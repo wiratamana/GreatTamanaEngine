@@ -286,7 +286,8 @@ public:
     // pass-declaration AND Draw()-exclusion decisions together (this
     // campaign's own "one source of truth" rule - see PHASE5's own Section
     // 3.1) rather than leave it half-excluded.
-    const Pipeline& ResolveInstancedPipeline(Renderer& renderer, PipelineHandle originalHandle);
+    const Pipeline& ResolveInstancedPipeline(
+        Renderer& renderer, PipelineHandle originalHandle, VkDescriptorSetLayout sceneServicesSetLayout);
 
 private:
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),

@@ -141,46 +141,23 @@ TEST(PipelineTest, UnchangedConstructionWithNoMaterialSetLayoutReportsHasMateria
     EXPECT_NE(pipeline.Native(), static_cast<VkPipeline>(VK_NULL_HANDLE));
 }
 
-// PHASE5 (PHASE5_SUBMIT_AND_FRAMERECORDER_BIND_WIRING.md) - debug-only
-// death test for Renderer::SubmitIndirect()'s ONE allowed functional change
-// (PHASE0's second scope boundary): a Pipeline that carries a real
-// sceneServicesSetLayout (legal per Pipeline's own contiguous-pSetLayouts
-// logic, PHASE3) must never reach SubmitIndirect()'s actual bind logic -
-// this project's own ctest Debug build does NOT define NDEBUG, so assert()
-// stays LIVE, mirroring RenderViewRegistryTests.cpp's own
-// "probe-then-EXPECT_DEATH, freshly-constructed-inside-the-lambda fixture"
-// idiom exactly. A real, legally-indexed Mesh and a real
-// VertexLayout::PositionNormalInstanced Pipeline are used so the two
-// EARLIER asserts inside SubmitIndirect() (recording-in-progress,
-// mesh.HasIndexBuffer()) both pass cleanly first, proving THIS specific
-// assert (not an earlier one) is what fires.
-//
-// Pulled out into its own free function (rather than inline inside
-// EXPECT_DEATH's own statement argument) because the preprocessor's macro
-// argument splitting only respects PARENTHESES, never braces - an
-// aggregate initializer list's own top-level commas (see `vertices` below)
-// would otherwise be mis-parsed as extra EXPECT_DEATH() arguments.
-#ifndef NDEBUG
-
-void SubmitIndirectAgainstPipelineWithSceneServicesSet()
+// Replaces the old EXPECT_DEATH-based test: SubmitIndirect() no longer
+// forbids a Pipeline with a real sceneServicesSetLayout - it now binds
+// set = 1 on an indirect draw too, same as any other draw. This proves the
+// pipeline survives the indirect draw cleanly - no crash, no assert.
+void SubmitIndirectAgainstPipelineWithSceneServicesSetBindsSetOne()
 {
     HeadlessRenderGraphFixture fixture;
     Renderer& renderer = fixture.GetRenderer();
     const VkDevice device = renderer.GetVulkanContextInfo().device;
 
-    // Stands in for Core's real SceneServicesDescriptorSet::Layout()
-    // (PHASE2/PHASE7) - only Renderer::SubmitIndirect()'s own new misuse
-    // guard is under test here.
     const VkDescriptorSetLayout throwawaySceneServicesLayout =
         DescriptorSetLayoutBuilder(device).AddCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT).Build();
 
     Pipeline pipeline = renderer.CreatePipeline("shaders/MeshInstanced.vert.spv", "shaders/Mesh.frag.spv",
         VertexLayout::PositionNormalInstanced, /*useMaterialTexture=*/false,
-        "RendererSubmitIndirectDeathTest.Pipeline", /*useInstanceBuffer=*/true, throwawaySceneServicesLayout);
+        "RendererSubmitIndirectTest.Pipeline", /*useInstanceBuffer=*/true, throwawaySceneServicesLayout);
 
-    // A trivial, real, indexed triangle - HasIndexBuffer() == true, so
-    // SubmitIndirect()'s own earlier mesh.HasIndexBuffer() assert passes
-    // cleanly before this phase's new assert is ever reached.
     MeshVertex vertices[3]{};
     vertices[0].position[0] = 0.0f;
     vertices[0].position[1] = 0.0f;
@@ -198,34 +175,38 @@ void SubmitIndirectAgainstPipelineWithSceneServicesSet()
     }
     std::uint32_t indices[3]{ 0, 1, 2 };
     Mesh mesh = renderer.CreateMesh(
-        vertices, sizeof(vertices), 3, indices, sizeof(indices), 3, "RendererSubmitIndirectDeathTest.Mesh");
+        vertices, sizeof(vertices), 3, indices, sizeof(indices), 3, "RendererSubmitIndirectTest.Mesh");
 
     const VkDescriptorSet instanceBufferDescriptorSet =
         renderer.AllocateComputeDescriptorSet(renderer.InstanceBufferDescriptorSetLayout());
 
-    // SubmitIndirect()'s FIRST assert requires a render-graph pass
-    // recording to already be in progress.
     const VkCommandBuffer cmd = renderer.BeginOffscreenRenderGraphRecording();
     renderer.BeginGraphPassRecording(cmd, {});
 
-    // indirectBuffer/countBuffer are never dereferenced - this phase's new
-    // assert fires before IssueIndirectDrawCommand() is ever called.
+    // New `sceneServicesSet` parameter sits right before viewProjMatrix in
+    // SubmitIndirect()'s signature - VK_NULL_HANDLE is enough here, this
+    // test only proves the call no longer asserts/crashes, not what ends
+    // up bound to it.
     renderer.SubmitIndirect(pipeline, mesh, /*indirectBuffer=*/VK_NULL_HANDLE, /*indirectOffset=*/0,
-        /*maxDrawCount=*/1, /*countBuffer=*/VK_NULL_HANDLE, /*countBufferOffset=*/0, instanceBufferDescriptorSet);
+        /*maxDrawCount=*/1, /*countBuffer=*/VK_NULL_HANDLE, /*countBufferOffset=*/0, instanceBufferDescriptorSet,
+        /*sceneServicesSet=*/VK_NULL_HANDLE);
+
+    renderer.EndGraphPassRecording();
+
+    vkDestroyDescriptorSetLayout(device, throwawaySceneServicesLayout, nullptr);
 }
 
-TEST(RendererSubmitIndirectDeathTest, PipelineWithSceneServicesSetAsserts)
+TEST(RendererSubmitIndirectTest, PipelineWithSceneServicesSetBindsSetOneInsteadOfAsserting)
 {
-    {
-        HeadlessRenderGraphFixture probe;
-        if (!probe.IsUsable()) {
-            GTEST_SKIP() << probe.SkipReason();
-        }
+    HeadlessRenderGraphFixture probe;
+    if (!probe.IsUsable()) {
+        GTEST_SKIP() << probe.SkipReason();
     }
-    EXPECT_DEATH(SubmitIndirectAgainstPipelineWithSceneServicesSet(), "");
+    // A Pipeline with a real sceneServicesSetLayout now survives an
+    // indirect draw and reaches FrameRecorder::IssueIndirectDrawCommand()
+    // cleanly - no crash, no assert, set = 1 is bound like any other draw.
+    SubmitIndirectAgainstPipelineWithSceneServicesSetBindsSetOne();
 }
-
-#endif
 
 } // namespace
 } // namespace gte

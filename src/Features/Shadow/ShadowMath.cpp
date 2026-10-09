@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace gte {
 
@@ -49,6 +50,30 @@ ShadowSettings SanitizeShadowSettings(const ShadowSettings& settings) noexcept
     sanitized.mapResolution = settings.mapResolution; // Deliberately not touched - see header.
 
     return sanitized;
+}
+
+SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirectionalLight& sun,
+    const Mat4& lightViewProjection, const ShadowSettings& safeSettings, std::uint32_t mapResolutionInUse) noexcept
+{
+    SceneLightingUniformData data{};
+    std::memcpy(data.lightViewProjection, lightViewProjection.Data(), sizeof(data.lightViewProjection));
+
+    data.sunDirectionAndBias[0] = sun.directionTowardSun.x;
+    data.sunDirectionAndBias[1] = sun.directionTowardSun.y;
+    data.sunDirectionAndBias[2] = sun.directionTowardSun.z;
+    data.sunDirectionAndBias[3] = safeSettings.depthBias;
+
+    data.sunIlluminanceAndStrength[0] = sun.sunIlluminance.x;
+    data.sunIlluminanceAndStrength[1] = sun.sunIlluminance.y;
+    data.sunIlluminanceAndStrength[2] = sun.sunIlluminance.z;
+    data.sunIlluminanceAndStrength[3] = safeSettings.strength;
+
+    data.shadowTexelSizeAndPad[0] = mapResolutionInUse > 0 ? 1.0f / static_cast<float>(mapResolutionInUse) : 0.0f;
+    data.shadowTexelSizeAndPad[1] = 0.0f;
+    data.shadowTexelSizeAndPad[2] = 0.0f;
+    data.shadowTexelSizeAndPad[3] = 0.0f;
+
+    return data;
 }
 
 } // namespace gte

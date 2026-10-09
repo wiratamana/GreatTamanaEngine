@@ -58,21 +58,25 @@ AABB ComputeSubsetLocalAABB(const std::vector<Vec3>& positions, const std::vecto
 
 } // namespace
 
-PipelineHandle MeshAssetGpuCatalog::EnsureMeshPipeline(RenderSystem& renderSystem, Renderer& renderer)
+PipelineHandle MeshAssetGpuCatalog::EnsureMeshPipeline(
+    RenderSystem& renderSystem, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout)
 {
     if (!m_meshPipeline.IsValid()) {
         m_meshPipeline = renderSystem.RegisterPipeline(renderer.CreatePipeline("shaders/Mesh.vert.spv",
-            "shaders/Mesh.frag.spv", VertexLayout::PositionNormal, false, "Mesh.vert/Mesh.frag (PositionNormal)"));
+            "shaders/Mesh.frag.spv", VertexLayout::PositionNormal, false, "Mesh.vert/Mesh.frag (PositionNormal)",
+            /*useInstanceBuffer=*/false, sceneServicesSetLayout));
     }
     return m_meshPipeline;
 }
 
-PipelineHandle MeshAssetGpuCatalog::EnsureTexturedMeshPipeline(RenderSystem& renderSystem, Renderer& renderer)
+PipelineHandle MeshAssetGpuCatalog::EnsureTexturedMeshPipeline(
+    RenderSystem& renderSystem, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout)
 {
     if (!m_texturedMeshPipeline.IsValid()) {
         m_texturedMeshPipeline = renderSystem.RegisterPipeline(
             renderer.CreatePipeline("shaders/TexturedMesh.vert.spv", "shaders/TexturedMesh.frag.spv",
-                VertexLayout::PositionNormalUv, true, "TexturedMesh.vert/TexturedMesh.frag (PositionNormalUv)"));
+                VertexLayout::PositionNormalUv, true, "TexturedMesh.vert/TexturedMesh.frag (PositionNormalUv)",
+                /*useInstanceBuffer=*/false, sceneServicesSetLayout));
     }
     return m_texturedMeshPipeline;
 }
@@ -266,7 +270,8 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
     return inserted.first->second;
 }
 
-EntityBlueprint MeshAssetGpuCatalog::Resolve(RenderSystem& renderSystem, Renderer& renderer, const std::string& absoluteGtaPath)
+EntityBlueprint MeshAssetGpuCatalog::Resolve(RenderSystem& renderSystem, Renderer& renderer,
+    const std::string& absoluteGtaPath, VkDescriptorSetLayout sceneServicesSetLayout)
 {
     const std::vector<MeshAssetPart>& parts = EnsureMeshAsset(renderSystem, renderer, absoluteGtaPath);
 
@@ -283,8 +288,9 @@ EntityBlueprint MeshAssetGpuCatalog::Resolve(RenderSystem& renderSystem, Rendere
     root.meshAssetSourcePath = absoluteGtaPath;
 
     for (const MeshAssetPart& part : parts) {
-        const PipelineHandle pipeline =
-            part.texture.IsValid() ? EnsureTexturedMeshPipeline(renderSystem, renderer) : EnsureMeshPipeline(renderSystem, renderer);
+        const PipelineHandle pipeline = part.texture.IsValid()
+            ? EnsureTexturedMeshPipeline(renderSystem, renderer, sceneServicesSetLayout)
+            : EnsureMeshPipeline(renderSystem, renderer, sceneServicesSetLayout);
 
         EntityBlueprintNode child;
         child.mesh = part.mesh;

@@ -46,7 +46,8 @@ bool SaveScene(Game& game)
     return SaveScene(game, DefaultScenePath());
 }
 
-bool LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scenePath)
+bool LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scenePath,
+    VkDescriptorSetLayout sceneServicesSetLayout)
 {
     std::ifstream file(scenePath, std::ios::binary);
     if (!file) {
@@ -78,13 +79,13 @@ bool LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scen
     assetDatabase.RefreshFromDirectory(projectRoot);
 
     ClearEntireScene(game.GetRegistry());
-    ReconstructSceneFromDocument(game, renderer, *document, assetDatabase);
+    ReconstructSceneFromDocument(game, renderer, *document, assetDatabase, sceneServicesSetLayout);
     return true;
 }
 
-bool LoadScene(Game& game, Renderer& renderer)
+bool LoadScene(Game& game, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout)
 {
-    return LoadScene(game, renderer, DefaultScenePath());
+    return LoadScene(game, renderer, DefaultScenePath(), sceneServicesSetLayout);
 }
 
 } // namespace gte

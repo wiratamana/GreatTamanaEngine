@@ -1,4 +1,4 @@
-﻿// Unit tests for Vertex (src/Renderer/Vertex.h) - checks the Vulkan
+// Unit tests for Vertex (src/Renderer/Vertex.h) - checks the Vulkan
 // binding/attribute description metadata describing this vertex layout is
 // internally consistent with Vertex's actual field layout. Pure metadata -
 // no VkDevice, pipeline, or GPU of any kind involved; VkVertexInput*
@@ -23,9 +23,9 @@ TEST(VertexTest, BindingDescription_UsesBinding0AndPerVertexStride)
     EXPECT_EQ(binding.inputRate, VK_VERTEX_INPUT_RATE_VERTEX);
 }
 
-TEST(VertexTest, AttributeDescriptions_HasExactlyTwoAttributes)
+TEST(VertexTest, AttributeDescriptions_HasExactlyThreeAttributes)
 {
-    EXPECT_EQ(Vertex::AttributeDescriptions().size(), 2u);
+    EXPECT_EQ(Vertex::AttributeDescriptions().size(), 3u);
 }
 
 TEST(VertexTest, AttributeDescriptions_PositionIsLocation0AsVec3AtItsRealOffset)
@@ -39,24 +39,33 @@ TEST(VertexTest, AttributeDescriptions_PositionIsLocation0AsVec3AtItsRealOffset)
     EXPECT_EQ(position.offset, offsetof(Vertex, position));
 }
 
-TEST(VertexTest, AttributeDescriptions_ColorIsLocation1AsVec3AtItsRealOffset)
+TEST(VertexTest, AttributeDescriptions_NormalIsLocation1AsVec3AtItsRealOffset)
 {
     const auto attributes = Vertex::AttributeDescriptions();
-    const VkVertexInputAttributeDescription& color = attributes[1];
+    const VkVertexInputAttributeDescription& normal = attributes[1];
 
-    EXPECT_EQ(color.location, 1u);
+    EXPECT_EQ(normal.location, 1u);
+    EXPECT_EQ(normal.binding, 0u);
+    EXPECT_EQ(normal.format, VK_FORMAT_R32G32B32_SFLOAT);
+    EXPECT_EQ(normal.offset, offsetof(Vertex, normal));
+}
+
+TEST(VertexTest, AttributeDescriptions_ColorIsLocation2AsVec3AtItsRealOffset)
+{
+    const auto attributes = Vertex::AttributeDescriptions();
+    const VkVertexInputAttributeDescription& color = attributes[2];
+
+    EXPECT_EQ(color.location, 2u);
     EXPECT_EQ(color.binding, 0u);
     EXPECT_EQ(color.format, VK_FORMAT_R32G32B32_SFLOAT);
     EXPECT_EQ(color.offset, offsetof(Vertex, color));
 }
 
-TEST(VertexTest, PositionAndColorAttributes_DoNotOverlap)
+TEST(VertexTest, PositionNormalAndColorAttributes_DoNotOverlap)
 {
     const auto attributes = Vertex::AttributeDescriptions();
-    // R32G32B32_SFLOAT (position) is 3 * 4 = 12 bytes - color's offset must
-    // be at or beyond that, or the rasterizer would read color data from
-    // inside the position field.
     EXPECT_GE(attributes[1].offset, attributes[0].offset + 3 * sizeof(float));
+    EXPECT_GE(attributes[2].offset, attributes[1].offset + 3 * sizeof(float));
 }
 
 } // namespace

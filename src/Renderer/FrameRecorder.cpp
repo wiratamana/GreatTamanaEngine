@@ -58,9 +58,9 @@ void FrameRecorder::IssueDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, V
 }
 
 void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
-    VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet instanceBufferDescriptorSet, const Mat4& viewProj,
-    VkBuffer indirectBuffer, VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer,
-    VkDeviceSize countBufferOffset, bool supportsDrawIndirectCount)
+    VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet instanceBufferDescriptorSet,
+    VkDescriptorSet sceneServicesSet, const Mat4& viewProj, VkBuffer indirectBuffer, VkDeviceSize indirectOffset,
+    std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset, bool supportsDrawIndirectCount)
 {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
@@ -81,6 +81,15 @@ void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pip
     // declares descriptor set 0 for its instance buffer.
     vkCmdBindDescriptorSets(
         cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &instanceBufferDescriptorSet, 0, nullptr);
+
+    // Bound right after set = 0, exactly like IssueDrawCommand() already
+    // does for the non-indirect path - only when a real set was resolved
+    // (Renderer::SubmitIndirect() already gated this against
+    // Pipeline::HasSceneServicesSet()).
+    if (sceneServicesSet != VK_NULL_HANDLE) {
+        vkCmdBindDescriptorSets(
+            cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, /*firstSet=*/1, 1, &sceneServicesSet, 0, nullptr);
+    }
 
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);

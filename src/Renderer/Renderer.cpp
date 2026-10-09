@@ -314,14 +314,12 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
 
 void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
     VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset,
-    VkDescriptorSet instanceBufferDescriptorSet, const Mat4& viewProjMatrix)
+    VkDescriptorSet instanceBufferDescriptorSet, VkDescriptorSet sceneServicesSet, const Mat4& viewProjMatrix)
 {
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE2 - deliberately NO legacy/queued fallback path, same "day-one
-    // render-graph-only" precedent Renderer::Dispatch() already established
-    // for compute (see its own doc comment in Renderer.h) - an indirect
-    // draw call has no pre-existing non-graph call site to preserve
-    // backward compatibility with.
+    // Deliberately NO legacy/queued fallback path, same "day-one render-
+    // graph-only" precedent Renderer::Dispatch() already established for
+    // compute - an indirect draw call has no pre-existing non-graph call
+    // site to preserve backward compatibility with.
     assert(m_currentGraphPassCmd != VK_NULL_HANDLE
         && "Renderer::SubmitIndirect() called outside of a render-graph pass recording - see "
            "BeginGraphPassRecording()/EndGraphPassRecording().");
@@ -329,39 +327,27 @@ void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuff
         return;
     }
 
-    // This campaign is VkDrawIndexedIndirectCommand-only (Locked Design
-    // Decision 6, PHASE0_MASTER_STRATEGY.md) - every Pipeline built with
-    // VertexLayout::PositionNormalInstanced is only ever meant to draw an
-    // INDEXED Mesh.
+    // This campaign is VkDrawIndexedIndirectCommand-only - every Pipeline
+    // built with VertexLayout::PositionNormalInstanced is only ever meant
+    // to draw an INDEXED Mesh.
     assert(mesh.HasIndexBuffer()
         && "Renderer::SubmitIndirect(): every indirect draw is VkDrawIndexedIndirectCommand-only (indexed meshes "
-           "only) - see PHASE0_MASTER_STRATEGY.md's Locked Design Decision 6.");
+           "only).");
 
-    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
-    // PHASE5 - the ONE allowed functional touch this block makes to
-    // SubmitIndirect(): a debug-only misuse guard, never a redesign of its
-    // actual bind logic. SubmitIndirect()/IssueIndirectDrawCommand() never
-    // bind set 1 (PHASE0's second scope boundary) - a Pipeline that carries
-    // a sceneServicesSetLayout anyway (legal per Pipeline's own contiguous-
-    // pSetLayouts logic, PHASE3) would silently leave its real set = 1
-    // layout slot unbound every indirect draw, which is exactly the kind of
-    // silent misuse this assert exists to catch instead.
-    assert(!pipeline.HasSceneServicesSet()
-        && "Renderer::SubmitIndirect(): pipeline carries a sceneServicesSetLayout, but SubmitIndirect()/"
-           "IssueIndirectDrawCommand() never bind set 1 - see Block 4's Section 2 second scope boundary.");
+    // Only ever actually forwarded when `pipeline` itself carries a real
+    // sceneServicesSetLayout - mirrors Submit()'s own gate exactly.
+    const VkDescriptorSet effectiveSceneServicesSet = pipeline.HasSceneServicesSet() ? sceneServicesSet : VK_NULL_HANDLE;
 
     FrameRecorder::IssueIndirectDrawCommand(m_currentGraphPassCmd, pipeline.Native(), pipeline.Layout(),
-        mesh.VertexBuffer(), mesh.IndexBuffer(), instanceBufferDescriptorSet, viewProjMatrix, indirectBuffer,
-        indirectOffset, maxDrawCount, countBuffer, countBufferOffset, m_device.SupportsDrawIndirectCount());
+        mesh.VertexBuffer(), mesh.IndexBuffer(), instanceBufferDescriptorSet, effectiveSceneServicesSet, viewProjMatrix,
+        indirectBuffer, indirectOffset, maxDrawCount, countBuffer, countBufferOffset,
+        m_device.SupportsDrawIndirectCount());
 
     // Deliberately does NOT touch m_currentGraphPassRecordDrawStats (that
     // callback only ever mutates DrawStats::drawCallCount/triangleCount,
     // via Submit()'s own PassContext::recordDraw plumbing) - an indirect
     // draw's real object/triangle count is GPU-only knowledge this method
-    // must never block to read back. Wiring DrawStats::indirectDrawCount
-    // (see DrawStats.h) into a real per-pass return value is PHASE5's job,
-    // once a real render-graph pass actually calls this method - out of
-    // scope for this phase's own hand-driven smoke test (section 3.6).
+    // must never block to read back.
 }
 
 Pipeline Renderer::CreatePipeline(const std::string& vertexShaderSpirvPath,

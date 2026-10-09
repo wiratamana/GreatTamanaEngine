@@ -20,4 +20,16 @@ struct ShadowSettings {
     float strength = 0.6f; // 0 = no darkening, 1 = fully black in shadow.
 };
 
+// Packed, GPU-ready layout for Scene Services binding 8 - must match
+// DirectionalLightingAndReceiverMask.glsl's own SceneGlobalUniformBlock
+// byte-for-byte (112 bytes, fits Renderer's 128-byte ceiling, std140).
+struct SceneLightingUniformData {
+    float lightViewProjection[16];
+    float sunDirectionAndBias[4];
+    float sunIlluminanceAndStrength[4];
+    float shadowTexelSizeAndPad[4];
+};
+static_assert(sizeof(SceneLightingUniformData) == 112,
+    "SceneLightingUniformData must match DirectionalLightingAndReceiverMask.glsl's own SceneGlobalUniformBlock size.");
+
 } // namespace gte

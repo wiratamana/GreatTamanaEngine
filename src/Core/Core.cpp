@@ -1097,6 +1097,13 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             const std::array<Plane, 6> frustumPlanes = ExtractFrustumPlanes(m_gpuDrivenGameViewProjectionThisFrame);
             const bool useCompaction = m_renderer.SupportsDrawIndirectCount();
             const Mat4 viewProjection = m_gpuDrivenGameViewProjectionThisFrame;
+            // Mirrors RenderOpaque's own "capture a plain by-value
+            // currentViewForServices" pattern - frame.currentView is only
+            // valid inside this outer Register() callback, never read
+            // directly from inside desc.execute. RenderOpaque is guaranteed
+            // to run first for this view, so its own Rewrite() call has
+            // already populated this view's set by the time this runs.
+            const rg::RenderViewId currentViewForServices = frame.currentView;
 
             for (const GpuDrivenBatchRenderData& batch : m_gpuDrivenBatchesThisFrame) {
                 const rg::BufferHandle inputHandle = batch.inputHandle;
@@ -1211,13 +1218,13 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                         pass.ReadBuffer(inputHandle, rg::ResourceAccess::VertexShaderStorageRead);
                     };
                     desc.execute = [this, meshHandle, originalPipelineHandle, indirectBufferNative, countBufferNative,
-                                        instanceBufferDescriptorSet, instanceCount, useCompaction, viewProjection](
-                                        rg::PassContext& ctx) {
+                                        instanceBufferDescriptorSet, instanceCount, useCompaction, viewProjection,
+                                        currentViewForServices](rg::PassContext& ctx) {
                         const Mesh* mesh = m_game.GetRenderSystem().TryGetMesh(meshHandle);
                         const Pipeline* instancedPipeline = nullptr;
                         try {
-                            instancedPipeline =
-                                &m_gpuDrivenBatchCache.ResolveInstancedPipeline(m_renderer, originalPipelineHandle);
+                            instancedPipeline = &m_gpuDrivenBatchCache.ResolveInstancedPipeline(
+                                m_renderer, originalPipelineHandle, m_sceneServicesDescriptorSet.Layout());
                         } catch (const std::exception& e) {
                             std::fprintf(
                                 stderr, "GpuDrivenBatches: failed to resolve instanced pipeline: %s\n", e.what());
@@ -1226,11 +1233,17 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                             return;
                         }
 
+                        // RenderOpaque already resolved/wrote this view's real
+                        // Scene Services set earlier this SAME frame - reuse it
+                        // via the read-only accessor instead of resolving twice.
+                        const VkDescriptorSet sceneServicesSet =
+                            m_sceneServicesDescriptorSet.DescriptorSetFor(currentViewForServices);
+
                         m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
                         const VkBuffer countBufferForCall = useCompaction ? countBufferNative : VK_NULL_HANDLE;
                         m_renderer.SubmitIndirect(*instancedPipeline, *mesh, indirectBufferNative,
                             /*indirectOffset=*/0, static_cast<std::uint32_t>(instanceCount), countBufferForCall,
-                            /*countBufferOffset=*/0, instanceBufferDescriptorSet, viewProjection);
+                            /*countBufferOffset=*/0, instanceBufferDescriptorSet, sceneServicesSet, viewProjection);
                         if (ctx.recordIndirectDraw) {
                             ctx.recordIndirectDraw();
                         }
@@ -1577,7 +1590,7 @@ void Core::BuildFrame()
                                 bool instancedPipelineResolved = true;
                                 try {
                                     m_gpuDrivenBatchCache.ResolveInstancedPipeline(
-                                        m_renderer, frameEntry.pipeline);
+                                        m_renderer, frameEntry.pipeline, m_sceneServicesDescriptorSet.Layout());
                                 } catch (const std::exception& e) {
                                     std::fprintf(stderr,
                                         "GpuDrivenBatches: failed to resolve instanced pipeline for a batch: "

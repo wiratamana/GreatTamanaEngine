@@ -11,42 +11,30 @@ namespace gte {
 
 namespace {
 
-// A fixed, arbitrary "key light" direction plus an ambient floor - baked
-// into each generated vertex's color at generation time instead of a real
-// lighting pass. See the class comment in PrimitiveMeshGenerator.h for the
-// full rationale. The ambient floor keeps a face pointed away from the
-// light a dim, visible gray instead of pure black.
-const Vec3 kLightDir = Normalize(Vec3{ 0.4f, 0.8f, -0.4f });
-constexpr float kAmbient = 0.25f;
-constexpr Vec3 kBaseColor{ 0.70f, 0.70f, 0.75f };
+// Flat, neutral, un-shaded base tint - Triangle.frag does 100% of the real
+// shading from the real normal now; this is no longer a pre-baked light.
+constexpr Vec3 kNeutralColor{ 1.0f, 1.0f, 1.0f };
 
-Vec3 Shade(const Vec3& normal) noexcept
+Vertex MakeVertex(const Vec3& position, const Vec3& normal) noexcept
 {
-    const float ndotl = Dot(normal, kLightDir);
-    const float intensity = kAmbient + (1.0f - kAmbient) * (ndotl > 0.0f ? ndotl : 0.0f);
-    return kBaseColor * intensity;
+    return Vertex{ { position.x, position.y, position.z }, { normal.x, normal.y, normal.z },
+        { kNeutralColor.x, kNeutralColor.y, kNeutralColor.z } };
 }
 
-Vertex MakeVertex(const Vec3& position, const Vec3& color) noexcept
-{
-    return Vertex{ { position.x, position.y, position.z }, { color.x, color.y, color.z } };
-}
-
-// Appends one flat-shaded (hard-edged) triangle: all three vertices get the
-// SAME color, baked from the triangle's own face normal - used for Cube/
-// Cone/Plane, where an abrupt shade change from one face to the next is
-// exactly what a real edge should look like.
+// Appends one flat-shaded (hard-edged) triangle: all three vertices share
+// the SAME real face normal - used for Cube/Cone/Plane, where an abrupt
+// normal change from one face to the next is exactly what a real edge
+// should look like.
 void AddFlatTriangle(std::vector<Vertex>& vertices, const Vec3& a, const Vec3& b, const Vec3& c)
 {
     const Vec3 normal = Normalize(Cross(b - a, c - a));
-    const Vec3 color = Shade(normal);
-    vertices.push_back(MakeVertex(a, color));
-    vertices.push_back(MakeVertex(b, color));
-    vertices.push_back(MakeVertex(c, color));
+    vertices.push_back(MakeVertex(a, normal));
+    vertices.push_back(MakeVertex(b, normal));
+    vertices.push_back(MakeVertex(c, normal));
 }
 
 // Appends one quad (a,b,c,d, in order around its perimeter) as two flat-
-// shaded triangles sharing that same face normal/color - the face normal is
+// shaded triangles sharing that same face normal - the face normal is
 // computed from (a,b,c) alone, so callers must list corners so THAT triangle
 // alone already has the correct outward winding (see GenerateCube()'s own
 // comment for the worked-out per-face winding).
@@ -56,15 +44,15 @@ void AddFlatQuad(std::vector<Vertex>& vertices, const Vec3& a, const Vec3& b, co
     AddFlatTriangle(vertices, a, c, d);
 }
 
-// Appends one smooth-shaded triangle: each vertex gets its OWN color, baked
-// from its OWN (already-computed) normal - used for Sphere/Capsule, where
-// the surface should look continuously curved rather than faceted.
+// Appends one smooth-shaded triangle: each vertex gets its OWN real normal -
+// used for Sphere/Capsule, where the surface should look continuously
+// curved rather than faceted.
 void AddSmoothTriangle(std::vector<Vertex>& vertices, const Vec3& posA, const Vec3& normalA, const Vec3& posB,
     const Vec3& normalB, const Vec3& posC, const Vec3& normalC)
 {
-    vertices.push_back(MakeVertex(posA, Shade(normalA)));
-    vertices.push_back(MakeVertex(posB, Shade(normalB)));
-    vertices.push_back(MakeVertex(posC, Shade(normalC)));
+    vertices.push_back(MakeVertex(posA, normalA));
+    vertices.push_back(MakeVertex(posB, normalB));
+    vertices.push_back(MakeVertex(posC, normalC));
 }
 
 // Shared by GenerateSphere() and GenerateCapsule()'s two end caps: a UV

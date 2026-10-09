@@ -1,5 +1,7 @@
 #pragma once
 
+#include <volk.h>
+
 namespace gte {
 
 struct EditorContext;
@@ -29,6 +31,10 @@ class Renderer;
 // Panels/HierarchyPanel.cpp offers, just attached to the Scene image
 // instead. Called once per frame by ImGuiEditorLayer::BuildUI(), before
 // BuildGamePanel().
-void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorCamera& camera);
+// `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+// Layout() - forwarded into Game::CreateMeshEntityFromGtaFile() for the
+// drag-and-drop spawn path above.
+void BuildScenePanel(
+    Game& game, Renderer& renderer, EditorContext& ctx, EditorCamera& camera, VkDescriptorSetLayout sceneServicesSetLayout);
 
 } // namespace gte

@@ -67,6 +67,11 @@ public:
     DescriptorSetLayoutBuilder& AddCombinedImageSampler(
         std::uint32_t binding, VkShaderStageFlags stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, std::uint32_t count = 1);
 
+    // A plain uniform buffer binding - see SceneServicesDescriptorSet.h's
+    // binding 8 for this builder's first real consumer.
+    DescriptorSetLayoutBuilder& AddUniformBuffer(
+        std::uint32_t binding, VkShaderStageFlags stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, std::uint32_t count = 1);
+
     // Builds and returns a fresh VkDescriptorSetLayout from every binding
     // added so far - throws std::runtime_error if vkCreateDescriptorSetLayout
     // fails. Safe to call more than once (e.g. to build two identical

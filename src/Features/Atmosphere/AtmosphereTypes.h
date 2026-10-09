@@ -37,10 +37,13 @@ namespace gte {
 // _reference/pl-sky/shaders/sky_interop.inc). As of the "Revision Notes"
 // double-check pass on this phase's own strategy document, these structs
 // will actually be bound as a read-only STORAGE buffer (std430), not a true
-// `uniform` block, since the engine has no UBO descriptor plumbing yet - but
-// std140 and std430 produce IDENTICAL padding for a flat, array-free struct
-// like both of these, so every group below is std140-AND-std430-compatible
-// with no changes needed either way.
+// `uniform` block - by deliberate choice, matching every other Atmosphere
+// LUT pass's own storage-buffer convention (Scene Services binding 8 is
+// this engine's one, scoped UBO exception - see Shaders/
+// DirectionalLightingAndReceiverMask.glsl). std140 and std430 produce
+// IDENTICAL padding for a flat, array-free struct like both of these, so
+// every group below is std140-AND-std430-compatible with no changes needed
+// either way.
 //
 // `Vec3` (src/Math/Vec3.h) is used directly as each group's vec3 member
 // (rather than three separately-named float fields, unlike

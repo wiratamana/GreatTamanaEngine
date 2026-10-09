@@ -127,5 +127,42 @@ TEST(ShadowMathTest, SanitizeNeverAltersMapResolution)
     EXPECT_EQ(SanitizeShadowSettings(settings).mapResolution, 777u);
 }
 
+TEST(ShadowMathTest, PackSceneLightingUniformDataMatchesExactKnownInputBytes)
+{
+    ResolvedDirectionalLight sun;
+    sun.directionTowardSun = Vec3(0.3f, 0.8f, -0.1f);
+    sun.sunIlluminance = Vec3(2.0f, 1.9f, 1.8f);
+
+    ShadowSettings settings;
+    settings.depthBias = 0.0025f;
+    settings.strength = 0.6f;
+    const ShadowSettings safeSettings = SanitizeShadowSettings(settings);
+
+    const Mat4 lightViewProjection = Mat4::Identity();
+    constexpr std::uint32_t mapResolutionInUse = 2048;
+
+    const SceneLightingUniformData packed =
+        PackSceneLightingUniformData(sun, lightViewProjection, safeSettings, mapResolutionInUse);
+
+    for (int i = 0; i < 16; ++i) {
+        EXPECT_FLOAT_EQ(packed.lightViewProjection[i], lightViewProjection.Data()[i]);
+    }
+
+    EXPECT_FLOAT_EQ(packed.sunDirectionAndBias[0], 0.3f);
+    EXPECT_FLOAT_EQ(packed.sunDirectionAndBias[1], 0.8f);
+    EXPECT_FLOAT_EQ(packed.sunDirectionAndBias[2], -0.1f);
+    EXPECT_FLOAT_EQ(packed.sunDirectionAndBias[3], 0.0025f);
+
+    EXPECT_FLOAT_EQ(packed.sunIlluminanceAndStrength[0], 2.0f);
+    EXPECT_FLOAT_EQ(packed.sunIlluminanceAndStrength[1], 1.9f);
+    EXPECT_FLOAT_EQ(packed.sunIlluminanceAndStrength[2], 1.8f);
+    EXPECT_FLOAT_EQ(packed.sunIlluminanceAndStrength[3], 0.6f);
+
+    EXPECT_FLOAT_EQ(packed.shadowTexelSizeAndPad[0], 1.0f / 2048.0f);
+    EXPECT_FLOAT_EQ(packed.shadowTexelSizeAndPad[1], 0.0f);
+    EXPECT_FLOAT_EQ(packed.shadowTexelSizeAndPad[2], 0.0f);
+    EXPECT_FLOAT_EQ(packed.shadowTexelSizeAndPad[3], 0.0f);
+}
+
 } // namespace
 } // namespace gte

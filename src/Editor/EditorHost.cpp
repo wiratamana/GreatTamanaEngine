@@ -544,8 +544,8 @@ int EditorHost::Run()
         // Physics/Animation run this frame.
         if (const std::optional<EngineCommandRequest> request = m_commandBridge.TryPeekPendingCommandRequest()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteEngineCommand");
-            const EngineCommandResult result =
-                ExecuteEngineCommand(m_game, m_renderer, m_sceneIOCapability, &s_editorHotReloadDebugCapability, *request);
+            const EngineCommandResult result = ExecuteEngineCommand(m_game, m_renderer, m_sceneIOCapability,
+                &s_editorHotReloadDebugCapability, m_core.GetSceneServicesDescriptorSet().Layout(), *request);
             m_commandBridge.FulfillCommand(result);
         }
 
@@ -634,8 +634,8 @@ int EditorHost::Run()
             // (render-pass-5), PHASE6 - a second EditorUiCommandKind now
             // exists (SpawnGpuDrivenTestBatch).
             if (uiRequest->kind == EditorUiCommandKind::SpawnGpuDrivenTestBatch) {
-                const GpuDrivenTestBatchSpawnResult spawned = m_editorLayer->SpawnGpuDrivenTestBatch(
-                    m_game, m_renderer, uiRequest->spawnGpuDrivenTestBatch.instanceCount);
+                const GpuDrivenTestBatchSpawnResult spawned = m_editorLayer->SpawnGpuDrivenTestBatch(m_game, m_renderer,
+                    uiRequest->spawnGpuDrivenTestBatch.instanceCount, m_core.GetSceneServicesDescriptorSet().Layout());
                 uiResult.spawnGpuDrivenTestBatch.success = spawned.success;
                 uiResult.spawnGpuDrivenTestBatch.editorAvailable = spawned.editorAvailable;
                 uiResult.spawnGpuDrivenTestBatch.errorMessage = spawned.errorMessage;
@@ -914,7 +914,11 @@ int EditorHost::Run()
                 // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3
                 // item 2) - the new, LAST trailing argument, feeding
                 // Panels/FrameDebuggerPanel.cpp's own new Clause C detector.
-                m_core.GetOffscreenBlackboardForFrameDebugger());
+                m_core.GetOffscreenBlackboardForFrameDebugger(),
+                // Stage 2 (Universal Lit Shader) - Core's real
+                // SceneServicesDescriptorSet::Layout(), threaded into every
+                // Editor-side spawn path reached from BuildUI().
+                m_core.GetSceneServicesDescriptorSet().Layout());
 
             // editor-core-separation-7 campaign, PHASE4 - GET /render_graph
             // support. Reuses renderFeatureEntries (still in scope here) so

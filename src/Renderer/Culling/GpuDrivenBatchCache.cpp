@@ -129,7 +129,8 @@ void GpuDrivenBatchCache::EnsureDescriptorSetsWritten(Renderer& renderer, const 
 
 // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5), PHASE5 -
 // see this method's own doc comment in GpuDrivenBatchCache.h.
-const Pipeline& GpuDrivenBatchCache::ResolveInstancedPipeline(Renderer& renderer, PipelineHandle originalHandle)
+const Pipeline& GpuDrivenBatchCache::ResolveInstancedPipeline(
+    Renderer& renderer, PipelineHandle originalHandle, VkDescriptorSetLayout sceneServicesSetLayout)
 {
     const auto found = m_instancedPipelines.find(originalHandle);
     if (found != m_instancedPipelines.end()) {
@@ -138,7 +139,7 @@ const Pipeline& GpuDrivenBatchCache::ResolveInstancedPipeline(Renderer& renderer
 
     Pipeline instanced = renderer.CreatePipeline("shaders/MeshInstanced.vert.spv", "shaders/Mesh.frag.spv",
         VertexLayout::PositionNormalInstanced, /*useMaterialTexture=*/false,
-        "MeshInstanced.vert/Mesh.frag (PositionNormalInstanced)", /*useInstanceBuffer=*/true);
+        "MeshInstanced.vert/Mesh.frag (PositionNormalInstanced)", /*useInstanceBuffer=*/true, sceneServicesSetLayout);
     const auto [it, inserted] = m_instancedPipelines.emplace(originalHandle, std::move(instanced));
     (void)inserted;
     return it->second;

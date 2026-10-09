@@ -10,15 +10,16 @@
 namespace gte {
 
 EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneIOCapability* sceneIOCapability,
-    IHotReloadDebugCapability* hotReloadDebugCapability, const EngineCommandRequest& request)
+    IHotReloadDebugCapability* hotReloadDebugCapability, VkDescriptorSetLayout sceneServicesSetLayout,
+    const EngineCommandRequest& request)
 {
     EngineCommandResult result;
     result.kind = request.kind;
     switch (request.kind) {
     case EngineCommandKind::InstantiatePrimitive: {
         const InstantiatePrimitiveCommand& cmd = request.instantiatePrimitive;
-        result.instantiatePrimitive = game.InstantiatePrimitive(
-            renderer, cmd.shape, cmd.requestedName, cmd.worldPosition, cmd.hasParent, cmd.parentName);
+        result.instantiatePrimitive = game.InstantiatePrimitive(renderer, cmd.shape, cmd.requestedName,
+            cmd.worldPosition, cmd.hasParent, cmd.parentName, sceneServicesSetLayout);
         break;
     }
     case EngineCommandKind::DeleteEntity: {
@@ -44,7 +45,7 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneI
     // InstantiateLight immediately above.
     case EngineCommandKind::InstantiateMeshAsset: {
         result.instantiateMeshAsset = game.InstantiateMeshAssetFromGtaFile(
-            renderer, request.instantiateMeshAsset.absoluteGtaPath);
+            renderer, request.instantiateMeshAsset.absoluteGtaPath, sceneServicesSetLayout);
         break;
     }
     // task_manager/scene-serialization-2 campaign, PHASE5
@@ -77,7 +78,8 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneI
             const std::filesystem::path path = request.loadScene.path.empty()
                 ? sceneIOCapability->DefaultScenePath()
                 : std::filesystem::path(request.loadScene.path);
-            result.loadScene.success = sceneIOCapability->LoadScene(game, renderer, path, result.loadScene.errorMessage);
+            result.loadScene.success =
+                sceneIOCapability->LoadScene(game, renderer, path, sceneServicesSetLayout, result.loadScene.errorMessage);
             result.loadScene.resolvedPath = path.string();
         } else {
             result.loadScene.editorAvailable = false;

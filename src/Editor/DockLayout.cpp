@@ -105,8 +105,8 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
 }
 } // namespace
 
-void BuildDockspaceAndMenuBar(
-    EditorContext& ctx, Game& game, Renderer& renderer, IHotReloadDebugCapability* hotReloadDebugCapability)
+void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer,
+    IHotReloadDebugCapability* hotReloadDebugCapability, VkDescriptorSetLayout sceneServicesSetLayout)
 {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -141,7 +141,7 @@ void BuildDockspaceAndMenuBar(
                 reportStatus(saved, "Saved scene to " + DefaultScenePath().string(), "Failed to save scene.");
             }
             if (ImGui::MenuItem("Open Scene", "Ctrl+O")) {
-                const bool loaded = LoadScene(game, renderer);
+                const bool loaded = LoadScene(game, renderer, sceneServicesSetLayout);
                 reportStatus(loaded, "Loaded scene from " + DefaultScenePath().string(),
                     "Failed to load scene (missing or malformed file).");
             }
@@ -237,7 +237,7 @@ void BuildDockspaceAndMenuBar(
                 reportStatus(saved, "Saved scene to " + DefaultScenePath().string(), "Failed to save scene.");
             }
             if (ImGui::IsKeyPressed(ImGuiKey_O, /*repeat=*/false)) {
-                const bool loaded = LoadScene(game, renderer);
+                const bool loaded = LoadScene(game, renderer, sceneServicesSetLayout);
                 reportStatus(loaded, "Loaded scene from " + DefaultScenePath().string(),
                     "Failed to load scene (missing or malformed file).");
             }

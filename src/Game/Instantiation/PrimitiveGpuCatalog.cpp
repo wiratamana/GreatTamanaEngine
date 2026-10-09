@@ -8,14 +8,16 @@
 
 namespace gte {
 
-PipelineHandle PrimitiveGpuCatalog::EnsureDefaultPipeline(RenderSystem& renderSystem, Renderer& renderer)
+PipelineHandle PrimitiveGpuCatalog::EnsureDefaultPipeline(
+    RenderSystem& renderSystem, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout)
 {
     if (!m_defaultPipeline.IsValid()) {
         // Shader source lives at src/Shaders/Triangle.vert/.frag (version-
         // controlled); compiled to SPIR-V at build time by
         // cmake/CompileShaders.cmake into "<exe dir>/shaders/*.spv".
         m_defaultPipeline = renderSystem.RegisterPipeline(renderer.CreatePipeline("shaders/Triangle.vert.spv",
-            "shaders/Triangle.frag.spv", VertexLayout::PositionColor, false, "Triangle.vert/Triangle.frag (PositionColor)"));
+            "shaders/Triangle.frag.spv", VertexLayout::PositionColor, false,
+            "Triangle.vert/Triangle.frag (PositionColor)", /*useInstanceBuffer=*/false, sceneServicesSetLayout));
     }
     return m_defaultPipeline;
 }
@@ -31,10 +33,11 @@ MeshHandle PrimitiveGpuCatalog::EnsurePrimitiveMesh(RenderSystem& renderSystem, 
     return cached;
 }
 
-EntityBlueprint PrimitiveGpuCatalog::Resolve(RenderSystem& renderSystem, Renderer& renderer, PrimitiveType type)
+EntityBlueprint PrimitiveGpuCatalog::Resolve(
+    RenderSystem& renderSystem, Renderer& renderer, PrimitiveType type, VkDescriptorSetLayout sceneServicesSetLayout)
 {
     EntityBlueprint blueprint;
-    blueprint.pipeline = EnsureDefaultPipeline(renderSystem, renderer);
+    blueprint.pipeline = EnsureDefaultPipeline(renderSystem, renderer, sceneServicesSetLayout);
     blueprint.mesh = EnsurePrimitiveMesh(renderSystem, renderer, type);
     blueprint.primitiveSourceType = type;
     return blueprint;

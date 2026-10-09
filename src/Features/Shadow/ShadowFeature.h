@@ -8,6 +8,7 @@
 #include "../../Game/SceneQuery.h"
 #include "../../Renderer/Pipeline.h"
 #include "../../Renderer/PipelineHandle.h"
+#include "../../Renderer/SceneServicesDescriptorSet.h"
 
 namespace gte {
 
@@ -54,6 +55,10 @@ private:
     bool m_mapResolutionLocked = false;
     bool m_mapResolutionMismatchWarned = false; // Logged at most once per process.
     std::uint32_t m_mapResolutionInUse = 0;
+
+    // Scene Services slot index this feature publishes its depth map into -
+    // see SceneServicesDescriptorSet.h. Registered once, in the constructor.
+    std::uint32_t m_shadowMapSlot = kInvalidSceneServiceSlotIndex;
 
     ShadowMaskRenderer m_maskRenderer;
     ShadowCompositeRenderer m_compositeRenderer;

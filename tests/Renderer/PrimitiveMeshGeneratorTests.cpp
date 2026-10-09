@@ -24,28 +24,23 @@ Vec3 PositionOf(const Vertex& v) noexcept
     return Vec3{ v.position[0], v.position[1], v.position[2] };
 }
 
-Vec3 ColorOf(const Vertex& v) noexcept
+Vec3 NormalOf(const Vertex& v) noexcept
 {
-    return Vec3{ v.color[0], v.color[1], v.color[2] };
+    return Vec3{ v.normal[0], v.normal[1], v.normal[2] };
 }
 
-// Every generated vertex's baked color must be a finite, non-negative value
-// no brighter than the shape's own base color (see PrimitiveMeshGenerator.cpp's
-// kBaseColor/kAmbient) - a cheap, shape-agnostic sanity check that shading
-// never produced NaN/negative/blown-out values, run against all five shapes.
-void ExpectPlausibleColors(const std::vector<Vertex>& vertices)
+// Every generated vertex's normal must be a real, finite, unit-length
+// direction - the one invariant that actually depends on each shape's own
+// AddFlatTriangle/AddSmoothTriangle normal math (unlike color, which is now
+// a hardcoded constant and proves nothing), run against all five shapes.
+void ExpectUnitLengthNormals(const std::vector<Vertex>& vertices)
 {
     for (const Vertex& v : vertices) {
-        const Vec3 color = ColorOf(v);
-        EXPECT_TRUE(std::isfinite(color.x));
-        EXPECT_TRUE(std::isfinite(color.y));
-        EXPECT_TRUE(std::isfinite(color.z));
-        EXPECT_GE(color.x, 0.0f);
-        EXPECT_LE(color.x, 1.0f);
-        EXPECT_GE(color.y, 0.0f);
-        EXPECT_LE(color.y, 1.0f);
-        EXPECT_GE(color.z, 0.0f);
-        EXPECT_LE(color.z, 1.0f);
+        const Vec3 n = NormalOf(v);
+        ASSERT_TRUE(std::isfinite(n.x));
+        ASSERT_TRUE(std::isfinite(n.y));
+        ASSERT_TRUE(std::isfinite(n.z));
+        EXPECT_NEAR(Length(n), 1.0f, 1e-4f);
     }
 }
 
@@ -73,7 +68,7 @@ TEST(PrimitiveMeshGeneratorTest, Cube_HasExactlySixFacesOfTwoTrianglesEach)
 
     // 6 faces * 2 triangles * 3 vertices, non-indexed (see Mesh.h/TODO.md).
     ASSERT_EQ(vertices.size(), 36u);
-    ExpectPlausibleColors(vertices);
+    ExpectUnitLengthNormals(vertices);
 }
 
 TEST(PrimitiveMeshGeneratorTest, Cube_EveryVertexLiesExactlyOnTheUnitCubesSurface)
@@ -109,7 +104,7 @@ TEST(PrimitiveMeshGeneratorTest, Plane_IsASingleUnitQuadOnTheXZPlane)
 
     // 1 quad * 2 triangles * 3 vertices.
     ASSERT_EQ(vertices.size(), 6u);
-    ExpectPlausibleColors(vertices);
+    ExpectUnitLengthNormals(vertices);
 
     for (const Vertex& v : vertices) {
         const Vec3 p = PositionOf(v);
@@ -125,7 +120,7 @@ TEST(PrimitiveMeshGeneratorTest, Sphere_IsANonEmptyTriangleListWithEveryVertexOn
 
     ASSERT_GT(vertices.size(), 0u);
     ASSERT_EQ(vertices.size() % 3u, 0u); // A valid (non-indexed) triangle list.
-    ExpectPlausibleColors(vertices);
+    ExpectUnitLengthNormals(vertices);
 
     for (const Vertex& v : vertices) {
         const Vec3 p = PositionOf(v);
@@ -139,7 +134,7 @@ TEST(PrimitiveMeshGeneratorTest, Cone_EveryVertexIsAtTheApexOrOnTheBasePlane)
 
     ASSERT_GT(vertices.size(), 0u);
     ASSERT_EQ(vertices.size() % 3u, 0u);
-    ExpectPlausibleColors(vertices);
+    ExpectUnitLengthNormals(vertices);
 
     bool sawApex = false;
     bool sawBaseCenter = false;
@@ -172,7 +167,7 @@ TEST(PrimitiveMeshGeneratorTest, Capsule_EveryVertexIsExactlyRadiusAwayFromItsNe
 
     ASSERT_GT(vertices.size(), 0u);
     ASSERT_EQ(vertices.size() % 3u, 0u);
-    ExpectPlausibleColors(vertices);
+    ExpectUnitLengthNormals(vertices);
 
     // A capsule is the set of points at exactly `radius` distance from SOME
     // point on a straight core segment - here the segment from

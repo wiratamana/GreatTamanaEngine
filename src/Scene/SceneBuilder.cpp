@@ -121,7 +121,8 @@ void ClearEntireScene(Registry& registry)
 // RestoreProjectAssemblyHotReloadState()). Do NOT "improve" this algorithm
 // here - this is a pure code-motion refactor; fix bugs, if any are ever
 // found, only as their own, separately-justified change.
-void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDocument& document, const AssetDatabase& assetDatabase)
+void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDocument& document,
+    const AssetDatabase& assetDatabase, VkDescriptorSetLayout sceneServicesSetLayout)
 {
     Registry& registry = game.GetRegistry();
 
@@ -203,7 +204,7 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
             PrimitiveType parsedType{};
             if (primitiveSourceJson.contains("type") && primitiveSourceJson.at("type").is_string()
                 && TryParsePrimitiveTypeName(primitiveSourceJson.at("type").get<std::string>(), parsedType)) {
-                resultEntities[i] = game.CreatePrimitiveEntity(renderer, parsedType);
+                resultEntities[i] = game.CreatePrimitiveEntity(renderer, parsedType, sceneServicesSetLayout);
                 consumedByRecipe[i] = true;
             }
             // else: malformed/unrecognized primitive type string - leave
@@ -230,7 +231,7 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
                 continue;
             }
 
-            const Entity rootEntity = game.CreateMeshEntityFromGtaFile(renderer, asset->gtaPath);
+            const Entity rootEntity = game.CreateMeshEntityFromGtaFile(renderer, asset->gtaPath, sceneServicesSetLayout);
             resultEntities[i] = rootEntity;
             consumedByRecipe[i] = true;
             // alreadyParentedByRecipe[i] is DELIBERATELY NOT set here - see

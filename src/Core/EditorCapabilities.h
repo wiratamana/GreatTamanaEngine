@@ -48,6 +48,8 @@
 
 #include "Logging.h" // editor-core-separation-2 campaign, PHASE3 - LogEntry/LogQueryFilter for ILogQueryCapability below.
 
+#include <volk.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -100,8 +102,10 @@ public:
     // untouched, mirroring SceneIO.h's real LoadScene() "never partially
     // clears the current scene on failure" guarantee) and sets
     // `outErrorMessage` when `scenePath` doesn't exist or fails to parse.
-    virtual bool LoadScene(
-        Game& game, Renderer& renderer, const std::filesystem::path& scenePath, std::string& outErrorMessage) = 0;
+    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+    // Layout() - forwarded into the real recipe-spawn helpers.
+    virtual bool LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scenePath,
+        VkDescriptorSetLayout sceneServicesSetLayout, std::string& outErrorMessage) = 0;
 
     // editor-core-separation-1 campaign, PHASE6
     // (PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md) - added

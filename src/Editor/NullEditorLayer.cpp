@@ -40,7 +40,8 @@ public:
         const std::vector<RenderFeatureDebugEntry>& /*renderFeatureEntries*/,
         rg::RenderPassToggleRegistry& /*renderPassToggleRegistry*/,
         RenderFeatureCompositor* /*renderFeatureCompositor*/,
-        const rg::RenderPassBlackboard& /*offscreenBlackboard*/) override // editor-core-separation-22, PHASE6.
+        const rg::RenderPassBlackboard& /*offscreenBlackboard*/,
+        VkDescriptorSetLayout /*sceneServicesSetLayout*/) override
     {
     }
     void Render(VkCommandBuffer /*cmd*/) override { }
@@ -106,7 +107,8 @@ public:
     // at all, mirroring ImportExternalAssetIntoProject()'s own "not
     // available" precedent above.
     GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(
-        Game& /*game*/, Renderer& /*renderer*/, std::uint32_t /*instanceCount*/) override
+        Game& /*game*/, Renderer& /*renderer*/, std::uint32_t /*instanceCount*/,
+        VkDescriptorSetLayout /*sceneServicesSetLayout*/) override
     {
         GpuDrivenTestBatchSpawnResult result;
         result.success = false;

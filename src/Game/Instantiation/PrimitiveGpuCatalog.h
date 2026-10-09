@@ -1,7 +1,8 @@
 #pragma once
-
 #include "EntityBlueprint.h"
 #include "Renderer/Primitives/PrimitiveMeshGenerator.h"
+
+#include <volk.h>
 
 #include <array>
 
@@ -26,10 +27,15 @@ public:
     // distinct PrimitiveType, reused forever after) and returns a ready-to-
     // instantiate, ONE-NODE EntityBlueprint (no children - a primitive spawn
     // request needs nothing more than that).
-    EntityBlueprint Resolve(RenderSystem& renderSystem, Renderer& renderer, PrimitiveType type);
+    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+    // Layout() - forwarded straight through to EnsureDefaultPipeline() so the
+    // spawned primitive's pipeline can sample the real scene directional
+    // light/shadow map at set = 1.
+    EntityBlueprint Resolve(
+        RenderSystem& renderSystem, Renderer& renderer, PrimitiveType type, VkDescriptorSetLayout sceneServicesSetLayout);
 
 private:
-    PipelineHandle EnsureDefaultPipeline(RenderSystem& renderSystem, Renderer& renderer);
+    PipelineHandle EnsureDefaultPipeline(RenderSystem& renderSystem, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout);
     MeshHandle EnsurePrimitiveMesh(RenderSystem& renderSystem, Renderer& renderer, PrimitiveType type);
 
     PipelineHandle m_defaultPipeline;

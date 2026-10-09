@@ -45,7 +45,7 @@ PipelineHandle& SharedPipelineHandle()
 // a real index buffer, exactly the shape PHASE0's Locked Design Decision 6/7
 // requires (PrimitiveMeshGenerator's own built-in shapes are deliberately
 // excluded precisely because they are NOT indexed).
-void EnsureSharedMeshAndPipeline(Game& game, Renderer& renderer)
+void EnsureSharedMeshAndPipeline(Game& game, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout)
 {
     if (SharedMeshHandle().IsValid() && SharedPipelineHandle().IsValid()) {
         return;
@@ -80,13 +80,15 @@ void EnsureSharedMeshAndPipeline(Game& game, Renderer& renderer)
     // ResolveInstancedPipeline() - PHASE5).
     Pipeline pipeline = renderer.CreatePipeline("shaders/Mesh.vert.spv", "shaders/Mesh.frag.spv",
         VertexLayout::PositionNormal, /*useMaterialTexture=*/false,
-        "GpuDrivenBatchTestSpawner (Mesh.vert/Mesh.frag PositionNormal, validation content)");
+        "GpuDrivenBatchTestSpawner (Mesh.vert/Mesh.frag PositionNormal, validation content)",
+        /*useInstanceBuffer=*/false, sceneServicesSetLayout);
     SharedPipelineHandle() = renderSystem.RegisterPipeline(std::move(pipeline));
 }
 
 } // namespace
 
-GpuDrivenBatchTestSpawnResult GpuDrivenBatchTestSpawner::Spawn(Game& game, Renderer& renderer, std::uint32_t instanceCount)
+GpuDrivenBatchTestSpawnResult GpuDrivenBatchTestSpawner::Spawn(
+    Game& game, Renderer& renderer, std::uint32_t instanceCount, VkDescriptorSetLayout sceneServicesSetLayout)
 {
     GpuDrivenBatchTestSpawnResult result;
 
@@ -96,7 +98,7 @@ GpuDrivenBatchTestSpawnResult GpuDrivenBatchTestSpawner::Spawn(Game& game, Rende
         return result;
     }
 
-    EnsureSharedMeshAndPipeline(game, renderer);
+    EnsureSharedMeshAndPipeline(game, renderer, sceneServicesSetLayout);
 
     Registry& registry = game.GetRegistry();
 

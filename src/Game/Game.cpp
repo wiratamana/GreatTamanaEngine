@@ -85,9 +85,9 @@ void Game::Update(const EngineContext& engineContext, const InputState& /*input*
     }
 }
 
-Entity Game::CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type)
+Entity Game::CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type, VkDescriptorSetLayout sceneServicesSetLayout)
 {
-    return m_meshInstantiationSystem.SpawnPrimitive(m_registry, renderer, type);
+    return m_meshInstantiationSystem.SpawnPrimitive(m_registry, renderer, type, sceneServicesSetLayout);
 }
 
 Entity Game::CreateDirectionalLightEntity()
@@ -105,9 +105,10 @@ Entity Game::CreateDirectionalLightEntity()
     return entity;
 }
 
-Entity Game::CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath)
+Entity Game::CreateMeshEntityFromGtaFile(
+    Renderer& renderer, const std::string& absoluteGtaPath, VkDescriptorSetLayout sceneServicesSetLayout)
 {
-    const Entity root = m_meshInstantiationSystem.SpawnMeshAsset(m_registry, renderer, absoluteGtaPath);
+    const Entity root = m_meshInstantiationSystem.SpawnMeshAsset(m_registry, renderer, absoluteGtaPath, sceneServicesSetLayout);
     if (root != kInvalidEntity) {
         // Explicit hand-off: if this model turned out to be skinned, make
         // its bind-pose/rig data available to AnimationSystem's own
@@ -142,11 +143,12 @@ Entity Game::CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& 
     return root;
 }
 
-InstantiateMeshAssetOutcome Game::InstantiateMeshAssetFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath)
+InstantiateMeshAssetOutcome Game::InstantiateMeshAssetFromGtaFile(
+    Renderer& renderer, const std::string& absoluteGtaPath, VkDescriptorSetLayout sceneServicesSetLayout)
 {
     InstantiateMeshAssetOutcome outcome;
 
-    const Entity root = CreateMeshEntityFromGtaFile(renderer, absoluteGtaPath);
+    const Entity root = CreateMeshEntityFromGtaFile(renderer, absoluteGtaPath, sceneServicesSetLayout);
     if (root == kInvalidEntity) {
         outcome.success = false;
         outcome.errorMessage = "failed to load or spawn a Mesh asset from \"" + absoluteGtaPath
@@ -169,7 +171,8 @@ bool Game::PlayAnimationOnEntity(Entity targetEntity, const std::string& absolut
 }
 
 InstantiatePrimitiveOutcome Game::InstantiatePrimitive(Renderer& renderer, const std::string& shapeName,
-    const std::string& requestedName, const Vec3& worldPosition, bool hasParent, const std::string& parentName)
+    const std::string& requestedName, const Vec3& worldPosition, bool hasParent, const std::string& parentName,
+    VkDescriptorSetLayout sceneServicesSetLayout)
 {
     InstantiatePrimitiveOutcome outcome;
 
@@ -184,7 +187,7 @@ InstantiatePrimitiveOutcome Game::InstantiatePrimitive(Renderer& renderer, const
     const std::string baseName = requestedName.empty() ? std::string(ToString(type)) : requestedName;
     const std::string uniqueName = MakeUniqueEntityName(m_registry, baseName);
 
-    const Entity entity = CreatePrimitiveEntity(renderer, type);
+    const Entity entity = CreatePrimitiveEntity(renderer, type, sceneServicesSetLayout);
     // Defensive - CreatePrimitiveEntity() is not currently documented to ever
     // return kInvalidEntity, but this is cheap insurance against a future
     // change there (e.g. a GPU resource creation failure surfaced as

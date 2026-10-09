@@ -86,6 +86,10 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
     constexpr std::uint32_t kMaxComputeCombinedImageSamplers = 128;
     constexpr std::uint32_t kMaxComputeDescriptorSets = 256;
 
+    // Block 4 "Global Scene Services Descriptor Set" - binding 8 is a plain
+    // uniform buffer, one per concurrently-tracked render view (Game, Scene).
+    constexpr std::uint32_t kMaxComputeUniformBuffers = 2;
+
     // Block 4 "Global Scene Services Descriptor Set"
     // (task_manager/better-render-pass-6) - SceneServicesDescriptorSet
     // allocates kSceneServiceSlotCount (8) COMBINED_IMAGE_SAMPLER descriptors
@@ -99,19 +103,24 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
     static_assert(2 <= kMaxComputeDescriptorSets,
         "SceneServicesDescriptorSet: at least 2 concurrently-tracked views (Game, Scene) must fit the shared "
         "compute-descriptor-set budget.");
+    static_assert(2 <= kMaxComputeUniformBuffers,
+        "SceneServicesDescriptorSet: at least 2 concurrently-tracked views (Game, Scene) must fit the shared "
+        "compute-descriptor UBO budget.");
 
-    VkDescriptorPoolSize computePoolSizes[3]{};
+    VkDescriptorPoolSize computePoolSizes[4]{};
     computePoolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     computePoolSizes[0].descriptorCount = kMaxComputeStorageBuffers;
     computePoolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     computePoolSizes[1].descriptorCount = kMaxComputeStorageImages;
     computePoolSizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     computePoolSizes[2].descriptorCount = kMaxComputeCombinedImageSamplers;
+    computePoolSizes[3].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    computePoolSizes[3].descriptorCount = kMaxComputeUniformBuffers;
 
     VkDescriptorPoolCreateInfo computePoolInfo{};
     computePoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     computePoolInfo.maxSets = kMaxComputeDescriptorSets;
-    computePoolInfo.poolSizeCount = 3;
+    computePoolInfo.poolSizeCount = 4;
     computePoolInfo.pPoolSizes = computePoolSizes;
 
     if (vkCreateDescriptorPool(m_device, &computePoolInfo, nullptr, &m_computeDescriptorPool) != VK_SUCCESS) {

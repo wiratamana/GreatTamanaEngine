@@ -14,6 +14,7 @@ namespace gte {
 
 class Renderer;
 class Buffer;
+class Texture2D;
 class RenderTexture;
 
 // Renders a live, slowly-spinning 3D preview of an on-disk *.gta
@@ -108,6 +109,21 @@ private:
     // range, color/depth format) never depends on WHICH mesh is selected.
     VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_pipeline = VK_NULL_HANDLE;
+
+    // MeshPreview.frag now samples the shared set=1 lighting/shadow
+    // interface (DirectionalLightingAndReceiverMask.glsl) - this preview has
+    // no real per-frame scene light/shadow context, so it builds its own
+    // tiny, local, always-neutral stand-in: a 1x1 white dummy texture at
+    // binding 0 + a zero-filled dummy UBO at binding 8, bound at set=1.
+    // m_setZeroFillerLayout is a zero-binding filler satisfying Vulkan's
+    // positional pSetLayouts indexing (set=0 must exist if set=1 does) -
+    // mirrors Pipeline.cpp's own m_syntheticSetZeroLayout precedent exactly.
+    VkDescriptorSetLayout m_setZeroFillerLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_localSetOneLayout = VK_NULL_HANDLE;
+    VkDescriptorPool m_localDescriptorPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_localSetOneDescriptorSet = VK_NULL_HANDLE;
+    std::unique_ptr<Texture2D> m_localWhiteTexture;
+    std::unique_ptr<Buffer> m_localUniformBuffer;
 
     std::string m_cachedPath;
     std::filesystem::file_time_type m_cachedWriteTime{};

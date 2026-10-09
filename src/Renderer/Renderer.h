@@ -559,17 +559,12 @@ public:
     // fundamentally GPU-only knowledge this method must never block to read
     // back.
     //
-    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
-    // PHASE5 - debug-only asserts `!pipeline.HasSceneServicesSet()`: this
-    // method/`FrameRecorder::IssueIndirectDrawCommand()` never bind set 1,
-    // by deliberate, permanent scope decision (PHASE0's second scope
-    // boundary) - a Pipeline built with a sceneServicesSetLayout anyway
-    // (legal per Pipeline's own contiguous-pSetLayouts logic) is a caller-
-    // side misuse this assert catches instead of silently leaving set 1
-    // unbound.
+    // `sceneServicesSet` (default VK_NULL_HANDLE) is bound at set = 1 when
+    // `pipeline.HasSceneServicesSet()` - the same gate Submit() applies.
     void SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
         VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset,
-        VkDescriptorSet instanceBufferDescriptorSet, const Mat4& viewProjMatrix = Mat4::Identity());
+        VkDescriptorSet instanceBufferDescriptorSet, VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE,
+        const Mat4& viewProjMatrix = Mat4::Identity());
 
     // Factory for graphics pipelines, so callers never need direct access
     // to the VkDevice this Renderer owns internally, and always get a

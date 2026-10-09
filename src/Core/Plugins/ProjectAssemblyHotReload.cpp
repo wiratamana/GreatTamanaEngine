@@ -57,7 +57,8 @@ void RestoreProjectAssemblyHotReloadState(Core& core, Renderer& renderer, const 
     // freeze - the whole engine, including any file-watching, was frozen
     // solid the entire time, LDD-HR4).
     ClearEntireScene(core.GetGame().GetRegistry());
-    ReconstructSceneFromDocument(core.GetGame(), renderer, snapshot.document, core.GetAssetDatabase());
+    ReconstructSceneFromDocument(
+        core.GetGame(), renderer, snapshot.document, core.GetAssetDatabase(), core.GetSceneServicesDescriptorSet().Layout());
 
     GTE_LOG_INFO("ProjectAssemblyHotReload",
         "RestoreProjectAssemblyHotReloadState: restored " + std::to_string(snapshot.document.entities.size()) + " entities.");

@@ -27,17 +27,21 @@ layout(push_constant) uniform PushConstants {
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 
-// World-space normal, interpolated across the triangle and consumed by
-// MeshPreview.frag for a simple fixed-direction lambert term. mat3(pc.model)
-// is enough (no inverse-transpose needed) because AssetPreviewMesh only
-// ever builds `model` from a pure rotation (see its own comment) - never a
-// non-uniform scale, which is the one case a plain mat3(model) would skew a
-// normal under (see Math/Mat4.h's TransformNormal() for the general case
-// this preview deliberately doesn't need).
+// World-space normal + position, interpolated across the triangle and
+// consumed by MeshPreview.frag's real directional-light shading function.
+// mat3(pc.model) is enough (no inverse-transpose needed) because
+// AssetPreviewMesh only ever builds `model` from a pure rotation (see its
+// own comment) - never a non-uniform scale, which is the one case a plain
+// mat3(model) would skew a normal under (see Math/Mat4.h's
+// TransformNormal() for the general case this preview deliberately doesn't
+// need).
 layout(location = 0) out vec3 outWorldNormal;
+layout(location = 1) out vec3 outWorldPos;
 
 void main()
 {
-    gl_Position = pc.viewProj * pc.model * vec4(inPosition, 1.0);
+    vec4 worldPos4 = pc.model * vec4(inPosition, 1.0);
+    gl_Position = pc.viewProj * worldPos4;
     outWorldNormal = mat3(pc.model) * inNormal;
+    outWorldPos = worldPos4.xyz;
 }

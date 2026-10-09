@@ -477,13 +477,14 @@ public:
         const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
         rg::RenderPassToggleRegistry& renderPassToggleRegistry,
         RenderFeatureCompositor* renderFeatureCompositor,
-        const rg::RenderPassBlackboard& offscreenBlackboard) override // editor-core-separation-22 campaign, PHASE6.
+        const rg::RenderPassBlackboard& offscreenBlackboard,
+        VkDescriptorSetLayout sceneServicesSetLayout) override // Core's real SceneServicesDescriptorSet::Layout().
     {
         ImGui::SetCurrentContext(m_context);
 
         Registry& registry = game.GetRegistry();
 
-        BuildDockspaceAndMenuBar(m_ctx, game, renderer, m_hotReloadDebugCapability);
+        BuildDockspaceAndMenuBar(m_ctx, game, renderer, m_hotReloadDebugCapability, sceneServicesSetLayout);
 
         // editor-core-separation-16 campaign (On-Engine Project Workflow
         // plan, BIG-STEP 2), PHASE4 - the "New Project..." floating window
@@ -537,14 +538,14 @@ public:
                 m_lastKnownSceneView = sceneSource->View();
             }
         }
-        BuildHierarchyPanel(game, renderer, m_ctx);
+        BuildHierarchyPanel(game, renderer, m_ctx, sceneServicesSetLayout);
 #if GTE_ENABLE_PROJECT_PANEL
         BuildInspectorPanel(registry, m_ctx, renderer, m_assetPreview, m_assetPreviewMesh, m_boneViewer,
             game.GetPhysicsSystem(), game.GetMeshInstantiationSystem(), m_modelRigCache);
 #else
         BuildInspectorPanel(registry, m_ctx, game.GetPhysicsSystem(), game.GetMeshInstantiationSystem());
 #endif
-        BuildScenePanel(game, renderer, m_ctx, m_sceneCamera);
+        BuildScenePanel(game, renderer, m_ctx, m_sceneCamera, sceneServicesSetLayout);
         BuildGamePanel(m_ctx);
         BuildMemoryPanel(m_ctx, renderer);
         m_profilerPanel.Build(m_ctx);
@@ -753,9 +754,11 @@ public:
     // (not in this composition-root class), mirroring
     // ImportExternalAssetIntoProject()'s own "thin forward into the real
     // implementation" shape immediately below.
-    GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(Game& game, Renderer& renderer, std::uint32_t instanceCount) override
+    GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(Game& game, Renderer& renderer, std::uint32_t instanceCount,
+        VkDescriptorSetLayout sceneServicesSetLayout) override
     {
-        const GpuDrivenBatchTestSpawnResult spawned = GpuDrivenBatchTestSpawner::Spawn(game, renderer, instanceCount);
+        const GpuDrivenBatchTestSpawnResult spawned =
+            GpuDrivenBatchTestSpawner::Spawn(game, renderer, instanceCount, sceneServicesSetLayout);
         GpuDrivenTestBatchSpawnResult result;
         result.success = spawned.success;
         result.errorMessage = spawned.errorMessage;

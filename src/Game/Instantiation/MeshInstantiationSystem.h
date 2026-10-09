@@ -5,6 +5,8 @@
 #include "MeshAssetGpuCatalog.h"
 #include "PrimitiveGpuCatalog.h"
 
+#include <volk.h>
+
 #include <string>
 
 namespace gte {
@@ -34,13 +36,17 @@ public:
     // Spawns a new entity built from one of the engine's built-in primitive
     // shapes - see Game::CreatePrimitiveEntity()'s own doc comment (Game.h)
     // for the full behavior contract this preserves exactly.
-    Entity SpawnPrimitive(Registry& registry, Renderer& renderer, PrimitiveType type);
+    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+    // Layout() - forwarded straight through to the catalogs below, no default.
+    Entity SpawnPrimitive(
+        Registry& registry, Renderer& renderer, PrimitiveType type, VkDescriptorSetLayout sceneServicesSetLayout);
 
     // Spawns a whole hierarchy of entities from an imported *.gta
     // AssetType::Mesh file - see Game::CreateMeshEntityFromGtaFile()'s own
     // doc comment (Game.h) for the full behavior contract this preserves
     // exactly, including the kInvalidEntity-on-failure convention.
-    Entity SpawnMeshAsset(Registry& registry, Renderer& renderer, const std::string& absoluteGtaPath);
+    Entity SpawnMeshAsset(Registry& registry, Renderer& renderer, const std::string& absoluteGtaPath,
+        VkDescriptorSetLayout sceneServicesSetLayout);
 
     // Read-only queries used by AnimationSystem (constructor-injected a
     // reference to this class - see AnimationSystem.h) to look up which GPU

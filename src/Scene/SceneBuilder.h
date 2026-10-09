@@ -1,5 +1,7 @@
 #pragma once
 
+#include <volk.h>
+
 #include "../Assets/AssetDatabase.h"
 #include "../ECS/Registry.h"
 #include "SceneDocument.h"
@@ -145,6 +147,9 @@ class Renderer;
 //
 // Also calls game.EnsureDefaultCameraExists() once, at the end - matches
 // LoadScene()'s own existing final guarantee.
-void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDocument& document, const AssetDatabase& assetDatabase);
+// `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+// Layout() - forwarded into Game::CreatePrimitiveEntity()/CreateMeshEntityFromGtaFile() below.
+void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDocument& document,
+    const AssetDatabase& assetDatabase, VkDescriptorSetLayout sceneServicesSetLayout);
 
 } // namespace gte

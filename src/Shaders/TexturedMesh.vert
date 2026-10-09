@@ -22,14 +22,17 @@ layout(location = 2) in vec2 inUv;
 
 layout(location = 0) out vec3 outWorldNormal;
 layout(location = 1) out vec2 outUv;
+layout(location = 2) out vec3 outWorldPos;
 
 void main()
 {
-    gl_Position = pc.viewProj * pc.model * vec4(inPosition, 1.0);
+    vec4 worldPos4 = pc.model * vec4(inPosition, 1.0);
+    gl_Position = pc.viewProj * worldPos4;
     // mat3(pc.model) (no inverse-transpose) is only exactly correct for a
     // uniform scale - see Mesh.vert's own comment for why this doesn't
     // matter yet (every spawned mesh entity starts with an identity
     // Transform).
     outWorldNormal = mat3(pc.model) * inNormal;
     outUv = inUv;
+    outWorldPos = worldPos4.xyz;
 }

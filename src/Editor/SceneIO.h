@@ -1,5 +1,7 @@
 #pragma once
 
+#include <volk.h>
+
 #include <filesystem>
 
 namespace gte {
@@ -94,10 +96,13 @@ bool SaveScene(Game& game);
 // added as an explicit-path sibling to the original zero-argument
 // LoadScene(Game&, Renderer&) below, so POST /load_scene can target a
 // caller-supplied path.
-bool LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scenePath);
+// `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+// Layout() - forwarded into ReconstructSceneFromDocument()'s own recipe-spawn helpers.
+bool LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scenePath,
+    VkDescriptorSetLayout sceneServicesSetLayout);
 
 // Unchanged behavior - still what Editor/DockLayout.cpp's Ctrl+O calls -
 // forwards to the explicit-path overload above with DefaultScenePath().
-bool LoadScene(Game& game, Renderer& renderer);
+bool LoadScene(Game& game, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout);
 
 } // namespace gte

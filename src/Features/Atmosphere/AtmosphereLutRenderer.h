@@ -18,9 +18,10 @@
 //
 // BINDING CONVENTION for the Transmittance LUT specifically (see the
 // strategy document's own "Revision Notes" at its top): binding 0 is
-// AtmosphereParametersGpu, bound as a read-only STORAGE buffer (this engine
-// has no VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER descriptor support anywhere
-// today - see Vulkan/DescriptorSetLayoutBuilder.h/Renderer/ComputeDescriptorSet.h),
+// AtmosphereParametersGpu, bound as a read-only STORAGE buffer (Scene
+// Services binding 8 is this engine's one, scoped VK_DESCRIPTOR_TYPE_
+// UNIFORM_BUFFER exception - see Shaders/DirectionalLightingAndReceiverMask.glsl -
+// every Atmosphere LUT pass stays on storage buffers unchanged, by choice),
 // NEVER a true uniform buffer; binding 1 is the output image2D. The output
 // texture is a plain Texture2D (allowStorageImageAccess = true), NOT a
 // RenderTexture/VolumeTexture - correct for THIS LUT since a transmittance

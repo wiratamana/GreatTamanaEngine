@@ -38,8 +38,10 @@
 // ordering: buffer bindings, then read-only textures, then storage images
 // last; see also this campaign's own "Revision Notes"): binding 0 =
 // AtmosphereParametersGpu, a read-only STORAGE buffer (`readonly buffer`,
-// NEVER `uniform` - this engine has no VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-// descriptor support anywhere today), REUSING the exact same buffer Phase
+// NEVER `uniform` - Scene Services binding 8 is this engine's one, scoped
+// VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER exception, Atmosphere stays on storage
+// buffers by deliberate choice - see DirectionalLightingAndReceiverMask.glsl),
+// REUSING the exact same buffer Phase
 // 3's AddTransmittanceLutPass() already created/uploaded this frame (no
 // second, duplicate buffer for the same data); binding 1 = sampler2D
 // transmittanceLut (read-only, Phase 3's own output); binding 2 = the

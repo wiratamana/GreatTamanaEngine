@@ -27,9 +27,8 @@ layout(push_constant) uniform PushConstants {
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 
-// World-space normal, interpolated across the triangle and consumed by
-// Mesh.frag for a simple fixed-direction lambert term - see that file's own
-// comment for why this engine has no real material/lighting system yet.
+// World-space normal + position, interpolated across the triangle and
+// consumed by Mesh.frag's real per-pixel directional lighting.
 // mat3(pc.model) (no inverse-transpose) is only exactly correct for a
 // uniform scale - see Math/Mat4.h's TransformNormal() for the general case -
 // but every entity spawned via Game::CreateMeshEntityFromGtaFile() starts
@@ -37,9 +36,12 @@ layout(location = 1) in vec3 inNormal;
 // yet; revisit if/when a spawned mesh entity's Transform is given a
 // non-uniform scale.
 layout(location = 0) out vec3 outWorldNormal;
+layout(location = 1) out vec3 outWorldPos;
 
 void main()
 {
-    gl_Position = pc.viewProj * pc.model * vec4(inPosition, 1.0);
+    vec4 worldPos4 = pc.model * vec4(inPosition, 1.0);
+    gl_Position = pc.viewProj * worldPos4;
     outWorldNormal = mat3(pc.model) * inNormal;
+    outWorldPos = worldPos4.xyz;
 }

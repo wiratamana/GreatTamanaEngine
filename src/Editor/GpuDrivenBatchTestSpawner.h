@@ -50,6 +50,7 @@
 // shader-pair lookup (PHASE5) resolve a real
 // VertexLayout::PositionNormalInstanced sibling for it with zero further
 // wiring.
+#include <volk.h>
 
 #include <cstdint>
 #include <string>
@@ -90,7 +91,10 @@ public:
     // engine - this function does not add its own defensive catch, matching
     // Game::CreatePrimitiveEntity()'s own identical "let a real GPU failure
     // surface" precedent.
-    static GpuDrivenBatchTestSpawnResult Spawn(Game& game, Renderer& renderer, std::uint32_t instanceCount);
+    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+    // Layout() - forwarded into the shared Mesh/Pipeline this class lazily builds.
+    static GpuDrivenBatchTestSpawnResult Spawn(
+        Game& game, Renderer& renderer, std::uint32_t instanceCount, VkDescriptorSetLayout sceneServicesSetLayout);
 };
 
 } // namespace gte

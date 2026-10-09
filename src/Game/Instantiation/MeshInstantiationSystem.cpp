@@ -4,15 +4,18 @@
 
 namespace gte {
 
-Entity MeshInstantiationSystem::SpawnPrimitive(Registry& registry, Renderer& renderer, PrimitiveType type)
+Entity MeshInstantiationSystem::SpawnPrimitive(
+    Registry& registry, Renderer& renderer, PrimitiveType type, VkDescriptorSetLayout sceneServicesSetLayout)
 {
-    const EntityBlueprint blueprint = m_primitiveCatalog.Resolve(m_renderSystem, renderer, type);
+    const EntityBlueprint blueprint = m_primitiveCatalog.Resolve(m_renderSystem, renderer, type, sceneServicesSetLayout);
     return Instantiate(registry, blueprint);
 }
 
-Entity MeshInstantiationSystem::SpawnMeshAsset(Registry& registry, Renderer& renderer, const std::string& absoluteGtaPath)
+Entity MeshInstantiationSystem::SpawnMeshAsset(Registry& registry, Renderer& renderer,
+    const std::string& absoluteGtaPath, VkDescriptorSetLayout sceneServicesSetLayout)
 {
-    const EntityBlueprint blueprint = m_meshAssetCatalog.Resolve(m_renderSystem, renderer, absoluteGtaPath);
+    const EntityBlueprint blueprint =
+        m_meshAssetCatalog.Resolve(m_renderSystem, renderer, absoluteGtaPath, sceneServicesSetLayout);
     if (blueprint.children.empty()) {
         // MeshAssetGpuCatalog::Resolve() returns an empty-children blueprint
         // to signal "this path didn't resolve to a valid, non-empty Mesh

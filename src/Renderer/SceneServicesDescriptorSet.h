@@ -16,14 +16,17 @@
 // dummy fallback resources, and Rewrite()/DescriptorSetFor().
 
 #include "RenderGraph/RenderPipeline.h" // rg::RenderPassId, rg::RenderViewId
+#include "Buffer.h"
 #include "Texture2D.h"
 #include "VolumeTexture.h"
 
 #include <volk.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -86,8 +89,12 @@ void ResetSceneServiceRegistryForTesting() noexcept;
 // concurrently-active views (this engine always has Game+Scene active
 // together whenever the Editor is up) must never alias onto the same key.
 rg::RenderPassId SceneServiceBlackboardKey(std::uint32_t slotIndex, rg::RenderViewId view) noexcept;
-
 class Renderer; // forward-declared only - the .cpp includes Renderer.h.
+
+// Fixed ceiling for binding 8's packed per-frame lighting UBO - std140-safe,
+// the domain schema living in Features/Shadow/ShadowTypes.h must fit inside
+// this many bytes.
+inline constexpr VkDeviceSize kSceneGlobalUniformBlockSize = 128;
 
 // Owns ONE reserved "scene services" descriptor-set LAYOUT (set = 1 at the
 // Pipeline level - see Pipeline.h's own new sceneServicesSetLayout
@@ -128,6 +135,12 @@ public:
     // execution window.
     VkDescriptorSet Rewrite(rg::RenderViewId view, const std::array<ResolvedSlot, kSceneServiceSlotCount>& resolved);
 
+    // Writes an opaque, fixed-size byte blob (<= kSceneGlobalUniformBlockSize)
+    // into the uniform buffer bound at Scene Services binding 8, for `view`.
+    // Content/schema is owned entirely by the caller - this class never
+    // interprets it. Call once per view per frame, same discipline as Rewrite().
+    void UpdateGlobalUniformBlock(rg::RenderViewId view, std::span<const std::byte> bytes);
+
     // The most recent Rewrite()-produced VkDescriptorSet for `view`, or
     // VK_NULL_HANDLE if Rewrite() was never called for that view yet.
     VkDescriptorSet DescriptorSetFor(rg::RenderViewId view) const noexcept;
@@ -139,6 +152,11 @@ public:
     const VolumeTexture& DummyImage3DTexture() const noexcept { return m_dummyImage3DTexture; }
 
 private:
+    // Shared by both Rewrite()'s and UpdateGlobalUniformBlock()'s own
+    // lazy-alloc branch - writes the dummy buffer into binding 8 of `set`.
+    // Only ever called immediately after `set` is freshly allocated.
+    void WriteDummyGlobalUniformBlockBinding(VkDescriptorSet set);
+
     Renderer* m_renderer = nullptr;
     VkDevice m_device = VK_NULL_HANDLE; // cached at construction, for Destroy().
     VkDescriptorSetLayout m_layout = VK_NULL_HANDLE; // owned - hand-built, NOT reflected; must be destroyed by this class.
@@ -157,6 +175,27 @@ private:
     // most one Image3D-kind slot is ever registered before this constructor
     // runs.
     VolumeTexture m_dummyImage3DTexture;
+
+    // DECLARATION ORDER IS LOAD-BEARING: must stay strictly after m_device
+    // and m_dummyImage3DTexture above, matching the constructor's own
+    // initializer-list order (C++ initializes in declaration order, not
+    // init-list order).
+    //
+    // ROBUSTNESS: binding 8 has NO per-call fallback the way bindings 0-7
+    // do inside Rewrite()'s own loop (that loop only ever touches indices
+    // 0..kSceneServiceSlotCount-1). Without an owned dummy UBO, a brand-new
+    // per-view set would leave binding 8 completely unwritten the instant
+    // it is allocated - sampling an unwritten binding is undefined behavior.
+    // Built ONCE in the constructor, zero-filled.
+    Buffer m_dummyGlobalUniformBuffer;
+
+    // Per-view UBO backing binding 8 - populated lazily by
+    // UpdateGlobalUniformBlock(), never by Rewrite() itself.
+    struct PerViewUniformBuffer {
+        rg::RenderViewId view;
+        Buffer buffer; // RAII, host-visible, persistently mapped (BufferMemoryUsage::CpuToGpu).
+    };
+    std::vector<PerViewUniformBuffer> m_perViewUniformBuffers;
 };
 
 } // namespace gte

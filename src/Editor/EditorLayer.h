@@ -445,8 +445,12 @@ public:
         // that accessor's own doc comment (Core.h) for why reading it here,
         // AFTER Core::BuildFrame() has already returned this same frame, is
         // safe. Forwarded through to Panels/FrameDebuggerPanel.cpp's new
-        // Clause C "disabled side effect still visible" detector.
-        const rg::RenderPassBlackboard& offscreenBlackboard) = 0;
+        const rg::RenderPassBlackboard& offscreenBlackboard,
+        // Stage 2 (Universal Lit Shader) - NEW, TRAILING parameter. Core's
+        // real SceneServicesDescriptorSet::Layout() - forwarded into every
+        // Editor-side spawn path (Hierarchy/Scene panel drag-and-drop,
+        // File > Open Scene) that must build a Pipeline opting into set=1.
+        VkDescriptorSetLayout sceneServicesSetLayout) = 0;
 
     // Records this frame's UI draw data into cmd. Called from inside
     // Renderer::Present()'s recordExtra hook - i.e. while the swapchain
@@ -750,7 +754,10 @@ public:
     // "editorAvailable"-style graceful-unavailability precedent (editor-
     // core-separation-1 campaign, PHASE8 - see GpuDrivenTestBatchSpawnResult's
     // own doc comment above).
-    virtual GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(Game& game, Renderer& renderer, std::uint32_t instanceCount) = 0;
+    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+    // Layout() - forwarded into GpuDrivenBatchTestSpawner::Spawn().
+    virtual GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(
+        Game& game, Renderer& renderer, std::uint32_t instanceCount, VkDescriptorSetLayout sceneServicesSetLayout) = 0;
 
     // Hands every built-in feature module constructed this session (see
     // src/Core/Plugins/BuiltinFeatureModuleRegistry.h) to the real Editor

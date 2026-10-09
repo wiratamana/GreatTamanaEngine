@@ -4,6 +4,8 @@
 #include "MaterialTextureGpuCache.h"
 #include "../Animation/SkeletalRigCache.h"
 
+#include <volk.h>
+
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -81,7 +83,12 @@ public:
     // a failure, never instantiating it) for anything that doesn't resolve
     // to a valid, non-empty *.gta AssetType::Mesh file - missing file, bad
     // magic, corrupt/truncated payload, or zero vertices/triangles.
-    EntityBlueprint Resolve(RenderSystem& renderSystem, Renderer& renderer, const std::string& absoluteGtaPath);
+    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+    // Layout() - forwarded straight through to EnsureMeshPipeline()/
+    // EnsureTexturedMeshPipeline() so every spawned part's pipeline can
+    // sample the real scene directional light/shadow map at set = 1.
+    EntityBlueprint Resolve(RenderSystem& renderSystem, Renderer& renderer, const std::string& absoluteGtaPath,
+        VkDescriptorSetLayout sceneServicesSetLayout);
 
     // Read-only queries used by AnimationSystem (via MeshInstantiationSystem's
     // own forwarding methods) - see SkeletalRigCache.h for why the
@@ -131,8 +138,9 @@ public:
     void InvalidateCachedMeshAsset(const std::string& absoluteGtaPath);
 
 private:
-    PipelineHandle EnsureMeshPipeline(RenderSystem& renderSystem, Renderer& renderer);
-    PipelineHandle EnsureTexturedMeshPipeline(RenderSystem& renderSystem, Renderer& renderer);
+    PipelineHandle EnsureMeshPipeline(RenderSystem& renderSystem, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout);
+    PipelineHandle EnsureTexturedMeshPipeline(
+        RenderSystem& renderSystem, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout);
 
     const std::vector<MeshAssetPart>& EnsureMeshAsset(
         RenderSystem& renderSystem, Renderer& renderer, const std::string& absoluteGtaPath);

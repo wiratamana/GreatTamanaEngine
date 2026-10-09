@@ -54,18 +54,11 @@ bool TryParsePrimitiveTypeName(const std::string& name, PrimitiveType& outType) 
 // Every generated mesh is a plain, NON-INDEXED triangle list - this engine's
 // Mesh (see Mesh.h) has no index buffer support yet (see TODO.md), so
 // vertices are duplicated across triangles/faces as needed rather than
-// shared. Each vertex's color is not a placeholder flat gray: it bakes a
-// simple, fixed-direction "faux-lit" shade (a constant light direction
-// dotted against either the FACE normal - Cube/Cone/Plane, i.e. hard-edged
-// flat shading - or the true per-vertex normal - Sphere/Capsule, i.e. smooth
-// shading) into the vertex color at generation time, entirely on the CPU.
-// This is a deliberately-scoped stand-in for a real lighting pass/pipeline
-// (which does not exist yet - the engine's one shader pair,
-// Shaders/Triangle.vert/.frag, is a flat unlit vertex-color pass-through) -
-// it makes a freshly-created primitive actually readable as a 3D shape in
-// the Scene/Game view instead of a flat silhouette, at zero cost to the
-// existing renderer/pipeline beyond Vertex::position growing from vec2 to
-// vec3 (see Vertex.h).
+// shared. Each vertex carries a REAL normal (flat per-face for Cube/Cone/
+// Plane, smooth per-vertex for Sphere/Capsule) plus a flat neutral color -
+// Triangle.frag shades from the normal using the real scene directional
+// light + shadow map (see src/Shaders/DirectionalLightingAndReceiverMask.glsl),
+// so there is no CPU-side lighting bake here anymore.
 //
 // Every shape is centered on the origin, at the same "unit" size Unity
 // itself uses for each built-in primitive (a 1x1x1 Cube, a Sphere/Capsule of

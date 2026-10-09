@@ -355,8 +355,10 @@ void MultiScatteringLutUvToHeightZenith(AtmosphereParametersGpu params, vec2 lut
 // session-stable AtmosphereParametersGpu above, which only changes when the
 // atmosphere's own physical constants change). Bound as ANOTHER read-only
 // STORAGE buffer, never a true uniform block - same "Revision Notes" rule
-// as AtmosphereParametersGpu (no VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER support
-// exists in the engine today).
+// as AtmosphereParametersGpu (Scene Services binding 8 is this engine's one,
+// scoped VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER exception - see
+// DirectionalLightingAndReceiverMask.glsl - Atmosphere stays on storage
+// buffers unchanged, by deliberate choice).
 // ----------------------------------------------------------------------
 
 struct AtmosphereFrameUniforms {

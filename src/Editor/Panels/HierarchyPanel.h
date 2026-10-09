@@ -1,5 +1,7 @@
 #pragma once
 
+#include <volk.h>
+
 namespace gte {
 
 class Game;
@@ -43,6 +45,9 @@ struct EditorContext;
 //
 // Called once per frame by ImGuiEditorLayer::BuildUI(), before
 // BuildInspectorPanel().
-void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx);
+// `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+// Layout() - forwarded into Game::CreatePrimitiveEntity()/
+// CreateMeshEntityFromGtaFile() and GpuDrivenBatchTestSpawner::Spawn().
+void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, VkDescriptorSetLayout sceneServicesSetLayout);
 
 } // namespace gte

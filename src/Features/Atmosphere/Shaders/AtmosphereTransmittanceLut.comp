@@ -13,9 +13,11 @@
 // BINDING CONVENTION (see Vulkan/DescriptorSetLayoutBuilder.h's own
 // documented rule, and this campaign's own strategy document "Revision
 // Notes"): binding 0 is AtmosphereParametersGpu, bound as a read-only
-// STORAGE buffer (`readonly buffer`, NOT `uniform`) - this engine has NO
-// VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER descriptor support anywhere today (a
-// direct grep of src/ confirms it), mirroring the GPU Vertex Skinning
+// STORAGE buffer (`readonly buffer`, NOT `uniform`) - Scene Services binding
+// 8 is this engine's one, scoped VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER exception
+// (see Shaders/DirectionalLightingAndReceiverMask.glsl); Atmosphere stays on
+// storage buffers unchanged, by deliberate choice, not by platform limitation,
+// mirroring the GPU Vertex Skinning
 // campaign's own bone-matrix-buffer precedent. Binding 1 is the output
 // image2D. Both C++ (src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp) and
 // this file must be kept in agreement by hand - this campaign deliberately

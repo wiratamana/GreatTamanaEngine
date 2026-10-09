@@ -34,6 +34,12 @@ DescriptorSetLayoutBuilder& DescriptorSetLayoutBuilder::AddCombinedImageSampler(
     return AddBinding(binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, stageFlags, count);
 }
 
+DescriptorSetLayoutBuilder& DescriptorSetLayoutBuilder::AddUniformBuffer(
+    std::uint32_t binding, VkShaderStageFlags stageFlags, std::uint32_t count)
+{
+    return AddBinding(binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, stageFlags, count);
+}
+
 VkDescriptorSetLayout DescriptorSetLayoutBuilder::Build() const
 {
     VkDescriptorSetLayoutCreateInfo createInfo{};

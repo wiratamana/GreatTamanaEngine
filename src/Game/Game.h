@@ -150,7 +150,11 @@ public:
     // PrimitiveGpuCatalog/EntityInstantiator, which it's built from) for the
     // actual GPU-mesh-caching/entity-spawning behavior, unchanged from
     // before this refactor.
-    Entity CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type);
+    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+    // Layout() - deliberately no default value (see this document's own
+    // DECIDED rule): a missed caller is a compile error, never a silent
+    // pipeline/shader set=1 mismatch.
+    Entity CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type, VkDescriptorSetLayout sceneServicesSetLayout);
 
     // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
     // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md)
@@ -210,7 +214,11 @@ public:
     // "EnsureMeshAsset() writes a private Game member, UpdateSkeletalAnimators()
     // reads it" coupling (see GameInstantiationRefactorProposal.txt, Step
     // 2.4/3.5).
-    Entity CreateMeshEntityFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath);
+    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+    // Layout() - deliberately no default value, same DECIDED rule as
+    // CreatePrimitiveEntity() above.
+    Entity CreateMeshEntityFromGtaFile(
+        Renderer& renderer, const std::string& absoluteGtaPath, VkDescriptorSetLayout sceneServicesSetLayout);
 
     // task_manager/stl-parser-2 campaign, PHASE3 - a network-command-friendly,
     // Outcome-returning wrapper around CreateMeshEntityFromGtaFile() above -
@@ -222,7 +230,11 @@ public:
     // and NO entity created) exactly when CreateMeshEntityFromGtaFile() would
     // have returned kInvalidEntity - missing file, wrong/corrupt *.gta, or a
     // decodable-but-empty (zero vertices/triangles) mesh. Never throws.
-    InstantiateMeshAssetOutcome InstantiateMeshAssetFromGtaFile(Renderer& renderer, const std::string& absoluteGtaPath);
+    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+    // Layout() - deliberately no default value, same DECIDED rule as
+    // CreateMeshEntityFromGtaFile() above (which this forwards into).
+    InstantiateMeshAssetOutcome InstantiateMeshAssetFromGtaFile(
+        Renderer& renderer, const std::string& absoluteGtaPath, VkDescriptorSetLayout sceneServicesSetLayout);
 
     // Assigns/replaces the SkeletalAnimator component on `targetEntity` (a
     // live entity spawned by CreateMeshEntityFromGtaFile() - i.e. one that
@@ -359,8 +371,12 @@ public:
     //
     // Never throws. Returns an outcome with success == false (and creates NO
     // entity at all) only for an unrecognized `shapeName`.
+    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+    // Layout() - deliberately no default value, same DECIDED rule as
+    // CreatePrimitiveEntity() above (which this forwards into).
     InstantiatePrimitiveOutcome InstantiatePrimitive(Renderer& renderer, const std::string& shapeName,
-        const std::string& requestedName, const Vec3& worldPosition, bool hasParent, const std::string& parentName);
+        const std::string& requestedName, const Vec3& worldPosition, bool hasParent, const std::string& parentName,
+        VkDescriptorSetLayout sceneServicesSetLayout);
 
     // Destroys the live entity (and every descendant of it - see
     // ECS/TransformHierarchy.h::DestroyEntityAndDescendants()) whose Name

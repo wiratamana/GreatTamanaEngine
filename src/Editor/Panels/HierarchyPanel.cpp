@@ -67,7 +67,8 @@ std::string BuildEntityLabel(Registry& registry, Entity entity)
 // attach/detach/reorder behavior described in HierarchyPanel.h's own doc
 // comment. `registry`/`game`/`renderer`/`ctx` are threaded straight through
 // from BuildHierarchyPanel() below.
-void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Registry& registry, Entity entity)
+void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Registry& registry, Entity entity,
+    VkDescriptorSetLayout sceneServicesSetLayout)
 {
     // task_manager/editor-core-separation-10 campaign, PHASE3 - was
     // ImGui::PushID(static_cast<int>(entity.index)) alone. entity.index is
@@ -163,7 +164,7 @@ void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Regist
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kProjectAssetDragDropPayloadType)) {
             const std::string absolutePath(static_cast<const char*>(payload->Data));
             if (!game.PlayAnimationOnEntity(entity, absolutePath)) {
-                const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath);
+                const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath, sceneServicesSetLayout);
                 if (spawned.IsValid()) {
                     SetParent(registry, spawned, entity, /*worldPositionStays=*/true);
                     ctx.selection.SelectEntity(spawned);
@@ -177,7 +178,7 @@ void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Regist
 
     if (opened && !children.empty()) {
         for (const Entity child : children) {
-            RenderEntityNode(game, renderer, ctx, registry, child);
+            RenderEntityNode(game, renderer, ctx, registry, child, sceneServicesSetLayout);
         }
         ImGui::TreePop();
     }
@@ -187,7 +188,7 @@ void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Regist
 
 } // namespace
 
-void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx)
+void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, VkDescriptorSetLayout sceneServicesSetLayout)
 {
     Registry& registry = game.GetRegistry();
 
@@ -199,7 +200,7 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx)
     // recursively from here.
     const std::vector<Entity> roots = GetChildren(registry, kInvalidEntity);
     for (const Entity root : roots) {
-        RenderEntityNode(game, renderer, ctx, registry, root);
+        RenderEntityNode(game, renderer, ctx, registry, root, sceneServicesSetLayout);
     }
 
     if (roots.empty()) {
@@ -230,7 +231,7 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx)
 #if GTE_ENABLE_PROJECT_PANEL
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kProjectAssetDragDropPayloadType)) {
                 const std::string absolutePath(static_cast<const char*>(payload->Data));
-                const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath);
+                const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath, sceneServicesSetLayout);
                 if (spawned.IsValid()) {
                     // Same "select what you just created" convention as
                     // "Create 3D Object" below.
@@ -255,7 +256,7 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx)
                     // Select the freshly spawned entity immediately - same
                     // as Unity, so Inspector shows it without an extra
                     // click in Hierarchy.
-                    ctx.selection.SelectEntity(game.CreatePrimitiveEntity(renderer, type));
+                    ctx.selection.SelectEntity(game.CreatePrimitiveEntity(renderer, type, sceneServicesSetLayout));
                 }
             }
             ImGui::EndMenu();
@@ -280,7 +281,7 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx)
         // indirection is needed here, unlike the HTTP route's own call site -
         // see IEditorLayer::SpawnGpuDrivenTestBatch()).
         if (ImGui::MenuItem("Create GPU-Driven Test Batch")) {
-            GpuDrivenBatchTestSpawner::Spawn(game, renderer, /*instanceCount=*/6);
+            GpuDrivenBatchTestSpawner::Spawn(game, renderer, /*instanceCount=*/6, sceneServicesSetLayout);
         }
         ImGui::EndPopup();
     }

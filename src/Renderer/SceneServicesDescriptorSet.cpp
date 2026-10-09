@@ -240,16 +240,22 @@ SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
     // integration test actually constructing this class against a real
     // device).
     , m_dummyImage3DTexture(renderer.CreateVolumeTexture(1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, "SceneServiceImage3DDummy"))
+    // Binding 8's own zero-filled dummy fallback - see this member's own
+    // doc comment in the header for why Rewrite()'s per-slot loop cannot
+    // cover it.
+    , m_dummyGlobalUniformBuffer(renderer.CreateBuffer(kSceneGlobalUniformBlockSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+          BufferMemoryUsage::CpuToGpu, "SceneGlobalUniformBlockDummy"))
 {
     // The one reserved "scene services" descriptor-set layout - 8 combined-
-    // image-sampler bindings, fragment-stage visible (this set is consumed
-    // by a fragment shader, never a compute one - see
-    // DescriptorSetLayoutBuilder's own default stageFlags comment for why
-    // that default does not apply here).
+    // image-sampler bindings (fragment-stage), plus one plain uniform buffer
+    // at binding 8 (the packed per-frame lighting UBO - see
+    // kSceneGlobalUniformBlockSize) - this set is consumed by a fragment
+    // shader, never a compute one.
     DescriptorSetLayoutBuilder layoutBuilder(m_device);
     for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
         layoutBuilder.AddCombinedImageSampler(i, VK_SHADER_STAGE_FRAGMENT_BIT);
     }
+    layoutBuilder.AddUniformBuffer(kSceneServiceSlotCount, VK_SHADER_STAGE_FRAGMENT_BIT);
     m_layout = layoutBuilder.Build();
 
     // Every Image2D-kind slot's real, uploaded dummy - a single opaque-white
@@ -263,6 +269,10 @@ SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
             m_dummyImage2DTextures.emplace(i, renderer.CreateTexture2D(whitePixel, 1, 1, debugName.c_str()));
         }
     }
+
+    // Zero-fill the dummy UBO exactly once - never written again after this.
+    const std::array<std::byte, static_cast<std::size_t>(kSceneGlobalUniformBlockSize)> zeroBytes{};
+    m_dummyGlobalUniformBuffer.Upload(zeroBytes.data(), zeroBytes.size());
 }
 
 SceneServicesDescriptorSet::~SceneServicesDescriptorSet()
@@ -291,6 +301,7 @@ VkDescriptorSet SceneServicesDescriptorSet::Rewrite(
     if (set == VK_NULL_HANDLE) {
         set = m_renderer->AllocateComputeDescriptorSet(m_layout);
         m_perViewSets.push_back(PerViewSet{ view, set });
+        WriteDummyGlobalUniformBlockBinding(set); // binding 8 has no per-slot fallback below - cover it here.
     }
 
     std::array<VkDescriptorImageInfo, kSceneServiceSlotCount> imageInfos{};
@@ -348,6 +359,70 @@ const Texture2D& SceneServicesDescriptorSet::DummyImage2DTextureFor(std::uint32_
     assert(SceneServiceSlotResourceKind(slotIndex) == SceneServiceResourceKind::Image2D
         && "SceneServicesDescriptorSet::DummyImage2DTextureFor: slotIndex is not an Image2D-kind slot.");
     return m_dummyImage2DTextures.at(slotIndex);
+}
+
+void SceneServicesDescriptorSet::WriteDummyGlobalUniformBlockBinding(VkDescriptorSet set)
+{
+    VkDescriptorBufferInfo bufferInfo{ m_dummyGlobalUniformBuffer.Native(), 0, kSceneGlobalUniformBlockSize };
+    VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    write.dstSet = set;
+    write.dstBinding = kSceneServiceSlotCount;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    write.pBufferInfo = &bufferInfo;
+    vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+}
+
+void SceneServicesDescriptorSet::UpdateGlobalUniformBlock(rg::RenderViewId view, std::span<const std::byte> bytes)
+{
+    assert(bytes.size() <= static_cast<std::size_t>(kSceneGlobalUniformBlockSize)
+        && "UpdateGlobalUniformBlock: payload exceeds the fixed ceiling - grow kSceneGlobalUniformBlockSize.");
+
+    PerViewUniformBuffer* entry = nullptr;
+    for (PerViewUniformBuffer& candidate : m_perViewUniformBuffers) {
+        if (candidate.view == view) {
+            entry = &candidate;
+            break;
+        }
+    }
+    if (entry == nullptr) {
+        m_perViewUniformBuffers.push_back(PerViewUniformBuffer{ view,
+            m_renderer->CreateBuffer(kSceneGlobalUniformBlockSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                BufferMemoryUsage::CpuToGpu, "SceneGlobalUniformBlock") });
+        entry = &m_perViewUniformBuffers.back();
+    }
+    entry->buffer.Upload(bytes.data(), bytes.size());
+
+    // Lazily allocate+register the shared per-view set here too - do NOT
+    // assert Rewrite() already ran. Whichever of the two runs first for a
+    // view creates the set; the other just reuses it from m_perViewSets.
+    // Mirrors Rewrite()'s own lazy-allocate pattern exactly - never
+    // "simplify" this back into an assert, the ordering is load-bearing
+    // (Shadow.DepthPass runs at PreOpaques, strictly BEFORE RenderOpaque,
+    // so it may well be the FIRST thing to touch a view's set this frame).
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    for (PerViewSet& perView : m_perViewSets) {
+        if (perView.view == view) {
+            set = perView.set;
+            break;
+        }
+    }
+    if (set == VK_NULL_HANDLE) {
+        set = m_renderer->AllocateComputeDescriptorSet(m_layout);
+        m_perViewSets.push_back(PerViewSet{ view, set });
+        // Same safety net as Rewrite()'s own lazy-alloc branch - the real
+        // write immediately below overwrites this with real data.
+        WriteDummyGlobalUniformBlockBinding(set);
+    }
+
+    VkDescriptorBufferInfo bufferInfo{ entry->buffer.Native(), 0, kSceneGlobalUniformBlockSize };
+    VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    write.dstSet = set;
+    write.dstBinding = kSceneServiceSlotCount;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    write.pBufferInfo = &bufferInfo;
+    vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
 }
 
 } // namespace gte

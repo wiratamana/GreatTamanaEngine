@@ -11,6 +11,8 @@
 #include "EngineCommandBridge.h"
 #include "../Core/EditorCapabilities.h" // PHASE6 of editor-core-separation-1 - ISceneIOCapability*, forward-declared-friendly (see below).
 
+#include <volk.h>
+
 namespace gte {
 
 class Game;
@@ -42,8 +44,11 @@ class Renderer;
 // capability" - EngineCommandKind::GetSceneSnapshot answers with
 // GetSceneSnapshotOutcome::editorAvailable == false in that case, mirroring
 // SaveScene/LoadScene's own identical nullptr-degrades-gracefully
-// convention exactly.
+// `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
+// Layout() - forwarded into every Game spawn path this dispatcher reaches
+// (InstantiatePrimitive/InstantiateMeshAssetFromGtaFile/LoadScene).
 EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneIOCapability* sceneIOCapability,
-    IHotReloadDebugCapability* hotReloadDebugCapability, const EngineCommandRequest& request);
+    IHotReloadDebugCapability* hotReloadDebugCapability, VkDescriptorSetLayout sceneServicesSetLayout,
+    const EngineCommandRequest& request);
 
 } // namespace gte

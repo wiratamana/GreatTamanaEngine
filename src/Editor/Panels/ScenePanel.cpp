@@ -15,7 +15,8 @@
 
 namespace gte {
 
-void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorCamera& camera)
+void BuildScenePanel(
+    Game& game, Renderer& renderer, EditorContext& ctx, EditorCamera& camera, VkDescriptorSetLayout sceneServicesSetLayout)
 {
     Registry& registry = game.GetRegistry();
     // ImGui::Begin() returns false when this panel isn't actually visible
@@ -55,7 +56,7 @@ void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorC
             if (ImGui::BeginDragDropTarget()) {
                 if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kProjectAssetDragDropPayloadType)) {
                     const std::string absolutePath(static_cast<const char*>(payload->Data));
-                    const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath);
+                    const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath, sceneServicesSetLayout);
                     if (spawned.IsValid()) {
                         ctx.selection.SelectEntity(spawned);
                     }

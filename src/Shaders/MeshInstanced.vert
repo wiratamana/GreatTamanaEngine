@@ -60,16 +60,19 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 
 // Matches Shaders/Mesh.frag's own input interface block exactly (world-space
-// normal only) - confirmed by reading that file before writing this one, so
-// the two genuinely link/match with zero fragment-shader changes.
+// normal + position) - confirmed by reading that file before writing this
+// one, so the two genuinely link/match with zero fragment-shader changes.
 layout(location = 0) out vec3 outWorldNormal;
+layout(location = 1) out vec3 outWorldPos;
 
 void main()
 {
     mat4 model = instanceBuffer.instances[gl_InstanceIndex].worldMatrix;
-    gl_Position = pc.viewProj * model * vec4(inPosition, 1.0);
+    vec4 worldPos4 = model * vec4(inPosition, 1.0);
+    gl_Position = pc.viewProj * worldPos4;
     // mat3(model) (no inverse-transpose) is only exactly correct for a
     // uniform scale - see Shaders/Mesh.vert's own identical, already-accepted
     // caveat and Math/Mat4.h's TransformNormal() for the general case.
     outWorldNormal = mat3(model) * inNormal;
+    outWorldPos = worldPos4.xyz;
 }

@@ -95,19 +95,20 @@ whenever touching this feature:
 - **`AtmosphereParametersGpu`/`AtmosphereFrameUniforms`
   (`src/Renderer/Atmosphere/AtmosphereTypes.h`) are ALWAYS bound as read-only
   STORAGE buffers (`layout(std430, ...) readonly buffer`), NEVER a true
-  `uniform`/`VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` block** — this engine has no
-  UBO descriptor plumbing anywhere (confirmed by a fresh grep before every
-  phase that added a new binding), and every atmosphere shader in this
-  campaign follows this exact same convention, established in Phase 3's own
-  "Revision Notes" and never deviated from since. A future new per-frame/
-  per-session GPU-uniform-shaped struct for this feature must follow the same
-  rule, not introduce this engine's first real UBO without a fresh, deliberate
-  discussion.
-- **`DirectionalLight` (`src/ECS/Components/DirectionalLight.h`) exists ONLY
-  to drive the atmosphere's own sun direction/illuminance — it is explicitly
-  NOT wired into `Mesh.frag`/`TexturedMesh.frag`/`MeshPreview.frag`'s existing
-  fixed-direction lambert term, and this campaign adds no point/spot light of
-  any kind.** `src/Game/Lighting/DirectionalLightResolver.h`'s
+  `uniform`/`VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` block** — Scene Services
+  binding 8 (`src/Shaders/DirectionalLightingAndReceiverMask.glsl`) is this
+  engine's one, scoped UBO exception (Stage 2 - Universal Lit Shader); every
+  Atmosphere LUT pass stays on storage buffers unchanged, by deliberate
+  choice, not by platform limitation. A future new per-frame/per-session
+  GPU-uniform-shaped struct for THIS feature must still follow the storage-
+  buffer convention established in Phase 3's own "Revision Notes", not
+  silently assume binding 8's exception extends to Atmosphere.
+- **`DirectionalLight` (`src/ECS/Components/DirectionalLight.h`) drives both
+  the atmosphere's own sun direction/illuminance AND, as of Stage 2, every
+  lit material shader's real per-pixel lighting
+  (`Mesh.frag`/`TexturedMesh.frag`/`Triangle.frag`/`MeshPreview.frag`, via
+  Scene Services binding 8) — not a separate, parallel light source.**
+  `src/Game/Lighting/DirectionalLightResolver.h`'s
   `ResolveActiveDirectionalLight()` picks the FIRST entity (in
   `ComponentStorage<DirectionalLight>` order) with `active == true`, exactly
   mirroring `RenderSystem::ResolveActiveCameraViewProjection()`'s own

@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cassert>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <vector>
 
@@ -49,6 +50,10 @@ ShadowFeature::ShadowFeature(Core& core)
     : m_core(core)
     , m_settings()
 {
+    // Scene Services slot 0 - durable shader-binding contract, every lit
+    // material shader hardcodes `layout(set = 1, binding = 0) uniform
+    // sampler2D sceneOcclusionMap`.
+    m_shadowMapSlot = RegisterSceneServiceSlot("ShadowMap", SceneServiceResourceKind::Image2D, /*preferredIndex=*/0);
     RegisterPasses();
 }
 
@@ -198,6 +203,17 @@ void ShadowFeature::RegisterPasses()
 
             const rg::RenderPassId key = isGameView ? kShadowMapGameKey : kShadowMapSceneKey;
             blackboard.Publish<ShadowMapBlackboardEntry>(key, ShadowMapBlackboardEntry{ shadowHandle, lightViewProj });
+
+            // Universal Lit Shader with Shadows - publishes the SAME shadow
+            // map into the generic Scene Services slot system (set = 1,
+            // binding 0) so every material shader samples it directly,
+            // plus the packed per-frame lighting UBO (binding 8).
+            blackboard.Publish<rg::TextureHandle>(SceneServiceBlackboardKey(m_shadowMapSlot, currentView), shadowHandle);
+
+            const SceneLightingUniformData packed =
+                PackSceneLightingUniformData(sun, lightViewProj, safeSettings, m_mapResolutionInUse);
+            m_core.GetSceneServicesDescriptorSet().UpdateGlobalUniformBlock(
+                currentView, std::as_bytes(std::span{ &packed, 1 }));
         },
         kShadowDepthPassPriority);
     assert(depthRegistered && "Shadow.DepthPass registration failed - see the GTE_LOG_WARNING above.");

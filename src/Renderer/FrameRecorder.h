@@ -116,10 +116,13 @@ public:
     // from VulkanDevice::SupportsDrawIndirectCount() ONCE; never re-queried
     // here. Never touches DrawStats - see Renderer::SubmitIndirect()'s own
     // doc comment for why.
+    // `sceneServicesSet` (default VK_NULL_HANDLE via Renderer::SubmitIndirect()'s
+    // own gate) is bound at set = 1, right after set = 0, exactly like
+    // IssueDrawCommand() already does for the non-indirect path.
     static void IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
-        VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet instanceBufferDescriptorSet, const Mat4& viewProj,
-        VkBuffer indirectBuffer, VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer,
-        VkDeviceSize countBufferOffset, bool supportsDrawIndirectCount);
+        VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet instanceBufferDescriptorSet,
+        VkDescriptorSet sceneServicesSet, const Mat4& viewProj, VkBuffer indirectBuffer, VkDeviceSize indirectOffset,
+        std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset, bool supportsDrawIndirectCount);
 
     // Records the undefined->color-attachment (and, when target carries a
     // real depth image, undefined->depth-attachment) barriers, the dynamic-

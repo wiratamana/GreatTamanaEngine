@@ -17,12 +17,12 @@ bool EditorSceneIOCapability::SaveScene(Game& game, const std::filesystem::path&
     return success;
 }
 
-bool EditorSceneIOCapability::LoadScene(
-    Game& game, Renderer& renderer, const std::filesystem::path& scenePath, std::string& outErrorMessage)
+bool EditorSceneIOCapability::LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scenePath,
+    VkDescriptorSetLayout sceneServicesSetLayout, std::string& outErrorMessage)
 {
     // Same reasoning as SaveScene() above - byte-for-byte the same fallback
     // string EngineCommandDispatch.cpp's own ON-branch used to set directly.
-    const bool success = gte::LoadScene(game, renderer, scenePath);
+    const bool success = gte::LoadScene(game, renderer, scenePath, sceneServicesSetLayout);
     if (!success) {
         outErrorMessage = "failed to load scene file - it may not exist, or failed to parse (see engine log)";
     }
