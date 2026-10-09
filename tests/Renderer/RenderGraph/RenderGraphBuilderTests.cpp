@@ -11,6 +11,7 @@
 
 #include "Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "Renderer/RenderGraph/RenderFeatureScope.h"
+#include "Renderer/RenderGraph/RenderPassToggleRegistry.h"
 
 #include <gtest/gtest.h>
 
@@ -1165,6 +1166,72 @@ TEST(RenderGraphBuilderTest, AddPassAndAddComputePassNeverCallTheSink)
         "PlainComputePass", [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
 
     EXPECT_EQ(sink.EntryCountForTesting(), 0u);
+}
+
+// --- SetPassToggleRegistry() - the real wiring RenderGraph::Execute() uses -
+// end-to-end proof that AddRenderPass()/AddBlitPass() actually populate a
+// REAL RenderPassToggleRegistry (not a fake), the exact chain the Render
+// Graph panel's sidebar depends on (RenderGraphPanel::BuildPassTree()).
+
+TEST(RenderGraphBuilderTest, AddRenderPassNotesDeclarationOnRealToggleRegistryWithCorrectOwner)
+{
+    RenderGraphBuilder builder;
+    RenderPassToggleRegistry registry;
+    builder.SetPassToggleRegistry(&registry);
+
+    {
+        const RenderFeatureScope scope(builder, "Shadow");
+        builder.AddRenderPass(
+            "ShadowCascade0", PassKind::Graphics, ViewScope::Shared, RenderPassCategory::General,
+            [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
+    }
+
+    const std::vector<RenderPassToggleState> all = registry.ListAll();
+    ASSERT_EQ(all.size(), 1u);
+    EXPECT_EQ(all[0].name, "ShadowCascade0");
+    EXPECT_EQ(all[0].owningFeatureName, "Shadow");
+    EXPECT_TRUE(all[0].enabled);
+}
+
+// AddBlitPass() must report through the same registry too - the sidebar
+// treats both declaration entry points identically.
+TEST(RenderGraphBuilderTest, AddBlitPassNotesDeclarationOnRealToggleRegistryWithCorrectOwner)
+{
+    RenderGraphBuilder builder;
+    RenderPassToggleRegistry registry;
+    builder.SetPassToggleRegistry(&registry);
+
+    const TextureDesc desc{ 256, 256, VK_FORMAT_R8G8B8A8_UNORM, true };
+    const TextureHandle srcHandle = builder.CreateTexture("BlitSrc", desc);
+    const TextureHandle dstHandle = builder.CreateTexture("BlitDst", desc);
+    BlitSpec spec;
+    spec.src = srcHandle;
+    spec.dst = dstHandle;
+
+    {
+        const RenderFeatureScope scope(builder, "Atmosphere");
+        builder.AddBlitPass("AtmosphereLutBlit", spec);
+    }
+
+    const std::vector<RenderPassToggleState> all = registry.ListAll();
+    ASSERT_EQ(all.size(), 1u);
+    EXPECT_EQ(all[0].name, "AtmosphereLutBlit");
+    EXPECT_EQ(all[0].owningFeatureName, "Atmosphere");
+}
+
+// A builder with no toggle registry installed never crashes - mirrors
+// AddRenderPassNeverCallsSinkWhenNoneInstalled's own null-guard proof.
+TEST(RenderGraphBuilderTest, AddRenderPassNeverTouchesToggleRegistryWhenNoneInstalled)
+{
+    RenderGraphBuilder builder;
+
+    builder.AddRenderPass(
+        "NoRegistryPass", PassKind::Graphics,
+        [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 1u);
+    EXPECT_STREQ(input.passes[0].name, "NoRegistryPass");
 }
 
 // --- editor-core-separation-26 campaign, PHASE5 - AddBlitPass() ------------

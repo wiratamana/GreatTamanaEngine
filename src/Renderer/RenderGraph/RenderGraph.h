@@ -191,6 +191,10 @@ public:
         // must happen exactly here, exactly once, before any pass this
         // call declares.
         builder.SetDebugMetadataSink(m_debugMetadataSink);
+        // Forwards this RenderGraph's own toggle registry into the fresh
+        // builder, so AddRenderPass()/AddBlitPass() can report declared
+        // passes (NoteDeclaredWithOwner) for the Render Graph panel.
+        builder.SetPassToggleRegistry(m_renderPassToggleRegistry);
         // editor-core-separation-27 campaign, PHASE7 - see
         // RenderGraphBuilder::SetPersistentResourceCache()'s own doc comment
         // for why all three values are bundled into this one call.
