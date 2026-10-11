@@ -28,9 +28,9 @@ Renderer::VulkanContextInfo QueryVulkanContextInfo(Renderer& renderer)
 RenderGraph::RenderGraph(Renderer& renderer)
     : m_resourcePool(renderer)
     , m_persistentResourceCache(renderer)
-    , m_timestampPool(QueryVulkanContextInfo(renderer).device, QueryVulkanContextInfo(renderer).graphicsQueue,
-          QueryVulkanContextInfo(renderer).graphicsQueueFamily, QueryVulkanContextInfo(renderer).timestampCapability,
-          kSynchronousTimingSlotBudget, kPipelinedTimingSlotBudget, kGpuTimingFramesInFlight)
+    , m_timestampPool(QueryVulkanContextInfo(renderer).device, renderer, QueryVulkanContextInfo(renderer).graphicsQueueFamily,
+          QueryVulkanContextInfo(renderer).timestampCapability, kSynchronousTimingSlotBudget, kPipelinedTimingSlotBudget,
+          kGpuTimingFramesInFlight)
     , m_eventSnapshotPool(renderer.GetVmaAllocator(), renderer.GetMemoryTracker(), QueryVulkanContextInfo(renderer).device,
           kEventSnapshotSlotBudget, kGpuTimingFramesInFlight)
 {

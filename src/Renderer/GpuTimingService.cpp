@@ -1,5 +1,7 @@
 #include "GpuTimingService.h"
 
+#include "Vulkan/VulkanDevice.h"
+
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -17,9 +19,8 @@ constexpr std::uint32_t kTotalQuerySlotCount = kOffscreenSlotCount + kGpuTimingF
 
 } // namespace
 
-GpuTimingService::GpuTimingService(
-    VkDevice device, VkQueue graphicsQueue, std::uint32_t graphicsQueueFamily, const GpuTimestampCapability& capability)
-    : m_device(device)
+GpuTimingService::GpuTimingService(VulkanDevice& vulkanDevice, const GpuTimestampCapability& capability)
+    : m_device(vulkanDevice.Native())
     , m_capability(capability)
 {
 #if !GTE_ENABLE_PROFILER
@@ -46,15 +47,15 @@ GpuTimingService::GpuTimingService(
     // life already reset, rather than needing a separate "is this the very
     // first use" branch scattered through their own logic. See
     // PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md, Phase 4B.
-    WarmUpResetEntirePool(graphicsQueue, graphicsQueueFamily);
+    WarmUpResetEntirePool(vulkanDevice);
 }
 
-void GpuTimingService::WarmUpResetEntirePool(VkQueue graphicsQueue, std::uint32_t graphicsQueueFamily)
+void GpuTimingService::WarmUpResetEntirePool(VulkanDevice& vulkanDevice)
 {
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    poolInfo.queueFamilyIndex = graphicsQueueFamily;
+    poolInfo.queueFamilyIndex = vulkanDevice.GraphicsQueueFamily();
 
     VkCommandPool commandPool = VK_NULL_HANDLE;
     if (vkCreateCommandPool(m_device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
@@ -100,15 +101,19 @@ void GpuTimingService::WarmUpResetEntirePool(VkQueue graphicsQueue, std::uint32_
         throw std::runtime_error("GpuTimingService: vkCreateFence failed (warm-up reset)");
     }
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
+    VkCommandBufferSubmitInfo cmdSubmitInfo{};
+    cmdSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+    cmdSubmitInfo.commandBuffer = cmd;
 
-    if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
+    VkSubmitInfo2 submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    submitInfo.commandBufferInfoCount = 1;
+    submitInfo.pCommandBufferInfos = &cmdSubmitInfo;
+
+    if (vulkanDevice.SubmitToGraphicsQueue(submitInfo, fence) != VK_SUCCESS) {
         vkDestroyFence(m_device, fence, nullptr);
         vkDestroyCommandPool(m_device, commandPool, nullptr);
-        throw std::runtime_error("GpuTimingService: vkQueueSubmit failed (warm-up reset)");
+        throw std::runtime_error("GpuTimingService: vkQueueSubmit2 failed (warm-up reset)");
     }
 
     vkWaitForFences(m_device, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());

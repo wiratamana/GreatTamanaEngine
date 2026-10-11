@@ -4,10 +4,11 @@
 #include "RigidBodyGroupSelection.h" // RigidBodyJointEdge, BuildRigidBodyAdjacency()
 #include "FlatListRangeSelection.h" // BuildInclusiveIndexRange()
 #include "../Assets/PhysicsData.h" // RigidBodyShape
+#include "../Core/GraphicsHandles.h"
 #include "../Math/Vec3.h"
 #include "../Physics/DynamicChainDefinition.h" // DynamicChainDefinition - task_manager/verlet-integration-5, Phase 2
 #include "../Game/Physics/DynamicChainRigCache.h" // DynamicChainRigCache::ModelEntry - used by BuildPartListPane()'s signature below
-
+#include "../Renderer/Pipeline.h"
 #include <volk.h>
 
 #include <cstdint>
@@ -218,12 +219,14 @@ private:
     Entity m_targetEntity = kInvalidEntity;
 
     VkDevice m_device = VK_NULL_HANDLE;
+    Renderer* m_renderer = nullptr; // Non-owning - needed to destroy the two handles below.
 
     // Lazily built on first Build() call, then reused for every
-    // subsequently-viewed model - this pipeline's shape never depends on
-    // which model is currently loaded.
-    VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline m_pipeline = VK_NULL_HANDLE;
+    // subsequently-viewed model - built via Renderer's configurable pipeline
+    // API (Core/PipelineDesc.h) instead of hand-rolled Vulkan calls.
+    std::unique_ptr<Pipeline> m_pipeline;
+    DescriptorSetLayoutHandle m_setZeroFillerLayoutHandle = DescriptorSetLayoutHandle::Invalid;
+    DescriptorSetLayoutHandle m_setOneLayoutHandle = DescriptorSetLayoutHandle::Invalid;
 
     // MeshPreview.frag now samples the shared set=1 lighting/shadow
     // interface (DirectionalLightingAndReceiverMask.glsl) - this window has
@@ -231,8 +234,11 @@ private:
     // tiny, local, always-neutral stand-in, exactly mirroring
     // AssetPreviewMesh's own identical local descriptor infra: a 1x1 white
     // dummy texture at binding 0 + a zero-filled dummy UBO at binding 8,
-    // bound at set=1, plus a zero-binding filler layout at set=0.
-    VkDescriptorSetLayout m_setZeroFillerLayout = VK_NULL_HANDLE;
+    // bound at set=1. Kept raw: the opaque pipeline API has no way to
+    // allocate a real, writable descriptor SET, only a set LAYOUT -
+    // m_localSetOneLayout and m_setOneLayoutHandle above are two separately-
+    // built but identically-defined layouts, which Vulkan treats as
+    // pipeline-layout-compatible.
     VkDescriptorSetLayout m_localSetOneLayout = VK_NULL_HANDLE;
     VkDescriptorPool m_localDescriptorPool = VK_NULL_HANDLE;
     VkDescriptorSet m_localSetOneDescriptorSet = VK_NULL_HANDLE;

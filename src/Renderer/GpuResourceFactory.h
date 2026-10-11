@@ -22,24 +22,28 @@
 
 namespace gte {
 
+class VulkanDevice;
+
 // Owns everything needed to manufacture GPU resources (buffers, off-screen
 // render textures, pipelines, meshes) on behalf of Renderer, plus the
-// bookkeeping (GpuMemoryTracker) and one-off command submission
-// (ImmediateSubmit()) those factories need - see the individual method
-// comments (moved here verbatim from the old Renderer.h/.cpp) for the
-// reasoning behind each one.
+// bookkeeping (GpuMemoryTracker) and one-off command submission primitives
+// (AllocateTransientCommandBuffer()/FreeTransientCommandBuffer()) those
+// factories need - see the individual method comments (moved here verbatim
+// from the old Renderer.h/.cpp) for the reasoning behind each one.
 //
-// Does NOT own the VkDevice/VmaAllocator/VkQueue passed in - all three must
-// outlive this object (same non-ownership convention as VulkanSwapchain/
-// VulkanAllocator not owning the instance/device/surface passed to them).
-// DOES own its own VkCommandPool (for ImmediateSubmit()), entirely separate
-// from FramePresenter's per-frame/offscreen command buffers, so a resource
-// upload (e.g. CreateDeviceLocalBuffer() at load time) never contends with
-// in-flight presentation/offscreen work.
+// Does NOT own the VkDevice/VmaAllocator/VkQueue/VulkanDevice passed in -
+// all must outlive this object (same non-ownership convention as
+// VulkanSwapchain/VulkanAllocator not owning the instance/device/surface
+// passed to them).
+// DOES own its own VkCommandPool (for AllocateTransientCommandBuffer()),
+// entirely separate from FramePresenter's per-frame/offscreen command
+// buffers, so a resource upload (e.g. CreateDeviceLocalBuffer() at load
+// time) never contends with in-flight presentation/offscreen work.
 class GpuResourceFactory {
 public:
     GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice device, VmaAllocator allocator, VkQueue graphicsQueue,
-        std::uint32_t graphicsQueueFamily, VkFormat depthFormat, std::shared_ptr<GpuMemoryTracker> memoryTracker);
+        std::uint32_t graphicsQueueFamily, VkFormat depthFormat, std::shared_ptr<GpuMemoryTracker> memoryTracker,
+        VulkanDevice& vulkanDevice);
     ~GpuResourceFactory();
 
     GpuResourceFactory(const GpuResourceFactory&) = delete;
@@ -141,8 +145,14 @@ public:
     // it.
     Buffer CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* debugName = nullptr) const;
 
-    // See Renderer::ImmediateSubmit().
-    void ImmediateSubmit(const std::function<void(VkCommandBuffer)>& recordFn) const;
+    // Allocates/frees a single transient (one-time-use) command buffer from
+    // this factory's own dedicated m_commandPool - the only two Renderer-
+    // facing primitives GAP3's rewrite of Renderer::ImmediateSubmit() needs.
+    // No submit logic lives here anymore - every actual vkQueueSubmit2 call
+    // against the graphics queue goes through VulkanDevice::SubmitToGraphicsQueue(),
+    // the one engine-wide choke point (see Renderer::ImmediateSubmit()).
+    VkCommandBuffer AllocateTransientCommandBuffer() const;
+    void FreeTransientCommandBuffer(VkCommandBuffer cmd) const noexcept;
 
     // See Renderer::CreatePipeline(). `colorFormat` here is always exactly
     // Renderer::ColorFormat(), passed in by Renderer since only Renderer
@@ -394,10 +404,20 @@ public:
 private:
     void Destroy() noexcept;
 
+    // Internal-only immediate-submit helper - used by CreateDeviceLocalBuffer()/
+    // CreateTexture2D() for their own one-shot upload command buffers.
+    // Deliberately NOT exposed publicly (see GAP3) - outside callers go
+    // through Renderer::ImmediateSubmit() (rg::CommandBuffer&) instead.
+    void ImmediateSubmitInternal(const std::function<void(VkCommandBuffer)>& recordFn) const;
+
     VkDevice m_device = VK_NULL_HANDLE;
     VmaAllocator m_allocator = VK_NULL_HANDLE;
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;
 
+    // The ONE choke point every submit to m_graphicsQueue goes through -
+    // not owned (must outlive this object, same convention as everything
+    // else this class doesn't own).
+    VulkanDevice* m_vulkanDevice = nullptr;
     // Needed purely for the storage-image capability check
     // (Vulkan/FormatCapabilities.h's SupportsStorageImageUsage()) that
     // CreateRenderTexture()/CreateTexture2D() perform when
@@ -424,9 +444,9 @@ private:
     // see GpuMemoryTracker's class comment.
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker;
 
-    // Dedicated to ImmediateSubmit() - never shared with FramePresenter's
-    // own per-frame/offscreen command buffers, so a buffer/mesh upload can
-    // never contend with in-flight presentation work.
+    // Dedicated to AllocateTransientCommandBuffer() - never shared with
+    // FramePresenter's own per-frame/offscreen command buffers, so a
+    // buffer/mesh upload can never contend with in-flight presentation work.
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
 
     // See MaterialDescriptorSetLayout()/CreateMaterialTexture2D() above -

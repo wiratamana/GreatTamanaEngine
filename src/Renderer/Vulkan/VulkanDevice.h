@@ -5,6 +5,7 @@
 #include "../GpuTiming.h"
 
 #include <cstdint>
+#include <mutex>
 
 namespace gte {
 
@@ -102,6 +103,18 @@ public:
     // execution branch, which debug-asserts against this.
     bool SupportsDepthBlit() const noexcept { return m_supportsDepthBlit; }
 
+    // The ONE choke point every submit to m_graphicsQueue must go through,
+    // engine-wide - VkQueue access must be externally synchronized per the
+    // Vulkan spec, and this queue is submitted to from several independent
+    // places (FramePresenter, GpuTimingService, RenderGraphTimestampPool,
+    // Renderer::ImmediateSubmit()). No other call site may call
+    // vkQueueSubmit/vkQueueSubmit2 against this queue directly.
+    VkResult SubmitToGraphicsQueue(const VkSubmitInfo2& submit, VkFence fence) const
+    {
+        std::lock_guard lock(m_graphicsQueueSubmitMutex);
+        return vkQueueSubmit2(m_graphicsQueue, 1, &submit, fence);
+    }
+
 private:
     void PickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface);
     void CreateLogicalDevice();
@@ -139,6 +152,11 @@ private:
     // editor-core-separation-26 campaign, PHASE6 - see SupportsDepthBlit()
     // above.
     bool m_supportsDepthBlit = false;
+
+    // Guards SubmitToGraphicsQueue() above - mutable so the method itself
+    // can stay const (submitting work doesn't logically mutate this
+    // object's own observable state).
+    mutable std::mutex m_graphicsQueueSubmitMutex;
 };
 
 } // namespace gte

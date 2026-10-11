@@ -20,11 +20,15 @@
 #include <vector>
 
 namespace gte::rg {
+class CommandBuffer;
 class RenderGraph;
 class RenderGraphBuilder;
 } // namespace gte::rg
 
 namespace gte {
+
+class VulkanDevice;
+
 
 // Owns the swapchain, every per-frame/per-image synchronization object (see
 // VulkanFrameSync), the command buffers (one set per frame-in-flight for
@@ -60,10 +64,16 @@ namespace gte {
 // a dangling cross-collaborator reference after a move.
 class FramePresenter {
 public:
+    // `vulkanDevice` is stored as a non-owning pointer (must outlive this
+    // object) purely so PresentViaRenderGraph()/RenderOffscreen()/
+    // EndOffscreenRecording() can submit through
+    // VulkanDevice::SubmitToGraphicsQueue() - the one choke point every
+    // submit to the graphics queue must go through, engine-wide.
     FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
         std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue graphicsQueue,
         VkQueue presentQueue, int width, int height, VmaAllocator allocator, VkFormat depthFormat,
-        std::shared_ptr<GpuMemoryTracker> memoryTracker, std::shared_ptr<GpuTimingService> gpuTiming);
+        std::shared_ptr<GpuMemoryTracker> memoryTracker, std::shared_ptr<GpuTimingService> gpuTiming,
+        VulkanDevice& vulkanDevice);
     ~FramePresenter();
 
     FramePresenter(const FramePresenter&) = delete;
@@ -99,7 +109,7 @@ public:
     // query slot for this call at all" (see Renderer::RenderOffscreen()'s
     // own doc comment for why this matters).
     DrawStats RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
-        std::optional<GpuTimingSlot> timingSlot, const std::function<void(VkCommandBuffer)>& recordExtra);
+        std::optional<GpuTimingSlot> timingSlot, const std::function<void(rg::CommandBuffer&)>& recordExtra);
 
     // --- Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md)
     // - Render Graph integration ---------------------------------------
@@ -163,6 +173,11 @@ private:
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;
     VkQueue m_presentQueue = VK_NULL_HANDLE;
     std::uint32_t m_graphicsQueueFamily = 0;
+
+    // The ONE choke point every submit to m_graphicsQueue goes through -
+    // not owned (must outlive this object, same convention as everything
+    // else this class doesn't own).
+    VulkanDevice* m_vulkanDevice = nullptr;
 
     // Needed to (re)build m_depthBuffers below whenever the swapchain
     // itself is (re)created - not owned (must outlive this object, same

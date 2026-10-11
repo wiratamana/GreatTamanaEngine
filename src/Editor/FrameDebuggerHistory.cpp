@@ -1,6 +1,7 @@
 #include "FrameDebuggerHistory.h"
 
 #include "../Renderer/Renderer.h"
+#include "../Renderer/RenderGraph/CommandBuffer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 
@@ -105,40 +106,40 @@ void FrameDebuggerCurrentCapture::CaptureFrame(Renderer& renderer, const rg::Ren
     // accumulated Game View image as of that exact step instead (`preview`/
     // `compositedPreview`/`perObjectStepPreviews`, picked by
     // `ChooseFrameDebuggerPreviewSource()`, FrameDebuggerData.h/.cpp).
-    renderer.ImmediateSubmit([&](VkCommandBuffer cmd) {
+    renderer.ImmediateSubmit([&](rg::CommandBuffer& cmd) {
         // Pre-composite copy - byte-for-byte the existing, already-correct
         // sequence, unchanged.
-        rg::EmitImageBarrier(cmd, gameViewSource.Image(), range, shaderRead, transferSrc);
-        rg::EmitImageBarrier(cmd, entry.preview->Image(), range, freshImageState, transferDst);
+        rg::EmitImageBarrier(cmd.Native(), gameViewSource.Image(), range, shaderRead, transferSrc);
+        rg::EmitImageBarrier(cmd.Native(), entry.preview->Image(), range, freshImageState, transferDst);
 
         VkImageCopy region{};
         region.srcSubresource = VkImageSubresourceLayers{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
         region.dstSubresource = VkImageSubresourceLayers{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
         region.extent = VkExtent3D{ extent.width, extent.height, 1 };
-        vkCmdCopyImage(cmd, gameViewSource.Image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, entry.preview->Image(),
+        vkCmdCopyImage(cmd.Native(), gameViewSource.Image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, entry.preview->Image(),
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
         // Restore the source back to ShaderRead (a later ImGui sample of
         // the SAME live Game View texture this same frame must be
         // unaffected), and leave the retained copy in ShaderRead too, ready
         // for ImGui::Image() display.
-        rg::EmitImageBarrier(cmd, gameViewSource.Image(), range, transferSrc, shaderRead);
-        rg::EmitImageBarrier(cmd, entry.preview->Image(), range, transferDst, shaderRead);
+        rg::EmitImageBarrier(cmd.Native(), gameViewSource.Image(), range, transferSrc, shaderRead);
+        rg::EmitImageBarrier(cmd.Native(), entry.preview->Image(), range, transferDst, shaderRead);
 
         // (frame-debugger-4 campaign, PHASE1) - post-composite copy, only
         // when requested this capture.
         if (hasCompositedSource) {
             const VkExtent2D compositedExtent = compositedGameViewSource->Extent();
-            rg::EmitImageBarrier(cmd, compositedGameViewSource->Image(), range, shaderRead, transferSrc);
-            rg::EmitImageBarrier(cmd, entry.compositedPreview->Image(), range, freshImageState, transferDst);
+            rg::EmitImageBarrier(cmd.Native(), compositedGameViewSource->Image(), range, shaderRead, transferSrc);
+            rg::EmitImageBarrier(cmd.Native(), entry.compositedPreview->Image(), range, freshImageState, transferDst);
             VkImageCopy compositedRegion{};
             compositedRegion.srcSubresource = VkImageSubresourceLayers{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
             compositedRegion.dstSubresource = VkImageSubresourceLayers{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
             compositedRegion.extent = VkExtent3D{ compositedExtent.width, compositedExtent.height, 1 };
-            vkCmdCopyImage(cmd, compositedGameViewSource->Image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            vkCmdCopyImage(cmd.Native(), compositedGameViewSource->Image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 entry.compositedPreview->Image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &compositedRegion);
-            rg::EmitImageBarrier(cmd, compositedGameViewSource->Image(), range, transferSrc, shaderRead);
-            rg::EmitImageBarrier(cmd, entry.compositedPreview->Image(), range, transferDst, shaderRead);
+            rg::EmitImageBarrier(cmd.Native(), compositedGameViewSource->Image(), range, transferSrc, shaderRead);
+            rg::EmitImageBarrier(cmd.Native(), entry.compositedPreview->Image(), range, transferDst, shaderRead);
         }
     });
 }

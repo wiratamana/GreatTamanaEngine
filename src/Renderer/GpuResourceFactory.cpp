@@ -3,6 +3,7 @@
 #include "SceneServicesDescriptorSet.h" // Block 4 - gte::kSceneServiceSlotCount, for this file's own static_asserts.
 #include "Vulkan/DescriptorSetLayoutBuilder.h"
 #include "Vulkan/FormatCapabilities.h"
+#include "Vulkan/VulkanDevice.h"
 
 #include <cassert>
 #include <cstddef>
@@ -14,10 +15,11 @@ namespace gte {
 
 GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice device, VmaAllocator allocator,
     VkQueue graphicsQueue, std::uint32_t graphicsQueueFamily, VkFormat depthFormat,
-    std::shared_ptr<GpuMemoryTracker> memoryTracker)
+    std::shared_ptr<GpuMemoryTracker> memoryTracker, VulkanDevice& vulkanDevice)
     : m_device(device)
     , m_allocator(allocator)
     , m_graphicsQueue(graphicsQueue)
+    , m_vulkanDevice(&vulkanDevice)
     , m_physicalDevice(physicalDevice)
     , m_depthFormat(depthFormat)
     , m_memoryTracker(std::move(memoryTracker))
@@ -159,6 +161,7 @@ GpuResourceFactory::GpuResourceFactory(GpuResourceFactory&& other) noexcept
     : m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
     , m_allocator(std::exchange(other.m_allocator, VK_NULL_HANDLE))
     , m_graphicsQueue(std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE))
+    , m_vulkanDevice(std::exchange(other.m_vulkanDevice, nullptr))
     , m_physicalDevice(std::exchange(other.m_physicalDevice, VK_NULL_HANDLE))
     , m_depthFormat(other.m_depthFormat)
     , m_memoryTracker(std::move(other.m_memoryTracker))
@@ -178,6 +181,7 @@ GpuResourceFactory& GpuResourceFactory::operator=(GpuResourceFactory&& other) no
         m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
         m_allocator = std::exchange(other.m_allocator, VK_NULL_HANDLE);
         m_graphicsQueue = std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE);
+        m_vulkanDevice = std::exchange(other.m_vulkanDevice, nullptr);
         m_physicalDevice = std::exchange(other.m_physicalDevice, VK_NULL_HANDLE);
         m_depthFormat = other.m_depthFormat;
         m_memoryTracker = std::move(other.m_memoryTracker);
@@ -265,18 +269,18 @@ Buffer GpuResourceFactory::CreateDeviceLocalBuffer(
     Buffer deviceLocal =
         CreateBuffer(size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemoryUsage::GpuOnly, debugName);
 
-    ImmediateSubmit([&](VkCommandBuffer cmd) {
+    ImmediateSubmitInternal([&](VkCommandBuffer cmd) {
         VkBufferCopy copyRegion{};
         copyRegion.size = size;
         vkCmdCopyBuffer(cmd, staging.Native(), deviceLocal.Native(), 1, &copyRegion);
     });
     // staging goes out of scope here and is destroyed - the copy above has
-    // already completed (ImmediateSubmit blocks until the GPU is done).
+    // already completed (ImmediateSubmitInternal blocks until the GPU is done).
 
     return deviceLocal;
 }
 
-void GpuResourceFactory::ImmediateSubmit(const std::function<void(VkCommandBuffer)>& recordFn) const
+VkCommandBuffer GpuResourceFactory::AllocateTransientCommandBuffer() const
 {
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -286,47 +290,64 @@ void GpuResourceFactory::ImmediateSubmit(const std::function<void(VkCommandBuffe
 
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     if (vkAllocateCommandBuffers(m_device, &allocInfo, &cmd) != VK_SUCCESS) {
-        throw std::runtime_error("GpuResourceFactory::ImmediateSubmit: vkAllocateCommandBuffers failed.");
+        throw std::runtime_error("GpuResourceFactory::AllocateTransientCommandBuffer: vkAllocateCommandBuffers failed.");
     }
+    return cmd;
+}
+
+void GpuResourceFactory::FreeTransientCommandBuffer(VkCommandBuffer cmd) const noexcept
+{
+    if (cmd != VK_NULL_HANDLE) {
+        vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmd);
+    }
+}
+
+void GpuResourceFactory::ImmediateSubmitInternal(const std::function<void(VkCommandBuffer)>& recordFn) const
+{
+    VkCommandBuffer cmd = AllocateTransientCommandBuffer();
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
-        vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmd);
-        throw std::runtime_error("GpuResourceFactory::ImmediateSubmit: vkBeginCommandBuffer failed.");
+        FreeTransientCommandBuffer(cmd);
+        throw std::runtime_error("GpuResourceFactory::ImmediateSubmitInternal: vkBeginCommandBuffer failed.");
     }
 
     recordFn(cmd);
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
-        vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmd);
-        throw std::runtime_error("GpuResourceFactory::ImmediateSubmit: vkEndCommandBuffer failed.");
+        FreeTransientCommandBuffer(cmd);
+        throw std::runtime_error("GpuResourceFactory::ImmediateSubmitInternal: vkEndCommandBuffer failed.");
     }
+
+    VkCommandBufferSubmitInfo cmdSubmitInfo{};
+    cmdSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+    cmdSubmitInfo.commandBuffer = cmd;
+
+    VkSubmitInfo2 submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    submitInfo.commandBufferInfoCount = 1;
+    submitInfo.pCommandBufferInfos = &cmdSubmitInfo;
 
     VkFenceCreateInfo fenceInfo{};
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     VkFence fence = VK_NULL_HANDLE;
     if (vkCreateFence(m_device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
-        vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmd);
-        throw std::runtime_error("GpuResourceFactory::ImmediateSubmit: vkCreateFence failed.");
+        FreeTransientCommandBuffer(cmd);
+        throw std::runtime_error("GpuResourceFactory::ImmediateSubmitInternal: vkCreateFence failed.");
     }
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-
-    if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
+    if (m_vulkanDevice->SubmitToGraphicsQueue(submitInfo, fence) != VK_SUCCESS) {
         vkDestroyFence(m_device, fence, nullptr);
-        vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmd);
-        throw std::runtime_error("GpuResourceFactory::ImmediateSubmit: vkQueueSubmit failed.");
+        FreeTransientCommandBuffer(cmd);
+        throw std::runtime_error("GpuResourceFactory::ImmediateSubmitInternal: vkQueueSubmit2 failed.");
     }
 
     vkWaitForFences(m_device, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
 
     vkDestroyFence(m_device, fence, nullptr);
-    vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmd);
+    FreeTransientCommandBuffer(cmd);
 }
 
 Pipeline GpuResourceFactory::CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
@@ -440,7 +461,7 @@ Texture2D GpuResourceFactory::CreateTexture2D(
     Buffer staging = CreateBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemoryUsage::CpuToGpu);
     staging.Upload(pixelsRgba8, static_cast<std::size_t>(size));
 
-    ImmediateSubmit([&](VkCommandBuffer cmd) {
+    ImmediateSubmitInternal([&](VkCommandBuffer cmd) {
         VkImageMemoryBarrier toTransferDst{};
         toTransferDst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         toTransferDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;

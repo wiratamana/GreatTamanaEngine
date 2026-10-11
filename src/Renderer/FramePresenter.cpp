@@ -1,8 +1,10 @@
 #include "FramePresenter.h"
 
+#include "RenderGraph/CommandBuffer.h"
 #include "RenderGraph/RenderGraph.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "RenderGraph/RenderGraphBuilder.h"
+#include "Vulkan/VulkanDevice.h"
 
 #include <cstddef>
 #include <limits>
@@ -15,11 +17,13 @@ namespace gte {
 FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
     std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue graphicsQueue,
     VkQueue presentQueue, int width, int height, VmaAllocator allocator, VkFormat depthFormat,
-    std::shared_ptr<GpuMemoryTracker> memoryTracker, std::shared_ptr<GpuTimingService> gpuTiming)
+    std::shared_ptr<GpuMemoryTracker> memoryTracker, std::shared_ptr<GpuTimingService> gpuTiming,
+    VulkanDevice& vulkanDevice)
     : m_device(device)
     , m_graphicsQueue(graphicsQueue)
     , m_presentQueue(presentQueue)
     , m_graphicsQueueFamily(graphicsQueueFamily)
+    , m_vulkanDevice(&vulkanDevice)
     , m_allocator(allocator)
     , m_depthFormat(depthFormat)
     , m_memoryTracker(std::move(memoryTracker))
@@ -49,6 +53,7 @@ FramePresenter::FramePresenter(FramePresenter&& other) noexcept
     , m_graphicsQueue(std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE))
     , m_presentQueue(std::exchange(other.m_presentQueue, VK_NULL_HANDLE))
     , m_graphicsQueueFamily(other.m_graphicsQueueFamily)
+    , m_vulkanDevice(std::exchange(other.m_vulkanDevice, nullptr))
     , m_allocator(std::exchange(other.m_allocator, VK_NULL_HANDLE))
     , m_depthFormat(other.m_depthFormat)
     , m_memoryTracker(std::move(other.m_memoryTracker))
@@ -78,6 +83,7 @@ FramePresenter& FramePresenter::operator=(FramePresenter&& other) noexcept
         m_graphicsQueue = std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE);
         m_presentQueue = std::exchange(other.m_presentQueue, VK_NULL_HANDLE);
         m_graphicsQueueFamily = other.m_graphicsQueueFamily;
+        m_vulkanDevice = std::exchange(other.m_vulkanDevice, nullptr);
         m_allocator = std::exchange(other.m_allocator, VK_NULL_HANDLE);
         m_depthFormat = other.m_depthFormat;
         m_memoryTracker = std::move(other.m_memoryTracker);
@@ -237,7 +243,7 @@ void FramePresenter::RecreateSwapchain()
 }
 
 DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
-    std::optional<GpuTimingSlot> timingSlot, const std::function<void(VkCommandBuffer)>& recordExtra)
+    std::optional<GpuTimingSlot> timingSlot, const std::function<void(rg::CommandBuffer&)>& recordExtra)
 {
     const VkFence offscreenFence = m_frameSync.OffscreenFence();
     vkWaitForFences(m_device, 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
@@ -265,8 +271,20 @@ DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTe
         m_gpuTiming->RecordOffscreenPassStart(m_offscreenCommandBuffer, *timingSlot);
     }
 
+    // FrameRecorder::RecordFrame() is a Renderer-internal-only primitive
+    // still speaking raw VkCommandBuffer - wrap `recordExtra` (the opaque,
+    // outside-Renderer-facing signature) around it so a caller never needs
+    // a raw handle of its own. `renderer`/`passDrawStats` are null here:
+    // recordExtra callbacks only ever use CommandBuffer::Native() (the raw
+    // escape hatch), never Draw()/Dispatch(), which require a real Renderer.
+    const std::function<void(VkCommandBuffer)> rawRecordExtra = [&recordExtra](VkCommandBuffer cmd) {
+        if (recordExtra) {
+            rg::CommandBuffer wrapped{ cmd, nullptr, nullptr };
+            recordExtra(wrapped);
+        }
+    };
     const DrawStats drawStats = frameRecorder.RecordFrame(m_offscreenCommandBuffer, target.Target(), ColorFormat(),
-        m_depthFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, recordExtra);
+        m_depthFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, rawRecordExtra);
 
     // BOTTOM_OF_PIPE timestamp write - see the RecordOffscreenPassStart()
     // comment above for why this placement (bracketing the WHOLE recorded
@@ -281,13 +299,17 @@ DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTe
         throw std::runtime_error("vkEndCommandBuffer failed (offscreen)");
     }
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &m_offscreenCommandBuffer;
+    VkCommandBufferSubmitInfo cmdSubmitInfo{};
+    cmdSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+    cmdSubmitInfo.commandBuffer = m_offscreenCommandBuffer;
 
-    if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, offscreenFence) != VK_SUCCESS) {
-        throw std::runtime_error("vkQueueSubmit failed (offscreen)");
+    VkSubmitInfo2 submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    submitInfo.commandBufferInfoCount = 1;
+    submitInfo.pCommandBufferInfos = &cmdSubmitInfo;
+
+    if (m_vulkanDevice->SubmitToGraphicsQueue(submitInfo, offscreenFence) != VK_SUCCESS) {
+        throw std::runtime_error("vkQueueSubmit2 failed (offscreen)");
     }
 
     // Synchronous for now - see the declaration comment in Renderer.h.
@@ -338,14 +360,18 @@ void FramePresenter::EndOffscreenRecording()
         throw std::runtime_error("vkEndCommandBuffer failed (offscreen render graph)");
     }
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &m_offscreenCommandBuffer;
+    VkCommandBufferSubmitInfo cmdSubmitInfo{};
+    cmdSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+    cmdSubmitInfo.commandBuffer = m_offscreenCommandBuffer;
+
+    VkSubmitInfo2 submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    submitInfo.commandBufferInfoCount = 1;
+    submitInfo.pCommandBufferInfos = &cmdSubmitInfo;
 
     const VkFence offscreenFence = m_frameSync.OffscreenFence();
-    if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, offscreenFence) != VK_SUCCESS) {
-        throw std::runtime_error("vkQueueSubmit failed (offscreen render graph)");
+    if (m_vulkanDevice->SubmitToGraphicsQueue(submitInfo, offscreenFence) != VK_SUCCESS) {
+        throw std::runtime_error("vkQueueSubmit2 failed (offscreen render graph)");
     }
 
     // Synchronous for now - matches RenderOffscreen()'s own documented
@@ -497,20 +523,32 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
 
     const VkSemaphore waitSemaphore = m_frameSync.ImageAvailableSemaphore(m_currentFrame);
     const VkSemaphore signalSemaphore = m_frameSync.RenderFinishedSemaphore(imageIndex);
-    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = &waitSemaphore;
-    submitInfo.pWaitDstStageMask = &waitStage;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-    submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = &signalSemaphore;
+    VkSemaphoreSubmitInfo waitSemaphoreInfo{};
+    waitSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+    waitSemaphoreInfo.semaphore = waitSemaphore;
+    waitSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
 
-    if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
-        throw std::runtime_error("vkQueueSubmit failed (render graph present)");
+    VkSemaphoreSubmitInfo signalSemaphoreInfo{};
+    signalSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+    signalSemaphoreInfo.semaphore = signalSemaphore;
+    signalSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+    VkCommandBufferSubmitInfo cmdSubmitInfo{};
+    cmdSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+    cmdSubmitInfo.commandBuffer = cmd;
+
+    VkSubmitInfo2 submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    submitInfo.waitSemaphoreInfoCount = 1;
+    submitInfo.pWaitSemaphoreInfos = &waitSemaphoreInfo;
+    submitInfo.commandBufferInfoCount = 1;
+    submitInfo.pCommandBufferInfos = &cmdSubmitInfo;
+    submitInfo.signalSemaphoreInfoCount = 1;
+    submitInfo.pSignalSemaphoreInfos = &signalSemaphoreInfo;
+
+    if (m_vulkanDevice->SubmitToGraphicsQueue(submitInfo, fence) != VK_SUCCESS) {
+        throw std::runtime_error("vkQueueSubmit2 failed (render graph present)");
     }
 
     VkPresentInfoKHR presentInfo{};

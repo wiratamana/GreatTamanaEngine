@@ -1,11 +1,13 @@
 #include "RenderGraphTimestampPool.h"
 
+#include "../Renderer.h"
+
 #include <limits>
 #include <stdexcept>
 
 namespace gte::rg {
 
-RenderGraphTimestampPool::RenderGraphTimestampPool(VkDevice device, VkQueue graphicsQueue,
+RenderGraphTimestampPool::RenderGraphTimestampPool(VkDevice device, Renderer& renderer,
     std::uint32_t graphicsQueueFamily, const GpuTimestampCapability& capability, std::uint32_t synchronousSlotBudget,
     std::uint32_t pipelinedSlotBudget, std::uint32_t pipelinedFramesInFlight)
     : m_device(device)
@@ -41,12 +43,12 @@ RenderGraphTimestampPool::RenderGraphTimestampPool(VkDevice device, VkQueue grap
     // exactly (validation-layer-friendly first use, even though the
     // Vulkan spec itself treats a freshly created query as already
     // "unavailable"/reset-equivalent).
-    WarmUpResetPool(*m_synchronousPool, graphicsQueue, graphicsQueueFamily);
-    WarmUpResetPool(*m_pipelinedPool, graphicsQueue, graphicsQueueFamily);
+    WarmUpResetPool(*m_synchronousPool, renderer, graphicsQueueFamily);
+    WarmUpResetPool(*m_pipelinedPool, renderer, graphicsQueueFamily);
 }
 
 void RenderGraphTimestampPool::WarmUpResetPool(
-    VulkanQueryPool& pool, VkQueue graphicsQueue, std::uint32_t graphicsQueueFamily)
+    VulkanQueryPool& pool, Renderer& renderer, std::uint32_t graphicsQueueFamily)
 {
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -96,15 +98,19 @@ void RenderGraphTimestampPool::WarmUpResetPool(
         throw std::runtime_error("RenderGraphTimestampPool: vkCreateFence failed (warm-up reset)");
     }
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
+    VkCommandBufferSubmitInfo cmdSubmitInfo{};
+    cmdSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+    cmdSubmitInfo.commandBuffer = cmd;
 
-    if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
+    VkSubmitInfo2 submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    submitInfo.commandBufferInfoCount = 1;
+    submitInfo.pCommandBufferInfos = &cmdSubmitInfo;
+
+    if (renderer.SubmitToGraphicsQueue(submitInfo, fence) != VK_SUCCESS) {
         vkDestroyFence(m_device, fence, nullptr);
         vkDestroyCommandPool(m_device, commandPool, nullptr);
-        throw std::runtime_error("RenderGraphTimestampPool: vkQueueSubmit failed (warm-up reset)");
+        throw std::runtime_error("RenderGraphTimestampPool: vkQueueSubmit2 failed (warm-up reset)");
     }
 
     vkWaitForFences(m_device, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());

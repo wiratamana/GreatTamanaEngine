@@ -49,6 +49,10 @@
 #include <cstdint>
 #include <optional>
 
+namespace gte {
+class Renderer;
+} // namespace gte
+
 namespace gte::rg {
 
 class RenderGraphTimestampPool {
@@ -71,18 +75,22 @@ public:
     // may still override `supported` to false internally when
     // GTE_ENABLE_PROFILER is compiled OFF, regardless of what the device
     // itself can do (mirrors GpuTimingService's own constructor exactly).
-    // `graphicsQueue`/`graphicsQueueFamily` are only used for this
-    // constructor's own one-time, up-front, whole-pool warm-up reset (see
-    // the .cpp) - never stored. `synchronousSlotBudget`/`pipelinedSlotBudget`
-    // must match RenderGraph's own RenderGraphNameSlotTable budgets exactly
-    // (see RenderGraph.h's kSynchronousTimingSlotBudget/
-    // kPipelinedTimingSlotBudget) - a name-slot table assigning slot N must
-    // always have a corresponding query-pool slot N to write into.
-    // `pipelinedFramesInFlight` must match gte::kGpuTimingFramesInFlight
-    // (GpuTiming.h) - reused here rather than hardcoded, for the same
-    // "kept in sync by a named, shared constant" reason GpuTimingService
-    // already documents for that constant.
-    RenderGraphTimestampPool(VkDevice device, VkQueue graphicsQueue, std::uint32_t graphicsQueueFamily,
+    // `device`/`graphicsQueueFamily` are only used for this constructor's
+    // own one-time, up-front, whole-pool warm-up reset (see the .cpp) -
+    // never stored. `renderer` is likewise only used for that same warm-up
+    // reset's actual submit, via Renderer::SubmitToGraphicsQueue() (the one
+    // choke point every submit to the graphics queue must go through) -
+    // this class cannot hold a private VulkanDevice reference of its own
+    // (constructed by rg::RenderGraph, which only has a Renderer&).
+    // `synchronousSlotBudget`/`pipelinedSlotBudget` must match RenderGraph's
+    // own RenderGraphNameSlotTable budgets exactly (see RenderGraph.h's
+    // kSynchronousTimingSlotBudget/kPipelinedTimingSlotBudget) - a name-slot
+    // table assigning slot N must always have a corresponding query-pool
+    // slot N to write into. `pipelinedFramesInFlight` must match
+    // gte::kGpuTimingFramesInFlight (GpuTiming.h) - reused here rather than
+    // hardcoded, for the same "kept in sync by a named, shared constant"
+    // reason GpuTimingService already documents for that constant.
+    RenderGraphTimestampPool(VkDevice device, Renderer& renderer, std::uint32_t graphicsQueueFamily,
         const GpuTimestampCapability& capability, std::uint32_t synchronousSlotBudget,
         std::uint32_t pipelinedSlotBudget, std::uint32_t pipelinedFramesInFlight);
     ~RenderGraphTimestampPool() = default;
@@ -146,7 +154,7 @@ public:
 
 private:
     std::uint32_t QueryBase(bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) const noexcept;
-    void WarmUpResetPool(VulkanQueryPool& pool, VkQueue graphicsQueue, std::uint32_t graphicsQueueFamily);
+    void WarmUpResetPool(VulkanQueryPool& pool, Renderer& renderer, std::uint32_t graphicsQueueFamily);
 
     VkDevice m_device = VK_NULL_HANDLE;
     GpuTimestampCapability m_capability;

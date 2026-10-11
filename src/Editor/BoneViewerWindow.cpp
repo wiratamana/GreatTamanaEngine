@@ -14,8 +14,11 @@
 #include "../Game/Physics/PhysicsSystem.h" // PhysicsSystem::GetDynamicChainRigCache() - task_manager/verlet-integration-5, Phase 2
 #include "../Math/Mat4.h"
 #include "../Math/Vec4.h"
+#include "../Core/PipelineDesc.h"
 #include "../Renderer/Buffer.h"
+#include "../Renderer/ComputeDescriptorSet.h"
 #include "../Renderer/Renderer.h"
+#include "../Renderer/RenderGraph/CommandBuffer.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/Texture2D.h"
 #include "../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
@@ -46,7 +49,7 @@ struct PreviewVertex {
     float normal[3];
 };
 
-std::vector<char> ReadShaderFile(const std::string& path)
+std::vector<std::byte> ReadShaderFileBytes(const std::string& path)
 {
     std::ifstream file(path, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
@@ -54,30 +57,10 @@ std::vector<char> ReadShaderFile(const std::string& path)
             "BoneViewerWindow: failed to open shader file '" + path + "' - was it compiled? See cmake/CompileShaders.cmake.");
     }
     const std::size_t size = static_cast<std::size_t>(file.tellg());
-    std::vector<char> buffer(size);
+    std::vector<std::byte> buffer(size);
     file.seekg(0);
-    file.read(buffer.data(), static_cast<std::streamsize>(size));
+    file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(size));
     return buffer;
-}
-
-VkShaderModule CreateShaderModule(VkDevice device, const std::vector<char>& spirv)
-{
-    VkShaderModuleCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = spirv.size();
-    createInfo.pCode = reinterpret_cast<const std::uint32_t*>(spirv.data());
-
-    VkShaderModule module = VK_NULL_HANDLE;
-    if (vkCreateShaderModule(device, &createInfo, nullptr, &module) != VK_SUCCESS) {
-        throw std::runtime_error("BoneViewerWindow: vkCreateShaderModule failed.");
-    }
-    return module;
-}
-
-bool DepthFormatHasStencil(VkFormat format)
-{
-    return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT ||
-        format == VK_FORMAT_D16_UNORM_S8_UINT;
 }
 
 // Projects a model-space point (the loaded mesh/skeleton uses an identity
@@ -146,7 +129,7 @@ void BoneViewerWindow::Reset()
 {
     if (m_device != VK_NULL_HANDLE
         && (m_vertexBuffer || m_indexBuffer || m_renderTexture || m_descriptor != VK_NULL_HANDLE
-            || m_pipeline != VK_NULL_HANDLE || m_localDescriptorPool != VK_NULL_HANDLE)) {
+            || m_pipeline || m_localDescriptorPool != VK_NULL_HANDLE)) {
         // Same "stall before releasing, this is a rare user-driven event
         // not a per-frame cost" reasoning as AssetPreviewMesh::Reset().
         vkDeviceWaitIdle(m_device);
@@ -174,14 +157,13 @@ void BoneViewerWindow::Reset()
     m_cachedWriteTime = std::filesystem::file_time_type{};
     m_cachedIsValid = false;
 
-    if (m_pipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(m_device, m_pipeline, nullptr);
-        m_pipeline = VK_NULL_HANDLE;
+    if (m_renderer) {
+        m_renderer->DestroyDescriptorSetLayout(m_setOneLayoutHandle);
+        m_renderer->DestroyDescriptorSetLayout(m_setZeroFillerLayoutHandle);
     }
-    if (m_pipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
-        m_pipelineLayout = VK_NULL_HANDLE;
-    }
+    m_setOneLayoutHandle = DescriptorSetLayoutHandle::Invalid;
+    m_setZeroFillerLayoutHandle = DescriptorSetLayoutHandle::Invalid;
+    m_pipeline.reset();
 
     // Local set=1 lighting/shadow stand-in - owned entirely by this class,
     // never routed through Renderer::AllocateComputeDescriptorSet(). The
@@ -197,257 +179,120 @@ void BoneViewerWindow::Reset()
         vkDestroyDescriptorSetLayout(m_device, m_localSetOneLayout, nullptr);
         m_localSetOneLayout = VK_NULL_HANDLE;
     }
-    if (m_setZeroFillerLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_setZeroFillerLayout, nullptr);
-        m_setZeroFillerLayout = VK_NULL_HANDLE;
-    }
 }
 
 void BoneViewerWindow::EnsurePipeline(Renderer& renderer)
 {
-    if (m_pipeline != VK_NULL_HANDLE) {
+    if (m_pipeline) {
         return;
     }
 
     const VkDevice device = m_device;
-    const VkFormat colorFormat = renderer.ColorFormat();
-    const VkFormat depthFormat = renderer.DepthFormat();
+    m_renderer = &renderer;
+
+    // Local set=1 lighting/shadow stand-in (MeshPreview.frag samples
+    // DirectionalLightingAndReceiverMask.glsl's shared interface) - a real,
+    // writable descriptor set the opaque pipeline API cannot allocate, so
+    // it is still built by hand: binding 0 (combined image sampler) and
+    // binding 8 (uniform buffer). Mirrors AssetPreviewMesh's own identical
+    // local descriptor infra exactly.
+    m_localSetOneLayout = DescriptorSetLayoutBuilder(device)
+                               .AddCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT)
+                               .AddUniformBuffer(8, VK_SHADER_STAGE_FRAGMENT_BIT)
+                               .Build();
+
+    VkDescriptorPoolSize localPoolSizes[2]{};
+    localPoolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    localPoolSizes[0].descriptorCount = 1;
+    localPoolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    localPoolSizes[1].descriptorCount = 1;
+
+    VkDescriptorPoolCreateInfo localPoolInfo{};
+    localPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    localPoolInfo.maxSets = 1;
+    localPoolInfo.poolSizeCount = static_cast<std::uint32_t>(std::size(localPoolSizes));
+    localPoolInfo.pPoolSizes = localPoolSizes;
+    if (vkCreateDescriptorPool(device, &localPoolInfo, nullptr, &m_localDescriptorPool) != VK_SUCCESS) {
+        throw std::runtime_error("BoneViewerWindow: vkCreateDescriptorPool (local set=1) failed.");
+    }
+
+    VkDescriptorSetAllocateInfo localAllocInfo{};
+    localAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    localAllocInfo.descriptorPool = m_localDescriptorPool;
+    localAllocInfo.descriptorSetCount = 1;
+    localAllocInfo.pSetLayouts = &m_localSetOneLayout;
+    if (vkAllocateDescriptorSets(device, &localAllocInfo, &m_localSetOneDescriptorSet) != VK_SUCCESS) {
+        throw std::runtime_error("BoneViewerWindow: vkAllocateDescriptorSets (local set=1) failed.");
+    }
+
+    const unsigned char whitePixel[4] = { 255, 255, 255, 255 };
+    m_localWhiteTexture =
+        std::make_unique<Texture2D>(renderer.CreateTexture2D(whitePixel, 1, 1, "BoneViewerDummyWhite"));
+
+    // Zero-filled - must be at least as large as the shared
+    // SceneGlobalUniformBlock (112 bytes, std140); 128 matches Scene
+    // Services binding 8's own ceiling, purely coincidentally - this
+    // class never includes SceneServicesDescriptorSet.h.
+    constexpr VkDeviceSize kLocalDummyUniformBlockSize = 128;
+    m_localUniformBuffer = std::make_unique<Buffer>(renderer.CreateBuffer(kLocalDummyUniformBlockSize,
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, BufferMemoryUsage::CpuToGpu, "BoneViewerDummyUniformBlock"));
+    const std::array<std::byte, kLocalDummyUniformBlockSize> zeroBytes{};
+    m_localUniformBuffer->Upload(zeroBytes.data(), zeroBytes.size());
+
+    VkDescriptorImageInfo localImageInfo{};
+    localImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    localImageInfo.imageView = m_localWhiteTexture->View();
+    localImageInfo.sampler = m_localWhiteTexture->Sampler();
+
+    VkDescriptorBufferInfo localBufferInfo{};
+    localBufferInfo.buffer = m_localUniformBuffer->Native();
+    localBufferInfo.offset = 0;
+    localBufferInfo.range = kLocalDummyUniformBlockSize;
+
+    VkWriteDescriptorSet localWrites[2]{};
+    localWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    localWrites[0].dstSet = m_localSetOneDescriptorSet;
+    localWrites[0].dstBinding = 0;
+    localWrites[0].descriptorCount = 1;
+    localWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    localWrites[0].pImageInfo = &localImageInfo;
+    localWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    localWrites[1].dstSet = m_localSetOneDescriptorSet;
+    localWrites[1].dstBinding = 8;
+    localWrites[1].descriptorCount = 1;
+    localWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    localWrites[1].pBufferInfo = &localBufferInfo;
+    vkUpdateDescriptorSets(device, static_cast<std::uint32_t>(std::size(localWrites)), localWrites, 0, nullptr);
+
+    // Opaque-handle twin of m_localSetOneLayout above, fed to the pipeline
+    // builder below - identically-defined layouts are pipeline-layout-
+    // compatible with the real m_localSetOneDescriptorSet bound at draw time.
+    constexpr DescriptorBindingDesc kSetOneBindings[] = {
+        { .binding = 0, .kind = DescriptorKind::CombinedImageSampler, .stages = ShaderStageMask::Fragment },
+        { .binding = 8, .kind = DescriptorKind::UniformBuffer, .stages = ShaderStageMask::Fragment },
+    };
+    m_setZeroFillerLayoutHandle = renderer.CreateDescriptorSetLayout({});
+    m_setOneLayoutHandle = renderer.CreateDescriptorSetLayout(kSetOneBindings);
+    const DescriptorSetLayoutHandle extraSets[] = { m_setZeroFillerLayoutHandle, m_setOneLayoutHandle };
+
+    // No backface culling - an imported .pmx's winding convention isn't
+    // guaranteed to match this engine's own, and this viewer's whole point
+    // is "show me the bones against the shape", not enforce a winding
+    // convention.
+    PipelineDesc desc = PipelinePreset::Opaque(renderer.ColorPixelFormat(), renderer.DepthPixelFormat());
+    desc.vertexLayout = VertexLayout::PositionNormal;
+    desc.cullMode = CullMode::None;
+    desc.layout.extraSetLayouts = extraSets;
+    desc.layout.pushConstantByteSize = sizeof(float) * 32; // model + viewProj, matches MeshPreview.vert.
+    desc.layout.pushConstantStages = ShaderStageMask::Vertex;
 
     // Reuses the exact same compiled shader pair as AssetPreviewMesh - see
     // BoneViewerWindow.h's class comment.
-    const std::vector<char> vertSpirv = ReadShaderFile("shaders/MeshPreview.vert.spv");
-    const std::vector<char> fragSpirv = ReadShaderFile("shaders/MeshPreview.frag.spv");
-
-    VkShaderModule vertModule = CreateShaderModule(device, vertSpirv);
-    VkShaderModule fragModule = VK_NULL_HANDLE;
-    try {
-        fragModule = CreateShaderModule(device, fragSpirv);
-    } catch (...) {
-        vkDestroyShaderModule(device, vertModule, nullptr);
-        throw;
-    }
-
-    try {
-        VkPipelineShaderStageCreateInfo stages[2]{};
-        stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-        stages[0].module = vertModule;
-        stages[0].pName = "main";
-
-        stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        stages[1].module = fragModule;
-        stages[1].pName = "main";
-
-        VkVertexInputBindingDescription binding{};
-        binding.binding = 0;
-        binding.stride = sizeof(PreviewVertex);
-        binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-        std::array<VkVertexInputAttributeDescription, 2> attributes{};
-        attributes[0].location = 0;
-        attributes[0].binding = 0;
-        attributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributes[0].offset = offsetof(PreviewVertex, position);
-        attributes[1].location = 1;
-        attributes[1].binding = 0;
-        attributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributes[1].offset = offsetof(PreviewVertex, normal);
-
-        VkPipelineVertexInputStateCreateInfo vertexInput{};
-        vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertexInput.vertexBindingDescriptionCount = 1;
-        vertexInput.pVertexBindingDescriptions = &binding;
-        vertexInput.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(attributes.size());
-        vertexInput.pVertexAttributeDescriptions = attributes.data();
-
-        VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-        inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-        VkPipelineViewportStateCreateInfo viewportState{};
-        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-        viewportState.viewportCount = 1;
-        viewportState.scissorCount = 1;
-
-        VkPipelineRasterizationStateCreateInfo rasterizer{};
-        rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-        // No backface culling - same reasoning as AssetPreviewMesh: an
-        // imported .pmx's winding convention isn't guaranteed to match this
-        // engine's own, and this viewer's whole point is "show me the
-        // bones against the shape", not enforce a winding convention.
-        rasterizer.cullMode = VK_CULL_MODE_NONE;
-        rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
-        rasterizer.lineWidth = 1.0f;
-
-        VkPipelineMultisampleStateCreateInfo multisample{};
-        multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-        multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-        VkPipelineDepthStencilStateCreateInfo depthStencil{};
-        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-        depthStencil.depthTestEnable = VK_TRUE;
-        depthStencil.depthWriteEnable = VK_TRUE;
-        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-        depthStencil.depthBoundsTestEnable = VK_FALSE;
-        depthStencil.stencilTestEnable = VK_FALSE;
-
-        VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-        colorBlendAttachment.blendEnable = VK_FALSE;
-        colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-
-        VkPipelineColorBlendStateCreateInfo colorBlend{};
-        colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        colorBlend.attachmentCount = 1;
-        colorBlend.pAttachments = &colorBlendAttachment;
-
-        const VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-        VkPipelineDynamicStateCreateInfo dynamicState{};
-        dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-        dynamicState.dynamicStateCount = static_cast<std::uint32_t>(std::size(dynamicStates));
-        dynamicState.pDynamicStates = dynamicStates;
-
-        // Same push-constant shape as AssetPreviewMesh/this engine's main
-        // Pipeline (model then viewProj, 128 bytes total).
-        VkPushConstantRange pushConstantRange{};
-        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-        pushConstantRange.offset = 0;
-        pushConstantRange.size = sizeof(float) * 32;
-
-        // Local set=1 lighting/shadow stand-in (MeshPreview.frag now samples
-        // DirectionalLightingAndReceiverMask.glsl's shared interface) -
-        // mirrors AssetPreviewMesh's own identical local descriptor infra: a
-        // zero-binding filler at set=0, plus a real local set=1 layout
-        // matching exactly what the shader declares: binding 0 (combined
-        // image sampler) and binding 8 (uniform buffer).
-        VkDescriptorSetLayoutCreateInfo fillerInfo{};
-        fillerInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        fillerInfo.bindingCount = 0;
-        if (vkCreateDescriptorSetLayout(device, &fillerInfo, nullptr, &m_setZeroFillerLayout) != VK_SUCCESS) {
-            throw std::runtime_error("BoneViewerWindow: vkCreateDescriptorSetLayout (set-0 filler) failed.");
-        }
-
-        m_localSetOneLayout = DescriptorSetLayoutBuilder(device)
-                                   .AddCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT)
-                                   .AddUniformBuffer(8, VK_SHADER_STAGE_FRAGMENT_BIT)
-                                   .Build();
-
-        VkDescriptorPoolSize localPoolSizes[2]{};
-        localPoolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        localPoolSizes[0].descriptorCount = 1;
-        localPoolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        localPoolSizes[1].descriptorCount = 1;
-
-        VkDescriptorPoolCreateInfo localPoolInfo{};
-        localPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        localPoolInfo.maxSets = 1;
-        localPoolInfo.poolSizeCount = static_cast<std::uint32_t>(std::size(localPoolSizes));
-        localPoolInfo.pPoolSizes = localPoolSizes;
-        if (vkCreateDescriptorPool(device, &localPoolInfo, nullptr, &m_localDescriptorPool) != VK_SUCCESS) {
-            throw std::runtime_error("BoneViewerWindow: vkCreateDescriptorPool (local set=1) failed.");
-        }
-
-        VkDescriptorSetAllocateInfo localAllocInfo{};
-        localAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        localAllocInfo.descriptorPool = m_localDescriptorPool;
-        localAllocInfo.descriptorSetCount = 1;
-        localAllocInfo.pSetLayouts = &m_localSetOneLayout;
-        if (vkAllocateDescriptorSets(device, &localAllocInfo, &m_localSetOneDescriptorSet) != VK_SUCCESS) {
-            throw std::runtime_error("BoneViewerWindow: vkAllocateDescriptorSets (local set=1) failed.");
-        }
-
-        const unsigned char whitePixel[4] = { 255, 255, 255, 255 };
-        m_localWhiteTexture =
-            std::make_unique<Texture2D>(renderer.CreateTexture2D(whitePixel, 1, 1, "BoneViewerDummyWhite"));
-
-        // Zero-filled - must be at least as large as the shared
-        // SceneGlobalUniformBlock (112 bytes, std140); 128 matches Scene
-        // Services binding 8's own ceiling, purely coincidentally - this
-        // class never includes SceneServicesDescriptorSet.h.
-        constexpr VkDeviceSize kLocalDummyUniformBlockSize = 128;
-        m_localUniformBuffer = std::make_unique<Buffer>(renderer.CreateBuffer(kLocalDummyUniformBlockSize,
-            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, BufferMemoryUsage::CpuToGpu, "BoneViewerDummyUniformBlock"));
-        const std::array<std::byte, kLocalDummyUniformBlockSize> zeroBytes{};
-        m_localUniformBuffer->Upload(zeroBytes.data(), zeroBytes.size());
-
-        VkDescriptorImageInfo localImageInfo{};
-        localImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        localImageInfo.imageView = m_localWhiteTexture->View();
-        localImageInfo.sampler = m_localWhiteTexture->Sampler();
-
-        VkDescriptorBufferInfo localBufferInfo{};
-        localBufferInfo.buffer = m_localUniformBuffer->Native();
-        localBufferInfo.offset = 0;
-        localBufferInfo.range = kLocalDummyUniformBlockSize;
-
-        VkWriteDescriptorSet localWrites[2]{};
-        localWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        localWrites[0].dstSet = m_localSetOneDescriptorSet;
-        localWrites[0].dstBinding = 0;
-        localWrites[0].descriptorCount = 1;
-        localWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        localWrites[0].pImageInfo = &localImageInfo;
-        localWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        localWrites[1].dstSet = m_localSetOneDescriptorSet;
-        localWrites[1].dstBinding = 8;
-        localWrites[1].descriptorCount = 1;
-        localWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        localWrites[1].pBufferInfo = &localBufferInfo;
-        vkUpdateDescriptorSets(device, static_cast<std::uint32_t>(std::size(localWrites)), localWrites, 0, nullptr);
-
-        const VkDescriptorSetLayout setLayouts[2] = { m_setZeroFillerLayout, m_localSetOneLayout };
-
-        VkPipelineLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layoutInfo.setLayoutCount = static_cast<std::uint32_t>(std::size(setLayouts));
-        layoutInfo.pSetLayouts = setLayouts;
-        layoutInfo.pushConstantRangeCount = 1;
-        layoutInfo.pPushConstantRanges = &pushConstantRange;
-
-        if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
-            throw std::runtime_error("BoneViewerWindow: vkCreatePipelineLayout failed.");
-        }
-
-        const bool depthHasStencil = DepthFormatHasStencil(depthFormat);
-        VkPipelineRenderingCreateInfo renderingInfo{};
-        renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-        renderingInfo.colorAttachmentCount = 1;
-        renderingInfo.pColorAttachmentFormats = &colorFormat;
-        renderingInfo.depthAttachmentFormat = depthFormat;
-        renderingInfo.stencilAttachmentFormat = depthHasStencil ? depthFormat : VK_FORMAT_UNDEFINED;
-
-        VkGraphicsPipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-        pipelineInfo.pNext = &renderingInfo;
-        pipelineInfo.stageCount = static_cast<std::uint32_t>(std::size(stages));
-        pipelineInfo.pStages = stages;
-        pipelineInfo.pVertexInputState = &vertexInput;
-        pipelineInfo.pInputAssemblyState = &inputAssembly;
-        pipelineInfo.pViewportState = &viewportState;
-        pipelineInfo.pRasterizationState = &rasterizer;
-        pipelineInfo.pMultisampleState = &multisample;
-        pipelineInfo.pDepthStencilState = &depthStencil;
-        pipelineInfo.pColorBlendState = &colorBlend;
-        pipelineInfo.pDynamicState = &dynamicState;
-        pipelineInfo.layout = m_pipelineLayout;
-        pipelineInfo.basePipelineIndex = -1;
-
-        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_pipeline) != VK_SUCCESS) {
-            vkDestroyPipelineLayout(device, m_pipelineLayout, nullptr);
-            m_pipelineLayout = VK_NULL_HANDLE;
-            throw std::runtime_error("BoneViewerWindow: vkCreateGraphicsPipelines failed.");
-        }
-    } catch (...) {
-        vkDestroyShaderModule(device, fragModule, nullptr);
-        vkDestroyShaderModule(device, vertModule, nullptr);
-        throw;
-    }
-
-    vkDestroyShaderModule(device, fragModule, nullptr);
-    vkDestroyShaderModule(device, vertModule, nullptr);
+    const std::vector<std::byte> vertSpirv = ReadShaderFileBytes("shaders/MeshPreview.vert.spv");
+    const std::vector<std::byte> fragSpirv = ReadShaderFileBytes("shaders/MeshPreview.frag.spv");
+    m_pipeline = std::make_unique<Pipeline>(renderer.CreatePipeline(desc, vertSpirv, fragSpirv));
 }
+
 
 bool BoneViewerWindow::EnsureDataLoaded(
     Renderer& renderer, const std::string& absoluteGtaPath, EditorContext& ctx, ModelRigCache& rigCache)
@@ -1282,8 +1127,8 @@ void BoneViewerWindow::Build(
         // color is safe).
         renderer.Clear(30, 32, 38, 255);
 
-        const VkPipeline pipeline = m_pipeline;
-        const VkPipelineLayout layout = m_pipelineLayout;
+        const VkPipeline pipeline = m_pipeline->Native();
+        const VkPipelineLayout layout = m_pipeline->Layout();
         const VkDescriptorSet localSetOne = m_localSetOneDescriptorSet;
         const VkBuffer vertexBuffer = m_vertexBuffer->Native();
         const VkBuffer indexBuffer = m_indexBuffer->Native();
@@ -1295,27 +1140,27 @@ void BoneViewerWindow::Build(
         // Profiler's three named passes, and must never silently share a
         // query slot with (or overwrite the cached timing of) "Game View"/
         // "Scene View" - see Renderer::RenderOffscreen()'s own doc comment.
-        renderer.RenderOffscreen(*m_renderTexture, std::nullopt, [&](VkCommandBuffer cmd) {
+        renderer.RenderOffscreen(*m_renderTexture, std::nullopt, [&](rg::CommandBuffer& cmd) {
             VkViewport viewport{};
             viewport.width = static_cast<float>(extent.width);
             viewport.height = static_cast<float>(extent.height);
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
-            vkCmdSetViewport(cmd, 0, 1, &viewport);
+            vkCmdSetViewport(cmd.Native(), 0, 1, &viewport);
 
             VkRect2D scissor{};
             scissor.extent = extent;
-            vkCmdSetScissor(cmd, 0, 1, &scissor);
+            vkCmdSetScissor(cmd.Native(), 0, 1, &scissor);
 
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+            vkCmdBindPipeline(cmd.Native(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
             vkCmdBindDescriptorSets(
-                cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, /*firstSet=*/1, 1, &localSetOne, 0, nullptr);
-            vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
+                cmd.Native(), VK_PIPELINE_BIND_POINT_GRAPHICS, layout, /*firstSet=*/1, 1, &localSetOne, 0, nullptr);
+            vkCmdPushConstants(cmd.Native(), layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
 
             const VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
-            vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+            vkCmdBindVertexBuffers(cmd.Native(), 0, 1, &vertexBuffer, &offset);
+            vkCmdBindIndexBuffer(cmd.Native(), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(cmd.Native(), indexCount, 1, 0, 0, 0);
         });
 
         const ImVec2 imageMin = ImGui::GetCursorScreenPos();

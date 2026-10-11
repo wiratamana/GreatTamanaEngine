@@ -8,6 +8,7 @@
 #include "../Math/Quat.h"
 #include "../Renderer/Buffer.h"
 #include "../Renderer/Renderer.h"
+#include "../Renderer/RenderGraph/CommandBuffer.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/Texture2D.h"
 #include "../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
@@ -394,27 +395,27 @@ std::optional<AssetPreviewMesh::Preview> AssetPreviewMesh::Render(
     // passes, and must never silently share a query slot with (or overwrite
     // the cached timing of) "Game View"/"Scene View" - see
     // Renderer::RenderOffscreen()'s own doc comment.
-    renderer.RenderOffscreen(*m_renderTexture, std::nullopt, [&](VkCommandBuffer cmd) {
+    renderer.RenderOffscreen(*m_renderTexture, std::nullopt, [&](rg::CommandBuffer& cmd) {
         VkViewport viewport{};
         viewport.width = static_cast<float>(extent.width);
         viewport.height = static_cast<float>(extent.height);
         viewport.minDepth = 0.0f;
         viewport.maxDepth = 1.0f;
-        vkCmdSetViewport(cmd, 0, 1, &viewport);
+        vkCmdSetViewport(cmd.Native(), 0, 1, &viewport);
 
         VkRect2D scissor{};
         scissor.extent = extent;
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
+        vkCmdSetScissor(cmd.Native(), 0, 1, &scissor);
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        vkCmdBindPipeline(cmd.Native(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
         vkCmdBindDescriptorSets(
-            cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, /*firstSet=*/1, 1, &localSetOne, 0, nullptr);
-        vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
+            cmd.Native(), VK_PIPELINE_BIND_POINT_GRAPHICS, layout, /*firstSet=*/1, 1, &localSetOne, 0, nullptr);
+        vkCmdPushConstants(cmd.Native(), layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
 
         const VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
-        vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+        vkCmdBindVertexBuffers(cmd.Native(), 0, 1, &vertexBuffer, &offset);
+        vkCmdBindIndexBuffer(cmd.Native(), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd.Native(), indexCount, 1, 0, 0, 0);
     });
 
     Preview preview;

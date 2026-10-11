@@ -1,6 +1,7 @@
 #include "FrameDebuggerPreviewProcessing.h"
 
 #include "../Renderer/Renderer.h"
+#include "../Renderer/RenderGraph/CommandBuffer.h"
 #include "../Renderer/RenderTexture.h"
 
 #include <algorithm>
@@ -186,33 +187,30 @@ const Texture2D& FrameDebuggerPreviewRenderer::RenderPreview(Renderer& renderer,
     const std::uint32_t outputWidth = extent.width;
     const std::uint32_t outputHeight = extent.height;
 
-    renderer.ImmediateSubmit([&](VkCommandBuffer cmd) {
+    renderer.ImmediateSubmit([&](rg::CommandBuffer& cmd) {
         const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-        // renderer.ImmediateSubmit() here still takes a raw VkCommandBuffer
-        // (no rg::CommandBuffer overload exists yet), so every Vulkan call
-        // below is issued directly instead of through CommandBuffer::DispatchCompute().
-        rg::EmitImageBarrier(cmd, sourceImage, range, sourcePreviousState, sourceComputeSampledState);
-        rg::EmitImageBarrier(cmd, outputImage, range, outputPreviousState, outputWriteState);
+        rg::EmitImageBarrier(cmd.Native(), sourceImage, range, sourcePreviousState, sourceComputeSampledState);
+        rg::EmitImageBarrier(cmd.Native(), outputImage, range, outputPreviousState, outputWriteState);
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineHandle);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &rawDescriptorSet, 0, nullptr);
-        vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
+        vkCmdBindPipeline(cmd.Native(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineHandle);
+        vkCmdBindDescriptorSets(cmd.Native(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &rawDescriptorSet, 0, nullptr);
+        vkCmdPushConstants(cmd.Native(), pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
 
         const std::uint32_t groupCountX = ComputeGroupCountLocal(outputWidth, kLocalSizeX);
         const std::uint32_t groupCountY = ComputeGroupCountLocal(outputHeight, kLocalSizeY);
-        vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
+        vkCmdDispatch(cmd.Native(), groupCountX, groupCountY, 1);
 
         // Restore the source retained texture to its real, expected state -
         // a later ImGui sample of the SAME texture (e.g. flipping Channels
         // back to "All") must see it exactly as FrameDebuggerHistory/
         // FrameDebuggerPanel still believe it is.
-        rg::EmitImageBarrier(cmd, sourceImage, range, sourceComputeSampledState, sourcePreviousState);
+        rg::EmitImageBarrier(cmd.Native(), sourceImage, range, sourceComputeSampledState, sourcePreviousState);
 
         // Transition the freshly-written output straight to ShaderRead too
         // (rather than leaving it in GENERAL) - see outputFinalState's own
         // comment above for why.
-        rg::EmitImageBarrier(cmd, outputImage, range, outputWriteState, outputFinalState);
+        rg::EmitImageBarrier(cmd.Native(), outputImage, range, outputWriteState, outputFinalState);
     });
 
     m_outputTextureState = outputFinalState;

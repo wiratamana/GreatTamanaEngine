@@ -9,8 +9,10 @@
 
 #include <cassert>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <unordered_set>
 #include <utility>
 
@@ -143,21 +145,20 @@ Renderer::Renderer(ISurfaceProvider& surfaceProvider)
     // both of which receive a copy of the SAME shared_ptr.
     // m_gpuTiming (Phase 4B - PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md)
     // has no default member initializer (see Renderer.h) - it needs
-    // m_device's already-resolved native handle/graphics queue+family/
-    // queried timestamp capability, so it's constructed explicitly here,
-    // right after m_device is ready, before m_presenter below (which
-    // receives a copy of the SAME shared_ptr, mirroring m_memoryTracker's
-    // own sharing pattern immediately above).
-    , m_gpuTiming(std::make_shared<GpuTimingService>(
-          m_device.Native(), m_device.GraphicsQueue(), m_device.GraphicsQueueFamily(), m_device.TimestampCapability()))
+    // m_device's already-resolved native handle/queried timestamp
+    // capability, so it's constructed explicitly here, right after m_device
+    // is ready, before m_presenter below (which receives a copy of the SAME
+    // shared_ptr, mirroring m_memoryTracker's own sharing pattern
+    // immediately above).
+    , m_gpuTiming(std::make_shared<GpuTimingService>(m_device, m_device.TimestampCapability()))
     // VK_API_VERSION_1_3 matches VulkanInstance::CreateInstance's
     // VkApplicationInfo::apiVersion (see also GetVulkanContextInfo() below).
     , m_allocator(m_instance.Native(), m_device.Physical(), m_device.Native(), VK_API_VERSION_1_3)
     , m_presenter(m_device.Physical(), m_device.Native(), m_surface.Native(), m_device.GraphicsQueueFamily(),
           m_device.PresentQueueFamily(), m_device.GraphicsQueue(), m_device.PresentQueue(), surfaceProvider.Width(),
-          surfaceProvider.Height(), m_allocator.Native(), m_depthFormat, m_memoryTracker, m_gpuTiming)
+          surfaceProvider.Height(), m_allocator.Native(), m_depthFormat, m_memoryTracker, m_gpuTiming, m_device)
     , m_resources(m_device.Physical(), m_device.Native(), m_allocator.Native(), m_device.GraphicsQueue(),
-          m_device.GraphicsQueueFamily(), m_depthFormat, m_memoryTracker)
+          m_device.GraphicsQueueFamily(), m_depthFormat, m_memoryTracker, m_device)
 {
 }
 
@@ -210,7 +211,7 @@ void Renderer::OnResize(int width, int height)
 }
 
 DrawStats Renderer::RenderOffscreen(
-    RenderTexture& target, std::optional<GpuTimingSlot> timingSlot, const std::function<void(VkCommandBuffer)>& recordExtra)
+    RenderTexture& target, std::optional<GpuTimingSlot> timingSlot, const std::function<void(rg::CommandBuffer&)>& recordExtra)
 {
     return m_presenter.RenderOffscreen(m_frameRecorder, target, timingSlot, recordExtra);
 }
@@ -301,15 +302,15 @@ Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageA
     const VkImageSubresourceRange range{ aspect, 0, 1, 0, 1 };
     const rg::ResourceState transferSrcState = rg::RequiredStateFor(rg::ResourceAccess::TransferSrc, false);
 
-    ImmediateSubmit([&](VkCommandBuffer cmd) {
-        rg::EmitImageBarrier(cmd, image, range, previousState, transferSrcState);
+    ImmediateSubmit([&](rg::CommandBuffer& cmd) {
+        rg::EmitImageBarrier(cmd.Native(), image, range, previousState, transferSrcState);
 
         VkBufferImageCopy region{};
         region.imageSubresource.aspectMask = aspect;
         region.imageSubresource.layerCount = 1;
         region.imageOffset = { 0, 0, static_cast<std::int32_t>(zOffset) };
         region.imageExtent = { extent.width, extent.height, depth };
-        vkCmdCopyImageToBuffer(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.Native(), 1, &region);
+        vkCmdCopyImageToBuffer(cmd.Native(), image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.Native(), 1, &region);
 
         // Host-read visibility: a fence wait alone (ImmediateSubmit()'s own
         // wait, below) guarantees the GPU write finished EXECUTING, but the
@@ -319,9 +320,9 @@ Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageA
         // CaptureRenderTexturePixels()'s original own reasoning for this step.
         const rg::ResourceState transferWriteState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT };
         const rg::ResourceState hostReadState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT };
-        rg::EmitBufferBarrier(cmd, readback.Native(), 0, size, transferWriteState, hostReadState);
+        rg::EmitBufferBarrier(cmd.Native(), readback.Native(), 0, size, transferWriteState, hostReadState);
 
-        rg::EmitImageBarrier(cmd, image, range, transferSrcState, previousState);
+        rg::EmitImageBarrier(cmd.Native(), image, range, transferSrcState, previousState);
     });
 
     CapturedRawPixels result;
@@ -380,9 +381,64 @@ Buffer Renderer::CreateDeviceLocalBuffer(
     return m_resources.CreateDeviceLocalBuffer(data, size, usage, debugName);
 }
 
-void Renderer::ImmediateSubmit(const std::function<void(VkCommandBuffer)>& recordFn) const
+// Precondition: never called re-entrantly from inside an active graph-pass
+// recording (CommandBuffer::Dispatch()/Draw() would otherwise clobber
+// m_currentGraphPassCmd - see BeginGraphPassRecording()). Synchronization2
+// submit path, one fence, zero leaks.
+void Renderer::ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& recordFn) const
 {
-    m_resources.ImmediateSubmit(recordFn);
+    assert(m_currentGraphPassCmd == VK_NULL_HANDLE
+        && "ImmediateSubmit() called while a graph pass is already being recorded");
+
+    VkCommandBuffer vkCmd = m_resources.AllocateTransientCommandBuffer();
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(vkCmd, &beginInfo) != VK_SUCCESS) {
+        m_resources.FreeTransientCommandBuffer(vkCmd);
+        throw std::runtime_error("Renderer::ImmediateSubmit: vkBeginCommandBuffer failed.");
+    }
+
+    rg::CommandBuffer cmd{ vkCmd, const_cast<Renderer*>(this), nullptr };
+    recordFn(cmd);
+
+    if (vkEndCommandBuffer(vkCmd) != VK_SUCCESS) {
+        m_resources.FreeTransientCommandBuffer(vkCmd);
+        throw std::runtime_error("Renderer::ImmediateSubmit: vkEndCommandBuffer failed.");
+    }
+
+    VkCommandBufferSubmitInfo cmdSubmit{};
+    cmdSubmit.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+    cmdSubmit.commandBuffer = vkCmd;
+
+    VkSubmitInfo2 submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    submit.commandBufferInfoCount = 1;
+    submit.pCommandBufferInfos = &cmdSubmit;
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence = VK_NULL_HANDLE;
+    if (vkCreateFence(m_device.Native(), &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
+        m_resources.FreeTransientCommandBuffer(vkCmd);
+        throw std::runtime_error("Renderer::ImmediateSubmit: vkCreateFence failed.");
+    }
+
+    if (m_device.SubmitToGraphicsQueue(submit, fence) != VK_SUCCESS) {
+        vkDestroyFence(m_device.Native(), fence, nullptr);
+        m_resources.FreeTransientCommandBuffer(vkCmd);
+        throw std::runtime_error("Renderer::ImmediateSubmit: vkQueueSubmit2 failed.");
+    }
+
+    vkWaitForFences(m_device.Native(), 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+    vkDestroyFence(m_device.Native(), fence, nullptr); // always reached: no early return above
+    m_resources.FreeTransientCommandBuffer(vkCmd);
+}
+
+VkResult Renderer::SubmitToGraphicsQueue(const VkSubmitInfo2& submit, VkFence fence) const
+{
+    return m_device.SubmitToGraphicsQueue(submit, fence);
 }
 
 void Renderer::BeginFrame()

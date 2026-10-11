@@ -1070,32 +1070,32 @@ Renderer::CapturedRawPixels AtmosphereLutRenderer::CaptureAerialPerspectiveVolum
     const VkPipelineLayout pipelineLayout = m_aerialPerspectiveVolumeDebugSlicePipeline->Layout();
     const VkDescriptorSet rawDescriptorSet = viewState.descriptorSet.Native();
 
-    renderer.ImmediateSubmit([&](VkCommandBuffer cmd) {
+    renderer.ImmediateSubmit([&](rg::CommandBuffer& cmd) {
         const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
         // Never renderer.Dispatch() here - that method is gated to
         // render-graph-pass recording only (asserts/no-ops otherwise, see
         // Renderer::Dispatch()'s own doc comment) - every Vulkan call below
-        // is issued directly, mirroring
+        // is issued directly via cmd.Native(), mirroring
         // VolumeTexturePreviewRenderer::RenderPreview() exactly.
-        rg::EmitImageBarrier(cmd, sourceVolumeImage, range, sourceVolumePreviousState, sourceVolumeSampledState);
-        rg::EmitImageBarrier(cmd, outputImage, range, outputDiscardState, outputWriteState);
+        rg::EmitImageBarrier(cmd.Native(), sourceVolumeImage, range, sourceVolumePreviousState, sourceVolumeSampledState);
+        rg::EmitImageBarrier(cmd.Native(), outputImage, range, outputDiscardState, outputWriteState);
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineHandle);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &rawDescriptorSet, 0, nullptr);
-        vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
+        vkCmdBindPipeline(cmd.Native(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineHandle);
+        vkCmdBindDescriptorSets(cmd.Native(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &rawDescriptorSet, 0, nullptr);
+        vkCmdPushConstants(cmd.Native(), pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
 
         const Extent3D groupCounts = ComputeGroupCount3D(
             Extent3D{ static_cast<std::uint32_t>(volumeWidth), static_cast<std::uint32_t>(volumeHeight), 1 },
             Extent3D{ kAerialPerspectiveVolumeDebugSliceLocalSizeX, kAerialPerspectiveVolumeDebugSliceLocalSizeY, 1 });
-        vkCmdDispatch(cmd, groupCounts.width, groupCounts.height, groupCounts.depth);
+        vkCmdDispatch(cmd.Native(), groupCounts.width, groupCounts.height, groupCounts.depth);
 
         // Restore the source volume image to its real previous state - the
         // NEXT real frame's own RenderGraph::Execute() call must find it
         // exactly where it left it, mirroring
         // VolumeTexturePreviewRenderer::RenderPreview()'s own identical
         // "restore the volume image to its real previous state" comment.
-        rg::EmitImageBarrier(cmd, sourceVolumeImage, range, sourceVolumeSampledState, sourceVolumePreviousState);
+        rg::EmitImageBarrier(cmd.Native(), sourceVolumeImage, range, sourceVolumeSampledState, sourceVolumePreviousState);
     });
 
     const VkExtent2D extent{ static_cast<std::uint32_t>(volumeWidth), static_cast<std::uint32_t>(volumeHeight) };

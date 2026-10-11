@@ -11,6 +11,9 @@
 
 namespace gte {
 
+class VulkanDevice;
+
+
 // Phase 4B (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - owns the one
 // VkQueryPool (via VulkanQueryPool) backing every GPU timestamp measurement
 // this engine ever takes, plus the actual vkCmdResetQueryPool/
@@ -49,20 +52,20 @@ namespace gte {
 // TESTING.md) - only the pure tri-state RESOLUTION logic it builds on
 // (ResolveGpuTimingStatus(), GpuTiming.h) is pulled out as Tier-1-testable.
 //
-// Does NOT own the VkDevice/VkQueue passed in - both must outlive this
-// object, same non-ownership convention as every other Vulkan/*-adjacent
-// class in this engine.
+// Does NOT own the VulkanDevice passed in - it must outlive this object,
+// same non-ownership convention as every other Vulkan/*-adjacent class in
+// this engine.
 class GpuTimingService {
 public:
     // `capability` is whatever VulkanDevice::TimestampCapability() actually
     // reported for this device (see GpuTiming.h) - this constructor may
     // still override `supported` to false internally (see its own body)
     // when GTE_ENABLE_PROFILER is compiled OFF, regardless of what the
-    // device itself can do. `graphicsQueue`/`graphicsQueueFamily` are only
-    // used for this constructor's own one-time, up-front, whole-pool
-    // reset (see the .cpp) - never stored.
-    GpuTimingService(
-        VkDevice device, VkQueue graphicsQueue, std::uint32_t graphicsQueueFamily, const GpuTimestampCapability& capability);
+    // device itself can do. `vulkanDevice` is only used for this
+    // constructor's own one-time, up-front, whole-pool reset (see the .cpp,
+    // WarmUpResetEntirePool()) - its native handle is cached (m_device,
+    // below), but the reference itself is never stored.
+    GpuTimingService(VulkanDevice& vulkanDevice, const GpuTimestampCapability& capability);
     ~GpuTimingService() = default;
 
     GpuTimingService(const GpuTimingService&) = delete;
@@ -162,8 +165,10 @@ private:
     // self-contained (its own throwaway VkCommandPool, never
     // Renderer::ImmediateSubmit()) since GpuTimingService is constructed
     // before GpuResourceFactory even exists (see Renderer.cpp's member
-    // declaration order) and so cannot depend on it.
-    void WarmUpResetEntirePool(VkQueue graphicsQueue, std::uint32_t graphicsQueueFamily);
+    // declaration order) and so cannot depend on it. The actual submit still
+    // goes through VulkanDevice::SubmitToGraphicsQueue() - the one choke
+    // point every submit to the graphics queue must go through.
+    void WarmUpResetEntirePool(VulkanDevice& vulkanDevice);
 
     VkDevice m_device = VK_NULL_HANDLE;
     GpuTimestampCapability m_capability;

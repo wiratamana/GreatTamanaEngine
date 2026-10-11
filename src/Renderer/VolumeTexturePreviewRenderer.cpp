@@ -2,6 +2,7 @@
 
 #include "ComputeDispatch.h"
 #include "Renderer.h"
+#include "RenderGraph/CommandBuffer.h"
 #include "VolumeTexturePreviewMath.h"
 
 #include <stdexcept>
@@ -235,27 +236,24 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
     const VkPipelineLayout pipelineLayout = m_pipeline->Layout();
     const VkDescriptorSet rawDescriptorSet = m_descriptorSet.Native();
 
-    renderer.ImmediateSubmit([&](VkCommandBuffer cmd) {
+    renderer.ImmediateSubmit([&](rg::CommandBuffer& cmd) {
         const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-        // renderer.ImmediateSubmit() here still takes a raw VkCommandBuffer
-        // (no rg::CommandBuffer overload exists yet), so every Vulkan call
-        // below is issued directly instead of through CommandBuffer::DispatchCompute().
-        rg::EmitImageBarrier(cmd, volumeImage, range, previousState, volumeSampledState);
-        rg::EmitImageBarrier(cmd, outputImage, range, outputPreviousState, outputWriteState);
+        rg::EmitImageBarrier(cmd.Native(), volumeImage, range, previousState, volumeSampledState);
+        rg::EmitImageBarrier(cmd.Native(), outputImage, range, outputPreviousState, outputWriteState);
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineHandle);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &rawDescriptorSet, 0, nullptr);
-        vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
+        vkCmdBindPipeline(cmd.Native(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineHandle);
+        vkCmdBindDescriptorSets(cmd.Native(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &rawDescriptorSet, 0, nullptr);
+        vkCmdPushConstants(cmd.Native(), pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
 
         const std::uint32_t groupCountX = ComputeGroupCount(static_cast<std::uint32_t>(kOutputWidth), kLocalSizeX);
         const std::uint32_t groupCountY = ComputeGroupCount(static_cast<std::uint32_t>(kOutputHeight), kLocalSizeY);
-        vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
+        vkCmdDispatch(cmd.Native(), groupCountX, groupCountY, 1);
 
         // Restore the volume image to its real previous state - a later
         // graph-recorded frame touching the SAME volume texture must see
         // it exactly as the render graph itself still believes it is.
-        rg::EmitImageBarrier(cmd, volumeImage, range, volumeSampledState, previousState);
+        rg::EmitImageBarrier(cmd.Native(), volumeImage, range, volumeSampledState, previousState);
 
         // Deliberately leave m_outputTexture's image in GENERAL - the next
         // step reads it back via Renderer::CaptureImagePixels(), which

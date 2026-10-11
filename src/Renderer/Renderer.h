@@ -36,6 +36,7 @@
 #include <vector>
 
 namespace gte::rg {
+class CommandBuffer;
 class RenderGraph;
 class RenderGraphBuilder;
 } // namespace gte::rg
@@ -142,7 +143,7 @@ public:
     // function's own return value (see this document's own design decision
     // log for why).
     DrawStats RenderOffscreen(RenderTexture& target, std::optional<GpuTimingSlot> timingSlot,
-        const std::function<void(VkCommandBuffer)>& recordExtra = {});
+        const std::function<void(rg::CommandBuffer&)>& recordExtra = {});
 
     // --- Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md)
     // - Render Graph integration ---------------------------------------
@@ -461,12 +462,28 @@ public:
 
 
     // Records a one-time-submit command buffer (recordFn), submits it to
-    // the graphics queue, and blocks until it finishes. The primitive
-    // behind CreateDeviceLocalBuffer() above, but also useful directly for
-    // future one-off GPU work (image layout transitions, mipmap
-    // generation, ...) that doesn't belong inside RenderOffscreen()'s/a
-    // render-graph pass's per-frame recording.
-    void ImmediateSubmit(const std::function<void(VkCommandBuffer)>& recordFn) const;
+    // the graphics queue via Synchronization2 (VkSubmitInfo2/vkQueueSubmit2),
+    // and blocks until it finishes. The primitive behind
+    // CreateDeviceLocalBuffer() above, but also useful directly for future
+    // one-off GPU work (image layout transitions, mipmap generation, ...)
+    // that doesn't belong inside RenderOffscreen()'s/a render-graph pass's
+    // per-frame recording.
+    //
+    // Must NEVER be called re-entrantly from inside an active graph-pass
+    // recording (see BeginGraphPassRecording()/EndGraphPassRecording()) -
+    // CommandBuffer::Dispatch()/Draw() mutate the one, non-reentrant
+    // m_currentGraphPassCmd member, which a nested call would silently
+    // clobber. Asserted in debug builds.
+    void ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& recordFn) const;
+
+    // The ONE choke point every direct vkQueueSubmit2 against this
+    // Renderer's graphics queue must go through (forwards to
+    // VulkanDevice::SubmitToGraphicsQueue(), mutex-guarded). Only for
+    // Renderer-module-internal collaborators that cannot hold a private
+    // VulkanDevice reference of their own (e.g. rg::RenderGraphTimestampPool,
+    // constructed by rg::RenderGraph) - everyone else should prefer
+    // ImmediateSubmit().
+    VkResult SubmitToGraphicsQueue(const VkSubmitInfo2& submit, VkFence fence) const;
 
     // Call once per frame, before Game::Update()/Render() - clears any draw
     // items queued last frame via Submit() (see below) so this frame always
