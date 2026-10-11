@@ -157,43 +157,6 @@ GpuResourceFactory::~GpuResourceFactory()
     Destroy();
 }
 
-GpuResourceFactory::GpuResourceFactory(GpuResourceFactory&& other) noexcept
-    : m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
-    , m_allocator(std::exchange(other.m_allocator, VK_NULL_HANDLE))
-    , m_graphicsQueue(std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE))
-    , m_vulkanDevice(std::exchange(other.m_vulkanDevice, nullptr))
-    , m_physicalDevice(std::exchange(other.m_physicalDevice, VK_NULL_HANDLE))
-    , m_depthFormat(other.m_depthFormat)
-    , m_memoryTracker(std::move(other.m_memoryTracker))
-    , m_commandPool(std::exchange(other.m_commandPool, VK_NULL_HANDLE))
-    , m_materialSetLayout(std::exchange(other.m_materialSetLayout, VK_NULL_HANDLE))
-    , m_materialDescriptorPool(std::exchange(other.m_materialDescriptorPool, VK_NULL_HANDLE))
-    , m_computeDescriptorPool(std::exchange(other.m_computeDescriptorPool, VK_NULL_HANDLE))
-    , m_instanceBufferSetLayout(std::exchange(other.m_instanceBufferSetLayout, VK_NULL_HANDLE))
-{
-}
-
-GpuResourceFactory& GpuResourceFactory::operator=(GpuResourceFactory&& other) noexcept
-{
-    if (this != &other) {
-        Destroy();
-
-        m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
-        m_allocator = std::exchange(other.m_allocator, VK_NULL_HANDLE);
-        m_graphicsQueue = std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE);
-        m_vulkanDevice = std::exchange(other.m_vulkanDevice, nullptr);
-        m_physicalDevice = std::exchange(other.m_physicalDevice, VK_NULL_HANDLE);
-        m_depthFormat = other.m_depthFormat;
-        m_memoryTracker = std::move(other.m_memoryTracker);
-        m_commandPool = std::exchange(other.m_commandPool, VK_NULL_HANDLE);
-        m_materialSetLayout = std::exchange(other.m_materialSetLayout, VK_NULL_HANDLE);
-        m_materialDescriptorPool = std::exchange(other.m_materialDescriptorPool, VK_NULL_HANDLE);
-        m_computeDescriptorPool = std::exchange(other.m_computeDescriptorPool, VK_NULL_HANDLE);
-        m_instanceBufferSetLayout = std::exchange(other.m_instanceBufferSetLayout, VK_NULL_HANDLE);
-    }
-    return *this;
-}
-
 Buffer GpuResourceFactory::CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* debugName) const
 {
     return CreateBuffer(size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
@@ -314,7 +277,12 @@ void GpuResourceFactory::ImmediateSubmitInternal(const std::function<void(VkComm
         throw std::runtime_error("GpuResourceFactory::ImmediateSubmitInternal: vkBeginCommandBuffer failed.");
     }
 
-    recordFn(cmd);
+    try {
+        recordFn(cmd);
+    } catch (...) {
+        FreeTransientCommandBuffer(cmd);
+        throw;
+    }
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         FreeTransientCommandBuffer(cmd);

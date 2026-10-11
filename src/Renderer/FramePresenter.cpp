@@ -48,63 +48,6 @@ FramePresenter::~FramePresenter()
     Destroy();
 }
 
-FramePresenter::FramePresenter(FramePresenter&& other) noexcept
-    : m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
-    , m_graphicsQueue(std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE))
-    , m_presentQueue(std::exchange(other.m_presentQueue, VK_NULL_HANDLE))
-    , m_graphicsQueueFamily(other.m_graphicsQueueFamily)
-    , m_vulkanDevice(std::exchange(other.m_vulkanDevice, nullptr))
-    , m_allocator(std::exchange(other.m_allocator, VK_NULL_HANDLE))
-    , m_depthFormat(other.m_depthFormat)
-    , m_memoryTracker(std::move(other.m_memoryTracker))
-    , m_gpuTiming(std::move(other.m_gpuTiming))
-    , m_swapchain(std::move(other.m_swapchain))
-    , m_frameSync(std::move(other.m_frameSync))
-    , m_depthBuffers(std::move(other.m_depthBuffers))
-    , m_commandPool(std::exchange(other.m_commandPool, VK_NULL_HANDLE))
-    , m_commandBuffers(other.m_commandBuffers)
-    , m_offscreenCommandBuffer(std::exchange(other.m_offscreenCommandBuffer, VK_NULL_HANDLE))
-    , m_currentFrame(other.m_currentFrame)
-    , m_resizeRequested(other.m_resizeRequested)
-    , m_pendingWidth(other.m_pendingWidth)
-    , m_pendingHeight(other.m_pendingHeight)
-    , m_swapchainCapture(std::move(other.m_swapchainCapture))
-    , m_lastCompletedCapture(std::move(other.m_lastCompletedCapture))
-{
-    other.m_commandBuffers.fill(VK_NULL_HANDLE);
-}
-
-FramePresenter& FramePresenter::operator=(FramePresenter&& other) noexcept
-{
-    if (this != &other) {
-        Destroy();
-
-        m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
-        m_graphicsQueue = std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE);
-        m_presentQueue = std::exchange(other.m_presentQueue, VK_NULL_HANDLE);
-        m_graphicsQueueFamily = other.m_graphicsQueueFamily;
-        m_vulkanDevice = std::exchange(other.m_vulkanDevice, nullptr);
-        m_allocator = std::exchange(other.m_allocator, VK_NULL_HANDLE);
-        m_depthFormat = other.m_depthFormat;
-        m_memoryTracker = std::move(other.m_memoryTracker);
-        m_gpuTiming = std::move(other.m_gpuTiming);
-        m_swapchain = std::move(other.m_swapchain);
-        m_frameSync = std::move(other.m_frameSync);
-        m_depthBuffers = std::move(other.m_depthBuffers);
-        m_commandPool = std::exchange(other.m_commandPool, VK_NULL_HANDLE);
-        m_commandBuffers = other.m_commandBuffers;
-        other.m_commandBuffers.fill(VK_NULL_HANDLE);
-        m_offscreenCommandBuffer = std::exchange(other.m_offscreenCommandBuffer, VK_NULL_HANDLE);
-        m_currentFrame = other.m_currentFrame;
-        m_resizeRequested = other.m_resizeRequested;
-        m_pendingWidth = other.m_pendingWidth;
-        m_pendingHeight = other.m_pendingHeight;
-        m_swapchainCapture = std::move(other.m_swapchainCapture);
-        m_lastCompletedCapture = std::move(other.m_lastCompletedCapture);
-    }
-    return *this;
-}
-
 void FramePresenter::Destroy() noexcept
 {
     if (m_commandPool != VK_NULL_HANDLE) {

@@ -58,10 +58,10 @@ class VulkanDevice;
 // DepthBuffers, and command pool/buffers for its entire lifetime.
 //
 // RenderOffscreen() takes a FrameRecorder& parameter rather than storing
-// one, so this class never holds a reference/pointer to anything outside
-// itself across calls - the only reason Renderer's own move constructor can
-// stay a plain defaulted member-wise move (see Renderer.h) without risking
-// a dangling cross-collaborator reference after a move.
+// one, but this class DOES hold a non-owning VulkanDevice* back into its
+// owning Renderer's own m_device sub-object (see m_vulkanDevice below) - so
+// it must never be moved independently, and Renderer itself is non-movable
+// for the exact same reason (see Renderer.h).
 class FramePresenter {
 public:
     // `vulkanDevice` is stored as a non-owning pointer (must outlive this
@@ -79,13 +79,13 @@ public:
     FramePresenter(const FramePresenter&) = delete;
     FramePresenter& operator=(const FramePresenter&) = delete;
 
-    FramePresenter(FramePresenter&& other) noexcept;
-    // Assumes the caller (Renderer::operator=(&&)) has already waited for
-    // the device to go idle before this runs, since it may destroy this
-    // presenter's current swapchain/command pool - see Renderer.cpp. This
-    // class has no standalone way to know when that wait is safe to skip,
-    // so it doesn't attempt it itself.
-    FramePresenter& operator=(FramePresenter&& other) noexcept;
+    // Deleted, not just omitted: m_vulkanDevice points back at the owning
+    // Renderer's m_device, so a plain member-wise move would silently
+    // dangle once the source is destroyed. Nothing needs this to be
+    // movable - only Renderer ever held one, and Renderer's own move is
+    // deleted for the same reason.
+    FramePresenter(FramePresenter&&) = delete;
+    FramePresenter& operator=(FramePresenter&&) = delete;
 
     // The color format this swapchain actually negotiated at runtime - see
     // Renderer::ColorFormat().

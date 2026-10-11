@@ -94,15 +94,14 @@ public:
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
 
-    // Every member below is itself a properly move-safe RAII type (and
-    // none of them hold a reference/pointer to each other - see
-    // FramePresenter.h's class comment), so a plain member-wise move is
-    // correct here. NOTE: if a raw Vulkan handle is ever added directly to
-    // Renderer (rather than inside one of its collaborators), this would
-    // need to become a hand-written move again, same as
-    // operator=(Renderer&&) below.
-    Renderer(Renderer&& other) noexcept = default;
-    Renderer& operator=(Renderer&& other) noexcept;
+    // Never moved - FramePresenter/GpuResourceFactory each hold a raw
+    // VulkanDevice* back into this Renderer's own m_device sub-object, so a
+    // member-wise move would leave them pointing at the SOURCE Renderer's
+    // VulkanDevice, dangling once it's destroyed. Nothing in this engine
+    // moves a Renderer (Core holds it by value and is itself non-movable),
+    // so deleting is correct - no rebind logic needed for zero real callers.
+    Renderer(Renderer&&) = delete;
+    Renderer& operator=(Renderer&&) = delete;
 
     // Sets the color the render target will be cleared to on the next
     // RenderOffscreen() call (0-255 per channel).

@@ -172,34 +172,6 @@ Renderer::~Renderer()
     // destructor body, in reverse declaration order.
 }
 
-Renderer& Renderer::operator=(Renderer&& other) noexcept
-{
-    if (this != &other) {
-        // Wait for the GPU to finish with everything THIS Renderer
-        // currently owns before any of it gets torn down below by the
-        // move-assignments of m_presenter/m_resources (which will destroy
-        // their old swapchain/command pools/etc.) - neither of those
-        // collaborators performs this wait internally, so it must happen
-        // exactly once, here, before touching any of them. See also
-        // ~Renderer() above.
-        if (m_device.Native() != VK_NULL_HANDLE) {
-            vkDeviceWaitIdle(m_device.Native());
-        }
-
-        m_instance = std::move(other.m_instance);
-        m_surface = std::move(other.m_surface);
-        m_device = std::move(other.m_device);
-        m_depthFormat = other.m_depthFormat;
-        m_memoryTracker = std::move(other.m_memoryTracker);
-        m_gpuTiming = std::move(other.m_gpuTiming);
-        m_allocator = std::move(other.m_allocator);
-        m_presenter = std::move(other.m_presenter);
-        m_resources = std::move(other.m_resources);
-        m_frameRecorder = std::move(other.m_frameRecorder);
-    }
-    return *this;
-}
-
 void Renderer::Clear(std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a)
 {
     m_frameRecorder.Clear(r, g, b, a);
@@ -401,7 +373,12 @@ void Renderer::ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& re
     }
 
     rg::CommandBuffer cmd{ vkCmd, const_cast<Renderer*>(this), nullptr };
-    recordFn(cmd);
+    try {
+        recordFn(cmd);
+    } catch (...) {
+        m_resources.FreeTransientCommandBuffer(vkCmd);
+        throw;
+    }
 
     if (vkEndCommandBuffer(vkCmd) != VK_SUCCESS) {
         m_resources.FreeTransientCommandBuffer(vkCmd);

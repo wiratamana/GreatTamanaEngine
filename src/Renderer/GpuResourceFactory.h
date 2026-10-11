@@ -49,8 +49,12 @@ public:
     GpuResourceFactory(const GpuResourceFactory&) = delete;
     GpuResourceFactory& operator=(const GpuResourceFactory&) = delete;
 
-    GpuResourceFactory(GpuResourceFactory&& other) noexcept;
-    GpuResourceFactory& operator=(GpuResourceFactory&& other) noexcept;
+    // Deleted: m_vulkanDevice points back at the owning Renderer's
+    // m_device, so a plain member-wise move would dangle once the source
+    // is destroyed. Only Renderer ever held one, and Renderer's own move
+    // is deleted for the same reason - nothing needs this movable.
+    GpuResourceFactory(GpuResourceFactory&&) = delete;
+    GpuResourceFactory& operator=(GpuResourceFactory&&) = delete;
 
     // See Renderer::CreateRenderTexture(). `format` here must already be
     // fully resolved - VK_FORMAT_UNDEFINED-as-"match ColorFormat()" is
