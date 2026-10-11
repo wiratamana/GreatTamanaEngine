@@ -131,6 +131,7 @@ const char* VertexLayoutDebugName(VertexLayout layout)
     case VertexLayout::PositionNormal: return "PositionNormal";
     case VertexLayout::PositionNormalUv: return "PositionNormalUv";
     case VertexLayout::PositionNormalInstanced: return "PositionNormalInstanced";
+    case VertexLayout::None: return "None";
     }
     return "Unknown";
 }

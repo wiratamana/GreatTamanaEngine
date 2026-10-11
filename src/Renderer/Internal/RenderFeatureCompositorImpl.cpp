@@ -857,16 +857,16 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
             const rg::RenderFeatureScope scope(frame.builder, featureName);
             const std::optional<RenderPassViewData> viewDataOpt = core.FindRenderPassViewData(frame.currentView);
             const RenderPassViewData* viewData = viewDataOpt.has_value() ? &(*viewDataOpt) : nullptr;
-
+            ScenePassHandleCache& handleCache = scenePassHandleCaches[privateName];
             ScenePassReadHandles handles;
             handles.colorHandle = currentInput;
-            handles.colorSampler = RegisterSampler(currentInputSampler);
+            handles.colorSampler = handleCache.colorSampler.Resolve(currentInputSampler);
             if (viewData != nullptr) {
                 const rg::RenderGraphBuilder::ImportedTextureSamplers viewResolved =
                     frame.builder.ResolveImportedTextureSamplers(viewData->colorTarget);
                 handles.depthHandle = viewData->colorTarget;
-                handles.depthImageView = RegisterImageView(viewResolved.depthImageView);
-                handles.depthSampler = RegisterSampler(viewResolved.depthSampler);
+                handles.depthImageView = handleCache.depthImageView.Resolve(viewResolved.depthImageView);
+                handles.depthSampler = handleCache.depthSampler.Resolve(viewResolved.depthSampler);
             }
 
             const RenderFeatureCameraData cameraData = ResolveRenderFeatureCameraData(frame.currentView, viewData);

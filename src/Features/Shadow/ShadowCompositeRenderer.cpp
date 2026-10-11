@@ -87,6 +87,7 @@ void ShadowCompositeRenderer::EnsurePipeline(Renderer& renderer)
     // into its own private accumulation target. No vertex input either -
     // ShadowComposite.vert synthesizes 3 triangle vertices from gl_VertexIndex.
     PipelineDesc desc = PipelinePreset::Opaque(renderer.ColorPixelFormat(), PixelFormat::Undefined);
+    desc.vertexLayout = VertexLayout::None;
     desc.depthTest = false;
     desc.depthWrite = false;
     desc.layout.extraSetLayouts = std::span{ &m_compositeSetLayoutHandle, 1 };

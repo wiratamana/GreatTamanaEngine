@@ -64,6 +64,7 @@
 #include <cstring>
 #include <deque>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace gte {
 
@@ -173,6 +174,27 @@ GpuDrivenBatchNamePool& BatchNamePool()
     return pool;
 }
 
+// Per-view cached sampler/image-view handle trio - see GraphicsHandleRegistry.h's
+// CachedSamplerHandle/CachedImageViewHandle doc comments. Keeps
+// OpaqueHandleRegistry<VkSampler>/OpaqueHandleRegistry<VkImageView>'s slot
+// counts flat across frames instead of minting (and leaking) a fresh handle
+// every single call - the underlying VkSampler/VkImageView only actually
+// changes when a view's own render target is resized/recreated.
+struct ScenePassHandleCache {
+    CachedSamplerHandle colorSampler;
+    CachedImageViewHandle depthImageView;
+    CachedSamplerHandle depthSampler;
+};
+
+// Function-local static, keyed by RenderViewId::Hash() - a plain
+// unordered_map is fine here, this holds one entry per distinct active view
+// (Game/Scene today), never grows per-frame.
+std::unordered_map<std::uint64_t, ScenePassHandleCache>& ScenePassHandleCaches()
+{
+    static std::unordered_map<std::uint64_t, ScenePassHandleCache> caches;
+    return caches;
+}
+
 // Shared by the "PostOpaqueFeatures"/"PostTransparentFeatures" providers
 // below - resolves the current view's own already-rendered color/depth into
 // a ScenePassReadHandles, or std::nullopt if this view has no renderTexture
@@ -181,7 +203,7 @@ GpuDrivenBatchNamePool& BatchNamePool()
 // guard is what keeps both providers safe if the set of active views is
 // ever widened beyond today's Game/Scene pair.
 std::optional<ScenePassReadHandles> ResolveScenePassReadHandles(
-    const rg::RenderGraphBuilder& builder, const RenderPassViewData* viewData)
+    const rg::RenderGraphBuilder& builder, const RenderPassViewData* viewData, rg::RenderViewId view)
 {
     if (viewData == nullptr || viewData->renderTexture == nullptr) {
         return std::nullopt;
@@ -191,13 +213,14 @@ std::optional<ScenePassReadHandles> ResolveScenePassReadHandles(
     if (resolved.depthSampler == VK_NULL_HANDLE) {
         return std::nullopt; // Mirrors the old DepthSampler()-null guard - no depth-sampled view available.
     }
+    ScenePassHandleCache& cache = ScenePassHandleCaches()[view.Hash()];
     ScenePassReadHandles handles;
     handles.colorHandle = viewData->colorTarget;
     handles.depthHandle = viewData->colorTarget; // Same underlying imported texture - color and depth are
                                                   // two sub-resources of the one handle in this engine today.
-    handles.colorSampler = RegisterSampler(resolved.colorSampler);
-    handles.depthImageView = RegisterImageView(resolved.depthImageView);
-    handles.depthSampler = RegisterSampler(resolved.depthSampler);
+    handles.colorSampler = cache.colorSampler.Resolve(resolved.colorSampler);
+    handles.depthImageView = cache.depthImageView.Resolve(resolved.depthImageView);
+    handles.depthSampler = cache.depthSampler.Resolve(resolved.depthSampler);
     return handles;
 }
 
@@ -1337,7 +1360,8 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 return;
             }
             const RenderPassViewData* viewData = FindViewData(frame.currentView);
-            const std::optional<ScenePassReadHandles> handles = ResolveScenePassReadHandles(frame.builder, viewData);
+            const std::optional<ScenePassReadHandles> handles =
+                ResolveScenePassReadHandles(frame.builder, viewData, frame.currentView);
             if (!handles.has_value()) {
                 return;
             }
@@ -1400,7 +1424,8 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 return;
             }
             const RenderPassViewData* viewData = FindViewData(frame.currentView);
-            const std::optional<ScenePassReadHandles> handles = ResolveScenePassReadHandles(frame.builder, viewData);
+            const std::optional<ScenePassReadHandles> handles =
+                ResolveScenePassReadHandles(frame.builder, viewData, frame.currentView);
             if (!handles.has_value()) {
                 return;
             }

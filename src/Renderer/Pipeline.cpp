@@ -29,11 +29,16 @@ bool DepthFormatHasStencil(VkFormat format)
 // Which binding/attribute description to build against - see VertexLayout's
 // own comment in Pipeline.h. Each layout's own struct (Vertex.h/MeshVertex.h)
 // knows its own binding/attributes; shared by every Pipeline constructor so
-// this switch exists in exactly one place.
-void BuildVertexInputState(
+// this switch exists in exactly one place. Returns the vertex BINDING count
+// (0 or 1) actually used - VertexLayout::None has none at all, so a caller
+// must use this return value instead of assuming 1.
+std::uint32_t BuildVertexInputState(
     VertexLayout vertexLayout, VkVertexInputBindingDescription& binding, std::vector<VkVertexInputAttributeDescription>& attributes)
 {
     switch (vertexLayout) {
+    case VertexLayout::None:
+        attributes.clear();
+        return 0;
     case VertexLayout::PositionNormal:
     case VertexLayout::PositionNormalInstanced: {
         // GPU-Driven Frustum Culling + Indirect Draw campaign
@@ -46,20 +51,20 @@ void BuildVertexInputState(
         binding = MeshVertex::BindingDescription();
         const auto layoutAttributes = MeshVertex::AttributeDescriptions();
         attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
-        break;
+        return 1;
     }
     case VertexLayout::PositionNormalUv: {
         binding = MeshVertexUv::BindingDescription();
         const auto layoutAttributes = MeshVertexUv::AttributeDescriptions();
         attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
-        break;
+        return 1;
     }
     case VertexLayout::PositionColor:
     default: {
         binding = Vertex::BindingDescription();
         const auto layoutAttributes = Vertex::AttributeDescriptions();
         attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
-        break;
+        return 1;
     }
     }
 }
@@ -123,12 +128,12 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         // See BuildVertexInputState() above.
         VkVertexInputBindingDescription binding{};
         std::vector<VkVertexInputAttributeDescription> attributes;
-        BuildVertexInputState(vertexLayout, binding, attributes);
+        const std::uint32_t bindingCount = BuildVertexInputState(vertexLayout, binding, attributes);
 
         VkPipelineVertexInputStateCreateInfo vertexInput{};
         vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertexInput.vertexBindingDescriptionCount = 1;
-        vertexInput.pVertexBindingDescriptions = &binding;
+        vertexInput.vertexBindingDescriptionCount = bindingCount;
+        vertexInput.pVertexBindingDescriptions = bindingCount > 0 ? &binding : nullptr;
         vertexInput.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(attributes.size());
         vertexInput.pVertexAttributeDescriptions = attributes.data();
 
@@ -364,12 +369,12 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
 
         VkVertexInputBindingDescription binding{};
         std::vector<VkVertexInputAttributeDescription> attributes;
-        BuildVertexInputState(vertexLayout, binding, attributes);
+        const std::uint32_t bindingCount = BuildVertexInputState(vertexLayout, binding, attributes);
 
         VkPipelineVertexInputStateCreateInfo vertexInput{};
         vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertexInput.vertexBindingDescriptionCount = 1;
-        vertexInput.pVertexBindingDescriptions = &binding;
+        vertexInput.vertexBindingDescriptionCount = bindingCount;
+        vertexInput.pVertexBindingDescriptions = bindingCount > 0 ? &binding : nullptr;
         vertexInput.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(attributes.size());
         vertexInput.pVertexAttributeDescriptions = attributes.data();
 

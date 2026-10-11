@@ -27,4 +27,48 @@ DescriptorSetLayoutHandle RegisterDescriptorSetLayout(VkDescriptorSetLayout valu
 VkDescriptorSetLayout Native(DescriptorSetLayoutHandle handle) noexcept;
 void UnregisterDescriptorSetLayout(DescriptorSetLayoutHandle handle) noexcept;
 
+// Re-mints a SamplerHandle only when the underlying VkSampler actually
+// changed since the last Resolve() call - a call site that re-resolves the
+// SAME stable VkSampler every frame (the common case: a view's own render
+// target sampler never changes unless that render target is itself resized
+// or recreated) gets back the SAME handle instead of minting a brand-new,
+// never-freed one every frame. VK_NULL_HANDLE always resolves to
+// SamplerHandle::Invalid, never registered.
+struct CachedSamplerHandle {
+    VkSampler native = VK_NULL_HANDLE;
+    SamplerHandle handle = SamplerHandle::Invalid;
+
+    SamplerHandle Resolve(VkSampler current) noexcept
+    {
+        if (current == native && handle != SamplerHandle::Invalid) {
+            return handle;
+        }
+        if (handle != SamplerHandle::Invalid) {
+            UnregisterSampler(handle);
+        }
+        native = current;
+        handle = (current != VK_NULL_HANDLE) ? RegisterSampler(current) : SamplerHandle::Invalid;
+        return handle;
+    }
+};
+
+// ImageView sibling of CachedSamplerHandle above - identical reasoning.
+struct CachedImageViewHandle {
+    VkImageView native = VK_NULL_HANDLE;
+    ImageViewHandle handle = ImageViewHandle::Invalid;
+
+    ImageViewHandle Resolve(VkImageView current) noexcept
+    {
+        if (current == native && handle != ImageViewHandle::Invalid) {
+            return handle;
+        }
+        if (handle != ImageViewHandle::Invalid) {
+            UnregisterImageView(handle);
+        }
+        native = current;
+        handle = (current != VK_NULL_HANDLE) ? RegisterImageView(current) : ImageViewHandle::Invalid;
+        return handle;
+    }
+};
+
 } // namespace gte
