@@ -20,6 +20,8 @@
 #include "../Renderer/RenderGraph/RenderFeatureScope.h"
 // The generic, early toggle guard used by the "IndirectDraw" check below.
 #include "../Renderer/RenderGraph/RenderPassToggleGuard.h"
+#include "../Renderer/RenderGraph/RenderPassTagValidation.h"
+#include "../Renderer/GraphicsHandleRegistry.h"
 
 // editor-core-separation-22 campaign, PHASE3
 // (task_manager/editor-core-separation-22/
@@ -193,9 +195,9 @@ std::optional<ScenePassReadHandles> ResolveScenePassReadHandles(
     handles.colorHandle = viewData->colorTarget;
     handles.depthHandle = viewData->colorTarget; // Same underlying imported texture - color and depth are
                                                   // two sub-resources of the one handle in this engine today.
-    handles.colorSampler = resolved.colorSampler;
-    handles.depthImageView = resolved.depthImageView;
-    handles.depthSampler = resolved.depthSampler;
+    handles.colorSampler = RegisterSampler(resolved.colorSampler);
+    handles.depthImageView = RegisterImageView(resolved.depthImageView);
+    handles.depthSampler = RegisterSampler(resolved.depthSampler);
     return handles;
 }
 

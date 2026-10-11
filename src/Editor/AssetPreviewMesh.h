@@ -1,6 +1,8 @@
 #pragma once
 
 #include "../Math/Vec3.h"
+#include "../Core/GraphicsHandles.h"
+#include "../Renderer/Pipeline.h"
 
 #include <volk.h>
 
@@ -35,18 +37,13 @@ class RenderTexture;
 // AssetPreviewTexture caches its decoded texture - only re-uploaded when the
 // selected path or that file's own last-write-time changes.
 //
-// Deliberately bypasses Renderer::CreatePipeline()/Renderer::CreateMesh()/
-// Renderer::Submit() entirely: those are hardcoded to this engine's shared
-// position+color Vertex layout (src/Renderer/Vertex.h), whereas a lit mesh
-// preview needs a per-vertex NORMAL instead. Builds its own small
-// VkPipeline/VkPipelineLayout (MeshPreview.vert/.frag) directly and records
-// its own vkCmdBindPipeline/vkCmdBindVertexBuffers/vkCmdBindIndexBuffer/
-// vkCmdDrawIndexed calls via a Renderer::RenderOffscreen() recordExtra
-// callback - this is exactly the kind of thing AGENTS.md's "Editor Module
-// Structure" section already sanctions ("Vulkan types are fine to use
-// directly anywhere in this folder... precisely so an external Vulkan-based
-// rendering backend... owned by the Editor module can use them directly"),
-// the same boundary Dear ImGui's own Vulkan backend already sits behind.
+// Needs a per-vertex NORMAL (not this engine's shared position+color
+// Vertex layout), so it builds its pipeline through Renderer's configurable
+// pipeline API (Core/PipelineDesc.h, VertexLayout::PositionNormal) instead
+// of the fixed-shape path-based CreatePipeline() overload. Still records
+// its own vkCmdBindVertexBuffers/vkCmdBindIndexBuffer/vkCmdDrawIndexed via
+// a Renderer::RenderOffscreen() recordExtra callback - Vulkan types are
+// fine to use directly in this Editor-module file for that reason.
 // Still uses Renderer's public factories for everything else (CreateBuffer/
 // CreateDeviceLocalBuffer/CreateRenderTexture/RenderOffscreen), so it never
 // touches a raw VmaAllocator/VkCommandPool itself.
@@ -102,23 +99,23 @@ private:
     void EnsureRenderTexture(Renderer& renderer, int width, int height);
 
     VkDevice m_device = VK_NULL_HANDLE;
+    Renderer* m_renderer = nullptr; // Non-owning - needed to destroy the two handles below.
 
     // Lazily built on first Render() call, then reused for every
-    // subsequently-selected mesh asset - unlike the per-asset vertex/index
-    // buffers below, this pipeline's shape (vertex layout, push constant
-    // range, color/depth format) never depends on WHICH mesh is selected.
-    VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline m_pipeline = VK_NULL_HANDLE;
+    // subsequently-selected mesh asset - built via Renderer's configurable
+    // pipeline API (Core/PipelineDesc.h) instead of hand-rolled Vulkan calls.
+    std::unique_ptr<Pipeline> m_pipeline;
+    DescriptorSetLayoutHandle m_setZeroFillerLayoutHandle = DescriptorSetLayoutHandle::Invalid;
+    DescriptorSetLayoutHandle m_setOneLayoutHandle = DescriptorSetLayoutHandle::Invalid;
 
-    // MeshPreview.frag now samples the shared set=1 lighting/shadow
-    // interface (DirectionalLightingAndReceiverMask.glsl) - this preview has
-    // no real per-frame scene light/shadow context, so it builds its own
-    // tiny, local, always-neutral stand-in: a 1x1 white dummy texture at
-    // binding 0 + a zero-filled dummy UBO at binding 8, bound at set=1.
-    // m_setZeroFillerLayout is a zero-binding filler satisfying Vulkan's
-    // positional pSetLayouts indexing (set=0 must exist if set=1 does) -
-    // mirrors Pipeline.cpp's own m_syntheticSetZeroLayout precedent exactly.
-    VkDescriptorSetLayout m_setZeroFillerLayout = VK_NULL_HANDLE;
+    // MeshPreview.frag samples the shared set=1 lighting/shadow interface -
+    // this preview has no real scene light/shadow context, so it builds its
+    // own tiny, always-neutral stand-in: a 1x1 white dummy texture at
+    // binding 0 + a zero-filled dummy UBO at binding 8. Kept raw: the opaque
+    // pipeline API has no way to allocate a real, writable descriptor SET,
+    // only a set LAYOUT - m_localSetOneLayout and m_setOneLayoutHandle above
+    // are two separately-built but identically-defined layouts, which Vulkan
+    // treats as pipeline-layout-compatible.
     VkDescriptorSetLayout m_localSetOneLayout = VK_NULL_HANDLE;
     VkDescriptorPool m_localDescriptorPool = VK_NULL_HANDLE;
     VkDescriptorSet m_localSetOneDescriptorSet = VK_NULL_HANDLE;

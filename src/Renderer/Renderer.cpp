@@ -3,11 +3,15 @@
 #include "../Core/ISurfaceProvider.h"
 #include "RenderGraph/RenderGraph.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
+#include "UiTextureBackend.h"
+#include "Vulkan/DescriptorSetLayoutBuilder.h"
 #include "VulkanFormatInfo.h"
 
 #include <cassert>
 #include <cstring>
 #include <memory>
+#include <mutex>
+#include <unordered_set>
 #include <utility>
 
 namespace gte {
@@ -19,6 +23,113 @@ constexpr bool kEnableValidation = false;
 #else
 constexpr bool kEnableValidation = true;
 #endif
+
+// --- GAP2: gte::PipelineDesc <-> Vk* conversion (Renderer-internal only) ---
+VkShaderStageFlags ToVkShaderStageFlags(ShaderStageMask mask) noexcept
+{
+    VkShaderStageFlags flags = 0;
+    if (HasStage(mask, ShaderStageMask::Vertex)) {
+        flags |= VK_SHADER_STAGE_VERTEX_BIT;
+    }
+    if (HasStage(mask, ShaderStageMask::Fragment)) {
+        flags |= VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
+    if (HasStage(mask, ShaderStageMask::Compute)) {
+        flags |= VK_SHADER_STAGE_COMPUTE_BIT;
+    }
+    return flags;
+}
+
+VkPrimitiveTopology ToVkTopology(Topology topology) noexcept
+{
+    switch (topology) {
+        case Topology::LineList:
+            return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+        case Topology::PointList:
+            return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+        case Topology::TriangleList:
+        default:
+            return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    }
+}
+
+VkCullModeFlags ToVkCullMode(CullMode cullMode) noexcept
+{
+    switch (cullMode) {
+        case CullMode::Front:
+            return VK_CULL_MODE_FRONT_BIT;
+        case CullMode::Back:
+            return VK_CULL_MODE_BACK_BIT;
+        case CullMode::None:
+        default:
+            return VK_CULL_MODE_NONE;
+    }
+}
+
+VkCompareOp ToVkCompareOp(CompareOp op) noexcept
+{
+    switch (op) {
+        case CompareOp::Never:
+            return VK_COMPARE_OP_NEVER;
+        case CompareOp::Less:
+            return VK_COMPARE_OP_LESS;
+        case CompareOp::Equal:
+            return VK_COMPARE_OP_EQUAL;
+        case CompareOp::LessEqual:
+            return VK_COMPARE_OP_LESS_OR_EQUAL;
+        case CompareOp::Greater:
+            return VK_COMPARE_OP_GREATER;
+        case CompareOp::GreaterEqual:
+            return VK_COMPARE_OP_GREATER_OR_EQUAL;
+        case CompareOp::Always:
+        default:
+            return VK_COMPARE_OP_ALWAYS;
+    }
+}
+
+// One blend attachment state per BlendMode - applied identically to every
+// color attachment a Pipeline built via PipelineDesc has (see
+// Pipeline::Pipeline()'s configurable constructor).
+VkPipelineColorBlendAttachmentState ToVkBlendState(BlendMode mode) noexcept
+{
+    VkPipelineColorBlendAttachmentState state{};
+    state.colorWriteMask =
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    switch (mode) {
+        case BlendMode::AlphaBlend:
+            state.blendEnable = VK_TRUE;
+            state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+            state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            state.colorBlendOp = VK_BLEND_OP_ADD;
+            state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+            state.alphaBlendOp = VK_BLEND_OP_ADD;
+            break;
+        case BlendMode::Additive:
+            state.blendEnable = VK_TRUE;
+            state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+            state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            state.colorBlendOp = VK_BLEND_OP_ADD;
+            state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            state.alphaBlendOp = VK_BLEND_OP_ADD;
+            break;
+        case BlendMode::Opaque:
+        default:
+            state.blendEnable = VK_FALSE;
+            break;
+    }
+    return state;
+}
+
+// GAP5: the live set of descriptor sets GetUiTextureHandle() has minted,
+// guarded by its own mutex - exists purely so ReleaseUiTextureHandle() can
+// reject a double-release/foreign value instead of calling
+// ImGui_ImplVulkan_RemoveTexture() on garbage. The handle VALUE itself is
+// the real VkDescriptorSet bit pattern (see Renderer.h's own doc comment on
+// GetUiTextureHandle()), never a separate generation-checked index.
+std::mutex g_uiTextureMutex;
+std::unordered_set<VkDescriptorSet> g_liveUiTextures;
 
 } // namespace
 
@@ -147,6 +258,16 @@ VkFormat Renderer::ColorFormat() const noexcept
 VkFormat Renderer::DepthFormat() const noexcept
 {
     return m_depthFormat;
+}
+
+PixelFormat Renderer::ColorPixelFormat() const noexcept
+{
+    return FromVkFormat(ColorFormat());
+}
+
+PixelFormat Renderer::DepthPixelFormat() const noexcept
+{
+    return FromVkFormat(DepthFormat());
 }
 
 RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat format, const char* debugName,
@@ -541,6 +662,113 @@ GpuTimingSample Renderer::LastGpuTiming(GpuTimingSlot slot) const noexcept
 void Renderer::SetGpuTimingCaptureEnabled(bool enabled) noexcept
 {
     m_gpuTiming->SetCaptureEnabled(enabled);
+}
+
+DescriptorSetLayoutHandle Renderer::CreateDescriptorSetLayout(std::span<const DescriptorBindingDesc> bindings) const
+{
+    DescriptorSetLayoutBuilder builder(m_device.Native());
+    for (const DescriptorBindingDesc& binding : bindings) {
+        const VkShaderStageFlags stages = ToVkShaderStageFlags(binding.stages);
+        switch (binding.kind) {
+            case DescriptorKind::CombinedImageSampler:
+                builder.AddCombinedImageSampler(binding.binding, stages, binding.count);
+                break;
+            case DescriptorKind::UniformBuffer:
+                builder.AddUniformBuffer(binding.binding, stages, binding.count);
+                break;
+            case DescriptorKind::StorageBuffer:
+                builder.AddStorageBuffer(binding.binding, stages, binding.count);
+                break;
+            case DescriptorKind::StorageImage:
+                builder.AddStorageImage(binding.binding, stages, binding.count);
+                break;
+        }
+    }
+    return RegisterDescriptorSetLayout(builder.Build());
+}
+
+void Renderer::DestroyDescriptorSetLayout(DescriptorSetLayoutHandle handle) const noexcept
+{
+    const VkDescriptorSetLayout layout = Native(handle);
+    UnregisterDescriptorSetLayout(handle);
+    if (layout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_device.Native(), layout, nullptr);
+    }
+}
+
+Pipeline Renderer::CreatePipeline(
+    const PipelineDesc& desc, std::span<const std::byte> vertexSpirv, std::span<const std::byte> fragmentSpirv) const
+{
+    VkFormat colorFormats[PipelineDesc::kMaxColorAttachments]{};
+    const std::span<const PixelFormat> colorFmts = desc.ColorFormats();
+    for (std::size_t i = 0; i < colorFmts.size(); ++i) {
+        colorFormats[i] = ToVkFormat(colorFmts[i]);
+    }
+
+    // desc.layout drives vkCreatePipelineLayout: sceneServicesSetLayout (if
+    // any) first, then extraSetLayouts in order - the ONLY place these
+    // opaque handles unwrap to a real VkDescriptorSetLayout value.
+    std::vector<VkDescriptorSetLayout> setLayouts;
+    if (desc.layout.sceneServicesSetLayout != DescriptorSetLayoutHandle::Invalid) {
+        setLayouts.push_back(Native(desc.layout.sceneServicesSetLayout));
+    }
+    for (DescriptorSetLayoutHandle handle : desc.layout.extraSetLayouts) {
+        setLayouts.push_back(Native(handle));
+    }
+
+    return Pipeline(m_device.Native(), std::span<const VkFormat>(colorFormats, colorFmts.size()),
+        ToVkFormat(desc.depthAttachmentFormat), vertexSpirv, fragmentSpirv, desc.vertexLayout,
+        ToVkTopology(desc.topology), ToVkCullMode(desc.cullMode), desc.depthTest, desc.depthWrite,
+        ToVkCompareOp(desc.depthCompare), ToVkBlendState(desc.blendMode), setLayouts,
+        ToVkShaderStageFlags(desc.layout.pushConstantStages), desc.layout.pushConstantByteSize, desc.debugName);
+}
+
+UiTextureHandle Renderer::GetUiTextureHandle(const Texture2D& texture)
+{
+    const VkDescriptorSet set = AddUiTexture(texture.Sampler(), texture.View());
+    if (set == VK_NULL_HANDLE) {
+        return UiTextureHandle::Invalid; // No UI backend installed (e.g. a headless Player build).
+    }
+    std::lock_guard lock(g_uiTextureMutex);
+    g_liveUiTextures.insert(set);
+    return static_cast<UiTextureHandle>(reinterpret_cast<std::uintptr_t>(set));
+}
+
+UiTextureHandle Renderer::GetUiTextureHandle(const RenderTexture& target)
+{
+    const VkDescriptorSet set = AddUiTexture(target.Sampler(), target.View());
+    if (set == VK_NULL_HANDLE) {
+        return UiTextureHandle::Invalid;
+    }
+    std::lock_guard lock(g_uiTextureMutex);
+    g_liveUiTextures.insert(set);
+    return static_cast<UiTextureHandle>(reinterpret_cast<std::uintptr_t>(set));
+}
+
+void Renderer::ReleaseUiTextureHandle(UiTextureHandle handle) noexcept
+{
+    const auto set = reinterpret_cast<VkDescriptorSet>(static_cast<std::uintptr_t>(static_cast<std::uint64_t>(handle)));
+    {
+        std::lock_guard lock(g_uiTextureMutex);
+        if (g_liveUiTextures.erase(set) == 0) {
+            return; // Already released, or never a real handle - safe no-op.
+        }
+    }
+    RemoveUiTexture(set);
+}
+
+CaptureResult Renderer::CaptureRenderTarget(const RenderTexture& target) const
+{
+    const rg::ResourceState shaderReadState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
+    const CapturedRawPixels raw =
+        CaptureImagePixels(target.Image(), VK_IMAGE_ASPECT_COLOR_BIT, target.Format(), target.Extent(), shaderReadState);
+
+    CaptureResult result;
+    result.extent = Extent2D{ static_cast<std::uint32_t>(raw.width), static_cast<std::uint32_t>(raw.height) };
+    result.format = FromVkFormat(raw.format);
+    result.pixels.resize(raw.pixels.size());
+    std::memcpy(result.pixels.data(), raw.pixels.data(), raw.pixels.size());
+    return result;
 }
 
 } // namespace gte

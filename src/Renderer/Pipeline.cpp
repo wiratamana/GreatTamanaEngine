@@ -26,6 +26,44 @@ bool DepthFormatHasStencil(VkFormat format)
         format == VK_FORMAT_D16_UNORM_S8_UINT;
 }
 
+// Which binding/attribute description to build against - see VertexLayout's
+// own comment in Pipeline.h. Each layout's own struct (Vertex.h/MeshVertex.h)
+// knows its own binding/attributes; shared by every Pipeline constructor so
+// this switch exists in exactly one place.
+void BuildVertexInputState(
+    VertexLayout vertexLayout, VkVertexInputBindingDescription& binding, std::vector<VkVertexInputAttributeDescription>& attributes)
+{
+    switch (vertexLayout) {
+    case VertexLayout::PositionNormal:
+    case VertexLayout::PositionNormalInstanced: {
+        // GPU-Driven Frustum Culling + Indirect Draw campaign
+        // (render-pass-5), PHASE2 - PositionNormalInstanced shares the
+        // EXACT same vertex INPUT attributes as PositionNormal (see
+        // Shaders/MeshInstanced.vert's own header comment) - only the
+        // model matrix SOURCE differs (a per-instance storage buffer
+        // instead of the push constant), which is a vertex-SHADER
+        // concern, not a vertex-INPUT-layout one.
+        binding = MeshVertex::BindingDescription();
+        const auto layoutAttributes = MeshVertex::AttributeDescriptions();
+        attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
+        break;
+    }
+    case VertexLayout::PositionNormalUv: {
+        binding = MeshVertexUv::BindingDescription();
+        const auto layoutAttributes = MeshVertexUv::AttributeDescriptions();
+        attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
+        break;
+    }
+    case VertexLayout::PositionColor:
+    default: {
+        binding = Vertex::BindingDescription();
+        const auto layoutAttributes = Vertex::AttributeDescriptions();
+        attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
+        break;
+    }
+    }
+}
+
 } // namespace
 
 Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
@@ -82,44 +120,10 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         stages[1].module = fragModule;
         stages[1].pName = "main";
 
-        // Which binding/attribute description to build against - see
-        // VertexLayout's own comment in Pipeline.h. Each layout's own
-        // struct (Vertex.h/MeshVertex.h) knows its own binding/attributes;
-        // a plain std::vector (rather than a fixed-size std::array, which
-        // would need to be the same size for every layout) lets this one
-        // code path serve all three without duplicating the constructor
-        // per layout.
+        // See BuildVertexInputState() above.
         VkVertexInputBindingDescription binding{};
         std::vector<VkVertexInputAttributeDescription> attributes;
-        switch (vertexLayout) {
-        case VertexLayout::PositionNormal:
-        case VertexLayout::PositionNormalInstanced: {
-            // GPU-Driven Frustum Culling + Indirect Draw campaign
-            // (render-pass-5), PHASE2 - PositionNormalInstanced shares the
-            // EXACT same vertex INPUT attributes as PositionNormal (see
-            // Shaders/MeshInstanced.vert's own header comment) - only the
-            // model matrix SOURCE differs (a per-instance storage buffer
-            // instead of the push constant), which is a vertex-SHADER
-            // concern, not a vertex-INPUT-layout one.
-            binding = MeshVertex::BindingDescription();
-            const auto layoutAttributes = MeshVertex::AttributeDescriptions();
-            attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
-            break;
-        }
-        case VertexLayout::PositionNormalUv: {
-            binding = MeshVertexUv::BindingDescription();
-            const auto layoutAttributes = MeshVertexUv::AttributeDescriptions();
-            attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
-            break;
-        }
-        case VertexLayout::PositionColor:
-        default: {
-            binding = Vertex::BindingDescription();
-            const auto layoutAttributes = Vertex::AttributeDescriptions();
-            attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
-            break;
-        }
-        }
+        BuildVertexInputState(vertexLayout, binding, attributes);
 
         VkPipelineVertexInputStateCreateInfo vertexInput{};
         vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -318,6 +322,156 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
             vkDestroyDescriptorSetLayout(device, m_syntheticSetZeroLayout, nullptr);
             m_syntheticSetZeroLayout = VK_NULL_HANDLE;
         }
+        vkDestroyShaderModule(device, fragModule, nullptr);
+        vkDestroyShaderModule(device, vertModule, nullptr);
+        throw;
+    }
+
+    vkDestroyShaderModule(device, fragModule, nullptr);
+    vkDestroyShaderModule(device, vertModule, nullptr);
+}
+
+Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
+    std::span<const std::byte> vertexSpirv, std::span<const std::byte> fragmentSpirv, VertexLayout vertexLayout,
+    VkPrimitiveTopology topology, VkCullModeFlags cullMode, bool depthTest, bool depthWrite, VkCompareOp depthCompare,
+    VkPipelineColorBlendAttachmentState blendState, std::span<const VkDescriptorSetLayout> setLayouts,
+    VkShaderStageFlags pushConstantStages, std::uint32_t pushConstantByteSize, const char* debugName)
+    : m_device(device)
+    , m_debugName(debugName != nullptr ? debugName : std::string())
+    , m_vertexLayout(vertexLayout)
+{
+    assert(colorFormats.size() <= kPipelineMaxColorAttachments
+        && "Pipeline: colorFormats must be no larger than kPipelineMaxColorAttachments (8).");
+
+    VkShaderModule vertModule = LoadShaderModule(device, vertexSpirv);
+    VkShaderModule fragModule = VK_NULL_HANDLE;
+    try {
+        fragModule = LoadShaderModule(device, fragmentSpirv);
+    } catch (...) {
+        vkDestroyShaderModule(device, vertModule, nullptr);
+        throw;
+    }
+    try {
+        VkPipelineShaderStageCreateInfo stages[2]{};
+        stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+        stages[0].module = vertModule;
+        stages[0].pName = "main";
+        stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        stages[1].module = fragModule;
+        stages[1].pName = "main";
+
+        VkVertexInputBindingDescription binding{};
+        std::vector<VkVertexInputAttributeDescription> attributes;
+        BuildVertexInputState(vertexLayout, binding, attributes);
+
+        VkPipelineVertexInputStateCreateInfo vertexInput{};
+        vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertexInput.vertexBindingDescriptionCount = 1;
+        vertexInput.pVertexBindingDescriptions = &binding;
+        vertexInput.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(attributes.size());
+        vertexInput.pVertexAttributeDescriptions = attributes.data();
+
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+        inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        inputAssembly.topology = topology;
+
+        VkPipelineViewportStateCreateInfo viewportState{};
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewportState.viewportCount = 1;
+        viewportState.scissorCount = 1;
+
+        VkPipelineRasterizationStateCreateInfo rasterizer{};
+        rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.cullMode = cullMode;
+        rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+        rasterizer.lineWidth = 1.0f;
+
+        VkPipelineMultisampleStateCreateInfo multisample{};
+        multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        VkPipelineDepthStencilStateCreateInfo depthStencil{};
+        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depthStencil.depthTestEnable = depthTest ? VK_TRUE : VK_FALSE;
+        depthStencil.depthWriteEnable = depthWrite ? VK_TRUE : VK_FALSE;
+        depthStencil.depthCompareOp = depthCompare;
+        depthStencil.depthBoundsTestEnable = VK_FALSE;
+        depthStencil.stencilTestEnable = VK_FALSE;
+
+        // One identical blend attachment state per color target - a single
+        // BlendMode applies uniformly across every attachment (per-attachment
+        // blend customization is out of scope, same as the fixed-shape
+        // constructors above).
+        std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments(colorFormats.size(), blendState);
+
+        VkPipelineColorBlendStateCreateInfo colorBlend{};
+        colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        colorBlend.attachmentCount = static_cast<std::uint32_t>(colorBlendAttachments.size());
+        colorBlend.pAttachments = colorBlendAttachments.data();
+
+        // Dynamic depth bias too (GAP2 - avoids a pipeline-permutation per
+        // shadow-bias tweak) on top of the fixed constructors' viewport/scissor.
+        const VkDynamicState dynamicStates[] = {
+            VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS
+        };
+        VkPipelineDynamicStateCreateInfo dynamicState{};
+        dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynamicState.dynamicStateCount = static_cast<std::uint32_t>(std::size(dynamicStates));
+        dynamicState.pDynamicStates = dynamicStates;
+
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = pushConstantStages;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = pushConstantByteSize;
+
+        VkPipelineLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        if (pushConstantByteSize > 0) {
+            layoutInfo.pushConstantRangeCount = 1;
+            layoutInfo.pPushConstantRanges = &pushConstantRange;
+        }
+        if (!setLayouts.empty()) {
+            layoutInfo.setLayoutCount = static_cast<std::uint32_t>(setLayouts.size());
+            layoutInfo.pSetLayouts = setLayouts.data();
+        }
+
+        if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &m_layout) != VK_SUCCESS) {
+            throw std::runtime_error("Pipeline: vkCreatePipelineLayout failed.");
+        }
+
+        const bool depthHasStencil = DepthFormatHasStencil(depthFormat);
+        VkPipelineRenderingCreateInfo renderingInfo{};
+        renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+        renderingInfo.colorAttachmentCount = static_cast<std::uint32_t>(colorFormats.size());
+        renderingInfo.pColorAttachmentFormats = colorFormats.data();
+        renderingInfo.depthAttachmentFormat = depthFormat;
+        renderingInfo.stencilAttachmentFormat = depthHasStencil ? depthFormat : VK_FORMAT_UNDEFINED;
+
+        VkGraphicsPipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.pNext = &renderingInfo;
+        pipelineInfo.stageCount = static_cast<std::uint32_t>(std::size(stages));
+        pipelineInfo.pStages = stages;
+        pipelineInfo.pVertexInputState = &vertexInput;
+        pipelineInfo.pInputAssemblyState = &inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &rasterizer;
+        pipelineInfo.pMultisampleState = &multisample;
+        pipelineInfo.pDepthStencilState = &depthStencil;
+        pipelineInfo.pColorBlendState = &colorBlend;
+        pipelineInfo.pDynamicState = &dynamicState;
+        pipelineInfo.layout = m_layout;
+        pipelineInfo.basePipelineIndex = -1;
+
+        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_pipeline) != VK_SUCCESS) {
+            vkDestroyPipelineLayout(device, m_layout, nullptr);
+            m_layout = VK_NULL_HANDLE;
+            throw std::runtime_error("Pipeline: vkCreateGraphicsPipelines failed.");
+        }
+    } catch (...) {
         vkDestroyShaderModule(device, fragModule, nullptr);
         vkDestroyShaderModule(device, vertModule, nullptr);
         throw;

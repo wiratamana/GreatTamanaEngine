@@ -887,6 +887,26 @@ add_library(gte_core STATIC
     src/Encoding/SingleChannelVisualization.cpp
     src/Renderer/VulkanFormatInfo.h
     src/Renderer/VulkanFormatInfo.cpp
+    # Vulkan/volk dependency decoupling - engine-wide, Vulkan-free value types
+    # plus their Renderer-internal registries/conversions.
+    src/Core/BufferSlice.h
+    src/Core/CaptureResult.h
+    src/Core/Extent.h
+    src/Core/GraphicsHandles.h
+    src/Core/PipelineDesc.h
+    src/Core/PixelFormat.h
+    src/Core/UiTextureHandle.h
+    src/Renderer/VertexLayout.h
+    src/Renderer/GraphicsHandleRegistry.h
+    src/Renderer/GraphicsHandleRegistry.cpp
+    src/Renderer/UiTextureBackend.h
+    src/Renderer/UiTextureBackend.cpp
+    src/Renderer/Vulkan/OpaqueHandleRegistry.h
+    src/Renderer/RenderGraph/RenderGraphHandles.h
+    src/Renderer/RenderGraph/RenderPassTagValidation.h
+    src/Renderer/Internal/RenderFeatureCompositorImpl.h
+    src/Renderer/Internal/RenderFeatureCompositorImpl.cpp
+    src/Renderer/Internal/RenderViewRegistryImpl.h
 )
 
 # Atmosphere feature module's (and every other feature's) gte_core source

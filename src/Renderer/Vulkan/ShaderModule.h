@@ -1,7 +1,8 @@
 #pragma once
 
 #include <volk.h>
-
+#include <cstddef>
+#include <span>
 #include <string>
 
 namespace gte {
@@ -28,5 +29,11 @@ namespace gte {
 // own pre-extraction error message style exactly, so this refactor changes
 // no observable behavior.
 VkShaderModule LoadShaderModule(VkDevice device, const std::string& spirvPath);
+
+// Byte-span sibling - wraps already-in-memory compiled SPIR-V (e.g. an
+// embedded resource, or bytes read by a caller through its own path) instead
+// of reading a file off disk. Same ownership/error-handling contract as the
+// path-based overload above.
+VkShaderModule LoadShaderModule(VkDevice device, std::span<const std::byte> spirv);
 
 } // namespace gte

@@ -37,6 +37,8 @@
 
 #include <volk.h>
 
+#include "RenderGraphHandles.h"
+
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -56,14 +58,8 @@ class RenderTexture;
 
 namespace gte::rg {
 
-// Sentinel "no slot assigned yet" index shared by every handle type below -
-// mirrors gte::Entity's own `generation == 0` invalidity convention in
-// spirit, but as an index sentinel instead, since a render-graph handle's
-// generation legitimately starts at 0 for its very first real use (there is
-// no equivalent "0 always means never-assigned" generation rule here - see
-// each handle's own IsValid() below, which checks `index`, not
-// `generation`).
-inline constexpr std::uint32_t kInvalidIndex = 0xFFFFFFFFu;
+// kInvalidIndex (shared "no slot assigned" sentinel for every handle type,
+// including PassHandle below) moved to RenderGraphHandles.h, included above.
 
 // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE1 - matches
 // typical real-world VkPhysicalDeviceLimits::maxColorAttachments (locked via
@@ -73,72 +69,8 @@ inline constexpr std::uint32_t kInvalidIndex = 0xFFFFFFFFu;
 // (RenderGraphBuilder.cpp) - never silently truncated.
 inline constexpr std::uint32_t kMaxColorAttachments = 8;
 
-// --- Handles ---------------------------------------------------------------
-//
-// Cheap, POD, generational identifiers - mirrors gte::Entity
-// (src/ECS/Entity.h) and gte::GpuResourceHandle
-// (src/Renderer/Memory/GpuResourceHandle.h) exactly: same index+generation
-// shape, same "always minted by the one system that owns the real thing,
-// never invented by calling code" rule (see AGENTS.md's "Entity-Component-
-// System"/"GPU Resource Memory Tracking" sections). Three DISTINCT structs
-// (never one shared `template<Tag> struct Handle`) so the compiler catches
-// "passed a TextureHandle where a BufferHandle was expected" at compile
-// time - the same reasoning MeshHandle/PipelineHandle/TextureHandle are
-// already three distinct types in src/Renderer/MeshHandle.h/PipelineHandle.h/
-// TextureHandle.h, rather than one generic template instantiated three ways
-// with implicit convertibility between them.
-
-struct TextureHandle {
-    std::uint32_t index = kInvalidIndex;
-    std::uint32_t generation = 0;
-
-    bool IsValid() const noexcept { return index != kInvalidIndex; }
-
-    friend bool operator==(const TextureHandle&, const TextureHandle&) noexcept = default;
-};
-
-struct BufferHandle {
-    std::uint32_t index = kInvalidIndex;
-    std::uint32_t generation = 0;
-
-    bool IsValid() const noexcept { return index != kInvalidIndex; }
-
-    friend bool operator==(const BufferHandle&, const BufferHandle&) noexcept = default;
-};
-
-// Atmosphere Scattering campaign, Phase 2
-// (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - a genuine
-// THIRD resource kind, for a real 3D (VK_IMAGE_TYPE_3D) GPU image (see
-// src/Renderer/VolumeTexture.h) - same cheap POD index+generation shape as
-// TextureHandle/BufferHandle above, deliberately its own DISTINCT struct
-// (never a shared template) for the exact same reason those two are
-// already separate types - see this file's own header comment.
-struct VolumeTextureHandle {
-    std::uint32_t index = kInvalidIndex;
-    std::uint32_t generation = 0;
-
-    bool IsValid() const noexcept { return index != kInvalidIndex; }
-
-    friend bool operator==(const VolumeTextureHandle&, const VolumeTextureHandle&) noexcept = default;
-};
-
-// better-render-pass-3 campaign, BLOCK5 (Array and Cubemap Texture
-// Resources) - a genuine FOURTH resource kind: a single Vulkan image with N
-// array layers (a Texture2DArray) or a cubemap (VK_IMAGE_VIEW_TYPE_CUBE/
-// _CUBE_ARRAY) - see src/Renderer/TextureArray2D.h. Same cheap POD
-// index+generation shape as TextureHandle/BufferHandle/VolumeTextureHandle
-// above, copied VERBATIM from VolumeTextureHandle's own shape (a plain POD
-// handle with no pooling-vs-import distinction baked into it - unlike
-// VolumeTexture, TextureArray IS pooled, see RenderGraphResourcePool::
-// AcquireTextureArray()).
-struct TextureArrayHandle {
-    std::uint32_t index = kInvalidIndex;
-    std::uint32_t generation = 0;
-
-    bool IsValid() const noexcept { return index != kInvalidIndex; }
-
-    friend bool operator==(const TextureArrayHandle&, const TextureArrayHandle&) noexcept = default;
-};
+// TextureHandle/BufferHandle/VolumeTextureHandle/TextureArrayHandle moved to
+// RenderGraphHandles.h (included above). PassHandle stays here.
 
 
 
@@ -153,109 +85,7 @@ struct PassHandle {
 
 // --- Resource access kind ----------------------------------------------
 
-// What a pass DOES with a resource it reads/writes - deliberately small,
-// deliberately named after WHAT THEY DO, not raw Vulkan enum values
-// (mirrors BufferMemoryUsage in Buffer.h, which is GpuOnly/CpuToGpu/
-// GpuToCpu, never a raw VkMemoryPropertyFlags). This is Phase 5's raw
-// material: every declared read/write in Phase 2's builder API records one
-// of these per resource per pass, and Phase 5 turns a (previousAccess,
-// nextAccess) pair into a concrete VkImageMemoryBarrier2/
-// VkBufferMemoryBarrier2.
-//
-// Originally scoped to exactly what Phases 1-8's graphics-only MVP needed
-// - see RENDERGRAPH_PHASE0_MASTER_STRATEGY_v2.md's "What We Will NOT Do".
-// Extended by Phase 5 of the compute-shader campaign
-// (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md) with three new
-// enumerators - ComputeShaderRead/ComputeShaderWrite (a StructuredBuffer/
-// RWStructuredBuffer or RWTexture's compute-shader access - see
-// COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) and
-// IndirectCommandRead (the companion GPU-driven-rendering document's own
-// indirect-draw-buffer read, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT/
-// VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT - added here, alongside the other
-// two, as the single shared source of truth both documents are meant to
-// consume, per COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md's own Step 2:
-// "whichever document's implementation lands FIRST is where the enum
-// values are actually added"). A fourth enumerator, VertexBufferRead, was
-// added by the GPU Vertex Skinning campaign's own Phase 3
-// (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) - see
-// its own doc comment below for the full reasoning. Adding a new
-// enumerator here MUST be
-// accompanied by updating every exhaustive switch that consumes it (see
-// IsWriteAccess()/ToString() below, both deliberately written with NO
-// `default:` case so a future addition fails to compile here until every
-// consumer is updated too) - RenderGraphBarrierPlanner.cpp's
-// RequiredStateFor() follows the exact same rule.
-enum class ResourceAccess : std::uint8_t {
-    ColorAttachmentWrite,
-    DepthStencilAttachmentReadWrite,
-    ShaderRead, // sampled in a fragment shader (e.g. a material texture / a previous pass's output)
-    TransferSrc,
-    TransferDst,
-    // A StructuredBuffer/RWStructuredBuffer or RWTexture read by a compute
-    // shader - VK_DESCRIPTOR_TYPE_STORAGE_BUFFER/STORAGE_IMAGE, never a
-    // write hazard source for a later read (see
-    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md's own
-    // RWStructuredBuffer-vs-StructuredBuffer split - both map to this one
-    // ResourceAccess value; the read-only/read-write distinction is
-    // enforced at the GLSL level - `readonly buffer` vs. plain `buffer` -
-    // never here).
-    ComputeShaderRead,
-    // The write-side counterpart of ComputeShaderRead above - a
-    // RWStructuredBuffer/RWTexture written by a compute shader.
-    ComputeShaderWrite,
-    // A buffer read as the source of vkCmdDrawIndexedIndirect/
-    // vkCmdDrawIndirect - the companion GPU-driven-rendering document's own
-    // indirect-draw-buffer read. Buffer-only in practice (an indirect
-    // command buffer has no texture equivalent) - never asserted against
-    // isDepthResource in RequiredStateFor(), since it is meaningful
-    // regardless of that flag.
-    IndirectCommandRead,
-    // GPU Vertex Skinning campaign, Phase 3
-    // (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) - a
-    // vertex buffer read by the FIXED-FUNCTION vertex-input assembler (a
-    // real vkCmdBindVertexBuffers-bound buffer), as distinct from
-    // ShaderRead (a texture/buffer sampled/loaded from inside a shader
-    // stage) and ComputeShaderRead (a StructuredBuffer read by a compute
-    // shader). Buffer-only in practice, same as IndirectCommandRead above.
-    // The graphics pass that draws a GPU-skinned model declares
-    // ReadBuffer(outputHandle, ResourceAccess::VertexBufferRead) against
-    // the SAME BufferHandle a skinning compute pass just wrote via
-    // ComputeShaderWrite, so the barrier planner knows to transition that
-    // buffer from "just finished being computed" to "about to be read by
-    // the vertex-input stage" before that draw call - this "phantom read"
-    // declaration exists PURELY to express this dependency edge/barrier;
-    // the graphics pipeline itself reads the buffer through its own
-    // VkVertexInputAttributeDescription binding (set up once, outside the
-    // render graph, by whatever built that pass's Pipeline/Mesh), never
-    // through anything this ResourceAccess value's ResourceState would
-    // otherwise gate - no descriptor set is ever built for a
-    // VertexBufferRead usage. See
-    // GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md, Step
-    // 3.3, for the full reasoning: this declaration must never be "cleaned
-    // up" as apparently-dead/no-op code by a future reader unfamiliar with
-    // why it's here - removing it would silently reopen a real GPU
-    // read-after-write hazard between the skinning compute pass and the
-    // graphics pass that draws from its output.
-    VertexBufferRead,
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE1 (task_manager/render-pass-5/
-    // PHASE1_FOUNDATIONS_BOUNDS_INDIRECT_TYPES_AND_VOCABULARY.md) - a
-    // StructuredBuffer read by the VERTEX SHADER stage itself (as distinct
-    // from ShaderRead, which is fragment-stage sampling only - confirmed by
-    // reading RequiredStateFor() before adding this - and from
-    // ComputeShaderRead, the compute-stage equivalent, and VertexBufferRead,
-    // the fixed-function vertex-INPUT-ASSEMBLER's read of a real bound
-    // vertex buffer, not a shader's own storage-buffer read).
-    // GPU-driven instanced rendering's new instanced graphics pass declares
-    // this against the per-instance GpuCullingInstanceInput buffer it reads
-    // via gl_InstanceIndex for its own model matrix (see
-    // src/Renderer/Culling/CullingTypes.h) - the SAME buffer the culling
-    // compute pass wrote via ComputeShaderWrite. Without this enumerator,
-    // the only existing option (ShaderRead, fragment-stage-only) would
-    // produce a barrier with the WRONG destination stage - a real, silent
-    // GPU hazard, not just an inaccurate label.
-    VertexShaderStorageRead,
-};
+// ResourceAccess moved to RenderGraphHandles.h (included above).
 
 // True for any access kind that can WRITE the resource's contents (used by
 // Phase 3's dependency-edge computation to decide whether one pass's usage
@@ -472,314 +302,28 @@ struct TextureArrayDesc {
 // declaration at a time) and Phase 3's compiler reads (to compute
 // dependency order, culling, and resource lifetimes).
 
-// Which of ResourceUsage's three handle fields is actually meaningful for a
-// given value - see ResourceUsage below.
-enum class ResourceKind : std::uint8_t {
-    Texture,
-    Buffer,
-    // Atmosphere Scattering campaign, Phase 2
-    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - a real
-    // 3D (VK_IMAGE_TYPE_3D) GPU image (see src/Renderer/VolumeTexture.h).
-    // IMPORTANT: every place that branches on ResourceKind (RenderGraphCompiler.cpp/
-    // RenderGraph.cpp) was audited and converted to a real three-way branch
-    // (an exhaustive switch with no `default:`, mirroring IsWriteAccess()'s
-    // own convention) BEFORE this enumerator was added - see this
-    // campaign's own Phase 2 completion report for the full write-up of
-    // why a plain two-way if/else here would have silently misrouted a
-    // volume-texture usage into the Buffer path, reaching a real,
-    // unchecked out-of-bounds vector access in
-    // RenderGraph::EnsureBufferResolved().
-    VolumeTexture,
-    // better-render-pass-3 campaign, BLOCK5 - see TextureArrayDesc above.
-    // IMPORTANT: adding this enumerator breaks compilation at every
-    // DispatchByKind() call site and every hand-rolled exhaustive switch
-    // over ResourceKind until each one is updated - see this phase's own
-    // "THIS PHASE DOES NOT END WITH A GREEN BUILD" note and Phase 3 of the
-    // BLOCK5 campaign for the full fix list.
-    TextureArray,
-};
+// ResourceKind moved to RenderGraphHandles.h (included above).
 
-// frame-debugger-6 campaign, PHASE1
-// (PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) - which real
-// VIEW (if any) this pass conceptually belongs to. Stamped exactly once, at
-// the same small set of Application-layer call sites that already
-// unambiguously know the answer (see RenderGraphBuilder::AddPass()/
-// AddComputePass()'s new 4-argument overloads below) - never guessed/
-// derived from a pass's own name or resource names. `Shared` (the default -
-// see PassRecord::viewScope below) means "this pass is not duplicated per
-// view" (e.g. a once-per-frame lookup-table precompute pass, or GPU
-// Skinning dispatches). A pass tagged GameView/SceneView exists as a
-// genuinely separate PassRecord instance per view that calls it - see a
-// feature's own per-view pass-registration helper, called once per view,
-// each call producing its own distinct PassRecord(s) even when two calls
-// happen to share an identical literal pass `name` string.
-//
-// editor-core-separation-25 campaign, PHASE3
-// (PHASE3_PASSRECORD_FIELD_MIGRATION_AND_SNAPSHOT_REWIRING.md, TR6) - given
-// an explicit std::uint8_t underlying type (previously defaulted to `int`,
-// 4 bytes, despite only ever needing 1) - a small, free, additive
-// tightening; no existing comparison/arithmetic anywhere in the engine
-// depends on this enum's size or signedness.
-enum class ViewScope : std::uint8_t {
-    Shared,
-    GameView,
-    SceneView,
-};
+// ViewScope moved to RenderGraphHandles.h (included above).
 
-// Render Pass campaign (task_manager/render-pass-1), PHASE1 - REPLACES the
-// old plain `bool isComputePass` with a real, extensible enum. Today there
-// are exactly two kinds (a pass either records inside a
-// vkCmdBeginRendering/vkCmdEndRendering bracket, or it doesn't - it issues
-// vkCmdDispatch instead), but "Graphics"/"Compute" as explicit, named
-// values (rather than an anonymous bool) is what lets a THIRD kind (e.g. a
-// future pure-blit/copy pass) be added later without every call site
-// having to re-litigate what `true`/`false` used to mean. Deliberately an
-// exhaustive-switch-friendly small enum, mirroring ResourceAccess's own
-// "no default: case, ever" convention in this same file.
-//
-// editor-core-separation-26 campaign, PHASE3
-// (PHASE3_BLITSPEC_PASSKIND_AND_PURE_HELPERS.md) - this is now that future
-// third kind: `Blit`, added below. A `PassKind::Blit` pass carries its
-// blit description on `PassRecord::blitCommand` (`std::optional<BlitSpec>`,
-// see `BlitSpec` further down this file) instead of the usual `setup`/
-// `execute` callback pair - see `RenderGraphBuilder::AddBlitPass()`
-// (PHASE5) for the real, producible entry point. Every pre-existing
-// consumer of this enum outside `RenderGraph.cpp`/`RenderGraphCompiler.cpp`/
-// `RenderGraphBarrierPlanner.cpp` was independently re-audited for an
-// implicit, non-exhaustive "not Compute => Graphics" assumption BEFORE this
-// enumerator was added - see PHASE4 (`src/Editor/FrameDebuggerData.cpp`'s
-// own required companion audit).
-enum class PassKind : std::uint8_t {
-    Graphics,
-    Compute,
-    Blit,
-};
+// PassKind moved to RenderGraphHandles.h (included above).
 
 const char* ToString(PassKind kind) noexcept;
 
-// Render Pass campaign, PHASE1 - which conceptual GROUP this pass belongs
-// to, for the Editor Frame Debugger's own tree-grouping purposes ONLY
-// (PHASE4 of this same campaign) - completely orthogonal to PassKind
-// (Graphics/Compute - WHAT this pass technically does) and ViewScope
-// (WHICH view this pass belongs to). Nothing in RenderGraph.cpp/
-// RenderGraphCompiler.cpp/RenderGraphBarrierPlanner.cpp ever reads this
-// field - exactly like ViewScope's own existing "PURELY DESCRIPTIVE
-// metadata" rule (see PassRecord::kind's own doc comment below for the
-// precedent this mirrors).
-enum class RenderPassCategory : std::uint8_t {
-    General, // The default - no special Frame Debugger grouping treatment.
-    Debug,   // editor-core-separation-22 campaign, PHASE4 - CORRECTED meaning: a
-        // real, optional/debug-flavored FEATURE pass (e.g. GBufferValidation,
-        // ComputeBlurValidation, PluginRenderPassBuilderAdapter's own
-        // fullscreen clear pass) - fully visible in the Frame Debugger tree
-        // like any other survivor, when it runs. This value used to
-        // (incorrectly) mean "never a real Frame Debugger tree citizen" -
-        // that meaning now belongs EXCLUSIVELY to FrameDebuggerInternal below.
-        // Never assume this hides a pass from the tree - if a pass genuinely
-        // needs to stay invisible, it must be tagged FrameDebuggerInternal
-        // instead, not this value.
-    FrameDebuggerInternal, // editor-core-separation-22 campaign, PHASE4 (NEW) -
-        // genuinely, permanently Frame-Debugger-OWNED ephemeral scaffolding
-        // (today: FrameDebuggerReplayStepN, see FrameDebuggerReplayPasses.cpp)
-        // - the ONLY category value that is unconditionally invisible to the
-        // Frame Debugger's own tree, regardless of what it does or does not
-        // survive culling as. Never use this for a real, user-facing feature
-        // pass, no matter how "debug-flavored" it feels - use `Debug` (or
-        // `General`) for that instead; see this enum's own updated `Debug`
-        // doc comment above.
-};
+// RenderPassCategory moved to RenderGraphHandles.h (included above).
 
 const char* ToString(RenderPassCategory category) noexcept;
 
-// Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2),
-// PHASE1 - which STRUCTURAL kind of draw operation a Graphics-kind pass
-// issues - PURELY DESCRIPTIVE metadata for the Editor Frame Debugger's own
-// child-event-labeling purposes (PHASE2 of this campaign) ONLY. Nothing in
-// RenderGraph.cpp/RenderGraphCompiler.cpp/RenderGraphBarrierPlanner.cpp ever
-// reads this field - mirrors RenderPassCategory's own identical rule
-// (immediately above). Meaningless for a Compute-kind pass (PassRecord::kind
-// == PassKind::Compute) - a compute dispatch's own Frame Debugger child
-// event is always labeled "Compute Dispatch" regardless of this field's
-// value; every Compute-kind pass simply leaves this at its own default.
-//
-// `Blit` is a REAL, currently COMPLETELY UNUSED scaffold enumerator - no
-// pass in this engine is tagged with it today, and none can be until a
-// FUTURE campaign teaches RenderGraph::Execute() a genuinely new recording
-// path (a real vkCmdBlitImage/vkCmdCopyImage cannot be issued inside a
-// vkCmdBeginRendering/vkCmdEndRendering bracket, which every Graphics-kind
-// pass uses today) - see PHASE0_MASTER_STRATEGY.md's Locked Design Decision
-// #4 for the full reasoning. Adding it now, unused, means that future
-// campaign needs zero further Frame Debugger changes once it lands.
-//
-// Deliberately an exhaustive-switch-friendly small enum, mirroring
-// PassKind's/RenderPassCategory's own "no default: case, ever" convention in
-// this same file.
-enum class RenderPassDrawKind : std::uint8_t {
-    DrawMesh, // The default - a real per-object mesh draw (e.g. "RenderOpaque"'s
-        // own per-entity children, the N FrameDebuggerReplayStepN debug
-        // replay passes, a future real "RenderTransparent").
-    DrawQuad, // A full-screen/screen-space triangle-or-quad draw with no
-        // per-object identity (e.g. a full-screen composite pass's own
-        // vkCmdDraw(cmd, 3, 1, 0, 0)).
-    Blit, // A raw image copy/blit - see this enum's own header comment
-        // above for why this is a real-but-unused scaffold value today.
-};
+// RenderPassDrawKind moved to RenderGraphHandles.h (included above).
 
 const char* ToString(RenderPassDrawKind drawKind) noexcept;
 
-// render-pass-3 campaign (task_manager/render-pass-3), PHASE1
-// (PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md) - a descriptive SORT HINT for
-// the new RenderPipeline declaration layer (src/Renderer/RenderGraph/
-// RenderPipeline.h) sitting strictly ABOVE this builder. Lives here (rather
-// than in RenderPipeline.h, where every other PHASE1 type lives) because it
-// is ALSO threaded onto PassRecord/RenderGraphPassSnapshot below, mirroring
-// exactly why PassKind/RenderPassCategory/RenderPassDrawKind already live in
-// this same file. Deliberately an exhaustive-switch-friendly small enum,
-// mirroring every sibling enum in this file's own "no default: case, ever"
-// convention.
-//
-// render-pass-4 campaign, PHASE1
-// (task_manager/render-pass-4/PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md)
-// - as of this campaign, RenderGraphCompiler::Compile() cross-checks this
-// field against every pass's real, declared resource dependencies - see
-// DetectRenderPassEventContradictions() (RenderGraphCompiler.h). A wrong
-// tag here is no longer silent: it is reported to stderr and, in debug
-// builds, fails an assert().
-//
-// render-pass-4 campaign, PHASE2
-// (task_manager/render-pass-4/PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md)
-// - CORRECTION to this comment's own former "purely descriptive... NOT a
-// dependency mechanism" wording (accurate through PHASE1, no longer accurate
-// as of PHASE2): this field is now a REAL, load-bearing ordering input.
-// RenderGraphCompiler::Compile() processes passes in a stable sort of this
-// field (ties broken by original declaration order) before building its
-// RAW/WAW dependency edges. It still cannot override a genuine dependency
-// in the opposite direction - a real data dependency always wins - but it
-// now determines execution order between passes that have NO real
-// dependency on each other, and it now determines which writer a read
-// resolves to when a naive declaration-order-only scan would otherwise miss
-// it entirely (the historical "a later-declared writer's own pass got
-// silently culled out from under an earlier reader" bug shape - see
-// PHASE0_MASTER_STRATEGY.md/PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md
-// under task_manager/render-pass-4/ for the full history). This alone still does
-// NOT make an incorrectly-tagged RenderPassEvent value harmless - see
-// DetectRenderPassEventContradictions() (RenderGraphCompiler.h), now checked
-// against this same effective order.
-enum class RenderPassEvent : std::uint32_t {
-    BeforeEverything = 0,
-    PreOpaques = 1000,
-    Opaques = 2000,
-    AfterOpaques = 2500,
-    Transparents = 3000,
-    AfterTransparents = 4000,
-    AfterEverything = 9000,
-};
+// RenderPassEvent moved to RenderGraphHandles.h (included above). Still a
+// real, load-bearing sort/ordering key for RenderGraphCompiler::Compile().
 
 const char* ToString(RenderPassEvent renderPassEvent) noexcept;
 
-// A single declared read/write on a texture, a buffer, OR a volume
-// texture. Phase 1 shipped this as a texture-only shape; Phase 2 of the
-// Render Graph campaign grew it into a texture/buffer tagged-union shape
-// once RenderGraphBuilder::PassBuilder's ReadBuffer()/WriteBuffer() existed
-// to justify it; the Atmosphere Scattering campaign's own Phase 2
-// (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) extends it
-// to a third kind, for the exact same reason.
-//
-// `kind` says which of `texture`/`buffer`/`volumeTexture` is meaningful -
-// every other field is simply left at its own default and never read.
-// Deliberately a plain "all fields present, one tag" struct rather than a
-// std::variant, matching this codebase's general preference for plain,
-// explicit structs over template-heavy machinery it doesn't otherwise use.
-// The three static factory functions below are what every real call site
-// (RenderGraphBuilder::PassBuilder) actually constructs one through -
-// nothing outside this file/its own tests should need to spell out every
-// field by hand.
-struct ResourceUsage {
-    ResourceKind kind = ResourceKind::Texture;
-    TextureHandle texture;
-    BufferHandle buffer;
-    VolumeTextureHandle volumeTexture;
-    // better-render-pass-3 campaign, BLOCK5 - see TextureArrayDesc above.
-    TextureArrayHandle textureArray;
-    ResourceAccess access = ResourceAccess::ShaderRead;
-    // Atmosphere Scattering + Aerial Perspective campaign, Phase 7
-    // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
-    // - only meaningful when kind == ResourceKind::Texture. Lets a caller
-    // declare a ShaderRead (or any other non-DepthStencilAttachmentReadWrite
-    // access) against the DEPTH half of an already-imported texture handle
-    // that ALSO carries a color image (e.g. the Game/Scene View's own
-    // RenderTexture, imported once as a single TextureHandle covering both)
-    // - closing the MVP limitation RenderGraph.cpp's own
-    // ApplyUsageBarrierIfNeeded() used to document ("there is no way today
-    // to declare... a distinct usage"). Combined with TargetsDepthState()
-    // (RenderGraphBarrierPlanner.h, itself UNCHANGED by this addition) at
-    // the one call site that actually applies a barrier - see
-    // RenderGraph.cpp's ApplyUsageBarrierIfNeeded(). Defaults to false so
-    // every existing ResourceUsage/ForTexture() call site (which always
-    // meant "the color half") is completely unaffected.
-    bool isDepthResource = false;
-
-    // Per-layer/per-face write against a TextureArrayHandle (see
-    // ForTextureArrayLayer below). nullopt means "whole-array usage" -
-    // every ForTextureArray()-built usage is unaffected. Only meaningful
-    // when kind == ResourceKind::TextureArray.
-    std::optional<std::uint32_t> arrayLayerIndex;
-
-    static ResourceUsage ForTexture(TextureHandle handle, ResourceAccess access, bool isDepthResource = false) noexcept
-    {
-        ResourceUsage usage;
-        usage.kind = ResourceKind::Texture;
-        usage.texture = handle;
-        usage.access = access;
-        usage.isDepthResource = isDepthResource;
-        return usage;
-    }
-
-    static ResourceUsage ForBuffer(BufferHandle handle, ResourceAccess access) noexcept
-    {
-        ResourceUsage usage;
-        usage.kind = ResourceKind::Buffer;
-        usage.buffer = handle;
-        usage.access = access;
-        return usage;
-    }
-
-    // Atmosphere Scattering campaign, Phase 2
-    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md).
-    static ResourceUsage ForVolumeTexture(VolumeTextureHandle handle, ResourceAccess access) noexcept
-    {
-        ResourceUsage usage;
-        usage.kind = ResourceKind::VolumeTexture;
-        usage.volumeTexture = handle;
-        usage.access = access;
-        return usage;
-    }
-
-    // better-render-pass-3 campaign, BLOCK5.
-    static ResourceUsage ForTextureArray(TextureArrayHandle handle, ResourceAccess access) noexcept
-    {
-        ResourceUsage usage;
-        usage.kind = ResourceKind::TextureArray;
-        usage.textureArray = handle;
-        usage.access = access;
-        return usage;
-    }
-
-    // Per-layer/per-face write - see arrayLayerIndex above. `access` is
-    // caller-supplied (e.g. ColorAttachmentWrite or
-    // DepthStencilAttachmentReadWrite - a TextureArray's aspect is a
-    // property of the resource, not the usage).
-    static ResourceUsage ForTextureArrayLayer(
-        TextureArrayHandle handle, std::uint32_t layerIndex, ResourceAccess access) noexcept
-    {
-        ResourceUsage usage;
-        usage.kind = ResourceKind::TextureArray;
-        usage.textureArray = handle;
-        usage.access = access;
-        usage.arrayLayerIndex = layerIndex;
-        return usage;
-    }
-};
+// ResourceUsage moved to RenderGraphHandles.h (included above).
 
 // render-pass-6 campaign, PHASE6 (item 2.2) - REPLACES every independently
 // hand-rolled `switch (usage.kind) { Texture / Buffer / VolumeTexture }`

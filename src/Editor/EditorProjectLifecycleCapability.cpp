@@ -305,7 +305,7 @@ std::string BuildScreenPostProcessPassCppContent(const std::string& name, std::i
         "    const bool registered = core.AddScreenPostProcessPass(\n"
         "        \"__NAME__.ScreenTint\",\n"
         "        [](gte::rg::RenderGraphBuilder& builder, gte::rg::RenderPassBlackboard& /*blackboard*/, gte::rg::RenderViewId /*currentView*/,\n"
-        "            gte::rg::TextureHandle privateTarget, VkExtent2D /*extent*/, const gte::ScenePassReadHandles& /*currentViewHandles*/,\n"
+            "            gte::rg::TextureHandle privateTarget, gte::Extent2D /*extent*/, const gte::ScenePassReadHandles& /*currentViewHandles*/,\n"
         "            const gte::RenderFeatureCameraData& /*cameraData*/) {\n"
         "            // This is the whole effect: clear your own private target to\n"
         "            // a translucent red every frame - only Render Graph API calls\n"

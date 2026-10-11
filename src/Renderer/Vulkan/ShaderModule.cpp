@@ -24,22 +24,31 @@ std::vector<char> ReadFile(const std::string& path)
     return buffer;
 }
 
-} // namespace
-
-VkShaderModule LoadShaderModule(VkDevice device, const std::string& spirvPath)
+VkShaderModule CreateModuleFromBytes(VkDevice device, const void* code, std::size_t codeSize)
 {
-    const std::vector<char> spirv = ReadFile(spirvPath);
-
     VkShaderModuleCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = spirv.size();
-    createInfo.pCode = reinterpret_cast<const std::uint32_t*>(spirv.data());
+    createInfo.codeSize = codeSize;
+    createInfo.pCode = reinterpret_cast<const std::uint32_t*>(code);
 
     VkShaderModule module = VK_NULL_HANDLE;
     if (vkCreateShaderModule(device, &createInfo, nullptr, &module) != VK_SUCCESS) {
         throw std::runtime_error("ShaderModule: vkCreateShaderModule failed.");
     }
     return module;
+}
+
+} // namespace
+
+VkShaderModule LoadShaderModule(VkDevice device, const std::string& spirvPath)
+{
+    const std::vector<char> spirv = ReadFile(spirvPath);
+    return CreateModuleFromBytes(device, spirv.data(), spirv.size());
+}
+
+VkShaderModule LoadShaderModule(VkDevice device, std::span<const std::byte> spirv)
+{
+    return CreateModuleFromBytes(device, spirv.data(), spirv.size());
 }
 
 } // namespace gte

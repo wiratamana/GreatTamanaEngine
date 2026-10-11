@@ -1,6 +1,8 @@
 #include "RenderViewRegistry.h"
 
+#include "../../Renderer/Internal/RenderViewRegistryImpl.h"
 #include "../../Renderer/Renderer.h"
+#include "../../Renderer/VulkanFormatInfo.h"
 #include "../Logging.h"
 
 #include <cassert>
@@ -36,13 +38,15 @@ bool IsReservedViewName(const char* name) noexcept
 }
 
 RenderViewRegistry::RenderViewRegistry(Renderer& renderer) noexcept
-    : m_renderer(&renderer)
+    : m_impl(std::make_unique<Impl>(renderer))
 {
 }
 
+RenderViewRegistry::~RenderViewRegistry() = default;
+
 rg::RenderViewId RenderViewRegistry::CreateOrGetView(const char* name, const RenderViewDesc& desc)
 {
-    assert(std::this_thread::get_id() == m_mainThreadId
+    assert(std::this_thread::get_id() == m_impl->mainThreadId
         && "RenderViewRegistry::CreateOrGetView is main-thread-only - called from a different thread.");
 
     assert(name != nullptr && name[0] != '\0'
@@ -80,27 +84,16 @@ rg::RenderViewId RenderViewRegistry::CreateOrGetView(const char* name, const Ren
 
     const std::string key(name);
 
-    // Two-phase, exception-safe construction - mirrors
-    // RenderGraphPersistentResourceCache::Resolve()'s own proven recipe
-    // exactly (PHASE2 strategy doc, Step 2).
-    auto [it, inserted] = m_views.try_emplace(key);
+    // Two-phase, exception-safe construction.
+    auto [it, inserted] = m_impl->views.try_emplace(key);
 
     if (!it->second.target.has_value()) {
         try {
-            it->second.target.emplace(m_renderer->CreateRenderTexture(
-                static_cast<int>(desc.width), static_cast<int>(desc.height), desc.colorFormat,
-                // better-render-pass-3 campaign, BLOCK2 PHASE4 - found live
-                // during this phase's own Memory-panel verification: passing
-                // depthDebugName=nullptr meant a depth-only view's ONE real
-                // GPU allocation (its depth buffer) showed up in the
-                // Editor's "Memory" panel as "(unnamed)" instead of by its
-                // own view name, making the required "exactly one row named
-                // <ViewName>" check unverifiable by name. Reusing this same
-                // map-owned, stable key string for BOTH debugName AND
-                // depthDebugName is exactly as safe as using it once (see
-                // this method's own two-phase construction comment above -
-                // `it->first` outlives this RenderTexture for the registry's
-                // entire process lifetime).
+            it->second.target.emplace(m_impl->renderer->CreateRenderTexture(static_cast<int>(desc.width),
+                static_cast<int>(desc.height), ToVkFormat(desc.colorFormat),
+                // Reusing this same map-owned, stable key string for BOTH
+                // debugName AND depthDebugName so a depth-only view's one
+                // real GPU allocation shows up named in the Memory panel.
                 /*debugName=*/it->first.c_str(), /*depthDebugName=*/it->first.c_str(),
                 /*allowStorageImageAccess=*/false, /*allowDepthSampledAccess=*/desc.allowDepthSampledAccess,
                 /*createDepthCompanion=*/desc.hasDepth, /*createColorImage=*/desc.hasColor));
@@ -108,21 +101,20 @@ rg::RenderViewId RenderViewRegistry::CreateOrGetView(const char* name, const Ren
             it->second.desc = desc;
         } catch (...) {
             if (inserted) {
-                m_views.erase(it);
+                m_impl->views.erase(it);
             }
             throw;
         }
         return it->second.id;
     }
 
-    // Already exists - compare descs (Section 3's "idempotent by name,
-    // refused on mismatch" contract).
+    // Already exists - compare descs (idempotent-by-name, refused-on-mismatch contract).
     if (!DescsMatchForSameName(desc, it->second.desc)) {
         if (!it->second.hasLoggedDescMismatch) {
             GTE_LOG_ERROR("RenderViewRegistry",
                 std::string("CreateOrGetView(\"") + name + "\") was re-requested with a DIFFERENT desc than its "
-                "existing view - this is always a caller bug (views are fixed-size for their whole lifetime, see "
-                "PHASE0_MASTER_STRATEGY.md Locked Design Decision 2); the EXISTING view is returned unchanged.");
+                "existing view - this is always a caller bug (views are fixed-size for their whole lifetime); the "
+                "EXISTING view is returned unchanged.");
             it->second.hasLoggedDescMismatch = true;
         }
     }
@@ -131,14 +123,23 @@ rg::RenderViewId RenderViewRegistry::CreateOrGetView(const char* name, const Ren
 
 RenderTexture* RenderViewRegistry::FindViewTarget(rg::RenderViewId view) const noexcept
 {
-    assert(std::this_thread::get_id() == m_mainThreadId
+    assert(std::this_thread::get_id() == m_impl->mainThreadId
         && "RenderViewRegistry::FindViewTarget is main-thread-only - called from a different thread.");
-    for (auto& [name, entry] : m_views) {
+    for (auto& [name, entry] : m_impl->views) {
         if (entry.target.has_value() && entry.id == view) {
             return &const_cast<RenderTexture&>(*entry.target);
         }
     }
     return nullptr;
+}
+
+UiTextureHandle RenderViewRegistry::FindViewUiTextureHandle(rg::RenderViewId view) const noexcept
+{
+    RenderTexture* target = FindViewTarget(view);
+    if (target == nullptr) {
+        return UiTextureHandle::Invalid;
+    }
+    return m_impl->renderer->GetUiTextureHandle(*target);
 }
 
 } // namespace gte

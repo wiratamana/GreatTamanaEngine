@@ -9,6 +9,8 @@
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleGuard.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
+#include "../../Renderer/GraphicsHandleRegistry.h"
+#include "../../Renderer/VulkanFormatInfo.h"
 
 #include <cassert>
 #include <cstdint>
@@ -200,7 +202,7 @@ void AtmosphereFeature::RegisterPasses()
     const bool compositeRegistered = m_core.RegisterBuiltInRenderFeature("AtmosphereComposite",
         RenderFeatureStage::PostComposite, RenderFeatureBlendMode::AlphaOver, kAtmosphereCompositePriority,
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
-            rg::TextureHandle privateTarget, VkExtent2D extent, const ScenePassReadHandles& currentViewHandles,
+            rg::TextureHandle privateTarget, Extent2D extent, const ScenePassReadHandles& currentViewHandles,
             const RenderFeatureCameraData& cameraData) {
             if (!cameraData.invViewProjectionValid) {
                 return; // Nothing safe to compute this frame for this view.
@@ -223,12 +225,12 @@ void AtmosphereFeature::RegisterPasses()
             const rg::ViewScope legacyViewScope = isGameView ? rg::ViewScope::GameView : rg::ViewScope::SceneView;
 
             const rg::TextureHandle composited = AddAtmosphereCompositePass(builder, m_core.GetRenderer(),
-                m_renderer, currentViewHandles.colorHandle, currentViewHandles.colorSampler,
-                currentViewHandles.depthHandle, currentViewHandles.depthImageView, currentViewHandles.depthSampler,
-                viewLuts->aerialPerspectiveVolumeHandle, aerialVolumeName, viewLuts->frameUniforms,
-                cameraData.eyeWorldPosition, m_settings.aerialPerspectiveStrength,
-                m_settings.aerialPerspectiveMaxDistanceKm, m_settings.aerialPerspectiveDepthExponent, extent,
-                outputTextureName, legacyViewScope, m_toggleRegistry);
+                m_renderer, currentViewHandles.colorHandle, Native(currentViewHandles.colorSampler),
+                currentViewHandles.depthHandle, Native(currentViewHandles.depthImageView),
+                Native(currentViewHandles.depthSampler), viewLuts->aerialPerspectiveVolumeHandle, aerialVolumeName,
+                viewLuts->frameUniforms, cameraData.eyeWorldPosition, m_settings.aerialPerspectiveStrength,
+                m_settings.aerialPerspectiveMaxDistanceKm, m_settings.aerialPerspectiveDepthExponent,
+                ToVkExtent2D(extent), outputTextureName, legacyViewScope, m_toggleRegistry);
 
             if (!composited.IsValid()) {
                 return; // Individually toggled off this frame - nothing to copy.

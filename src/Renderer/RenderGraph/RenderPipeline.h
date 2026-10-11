@@ -48,6 +48,7 @@
 // RenderGraphCompiler::Compile() itself.
 
 #include "RenderFeatureScope.h"
+#include "RenderGraphHandles.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphTypes.h"
 #include "RenderPassToggleRegistry.h"
@@ -121,54 +122,7 @@ void RegisterPassIdDebugName(RenderPassId id, const char* name) noexcept;
 const char* DebugNameForPassId(RenderPassId id) noexcept; // "<unknown>" if never registered.
 #endif
 
-// --- RenderViewId (design doc Section 7) -----------------------------------
-//
-// Opaque view identifier - Shared() is the only built-in value this layer
-// defines; Named() lets any future named view (beyond today's Game/Scene)
-// exist for free, since view identity is a hashed opaque name rather than a
-// fixed enum from the start (design doc Section 0, point 6).
-
-class RenderViewId {
-public:
-    RenderViewId() noexcept = default; // Defaults to the same reserved hash Shared() returns.
-
-    static RenderViewId Shared() noexcept { return RenderViewId{}; }
-
-    // Hashed, opaque - the same FNV-1a algorithm/constants as
-    // operator""_passId above, just evaluated at ordinary RUNTIME (this
-    // takes a plain `const char*`, not a literal operand, so it cannot be
-    // consteval).
-    static RenderViewId Named(const char* name) noexcept
-    {
-        std::uint64_t hash = 2166136261u;
-        if (name != nullptr) {
-            for (const char* p = name; *p != '\0'; ++p) {
-                hash ^= static_cast<std::uint64_t>(static_cast<unsigned char>(*p));
-                hash *= 16777619u;
-            }
-        }
-        RenderViewId view;
-        // Reserve 0 exclusively for Shared() - see this class's own header
-        // comment. A real name hashing to exactly 0 is astronomically
-        // unlikely, but nudged to 1 defensively rather than left as a
-        // silent collision with Shared().
-        view.m_hash = (hash != 0) ? hash : 1;
-        return view;
-    }
-
-    bool operator==(const RenderViewId&) const noexcept = default;
-
-    // Block 4 (task_manager/better-render-pass-6) - a read-only accessor onto
-    // this class's own opaque hash, needed by SceneServiceBlackboardKey()
-    // (Renderer/SceneServicesDescriptorSet.h) to fold a view's identity into a
-    // per-(slot, view) RenderPassBlackboard key. Purely additive - changes
-    // nothing about RenderViewId's existing equality semantics or Shared()/
-    // Named() factories.
-    std::uint64_t Hash() const noexcept { return m_hash; }
-
-private:
-    std::uint64_t m_hash = 0;
-};
+// RenderViewId moved to RenderGraphHandles.h (included above).
 
 // Generic Core-owned key for a low-frequency, discoverable, string-named cross-feature handoff through
 // RenderPassBlackboard - NOT a substitute for a bounded, binding-stable slot registry (see

@@ -2753,3 +2753,13 @@ add_test(NAME AtmosphereCoreDecouplingCheck
     COMMAND "${CMAKE_COMMAND}" -D "GTE_REPO_ROOT=${CMAKE_SOURCE_DIR}"
             -P "${CMAKE_SOURCE_DIR}/tools/ci/atmosphere_core_decoupling_check/CheckAtmosphereCoreDecoupling.cmake"
 )
+
+# Fails (non-zero) if any Vk*/vk*/VK_*/volk.h symbol appears outside
+# src/Renderer - see tools/ci/volk_leak_check/CheckVolkLeak.cmake. Comments
+# are stripped before matching; comment_only_allowlist.txt is a shrink-only
+# pre-existing-debt list, never grown to silence a new real leak.
+add_test(NAME VolkLeakCheck
+    COMMAND "${CMAKE_COMMAND}" -D "SRC_ROOT=${CMAKE_SOURCE_DIR}/src"
+            -D "ALLOWLIST_FILE=${CMAKE_SOURCE_DIR}/tools/ci/volk_leak_check/comment_only_allowlist.txt"
+            -P "${CMAKE_SOURCE_DIR}/tools/ci/volk_leak_check/CheckVolkLeak.cmake"
+)

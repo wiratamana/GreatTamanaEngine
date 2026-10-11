@@ -3,81 +3,15 @@
 #include <volk.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string>
+#include "VertexLayout.h"
 
 namespace gte {
 
-// Which per-vertex GPU layout a Pipeline expects its bound Mesh's vertex
-// buffer to already be in - see Vertex.h (PositionColor) and MeshVertex.h
-// (PositionNormal). A Mesh itself carries no notion of "its own" vertex
-// layout (see Mesh.h - it's just a VkBuffer + a count); it is entirely up to
-// whoever builds a Pipeline/Mesh PAIR to make sure both agree on this, the
-// same way AGENTS.md's "Render Target Format Matching" already requires a
-// Pipeline and the render target it draws into to agree on their exact
-// color/depth format.
-enum class VertexLayout {
-    // This engine's original position+color layout (Vertex.h) - every
-    // built-in primitive shape (Renderer/Primitives/PrimitiveMeshGenerator.h)
-    // and the original hardcoded triangle demo use this, via Triangle.vert/
-    // .frag. The default, for backward compatibility with every existing
-    // Renderer::CreatePipeline() call site.
-    PositionColor,
-
-    // Position+normal (MeshVertex.h) - for an imported, indexed mesh asset
-    // (a *.gta AssetType::Mesh - see Game::CreateMeshEntityFromGtaFile(),
-    // src/Game/Game.h/.cpp), via Shaders/Mesh.vert/.frag. Such an asset
-    // carries no per-vertex color (see src/Assets/MeshData.h), only a real
-    // per-vertex normal.
-    PositionNormal,
-
-    // Position+normal+UV (MeshVertex.h's MeshVertexUv) - for an imported,
-    // indexed, TEXTURED mesh submesh (a per-material slice of a *.gta
-    // AssetType::Mesh's triangle-index list whose material references a
-    // resolvable diffuse texture - see Game::EnsureMeshAsset(),
-    // src/Game/Game.h/.cpp), via Shaders/TexturedMesh.vert/.frag. Unlike
-    // the other two layouts above, a Pipeline built with this layout ALSO
-    // carries a descriptor-set-layout for a single combined-image-sampler
-    // (set = 0, binding = 0) in its VkPipelineLayout - see
-    // Pipeline's constructor `materialSetLayout` parameter and
-    // GpuResourceFactory::MaterialDescriptorSetLayout() - so a per-submesh
-    // MaterialTexture's own VkDescriptorSet (Renderer/MaterialTexture.h)
-    // can be bound before each draw (see FrameRecorder::RecordFrame()).
-    PositionNormalUv,
-
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE2 (task_manager/render-pass-5/
-    // PHASE2_INSTANCED_DRAW_PRIMITIVE_AND_INDIRECT_SUBMIT.md) - same vertex
-    // INPUT attributes as PositionNormal (MeshVertex.h - position+normal),
-    // via Shaders/MeshInstanced.vert (reuses Shaders/Mesh.frag UNCHANGED).
-    // UNLIKE every other VertexLayout, the per-draw model matrix is NOT
-    // sourced from this Pipeline's push constant - MeshInstanced.vert reads
-    // it from a per-instance storage buffer (set = 0, binding = 0, vertex
-    // stage), indexed by gl_InstanceIndex, so ONE
-    // vkCmdDrawIndexedIndirect(Count) call (Renderer::SubmitIndirect()) can
-    // render N differently-positioned/oriented objects. A Pipeline built
-    // with this layout carries a descriptor-set-layout for that ONE
-    // readonly storage buffer in its VkPipelineLayout - see this class's
-    // own `instanceBufferSetLayout` constructor parameter and
-    // GpuResourceFactory::InstanceBufferDescriptorSetLayout(). Indexed
-    // meshes ONLY (VkDrawIndexedIndirectCommand-only - Locked Design
-    // Decision 6, PHASE0_MASTER_STRATEGY.md); never used together with
-    // `materialSetLayout` on the same Pipeline (Locked Design Decision 8 -
-    // textured instanced batches are out of scope this campaign).
-    PositionNormalInstanced,
-};
-
-// Number of VertexLayout enumerators. Keep in sync with the enum above.
-inline constexpr std::size_t kVertexLayoutCount = 4;
-
-// PipelineOverrideSet::byLayout (SceneQuery.h) is sized off this constant and
-// indexed with an unchecked operator[] in ResolveOverridePipeline() - if a
-// new VertexLayout is ever added without bumping this constant, that is a
-// silent out-of-bounds read, not a safely-skipped draw. Catch it at compile
-// time instead.
-static_assert(kVertexLayoutCount == static_cast<std::size_t>(VertexLayout::PositionNormalInstanced) + 1,
-    "kVertexLayoutCount must equal the enum's last entry + 1 - add a new case and bump this constant together.");
-
+// VertexLayout/kVertexLayoutCount moved to VertexLayout.h (included above) -
+// zero Vulkan dependency, shared with PipelineDesc.h.
 // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
 // maximum number of color attachments a single Pipeline can be built
 // against. Mirrors gte::rg::kMaxColorAttachments
@@ -209,6 +143,25 @@ public:
         VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr,
         VkDescriptorSetLayout instanceBufferSetLayout = VK_NULL_HANDLE,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE);
+
+    // Configurable constructor (GAP2 - engine-wide gte::PipelineDesc, see
+    // Core/PipelineDesc.h) - built directly from in-memory compiled SPIR-V
+    // bytes (no file path), with a fully caller-resolved blend/cull/compare/
+    // topology shape and an arbitrary extra descriptor-set-layout list +
+    // optional push-constant range. Distinguished from the two constructors
+    // above purely by parameter type (std::span<const std::byte> vs.
+    // std::string) - never mixed with them on the same object.
+    // HasSceneServicesSet()/HasMaterialSet() stay false for a Pipeline built
+    // this way (Renderer::Submit()'s own set-0/set-1 gating convention does
+    // not apply here - a pass built through CommandBuffer binds its own
+    // extra sets directly via BindDescriptorSet()).
+    Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
+        std::span<const std::byte> vertexSpirv, std::span<const std::byte> fragmentSpirv, VertexLayout vertexLayout,
+        VkPrimitiveTopology topology, VkCullModeFlags cullMode, bool depthTest, bool depthWrite,
+        VkCompareOp depthCompare, VkPipelineColorBlendAttachmentState blendState,
+        std::span<const VkDescriptorSetLayout> setLayouts, VkShaderStageFlags pushConstantStages,
+        std::uint32_t pushConstantByteSize, const char* debugName = nullptr);
+
     ~Pipeline();
 
     Pipeline(const Pipeline&) = delete;

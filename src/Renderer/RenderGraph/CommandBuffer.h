@@ -24,6 +24,8 @@
 
 #include <volk.h>
 
+#include "../GraphicsHandleRegistry.h"
+
 #include "../DrawStats.h"
 #include "../../Core/FrameDebuggerEventSink.h"
 #include "../../Math/Mat4.h"
@@ -92,6 +94,13 @@ public:
     // for any pass not yet using a bindless/reflection-driven binding model.
     void BindDescriptorSet(VkDescriptorSet set) noexcept { m_boundDescriptorSet = set; }
 
+    // Opaque-handle sibling of BindDescriptorSet(VkDescriptorSet) above - the
+    // only way code outside src/Renderer can bind a descriptor set while
+    // recording a pass (Core/GraphicsHandles.h). Qualified as ::gte::Native
+    // since this class's own Native() member would otherwise hide the free
+    // function of the same name.
+    void BindDescriptorSet(DescriptorSetHandle set) noexcept { BindDescriptorSet(::gte::Native(set)); }
+
     // Remembers `data`/`size` for the NEXT Dispatch()/DispatchOverSize() call
     // - `data` must stay alive until that call actually happens (the same
     // lifetime contract Renderer::Dispatch()'s own `pushConstants` parameter
@@ -129,6 +138,21 @@ public:
     // ComputeGroupCount3D(), then calls Dispatch() with the result. Same
     // "bound compute pipeline required" precondition as Dispatch() above.
     void DispatchOverSize(std::uint32_t width, std::uint32_t height, std::uint32_t depth = 1);
+
+    // One-call bind/push/dispatch sequence - collapses the hand-copied
+    // bind-pipeline/bind-set/push-constants/dispatch pattern repeated across
+    // this engine's compute-debug call sites into a single line. Uses the
+    // opaque-handle BindDescriptorSet() overload above - no raw VkDescriptorSet
+    // ever needs to reach the call site.
+    template <typename PushConstants>
+    void DispatchCompute(const ComputePipeline& pipeline, DescriptorSetHandle set, const PushConstants& pushConstants,
+        std::uint32_t groupX, std::uint32_t groupY = 1, std::uint32_t groupZ = 1)
+    {
+        BindComputePipeline(pipeline);
+        BindDescriptorSet(set);
+        SetPushConstants(pushConstants);
+        Dispatch(groupX, groupY, groupZ);
+    }
 
     // Thin, single-call forwarder straight to Renderer::Submit() - see this
     // file's own header comment for why there is deliberately no separate

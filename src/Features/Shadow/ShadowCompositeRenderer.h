@@ -1,9 +1,12 @@
 #pragma once
 
 #include "../../Renderer/RenderGraph/RenderGraphTypes.h" // rg::TextureHandle - real struct.
+#include "../../Core/GraphicsHandles.h"
+#include "../../Renderer/Pipeline.h"
 
 #include <volk.h>
 
+#include <memory>
 #include <string>
 #include <unordered_map>
 
@@ -15,11 +18,11 @@ namespace rg { class RenderGraphBuilder; }
 // Darkens scene color by Shadow.Mask's output, writing into the
 // compositor's private target under RenderFeatureBlendMode::ScreenSpaceMask.
 //
-// Hand-rolled fullscreen-triangle graphics pipeline, same low-level recipe
-// as AtmosphereSkyBackgroundRenderer - keeps ONE DESCRIPTOR SET PER CALLING
-// VIEW, never one shared set: a shared set would let the Game View's draw
-// silently sample the Scene View's own scene-color/mask (or vice versa)
-// whenever both are visible the same frame.
+// Fullscreen-triangle graphics pipeline built through Renderer's
+// configurable pipeline API (Core/PipelineDesc.h) - keeps ONE DESCRIPTOR SET
+// PER CALLING VIEW, never one shared set: a shared set would let the Game
+// View's draw silently sample the Scene View's own scene-color/mask (or
+// vice versa) whenever both are visible the same frame.
 class ShadowCompositeRenderer {
 public:
     ~ShadowCompositeRenderer();
@@ -42,9 +45,16 @@ private:
     VkDescriptorSet EnsureViewDescriptorSet(Renderer& renderer, const char* viewKey);
 
     VkDevice m_device = VK_NULL_HANDLE;
+    Renderer* m_renderer = nullptr; // Non-owning - needed to destroy m_compositeSetLayoutHandle.
+
+    // Real descriptor-SET layout, still built by hand - needed for
+    // AllocateComputeDescriptorSet(), which the opaque pipeline API does not
+    // replace (that API only builds pipeline-compatible set LAYOUTS).
     VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline m_pipeline = VK_NULL_HANDLE;
+
+    // Built via Renderer's configurable pipeline API - see EnsurePipeline().
+    std::unique_ptr<Pipeline> m_pipeline;
+    DescriptorSetLayoutHandle m_compositeSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
 
     // One descriptor set per calling view - never collapse into one shared
     // VkDescriptorSet, see this class's own comment above.

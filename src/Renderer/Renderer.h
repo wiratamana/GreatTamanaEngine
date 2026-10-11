@@ -22,6 +22,11 @@
 #include "Vulkan/VulkanInstance.h"
 #include "Vulkan/VulkanSurface.h"
 
+#include "../Core/CaptureResult.h"
+#include "../Core/PipelineDesc.h"
+#include "../Core/UiTextureHandle.h"
+#include "GraphicsHandleRegistry.h"
+
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -223,6 +228,11 @@ public:
     // 3D geometry - the built-in primitive shapes (Renderer/Primitives/
     // PrimitiveMeshGenerator.h) - is correctly depth-tested/occluded.
     VkFormat DepthFormat() const noexcept;
+
+    // ColorFormat()/DepthFormat() as engine-native PixelFormat, for callers
+    // outside src/Renderer that cannot name a VkFormat.
+    PixelFormat ColorPixelFormat() const noexcept;
+    PixelFormat DepthPixelFormat() const noexcept;
 
     // Factory for off-screen render targets, so callers (Game, a future
     // Editor module, ...) never need direct access to the
@@ -912,6 +922,51 @@ public:
     // Phase 4C, alongside the first real per-frame recording code it's
     // meant to gate.
     void SetGpuTimingCaptureEnabled(bool enabled) noexcept;
+
+    // Configurable pipeline builder (gte::PipelineDesc, Core/PipelineDesc.h) -
+    // the ONLY way code outside src/Renderer builds a custom descriptor-set
+    // layout for a Pipeline's extra sets. Pass an empty span for a
+    // zero-binding "filler" set (needed when a layout must skip set 0 but
+    // Vulkan forbids a hole before a populated set). Destroy via
+    // DestroyDescriptorSetLayout() below - never by reaching into Vk* directly.
+    DescriptorSetLayoutHandle CreateDescriptorSetLayout(std::span<const DescriptorBindingDesc> bindings) const;
+    void DestroyDescriptorSetLayout(DescriptorSetLayoutHandle handle) const noexcept;
+
+    // Builds a Pipeline from a fully caller-described shape (blend/cull/
+    // compare/topology, extra descriptor sets, push-constant range) and
+    // in-memory compiled SPIR-V bytes - the configurable sibling of the two
+    // fixed-shape, path-based CreatePipeline() overloads above. See
+    // Core/PipelineDesc.h's PipelinePreset namespace for the common cases
+    // (Opaque/AlphaBlend/DepthEqualNoWrite) - a caller should start from one
+    // of those rather than filling every PipelineDesc field by hand.
+    // Dynamic rendering only (no VkRenderPass/VkFramebuffer, see
+    // Renderer.cpp) - mandatory per this engine's Vulkan 1.3 baseline.
+    Pipeline CreatePipeline(const PipelineDesc& desc, std::span<const std::byte> vertexSpirv,
+        std::span<const std::byte> fragmentSpirv) const;
+
+    // AI-driven debugging / Editor preview primitive - wraps a texture for
+    // display by an immediate-mode UI (ImGui::Image()) without the caller
+    // ever touching ImGui_ImplVulkan_AddTexture() or a raw VkDescriptorSet.
+    // Pass the returned handle straight to ImGui as
+    // `ImGui::Image(reinterpret_cast<ImTextureID>(handle), size)` - the
+    // handle's bit pattern IS the real backing descriptor set value (unlike
+    // every other opaque handle in this engine), which is exactly what lets
+    // ImGui's Vulkan backend consume it directly. Always release via
+    // ReleaseUiTextureHandle() below - never silently replaced by a later
+    // call with the same texture.
+    UiTextureHandle GetUiTextureHandle(const Texture2D& texture);
+    UiTextureHandle GetUiTextureHandle(const RenderTexture& target);
+    void ReleaseUiTextureHandle(UiTextureHandle handle) noexcept;
+
+    // AI-driven debugging - the decoupled-from-screenshot capture primitive
+    // behind the /get_debug_texture network route (Network/NetworkRoutes.cpp):
+    // reads back ANY render target's current pixels as engine-native
+    // PixelFormat, so an AI agent (or a human) can fetch a specific pass's
+    // output (a shadow mask, an LUT, a FrameDebugger pass) directly, instead
+    // of screenshotting the whole desktop. Thin repackaging of
+    // CaptureRenderTexturePixels() above into PixelFormat/Extent2D - same
+    // synchronous, at-most-once-per-request cost.
+    CaptureResult CaptureRenderTarget(const RenderTexture& target) const;
 
     // Read-only snapshot of this Renderer's core Vulkan handles + swapchain
     // format/image count, for an external Vulkan-based rendering backend

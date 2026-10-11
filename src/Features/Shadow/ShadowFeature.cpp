@@ -8,6 +8,8 @@
 #include "../../Game/Lighting/DirectionalLightResolver.h"
 #include "../../Game/SceneQuery.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
+#include "../../Renderer/GraphicsHandleRegistry.h"
+#include "../../Renderer/VulkanFormatInfo.h"
 
 #include <algorithm>
 #include <cassert>
@@ -255,7 +257,8 @@ void ShadowFeature::RegisterPasses()
             const rg::TextureHandle maskHandle = m_maskRenderer.AddMaskPass(builder, m_core.GetRenderer(), maskName,
                 viewData->renderTexture->Extent(), cameraData.invViewProjection, shadowMap->lightSpaceViewProjection,
                 safeSettings.depthBias, m_mapResolutionInUse, shadowMap->shadowMapHandle, shadowTarget->DepthSampler(),
-                currentViewHandles.depthHandle, currentViewHandles.depthImageView, currentViewHandles.depthSampler);
+                currentViewHandles.depthHandle, Native(currentViewHandles.depthImageView),
+                Native(currentViewHandles.depthSampler));
             if (!maskHandle.IsValid()) {
                 return;
             }
@@ -271,7 +274,7 @@ void ShadowFeature::RegisterPasses()
     const bool compositeRegistered = m_core.RegisterBuiltInRenderFeature("Shadow.Composite",
         RenderFeatureStage::PostComposite, RenderFeatureBlendMode::ScreenSpaceMask, kShadowCompositePriority,
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
-            rg::TextureHandle privateTarget, VkExtent2D extent, const ScenePassReadHandles& currentViewHandles,
+            rg::TextureHandle privateTarget, Extent2D extent, const ScenePassReadHandles& currentViewHandles,
             const RenderFeatureCameraData&) {
             const bool isGameView = (currentView == rg::RenderViewId::Named("Game"));
             const rg::RenderPassId maskKey = isGameView ? kShadowMaskGameKey : kShadowMaskSceneKey;
@@ -283,8 +286,9 @@ void ShadowFeature::RegisterPasses()
 
             const ShadowSettings safeSettings = SanitizeShadowSettings(m_settings);
             m_compositeRenderer.AddCompositePass(builder, m_core.GetRenderer(), isGameView ? "Game" : "Scene",
-                privateTarget, extent, currentViewHandles.colorHandle, currentViewHandles.colorSampler,
-                mask->maskHandle, currentViewHandles.depthHandle, safeSettings.strength);
+                privateTarget, ToVkExtent2D(extent), currentViewHandles.colorHandle,
+                Native(currentViewHandles.colorSampler), mask->maskHandle, currentViewHandles.depthHandle,
+                safeSettings.strength);
         });
     assert(compositeRegistered && "Shadow.Composite registration failed - see the GTE_LOG_WARNING above.");
 }

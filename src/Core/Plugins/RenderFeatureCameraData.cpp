@@ -1,5 +1,6 @@
 #include "RenderFeatureCameraData.h"
 
+#include "../../Application/RenderPassViewData.h"
 #include "../Logging.h"
 
 namespace gte {

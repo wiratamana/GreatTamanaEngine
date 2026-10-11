@@ -5,14 +5,17 @@
 // post-processing) needs about the camera that is NOT already covered by
 // ScenePassReadHandles' color/depth read handles. Deliberately a separate
 // struct/file pair - never folded onto ScenePassReadHandles.
-#include "../../Application/RenderPassViewData.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
-#include "../../Renderer/RenderGraph/RenderPipeline.h"
+#include "../../Renderer/RenderGraph/RenderGraphHandles.h"
 
 #include <vector>
 
 namespace gte {
+
+// Defined in Application/RenderPassViewData.h (Vulkan-bearing) - only ever
+// touched by pointer here, so this header never needs its full definition.
+struct RenderPassViewData;
 
 struct RenderFeatureCameraData {
     Vec3 eyeWorldPosition;

@@ -31,19 +31,15 @@
 // stay equal to - never centralized here, since each compute shader's
 // optimal group size is a property of that ONE shader, not a shared engine
 // convention.
+#include "../Core/Extent.h"
+
 #include <cassert>
 #include <cstdint>
 
 namespace gte {
 
-// A plain 3-uint32_t extent - the Vulkan-free sibling of VkExtent3D, used
-// only by ComputeGroupCount3D() below so this header never needs to
-// include <volk.h>.
-struct Extent3D {
-    std::uint32_t width = 0;
-    std::uint32_t height = 0;
-    std::uint32_t depth = 0;
-};
+// ComputeGroupCount3D() below reuses the engine-wide, Vulkan-free
+// gte::Extent3D (Core/Extent.h) rather than a local duplicate.
 
 // Returns ceil(totalItems / localGroupSize) - the number of work groups
 // needed so that groupCount * localGroupSize >= totalItems, i.e. every

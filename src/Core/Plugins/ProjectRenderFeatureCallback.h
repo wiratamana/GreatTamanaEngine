@@ -1,78 +1,29 @@
 #pragma once
 
-// The one callback type a Project Assembly's own on-screen render feature
+// The callback type a Project Assembly's own on-screen render feature
 // registration (Core::RegisterProjectRenderFeature(),
-// RenderFeatureCompositor::RegisterProjectFeature()) is built around. Gives
-// a PostComposite/PreUI callback the same view identity + blackboard +
-// color/depth read-handle shape its PostOpaque/PostTransparent sibling
-// (ProjectScenePassCallback/ScenePassReadHandles) already has, plus a
-// separate per-view camera-data struct (RenderFeatureCameraData.h).
+// RenderFeatureCompositor::RegisterProjectFeature()) is built around - a
+// PostComposite/PreUI callback. Zero Vulkan dependency, reachable from a
+// third-party plugin translation unit with no volk.h pulled in.
 //
-// Deliberately NOT a nested member of RenderFeatureCompositor - Core.h only
-// ever forward-declares that class (never #includes the real
-// Plugins/RenderFeatureCompositor.h - see that header's own "this header
-// must not #include ../Core.h" comment for the matching half of this same
-// discipline) and therefore has no way to name a type nested inside an
-// incomplete class. Living here, in its own free-standing, zero-Core-
-// dependency header, lets BOTH RenderFeatureCompositor.h and Core.h include
-// this ONE small file directly, by value, with neither header's own
-// existing include discipline having to change.
-//
-// This signature exposes a RenderGraphBuilder&, a RenderPassBlackboard&,
-// this frame's RenderViewId, a TextureHandle private target, a real
-// VkImageView/VkSampler read-handle struct for the current color/depth
-// sub-resources, and a checked camera-data struct - never a raw VkImage/
-// VkCommandBuffer/RenderTexture&, so a Project Assembly's own callback body
-// still has no way to record a GPU command except through
+// Exposes a RenderGraphBuilder&, a RenderPassBlackboard&, this frame's
+// RenderViewId, a private target handle, the current color/depth read
+// handles, and a camera-data struct - never a raw image/command buffer, so a
+// callback body can only record GPU work through
 // builder.AddRenderPass()/AddPass()/AddComputePass()'s own setup/execute
-// pair, the Render Graph's own, one, official entry point.
-// Synchronization/barriers/scheduling for whatever this callback declares
-// are handled entirely by the SAME RenderGraphCompiler/RenderGraphBarrierPlanner
-// every other pass in this engine already goes through - nothing new to
-// build, nothing to bypass. See task_manager/editor-core-separation-23/
-// PHASE7_FULL_REGRESSION_DOCS_AND_ENTRY_GATE_CLOSEOUT.md's own
-// RenderPassEvent::AfterEverything requirement for the ONE convention every
-// pass this callback declares must follow.
+// pair, this engine's one official render-graph entry point. Every pass this
+// callback declares must be tagged RenderPassEvent::AfterEverything.
+#include "../../Renderer/RenderGraph/RenderGraphHandles.h"
 #include "ProjectScenePassCallback.h"
 #include "RenderFeatureCameraData.h"
+#include "../Extent.h"
 
-#include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
-#include "../../Renderer/RenderGraph/RenderGraphTypes.h"
-#include "../../Renderer/RenderGraph/RenderPipeline.h"
-
-#include <volk.h>
-
-#include <cassert>
-#include <cstddef>
 #include <functional>
-#include <vector>
 
 namespace gte {
 
 using ProjectRenderFeatureCallback = std::function<void(rg::RenderGraphBuilder& builder,
     rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView, rg::TextureHandle privateTarget,
-    VkExtent2D extent, const ScenePassReadHandles& currentViewHandles, const RenderFeatureCameraData& cameraData)>;
-
-// Pure, side-effect-free, directly Tier-1-testable - every PostComposite/
-// PreUI pass must be tagged EXACTLY RenderPassEvent::AfterEverything (see
-// this file's own top-of-file comment). Scans every pass in `builder` whose
-// declaration index is in the half-open range [before, after) and returns
-// the (absolute, builder-relative) indices of every one whose
-// RenderPassEvent is not AfterEverything. Empty result = every pass in
-// range was tagged correctly, including an empty range itself.
-inline std::vector<std::size_t> FindPassesNotTaggedAfterEverything(
-    const rg::RenderGraphBuilder& builder, std::size_t before, std::size_t after)
-{
-    assert(before <= after && after <= builder.DeclaredPassCount()
-        && "FindPassesNotTaggedAfterEverything() - [before, after) out of range");
-
-    std::vector<std::size_t> violations;
-    for (std::size_t index = before; index < after; ++index) {
-        if (builder.PassEventAt(index) != rg::RenderPassEvent::AfterEverything) {
-            violations.push_back(index);
-        }
-    }
-    return violations;
-}
+    Extent2D extent, const ScenePassReadHandles& currentViewHandles, const RenderFeatureCameraData& cameraData)>;
 
 } // namespace gte
