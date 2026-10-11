@@ -189,22 +189,9 @@ const Texture2D& FrameDebuggerPreviewRenderer::RenderPreview(Renderer& renderer,
     renderer.ImmediateSubmit([&](VkCommandBuffer cmd) {
         const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-        // Never renderer.Dispatch()/gte::rg::CommandBuffer here - both only
-        // work from inside an active render-graph pass recording
-        // (BeginGraphPassRecording()/EndGraphPassRecording(), or a real
-        // rg::PassContext to obtain a CommandBuffer from via ctx.Cmd());
-        // FrameDebuggerPanel::Build() runs during ImGui UI construction,
-        // never inside such a bracket - so every Vulkan call below is issued
-        // directly against this plain ImmediateSubmit() callback instead,
-        // mirroring VolumeTexturePreviewRenderer::RenderPreview()'s own
-        // identical precedent/comment (task_manager/better-render-pass-1
-        // campaign, PHASE6 - this dispatch is architecturally incompatible
-        // with rg::CommandBuffer for the exact same reason PHASE4's
-        // GpuSkinningValidation.cpp/PHASE5's
-        // CaptureAerialPerspectiveVolumeSliceImmediate() were both left on
-        // this same raw-dispatch shape: there is no rg::PassContext here at
-        // all, only EnsureInitialized()'s pipeline CREATION was migrated
-        // onto the reflection path above).
+        // renderer.ImmediateSubmit() here still takes a raw VkCommandBuffer
+        // (no rg::CommandBuffer overload exists yet), so every Vulkan call
+        // below is issued directly instead of through CommandBuffer::DispatchCompute().
         rg::EmitImageBarrier(cmd, sourceImage, range, sourcePreviousState, sourceComputeSampledState);
         rg::EmitImageBarrier(cmd, outputImage, range, outputPreviousState, outputWriteState);
 

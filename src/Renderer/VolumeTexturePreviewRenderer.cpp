@@ -238,17 +238,9 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
     renderer.ImmediateSubmit([&](VkCommandBuffer cmd) {
         const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-        // Never renderer.Dispatch()/gte::rg::CommandBuffer here - both only
-        // work from inside an active render-graph pass recording, and this
-        // dispatch runs inside a plain ImmediateSubmit() callback instead -
-        // so every Vulkan call below is issued directly (task_manager/
-        // better-render-pass-1 campaign, PHASE6 - this dispatch is
-        // architecturally incompatible with rg::CommandBuffer for the exact
-        // same reason PHASE4's GpuSkinningValidation.cpp/PHASE5's
-        // CaptureAerialPerspectiveVolumeSliceImmediate() were both left on
-        // this same raw-dispatch shape: there is no rg::PassContext here at
-        // all, only EnsureInitialized()'s pipeline CREATION was migrated
-        // onto the reflection path above).
+        // renderer.ImmediateSubmit() here still takes a raw VkCommandBuffer
+        // (no rg::CommandBuffer overload exists yet), so every Vulkan call
+        // below is issued directly instead of through CommandBuffer::DispatchCompute().
         rg::EmitImageBarrier(cmd, volumeImage, range, previousState, volumeSampledState);
         rg::EmitImageBarrier(cmd, outputImage, range, outputPreviousState, outputWriteState);
 

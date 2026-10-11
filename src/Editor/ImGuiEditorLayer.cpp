@@ -40,6 +40,7 @@
 #include "../Game/Game.h"
 #include "../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 #include "../Renderer/Renderer.h"
+#include "../Renderer/UiTextureBackend.h"
 #include "../Window/Window.h"
 
 // This file - together with DockLayout.cpp and every Panels/*.cpp - is the
@@ -259,6 +260,14 @@ public:
             ImGui::DestroyContext(m_context);
             throw std::runtime_error("ImGui_ImplVulkan_Init failed.");
         }
+
+        // Bridges Renderer::GetUiTextureHandle() to this real ImGui Vulkan
+        // backend - Renderer itself never includes an ImGui header.
+        SetUiTextureBackend(
+            [](VkSampler sampler, VkImageView view) {
+                return ImGui_ImplVulkan_AddTexture(sampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            },
+            [](VkDescriptorSet set) { ImGui_ImplVulkan_RemoveTexture(set); });
     }
 
     ~ImGuiEditorLayer() override
