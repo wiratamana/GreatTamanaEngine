@@ -5,6 +5,7 @@
 // no live VkDevice/Core/RenderFeatureCompositor involved.
 
 #include "Core/Plugins/ProjectRenderFeatureCallback.h"
+#include "Renderer/RenderGraph/RenderPassTagValidation.h"
 
 #include <gtest/gtest.h>
 

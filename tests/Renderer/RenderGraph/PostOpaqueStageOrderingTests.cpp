@@ -15,6 +15,7 @@
 
 #include "Core/Plugins/ProjectScenePassCallback.h"
 #include "Renderer/RenderGraph/RenderGraphCompiler.h"
+#include "Renderer/RenderGraph/RenderPassTagValidation.h"
 
 #include <gtest/gtest.h>
 

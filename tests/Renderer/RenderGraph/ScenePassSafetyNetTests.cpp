@@ -6,6 +6,7 @@
 // PreOpaqueStageOrderingTests.cpp's own established convention.
 
 #include "Core/Plugins/ProjectScenePassCallback.h"
+#include "Renderer/RenderGraph/RenderPassTagValidation.h"
 
 #include <gtest/gtest.h>
 
