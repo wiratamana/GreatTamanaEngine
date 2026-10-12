@@ -43,7 +43,7 @@ void BuildGamePanel(EditorContext& ctx)
             // resized to, with no leftover space and nothing overflowing
             // it.
             ImGui::Image(
-                static_cast<ImTextureID>(reinterpret_cast<intptr_t>(ctx.gameViewDescriptor)),
+                static_cast<ImTextureID>(static_cast<std::uint64_t>(ctx.gameViewDescriptor)),
                 avail);
         }
     }

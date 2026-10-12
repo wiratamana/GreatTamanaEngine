@@ -1,12 +1,37 @@
 #include "CommandBuffer.h"
 
+#include "../Buffer.h"
 #include "../ComputeDispatch.h"
 #include "../ComputePipeline.h"
+#include "../Pipeline.h"
 #include "../Renderer.h"
 
 #include <cassert>
 
 namespace gte::rg {
+
+namespace {
+
+// Local to this translation unit - mirrors Renderer.cpp's own
+// ToVkShaderStageFlags() (Core/PipelineDesc.h's ShaderStageMask ->
+// VkShaderStageFlags), duplicated rather than shared since that one lives
+// in Renderer.cpp's own anonymous namespace.
+VkShaderStageFlags ToVkShaderStageFlags(ShaderStageMask mask) noexcept
+{
+    VkShaderStageFlags flags = 0;
+    if (HasStage(mask, ShaderStageMask::Vertex)) {
+        flags |= VK_SHADER_STAGE_VERTEX_BIT;
+    }
+    if (HasStage(mask, ShaderStageMask::Fragment)) {
+        flags |= VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
+    if (HasStage(mask, ShaderStageMask::Compute)) {
+        flags |= VK_SHADER_STAGE_COMPUTE_BIT;
+    }
+    return flags;
+}
+
+} // namespace
 
 CommandBuffer::CommandBuffer(VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats,
     WriteTargetInfo writeTarget, FrameDebuggerEventSink* eventSink) noexcept
@@ -98,6 +123,69 @@ void CommandBuffer::Draw(const Pipeline& pipeline, const Mesh& mesh, const Mat4&
                 VK_IMAGE_ASPECT_DEPTH_BIT);
         }
     }
+}
+
+void CommandBuffer::BindPipeline(const Pipeline& pipeline) noexcept
+{
+    m_boundGraphicsLayout = pipeline.Layout();
+    vkCmdBindPipeline(m_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Native());
+}
+
+void CommandBuffer::BindDescriptorSet(std::uint32_t setIndex, VkDescriptorSet set) noexcept
+{
+    assert(m_boundGraphicsLayout != VK_NULL_HANDLE
+        && "CommandBuffer::BindDescriptorSet(uint32_t, VkDescriptorSet): no graphics pipeline bound - call "
+           "BindPipeline() first.");
+    if (m_boundGraphicsLayout == VK_NULL_HANDLE) {
+        return;
+    }
+    vkCmdBindDescriptorSets(m_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_boundGraphicsLayout, setIndex, 1, &set, 0, nullptr);
+}
+
+void CommandBuffer::PushConstants(const void* data, std::uint32_t size, ShaderStageMask stages) noexcept
+{
+    assert(m_boundGraphicsLayout != VK_NULL_HANDLE
+        && "CommandBuffer::PushConstants(): no graphics pipeline bound - call BindPipeline() first.");
+    if (m_boundGraphicsLayout == VK_NULL_HANDLE) {
+        return;
+    }
+    vkCmdPushConstants(m_cmd, m_boundGraphicsLayout, ToVkShaderStageFlags(stages), 0, size, data);
+}
+
+void CommandBuffer::SetViewportAndScissor(std::uint32_t width, std::uint32_t height) noexcept
+{
+    VkViewport viewport{};
+    viewport.width = static_cast<float>(width);
+    viewport.height = static_cast<float>(height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(m_cmd, 0, 1, &viewport);
+
+    VkRect2D scissor{};
+    scissor.extent = VkExtent2D{ width, height };
+    vkCmdSetScissor(m_cmd, 0, 1, &scissor);
+}
+
+void CommandBuffer::BindVertexBuffer(const Buffer& buffer, std::uint32_t binding) noexcept
+{
+    const VkBuffer native = buffer.Native();
+    const VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(m_cmd, binding, 1, &native, &offset);
+}
+
+void CommandBuffer::BindIndexBuffer(const Buffer& buffer) noexcept
+{
+    vkCmdBindIndexBuffer(m_cmd, buffer.Native(), 0, VK_INDEX_TYPE_UINT32);
+}
+
+void CommandBuffer::DrawIndexed(std::uint32_t indexCount, std::uint32_t firstIndex, std::int32_t vertexOffset) noexcept
+{
+    vkCmdDrawIndexed(m_cmd, indexCount, 1, firstIndex, vertexOffset, 0);
+}
+
+void CommandBuffer::Draw(std::uint32_t vertexCount, std::uint32_t firstVertex) noexcept
+{
+    vkCmdDraw(m_cmd, vertexCount, 1, firstVertex, 0);
 }
 
 } // namespace gte::rg

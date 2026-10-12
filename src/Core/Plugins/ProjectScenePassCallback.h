@@ -21,9 +21,9 @@ namespace gte {
 struct ScenePassReadHandles {
     rg::TextureHandle colorHandle;
     rg::TextureHandle depthHandle;
-    SamplerHandle colorSampler;
-    ImageViewHandle depthImageView;
-    SamplerHandle depthSampler;
+    SamplerHandle colorSampler = SamplerHandle::Invalid;
+    ImageViewHandle depthImageView = ImageViewHandle::Invalid;
+    SamplerHandle depthSampler = SamplerHandle::Invalid;
 };
 
 // Shared callback type for both the PostOpaque and PostTransparent stages -

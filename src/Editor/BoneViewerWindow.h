@@ -5,6 +5,7 @@
 #include "FlatListRangeSelection.h" // BuildInclusiveIndexRange()
 #include "../Assets/PhysicsData.h" // RigidBodyShape
 #include "../Core/GraphicsHandles.h"
+#include "../Core/UiTextureHandle.h"
 #include "../Math/Vec3.h"
 #include "../Physics/DynamicChainDefinition.h" // DynamicChainDefinition - task_manager/verlet-integration-5, Phase 2
 #include "../Game/Physics/DynamicChainRigCache.h" // DynamicChainRigCache::ModelEntry - used by BuildPartListPane()'s signature below
@@ -85,10 +86,10 @@ struct EditorContext;
 // staged under that same switch (see CMakeLists.txt) - nothing about the
 // bone-viewing feature ITSELF is Project-panel-specific.
 //
-// Owns its GPU buffers/RenderTexture/ImGui descriptor/pipeline for as long
+// Owns its GPU buffers/RenderTexture/UI-texture handle/pipeline for as long
 // as they're needed - all released by Reset() (called by the destructor,
 // and MUST also be called explicitly by ImGuiEditorLayer's destructor
-// BEFORE ImGui_ImplVulkan_Shutdown(), same requirement as
+// BEFORE the ImGui Vulkan backend shuts down, same requirement as
 // AssetPreviewMesh::Reset()/AssetPreviewTexture::Reset()).
 class BoneViewerWindow {
 public:
@@ -218,8 +219,7 @@ private:
     bool m_open = false;
     Entity m_targetEntity = kInvalidEntity;
 
-    VkDevice m_device = VK_NULL_HANDLE;
-    Renderer* m_renderer = nullptr; // Non-owning - needed to destroy the two handles below.
+    Renderer* m_renderer = nullptr; // Non-owning - needed to destroy/release every handle below.
 
     // Lazily built on first Build() call, then reused for every
     // subsequently-viewed model - built via Renderer's configurable pipeline
@@ -234,13 +234,11 @@ private:
     // tiny, local, always-neutral stand-in, exactly mirroring
     // AssetPreviewMesh's own identical local descriptor infra: a 1x1 white
     // dummy texture at binding 0 + a zero-filled dummy UBO at binding 8,
-    // bound at set=1. Kept raw: the opaque pipeline API has no way to
-    // allocate a real, writable descriptor SET, only a set LAYOUT -
-    // m_localSetOneLayout and m_setOneLayoutHandle above are two separately-
-    // built but identically-defined layouts, which Vulkan treats as
-    // pipeline-layout-compatible.
-    VkDescriptorSetLayout m_localSetOneLayout = VK_NULL_HANDLE;
-    VkDescriptorPool m_localDescriptorPool = VK_NULL_HANDLE;
+    // bound at set=1. Allocated directly against m_setOneLayoutHandle via
+    // Renderer::AllocateComputeDescriptorSet() - no second, hand-built
+    // VkDescriptorSetLayout/VkDescriptorPool of its own; the returned set
+    // comes from Renderer's own shared descriptor pool and is never
+    // individually freed.
     VkDescriptorSet m_localSetOneDescriptorSet = VK_NULL_HANDLE;
     std::unique_ptr<Texture2D> m_localWhiteTexture;
     std::unique_ptr<Buffer> m_localUniformBuffer;
@@ -317,7 +315,7 @@ private:
     float m_boundsRadius = 1.0f;
 
     std::unique_ptr<RenderTexture> m_renderTexture;
-    VkDescriptorSet m_descriptor = VK_NULL_HANDLE;
+    UiTextureHandle m_descriptor = UiTextureHandle::Invalid;
     int m_texWidth = 0;
     int m_texHeight = 0;
 

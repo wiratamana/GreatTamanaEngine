@@ -684,6 +684,15 @@ public:
     // freed).
     VkDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
 
+    // Opaque-layout-input sibling of AllocateComputeDescriptorSet() above -
+    // takes a DescriptorSetLayoutHandle (CreateDescriptorSetLayout() below)
+    // instead of forcing a caller outside src/Renderer to ALSO hand-build a
+    // second, duplicate raw VkDescriptorSetLayout purely to allocate
+    // against. Still returns a raw VkDescriptorSet, written via
+    // ComputeDescriptorSet::Rewrite() exactly like the overload above - same
+    // shared pool, never individually freed.
+    VkDescriptorSet AllocateComputeDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const;
+
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE2 - the ONE shared instance-buffer descriptor-set-layout every
     // VertexLayout::PositionNormalInstanced Pipeline is built with (see

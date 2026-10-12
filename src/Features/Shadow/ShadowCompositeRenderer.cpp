@@ -5,7 +5,6 @@
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
-#include "../../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
 
 #include <cstring>
@@ -43,18 +42,14 @@ ShadowCompositeRenderer::~ShadowCompositeRenderer()
 
 void ShadowCompositeRenderer::Reset()
 {
-    if (m_device != VK_NULL_HANDLE && m_pipeline) {
-        vkDeviceWaitIdle(m_device);
+    if (m_renderer != nullptr && m_pipeline) {
+        m_renderer->WaitForGpuIdle();
     }
     if (m_renderer) {
         m_renderer->DestroyDescriptorSetLayout(m_compositeSetLayoutHandle);
     }
     m_compositeSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
     m_pipeline.reset();
-    if (m_descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
-        m_descriptorSetLayout = VK_NULL_HANDLE;
-    }
     m_descriptorSetsByView.clear(); // Every entry is pool-owned - never individually freed.
 }
 
@@ -63,20 +58,14 @@ void ShadowCompositeRenderer::EnsurePipeline(Renderer& renderer)
     if (m_pipeline) {
         return;
     }
-    m_device = renderer.GetVulkanContextInfo().device;
     m_renderer = &renderer;
-    const VkDevice device = m_device;
 
-    // Real descriptor-SET layout (binding 0 = sceneColor, binding 1 =
-    // shadowMask, fragment stage - see ShadowComposite.frag) - needed for
-    // AllocateComputeDescriptorSet(), kept raw.
-    DescriptorSetLayoutBuilder layoutBuilder(device);
-    m_descriptorSetLayout = layoutBuilder.AddCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT)
-                                 .AddCombinedImageSampler(1, VK_SHADER_STAGE_FRAGMENT_BIT)
-                                 .Build();
-
-    // Opaque-handle twin, identically defined, fed to the pipeline builder -
-    // pipeline-layout-compatible with the real sets allocated above.
+    // Opaque-handle layout (binding 0 = sceneColor, binding 1 = shadowMask,
+    // fragment stage - see ShadowComposite.frag) - this SAME layout handle
+    // is used both to allocate every per-view descriptor set
+    // (EnsureViewDescriptorSet()) and to build the pipeline's own layout,
+    // so there is exactly one definition of this binding set, never a
+    // hand-built duplicate.
     constexpr DescriptorBindingDesc kCompositeBindings[] = {
         { .binding = 0, .kind = DescriptorKind::CombinedImageSampler, .stages = ShaderStageMask::Fragment },
         { .binding = 1, .kind = DescriptorKind::CombinedImageSampler, .stages = ShaderStageMask::Fragment },
@@ -105,7 +94,7 @@ VkDescriptorSet ShadowCompositeRenderer::EnsureViewDescriptorSet(Renderer& rende
     if (existing != m_descriptorSetsByView.end()) {
         return existing->second;
     }
-    const VkDescriptorSet descriptorSet = renderer.AllocateComputeDescriptorSet(m_descriptorSetLayout);
+    const VkDescriptorSet descriptorSet = renderer.AllocateComputeDescriptorSet(m_compositeSetLayoutHandle);
     return m_descriptorSetsByView.emplace(viewKey, descriptorSet).first->second;
 }
 
@@ -133,7 +122,7 @@ void ShadowCompositeRenderer::AddCompositePass(rg::RenderGraphBuilder& builder, 
             const rg::PassContext::ResolvedTexture mask = ctx.resolveTexture(maskHandle);
 
             ComputeDescriptorSet wrapped(descriptorSet);
-            wrapped.Rewrite(m_device,
+            wrapped.Rewrite(m_renderer->GetVulkanContextInfo().device,
                 std::vector<ComputeDescriptorWrite>{
                     ComputeDescriptorWrite::CombinedImageSampler(0, sceneColor.view, sceneColorSampler),
                     ComputeDescriptorWrite::CombinedImageSampler(1, mask.view, mask.sampler),
@@ -142,20 +131,12 @@ void ShadowCompositeRenderer::AddCompositePass(rg::RenderGraphBuilder& builder, 
             PushConstants pushConstants{};
             pushConstants.strength = strength;
 
-            const VkPipeline pipeline = m_pipeline->Native();
-            const VkPipelineLayout layout = m_pipeline->Layout();
-
             auto cmd = ctx.Cmd();
-            VkViewport viewport{ 0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f };
-            VkRect2D scissor{ { 0, 0 }, extent };
-            vkCmdSetViewport(cmd.Native(), 0, 1, &viewport);
-            vkCmdSetScissor(cmd.Native(), 0, 1, &scissor);
-            vkCmdBindPipeline(cmd.Native(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-            vkCmdBindDescriptorSets(
-                cmd.Native(), VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &descriptorSet, 0, nullptr);
-            vkCmdPushConstants(
-                cmd.Native(), layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pushConstants), &pushConstants);
-            vkCmdDraw(cmd.Native(), 3, 1, 0, 0);
+            cmd.BindPipeline(*m_pipeline);
+            cmd.SetViewportAndScissor(extent.width, extent.height);
+            cmd.BindDescriptorSet(/*setIndex=*/0, descriptorSet);
+            cmd.PushConstants(pushConstants, ShaderStageMask::Fragment);
+            cmd.Draw(/*vertexCount=*/3);
         },
         rg::RenderPassDrawKind::DrawQuad, rg::RenderPassEvent::AfterEverything);
 }

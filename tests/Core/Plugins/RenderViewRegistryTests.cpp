@@ -19,7 +19,7 @@ namespace {
 RenderViewDesc MakeColorDesc(std::uint32_t w = 64, std::uint32_t h = 64)
 {
     RenderViewDesc d; d.width = w; d.height = h; d.hasColor = true; d.hasDepth = true;
-    d.colorFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    d.colorFormat = PixelFormat::RGBA8_UNorm;
     return d;
 }
 
@@ -86,9 +86,9 @@ TEST(RenderViewRegistryTest, ColorFormatIsIgnoredWhenHasColorIsFalse)
     if (!fixture.IsUsable()) { GTEST_SKIP() << fixture.SkipReason(); }
     RenderViewRegistry registry(fixture.GetRenderer());
     RenderViewDesc a = MakeDepthOnlyDesc();
-    a.colorFormat = VK_FORMAT_R8G8B8A8_UNORM; // meaningless, since hasColor == false.
+    a.colorFormat = PixelFormat::RGBA8_UNorm; // meaningless, since hasColor == false.
     RenderViewDesc b = MakeDepthOnlyDesc();
-    b.colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT; // different, still meaningless.
+    b.colorFormat = PixelFormat::RGBA16_Float; // different, still meaningless.
     EXPECT_TRUE(DescsMatchForSameName(a, b));
     const rg::RenderViewId first = registry.CreateOrGetView("DepthOnlyX", a);
     const rg::RenderViewId second = registry.CreateOrGetView("DepthOnlyX", b);

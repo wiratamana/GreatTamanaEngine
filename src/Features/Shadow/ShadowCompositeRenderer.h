@@ -44,20 +44,17 @@ private:
     void Reset();
     VkDescriptorSet EnsureViewDescriptorSet(Renderer& renderer, const char* viewKey);
 
-    VkDevice m_device = VK_NULL_HANDLE;
     Renderer* m_renderer = nullptr; // Non-owning - needed to destroy m_compositeSetLayoutHandle.
-
-    // Real descriptor-SET layout, still built by hand - needed for
-    // AllocateComputeDescriptorSet(), which the opaque pipeline API does not
-    // replace (that API only builds pipeline-compatible set LAYOUTS).
-    VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
 
     // Built via Renderer's configurable pipeline API - see EnsurePipeline().
     std::unique_ptr<Pipeline> m_pipeline;
     DescriptorSetLayoutHandle m_compositeSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
 
     // One descriptor set per calling view - never collapse into one shared
-    // VkDescriptorSet, see this class's own comment above.
+    // VkDescriptorSet, see this class's own comment above. Allocated
+    // directly against m_compositeSetLayoutHandle via
+    // Renderer::AllocateComputeDescriptorSet() - no second, hand-built
+    // VkDescriptorSetLayout of its own anymore.
     std::unordered_map<std::string, VkDescriptorSet> m_descriptorSetsByView;
 };
 

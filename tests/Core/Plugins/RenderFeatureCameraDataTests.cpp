@@ -3,6 +3,7 @@
 // hand-built RenderPassViewData, no live Core/Renderer/Vulkan device needed.
 
 #include "Core/Plugins/RenderFeatureCameraData.h"
+#include "Application/RenderPassViewData.h" // RenderPassViewData's real definition - only forward-declared above.
 
 #include <gtest/gtest.h>
 

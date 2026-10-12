@@ -2,6 +2,7 @@
 
 #include "../Math/Vec3.h"
 #include "../Core/GraphicsHandles.h"
+#include "../Core/UiTextureHandle.h"
 #include "../Renderer/Pipeline.h"
 
 #include <volk.h>
@@ -40,18 +41,16 @@ class RenderTexture;
 // Needs a per-vertex NORMAL (not this engine's shared position+color
 // Vertex layout), so it builds its pipeline through Renderer's configurable
 // pipeline API (Core/PipelineDesc.h, VertexLayout::PositionNormal) instead
-// of the fixed-shape path-based CreatePipeline() overload. Still records
-// its own vkCmdBindVertexBuffers/vkCmdBindIndexBuffer/vkCmdDrawIndexed via
-// a Renderer::RenderOffscreen() recordExtra callback - Vulkan types are
-// fine to use directly in this Editor-module file for that reason.
-// Still uses Renderer's public factories for everything else (CreateBuffer/
-// CreateDeviceLocalBuffer/CreateRenderTexture/RenderOffscreen), so it never
-// touches a raw VmaAllocator/VkCommandPool itself.
+// of the fixed-shape path-based CreatePipeline() overload. Records its draw
+// through gte::rg::CommandBuffer's own high-level methods (BindPipeline/
+// BindDescriptorSet/PushConstants/BindVertexBuffer/BindIndexBuffer/
+// DrawIndexed) via a Renderer::RenderOffscreen() recordExtra callback -
+// never touches CommandBuffer::Native()/a raw vkCmd* call.
 //
-// Owns its GPU buffers/RenderTexture/ImGui descriptor/pipeline for as long
+// Owns its GPU buffers/RenderTexture/UI-texture handle/pipeline for as long
 // as they're needed - all released by Reset() (called by the destructor,
 // and MUST also be called explicitly by ImGuiEditorLayer's destructor
-// BEFORE ImGui_ImplVulkan_Shutdown(), same requirement as
+// BEFORE the ImGui Vulkan backend shuts down, same requirement as
 // AssetPreviewTexture::Reset()).
 class AssetPreviewMesh {
 public:
@@ -62,7 +61,7 @@ public:
     AssetPreviewMesh& operator=(const AssetPreviewMesh&) = delete;
 
     struct Preview {
-        VkDescriptorSet descriptor = VK_NULL_HANDLE; // Ready to pass straight to ImGui::Image().
+        UiTextureHandle descriptor = UiTextureHandle::Invalid; // Ready to pass straight to ImGui::Image().
         int width = 0;
         int height = 0;
         std::size_t vertexCount = 0;
@@ -85,9 +84,9 @@ public:
     std::optional<Preview> Render(Renderer& renderer, const std::string& absolutePath, int viewportWidth, int viewportHeight);
 
     // Releases every currently-held GPU resource (vertex/index buffers,
-    // RenderTexture, ImGui descriptor, pipeline) - waiting for the GPU to be
-    // idle first, same reasoning as AssetPreviewTexture::Reset(). Called by
-    // the destructor, and safe to call repeatedly/on an already-empty
+    // RenderTexture, UI-texture handle, pipeline) - waiting for the GPU to
+    // be idle first, same reasoning as AssetPreviewTexture::Reset(). Called
+    // by the destructor, and safe to call repeatedly/on an already-empty
     // instance.
     void Reset();
 
@@ -98,8 +97,7 @@ private:
     bool EnsureMeshUploaded(Renderer& renderer, const std::string& absolutePath);
     void EnsureRenderTexture(Renderer& renderer, int width, int height);
 
-    VkDevice m_device = VK_NULL_HANDLE;
-    Renderer* m_renderer = nullptr; // Non-owning - needed to destroy the two handles below.
+    Renderer* m_renderer = nullptr; // Non-owning - needed to destroy/release every handle below.
 
     // Lazily built on first Render() call, then reused for every
     // subsequently-selected mesh asset - built via Renderer's configurable
@@ -111,13 +109,12 @@ private:
     // MeshPreview.frag samples the shared set=1 lighting/shadow interface -
     // this preview has no real scene light/shadow context, so it builds its
     // own tiny, always-neutral stand-in: a 1x1 white dummy texture at
-    // binding 0 + a zero-filled dummy UBO at binding 8. Kept raw: the opaque
-    // pipeline API has no way to allocate a real, writable descriptor SET,
-    // only a set LAYOUT - m_localSetOneLayout and m_setOneLayoutHandle above
-    // are two separately-built but identically-defined layouts, which Vulkan
-    // treats as pipeline-layout-compatible.
-    VkDescriptorSetLayout m_localSetOneLayout = VK_NULL_HANDLE;
-    VkDescriptorPool m_localDescriptorPool = VK_NULL_HANDLE;
+    // binding 0 + a zero-filled dummy UBO at binding 8. Allocated directly
+    // against m_setOneLayoutHandle via Renderer::AllocateComputeDescriptorSet()
+    // - no second, hand-built VkDescriptorSetLayout/VkDescriptorPool of its
+    // own anymore; the returned set comes from Renderer's own shared
+    // descriptor pool and is never individually freed (same convention as
+    // every other compute-shaped descriptor set in this engine).
     VkDescriptorSet m_localSetOneDescriptorSet = VK_NULL_HANDLE;
     std::unique_ptr<Texture2D> m_localWhiteTexture;
     std::unique_ptr<Buffer> m_localUniformBuffer;
@@ -139,7 +136,7 @@ private:
     float m_boundsRadius = 1.0f;
 
     std::unique_ptr<RenderTexture> m_renderTexture;
-    VkDescriptorSet m_descriptor = VK_NULL_HANDLE;
+    UiTextureHandle m_descriptor = UiTextureHandle::Invalid;
     int m_texWidth = 0;
     int m_texHeight = 0;
 };

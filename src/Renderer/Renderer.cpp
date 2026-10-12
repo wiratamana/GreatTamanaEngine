@@ -532,6 +532,11 @@ VkDescriptorSet Renderer::AllocateComputeDescriptorSet(VkDescriptorSetLayout lay
     return m_resources.AllocateComputeDescriptorSet(layout);
 }
 
+VkDescriptorSet Renderer::AllocateComputeDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const
+{
+    return m_resources.AllocateComputeDescriptorSet(Native(layoutHandle));
+}
+
 VkDescriptorSetLayout Renderer::InstanceBufferDescriptorSetLayout() const noexcept
 {
     return m_resources.InstanceBufferDescriptorSetLayout();

@@ -45,7 +45,7 @@ void BuildScenePanel(
             // Its own RenderTexture (ctx.sceneViewDescriptor) - "Scene"
             // no longer displays the same image as "Game".
             ImGui::Image(
-                static_cast<ImTextureID>(reinterpret_cast<intptr_t>(ctx.sceneViewDescriptor)),
+                static_cast<ImTextureID>(static_cast<std::uint64_t>(ctx.sceneViewDescriptor)),
                 avail);
 
 #if GTE_ENABLE_PROJECT_PANEL

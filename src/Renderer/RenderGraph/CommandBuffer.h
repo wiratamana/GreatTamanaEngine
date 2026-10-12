@@ -24,6 +24,8 @@
 
 #include <volk.h>
 
+#include "../../Core/PipelineDesc.h" // ShaderStageMask - PushConstants() below.
+
 #include "../GraphicsHandleRegistry.h"
 
 #include "../DrawStats.h"
@@ -34,6 +36,7 @@
 #include <functional>
 
 namespace gte {
+class Buffer;
 class ComputePipeline;
 class Mesh;
 class Pipeline;
@@ -100,6 +103,53 @@ public:
     // since this class's own Native() member would otherwise hide the free
     // function of the same name.
     void BindDescriptorSet(DescriptorSetHandle set) noexcept { BindDescriptorSet(::gte::Native(set)); }
+
+    // --- Immediate graphics-recording helpers -----------------------------
+    // Unlike BindComputePipeline()/BindDescriptorSet()/SetPushConstants()
+    // above (which only accumulate state for the NEXT Dispatch()), the
+    // methods below issue their real vkCmd* call immediately - for a custom
+    // graphics draw (a hand-built Pipeline, not Renderer::Submit()'s own
+    // fixed draw path) that needs direct control over binding order. This is
+    // what lets a caller outside src/Renderer record a full draw without
+    // ever touching Native()/raw vkCmd* itself.
+
+    // Binds `pipeline` immediately and remembers its VkPipelineLayout for
+    // the BindDescriptorSet()/PushConstants() overloads below.
+    void BindPipeline(const Pipeline& pipeline) noexcept;
+
+    // Binds `set` at descriptor-set index `setIndex` against the most
+    // recently bound graphics pipeline's layout (BindPipeline() above) -
+    // e.g. index 1 for a Pipeline built with a PipelineLayoutDesc::
+    // extraSetLayouts entry at that position.
+    void BindDescriptorSet(std::uint32_t setIndex, VkDescriptorSet set) noexcept;
+
+    // Pushes `size` bytes from `data` at offset 0 with `stages`, against the
+    // most recently bound graphics pipeline - immediate, unlike
+    // SetPushConstants() above (which only takes effect at the next
+    // Dispatch()).
+    void PushConstants(const void* data, std::uint32_t size, ShaderStageMask stages) noexcept;
+
+    template <typename T>
+    void PushConstants(const T& data, ShaderStageMask stages) noexcept
+    {
+        PushConstants(&data, static_cast<std::uint32_t>(sizeof(T)), stages);
+    }
+
+    // Sets both viewport and scissor to [0,0]-(width,height), full depth
+    // range - the common "draw into this whole render target" case.
+    void SetViewportAndScissor(std::uint32_t width, std::uint32_t height) noexcept;
+
+    void BindVertexBuffer(const Buffer& buffer, std::uint32_t binding = 0) noexcept;
+
+    // Always VK_INDEX_TYPE_UINT32 - this engine's only index format (see Mesh.h).
+    void BindIndexBuffer(const Buffer& buffer) noexcept;
+
+    void DrawIndexed(std::uint32_t indexCount, std::uint32_t firstIndex = 0, std::int32_t vertexOffset = 0) noexcept;
+
+    // Non-indexed draw sibling of DrawIndexed() above - for a pipeline with
+    // no vertex/index buffer at all (e.g. a fullscreen-triangle pass that
+    // synthesizes its own vertices from gl_VertexIndex in the shader).
+    void Draw(std::uint32_t vertexCount, std::uint32_t firstVertex = 0) noexcept;
 
     // Remembers `data`/`size` for the NEXT Dispatch()/DispatchOverSize() call
     // - `data` must stay alive until that call actually happens (the same
@@ -189,6 +239,11 @@ private:
     VkDescriptorSet m_boundDescriptorSet = VK_NULL_HANDLE;
     const void* m_pushConstantData = nullptr;
     std::uint32_t m_pushConstantSize = 0;
+
+    // Set by BindPipeline() above - the immediate-graphics-recording
+    // counterpart of m_boundComputePipeline, read by BindDescriptorSet(
+    // uint32_t, VkDescriptorSet)/PushConstants() above.
+    VkPipelineLayout m_boundGraphicsLayout = VK_NULL_HANDLE;
 };
 
 } // namespace gte::rg

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Selection.h"
+#include "../Core/UiTextureHandle.h"
 #include "TransformGizmo.h"
 #include "RenderGraphRegimeChoice.h"
 #include <chrono>
@@ -60,27 +61,28 @@ inline constexpr const char* kHierarchyEntityDragDropPayloadType = "GTE_HIERARCH
 // and the panel/dock-layout functions it calls ever touch this, in a fixed,
 // explicit order every frame.
 //
-// Holding raw Vulkan types here (VkDescriptorSet, VkExtent2D) is deliberate,
-// not an architectural leak: Renderer's own public API
-// (RenderTexture::Extent(), Renderer::GetVulkanContextInfo()) already hands
-// out plain Vulkan handles on purpose, specifically so "an external
-// Vulkan-based rendering backend... owned by the Editor module" (see
-// Renderer.h) - i.e. Dear ImGui's own Vulkan backend - can use them
-// directly. See AGENTS.md ("Editor Module Structure") for the full
-// rationale.
+// Holding raw VkExtent2D here is deliberate, not an architectural leak:
+// Renderer's own public API (RenderTexture::Extent()) already hands out
+// plain Vulkan extents on purpose, specifically so "an external Vulkan-
+// based rendering backend... owned by the Editor module" (see Renderer.h)
+// - i.e. Dear ImGui's own Vulkan backend - can use them directly. See
+// AGENTS.md ("Editor Module Structure") for the full rationale.
+// gameViewDescriptor/sceneViewDescriptor below use the opaque
+// UiTextureHandle (Renderer::GetUiTextureHandle()) instead - never a raw
+// VkDescriptorSet.
 struct EditorContext {
-    // The ImGui-side descriptor for the Game-view RenderTexture, created
+    // The ImGui-side texture handle for the Game-view RenderTexture, created
     // lazily by ImGuiEditorLayer::BuildUI() - read by GamePanel only. Never
     // interpreted by engine code, just handed straight to ImGui::Image() as
     // an opaque texture id.
-    VkDescriptorSet gameViewDescriptor = VK_NULL_HANDLE;
+    UiTextureHandle gameViewDescriptor = UiTextureHandle::Invalid;
 
     // The Scene-view equivalent of gameViewDescriptor above, for its own,
     // separate RenderTexture (see ImGuiEditorLayer's class comment and
     // EditorLayer.h's SceneViewTarget()) - read by ScenePanel only. "Game"
     // and "Scene" each display their own texture now; they no longer share
     // one.
-    VkDescriptorSet sceneViewDescriptor = VK_NULL_HANDLE;
+    UiTextureHandle sceneViewDescriptor = UiTextureHandle::Invalid;
 
     // Size (in pixels) the "Game" panel's content region actually was as of
     // last frame's GamePanel::Build() (Panels/GamePanel.cpp) - what

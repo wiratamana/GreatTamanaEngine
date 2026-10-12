@@ -89,8 +89,11 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
     constexpr std::uint32_t kMaxComputeDescriptorSets = 256;
 
     // Block 4 "Global Scene Services Descriptor Set" - binding 8 is a plain
-    // uniform buffer, one per concurrently-tracked render view (Game, Scene).
-    constexpr std::uint32_t kMaxComputeUniformBuffers = 2;
+    // uniform buffer, one per concurrently-tracked render view (Game, Scene),
+    // plus one each for the Editor's AssetPreviewMesh/BoneViewerWindow
+    // "local set=1" lighting stand-in (see Renderer::
+    // AllocateComputeDescriptorSet(DescriptorSetLayoutHandle)).
+    constexpr std::uint32_t kMaxComputeUniformBuffers = 4;
 
     // Block 4 "Global Scene Services Descriptor Set"
     // (task_manager/better-render-pass-6) - SceneServicesDescriptorSet

@@ -7,15 +7,15 @@
 
 #include <gtest/gtest.h>
 
-// A default-constructed gte::ScenePassReadHandles carries null handles and
-// null Vulkan objects - the exact contract a PostOpaque/PostTransparent
+// A default-constructed gte::ScenePassReadHandles carries only Invalid
+// opaque handles - the exact contract a PostOpaque/PostTransparent
 // provider must overwrite before handing it to a registered callback.
 TEST(ProjectScenePassCallbackHeaderCompilesStandaloneTests, DefaultConstructedReadHandlesAreNull)
 {
     gte::ScenePassReadHandles handles;
-    EXPECT_EQ(handles.colorSampler, VK_NULL_HANDLE);
-    EXPECT_EQ(handles.depthImageView, VK_NULL_HANDLE);
-    EXPECT_EQ(handles.depthSampler, VK_NULL_HANDLE);
+    EXPECT_EQ(handles.colorSampler, gte::SamplerHandle::Invalid);
+    EXPECT_EQ(handles.depthImageView, gte::ImageViewHandle::Invalid);
+    EXPECT_EQ(handles.depthSampler, gte::SamplerHandle::Invalid);
 }
 
 // A lambda matching ProjectScenePassCallback's signature assigns cleanly -

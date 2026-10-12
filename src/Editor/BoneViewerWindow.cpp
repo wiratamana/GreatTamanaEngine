@@ -21,10 +21,8 @@
 #include "../Renderer/RenderGraph/CommandBuffer.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/Texture2D.h"
-#include "../Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
 
 #include <imgui.h>
-#include <backends/imgui_impl_vulkan.h>
 
 #include <algorithm>
 #include <array>
@@ -127,17 +125,17 @@ void BoneViewerWindow::Open(Entity rootEntity) noexcept
 
 void BoneViewerWindow::Reset()
 {
-    if (m_device != VK_NULL_HANDLE
-        && (m_vertexBuffer || m_indexBuffer || m_renderTexture || m_descriptor != VK_NULL_HANDLE
-            || m_pipeline || m_localDescriptorPool != VK_NULL_HANDLE)) {
+    if (m_renderer != nullptr
+        && (m_vertexBuffer || m_indexBuffer || m_renderTexture || m_descriptor != UiTextureHandle::Invalid
+            || m_pipeline)) {
         // Same "stall before releasing, this is a rare user-driven event
         // not a per-frame cost" reasoning as AssetPreviewMesh::Reset().
-        vkDeviceWaitIdle(m_device);
+        m_renderer->WaitForGpuIdle();
     }
 
-    if (m_descriptor != VK_NULL_HANDLE) {
-        ImGui_ImplVulkan_RemoveTexture(m_descriptor);
-        m_descriptor = VK_NULL_HANDLE;
+    if (m_descriptor != UiTextureHandle::Invalid && m_renderer != nullptr) {
+        m_renderer->ReleaseUiTextureHandle(m_descriptor);
+        m_descriptor = UiTextureHandle::Invalid;
     }
     m_renderTexture.reset();
     m_vertexBuffer.reset();
@@ -165,20 +163,13 @@ void BoneViewerWindow::Reset()
     m_setZeroFillerLayoutHandle = DescriptorSetLayoutHandle::Invalid;
     m_pipeline.reset();
 
-    // Local set=1 lighting/shadow stand-in - owned entirely by this class,
-    // never routed through Renderer::AllocateComputeDescriptorSet(). The
-    // pool destroy implicitly frees m_localSetOneDescriptorSet.
+    // m_localSetOneDescriptorSet came from Renderer's own shared compute
+    // descriptor pool (AllocateComputeDescriptorSet()) - never individually
+    // freed, same convention as every other compute-shaped descriptor set
+    // in this engine.
     m_localWhiteTexture.reset();
     m_localUniformBuffer.reset();
-    if (m_localDescriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(m_device, m_localDescriptorPool, nullptr);
-        m_localDescriptorPool = VK_NULL_HANDLE;
-    }
     m_localSetOneDescriptorSet = VK_NULL_HANDLE;
-    if (m_localSetOneLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_localSetOneLayout, nullptr);
-        m_localSetOneLayout = VK_NULL_HANDLE;
-    }
 }
 
 void BoneViewerWindow::EnsurePipeline(Renderer& renderer)
@@ -187,43 +178,22 @@ void BoneViewerWindow::EnsurePipeline(Renderer& renderer)
         return;
     }
 
-    const VkDevice device = m_device;
     m_renderer = &renderer;
 
-    // Local set=1 lighting/shadow stand-in (MeshPreview.frag samples
-    // DirectionalLightingAndReceiverMask.glsl's shared interface) - a real,
-    // writable descriptor set the opaque pipeline API cannot allocate, so
-    // it is still built by hand: binding 0 (combined image sampler) and
-    // binding 8 (uniform buffer). Mirrors AssetPreviewMesh's own identical
-    // local descriptor infra exactly.
-    m_localSetOneLayout = DescriptorSetLayoutBuilder(device)
-                               .AddCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT)
-                               .AddUniformBuffer(8, VK_SHADER_STAGE_FRAGMENT_BIT)
-                               .Build();
+    // Opaque-handle layout for set=1's lighting/shadow stand-in
+    // (MeshPreview.frag samples DirectionalLightingAndReceiverMask.glsl's
+    // shared interface) - this SAME layout handle is used both to allocate
+    // the real, writable descriptor set below and to build the pipeline's
+    // own layout, mirroring AssetPreviewMesh's own identical local
+    // descriptor infra exactly - no hand-built duplicate layout anymore.
+    constexpr DescriptorBindingDesc kSetOneBindings[] = {
+        { .binding = 0, .kind = DescriptorKind::CombinedImageSampler, .stages = ShaderStageMask::Fragment },
+        { .binding = 8, .kind = DescriptorKind::UniformBuffer, .stages = ShaderStageMask::Fragment },
+    };
+    m_setZeroFillerLayoutHandle = renderer.CreateDescriptorSetLayout({});
+    m_setOneLayoutHandle = renderer.CreateDescriptorSetLayout(kSetOneBindings);
 
-    VkDescriptorPoolSize localPoolSizes[2]{};
-    localPoolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    localPoolSizes[0].descriptorCount = 1;
-    localPoolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    localPoolSizes[1].descriptorCount = 1;
-
-    VkDescriptorPoolCreateInfo localPoolInfo{};
-    localPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    localPoolInfo.maxSets = 1;
-    localPoolInfo.poolSizeCount = static_cast<std::uint32_t>(std::size(localPoolSizes));
-    localPoolInfo.pPoolSizes = localPoolSizes;
-    if (vkCreateDescriptorPool(device, &localPoolInfo, nullptr, &m_localDescriptorPool) != VK_SUCCESS) {
-        throw std::runtime_error("BoneViewerWindow: vkCreateDescriptorPool (local set=1) failed.");
-    }
-
-    VkDescriptorSetAllocateInfo localAllocInfo{};
-    localAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    localAllocInfo.descriptorPool = m_localDescriptorPool;
-    localAllocInfo.descriptorSetCount = 1;
-    localAllocInfo.pSetLayouts = &m_localSetOneLayout;
-    if (vkAllocateDescriptorSets(device, &localAllocInfo, &m_localSetOneDescriptorSet) != VK_SUCCESS) {
-        throw std::runtime_error("BoneViewerWindow: vkAllocateDescriptorSets (local set=1) failed.");
-    }
+    m_localSetOneDescriptorSet = renderer.AllocateComputeDescriptorSet(m_setOneLayoutHandle);
 
     const unsigned char whitePixel[4] = { 255, 255, 255, 255 };
     m_localWhiteTexture =
@@ -239,40 +209,21 @@ void BoneViewerWindow::EnsurePipeline(Renderer& renderer)
     const std::array<std::byte, kLocalDummyUniformBlockSize> zeroBytes{};
     m_localUniformBuffer->Upload(zeroBytes.data(), zeroBytes.size());
 
-    VkDescriptorImageInfo localImageInfo{};
-    localImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    localImageInfo.imageView = m_localWhiteTexture->View();
-    localImageInfo.sampler = m_localWhiteTexture->Sampler();
+    ComputeDescriptorWrite uniformWrite;
+    uniformWrite.binding = 8;
+    uniformWrite.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uniformWrite.buffer = m_localUniformBuffer->Native();
+    uniformWrite.bufferOffset = 0;
+    uniformWrite.bufferRange = kLocalDummyUniformBlockSize;
 
-    VkDescriptorBufferInfo localBufferInfo{};
-    localBufferInfo.buffer = m_localUniformBuffer->Native();
-    localBufferInfo.offset = 0;
-    localBufferInfo.range = kLocalDummyUniformBlockSize;
+    ComputeDescriptorSet(m_localSetOneDescriptorSet)
+        .Rewrite(renderer.GetVulkanContextInfo().device,
+            std::vector<ComputeDescriptorWrite>{
+                ComputeDescriptorWrite::CombinedImageSampler(
+                    0, m_localWhiteTexture->View(), m_localWhiteTexture->Sampler()),
+                uniformWrite,
+            });
 
-    VkWriteDescriptorSet localWrites[2]{};
-    localWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    localWrites[0].dstSet = m_localSetOneDescriptorSet;
-    localWrites[0].dstBinding = 0;
-    localWrites[0].descriptorCount = 1;
-    localWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    localWrites[0].pImageInfo = &localImageInfo;
-    localWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    localWrites[1].dstSet = m_localSetOneDescriptorSet;
-    localWrites[1].dstBinding = 8;
-    localWrites[1].descriptorCount = 1;
-    localWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    localWrites[1].pBufferInfo = &localBufferInfo;
-    vkUpdateDescriptorSets(device, static_cast<std::uint32_t>(std::size(localWrites)), localWrites, 0, nullptr);
-
-    // Opaque-handle twin of m_localSetOneLayout above, fed to the pipeline
-    // builder below - identically-defined layouts are pipeline-layout-
-    // compatible with the real m_localSetOneDescriptorSet bound at draw time.
-    constexpr DescriptorBindingDesc kSetOneBindings[] = {
-        { .binding = 0, .kind = DescriptorKind::CombinedImageSampler, .stages = ShaderStageMask::Fragment },
-        { .binding = 8, .kind = DescriptorKind::UniformBuffer, .stages = ShaderStageMask::Fragment },
-    };
-    m_setZeroFillerLayoutHandle = renderer.CreateDescriptorSetLayout({});
-    m_setOneLayoutHandle = renderer.CreateDescriptorSetLayout(kSetOneBindings);
     const DescriptorSetLayoutHandle extraSets[] = { m_setZeroFillerLayoutHandle, m_setOneLayoutHandle };
 
     // No backface culling - an imported .pmx's winding convention isn't
@@ -304,8 +255,8 @@ bool BoneViewerWindow::EnsureDataLoaded(
         return true; // Unchanged since last call - whatever m_cachedIsValid says still holds.
     }
 
-    if (m_device != VK_NULL_HANDLE && (m_vertexBuffer || m_indexBuffer)) {
-        vkDeviceWaitIdle(m_device);
+    if (m_vertexBuffer || m_indexBuffer) {
+        renderer.WaitForGpuIdle();
     }
     m_vertexBuffer.reset();
     m_indexBuffer.reset();
@@ -429,12 +380,12 @@ void BoneViewerWindow::EnsureRenderTexture(Renderer& renderer, int width, int he
         return;
     }
 
-    if (m_device != VK_NULL_HANDLE && (m_renderTexture || m_descriptor != VK_NULL_HANDLE)) {
-        vkDeviceWaitIdle(m_device);
+    if (m_renderTexture || m_descriptor != UiTextureHandle::Invalid) {
+        renderer.WaitForGpuIdle();
     }
-    if (m_descriptor != VK_NULL_HANDLE) {
-        ImGui_ImplVulkan_RemoveTexture(m_descriptor);
-        m_descriptor = VK_NULL_HANDLE;
+    if (m_descriptor != UiTextureHandle::Invalid) {
+        renderer.ReleaseUiTextureHandle(m_descriptor);
+        m_descriptor = UiTextureHandle::Invalid;
     }
 
     if (!m_renderTexture) {
@@ -446,8 +397,7 @@ void BoneViewerWindow::EnsureRenderTexture(Renderer& renderer, int width, int he
     m_texWidth = width;
     m_texHeight = height;
 
-    m_descriptor = ImGui_ImplVulkan_AddTexture(
-        m_renderTexture->Sampler(), m_renderTexture->View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    m_descriptor = renderer.GetUiTextureHandle(*m_renderTexture);
 }
 
 void BoneViewerWindow::FrameCameraToBounds() noexcept
@@ -816,8 +766,6 @@ void BoneViewerWindow::Build(
         return;
     }
 
-    m_device = renderer.GetVulkanContextInfo().device;
-
     ImGui::SetNextWindowSize(ImVec2(900.0f, 650.0f), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Bone Viewer", &m_open)) {
         ImGui::End();
@@ -1127,11 +1075,10 @@ void BoneViewerWindow::Build(
         // color is safe).
         renderer.Clear(30, 32, 38, 255);
 
-        const VkPipeline pipeline = m_pipeline->Native();
-        const VkPipelineLayout layout = m_pipeline->Layout();
+        const Pipeline& pipeline = *m_pipeline;
         const VkDescriptorSet localSetOne = m_localSetOneDescriptorSet;
-        const VkBuffer vertexBuffer = m_vertexBuffer->Native();
-        const VkBuffer indexBuffer = m_indexBuffer->Native();
+        const Buffer& vertexBuffer = *m_vertexBuffer;
+        const Buffer& indexBuffer = *m_indexBuffer;
         const std::uint32_t indexCount = m_indexCount;
         const VkExtent2D extent = m_renderTexture->Extent();
 
@@ -1141,30 +1088,17 @@ void BoneViewerWindow::Build(
         // query slot with (or overwrite the cached timing of) "Game View"/
         // "Scene View" - see Renderer::RenderOffscreen()'s own doc comment.
         renderer.RenderOffscreen(*m_renderTexture, std::nullopt, [&](rg::CommandBuffer& cmd) {
-            VkViewport viewport{};
-            viewport.width = static_cast<float>(extent.width);
-            viewport.height = static_cast<float>(extent.height);
-            viewport.minDepth = 0.0f;
-            viewport.maxDepth = 1.0f;
-            vkCmdSetViewport(cmd.Native(), 0, 1, &viewport);
-
-            VkRect2D scissor{};
-            scissor.extent = extent;
-            vkCmdSetScissor(cmd.Native(), 0, 1, &scissor);
-
-            vkCmdBindPipeline(cmd.Native(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-            vkCmdBindDescriptorSets(
-                cmd.Native(), VK_PIPELINE_BIND_POINT_GRAPHICS, layout, /*firstSet=*/1, 1, &localSetOne, 0, nullptr);
-            vkCmdPushConstants(cmd.Native(), layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
-
-            const VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(cmd.Native(), 0, 1, &vertexBuffer, &offset);
-            vkCmdBindIndexBuffer(cmd.Native(), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(cmd.Native(), indexCount, 1, 0, 0, 0);
+            cmd.SetViewportAndScissor(extent.width, extent.height);
+            cmd.BindPipeline(pipeline);
+            cmd.BindDescriptorSet(/*setIndex=*/1, localSetOne);
+            cmd.PushConstants(pushConstants, ShaderStageMask::Vertex);
+            cmd.BindVertexBuffer(vertexBuffer);
+            cmd.BindIndexBuffer(indexBuffer);
+            cmd.DrawIndexed(indexCount);
         });
 
         const ImVec2 imageMin = ImGui::GetCursorScreenPos();
-        ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_descriptor)), avail);
+        ImGui::Image(static_cast<ImTextureID>(static_cast<std::uint64_t>(m_descriptor)), avail);
         const ImVec2 imageMax(imageMin.x + avail.x, imageMin.y + avail.y);
         const bool hovered = ImGui::IsItemHovered();
 

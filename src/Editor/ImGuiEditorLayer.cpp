@@ -147,6 +147,7 @@ public:
 
         const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
         m_device = context.device;
+        m_renderer = &renderer; // Non-owning - needed by Release*Descriptor() below, which take no renderer parameter.
 
         // Must be installed before ImGui::CreateContext() below - see
         // ImGuiMemoryTracker's own doc comment for why (some of a context's
@@ -531,19 +532,17 @@ public:
         // moment it runs later in the same chain.
         {
             RenderTexture* gameSource = &m_gameView;
-            if (m_ctx.gameViewDescriptor == VK_NULL_HANDLE || gameSource->View() != m_lastKnownGameView) {
+            if (m_ctx.gameViewDescriptor == UiTextureHandle::Invalid || gameSource->View() != m_lastKnownGameView) {
                 ReleaseGameViewDescriptor();
-                m_ctx.gameViewDescriptor = ImGui_ImplVulkan_AddTexture(
-                    gameSource->Sampler(), gameSource->View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                m_ctx.gameViewDescriptor = renderer.GetUiTextureHandle(*gameSource);
                 m_lastKnownGameView = gameSource->View();
             }
         }
         {
             RenderTexture* sceneSource = &m_sceneView;
-            if (m_ctx.sceneViewDescriptor == VK_NULL_HANDLE || sceneSource->View() != m_lastKnownSceneView) {
+            if (m_ctx.sceneViewDescriptor == UiTextureHandle::Invalid || sceneSource->View() != m_lastKnownSceneView) {
                 ReleaseSceneViewDescriptor();
-                m_ctx.sceneViewDescriptor = ImGui_ImplVulkan_AddTexture(
-                    sceneSource->Sampler(), sceneSource->View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                m_ctx.sceneViewDescriptor = renderer.GetUiTextureHandle(*sceneSource);
                 m_lastKnownSceneView = sceneSource->View();
             }
         }
@@ -932,23 +931,24 @@ public:
 private:
     void ReleaseGameViewDescriptor()
     {
-        if (m_ctx.gameViewDescriptor != VK_NULL_HANDLE) {
-            ImGui_ImplVulkan_RemoveTexture(m_ctx.gameViewDescriptor);
-            m_ctx.gameViewDescriptor = VK_NULL_HANDLE;
+        if (m_ctx.gameViewDescriptor != UiTextureHandle::Invalid) {
+            m_renderer->ReleaseUiTextureHandle(m_ctx.gameViewDescriptor);
+            m_ctx.gameViewDescriptor = UiTextureHandle::Invalid;
             m_lastKnownGameView = VK_NULL_HANDLE;
         }
     }
 
     void ReleaseSceneViewDescriptor()
     {
-        if (m_ctx.sceneViewDescriptor != VK_NULL_HANDLE) {
-            ImGui_ImplVulkan_RemoveTexture(m_ctx.sceneViewDescriptor);
-            m_ctx.sceneViewDescriptor = VK_NULL_HANDLE;
+        if (m_ctx.sceneViewDescriptor != UiTextureHandle::Invalid) {
+            m_renderer->ReleaseUiTextureHandle(m_ctx.sceneViewDescriptor);
+            m_ctx.sceneViewDescriptor = UiTextureHandle::Invalid;
             m_lastKnownSceneView = VK_NULL_HANDLE;
         }
     }
 
     VkDevice m_device = VK_NULL_HANDLE;
+    Renderer* m_renderer = nullptr; // Non-owning - see constructor comment.
     ImGuiContext* m_context = nullptr;
     RenderTexture m_gameView;
     RenderTexture m_sceneView;
