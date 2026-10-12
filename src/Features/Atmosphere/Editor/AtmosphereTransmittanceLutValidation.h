@@ -1,61 +1,36 @@
 #pragma once
 
-// ============================================================================
-// Atmosphere Scattering + Aerial Perspective campaign - Phase 9: Validation,
-// Debug Tooling, and Docs (v1).
-// ============================================================================
-// See task_manager/atmosphere-scattering-1/
-// ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md (Step 3.1) for
-// this file's own design reasoning - directly modeled on
-// src/Editor/GpuSkinningValidation.h/.cpp's shape: Editor-only
-// (GTE_ENABLE_EDITOR), self-contained (built on Renderer::CaptureImagePixels(),
-// which itself is built on Renderer::ImmediateSubmit() - see Renderer.cpp),
-// and with NO gte::rg::RenderGraph dependency of any kind - this tool never
-// adds a pass to a graph; it only ever reads back whatever the ALREADY-
-// RUNNING, permanent, every-frame atmosphere pass sequence
-// (src/Application/AtmospherePassSequence.h/.cpp) most recently wrote into
-// "AtmosphereTransmittanceLut".
+// Reads back the real, currently-computed "AtmosphereTransmittanceLut" texture
+// (via RenderGraph::DebugTextureSnapshotFor() + Renderer::CaptureImagePixels() -
+// mirrors ValidateAerialPerspectiveSkyPurity()'s own exact shape, since this
+// LUT is now owned by the render graph's persistent texture cache rather than
+// a Texture2D this feature holds directly - see AtmosphereLutRendererImpl.cpp),
+// decodes each texel's (u, v) grid position back into (heightKm, upDot) via
+// AtmosphereMath.h's TransmittanceLutUvToHeightZenith(), reproduces the
+// shader's own ground-occlusion check (a local helper in this .cpp, not part
+// of the permanent AtmosphereMath.h oracle), and calls
+// AtmosphereMath::ComputeTransmittanceToTopOfAtmosphere() for that same input -
+// the permanent CPU oracle this whole feature is built around (see AGENTS.md's
+// "Atmosphere Scattering" section). Reports max/mean per-channel absolute
+// difference across every texel plus a pass/fail against a documented
+// tolerance.
 //
-// ONE numeric parity check, mirroring GpuSkinningValidation's own GPU-vs-
-// CPU-oracle shape:
-//
-//   ValidateAtmosphereTransmittanceLut() - reads back the REAL, currently-
-//   computed "AtmosphereTransmittanceLut" texture (via
-//   Renderer::CaptureImagePixels() - the exact same generic image-readback
-//   primitive GET /get_texture itself uses, see Renderer.h), decodes each
-//   texel's own (u, v) grid position back into (heightKm, upDot) via
-//   AtmosphereMath.h's TransmittanceLutUvToHeightZenith() (added THIS
-//   phase - see that file's own doc comment), reproduces
-//   AtmosphereTransmittanceLut.comp's own ground-occlusion check (a LOCAL
-//   helper in this .cpp, NOT part of the permanent AtmosphereMath.h oracle
-//   - ground occlusion is explicitly out of that file's own scope, see its
-//   doc comment on ComputeOpticalDepthToTopOfAtmosphere()), and calls
-//   AtmosphereMath::ComputeTransmittanceToTopOfAtmosphere() for that exact
-//   same input - the permanent CPU oracle this whole campaign is built
-//   around (see AGENTS.md's "Atmosphere Scattering" section). Reports
-//   max/mean per-channel absolute difference across every texel plus a
-//   pass/fail against a documented tolerance.
-//
-// TOLERANCE REASONING: "AtmosphereTransmittanceLut" is stored as an 8-bit-
-// per-channel VK_FORMAT_R8G8B8A8_UNORM texture (Phase 3's own deliberate
-// choice - a transmittance value is always in [0, 1] per channel by
-// definition), so UNORM quantization alone contributes up to 1/255 ~=
-// 0.0039 of expected per-channel delta before any numerical-integration
-// difference is even considered. Both the GPU shader and this CPU oracle
-// use the IDENTICAL 40-sample, forward-marching, advance-then-sample
-// numerical method (see AtmosphereMath.h's own doc comment on
-// ComputeOpticalDepthToTopOfAtmosphere()), so the two should agree almost
-// exactly in exact arithmetic - the remaining gap is float32 accumulation-
-// order/transcendental-function (exp/sqrt) differences between the GPU
-// driver's and the CPU's own implementations across 40 sequentially-
-// dependent steps. A default epsilon of 0.01 (~2.5x the UNORM8
-// quantization floor) gives comfortable, documented margin for both
-// sources of difference without being so loose it would silently accept a
-// genuine bug (e.g. a sign error, a completely wrong height/angle decode,
-// or the wrong sample count) - any of those would produce deltas far
-// larger than 0.01 in practice.
+// TOLERANCE REASONING: "AtmosphereTransmittanceLut" is an 8-bit-per-channel
+// VK_FORMAT_R8G8B8A8_UNORM texture (a transmittance value is always in [0, 1]
+// per channel by definition), so UNORM quantization alone contributes up to
+// 1/255 ~= 0.0039 of expected per-channel delta before any numerical-
+// integration difference is even considered. Both the GPU shader and this CPU
+// oracle use the identical 40-sample, forward-marching, advance-then-sample
+// numerical method, so the two should agree almost exactly in exact
+// arithmetic - the remaining gap is float32 accumulation-order/transcendental-
+// function (exp/sqrt) differences between the GPU driver's and the CPU's own
+// implementations across 40 sequentially-dependent steps. A default epsilon
+// of 0.01 (~2.5x the UNORM8 quantization floor) gives comfortable, documented
+// margin for both sources of difference without being so loose it would
+// silently accept a genuine bug.
 
 #include "../AtmosphereTypes.h"
+#include "../../../Renderer/RenderGraph/RenderGraphTypes.h"
 
 #include <cstddef>
 #include <string>
@@ -63,7 +38,10 @@
 namespace gte {
 
 class Renderer;
-class AtmosphereLutRenderer;
+
+namespace rg {
+class RenderGraph;
+} // namespace rg
 
 // The result of ValidateAtmosphereTransmittanceLut() below - every delta is
 // a plain double (never a fabricated 0.0 for a run that never actually
@@ -83,28 +61,18 @@ struct AtmosphereTransmittanceLutValidationResult {
 };
 
 // A human-readable, multi-line summary suitable for printing straight into
-// the Editor's "Atmosphere" panel (Panels/AtmospherePanel.cpp) - mirrors
-// GpuSkinningValidation.h's own ToDiagnosticString() shape exactly (a
-// second, distinct overload - never a collision, since the two live in
-// separate headers and take different result types).
+// the Editor's "Atmosphere" panel (Panels/AtmospherePanel.cpp).
 std::string ToDiagnosticString(const AtmosphereTransmittanceLutValidationResult& result);
 
-// Reads back "AtmosphereTransmittanceLut"'s REAL, currently-computed pixels
-// (via `atmosphereLutRenderer.TransmittanceLutOutput()` - a graceful
-// failure, not a crash, if AddTransmittanceLutPass() has never run yet this
-// session; in practice it always has by the time the Editor's own
-// "Atmosphere" panel button that calls this is even clickable, since the
-// atmosphere pass sequence runs unconditionally every frame) and
-// numerically compares every texel against `params` fed through the exact
-// same decode + AtmosphereMath::ComputeTransmittanceToTopOfAtmosphere() the
-// real AtmosphereTransmittanceLut.comp shader itself used to generate it
+// Reads back "AtmosphereTransmittanceLut"'s real, currently-computed pixels -
+// a graceful failure, not a crash, if AddTransmittanceLutPass() has never run
+// yet this session - and numerically compares every texel against `params`
+// fed through the exact same decode + AtmosphereMath::ComputeTransmittanceToTopOfAtmosphere()
+// the real AtmosphereTransmittanceLut.comp shader itself used to generate it
 // this session. `params` should normally be
 // AtmosphereParameters::MakeDefaultEarthAtmosphereParameters() - this LUT's
-// own physical constants are never affected by
-// AtmosphereSettings::groundAlbedo (see AtmosphereMath.h's own
-// ComputeExtinctionCoefficientAtHeight(), which never reads groundAlbedo at
-// all).
-AtmosphereTransmittanceLutValidationResult ValidateAtmosphereTransmittanceLut(Renderer& renderer,
-    AtmosphereLutRenderer& atmosphereLutRenderer, const AtmosphereParametersGpu& params, double epsilon = 0.01);
+// own physical constants are never affected by AtmosphereSettings::groundAlbedo.
+AtmosphereTransmittanceLutValidationResult ValidateAtmosphereTransmittanceLut(
+    Renderer& renderer, const rg::RenderGraph& renderGraph, const AtmosphereParametersGpu& params, double epsilon = 0.01);
 
 } // namespace gte

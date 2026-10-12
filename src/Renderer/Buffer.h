@@ -1,5 +1,6 @@
 #pragma once
 
+#include "GraphicsHandleRegistry.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "Vulkan/VulkanAllocator.h"
 
@@ -81,6 +82,12 @@ public:
     // once moved-from.
     GpuResourceHandle Handle() const noexcept { return m_handle; }
 
+    // Opaque handle for the render-graph compute-binding API
+    // (RenderGraphBuilder::PassBuilder::BindStorageBuffer) - lazily registers
+    // this buffer's native VkBuffer on first call, reuses the same handle
+    // for every later call.
+    BufferObjectHandle ObjectHandle() const noexcept { return m_objectHandle.Resolve(m_buffer); }
+
 private:
     void Destroy() noexcept;
 
@@ -92,6 +99,10 @@ private:
     VmaAllocation m_allocation = VK_NULL_HANDLE;
     VkDeviceSize m_size = 0;
     void* m_mappedData = nullptr;
+
+    // Lazily populated by ObjectHandle() above - mutable since resolving is
+    // logically const (just caches an opaque registry handle).
+    mutable CachedBufferObjectHandle m_objectHandle;
 };
 
 } // namespace gte

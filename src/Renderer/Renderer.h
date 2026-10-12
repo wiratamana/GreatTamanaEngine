@@ -40,6 +40,7 @@ class CommandBuffer;
 class RenderGraph;
 class RenderGraphBuilder;
 class RenderGraphPersistentResourceCache;
+class RenderGraphComputeBindingCache;
 } // namespace gte::rg
 
 namespace gte {
@@ -1064,6 +1065,7 @@ private:
 
     friend class rg::RenderGraph;
     friend class rg::RenderGraphPersistentResourceCache;
+    friend class rg::RenderGraphComputeBindingCache;
     friend class SceneServicesDescriptorSet;
     friend class GpuDrivenBatchCache;
     friend class VolumeTexturePreviewRenderer;

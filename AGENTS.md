@@ -62,3 +62,29 @@ Core Requirements:
 5. AI Debug Capabilities
    - Focus code on AI driven debugging flow with existing HTTP request.
    - If debugging context involve visual confirmation, you must also provide a way to effectively get the image of the context without relying on taking screenshot entire screen.
+
+**Comment Guidelines:**
+- Keep comments under 1 to 2 lines.
+- Only explain *what* or *why*, never write project history or document names.
+- Rule of thumb: A developer must be able to read and understand the comment in under 3 seconds.
+
+#### Example of a BAD comment (Do NOT do this):
+// Push constants for the Aerial Perspective Composite compute pass - MUST
+// match Shaders/AtmosphereAerialPerspectiveComposite.comp's own
+// `layout(push_constant)` block exactly (mat4 + vec4 + vec4 = 96 bytes).
+// Phase 8 (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) added
+// `aerialPerspectiveStrengthAndPad` ...
+struct AerialPerspectiveCompositePushConstants { ... };
+
+#### Example of a GOOD comment (Follow this style):
+// Push constants for Aerial Perspective Composite pass.
+// NOTE: Must match layout in 'Shaders/AtmosphereAerialPerspectiveComposite.comp' (96 bytes).
+struct AerialPerspectiveCompositePushConstants {
+    float invViewProjection[16];
+
+    // xyz = Camera world position, w = World units per km
+    float cameraWorldPositionAndScale[4];
+
+    // x = Strength, y = Max distance (km), z = Depth exponent, w = Padding
+    float aerialPerspectiveStrengthAndPad[4];
+};

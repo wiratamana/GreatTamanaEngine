@@ -33,6 +33,11 @@ OpaqueHandleRegistry<VkDescriptorSetLayout>& DescriptorSetLayoutRegistry()
     static OpaqueHandleRegistry<VkDescriptorSetLayout> registry;
     return registry;
 }
+OpaqueHandleRegistry<VkBuffer>& BufferObjectRegistry()
+{
+    static OpaqueHandleRegistry<VkBuffer> registry;
+    return registry;
+}
 
 } // namespace
 
@@ -86,6 +91,19 @@ VkDescriptorSetLayout Native(DescriptorSetLayoutHandle handle) noexcept
 void UnregisterDescriptorSetLayout(DescriptorSetLayoutHandle handle) noexcept
 {
     DescriptorSetLayoutRegistry().Remove(static_cast<std::uint64_t>(handle));
+}
+
+BufferObjectHandle RegisterBufferObject(VkBuffer value) noexcept
+{
+    return static_cast<BufferObjectHandle>(BufferObjectRegistry().Insert(value));
+}
+VkBuffer Native(BufferObjectHandle handle) noexcept
+{
+    return BufferObjectRegistry().Get(static_cast<std::uint64_t>(handle));
+}
+void UnregisterBufferObject(BufferObjectHandle handle) noexcept
+{
+    BufferObjectRegistry().Remove(static_cast<std::uint64_t>(handle));
 }
 
 } // namespace gte

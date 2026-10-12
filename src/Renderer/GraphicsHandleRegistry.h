@@ -27,6 +27,10 @@ DescriptorSetLayoutHandle RegisterDescriptorSetLayout(VkDescriptorSetLayout valu
 VkDescriptorSetLayout Native(DescriptorSetLayoutHandle handle) noexcept;
 void UnregisterDescriptorSetLayout(DescriptorSetLayoutHandle handle) noexcept;
 
+BufferObjectHandle RegisterBufferObject(VkBuffer value) noexcept;
+VkBuffer Native(BufferObjectHandle handle) noexcept;
+void UnregisterBufferObject(BufferObjectHandle handle) noexcept;
+
 // Re-mints a SamplerHandle only when the underlying VkSampler actually
 // changed since the last Resolve() call - a call site that re-resolves the
 // SAME stable VkSampler every frame (the common case: a view's own render
@@ -70,5 +74,25 @@ struct CachedImageViewHandle {
         return handle;
     }
 };
+
+// Buffer sibling of CachedSamplerHandle above - identical reasoning.
+struct CachedBufferObjectHandle {
+    VkBuffer native = VK_NULL_HANDLE;
+    BufferObjectHandle handle = BufferObjectHandle::Invalid;
+
+    BufferObjectHandle Resolve(VkBuffer current) noexcept
+    {
+        if (current == native && handle != BufferObjectHandle::Invalid) {
+            return handle;
+        }
+        if (handle != BufferObjectHandle::Invalid) {
+            UnregisterBufferObject(handle);
+        }
+        native = current;
+        handle = (current != VK_NULL_HANDLE) ? RegisterBufferObject(current) : BufferObjectHandle::Invalid;
+        return handle;
+    }
+};
+
 
 } // namespace gte

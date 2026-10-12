@@ -154,8 +154,9 @@ void AtmosphereFeature::RegisterPasses()
 
             const char* skyViewLutName = isGameView ? "AtmosphereSkyViewLut_GameView" : "AtmosphereSkyViewLut_SceneView";
             const std::function<void(rg::CommandBuffer&)> recordSkyBackground =
-                MakeRecordSkyBackgroundCallback(m_renderer, m_core.GetRenderer(), viewData->viewProjection,
-                    sharedLuts->parameters, viewLuts->frameUniforms, skyViewLutName, m_settings.skyExposure);
+                MakeRecordSkyBackgroundCallback(m_renderer, m_core.GetRenderer(), m_core.GetRenderGraph(),
+                    viewData->viewProjection, sharedLuts->parameters, viewLuts->frameUniforms, skyViewLutName,
+                    m_settings.skyExposure);
 
             if (isGameView) {
                 // Core.cpp/FrameDebuggerCapture.cpp's replay/debug side

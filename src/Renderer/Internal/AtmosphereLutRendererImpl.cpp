@@ -10,6 +10,7 @@
 #include "../RenderGraph/RenderGraph.h"
 #include "../RenderGraph/RenderFeatureScope.h"
 #include "../RenderGraph/RenderPassToggleRegistry.h"
+#include "../RenderGraph/RenderGraphPersistentResourceOwners.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -24,25 +25,24 @@ namespace gte {
 
 namespace {
 
-// Transmittance LUT resolution - 256x256 (see Shaders/AtmosphereTransmittanceLut.comp).
+// Transmittance LUT resolution - see Shaders/AtmosphereTransmittanceLut.comp.
 constexpr int kTransmittanceLutWidth = 256;
 constexpr int kTransmittanceLutHeight = 256;
 
-// Multi-Scattering LUT resolution - 64x64.
+// Multi-Scattering LUT resolution.
 constexpr int kMultiScatteringLutWidth = 64;
 constexpr int kMultiScatteringLutHeight = 64;
 
-// Sky-View LUT resolution - 200x100.
+// Sky-View LUT resolution.
 constexpr int kSkyViewLutWidth = 200;
 constexpr int kSkyViewLutHeight = 100;
 
-// Aerial Perspective froxel-volume resolution - 128x128x32.
+// Aerial Perspective froxel-volume resolution.
 constexpr int kAerialPerspectiveVolumeWidth = 128;
 constexpr int kAerialPerspectiveVolumeHeight = 128;
 constexpr int kAerialPerspectiveVolumeDepth = 32;
 
-// Push constants for the Aerial Perspective Composite compute pass.
-// NOTE: Must match layout in 'Shaders/AtmosphereAerialPerspectiveComposite.comp' (96 bytes).
+// Must match Shaders/AtmosphereAerialPerspectiveComposite.comp's push-constant block (96 bytes).
 struct AerialPerspectiveCompositePushConstants {
     float invViewProjection[16];
 
@@ -53,13 +53,11 @@ struct AerialPerspectiveCompositePushConstants {
     float aerialPerspectiveStrengthAndPad[4];
 };
 
-// MUST match Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp's own
-// `layout(local_size_x = 16, local_size_y = 16) in;` exactly.
+// Must match Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp's local_size_x/y (16x16).
 constexpr std::uint32_t kAerialPerspectiveVolumeDebugSliceLocalSizeX = 16;
 constexpr std::uint32_t kAerialPerspectiveVolumeDebugSliceLocalSizeY = 16;
 
-// Push constants for the Aerial Perspective Volume Debug Slice compute pass.
-// NOTE: Must match layout in 'Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp' (8 bytes).
+// Must match Shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp's push-constant block (8 bytes).
 struct AerialPerspectiveVolumeDebugSlicePushConstants {
     std::uint32_t sliceIndex = 0;
     std::uint32_t sliceCount = 1;
@@ -79,9 +77,7 @@ std::vector<std::byte> ReadShaderFileBytes(const std::string& path)
     return buffer;
 }
 
-// Fragment-stage push constants for the Sky Background pass - MUST match
-// Shaders/AtmosphereSkyBackground.frag's own `layout(push_constant)` block
-// exactly (mat4 + 3 floats + 1 padding float = 80 bytes).
+// Must match Shaders/AtmosphereSkyBackground.frag's push-constant block (mat4 + 3 floats + pad = 80 bytes).
 struct SkyBackgroundPushConstants {
     float invViewProjection[16];
     float eyeHeightKm;
@@ -94,19 +90,10 @@ struct SkyBackgroundPushConstants {
 
 AtmosphereLutRenderer::Impl::~Impl()
 {
-    // Every LUT pass's own VkDescriptorSetLayout (transmittanceLutDescriptorSetLayout/
-    // multiScatteringLutDescriptorSetLayout/skyViewLutDescriptorSetLayout/
-    // aerialPerspectiveVolumeDescriptorSetLayout/aerialPerspectiveCompositeDescriptorSetLayout/
-    // aerialPerspectiveVolumeDebugSliceDescriptorSetLayout) is BORROWED from
-    // its own ComputePipeline's own reflected ReflectedDescriptorSetLayout(0)
-    // - owned and destroyed by that ComputePipeline itself. This destructor
-    // must NEVER destroy any of them - doing so would be a double-free.
-    //
-    // skyBackgroundDescriptorSetLayout is the ONE exception: a hand-built
-    // graphics-pipeline layout, never reflected from a ComputePipeline, so it
-    // (and its opaque DescriptorSetLayoutHandle twin) genuinely need explicit
-    // teardown here, mirroring the former, now-deleted
-    // AtmosphereSkyBackgroundRenderer::Reset().
+    // Every LUT pass's own descriptor-set layout is borrowed from its own
+    // ComputePipeline's reflected layout - owned/destroyed by that pipeline,
+    // never here. skyBackgroundDescriptorSetLayout is the one exception: a
+    // hand-built graphics layout that genuinely needs explicit teardown.
     if (device != VK_NULL_HANDLE && skyBackgroundPipeline) {
         vkDeviceWaitIdle(device);
     }
@@ -116,8 +103,8 @@ AtmosphereLutRenderer::Impl::~Impl()
     if (skyBackgroundDescriptorSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(device, skyBackgroundDescriptorSetLayout, nullptr);
     }
-    // skyBackgroundDescriptorSet is allocated from Renderer's own shared
-    // compute descriptor pool - never individually freed.
+    // skyBackgroundDescriptorSet is allocated from Renderer's shared compute
+    // descriptor pool - never individually freed.
 }
 
 void AtmosphereLutRenderer::Impl::EnsureTransmittanceLutInitialized(
@@ -129,30 +116,17 @@ void AtmosphereLutRenderer::Impl::EnsureTransmittanceLutInitialized(
 
     device = renderer.GetVulkanContextInfo().device;
 
-    // Binding convention (read from Shaders/AtmosphereTransmittanceLut.comp's
-    // own compiled SPIR-V via reflection): binding 0 is the read-only
-    // AtmosphereParametersGpu STORAGE buffer (never a true uniform buffer),
-    // binding 1 is the output image2D.
+    // Binding 0 = AtmosphereParametersGpu (read-only storage buffer), binding 1 = the output image2D.
     transmittanceLutPipeline.emplace(renderer.CreateComputePipeline("shaders/AtmosphereTransmittanceLut.comp.spv"));
     transmittanceLutDescriptorSetLayout = transmittanceLutPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
     transmittanceLutDescriptorSet = renderer.AllocateComputeDescriptorSet(transmittanceLutDescriptorSetLayout);
 
-    // A read-only storage buffer, CpuToGpu so Upload() can write straight
-    // into it every call - REUSED VERBATIM by AddMultiScatteringLutPass()
-    // below (no second, duplicate buffer for the same data).
+    // CpuToGpu so Upload() can write straight into it every call - reused
+    // verbatim by every other LUT pass below, never duplicated.
     atmosphereParametersBuffer.emplace(renderer.CreateBuffer(sizeof(AtmosphereParametersGpu),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemoryUsage::CpuToGpu, "AtmosphereParametersGpu"));
     atmosphereParametersBuffer->Upload(&params, sizeof(AtmosphereParametersGpu));
 
-    // Texture2D (allowStorageImageAccess = true) - fixed
-    // VK_FORMAT_R8G8B8A8_UNORM is correct for THIS LUT (a transmittance value
-    // is always in [0, 1] per channel) - do not copy this choice for an HDR
-    // LUT. A zero-filled initial upload is fine since this pass's own
-    // compute write fully overwrites every texel the first time it runs.
-    const std::vector<std::uint8_t> zeroPixels(
-        static_cast<std::size_t>(kTransmittanceLutWidth) * static_cast<std::size_t>(kTransmittanceLutHeight) * 4, 0);
-    transmittanceLutOutput.emplace(renderer.CreateTexture2D(zeroPixels.data(), kTransmittanceLutWidth,
-        kTransmittanceLutHeight, "AtmosphereTransmittanceLut", /*allowStorageImageAccess=*/true));
 }
 
 rg::TextureHandle AtmosphereLutRenderer::Impl::AddTransmittanceLutPass(
@@ -168,25 +142,21 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddTransmittanceLutPass(
 
     EnsureTransmittanceLutInitialized(renderer, params);
 
-    // No dirty-flag optimization - unconditionally re-upload the (tiny,
-    // 96-byte) parameters buffer and recompute the whole LUT every call.
+    // No dirty-flag optimization - re-upload the tiny parameters buffer and
+    // recompute the whole LUT every call.
     atmosphereParametersBuffer->Upload(&params, sizeof(AtmosphereParametersGpu));
 
-    // Texture2D has no Target()/RenderTarget accessor of its own (unlike
-    // RenderTexture) - build one by hand; the depth fields stay default
-    // (this compute pass never uses a depth attachment).
-    RenderTarget target{};
-    target.image = transmittanceLutOutput->Image();
-    target.imageView = transmittanceLutOutput->View();
-    target.extent = VkExtent2D{ static_cast<std::uint32_t>(transmittanceLutOutput->Width()),
-        static_cast<std::uint32_t>(transmittanceLutOutput->Height()) };
-    target.format = VK_FORMAT_R8G8B8A8_UNORM;
-
-    // Always imported as VK_IMAGE_LAYOUT_UNDEFINED - this pass's own compute
-    // write fully overwrites every texel every time it runs. Texture2D has
-    // no depth sub-resource - color sampler only.
-    const rg::TextureHandle outputHandle = builder.ImportTexture(
-        "AtmosphereTransmittanceLut", target, VK_IMAGE_LAYOUT_UNDEFINED, transmittanceLutOutput->Sampler());
+    // VK_FORMAT_R8G8B8A8_UNORM is correct here - a transmittance value is
+    // always in [0, 1] per channel. Registered under the exact literal name
+    // "AtmosphereTransmittanceLut" (empty owner) - AtmosphereTransmittanceLutValidation.cpp
+    // already depends on that exact name via DebugTextureSnapshotFor().
+    rg::TextureDesc desc{};
+    desc.width = static_cast<std::uint32_t>(kTransmittanceLutWidth);
+    desc.height = static_cast<std::uint32_t>(kTransmittanceLutHeight);
+    desc.format = VK_FORMAT_R8G8B8A8_UNORM;
+    desc.usage = rg::TextureUsage::Storage;
+    const rg::TextureHandle outputHandle =
+        builder.GetOrCreatePersistentTexture(transmittanceLutToken, "", "AtmosphereTransmittanceLut", desc);
 
     builder.AddRenderPass(
         "AtmosphereTransmittanceLutPass", rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
@@ -208,8 +178,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddTransmittanceLutPass(
             cmd.DispatchOverSize(
                 static_cast<std::uint32_t>(kTransmittanceLutWidth), static_cast<std::uint32_t>(kTransmittanceLutHeight), 1);
         },
-        // Explicit RenderPassEvent::PreOpaques - GPU Skinning dispatch and
-        // the Atmosphere shared LUTs run first (before everything else).
+        // GPU Skinning and the Atmosphere shared LUTs run first, before everything else.
         rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
 
     return outputHandle;
@@ -221,26 +190,16 @@ void AtmosphereLutRenderer::Impl::EnsureMultiScatteringLutInitialized(Renderer& 
         return;
     }
 
-    // By the time this is ever called, EnsureTransmittanceLutInitialized()
-    // has already run - device/atmosphereParametersBuffer/transmittanceLutOutput
-    // are already valid here. This does NOT create a second
-    // AtmosphereParametersGpu buffer.
+    // EnsureTransmittanceLutInitialized() has always already run by the time
+    // this is called - device/atmosphereParametersBuffer are already valid.
     device = renderer.GetVulkanContextInfo().device;
 
-    // Binding 0 = AtmosphereParametersGpu (reused, not duplicated), binding 1
-    // = the read-only transmittanceLut combined image sampler, binding 2 =
-    // the output image2D.
+    // Binding 0 = AtmosphereParametersGpu (reused), binding 1 = the
+    // transmittance LUT combined image sampler, binding 2 = the output image2D.
     multiScatteringLutPipeline.emplace(
         renderer.CreateComputePipeline("shaders/AtmosphereMultiScatteringLut.comp.spv"));
     multiScatteringLutDescriptorSetLayout = multiScatteringLutPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
     multiScatteringLutDescriptorSet = renderer.AllocateComputeDescriptorSet(multiScatteringLutDescriptorSetLayout);
-
-    // HDR output - a multi-scattering "response" value can exceed 1.0,
-    // unlike the Transmittance LUT's bounded [0, 1] output, so Texture2D's
-    // fixed VK_FORMAT_R8G8B8A8_UNORM would clip it.
-    multiScatteringLutOutput.emplace(renderer.CreateRenderTexture(kMultiScatteringLutWidth, kMultiScatteringLutHeight,
-        VK_FORMAT_R16G16B16A16_SFLOAT, "AtmosphereMultiScatteringLut", "AtmosphereMultiScatteringLutDepth",
-        /*allowStorageImageAccess=*/true));
 }
 
 rg::TextureHandle AtmosphereLutRenderer::Impl::AddMultiScatteringLutPass(rg::RenderGraphBuilder& builder,
@@ -258,9 +217,17 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddMultiScatteringLutPass(rg::Ren
 
     EnsureMultiScatteringLutInitialized(renderer);
 
-    const rg::TextureHandle outputHandle = builder.ImportTexture("AtmosphereMultiScatteringLut",
-        multiScatteringLutOutput->Target(), VK_IMAGE_LAYOUT_UNDEFINED, multiScatteringLutOutput->Sampler(),
-        multiScatteringLutOutput->DepthSampler());
+    // HDR output - a multi-scattering response value can exceed 1.0, so an
+    // 8-bit UNORM format would clip it. Only ever read by other same-frame
+    // render-graph passes below (never exposed outside the graph), so the
+    // persistent cache owns it - no manual RenderTexture/RenderTarget needed.
+    rg::TextureDesc desc{};
+    desc.width = static_cast<std::uint32_t>(kMultiScatteringLutWidth);
+    desc.height = static_cast<std::uint32_t>(kMultiScatteringLutHeight);
+    desc.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    desc.usage = rg::TextureUsage::Storage;
+    const rg::TextureHandle outputHandle = builder.GetOrCreatePersistentTexture(
+        multiScatteringLutToken, rg::kPersistentOwnerAtmosphere, "MultiScatteringLut", desc);
 
     builder.AddRenderPass(
         "AtmosphereMultiScatteringLutPass", rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
@@ -268,18 +235,14 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddMultiScatteringLutPass(rg::Ren
             pass.ReadTexture(transmittanceLutHandle, rg::ResourceAccess::ShaderRead);
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
         },
-        [this, outputHandle](rg::PassContext& ctx) {
+        [this, transmittanceLutHandle, outputHandle](rg::PassContext& ctx) {
+            const rg::PassContext::ResolvedTexture transmittance = ctx.resolveTexture(transmittanceLutHandle);
             const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(outputHandle);
 
-            // transmittanceLutOutput is the SAME Texture2D AddTransmittanceLutPass()
-            // itself writes through - its own Sampler() is used directly here
-            // rather than resolved via PassContext::resolveTexture(), since an
-            // IMPORTED texture's resolved sampler is always VK_NULL_HANDLE.
             multiScatteringLutDescriptorSet.Rewrite(
                 std::vector<ComputeDescriptorWrite>{
                     ComputeDescriptorWrite::StorageBuffer(0, atmosphereParametersBuffer->Native()),
-                    ComputeDescriptorWrite::CombinedImageSampler(
-                        1, transmittanceLutOutput->View(), transmittanceLutOutput->Sampler()),
+                    ComputeDescriptorWrite::CombinedImageSampler(1, transmittance.view, transmittance.sampler),
                     ComputeDescriptorWrite::StorageImage(2, dest.view),
                 });
 
@@ -302,10 +265,9 @@ void AtmosphereLutRenderer::Impl::EnsureSkyViewLutInitialized(Renderer& renderer
 
     device = renderer.GetVulkanContextInfo().device;
 
-    // Binding 0 = AtmosphereParametersGpu (reused), binding 1 =
-    // AtmosphereFrameUniforms (a second, per-VIEW storage buffer - see
-    // skyViewLutViewStates), binding 2 = transmittanceLut, binding 3 =
-    // multiScatteringLut, binding 4 = the output image2D.
+    // Binding 0 = AtmosphereParametersGpu, binding 1 = AtmosphereFrameUniforms
+    // (per-view, see skyViewLutViewStates), binding 2 = transmittanceLut,
+    // binding 3 = multiScatteringLut, binding 4 = the output image2D.
     skyViewLutPipeline.emplace(renderer.CreateComputePipeline("shaders/AtmosphereSkyViewLut.comp.spv"));
     skyViewLutDescriptorSetLayout = skyViewLutPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 }
@@ -322,15 +284,6 @@ AtmosphereLutRenderer::Impl::SkyViewLutViewState& AtmosphereLutRenderer::Impl::E
     state.descriptorSet = renderer.AllocateComputeDescriptorSet(skyViewLutDescriptorSetLayout);
     state.frameUniformsBuffer.emplace(renderer.CreateBuffer(sizeof(AtmosphereFrameUniforms),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemoryUsage::CpuToGpu, "AtmosphereFrameUniforms"));
-
-    // HDR RenderTexture output - the sky's own near-sun radiance routinely
-    // exceeds 1.0, so Texture2D's fixed VK_FORMAT_R8G8B8A8_UNORM would clip
-    // it. `outputTextureName` is reused directly as this RenderTexture's own
-    // GpuMemoryTracker debug name (static-storage-duration, guaranteed by
-    // AddSkyViewLutPass()'s own contract).
-    state.output.emplace(renderer.CreateRenderTexture(kSkyViewLutWidth, kSkyViewLutHeight,
-        VK_FORMAT_R16G16B16A16_SFLOAT, outputTextureName, /*depthDebugName=*/nullptr,
-        /*allowStorageImageAccess=*/true));
 
     const auto insertedPair = skyViewLutViewStates.emplace(outputTextureName, std::move(state));
     return insertedPair.first->second;
@@ -358,8 +311,16 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddSkyViewLutPass(rg::RenderGraph
     // re-uploaded and the whole LUT recomputed every call.
     viewState.frameUniformsBuffer->Upload(&frameUniforms, sizeof(AtmosphereFrameUniforms));
 
-    const rg::TextureHandle outputHandle = builder.ImportTexture(outputTextureName, viewState.output->Target(),
-        VK_IMAGE_LAYOUT_UNDEFINED, viewState.output->Sampler(), viewState.output->DepthSampler());
+    // HDR output - near-sun sky radiance routinely exceeds 1.0. DrawSkyBackground()
+    // looks this up by name through the render graph (DebugTextureSnapshotFor()),
+    // so the persistent cache owns it - no manually-held RenderTexture needed.
+    rg::TextureDesc desc{};
+    desc.width = static_cast<std::uint32_t>(kSkyViewLutWidth);
+    desc.height = static_cast<std::uint32_t>(kSkyViewLutHeight);
+    desc.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    desc.usage = rg::TextureUsage::Storage;
+    const rg::TextureHandle outputHandle = builder.GetOrCreatePersistentTexture(
+        viewState.token, rg::kPersistentOwnerAtmosphere, outputTextureName, desc);
 
     builder.AddRenderPass(
         "AtmosphereSkyViewLutPass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::General,
@@ -368,22 +329,18 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddSkyViewLutPass(rg::RenderGraph
             pass.ReadTexture(multiScatteringLutHandle, rg::ResourceAccess::ShaderRead);
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
         },
-        [this, &viewState, outputHandle](rg::PassContext& ctx) {
+        [this, &viewState, transmittanceLutHandle, multiScatteringLutHandle,
+            outputHandle](rg::PassContext& ctx) {
+            const rg::PassContext::ResolvedTexture transmittance = ctx.resolveTexture(transmittanceLutHandle);
+            const rg::PassContext::ResolvedTexture multiScattering = ctx.resolveTexture(multiScatteringLutHandle);
             const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(outputHandle);
 
-            // transmittanceLutOutput/multiScatteringLutOutput are the SAME
-            // Texture2D/RenderTexture their own Add*Pass() write through -
-            // `&viewState` stays valid across any future insertion into
-            // skyViewLutViewStates (only ERASING an element invalidates a
-            // std::unordered_map reference, never inserting more).
             viewState.descriptorSet.Rewrite(
                 std::vector<ComputeDescriptorWrite>{
                     ComputeDescriptorWrite::StorageBuffer(0, atmosphereParametersBuffer->Native()),
                     ComputeDescriptorWrite::StorageBuffer(1, viewState.frameUniformsBuffer->Native()),
-                    ComputeDescriptorWrite::CombinedImageSampler(
-                        2, transmittanceLutOutput->View(), transmittanceLutOutput->Sampler()),
-                    ComputeDescriptorWrite::CombinedImageSampler(
-                        3, multiScatteringLutOutput->View(), multiScatteringLutOutput->Sampler()),
+                    ComputeDescriptorWrite::CombinedImageSampler(2, transmittance.view, transmittance.sampler),
+                    ComputeDescriptorWrite::CombinedImageSampler(3, multiScattering.view, multiScattering.sampler),
                     ComputeDescriptorWrite::StorageImage(4, dest.view),
                 });
 
@@ -407,9 +364,8 @@ void AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveVolumeInitialized(Rende
     device = renderer.GetVulkanContextInfo().device;
 
     // Binding 0 = AtmosphereParametersGpu (reused), binding 1 =
-    // AtmosphereFrameUniforms (per-VIEW - see aerialPerspectiveVolumeViewStates),
-    // binding 2 = transmittanceLut, binding 3 = multiScatteringLut, binding 4
-    // = the output image3D.
+    // AtmosphereFrameUniforms (per-view), binding 2 = transmittanceLut,
+    // binding 3 = multiScatteringLut, binding 4 = the output image3D.
     aerialPerspectiveVolumePipeline.emplace(
         renderer.CreateComputePipeline("shaders/AtmosphereAerialPerspectiveVolume.comp.spv"));
     aerialPerspectiveVolumeDescriptorSetLayout = aerialPerspectiveVolumePipeline->ReflectedDescriptorSetLayout(/*set=*/0);
@@ -428,9 +384,10 @@ AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveVolumeViewInitialized(Render
     state.frameUniformsBuffer.emplace(renderer.CreateBuffer(sizeof(AtmosphereFrameUniforms),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemoryUsage::CpuToGpu, "AtmosphereFrameUniforms"));
 
-    // Persistent VolumeTexture output, created ONCE (never a graph-pooled/
-    // transient resource) - rgba16f (in-scattered luminance routinely
-    // exceeds 1.0).
+    // Persistent 3D VolumeTexture, created once - the render graph has no
+    // pooled/transient VolumeTexture kind yet, only ever an imported one, so
+    // this must stay manually owned (not a RenderGraphPersistentResourceCache
+    // gap specific to this file - the cache itself is color-2D-texture only).
     state.output.emplace(renderer.CreateVolumeTexture(kAerialPerspectiveVolumeWidth, kAerialPerspectiveVolumeHeight,
         kAerialPerspectiveVolumeDepth, VK_FORMAT_R16G16B16A16_SFLOAT, outputVolumeName));
 
@@ -457,8 +414,7 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveVolumeP
     AerialPerspectiveVolumeViewState& viewState =
         EnsureAerialPerspectiveVolumeViewInitialized(renderer, outputVolumeName);
 
-    // No dirty-flag optimization - re-uploaded and the whole volume
-    // recomputed every call.
+    // No dirty-flag optimization - re-uploaded and the whole volume recomputed every call.
     viewState.frameUniformsBuffer->Upload(&frameUniforms, sizeof(AtmosphereFrameUniforms));
 
     const rg::VolumeTextureHandle outputHandle =
@@ -471,24 +427,24 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveVolumeP
             pass.ReadTexture(multiScatteringLutHandle, rg::ResourceAccess::ShaderRead);
             pass.WriteVolumeTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
         },
-        [this, &viewState, outputHandle](rg::PassContext& ctx) {
+        [this, &viewState, transmittanceLutHandle, multiScatteringLutHandle,
+            outputHandle](rg::PassContext& ctx) {
+            const rg::PassContext::ResolvedTexture transmittance = ctx.resolveTexture(transmittanceLutHandle);
+            const rg::PassContext::ResolvedTexture multiScattering = ctx.resolveTexture(multiScatteringLutHandle);
             const rg::PassContext::ResolvedVolumeTexture dest = ctx.resolveVolumeTexture(outputHandle);
 
             viewState.descriptorSet.Rewrite(
                 std::vector<ComputeDescriptorWrite>{
                     ComputeDescriptorWrite::StorageBuffer(0, atmosphereParametersBuffer->Native()),
                     ComputeDescriptorWrite::StorageBuffer(1, viewState.frameUniformsBuffer->Native()),
-                    ComputeDescriptorWrite::CombinedImageSampler(
-                        2, transmittanceLutOutput->View(), transmittanceLutOutput->Sampler()),
-                    ComputeDescriptorWrite::CombinedImageSampler(
-                        3, multiScatteringLutOutput->View(), multiScatteringLutOutput->Sampler()),
+                    ComputeDescriptorWrite::CombinedImageSampler(2, transmittance.view, transmittance.sampler),
+                    ComputeDescriptorWrite::CombinedImageSampler(3, multiScattering.view, multiScattering.sampler),
                     ComputeDescriptorWrite::StorageImage(4, dest.view),
                 });
 
-            // One dispatch group covers exactly ONE froxel column each - the
-            // pipeline's own reflected LocalGroupSize().depth == 1, and this
-            // call's Z "total items" argument is 1, not the volume's real
-            // depth (each invocation loops every Z slice internally).
+            // One dispatch group covers exactly one froxel column - the
+            // pipeline's reflected local Z size is 1; each invocation loops
+            // every Z slice internally, so the real depth is never passed here.
             auto cmd = ctx.Cmd();
             cmd.BindComputePipeline(*aerialPerspectiveVolumePipeline);
             cmd.BindDescriptorSet(viewState.descriptorSet.Native());
@@ -509,8 +465,7 @@ void AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveCompositeInitialized(Re
     device = renderer.GetVulkanContextInfo().device;
 
     // binding 0 = sourceColor, binding 1 = sourceDepth, binding 2 =
-    // aerialPerspectiveVolume, binding 3 = the output image2D, plus the
-    // push-constant block.
+    // aerialPerspectiveVolume, binding 3 = the output image2D, plus push constants.
     aerialPerspectiveCompositePipeline.emplace(
         renderer.CreateComputePipeline("shaders/AtmosphereAerialPerspectiveComposite.comp.spv"));
     aerialPerspectiveCompositeDescriptorSetLayout =
@@ -529,9 +484,10 @@ AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveCompositeViewInitialized(
     AerialPerspectiveCompositeViewState state;
     state.descriptorSet = renderer.AllocateComputeDescriptorSet(aerialPerspectiveCompositeDescriptorSetLayout);
 
-    // Explicit VK_FORMAT_R8G8B8A8_UNORM (never the swapchain's own
-    // negotiated format). `outputTextureName` is reused directly as this
-    // RenderTexture's own GpuMemoryTracker debug name.
+    // Explicit VK_FORMAT_R8G8B8A8_UNORM, never the swapchain's own negotiated
+    // format. CompositedOutput()/FinalizeAerialPerspectiveCompositeForSampling()
+    // hand this RenderTexture directly to the Editor/HTTP capture outside any
+    // render-graph pass, so it must stay manually owned, not a cache handle.
     const int width = extent.width > 0 ? static_cast<int>(extent.width) : 1;
     const int height = extent.height > 0 ? static_cast<int>(extent.height) : 1;
     state.output.emplace(renderer.CreateRenderTexture(width, height, VK_FORMAT_R8G8B8A8_UNORM, outputTextureName,
@@ -549,8 +505,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass
     float depthExponent, Extent2D extentOpaque, const char* outputTextureName, rg::ViewScope viewScope,
     rg::RenderPassToggleRegistry* toggleRegistry)
 {
-    // Unwrapped here, once, right at the top - the public, Vulkan-free
-    // AtmosphereLutRenderer.cpp never touches a Vk* value itself.
+    // Unwrapped here, once - the public, Vulkan-free AtmosphereLutRenderer.cpp never touches a Vk* value itself.
     const VkSampler rawSourceColorSampler = Native(sourceColorSampler);
     const VkImageView rawSourceDepthView = Native(sourceDepthView);
     const VkSampler rawSourceDepthSampler = Native(sourceDepthSampler);
@@ -580,7 +535,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass
         VK_IMAGE_LAYOUT_UNDEFINED, viewState.output->Sampler(), viewState.output->DepthSampler(), &*viewState.output);
 
     // The Aerial Perspective Volume's own trilinear sampler - looked up by
-    // name (the SAME name this frame's own AddAerialPerspectiveVolumePass()
+    // name (the same name this frame's own AddAerialPerspectiveVolumePass()
     // call registered it under), since an imported VolumeTextureHandle never
     // carries a sampler of its own.
     const auto aerialVolumeIt = aerialPerspectiveVolumeViewStates.find(aerialPerspectiveVolumeName);
@@ -633,9 +588,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass
             cmd.SetPushConstants(localPushConstants);
             cmd.DispatchOverSize(extent.width, extent.height, 1);
         },
-        // Required tag for a PostComposite render-feature pass - every pass
-        // it declares must be provably ordered after the generic compositor
-        // chain's own seed point.
+        // Every PostComposite pass must be provably ordered after the generic compositor chain's seed point.
         rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything);
     return outputHandle;
 }
@@ -668,11 +621,6 @@ int AtmosphereLutRenderer::Impl::AerialPerspectiveVolumeDepth(const char* aerial
     return it->second.output->Depth();
 }
 
-Texture2D* AtmosphereLutRenderer::Impl::TransmittanceLutOutput() noexcept
-{
-    return transmittanceLutOutput.has_value() ? &(*transmittanceLutOutput) : nullptr;
-}
-
 void AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveVolumeDebugSliceInitialized(Renderer& renderer)
 {
     if (aerialPerspectiveVolumeDebugSlicePipeline.has_value()) {
@@ -681,8 +629,7 @@ void AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveVolumeDebugSliceInitial
 
     device = renderer.GetVulkanContextInfo().device;
 
-    // binding 0 = the source volume's own trilinear sampler3D, binding 1 =
-    // the output image2D, plus the push-constant block.
+    // binding 0 = the source volume's own trilinear sampler3D, binding 1 = the output image2D, plus push constants.
     aerialPerspectiveVolumeDebugSlicePipeline.emplace(
         renderer.CreateComputePipeline("shaders/AtmosphereAerialPerspectiveVolumeDebugSlice.comp.spv"));
     aerialPerspectiveVolumeDebugSliceDescriptorSetLayout =
@@ -702,7 +649,9 @@ AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveVolumeDebugSliceViewInitiali
     state.descriptorSet = renderer.AllocateComputeDescriptorSet(aerialPerspectiveVolumeDebugSliceDescriptorSetLayout);
 
     // rgba16f - matches the aerial-perspective volume's own HDR format
-    // exactly (never clipped to [0, 1]).
+    // exactly. CaptureAerialPerspectiveVolumeSliceImmediate() manipulates
+    // this RenderTexture's raw VkImage directly outside any render-graph
+    // pass, so it must stay manually owned.
     state.output.emplace(renderer.CreateRenderTexture(width, height, VK_FORMAT_R16G16B16A16_SFLOAT, outputTextureName,
         /*depthDebugName=*/nullptr, /*allowStorageImageAccess=*/true));
 
@@ -723,13 +672,13 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveVolumeDebugSl
 
     EnsureAerialPerspectiveVolumeDebugSliceInitialized(renderer);
 
-    // The SAME AerialPerspectiveVolumeViewState AddAerialPerspectiveVolumePass()
-    // itself created for `aerialPerspectiveVolumeName` THIS session - looked
+    // The same AerialPerspectiveVolumeViewState AddAerialPerspectiveVolumePass()
+    // itself created for `aerialPerspectiveVolumeName` this session - looked
     // up again purely for its own Width()/Height()/Depth()/View()/Sampler().
     const auto volumeIt = aerialPerspectiveVolumeViewStates.find(aerialPerspectiveVolumeName);
     if (volumeIt == aerialPerspectiveVolumeViewStates.end() || !volumeIt->second.output.has_value()) {
         // Programmer error - AddAerialPerspectiveVolumePass() for this exact
-        // name MUST have already run earlier THIS SAME frame.
+        // name must have already run earlier this same frame.
         return rg::TextureHandle{};
     }
     const VolumeTexture& sourceVolume = *volumeIt->second.output;
@@ -784,9 +733,8 @@ Renderer::CapturedRawPixels AtmosphereLutRenderer::Impl::CaptureAerialPerspectiv
 {
     const auto volumeIt = aerialPerspectiveVolumeViewStates.find(aerialPerspectiveVolumeName);
     if (volumeIt == aerialPerspectiveVolumeViewStates.end() || !volumeIt->second.output.has_value()) {
-        // Programmer/caller-ordering error - AddAerialPerspectiveVolumePass()
-        // for this exact name must have already run at least once this
-        // session. Returns an empty CapturedRawPixels rather than crashing.
+        // Caller-ordering error - AddAerialPerspectiveVolumePass() for this
+        // exact name must have already run at least once this session.
         return Renderer::CapturedRawPixels{};
     }
 
@@ -818,9 +766,8 @@ Renderer::CapturedRawPixels AtmosphereLutRenderer::Impl::CaptureAerialPerspectiv
     // ReadVolumeTexture(..., ShaderRead) call leaves the source volume in by
     // the end of this session's most recently completed real frame.
     const rg::ResourceState sourceVolumePreviousState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
-    // A combined-image-sampler read from a COMPUTE shader has no existing
-    // ResourceAccess enumerator to reuse via RequiredStateFor() - built by
-    // hand.
+    // A combined-image-sampler read from a compute shader has no existing
+    // ResourceAccess enumerator to reuse via RequiredStateFor() - built by hand.
     const rg::ResourceState sourceVolumeSampledState{
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -828,12 +775,11 @@ Renderer::CapturedRawPixels AtmosphereLutRenderer::Impl::CaptureAerialPerspectiv
     };
 
     const VkImage outputImage = viewState.output->Image();
-    // This dedicated inspection-only output RenderTexture's own real current
-    // layout doesn't matter here - this dispatch's own imageStore()
-    // unconditionally overwrites every texel, so transitioning FROM
-    // VK_IMAGE_LAYOUT_UNDEFINED is always correct; Renderer::ImmediateSubmit()
-    // fully blocks until its own fence signals, so every previous call
-    // already completed before this one starts recording.
+    // This dedicated inspection-only output's own real current layout
+    // doesn't matter - this dispatch's imageStore() unconditionally
+    // overwrites every texel, so transitioning FROM VK_IMAGE_LAYOUT_UNDEFINED
+    // is always correct; ImmediateSubmit() fully blocks on its own fence, so
+    // every previous call already completed before this one starts recording.
     const rg::ResourceState outputDiscardState{};
     const rg::ResourceState outputWriteState = rg::RequiredStateFor(rg::ResourceAccess::ComputeShaderWrite, false);
 
@@ -852,7 +798,7 @@ Renderer::CapturedRawPixels AtmosphereLutRenderer::Impl::CaptureAerialPerspectiv
             groupCounts.height, groupCounts.depth);
 
         // Restore the source volume image to its real previous state - the
-        // NEXT real frame's own RenderGraph::Execute() call must find it
+        // next real frame's own RenderGraph::Execute() call must find it
         // exactly where it left it.
         rg::EmitImageBarrier(cmd.Native(), sourceVolumeImage, range, sourceVolumeSampledState, sourceVolumePreviousState);
     });
@@ -872,8 +818,7 @@ void AtmosphereLutRenderer::Impl::EnsureSkyBackgroundPipelineInitialized(Rendere
     device = renderer.GetVulkanContextInfo().device;
     ownerRenderer = &renderer;
 
-    // Binding 0 = the Sky-View LUT combined image sampler - fragment stage
-    // only.
+    // Binding 0 = the Sky-View LUT combined image sampler - fragment stage only.
     DescriptorSetLayoutBuilder layoutBuilder(device);
     skyBackgroundDescriptorSetLayout =
         layoutBuilder.AddCombinedImageSampler(/*binding=*/0, VK_SHADER_STAGE_FRAGMENT_BIT).Build();
@@ -886,11 +831,10 @@ void AtmosphereLutRenderer::Impl::EnsureSkyBackgroundPipelineInitialized(Rendere
     };
     skyBackgroundSetLayoutHandle = renderer.CreateDescriptorSetLayout(kBindings);
 
-    // Depth TEST enabled with CompareOp::Equal (this pass must survive ONLY
-    // at a pixel whose depth is still exactly the frame's own clear value,
-    // 1.0), depth WRITE disabled (nothing is ever meant to occlude the sky
-    // itself). Opaque blend - the sky IS the base layer for every pixel it
-    // survives the depth test at.
+    // Depth test enabled with CompareOp::Equal (survives only at a pixel
+    // whose depth is still exactly the frame's own clear value, 1.0), depth
+    // write disabled. Opaque blend - the sky is the base layer for every
+    // pixel it survives the depth test at.
     PipelineDesc desc = PipelinePreset::DepthEqualNoWrite(renderer.ColorPixelFormat(), renderer.DepthPixelFormat());
     desc.vertexLayout = VertexLayout::None; // Full-screen triangle from gl_VertexIndex - no vertex input.
     desc.cullMode = CullMode::None;
@@ -940,22 +884,27 @@ void AtmosphereLutRenderer::Impl::DrawSkyBackgroundPass(Renderer& renderer, rg::
 }
 
 void AtmosphereLutRenderer::Impl::DrawSkyBackground(Renderer& renderer, rg::CommandBuffer& cmd,
-    const Mat4& viewProjection, const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
-    const char* skyViewLutName, float skyExposure)
+    const rg::RenderGraph& renderGraph, const Mat4& viewProjection, const AtmosphereParametersGpu& params,
+    const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure)
 {
-    const auto it = skyViewLutViewStates.find(skyViewLutName);
-    if (it == skyViewLutViewStates.end() || !it->second.output.has_value()) {
-        // Programmer error - AddSkyViewLutPass() for this exact name MUST
-        // have already run earlier THIS SAME frame. Degrades to "draw
+    // Combined key GetOrCreatePersistentTexture() registered this view's Sky-View
+    // LUT under - see AddSkyViewLutPass(). This draw runs nested inside another
+    // already-declared pass's own execute body, with no TextureHandle/PassContext
+    // of its own to resolve through, so a by-name lookup is the correct way to
+    // reach it (mirrors ValidateAerialPerspectiveSkyPurity()'s own precedent).
+    const std::string key = std::string(rg::kPersistentOwnerAtmosphere) + "::" + skyViewLutName;
+    const std::optional<rg::DebugTextureSnapshot> snapshot = renderGraph.DebugTextureSnapshotFor(key);
+    if (!snapshot.has_value()) {
+        // Programmer error - AddSkyViewLutPass() for this exact name must
+        // have already run earlier this same frame. Degrades to "draw
         // nothing" (an invisible sky) rather than crashing.
         return;
     }
 
-    // AtmosphereFrameUniforms::cameraPositionAtmosphere.y IS ALREADY the
-    // "view height from the planet's CENTER" quantity (planetRadiusKm +
-    // heightAboveGroundKm) - the exact same value AtmosphereSkyViewLut.comp's
-    // own generation pass reads directly.
-    DrawSkyBackgroundPass(renderer, cmd, viewProjection, it->second.output->View(), it->second.output->Sampler(),
+    // AtmosphereFrameUniforms::cameraPositionAtmosphere.y is already the
+    // "view height from the planet's center" quantity (planetRadiusKm +
+    // heightAboveGroundKm) - the exact same value the Sky-View LUT itself reads.
+    DrawSkyBackgroundPass(renderer, cmd, viewProjection, snapshot->target.imageView, snapshot->sampler,
         frameUniforms.cameraPositionAtmosphere.y, params.planetRadiusKm, skyExposure);
 }
 

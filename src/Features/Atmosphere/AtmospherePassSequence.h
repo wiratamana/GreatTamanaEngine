@@ -26,6 +26,7 @@ class Renderer;
 
 namespace rg {
 class CommandBuffer;
+class RenderGraph;
 class RenderGraphBuilder;
 class RenderPassToggleRegistry;
 } // namespace rg
@@ -70,14 +71,16 @@ AtmosphereViewLutHandles AddAtmosphereViewLutPasses(rg::RenderGraphBuilder& buil
     rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
 // Builds a ready-to-pass-into-AddGameViewPass()/AddSceneViewPass()'s own
-// `recordSkyBackground` parameter - captures everything it needs by VALUE,
-// so the returned std::function stays valid for the rest of this frame's
-// recording regardless of what happens to the arguments afterward.
+// `recordSkyBackground` parameter - captures everything it needs by VALUE
+// (`renderGraph` by reference - it outlives any one frame), so the returned
+// std::function stays valid for the rest of this frame's recording
+// regardless of what happens to the other arguments afterward.
 // `skyViewLutName` must be the SAME name just passed to
 // AddAtmosphereViewLutPasses() above for this view, this same frame.
 std::function<void(rg::CommandBuffer&)> MakeRecordSkyBackgroundCallback(AtmosphereLutRenderer& atmosphereLutRenderer,
-    Renderer& renderer, const Mat4& viewProjection, const AtmosphereParametersGpu& atmosphereParameters,
-    const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure);
+    Renderer& renderer, const rg::RenderGraph& renderGraph, const Mat4& viewProjection,
+    const AtmosphereParametersGpu& atmosphereParameters, const AtmosphereFrameUniforms& frameUniforms,
+    const char* skyViewLutName, float skyExposure);
 
 // Declares the Aerial Perspective Composite pass for ONE view - must be
 // called AFTER that view's own GameView/SceneView pass has already been

@@ -72,6 +72,7 @@ Buffer::Buffer(Buffer&& other) noexcept
     , m_allocation(std::exchange(other.m_allocation, VK_NULL_HANDLE))
     , m_size(std::exchange(other.m_size, VkDeviceSize{ 0 }))
     , m_mappedData(std::exchange(other.m_mappedData, nullptr))
+    , m_objectHandle(std::exchange(other.m_objectHandle, CachedBufferObjectHandle{}))
 {
 }
 
@@ -86,6 +87,7 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept
         m_allocation = std::exchange(other.m_allocation, VK_NULL_HANDLE);
         m_size = std::exchange(other.m_size, VkDeviceSize{ 0 });
         m_mappedData = std::exchange(other.m_mappedData, nullptr);
+        m_objectHandle = std::exchange(other.m_objectHandle, CachedBufferObjectHandle{});
     }
     return *this;
 }
@@ -117,6 +119,9 @@ void Buffer::Destroy() noexcept
     if (m_buffer != VK_NULL_HANDLE) {
         m_tracker->Untrack(m_handle);
         m_handle = kInvalidGpuResourceHandle;
+
+        // Never leave a stale registry entry pointing at a VkBuffer that's about to be destroyed.
+        m_objectHandle.Resolve(VK_NULL_HANDLE);
 
         vmaDestroyBuffer(m_allocator, m_buffer, m_allocation);
         m_buffer = VK_NULL_HANDLE;

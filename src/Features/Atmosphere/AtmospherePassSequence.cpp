@@ -53,13 +53,14 @@ AtmosphereViewLutHandles AddAtmosphereViewLutPasses(rg::RenderGraphBuilder& buil
 }
 
 std::function<void(rg::CommandBuffer&)> MakeRecordSkyBackgroundCallback(AtmosphereLutRenderer& atmosphereLutRenderer,
-    Renderer& renderer, const Mat4& viewProjection, const AtmosphereParametersGpu& atmosphereParameters,
-    const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure)
+    Renderer& renderer, const rg::RenderGraph& renderGraph, const Mat4& viewProjection,
+    const AtmosphereParametersGpu& atmosphereParameters, const AtmosphereFrameUniforms& frameUniforms,
+    const char* skyViewLutName, float skyExposure)
 {
-    return [&atmosphereLutRenderer, &renderer, viewProjection, atmosphereParameters, frameUniforms, skyViewLutName,
-               skyExposure](rg::CommandBuffer& cmd) {
-        atmosphereLutRenderer.DrawSkyBackground(renderer, cmd, viewProjection, atmosphereParameters, frameUniforms,
-            skyViewLutName, skyExposure);
+    return [&atmosphereLutRenderer, &renderer, &renderGraph, viewProjection, atmosphereParameters, frameUniforms,
+               skyViewLutName, skyExposure](rg::CommandBuffer& cmd) {
+        atmosphereLutRenderer.DrawSkyBackground(renderer, cmd, renderGraph, viewProjection, atmosphereParameters,
+            frameUniforms, skyViewLutName, skyExposure);
     };
 }
 

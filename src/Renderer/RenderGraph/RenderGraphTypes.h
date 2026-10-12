@@ -38,6 +38,7 @@
 #include <volk.h>
 
 #include "RenderGraphHandles.h"
+#include "../../Core/GraphicsHandles.h" // SamplerHandle/DescriptorSetLayoutHandle - PendingBinding/PassRecord below.
 
 #include <array>
 #include <cassert>
@@ -529,6 +530,39 @@ ResolvedBlitRegion ResolveBlitRegion(
 // own execution branch for where this is actually asserted.
 bool IsValidBlitRegion(const ResolvedBlitRegion& region, VkExtent2D resolvedExtent) noexcept;
 
+// Compute-binding vocabulary - lets a pass declare which descriptor slot a
+// resource occupies, orthogonal to the Read*/Write* barrier-tracking family
+// above (a Bind* call never implies a barrier - the matching ReadTexture()/
+// WriteTexture()/etc. call still owns that). `kind` selects which of the
+// handle fields below is meaningful; for StorageBuffer/StorageImage exactly
+// one of the two possible handle fields is ever set by the one PassBuilder
+// call that produced this entry (see RenderGraphBuilder.h's BindStorageBuffer/
+// BindStorageImage overloads) - checked by which one IsValid()/!=Invalid at
+// resolve time, never both.
+enum class BindingKind : std::uint8_t {
+    StorageBuffer,
+    CombinedImageSampler,
+    CombinedVolumeImageSampler,
+    StorageImage,
+};
+
+// One descriptor-slot binding declared via PassBuilder::Bind*() - resolved
+// into a real VkDescriptorSet write immediately before this pass's execute()
+// runs (see RenderGraph.cpp).
+struct PendingBinding {
+    std::uint32_t binding = 0;
+    BindingKind kind = BindingKind::StorageBuffer;
+    TextureHandle textureHandle;
+    VolumeTextureHandle volumeTextureHandle;
+    BufferHandle bufferHandle;
+    BufferObjectHandle bufferObjectHandle = BufferObjectHandle::Invalid;
+    // CombinedImageSampler only - SamplerHandle::Invalid means "use this
+    // TextureHandle's own already-resolved sampler".
+    SamplerHandle explicitSampler = SamplerHandle::Invalid;
+    VkDeviceSize bufferOffset = 0;
+    VkDeviceSize bufferRange = VK_WHOLE_SIZE;
+};
+
 struct PassRecord {
     // Must be a string literal / static-storage-duration const char* -
     // mirrors GTE_PROFILE_SCOPE's own rule (see AGENTS.md, "Profiling":
@@ -658,6 +692,14 @@ struct PassRecord {
     // never calls WriteArrayLayer(). At most one per pass -
     // WriteArrayLayer() asserts against a second call on the same pass.
     std::optional<ArrayLayerAttachmentDesc> arrayLayerAttachment;
+
+    // Compute-binding vocabulary - see PendingBinding's own doc comment
+    // above. Populated exclusively by RenderGraphBuilder::PassBuilder's
+    // BindDescriptorSetLayout()/Bind*() calls. Empty `bindings` (every
+    // pre-existing pass today) costs nothing beyond one empty-vector check
+    // in RenderGraph::ExecuteCompiledGraph().
+    DescriptorSetLayoutHandle computeBindingLayout = DescriptorSetLayoutHandle::Invalid;
+    std::vector<PendingBinding> bindings;
 };
 
 } // namespace gte::rg

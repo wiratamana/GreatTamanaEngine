@@ -18,4 +18,8 @@ enum class ImageViewHandle : std::uint64_t { Invalid = 0 };
 // Renderer::CreateDescriptorSetLayout()/DestroyDescriptorSetLayout().
 enum class DescriptorSetLayoutHandle : std::uint64_t { Invalid = 0 };
 
+// Handle to a persistent, non-graph-tracked VkBuffer (e.g. a small
+// CpuToGpu buffer re-uploaded every frame) - see Buffer::ObjectHandle().
+enum class BufferObjectHandle : std::uint64_t { Invalid = 0 };
+
 } // namespace gte

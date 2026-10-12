@@ -22,6 +22,7 @@ namespace gte::rg {
 RenderGraph::RenderGraph(Renderer& renderer)
     : m_resourcePool(renderer)
     , m_persistentResourceCache(renderer)
+    , m_computeBindingCache(renderer)
     , m_timestampPool(QueryVulkanContextInfoForRenderGraph(renderer).device, renderer,
           QueryVulkanContextInfoForRenderGraph(renderer).graphicsQueueFamily,
           QueryVulkanContextInfoForRenderGraph(renderer).timestampCapability, kSynchronousTimingSlotBudget,
@@ -371,6 +372,93 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
                 }
             }
         });
+}
+
+// Compute-binding vocabulary (RenderGraphBuilder::PassBuilder::Bind*()) -
+// translates every PendingBinding this pass declared into a real
+// ComputeDescriptorWrite against its already-resolved physical resource,
+// then hands the batch to m_computeBindingCache to allocate/rewrite/cache.
+// Zero cost for the overwhelming majority of passes, which never call
+// Bind*() at all (pass.bindings.empty()).
+DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRecord& pass,
+    const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers,
+    const std::vector<PhysicalVolumeTexture>& physicalVolumeTextures)
+{
+    if (pass.bindings.empty()) {
+        return DescriptorSetHandle::Invalid;
+    }
+
+    const VkDescriptorSetLayout layout = Native(pass.computeBindingLayout);
+    if (layout == VK_NULL_HANDLE) {
+        GTE_LOG_ERROR("RenderGraph",
+            "Pass \"" + std::string(pass.name != nullptr ? pass.name : "<unnamed>")
+                + "\" declared Bind*() calls but never called BindDescriptorSetLayout() - refusing to resolve.");
+        return DescriptorSetHandle::Invalid;
+    }
+
+    std::vector<ComputeDescriptorWrite> writes;
+    writes.reserve(pass.bindings.size());
+
+    for (const PendingBinding& binding : pass.bindings) {
+        switch (binding.kind) {
+        case BindingKind::StorageBuffer: {
+            VkBuffer buffer = VK_NULL_HANDLE;
+            if (binding.bufferHandle.IsValid() && binding.bufferHandle.index < physicalBuffers.size()
+                && physicalBuffers[binding.bufferHandle.index].resolved) {
+                buffer = physicalBuffers[binding.bufferHandle.index].buffer;
+            } else if (binding.bufferObjectHandle != BufferObjectHandle::Invalid) {
+                buffer = Native(binding.bufferObjectHandle);
+            }
+            if (buffer == VK_NULL_HANDLE) {
+                continue; // Unresolved this call - skip, mirrors every resolve*() "safe-null" discipline.
+            }
+            writes.push_back(
+                ComputeDescriptorWrite::StorageBuffer(binding.binding, buffer, binding.bufferOffset, binding.bufferRange));
+            break;
+        }
+        case BindingKind::CombinedImageSampler: {
+            if (!binding.textureHandle.IsValid() || binding.textureHandle.index >= physicalTextures.size()
+                || !physicalTextures[binding.textureHandle.index].resolved) {
+                continue;
+            }
+            const PhysicalTexture& tex = physicalTextures[binding.textureHandle.index];
+            const VkSampler sampler =
+                (binding.explicitSampler != SamplerHandle::Invalid) ? Native(binding.explicitSampler) : tex.sampler;
+            writes.push_back(
+                ComputeDescriptorWrite::CombinedImageSampler(binding.binding, tex.target.imageView, sampler));
+            break;
+        }
+        case BindingKind::CombinedVolumeImageSampler: {
+            if (!binding.volumeTextureHandle.IsValid() || binding.volumeTextureHandle.index >= physicalVolumeTextures.size()
+                || !physicalVolumeTextures[binding.volumeTextureHandle.index].resolved
+                || binding.explicitSampler == SamplerHandle::Invalid) {
+                continue;
+            }
+            const PhysicalVolumeTexture& vol = physicalVolumeTextures[binding.volumeTextureHandle.index];
+            writes.push_back(ComputeDescriptorWrite::CombinedImageSampler(
+                binding.binding, vol.target.imageView, Native(binding.explicitSampler)));
+            break;
+        }
+        case BindingKind::StorageImage: {
+            VkImageView view = VK_NULL_HANDLE;
+            if (binding.textureHandle.IsValid() && binding.textureHandle.index < physicalTextures.size()
+                && physicalTextures[binding.textureHandle.index].resolved) {
+                view = physicalTextures[binding.textureHandle.index].target.imageView;
+            } else if (binding.volumeTextureHandle.IsValid()
+                && binding.volumeTextureHandle.index < physicalVolumeTextures.size()
+                && physicalVolumeTextures[binding.volumeTextureHandle.index].resolved) {
+                view = physicalVolumeTextures[binding.volumeTextureHandle.index].target.imageView;
+            }
+            if (view == VK_NULL_HANDLE) {
+                continue;
+            }
+            writes.push_back(ComputeDescriptorWrite::StorageImage(binding.binding, view));
+            break;
+        }
+        }
+    }
+
+    return m_computeBindingCache.Resolve(pass.name, layout, writes);
 }
 
 // render-pass-6 campaign, PHASE2 (item 2.6), updated by PHASE3 (item 2.7) -
@@ -947,6 +1035,12 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         DrawStats passDrawStats;
         PassContext ctx = BuildPassContext(
             cmd, physicalTextures, physicalBuffers, physicalVolumeTextures, physicalTextureArrays, passDrawStats);
+
+        // Compute-binding vocabulary (PassBuilder::Bind*()) - resolved
+        // immediately after reads/writes above (every declared handle's
+        // physical resource is now live), before execute() runs below.
+        ctx.computeDescriptorSet =
+            ResolveComputeBindingDescriptorSet(pass, physicalTextures, physicalBuffers, physicalVolumeTextures);
 
         bool didBeginRendering = false;
         if (hasAnyAttachment) {

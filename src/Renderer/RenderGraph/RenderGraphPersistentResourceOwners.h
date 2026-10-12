@@ -25,4 +25,7 @@ namespace gte::rg {
 // real, built-in "population (b)" consumer this campaign itself ships.
 inline constexpr const char* kPersistentOwnerCacheValidation = "PersistentResourceCacheValidation";
 
+// Atmosphere LUT passes (AtmosphereLutRendererImpl.cpp) - shared GPU color textures reused every frame.
+inline constexpr const char* kPersistentOwnerAtmosphere = "Atmosphere";
+
 } // namespace gte::rg

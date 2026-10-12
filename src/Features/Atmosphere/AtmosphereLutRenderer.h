@@ -27,11 +27,11 @@ namespace gte {
 
 namespace rg {
 class CommandBuffer;
+class RenderGraph; // DrawSkyBackground() looks up its own Sky-View LUT by name.
 class RenderPassToggleRegistry;
 } // namespace rg
 
 class RenderTexture; // CompositedOutput() returns a pointer - never needs volk.h.
-class Texture2D;     // TransmittanceLutOutput() returns a pointer - same reasoning.
 
 class AtmosphereLutRenderer {
 public:
@@ -43,16 +43,20 @@ public:
     AtmosphereLutRenderer& operator=(AtmosphereLutRenderer&&) = delete;
 
     // Declares this frame's Transmittance LUT compute pass into `builder` -
-    // writes a persistent 256x256 output Texture2D registered as
-    // "AtmosphereTransmittanceLut". The caller must add the returned handle
-    // to this call's own outputs root set, or the write is silently culled.
+    // writes a persistent 256x256 output owned by the render graph's
+    // persistent texture cache, registered under the exact literal name
+    // "AtmosphereTransmittanceLut" (read back by name via
+    // RenderGraph::DebugTextureSnapshotFor(), e.g. by
+    // AtmosphereTransmittanceLutValidation.cpp). The caller must add the
+    // returned handle to this call's own outputs root set, or the write is
+    // silently culled.
     rg::TextureHandle AddTransmittanceLutPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         const AtmosphereParametersGpu& params, rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
     // Declares this frame's Multi-Scattering LUT pass - reads this call's
     // own AddTransmittanceLutPass() result, writes a persistent 64x64 HDR
-    // output RenderTexture ("AtmosphereMultiScatteringLut"). Must be called
-    // after AddTransmittanceLutPass() in the same frame.
+    // output owned by the render graph's persistent texture cache
+    // ("Atmosphere::MultiScatteringLut"). Must be called after AddTransmittanceLutPass().
     rg::TextureHandle AddMultiScatteringLutPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         const AtmosphereParametersGpu& params, rg::TextureHandle transmittanceLutHandle,
         rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
@@ -80,11 +84,12 @@ public:
 
     // Draws this view's sky background directly against `cmd`, inside the
     // caller's own already-open render pass - looks up the already-computed
-    // Sky-View LUT for `skyViewLutName` (this frame's own AddSkyViewLutPass()
-    // call for that exact name must have already run).
-    void DrawSkyBackground(Renderer& renderer, rg::CommandBuffer& cmd, const Mat4& viewProjection,
-        const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
-        const char* skyViewLutName, float skyExposure);
+    // Sky-View LUT for `skyViewLutName` by name through `renderGraph` (this
+    // frame's own AddSkyViewLutPass() call for that exact name must have
+    // already run).
+    void DrawSkyBackground(Renderer& renderer, rg::CommandBuffer& cmd, const rg::RenderGraph& renderGraph,
+        const Mat4& viewProjection, const AtmosphereParametersGpu& params,
+        const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure);
 
     // Declares this frame's Aerial Perspective Composite pass for ONE view.
     // `sourceColorHandle`/`sourceDepthHandle` are read as color/depth
@@ -112,11 +117,6 @@ public:
     // command buffer the offscreen RenderGraph::Execute() call just
     // recorded into, before that command buffer is ended/submitted.
     void FinalizeAerialPerspectiveCompositeForSampling(rg::CommandBuffer& cmd, const char* outputTextureName);
-
-    // Exposes the persistent Texture2D behind AddTransmittanceLutPass()'s
-    // own output, so a validation tool can read back its real, currently-
-    // computed pixels. Returns nullptr if that pass has never run yet.
-    Texture2D* TransmittanceLutOutput() noexcept;
 
     // The real Z-slice count for `aerialPerspectiveVolumeName` - returns 0
     // if that volume has never been generated this session.

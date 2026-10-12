@@ -40,11 +40,12 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg
         multiScatteringLutHandle, outputVolumeName, viewScope, toggleRegistry);
 }
 
-void AtmosphereLutRenderer::DrawSkyBackground(Renderer& renderer, rg::CommandBuffer& cmd, const Mat4& viewProjection,
-    const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName,
-    float skyExposure)
+void AtmosphereLutRenderer::DrawSkyBackground(Renderer& renderer, rg::CommandBuffer& cmd,
+    const rg::RenderGraph& renderGraph, const Mat4& viewProjection, const AtmosphereParametersGpu& params,
+    const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure)
 {
-    m_impl->DrawSkyBackground(renderer, cmd, viewProjection, params, frameUniforms, skyViewLutName, skyExposure);
+    m_impl->DrawSkyBackground(renderer, cmd, renderGraph, viewProjection, params, frameUniforms, skyViewLutName,
+        skyExposure);
 }
 
 rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder,
@@ -70,11 +71,6 @@ void AtmosphereLutRenderer::FinalizeAerialPerspectiveCompositeForSampling(
     rg::CommandBuffer& cmd, const char* outputTextureName)
 {
     m_impl->FinalizeAerialPerspectiveCompositeForSampling(cmd, outputTextureName);
-}
-
-Texture2D* AtmosphereLutRenderer::TransmittanceLutOutput() noexcept
-{
-    return m_impl->TransmittanceLutOutput();
 }
 
 int AtmosphereLutRenderer::AerialPerspectiveVolumeDepth(const char* aerialPerspectiveVolumeName) const noexcept

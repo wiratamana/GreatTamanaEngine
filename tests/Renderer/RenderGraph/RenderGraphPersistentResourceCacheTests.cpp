@@ -284,23 +284,31 @@ TEST(RenderGraphPersistentResourceCacheDeathTest, ResolveAssertsOnNullName)
         "");
 }
 
-TEST(RenderGraphPersistentResourceCacheDeathTest, ResolveAssertsOnEmptyOwner)
+#endif // !NDEBUG
+
+// Empty owner is a deliberate escape hatch: the identity stays the literal `name`, no "<owner>::" prefix.
+TEST(RenderGraphPersistentResourceCacheTest, ResolveWithEmptyOwnerUsesNameAsLiteralIdentity)
 {
-    {
-        HeadlessRenderGraphFixture probe;
-        if (!probe.IsUsable()) {
-            GTEST_SKIP() << probe.SkipReason();
-        }
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
     }
-    EXPECT_DEATH(
-        {
-            HeadlessRenderGraphFixture fixture;
-            RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
-            const TextureDesc desc = MakeColorDesc();
-            (void)cache.Resolve("", "EmptyOwnerRefusal", desc, /*currentFrame=*/1, kSync);
-        },
-        "");
+
+    RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
+    const TextureDesc desc = MakeColorDesc();
+
+    std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved;
+    fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
+        resolved = cache.Resolve("", "LiteralIdentity", desc, /*currentFrame=*/1, kSync);
+        return {};
+    });
+
+    ASSERT_TRUE(resolved.has_value());
+    ASSERT_NE(resolved->combinedKey, nullptr);
+    EXPECT_EQ(*resolved->combinedKey, "LiteralIdentity");
 }
+
+#ifndef NDEBUG
 
 TEST(RenderGraphPersistentResourceCacheDeathTest, ResolveAssertsOnEmptyName)
 {
@@ -1309,25 +1317,29 @@ TEST(RenderGraphPersistentResourceCacheDeathTest, BuilderGetOrCreatePersistentTe
         "");
 }
 
-TEST(RenderGraphPersistentResourceCacheDeathTest, BuilderGetOrCreatePersistentTextureAssertsOnEmptyOwner)
+// Empty owner is a deliberate escape hatch: the identity stays the literal `name`, no "<owner>::" prefix.
+TEST(RenderGraphPersistentResourceCacheTest, BuilderGetOrCreatePersistentTextureWithEmptyOwnerUsesNameAsLiteralIdentity)
 {
-    {
-        HeadlessRenderGraphFixture probe;
-        if (!probe.IsUsable()) {
-            GTEST_SKIP() << probe.SkipReason();
-        }
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
     }
-    EXPECT_DEATH(
-        {
-            HeadlessRenderGraphFixture fixture;
-            const TextureDesc desc = MakeColorDesc();
-            fixture.GetRenderGraph().BeginPersistentResourceFrame();
-            fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-                (void)b.GetOrCreatePersistentTexture("", "BuilderEmptyOwnerRefusal", desc);
-                return {};
-            });
-        },
-        "");
+
+    const TextureDesc desc = MakeColorDesc();
+    fixture.GetRenderGraph().BeginPersistentResourceFrame();
+    fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
+        const TextureHandle h = b.GetOrCreatePersistentTexture("", "BuilderLiteralIdentity", desc);
+        EXPECT_TRUE(h.IsValid());
+        b.AddPass(
+            "BuilderLiteralIdentityTouchPass",
+            [&](RenderGraphBuilder::PassBuilder& pb) { pb.WriteColorAttachment(h); },
+            [](PassContext&) {});
+        return {};
+    });
+
+    const std::optional<DebugTextureSnapshot> snapshot =
+        fixture.GetRenderGraph().DebugTextureSnapshotFor("BuilderLiteralIdentity");
+    ASSERT_TRUE(snapshot.has_value());
 }
 
 TEST(RenderGraphPersistentResourceCacheDeathTest, BuilderGetOrCreatePersistentTextureAssertsWhenTokenReusedAcrossDifferentIdentities)
@@ -1354,5 +1366,82 @@ TEST(RenderGraphPersistentResourceCacheDeathTest, BuilderGetOrCreatePersistentTe
 }
 
 #endif // !NDEBUG
+
+// desc.usage == TextureUsage::Storage is threaded into the real created RenderTexture.
+TEST(RenderGraphPersistentResourceCacheTest, ResolveThreadsStorageUsageIntoTheCreatedTexture)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
+    TextureDesc storageDesc = MakeColorDesc();
+    storageDesc.usage = TextureUsage::Storage;
+
+    std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved;
+    fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
+        resolved = cache.Resolve(kPersistentOwnerCacheValidation, "StorageUsage", storageDesc, /*currentFrame=*/1, kSync);
+        return {};
+    });
+
+    ASSERT_TRUE(resolved.has_value());
+    ASSERT_NE(resolved->texture, nullptr);
+    EXPECT_TRUE(resolved->texture->AllowsStorageImageAccess());
+}
+
+// A plain desc (TextureUsage::None) never opts into storage-image access.
+TEST(RenderGraphPersistentResourceCacheTest, ResolveWithoutStorageUsageNeverAllowsStorageImageAccess)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
+    const TextureDesc desc = MakeColorDesc();
+
+    std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved;
+    fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
+        resolved = cache.Resolve(kPersistentOwnerCacheValidation, "NoStorageUsage", desc, /*currentFrame=*/1, kSync);
+        return {};
+    });
+
+    ASSERT_TRUE(resolved.has_value());
+    ASSERT_NE(resolved->texture, nullptr);
+    EXPECT_FALSE(resolved->texture->AllowsStorageImageAccess());
+}
+
+// A usage change on an existing entry needs a full VkImage recreation -
+// treated as a caller bug, same as a format change, never silently applied.
+TEST(RenderGraphPersistentResourceCacheTest, ReRequestingAnExistingEntryWithADifferentUsageIsRefused)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
+
+    fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
+        auto resolved = cache.Resolve(
+            kPersistentOwnerCacheValidation, "UsageRefusal", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
+        if (!resolved.has_value()) {
+            ADD_FAILURE() << "Initial Resolve() unexpectedly failed for UsageRefusal";
+        }
+        return {};
+    });
+
+    TextureDesc differentUsageDesc = MakeColorDesc(32, 32);
+    differentUsageDesc.usage = TextureUsage::Storage;
+
+    std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> refused;
+    fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
+        refused =
+            cache.Resolve(kPersistentOwnerCacheValidation, "UsageRefusal", differentUsageDesc, /*currentFrame=*/2, kSync);
+        return {};
+    });
+    EXPECT_FALSE(refused.has_value());
+}
 
 } // namespace gte::rg

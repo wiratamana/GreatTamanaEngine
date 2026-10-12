@@ -14,7 +14,6 @@
 #include "../Compute/ComputePipeline.h"
 #include "../GraphicsHandleRegistry.h"
 #include "../RenderTexture.h"
-#include "../Texture2D.h"
 #include "../VolumeTexture.h"
 #include "../Buffer.h"
 #include "../Pipeline.h"
@@ -28,6 +27,10 @@ namespace gte {
 
 class Renderer;
 
+namespace rg {
+class RenderGraph; // DrawSkyBackground() looks up its own Sky-View LUT by name - see that method below.
+} // namespace rg
+
 struct AtmosphereLutRenderer::Impl {
     ~Impl();
 
@@ -37,17 +40,27 @@ struct AtmosphereLutRenderer::Impl {
     std::optional<ComputePipeline> transmittanceLutPipeline;
     ComputeDescriptorSet transmittanceLutDescriptorSet;
     std::optional<Buffer> atmosphereParametersBuffer; // shared by every LUT pass below
-    std::optional<Texture2D> transmittanceLutOutput;
+    // Persistent cache owns the real RenderTexture, registered under the
+    // exact literal name "AtmosphereTransmittanceLut" (no owner prefix) -
+    // AtmosphereTransmittanceLutValidation.cpp reads it back by that same
+    // name directly from the render graph, so this token is the only state
+    // this struct needs for it.
+    rg::PersistentTextureCacheToken transmittanceLutToken;
 
     VkDescriptorSetLayout multiScatteringLutDescriptorSetLayout = VK_NULL_HANDLE;
     std::optional<ComputePipeline> multiScatteringLutPipeline;
     ComputeDescriptorSet multiScatteringLutDescriptorSet;
-    std::optional<RenderTexture> multiScatteringLutOutput;
+    // Persistent cache owns the real RenderTexture - only consumed via resolved
+    // handles by same-frame passes below, so a lightweight token is enough.
+    rg::PersistentTextureCacheToken multiScatteringLutToken;
 
     struct SkyViewLutViewState {
         ComputeDescriptorSet descriptorSet;
         std::optional<Buffer> frameUniformsBuffer;
-        std::optional<RenderTexture> output;
+        // Persistent cache owns the real RenderTexture - DrawSkyBackground()
+        // looks it up by name through the render graph instead of holding a
+        // live pointer, so a token is all this struct needs to own here.
+        rg::PersistentTextureCacheToken token;
     };
     VkDescriptorSetLayout skyViewLutDescriptorSetLayout = VK_NULL_HANDLE;
     std::optional<ComputePipeline> skyViewLutPipeline;
@@ -130,9 +143,13 @@ struct AtmosphereLutRenderer::Impl {
         const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
         rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle,
         const char* outputVolumeName, rg::ViewScope viewScope, rg::RenderPassToggleRegistry* toggleRegistry);
-    void DrawSkyBackground(Renderer& renderer, rg::CommandBuffer& cmd, const Mat4& viewProjection,
-        const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
-        const char* skyViewLutName, float skyExposure);
+    // `renderGraph` is used purely to look up the Sky-View LUT named
+    // `skyViewLutName` by name (DebugTextureSnapshotFor()) - this draw runs
+    // directly inside another already-declared pass's own execute body, with
+    // no PassContext/TextureHandle of its own to resolve through.
+    void DrawSkyBackground(Renderer& renderer, rg::CommandBuffer& cmd, const rg::RenderGraph& renderGraph,
+        const Mat4& viewProjection, const AtmosphereParametersGpu& params,
+        const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure);
     // `sourceColorSampler`/`sourceDepthView`/`sourceDepthSampler`/`extent` are
     // the opaque handles the public AtmosphereLutRenderer::
     // AddAerialPerspectiveCompositePass() receives - unwrapped to real Vk*
@@ -147,7 +164,6 @@ struct AtmosphereLutRenderer::Impl {
         rg::RenderPassToggleRegistry* toggleRegistry);
     RenderTexture* CompositedOutput(const char* outputTextureName) noexcept;
     void FinalizeAerialPerspectiveCompositeForSampling(rg::CommandBuffer& cmd, const char* outputTextureName);
-    Texture2D* TransmittanceLutOutput() noexcept;
     int AerialPerspectiveVolumeDepth(const char* aerialPerspectiveVolumeName) const noexcept;
     rg::TextureHandle AddAerialPerspectiveVolumeDebugSlicePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,

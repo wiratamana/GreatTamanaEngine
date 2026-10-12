@@ -139,9 +139,11 @@ ComputePipeline::ComputePipeline(ComputePipeline&& other) noexcept
     , m_ownedReflectedSetNumbers(std::move(other.m_ownedReflectedSetNumbers))
     , m_pushConstantSize(std::exchange(other.m_pushConstantSize, 0))
     , m_localSize(std::exchange(other.m_localSize, Extent3D{ 1, 1, 1 }))
+    , m_reflectedLayoutHandles(std::move(other.m_reflectedLayoutHandles))
 {
     other.m_ownedReflectedLayouts.clear();
     other.m_ownedReflectedSetNumbers.clear();
+    other.m_reflectedLayoutHandles.clear();
 }
 
 ComputePipeline& ComputePipeline::operator=(ComputePipeline&& other) noexcept
@@ -155,8 +157,10 @@ ComputePipeline& ComputePipeline::operator=(ComputePipeline&& other) noexcept
         m_ownedReflectedSetNumbers = std::move(other.m_ownedReflectedSetNumbers);
         m_pushConstantSize = std::exchange(other.m_pushConstantSize, 0);
         m_localSize = std::exchange(other.m_localSize, Extent3D{ 1, 1, 1 });
+        m_reflectedLayoutHandles = std::move(other.m_reflectedLayoutHandles);
         other.m_ownedReflectedLayouts.clear();
         other.m_ownedReflectedSetNumbers.clear();
+        other.m_reflectedLayoutHandles.clear();
     }
     return *this;
 }
@@ -171,8 +175,30 @@ VkDescriptorSetLayout ComputePipeline::ReflectedDescriptorSetLayout(std::uint32_
     return VK_NULL_HANDLE;
 }
 
+DescriptorSetLayoutHandle ComputePipeline::ReflectedDescriptorSetLayoutHandle(std::uint32_t set) const noexcept
+{
+    for (const auto& cached : m_reflectedLayoutHandles) {
+        if (cached.first == set) {
+            return cached.second;
+        }
+    }
+    const VkDescriptorSetLayout layout = ReflectedDescriptorSetLayout(set);
+    if (layout == VK_NULL_HANDLE) {
+        return DescriptorSetLayoutHandle::Invalid;
+    }
+    const DescriptorSetLayoutHandle handle = RegisterDescriptorSetLayout(layout);
+    m_reflectedLayoutHandles.push_back({ set, handle });
+    return handle;
+}
+
 void ComputePipeline::Destroy() noexcept
 {
+    // Registry entries must die before the layouts they point at do.
+    for (const auto& cached : m_reflectedLayoutHandles) {
+        UnregisterDescriptorSetLayout(cached.second);
+    }
+    m_reflectedLayoutHandles.clear();
+
     for (VkDescriptorSetLayout layout : m_ownedReflectedLayouts) {
         if (layout != VK_NULL_HANDLE) {
             vkDestroyDescriptorSetLayout(m_device, layout, nullptr);

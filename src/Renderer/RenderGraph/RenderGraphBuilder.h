@@ -407,6 +407,44 @@ public:
         void WriteArrayLayer(TextureArrayHandle handle, std::uint32_t layerIndex, ResourceAccess access,
             std::optional<std::array<float, 4>> clearColor = std::nullopt, std::optional<float> clearDepth = std::nullopt);
 
+        // --- Compute-binding vocabulary ---------------------------------
+        // Declares which descriptor slot a resource occupies for this pass -
+        // ORTHOGONAL to Read*/Write* above, never a replacement: barrier/
+        // access tracking stays governed exclusively by Read*/Write*. A
+        // true read-modify-write RWTexture still needs both a ReadTexture()
+        // AND a WriteTexture() call alongside its Bind*() call. Declare-time-
+        // only bookkeeping - no Vulkan call, no resolution here; resolved
+        // once per frame by RenderGraph::ExecuteCompiledGraph() immediately
+        // before this pass's own execute() callback runs.
+
+        // Required once per pass, before any Bind* call below - the
+        // VkDescriptorSetLayout every binding on this pass targets. Get one
+        // from a ComputePipeline via its ReflectedDescriptorSetLayoutHandle().
+        void BindDescriptorSetLayout(DescriptorSetLayoutHandle layout);
+
+        void BindStorageBuffer(std::uint32_t binding, BufferHandle handle, VkDeviceSize offset = 0,
+            VkDeviceSize range = VK_WHOLE_SIZE);
+
+        // BufferObjectHandle sibling of the overload above - for a
+        // persistent, NOT-graph-tracked buffer (e.g. Buffer::ObjectHandle()).
+        void BindStorageBuffer(std::uint32_t binding, BufferObjectHandle handle, VkDeviceSize offset = 0,
+            VkDeviceSize range = VK_WHOLE_SIZE);
+
+        // `sampler` == SamplerHandle::Invalid means "use this TextureHandle's
+        // own already-resolved sampler" - an explicit sampler is only needed
+        // when the caller wants a DIFFERENT sampler than the texture's own.
+        void BindCombinedImageSampler(
+            std::uint32_t binding, TextureHandle handle, SamplerHandle sampler = SamplerHandle::Invalid);
+
+        // Volume-texture sibling of the overload above. UNLIKE the TextureHandle
+        // overload, `sampler` is REQUIRED here: the render graph never tracks a
+        // sampler for a VolumeTextureHandle (VolumeTarget carries none), so
+        // there is no implicit fallback to resolve against.
+        void BindCombinedImageSampler(std::uint32_t binding, VolumeTextureHandle handle, SamplerHandle sampler);
+
+        void BindStorageImage(std::uint32_t binding, TextureHandle handle);
+        void BindStorageImage(std::uint32_t binding, VolumeTextureHandle handle);
+
     private:
         PassRecord& m_pass;
     };
@@ -737,23 +775,15 @@ public:
         m_persistentCacheCurrentFrame = currentFrame;
     }
 
-    // editor-core-separation-27 campaign, PHASE8 (BIG_STEP_3, FR1) - the
-    // plain, always-correct, always-safe entry point any pass author uses to
-    // reach a persistent, named, cross-frame GPU color texture - usable
-    // exactly like an ImportTexture()-minted handle in
-    // ReadTexture()/WriteTexture()/WriteColorAttachment() afterward. `owner`
-    // MUST be a built-in feature's own constant from
-    // RenderGraphPersistentResourceOwners.h, or a `_v2`/`_v3` plugin/Project
-    // Assembly feature's own already-unique `descriptor.name` (Section 6.2) -
-    // never a locally hand-typed literal. Returns a default-constructed
-    // (invalid) TextureHandle if this builder has no persistent cache
-    // installed (asserted in debug builds - see this class's own
-    // SetPersistentResourceCache()) or if the underlying
-    // RenderGraphPersistentResourceCache::Resolve() call itself refuses the
-    // request (already logged there - see that method's own doc comment) -
-    // never a second log here. May THROW std::runtime_error if the
-    // underlying RenderTexture construction genuinely fails (Section 6.1) -
-    // never caught/swallowed here either.
+    // Reaches a persistent, named, cross-frame GPU color texture - usable
+    // exactly like an ImportTexture()-minted handle afterward. `owner` must
+    // be a constant from RenderGraphPersistentResourceOwners.h, or a plugin's
+    // own already-unique name - pass "" only to keep a pre-existing literal
+    // `name` as the identity verbatim (back-compat with an external consumer
+    // that already depends on that exact name). Returns an invalid
+    // TextureHandle if no persistent cache is installed or the underlying
+    // Resolve() call refuses (already logged there). May throw
+    // std::runtime_error if the underlying RenderTexture construction fails.
     TextureHandle GetOrCreatePersistentTexture(const char* owner, const char* name, const TextureDesc& desc);
 
     // editor-core-separation-27 campaign, PHASE8 (BIG_STEP_3, FR7) - the

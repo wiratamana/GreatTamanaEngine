@@ -51,6 +51,7 @@
 #include "RenderGraphBarrierPlanner.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphCompiler.h"
+#include "RenderGraphComputeBindingCache.h"
 #include "RenderGraphDebugMetadataSink.h" // editor-core-separation-25 campaign, PHASE4
 #include "RenderGraphDebugTextureRegistry.h"
 #include "RenderGraphDebugVolumeTextureRegistry.h"
@@ -511,6 +512,16 @@ private:
         std::vector<PhysicalVolumeTexture>& physicalVolumeTextures,
         std::vector<PhysicalTextureArray>& physicalTextureArrays, AppliedBarrierInfo* outBarrierInfo = nullptr);
 
+    // Compute-binding vocabulary (PassBuilder::Bind*()) - resolves every
+    // PendingBinding this pass declared against its already-resolved
+    // physical resources, rewrites `pass`'s cached VkDescriptorSet, and
+    // returns its opaque DescriptorSetHandle. Returns DescriptorSetHandle::
+    // Invalid, zero cost, for a pass with no bindings (pass.bindings.empty())
+    // - true for every pre-existing pass in the engine today.
+    DescriptorSetHandle ResolveComputeBindingDescriptorSet(const PassRecord& pass,
+        const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers,
+        const std::vector<PhysicalVolumeTexture>& physicalVolumeTextures);
+
     // render-pass-6 campaign, PHASE2 (item 2.6) - extracted, zero-behavior-
     // change decomposition of ExecuteCompiledGraph()'s own six interleaved
     // concerns - see PHASE2_EXECUTE_COMPILED_GRAPH_EXTRACTION.md. Builds the
@@ -619,6 +630,11 @@ private:
     // editor-core-separation-27 campaign, PHASE7 - mirrors m_resourcePool's
     // exact ownership shape (BIG STEP 3 of 4).
     RenderGraphPersistentResourceCache m_persistentResourceCache;
+
+    // Owns every VkDescriptorSet the compute-binding API (PassBuilder::
+    // Bind*()) allocates - mirrors m_persistentResourceCache's own "resolve
+    // once per stable identity" shape.
+    RenderGraphComputeBindingCache m_computeBindingCache;
 
     // editor-core-separation-26 campaign, PHASE6 - non-owning, mirrors
     // RenderGraphResourcePool::m_renderer's own identical "pointer, not
@@ -898,6 +914,16 @@ struct PassContext {
     // itself null, so a Player-style build pays one null-pointer branch per
     // Draw()/Dispatch() call and nothing else.
     FrameDebuggerEventSink* eventSink = nullptr;
+
+    // Set exactly once by RenderGraph::BuildPassContext()/
+    // RenderGraph::ExecuteCompiledGraph() - DescriptorSetHandle::Invalid for
+    // a pass that declared no Bind*() calls (every pre-existing pass today).
+    // The render graph has already resolved and rewritten this set against
+    // every declared binding's CURRENT physical resource, every frame,
+    // before this pass's own execute() callback runs - nothing further to
+    // do except cmd.BindDescriptorSet(ctx.BoundDescriptorSet()).
+    DescriptorSetHandle computeDescriptorSet = DescriptorSetHandle::Invalid;
+    DescriptorSetHandle BoundDescriptorSet() const noexcept { return computeDescriptorSet; }
 
     // Resolves a texture this pass declared as a READ (via
     // PassBuilder::ReadTexture()) into its already-live VkImageView/

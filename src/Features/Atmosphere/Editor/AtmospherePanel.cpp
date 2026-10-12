@@ -66,7 +66,7 @@ void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings, 
     // GPU-vs-CPU-oracle numeric parity check.
     if (ImGui::Button("Validate Transmittance LUT")) {
         lastValidationResult = ValidateAtmosphereTransmittanceLut(
-            renderer, atmosphereLutRenderer, MakeDefaultEarthAtmosphereParameters());
+            renderer, renderGraph, MakeDefaultEarthAtmosphereParameters());
     }
     if (lastValidationResult.has_value()) {
         const AtmosphereTransmittanceLutValidationResult& r = *lastValidationResult;

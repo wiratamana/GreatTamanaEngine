@@ -111,6 +111,81 @@ void RenderGraphBuilder::PassBuilder::WriteArrayLayer(TextureArrayHandle handle,
     m_pass.arrayLayerAttachment = desc;
 }
 
+// --- Compute-binding vocabulary ----------------------------------------
+
+void RenderGraphBuilder::PassBuilder::BindDescriptorSetLayout(DescriptorSetLayoutHandle layout)
+{
+    m_pass.computeBindingLayout = layout;
+}
+
+void RenderGraphBuilder::PassBuilder::BindStorageBuffer(
+    std::uint32_t binding, BufferHandle handle, VkDeviceSize offset, VkDeviceSize range)
+{
+    PendingBinding pending;
+    pending.binding = binding;
+    pending.kind = BindingKind::StorageBuffer;
+    pending.bufferHandle = handle;
+    pending.bufferOffset = offset;
+    pending.bufferRange = range;
+    m_pass.bindings.push_back(pending);
+}
+
+void RenderGraphBuilder::PassBuilder::BindStorageBuffer(
+    std::uint32_t binding, BufferObjectHandle handle, VkDeviceSize offset, VkDeviceSize range)
+{
+    PendingBinding pending;
+    pending.binding = binding;
+    pending.kind = BindingKind::StorageBuffer;
+    pending.bufferObjectHandle = handle;
+    pending.bufferOffset = offset;
+    pending.bufferRange = range;
+    m_pass.bindings.push_back(pending);
+}
+
+void RenderGraphBuilder::PassBuilder::BindCombinedImageSampler(
+    std::uint32_t binding, TextureHandle handle, SamplerHandle sampler)
+{
+    PendingBinding pending;
+    pending.binding = binding;
+    pending.kind = BindingKind::CombinedImageSampler;
+    pending.textureHandle = handle;
+    pending.explicitSampler = sampler;
+    m_pass.bindings.push_back(pending);
+}
+
+void RenderGraphBuilder::PassBuilder::BindCombinedImageSampler(
+    std::uint32_t binding, VolumeTextureHandle handle, SamplerHandle sampler)
+{
+    assert(sampler != SamplerHandle::Invalid &&
+        "RenderGraphBuilder::PassBuilder::BindCombinedImageSampler: a volume texture binding requires an "
+        "explicit sampler - the render graph tracks no implicit sampler for a VolumeTextureHandle.");
+
+    PendingBinding pending;
+    pending.binding = binding;
+    pending.kind = BindingKind::CombinedVolumeImageSampler;
+    pending.volumeTextureHandle = handle;
+    pending.explicitSampler = sampler;
+    m_pass.bindings.push_back(pending);
+}
+
+void RenderGraphBuilder::PassBuilder::BindStorageImage(std::uint32_t binding, TextureHandle handle)
+{
+    PendingBinding pending;
+    pending.binding = binding;
+    pending.kind = BindingKind::StorageImage;
+    pending.textureHandle = handle;
+    m_pass.bindings.push_back(pending);
+}
+
+void RenderGraphBuilder::PassBuilder::BindStorageImage(std::uint32_t binding, VolumeTextureHandle handle)
+{
+    PendingBinding pending;
+    pending.binding = binding;
+    pending.kind = BindingKind::StorageImage;
+    pending.volumeTextureHandle = handle;
+    m_pass.bindings.push_back(pending);
+}
+
 
 // --- RenderGraphBuilder ------------------------------------------------
 

@@ -1,8 +1,8 @@
 #include "AtmosphereTransmittanceLutValidation.h"
 
-#include "../AtmosphereLutRenderer.h"
 #include "../AtmosphereMath.h"
 #include "../../../Renderer/Renderer.h"
+#include "../../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 
 #include <algorithm>
@@ -77,47 +77,34 @@ std::string ToDiagnosticString(const AtmosphereTransmittanceLutValidationResult&
 }
 
 AtmosphereTransmittanceLutValidationResult ValidateAtmosphereTransmittanceLut(
-    Renderer& renderer, AtmosphereLutRenderer& atmosphereLutRenderer, const AtmosphereParametersGpu& params, double epsilon)
+    Renderer& renderer, const rg::RenderGraph& renderGraph, const AtmosphereParametersGpu& params, double epsilon)
 {
     AtmosphereTransmittanceLutValidationResult result;
     result.epsilon = epsilon;
 
-    Texture2D* texture = atmosphereLutRenderer.TransmittanceLutOutput();
-    if (texture == nullptr) {
+    // Owned by the render graph's persistent texture cache now, not a
+    // Texture2D this feature holds directly - looked up by its exact,
+    // stable registered name, mirroring ValidateAerialPerspectiveSkyPurity()'s
+    // own DebugTextureSnapshotFor() precedent.
+    const std::optional<rg::DebugTextureSnapshot> snapshot =
+        renderGraph.DebugTextureSnapshotFor("AtmosphereTransmittanceLut");
+    if (!snapshot.has_value()) {
         result.failureReason =
             "AtmosphereTransmittanceLut has not been computed yet this session - render at least one frame first.";
         return result;
     }
 
-    result.width = texture->Width();
-    result.height = texture->Height();
+    result.width = static_cast<int>(snapshot->target.extent.width);
+    result.height = static_cast<int>(snapshot->target.extent.height);
     result.texelCount = static_cast<std::size_t>(result.width) * static_cast<std::size_t>(result.height);
     if (result.texelCount == 0) {
         result.failureReason = "AtmosphereTransmittanceLut has a zero-sized dimension - nothing to validate.";
         return result;
     }
 
-    // See this file's own header comment ("no RenderGraph dependency") for
-    // why this is a documented ASSUMPTION rather than a graph query: every
-    // reader of "AtmosphereTransmittanceLut" this same frame
-    // (AddMultiScatteringLutPass()/AddSkyViewLutPass()/
-    // AddAerialPerspectiveVolumePass() - see AtmosphereLutRenderer.cpp)
-    // declares rg::ResourceAccess::ShaderRead, and nothing ever writes it
-    // again after that same frame's own generation pass - so by the time
-    // this Editor button click is actually processed (always BEFORE this
-    // frame's own RenderGraph::Execute() re-runs it, since
-    // ImGuiEditorLayer::BuildUI() records UI commands before
-    // Application::Run() submits any GPU work this iteration), the image
-    // is guaranteed to still be in the exact ShaderRead state the
-    // PREVIOUS, already-GPU-completed frame's own graph execution left it
-    // in (every Game/Scene View offscreen regime pass is fully
-    // synchronous). Mirrors Renderer::CaptureRenderTexturePixels()'s own
-    // identical assumption for a RenderTexture.
-    const rg::ResourceState assumedCurrentState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
-
-    const VkExtent2D extent{ static_cast<std::uint32_t>(result.width), static_cast<std::uint32_t>(result.height) };
     const Renderer::CapturedRawPixels raw = renderer.CaptureImagePixels(
-        texture->Image(), VK_IMAGE_ASPECT_COLOR_BIT, VK_FORMAT_R8G8B8A8_UNORM, extent, assumedCurrentState);
+        snapshot->target.image, VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format, snapshot->target.extent,
+        snapshot->colorState);
 
     double deltaSum = 0.0;
     double maxDelta = 0.0;
