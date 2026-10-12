@@ -704,7 +704,7 @@ void RenderFeatureCompositor::Impl::EnsureTextureSized(
         return;
     }
 
-    const VkExtent2D currentExtent = texture->Extent();
+    const Extent2D currentExtent = texture->Extent();
     if (currentExtent.width != extent.width || currentExtent.height != extent.height) {
         // Resizes are rare/user-driven (dragging the Game/Scene panel's
         // border) - a full device stall here is the simplest correct thing.

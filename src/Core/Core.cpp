@@ -22,6 +22,7 @@
 #include "../Renderer/RenderGraph/RenderPassToggleGuard.h"
 #include "../Renderer/RenderGraph/RenderPassTagValidation.h"
 #include "../Renderer/GraphicsHandleRegistry.h"
+#include "../Renderer/VulkanFormatInfo.h" // ToVkExtent2D() - PluginRenderFeatureTargetInfo::extent stays VkExtent2D.
 
 // editor-core-separation-22 campaign, PHASE3
 // (task_manager/editor-core-separation-22/
@@ -816,7 +817,7 @@ std::optional<Core::PluginRenderFeatureTargetInfo> Core::FindPluginRenderFeature
 
     PluginRenderFeatureTargetInfo info;
     info.target = viewData->colorTarget;
-    info.extent = viewData->renderTexture != nullptr ? viewData->renderTexture->Extent() : VkExtent2D{};
+    info.extent = viewData->renderTexture != nullptr ? ToVkExtent2D(viewData->renderTexture->Extent()) : VkExtent2D{};
     info.sampler = viewData->renderTexture != nullptr ? viewData->renderTexture->Sampler() : VK_NULL_HANDLE;
     return info;
 }
@@ -1591,7 +1592,7 @@ void Core::BuildFrame()
                     float gameAspectForReplay = 1.0f;
 
                     if (gameTarget != nullptr) {
-                        const VkExtent2D extent = gameTarget->Extent();
+                        const Extent2D extent = gameTarget->Extent();
                         const float aspect =
                             AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
 
@@ -1694,7 +1695,7 @@ void Core::BuildFrame()
                     }
 
                     if (sceneTarget != nullptr) {
-                        const VkExtent2D extent = sceneTarget->Extent();
+                        const Extent2D extent = sceneTarget->Extent();
                         const float aspect =
                             AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
                         // editor-core-separation-1 campaign, PHASE13 - reached

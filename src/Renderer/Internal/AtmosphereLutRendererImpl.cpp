@@ -468,13 +468,13 @@ void AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveCompositeInitialized(Re
     // aerialPerspectiveVolume, binding 3 = the output image2D, plus push constants.
     aerialPerspectiveCompositePipeline.emplace(
         renderer.CreateComputePipeline("shaders/AtmosphereAerialPerspectiveComposite.comp.spv"));
-    aerialPerspectiveCompositeDescriptorSetLayout =
-        aerialPerspectiveCompositePipeline->ReflectedDescriptorSetLayout(/*set=*/0);
+    aerialPerspectiveCompositeDescriptorSetLayoutHandle =
+        aerialPerspectiveCompositePipeline->ReflectedDescriptorSetLayoutHandle(/*set=*/0);
 }
 
 AtmosphereLutRenderer::Impl::AerialPerspectiveCompositeViewState&
 AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveCompositeViewInitialized(
-    Renderer& renderer, const char* outputTextureName, VkExtent2D extent)
+    Renderer& renderer, const char* outputTextureName, Extent2D extent)
 {
     const auto existing = aerialPerspectiveCompositeViewStates.find(outputTextureName);
     if (existing != aerialPerspectiveCompositeViewStates.end()) {
@@ -482,7 +482,6 @@ AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveCompositeViewInitialized(
     }
 
     AerialPerspectiveCompositeViewState state;
-    state.descriptorSet = renderer.AllocateComputeDescriptorSet(aerialPerspectiveCompositeDescriptorSetLayout);
 
     // Explicit VK_FORMAT_R8G8B8A8_UNORM, never the swapchain's own negotiated
     // format. CompositedOutput()/FinalizeAerialPerspectiveCompositeForSampling()
@@ -502,14 +501,13 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass
     rg::TextureHandle sourceDepthHandle, ImageViewHandle sourceDepthView, SamplerHandle sourceDepthSampler,
     rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
     const Mat4& invViewProjection, Vec3 cameraWorldPosition, float aerialPerspectiveStrength, float maxDistanceKm,
-    float depthExponent, Extent2D extentOpaque, const char* outputTextureName, rg::ViewScope viewScope,
+    float depthExponent, Extent2D extent, const char* outputTextureName, rg::ViewScope viewScope,
     rg::RenderPassToggleRegistry* toggleRegistry)
 {
-    // Unwrapped here, once - the public, Vulkan-free AtmosphereLutRenderer.cpp never touches a Vk* value itself.
-    const VkSampler rawSourceColorSampler = Native(sourceColorSampler);
-    const VkImageView rawSourceDepthView = Native(sourceDepthView);
-    const VkSampler rawSourceDepthSampler = Native(sourceDepthSampler);
-    const VkExtent2D extent{ extentOpaque.width, extentOpaque.height };
+    // Genuinely zero raw Vulkan types touched anywhere in this function -
+    // `extent` stays the engine's own Vulkan-free Extent2D the whole way
+    // through, including RenderTexture::Extent() below, which now also
+    // returns Extent2D (see RenderTexture.h).
 
     const bool passEnabledThisFrame = toggleRegistry == nullptr
         || toggleRegistry->IsEnabled("AtmosphereAerialPerspectiveCompositePass");
@@ -523,7 +521,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass
     AerialPerspectiveCompositeViewState& viewState =
         EnsureAerialPerspectiveCompositeViewInitialized(renderer, outputTextureName, extent);
 
-    const VkExtent2D currentExtent = viewState.output->Extent();
+    const Extent2D currentExtent = viewState.output->Extent();
     if (currentExtent.width != extent.width || currentExtent.height != extent.height) {
         // Resizes are rare/user-driven (dragging the Game/Scene panel's
         // border) - a full device stall here is the simplest correct thing.
@@ -537,12 +535,14 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass
     // The Aerial Perspective Volume's own trilinear sampler - looked up by
     // name (the same name this frame's own AddAerialPerspectiveVolumePass()
     // call registered it under), since an imported VolumeTextureHandle never
-    // carries a sampler of its own.
+    // carries a sampler of its own. Resolved to a stable, opaque SamplerHandle
+    // (never a raw VkSampler) via CachedSamplerHandle - re-minted only if the
+    // underlying sampler ever actually changes.
     const auto aerialVolumeIt = aerialPerspectiveVolumeViewStates.find(aerialPerspectiveVolumeName);
-    const VkSampler aerialVolumeSampler =
+    const SamplerHandle aerialVolumeSamplerHandle =
         (aerialVolumeIt != aerialPerspectiveVolumeViewStates.end() && aerialVolumeIt->second.output.has_value())
-        ? aerialVolumeIt->second.output->Sampler()
-        : VK_NULL_HANDLE;
+        ? aerialVolumeIt->second.volumeSamplerHandle.Resolve(aerialVolumeIt->second.output->Sampler())
+        : SamplerHandle::Invalid;
 
     AerialPerspectiveCompositePushConstants pushConstants{};
     std::memcpy(pushConstants.invViewProjection, invViewProjection.Data(), sizeof(pushConstants.invViewProjection));
@@ -555,36 +555,35 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass
     pushConstants.aerialPerspectiveStrengthAndPad[2] = depthExponent;
     pushConstants.aerialPerspectiveStrengthAndPad[3] = 0.0f;
 
+    const DescriptorSetLayoutHandle bindingLayout = aerialPerspectiveCompositeDescriptorSetLayoutHandle;
+
     builder.AddRenderPass(
         "AtmosphereAerialPerspectiveCompositePass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::General,
-        [sourceColorHandle, sourceDepthHandle, aerialPerspectiveVolumeHandle,
-            outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
+        [sourceColorHandle, sourceColorSampler, sourceDepthHandle, sourceDepthView, sourceDepthSampler,
+            aerialPerspectiveVolumeHandle, aerialVolumeSamplerHandle, outputHandle,
+            bindingLayout](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.ReadTexture(sourceColorHandle, rg::ResourceAccess::ShaderRead);
             pass.ReadTexture(sourceDepthHandle, rg::ResourceAccess::ShaderRead, /*isDepthResource=*/true);
             pass.ReadVolumeTexture(aerialPerspectiveVolumeHandle, rg::ResourceAccess::ShaderRead);
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
+
+            // Compute-binding vocabulary - orthogonal to the Read*/Write*
+            // declarations above (see PassBuilder::BindDescriptorSetLayout()'s
+            // own doc comment). The render graph resolves/rewrites/caches the
+            // real VkDescriptorSet internally, keyed by (pass name, ViewScope) -
+            // no ComputeDescriptorSet/raw Vk* value touched anywhere in this file.
+            pass.BindDescriptorSetLayout(bindingLayout);
+            pass.BindCombinedImageSampler(0, sourceColorHandle, sourceColorSampler);
+            pass.BindCombinedImageSampler(1, sourceDepthView, sourceDepthSampler);
+            pass.BindCombinedImageSampler(2, aerialPerspectiveVolumeHandle, aerialVolumeSamplerHandle);
+            pass.BindStorageImage(3, outputHandle);
         },
-        [this, &viewState, sourceColorHandle, rawSourceColorSampler, rawSourceDepthView, rawSourceDepthSampler,
-            aerialPerspectiveVolumeHandle, aerialVolumeSampler, outputHandle, pushConstants,
-            extent](rg::PassContext& ctx) {
-            const rg::PassContext::ResolvedTexture sourceColor = ctx.resolveTexture(sourceColorHandle);
-            const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(outputHandle);
-            const rg::PassContext::ResolvedVolumeTexture volume =
-                ctx.resolveVolumeTexture(aerialPerspectiveVolumeHandle);
-
-            viewState.descriptorSet.Rewrite(
-                std::vector<ComputeDescriptorWrite>{
-                    ComputeDescriptorWrite::CombinedImageSampler(0, sourceColor.view, rawSourceColorSampler),
-                    ComputeDescriptorWrite::CombinedImageSampler(1, rawSourceDepthView, rawSourceDepthSampler),
-                    ComputeDescriptorWrite::CombinedImageSampler(2, volume.view, aerialVolumeSampler),
-                    ComputeDescriptorWrite::StorageImage(3, dest.view),
-                });
-
+        [this, pushConstants, extent](rg::PassContext& ctx) {
             AerialPerspectiveCompositePushConstants localPushConstants = pushConstants;
 
             auto cmd = ctx.Cmd();
             cmd.BindComputePipeline(*aerialPerspectiveCompositePipeline);
-            cmd.BindDescriptorSet(viewState.descriptorSet.Native());
+            cmd.BindDescriptorSet(ctx.BoundDescriptorSet());
             cmd.SetPushConstants(localPushConstants);
             cmd.DispatchOverSize(extent.width, extent.height, 1);
         },

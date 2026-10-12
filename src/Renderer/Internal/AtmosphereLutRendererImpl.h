@@ -70,16 +70,29 @@ struct AtmosphereLutRenderer::Impl {
         ComputeDescriptorSet descriptorSet;
         std::optional<Buffer> frameUniformsBuffer;
         std::optional<VolumeTexture> output;
+        // Opaque, stable sampler handle for this volume's own trilinear
+        // sampler - AddAerialPerspectiveCompositePass() binds it via the new
+        // compute-binding API (BindCombinedImageSampler), which needs a
+        // SamplerHandle, never a raw VkSampler. Re-minted only if the
+        // underlying VkSampler ever actually changes (never does, in
+        // practice, for a volume created once and never resized).
+        CachedSamplerHandle volumeSamplerHandle;
     };
     VkDescriptorSetLayout aerialPerspectiveVolumeDescriptorSetLayout = VK_NULL_HANDLE;
     std::optional<ComputePipeline> aerialPerspectiveVolumePipeline;
     std::unordered_map<std::string, AerialPerspectiveVolumeViewState> aerialPerspectiveVolumeViewStates;
 
+    // No ComputeDescriptorSet member here anymore - the render graph's own
+    // compute-binding API (RenderGraphBuilder::PassBuilder::Bind*(), keyed by
+    // (pass name, ViewScope)) owns the real VkDescriptorSet internally now.
     struct AerialPerspectiveCompositeViewState {
-        ComputeDescriptorSet descriptorSet;
         std::optional<RenderTexture> output;
     };
-    VkDescriptorSetLayout aerialPerspectiveCompositeDescriptorSetLayout = VK_NULL_HANDLE;
+    // Opaque sibling of a raw VkDescriptorSetLayout - BindDescriptorSetLayout()
+    // needs this, never the raw value. Lazily minted by ComputePipeline's own
+    // ReflectedDescriptorSetLayoutHandle(), cached there, never unregistered
+    // here (this Impl - and its ComputePipeline - lives for the whole session).
+    DescriptorSetLayoutHandle aerialPerspectiveCompositeDescriptorSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
     std::optional<ComputePipeline> aerialPerspectiveCompositePipeline;
     std::unordered_map<std::string, AerialPerspectiveCompositeViewState> aerialPerspectiveCompositeViewStates;
 
@@ -115,7 +128,7 @@ struct AtmosphereLutRenderer::Impl {
         Renderer& renderer, const char* outputVolumeName);
     void EnsureAerialPerspectiveCompositeInitialized(Renderer& renderer);
     AerialPerspectiveCompositeViewState& EnsureAerialPerspectiveCompositeViewInitialized(
-        Renderer& renderer, const char* outputTextureName, VkExtent2D extent);
+        Renderer& renderer, const char* outputTextureName, Extent2D extent);
     void EnsureAerialPerspectiveVolumeDebugSliceInitialized(Renderer& renderer);
     AerialPerspectiveVolumeDebugSliceViewState& EnsureAerialPerspectiveVolumeDebugSliceViewInitialized(
         Renderer& renderer, const char* outputTextureName, int width, int height);
@@ -150,11 +163,9 @@ struct AtmosphereLutRenderer::Impl {
     void DrawSkyBackground(Renderer& renderer, rg::CommandBuffer& cmd, const rg::RenderGraph& renderGraph,
         const Mat4& viewProjection, const AtmosphereParametersGpu& params,
         const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure);
-    // `sourceColorSampler`/`sourceDepthView`/`sourceDepthSampler`/`extent` are
-    // the opaque handles the public AtmosphereLutRenderer::
-    // AddAerialPerspectiveCompositePass() receives - unwrapped to real Vk*
-    // values right at the top of this method's own body (AtmosphereLutRendererImpl.cpp),
-    // never by the public-facing, Vulkan-free AtmosphereLutRenderer.cpp.
+    // `sourceColorSampler`/`sourceDepthView`/`sourceDepthSampler` are opaque
+    // handles bound via the render graph's compute-binding API (Bind*()) -
+    // never unwrapped to a raw Vk* value in this file anymore.
     rg::TextureHandle AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         rg::TextureHandle sourceColorHandle, SamplerHandle sourceColorSampler, rg::TextureHandle sourceDepthHandle,
         ImageViewHandle sourceDepthView, SamplerHandle sourceDepthSampler,

@@ -453,7 +453,7 @@ void FrameDebuggerPanel::TriggerCapture()
     }
 
     FrameDebuggerRenderTargetInfo renderTargetInfo;
-    const VkExtent2D extent = m_frameGameView->Extent();
+    const Extent2D extent = m_frameGameView->Extent();
     renderTargetInfo.width = static_cast<int>(extent.width);
     renderTargetInfo.height = static_cast<int>(extent.height);
     renderTargetInfo.format = ToString(m_frameGameView->Format());

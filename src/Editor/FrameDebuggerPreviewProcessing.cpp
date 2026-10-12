@@ -126,7 +126,7 @@ const Texture2D& FrameDebuggerPreviewRenderer::RenderPreview(Renderer& renderer,
 {
     EnsureInitialized(renderer);
 
-    const VkExtent2D extent = source.Extent();
+    const Extent2D extent = source.Extent();
     EnsureOutputTexture(renderer, static_cast<int>(extent.width), static_cast<int>(extent.height));
 
     // Every call may serve a DIFFERENT currently-viewed history entry (a

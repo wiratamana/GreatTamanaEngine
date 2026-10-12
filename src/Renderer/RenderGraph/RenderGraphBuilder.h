@@ -442,6 +442,14 @@ public:
         // there is no implicit fallback to resolve against.
         void BindCombinedImageSampler(std::uint32_t binding, VolumeTextureHandle handle, SamplerHandle sampler);
 
+        // ImageViewHandle/SamplerHandle sibling of the two overloads above -
+        // for an already-resolved image that is NOT itself a render-graph
+        // resource (e.g. a per-view depth target's own ImageViewHandle,
+        // handed down through ScenePassReadHandles rather than declared via
+        // CreateTexture()/ImportTexture()). Both arguments REQUIRED - there
+        // is no graph-tracked resource here to fall back to.
+        void BindCombinedImageSampler(std::uint32_t binding, ImageViewHandle view, SamplerHandle sampler);
+
         void BindStorageImage(std::uint32_t binding, TextureHandle handle);
         void BindStorageImage(std::uint32_t binding, VolumeTextureHandle handle);
 

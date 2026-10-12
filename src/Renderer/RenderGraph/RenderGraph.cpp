@@ -439,6 +439,15 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
                 binding.binding, vol.target.imageView, Native(binding.explicitSampler)));
             break;
         }
+        case BindingKind::CombinedImageViewSampler: {
+            if (binding.explicitImageView == ImageViewHandle::Invalid
+                || binding.explicitSampler == SamplerHandle::Invalid) {
+                continue;
+            }
+            writes.push_back(ComputeDescriptorWrite::CombinedImageSampler(
+                binding.binding, Native(binding.explicitImageView), Native(binding.explicitSampler)));
+            break;
+        }
         case BindingKind::StorageImage: {
             VkImageView view = VK_NULL_HANDLE;
             if (binding.textureHandle.IsValid() && binding.textureHandle.index < physicalTextures.size()
@@ -458,7 +467,7 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
         }
     }
 
-    return m_computeBindingCache.Resolve(pass.name, layout, writes);
+    return m_computeBindingCache.Resolve(pass.name, pass.viewScope, layout, writes);
 }
 
 // render-pass-6 campaign, PHASE2 (item 2.6), updated by PHASE3 (item 2.7) -

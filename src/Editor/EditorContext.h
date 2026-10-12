@@ -61,12 +61,14 @@ inline constexpr const char* kHierarchyEntityDragDropPayloadType = "GTE_HIERARCH
 // and the panel/dock-layout functions it calls ever touch this, in a fixed,
 // explicit order every frame.
 //
-// Holding raw VkExtent2D here is deliberate, not an architectural leak:
-// Renderer's own public API (RenderTexture::Extent()) already hands out
-// plain Vulkan extents on purpose, specifically so "an external Vulkan-
-// based rendering backend... owned by the Editor module" (see Renderer.h)
-// - i.e. Dear ImGui's own Vulkan backend - can use them directly. See
-// AGENTS.md ("Editor Module Structure") for the full rationale.
+// Holding raw VkExtent2D here is a DELIBERATE, Editor-only exception, NOT
+// an architectural leak elsewhere: these fields are written directly from
+// ImGui's own panel-size floats (GamePanel.cpp/ScenePanel.cpp), for Dear
+// ImGui's own Vulkan backend - "an external Vulkan-based rendering
+// backend... owned by the Editor module" (see Renderer.h). See AGENTS.md
+// ("Editor Module Structure") for the full rationale. NOTE: RenderTexture::
+// Extent() itself now returns the engine's own Extent2D, never VkExtent2D -
+// do not cite it as a reason raw Vulkan extents are acceptable elsewhere.
 // gameViewDescriptor/sceneViewDescriptor below use the opaque
 // UiTextureHandle (Renderer::GetUiTextureHandle()) instead - never a raw
 // VkDescriptorSet.

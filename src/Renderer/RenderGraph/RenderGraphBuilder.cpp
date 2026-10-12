@@ -168,6 +168,21 @@ void RenderGraphBuilder::PassBuilder::BindCombinedImageSampler(
     m_pass.bindings.push_back(pending);
 }
 
+void RenderGraphBuilder::PassBuilder::BindCombinedImageSampler(
+    std::uint32_t binding, ImageViewHandle view, SamplerHandle sampler)
+{
+    assert(sampler != SamplerHandle::Invalid &&
+        "RenderGraphBuilder::PassBuilder::BindCombinedImageSampler: an ImageViewHandle binding requires an "
+        "explicit sampler - there is no graph-tracked resource here to fall back to.");
+
+    PendingBinding pending;
+    pending.binding = binding;
+    pending.kind = BindingKind::CombinedImageViewSampler;
+    pending.explicitImageView = view;
+    pending.explicitSampler = sampler;
+    m_pass.bindings.push_back(pending);
+}
+
 void RenderGraphBuilder::PassBuilder::BindStorageImage(std::uint32_t binding, TextureHandle handle)
 {
     PendingBinding pending;

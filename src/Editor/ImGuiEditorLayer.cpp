@@ -410,7 +410,7 @@ public:
         // and safe (last frame's ImGui draw data was already submitted/
         // executed before this frame started).
         if (m_ctx.desiredExtent.width > 0 && m_ctx.desiredExtent.height > 0) {
-            const VkExtent2D current = m_gameView.Extent();
+            const Extent2D current = m_gameView.Extent();
             if (current.width != m_ctx.desiredExtent.width || current.height != m_ctx.desiredExtent.height) {
                 // Resizes are rare/user-driven (dragging the panel's
                 // border), so a full device stall here is the simplest
@@ -438,7 +438,7 @@ public:
         }
 
         if (m_ctx.desiredSceneExtent.width > 0 && m_ctx.desiredSceneExtent.height > 0) {
-            const VkExtent2D current = m_sceneView.Extent();
+            const Extent2D current = m_sceneView.Extent();
             if (current.width != m_ctx.desiredSceneExtent.width || current.height != m_ctx.desiredSceneExtent.height) {
                 m_renderer->WaitForGpuIdle();
                 ReleaseSceneViewDescriptor();

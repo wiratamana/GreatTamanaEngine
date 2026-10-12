@@ -29,7 +29,7 @@ void FrameDebuggerCurrentCapture::CaptureFrame(Renderer& renderer, const rg::Ren
     FrameDebuggerHistoryEntry& entry = m_current.emplace();
     entry.snapshot = snapshot;
 
-    const VkExtent2D extent = gameViewSource.Extent();
+    const Extent2D extent = gameViewSource.Extent();
 
     // Always freshly (re)created, never Resize()d in place - the simplest
     // way to guarantee this capture's own retained texture matches
@@ -55,7 +55,7 @@ void FrameDebuggerCurrentCapture::CaptureFrame(Renderer& renderer, const rg::Ren
     // apart.
     const bool hasCompositedSource = (compositedGameViewSource != nullptr);
     if (hasCompositedSource) {
-        const VkExtent2D compositedExtent = compositedGameViewSource->Extent();
+        const Extent2D compositedExtent = compositedGameViewSource->Extent();
         entry.compositedPreview.emplace(renderer.CreateRenderTexture(static_cast<int>(compositedExtent.width),
             static_cast<int>(compositedExtent.height), compositedGameViewSource->Format(),
             "FrameDebuggerCurrentCapturePreviewComposited"));
@@ -129,7 +129,7 @@ void FrameDebuggerCurrentCapture::CaptureFrame(Renderer& renderer, const rg::Ren
         // (frame-debugger-4 campaign, PHASE1) - post-composite copy, only
         // when requested this capture.
         if (hasCompositedSource) {
-            const VkExtent2D compositedExtent = compositedGameViewSource->Extent();
+            const Extent2D compositedExtent = compositedGameViewSource->Extent();
             rg::EmitImageBarrier(cmd.Native(), compositedGameViewSource->Image(), range, shaderRead, transferSrc);
             rg::EmitImageBarrier(cmd.Native(), entry.compositedPreview->Image(), range, freshImageState, transferDst);
             VkImageCopy compositedRegion{};

@@ -82,7 +82,7 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
 
     // Same width/height/format as the real GameView target, read directly
     // off `gameTarget` - never hardcoded.
-    const VkExtent2D extent = gameTarget.Extent();
+    const Extent2D extent = gameTarget.Extent();
     const int width = static_cast<int>(extent.width);
     const int height = static_cast<int>(extent.height);
     const VkFormat format = gameTarget.Format();

@@ -4,6 +4,7 @@
 #include "Memory/GpuMemoryTracker.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "RenderTarget.h"
+#include "VulkanFormatInfo.h" // FromVkExtent2D() - Extent() below returns the engine's own Extent2D, never VkExtent2D.
 #include "Vulkan/VulkanAllocator.h"
 
 #include <memory>
@@ -152,7 +153,9 @@ public:
     // into it (texture is left in VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     // - see Renderer::RenderOffscreen).
     VkSampler Sampler() const noexcept { return m_sampler; }
-    VkExtent2D Extent() const noexcept { return m_extent; }
+    // Engine-owned Extent2D, never a raw VkExtent2D - this is the one place
+    // RenderTexture's own real VkExtent2D converts outward (FromVkExtent2D()).
+    Extent2D Extent() const noexcept { return FromVkExtent2D(m_extent); }
     VkFormat Format() const noexcept { return m_format; }
 
     // Handle into the GpuMemoryTracker this RenderTexture's COLOR image is

@@ -333,7 +333,7 @@ std::optional<AssetPreviewMesh::Preview> AssetPreviewMesh::Render(
     const Buffer& vertexBuffer = *m_vertexBuffer;
     const Buffer& indexBuffer = *m_indexBuffer;
     const std::uint32_t indexCount = m_indexCount;
-    const VkExtent2D extent = m_renderTexture->Extent();
+    const Extent2D extent = m_renderTexture->Extent();
 
     // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - std::nullopt:
     // this Inspector mesh preview is not one of the Profiler's three named

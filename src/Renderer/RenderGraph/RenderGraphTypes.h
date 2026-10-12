@@ -544,6 +544,11 @@ enum class BindingKind : std::uint8_t {
     CombinedImageSampler,
     CombinedVolumeImageSampler,
     StorageImage,
+    // A combined-image-sampler binding against an already-resolved,
+    // NOT-graph-tracked ImageViewHandle/SamplerHandle pair - the sibling of
+    // BufferObjectHandle for images (e.g. a per-view depth target handed
+    // down through ScenePassReadHandles, never itself a graph resource).
+    CombinedImageViewSampler,
 };
 
 // One descriptor-slot binding declared via PassBuilder::Bind*() - resolved
@@ -556,8 +561,14 @@ struct PendingBinding {
     VolumeTextureHandle volumeTextureHandle;
     BufferHandle bufferHandle;
     BufferObjectHandle bufferObjectHandle = BufferObjectHandle::Invalid;
-    // CombinedImageSampler only - SamplerHandle::Invalid means "use this
-    // TextureHandle's own already-resolved sampler".
+    // CombinedImageViewSampler only - an already-resolved, NOT-graph-tracked
+    // image view (e.g. a per-view depth target's own ImageViewHandle).
+    ImageViewHandle explicitImageView = ImageViewHandle::Invalid;
+    // CombinedImageSampler/CombinedImageViewSampler: SamplerHandle::Invalid
+    // on a CombinedImageSampler binding means "use this TextureHandle's own
+    // already-resolved sampler" - REQUIRED (never Invalid) for
+    // CombinedVolumeImageSampler/CombinedImageViewSampler, which track no
+    // implicit sampler of their own.
     SamplerHandle explicitSampler = SamplerHandle::Invalid;
     VkDeviceSize bufferOffset = 0;
     VkDeviceSize bufferRange = VK_WHOLE_SIZE;

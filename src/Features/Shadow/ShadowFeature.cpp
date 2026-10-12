@@ -255,7 +255,8 @@ void ShadowFeature::RegisterPasses()
             const char* maskName = isGameView ? "Shadow.Mask.GameView" : "Shadow.Mask.SceneView";
             const ShadowSettings safeSettings = SanitizeShadowSettings(m_settings);
             const rg::TextureHandle maskHandle = m_maskRenderer.AddMaskPass(builder, m_core.GetRenderer(), maskName,
-                viewData->renderTexture->Extent(), cameraData.invViewProjection, shadowMap->lightSpaceViewProjection,
+                ToVkExtent2D(viewData->renderTexture->Extent()), cameraData.invViewProjection,
+                shadowMap->lightSpaceViewProjection,
                 safeSettings.depthBias, m_mapResolutionInUse, shadowMap->shadowMapHandle, shadowTarget->DepthSampler(),
                 currentViewHandles.depthHandle, Native(currentViewHandles.depthImageView),
                 Native(currentViewHandles.depthSampler));

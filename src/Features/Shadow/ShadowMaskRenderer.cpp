@@ -72,7 +72,7 @@ rg::TextureHandle ShadowMaskRenderer::AddMaskPass(rg::RenderGraphBuilder& builde
     // (editor docking layout settles, panel resize, etc) - re-create the
     // output at the new size instead of silently sampling/writing a
     // stale-resolution texture forever.
-    const VkExtent2D currentExtent = viewState.output->Extent();
+    const Extent2D currentExtent = viewState.output->Extent();
     if (currentExtent.width != viewExtent.width || currentExtent.height != viewExtent.height) {
         renderer.WaitForGpuIdle();
         const int resizedWidth = viewExtent.width > 0 ? static_cast<int>(viewExtent.width) : 1;
