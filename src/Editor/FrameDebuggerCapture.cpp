@@ -136,7 +136,7 @@ void FrameDebuggerCaptureContext::InitializeEventCapture(Renderer& renderer) noe
 {
     m_eventCaptureAllocator = renderer.GetVmaAllocator();
     m_eventCaptureTracker = renderer.GetMemoryTracker();
-    m_eventCaptureDevice = renderer.GetVulkanContextInfo().device;
+    m_eventCaptureDevice = renderer.GetImGuiVulkanBackendInfo().device;
 }
 
 void FrameDebuggerCaptureContext::NoteCommandResult(
