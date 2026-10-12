@@ -3,7 +3,7 @@
 #include "../Math/Vec3.h"
 #include "../Core/GraphicsHandles.h"
 #include "../Core/UiTextureHandle.h"
-#include "../Renderer/ComputeDescriptorSet.h"
+#include "../Renderer/Compute/ComputeDescriptorSet.h"
 #include "../Renderer/Pipeline.h"
 
 #include <volk.h>

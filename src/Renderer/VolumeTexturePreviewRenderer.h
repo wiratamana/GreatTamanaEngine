@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ComputeDescriptorSet.h"
-#include "ComputePipeline.h"
+#include "Compute/ComputeDescriptorSet.h"
+#include "Compute/ComputePipeline.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h" // gte::rg::ResourceState
 #include "Texture2D.h"
 #include "VolumeTarget.h"

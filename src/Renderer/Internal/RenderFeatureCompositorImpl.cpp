@@ -3,7 +3,7 @@
 #include "../../Core/Core.h"
 #include "../../Core/Logging.h"
 #include "../../Core/Plugins/RenderFeatureCameraData.h"
-#include "../../Renderer/ComputeDispatch.h"
+#include "../../Renderer/Compute/ComputeDispatch.h"
 #include "../../Renderer/GraphicsHandleRegistry.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
 #include "../../Renderer/RenderGraph/RenderPassTagValidation.h"

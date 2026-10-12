@@ -3,7 +3,7 @@
 #include "../../Features/Atmosphere/AtmosphereParameters.h"
 #include "../../Features/Atmosphere/AtmospherePassToggleLogic.h"
 #include "../../Core/PipelineDesc.h"
-#include "../ComputeDispatch.h"
+#include "../Compute/ComputeDispatch.h"
 #include "../RenderTarget.h"
 #include "../Vulkan/DescriptorSetLayoutBuilder.h"
 #include "../RenderGraph/CommandBuffer.h"

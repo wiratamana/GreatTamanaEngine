@@ -16,7 +16,7 @@
 #include "../Math/Vec4.h"
 #include "../Core/PipelineDesc.h"
 #include "../Renderer/Buffer.h"
-#include "../Renderer/ComputeDescriptorSet.h"
+#include "../Renderer/Compute/ComputeDescriptorSet.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/CommandBuffer.h"
 #include "../Renderer/RenderTexture.h"

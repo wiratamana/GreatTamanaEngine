@@ -2,7 +2,7 @@
 
 #include "../../Renderer/RenderGraph/RenderGraphTypes.h" // rg::TextureHandle - real struct.
 #include "../../Core/GraphicsHandles.h"
-#include "../../Renderer/ComputeDescriptorSet.h"
+#include "../../Renderer/Compute/ComputeDescriptorSet.h"
 #include "../../Renderer/Pipeline.h"
 
 #include <volk.h>

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../Renderer/Buffer.h"
-#include "../../Renderer/ComputeDescriptorSet.h"
+#include "../../Renderer/Compute/ComputeDescriptorSet.h"
 #include "../../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../../Renderer/MeshHandle.h"
 

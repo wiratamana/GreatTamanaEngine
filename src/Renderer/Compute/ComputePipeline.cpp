@@ -1,8 +1,8 @@
 #include "ComputePipeline.h"
 
-#include "Vulkan/DescriptorSetLayoutBuilder.h"
-#include "Vulkan/ShaderModule.h"
-#include "Vulkan/ShaderReflection.h"
+#include "../Vulkan/DescriptorSetLayoutBuilder.h"
+#include "../Vulkan/ShaderModule.h"
+#include "../Vulkan/ShaderReflection.h"
 
 #include <stdexcept>
 #include <utility>
@@ -13,22 +13,13 @@ ComputePipeline::ComputePipeline(VkDevice device, const std::string& shaderSpirv
     const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts, std::optional<VkPushConstantRange> pushConstantRange)
     : m_device(device)
 {
-    // task_manager/better-render-pass-1 campaign, PHASE2
-    // (PHASE2_REFLECTION_BASED_COMPUTE_PIPELINE_CREATION.md) - distinguish
-    // "caller omitted both" (REFLECT shaderSpirvPath to build the
-    // layout(s)/range) from "caller supplied at least one explicitly"
-    // (MANUAL path, byte-for-byte the pre-PHASE2 behavior) purely from the
-    // values already received - a new enum parameter was deliberately
-    // rejected for this, see that doc's own Step 2 "RESOLVED" note.
+    // If no layouts or push constants are passed, reflect them from the shader SPIR-V.
     const bool useReflection = descriptorSetLayouts.empty() && !pushConstantRange.has_value();
 
     std::vector<VkDescriptorSetLayout> resolvedSetLayouts = descriptorSetLayouts;
     std::optional<VkPushConstantRange> resolvedPushConstantRange = pushConstantRange;
 
-    // Cleans up any reflected VkDescriptorSetLayout(s) already built so far
-    // - needed on every throwing path below the point they're created,
-    // since a throwing constructor never runs this object's own destructor
-    // (the object is never considered constructed).
+    // Clean up created descriptor set layouts if an exception is thrown.
     auto destroyOwnedReflectedLayouts = [&]() noexcept {
         for (VkDescriptorSetLayout layout : m_ownedReflectedLayouts) {
             if (layout != VK_NULL_HANDLE) {
@@ -64,16 +55,8 @@ ComputePipeline::ComputePipeline(VkDevice device, const std::string& shaderSpirv
                                 binding.binding, VK_SHADER_STAGE_COMPUTE_BIT, binding.count);
                             break;
                         default:
-                            // Unreachable: ReflectComputeShader() (PHASE1,
-                            // ShaderReflection.cpp's own MapDescriptorType())
-                            // already throws for any descriptor type other
-                            // than these three - this check deliberately
-                            // lives in exactly ONE place (there, not here),
-                            // this is only a defensive, documented
-                            // hard-fail tail.
                             throw std::runtime_error(
-                                "ComputePipeline: reflected an unsupported descriptor type for '" + shaderSpirvPath +
-                                "' - this should be unreachable (ReflectComputeShader() already validates this).");
+                                "ComputePipeline: reflected an unsupported descriptor type for '" + shaderSpirvPath + "'.");
                     }
                 }
 
@@ -101,9 +84,6 @@ ComputePipeline::ComputePipeline(VkDevice device, const std::string& shaderSpirv
         }
     }
 
-    // Only needed transiently, to build the VkPipeline below - destroyed
-    // before this constructor returns (success or failure), same
-    // convention as Pipeline's own vertex/fragment shader modules.
     VkShaderModule computeModule = LoadShaderModule(device, shaderSpirvPath);
 
     try {

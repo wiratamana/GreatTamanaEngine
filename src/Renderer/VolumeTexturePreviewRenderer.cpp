@@ -1,6 +1,6 @@
 #include "VolumeTexturePreviewRenderer.h"
 
-#include "ComputeDispatch.h"
+#include "Compute/ComputeDispatch.h"
 #include "Renderer.h"
 #include "RenderGraph/CommandBuffer.h"
 #include "VolumeTexturePreviewMath.h"

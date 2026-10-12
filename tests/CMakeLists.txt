@@ -117,7 +117,7 @@
 #                                            Phase 4 pure dispatch math
 #                                            (ComputeGroupCount()/
 #                                            ComputeGroupCount3D() -
-#                                            src/Renderer/ComputeDispatch.h) -
+#                                            src/Renderer/Compute/ComputeDispatch.h) -
 #                                            exact multiples, the
 #                                            non-exact-multiple ceiling-
 #                                            division regression case (100

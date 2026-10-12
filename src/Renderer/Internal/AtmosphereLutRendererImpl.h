@@ -10,8 +10,8 @@
 
 #include "../../Features/Atmosphere/AtmosphereLutRenderer.h"
 #include "../../Features/Atmosphere/AtmosphereTypes.h"
-#include "../ComputeDescriptorSet.h"
-#include "../ComputePipeline.h"
+#include "../Compute/ComputeDescriptorSet.h"
+#include "../Compute/ComputePipeline.h"
 #include "../GraphicsHandleRegistry.h"
 #include "../RenderTexture.h"
 #include "../Texture2D.h"

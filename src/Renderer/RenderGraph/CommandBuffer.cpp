@@ -1,8 +1,8 @@
 #include "CommandBuffer.h"
 
 #include "../Buffer.h"
-#include "../ComputeDispatch.h"
-#include "../ComputePipeline.h"
+#include "../Compute/ComputeDispatch.h"
+#include "../Compute/ComputePipeline.h"
 #include "../Pipeline.h"
 #include "../Renderer.h"
 

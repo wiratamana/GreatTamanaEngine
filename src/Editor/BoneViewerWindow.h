@@ -9,7 +9,7 @@
 #include "../Math/Vec3.h"
 #include "../Physics/DynamicChainDefinition.h" // DynamicChainDefinition - task_manager/verlet-integration-5, Phase 2
 #include "../Game/Physics/DynamicChainRigCache.h" // DynamicChainRigCache::ModelEntry - used by BuildPartListPane()'s signature below
-#include "../Renderer/ComputeDescriptorSet.h"
+#include "../Renderer/Compute/ComputeDescriptorSet.h"
 #include "../Renderer/Pipeline.h"
 #include <volk.h>
 

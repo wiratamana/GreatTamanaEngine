@@ -1,4 +1,4 @@
-#include "Renderer/ComputeDispatch.h"
+#include "Renderer/Compute/ComputeDispatch.h"
 
 #include <gtest/gtest.h>
 

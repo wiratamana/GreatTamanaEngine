@@ -35,7 +35,7 @@
 #include "CullingPipelines.h"
 #include "CullingTypes.h"
 #include "../Buffer.h"
-#include "../ComputeDescriptorSet.h"
+#include "../Compute/ComputeDescriptorSet.h"
 #include "../MeshHandle.h"
 #include "../Pipeline.h"
 #include "../PipelineHandle.h"

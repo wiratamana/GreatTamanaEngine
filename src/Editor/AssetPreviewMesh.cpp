@@ -7,7 +7,7 @@
 #include "../Core/PipelineDesc.h"
 #include "../Math/Quat.h"
 #include "../Renderer/Buffer.h"
-#include "../Renderer/ComputeDescriptorSet.h"
+#include "../Renderer/Compute/ComputeDescriptorSet.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/CommandBuffer.h"
 #include "../Renderer/RenderTexture.h"

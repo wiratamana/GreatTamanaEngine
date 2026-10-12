@@ -2,8 +2,8 @@
 
 #include "../../Math/Mat4.h"
 #include "../../Renderer/Buffer.h"
-#include "../../Renderer/ComputeDescriptorSet.h"
-#include "../../Renderer/ComputePipeline.h"
+#include "../../Renderer/Compute/ComputeDescriptorSet.h"
+#include "../../Renderer/Compute/ComputePipeline.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../../Renderer/RenderTexture.h"
 

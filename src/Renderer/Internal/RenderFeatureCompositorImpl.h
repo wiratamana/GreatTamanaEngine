@@ -7,8 +7,8 @@
 
 #include "../../Core/Plugins/RenderFeatureCompositor.h"
 #include "../../Core/Plugins/RenderFeatureNamePool.h"
-#include "../ComputeDescriptorSet.h"
-#include "../ComputePipeline.h"
+#include "../Compute/ComputeDescriptorSet.h"
+#include "../Compute/ComputePipeline.h"
 #include "../GraphicsHandleRegistry.h"
 #include "../RenderTexture.h"
 #include "../RenderGraph/RenderGraphBuilder.h"

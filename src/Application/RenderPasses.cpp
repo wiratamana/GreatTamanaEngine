@@ -2,7 +2,7 @@
 
 #include "../Game/Animation/AnimationSystem.h"
 #include "../Game/Game.h"
-#include "../Renderer/ComputePipeline.h"
+#include "../Renderer/Compute/ComputePipeline.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"

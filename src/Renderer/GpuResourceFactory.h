@@ -1,8 +1,8 @@
 #pragma once
 
 #include "Buffer.h"
-#include "ComputeDescriptorSet.h"
-#include "ComputePipeline.h"
+#include "Compute/ComputeDescriptorSet.h"
+#include "Compute/ComputePipeline.h"
 #include "MaterialTexture.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
@@ -25,21 +25,7 @@ namespace gte {
 
 class VulkanDevice;
 
-// Owns everything needed to manufacture GPU resources (buffers, off-screen
-// render textures, pipelines, meshes) on behalf of Renderer, plus the
-// bookkeeping (GpuMemoryTracker) and one-off command submission primitives
-// (AllocateTransientCommandBuffer()/FreeTransientCommandBuffer()) those
-// factories need - see the individual method comments (moved here verbatim
-// from the old Renderer.h/.cpp) for the reasoning behind each one.
-//
-// Does NOT own the VkDevice/VmaAllocator/VkQueue/VulkanDevice passed in -
-// all must outlive this object (same non-ownership convention as
-// VulkanSwapchain/VulkanAllocator not owning the instance/device/surface
-// passed to them).
-// DOES own its own VkCommandPool (for AllocateTransientCommandBuffer()),
-// entirely separate from FramePresenter's per-frame/offscreen command
-// buffers, so a resource upload (e.g. CreateDeviceLocalBuffer() at load
-// time) never contends with in-flight presentation/offscreen work.
+// Factory for creating and managing GPU resources (buffers, textures, pipelines, meshes).
 class GpuResourceFactory {
 public:
     GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice device, VmaAllocator allocator, VkQueue graphicsQueue,
@@ -50,439 +36,111 @@ public:
     GpuResourceFactory(const GpuResourceFactory&) = delete;
     GpuResourceFactory& operator=(const GpuResourceFactory&) = delete;
 
-    // Deleted: m_vulkanDevice points back at the owning Renderer's
-    // m_device, so a plain member-wise move would dangle once the source
-    // is destroyed. Only Renderer ever held one, and Renderer's own move
-    // is deleted for the same reason - nothing needs this movable.
     GpuResourceFactory(GpuResourceFactory&&) = delete;
     GpuResourceFactory& operator=(GpuResourceFactory&&) = delete;
 
-    // See Renderer::CreateRenderTexture(). `format` here must already be
-    // fully resolved - VK_FORMAT_UNDEFINED-as-"match ColorFormat()" is
-    // resolved by Renderer itself, since only Renderer (via FramePresenter)
-    // knows ColorFormat(). depthDebugName optionally names the companion
-    // DepthBuffer separately from the color image's debugName - see
-    // RenderTexture's constructor comment. `allowStorageImageAccess`
-    // (default false) opts the returned RenderTexture's color image into
-    // VK_IMAGE_USAGE_STORAGE_BIT (an `RWTexture` - see
-    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) - when true, this
-    // method first confirms `format` actually supports
-    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT via
-    // Vulkan/FormatCapabilities.h's SupportsStorageImageUsage() and throws
-    // std::runtime_error loudly if it doesn't, rather than silently
-    // creating a RenderTexture a compute shader can't actually bind as a
-    // storage image. `allowDepthSampledAccess` (default false) - Atmosphere
-    // Scattering + Aerial Perspective campaign, Phase 7 - forwards straight
-    // through to RenderTexture's own identically-named constructor
-    // parameter (see RenderTexture.h); no format-capability check needed
-    // here (unlike allowStorageImageAccess above), since a depth format's
-    // own VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT support is effectively
-    // universal on every conformant Vulkan implementation.
-    // `createDepthCompanion` (default true, editor-core-separation-27
-    // campaign, BIG STEP 3 of 4) forwards straight through to
-    // RenderTexture's own identically-named constructor parameter (see
-    // RenderTexture.h) - when false, the returned RenderTexture carries NO
-    // depth companion at all (a true GPU-memory statement, not just a
-    // render-graph bookkeeping one). The one real consumer is
-    // RenderGraphPersistentResourceCache (a later phase of that same
-    // campaign); every other caller keeps getting a depth companion,
-    // byte-for-byte unchanged.
-    // `createColorImage` (default true, better-render-pass-3 campaign,
-    // BLOCK 2 - Arbitrary Render Views) forwards straight through to
-    // RenderTexture's own identically-named constructor parameter (see
-    // RenderTexture.h) - the COLOR-side mirror of createDepthCompanion
-    // immediately above; when false, the returned RenderTexture carries NO
-    // color image at all. The one real consumer is RenderViewRegistry (a
-    // later phase of that same campaign); every other caller keeps getting
-    // a color image, byte-for-byte unchanged.
+    // Render textures
     RenderTexture CreateRenderTexture(int width, int height, VkFormat format, const char* debugName,
         const char* depthDebugName = nullptr, bool allowStorageImageAccess = false,
         bool allowDepthSampledAccess = false, bool createDepthCompanion = true,
         bool createColorImage = true) const;
 
-    // See Renderer::CreateBuffer().
+    // Buffers
     Buffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage,
         const char* debugName = nullptr) const;
 
-    // See Renderer::CreateDeviceLocalBuffer().
     Buffer CreateDeviceLocalBuffer(
         const void* data, VkDeviceSize size, VkBufferUsageFlags usage, const char* debugName = nullptr) const;
 
-    // See Renderer::CreateStructuredBuffer(). A thin, self-documenting
-    // wrapper over CreateBuffer() above, for the `RWStructuredBuffer`/
-    // `StructuredBuffer` compute-shader resource kinds (see
-    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) - both map onto
-    // the SAME underlying Vulkan buffer/descriptor type
-    // (VK_DESCRIPTOR_TYPE_STORAGE_BUFFER); the read-only-vs-read-write
-    // distinction is enforced entirely at the GLSL (`readonly buffer` vs.
-    // plain `buffer`) and render-graph (ComputeShaderRead vs.
-    // ComputeShaderWrite - see Phase 5) levels, never by a different
-    // Vulkan object here. `elementStride`/`elementCount` are plain
-    // bookkeeping (size = elementStride * elementCount) - this does NOT
-    // introduce a typed/templated buffer wrapper; the returned Buffer is
-    // exactly as untyped as ever. Always ORs in
-    // VK_BUFFER_USAGE_STORAGE_BUFFER_BIT (plus VK_BUFFER_USAGE_TRANSFER_DST_BIT
-    // when `memoryUsage == BufferMemoryUsage::GpuOnly`, mirroring
-    // CreateDeviceLocalBuffer()'s own convention, so a GPU-only structured
-    // buffer can still be initialized once via a caller-driven staging
-    // upload). `extraUsage` (default 0) lets a caller OR in additional
-    // usage flags this buffer also needs (e.g.
-    // VK_BUFFER_USAGE_INDIRECT_COMMAND_BIT for an indirect-draw buffer
-    // that's ALSO written as a plain RWStructuredBuffer by a culling
-    // compute shader - see the companion GPU-driven-rendering document)
-    // without needing a second, near-duplicate factory method.
     Buffer CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
         BufferMemoryUsage memoryUsage, VkBufferUsageFlags extraUsage = 0, const char* debugName = nullptr) const;
 
-    // GPU Vertex Skinning campaign, Phase 4 (Per-Model Resource Management -
-    // see task_manager/gpu_skinning/GPU_SKINNING_PHASE4_PER_MODEL_RESOURCE_MANAGEMENT_STRATEGY_v1.md,
-    // Step 3.1). Creates a device-local (BufferMemoryUsage::GpuOnly) buffer
-    // usable BOTH as a compute shader's storage-buffer output AND as a real
-    // vertex-input-assembler vertex buffer (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
-    // | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT combined on the same VkBuffer -
-    // always legal on any conformant Vulkan implementation, unlike a storage
-    // IMAGE's format-dependent VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT check, see
-    // that strategy document's own Step 3.4 for the full reasoning). Never
-    // stages/uploads any initial data - this buffer starts life with
-    // UNDEFINED contents and is only ever meaningfully populated by the
-    // first compute dispatch that targets it (a GPU skinning kernel's own
-    // output), which must always happen before the first draw that reads
-    // it.
     Buffer CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* debugName = nullptr) const;
 
-    // Allocates/frees a single transient (one-time-use) command buffer from
-    // this factory's own dedicated m_commandPool - the only two Renderer-
-    // facing primitives GAP3's rewrite of Renderer::ImmediateSubmit() needs.
-    // No submit logic lives here anymore - every actual vkQueueSubmit2 call
-    // against the graphics queue goes through VulkanDevice::SubmitToGraphicsQueue(),
-    // the one engine-wide choke point (see Renderer::ImmediateSubmit()).
+    // Transient command buffer helpers
     VkCommandBuffer AllocateTransientCommandBuffer() const;
     void FreeTransientCommandBuffer(VkCommandBuffer cmd) const noexcept;
 
-    // See Renderer::CreatePipeline(). `colorFormat` here is always exactly
-    // Renderer::ColorFormat(), passed in by Renderer since only Renderer
-    // knows it. `vertexLayout` defaults to VertexLayout::PositionColor -
-    // see Pipeline.h. `useMaterialTexture`, when true, passes this
-    // factory's own persistent MaterialDescriptorSetLayout() through to
-    // Pipeline's constructor - meaningful (and expected to be true) only
-    // when vertexLayout is VertexLayout::PositionNormalUv.
-    // `debugName` (optional, default nullptr) is a purely cosmetic,
-    // human-readable Pipeline identity label - forwarded straight through
-    // to Pipeline's own constructor (see Pipeline.h's own `debugName`
-    // comment) - task_manager/frame-debugger-3, PHASE1.
-    // `useInstanceBuffer` (GPU-Driven Frustum Culling + Indirect Draw
-    // campaign, render-pass-5, PHASE2 - default false), when true, passes
-    // this factory's own persistent InstanceBufferDescriptorSetLayout()
-    // through to Pipeline's constructor - meaningful (and expected to be
-    // true) only when vertexLayout is VertexLayout::PositionNormalInstanced.
-    // Mirrors `useMaterialTexture` above exactly, as a SEPARATE, unrelated
-    // flag (never combined with it on the same call - Locked Design
-    // Decision 8, PHASE0_MASTER_STRATEGY.md).
-    //
-    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
-    // PHASE4 (task_manager/better-render-pass-6/PHASE4_CREATEPIPELINE_FACTORY_WIRING.md)
-    // - `sceneServicesSetLayout` (default VK_NULL_HANDLE) is a genuinely NEW,
-    // trailing parameter, forwarded straight through to Pipeline's own new
-    // `sceneServicesSetLayout` constructor parameter with ZERO interpretation
-    // at this layer - unlike `useMaterialTexture`/`useInstanceBuffer` (which
-    // resolve to a layout THIS factory itself owns), the real owning
-    // instance is Core's ONE SceneServicesDescriptorSet (wired in PHASE7),
-    // which this factory has no reach to and must not be given one. The
-    // caller passes SceneServicesDescriptorSet::Layout()'s result straight
-    // in. Every existing call site is unaffected (new trailing defaulted
-    // parameter).
+    // Pipelines
     Pipeline CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
         bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE) const;
 
-    // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
-    // N-color-format sibling of CreatePipeline() above, forwarding straight
-    // into Pipeline's new std::span<const VkFormat> constructor
-    // (Pipeline.h). Unlike the single-format overload above, `colorFormats`
-    // is supplied explicitly by the caller (via Renderer::CreatePipeline()'s
-    // own parallel overload) rather than always being exactly
-    // Renderer::ColorFormat() - a genuine multi-target pass (e.g. a future
-    // G-buffer pass) may write into targets of differing formats. Every
-    // other parameter behaves identically to the single-format overload
-    // above, including the new trailing `useInstanceBuffer` (render-pass-5
-    // campaign, PHASE2) and `sceneServicesSetLayout` (better-render-pass-6
-    // campaign, PHASE4 - same pure pass-through, zero interpretation here).
     Pipeline CreatePipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
         bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE) const;
 
-    // See Renderer::CreateComputePipeline() (Phase 2 -
-    // COMPUTE_PHASE2_PIPELINE_INFRASTRUCTURE_STRATEGY_v1.md). Builds a
-    // ComputePipeline from a single compiled .comp SPIR-V binary -
-    // `descriptorSetLayouts`/`pushConstantRange` are forwarded verbatim to
-    // ComputePipeline's own constructor (see ComputePipeline.h for the full
-    // reasoning behind both). Unlike CreatePipeline() above, this needs no
-    // color/depth format at all - a compute pipeline has no
-    // VkPipelineRenderingCreateInfo/render target of its own.
     ComputePipeline CreateComputePipeline(const std::string& shaderSpirvPath,
         const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts = {},
         std::optional<VkPushConstantRange> pushConstantRange = std::nullopt) const;
 
-    // See Renderer::CreateMesh() (non-indexed overload).
+    // Meshes
     Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
         const char* debugName = nullptr) const;
 
-    // See Renderer::CreateMesh() (indexed overload) - builds BOTH a vertex
-    // buffer and an index buffer, one CreateDeviceLocalBuffer() upload each,
-    // and returns a Mesh built via Mesh's indexed constructor.
     Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
         const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
-    // Like CreateMesh() (indexed overload) above, but the VERTEX buffer is
-    // built as a host-visible, persistently-mapped BufferMemoryUsage::
-    // CpuToGpu buffer (initialized with `vertexData` immediately, then
-    // re-writable afterwards via Mesh::UpdateVertexData()) instead of an
-    // immutable device-local one - for a rigged mesh whose vertex
-    // positions/normals need to be re-uploaded every frame as its pose
-    // animates (see Game::UpdateSkeletalAnimators(), src/Game/Game.cpp).
-    // The INDEX buffer is still built via CreateDeviceLocalBuffer() exactly
-    // like CreateMesh() - a mesh's triangle topology never changes as it
-    // animates, only its vertex positions/normals do.
     Mesh CreateSkinnedMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
         const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
-    // Multithreaded CPU-skinning optimization, Stage 1 (see
-    // task_manager/optimizing_multi_thread_cpu_skinning/
-    // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md): builds ONE
-    // device-local vertex buffer, shared (via std::shared_ptr) across
-    // however many Mesh "parts" a caller subsequently builds from it via
-    // CreateMeshFromSharedVertexBuffer() below - each part still gets its
-    // own, genuinely distinct index buffer/range, but the (often far
-    // larger) vertex data is uploaded/stored exactly once, not once per
-    // part. Otherwise identical to CreateDeviceLocalBuffer() + wrapping.
     std::shared_ptr<Buffer> CreateSharedMeshVertexBuffer(
         const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName = nullptr) const;
 
-    // Like CreateSharedMeshVertexBuffer() above, but host-visible/
-    // persistently-mapped (BufferMemoryUsage::CpuToGpu) instead of
-    // device-local - for a rigged (skinned) model's shared vertex buffer,
-    // re-writable every frame via Mesh::UpdateVertexData() (see
-    // GpuResourceFactory::CreateSkinnedMesh()'s own reasoning for the
-    // non-shared equivalent).
     std::shared_ptr<Buffer> CreateSharedSkinnedMeshVertexBuffer(
         const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName = nullptr) const;
 
-    // Builds a Mesh that points at an ALREADY-CONSTRUCTED shared vertex
-    // buffer (from either factory above) plus its OWN, freshly-uploaded
-    // index buffer/range - see Mesh.h's shared-vertex-buffer constructor.
-    // `vertexCount` must match whatever the shared buffer was originally
-    // sized for (the caller's own responsibility - this factory has no way
-    // to independently verify it against a raw VkDeviceSize).
     Mesh CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVertexBuffer, std::uint32_t vertexCount,
         const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
-
-
-    // See Renderer::CreateTexture2D(). `pixelsRgba8` must be
-    // width*height*4 tightly-packed bytes (e.g. straight out of
-    // stbi_load(..., desired_channels=4)) - uploaded via a temporary
-    // staging Buffer + ImmediateSubmit(), the same pattern
-    // CreateDeviceLocalBuffer() above already uses. `allowStorageImageAccess`
-    // (default false) opts the returned Texture2D's image into
-    // VK_IMAGE_USAGE_STORAGE_BIT (an `RWTexture`) - when true, this method
-    // first confirms Texture2D's own fixed VK_FORMAT_R8G8B8A8_UNORM format
-    // actually supports VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT via
-    // Vulkan/FormatCapabilities.h's SupportsStorageImageUsage() and throws
-    // std::runtime_error loudly if it doesn't - same discipline as
-    // CreateRenderTexture() above.
+    // Textures
     Texture2D CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName = nullptr,
         bool allowStorageImageAccess = false) const;
 
-    // Atmosphere Scattering campaign, Phase 2
-    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - see
-    // Renderer::CreateVolumeTexture(). Unlike CreateTexture2D()/
-    // CreateRenderTexture() above, storage-image access is NOT optional -
-    // a VolumeTexture is always compute-written and later sampled, so this
-    // ALWAYS confirms `format` actually supports
-    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT via
-    // Vulkan/FormatCapabilities.h's SupportsStorageImageUsage() and throws
-    // std::runtime_error loudly if it doesn't - same "constructor trusts,
-    // factory checks" division of labor as every other storage-capable
-    // resource this factory creates.
     VolumeTexture CreateVolumeTexture(
         int width, int height, int depth, VkFormat format, const char* debugName = nullptr) const;
 
-    // better-render-pass-3 campaign, BLOCK 5 (Array and Cubemap Texture
-    // Resources) - see TextureArray2D.h. `format` here must already be
-    // fully resolved - VK_FORMAT_UNDEFINED-as-"match ColorFormat()/
-    // DepthFormat()" is resolved by Renderer::CreateTextureArray() (never
-    // this method - see that method's own doc comment for why this is NOT
-    // a trivial one-line forward like Renderer::CreateVolumeTexture()'s own
-    // precedent), so a debug-only assert at the top of this method's own
-    // body documents that contract rather than re-resolving it here.
-    // Validates BOTH cubemap invariants (`isCubemap` requires `arrayLayers`
-    // to be a positive multiple of 6, and `width == height`) with a real,
-    // unconditional `throw std::runtime_error` BEFORE ever constructing a
-    // TextureArray2D - these are hard Vulkan API preconditions for
-    // VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT, not a caller-trust boundary, so
-    // they must never be debug-assert-only (mirrors
-    // FindMismatchedColorAttachmentExtent()'s own precedent for this exact
-    // category of problem). `allowStorageImageAccess` is only ever checked
-    // via SupportsStorageImageUsage() when it is actually requested AND
-    // `hasDepth == false` - never for the depth case (mirrors
-    // RenderTexture's own depth-companion creation, which trusts
-    // Renderer::DepthFormat() unconditionally, since that format was
-    // already globally validated once, at device-pick time, by
-    // VulkanDevice::PickDepthFormat()).
     TextureArray2D CreateTextureArray(int width, int height, int arrayLayers, VkFormat format, bool hasDepth,
         bool isCubemap, bool allowStorageImageAccess = false, const char* debugName = nullptr) const;
 
-    // The ONE descriptor-set-layout (a single combined-image-sampler,
-    // fragment stage, set = 0 binding = 0) every VertexLayout::
-    // PositionNormalUv Pipeline is built with (see CreatePipeline()'s
-    // `useMaterialTexture` above) AND every MaterialTexture's own
-    // VkDescriptorSet (see CreateMaterialTexture2D() below) is allocated
-    // against - created once, for this factory's entire lifetime, in the
-    // constructor, so any Pipeline/MaterialTexture pair built through this
-    // factory is always binding-compatible with each other.
+    // Descriptors and Materials
     VkDescriptorSetLayout MaterialDescriptorSetLayout() const noexcept { return m_materialSetLayout; }
-
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE2 - the ONE descriptor-set-layout (a single readonly storage
-    // buffer, VERTEX stage, set = 0 binding = 0) every VertexLayout::
-    // PositionNormalInstanced Pipeline is built with (see CreatePipeline()'s
-    // `useInstanceBuffer` above) - created once, for this factory's entire
-    // lifetime, in the constructor, mirroring MaterialDescriptorSetLayout()
-    // above exactly, but for a completely separate, unrelated concept (a
-    // per-instance world-matrix/AABB buffer, not a material texture). A
-    // real VkDescriptorSet built against this layout is allocated via
-    // AllocateComputeDescriptorSet() below (the SAME shared
-    // m_computeDescriptorPool already sized for VK_DESCRIPTOR_TYPE_STORAGE_BUFFER -
-    // this binding's descriptor TYPE is identical to a compute shader's own
-    // StructuredBuffer/RWStructuredBuffer binding, only the consuming SHADER
-    // STAGE differs, which the pool itself does not care about).
     VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept { return m_instanceBufferSetLayout; }
 
-    // Like CreateTexture2D() above, but ALSO allocates (from this
-    // factory's own persistent m_materialDescriptorPool) and writes a
-    // VkDescriptorSet - built against MaterialDescriptorSetLayout() above -
-    // pointing at the freshly-created Texture2D's view/sampler, bundled
-    // together as a MaterialTexture (see Renderer/MaterialTexture.h). This
-    // is what Game::EnsureMeshAsset() uses for a PMX material's diffuse
-    // texture (src/Game/Game.cpp), as opposed to CreateTexture2D() above,
-    // which the Editor's Inspector preview (AssetPreviewTexture.h) uses for
-    // a texture that's only ever displayed via ImGui::Image() (its own,
-    // separate ImGui-owned descriptor set), never sampled by one of this
-    // engine's own Pipelines.
     MaterialTexture CreateMaterialTexture2D(
         const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
 
-    // Phase 3 (COMPUTE_PHASE3_DESCRIPTOR_BINDING_MODEL_STRATEGY_v1.md) -
-    // allocates one VkDescriptorSet from this factory's own persistent
-    // m_computeDescriptorPool against `layout` (built via
-    // Vulkan/DescriptorSetLayoutBuilder.h). Wrap the result in a
-    // ComputeDescriptorSet (see Renderer/ComputeDescriptorSet.h) and call
-    // its own Rewrite() to actually point it at real buffer/image
-    // resources before first use. Like m_materialDescriptorPool's own
-    // sets (see MaterialTexture.h's own comment), a set allocated here is
-    // NEVER individually freed - only the whole m_computeDescriptorPool at
-    // once, when this factory itself is destroyed.
     ComputeDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
 
-    // See Renderer::GetMemoryTotals()/GetMemoryResources().
+    // Memory Tracking
     GpuMemoryTracker::Totals GetMemoryTotals() const;
     std::vector<GpuMemoryTracker::Entry> GetMemoryResources() const;
-
-    // editor-core-separation-1 campaign, PHASE4 - always compiled, no macro.
-    // Returns the SAME GpuMemoryTracker instance every Buffer/RenderTexture/
-    // Texture2D/VolumeTexture this factory creates registers with (see
-    // GpuMemoryTracker.h's own class comment) - lets an external, Editor-
-    // owned observer (see src/Editor/EditorGpuMemoryNameOverlay.h) install
-    // itself via GpuMemoryTracker::SetDebugNameObserver() without this
-    // factory (or GpuMemoryTracker itself) storing a single byte of name/
-    // string data. REPLACES the old, Editor-only GetMemoryDebugName()
-    // forwarder, which forwarded to a GpuMemoryTracker::GetDebugName() that
-    // no longer exists (that lookup now lives entirely on the Editor side -
-    // see EditorGpuMemoryNameOverlay::GetDebugName()).
     std::shared_ptr<GpuMemoryTracker> GetMemoryTracker() const noexcept { return m_memoryTracker; }
 
 private:
     void Destroy() noexcept;
 
-    // Internal-only immediate-submit helper - used by CreateDeviceLocalBuffer()/
-    // CreateTexture2D() for their own one-shot upload command buffers.
-    // Deliberately NOT exposed publicly (see GAP3) - outside callers go
-    // through Renderer::ImmediateSubmit() (rg::CommandBuffer&) instead.
     void ImmediateSubmitInternal(const std::function<void(VkCommandBuffer)>& recordFn) const;
 
     VkDevice m_device = VK_NULL_HANDLE;
     VmaAllocator m_allocator = VK_NULL_HANDLE;
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;
-
-    // The ONE choke point every submit to m_graphicsQueue goes through -
-    // not owned (must outlive this object, same convention as everything
-    // else this class doesn't own).
     VulkanDevice* m_vulkanDevice = nullptr;
-    // Needed purely for the storage-image capability check
-    // (Vulkan/FormatCapabilities.h's SupportsStorageImageUsage()) that
-    // CreateRenderTexture()/CreateTexture2D() perform when
-    // `allowStorageImageAccess` is requested - see
-    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md. Not owned; must
-    // outlive this factory, same non-ownership convention as m_device/
-    // m_allocator/m_graphicsQueue above.
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
-
-    // The single depth format every RenderTexture/Pipeline this factory
-    // creates is built against - always exactly Renderer::DepthFormat()
-    // (VulkanDevice::PickDepthFormat()), stored once here rather than
-    // threaded through every CreateRenderTexture()/CreatePipeline() call
-    // (unlike colorFormat, which a caller can deliberately override per
-    // RenderTexture - see CreateRenderTexture() above - depth never needs
-    // that: it's never sampled/displayed, so there's no reason for it to
-    // ever differ from the one shared format). See AGENTS.md ("Render
-    // Target Format Matching").
     VkFormat m_depthFormat = VK_FORMAT_UNDEFINED;
 
-    // Owned via shared_ptr (not by value) so it can be handed out to every
-    // Buffer/RenderTexture this factory creates without any risk of
-    // dangling if this factory (or the Renderer owning it) is later moved -
-    // see GpuMemoryTracker's class comment.
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker;
-
-    // Dedicated to AllocateTransientCommandBuffer() - never shared with
-    // FramePresenter's own per-frame/offscreen command buffers, so a
-    // buffer/mesh upload can never contend with in-flight presentation work.
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
 
-    // See MaterialDescriptorSetLayout()/CreateMaterialTexture2D() above -
-    // both created once in the constructor, destroyed together in
-    // Destroy(). m_materialDescriptorPool is sized generously (see
-    // GpuResourceFactory.cpp) for every material texture this process is
-    // ever likely to load; individual VkDescriptorSets allocated from it
-    // are never individually freed (see MaterialTexture.h's own comment).
     VkDescriptorSetLayout m_materialSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool m_materialDescriptorPool = VK_NULL_HANDLE;
 
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE2 - see InstanceBufferDescriptorSetLayout() above. Created once
-    // in the constructor, destroyed in Destroy(). Descriptor SETS built
-    // against this layout are allocated from m_computeDescriptorPool below
-    // (NOT a third, dedicated pool) - see InstanceBufferDescriptorSetLayout()'s
-    // own comment for why that's safe (same descriptor TYPE, just a
-    // different consuming shader stage).
     VkDescriptorSetLayout m_instanceBufferSetLayout = VK_NULL_HANDLE;
-
-    // Phase 3 (COMPUTE_PHASE3_DESCRIPTOR_BINDING_MODEL_STRATEGY_v1.md) - a
-    // SECOND, dedicated descriptor pool for compute-shaped descriptor
-    // types (VK_DESCRIPTOR_TYPE_STORAGE_BUFFER/STORAGE_IMAGE, plus
-    // COMBINED_IMAGE_SAMPLER for a compute shader's own plain `Texture`
-    // reads - see AllocateComputeDescriptorSet() above). Deliberately
-    // NEVER shared with m_materialDescriptorPool above - different
-    // descriptor type requirements, and keeping them separate means a
-    // compute-heavy feature can never exhaust the material-texture pool's
-    // budget or vice versa. Created once in the constructor, destroyed in
-    // Destroy() - sets allocated from it are never individually freed,
-    // same convention as m_materialDescriptorPool.
     VkDescriptorPool m_computeDescriptorPool = VK_NULL_HANDLE;
 };
 

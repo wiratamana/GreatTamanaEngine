@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../ComputeDescriptorSet.h"
-#include "../ComputePipeline.h"
+#include "../Compute/ComputeDescriptorSet.h"
+#include "../Compute/ComputePipeline.h"
 
 #include <volk.h>
 

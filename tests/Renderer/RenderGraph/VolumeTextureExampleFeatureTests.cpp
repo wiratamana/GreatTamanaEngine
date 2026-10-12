@@ -8,8 +8,8 @@
 // every other Tier-2 test in this folder already uses.
 
 #include "Renderer/Renderer.h"
-#include "Renderer/ComputeDescriptorSet.h"
-#include "Renderer/ComputePipeline.h"
+#include "Renderer/Compute/ComputeDescriptorSet.h"
+#include "Renderer/Compute/ComputePipeline.h"
 #include "Renderer/VolumetricFroxelMath.h"
 #include "Encoding/HdrColorVisualization.h"
 
