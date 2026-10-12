@@ -589,11 +589,11 @@ void RenderGraphPanel::BuildInspector(const rg::RenderGraphRegimeMetadata& regim
         ToggleIsolatePass(pass->name, toggles);
     }
 
-    if (m_texturePreview.Descriptor() != VK_NULL_HANDLE) {
+    if (m_texturePreview.Descriptor() != UiTextureHandle::Invalid) {
         ImGui::Separator();
         ImGui::Text("Preview: %s (%dx%d)", m_texturePreview.ResourceName().c_str(), m_texturePreview.Width(),
             m_texturePreview.Height());
-        ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_texturePreview.Descriptor())),
+        ImGui::Image(static_cast<ImTextureID>(static_cast<std::uint64_t>(m_texturePreview.Descriptor())),
             ImVec2(256.0f, 256.0f));
     }
 }
@@ -709,7 +709,7 @@ void RenderGraphPanel::RequestTexturePreview(
     }
 
     try {
-        m_texturePreview.Request(renderer.GetVulkanContextInfo().device, resourceName,
+        m_texturePreview.Request(renderer, resourceName,
             renderer.CreateTexture2D(rgba8.data(), raw.width, raw.height, "RenderGraphPreview"));
     } catch (const std::exception&) {
         m_texturePreview.Release(); // vmaCreateImage/vkCreateImageView failure - rare, not fatal.

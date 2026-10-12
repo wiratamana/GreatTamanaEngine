@@ -35,8 +35,8 @@ SceneGridRenderer::~SceneGridRenderer()
 
 void SceneGridRenderer::Reset()
 {
-    if (m_device != VK_NULL_HANDLE && m_pipeline) {
-        vkDeviceWaitIdle(m_device);
+    if (m_renderer != nullptr && m_pipeline) {
+        m_renderer->WaitForGpuIdle();
     }
     m_pipeline.reset();
 }
@@ -46,7 +46,7 @@ void SceneGridRenderer::EnsurePipeline(Renderer& renderer)
     if (m_pipeline) {
         return;
     }
-    m_device = renderer.GetVulkanContextInfo().device;
+    m_renderer = &renderer;
 
     // Full-screen triangle synthesized from gl_VertexIndex - no vertex
     // input. Depth TEST enabled (occluded correctly by real scene geometry),
@@ -70,8 +70,6 @@ void SceneGridRenderer::EnsurePipeline(Renderer& renderer)
 
 void SceneGridRenderer::Draw(Renderer& renderer, VkCommandBuffer cmd, const Mat4& sceneViewProjection)
 {
-    m_device = renderer.GetVulkanContextInfo().device;
-
     Mat4 invViewProj;
     if (!sceneViewProjection.TryInverse(invViewProj)) {
         return; // Degenerate camera matrix this frame - draw nothing rather than assert/crash.

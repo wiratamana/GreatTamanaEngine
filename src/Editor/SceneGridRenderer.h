@@ -62,7 +62,7 @@ public:
 private:
     void EnsurePipeline(Renderer& renderer);
 
-    VkDevice m_device = VK_NULL_HANDLE;
+    Renderer* m_renderer = nullptr; // Non-owning - used only to call WaitForGpuIdle() in Reset().
     std::unique_ptr<Pipeline> m_pipeline;
 };
 

@@ -572,13 +572,6 @@ private:
     // class's own destructor's existing unconditional vkDeviceWaitIdle() call.
     VolumeTexturePreviewRenderer m_shaderPropertyVolumeRenderer;
 
-    // The live VkDevice, refreshed unconditionally every Build() call from
-    // `renderer.GetVulkanContextInfo().device` (cheap - a few field reads) -
-    // used only by this class's own destructor (see ~FrameDebuggerPanel())
-    // to safely wait for the GPU to be idle before its final
-    // ImGui_ImplVulkan_RemoveTexture() call, mirroring BoneViewerWindow's own
-    // m_device precedent.
-    VkDevice m_device = VK_NULL_HANDLE;
 
     // This-frame-only cached context for TriggerCapture()'s own use - see
     // Build() above. Non-owning: every one of these points at a long-lived

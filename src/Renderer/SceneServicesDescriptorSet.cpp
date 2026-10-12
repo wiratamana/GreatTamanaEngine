@@ -311,7 +311,7 @@ VkDescriptorSet SceneServicesDescriptorSet::Rewrite(
     }
     const bool freshlyAllocated = (set == VK_NULL_HANDLE);
     if (freshlyAllocated) {
-        set = m_renderer->AllocateComputeDescriptorSet(m_layout);
+        set = m_renderer->AllocateComputeDescriptorSet(m_layout).Native();
         m_perViewSets.push_back(PerViewSet{ view, set });
     }
 
@@ -431,7 +431,7 @@ void SceneServicesDescriptorSet::UpdateGlobalUniformBlock(rg::RenderViewId view,
     }
     const bool freshlyAllocatedSet = (set == VK_NULL_HANDLE);
     if (freshlyAllocatedSet) {
-        set = m_renderer->AllocateComputeDescriptorSet(m_layout);
+        set = m_renderer->AllocateComputeDescriptorSet(m_layout).Native();
         m_perViewSets.push_back(PerViewSet{ view, set });
     }
 

@@ -9,8 +9,7 @@
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleGuard.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
-#include "../../Renderer/GraphicsHandleRegistry.h"
-#include "../../Renderer/VulkanFormatInfo.h"
+#include "../../Renderer/RenderGraph/CommandBuffer.h"
 
 #include <cassert>
 #include <cstdint>
@@ -154,15 +153,24 @@ void AtmosphereFeature::RegisterPasses()
             }
 
             const char* skyViewLutName = isGameView ? "AtmosphereSkyViewLut_GameView" : "AtmosphereSkyViewLut_SceneView";
-            const std::function<void(VkCommandBuffer)> recordSkyBackground =
+            const std::function<void(rg::CommandBuffer&)> recordSkyBackground =
                 MakeRecordSkyBackgroundCallback(m_renderer, m_core.GetRenderer(), viewData->viewProjection,
                     sharedLuts->parameters, viewLuts->frameUniforms, skyViewLutName, m_settings.skyExposure);
 
             if (isGameView) {
+                // Core.cpp/FrameDebuggerCapture.cpp's replay/debug side
+                // channel still travels as the engine-wide
+                // std::function<void(VkCommandBuffer)> shape - wrapped once,
+                // here, at this publish boundary only.
+                const std::function<void(VkCommandBuffer)> recordSkyBackgroundForBlackboard =
+                    [this, recordSkyBackground](VkCommandBuffer cmd) {
+                        rg::CommandBuffer wrapped(cmd, &m_core.GetRenderer(), nullptr);
+                        recordSkyBackground(wrapped);
+                    };
                 frame.blackboard.Publish<std::function<void(VkCommandBuffer)>>(
-                    kGameSkyBackgroundCallbackKey, recordSkyBackground);
+                    kGameSkyBackgroundCallbackKey, recordSkyBackgroundForBlackboard);
                 frame.blackboard.Publish<std::function<void(VkCommandBuffer)>>(
-                    kViewBackgroundReplayCallbackKey, recordSkyBackground);
+                    kViewBackgroundReplayCallbackKey, recordSkyBackgroundForBlackboard);
             }
 
             if (!recordSkyBackground) {
@@ -185,7 +193,8 @@ void AtmosphereFeature::RegisterPasses()
             };
             desc.execute = [this, recordSkyBackground](rg::PassContext& ctx) {
                 m_core.GetRenderer().BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                recordSkyBackground(ctx.cmd);
+                rg::CommandBuffer cmd = ctx.Cmd();
+                recordSkyBackground(cmd);
                 m_core.GetRenderer().EndGraphPassRecording();
             };
             out.push_back(std::move(desc));
@@ -225,12 +234,12 @@ void AtmosphereFeature::RegisterPasses()
             const rg::ViewScope legacyViewScope = isGameView ? rg::ViewScope::GameView : rg::ViewScope::SceneView;
 
             const rg::TextureHandle composited = AddAtmosphereCompositePass(builder, m_core.GetRenderer(),
-                m_renderer, currentViewHandles.colorHandle, Native(currentViewHandles.colorSampler),
-                currentViewHandles.depthHandle, Native(currentViewHandles.depthImageView),
-                Native(currentViewHandles.depthSampler), viewLuts->aerialPerspectiveVolumeHandle, aerialVolumeName,
+                m_renderer, currentViewHandles.colorHandle, currentViewHandles.colorSampler,
+                currentViewHandles.depthHandle, currentViewHandles.depthImageView,
+                currentViewHandles.depthSampler, viewLuts->aerialPerspectiveVolumeHandle, aerialVolumeName,
                 viewLuts->frameUniforms, cameraData.eyeWorldPosition, m_settings.aerialPerspectiveStrength,
                 m_settings.aerialPerspectiveMaxDistanceKm, m_settings.aerialPerspectiveDepthExponent,
-                ToVkExtent2D(extent), outputTextureName, legacyViewScope, m_toggleRegistry);
+                extent, outputTextureName, legacyViewScope, m_toggleRegistry);
 
             if (!composited.IsValid()) {
                 return; // Individually toggled off this frame - nothing to copy.
@@ -255,11 +264,13 @@ void AtmosphereFeature::RegisterPasses()
     // output name. FreshCompositedOutput() reports nullptr on a stale/
     // disabled frame instead of replaying a leftover cached texture.
     m_core.RegisterFinalizeForSamplingHook("GameViewComposited", [this](VkCommandBuffer cmd) -> RenderTexture* {
-        m_renderer.FinalizeAerialPerspectiveCompositeForSampling(cmd, "GameViewComposited");
+        rg::CommandBuffer wrapped(cmd, &m_core.GetRenderer(), nullptr);
+        m_renderer.FinalizeAerialPerspectiveCompositeForSampling(wrapped, "GameViewComposited");
         return FreshCompositedOutput("GameViewComposited");
     });
     m_core.RegisterFinalizeForSamplingHook("SceneViewComposited", [this](VkCommandBuffer cmd) -> RenderTexture* {
-        m_renderer.FinalizeAerialPerspectiveCompositeForSampling(cmd, "SceneViewComposited");
+        rg::CommandBuffer wrapped(cmd, &m_core.GetRenderer(), nullptr);
+        m_renderer.FinalizeAerialPerspectiveCompositeForSampling(wrapped, "SceneViewComposited");
         return FreshCompositedOutput("SceneViewComposited");
     });
 }

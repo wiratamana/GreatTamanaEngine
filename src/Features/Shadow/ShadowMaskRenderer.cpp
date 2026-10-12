@@ -23,7 +23,6 @@ void ShadowMaskRenderer::EnsurePipelineBuilt(Renderer& renderer)
     if (m_pipeline.has_value()) {
         return;
     }
-    m_device = renderer.GetVulkanContextInfo().device;
 
     // Binding 0 = params (storage buffer), 1 = shadowDepth, 2 = sceneDepth,
     // 3 = maskOutput (r8 storage image) - reflected from ShadowMask.comp.
@@ -75,7 +74,7 @@ rg::TextureHandle ShadowMaskRenderer::AddMaskPass(rg::RenderGraphBuilder& builde
     // stale-resolution texture forever.
     const VkExtent2D currentExtent = viewState.output->Extent();
     if (currentExtent.width != viewExtent.width || currentExtent.height != viewExtent.height) {
-        vkDeviceWaitIdle(m_device);
+        renderer.WaitForGpuIdle();
         const int resizedWidth = viewExtent.width > 0 ? static_cast<int>(viewExtent.width) : 1;
         const int resizedHeight = viewExtent.height > 0 ? static_cast<int>(viewExtent.height) : 1;
         viewState.output->Resize(resizedWidth, resizedHeight);
@@ -109,7 +108,7 @@ rg::TextureHandle ShadowMaskRenderer::AddMaskPass(rg::RenderGraphBuilder& builde
             // depth sampler - assert directly, never silently fall back.
             assert(shadowDepth.view != VK_NULL_HANDLE && "shadow map resolved with no depth view.");
 
-            viewState.descriptorSet.Rewrite(m_device,
+            viewState.descriptorSet.Rewrite(
                 std::vector<ComputeDescriptorWrite>{
                     ComputeDescriptorWrite::StorageBuffer(0, viewState.paramsBuffer->Native()),
                     ComputeDescriptorWrite::CombinedImageSampler(1, shadowDepth.view, shadowMapDepthSampler),

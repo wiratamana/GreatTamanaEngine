@@ -88,8 +88,13 @@ struct ComputeDescriptorWrite {
 class ComputeDescriptorSet {
 public:
     ComputeDescriptorSet() = default;
-    explicit ComputeDescriptorSet(VkDescriptorSet descriptorSet) noexcept
+
+    // `device` is bound once, here, by whichever Renderer-owned factory
+    // allocated `descriptorSet` - callers outside src/Renderer never see or
+    // pass a VkDevice themselves.
+    ComputeDescriptorSet(VkDescriptorSet descriptorSet, VkDevice device) noexcept
         : m_descriptorSet(descriptorSet)
+        , m_device(device)
     {
     }
 
@@ -101,10 +106,11 @@ public:
     // frame - see the class comment above for why this is deliberately not
     // optimized to skip unchanged bindings. Asserts (debug builds) that
     // this descriptor set is actually valid; a no-op for an empty `writes`.
-    void Rewrite(VkDevice device, const std::vector<ComputeDescriptorWrite>& writes) const;
+    void Rewrite(const std::vector<ComputeDescriptorWrite>& writes) const;
 
 private:
     VkDescriptorSet m_descriptorSet = VK_NULL_HANDLE;
+    VkDevice m_device = VK_NULL_HANDLE;
 };
 
 } // namespace gte

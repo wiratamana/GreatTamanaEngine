@@ -51,6 +51,11 @@ public:
     Renderer& GetRenderer() { return *m_renderer; }
     rg::RenderGraph& GetRenderGraph() { return *m_renderGraph; }
 
+    // Test-only accessor for Renderer::GetVulkanContextInfo().device - this
+    // fixture is friended by Renderer specifically so tests never need
+    // direct GetVulkanContextInfo() access of their own.
+    VkDevice Device() const noexcept { return m_renderer->GetVulkanContextInfo().device; }
+
     // Drives exactly ONE real SynchronousImmediateReadback Execute() call -
     // mirrors Core::BuildFrame()'s own Begin/Execute/End sequence exactly
     // (Renderer::BeginOffscreenRenderGraphRecording() ->

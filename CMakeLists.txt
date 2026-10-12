@@ -907,6 +907,8 @@ add_library(gte_core STATIC
     src/Renderer/Internal/RenderFeatureCompositorImpl.h
     src/Renderer/Internal/RenderFeatureCompositorImpl.cpp
     src/Renderer/Internal/RenderViewRegistryImpl.h
+    src/Renderer/Internal/AtmosphereLutRendererImpl.h
+    src/Renderer/Internal/AtmosphereLutRendererImpl.cpp
 )
 
 # Atmosphere feature module's (and every other feature's) gte_core source

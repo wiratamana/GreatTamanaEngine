@@ -8,31 +8,26 @@
 #include <cstring>
 #include <stdexcept>
 
-namespace gte::rg {
+namespace gte {
 
-namespace {
-
-// B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - the one place this class's
-// constructor needs a Renderer::VulkanContextInfo, computed once and
-// forwarded into every RenderGraphTimestampPool constructor argument that
-// needs it, rather than calling Renderer::GetVulkanContextInfo() several
-// times inline in the member-initializer list (harmless either way - it's
-// a cheap, side-effect-free struct copy - but this reads more clearly).
-Renderer::VulkanContextInfo QueryVulkanContextInfo(Renderer& renderer)
+Renderer::VulkanContextInfo QueryVulkanContextInfoForRenderGraph(Renderer& renderer)
 {
     return renderer.GetVulkanContextInfo();
 }
 
-} // namespace
+} // namespace gte
+
+namespace gte::rg {
 
 RenderGraph::RenderGraph(Renderer& renderer)
     : m_resourcePool(renderer)
     , m_persistentResourceCache(renderer)
-    , m_timestampPool(QueryVulkanContextInfo(renderer).device, renderer, QueryVulkanContextInfo(renderer).graphicsQueueFamily,
-          QueryVulkanContextInfo(renderer).timestampCapability, kSynchronousTimingSlotBudget, kPipelinedTimingSlotBudget,
-          kGpuTimingFramesInFlight)
-    , m_eventSnapshotPool(renderer.GetVmaAllocator(), renderer.GetMemoryTracker(), QueryVulkanContextInfo(renderer).device,
-          kEventSnapshotSlotBudget, kGpuTimingFramesInFlight)
+    , m_timestampPool(QueryVulkanContextInfoForRenderGraph(renderer).device, renderer,
+          QueryVulkanContextInfoForRenderGraph(renderer).graphicsQueueFamily,
+          QueryVulkanContextInfoForRenderGraph(renderer).timestampCapability, kSynchronousTimingSlotBudget,
+          kPipelinedTimingSlotBudget, kGpuTimingFramesInFlight)
+    , m_eventSnapshotPool(renderer.GetVmaAllocator(), renderer.GetMemoryTracker(),
+          QueryVulkanContextInfoForRenderGraph(renderer).device, kEventSnapshotSlotBudget, kGpuTimingFramesInFlight)
 {
     // editor-core-separation-26 campaign, PHASE6 - see RenderGraph.h's own
     // m_renderer doc comment.

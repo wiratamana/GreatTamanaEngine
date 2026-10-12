@@ -115,7 +115,6 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
         std::move(boneMatricesBuffer), {} };
 
     const std::uint32_t vertexCount = static_cast<std::uint32_t>(data.bindPositions.size());
-    const VkDevice device = renderer.GetVulkanContextInfo().device;
 
     entry.outputGroups.reserve(groups.size());
 
@@ -160,7 +159,7 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
         if (group.textured && entry.uvBuffer.has_value()) {
             writes.push_back(ComputeDescriptorWrite::StorageBuffer(4, entry.uvBuffer->Native()));
         }
-        outputGroup.descriptorSet.Rewrite(device, writes);
+        outputGroup.descriptorSet.Rewrite(writes);
 
         // Build a GPU-skinned Mesh PER PART in this group, all sharing this
         // group's own output vertex buffer - mirrors the CPU path's own

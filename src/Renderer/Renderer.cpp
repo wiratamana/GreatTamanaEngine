@@ -527,12 +527,12 @@ ComputePipeline Renderer::CreateComputePipeline(const std::string& shaderSpirvPa
     return m_resources.CreateComputePipeline(shaderSpirvPath, descriptorSetLayouts, pushConstantRange);
 }
 
-VkDescriptorSet Renderer::AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const
+ComputeDescriptorSet Renderer::AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const
 {
     return m_resources.AllocateComputeDescriptorSet(layout);
 }
 
-VkDescriptorSet Renderer::AllocateComputeDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const
+ComputeDescriptorSet Renderer::AllocateComputeDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const
 {
     return m_resources.AllocateComputeDescriptorSet(Native(layoutHandle));
 }
@@ -675,6 +675,17 @@ Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const
     // PHASE2 - mirrors timestampCapability immediately above.
     info.supportsDrawIndirectCount = m_device.SupportsDrawIndirectCount();
     return info;
+}
+
+Renderer::VulkanContextInfo Renderer::GetImGuiVulkanBackendInfo() const
+{
+    // private-to-private call, no friend needed here. gte_core (which this
+    // translation unit is part of) builds with NO ImGui include path at
+    // all - this method deliberately returns plain Vulkan values instead of
+    // filling an ImGui_ImplVulkan_InitInfo directly, so the Editor-only
+    // caller (which DOES have ImGui available) does that trivial field copy
+    // itself.
+    return GetVulkanContextInfo();
 }
 
 GpuMemoryTracker::Totals Renderer::GetMemoryTotals() const

@@ -38,7 +38,7 @@ ComputeDescriptorWrite ComputeDescriptorWrite::CombinedImageSampler(
     return write;
 }
 
-void ComputeDescriptorSet::Rewrite(VkDevice device, const std::vector<ComputeDescriptorWrite>& writes) const
+void ComputeDescriptorSet::Rewrite(const std::vector<ComputeDescriptorWrite>& writes) const
 {
     assert(m_descriptorSet != VK_NULL_HANDLE && "ComputeDescriptorSet::Rewrite() called on an invalid descriptor set");
     if (writes.empty()) {
@@ -90,7 +90,7 @@ void ComputeDescriptorSet::Rewrite(VkDevice device, const std::vector<ComputeDes
     }
 
     vkUpdateDescriptorSets(
-        device, static_cast<std::uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+        m_device, static_cast<std::uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 }
 
 } // namespace gte

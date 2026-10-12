@@ -2,6 +2,7 @@
 
 #include "../../Renderer/RenderGraph/RenderGraphTypes.h" // rg::TextureHandle - real struct.
 #include "../../Core/GraphicsHandles.h"
+#include "../../Renderer/ComputeDescriptorSet.h"
 #include "../../Renderer/Pipeline.h"
 
 #include <volk.h>
@@ -42,7 +43,7 @@ public:
 private:
     void EnsurePipeline(Renderer& renderer);
     void Reset();
-    VkDescriptorSet EnsureViewDescriptorSet(Renderer& renderer, const char* viewKey);
+    ComputeDescriptorSet EnsureViewDescriptorSet(Renderer& renderer, const char* viewKey);
 
     Renderer* m_renderer = nullptr; // Non-owning - needed to destroy m_compositeSetLayoutHandle.
 
@@ -51,11 +52,12 @@ private:
     DescriptorSetLayoutHandle m_compositeSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
 
     // One descriptor set per calling view - never collapse into one shared
-    // VkDescriptorSet, see this class's own comment above. Allocated
+    // descriptor set, see this class's own comment above. Allocated
     // directly against m_compositeSetLayoutHandle via
     // Renderer::AllocateComputeDescriptorSet() - no second, hand-built
-    // VkDescriptorSetLayout of its own anymore.
-    std::unordered_map<std::string, VkDescriptorSet> m_descriptorSetsByView;
+    // VkDescriptorSetLayout of its own anymore. ComputeDescriptorSet already
+    // binds its own owning VkDevice - this class never touches one directly.
+    std::unordered_map<std::string, ComputeDescriptorSet> m_descriptorSetsByView;
 };
 
 } // namespace gte

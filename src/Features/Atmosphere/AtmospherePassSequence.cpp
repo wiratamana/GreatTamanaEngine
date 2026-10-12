@@ -52,23 +52,24 @@ AtmosphereViewLutHandles AddAtmosphereViewLutPasses(rg::RenderGraphBuilder& buil
     return result;
 }
 
-std::function<void(VkCommandBuffer)> MakeRecordSkyBackgroundCallback(AtmosphereLutRenderer& atmosphereLutRenderer,
+std::function<void(rg::CommandBuffer&)> MakeRecordSkyBackgroundCallback(AtmosphereLutRenderer& atmosphereLutRenderer,
     Renderer& renderer, const Mat4& viewProjection, const AtmosphereParametersGpu& atmosphereParameters,
     const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure)
 {
     return [&atmosphereLutRenderer, &renderer, viewProjection, atmosphereParameters, frameUniforms, skyViewLutName,
-               skyExposure](VkCommandBuffer cmd) {
+               skyExposure](rg::CommandBuffer& cmd) {
         atmosphereLutRenderer.DrawSkyBackground(renderer, cmd, viewProjection, atmosphereParameters, frameUniforms,
             skyViewLutName, skyExposure);
     };
 }
 
 rg::TextureHandle AddAtmosphereCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-    AtmosphereLutRenderer& atmosphereLutRenderer, rg::TextureHandle sourceColorHandle, VkSampler sourceColorSampler,
-    rg::TextureHandle sourceDepthHandle, VkImageView sourceDepthView, VkSampler sourceDepthSampler,
-    rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
-    const AtmosphereFrameUniforms& frameUniforms, Vec3 eyeWorldPosition, float aerialPerspectiveStrength,
-    float maxDistanceKm, float depthExponent, VkExtent2D extent, const char* outputTextureName, rg::ViewScope viewScope,
+    AtmosphereLutRenderer& atmosphereLutRenderer, rg::TextureHandle sourceColorHandle,
+    SamplerHandle sourceColorSampler, rg::TextureHandle sourceDepthHandle, ImageViewHandle sourceDepthView,
+    SamplerHandle sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
+    const char* aerialPerspectiveVolumeName, const AtmosphereFrameUniforms& frameUniforms,
+    Vec3 eyeWorldPosition, float aerialPerspectiveStrength, float maxDistanceKm, float depthExponent,
+    Extent2D extent, const char* outputTextureName, rg::ViewScope viewScope,
     rg::RenderPassToggleRegistry* toggleRegistry)
 {
     return atmosphereLutRenderer.AddAerialPerspectiveCompositePass(builder, renderer, sourceColorHandle,

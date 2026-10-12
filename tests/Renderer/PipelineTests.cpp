@@ -44,7 +44,7 @@ TEST(PipelineTest, SceneServicesSetLayoutProducesHasSceneServicesSetTrueWithSynt
     }
 
     Renderer& renderer = fixture.GetRenderer();
-    const VkDevice device = renderer.GetVulkanContextInfo().device;
+    const VkDevice device = fixture.Device();
 
     // A small, throwaway, 1-binding layout - stands in for Core's real
     // SceneServicesDescriptorSet::Layout() (PHASE2), which this phase does
@@ -79,7 +79,7 @@ TEST(PipelineTest, UnchangedConstructionWithNoSceneServicesSetLayoutReportsHasSc
     }
 
     Renderer& renderer = fixture.GetRenderer();
-    const VkDevice device = renderer.GetVulkanContextInfo().device;
+    const VkDevice device = fixture.Device();
 
     // Every positional argument up through debugName, exactly as any
     // pre-existing call site would supply - sceneServicesSetLayout left at
@@ -103,7 +103,7 @@ TEST(PipelineTest, MaterialSetLayoutProducesHasMaterialSetTrue)
     }
 
     Renderer& renderer = fixture.GetRenderer();
-    const VkDevice device = renderer.GetVulkanContextInfo().device;
+    const VkDevice device = fixture.Device();
 
     // A small, throwaway, 1-binding layout - only Pipeline's own
     // materialSetLayout-is-non-null bookkeeping is under test here, not
@@ -129,7 +129,7 @@ TEST(PipelineTest, UnchangedConstructionWithNoMaterialSetLayoutReportsHasMateria
     }
 
     Renderer& renderer = fixture.GetRenderer();
-    const VkDevice device = renderer.GetVulkanContextInfo().device;
+    const VkDevice device = fixture.Device();
 
     // Every positional argument up through debugName, exactly as any
     // pre-existing call site would supply - materialSetLayout left at its
@@ -149,7 +149,7 @@ void SubmitIndirectAgainstPipelineWithSceneServicesSetBindsSetOne()
 {
     HeadlessRenderGraphFixture fixture;
     Renderer& renderer = fixture.GetRenderer();
-    const VkDevice device = renderer.GetVulkanContextInfo().device;
+    const VkDevice device = fixture.Device();
 
     const VkDescriptorSetLayout throwawaySceneServicesLayout =
         DescriptorSetLayoutBuilder(device).AddCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT).Build();
@@ -178,7 +178,7 @@ void SubmitIndirectAgainstPipelineWithSceneServicesSetBindsSetOne()
         vertices, sizeof(vertices), 3, indices, sizeof(indices), 3, "RendererSubmitIndirectTest.Mesh");
 
     const VkDescriptorSet instanceBufferDescriptorSet =
-        renderer.AllocateComputeDescriptorSet(renderer.InstanceBufferDescriptorSetLayout());
+        renderer.AllocateComputeDescriptorSet(renderer.InstanceBufferDescriptorSetLayout()).Native();
 
     const VkCommandBuffer cmd = renderer.BeginOffscreenRenderGraphRecording();
     renderer.BeginGraphPassRecording(cmd, {});

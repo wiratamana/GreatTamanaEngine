@@ -85,12 +85,10 @@ public:
     void Reset();
 
 private:
-    // Captured from whichever Renderer was passed to the most recent
-    // Resolve() call - used only to vkDeviceWaitIdle() before releasing a
-    // stale texture/descriptor in Reset(). Deliberately a plain VkDevice,
-    // not a Renderer&, so this object never depends on Renderer outliving
-    // it (same reasoning as ImGuiEditorLayer's own m_device member).
-    VkDevice m_device = VK_NULL_HANDLE;
+    // Non-owning - captured from whichever Renderer was passed to the most
+    // recent Resolve() call, used only to call WaitForGpuIdle() before
+    // releasing a stale texture/descriptor in Reset().
+    Renderer* m_renderer = nullptr;
 
     std::string m_cachedPath;
     std::filesystem::file_time_type m_cachedWriteTime{};

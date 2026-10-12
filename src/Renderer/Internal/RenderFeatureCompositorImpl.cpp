@@ -782,7 +782,7 @@ void RenderFeatureCompositor::Impl::DispatchBlend(rg::RenderGraphBuilder& builde
             const rg::PassContext::ResolvedTexture srcResolved = ctx.resolveTexture(srcIn);
             const rg::PassContext::ResolvedTexture destResolved = ctx.resolveTexture(destination);
 
-            state.blendDescriptorSet.Rewrite(device,
+            state.blendDescriptorSet.Rewrite(
                 std::vector<ComputeDescriptorWrite>{
                     ComputeDescriptorWrite::CombinedImageSampler(0, dstResolved.view, dstInSampler),
                     ComputeDescriptorWrite::CombinedImageSampler(1, srcResolved.view, srcInSampler),

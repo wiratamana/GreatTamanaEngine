@@ -150,7 +150,6 @@ private:
     static constexpr std::uint32_t kLocalSizeY = 16;
 
     bool m_initialized = false;
-    VkDevice m_device = VK_NULL_HANDLE;
     VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
     std::optional<ComputePipeline> m_pipeline;
     ComputeDescriptorSet m_descriptorSet;

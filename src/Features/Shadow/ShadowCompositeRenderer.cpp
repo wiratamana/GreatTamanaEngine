@@ -88,13 +88,13 @@ void ShadowCompositeRenderer::EnsurePipeline(Renderer& renderer)
     m_pipeline = std::make_unique<Pipeline>(renderer.CreatePipeline(desc, vertSpirv, fragSpirv));
 }
 
-VkDescriptorSet ShadowCompositeRenderer::EnsureViewDescriptorSet(Renderer& renderer, const char* viewKey)
+ComputeDescriptorSet ShadowCompositeRenderer::EnsureViewDescriptorSet(Renderer& renderer, const char* viewKey)
 {
     const auto existing = m_descriptorSetsByView.find(viewKey);
     if (existing != m_descriptorSetsByView.end()) {
         return existing->second;
     }
-    const VkDescriptorSet descriptorSet = renderer.AllocateComputeDescriptorSet(m_compositeSetLayoutHandle);
+    const ComputeDescriptorSet descriptorSet = renderer.AllocateComputeDescriptorSet(m_compositeSetLayoutHandle);
     return m_descriptorSetsByView.emplace(viewKey, descriptorSet).first->second;
 }
 
@@ -104,7 +104,7 @@ void ShadowCompositeRenderer::AddCompositePass(rg::RenderGraphBuilder& builder, 
 {
     const rg::RenderFeatureScope scope(builder, "Shadow");
     EnsurePipeline(renderer);
-    const VkDescriptorSet descriptorSet = EnsureViewDescriptorSet(renderer, viewKey);
+    const ComputeDescriptorSet descriptorSet = EnsureViewDescriptorSet(renderer, viewKey);
 
     builder.AddRenderPass(
         "Shadow.Composite.Draw", rg::PassKind::Graphics, rg::ViewScope::Shared, rg::RenderPassCategory::General,
@@ -121,8 +121,7 @@ void ShadowCompositeRenderer::AddCompositePass(rg::RenderGraphBuilder& builder, 
             const rg::PassContext::ResolvedTexture sceneColor = ctx.resolveTexture(sceneColorHandle);
             const rg::PassContext::ResolvedTexture mask = ctx.resolveTexture(maskHandle);
 
-            ComputeDescriptorSet wrapped(descriptorSet);
-            wrapped.Rewrite(m_renderer->GetVulkanContextInfo().device,
+            descriptorSet.Rewrite(
                 std::vector<ComputeDescriptorWrite>{
                     ComputeDescriptorWrite::CombinedImageSampler(0, sceneColor.view, sceneColorSampler),
                     ComputeDescriptorWrite::CombinedImageSampler(1, mask.view, mask.sampler),
@@ -134,7 +133,7 @@ void ShadowCompositeRenderer::AddCompositePass(rg::RenderGraphBuilder& builder, 
             auto cmd = ctx.Cmd();
             cmd.BindPipeline(*m_pipeline);
             cmd.SetViewportAndScissor(extent.width, extent.height);
-            cmd.BindDescriptorSet(/*setIndex=*/0, descriptorSet);
+            cmd.BindDescriptorSet(/*setIndex=*/0, descriptorSet.Native());
             cmd.PushConstants(pushConstants, ShaderStageMask::Fragment);
             cmd.Draw(/*vertexCount=*/3);
         },

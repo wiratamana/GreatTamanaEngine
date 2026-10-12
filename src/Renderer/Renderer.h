@@ -39,11 +39,18 @@ namespace gte::rg {
 class CommandBuffer;
 class RenderGraph;
 class RenderGraphBuilder;
+class RenderGraphPersistentResourceCache;
 } // namespace gte::rg
 
 namespace gte {
 
+class AtmosphereLutRenderer;
+class GpuDrivenBatchCache;
+class HeadlessRenderGraphFixture;
 class ISurfaceProvider;
+class RenderFeatureCompositor;
+class SceneServicesDescriptorSet;
+class VolumeTexturePreviewRenderer;
 
 // Owns the entire Vulkan pipeline for a surface (via ISurfaceProvider -
 // editor-core-separation-1 campaign, PHASE10, see
@@ -682,16 +689,14 @@ public:
     // see GpuResourceFactory::AllocateComputeDescriptorSet() for the full
     // reasoning (in particular why the returned set is never individually
     // freed).
-    VkDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
+    ComputeDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
 
     // Opaque-layout-input sibling of AllocateComputeDescriptorSet() above -
     // takes a DescriptorSetLayoutHandle (CreateDescriptorSetLayout() below)
     // instead of forcing a caller outside src/Renderer to ALSO hand-build a
     // second, duplicate raw VkDescriptorSetLayout purely to allocate
-    // against. Still returns a raw VkDescriptorSet, written via
-    // ComputeDescriptorSet::Rewrite() exactly like the overload above - same
-    // shared pool, never individually freed.
-    VkDescriptorSet AllocateComputeDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const;
+    // against. Same shared pool, never individually freed.
+    ComputeDescriptorSet AllocateComputeDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const;
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE2 - the ONE shared instance-buffer descriptor-set-layout every
@@ -1026,7 +1031,11 @@ public:
         // Renderer::SupportsDrawIndirectCount()'s own doc comment.
         bool supportsDrawIndirectCount = false;
     };
-    VulkanContextInfo GetVulkanContextInfo() const;
+    // GetVulkanContextInfo() itself is private below - every genuine need
+    // from outside src/Renderer has a real, opaque replacement
+    // (WaitForGpuIdle()/GetUiTextureHandle()/the SamplerHandle/
+    // ImageViewHandle/DescriptorSetHandle path/GetImGuiVulkanBackendInfo()
+    // below).
 
     // Call when the window has been resized (e.g. from a WindowResized
     // event) - marks the swapchain dirty so the next PresentViaRenderGraph()
@@ -1034,7 +1043,50 @@ public:
     // stale-sized swapchain.
     void OnResize(int width, int height);
 
+    // The ONE sanctioned bridge for Dear ImGui's own Vulkan backend init
+    // (ImGui_ImplVulkan_InitInfo) - a real, permanent, structurally
+    // different need than every other outside-Renderer caller above.
+    // Returns the same plain Vulkan values GetVulkanContextInfo() does, by
+    // a separate, narrowly-named public method - gte_core (which this
+    // class is part of) builds with no ImGui include path at all, so this
+    // deliberately never touches an ImGui type itself; the Editor-only
+    // caller (which does have ImGui available) copies these fields into
+    // its own ImGui_ImplVulkan_InitInfo directly.
+    VulkanContextInfo GetImGuiVulkanBackendInfo() const;
+
 private:
+    // Read-only snapshot of this Renderer's core Vulkan handles + swapchain
+    // format/image count - every genuine need from outside src/Renderer has
+    // a real, opaque replacement instead (see the friend list below for the
+    // narrow set of Renderer-tree collaborators still allowed direct
+    // access).
+    VulkanContextInfo GetVulkanContextInfo() const;
+
+    friend class rg::RenderGraph;
+    friend class rg::RenderGraphPersistentResourceCache;
+    friend class SceneServicesDescriptorSet;
+    friend class GpuDrivenBatchCache;
+    friend class VolumeTexturePreviewRenderer;
+    // Grants RenderFeatureCompositor::Impl too - same nested-class access
+    // rule as AtmosphereLutRenderer below (src/Renderer/Internal/RenderFeatureCompositorImpl.h).
+    friend class RenderFeatureCompositor;
+    // Grants AtmosphereLutRenderer::Impl too - a nested class inherits its
+    // enclosing class's own access rights, so no Feature-layer include is
+    // ever needed here (see AtmosphereLutRenderer.h/AtmosphereLutRendererImpl.h).
+    friend class AtmosphereLutRenderer;
+    // Test-only accessor - see tests/Fakes/HeadlessRenderGraphFixture.h.
+    friend class HeadlessRenderGraphFixture;
+
+    // rg::RenderGraph's own constructor needs this BEFORE its member-
+    // initializer-list can run (RenderGraphTimestampPool/RenderGraphEventSnapshotPool
+    // construction), so it cannot be a friended member CALL on an
+    // already-constructed RenderGraph - a free function instead. RenderGraph.h
+    // deliberately only forward-declares Renderer (avoids dragging the full
+    // Renderer.h onto every RenderGraph.h consumer), so this friend grant -
+    // plus the plain, ordinary declaration right after this class below -
+    // both live here instead, where VulkanContextInfo is already complete.
+    friend VulkanContextInfo QueryVulkanContextInfoForRenderGraph(Renderer& renderer);
+
     VulkanInstance m_instance;
     VulkanSurface m_surface;
     VulkanDevice m_device;
@@ -1102,5 +1154,12 @@ private:
     VkCommandBuffer m_currentGraphPassCmd = VK_NULL_HANDLE;
     std::function<void(bool, std::uint32_t, std::uint32_t)> m_currentGraphPassRecordDrawStats;
 };
+
+// Ordinary, plain-namespace-scope twin of the friend grant inside Renderer
+// above - rg::RenderGraph::RenderGraph() (RenderGraph.cpp) calls this,
+// unqualified, from within namespace gte::rg (ordinary nested-namespace
+// lookup reaches this enclosing gte::-scope declaration). Defined once, in
+// RenderGraph.cpp, right next to its only caller.
+Renderer::VulkanContextInfo QueryVulkanContextInfoForRenderGraph(Renderer& renderer);
 
 } // namespace gte

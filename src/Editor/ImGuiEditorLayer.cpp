@@ -69,7 +69,7 @@
 //     window) - see the constructor and RenderPlatformWindows() below.
 //   - the SDL3 platform backend (input) and Vulkan renderer backend
 //     (drawing), wired to the exact same device/swapchain format Renderer
-//     already uses (see Renderer::GetVulkanContextInfo())
+//     already uses (see Renderer::GetImGuiVulkanBackendInfo())
 //   - TWO RenderTextures - m_gameView ("the Game view") and m_sceneView
 //     ("the Scene view") - that Game's camera renders into each frame
 //     instead of the swapchain, one per panel, each tracking that panel's
@@ -145,8 +145,6 @@ public:
             static_cast<std::uint32_t>(window.Width()), static_cast<std::uint32_t>(window.Height()) };
         m_ctx.desiredSceneExtent = m_ctx.desiredExtent;
 
-        const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
-        m_device = context.device;
         m_renderer = &renderer; // Non-owning - needed by Release*Descriptor() below, which take no renderer parameter.
 
         // Must be installed before ImGui::CreateContext() below - see
@@ -235,6 +233,13 @@ public:
             throw std::runtime_error("ImGui_ImplSDL3_InitForVulkan failed.");
         }
 
+        // The ONE place this file ever needs Renderer's own Vulkan context -
+        // a dedicated, narrowly-scoped bridge (GetVulkanContextInfo() itself
+        // stays private to src/Renderer). `context` is a LOCAL here, kept
+        // alive for the rest of this constructor, so `pColorAttachmentFormats`
+        // below stays valid through the real ImGui_ImplVulkan_Init() call.
+        const Renderer::VulkanContextInfo context = renderer.GetImGuiVulkanBackendInfo();
+
         ImGui_ImplVulkan_InitInfo initInfo{};
         initInfo.ApiVersion = context.apiVersion;
         initInfo.Instance = context.instance;
@@ -278,8 +283,8 @@ public:
         // Make sure the GPU is done with anything ImGui's Vulkan backend
         // (or our own AddTexture() descriptors) might still be referencing
         // before tearing any of it down.
-        if (m_device != VK_NULL_HANDLE) {
-            vkDeviceWaitIdle(m_device);
+        if (m_renderer != nullptr) {
+            m_renderer->WaitForGpuIdle();
         }
 
         ReleaseGameViewDescriptor();
@@ -411,9 +416,7 @@ public:
                 // border), so a full device stall here is the simplest
                 // correct thing - not a per-frame cost. Same reasoning
                 // OnWindowResized used to apply for OS window resizes.
-                if (m_device != VK_NULL_HANDLE) {
-                    vkDeviceWaitIdle(m_device);
-                }
+                m_renderer->WaitForGpuIdle();
                 ReleaseGameViewDescriptor();
                 m_gameView.Resize(
                     static_cast<int>(m_ctx.desiredExtent.width), static_cast<int>(m_ctx.desiredExtent.height));
@@ -437,9 +440,7 @@ public:
         if (m_ctx.desiredSceneExtent.width > 0 && m_ctx.desiredSceneExtent.height > 0) {
             const VkExtent2D current = m_sceneView.Extent();
             if (current.width != m_ctx.desiredSceneExtent.width || current.height != m_ctx.desiredSceneExtent.height) {
-                if (m_device != VK_NULL_HANDLE) {
-                    vkDeviceWaitIdle(m_device);
-                }
+                m_renderer->WaitForGpuIdle();
                 ReleaseSceneViewDescriptor();
                 m_sceneView.Resize(static_cast<int>(m_ctx.desiredSceneExtent.width),
                     static_cast<int>(m_ctx.desiredSceneExtent.height));
@@ -947,7 +948,6 @@ private:
         }
     }
 
-    VkDevice m_device = VK_NULL_HANDLE;
     Renderer* m_renderer = nullptr; // Non-owning - see constructor comment.
     ImGuiContext* m_context = nullptr;
     RenderTexture m_gameView;

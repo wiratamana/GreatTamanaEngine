@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Buffer.h"
+#include "ComputeDescriptorSet.h"
 #include "ComputePipeline.h"
 #include "MaterialTexture.h"
 #include "Memory/GpuMemoryTracker.h"
@@ -386,7 +387,7 @@ public:
     // sets (see MaterialTexture.h's own comment), a set allocated here is
     // NEVER individually freed - only the whole m_computeDescriptorPool at
     // once, when this factory itself is destroyed.
-    VkDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
+    ComputeDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
 
     // See Renderer::GetMemoryTotals()/GetMemoryResources().
     GpuMemoryTracker::Totals GetMemoryTotals() const;

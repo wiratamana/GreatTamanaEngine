@@ -64,10 +64,8 @@ TEST(VolumeTextureExampleFeatureTest, PerCellParallelFillWritesEveryCellsOwnCoor
         static_cast<int>(kSize), static_cast<int>(kSize), static_cast<int>(kSize), VK_FORMAT_R16G16B16A16_SFLOAT, kVolumeName);
 
     ComputePipeline pipeline = fixture.GetRenderer().CreateComputePipeline(GTE_TEST_FROXEL_PERCELL_SPV_PATH);
-    const VkDescriptorSet rawSet =
+    ComputeDescriptorSet descriptorSet =
         fixture.GetRenderer().AllocateComputeDescriptorSet(pipeline.ReflectedDescriptorSetLayout(0));
-    ComputeDescriptorSet descriptorSet(rawSet);
-    const VkDevice device = fixture.GetRenderer().GetVulkanContextInfo().device;
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
         const VolumeTextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), VK_IMAGE_LAYOUT_UNDEFINED);
@@ -78,7 +76,7 @@ TEST(VolumeTextureExampleFeatureTest, PerCellParallelFillWritesEveryCellsOwnCoor
             },
             [&](PassContext& ctx) {
                 const PassContext::ResolvedVolumeTexture dest = ctx.resolveVolumeTexture(handle);
-                descriptorSet.Rewrite(device, { ComputeDescriptorWrite::StorageImage(0, dest.view) });
+                descriptorSet.Rewrite({ ComputeDescriptorWrite::StorageImage(0, dest.view) });
 
                 auto cmd = ctx.Cmd();
                 cmd.BindComputePipeline(pipeline);
@@ -137,10 +135,8 @@ TEST(VolumeTextureExampleFeatureTest, PerColumnSequentialFillMatchesTheCpuOracle
         static_cast<int>(kWidth), static_cast<int>(kHeight), static_cast<int>(kDepth), VK_FORMAT_R16G16B16A16_SFLOAT, kVolumeName);
 
     ComputePipeline pipeline = fixture.GetRenderer().CreateComputePipeline(GTE_TEST_FROXEL_PERCOLUMN_SPV_PATH);
-    const VkDescriptorSet rawSet =
+    ComputeDescriptorSet descriptorSet =
         fixture.GetRenderer().AllocateComputeDescriptorSet(pipeline.ReflectedDescriptorSetLayout(0));
-    ComputeDescriptorSet descriptorSet(rawSet);
-    const VkDevice device = fixture.GetRenderer().GetVulkanContextInfo().device;
 
     struct PushConstants {
         float maxDistanceKm;
@@ -157,7 +153,7 @@ TEST(VolumeTextureExampleFeatureTest, PerColumnSequentialFillMatchesTheCpuOracle
             },
             [&](PassContext& ctx) {
                 const PassContext::ResolvedVolumeTexture dest = ctx.resolveVolumeTexture(handle);
-                descriptorSet.Rewrite(device, { ComputeDescriptorWrite::StorageImage(0, dest.view) });
+                descriptorSet.Rewrite({ ComputeDescriptorWrite::StorageImage(0, dest.view) });
 
                 auto cmd = ctx.Cmd();
                 cmd.BindComputePipeline(pipeline);

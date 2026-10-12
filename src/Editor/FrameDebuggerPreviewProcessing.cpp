@@ -87,9 +87,6 @@ void FrameDebuggerPreviewRenderer::EnsureInitialized(Renderer& renderer)
         return;
     }
 
-    const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
-    m_device = context.device;
-
     // task_manager/better-render-pass-1 campaign, PHASE6 - path-only,
     // reflection-based pipeline creation (PHASE2) replaces the old hand-built
     // DescriptorSetLayoutBuilder + manual VkPushConstantRange entirely.
@@ -100,7 +97,7 @@ void FrameDebuggerPreviewRenderer::EnsureInitialized(Renderer& renderer)
     m_pipeline.emplace(renderer.CreateComputePipeline("shaders/FrameDebuggerPreview.comp.spv"));
     m_descriptorSetLayout = m_pipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 
-    m_descriptorSet = ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(m_descriptorSetLayout));
+    m_descriptorSet = renderer.AllocateComputeDescriptorSet(m_descriptorSetLayout);
 
     m_initialized = true;
 }
@@ -142,7 +139,7 @@ const Texture2D& FrameDebuggerPreviewRenderer::RenderPreview(Renderer& renderer,
     // to rewrite alongside binding 0 every time - mirrors
     // VolumeTexturePreviewRenderer::RenderPreview()'s own identical
     // reasoning.
-    m_descriptorSet.Rewrite(m_device,
+    m_descriptorSet.Rewrite(
         std::vector<ComputeDescriptorWrite>{
             ComputeDescriptorWrite::CombinedImageSampler(0, source.View(), source.Sampler()),
             ComputeDescriptorWrite::StorageImage(1, m_outputTexture->View()),

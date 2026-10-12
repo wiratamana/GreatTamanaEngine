@@ -42,7 +42,6 @@ private:
     };
     ViewState& EnsureViewState(Renderer& renderer, const char* outputName, VkExtent2D extent);
 
-    VkDevice m_device = VK_NULL_HANDLE;
     std::optional<ComputePipeline> m_pipeline;
     std::unordered_map<std::string, ViewState> m_viewStates;
 };

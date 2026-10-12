@@ -554,7 +554,7 @@ MaterialTexture GpuResourceFactory::CreateMaterialTexture2D(
     return MaterialTexture{ std::move(texture), descriptorSet };
 }
 
-VkDescriptorSet GpuResourceFactory::AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const
+ComputeDescriptorSet GpuResourceFactory::AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const
 {
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -568,7 +568,7 @@ VkDescriptorSet GpuResourceFactory::AllocateComputeDescriptorSet(VkDescriptorSet
             "GpuResourceFactory::AllocateComputeDescriptorSet: vkAllocateDescriptorSets failed "
             "(consider raising GpuResourceFactory.cpp's compute descriptor pool sizes).");
     }
-    return descriptorSet;
+    return ComputeDescriptorSet(descriptorSet, m_device); // Device bound here, once - callers never see VkDevice.
 }
 
 GpuMemoryTracker::Totals GpuResourceFactory::GetMemoryTotals() const

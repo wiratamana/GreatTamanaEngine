@@ -173,8 +173,8 @@ void AssetPreviewTexture::Reset()
     // entirely when nothing is actually cached yet (e.g. the very first
     // call), so a fresh AssetPreviewTexture never pays this cost for
     // nothing.
-    if ((m_texture || m_descriptor != VK_NULL_HANDLE) && m_device != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(m_device);
+    if ((m_texture || m_descriptor != VK_NULL_HANDLE) && m_renderer != nullptr) {
+        m_renderer->WaitForGpuIdle();
     }
 
     if (m_descriptor != VK_NULL_HANDLE) {
@@ -192,7 +192,7 @@ void AssetPreviewTexture::Reset()
 std::optional<AssetPreviewTexture::Preview> AssetPreviewTexture::Resolve(
     Renderer& renderer, const std::string& absolutePath)
 {
-    m_device = renderer.GetVulkanContextInfo().device;
+    m_renderer = &renderer;
 
     std::error_code timeEc;
     const std::filesystem::file_time_type writeTime =

@@ -173,7 +173,7 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
     // refreshed every time. Binding 1 (the output image) never actually
     // changes across calls since the SAME output texture is reused every
     // time, but costs nothing extra to rewrite alongside binding 0.
-    m_descriptorSet.Rewrite(m_device,
+    m_descriptorSet.Rewrite(
         std::vector<ComputeDescriptorWrite>{
             ComputeDescriptorWrite::CombinedImageSampler(0, volume.imageView, m_volumeSampler),
             ComputeDescriptorWrite::StorageImage(1, m_outputTexture->View()),

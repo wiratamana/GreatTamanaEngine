@@ -57,8 +57,8 @@ FrameDebuggerPanel::~FrameDebuggerPanel()
     // case m_previewDescriptor happens to be null at shutdown time, and
     // those must be just as safe to destroy as m_previewDescriptor's own
     // wrapped texture.
-    if (m_device != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(m_device);
+    if (m_frameRenderer != nullptr) {
+        m_frameRenderer->WaitForGpuIdle();
     }
     ReleasePreviewDescriptor();
     // task_manager/frame-debugger-9 campaign, PHASE3 - defense-in-depth only
@@ -86,8 +86,8 @@ void FrameDebuggerPanel::ReleasePreviewDescriptor()
 void FrameDebuggerPanel::ReleaseShaderPropertyTexturePreview()
 {
     if ((m_shaderPropertyPreviewTexture.has_value() || m_shaderPropertyPreviewDescriptor != VK_NULL_HANDLE)
-        && m_device != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(m_device); // Mirrors AssetPreviewTexture::Reset()'s own identical, already-accepted tradeoff.
+        && m_frameRenderer != nullptr) {
+        m_frameRenderer->WaitForGpuIdle(); // Mirrors AssetPreviewTexture::Reset()'s own identical, already-accepted tradeoff.
     }
     if (m_shaderPropertyPreviewDescriptor != VK_NULL_HANDLE) {
         ImGui_ImplVulkan_RemoveTexture(m_shaderPropertyPreviewDescriptor);
@@ -1142,11 +1142,6 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     m_frameGameViewComposited = compositedGameView; // PHASE1 (frame-debugger-4) - nullable, see header comment.
     m_frameToggleRegistry = toggleRegistry; // editor-core-separation-21 campaign, PHASE5 - nullable, see header comment.
     m_frameBlackboard = offscreenBlackboard; // editor-core-separation-22 campaign, PHASE6 - nullable, see header comment.
-
-    // PHASE4 - refreshed unconditionally every call, cheap, mirrors
-    // BoneViewerWindow's own m_device precedent - only ever actually read by
-    // this class's own destructor (see ~FrameDebuggerPanel()).
-    m_device = renderer.GetVulkanContextInfo().device;
 
     // Per-draw event capture - cheap/idempotent, see
     // FrameDebuggerCaptureContext::InitializeEventCapture()'s own doc

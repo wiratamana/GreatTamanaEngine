@@ -56,8 +56,6 @@ Editor\Panels\RenderGraphPanel.cpp
 Editor\Panels\RenderGraphPanel.h
 Editor\Panels\ScenePanel.cpp
 Editor\Panels\ScenePanel.h
-Editor\RenderGraphTexturePreview.cpp
-Editor\RenderGraphTexturePreview.h
 Editor\SceneGridMath.cpp
 Editor\SceneGridRenderer.cpp
 Editor\SceneGridRenderer.h
@@ -72,17 +70,7 @@ Encoding\HdrColorVisualization.h
 Encoding\PixelConversion.h
 Encoding\SingleChannelVisualization.cpp
 Encoding\SingleChannelVisualization.h
-Features\Atmosphere\AtmosphereAerialPerspectiveCompositeMath.h
 Features\Atmosphere\AtmosphereFeature.cpp
-Features\Atmosphere\AtmosphereLutRenderer.cpp
-Features\Atmosphere\AtmosphereLutRenderer.h
-Features\Atmosphere\AtmosphereMath.h
-Features\Atmosphere\AtmospherePassSequence.cpp
-Features\Atmosphere\AtmospherePassSequence.h
-Features\Atmosphere\AtmospherePassToggleLogic.h
-Features\Atmosphere\AtmosphereSkyBackgroundRenderer.cpp
-Features\Atmosphere\AtmosphereSkyBackgroundRenderer.h
-Features\Atmosphere\AtmosphereTypes.h
 Features\Atmosphere\Editor\AtmosphereAerialPerspectiveLutInspection.cpp
 Features\Atmosphere\Editor\AtmosphereAerialPerspectiveLutInspection.h
 Features\Atmosphere\Editor\AtmosphereAerialPerspectiveSkyPurityValidation.cpp

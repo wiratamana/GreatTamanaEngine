@@ -1,31 +1,22 @@
 #pragma once
 
-// Atmosphere Scattering + Aerial Perspective campaign, Phase 7
-// (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
-// - the PERMANENT, always-running per-frame atmosphere pass sequence,
-// relocated out of Application.cpp's own temporary
-// `// TODO(ATMOSPHERE_PHASE7): relocate...` validation call site (Phases
-// 3-6's own completion reports). Mirrors src/Application/RenderPasses.h's
-// existing role/shape EXACTLY: thin, Application-layer free functions
-// Application::Run() calls directly, in a fixed order, from inside its own
-// offscreen-regime `build` lambda - deliberately NOT a single giant
-// orchestration function, so each granular step's own ordering/dependency
-// requirements stay visible at the call site (RenderPasses.h's own
-// AddGameViewPass()/AddSceneViewPass()/AddPresentPass()/AddGpuSkinningPasses()
-// are the direct precedent for this shape).
+// The PERMANENT, always-running per-frame atmosphere pass sequence - thin,
+// Application-layer free functions called directly, in a fixed order, from
+// the offscreen-regime build lambda. Kept separate from AtmosphereLutRenderer
+// itself: AtmosphereLutRenderer must never know which ECS Registry/active
+// Camera is "the Game View" vs. "the Scene View" - that Editor-aware
+// knowledge lives here instead.
 //
-// Kept separate from AtmosphereLutRenderer itself for the same reason
-// RenderPasses.h keeps this logic out of Renderer: AtmosphereLutRenderer must
-// never know which ECS Registry/active Camera is "the Game View" vs. "the
-// Scene View" - that Editor-aware knowledge lives here instead.
+// Pure pass-through plumbing, Vulkan-free - every opaque type here is
+// forwarded straight into AtmosphereLutRenderer's own matching method.
 
+#include "../../Core/Extent.h"
+#include "../../Core/GraphicsHandles.h"
 #include "../../ECS/Registry.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
 #include "AtmosphereLutRenderer.h"
 #include "../../Renderer/RenderGraph/RenderGraphTypes.h"
-
-#include <volk.h>
 
 #include <functional>
 
@@ -34,19 +25,16 @@ namespace gte {
 class Renderer;
 
 namespace rg {
+class CommandBuffer;
 class RenderGraphBuilder;
 class RenderPassToggleRegistry;
 } // namespace rg
 
-// Declares the SHARED (once per FRAME, never once per view) Transmittance
-// LUT (Phase 3) + Multi-Scattering LUT (Phase 4) compute passes into
-// `builder` - the Transmittance/Multi-Scattering LUTs are view-INDEPENDENT,
-// unlike the Sky-View LUT/Aerial Perspective volume below (per this
-// phase's own Step 3.1). The CALLER must add BOTH returned handles to this
-// Execute() call's own outputs root set, or their writes are silently
-// culled the next time RenderGraphCompiler::Compile() runs (same contract
-// as AtmosphereLutRenderer's own AddTransmittanceLutPass()/
-// AddMultiScatteringLutPass()).
+// Declares the SHARED (once per FRAME, never once per view) Transmittance +
+// Multi-Scattering LUT compute passes into `builder` - view-INDEPENDENT,
+// unlike the Sky-View LUT/Aerial Perspective volume below. The caller must
+// add BOTH returned handles to this Execute() call's own outputs root set,
+// or their writes are silently culled.
 struct AtmosphereSharedLutHandles {
     rg::TextureHandle transmittanceLutHandle;
     rg::TextureHandle multiScatteringLutHandle;
@@ -55,33 +43,20 @@ AtmosphereSharedLutHandles AddAtmosphereSharedLutPasses(rg::RenderGraphBuilder& 
     AtmosphereLutRenderer& atmosphereLutRenderer, const AtmosphereParametersGpu& atmosphereParameters,
     rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
-// Resolves ONE view's own AtmosphereFrameUniforms (via
-// AtmosphereLutRenderer.h's ResolveAtmosphereFrameUniforms(), still Phase
-// 5's hardcoded sun-direction placeholder - `registry` is accepted purely
-// so a future Phase 8 can look up a real DirectionalLight from it, per
-// that function's own stable-signature contract) and declares that view's
-// own Sky-View LUT (Phase 5) + Aerial Perspective Volume (Phase 6)
-// passes - called ONCE PER VIEW (Game View and, now that this phase wires
-// it up for real, Scene View too). `viewProjection` is this view's own
-// CURRENT combined view * projection matrix - baked into the returned
-// frameUniforms.invViewProjection for the Aerial Perspective volume's own
-// froxel-ray reconstruction, and reused again later (unchanged) by
+// Resolves ONE view's own AtmosphereFrameUniforms and declares that view's
+// own Sky-View LUT + Aerial Perspective Volume passes - called ONCE PER
+// VIEW (Game View and Scene View). `viewProjection` is this view's own
+// current combined view * projection matrix - baked into the returned
+// frameUniforms.invViewProjection, and reused again later (unchanged) by
 // MakeRecordSkyBackgroundCallback()/AddAtmosphereCompositePass() for this
-// exact same view. `atmosphereSettings` (atmosphere-scattering-2 campaign
-// Phase 1) supplies the 4 Aerial Perspective froxel-volume ray-march
-// tunables (max distance/depth exponent/samples-per-slice/scattering
-// exaggeration) set onto `result.frameUniforms` from INSIDE this function,
-// right after ResolveAtmosphereFrameUniforms() returns and BEFORE
-// AddSkyViewLutPass()/AddAerialPerspectiveVolumePass() are called (so both
-// of those two calls' own GPU-side reads of frameUniforms already see the
-// live Editor-tunable values) - the Sky-View LUT pass itself ignores these
-// 4 fields entirely; only the Aerial Perspective Volume pass consumes them.
+// exact same view. `atmosphereSettings` supplies the Aerial Perspective
+// froxel-volume ray-march tunables, set onto `result.frameUniforms` before
+// AddSkyViewLutPass()/AddAerialPerspectiveVolumePass() are called.
 //
-// The CALLER must add the returned Sky-View LUT TextureHandle to this
+// The caller must add the returned Sky-View LUT TextureHandle to this
 // call's own outputs root set, AND call
 // `builder.KeepVolumeTextureOutput(result.aerialPerspectiveVolumeHandle)`
-// explicitly (a VolumeTextureHandle can never be a `finalOutputs` root -
-// see RenderGraphBuilder::KeepVolumeTextureOutput()'s own doc comment).
+// explicitly (a VolumeTextureHandle can never be a finalOutputs root).
 struct AtmosphereViewLutHandles {
     rg::TextureHandle skyViewLutHandle;
     rg::VolumeTextureHandle aerialPerspectiveVolumeHandle;
@@ -95,37 +70,30 @@ AtmosphereViewLutHandles AddAtmosphereViewLutPasses(rg::RenderGraphBuilder& buil
     rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
 // Builds a ready-to-pass-into-AddGameViewPass()/AddSceneViewPass()'s own
-// `recordSkyBackground` parameter (RenderPasses.h) - captures everything
-// it needs by VALUE, so the returned std::function stays valid for the
-// rest of this frame's recording regardless of what happens to the
-// arguments afterward. `skyViewLutName` must be the SAME name just passed
-// to AddAtmosphereViewLutPasses() above for this view, this same frame.
-// `skyExposure` (Phase 8 -
-// ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) is the Editor's
-// "Atmosphere" panel-tunable value (AtmosphereSettings::skyExposure).
-std::function<void(VkCommandBuffer)> MakeRecordSkyBackgroundCallback(AtmosphereLutRenderer& atmosphereLutRenderer,
+// `recordSkyBackground` parameter - captures everything it needs by VALUE,
+// so the returned std::function stays valid for the rest of this frame's
+// recording regardless of what happens to the arguments afterward.
+// `skyViewLutName` must be the SAME name just passed to
+// AddAtmosphereViewLutPasses() above for this view, this same frame.
+std::function<void(rg::CommandBuffer&)> MakeRecordSkyBackgroundCallback(AtmosphereLutRenderer& atmosphereLutRenderer,
     Renderer& renderer, const Mat4& viewProjection, const AtmosphereParametersGpu& atmosphereParameters,
     const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure);
 
-// Declares the Aerial Perspective Composite pass for ONE view - MUST be
+// Declares the Aerial Perspective Composite pass for ONE view - must be
 // called AFTER that view's own GameView/SceneView pass has already been
-// declared in the SAME builder call (this pass needs to read that pass's
-// own just-written color+depth this same frame). `sourceColorHandle` is read
-// for color; `sourceDepthHandle` is read for depth only - a separate handle,
-// since the two may come from physically different imported resources (see
-// AtmosphereLutRenderer::AddAerialPerspectiveCompositePass()'s own doc
-// comment). `sourceColorSampler`/`sourceDepthView`/`sourceDepthSampler` are
-// the caller-resolved plain Vulkan objects actually bound to the shader.
-// `aerialPerspectiveStrength`/`maxDistanceKm`/`depthExponent` forward
-// straight through to AtmosphereLutRenderer::AddAerialPerspectiveCompositePass().
-// The CALLER must add the returned TextureHandle to this call's own outputs
-// root set.
+// declared in the SAME builder call. `sourceColorHandle` is read for color;
+// `sourceDepthHandle` is read for depth only - a separate handle, since the
+// two may come from physically different imported resources.
+// `sourceColorSampler`/`sourceDepthView`/`sourceDepthSampler` are the
+// caller-resolved opaque handles actually bound to the shader. The caller
+// must add the returned TextureHandle to this call's own outputs root set.
 rg::TextureHandle AddAtmosphereCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-    AtmosphereLutRenderer& atmosphereLutRenderer, rg::TextureHandle sourceColorHandle, VkSampler sourceColorSampler,
-    rg::TextureHandle sourceDepthHandle, VkImageView sourceDepthView, VkSampler sourceDepthSampler,
-    rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
-    const AtmosphereFrameUniforms& frameUniforms, Vec3 eyeWorldPosition, float aerialPerspectiveStrength,
-    float maxDistanceKm, float depthExponent, VkExtent2D extent, const char* outputTextureName, rg::ViewScope viewScope,
+    AtmosphereLutRenderer& atmosphereLutRenderer, rg::TextureHandle sourceColorHandle,
+    SamplerHandle sourceColorSampler, rg::TextureHandle sourceDepthHandle, ImageViewHandle sourceDepthView,
+    SamplerHandle sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
+    const char* aerialPerspectiveVolumeName, const AtmosphereFrameUniforms& frameUniforms,
+    Vec3 eyeWorldPosition, float aerialPerspectiveStrength, float maxDistanceKm, float depthExponent,
+    Extent2D extent, const char* outputTextureName, rg::ViewScope viewScope,
     rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
 } // namespace gte
