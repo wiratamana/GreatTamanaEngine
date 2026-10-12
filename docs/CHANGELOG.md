@@ -1148,3 +1148,34 @@ pieces:
   to the front) and a full `ctest` regression pass. See
   `task_manager/network-impl-7/CAMPAIGN_COMPLETION_REPORT.md` for the full
   five-phase campaign writeup.
+
+- **2026-10-12 - `AtmosphereLutRenderer` moved behind a pimpl boundary, and
+  `Renderer::GetVulkanContextInfo()` is now private** (`fix/great-refactor`
+  branch, `code-refactor-12/PROPOSAL_3_ATMOSPHERE_LUT_PIMPL_AND_GETVULKANCONTEXTINFO_PRIVATIZATION.txt`)
+  - `src/Features/Atmosphere/AtmosphereLutRenderer.h` is now 100% Vulkan-free
+  (zero `Vk*`/`<volk.h>`), mirroring `Core/Plugins/RenderFeatureCompositor.h`'s
+  own already-shipped pimpl shape; every Vulkan-bearing field/method moved to
+  `src/Renderer/Internal/AtmosphereLutRendererImpl.h/.cpp`, which also folds
+  in the former `AtmosphereSkyBackgroundRenderer` (now deleted).
+  `Renderer::GetVulkanContextInfo()` itself is now `private`, friended only
+  to `rg::RenderGraph`/`rg::RenderGraphPersistentResourceCache`/
+  `SceneServicesDescriptorSet`/`GpuDrivenBatchCache`/`VolumeTexturePreviewRenderer`/
+  `RenderFeatureCompositor`/`AtmosphereLutRenderer` (plus the test-only
+  `HeadlessRenderGraphFixture`) - every other outside-`Renderer` caller
+  migrated to `WaitForGpuIdle()`/`GetUiTextureHandle()`/the opaque
+  `SamplerHandle`/`ImageViewHandle`/`DescriptorSetHandle` path, or the new,
+  dedicated `Renderer::GetImGuiVulkanBackendInfo()` bridge
+  (`Editor/ImGuiEditorLayer.cpp`'s one real, permanent need for the full
+  Vulkan context struct). **Reviewed, dated exception list - left broken ON
+  PURPOSE** (the correct, visible forcing function for each file's own
+  separate, already-tracked pass, NOT an oversight): `Editor/AssetPreviewMesh.cpp`
+  and `Editor/BoneViewerWindow.cpp` each still own a separate, locally-created
+  `VkDescriptorPool`/`VkDescriptorSetLayout` outside `Renderer`'s shared
+  allocation path, never routed through `Renderer::AllocateComputeDescriptorSet()`;
+  `Editor/FrameDebuggerCapture.cpp` feeds `rg::CopyImageIntoSnapshot(...)` a raw
+  `VkDevice` from outside `Renderer`, a different function with the same
+  shape of problem. (The proposal's own draft additionally named
+  `Features/Shadow/ShadowCompositeRenderer.cpp` as a 4th exception - on
+  inspection it never actually owned a local `VkDescriptorPool`, so fixing its
+  one `ComputeDescriptorSet::Rewrite()` call site was enough to fix it fully;
+  it needs no friend grant and is not part of this exception list.)
