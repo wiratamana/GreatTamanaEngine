@@ -93,14 +93,19 @@ directly as `ImGuiEditorLayer.cpp` itself:
 - **Vulkan types (e.g. `EditorContext::gameViewDescriptor`,
   `VkExtent2D`) are fine to use directly anywhere in this folder** - this is
   not an architectural leak. `Renderer`'s own public API
-  (`Renderer::GetVulkanContextInfo()`, `RenderTexture::Extent()`/`View()`/
-  `Sampler()`) already hands out plain Vulkan handles on purpose, precisely
-  so "an external Vulkan-based rendering backend... owned by the Editor
-  module" (see `Renderer.h`) - i.e. Dear ImGui's own Vulkan backend - can
-  use them directly; there is exactly one rendering backend in this engine
-  and no plan to swap it, so wrapping these handles in a fake neutral type
-  would add indirection with no real decoupling benefit. The boundary that
-  actually matters and must stay intact is that `Renderer`'s *internal*
+  (`RenderTexture::Extent()`/`View()`/`Sampler()`, `Renderer::GetUiTextureHandle()`,
+  `Renderer::GetImGuiVulkanBackendInfo()` - the ONE narrow, Vulkan-typeless
+  bridge Dear ImGui's own backend init goes through) already hands out plain
+  Vulkan handles on purpose, precisely so "an external Vulkan-based rendering
+  backend... owned by the Editor module" (see `Renderer.h`) - i.e. Dear
+  ImGui's own Vulkan backend - can use them directly; there is exactly one
+  rendering backend in this engine and no plan to swap it, so wrapping these
+  handles in a fake neutral type would add indirection with no real
+  decoupling benefit. `Renderer::GetVulkanContextInfo()` itself is PRIVATE,
+  friended only to a short, reviewed list of genuine Renderer-tree
+  collaborators - never callable from this folder, or anywhere outside
+  `src/Renderer`. The boundary that actually matters and must stay intact is
+  that `Renderer`'s *internal*
   RAII wrapper types (`VulkanInstance`, `VulkanDevice`, `VulkanSwapchain`,
   `VulkanAllocator`, `FramePresenter`, `FrameRecorder`, `GpuResourceFactory`
   - everything under `Renderer/Vulkan/` plus Renderer's private

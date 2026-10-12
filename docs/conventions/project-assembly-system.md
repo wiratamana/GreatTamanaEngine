@@ -292,9 +292,11 @@ referenced as a plain, bare relative path string,
 `"project_assemblies/shaders/<Name>.spv"` — the exact same convention every
 existing internal `ComputePipeline` construction call site already uses
 (`Renderer::CreateComputePipeline()`, never a raw `ComputePipeline`
-constructor call, since `Renderer` exposes no public `VkDevice` getter —
-`Core::GetRenderer().GetVulkanContextInfo().device` is the one legitimate way
-to obtain one).
+constructor call, since `Renderer` never exposes a `VkDevice` to a Project
+Assembly at all — `Renderer::GetVulkanContextInfo()` is private to
+`src/Renderer` and its narrow, reviewed friend list; every pipeline/
+descriptor-set construction a Project Assembly needs already goes through
+`Renderer`'s own factory methods, which resolve the device internally).
 
 `ProjectAssemblyProbe_Game.dll`'s own `HelloGame.cpp` is the full, working,
 concrete example of all three Findings combined: it mints a transient
