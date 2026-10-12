@@ -94,7 +94,7 @@ directly as `ImGuiEditorLayer.cpp` itself:
   `VkExtent2D`) are fine to use directly anywhere in this folder** - this is
   not an architectural leak. `Renderer`'s own public API
   (`RenderTexture::Extent()`/`View()`/`Sampler()`, `Renderer::GetUiTextureHandle()`,
-  `Renderer::GetImGuiVulkanBackendInfo()` - the ONE narrow, Vulkan-typeless
+  `Renderer::GetImGuiVulkanBackendInfo()` - the ONE narrow, by-name-restricted
   bridge Dear ImGui's own backend init goes through) already hands out plain
   Vulkan handles on purpose, precisely so "an external Vulkan-based rendering
   backend... owned by the Editor module" (see `Renderer.h`) - i.e. Dear
