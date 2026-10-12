@@ -1166,16 +1166,21 @@ pieces:
   `SamplerHandle`/`ImageViewHandle`/`DescriptorSetHandle` path, or the new,
   dedicated `Renderer::GetImGuiVulkanBackendInfo()` bridge
   (`Editor/ImGuiEditorLayer.cpp`'s one real, permanent need for the full
-  Vulkan context struct). **Reviewed, dated exception list - left broken ON
-  PURPOSE** (the correct, visible forcing function for each file's own
-  separate, already-tracked pass, NOT an oversight): `Editor/AssetPreviewMesh.cpp`
-  and `Editor/BoneViewerWindow.cpp` each still own a separate, locally-created
-  `VkDescriptorPool`/`VkDescriptorSetLayout` outside `Renderer`'s shared
-  allocation path, never routed through `Renderer::AllocateComputeDescriptorSet()`;
-  `Editor/FrameDebuggerCapture.cpp` feeds `rg::CopyImageIntoSnapshot(...)` a raw
-  `VkDevice` from outside `Renderer`, a different function with the same
-  shape of problem. (The proposal's own draft additionally named
-  `Features/Shadow/ShadowCompositeRenderer.cpp` as a 4th exception - on
-  inspection it never actually owned a local `VkDescriptorPool`, so fixing its
-  one `ComputeDescriptorSet::Rewrite()` call site was enough to fix it fully;
-  it needs no friend grant and is not part of this exception list.)
+  Vulkan context struct). `Editor/AssetPreviewMesh.cpp`/
+  `Editor/BoneViewerWindow.cpp` had already dropped their own local
+  `VkDescriptorPool`/`VkDescriptorSetLayout` in the prior pass (`98fd2af6`) -
+  both are now fully migrated too: their `m_localSetOneDescriptorSet` field
+  is a `ComputeDescriptorSet` value (not a raw `VkDescriptorSet`), rewritten
+  once via the device-less `Rewrite(writes)` and bound via `.Native()`,
+  mirroring `Editor/FrameDebuggerPreviewProcessing.cpp`/
+  `Game/Animation/GpuSkinningRigCache.cpp`'s own already-migrated pattern.
+  **Reviewed, dated exception list - left broken ON PURPOSE** (the correct,
+  visible forcing function for its own separate, already-tracked pass, NOT
+  an oversight): `Editor/FrameDebuggerCapture.cpp` feeds
+  `rg::CopyImageIntoSnapshot(...)` a raw `VkDevice` from outside `Renderer`,
+  a free function this proposal does not touch. (The proposal's own draft
+  additionally named `Features/Shadow/ShadowCompositeRenderer.cpp` as a 4th
+  exception - on inspection it never actually owned a local
+  `VkDescriptorPool`, so fixing its one `ComputeDescriptorSet::Rewrite()`
+  call site was enough to fix it fully; it needs no friend grant and is not
+  part of this exception list.)

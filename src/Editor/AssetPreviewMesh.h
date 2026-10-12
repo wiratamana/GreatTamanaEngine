@@ -3,6 +3,7 @@
 #include "../Math/Vec3.h"
 #include "../Core/GraphicsHandles.h"
 #include "../Core/UiTextureHandle.h"
+#include "../Renderer/ComputeDescriptorSet.h"
 #include "../Renderer/Pipeline.h"
 
 #include <volk.h>
@@ -110,12 +111,11 @@ private:
     // this preview has no real scene light/shadow context, so it builds its
     // own tiny, always-neutral stand-in: a 1x1 white dummy texture at
     // binding 0 + a zero-filled dummy UBO at binding 8. Allocated directly
-    // against m_setOneLayoutHandle via Renderer::AllocateComputeDescriptorSet()
-    // - no second, hand-built VkDescriptorSetLayout/VkDescriptorPool of its
-    // own anymore; the returned set comes from Renderer's own shared
-    // descriptor pool and is never individually freed (same convention as
-    // every other compute-shaped descriptor set in this engine).
-    VkDescriptorSet m_localSetOneDescriptorSet = VK_NULL_HANDLE;
+    // against m_setOneLayoutHandle via Renderer::AllocateComputeDescriptorSet(),
+    // which also binds its owning VkDevice - the returned set comes from
+    // Renderer's own shared descriptor pool and is never individually freed
+    // (same convention as every other compute-shaped descriptor set here).
+    ComputeDescriptorSet m_localSetOneDescriptorSet;
     std::unique_ptr<Texture2D> m_localWhiteTexture;
     std::unique_ptr<Buffer> m_localUniformBuffer;
 

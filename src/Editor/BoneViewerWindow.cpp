@@ -169,7 +169,7 @@ void BoneViewerWindow::Reset()
     // in this engine.
     m_localWhiteTexture.reset();
     m_localUniformBuffer.reset();
-    m_localSetOneDescriptorSet = VK_NULL_HANDLE;
+    m_localSetOneDescriptorSet = ComputeDescriptorSet();
 }
 
 void BoneViewerWindow::EnsurePipeline(Renderer& renderer)
@@ -216,13 +216,10 @@ void BoneViewerWindow::EnsurePipeline(Renderer& renderer)
     uniformWrite.bufferOffset = 0;
     uniformWrite.bufferRange = kLocalDummyUniformBlockSize;
 
-    ComputeDescriptorSet(m_localSetOneDescriptorSet)
-        .Rewrite(renderer.GetVulkanContextInfo().device,
-            std::vector<ComputeDescriptorWrite>{
-                ComputeDescriptorWrite::CombinedImageSampler(
-                    0, m_localWhiteTexture->View(), m_localWhiteTexture->Sampler()),
-                uniformWrite,
-            });
+    m_localSetOneDescriptorSet.Rewrite(std::vector<ComputeDescriptorWrite>{
+        ComputeDescriptorWrite::CombinedImageSampler(0, m_localWhiteTexture->View(), m_localWhiteTexture->Sampler()),
+        uniformWrite,
+    });
 
     const DescriptorSetLayoutHandle extraSets[] = { m_setZeroFillerLayoutHandle, m_setOneLayoutHandle };
 
@@ -1076,7 +1073,7 @@ void BoneViewerWindow::Build(
         renderer.Clear(30, 32, 38, 255);
 
         const Pipeline& pipeline = *m_pipeline;
-        const VkDescriptorSet localSetOne = m_localSetOneDescriptorSet;
+        const VkDescriptorSet localSetOne = m_localSetOneDescriptorSet.Native();
         const Buffer& vertexBuffer = *m_vertexBuffer;
         const Buffer& indexBuffer = *m_indexBuffer;
         const std::uint32_t indexCount = m_indexCount;

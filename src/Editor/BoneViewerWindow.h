@@ -9,6 +9,7 @@
 #include "../Math/Vec3.h"
 #include "../Physics/DynamicChainDefinition.h" // DynamicChainDefinition - task_manager/verlet-integration-5, Phase 2
 #include "../Game/Physics/DynamicChainRigCache.h" // DynamicChainRigCache::ModelEntry - used by BuildPartListPane()'s signature below
+#include "../Renderer/ComputeDescriptorSet.h"
 #include "../Renderer/Pipeline.h"
 #include <volk.h>
 
@@ -235,11 +236,10 @@ private:
     // AssetPreviewMesh's own identical local descriptor infra: a 1x1 white
     // dummy texture at binding 0 + a zero-filled dummy UBO at binding 8,
     // bound at set=1. Allocated directly against m_setOneLayoutHandle via
-    // Renderer::AllocateComputeDescriptorSet() - no second, hand-built
-    // VkDescriptorSetLayout/VkDescriptorPool of its own; the returned set
-    // comes from Renderer's own shared descriptor pool and is never
-    // individually freed.
-    VkDescriptorSet m_localSetOneDescriptorSet = VK_NULL_HANDLE;
+    // Renderer::AllocateComputeDescriptorSet(), which also binds its
+    // owning VkDevice - the returned set comes from Renderer's own shared
+    // descriptor pool and is never individually freed.
+    ComputeDescriptorSet m_localSetOneDescriptorSet;
     std::unique_ptr<Texture2D> m_localWhiteTexture;
     std::unique_ptr<Buffer> m_localUniformBuffer;
 
