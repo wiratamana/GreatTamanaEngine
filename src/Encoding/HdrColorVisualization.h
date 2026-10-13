@@ -56,12 +56,14 @@ bool ConvertHdrRgba16fToRgba8(
 // - a PURE visibility change only: this is the exact same IEEE-754 binary16
 // -> binary32 conversion ConvertHdrRgba16fToRgba8() above already used
 // internally (previously a private HalfToFloat() helper in this .cpp's own
-// anonymous namespace), now exposed publicly so a second consumer
-// (src/Editor/AtmosphereAerialPerspectiveLutInspection.cpp, which reads back
-// raw VK_FORMAT_R16G16B16A16_SFLOAT bytes and must decode each half-float
-// channel itself before computing any min/max/mean statistic) never needs a
-// second, independently-maintained copy of this bit-twiddling logic - see
-// AGENTS.md's "one implementation, no duplication" discipline.
+// anonymous namespace), exposed publicly so a second consumer (an
+// Editor-only LUT inspection tool that read back raw
+// VK_FORMAT_R16G16B16A16_SFLOAT bytes and had to decode each half-float
+// channel itself before computing any min/max/mean statistic - since
+// removed) never needed a second, independently-maintained copy of this
+// bit-twiddling logic - see AGENTS.md's "one implementation, no
+// duplication" discipline. Stays public: a genuinely reusable building
+// block, even with that one consumer gone.
 // ConvertHdrRgba16fToRgba8()'s own behavior/tests are completely unchanged by
 // this move - it now simply calls this newly-public function instead of a
 // private one.

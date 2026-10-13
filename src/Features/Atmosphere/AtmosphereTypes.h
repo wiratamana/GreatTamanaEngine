@@ -247,18 +247,6 @@ struct AtmosphereSettings {
     // what used to be a hardcoded `kSkyExposure = 12.0` constant.
     float skyExposure = 12.0f;
 
-    // Phase 9 (ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md,
-    // Step 3.2) - which Z slice of the GAME VIEW's own aerial-perspective
-    // volume (128x128x32 - see AtmosphereLutRenderer.cpp) is mirrored into
-    // the real, registered 2D "AtmosphereAerialPerspectiveVolumeDebugSlice"
-    // texture every frame, edited live via a slider in the Editor's
-    // "Atmosphere" panel. Defaults to the middle slice (16 of 0..31).
-    // Clamped internally by
-    // AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePass() -
-    // never out of bounds even if this value briefly disagrees with the
-    // volume's real depth.
-    int aerialPerspectiveDebugSliceIndex = 16;
-
     // atmosphere-scattering-2 campaign, Phase 1/3 - Aerial Perspective froxel
     // volume ray-march tunables, mirrored into every view's own
     // AtmosphereFrameUniforms (Application.cpp) each frame.

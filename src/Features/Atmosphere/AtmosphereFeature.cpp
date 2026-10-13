@@ -109,17 +109,6 @@ void AtmosphereFeature::RegisterPasses()
             builder.KeepTextureOutput(viewLuts.skyViewLutHandle);
             builder.KeepVolumeTextureOutput(viewLuts.aerialPerspectiveVolumeHandle);
 
-            // The volume handle can be invalid this frame if an upstream LUT
-            // pass is disabled, even with a stale view-state entry from an
-            // earlier frame - guard before reading it.
-            if (isGameView && viewLuts.aerialPerspectiveVolumeHandle.IsValid()) {
-                const rg::TextureHandle debugSlice = m_renderer.AddAerialPerspectiveVolumeDebugSlicePass(
-                    builder, m_core.GetRenderer(), viewLuts.aerialPerspectiveVolumeHandle, aerialVolumeName,
-                    static_cast<std::uint32_t>(m_settings.aerialPerspectiveDebugSliceIndex),
-                    "AtmosphereAerialPerspectiveVolumeDebugSlice", rg::ViewScope::GameView, m_toggleRegistry);
-                builder.KeepTextureOutput(debugSlice);
-            }
-
             const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
             blackboard.Publish<AtmosphereViewLutHandles>(viewLutKey, viewLuts);
         },

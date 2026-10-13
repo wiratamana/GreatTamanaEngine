@@ -2,7 +2,6 @@
 
 #include "../../../Core/EditorPanelModule.h"
 #include "AtmospherePanel.h"
-#include "AtmosphereAerialPerspectiveLutInspection.h"
 #include "AtmosphereAerialPerspectiveSkyPurityValidation.h"
 #include "AtmosphereTransmittanceLutValidation.h"
 
@@ -53,7 +52,6 @@ private:
     AtmosphereFeature& m_feature;
 
     std::optional<AtmosphereTransmittanceLutValidationResult> m_lastValidationResult;
-    std::optional<AtmosphereAerialPerspectiveLutInspectionResult> m_lastAerialInspectionResult;
     std::optional<AtmosphereAerialPerspectiveSkyPurityResult> m_lastSkyPurityResult;
 };
 

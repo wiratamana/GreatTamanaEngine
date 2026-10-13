@@ -3,7 +3,7 @@
 // PHASE3_EDITOR_PANEL_DATA_DRIVEN_MIGRATION_AND_EXPORT_DOT.md) - the real
 // "Export DOT" implementation (src/Editor/RenderGraphDotExport.h/.cpp).
 // gte_editor-tier (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #14),
-// mirroring Editor/AtmosphereAerialPerspectiveLutInspectionTests.cpp's own
+// mirroring this test suite's other gte_editor-tier files' own
 // "GreatTamanaEngineTests already links gte_editor" precedent - no live
 // Vulkan/RenderGraph/ImGui involved anywhere in this file.
 //

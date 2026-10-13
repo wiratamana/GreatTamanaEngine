@@ -9,9 +9,7 @@
 namespace gte {
 
 void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings, Renderer& renderer,
-    AtmosphereLutRenderer& atmosphereLutRenderer,
     std::optional<AtmosphereTransmittanceLutValidationResult>& lastValidationResult,
-    std::optional<AtmosphereAerialPerspectiveLutInspectionResult>& lastAerialInspectionResult,
     const rg::RenderGraph& renderGraph,
     std::optional<AtmosphereAerialPerspectiveSkyPurityResult>& lastSkyPurityResult)
 {
@@ -57,12 +55,6 @@ void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings, 
         "Sun direction/color/illuminance are controlled by a DirectionalLight ECS entity - see \"Hierarchy\" > "
         "right-click > \"Create Directional Light\", then edit its Transform/DirectionalLight in \"Inspector\".");
 
-    // 0..31 matches the aerial-perspective volume's fixed 128x128x32 resolution.
-    ImGui::SliderInt("Aerial Perspective Debug Slice", &settings.aerialPerspectiveDebugSliceIndex, 0, 31);
-    ImGui::TextDisabled(
-        "Mirrors one Z-slice of the Game View's own aerial-perspective volume into "
-        "\"AtmosphereAerialPerspectiveVolumeDebugSlice\" (see GET /get_texture).");
-
     // GPU-vs-CPU-oracle numeric parity check.
     if (ImGui::Button("Validate Transmittance LUT")) {
         lastValidationResult = ValidateAtmosphereTransmittanceLut(
@@ -73,21 +65,6 @@ void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings, 
         const bool passed = r.succeeded && r.texelsExceedingEpsilon == 0;
         ImGui::TextColored(passed ? ImVec4(0.3f, 1.0f, 0.3f, 1.0f) : ImVec4(1.0f, 0.4f, 0.3f, 1.0f), "%s",
             !r.succeeded ? "ERROR" : (passed ? "PASS" : "CHECK"));
-        ImGui::TextWrapped("%s", ToDiagnosticString(r).c_str());
-    }
-
-    // Descriptive statistics (min/max/mean), not a parity check.
-    if (ImGui::Button("Inspect Aerial Perspective LUT")) {
-        lastAerialInspectionResult = InspectAerialPerspectiveVolume(
-            renderer, atmosphereLutRenderer, "AtmosphereAerialPerspectiveVolume_GameView");
-    }
-    if (lastAerialInspectionResult.has_value()) {
-        const AtmosphereAerialPerspectiveLutInspectionResult& r = *lastAerialInspectionResult;
-        const bool ok = r.succeeded;
-        ImGui::TextColored(
-            ok ? (r.likelyVisibleAtDefaultExposure ? ImVec4(0.3f, 1.0f, 0.3f, 1.0f) : ImVec4(1.0f, 0.8f, 0.3f, 1.0f))
-               : ImVec4(1.0f, 0.4f, 0.3f, 1.0f),
-            "%s", !ok ? "ERROR" : (r.likelyVisibleAtDefaultExposure ? "LIKELY VISIBLE" : "LIKELY TOO FAINT"));
         ImGui::TextWrapped("%s", ToDiagnosticString(r).c_str());
     }
 

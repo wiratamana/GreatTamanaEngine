@@ -63,15 +63,6 @@ struct AtmosphereLutRenderer::Impl {
     std::optional<ComputePipeline> aerialPerspectiveCompositePipeline;
     std::unordered_map<std::string, AerialPerspectiveCompositeViewState> aerialPerspectiveCompositeViewStates;
 
-    struct AerialPerspectiveVolumeDebugSliceViewState {
-        ComputeDescriptorSet descriptorSet;
-        std::optional<RenderTexture> output;
-    };
-    DescriptorSetLayoutHandle aerialPerspectiveVolumeDebugSliceDescriptorSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
-    std::optional<ComputePipeline> aerialPerspectiveVolumeDebugSlicePipeline;
-    std::unordered_map<std::string, AerialPerspectiveVolumeDebugSliceViewState>
-        aerialPerspectiveVolumeDebugSliceViewStates;
-
     // Sky background graphics pass resources
     ComputeDescriptorSet skyBackgroundDescriptorSet;
     std::unique_ptr<Pipeline> skyBackgroundPipeline;
@@ -88,9 +79,6 @@ struct AtmosphereLutRenderer::Impl {
     void EnsureAerialPerspectiveCompositeInitialized(Renderer& renderer);
     AerialPerspectiveCompositeViewState& EnsureAerialPerspectiveCompositeViewInitialized(
         Renderer& renderer, const char* outputTextureName, Extent2D extent);
-    void EnsureAerialPerspectiveVolumeDebugSliceInitialized(Renderer& renderer);
-    AerialPerspectiveVolumeDebugSliceViewState& EnsureAerialPerspectiveVolumeDebugSliceViewInitialized(
-        Renderer& renderer, const char* outputTextureName, int width, int height);
     void EnsureSkyBackgroundPipelineInitialized(Renderer& renderer);
 
     // Full-screen pass for sky background
@@ -125,12 +113,6 @@ struct AtmosphereLutRenderer::Impl {
     RenderTexture* CompositedOutput(const char* outputTextureName) noexcept;
     void FinalizeAerialPerspectiveCompositeForSampling(rg::CommandBuffer& cmd, const char* outputTextureName);
     int AerialPerspectiveVolumeDepth(const char* aerialPerspectiveVolumeName) const noexcept;
-    rg::TextureHandle AddAerialPerspectiveVolumeDebugSlicePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-        rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
-        std::uint32_t debugSliceIndex, const char* outputTextureName, rg::ViewScope viewScope,
-        rg::RenderPassToggleRegistry* toggleRegistry);
-    Renderer::CapturedRawPixels CaptureAerialPerspectiveVolumeSliceImmediate(Renderer& renderer,
-        const char* aerialPerspectiveVolumeName, std::uint32_t sliceIndex, const char* outputTextureName);
 };
 
 } // namespace gte

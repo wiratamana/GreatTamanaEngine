@@ -122,27 +122,6 @@ public:
     // if that volume has never been generated this session.
     int AerialPerspectiveVolumeDepth(const char* aerialPerspectiveVolumeName) const noexcept;
 
-    // Declares a tiny compute pass copying ONE Z slice of
-    // `aerialPerspectiveVolumeHandle` into a real, registered 2D
-    // RenderTexture under `outputTextureName` - GET /get_texture/GET
-    // /list_textures-capturable with zero further networking changes.
-    // Must be called after AddAerialPerspectiveVolumePass() for
-    // `aerialPerspectiveVolumeName` in the same frame.
-    rg::TextureHandle AddAerialPerspectiveVolumeDebugSlicePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-        rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
-        std::uint32_t debugSliceIndex, const char* outputTextureName, rg::ViewScope viewScope,
-        rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
-
-    // Feeds GET /get_debug_texture / the Editor's numeric LUT inspector -
-    // the raw captured bytes stay Vulkan-free (Renderer::CapturedRawPixels
-    // is a plain bytes+width+height value type). The ad-hoc, IMMEDIATE-
-    // dispatch counterpart of AddAerialPerspectiveVolumeDebugSlicePass()
-    // above, for an Editor button click outside any per-frame RenderGraph
-    // pass. Returns an empty CapturedRawPixels if `aerialPerspectiveVolumeName`
-    // has never been generated this session.
-    Renderer::CapturedRawPixels CaptureAerialPerspectiveVolumeSliceImmediate(Renderer& renderer,
-        const char* aerialPerspectiveVolumeName, std::uint32_t sliceIndex, const char* outputTextureName);
-
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;

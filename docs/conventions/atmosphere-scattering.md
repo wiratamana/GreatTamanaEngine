@@ -64,12 +64,13 @@ whenever touching this feature:
   fixed-camera raymarch (`VolumeTexturePreviewRenderer`), never a raw pixel
   copy, since a 3D voxel grid has no direct 2D pixel representation to copy
   the way an ordinary 2D render target does. Phase 9's own small, permanent
-  "debug slice" mirror
-  (`AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePass()`,
+  "debug slice" mirror (`AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePass()`,
   copying one Z-slice into a real, registered 2D texture,
-  `"AtmosphereAerialPerspectiveVolumeDebugSlice"`) still exists and remains a
-  perfectly valid, narrower way to get a literal-slice view of a volume
-  texture — the two approaches are complementary, not redundant; this is no
+  `"AtmosphereAerialPerspectiveVolumeDebugSlice"`) was later REMOVED (it had
+  become fully redundant with the `VolumeTexturePreviewRenderer` raymarch path
+  above, which already covers "get a 2D view of a volume texture" with no
+  separate per-frame production pass/Editor slider/settings field of its own
+  needed) - this is no
   longer a "deliberate, out-of-scope non-goal" (see
   `task_manager/network-impl-6/PHASE0_MASTER_STRATEGY.md` for the full
   six-phase campaign that lifted this restriction).

@@ -78,22 +78,6 @@ int AtmosphereLutRenderer::AerialPerspectiveVolumeDepth(const char* aerialPerspe
     return m_impl->AerialPerspectiveVolumeDepth(aerialPerspectiveVolumeName);
 }
 
-rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumeDebugSlicePass(rg::RenderGraphBuilder& builder,
-    Renderer& renderer, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
-    std::uint32_t debugSliceIndex, const char* outputTextureName, rg::ViewScope viewScope,
-    rg::RenderPassToggleRegistry* toggleRegistry)
-{
-    return m_impl->AddAerialPerspectiveVolumeDebugSlicePass(builder, renderer, aerialPerspectiveVolumeHandle,
-        aerialPerspectiveVolumeName, debugSliceIndex, outputTextureName, viewScope, toggleRegistry);
-}
-
-Renderer::CapturedRawPixels AtmosphereLutRenderer::CaptureAerialPerspectiveVolumeSliceImmediate(Renderer& renderer,
-    const char* aerialPerspectiveVolumeName, std::uint32_t sliceIndex, const char* outputTextureName)
-{
-    return m_impl->CaptureAerialPerspectiveVolumeSliceImmediate(
-        renderer, aerialPerspectiveVolumeName, sliceIndex, outputTextureName);
-}
-
 AtmosphereFrameUniforms ResolveAtmosphereFrameUniforms(Registry& registry, Vec3 eyeWorldPosition)
 {
     AtmosphereFrameUniforms uniforms;
