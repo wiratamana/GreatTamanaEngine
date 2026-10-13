@@ -12,10 +12,7 @@ namespace gte::rg {
 
 namespace {
 
-// Local to this translation unit - mirrors Renderer.cpp's own
-// ToVkShaderStageFlags() (Core/PipelineDesc.h's ShaderStageMask ->
-// VkShaderStageFlags), duplicated rather than shared since that one lives
-// in Renderer.cpp's own anonymous namespace.
+// Converts engine stage mask to Vulkan shader stage flags.
 VkShaderStageFlags ToVkShaderStageFlags(ShaderStageMask mask) noexcept
 {
     VkShaderStageFlags flags = 0;
@@ -107,11 +104,7 @@ void CommandBuffer::Draw(const Pipeline& pipeline, const Mesh& mesh, const Mat4&
     m_renderer->Submit(pipeline, mesh, modelMatrix, viewProjMatrix, materialDescriptorSet, sceneServicesSet);
     m_renderer->EndGraphPassRecording();
 
-    // Prefers color when a pass writes both (the common opaque-draw case);
-    // depth only when color is absent - this is what gives a depth-only
-    // pass a real preview at all. Bookkeeping only - see
-    // FrameDebuggerEventSink::NoteCommandResult()'s own doc comment for why
-    // this must never touch the GPU directly.
+    // Notify frame debugger (prefers color over depth target).
     if (m_eventSink != nullptr) {
         if (m_writeTarget.colorImage != VK_NULL_HANDLE) {
             m_eventSink->NoteCommandResult(
