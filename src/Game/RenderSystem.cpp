@@ -115,7 +115,7 @@ Vec3 RenderSystem::ResolveActiveCameraWorldPosition(Registry& registry) noexcept
 
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
     IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
-    const std::unordered_set<Entity>& batchedEntities, VkDescriptorSet sceneServicesSet, rg::CommandBuffer* cmd)
+    const std::unordered_set<Entity>& batchedEntities, DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd)
 {
     Draw(registry, renderer, ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight), capture, maxDrawCount,
         batchedEntities, std::nullopt, sceneServicesSet, cmd);
@@ -140,7 +140,7 @@ const char* VertexLayoutDebugName(VertexLayout layout)
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
     IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
     const std::unordered_set<Entity>& batchedEntities, std::optional<PipelineOverrideSet> pipelineOverrideSet,
-    VkDescriptorSet sceneServicesSet, rg::CommandBuffer* cmd)
+    DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd)
 {
     GTE_PROFILE_SCOPE("RenderSystem::Draw");
 
@@ -197,8 +197,8 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
 
         if (mesh != nullptr && pipeline != nullptr) {
             const MaterialTexture* materialTexture = m_textures.TryGet(command.texture);
-            const VkDescriptorSet descriptorSet =
-                materialTexture != nullptr ? materialTexture->descriptorSet : VK_NULL_HANDLE;
+            const DescriptorSetHandle descriptorSet =
+                materialTexture != nullptr ? materialTexture->descriptorSet : DescriptorSetHandle::Invalid;
 
             // editor-core-separation-2 campaign, PHASE2 -
             // zero-overhead-when-disarmed: this call collapses to one

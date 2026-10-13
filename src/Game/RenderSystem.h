@@ -2,6 +2,7 @@
 
 #include "DrawCommand.h"
 #include "RenderBatching.h"
+#include "../Core/GraphicsHandles.h" // DescriptorSetHandle
 #include "ECS/Components/Camera.h"
 #include "ECS/Components/MeshRenderer.h"
 #include "ECS/Components/Transform.h"
@@ -249,7 +250,8 @@ public:
     // straight through, unchanged.
     void Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
         IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
-        const std::unordered_set<Entity>& batchedEntities = {}, VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE,
+        const std::unordered_set<Entity>& batchedEntities = {},
+        DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
         rg::CommandBuffer* cmd = nullptr);
 
     // Explicit-view-projection overload of Draw() above, for a caller that
@@ -313,7 +315,7 @@ public:
         IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
         const std::unordered_set<Entity>& batchedEntities = {},
         std::optional<PipelineOverrideSet> pipelineOverrideSet = std::nullopt,
-        VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE, rg::CommandBuffer* cmd = nullptr);
+        DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid, rg::CommandBuffer* cmd = nullptr);
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE4 (task_manager/render-pass-5/

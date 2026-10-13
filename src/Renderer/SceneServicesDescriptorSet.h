@@ -17,6 +17,7 @@
 
 #include "RenderGraph/RenderPipeline.h" // rg::RenderPassId, rg::RenderViewId
 #include "Buffer.h"
+#include "../Core/GraphicsHandles.h" // DescriptorSetHandle
 #include "Texture2D.h"
 #include "VolumeTexture.h"
 
@@ -146,7 +147,7 @@ public:
     // from inside the SAME pass's own execute() callback that is about to
     // Submit() against it (see PHASE7) - never from outside a pass's
     // execution window.
-    VkDescriptorSet Rewrite(rg::RenderViewId view, const std::array<ResolvedSlot, kSceneServiceSlotCount>& resolved);
+    DescriptorSetHandle Rewrite(rg::RenderViewId view, const std::array<ResolvedSlot, kSceneServiceSlotCount>& resolved);
 
     // Writes an opaque, fixed-size byte blob (<= kSceneGlobalUniformBlockSize)
     // into the uniform buffer bound at Scene Services binding 8, for `view`.
@@ -156,7 +157,7 @@ public:
 
     // The most recent Rewrite()-produced VkDescriptorSet for `view`, or
     // VK_NULL_HANDLE if Rewrite() was never called for that view yet.
-    VkDescriptorSet DescriptorSetFor(rg::RenderViewId view) const noexcept;
+    DescriptorSetHandle DescriptorSetFor(rg::RenderViewId view) const noexcept;
 
     // Test-facing accessors confirming the real, uploaded dummy fallback
     // resources backing an unresolved slot are valid.
@@ -171,7 +172,12 @@ private:
 
     struct PerViewSet {
         rg::RenderViewId view;
-        VkDescriptorSet set = VK_NULL_HANDLE;
+        // Registered ONCE, the moment this view's set is first lazily
+        // allocated (see Rewrite()'s own "freshlyAllocated" branch) - never
+        // re-registered afterward, only re-Rewrite()'d in place (the
+        // underlying VkDescriptorSet is pool-owned and never individually
+        // freed, matching MaterialTexture's own convention).
+        DescriptorSetHandle handle = DescriptorSetHandle::Invalid;
     };
     std::vector<PerViewSet> m_perViewSets;
 

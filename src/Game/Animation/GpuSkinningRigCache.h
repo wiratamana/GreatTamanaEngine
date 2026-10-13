@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../Renderer/Buffer.h"
+#include "../../Core/GraphicsHandles.h" // DescriptorSetHandle
 #include "../../Renderer/Compute/ComputeDescriptorSet.h"
 #include "../../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../../Renderer/MeshHandle.h"
@@ -85,6 +86,15 @@ public:
         // every frame" for a resource whose physical identity may change
         // frame to frame.
         ComputeDescriptorSet descriptorSet;
+
+        // Engine-owned handle wrapping the exact same native VkDescriptorSet
+        // as `descriptorSet` above - registered ONCE, right after Register()
+        // below builds+Rewrite()'s it (never re-registered afterward, same
+        // "permanently stable identity" convention as descriptorSet itself).
+        // This is what AnimationSystem::GpuSkinningDispatchRequest::descriptorSet
+        // is populated from, so that leg of the pipeline never touches a raw
+        // VkDescriptorSet either.
+        DescriptorSetHandle descriptorSetHandle = DescriptorSetHandle::Invalid;
 
         // Whether this group's own output buffer uses the
         // GpuSkinnedVertexPositionNormalUv layout (true) or the

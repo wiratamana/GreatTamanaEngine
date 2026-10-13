@@ -93,7 +93,8 @@ public:
     void Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride = nullptr,
         IFrameDebuggerCaptureRecorder* frameDebuggerCapture = nullptr,
         std::optional<std::size_t> maxDrawCount = std::nullopt,
-        const std::unordered_set<Entity>& batchedEntities = {}, VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE,
+        const std::unordered_set<Entity>& batchedEntities = {},
+        DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
         rg::CommandBuffer* cmd = nullptr);
 
 

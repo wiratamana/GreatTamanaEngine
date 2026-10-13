@@ -534,7 +534,8 @@ public:
     // layer up). Called once per VISIBLE render target per frame (e.g. once
     // for the Editor's "Game" view, again for its "Scene" view) with that
     // target's own aspect-ratio-derived viewProjMatrix - see
-    // RenderSystem::Draw(). `materialDescriptorSet` (default VK_NULL_HANDLE)
+    // RenderSystem::Draw(). `materialDescriptorSet` (default
+    // DescriptorSetHandle::Invalid - engine-owned, not a raw VkDescriptorSet)
     // is bound as descriptor set 0 before the draw when non-null - only
     // meaningful (and expected to be set) for a Pipeline built with
     // VertexLayout::PositionNormalUv/useMaterialTexture (see Pipeline.h) -
@@ -542,7 +543,7 @@ public:
     // TextureHandle resolves into this.
     //
     // `sceneServicesSet` (Global Scene Services Descriptor Set campaign,
-    // better-render-pass-6, PHASE5 - default VK_NULL_HANDLE, trailing) is
+    // better-render-pass-6, PHASE5 - default DescriptorSetHandle::Invalid, trailing) is
     // bound as descriptor set 1 before the draw, but ONLY when `pipeline`
     // itself actually carries a sceneServicesSetLayout
     // (`pipeline.HasSceneServicesSet()`, PHASE3) - passing a non-null value
@@ -558,8 +559,9 @@ public:
     // RenderSystem::Draw()/Game::Render() (PHASE6) as one call-scoped
     // constant, never per-entity.
     void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
-        const Mat4& viewProjMatrix = Mat4::Identity(), VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE,
-        VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
+        const Mat4& viewProjMatrix = Mat4::Identity(),
+        DescriptorSetHandle materialDescriptorSet = DescriptorSetHandle::Invalid,
+        DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid);
 
     // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
     // PHASE2 (task_manager/render-pass-5/
@@ -612,7 +614,8 @@ public:
     // `pipeline.HasSceneServicesSet()` - the same gate Submit() applies.
     void SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
         VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset,
-        VkDescriptorSet instanceBufferDescriptorSet, VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE,
+        DescriptorSetHandle instanceBufferDescriptorSet,
+        DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
         const Mat4& viewProjMatrix = Mat4::Identity());
 
     // Factory for graphics pipelines, so callers never need direct access

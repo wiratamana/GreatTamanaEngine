@@ -17,6 +17,8 @@
 
 #include "Renderer/SceneServicesDescriptorSet.h"
 
+#include "Renderer/GraphicsHandleRegistry.h" // Native() - this file compares DescriptorSetHandle values.
+
 #include "../Fakes/HeadlessRenderGraphFixture.h"
 
 #include <gtest/gtest.h>
@@ -120,9 +122,9 @@ TEST(SceneServicesDescriptorSetTest, RewriteWithAllDefaultedSlotsReturnsAValidSe
     SceneServicesDescriptorSet sceneServices(fixture.GetRenderer());
 
     std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolved{};
-    const VkDescriptorSet set = sceneServices.Rewrite(rg::RenderViewId::Named("Game"), resolved);
+    const DescriptorSetHandle set = sceneServices.Rewrite(rg::RenderViewId::Named("Game"), resolved);
 
-    EXPECT_NE(set, static_cast<VkDescriptorSet>(VK_NULL_HANDLE));
+    EXPECT_NE(set, DescriptorSetHandle::Invalid);
 
     EXPECT_NE(sceneServices.DummyImage2DTextureFor(0u).View(), static_cast<VkImageView>(VK_NULL_HANDLE));
     EXPECT_NE(sceneServices.DummyImage2DTextureFor(0u).Sampler(), static_cast<VkSampler>(VK_NULL_HANDLE));
@@ -156,11 +158,11 @@ TEST(SceneServicesDescriptorSetTest, RewriteForTwoDifferentViewsProducesTwoDiffe
     const rg::RenderViewId viewA = rg::RenderViewId::Named("Game");
     const rg::RenderViewId viewB = rg::RenderViewId::Named("Scene");
 
-    const VkDescriptorSet setA = sceneServices.Rewrite(viewA, resolvedA);
-    const VkDescriptorSet setB = sceneServices.Rewrite(viewB, resolvedB);
+    const DescriptorSetHandle setA = sceneServices.Rewrite(viewA, resolvedA);
+    const DescriptorSetHandle setB = sceneServices.Rewrite(viewB, resolvedB);
 
-    EXPECT_NE(setA, static_cast<VkDescriptorSet>(VK_NULL_HANDLE));
-    EXPECT_NE(setB, static_cast<VkDescriptorSet>(VK_NULL_HANDLE));
+    EXPECT_NE(setA, DescriptorSetHandle::Invalid);
+    EXPECT_NE(setB, DescriptorSetHandle::Invalid);
     EXPECT_NE(sceneServices.DescriptorSetFor(viewA), sceneServices.DescriptorSetFor(viewB));
     EXPECT_EQ(sceneServices.DescriptorSetFor(viewA), setA);
     EXPECT_EQ(sceneServices.DescriptorSetFor(viewB), setB);
@@ -177,8 +179,7 @@ TEST(SceneServicesDescriptorSetTest, DescriptorSetForAnUnseenViewIsNullHandle)
     }
 
     SceneServicesDescriptorSet sceneServices(fixture.GetRenderer());
-    EXPECT_EQ(sceneServices.DescriptorSetFor(rg::RenderViewId::Named("NeverRewritten")),
-        static_cast<VkDescriptorSet>(VK_NULL_HANDLE));
+    EXPECT_EQ(sceneServices.DescriptorSetFor(rg::RenderViewId::Named("NeverRewritten")), DescriptorSetHandle::Invalid);
     ResetSceneServiceRegistryForTesting();
 }
 

@@ -2,6 +2,7 @@
 
 #include "ECS/Entity.h"
 #include "Math/Mat4.h"
+#include "../Core/GraphicsHandles.h" // DescriptorSetHandle
 #include "Renderer/Pipeline.h"
 #include "Renderer/PipelineHandle.h"
 
@@ -75,11 +76,11 @@ struct SceneDrawRequest {
 
     // The ONE resolved, per-view, per-frame "scene services" descriptor set
     // (set = 1) to bind for every entity drawn by this one DrawScene() call -
-    // VK_NULL_HANDLE means "no scene services this call". NEVER resolved
-    // per-entity - this is a single, call-scoped constant, mirroring
-    // pipelineOverrideSet's own "one value for the whole call" contract
-    // above.
-    VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE;
+    // DescriptorSetHandle::Invalid means "no scene services this call".
+    // NEVER resolved per-entity - this is a single, call-scoped constant,
+    // mirroring pipelineOverrideSet's own "one value for the whole call"
+    // contract above.
+    DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid;
 };
 
 // The ONE new public convenience entry point every "redraw the scene for a

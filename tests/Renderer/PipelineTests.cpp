@@ -177,8 +177,8 @@ void SubmitIndirectAgainstPipelineWithSceneServicesSetBindsSetOne()
     Mesh mesh = renderer.CreateMesh(
         vertices, sizeof(vertices), 3, indices, sizeof(indices), 3, "RendererSubmitIndirectTest.Mesh");
 
-    const VkDescriptorSet instanceBufferDescriptorSet =
-        renderer.AllocateComputeDescriptorSet(renderer.InstanceBufferDescriptorSetLayout()).Native();
+    const DescriptorSetHandle instanceBufferDescriptorSet =
+        RegisterDescriptorSet(renderer.AllocateComputeDescriptorSet(renderer.InstanceBufferDescriptorSetLayout()).Native());
 
     const VkCommandBuffer cmd = renderer.BeginOffscreenRenderGraphRecording();
     renderer.BeginGraphPassRecording(cmd, {});
@@ -189,7 +189,7 @@ void SubmitIndirectAgainstPipelineWithSceneServicesSetBindsSetOne()
     // up bound to it.
     renderer.SubmitIndirect(pipeline, mesh, /*indirectBuffer=*/VK_NULL_HANDLE, /*indirectOffset=*/0,
         /*maxDrawCount=*/1, /*countBuffer=*/VK_NULL_HANDLE, /*countBufferOffset=*/0, instanceBufferDescriptorSet,
-        /*sceneServicesSet=*/VK_NULL_HANDLE);
+        /*sceneServicesSet=*/DescriptorSetHandle::Invalid);
 
     renderer.EndGraphPassRecording();
 

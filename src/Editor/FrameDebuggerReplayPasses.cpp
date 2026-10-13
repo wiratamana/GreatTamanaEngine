@@ -146,7 +146,7 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
                 // this step's own DrawStats, matching this step's pre-existing
                 // behavior exactly.
                 if (isBackgroundStep && recordBackgroundStep) {
-                    rg::CommandBuffer wrappedForBackground(ctx.cmd, &renderer, nullptr);
+                    rg::CommandBuffer wrappedForBackground = rg::CommandBuffer::WrapRaw(ctx.cmd, &renderer);
                     recordBackgroundStep(wrappedForBackground);
                 }
             });

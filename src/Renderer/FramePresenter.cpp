@@ -1,4 +1,4 @@
-﻿#include "FramePresenter.h"
+#include "FramePresenter.h"
 
 #include "RenderGraph/CommandBuffer.h"
 #include "RenderGraph/RenderGraph.h"
@@ -222,7 +222,7 @@ DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTe
     // escape hatch), never Draw()/Dispatch(), which require a real Renderer.
     const std::function<void(VkCommandBuffer)> rawRecordExtra = [&recordExtra](VkCommandBuffer cmd) {
         if (recordExtra) {
-            rg::CommandBuffer wrapped{ cmd, nullptr, nullptr };
+            rg::CommandBuffer wrapped = rg::CommandBuffer::WrapRaw(cmd);
             recordExtra(wrapped);
         }
     };

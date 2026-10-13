@@ -574,7 +574,7 @@ std::vector<AnimationSystem::GpuSkinningDispatchRequest> AnimationSystem::Collec
             request.name = group.debugName.c_str();
             request.outputBuffer = group.outputVertexBuffer->ObjectHandle();
             request.outputBufferSize = group.outputVertexBuffer->Size();
-            request.descriptorSet = group.descriptorSet.Native();
+            request.descriptorSet = group.descriptorSetHandle;
             request.vertexCount = group.vertexCount;
             request.textured = group.isTextured;
             requests.push_back(request);

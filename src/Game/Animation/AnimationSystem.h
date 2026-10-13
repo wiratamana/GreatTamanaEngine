@@ -229,7 +229,10 @@ public:
         // exactly this type.
         BufferObjectHandle outputBuffer = BufferObjectHandle::Invalid;
         VkDeviceSize outputBufferSize = 0;
-        VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+        // Engine-owned handle (not a raw VkDescriptorSet) - see
+        // GpuSkinningRigCache::OutputGroup::descriptorSetHandle, which this
+        // is copied from verbatim.
+        DescriptorSetHandle descriptorSet = DescriptorSetHandle::Invalid;
         std::uint32_t vertexCount = 0;
         // Selects which of GetGpuSkinningPipelines()'s two pipelines
         // (PositionNormal vs. PositionNormalUv) this request's descriptor

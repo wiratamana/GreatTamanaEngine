@@ -337,7 +337,7 @@ struct PassContext {
     // Constructs a CommandBuffer wrapper for recording draws in this pass.
     CommandBuffer Cmd() const noexcept
     {
-        return CommandBuffer(cmd, renderer, recordDraw.drawStats,
+        return CommandBuffer(CommandBufferKey{}, cmd, renderer, recordDraw.drawStats,
             CommandBuffer::WriteTargetInfo{
                 writeTargetColorImage, colorAttachmentExtent, writeTargetColorFormat, writeTargetDepthImage,
                 writeTargetDepthFormat },

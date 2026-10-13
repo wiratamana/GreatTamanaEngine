@@ -599,8 +599,8 @@ private:
         rg::BufferHandle countHandle;
         VkBuffer indirectBufferNative = VK_NULL_HANDLE;
         VkBuffer countBufferNative = VK_NULL_HANDLE;
-        VkDescriptorSet cullingDescriptorSet = VK_NULL_HANDLE;
-        VkDescriptorSet instanceBufferDescriptorSet = VK_NULL_HANDLE;
+        DescriptorSetHandle cullingDescriptorSet = DescriptorSetHandle::Invalid;
+        DescriptorSetHandle instanceBufferDescriptorSet = DescriptorSetHandle::Invalid;
         const char* resetPassName = nullptr;
         const char* cullingPassName = nullptr;
         const char* indirectDrawPassName = nullptr;

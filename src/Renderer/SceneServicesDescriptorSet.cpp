@@ -1,4 +1,4 @@
-﻿#include "SceneServicesDescriptorSet.h"
+#include "SceneServicesDescriptorSet.h"
 
 #include "Renderer.h"
 #include "Vulkan/DescriptorSetLayoutBuilder.h"
@@ -297,22 +297,24 @@ SceneServicesDescriptorSet::~SceneServicesDescriptorSet()
     }
 }
 
-VkDescriptorSet SceneServicesDescriptorSet::Rewrite(
+DescriptorSetHandle SceneServicesDescriptorSet::Rewrite(
     rg::RenderViewId view, const std::array<ResolvedSlot, kSceneServiceSlotCount>& resolved)
 {
     SceneServiceRegistrySealedFlag() = true; // Startup-only registration: this is the first-ever call's permanent cutoff.
 
-    VkDescriptorSet set = VK_NULL_HANDLE;
+    DescriptorSetHandle handle = DescriptorSetHandle::Invalid;
     for (PerViewSet& entry : m_perViewSets) {
         if (entry.view == view) {
-            set = entry.set;
+            handle = entry.handle;
             break;
         }
     }
+    VkDescriptorSet set = Native(handle);
     const bool freshlyAllocated = (set == VK_NULL_HANDLE);
     if (freshlyAllocated) {
         set = m_renderer->AllocateComputeDescriptorSet(m_layout).Native();
-        m_perViewSets.push_back(PerViewSet{ view, set });
+        handle = RegisterDescriptorSet(set);
+        m_perViewSets.push_back(PerViewSet{ view, handle });
     }
 
     std::array<VkDescriptorImageInfo, kSceneServiceSlotCount> imageInfos{};
@@ -371,17 +373,17 @@ VkDescriptorSet SceneServicesDescriptorSet::Rewrite(
     }
 
     vkUpdateDescriptorSets(m_device, writeCount, writes.data(), 0, nullptr);
-    return set;
+    return handle;
 }
 
-VkDescriptorSet SceneServicesDescriptorSet::DescriptorSetFor(rg::RenderViewId view) const noexcept
+DescriptorSetHandle SceneServicesDescriptorSet::DescriptorSetFor(rg::RenderViewId view) const noexcept
 {
     for (const PerViewSet& entry : m_perViewSets) {
         if (entry.view == view) {
-            return entry.set;
+            return entry.handle;
         }
     }
-    return VK_NULL_HANDLE;
+    return DescriptorSetHandle::Invalid;
 }
 
 const Texture2D& SceneServicesDescriptorSet::DummyImage2DTextureFor(std::uint32_t slotIndex) const
@@ -422,17 +424,19 @@ void SceneServicesDescriptorSet::UpdateGlobalUniformBlock(rg::RenderViewId view,
     // "simplify" this back into an assert, the ordering is load-bearing
     // (Shadow.DepthPass runs at PreOpaques, strictly BEFORE RenderOpaque,
     // so it may well be the FIRST thing to touch a view's set this frame).
-    VkDescriptorSet set = VK_NULL_HANDLE;
+    DescriptorSetHandle handle = DescriptorSetHandle::Invalid;
     for (PerViewSet& perView : m_perViewSets) {
         if (perView.view == view) {
-            set = perView.set;
+            handle = perView.handle;
             break;
         }
     }
+    VkDescriptorSet set = Native(handle);
     const bool freshlyAllocatedSet = (set == VK_NULL_HANDLE);
     if (freshlyAllocatedSet) {
         set = m_renderer->AllocateComputeDescriptorSet(m_layout).Native();
-        m_perViewSets.push_back(PerViewSet{ view, set });
+        handle = RegisterDescriptorSet(set);
+        m_perViewSets.push_back(PerViewSet{ view, handle });
     }
 
     // Binding 8 only ever needs to be POINTED at this view's buffer ONCE -

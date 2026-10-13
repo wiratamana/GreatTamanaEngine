@@ -105,10 +105,11 @@ void GpuDrivenBatchCache::EnsureDescriptorSetsWritten(Renderer& renderer, const 
 
     const VkDevice device = renderer.GetVulkanContextInfo().device;
 
-    if (entry.cullingDescriptorSet == VK_NULL_HANDLE) {
-        entry.cullingDescriptorSet = renderer.AllocateComputeDescriptorSet(m_pipelines.DescriptorSetLayout()).Native();
+    if (entry.cullingDescriptorSet == DescriptorSetHandle::Invalid) {
+        entry.cullingDescriptorSet =
+            RegisterDescriptorSet(renderer.AllocateComputeDescriptorSet(m_pipelines.DescriptorSetLayout()).Native());
     }
-    ComputeDescriptorSet(entry.cullingDescriptorSet, device)
+    ComputeDescriptorSet(Native(entry.cullingDescriptorSet), device)
         .Rewrite(
             {
                 ComputeDescriptorWrite::StorageBuffer(0, entry.inputBuffer.Native()),
@@ -116,11 +117,11 @@ void GpuDrivenBatchCache::EnsureDescriptorSetsWritten(Renderer& renderer, const 
                 ComputeDescriptorWrite::StorageBuffer(2, entry.countBuffer.Native()),
             });
 
-    if (entry.instanceBufferDescriptorSet == VK_NULL_HANDLE) {
-        entry.instanceBufferDescriptorSet =
-            renderer.AllocateComputeDescriptorSet(renderer.InstanceBufferDescriptorSetLayout()).Native();
+    if (entry.instanceBufferDescriptorSet == DescriptorSetHandle::Invalid) {
+        entry.instanceBufferDescriptorSet = RegisterDescriptorSet(
+            renderer.AllocateComputeDescriptorSet(renderer.InstanceBufferDescriptorSetLayout()).Native());
     }
-    ComputeDescriptorSet(entry.instanceBufferDescriptorSet, device)
+    ComputeDescriptorSet(Native(entry.instanceBufferDescriptorSet), device)
         .Rewrite(
             {
                 ComputeDescriptorWrite::StorageBuffer(0, entry.inputBuffer.Native()),

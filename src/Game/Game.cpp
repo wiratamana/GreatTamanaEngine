@@ -373,7 +373,7 @@ void Game::EnsureDefaultCameraExists()
 
 void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride,
     IFrameDebuggerCaptureRecorder* frameDebuggerCapture, std::optional<std::size_t> maxDrawCount,
-    const std::unordered_set<Entity>& batchedEntities, VkDescriptorSet sceneServicesSet, rg::CommandBuffer* cmd)
+    const std::unordered_set<Entity>& batchedEntities, DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd)
 {
     renderer.Clear(20, 20, 30, 255);
 

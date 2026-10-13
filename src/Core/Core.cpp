@@ -801,7 +801,7 @@ RenderTexture* Core::DispatchFinalizeForSamplingHook(const char* name, VkCommand
 {
     for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
         if (entry.name == name) {
-            rg::CommandBuffer wrapped(cmd, &m_renderer, nullptr);
+            rg::CommandBuffer wrapped = rg::CommandBuffer::WrapRaw(cmd, &m_renderer);
             entry.lastResult = entry.callback ? entry.callback(wrapped) : nullptr;
             return entry.lastResult;
         }
@@ -1110,7 +1110,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     // slot that resolved but came back with a null view or null sampler -
                     // see PHASE0 global rule 12).
                 }
-                const VkDescriptorSet sceneServicesSet =
+                const DescriptorSetHandle sceneServicesSet =
                     m_sceneServicesDescriptorSet.Rewrite(currentViewForServices, resolvedServiceSlots);
                 if (isGameView) {
                     // Per-draw-call granularity: CommandBuffer::Draw() opens/closes
@@ -1165,8 +1165,8 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 const rg::BufferHandle countHandle = batch.countHandle;
                 const VkBuffer indirectBufferNative = batch.indirectBufferNative;
                 const VkBuffer countBufferNative = batch.countBufferNative;
-                const VkDescriptorSet cullingDescriptorSet = batch.cullingDescriptorSet;
-                const VkDescriptorSet instanceBufferDescriptorSet = batch.instanceBufferDescriptorSet;
+                const DescriptorSetHandle cullingDescriptorSet = batch.cullingDescriptorSet;
+                const DescriptorSetHandle instanceBufferDescriptorSet = batch.instanceBufferDescriptorSet;
                 const std::size_t instanceCount = batch.instanceCount;
                 const MeshHandle meshHandle = batch.mesh;
                 const PipelineHandle originalPipelineHandle = batch.originalPipeline;
@@ -1290,7 +1290,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                         // RenderOpaque already resolved/wrote this view's real
                         // Scene Services set earlier this SAME frame - reuse it
                         // via the read-only accessor instead of resolving twice.
-                        const VkDescriptorSet sceneServicesSet =
+                        const DescriptorSetHandle sceneServicesSet =
                             m_sceneServicesDescriptorSet.DescriptorSetFor(currentViewForServices);
 
                         m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
@@ -1847,7 +1847,7 @@ void Core::BuildFrame()
                 if (entry.name == "GameViewComposited" || entry.name == "SceneViewComposited") {
                     continue;
                 }
-                rg::CommandBuffer wrappedForGenericHook(offscreenCmd, &m_renderer, nullptr);
+                rg::CommandBuffer wrappedForGenericHook = rg::CommandBuffer::WrapRaw(offscreenCmd, &m_renderer);
                 entry.lastResult = entry.callback(wrappedForGenericHook);
             }
             m_renderer.EndOffscreenRenderGraphRecording();

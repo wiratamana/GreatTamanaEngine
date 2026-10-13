@@ -30,7 +30,7 @@ VkShaderStageFlags ToVkShaderStageFlags(ShaderStageMask mask) noexcept
 
 } // namespace
 
-CommandBuffer::CommandBuffer(VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats,
+CommandBuffer::CommandBuffer(CommandBufferKey, VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats,
     WriteTargetInfo writeTarget, FrameDebuggerEventSink* eventSink) noexcept
     : m_cmd(cmd)
     , m_renderer(renderer)
@@ -91,7 +91,7 @@ void CommandBuffer::DispatchOverSize(std::uint32_t width, std::uint32_t height, 
 }
 
 void CommandBuffer::Draw(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix,
-    const Mat4& viewProjMatrix, VkDescriptorSet materialDescriptorSet, VkDescriptorSet sceneServicesSet)
+    const Mat4& viewProjMatrix, DescriptorSetHandle materialDescriptorSet, DescriptorSetHandle sceneServicesSet)
 {
     assert(m_renderer != nullptr
         && "CommandBuffer::Draw(): no Renderer available - this CommandBuffer was not built from a real "

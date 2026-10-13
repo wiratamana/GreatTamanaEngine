@@ -161,6 +161,12 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
         }
         outputGroup.descriptorSet.Rewrite(writes);
 
+        // Registered ONCE here - this group's descriptor set is never
+        // Rewrite()'d again after this (see OutputGroup::descriptorSetHandle's
+        // own doc comment) - so there is exactly one RegisterDescriptorSet()
+        // call for this handle's entire lifetime.
+        outputGroup.descriptorSetHandle = RegisterDescriptorSet(outputGroup.descriptorSet.Native());
+
         // Build a GPU-skinned Mesh PER PART in this group, all sharing this
         // group's own output vertex buffer - mirrors the CPU path's own
         // "several textured parts share one vertex buffer, each with its

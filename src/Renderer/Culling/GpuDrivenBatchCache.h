@@ -35,6 +35,7 @@
 #include "CullingPipelines.h"
 #include "CullingTypes.h"
 #include "../Buffer.h"
+#include "../../Core/GraphicsHandles.h" // DescriptorSetHandle
 #include "../Compute/ComputeDescriptorSet.h"
 #include "../MeshHandle.h"
 #include "../Pipeline.h"
@@ -179,8 +180,13 @@ public:
         //     Renderer::InstanceBufferDescriptorSetLayout() (1 storage
         //     buffer: input only) - used by the indirect-draw graphics
         //     pass's own Shaders/MeshInstanced.vert.
-        VkDescriptorSet cullingDescriptorSet = VK_NULL_HANDLE;
-        VkDescriptorSet instanceBufferDescriptorSet = VK_NULL_HANDLE;
+        // Both are DescriptorSetHandle (engine-owned, not a raw
+        // VkDescriptorSet) - registered ONCE, at the point they are lazily
+        // allocated inside EnsureDescriptorSetsWritten() below (see that
+        // method's own "== DescriptorSetHandle::Invalid" guard) - never
+        // re-registered on later frames, only re-Rewrite()'d in place.
+        DescriptorSetHandle cullingDescriptorSet = DescriptorSetHandle::Invalid;
+        DescriptorSetHandle instanceBufferDescriptorSet = DescriptorSetHandle::Invalid;
     };
 
     // Reallocates (grows only - never shrinks, and never reallocates at all

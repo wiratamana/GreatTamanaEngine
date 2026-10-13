@@ -1,4 +1,4 @@
-﻿#include "Renderer.h"
+#include "Renderer.h"
 
 #include "../Core/ISurfaceProvider.h"
 #include "RenderGraph/RenderGraph.h"
@@ -374,7 +374,7 @@ void Renderer::ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& re
         throw std::runtime_error("Renderer::ImmediateSubmit: vkBeginCommandBuffer failed.");
     }
 
-    rg::CommandBuffer cmd{ vkCmd, const_cast<Renderer*>(this), nullptr };
+    rg::CommandBuffer cmd = rg::CommandBuffer::WrapRaw(vkCmd, const_cast<Renderer*>(this));
     try {
         recordFn(cmd);
     } catch (...) {
@@ -426,7 +426,7 @@ void Renderer::BeginFrame()
 }
 
 void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix, const Mat4& viewProjMatrix,
-    VkDescriptorSet materialDescriptorSet, VkDescriptorSet sceneServicesSet)
+    DescriptorSetHandle materialDescriptorSet, DescriptorSetHandle sceneServicesSet)
 {
     // Global Scene Services Descriptor Set campaign (better-render-pass-6),
     // PHASE5 - the ONE place that resolves pipeline.HasSceneServicesSet()'s
@@ -435,14 +435,15 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
     // sceneServicesSetLayout (PHASE3) - passing one against a Pipeline with
     // no set = 1 is exactly the backward-compatibility break this gate
     // exists to prevent (PHASE0's global rule 1).
-    const VkDescriptorSet effectiveSceneServicesSet = pipeline.HasSceneServicesSet() ? sceneServicesSet : VK_NULL_HANDLE;
+    const VkDescriptorSet effectiveSceneServicesSet =
+        pipeline.HasSceneServicesSet() ? Native(sceneServicesSet) : VK_NULL_HANDLE;
 
     // Never bind descriptor set 0 against a pipeline layout that declares no
     // material set - a depth-only pipeline (zero descriptor sets) paired
     // with a textured entity's real material texture would otherwise trip
     // VUID-vkCmdBindDescriptorSets-firstSet-00360.
     const VkDescriptorSet effectiveMaterialDescriptorSet =
-        pipeline.HasMaterialSet() ? materialDescriptorSet : VK_NULL_HANDLE;
+        pipeline.HasMaterialSet() ? Native(materialDescriptorSet) : VK_NULL_HANDLE;
 
     // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
     // while a render-graph pass is being recorded (BeginGraphPassRecording()
@@ -470,7 +471,7 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
 
 void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
     VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset,
-    VkDescriptorSet instanceBufferDescriptorSet, VkDescriptorSet sceneServicesSet, const Mat4& viewProjMatrix)
+    DescriptorSetHandle instanceBufferDescriptorSet, DescriptorSetHandle sceneServicesSet, const Mat4& viewProjMatrix)
 {
     // Deliberately NO legacy/queued fallback path, same "day-one render-
     // graph-only" precedent Renderer::Dispatch() already established for
@@ -492,11 +493,12 @@ void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuff
 
     // Only ever actually forwarded when `pipeline` itself carries a real
     // sceneServicesSetLayout - mirrors Submit()'s own gate exactly.
-    const VkDescriptorSet effectiveSceneServicesSet = pipeline.HasSceneServicesSet() ? sceneServicesSet : VK_NULL_HANDLE;
+    const VkDescriptorSet effectiveSceneServicesSet =
+        pipeline.HasSceneServicesSet() ? Native(sceneServicesSet) : VK_NULL_HANDLE;
 
     FrameRecorder::IssueIndirectDrawCommand(m_currentGraphPassCmd, pipeline.Native(), pipeline.Layout(),
-        mesh.VertexBuffer(), mesh.IndexBuffer(), instanceBufferDescriptorSet, effectiveSceneServicesSet, viewProjMatrix,
-        indirectBuffer, indirectOffset, maxDrawCount, countBuffer, countBufferOffset,
+        mesh.VertexBuffer(), mesh.IndexBuffer(), Native(instanceBufferDescriptorSet), effectiveSceneServicesSet,
+        viewProjMatrix, indirectBuffer, indirectOffset, maxDrawCount, countBuffer, countBufferOffset,
         m_device.SupportsDrawIndirectCount());
 
     // Deliberately does NOT touch m_currentGraphPassRecordDrawStats (that

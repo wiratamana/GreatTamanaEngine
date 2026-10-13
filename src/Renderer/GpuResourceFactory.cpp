@@ -1,5 +1,6 @@
-﻿#include "GpuResourceFactory.h"
+#include "GpuResourceFactory.h"
 
+#include "GraphicsHandleRegistry.h" // RegisterDescriptorSet() - MaterialTexture/compute descriptor sets leave this file as engine handles.
 #include "SceneServicesDescriptorSet.h" // Block 4 - gte::kSceneServiceSlotCount, for this file's own static_asserts.
 #include "VulkanFormatInfo.h" // ToVkFormat() - the one place this file translates PixelFormat->VkFormat for its own pre-construction capability checks.
 #include "Vulkan/DescriptorSetLayoutBuilder.h"
@@ -560,7 +561,11 @@ MaterialTexture GpuResourceFactory::CreateMaterialTexture2D(
     write.pImageInfo = &imageInfo;
     vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
 
-    return MaterialTexture{ std::move(texture), descriptorSet };
+    // Registered ONCE, here, at creation time - this VkDescriptorSet is
+    // pool-owned and never individually freed/reallocated afterward (see
+    // MaterialTexture.h's own doc comment), so there is exactly one
+    // RegisterDescriptorSet() call for this set's entire lifetime.
+    return MaterialTexture{ std::move(texture), RegisterDescriptorSet(descriptorSet) };
 }
 
 ComputeDescriptorSet GpuResourceFactory::AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const
