@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../../Core/GraphicsHandles.h" // BufferObjectHandle - GpuSkinningDispatchRequest::outputBuffer below.
 #include "../../ECS/Entity.h"
 #include "../../ECS/Registry.h"
 #include "../../Math/Vec3.h"
@@ -222,7 +223,11 @@ public:
         // ImportBuffer()'s own `name` parameter.
         const char* name = nullptr;
 
-        VkBuffer outputBuffer = VK_NULL_HANDLE;
+        // Engine-native opaque handle (Core/GraphicsHandles.h), never a raw
+        // VkBuffer - see Buffer::ObjectHandle(). RenderGraphBuilder::
+        // ImportBuffer()'s own `externalBuffer` parameter now requires
+        // exactly this type.
+        BufferObjectHandle outputBuffer = BufferObjectHandle::Invalid;
         VkDeviceSize outputBufferSize = 0;
         VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
         std::uint32_t vertexCount = 0;

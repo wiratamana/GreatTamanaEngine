@@ -1,4 +1,4 @@
-﻿#include "AtmosphereLutRendererImpl.h"
+#include "AtmosphereLutRendererImpl.h"
 
 #include "AtmosphereParameters.h"
 #include "AtmospherePassToggleLogic.h"
@@ -441,7 +441,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass
     }
 
     const rg::TextureHandle outputHandle = builder.ImportTexture(outputTextureName, viewState.output->Target(),
-        ImageLayout::Undefined, viewState.output->Sampler(), viewState.output->DepthSampler(), &*viewState.output);
+        ImageLayout::Undefined, viewState.output->SamplerObjectHandle(), viewState.output->DepthSamplerObjectHandle(), &*viewState.output);
 
     // Resolve volume sampler handle.
     const auto aerialVolumeIt = aerialPerspectiveVolumeViewStates.find(aerialPerspectiveVolumeName);

@@ -10,6 +10,7 @@
 // to prove it is NEVER invoked by AddPass()/Finish() themselves.
 
 #include "Renderer/RenderGraph/RenderGraphBuilder.h"
+#include "Renderer/GraphicsHandleRegistry.h" // RegisterBufferObject()/Native(BufferObjectHandle) - ImportBuffer() tests below build a BufferObjectHandle from a fake VkBuffer through this exact, engine-sanctioned round trip.
 #include "Renderer/RenderGraph/RenderFeatureScope.h"
 #include "Renderer/RenderGraph/RenderPassToggleRegistry.h"
 
@@ -912,12 +913,18 @@ TEST(RenderGraphBuilderTest, ImportedAndTransientTexturesShareOneContiguousHandl
 
 // --- ImportBuffer() (GPU Vertex Skinning campaign, Phase 3 - -----------------
 // --- GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) ---------
+//
+// ImportBuffer()'s `externalBuffer` parameter is a BufferObjectHandle
+// (Core/GraphicsHandles.h), never a raw VkBuffer - every test below builds
+// one from a fake VkBuffer via RegisterBufferObject(), the exact same
+// round trip a real caller gets via Buffer::ObjectHandle() (see
+// GraphicsHandleRegistry.h).
 
 TEST(RenderGraphBuilderTest, ImportBufferProducesHandleUsableLikeCreateBufferHandle)
 {
     RenderGraphBuilder builder;
     const VkBuffer fakeBuffer = reinterpret_cast<VkBuffer>(static_cast<std::uintptr_t>(0x7777));
-    const BufferHandle imported = builder.ImportBuffer("SkinOutput", fakeBuffer, 1024);
+    const BufferHandle imported = builder.ImportBuffer("SkinOutput", RegisterBufferObject(fakeBuffer), 1024);
 
     ASSERT_TRUE(imported.IsValid());
 
@@ -938,7 +945,7 @@ TEST(RenderGraphBuilderTest, ImportBufferIsTaggedAsImportedInCompiledGraphInput)
 {
     RenderGraphBuilder builder;
     const VkBuffer fakeBuffer = reinterpret_cast<VkBuffer>(static_cast<std::uintptr_t>(0x8888));
-    const BufferHandle imported = builder.ImportBuffer("SkinOutput", fakeBuffer, 512);
+    const BufferHandle imported = builder.ImportBuffer("SkinOutput", RegisterBufferObject(fakeBuffer), 512);
     const BufferHandle transient = builder.CreateBuffer("Scratch", BufferDesc{ 256, BufferUsage::StorageBuffer });
 
     const CompiledGraphInput input = builder.Finish();
@@ -951,11 +958,11 @@ TEST(RenderGraphBuilderTest, ImportBufferStoresExternalBufferAndSizeVerbatim)
 {
     RenderGraphBuilder builder;
     const VkBuffer fakeBuffer = reinterpret_cast<VkBuffer>(static_cast<std::uintptr_t>(0x9999));
-    const BufferHandle imported = builder.ImportBuffer("SkinOutput", fakeBuffer, 2048);
+    const BufferHandle imported = builder.ImportBuffer("SkinOutput", RegisterBufferObject(fakeBuffer), 2048);
 
     const CompiledGraphInput input = builder.Finish();
     const BufferImportInfo& info = input.buffers[imported.index].importInfo;
-    EXPECT_EQ(info.externalBuffer, fakeBuffer);
+    EXPECT_EQ(Native(info.externalBuffer), fakeBuffer);
     EXPECT_EQ(info.size, 2048u);
 }
 
@@ -963,7 +970,7 @@ TEST(RenderGraphBuilderTest, ImportBufferMirrorsSizeIntoBufferDesc)
 {
     RenderGraphBuilder builder;
     const VkBuffer fakeBuffer = reinterpret_cast<VkBuffer>(static_cast<std::uintptr_t>(0xAAAA));
-    const BufferHandle imported = builder.ImportBuffer("SkinOutput", fakeBuffer, 4096);
+    const BufferHandle imported = builder.ImportBuffer("SkinOutput", RegisterBufferObject(fakeBuffer), 4096);
 
     const CompiledGraphInput input = builder.Finish();
     EXPECT_EQ(input.buffers[imported.index].desc.size, 4096u);
@@ -973,8 +980,8 @@ TEST(RenderGraphBuilderTest, ImportedAndTransientBuffersShareOneContiguousHandle
 {
     RenderGraphBuilder builder;
     const BufferHandle transientA = builder.CreateBuffer("A", BufferDesc{ 128, BufferUsage::StorageBuffer });
-    const BufferHandle imported = builder.ImportBuffer(
-        "SkinOutput", reinterpret_cast<VkBuffer>(static_cast<std::uintptr_t>(0xBBBB)), 512);
+    const BufferHandle imported = builder.ImportBuffer("SkinOutput",
+        RegisterBufferObject(reinterpret_cast<VkBuffer>(static_cast<std::uintptr_t>(0xBBBB))), 512);
     const BufferHandle transientB = builder.CreateBuffer("B", BufferDesc{ 64, BufferUsage::VertexBuffer });
 
     EXPECT_FALSE(transientA == imported);
@@ -1033,7 +1040,7 @@ TEST(RenderGraphBuilderDeathTest, ImportBufferRejectsNullName)
 {
     RenderGraphBuilder builder;
     EXPECT_DEATH(
-        { builder.ImportBuffer(nullptr, VK_NULL_HANDLE, 1024); },
+        { builder.ImportBuffer(nullptr, BufferObjectHandle::Invalid, 1024); },
         "");
 }
 
@@ -1536,8 +1543,8 @@ TEST(RenderGraphBuilderTest, ResolveImportedTextureSamplersReturnsRealSamplersFo
     const RenderTarget gameViewTarget = MakeFakeGameViewTarget();
     const VkSampler colorSampler = reinterpret_cast<VkSampler>(static_cast<std::uintptr_t>(0xC0105A));
     const VkSampler depthSampler = reinterpret_cast<VkSampler>(static_cast<std::uintptr_t>(0xD3975A));
-    const TextureHandle imported = builder.ImportTexture(
-        "GameView", gameViewTarget, ImageLayout::ShaderReadOnlyOptimal, colorSampler, depthSampler);
+    const TextureHandle imported = builder.ImportTexture("GameView", gameViewTarget,
+        ImageLayout::ShaderReadOnlyOptimal, RegisterSampler(colorSampler), RegisterSampler(depthSampler));
 
     const RenderGraphBuilder::ImportedTextureSamplers resolved = builder.ResolveImportedTextureSamplers(imported);
     EXPECT_EQ(resolved.colorSampler, colorSampler);

@@ -1606,7 +1606,7 @@ void Core::BuildFrame()
                             RenderSystem::ResolveActiveCameraViewProjection(m_game.GetRegistry(), aspect);
 
                         const rg::TextureHandle h = b.ImportTexture("GameView", gameTarget->Target(),
-                            ImageLayout::Undefined, gameTarget->Sampler(), gameTarget->DepthSampler(), gameTarget);
+                            ImageLayout::Undefined, gameTarget->SamplerObjectHandle(), gameTarget->DepthSamplerObjectHandle(), gameTarget);
 
                         RenderPassViewData gameViewData;
                         gameViewData.id = rg::RenderViewId::Named("Game");
@@ -1627,7 +1627,7 @@ void Core::BuildFrame()
                             gpuSkinnedOutputBuffers.reserve(m_gpuSkinningRequestsThisFrame.size());
                             for (const AnimationSystem::GpuSkinningDispatchRequest& request :
                                 m_gpuSkinningRequestsThisFrame) {
-                                gpuSkinnedOutputBuffers.insert(request.outputBuffer);
+                                gpuSkinnedOutputBuffers.insert(Native(request.outputBuffer));
                             }
 
                             RenderSystem& renderSystem = m_game.GetRenderSystem();
@@ -1665,12 +1665,12 @@ void Core::BuildFrame()
                                 data.originalPipeline = frameEntry.pipeline;
                                 data.instanceCount = frameEntry.instanceCount;
                                 data.inputHandle = b.ImportBuffer(names.inputBufferName,
-                                    cacheEntry->inputBuffer.Native(), cacheEntry->inputBuffer.Size());
+                                    cacheEntry->inputBuffer.ObjectHandle(), cacheEntry->inputBuffer.Size());
                                 data.indirectHandle = b.ImportBuffer(names.indirectBufferName,
-                                    cacheEntry->indirectCommandBuffer.Native(),
+                                    cacheEntry->indirectCommandBuffer.ObjectHandle(),
                                     cacheEntry->indirectCommandBuffer.Size());
                                 data.countHandle = b.ImportBuffer(names.countBufferName,
-                                    cacheEntry->countBuffer.Native(), cacheEntry->countBuffer.Size());
+                                    cacheEntry->countBuffer.ObjectHandle(), cacheEntry->countBuffer.Size());
                                 data.indirectBufferNative = cacheEntry->indirectCommandBuffer.Native();
                                 data.countBufferNative = cacheEntry->countBuffer.Native();
                                 data.cullingDescriptorSet = cacheEntry->cullingDescriptorSet;
@@ -1713,7 +1713,7 @@ void Core::BuildFrame()
                         const Vec3 sceneEyeWorldPosition = m_editorLayer->SceneViewCameraWorldPosition();
 
                         const rg::TextureHandle h = b.ImportTexture("SceneView", sceneTarget->Target(),
-                            ImageLayout::Undefined, sceneTarget->Sampler(), sceneTarget->DepthSampler(), sceneTarget);
+                            ImageLayout::Undefined, sceneTarget->SamplerObjectHandle(), sceneTarget->DepthSamplerObjectHandle(), sceneTarget);
 
                         RenderPassViewData sceneViewData;
                         sceneViewData.id = rg::RenderViewId::Named("Scene");

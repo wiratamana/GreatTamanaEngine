@@ -51,6 +51,8 @@ RenderTexture::RenderTexture(RenderTexture&& other) noexcept
     , m_imageView(std::exchange(other.m_imageView, VK_NULL_HANDLE))
     , m_sampler(std::exchange(other.m_sampler, VK_NULL_HANDLE))
     , m_extent(other.m_extent)
+    , m_samplerObjectHandle(std::exchange(other.m_samplerObjectHandle, CachedSamplerHandle{}))
+    , m_depthSamplerObjectHandle(std::exchange(other.m_depthSamplerObjectHandle, CachedSamplerHandle{}))
     , m_currentState(std::exchange(other.m_currentState, rg::ResourceState{}))
     , m_depthBuffer(std::move(other.m_depthBuffer))
 {
@@ -77,6 +79,8 @@ RenderTexture& RenderTexture::operator=(RenderTexture&& other) noexcept
         m_imageView = std::exchange(other.m_imageView, VK_NULL_HANDLE);
         m_sampler = std::exchange(other.m_sampler, VK_NULL_HANDLE);
         m_extent = other.m_extent;
+        m_samplerObjectHandle = std::exchange(other.m_samplerObjectHandle, CachedSamplerHandle{});
+        m_depthSamplerObjectHandle = std::exchange(other.m_depthSamplerObjectHandle, CachedSamplerHandle{});
         m_currentState = std::exchange(other.m_currentState, rg::ResourceState{});
         m_depthBuffer = std::move(other.m_depthBuffer);
     }
@@ -228,7 +232,15 @@ void RenderTexture::Create(int width, int height)
 
 void RenderTexture::Destroy() noexcept
 {
+    // Never leave a stale registry entry pointing at a VkSampler that's
+    // about to be destroyed - mirrors Buffer::Destroy()'s own
+    // m_objectHandle.Resolve(VK_NULL_HANDLE) precedent. Depth sampler is
+    // resolved AFTER m_depthBuffer.reset() below so DepthSampler() already
+    // observes VK_NULL_HANDLE by the time it's asked to unregister.
+    m_samplerObjectHandle.Resolve(VK_NULL_HANDLE);
+
     m_depthBuffer.reset();
+    m_depthSamplerObjectHandle.Resolve(VK_NULL_HANDLE);
 
     if (m_sampler != VK_NULL_HANDLE) {
         vkDestroySampler(m_device, m_sampler, nullptr);

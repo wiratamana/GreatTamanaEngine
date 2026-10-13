@@ -1,4 +1,4 @@
-﻿// Unit tests for Phase 3's pure "Smart Planner" compilation algorithm
+// Unit tests for Phase 3's pure "Smart Planner" compilation algorithm
 // (src/Renderer/RenderGraph/RenderGraphCompiler.h) - dependency resolution,
 // culling, deterministic topological ordering, and resource lifetimes. No
 // live VkDevice/Renderer involved at all - see
@@ -629,9 +629,9 @@ TEST(RenderGraphCompilerTest, BufferOnlyWriteSurvivesCullingOnlyWhenExplicitlyKe
 {
     RenderGraphBuilder builder;
     const BufferHandle bufferA =
-        builder.ImportBuffer("BufA", VK_NULL_HANDLE, 1024);
+        builder.ImportBuffer("BufA", BufferObjectHandle::Invalid, 1024);
     const BufferHandle bufferB =
-        builder.ImportBuffer("BufB", VK_NULL_HANDLE, 1024);
+        builder.ImportBuffer("BufB", BufferObjectHandle::Invalid, 1024);
 
     builder.AddComputePass(
         "WritesKeptBuffer",
@@ -660,7 +660,7 @@ TEST(RenderGraphCompilerTest, BufferWriteNeverKeptIsCulledEvenWithNoTextureFinal
 {
     RenderGraphBuilder builder;
     const BufferHandle buffer =
-        builder.ImportBuffer("Buf", VK_NULL_HANDLE, 1024);
+        builder.ImportBuffer("Buf", BufferObjectHandle::Invalid, 1024);
 
     builder.AddComputePass(
         "WritesBuffer",
@@ -697,7 +697,7 @@ TEST(RenderGraphCompilerTest, BufferWriteNeverKeptIsCulledEvenWithNoTextureFinal
 TEST(RenderGraphCompilerTest, GpuSkinningReadBeforeWriteMitigationPreservesOrderForSharedOutputBuffer)
 {
     RenderGraphBuilder builder;
-    const BufferHandle output = builder.ImportBuffer("SkinOutput", VK_NULL_HANDLE, 1024);
+    const BufferHandle output = builder.ImportBuffer("SkinOutput", BufferObjectHandle::Invalid, 1024);
     const TextureHandle color = builder.CreateTexture("Color", MakeTextureDesc());
 
     builder.AddComputePass(

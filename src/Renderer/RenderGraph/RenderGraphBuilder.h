@@ -1,31 +1,6 @@
 #pragma once
 
-// Phase 2 (RENDERGRAPH_PHASE2_BUILDER_API_STRATEGY_v2.md, part 2 of the
-// wider RENDERGRAPH_PHASE0_MASTER_STRATEGY_v2.md campaign) - the
-// declarative "describe a frame's drawing jobs" authoring API, built
-// directly on top of Phase 1's pure vocabulary (RenderGraphTypes.h).
-//
-// RenderGraphBuilder lets a future pass author say "I want a texture like
-// THIS" (CreateTexture()/ImportTexture()) and "here is a pass that reads/
-// writes some of those textures, here is the code that records its draws"
-// (AddPass()) - and produces nothing more than an INERT, in-memory
-// description of one frame's intended work (Finish() -> CompiledGraphInput).
-// No Vulkan call is issued and no physical resource is allocated anywhere
-// in this file - see RENDERGRAPH_PHASE2_BUILDER_API_STRATEGY_v2.md, Step 1.
-// Compilation (dependency ordering/culling - Phase 3) and execution (real
-// Vulkan recording - Phase 6) both come later; this is purely the
-// "setup phase" half of the classic two-phase setup/execute render-graph
-// pattern (Frostbite's Frame Graph, Unreal's FRDGBuilder).
-//
-// Nothing outside src/Renderer/RenderGraph/ includes this header yet, and
-// nothing here is wired into Application::Run()/Renderer - that is
-// deliberate (see this phase's own Step 4, "What We Will NOT Do"). Phase 7
-// is the first real production consumer.
-//
-// Same "Vulkan-header-present-but-Vulkan-call-free" discipline Phase 1
-// established: RenderTarget.h (a plain struct of Vulkan handles, no
-// Vulkan calls of its own either) is the only Vulkan-adjacent dependency
-// here besides RenderGraphTypes.h itself.
+// Declarative builder API to record frame render passes and resources.
 
 #include "RenderGraphTypes.h"
 #include "RenderGraphDebugMetadataSink.h"
@@ -33,8 +8,8 @@
 #include "RenderPassToggleRegistry.h"
 #include "../RenderTarget.h"
 #include "../VolumeTarget.h"
-#include "../TextureArrayTarget.h" // better-render-pass-3 campaign, BLOCK5
-#include "../../Core/ImageLayout.h" // engine-native ImportTexture()/ImportVolumeTexture()/ImportTextureArray() `currentLayout` type - see TextureImportInfo's own doc comment below for why this is never VkImageLayout.
+#include "../TextureArrayTarget.h"
+#include "../../Core/ImageLayout.h"
 
 #include <volk.h>
 
@@ -48,111 +23,52 @@
 
 namespace gte::rg {
 
-enum class ExecuteTimingMode : std::uint8_t; // see RenderGraph.h - forward-declared to avoid a circular include (mirrors RenderGraphDebugTextureRegistry.h's own identical precedent).
+// Forward declaration to avoid circular include with RenderGraph.h.
+enum class ExecuteTimingMode : std::uint8_t;
 
-// Per-texture-slot side information for a texture the graph does NOT own
-// the lifetime of - see RenderGraphBuilder::ImportTexture() below and
-// RENDERGRAPH_PHASE2_BUILDER_API_STRATEGY_v2.md, Step 3.3. render-pass-6
-// campaign, PHASE5 (item 2.1) - this is the `importInfo` field of the
-// matching TextureSlot entry (see TextureSlot below), so a non-imported
-// (transient) texture's entry here is simply `TextureImportInfo{}`
-// (isImported == false) and is never read by Phase 4.
+// Import metadata for textures owned outside the render graph.
 struct TextureImportInfo {
     bool isImported = false;
-    // Only meaningful when isImported == true - the already-live resource
-    // this handle refers to (the swapchain image acquired this frame, or
-    // ImGuiEditorLayer's own persistent Game/Scene RenderTexture). Phase 4
-    // must never try to allocate or free this.
     RenderTarget externalTarget{};
-    // Only meaningful when isImported == true - the caller-supplied,
-    // REQUIRED statement of exactly what layout this image is actually in
-    // right now, as this engine's own native ImageLayout (Core/ImageLayout.h)
-    // - never a raw VkImageLayout (see that header's own doc comment for
-    // why). See ImportTexture()'s own comment for why this has no default
-    // to silently fall back on.
     ImageLayout currentLayout = ImageLayout::Undefined;
-    // Only meaningful when isImported == true - the already-live color/
-    // depth sampler for this resource, supplied by the caller at import
-    // time (VK_NULL_HANDLE when that sub-resource genuinely has none).
-    VkSampler colorSampler = VK_NULL_HANDLE;
-    VkSampler depthSampler = VK_NULL_HANDLE;
-    // Only meaningful when isImported == true - the RenderTexture that owns
-    // this image, if any. ExecuteCompiledGraph() mirrors this physical
-    // texture's real final state back onto `trackedOwner` once per frame,
-    // so a caller never has to guess its own barrier state again.
-    RenderTexture* trackedOwner = nullptr;
+    // Engine-native opaque handles (Core/GraphicsHandles.h) - never a raw
+    // VkSampler. See RenderTexture::SamplerObjectHandle()/
+    // DepthSamplerObjectHandle() for the usual way a caller builds one of
+    // these; Renderer/GraphicsHandleRegistry.h's Native() is how this
+    // engine ever unwraps one back to a real VkSampler (see RenderGraph.cpp's
+    // EnsureTextureResolved()).
+    SamplerHandle colorSampler = SamplerHandle::Invalid;
+    SamplerHandle depthSampler = SamplerHandle::Invalid;
+    RenderTexture* trackedOwner = nullptr; // Optional owner to receive final layout state.
 };
 
-// Buffer sibling of TextureImportInfo above - see
-// RenderGraphBuilder::ImportBuffer() below and
-// GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md, Step 3.2,
-// for the motivating use case (a future GPU-vertex-skinning per-model
-// output buffer - created ONCE, at model-registration time, and
-// re-imported into a freshly-built graph every frame, exactly like the
-// Editor's persistent Game/Scene RenderTexture is re-imported as a texture
-// every frame today - see TextureImportInfo above). render-pass-6 campaign,
-// PHASE5 (item 2.1) - this is the `importInfo` field of the matching
-// BufferSlot entry (see BufferSlot below), so a non-imported (transient)
-// buffer's entry here is simply `BufferImportInfo{}` (isImported == false)
-// and is never read by RenderGraphResourcePool.
+// Import metadata for buffers owned outside the render graph.
 struct BufferImportInfo {
     bool isImported = false;
-    // Only meaningful when isImported == true - the already-live buffer
-    // this handle refers to. RenderGraphResourcePool must never try to
-    // allocate or free this - see RenderGraph::EnsureBufferResolved()'s own
-    // import branch.
-    VkBuffer externalBuffer = VK_NULL_HANDLE;
+    // Engine-native opaque handle (Core/GraphicsHandles.h) - never a raw
+    // VkBuffer. See Buffer::ObjectHandle() for the usual way a caller builds
+    // one of these; Renderer/GraphicsHandleRegistry.h's Native() is how this
+    // engine ever unwraps one back to a real VkBuffer (see RenderGraph.cpp's
+    // EnsureBufferResolved()).
+    BufferObjectHandle externalBuffer = BufferObjectHandle::Invalid;
     VkDeviceSize size = 0;
 };
 
-// VolumeTexture sibling of TextureImportInfo above - Atmosphere Scattering
-// campaign, Phase 2 (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md).
-// render-pass-6 campaign, PHASE5 (item 2.1) - this is the `importInfo` field
-// of the matching VolumeTextureSlot entry (see VolumeTextureSlot below).
-// Every VolumeTextureHandle today is created exclusively via
-// RenderGraphBuilder::ImportVolumeTexture() below (isImported is therefore
-// always true in practice) - there is deliberately no
-// CreateVolumeTexture()-requested transient/pooled counterpart yet (see
-// this campaign's own Phase 2 completion report for why this was
-// deliberately deferred).
+// Import metadata for 3D volume textures owned outside the render graph.
 struct VolumeTextureImportInfo {
     bool isImported = false;
-    // Only meaningful when isImported == true - the already-live resource
-    // this handle refers to. RenderGraphResourcePool must never try to
-    // allocate or free this (it never even sees a volume texture at all -
-    // see this campaign's own Phase 2 analysis).
     VolumeTarget externalTarget{};
-    // Only meaningful when isImported == true - see ImportVolumeTexture()'s
-    // own comment for why this has no default to silently fall back on.
-    // Engine-native ImageLayout, never a raw VkImageLayout - mirrors
-    // TextureImportInfo::currentLayout's own doc comment above.
     ImageLayout currentLayout = ImageLayout::Undefined;
 };
 
-// TextureArray sibling of VolumeTextureImportInfo above - better-render-
-// pass-3 campaign, BLOCK5. Points at the NEW TextureArrayTarget (NOT
-// VolumeTarget or RenderTarget - neither existing plain-view struct has the
-// right shape for this resource).
+// Import metadata for texture arrays owned outside the render graph.
 struct TextureArrayImportInfo {
     bool isImported = false;
     TextureArrayTarget externalTarget{};
-    // Engine-native ImageLayout, never a raw VkImageLayout - mirrors
-    // TextureImportInfo::currentLayout's own doc comment above.
     ImageLayout currentLayout = ImageLayout::Undefined;
 };
 
-
-// render-pass-6 campaign, PHASE5 (item 2.1,
-// task_manager/render-pass-6/PHASE5_RESOURCE_SLOT_VECTOR_COLLAPSE.md) -
-// REPLACES the old "textureDescs/textureNames/textureImportInfo trio, three
-// parallel vectors kept in lockstep purely by convention" data shape with
-// one struct-of-3-fields per declared resource. Nothing enforced the old
-// parallelism at compile time - a future edit that pushed to one array
-// without the other two would have been a silent, very-hard-to-debug
-// misalignment bug, not a compile error. This struct makes that bug class
-// structurally impossible: there is only ONE vector to push onto, and its
-// three fields can never independently desynchronize. Mirrors
-// BufferSlot/VolumeTextureSlot below exactly.
+// Resource slot entries storing descriptor, debug name, and import data together.
 struct TextureSlot {
     TextureDesc desc;
     const char* name = nullptr;
@@ -177,121 +93,26 @@ struct TextureArraySlot {
     TextureArrayImportInfo importInfo;
 };
 
-
-// The "raw material" handed off to Phase 3's compiler
-// (RenderGraphCompiler::Compile(CompiledGraphInput&&)) - NOT yet
-// "compiled" in any real sense (no ordering/culling has happened yet)
-// despite the name; named this way so Phase 3 reads naturally as "the
-// input a compiler consumes". Bundles every pass declared this frame plus
-// the texture/buffer/volume-texture SLOT tables (TextureSlot/BufferSlot/
-// VolumeTextureSlot above - render-pass-6 campaign, PHASE5, REPLACING the
-// old 9-parallel-vector shape) - see RenderGraphBuilder's own class comment
-// below for why a resource's name lives here, and nowhere inside
-// TextureDesc/BufferDesc themselves.
-//
-// This hand-off boundary is itself a natural Tier-1 test seam: a test can
-// build a RenderGraphBuilder, call Finish(), and assert on the resulting
-// CompiledGraphInput's shape directly, with no Phase 3 code needing to
-// exist at all - see tests/Renderer/RenderGraph/RenderGraphBuilderTests.cpp.
+// Uncompiled frame description passed to the compiler.
 struct CompiledGraphInput {
     std::vector<PassRecord> passes;
 
     std::vector<TextureSlot> textures;
     std::vector<BufferSlot> buffers;
-
-    // Atmosphere Scattering campaign, Phase 2.
     std::vector<VolumeTextureSlot> volumeTextures;
-
-    // better-render-pass-3 campaign, BLOCK5.
     std::vector<TextureArraySlot> textureArrays;
 
-    // Atmosphere Scattering campaign, Phase 6
-    // (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) - fixes a
-    // genuine Phase 2 infrastructure gap this phase found: RenderGraphCompiler::
-    // Compile()'s `finalOutputs` root set is TextureHandle-only, so a pass
-    // whose ONLY write is a VolumeTextureHandle (e.g. this campaign's own
-    // aerial-perspective froxel volume) could NEVER be kept alive - its
-    // write is structurally unreachable from any texture-only root, so it
-    // was always silently culled, no matter what it declared. Rather than
-    // changing every existing `RenderGraph::Execute()` `build` callback's
-    // return type (which is texture-only, `std::vector<TextureHandle>`, and
-    // used by every pre-existing call site), RenderGraphBuilder gained a
-    // SEPARATE, opt-in way to mark a VolumeTextureHandle as a required root
-    // - see RenderGraphBuilder::KeepVolumeTextureOutput() below.
-    // RenderGraphCompiler::Compile() reads THIS field directly off `input`
-    // (it already takes `CompiledGraphInput&`) rather than needing a new
-    // parameter of its own.
+    // Output roots that must not be culled during compilation.
     std::vector<VolumeTextureHandle> finalVolumeTextureOutputs;
-
-    // editor-core-separation-26 campaign, PHASE1
-    // (BIG_STEP_2_BUFFER_ROOTS_AND_BLIT_PASSES_2026-09-29.txt, Part A) -
-    // the BufferHandle sibling of finalVolumeTextureOutputs immediately
-    // above, closing the exact same shape of gap for buffers:
-    // RenderGraphCompiler::Compile()'s `finalOutputs` root set is
-    // TextureHandle-only, and finalVolumeTextureOutputs (Atmosphere
-    // Scattering campaign, Phase 6) is VolumeTextureHandle-only - a pass
-    // whose ONLY write is a BufferHandle (e.g. a compute pass that fills a
-    // buffer this frame purely for a LATER frame's own ImportBuffer() to
-    // read, with no in-frame reader) used to be silently culled no matter
-    // what it declared. RenderGraphBuilder gained a SEPARATE, opt-in way
-    // to mark a BufferHandle as a required root - see
-    // RenderGraphBuilder::KeepBufferOutput() below. RenderGraphCompiler::
-    // Compile() reads THIS field directly off `input`, exactly like
-    // finalVolumeTextureOutputs.
     std::vector<BufferHandle> finalBufferOutputs;
-
-    // better-render-pass-3 campaign, BLOCK5 - the TextureArrayHandle
-    // sibling of finalVolumeTextureOutputs/finalBufferOutputs above - a
-    // REQUIREMENT, not an open question, per this campaign's own planning
-    // doc: both VolumeTextureHandle and BufferHandle originally shipped
-    // without this and both needed it added later once a real pass existed
-    // whose ONLY write was that handle with no in-frame reader (a
-    // persistent multi-layer image array re-read only by a LATER frame is
-    // exactly this shape). See RenderGraphBuilder::KeepTextureArrayOutput()
-    // below.
     std::vector<TextureArrayHandle> finalTextureArrayOutputs;
-
-    // editor-core-separation-27 campaign, PHASE2/PHASE8
-    // (BIG_STEP_3_PERSISTENT_RESOURCE_CACHE_HONEST_LAYOUT_HISTORY_REV2_2026-09-30.txt,
-    // Section 5.1/5.2) - every handle either GetOrCreatePersistentTexture()
-    // overload mints (PHASE8) is pushed here too, alongside its normal
-    // TextureSlot entry - this is what RenderGraphCompiler::Compile()'s
-    // root-marking scan (PHASE3) treats as an ALWAYS-required root, with
-    // zero action needed from the pass author, and what
-    // RenderGraph::ExecuteCompiledGraph()'s own honest-layout-recording
-    // loop (PHASE8) walks at the end of every call. UNLIKE
-    // finalVolumeTextureOutputs/finalBufferOutputs above, nothing outside
-    // RenderGraphBuilder ever pushes onto this directly - there is no
-    // public "KeepPersistentTextureOutput()" method; population is
-    // entirely internal to GetOrCreatePersistentTexture() itself (PHASE8).
     std::vector<TextureHandle> persistentCacheTextures;
 };
 
-
-// Owns the whole in-progress description of one frame. A fresh
-// RenderGraphBuilder is meant to be built up once per frame (CreateTexture/
-// CreateBuffer/ImportTexture/AddPass calls), then consumed exactly once via
-// Finish() - it is NOT a persistent, cross-frame object (see this phase's
-// own Step 4: no pass/resource declared here is ever "upserted" - a graph
-// is rebuilt, in full, from scratch, every single frame).
-//
-// A resource's human-readable name (CreateTexture()/CreateBuffer()/
-// ImportTexture()'s own `name` parameter) is captured HERE, in a table
-// parallel to the desc table, and NOWHERE else - see
-// RENDERGRAPH_PHASE1_CORE_DATA_MODEL_STRATEGY_v2.md's "standing rule" and
-// this phase's own Revision Notes for why TextureDesc/BufferDesc
-// themselves must never carry a name field again. `name` must be a string
-// literal (or otherwise static-storage-duration) const char* - stored by
-// pointer, never copied, mirroring GTE_PROFILE_SCOPE's own rule (see
-// AGENTS.md, "Profiling").
+// Records passes and resources for a single frame.
 class RenderGraphBuilder {
 public:
-    // Declares one pass's reads/writes while its owning AddPass() call's
-    // `setup` callback runs - see AddPass() below. Deliberately exposes
-    // NOTHING beyond "declare a read/write" - no live VkCommandBuffer, no
-    // Renderer&, no GpuResourceFactory& - by design (this phase's own Step
-    // 4): if a future requirement seems to need one of those inside
-    // `setup`, that requirement belongs in `execute` instead.
+    // Helper to declare reads, writes, and bindings during pass setup.
     class PassBuilder {
     public:
         explicit PassBuilder(PassRecord& pass) noexcept
@@ -302,159 +123,49 @@ public:
         void ReadTexture(TextureHandle handle, ResourceAccess access = ResourceAccess::ShaderRead,
             bool isDepthResource = false);
 
-        // `clearColor`/`clearDepth` are Phase 7 additions
-        // (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
-        // std::nullopt (the default) preserves Phase 6's original-only
-        // behavior (VK_ATTACHMENT_LOAD_OP_LOAD - existing contents kept);
-        // supplying a value switches that attachment's loadOp to
-        // VK_ATTACHMENT_LOAD_OP_CLEAR with this exact value.
-        //
-        // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE1 -
-        // CORRECTED description, replacing the old "the Phases 1-8 MVP never
-        // declares more than one color/depth write per pass anyway"
-        // assumption (no longer true): WriteColorAttachment() is now
-        // callable MORE THAN ONCE per pass, and each call APPENDS a new,
-        // ordered entry to PassRecord::colorAttachments (see
-        // ColorAttachmentDesc, RenderGraphTypes.h) - attachment INDEX in
-        // that list equals the shader's own `layout(location = N) out`
-        // index. Each attachment carries its OWN independent, optional
-        // clear color (no more "last call's clear color silently wins").
-        // Capped at kMaxColorAttachments (8), asserted in the .cpp. For
-        // backward compatibility, PassRecord::colorClearValue is ALSO still
-        // populated with the exact same value every call supplies (last
-        // call wins there, unchanged pre-existing behavior) - kept purely so
-        // the 2 pre-existing RenderGraphBuilderTests.cpp tests that assert on
-        // it directly keep passing unmodified (see
-        // task_manager/mrt-1/PHASE1_COMPLETION_REPORT.md's own "Design
-        // decision" section). As of PHASE2 of this campaign,
-        // RenderGraph::ExecuteCompiledGraph() no longer reads this field at
-        // all - it reads `colorAttachments[i].clearColor` exclusively (see
-        // task_manager/mrt-1/PHASE2_COMPLETION_REPORT.md) - so
-        // `colorClearValue` is genuinely dead weight in production today,
-        // deliberately left in place rather than removed (see that report's
-        // own "colorClearValue disposition" note).
-        // `WriteDepthStencilAttachment()` is UNCHANGED by this campaign -
-        // still exactly one depth attachment per pass, by design.
+        // Adds a color attachment write. Can be called multiple times for MRT (up to 8).
         void WriteColorAttachment(TextureHandle handle, const std::optional<std::array<float, 4>>& clearColor = std::nullopt);
+
+        // Sets the depth/stencil attachment write for this pass.
         void WriteDepthStencilAttachment(TextureHandle handle, std::optional<float> clearDepth = std::nullopt);
 
-        // Phase 6 of the compute-shader campaign
-        // (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md) - a
-        // general, NON-ATTACHMENT texture write, distinct from
-        // WriteColorAttachment()/WriteDepthStencilAttachment() above (both
-        // of which ALSO implicitly mark this pass as needing a real
-        // vkCmdBeginRendering bracket - see RenderGraph::Execute()'s own
-        // hasColorWrite/hasDepthWrite scan, which correctly excludes this
-        // access kind via IsColorAttachmentWriteAccess()/TargetsDepthState(),
-        // RenderGraphBarrierPlanner.h). This is how a compute pass declares
-        // it writes an `RWTexture` (see
-        // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) -
-        // `access` defaults to ResourceAccess::ComputeShaderWrite, the only
-        // access kind this is meant for today. A true read-modify-write
-        // `RWTexture` (a compute shader that both `imageLoad`s and
-        // `imageStore`s the same image) declares BOTH
-        // `pass.ReadTexture(handle, ResourceAccess::ComputeShaderRead)` AND
-        // `pass.WriteTexture(handle)` on the SAME handle - mirroring how
-        // ReadBuffer()/WriteBuffer() below are already two separate calls a
-        // caller combines for buffers.
-        // editor-core-separation-26 campaign (Gap B, PHASE2) - added a third,
-        // trailing, DEFAULTED `isDepthResource` parameter mirroring
-        // ReadTexture()'s own existing one (see ResourceUsage::isDepthResource,
-        // RenderGraphTypes.h). Defaults to `false`, matching every pre-existing
-        // call site's implicit behavior exactly (TR3 - zero behavior change).
-        // This is the prerequisite a future Blit/Copy pass
-        // (RenderGraphBuilder::AddBlitPass(), PHASE5) needs to correctly mark a
-        // TransferDst write as targeting a texture's DEPTH half rather than its
-        // color half - without it, RenderGraph.cpp's ApplyUsageBarrierIfNeeded()
-        // has no way to learn that fact, and a blit into a depth destination
-        // would be barriered against the wrong physical image/aspect mask.
+        // General texture write (e.g. compute storage image or transfer dst).
         void WriteTexture(TextureHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderWrite,
             bool isDepthResource = false);
 
-        // Symmetric buffer counterparts, for a future compute pass (Phase
-        // 9 backlog) - no real Phases 1-8 pass needs these yet, but
-        // CreateBuffer()/BufferHandle already exist from Phase 1, so these
-        // are added now for the same reason ReadTexture()/
-        // WriteColorAttachment() are: so a declared BufferHandle has a way
-        // to actually be used inside a pass at all.
         void ReadBuffer(BufferHandle handle, ResourceAccess access = ResourceAccess::ShaderRead);
         void WriteBuffer(BufferHandle handle, ResourceAccess access = ResourceAccess::TransferDst);
 
-        // Atmosphere Scattering campaign, Phase 2
-        // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) -
-        // volume-texture counterparts of ReadBuffer()/WriteBuffer() above,
-        // mirroring their exact shape. `access` defaults to
-        // ComputeShaderRead/ComputeShaderWrite respectively - the only
-        // access kinds a volume texture is meant for today (a compute pass
-        // writing/reading an `image3D`, or a later full-screen pass
-        // sampling it as `sampler3D` via ShaderRead).
         void ReadVolumeTexture(VolumeTextureHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderRead);
         void WriteVolumeTexture(VolumeTextureHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderWrite);
 
-        // better-render-pass-3 campaign, BLOCK5 - WHOLE-ARRAY access only
-        // (no per-layer read/write entry point in this block - see
-        // TextureArrayDesc's own doc comment, RenderGraphTypes.h, and this
-        // campaign's Section 5 for exactly why). `WriteTextureArray()`'s
-        // default access mirrors `WriteTexture()`'s general-purpose,
-        // non-attachment compute-write convention - there is no
-        // attachment-style write for this resource kind in this block.
         void ReadTextureArray(TextureArrayHandle handle, ResourceAccess access = ResourceAccess::ShaderRead);
         void WriteTextureArray(TextureArrayHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderWrite);
 
-        // Declares a write to exactly one layer/face of this array
-        // resource (not the whole array - see WriteTextureArray() above,
-        // which stays whole-array-only and unmodified). At most one
-        // array-layer attachment may be declared per pass - asserted.
-        // `clearColor` is only meaningful for a color array
-        // (TextureArrayDesc::hasDepth == false); `clearDepth` only for a
-        // depth array (hasDepth == true) - passing the wrong one for this
-        // resource's own aspect is simply ignored by the executor, never
-        // asserted here (this builder has no resolved resource to check
-        // yet).
+        // Declares an attachment write to a single layer of a texture array.
         void WriteArrayLayer(TextureArrayHandle handle, std::uint32_t layerIndex, ResourceAccess access,
             std::optional<std::array<float, 4>> clearColor = std::nullopt, std::optional<float> clearDepth = std::nullopt);
 
-        // --- Compute-binding vocabulary ---------------------------------
-        // Declares which descriptor slot a resource occupies for this pass -
-        // ORTHOGONAL to Read*/Write* above, never a replacement: barrier/
-        // access tracking stays governed exclusively by Read*/Write*. A
-        // true read-modify-write RWTexture still needs both a ReadTexture()
-        // AND a WriteTexture() call alongside its Bind*() call. Declare-time-
-        // only bookkeeping - no Vulkan call, no resolution here; resolved
-        // once per frame by RenderGraph::ExecuteCompiledGraph() immediately
-        // before this pass's own execute() callback runs.
+        // --- Compute Bindings ---
 
-        // Required once per pass, before any Bind* call below - the
-        // VkDescriptorSetLayout every binding on this pass targets. Get one
-        // from a ComputePipeline via its ReflectedDescriptorSetLayoutHandle().
+        // Must be called before binding descriptor slots for this pass.
         void BindDescriptorSetLayout(DescriptorSetLayoutHandle layout);
 
         void BindStorageBuffer(std::uint32_t binding, BufferHandle handle, VkDeviceSize offset = 0,
             VkDeviceSize range = VK_WHOLE_SIZE);
 
-        // BufferObjectHandle sibling of the overload above - for a
-        // persistent, NOT-graph-tracked buffer (e.g. Buffer::ObjectHandle()).
+        // Binds an untracked, externally managed buffer.
         void BindStorageBuffer(std::uint32_t binding, BufferObjectHandle handle, VkDeviceSize offset = 0,
             VkDeviceSize range = VK_WHOLE_SIZE);
 
-        // `sampler` == SamplerHandle::Invalid means "use this TextureHandle's
-        // own already-resolved sampler" - an explicit sampler is only needed
-        // when the caller wants a DIFFERENT sampler than the texture's own.
+        // If sampler is Invalid, uses the texture's own sampler.
         void BindCombinedImageSampler(
             std::uint32_t binding, TextureHandle handle, SamplerHandle sampler = SamplerHandle::Invalid);
 
-        // Volume-texture sibling of the overload above. UNLIKE the TextureHandle
-        // overload, `sampler` is REQUIRED here: the render graph never tracks a
-        // sampler for a VolumeTextureHandle (VolumeTarget carries none), so
-        // there is no implicit fallback to resolve against.
+        // Sampler is required for volume textures.
         void BindCombinedImageSampler(std::uint32_t binding, VolumeTextureHandle handle, SamplerHandle sampler);
 
-        // ImageViewHandle/SamplerHandle sibling of the two overloads above -
-        // for an already-resolved image that is NOT itself a render-graph
-        // resource (e.g. a per-view depth target's own ImageViewHandle,
-        // handed down through ScenePassReadHandles rather than declared via
-        // CreateTexture()/ImportTexture()). Both arguments REQUIRED - there
-        // is no graph-tracked resource here to fall back to.
+        // Binds an untracked external image view with a sampler.
         void BindCombinedImageSampler(std::uint32_t binding, ImageViewHandle view, SamplerHandle sampler);
 
         void BindStorageImage(std::uint32_t binding, TextureHandle handle);
@@ -464,179 +175,39 @@ public:
         PassRecord& m_pass;
     };
 
-    // Declares a brand-new TRANSIENT texture this frame - Phase 4 later
-    // decides whether it's freshly allocated or reused from a pool of
-    // matching-desc resources left over from a previous frame (purely by
-    // TextureDesc value equality - see RenderGraphTypes.h). Two
-    // CreateTexture() calls with an identical `desc` still mint two
-    // DISTINCT handles - handle identity and physical-resource identity
-    // are deliberately different concepts (see this phase's own Step 3.4).
+    // Creates a transient resource managed by the graph resource pool.
     TextureHandle CreateTexture(const char* name, const TextureDesc& desc);
     BufferHandle CreateBuffer(const char* name, const BufferDesc& desc);
+    TextureArrayHandle CreateTextureArray(const char* name, const TextureArrayDesc& desc);
 
-    // Wraps an ALREADY-LIVE, externally-owned resource (the swapchain
-    // image acquired this frame, or ImGuiEditorLayer's own persistent
-    // Game/Scene RenderTexture) as a graph resource, so existing call
-    // sites keep working unmodified - see Phase 4's own "imported vs.
-    // transient" split. The resulting handle is usable in
-    // ReadTexture()/WriteColorAttachment()/WriteDepthStencilAttachment()
-    // exactly like a CreateTexture()-minted one - a pass author cannot
-    // tell the difference from the handle alone.
-    //
-    // `currentLayout` is REQUIRED, with no default: pass
-    // ImageLayout::Undefined when the first pass this frame fully
-    // overwrites the resource via a clear load op (the previous layout is
-    // then irrelevant); otherwise pass the resource's own actual
-    // `CurrentState().layout`, translated to this engine's own native
-    // ImageLayout via FromVkImageLayout() (Renderer/VulkanFormatInfo.h) -
-    // (e.g. a RenderTexture - see RenderTexture::CurrentState()). Guessing
-    // this wrong is a silent correctness bug (a barrier built with the
-    // wrong oldLayout/srcAccessMask), not a compile error.
-    // `colorSampler`/`depthSampler` are this resource's already-live
-    // color/depth samplers (VK_NULL_HANDLE only when that sub-resource
-    // genuinely has no sampler, e.g. the swapchain).
-    // `trackedOwner` (optional) - the RenderTexture that owns this image.
-    // When set, ExecuteCompiledGraph() mirrors this image's real final
-    // barrier state back onto it once per frame, via SetCurrentState() -
-    // see RenderTexture::FinalizeForExternalSampling().
+    // Imports an externally managed resource into the graph. colorSampler/
+    // depthSampler are engine-native SamplerHandle opaque handles (Core/
+    // GraphicsHandles.h), never a raw VkSampler - see
+    // RenderTexture::SamplerObjectHandle()/DepthSamplerObjectHandle().
     TextureHandle ImportTexture(const char* name, const RenderTarget& externalTarget, ImageLayout currentLayout,
-        VkSampler colorSampler = VK_NULL_HANDLE, VkSampler depthSampler = VK_NULL_HANDLE,
+        SamplerHandle colorSampler = SamplerHandle::Invalid, SamplerHandle depthSampler = SamplerHandle::Invalid,
         RenderTexture* trackedOwner = nullptr);
 
-    // Buffer sibling of ImportTexture() above - GPU Vertex Skinning
-    // campaign, Phase 3
-    // (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md, Step
-    // 3.2). Wraps an ALREADY-LIVE, externally-owned VkBuffer (e.g. a
-    // per-model GPU skinning output buffer, created once at model
-    // registration time and re-imported into a fresh graph every frame) as
-    // a graph resource - the resulting handle is usable in
-    // ReadBuffer()/WriteBuffer() exactly like a CreateBuffer()-minted one.
-    //
-    // Unlike ImportTexture(), there is no "currentLayout" (or equivalent
-    // "current ResourceState") parameter here at all - a buffer has no
-    // image-layout concept, and RenderGraph::EnsureBufferResolved() always
-    // seeds an imported buffer's tracked ResourceState fresh (the same
-    // "never touched before" default a transient/pooled buffer already
-    // starts every Execute() call at), relying on this engine's existing
-    // whole-frame fence/semaphore synchronization to make that safe -
-    // mirrors EnsureTextureResolved()'s own stage/access-mask seeding for
-    // an imported TEXTURE, which likewise never carries a true stage/
-    // access value across frames, only its layout (see that function's own
-    // comment in RenderGraph.cpp).
-    BufferHandle ImportBuffer(const char* name, VkBuffer externalBuffer, VkDeviceSize size);
+    // externalBuffer is an engine-native BufferObjectHandle opaque handle
+    // (Core/GraphicsHandles.h), never a raw VkBuffer - see
+    // Buffer::ObjectHandle().
+    BufferHandle ImportBuffer(const char* name, BufferObjectHandle externalBuffer, VkDeviceSize size);
 
-    // VolumeTexture sibling of ImportTexture() above - Atmosphere
-    // Scattering campaign, Phase 2
-    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md). Takes a
-    // plain, non-owning VolumeTarget (see VolumeTarget.h) - mirroring
-    // ImportTexture()'s own `const RenderTarget&` convention exactly, NEVER
-    // the owning VolumeTexture object itself, so this header stays
-    // decoupled from VolumeTexture.h's own (heavier) dependency, exactly
-    // like ImportTexture()'s existing RenderTarget.h-only layering. The
-    // resulting handle is usable in ReadVolumeTexture()/WriteVolumeTexture()
-    // exactly like any other declared handle.
-    //
-    // `currentLayout` is REQUIRED, with no default - same reasoning as
-    // ImportTexture()'s own `currentLayout` parameter above: the caller
-    // must state exactly what engine-native ImageLayout this image is
-    // ACTUALLY in right now.
     VolumeTextureHandle ImportVolumeTexture(
         const char* name, const VolumeTarget& externalVolumeTarget, ImageLayout currentLayout);
 
-    // better-render-pass-3 campaign, BLOCK5 - declares a brand-new
-    // TRANSIENT (pooled) TextureArray this frame, mirroring CreateTexture()'s
-    // own exact shape (NOT ImportVolumeTexture()'s import-only shape -
-    // TextureArray IS pooled, unlike VolumeTexture). Two CreateTextureArray()
-    // calls with an identical `desc` still mint two DISTINCT handles.
-    TextureArrayHandle CreateTextureArray(const char* name, const TextureArrayDesc& desc);
-
-    // TextureArray sibling of ImportTexture()/ImportVolumeTexture() above -
-    // wraps an ALREADY-LIVE, externally-owned TextureArrayTarget as a graph
-    // resource. `currentLayout` is REQUIRED, with no default - same
-    // reasoning as ImportTexture()'s own `currentLayout` parameter.
     TextureArrayHandle ImportTextureArray(
         const char* name, const TextureArrayTarget& externalTarget, ImageLayout currentLayout);
 
-    // Marks `handle` as a REQUIRED root the compiler must keep alive - the
-    // plain TextureHandle counterpart of KeepVolumeTextureOutput()/
-    // KeepBufferOutput()/KeepTextureArrayOutput() below. Needed by any
-    // PreOpaque/PostOpaque/PostTransparent callback that produces a plain 2D
-    // texture output with no in-frame reader of its own: a raw
-    // RenderPassProvider can already do this via
-    // RenderPassFrameContext::finalTextureOutputs; a Project Assembly
-    // callback has no access to that object at all. Drained by
-    // FinalTextureOutputs() below, NOT by Finish()/CompiledGraphInput -
-    // callers merge it into their own root set directly. Idempotent - safe
-    // to call more than once for the same handle.
+    // Marks resources as graph roots to prevent them from being culled.
     void KeepTextureOutput(TextureHandle handle);
-
-    // Read-only accessor for KeepTextureOutput()'s own accumulated list -
-    // lets the one real merge site (Core.cpp, right after
-    // RenderPipeline::DeclareInto() returns) drain it without reaching into
-    // private state.
     const std::vector<TextureHandle>& FinalTextureOutputs() const noexcept { return m_finalTextureOutputs; }
 
-    // Atmosphere Scattering campaign, Phase 6
-    // (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) - marks
-    // `handle` as a REQUIRED root the compiler must keep alive, the
-    // VolumeTextureHandle counterpart of `RenderGraph::Execute()`'s own
-    // `build` callback returning a `std::vector<TextureHandle>` -
-    // deliberately a SEPARATE call rather than changing that callback's
-    // return type (which is texture-only and shared by every existing call
-    // site) - see CompiledGraphInput::finalVolumeTextureOutputs above for
-    // the full reasoning behind this specific shape. A pass whose only
-    // write is a VolumeTextureHandle that is NEVER passed to this method
-    // (directly, or read by some other pass that is itself kept alive) is
-    // silently culled, exactly like an ordinary TextureHandle that never
-    // reaches `finalOutputs`. Safe to call more than once for the same
-    // handle (idempotent - RenderGraphCompiler::Compile()'s own root-
-    // marking scan only ever needs `handle` to appear at least once).
     void KeepVolumeTextureOutput(VolumeTextureHandle handle);
-
-    // editor-core-separation-26 campaign, PHASE1
-    // (BIG_STEP_2_BUFFER_ROOTS_AND_BLIT_PASSES_2026-09-29.txt, Part A) -
-    // marks `handle` as a REQUIRED root the compiler must keep alive, the
-    // BufferHandle counterpart of KeepVolumeTextureOutput() immediately
-    // above - see CompiledGraphInput::finalBufferOutputs above for the
-    // full reasoning behind this specific shape. A pass whose only write
-    // is a BufferHandle that is NEVER passed to this method (directly, or
-    // read by some other pass that is itself kept alive) is silently
-    // culled, exactly like an ordinary TextureHandle that never reaches
-    // `finalOutputs`. Safe to call more than once for the same handle
-    // (idempotent - RenderGraphCompiler::Compile()'s own root-marking scan
-    // only ever needs `handle` to appear at least once).
     void KeepBufferOutput(BufferHandle handle);
-
-    // better-render-pass-3 campaign, BLOCK5 - marks `handle` as a REQUIRED
-    // root the compiler must keep alive, the TextureArrayHandle counterpart
-    // of KeepVolumeTextureOutput()/KeepBufferOutput() above - see
-    // CompiledGraphInput::finalTextureArrayOutputs above for the full
-    // reasoning. Safe to call more than once for the same handle
-    // (idempotent).
     void KeepTextureArrayOutput(TextureArrayHandle handle);
 
-    // `name` must be a string literal (mirrors GTE_PROFILE_SCOPE's own
-    // static-storage-duration requirement - see AGENTS.md, "Profiling").
-    // `setup` runs IMMEDIATELY, synchronously, exactly once, right here in
-    // this call - it declares this pass's reads/writes via the
-    // PassBuilder& it's handed. `execute` is stored (type-erased into a
-    // std::function<void(PassContext&)>) but NOT run here - Phase 6's
-    // RenderGraph::Execute() is the only thing that ever invokes it, and
-    // only for a pass that survives Phase 3's culling.
-    //
-    // The two-callback shape is deliberate, mirroring Unreal's
-    // FRDGBuilder::AddPass almost exactly: `setup` must never be handed a
-    // live VkCommandBuffer (nothing is being recorded yet); `execute` has
-    // no further use for a PassBuilder& (every declaration already
-    // happened by the time it runs). Fusing them into one callback would
-    // either leave an unused parameter or, worse, tempt a future pass
-    // author into recording draws inside `setup` - two distinct callback
-    // types make that illegal state impossible to express.
-    //
-    // Template (not a plain std::function parameter) so `setup`/`execute`
-    // can each be an ordinary lambda with no explicit std::function
-    // wrapping needed at the call site - `execute` is type-erased into
-    // PassRecord::execute right here, inside this call.
+    // Declares a standard render pass with immediate setup and deferred execution.
     template <typename SetupFn, typename ExecuteFn>
     void AddPass(const char* name, SetupFn&& setup, ExecuteFn&& execute)
     {
@@ -653,11 +224,6 @@ public:
         pass.execute = std::function<void(PassContext&)>(std::forward<ExecuteFn>(execute));
     }
 
-    // frame-debugger-6 campaign, PHASE1
-    // (PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) - identical
-    // to AddPass() above, plus stamping PassRecord::viewScope. Every
-    // pre-existing 3-argument AddPass() call site is completely unaffected -
-    // this is purely an additive overload.
     template <typename SetupFn, typename ExecuteFn>
     void AddPass(const char* name, ViewScope viewScope, SetupFn&& setup, ExecuteFn&& execute)
     {
@@ -665,22 +231,7 @@ public:
         m_passes.back().viewScope = viewScope;
     }
 
-    // frame-debugger-5 campaign, PHASE1
-    // (PHASE1_RENDERGRAPH_COMPUTE_DISPATCH_CHOKEPOINT_INFRASTRUCTURE.md) -
-    // UPDATES this method's own former "purely cosmetic" claim: this is now
-    // the ONE place in the whole engine that marks a pass as a real compute
-    // dispatch (PassRecord::kind - see RenderGraphTypes.h; RENAMED from the
-    // original plain `bool isComputePass` by the Render Pass campaign's own
-    // PHASE1, task_manager/render-pass-1). Still otherwise behaviorally
-    // identical to plain AddPass() - a pass's actual barrier/attachment/
-    // dispatch behavior is still entirely determined by what it declares in
-    // `reads`/`writes` via `setup`, never by which entry point created it;
-    // this method ONLY additionally stamps `kind`. Every real compute pass
-    // in this engine already calls this method (not plain AddPass()) - see
-    // PHASE0_MASTER_STRATEGY.md's Step 2.2 for the full, confirmed list - so
-    // this one flag alone is enough to make every one of them automatically,
-    // generically discoverable by any future consumer (the Editor's Frame
-    // Debugger, frame-debugger-5 PHASE2, is the first one).
+    // Declares a compute pass.
     template <typename SetupFn, typename ExecuteFn>
     void AddComputePass(const char* name, SetupFn&& setup, ExecuteFn&& execute)
     {
@@ -688,11 +239,6 @@ public:
         m_passes.back().kind = PassKind::Compute;
     }
 
-    // frame-debugger-6 campaign, PHASE1
-    // (PHASE1_RENDERGRAPH_VIEWSCOPE_CHOKEPOINT_INFRASTRUCTURE.md) - identical
-    // to AddComputePass() above, plus stamping PassRecord::viewScope. Every
-    // pre-existing 3-argument AddComputePass() call site is completely
-    // unaffected.
     template <typename SetupFn, typename ExecuteFn>
     void AddComputePass(const char* name, ViewScope viewScope, SetupFn&& setup, ExecuteFn&& execute)
     {
@@ -700,19 +246,7 @@ public:
         m_passes.back().viewScope = viewScope;
     }
 
-    // The ONE, OFFICIAL entry point every real pass declaration in this
-    // engine uses. A thin wrapper around the two primitives above - it adds
-    // no new capability beyond stamping `kind`/`category`/`drawKind`/
-    // `renderPassEvent` in one place (no polymorphic pass-object hierarchy).
-    // AddPass()/AddComputePass() are NOT removed - test-only call sites are
-    // free to keep using them directly.
-    //
-    // Ownership is derived, never passed: this is the ONE place that reads
-    // the currently-open RenderFeatureScope (CurrentOwningFeatureName()) and
-    // writes both the debug-metadata sink and the pass toggle registry -
-    // see RenderFeatureScope.h. There is no way to declare a pass through
-    // this chokepoint without it becoming toggle-registry-known with a real
-    // owner.
+    // Main entry point for declaring passes with debugging and toggle support.
     template <typename SetupFn, typename ExecuteFn>
     void AddRenderPass(const char* name, PassKind kind, ViewScope viewScope, RenderPassCategory category,
         SetupFn&& setup, ExecuteFn&& execute, RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh,
@@ -734,8 +268,6 @@ public:
         }
     }
 
-    // Convenience overload defaulting `viewScope` to Shared and `category` to
-    // General - for the (majority of) real call sites that need neither.
     template <typename SetupFn, typename ExecuteFn>
     void AddRenderPass(const char* name, PassKind kind, SetupFn&& setup, ExecuteFn&& execute,
         RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh,
@@ -745,44 +277,14 @@ public:
             std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute), drawKind, renderPassEvent);
     }
 
-    // The official entry point for a raw image blit/copy (vkCmdBlitImage) -
-    // NOT built on AddPass()/AddComputePass() (neither accepts a blit's
-    // shape - no setup/execute callback at all): constructs its own
-    // PassRecord directly. Declares ReadTexture(spec.src, TransferSrc) and
-    // WriteTexture(spec.dst, TransferDst) internally, stores `spec` on
-    // PassRecord::blitCommand, stamps `pass.kind = PassKind::Blit`, and
-    // forwards drawKind = RenderPassDrawKind::Blit (always fixed) to the
-    // installed debug-metadata sink - mirrors AddRenderPass()'s own owner
-    // derivation and toggle-registry registration exactly.
-    //
-    // `renderPassEvent` has no special-cased default: a blit with no real
-    // in-frame reader has no data dependency to order it by, so it must
-    // have an explicit way to be placed at a real RenderPassEvent tier.
+    // Declares an image copy/blit pass.
     void AddBlitPass(const char* name, const BlitSpec& spec,
         RenderPassEvent renderPassEvent = RenderPassEvent::Opaques,
         ViewScope viewScope = ViewScope::Shared,
         RenderPassCategory category = RenderPassCategory::General);
 
-    // editor-core-separation-25 campaign - optional, nullable, zero-cost-
-    // when-absent. Forwarded into this builder by RenderGraph::Execute()'s
-    // own template body (PHASE4), immediately after constructing a fresh
-    // RenderGraphBuilder, before that call's own build(builder) callback
-    // runs. A test may also call this directly (see RenderGraphSnapshotTests.cpp's
-    // own updated tests, PHASE3) - RenderGraphBuilder itself has no
-    // opinion about who installs this or how often; it is a plain,
-    // unconditional setter.
     void SetDebugMetadataSink(IPassDebugMetadataSink* sink) noexcept { m_debugMetadataSink = sink; }
 
-    // editor-core-separation-27 campaign, PHASE7 - forwarded into this
-    // builder by RenderGraph::Execute()'s own template body, immediately
-    // after constructing a fresh RenderGraphBuilder. `timingMode` is needed
-    // by GetOrCreatePersistentTexture()'s own regime-aware resize-refusal
-    // logic (PHASE8/FR4); `currentFrame` is needed by
-    // RenderGraphPersistentResourceCache::Resolve()'s own same-frame
-    // double-request guard and age-stamping (PHASE5/PHASE8) - bundled here
-    // (never a separate setter for either) since RenderGraph::Execute()
-    // already has all three values on hand at exactly the point it makes
-    // this one call.
     void SetPersistentResourceCache(
         RenderGraphPersistentResourceCache* cache, ExecuteTimingMode timingMode, std::uint64_t currentFrame) noexcept
     {
@@ -791,66 +293,22 @@ public:
         m_persistentCacheCurrentFrame = currentFrame;
     }
 
-    // Reaches a persistent, named, cross-frame GPU color texture - usable
-    // exactly like an ImportTexture()-minted handle afterward. `owner` must
-    // be a constant from RenderGraphPersistentResourceOwners.h, or a plugin's
-    // own already-unique name - pass "" only to keep a pre-existing literal
-    // `name` as the identity verbatim (back-compat with an external consumer
-    // that already depends on that exact name). Returns an invalid
-    // TextureHandle if no persistent cache is installed or the underlying
-    // Resolve() call refuses (already logged there). May throw
-    // std::runtime_error if the underlying RenderTexture construction fails.
+    // Retrieves or allocates a persistent cross-frame texture.
     TextureHandle GetOrCreatePersistentTexture(const char* owner, const char* name, const TextureDesc& desc);
 
-    // editor-core-separation-27 campaign, PHASE8 (BIG_STEP_3, FR7) - the
-    // token-based fast path for a caller's own steady-state hot path: skips
-    // the owned-string build and hash-map lookup whenever `token` still
-    // references a live entry (RenderGraphPersistentResourceCache::
-    // IsTokenLive()) - identical result to the plain overload above either
-    // way, since both ultimately funnel through the SAME shared
-    // RenderGraphPersistentResourceCache::ResolveAgainstEntry() helper. On
-    // the slow path (token not yet live), `token` is refreshed for every
-    // subsequent call this session. In debug builds, re-using `token`
-    // against a DIFFERENT (owner, name) identity than it was originally
-    // resolved against is asserted (RenderGraphPersistentResourceCache::
-    // DebugTokenIdentityMatches()) - a token must never be shared across two
-    // unrelated identities.
+    // Fast-path lookup for persistent textures using a cached token.
     TextureHandle GetOrCreatePersistentTexture(
         PersistentTextureCacheToken& token, const char* owner, const char* name, const TextureDesc& desc);
 
-    // render-pass-3-campaign (better-render-pass-5 effort), BLOCK 3,
-    // PHASE1 - two tiny, read-only accessors over m_passes (below),
-    // added SPECIFICALLY so a provider that invokes a Project Assembly
-    // callback which declares passes directly against this builder
-    // (e.g. the new "PreOpaqueFeatures" provider, Core.cpp) can snapshot
-    // "how many passes existed before the callback ran" and "how many
-    // exist after", then inspect every NEWLY added pass's own
-    // RenderPassEvent - this is the ONLY mechanism in this engine that
-    // can catch a pass whose RenderPassEvent tag EXACTLY EQUALS (not
-    // strictly later than) a known-bad default, since
-    // DetectRenderPassEventContradictions() (RenderGraphCompiler.h) only
-    // ever fires on a STRICT inequality. Deliberately tiny/read-only -
-    // no new mutation surface, no new invariant to maintain beyond what
-    // m_passes already guarantees.
+    // Pass inspection queries.
     std::size_t DeclaredPassCount() const noexcept { return m_passes.size(); }
 
-    // `index` must be < DeclaredPassCount() - asserted in debug builds
-    // (mirrors this class's own existing AddPass() assert-on-misuse
-    // discipline); out-of-range access in a release build is undefined
-    // behavior, exactly like any other unchecked std::vector::operator[]
-    // use already present in this file.
     RenderPassEvent PassEventAt(std::size_t index) const
     {
         assert(index < m_passes.size() && "RenderGraphBuilder::PassEventAt() - index out of range");
         return m_passes[index].renderPassEvent;
     }
 
-    // True if the pass at declaration index `index` declared any read usage
-    // (texture kind only) against `handle`, regardless of its
-    // isDepthResource flag - a depth-aspect read and a color-aspect read
-    // against the same handle both count as a match. `index` must be <
-    // DeclaredPassCount() - asserted in debug builds, mirroring
-    // PassEventAt()'s own bound check.
     bool PassReadsTexture(std::size_t index, TextureHandle handle) const
     {
         assert(index < m_passes.size() && "RenderGraphBuilder::PassReadsTexture() - index out of range");
@@ -862,10 +320,6 @@ public:
         return false;
     }
 
-    // Aspect-aware sibling of PassReadsTexture() above - true only when the
-    // read usage against `handle` also has isDepthResource set. Needed
-    // because a color-aspect-only read must NOT satisfy a depth-resolve
-    // safety check.
     bool PassReadsTextureAsDepth(std::size_t index, TextureHandle handle) const
     {
         assert(index < m_passes.size() && "RenderGraphBuilder::PassReadsTextureAsDepth() - index out of range");
@@ -877,118 +331,49 @@ public:
         return false;
     }
 
-    // Declare-time counterpart of rg::PassContext::resolveReadTexture()/
-    // resolveDepthTexture() - for a caller that needs an IMPORTED handle's
-    // real sampler(s) before any pass has executed (PassContext only exists
-    // inside a pass's own execute callback, which does not exist yet at
-    // declaration time). Reads straight off this handle's already-complete
-    // TextureImportInfo (populated synchronously by ImportTexture() itself).
     struct ImportedTextureSamplers {
         VkSampler colorSampler = VK_NULL_HANDLE;
         VkImageView depthImageView = VK_NULL_HANDLE;
         VkSampler depthSampler = VK_NULL_HANDLE;
     };
 
-    // Returns an all-null value for a transient (CreateTexture()-minted)
-    // handle, or an out-of-range one - mirrors PassReadsTexture()'s own
-    // "no match, not an error" convention, never an assert/throw.
+    // Resolves samplers for an imported texture at declaration time.
     ImportedTextureSamplers ResolveImportedTextureSamplers(TextureHandle handle) const noexcept;
 
-    // Consumes this builder, handing its whole in-progress description
-    // over to Phase 3's compiler. Safe to call at most meaningfully once
-    // per builder instance (a builder is a one-frame-lifetime object, per
-    // this class's own comment above) - calling it again would simply
-    // return an empty CompiledGraphInput, since every table was moved out.
+    // Finalizes the builder and returns the compiled graph input.
     CompiledGraphInput Finish();
 
-    // RAII scope marking "every pass declared while this is alive belongs
-    // to this named feature" - pushed/popped here; never call these
-    // directly, use RenderFeatureScope (RenderFeatureScope.h) instead.
+    // Feature scope tracking for pass categorization and debugging.
     void PushOwningFeatureScope(std::string_view name) { m_owningFeatureScope.push_back(std::string(name)); }
     void PopOwningFeatureScope() noexcept { m_owningFeatureScope.pop_back(); }
 
-    // Top of the owning-feature stack, or a loud sentinel if none is open -
-    // a pass carrying this sentinel in a real capture is a bug to fix, not
-    // a fallback to tolerate.
     std::string_view CurrentOwningFeatureName() const noexcept
     {
         static constexpr std::string_view kEngineUnowned = "ENGINE_UNOWNED";
         return m_owningFeatureScope.empty() ? kEngineUnowned : std::string_view(m_owningFeatureScope.back());
     }
 
-    // Wired once by RenderGraph::Execute(), next to SetDebugMetadataSink().
     void SetPassToggleRegistry(RenderPassToggleRegistry* registry) noexcept { m_passToggleRegistry = registry; }
 
 private:
-    // editor-core-separation-27 campaign, PHASE8 - the ONE place either
-    // GetOrCreatePersistentTexture() overload mints this frame's real
-    // TextureHandle from a successful RenderGraphPersistentResourceCache::
-    // Resolve()/ResolveFast() result - calls the pre-existing, unchanged
-    // ImportTexture() using `resolved.combinedKey->c_str()` (a pointer into
-    // the CACHE's own permanently-stable std::string, TR4) as `name`, then
-    // pushes the resulting handle onto m_persistentCacheTextures so
-    // RenderGraphCompiler::Compile()'s PHASE3 root-marking fix keeps it
-    // alive every frame with zero further action needed from the pass
-    // author.
     TextureHandle MintPersistentHandle(const RenderGraphPersistentResourceCache::ResolvedTexture& resolved);
 
     std::vector<PassRecord> m_passes;
-
-    // editor-core-separation-25 campaign - optional, nullable, zero-cost-
-    // when-absent. See SetDebugMetadataSink() above.
     IPassDebugMetadataSink* m_debugMetadataSink = nullptr;
-
-    // Stack of owned strings (not string_view) - a pushed name can come
-    // from a short-lived std::string; copying a few bytes per scope-open
-    // is free, a dangling view is not.
     std::vector<std::string> m_owningFeatureScope;
-
-    // Not owned. Wired once by RenderGraph::Execute(). Null in headless/Player builds.
     RenderPassToggleRegistry* m_passToggleRegistry = nullptr;
 
-    // render-pass-6 campaign, PHASE5 (item 2.1) - REPLACES the old 9
-    // parallel vectors (m_textureDescs/m_textureNames/m_textureImportInfo,
-    // etc.) with exactly 3 slot vectors - see TextureSlot/BufferSlot/
-    // VolumeTextureSlot above.
     std::vector<TextureSlot> m_textures;
     std::vector<BufferSlot> m_buffers;
-
-    // Atmosphere Scattering campaign, Phase 2.
     std::vector<VolumeTextureSlot> m_volumeTextures;
-
-    // better-render-pass-3 campaign, BLOCK5.
     std::vector<TextureArraySlot> m_textureArrays;
 
-    // Backs KeepTextureOutput()/FinalTextureOutputs() above - drained
-    // directly by the caller, never by Finish()/CompiledGraphInput.
     std::vector<TextureHandle> m_finalTextureOutputs;
-
-    // Atmosphere Scattering campaign, Phase 6 - see
-    // CompiledGraphInput::finalVolumeTextureOutputs above.
     std::vector<VolumeTextureHandle> m_finalVolumeTextureOutputs;
-
-    // editor-core-separation-26 campaign, PHASE1 - see
-    // CompiledGraphInput::finalBufferOutputs above.
     std::vector<BufferHandle> m_finalBufferOutputs;
-
-    // better-render-pass-3 campaign, BLOCK5 - see
-    // CompiledGraphInput::finalTextureArrayOutputs above.
     std::vector<TextureArrayHandle> m_finalTextureArrayOutputs;
-
-    // editor-core-separation-27 campaign, PHASE2/PHASE8 - see
-    // CompiledGraphInput::persistentCacheTextures above.
     std::vector<TextureHandle> m_persistentCacheTextures;
 
-    // editor-core-separation-27 campaign, PHASE7 - optional, nullable,
-    // zero-cost-when-absent, mirroring m_debugMetadataSink's exact shape
-    // (see SetPersistentResourceCache() above). `{}` value-initializes to
-    // 0 == ExecuteTimingMode::SynchronousImmediateReadback (RenderGraph.h) -
-    // the enumerator NAME itself is not visible here since ExecuteTimingMode
-    // is only forward-declared in this header, mirroring
-    // RenderGraphDebugTextureRegistry.h's own DebugTextureSnapshot::regime{}
-    // identical precedent. Never actually read before SetPersistentResourceCache()
-    // overwrites it (RenderGraph::Execute() calls it unconditionally, every
-    // call, before build(builder) runs).
     RenderGraphPersistentResourceCache* m_persistentCache = nullptr;
     ExecuteTimingMode m_persistentCacheTimingMode{};
     std::uint64_t m_persistentCacheCurrentFrame = 0;

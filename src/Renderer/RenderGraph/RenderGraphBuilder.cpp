@@ -1,8 +1,8 @@
 #include "RenderGraphBuilder.h"
 
-#include "../../Core/Logging.h" // GTE_LOG_ERROR for GetOrCreatePersistentTexture()'s own
-    // "no persistent cache installed" refusal branch.
-#include "../VulkanFormatInfo.h" // FromVkFormat() - RenderTarget/VolumeTarget/TextureArrayTarget::format stay raw VkFormat (internal plumbing); TextureDesc/VolumeTextureDesc/TextureArrayDesc::format are engine-native PixelFormat.
+#include "../../Core/Logging.h"
+#include "../GraphicsHandleRegistry.h" // Native(SamplerHandle)/Native(BufferObjectHandle) - ResolveImportedTextureSamplers()/MintPersistentHandle() below.
+#include "../VulkanFormatInfo.h"
 
 #include <string>
 
@@ -18,30 +18,11 @@ void RenderGraphBuilder::PassBuilder::ReadTexture(TextureHandle handle, Resource
 void RenderGraphBuilder::PassBuilder::WriteColorAttachment(
     TextureHandle handle, const std::optional<std::array<float, 4>>& clearColor)
 {
-    // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE1 - the
-    // 8-attachment cap (Locked Design Decision 2, PHASE0_MASTER_STRATEGY.md).
     assert(m_pass.colorAttachments.size() < kMaxColorAttachments &&
         "RenderGraphBuilder::PassBuilder::WriteColorAttachment: exceeded kMaxColorAttachments per pass");
 
-    // ALWAYS ALSO push a ColorAttachmentWrite onto `writes` (Phase 6's
-    // original behavior, kept byte-for-byte) - this is what keeps
-    // RenderGraphCompiler's dependency-edge/culling computation and
-    // RenderGraph::ApplyUsageBarrierIfNeeded()'s per-usage barrier loop
-    // working per-target with ZERO changes to either - see
-    // task_manager/mrt-1/PHASE0_MASTER_STRATEGY.md's Step 2.
     m_pass.writes.push_back(ResourceUsage::ForTexture(handle, ResourceAccess::ColorAttachmentWrite));
 
-    // MRT campaign, PHASE1 - PassRecord::colorClearValue is kept, byte-for-
-    // byte, exactly as before (RenderGraph::ExecuteCompiledGraph() still
-    // reads it exclusively until PHASE2 lands, and 3 pre-existing tests in
-    // RenderGraphBuilderTests.cpp assert on it directly for the
-    // single-attachment case) - this is a deliberate deviation from a
-    // literal reading of this phase's own strategy doc's illustrative code
-    // sample, which omitted this line; see PHASE1_COMPLETION_REPORT.md's
-    // own "Design decisions" section for the full reasoning. The NEW
-    // ordered `colorAttachments` list (below) is what PHASE2 will read
-    // instead, going forward - both are populated here so nothing regresses
-    // in between.
     if (clearColor.has_value()) {
         m_pass.colorClearValue = clearColor;
     }
@@ -205,14 +186,6 @@ void RenderGraphBuilder::PassBuilder::BindStorageImage(std::uint32_t binding, Vo
 
 // --- RenderGraphBuilder ------------------------------------------------
 
-// render-pass-6 campaign, PHASE5 (item 2.1) - every Create*/Import* method
-// below now pushes exactly ONE entry onto its own single slot vector
-// (m_textures/m_buffers/m_volumeTextures) instead of three separate,
-// hand-kept-in-lockstep vectors - see TextureSlot/BufferSlot/
-// VolumeTextureSlot (RenderGraphBuilder.h) for the full reasoning. Every
-// method's real, observable behavior (what desc/name/importInfo ends up
-// stored, what handle is returned) is byte-for-byte unchanged.
-
 TextureHandle RenderGraphBuilder::CreateTexture(const char* name, const TextureDesc& desc)
 {
     assert(name != nullptr && name[0] != '\0' &&
@@ -231,21 +204,16 @@ BufferHandle RenderGraphBuilder::CreateBuffer(const char* name, const BufferDesc
     const std::uint32_t index = static_cast<std::uint32_t>(m_buffers.size());
     m_buffers.push_back(BufferSlot{ desc, name, BufferImportInfo{} });
     return BufferHandle{ index, 1 };
-}
+}   
 
 TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTarget& externalTarget,
-    ImageLayout currentLayout, VkSampler colorSampler, VkSampler depthSampler, RenderTexture* trackedOwner)
+    ImageLayout currentLayout, SamplerHandle colorSampler, SamplerHandle depthSampler, RenderTexture* trackedOwner)
 {
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::ImportTexture requires a non-empty, static-storage-duration name");
 
     const std::uint32_t index = static_cast<std::uint32_t>(m_textures.size());
 
-    // Mirror the external target's own real shape into a TextureDesc
-    // purely for informational/debug-display purposes (Phase 8) - Phase 4
-    // never pool-matches against an imported resource's desc, since an
-    // imported resource is never allocated/freed by the graph in the
-    // first place.
     TextureDesc desc;
     desc.width = externalTarget.extent.width;
     desc.height = externalTarget.extent.height;
@@ -264,10 +232,6 @@ TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTa
     return TextureHandle{ index, 1 };
 }
 
-// Declare-time sibling of PassContext::resolveReadTexture()/resolveDepthTexture()
-// - see this method's own doc comment (RenderGraphBuilder.h). Built only from
-// TextureImportInfo, already stored synchronously the instant ImportTexture()
-// was called - no compile/execute/resolve step needed for an imported handle.
 RenderGraphBuilder::ImportedTextureSamplers RenderGraphBuilder::ResolveImportedTextureSamplers(
     TextureHandle handle) const noexcept
 {
@@ -276,7 +240,7 @@ RenderGraphBuilder::ImportedTextureSamplers RenderGraphBuilder::ResolveImportedT
     }
     const TextureImportInfo& importInfo = m_textures[handle.index].importInfo;
     ImportedTextureSamplers resolved{
-        importInfo.colorSampler, importInfo.externalTarget.depthImageView, importInfo.depthSampler
+        Native(importInfo.colorSampler), importInfo.externalTarget.depthImageView, Native(importInfo.depthSampler)
     };
     if (IsResolvedViewMissingItsSampler(resolved.depthImageView, resolved.depthSampler)) {
         assert(false && "RenderGraphBuilder::ResolveImportedTextureSamplers() - non-null depth view with a null sampler");
@@ -287,22 +251,13 @@ RenderGraphBuilder::ImportedTextureSamplers RenderGraphBuilder::ResolveImportedT
     return resolved;
 }
 
-BufferHandle RenderGraphBuilder::ImportBuffer(const char* name, VkBuffer externalBuffer, VkDeviceSize size)
+BufferHandle RenderGraphBuilder::ImportBuffer(const char* name, BufferObjectHandle externalBuffer, VkDeviceSize size)
 {
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::ImportBuffer requires a non-empty, static-storage-duration name");
 
     const std::uint32_t index = static_cast<std::uint32_t>(m_buffers.size());
 
-    // Mirror the external buffer's own real size into a BufferDesc purely
-    // for informational/debug-display purposes (Phase 8's snapshot) -
-    // RenderGraphResourcePool never pool-matches against an imported
-    // resource's desc, since an imported resource is never allocated/freed
-    // by the graph in the first place (see ImportTexture()'s own identical
-    // comment above). `usage` has no equivalent to mirror (a live VkBuffer
-    // does not expose its own creation-time usage flags back) - left at 0,
-    // which is harmless since an imported entry's desc is never read for
-    // pool-matching purposes.
     BufferDesc desc;
     desc.size = size;
     desc.usage = BufferUsage::None;
@@ -324,9 +279,6 @@ VolumeTextureHandle RenderGraphBuilder::ImportVolumeTexture(
 
     const std::uint32_t index = static_cast<std::uint32_t>(m_volumeTextures.size());
 
-    // Mirror the external target's own real shape into a VolumeTextureDesc
-    // purely for informational/debug-display purposes - mirrors
-    // ImportTexture()'s own identical comment above.
     VolumeTextureDesc desc;
     desc.width = externalVolumeTarget.extent.width;
     desc.height = externalVolumeTarget.extent.height;
@@ -342,8 +294,6 @@ VolumeTextureHandle RenderGraphBuilder::ImportVolumeTexture(
     return VolumeTextureHandle{ index, 1 };
 }
 
-// better-render-pass-3 campaign, BLOCK5 - mirrors CreateTexture()'s exact
-// assert-then-push-then-return-handle shape.
 TextureArrayHandle RenderGraphBuilder::CreateTextureArray(const char* name, const TextureArrayDesc& desc)
 {
     assert(name != nullptr && name[0] != '\0' &&
@@ -353,8 +303,6 @@ TextureArrayHandle RenderGraphBuilder::CreateTextureArray(const char* name, cons
     return TextureArrayHandle{ index, 1 };
 }
 
-// better-render-pass-3 campaign, BLOCK5 - mirrors ImportVolumeTexture()'s
-// exact import-info-population shape immediately above.
 TextureArrayHandle RenderGraphBuilder::ImportTextureArray(
     const char* name, const TextureArrayTarget& externalTarget, ImageLayout currentLayout)
 {
@@ -388,29 +336,16 @@ void RenderGraphBuilder::KeepVolumeTextureOutput(VolumeTextureHandle handle)
     m_finalVolumeTextureOutputs.push_back(handle);
 }
 
-// editor-core-separation-26 campaign, PHASE1 - see
-// RenderGraphBuilder::KeepBufferOutput()'s own declaration
-// (RenderGraphBuilder.h) for the full reasoning; mirrors
-// KeepVolumeTextureOutput() immediately above verbatim.
 void RenderGraphBuilder::KeepBufferOutput(BufferHandle handle)
 {
     m_finalBufferOutputs.push_back(handle);
 }
 
-// better-render-pass-3 campaign, BLOCK5 - see
-// RenderGraphBuilder::KeepTextureArrayOutput()'s own declaration
-// (RenderGraphBuilder.h) for the full reasoning; mirrors
-// KeepVolumeTextureOutput()/KeepBufferOutput() above verbatim.
 void RenderGraphBuilder::KeepTextureArrayOutput(TextureArrayHandle handle)
 {
     m_finalTextureArrayOutputs.push_back(handle);
 }
 
-// The real, official pass-declaration entry point for a raw image blit/copy
-// - see AddBlitPass()'s own declaration (RenderGraphBuilder.h). NOT built on
-// top of AddPass()/AddComputePass() - constructs its own PassRecord
-// directly, mirroring AddPass()'s own internal shape, then derives ownership
-// and registers with the toggle registry exactly like AddRenderPass() does.
 void RenderGraphBuilder::AddBlitPass(
     const char* name, const BlitSpec& spec, RenderPassEvent renderPassEvent, ViewScope viewScope, RenderPassCategory category)
 {
@@ -438,22 +373,11 @@ void RenderGraphBuilder::AddBlitPass(
     }
 }
 
-// editor-core-separation-27 campaign, PHASE8 (BIG_STEP_3, Section 5.1/5.2) -
-// the ONE place either GetOrCreatePersistentTexture() overload mints this
-// frame's real TextureHandle from a successful Resolve()/ResolveFast()
-// result - see this method's own declaration (RenderGraphBuilder.h) for the
-// full reasoning.
 TextureHandle RenderGraphBuilder::MintPersistentHandle(
     const RenderGraphPersistentResourceCache::ResolvedTexture& resolved)
 {
-    // Persistent cache entries are always color-only (Section 7) - no depth sampler to pass.
-    // `resolved.lastKnownLayout` is the cache's own honest, real VkImageLayout
-    // history (RenderGraphPersistentResourceCache::RecordFinalLayout()) -
-    // translated to this engine's own native ImageLayout here, right at the
-    // boundary, since ImportTexture() never accepts a raw VkImageLayout (see
-    // its own declaration comment, RenderGraphBuilder.h).
     const TextureHandle handle = ImportTexture(resolved.combinedKey->c_str(), resolved.texture->Target(),
-        FromVkImageLayout(resolved.lastKnownLayout), resolved.texture->Sampler());
+        FromVkImageLayout(resolved.lastKnownLayout), resolved.texture->SamplerObjectHandle());
     m_persistentCacheTextures.push_back(handle);
     return handle;
 }
@@ -472,7 +396,7 @@ TextureHandle RenderGraphBuilder::GetOrCreatePersistentTexture(
     const std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved = m_persistentCache->Resolve(
         owner, name, desc, m_persistentCacheCurrentFrame, m_persistentCacheTimingMode);
     if (!resolved.has_value()) {
-        return TextureHandle{}; // Resolve() already logged the specific reason - never a second log here.
+        return TextureHandle{};
     }
     return MintPersistentHandle(*resolved);
 }
@@ -523,10 +447,10 @@ CompiledGraphInput RenderGraphBuilder::Finish()
     input.textures = std::move(m_textures);
     input.buffers = std::move(m_buffers);
     input.volumeTextures = std::move(m_volumeTextures);
-    input.textureArrays = std::move(m_textureArrays); // better-render-pass-3 campaign, BLOCK5
+    input.textureArrays = std::move(m_textureArrays);
     input.finalVolumeTextureOutputs = std::move(m_finalVolumeTextureOutputs);
     input.finalBufferOutputs = std::move(m_finalBufferOutputs);
-    input.finalTextureArrayOutputs = std::move(m_finalTextureArrayOutputs); // better-render-pass-3 campaign, BLOCK5
+    input.finalTextureArrayOutputs = std::move(m_finalTextureArrayOutputs);
     input.persistentCacheTextures = std::move(m_persistentCacheTextures);
     return input;
 }

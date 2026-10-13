@@ -2,6 +2,7 @@
 
 #include "../Core/PixelFormat.h"
 #include "DepthBuffer.h"
+#include "GraphicsHandleRegistry.h" // CachedSamplerHandle/SamplerHandle - SamplerObjectHandle()/DepthSamplerObjectHandle() below.
 #include "Memory/GpuMemoryTracker.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "RenderTarget.h"
@@ -192,6 +193,19 @@ public:
     // comment).
     VkSampler DepthSampler() const noexcept { return m_depthBuffer ? m_depthBuffer->Sampler() : VK_NULL_HANDLE; }
 
+    // Opaque handles for the render-graph import API
+    // (RenderGraphBuilder::ImportTexture()'s own colorSampler/depthSampler
+    // parameters) - never a raw VkSampler, mirroring Buffer::ObjectHandle()'s
+    // own "untracked external Vulkan object exposed as a safe opaque handle"
+    // precedent exactly. Each lazily registers this texture's current
+    // color/depth VkSampler on first call and reuses the same handle on
+    // every later call, automatically re-registering if Resize() (or, for
+    // the depth side, allowDepthSampledAccess toggling) ever changes the
+    // underlying VkSampler - see CachedSamplerHandle::Resolve() (Renderer/
+    // GraphicsHandleRegistry.h).
+    SamplerHandle SamplerObjectHandle() const noexcept { return m_samplerObjectHandle.Resolve(m_sampler); }
+    SamplerHandle DepthSamplerObjectHandle() const noexcept { return m_depthSamplerObjectHandle.Resolve(DepthSampler()); }
+
     // Last known GPU barrier state of the color image - the single source
     // of truth a caller reads instead of guessing. Written back by the
     // render graph (see RenderGraphBuilder::ImportTexture()'s own
@@ -236,6 +250,12 @@ private:
     VkImageView m_imageView = VK_NULL_HANDLE;
     VkSampler m_sampler = VK_NULL_HANDLE;
     VkExtent2D m_extent{};
+
+    // Lazily populated by SamplerObjectHandle()/DepthSamplerObjectHandle()
+    // above - mutable since resolving is logically const (just caches an
+    // opaque registry handle), mirroring Buffer::m_objectHandle exactly.
+    mutable CachedSamplerHandle m_samplerObjectHandle;
+    mutable CachedSamplerHandle m_depthSamplerObjectHandle;
 
     // Last known GPU barrier state of the color image - VK_IMAGE_LAYOUT_UNDEFINED
     // matches a freshly created image. See CurrentState()/SetCurrentState().

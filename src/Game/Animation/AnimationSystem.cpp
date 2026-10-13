@@ -572,7 +572,7 @@ std::vector<AnimationSystem::GpuSkinningDispatchRequest> AnimationSystem::Collec
 
             GpuSkinningDispatchRequest request;
             request.name = group.debugName.c_str();
-            request.outputBuffer = group.outputVertexBuffer->Native();
+            request.outputBuffer = group.outputVertexBuffer->ObjectHandle();
             request.outputBufferSize = group.outputVertexBuffer->Size();
             request.descriptorSet = group.descriptorSet.Native();
             request.vertexCount = group.vertexCount;

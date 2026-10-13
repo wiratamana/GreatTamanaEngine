@@ -307,7 +307,7 @@ TEST(RenderGraphSnapshotTest, TransientBufferResourceIsNotReportedAsImported)
 TEST(RenderGraphSnapshotTest, ImportedBufferResourceIsReportedAsImported)
 {
     RenderGraphBuilder builder;
-    const BufferHandle importedBuffer = builder.ImportBuffer("SkinOutput", VK_NULL_HANDLE, 1024);
+    const BufferHandle importedBuffer = builder.ImportBuffer("SkinOutput", BufferObjectHandle::Invalid, 1024);
     const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
 
     builder.AddPass(

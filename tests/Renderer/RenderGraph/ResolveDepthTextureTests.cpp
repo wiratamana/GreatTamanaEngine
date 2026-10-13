@@ -1,4 +1,4 @@
-﻿// Tier-2 (real, headless GPU) proof that PassContext::resolveDepthTexture()
+// Tier-2 (real, headless GPU) proof that PassContext::resolveDepthTexture()
 // works correctly for an imported depth-carrying texture even when NOTHING
 // else in the same graph execution ever declares a depth-attachment write
 // against it first - the "untested territory" case EnsureTextureResolved()'s
@@ -39,7 +39,7 @@ TEST(ResolveDepthTextureTest, ResolvesNonNullViewAndSamplerWithNoPriorSameFrameD
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
         const TextureHandle handle = b.ImportTexture("UntestedTerritoryTarget", depthCarrying.Target(),
-            ImageLayout::Undefined, depthCarrying.Sampler(), depthCarrying.DepthSampler());
+            ImageLayout::Undefined, depthCarrying.SamplerObjectHandle(), depthCarrying.DepthSamplerObjectHandle());
         const TextureHandle output =
             b.CreateTexture("DummyOutput", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 

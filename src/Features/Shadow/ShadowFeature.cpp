@@ -1,4 +1,4 @@
-﻿#include "ShadowFeature.h"
+#include "ShadowFeature.h"
 
 #include "ShadowMath.h"
 #include "../../Core/Core.h"
@@ -185,7 +185,7 @@ void ShadowFeature::RegisterPasses()
 
             const rg::TextureHandle shadowHandle = builder.ImportTexture(
                 viewName, shadowTarget->Target(), ImageLayout::Undefined,
-                /*colorSampler=*/VK_NULL_HANDLE, /*depthSampler=*/shadowTarget->DepthSampler());
+                /*colorSampler=*/SamplerHandle::Invalid, /*depthSampler=*/shadowTarget->DepthSamplerObjectHandle());
 
             builder.AddRenderPass(
                 "Shadow.DepthPass.Draw", rg::PassKind::Graphics, rg::ViewScope::Shared, rg::RenderPassCategory::General,

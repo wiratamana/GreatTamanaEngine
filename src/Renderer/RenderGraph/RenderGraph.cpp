@@ -1,6 +1,7 @@
 #include "RenderGraph.h"
 
 #include "../Renderer.h"
+#include "../GraphicsHandleRegistry.h" // Native(SamplerHandle)/Native(BufferObjectHandle) - EnsureTextureResolved()/EnsureBufferResolved() below.
 #include "../VulkanFormatInfo.h" // ToVkImageLayout() - the ONE place an imported resource's engine-native ImportInfo::currentLayout becomes a real VkImageLayout fed into ResourceState (see ImageLayout's own doc comment, Core/ImageLayout.h).
 #include "RenderPassToggleRegistry.h"
 #include "../../Core/Logging.h" // PHASE1 (render-pass-6 campaign, item 2.4) - GTE_LOG_WARNING for slot-budget overflow. Moved from Editor/Logger.h to Core/Logging.h by editor-core-separation-1's own PHASE3 (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - gte_core must never include anything under src/Editor/.
@@ -70,8 +71,8 @@ void RenderGraph::EnsureTextureResolved(
         // sync that already orders frames elsewhere).
         tex.isImported = true;
         tex.target = importInfo.externalTarget;
-        tex.sampler = importInfo.colorSampler; // the real, already-live sampler the caller supplied at import time.
-        tex.depthSampler = importInfo.depthSampler;
+        tex.sampler = Native(importInfo.colorSampler); // the real, already-live sampler the caller supplied at import time.
+        tex.depthSampler = Native(importInfo.depthSampler);
         tex.hasDepth = importInfo.externalTarget.depthImage != VK_NULL_HANDLE;
         tex.colorState = ResourceState{
             ToVkImageLayout(importInfo.currentLayout), VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE };
@@ -131,7 +132,7 @@ void RenderGraph::EnsureBufferResolved(
         // currentLayout does; this engine's existing whole-frame fence/
         // semaphore synchronization is what makes this safe (see
         // RenderGraphBuilder::ImportBuffer()'s own comment).
-        buf.buffer = importInfo.externalBuffer;
+        buf.buffer = Native(importInfo.externalBuffer);
         buf.size = importInfo.size;
         buf.state = ResourceState{};
     } else {
