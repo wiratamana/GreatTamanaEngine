@@ -1,12 +1,6 @@
 #pragma once
 
-// Renderer-internal only - never included by a Feature/Editor file. Holds
-// every Vk*/ComputePipeline/ComputeDescriptorSet/RenderTexture field
-// AtmosphereLutRenderer.h used to expose directly, plus the former
-// AtmosphereSkyBackgroundRenderer's own state (folded in here - see
-// EnsureSkyBackgroundPipelineInitialized()/DrawSkyBackgroundPass() below).
-// Only AtmosphereLutRenderer.cpp and AtmosphereLutRendererImpl.cpp include
-// this.
+// Internal state and pipeline definitions for AtmosphereLutRenderer.
 
 #include "../../Features/Atmosphere/AtmosphereLutRenderer.h"
 #include "../../Features/Atmosphere/AtmosphereTypes.h"
@@ -28,7 +22,7 @@ namespace gte {
 class Renderer;
 
 namespace rg {
-class RenderGraph; // DrawSkyBackground() looks up its own Sky-View LUT by name - see that method below.
+class RenderGraph;
 } // namespace rg
 
 struct AtmosphereLutRenderer::Impl {
@@ -36,62 +30,35 @@ struct AtmosphereLutRenderer::Impl {
 
     VkDevice device = VK_NULL_HANDLE;
 
-    VkDescriptorSetLayout transmittanceLutDescriptorSetLayout = VK_NULL_HANDLE;
+    DescriptorSetLayoutHandle transmittanceLutDescriptorSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
     std::optional<ComputePipeline> transmittanceLutPipeline;
-    ComputeDescriptorSet transmittanceLutDescriptorSet;
-    std::optional<Buffer> atmosphereParametersBuffer; // shared by every LUT pass below
-    // Persistent cache owns the real RenderTexture, registered under the
-    // exact literal name "AtmosphereTransmittanceLut" (no owner prefix) -
-    // AtmosphereTransmittanceLutValidation.cpp reads it back by that same
-    // name directly from the render graph, so this token is the only state
-    // this struct needs for it.
+    std::optional<Buffer> atmosphereParametersBuffer; // Shared by all LUT passes
     rg::PersistentTextureCacheToken transmittanceLutToken;
 
-    VkDescriptorSetLayout multiScatteringLutDescriptorSetLayout = VK_NULL_HANDLE;
+    DescriptorSetLayoutHandle multiScatteringLutDescriptorSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
     std::optional<ComputePipeline> multiScatteringLutPipeline;
-    ComputeDescriptorSet multiScatteringLutDescriptorSet;
-    // Persistent cache owns the real RenderTexture - only consumed via resolved
-    // handles by same-frame passes below, so a lightweight token is enough.
     rg::PersistentTextureCacheToken multiScatteringLutToken;
 
     struct SkyViewLutViewState {
-        ComputeDescriptorSet descriptorSet;
         std::optional<Buffer> frameUniformsBuffer;
-        // Persistent cache owns the real RenderTexture - DrawSkyBackground()
-        // looks it up by name through the render graph instead of holding a
-        // live pointer, so a token is all this struct needs to own here.
         rg::PersistentTextureCacheToken token;
     };
-    VkDescriptorSetLayout skyViewLutDescriptorSetLayout = VK_NULL_HANDLE;
+    DescriptorSetLayoutHandle skyViewLutDescriptorSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
     std::optional<ComputePipeline> skyViewLutPipeline;
     std::unordered_map<std::string, SkyViewLutViewState> skyViewLutViewStates;
 
     struct AerialPerspectiveVolumeViewState {
-        ComputeDescriptorSet descriptorSet;
         std::optional<Buffer> frameUniformsBuffer;
         std::optional<VolumeTexture> output;
-        // Opaque, stable sampler handle for this volume's own trilinear
-        // sampler - AddAerialPerspectiveCompositePass() binds it via the new
-        // compute-binding API (BindCombinedImageSampler), which needs a
-        // SamplerHandle, never a raw VkSampler. Re-minted only if the
-        // underlying VkSampler ever actually changes (never does, in
-        // practice, for a volume created once and never resized).
-        CachedSamplerHandle volumeSamplerHandle;
+        CachedSamplerHandle volumeSamplerHandle; // Trilinear volume sampler
     };
-    VkDescriptorSetLayout aerialPerspectiveVolumeDescriptorSetLayout = VK_NULL_HANDLE;
+    DescriptorSetLayoutHandle aerialPerspectiveVolumeDescriptorSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
     std::optional<ComputePipeline> aerialPerspectiveVolumePipeline;
     std::unordered_map<std::string, AerialPerspectiveVolumeViewState> aerialPerspectiveVolumeViewStates;
 
-    // No ComputeDescriptorSet member here anymore - the render graph's own
-    // compute-binding API (RenderGraphBuilder::PassBuilder::Bind*(), keyed by
-    // (pass name, ViewScope)) owns the real VkDescriptorSet internally now.
     struct AerialPerspectiveCompositeViewState {
         std::optional<RenderTexture> output;
     };
-    // Opaque sibling of a raw VkDescriptorSetLayout - BindDescriptorSetLayout()
-    // needs this, never the raw value. Lazily minted by ComputePipeline's own
-    // ReflectedDescriptorSetLayoutHandle(), cached there, never unregistered
-    // here (this Impl - and its ComputePipeline - lives for the whole session).
     DescriptorSetLayoutHandle aerialPerspectiveCompositeDescriptorSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
     std::optional<ComputePipeline> aerialPerspectiveCompositePipeline;
     std::unordered_map<std::string, AerialPerspectiveCompositeViewState> aerialPerspectiveCompositeViewStates;
@@ -100,24 +67,16 @@ struct AtmosphereLutRenderer::Impl {
         ComputeDescriptorSet descriptorSet;
         std::optional<RenderTexture> output;
     };
-    VkDescriptorSetLayout aerialPerspectiveVolumeDebugSliceDescriptorSetLayout = VK_NULL_HANDLE;
+    DescriptorSetLayoutHandle aerialPerspectiveVolumeDebugSliceDescriptorSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
     std::optional<ComputePipeline> aerialPerspectiveVolumeDebugSlicePipeline;
     std::unordered_map<std::string, AerialPerspectiveVolumeDebugSliceViewState>
         aerialPerspectiveVolumeDebugSliceViewStates;
 
-    // Sky Background pass - folded in from the former, now-deleted
-    // AtmosphereSkyBackgroundRenderer. A hand-built graphics pipeline (never
-    // reflected from a ComputePipeline), so its own descriptor-set layout
-    // needs explicit teardown in ~Impl() below - unlike every LUT pass
-    // layout above, which is borrowed from its own ComputePipeline.
-    VkDescriptorSetLayout skyBackgroundDescriptorSetLayout = VK_NULL_HANDLE;
-    VkDescriptorSet skyBackgroundDescriptorSet = VK_NULL_HANDLE;
+    // Sky background graphics pass resources
+    ComputeDescriptorSet skyBackgroundDescriptorSet;
     std::unique_ptr<Pipeline> skyBackgroundPipeline;
     DescriptorSetLayoutHandle skyBackgroundSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
-    // Non-owning, cached purely so ~Impl() can call
-    // Renderer::DestroyDescriptorSetLayout(skyBackgroundSetLayoutHandle) -
-    // set the first time EnsureSkyBackgroundPipelineInitialized() runs.
-    Renderer* ownerRenderer = nullptr;
+    Renderer* ownerRenderer = nullptr; // Used to clean up descriptor set layout
 
     void EnsureTransmittanceLutInitialized(Renderer& renderer, const AtmosphereParametersGpu& params);
     void EnsureMultiScatteringLutInitialized(Renderer& renderer);
@@ -134,15 +93,12 @@ struct AtmosphereLutRenderer::Impl {
         Renderer& renderer, const char* outputTextureName, int width, int height);
     void EnsureSkyBackgroundPipelineInitialized(Renderer& renderer);
 
-    // The real full-screen-triangle draw body - issued directly via
-    // cmd.Native(), mirroring the former AtmosphereSkyBackgroundRenderer::Draw().
-    // This struct already lives under src/Renderer/Internal - direct Vulkan
-    // access here was always correct.
+    // Full-screen pass for sky background
     void DrawSkyBackgroundPass(Renderer& renderer, rg::CommandBuffer& cmd, const Mat4& viewProjection,
         VkImageView skyViewLutView, VkSampler skyViewLutSampler, float eyeHeightKm, float planetRadiusKm,
         float skyExposure);
 
-    // --- Mirrors of every public AtmosphereLutRenderer method - real bodies. ---
+    // Render graph pass builders
     rg::TextureHandle AddTransmittanceLutPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         const AtmosphereParametersGpu& params, rg::RenderPassToggleRegistry* toggleRegistry);
     rg::TextureHandle AddMultiScatteringLutPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
@@ -156,16 +112,9 @@ struct AtmosphereLutRenderer::Impl {
         const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
         rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle,
         const char* outputVolumeName, rg::ViewScope viewScope, rg::RenderPassToggleRegistry* toggleRegistry);
-    // `renderGraph` is used purely to look up the Sky-View LUT named
-    // `skyViewLutName` by name (DebugTextureSnapshotFor()) - this draw runs
-    // directly inside another already-declared pass's own execute body, with
-    // no PassContext/TextureHandle of its own to resolve through.
     void DrawSkyBackground(Renderer& renderer, rg::CommandBuffer& cmd, const rg::RenderGraph& renderGraph,
         const Mat4& viewProjection, const AtmosphereParametersGpu& params,
         const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure);
-    // `sourceColorSampler`/`sourceDepthView`/`sourceDepthSampler` are opaque
-    // handles bound via the render graph's compute-binding API (Bind*()) -
-    // never unwrapped to a raw Vk* value in this file anymore.
     rg::TextureHandle AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         rg::TextureHandle sourceColorHandle, SamplerHandle sourceColorSampler, rg::TextureHandle sourceDepthHandle,
         ImageViewHandle sourceDepthView, SamplerHandle sourceDepthSampler,
