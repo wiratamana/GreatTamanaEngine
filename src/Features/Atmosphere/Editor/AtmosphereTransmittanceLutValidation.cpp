@@ -103,7 +103,7 @@ AtmosphereTransmittanceLutValidationResult ValidateAtmosphereTransmittanceLut(
     }
 
     const Renderer::CapturedRawPixels raw = renderer.CaptureImagePixels(
-        snapshot->target.image, VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format, snapshot->target.extent,
+        snapshot->target.image, VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format, FromVkExtent2D(snapshot->target.extent),
         snapshot->colorState);
 
     double deltaSum = 0.0;

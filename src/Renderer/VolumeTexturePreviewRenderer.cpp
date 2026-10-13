@@ -268,7 +268,7 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
     // capture kind - see this phase's own strategy document, Step 3.4g.
     const Renderer::CapturedRawPixels raw = renderer.CaptureImagePixels(m_outputTexture->Image(),
         VK_IMAGE_ASPECT_COLOR_BIT, VK_FORMAT_R8G8B8A8_UNORM,
-        VkExtent2D{ static_cast<std::uint32_t>(kOutputWidth), static_cast<std::uint32_t>(kOutputHeight) },
+        Extent2D{ static_cast<std::uint32_t>(kOutputWidth), static_cast<std::uint32_t>(kOutputHeight) },
         m_outputTextureState);
     // CaptureImagePixels() restores the image to GENERAL afterward (per its
     // own contract) - m_outputTextureState is already GENERAL, so no

@@ -695,7 +695,7 @@ void RenderGraphPanel::RequestTexturePreview(
 
     renderer.WaitForGpuIdle(); // One-shot, user-driven - not a per-frame cost.
     const Renderer::CapturedRawPixels raw = renderer.CaptureImagePixels(
-        snapshot->target.image, VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format, snapshot->target.extent,
+        snapshot->target.image, VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format, FromVkExtent2D(snapshot->target.extent),
         snapshot->colorState);
     if (raw.pixels.empty()) {
         m_texturePreview.Release();

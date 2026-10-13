@@ -149,12 +149,12 @@ AtmosphereAerialPerspectiveSkyPurityResult ValidateAerialPerspectiveSkyPurity(Re
     }
 
     const Renderer::CapturedRawPixels depthRaw = renderer.CaptureImagePixels(preSnapshot->target.depthImage,
-        VK_IMAGE_ASPECT_DEPTH_BIT, preSnapshot->target.depthFormat, preSnapshot->target.extent,
+        VK_IMAGE_ASPECT_DEPTH_BIT, preSnapshot->target.depthFormat, FromVkExtent2D(preSnapshot->target.extent),
         preSnapshot->depthState);
     const Renderer::CapturedRawPixels preColorRaw = renderer.CaptureImagePixels(preSnapshot->target.image,
-        VK_IMAGE_ASPECT_COLOR_BIT, preSnapshot->target.format, preSnapshot->target.extent, preSnapshot->colorState);
+        VK_IMAGE_ASPECT_COLOR_BIT, preSnapshot->target.format, FromVkExtent2D(preSnapshot->target.extent), preSnapshot->colorState);
     const Renderer::CapturedRawPixels postColorRaw = renderer.CaptureImagePixels(postSnapshot->target.image,
-        VK_IMAGE_ASPECT_COLOR_BIT, postSnapshot->target.format, postSnapshot->target.extent,
+        VK_IMAGE_ASPECT_COLOR_BIT, postSnapshot->target.format, FromVkExtent2D(postSnapshot->target.extent),
         postSnapshot->colorState);
 
     std::size_t skyPixelCount = 0;

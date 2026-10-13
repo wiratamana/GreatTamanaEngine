@@ -380,7 +380,7 @@ TEST(RenderGraphPersistentResourceCacheTest, EarlierResolvedIdentitiesStayValidA
         std::string name;
         RenderTexture* texture = nullptr;
         VkImage image = VK_NULL_HANDLE;
-        VkExtent2D extent{};
+        Extent2D extent{};
     };
 
     std::vector<Recorded> recorded;
@@ -1170,8 +1170,8 @@ TEST(RenderGraphPersistentResourceCacheTest, ContentWrittenOnFrameNSurvivesReada
     const std::optional<DebugTextureSnapshot> afterFrame1 = fixture.GetRenderGraph().DebugTextureSnapshotFor(combinedKey);
     ASSERT_TRUE(afterFrame1.has_value());
     const Renderer::CapturedRawPixels pixelsAfterFrame1 = fixture.GetRenderer().CaptureImagePixels(
-        afterFrame1->target.image, VK_IMAGE_ASPECT_COLOR_BIT, afterFrame1->target.format, afterFrame1->target.extent,
-        afterFrame1->colorState);
+        afterFrame1->target.image, VK_IMAGE_ASPECT_COLOR_BIT, afterFrame1->target.format,
+        FromVkExtent2D(afterFrame1->target.extent), afterFrame1->colorState);
     ASSERT_EQ(pixelsAfterFrame1.pixels.size(), static_cast<std::size_t>(16 * 16 * 4));
     // VK_FORMAT_R8G8B8A8_UNORM - each channel is round(component * 255).
     EXPECT_NEAR(pixelsAfterFrame1.pixels[0], 64, 2);
@@ -1194,8 +1194,8 @@ TEST(RenderGraphPersistentResourceCacheTest, ContentWrittenOnFrameNSurvivesReada
     ASSERT_TRUE(afterFrame2.has_value());
     EXPECT_EQ(afterFrame2->target.image, afterFrame1->target.image); // same physical VkImage - no discard/recreate.
     const Renderer::CapturedRawPixels pixelsAfterFrame2 = fixture.GetRenderer().CaptureImagePixels(
-        afterFrame2->target.image, VK_IMAGE_ASPECT_COLOR_BIT, afterFrame2->target.format, afterFrame2->target.extent,
-        afterFrame2->colorState);
+        afterFrame2->target.image, VK_IMAGE_ASPECT_COLOR_BIT, afterFrame2->target.format,
+        FromVkExtent2D(afterFrame2->target.extent), afterFrame2->colorState);
     ASSERT_EQ(pixelsAfterFrame2.pixels.size(), pixelsAfterFrame1.pixels.size());
     EXPECT_NEAR(pixelsAfterFrame2.pixels[0], 64, 2);
     EXPECT_NEAR(pixelsAfterFrame2.pixels[1], 128, 2);

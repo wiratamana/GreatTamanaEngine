@@ -988,7 +988,7 @@ int EditorHost::Run()
                 m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedWindow, FrameCaptureFailureReason::TargetNotAvailable);
             } else {
                 const ImGui_ImplVulkanH_Frame& frame = platformWindow->Frames[platformWindow->FrameIndex];
-                const VkExtent2D extent{
+                const Extent2D extent{
                     static_cast<std::uint32_t>(platformWindow->Width), static_cast<std::uint32_t>(platformWindow->Height) };
                 const rg::ResourceState presentState{
                     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_NONE };
@@ -1067,7 +1067,7 @@ int EditorHost::Run()
                     const rg::ResourceState state = wantsDepth ? snapshot->depthState : snapshot->colorState;
 
                     Renderer::CapturedRawPixels raw =
-                        m_renderer.CaptureImagePixels(image, aspect, format, snapshot->target.extent, state);
+                        m_renderer.CaptureImagePixels(image, aspect, format, FromVkExtent2D(snapshot->target.extent), state);
 
                     if (raw.pixels.empty()) {
                         // BytesPerTexelForFormat() didn't recognize `format` -

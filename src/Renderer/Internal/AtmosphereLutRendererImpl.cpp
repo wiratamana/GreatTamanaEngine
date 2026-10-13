@@ -804,7 +804,7 @@ Renderer::CapturedRawPixels AtmosphereLutRenderer::Impl::CaptureAerialPerspectiv
 
     UnregisterDescriptorSet(debugSliceSet);
 
-    const VkExtent2D extent{ static_cast<std::uint32_t>(volumeWidth), static_cast<std::uint32_t>(volumeHeight) };
+    const Extent2D extent{ static_cast<std::uint32_t>(volumeWidth), static_cast<std::uint32_t>(volumeHeight) };
     return renderer.CaptureImagePixels(
         outputImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_FORMAT_R16G16B16A16_SFLOAT, extent, outputWriteState);
 }

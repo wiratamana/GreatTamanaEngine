@@ -371,7 +371,7 @@ public:
     // arbitrary Z-slice range of a 3D image instead of only Z=0 - every
     // existing 2D caller leaves both at their defaults (0/1), reproducing
     // today's exact behavior byte-for-byte.
-    CapturedRawPixels CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format, VkExtent2D extent,
+    CapturedRawPixels CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format, Extent2D extent,
         const rg::ResourceState& previousState, std::uint32_t zOffset = 0, std::uint32_t depth = 1) const;
 
     // A full, blocking vkDeviceWaitIdle() - see PHASE0_MASTER_STRATEGY.md's

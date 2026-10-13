@@ -154,7 +154,7 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
         // a buffer we own exclusively.
         Renderer::CapturedRawPixels raw = m_frameRenderer->CaptureImagePixels(
             snapshot->target.image, VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format,
-            snapshot->target.extent, snapshot->colorState);
+            FromVkExtent2D(snapshot->target.extent), snapshot->colorState);
 
         if (raw.pixels.empty()) {
             // BytesPerTexelForFormat() didn't recognize this format.
@@ -1434,7 +1434,7 @@ FrameDebuggerEventTextureResult FrameDebuggerPanel::GetEventTextureFromCommand(i
     m_frameRenderer->WaitForGpuIdle();
 
     Renderer::CapturedRawPixels raw = m_frameRenderer->CaptureImagePixels(
-        retained.Image(), aspect, retained.Format(), retained.Extent(),
+        retained.Image(), aspect, retained.Format(), FromVkExtent2D(retained.Extent()),
         rg::ResourceState{ VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
             VK_ACCESS_2_SHADER_READ_BIT });
     if (raw.pixels.empty()) {

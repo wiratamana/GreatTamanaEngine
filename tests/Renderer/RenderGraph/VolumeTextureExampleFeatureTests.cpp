@@ -94,7 +94,7 @@ TEST(VolumeTextureExampleFeatureTest, PerCellParallelFillWritesEveryCellsOwnCoor
 
     for (std::uint32_t z = 0; z < kSize; ++z) {
         const Renderer::CapturedRawPixels captured = fixture.GetRenderer().CaptureImagePixels(snapshot->target.image,
-            VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format, VkExtent2D{ kSize, kSize }, snapshot->state,
+            VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format, Extent2D{ kSize, kSize }, snapshot->state,
             /*zOffset=*/z, /*depth=*/1);
         ASSERT_EQ(captured.pixels.size(), static_cast<std::size_t>(kSize) * kSize * 8);
 
@@ -183,7 +183,7 @@ TEST(VolumeTextureExampleFeatureTest, PerColumnSequentialFillMatchesTheCpuOracle
 
     for (std::uint32_t z = 0; z < kDepth; ++z) {
         const Renderer::CapturedRawPixels captured = fixture.GetRenderer().CaptureImagePixels(snapshot->target.image,
-            VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format, VkExtent2D{ kWidth, kHeight }, snapshot->state,
+            VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format, Extent2D{ kWidth, kHeight }, snapshot->state,
             /*zOffset=*/z, /*depth=*/1);
         ASSERT_EQ(captured.pixels.size(), static_cast<std::size_t>(kWidth) * kHeight * 8);
 

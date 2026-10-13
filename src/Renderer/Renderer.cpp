@@ -260,8 +260,9 @@ RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat form
 }
 
 Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format,
-    VkExtent2D extent, const rg::ResourceState& previousState, std::uint32_t zOffset, std::uint32_t depth) const
+    Extent2D extentIn, const rg::ResourceState& previousState, std::uint32_t zOffset, std::uint32_t depth) const
 {
+    const VkExtent2D extent = ToVkExtent2D(extentIn);
     const int bytesPerPixel = BytesPerTexelForFormat(format);
     if (bytesPerPixel == 0) {
         return CapturedRawPixels{}; // Unsupported format - pixels stays empty, caller fails cleanly.
@@ -310,7 +311,7 @@ Renderer::CapturedRawPixels Renderer::CaptureRenderTexturePixels(RenderTexture& 
 {
     const rg::ResourceState shaderReadState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
     return CaptureImagePixels(
-        texture.Image(), VK_IMAGE_ASPECT_COLOR_BIT, texture.Format(), ToVkExtent2D(texture.Extent()), shaderReadState);
+        texture.Image(), VK_IMAGE_ASPECT_COLOR_BIT, texture.Format(), texture.Extent(), shaderReadState);
 }
 
 void Renderer::WaitForGpuIdle() const
@@ -810,7 +811,7 @@ CaptureResult Renderer::CaptureRenderTarget(const RenderTexture& target) const
 {
     const rg::ResourceState shaderReadState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
     const CapturedRawPixels raw =
-        CaptureImagePixels(target.Image(), VK_IMAGE_ASPECT_COLOR_BIT, target.Format(), ToVkExtent2D(target.Extent()), shaderReadState);
+        CaptureImagePixels(target.Image(), VK_IMAGE_ASPECT_COLOR_BIT, target.Format(), target.Extent(), shaderReadState);
 
     CaptureResult result;
     result.extent = Extent2D{ static_cast<std::uint32_t>(raw.width), static_cast<std::uint32_t>(raw.height) };
