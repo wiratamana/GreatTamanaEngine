@@ -1,4 +1,4 @@
-#include "Core.h"
+﻿#include "Core.h"
 
 // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8 - the ONE gte_core
 // .cpp file allowed to #include the real src/Editor/EditorLayer.h header
@@ -1601,7 +1601,7 @@ void Core::BuildFrame()
                             RenderSystem::ResolveActiveCameraViewProjection(m_game.GetRegistry(), aspect);
 
                         const rg::TextureHandle h = b.ImportTexture("GameView", gameTarget->Target(),
-                            VK_IMAGE_LAYOUT_UNDEFINED, gameTarget->Sampler(), gameTarget->DepthSampler(), gameTarget);
+                            ImageLayout::Undefined, gameTarget->Sampler(), gameTarget->DepthSampler(), gameTarget);
 
                         RenderPassViewData gameViewData;
                         gameViewData.id = rg::RenderViewId::Named("Game");
@@ -1708,7 +1708,7 @@ void Core::BuildFrame()
                         const Vec3 sceneEyeWorldPosition = m_editorLayer->SceneViewCameraWorldPosition();
 
                         const rg::TextureHandle h = b.ImportTexture("SceneView", sceneTarget->Target(),
-                            VK_IMAGE_LAYOUT_UNDEFINED, sceneTarget->Sampler(), sceneTarget->DepthSampler(), sceneTarget);
+                            ImageLayout::Undefined, sceneTarget->Sampler(), sceneTarget->DepthSampler(), sceneTarget);
 
                         RenderPassViewData sceneViewData;
                         sceneViewData.id = rg::RenderViewId::Named("Scene");

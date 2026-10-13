@@ -1,4 +1,4 @@
-#include "ShadowFeature.h"
+﻿#include "ShadowFeature.h"
 
 #include "ShadowMath.h"
 #include "../../Core/Core.h"
@@ -184,7 +184,7 @@ void ShadowFeature::RegisterPasses()
                 viewData->eyeWorldPosition, safeSettings.orthoHalfExtentWorld, safeSettings.nearZ, safeSettings.farZ);
 
             const rg::TextureHandle shadowHandle = builder.ImportTexture(
-                viewName, shadowTarget->Target(), VK_IMAGE_LAYOUT_UNDEFINED,
+                viewName, shadowTarget->Target(), ImageLayout::Undefined,
                 /*colorSampler=*/VK_NULL_HANDLE, /*depthSampler=*/shadowTarget->DepthSampler());
 
             builder.AddRenderPass(

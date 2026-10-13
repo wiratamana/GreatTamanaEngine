@@ -831,7 +831,7 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
     const char* seedName = namePool.SeedName(viewName);
     BlendStageState& seedState = EnsureBlendStageState(seedName, extent);
     const rg::TextureHandle seedHandle = frame.builder.ImportTexture(
-        seedName, seedState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED, seedState.texture->Sampler());
+        seedName, seedState.texture->Target(), ImageLayout::Undefined, seedState.texture->Sampler());
     DispatchBlend(frame.builder, resolved->target, resolved->sampler, resolved->target, resolved->sampler, seedHandle,
         seedState, namePool.SeedCopyPassName(viewName), extent, RenderFeatureBlendMode::Replace, "Post Processing");
 
@@ -849,7 +849,7 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
         const char* privateName = namePool.PrivateName(gpuStateKey, viewName);
         PrivateTargetState& privateState = EnsurePrivateTargetState(privateName, extent);
         const rg::TextureHandle privateTarget = frame.builder.ImportTexture(
-            privateName, privateState.texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED, privateState.texture->Sampler());
+            privateName, privateState.texture->Target(), ImageLayout::Undefined, privateState.texture->Sampler());
 
         if (entry.projectCallback) {
             const rg::RenderFeatureScope scope(frame.builder, featureName);
@@ -910,7 +910,7 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
             const char* accumName = namePool.AccumName(gpuStateKey, viewName);
             outputState = &EnsureBlendStageState(accumName, extent);
             outputTarget = frame.builder.ImportTexture(
-                accumName, outputState->texture->Target(), VK_IMAGE_LAYOUT_UNDEFINED, outputState->texture->Sampler());
+                accumName, outputState->texture->Target(), ImageLayout::Undefined, outputState->texture->Sampler());
         }
 
         DispatchBlend(frame.builder, currentInput, currentInputSampler, privateTarget, privateState.texture->Sampler(),

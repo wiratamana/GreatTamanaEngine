@@ -349,7 +349,7 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveVolumeP
     viewState.frameUniformsBuffer->Upload(&frameUniforms, sizeof(AtmosphereFrameUniforms));
 
     const rg::VolumeTextureHandle outputHandle =
-        builder.ImportVolumeTexture(outputVolumeName, viewState.output->Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+        builder.ImportVolumeTexture(outputVolumeName, viewState.output->Target(), ImageLayout::Undefined);
 
     builder.AddRenderPass(
         "AtmosphereAerialPerspectiveVolumePass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::General,
@@ -441,7 +441,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass
     }
 
     const rg::TextureHandle outputHandle = builder.ImportTexture(outputTextureName, viewState.output->Target(),
-        VK_IMAGE_LAYOUT_UNDEFINED, viewState.output->Sampler(), viewState.output->DepthSampler(), &*viewState.output);
+        ImageLayout::Undefined, viewState.output->Sampler(), viewState.output->DepthSampler(), &*viewState.output);
 
     // Resolve volume sampler handle.
     const auto aerialVolumeIt = aerialPerspectiveVolumeViewStates.find(aerialPerspectiveVolumeName);

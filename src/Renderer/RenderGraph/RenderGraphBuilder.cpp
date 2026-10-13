@@ -1,4 +1,4 @@
-﻿#include "RenderGraphBuilder.h"
+#include "RenderGraphBuilder.h"
 
 #include "../../Core/Logging.h" // GTE_LOG_ERROR for GetOrCreatePersistentTexture()'s own
     // "no persistent cache installed" refusal branch.
@@ -234,7 +234,7 @@ BufferHandle RenderGraphBuilder::CreateBuffer(const char* name, const BufferDesc
 }
 
 TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTarget& externalTarget,
-    VkImageLayout currentLayout, VkSampler colorSampler, VkSampler depthSampler, RenderTexture* trackedOwner)
+    ImageLayout currentLayout, VkSampler colorSampler, VkSampler depthSampler, RenderTexture* trackedOwner)
 {
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::ImportTexture requires a non-empty, static-storage-duration name");
@@ -317,7 +317,7 @@ BufferHandle RenderGraphBuilder::ImportBuffer(const char* name, VkBuffer externa
 }
 
 VolumeTextureHandle RenderGraphBuilder::ImportVolumeTexture(
-    const char* name, const VolumeTarget& externalVolumeTarget, VkImageLayout currentLayout)
+    const char* name, const VolumeTarget& externalVolumeTarget, ImageLayout currentLayout)
 {
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::ImportVolumeTexture requires a non-empty, static-storage-duration name");
@@ -356,7 +356,7 @@ TextureArrayHandle RenderGraphBuilder::CreateTextureArray(const char* name, cons
 // better-render-pass-3 campaign, BLOCK5 - mirrors ImportVolumeTexture()'s
 // exact import-info-population shape immediately above.
 TextureArrayHandle RenderGraphBuilder::ImportTextureArray(
-    const char* name, const TextureArrayTarget& externalTarget, VkImageLayout currentLayout)
+    const char* name, const TextureArrayTarget& externalTarget, ImageLayout currentLayout)
 {
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::ImportTextureArray requires a non-empty, static-storage-duration name");
@@ -447,8 +447,13 @@ TextureHandle RenderGraphBuilder::MintPersistentHandle(
     const RenderGraphPersistentResourceCache::ResolvedTexture& resolved)
 {
     // Persistent cache entries are always color-only (Section 7) - no depth sampler to pass.
-    const TextureHandle handle = ImportTexture(
-        resolved.combinedKey->c_str(), resolved.texture->Target(), resolved.lastKnownLayout, resolved.texture->Sampler());
+    // `resolved.lastKnownLayout` is the cache's own honest, real VkImageLayout
+    // history (RenderGraphPersistentResourceCache::RecordFinalLayout()) -
+    // translated to this engine's own native ImageLayout here, right at the
+    // boundary, since ImportTexture() never accepts a raw VkImageLayout (see
+    // its own declaration comment, RenderGraphBuilder.h).
+    const TextureHandle handle = ImportTexture(resolved.combinedKey->c_str(), resolved.texture->Target(),
+        FromVkImageLayout(resolved.lastKnownLayout), resolved.texture->Sampler());
     m_persistentCacheTextures.push_back(handle);
     return handle;
 }

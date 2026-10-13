@@ -227,7 +227,7 @@ TEST(RenderGraphSnapshotTest, ImportedAndTransientTextureResourcesReportCorrectK
 {
     RenderGraphBuilder builder;
     const RenderTarget swapchainTarget{};
-    const TextureHandle swapchain = builder.ImportTexture("Swapchain", swapchainTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+    const TextureHandle swapchain = builder.ImportTexture("Swapchain", swapchainTarget, ImageLayout::Undefined);
     const TextureHandle scratch = builder.CreateTexture("Scratch", MakeTextureDesc());
 
     builder.AddPass(
@@ -703,7 +703,7 @@ TEST(RenderGraphSnapshotTest, ReadKindsAndWriteKindsMatchDeclaredResourceKindsIn
     const BufferHandle bufferHandle = builder.CreateBuffer("Buf", BufferDesc{ 256, BufferUsage::StorageBuffer });
     const VolumeTarget volumeTarget{};
     const VolumeTextureHandle volumeHandle =
-        builder.ImportVolumeTexture("Vol", volumeTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+        builder.ImportVolumeTexture("Vol", volumeTarget, ImageLayout::Undefined);
 
     builder.AddComputePass(
         "MixedPass",
@@ -759,7 +759,7 @@ TEST(RenderGraphSnapshotTest, WriteVolumeTextureAndReadVolumeTextureProduceNonEm
     RenderGraphBuilder builder;
     const VolumeTarget volumeTarget{};
     const VolumeTextureHandle volumeHandle =
-        builder.ImportVolumeTexture("AtmosphereAerialPerspectiveVolume", volumeTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+        builder.ImportVolumeTexture("AtmosphereAerialPerspectiveVolume", volumeTarget, ImageLayout::Undefined);
     const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
 
     builder.AddComputePass(

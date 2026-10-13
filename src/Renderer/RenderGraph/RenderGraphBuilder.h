@@ -34,6 +34,7 @@
 #include "../RenderTarget.h"
 #include "../VolumeTarget.h"
 #include "../TextureArrayTarget.h" // better-render-pass-3 campaign, BLOCK5
+#include "../../Core/ImageLayout.h" // engine-native ImportTexture()/ImportVolumeTexture()/ImportTextureArray() `currentLayout` type - see TextureImportInfo's own doc comment below for why this is never VkImageLayout.
 
 #include <volk.h>
 
@@ -64,10 +65,12 @@ struct TextureImportInfo {
     // must never try to allocate or free this.
     RenderTarget externalTarget{};
     // Only meaningful when isImported == true - the caller-supplied,
-    // REQUIRED statement of exactly what VkImageLayout this image is
-    // actually in right now. See ImportTexture()'s own comment for why
-    // this has no default to silently fall back on.
-    VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    // REQUIRED statement of exactly what layout this image is actually in
+    // right now, as this engine's own native ImageLayout (Core/ImageLayout.h)
+    // - never a raw VkImageLayout (see that header's own doc comment for
+    // why). See ImportTexture()'s own comment for why this has no default
+    // to silently fall back on.
+    ImageLayout currentLayout = ImageLayout::Undefined;
     // Only meaningful when isImported == true - the already-live color/
     // depth sampler for this resource, supplied by the caller at import
     // time (VK_NULL_HANDLE when that sub-resource genuinely has none).
@@ -121,7 +124,9 @@ struct VolumeTextureImportInfo {
     VolumeTarget externalTarget{};
     // Only meaningful when isImported == true - see ImportVolumeTexture()'s
     // own comment for why this has no default to silently fall back on.
-    VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    // Engine-native ImageLayout, never a raw VkImageLayout - mirrors
+    // TextureImportInfo::currentLayout's own doc comment above.
+    ImageLayout currentLayout = ImageLayout::Undefined;
 };
 
 // TextureArray sibling of VolumeTextureImportInfo above - better-render-
@@ -131,7 +136,9 @@ struct VolumeTextureImportInfo {
 struct TextureArrayImportInfo {
     bool isImported = false;
     TextureArrayTarget externalTarget{};
-    VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    // Engine-native ImageLayout, never a raw VkImageLayout - mirrors
+    // TextureImportInfo::currentLayout's own doc comment above.
+    ImageLayout currentLayout = ImageLayout::Undefined;
 };
 
 
@@ -477,13 +484,14 @@ public:
     // tell the difference from the handle alone.
     //
     // `currentLayout` is REQUIRED, with no default: pass
-    // VK_IMAGE_LAYOUT_UNDEFINED when the first pass this frame fully
+    // ImageLayout::Undefined when the first pass this frame fully
     // overwrites the resource via a clear load op (the previous layout is
     // then irrelevant); otherwise pass the resource's own actual
-    // `CurrentState().layout` (e.g. a RenderTexture - see
-    // RenderTexture::CurrentState()). Guessing this wrong is a silent
-    // correctness bug (a barrier built with the wrong oldLayout/
-    // srcAccessMask), not a compile error.
+    // `CurrentState().layout`, translated to this engine's own native
+    // ImageLayout via FromVkImageLayout() (Renderer/VulkanFormatInfo.h) -
+    // (e.g. a RenderTexture - see RenderTexture::CurrentState()). Guessing
+    // this wrong is a silent correctness bug (a barrier built with the
+    // wrong oldLayout/srcAccessMask), not a compile error.
     // `colorSampler`/`depthSampler` are this resource's already-live
     // color/depth samplers (VK_NULL_HANDLE only when that sub-resource
     // genuinely has no sampler, e.g. the swapchain).
@@ -491,7 +499,7 @@ public:
     // When set, ExecuteCompiledGraph() mirrors this image's real final
     // barrier state back onto it once per frame, via SetCurrentState() -
     // see RenderTexture::FinalizeForExternalSampling().
-    TextureHandle ImportTexture(const char* name, const RenderTarget& externalTarget, VkImageLayout currentLayout,
+    TextureHandle ImportTexture(const char* name, const RenderTarget& externalTarget, ImageLayout currentLayout,
         VkSampler colorSampler = VK_NULL_HANDLE, VkSampler depthSampler = VK_NULL_HANDLE,
         RenderTexture* trackedOwner = nullptr);
 
@@ -530,10 +538,10 @@ public:
     //
     // `currentLayout` is REQUIRED, with no default - same reasoning as
     // ImportTexture()'s own `currentLayout` parameter above: the caller
-    // must state exactly what VkImageLayout this image is ACTUALLY in
-    // right now.
+    // must state exactly what engine-native ImageLayout this image is
+    // ACTUALLY in right now.
     VolumeTextureHandle ImportVolumeTexture(
-        const char* name, const VolumeTarget& externalVolumeTarget, VkImageLayout currentLayout);
+        const char* name, const VolumeTarget& externalVolumeTarget, ImageLayout currentLayout);
 
     // better-render-pass-3 campaign, BLOCK5 - declares a brand-new
     // TRANSIENT (pooled) TextureArray this frame, mirroring CreateTexture()'s
@@ -547,7 +555,7 @@ public:
     // resource. `currentLayout` is REQUIRED, with no default - same
     // reasoning as ImportTexture()'s own `currentLayout` parameter.
     TextureArrayHandle ImportTextureArray(
-        const char* name, const TextureArrayTarget& externalTarget, VkImageLayout currentLayout);
+        const char* name, const TextureArrayTarget& externalTarget, ImageLayout currentLayout);
 
     // Marks `handle` as a REQUIRED root the compiler must keep alive - the
     // plain TextureHandle counterpart of KeepVolumeTextureOutput()/

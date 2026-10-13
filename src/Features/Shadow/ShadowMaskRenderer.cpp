@@ -90,7 +90,7 @@ rg::TextureHandle ShadowMaskRenderer::AddMaskPass(rg::RenderGraphBuilder& builde
     viewState.paramsBuffer->Upload(&params, sizeof(params));
 
     const rg::TextureHandle outputHandle = builder.ImportTexture(
-        outputName, viewState.output->Target(), VK_IMAGE_LAYOUT_UNDEFINED, viewState.output->Sampler());
+        outputName, viewState.output->Target(), ImageLayout::Undefined, viewState.output->Sampler());
 
     builder.AddRenderPass(
         "Shadow.Mask.Dispatch", rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,

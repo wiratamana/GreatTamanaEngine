@@ -735,7 +735,7 @@ TEST(RenderGraphBuilderTest, AddComputePassWithMixedReadWriteKindsRecordsEachCor
     const BufferHandle bufferHandle = builder.CreateBuffer("Buf", BufferDesc{ 256, BufferUsage::StorageBuffer });
     const VolumeTarget volumeTarget{};
     const VolumeTextureHandle volumeHandle =
-        builder.ImportVolumeTexture("Volume", volumeTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+        builder.ImportVolumeTexture("Volume", volumeTarget, ImageLayout::Undefined);
 
     builder.AddComputePass(
         "MixedPass",
@@ -807,7 +807,7 @@ TEST(RenderGraphBuilderTest, ImportTextureProducesHandleUsableLikeCreateTextureH
 {
     RenderGraphBuilder builder;
     const RenderTarget swapchainTarget = MakeFakeSwapchainTarget();
-    const TextureHandle imported = builder.ImportTexture("Swapchain", swapchainTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+    const TextureHandle imported = builder.ImportTexture("Swapchain", swapchainTarget, ImageLayout::Undefined);
 
     ASSERT_TRUE(imported.IsValid());
 
@@ -828,7 +828,7 @@ TEST(RenderGraphBuilderTest, ImportTextureIsTaggedAsImportedInCompiledGraphInput
 {
     RenderGraphBuilder builder;
     const RenderTarget swapchainTarget = MakeFakeSwapchainTarget();
-    const TextureHandle imported = builder.ImportTexture("Swapchain", swapchainTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+    const TextureHandle imported = builder.ImportTexture("Swapchain", swapchainTarget, ImageLayout::Undefined);
     const TextureHandle transient = builder.CreateTexture("Scratch", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     const CompiledGraphInput input = builder.Finish();
@@ -845,19 +845,19 @@ TEST(RenderGraphBuilderTest, ImportTextureRecordsExactCurrentLayoutSupplied)
     RenderGraphBuilder builder;
     const RenderTarget gameViewTarget = MakeFakeGameViewTarget();
     const TextureHandle imported =
-        builder.ImportTexture("GameView", gameViewTarget, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        builder.ImportTexture("GameView", gameViewTarget, ImageLayout::ShaderReadOnlyOptimal);
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.textures.size(), 1u);
     EXPECT_TRUE(input.textures[imported.index].importInfo.isImported);
-    EXPECT_EQ(input.textures[imported.index].importInfo.currentLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    EXPECT_EQ(input.textures[imported.index].importInfo.currentLayout, ImageLayout::ShaderReadOnlyOptimal);
 }
 
 TEST(RenderGraphBuilderTest, ImportTextureStoresExternalTargetVerbatim)
 {
     RenderGraphBuilder builder;
     const RenderTarget gameViewTarget = MakeFakeGameViewTarget();
-    const TextureHandle imported = builder.ImportTexture("GameView", gameViewTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+    const TextureHandle imported = builder.ImportTexture("GameView", gameViewTarget, ImageLayout::Undefined);
 
     const CompiledGraphInput input = builder.Finish();
     const TextureImportInfo& info = input.textures[imported.index].importInfo;
@@ -873,7 +873,7 @@ TEST(RenderGraphBuilderTest, ImportTextureMirrorsExternalTargetShapeIntoTextureD
 {
     RenderGraphBuilder builder;
     const RenderTarget gameViewTarget = MakeFakeGameViewTarget();
-    const TextureHandle imported = builder.ImportTexture("GameView", gameViewTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+    const TextureHandle imported = builder.ImportTexture("GameView", gameViewTarget, ImageLayout::Undefined);
 
     const CompiledGraphInput input = builder.Finish();
     const TextureDesc& desc = input.textures[imported.index].desc;
@@ -887,7 +887,7 @@ TEST(RenderGraphBuilderTest, ImportedAndTransientTexturesShareOneContiguousHandl
 {
     RenderGraphBuilder builder;
     const TextureHandle transientA = builder.CreateTexture("A", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
-    const TextureHandle imported = builder.ImportTexture("Swapchain", MakeFakeSwapchainTarget(), VK_IMAGE_LAYOUT_UNDEFINED);
+    const TextureHandle imported = builder.ImportTexture("Swapchain", MakeFakeSwapchainTarget(), ImageLayout::Undefined);
     const TextureHandle transientB = builder.CreateTexture("B", TextureDesc{ 32, 32, PixelFormat::RGBA8_UNorm, false });
 
     EXPECT_FALSE(transientA == imported);
@@ -1015,7 +1015,7 @@ TEST(RenderGraphBuilderDeathTest, ImportTextureRejectsNullName)
     RenderGraphBuilder builder;
     const RenderTarget target = MakeFakeSwapchainTarget();
     EXPECT_DEATH(
-        { builder.ImportTexture(nullptr, target, VK_IMAGE_LAYOUT_UNDEFINED); },
+        { builder.ImportTexture(nullptr, target, ImageLayout::Undefined); },
         "");
 }
 
@@ -1527,7 +1527,7 @@ TEST(RenderGraphBuilderTest, ResolveImportedTextureSamplersReturnsRealSamplersFo
     const VkSampler colorSampler = reinterpret_cast<VkSampler>(static_cast<std::uintptr_t>(0xC0105A));
     const VkSampler depthSampler = reinterpret_cast<VkSampler>(static_cast<std::uintptr_t>(0xD3975A));
     const TextureHandle imported = builder.ImportTexture(
-        "GameView", gameViewTarget, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, colorSampler, depthSampler);
+        "GameView", gameViewTarget, ImageLayout::ShaderReadOnlyOptimal, colorSampler, depthSampler);
 
     const RenderGraphBuilder::ImportedTextureSamplers resolved = builder.ResolveImportedTextureSamplers(imported);
     EXPECT_EQ(resolved.colorSampler, colorSampler);

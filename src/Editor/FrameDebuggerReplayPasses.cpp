@@ -106,7 +106,7 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
         const char* passName = ReplayStepPassName(i); // Never a per-call temporary.
 
         const rg::TextureHandle destHandle = builder.ImportTexture(passName, destinations[i].Target(),
-            VK_IMAGE_LAYOUT_UNDEFINED, destinations[i].Sampler(), destinations[i].DepthSampler());
+            ImageLayout::Undefined, destinations[i].Sampler(), destinations[i].DepthSampler());
 
         // isBackgroundStep is true for exactly one index: the extra,
         // dedicated step (only reachable when includeBackgroundStep is

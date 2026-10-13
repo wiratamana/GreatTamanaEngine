@@ -68,7 +68,7 @@ TEST(VolumeTextureExampleFeatureTest, PerCellParallelFillWritesEveryCellsOwnCoor
         fixture.GetRenderer().AllocateComputeDescriptorSet(pipeline.ReflectedDescriptorSetLayout(0));
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-        const VolumeTextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+        const VolumeTextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), ImageLayout::Undefined);
         b.AddRenderPass(
             "VolumeTextureExamplePerCellFillPass", PassKind::Compute,
             [handle](RenderGraphBuilder::PassBuilder& pass) {
@@ -145,7 +145,7 @@ TEST(VolumeTextureExampleFeatureTest, PerColumnSequentialFillMatchesTheCpuOracle
     const PushConstants pushConstants{ kMaxDistanceKm, kDepthExponent };
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-        const VolumeTextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+        const VolumeTextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), ImageLayout::Undefined);
         b.AddRenderPass(
             "VolumeTextureExamplePerColumnFillPass", PassKind::Compute,
             [handle](RenderGraphBuilder::PassBuilder& pass) {

@@ -172,7 +172,7 @@ TEST(RenderGraphCompilerTest, MultipleWritersToSameResourcePreserveWriteAfterWri
 {
     RenderGraphBuilder builder;
     const RenderTarget swapchainTarget{};
-    const TextureHandle swapchain = builder.ImportTexture("Swapchain", swapchainTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+    const TextureHandle swapchain = builder.ImportTexture("Swapchain", swapchainTarget, ImageLayout::Undefined);
 
     builder.AddPass(
         "ClearPass", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(swapchain); }, NoOpExecute);
@@ -557,9 +557,9 @@ TEST(RenderGraphCompilerTest, VolumeTextureOnlyWriteSurvivesCullingOnlyWhenExpli
     RenderGraphBuilder builder;
     const VolumeTarget dummyVolumeTarget{};
     const VolumeTextureHandle volumeA =
-        builder.ImportVolumeTexture("VolA", dummyVolumeTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+        builder.ImportVolumeTexture("VolA", dummyVolumeTarget, ImageLayout::Undefined);
     const VolumeTextureHandle volumeB =
-        builder.ImportVolumeTexture("VolB", dummyVolumeTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+        builder.ImportVolumeTexture("VolB", dummyVolumeTarget, ImageLayout::Undefined);
 
     builder.AddComputePass(
         "WritesKeptVolume",
@@ -588,7 +588,7 @@ TEST(RenderGraphCompilerTest, VolumeTextureWriteNeverKeptIsCulledEvenWithNoTextu
 {
     RenderGraphBuilder builder;
     const VolumeTarget dummyVolumeTarget{};
-    const VolumeTextureHandle volume = builder.ImportVolumeTexture("Vol", dummyVolumeTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+    const VolumeTextureHandle volume = builder.ImportVolumeTexture("Vol", dummyVolumeTarget, ImageLayout::Undefined);
 
     builder.AddComputePass(
         "WritesVolume",
@@ -1137,7 +1137,7 @@ TEST(RenderGraphCompilerTest, PassesSharingTheSameRenderPassEventTierPreserveThe
 {
     RenderGraphBuilder builder;
     const RenderTarget swapchainTarget{};
-    const TextureHandle swapchain = builder.ImportTexture("Swapchain", swapchainTarget, VK_IMAGE_LAYOUT_UNDEFINED);
+    const TextureHandle swapchain = builder.ImportTexture("Swapchain", swapchainTarget, ImageLayout::Undefined);
 
     builder.AddRenderPass(
         "ClearPass", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(swapchain); },

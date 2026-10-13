@@ -1,4 +1,4 @@
-#include "FramePresenter.h"
+﻿#include "FramePresenter.h"
 
 #include "RenderGraph/CommandBuffer.h"
 #include "RenderGraph/RenderGraph.h"
@@ -407,7 +407,7 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
         [&](rg::RenderGraphBuilder& builder) -> std::vector<rg::TextureHandle> {
             // The swapchain image is never sampled, only presented - no sampler exists for it.
             const rg::TextureHandle swapchainHandle =
-                builder.ImportTexture("Swapchain", target, VK_IMAGE_LAYOUT_UNDEFINED);
+                builder.ImportTexture("Swapchain", target, ImageLayout::Undefined);
             return build(builder, swapchainHandle);
         });
 

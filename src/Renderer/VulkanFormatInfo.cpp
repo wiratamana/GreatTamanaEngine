@@ -67,4 +67,49 @@ PixelFormat FromVkFormat(VkFormat format) noexcept
     }
 }
 
+VkImageLayout ToVkImageLayout(ImageLayout layout) noexcept
+{
+    switch (layout) {
+        case ImageLayout::General:
+            return VK_IMAGE_LAYOUT_GENERAL;
+        case ImageLayout::ColorAttachmentOptimal:
+            return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        case ImageLayout::DepthStencilAttachmentOptimal:
+            return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        case ImageLayout::ShaderReadOnlyOptimal:
+            return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        case ImageLayout::TransferSrcOptimal:
+            return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        case ImageLayout::TransferDstOptimal:
+            return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        case ImageLayout::PresentSrc:
+            return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        case ImageLayout::Undefined:
+        default:
+            return VK_IMAGE_LAYOUT_UNDEFINED;
+    }
+}
+
+ImageLayout FromVkImageLayout(VkImageLayout layout) noexcept
+{
+    switch (layout) {
+        case VK_IMAGE_LAYOUT_GENERAL:
+            return ImageLayout::General;
+        case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+            return ImageLayout::ColorAttachmentOptimal;
+        case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+            return ImageLayout::DepthStencilAttachmentOptimal;
+        case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+            return ImageLayout::ShaderReadOnlyOptimal;
+        case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+            return ImageLayout::TransferSrcOptimal;
+        case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+            return ImageLayout::TransferDstOptimal;
+        case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+            return ImageLayout::PresentSrc;
+        default:
+            return ImageLayout::Undefined;
+    }
+}
+
 } // namespace gte
