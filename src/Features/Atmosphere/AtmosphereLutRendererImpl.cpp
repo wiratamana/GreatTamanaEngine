@@ -1,14 +1,14 @@
 ﻿#include "AtmosphereLutRendererImpl.h"
 
-#include "../../Features/Atmosphere/AtmosphereParameters.h"
-#include "../../Features/Atmosphere/AtmospherePassToggleLogic.h"
+#include "AtmosphereParameters.h"
+#include "AtmospherePassToggleLogic.h"
 #include "../../Core/PipelineDesc.h"
-#include "../RenderTarget.h"
-#include "../RenderGraph/CommandBuffer.h"
-#include "../RenderGraph/RenderGraph.h"
-#include "../RenderGraph/RenderFeatureScope.h"
-#include "../RenderGraph/RenderPassToggleRegistry.h"
-#include "../RenderGraph/RenderGraphPersistentResourceOwners.h"
+#include "../../Renderer/RenderTarget.h"
+#include "../../Renderer/RenderGraph/CommandBuffer.h"
+#include "../../Renderer/RenderGraph/RenderGraph.h"
+#include "../../Renderer/RenderGraph/RenderFeatureScope.h"
+#include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
+#include "../../Renderer/RenderGraph/RenderGraphPersistentResourceOwners.h"
 
 #include <cstdint>
 #include <cstring>

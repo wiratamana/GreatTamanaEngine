@@ -560,12 +560,16 @@ public:
 
     // A feature's own composited-output finalize step, run once per
     // registered name after the offscreen render graph has executed this
-    // frame, with the SAME VkCommandBuffer BuildFrame() already has in hand.
+    // frame, wrapping the SAME raw VkCommandBuffer BuildFrame() already has
+    // in hand into an engine-owned rg::CommandBuffer (built with a null
+    // DrawStats/default write-target/null event-sink - this finalize step
+    // is never attributed to any one render-graph pass) before the hook
+    // itself ever runs - see DispatchFinalizeForSamplingHook() (Core.cpp).
     // Returns the finalized RenderTexture* to report for `name` this frame,
     // or nullptr if there is nothing to report (e.g. that view was not
     // rendered at all). Must never throw - it runs inside the same try/catch
     // that already wraps the whole offscreen Execute() call.
-    using FinalizeForSamplingCallback = std::function<RenderTexture*(VkCommandBuffer cmd)>;
+    using FinalizeForSamplingCallback = std::function<RenderTexture*(rg::CommandBuffer& cmd)>;
 
     // Called exactly once per feature, from that feature's own constructor,
     // on the same thread that constructs Core (never a worker/network
@@ -643,10 +647,11 @@ private:
     // (below). Relocated verbatim from Application::FindViewData(), PHASE13.
     const RenderPassViewData* FindViewData(rg::RenderViewId view) const noexcept;
 
-    // Finds `name` in m_finalizeForSamplingHooks and invokes it with `cmd`;
-    // returns its result, or nullptr if no hook is registered under `name`.
-    // A hook callback must never throw - it runs inside the same try/catch
-    // that already wraps the whole offscreen Execute() call.
+    // Finds `name` in m_finalizeForSamplingHooks, wraps `cmd` into an
+    // engine-owned rg::CommandBuffer, and invokes the hook with that
+    // wrapper; returns its result, or nullptr if no hook is registered
+    // under `name`. A hook callback must never throw - it runs inside the
+    // same try/catch that already wraps the whole offscreen Execute() call.
     RenderTexture* DispatchFinalizeForSamplingHook(const char* name, VkCommandBuffer cmd);
 
     // Declared first - independent of every other member below, and not

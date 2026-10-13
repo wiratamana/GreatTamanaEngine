@@ -1,17 +1,16 @@
-#pragma once
+﻿#pragma once
 
 // Internal state and pipeline definitions for AtmosphereLutRenderer.
 
-#include "../../Features/Atmosphere/AtmosphereLutRenderer.h"
-#include "../../Features/Atmosphere/AtmosphereTypes.h"
-#include "../Compute/ComputeDescriptorSet.h"
-#include "../Compute/ComputePipeline.h"
-#include "../GraphicsHandleRegistry.h"
-#include "../RenderTexture.h"
-#include "../VolumeTexture.h"
-#include "../Buffer.h"
-#include "../Pipeline.h"
-#include <volk.h>
+#include "AtmosphereLutRenderer.h"
+#include "AtmosphereTypes.h"
+#include "../../Renderer/Compute/ComputeDescriptorSet.h"
+#include "../../Renderer/Compute/ComputePipeline.h"
+#include "../../Renderer/GraphicsHandleRegistry.h"
+#include "../../Renderer/RenderTexture.h"
+#include "../../Renderer/VolumeTexture.h"
+#include "../../Renderer/Buffer.h"
+#include "../../Renderer/Pipeline.h"
 
 #include <optional>
 #include <string>

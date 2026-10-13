@@ -1,5 +1,5 @@
-#include "AtmosphereLutRenderer.h"
-#include "../../Renderer/Internal/AtmosphereLutRendererImpl.h"
+﻿#include "AtmosphereLutRenderer.h"
+#include "AtmosphereLutRendererImpl.h"
 
 #include "AtmosphereParameters.h"
 #include "../../Game/Lighting/DirectionalLightResolver.h"

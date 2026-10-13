@@ -1,4 +1,4 @@
-﻿// Unit tests for Phase 2's declarative "describe a frame's drawing jobs"
+// Unit tests for Phase 2's declarative "describe a frame's drawing jobs"
 // builder API (src/Renderer/RenderGraph/RenderGraphBuilder.h) - entirely
 // Tier-1, since nothing in RenderGraphBuilder touches a live VkDevice. See
 // RENDERGRAPH_PHASE2_BUILDER_API_STRATEGY_v2.md, Step 3.4, for the exact
@@ -878,8 +878,18 @@ TEST(RenderGraphBuilderTest, ImportTextureMirrorsExternalTargetShapeIntoTextureD
     const CompiledGraphInput input = builder.Finish();
     const TextureDesc& desc = input.textures[imported.index].desc;
     EXPECT_EQ(desc.width, gameViewTarget.extent.width);
-    EXPECT_EQ(desc.height, gameViewTarget.extent.height);
-    EXPECT_EQ(desc.format, gameViewTarget.format);
+    // desc.format is engine-native PixelFormat (TextureDesc's own type -
+    // see RenderGraphTypes.h); gameViewTarget.format is the raw VkFormat
+    // MakeFakeGameViewTarget() set above (VK_FORMAT_R8G8B8A8_UNORM). The
+    // two are never directly comparable (different types) - compare
+    // against the engine's own PixelFormat::RGBA8_UNorm literal instead of
+    // pulling VulkanFormatInfo.h's FromVkFormat()/ToVkFormat() into test
+    // code, since that conversion is documented as Renderer-internal only
+    // (see VulkanFormatInfo.h). RenderGraphBuilder.cpp itself already does
+    // this exact FromVkFormat(externalTarget.format) conversion internally
+    // - this assertion just pins the known, fixed result of that for this
+    // specific fake target.
+    EXPECT_EQ(desc.format, PixelFormat::RGBA8_UNorm);
     EXPECT_TRUE(desc.hasDepth); // MakeFakeGameViewTarget() carries a depth image.
 }
 

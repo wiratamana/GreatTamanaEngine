@@ -1,4 +1,4 @@
-﻿// Unit tests for Phase 8's pure "flatten a compiled graph into something
+// Unit tests for Phase 8's pure "flatten a compiled graph into something
 // displayable" reshape (src/Renderer/RenderGraph/RenderGraphSnapshot.h). No
 // live VkDevice/Renderer/RenderGraph involved at all - every fixture below is
 // built through a real RenderGraphBuilder/RenderGraphCompiler::Compile()
@@ -273,7 +273,7 @@ TEST(RenderGraphSnapshotTest, ImportedAndTransientTextureResourcesReportCorrectK
 TEST(RenderGraphSnapshotTest, TransientBufferResourceIsNotReportedAsImported)
 {
     RenderGraphBuilder builder;
-    const BufferHandle scratchBuffer = builder.CreateBuffer("ScratchBuffer", BufferDesc{ 256, 0 });
+    const BufferHandle scratchBuffer = builder.CreateBuffer("ScratchBuffer", BufferDesc{ 256, BufferUsage::None });
     const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
 
     builder.AddPass(

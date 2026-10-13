@@ -1,4 +1,4 @@
-﻿// Defines FrameDebuggerCaptureContext::AddReplayPasses() - the concrete
+// Defines FrameDebuggerCaptureContext::AddReplayPasses() - the concrete
 // implementation of IFrameDebuggerCaptureRecorder::AddReplayPasses()
 // (src/Core/FrameDebuggerCaptureRecorder.h). Reached from gte_core-tier
 // Core::BuildFrame() only through a virtual call on a null-checked
@@ -56,7 +56,7 @@ const char* ReplayStepPassName(std::size_t index)
 std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::RenderGraphBuilder& builder,
     Game& game, Renderer& renderer, float aspectWidthOverHeight, std::size_t objectCount,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-    const std::function<void(VkCommandBuffer)>& recordBackgroundStep, RenderTexture& gameTarget,
+    const std::function<void(rg::CommandBuffer&)>& recordBackgroundStep, RenderTexture& gameTarget,
     rg::RenderPassToggleRegistry* toggleRegistry)
 {
     std::vector<rg::TextureHandle> destHandles;
@@ -139,9 +139,15 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
                 // O(N^2) duplicated entries.
                 game.Render(renderer, aspectWidthOverHeight, nullptr, /*frameDebuggerCapture=*/nullptr, maxDrawCount);
                 renderer.EndGraphPassRecording();
-                // The background is drawn on exactly one dedicated step.
+                // The background is drawn on exactly one dedicated step. Wrapped
+                // here (null DrawStats/default write-target/null event-sink,
+                // same as every other raw-VkCommandBuffer-to-rg::CommandBuffer
+                // boundary this replay path crosses) - never attributed to
+                // this step's own DrawStats, matching this step's pre-existing
+                // behavior exactly.
                 if (isBackgroundStep && recordBackgroundStep) {
-                    recordBackgroundStep(ctx.cmd);
+                    rg::CommandBuffer wrappedForBackground(ctx.cmd, &renderer, nullptr);
+                    recordBackgroundStep(wrappedForBackground);
                 }
             });
 

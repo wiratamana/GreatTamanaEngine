@@ -149,18 +149,18 @@ void AtmosphereFeature::RegisterPasses()
 
             if (isGameView) {
                 // Core.cpp/FrameDebuggerCapture.cpp's replay/debug side
-                // channel still travels as the engine-wide
-                // std::function<void(VkCommandBuffer)> shape - wrapped once,
-                // here, at this publish boundary only.
-                const std::function<void(VkCommandBuffer)> recordSkyBackgroundForBlackboard =
-                    [this, recordSkyBackground](VkCommandBuffer cmd) {
-                        rg::CommandBuffer wrapped(cmd, &m_core.GetRenderer(), nullptr);
-                        recordSkyBackground(wrapped);
-                    };
-                frame.blackboard.Publish<std::function<void(VkCommandBuffer)>>(
-                    kGameSkyBackgroundCallbackKey, recordSkyBackgroundForBlackboard);
-                frame.blackboard.Publish<std::function<void(VkCommandBuffer)>>(
-                    kViewBackgroundReplayCallbackKey, recordSkyBackgroundForBlackboard);
+                // channel travels as the SAME engine-owned
+                // std::function<void(rg::CommandBuffer&)> shape
+                // `recordSkyBackground` already is - published directly, no
+                // extra per-publish wrapping needed (Core::
+                // DispatchFinalizeForSamplingHook()/FrameDebuggerCaptureContext::
+                // AddReplayPasses() each wrap their own raw VkCommandBuffer
+                // into an rg::CommandBuffer themselves, right at the one spot
+                // that actually owns it).
+                frame.blackboard.Publish<std::function<void(rg::CommandBuffer&)>>(
+                    kGameSkyBackgroundCallbackKey, recordSkyBackground);
+                frame.blackboard.Publish<std::function<void(rg::CommandBuffer&)>>(
+                    kViewBackgroundReplayCallbackKey, recordSkyBackground);
             }
 
             if (!recordSkyBackground) {
@@ -252,15 +252,16 @@ void AtmosphereFeature::RegisterPasses()
 
     // AtmosphereComposite's own finalize-for-sampling step, one hook per view
     // output name. FreshCompositedOutput() reports nullptr on a stale/
-    // disabled frame instead of replaying a leftover cached texture.
-    m_core.RegisterFinalizeForSamplingHook("GameViewComposited", [this](VkCommandBuffer cmd) -> RenderTexture* {
-        rg::CommandBuffer wrapped(cmd, &m_core.GetRenderer(), nullptr);
-        m_renderer.FinalizeAerialPerspectiveCompositeForSampling(wrapped, "GameViewComposited");
+    // disabled frame instead of replaying a leftover cached texture. `cmd`
+    // arrives already wrapped as an engine-owned rg::CommandBuffer - Core::
+    // DispatchFinalizeForSamplingHook() wraps its own raw VkCommandBuffer
+    // once, right there, before calling this hook.
+    m_core.RegisterFinalizeForSamplingHook("GameViewComposited", [this](rg::CommandBuffer& cmd) -> RenderTexture* {
+        m_renderer.FinalizeAerialPerspectiveCompositeForSampling(cmd, "GameViewComposited");
         return FreshCompositedOutput("GameViewComposited");
     });
-    m_core.RegisterFinalizeForSamplingHook("SceneViewComposited", [this](VkCommandBuffer cmd) -> RenderTexture* {
-        rg::CommandBuffer wrapped(cmd, &m_core.GetRenderer(), nullptr);
-        m_renderer.FinalizeAerialPerspectiveCompositeForSampling(wrapped, "SceneViewComposited");
+    m_core.RegisterFinalizeForSamplingHook("SceneViewComposited", [this](rg::CommandBuffer& cmd) -> RenderTexture* {
+        m_renderer.FinalizeAerialPerspectiveCompositeForSampling(cmd, "SceneViewComposited");
         return FreshCompositedOutput("SceneViewComposited");
     });
 }

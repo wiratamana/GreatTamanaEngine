@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // The single home for every atmosphere LUT compute pass (Transmittance/
 // Multi-Scattering/Sky-View/Aerial-Perspective) plus the Sky Background
@@ -6,7 +6,7 @@
 // the per-frame call order a caller must follow.
 //
 // Public, Vulkan-free: every Vk*-bearing field/call lives behind a pimpl
-// boundary in src/Renderer/Internal/AtmosphereLutRendererImpl.h/.cpp -
+// boundary in src/Features/Atmosphere/AtmosphereLutRendererImpl.h/.cpp -
 // mirrors Core/Plugins/RenderFeatureCompositor.h's own shape. Only
 // src/Renderer may know this engine's graphics backend is Vulkan.
 

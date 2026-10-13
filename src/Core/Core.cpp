@@ -1,4 +1,4 @@
-﻿#include "Core.h"
+#include "Core.h"
 
 // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8 - the ONE gte_core
 // .cpp file allowed to #include the real src/Editor/EditorLayer.h header
@@ -792,12 +792,17 @@ bool Core::RegisterViewContentPassName(const char* name)
 
 // Linear scan (realistic hook count is 1-3, mirrors FindViewData()'s own
 // precedent) - returns nullptr both when `name` is not registered and when
-// the registered callback itself returns nullptr.
+// the registered callback itself returns nullptr. Wraps the raw `cmd`
+// into an engine-owned rg::CommandBuffer ONCE here (null DrawStats/default
+// write-target/null event-sink - this finalize step is never attributed to
+// any one render-graph pass) so every registered hook deals exclusively in
+// rg::CommandBuffer, never the raw Vulkan handle itself.
 RenderTexture* Core::DispatchFinalizeForSamplingHook(const char* name, VkCommandBuffer cmd)
 {
     for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
         if (entry.name == name) {
-            entry.lastResult = entry.callback ? entry.callback(cmd) : nullptr;
+            rg::CommandBuffer wrapped(cmd, &m_renderer, nullptr);
+            entry.lastResult = entry.callback ? entry.callback(wrapped) : nullptr;
             return entry.lastResult;
         }
     }
@@ -1729,8 +1734,8 @@ void Core::BuildFrame()
 
                     m_offscreenRenderPipeline.DeclareInto(b, frame);
 
-                    const std::optional<std::function<void(VkCommandBuffer)>> viewBackgroundCallbackForReplay =
-                        m_offscreenBlackboardThisFrame.Fetch<std::function<void(VkCommandBuffer)>>(
+                    const std::optional<std::function<void(rg::CommandBuffer&)>> viewBackgroundCallbackForReplay =
+                        m_offscreenBlackboardThisFrame.Fetch<std::function<void(rg::CommandBuffer&)>>(
                             kViewBackgroundReplayCallbackKey);
 #ifndef NDEBUG
                     m_offscreenBlackboardThisFrame.ReportUnusedPublishesIfAny();
@@ -1751,8 +1756,8 @@ void Core::BuildFrame()
                         const std::vector<rg::BufferHandle> gpuSkinningBuffersForReplay =
                             m_offscreenBlackboardThisFrame.Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey)
                                 .value_or(std::vector<rg::BufferHandle>{});
-                        const std::function<void(VkCommandBuffer)> recordViewBackground =
-                            viewBackgroundCallbackForReplay.value_or(std::function<void(VkCommandBuffer)>{});
+                        const std::function<void(rg::CommandBuffer&)> recordViewBackground =
+                            viewBackgroundCallbackForReplay.value_or(std::function<void(rg::CommandBuffer&)>{});
                         const std::size_t objectCount = m_game.CountGameViewDrawCommandsThisFrame();
                         const std::vector<rg::TextureHandle> replayStepHandles = frameDebuggerCapture->AddReplayPasses(
                             b, m_game, m_renderer, gameAspectForReplay, objectCount, gpuSkinningBuffersForReplay,
@@ -1834,12 +1839,16 @@ void Core::BuildFrame()
                 }
             }
             // Generic sweep: any other registered finalize-for-sampling hook
-            // (today: none) runs unconditionally, once per frame.
+            // (today: none) runs unconditionally, once per frame. Wrapped
+            // into an engine-owned rg::CommandBuffer here too - same null
+            // DrawStats/default write-target/null event-sink as
+            // DispatchFinalizeForSamplingHook() above.
             for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
                 if (entry.name == "GameViewComposited" || entry.name == "SceneViewComposited") {
                     continue;
                 }
-                entry.lastResult = entry.callback(offscreenCmd);
+                rg::CommandBuffer wrappedForGenericHook(offscreenCmd, &m_renderer, nullptr);
+                entry.lastResult = entry.callback(wrappedForGenericHook);
             }
             m_renderer.EndOffscreenRenderGraphRecording();
 
