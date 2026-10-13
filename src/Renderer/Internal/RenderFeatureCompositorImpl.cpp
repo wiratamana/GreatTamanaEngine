@@ -1,4 +1,4 @@
-#include "RenderFeatureCompositorImpl.h"
+﻿#include "RenderFeatureCompositorImpl.h"
 
 #include "../../Core/Core.h"
 #include "../../Core/Logging.h"
@@ -699,7 +699,7 @@ void RenderFeatureCompositor::Impl::EnsureTextureSized(
     const int height = extent.height > 0 ? static_cast<int>(extent.height) : 1;
 
     if (!texture.has_value()) {
-        texture.emplace(renderer.CreateRenderTexture(width, height, VK_FORMAT_R8G8B8A8_UNORM, internedName,
+        texture.emplace(renderer.CreateRenderTexture(width, height, PixelFormat::RGBA8_UNorm, internedName,
             /*depthDebugName=*/nullptr, /*allowStorageImageAccess=*/true));
         return;
     }

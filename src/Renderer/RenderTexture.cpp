@@ -8,14 +8,15 @@
 namespace gte {
 
 RenderTexture::RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
-    int width, int height, VkFormat format, VkFormat depthFormat, const char* debugName, const char* depthDebugName,
-    bool allowStorageImageAccess, bool allowDepthSampledAccess, bool createDepthCompanion, bool createColorImage)
+    int width, int height, PixelFormat format, PixelFormat depthFormat, const char* debugName,
+    const char* depthDebugName, bool allowStorageImageAccess, bool allowDepthSampledAccess, bool createDepthCompanion,
+    bool createColorImage)
     : m_allocator(allocator)
     , m_tracker(std::move(tracker))
     , m_debugName(debugName)
     , m_depthDebugName(depthDebugName)
     , m_device(device)
-    , m_format(format)
+    , m_format(ToVkFormat(format))
     , m_depthFormat(depthFormat)
     , m_allowStorageImageAccess(allowStorageImageAccess)
     , m_allowDepthSampledAccess(allowDepthSampledAccess)
@@ -101,7 +102,7 @@ RenderTarget RenderTexture::Target() const noexcept
     if (m_depthBuffer) {
         target.depthImage = m_depthBuffer->Image();
         target.depthImageView = m_depthBuffer->View();
-        target.depthFormat = m_depthBuffer->Format();
+        target.depthFormat = m_depthBuffer->NativeFormat();
         target.depthHasStencil = m_depthBuffer->HasStencilComponent();
     }
     return target;

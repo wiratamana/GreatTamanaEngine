@@ -19,10 +19,10 @@ RenderTexture& RenderGraphResourcePool::AcquireTexture(const TextureDesc& desc, 
     }
 
     // No matching, unclaimed entry - create a fresh one and append it.
-    // desc.format == VK_FORMAT_UNDEFINED is passed straight through
+    // desc.format == PixelFormat::Undefined is passed straight through
     // (rather than pre-resolved here) - Renderer::CreateRenderTexture()
-    // itself already treats VK_FORMAT_UNDEFINED as "match Renderer::
-    // ColorFormat() exactly" (see AGENTS.md, "Render Target Format
+    // itself already treats PixelFormat::Undefined as "match Renderer::
+    // ColorPixelFormat() exactly" (see AGENTS.md, "Render Target Format
     // Matching"), so every "default format" request still compares equal
     // to every other one via TextureDesc::operator==, exactly as intended.
     // better-render-pass-1 campaign, PHASE8
@@ -71,7 +71,7 @@ TextureArray2D& RenderGraphResourcePool::AcquireTextureArray(const TextureArrayD
         }
     }
 
-    // desc.format == VK_FORMAT_UNDEFINED is passed straight through - see
+    // desc.format == PixelFormat::Undefined is passed straight through - see
     // AcquireTexture()'s own identical comment for why this is correct
     // (Renderer::CreateTextureArray() itself resolves it per desc.hasDepth -
     // NOT GpuResourceFactory::CreateTextureArray(), which has no

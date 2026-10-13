@@ -122,7 +122,7 @@ void FramePresenter::CreateDepthBuffers()
     for (std::uint32_t i = 0; i < m_swapchain.ImageCount(); ++i) {
         const char* debugName = (i < kNamedCount) ? kSwapchainDepthNames[i] : nullptr;
         m_depthBuffers.emplace_back(m_allocator, m_memoryTracker, m_device, static_cast<int>(extent.width),
-            static_cast<int>(extent.height), m_depthFormat, debugName);
+            static_cast<int>(extent.height), FromVkFormat(m_depthFormat), debugName);
     }
 }
 
@@ -393,7 +393,7 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
         const DepthBuffer& depthBuffer = m_depthBuffers[imageIndex];
         target.depthImage = depthBuffer.Image();
         target.depthImageView = depthBuffer.View();
-        target.depthFormat = depthBuffer.Format();
+        target.depthFormat = depthBuffer.NativeFormat();
         target.depthHasStencil = depthBuffer.HasStencilComponent();
     }
 

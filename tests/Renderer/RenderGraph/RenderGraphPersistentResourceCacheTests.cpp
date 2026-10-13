@@ -56,7 +56,7 @@ TextureDesc MakeColorDesc(std::uint32_t width = 64, std::uint32_t height = 64)
     TextureDesc desc;
     desc.width = width;
     desc.height = height;
-    desc.format = VK_FORMAT_R8G8B8A8_UNORM;
+    desc.format = PixelFormat::RGBA8_UNorm;
     desc.hasDepth = false;
     return desc;
 }
@@ -940,7 +940,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ReRequestingAnExistingEntryWithADif
     });
 
     TextureDesc differentFormatDesc = MakeColorDesc(32, 32);
-    differentFormatDesc.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    differentFormatDesc.format = PixelFormat::RGBA16_Float;
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> refusedSync;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {

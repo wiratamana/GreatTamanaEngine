@@ -1,4 +1,4 @@
-#include "SceneServicesDescriptorSet.h"
+﻿#include "SceneServicesDescriptorSet.h"
 
 #include "Renderer.h"
 #include "Vulkan/DescriptorSetLayoutBuilder.h"
@@ -250,7 +250,7 @@ SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
     // branch is needed in practice (confirmed live by this phase's own
     // integration test actually constructing this class against a real
     // device).
-    , m_dummyImage3DTexture(renderer.CreateVolumeTexture(1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, "SceneServiceImage3DDummy"))
+    , m_dummyImage3DTexture(renderer.CreateVolumeTexture(1, 1, 1, PixelFormat::RGBA8_UNorm, "SceneServiceImage3DDummy"))
     // Binding 8's own zero-filled dummy fallback - see this member's own
     // doc comment in the header for why Rewrite()'s per-slot loop cannot
     // cover it.

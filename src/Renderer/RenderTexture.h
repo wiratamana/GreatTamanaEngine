@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../Core/PixelFormat.h"
 #include "DepthBuffer.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
@@ -113,9 +114,14 @@ public:
     // consumer is RenderViewRegistry (a later phase of that same campaign)
     // for a genuinely colorless shadow-map-style view; every other caller
     // keeps getting a color image, byte-for-byte unchanged.
+    // `format`/`depthFormat` are this engine's own PixelFormat (never a raw
+    // VkFormat) - translated to a real VkFormat internally, right here in
+    // this class (see RenderTexture.cpp's constructor body/Create()) -
+    // callers never need to name a VkFormat at all. See
+    // NativeFormat()/Format() below.
     RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
-        int height, VkFormat format = VK_FORMAT_B8G8R8A8_UNORM,
-        VkFormat depthFormat = VK_FORMAT_D32_SFLOAT, const char* debugName = nullptr,
+        int height, PixelFormat format = PixelFormat::BGRA8_UNorm,
+        PixelFormat depthFormat = PixelFormat::D32_Float, const char* debugName = nullptr,
         const char* depthDebugName = nullptr, bool allowStorageImageAccess = false,
         bool allowDepthSampledAccess = false, bool createDepthCompanion = true,
         bool createColorImage = true);
@@ -156,7 +162,13 @@ public:
     // Engine-owned Extent2D, never a raw VkExtent2D - this is the one place
     // RenderTexture's own real VkExtent2D converts outward (FromVkExtent2D()).
     Extent2D Extent() const noexcept { return FromVkExtent2D(m_extent); }
-    VkFormat Format() const noexcept { return m_format; }
+    // Engine-native format - what every caller OUTSIDE this Renderer-tree's
+    // own deep Vulkan plumbing should use.
+    PixelFormat Format() const noexcept { return FromVkFormat(m_format); }
+    // Renderer-tree-internal escape hatch ONLY (Target(), Renderer's own
+    // capture path, ...) - the real VkFormat Vulkan itself was built with.
+    // Never call this from outside src/Renderer.
+    VkFormat NativeFormat() const noexcept { return m_format; }
 
     // Handle into the GpuMemoryTracker this RenderTexture's COLOR image is
     // registered with - valid until the next Resize() (see above) or
@@ -205,7 +217,11 @@ private:
 
     VkDevice m_device = VK_NULL_HANDLE;
     VkFormat m_format = VK_FORMAT_B8G8R8A8_UNORM;
-    VkFormat m_depthFormat = VK_FORMAT_D32_SFLOAT;
+    // Only ever forwarded straight into this RenderTexture's own companion
+    // DepthBuffer's constructor (see Create()) - never read as a raw
+    // VkFormat anywhere in this class, so it stays PixelFormat, never
+    // translated here at all.
+    PixelFormat m_depthFormat = PixelFormat::D32_Float;
     bool m_allowStorageImageAccess = false;
     bool m_allowDepthSampledAccess = false;
     // editor-core-separation-27 campaign, BIG STEP 3 of 4 (Persistent

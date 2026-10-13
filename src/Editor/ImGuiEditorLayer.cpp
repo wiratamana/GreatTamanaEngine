@@ -1,4 +1,4 @@
-#include "EditorLayer.h"
+﻿#include "EditorLayer.h"
 
 #include <cassert>
 
@@ -134,9 +134,9 @@ namespace {
 class ImGuiEditorLayer final : public IEditorLayer {
 public:
     ImGuiEditorLayer(Window& window, Renderer& renderer)
-        : m_gameView(renderer.CreateRenderTexture(window.Width(), window.Height(), VK_FORMAT_UNDEFINED, "GameView",
+        : m_gameView(renderer.CreateRenderTexture(window.Width(), window.Height(), PixelFormat::Undefined, "GameView",
               "GameViewDepth", /*allowStorageImageAccess=*/true, /*allowDepthSampledAccess=*/true))
-        , m_sceneView(renderer.CreateRenderTexture(window.Width(), window.Height(), VK_FORMAT_UNDEFINED, "SceneView",
+        , m_sceneView(renderer.CreateRenderTexture(window.Width(), window.Height(), PixelFormat::Undefined, "SceneView",
               "SceneViewDepth", /*allowStorageImageAccess=*/true, /*allowDepthSampledAccess=*/true))
     {
         // See EditorContext::desiredExtent/desiredSceneExtent for why both

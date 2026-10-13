@@ -1,6 +1,7 @@
 #include "GpuResourceFactory.h"
 
 #include "SceneServicesDescriptorSet.h" // Block 4 - gte::kSceneServiceSlotCount, for this file's own static_asserts.
+#include "VulkanFormatInfo.h" // ToVkFormat() - the one place this file translates PixelFormat->VkFormat for its own pre-construction capability checks.
 #include "Vulkan/DescriptorSetLayoutBuilder.h"
 #include "Vulkan/FormatCapabilities.h"
 #include "Vulkan/VulkanDevice.h"
@@ -190,17 +191,25 @@ void GpuResourceFactory::Destroy() noexcept
     }
 }
 
-RenderTexture GpuResourceFactory::CreateRenderTexture(int width, int height, VkFormat format, const char* debugName,
+RenderTexture GpuResourceFactory::CreateRenderTexture(int width, int height, PixelFormat format, const char* debugName,
     const char* depthDebugName, bool allowStorageImageAccess, bool allowDepthSampledAccess,
     bool createDepthCompanion, bool createColorImage) const
 {
-    if (allowStorageImageAccess && !SupportsStorageImageUsage(m_physicalDevice, format)) {
+    // Pre-construction capability check needs the real VkFormat - translate
+    // once, here, purely for this check (RenderTexture's own constructor
+    // independently re-translates `format` itself for the real image it
+    // creates - see RenderTexture.cpp). m_depthFormat is this factory's own
+    // already-VkFormat depth format (resolved once from Renderer::DepthFormat()
+    // at construction) - translated back to PixelFormat here since
+    // RenderTexture's constructor now only ever accepts PixelFormat.
+    if (allowStorageImageAccess && !SupportsStorageImageUsage(m_physicalDevice, ToVkFormat(format))) {
         throw std::runtime_error(
             "GpuResourceFactory::CreateRenderTexture: requested allowStorageImageAccess = true, but this "
             "physical device does not support VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for the requested format.");
     }
-    return RenderTexture(m_allocator, m_memoryTracker, m_device, width, height, format, m_depthFormat, debugName,
-        depthDebugName, allowStorageImageAccess, allowDepthSampledAccess, createDepthCompanion, createColorImage);
+    return RenderTexture(m_allocator, m_memoryTracker, m_device, width, height, format, FromVkFormat(m_depthFormat),
+        debugName, depthDebugName, allowStorageImageAccess, allowDepthSampledAccess, createDepthCompanion,
+        createColorImage);
 }
 
 Buffer GpuResourceFactory::CreateBuffer(
@@ -472,9 +481,9 @@ Texture2D GpuResourceFactory::CreateTexture2D(
 }
 
 VolumeTexture GpuResourceFactory::CreateVolumeTexture(
-    int width, int height, int depth, VkFormat format, const char* debugName) const
+    int width, int height, int depth, PixelFormat format, const char* debugName) const
 {
-    if (!SupportsStorageImageUsage(m_physicalDevice, format)) {
+    if (!SupportsStorageImageUsage(m_physicalDevice, ToVkFormat(format))) {
         throw std::runtime_error(
             "GpuResourceFactory::CreateVolumeTexture: this physical device does not support "
             "VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for the requested format.");
@@ -482,16 +491,16 @@ VolumeTexture GpuResourceFactory::CreateVolumeTexture(
     return VolumeTexture(m_allocator, m_memoryTracker, m_device, width, height, depth, format, debugName);
 }
 
-TextureArray2D GpuResourceFactory::CreateTextureArray(int width, int height, int arrayLayers, VkFormat format,
+TextureArray2D GpuResourceFactory::CreateTextureArray(int width, int height, int arrayLayers, PixelFormat format,
     bool hasDepth, bool isCubemap, bool allowStorageImageAccess, const char* debugName) const
 {
     // Caller-trust boundary: `format` must already be a concrete, resolved
-    // VkFormat by the time it reaches this method - VK_FORMAT_UNDEFINED
+    // PixelFormat by the time it reaches this method - PixelFormat::Undefined
     // resolution happens one layer up, in Renderer::CreateTextureArray()
     // (see this method's own declaration comment in GpuResourceFactory.h).
-    assert(format != VK_FORMAT_UNDEFINED &&
+    assert(format != PixelFormat::Undefined &&
         "GpuResourceFactory::CreateTextureArray requires an already-resolved concrete format - "
-        "VK_FORMAT_UNDEFINED resolution happens one layer up, in Renderer::CreateTextureArray()");
+        "PixelFormat::Undefined resolution happens one layer up, in Renderer::CreateTextureArray()");
 
     // Hard Vulkan API preconditions for VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
     // - a real, unconditional throw, not a caller-trust boundary (see this
@@ -509,7 +518,7 @@ TextureArray2D GpuResourceFactory::CreateTextureArray(int width, int height, int
 
     // Only ever checked when actually requested AND hasDepth == false -
     // never for the depth case (see this method's own declaration comment).
-    if (allowStorageImageAccess && !hasDepth && !SupportsStorageImageUsage(m_physicalDevice, format)) {
+    if (allowStorageImageAccess && !hasDepth && !SupportsStorageImageUsage(m_physicalDevice, ToVkFormat(format))) {
         throw std::runtime_error(
             "GpuResourceFactory::CreateTextureArray: requested allowStorageImageAccess = true, but this "
             "physical device does not support VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for the requested format.");

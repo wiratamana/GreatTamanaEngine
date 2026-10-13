@@ -123,7 +123,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddTransmittanceLutPass(
     rg::TextureDesc desc{};
     desc.width = static_cast<std::uint32_t>(kTransmittanceLutWidth);
     desc.height = static_cast<std::uint32_t>(kTransmittanceLutHeight);
-    desc.format = VK_FORMAT_R8G8B8A8_UNORM;
+    desc.format = PixelFormat::RGBA8_UNorm;
     desc.usage = rg::TextureUsage::Storage;
     const rg::TextureHandle outputHandle =
         builder.GetOrCreatePersistentTexture(transmittanceLutToken, "", "AtmosphereTransmittanceLut", desc);
@@ -182,7 +182,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddMultiScatteringLutPass(rg::Ren
     rg::TextureDesc desc{};
     desc.width = static_cast<std::uint32_t>(kMultiScatteringLutWidth);
     desc.height = static_cast<std::uint32_t>(kMultiScatteringLutHeight);
-    desc.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    desc.format = PixelFormat::RGBA16_Float;
     desc.usage = rg::TextureUsage::Storage;
     const rg::TextureHandle outputHandle = builder.GetOrCreatePersistentTexture(
         multiScatteringLutToken, rg::kPersistentOwnerAtmosphere, "MultiScatteringLut", desc);
@@ -262,7 +262,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddSkyViewLutPass(rg::RenderGraph
     rg::TextureDesc desc{};
     desc.width = static_cast<std::uint32_t>(kSkyViewLutWidth);
     desc.height = static_cast<std::uint32_t>(kSkyViewLutHeight);
-    desc.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    desc.format = PixelFormat::RGBA16_Float;
     desc.usage = rg::TextureUsage::Storage;
     const rg::TextureHandle outputHandle = builder.GetOrCreatePersistentTexture(
         viewState.token, rg::kPersistentOwnerAtmosphere, outputTextureName, desc);
@@ -321,7 +321,7 @@ AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveVolumeViewInitialized(Render
 
     // Persistent 3D volume texture owned per view.
     state.output.emplace(renderer.CreateVolumeTexture(kAerialPerspectiveVolumeWidth, kAerialPerspectiveVolumeHeight,
-        kAerialPerspectiveVolumeDepth, VK_FORMAT_R16G16B16A16_SFLOAT, outputVolumeName));
+        kAerialPerspectiveVolumeDepth, PixelFormat::RGBA16_Float, outputVolumeName));
 
     const auto insertedPair = aerialPerspectiveVolumeViewStates.emplace(outputVolumeName, std::move(state));
     return insertedPair.first->second;
@@ -406,7 +406,7 @@ AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveCompositeViewInitialized(
     // Manually owned texture for editor inspection and display output.
     const int width = extent.width > 0 ? static_cast<int>(extent.width) : 1;
     const int height = extent.height > 0 ? static_cast<int>(extent.height) : 1;
-    state.output.emplace(renderer.CreateRenderTexture(width, height, VK_FORMAT_R8G8B8A8_UNORM, outputTextureName,
+    state.output.emplace(renderer.CreateRenderTexture(width, height, PixelFormat::RGBA8_UNorm, outputTextureName,
         /*depthDebugName=*/nullptr, /*allowStorageImageAccess=*/true));
 
     const auto insertedPair = aerialPerspectiveCompositeViewStates.emplace(outputTextureName, std::move(state));

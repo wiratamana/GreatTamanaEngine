@@ -1,4 +1,4 @@
-#include "ShadowMaskRenderer.h"
+﻿#include "ShadowMaskRenderer.h"
 
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
@@ -46,7 +46,7 @@ ShadowMaskRenderer::ViewState& ShadowMaskRenderer::EnsureViewState(
     const int width = extent.width > 0 ? static_cast<int>(extent.width) : 1;
     const int height = extent.height > 0 ? static_cast<int>(extent.height) : 1;
     // r8, single channel, 0 = lit, 1 = shadowed.
-    state.output.emplace(renderer.CreateRenderTexture(width, height, VK_FORMAT_R8_UNORM, outputName,
+    state.output.emplace(renderer.CreateRenderTexture(width, height, PixelFormat::R8_UNorm, outputName,
         /*depthDebugName=*/nullptr, /*allowStorageImageAccess=*/true, /*allowDepthSampledAccess=*/false,
         /*createDepthCompanion=*/false, /*createColorImage=*/true));
 

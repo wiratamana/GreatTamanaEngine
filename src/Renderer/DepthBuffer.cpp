@@ -6,12 +6,12 @@
 namespace gte {
 
 DepthBuffer::DepthBuffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
-    int width, int height, VkFormat format, const char* debugName, bool allowSampledAccess)
+    int width, int height, PixelFormat format, const char* debugName, bool allowSampledAccess)
     : m_allocator(allocator)
     , m_tracker(std::move(tracker))
     , m_debugName(debugName)
     , m_device(device)
-    , m_format(format)
+    , m_format(ToVkFormat(format))
     , m_allowSampledAccess(allowSampledAccess)
 {
     Create(width, height);

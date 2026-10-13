@@ -243,18 +243,19 @@ PixelFormat Renderer::DepthPixelFormat() const noexcept
     return FromVkFormat(DepthFormat());
 }
 
-RenderTexture Renderer::CreateRenderTexture(int width, int height, VkFormat format, const char* debugName,
+RenderTexture Renderer::CreateRenderTexture(int width, int height, PixelFormat format, const char* debugName,
     const char* depthDebugName, bool allowStorageImageAccess, bool allowDepthSampledAccess,
     bool createDepthCompanion, bool createColorImage) const
 {
-    // VK_FORMAT_UNDEFINED (the default - see Renderer.h) means "match
-    // ColorFormat() exactly", not "let Vulkan pick" - resolved here (the one
-    // place that knows both ColorFormat() and the resource factory) rather
-    // than baking a hardcoded literal into the default argument, so this
-    // always tracks whatever the swapchain actually negotiated at runtime
-    // (see VulkanSwapchain.cpp's ChooseSurfaceFormat), even if that differs
-    // across GPUs/drivers. See AGENTS.md ("Render Target Format Matching").
-    const VkFormat resolvedFormat = (format == VK_FORMAT_UNDEFINED) ? ColorFormat() : format;
+    // PixelFormat::Undefined (the default - see Renderer.h) means "match
+    // ColorPixelFormat() exactly", not "let Vulkan pick" - resolved here
+    // (the one place that knows both ColorPixelFormat() and the resource
+    // factory) rather than baking a hardcoded literal into the default
+    // argument, so this always tracks whatever the swapchain actually
+    // negotiated at runtime (see VulkanSwapchain.cpp's ChooseSurfaceFormat),
+    // even if that differs across GPUs/drivers. See AGENTS.md ("Render
+    // Target Format Matching").
+    const PixelFormat resolvedFormat = (format == PixelFormat::Undefined) ? ColorPixelFormat() : format;
     return m_resources.CreateRenderTexture(width, height, resolvedFormat, debugName, depthDebugName,
         allowStorageImageAccess, allowDepthSampledAccess, createDepthCompanion, createColorImage);
 }
@@ -311,7 +312,7 @@ Renderer::CapturedRawPixels Renderer::CaptureRenderTexturePixels(RenderTexture& 
 {
     const rg::ResourceState shaderReadState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
     return CaptureImagePixels(
-        texture.Image(), VK_IMAGE_ASPECT_COLOR_BIT, texture.Format(), texture.Extent(), shaderReadState);
+        texture.Image(), VK_IMAGE_ASPECT_COLOR_BIT, texture.NativeFormat(), texture.Extent(), shaderReadState);
 }
 
 void Renderer::WaitForGpuIdle() const
@@ -632,7 +633,7 @@ MaterialTexture Renderer::CreateMaterialTexture2D(
 }
 
 VolumeTexture Renderer::CreateVolumeTexture(
-    int width, int height, int depth, VkFormat format, const char* debugName) const
+    int width, int height, int depth, PixelFormat format, const char* debugName) const
 {
     return m_resources.CreateVolumeTexture(width, height, depth, format, debugName);
 }
@@ -640,18 +641,18 @@ VolumeTexture Renderer::CreateVolumeTexture(
 // better-render-pass-3 campaign, BLOCK5 - see this method's own declaration
 // (Renderer.h) for the full reasoning on why this is NOT a trivial one-line
 // forward like CreateVolumeTexture() immediately above.
-TextureArray2D Renderer::CreateTextureArray(int width, int height, int arrayLayers, VkFormat format, bool hasDepth,
+TextureArray2D Renderer::CreateTextureArray(int width, int height, int arrayLayers, PixelFormat format, bool hasDepth,
     bool isCubemap, bool allowStorageImageAccess, const char* debugName) const
 {
-    // VK_FORMAT_UNDEFINED resolves per hasDepth - mirrors CreateRenderTexture()'s
+    // PixelFormat::Undefined resolves per hasDepth - mirrors CreateRenderTexture()'s
     // own resolution line but branches by hasDepth instead of always resolving
-    // to ColorFormat(). This resolution MUST happen here, in Renderer, never
+    // to ColorPixelFormat(). This resolution MUST happen here, in Renderer, never
     // inside GpuResourceFactory::CreateTextureArray() - that class has no
     // ColorFormat() access and no color-format field of its own (confirmed:
     // GpuResourceFactory::CreateRenderTexture() does zero format resolution of
     // its own).
-    const VkFormat resolvedFormat = (format == VK_FORMAT_UNDEFINED)
-        ? (hasDepth ? DepthFormat() : ColorFormat())
+    const PixelFormat resolvedFormat = (format == PixelFormat::Undefined)
+        ? (hasDepth ? DepthPixelFormat() : ColorPixelFormat())
         : format;
     return m_resources.CreateTextureArray(
         width, height, arrayLayers, resolvedFormat, hasDepth, isCubemap, allowStorageImageAccess, debugName);
@@ -811,7 +812,7 @@ CaptureResult Renderer::CaptureRenderTarget(const RenderTexture& target) const
 {
     const rg::ResourceState shaderReadState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
     const CapturedRawPixels raw =
-        CaptureImagePixels(target.Image(), VK_IMAGE_ASPECT_COLOR_BIT, target.Format(), target.Extent(), shaderReadState);
+        CaptureImagePixels(target.Image(), VK_IMAGE_ASPECT_COLOR_BIT, target.NativeFormat(), target.Extent(), shaderReadState);
 
     CaptureResult result;
     result.extent = Extent2D{ static_cast<std::uint32_t>(raw.width), static_cast<std::uint32_t>(raw.height) };

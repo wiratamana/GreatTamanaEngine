@@ -1,4 +1,4 @@
-// Unit tests for Phase 2's declarative "describe a frame's drawing jobs"
+﻿// Unit tests for Phase 2's declarative "describe a frame's drawing jobs"
 // builder API (src/Renderer/RenderGraph/RenderGraphBuilder.h) - entirely
 // Tier-1, since nothing in RenderGraphBuilder touches a live VkDevice. See
 // RENDERGRAPH_PHASE2_BUILDER_API_STRATEGY_v2.md, Step 3.4, for the exact
@@ -53,7 +53,7 @@ RenderTarget MakeFakeGameViewTarget()
 TEST(RenderGraphBuilderTest, CreateTextureMintsDistinctHandlesEvenWithIdenticalDesc)
 {
     RenderGraphBuilder builder;
-    const TextureDesc desc{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
+    const TextureDesc desc{ 1920, 1080, PixelFormat::RGBA8_UNorm, true };
 
     const TextureHandle a = builder.CreateTexture("First", desc);
     const TextureHandle b = builder.CreateTexture("Second", desc);
@@ -74,7 +74,7 @@ TEST(RenderGraphBuilderTest, CreateTextureArrayMintsDistinctHandlesEvenWithIdent
     desc.width = 2048;
     desc.height = 2048;
     desc.arrayLayers = 4;
-    desc.format = VK_FORMAT_D32_SFLOAT;
+    desc.format = PixelFormat::D32_Float;
     desc.hasDepth = true;
 
     const TextureArrayHandle a = builder.CreateTextureArray("CascadesA", desc);
@@ -179,7 +179,7 @@ TEST(RenderGraphBuilderTest, CreateBufferMintsDistinctHandlesEvenWithIdenticalDe
 TEST(RenderGraphBuilderTest, DifferentNamesSameDescStillCompareEqualDescs)
 {
     RenderGraphBuilder builder;
-    const TextureDesc desc{ 800, 600, VK_FORMAT_R8G8B8A8_UNORM, false };
+    const TextureDesc desc{ 800, 600, PixelFormat::RGBA8_UNorm, false };
 
     const TextureHandle a = builder.CreateTexture("GameView", desc);
     const TextureHandle b = builder.CreateTexture("SceneView", desc);
@@ -276,7 +276,7 @@ TEST(RenderGraphBuilderTest, AddPassRecordsPassNameAndDefaultsToNotCulled)
 TEST(RenderGraphBuilderTest, PassBuilderReadTextureAppendsWithGivenAccess)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Input", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handle = builder.CreateTexture("Input", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     builder.AddPass(
         "ReadPass",
@@ -294,7 +294,7 @@ TEST(RenderGraphBuilderTest, PassBuilderReadTextureAppendsWithGivenAccess)
 TEST(RenderGraphBuilderTest, PassBuilderReadTextureDefaultsToShaderRead)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Input", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handle = builder.CreateTexture("Input", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     builder.AddPass(
         "ReadPass",
@@ -309,7 +309,7 @@ TEST(RenderGraphBuilderTest, PassBuilderReadTextureDefaultsToShaderRead)
 TEST(RenderGraphBuilderTest, PassBuilderWriteColorAttachmentAppendsColorAttachmentWrite)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     builder.AddPass(
         "WritePass",
@@ -326,7 +326,7 @@ TEST(RenderGraphBuilderTest, PassBuilderWriteColorAttachmentAppendsColorAttachme
 TEST(RenderGraphBuilderTest, PassBuilderWriteDepthStencilAttachmentAppendsDepthStencilReadWrite)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, PixelFormat::D32_Float, true });
 
     builder.AddPass(
         "DepthPass",
@@ -347,7 +347,7 @@ TEST(RenderGraphBuilderTest, PassBuilderWriteDepthStencilAttachmentAppendsDepthS
 TEST(RenderGraphBuilderTest, WriteColorAttachmentWithNoClearColorLeavesColorClearValueEmpty)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     builder.AddPass(
         "WritePass",
@@ -364,7 +364,7 @@ TEST(RenderGraphBuilderTest, WriteColorAttachmentWithNoClearColorLeavesColorClea
 TEST(RenderGraphBuilderTest, WriteColorAttachmentWithClearColorRecordsItOnThePass)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
     const std::array<float, 4> clearColor{ 0.1f, 0.2f, 0.3f, 1.0f };
 
     builder.AddPass(
@@ -382,7 +382,7 @@ TEST(RenderGraphBuilderTest, WriteColorAttachmentWithClearColorRecordsItOnThePas
 TEST(RenderGraphBuilderTest, WriteDepthStencilAttachmentWithNoClearDepthLeavesDepthClearValueEmpty)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, PixelFormat::D32_Float, true });
 
     builder.AddPass(
         "DepthPass",
@@ -398,7 +398,7 @@ TEST(RenderGraphBuilderTest, WriteDepthStencilAttachmentWithNoClearDepthLeavesDe
 TEST(RenderGraphBuilderTest, WriteDepthStencilAttachmentWithClearDepthRecordsItOnThePass)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, PixelFormat::D32_Float, true });
 
     builder.AddPass(
         "DepthPass",
@@ -423,8 +423,8 @@ TEST(RenderGraphBuilderTest, WriteDepthStencilAttachmentWithClearDepthRecordsItO
 TEST(RenderGraphBuilderTest, WriteColorAttachmentCalledTwiceAppendsBothInOrder)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handleA = builder.CreateTexture("Albedo", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
-    const TextureHandle handleB = builder.CreateTexture("Normal", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handleA = builder.CreateTexture("Albedo", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
+    const TextureHandle handleB = builder.CreateTexture("Normal", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
     const std::array<float, 4> clearA{ 0.1f, 0.2f, 0.3f, 1.0f };
     const std::array<float, 4> clearB{ 0.4f, 0.5f, 0.6f, 1.0f };
 
@@ -464,7 +464,7 @@ TEST(RenderGraphBuilderDeathTest, WriteColorAttachmentExceedingCapAssertsInDebug
     RenderGraphBuilder builder;
     std::vector<TextureHandle> handles;
     for (std::uint32_t i = 0; i < kMaxColorAttachments + 1; ++i) {
-        handles.push_back(builder.CreateTexture("Target", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false }));
+        handles.push_back(builder.CreateTexture("Target", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false }));
     }
 
     EXPECT_DEATH(
@@ -488,7 +488,7 @@ TEST(RenderGraphBuilderDeathTest, WriteColorAttachmentExceedingCapAssertsInDebug
 TEST(RenderGraphBuilderTest, PassBuilderWriteTextureDefaultsToComputeShaderWrite)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     builder.AddPass(
         "ComputeWritePass",
@@ -505,7 +505,7 @@ TEST(RenderGraphBuilderTest, PassBuilderWriteTextureDefaultsToComputeShaderWrite
 TEST(RenderGraphBuilderTest, PassBuilderWriteTextureAppendsWithGivenAccess)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     builder.AddPass(
         "ComputeWritePass",
@@ -526,7 +526,7 @@ TEST(RenderGraphBuilderTest, PassBuilderWriteTextureAppendsWithGivenAccess)
 TEST(RenderGraphBuilderTest, WriteTextureWithIsDepthResourceTrueProducesDepthFlaggedResourceUsage)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, PixelFormat::D32_Float, true });
 
     builder.AddPass(
         "BlitDstPass",
@@ -546,7 +546,7 @@ TEST(RenderGraphBuilderTest, WriteTextureWithIsDepthResourceTrueProducesDepthFla
 TEST(RenderGraphBuilderTest, WriteTextureWithoutIsDepthResourceDefaultsToFalse)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     builder.AddPass(
         "ComputeWritePass",
@@ -564,7 +564,7 @@ TEST(RenderGraphBuilderTest, WriteTextureWithoutIsDepthResourceDefaultsToFalse)
 TEST(RenderGraphBuilderTest, PassBuilderCanDeclareBothReadAndWriteOfSameTextureForReadModifyWrite)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Scratch", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handle = builder.CreateTexture("Scratch", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     builder.AddPass(
         "ReadModifyWritePass",
@@ -597,7 +597,7 @@ TEST(RenderGraphBuilderTest, PassBuilderCanDeclareBothReadAndWriteOfSameTextureF
 TEST(RenderGraphBuilderTest, AddComputePassStillRunsSetupAndCapturesExecuteLikeAddPass)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
     int setupCallCount = 0;
 
     builder.AddComputePass(
@@ -731,7 +731,7 @@ TEST(RenderGraphBuilderTest, AddComputePassWithMixedReadWriteKindsRecordsEachCor
 {
     RenderGraphBuilder builder;
     const TextureHandle textureHandle =
-        builder.CreateTexture("Tex", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+        builder.CreateTexture("Tex", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
     const BufferHandle bufferHandle = builder.CreateBuffer("Buf", BufferDesc{ 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
     const VolumeTarget volumeTarget{};
     const VolumeTextureHandle volumeHandle =
@@ -829,7 +829,7 @@ TEST(RenderGraphBuilderTest, ImportTextureIsTaggedAsImportedInCompiledGraphInput
     RenderGraphBuilder builder;
     const RenderTarget swapchainTarget = MakeFakeSwapchainTarget();
     const TextureHandle imported = builder.ImportTexture("Swapchain", swapchainTarget, VK_IMAGE_LAYOUT_UNDEFINED);
-    const TextureHandle transient = builder.CreateTexture("Scratch", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle transient = builder.CreateTexture("Scratch", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.textures.size(), 2u);
@@ -886,9 +886,9 @@ TEST(RenderGraphBuilderTest, ImportTextureMirrorsExternalTargetShapeIntoTextureD
 TEST(RenderGraphBuilderTest, ImportedAndTransientTexturesShareOneContiguousHandleSpace)
 {
     RenderGraphBuilder builder;
-    const TextureHandle transientA = builder.CreateTexture("A", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle transientA = builder.CreateTexture("A", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
     const TextureHandle imported = builder.ImportTexture("Swapchain", MakeFakeSwapchainTarget(), VK_IMAGE_LAYOUT_UNDEFINED);
-    const TextureHandle transientB = builder.CreateTexture("B", TextureDesc{ 32, 32, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle transientB = builder.CreateTexture("B", TextureDesc{ 32, 32, PixelFormat::RGBA8_UNorm, false });
 
     EXPECT_FALSE(transientA == imported);
     EXPECT_FALSE(imported == transientB);
@@ -1201,7 +1201,7 @@ TEST(RenderGraphBuilderTest, AddBlitPassNotesDeclarationOnRealToggleRegistryWith
     RenderPassToggleRegistry registry;
     builder.SetPassToggleRegistry(&registry);
 
-    const TextureDesc desc{ 256, 256, VK_FORMAT_R8G8B8A8_UNORM, true };
+    const TextureDesc desc{ 256, 256, PixelFormat::RGBA8_UNorm, true };
     const TextureHandle srcHandle = builder.CreateTexture("BlitSrc", desc);
     const TextureHandle dstHandle = builder.CreateTexture("BlitDst", desc);
     BlitSpec spec;
@@ -1242,7 +1242,7 @@ TEST(RenderGraphBuilderTest, AddRenderPassNeverTouchesToggleRegistryWhenNoneInst
 TEST(RenderGraphBuilderTest, AddBlitPassProducesCorrectlyPopulatedPassRecord)
 {
     RenderGraphBuilder builder;
-    const TextureDesc desc{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
+    const TextureDesc desc{ 1920, 1080, PixelFormat::RGBA8_UNorm, true };
     const TextureHandle srcHandle = builder.CreateTexture("BlitSrc", desc);
     const TextureHandle dstHandle = builder.CreateTexture("BlitDst", desc);
 
@@ -1273,7 +1273,7 @@ TEST(RenderGraphBuilderTest, AddBlitPassProducesCorrectlyPopulatedPassRecord)
 TEST(RenderGraphBuilderTest, AddBlitPassWithDstIsDepthTrueProducesDepthFlaggedWrite)
 {
     RenderGraphBuilder builder;
-    const TextureDesc desc{ 1920, 1080, VK_FORMAT_D32_SFLOAT, true };
+    const TextureDesc desc{ 1920, 1080, PixelFormat::D32_Float, true };
     const TextureHandle srcHandle = builder.CreateTexture("BlitSrc", desc);
     const TextureHandle dstHandle = builder.CreateTexture("BlitDst", desc);
 
@@ -1293,7 +1293,7 @@ TEST(RenderGraphBuilderTest, AddBlitPassWithDstIsDepthTrueProducesDepthFlaggedWr
 TEST(RenderGraphBuilderTest, AddBlitPassWithSrcIsDepthTrueProducesDepthFlaggedRead)
 {
     RenderGraphBuilder builder;
-    const TextureDesc desc{ 1920, 1080, VK_FORMAT_D32_SFLOAT, true };
+    const TextureDesc desc{ 1920, 1080, PixelFormat::D32_Float, true };
     const TextureHandle srcHandle = builder.CreateTexture("BlitSrc", desc);
     const TextureHandle dstHandle = builder.CreateTexture("BlitDst", desc);
 
@@ -1316,7 +1316,7 @@ TEST(RenderGraphBuilderTest, AddBlitPassCallsSinkWithBlitDrawKindAndSuppliedCate
     FakeMetadataSink sink;
     builder.SetDebugMetadataSink(&sink);
 
-    const TextureDesc desc{ 256, 256, VK_FORMAT_R8G8B8A8_UNORM, true };
+    const TextureDesc desc{ 256, 256, PixelFormat::RGBA8_UNorm, true };
     const TextureHandle srcHandle = builder.CreateTexture("BlitSrc", desc);
     const TextureHandle dstHandle = builder.CreateTexture("BlitDst", desc);
 
@@ -1340,7 +1340,7 @@ TEST(RenderGraphBuilderTest, AddBlitPassCallsSinkWithBlitDrawKindAndSuppliedCate
 TEST(RenderGraphBuilderTest, AddBlitPassCallerSuppliedRenderPassEventReachesPassRecordUnchanged)
 {
     RenderGraphBuilder builder;
-    const TextureDesc desc{ 256, 256, VK_FORMAT_R8G8B8A8_UNORM, true };
+    const TextureDesc desc{ 256, 256, PixelFormat::RGBA8_UNorm, true };
     const TextureHandle srcHandle = builder.CreateTexture("BlitSrc", desc);
     const TextureHandle dstHandle = builder.CreateTexture("BlitDst", desc);
 
@@ -1361,7 +1361,7 @@ TEST(RenderGraphBuilderTest, AddBlitPassDefaultsViewScopeToSharedAndCategoryToGe
     FakeMetadataSink sink;
     builder.SetDebugMetadataSink(&sink);
 
-    const TextureDesc desc{ 256, 256, VK_FORMAT_R8G8B8A8_UNORM, true };
+    const TextureDesc desc{ 256, 256, PixelFormat::RGBA8_UNorm, true };
     const TextureHandle srcHandle = builder.CreateTexture("BlitSrc", desc);
     const TextureHandle dstHandle = builder.CreateTexture("BlitDst", desc);
 
@@ -1388,7 +1388,7 @@ TEST(RenderGraphBuilderTest, AddBlitPassDefaultsViewScopeToSharedAndCategoryToGe
 TEST(RenderGraphBuilderTest, PassReadsTextureReturnsTrueForDeclaredColorRead)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Input", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handle = builder.CreateTexture("Input", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     builder.AddPass(
         "ReadPass",
@@ -1403,7 +1403,7 @@ TEST(RenderGraphBuilderTest, PassReadsTextureReturnsTrueForDeclaredColorRead)
 TEST(RenderGraphBuilderTest, PassReadsTextureReturnsTrueForDeclaredDepthRead)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, PixelFormat::D32_Float, true });
 
     builder.AddPass(
         "DepthReadPass",
@@ -1418,8 +1418,8 @@ TEST(RenderGraphBuilderTest, PassReadsTextureReturnsTrueForDeclaredDepthRead)
 TEST(RenderGraphBuilderTest, PassReadsTextureReturnsFalseForUnreadHandle)
 {
     RenderGraphBuilder builder;
-    const TextureHandle readHandle = builder.CreateTexture("Input", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
-    const TextureHandle otherHandle = builder.CreateTexture("Other", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle readHandle = builder.CreateTexture("Input", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
+    const TextureHandle otherHandle = builder.CreateTexture("Other", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     builder.AddPass(
         "ReadPass",
@@ -1432,7 +1432,7 @@ TEST(RenderGraphBuilderTest, PassReadsTextureReturnsFalseForUnreadHandle)
 TEST(RenderGraphBuilderTest, PassReadsTextureReturnsFalseForPassWithZeroReads)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     builder.AddPass(
         "WriteOnlyPass",
@@ -1447,7 +1447,7 @@ TEST(RenderGraphBuilderTest, PassReadsTextureReturnsFalseForPassWithZeroReads)
 TEST(RenderGraphBuilderDeathTest, PassReadsTextureRejectsOutOfRangeIndex)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     EXPECT_DEATH({ builder.PassReadsTexture(0, handle); }, "");
 }
@@ -1459,7 +1459,7 @@ TEST(RenderGraphBuilderDeathTest, PassReadsTextureRejectsOutOfRangeIndex)
 TEST(RenderGraphBuilderTest, PassReadsTextureAsDepthReturnsTrueForDeclaredDepthAspectReadOnExactHandle)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, PixelFormat::D32_Float, true });
 
     builder.AddPass(
         "DepthReadPass",
@@ -1477,7 +1477,7 @@ TEST(RenderGraphBuilderTest, PassReadsTextureAsDepthReturnsTrueForDeclaredDepthA
 TEST(RenderGraphBuilderTest, PassReadsTextureAsDepthReturnsFalseForColorAspectReadOnSameHandle)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, PixelFormat::D32_Float, true });
 
     builder.AddPass(
         "ColorReadPass",
@@ -1491,8 +1491,8 @@ TEST(RenderGraphBuilderTest, PassReadsTextureAsDepthReturnsFalseForColorAspectRe
 TEST(RenderGraphBuilderTest, PassReadsTextureAsDepthReturnsFalseForDepthAspectReadOnDifferentHandle)
 {
     RenderGraphBuilder builder;
-    const TextureHandle depthHandle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
-    const TextureHandle otherHandle = builder.CreateTexture("Other", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+    const TextureHandle depthHandle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, PixelFormat::D32_Float, true });
+    const TextureHandle otherHandle = builder.CreateTexture("Other", TextureDesc{ 64, 64, PixelFormat::D32_Float, true });
 
     builder.AddPass(
         "DepthReadPass",
@@ -1509,7 +1509,7 @@ TEST(RenderGraphBuilderTest, PassReadsTextureAsDepthReturnsFalseForDepthAspectRe
 TEST(RenderGraphBuilderDeathTest, PassReadsTextureAsDepthRejectsOutOfRangeIndex)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+    const TextureHandle handle = builder.CreateTexture("Depth", TextureDesc{ 64, 64, PixelFormat::D32_Float, true });
 
     EXPECT_DEATH({ builder.PassReadsTextureAsDepth(0, handle); }, "");
 }
@@ -1541,7 +1541,7 @@ TEST(RenderGraphBuilderTest, ResolveImportedTextureSamplersReturnsAllNullForATra
 {
     RenderGraphBuilder builder;
     const TextureHandle transient =
-        builder.CreateTexture("Scratch", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+        builder.CreateTexture("Scratch", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
     const RenderGraphBuilder::ImportedTextureSamplers resolved = builder.ResolveImportedTextureSamplers(transient);
     EXPECT_EQ(resolved.colorSampler, VK_NULL_HANDLE);

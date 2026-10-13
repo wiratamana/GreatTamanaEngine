@@ -8,7 +8,7 @@
 namespace gte {
 
 TextureArray2D::TextureArray2D(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
-    int width, int height, int arrayLayers, VkFormat format, bool hasDepth, bool isCubemap,
+    int width, int height, int arrayLayers, PixelFormat format, bool hasDepth, bool isCubemap,
     bool allowStorageImageAccess, const char* debugName)
     : m_allocator(allocator)
     , m_tracker(std::move(tracker))
@@ -21,7 +21,7 @@ TextureArray2D::TextureArray2D(VmaAllocator allocator, std::shared_ptr<GpuMemory
     , m_width(width > 0 ? width : 1)
     , m_height(height > 0 ? height : 1)
     , m_arrayLayers(arrayLayers > 0 ? static_cast<std::uint32_t>(arrayLayers) : 1U)
-    , m_format(format)
+    , m_format(ToVkFormat(format))
     , m_hasDepth(hasDepth)
     , m_isCubemap(isCubemap)
     , m_allowStorageImageAccess(allowStorageImageAccess)

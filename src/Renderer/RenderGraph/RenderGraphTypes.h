@@ -39,6 +39,7 @@
 
 #include "RenderGraphHandles.h"
 #include "../../Core/GraphicsHandles.h" // SamplerHandle/DescriptorSetLayoutHandle - PendingBinding/PassRecord below.
+#include "../../Core/PixelFormat.h" // TextureDesc/VolumeTextureDesc/TextureArrayDesc::format below - engine-native, never a raw VkFormat.
 
 #include <array>
 #include <cassert>
@@ -211,11 +212,13 @@ constexpr bool HasFlag(TextureUsage value, TextureUsage flag) noexcept
 struct TextureDesc {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
-    // VK_FORMAT_UNDEFINED == "match Renderer::ColorFormat() exactly" - the
-    // same convention Renderer::CreateRenderTexture()'s own `format`
+    // PixelFormat::Undefined == "match Renderer::ColorPixelFormat() exactly"
+    // - the same convention Renderer::CreateRenderTexture()'s own `format`
     // parameter already uses (see AGENTS.md, "Render Target Format
-    // Matching").
-    VkFormat format = VK_FORMAT_UNDEFINED;
+    // Matching"). Engine-native PixelFormat, never a raw VkFormat - Renderer
+    // is the ONE place this ever translates to/from a real VkFormat (see
+    // VulkanFormatInfo.h).
+    PixelFormat format = PixelFormat::Undefined;
     // Whether this logical resource also carries a companion DepthBuffer,
     // mirroring RenderTexture's own shape (see src/Renderer/RenderTexture.h).
     bool hasDepth = false;
@@ -249,7 +252,7 @@ struct VolumeTextureDesc {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     std::uint32_t depth = 0;
-    VkFormat format = VK_FORMAT_UNDEFINED;
+    PixelFormat format = PixelFormat::Undefined;
 
     friend bool operator==(const VolumeTextureDesc&, const VolumeTextureDesc&) noexcept = default;
 };
@@ -263,7 +266,7 @@ struct TextureArrayDesc {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     std::uint32_t arrayLayers = 1;   // Layer count for a multi-layer poolable image, e.g. 4.
-    VkFormat format = VK_FORMAT_UNDEFINED;
+    PixelFormat format = PixelFormat::Undefined;
     // DELIBERATE ASYMMETRY vs. TextureDesc::hasDepth (which defaults false):
     // this defaults to TRUE because a multi-layer depth image array is
     // this struct's dominant real use case. hasDepth here does NOT mean "also allocate a
@@ -272,14 +275,14 @@ struct TextureArrayDesc {
     // layer is:
     //   true  (default): every layer is a depth image (VK_IMAGE_ASPECT_DEPTH_BIT,
     //          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | SAMPLED_BIT).
-    //          VK_FORMAT_UNDEFINED resolves to Renderer::DepthFormat() (NOT
-    //          ColorFormat() - these are two different, independently
-    //          negotiated device formats). usage.Storage must never combine
-    //          with hasDepth == true.
+    //          PixelFormat::Undefined resolves to Renderer::DepthPixelFormat()
+    //          (NOT ColorPixelFormat() - these are two different,
+    //          independently negotiated device formats). usage.Storage must
+    //          never combine with hasDepth == true.
     //   false: every layer is a color image (VK_IMAGE_ASPECT_COLOR_BIT,
     //          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | SAMPLED_BIT, plus
     //          STORAGE_BIT when usage has TextureUsage::Storage).
-    //          VK_FORMAT_UNDEFINED resolves to Renderer::ColorFormat(),
+    //          PixelFormat::Undefined resolves to Renderer::ColorPixelFormat(),
     //          exactly like plain TextureDesc.
     // A caller building a color array/cubemap (e.g. a reflection-probe
     // array) MUST pass hasDepth = false explicitly - never rely on the

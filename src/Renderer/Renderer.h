@@ -299,7 +299,20 @@ public:
     // one real consumer is RenderViewRegistry (a later phase of that same
     // campaign); every other caller keeps getting a color image,
     // byte-for-byte unchanged.
-    RenderTexture CreateRenderTexture(int width, int height, VkFormat format = VK_FORMAT_UNDEFINED,
+    // `format` is this engine's own PixelFormat (never a raw VkFormat) -
+    // defaults to PixelFormat::Undefined, meaning "match ColorPixelFormat()
+    // exactly" (resolved in Renderer.cpp) - this is what guarantees a
+    // pipeline built once against ColorFormat() can render into either the
+    // swapchain or a default-format RenderTexture without a
+    // VkPipelineRenderingCreateInfo mismatch. Only pass an explicit format
+    // for a target that's deliberately different (e.g. a future HDR
+    // intermediate) and will have its own dedicated pipeline variant built
+    // for that exact format. See AGENTS.md ("Render Target Format
+    // Matching"). debugName is optional/Editor-only - see RenderTexture's
+    // constructor comment. depthDebugName likewise optionally names the
+    // companion DepthBuffer separately (e.g. "GameView" / "GameViewDepth") -
+    // left null if the depth side isn't worth naming individually.
+    RenderTexture CreateRenderTexture(int width, int height, PixelFormat format = PixelFormat::Undefined,
         const char* debugName = nullptr, const char* depthDebugName = nullptr,
         bool allowStorageImageAccess = false, bool allowDepthSampledAccess = false,
         bool createDepthCompanion = true, bool createColorImage = true) const;
@@ -868,18 +881,18 @@ public:
     // and RenderGraphBuilder::ImportVolumeTexture() - never the owning
     // VolumeTexture object itself (see VolumeTarget.h).
     VolumeTexture CreateVolumeTexture(
-        int width, int height, int depth, VkFormat format, const char* debugName = nullptr) const;
+        int width, int height, int depth, PixelFormat format, const char* debugName = nullptr) const;
 
     // better-render-pass-3 campaign, BLOCK5 (Array and Cubemap Texture
     // Resources) - see TextureArray2D.h. UNLIKE CreateVolumeTexture() above,
     // this is NOT a trivial one-line forward: GpuResourceFactory has no
-    // ColorFormat()/DepthFormat() accessor of its own, so VK_FORMAT_UNDEFINED
-    // must be resolved HERE, branching on `hasDepth` - DepthFormat() when
-    // hasDepth == true, ColorFormat() when hasDepth == false (mirrors
+    // ColorFormat()/DepthFormat() accessor of its own, so PixelFormat::Undefined
+    // must be resolved HERE, branching on `hasDepth` - DepthPixelFormat() when
+    // hasDepth == true, ColorPixelFormat() when hasDepth == false (mirrors
     // CreateRenderTexture()'s own "resolve, then forward" division of labor,
     // but with a depth/color branch CreateRenderTexture() itself never
-    // needed, since it only ever resolves to ColorFormat()).
-    TextureArray2D CreateTextureArray(int width, int height, int arrayLayers, VkFormat format, bool hasDepth,
+    // needed, since it only ever resolves to ColorPixelFormat()).
+    TextureArray2D CreateTextureArray(int width, int height, int arrayLayers, PixelFormat format, bool hasDepth,
         bool isCubemap, bool allowStorageImageAccess = false, const char* debugName = nullptr) const;
 
     // Aggregate live-memory totals across every Buffer/RenderTexture this

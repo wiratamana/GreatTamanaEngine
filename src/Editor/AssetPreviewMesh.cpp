@@ -1,4 +1,4 @@
-#include "AssetPreviewMesh.h"
+﻿#include "AssetPreviewMesh.h"
 
 #include "ProjectPanelData.h" // Utf8ToPath()
 #include "../Assets/AssetTypes.h" // AssetType
@@ -262,7 +262,7 @@ void AssetPreviewMesh::EnsureRenderTexture(Renderer& renderer, int width, int he
 
     if (!m_renderTexture) {
         m_renderTexture = std::make_unique<RenderTexture>(
-            renderer.CreateRenderTexture(width, height, VK_FORMAT_UNDEFINED, "AssetPreviewMesh", "AssetPreviewMeshDepth"));
+            renderer.CreateRenderTexture(width, height, PixelFormat::Undefined, "AssetPreviewMesh", "AssetPreviewMeshDepth"));
     } else {
         m_renderTexture->Resize(width, height);
     }

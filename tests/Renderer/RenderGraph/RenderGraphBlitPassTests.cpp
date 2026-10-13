@@ -14,7 +14,7 @@ namespace {
 
 TextureDesc MakeBlitTestTextureDesc()
 {
-    return TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false };
+    return TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false };
 }
 
 // A blit's destination reaching this call's own finalOutputs root set must

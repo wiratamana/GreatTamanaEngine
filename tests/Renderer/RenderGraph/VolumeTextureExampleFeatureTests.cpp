@@ -1,4 +1,4 @@
-// Real, headless-GPU, numerically-asserted tests proving both valid
+﻿// Real, headless-GPU, numerically-asserted tests proving both valid
 // compute-dispatch shapes for filling a VolumeTexture - per-cell-parallel
 // (every cell computed independently) and per-column-sequential (every
 // column loops its own Z slices in order, since each slice's value depends
@@ -61,7 +61,7 @@ TEST(VolumeTextureExampleFeatureTest, PerCellParallelFillWritesEveryCellsOwnCoor
     constexpr const char* kVolumeName = "PerCellFillTestVolume";
 
     VolumeTexture volume = fixture.GetRenderer().CreateVolumeTexture(
-        static_cast<int>(kSize), static_cast<int>(kSize), static_cast<int>(kSize), VK_FORMAT_R16G16B16A16_SFLOAT, kVolumeName);
+        static_cast<int>(kSize), static_cast<int>(kSize), static_cast<int>(kSize), PixelFormat::RGBA16_Float, kVolumeName);
 
     ComputePipeline pipeline = fixture.GetRenderer().CreateComputePipeline(GTE_TEST_FROXEL_PERCELL_SPV_PATH);
     ComputeDescriptorSet descriptorSet =
@@ -132,7 +132,7 @@ TEST(VolumeTextureExampleFeatureTest, PerColumnSequentialFillMatchesTheCpuOracle
     constexpr const char* kVolumeName = "PerColumnFillTestVolume";
 
     VolumeTexture volume = fixture.GetRenderer().CreateVolumeTexture(
-        static_cast<int>(kWidth), static_cast<int>(kHeight), static_cast<int>(kDepth), VK_FORMAT_R16G16B16A16_SFLOAT, kVolumeName);
+        static_cast<int>(kWidth), static_cast<int>(kHeight), static_cast<int>(kDepth), PixelFormat::RGBA16_Float, kVolumeName);
 
     ComputePipeline pipeline = fixture.GetRenderer().CreateComputePipeline(GTE_TEST_FROXEL_PERCOLUMN_SPV_PATH);
     ComputeDescriptorSet descriptorSet =

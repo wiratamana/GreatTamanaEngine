@@ -29,7 +29,7 @@ TEST(ResolveDepthTextureTest, ResolvesNonNullViewAndSamplerWithNoPriorSameFrameD
 
     // allowDepthSampledAccess=true gives this a real depth sampler - the
     // one real precondition resolveDepthTexture() requires.
-    RenderTexture depthCarrying = fixture.GetRenderer().CreateRenderTexture(64, 64, VK_FORMAT_UNDEFINED,
+    RenderTexture depthCarrying = fixture.GetRenderer().CreateRenderTexture(64, 64, PixelFormat::Undefined,
         "UntestedTerritoryColor", "UntestedTerritoryDepth", /*allowStorageImageAccess=*/false,
         /*allowDepthSampledAccess=*/true);
 
@@ -41,7 +41,7 @@ TEST(ResolveDepthTextureTest, ResolvesNonNullViewAndSamplerWithNoPriorSameFrameD
         const TextureHandle handle = b.ImportTexture("UntestedTerritoryTarget", depthCarrying.Target(),
             VK_IMAGE_LAYOUT_UNDEFINED, depthCarrying.Sampler(), depthCarrying.DepthSampler());
         const TextureHandle output =
-            b.CreateTexture("DummyOutput", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+            b.CreateTexture("DummyOutput", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
 
         // Only a depth-aspect READ is declared against `handle` - no pass
         // anywhere in this graph ever calls WriteDepthStencilAttachment()

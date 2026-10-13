@@ -24,7 +24,7 @@ void NoOpExecute(PassContext&) { }
 
 TextureDesc MakeTextureDesc()
 {
-    return TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false };
+    return TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false };
 }
 
 bool ExecutionOrderEquals(const std::vector<PassHandle>& order, const std::vector<std::uint32_t>& expectedIndices)
@@ -427,7 +427,7 @@ TEST(RenderGraphCompilerTest, CompilingTheSameInputObjectTwiceIsIdempotent)
 TEST(RenderGraphCompilerTest, SelfLoopReadAndWriteOfSameResourceDoesNotCrashOrCycle)
 {
     RenderGraphBuilder builder;
-    const TextureHandle depth = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+    const TextureHandle depth = builder.CreateTexture("Depth", TextureDesc{ 64, 64, PixelFormat::D32_Float, true });
 
     builder.AddPass(
         "DepthPass",
@@ -1473,7 +1473,7 @@ TEST(RenderGraphCompilerTest, LargeFanOutFanInGraphCompilesCorrectlyExercisingTh
 TEST(RenderGraphCompilerTest, SelfExclusionGuardPreventsFalsePositiveContradictionForSelfLoopReadWriteOfNeverOtherwiseWrittenResource)
 {
     RenderGraphBuilder builder;
-    const TextureHandle depth = builder.CreateTexture("Depth", TextureDesc{ 64, 64, VK_FORMAT_D32_SFLOAT, true });
+    const TextureHandle depth = builder.CreateTexture("Depth", TextureDesc{ 64, 64, PixelFormat::D32_Float, true });
 
     builder.AddRenderPass(
         "DepthPass", PassKind::Graphics,

@@ -16,7 +16,7 @@ void NoOpExecute(rg::PassContext&) { }
 
 rg::TextureDesc MakeTextureDesc()
 {
-    return rg::TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false };
+    return rg::TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false };
 }
 
 } // namespace

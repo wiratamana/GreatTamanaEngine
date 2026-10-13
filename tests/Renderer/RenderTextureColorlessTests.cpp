@@ -30,7 +30,7 @@ TEST(RenderTextureColorlessTest, CreateColorImageFalseProducesNullColorHalfAndRe
 
     const GpuMemoryTracker::Totals before = fixture.GetRenderer().GetMemoryTotals();
     RenderTexture tex = fixture.GetRenderer().CreateRenderTexture(
-        64, 64, VK_FORMAT_UNDEFINED, "ColorlessTest", /*depthDebugName=*/nullptr,
+        64, 64, PixelFormat::Undefined, "ColorlessTest", /*depthDebugName=*/nullptr,
         /*allowStorageImageAccess=*/false, /*allowDepthSampledAccess=*/false,
         /*createDepthCompanion=*/true, /*createColorImage=*/false);
 
@@ -52,7 +52,7 @@ TEST(RenderTextureColorlessTest, CreateDepthCompanionFalseIsTheExactMirrorImage)
     HeadlessRenderGraphFixture fixture;
     if (!fixture.IsUsable()) { GTEST_SKIP() << fixture.SkipReason(); }
     RenderTexture tex = fixture.GetRenderer().CreateRenderTexture(
-        64, 64, VK_FORMAT_UNDEFINED, nullptr, nullptr, false, false,
+        64, 64, PixelFormat::Undefined, nullptr, nullptr, false, false,
         /*createDepthCompanion=*/false, /*createColorImage=*/true);
     EXPECT_NE(tex.Image(), static_cast<VkImage>(VK_NULL_HANDLE));
     const RenderTarget target = tex.Target();
@@ -70,7 +70,7 @@ TEST(RenderTextureColorlessDeathTest, NeitherColorNorDepthAsserts)
         {
             HeadlessRenderGraphFixture fixture;
             (void)fixture.GetRenderer().CreateRenderTexture(
-                64, 64, VK_FORMAT_UNDEFINED, nullptr, nullptr, false, false,
+                64, 64, PixelFormat::Undefined, nullptr, nullptr, false, false,
                 /*createDepthCompanion=*/false, /*createColorImage=*/false);
         },
         "");

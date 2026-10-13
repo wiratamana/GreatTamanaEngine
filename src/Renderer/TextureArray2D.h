@@ -1,7 +1,9 @@
 #pragma once
 
+#include "../Core/PixelFormat.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "TextureArrayTarget.h"
+#include "VulkanFormatInfo.h"
 #include "Vulkan/VulkanAllocator.h"
 
 #include <memory>
@@ -91,15 +93,18 @@ public:
     // (see Buffer.h's doc comment for the full "who actually stores this"
     // story).
     //
-    // `format` must already be a concrete, resolved VkFormat by the time it
-    // reaches this constructor (never VK_FORMAT_UNDEFINED) - resolution
-    // happens one layer up, in Renderer::CreateTextureArray().
+    // `format` is this engine's own PixelFormat (never a raw VkFormat) -
+    // translated to a real VkFormat internally, right here in this class
+    // (see TextureArray2D.cpp's constructor body) - must already be a
+    // concrete, resolved value by the time it reaches this constructor
+    // (never PixelFormat::Undefined) - resolution happens one layer up, in
+    // Renderer::CreateTextureArray(). See NativeFormat()/Format() below.
     //
     // `hasDepth`/`isCubemap` have no default here - the caller
     // (GpuResourceFactory::CreateTextureArray()) always supplies both
     // explicitly, already resolved/validated.
     TextureArray2D(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
-        int height, int arrayLayers, VkFormat format, bool hasDepth, bool isCubemap,
+        int height, int arrayLayers, PixelFormat format, bool hasDepth, bool isCubemap,
         bool allowStorageImageAccess = false, const char* debugName = nullptr);
     ~TextureArray2D();
 
@@ -127,7 +132,13 @@ public:
     int Width() const noexcept { return m_width; }
     int Height() const noexcept { return m_height; }
     std::uint32_t ArrayLayers() const noexcept { return m_arrayLayers; }
-    VkFormat Format() const noexcept { return m_format; }
+    // Engine-native format - what every caller OUTSIDE this Renderer-tree's
+    // own deep Vulkan plumbing should use.
+    PixelFormat Format() const noexcept { return FromVkFormat(m_format); }
+    // Renderer-tree-internal escape hatch ONLY (Target()) - the real
+    // VkFormat Vulkan itself was built with. Never call this from outside
+    // src/Renderer.
+    VkFormat NativeFormat() const noexcept { return m_format; }
     bool HasDepth() const noexcept { return m_hasDepth; }
     bool IsCubemap() const noexcept { return m_isCubemap; }
     bool AllowsStorageImageAccess() const noexcept { return m_allowStorageImageAccess; }

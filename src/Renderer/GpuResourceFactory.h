@@ -39,8 +39,11 @@ public:
     GpuResourceFactory(GpuResourceFactory&&) = delete;
     GpuResourceFactory& operator=(GpuResourceFactory&&) = delete;
 
-    // Render textures
-    RenderTexture CreateRenderTexture(int width, int height, VkFormat format, const char* debugName,
+    // Render textures - `format` is this engine's own PixelFormat (never a
+    // raw VkFormat); translated internally wherever Vulkan actually needs
+    // it (the real VkFormat constructors of RenderTexture/VolumeTexture/
+    // TextureArray2D themselves - see each class's own constructor body).
+    RenderTexture CreateRenderTexture(int width, int height, PixelFormat format, const char* debugName,
         const char* depthDebugName = nullptr, bool allowStorageImageAccess = false,
         bool allowDepthSampledAccess = false, bool createDepthCompanion = true,
         bool createColorImage = true) const;
@@ -103,9 +106,9 @@ public:
         bool allowStorageImageAccess = false) const;
 
     VolumeTexture CreateVolumeTexture(
-        int width, int height, int depth, VkFormat format, const char* debugName = nullptr) const;
+        int width, int height, int depth, PixelFormat format, const char* debugName = nullptr) const;
 
-    TextureArray2D CreateTextureArray(int width, int height, int arrayLayers, VkFormat format, bool hasDepth,
+    TextureArray2D CreateTextureArray(int width, int height, int arrayLayers, PixelFormat format, bool hasDepth,
         bool isCubemap, bool allowStorageImageAccess = false, const char* debugName = nullptr) const;
 
     // Descriptors and Materials

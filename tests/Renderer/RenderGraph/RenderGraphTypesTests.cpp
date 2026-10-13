@@ -1,4 +1,4 @@
-// Unit tests for Phase 1's pure, Vulkan-free-of-behavior render graph
+﻿// Unit tests for Phase 1's pure, Vulkan-free-of-behavior render graph
 // vocabulary (src/Renderer/RenderGraph/RenderGraphTypes.h) - handles,
 // resource descriptors, and the ResourceAccess enum's pure helper
 // functions. No live VkDevice/Renderer/Registry involved at all - see
@@ -127,36 +127,36 @@ TEST(RenderGraphHandleTest, VolumeTextureHandleEqualityComparesBothFields)
 
 TEST(RenderGraphDescTest, IdenticalTextureDescsCompareEqual)
 {
-    const TextureDesc a{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
-    const TextureDesc b{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
+    const TextureDesc a{ 1920, 1080, PixelFormat::RGBA8_UNorm, true };
+    const TextureDesc b{ 1920, 1080, PixelFormat::RGBA8_UNorm, true };
     EXPECT_TRUE(a == b);
 }
 
 TEST(RenderGraphDescTest, TextureDescsDifferingInWidthCompareUnequal)
 {
-    const TextureDesc a{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
-    const TextureDesc b{ 1280, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
+    const TextureDesc a{ 1920, 1080, PixelFormat::RGBA8_UNorm, true };
+    const TextureDesc b{ 1280, 1080, PixelFormat::RGBA8_UNorm, true };
     EXPECT_FALSE(a == b);
 }
 
 TEST(RenderGraphDescTest, TextureDescsDifferingInHeightCompareUnequal)
 {
-    const TextureDesc a{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
-    const TextureDesc b{ 1920, 720, VK_FORMAT_R8G8B8A8_UNORM, true };
+    const TextureDesc a{ 1920, 1080, PixelFormat::RGBA8_UNorm, true };
+    const TextureDesc b{ 1920, 720, PixelFormat::RGBA8_UNorm, true };
     EXPECT_FALSE(a == b);
 }
 
 TEST(RenderGraphDescTest, TextureDescsDifferingInFormatCompareUnequal)
 {
-    const TextureDesc a{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
-    const TextureDesc b{ 1920, 1080, VK_FORMAT_R8G8B8A8_SRGB, true };
+    const TextureDesc a{ 1920, 1080, PixelFormat::RGBA8_UNorm, true };
+    const TextureDesc b{ 1920, 1080, PixelFormat::BGRA8_UNorm, true };
     EXPECT_FALSE(a == b);
 }
 
 TEST(RenderGraphDescTest, TextureDescsDifferingInHasDepthCompareUnequal)
 {
-    const TextureDesc a{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
-    const TextureDesc b{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, false };
+    const TextureDesc a{ 1920, 1080, PixelFormat::RGBA8_UNorm, true };
+    const TextureDesc b{ 1920, 1080, PixelFormat::RGBA8_UNorm, false };
     EXPECT_FALSE(a == b);
 }
 
@@ -201,18 +201,18 @@ TEST(RenderGraphTextureUsageTest, HasFlagIsFalseForNoneAgainstAnyRealBit)
 // TextureUsage::Storage (or vice versa).
 TEST(RenderGraphDescTest, TextureDescsDifferingOnlyInUsageCompareUnequal)
 {
-    TextureDesc a{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
+    TextureDesc a{ 1920, 1080, PixelFormat::RGBA8_UNorm, true };
     a.usage = TextureUsage::None;
-    TextureDesc b{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
+    TextureDesc b{ 1920, 1080, PixelFormat::RGBA8_UNorm, true };
     b.usage = TextureUsage::Storage;
     EXPECT_FALSE(a == b);
 }
 
 TEST(RenderGraphDescTest, TextureDescsWithIdenticalUsageCompareEqual)
 {
-    TextureDesc a{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
+    TextureDesc a{ 1920, 1080, PixelFormat::RGBA8_UNorm, true };
     a.usage = TextureUsage::Storage;
-    TextureDesc b{ 1920, 1080, VK_FORMAT_R8G8B8A8_UNORM, true };
+    TextureDesc b{ 1920, 1080, PixelFormat::RGBA8_UNorm, true };
     b.usage = TextureUsage::Storage;
     EXPECT_TRUE(a == b);
 }
@@ -225,7 +225,7 @@ TEST(RenderGraphDescTest, DefaultConstructedTextureDescHasExpectedDefaults)
     const TextureDesc desc{};
     EXPECT_EQ(desc.width, 0u);
     EXPECT_EQ(desc.height, 0u);
-    EXPECT_EQ(desc.format, VK_FORMAT_UNDEFINED);
+    EXPECT_EQ(desc.format, PixelFormat::Undefined);
     EXPECT_FALSE(desc.hasDepth);
     EXPECT_EQ(desc.usage, TextureUsage::None);
 }
@@ -246,13 +246,13 @@ TEST(RenderGraphDescTest, TextureDescsBuiltFromSeparateRuntimeInputsStillCompare
     TextureDesc a;
     a.width = makeWidth(2);
     a.height = makeHeight(2);
-    a.format = VK_FORMAT_B8G8R8A8_UNORM;
+    a.format = PixelFormat::BGRA8_UNorm;
     a.hasDepth = true;
 
     TextureDesc b;
     b.width = makeWidth(2);
     b.height = makeHeight(2);
-    b.format = VK_FORMAT_B8G8R8A8_UNORM;
+    b.format = PixelFormat::BGRA8_UNorm;
     b.hasDepth = true;
 
     EXPECT_TRUE(a == b);
@@ -286,36 +286,36 @@ TEST(RenderGraphDescTest, BufferDescsDifferingInUsageCompareUnequal)
 
 TEST(RenderGraphDescTest, IdenticalVolumeTextureDescsCompareEqual)
 {
-    const VolumeTextureDesc a{ 32, 32, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
-    const VolumeTextureDesc b{ 32, 32, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
+    const VolumeTextureDesc a{ 32, 32, 32, PixelFormat::RGBA16_Float };
+    const VolumeTextureDesc b{ 32, 32, 32, PixelFormat::RGBA16_Float };
     EXPECT_TRUE(a == b);
 }
 
 TEST(RenderGraphDescTest, VolumeTextureDescsDifferingInWidthCompareUnequal)
 {
-    const VolumeTextureDesc a{ 32, 32, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
-    const VolumeTextureDesc b{ 16, 32, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
+    const VolumeTextureDesc a{ 32, 32, 32, PixelFormat::RGBA16_Float };
+    const VolumeTextureDesc b{ 16, 32, 32, PixelFormat::RGBA16_Float };
     EXPECT_FALSE(a == b);
 }
 
 TEST(RenderGraphDescTest, VolumeTextureDescsDifferingInHeightCompareUnequal)
 {
-    const VolumeTextureDesc a{ 32, 32, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
-    const VolumeTextureDesc b{ 32, 16, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
+    const VolumeTextureDesc a{ 32, 32, 32, PixelFormat::RGBA16_Float };
+    const VolumeTextureDesc b{ 32, 16, 32, PixelFormat::RGBA16_Float };
     EXPECT_FALSE(a == b);
 }
 
 TEST(RenderGraphDescTest, VolumeTextureDescsDifferingInDepthCompareUnequal)
 {
-    const VolumeTextureDesc a{ 32, 32, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
-    const VolumeTextureDesc b{ 32, 32, 16, VK_FORMAT_R16G16B16A16_SFLOAT };
+    const VolumeTextureDesc a{ 32, 32, 32, PixelFormat::RGBA16_Float };
+    const VolumeTextureDesc b{ 32, 32, 16, PixelFormat::RGBA16_Float };
     EXPECT_FALSE(a == b);
 }
 
 TEST(RenderGraphDescTest, VolumeTextureDescsDifferingInFormatCompareUnequal)
 {
-    const VolumeTextureDesc a{ 32, 32, 32, VK_FORMAT_R16G16B16A16_SFLOAT };
-    const VolumeTextureDesc b{ 32, 32, 32, VK_FORMAT_R8G8B8A8_UNORM };
+    const VolumeTextureDesc a{ 32, 32, 32, PixelFormat::RGBA16_Float };
+    const VolumeTextureDesc b{ 32, 32, 32, PixelFormat::RGBA8_UNorm };
     EXPECT_FALSE(a == b);
 }
 

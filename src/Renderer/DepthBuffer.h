@@ -1,8 +1,9 @@
 #pragma once
 
+#include "../Core/PixelFormat.h"
 #include "Memory/GpuMemoryTracker.h"
+#include "VulkanFormatInfo.h"
 #include "Vulkan/VulkanAllocator.h"
-
 #include <memory>
 
 namespace gte {
@@ -51,8 +52,12 @@ public:
     // Buffer/RenderTexture - see Buffer.h's own doc comment for the full
     // "who actually stores this" story (editor-core-separation-1 campaign,
     // PHASE4).
+    // `format` is this engine's own PixelFormat (never a raw VkFormat) -
+    // translated to a real VkFormat internally, right here in this class
+    // (see DepthBuffer.cpp's constructor body) - callers never need to
+    // name a VkFormat at all. See NativeFormat()/Format() below.
     DepthBuffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
-        int height, VkFormat format, const char* debugName = nullptr, bool allowSampledAccess = false);
+        int height, PixelFormat format, const char* debugName = nullptr, bool allowSampledAccess = false);
     ~DepthBuffer();
 
     DepthBuffer(const DepthBuffer&) = delete;
@@ -70,7 +75,13 @@ public:
 
     VkImage Image() const noexcept { return m_image; }
     VkImageView View() const noexcept { return m_imageView; }
-    VkFormat Format() const noexcept { return m_format; }
+    // Engine-native format - what every caller OUTSIDE this Renderer-tree's
+    // own deep Vulkan plumbing should use.
+    PixelFormat Format() const noexcept { return FromVkFormat(m_format); }
+    // Renderer-tree-internal escape hatch ONLY (RenderTexture::Target(),
+    // FramePresenter, ...) - the real VkFormat Vulkan itself was built
+    // with. Never call this from outside src/Renderer.
+    VkFormat NativeFormat() const noexcept { return m_format; }
     VkExtent2D Extent() const noexcept { return m_extent; }
 
     // Sampler suitable for reading this depth buffer in a shader as

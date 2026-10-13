@@ -2,6 +2,7 @@
 
 #include "../../Core/Logging.h" // GTE_LOG_ERROR for GetOrCreatePersistentTexture()'s own
     // "no persistent cache installed" refusal branch.
+#include "../VulkanFormatInfo.h" // FromVkFormat() - RenderTarget/VolumeTarget/TextureArrayTarget::format stay raw VkFormat (internal plumbing); TextureDesc/VolumeTextureDesc/TextureArrayDesc::format are engine-native PixelFormat.
 
 #include <string>
 
@@ -248,7 +249,7 @@ TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTa
     TextureDesc desc;
     desc.width = externalTarget.extent.width;
     desc.height = externalTarget.extent.height;
-    desc.format = externalTarget.format;
+    desc.format = FromVkFormat(externalTarget.format);
     desc.hasDepth = externalTarget.depthImage != VK_NULL_HANDLE;
 
     TextureImportInfo importInfo;
@@ -330,7 +331,7 @@ VolumeTextureHandle RenderGraphBuilder::ImportVolumeTexture(
     desc.width = externalVolumeTarget.extent.width;
     desc.height = externalVolumeTarget.extent.height;
     desc.depth = externalVolumeTarget.extent.depth;
-    desc.format = externalVolumeTarget.format;
+    desc.format = FromVkFormat(externalVolumeTarget.format);
 
     VolumeTextureImportInfo importInfo;
     importInfo.isImported = true;
@@ -365,7 +366,7 @@ TextureArrayHandle RenderGraphBuilder::ImportTextureArray(
     desc.width = externalTarget.extent.width;
     desc.height = externalTarget.extent.height;
     desc.arrayLayers = externalTarget.arrayLayers;
-    desc.format = externalTarget.format;
+    desc.format = FromVkFormat(externalTarget.format);
     desc.hasDepth = externalTarget.hasDepth;
 
     TextureArrayImportInfo importInfo;

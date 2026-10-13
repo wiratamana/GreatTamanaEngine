@@ -1,4 +1,4 @@
-#include "BoneViewerWindow.h"
+﻿#include "BoneViewerWindow.h"
 
 #include "EditorContext.h"
 #include "ModelRigCache.h"
@@ -387,7 +387,7 @@ void BoneViewerWindow::EnsureRenderTexture(Renderer& renderer, int width, int he
 
     if (!m_renderTexture) {
         m_renderTexture = std::make_unique<RenderTexture>(
-            renderer.CreateRenderTexture(width, height, VK_FORMAT_UNDEFINED, "BoneViewer", "BoneViewerDepth"));
+            renderer.CreateRenderTexture(width, height, PixelFormat::Undefined, "BoneViewer", "BoneViewerDepth"));
     } else {
         m_renderTexture->Resize(width, height);
     }

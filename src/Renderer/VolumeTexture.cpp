@@ -7,7 +7,7 @@
 namespace gte {
 
 VolumeTexture::VolumeTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
-    int width, int height, int depth, VkFormat format, const char* debugName)
+    int width, int height, int depth, PixelFormat format, const char* debugName)
     : m_allocator(allocator)
     , m_tracker(std::move(tracker))
     , m_device(device)
@@ -16,7 +16,7 @@ VolumeTexture::VolumeTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTr
     , m_width(width > 0 ? width : 1)
     , m_height(height > 0 ? height : 1)
     , m_depth(depth > 0 ? depth : 1)
-    , m_format(format)
+    , m_format(ToVkFormat(format))
 {
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;

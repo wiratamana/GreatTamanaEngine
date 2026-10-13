@@ -23,7 +23,7 @@ TextureDesc MakeColorDesc()
     TextureDesc desc;
     desc.width = 64;
     desc.height = 64;
-    desc.format = VK_FORMAT_R8G8B8A8_UNORM;
+    desc.format = PixelFormat::RGBA8_UNorm;
     desc.hasDepth = false;
     return desc;
 }

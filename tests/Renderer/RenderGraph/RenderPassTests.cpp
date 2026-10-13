@@ -82,7 +82,7 @@ TEST(RenderPassTest, AddRenderPassWithGraphicsKindRunsSetupAndStampsGraphicsKind
 TEST(RenderPassTest, AddRenderPassWithComputeKindRunsSetupAndStampsComputeKind)
 {
     RenderGraphBuilder builder;
-    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, VK_FORMAT_R8G8B8A8_UNORM, false });
+    const TextureHandle handle = builder.CreateTexture("Output", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
     int setupCallCount = 0;
 
     builder.AddRenderPass(

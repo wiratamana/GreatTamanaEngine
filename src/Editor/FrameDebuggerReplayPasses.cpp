@@ -1,4 +1,4 @@
-// Defines FrameDebuggerCaptureContext::AddReplayPasses() - the concrete
+﻿// Defines FrameDebuggerCaptureContext::AddReplayPasses() - the concrete
 // implementation of IFrameDebuggerCaptureRecorder::AddReplayPasses()
 // (src/Core/FrameDebuggerCaptureRecorder.h). Reached from gte_core-tier
 // Core::BuildFrame() only through a virtual call on a null-checked
@@ -85,7 +85,7 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
     const Extent2D extent = gameTarget.Extent();
     const int width = static_cast<int>(extent.width);
     const int height = static_cast<int>(extent.height);
-    const VkFormat format = gameTarget.Format();
+    const PixelFormat format = gameTarget.Format();
 
     std::vector<RenderTexture> destinations;
     destinations.reserve(totalStepCount); // ESSENTIAL - every destHandle below imports a POINTER-STABLE

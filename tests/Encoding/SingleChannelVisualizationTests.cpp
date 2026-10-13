@@ -32,7 +32,7 @@ TEST(SingleChannelVisualizationTest, RealR8UnormCaptureRoundTripsThroughPng)
     constexpr std::array<float, 4> kKnownClearColor{ 128.0f / 255.0f, 0.0f, 0.0f, 0.0f };
 
     RenderTexture tex = fixture.GetRenderer().CreateRenderTexture(
-        kWidth, kHeight, VK_FORMAT_R8_UNORM, "SingleChannelVisualizationTarget", /*depthDebugName=*/nullptr,
+        kWidth, kHeight, PixelFormat::R8_UNorm, "SingleChannelVisualizationTarget", /*depthDebugName=*/nullptr,
         /*allowStorageImageAccess=*/false, /*allowDepthSampledAccess=*/false,
         /*createDepthCompanion=*/false, /*createColorImage=*/true);
 
@@ -51,7 +51,7 @@ TEST(SingleChannelVisualizationTest, RealR8UnormCaptureRoundTripsThroughPng)
     ASSERT_TRUE(snapshot.has_value());
 
     const Renderer::CapturedRawPixels raw = fixture.GetRenderer().CaptureImagePixels(
-        tex.Image(), VK_IMAGE_ASPECT_COLOR_BIT, tex.Format(), tex.Extent(), snapshot->colorState);
+        tex.Image(), VK_IMAGE_ASPECT_COLOR_BIT, tex.NativeFormat(), tex.Extent(), snapshot->colorState);
     ASSERT_FALSE(raw.pixels.empty());
     ASSERT_EQ(raw.pixels.size(), static_cast<std::size_t>(kWidth) * kHeight);
 

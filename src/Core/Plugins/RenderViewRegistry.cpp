@@ -1,4 +1,4 @@
-#include "RenderViewRegistry.h"
+﻿#include "RenderViewRegistry.h"
 
 #include "../../Renderer/Internal/RenderViewRegistryImpl.h"
 #include "../../Renderer/Renderer.h"
@@ -90,7 +90,7 @@ rg::RenderViewId RenderViewRegistry::CreateOrGetView(const char* name, const Ren
     if (!it->second.target.has_value()) {
         try {
             it->second.target.emplace(m_impl->renderer->CreateRenderTexture(static_cast<int>(desc.width),
-                static_cast<int>(desc.height), ToVkFormat(desc.colorFormat),
+                static_cast<int>(desc.height), desc.colorFormat,
                 // Reusing this same map-owned, stable key string for BOTH
                 // debugName AND depthDebugName so a depth-only view's one
                 // real GPU allocation shows up named in the Memory panel.

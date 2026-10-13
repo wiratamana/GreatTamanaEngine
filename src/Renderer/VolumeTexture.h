@@ -1,7 +1,8 @@
 #pragma once
-
+#include "../Core/PixelFormat.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "VolumeTarget.h"
+#include "VulkanFormatInfo.h"
 #include "Vulkan/VulkanAllocator.h"
 
 #include <memory>
@@ -59,8 +60,12 @@ public:
     // debugName is optional and purely cosmetic - same convention as
     // Buffer/RenderTexture/Texture2D's own debugName parameter (see
     // Buffer.h's doc comment for the full "who actually stores this" story).
+    // `format` is this engine's own PixelFormat (never a raw VkFormat) -
+    // translated to a real VkFormat internally, right here in this class
+    // (see VolumeTexture.cpp's constructor body) - callers never need to
+    // name a VkFormat at all. See NativeFormat()/Format() below.
     VolumeTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
-        int height, int depth, VkFormat format, const char* debugName = nullptr);
+        int height, int depth, PixelFormat format, const char* debugName = nullptr);
     ~VolumeTexture();
 
     VolumeTexture(const VolumeTexture&) = delete;
@@ -78,7 +83,13 @@ public:
     int Width() const noexcept { return m_width; }
     int Height() const noexcept { return m_height; }
     int Depth() const noexcept { return m_depth; }
-    VkFormat Format() const noexcept { return m_format; }
+    // Engine-native format - what every caller OUTSIDE this Renderer-tree's
+    // own deep Vulkan plumbing should use.
+    PixelFormat Format() const noexcept { return FromVkFormat(m_format); }
+    // Renderer-tree-internal escape hatch ONLY (Target()) - the real
+    // VkFormat Vulkan itself was built with. Never call this from outside
+    // src/Renderer.
+    VkFormat NativeFormat() const noexcept { return m_format; }
 
     // Handle into the GpuMemoryTracker this VolumeTexture is registered
     // with - valid for this VolumeTexture's entire lifetime,
