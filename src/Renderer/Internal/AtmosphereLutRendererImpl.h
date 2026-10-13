@@ -28,8 +28,6 @@ class RenderGraph;
 struct AtmosphereLutRenderer::Impl {
     ~Impl();
 
-    VkDevice device = VK_NULL_HANDLE;
-
     DescriptorSetLayoutHandle transmittanceLutDescriptorSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
     std::optional<ComputePipeline> transmittanceLutPipeline;
     std::optional<Buffer> atmosphereParametersBuffer; // Shared by all LUT passes
@@ -69,6 +67,13 @@ struct AtmosphereLutRenderer::Impl {
     DescriptorSetLayoutHandle skyBackgroundSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
     Renderer* ownerRenderer = nullptr; // Used to clean up descriptor set layout
 
+    // Cached (engine-owned, NOT raw Vulkan) handles for the Sky-View LUT's
+    // image view + sampler, resolved once per frame from the render graph's
+    // debug texture snapshot - see GraphicsHandleRegistry.h's CachedImageViewHandle/
+    // CachedSamplerHandle doc comments. Keeps DrawSkyBackgroundPass() Vulkan-handle-free.
+    CachedImageViewHandle skyViewLutImageViewHandle;
+    CachedSamplerHandle skyViewLutSamplerHandle;
+
     void EnsureTransmittanceLutInitialized(Renderer& renderer, const AtmosphereParametersGpu& params);
     void EnsureMultiScatteringLutInitialized(Renderer& renderer);
     void EnsureSkyViewLutInitialized(Renderer& renderer);
@@ -81,9 +86,12 @@ struct AtmosphereLutRenderer::Impl {
         Renderer& renderer, const char* outputTextureName, Extent2D extent);
     void EnsureSkyBackgroundPipelineInitialized(Renderer& renderer);
 
-    // Full-screen pass for sky background
+    // Full-screen pass for sky background. `skyViewLutView`/`skyViewLutSampler`
+    // are engine-owned opaque handles (NOT raw Vulkan types) - see
+    // GraphicsHandleRegistry.h; resolved once per frame by DrawSkyBackground()
+    // below via skyViewLutImageViewHandle/skyViewLutSamplerHandle.
     void DrawSkyBackgroundPass(Renderer& renderer, rg::CommandBuffer& cmd, const Mat4& viewProjection,
-        VkImageView skyViewLutView, VkSampler skyViewLutSampler, float eyeHeightKm, float planetRadiusKm,
+        ImageViewHandle skyViewLutView, SamplerHandle skyViewLutSampler, float eyeHeightKm, float planetRadiusKm,
         float skyExposure);
 
     // Render graph pass builders

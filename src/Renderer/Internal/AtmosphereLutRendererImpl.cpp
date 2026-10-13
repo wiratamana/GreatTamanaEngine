@@ -77,8 +77,8 @@ struct SkyBackgroundPushConstants {
 
 AtmosphereLutRenderer::Impl::~Impl()
 {
-    if (device != VK_NULL_HANDLE && skyBackgroundPipeline) {
-        vkDeviceWaitIdle(device);
+    if (ownerRenderer != nullptr && skyBackgroundPipeline) {
+        ownerRenderer->WaitForGpuIdle();
     }
     // Clean up manually created graphics descriptor set layout.
     if (ownerRenderer != nullptr) {
@@ -92,8 +92,6 @@ void AtmosphereLutRenderer::Impl::EnsureTransmittanceLutInitialized(
     if (transmittanceLutPipeline.has_value()) {
         return;
     }
-
-    device = renderer.GetVulkanContextInfo().device;
 
     // Bindings: 0 = AtmosphereParametersGpu, 1 = output storage image.
     transmittanceLutPipeline.emplace(renderer.CreateComputePipeline("shaders/AtmosphereTransmittanceLut.comp.spv"));
@@ -158,8 +156,6 @@ void AtmosphereLutRenderer::Impl::EnsureMultiScatteringLutInitialized(Renderer& 
         return;
     }
 
-    device = renderer.GetVulkanContextInfo().device;
-
     // Bindings: 0 = params, 1 = transmittance LUT sampler, 2 = output image.
     multiScatteringLutPipeline.emplace(
         renderer.CreateComputePipeline("shaders/AtmosphereMultiScatteringLut.comp.spv"));
@@ -219,8 +215,6 @@ void AtmosphereLutRenderer::Impl::EnsureSkyViewLutInitialized(Renderer& renderer
     if (skyViewLutPipeline.has_value()) {
         return;
     }
-
-    device = renderer.GetVulkanContextInfo().device;
 
     // Bindings: 0 = params, 1 = view uniforms, 2 = transmittance, 3 = multi-scattering, 4 = output image.
     skyViewLutPipeline.emplace(renderer.CreateComputePipeline("shaders/AtmosphereSkyViewLut.comp.spv"));
@@ -305,8 +299,6 @@ void AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveVolumeInitialized(Rende
     if (aerialPerspectiveVolumePipeline.has_value()) {
         return;
     }
-
-    device = renderer.GetVulkanContextInfo().device;
 
     // Bindings: 0 = params, 1 = view uniforms, 2 = transmittance, 3 = multi-scattering, 4 = output 3D image.
     aerialPerspectiveVolumePipeline.emplace(
@@ -393,8 +385,6 @@ void AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveCompositeInitialized(Re
         return;
     }
 
-    device = renderer.GetVulkanContextInfo().device;
-
     // Bindings: 0 = color, 1 = depth, 2 = volume, 3 = output image.
     aerialPerspectiveCompositePipeline.emplace(
         renderer.CreateComputePipeline("shaders/AtmosphereAerialPerspectiveComposite.comp.spv"));
@@ -446,7 +436,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass
     const Extent2D currentExtent = viewState.output->Extent();
     if (currentExtent.width != extent.width || currentExtent.height != extent.height) {
         // Wait idle before resizing render texture.
-        vkDeviceWaitIdle(device);
+        renderer.WaitForGpuIdle();
         viewState.output->Resize(static_cast<int>(extent.width), static_cast<int>(extent.height));
     }
 
@@ -536,7 +526,6 @@ void AtmosphereLutRenderer::Impl::EnsureSkyBackgroundPipelineInitialized(Rendere
     if (skyBackgroundPipeline) {
         return;
     }
-    device = renderer.GetVulkanContextInfo().device;
     ownerRenderer = &renderer;
 
     // Binding 0: Sky-View LUT combined image sampler.
@@ -560,11 +549,9 @@ void AtmosphereLutRenderer::Impl::EnsureSkyBackgroundPipelineInitialized(Rendere
 }
 
 void AtmosphereLutRenderer::Impl::DrawSkyBackgroundPass(Renderer& renderer, rg::CommandBuffer& cmd,
-    const Mat4& viewProjection, VkImageView skyViewLutView, VkSampler skyViewLutSampler, float eyeHeightKm,
+    const Mat4& viewProjection, ImageViewHandle skyViewLutView, SamplerHandle skyViewLutSampler, float eyeHeightKm,
     float planetRadiusKm, float skyExposure)
 {
-    device = renderer.GetVulkanContextInfo().device;
-
     Mat4 invViewProjection;
     if (!viewProjection.TryInverse(invViewProjection)) {
         return;
@@ -572,9 +559,12 @@ void AtmosphereLutRenderer::Impl::DrawSkyBackgroundPass(Renderer& renderer, rg::
 
     EnsureSkyBackgroundPipelineInitialized(renderer);
 
+    // Unwrap to native Vulkan only right here, at the single leaf call that
+    // actually needs it - GraphicsHandleRegistry.h is the only place these
+    // handles ever convert back to a real Vk* value.
     skyBackgroundDescriptorSet.Rewrite(
         std::vector<ComputeDescriptorWrite>{
-            ComputeDescriptorWrite::CombinedImageSampler(0, skyViewLutView, skyViewLutSampler),
+            ComputeDescriptorWrite::CombinedImageSampler(0, Native(skyViewLutView), Native(skyViewLutSampler)),
         });
 
     SkyBackgroundPushConstants pushConstants{};
@@ -600,8 +590,14 @@ void AtmosphereLutRenderer::Impl::DrawSkyBackground(Renderer& renderer, rg::Comm
         return;
     }
 
+    // Resolve this frame's raw Vk snapshot fields into stable, engine-owned
+    // handles once here - DrawSkyBackgroundPass() itself never sees a raw
+    // VkImageView/VkSampler.
+    const ImageViewHandle skyViewLutView = skyViewLutImageViewHandle.Resolve(snapshot->target.imageView);
+    const SamplerHandle skyViewLutSampler = skyViewLutSamplerHandle.Resolve(snapshot->sampler);
+
     // cameraPositionAtmosphere.y stores view height from planet center.
-    DrawSkyBackgroundPass(renderer, cmd, viewProjection, snapshot->target.imageView, snapshot->sampler,
+    DrawSkyBackgroundPass(renderer, cmd, viewProjection, skyViewLutView, skyViewLutSampler,
         frameUniforms.cameraPositionAtmosphere.y, params.planetRadiusKm, skyExposure);
 }
 

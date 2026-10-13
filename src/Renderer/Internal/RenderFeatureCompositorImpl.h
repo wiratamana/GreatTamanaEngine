@@ -31,7 +31,6 @@ struct RenderFeatureCompositor::Impl {
 
     Core& core;
     Renderer& renderer;
-    VkDevice device = VK_NULL_HANDLE;
     const std::thread::id mainThreadId = std::this_thread::get_id();
 
     // Lazily built by EnsureBlendPipelineInitialized() on first use.

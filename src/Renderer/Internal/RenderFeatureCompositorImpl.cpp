@@ -708,7 +708,7 @@ void RenderFeatureCompositor::Impl::EnsureTextureSized(
     if (currentExtent.width != extent.width || currentExtent.height != extent.height) {
         // Resizes are rare/user-driven (dragging the Game/Scene panel's
         // border) - a full device stall here is the simplest correct thing.
-        vkDeviceWaitIdle(device);
+        renderer.WaitForGpuIdle();
         texture->Resize(width, height);
     }
 }
@@ -827,8 +827,6 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
     const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
     const std::string viewName = isGameView ? "Game" : "Scene";
     const VkExtent2D extent = resolved->extent;
-
-    device = renderer.GetVulkanContextInfo().device;
 
     const char* seedName = namePool.SeedName(viewName);
     BlendStageState& seedState = EnsureBlendStageState(seedName, extent);
