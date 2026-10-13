@@ -1,4 +1,4 @@
-#include "GpuResourceFactory.h"
+﻿#include "GpuResourceFactory.h"
 
 #include "SceneServicesDescriptorSet.h" // Block 4 - gte::kSceneServiceSlotCount, for this file's own static_asserts.
 #include "VulkanFormatInfo.h" // ToVkFormat() - the one place this file translates PixelFormat->VkFormat for its own pre-construction capability checks.
@@ -163,7 +163,7 @@ GpuResourceFactory::~GpuResourceFactory()
 
 Buffer GpuResourceFactory::CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* debugName) const
 {
-    return CreateBuffer(size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+    return CreateBuffer(size, BufferUsage::StorageBuffer | BufferUsage::VertexBuffer,
         BufferMemoryUsage::GpuOnly, debugName);
 }
 
@@ -213,36 +213,36 @@ RenderTexture GpuResourceFactory::CreateRenderTexture(int width, int height, Pix
 }
 
 Buffer GpuResourceFactory::CreateBuffer(
-    VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage, const char* debugName) const
+    VkDeviceSize size, BufferUsage usage, BufferMemoryUsage memoryUsage, const char* debugName) const
 {
     return Buffer(m_allocator, m_memoryTracker, size, usage, memoryUsage, debugName);
 }
 
 Buffer GpuResourceFactory::CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
-    BufferMemoryUsage memoryUsage, VkBufferUsageFlags extraUsage, const char* debugName) const
+    BufferMemoryUsage memoryUsage, BufferUsage extraUsage, const char* debugName) const
 {
     const VkDeviceSize size = elementStride * static_cast<VkDeviceSize>(elementCount);
-    VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | extraUsage;
+    BufferUsage usage = BufferUsage::StorageBuffer | extraUsage;
     if (memoryUsage == BufferMemoryUsage::GpuOnly) {
         // Mirrors CreateDeviceLocalBuffer()'s own convention - so a
         // GpuOnly structured buffer can still be initialized once via a
         // caller-driven staging upload (ImmediateSubmit() + vkCmdCopyBuffer).
-        usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        usage |= BufferUsage::TransferDst;
     }
     return CreateBuffer(size, usage, memoryUsage, debugName);
 }
 
 Buffer GpuResourceFactory::CreateDeviceLocalBuffer(
-    const void* data, VkDeviceSize size, VkBufferUsageFlags usage, const char* debugName) const
+    const void* data, VkDeviceSize size, BufferUsage usage, const char* debugName) const
 {
     // The staging buffer is intentionally unnamed (nullptr) - it's a
     // throwaway that never outlives this function, so it's never worth
     // showing up as a named entry in a future Memory panel.
-    Buffer staging = CreateBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemoryUsage::CpuToGpu);
+    Buffer staging = CreateBuffer(size, BufferUsage::TransferSrc, BufferMemoryUsage::CpuToGpu);
     staging.Upload(data, static_cast<std::size_t>(size));
 
     Buffer deviceLocal =
-        CreateBuffer(size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemoryUsage::GpuOnly, debugName);
+        CreateBuffer(size, usage | BufferUsage::TransferDst, BufferMemoryUsage::GpuOnly, debugName);
 
     ImmediateSubmitInternal([&](VkCommandBuffer cmd) {
         VkBufferCopy copyRegion{};
@@ -362,7 +362,7 @@ Mesh GpuResourceFactory::CreateMesh(
     const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount, const char* debugName) const
 {
     Buffer vertexBuffer =
-        CreateDeviceLocalBuffer(vertexData, vertexDataSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, debugName);
+        CreateDeviceLocalBuffer(vertexData, vertexDataSize, BufferUsage::VertexBuffer, debugName);
     return Mesh(std::move(vertexBuffer), vertexCount);
 }
 
@@ -370,9 +370,9 @@ Mesh GpuResourceFactory::CreateMesh(const void* vertexData, VkDeviceSize vertexD
     const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount, const char* debugName) const
 {
     Buffer vertexBuffer =
-        CreateDeviceLocalBuffer(vertexData, vertexDataSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, debugName);
+        CreateDeviceLocalBuffer(vertexData, vertexDataSize, BufferUsage::VertexBuffer, debugName);
     Buffer indexBuffer =
-        CreateDeviceLocalBuffer(indexData, indexDataSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, debugName);
+        CreateDeviceLocalBuffer(indexData, indexDataSize, BufferUsage::IndexBuffer, debugName);
     return Mesh(std::move(vertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
 }
 
@@ -384,14 +384,14 @@ Mesh GpuResourceFactory::CreateSkinnedMesh(const void* vertexData, VkDeviceSize 
     // unlike CreateMesh()'s device-local vertex buffer - initialized with
     // the bind pose right away, then re-written every frame afterwards via
     // Mesh::UpdateVertexData() (see Game::UpdateSkeletalAnimators()).
-    Buffer vertexBuffer = CreateBuffer(vertexDataSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, BufferMemoryUsage::CpuToGpu,
+    Buffer vertexBuffer = CreateBuffer(vertexDataSize, BufferUsage::VertexBuffer, BufferMemoryUsage::CpuToGpu,
         debugName);
     vertexBuffer.Upload(vertexData, static_cast<std::size_t>(vertexDataSize));
 
     // The index buffer never changes as a mesh animates - keep it static/
     // device-local exactly like CreateMesh()'s own indexed overload.
     Buffer indexBuffer =
-        CreateDeviceLocalBuffer(indexData, indexDataSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, debugName);
+        CreateDeviceLocalBuffer(indexData, indexDataSize, BufferUsage::IndexBuffer, debugName);
 
     return Mesh(std::move(vertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
 }
@@ -400,14 +400,14 @@ std::shared_ptr<Buffer> GpuResourceFactory::CreateSharedMeshVertexBuffer(
     const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName) const
 {
     Buffer vertexBuffer =
-        CreateDeviceLocalBuffer(vertexData, vertexDataSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, debugName);
+        CreateDeviceLocalBuffer(vertexData, vertexDataSize, BufferUsage::VertexBuffer, debugName);
     return std::make_shared<Buffer>(std::move(vertexBuffer));
 }
 
 std::shared_ptr<Buffer> GpuResourceFactory::CreateSharedSkinnedMeshVertexBuffer(
     const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName) const
 {
-    Buffer vertexBuffer = CreateBuffer(vertexDataSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, BufferMemoryUsage::CpuToGpu,
+    Buffer vertexBuffer = CreateBuffer(vertexDataSize, BufferUsage::VertexBuffer, BufferMemoryUsage::CpuToGpu,
         debugName);
     vertexBuffer.Upload(vertexData, static_cast<std::size_t>(vertexDataSize));
     return std::make_shared<Buffer>(std::move(vertexBuffer));
@@ -418,7 +418,7 @@ Mesh GpuResourceFactory::CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer
     const char* debugName) const
 {
     Buffer indexBuffer =
-        CreateDeviceLocalBuffer(indexData, indexDataSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, debugName);
+        CreateDeviceLocalBuffer(indexData, indexDataSize, BufferUsage::IndexBuffer, debugName);
     return Mesh(std::move(sharedVertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
 }
 
@@ -438,7 +438,7 @@ Texture2D GpuResourceFactory::CreateTexture2D(
 
     // Unnamed - same reasoning as CreateDeviceLocalBuffer()'s own staging
     // buffer above: a throwaway that never outlives this function.
-    Buffer staging = CreateBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemoryUsage::CpuToGpu);
+    Buffer staging = CreateBuffer(size, BufferUsage::TransferSrc, BufferMemoryUsage::CpuToGpu);
     staging.Upload(pixelsRgba8, static_cast<std::size_t>(size));
 
     ImmediateSubmitInternal([&](VkCommandBuffer cmd) {

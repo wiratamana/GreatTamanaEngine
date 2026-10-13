@@ -6,10 +6,47 @@
 #include <string>
 #include <utility>
 
+namespace {
+
+// The ONLY place in this entire engine a gte::BufferUsage bitmask ever
+// becomes a real VkBufferUsageFlags value - see BufferUsage's own doc
+// comment (Buffer.h) for the full reasoning. Deliberately a plain
+// if-chain (not a switch - BufferUsage is a bitmask, not a scoped set of
+// mutually exclusive values) mirroring ToVkShaderStageFlags()'s own shape
+// (Renderer.cpp).
+VkBufferUsageFlags ToVkBufferUsageFlags(gte::BufferUsage usage) noexcept
+{
+    VkBufferUsageFlags flags = 0;
+    if (gte::HasUsage(usage, gte::BufferUsage::TransferSrc)) {
+        flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    }
+    if (gte::HasUsage(usage, gte::BufferUsage::TransferDst)) {
+        flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    }
+    if (gte::HasUsage(usage, gte::BufferUsage::UniformBuffer)) {
+        flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    }
+    if (gte::HasUsage(usage, gte::BufferUsage::StorageBuffer)) {
+        flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    }
+    if (gte::HasUsage(usage, gte::BufferUsage::IndexBuffer)) {
+        flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    }
+    if (gte::HasUsage(usage, gte::BufferUsage::VertexBuffer)) {
+        flags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    }
+    if (gte::HasUsage(usage, gte::BufferUsage::IndirectBuffer)) {
+        flags |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+    }
+    return flags;
+}
+
+} // namespace
+
 namespace gte {
 
 Buffer::Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDeviceSize size,
-    VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage, const char* debugName)
+    BufferUsage usage, BufferMemoryUsage memoryUsage, const char* debugName)
     : m_allocator(allocator)
     , m_tracker(std::move(tracker))
     , m_size(size)
@@ -17,7 +54,7 @@ Buffer::Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = size;
-    bufferInfo.usage = usage;
+    bufferInfo.usage = ToVkBufferUsageFlags(usage);
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VmaAllocationCreateInfo allocCreateInfo{};

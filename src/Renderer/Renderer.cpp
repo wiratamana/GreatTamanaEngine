@@ -1,4 +1,4 @@
-#include "Renderer.h"
+﻿#include "Renderer.h"
 
 #include "../Core/ISurfaceProvider.h"
 #include "RenderGraph/RenderGraph.h"
@@ -271,7 +271,7 @@ Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageA
 
     const VkDeviceSize size =
         VkDeviceSize(extent.width) * extent.height * depth * static_cast<VkDeviceSize>(bytesPerPixel);
-    Buffer readback = CreateBuffer(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemoryUsage::GpuToCpu, "CaptureReadback");
+    Buffer readback = CreateBuffer(size, BufferUsage::TransferDst, BufferMemoryUsage::GpuToCpu, "CaptureReadback");
 
     const VkImageSubresourceRange range{ aspect, 0, 1, 0, 1 };
     const rg::ResourceState transferSrcState = rg::RequiredStateFor(rg::ResourceAccess::TransferSrc, false);
@@ -331,13 +331,13 @@ std::optional<CapturedSwapchainPixels> Renderer::TakeLastCompletedSwapchainCaptu
 }
 
 Buffer Renderer::CreateBuffer(
-    VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage, const char* debugName) const
+    VkDeviceSize size, BufferUsage usage, BufferMemoryUsage memoryUsage, const char* debugName) const
 {
     return m_resources.CreateBuffer(size, usage, memoryUsage, debugName);
 }
 
 Buffer Renderer::CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
-    BufferMemoryUsage memoryUsage, VkBufferUsageFlags extraUsage, const char* debugName) const
+    BufferMemoryUsage memoryUsage, BufferUsage extraUsage, const char* debugName) const
 {
     return m_resources.CreateStructuredBuffer(elementStride, elementCount, memoryUsage, extraUsage, debugName);
 }
@@ -350,7 +350,7 @@ Buffer Renderer::CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* de
 
 
 Buffer Renderer::CreateDeviceLocalBuffer(
-    const void* data, VkDeviceSize size, VkBufferUsageFlags usage, const char* debugName) const
+    const void* data, VkDeviceSize size, BufferUsage usage, const char* debugName) const
 {
     return m_resources.CreateDeviceLocalBuffer(data, size, usage, debugName);
 }

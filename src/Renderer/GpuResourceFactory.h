@@ -48,15 +48,17 @@ public:
         bool allowDepthSampledAccess = false, bool createDepthCompanion = true,
         bool createColorImage = true) const;
 
-    // Buffers
-    Buffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage,
+    // Buffers - `usage`/`extraUsage` are this engine's own BufferUsage
+    // bitmask (Buffer.h), never a raw VkBufferUsageFlags - see BufferUsage's
+    // own doc comment for why.
+    Buffer CreateBuffer(VkDeviceSize size, BufferUsage usage, BufferMemoryUsage memoryUsage,
         const char* debugName = nullptr) const;
 
     Buffer CreateDeviceLocalBuffer(
-        const void* data, VkDeviceSize size, VkBufferUsageFlags usage, const char* debugName = nullptr) const;
+        const void* data, VkDeviceSize size, BufferUsage usage, const char* debugName = nullptr) const;
 
     Buffer CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
-        BufferMemoryUsage memoryUsage, VkBufferUsageFlags extraUsage = 0, const char* debugName = nullptr) const;
+        BufferMemoryUsage memoryUsage, BufferUsage extraUsage = BufferUsage::None, const char* debugName = nullptr) const;
 
     Buffer CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* debugName = nullptr) const;
 

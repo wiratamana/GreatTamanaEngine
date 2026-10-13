@@ -1,4 +1,4 @@
-// Unit tests for Phase 3's pure "Smart Planner" compilation algorithm
+﻿// Unit tests for Phase 3's pure "Smart Planner" compilation algorithm
 // (src/Renderer/RenderGraph/RenderGraphCompiler.h) - dependency resolution,
 // culling, deterministic topological ordering, and resource lifetimes. No
 // live VkDevice/Renderer involved at all - see
@@ -505,7 +505,7 @@ TEST(RenderGraphCompilerTest, FinalOutputHandleNeverProducedByAnythingDoesNotCra
 TEST(RenderGraphCompilerTest, BufferOnlyWriteSurvivesCullingOnlyWhenAReaderReachesATextureFinalOutput)
 {
     RenderGraphBuilder builder;
-    const BufferHandle bufferB = builder.CreateBuffer("B", BufferDesc{ 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    const BufferHandle bufferB = builder.CreateBuffer("B", BufferDesc{ 1024, BufferUsage::StorageBuffer });
     const TextureHandle textureT = builder.CreateTexture("T", MakeTextureDesc());
 
     builder.AddPass(
@@ -1238,7 +1238,7 @@ TEST(RenderGraphCompilerTest, MrtPassAndSeparateNonAttachmentBufferWritePassBoth
     const TextureHandle albedo = builder.CreateTexture("Albedo", MakeTextureDesc());
     const TextureHandle normal = builder.CreateTexture("Normal", MakeTextureDesc());
     const TextureHandle composited = builder.CreateTexture("Composited", MakeTextureDesc());
-    const BufferHandle bufferB = builder.CreateBuffer("B", BufferDesc{ 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    const BufferHandle bufferB = builder.CreateBuffer("B", BufferDesc{ 1024, BufferUsage::StorageBuffer });
     const TextureHandle bufferConsumerOutput = builder.CreateTexture("BufferConsumerOutput", MakeTextureDesc());
 
     builder.AddPass(

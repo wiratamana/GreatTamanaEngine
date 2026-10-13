@@ -103,19 +103,20 @@ struct GpuDrivenBatchKey {
 //     instance survives culling - regardless of which useCompaction mode a
 //     future dispatch selects, since a compacted array can never need MORE
 //     slots than the input has instances), extraUsage =
-//     VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT (the real Vulkan enumerator name -
-//     see PHASE3_COMPLETION_REPORT.md's own flagged documentation-only typo
-//     correction: PHASE3/PHASE4's own strategy docs wrote
-//     "VK_BUFFER_USAGE_INDIRECT_COMMAND_BIT", which does not exist).
+//     BufferUsage::IndirectBuffer (this engine's own flag - see Buffer.h -
+//     translated to the real VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT only
+//     inside Buffer.cpp; see PHASE3_COMPLETION_REPORT.md's own flagged
+//     documentation-only typo correction: PHASE3/PHASE4's own strategy docs
+//     wrote "VK_BUFFER_USAGE_INDIRECT_COMMAND_BIT", which does not exist).
 //   - countBuffer: BufferMemoryUsage::GpuOnly, one std::uint32_t, BOTH
-//     VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT (required by
+//     BufferUsage::IndirectBuffer (required by
 //     vkCmdDrawIndexedIndirectCount's own countBuffer argument) AND
-//     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT (needed for Shaders/FrustumCull.comp's
+//     BufferUsage::StorageBuffer (needed for Shaders/FrustumCull.comp's
 //     own atomicAdd/write access to it as a plain SSBO) - both flags
 //     together, on the SAME buffer, simultaneously, is legal Vulkan (see
 //     PHASE3_STRATEGY_DOUBLE_CHECK_REPORT.md's own resolution of this exact
 //     question) - CreateStructuredBuffer() already ORs in
-//     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT unconditionally, so only
+//     BufferUsage::StorageBuffer unconditionally, so only
 //     extraUsage needs to be passed explicitly. This class does NOT reset
 //     this buffer to zero itself anywhere - PHASE5 declares the real
 //     vkCmdFillBuffer reset pass every frame, immediately before dispatching

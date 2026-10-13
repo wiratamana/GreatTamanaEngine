@@ -1,4 +1,4 @@
-#include "AtmosphereLutRendererImpl.h"
+﻿#include "AtmosphereLutRendererImpl.h"
 
 #include "../../Features/Atmosphere/AtmosphereParameters.h"
 #include "../../Features/Atmosphere/AtmospherePassToggleLogic.h"
@@ -99,7 +99,7 @@ void AtmosphereLutRenderer::Impl::EnsureTransmittanceLutInitialized(
 
     // Shared parameter buffer across all LUT passes.
     atmosphereParametersBuffer.emplace(renderer.CreateBuffer(sizeof(AtmosphereParametersGpu),
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemoryUsage::CpuToGpu, "AtmosphereParametersGpu"));
+        BufferUsage::StorageBuffer, BufferMemoryUsage::CpuToGpu, "AtmosphereParametersGpu"));
     atmosphereParametersBuffer->Upload(&params, sizeof(AtmosphereParametersGpu));
 }
 
@@ -231,7 +231,7 @@ AtmosphereLutRenderer::Impl::SkyViewLutViewState& AtmosphereLutRenderer::Impl::E
 
     SkyViewLutViewState state;
     state.frameUniformsBuffer.emplace(renderer.CreateBuffer(sizeof(AtmosphereFrameUniforms),
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemoryUsage::CpuToGpu, "AtmosphereFrameUniforms"));
+        BufferUsage::StorageBuffer, BufferMemoryUsage::CpuToGpu, "AtmosphereFrameUniforms"));
 
     const auto insertedPair = skyViewLutViewStates.emplace(outputTextureName, std::move(state));
     return insertedPair.first->second;
@@ -317,7 +317,7 @@ AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveVolumeViewInitialized(Render
 
     AerialPerspectiveVolumeViewState state;
     state.frameUniformsBuffer.emplace(renderer.CreateBuffer(sizeof(AtmosphereFrameUniforms),
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemoryUsage::CpuToGpu, "AtmosphereFrameUniforms"));
+        BufferUsage::StorageBuffer, BufferMemoryUsage::CpuToGpu, "AtmosphereFrameUniforms"));
 
     // Persistent 3D volume texture owned per view.
     state.output.emplace(renderer.CreateVolumeTexture(kAerialPerspectiveVolumeWidth, kAerialPerspectiveVolumeHeight,

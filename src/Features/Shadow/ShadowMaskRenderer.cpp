@@ -40,7 +40,7 @@ ShadowMaskRenderer::ViewState& ShadowMaskRenderer::EnsureViewState(
     ViewState state;
     state.descriptorSet =
         ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(m_pipeline->ReflectedDescriptorSetLayout(0)));
-    state.paramsBuffer.emplace(renderer.CreateBuffer(sizeof(ShadowMaskParamsGpu), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+    state.paramsBuffer.emplace(renderer.CreateBuffer(sizeof(ShadowMaskParamsGpu), BufferUsage::StorageBuffer,
         BufferMemoryUsage::CpuToGpu, "ShadowMaskParams"));
 
     const int width = extent.width > 0 ? static_cast<int>(extent.width) : 1;

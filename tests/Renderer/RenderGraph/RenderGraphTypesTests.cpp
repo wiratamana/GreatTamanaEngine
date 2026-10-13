@@ -260,22 +260,22 @@ TEST(RenderGraphDescTest, TextureDescsBuiltFromSeparateRuntimeInputsStillCompare
 
 TEST(RenderGraphDescTest, IdenticalBufferDescsCompareEqual)
 {
-    const BufferDesc a{ 1024, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT };
-    const BufferDesc b{ 1024, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT };
+    const BufferDesc a{ 1024, BufferUsage::VertexBuffer };
+    const BufferDesc b{ 1024, BufferUsage::VertexBuffer };
     EXPECT_TRUE(a == b);
 }
 
 TEST(RenderGraphDescTest, BufferDescsDifferingInSizeCompareUnequal)
 {
-    const BufferDesc a{ 1024, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT };
-    const BufferDesc b{ 2048, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT };
+    const BufferDesc a{ 1024, BufferUsage::VertexBuffer };
+    const BufferDesc b{ 2048, BufferUsage::VertexBuffer };
     EXPECT_FALSE(a == b);
 }
 
 TEST(RenderGraphDescTest, BufferDescsDifferingInUsageCompareUnequal)
 {
-    const BufferDesc a{ 1024, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT };
-    const BufferDesc b{ 1024, VK_BUFFER_USAGE_INDEX_BUFFER_BIT };
+    const BufferDesc a{ 1024, BufferUsage::VertexBuffer };
+    const BufferDesc b{ 1024, BufferUsage::IndexBuffer };
     EXPECT_FALSE(a == b);
 }
 

@@ -20,12 +20,12 @@ void GpuDrivenBatchCache::EnsureCapacity(Renderer& renderer, const GpuDrivenBatc
 
     Entry entry{
         renderer.CreateStructuredBuffer(sizeof(GpuCullingInstanceInput), static_cast<std::uint32_t>(instanceCount),
-            BufferMemoryUsage::CpuToGpu, /*extraUsage=*/0, "GpuDrivenBatch.Input"),
+            BufferMemoryUsage::CpuToGpu, /*extraUsage=*/BufferUsage::None, "GpuDrivenBatch.Input"),
         renderer.CreateStructuredBuffer(sizeof(IndirectDrawCommand), static_cast<std::uint32_t>(instanceCount),
-            BufferMemoryUsage::GpuOnly, /*extraUsage=*/VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+            BufferMemoryUsage::GpuOnly, /*extraUsage=*/BufferUsage::IndirectBuffer,
             "GpuDrivenBatch.IndirectCommands"),
         renderer.CreateStructuredBuffer(sizeof(std::uint32_t), /*elementCount=*/1, BufferMemoryUsage::GpuOnly,
-            /*extraUsage=*/VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, "GpuDrivenBatch.VisibleCount"),
+            /*extraUsage=*/BufferUsage::IndirectBuffer, "GpuDrivenBatch.VisibleCount"),
         instanceCount,
         // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
         // PHASE6 - a fresh countReadbackBuffer here on the "brand new key"
@@ -35,7 +35,7 @@ void GpuDrivenBatchCache::EnsureCapacity(Renderer& renderer, const GpuDrivenBatc
         // actually used in that branch - kept here anyway so `Entry`'s own
         // aggregate-initializer list stays complete/valid either way.
         renderer.CreateStructuredBuffer(sizeof(std::uint32_t), /*elementCount=*/1, BufferMemoryUsage::GpuToCpu,
-            /*extraUsage=*/0, "GpuDrivenBatch.VisibleCountReadback"),
+            /*extraUsage=*/BufferUsage::None, "GpuDrivenBatch.VisibleCountReadback"),
     };
 
     if (found != m_entries.end()) {

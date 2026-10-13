@@ -1,4 +1,4 @@
-// Unit tests for Phase 8's pure "flatten a compiled graph into something
+﻿// Unit tests for Phase 8's pure "flatten a compiled graph into something
 // displayable" reshape (src/Renderer/RenderGraph/RenderGraphSnapshot.h). No
 // live VkDevice/Renderer/RenderGraph involved at all - every fixture below is
 // built through a real RenderGraphBuilder/RenderGraphCompiler::Compile()
@@ -700,7 +700,7 @@ TEST(RenderGraphSnapshotTest, ReadKindsAndWriteKindsMatchDeclaredResourceKindsIn
 {
     RenderGraphBuilder builder;
     const TextureHandle textureHandle = builder.CreateTexture("Tex", MakeTextureDesc());
-    const BufferHandle bufferHandle = builder.CreateBuffer("Buf", BufferDesc{ 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    const BufferHandle bufferHandle = builder.CreateBuffer("Buf", BufferDesc{ 256, BufferUsage::StorageBuffer });
     const VolumeTarget volumeTarget{};
     const VolumeTextureHandle volumeHandle =
         builder.ImportVolumeTexture("Vol", volumeTarget, VK_IMAGE_LAYOUT_UNDEFINED);

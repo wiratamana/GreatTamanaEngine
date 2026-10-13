@@ -205,7 +205,7 @@ void BoneViewerWindow::EnsurePipeline(Renderer& renderer)
     // class never includes SceneServicesDescriptorSet.h.
     constexpr VkDeviceSize kLocalDummyUniformBlockSize = 128;
     m_localUniformBuffer = std::make_unique<Buffer>(renderer.CreateBuffer(kLocalDummyUniformBlockSize,
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, BufferMemoryUsage::CpuToGpu, "BoneViewerDummyUniformBlock"));
+        BufferUsage::UniformBuffer, BufferMemoryUsage::CpuToGpu, "BoneViewerDummyUniformBlock"));
     const std::array<std::byte, kLocalDummyUniformBlockSize> zeroBytes{};
     m_localUniformBuffer->Upload(zeroBytes.data(), zeroBytes.size());
 
@@ -354,10 +354,10 @@ bool BoneViewerWindow::EnsureDataLoaded(
 
     try {
         m_vertexBuffer = std::make_unique<Buffer>(renderer.CreateDeviceLocalBuffer(
-            vertices.data(), vertices.size() * sizeof(PreviewVertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            vertices.data(), vertices.size() * sizeof(PreviewVertex), BufferUsage::VertexBuffer,
             "BoneViewerVertices"));
         m_indexBuffer = std::make_unique<Buffer>(renderer.CreateDeviceLocalBuffer(mesh->indices.data(),
-            mesh->indices.size() * sizeof(std::uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, "BoneViewerIndices"));
+            mesh->indices.size() * sizeof(std::uint32_t), BufferUsage::IndexBuffer, "BoneViewerIndices"));
     } catch (const std::exception&) {
         m_vertexBuffer.reset();
         m_indexBuffer.reset();

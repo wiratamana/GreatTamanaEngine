@@ -5,6 +5,7 @@
 #include "Vulkan/VulkanAllocator.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 
 namespace gte {
@@ -29,6 +30,43 @@ enum class BufferMemoryUsage {
     GpuToCpu,
 };
 
+// Engine-native buffer-usage flags - zero Vulkan dependency, usable from any
+// layer (Renderer::CreateBuffer()/CreateDeviceLocalBuffer()/
+// CreateStructuredBuffer(), BufferDesc (RenderGraph/RenderGraphTypes.h), and
+// every call site across Editor/Game/Features that used to pass a raw
+// VK_BUFFER_USAGE_*_BIT literal directly). Buffer.cpp is the ONLY place this
+// ever converts to a real VkBufferUsageFlags bitmask (see the anonymous
+// ToVkBufferUsageFlags() helper in Buffer.cpp) - mirrors PixelFormat's own
+// "one translation choke point" convention (see Core/PixelFormat.h and
+// Renderer/VulkanFormatInfo.h) applied to a bitmask instead of a plain enum.
+// Only the bits this engine actually has a real use for today are declared -
+// extend this (and ToVkBufferUsageFlags()) if a future feature genuinely
+// needs another VK_BUFFER_USAGE_*_BIT.
+enum class BufferUsage : std::uint32_t {
+    None = 0,
+    TransferSrc = 1u << 0,
+    TransferDst = 1u << 1,
+    UniformBuffer = 1u << 2,
+    StorageBuffer = 1u << 3,
+    IndexBuffer = 1u << 4,
+    VertexBuffer = 1u << 5,
+    IndirectBuffer = 1u << 6,
+};
+
+constexpr BufferUsage operator|(BufferUsage a, BufferUsage b) noexcept
+{
+    return static_cast<BufferUsage>(static_cast<std::uint32_t>(a) | static_cast<std::uint32_t>(b));
+}
+constexpr BufferUsage& operator|=(BufferUsage& a, BufferUsage b) noexcept
+{
+    a = a | b;
+    return a;
+}
+constexpr bool HasUsage(BufferUsage mask, BufferUsage flag) noexcept
+{
+    return (static_cast<std::uint32_t>(mask) & static_cast<std::uint32_t>(flag)) != 0u;
+}
+
 // RAII wrapper around a VkBuffer + its backing VmaAllocation (GPU memory,
 // sub-allocated by VMA - see Vulkan/VulkanAllocator.h): owns both for its
 // entire lifetime, created in the constructor, destroyed in the destructor.
@@ -51,8 +89,12 @@ public:
     // only ever observed by whichever debug-name observer is installed (see
     // GpuMemoryTracker::SetDebugNameObserver()), e.g. the Editor's
     // EditorGpuMemoryNameOverlay.
-    Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDeviceSize size,
-        VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage, const char* debugName = nullptr);
+    //
+    // `usage` is this engine's own BufferUsage bitmask (see above), NEVER a
+    // raw VkBufferUsageFlags - this constructor is the ONE place that value
+    // is translated into a real VkBufferUsageFlags bitmask (see Buffer.cpp).
+    Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDeviceSize size, BufferUsage usage,
+        BufferMemoryUsage memoryUsage, const char* debugName = nullptr);
     ~Buffer();
 
     Buffer(const Buffer&) = delete;

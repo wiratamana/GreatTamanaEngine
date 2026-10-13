@@ -160,7 +160,7 @@ TEST(RenderGraphBuilderTest, WriteTextureArrayLeavesArrayLayerIndexEmpty)
 TEST(RenderGraphBuilderTest, CreateBufferMintsDistinctHandlesEvenWithIdenticalDesc)
 {
     RenderGraphBuilder builder;
-    const BufferDesc desc{ 1024, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT };
+    const BufferDesc desc{ 1024, BufferUsage::VertexBuffer };
 
     const BufferHandle a = builder.CreateBuffer("First", desc);
     const BufferHandle b = builder.CreateBuffer("Second", desc);
@@ -196,7 +196,7 @@ TEST(RenderGraphBuilderTest, DifferentNamesSameDescStillCompareEqualDescs)
 TEST(RenderGraphBuilderTest, CreateBufferDifferentNamesSameDescStillCompareEqualDescs)
 {
     RenderGraphBuilder builder;
-    const BufferDesc desc{ 2048, VK_BUFFER_USAGE_INDEX_BUFFER_BIT };
+    const BufferDesc desc{ 2048, BufferUsage::IndexBuffer };
 
     const BufferHandle a = builder.CreateBuffer("IndexBufferA", desc);
     const BufferHandle b = builder.CreateBuffer("IndexBufferB", desc);
@@ -732,7 +732,7 @@ TEST(RenderGraphBuilderTest, AddComputePassWithMixedReadWriteKindsRecordsEachCor
     RenderGraphBuilder builder;
     const TextureHandle textureHandle =
         builder.CreateTexture("Tex", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
-    const BufferHandle bufferHandle = builder.CreateBuffer("Buf", BufferDesc{ 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    const BufferHandle bufferHandle = builder.CreateBuffer("Buf", BufferDesc{ 256, BufferUsage::StorageBuffer });
     const VolumeTarget volumeTarget{};
     const VolumeTextureHandle volumeHandle =
         builder.ImportVolumeTexture("Volume", volumeTarget, VK_IMAGE_LAYOUT_UNDEFINED);
@@ -770,7 +770,7 @@ TEST(RenderGraphBuilderTest, AddComputePassWithMixedReadWriteKindsRecordsEachCor
 TEST(RenderGraphBuilderTest, PassBuilderReadBufferAppendsWithGivenAccess)
 {
     RenderGraphBuilder builder;
-    const BufferHandle handle = builder.CreateBuffer("VertexData", BufferDesc{ 1024, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT });
+    const BufferHandle handle = builder.CreateBuffer("VertexData", BufferDesc{ 1024, BufferUsage::VertexBuffer });
 
     builder.AddPass(
         "ReadBufferPass",
@@ -787,7 +787,7 @@ TEST(RenderGraphBuilderTest, PassBuilderReadBufferAppendsWithGivenAccess)
 TEST(RenderGraphBuilderTest, PassBuilderWriteBufferAppendsWithGivenAccess)
 {
     RenderGraphBuilder builder;
-    const BufferHandle handle = builder.CreateBuffer("StagingData", BufferDesc{ 1024, VK_BUFFER_USAGE_TRANSFER_DST_BIT });
+    const BufferHandle handle = builder.CreateBuffer("StagingData", BufferDesc{ 1024, BufferUsage::TransferDst });
 
     builder.AddPass(
         "WriteBufferPass",
@@ -929,7 +929,7 @@ TEST(RenderGraphBuilderTest, ImportBufferIsTaggedAsImportedInCompiledGraphInput)
     RenderGraphBuilder builder;
     const VkBuffer fakeBuffer = reinterpret_cast<VkBuffer>(static_cast<std::uintptr_t>(0x8888));
     const BufferHandle imported = builder.ImportBuffer("SkinOutput", fakeBuffer, 512);
-    const BufferHandle transient = builder.CreateBuffer("Scratch", BufferDesc{ 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    const BufferHandle transient = builder.CreateBuffer("Scratch", BufferDesc{ 256, BufferUsage::StorageBuffer });
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.buffers.size(), 2u);
@@ -962,10 +962,10 @@ TEST(RenderGraphBuilderTest, ImportBufferMirrorsSizeIntoBufferDesc)
 TEST(RenderGraphBuilderTest, ImportedAndTransientBuffersShareOneContiguousHandleSpace)
 {
     RenderGraphBuilder builder;
-    const BufferHandle transientA = builder.CreateBuffer("A", BufferDesc{ 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    const BufferHandle transientA = builder.CreateBuffer("A", BufferDesc{ 128, BufferUsage::StorageBuffer });
     const BufferHandle imported = builder.ImportBuffer(
         "SkinOutput", reinterpret_cast<VkBuffer>(static_cast<std::uintptr_t>(0xBBBB)), 512);
-    const BufferHandle transientB = builder.CreateBuffer("B", BufferDesc{ 64, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT });
+    const BufferHandle transientB = builder.CreateBuffer("B", BufferDesc{ 64, BufferUsage::VertexBuffer });
 
     EXPECT_FALSE(transientA == imported);
     EXPECT_FALSE(imported == transientB);

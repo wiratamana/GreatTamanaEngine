@@ -87,18 +87,18 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
     const std::vector<GpuBindPoseVertex> packedBindPose = PackBindPoseVertices(data.bindPositions, data.bindNormals);
     Buffer bindPoseBuffer = renderer.CreateDeviceLocalBuffer(packedBindPose.data(),
         static_cast<VkDeviceSize>(packedBindPose.size() * sizeof(GpuBindPoseVertex)),
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, "GpuSkinningBindPose");
+        BufferUsage::StorageBuffer, "GpuSkinningBindPose");
 
     const std::vector<GpuSkinWeights> packedSkinWeights = PackSkinWeights(data.skinWeights);
     Buffer skinWeightsBuffer = renderer.CreateDeviceLocalBuffer(packedSkinWeights.data(),
         static_cast<VkDeviceSize>(packedSkinWeights.size() * sizeof(GpuSkinWeights)),
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, "GpuSkinningWeights");
+        BufferUsage::StorageBuffer, "GpuSkinningWeights");
 
     // The one genuinely per-frame-rewritten input - sized here, uploaded by
     // AnimationSystem::Update() every frame this model is animated in GPU
     // mode. See this phase's own strategy document, Step 3.3.
     Buffer boneMatricesBuffer = renderer.CreateStructuredBuffer(sizeof(Mat4),
-        static_cast<std::uint32_t>(data.skeleton.bones.size()), BufferMemoryUsage::CpuToGpu, 0,
+        static_cast<std::uint32_t>(data.skeleton.bones.size()), BufferMemoryUsage::CpuToGpu, BufferUsage::None,
         "GpuSkinningBoneMatrices");
 
     const bool anyTextured =
@@ -107,7 +107,7 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
     if (anyTextured) {
         const std::vector<GpuUv> packedUvs = PackUvs(data.uvs);
         uvBuffer.emplace(renderer.CreateDeviceLocalBuffer(packedUvs.data(),
-            static_cast<VkDeviceSize>(packedUvs.size() * sizeof(GpuUv)), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            static_cast<VkDeviceSize>(packedUvs.size() * sizeof(GpuUv)), BufferUsage::StorageBuffer,
             "GpuSkinningUv"));
     }
 

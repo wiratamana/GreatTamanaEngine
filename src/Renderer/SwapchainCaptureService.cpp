@@ -1,4 +1,4 @@
-#include "SwapchainCaptureService.h"
+﻿#include "SwapchainCaptureService.h"
 
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 
@@ -39,7 +39,7 @@ bool SwapchainCaptureService::RecordCaptureIfRequested(
         // belt-and-braces, not the primary rebuild path (see the phase
         // document's own Step 3.2, point 3).
         slot.readbackBuffer.reset();
-        slot.readbackBuffer.emplace(m_allocator, m_memoryTracker, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        slot.readbackBuffer.emplace(m_allocator, m_memoryTracker, size, BufferUsage::TransferDst,
             BufferMemoryUsage::GpuToCpu, "SwapchainCaptureReadback");
     }
 

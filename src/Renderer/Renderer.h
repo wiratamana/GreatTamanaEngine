@@ -433,8 +433,10 @@ public:
     // never need direct access to the VmaAllocator this Renderer owns
     // internally. See BufferMemoryUsage (Buffer.h) for how memoryUsage
     // picks between device-local and host-mapped allocation. debugName is
-    // optional/Editor-only - see Buffer's constructor comment.
-    Buffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, BufferMemoryUsage memoryUsage,
+    // optional/Editor-only - see Buffer's constructor comment. `usage` is
+    // this engine's own BufferUsage bitmask (Buffer.h), never a raw
+    // VkBufferUsageFlags.
+    Buffer CreateBuffer(VkDeviceSize size, BufferUsage usage, BufferMemoryUsage memoryUsage,
         const char* debugName = nullptr) const;
 
     // Convenience for the common "static GPU-only buffer initialized once"
@@ -443,33 +445,33 @@ public:
     // submits a one-shot command buffer (see ImmediateSubmit() below) that
     // copies it into a freshly created BufferMemoryUsage::GpuOnly Buffer of
     // the requested usage, and blocks until that copy finishes before
-    // returning it. `usage` should NOT include VK_BUFFER_USAGE_TRANSFER_DST_BIT
+    // returning it. `usage` should NOT include BufferUsage::TransferDst
     // - it's added automatically. debugName is optional/Editor-only, and
     // applies to the returned (destination) Buffer - the temporary staging
     // Buffer is unnamed, since it's gone before this call even returns.
     Buffer CreateDeviceLocalBuffer(
-        const void* data, VkDeviceSize size, VkBufferUsageFlags usage, const char* debugName = nullptr) const;
+        const void* data, VkDeviceSize size, BufferUsage usage, const char* debugName = nullptr) const;
 
     // Convenience factory for the `RWStructuredBuffer`/`StructuredBuffer`
     // compute-shader resource kinds (see
     // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) - a thin wrapper
     // over CreateBuffer() above that always ORs in
-    // VK_BUFFER_USAGE_STORAGE_BUFFER_BIT (plus VK_BUFFER_USAGE_TRANSFER_DST_BIT
+    // BufferUsage::StorageBuffer (plus BufferUsage::TransferDst
     // when `memoryUsage == BufferMemoryUsage::GpuOnly`, mirroring
     // CreateDeviceLocalBuffer()'s own convention). `elementStride`/
     // `elementCount` are plain bookkeeping (size = elementStride *
     // elementCount) - the returned Buffer stays exactly as untyped as
-    // ever, no `Buffer<T>` wrapper introduced. `extraUsage` (default 0)
-    // lets a caller OR in additional usage flags this same buffer also
-    // needs (e.g. VK_BUFFER_USAGE_INDIRECT_COMMAND_BIT for an indirect-draw
-    // buffer a culling compute shader ALSO writes as a plain
+    // ever, no `Buffer<T>` wrapper introduced. `extraUsage` (default
+    // BufferUsage::None) lets a caller OR in additional usage flags this
+    // same buffer also needs (e.g. BufferUsage::IndirectBuffer for an
+    // indirect-draw buffer a culling compute shader ALSO writes as a plain
     // RWStructuredBuffer). The RWStructuredBuffer-vs-StructuredBuffer
     // (read-write vs. read-only) distinction is enforced entirely at the
     // GLSL (`readonly buffer` vs. plain `buffer`) and render-graph
     // (ComputeShaderRead vs. ComputeShaderWrite) levels, never by a
     // different Vulkan object here.
     Buffer CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
-        BufferMemoryUsage memoryUsage, VkBufferUsageFlags extraUsage = 0, const char* debugName = nullptr) const;
+        BufferMemoryUsage memoryUsage, BufferUsage extraUsage = BufferUsage::None, const char* debugName = nullptr) const;
 
     // GPU Vertex Skinning campaign, Phase 4 (Per-Model Resource Management -
     // see task_manager/gpu_skinning/GPU_SKINNING_PHASE4_PER_MODEL_RESOURCE_MANAGEMENT_STRATEGY_v1.md).

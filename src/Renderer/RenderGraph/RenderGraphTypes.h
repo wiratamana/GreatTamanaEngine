@@ -17,7 +17,7 @@
 // API built on top of these types).
 //
 // Deliberately Vulkan-header-PRESENT-but-Vulkan-call-FREE: VkFormat/
-// VkDeviceSize/VkBufferUsageFlags are the only Vulkan-header types used
+// VkDeviceSize are the only remaining raw Vulkan-header types used
 // here (via a minimal <volk.h> include, exactly like FrameRecorder.h's own
 // DrawItem - see that file's header comment), and no Vulkan device/queue
 // call of any kind appears anywhere in this file. This keeps the whole
@@ -38,6 +38,7 @@
 #include <volk.h>
 
 #include "RenderGraphHandles.h"
+#include "../Buffer.h" // BufferUsage - BufferDesc::usage below, engine-native, never a raw VkBufferUsageFlags.
 #include "../../Core/GraphicsHandles.h" // SamplerHandle/DescriptorSetLayoutHandle - PendingBinding/PassRecord below.
 #include "../../Core/PixelFormat.h" // TextureDesc/VolumeTextureDesc/TextureArrayDesc::format below - engine-native, never a raw VkFormat.
 
@@ -237,7 +238,10 @@ struct TextureDesc {
 
 struct BufferDesc {
     VkDeviceSize size = 0;
-    VkBufferUsageFlags usage = 0;
+    // Engine-native BufferUsage bitmask (Buffer.h) - never a raw
+    // VkBufferUsageFlags, mirroring TextureDesc::usage's own TextureUsage
+    // convention immediately above.
+    BufferUsage usage = BufferUsage::None;
 
     friend bool operator==(const BufferDesc&, const BufferDesc&) noexcept = default;
 };

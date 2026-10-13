@@ -254,7 +254,7 @@ SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
     // Binding 8's own zero-filled dummy fallback - see this member's own
     // doc comment in the header for why Rewrite()'s per-slot loop cannot
     // cover it.
-    , m_dummyGlobalUniformBuffer(renderer.CreateBuffer(kSceneGlobalUniformBlockSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+    , m_dummyGlobalUniformBuffer(renderer.CreateBuffer(kSceneGlobalUniformBlockSize, BufferUsage::UniformBuffer,
           BufferMemoryUsage::CpuToGpu, "SceneGlobalUniformBlockDummy"))
 {
     // The one reserved "scene services" descriptor-set layout - 8 combined-
@@ -406,7 +406,7 @@ void SceneServicesDescriptorSet::UpdateGlobalUniformBlock(rg::RenderViewId view,
     const bool freshlyCreatedBuffer = (entry == nullptr);
     if (freshlyCreatedBuffer) {
         m_perViewUniformBuffers.push_back(PerViewUniformBuffer{ view,
-            m_renderer->CreateBuffer(kSceneGlobalUniformBlockSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            m_renderer->CreateBuffer(kSceneGlobalUniformBlockSize, BufferUsage::UniformBuffer,
                 BufferMemoryUsage::CpuToGpu, "SceneGlobalUniformBlock") });
         entry = &m_perViewUniformBuffers.back();
     }

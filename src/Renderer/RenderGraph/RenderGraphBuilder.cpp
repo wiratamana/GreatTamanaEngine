@@ -1,4 +1,4 @@
-#include "RenderGraphBuilder.h"
+﻿#include "RenderGraphBuilder.h"
 
 #include "../../Core/Logging.h" // GTE_LOG_ERROR for GetOrCreatePersistentTexture()'s own
     // "no persistent cache installed" refusal branch.
@@ -305,7 +305,7 @@ BufferHandle RenderGraphBuilder::ImportBuffer(const char* name, VkBuffer externa
     // pool-matching purposes.
     BufferDesc desc;
     desc.size = size;
-    desc.usage = 0;
+    desc.usage = BufferUsage::None;
 
     BufferImportInfo importInfo;
     importInfo.isImported = true;
