@@ -11,11 +11,11 @@
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
 #include "Pipeline.h"
-#include "RenderGraph/RenderGraphBarrierPlanner.h" // gte::rg::ResourceState - needed by CaptureImagePixels() below (network-impl-4, Phase 3).
+#include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "RenderGraph/RenderGraphTypes.h"
 #include "RenderTexture.h"
 #include "Texture2D.h"
-#include "TextureArray2D.h" // better-render-pass-3 campaign, BLOCK5
+#include "TextureArray2D.h"
 #include "VolumeTexture.h"
 #include "Vulkan/VulkanAllocator.h"
 #include "Vulkan/VulkanDevice.h"
@@ -53,278 +53,53 @@ class RenderFeatureCompositor;
 class SceneServicesDescriptorSet;
 class VolumeTexturePreviewRenderer;
 
-// Owns the entire Vulkan pipeline for a surface (via ISurfaceProvider -
-// editor-core-separation-1 campaign, PHASE10, see
-// task_manager/editor-core-separation-1/PHASE10_ISURFACEPROVIDER_INTERFACE_AND_WINDOW_INVERSION.md):
-// instance, surface, device, and allocator (acquired piece-by-piece in the
-// constructor, each piece itself RAII-owned - see Vulkan/*), plus three
-// collaborators that do the actual work and are released automatically, in
-// reverse order, in the destructor:
-//   - FramePresenter (FramePresenter.h): owns the swapchain and every
-//     per-frame/per-image synchronization object, and implements
-//     RenderOffscreen()/PresentViaRenderGraph()'s actual Vulkan recording/
-//     submission.
-//   - GpuResourceFactory (GpuResourceFactory.h): the Buffer/RenderTexture/
-//     Pipeline/Mesh factories, GPU memory tracking, and ImmediateSubmit().
-//   - FrameRecorder (FrameRecorder.h): this frame's clear color plus the
-//     queued Submit() draw list, and the dynamic-rendering command
-//     sequence RenderOffscreen() records with (see also
-//     Submit()/IssueDrawCommand() for the render-graph-driven Present path).
-// Renderer itself is now just a thin façade: every public method below
-// simply forwards to whichever collaborator actually implements it, so
-// Game/main code is completely unaffected by this split - every signature
-// is identical to before.
-//
-// Public API is Clear()/RenderOffscreen()/PresentViaRenderGraph() - the
-// swapchain path is driven entirely through a real gte::rg::RenderGraph
-// (see PresentViaRenderGraph()/BeginGraphPassRecording() below and
-// RENDERGRAPH_CAMPAIGN_COMPLETION_REPORT.md) rather than a standalone
-// Present() method; Clear() only records the desired clear color, actually
-// applied the next time RenderOffscreen() (or a render-graph pass) clears
-// its target.
-//
-// Also owns (via FramePresenter/GpuResourceFactory) the machinery to render
-// into an off-screen RenderTexture instead of the swapchain
-// (RenderOffscreen()/CreateRenderTexture()) - the primitive behind
-// Unity-style Editor "Game"/"Scene" panels: a camera renders into a
-// RenderTexture, which the Editor then displays inside an ImGui::Image()
-// panel, while a final/release build (no Editor compiled in) instead
-// renders the same scene straight into the swapchain via
-// PresentViaRenderGraph(), fullscreen, with no Editor/ImGui involved at
-// all. Callers (Game, a future Editor module, ...) never touch raw Vulkan
-// handles for this - RenderTarget/RenderTexture are the abstraction
-// boundary.
+// High-level Vulkan renderer façade managing device lifecycle, frames, and resources.
 class Renderer {
 public:
     explicit Renderer(ISurfaceProvider& surfaceProvider);
     ~Renderer();
 
+    // Non-copyable and non-movable.
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
-
-    // Never moved - FramePresenter/GpuResourceFactory each hold a raw
-    // VulkanDevice* back into this Renderer's own m_device sub-object, so a
-    // member-wise move would leave them pointing at the SOURCE Renderer's
-    // VulkanDevice, dangling once it's destroyed. Nothing in this engine
-    // moves a Renderer (Core holds it by value and is itself non-movable),
-    // so deleting is correct - no rebind logic needed for zero real callers.
     Renderer(Renderer&&) = delete;
     Renderer& operator=(Renderer&&) = delete;
 
-    // Sets the color the render target will be cleared to on the next
-    // RenderOffscreen() call (0-255 per channel).
+    // Sets the clear color for subsequent render operations.
     void Clear(std::uint8_t r = 0, std::uint8_t g = 0, std::uint8_t b = 0, std::uint8_t a = 255);
 
-    // Renders into an off-screen RenderTexture instead of the swapchain:
-    // clears it to the last Clear() color, runs recordExtra (if set)
-    // between the clear and the final shader-read-layout transition (i.e.
-    // between what used to be vkCmdBeginRendering/vkCmdEndRendering) - the
-    // seam a future overlay pass (the Editor's own ImGui chrome, a debug
-    // UI, ...) hooks its draw commands into, without Renderer ever needing
-    // to know what ImGui - or anything else - is. Leaves the texture in
-    // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, ready to sample (e.g. wrap
-    // in an ImGui descriptor set and display via ImGui::Image() - the
-    // Unity-style Editor "Game"/"Scene" panel use case).
-    //
-    // Deliberately synchronous for now (blocks until the GPU finishes) -
-    // simplest correct thing while this is only used a couple of times a
-    // frame for Editor panels; revisit (e.g. pipeline against its own
-    // frames-in-flight) if it ever shows up as a bottleneck.
-    //
-    // Always returns a real DrawStats, never std::nullopt.
-    //
-    // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - `timingSlot`
-    // tells FramePresenter which of GpuTimingSlot::Offscreen0/Offscreen1
-    // this call's GPU timing belongs to (Application::Run()'s "Game"/
-    // "Scene" blocks), or std::nullopt to explicitly opt OUT of GPU-timing
-    // this call entirely (e.g. src/Editor/AssetPreviewMesh.cpp's Inspector
-    // mesh preview, or BoneViewerWindow's own viewport - neither is one of
-    // the Profiler's three named passes, and must never silently share a
-    // query slot with, or overwrite the cached timing of, "Game View"/
-    // "Scene View"). Deliberately NO DEFAULT VALUE - every caller must state
-    // its intent explicitly; see this document's own "Overall API surface"/
-    // design decision log for why std::nullopt is one of two equally
-    // explicit choices here, never an implicit fallback. Once this call
-    // returns, the resolved GpuTimingSample (if any) is available via
-    // Renderer::LastGpuTiming(*timingSlot) - never bundled into this
-    // function's own return value (see this document's own design decision
-    // log for why).
+    // Synchronously renders into an offscreen render target.
     DrawStats RenderOffscreen(RenderTexture& target, std::optional<GpuTimingSlot> timingSlot,
         const std::function<void(rg::CommandBuffer&)>& recordExtra = {});
 
-    // --- Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md)
-    // - Render Graph integration ---------------------------------------
-    //
-    // Begins recording FramePresenter's dedicated offscreen command buffer
-    // (the same one RenderOffscreen() above uses) - waits on its fence,
-    // resets it, and calls vkBeginCommandBuffer(). The caller (Application::Run())
-    // is expected to declare/execute one or more RenderGraph passes against
-    // the returned VkCommandBuffer (see RenderPasses.h's AddGameViewPass()/
-    // AddSceneViewPass()), then call EndOffscreenRenderGraphRecording() to
-    // end/submit/block until the GPU finishes - mirroring RenderOffscreen()'s
-    // own synchronous behavior, just generalized to cover MULTIPLE render-
-    // graph passes recorded into ONE submission instead of one call per
-    // RenderTexture. Never call Renderer::RenderOffscreen() (the legacy,
-    // FrameRecorder-based path - still used by src/Editor/AssetPreviewMesh.cpp/
-    // BoneViewerWindow.cpp's own independent previews) between this call and
-    // EndOffscreenRenderGraphRecording() - both share the SAME underlying
-    // command buffer/fence.
+    // Begins recording into the dedicated offscreen command buffer.
     VkCommandBuffer BeginOffscreenRenderGraphRecording();
 
-    // Ends/submits the command buffer BeginOffscreenRenderGraphRecording()
-    // began, and blocks until the GPU finishes (synchronous, matching
-    // RenderOffscreen()'s own documented behavior above).
+    // Ends recording and submits the offscreen command buffer, blocking until complete.
     void EndOffscreenRenderGraphRecording();
 
-    // Executes the pipelined swapchain-present regime via `graph` - handles
-    // acquire/resize/skip (minimized window, still-pending resize, just-
-    // recreated swapchain) via the render graph instead of FrameRecorder.
-    // Returns std::nullopt under those same circumstances - never touches
-    // `graph` at all in that case. `needsSwapchainDepth`
-    // mirrors the same lazy swapchain-depth-buffer provisioning decision
-    // FramePresenter used to make from FrameRecorder's old queued-draws
-    // state - true when this frame's Present pass will draw
-    // real, depth-tested engine geometry directly into the swapchain image
-    // (the release-build/"both Game and Scene panels hidden" case - see
-    // RenderPasses.h's AddPresentPass()), false otherwise (the common
-    // Editor case, where nothing but ImGui's own never-depth-tested chrome
-    // is drawn here). `build` receives the swapchain's own freshly-imported
-    // TextureHandle (see RenderGraphBuilder::ImportTexture()) and returns
-    // the finalOutputs root set - mirroring RenderGraph::Execute()'s own
-    // `build` parameter. On success, returns the "Present" pass's own
-    // DrawStats (see RenderGraph::LastKnownStatsFor() - "Present" must
-    // match RenderPasses.h's AddPresentPass() pass name literal exactly).
+    // Executes swapchain presentation passes using the render graph.
     std::optional<DrawStats> PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwapchainDepth,
         const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build);
 
-    // While a render-graph pass is being recorded (see RenderPasses.h),
-    // Submit() below issues its Vulkan draw command DIRECTLY against `cmd`
-    // (via FrameRecorder::IssueDrawCommand()) instead of queuing into the
-    // legacy FrameRecorder draw list - this is the one surgical change that
-    // lets Game/RenderSystem keep calling Renderer::Submit() completely
-    // unaware anything changed underneath them (see
-    // RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md, Step 3.1).
-    // `recordDrawStats` is called once per Submit() call while active,
-    // mirroring PassContext::recordDraw's own shape exactly (see
-    // RenderGraph.h) - so a pass's own DrawStats tally stays fused to the
-    // exact call site that issues the real draw, per this engine's existing
-    // AccumulateDrawStats() correctness rule (see AGENTS.md, "Profiling").
-    // Must be paired with EndGraphPassRecording() before this same Renderer
-    // is used for anything else - RenderPasses.h's AddGameViewPass()/
-    // AddSceneViewPass()/AddPresentPass() already do this correctly, for
-    // the exact duration of their own `execute` callback.
+    // Binds an active command buffer for direct draw submissions during a graph pass.
     void BeginGraphPassRecording(
         VkCommandBuffer cmd, std::function<void(bool, std::uint32_t, std::uint32_t)> recordDrawStats);
     void EndGraphPassRecording() noexcept;
 
-    // The color format this Renderer's swapchain actually negotiated at
-    // runtime (see VulkanSwapchain.cpp's ChooseSurfaceFormat) - the single
-    // shared source of truth every default-format RenderTexture (and every
-    // pipeline built against it) should agree on, so the same pipeline can
-    // legally draw into either the swapchain or an off-screen RenderTexture
-    // created with CreateRenderTexture()'s default format below. See
-    // AGENTS.md ("Render Target Format Matching").
+    // Formats used by the current swapchain and depth buffer.
     VkFormat ColorFormat() const noexcept;
-
-    // The depth-buffer format every pipeline/DepthBuffer this Renderer
-    // creates is built against (see VulkanDevice::PickDepthFormat() - the
-    // single source of truth, queried once from the physical device rather
-    // than hardcoded). The exact depth counterpart to ColorFormat() above -
-    // see AGENTS.md ("Render Target Format Matching"). Every render target
-    // this engine draws into (the swapchain, or an off-screen RenderTexture)
-    // has its own real DepthBuffer at this format, so real (non-coplanar)
-    // 3D geometry - the built-in primitive shapes (Renderer/Primitives/
-    // PrimitiveMeshGenerator.h) - is correctly depth-tested/occluded.
     VkFormat DepthFormat() const noexcept;
-
-    // ColorFormat()/DepthFormat() as engine-native PixelFormat, for callers
-    // outside src/Renderer that cannot name a VkFormat.
     PixelFormat ColorPixelFormat() const noexcept;
     PixelFormat DepthPixelFormat() const noexcept;
 
-    // Factory for off-screen render targets, so callers (Game, a future
-    // Editor module, ...) never need direct access to the
-    // VkPhysicalDevice/VkDevice this Renderer owns internally. `format`
-    // defaults to VK_FORMAT_UNDEFINED, meaning "match ColorFormat() exactly"
-    // (resolved in Renderer.cpp) - this is what guarantees a pipeline built
-    // once against ColorFormat() can render into either the swapchain or a
-    // default-format RenderTexture without a VkPipelineRenderingCreateInfo
-    // mismatch. Only pass an explicit format for a target that's
-    // deliberately different (e.g. a future HDR intermediate) and will have
-    // its own dedicated pipeline variant built for that exact format. See
-    // AGENTS.md ("Render Target Format Matching"). debugName is
-    // optional/Editor-only - see RenderTexture's constructor comment.
-    // depthDebugName likewise optionally names the companion DepthBuffer
-    // separately (e.g. "GameView" / "GameViewDepth") - left null if the
-    // depth side isn't worth naming individually.
-    //
-    // `allowStorageImageAccess` (default false - every existing call site
-    // is unaffected) opts the returned RenderTexture's color image into
-    // VK_IMAGE_USAGE_STORAGE_BIT - an `RWTexture` (see
-    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) a compute shader
-    // can `imageStore` directly into. When true, this throws
-    // std::runtime_error if `format` doesn't actually support
-    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT on this physical device (see
-    // Vulkan/FormatCapabilities.h's SupportsStorageImageUsage()) - never a
-    // silent fallback. Per that same document's own scope note, every
-    // storage-capable RenderTexture in this campaign is externally-owned/
-    // persistent (imported into a render graph via ImportTexture()) -
-    // never requested as a transient, render-graph-pooled resource.
-    //
-    // `allowDepthSampledAccess` (default false) - Atmosphere Scattering +
-    // Aerial Perspective campaign, Phase 7
-    // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md)
-    // - forwards straight through to RenderTexture's own identically-named
-    // constructor parameter, opting this RenderTexture's companion
-    // DepthBuffer into VK_IMAGE_USAGE_SAMPLED_BIT plus a real (nearest-
-    // filter) VkSampler, so a later pass can bind it as `sampler2D`. See
-    // DepthBuffer.h/RenderTexture.h for the full reasoning.
-    //
-    // `createDepthCompanion` (default true, editor-core-separation-27
-    // campaign, BIG STEP 3 of 4 - Persistent Resource Cache) forwards
-    // straight through to RenderTexture's own identically-named constructor
-    // parameter - when false, the returned RenderTexture carries NO depth
-    // companion at all (a true GPU-memory statement, not just a
-    // render-graph bookkeeping one). The one real consumer is
-    // RenderGraphPersistentResourceCache (a later phase of that same
-    // campaign, called via RenderGraphResourcePool::AcquireTexture()'s own
-    // existing call chain through this method); every other caller keeps
-    // getting a depth companion, byte-for-byte unchanged.
-    //
-    // `createColorImage` (default true, better-render-pass-3 campaign,
-    // BLOCK 2 - Arbitrary Render Views) forwards straight through to
-    // RenderTexture's own identically-named constructor parameter - the
-    // COLOR-side mirror of createDepthCompanion immediately above; when
-    // false, the returned RenderTexture carries NO color image at all. The
-    // one real consumer is RenderViewRegistry (a later phase of that same
-    // campaign); every other caller keeps getting a color image,
-    // byte-for-byte unchanged.
-    // `format` is this engine's own PixelFormat (never a raw VkFormat) -
-    // defaults to PixelFormat::Undefined, meaning "match ColorPixelFormat()
-    // exactly" (resolved in Renderer.cpp) - this is what guarantees a
-    // pipeline built once against ColorFormat() can render into either the
-    // swapchain or a default-format RenderTexture without a
-    // VkPipelineRenderingCreateInfo mismatch. Only pass an explicit format
-    // for a target that's deliberately different (e.g. a future HDR
-    // intermediate) and will have its own dedicated pipeline variant built
-    // for that exact format. See AGENTS.md ("Render Target Format
-    // Matching"). debugName is optional/Editor-only - see RenderTexture's
-    // constructor comment. depthDebugName likewise optionally names the
-    // companion DepthBuffer separately (e.g. "GameView" / "GameViewDepth") -
-    // left null if the depth side isn't worth naming individually.
+    // Creates an offscreen render target.
     RenderTexture CreateRenderTexture(int width, int height, PixelFormat format = PixelFormat::Undefined,
         const char* debugName = nullptr, const char* depthDebugName = nullptr,
         bool allowStorageImageAccess = false, bool allowDepthSampledAccess = false,
         bool createDepthCompanion = true, bool createColorImage = true) const;
 
-    // network-impl-2 campaign, Phase 3
-    // (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) - synchronous,
-    // on-demand pixel readback from a RenderTexture, the primitive behind
-    // GET /get_game_view. `pixels` is tightly packed width*height*4 bytes in
-    // whatever `format` actually reports - the caller (Application::Run())
-    // decides whether a BGRA->RGBA swizzle is needed (see
-    // Encoding::ConvertBgraToRgbaInPlace()) based on that real format, never
-    // an assumption.
+    // Holds raw image pixels read back from the GPU.
     struct CapturedRawPixels {
         std::vector<std::uint8_t> pixels;
         int width = 0;
@@ -332,505 +107,100 @@ public:
         VkFormat format = VK_FORMAT_UNDEFINED;
     };
 
-    // Synchronously reads back `texture`'s CURRENT color pixels - the caller
-    // is responsible for only calling this once it independently knows
-    // `texture`'s contents are final for this frame (e.g. right after
-    // Renderer::EndOffscreenRenderGraphRecording() returns for it - see
-    // Application::Run()). Uses a throwaway, on-demand host-visible readback
-    // Buffer + Renderer::ImmediateSubmit() - a genuinely EXTRA GPU
-    // submission/wait beyond the frame's own normal recording, acceptable
-    // ONLY because this is invoked at most once per network request, never
-    // unconditionally every frame.
-    //
-    // `texture` must currently be in VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    // (the state Renderer::RenderOffscreen()/the render-graph offscreen
-    // regime always leaves a RenderTexture in) - this call transitions it to
-    // TRANSFER_SRC_OPTIMAL, copies it, and transitions it back to
-    // SHADER_READ_ONLY_OPTIMAL before returning, so a later ImGui sample of
-    // the SAME texture this same frame is unaffected.
-    //
-    // network-impl-4 campaign, Phase 3 - now implemented purely in terms of
-    // CaptureImagePixels() below (aspect=COLOR, previousState=ShaderRead) -
-    // zero signature/behavior change for this method or its existing caller.
+    // Synchronously reads back color pixels from a RenderTexture.
     CapturedRawPixels CaptureRenderTexturePixels(RenderTexture& texture) const;
 
-    // network-impl-4 campaign, Phase 3
-    // (task_manager/network-impl-4/PHASE3_GENERIC_IMAGE_READBACK_AND_DEPTH_VISUALIZATION.md) -
-    // the generalized, PUBLIC primitive behind BOTH CaptureRenderTexturePixels()
-    // above (which now just calls this with aspect=COLOR and a ShaderRead
-    // previous state) and GET /get_texture's own named-texture capture path
-    // (Phase 4, Application::Run()), which calls this directly with whatever
-    // RenderGraphDebugTextureRegistry (src/Renderer/RenderGraph/
-    // RenderGraphDebugTextureRegistry.h) reports for an arbitrary registered
-    // name's color OR depth half. Public (not private) specifically because
-    // Phase 4's caller lives in a different class (Application) than Renderer
-    // itself.
-    //
-    // `previousState` MUST be the image's actual, real current ResourceState -
-    // guessing wrong is a silent correctness bug (see network-impl-2's
-    // PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md's own analogous
-    // warning for RenderGraphBuilder::ImportTexture()'s `currentLayout`
-    // parameter). Restores the image to the SAME `previousState` afterward,
-    // unconditionally - see this phase's own Step 2 analysis for why this is
-    // cheap, always-safe insurance even in cases where nothing currently
-    // depends on the restored value being exactly right.
-    //
-    // Bytes/texel is derived internally from `format` via
-    // BytesPerTexelForFormat() (see Renderer/VulkanFormatInfo.h) - an
-    // unsupported format returns an empty CapturedRawPixels (pixels stays
-    // empty) instead of asserting on an arbitrary caller-supplied size.
-    //
-    // `zOffset`/`depth` (trailing, defaulted) let a caller read back an
-    // arbitrary Z-slice range of a 3D image instead of only Z=0 - every
-    // existing 2D caller leaves both at their defaults (0/1), reproducing
-    // today's exact behavior byte-for-byte.
+    // Synchronously reads back raw pixel data from any GPU image.
     CapturedRawPixels CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format, Extent2D extent,
         const rg::ResourceState& previousState, std::uint32_t zOffset = 0, std::uint32_t depth = 1) const;
 
-    // A full, blocking vkDeviceWaitIdle() - see PHASE0_MASTER_STRATEGY.md's
-    // Locked Design Decision 1. NEVER call this from any per-frame/
-    // performance-sensitive path - it is reserved for the rare, explicit,
-    // human/LLM-triggered GET /get_texture request path (Phase 4) only. Every
-    // OTHER capture endpoint in this engine (/get_swapchain, /get_game_view)
-    // deliberately adds ZERO GPU stall and must stay that way - this method
-    // must never be called from anywhere those two endpoints' own code paths
-    // reach.
-    //
-    // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
-    // BIG-STEP 2), PHASE4 - a SECOND sanctioned caller now exists:
-    // ProjectAssemblyHost::UnloadProjectAssembly(), which MUST call this
-    // BEFORE any Project-Assembly-owned GPU resource can be released via
-    // FreeLibrary()'s own static-destructor path (BIG-STEP 0, Hazard 4) -
-    // this remains NOT safe to call from any per-frame path; it is reserved
-    // exclusively for these two rare, explicit, synchronous teardown/capture
-    // call sites.
+    // Blocks until all GPU execution finishes. Call only during teardown or manual captures.
     void WaitForGpuIdle() const;
 
-    // network-impl-2 campaign, Phase 4
-    // (PHASE4_SWAPCHAIN_PIPELINED_CAPTURE_SERVICE.md) - the pipelined
-    // counterpart of CaptureRenderTexturePixels() above, for the REAL
-    // swapchain image going through PresentViaRenderGraph()'s pipelined,
-    // multi-frame-in-flight Present regime. Unlike
-    // CaptureRenderTexturePixels() (synchronous, adds a real extra GPU
-    // submission/wait), this adds ZERO extra GPU work: RequestSwapchainCapture()
-    // merely marks a capture as wanted, and the actual readback copy/read
-    // happens automatically, piggy-backing on synchronization
-    // PresentViaRenderGraph() already performs every frame for an unrelated,
-    // pre-existing reason - see SwapchainCaptureService's own class comment
-    // (FramePresenter.h/SwapchainCaptureService.h). A capture requested this
-    // way is NOT fulfilled by the SAME PresentViaRenderGraph() call it was
-    // requested from - it completes kFramesInFlight (2) real frames later.
+    // Schedules an asynchronous swapchain readback.
     void RequestSwapchainCapture();
 
-    // Returns (and clears) whatever swapchain capture completed during THIS
-    // Renderer's own most recent PresentViaRenderGraph() call -
-    // std::nullopt if none completed that call. Call this right after
-    // PresentViaRenderGraph() returns (see Application::Run()) - never
-    // before, since it reflects only that one call's own result.
+    // Retrieves and clears the most recently completed swapchain capture.
     std::optional<CapturedSwapchainPixels> TakeLastCompletedSwapchainCapture();
 
-    // Factory for GPU buffers (vertex/index/uniform/staging), so callers
-    // never need direct access to the VmaAllocator this Renderer owns
-    // internally. See BufferMemoryUsage (Buffer.h) for how memoryUsage
-    // picks between device-local and host-mapped allocation. debugName is
-    // optional/Editor-only - see Buffer's constructor comment. `usage` is
-    // this engine's own BufferUsage bitmask (Buffer.h), never a raw
-    // VkBufferUsageFlags.
+    // Buffer factory methods.
     Buffer CreateBuffer(VkDeviceSize size, BufferUsage usage, BufferMemoryUsage memoryUsage,
         const char* debugName = nullptr) const;
 
-    // Convenience for the common "static GPU-only buffer initialized once"
-    // case (vertex/index buffers, immutable uniform data, ...): uploads
-    // `data` into a temporary host-visible staging Buffer, then records and
-    // submits a one-shot command buffer (see ImmediateSubmit() below) that
-    // copies it into a freshly created BufferMemoryUsage::GpuOnly Buffer of
-    // the requested usage, and blocks until that copy finishes before
-    // returning it. `usage` should NOT include BufferUsage::TransferDst
-    // - it's added automatically. debugName is optional/Editor-only, and
-    // applies to the returned (destination) Buffer - the temporary staging
-    // Buffer is unnamed, since it's gone before this call even returns.
     Buffer CreateDeviceLocalBuffer(
         const void* data, VkDeviceSize size, BufferUsage usage, const char* debugName = nullptr) const;
 
-    // Convenience factory for the `RWStructuredBuffer`/`StructuredBuffer`
-    // compute-shader resource kinds (see
-    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) - a thin wrapper
-    // over CreateBuffer() above that always ORs in
-    // BufferUsage::StorageBuffer (plus BufferUsage::TransferDst
-    // when `memoryUsage == BufferMemoryUsage::GpuOnly`, mirroring
-    // CreateDeviceLocalBuffer()'s own convention). `elementStride`/
-    // `elementCount` are plain bookkeeping (size = elementStride *
-    // elementCount) - the returned Buffer stays exactly as untyped as
-    // ever, no `Buffer<T>` wrapper introduced. `extraUsage` (default
-    // BufferUsage::None) lets a caller OR in additional usage flags this
-    // same buffer also needs (e.g. BufferUsage::IndirectBuffer for an
-    // indirect-draw buffer a culling compute shader ALSO writes as a plain
-    // RWStructuredBuffer). The RWStructuredBuffer-vs-StructuredBuffer
-    // (read-write vs. read-only) distinction is enforced entirely at the
-    // GLSL (`readonly buffer` vs. plain `buffer`) and render-graph
-    // (ComputeShaderRead vs. ComputeShaderWrite) levels, never by a
-    // different Vulkan object here.
     Buffer CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
         BufferMemoryUsage memoryUsage, BufferUsage extraUsage = BufferUsage::None, const char* debugName = nullptr) const;
 
-    // GPU Vertex Skinning campaign, Phase 4 (Per-Model Resource Management -
-    // see task_manager/gpu_skinning/GPU_SKINNING_PHASE4_PER_MODEL_RESOURCE_MANAGEMENT_STRATEGY_v1.md).
-    // See GpuResourceFactory::CreateGpuSkinningTargetBuffer() for the full
-    // reasoning - a device-local buffer usable BOTH as a compute shader's
-    // storage-buffer output AND as a real vertex-input-assembler vertex
-    // buffer, for a GPU-skinned model's per-shared-vertex-buffer-group
-    // output.
     Buffer CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* debugName = nullptr) const;
 
-
-    // Records a one-time-submit command buffer (recordFn), submits it to
-    // the graphics queue via Synchronization2 (VkSubmitInfo2/vkQueueSubmit2),
-    // and blocks until it finishes. The primitive behind
-    // CreateDeviceLocalBuffer() above, but also useful directly for future
-    // one-off GPU work (image layout transitions, mipmap generation, ...)
-    // that doesn't belong inside RenderOffscreen()'s/a render-graph pass's
-    // per-frame recording.
-    //
-    // Must NEVER be called re-entrantly from inside an active graph-pass
-    // recording (see BeginGraphPassRecording()/EndGraphPassRecording()) -
-    // CommandBuffer::Dispatch()/Draw() mutate the one, non-reentrant
-    // m_currentGraphPassCmd member, which a nested call would silently
-    // clobber. Asserted in debug builds.
+    // Executes a one-shot command buffer immediately on the graphics queue.
     void ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& recordFn) const;
 
-    // The ONE choke point every direct vkQueueSubmit2 against this
-    // Renderer's graphics queue must go through (forwards to
-    // VulkanDevice::SubmitToGraphicsQueue(), mutex-guarded). Only for
-    // Renderer-module-internal collaborators that cannot hold a private
-    // VulkanDevice reference of their own (e.g. rg::RenderGraphTimestampPool,
-    // constructed by rg::RenderGraph) - everyone else should prefer
-    // ImmediateSubmit().
+    // Submits work directly to the graphics queue.
     VkResult SubmitToGraphicsQueue(const VkSubmitInfo2& submit, VkFence fence) const;
 
-    // Call once per frame, before Game::Update()/Render() - clears any draw
-    // items queued last frame via Submit() (see below) so this frame always
-    // starts from an empty queue. Also guards against a queue growing
-    // unbounded across frames where nothing ever consumes it (e.g. a
-    // minimized window with no Editor).
+    // Prepares the renderer for a new frame and clears queued draw commands.
     void BeginFrame();
 
-    // Queues one draw call - a Pipeline plus the Mesh to draw with it, plus
-    // the world matrix to draw it with (defaults to Mat4::Identity()) and
-    // the view-projection matrix of whichever camera this draw's target is
-    // being rendered through (also defaults to Mat4::Identity(), meaning
-    // "no camera" - vertices land directly in clip space, this engine's
-    // original pre-Camera triangle-demo behavior) - both pushed to the
-    // shader via vkCmdPushConstants (see Pipeline.h's push constant range)
-    // as `pc.viewProj * pc.model * vec4(position, 0.0, 1.0)`. This is the
-    // seam that lets Game/RenderSystem record draws without ever touching a
-    // VkCommandBuffer or knowing Vulkan exists at all: the caller holds
-    // onto Pipeline/Mesh objects (built via CreatePipeline()/CreateMesh())
-    // and just calls this once per object it wants drawn each frame -
-    // Renderer is the only thing that ever issues the actual
-    // vkCmdBindPipeline/vkCmdPushConstants/vkCmdBindVertexBuffers/vkCmdDraw
-    // calls. Not persistent - must be called again every frame an object
-    // should be drawn (there is no retained scene graph inside Renderer
-    // itself - see src/Game/RenderSystem.h for where that now lives, one
-    // layer up). Called once per VISIBLE render target per frame (e.g. once
-    // for the Editor's "Game" view, again for its "Scene" view) with that
-    // target's own aspect-ratio-derived viewProjMatrix - see
-    // RenderSystem::Draw(). `materialDescriptorSet` (default
-    // DescriptorSetHandle::Invalid - engine-owned, not a raw VkDescriptorSet)
-    // is bound as descriptor set 0 before the draw when non-null - only
-    // meaningful (and expected to be set) for a Pipeline built with
-    // VertexLayout::PositionNormalUv/useMaterialTexture (see Pipeline.h) -
-    // see RenderSystem::Draw() for how a MeshRenderer's optional
-    // TextureHandle resolves into this.
-    //
-    // `sceneServicesSet` (Global Scene Services Descriptor Set campaign,
-    // better-render-pass-6, PHASE5 - default DescriptorSetHandle::Invalid, trailing) is
-    // bound as descriptor set 1 before the draw, but ONLY when `pipeline`
-    // itself actually carries a sceneServicesSetLayout
-    // (`pipeline.HasSceneServicesSet()`, PHASE3) - passing a non-null value
-    // against a Pipeline with no set = 1 is silently ignored (gated INSIDE
-    // this method's own body), never forwarded as-is; see
-    // Pipeline::HasSceneServicesSet() for why this gate must live here, not
-    // at a lower layer. Rebinding an unchanged set every Submit() call is
-    // harmless (Vulkan tolerates it) even though the REAL rewrite
-    // (`SceneServicesDescriptorSet::Rewrite()`, PHASE7) only happens once
-    // per view per frame - the real owning instance is Core's ONE
-    // SceneServicesDescriptorSet, resolved once per view by the
-    // `"RenderOpaque"` provider (PHASE7) and threaded down through
-    // RenderSystem::Draw()/Game::Render() (PHASE6) as one call-scoped
-    // constant, never per-entity.
+    // Queues a mesh draw call for the active frame.
     void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
         const Mat4& viewProjMatrix = Mat4::Identity(),
         DescriptorSetHandle materialDescriptorSet = DescriptorSetHandle::Invalid,
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid);
 
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE2 (task_manager/render-pass-5/
-    // PHASE2_INSTANCED_DRAW_PRIMITIVE_AND_INDIRECT_SUBMIT.md) - the
-    // indirect-draw sibling of Submit() above: issues exactly ONE
-    // vkCmdDrawIndexedIndirectCount/vkCmdDrawIndexedIndirect call instead of
-    // N individual Submit() calls, reading each surviving instance's own
-    // model matrix from `instanceBufferDescriptorSet` (set 0) inside the
-    // vertex shader itself (see Shaders/MeshInstanced.vert), indexed by
-    // gl_InstanceIndex - `pipeline` MUST have been built with
-    // VertexLayout::PositionNormalInstanced (Pipeline.h) and `mesh` MUST be
-    // indexed (Mesh::HasIndexBuffer()) - this campaign is
-    // VkDrawIndexedIndirectCommand-only (Locked Design Decision 6,
-    // PHASE0_MASTER_STRATEGY.md).
-    //
-    // `indirectBuffer`/`indirectOffset` point at a buffer of
-    // IndirectDrawCommand entries (src/Renderer/IndirectDrawTypes.h, a
-    // byte-for-byte mirror of VkDrawIndexedIndirectCommand) - PHASE3
-    // onward's real culling compute shader is the production WRITER of this
-    // buffer; this phase's own throwaway smoke test (section 3.6) is a
-    // hand-authored CPU array instead.
-    //
-    // `countBuffer` == VK_NULL_HANDLE means "use the fixed-`maxDrawCount`,
-    // no-count fallback" (vkCmdDrawIndexedIndirect) - the degenerate-padded
-    // path (Locked Design Decision 4). A non-null `countBuffer` means "use
-    // the real counted path" (vkCmdDrawIndexedIndirectCount), but this is
-    // ALSO gated on SupportsDrawIndirectCount() below - passing a non-null
-    // `countBuffer` on a device that doesn't actually support it is a
-    // caller-side logic error (PHASE4/5's own per-batch resource code
-    // decides which mode a batch uses, ONCE, based on this same capability
-    // query, never per-frame): asserted in debug builds, falls back safely
-    // (the fixed-`maxDrawCount` path) in release.
-    //
-    // Pushes `viewProjMatrix` at the SAME push-constant offset every other
-    // draw uses (the `model` half of that same 128-byte range is left as
-    // whatever convenient value - never read by Shaders/MeshInstanced.vert).
-    //
-    // Like Dispatch(), there is deliberately NO legacy/queued fallback path -
-    // must be called while a render-graph pass is being recorded (see
-    // BeginGraphPassRecording()/EndGraphPassRecording()); asserts in debug
-    // builds and is a safe no-op in release otherwise.
-    //
-    // Never touches DrawStats::drawCallCount/triangleCount - see
-    // DrawStats.h's own "unknown/indirect" bucket (`indirectDrawCount`) doc
-    // comment for why an indirect draw's real object/triangle count is
-    // fundamentally GPU-only knowledge this method must never block to read
-    // back.
-    //
-    // `sceneServicesSet` (default VK_NULL_HANDLE) is bound at set = 1 when
-    // `pipeline.HasSceneServicesSet()` - the same gate Submit() applies.
+    // Issues an indirect draw call from GPU-side command and count buffers.
     void SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
         VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset,
         DescriptorSetHandle instanceBufferDescriptorSet,
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
         const Mat4& viewProjMatrix = Mat4::Identity());
 
-    // Factory for graphics pipelines, so callers never need direct access
-    // to the VkDevice this Renderer owns internally, and always get a
-    // pipeline built against the exact color format this Renderer actually
-    // renders with (see ColorFormat() and AGENTS.md, "Render Target Format
-    // Matching"). vertexShaderSpirvPath/fragmentShaderSpirvPath point at
-    // compiled SPIR-V binaries - see cmake/CompileShaders.cmake, which
-    // compiles src/Shaders/*.vert/*.frag into "<exe dir>/shaders/*.spv" at
-    // build time. `vertexLayout` (see Pipeline.h's VertexLayout) defaults to
-    // VertexLayout::PositionColor - every existing call site is unaffected;
-    // pass VertexLayout::PositionNormal for a pipeline meant to draw a Mesh
-    // built from the indexed CreateMesh() overload below (e.g.
-    // Game::CreateMeshEntityFromGtaFile()'s own pipeline), or
-    // VertexLayout::PositionNormalUv (with `useMaterialTexture` = true) for
-    // one meant to sample a per-submesh MaterialTexture - see
-    // CreateMaterialTexture2D() below.
-    // `debugName` (optional, default nullptr) is a purely cosmetic,
-    // human-readable Pipeline identity label, forwarded straight through
-    // to Pipeline's own constructor - see Pipeline.h's own `debugName`
-    // comment and RenderSystem::Draw()'s FrameDebuggerCaptureContext
-    // consumer (task_manager/frame-debugger-3, PHASE1).
-    // `useInstanceBuffer` (GPU-Driven Frustum Culling + Indirect Draw
-    // campaign, render-pass-5, PHASE2 - default false, trailing) mirrors
-    // `useMaterialTexture` above for the SEPARATE, unrelated
-    // VertexLayout::PositionNormalInstanced concept - see
-    // GpuResourceFactory::CreatePipeline()'s own matching comment.
-    // `sceneServicesSetLayout` (Global Scene Services Descriptor Set
-    // campaign, better-render-pass-6, PHASE4 - default VK_NULL_HANDLE,
-    // trailing) is forwarded straight through to GpuResourceFactory::
-    // CreatePipeline()'s own matching new parameter, which forwards it
-    // straight through to Pipeline's own new `sceneServicesSetLayout`
-    // constructor parameter - zero interpretation at either layer. The real
-    // owning instance is Core's ONE SceneServicesDescriptorSet (wired in
-    // PHASE7); the caller passes SceneServicesDescriptorSet::Layout()'s
-    // result straight in. Every existing call site is unaffected (new
-    // trailing defaulted parameter).
+    // Graphics pipeline factories.
     Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
         VertexLayout vertexLayout = VertexLayout::PositionColor, bool useMaterialTexture = false,
         const char* debugName = nullptr, bool useInstanceBuffer = false,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE) const;
 
-    // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
-    // N-color-format sibling of CreatePipeline() above: builds a real
-    // multi-color-attachment Pipeline (up to gte::rg::kMaxColorAttachments -
-    // see RenderGraphTypes.h) against a caller-supplied `colorFormats` list,
-    // rather than always exactly ColorFormat() (a single value). A genuine
-    // multi-target pass (e.g. a future G-buffer pass) may write into
-    // targets of differing formats, so this overload does NOT auto-inject
-    // ColorFormat() the way the single-format overload above does - the
-    // caller decides every entry. Forwards straight into
-    // GpuResourceFactory::CreatePipeline()'s own parallel span overload.
-    // Every other parameter (`vertexLayout`/`useMaterialTexture`/
-    // `debugName`/`useInstanceBuffer`/`sceneServicesSetLayout`) behaves
-    // identically to the single-format overload above.
-    // No existing call site needs to change - this is a genuinely new,
-    // additive capability with zero real consumers until a future phase's
-    // own G-buffer pass (task_manager/mrt-1/PHASE4_GBUFFER_VALIDATION_PASS_AND_SHADER.md).
     Pipeline CreatePipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
         bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE) const;
 
-    // Factory for compute pipelines (Phase 2 -
-    // COMPUTE_PHASE2_PIPELINE_INFRASTRUCTURE_STRATEGY_v1.md) - so callers
-    // never need direct access to the VkDevice this Renderer owns
-    // internally, mirroring CreatePipeline() above but for
-    // VK_PIPELINE_BIND_POINT_COMPUTE. `shaderSpirvPath` points at a
-    // compiled .comp SPIR-V binary (see cmake/CompileShaders.cmake).
-    // `descriptorSetLayouts`/`pushConstantRange` are forwarded straight to
-    // ComputePipeline's own constructor - see ComputePipeline.h for the
-    // full reasoning behind both (in particular why this takes a plural
-    // list of set layouts, unlike CreatePipeline()'s single optional
-    // `materialSetLayout`, and why the push-constant layout is a plain,
-    // per-shader-documented convention rather than this engine's fixed
-    // 128-byte graphics one).
+    // Compute pipeline and descriptor factories.
     ComputePipeline CreateComputePipeline(const std::string& shaderSpirvPath,
         const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts = {},
         std::optional<VkPushConstantRange> pushConstantRange = std::nullopt) const;
 
-    // Factory for a compute descriptor set (Phase 3 -
-    // COMPUTE_PHASE3_DESCRIPTOR_BINDING_MODEL_STRATEGY_v1.md) - so callers
-    // never need direct access to the VkDevice/descriptor pool this
-    // Renderer owns internally, mirroring CreateComputePipeline() above.
-    // `layout` should be built via a Vulkan/DescriptorSetLayoutBuilder.h
-    // instance constructed against GetVulkanContextInfo().device. Wrap the
-    // returned VkDescriptorSet in a ComputeDescriptorSet
-    // (Renderer/ComputeDescriptorSet.h) and call its own Rewrite() to
-    // actually point it at real buffer/image resources before first use -
-    // see GpuResourceFactory::AllocateComputeDescriptorSet() for the full
-    // reasoning (in particular why the returned set is never individually
-    // freed).
     ComputeDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
-
-    // Opaque-layout-input sibling of AllocateComputeDescriptorSet() above -
-    // takes a DescriptorSetLayoutHandle (CreateDescriptorSetLayout() below)
-    // instead of forcing a caller outside src/Renderer to ALSO hand-build a
-    // second, duplicate raw VkDescriptorSetLayout purely to allocate
-    // against. Same shared pool, never individually freed.
     ComputeDescriptorSet AllocateComputeDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const;
 
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE2 - the ONE shared instance-buffer descriptor-set-layout every
-    // VertexLayout::PositionNormalInstanced Pipeline is built with (see
-    // CreatePipeline()'s `useInstanceBuffer` above) - forwards straight to
-    // GpuResourceFactory::InstanceBufferDescriptorSetLayout(). A real
-    // VkDescriptorSet built against this layout (pointing at a real
-    // per-batch culling-input buffer) is allocated via
-    // AllocateComputeDescriptorSet() above.
+    // Layout shared by instanced indirect draw buffers.
     VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept;
 
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE2 - real, queried-once device capability for
-    // vkCmdDrawIndexedIndirectCount (VulkanDevice::SupportsDrawIndirectCount())
-    // - mirrors LastGpuTiming()/GetVulkanContextInfo().timestampCapability's
-    // own "queried once in the constructor, cached, const accessor, never
-    // re-checked" shape. SubmitIndirect() above queries this itself to pick
-    // its own real-vs-fallback branch; PHASE4/5's own per-batch resource
-    // code decides ONCE, per batch, which of SubmitIndirect()'s two code
-    // paths to use, based on this - NEVER re-queried per-frame. Per Locked
-    // Design Decision 4 (PHASE0_MASTER_STRATEGY.md), this campaign's own
-    // code must never mention or depend on which branch any one
-    // development/CI machine happens to support - the choice is made
-    // EXCLUSIVELY by this runtime capability probe.
+    // Hardware capability checks.
     bool SupportsDrawIndirectCount() const noexcept;
-
-    // editor-core-separation-26 campaign, PHASE6 (Locked Decision 4) - real,
-    // queried-once device capability for depth-format vkCmdBlitImage2
-    // support (VulkanDevice::SupportsDepthBlit()) - mirrors
-    // SupportsDrawIndirectCount() immediately above exactly, for a
-    // different capability. See VulkanDevice::SupportsDepthBlit()'s own doc
-    // comment for the full reasoning.
     bool SupportsDepthBlit() const noexcept;
 
-    // Phase 4 (COMPUTE_PHASE4_DISPATCH_EXECUTION_STRATEGY_v2.md) - the
-    // compute sibling of Submit() above: issues a real vkCmdDispatch
-    // against whichever render-graph pass is currently being recorded (see
-    // BeginGraphPassRecording()/EndGraphPassRecording()). Binds `pipeline`
-    // (VK_PIPELINE_BIND_POINT_COMPUTE), optionally binds `descriptorSet` as
-    // descriptor set 0 (skipped when VK_NULL_HANDLE), optionally pushes
-    // `pushConstantBytes` bytes from `pushConstants` at offset 0 with
-    // VK_SHADER_STAGE_COMPUTE_BIT (skipped when `pushConstantBytes == 0`),
-    // then dispatches `groupCountX`*`groupCountY`*`groupCountZ` work
-    // groups - `groupCountY`/`groupCountZ` default to 1 for a flat 1D
-    // dispatch. Compute a correct `groupCountX`/`Y`/`Z` via
-    // ComputeDispatch.h's ComputeGroupCount()/ComputeGroupCount3D(), never
-    // plain integer division (see that header's own comment for why).
-    //
-    // Unlike Submit() above, there is deliberately NO legacy/queued
-    // fallback path - compute dispatch is introduced ONLY as a render-
-    // graph-pass operation from day one (no pre-existing non-graph compute
-    // call site to preserve backward compatibility with). Calling this
-    // OUTSIDE of a BeginGraphPassRecording()/EndGraphPassRecording()
-    // bracket has nothing sensible to do at all: asserts in debug builds,
-    // and is a safe no-op in release (see COMPUTE_PHASE4_DISPATCH_EXECUTION_STRATEGY_v2.md's
-    // own Step 6, point 3).
-    //
-    // No PassContext::recordDispatch callback is involved (see that same
-    // document's Step 6, point 1) - a compute pass's own `execute`
-    // callback calls this directly, the same way a graphics pass's
-    // `execute` callback already calls Renderer::Submit() directly today.
-    // Also deliberately does NOT touch PassGpuStats::drawStats (see Step
-    // 6, point 2) - there is no meaningful compute equivalent of a
-    // triangle count yet; a pure-compute pass's GPU TIME is still recorded
-    // automatically by RenderGraph::ExecuteCompiledGraph()'s own
-    // unconditional per-pass timestamp bracket, with zero changes needed
-    // here.
+    // Dispatches a compute pipeline within an active render graph pass.
     void Dispatch(const ComputePipeline& pipeline, VkDescriptorSet descriptorSet, const void* pushConstants,
         std::uint32_t pushConstantBytes, std::uint32_t groupCountX, std::uint32_t groupCountY = 1,
         std::uint32_t groupCountZ = 1);
 
-    // Factory for meshes: a vertex buffer + vertex count, NO index buffer -
-    // see Mesh.h's non-indexed constructor. So callers never need direct
-    // access to the VmaAllocator this Renderer owns internally. vertexData/
-    // vertexDataSize describe a plain CPU-side array of Vertex (Vertex.h);
-    // uploaded once via CreateDeviceLocalBuffer(), same as any other
-    // static GPU-only buffer. debugName is optional/Editor-only - see
-    // Buffer's constructor comment.
+    // Mesh creation helpers.
     Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
         const char* debugName = nullptr) const;
 
-    // Indexed overload of CreateMesh() above - for a real imported mesh
-    // whose CPU-side data already came with a triangle-index list (see
-    // src/Assets/MeshData.h::indices), e.g. a decoded *.gta AssetType::Mesh
-    // payload. `vertexData`/`vertexDataSize` describe a plain CPU-side array
-    // of MeshVertex (MeshVertex.h) here, NOT Vertex - a Pipeline this Mesh
-    // is drawn with must have been built with VertexLayout::PositionNormal
-    // (see CreatePipeline() above) for the two to actually agree on layout.
-    // Both the vertex AND index buffers are uploaded via
-    // CreateDeviceLocalBuffer(), same as the non-indexed overload.
-    // debugName is optional/Editor-only and applies to BOTH buffers.
     Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
         const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
-    // See GpuResourceFactory::CreateSkinnedMesh() for the full reasoning -
-    // same shape as the indexed CreateMesh() overload above, but the
-    // returned Mesh's vertex buffer is CPU-writable afterwards via
-    // Mesh::UpdateVertexData(), for a rigged model whose pose changes
-    // every frame (see Game::UpdateSkeletalAnimators(), src/Game/Game.cpp).
     Mesh CreateSkinnedMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
         const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
-    // Multithreaded CPU-skinning optimization, Stage 1 (see
-    // task_manager/optimizing_multi_thread_cpu_skinning/
-    // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md) - see
-    // GpuResourceFactory::CreateSharedMeshVertexBuffer()/
-    // CreateSharedSkinnedMeshVertexBuffer()/CreateMeshFromSharedVertexBuffer()
-    // for the full reasoning: lets several material "parts" of the same
-    // imported model share ONE underlying GPU vertex buffer instead of each
-    // getting its own full, independently-uploaded copy of identical vertex
-    // data - only each part's own index buffer/range stays genuinely
-    // distinct. See Mesh.h's shared-vertex-buffer constructor and
-    // VertexBufferIdentity().
+    // Shared vertex buffer helpers for multi-part meshes.
     std::shared_ptr<Buffer> CreateSharedMeshVertexBuffer(
         const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName = nullptr) const;
 
@@ -841,189 +211,47 @@ public:
         const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
-    // Factory for a static, immutable, CPU-authored texture (e.g. a decoded
-    // PNG/JPEG asset - see src/Editor/AssetPreviewTexture.h, the first
-    // consumer of this) built once from already-decoded RGBA8 pixel data,
-    // as opposed to CreateRenderTexture() above (a resizable target
-    // rendered into every frame). `pixelsRgba8` must be
-    // width*height*4 tightly-packed bytes (e.g. straight out of
-    // stbi_load(..., desired_channels=4)). debugName is optional/
-    // Editor-only - see Buffer's constructor comment. See Texture2D.h.
-    // `allowStorageImageAccess` (default false) opts the returned
-    // Texture2D's image into VK_IMAGE_USAGE_STORAGE_BIT (an `RWTexture` -
-    // see COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md), throwing
-    // std::runtime_error if this device doesn't actually support
-    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for Texture2D's own fixed
-    // VK_FORMAT_R8G8B8A8_UNORM format - same discipline as
-    // CreateRenderTexture() above.
+    // Texture creation factories.
     Texture2D CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName = nullptr,
         bool allowStorageImageAccess = false) const;
 
-    // Like CreateTexture2D() above, but for a texture meant to be SAMPLED
-    // by one of this engine's own Pipelines (a PMX material's diffuse
-    // texture - see Game::EnsureMeshAsset(), src/Game/Game.cpp) rather than
-    // merely displayed via ImGui::Image(): also allocates and writes the
-    // VkDescriptorSet a VertexLayout::PositionNormalUv Pipeline expects
-    // bound at descriptor set 0 (see Renderer/MaterialTexture.h and
-    // Submit()'s own `materialDescriptorSet` parameter above).
     MaterialTexture CreateMaterialTexture2D(
         const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
 
-    // Atmosphere Scattering campaign, Phase 2
-    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - factory
-    // for a real 3D (VK_IMAGE_TYPE_3D) GPU image (see VolumeTexture.h),
-    // mirroring CreateTexture2D() above but with an EXPLICIT `format`
-    // (unlike Texture2D's fixed VK_FORMAT_R8G8B8A8_UNORM - a volume texture
-    // typically needs a higher-precision floating-point format to store
-    // scattering values that can exceed [0, 1]) and ALWAYS storage+sampled
-    // capable (no `allowStorageImageAccess` opt-in - a VolumeTexture is
-    // always compute-written and later sampled). Throws std::runtime_error
-    // if this device doesn't actually support
-    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for the requested `format` (see
-    // Vulkan/FormatCapabilities.h's SupportsStorageImageUsage()) - same
-    // discipline as CreateRenderTexture()/CreateTexture2D() above. Import
-    // the result into a gte::rg::RenderGraph via its own Target() accessor
-    // and RenderGraphBuilder::ImportVolumeTexture() - never the owning
-    // VolumeTexture object itself (see VolumeTarget.h).
     VolumeTexture CreateVolumeTexture(
         int width, int height, int depth, PixelFormat format, const char* debugName = nullptr) const;
 
-    // better-render-pass-3 campaign, BLOCK5 (Array and Cubemap Texture
-    // Resources) - see TextureArray2D.h. UNLIKE CreateVolumeTexture() above,
-    // this is NOT a trivial one-line forward: GpuResourceFactory has no
-    // ColorFormat()/DepthFormat() accessor of its own, so PixelFormat::Undefined
-    // must be resolved HERE, branching on `hasDepth` - DepthPixelFormat() when
-    // hasDepth == true, ColorPixelFormat() when hasDepth == false (mirrors
-    // CreateRenderTexture()'s own "resolve, then forward" division of labor,
-    // but with a depth/color branch CreateRenderTexture() itself never
-    // needed, since it only ever resolves to ColorPixelFormat()).
     TextureArray2D CreateTextureArray(int width, int height, int arrayLayers, PixelFormat format, bool hasDepth,
         bool isCubemap, bool allowStorageImageAccess = false, const char* debugName = nullptr) const;
 
-    // Aggregate live-memory totals across every Buffer/RenderTexture this
-    // Renderer has ever created and not yet destroyed - see
-    // Memory/GpuMemoryTracker.h. O(1); safe to call every frame if desired
-    // (e.g. the Editor's "Memory" panel header - see Panels/MemoryPanel.cpp).
+    // GPU memory tracking queries.
     GpuMemoryTracker::Totals GetMemoryTotals() const;
-
-    // Full per-object snapshot of every currently-live GPU resource - the
-    // primitive behind a Unity-Memory-Profiler-style listing (see the
-    // Editor's "Memory" panel, Panels/MemoryPanel.cpp). Carries no names
-    // (see GetMemoryTracker() below for how a name is now looked up).
     std::vector<GpuMemoryTracker::Entry> GetMemoryResources() const;
-
-    // editor-core-separation-1 campaign, PHASE4 - always compiled, no macro.
-    // Returns the SAME GpuMemoryTracker instance every Buffer/RenderTexture/
-    // Texture2D/VolumeTexture this Renderer creates registers with - lets an
-    // external, Editor-owned observer (see
-    // src/Editor/EditorGpuMemoryNameOverlay.h) install itself via
-    // GpuMemoryTracker::SetDebugNameObserver() so debug names remain
-    // observable WITHOUT this Renderer (or GpuMemoryTracker itself) storing
-    // a single byte of name/string data. REPLACES the old, Editor-only
-    // GetMemoryDebugName() forwarder, which forwarded to a
-    // GpuMemoryTracker::GetDebugName() that no longer exists (that lookup
-    // now lives entirely on the Editor side - see
-    // EditorGpuMemoryNameOverlay::GetDebugName()).
     std::shared_ptr<GpuMemoryTracker> GetMemoryTracker() const noexcept { return m_resources.GetMemoryTracker(); }
-
-    // The raw VmaAllocator backing every Buffer/RenderTexture this Renderer
-    // creates - lets a collaborator (e.g. gte::rg::RenderGraph's own scratch
-    // copy-image pools) allocate through the exact same allocator instead of
-    // opening a second, independent one.
     VmaAllocator GetVmaAllocator() const noexcept { return m_allocator.Native(); }
-
-    // The REAL, driver-reported memory usage/budget for every Vulkan memory
-    // heap on this device (see VulkanAllocator::GetHeapBudgets()) - distinct
-    // from GetMemoryTotals()/GetMemoryResources() above, which only tally
-    // what THIS engine's own Buffer/RenderTexture objects requested.
-    // Comparing the two together (see the Editor's "Memory" panel,
-    // Panels/MemoryPanel.cpp) is how you tell whether GpuMemoryTracker
-    // accounts for everything a real GPU tool (or Task Manager's dedicated
-    // GPU memory column) would report, or whether something else - the
-    // swapchain's own images, ImGui's Vulkan backend, driver/loader
-    // overhead - isn't tracked yet.
     std::vector<VmaBudget> GetVmaHeapBudgets() const;
 
-    // Phase 4B (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - a cheap,
-    // side-effect-free read of whatever GpuTimingService most recently
-    // cached for `slot` (see Renderer/GpuTimingService.h). Safe to call any
-    // number of times, including zero times in a frame where the
-    // corresponding pass didn't run - but a caller must ONLY treat the
-    // result as "this frame's" data immediately after a call that it knows
-    // actually ran that pass THIS frame (mirroring how Application.cpp
-    // already only reads a DrawStats return value inside the guard that
-    // proves the corresponding pass ran - see AGENTS.md, "Profiling").
-    // Reports GpuTimingSample::Status::Unsupported (never a fabricated
-    // 0.00 ms) on a device/build that can never produce this measurement,
-    // and Status::Absent whenever nothing has been recorded yet for this
-    // slot this session (including throughout Phase 4B, since nothing
-    // calls GpuTimingService's Record*/Read* methods yet - that's Phase
-    // 4C/4D's job).
+    // GPU timing queries.
     GpuTimingSample LastGpuTiming(GpuTimingSlot slot) const noexcept;
-
-    // Phase 4B - the runtime layer of GpuTimingService's two-layer on/off
-    // gate (see GpuTimingService::SetCaptureEnabled()'s own doc comment).
-    // Takes a plain bool (never a Profiling::-namespaced type) so Renderer
-    // stays completely free of any Profiling/ header, exactly like every
-    // other Renderer<->Profiling bridge in this engine (see AGENTS.md,
-    // "Profiling", and this phase's own design decision log). Not yet
-    // called from Application::Run() in production code - that starts in
-    // Phase 4C, alongside the first real per-frame recording code it's
-    // meant to gate.
     void SetGpuTimingCaptureEnabled(bool enabled) noexcept;
 
-    // Configurable pipeline builder (gte::PipelineDesc, Core/PipelineDesc.h) -
-    // the ONLY way code outside src/Renderer builds a custom descriptor-set
-    // layout for a Pipeline's extra sets. Pass an empty span for a
-    // zero-binding "filler" set (needed when a layout must skip set 0 but
-    // Vulkan forbids a hole before a populated set). Destroy via
-    // DestroyDescriptorSetLayout() below - never by reaching into Vk* directly.
+    // Descriptor set layout helpers.
     DescriptorSetLayoutHandle CreateDescriptorSetLayout(std::span<const DescriptorBindingDesc> bindings) const;
     void DestroyDescriptorSetLayout(DescriptorSetLayoutHandle handle) const noexcept;
 
-    // Builds a Pipeline from a fully caller-described shape (blend/cull/
-    // compare/topology, extra descriptor sets, push-constant range) and
-    // in-memory compiled SPIR-V bytes - the configurable sibling of the two
-    // fixed-shape, path-based CreatePipeline() overloads above. See
-    // Core/PipelineDesc.h's PipelinePreset namespace for the common cases
-    // (Opaque/AlphaBlend/DepthEqualNoWrite) - a caller should start from one
-    // of those rather than filling every PipelineDesc field by hand.
-    // Dynamic rendering only (no VkRenderPass/VkFramebuffer, see
-    // Renderer.cpp) - mandatory per this engine's Vulkan 1.3 baseline.
+    // Builds a dynamic graphics pipeline from a descriptive configuration.
     Pipeline CreatePipeline(const PipelineDesc& desc, std::span<const std::byte> vertexSpirv,
         std::span<const std::byte> fragmentSpirv) const;
 
-    // AI-driven debugging / Editor preview primitive - wraps a texture for
-    // display by an immediate-mode UI (ImGui::Image()) without the caller
-    // ever touching ImGui_ImplVulkan_AddTexture() or a raw VkDescriptorSet.
-    // Pass the returned handle straight to ImGui as
-    // `ImGui::Image(reinterpret_cast<ImTextureID>(handle), size)` - the
-    // handle's bit pattern IS the real backing descriptor set value (unlike
-    // every other opaque handle in this engine), which is exactly what lets
-    // ImGui's Vulkan backend consume it directly. Always release via
-    // ReleaseUiTextureHandle() below - never silently replaced by a later
-    // call with the same texture.
+    // UI texture handles for immediate-mode GUI integration.
     UiTextureHandle GetUiTextureHandle(const Texture2D& texture);
     UiTextureHandle GetUiTextureHandle(const RenderTexture& target);
     void ReleaseUiTextureHandle(UiTextureHandle handle) noexcept;
 
-    // AI-driven debugging - the decoupled-from-screenshot capture primitive
-    // behind the /get_debug_texture network route (Network/NetworkRoutes.cpp):
-    // reads back ANY render target's current pixels as engine-native
-    // PixelFormat, so an AI agent (or a human) can fetch a specific pass's
-    // output (a shadow mask, an LUT, a FrameDebugger pass) directly, instead
-    // of screenshotting the whole desktop. Thin repackaging of
-    // CaptureRenderTexturePixels() above into PixelFormat/Extent2D - same
-    // synchronous, at-most-once-per-request cost.
+    // Reads back a render target into engine pixel format for inspection.
     CaptureResult CaptureRenderTarget(const RenderTexture& target) const;
 
-    // Read-only snapshot of this Renderer's core Vulkan handles + swapchain
-    // format/image count, for an external Vulkan-based rendering backend
-    // (e.g. Dear ImGui's Vulkan backend, owned by the Editor module) to
-    // initialize its own pipeline against the exact same device/swapchain -
-    // without Renderer ever needing to know that consumer exists, and
-    // without exposing VulkanInstance/VulkanDevice/FramePresenter
-    // themselves to callers outside this class.
+    // Context details needed by external backends (e.g. ImGui).
     struct VulkanContextInfo {
         std::uint32_t apiVersion = 0;
         VkInstance instance = VK_NULL_HANDLE;
@@ -1034,51 +262,17 @@ public:
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;
         std::uint32_t imageCount = 0;
         std::uint32_t minImageCount = 0;
-        // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - this device's real GPU
-        // timestamp-query capability (VulkanDevice::TimestampCapability(),
-        // queried once at device-creation time - see VulkanDevice.h). Lets
-        // gte::rg::RenderGraph build its own RenderGraphTimestampPool
-        // (src/Renderer/RenderGraph/RenderGraphTimestampPool.h) against the
-        // same, single source of truth GpuTimingService already uses,
-        // without RenderGraph ever needing direct access to VulkanDevice
-        // itself.
         GpuTimestampCapability timestampCapability;
-        // GPU-Driven Frustum Culling + Indirect Draw campaign
-        // (render-pass-5), PHASE2 - mirrors timestampCapability immediately
-        // above: this device's real, queried-once drawIndirectCount support
-        // (VulkanDevice::SupportsDrawIndirectCount()) - see
-        // Renderer::SupportsDrawIndirectCount()'s own doc comment.
         bool supportsDrawIndirectCount = false;
     };
-    // GetVulkanContextInfo() itself is private below - every genuine need
-    // from outside src/Renderer has a real, opaque replacement
-    // (WaitForGpuIdle()/GetUiTextureHandle()/the SamplerHandle/
-    // ImageViewHandle/DescriptorSetHandle path/GetImGuiVulkanBackendInfo()
-    // below).
 
-    // Call when the window has been resized (e.g. from a WindowResized
-    // event) - marks the swapchain dirty so the next PresentViaRenderGraph()
-    // rebuilds it at the new size instead of presenting into a
-    // stale-sized swapchain.
+    // Resizes swapchain on window resize events.
     void OnResize(int width, int height);
 
-    // The ONE sanctioned bridge for Dear ImGui's own Vulkan backend init
-    // (ImGui_ImplVulkan_InitInfo) - a real, permanent, structurally
-    // different need than every other outside-Renderer caller above.
-    // Returns the same plain Vulkan values GetVulkanContextInfo() does, by
-    // a separate, narrowly-named public method - gte_core (which this
-    // class is part of) builds with no ImGui include path at all, so this
-    // deliberately never touches an ImGui type itself; the Editor-only
-    // caller (which does have ImGui available) copies these fields into
-    // its own ImGui_ImplVulkan_InitInfo directly.
+    // Returns context information required by ImGui's Vulkan backend.
     VulkanContextInfo GetImGuiVulkanBackendInfo() const;
 
 private:
-    // Read-only snapshot of this Renderer's core Vulkan handles + swapchain
-    // format/image count - every genuine need from outside src/Renderer has
-    // a real, opaque replacement instead (see the friend list below for the
-    // narrow set of Renderer-tree collaborators still allowed direct
-    // access).
     VulkanContextInfo GetVulkanContextInfo() const;
 
     friend class rg::RenderGraph;
@@ -1087,99 +281,32 @@ private:
     friend class SceneServicesDescriptorSet;
     friend class GpuDrivenBatchCache;
     friend class VolumeTexturePreviewRenderer;
-    // Grants RenderFeatureCompositor::Impl too - same nested-class access
-    // rule as AtmosphereLutRenderer below (src/Renderer/Internal/RenderFeatureCompositorImpl.h).
     friend class RenderFeatureCompositor;
-    // Grants AtmosphereLutRenderer::Impl too - a nested class inherits its
-    // enclosing class's own access rights, so no Feature-layer include is
-    // ever needed here (see AtmosphereLutRenderer.h/AtmosphereLutRendererImpl.h).
     friend class AtmosphereLutRenderer;
-    // Test-only accessor - see tests/Fakes/HeadlessRenderGraphFixture.h.
     friend class HeadlessRenderGraphFixture;
 
-    // rg::RenderGraph's own constructor needs this BEFORE its member-
-    // initializer-list can run (RenderGraphTimestampPool/RenderGraphEventSnapshotPool
-    // construction), so it cannot be a friended member CALL on an
-    // already-constructed RenderGraph - a free function instead. RenderGraph.h
-    // deliberately only forward-declares Renderer (avoids dragging the full
-    // Renderer.h onto every RenderGraph.h consumer), so this friend grant -
-    // plus the plain, ordinary declaration right after this class below -
-    // both live here instead, where VulkanContextInfo is already complete.
+    // Helper for RenderGraph initialization before member lists are ready.
     friend VulkanContextInfo QueryVulkanContextInfoForRenderGraph(Renderer& renderer);
 
     VulkanInstance m_instance;
     VulkanSurface m_surface;
     VulkanDevice m_device;
 
-    // Computed once, right after m_device exists (VulkanDevice::
-    // PickDepthFormat() needs its physical device) - see DepthFormat()
-    // above. Declared here (not lower) so it's already initialized by the
-    // time m_presenter/m_resources below are constructed, both of which
-    // need it.
     VkFormat m_depthFormat = VK_FORMAT_UNDEFINED;
 
-    // The ONE GpuMemoryTracker shared by both m_presenter (its per-
-    // swapchain-image DepthBuffers) and m_resources (every Buffer/
-    // RenderTexture/its own DepthBuffer created through it) - constructed
-    // here (no dependencies of its own) so both collaborators below get the
-    // SAME instance rather than two independent ones, which would silently
-    // split GetMemoryTotals()/GetMemoryResources() across two disjoint
-    // tallies instead of one accurate whole-engine picture. See
-    // GpuMemoryTracker's own class comment for why this is owned via
-    // shared_ptr in the first place.
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker = std::make_shared<GpuMemoryTracker>();
-
-    // Phase 4B (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - the ONE
-    // GpuTimingService shared by this Renderer's own LastGpuTiming()/
-    // SetGpuTimingCaptureEnabled() and m_presenter below (which will call
-    // its Record*/Read* methods starting in Phase 4C/4D) - the exact same
-    // "constructed here, shared via shared_ptr with every collaborator that
-    // needs it" pattern m_memoryTracker immediately above already
-    // establishes for GPU memory tracking, applied to a second cross-
-    // cutting concern. Unlike m_memoryTracker, this has no default member
-    // initializer - GpuTimingService's constructor needs real,
-    // already-resolved m_device state (its native handle, graphics queue/
-    // family, and queried timestamp capability), so it's constructed
-    // explicitly in Renderer's own constructor body/initializer list
-    // instead (see Renderer.cpp).
     std::shared_ptr<GpuTimingService> m_gpuTiming;
 
-    // Declared (and thus destroyed, per reverse-declaration-order RAII
-    // teardown) right after m_device: relative order vs. m_presenter
-    // doesn't matter (the allocator never touches the swapchain), but it
-    // MUST be destroyed before m_device/m_instance are, since VMA holds
-    // handles derived from both, and it must outlive m_resources
-    // (declared after it below), which uses it.
     VulkanAllocator m_allocator;
-
-    // Swapchain + per-frame sync objects + the actual
-    // RenderOffscreen()/PresentViaRenderGraph() Vulkan recording/submission -
-    // see FramePresenter.h.
     FramePresenter m_presenter;
-
-    // Buffer/RenderTexture/Pipeline/Mesh factories + GPU memory tracking +
-    // ImmediateSubmit() - see GpuResourceFactory.h.
     GpuResourceFactory m_resources;
-
-    // This frame's clear color + queued Submit() draw list - see
-    // FrameRecorder.h.
     FrameRecorder m_frameRecorder;
 
-    // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
-    // set/cleared by BeginGraphPassRecording()/EndGraphPassRecording() for
-    // the exact duration of one RenderGraph pass's `execute` callback (see
-    // RenderPasses.h). VK_NULL_HANDLE (the default) means "not currently
-    // inside a render-graph pass" - Submit() below falls back to the legacy
-    // m_frameRecorder queue in that case.
     VkCommandBuffer m_currentGraphPassCmd = VK_NULL_HANDLE;
     std::function<void(bool, std::uint32_t, std::uint32_t)> m_currentGraphPassRecordDrawStats;
 };
 
-// Ordinary, plain-namespace-scope twin of the friend grant inside Renderer
-// above - rg::RenderGraph::RenderGraph() (RenderGraph.cpp) calls this,
-// unqualified, from within namespace gte::rg (ordinary nested-namespace
-// lookup reaches this enclosing gte::-scope declaration). Defined once, in
-// RenderGraph.cpp, right next to its only caller.
+// Global helper to query context info for RenderGraph.
 Renderer::VulkanContextInfo QueryVulkanContextInfoForRenderGraph(Renderer& renderer);
 
 } // namespace gte

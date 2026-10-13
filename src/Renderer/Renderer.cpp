@@ -26,7 +26,7 @@ constexpr bool kEnableValidation = false;
 constexpr bool kEnableValidation = true;
 #endif
 
-// --- GAP2: gte::PipelineDesc <-> Vk* conversion (Renderer-internal only) ---
+// Conversion helpers for PipelineDesc to Vulkan types.
 VkShaderStageFlags ToVkShaderStageFlags(ShaderStageMask mask) noexcept
 {
     VkShaderStageFlags flags = 0;
@@ -89,9 +89,7 @@ VkCompareOp ToVkCompareOp(CompareOp op) noexcept
     }
 }
 
-// One blend attachment state per BlendMode - applied identically to every
-// color attachment a Pipeline built via PipelineDesc has (see
-// Pipeline::Pipeline()'s configurable constructor).
+// Returns the color blend attachment state for a given BlendMode.
 VkPipelineColorBlendAttachmentState ToVkBlendState(BlendMode mode) noexcept
 {
     VkPipelineColorBlendAttachmentState state{};
@@ -124,12 +122,7 @@ VkPipelineColorBlendAttachmentState ToVkBlendState(BlendMode mode) noexcept
     return state;
 }
 
-// GAP5: the live set of descriptor sets GetUiTextureHandle() has minted,
-// guarded by its own mutex - exists purely so ReleaseUiTextureHandle() can
-// reject a double-release/foreign value instead of calling
-// ImGui_ImplVulkan_RemoveTexture() on garbage. The handle VALUE itself is
-// the real VkDescriptorSet bit pattern (see Renderer.h's own doc comment on
-// GetUiTextureHandle()), never a separate generation-checked index.
+// Tracks active UI descriptor sets to prevent double-releases.
 std::mutex g_uiTextureMutex;
 std::unordered_set<VkDescriptorSet> g_liveUiTextures;
 
@@ -140,19 +133,7 @@ Renderer::Renderer(ISurfaceProvider& surfaceProvider)
     , m_surface(m_instance.Native(), surfaceProvider)
     , m_device(m_instance.Native(), m_surface.Native())
     , m_depthFormat(m_device.PickDepthFormat())
-    // m_memoryTracker uses its default member initializer (see Renderer.h) -
-    // constructed here implicitly, before m_presenter/m_resources below,
-    // both of which receive a copy of the SAME shared_ptr.
-    // m_gpuTiming (Phase 4B - PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md)
-    // has no default member initializer (see Renderer.h) - it needs
-    // m_device's already-resolved native handle/queried timestamp
-    // capability, so it's constructed explicitly here, right after m_device
-    // is ready, before m_presenter below (which receives a copy of the SAME
-    // shared_ptr, mirroring m_memoryTracker's own sharing pattern
-    // immediately above).
     , m_gpuTiming(std::make_shared<GpuTimingService>(m_device, m_device.TimestampCapability()))
-    // VK_API_VERSION_1_3 matches VulkanInstance::CreateInstance's
-    // VkApplicationInfo::apiVersion (see also GetVulkanContextInfo() below).
     , m_allocator(m_instance.Native(), m_device.Physical(), m_device.Native(), VK_API_VERSION_1_3)
     , m_presenter(m_device.Physical(), m_device.Native(), m_surface.Native(), m_device.GraphicsQueueFamily(),
           m_device.PresentQueueFamily(), m_device.GraphicsQueue(), m_device.PresentQueue(), surfaceProvider.Width(),
@@ -167,9 +148,6 @@ Renderer::~Renderer()
     if (m_device.Native() != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(m_device.Native());
     }
-    // m_frameRecorder, m_resources, m_presenter, m_allocator, m_device,
-    // m_surface, m_instance clean themselves up automatically after this
-    // destructor body, in reverse declaration order.
 }
 
 void Renderer::Clear(std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a)
@@ -205,8 +183,6 @@ std::optional<DrawStats> Renderer::PresentViaRenderGraph(rg::RenderGraph& graph,
     if (!ran) {
         return std::nullopt;
     }
-    // "Present" must match RenderPasses.cpp's AddPresentPass() pass name
-    // literal exactly - see this method's own doc comment in Renderer.h.
     return graph.LastKnownStatsFor("Present").drawStats;
 }
 
@@ -247,14 +223,7 @@ RenderTexture Renderer::CreateRenderTexture(int width, int height, PixelFormat f
     const char* depthDebugName, bool allowStorageImageAccess, bool allowDepthSampledAccess,
     bool createDepthCompanion, bool createColorImage) const
 {
-    // PixelFormat::Undefined (the default - see Renderer.h) means "match
-    // ColorPixelFormat() exactly", not "let Vulkan pick" - resolved here
-    // (the one place that knows both ColorPixelFormat() and the resource
-    // factory) rather than baking a hardcoded literal into the default
-    // argument, so this always tracks whatever the swapchain actually
-    // negotiated at runtime (see VulkanSwapchain.cpp's ChooseSurfaceFormat),
-    // even if that differs across GPUs/drivers. See AGENTS.md ("Render
-    // Target Format Matching").
+    // Defaults to the swapchain color format if format is undefined.
     const PixelFormat resolvedFormat = (format == PixelFormat::Undefined) ? ColorPixelFormat() : format;
     return m_resources.CreateRenderTexture(width, height, resolvedFormat, debugName, depthDebugName,
         allowStorageImageAccess, allowDepthSampledAccess, createDepthCompanion, createColorImage);
@@ -266,7 +235,7 @@ Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageA
     const VkExtent2D extent = ToVkExtent2D(extentIn);
     const int bytesPerPixel = BytesPerTexelForFormat(format);
     if (bytesPerPixel == 0) {
-        return CapturedRawPixels{}; // Unsupported format - pixels stays empty, caller fails cleanly.
+        return CapturedRawPixels{}; // Unsupported format.
     }
 
     const VkDeviceSize size =
@@ -286,12 +255,7 @@ Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageA
         region.imageExtent = { extent.width, extent.height, depth };
         vkCmdCopyImageToBuffer(cmd.Native(), image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.Native(), 1, &region);
 
-        // Host-read visibility: a fence wait alone (ImmediateSubmit()'s own
-        // wait, below) guarantees the GPU write finished EXECUTING, but the
-        // Vulkan spec still requires an explicit memory dependency whose
-        // destination stage/access includes HOST_BIT/HOST_READ_BIT before a
-        // device write is guaranteed VISIBLE to a later host read - mirrors
-        // CaptureRenderTexturePixels()'s original own reasoning for this step.
+        // Memory barrier to ensure device copy is visible to host read.
         const rg::ResourceState transferWriteState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT };
         const rg::ResourceState hostReadState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT };
         rg::EmitBufferBarrier(cmd.Native(), readback.Native(), 0, size, transferWriteState, hostReadState);
@@ -347,18 +311,13 @@ Buffer Renderer::CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* de
     return m_resources.CreateGpuSkinningTargetBuffer(size, debugName);
 }
 
-
-
 Buffer Renderer::CreateDeviceLocalBuffer(
     const void* data, VkDeviceSize size, BufferUsage usage, const char* debugName) const
 {
     return m_resources.CreateDeviceLocalBuffer(data, size, usage, debugName);
 }
 
-// Precondition: never called re-entrantly from inside an active graph-pass
-// recording (CommandBuffer::Dispatch()/Draw() would otherwise clobber
-// m_currentGraphPassCmd - see BeginGraphPassRecording()). Synchronization2
-// submit path, one fence, zero leaks.
+// Executes a command buffer immediately on the graphics queue and waits for completion.
 void Renderer::ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& recordFn) const
 {
     assert(m_currentGraphPassCmd == VK_NULL_HANDLE
@@ -411,7 +370,7 @@ void Renderer::ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& re
     }
 
     vkWaitForFences(m_device.Native(), 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
-    vkDestroyFence(m_device.Native(), fence, nullptr); // always reached: no early return above
+    vkDestroyFence(m_device.Native(), fence, nullptr);
     m_resources.FreeTransientCommandBuffer(vkCmd);
 }
 
@@ -428,31 +387,15 @@ void Renderer::BeginFrame()
 void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix, const Mat4& viewProjMatrix,
     DescriptorSetHandle materialDescriptorSet, DescriptorSetHandle sceneServicesSet)
 {
-    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
-    // PHASE5 - the ONE place that resolves pipeline.HasSceneServicesSet()'s
-    // gate: a non-null sceneServicesSet is only ever actually forwarded
-    // (down either path below) when `pipeline` itself was built with a real
-    // sceneServicesSetLayout (PHASE3) - passing one against a Pipeline with
-    // no set = 1 is exactly the backward-compatibility break this gate
-    // exists to prevent (PHASE0's global rule 1).
+    // Bind scene services set only if the pipeline supports it.
     const VkDescriptorSet effectiveSceneServicesSet =
         pipeline.HasSceneServicesSet() ? Native(sceneServicesSet) : VK_NULL_HANDLE;
 
-    // Never bind descriptor set 0 against a pipeline layout that declares no
-    // material set - a depth-only pipeline (zero descriptor sets) paired
-    // with a textured entity's real material texture would otherwise trip
-    // VUID-vkCmdBindDescriptorSets-firstSet-00360.
+    // Bind material set only if the pipeline has a material layout.
     const VkDescriptorSet effectiveMaterialDescriptorSet =
         pipeline.HasMaterialSet() ? Native(materialDescriptorSet) : VK_NULL_HANDLE;
 
-    // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
-    // while a render-graph pass is being recorded (BeginGraphPassRecording()
-    // was called and hasn't been cleared yet - see Renderer.h), issue this
-    // draw's real Vulkan commands DIRECTLY against that pass's own command
-    // buffer instead of queuing into the legacy m_frameRecorder draw list -
-    // this is the one surgical change that lets Game/RenderSystem keep
-    // calling Renderer::Submit() completely unaware anything changed
-    // underneath them.
+    // If a render graph pass is active, record directly to its command buffer.
     if (m_currentGraphPassCmd != VK_NULL_HANDLE) {
         const bool hasIndexBuffer = mesh.HasIndexBuffer();
         const std::uint32_t indexCount = hasIndexBuffer ? mesh.IndexCount() : 0;
@@ -473,26 +416,15 @@ void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuff
     VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset,
     DescriptorSetHandle instanceBufferDescriptorSet, DescriptorSetHandle sceneServicesSet, const Mat4& viewProjMatrix)
 {
-    // Deliberately NO legacy/queued fallback path, same "day-one render-
-    // graph-only" precedent Renderer::Dispatch() already established for
-    // compute - an indirect draw call has no pre-existing non-graph call
-    // site to preserve backward compatibility with.
     assert(m_currentGraphPassCmd != VK_NULL_HANDLE
-        && "Renderer::SubmitIndirect() called outside of a render-graph pass recording - see "
-           "BeginGraphPassRecording()/EndGraphPassRecording().");
+        && "Renderer::SubmitIndirect() called outside of a render-graph pass recording.");
     if (m_currentGraphPassCmd == VK_NULL_HANDLE) {
         return;
     }
 
-    // This campaign is VkDrawIndexedIndirectCommand-only - every Pipeline
-    // built with VertexLayout::PositionNormalInstanced is only ever meant
-    // to draw an INDEXED Mesh.
     assert(mesh.HasIndexBuffer()
-        && "Renderer::SubmitIndirect(): every indirect draw is VkDrawIndexedIndirectCommand-only (indexed meshes "
-           "only).");
+        && "Renderer::SubmitIndirect(): indexed mesh required for indirect draw.");
 
-    // Only ever actually forwarded when `pipeline` itself carries a real
-    // sceneServicesSetLayout - mirrors Submit()'s own gate exactly.
     const VkDescriptorSet effectiveSceneServicesSet =
         pipeline.HasSceneServicesSet() ? Native(sceneServicesSet) : VK_NULL_HANDLE;
 
@@ -500,12 +432,6 @@ void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuff
         mesh.VertexBuffer(), mesh.IndexBuffer(), Native(instanceBufferDescriptorSet), effectiveSceneServicesSet,
         viewProjMatrix, indirectBuffer, indirectOffset, maxDrawCount, countBuffer, countBufferOffset,
         m_device.SupportsDrawIndirectCount());
-
-    // Deliberately does NOT touch m_currentGraphPassRecordDrawStats (that
-    // callback only ever mutates DrawStats::drawCallCount/triangleCount,
-    // via Submit()'s own PassContext::recordDraw plumbing) - an indirect
-    // draw's real object/triangle count is GPU-only knowledge this method
-    // must never block to read back.
 }
 
 Pipeline Renderer::CreatePipeline(const std::string& vertexShaderSpirvPath,
@@ -559,14 +485,8 @@ bool Renderer::SupportsDepthBlit() const noexcept
 void Renderer::Dispatch(const ComputePipeline& pipeline, VkDescriptorSet descriptorSet, const void* pushConstants,
     std::uint32_t pushConstantBytes, std::uint32_t groupCountX, std::uint32_t groupCountY, std::uint32_t groupCountZ)
 {
-    // Phase 4 (COMPUTE_PHASE4_DISPATCH_EXECUTION_STRATEGY_v2.md) - see this
-    // method's own doc comment in Renderer.h for the full reasoning: unlike
-    // Submit(), there is deliberately no legacy/queued fallback - a
-    // dispatch outside an active render-graph pass recording has nothing
-    // sensible to do at all.
     assert(m_currentGraphPassCmd != VK_NULL_HANDLE
-        && "Renderer::Dispatch() called outside of a render-graph pass recording - see "
-           "BeginGraphPassRecording()/EndGraphPassRecording()");
+        && "Renderer::Dispatch() called outside of a render-graph pass recording.");
     if (m_currentGraphPassCmd == VK_NULL_HANDLE) {
         return;
     }
@@ -640,19 +560,10 @@ VolumeTexture Renderer::CreateVolumeTexture(
     return m_resources.CreateVolumeTexture(width, height, depth, format, debugName);
 }
 
-// better-render-pass-3 campaign, BLOCK5 - see this method's own declaration
-// (Renderer.h) for the full reasoning on why this is NOT a trivial one-line
-// forward like CreateVolumeTexture() immediately above.
 TextureArray2D Renderer::CreateTextureArray(int width, int height, int arrayLayers, PixelFormat format, bool hasDepth,
     bool isCubemap, bool allowStorageImageAccess, const char* debugName) const
 {
-    // PixelFormat::Undefined resolves per hasDepth - mirrors CreateRenderTexture()'s
-    // own resolution line but branches by hasDepth instead of always resolving
-    // to ColorPixelFormat(). This resolution MUST happen here, in Renderer, never
-    // inside GpuResourceFactory::CreateTextureArray() - that class has no
-    // ColorFormat() access and no color-format field of its own (confirmed:
-    // GpuResourceFactory::CreateRenderTexture() does zero format resolution of
-    // its own).
+    // Resolves undefined format to depth or color format based on hasDepth.
     const PixelFormat resolvedFormat = (format == PixelFormat::Undefined)
         ? (hasDepth ? DepthPixelFormat() : ColorPixelFormat())
         : format;
@@ -663,32 +574,22 @@ TextureArray2D Renderer::CreateTextureArray(int width, int height, int arrayLaye
 Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const
 {
     VulkanContextInfo info;
-    info.apiVersion = VK_API_VERSION_1_3; // matches VulkanInstance::CreateInstance's VkApplicationInfo::apiVersion
+    info.apiVersion = VK_API_VERSION_1_3;
     info.instance = m_instance.Native();
     info.physicalDevice = m_device.Physical();
     info.device = m_device.Native();
     info.graphicsQueueFamily = m_device.GraphicsQueueFamily();
     info.graphicsQueue = m_device.GraphicsQueue();
-    info.colorFormat = ColorFormat(); // single source of truth - see ColorFormat()'s comment in Renderer.h
+    info.colorFormat = ColorFormat();
     info.imageCount = m_presenter.ImageCount();
-    info.minImageCount = m_presenter.FramesInFlight(); // matches what FramePresenter actually keeps in flight
-    // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - the single source of truth
-    // gte::rg::RenderGraph's own RenderGraphTimestampPool is built from.
+    info.minImageCount = m_presenter.FramesInFlight();
     info.timestampCapability = m_device.TimestampCapability();
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE2 - mirrors timestampCapability immediately above.
     info.supportsDrawIndirectCount = m_device.SupportsDrawIndirectCount();
     return info;
 }
 
 Renderer::VulkanContextInfo Renderer::GetImGuiVulkanBackendInfo() const
 {
-    // private-to-private call, no friend needed here. gte_core (which this
-    // translation unit is part of) builds with NO ImGui include path at
-    // all - this method deliberately returns plain Vulkan values instead of
-    // filling an ImGui_ImplVulkan_InitInfo directly, so the Editor-only
-    // caller (which DOES have ImGui available) does that trivial field copy
-    // itself.
     return GetVulkanContextInfo();
 }
 
@@ -758,9 +659,7 @@ Pipeline Renderer::CreatePipeline(
         colorFormats[i] = ToVkFormat(colorFmts[i]);
     }
 
-    // desc.layout drives vkCreatePipelineLayout: sceneServicesSetLayout (if
-    // any) first, then extraSetLayouts in order - the ONLY place these
-    // opaque handles unwrap to a real VkDescriptorSetLayout value.
+    // Unwrap descriptor set layouts in order.
     std::vector<VkDescriptorSetLayout> setLayouts;
     if (desc.layout.sceneServicesSetLayout != DescriptorSetLayoutHandle::Invalid) {
         setLayouts.push_back(Native(desc.layout.sceneServicesSetLayout));
@@ -780,7 +679,7 @@ UiTextureHandle Renderer::GetUiTextureHandle(const Texture2D& texture)
 {
     const VkDescriptorSet set = AddUiTexture(texture.Sampler(), texture.View());
     if (set == VK_NULL_HANDLE) {
-        return UiTextureHandle::Invalid; // No UI backend installed (e.g. a headless Player build).
+        return UiTextureHandle::Invalid; // No UI backend installed.
     }
     std::lock_guard lock(g_uiTextureMutex);
     g_liveUiTextures.insert(set);
@@ -804,7 +703,7 @@ void Renderer::ReleaseUiTextureHandle(UiTextureHandle handle) noexcept
     {
         std::lock_guard lock(g_uiTextureMutex);
         if (g_liveUiTextures.erase(set) == 0) {
-            return; // Already released, or never a real handle - safe no-op.
+            return; // Already released or invalid handle.
         }
     }
     RemoveUiTexture(set);
