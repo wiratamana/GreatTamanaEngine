@@ -64,55 +64,44 @@ TEST(RenderGraphBuilderTest, CreateTextureMintsDistinctHandlesEvenWithIdenticalD
     EXPECT_FALSE(a == b);
 }
 
-// better-render-pass-3 campaign, BLOCK5, Phase 4
-// (task_manager/better-render-pass-7/PHASE4_TIER1_AUTOMATED_TESTS.md) -
-// TextureArray mirrors plain Texture's own distinct-handle-minting test
-// exactly (CreateTextureMintsDistinctHandlesEvenWithIdenticalDesc above).
-TEST(RenderGraphBuilderTest, CreateTextureArrayMintsDistinctHandlesEvenWithIdenticalDesc)
+// An array is created through the same CreateTexture() as a 2D texture; its shape lives in TextureDesc.
+TEST(RenderGraphBuilderTest, CreateTextureWithArrayDescMintsDistinctHandlesAndKeepsTheShape)
 {
     RenderGraphBuilder builder;
-    TextureArrayDesc desc;
+    TextureDesc desc;
     desc.width = 2048;
     desc.height = 2048;
-    desc.arrayLayers = 4;
     desc.format = PixelFormat::D32_Float;
     desc.hasDepth = true;
+    desc.dimension = TextureDimension::Array2D;
+    desc.arrayLayers = 4;
 
-    const TextureArrayHandle a = builder.CreateTextureArray("CascadesA", desc);
-    const TextureArrayHandle b = builder.CreateTextureArray("CascadesB", desc);
+    const TextureHandle a = builder.CreateTexture("CascadesA", desc);
+    const TextureHandle b = builder.CreateTexture("CascadesB", desc);
 
     EXPECT_TRUE(a.IsValid());
     EXPECT_TRUE(b.IsValid());
     EXPECT_FALSE(a == b);
+
+    const CompiledGraphInput input = builder.Finish();
+    EXPECT_EQ(input.textures[a.index].desc.dimension, TextureDimension::Array2D);
+    EXPECT_EQ(input.textures[a.index].desc.arrayLayers, 4u);
+    EXPECT_TRUE(input.textures[a.index].desc.hasDepth);
 }
 
-// A one-line regression guard against someone later "fixing" the deliberate
-// asymmetry vs. plain TextureDesc::hasDepth (which defaults to false) -
-// TextureArrayDesc::hasDepth defaults to TRUE (a shadow-cascade array is
-// this struct's dominant real use case), per BLOCK5_ARRAY_AND_CUBEMAP_TEXTURE_RESOURCES.txt,
-// Section 2. No existing test anywhere in this suite covered this default
-// before this phase (confirmed by direct search).
-TEST(RenderGraphBuilderTest, TextureArrayDescDefaultsToDepthTrue)
-{
-    const TextureArrayDesc desc{};
-    EXPECT_TRUE(desc.hasDepth);
-    EXPECT_FALSE(desc.isCubemap);
-    EXPECT_EQ(desc.arrayLayers, 1u);
-}
-
-// WriteArrayLayer() - a pass declares a write to exactly one layer/face of
-// a TextureArray resource, recording both a per-layer ResourceUsage and a
-// dedicated attachment descriptor - mirrors WriteColorAttachment()'s own
-// lockstep writes/colorAttachments convention.
+// WriteArrayLayer() - a pass declares a write to exactly one layer/face of an array/cube texture, recording
+// both a per-layer ResourceUsage and a dedicated attachment descriptor - mirrors WriteColorAttachment()'s
+// own lockstep writes/colorAttachments convention.
 TEST(RenderGraphBuilderTest, WriteArrayLayerRecordsArrayLayerIndexAndAttachmentDesc)
 {
     RenderGraphBuilder builder;
-    TextureArrayDesc desc;
+    TextureDesc desc;
     desc.width = 64;
     desc.height = 64;
-    desc.arrayLayers = 4;
     desc.hasDepth = true;
-    const TextureArrayHandle handle = builder.CreateTextureArray("Cascades", desc);
+    desc.dimension = TextureDimension::Array2D;
+    desc.arrayLayers = 4;
+    const TextureHandle handle = builder.CreateTexture("Cascades", desc);
 
     builder.AddPass(
         "WritesLayer2",
@@ -126,8 +115,8 @@ TEST(RenderGraphBuilderTest, WriteArrayLayerRecordsArrayLayerIndexAndAttachmentD
     const PassRecord& pass = input.passes[0];
 
     ASSERT_EQ(pass.writes.size(), 1u);
-    EXPECT_EQ(pass.writes[0].kind, ResourceKind::TextureArray);
-    EXPECT_EQ(pass.writes[0].textureArray, handle);
+    EXPECT_EQ(pass.writes[0].kind, ResourceKind::Texture);
+    EXPECT_EQ(pass.writes[0].texture, handle);
     ASSERT_TRUE(pass.writes[0].arrayLayerIndex.has_value());
     EXPECT_EQ(*pass.writes[0].arrayLayerIndex, 2u);
 
@@ -136,19 +125,20 @@ TEST(RenderGraphBuilderTest, WriteArrayLayerRecordsArrayLayerIndexAndAttachmentD
     EXPECT_EQ(pass.arrayLayerAttachment->layerIndex, 2u);
 }
 
-// Regression guard: a whole-array write (WriteTextureArray()) must leave
-// arrayLayerIndex/arrayLayerAttachment empty - the per-layer path above must
-// never affect this pre-existing, unmodified behavior.
-TEST(RenderGraphBuilderTest, WriteTextureArrayLeavesArrayLayerIndexEmpty)
+// Regression guard: a whole-image write (WriteTexture()) must leave arrayLayerIndex/arrayLayerAttachment
+// empty - the per-layer path above must never affect it.
+TEST(RenderGraphBuilderTest, WholeArrayWriteLeavesArrayLayerIndexEmpty)
 {
     RenderGraphBuilder builder;
-    TextureArrayDesc desc;
-    const TextureArrayHandle handle = builder.CreateTextureArray("WholeArray", desc);
+    TextureDesc desc;
+    desc.dimension = TextureDimension::Array2D;
+    desc.arrayLayers = 4;
+    const TextureHandle handle = builder.CreateTexture("WholeArray", desc);
 
     builder.AddPass(
         "WritesWhole",
         [handle](RenderGraphBuilder::PassBuilder& pass) {
-            pass.WriteTextureArray(handle, ResourceAccess::ComputeShaderWrite);
+            pass.WriteTexture(handle, ResourceAccess::ComputeShaderWrite);
         },
         NoOpExecute);
 
@@ -156,6 +146,22 @@ TEST(RenderGraphBuilderTest, WriteTextureArrayLeavesArrayLayerIndexEmpty)
     ASSERT_EQ(input.passes[0].writes.size(), 1u);
     EXPECT_FALSE(input.passes[0].writes[0].arrayLayerIndex.has_value());
     EXPECT_FALSE(input.passes[0].arrayLayerAttachment.has_value());
+}
+
+// Keep*Output is one list for every texture dimension; Finish() hands it to the compiler.
+TEST(RenderGraphBuilderTest, KeepTextureOutputRecordsAnyDimensionAndFinishCarriesItToTheInput)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle plain = builder.CreateTexture("Plain", TextureDesc{ 8, 8, PixelFormat::RGBA8_UNorm });
+    const TextureHandle volume = builder.ImportVolumeTexture("Volume", VolumeTarget{}, ImageLayout::Undefined);
+
+    builder.KeepTextureOutput(plain);
+    builder.KeepTextureOutput(volume);
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.finalTextureOutputs.size(), 2u);
+    EXPECT_EQ(input.finalTextureOutputs[0], plain);
+    EXPECT_EQ(input.finalTextureOutputs[1], volume);
 }
 
 TEST(RenderGraphBuilderTest, CreateBufferMintsDistinctHandlesEvenWithIdenticalDesc)
@@ -723,11 +729,8 @@ TEST(RenderGraphBuilderTest, AddComputePassFourArgumentOverloadStampsViewScopeAn
     EXPECT_EQ(input.passes[0].kind, PassKind::Compute);
 }
 
-// frame-debugger-5 campaign, PHASE1 - a single compute pass declaring a
-// mix of ReadTexture/WriteTexture AND ReadBuffer/WriteBuffer AND
-// ReadVolumeTexture/WriteVolumeTexture still populates pass.reads/writes
-// with the correct ResourceUsage::kind for each - a pure sanity check of
-// pre-existing behavior, now also asserted alongside `kind`.
+// A single compute pass declaring reads/writes on a 2D texture, a buffer AND an imported 3D volume records one
+// ResourceUsage each. A volume is a Texture usage; its dimension lives on the texture slot.
 TEST(RenderGraphBuilderTest, AddComputePassWithMixedReadWriteKindsRecordsEachCorrectly)
 {
     RenderGraphBuilder builder;
@@ -735,18 +738,17 @@ TEST(RenderGraphBuilderTest, AddComputePassWithMixedReadWriteKindsRecordsEachCor
         builder.CreateTexture("Tex", TextureDesc{ 64, 64, PixelFormat::RGBA8_UNorm, false });
     const BufferHandle bufferHandle = builder.CreateBuffer("Buf", BufferDesc{ 256, BufferUsage::StorageBuffer });
     const VolumeTarget volumeTarget{};
-    const VolumeTextureHandle volumeHandle =
-        builder.ImportVolumeTexture("Volume", volumeTarget, ImageLayout::Undefined);
+    const TextureHandle volumeHandle = builder.ImportVolumeTexture("Volume", volumeTarget, ImageLayout::Undefined);
 
     builder.AddComputePass(
         "MixedPass",
         [&](RenderGraphBuilder::PassBuilder& pass) {
             pass.ReadTexture(textureHandle, ResourceAccess::ComputeShaderRead);
             pass.ReadBuffer(bufferHandle, ResourceAccess::ComputeShaderRead);
-            pass.ReadVolumeTexture(volumeHandle, ResourceAccess::ComputeShaderRead);
+            pass.ReadTexture(volumeHandle, ResourceAccess::ComputeShaderRead);
             pass.WriteTexture(textureHandle, ResourceAccess::ComputeShaderWrite);
             pass.WriteBuffer(bufferHandle, ResourceAccess::ComputeShaderWrite);
-            pass.WriteVolumeTexture(volumeHandle, ResourceAccess::ComputeShaderWrite);
+            pass.WriteTexture(volumeHandle, ResourceAccess::ComputeShaderWrite);
         },
         NoOpExecute);
 
@@ -758,12 +760,16 @@ TEST(RenderGraphBuilderTest, AddComputePassWithMixedReadWriteKindsRecordsEachCor
     ASSERT_EQ(pass.reads.size(), 3u);
     EXPECT_EQ(pass.reads[0].kind, ResourceKind::Texture);
     EXPECT_EQ(pass.reads[1].kind, ResourceKind::Buffer);
-    EXPECT_EQ(pass.reads[2].kind, ResourceKind::VolumeTexture);
+    EXPECT_EQ(pass.reads[2].kind, ResourceKind::Texture);
+    EXPECT_EQ(pass.reads[2].texture, volumeHandle);
 
     ASSERT_EQ(pass.writes.size(), 3u);
     EXPECT_EQ(pass.writes[0].kind, ResourceKind::Texture);
     EXPECT_EQ(pass.writes[1].kind, ResourceKind::Buffer);
-    EXPECT_EQ(pass.writes[2].kind, ResourceKind::VolumeTexture);
+    EXPECT_EQ(pass.writes[2].kind, ResourceKind::Texture);
+
+    EXPECT_EQ(input.textures[textureHandle.index].desc.dimension, TextureDimension::Tex2D);
+    EXPECT_EQ(input.textures[volumeHandle.index].desc.dimension, TextureDimension::Tex3D);
 }
 
 

@@ -56,34 +56,14 @@ void RenderGraphBuilder::PassBuilder::WriteBuffer(BufferHandle handle, ResourceA
     m_pass.writes.push_back(ResourceUsage::ForBuffer(handle, access));
 }
 
-void RenderGraphBuilder::PassBuilder::ReadVolumeTexture(VolumeTextureHandle handle, ResourceAccess access)
-{
-    m_pass.reads.push_back(ResourceUsage::ForVolumeTexture(handle, access));
-}
-
-void RenderGraphBuilder::PassBuilder::WriteVolumeTexture(VolumeTextureHandle handle, ResourceAccess access)
-{
-    m_pass.writes.push_back(ResourceUsage::ForVolumeTexture(handle, access));
-}
-
-void RenderGraphBuilder::PassBuilder::ReadTextureArray(TextureArrayHandle handle, ResourceAccess access)
-{
-    m_pass.reads.push_back(ResourceUsage::ForTextureArray(handle, access));
-}
-
-void RenderGraphBuilder::PassBuilder::WriteTextureArray(TextureArrayHandle handle, ResourceAccess access)
-{
-    m_pass.writes.push_back(ResourceUsage::ForTextureArray(handle, access));
-}
-
-void RenderGraphBuilder::PassBuilder::WriteArrayLayer(TextureArrayHandle handle, std::uint32_t layerIndex,
+void RenderGraphBuilder::PassBuilder::WriteArrayLayer(TextureHandle handle, std::uint32_t layerIndex,
     ResourceAccess access, std::optional<std::array<float, 4>> clearColor, std::optional<float> clearDepth)
 {
     assert(!m_pass.arrayLayerAttachment.has_value() &&
         "RenderGraphBuilder::PassBuilder::WriteArrayLayer: a pass may declare at most one "
         "array-layer attachment - use a separate pass per layer.");
 
-    m_pass.writes.push_back(ResourceUsage::ForTextureArrayLayer(handle, layerIndex, access));
+    m_pass.writes.push_back(ResourceUsage::ForTextureLayer(handle, layerIndex, access));
 
     ArrayLayerAttachmentDesc desc;
     desc.handle = handle;
@@ -147,21 +127,6 @@ void RenderGraphBuilder::PassBuilder::BindCombinedImageSampler(
 }
 
 void RenderGraphBuilder::PassBuilder::BindCombinedImageSampler(
-    std::uint32_t binding, VolumeTextureHandle handle, SamplerHandle sampler)
-{
-    assert(sampler != SamplerHandle::Invalid &&
-        "RenderGraphBuilder::PassBuilder::BindCombinedImageSampler: a volume texture binding requires an "
-        "explicit sampler - the render graph tracks no implicit sampler for a VolumeTextureHandle.");
-
-    PendingBinding pending;
-    pending.binding = binding;
-    pending.kind = BindingKind::CombinedVolumeImageSampler;
-    pending.volumeTextureHandle = handle;
-    pending.explicitSampler = sampler;
-    m_pass.bindings.push_back(pending);
-}
-
-void RenderGraphBuilder::PassBuilder::BindCombinedImageSampler(
     std::uint32_t binding, ImageViewHandle view, SamplerHandle sampler)
 {
     assert(sampler != SamplerHandle::Invalid &&
@@ -182,15 +147,6 @@ void RenderGraphBuilder::PassBuilder::BindStorageImage(std::uint32_t binding, Te
     pending.binding = binding;
     pending.kind = BindingKind::StorageImage;
     pending.textureHandle = handle;
-    m_pass.bindings.push_back(pending);
-}
-
-void RenderGraphBuilder::PassBuilder::BindStorageImage(std::uint32_t binding, VolumeTextureHandle handle)
-{
-    PendingBinding pending;
-    pending.binding = binding;
-    pending.kind = BindingKind::StorageImage;
-    pending.volumeTextureHandle = handle;
     m_pass.bindings.push_back(pending);
 }
 
@@ -282,59 +238,52 @@ BufferHandle RenderGraphBuilder::ImportBuffer(const char* name, BufferObjectHand
     return BufferHandle{ index, 1 };
 }
 
-VolumeTextureHandle RenderGraphBuilder::ImportVolumeTexture(
+TextureHandle RenderGraphBuilder::ImportVolumeTexture(
     const char* name, const VolumeTarget& externalVolumeTarget, ImageLayout currentLayout)
 {
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::ImportVolumeTexture requires a non-empty, static-storage-duration name");
 
-    const std::uint32_t index = static_cast<std::uint32_t>(m_volumeTextures.size());
+    const std::uint32_t index = static_cast<std::uint32_t>(m_textures.size());
 
-    VolumeTextureDesc desc;
+    TextureDesc desc;
+    desc.dimension = TextureDimension::Tex3D;
     desc.width = externalVolumeTarget.extent.width;
     desc.height = externalVolumeTarget.extent.height;
     desc.depth = externalVolumeTarget.extent.depth;
     desc.format = FromVkFormat(externalVolumeTarget.format);
 
-    VolumeTextureImportInfo importInfo;
+    TextureImportInfo importInfo;
     importInfo.isImported = true;
-    importInfo.externalTarget = externalVolumeTarget;
+    importInfo.externalVolumeTarget = externalVolumeTarget;
     importInfo.currentLayout = currentLayout;
 
-    m_volumeTextures.push_back(VolumeTextureSlot{ desc, name, importInfo });
-    return VolumeTextureHandle{ index, 1 };
+    m_textures.push_back(TextureSlot{ desc, name, importInfo });
+    return TextureHandle{ index, 1 };
 }
 
-TextureArrayHandle RenderGraphBuilder::CreateTextureArray(const char* name, const TextureArrayDesc& desc)
-{
-    assert(name != nullptr && name[0] != '\0' &&
-        "RenderGraphBuilder::CreateTextureArray requires a non-empty, static-storage-duration name");
-    const std::uint32_t index = static_cast<std::uint32_t>(m_textureArrays.size());
-    m_textureArrays.push_back(TextureArraySlot{ desc, name, TextureArrayImportInfo{} });
-    return TextureArrayHandle{ index, 1 };
-}
-
-TextureArrayHandle RenderGraphBuilder::ImportTextureArray(
+TextureHandle RenderGraphBuilder::ImportTextureArray(
     const char* name, const TextureArrayTarget& externalTarget, ImageLayout currentLayout)
 {
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::ImportTextureArray requires a non-empty, static-storage-duration name");
-    const std::uint32_t index = static_cast<std::uint32_t>(m_textureArrays.size());
+    const std::uint32_t index = static_cast<std::uint32_t>(m_textures.size());
 
-    TextureArrayDesc desc;
+    TextureDesc desc;
+    desc.dimension = TextureDimension::Array2D;
     desc.width = externalTarget.extent.width;
     desc.height = externalTarget.extent.height;
     desc.arrayLayers = externalTarget.arrayLayers;
     desc.format = FromVkFormat(externalTarget.format);
     desc.hasDepth = externalTarget.hasDepth;
 
-    TextureArrayImportInfo importInfo;
+    TextureImportInfo importInfo;
     importInfo.isImported = true;
-    importInfo.externalTarget = externalTarget;
+    importInfo.externalArrayTarget = externalTarget;
     importInfo.currentLayout = currentLayout;
 
-    m_textureArrays.push_back(TextureArraySlot{ desc, name, importInfo });
-    return TextureArrayHandle{ index, 1 };
+    m_textures.push_back(TextureSlot{ desc, name, importInfo });
+    return TextureHandle{ index, 1 };
 }
 
 void RenderGraphBuilder::KeepTextureOutput(TextureHandle handle)
@@ -342,19 +291,9 @@ void RenderGraphBuilder::KeepTextureOutput(TextureHandle handle)
     m_finalTextureOutputs.push_back(handle);
 }
 
-void RenderGraphBuilder::KeepVolumeTextureOutput(VolumeTextureHandle handle)
-{
-    m_finalVolumeTextureOutputs.push_back(handle);
-}
-
 void RenderGraphBuilder::KeepBufferOutput(BufferHandle handle)
 {
     m_finalBufferOutputs.push_back(handle);
-}
-
-void RenderGraphBuilder::KeepTextureArrayOutput(TextureArrayHandle handle)
-{
-    m_finalTextureArrayOutputs.push_back(handle);
 }
 
 void RenderGraphBuilder::AddBlitPass(
@@ -457,11 +396,8 @@ CompiledGraphInput RenderGraphBuilder::Finish()
     input.passes = std::move(m_passes);
     input.textures = std::move(m_textures);
     input.buffers = std::move(m_buffers);
-    input.volumeTextures = std::move(m_volumeTextures);
-    input.textureArrays = std::move(m_textureArrays);
-    input.finalVolumeTextureOutputs = std::move(m_finalVolumeTextureOutputs);
+    input.finalTextureOutputs = m_finalTextureOutputs;
     input.finalBufferOutputs = std::move(m_finalBufferOutputs);
-    input.finalTextureArrayOutputs = std::move(m_finalTextureArrayOutputs);
     input.persistentCacheTextures = std::move(m_persistentCacheTextures);
     return input;
 }

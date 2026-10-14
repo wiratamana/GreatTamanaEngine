@@ -31,7 +31,7 @@ rg::TextureHandle AtmosphereLutRenderer::AddSkyViewLutPass(rg::RenderGraphBuilde
         multiScatteringLutHandle, outputTextureName, viewScope, toggleRegistry);
 }
 
-rg::VolumeTextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg::RenderGraphBuilder& builder,
+rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveVolumePass(rg::RenderGraphBuilder& builder,
     Renderer& renderer, const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
     rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle,
     const char* outputVolumeName, rg::ViewScope viewScope, rg::RenderPassToggleRegistry* toggleRegistry)
@@ -50,7 +50,7 @@ void AtmosphereLutRenderer::DrawSkyBackground(Renderer& renderer, rg::CommandBuf
 
 rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder,
     Renderer& renderer, rg::TextureHandle sourceColorHandle, rg::TextureHandle sourceDepthHandle,
-    rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
+    rg::TextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
     const Mat4& invViewProjection, Vec3 cameraWorldPosition, float aerialPerspectiveStrength, float maxDistanceKm,
     float depthExponent, Extent2D extent, const char* outputTextureName, rg::ViewScope viewScope,
     rg::RenderPassToggleRegistry* toggleRegistry)

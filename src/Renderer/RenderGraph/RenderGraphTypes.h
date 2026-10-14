@@ -40,6 +40,7 @@
 #include "RenderGraphHandles.h"
 #include "../Buffer.h" // BufferUsage - BufferDesc::usage below, engine-native, never a raw VkBufferUsageFlags.
 #include "../../Core/GraphicsHandles.h" // SamplerHandle/DescriptorSetLayoutHandle - PendingBinding/PassRecord below.
+#include "../../Core/TextureDimension.h"
 #include "../../Core/PixelFormat.h" // TextureDesc/VolumeTextureDesc/TextureArrayDesc::format below - engine-native, never a raw VkFormat.
 
 #include <array>
@@ -210,28 +211,20 @@ constexpr bool HasFlag(TextureUsage value, TextureUsage flag) noexcept
 // from different call sites. `debugName` is intentionally ABSENT from both
 // structs below as the direct fix for that bug - do not reintroduce it.
 
+// Physical shape of any graph-owned texture: 2D, 3D volume, 2D array or cube.
+// New fields are appended at the end so positional initializers like TextureDesc{ w, h, format, hasDepth, usage } stay valid.
 struct TextureDesc {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
-    // PixelFormat::Undefined == "match Renderer::ColorPixelFormat() exactly"
-    // - the same convention Renderer::CreateRenderTexture()'s own `format`
-    // parameter already uses (see AGENTS.md, "Render Target Format
-    // Matching"). Engine-native PixelFormat, never a raw VkFormat - Renderer
-    // is the ONE place this ever translates to/from a real VkFormat (see
-    // VulkanFormatInfo.h).
+    // PixelFormat::Undefined == "match the renderer's color format (or depth format, for a depth array)".
     PixelFormat format = PixelFormat::Undefined;
-    // Whether this logical resource also carries a companion DepthBuffer,
-    // mirroring RenderTexture's own shape (see src/Renderer/RenderTexture.h).
+    // Tex2D: also carries a companion depth image (like RenderTexture).
+    // Array2D/Cube: the single image IS a depth image (true) or a color image (false) - never both.
     bool hasDepth = false;
-    // better-render-pass-1 campaign, PHASE8
-    // (PHASE8_TEXTUREDESC_USAGE_FIELD_AND_RESOURCE_POOL_AUDIT.md, R5) -
-    // appended at the END per this struct's own universal field-append
-    // rule, genuinely belongs here per the "standing rule" comment above:
-    // a storage-capable image and a non-storage image are NOT
-    // Vulkan-interchangeable, so `usage` genuinely changes whether two
-    // requests can share one physical allocation. Compared automatically by
-    // the `= default` operator== below, exactly like `hasDepth` already is.
-    TextureUsage usage = TextureUsage::None;
+    TextureUsage usage = TextureUsage::None; // Storage and non-storage images are not interchangeable.
+    TextureDimension dimension = TextureDimension::Tex2D;
+    std::uint32_t depth = 1;       // Z slices (Tex3D only).
+    std::uint32_t arrayLayers = 1; // Layer count (Array2D/Cube; cube needs a positive multiple of 6 and width == height).
 
     friend bool operator==(const TextureDesc&, const TextureDesc&) noexcept = default;
 };
@@ -244,64 +237,6 @@ struct BufferDesc {
     BufferUsage usage = BufferUsage::None;
 
     friend bool operator==(const BufferDesc&, const BufferDesc&) noexcept = default;
-};
-
-// Atmosphere Scattering campaign, Phase 2
-// (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) - the
-// VolumeTextureHandle counterpart of TextureDesc/BufferDesc above, same
-// "purely a physical-shape descriptor, no debugName field" rule (see this
-// file's own "standing rule" comment above). `depth` is the one genuinely
-// new dimension neither TextureDesc nor BufferDesc has any equivalent of.
-struct VolumeTextureDesc {
-    std::uint32_t width = 0;
-    std::uint32_t height = 0;
-    std::uint32_t depth = 0;
-    PixelFormat format = PixelFormat::Undefined;
-
-    friend bool operator==(const VolumeTextureDesc&, const VolumeTextureDesc&) noexcept = default;
-};
-
-// A single Vulkan image with N layers (a Texture2DArray) or a cubemap
-// (VK_IMAGE_VIEW_TYPE_CUBE/_CUBE_ARRAY). Poolable and barrier-planned
-// exactly like plain TextureDesc/TextureHandle - unlike VolumeTextureDesc,
-// which is import-only with no pooling counterpart.
-// See src/Renderer/TextureArray2D.h for the owning RAII class.
-struct TextureArrayDesc {
-    std::uint32_t width = 0;
-    std::uint32_t height = 0;
-    std::uint32_t arrayLayers = 1;   // Layer count for a multi-layer poolable image, e.g. 4.
-    PixelFormat format = PixelFormat::Undefined;
-    // DELIBERATE ASYMMETRY vs. TextureDesc::hasDepth (which defaults false):
-    // this defaults to TRUE because a multi-layer depth image array is
-    // this struct's dominant real use case. hasDepth here does NOT mean "also allocate a
-    // second companion depth image" (TextureDesc's own meaning) - there is
-    // only ever ONE image. It selects WHICH KIND of homogeneous image every
-    // layer is:
-    //   true  (default): every layer is a depth image (VK_IMAGE_ASPECT_DEPTH_BIT,
-    //          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | SAMPLED_BIT).
-    //          PixelFormat::Undefined resolves to Renderer::DepthPixelFormat()
-    //          (NOT ColorPixelFormat() - these are two different,
-    //          independently negotiated device formats). usage.Storage must
-    //          never combine with hasDepth == true.
-    //   false: every layer is a color image (VK_IMAGE_ASPECT_COLOR_BIT,
-    //          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | SAMPLED_BIT, plus
-    //          STORAGE_BIT when usage has TextureUsage::Storage).
-    //          PixelFormat::Undefined resolves to Renderer::ColorPixelFormat(),
-    //          exactly like plain TextureDesc.
-    // A caller building a color array/cubemap (e.g. a reflection-probe
-    // array) MUST pass hasDepth = false explicitly - never rely on the
-    // default for that case. Do not "fix" this asymmetry by changing the
-    // default.
-    bool hasDepth = true;
-    // VK_IMAGE_VIEW_TYPE_CUBE/_CUBE_ARRAY + VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT.
-    // Requires arrayLayers a positive multiple of 6, AND width == height
-    // (Vulkan requires square faces for a cube-compatible image) - enforced
-    // unconditionally (even in release) by GpuResourceFactory::CreateTextureArray(),
-    // NEVER by a debug-assert alone - see TextureArray2D.h.
-    bool isCubemap = false;
-    TextureUsage usage = TextureUsage::None;
-
-    friend bool operator==(const TextureArrayDesc&, const TextureArrayDesc&) noexcept = default;
 };
 
 // --- Pass metadata -----------------------------------------------------
@@ -333,81 +268,23 @@ const char* ToString(RenderPassEvent renderPassEvent) noexcept;
 
 // ResourceUsage moved to RenderGraphHandles.h (included above).
 
-// render-pass-6 campaign, PHASE6 (item 2.2) - REPLACES every independently
-// hand-rolled `switch (usage.kind) { Texture / Buffer / VolumeTexture }`
-// block scattered across RenderGraph.cpp/RenderGraphCompiler.cpp/
-// RenderGraphSnapshot.cpp with ONE generic dispatch point every one of them
-// routes through instead. `usage.kind` still drives a REAL, exhaustive
-// switch internally - deliberately NOT a `default:`-having fallback of any
-// kind, so a future 4th ResourceKind enumerator STILL fails to compile here
-// until every call site's own three (soon four) lambdas are updated - this
-// is the exact same "no default: case, ever" guarantee IsWriteAccess()/
-// ToString() already provide for ResourceAccess, extended to ResourceKind's
-// own dispatch shape.
-//
-// `onTexture`/`onBuffer`/`onVolumeTexture` are three separate callables
-// (never one generic templated callable dispatched via `if constexpr`) -
-// this is deliberate: three DISTINCT lambda parameters, one per kind, means
-// a caller who forgets to handle one kind gets a real compile error
-// (missing function argument) rather than a silently-empty generic body -
-// mirroring this file's own general "plain, explicit code over template-
-// heavy machinery" house style (see ResourceUsage's own doc comment on why
-// it is a tagged struct, not a std::variant).
-//
-// All three callables must return the SAME type (C++ requires every return
-// statement inside a function with a deduced `auto` return type to agree) -
-// `void` is completely valid (RenderGraph.cpp's ApplyUsageBarrierIfNeeded()
-// uses this: all the divergent per-kind logic lives inside the three
-// lambdas, the dispatcher itself returns nothing), as is a shared pointer
-// type (e.g. `ResourceLifetime*`, letting one lambda per kind resolve BOTH
-// "which vector" and "which index" in one step - see RenderGraphCompiler.cpp's
-// lifetime `touch()` lambda) or a shared plain value type (`std::int32_t`,
-// `bool`, `std::string`, ...). This is a per-call-site choice, re-checked
-// independently at each of this template's own instantiations - it is never
-// a global constraint on DispatchByKind() itself.
-template <typename TextureFn, typename BufferFn, typename VolumeTextureFn, typename TextureArrayFn>
-auto DispatchByKind(const ResourceUsage& usage, TextureFn&& onTexture, BufferFn&& onBuffer,
-    VolumeTextureFn&& onVolumeTexture, TextureArrayFn&& onTextureArray)
+// Single dispatch point over a usage's resource kind. Exhaustive switch with no `default:`, so a new
+// ResourceKind fails to compile here. All callables must return the same type (void is fine).
+// A texture-like kind (Texture/VolumeTexture/TextureArray) routes to `onTexture`.
+template <typename TextureFn, typename BufferFn>
+auto DispatchByKind(const ResourceUsage& usage, TextureFn&& onTexture, BufferFn&& onBuffer)
 {
     switch (usage.kind) {
     case ResourceKind::Texture:
+    case ResourceKind::VolumeTexture:
+    case ResourceKind::TextureArray:
         return onTexture(usage.texture);
     case ResourceKind::Buffer:
         return onBuffer(usage.buffer);
-    case ResourceKind::VolumeTexture:
-        return onVolumeTexture(usage.volumeTexture);
-    case ResourceKind::TextureArray:
-        return onTextureArray(usage.textureArray);
     }
-    // Unreachable in practice - the switch above is exhaustive over all 4
-    // current ResourceKind enumerators with no default: case, so this line
-    // is only ever reached if a caller somehow constructed an out-of-range
-    // ResourceKind value directly (never possible through any real
-    // ResourceUsage::ForTexture()/ForBuffer()/ForVolumeTexture()/
-    // ForTextureArray() factory).
-    // Kept ONLY for the compiler's own "not all control paths return a
-    // value" diagnostic on some compilers/warning levels (MSVC's C4715 in
-    // particular, which can fire even for a switch that visibly covers
-    // every named enumerator, since it cannot statically rule out a value
-    // outside the enum's named range at runtime).
-    //
-    // Deliberately DOES NOT call onTexture/onBuffer/onVolumeTexture/
-    // onTextureArray again as a fallback (unlike naively mirroring
-    // IsWriteAccess()/ToString()'s own "return a safe sentinel" convention)
-    // - those two functions return a concrete, known, always-safe sentinel
-    // type (bool/const char*); this template's return type is caller-chosen
-    // and may be a pointer, a pair, or anything else with no safe default -
-    // and, more importantly, re-invoking one of the four callables here
-    // would silently RE-RUN real, possibly side-effecting per-kind logic
-    // (e.g. a barrier site emitting a second GPU barrier) for a usage.kind
-    // value that, if this line is ever genuinely reached, is already
-    // corrupt - doing nothing and failing loudly is strictly safer than
-    // doing something wrong. A thrown exception is valid for ANY deduced
-    // return type (including void), since a path that always throws never
-    // needs to produce a value.
-    assert(false && "DispatchByKind: ResourceUsage::kind held a value outside ResourceKind's 4 named enumerators");
-    throw std::logic_error(
-        "DispatchByKind: ResourceUsage::kind held a value outside ResourceKind's 4 named enumerators");
+    // Only reachable with an out-of-range kind. Fail loudly rather than re-run a callable's side effects.
+    assert(false && "DispatchByKind: ResourceUsage::kind held a value outside ResourceKind's named enumerators");
+    throw std::logic_error("DispatchByKind: ResourceUsage::kind held a value outside ResourceKind's named enumerators");
 }
 
 // Forward-declared only - fully specified in Phase 6
@@ -445,7 +322,7 @@ struct ColorAttachmentDesc {
 // the underlying TextureArrayDesc::hasDepth, read off the resolved
 // physical resource by the executor.
 struct ArrayLayerAttachmentDesc {
-    TextureArrayHandle handle;
+    TextureHandle handle;
     std::uint32_t layerIndex = 0;
     std::optional<std::array<float, 4>> clearColor; // meaningful only when the array is color (hasDepth == false)
     std::optional<float> clearDepth;                 // meaningful only when the array is depth (hasDepth == true)
@@ -537,46 +414,28 @@ ResolvedBlitRegion ResolveBlitRegion(
 // own execution branch for where this is actually asserted.
 bool IsValidBlitRegion(const ResolvedBlitRegion& region, VkExtent2D resolvedExtent) noexcept;
 
-// Compute-binding vocabulary - lets a pass declare which descriptor slot a
-// resource occupies, orthogonal to the Read*/Write* barrier-tracking family
-// above (a Bind* call never implies a barrier - the matching ReadTexture()/
-// WriteTexture()/etc. call still owns that). `kind` selects which of the
-// handle fields below is meaningful; for StorageBuffer/StorageImage exactly
-// one of the two possible handle fields is ever set by the one PassBuilder
-// call that produced this entry (see RenderGraphBuilder.h's BindStorageBuffer/
-// BindStorageImage overloads) - checked by which one IsValid()/!=Invalid at
-// resolve time, never both.
+// Compute-binding vocabulary - declares which descriptor slot a resource occupies. A Bind*() call never
+// implies a barrier; the matching ReadTexture()/WriteTexture() call still owns that.
 enum class BindingKind : std::uint8_t {
     StorageBuffer,
     CombinedImageSampler,
-    CombinedVolumeImageSampler,
     StorageImage,
-    // A combined-image-sampler binding against an already-resolved,
-    // NOT-graph-tracked ImageViewHandle/SamplerHandle pair - the image sibling
-    // of BufferObjectHandle (for an image that is never itself a graph resource).
+    // Combined-image-sampler against an already-resolved ImageViewHandle/SamplerHandle pair that is not a graph resource.
     CombinedImageViewSampler,
 };
 
-// One descriptor-slot binding declared via PassBuilder::Bind*() - resolved
-// into a real VkDescriptorSet write immediately before this pass's execute()
-// runs (see RenderGraph.cpp).
+// One descriptor-slot binding declared via PassBuilder::Bind*(); resolved into a descriptor write right before the pass runs.
 struct PendingBinding {
     std::uint32_t binding = 0;
     BindingKind kind = BindingKind::StorageBuffer;
     TextureHandle textureHandle;
     // CombinedImageSampler only: Depth binds the texture's depth image view + depth sampler.
     TextureAspect textureAspect = TextureAspect::Color;
-    VolumeTextureHandle volumeTextureHandle;
     BufferHandle bufferHandle;
     BufferObjectHandle bufferObjectHandle = BufferObjectHandle::Invalid;
-    // CombinedImageViewSampler only - an already-resolved, NOT-graph-tracked
-    // image view (e.g. a per-view depth target's own ImageViewHandle).
+    // CombinedImageViewSampler only.
     ImageViewHandle explicitImageView = ImageViewHandle::Invalid;
-    // CombinedImageSampler/CombinedImageViewSampler: SamplerHandle::Invalid
-    // on a CombinedImageSampler binding means "use this TextureHandle's own
-    // already-resolved sampler" - REQUIRED (never Invalid) for
-    // CombinedVolumeImageSampler/CombinedImageViewSampler, which track no
-    // implicit sampler of their own.
+    // Invalid on a CombinedImageSampler binding means "use the texture's own sampler" (volumes have none: pass one).
     SamplerHandle explicitSampler = SamplerHandle::Invalid;
     uint64_t bufferOffset = 0;
     uint64_t bufferRange = VK_WHOLE_SIZE;

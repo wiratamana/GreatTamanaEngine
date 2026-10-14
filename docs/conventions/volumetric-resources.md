@@ -47,7 +47,7 @@ re-imports its persistent `VolumeTexture` into that frame's graph —
 currentLayout)`:
 
 ```cpp
-const VolumeTextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+const TextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), VK_IMAGE_LAYOUT_UNDEFINED);
 ```
 
 - **Case (a), full rewrite every frame (the one shipped feature's real case,
@@ -77,7 +77,7 @@ const VolumeTextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Tar
 
 ## 3. The compute pass — both valid dispatch shapes
 
-`PassBuilder::WriteVolumeTexture(handle, access)` declares the write. There
+`PassBuilder::WriteTexture(handle, access)` declares the write. There
 are exactly two valid dispatch shapes, each proven by one of
 `tests/Renderer/RenderGraph/VolumeTextureExampleFeatureTests.cpp`'s two real,
 headless-GPU-executed tests:
@@ -165,25 +165,24 @@ fully independent, use shape (a) — picking the wrong one for a given
 algorithm produces no build error and no validation-layer warning, only
 silently wrong per-cell results.
 
-## 3b. Keeping the pass alive — the mandatory `KeepVolumeTextureOutput()` call
+## 3b. Keeping the pass alive — the mandatory `KeepTextureOutput()` call
 
 **This is the single most common way a first-time `VolumeTexture` feature
-silently fails — read this even if you skim everything else.** A
-`VolumeTextureHandle` can **never** be a `finalOutputs` root — that vector is
-texture-only, shared by every `RenderGraph::Execute()` call site in the
-engine. A pass whose only write is a `VolumeTexture` must have its handle
-passed to `RenderGraphBuilder::KeepVolumeTextureOutput(handle)` explicitly, or
+silently fails — read this even if you skim everything else.** A volume
+`TextureHandle` is only a root when it is explicitly kept — nothing roots it
+by default. A pass whose only write is a `VolumeTexture` must have its handle
+passed to `RenderGraphBuilder::KeepTextureOutput(handle)` explicitly, or
 `RenderGraphCompiler::Compile()`'s backward-reachability culling drops the
 whole pass silently, every single frame — no build error, no validation-layer
 warning, just a volume that never gets filled.
 
 This is a real, verified trap, not a theoretical one:
 `AddAerialPerspectiveVolumePass()` itself (`AtmosphereLutRenderer.cpp`, lines
-574-656) does NOT call `KeepVolumeTextureOutput()` anywhere in its own body —
+574-656) does NOT call `KeepTextureOutput()` anywhere in its own body —
 its caller does, separately, at `src/Core/Core.cpp` line 848:
 
 ```cpp
-frame.builder.KeepVolumeTextureOutput(viewLuts.aerialPerspectiveVolumeHandle);
+frame.builder.KeepTextureOutput(viewLuts.aerialPerspectiveVolumeHandle);
 ```
 
 Both of `VolumeTextureExampleFeatureTests.cpp`'s own tests declare a pass
@@ -193,11 +192,11 @@ verbatim from the per-cell test's own `build` lambda:
 
 ```cpp
 fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-    const VolumeTextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+    const TextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), VK_IMAGE_LAYOUT_UNDEFINED);
     b.AddRenderPass(
         "VolumeTextureExamplePerCellFillPass", PassKind::Compute,
         [handle](RenderGraphBuilder::PassBuilder& pass) {
-            pass.WriteVolumeTexture(handle, ResourceAccess::ComputeShaderWrite);
+            pass.WriteTexture(handle, ResourceAccess::ComputeShaderWrite);
         },
         [&](PassContext& ctx) {
             const PassContext::ResolvedVolumeTexture dest = ctx.resolveVolumeTexture(handle);
@@ -208,9 +207,9 @@ fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHan
             cmd.BindDescriptorSet(descriptorSet.Native());
             cmd.DispatchOverSize(kSize, kSize, kSize);
         });
-    // Mandatory - a pass whose only write is a VolumeTextureHandle is
+    // Mandatory - a pass whose only write is a volume texture is
     // silently culled without this call.
-    b.KeepVolumeTextureOutput(handle);
+    b.KeepTextureOutput(handle);
     return {};
 });
 ```
@@ -308,6 +307,6 @@ codebase already has.
   recipe — pick the one the real data dependency actually demands.
 - Do not present the `Image3D` scene-service-slot path as fully symmetric to
   `Image2D` — the single-shared-dummy caveat in section 4(a) above is real.
-- Do not omit the `KeepVolumeTextureOutput()` requirement (section 3b) or
+- Do not omit the `KeepTextureOutput()` requirement (section 3b) or
   treat it as a footnote — it is the single most common way a first-time
   `VolumeTexture` feature silently fails.

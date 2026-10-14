@@ -69,21 +69,10 @@ struct CompiledGraph {
     // nothing else mints/recycles a PassHandle's generation today.
     std::vector<PassHandle> executionOrder;
 
-    // Parallel to CompiledGraphInput::textures/buffers/volumeTextures (same
-    // index) - one ResourceLifetime per declared resource, regardless of
-    // whether it survived culling. render-pass-6 campaign, PHASE5 (item
-    // 2.1) - reworded from the old textureDescs/bufferDescs/
-    // volumeTextureDescs field names, which no longer exist.
+    // Parallel to CompiledGraphInput::textures/buffers (same index) - one ResourceLifetime per declared
+    // resource, regardless of whether it survived culling. `textureLifetimes` covers every texture dimension.
     std::vector<ResourceLifetime> textureLifetimes;
     std::vector<ResourceLifetime> bufferLifetimes;
-
-    // Atmosphere Scattering campaign, Phase 2
-    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md).
-    std::vector<ResourceLifetime> volumeTextureLifetimes;
-
-    // better-render-pass-3 campaign, BLOCK5, Phase 3 - see TextureArrayDesc
-    // (RenderGraphTypes.h). Mirrors volumeTextureLifetimes's exact shape.
-    std::vector<ResourceLifetime> textureArrayLifetimes;
 };
 
 // render-pass-4 campaign, PHASE1
@@ -146,22 +135,11 @@ struct RenderPassEventContradiction {
 std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
     const CompiledGraphInput& input, std::span<const std::int32_t> processingOrder);
 
-// Compiles `input` against the REQUIRED root set `finalOutputs` - the
-// texture handles the caller actually needs to exist by the end of this
-// frame (e.g. the swapchain image the Present pass writes, and nothing
-// else). ALSO reads `input.finalVolumeTextureOutputs` (Atmosphere
-// Scattering campaign, Phase 6 -
-// ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md - see
-// RenderGraphBuilder::KeepVolumeTextureOutput()) as a SECOND, independent
-// root set for VolumeTextureHandle writes, and ALSO reads
-// `input.finalBufferOutputs` (editor-core-separation-26 campaign, PHASE1 -
-// BIG_STEP_2_BUFFER_ROOTS_AND_BLIT_PASSES_2026-09-29.txt, Part A - see
-// RenderGraphBuilder::KeepBufferOutput()) as a THIRD, independent root set
-// for BufferHandle writes. A pass with no path (direct
-// or transitive, through declared reads/writes) to any `finalOutputs`/
-// `finalVolumeTextureOutputs` entry is dead code and is culled entirely:
-// excluded from `executionOrder`, and none of its declared reads/writes
-// extend any resource's lifetime.
+// Compiles `input` against the root set `finalOutputs` - the texture handles the caller needs to exist by
+// the end of the frame (e.g. the swapchain image). `input.finalTextureOutputs` (KeepTextureOutput()),
+// `input.persistentCacheTextures` and `input.finalBufferOutputs` (KeepBufferOutput()) are further roots.
+// A pass with no path (direct or transitive, through declared reads/writes) to any root is dead code and is
+// culled entirely: excluded from `executionOrder`, and none of its reads/writes extend any resource's lifetime.
 //
 // render-pass-4 campaign, PHASE1 - Compile() cross-checks every pass's
 // declared RenderPassEvent against its real resource dependencies, turning a

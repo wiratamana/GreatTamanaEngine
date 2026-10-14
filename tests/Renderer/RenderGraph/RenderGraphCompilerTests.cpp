@@ -242,72 +242,36 @@ TEST(RenderGraphCompilerTest, LifetimeBoundsSpanFromFirstWriterThroughLaterOfTwo
     EXPECT_EQ(finalLifetime.lastUsePassIndex, 3);
 }
 
-// --- TextureArray lifetime (better-render-pass-3 campaign, BLOCK5, Phase 4 -
-// task_manager/better-render-pass-7/PHASE4_TIER1_AUTOMATED_TESTS.md) --------
+// --- Array lifetime ------------------------------------------------------------------
 //
-// Mirrors LifetimeBoundsSpanFromFirstWriterThroughLaterOfTwoReaders's own
-// shape above, substituting TextureArray for the write side: one pass
-// writes a TextureArray resource, a later pass reads it AND writes a real
-// finalOutputs-rooted plain Texture - correctly computing
-// compiled.textureArrayLifetimes[cascades.index]'s firstUsePassIndex/
-// lastUsePassIndex.
-//
-// IMPORTANT finding (per this phase document's own explicit instruction to
-// "reason through which one it is" before fixing anything): the phase
-// document's own illustrative sketch has "ReadCascades" doing NOTHING but
-// a bare ReadTextureArray() call, relying solely on
-// KeepTextureArrayOutput(cascades) to keep both passes alive. That shape
-// was tried FIRST, and it does NOT work - not because of a compiler bug,
-// but because of how this compiler's culling/root-marking has always
-// worked for EVERY resource kind (confirmed by re-reading
-// VolumeTextureOnlyWriteSurvivesCullingOnlyWhenExplicitlyKeptAsOutput
-// above): KeepTextureArrayOutput()/KeepVolumeTextureOutput() mark the
-// WRITE of that handle as a root, keeping the WRITER pass alive - they do
-// NOT, and structurally cannot, keep a READER-only pass alive if that
-// reader itself produces nothing anything else needs (exactly like
-// DeadBranchIsCulledAndItsResourceHasNoLifetime's own "C" pass above,
-// culled for writing a texture nobody reads). A reader pass with no write
-// of its own has no outgoing edge for backward reachability to ever reach
-// it. This is REAL, PRE-EXISTING, cross-resource-kind compiler behavior,
-// not something this phase changed or discovered a bug in - so this test
-// instead mirrors the REAL, already-proven
-// LifetimeBoundsSpanFromFirstWriterThroughLaterOfTwoReaders shape: the
-// reader also writes a plain Texture that is itself a real finalOutputs
-// root, which is exactly how a real future TextureArray consumer (e.g. a
-// shadow-cascade pass reading the array and writing a lit color output)
-// would actually be structured. KeepTextureArrayOutput() itself is
-// deliberately NOT called here, since it is not needed once a real
-// finalOutputs path exists (mirroring how LifetimeBoundsSpanFromFirstWriterThroughLaterOfTwoReaders
-// above never calls any Keep*Output() either) - it remains correctly
-// exercised by this file's existing root-marking coverage pattern for
-// VolumeTexture/Buffer (this phase's own master strategy's non-goal list
-// does not ask for a dedicated TextureArray-Keep test, and Phase 3's own
-// sub-agent double-check already confirmed the TextureArray root-marking
-// dispatch branch exists and is wired correctly by direct code reading).
+// One pass writes an array texture, a later pass reads it AND writes a plain texture that is a real
+// finalOutputs root. The array's lifetime spans both passes. (A reader-only pass is never a root, so the
+// reader writes the final output - exactly how a real shadow-cascade consumer is structured.)
 TEST(RenderGraphCompilerTest, TextureArrayLifetimeTracksFirstAndLastUsePassIndex)
 {
     RenderGraphBuilder builder;
-    TextureArrayDesc desc;
+    TextureDesc desc;
     desc.width = 1024;
     desc.height = 1024;
-    desc.arrayLayers = 4;
     desc.hasDepth = true;
-    const TextureArrayHandle cascades = builder.CreateTextureArray("Cascades", desc);
+    desc.dimension = TextureDimension::Array2D;
+    desc.arrayLayers = 4;
+    const TextureHandle cascades = builder.CreateTexture("Cascades", desc);
     const TextureHandle output = builder.CreateTexture("CascadesPreview", MakeTextureDesc());
 
     builder.AddPass(
         "WriteCascades",
         [&](RenderGraphBuilder::PassBuilder& pass) {
-            pass.WriteTextureArray(cascades, ResourceAccess::DepthStencilAttachmentReadWrite);
+            pass.WriteTexture(cascades, ResourceAccess::DepthStencilAttachmentReadWrite);
         },
         NoOpExecute); // index 0
     builder.AddPass(
         "ReadCascades",
         [&](RenderGraphBuilder::PassBuilder& pass) {
-            pass.ReadTextureArray(cascades, ResourceAccess::ShaderRead);
+            pass.ReadTexture(cascades, ResourceAccess::ShaderRead);
             pass.WriteColorAttachment(output);
         },
-        NoOpExecute); // index 1 - its own real finalOutputs-reaching write keeps it (and, transitively, its reader dependency on WriteCascades) alive.
+        NoOpExecute); // index 1 - its own finalOutputs-reaching write keeps both passes alive.
 
     CompiledGraphInput input = builder.Finish();
     const TextureHandle finalOutputs[] = { output };
@@ -317,9 +281,9 @@ TEST(RenderGraphCompilerTest, TextureArrayLifetimeTracksFirstAndLastUsePassIndex
     EXPECT_FALSE(input.passes[0].isCulled);
     EXPECT_FALSE(input.passes[1].isCulled);
 
-    ASSERT_EQ(compiled.textureArrayLifetimes.size(), 1u);
-    EXPECT_EQ(compiled.textureArrayLifetimes[cascades.index].firstUsePassIndex, 0);
-    EXPECT_EQ(compiled.textureArrayLifetimes[cascades.index].lastUsePassIndex, 1);
+    ASSERT_EQ(compiled.textureLifetimes.size(), 2u);
+    EXPECT_EQ(compiled.textureLifetimes[cascades.index].firstUsePassIndex, 0);
+    EXPECT_EQ(compiled.textureLifetimes[cascades.index].lastUsePassIndex, 1);
 }
 
 // --- Determinism ---------------------------------------------------------------
@@ -537,44 +501,33 @@ TEST(RenderGraphCompilerTest, BufferOnlyWriteSurvivesCullingOnlyWhenAReaderReach
     EXPECT_TRUE(input.passes[2].isCulled);
 }
 
-// --- Atmosphere Scattering campaign, Phase 6's own VolumeTextureHandle
-// root-set fix (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) -
+// --- Volume roots ---------------------------------------------------------------
 //
-// Before this phase, `finalOutputs` was the ONLY root set Compile() ever
-// consulted, and it is TextureHandle-only - a pass whose ONLY declared
-// write was a VolumeTextureHandle had structurally NO way to survive
-// culling, no matter what it wrote (this was a genuine Phase 2
-// infrastructure gap, discovered by Phase 6's own real workload - see
-// ATMOSPHERE_PHASE6_COMPLETION_REPORT.md). RenderGraphBuilder::
-// KeepVolumeTextureOutput() is the fix: a SECOND, independent root set
-// (CompiledGraphInput::finalVolumeTextureOutputs) Compile() now also
-// checks. VolumeA is explicitly kept via KeepVolumeTextureOutput() and
-// must survive; VolumeB is written but never kept/read by anything and
-// must still be culled, proving this fix is correctly OPT-IN, not a
-// blanket "every volume texture write always survives" regression.
+// A 3D volume is a TextureHandle like any other, but a pass whose ONLY write is a volume has no
+// `finalOutputs` texture to reach, so it survives culling only when explicitly kept via KeepTextureOutput().
+// VolumeA is kept and must survive; VolumeB is written but never kept/read and must still be culled -
+// proving keeping is opt-in, not a blanket "every volume write survives".
 TEST(RenderGraphCompilerTest, VolumeTextureOnlyWriteSurvivesCullingOnlyWhenExplicitlyKeptAsOutput)
 {
     RenderGraphBuilder builder;
     const VolumeTarget dummyVolumeTarget{};
-    const VolumeTextureHandle volumeA =
-        builder.ImportVolumeTexture("VolA", dummyVolumeTarget, ImageLayout::Undefined);
-    const VolumeTextureHandle volumeB =
-        builder.ImportVolumeTexture("VolB", dummyVolumeTarget, ImageLayout::Undefined);
+    const TextureHandle volumeA = builder.ImportVolumeTexture("VolA", dummyVolumeTarget, ImageLayout::Undefined);
+    const TextureHandle volumeB = builder.ImportVolumeTexture("VolB", dummyVolumeTarget, ImageLayout::Undefined);
 
     builder.AddComputePass(
         "WritesKeptVolume",
         [&](RenderGraphBuilder::PassBuilder& pass) {
-            pass.WriteVolumeTexture(volumeA, ResourceAccess::ComputeShaderWrite);
+            pass.WriteTexture(volumeA, ResourceAccess::ComputeShaderWrite);
         },
         NoOpExecute); // index 0 - its only write is explicitly kept as a root below.
     builder.AddComputePass(
         "WritesUnkeptVolume",
         [&](RenderGraphBuilder::PassBuilder& pass) {
-            pass.WriteVolumeTexture(volumeB, ResourceAccess::ComputeShaderWrite);
+            pass.WriteTexture(volumeB, ResourceAccess::ComputeShaderWrite);
         },
-        NoOpExecute); // index 1 - writes a DIFFERENT volume texture, never kept/read - dead code.
+        NoOpExecute); // index 1 - writes a DIFFERENT volume, never kept/read - dead code.
 
-    builder.KeepVolumeTextureOutput(volumeA);
+    builder.KeepTextureOutput(volumeA);
 
     CompiledGraphInput input = builder.Finish();
     const CompiledGraph compiled = Compile(input, {});
@@ -588,24 +541,54 @@ TEST(RenderGraphCompilerTest, VolumeTextureWriteNeverKeptIsCulledEvenWithNoTextu
 {
     RenderGraphBuilder builder;
     const VolumeTarget dummyVolumeTarget{};
-    const VolumeTextureHandle volume = builder.ImportVolumeTexture("Vol", dummyVolumeTarget, ImageLayout::Undefined);
+    const TextureHandle volume = builder.ImportVolumeTexture("Vol", dummyVolumeTarget, ImageLayout::Undefined);
 
     builder.AddComputePass(
         "WritesVolume",
         [&](RenderGraphBuilder::PassBuilder& pass) {
-            pass.WriteVolumeTexture(volume, ResourceAccess::ComputeShaderWrite);
+            pass.WriteTexture(volume, ResourceAccess::ComputeShaderWrite);
         },
         NoOpExecute);
 
-    // Deliberately never call KeepVolumeTextureOutput() - this is the exact
-    // pre-fix behavior (and remains correct post-fix): a volume texture
-    // write nobody ever marks as a root is dead code, same as any other
-    // never-read/never-kept resource.
+    // Never kept: a write nobody marks as a root is dead code, same as any other never-read resource.
     CompiledGraphInput input = builder.Finish();
     const CompiledGraph compiled = Compile(input, {});
 
     EXPECT_TRUE(compiled.executionOrder.empty());
     EXPECT_TRUE(input.passes[0].isCulled);
+}
+
+// A kept 3D volume, a kept array and a kept plain 2D texture share ONE root list.
+TEST(RenderGraphCompilerTest, KeepTextureOutputRootsEveryTextureDimension)
+{
+    RenderGraphBuilder builder;
+    const TextureHandle volume = builder.ImportVolumeTexture("Vol", VolumeTarget{}, ImageLayout::Undefined);
+    TextureDesc arrayDesc;
+    arrayDesc.dimension = TextureDimension::Array2D;
+    arrayDesc.arrayLayers = 2;
+    const TextureHandle array = builder.CreateTexture("Array", arrayDesc);
+    const TextureHandle plain = builder.CreateTexture("Plain", MakeTextureDesc());
+
+    builder.AddComputePass("WritesVolume",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteTexture(volume, ResourceAccess::ComputeShaderWrite); },
+        NoOpExecute);
+    builder.AddComputePass("WritesArray",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteTexture(array, ResourceAccess::ComputeShaderWrite); },
+        NoOpExecute);
+    builder.AddPass("WritesPlain",
+        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(plain); }, NoOpExecute);
+
+    builder.KeepTextureOutput(volume);
+    builder.KeepTextureOutput(array);
+    builder.KeepTextureOutput(plain);
+
+    CompiledGraphInput input = builder.Finish();
+    const CompiledGraph compiled = Compile(input, {});
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1, 2 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+    EXPECT_FALSE(input.passes[1].isCulled);
+    EXPECT_FALSE(input.passes[2].isCulled);
 }
 
 // --- editor-core-separation-26 campaign, PHASE1's own BufferHandle

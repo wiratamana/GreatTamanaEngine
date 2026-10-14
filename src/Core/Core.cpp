@@ -1,4 +1,4 @@
-﻿#include "Core.h"
+#include "Core.h"
 
 // Access to editor layer implementation.
 #include "../Editor/EditorLayer.h"
@@ -1076,7 +1076,7 @@ void Core::BuildFrame()
 
                     m_offscreenBlackboardThisFrame.BeginFrame();
                     rg::RenderPassFrameContext frame{
-                        {}, rg::RenderViewId::Shared(), m_offscreenBlackboardThisFrame, b, {}, {} };
+                        {}, rg::RenderViewId::Shared(), m_offscreenBlackboardThisFrame, b, {} };
 
                     m_currentViewDataThisFrame.clear();
                     m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
@@ -1376,7 +1376,7 @@ void Core::Present()
                 rg::RenderPassBlackboard presentBlackboard;
                 presentBlackboard.BeginFrame();
                 rg::RenderPassFrameContext presentFrame{
-                    {}, rg::RenderViewId::Shared(), presentBlackboard, b, {}, {}
+                    {}, rg::RenderViewId::Shared(), presentBlackboard, b, {}
                 };
                 m_presentRenderPipeline.DeclareInto(b, presentFrame);
 #ifndef NDEBUG

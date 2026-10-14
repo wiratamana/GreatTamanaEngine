@@ -389,7 +389,6 @@ struct RenderPassFrameContext {
     // real. A confirmed, narrow, additive fix - see this phase's own
     // completion report.
     mutable std::vector<TextureHandle> finalTextureOutputs;
-    mutable std::vector<VolumeTextureHandle> finalVolumeTextureOutputs;
 
     // ... any other plain, opaque-to-the-pipeline per-frame data
     // (camera/target/dt) is added here by whichever LATER phase first

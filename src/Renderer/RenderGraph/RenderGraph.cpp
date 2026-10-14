@@ -51,28 +51,66 @@ void RenderGraph::EnsureTextureResolved(
         return;
     }
 
-    const TextureImportInfo& importInfo = input.textures[index].importInfo;
-    if (importInfo.isImported) {
-        // Resolve externally owned resource with caller-provided initial layout.
-        tex.isImported = true;
-        tex.target = importInfo.externalTarget;
-        tex.sampler = Native(importInfo.colorSampler);
-        tex.depthSampler = Native(importInfo.depthSampler);
-        tex.hasDepth = importInfo.externalTarget.depthImage != VK_NULL_HANDLE;
-        tex.colorState = ResourceState{
-            ToVkImageLayout(importInfo.currentLayout), VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE };
-        tex.depthState = ResourceState{};
-    } else {
-        // Acquire transient texture from the internal resource pool.
-        RenderTexture& renderTexture =
-            m_resourcePool.AcquireTexture(input.textures[index].desc, input.textures[index].name);
-        tex.isImported = false;
-        tex.target = renderTexture.Target();
-        tex.sampler = renderTexture.Sampler();
-        tex.depthSampler = renderTexture.DepthSampler();
-        tex.hasDepth = input.textures[index].desc.hasDepth;
-        tex.colorState = ResourceState{};
-        tex.depthState = ResourceState{};
+    const TextureSlot& slot = input.textures[index];
+    const TextureImportInfo& importInfo = slot.importInfo;
+    tex.dimension = slot.desc.dimension;
+    tex.isImported = importInfo.isImported;
+    const ResourceState importedState{
+        ToVkImageLayout(importInfo.currentLayout), VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE };
+
+    switch (tex.dimension) {
+    case TextureDimension::Tex2D:
+        if (importInfo.isImported) {
+            // Externally owned resource with caller-provided initial layout.
+            tex.target = importInfo.externalTarget;
+            tex.sampler = Native(importInfo.colorSampler);
+            tex.depthSampler = Native(importInfo.depthSampler);
+            tex.hasDepth = importInfo.externalTarget.depthImage != VK_NULL_HANDLE;
+            tex.colorState = importedState;
+            tex.depthState = ResourceState{};
+        } else {
+            // Transient texture from the internal resource pool.
+            RenderTexture& renderTexture = m_resourcePool.AcquireRenderTexture(slot.desc, slot.name);
+            tex.target = renderTexture.Target();
+            tex.sampler = renderTexture.Sampler();
+            tex.depthSampler = renderTexture.DepthSampler();
+            tex.hasDepth = slot.desc.hasDepth;
+            tex.colorState = ResourceState{};
+            tex.depthState = ResourceState{};
+        }
+        break;
+
+    case TextureDimension::Tex3D:
+        // 3D volumes are import-only; a non-imported one stays an empty target.
+        if (importInfo.isImported) {
+            const VolumeTarget& volume = importInfo.externalVolumeTarget;
+            tex.target.image = volume.image;
+            tex.target.imageView = volume.imageView;
+            tex.target.extent = VkExtent2D{ volume.extent.width, volume.extent.height };
+            tex.target.format = volume.format;
+            tex.depthSlices = volume.extent.depth;
+            tex.colorState = importedState;
+        } else {
+            tex.colorState = ResourceState{};
+        }
+        break;
+
+    case TextureDimension::Array2D:
+    case TextureDimension::Cube:
+        if (importInfo.isImported) {
+            tex.arrayTarget = importInfo.externalArrayTarget;
+            tex.layerStates.assign(tex.arrayTarget.arrayLayers, importedState);
+        } else {
+            TextureArray2D& textureArray = m_resourcePool.AcquireTextureArray(slot.desc, slot.name);
+            tex.arrayTarget = textureArray.Target();
+            tex.layerStates.assign(tex.arrayTarget.arrayLayers, ResourceState{});
+        }
+        tex.target.image = tex.arrayTarget.image;
+        tex.target.imageView = tex.arrayTarget.imageView;
+        tex.target.extent = tex.arrayTarget.extent;
+        tex.target.format = tex.arrayTarget.format;
+        tex.sampler = tex.arrayTarget.sampler;
+        break;
     }
     tex.resolved = true;
 }
@@ -101,78 +139,105 @@ void RenderGraph::EnsureBufferResolved(
     buf.resolved = true;
 }
 
-void RenderGraph::EnsureVolumeTextureResolved(std::uint32_t index, const CompiledGraphInput& input,
-    std::vector<PhysicalVolumeTexture>& physicalVolumeTextures)
-{
-    PhysicalVolumeTexture& vol = physicalVolumeTextures[index];
-    if (vol.resolved) {
-        return;
-    }
-
-    const VolumeTextureImportInfo& importInfo = input.volumeTextures[index].importInfo;
-    if (importInfo.isImported) {
-        vol.isImported = true;
-        vol.target = importInfo.externalTarget;
-        vol.state = ResourceState{
-            ToVkImageLayout(importInfo.currentLayout), VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE };
-    } else {
-        vol.isImported = false;
-        vol.target = VolumeTarget{};
-        vol.state = ResourceState{};
-    }
-    vol.resolved = true;
-}
-
-void RenderGraph::EnsureTextureArrayResolved(std::uint32_t index, const CompiledGraphInput& input,
-    std::vector<PhysicalTextureArray>& physicalTextureArrays)
-{
-    PhysicalTextureArray& arr = physicalTextureArrays[index];
-    if (arr.resolved) {
-        return;
-    }
-
-    const TextureArrayImportInfo& importInfo = input.textureArrays[index].importInfo;
-    if (importInfo.isImported) {
-        arr.isImported = true;
-        arr.target = importInfo.externalTarget;
-        arr.layerStates.assign(arr.target.arrayLayers,
-            ResourceState{ ToVkImageLayout(importInfo.currentLayout), VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE });
-    } else {
-        arr.isImported = false;
-        TextureArray2D& textureArray =
-            m_resourcePool.AcquireTextureArray(input.textureArrays[index].desc, input.textureArrays[index].name);
-        arr.target = textureArray.Target();
-        arr.layerStates.assign(arr.target.arrayLayers, ResourceState{});
-    }
-    arr.resolved = true;
-}
-
 void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceUsage& usage,
     const CompiledGraphInput& input, std::vector<PhysicalTexture>& physicalTextures,
-    std::vector<PhysicalBuffer>& physicalBuffers, std::vector<PhysicalVolumeTexture>& physicalVolumeTextures,
-    std::vector<PhysicalTextureArray>& physicalTextureArrays, AppliedBarrierInfo* outBarrierInfo)
+    std::vector<PhysicalBuffer>& physicalBuffers, AppliedBarrierInfo* outBarrierInfo)
 {
     DispatchByKind(usage,
         [&](TextureHandle textureHandle) {
             EnsureTextureResolved(textureHandle.index, input, physicalTextures);
             PhysicalTexture& tex = physicalTextures[textureHandle.index];
 
-            const bool isDepthAccess = TargetsDepthState(usage.access) || usage.isDepthResource;
-            ResourceState& state = isDepthAccess ? tex.depthState : tex.colorState;
-            const ResourceState next = RequiredStateFor(usage.access, isDepthAccess);
+            switch (tex.dimension) {
+            case TextureDimension::Tex2D: {
+                const bool isDepthAccess = TargetsDepthState(usage.access) || usage.isDepthResource;
+                ResourceState& state = isDepthAccess ? tex.depthState : tex.colorState;
+                const ResourceState next = RequiredStateFor(usage.access, isDepthAccess);
 
-            if (RequiresBarrier(state, next)) {
-                const VkImage image = isDepthAccess ? tex.target.depthImage : tex.target.image;
-                const VkImageAspectFlags aspect = isDepthAccess
-                    ? (VK_IMAGE_ASPECT_DEPTH_BIT | (tex.target.depthHasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0))
-                    : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT);
-                const VkImageSubresourceRange range{ aspect, 0, 1, 0, 1 };
-                EmitImageBarrier(cmd, image, range, state, next);
-                if (outBarrierInfo != nullptr) {
-                    *outBarrierInfo = AppliedBarrierInfo{ true, state.layout, next.layout };
+                if (RequiresBarrier(state, next)) {
+                    const VkImage image = isDepthAccess ? tex.target.depthImage : tex.target.image;
+                    const VkImageAspectFlags aspect = isDepthAccess
+                        ? (VK_IMAGE_ASPECT_DEPTH_BIT | (tex.target.depthHasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0))
+                        : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT);
+                    const VkImageSubresourceRange range{ aspect, 0, 1, 0, 1 };
+                    EmitImageBarrier(cmd, image, range, state, next);
+                    if (outBarrierInfo != nullptr) {
+                        *outBarrierInfo = AppliedBarrierInfo{ true, state.layout, next.layout };
+                    }
                 }
+                state = next;
+                break;
             }
-            state = next;
+
+            case TextureDimension::Tex3D: {
+                const ResourceState next = RequiredStateFor(usage.access, false);
+                if (RequiresBarrier(tex.colorState, next)) {
+                    const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+                    EmitImageBarrier(cmd, tex.target.image, range, tex.colorState, next);
+                    if (outBarrierInfo != nullptr) {
+                        *outBarrierInfo = AppliedBarrierInfo{ true, tex.colorState.layout, next.layout };
+                    }
+                }
+                tex.colorState = next;
+                break;
+            }
+
+            case TextureDimension::Array2D:
+            case TextureDimension::Cube: {
+                const TextureArrayTarget& arr = tex.arrayTarget;
+                std::vector<ResourceState>& layerStates = tex.layerStates;
+
+                const VkImageAspectFlags aspect = arr.hasDepth
+                    ? static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_DEPTH_BIT)
+                    : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT);
+                const ResourceState next = RequiredStateFor(usage.access, arr.hasDepth);
+
+                if (usage.arrayLayerIndex.has_value()) {
+                    // Per-layer usage transition.
+                    const std::uint32_t layer = *usage.arrayLayerIndex;
+                    assert(layer < layerStates.size() &&
+                        "RenderGraph::ApplyUsageBarrierIfNeeded: arrayLayerIndex out of range for this handle's arrayLayers.");
+                    const TextureArraySubresourceDecision decision =
+                        DecideTextureArrayLayerTransition(layerStates[layer], aspect, layer, next);
+                    if (decision.requiresBarrier) {
+                        EmitImageBarrier(cmd, arr.image, decision.range, layerStates[layer], next);
+                        if (outBarrierInfo != nullptr) {
+                            *outBarrierInfo = AppliedBarrierInfo{ true, layerStates[layer].layout, next.layout };
+                        }
+                    }
+                    layerStates[layer] = next;
+                } else {
+                    // Whole-image transition: one barrier if all layers match, individual barriers otherwise.
+                    bool allLayersMatchFirst = true;
+                    for (const ResourceState& layerState : layerStates) {
+                        if (!(layerState == layerStates[0])) {
+                            allLayersMatchFirst = false;
+                            break;
+                        }
+                    }
+
+                    if (allLayersMatchFirst) {
+                        if (RequiresBarrier(layerStates[0], next)) {
+                            const VkImageSubresourceRange range{ aspect, 0, 1, 0, arr.arrayLayers };
+                            EmitImageBarrier(cmd, arr.image, range, layerStates[0], next);
+                        }
+                    } else {
+                        for (std::uint32_t layer = 0; layer < arr.arrayLayers; ++layer) {
+                            const TextureArraySubresourceDecision decision =
+                                DecideTextureArrayLayerTransition(layerStates[layer], aspect, layer, next);
+                            if (decision.requiresBarrier) {
+                                EmitImageBarrier(cmd, arr.image, decision.range, layerStates[layer], next);
+                            }
+                        }
+                    }
+
+                    for (ResourceState& layerState : layerStates) {
+                        layerState = next;
+                    }
+                }
+                break;
+            }
+            }
         },
         [&](BufferHandle bufferHandle) {
             EnsureBufferResolved(bufferHandle.index, input, physicalBuffers);
@@ -182,79 +247,12 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
                 EmitBufferBarrier(cmd, buf.buffer, 0, buf.size, buf.state, next);
             }
             buf.state = next;
-        },
-        [&](VolumeTextureHandle volumeHandle) {
-            EnsureVolumeTextureResolved(volumeHandle.index, input, physicalVolumeTextures);
-            PhysicalVolumeTexture& vol = physicalVolumeTextures[volumeHandle.index];
-            const ResourceState next = RequiredStateFor(usage.access, false);
-            if (RequiresBarrier(vol.state, next)) {
-                const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-                EmitImageBarrier(cmd, vol.target.image, range, vol.state, next);
-                if (outBarrierInfo != nullptr) {
-                    *outBarrierInfo = AppliedBarrierInfo{ true, vol.state.layout, next.layout };
-                }
-            }
-            vol.state = next;
-        },
-        [&](TextureArrayHandle textureArrayHandle) {
-            EnsureTextureArrayResolved(textureArrayHandle.index, input, physicalTextureArrays);
-            PhysicalTextureArray& arr = physicalTextureArrays[textureArrayHandle.index];
-
-            const VkImageAspectFlags aspect = arr.target.hasDepth
-                ? static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_DEPTH_BIT)
-                : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT);
-            const ResourceState next = RequiredStateFor(usage.access, arr.target.hasDepth);
-
-            if (usage.arrayLayerIndex.has_value()) {
-                // Per-layer usage transition.
-                const std::uint32_t layer = *usage.arrayLayerIndex;
-                assert(layer < arr.layerStates.size() &&
-                    "RenderGraph::ApplyUsageBarrierIfNeeded: arrayLayerIndex out of range for this handle's arrayLayers.");
-                const TextureArraySubresourceDecision decision =
-                    DecideTextureArrayLayerTransition(arr.layerStates[layer], aspect, layer, next);
-                if (decision.requiresBarrier) {
-                    EmitImageBarrier(cmd, arr.target.image, decision.range, arr.layerStates[layer], next);
-                    if (outBarrierInfo != nullptr) {
-                        *outBarrierInfo = AppliedBarrierInfo{ true, arr.layerStates[layer].layout, next.layout };
-                    }
-                }
-                arr.layerStates[layer] = next;
-            } else {
-                // Whole-array usage transition: single barrier if all layers match, individual barriers otherwise.
-                bool allLayersMatchFirst = true;
-                for (const ResourceState& layerState : arr.layerStates) {
-                    if (!(layerState == arr.layerStates[0])) {
-                        allLayersMatchFirst = false;
-                        break;
-                    }
-                }
-
-                if (allLayersMatchFirst) {
-                    if (RequiresBarrier(arr.layerStates[0], next)) {
-                        const VkImageSubresourceRange range{ aspect, 0, 1, 0, arr.target.arrayLayers };
-                        EmitImageBarrier(cmd, arr.target.image, range, arr.layerStates[0], next);
-                    }
-                } else {
-                    for (std::uint32_t layer = 0; layer < arr.target.arrayLayers; ++layer) {
-                        const TextureArraySubresourceDecision decision =
-                            DecideTextureArrayLayerTransition(arr.layerStates[layer], aspect, layer, next);
-                        if (decision.requiresBarrier) {
-                            EmitImageBarrier(cmd, arr.target.image, decision.range, arr.layerStates[layer], next);
-                        }
-                    }
-                }
-
-                for (ResourceState& layerState : arr.layerStates) {
-                    layerState = next;
-                }
-            }
         });
 }
 
 // Resolves pending pass bindings into a descriptor set using the compute binding cache.
 DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRecord& pass,
-    const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers,
-    const std::vector<PhysicalVolumeTexture>& physicalVolumeTextures)
+    const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers)
 {
     if (pass.bindings.empty()) {
         return DescriptorSetHandle::Invalid;
@@ -302,21 +300,14 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
                     binding.binding, tex.target.depthImageView, tex.depthSampler));
                 break;
             }
+            // A volume has no sampler of its own, so its binding must name one explicitly.
             const VkSampler sampler =
                 (binding.explicitSampler != SamplerHandle::Invalid) ? Native(binding.explicitSampler) : tex.sampler;
-            writes.push_back(
-                ComputeDescriptorWrite::CombinedImageSampler(binding.binding, tex.target.imageView, sampler));
-            break;
-        }
-        case BindingKind::CombinedVolumeImageSampler: {
-            if (!binding.volumeTextureHandle.IsValid() || binding.volumeTextureHandle.index >= physicalVolumeTextures.size()
-                || !physicalVolumeTextures[binding.volumeTextureHandle.index].resolved
-                || binding.explicitSampler == SamplerHandle::Invalid) {
+            if (sampler == VK_NULL_HANDLE) {
                 continue;
             }
-            const PhysicalVolumeTexture& vol = physicalVolumeTextures[binding.volumeTextureHandle.index];
-            writes.push_back(ComputeDescriptorWrite::CombinedImageSampler(
-                binding.binding, vol.target.imageView, Native(binding.explicitSampler)));
+            writes.push_back(
+                ComputeDescriptorWrite::CombinedImageSampler(binding.binding, tex.target.imageView, sampler));
             break;
         }
         case BindingKind::CombinedImageViewSampler: {
@@ -329,15 +320,11 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
             break;
         }
         case BindingKind::StorageImage: {
-            VkImageView view = VK_NULL_HANDLE;
-            if (binding.textureHandle.IsValid() && binding.textureHandle.index < physicalTextures.size()
-                && physicalTextures[binding.textureHandle.index].resolved) {
-                view = physicalTextures[binding.textureHandle.index].target.imageView;
-            } else if (binding.volumeTextureHandle.IsValid()
-                && binding.volumeTextureHandle.index < physicalVolumeTextures.size()
-                && physicalVolumeTextures[binding.volumeTextureHandle.index].resolved) {
-                view = physicalVolumeTextures[binding.volumeTextureHandle.index].target.imageView;
+            if (!binding.textureHandle.IsValid() || binding.textureHandle.index >= physicalTextures.size()
+                || !physicalTextures[binding.textureHandle.index].resolved) {
+                continue;
             }
+            const VkImageView view = physicalTextures[binding.textureHandle.index].target.imageView;
             if (view == VK_NULL_HANDLE) {
                 continue;
             }
@@ -352,15 +339,12 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
 
 // Constructs PassContext provided to the pass execute callback.
 PassContext RenderGraph::BuildPassContext(VkCommandBuffer cmd, std::vector<PhysicalTexture>& physicalTextures,
-    std::vector<PhysicalBuffer>& physicalBuffers, std::vector<PhysicalVolumeTexture>& physicalVolumeTextures,
-    std::vector<PhysicalTextureArray>& physicalTextureArrays, DrawStats& passDrawStats)
+    std::vector<PhysicalBuffer>& physicalBuffers, DrawStats& passDrawStats)
 {
     PassContext ctx;
     ctx.cmd = cmd;
     ctx.textures = &physicalTextures;
     ctx.buffers = &physicalBuffers;
-    ctx.volumeTextures = &physicalVolumeTextures;
-    ctx.textureArrays = &physicalTextureArrays;
     ctx.renderer = m_renderer;
     ctx.eventSink = m_frameDebuggerEventSink;
     ctx.recordDraw.drawStats = &passDrawStats;
@@ -409,31 +393,33 @@ VkBuffer PassContext::resolveBuffer(BufferHandle handle) const noexcept
     return VK_NULL_HANDLE;
 }
 
-PassContext::ResolvedVolumeTexture PassContext::resolveVolumeTexture(VolumeTextureHandle handle) const noexcept
+PassContext::ResolvedVolumeTexture PassContext::resolveVolumeTexture(TextureHandle handle) const noexcept
 {
-    if (volumeTextures != nullptr && handle.index < volumeTextures->size()
-        && (*volumeTextures)[handle.index].resolved) {
-        return ResolvedVolumeTexture{ (*volumeTextures)[handle.index].target.imageView };
+    if (textures != nullptr && handle.index < textures->size() && (*textures)[handle.index].resolved
+        && (*textures)[handle.index].dimension == TextureDimension::Tex3D) {
+        return ResolvedVolumeTexture{ (*textures)[handle.index].target.imageView };
     }
     return ResolvedVolumeTexture{};
 }
 
-PassContext::ResolvedTextureArray PassContext::resolveTextureArray(TextureArrayHandle handle) const noexcept
+PassContext::ResolvedTextureArray PassContext::resolveTextureArray(TextureHandle handle) const noexcept
 {
-    if (textureArrays != nullptr && handle.index < textureArrays->size()
-        && (*textureArrays)[handle.index].resolved) {
-        return ResolvedTextureArray{ (*textureArrays)[handle.index].target.imageView };
+    if (textures != nullptr && handle.index < textures->size() && (*textures)[handle.index].resolved
+        && (*textures)[handle.index].dimension != TextureDimension::Tex2D
+        && (*textures)[handle.index].dimension != TextureDimension::Tex3D) {
+        return ResolvedTextureArray{ (*textures)[handle.index].arrayTarget.imageView };
     }
     return ResolvedTextureArray{};
 }
 
 PassContext::ResolvedTextureArrayLayer PassContext::resolveArrayLayer(
-    TextureArrayHandle handle, std::uint32_t layerIndex) const noexcept
+    TextureHandle handle, std::uint32_t layerIndex) const noexcept
 {
-    if (textureArrays != nullptr && handle.index < textureArrays->size()
-        && (*textureArrays)[handle.index].resolved) {
-        const RenderGraph::PhysicalTextureArray& arr = (*textureArrays)[handle.index];
-        return ResolvedTextureArrayLayer{ arr.target.LayerView(layerIndex), arr.target.image };
+    if (textures != nullptr && handle.index < textures->size() && (*textures)[handle.index].resolved
+        && (*textures)[handle.index].dimension != TextureDimension::Tex2D
+        && (*textures)[handle.index].dimension != TextureDimension::Tex3D) {
+        const TextureArrayTarget& arr = (*textures)[handle.index].arrayTarget;
+        return ResolvedTextureArrayLayer{ arr.LayerView(layerIndex), arr.image };
     }
     return ResolvedTextureArrayLayer{};
 }
@@ -454,9 +440,8 @@ void PassContext::RecordIndirectDrawFn::operator()() const
 }
 
 // Builds VkRenderingAttachmentInfo descriptors for all color attachments.
-std::vector<VkRenderingAttachmentInfo> RenderGraph::BuildColorAttachmentInfos(
-    const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures,
-    const std::vector<PhysicalTextureArray>& physicalTextureArrays, std::vector<VkExtent2D>& outResolvedExtents) const
+std::vector<VkRenderingAttachmentInfo> RenderGraph::BuildColorAttachmentInfos(const PassRecord& pass,
+    const std::vector<PhysicalTexture>& physicalTextures, std::vector<VkExtent2D>& outResolvedExtents) const
 {
     std::vector<VkRenderingAttachmentInfo> colorAttachmentInfos;
     colorAttachmentInfos.reserve(pass.colorAttachments.size());
@@ -487,16 +472,16 @@ std::vector<VkRenderingAttachmentInfo> RenderGraph::BuildColorAttachmentInfos(
     // Append color array layer attachment if present.
     if (pass.arrayLayerAttachment.has_value()) {
         const ArrayLayerAttachmentDesc& arrDesc = *pass.arrayLayerAttachment;
-        assert(arrDesc.handle.index < physicalTextureArrays.size() &&
-            physicalTextureArrays[arrDesc.handle.index].resolved &&
+        assert(arrDesc.handle.index < physicalTextures.size() &&
+            physicalTextures[arrDesc.handle.index].resolved &&
             "RenderGraph::BuildColorAttachmentInfos: arrayLayerAttachment was never resolved.");
-        const PhysicalTextureArray& arr = physicalTextureArrays[arrDesc.handle.index];
-        if (!arr.target.hasDepth) {
-            outResolvedExtents.push_back(arr.target.extent);
+        const TextureArrayTarget& arr = physicalTextures[arrDesc.handle.index].arrayTarget;
+        if (!arr.hasDepth) {
+            outResolvedExtents.push_back(arr.extent);
 
             VkRenderingAttachmentInfo colorAttachment{};
             colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-            colorAttachment.imageView = arr.target.LayerView(arrDesc.layerIndex);
+            colorAttachment.imageView = arr.LayerView(arrDesc.layerIndex);
             colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
             if (arrDesc.clearColor.has_value()) {
@@ -514,15 +499,14 @@ std::vector<VkRenderingAttachmentInfo> RenderGraph::BuildColorAttachmentInfos(
 }
 
 // Builds VkRenderingAttachmentInfo for depth attachment (standard or array layer).
-RenderGraph::DepthAttachmentResult RenderGraph::BuildDepthAttachmentInfo(const PassRecord& pass,
-    const std::vector<PhysicalTexture>& physicalTextures,
-    const std::vector<PhysicalTextureArray>& physicalTextureArrays, TextureHandle depthHandle) const
+RenderGraph::DepthAttachmentResult RenderGraph::BuildDepthAttachmentInfo(
+    const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures, TextureHandle depthHandle) const
 {
     DepthAttachmentResult result;
 
     assert((!depthHandle.IsValid() || !pass.arrayLayerAttachment.has_value() ||
-               pass.arrayLayerAttachment->handle.index >= physicalTextureArrays.size() ||
-               !physicalTextureArrays[pass.arrayLayerAttachment->handle.index].target.hasDepth) &&
+               pass.arrayLayerAttachment->handle.index >= physicalTextures.size() ||
+               !physicalTextures[pass.arrayLayerAttachment->handle.index].arrayTarget.hasDepth) &&
            "RenderGraph::BuildDepthAttachmentInfo: pass declared BOTH a plain Texture depth "
            "write and a DEPTH array-layer attachment - at most one depth target per pass.");
 
@@ -549,16 +533,16 @@ RenderGraph::DepthAttachmentResult RenderGraph::BuildDepthAttachmentInfo(const P
 
     if (pass.arrayLayerAttachment.has_value()) {
         const ArrayLayerAttachmentDesc& arrDesc = *pass.arrayLayerAttachment;
-        assert(arrDesc.handle.index < physicalTextureArrays.size() &&
-            physicalTextureArrays[arrDesc.handle.index].resolved &&
+        assert(arrDesc.handle.index < physicalTextures.size() &&
+            physicalTextures[arrDesc.handle.index].resolved &&
             "RenderGraph::BuildDepthAttachmentInfo: pass.arrayLayerAttachment was never resolved.");
-        const PhysicalTextureArray& arr = physicalTextureArrays[arrDesc.handle.index];
-        if (arr.target.hasDepth) {
-            result.extent = arr.target.extent;
+        const TextureArrayTarget& arr = physicalTextures[arrDesc.handle.index].arrayTarget;
+        if (arr.hasDepth) {
+            result.extent = arr.extent;
 
             VkRenderingAttachmentInfo depthAttachment{};
             depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-            depthAttachment.imageView = arr.target.LayerView(arrDesc.layerIndex);
+            depthAttachment.imageView = arr.LayerView(arrDesc.layerIndex);
             depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
             depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
             if (arrDesc.clearDepth.has_value()) {
@@ -574,13 +558,13 @@ RenderGraph::DepthAttachmentResult RenderGraph::BuildDepthAttachmentInfo(const P
     return result;
 }
 
-// Registers resolved textures with the debug inspector.
+// Registers resolved 2D textures with the debug inspector.
 void RenderGraph::RegisterDebugTextureSnapshots(ExecuteTimingMode timingMode, const CompiledGraphInput& input,
     const std::vector<PhysicalTexture>& physicalTextures)
 {
     for (std::size_t i = 0; i < physicalTextures.size(); ++i) {
         const PhysicalTexture& tex = physicalTextures[i];
-        if (!tex.resolved) {
+        if (!tex.resolved || tex.dimension != TextureDimension::Tex2D) {
             continue;
         }
         const char* name = input.textures[i].name;
@@ -602,16 +586,16 @@ void RenderGraph::RegisterDebugTextureSnapshots(ExecuteTimingMode timingMode, co
     }
 }
 
-// Registers resolved volume textures with the debug inspector.
+// Registers resolved 3D volume textures with the debug inspector.
 void RenderGraph::RegisterDebugVolumeTextureSnapshots(ExecuteTimingMode timingMode, const CompiledGraphInput& input,
-    const std::vector<PhysicalVolumeTexture>& physicalVolumeTextures)
+    const std::vector<PhysicalTexture>& physicalTextures)
 {
-    for (std::size_t i = 0; i < physicalVolumeTextures.size(); ++i) {
-        const PhysicalVolumeTexture& vol = physicalVolumeTextures[i];
-        if (!vol.resolved) {
+    for (std::size_t i = 0; i < physicalTextures.size(); ++i) {
+        const PhysicalTexture& vol = physicalTextures[i];
+        if (!vol.resolved || vol.dimension != TextureDimension::Tex3D) {
             continue;
         }
-        const char* name = input.volumeTextures[i].name;
+        const char* name = input.textures[i].name;
         if (name == nullptr || name[0] == '\0') {
             continue;
         }
@@ -619,8 +603,11 @@ void RenderGraph::RegisterDebugVolumeTextureSnapshots(ExecuteTimingMode timingMo
         DebugVolumeTextureSnapshot snapshot;
         snapshot.name = name;
         snapshot.regime = timingMode;
-        snapshot.target = vol.target;
-        snapshot.state = vol.state;
+        snapshot.target.image = vol.target.image;
+        snapshot.target.imageView = vol.target.imageView;
+        snapshot.target.extent = VkExtent3D{ vol.target.extent.width, vol.target.extent.height, vol.depthSlices };
+        snapshot.target.format = vol.target.format;
+        snapshot.state = vol.colorState;
         snapshot.lastUpdatedFrameCounter = m_debugTextureFrameCounter;
         m_debugVolumeTextures.Upsert(snapshot);
     }
@@ -663,8 +650,6 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 
     std::vector<PhysicalTexture> physicalTextures(input.textures.size());
     std::vector<PhysicalBuffer> physicalBuffers(input.buffers.size());
-    std::vector<PhysicalVolumeTexture> physicalVolumeTextures(input.volumeTextures.size());
-    std::vector<PhysicalTextureArray> physicalTextureArrays(input.textureArrays.size());
 
     RenderGraphNameSlotTable& timingSlots = isPipelined ? m_pipelinedTimingSlots : m_synchronousTimingSlots;
 
@@ -673,13 +658,11 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 
         // Apply resource barriers for reads before writes.
         for (const ResourceUsage& usage : pass.reads) {
-            ApplyUsageBarrierIfNeeded(
-                cmd, usage, input, physicalTextures, physicalBuffers, physicalVolumeTextures, physicalTextureArrays);
+            ApplyUsageBarrierIfNeeded(cmd, usage, input, physicalTextures, physicalBuffers);
         }
         for (const ResourceUsage& usage : pass.writes) {
             AppliedBarrierInfo barrierInfo;
-            ApplyUsageBarrierIfNeeded(cmd, usage, input, physicalTextures, physicalBuffers, physicalVolumeTextures,
-                physicalTextureArrays, &barrierInfo);
+            ApplyUsageBarrierIfNeeded(cmd, usage, input, physicalTextures, physicalBuffers, &barrierInfo);
             if (barrierInfo.applied && m_debugMetadataSink != nullptr) {
                 m_debugMetadataSink->OnResourceBarrierApplied(passHandle.index, ResourceUsageName(usage, input),
                     barrierInfo.oldLayout, barrierInfo.newLayout);
@@ -716,13 +699,15 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         // Record start timestamp after barriers execute.
         m_timestampPool.WriteBegin(cmd, isPipelined, pipelinedBufferIndex, timingSlot);
 
-        // Find depth write texture handle, if any.
+        // Find depth write texture handle, if any. Per-layer array writes and non-2D textures are attached
+        // through pass.arrayLayerAttachment instead.
         TextureHandle depthHandle;
         for (const ResourceUsage& usage : pass.writes) {
-            if (usage.kind != ResourceKind::Texture) {
+            if (usage.kind != ResourceKind::Texture || usage.arrayLayerIndex.has_value()) {
                 continue;
             }
-            if (TargetsDepthState(usage.access)) {
+            if (TargetsDepthState(usage.access)
+                && physicalTextures[usage.texture.index].dimension == TextureDimension::Tex2D) {
                 depthHandle = usage.texture;
             }
         }
@@ -731,17 +716,15 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             !pass.colorAttachments.empty() || depthHandle.IsValid() || pass.arrayLayerAttachment.has_value();
 
         DrawStats passDrawStats;
-        PassContext ctx = BuildPassContext(
-            cmd, physicalTextures, physicalBuffers, physicalVolumeTextures, physicalTextureArrays, passDrawStats);
+        PassContext ctx = BuildPassContext(cmd, physicalTextures, physicalBuffers, passDrawStats);
 
-        ctx.computeDescriptorSet =
-            ResolveComputeBindingDescriptorSet(pass, physicalTextures, physicalBuffers, physicalVolumeTextures);
+        ctx.computeDescriptorSet = ResolveComputeBindingDescriptorSet(pass, physicalTextures, physicalBuffers);
 
         bool didBeginRendering = false;
         if (hasAnyAttachment) {
             std::vector<VkExtent2D> resolvedExtents;
             const std::vector<VkRenderingAttachmentInfo> colorAttachmentInfos =
-                BuildColorAttachmentInfos(pass, physicalTextures, physicalTextureArrays, resolvedExtents);
+                BuildColorAttachmentInfos(pass, physicalTextures, resolvedExtents);
 
             // Verify that all color attachments match in resolution.
             if (resolvedExtents.size() > 1) {
@@ -761,8 +744,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
                 }
             }
 
-            const DepthAttachmentResult depthResult =
-                BuildDepthAttachmentInfo(pass, physicalTextures, physicalTextureArrays, depthHandle);
+            const DepthAttachmentResult depthResult = BuildDepthAttachmentInfo(pass, physicalTextures, depthHandle);
 
             VkExtent2D firstExtent{};
             if (!resolvedExtents.empty()) {
@@ -883,6 +865,9 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
                     continue;
                 }
                 PhysicalTexture& tex = physicalTextures[usage.texture.index];
+                if (tex.dimension != TextureDimension::Tex2D) {
+                    continue; // Only plain 2D textures are captured per event.
+                }
                 const bool isDepth = TargetsDepthState(usage.access);
                 const VkImage image = isDepth ? tex.target.depthImage : tex.target.image;
                 if (image == VK_NULL_HANDLE) {
@@ -913,7 +898,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     }
 
     RegisterDebugTextureSnapshots(timingMode, input, physicalTextures);
-    RegisterDebugVolumeTextureSnapshots(timingMode, input, physicalVolumeTextures);
+    RegisterDebugVolumeTextureSnapshots(timingMode, input, physicalTextures);
 
     // Sync final image layout back to external owning RenderTextures.
     for (std::size_t i = 0; i < input.textures.size(); ++i) {

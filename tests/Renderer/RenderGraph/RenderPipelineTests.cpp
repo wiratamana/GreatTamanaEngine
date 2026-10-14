@@ -325,7 +325,7 @@ TEST(RenderPipelineTest, OnceProviderContributesExactlyOnceRegardlessOfActiveVie
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {} };
     frame.activeViews = { RenderViewId::Named("GameView"), RenderViewId::Named("SceneView") };
 
     pipeline.DeclareInto(builder, frame);
@@ -355,7 +355,7 @@ TEST(RenderPipelineTest, PerActiveViewProviderContributesOncePerActiveViewWithCo
     RenderGraphBuilder builder;
     const RenderViewId gameView = RenderViewId::Named("GameView");
     const RenderViewId sceneView = RenderViewId::Named("SceneView");
-    RenderPassFrameContext frame{ { gameView, sceneView }, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    RenderPassFrameContext frame{ { gameView, sceneView }, RenderViewId::Shared(), blackboard, builder, {} };
 
     pipeline.DeclareInto(builder, frame);
 
@@ -384,7 +384,7 @@ TEST(RenderPipelineTest, PerActiveViewProviderContributesNothingWithZeroActiveVi
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {} };
 
     pipeline.DeclareInto(builder, frame);
 
@@ -447,7 +447,7 @@ TEST(RenderPipelineTest, CollectedPassesAreSortedByOrderRegardlessOfRegistration
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ { RenderViewId::Named("GameView") }, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    RenderPassFrameContext frame{ { RenderViewId::Named("GameView") }, RenderViewId::Shared(), blackboard, builder, {} };
 
     pipeline.DeclareInto(builder, frame);
 
@@ -485,7 +485,7 @@ TEST(RenderPipelineTest, LegacyCategoryAndDrawKindSurviveUnchangedIntoTheProduce
     RenderGraphBuilder builder;
     FakeMetadataSink sink;
     builder.SetDebugMetadataSink(&sink);
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {} };
 
     pipeline.DeclareInto(builder, frame);
 
@@ -522,7 +522,7 @@ TEST(RenderPipelineTest, DeclareIntoForwardsTagsOntoTheUnderlyingPassRecord)
     RenderGraphBuilder builder;
     FakeMetadataSink sink;
     builder.SetDebugMetadataSink(&sink);
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {} };
 
     pipeline.DeclareInto(builder, frame);
 
@@ -553,7 +553,7 @@ TEST(RenderPipelineTest, UnregisterRemovesAMatchingProviderByDebugNameContent)
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {} };
     pipeline.DeclareInto(builder, frame);
 
     EXPECT_EQ(callCount, 0);
@@ -582,7 +582,7 @@ TEST(RenderPipelineTest, WithNoLegacyViewScopeTranslatorEveryPassTranslatesToSha
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {} };
     pipeline.DeclareInto(builder, frame);
 
     const CompiledGraphInput input = builder.Finish();
@@ -619,7 +619,7 @@ TEST(RenderPipelineTest, InjectedLegacyViewScopeTranslatorIsAppliedPerDesc)
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
     RenderPassFrameContext frame{ { RenderViewId::Named("GameView"), RenderViewId::Named("SceneView") },
-        RenderViewId::Shared(), blackboard, builder, {}, {} };
+        RenderViewId::Shared(), blackboard, builder, {} };
     pipeline.DeclareInto(builder, frame);
 
     const CompiledGraphInput input = builder.Finish();
@@ -643,7 +643,7 @@ TEST(RenderPipelineTest, ProviderCanDeclareARealPassDirectlyViaFrameBuilder)
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {} };
     pipeline.DeclareInto(builder, frame);
 
     const CompiledGraphInput input = builder.Finish();
@@ -652,7 +652,7 @@ TEST(RenderPipelineTest, ProviderCanDeclareARealPassDirectlyViaFrameBuilder)
 }
 
 // Step 3.3b - a provider taking `const RenderPassFrameContext&` must still be
-// able to append to finalTextureOutputs/finalVolumeTextureOutputs (the
+// able to append to finalTextureOutputs (the
 // `mutable` fix) - this is the exact mechanism the Atmosphere-wrapping
 // providers rely on to replace today's manual `outputs.push_back(...)` calls.
 TEST(RenderPipelineTest, ProviderCanAppendToFinalOutputsThroughAConstFrameReference)
@@ -662,18 +662,15 @@ TEST(RenderPipelineTest, ProviderCanAppendToFinalOutputsThroughAConstFrameRefere
     pipeline.Register("OutputProvider", ProviderScope::Once,
         [](const RenderPassFrameContext& frame, std::vector<RenderPassDesc>&) {
             frame.finalTextureOutputs.push_back(TextureHandle{ 7 });
-            frame.finalVolumeTextureOutputs.push_back(VolumeTextureHandle{ 9 });
         });
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {} };
     pipeline.DeclareInto(builder, frame);
 
     ASSERT_EQ(frame.finalTextureOutputs.size(), 1u);
     EXPECT_EQ(frame.finalTextureOutputs[0], TextureHandle{ 7 });
-    ASSERT_EQ(frame.finalVolumeTextureOutputs.size(), 1u);
-    EXPECT_EQ(frame.finalVolumeTextureOutputs[0], VolumeTextureHandle{ 9 });
 }
 
 // Step 3.3b - a REAL, LIVE-VERIFICATION-CONFIRMED correctness bug this test
@@ -706,7 +703,7 @@ TEST(RenderPipelineTest, AfterDeferredPassesProviderDeclaresStrictlyAfterEveryBe
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {} };
     pipeline.DeclareInto(builder, frame);
 
     const CompiledGraphInput input = builder.Finish();
@@ -741,7 +738,7 @@ TEST(RenderPipelineTest, DisabledPassInToggleRegistryIsNeverDeclaredToTheBuilder
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {} };
     pipeline.DeclareInto(builder, frame);
 
     const CompiledGraphInput input = builder.Finish();
@@ -766,7 +763,7 @@ TEST(RenderPipelineTest, WithNoToggleRegistryEverySetPassIsDeclaredNormally)
 
     RenderPassBlackboard blackboard;
     RenderGraphBuilder builder;
-    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {}, {} };
+    RenderPassFrameContext frame{ {}, RenderViewId::Shared(), blackboard, builder, {} };
     pipeline.DeclareInto(builder, frame);
 
     const CompiledGraphInput input = builder.Finish();

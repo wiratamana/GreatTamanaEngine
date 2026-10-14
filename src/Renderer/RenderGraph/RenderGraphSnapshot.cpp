@@ -35,13 +35,9 @@ PassGpuStats CombinePassGpuStats(const std::vector<PassGpuStats>& stats)
     return combined;
 }
 
-// Resolves one declared read/write's resource name, from whichever of
-// CompiledGraphInput's texture/buffer/volume-texture/texture-array tables
-// actually applies to its kind. Never reads out of bounds (a stale/invalid
-// index degrades to an empty string rather than crashing) - a display
-// helper, never an assertion. Exported so RenderGraph.cpp's own
-// barrier-applied sink call resolves a usage's name through this exact
-// same function, never a second copy.
+// Resolves one declared read/write's resource name from the texture or buffer table. Never reads out of
+// bounds (a stale index degrades to an empty string). Exported so RenderGraph.cpp's barrier-applied sink
+// resolves a usage's name through this exact same function.
 std::string ResourceUsageName(const ResourceUsage& usage, const CompiledGraphInput& input)
 {
     std::string name;
@@ -55,18 +51,26 @@ std::string ResourceUsageName(const ResourceUsage& usage, const CompiledGraphInp
             if (h.index < input.buffers.size() && input.buffers[h.index].name != nullptr) {
                 name = input.buffers[h.index].name;
             }
-        },
-        [&](VolumeTextureHandle h) {
-            if (h.index < input.volumeTextures.size() && input.volumeTextures[h.index].name != nullptr) {
-                name = input.volumeTextures[h.index].name;
-            }
-        },
-        [&](TextureArrayHandle h) {
-            if (h.index < input.textureArrays.size() && input.textureArrays[h.index].name != nullptr) {
-                name = input.textureArrays[h.index].name;
-            }
         });
     return name;
+}
+
+// What a usage's resource looks like to the UI: a texture is classified by its dimension.
+static ResourceKind DisplayKindOf(const ResourceUsage& usage, const CompiledGraphInput& input)
+{
+    if (usage.kind == ResourceKind::Buffer || usage.texture.index >= input.textures.size()) {
+        return usage.kind;
+    }
+    switch (input.textures[usage.texture.index].desc.dimension) {
+    case TextureDimension::Tex3D:
+        return ResourceKind::VolumeTexture;
+    case TextureDimension::Array2D:
+    case TextureDimension::Cube:
+        return ResourceKind::TextureArray;
+    case TextureDimension::Tex2D:
+        break;
+    }
+    return ResourceKind::Texture;
 }
 
 namespace {
@@ -103,7 +107,7 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t de
     snapshot.readAccess.reserve(pass.reads.size());
     for (const ResourceUsage& usage : pass.reads) {
         snapshot.readNames.push_back(ResourceUsageName(usage, input));
-        snapshot.readKinds.push_back(usage.kind);
+        snapshot.readKinds.push_back(DisplayKindOf(usage, input));
         snapshot.readAccess.push_back(usage.access);
     }
 
@@ -114,7 +118,7 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t de
     for (const ResourceUsage& usage : pass.writes) {
         const std::string writeName = ResourceUsageName(usage, input);
         snapshot.writeNames.push_back(writeName);
-        snapshot.writeKinds.push_back(usage.kind);
+        snapshot.writeKinds.push_back(DisplayKindOf(usage, input));
         snapshot.writeAccess.push_back(usage.access);
 
         std::string barrierLabel;

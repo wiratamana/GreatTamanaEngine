@@ -1,4 +1,4 @@
-﻿// Unit tests for Phase 1's pure, Vulkan-free-of-behavior render graph
+// Unit tests for Phase 1's pure, Vulkan-free-of-behavior render graph
 // vocabulary (src/Renderer/RenderGraph/RenderGraphTypes.h) - handles,
 // resource descriptors, and the ResourceAccess enum's pure helper
 // functions. No live VkDevice/Renderer/Registry involved at all - see
@@ -84,34 +84,6 @@ TEST(RenderGraphHandleTest, PassHandleEqualityComparesBothFields)
     const PassHandle b{ 2, 3 };
     const PassHandle differentIndex{ 8, 3 };
     const PassHandle differentGeneration{ 2, 8 };
-
-    EXPECT_TRUE(a == b);
-    EXPECT_FALSE(a == differentIndex);
-    EXPECT_FALSE(a == differentGeneration);
-}
-
-// Atmosphere Scattering campaign, Phase 2
-// (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) -
-// VolumeTextureHandle mirrors TextureHandle/BufferHandle/PassHandle's own
-// tests exactly.
-TEST(RenderGraphHandleTest, DefaultConstructedVolumeTextureHandleIsInvalid)
-{
-    const VolumeTextureHandle handle;
-    EXPECT_FALSE(handle.IsValid());
-}
-
-TEST(RenderGraphHandleTest, ExplicitlyConstructedVolumeTextureHandleIsValid)
-{
-    const VolumeTextureHandle handle{ 6, 1 };
-    EXPECT_TRUE(handle.IsValid());
-}
-
-TEST(RenderGraphHandleTest, VolumeTextureHandleEqualityComparesBothFields)
-{
-    const VolumeTextureHandle a{ 4, 3 };
-    const VolumeTextureHandle b{ 4, 3 };
-    const VolumeTextureHandle differentIndex{ 9, 3 };
-    const VolumeTextureHandle differentGeneration{ 4, 9 };
 
     EXPECT_TRUE(a == b);
     EXPECT_FALSE(a == differentIndex);
@@ -279,43 +251,61 @@ TEST(RenderGraphDescTest, BufferDescsDifferingInUsageCompareUnequal)
     EXPECT_FALSE(a == b);
 }
 
-// Atmosphere Scattering campaign, Phase 2
-// (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md) -
-// VolumeTextureDesc mirrors TextureDesc's own value-equality tests exactly,
-// plus its own new `depth` dimension.
+// TextureDesc also describes 3D volumes, arrays and cubes - every shape field takes part in equality, so
+// two requests only share a pooled resource when they are physically identical.
 
-TEST(RenderGraphDescTest, IdenticalVolumeTextureDescsCompareEqual)
+TEST(RenderGraphDescTest, DefaultTextureDescIsA2DTexture)
 {
-    const VolumeTextureDesc a{ 32, 32, 32, PixelFormat::RGBA16_Float };
-    const VolumeTextureDesc b{ 32, 32, 32, PixelFormat::RGBA16_Float };
+    const TextureDesc desc;
+    EXPECT_EQ(desc.dimension, TextureDimension::Tex2D);
+    EXPECT_EQ(desc.depth, 1u);
+    EXPECT_EQ(desc.arrayLayers, 1u);
+}
+
+TEST(RenderGraphDescTest, IdenticalVolumeDescsCompareEqual)
+{
+    TextureDesc a{ 32, 32, PixelFormat::RGBA16_Float };
+    a.dimension = TextureDimension::Tex3D;
+    a.depth = 32;
+    const TextureDesc b = a;
     EXPECT_TRUE(a == b);
 }
 
-TEST(RenderGraphDescTest, VolumeTextureDescsDifferingInWidthCompareUnequal)
+TEST(RenderGraphDescTest, TextureDescsDifferingInDimensionCompareUnequal)
 {
-    const VolumeTextureDesc a{ 32, 32, 32, PixelFormat::RGBA16_Float };
-    const VolumeTextureDesc b{ 16, 32, 32, PixelFormat::RGBA16_Float };
+    TextureDesc a{ 32, 32, PixelFormat::RGBA16_Float };
+    TextureDesc b = a;
+    b.dimension = TextureDimension::Tex3D;
     EXPECT_FALSE(a == b);
 }
 
-TEST(RenderGraphDescTest, VolumeTextureDescsDifferingInHeightCompareUnequal)
+TEST(RenderGraphDescTest, VolumeDescsDifferingInDepthCompareUnequal)
 {
-    const VolumeTextureDesc a{ 32, 32, 32, PixelFormat::RGBA16_Float };
-    const VolumeTextureDesc b{ 32, 16, 32, PixelFormat::RGBA16_Float };
+    TextureDesc a{ 32, 32, PixelFormat::RGBA16_Float };
+    a.dimension = TextureDimension::Tex3D;
+    a.depth = 32;
+    TextureDesc b = a;
+    b.depth = 16;
     EXPECT_FALSE(a == b);
 }
 
-TEST(RenderGraphDescTest, VolumeTextureDescsDifferingInDepthCompareUnequal)
+TEST(RenderGraphDescTest, ArrayDescsDifferingInLayerCountCompareUnequal)
 {
-    const VolumeTextureDesc a{ 32, 32, 32, PixelFormat::RGBA16_Float };
-    const VolumeTextureDesc b{ 32, 32, 16, PixelFormat::RGBA16_Float };
+    TextureDesc a{ 1024, 1024, PixelFormat::D32_Float, true };
+    a.dimension = TextureDimension::Array2D;
+    a.arrayLayers = 4;
+    TextureDesc b = a;
+    b.arrayLayers = 6;
     EXPECT_FALSE(a == b);
 }
 
-TEST(RenderGraphDescTest, VolumeTextureDescsDifferingInFormatCompareUnequal)
+TEST(RenderGraphDescTest, ArrayAndCubeDescsCompareUnequal)
 {
-    const VolumeTextureDesc a{ 32, 32, 32, PixelFormat::RGBA16_Float };
-    const VolumeTextureDesc b{ 32, 32, 32, PixelFormat::RGBA8_UNorm };
+    TextureDesc a{ 512, 512, PixelFormat::RGBA8_UNorm };
+    a.dimension = TextureDimension::Array2D;
+    a.arrayLayers = 6;
+    TextureDesc b = a;
+    b.dimension = TextureDimension::Cube;
     EXPECT_FALSE(a == b);
 }
 
@@ -518,57 +508,42 @@ TEST(RenderGraphResourceUsageTest, ForBufferSetsKindAndBufferFields)
     EXPECT_EQ(usage.access, ResourceAccess::TransferDst);
 }
 
-// Atmosphere Scattering campaign, Phase 2
-// (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md).
-TEST(RenderGraphResourceUsageTest, ForVolumeTextureSetsKindAndVolumeTextureFields)
+// A per-layer array/cube usage is still a Texture usage - the layer index is the only extra field.
+TEST(RenderGraphResourceUsageTest, ForTextureLayerSetsKindTextureAndLayerIndex)
 {
     const ResourceUsage usage =
-        ResourceUsage::ForVolumeTexture(VolumeTextureHandle{ 8, 3 }, ResourceAccess::ComputeShaderWrite);
-    EXPECT_EQ(usage.kind, ResourceKind::VolumeTexture);
-    EXPECT_EQ(usage.volumeTexture, (VolumeTextureHandle{ 8, 3 }));
-    EXPECT_EQ(usage.access, ResourceAccess::ComputeShaderWrite);
+        ResourceUsage::ForTextureLayer(TextureHandle{ 9, 4 }, 2u, ResourceAccess::DepthStencilAttachmentReadWrite);
+    EXPECT_EQ(usage.kind, ResourceKind::Texture);
+    EXPECT_EQ(usage.texture, (TextureHandle{ 9, 4 }));
+    ASSERT_TRUE(usage.arrayLayerIndex.has_value());
+    EXPECT_EQ(*usage.arrayLayerIndex, 2u);
+    EXPECT_EQ(usage.access, ResourceAccess::DepthStencilAttachmentReadWrite);
 }
 
-// better-render-pass-3 campaign, BLOCK5, Phase 4
-// (task_manager/better-render-pass-7/PHASE4_TIER1_AUTOMATED_TESTS.md) -
-// mirrors ForVolumeTextureSetsKindAndVolumeTextureFields immediately above,
-// the exact existing VolumeTexture-kind pattern this file's own Phase 4
-// coverage check found and is instructed to parallel for TextureArray.
-TEST(RenderGraphResourceUsageTest, ForTextureArraySetsKindAndTextureArrayFields)
+TEST(RenderGraphResourceUsageTest, ForTextureHasNoArrayLayerIndex)
 {
-    const ResourceUsage usage =
-        ResourceUsage::ForTextureArray(TextureArrayHandle{ 9, 4 }, ResourceAccess::ShaderRead);
-    EXPECT_EQ(usage.kind, ResourceKind::TextureArray);
-    EXPECT_EQ(usage.textureArray, (TextureArrayHandle{ 9, 4 }));
-    EXPECT_EQ(usage.access, ResourceAccess::ShaderRead);
+    const ResourceUsage usage = ResourceUsage::ForTexture(TextureHandle{ 1, 1 }, ResourceAccess::ShaderRead);
+    EXPECT_FALSE(usage.arrayLayerIndex.has_value());
 }
 
-// --- DispatchByKind() (render-pass-6 campaign, PHASE6, item 2.2) ---------
+// --- DispatchByKind() ----------------------------------------------------
 //
-// Confirms the generic dispatcher (RenderGraphTypes.h) routes to exactly
-// ONE of its three callables, with the correct handle, for each of the
-// three ResourceKind values, and that a non-void return type round-trips
-// correctly through all three ResourceUsage::For*() factories.
+// Confirms the generic dispatcher (RenderGraphTypes.h) routes to exactly ONE of its two callables, with the
+// correct handle, and that a non-void return type round-trips.
 
 TEST(RenderGraphDispatchByKindTest, TextureUsageDispatchesOnlyToOnTextureWithTheCorrectHandle)
 {
     const ResourceUsage usage = ResourceUsage::ForTexture(TextureHandle{ 5, 2 }, ResourceAccess::ShaderRead);
     bool onTextureCalled = false;
     bool onBufferCalled = false;
-    bool onVolumeTextureCalled = false;
-    bool onTextureArrayCalled = false;
     TextureHandle received;
 
     DispatchByKind(usage,
         [&](TextureHandle h) { onTextureCalled = true; received = h; },
-        [&](BufferHandle) { onBufferCalled = true; },
-        [&](VolumeTextureHandle) { onVolumeTextureCalled = true; },
-        [&](TextureArrayHandle) { onTextureArrayCalled = true; });
+        [&](BufferHandle) { onBufferCalled = true; });
 
     EXPECT_TRUE(onTextureCalled);
     EXPECT_FALSE(onBufferCalled);
-    EXPECT_FALSE(onVolumeTextureCalled);
-    EXPECT_FALSE(onTextureArrayCalled);
     EXPECT_EQ(received, (TextureHandle{ 5, 2 }));
 }
 
@@ -577,64 +552,30 @@ TEST(RenderGraphDispatchByKindTest, BufferUsageDispatchesOnlyToOnBufferWithTheCo
     const ResourceUsage usage = ResourceUsage::ForBuffer(BufferHandle{ 3, 1 }, ResourceAccess::TransferDst);
     bool onTextureCalled = false;
     bool onBufferCalled = false;
-    bool onVolumeTextureCalled = false;
-    bool onTextureArrayCalled = false;
     BufferHandle received;
 
     DispatchByKind(usage,
         [&](TextureHandle) { onTextureCalled = true; },
-        [&](BufferHandle h) { onBufferCalled = true; received = h; },
-        [&](VolumeTextureHandle) { onVolumeTextureCalled = true; },
-        [&](TextureArrayHandle) { onTextureArrayCalled = true; });
+        [&](BufferHandle h) { onBufferCalled = true; received = h; });
 
     EXPECT_FALSE(onTextureCalled);
     EXPECT_TRUE(onBufferCalled);
-    EXPECT_FALSE(onVolumeTextureCalled);
-    EXPECT_FALSE(onTextureArrayCalled);
     EXPECT_EQ(received, (BufferHandle{ 3, 1 }));
-}
-
-TEST(RenderGraphDispatchByKindTest, VolumeTextureUsageDispatchesOnlyToOnVolumeTextureWithTheCorrectHandle)
-{
-    const ResourceUsage usage =
-        ResourceUsage::ForVolumeTexture(VolumeTextureHandle{ 8, 3 }, ResourceAccess::ComputeShaderWrite);
-    bool onTextureCalled = false;
-    bool onBufferCalled = false;
-    bool onVolumeTextureCalled = false;
-    bool onTextureArrayCalled = false;
-    VolumeTextureHandle received;
-
-    DispatchByKind(usage,
-        [&](TextureHandle) { onTextureCalled = true; },
-        [&](BufferHandle) { onBufferCalled = true; },
-        [&](VolumeTextureHandle h) { onVolumeTextureCalled = true; received = h; },
-        [&](TextureArrayHandle) { onTextureArrayCalled = true; });
-
-    EXPECT_FALSE(onTextureCalled);
-    EXPECT_FALSE(onBufferCalled);
-    EXPECT_TRUE(onVolumeTextureCalled);
-    EXPECT_FALSE(onTextureArrayCalled);
-    EXPECT_EQ(received, (VolumeTextureHandle{ 8, 3 }));
 }
 
 TEST(RenderGraphDispatchByKindTest, DispatchByKindWithNonVoidReturnTypeProducesTheExpectedValue)
 {
     const ResourceUsage textureUsage = ResourceUsage::ForTexture(TextureHandle{ 1, 1 }, ResourceAccess::ShaderRead);
     const ResourceUsage bufferUsage = ResourceUsage::ForBuffer(BufferHandle{ 2, 1 }, ResourceAccess::ShaderRead);
-    const ResourceUsage volumeTextureUsage =
-        ResourceUsage::ForVolumeTexture(VolumeTextureHandle{ 3, 1 }, ResourceAccess::ShaderRead);
 
     auto dispatch = [](const ResourceUsage& usage) {
         return DispatchByKind(usage,
             [](TextureHandle) { return std::int32_t{ 10 }; },
-            [](BufferHandle) { return std::int32_t{ 20 }; },
-            [](VolumeTextureHandle) { return std::int32_t{ 30 }; },
-            [](TextureArrayHandle) { return std::int32_t{ 40 }; });
+            [](BufferHandle) { return std::int32_t{ 20 }; });
     };
 
     EXPECT_EQ(dispatch(textureUsage), 10);
     EXPECT_EQ(dispatch(bufferUsage), 20);
-    EXPECT_EQ(dispatch(volumeTextureUsage), 30);
 }
 
 

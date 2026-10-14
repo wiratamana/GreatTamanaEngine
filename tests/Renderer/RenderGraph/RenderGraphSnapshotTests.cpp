@@ -702,7 +702,7 @@ TEST(RenderGraphSnapshotTest, ReadKindsAndWriteKindsMatchDeclaredResourceKindsIn
     const TextureHandle textureHandle = builder.CreateTexture("Tex", MakeTextureDesc());
     const BufferHandle bufferHandle = builder.CreateBuffer("Buf", BufferDesc{ 256, BufferUsage::StorageBuffer });
     const VolumeTarget volumeTarget{};
-    const VolumeTextureHandle volumeHandle =
+    const TextureHandle volumeHandle =
         builder.ImportVolumeTexture("Vol", volumeTarget, ImageLayout::Undefined);
 
     builder.AddComputePass(
@@ -710,14 +710,14 @@ TEST(RenderGraphSnapshotTest, ReadKindsAndWriteKindsMatchDeclaredResourceKindsIn
         [&](RenderGraphBuilder::PassBuilder& pass) {
             pass.ReadTexture(textureHandle, ResourceAccess::ComputeShaderRead);
             pass.ReadBuffer(bufferHandle, ResourceAccess::ComputeShaderRead);
-            pass.ReadVolumeTexture(volumeHandle, ResourceAccess::ComputeShaderRead);
+            pass.ReadTexture(volumeHandle, ResourceAccess::ComputeShaderRead);
             pass.WriteTexture(textureHandle, ResourceAccess::ComputeShaderWrite);
             pass.WriteBuffer(bufferHandle, ResourceAccess::ComputeShaderWrite);
-            pass.WriteVolumeTexture(volumeHandle, ResourceAccess::ComputeShaderWrite);
+            pass.WriteTexture(volumeHandle, ResourceAccess::ComputeShaderWrite);
         },
         NoOpExecute);
 
-    builder.KeepVolumeTextureOutput(volumeHandle);
+    builder.KeepTextureOutput(volumeHandle);
     CompiledGraphInput input = builder.Finish();
     const TextureHandle finalOutputs[] = { textureHandle };
     const CompiledGraph compiled = Compile(input, finalOutputs);
@@ -758,20 +758,20 @@ TEST(RenderGraphSnapshotTest, WriteVolumeTextureAndReadVolumeTextureProduceNonEm
 {
     RenderGraphBuilder builder;
     const VolumeTarget volumeTarget{};
-    const VolumeTextureHandle volumeHandle =
+    const TextureHandle volumeHandle =
         builder.ImportVolumeTexture("AtmosphereAerialPerspectiveVolume", volumeTarget, ImageLayout::Undefined);
     const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
 
     builder.AddComputePass(
         "WriteVolumePass",
         [&](RenderGraphBuilder::PassBuilder& pass) {
-            pass.WriteVolumeTexture(volumeHandle, ResourceAccess::ComputeShaderWrite);
+            pass.WriteTexture(volumeHandle, ResourceAccess::ComputeShaderWrite);
         },
         NoOpExecute);
     builder.AddComputePass(
         "ReadVolumePass",
         [&](RenderGraphBuilder::PassBuilder& pass) {
-            pass.ReadVolumeTexture(volumeHandle, ResourceAccess::ComputeShaderRead);
+            pass.ReadTexture(volumeHandle, ResourceAccess::ComputeShaderRead);
             pass.WriteTexture(output, ResourceAccess::ComputeShaderWrite);
         },
         NoOpExecute);

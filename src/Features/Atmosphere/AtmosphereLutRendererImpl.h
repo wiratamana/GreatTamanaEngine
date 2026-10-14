@@ -103,7 +103,7 @@ struct AtmosphereLutRenderer::Impl {
         const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
         rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle,
         const char* outputTextureName, rg::ViewScope viewScope, rg::RenderPassToggleRegistry* toggleRegistry);
-    rg::VolumeTextureHandle AddAerialPerspectiveVolumePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
+    rg::TextureHandle AddAerialPerspectiveVolumePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
         rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle,
         const char* outputVolumeName, rg::ViewScope viewScope, rg::RenderPassToggleRegistry* toggleRegistry);
@@ -112,7 +112,7 @@ struct AtmosphereLutRenderer::Impl {
         const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure);
     rg::TextureHandle AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         rg::TextureHandle sourceColorHandle, rg::TextureHandle sourceDepthHandle,
-        rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
+        rg::TextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
         const Mat4& invViewProjection, Vec3 cameraWorldPosition, float aerialPerspectiveStrength, float maxDistanceKm,
         float depthExponent, Extent2D extent, const char* outputTextureName, rg::ViewScope viewScope,
         rg::RenderPassToggleRegistry* toggleRegistry);

@@ -56,11 +56,11 @@ AtmosphereSharedLutHandles AddAtmosphereSharedLutPasses(rg::RenderGraphBuilder& 
 //
 // The caller must add the returned Sky-View LUT TextureHandle to this
 // call's own outputs root set, AND call
-// `builder.KeepVolumeTextureOutput(result.aerialPerspectiveVolumeHandle)`
-// explicitly (a VolumeTextureHandle can never be a finalOutputs root).
+// `builder.KeepTextureOutput(result.aerialPerspectiveVolumeHandle)`
+// explicitly (a texture is only a root when kept).
 struct AtmosphereViewLutHandles {
     rg::TextureHandle skyViewLutHandle;
-    rg::VolumeTextureHandle aerialPerspectiveVolumeHandle;
+    rg::TextureHandle aerialPerspectiveVolumeHandle;
     AtmosphereFrameUniforms frameUniforms; // invViewProjection already set to viewProjection.Inverse().
 };
 AtmosphereViewLutHandles AddAtmosphereViewLutPasses(rg::RenderGraphBuilder& builder, Renderer& renderer,
@@ -90,7 +90,7 @@ std::function<void(rg::CommandBuffer&)> MakeRecordSkyBackgroundCallback(Atmosphe
 // The caller must add the returned TextureHandle to this call's own outputs root set.
 rg::TextureHandle AddAtmosphereCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
     AtmosphereLutRenderer& atmosphereLutRenderer, rg::TextureHandle sourceColorHandle,
-    rg::TextureHandle sourceDepthHandle, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
+    rg::TextureHandle sourceDepthHandle, rg::TextureHandle aerialPerspectiveVolumeHandle,
     const char* aerialPerspectiveVolumeName, const AtmosphereFrameUniforms& frameUniforms,
     Vec3 eyeWorldPosition, float aerialPerspectiveStrength, float maxDistanceKm, float depthExponent,
     Extent2D extent, const char* outputTextureName, rg::ViewScope viewScope,

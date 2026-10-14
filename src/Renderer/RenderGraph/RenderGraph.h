@@ -131,15 +131,21 @@ private:
     // PassContext needs access to internal physical resource types for resolution.
     friend struct PassContext;
 
+    // One physical record per TextureHandle, for every dimension. `dimension` selects which fields apply.
     struct PhysicalTexture {
         bool resolved = false;
         bool isImported = false;
-        bool hasDepth = false;
+        bool hasDepth = false; // Tex2D only: carries a companion depth image (target.depth*).
+        TextureDimension dimension = TextureDimension::Tex2D;
+        // Every dimension: image/imageView/extent(w,h)/format. Tex2D additionally: depth image/view/format.
         RenderTarget target;
+        std::uint32_t depthSlices = 1;  // Tex3D only.
+        TextureArrayTarget arrayTarget; // Array2D/Cube only.
         VkSampler sampler = VK_NULL_HANDLE;
         VkSampler depthSampler = VK_NULL_HANDLE;
-        ResourceState colorState;
-        ResourceState depthState;
+        ResourceState colorState;                 // Tex2D color image, or the Tex3D image.
+        ResourceState depthState;                 // Tex2D companion depth image.
+        std::vector<ResourceState> layerStates;   // Array2D/Cube: one state per layer.
     };
 
     struct PhysicalBuffer {
@@ -147,20 +153,6 @@ private:
         VkBuffer buffer = VK_NULL_HANDLE;
         uint64_t size = 0;
         ResourceState state;
-    };
-
-    struct PhysicalVolumeTexture {
-        bool resolved = false;
-        bool isImported = false;
-        VolumeTarget target;
-        ResourceState state;
-    };
-
-    struct PhysicalTextureArray {
-        bool resolved = false;
-        bool isImported = false;
-        TextureArrayTarget target;
-        std::vector<ResourceState> layerStates;
     };
 
     struct NamedStats {
@@ -175,10 +167,6 @@ private:
         std::uint32_t index, const CompiledGraphInput& input, std::vector<PhysicalTexture>& physicalTextures);
     void EnsureBufferResolved(
         std::uint32_t index, const CompiledGraphInput& input, std::vector<PhysicalBuffer>& physicalBuffers);
-    void EnsureVolumeTextureResolved(std::uint32_t index, const CompiledGraphInput& input,
-        std::vector<PhysicalVolumeTexture>& physicalVolumeTextures);
-    void EnsureTextureArrayResolved(std::uint32_t index, const CompiledGraphInput& input,
-        std::vector<PhysicalTextureArray>& physicalTextureArrays);
 
     // Tracks whether a barrier was emitted and its before/after layout.
     struct AppliedBarrierInfo {
@@ -189,21 +177,16 @@ private:
 
     void ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceUsage& usage, const CompiledGraphInput& input,
         std::vector<PhysicalTexture>& physicalTextures, std::vector<PhysicalBuffer>& physicalBuffers,
-        std::vector<PhysicalVolumeTexture>& physicalVolumeTextures,
-        std::vector<PhysicalTextureArray>& physicalTextureArrays, AppliedBarrierInfo* outBarrierInfo = nullptr);
+        AppliedBarrierInfo* outBarrierInfo = nullptr);
 
     DescriptorSetHandle ResolveComputeBindingDescriptorSet(const PassRecord& pass,
-        const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers,
-        const std::vector<PhysicalVolumeTexture>& physicalVolumeTextures);
+        const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers);
 
     PassContext BuildPassContext(VkCommandBuffer cmd, std::vector<PhysicalTexture>& physicalTextures,
-        std::vector<PhysicalBuffer>& physicalBuffers, std::vector<PhysicalVolumeTexture>& physicalVolumeTextures,
-        std::vector<PhysicalTextureArray>& physicalTextureArrays, DrawStats& passDrawStats);
+        std::vector<PhysicalBuffer>& physicalBuffers, DrawStats& passDrawStats);
 
-    std::vector<VkRenderingAttachmentInfo> BuildColorAttachmentInfos(
-        const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures,
-        const std::vector<PhysicalTextureArray>& physicalTextureArrays,
-        std::vector<VkExtent2D>& outResolvedExtents) const;
+    std::vector<VkRenderingAttachmentInfo> BuildColorAttachmentInfos(const PassRecord& pass,
+        const std::vector<PhysicalTexture>& physicalTextures, std::vector<VkExtent2D>& outResolvedExtents) const;
 
     struct DepthAttachmentResult {
         std::optional<VkRenderingAttachmentInfo> info;
@@ -211,13 +194,13 @@ private:
     };
 
     DepthAttachmentResult BuildDepthAttachmentInfo(const PassRecord& pass,
-        const std::vector<PhysicalTexture>& physicalTextures,
-        const std::vector<PhysicalTextureArray>& physicalTextureArrays, TextureHandle depthHandle) const;
+        const std::vector<PhysicalTexture>& physicalTextures, TextureHandle depthHandle) const;
 
+    // Registers resolved 2D textures / 3D volumes with the debug inspector (other dimensions are not inspected).
     void RegisterDebugTextureSnapshots(ExecuteTimingMode timingMode, const CompiledGraphInput& input,
         const std::vector<PhysicalTexture>& physicalTextures);
     void RegisterDebugVolumeTextureSnapshots(ExecuteTimingMode timingMode, const CompiledGraphInput& input,
-        const std::vector<PhysicalVolumeTexture>& physicalVolumeTextures);
+        const std::vector<PhysicalTexture>& physicalTextures);
 
     void UpdateDrawStatsFor(const char* name, const DrawStats& drawStats);
     void UpdateTimingFor(const char* name, const GpuTimingSample& timing);
@@ -300,8 +283,6 @@ struct PassContext {
     // Non-owning pointers to active physical resources during this pass.
     const std::vector<RenderGraph::PhysicalTexture>* textures = nullptr;
     const std::vector<RenderGraph::PhysicalBuffer>* buffers = nullptr;
-    const std::vector<RenderGraph::PhysicalVolumeTexture>* volumeTextures = nullptr;
-    const std::vector<RenderGraph::PhysicalTextureArray>* textureArrays = nullptr;
 
     Renderer* renderer = nullptr;
     FrameDebuggerEventSink* eventSink = nullptr;
@@ -314,9 +295,10 @@ struct PassContext {
     ResolvedTexture resolveTexture(TextureHandle handle) const noexcept { return resolveReadTexture(handle); }
     ResolvedDepthTexture resolveDepthTexture(TextureHandle handle) const noexcept;
     VkBuffer resolveBuffer(BufferHandle handle) const noexcept;
-    ResolvedVolumeTexture resolveVolumeTexture(VolumeTextureHandle handle) const noexcept;
-    ResolvedTextureArray resolveTextureArray(TextureArrayHandle handle) const noexcept;
-    ResolvedTextureArrayLayer resolveArrayLayer(TextureArrayHandle handle, std::uint32_t layerIndex) const noexcept;
+    // Non-2D resolvers: `handle` must name a Tex3D / Array2D-Cube texture.
+    ResolvedVolumeTexture resolveVolumeTexture(TextureHandle handle) const noexcept;
+    ResolvedTextureArray resolveTextureArray(TextureHandle handle) const noexcept;
+    ResolvedTextureArrayLayer resolveArrayLayer(TextureHandle handle, std::uint32_t layerIndex) const noexcept;
 
     // Callable object to accumulate draw call statistics.
     struct RecordDrawFn {

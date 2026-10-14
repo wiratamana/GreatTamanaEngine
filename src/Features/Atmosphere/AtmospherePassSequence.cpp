@@ -66,7 +66,7 @@ std::function<void(rg::CommandBuffer&)> MakeRecordSkyBackgroundCallback(Atmosphe
 
 rg::TextureHandle AddAtmosphereCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
     AtmosphereLutRenderer& atmosphereLutRenderer, rg::TextureHandle sourceColorHandle,
-    rg::TextureHandle sourceDepthHandle, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
+    rg::TextureHandle sourceDepthHandle, rg::TextureHandle aerialPerspectiveVolumeHandle,
     const char* aerialPerspectiveVolumeName, const AtmosphereFrameUniforms& frameUniforms,
     Vec3 eyeWorldPosition, float aerialPerspectiveStrength, float maxDistanceKm, float depthExponent,
     Extent2D extent, const char* outputTextureName, rg::ViewScope viewScope,

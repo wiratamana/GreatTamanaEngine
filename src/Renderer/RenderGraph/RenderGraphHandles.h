@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // Vulkan-free render-graph vocabulary: every handle/enum a Project Assembly
 // plugin callback needs to NAME, without pulling in Vulkan. RenderGraphTypes.h
@@ -11,10 +11,8 @@ namespace gte::rg {
 
 inline constexpr std::uint32_t kInvalidIndex = 0xFFFFFFFFu;
 
-// Cheap, POD, generational identifiers minted by the resource owning each
-// one - never invented by calling code. Three distinct structs (not one
-// shared template) so the compiler catches a mismatched handle at compile time.
-
+// Cheap, POD, generational identifiers minted by the resource owning each one - never invented by calling code.
+// TextureHandle names any image (2D, 3D, array, cube); its shape lives in TextureDesc::dimension.
 struct TextureHandle {
     std::uint32_t index = kInvalidIndex;
     std::uint32_t generation = 0;
@@ -33,25 +31,6 @@ struct BufferHandle {
     friend bool operator==(const BufferHandle&, const BufferHandle&) noexcept = default;
 };
 
-// Handle to a real 3D (volume) GPU image.
-struct VolumeTextureHandle {
-    std::uint32_t index = kInvalidIndex;
-    std::uint32_t generation = 0;
-
-    bool IsValid() const noexcept { return index != kInvalidIndex; }
-
-    friend bool operator==(const VolumeTextureHandle&, const VolumeTextureHandle&) noexcept = default;
-};
-
-// Handle to a multi-layer image (texture array or cubemap).
-struct TextureArrayHandle {
-    std::uint32_t index = kInvalidIndex;
-    std::uint32_t generation = 0;
-
-    bool IsValid() const noexcept { return index != kInvalidIndex; }
-
-    friend bool operator==(const TextureArrayHandle&, const TextureArrayHandle&) noexcept = default;
-};
 
 // Which half of an imported texture a binding targets (an imported view can carry a color and a depth image).
 enum class TextureAspect : std::uint8_t {
@@ -77,7 +56,8 @@ enum class ResourceAccess : std::uint8_t {
     VertexShaderStorageRead,
 };
 
-// Which of ResourceUsage's handle fields is meaningful for a given value.
+// What a resource is. A ResourceUsage only ever carries Texture or Buffer; the snapshot/UI additionally
+// classify a texture by its dimension (VolumeTexture = Tex3D, TextureArray = Array2D/Cube).
 enum class ResourceKind : std::uint8_t {
     Texture,
     Buffer,
@@ -162,21 +142,15 @@ private:
     std::uint64_t m_hash = 0;
 };
 
-// A single declared read/write on a texture, buffer, volume texture, or
-// texture array - `kind` says which field is meaningful, every other field
-// stays at its default and is never read.
+// A single declared read/write on a texture (any dimension) or a buffer. `kind` says which handle is meaningful.
 struct ResourceUsage {
     ResourceKind kind = ResourceKind::Texture;
     TextureHandle texture;
     BufferHandle buffer;
-    VolumeTextureHandle volumeTexture;
-    TextureArrayHandle textureArray;
     ResourceAccess access = ResourceAccess::ShaderRead;
-    // Only meaningful when kind == Texture - targets the DEPTH half of an
-    // already-imported handle that also carries a color image.
+    // Texture only - targets the DEPTH half of an imported handle that also carries a color image.
     bool isDepthResource = false;
-    // Per-layer/per-face write against a TextureArrayHandle. nullopt means
-    // whole-array usage. Only meaningful when kind == TextureArray.
+    // Texture only - per-layer/per-face access to an array or cube. nullopt means the whole image.
     std::optional<std::uint32_t> arrayLayerIndex;
 
     static ResourceUsage ForTexture(TextureHandle handle, ResourceAccess access, bool isDepthResource = false) noexcept
@@ -189,41 +163,19 @@ struct ResourceUsage {
         return usage;
     }
 
+    static ResourceUsage ForTextureLayer(TextureHandle handle, std::uint32_t layerIndex, ResourceAccess access) noexcept
+    {
+        ResourceUsage usage = ForTexture(handle, access);
+        usage.arrayLayerIndex = layerIndex;
+        return usage;
+    }
+
     static ResourceUsage ForBuffer(BufferHandle handle, ResourceAccess access) noexcept
     {
         ResourceUsage usage;
         usage.kind = ResourceKind::Buffer;
         usage.buffer = handle;
         usage.access = access;
-        return usage;
-    }
-
-    static ResourceUsage ForVolumeTexture(VolumeTextureHandle handle, ResourceAccess access) noexcept
-    {
-        ResourceUsage usage;
-        usage.kind = ResourceKind::VolumeTexture;
-        usage.volumeTexture = handle;
-        usage.access = access;
-        return usage;
-    }
-
-    static ResourceUsage ForTextureArray(TextureArrayHandle handle, ResourceAccess access) noexcept
-    {
-        ResourceUsage usage;
-        usage.kind = ResourceKind::TextureArray;
-        usage.textureArray = handle;
-        usage.access = access;
-        return usage;
-    }
-
-    static ResourceUsage ForTextureArrayLayer(
-        TextureArrayHandle handle, std::uint32_t layerIndex, ResourceAccess access) noexcept
-    {
-        ResourceUsage usage;
-        usage.kind = ResourceKind::TextureArray;
-        usage.textureArray = handle;
-        usage.access = access;
-        usage.arrayLayerIndex = layerIndex;
         return usage;
     }
 };

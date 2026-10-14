@@ -519,9 +519,9 @@ registering a new named texture:
   yaw/pitch/distance query parameters, and no other preview mode
   (Slice/Maximum-Intensity-Projection), by deliberate design; this is a
   debugging/LLM-agent capability, not an Editor inspector feature. The
-  mechanism is fully generic over ANY current or future `VolumeTextureHandle`
+  mechanism is fully generic over ANY current or future volume `TextureHandle`
   a render-graph pass declares and keeps alive via
-  `RenderGraphBuilder::KeepVolumeTextureOutput()` - not hardcoded to the
+  `RenderGraphBuilder::KeepTextureOutput()` - not hardcoded to the
   Atmosphere feature's own two aerial-perspective volumes specifically,
   mirroring `RenderGraphDebugTextureRegistry`'s own "zero opt-in required"
   property exactly (see [Atmosphere Scattering](atmosphere-scattering.md) below for where the new

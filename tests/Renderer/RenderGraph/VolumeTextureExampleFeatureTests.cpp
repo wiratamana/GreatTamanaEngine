@@ -1,4 +1,4 @@
-﻿// Real, headless-GPU, numerically-asserted tests proving both valid
+// Real, headless-GPU, numerically-asserted tests proving both valid
 // compute-dispatch shapes for filling a VolumeTexture - per-cell-parallel
 // (every cell computed independently) and per-column-sequential (every
 // column loops its own Z slices in order, since each slice's value depends
@@ -68,11 +68,11 @@ TEST(VolumeTextureExampleFeatureTest, PerCellParallelFillWritesEveryCellsOwnCoor
         fixture.GetRenderer().AllocateComputeDescriptorSet(pipeline.ReflectedDescriptorSetLayout(0));
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-        const VolumeTextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), ImageLayout::Undefined);
+        const TextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), ImageLayout::Undefined);
         b.AddRenderPass(
             "VolumeTextureExamplePerCellFillPass", PassKind::Compute,
             [handle](RenderGraphBuilder::PassBuilder& pass) {
-                pass.WriteVolumeTexture(handle, ResourceAccess::ComputeShaderWrite);
+                pass.WriteTexture(handle, ResourceAccess::ComputeShaderWrite);
             },
             [&](PassContext& ctx) {
                 const PassContext::ResolvedVolumeTexture dest = ctx.resolveVolumeTexture(handle);
@@ -83,9 +83,9 @@ TEST(VolumeTextureExampleFeatureTest, PerCellParallelFillWritesEveryCellsOwnCoor
                 cmd.BindDescriptorSet(descriptorSet.Native());
                 cmd.DispatchOverSize(kSize, kSize, kSize);
             });
-        // Mandatory - a pass whose only write is a VolumeTextureHandle is
+        // Mandatory - a pass whose only write is a volume texture handle is
         // silently culled without this call.
-        b.KeepVolumeTextureOutput(handle);
+        b.KeepTextureOutput(handle);
         return {};
     });
 
@@ -145,11 +145,11 @@ TEST(VolumeTextureExampleFeatureTest, PerColumnSequentialFillMatchesTheCpuOracle
     const PushConstants pushConstants{ kMaxDistanceKm, kDepthExponent };
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-        const VolumeTextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), ImageLayout::Undefined);
+        const TextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), ImageLayout::Undefined);
         b.AddRenderPass(
             "VolumeTextureExamplePerColumnFillPass", PassKind::Compute,
             [handle](RenderGraphBuilder::PassBuilder& pass) {
-                pass.WriteVolumeTexture(handle, ResourceAccess::ComputeShaderWrite);
+                pass.WriteTexture(handle, ResourceAccess::ComputeShaderWrite);
             },
             [&](PassContext& ctx) {
                 const PassContext::ResolvedVolumeTexture dest = ctx.resolveVolumeTexture(handle);
@@ -162,7 +162,7 @@ TEST(VolumeTextureExampleFeatureTest, PerColumnSequentialFillMatchesTheCpuOracle
                 cmd.DispatchOverSize(kWidth, kHeight, 1);
             });
         // Mandatory - same reasoning as the per-cell test above.
-        b.KeepVolumeTextureOutput(handle);
+        b.KeepTextureOutput(handle);
         return {};
     });
 

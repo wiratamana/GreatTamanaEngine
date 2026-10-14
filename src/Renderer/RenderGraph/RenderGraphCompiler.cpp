@@ -20,47 +20,10 @@ bool ContainsTextureHandle(std::span<const TextureHandle> handles, const Texture
     return false;
 }
 
-// Atmosphere Scattering campaign, Phase 6
-// (ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md) - the
-// VolumeTextureHandle sibling of ContainsTextureHandle() above, used by the
-// root-marking scan below to fix a genuine Phase 2 gap (see
-// CompiledGraphInput::finalVolumeTextureOutputs's own doc comment,
-// RenderGraphBuilder.h).
-bool ContainsVolumeTextureHandle(std::span<const VolumeTextureHandle> handles, const VolumeTextureHandle& handle)
-{
-    for (const VolumeTextureHandle& candidate : handles) {
-        if (candidate == handle) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// editor-core-separation-26 campaign, PHASE1
-// (BIG_STEP_2_BUFFER_ROOTS_AND_BLIT_PASSES_2026-09-29.txt, Part A) - the
-// BufferHandle sibling of ContainsVolumeTextureHandle() above, used by the
-// root-marking scan below to fix a genuine, long-standing gap: a
-// BufferHandle used to have NO equivalent root set at all and could never
-// be a root, no matter what a pass declared - see
-// RenderGraphBuilder::KeepBufferOutput()'s own doc comment
-// (RenderGraphBuilder.h) for the full reasoning.
+// Roots for buffers: a buffer write is only kept alive by KeepBufferOutput() or by a kept reader.
 bool ContainsBufferHandle(std::span<const BufferHandle> handles, const BufferHandle& handle)
 {
     for (const BufferHandle& candidate : handles) {
-        if (candidate == handle) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// better-render-pass-3 campaign, BLOCK5, Phase 3 - the TextureArrayHandle
-// sibling of ContainsVolumeTextureHandle() above, used by the root-marking
-// scan below (Compile()'s own Step 2) to resolve TextureArrayHandle::
-// finalTextureArrayOutputs root membership, mirroring that function verbatim.
-bool ContainsTextureArrayHandle(std::span<const TextureArrayHandle> handles, const TextureArrayHandle& handle)
-{
-    for (const TextureArrayHandle& candidate : handles) {
         if (candidate == handle) {
             return true;
         }
@@ -84,21 +47,13 @@ std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
 {
     std::vector<RenderPassEventContradiction> contradictions;
 
-    // render-pass-6 campaign, PHASE6 (item 2.2) - converted from a
-    // hand-rolled `switch (a.kind)` to DispatchByKind() (RenderGraphTypes.h).
-    // Permitted per PHASE6_RESOURCEKIND_DISPATCH_TABLE.md's own "PHASE4/
-    // PHASE6 interaction" resolution: this function's PUBLIC signature and
-    // observable return value are unaffected - only this internal lambda's
-    // dispatch mechanism changed.
     auto sameResource = [](const ResourceUsage& a, const ResourceUsage& b) {
         if (a.kind != b.kind) {
             return false;
         }
         return DispatchByKind(a,
             [&](TextureHandle) { return a.texture == b.texture; },
-            [&](BufferHandle) { return a.buffer == b.buffer; },
-            [&](VolumeTextureHandle) { return a.volumeTexture == b.volumeTexture; },
-            [&](TextureArrayHandle) { return a.textureArray == b.textureArray; });
+            [&](BufferHandle) { return a.buffer == b.buffer; });
     };
 
     for (std::size_t readerPos = 0; readerPos < processingOrder.size(); ++readerPos) {
@@ -141,9 +96,7 @@ std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
                             contradiction.resourceKind = read.kind;
                             contradiction.resourceIndex = DispatchByKind(read,
                                 [](TextureHandle h) { return h.index; },
-                                [](BufferHandle h) { return h.index; },
-                                [](VolumeTextureHandle h) { return h.index; },
-                                [](TextureArrayHandle h) { return h.index; });
+                                [](BufferHandle h) { return h.index; });
                             contradictions.push_back(contradiction);
                             break; // One report per (reader, resource) pair is enough.
                         }
@@ -159,9 +112,7 @@ std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
                     contradiction.resourceKind = read.kind;
                     contradiction.resourceIndex = DispatchByKind(read,
                         [](TextureHandle h) { return h.index; },
-                        [](BufferHandle h) { return h.index; },
-                        [](VolumeTextureHandle h) { return h.index; },
-                        [](TextureArrayHandle h) { return h.index; });
+                        [](BufferHandle h) { return h.index; });
                     contradictions.push_back(contradiction);
                 }
             }
@@ -200,11 +151,6 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     CompiledGraph result;
     result.textureLifetimes.assign(input.textures.size(), ResourceLifetime{});
     result.bufferLifetimes.assign(input.buffers.size(), ResourceLifetime{});
-    // Atmosphere Scattering campaign, Phase 2
-    // (ATMOSPHERE_PHASE2_VOLUME_TEXTURE_RENDERGRAPH_SUPPORT_v1.md).
-    result.volumeTextureLifetimes.assign(input.volumeTextures.size(), ResourceLifetime{});
-    // better-render-pass-3 campaign, BLOCK5, Phase 3.
-    result.textureArrayLifetimes.assign(input.textureArrays.size(), ResourceLifetime{});
 
     if (passCount == 0) {
         return result;
@@ -255,10 +201,6 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     // before Step 1's own loop.
     std::vector<std::int32_t> firstTextureWriter(input.textures.size(), -1);
     std::vector<std::int32_t> firstBufferWriter(input.buffers.size(), -1);
-    std::vector<std::int32_t> firstVolumeTextureWriter(input.volumeTextures.size(), -1);
-    // better-render-pass-3 campaign, BLOCK5, Phase 3 - same shape as
-    // firstVolumeTextureWriter above.
-    std::vector<std::int32_t> firstTextureArrayWriter(input.textureArrays.size(), -1);
     // render-pass-6 campaign, PHASE6 (item 2.2) - resolves a pointer directly
     // at the resolved firstXWriter slot for `usage`, mirroring
     // lastWriterSlotFor below (Step 1's own RAW/WAW scan) - a single shared
@@ -272,12 +214,6 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
             },
             [&](BufferHandle h) -> std::int32_t* {
                 return h.index < firstBufferWriter.size() ? &firstBufferWriter[h.index] : nullptr;
-            },
-            [&](VolumeTextureHandle h) -> std::int32_t* {
-                return h.index < firstVolumeTextureWriter.size() ? &firstVolumeTextureWriter[h.index] : nullptr;
-            },
-            [&](TextureArrayHandle h) -> std::int32_t* {
-                return h.index < firstTextureArrayWriter.size() ? &firstTextureArrayWriter[h.index] : nullptr;
             });
     };
     for (std::int32_t pos = 0; pos < passCount; ++pos) {
@@ -352,10 +288,6 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     // exhaustive, `default:`-less three-way `switch (usage.kind)` BEFORE
     // ResourceKind::VolumeTexture was ever added to the enum, so a future
     // fourth resource kind gets this same compile-time safety net too.
-    std::vector<std::int32_t> lastVolumeTextureWriter(input.volumeTextures.size(), -1);
-    // better-render-pass-3 campaign, BLOCK5, Phase 3 - same shape as
-    // lastVolumeTextureWriter above.
-    std::vector<std::int32_t> lastTextureArrayWriter(input.textureArrays.size(), -1);
 
     // render-pass-6 campaign, PHASE6 (item 2.2) - the RAW-edge scan and the
     // WAW-edge scan below both need to "resolve a pointer directly at the
@@ -374,12 +306,6 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
             },
             [&](BufferHandle h) -> std::int32_t* {
                 return h.index < lastBufferWriter.size() ? &lastBufferWriter[h.index] : nullptr;
-            },
-            [&](VolumeTextureHandle h) -> std::int32_t* {
-                return h.index < lastVolumeTextureWriter.size() ? &lastVolumeTextureWriter[h.index] : nullptr;
-            },
-            [&](TextureArrayHandle h) -> std::int32_t* {
-                return h.index < lastTextureArrayWriter.size() ? &lastTextureArrayWriter[h.index] : nullptr;
             });
     };
 
@@ -443,9 +369,7 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
                     contradiction.resourceKind = usage.kind;
                     contradiction.resourceIndex = DispatchByKind(usage,
                         [](TextureHandle h) { return h.index; },
-                        [](BufferHandle h) { return h.index; },
-                        [](VolumeTextureHandle h) { return h.index; },
-                        [](TextureArrayHandle h) { return h.index; });
+                        [](BufferHandle h) { return h.index; });
                     fastContradictions.push_back(contradiction);
                 }
             } else if (input.passes[static_cast<std::size_t>(writer)].renderPassEvent > pass.renderPassEvent) {
@@ -456,9 +380,7 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
                 contradiction.resourceKind = usage.kind;
                 contradiction.resourceIndex = DispatchByKind(usage,
                     [](TextureHandle h) { return h.index; },
-                    [](BufferHandle h) { return h.index; },
-                    [](VolumeTextureHandle h) { return h.index; },
-                    [](TextureArrayHandle h) { return h.index; });
+                    [](BufferHandle h) { return h.index; });
                 fastContradictions.push_back(contradiction);
             }
         }
@@ -578,33 +500,15 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     for (std::int32_t i = 0; i < passCount; ++i) {
         const PassRecord& pass = input.passes[static_cast<std::size_t>(i)];
         for (const ResourceUsage& usage : pass.writes) {
-            // render-pass-6 campaign, PHASE6 (item 2.2) - converted from a
-            // hand-rolled `switch (usage.kind)` to DispatchByKind()
-            // (RenderGraphTypes.h) - same three bodies moved verbatim into
-            // each lambda. editor-core-separation-26 campaign, PHASE1 - the
-            // BufferHandle lambda now ALSO checks `input.finalBufferOutputs`
-            // (RenderGraphBuilder::KeepBufferOutput()), mirroring the
-            // VolumeTextureHandle lambda immediately below exactly - a
-            // buffer is still culled unless explicitly kept or read by
-            // something else that is itself kept. editor-core-separation-27
-            // campaign, PHASE3 - the TextureHandle lambda now ALSO checks
-            // `input.persistentCacheTextures`, see this block's own comment
-            // above for the full reasoning.
+            // A write is a root when its resource was explicitly kept (any texture dimension, or a buffer)
+            // or is a persistent-cache texture; a buffer is culled unless kept or read by something kept.
             const bool isRoot = DispatchByKind(usage,
                 [&](TextureHandle h) {
                     return ContainsTextureHandle(finalOutputs, h)
+                        || ContainsTextureHandle(input.finalTextureOutputs, h)
                         || ContainsTextureHandle(input.persistentCacheTextures, h);
                 },
-                [&](BufferHandle h) { return ContainsBufferHandle(input.finalBufferOutputs, h); },
-                [&](VolumeTextureHandle h) {
-                    return ContainsVolumeTextureHandle(input.finalVolumeTextureOutputs, h);
-                },
-                // better-render-pass-3 campaign, BLOCK5, Phase 3 - mirrors the
-                // VolumeTextureHandle lambda above, NOT the TextureHandle one
-                // (no persistent-cache concept exists for TextureArray yet).
-                [&](TextureArrayHandle h) {
-                    return ContainsTextureArrayHandle(input.finalTextureArrayOutputs, h);
-                });
+                [&](BufferHandle h) { return ContainsBufferHandle(input.finalBufferOutputs, h); });
             if (isRoot) {
                 if (!kept[static_cast<std::size_t>(i)]) {
                     kept[static_cast<std::size_t>(i)] = true;
@@ -730,11 +634,7 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
     for (std::size_t pos = 0; pos < order.size(); ++pos) {
         const PassRecord& pass = input.passes[static_cast<std::size_t>(order[pos])];
 
-        // render-pass-6 campaign, PHASE6 (item 2.2) - converted from a
-        // hand-rolled `switch (usage.kind)` to DispatchByKind(), resolving
-        // BOTH "which vector" and "which index" in one pointer return -
-        // strictly simpler than the original two-local-variable
-        // (lifetimes/index) shape it replaces.
+        // Resolves which lifetime table and index a usage touches, in one pointer.
         auto touch = [&](const ResourceUsage& usage) {
             ResourceLifetime* lifetime = DispatchByKind(usage,
                 [&](TextureHandle h) -> ResourceLifetime* {
@@ -742,17 +642,6 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
                 },
                 [&](BufferHandle h) -> ResourceLifetime* {
                     return h.index < result.bufferLifetimes.size() ? &result.bufferLifetimes[h.index] : nullptr;
-                },
-                [&](VolumeTextureHandle h) -> ResourceLifetime* {
-                    return h.index < result.volumeTextureLifetimes.size()
-                        ? &result.volumeTextureLifetimes[h.index]
-                        : nullptr;
-                },
-                // better-render-pass-3 campaign, BLOCK5, Phase 3.
-                [&](TextureArrayHandle h) -> ResourceLifetime* {
-                    return h.index < result.textureArrayLifetimes.size()
-                        ? &result.textureArrayLifetimes[h.index]
-                        : nullptr;
                 });
             if (lifetime == nullptr) {
                 return;

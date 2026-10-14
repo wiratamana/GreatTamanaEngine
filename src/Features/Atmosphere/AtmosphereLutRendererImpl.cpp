@@ -327,7 +327,7 @@ AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveVolumeViewInitialized(Render
     return insertedPair.first->second;
 }
 
-rg::VolumeTextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveVolumePass(rg::RenderGraphBuilder& builder,
+rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveVolumePass(rg::RenderGraphBuilder& builder,
     Renderer& renderer, const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
     rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle, const char* outputVolumeName,
     rg::ViewScope viewScope, rg::RenderPassToggleRegistry* toggleRegistry)
@@ -336,7 +336,7 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveVolumeP
         || toggleRegistry->IsEnabled("AtmosphereAerialPerspectiveVolumePass");
     if (!ShouldDeclareAtmospherePassThisFrame(
             passEnabledThisFrame, transmittanceLutHandle.IsValid() && multiScatteringLutHandle.IsValid())) {
-        return rg::VolumeTextureHandle{};
+        return rg::TextureHandle{};
     }
     const rg::RenderFeatureScope scope(builder, "Atmosphere / Sky");
 
@@ -348,7 +348,7 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveVolumeP
 
     viewState.frameUniformsBuffer->Upload(&frameUniforms, sizeof(AtmosphereFrameUniforms));
 
-    const rg::VolumeTextureHandle outputHandle =
+    const rg::TextureHandle outputHandle =
         builder.ImportVolumeTexture(outputVolumeName, viewState.output->Target(), ImageLayout::Undefined);
 
     builder.AddRenderPass(
@@ -357,7 +357,7 @@ rg::VolumeTextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveVolumeP
             rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.ReadTexture(transmittanceLutHandle, rg::ResourceAccess::ShaderRead);
             pass.ReadTexture(multiScatteringLutHandle, rg::ResourceAccess::ShaderRead);
-            pass.WriteVolumeTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
+            pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
 
             pass.BindDescriptorSetLayout(aerialPerspectiveVolumeDescriptorSetLayoutHandle);
             pass.BindStorageBuffer(0, atmosphereParametersBuffer->ObjectHandle());
@@ -415,7 +415,7 @@ AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveCompositeViewInitialized(
 
 rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder,
     Renderer& renderer, rg::TextureHandle sourceColorHandle, rg::TextureHandle sourceDepthHandle,
-    rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
+    rg::TextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
     const Mat4& invViewProjection, Vec3 cameraWorldPosition, float aerialPerspectiveStrength, float maxDistanceKm,
     float depthExponent, Extent2D extent, const char* outputTextureName, rg::ViewScope viewScope,
     rg::RenderPassToggleRegistry* toggleRegistry)
@@ -469,7 +469,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass
             bindingLayout](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.ReadTexture(sourceColorHandle, rg::ResourceAccess::ShaderRead);
             pass.ReadTexture(sourceDepthHandle, rg::ResourceAccess::ShaderRead, /*isDepthResource=*/true);
-            pass.ReadVolumeTexture(aerialPerspectiveVolumeHandle, rg::ResourceAccess::ShaderRead);
+            pass.ReadTexture(aerialPerspectiveVolumeHandle, rg::ResourceAccess::ShaderRead);
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
 
             pass.BindDescriptorSetLayout(bindingLayout);

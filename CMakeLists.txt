@@ -895,7 +895,7 @@ add_library(gte_core STATIC
     src/Core/GraphicsHandles.h
     src/Core/PipelineDesc.h
     src/Core/PixelFormat.h
-    src/Core/UiTextureHandle.h
+    src/Core/TextureDimension.h
     src/Renderer/VertexLayout.h
     src/Renderer/GraphicsHandleRegistry.h
     src/Renderer/GraphicsHandleRegistry.cpp

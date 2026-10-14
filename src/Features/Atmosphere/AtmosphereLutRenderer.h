@@ -73,9 +73,9 @@ public:
     // Declares this frame's Aerial Perspective froxel-volume pass for ONE
     // view - writes a persistent 128x128x32 HDR VolumeTexture registered
     // under `outputVolumeName`. The caller must call
-    // `builder.KeepVolumeTextureOutput(result)` explicitly (a
-    // VolumeTextureHandle can never be a finalOutputs root).
-    rg::VolumeTextureHandle AddAerialPerspectiveVolumePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
+    // `builder.KeepTextureOutput(result)` explicitly (a
+    // TextureHandle can never be a finalOutputs root).
+    rg::TextureHandle AddAerialPerspectiveVolumePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         const AtmosphereParametersGpu& params, const AtmosphereFrameUniforms& frameUniforms,
         rg::TextureHandle transmittanceLutHandle, rg::TextureHandle multiScatteringLutHandle,
         const char* outputVolumeName, rg::ViewScope viewScope,
@@ -95,7 +95,7 @@ public:
     // Writes a persistent output RenderTexture under `outputTextureName`.
     rg::TextureHandle AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
         rg::TextureHandle sourceColorHandle, rg::TextureHandle sourceDepthHandle,
-        rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
+        rg::TextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
         const Mat4& invViewProjection, Vec3 cameraWorldPosition, float aerialPerspectiveStrength,
         float maxDistanceKm, float depthExponent, Extent2D extent, const char* outputTextureName,
         rg::ViewScope viewScope, rg::RenderPassToggleRegistry* toggleRegistry = nullptr);

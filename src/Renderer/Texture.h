@@ -2,6 +2,7 @@
 
 #include "../Core/Extent.h"
 #include "../Core/PixelFormat.h"
+#include "../Core/TextureDimension.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "VulkanFormatInfo.h"
 #include "Vulkan/VulkanAllocator.h"
@@ -11,13 +12,6 @@
 #include <vector>
 
 namespace gte {
-
-enum class TextureDimension : std::uint8_t {
-    Tex2D,
-    Tex3D,
-    Array2D,
-    Cube, // layers == 6 -> cube view, otherwise cube-array view.
-};
 
 enum class TextureFilter : std::uint8_t {
     None, // No sampler is created.

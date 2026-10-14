@@ -571,7 +571,7 @@ TEST(BuildRenderGraphMetadataResponseJsonTests, PopulatedMetadataRoundTripsEvery
     const nlohmann::json& jsonPass = parsed["offscreen_regime"]["passes"][0];
     EXPECT_EQ(jsonPass["name"].get<std::string>(), "RenderOpaque");
     EXPECT_FALSE(jsonPass["is_culled"].get<bool>());
-    EXPECT_TRUE(jsonPass["tag_group_label"].is_null());
+    EXPECT_FALSE(jsonPass.contains("tag_group_label")); // operator[] on a missing key of a const json is UB.
     EXPECT_EQ(jsonPass["draw_call_count"].get<std::uint32_t>(), 2u);
     EXPECT_EQ(jsonPass["triangle_count"].get<std::uint32_t>(), 20u);
     ASSERT_EQ(jsonPass["reads"].size(), 1u);

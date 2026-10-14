@@ -5,7 +5,7 @@
 // - the ONE pure decision every one of AtmosphereLutRenderer's 5 toggle-aware
 // AddXxxPass() methods needs before it is allowed to call
 // builder.AddRenderPass() at all: "is this pass individually enabled THIS
-// FRAME, and are every one of its upstream TextureHandle/VolumeTextureHandle
+// FRAME, and are every one of its upstream TextureHandle
 // dependencies already valid THIS FRAME?" Extracted out of those methods'
 // own guard clauses specifically so this exact branching is Tier-1-testable
 // with ZERO live VkDevice/Renderer/RenderGraphBuilder involved (see
@@ -19,7 +19,7 @@
 // RenderGraphTypes.h - every caller resolves its own two booleans FIRST
 // (`toggleRegistry == nullptr || toggleRegistry->IsEnabled(name)` for the
 // first; a logical AND of every relevant TextureHandle::IsValid()/
-// VolumeTextureHandle::IsValid() call for the second) and passes them in
+// TextureHandle::IsValid() call for the second) and passes them in
 // as plain bool values - this keeps this function usable from a Tier-1
 // test with no dependency on either type at all.
 //

@@ -2,6 +2,9 @@
 
 #include "../Renderer.h"
 
+#include <cassert>
+#include <stdexcept>
+
 namespace gte::rg {
 
 RenderGraphResourcePool::RenderGraphResourcePool(Renderer& renderer) noexcept
@@ -9,36 +12,48 @@ RenderGraphResourcePool::RenderGraphResourcePool(Renderer& renderer) noexcept
 {
 }
 
-RenderTexture& RenderGraphResourcePool::AcquireTexture(const TextureDesc& desc, const char* debugName)
+Texture& RenderGraphResourcePool::AcquireTexture(const TextureDesc& desc, const char* debugName)
 {
     for (TextureEntry& entry : m_textureEntries) {
         if (!entry.claimedThisFrame && entry.desc == desc) {
             entry.claimedThisFrame = true;
-            return entry.texture;
+            return *entry.texture;
         }
     }
 
-    // No matching, unclaimed entry - create a fresh one and append it.
-    // desc.format == PixelFormat::Undefined is passed straight through
-    // (rather than pre-resolved here) - Renderer::CreateRenderTexture()
-    // itself already treats PixelFormat::Undefined as "match Renderer::
-    // ColorPixelFormat() exactly" (see AGENTS.md, "Render Target Format
-    // Matching"), so every "default format" request still compares equal
-    // to every other one via TextureDesc::operator==, exactly as intended.
-    // better-render-pass-1 campaign, PHASE8
-    // (PHASE8_TEXTUREDESC_USAGE_FIELD_AND_RESOURCE_POOL_AUDIT.md, R5) -
-    // desc.usage's TextureUsage::Storage bit is threaded through into
-    // allowStorageImageAccess here - the load-bearing fix this phase exists
-    // for: before this, a CreateTexture()-declared (pooled/transient)
-    // resource had no way to ever become a storage image at all, since this
-    // call always passed the default (false). TransferSrc/TransferDst are
-    // deliberately NOT threaded anywhere yet - see TextureUsage's own doc
-    // comment (RenderGraphTypes.h) for why.
-    TextureEntry& entry = m_textureEntries.emplace_back(TextureEntry{ desc,
-        m_renderer->CreateRenderTexture(static_cast<int>(desc.width), static_cast<int>(desc.height), desc.format,
-            debugName, nullptr, HasFlag(desc.usage, TextureUsage::Storage)),
-        true });
-    return entry.texture;
+    // PixelFormat::Undefined is passed through: the Renderer resolves it (color or depth format), so every
+    // "default format" request still compares equal. Only the Storage usage bit is wired through.
+    std::unique_ptr<Texture> texture;
+    switch (desc.dimension) {
+    case TextureDimension::Tex2D:
+        texture = std::make_unique<RenderTexture>(m_renderer->CreateRenderTexture(static_cast<int>(desc.width),
+            static_cast<int>(desc.height), desc.format, debugName, nullptr, HasFlag(desc.usage, TextureUsage::Storage)));
+        break;
+    case TextureDimension::Array2D:
+    case TextureDimension::Cube:
+        texture = std::make_unique<TextureArray2D>(m_renderer->CreateTextureArray(static_cast<int>(desc.width),
+            static_cast<int>(desc.height), static_cast<int>(desc.arrayLayers), desc.format, desc.hasDepth,
+            desc.dimension == TextureDimension::Cube, HasFlag(desc.usage, TextureUsage::Storage), debugName));
+        break;
+    case TextureDimension::Tex3D:
+        throw std::logic_error("RenderGraphResourcePool::AcquireTexture: a 3D texture cannot be pooled (import-only).");
+    }
+
+    TextureEntry& entry = m_textureEntries.emplace_back(TextureEntry{ desc, std::move(texture), true });
+    return *entry.texture;
+}
+
+RenderTexture& RenderGraphResourcePool::AcquireRenderTexture(const TextureDesc& desc, const char* debugName)
+{
+    assert(desc.dimension == TextureDimension::Tex2D && "AcquireRenderTexture requires a Tex2D desc");
+    return static_cast<RenderTexture&>(AcquireTexture(desc, debugName));
+}
+
+TextureArray2D& RenderGraphResourcePool::AcquireTextureArray(const TextureDesc& desc, const char* debugName)
+{
+    assert((desc.dimension == TextureDimension::Array2D || desc.dimension == TextureDimension::Cube)
+        && "AcquireTextureArray requires an Array2D/Cube desc");
+    return static_cast<TextureArray2D&>(AcquireTexture(desc, debugName));
 }
 
 Buffer& RenderGraphResourcePool::AcquireBuffer(const BufferDesc& desc, const char* debugName)
@@ -50,40 +65,9 @@ Buffer& RenderGraphResourcePool::AcquireBuffer(const BufferDesc& desc, const cha
         }
     }
 
-    // No matching, unclaimed entry - create a fresh one and append it. See
-    // this class's own header comment for why BufferMemoryUsage::GpuOnly is
-    // the fixed choice here (BufferDesc carries no memory-usage field of
-    // its own, and no real pass exercises this path yet).
     BufferEntry& entry = m_bufferEntries.emplace_back(
         BufferEntry{ desc, m_renderer->CreateBuffer(desc.size, desc.usage, BufferMemoryUsage::GpuOnly, debugName), true });
     return entry.buffer;
-}
-
-// better-render-pass-3 campaign, BLOCK5 - mirrors AcquireTexture() EXACTLY
-// (same desc-equality linear-scan-and-reuse shape), NOT AcquireVolumeTexture()
-// (which does not exist).
-TextureArray2D& RenderGraphResourcePool::AcquireTextureArray(const TextureArrayDesc& desc, const char* debugName)
-{
-    for (TextureArrayEntry& entry : m_textureArrayEntries) {
-        if (!entry.claimedThisFrame && entry.desc == desc) {
-            entry.claimedThisFrame = true;
-            return entry.textureArray;
-        }
-    }
-
-    // desc.format == PixelFormat::Undefined is passed straight through - see
-    // AcquireTexture()'s own identical comment for why this is correct
-    // (Renderer::CreateTextureArray() itself resolves it per desc.hasDepth -
-    // NOT GpuResourceFactory::CreateTextureArray(), which has no
-    // ColorFormat()/DepthFormat() access at all - so every "default format"
-    // request still compares equal via TextureArrayDesc::operator==
-    // regardless).
-    TextureArrayEntry& entry = m_textureArrayEntries.emplace_back(TextureArrayEntry{ desc,
-        m_renderer->CreateTextureArray(static_cast<int>(desc.width), static_cast<int>(desc.height),
-            static_cast<int>(desc.arrayLayers), desc.format, desc.hasDepth, desc.isCubemap,
-            HasFlag(desc.usage, TextureUsage::Storage), debugName),
-        true });
-    return entry.textureArray;
 }
 
 void RenderGraphResourcePool::BeginFrame() noexcept
@@ -92,10 +76,6 @@ void RenderGraphResourcePool::BeginFrame() noexcept
         entry.claimedThisFrame = false;
     }
     for (BufferEntry& entry : m_bufferEntries) {
-        entry.claimedThisFrame = false;
-    }
-    // better-render-pass-3 campaign, BLOCK5.
-    for (TextureArrayEntry& entry : m_textureArrayEntries) {
         entry.claimedThisFrame = false;
     }
 }

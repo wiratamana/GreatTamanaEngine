@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // Declarative builder API to record frame render passes and resources.
 
@@ -26,17 +26,16 @@ namespace gte::rg {
 // Forward declaration to avoid circular include with RenderGraph.h.
 enum class ExecuteTimingMode : std::uint8_t;
 
-// Import metadata for textures owned outside the render graph.
+// Import metadata for textures owned outside the render graph. Which target is meaningful depends on
+// the slot's TextureDesc::dimension: Tex2D -> externalTarget, Tex3D -> externalVolumeTarget,
+// Array2D/Cube -> externalArrayTarget.
 struct TextureImportInfo {
     bool isImported = false;
     RenderTarget externalTarget{};
+    VolumeTarget externalVolumeTarget{};
+    TextureArrayTarget externalArrayTarget{};
     ImageLayout currentLayout = ImageLayout::Undefined;
-    // Engine-native opaque handles (Core/GraphicsHandles.h) - never a raw
-    // VkSampler. See RenderTexture::SamplerObjectHandle()/
-    // DepthSamplerObjectHandle() for the usual way a caller builds one of
-    // these; Renderer/GraphicsHandleRegistry.h's Native() is how this
-    // engine ever unwraps one back to a real VkSampler (see RenderGraph.cpp's
-    // EnsureTextureResolved()).
+    // Opaque sampler handles (never a raw VkSampler), usually from RenderTexture::SamplerObjectHandle()/DepthSamplerObjectHandle().
     SamplerHandle colorSampler = SamplerHandle::Invalid;
     SamplerHandle depthSampler = SamplerHandle::Invalid;
     RenderTexture* trackedOwner = nullptr; // Optional owner to receive final layout state.
@@ -45,27 +44,9 @@ struct TextureImportInfo {
 // Import metadata for buffers owned outside the render graph.
 struct BufferImportInfo {
     bool isImported = false;
-    // Engine-native opaque handle (Core/GraphicsHandles.h) - never a raw
-    // VkBuffer. See Buffer::ObjectHandle() for the usual way a caller builds
-    // one of these; Renderer/GraphicsHandleRegistry.h's Native() is how this
-    // engine ever unwraps one back to a real VkBuffer (see RenderGraph.cpp's
-    // EnsureBufferResolved()).
+    // Opaque handle (never a raw VkBuffer) - see Buffer::ObjectHandle().
     BufferObjectHandle externalBuffer = BufferObjectHandle::Invalid;
     uint64_t size = 0;
-};
-
-// Import metadata for 3D volume textures owned outside the render graph.
-struct VolumeTextureImportInfo {
-    bool isImported = false;
-    VolumeTarget externalTarget{};
-    ImageLayout currentLayout = ImageLayout::Undefined;
-};
-
-// Import metadata for texture arrays owned outside the render graph.
-struct TextureArrayImportInfo {
-    bool isImported = false;
-    TextureArrayTarget externalTarget{};
-    ImageLayout currentLayout = ImageLayout::Undefined;
 };
 
 // Resource slot entries storing descriptor, debug name, and import data together.
@@ -81,31 +62,16 @@ struct BufferSlot {
     BufferImportInfo importInfo;
 };
 
-struct VolumeTextureSlot {
-    VolumeTextureDesc desc;
-    const char* name = nullptr;
-    VolumeTextureImportInfo importInfo;
-};
-
-struct TextureArraySlot {
-    TextureArrayDesc desc;
-    const char* name = nullptr;
-    TextureArrayImportInfo importInfo;
-};
-
 // Uncompiled frame description passed to the compiler.
 struct CompiledGraphInput {
     std::vector<PassRecord> passes;
 
     std::vector<TextureSlot> textures;
     std::vector<BufferSlot> buffers;
-    std::vector<VolumeTextureSlot> volumeTextures;
-    std::vector<TextureArraySlot> textureArrays;
 
     // Output roots that must not be culled during compilation.
-    std::vector<VolumeTextureHandle> finalVolumeTextureOutputs;
+    std::vector<TextureHandle> finalTextureOutputs;
     std::vector<BufferHandle> finalBufferOutputs;
-    std::vector<TextureArrayHandle> finalTextureArrayOutputs;
     std::vector<TextureHandle> persistentCacheTextures;
 };
 
@@ -136,14 +102,8 @@ public:
         void ReadBuffer(BufferHandle handle, ResourceAccess access = ResourceAccess::ShaderRead);
         void WriteBuffer(BufferHandle handle, ResourceAccess access = ResourceAccess::TransferDst);
 
-        void ReadVolumeTexture(VolumeTextureHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderRead);
-        void WriteVolumeTexture(VolumeTextureHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderWrite);
-
-        void ReadTextureArray(TextureArrayHandle handle, ResourceAccess access = ResourceAccess::ShaderRead);
-        void WriteTextureArray(TextureArrayHandle handle, ResourceAccess access = ResourceAccess::ComputeShaderWrite);
-
-        // Declares an attachment write to a single layer of a texture array.
-        void WriteArrayLayer(TextureArrayHandle handle, std::uint32_t layerIndex, ResourceAccess access,
+        // Declares an attachment write to a single layer of an array or cube.
+        void WriteArrayLayer(TextureHandle handle, std::uint32_t layerIndex, ResourceAccess access,
             std::optional<std::array<float, 4>> clearColor = std::nullopt, std::optional<float> clearDepth = std::nullopt);
 
         // --- Compute Bindings ---
@@ -158,30 +118,26 @@ public:
         void BindStorageBuffer(std::uint32_t binding, BufferObjectHandle handle, uint64_t offset = 0,
             uint64_t range = VK_WHOLE_SIZE);
 
-        // If sampler is Invalid, uses the texture's own sampler.
+        // If sampler is Invalid, uses the texture's own sampler (a volume has none: pass one).
         void BindCombinedImageSampler(
             std::uint32_t binding, TextureHandle handle, SamplerHandle sampler = SamplerHandle::Invalid);
 
         // Binds one aspect (color or depth) of an imported texture with that aspect's own sampler.
         void BindCombinedImageSampler(std::uint32_t binding, TextureHandle handle, TextureAspect aspect);
 
-        // Sampler is required for volume textures.
-        void BindCombinedImageSampler(std::uint32_t binding, VolumeTextureHandle handle, SamplerHandle sampler);
-
         // Binds an untracked external image view with a sampler.
         void BindCombinedImageSampler(std::uint32_t binding, ImageViewHandle view, SamplerHandle sampler);
 
         void BindStorageImage(std::uint32_t binding, TextureHandle handle);
-        void BindStorageImage(std::uint32_t binding, VolumeTextureHandle handle);
 
     private:
         PassRecord& m_pass;
     };
 
-    // Creates a transient resource managed by the graph resource pool.
+    // Creates a transient resource managed by the graph resource pool (any dimension the pool supports:
+    // Tex2D, Array2D, Cube - see TextureDesc).
     TextureHandle CreateTexture(const char* name, const TextureDesc& desc);
     BufferHandle CreateBuffer(const char* name, const BufferDesc& desc);
-    TextureArrayHandle CreateTextureArray(const char* name, const TextureArrayDesc& desc);
 
     // Imports an externally managed resource into the graph. colorSampler/
     // depthSampler are engine-native SamplerHandle opaque handles (Core/
@@ -196,19 +152,18 @@ public:
     // Buffer::ObjectHandle().
     BufferHandle ImportBuffer(const char* name, BufferObjectHandle externalBuffer, uint64_t size);
 
-    VolumeTextureHandle ImportVolumeTexture(
+    // Imports a 3D volume / 2D array / cube owned outside the graph. All return the one TextureHandle type.
+    TextureHandle ImportVolumeTexture(
         const char* name, const VolumeTarget& externalVolumeTarget, ImageLayout currentLayout);
 
-    TextureArrayHandle ImportTextureArray(
+    TextureHandle ImportTextureArray(
         const char* name, const TextureArrayTarget& externalTarget, ImageLayout currentLayout);
 
-    // Marks resources as graph roots to prevent them from being culled.
+    // Marks resources as graph roots to prevent them from being culled (any texture dimension).
     void KeepTextureOutput(TextureHandle handle);
     const std::vector<TextureHandle>& FinalTextureOutputs() const noexcept { return m_finalTextureOutputs; }
 
-    void KeepVolumeTextureOutput(VolumeTextureHandle handle);
     void KeepBufferOutput(BufferHandle handle);
-    void KeepTextureArrayOutput(TextureArrayHandle handle);
 
     // Declares a standard render pass with immediate setup and deferred execution.
     template <typename SetupFn, typename ExecuteFn>
@@ -396,13 +351,9 @@ private:
 
     std::vector<TextureSlot> m_textures;
     std::vector<BufferSlot> m_buffers;
-    std::vector<VolumeTextureSlot> m_volumeTextures;
-    std::vector<TextureArraySlot> m_textureArrays;
 
     std::vector<TextureHandle> m_finalTextureOutputs;
-    std::vector<VolumeTextureHandle> m_finalVolumeTextureOutputs;
     std::vector<BufferHandle> m_finalBufferOutputs;
-    std::vector<TextureArrayHandle> m_finalTextureArrayOutputs;
     std::vector<TextureHandle> m_persistentCacheTextures;
 
     RenderGraphPersistentResourceCache* m_persistentCache = nullptr;

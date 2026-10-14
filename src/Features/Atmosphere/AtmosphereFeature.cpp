@@ -114,7 +114,7 @@ void AtmosphereFeature::RegisterPasses()
 
             // Mark view LUTs as graph roots.
             builder.KeepTextureOutput(viewLuts.skyViewLutHandle);
-            builder.KeepVolumeTextureOutput(viewLuts.aerialPerspectiveVolumeHandle);
+            builder.KeepTextureOutput(viewLuts.aerialPerspectiveVolumeHandle);
 
             const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
             blackboard.Publish<AtmosphereViewLutHandles>(viewLutKey, viewLuts);

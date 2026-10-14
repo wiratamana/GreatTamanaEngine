@@ -34,17 +34,14 @@ whenever touching this feature:
   instead. A future contributor extending/adding a new LUT should add the
   matching CPU-oracle math here FIRST, the same order every phase in this
   campaign already followed.
-- **The Render Graph's resource vocabulary now has a genuine THIRD kind,
-  `VolumeTexture`/`VolumeTextureHandle`/`rg::ResourceKind::VolumeTexture`**
-  (`src/Renderer/VolumeTexture.h`, `src/Renderer/RenderGraph/RenderGraphTypes.h`)
-  — a real 3D (`VK_IMAGE_TYPE_3D`) Vulkan image, added specifically for the
-  Aerial Perspective froxel volume. A `VolumeTextureHandle` can **never** be a
-  `finalOutputs` root (that vector is texture-only) — a pass whose only write
-  is a volume texture must call `RenderGraphBuilder::KeepVolumeTextureOutput()`
+- **The Aerial Perspective froxel volume is a real 3D (`VK_IMAGE_TYPE_3D`) `VolumeTexture`**
+  (`src/Renderer/VolumeTexture.h`), imported into the graph as a `TextureHandle` whose
+  `TextureDesc::dimension` is `Tex3D`. A texture handle is only a root when it is explicitly kept: a pass
+  whose only write is a volume texture must call `RenderGraphBuilder::KeepTextureOutput()`
   explicitly, or `RenderGraphCompiler::Compile()` silently culls it every
-  frame (a genuine infrastructure gap this campaign found and fixed — see
-  `ATMOSPHERE_PHASE6_COMPLETION_REPORT.md`). There is deliberately still no
-  `CreateVolumeTexture()` (pooled/transient) counterpart to
+  frame (a genuine infrastructure gap this campaign found and fixed - see
+  `ATMOSPHERE_PHASE6_COMPLETION_REPORT.md`).
+  There is deliberately still no `CreateVolumeTexture()` (pooled/transient) counterpart to
   `ImportVolumeTexture()` — this campaign's one and only volume-texture
   consumer is a fixed-size resource created ONCE (via
   `Renderer::CreateVolumeTexture()`) and re-imported fresh every frame,
@@ -74,25 +71,16 @@ whenever touching this feature:
   longer a "deliberate, out-of-scope non-goal" (see
   `task_manager/network-impl-6/PHASE0_MASTER_STRATEGY.md` for the full
   six-phase campaign that lifted this restriction).
-- **This is also the documented home for the Render Graph's `ResourceKind`
-  vocabulary in general, not just the `VolumeTexture` entry above - follow this
-  precedent for any future resource-kind addition.** The `better-render-pass-7`
-  campaign (BLOCK 5 of 6 of a separate `better-render-pass-3` campaign,
-  `task_manager/better-render-pass-7/PHASE0_MASTER_STRATEGY.md`,
-  `PHASE6_COMPLETION_REPORT.md`) added a genuine FOURTH kind,
-  `rg::ResourceKind::TextureArray`/`TextureArrayDesc`/`TextureArrayHandle`
-  (`src/Renderer/RenderGraph/RenderGraphTypes.h`, `src/Renderer/TextureArray2D.h`)
-  — a single Vulkan image with N layers (`Texture2DArray`) or a cubemap
-  (`VK_IMAGE_VIEW_TYPE_CUBE`/`_CUBE_ARRAY`), poolable/barrier-planned exactly
-  like plain `TextureDesc`/`TextureHandle` (unlike `VolumeTexture`, which is
-  import-only). **Deliberately deferred, unrelated to the Atmosphere feature
-  itself**: no per-layer/per-face `VkImageView` or per-layer write
-  declaration (so a real cascade-shadow/point-light-cubemap pass still cannot
-  render into one specific layer yet), no hardware depth-comparison sampler,
-  no mip-mapping, no new debug-texture-registry/Editor resource-list entry for
-  this kind, and no Tier-1 test for `RenderGraphResourcePool::AcquireTextureArray()`
-  (permanently Tier-2/manual-only). See that campaign's own
-  `PHASE6_COMPLETION_REPORT.md` for the full, itemized restatement.
+- **Every texture dimension is one `rg::TextureHandle`.** 2D textures, 3D volumes, 2D arrays and cubemaps
+  all share a single handle type; the shape lives in `TextureDesc::dimension`/`depth`/`arrayLayers`
+  (`src/Renderer/RenderGraph/RenderGraphTypes.h`). The owning classes are `Texture2D`, `VolumeTexture`,
+  `TextureArray2D` and `RenderTexture`, all subclasses of `Texture` (`src/Renderer/Texture.h`).
+  `rg::ResourceKind::VolumeTexture`/`TextureArray` survive only as UI classifications derived from a
+  texture's dimension; a `ResourceUsage` is always `Texture` or `Buffer`. Arrays and cubemaps are poolable
+  and barrier-planned exactly like plain textures (create one with `CreateTexture()` and
+  `dimension = Array2D/Cube`); a volume is import-only. Per-layer writes use
+  `PassBuilder::WriteArrayLayer()`. Still deferred: hardware depth-comparison sampler, mip-mapping,
+  and a debug-texture-registry/Editor resource-list entry for arrays.
 - **`AtmosphereParametersGpu`/`AtmosphereFrameUniforms`
   (`src/Renderer/Atmosphere/AtmosphereTypes.h`) are ALWAYS bound as read-only
   STORAGE buffers (`layout(std430, ...) readonly buffer`), NEVER a true
