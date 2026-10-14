@@ -55,64 +55,53 @@ ShadowMaskRenderer::ViewState& ShadowMaskRenderer::EnsureViewState(
 }
 
 rg::TextureHandle ShadowMaskRenderer::AddMaskPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-    const char* outputName, Extent2D viewExtent, const Mat4& invViewProjection, const Mat4& lightViewProjection,
-    float depthBias, std::uint32_t shadowMapResolution, rg::TextureHandle shadowMapHandle,
-    SamplerHandle shadowMapDepthSampler, rg::TextureHandle sceneDepthHandle, ImageViewHandle sceneDepthImageView,
-    SamplerHandle sceneDepthSampler)
+    const ShadowMaskInputs& inputs, rg::TextureHandle shadowMap, rg::TextureHandle sceneDepth)
 {
-    if (!shadowMapHandle.IsValid()) {
+    if (!shadowMap.IsValid()) {
         return rg::TextureHandle{};
     }
     const rg::RenderFeatureScope scope(builder, "Shadow");
 
     EnsurePipelineBuilt(renderer);
-    ViewState& viewState = EnsureViewState(renderer, outputName, viewExtent);
+    ViewState& viewState = EnsureViewState(renderer, inputs.outputName, inputs.viewExtent);
 
-    // The Game/Scene view can resize after this ViewState's first frame
-    // (editor docking layout settles, panel resize, etc) - re-create the
-    // output at the new size instead of silently sampling/writing a
-    // stale-resolution texture forever.
+    // The view can resize after its first frame (docking, panel resize) - recreate the output to match.
     const Extent2D currentExtent = viewState.output->Extent();
-    if (currentExtent.width != viewExtent.width || currentExtent.height != viewExtent.height) {
+    if (currentExtent.width != inputs.viewExtent.width || currentExtent.height != inputs.viewExtent.height) {
         renderer.WaitForGpuIdle();
-        const int resizedWidth = viewExtent.width > 0 ? static_cast<int>(viewExtent.width) : 1;
-        const int resizedHeight = viewExtent.height > 0 ? static_cast<int>(viewExtent.height) : 1;
-        viewState.output->Resize(resizedWidth, resizedHeight);
+        viewState.output->Resize(static_cast<int>(inputs.viewExtent.width), static_cast<int>(inputs.viewExtent.height));
     }
 
     ShadowMaskParamsGpu params{};
-    std::memcpy(params.invViewProjection, invViewProjection.Data(), sizeof(params.invViewProjection));
-    std::memcpy(params.lightViewProjection, lightViewProjection.Data(), sizeof(params.lightViewProjection));
-    params.biasAndStrengthAndTexel[0] = depthBias;
-    params.biasAndStrengthAndTexel[1] = 0.0f;
-    params.biasAndStrengthAndTexel[2] = shadowMapResolution > 0 ? 1.0f / static_cast<float>(shadowMapResolution) : 0.0f;
-    params.biasAndStrengthAndTexel[3] = 0.0f;
+    std::memcpy(params.invViewProjection, inputs.invViewProjection.Data(), sizeof(params.invViewProjection));
+    std::memcpy(params.lightViewProjection, inputs.lightViewProjection.Data(), sizeof(params.lightViewProjection));
+    params.biasAndStrengthAndTexel[0] = inputs.depthBias;
+    params.biasAndStrengthAndTexel[2] =
+        inputs.shadowMapResolution > 0 ? 1.0f / static_cast<float>(inputs.shadowMapResolution) : 0.0f;
     viewState.paramsBuffer->Upload(&params, sizeof(params));
 
-    const rg::TextureHandle outputHandle = builder.ImportTexture(
-        outputName, viewState.output->Target(), ImageLayout::Undefined, viewState.output->SamplerObjectHandle());
+    const rg::TextureHandle output = builder.ImportTexture(inputs.outputName, viewState.output->Target(),
+        ImageLayout::Undefined, viewState.output->SamplerObjectHandle());
 
     builder.AddRenderPass(
         "Shadow.Mask.Dispatch", rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
-        [shadowMapHandle, sceneDepthHandle, outputHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
-            pass.ReadTexture(shadowMapHandle, rg::ResourceAccess::ShaderRead, /*isDepthResource=*/true);
-            pass.ReadTexture(sceneDepthHandle, rg::ResourceAccess::ShaderRead, /*isDepthResource=*/true);
-            pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
+        [shadowMap, sceneDepth, output](rg::RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadTexture(shadowMap, rg::ResourceAccess::ShaderRead, /*isDepthResource=*/true);
+            pass.ReadTexture(sceneDepth, rg::ResourceAccess::ShaderRead, /*isDepthResource=*/true);
+            pass.WriteTexture(output, rg::ResourceAccess::ComputeShaderWrite);
         },
-        [this, &viewState, shadowMapHandle, shadowMapDepthSampler, sceneDepthImageView, sceneDepthSampler,
-            outputHandle, viewExtent](rg::PassContext& ctx) {
-            const rg::PassContext::ResolvedDepthTexture shadowDepth = ctx.resolveDepthTexture(shadowMapHandle);
-            const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(outputHandle);
-
-            // Non-null here confirms ImportTexture() above supplied a real
-            // depth sampler - assert directly, never silently fall back.
+        [this, &viewState, shadowMap, sceneDepth, output, viewExtent = inputs.viewExtent](rg::PassContext& ctx) {
+            const rg::PassContext::ResolvedDepthTexture shadowDepth = ctx.resolveDepthTexture(shadowMap);
+            const rg::PassContext::ResolvedDepthTexture sceneDepthView = ctx.resolveDepthTexture(sceneDepth);
+            const rg::PassContext::ResolvedTexture dest = ctx.resolveTexture(output);
             assert(shadowDepth.view != VK_NULL_HANDLE && "shadow map resolved with no depth view.");
+            assert(sceneDepthView.view != VK_NULL_HANDLE && "scene depth resolved with no depth view.");
 
             viewState.descriptorSet.Rewrite(
                 std::vector<ComputeDescriptorWrite>{
                     ComputeDescriptorWrite::StorageBuffer(0, viewState.paramsBuffer->Native()),
-                    ComputeDescriptorWrite::CombinedImageSampler(1, shadowDepth.view, Native(shadowMapDepthSampler)),
-                    ComputeDescriptorWrite::CombinedImageSampler(2, Native(sceneDepthImageView), Native(sceneDepthSampler)),
+                    ComputeDescriptorWrite::CombinedImageSampler(1, shadowDepth.view, shadowDepth.sampler),
+                    ComputeDescriptorWrite::CombinedImageSampler(2, sceneDepthView.view, sceneDepthView.sampler),
                     ComputeDescriptorWrite::StorageImage(3, dest.view),
                 });
 
@@ -123,7 +112,7 @@ rg::TextureHandle ShadowMaskRenderer::AddMaskPass(rg::RenderGraphBuilder& builde
         },
         rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterOpaques);
 
-    return outputHandle;
+    return output;
 }
 
 } // namespace gte

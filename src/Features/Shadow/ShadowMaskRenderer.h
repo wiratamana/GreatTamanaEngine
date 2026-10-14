@@ -17,17 +17,25 @@ namespace gte {
 
 class Renderer;
 
+// Per-view inputs for the shadow mask pass.
+struct ShadowMaskInputs {
+    // Stable, static-storage-duration string: debug name, import name and this view's key into m_viewStates.
+    const char* outputName = nullptr;
+    Extent2D viewExtent;
+    Mat4 invViewProjection;
+    Mat4 lightViewProjection;
+    float depthBias = 0.0f;
+    std::uint32_t shadowMapResolution = 0;
+};
+
 // Reconstructs world position from view depth + the shadow map, writes a
 // single-channel (r8) shadow mask. A plain compute dispatch wrapper.
 class ShadowMaskRenderer {
 public:
-    // `outputName` must be a stable, static-storage-duration string (debug
-    // name, import name, and this view's own key into m_viewStates below).
-    // Returns an invalid handle if `shadowMapHandle` is invalid.
-    rg::TextureHandle AddMaskPass(rg::RenderGraphBuilder& builder, Renderer& renderer, const char* outputName,
-        Extent2D viewExtent, const Mat4& invViewProjection, const Mat4& lightViewProjection, float depthBias,
-        std::uint32_t shadowMapResolution, rg::TextureHandle shadowMapHandle, SamplerHandle shadowMapDepthSampler,
-        rg::TextureHandle sceneDepthHandle, ImageViewHandle sceneDepthImageView, SamplerHandle sceneDepthSampler);
+    // Both depth textures are resolved (view + sampler) from the render graph inside the pass.
+    // Returns an invalid handle if `shadowMap` is invalid.
+    rg::TextureHandle AddMaskPass(rg::RenderGraphBuilder& builder, Renderer& renderer, const ShadowMaskInputs& inputs,
+        rg::TextureHandle shadowMap, rg::TextureHandle sceneDepth);
 
 private:
     void EnsurePipelineBuilt(Renderer& renderer);

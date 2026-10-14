@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // Vulkan-free render-graph vocabulary: every handle/enum a Project Assembly
 // plugin callback needs to NAME, without pulling in Vulkan. RenderGraphTypes.h
@@ -51,6 +51,12 @@ struct TextureArrayHandle {
     bool IsValid() const noexcept { return index != kInvalidIndex; }
 
     friend bool operator==(const TextureArrayHandle&, const TextureArrayHandle&) noexcept = default;
+};
+
+// Which half of an imported texture a binding targets (an imported view can carry a color and a depth image).
+enum class TextureAspect : std::uint8_t {
+    Color,
+    Depth,
 };
 
 // What a pass does with a resource it reads/writes - named after the

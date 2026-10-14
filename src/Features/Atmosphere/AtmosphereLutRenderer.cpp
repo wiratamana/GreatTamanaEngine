@@ -1,4 +1,4 @@
-﻿#include "AtmosphereLutRenderer.h"
+#include "AtmosphereLutRenderer.h"
 #include "AtmosphereLutRendererImpl.h"
 
 #include "AtmosphereParameters.h"
@@ -49,17 +49,16 @@ void AtmosphereLutRenderer::DrawSkyBackground(Renderer& renderer, rg::CommandBuf
 }
 
 rg::TextureHandle AtmosphereLutRenderer::AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder,
-    Renderer& renderer, rg::TextureHandle sourceColorHandle, SamplerHandle sourceColorSampler,
-    rg::TextureHandle sourceDepthHandle, ImageViewHandle sourceDepthView, SamplerHandle sourceDepthSampler,
+    Renderer& renderer, rg::TextureHandle sourceColorHandle, rg::TextureHandle sourceDepthHandle,
     rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
     const Mat4& invViewProjection, Vec3 cameraWorldPosition, float aerialPerspectiveStrength, float maxDistanceKm,
     float depthExponent, Extent2D extent, const char* outputTextureName, rg::ViewScope viewScope,
     rg::RenderPassToggleRegistry* toggleRegistry)
 {
-    return m_impl->AddAerialPerspectiveCompositePass(builder, renderer, sourceColorHandle, sourceColorSampler,
-        sourceDepthHandle, sourceDepthView, sourceDepthSampler, aerialPerspectiveVolumeHandle,
-        aerialPerspectiveVolumeName, invViewProjection, cameraWorldPosition, aerialPerspectiveStrength, maxDistanceKm,
-        depthExponent, extent, outputTextureName, viewScope, toggleRegistry);
+    return m_impl->AddAerialPerspectiveCompositePass(builder, renderer, sourceColorHandle, sourceDepthHandle,
+        aerialPerspectiveVolumeHandle, aerialPerspectiveVolumeName, invViewProjection, cameraWorldPosition,
+        aerialPerspectiveStrength, maxDistanceKm, depthExponent, extent, outputTextureName, viewScope,
+        toggleRegistry);
 }
 
 RenderTexture* AtmosphereLutRenderer::CompositedOutput(const char* outputTextureName) noexcept

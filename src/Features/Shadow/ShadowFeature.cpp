@@ -216,20 +216,16 @@ void ShadowFeature::RegisterPasses()
                 return;
             }
 
-            RenderTexture* shadowTarget = m_core.FindRenderViewTarget(
-                rg::RenderViewId::Named(isGameView ? "Shadow.Map.GameView" : "Shadow.Map.SceneView"));
-            if (shadowTarget == nullptr) {
-                return;
-            }
-
-            const char* maskName = isGameView ? "Shadow.Mask.GameView" : "Shadow.Mask.SceneView";
             const ShadowSettings safeSettings = SanitizeShadowSettings(m_settings);
-            const rg::TextureHandle maskHandle = m_maskRenderer.AddMaskPass(builder, m_core.GetRenderer(), maskName,
-                viewData->renderTexture->Extent(), realCameraData.invViewProjection,
-                shadowMap->lightSpaceViewProjection,
-                safeSettings.depthBias, m_mapResolutionInUse, shadowMap->shadowMapHandle,
-                shadowTarget->DepthSamplerObjectHandle(), currentViewHandles.depthHandle,
-                currentViewHandles.depthImageView, currentViewHandles.depthSampler);
+            ShadowMaskInputs maskInputs;
+            maskInputs.outputName = isGameView ? "Shadow.Mask.GameView" : "Shadow.Mask.SceneView";
+            maskInputs.viewExtent = viewData->renderTexture->Extent();
+            maskInputs.invViewProjection = realCameraData.invViewProjection;
+            maskInputs.lightViewProjection = shadowMap->lightSpaceViewProjection;
+            maskInputs.depthBias = safeSettings.depthBias;
+            maskInputs.shadowMapResolution = m_mapResolutionInUse;
+            const rg::TextureHandle maskHandle = m_maskRenderer.AddMaskPass(
+                builder, m_core.GetRenderer(), maskInputs, shadowMap->shadowMapHandle, currentViewHandles.depthHandle);
             if (!maskHandle.IsValid()) {
                 return;
             }
@@ -257,9 +253,8 @@ void ShadowFeature::RegisterPasses()
 
             const ShadowSettings safeSettings = SanitizeShadowSettings(m_settings);
             m_compositeRenderer.AddCompositePass(builder, m_core.GetRenderer(), isGameView ? "Game" : "Scene",
-                privateTarget, extent, currentViewHandles.colorHandle,
-                currentViewHandles.colorSampler, mask->maskHandle, currentViewHandles.depthHandle,
-                safeSettings.strength);
+                privateTarget, extent, currentViewHandles.colorHandle, mask->maskHandle,
+                currentViewHandles.depthHandle, safeSettings.strength);
         },
         RenderFeatureBlendMode::ScreenSpaceMask);
     assert(compositeRegistered && "Shadow.Composite registration failed");

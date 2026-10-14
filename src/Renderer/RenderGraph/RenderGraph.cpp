@@ -294,6 +294,14 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
                 continue;
             }
             const PhysicalTexture& tex = physicalTextures[binding.textureHandle.index];
+            if (binding.textureAspect == TextureAspect::Depth) {
+                if (!tex.hasDepth || tex.target.depthImageView == VK_NULL_HANDLE) {
+                    continue;
+                }
+                writes.push_back(ComputeDescriptorWrite::CombinedImageSampler(
+                    binding.binding, tex.target.depthImageView, tex.depthSampler));
+                break;
+            }
             const VkSampler sampler =
                 (binding.explicitSampler != SamplerHandle::Invalid) ? Native(binding.explicitSampler) : tex.sampler;
             writes.push_back(

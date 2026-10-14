@@ -207,9 +207,8 @@ void AtmosphereFeature::RegisterPasses()
             const rg::ViewScope legacyViewScope = isGameView ? rg::ViewScope::GameView : rg::ViewScope::SceneView;
 
             const rg::TextureHandle composited = AddAtmosphereCompositePass(builder, m_core.GetRenderer(),
-                m_renderer, currentViewHandles.colorHandle, currentViewHandles.colorSampler,
-                currentViewHandles.depthHandle, currentViewHandles.depthImageView,
-                currentViewHandles.depthSampler, viewLuts->aerialPerspectiveVolumeHandle, aerialVolumeName,
+                m_renderer, currentViewHandles.colorHandle, currentViewHandles.depthHandle,
+                viewLuts->aerialPerspectiveVolumeHandle, aerialVolumeName,
                 viewLuts->frameUniforms, cameraData.eyeWorldPosition, m_settings.aerialPerspectiveStrength,
                 m_settings.aerialPerspectiveMaxDistanceKm, m_settings.aerialPerspectiveDepthExponent,
                 extent, outputTextureName, legacyViewScope, m_toggleRegistry);

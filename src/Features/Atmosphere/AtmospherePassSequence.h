@@ -87,13 +87,10 @@ std::function<void(rg::CommandBuffer&)> MakeRecordSkyBackgroundCallback(Atmosphe
 // declared in the SAME builder call. `sourceColorHandle` is read for color;
 // `sourceDepthHandle` is read for depth only - a separate handle, since the
 // two may come from physically different imported resources.
-// `sourceColorSampler`/`sourceDepthView`/`sourceDepthSampler` are the
-// caller-resolved opaque handles actually bound to the shader. The caller
-// must add the returned TextureHandle to this call's own outputs root set.
+// The caller must add the returned TextureHandle to this call's own outputs root set.
 rg::TextureHandle AddAtmosphereCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
     AtmosphereLutRenderer& atmosphereLutRenderer, rg::TextureHandle sourceColorHandle,
-    SamplerHandle sourceColorSampler, rg::TextureHandle sourceDepthHandle, ImageViewHandle sourceDepthView,
-    SamplerHandle sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
+    rg::TextureHandle sourceDepthHandle, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
     const char* aerialPerspectiveVolumeName, const AtmosphereFrameUniforms& frameUniforms,
     Vec3 eyeWorldPosition, float aerialPerspectiveStrength, float maxDistanceKm, float depthExponent,
     Extent2D extent, const char* outputTextureName, rg::ViewScope viewScope,

@@ -1,29 +1,21 @@
 #pragma once
 
 #include "../../Renderer/RenderGraph/RenderGraphHandles.h"
-#include "../GraphicsHandles.h"
 
 #include <functional>
 
 namespace gte {
 
-// Everything a PostOpaque/PostTransparent callback needs to sample the
-// current view's own already-rendered color/depth, for exactly the view it
-// was invoked for. colorHandle/depthHandle carry the same underlying value
-// in this engine today (color and depth are two sub-resources of one
-// imported texture) - kept as two separate, named fields so a callback's
-// own body can say which sub-resource a given pass.ReadTexture() call is
-// declaring a dependency against.
+// The current view's own already-rendered color/depth, for exactly the view the callback was invoked for.
+// colorHandle/depthHandle carry the same underlying value today (color and depth are two aspects of one
+// imported texture) - they are separate fields so a callback names which aspect each call declares.
+// To sample one in a compute pass: pass.ReadTexture(handle, ...) then
+// pass.BindCombinedImageSampler(binding, handle, rg::TextureAspect::Color/Depth).
 //
-// VALID FOR EXACTLY ONE CALLBACK INVOCATION. Never store a copy of this
-// value, or any of its handle fields, past the single invocation it was
-// handed in.
+// VALID FOR EXACTLY ONE CALLBACK INVOCATION. Never store a copy past the single invocation it was handed in.
 struct ScenePassReadHandles {
     rg::TextureHandle colorHandle;
     rg::TextureHandle depthHandle;
-    SamplerHandle colorSampler = SamplerHandle::Invalid;
-    ImageViewHandle depthImageView = ImageViewHandle::Invalid;
-    SamplerHandle depthSampler = SamplerHandle::Invalid;
 };
 
 // Shared callback type for both the PostOpaque and PostTransparent stages -

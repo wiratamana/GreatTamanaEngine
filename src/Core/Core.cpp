@@ -1,4 +1,4 @@
-#include "Core.h"
+﻿#include "Core.h"
 
 // Access to editor layer implementation.
 #include "../Editor/EditorLayer.h"
@@ -121,39 +121,20 @@ GpuDrivenBatchNamePool& BatchNamePool()
     return pool;
 }
 
-// Cached view handles to prevent recreating handles every frame.
-struct ScenePassHandleCache {
-    CachedSamplerHandle colorSampler;
-    CachedImageViewHandle depthImageView;
-    CachedSamplerHandle depthSampler;
-};
-
-// Map of handle caches keyed by view ID hash.
-std::unordered_map<std::uint64_t, ScenePassHandleCache>& ScenePassHandleCaches()
-{
-    static std::unordered_map<std::uint64_t, ScenePassHandleCache> caches;
-    return caches;
-}
-
 // Resolves color and depth texture handles for post-opaque and post-transparent passes.
+// Returns nullopt when the view has no sampleable depth.
 std::optional<ScenePassReadHandles> ResolveScenePassReadHandles(
-    const rg::RenderGraphBuilder& builder, const RenderPassViewData* viewData, rg::RenderViewId view)
+    const rg::RenderGraphBuilder& builder, const RenderPassViewData* viewData)
 {
     if (viewData == nullptr || viewData->renderTexture == nullptr) {
         return std::nullopt;
     }
-    const rg::RenderGraphBuilder::ImportedTextureSamplers resolved =
-        builder.ResolveImportedTextureSamplers(viewData->colorTarget);
-    if (resolved.depthSampler == VK_NULL_HANDLE) {
+    if (builder.ResolveImportedTextureSamplers(viewData->colorTarget).depthSampler == VK_NULL_HANDLE) {
         return std::nullopt;
     }
-    ScenePassHandleCache& cache = ScenePassHandleCaches()[view.Hash()];
     ScenePassReadHandles handles;
     handles.colorHandle = viewData->colorTarget;
     handles.depthHandle = viewData->colorTarget;
-    handles.colorSampler = cache.colorSampler.Resolve(resolved.colorSampler);
-    handles.depthImageView = cache.depthImageView.Resolve(resolved.depthImageView);
-    handles.depthSampler = cache.depthSampler.Resolve(resolved.depthSampler);
     return handles;
 }
 
@@ -952,7 +933,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             }
             const RenderPassViewData* viewData = FindViewData(frame.currentView);
             const std::optional<ScenePassReadHandles> handles =
-                ResolveScenePassReadHandles(frame.builder, viewData, frame.currentView);
+                ResolveScenePassReadHandles(frame.builder, viewData);
             if (!handles.has_value()) {
                 return;
             }
@@ -996,7 +977,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             }
             const RenderPassViewData* viewData = FindViewData(frame.currentView);
             const std::optional<ScenePassReadHandles> handles =
-                ResolveScenePassReadHandles(frame.builder, viewData, frame.currentView);
+                ResolveScenePassReadHandles(frame.builder, viewData);
             if (!handles.has_value()) {
                 return;
             }

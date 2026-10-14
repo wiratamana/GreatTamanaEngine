@@ -552,9 +552,8 @@ enum class BindingKind : std::uint8_t {
     CombinedVolumeImageSampler,
     StorageImage,
     // A combined-image-sampler binding against an already-resolved,
-    // NOT-graph-tracked ImageViewHandle/SamplerHandle pair - the sibling of
-    // BufferObjectHandle for images (e.g. a per-view depth target handed
-    // down through ScenePassReadHandles, never itself a graph resource).
+    // NOT-graph-tracked ImageViewHandle/SamplerHandle pair - the image sibling
+    // of BufferObjectHandle (for an image that is never itself a graph resource).
     CombinedImageViewSampler,
 };
 
@@ -565,6 +564,8 @@ struct PendingBinding {
     std::uint32_t binding = 0;
     BindingKind kind = BindingKind::StorageBuffer;
     TextureHandle textureHandle;
+    // CombinedImageSampler only: Depth binds the texture's depth image view + depth sampler.
+    TextureAspect textureAspect = TextureAspect::Color;
     VolumeTextureHandle volumeTextureHandle;
     BufferHandle bufferHandle;
     BufferObjectHandle bufferObjectHandle = BufferObjectHandle::Invalid;

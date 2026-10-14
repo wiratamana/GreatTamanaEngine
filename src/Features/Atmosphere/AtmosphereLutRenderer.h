@@ -91,13 +91,10 @@ public:
         const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure);
 
     // Declares this frame's Aerial Perspective Composite pass for ONE view.
-    // `sourceColorHandle`/`sourceDepthHandle` are read as color/depth
-    // inputs; `sourceColorSampler`/`sourceDepthView`/`sourceDepthSampler`
-    // are the caller-resolved opaque handles actually bound to the shader.
+    // `sourceColorHandle`/`sourceDepthHandle` are read (and bound) as the color/depth inputs.
     // Writes a persistent output RenderTexture under `outputTextureName`.
     rg::TextureHandle AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-        rg::TextureHandle sourceColorHandle, SamplerHandle sourceColorSampler,
-        rg::TextureHandle sourceDepthHandle, ImageViewHandle sourceDepthView, SamplerHandle sourceDepthSampler,
+        rg::TextureHandle sourceColorHandle, rg::TextureHandle sourceDepthHandle,
         rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
         const Mat4& invViewProjection, Vec3 cameraWorldPosition, float aerialPerspectiveStrength,
         float maxDistanceKm, float depthExponent, Extent2D extent, const char* outputTextureName,

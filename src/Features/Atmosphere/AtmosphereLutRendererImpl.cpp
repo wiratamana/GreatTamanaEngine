@@ -414,8 +414,7 @@ AtmosphereLutRenderer::Impl::EnsureAerialPerspectiveCompositeViewInitialized(
 }
 
 rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder,
-    Renderer& renderer, rg::TextureHandle sourceColorHandle, SamplerHandle sourceColorSampler,
-    rg::TextureHandle sourceDepthHandle, ImageViewHandle sourceDepthView, SamplerHandle sourceDepthSampler,
+    Renderer& renderer, rg::TextureHandle sourceColorHandle, rg::TextureHandle sourceDepthHandle,
     rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
     const Mat4& invViewProjection, Vec3 cameraWorldPosition, float aerialPerspectiveStrength, float maxDistanceKm,
     float depthExponent, Extent2D extent, const char* outputTextureName, rg::ViewScope viewScope,
@@ -465,7 +464,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass
 
     builder.AddRenderPass(
         "AtmosphereAerialPerspectiveCompositePass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::General,
-        [sourceColorHandle, sourceColorSampler, sourceDepthHandle, sourceDepthView, sourceDepthSampler,
+        [sourceColorHandle, sourceDepthHandle,
             aerialPerspectiveVolumeHandle, aerialVolumeSamplerHandle, outputHandle,
             bindingLayout](rg::RenderGraphBuilder::PassBuilder& pass) {
             pass.ReadTexture(sourceColorHandle, rg::ResourceAccess::ShaderRead);
@@ -474,8 +473,8 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddAerialPerspectiveCompositePass
             pass.WriteTexture(outputHandle, rg::ResourceAccess::ComputeShaderWrite);
 
             pass.BindDescriptorSetLayout(bindingLayout);
-            pass.BindCombinedImageSampler(0, sourceColorHandle, sourceColorSampler);
-            pass.BindCombinedImageSampler(1, sourceDepthView, sourceDepthSampler);
+            pass.BindCombinedImageSampler(0, sourceColorHandle, rg::TextureAspect::Color);
+            pass.BindCombinedImageSampler(1, sourceDepthHandle, rg::TextureAspect::Depth);
             pass.BindCombinedImageSampler(2, aerialPerspectiveVolumeHandle, aerialVolumeSamplerHandle);
             pass.BindStorageImage(3, outputHandle);
         },

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // Declarative builder API to record frame render passes and resources.
 
@@ -161,6 +161,9 @@ public:
         // If sampler is Invalid, uses the texture's own sampler.
         void BindCombinedImageSampler(
             std::uint32_t binding, TextureHandle handle, SamplerHandle sampler = SamplerHandle::Invalid);
+
+        // Binds one aspect (color or depth) of an imported texture with that aspect's own sampler.
+        void BindCombinedImageSampler(std::uint32_t binding, TextureHandle handle, TextureAspect aspect);
 
         // Sampler is required for volume textures.
         void BindCombinedImageSampler(std::uint32_t binding, VolumeTextureHandle handle, SamplerHandle sampler);

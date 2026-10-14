@@ -49,17 +49,6 @@ struct RenderFeatureCompositor::Impl {
         std::optional<RenderTexture> texture;
     };
 
-    // Cached per-(feature, view) sampler/image-view handle trio handed to a
-    // project feature's ScenePassReadHandles - see GraphicsHandleRegistry.h's
-    // CachedSamplerHandle/CachedImageViewHandle doc comments. Keeps the
-    // opaque handle registries flat across frames instead of minting a
-    // fresh, never-freed handle every single frame, per feature, per view.
-    struct ScenePassHandleCache {
-        CachedSamplerHandle colorSampler;
-        CachedImageViewHandle depthImageView;
-        CachedSamplerHandle depthSampler;
-    };
-
     std::vector<Entry> postComposite; // sorted by priority ascending
     std::vector<Entry> preUi;         // sorted by priority ascending
     std::vector<PreOpaqueEntry> preOpaque;             // sorted by priority ascending
@@ -120,7 +109,6 @@ struct RenderFeatureCompositor::Impl {
 
     std::unordered_map<std::string, PrivateTargetState> privateTargetStates;
     std::unordered_map<std::string, BlendStageState> blendStageStates;
-    std::unordered_map<std::string, ScenePassHandleCache> scenePassHandleCaches;
 };
 
 } // namespace gte

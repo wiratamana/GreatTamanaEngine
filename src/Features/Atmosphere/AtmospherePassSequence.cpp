@@ -66,17 +66,16 @@ std::function<void(rg::CommandBuffer&)> MakeRecordSkyBackgroundCallback(Atmosphe
 
 rg::TextureHandle AddAtmosphereCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
     AtmosphereLutRenderer& atmosphereLutRenderer, rg::TextureHandle sourceColorHandle,
-    SamplerHandle sourceColorSampler, rg::TextureHandle sourceDepthHandle, ImageViewHandle sourceDepthView,
-    SamplerHandle sourceDepthSampler, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
+    rg::TextureHandle sourceDepthHandle, rg::VolumeTextureHandle aerialPerspectiveVolumeHandle,
     const char* aerialPerspectiveVolumeName, const AtmosphereFrameUniforms& frameUniforms,
     Vec3 eyeWorldPosition, float aerialPerspectiveStrength, float maxDistanceKm, float depthExponent,
     Extent2D extent, const char* outputTextureName, rg::ViewScope viewScope,
     rg::RenderPassToggleRegistry* toggleRegistry)
 {
     return atmosphereLutRenderer.AddAerialPerspectiveCompositePass(builder, renderer, sourceColorHandle,
-        sourceColorSampler, sourceDepthHandle, sourceDepthView, sourceDepthSampler, aerialPerspectiveVolumeHandle,
-        aerialPerspectiveVolumeName, frameUniforms.invViewProjection, eyeWorldPosition, aerialPerspectiveStrength,
-        maxDistanceKm, depthExponent, extent, outputTextureName, viewScope, toggleRegistry);
+        sourceDepthHandle, aerialPerspectiveVolumeHandle, aerialPerspectiveVolumeName, frameUniforms.invViewProjection,
+        eyeWorldPosition, aerialPerspectiveStrength, maxDistanceKm, depthExponent, extent, outputTextureName,
+        viewScope, toggleRegistry);
 }
 
 } // namespace gte

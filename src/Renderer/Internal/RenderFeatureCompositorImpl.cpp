@@ -855,16 +855,13 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
             const rg::RenderFeatureScope scope(frame.builder, featureName);
             const std::optional<RenderPassViewData> viewDataOpt = core.FindRenderPassViewData(frame.currentView);
             const RenderPassViewData* viewData = viewDataOpt.has_value() ? &(*viewDataOpt) : nullptr;
-            ScenePassHandleCache& handleCache = scenePassHandleCaches[privateName];
             ScenePassReadHandles handles;
             handles.colorHandle = currentInput;
-            handles.colorSampler = handleCache.colorSampler.Resolve(currentInputSampler);
+            bool viewHasSampleableDepth = false;
             if (viewData != nullptr) {
-                const rg::RenderGraphBuilder::ImportedTextureSamplers viewResolved =
-                    frame.builder.ResolveImportedTextureSamplers(viewData->colorTarget);
                 handles.depthHandle = viewData->colorTarget;
-                handles.depthImageView = handleCache.depthImageView.Resolve(viewResolved.depthImageView);
-                handles.depthSampler = handleCache.depthSampler.Resolve(viewResolved.depthSampler);
+                viewHasSampleableDepth =
+                    frame.builder.ResolveImportedTextureSamplers(viewData->colorTarget).depthSampler != VK_NULL_HANDLE;
             }
 
             const RenderFeatureCameraData cameraData = ResolveRenderFeatureCameraData(frame.currentView, viewData);
@@ -874,8 +871,7 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
                 FromVkExtent2D(extent), handles, cameraData);
             const std::size_t after = frame.builder.DeclaredPassCount();
 
-            const VkSampler rawDepthSampler = Native(handles.depthSampler);
-            if (rawDepthSampler != VK_NULL_HANDLE
+            if (viewHasSampleableDepth
                 && FindMissingDeclaredDepthReadForResolve(frame.builder, before, after, handles.depthHandle)) {
                 GTE_LOG_WARNING("RenderFeatureCompositor",
                     "Render feature '" + featureName + "' declared at least one pass but never declared a "

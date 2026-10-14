@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // Internal state and pipeline definitions for AtmosphereLutRenderer.
 
@@ -111,8 +111,7 @@ struct AtmosphereLutRenderer::Impl {
         const Mat4& viewProjection, const AtmosphereParametersGpu& params,
         const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure);
     rg::TextureHandle AddAerialPerspectiveCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-        rg::TextureHandle sourceColorHandle, SamplerHandle sourceColorSampler, rg::TextureHandle sourceDepthHandle,
-        ImageViewHandle sourceDepthView, SamplerHandle sourceDepthSampler,
+        rg::TextureHandle sourceColorHandle, rg::TextureHandle sourceDepthHandle,
         rg::VolumeTextureHandle aerialPerspectiveVolumeHandle, const char* aerialPerspectiveVolumeName,
         const Mat4& invViewProjection, Vec3 cameraWorldPosition, float aerialPerspectiveStrength, float maxDistanceKm,
         float depthExponent, Extent2D extent, const char* outputTextureName, rg::ViewScope viewScope,

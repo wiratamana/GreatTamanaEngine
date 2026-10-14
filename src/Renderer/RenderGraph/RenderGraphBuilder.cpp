@@ -136,6 +136,17 @@ void RenderGraphBuilder::PassBuilder::BindCombinedImageSampler(
 }
 
 void RenderGraphBuilder::PassBuilder::BindCombinedImageSampler(
+    std::uint32_t binding, TextureHandle handle, TextureAspect aspect)
+{
+    PendingBinding pending;
+    pending.binding = binding;
+    pending.kind = BindingKind::CombinedImageSampler;
+    pending.textureHandle = handle;
+    pending.textureAspect = aspect;
+    m_pass.bindings.push_back(pending);
+}
+
+void RenderGraphBuilder::PassBuilder::BindCombinedImageSampler(
     std::uint32_t binding, VolumeTextureHandle handle, SamplerHandle sampler)
 {
     assert(sampler != SamplerHandle::Invalid &&

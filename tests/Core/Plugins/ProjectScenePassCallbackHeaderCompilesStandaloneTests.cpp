@@ -7,15 +7,14 @@
 
 #include <gtest/gtest.h>
 
-// A default-constructed gte::ScenePassReadHandles carries only Invalid
-// opaque handles - the exact contract a PostOpaque/PostTransparent
-// provider must overwrite before handing it to a registered callback.
+// A default-constructed gte::ScenePassReadHandles carries only invalid
+// handles - the exact contract a PostOpaque/PostTransparent provider must
+// overwrite before handing it to a registered callback.
 TEST(ProjectScenePassCallbackHeaderCompilesStandaloneTests, DefaultConstructedReadHandlesAreNull)
 {
     gte::ScenePassReadHandles handles;
-    EXPECT_EQ(handles.colorSampler, gte::SamplerHandle::Invalid);
-    EXPECT_EQ(handles.depthImageView, gte::ImageViewHandle::Invalid);
-    EXPECT_EQ(handles.depthSampler, gte::SamplerHandle::Invalid);
+    EXPECT_FALSE(handles.colorHandle.IsValid());
+    EXPECT_FALSE(handles.depthHandle.IsValid());
 }
 
 // A lambda matching ProjectScenePassCallback's signature assigns cleanly -

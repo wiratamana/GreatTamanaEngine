@@ -36,8 +36,7 @@ public:
     // RenderFeatureCompositor's mandatory-depth-read-declaration contract.
     void AddCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer, const char* viewKey,
         rg::TextureHandle privateTarget, Extent2D extent, rg::TextureHandle sceneColorHandle,
-        SamplerHandle sceneColorSampler, rg::TextureHandle maskHandle, rg::TextureHandle sceneDepthHandle,
-        float strength);
+        rg::TextureHandle maskHandle, rg::TextureHandle sceneDepthHandle, float strength);
 
 private:
     void EnsurePipeline(Renderer& renderer);
