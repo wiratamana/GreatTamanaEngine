@@ -14,11 +14,9 @@
 // Lives under src/Editor/ (gte_editor), NOT src/Renderer/RenderGraph/
 // (gte_core) - PHASE0_MASTER_STRATEGY.md's Locked Design Decision #14:
 // this file has exactly ONE consumer, forever, RenderGraphPanel::Build()'s
-// own "Export DOT" button, mirroring src/Editor/ComputeBlurValidation.h/.cpp,
-// src/Editor/GBufferValidation.h/.cpp, and
-// src/Editor/AtmosphereAerialPerspectiveSkyPurityValidation.h/.cpp's own
-// identical "Editor-only debug/export tool consuming rg::/Renderer types"
-// precedent - all three live here too, not under Renderer/RenderGraph/.
+// own "Export DOT" button, mirroring other "Editor-only debug/export tool
+// consuming rg::/Renderer types" precedent living here too, not under
+// Renderer/RenderGraph/.
 
 #include "../Renderer/RenderGraph/RenderGraphMetadata.h"
 

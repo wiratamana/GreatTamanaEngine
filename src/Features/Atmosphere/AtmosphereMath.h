@@ -126,8 +126,8 @@ float CornetteShanksMiePhaseFunction(float g, float cosTheta) noexcept;
 
 // Phase 9 (ATMOSPHERE_PHASE9_VALIDATION_DEBUG_TOOLING_AND_DOCS_v1.md, Step
 // 3.1) - the C++ port of AtmosphereCommon.glsl's own identically-named GLSL
-// function (Phase 3), added specifically so
-// src/Editor/AtmosphereTransmittanceLutValidation.cpp can decode a captured
+// function (Phase 3), added specifically so an Editor-side/diagnostic
+// caller can decode a captured
 // Transmittance LUT texel's own (u, v) grid position back into the exact
 // same (heightKm, upDot) pair AtmosphereTransmittanceLut.comp itself used
 // to generate that texel, then feed it back into

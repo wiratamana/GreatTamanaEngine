@@ -1,17 +1,13 @@
 #include "AtmospherePanel.h"
 
 #include "../../../Editor/EditorContext.h"
-#include "../AtmosphereParameters.h"
 #include "../AtmosphereTypes.h"
 
 #include <imgui.h>
 
 namespace gte {
 
-void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings, Renderer& renderer,
-    std::optional<AtmosphereTransmittanceLutValidationResult>& lastValidationResult,
-    const rg::RenderGraph& renderGraph,
-    std::optional<AtmosphereAerialPerspectiveSkyPurityResult>& lastSkyPurityResult)
+void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings)
 {
     ImGui::Begin("Atmosphere");
 
@@ -54,31 +50,6 @@ void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings, 
     ImGui::TextDisabled(
         "Sun direction/color/illuminance are controlled by a DirectionalLight ECS entity - see \"Hierarchy\" > "
         "right-click > \"Create Directional Light\", then edit its Transform/DirectionalLight in \"Inspector\".");
-
-    // GPU-vs-CPU-oracle numeric parity check.
-    if (ImGui::Button("Validate Transmittance LUT")) {
-        lastValidationResult = ValidateAtmosphereTransmittanceLut(
-            renderer, renderGraph, MakeDefaultEarthAtmosphereParameters());
-    }
-    if (lastValidationResult.has_value()) {
-        const AtmosphereTransmittanceLutValidationResult& r = *lastValidationResult;
-        const bool passed = r.succeeded && r.texelsExceedingEpsilon == 0;
-        ImGui::TextColored(passed ? ImVec4(0.3f, 1.0f, 0.3f, 1.0f) : ImVec4(1.0f, 0.4f, 0.3f, 1.0f), "%s",
-            !r.succeeded ? "ERROR" : (passed ? "PASS" : "CHECK"));
-        ImGui::TextWrapped("%s", ToDiagnosticString(r).c_str());
-    }
-
-    // Regression guard: sky pixels must stay unaffected by this pass.
-    if (ImGui::Button("Validate Aerial Perspective Sky Purity")) {
-        lastSkyPurityResult = ValidateAerialPerspectiveSkyPurity(renderer, renderGraph, "GameView", "GameViewComposited");
-    }
-    if (lastSkyPurityResult.has_value()) {
-        const AtmosphereAerialPerspectiveSkyPurityResult& r = *lastSkyPurityResult;
-        const bool passed = r.Passed();
-        ImGui::TextColored(passed ? ImVec4(0.3f, 1.0f, 0.3f, 1.0f) : ImVec4(1.0f, 0.4f, 0.3f, 1.0f), "%s",
-            !r.succeeded ? "ERROR" : (passed ? "PASS" : "FAIL"));
-        ImGui::TextWrapped("%s", ToDiagnosticString(r).c_str());
-    }
 
     ImGui::End();
 }

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // The single home for every atmosphere LUT compute pass (Transmittance/
 // Multi-Scattering/Sky-View/Aerial-Perspective) plus the Sky Background
@@ -46,8 +46,7 @@ public:
     // writes a persistent 256x256 output owned by the render graph's
     // persistent texture cache, registered under the exact literal name
     // "AtmosphereTransmittanceLut" (read back by name via
-    // RenderGraph::DebugTextureSnapshotFor(), e.g. by
-    // AtmosphereTransmittanceLutValidation.cpp). The caller must add the
+    // RenderGraph::DebugTextureSnapshotFor()). The caller must add the
     // returned handle to this call's own outputs root set, or the write is
     // silently culled.
     rg::TextureHandle AddTransmittanceLutPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
