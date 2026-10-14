@@ -25,7 +25,7 @@ TEST(EntityInstantiatorTest, SingleNodeWithMeshCreatesTransformAndMeshRenderer)
     EntityBlueprint blueprint;
     blueprint.mesh = MeshHandle{ 1, 1 };
     blueprint.pipeline = PipelineHandle{ 2, 1 };
-    blueprint.texture = TextureHandle{ 3, 1 };
+    blueprint.texture = MaterialTextureHandle{ 3, 1 };
 
     const Entity entity = Instantiate(registry, blueprint);
 

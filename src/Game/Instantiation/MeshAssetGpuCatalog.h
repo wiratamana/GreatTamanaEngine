@@ -23,10 +23,10 @@ class RenderSystem;
 // forwarding query for AnimationSystem's per-frame re-upload need the shape.
 struct MeshAssetPart {
     MeshHandle mesh;
-    // kInvalidTextureHandle means "untextured - draw via the untextured
+    // kInvalidMaterialTextureHandle means "untextured - draw via the untextured
     // Mesh.vert/.frag pipeline"; otherwise draw via the textured
     // TexturedMesh.vert/.frag pipeline with this texture bound.
-    TextureHandle texture;
+    MaterialTextureHandle texture;
     // The originating PMX material's own name (Material::name - see
     // MaterialData.h), or empty when this part has no single originating
     // material with a usable name (the combined untextured submesh, which

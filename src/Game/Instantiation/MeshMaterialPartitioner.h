@@ -14,7 +14,7 @@ namespace gte {
 // below). Pure output of PartitionMeshMaterials() below - deciding whether
 // a given slice ends up in the "untextured merged" bucket or its own
 // "textured" bucket is left entirely to the CALLER (that decision needs a
-// resolved TextureHandle, which requires Renderer+AssetDatabase - genuinely
+// resolved MaterialTextureHandle, which requires Renderer+AssetDatabase - genuinely
 // impure), so this type stays free of any GPU/asset-resolution concept.
 struct MeshMaterialSlice {
     std::size_t start = 0;

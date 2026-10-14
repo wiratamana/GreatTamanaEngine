@@ -2,7 +2,7 @@
 
 #include "Renderer/MeshHandle.h"
 #include "Renderer/PipelineHandle.h"
-#include "Renderer/TextureHandle.h"
+#include "Renderer/MaterialTextureHandle.h"
 
 namespace gte {
 
@@ -24,7 +24,7 @@ struct MeshRenderer {
     PipelineHandle pipeline;
 
     // OPTIONAL per-submesh diffuse texture (see Renderer/MaterialTexture.h)
-    // - kInvalidTextureHandle (the default) means "no texture", exactly
+    // - kInvalidMaterialTextureHandle (the default) means "no texture", exactly
     // what every pre-existing MeshRenderer{ mesh, pipeline } call site
     // (primitives, the demo scene, a materialless imported mesh) still
     // produces unchanged. Set only for a per-material submesh entity a
@@ -33,7 +33,7 @@ struct MeshRenderer {
     // with VertexLayout::PositionNormalUv/useMaterialTexture (see
     // Pipeline.h) for this to actually get sampled; RenderSystem::Draw()
     // resolves it into the VkDescriptorSet Renderer::Submit() binds.
-    TextureHandle texture;
+    MaterialTextureHandle texture;
 };
 
 } // namespace gte

@@ -22,11 +22,11 @@ std::filesystem::path Utf8PathFromGamePath(const std::string& utf8)
 
 } // namespace
 
-TextureHandle MaterialTextureGpuCache::Resolve(
+MaterialTextureHandle MaterialTextureGpuCache::Resolve(
     RenderSystem& renderSystem, Renderer& renderer, const AssetDatabase& database, const Guid& textureGuid)
 {
     if (!textureGuid.IsValid()) {
-        return kInvalidTextureHandle;
+        return kInvalidMaterialTextureHandle;
     }
 
     if (const auto found = m_cache.find(textureGuid); found != m_cache.end()) {
@@ -35,17 +35,17 @@ TextureHandle MaterialTextureGpuCache::Resolve(
 
     const AssetRecord* record = database.FindByGuid(textureGuid);
     if (record == nullptr || record->type != AssetType::Texture) {
-        return kInvalidTextureHandle;
+        return kInvalidMaterialTextureHandle;
     }
 
     const std::optional<GtaFileData> gta = ReadGtaFile(Utf8PathFromGamePath(record->gtaPath));
     if (!gta.has_value()) {
-        return kInvalidTextureHandle;
+        return kInvalidMaterialTextureHandle;
     }
 
     const std::optional<Ktx2DecodeResult> decoded = DecodeKtx2ToRgba8(gta->payload);
     if (!decoded.has_value()) {
-        return kInvalidTextureHandle;
+        return kInvalidMaterialTextureHandle;
     }
 
     // A genuinely per-instance debug name (derived from this texture
@@ -58,7 +58,7 @@ TextureHandle MaterialTextureGpuCache::Resolve(
     // separation-1 campaign, PHASE4; formerly Renderer::GetMemoryDebugName()),
     // which the old shared literal string could never do.
     const std::string debugName = "MaterialTexture " + textureGuid.ToString();
-    const TextureHandle handle = renderSystem.RegisterTexture(renderer.CreateMaterialTexture2D(
+    const MaterialTextureHandle handle = renderSystem.RegisterTexture(renderer.CreateMaterialTexture2D(
         decoded->rgba8Pixels.data(), static_cast<int>(decoded->width), static_cast<int>(decoded->height),
         debugName.c_str()));
     m_cache.emplace(textureGuid, handle);

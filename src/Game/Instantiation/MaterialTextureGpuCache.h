@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../Assets/AssetTypes.h"
-#include "../../Renderer/TextureHandle.h"
+#include "../../Renderer/MaterialTextureHandle.h"
 
 #include <unordered_map>
 
@@ -29,15 +29,15 @@ public:
     // decodes its KTX2 payload via Ktx2Decoder.h's DecodeKtx2ToRgba8() - the
     // exact same asset-by-Guid resolution path the Editor's own Inspector
     // preview (AssetPreviewTexture) uses for a *.gta Texture asset. Returns
-    // kInvalidTextureHandle (never throws) if `textureGuid` is
+    // kInvalidMaterialTextureHandle (never throws) if `textureGuid` is
     // Guid::Invalid(), isn't currently tracked by `database`, or fails to
     // decode (missing/corrupt/moved *.gta) - deliberately NOT cached as a
     // failure, so a texture that shows up later (or is fixed) can succeed
     // on a subsequent spawn without restarting the process.
-    TextureHandle Resolve(RenderSystem& renderSystem, Renderer& renderer, const AssetDatabase& database, const Guid& textureGuid);
+    MaterialTextureHandle Resolve(RenderSystem& renderSystem, Renderer& renderer, const AssetDatabase& database, const Guid& textureGuid);
 
 private:
-    std::unordered_map<Guid, TextureHandle> m_cache;
+    std::unordered_map<Guid, MaterialTextureHandle> m_cache;
 };
 
 } // namespace gte

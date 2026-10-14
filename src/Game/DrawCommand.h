@@ -4,12 +4,12 @@
 #include "../Math/Mat4.h"
 #include "../Renderer/MeshHandle.h"
 #include "../Renderer/PipelineHandle.h"
-#include "../Renderer/TextureHandle.h"
+#include "../Renderer/MaterialTextureHandle.h"
 
 namespace gte {
 
 // One queued draw call's worth of PLAIN data, extracted from the ECS world -
-// a MeshHandle/PipelineHandle/TextureHandle triple (never a Mesh&/Pipeline*/
+// a MeshHandle/PipelineHandle/MaterialTextureHandle triple (never a Mesh&/Pipeline*/
 // MaterialTexture* - see ECS/Components/MeshRenderer.h) plus the world
 // matrix to draw it with. Carries no live Renderer/Vulkan state at all,
 // which is what keeps RenderSystem::CollectRenderables() callable with
@@ -37,7 +37,7 @@ struct DrawCommand {
                     // anonymous mesh/pipeline/texture triple.
     MeshHandle mesh;
     PipelineHandle pipeline;
-    TextureHandle texture; // kInvalidTextureHandle (the default) means "no material texture" - see MeshRenderer::texture.
+    MaterialTextureHandle texture; // kInvalidMaterialTextureHandle (the default) means "no material texture" - see MeshRenderer::texture.
     Mat4 model = Mat4::Identity(); // Mat4's own default ctor is all-zero, NOT identity - see Math/Mat4.h.
 };
 

@@ -15,7 +15,7 @@
 #include "Renderer/Pipeline.h"
 #include "Renderer/PipelineHandle.h"
 #include "Renderer/ResourcePool.h"
-#include "Renderer/TextureHandle.h"
+#include "Renderer/MaterialTextureHandle.h"
 // RenderSystem.h now #includes SceneQuery.h, for PipelineOverrideSet's full
 // definition - a std::optional<PipelineOverrideSet> function parameter below
 // needs a complete type. SceneQuery.h only forward-declares RenderSystem (no
@@ -88,7 +88,7 @@ struct GpuDrivenBatchFrameEntry {
 // Renderer::CreateMesh()/CreatePipeline()/CreateMaterialTexture2D() - still
 // returned BY VALUE exactly as before (Renderer's own factory API is
 // unaffected in shape) - addressed by the MeshHandle/PipelineHandle/
-// TextureHandle a MeshRenderer component can safely hold instead of ever
+// MaterialTextureHandle a MeshRenderer component can safely hold instead of ever
 // embedding one of these directly.
 class RenderSystem {
 public:
@@ -100,7 +100,7 @@ public:
     // component should store.
     MeshHandle RegisterMesh(Mesh&& mesh) { return m_meshes.Insert(std::move(mesh)); }
     PipelineHandle RegisterPipeline(Pipeline&& pipeline) { return m_pipelines.Insert(std::move(pipeline)); }
-    TextureHandle RegisterTexture(MaterialTexture&& texture) { return m_textures.Insert(std::move(texture)); }
+    MaterialTextureHandle RegisterTexture(MaterialTexture&& texture) { return m_textures.Insert(std::move(texture)); }
 
     // Frees a previously-registered Pipeline's slot. Only safe to call for a
     // handle guaranteed to be unreferenced by any entity's MeshRenderer -
@@ -191,7 +191,7 @@ public:
     // mesh) is silently skipped rather than asserting - draws are
     // inherently best-effort against whatever is currently loaded. A
     // DrawCommand whose texture handle doesn't resolve (either
-    // kInvalidTextureHandle - the normal untextured case - or a stale
+    // kInvalidMaterialTextureHandle - the normal untextured case - or a stale
     // handle) simply draws with no material texture bound (VK_NULL_HANDLE -
     // see Renderer::Submit()'s own `materialDescriptorSet` parameter).
     //
@@ -359,7 +359,7 @@ public:
 private:
     ResourcePool<Mesh, MeshHandle> m_meshes;
     ResourcePool<Pipeline, PipelineHandle> m_pipelines;
-    ResourcePool<MaterialTexture, TextureHandle> m_textures;
+    ResourcePool<MaterialTexture, MaterialTextureHandle> m_textures;
 
     // Draw()'s pipelineOverrideSet warn-once state. Single-threaded only -
     // Draw() has no concurrent call sites today. Never cleared: growth is

@@ -1,4 +1,4 @@
-﻿#include "MeshAssetGpuCatalog.h"
+#include "MeshAssetGpuCatalog.h"
 
 #include "../../Assets/AssetDatabase.h"
 #include "../../Assets/AssetTypes.h"
@@ -136,13 +136,13 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
     struct TexturedSlice {
         std::size_t start = 0;
         std::size_t count = 0;
-        TextureHandle texture;
+        MaterialTextureHandle texture;
         std::string name;
     };
     std::vector<TexturedSlice> texturedSlices;
 
     for (const MeshMaterialSlice& slice : slices) {
-        TextureHandle texture = kInvalidTextureHandle;
+        MaterialTextureHandle texture = kInvalidMaterialTextureHandle;
         if (slice.materialIndex >= 0 && static_cast<std::size_t>(slice.materialIndex) < materials.materials.size()) {
             const Material& material = materials.materials[static_cast<std::size_t>(slice.materialIndex)];
             if (material.textureIndex >= 0 && static_cast<std::size_t>(material.textureIndex) < materials.textures.size()) {
@@ -190,7 +190,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
         // Mesh, so there is no reason to keep a second, redundant CPU-side
         // copy of its index data alive for the rest of this cache entry's
         // lifetime.
-        MeshAssetPart part{ handle, kInvalidTextureHandle, std::string() };
+        MeshAssetPart part{ handle, kInvalidMaterialTextureHandle, std::string() };
         if (skinned) {
             part.indices = untexturedIndices;
         }

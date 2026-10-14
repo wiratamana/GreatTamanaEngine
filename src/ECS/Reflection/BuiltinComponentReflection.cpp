@@ -93,7 +93,7 @@ void RegisterBuiltinComponentReflections()
     //   Phase 3/4 implement the actual save/load logic for this.
     //
     //   MeshRenderer (mesh: MeshHandle, pipeline: PipelineHandle, texture:
-    //   TextureHandle) - every field is a live, session-local, opaque
+    //   MaterialTextureHandle) - every field is a live, session-local, opaque
     //   GPU-resource-pool index (Renderer/ResourcePool.h) - serializing one
     //   and reading it back in a LATER session would silently reference
     //   whatever unrelated resource happens to occupy that pool slot THIS

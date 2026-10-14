@@ -4,7 +4,7 @@
 #include "../../Renderer/MeshHandle.h"
 #include "../../Renderer/PipelineHandle.h"
 #include "../../Renderer/Primitives/PrimitiveMeshGenerator.h"
-#include "../../Renderer/TextureHandle.h"
+#include "../../Renderer/MaterialTextureHandle.h"
 
 #include <optional>
 #include <string>
@@ -38,8 +38,8 @@ struct EntityBlueprintNode {
     // entity, which only exists to parent its real parts together).
     MeshHandle mesh;
     PipelineHandle pipeline;
-    // kInvalidTextureHandle (the default) means "untextured".
-    TextureHandle texture;
+    // kInvalidMaterialTextureHandle (the default) means "untextured".
+    MaterialTextureHandle texture;
 
     // Local position/rotation/scale override for the spawned entity's
     // Transform - identity (Transform{}'s own default) unless set. Only the
