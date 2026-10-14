@@ -26,13 +26,7 @@ namespace {
 constexpr rg::RenderPassId kShadowMapGameKey = "Shadow.Map.Game"_passId;
 constexpr rg::RenderPassId kShadowMapSceneKey = "Shadow.Map.Scene"_passId;
 
-// Distinct from AtmosphereViewLut's priority 0 in the same PreOpaque stage.
 constexpr std::int32_t kShadowDepthPassPriority = 10;
-
-// Never 0 (collides with AddScreenPostProcessPass()'s auto-priority
-// counter), never -1000 (AtmosphereComposite's slot). Uniqueness against
-// every other PostComposite feature is enforced by review only - verify
-// manually via the Render Graph panel before shipping.
 constexpr std::int32_t kShadowCompositePriority = -500;
 
 struct ShadowMapBlackboardEntry {
@@ -40,7 +34,7 @@ struct ShadowMapBlackboardEntry {
     Mat4 lightSpaceViewProjection;
 };
 
-// Shadow.Mask's own output, keyed per view.
+// Output of the shadow mask pass, stored per view.
 struct ShadowMaskBlackboardEntry {
     rg::TextureHandle maskHandle;
 };
@@ -52,24 +46,16 @@ ShadowFeature::ShadowFeature(Core& core)
     : m_core(core)
     , m_settings()
 {
-    // Scene Services slot 0 - durable shader-binding contract, every lit
-    // material shader hardcodes `layout(set = 1, binding = 0) uniform
-    // sampler2D sceneOcclusionMap`. isDepthResource=true - this slot's real
-    // published texture is always a depth-format shadow map, never color.
+    // Register the depth shadow map in Scene Services slot 0 for material shaders.
     m_shadowMapSlot = RegisterSceneServiceSlot(
         "ShadowMap", SceneServiceResourceKind::Image2D, /*preferredIndex=*/0, /*isDepthResource=*/true);
     RegisterPasses();
 }
 
-// Builds one depth-only Pipeline per supported vertex layout
-// (PositionColor/PositionNormal/PositionNormalUv). Not transactional across
-// repeated calls: on a build failure, rolls back only what THIS attempt
-// inserted (ResourcePool slots from earlier, already-succeeded frames are
-// untouched), then backs off for kRetryCooldownFrames before trying again,
-// giving up permanently after kMaxBuildAttempts total failures.
+// Compiles depth-only pipelines for supported vertex layouts with retry on failure.
 void ShadowFeature::EnsureDepthPipelinesBuilt(Renderer& renderer)
 {
-    constexpr std::uint32_t kRetryCooldownFrames = 120; // ~2s at 60 FPS.
+    constexpr std::uint32_t kRetryCooldownFrames = 120;
     constexpr std::uint32_t kMaxBuildAttempts = 5;
 
     if (m_depthPipelinesBuilt || m_depthPipelineGaveUp) {
@@ -78,7 +64,7 @@ void ShadowFeature::EnsureDepthPipelinesBuilt(Renderer& renderer)
 
     if (m_depthPipelineRetryCooldownFramesRemaining > 0) {
         --m_depthPipelineRetryCooldownFramesRemaining;
-        return; // Still cooling down from the last failed attempt.
+        return;
     }
 
     RenderSystem& renderSystem = m_core.GetGame().GetRenderSystem();
@@ -99,13 +85,11 @@ void ShadowFeature::EnsureDepthPipelinesBuilt(Renderer& renderer)
             "ShadowDepthPositionNormal.vert/ShadowDepth.frag (PositionNormal, depth-only)");
         build(VertexLayout::PositionNormalUv, "shaders/ShadowDepthPositionNormalUv.vert.spv",
             "ShadowDepthPositionNormalUv.vert/ShadowDepth.frag (PositionNormalUv, depth-only)");
-        // PositionNormalInstanced intentionally left unset - GPU-driven
-        // batched entities cast through the brute-force PositionNormal path.
     } catch (const std::exception& e) {
         for (const PipelineHandle handle : insertedThisAttempt) {
             renderSystem.UnregisterPipeline(handle);
         }
-        m_depthPipelines = PipelineOverrideSet{}; // Drop any half-built entries too.
+        m_depthPipelines = PipelineOverrideSet{};
         ++m_depthPipelineFailedAttempts;
 
         if (m_depthPipelineFailedAttempts >= kMaxBuildAttempts) {
@@ -121,7 +105,7 @@ void ShadowFeature::EnsureDepthPipelinesBuilt(Renderer& renderer)
             "') - rolled back this attempt's pipelines. Retrying in " + std::to_string(kRetryCooldownFrames) +
             " frames (attempt " + std::to_string(m_depthPipelineFailedAttempts) + "/" +
             std::to_string(kMaxBuildAttempts) + ").");
-        return; // m_depthPipelinesBuilt stays false - retried after cooldown, no leak accumulates meanwhile.
+        return;
     }
 
     m_depthPipelinesBuilt = true;
@@ -129,39 +113,23 @@ void ShadowFeature::EnsureDepthPipelinesBuilt(Renderer& renderer)
 
 void ShadowFeature::RegisterPasses()
 {
-    // "Shadow.DepthPass" - PreOpaque, built-in engine feature, now via the
-    // universal Core::RegisterRenderPass() front door (migration scaffold -
-    // see chat history; same conversion already done and verified working
-    // for AtmosphereFeature.cpp). FrameEvent::PreOpaque routes straight into
-    // RenderFeatureCompositor::RegisterBuiltInPreOpaqueFeature() - same real
-    // engine machinery, same safety asserts, this is purely a different call
-    // shape (reports isProjectFeature == false in DebugSnapshot()/
-    // GET /render_graph - this is the engine's own pass).
-    //
-    // privateTarget/extent/currentViewHandles/cameraData below are
-    // PostOpaque-or-later-only fields - always safe, invalid placeholders
-    // here for FrameEvent::PreOpaque (see UniversalRenderPassCallback.h).
-    // This callback never reads any of the 4, by design.
+    // PreOpaque pass: renders the scene depth from the directional light's perspective.
     const bool depthRegistered = m_core.RegisterRenderPass(FrameEvent::PreOpaque, "Shadow.DepthPass",
         kShadowDepthPassPriority,
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
             rg::TextureHandle /*privateTarget*/, Extent2D /*extent*/,
             const ScenePassReadHandles& /*currentViewHandles*/, const RenderFeatureCameraData& /*cameraData*/) {
-            // Shares one literal "Shadow" heading across all 3 of this
-            // feature's own stages (depth pass, mask, composite) - each
-            // registered under its own distinct feature name, so the
-            // generic per-registration-name scope alone would otherwise
-            // split them into 3 separate sidebar headings.
+            // Group all shadow passes under "Shadow" in debug views.
             const rg::RenderFeatureScope scope(builder, "Shadow");
             const std::optional<RenderPassViewData> viewData = m_core.FindRenderPassViewData(currentView);
             if (!viewData.has_value()) {
-                return; // No per-view data yet this frame - safe no-op.
+                return;
             }
 
             Renderer& renderer = m_core.GetRenderer();
             EnsureDepthPipelinesBuilt(renderer);
 
-            // Lock mapResolution on first use - see ShadowTypes.h. Never 0.
+            // Lock shadow map resolution on first use.
             if (!m_mapResolutionLocked) {
                 m_mapResolutionInUse = std::max<std::uint32_t>(1u, m_settings.mapResolution);
                 m_mapResolutionLocked = true;
@@ -187,11 +155,7 @@ void ShadowFeature::RegisterPasses()
 
             const ResolvedDirectionalLight sun = ResolveActiveDirectionalLight(m_core.GetRegistry());
 
-            // A fixed-size box centered on THIS VIEW's own camera eye
-            // position - not a hardcoded world point. A box fixed at the
-            // origin would produce zero shadows for any scene not authored
-            // near (0,0,0); this still does not frustum-fit (sharp shadows
-            // may alias for casters far from the camera).
+            // Build directional light view-projection matrix centered on the camera position.
             const Mat4 lightViewProj = BuildDirectionalShadowViewProjection(sun.directionTowardSun,
                 viewData->eyeWorldPosition, safeSettings.orthoHalfExtentWorld, safeSettings.nearZ, safeSettings.farZ);
 
@@ -208,7 +172,7 @@ void ShadowFeature::RegisterPasses()
                     Renderer& renderer = m_core.GetRenderer();
                     renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
                     SceneDrawRequest request;
-                    request.viewProjection = lightViewProj; // Real light-space matrix, never Identity.
+                    request.viewProjection = lightViewProj;
                     request.pipelineOverrideSet = m_depthPipelines;
                     gte::DrawScene(m_core.GetGame().GetRenderSystem(), m_core.GetRegistry(), renderer, request);
                     renderer.EndGraphPassRecording();
@@ -220,10 +184,7 @@ void ShadowFeature::RegisterPasses()
             const rg::RenderPassId key = isGameView ? kShadowMapGameKey : kShadowMapSceneKey;
             blackboard.Publish<ShadowMapBlackboardEntry>(key, ShadowMapBlackboardEntry{ shadowHandle, lightViewProj });
 
-            // Universal Lit Shader with Shadows - publishes the SAME shadow
-            // map into the generic Scene Services slot system (set = 1,
-            // binding 0) so every material shader samples it directly,
-            // plus the packed per-frame lighting UBO (binding 8).
+            // Publish shadow map and lighting uniforms for scene material shaders.
             blackboard.Publish<rg::TextureHandle>(SceneServiceBlackboardKey(m_shadowMapSlot, currentView), shadowHandle);
 
             const SceneLightingUniformData packed =
@@ -231,23 +192,10 @@ void ShadowFeature::RegisterPasses()
             m_core.GetSceneServicesDescriptorSet().UpdateGlobalUniformBlock(
                 currentView, std::as_bytes(std::span{ &packed, 1 }));
         });
-    assert(depthRegistered && "Shadow.DepthPass registration failed - see the GTE_LOG_WARNING above.");
+    assert(depthRegistered && "Shadow.DepthPass registration failed");
 
-    // "Shadow.Mask" - PostOpaque, AfterOpaques, built-in engine feature, now
-    // via the universal Core::RegisterRenderPass() front door (migration
-    // scaffold - see chat history). FrameEvent::PostOpaque routes straight
-    // into RenderFeatureCompositor::RegisterBuiltInPostOpaqueFeature()
-    // (reports isProjectFeature == false in DebugSnapshot()/
-    // GET /render_graph - this is the engine's own pass).
-    //
-    // privateTarget/extent below are PostComposite/PreUI-only fields -
-    // always safe, invalid placeholders here. currentViewHandles IS real
-    // and valid for PostOpaque (used below, unchanged). cameraData is ALSO
-    // a placeholder here - this callback keeps computing its own real
-    // camera data manually via ResolveRenderFeatureCameraData() below,
-    // exactly as it did before this migration (PostOpaque never gets a real
-    // one from the universal signature - only PostComposite/PreUI do).
-    static constexpr std::int32_t kShadowMaskPriority = 0; // Matches this pass's own previous, implicit default.
+    // PostOpaque pass: generates screen-space shadow mask using scene depth and the shadow map.
+    static constexpr std::int32_t kShadowMaskPriority = 0;
     const bool maskRegistered = m_core.RegisterRenderPass(FrameEvent::PostOpaque, "Shadow.Mask", kShadowMaskPriority,
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
             rg::TextureHandle /*privateTarget*/, Extent2D /*extent*/, const ScenePassReadHandles& currentViewHandles,
@@ -257,7 +205,7 @@ void ShadowFeature::RegisterPasses()
             const std::optional<ShadowMapBlackboardEntry> shadowMap =
                 blackboard.Fetch<ShadowMapBlackboardEntry>(mapKey);
             if (!shadowMap.has_value() || !shadowMap->shadowMapHandle.IsValid()) {
-                return; // Shadow.DepthPass didn't run this frame - nothing to mask.
+                return;
             }
 
             const std::optional<RenderPassViewData> viewData = m_core.FindRenderPassViewData(currentView);
@@ -266,7 +214,7 @@ void ShadowFeature::RegisterPasses()
             }
             const RenderFeatureCameraData realCameraData = ResolveRenderFeatureCameraData(currentView, &(*viewData));
             if (!realCameraData.invViewProjectionValid) {
-                return; // Degenerate camera matrix this frame - never divide by garbage.
+                return;
             }
 
             RenderTexture* shadowTarget = m_core.FindRenderViewTarget(
@@ -292,15 +240,9 @@ void ShadowFeature::RegisterPasses()
             const rg::RenderPassId maskKey = isGameView ? kShadowMaskGameKey : kShadowMaskSceneKey;
             blackboard.Publish<ShadowMaskBlackboardEntry>(maskKey, ShadowMaskBlackboardEntry{ maskHandle });
         });
-    assert(maskRegistered && "Shadow.Mask registration failed - see the GTE_LOG_WARNING above.");
+    assert(maskRegistered && "Shadow.Mask registration failed");
 
-    // "Shadow.Composite" - built-in PostComposite feature,
-    // RenderFeatureBlendMode::ScreenSpaceMask, now via the universal
-    // Core::RegisterRenderPass() front door (migration scaffold - see chat
-    // history). FrameEvent::PostComposite routes straight into
-    // RenderFeatureCompositor::RegisterBuiltInFeature() - same real
-    // engine machinery (private target + GPU blend chain), same safety
-    // asserts, this is purely a different call shape.
+    // PostComposite pass: composites the shadow mask over the color buffer.
     const bool compositeRegistered = m_core.RegisterRenderPass(FrameEvent::PostComposite, "Shadow.Composite",
         kShadowCompositePriority,
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
@@ -311,7 +253,7 @@ void ShadowFeature::RegisterPasses()
             const std::optional<ShadowMaskBlackboardEntry> mask =
                 blackboard.Fetch<ShadowMaskBlackboardEntry>(maskKey);
             if (!mask.has_value() || !mask->maskHandle.IsValid()) {
-                return; // Shadow.Mask didn't run this frame - nothing to darken with.
+                return;
             }
 
             const ShadowSettings safeSettings = SanitizeShadowSettings(m_settings);
@@ -321,7 +263,7 @@ void ShadowFeature::RegisterPasses()
                 safeSettings.strength);
         },
         RenderFeatureBlendMode::ScreenSpaceMask);
-    assert(compositeRegistered && "Shadow.Composite registration failed - see the GTE_LOG_WARNING above.");
+    assert(compositeRegistered && "Shadow.Composite registration failed");
 }
 
 namespace {
