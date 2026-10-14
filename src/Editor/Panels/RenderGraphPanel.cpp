@@ -1,4 +1,4 @@
-#include "RenderGraphPanel.h"
+﻿#include "RenderGraphPanel.h"
 
 #include "../EditorContext.h"
 #include "../EditorGpuMemoryNameOverlay.h"
@@ -557,7 +557,7 @@ void RenderGraphPanel::BuildInspector(const rg::RenderGraphRegimeMetadata& regim
     for (const rg::RenderGraphResourceRefMetadata& write : pass->writes) {
         ImGui::BulletText("%s (%s)", write.name.c_str(), write.kind.c_str());
         BuildResourceResolutionText(m_frozenResourceResolutionText, write.name);
-        if (const std::optional<VkDeviceSize> bytes = LookupTrackedResourceSizeByName(write.name, renderer)) {
+        if (const std::optional<uint64_t> bytes = LookupTrackedResourceSizeByName(write.name, renderer)) {
             ImGui::SameLine();
             ImGui::TextDisabled("%s", FormatBytes(*bytes).c_str());
         }
@@ -721,7 +721,7 @@ void RenderGraphPanel::RequestTexturePreview(
 // new bookkeeping. Linear scan over a tracker that holds, at most, a few
 // hundred live GPU resources, called once per selected-pass-inspector-frame
 // (not per resource per node per frame) - cache-irrelevant, not a hot path.
-std::optional<VkDeviceSize> RenderGraphPanel::LookupTrackedResourceSizeByName(
+std::optional<uint64_t> RenderGraphPanel::LookupTrackedResourceSizeByName(
     const std::string& resourceName, Renderer& renderer) const
 {
     for (const GpuMemoryTracker::Entry& entry : renderer.GetMemoryResources()) {

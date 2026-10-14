@@ -59,8 +59,8 @@ void FrameRecorder::IssueDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, V
 
 void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
     VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet instanceBufferDescriptorSet,
-    VkDescriptorSet sceneServicesSet, const Mat4& viewProj, VkBuffer indirectBuffer, VkDeviceSize indirectOffset,
-    std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset, bool supportsDrawIndirectCount)
+    VkDescriptorSet sceneServicesSet, const Mat4& viewProj, VkBuffer indirectBuffer, uint64_t indirectOffset,
+    std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset, bool supportsDrawIndirectCount)
 {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
@@ -110,8 +110,8 @@ void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pip
             // instance count from `countBuffer` itself (written by
             // PHASE3's real culling compute shader), capped at
             // `maxDrawCount`.
-            vkCmdDrawIndexedIndirectCount(
-                cmd, indirectBuffer, indirectOffset, countBuffer, countBufferOffset, maxDrawCount, stride);
+            vkCmdDrawIndexedIndirectCount(cmd, indirectBuffer, static_cast<VkDeviceSize>(indirectOffset), countBuffer,
+                static_cast<VkDeviceSize>(countBufferOffset), maxDrawCount, stride);
             return;
         }
         // Release-build fallback only (the assert above already caught
@@ -126,7 +126,7 @@ void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pip
     // degenerate (indexCount == 0) entry on a device that reaches this
     // branch because it lacks real drawIndirectCount support, so this still
     // draws exactly the surviving instances, just without a GPU-side count.
-    vkCmdDrawIndexedIndirect(cmd, indirectBuffer, indirectOffset, maxDrawCount, stride);
+    vkCmdDrawIndexedIndirect(cmd, indirectBuffer, static_cast<VkDeviceSize>(indirectOffset), maxDrawCount, stride);
 }
 
 void FrameRecorder::Clear(std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a)

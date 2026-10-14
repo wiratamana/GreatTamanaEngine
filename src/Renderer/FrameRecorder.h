@@ -121,8 +121,8 @@ public:
     // IssueDrawCommand() already does for the non-indirect path.
     static void IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
         VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet instanceBufferDescriptorSet,
-        VkDescriptorSet sceneServicesSet, const Mat4& viewProj, VkBuffer indirectBuffer, VkDeviceSize indirectOffset,
-        std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset, bool supportsDrawIndirectCount);
+        VkDescriptorSet sceneServicesSet, const Mat4& viewProj, VkBuffer indirectBuffer, uint64_t indirectOffset,
+        std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset, bool supportsDrawIndirectCount);
 
     // Records the undefined->color-attachment (and, when target carries a
     // real depth image, undefined->depth-attachment) barriers, the dynamic-

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "../../Core/GraphicsHandles.h" // BufferObjectHandle - GpuSkinningDispatchRequest::outputBuffer below.
 #include "../../ECS/Entity.h"
@@ -228,7 +228,7 @@ public:
         // ImportBuffer()'s own `externalBuffer` parameter now requires
         // exactly this type.
         BufferObjectHandle outputBuffer = BufferObjectHandle::Invalid;
-        VkDeviceSize outputBufferSize = 0;
+        uint64_t outputBufferSize = 0;
         // Engine-owned handle (not a raw VkDescriptorSet) - see
         // GpuSkinningRigCache::OutputGroup::descriptorSetHandle, which this
         // is copied from verbatim.

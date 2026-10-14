@@ -23,7 +23,7 @@ struct MemoryRow {
     std::string name; // Empty if the resource was never given a debug name.
     GpuResourceType type = GpuResourceType::Buffer;
     GpuMemoryLocation location = GpuMemoryLocation::GpuOnly;
-    VkDeviceSize sizeBytes = 0;
+    uint64_t sizeBytes = 0;
     // VK_FORMAT_UNDEFINED for a Buffer (format is meaningless there) - the
     // resource's actual VkFormat for a Texture. See ToString(VkFormat)
     // below for how this becomes the panel's "Format" column text.
@@ -80,11 +80,11 @@ std::string ToString(VkFormat format);
 // backend, driver/loader overhead, ...) is unaccounted for.
 struct HeapBudgetRow {
     std::uint32_t heapIndex = 0;
-    VkDeviceSize vmaBlockBytes = 0;      // Bytes VMA itself has actually requested from the driver for this heap.
+    uint64_t vmaBlockBytes = 0;      // Bytes VMA itself has actually requested from the driver for this heap.
     std::uint32_t vmaBlockCount = 0;     // Number of separate VkDeviceMemory blocks VMA holds for this heap.
     std::uint32_t vmaAllocationCount = 0; // Number of individual sub-allocations (Buffer/RenderTexture, ...) living inside those blocks.
-    VkDeviceSize usageBytes = 0;    // Driver-reported CURRENT usage of this heap by this process.
-    VkDeviceSize budgetBytes = 0;   // Driver-reported ESTIMATED ceiling this process can use of this heap.
+    uint64_t usageBytes = 0;    // Driver-reported CURRENT usage of this heap by this process.
+    uint64_t budgetBytes = 0;   // Driver-reported ESTIMATED ceiling this process can use of this heap.
 };
 
 // Pure reshape of VulkanAllocator::GetHeapBudgets()'s raw VmaBudget entries
@@ -103,6 +103,6 @@ std::vector<HeapBudgetRow> BuildHeapBudgetRows(const std::vector<VmaBudget>& bud
 // mostly-unused headroom rather than a sign of a tracking gap. Pulled out as
 // its own pure function (like FormatBytes() above) so Panels/MemoryPanel.cpp
 // and its test share the exact same phrasing.
-std::string FormatBlockSummary(VkDeviceSize bytes, std::uint32_t blockCount, std::uint32_t allocationCount);
+std::string FormatBlockSummary(uint64_t bytes, std::uint32_t blockCount, std::uint32_t allocationCount);
 
 } // namespace gte

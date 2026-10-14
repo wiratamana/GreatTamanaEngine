@@ -1,4 +1,4 @@
-#include "MemoryPanelData.h"
+﻿#include "MemoryPanelData.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -115,7 +115,7 @@ std::vector<HeapBudgetRow> BuildHeapBudgetRows(const std::vector<VmaBudget>& bud
     return rows;
 }
 
-std::string FormatBlockSummary(VkDeviceSize bytes, std::uint32_t blockCount, std::uint32_t allocationCount)
+std::string FormatBlockSummary(uint64_t bytes, std::uint32_t blockCount, std::uint32_t allocationCount)
 {
     char buffer[128];
     std::snprintf(buffer, sizeof(buffer), "%s across %u %s (%u %s)", FormatBytes(bytes).c_str(), blockCount,

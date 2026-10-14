@@ -1,4 +1,4 @@
-#include "MeshAssetGpuCatalog.h"
+﻿#include "MeshAssetGpuCatalog.h"
 
 #include "../../Assets/AssetDatabase.h"
 #include "../../Assets/AssetTypes.h"
@@ -210,7 +210,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
     // every single animated frame afterwards) - now it gets exactly one.
     if (!texturedSlices.empty()) {
         const std::vector<MeshVertexUv> texturedVertices = PackMeshVertexUvs(mesh->positions, mesh->normals, mesh->uvs);
-        const VkDeviceSize texturedVertexDataSize = texturedVertices.size() * sizeof(MeshVertexUv);
+        const uint64_t texturedVertexDataSize = texturedVertices.size() * sizeof(MeshVertexUv);
         const std::uint32_t texturedVertexCount = static_cast<std::uint32_t>(texturedVertices.size());
 
         const std::shared_ptr<Buffer> sharedTexturedVertexBuffer = skinned

@@ -51,7 +51,7 @@ struct BufferImportInfo {
     // engine ever unwraps one back to a real VkBuffer (see RenderGraph.cpp's
     // EnsureBufferResolved()).
     BufferObjectHandle externalBuffer = BufferObjectHandle::Invalid;
-    VkDeviceSize size = 0;
+    uint64_t size = 0;
 };
 
 // Import metadata for 3D volume textures owned outside the render graph.
@@ -151,12 +151,12 @@ public:
         // Must be called before binding descriptor slots for this pass.
         void BindDescriptorSetLayout(DescriptorSetLayoutHandle layout);
 
-        void BindStorageBuffer(std::uint32_t binding, BufferHandle handle, VkDeviceSize offset = 0,
-            VkDeviceSize range = VK_WHOLE_SIZE);
+        void BindStorageBuffer(std::uint32_t binding, BufferHandle handle, uint64_t offset = 0,
+            uint64_t range = VK_WHOLE_SIZE);
 
         // Binds an untracked, externally managed buffer.
-        void BindStorageBuffer(std::uint32_t binding, BufferObjectHandle handle, VkDeviceSize offset = 0,
-            VkDeviceSize range = VK_WHOLE_SIZE);
+        void BindStorageBuffer(std::uint32_t binding, BufferObjectHandle handle, uint64_t offset = 0,
+            uint64_t range = VK_WHOLE_SIZE);
 
         // If sampler is Invalid, uses the texture's own sampler.
         void BindCombinedImageSampler(
@@ -191,7 +191,7 @@ public:
     // externalBuffer is an engine-native BufferObjectHandle opaque handle
     // (Core/GraphicsHandles.h), never a raw VkBuffer - see
     // Buffer::ObjectHandle().
-    BufferHandle ImportBuffer(const char* name, BufferObjectHandle externalBuffer, VkDeviceSize size);
+    BufferHandle ImportBuffer(const char* name, BufferObjectHandle externalBuffer, uint64_t size);
 
     VolumeTextureHandle ImportVolumeTexture(
         const char* name, const VolumeTarget& externalVolumeTarget, ImageLayout currentLayout);

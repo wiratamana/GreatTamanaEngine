@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "../../Renderer/RenderGraph/RenderGraphMetadata.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
@@ -65,7 +65,7 @@ private:
     void DrawTimelineTrack(const char* label, const rg::RenderGraphRegimeMetadata& regime, const char* kindFilter);
     void RequestTexturePreview(const std::string& resourceName, Renderer& renderer, const rg::RenderGraph& renderGraph);
     void ToggleIsolatePass(const std::string& passName, rg::RenderPassToggleRegistry& toggles);
-    std::optional<VkDeviceSize> LookupTrackedResourceSizeByName(const std::string& resourceName, Renderer& renderer) const;
+    std::optional<uint64_t> LookupTrackedResourceSizeByName(const std::string& resourceName, Renderer& renderer) const;
 
     // Shared search-text + queue-kind predicate for both the pass tree and
     // the pass table - one filter, never two independently-maintained ones.

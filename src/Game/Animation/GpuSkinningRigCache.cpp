@@ -86,12 +86,12 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
     // from them in one step below.
     const std::vector<GpuBindPoseVertex> packedBindPose = PackBindPoseVertices(data.bindPositions, data.bindNormals);
     Buffer bindPoseBuffer = renderer.CreateDeviceLocalBuffer(packedBindPose.data(),
-        static_cast<VkDeviceSize>(packedBindPose.size() * sizeof(GpuBindPoseVertex)),
+        static_cast<uint64_t>(packedBindPose.size() * sizeof(GpuBindPoseVertex)),
         BufferUsage::StorageBuffer, "GpuSkinningBindPose");
 
     const std::vector<GpuSkinWeights> packedSkinWeights = PackSkinWeights(data.skinWeights);
     Buffer skinWeightsBuffer = renderer.CreateDeviceLocalBuffer(packedSkinWeights.data(),
-        static_cast<VkDeviceSize>(packedSkinWeights.size() * sizeof(GpuSkinWeights)),
+        static_cast<uint64_t>(packedSkinWeights.size() * sizeof(GpuSkinWeights)),
         BufferUsage::StorageBuffer, "GpuSkinningWeights");
 
     // The one genuinely per-frame-rewritten input - sized here, uploaded by
@@ -107,7 +107,7 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
     if (anyTextured) {
         const std::vector<GpuUv> packedUvs = PackUvs(data.uvs);
         uvBuffer.emplace(renderer.CreateDeviceLocalBuffer(packedUvs.data(),
-            static_cast<VkDeviceSize>(packedUvs.size() * sizeof(GpuUv)), BufferUsage::StorageBuffer,
+            static_cast<uint64_t>(packedUvs.size() * sizeof(GpuUv)), BufferUsage::StorageBuffer,
             "GpuSkinningUv"));
     }
 
@@ -135,9 +135,9 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
         outputGroup.debugName = displayFileName + "#SkinGroup" + std::to_string(groupIndex);
         ++groupIndex;
 
-        const VkDeviceSize outputSize = group.textured
-            ? static_cast<VkDeviceSize>(vertexCount) * sizeof(GpuSkinnedVertexPositionNormalUv)
-            : static_cast<VkDeviceSize>(vertexCount) * sizeof(GpuSkinnedVertexPositionNormal);
+        const uint64_t outputSize = group.textured
+            ? static_cast<uint64_t>(vertexCount) * sizeof(GpuSkinnedVertexPositionNormalUv)
+            : static_cast<uint64_t>(vertexCount) * sizeof(GpuSkinnedVertexPositionNormal);
 
         outputGroup.outputVertexBuffer = std::make_shared<Buffer>(
             renderer.CreateGpuSkinningTargetBuffer(outputSize, "GpuSkinningOutput"));
@@ -182,7 +182,7 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
             }
 
             Mesh gpuMesh = renderer.CreateMeshFromSharedVertexBuffer(outputGroup.outputVertexBuffer, vertexCount,
-                part.indices.data(), static_cast<VkDeviceSize>(part.indices.size() * sizeof(std::uint32_t)),
+                part.indices.data(), static_cast<uint64_t>(part.indices.size() * sizeof(std::uint32_t)),
                 static_cast<std::uint32_t>(part.indices.size()), "GpuSkinnedMesh");
             const MeshHandle gpuHandle = renderSystem.RegisterMesh(std::move(gpuMesh));
             outputGroup.partMeshBindings.push_back(OutputGroup::PartMeshBinding{ part.mesh, gpuHandle });

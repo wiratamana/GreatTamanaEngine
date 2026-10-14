@@ -8,7 +8,7 @@
 namespace gte {
 
 // Reshapes Renderer::GetMemoryTotals()'s result (GpuMemoryTracker::Totals,
-// a Vulkan-tied VkDeviceSize/std::size_t-based type) into a
+// a std::uint64_t/std::size_t-based type) into a
 // Profiling::MemorySnapshot (a plain, Vulkan-free std::uint64_t-based
 // type) for FrameProfiler::SetMemorySnapshot() - see PHASE5_GPU_MEMORY_
 // HISTORY_STRATEGY_v2.md. Deliberately lives HERE, not inside

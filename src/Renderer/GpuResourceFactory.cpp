@@ -162,7 +162,7 @@ GpuResourceFactory::~GpuResourceFactory()
     Destroy();
 }
 
-Buffer GpuResourceFactory::CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* debugName) const
+Buffer GpuResourceFactory::CreateGpuSkinningTargetBuffer(uint64_t size, const char* debugName) const
 {
     return CreateBuffer(size, BufferUsage::StorageBuffer | BufferUsage::VertexBuffer,
         BufferMemoryUsage::GpuOnly, debugName);
@@ -214,15 +214,15 @@ RenderTexture GpuResourceFactory::CreateRenderTexture(int width, int height, Pix
 }
 
 Buffer GpuResourceFactory::CreateBuffer(
-    VkDeviceSize size, BufferUsage usage, BufferMemoryUsage memoryUsage, const char* debugName) const
+    uint64_t size, BufferUsage usage, BufferMemoryUsage memoryUsage, const char* debugName) const
 {
     return Buffer(m_allocator, m_memoryTracker, size, usage, memoryUsage, debugName);
 }
 
-Buffer GpuResourceFactory::CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
+Buffer GpuResourceFactory::CreateStructuredBuffer(uint64_t elementStride, std::uint32_t elementCount,
     BufferMemoryUsage memoryUsage, BufferUsage extraUsage, const char* debugName) const
 {
-    const VkDeviceSize size = elementStride * static_cast<VkDeviceSize>(elementCount);
+    const uint64_t size = elementStride * static_cast<uint64_t>(elementCount);
     BufferUsage usage = BufferUsage::StorageBuffer | extraUsage;
     if (memoryUsage == BufferMemoryUsage::GpuOnly) {
         // Mirrors CreateDeviceLocalBuffer()'s own convention - so a
@@ -234,7 +234,7 @@ Buffer GpuResourceFactory::CreateStructuredBuffer(VkDeviceSize elementStride, st
 }
 
 Buffer GpuResourceFactory::CreateDeviceLocalBuffer(
-    const void* data, VkDeviceSize size, BufferUsage usage, const char* debugName) const
+    const void* data, uint64_t size, BufferUsage usage, const char* debugName) const
 {
     // The staging buffer is intentionally unnamed (nullptr) - it's a
     // throwaway that never outlives this function, so it's never worth
@@ -247,7 +247,7 @@ Buffer GpuResourceFactory::CreateDeviceLocalBuffer(
 
     ImmediateSubmitInternal([&](VkCommandBuffer cmd) {
         VkBufferCopy copyRegion{};
-        copyRegion.size = size;
+        copyRegion.size = static_cast<VkDeviceSize>(size);
         vkCmdCopyBuffer(cmd, staging.Native(), deviceLocal.Native(), 1, &copyRegion);
     });
     // staging goes out of scope here and is destroyed - the copy above has
@@ -360,15 +360,15 @@ ComputePipeline GpuResourceFactory::CreateComputePipeline(const std::string& sha
 }
 
 Mesh GpuResourceFactory::CreateMesh(
-    const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount, const char* debugName) const
+    const void* vertexData, uint64_t vertexDataSize, std::uint32_t vertexCount, const char* debugName) const
 {
     Buffer vertexBuffer =
         CreateDeviceLocalBuffer(vertexData, vertexDataSize, BufferUsage::VertexBuffer, debugName);
     return Mesh(std::move(vertexBuffer), vertexCount);
 }
 
-Mesh GpuResourceFactory::CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
-    const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount, const char* debugName) const
+Mesh GpuResourceFactory::CreateMesh(const void* vertexData, uint64_t vertexDataSize, std::uint32_t vertexCount,
+    const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount, const char* debugName) const
 {
     Buffer vertexBuffer =
         CreateDeviceLocalBuffer(vertexData, vertexDataSize, BufferUsage::VertexBuffer, debugName);
@@ -377,8 +377,8 @@ Mesh GpuResourceFactory::CreateMesh(const void* vertexData, VkDeviceSize vertexD
     return Mesh(std::move(vertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
 }
 
-Mesh GpuResourceFactory::CreateSkinnedMesh(const void* vertexData, VkDeviceSize vertexDataSize,
-    std::uint32_t vertexCount, const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+Mesh GpuResourceFactory::CreateSkinnedMesh(const void* vertexData, uint64_t vertexDataSize,
+    std::uint32_t vertexCount, const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
     const char* debugName) const
 {
     // Host-visible + persistently mapped (BufferMemoryUsage::CpuToGpu),
@@ -398,7 +398,7 @@ Mesh GpuResourceFactory::CreateSkinnedMesh(const void* vertexData, VkDeviceSize 
 }
 
 std::shared_ptr<Buffer> GpuResourceFactory::CreateSharedMeshVertexBuffer(
-    const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName) const
+    const void* vertexData, uint64_t vertexDataSize, const char* debugName) const
 {
     Buffer vertexBuffer =
         CreateDeviceLocalBuffer(vertexData, vertexDataSize, BufferUsage::VertexBuffer, debugName);
@@ -406,7 +406,7 @@ std::shared_ptr<Buffer> GpuResourceFactory::CreateSharedMeshVertexBuffer(
 }
 
 std::shared_ptr<Buffer> GpuResourceFactory::CreateSharedSkinnedMeshVertexBuffer(
-    const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName) const
+    const void* vertexData, uint64_t vertexDataSize, const char* debugName) const
 {
     Buffer vertexBuffer = CreateBuffer(vertexDataSize, BufferUsage::VertexBuffer, BufferMemoryUsage::CpuToGpu,
         debugName);
@@ -415,7 +415,7 @@ std::shared_ptr<Buffer> GpuResourceFactory::CreateSharedSkinnedMeshVertexBuffer(
 }
 
 Mesh GpuResourceFactory::CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVertexBuffer,
-    std::uint32_t vertexCount, const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+    std::uint32_t vertexCount, const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
     const char* debugName) const
 {
     Buffer indexBuffer =
@@ -433,9 +433,9 @@ Texture2D GpuResourceFactory::CreateTexture2D(
     }
     Texture2D texture(m_allocator, m_memoryTracker, m_device, width, height, debugName, allowStorageImageAccess);
 
-    const auto safeWidth = static_cast<VkDeviceSize>(texture.Width());
-    const auto safeHeight = static_cast<VkDeviceSize>(texture.Height());
-    const VkDeviceSize size = safeWidth * safeHeight * 4;
+    const auto safeWidth = static_cast<uint64_t>(texture.Width());
+    const auto safeHeight = static_cast<uint64_t>(texture.Height());
+    const uint64_t size = safeWidth * safeHeight * 4;
 
     // Unnamed - same reasoning as CreateDeviceLocalBuffer()'s own staging
     // buffer above: a throwaway that never outlives this function.

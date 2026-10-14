@@ -5,7 +5,7 @@
 namespace gte {
 
 ComputeDescriptorWrite ComputeDescriptorWrite::StorageBuffer(
-    std::uint32_t binding, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range)
+    std::uint32_t binding, VkBuffer buffer, uint64_t offset, uint64_t range)
 {
     ComputeDescriptorWrite write;
     write.binding = binding;
@@ -69,8 +69,8 @@ void ComputeDescriptorSet::Rewrite(const std::vector<ComputeDescriptorWrite>& wr
         if (write.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
             VkDescriptorBufferInfo bufferInfo{};
             bufferInfo.buffer = write.buffer;
-            bufferInfo.offset = write.bufferOffset;
-            bufferInfo.range = write.bufferRange;
+            bufferInfo.offset = static_cast<VkDeviceSize>(write.bufferOffset);
+            bufferInfo.range = static_cast<VkDeviceSize>(write.bufferRange);
             bufferInfos.push_back(bufferInfo);
             vkWrite.pBufferInfo = &bufferInfos.back();
         } else {

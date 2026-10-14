@@ -19,6 +19,7 @@
 
 #include <volk.h>
 
+#include <cstdint>
 #include <string>
 
 
@@ -145,7 +146,7 @@ VkImageMemoryBarrier2 BuildImageMemoryBarrier2(
 // on either ResourceState is ignored entirely (see this file's own
 // ResourceState comment).
 VkBufferMemoryBarrier2 BuildBufferMemoryBarrier2(
-    VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size, const ResourceState& previous, const ResourceState& next) noexcept;
+    VkBuffer buffer, uint64_t offset, uint64_t size, const ResourceState& previous, const ResourceState& next) noexcept;
 
 // Thin Vulkan-call half: builds the barrier via BuildImageMemoryBarrier2()
 // above and issues it via a single vkCmdPipelineBarrier2 call. Contains NO
@@ -159,7 +160,7 @@ void EmitImageBarrier(
 
 // Thin Vulkan-call buffer counterpart - see EmitImageBarrier() above.
 void EmitBufferBarrier(
-    VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size, const ResourceState& previous, const ResourceState& next);
+    VkCommandBuffer cmd, VkBuffer buffer, uint64_t offset, uint64_t size, const ResourceState& previous, const ResourceState& next);
 
 // Short Editor-display label for one VkImageLayout value - e.g. "RT",
 // "Shader Read". Falls back to "Other" for anything not explicitly listed.

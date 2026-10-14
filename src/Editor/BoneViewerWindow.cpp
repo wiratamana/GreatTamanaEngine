@@ -203,7 +203,7 @@ void BoneViewerWindow::EnsurePipeline(Renderer& renderer)
     // SceneGlobalUniformBlock (112 bytes, std140); 128 matches Scene
     // Services binding 8's own ceiling, purely coincidentally - this
     // class never includes SceneServicesDescriptorSet.h.
-    constexpr VkDeviceSize kLocalDummyUniformBlockSize = 128;
+    constexpr uint64_t kLocalDummyUniformBlockSize = 128;
     m_localUniformBuffer = std::make_unique<Buffer>(renderer.CreateBuffer(kLocalDummyUniformBlockSize,
         BufferUsage::UniformBuffer, BufferMemoryUsage::CpuToGpu, "BoneViewerDummyUniformBlock"));
     const std::array<std::byte, kLocalDummyUniformBlockSize> zeroBytes{};

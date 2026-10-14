@@ -51,16 +51,16 @@ public:
     // Buffers - `usage`/`extraUsage` are this engine's own BufferUsage
     // bitmask (Buffer.h), never a raw VkBufferUsageFlags - see BufferUsage's
     // own doc comment for why.
-    Buffer CreateBuffer(VkDeviceSize size, BufferUsage usage, BufferMemoryUsage memoryUsage,
+    Buffer CreateBuffer(uint64_t size, BufferUsage usage, BufferMemoryUsage memoryUsage,
         const char* debugName = nullptr) const;
 
     Buffer CreateDeviceLocalBuffer(
-        const void* data, VkDeviceSize size, BufferUsage usage, const char* debugName = nullptr) const;
+        const void* data, uint64_t size, BufferUsage usage, const char* debugName = nullptr) const;
 
-    Buffer CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
+    Buffer CreateStructuredBuffer(uint64_t elementStride, std::uint32_t elementCount,
         BufferMemoryUsage memoryUsage, BufferUsage extraUsage = BufferUsage::None, const char* debugName = nullptr) const;
 
-    Buffer CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* debugName = nullptr) const;
+    Buffer CreateGpuSkinningTargetBuffer(uint64_t size, const char* debugName = nullptr) const;
 
     // Transient command buffer helpers
     VkCommandBuffer AllocateTransientCommandBuffer() const;
@@ -82,25 +82,25 @@ public:
         std::optional<VkPushConstantRange> pushConstantRange = std::nullopt) const;
 
     // Meshes
-    Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
+    Mesh CreateMesh(const void* vertexData, uint64_t vertexDataSize, std::uint32_t vertexCount,
         const char* debugName = nullptr) const;
 
-    Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
-        const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+    Mesh CreateMesh(const void* vertexData, uint64_t vertexDataSize, std::uint32_t vertexCount,
+        const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
-    Mesh CreateSkinnedMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
-        const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+    Mesh CreateSkinnedMesh(const void* vertexData, uint64_t vertexDataSize, std::uint32_t vertexCount,
+        const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
     std::shared_ptr<Buffer> CreateSharedMeshVertexBuffer(
-        const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName = nullptr) const;
+        const void* vertexData, uint64_t vertexDataSize, const char* debugName = nullptr) const;
 
     std::shared_ptr<Buffer> CreateSharedSkinnedMeshVertexBuffer(
-        const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName = nullptr) const;
+        const void* vertexData, uint64_t vertexDataSize, const char* debugName = nullptr) const;
 
     Mesh CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVertexBuffer, std::uint32_t vertexCount,
-        const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+        const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
     // Textures

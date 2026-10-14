@@ -1,4 +1,4 @@
-#include "Buffer.h"
+﻿#include "Buffer.h"
 
 #include <cstdint>
 #include <cstring>
@@ -45,7 +45,7 @@ VkBufferUsageFlags ToVkBufferUsageFlags(gte::BufferUsage usage) noexcept
 
 namespace gte {
 
-Buffer::Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDeviceSize size,
+Buffer::Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, uint64_t size,
     BufferUsage usage, BufferMemoryUsage memoryUsage, const char* debugName)
     : m_allocator(allocator)
     , m_tracker(std::move(tracker))
@@ -53,7 +53,7 @@ Buffer::Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker
 {
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
+    bufferInfo.size = static_cast<VkDeviceSize>(size);
     bufferInfo.usage = ToVkBufferUsageFlags(usage);
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -107,7 +107,7 @@ Buffer::Buffer(Buffer&& other) noexcept
     , m_handle(std::exchange(other.m_handle, kInvalidGpuResourceHandle))
     , m_buffer(std::exchange(other.m_buffer, VK_NULL_HANDLE))
     , m_allocation(std::exchange(other.m_allocation, VK_NULL_HANDLE))
-    , m_size(std::exchange(other.m_size, VkDeviceSize{ 0 }))
+    , m_size(std::exchange(other.m_size, uint64_t{ 0 }))
     , m_mappedData(std::exchange(other.m_mappedData, nullptr))
     , m_objectHandle(std::exchange(other.m_objectHandle, CachedBufferObjectHandle{}))
 {
@@ -122,7 +122,7 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept
         m_handle = std::exchange(other.m_handle, kInvalidGpuResourceHandle);
         m_buffer = std::exchange(other.m_buffer, VK_NULL_HANDLE);
         m_allocation = std::exchange(other.m_allocation, VK_NULL_HANDLE);
-        m_size = std::exchange(other.m_size, VkDeviceSize{ 0 });
+        m_size = std::exchange(other.m_size, uint64_t{ 0 });
         m_mappedData = std::exchange(other.m_mappedData, nullptr);
         m_objectHandle = std::exchange(other.m_objectHandle, CachedBufferObjectHandle{});
     }

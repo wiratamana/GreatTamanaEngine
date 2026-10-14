@@ -53,7 +53,7 @@ GpuMemoryLocation ClassifyGpuMemoryLocation(VmaAllocator allocator, VmaAllocatio
 struct GpuResourceRecord {
     GpuResourceType type = GpuResourceType::Buffer;
     GpuMemoryLocation location = GpuMemoryLocation::GpuOnly;
-    VkDeviceSize sizeBytes = 0;
+    uint64_t sizeBytes = 0;
     VkFormat format = VK_FORMAT_UNDEFINED;
 };
 
@@ -113,7 +113,7 @@ public:
     // same operation - see AGENTS.md ("GPU resource memory tracking"). The
     // record here must always reflect the CURRENT actual allocation, never
     // a stale snapshot from whenever the resource was first constructed.
-    GpuResourceHandle Track(GpuResourceType type, GpuMemoryLocation location, VkDeviceSize sizeBytes,
+    GpuResourceHandle Track(GpuResourceType type, GpuMemoryLocation location, uint64_t sizeBytes,
         VkFormat format = VK_FORMAT_UNDEFINED);
 
     // Removes a resource's record. Safe to call with an already-untracked
@@ -123,12 +123,12 @@ public:
     void Untrack(GpuResourceHandle handle);
 
     struct Totals {
-        VkDeviceSize totalBytes = 0;
-        VkDeviceSize bufferBytes = 0;
-        VkDeviceSize textureBytes = 0;
-        VkDeviceSize gpuOnlyBytes = 0;
-        VkDeviceSize cpuOnlyBytes = 0;
-        VkDeviceSize sharedBytes = 0;
+        uint64_t totalBytes = 0;
+        uint64_t bufferBytes = 0;
+        uint64_t textureBytes = 0;
+        uint64_t gpuOnlyBytes = 0;
+        uint64_t cpuOnlyBytes = 0;
+        uint64_t sharedBytes = 0;
         std::size_t bufferCount = 0;
         std::size_t textureCount = 0;
     };

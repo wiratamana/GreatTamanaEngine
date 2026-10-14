@@ -124,16 +124,16 @@ public:
     std::optional<CapturedSwapchainPixels> TakeLastCompletedSwapchainCapture();
 
     // Buffer factory methods.
-    Buffer CreateBuffer(VkDeviceSize size, BufferUsage usage, BufferMemoryUsage memoryUsage,
+    Buffer CreateBuffer(uint64_t size, BufferUsage usage, BufferMemoryUsage memoryUsage,
         const char* debugName = nullptr) const;
 
     Buffer CreateDeviceLocalBuffer(
-        const void* data, VkDeviceSize size, BufferUsage usage, const char* debugName = nullptr) const;
+        const void* data, uint64_t size, BufferUsage usage, const char* debugName = nullptr) const;
 
-    Buffer CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
+    Buffer CreateStructuredBuffer(uint64_t elementStride, std::uint32_t elementCount,
         BufferMemoryUsage memoryUsage, BufferUsage extraUsage = BufferUsage::None, const char* debugName = nullptr) const;
 
-    Buffer CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* debugName = nullptr) const;
+    Buffer CreateGpuSkinningTargetBuffer(uint64_t size, const char* debugName = nullptr) const;
 
     // Executes a one-shot command buffer immediately on the graphics queue.
     void ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& recordFn) const;
@@ -152,7 +152,7 @@ public:
 
     // Issues an indirect draw call from GPU-side command and count buffers.
     void SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
-        VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset,
+        uint64_t indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset,
         DescriptorSetHandle instanceBufferDescriptorSet,
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
         const Mat4& viewProjMatrix = Mat4::Identity());
@@ -189,26 +189,26 @@ public:
         std::uint32_t groupCountZ = 1);
 
     // Mesh creation helpers.
-    Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
+    Mesh CreateMesh(const void* vertexData, uint64_t vertexDataSize, std::uint32_t vertexCount,
         const char* debugName = nullptr) const;
 
-    Mesh CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
-        const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+    Mesh CreateMesh(const void* vertexData, uint64_t vertexDataSize, std::uint32_t vertexCount,
+        const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
-    Mesh CreateSkinnedMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
-        const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+    Mesh CreateSkinnedMesh(const void* vertexData, uint64_t vertexDataSize, std::uint32_t vertexCount,
+        const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
     // Shared vertex buffer helpers for multi-part meshes.
     std::shared_ptr<Buffer> CreateSharedMeshVertexBuffer(
-        const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName = nullptr) const;
+        const void* vertexData, uint64_t vertexDataSize, const char* debugName = nullptr) const;
 
     std::shared_ptr<Buffer> CreateSharedSkinnedMeshVertexBuffer(
-        const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName = nullptr) const;
+        const void* vertexData, uint64_t vertexDataSize, const char* debugName = nullptr) const;
 
     Mesh CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVertexBuffer, std::uint32_t vertexCount,
-        const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+        const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 
     // Texture creation factories.

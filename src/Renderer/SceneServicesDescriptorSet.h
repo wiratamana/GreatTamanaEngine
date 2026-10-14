@@ -108,7 +108,7 @@ class Renderer; // forward-declared only - the .cpp includes Renderer.h.
 // Fixed ceiling for binding 8's packed per-frame lighting UBO - std140-safe,
 // the domain schema living in Features/Shadow/ShadowTypes.h must fit inside
 // this many bytes.
-inline constexpr VkDeviceSize kSceneGlobalUniformBlockSize = 128;
+inline constexpr uint64_t kSceneGlobalUniformBlockSize = 128;
 
 // Owns ONE reserved "scene services" descriptor-set LAYOUT (set = 1 at the
 // Pipeline level - see Pipeline.h's own new sceneServicesSetLayout

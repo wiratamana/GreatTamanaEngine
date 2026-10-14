@@ -13,8 +13,8 @@ struct ComputeDescriptorWrite {
 
     // Buffer descriptor fields
     VkBuffer buffer = VK_NULL_HANDLE;
-    VkDeviceSize bufferOffset = 0;
-    VkDeviceSize bufferRange = VK_WHOLE_SIZE;
+    uint64_t bufferOffset = 0;
+    uint64_t bufferRange = VK_WHOLE_SIZE;
 
     // Image descriptor fields
     VkImageView imageView = VK_NULL_HANDLE;
@@ -23,7 +23,7 @@ struct ComputeDescriptorWrite {
 
     // Factory helpers
     static ComputeDescriptorWrite StorageBuffer(
-        std::uint32_t binding, VkBuffer buffer, VkDeviceSize offset = 0, VkDeviceSize range = VK_WHOLE_SIZE);
+        std::uint32_t binding, VkBuffer buffer, uint64_t offset = 0, uint64_t range = VK_WHOLE_SIZE);
 
     static ComputeDescriptorWrite StorageImage(std::uint32_t binding, VkImageView imageView);
 

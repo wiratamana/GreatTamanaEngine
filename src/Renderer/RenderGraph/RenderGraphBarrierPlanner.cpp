@@ -176,7 +176,7 @@ VkImageMemoryBarrier2 BuildImageMemoryBarrier2(
 }
 
 VkBufferMemoryBarrier2 BuildBufferMemoryBarrier2(
-    VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size, const ResourceState& previous, const ResourceState& next) noexcept
+    VkBuffer buffer, uint64_t offset, uint64_t size, const ResourceState& previous, const ResourceState& next) noexcept
 {
     VkBufferMemoryBarrier2 barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
@@ -187,8 +187,8 @@ VkBufferMemoryBarrier2 BuildBufferMemoryBarrier2(
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.buffer = buffer;
-    barrier.offset = offset;
-    barrier.size = size;
+    barrier.offset = static_cast<VkDeviceSize>(offset);
+    barrier.size = static_cast<VkDeviceSize>(size);
     return barrier;
 }
 
@@ -205,7 +205,7 @@ void EmitImageBarrier(
 }
 
 void EmitBufferBarrier(
-    VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size, const ResourceState& previous, const ResourceState& next)
+    VkCommandBuffer cmd, VkBuffer buffer, uint64_t offset, uint64_t size, const ResourceState& previous, const ResourceState& next)
 {
     VkBufferMemoryBarrier2 barrier = BuildBufferMemoryBarrier2(buffer, offset, size, previous, next);
 

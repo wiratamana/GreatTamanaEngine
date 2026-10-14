@@ -145,7 +145,7 @@ private:
     struct PhysicalBuffer {
         bool resolved = false;
         VkBuffer buffer = VK_NULL_HANDLE;
-        VkDeviceSize size = 0;
+        uint64_t size = 0;
         ResourceState state;
     };
 

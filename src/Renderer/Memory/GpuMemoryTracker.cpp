@@ -1,4 +1,4 @@
-#include "GpuMemoryTracker.h"
+﻿#include "GpuMemoryTracker.h"
 
 namespace gte {
 
@@ -20,7 +20,7 @@ GpuMemoryLocation ClassifyGpuMemoryLocation(VmaAllocator allocator, VmaAllocatio
 }
 
 GpuResourceHandle GpuMemoryTracker::Track(
-    GpuResourceType type, GpuMemoryLocation location, VkDeviceSize sizeBytes, VkFormat format)
+    GpuResourceType type, GpuMemoryLocation location, uint64_t sizeBytes, VkFormat format)
 {
     const GpuResourceRecord record{ type, location, sizeBytes, format };
 

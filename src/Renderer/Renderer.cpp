@@ -238,8 +238,8 @@ Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageA
         return CapturedRawPixels{}; // Unsupported format.
     }
 
-    const VkDeviceSize size =
-        VkDeviceSize(extent.width) * extent.height * depth * static_cast<VkDeviceSize>(bytesPerPixel);
+    const uint64_t size =
+        uint64_t(extent.width) * extent.height * depth * static_cast<uint64_t>(bytesPerPixel);
     Buffer readback = CreateBuffer(size, BufferUsage::TransferDst, BufferMemoryUsage::GpuToCpu, "CaptureReadback");
 
     const VkImageSubresourceRange range{ aspect, 0, 1, 0, 1 };
@@ -295,24 +295,24 @@ std::optional<CapturedSwapchainPixels> Renderer::TakeLastCompletedSwapchainCaptu
 }
 
 Buffer Renderer::CreateBuffer(
-    VkDeviceSize size, BufferUsage usage, BufferMemoryUsage memoryUsage, const char* debugName) const
+    uint64_t size, BufferUsage usage, BufferMemoryUsage memoryUsage, const char* debugName) const
 {
     return m_resources.CreateBuffer(size, usage, memoryUsage, debugName);
 }
 
-Buffer Renderer::CreateStructuredBuffer(VkDeviceSize elementStride, std::uint32_t elementCount,
+Buffer Renderer::CreateStructuredBuffer(uint64_t elementStride, std::uint32_t elementCount,
     BufferMemoryUsage memoryUsage, BufferUsage extraUsage, const char* debugName) const
 {
     return m_resources.CreateStructuredBuffer(elementStride, elementCount, memoryUsage, extraUsage, debugName);
 }
 
-Buffer Renderer::CreateGpuSkinningTargetBuffer(VkDeviceSize size, const char* debugName) const
+Buffer Renderer::CreateGpuSkinningTargetBuffer(uint64_t size, const char* debugName) const
 {
     return m_resources.CreateGpuSkinningTargetBuffer(size, debugName);
 }
 
 Buffer Renderer::CreateDeviceLocalBuffer(
-    const void* data, VkDeviceSize size, BufferUsage usage, const char* debugName) const
+    const void* data, uint64_t size, BufferUsage usage, const char* debugName) const
 {
     return m_resources.CreateDeviceLocalBuffer(data, size, usage, debugName);
 }
@@ -413,7 +413,7 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
 }
 
 void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
-    VkDeviceSize indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, VkDeviceSize countBufferOffset,
+    uint64_t indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset,
     DescriptorSetHandle instanceBufferDescriptorSet, DescriptorSetHandle sceneServicesSet, const Mat4& viewProjMatrix)
 {
     assert(m_currentGraphPassCmd != VK_NULL_HANDLE
@@ -504,38 +504,38 @@ void Renderer::Dispatch(const ComputePipeline& pipeline, VkDescriptorSet descrip
 }
 
 Mesh Renderer::CreateMesh(
-    const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount, const char* debugName) const
+    const void* vertexData, uint64_t vertexDataSize, std::uint32_t vertexCount, const char* debugName) const
 {
     return m_resources.CreateMesh(vertexData, vertexDataSize, vertexCount, debugName);
 }
 
-Mesh Renderer::CreateMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
-    const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount, const char* debugName) const
+Mesh Renderer::CreateMesh(const void* vertexData, uint64_t vertexDataSize, std::uint32_t vertexCount,
+    const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount, const char* debugName) const
 {
     return m_resources.CreateMesh(vertexData, vertexDataSize, vertexCount, indexData, indexDataSize, indexCount, debugName);
 }
 
-Mesh Renderer::CreateSkinnedMesh(const void* vertexData, VkDeviceSize vertexDataSize, std::uint32_t vertexCount,
-    const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount, const char* debugName) const
+Mesh Renderer::CreateSkinnedMesh(const void* vertexData, uint64_t vertexDataSize, std::uint32_t vertexCount,
+    const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount, const char* debugName) const
 {
     return m_resources.CreateSkinnedMesh(
         vertexData, vertexDataSize, vertexCount, indexData, indexDataSize, indexCount, debugName);
 }
 
 std::shared_ptr<Buffer> Renderer::CreateSharedMeshVertexBuffer(
-    const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName) const
+    const void* vertexData, uint64_t vertexDataSize, const char* debugName) const
 {
     return m_resources.CreateSharedMeshVertexBuffer(vertexData, vertexDataSize, debugName);
 }
 
 std::shared_ptr<Buffer> Renderer::CreateSharedSkinnedMeshVertexBuffer(
-    const void* vertexData, VkDeviceSize vertexDataSize, const char* debugName) const
+    const void* vertexData, uint64_t vertexDataSize, const char* debugName) const
 {
     return m_resources.CreateSharedSkinnedMeshVertexBuffer(vertexData, vertexDataSize, debugName);
 }
 
 Mesh Renderer::CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVertexBuffer,
-    std::uint32_t vertexCount, const void* indexData, VkDeviceSize indexDataSize, std::uint32_t indexCount,
+    std::uint32_t vertexCount, const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
     const char* debugName) const
 {
     return m_resources.CreateMeshFromSharedVertexBuffer(

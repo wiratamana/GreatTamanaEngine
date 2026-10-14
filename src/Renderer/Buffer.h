@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "GraphicsHandleRegistry.h"
 #include "Memory/GpuMemoryTracker.h"
@@ -93,7 +93,7 @@ public:
     // `usage` is this engine's own BufferUsage bitmask (see above), NEVER a
     // raw VkBufferUsageFlags - this constructor is the ONE place that value
     // is translated into a real VkBufferUsageFlags bitmask (see Buffer.cpp).
-    Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDeviceSize size, BufferUsage usage,
+    Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, uint64_t size, BufferUsage usage,
         BufferMemoryUsage memoryUsage, const char* debugName = nullptr);
     ~Buffer();
 
@@ -104,7 +104,7 @@ public:
     Buffer& operator=(Buffer&& other) noexcept;
 
     VkBuffer Native() const noexcept { return m_buffer; }
-    VkDeviceSize Size() const noexcept { return m_size; }
+    uint64_t Size() const noexcept { return m_size; }
 
     // Non-null only for buffers created with BufferMemoryUsage::CpuToGpu/
     // GpuToCpu (persistently mapped by VMA) - nullptr for GpuOnly buffers,
@@ -139,7 +139,7 @@ private:
 
     VkBuffer m_buffer = VK_NULL_HANDLE;
     VmaAllocation m_allocation = VK_NULL_HANDLE;
-    VkDeviceSize m_size = 0;
+    uint64_t m_size = 0;
     void* m_mappedData = nullptr;
 
     // Lazily populated by ObjectHandle() above - mutable since resolving is

@@ -16,8 +16,8 @@
 // first consumer (the AddPass()/CreateTexture()/ImportTexture() builder
 // API built on top of these types).
 //
-// Deliberately Vulkan-header-PRESENT-but-Vulkan-call-FREE: VkFormat/
-// VkDeviceSize are the only remaining raw Vulkan-header types used
+// Deliberately Vulkan-header-PRESENT-but-Vulkan-call-FREE:
+// VkFormat is the only remaining raw Vulkan-header type used
 // here (via a minimal <volk.h> include, exactly like FrameRecorder.h's own
 // DrawItem - see that file's header comment), and no Vulkan device/queue
 // call of any kind appears anywhere in this file. This keeps the whole
@@ -237,7 +237,7 @@ struct TextureDesc {
 };
 
 struct BufferDesc {
-    VkDeviceSize size = 0;
+    uint64_t size = 0;
     // Engine-native BufferUsage bitmask (Buffer.h) - never a raw
     // VkBufferUsageFlags, mirroring TextureDesc::usage's own TextureUsage
     // convention immediately above.
@@ -577,8 +577,8 @@ struct PendingBinding {
     // CombinedVolumeImageSampler/CombinedImageViewSampler, which track no
     // implicit sampler of their own.
     SamplerHandle explicitSampler = SamplerHandle::Invalid;
-    VkDeviceSize bufferOffset = 0;
-    VkDeviceSize bufferRange = VK_WHOLE_SIZE;
+    uint64_t bufferOffset = 0;
+    uint64_t bufferRange = VK_WHOLE_SIZE;
 };
 
 struct PassRecord {

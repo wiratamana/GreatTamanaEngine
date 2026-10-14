@@ -101,7 +101,7 @@ void RenderGraphBuilder::PassBuilder::BindDescriptorSetLayout(DescriptorSetLayou
 }
 
 void RenderGraphBuilder::PassBuilder::BindStorageBuffer(
-    std::uint32_t binding, BufferHandle handle, VkDeviceSize offset, VkDeviceSize range)
+    std::uint32_t binding, BufferHandle handle, uint64_t offset, uint64_t range)
 {
     PendingBinding pending;
     pending.binding = binding;
@@ -113,7 +113,7 @@ void RenderGraphBuilder::PassBuilder::BindStorageBuffer(
 }
 
 void RenderGraphBuilder::PassBuilder::BindStorageBuffer(
-    std::uint32_t binding, BufferObjectHandle handle, VkDeviceSize offset, VkDeviceSize range)
+    std::uint32_t binding, BufferObjectHandle handle, uint64_t offset, uint64_t range)
 {
     PendingBinding pending;
     pending.binding = binding;
@@ -251,7 +251,7 @@ RenderGraphBuilder::ImportedTextureSamplers RenderGraphBuilder::ResolveImportedT
     return resolved;
 }
 
-BufferHandle RenderGraphBuilder::ImportBuffer(const char* name, BufferObjectHandle externalBuffer, VkDeviceSize size)
+BufferHandle RenderGraphBuilder::ImportBuffer(const char* name, BufferObjectHandle externalBuffer, uint64_t size)
 {
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::ImportBuffer requires a non-empty, static-storage-duration name");

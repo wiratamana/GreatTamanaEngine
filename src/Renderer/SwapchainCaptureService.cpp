@@ -1,4 +1,4 @@
-﻿#include "SwapchainCaptureService.h"
+#include "SwapchainCaptureService.h"
 
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 
@@ -31,7 +31,7 @@ bool SwapchainCaptureService::RecordCaptureIfRequested(
 
     Slot& slot = m_slots[frameInFlightIndex];
 
-    const VkDeviceSize size = VkDeviceSize(extent.width) * extent.height * 4;
+    const uint64_t size = uint64_t(extent.width) * extent.height * 4;
     if (!slot.readbackBuffer.has_value() || slot.readbackBuffer->Size() != size) {
         // In practice NotifySwapchainRecreated() will already have reset
         // every slot's buffer by the time a real size mismatch could ever
