@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "../Core/Extent.h"
 #include "../Core/PixelFormat.h"
@@ -38,6 +38,7 @@ struct TextureCreateInfo {
     bool storage = false;
     bool transferDst = false;
     bool perLayerViews = false; // One extra 2D view per layer (see LayerView()).
+    bool createImage = true;    // false: only records size/format, creates no Vulkan objects (depth-only RenderTexture).
     TextureFilter filter = TextureFilter::Linear;
     const char* debugName = nullptr; // Stored by pointer - must outlive the Texture.
 };
@@ -48,7 +49,7 @@ class Texture {
 public:
     Texture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
         const TextureCreateInfo& info);
-    ~Texture();
+    virtual ~Texture();
 
     Texture(const Texture&) = delete;
     Texture& operator=(const Texture&) = delete;
@@ -56,7 +57,7 @@ public:
     Texture& operator=(Texture&& other) noexcept;
 
     // Destroys and recreates the image at a new size. Handle() changes; contents are undefined.
-    void Resize(int width, int height);
+    virtual void Resize(int width, int height);
 
     int Width() const noexcept { return m_width; }
     int Height() const noexcept { return m_height; }

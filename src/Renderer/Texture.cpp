@@ -128,6 +128,9 @@ void Texture::Resize(int width, int height)
 
 void Texture::Create()
 {
+    if (!m_info.createImage) {
+        return;
+    }
     try {
         const bool is3D = m_info.dimension == TextureDimension::Tex3D;
         const bool isLayered = m_info.dimension == TextureDimension::Array2D || m_info.dimension == TextureDimension::Cube;
