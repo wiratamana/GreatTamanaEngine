@@ -450,6 +450,19 @@ Pipeline Renderer::CreatePipeline(std::span<const VkFormat> colorFormats, const 
         useMaterialTexture, debugName, useInstanceBuffer, sceneServicesSetLayout);
 }
 
+Pipeline Renderer::CreatePipeline(std::span<const PixelFormat> colorFormats, const std::string& vertexShaderSpirvPath,
+    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
+    const char* debugName, bool useInstanceBuffer, DescriptorSetLayoutHandle sceneServicesSetLayout) const
+{
+    std::vector<VkFormat> vkColorFormats;
+    vkColorFormats.reserve(colorFormats.size());
+    for (const PixelFormat format : colorFormats) {
+        vkColorFormats.push_back(ToVkFormat(format));
+    }
+    return m_resources.CreatePipeline(vkColorFormats, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
+        useMaterialTexture, debugName, useInstanceBuffer, Native(sceneServicesSetLayout));
+}
+
 ComputePipeline Renderer::CreateComputePipeline(const std::string& shaderSpirvPath,
     const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts,
     std::optional<VkPushConstantRange> pushConstantRange) const

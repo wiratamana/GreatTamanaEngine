@@ -99,8 +99,8 @@ ComputeDescriptorSet ShadowCompositeRenderer::EnsureViewDescriptorSet(Renderer& 
 }
 
 void ShadowCompositeRenderer::AddCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-    const char* viewKey, rg::TextureHandle privateTarget, VkExtent2D extent, rg::TextureHandle sceneColorHandle,
-    VkSampler sceneColorSampler, rg::TextureHandle maskHandle, rg::TextureHandle sceneDepthHandle, float strength)
+    const char* viewKey, rg::TextureHandle privateTarget, Extent2D extent, rg::TextureHandle sceneColorHandle,
+    SamplerHandle sceneColorSampler, rg::TextureHandle maskHandle, rg::TextureHandle sceneDepthHandle, float strength)
 {
     const rg::RenderFeatureScope scope(builder, "Shadow");
     EnsurePipeline(renderer);
@@ -123,7 +123,7 @@ void ShadowCompositeRenderer::AddCompositePass(rg::RenderGraphBuilder& builder, 
 
             descriptorSet.Rewrite(
                 std::vector<ComputeDescriptorWrite>{
-                    ComputeDescriptorWrite::CombinedImageSampler(0, sceneColor.view, sceneColorSampler),
+                    ComputeDescriptorWrite::CombinedImageSampler(0, sceneColor.view, Native(sceneColorSampler)),
                     ComputeDescriptorWrite::CombinedImageSampler(1, mask.view, mask.sampler),
                 });
 

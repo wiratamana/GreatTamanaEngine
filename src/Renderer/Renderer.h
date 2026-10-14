@@ -168,6 +168,18 @@ public:
         bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE) const;
 
+    // Vulkan-free sibling of the std::span<const VkFormat> overload above -
+    // converts each PixelFormat to a real VkFormat internally
+    // (VulkanFormatInfo.h's ToVkFormat()) so callers outside src/Renderer
+    // (e.g. Features/*) never need to name VkFormat directly. Pass an empty
+    // span for a depth-only pipeline (zero color attachments) - mirrors
+    // PipelineDesc's own "colorAttachmentCount == 0" depth-only convention
+    // (Core/PipelineDesc.h).
+    Pipeline CreatePipeline(std::span<const PixelFormat> colorFormats, const std::string& vertexShaderSpirvPath,
+        const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
+        bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false,
+        DescriptorSetLayoutHandle sceneServicesSetLayout = DescriptorSetLayoutHandle::Invalid) const;
+
     // Compute pipeline and descriptor factories.
     ComputePipeline CreateComputePipeline(const std::string& shaderSpirvPath,
         const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts = {},

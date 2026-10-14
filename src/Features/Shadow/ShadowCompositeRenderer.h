@@ -1,11 +1,10 @@
 #pragma once
 
 #include "../../Renderer/RenderGraph/RenderGraphTypes.h" // rg::TextureHandle - real struct.
+#include "../../Core/Extent.h"
 #include "../../Core/GraphicsHandles.h"
 #include "../../Renderer/Compute/ComputeDescriptorSet.h"
 #include "../../Renderer/Pipeline.h"
-
-#include <volk.h>
 
 #include <memory>
 #include <string>
@@ -36,8 +35,8 @@ public:
     // this feature acknowledge the current view's depth sub-resource, per
     // RenderFeatureCompositor's mandatory-depth-read-declaration contract.
     void AddCompositePass(rg::RenderGraphBuilder& builder, Renderer& renderer, const char* viewKey,
-        rg::TextureHandle privateTarget, VkExtent2D extent, rg::TextureHandle sceneColorHandle,
-        VkSampler sceneColorSampler, rg::TextureHandle maskHandle, rg::TextureHandle sceneDepthHandle,
+        rg::TextureHandle privateTarget, Extent2D extent, rg::TextureHandle sceneColorHandle,
+        SamplerHandle sceneColorSampler, rg::TextureHandle maskHandle, rg::TextureHandle sceneDepthHandle,
         float strength);
 
 private:

@@ -3,13 +3,12 @@
 #include "ShadowMath.h"
 #include "../../Core/Core.h"
 #include "../../Core/Logging.h"
+#include "../../Core/PixelFormat.h"
 #include "../../Core/Plugins/BuiltinFeatureModuleRegistry.h"
 #include "../../Core/Plugins/RenderFeatureCameraData.h"
 #include "../../Game/Lighting/DirectionalLightResolver.h"
 #include "../../Game/SceneQuery.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
-#include "../../Renderer/GraphicsHandleRegistry.h"
-#include "../../Renderer/VulkanFormatInfo.h"
 
 #include <algorithm>
 #include <cassert>
@@ -72,7 +71,7 @@ void ShadowFeature::EnsureDepthPipelinesBuilt(Renderer& renderer)
 
     auto build = [&](VertexLayout layout, const char* vert, const char* debugName) {
         const PipelineHandle handle = renderSystem.RegisterPipeline(
-            renderer.CreatePipeline(std::span<const VkFormat>{}, vert, "shaders/ShadowDepth.frag.spv", layout,
+            renderer.CreatePipeline(std::span<const PixelFormat>{}, vert, "shaders/ShadowDepth.frag.spv", layout,
                 /*useMaterialTexture=*/false, debugName));
         insertedThisAttempt.push_back(handle);
         m_depthPipelines.byLayout[static_cast<std::size_t>(layout)] = handle;
@@ -226,11 +225,11 @@ void ShadowFeature::RegisterPasses()
             const char* maskName = isGameView ? "Shadow.Mask.GameView" : "Shadow.Mask.SceneView";
             const ShadowSettings safeSettings = SanitizeShadowSettings(m_settings);
             const rg::TextureHandle maskHandle = m_maskRenderer.AddMaskPass(builder, m_core.GetRenderer(), maskName,
-                ToVkExtent2D(viewData->renderTexture->Extent()), realCameraData.invViewProjection,
+                viewData->renderTexture->Extent(), realCameraData.invViewProjection,
                 shadowMap->lightSpaceViewProjection,
-                safeSettings.depthBias, m_mapResolutionInUse, shadowMap->shadowMapHandle, shadowTarget->DepthSampler(),
-                currentViewHandles.depthHandle, Native(currentViewHandles.depthImageView),
-                Native(currentViewHandles.depthSampler));
+                safeSettings.depthBias, m_mapResolutionInUse, shadowMap->shadowMapHandle,
+                shadowTarget->DepthSamplerObjectHandle(), currentViewHandles.depthHandle,
+                currentViewHandles.depthImageView, currentViewHandles.depthSampler);
             if (!maskHandle.IsValid()) {
                 return;
             }
@@ -258,8 +257,8 @@ void ShadowFeature::RegisterPasses()
 
             const ShadowSettings safeSettings = SanitizeShadowSettings(m_settings);
             m_compositeRenderer.AddCompositePass(builder, m_core.GetRenderer(), isGameView ? "Game" : "Scene",
-                privateTarget, ToVkExtent2D(extent), currentViewHandles.colorHandle,
-                Native(currentViewHandles.colorSampler), mask->maskHandle, currentViewHandles.depthHandle,
+                privateTarget, extent, currentViewHandles.colorHandle,
+                currentViewHandles.colorSampler, mask->maskHandle, currentViewHandles.depthHandle,
                 safeSettings.strength);
         },
         RenderFeatureBlendMode::ScreenSpaceMask);

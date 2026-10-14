@@ -30,7 +30,7 @@ void ShadowMaskRenderer::EnsurePipelineBuilt(Renderer& renderer)
 }
 
 ShadowMaskRenderer::ViewState& ShadowMaskRenderer::EnsureViewState(
-    Renderer& renderer, const char* outputName, VkExtent2D extent)
+    Renderer& renderer, const char* outputName, Extent2D extent)
 {
     const auto existing = m_viewStates.find(outputName);
     if (existing != m_viewStates.end()) {
@@ -55,10 +55,10 @@ ShadowMaskRenderer::ViewState& ShadowMaskRenderer::EnsureViewState(
 }
 
 rg::TextureHandle ShadowMaskRenderer::AddMaskPass(rg::RenderGraphBuilder& builder, Renderer& renderer,
-    const char* outputName, VkExtent2D viewExtent, const Mat4& invViewProjection, const Mat4& lightViewProjection,
+    const char* outputName, Extent2D viewExtent, const Mat4& invViewProjection, const Mat4& lightViewProjection,
     float depthBias, std::uint32_t shadowMapResolution, rg::TextureHandle shadowMapHandle,
-    VkSampler shadowMapDepthSampler, rg::TextureHandle sceneDepthHandle, VkImageView sceneDepthImageView,
-    VkSampler sceneDepthSampler)
+    SamplerHandle shadowMapDepthSampler, rg::TextureHandle sceneDepthHandle, ImageViewHandle sceneDepthImageView,
+    SamplerHandle sceneDepthSampler)
 {
     if (!shadowMapHandle.IsValid()) {
         return rg::TextureHandle{};
@@ -111,8 +111,8 @@ rg::TextureHandle ShadowMaskRenderer::AddMaskPass(rg::RenderGraphBuilder& builde
             viewState.descriptorSet.Rewrite(
                 std::vector<ComputeDescriptorWrite>{
                     ComputeDescriptorWrite::StorageBuffer(0, viewState.paramsBuffer->Native()),
-                    ComputeDescriptorWrite::CombinedImageSampler(1, shadowDepth.view, shadowMapDepthSampler),
-                    ComputeDescriptorWrite::CombinedImageSampler(2, sceneDepthImageView, sceneDepthSampler),
+                    ComputeDescriptorWrite::CombinedImageSampler(1, shadowDepth.view, Native(shadowMapDepthSampler)),
+                    ComputeDescriptorWrite::CombinedImageSampler(2, Native(sceneDepthImageView), Native(sceneDepthSampler)),
                     ComputeDescriptorWrite::StorageImage(3, dest.view),
                 });
 
