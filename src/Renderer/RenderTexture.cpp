@@ -1,8 +1,7 @@
 #include "RenderTexture.h"
 
+#include <algorithm>
 #include <cassert>
-#include <cstdint>
-#include <stdexcept>
 #include <utility>
 
 namespace gte {
@@ -11,261 +10,102 @@ RenderTexture::RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTr
     int width, int height, PixelFormat format, PixelFormat depthFormat, const char* debugName,
     const char* depthDebugName, bool allowStorageImageAccess, bool allowDepthSampledAccess, bool createDepthCompanion,
     bool createColorImage)
-    : m_allocator(allocator)
-    , m_tracker(std::move(tracker))
-    , m_debugName(debugName)
-    , m_depthDebugName(depthDebugName)
-    , m_device(device)
-    , m_format(ToVkFormat(format))
-    , m_depthFormat(depthFormat)
-    , m_allowStorageImageAccess(allowStorageImageAccess)
-    , m_allowDepthSampledAccess(allowDepthSampledAccess)
-    , m_createDepthCompanion(createDepthCompanion)
-    , m_createColorImage(createColorImage)
+    : m_format(format)
+    , m_extent{ static_cast<std::uint32_t>(std::max(width, 1)), static_cast<std::uint32_t>(std::max(height, 1)) }
 {
-    assert((m_createColorImage || m_createDepthCompanion)
-        && "RenderTexture: a RenderTexture with neither a color image nor a depth companion is meaningless");
-    Create(width, height);
+    assert((createColorImage || createDepthCompanion) && "RenderTexture needs a color image or a depth companion.");
+    if (createColorImage) {
+        m_color.emplace(allocator, tracker, device,
+            TextureCreateInfo{ .width = width,
+                .height = height,
+                .format = format,
+                .renderTarget = true,
+                .storage = allowStorageImageAccess,
+                .debugName = debugName });
+    }
+    if (createDepthCompanion) {
+        m_depth.emplace(
+            allocator, std::move(tracker), device, width, height, depthFormat, depthDebugName, allowDepthSampledAccess);
+    }
 }
 
 RenderTexture::~RenderTexture()
 {
-    Destroy();
+    ReleaseSamplerHandles();
 }
 
 RenderTexture::RenderTexture(RenderTexture&& other) noexcept
-    : m_allocator(std::exchange(other.m_allocator, VK_NULL_HANDLE))
-    , m_tracker(std::move(other.m_tracker))
-    , m_handle(std::exchange(other.m_handle, kInvalidGpuResourceHandle))
-    , m_debugName(std::exchange(other.m_debugName, nullptr))
-    , m_depthDebugName(std::exchange(other.m_depthDebugName, nullptr))
-    , m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
-    , m_format(other.m_format)
-    , m_depthFormat(other.m_depthFormat)
-    , m_allowStorageImageAccess(other.m_allowStorageImageAccess)
-    , m_allowDepthSampledAccess(other.m_allowDepthSampledAccess)
-    , m_createDepthCompanion(other.m_createDepthCompanion)
-    , m_createColorImage(other.m_createColorImage)
-    , m_image(std::exchange(other.m_image, VK_NULL_HANDLE))
-    , m_allocation(std::exchange(other.m_allocation, VK_NULL_HANDLE))
-    , m_imageView(std::exchange(other.m_imageView, VK_NULL_HANDLE))
-    , m_sampler(std::exchange(other.m_sampler, VK_NULL_HANDLE))
+    : m_format(other.m_format)
     , m_extent(other.m_extent)
+    , m_color(std::move(other.m_color))
+    , m_depth(std::move(other.m_depth))
     , m_samplerObjectHandle(std::exchange(other.m_samplerObjectHandle, CachedSamplerHandle{}))
     , m_depthSamplerObjectHandle(std::exchange(other.m_depthSamplerObjectHandle, CachedSamplerHandle{}))
     , m_currentState(std::exchange(other.m_currentState, rg::ResourceState{}))
-    , m_depthBuffer(std::move(other.m_depthBuffer))
 {
+    other.m_color.reset();
+    other.m_depth.reset();
 }
 
 RenderTexture& RenderTexture::operator=(RenderTexture&& other) noexcept
 {
     if (this != &other) {
-        Destroy();
-        m_allocator = std::exchange(other.m_allocator, VK_NULL_HANDLE);
-        m_tracker = std::move(other.m_tracker);
-        m_handle = std::exchange(other.m_handle, kInvalidGpuResourceHandle);
-        m_debugName = std::exchange(other.m_debugName, nullptr);
-        m_depthDebugName = std::exchange(other.m_depthDebugName, nullptr);
-        m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
+        ReleaseSamplerHandles();
         m_format = other.m_format;
-        m_depthFormat = other.m_depthFormat;
-        m_allowStorageImageAccess = other.m_allowStorageImageAccess;
-        m_allowDepthSampledAccess = other.m_allowDepthSampledAccess;
-        m_createDepthCompanion = other.m_createDepthCompanion;
-        m_createColorImage = other.m_createColorImage;
-        m_image = std::exchange(other.m_image, VK_NULL_HANDLE);
-        m_allocation = std::exchange(other.m_allocation, VK_NULL_HANDLE);
-        m_imageView = std::exchange(other.m_imageView, VK_NULL_HANDLE);
-        m_sampler = std::exchange(other.m_sampler, VK_NULL_HANDLE);
         m_extent = other.m_extent;
+        m_color = std::move(other.m_color);
+        m_depth = std::move(other.m_depth);
+        other.m_color.reset();
+        other.m_depth.reset();
         m_samplerObjectHandle = std::exchange(other.m_samplerObjectHandle, CachedSamplerHandle{});
         m_depthSamplerObjectHandle = std::exchange(other.m_depthSamplerObjectHandle, CachedSamplerHandle{});
         m_currentState = std::exchange(other.m_currentState, rg::ResourceState{});
-        m_depthBuffer = std::move(other.m_depthBuffer);
     }
     return *this;
 }
 
+void RenderTexture::ReleaseSamplerHandles() noexcept
+{
+    // Unregister before the VkSampler goes away so the registry never holds a stale entry.
+    m_samplerObjectHandle.Resolve(VK_NULL_HANDLE);
+    m_depthSamplerObjectHandle.Resolve(VK_NULL_HANDLE);
+}
+
 void RenderTexture::Resize(int width, int height)
 {
-    Destroy();
-    Create(width, height);
-    // A brand-new VkImage is back at UNDEFINED - never carry over whatever
-    // state the old, now-destroyed image happened to end its life in.
-    m_currentState = rg::ResourceState{};
+    ReleaseSamplerHandles();
+    if (m_color) {
+        m_color->Resize(width, height);
+    }
+    if (m_depth) {
+        m_depth->Resize(width, height);
+    }
+    m_extent = Extent2D{ static_cast<std::uint32_t>(std::max(width, 1)), static_cast<std::uint32_t>(std::max(height, 1)) };
+    m_currentState = rg::ResourceState{}; // A new image starts at UNDEFINED.
 }
 
 RenderTarget RenderTexture::Target() const noexcept
 {
     RenderTarget target;
-    target.image = m_image;
-    target.imageView = m_imageView;
-    target.extent = m_extent;
-    target.format = m_format;
-    if (m_depthBuffer) {
-        target.depthImage = m_depthBuffer->Image();
-        target.depthImageView = m_depthBuffer->View();
-        target.depthFormat = m_depthBuffer->NativeFormat();
-        target.depthHasStencil = m_depthBuffer->HasStencilComponent();
+    target.image = Image();
+    target.imageView = View();
+    target.extent = ToVkExtent2D(m_extent);
+    target.format = NativeFormat();
+    if (m_depth) {
+        target.depthImage = m_depth->Image();
+        target.depthImageView = m_depth->View();
+        target.depthFormat = m_depth->NativeFormat();
+        target.depthHasStencil = m_depth->HasStencilComponent();
     }
     return target;
 }
 
-void RenderTexture::Create(int width, int height)
-{
-    // Clamp to at least 1x1 - a docked Editor panel can transiently report
-    // zero size while collapsed/hidden, and a zero-sized VkImage is invalid.
-    // Computed UNCONDITIONALLY, before the createColorImage branch below -
-    // a depth-only RenderTexture still needs a correct Extent() (its
-    // DepthBuffer is sized from these same locals, and Extent()'s callers
-    // need the real size regardless of which half exists).
-    m_extent.width = static_cast<std::uint32_t>(width > 0 ? width : 1);
-    m_extent.height = static_cast<std::uint32_t>(height > 0 ? height : 1);
-
-    // better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views) - the
-    // COLOR-side mirror of the m_createDepthCompanion branch below. Skipped
-    // entirely when m_createColorImage is false - m_image/m_imageView/
-    // m_sampler simply stay VK_NULL_HANDLE, and the color image is NEVER
-    // registered with GpuMemoryTracker at all (not tracked-then-untracked -
-    // never tracked). Every existing consumer already null-checks these
-    // (see Target()/Image()/View()/Sampler()).
-    if (m_createColorImage) {
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.format = m_format;
-        imageInfo.extent = { m_extent.width, m_extent.height, 1 };
-        imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        // COLOR_ATTACHMENT so Renderer::RenderOffscreen() can draw into it,
-        // SAMPLED so it can be displayed later (e.g. an Editor panel wrapping
-        // it in an ImGui descriptor set). STORAGE_BIT is ADDITIONALLY OR'd in
-        // when this RenderTexture was created with allowStorageImageAccess =
-        // true (an `RWTexture` - see
-        // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) - the caller
-        // (GpuResourceFactory::CreateRenderTexture()) is responsible for having
-        // already confirmed `m_format` supports
-        // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT via SupportsStorageImageUsage()
-        // before ever reaching here.
-        imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        if (m_allowStorageImageAccess) {
-            imageInfo.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
-        }
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-        // VMA_MEMORY_USAGE_AUTO lets VMA pick the right memory type from the
-        // image's usage flags (device-local here, since it's a color attachment)
-        // - replaces the manual FindMemoryType()/vkAllocateMemory()/
-        // vkBindImageMemory() dance this used to do by hand.
-        VmaAllocationCreateInfo allocCreateInfo{};
-        allocCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-        VmaAllocationInfo allocationInfo{};
-        if (vmaCreateImage(m_allocator, &imageInfo, &allocCreateInfo, &m_image, &m_allocation, &allocationInfo) !=
-            VK_SUCCESS) {
-            throw std::runtime_error("RenderTexture: vmaCreateImage failed.");
-        }
-
-        // Registers this exact allocation - see AGENTS.md ("GPU resource
-        // memory tracking"). Called from here (not just the constructor) so a
-        // Resize() (Destroy() + Create()) always re-tracks with a fresh handle
-        // reflecting the NEW size - the tracker never holds a stale record.
-        const GpuMemoryLocation location = ClassifyGpuMemoryLocation(m_allocator, m_allocation);
-        m_handle = m_tracker->Track(GpuResourceType::Texture, location, allocationInfo.size, m_format);
-        // editor-core-separation-1 campaign, PHASE4 - unconditional now.
-        if (m_debugName != nullptr) {
-            m_tracker->SetDebugName(m_handle, m_debugName);
-        }
-
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = m_image;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = m_format;
-        viewInfo.components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-                                 VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
-
-        if (vkCreateImageView(m_device, &viewInfo, nullptr, &m_imageView) != VK_SUCCESS) {
-            throw std::runtime_error("RenderTexture: vkCreateImageView failed.");
-        }
-
-        VkSamplerCreateInfo samplerInfo{};
-        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerInfo.magFilter = VK_FILTER_LINEAR;
-        samplerInfo.minFilter = VK_FILTER_LINEAR;
-        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        samplerInfo.minLod = 0.0f;
-        samplerInfo.maxLod = 1.0f;
-
-        if (vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler) != VK_SUCCESS) {
-            throw std::runtime_error("RenderTexture: vkCreateSampler failed.");
-        }
-    }
-
-    // This RenderTexture's own companion depth buffer - see the class
-    // comment for why one (rather than several, as the swapchain needs) is
-    // safe here. Named via m_depthDebugName (if the caller supplied one) so
-    // it shows up as an identifiable engine-owned texture in the Editor's
-    // "Memory" panel instead of "(unnamed)" - see RenderTexture's
-    // constructor comment for the naming convention (e.g. "GameView" /
-    // "GameViewDepth"). Skipped entirely when m_createDepthCompanion is
-    // false (editor-core-separation-27 campaign, BIG STEP 3 of 4) -
-    // m_depthBuffer simply stays null; every existing consumer already
-    // null-checks it (see Target()/DepthSampler()).
-    if (m_createDepthCompanion) {
-        m_depthBuffer = std::make_unique<DepthBuffer>(m_allocator, m_tracker, m_device, width, height, m_depthFormat,
-            m_depthDebugName, m_allowDepthSampledAccess);
-    }
-}
-
-void RenderTexture::Destroy() noexcept
-{
-    // Never leave a stale registry entry pointing at a VkSampler that's
-    // about to be destroyed - mirrors Buffer::Destroy()'s own
-    // m_objectHandle.Resolve(VK_NULL_HANDLE) precedent. Depth sampler is
-    // resolved AFTER m_depthBuffer.reset() below so DepthSampler() already
-    // observes VK_NULL_HANDLE by the time it's asked to unregister.
-    m_samplerObjectHandle.Resolve(VK_NULL_HANDLE);
-
-    m_depthBuffer.reset();
-    m_depthSamplerObjectHandle.Resolve(VK_NULL_HANDLE);
-
-    if (m_sampler != VK_NULL_HANDLE) {
-        vkDestroySampler(m_device, m_sampler, nullptr);
-        m_sampler = VK_NULL_HANDLE;
-    }
-    if (m_imageView != VK_NULL_HANDLE) {
-        vkDestroyImageView(m_device, m_imageView, nullptr);
-        m_imageView = VK_NULL_HANDLE;
-    }
-    if (m_image != VK_NULL_HANDLE) {
-        m_tracker->Untrack(m_handle);
-        m_handle = kInvalidGpuResourceHandle;
-
-        vmaDestroyImage(m_allocator, m_image, m_allocation);
-        m_image = VK_NULL_HANDLE;
-        m_allocation = VK_NULL_HANDLE;
-    }
-}
-
 void RenderTexture::FinalizeForExternalSampling(VkCommandBuffer cmd)
 {
-    assert(m_image != VK_NULL_HANDLE && "FinalizeForExternalSampling: no color image to transition");
+    assert(m_color && "FinalizeForExternalSampling: no color image to transition");
     const rg::ResourceState next = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
     const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    rg::EmitImageBarrier(cmd, m_image, range, m_currentState, next);
+    rg::EmitImageBarrier(cmd, m_color->Image(), range, m_currentState, next);
     m_currentState = next;
 }
 

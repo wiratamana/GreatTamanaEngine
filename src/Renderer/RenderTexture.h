@@ -1,273 +1,74 @@
-#pragma once
+﻿#pragma once
 
 #include "../Core/PixelFormat.h"
 #include "DepthBuffer.h"
-#include "GraphicsHandleRegistry.h" // CachedSamplerHandle/SamplerHandle - SamplerObjectHandle()/DepthSamplerObjectHandle() below.
-#include "Memory/GpuMemoryTracker.h"
+#include "GraphicsHandleRegistry.h" // CachedSamplerHandle
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "RenderTarget.h"
-#include "VulkanFormatInfo.h" // FromVkExtent2D() - Extent() below returns the engine's own Extent2D, never VkExtent2D.
-#include "Vulkan/VulkanAllocator.h"
+#include "Texture.h"
 
 #include <memory>
+#include <optional>
 
 namespace gte {
 
-// RAII wrapper around an off-screen, sampleable color-attachment Vulkan
-// image: owns the VkImage, its backing VmaAllocation (GPU memory, sub-
-// allocated by VMA - see Vulkan/VulkanAllocator.h), a VkImageView, a
-// VkSampler, and its own companion DepthBuffer (see DepthBuffer.h) for its
-// entire lifetime - created in the constructor, destroyed in the
-// destructor. This is the engine's "camera render target" primitive (a
-// Unity-style RenderTexture). Intended uses:
-//
-//   - Editor "Game"/"Scene" panels: a camera renders into one of these via
-//     Renderer::RenderOffscreen(), then the Editor wraps it in an ImGui
-//     descriptor set and displays it inside an ImGui::Image() panel. A
-//     final/release build (no Editor compiled in) instead renders the same
-//     scene straight into the swapchain via Renderer::Present(), fullscreen.
-//   - Future off-screen effects (shadow maps, post-processing chains, etc).
-//
-// Does NOT own the VmaAllocator/VkDevice passed in - both must outlive this
-// texture. Not tied to the swapchain or its frame-in-flight count: a
-// RenderTexture is rendered into synchronously, on demand, via
-// Renderer::RenderOffscreen() (see Renderer.h) rather than every frame in
-// lockstep with presentation - which is also why one shared DepthBuffer per
-// RenderTexture is safe (no frames-in-flight overlap to race against,
-// unlike the swapchain's own per-swapchain-image DepthBuffers - see
-// FramePresenter.h).
-//
-// Registers itself (and its companion DepthBuffer) with a GpuMemoryTracker
-// (see Memory/GpuMemoryTracker.h) every time its underlying image is
-// (re)created - constructor AND Resize() - so the engine's live memory
-// picture always reflects the CURRENT actual allocation, never a stale
-// snapshot from whenever this RenderTexture was first constructed. See
-// AGENTS.md ("GPU resource memory tracking").
+// Off-screen render target: an optional color Texture plus an optional companion DepthBuffer.
+// A depth-only RenderTexture (shadow map) simply has no color image.
 class RenderTexture {
 public:
-    // format defaults to a plain 8-bit BGRA format, matching the common
-    // swapchain format this engine already prefers (see
-    // VulkanSwapchain.cpp's ChooseSurfaceFormat) - override if a caller
-    // needs something else (e.g. an HDR intermediate format later).
-    // depthFormat should always be exactly Renderer::DepthFormat() - see
-    // AGENTS.md ("Render Target Format Matching").
-    //
-    // debugName/depthDebugName are optional and purely cosmetic (see
-    // Buffer.h's doc comment for the full "who actually stores this" story)
-    // if provided: this RenderTexture stores each pointer itself
-    // (not a copy) so Resize() can re-attach the same names to the fresh
-    // handles it creates. debugName names the color image; depthDebugName
-    // separately names its companion DepthBuffer (e.g. "GameView" /
-    // "GameViewDepth") - left null (the default) if the depth side isn't
-    // worth naming individually.
-    //
-    // allowStorageImageAccess (default false - every existing call site is
-    // unaffected) opts this RenderTexture's color image into
-    // VK_IMAGE_USAGE_STORAGE_BIT, the Vulkan mechanism behind an
-    // `RWTexture` (see COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) -
-    // e.g. a compute shader `imageStore`s directly into it. The CALLER
-    // (GpuResourceFactory::CreateRenderTexture(), never this constructor
-    // itself - see FormatCapabilities.h) is responsible for first
-    // confirming `format` actually supports
-    // VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT via SupportsStorageImageUsage()
-    // and throwing loudly if not; this constructor unconditionally trusts
-    // that check already happened and just sets the usage flag. The flag
-    // is remembered as a member (not just a constructor-local bool) so a
-    // later Resize() (Destroy() + Create()) re-applies the exact same
-    // usage flags at the new size, without needing to re-validate the
-    // format's capability (format never changes across a Resize()).
-    //
-    // allowDepthSampledAccess (default false - every existing call site is
-    // unaffected) is the DEPTH-side counterpart of allowStorageImageAccess
-    // above - Atmosphere Scattering + Aerial Perspective campaign, Phase 7
-    // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md).
-    // Forwarded straight through to this RenderTexture's own companion
-    // DepthBuffer's `allowSampledAccess` constructor parameter (see
-    // DepthBuffer.h) - opts the depth image into VK_IMAGE_USAGE_SAMPLED_BIT
-    // plus a real (nearest-filter) VkSampler, so the Aerial Perspective
-    // Composite pass can bind it as `sampler2D sourceDepth`. Applied to the
-    // Game/Scene View's own RenderTexture (see ImGuiEditorLayer.cpp) - no
-    // other call site needs this.
-    // createDepthCompanion (default true - every existing call site is
-    // unaffected) - editor-core-separation-27 campaign, BIG STEP 3 of 4
-    // (Persistent Resource Cache). When false, Create() skips building the
-    // companion DepthBuffer entirely - m_depthBuffer simply stays null for
-    // this RenderTexture's whole lifetime (every existing consumer already
-    // null-checks it - see Target()/DepthSampler() below). This is what
-    // turns a color-only render-graph resource (TextureDesc::hasDepth ==
-    // false) into a true GPU-memory statement (exactly one tracked
-    // allocation) instead of a bookkeeping-only one that still silently
-    // carries an unused depth allocation. The one real consumer is
-    // RenderGraphPersistentResourceCache (introduced in a later phase of
-    // that same campaign) - every other caller keeps getting a depth
-    // companion, byte-for-byte unchanged.
-    //
-    // createColorImage (default true - every existing call site is
-    // unaffected) - better-render-pass-3 campaign, BLOCK 2 (Arbitrary
-    // Render Views). The COLOR-side mirror of createDepthCompanion
-    // immediately above. When false, Create() skips building the color
-    // VkImage/VkImageView/VkSampler entirely - m_image/m_imageView/
-    // m_sampler simply stay VK_NULL_HANDLE for this RenderTexture's whole
-    // lifetime, and the color image is NEVER registered with
-    // GpuMemoryTracker at all (not tracked-then-untracked - never
-    // tracked). Asserted: createColorImage || createDepthCompanion (a
-    // RenderTexture with NEITHER half is meaningless). The one real
-    // consumer is RenderViewRegistry (a later phase of that same campaign)
-    // for a genuinely colorless shadow-map-style view; every other caller
-    // keeps getting a color image, byte-for-byte unchanged.
-    // `format`/`depthFormat` are this engine's own PixelFormat (never a raw
-    // VkFormat) - translated to a real VkFormat internally, right here in
-    // this class (see RenderTexture.cpp's constructor body/Create()) -
-    // callers never need to name a VkFormat at all. See
-    // NativeFormat()/Format() below.
+    // At least one of createColorImage/createDepthCompanion must be true.
+    // debugName/depthDebugName are stored by pointer and must outlive this object.
     RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
-        int height, PixelFormat format = PixelFormat::BGRA8_UNorm,
-        PixelFormat depthFormat = PixelFormat::D32_Float, const char* debugName = nullptr,
-        const char* depthDebugName = nullptr, bool allowStorageImageAccess = false,
-        bool allowDepthSampledAccess = false, bool createDepthCompanion = true,
-        bool createColorImage = true);
+        int height, PixelFormat format = PixelFormat::BGRA8_UNorm, PixelFormat depthFormat = PixelFormat::D32_Float,
+        const char* debugName = nullptr, const char* depthDebugName = nullptr, bool allowStorageImageAccess = false,
+        bool allowDepthSampledAccess = false, bool createDepthCompanion = true, bool createColorImage = true);
     ~RenderTexture();
 
     RenderTexture(const RenderTexture&) = delete;
     RenderTexture& operator=(const RenderTexture&) = delete;
-
     RenderTexture(RenderTexture&& other) noexcept;
     RenderTexture& operator=(RenderTexture&& other) noexcept;
 
-    // Destroys and recreates the underlying color image/view/sampler AND
-    // the companion DepthBuffer at a new size (e.g. an Editor panel being
-    // resized). Contents are undefined afterwards - Renderer::RenderOffscreen()
-    // always clears before drawing anyway, so this is never a problem in
-    // practice. This is a genuinely new VMA allocation - Handle() returns a
-    // DIFFERENT handle after this call (the old one is untracked, a new one
-    // tracked with the new size) - never assume a RenderTexture's handle is
-    // stable across a Resize().
+    // Recreates color and depth at a new size. Handle() changes; contents are undefined.
     void Resize(int width, int height);
 
-    // Describes this texture (color + depth) as a render target, for
-    // Renderer::RenderOffscreen() to draw into.
     RenderTarget Target() const noexcept;
 
-    // Image()/View()/Sampler() legitimately return VK_NULL_HANDLE for a
-    // RenderTexture constructed with createColorImage == false (see this
-    // class's own constructor comment) - every existing caller that
-    // doesn't pass createColorImage keeps getting a real color image,
-    // byte-for-byte unchanged.
-    VkImage Image() const noexcept { return m_image; }
-    VkImageView View() const noexcept { return m_imageView; }
-    // Sampler suitable for reading this texture in a shader/ImGui
-    // descriptor once Renderer::RenderOffscreen() has finished drawing
-    // into it (texture is left in VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    // - see Renderer::RenderOffscreen).
-    VkSampler Sampler() const noexcept { return m_sampler; }
-    // Engine-owned Extent2D, never a raw VkExtent2D - this is the one place
-    // RenderTexture's own real VkExtent2D converts outward (FromVkExtent2D()).
-    Extent2D Extent() const noexcept { return FromVkExtent2D(m_extent); }
-    // Engine-native format - what every caller OUTSIDE this Renderer-tree's
-    // own deep Vulkan plumbing should use.
-    PixelFormat Format() const noexcept { return FromVkFormat(m_format); }
-    // Renderer-tree-internal escape hatch ONLY (Target(), Renderer's own
-    // capture path, ...) - the real VkFormat Vulkan itself was built with.
-    // Never call this from outside src/Renderer.
-    VkFormat NativeFormat() const noexcept { return m_format; }
+    // Null when this RenderTexture has no color image.
+    VkImage Image() const noexcept { return m_color ? m_color->Image() : VK_NULL_HANDLE; }
+    VkImageView View() const noexcept { return m_color ? m_color->View() : VK_NULL_HANDLE; }
+    VkSampler Sampler() const noexcept { return m_color ? m_color->Sampler() : VK_NULL_HANDLE; }
+    // Null unless the depth companion was created with allowDepthSampledAccess.
+    VkSampler DepthSampler() const noexcept { return m_depth ? m_depth->Sampler() : VK_NULL_HANDLE; }
 
-    // Handle into the GpuMemoryTracker this RenderTexture's COLOR image is
-    // registered with - valid until the next Resize() (see above) or
-    // destruction. The companion DepthBuffer is tracked separately under
-    // its own handle (see DepthBuffer::Handle()) - not exposed here since
-    // nothing outside this class currently needs it individually.
-    GpuResourceHandle Handle() const noexcept { return m_handle; }
+    Extent2D Extent() const noexcept { return m_extent; }
+    PixelFormat Format() const noexcept { return m_format; }
+    VkFormat NativeFormat() const noexcept { return ToVkFormat(m_format); }
+    GpuResourceHandle Handle() const noexcept { return m_color ? m_color->Handle() : kInvalidGpuResourceHandle; }
+    bool AllowsStorageImageAccess() const noexcept { return m_color && m_color->AllowsStorageImageAccess(); }
 
-    // Whether this RenderTexture's color image was created with
-    // VK_IMAGE_USAGE_STORAGE_BIT (i.e. an `RWTexture`, see
-    // COMPUTE_PHASE1_RESOURCE_VOCABULARY_STRATEGY_v2.md) - a future
-    // descriptor-set builder (Phase 3) needs this to know whether this
-    // texture is even eligible to be bound as a storage image.
-    bool AllowsStorageImageAccess() const noexcept { return m_allowStorageImageAccess; }
-
-    // Sampler suitable for reading this texture's DEPTH image in a shader
-    // as `sampler2D`, once whichever pass wrote it has finished -
-    // VK_NULL_HANDLE unless this RenderTexture was constructed with
-    // allowDepthSampledAccess = true (see this class's own constructor
-    // comment). NEAREST filtering (see DepthBuffer::Sampler()'s own doc
-    // comment).
-    VkSampler DepthSampler() const noexcept { return m_depthBuffer ? m_depthBuffer->Sampler() : VK_NULL_HANDLE; }
-
-    // Opaque handles for the render-graph import API
-    // (RenderGraphBuilder::ImportTexture()'s own colorSampler/depthSampler
-    // parameters) - never a raw VkSampler, mirroring Buffer::ObjectHandle()'s
-    // own "untracked external Vulkan object exposed as a safe opaque handle"
-    // precedent exactly. Each lazily registers this texture's current
-    // color/depth VkSampler on first call and reuses the same handle on
-    // every later call, automatically re-registering if Resize() (or, for
-    // the depth side, allowDepthSampledAccess toggling) ever changes the
-    // underlying VkSampler - see CachedSamplerHandle::Resolve() (Renderer/
-    // GraphicsHandleRegistry.h).
-    SamplerHandle SamplerObjectHandle() const noexcept { return m_samplerObjectHandle.Resolve(m_sampler); }
+    // Opaque sampler handles for RenderGraphBuilder::ImportTexture(); re-registered automatically after Resize().
+    SamplerHandle SamplerObjectHandle() const noexcept { return m_samplerObjectHandle.Resolve(Sampler()); }
     SamplerHandle DepthSamplerObjectHandle() const noexcept { return m_depthSamplerObjectHandle.Resolve(DepthSampler()); }
 
-    // Last known GPU barrier state of the color image - the single source
-    // of truth a caller reads instead of guessing. Written back by the
-    // render graph (see RenderGraphBuilder::ImportTexture()'s own
-    // `trackedOwner` parameter) once per frame, and by
-    // FinalizeForExternalSampling() below.
+    // Last known GPU barrier state of the color image; written back by the render graph.
     rg::ResourceState CurrentState() const noexcept { return m_currentState; }
     void SetCurrentState(rg::ResourceState state) noexcept { m_currentState = state; }
 
-    // Transitions the color image from whatever CurrentState() says it is
-    // actually in right now to ShaderRead, and records that as the new
-    // current state. Replaces every caller's own previous hardcoded guess.
+    // Transitions the color image from CurrentState() to ShaderRead.
     void FinalizeForExternalSampling(VkCommandBuffer cmd);
 
 private:
-    void Create(int width, int height);
-    void Destroy() noexcept;
+    void ReleaseSamplerHandles() noexcept;
 
-    VmaAllocator m_allocator = VK_NULL_HANDLE;
-    std::shared_ptr<GpuMemoryTracker> m_tracker;
-    GpuResourceHandle m_handle;
-    const char* m_debugName = nullptr;
-    const char* m_depthDebugName = nullptr;
+    PixelFormat m_format = PixelFormat::BGRA8_UNorm;
+    Extent2D m_extent{};
+    std::optional<Texture> m_color;
+    std::optional<DepthBuffer> m_depth;
 
-    VkDevice m_device = VK_NULL_HANDLE;
-    VkFormat m_format = VK_FORMAT_B8G8R8A8_UNORM;
-    // Only ever forwarded straight into this RenderTexture's own companion
-    // DepthBuffer's constructor (see Create()) - never read as a raw
-    // VkFormat anywhere in this class, so it stays PixelFormat, never
-    // translated here at all.
-    PixelFormat m_depthFormat = PixelFormat::D32_Float;
-    bool m_allowStorageImageAccess = false;
-    bool m_allowDepthSampledAccess = false;
-    // editor-core-separation-27 campaign, BIG STEP 3 of 4 (Persistent
-    // Resource Cache) - see the constructor's own doc comment above.
-    bool m_createDepthCompanion = true;
-    // better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views) - see
-    // the constructor's own doc comment above.
-    bool m_createColorImage = true;
-
-    VkImage m_image = VK_NULL_HANDLE;
-    VmaAllocation m_allocation = VK_NULL_HANDLE;
-    VkImageView m_imageView = VK_NULL_HANDLE;
-    VkSampler m_sampler = VK_NULL_HANDLE;
-    VkExtent2D m_extent{};
-
-    // Lazily populated by SamplerObjectHandle()/DepthSamplerObjectHandle()
-    // above - mutable since resolving is logically const (just caches an
-    // opaque registry handle), mirroring Buffer::m_objectHandle exactly.
     mutable CachedSamplerHandle m_samplerObjectHandle;
     mutable CachedSamplerHandle m_depthSamplerObjectHandle;
-
-    // Last known GPU barrier state of the color image - VK_IMAGE_LAYOUT_UNDEFINED
-    // matches a freshly created image. See CurrentState()/SetCurrentState().
     rg::ResourceState m_currentState{};
-
-    // This RenderTexture's own companion depth buffer - see the class
-    // comment for why one shared DepthBuffer per RenderTexture (rather than
-    // several, as the swapchain needs - see FramePresenter.h) is safe here.
-    // std::unique_ptr so RenderTexture can still be constructed as a plain
-    // aggregate-like RAII object without needing DepthBuffer to be
-    // default-constructible - see Create()/Destroy().
-    std::unique_ptr<DepthBuffer> m_depthBuffer;
 };
 
 } // namespace gte

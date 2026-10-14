@@ -678,12 +678,9 @@ add_library(gte_core STATIC
     src/Renderer/GpuResourceFactory.h
     src/Renderer/Buffer.cpp
     src/Renderer/Buffer.h
-    src/Renderer/Texture2D.cpp
     src/Renderer/Texture2D.h
-    src/Renderer/VolumeTexture.cpp
     src/Renderer/VolumeTexture.h
     src/Renderer/VolumeTarget.h
-    src/Renderer/TextureArray2D.cpp
     src/Renderer/TextureArray2D.h
     src/Renderer/TextureArrayTarget.h
     src/Renderer/VolumeTexturePreviewMath.cpp
@@ -732,7 +729,8 @@ add_library(gte_core STATIC
     src/Renderer/Memory/GpuMemoryTracker.h
     src/Renderer/RenderTarget.h
     src/Renderer/RenderTexture.cpp
-    src/Renderer/DepthBuffer.cpp
+    src/Renderer/Texture.cpp
+    src/Renderer/Texture.h
     src/Renderer/DepthBuffer.h
     src/Renderer/RenderTexture.h
     src/Renderer/Vulkan/VulkanInstance.cpp
