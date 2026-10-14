@@ -1,14 +1,8 @@
 #include "Core.h"
 
-// PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8 - the ONE gte_core
-// .cpp file allowed to #include the real src/Editor/EditorLayer.h header
-// (Core.h itself only ever forward-declares IEditorLayer).
+// Access to editor layer implementation.
 #include "../Editor/EditorLayer.h"
 
-// RenderPasses.h/FrameProfiler.h/ScopeTimer.h back "GpuSkinning"/"Present"/
-// "ClearViewTarget" below - RenderPasses.h lives under src/Application/, but
-// that whole folder already sits inside the gte_core CMake target's own
-// source list.
 #include "../Application/RenderPasses.h"
 #include "../Profiling/FrameProfiler.h"
 #include "../Profiling/ScopeTimer.h"
@@ -18,44 +12,14 @@
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
 #include "../Renderer/RenderGraph/RenderFeatureScope.h"
-// The generic, early toggle guard used by the "IndirectDraw" check below.
 #include "../Renderer/RenderGraph/RenderPassToggleGuard.h"
 #include "../Renderer/RenderGraph/RenderPassTagValidation.h"
 #include "../Renderer/GraphicsHandleRegistry.h"
-#include "../Renderer/VulkanFormatInfo.h" // ToVkExtent2D() - PluginRenderFeatureTargetInfo::extent stays VkExtent2D.
-
-// editor-core-separation-22 campaign, PHASE3
-// (task_manager/editor-core-separation-22/
-// PHASE3_FIX_AUDIT_FINDINGS_SIDE_CHANNEL_LEAKS.md) - the pure "which of this
-// batch's own entities are safe to exclude from RenderOpaque's own normal
-// per-entity draw path THIS frame" decision, used by the "GpuDrivenBatches"
-// provider below (fixes PHASE2_COMPLETION_REPORT.md's own finding #19).
+#include "../Renderer/VulkanFormatInfo.h"
 #include "GpuDrivenBatchEntityExclusionLogic.h"
-
-// better-render-pass-1 campaign, PHASE9 (Decision D3) - the pure,
-// Tier-1-testable counter-increment logic backing
-// Core::AddScreenPostProcessPass()'s own RUNTIME auto-priority assignment
-// (see Core::AddScreenPostProcessPass() below for the full reasoning).
 #include "ScreenPostProcessPassPriorityAssignment.h"
-
-// editor-core-separation-6 campaign, PHASE2
-// (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md)
-// - the ONE generic IPluginCapabilityOrchestrator registry. better-render-pass-2
-// campaign, PHASE2 (PHASE2_DISABLE_RUNTIME_CALL_SITES.md) already removed
-// this file's own registration of its two ABI-only implementors
-// (LegacyRenderFeatureOrchestrator/EditorPanelCapabilityOrchestrator);
-// PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) now also removes their own
-// #include lines below, since both classes' .h/.cpp files are deleted
-// outright this phase.
 #include "Plugins/IPluginCapabilityOrchestrator.h"
-// editor-core-separation-6 campaign, PHASE4
-// (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the third real
-// IPluginCapabilityOrchestrator implementation, the real `_v2` render-feature
-// compositing pipeline (PHASE0_MASTER_STRATEGY.md's whole reason to exist).
 #include "Plugins/RenderFeatureCompositor.h"
-// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
-// BIG-STEP 2), PHASE3 - RecordRenderPass()'s own no-op-outside-a-bracket
-// call, added to RegisterProjectRenderPassProvider() below.
 #include "Plugins/ProjectAssemblyRegistrationLedger.h"
 #include "ViewBackgroundReplayKey.h"
 
@@ -71,35 +35,20 @@ namespace gte {
 
 namespace {
 
-// Relocated verbatim from Application.cpp's own former anonymous namespace
-// (editor-core-separation-1 campaign, PHASE13) - see each helper's own doc
-// comment, unchanged.
-
-// Aspect ratio (width / height) of a render target - see RenderSystem::Draw()/
-// Game::Render(). Falls back to a square (1.0f) for a degenerate/zero-height
-// extent rather than dividing by zero.
+// Computes aspect ratio (width / height); defaults to 1.0f on invalid height.
 float AspectRatioOf(int width, int height) noexcept
 {
     return height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
 }
 
-// frame-debugger-1 campaign (task_manager/frame-debugger-1/
-// PHASE0_MASTER_STRATEGY.md, Locked Design Decision #4) - the fixed,
-// deterministic amount of simulated time a single Step advances by, and also
-// what a resume-from-pause frame is clamped to (see Time::Advance()'s own
-// doc comment, Locked Design Decision #11). A plain 1/60s, never derived
-// from real elapsed time.
+// Fixed time step for frame debugging (1/60s).
 constexpr double kFixedStepSeconds = 1.0 / 60.0;
 
-// render-pass-3 campaign, PHASE2 - the ONE rg::RenderPassBlackboard key GPU
-// Skinning's "GpuSkinning" provider Publish()es its resulting
-// std::vector<rg::BufferHandle> under, and "RenderOpaque"'s own provider
-// Fetch()es it back from.
+// Blackboard key for GPU skinning output buffers.
 using rg::operator""_passId;
 constexpr rg::RenderPassId kGpuSkinningOutputsKey = "GpuSkinning.OutputBuffers"_passId;
 
-// Phase 4C - the one, tiny bridge from Renderer's own (Profiling-free)
-// GpuTimingSample::Status into Profiling::GpuSampleStatus.
+// Maps renderer GPU timing status to profiling sample status.
 Profiling::GpuSampleStatus ToProfilingGpuSampleStatus(GpuTimingSample::Status status) noexcept
 {
     switch (status) {
@@ -113,10 +62,7 @@ Profiling::GpuSampleStatus ToProfilingGpuSampleStatus(GpuTimingSample::Status st
     }
 }
 
-// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-// PHASE5 - stable (whole-process-lifetime) per-batch pass/resource names,
-// keyed by GpuDrivenBatchKey - mirrors RenderPasses.cpp's own
-// ReplayStepPassNamePool() precedent exactly.
+// Cached pass and resource names for a GPU-driven batch.
 struct GpuDrivenBatchNames {
     const char* resetPassName = nullptr;
     const char* cullingPassName = nullptr;
@@ -127,6 +73,7 @@ struct GpuDrivenBatchNames {
     const char* displayName = nullptr;
 };
 
+// String pool for stable GPU-driven batch names.
 class GpuDrivenBatchNamePool {
 public:
     const GpuDrivenBatchNames& NamesFor(const GpuDrivenBatchKey& key)
@@ -163,46 +110,32 @@ private:
         GpuDrivenBatchNames names;
     };
 
-    std::deque<std::string> m_storage; // Never reallocates an already-handed-out c_str() pointer.
+    std::deque<std::string> m_storage;
     std::vector<Entry> m_entries;
 };
 
-// A function-local static, mirroring RenderPasses.cpp's own
-// ReplayStepPassNamePool() precedent - whole-process-lifetime, never reset.
+// Global pool of batch names.
 GpuDrivenBatchNamePool& BatchNamePool()
 {
     static GpuDrivenBatchNamePool pool;
     return pool;
 }
 
-// Per-view cached sampler/image-view handle trio - see GraphicsHandleRegistry.h's
-// CachedSamplerHandle/CachedImageViewHandle doc comments. Keeps
-// OpaqueHandleRegistry<VkSampler>/OpaqueHandleRegistry<VkImageView>'s slot
-// counts flat across frames instead of minting (and leaking) a fresh handle
-// every single call - the underlying VkSampler/VkImageView only actually
-// changes when a view's own render target is resized/recreated.
+// Cached view handles to prevent recreating handles every frame.
 struct ScenePassHandleCache {
     CachedSamplerHandle colorSampler;
     CachedImageViewHandle depthImageView;
     CachedSamplerHandle depthSampler;
 };
 
-// Function-local static, keyed by RenderViewId::Hash() - a plain
-// unordered_map is fine here, this holds one entry per distinct active view
-// (Game/Scene today), never grows per-frame.
+// Map of handle caches keyed by view ID hash.
 std::unordered_map<std::uint64_t, ScenePassHandleCache>& ScenePassHandleCaches()
 {
     static std::unordered_map<std::uint64_t, ScenePassHandleCache> caches;
     return caches;
 }
 
-// Shared by the "PostOpaqueFeatures"/"PostTransparentFeatures" providers
-// below - resolves the current view's own already-rendered color/depth into
-// a ScenePassReadHandles, or std::nullopt if this view has no renderTexture
-// or that renderTexture was never built with depth-sampled access enabled
-// (RenderTexture::DepthSampler() returns VK_NULL_HANDLE in that case). This
-// guard is what keeps both providers safe if the set of active views is
-// ever widened beyond today's Game/Scene pair.
+// Resolves color and depth texture handles for post-opaque and post-transparent passes.
 std::optional<ScenePassReadHandles> ResolveScenePassReadHandles(
     const rg::RenderGraphBuilder& builder, const RenderPassViewData* viewData, rg::RenderViewId view)
 {
@@ -212,13 +145,12 @@ std::optional<ScenePassReadHandles> ResolveScenePassReadHandles(
     const rg::RenderGraphBuilder::ImportedTextureSamplers resolved =
         builder.ResolveImportedTextureSamplers(viewData->colorTarget);
     if (resolved.depthSampler == VK_NULL_HANDLE) {
-        return std::nullopt; // Mirrors the old DepthSampler()-null guard - no depth-sampled view available.
+        return std::nullopt;
     }
     ScenePassHandleCache& cache = ScenePassHandleCaches()[view.Hash()];
     ScenePassReadHandles handles;
     handles.colorHandle = viewData->colorTarget;
-    handles.depthHandle = viewData->colorTarget; // Same underlying imported texture - color and depth are
-                                                  // two sub-resources of the one handle in this engine today.
+    handles.depthHandle = viewData->colorTarget;
     handles.colorSampler = cache.colorSampler.Resolve(resolved.colorSampler);
     handles.depthImageView = cache.depthImageView.Resolve(resolved.depthImageView);
     handles.depthSampler = cache.depthSampler.Resolve(resolved.depthSampler);
@@ -229,167 +161,52 @@ std::optional<ScenePassReadHandles> ResolveScenePassReadHandles(
 
 Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices)
     : m_renderer(surfaceProvider)
-    // Block 4 (task_manager/better-render-pass-6), PHASE7 - constructed
-    // immediately after m_renderer (declaration order matches Core.h - see
-    // m_sceneServicesDescriptorSet's own member doc comment there).
     , m_sceneServicesDescriptorSet(m_renderer)
-    // better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views) -
-    // needs a live Renderer&, constructed immediately after m_renderer
-    // (declaration order matches Core.h - see m_renderViewRegistry's own
-    // member doc comment there).
     , m_renderViewRegistry(m_renderer)
-    // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
-    // `, m_pluginRenderOperationRegistry(m_renderer)` removed - that member
-    // (and its type) are deleted outright this phase (ABI-only).
     , m_renderGraph(m_renderer)
     , m_game()
     , m_engineContext()
-    // editor-core-separation-1 campaign, PHASE13 - seeded from
-    // surfaceProvider's own CONSTRUCTION-time size (correct at this exact
-    // moment - no resize has happened yet) - see NotifyWindowResized()'s own
-    // doc comment (Core.h).
     , m_windowWidth(surfaceProvider.Width())
     , m_windowHeight(surfaceProvider.Height())
 {
-    // editor-core-separation-1 campaign, PHASE12 - hostServices is accepted
-    // (satisfying Core's own frozen public contract, design doc Section
-    // 5.2) but not yet stored/used anywhere - no phase before PHASE16 needs
-    // Core to actually report anything through it.
     (void)hostServices;
 
-    // editor-core-separation-6 campaign, PHASE2
-    // (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,
-    // Step 3.4) - populates m_capabilityOrchestrators. Runs BEFORE
-    // RegisterOffscreenRenderPipelineProviders() below (a clearer, more
-    // readable convention - not itself load-bearing, see
-    // RegisterBuiltinCapabilityOrchestrators()'s own doc comment in Core.h).
     RegisterBuiltinCapabilityOrchestrators();
-
-    // render-pass-3 campaign, PHASE2/PHASE3 - registers both
-    // m_offscreenRenderPipeline (every remaining production pass) and
-    // m_presentRenderPipeline ("Present" alone) once, here, at construction
-    // time (editor-core-separation-1 campaign, PHASE13 - relocated from
-    // Application::Application()'s own constructor body, which used to call
-    // these two methods on itself).
     RegisterOffscreenRenderPipelineProviders();
     RegisterPresentRenderPipelineProvider();
 }
 
-// editor-core-separation-6 campaign, PHASE2 - defined here (out-of-line),
-// NOT inline in Core.h, because m_capabilityOrchestrators holds
-// std::unique_ptr<IPluginCapabilityOrchestrator> and that type is only
-// forward-declared in Core.h - see ~Core()'s own doc comment in Core.h for
-// the full "why".
 Core::~Core() = default;
 
-// editor-core-separation-6 campaign, PHASE2
-// (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md,
-// Step 3.4) - adding a brand-new capability kind in the future means writing
-// ONE new class implementing IPluginCapabilityOrchestrator and adding ONE
-// line here - never touching Core::LoadPlugins()'s own body, never touching
-// Core::RegisterOffscreenRenderPipelineProviders()'s own body, ever again.
+// Initializes built-in capability orchestrators.
 void Core::RegisterBuiltinCapabilityOrchestrators()
 {
-    // better-render-pass-2 campaign, PHASE2
-    // (PHASE2_DISABLE_RUNTIME_CALL_SITES.md) - the two ABI-only orchestrator
-    // registrations that used to live here, LegacyRenderFeatureOrchestrator
-    // and EditorPanelCapabilityOrchestrator, are removed outright (Locked
-    // Conclusion D2, PHASE0_MASTER_STRATEGY.md Section 2.4). Both classes
-    // are left intact for now (PHASE3 deletes them) - this is purely "never
-    // register them again". RenderFeatureCompositor below is the one
-    // surviving orchestrator - left completely untouched, since Project
-    // Assembly's on-screen compositing depends on its
-    // ContributeRenderGraphPasses() still being called every frame via the
-    // still-intact generic m_capabilityOrchestrators loop (Decision D3).
-    //
-    // editor-core-separation-6 campaign, PHASE4
-    // (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the real
-    // `_v2` render-feature compositing pipeline - reuses the SAME m_renderer
-    // member every other real pass in this file already reads (never a second,
-    // duplicate Renderer instance).
-    //
-    // editor-core-separation-6 campaign, PHASE7
-    // (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - m_renderFeatureCompositorPtr
-    // is captured HERE, at the exact same statement that constructs the
-    // owning std::unique_ptr, BEFORE it is moved into
-    // m_capabilityOrchestrators - see Core.h's own doc comment on
-    // GetRenderFeatureCompositor()/m_renderFeatureCompositorPtr for why this
-    // is a plain, zero-cost pointer with no dynamic_cast/RTTI involved.
-    // better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
-    // RenderFeatureCompositor's constructor no longer takes a trailing
-    // PluginRenderOperationRegistry& parameter (that type is deleted outright
-    // this phase, ABI-only).
     auto renderFeatureCompositor = std::make_unique<RenderFeatureCompositor>(*this, m_renderer);
     m_renderFeatureCompositorPtr = renderFeatureCompositor.get();
     m_capabilityOrchestrators.push_back(std::move(renderFeatureCompositor));
 }
 
-// better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
-// Core::LoadPlugins() removed outright, along with its private m_pluginHost
-// member (Core.h) - PluginHost.h/.cpp are deleted this phase (ABI-only; the
-// one call site that ever invoked this method, EditorHost.cpp's own, was
-// already removed by PHASE2, per Locked Conclusion D2,
-// PHASE0_MASTER_STRATEGY.md Section 2.4).
-
-// editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
-// thin pass-through into m_projectAssemblyHost, mirroring LoadPlugins()
-// immediately above exactly (always compiled - only EditorHost.cpp's own
-// call site is gated, behind `#if GTE_ENABLE_PROJECT_ASSEMBLIES`, its own,
-// separate flag, never GTE_ENABLE_PLUGINS).
+// Loads dynamic assemblies for the project.
 void Core::LoadProjectAssemblies(const std::filesystem::path& outputDirectory, EditorHost* editorHost)
 {
     m_projectAssemblyHost.LoadProjectAssemblies(outputDirectory, *this, editorHost);
 }
 
-// editor-core-separation-11 campaign (Project Assembly system), PHASE8
-// (Finding B) - thin pass-through into m_offscreenRenderPipeline.Register(),
-// mirroring LoadPlugins()/LoadProjectAssemblies() immediately above exactly.
-// Always compiled (no #if guard here - a Project Assembly's own
-// GTE_RegisterProject entry point calls this directly, unconditionally,
-// exactly as LoadProjectAssemblies() itself is called from PHASE5's own
-// ProjectAssemblyHost, which only ever runs when GTE_ENABLE_PROJECT_ASSEMBLIES
-// is already on). m_offscreenRenderPipeline is confirmed the correct target:
-// it is the pipeline every production Game-View/Scene-View pass
-// ("GpuSkinning", "RenderOpaque",
-// "GpuDrivenBatches", ...) registers onto (see
-// RegisterOffscreenRenderPipelineProviders() below) - m_presentRenderPipeline
-// is the separate, narrower pipeline used ONLY for the one "Present"
-// pass. `timing` forwards straight into the underlying 4-argument
-// Register() overload, defaulting to its own BeforeDeferredPasses default -
-// every pre-existing 3-argument call site keeps compiling unmodified. Safe
-// to call any time after Core's own constructor has run (a Project
-// Assembly's GTE_RegisterProject runs from EditorHost.cpp's constructor
-// body, strictly after Core's own construction) - Register() merely appends
-// to an internal std::vector read fresh, in full, every frame by
-// DeclareInto(), so registering after construction but before the first
-// real frame renders behaves identically to registering during
-// construction.
+// Registers a custom render pass provider from a project assembly.
 void Core::RegisterProjectRenderPassProvider(const char* debugName, rg::ProviderScope scope,
     rg::RenderPassProvider provider, rg::ProviderTiming timing)
 {
     m_offscreenRenderPipeline.Register(debugName, scope, std::move(provider), timing);
-    // editor-core-separation-13 campaign, PHASE3 - safe no-op outside an
-    // active ProjectAssemblyRegistrationLedger::BeginRecordingFor() bracket.
     ProjectAssemblyRegistrationLedger::Instance().RecordRenderPass(debugName);
 }
 
-// editor-core-separation-13 campaign, PHASE3 - the teardown counterpart of
-// RegisterProjectRenderPassProvider() immediately above, called ONLY by
-// ProjectAssemblyRegistrationLedger::UnregisterEverythingFor() (see that
-// class for the full reasoning) - never by any Project Assembly's own
-// authored code directly.
+// Unregisters a custom render pass provider.
 void Core::UnregisterProjectRenderPassProvider(const char* debugName)
 {
     m_offscreenRenderPipeline.Unregister(debugName);
 }
 
-// Thin pass-throughs into m_renderViewRegistry. `depthOnly` (default false)
-// translates to RenderViewDesc{ hasColor = !depthOnly, hasDepth = true } -
-// a depth-only view always keeps its depth half and never allocates a
-// color image. See Core.h's own doc comment on
-// CreateRenderView()/FindRenderViewTarget() for the full "why
-// RegisterProjectRenderPassProvider(), never AddScreenPostProcessPass()"
-// reasoning the writer pass itself must follow.
+// Creates or retrieves a persistent render view.
 rg::RenderViewId Core::CreateRenderView(const char* name, std::uint32_t width, std::uint32_t height,
     bool depthOnly, bool allowDepthSampledAccess)
 {
@@ -408,12 +225,7 @@ RenderTexture* Core::FindRenderViewTarget(rg::RenderViewId view) const noexcept
 }
 
 namespace {
-// Shared validation for RegisterProjectRenderFeature()/
-// RegisterBuiltInRenderFeature() - null/length-checks debugName and builds
-// the descriptor. Returns nullopt (logged under `callerName`) on failure.
-// GtePluginRenderFeatureDescriptor::name is a fixed char[64] (63 usable
-// bytes) - rejected outright rather than silently truncated, since two long
-// names sharing the same first 63 bytes would otherwise collide undetected.
+// Validates descriptor name length (max 63 characters) and constructs descriptor.
 std::optional<GtePluginRenderFeatureDescriptor> BuildValidatedRenderFeatureDescriptor(const char* callerName,
     const char* debugName, RenderFeatureStage stage, RenderFeatureBlendMode blendMode, std::int32_t priority)
 {
@@ -423,23 +235,20 @@ std::optional<GtePluginRenderFeatureDescriptor> BuildValidatedRenderFeatureDescr
     }
     if (std::strlen(debugName) > 63) {
         GTE_LOG_WARNING("Core", std::string(callerName) + "('" + debugName
-            + "') failed - name exceeds the 63-byte limit for GtePluginRenderFeatureDescriptor::name; "
-            "shorten it (never silently truncated).");
+            + "') failed - name exceeds the 63-byte limit; shorten it.");
         return std::nullopt;
     }
     return MakeRenderFeatureDescriptor(debugName, stage, priority, blendMode);
 }
 } // namespace
 
-// Thin pass-through into RenderFeatureCompositor::RegisterProjectFeature().
-// On success, records into ProjectAssemblyRegistrationLedger so project
-// hot-reload tears this feature down automatically.
+// Registers a project render feature and records it in the hot-reload ledger.
 bool Core::RegisterProjectRenderFeature(const char* debugName, RenderFeatureStage stage,
     RenderFeatureBlendMode blendMode, std::int32_t priority, ProjectRenderFeatureCallback callback)
 {
     if (m_renderFeatureCompositorPtr == nullptr) {
         GTE_LOG_WARNING("Core", "RegisterProjectRenderFeature('" + std::string(debugName != nullptr ? debugName : "<null>")
-            + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+            + "') failed - no RenderFeatureCompositor registered.");
         return false;
     }
     const std::optional<GtePluginRenderFeatureDescriptor> descriptor =
@@ -450,16 +259,12 @@ bool Core::RegisterProjectRenderFeature(const char* debugName, RenderFeatureStag
 
     const bool registered = m_renderFeatureCompositorPtr->RegisterProjectFeature(*descriptor, std::move(callback));
     if (registered) {
-        // Gated on success: recording unconditionally would let the ledger
-        // track a name that was never actually registered.
         ProjectAssemblyRegistrationLedger::Instance().RecordRenderFeature(debugName);
     }
     return registered;
 }
 
-// Teardown counterpart of RegisterProjectRenderFeature(). Null-safe; forwards
-// straight to UnregisterProjectFeature() - no length check needed (an
-// over-length name could never have been successfully registered).
+// Unregisters a project render feature.
 void Core::UnregisterProjectRenderFeature(const char* debugName)
 {
     if (m_renderFeatureCompositorPtr == nullptr || debugName == nullptr) {
@@ -468,13 +273,12 @@ void Core::UnregisterProjectRenderFeature(const char* debugName)
     m_renderFeatureCompositorPtr->UnregisterProjectFeature(debugName);
 }
 
-// better-render-pass-5 effort, BLOCK 3, PHASE3 - see this method's own
-// doc comment (Core.h) for the full contract.
+// Registers a custom pass executed before opaque geometry.
 bool Core::AddPreOpaquePass(const char* debugName, ProjectPreOpaqueCallback callback, std::int32_t priority)
 {
     if (m_renderFeatureCompositorPtr == nullptr) {
         GTE_LOG_WARNING("Core", "AddPreOpaquePass('" + std::string(debugName != nullptr ? debugName : "<null>")
-            + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+            + "') failed - no RenderFeatureCompositor registered.");
         return false;
     }
     if (debugName == nullptr) {
@@ -483,28 +287,19 @@ bool Core::AddPreOpaquePass(const char* debugName, ProjectPreOpaqueCallback call
     }
     if (std::strlen(debugName) > 63) {
         GTE_LOG_WARNING("Core", "AddPreOpaquePass('" + std::string(debugName)
-            + "') failed - name exceeds the 63-byte limit this engine's registration surfaces consistently "
-            "enforce; shorten it (never silently truncated).");
+            + "') failed - name exceeds the 63-byte limit; shorten it.");
         return false;
     }
 
     const bool registered =
         m_renderFeatureCompositorPtr->RegisterPreOpaqueFeature(debugName, priority, std::move(callback));
     if (registered) {
-        // editor-core-separation-23 campaign, PHASE4's own precedent,
-        // extended here - gated on success for the exact same reason
-        // RecordRenderFeature() already is (RegisterPreOpaqueFeature()
-        // can genuinely fail - duplicate name).
         ProjectAssemblyRegistrationLedger::Instance().RecordPreOpaqueFeature(debugName);
     }
     return registered;
 }
 
-// better-render-pass-5 effort, BLOCK 3, PHASE3 - the teardown
-// counterpart of AddPreOpaquePass() immediately above. Null-safe;
-// forwards straight to UnregisterPreOpaqueFeature() - no length check
-// needed (an over-length name could never have been successfully
-// registered in the first place).
+// Unregisters a pre-opaque pass.
 void Core::RemovePreOpaquePass(const char* debugName)
 {
     if (m_renderFeatureCompositorPtr == nullptr || debugName == nullptr) {
@@ -513,13 +308,12 @@ void Core::RemovePreOpaquePass(const char* debugName)
     m_renderFeatureCompositorPtr->UnregisterPreOpaqueFeature(debugName);
 }
 
-// Same contract as AddPreOpaquePass() above, for the PostOpaque stage - see
-// that method's own doc comment (Core.h) for the full shared contract.
+// Registers a custom pass executed after opaque geometry.
 bool Core::AddPostOpaquePass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority)
 {
     if (m_renderFeatureCompositorPtr == nullptr) {
         GTE_LOG_WARNING("Core", "AddPostOpaquePass('" + std::string(debugName != nullptr ? debugName : "<null>")
-            + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+            + "') failed - no RenderFeatureCompositor registered.");
         return false;
     }
     if (debugName == nullptr) {
@@ -528,8 +322,7 @@ bool Core::AddPostOpaquePass(const char* debugName, ProjectScenePassCallback cal
     }
     if (std::strlen(debugName) > 63) {
         GTE_LOG_WARNING("Core", "AddPostOpaquePass('" + std::string(debugName)
-            + "') failed - name exceeds the 63-byte limit this engine's registration surfaces consistently "
-            "enforce; shorten it (never silently truncated).");
+            + "') failed - name exceeds the 63-byte limit; shorten it.");
         return false;
     }
 
@@ -541,8 +334,7 @@ bool Core::AddPostOpaquePass(const char* debugName, ProjectScenePassCallback cal
     return registered;
 }
 
-// Teardown counterpart of AddPostOpaquePass() immediately above. Null-safe;
-// a safe no-op if debugName was never successfully registered.
+// Unregisters a post-opaque pass.
 void Core::RemovePostOpaquePass(const char* debugName)
 {
     if (m_renderFeatureCompositorPtr == nullptr || debugName == nullptr) {
@@ -551,13 +343,12 @@ void Core::RemovePostOpaquePass(const char* debugName)
     m_renderFeatureCompositorPtr->UnregisterPostOpaqueFeature(debugName);
 }
 
-// Same contract as AddPreOpaquePass() above, for the PostTransparent stage -
-// see that method's own doc comment (Core.h) for the full shared contract.
+// Registers a custom pass executed after transparent geometry.
 bool Core::AddPostTransparentPass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority)
 {
     if (m_renderFeatureCompositorPtr == nullptr) {
         GTE_LOG_WARNING("Core", "AddPostTransparentPass('" + std::string(debugName != nullptr ? debugName : "<null>")
-            + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+            + "') failed - no RenderFeatureCompositor registered.");
         return false;
     }
     if (debugName == nullptr) {
@@ -566,8 +357,7 @@ bool Core::AddPostTransparentPass(const char* debugName, ProjectScenePassCallbac
     }
     if (std::strlen(debugName) > 63) {
         GTE_LOG_WARNING("Core", "AddPostTransparentPass('" + std::string(debugName)
-            + "') failed - name exceeds the 63-byte limit this engine's registration surfaces consistently "
-            "enforce; shorten it (never silently truncated).");
+            + "') failed - name exceeds the 63-byte limit; shorten it.");
         return false;
     }
 
@@ -579,8 +369,7 @@ bool Core::AddPostTransparentPass(const char* debugName, ProjectScenePassCallbac
     return registered;
 }
 
-// Teardown counterpart of AddPostTransparentPass() immediately above.
-// Null-safe; a safe no-op if debugName was never successfully registered.
+// Unregisters a post-transparent pass.
 void Core::RemovePostTransparentPass(const char* debugName)
 {
     if (m_renderFeatureCompositorPtr == nullptr || debugName == nullptr) {
@@ -589,26 +378,7 @@ void Core::RemovePostTransparentPass(const char* debugName)
     m_renderFeatureCompositorPtr->UnregisterPostTransparentFeature(debugName);
 }
 
-// better-render-pass-1 campaign, PHASE9 (Decision D3) - additive convenience
-// wrapper over RegisterProjectRenderFeature() immediately above: fixes stage
-// to RenderFeatureStage::PostComposite (the one, real "draw over the final
-// composited screen" hook point "screen post-process pass" means today -
-// only PostComposite/PreUI are actually wired into the live render graph at
-// all, see RenderFeatureDescriptor.h's own doc comment), and auto-assigns a
-// collision-tolerant priority at RUNTIME via a simple, monotonically-
-// incrementing, function-local `static` counter (shared process-wide, never
-// reset - a function-local static is the lower-risk, smaller-diff choice
-// over a dedicated private Core member, and Core is a singleton-per-process
-// composition root in practice) when the caller does not supply one
-// explicitly. `RenderFeatureCompositor`'s own documented collision policy
-// (RenderFeatureDescriptor.h's `priority` field doc comment) already
-// tolerates a priority collision gracefully (a loud GTE_LOG_WARNING + a
-// stable, deterministic lexical tie-break, never a crash) - a simple
-// incrementing counter is therefore a SAFE choice even though it does not
-// guarantee global uniqueness against a caller who ALSO separately calls the
-// full RegisterProjectRenderFeature() with an explicit, colliding priority
-// value; this is an accepted, already-documented degrade, not a new risk
-// this phase introduces.
+// Registers a post-composite screen pass with an auto-incremented priority if none is specified.
 bool Core::AddScreenPostProcessPass(const char* debugName, ProjectRenderFeatureCallback callback,
     RenderFeatureBlendMode blendMode, std::optional<std::int32_t> priority)
 {
@@ -620,18 +390,7 @@ bool Core::AddScreenPostProcessPass(const char* debugName, ProjectRenderFeatureC
         debugName, RenderFeatureStage::PostComposite, blendMode, resolvedPriority, std::move(callback));
 }
 
-// Migration scaffold (see chat history, UniversalRenderPassCallback.h) -
-// PHASE 3 COMPLETE (full deletion, per explicit instruction). This is now
-// the ONE real implementation for every built-in feature's render-pass
-// registration - the 4 old methods (RegisterBuiltInRenderFeature,
-// AddBuiltInPreOpaquePass, AddBuiltInPostOpaquePass,
-// AddBuiltInPostTransparentPass) are GONE, not hidden - their validation/
-// logging bodies are inlined into the matching case below verbatim (an
-// exhaustive, whole-repository search confirmed they had no other caller
-// left to break). BuildValidatedRenderFeatureDescriptor() (anonymous
-// namespace, above) is the SAME shared helper RegisterProjectRenderFeature()
-// still uses - reused here rather than re-duplicated a second time for the
-// PostComposite/PreUI case.
+// Registers built-in engine passes for a specific frame event.
 bool Core::RegisterRenderPass(FrameEvent event, const char* debugName, std::int32_t priority,
     UniversalRenderPassAction action, RenderFeatureBlendMode blendMode)
 {
@@ -639,7 +398,7 @@ bool Core::RegisterRenderPass(FrameEvent event, const char* debugName, std::int3
     case FrameEvent::PreOpaque: {
         if (m_renderFeatureCompositorPtr == nullptr) {
             GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName != nullptr ? debugName : "<null>")
-                + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+                + "') failed - no RenderFeatureCompositor registered.");
             return false;
         }
         if (debugName == nullptr) {
@@ -648,13 +407,9 @@ bool Core::RegisterRenderPass(FrameEvent event, const char* debugName, std::int3
         }
         if (std::strlen(debugName) > 63) {
             GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName)
-                + "') failed - name exceeds the 63-byte limit this engine's registration surfaces consistently "
-                "enforce; shorten it (never silently truncated).");
+                + "') failed - name exceeds the 63-byte limit; shorten it.");
             return false;
         }
-        // privateTarget/extent/currentViewHandles/cameraData are all
-        // PostOpaque-or-later-only fields - safe, invalid placeholders here.
-        // See UniversalRenderPassCallback.h.
         return m_renderFeatureCompositorPtr->RegisterBuiltInPreOpaqueFeature(debugName, priority,
             [action](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId view) {
                 action(builder, blackboard, view, rg::TextureHandle{}, Extent2D{}, ScenePassReadHandles{},
@@ -665,7 +420,7 @@ bool Core::RegisterRenderPass(FrameEvent event, const char* debugName, std::int3
     case FrameEvent::PostOpaque: {
         if (m_renderFeatureCompositorPtr == nullptr) {
             GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName != nullptr ? debugName : "<null>")
-                + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+                + "') failed - no RenderFeatureCompositor registered.");
             return false;
         }
         if (debugName == nullptr) {
@@ -674,13 +429,9 @@ bool Core::RegisterRenderPass(FrameEvent event, const char* debugName, std::int3
         }
         if (std::strlen(debugName) > 63) {
             GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName)
-                + "') failed - name exceeds the 63-byte limit this engine's registration surfaces consistently "
-                "enforce; shorten it (never silently truncated).");
+                + "') failed - name exceeds the 63-byte limit; shorten it.");
             return false;
         }
-        // `currentViewHandles` is real and valid here - only
-        // privateTarget/extent/cameraData (PostComposite/PreUI-only fields)
-        // are safe, invalid placeholders.
         return m_renderFeatureCompositorPtr->RegisterBuiltInPostOpaqueFeature(debugName, priority,
             [action](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId view,
                 const ScenePassReadHandles& currentViewHandles) {
@@ -692,7 +443,7 @@ bool Core::RegisterRenderPass(FrameEvent event, const char* debugName, std::int3
     case FrameEvent::PostTransparent: {
         if (m_renderFeatureCompositorPtr == nullptr) {
             GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName != nullptr ? debugName : "<null>")
-                + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+                + "') failed - no RenderFeatureCompositor registered.");
             return false;
         }
         if (debugName == nullptr) {
@@ -701,8 +452,7 @@ bool Core::RegisterRenderPass(FrameEvent event, const char* debugName, std::int3
         }
         if (std::strlen(debugName) > 63) {
             GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName)
-                + "') failed - name exceeds the 63-byte limit this engine's registration surfaces consistently "
-                "enforce; shorten it (never silently truncated).");
+                + "') failed - name exceeds the 63-byte limit; shorten it.");
             return false;
         }
         return m_renderFeatureCompositorPtr->RegisterBuiltInPostTransparentFeature(debugName, priority,
@@ -717,7 +467,7 @@ bool Core::RegisterRenderPass(FrameEvent event, const char* debugName, std::int3
     case FrameEvent::PreUI: {
         if (m_renderFeatureCompositorPtr == nullptr) {
             GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName != nullptr ? debugName : "<null>")
-                + "') failed - no RenderFeatureCompositor orchestrator is registered in this build.");
+                + "') failed - no RenderFeatureCompositor registered.");
             return false;
         }
         const RenderFeatureStage stage =
@@ -741,16 +491,12 @@ void Core::Update(const InputFrame& input, float deltaTime)
     const bool steppedThisFrame = input.playbackPaused && input.stepRequested;
     m_engineContext.time.Advance(static_cast<double>(deltaTime), input.playbackPaused, steppedThisFrame, kFixedStepSeconds);
 
-    // Game::Update() itself is already wrapped in
-    // GTE_PROFILE_SCOPE("Game::Update") (see src/Game/Game.cpp) - not
-    // wrapped again here too (see AGENTS.md, "Profiling").
     if (input.inputState != nullptr) {
         m_game.Update(m_engineContext, *input.inputState);
     }
 }
 
-// render-pass-3 campaign, PHASE3 (Step 3.1) - a small, linear scan (the
-// realistic view count is 0-2, so this is never worth a hashed lookup).
+// Finds active view data by view ID.
 const RenderPassViewData* Core::FindViewData(rg::RenderViewId view) const noexcept
 {
     for (const RenderPassViewData& viewData : m_currentViewDataThisFrame) {
@@ -761,29 +507,20 @@ const RenderPassViewData* Core::FindViewData(rg::RenderViewId view) const noexce
     return nullptr;
 }
 
-// Public, read-only pass-through onto FindViewData() immediately above, for
-// RenderPipeline-registered callers outside Core.cpp that hold a
-// RenderViewId but no access to Core's own private state.
+// Public accessor for view data.
 std::optional<RenderPassViewData> Core::FindRenderPassViewData(rg::RenderViewId view) const noexcept
 {
     const RenderPassViewData* viewData = FindViewData(view);
     return viewData != nullptr ? std::optional<RenderPassViewData>(*viewData) : std::nullopt;
 }
 
-// RegisterFinalizeForSamplingHook()'s own doc comment (Core.h) states the
-// full contract: called once, at construction time, main-thread-only, no
-// Unregister. A duplicate name is refused - logged unconditionally (so a
-// release build still leaves a discoverable trace) and asserted in debug
-// builds, mirroring DetectRenderPassEventContradictions()'s own precedent
-// (docs/conventions/render-pass-toggle-honesty.md) rather than
-// RegisterSceneServiceSlot()'s idempotent-re-registration one, since this
-// mechanism has no legitimate non-error duplicate case.
+// Registers a callback to finalize a feature's output texture for sampling.
 bool Core::RegisterFinalizeForSamplingHook(const char* name, FinalizeForSamplingCallback callback)
 {
     for (const FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
         if (entry.name == name) {
             GTE_LOG_ERROR("Core", std::string("RegisterFinalizeForSamplingHook: duplicate name '") + name + "' - refused.");
-            assert(false && "RegisterFinalizeForSamplingHook: duplicate name - see the GTE_LOG_ERROR immediately above.");
+            assert(false && "RegisterFinalizeForSamplingHook: duplicate name.");
             return false;
         }
     }
@@ -791,8 +528,7 @@ bool Core::RegisterFinalizeForSamplingHook(const char* name, FinalizeForSampling
     return true;
 }
 
-// Duplicate name refused the same way RegisterFinalizeForSamplingHook()
-// refuses one - no legitimate duplicate case exists here either.
+// Registers a pass name to be included in GPU content stats.
 bool Core::RegisterViewContentPassName(const char* name)
 {
     if (name == nullptr) {
@@ -801,7 +537,7 @@ bool Core::RegisterViewContentPassName(const char* name)
     for (const std::string& existing : m_viewContentPassNames) {
         if (existing == name) {
             GTE_LOG_ERROR("Core", std::string("RegisterViewContentPassName: duplicate name '") + name + "' - refused.");
-            assert(false && "RegisterViewContentPassName: duplicate name - see the GTE_LOG_ERROR above.");
+            assert(false && "RegisterViewContentPassName: duplicate name.");
             return false;
         }
     }
@@ -809,13 +545,7 @@ bool Core::RegisterViewContentPassName(const char* name)
     return true;
 }
 
-// Linear scan (realistic hook count is 1-3, mirrors FindViewData()'s own
-// precedent) - returns nullptr both when `name` is not registered and when
-// the registered callback itself returns nullptr. Wraps the raw `cmd`
-// into an engine-owned rg::CommandBuffer ONCE here (null DrawStats/default
-// write-target/null event-sink - this finalize step is never attributed to
-// any one render-graph pass) so every registered hook deals exclusively in
-// rg::CommandBuffer, never the raw Vulkan handle itself.
+// Invokes registered texture finalization hook with a wrapped command buffer.
 RenderTexture* Core::DispatchFinalizeForSamplingHook(const char* name, VkCommandBuffer cmd)
 {
     for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
@@ -828,9 +558,7 @@ RenderTexture* Core::DispatchFinalizeForSamplingHook(const char* name, VkCommand
     return nullptr;
 }
 
-// Always the view's own real target - never a feature's composited output.
-// See Core.h's own doc comment: a composited-output override mechanism was
-// considered and deleted before any feature ever published through it.
+// Resolves target texture, extent, and sampler for the active view.
 std::optional<Core::PluginRenderFeatureTargetInfo> Core::FindPluginRenderFeatureTarget(
     const rg::RenderPassFrameContext& frame)
 {
@@ -846,39 +574,18 @@ std::optional<Core::PluginRenderFeatureTargetInfo> Core::FindPluginRenderFeature
     return info;
 }
 
-// render-pass-3 campaign, PHASE2/PHASE3 - registers every remaining
-// production pass onto m_offscreenRenderPipeline. Relocated verbatim from
-// Application::RegisterOffscreenRenderPipelineProviders() (editor-core-
-// separation-1 campaign, PHASE13) - every m_editorLayer-> call site below is
-// now reached through Core's OWN null-checked hook (Locked Design Decision
-// #8's first bucket: GameViewTarget()/SceneViewTarget()/RenderSceneGrid()
-// physically live inside this per-frame orchestration body, so they moved
-// here together with it).
+// Registers all standard offscreen passes into the pipeline.
 void Core::RegisterOffscreenRenderPipelineProviders()
 {
     m_offscreenRenderPipeline.SetLegacyViewScopeTranslator(&TranslateLegacyViewScope);
-    // editor-core-separation-8 campaign, PHASE1 - see RenderPassToggleRegistry.h's
-    // own header comment for the full contract.
     m_offscreenRenderPipeline.SetPassToggleRegistry(&m_renderPassToggleRegistry);
-
-    // Independent kill-switch for RenderGraph's own per-pass write-target
-    // capture (Frame Debugger event snapshots) - see RenderGraph::
-    // SetRenderPassToggleRegistry()'s own doc comment.
     m_renderGraph.SetRenderPassToggleRegistry(&m_renderPassToggleRegistry);
 
-    // "GpuSkinning" - ProviderScope::Once.
+    // Compute passes for GPU skinning.
     m_offscreenRenderPipeline.Register("GpuSkinning", rg::ProviderScope::Once,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
             GpuSkinningPipelines& pipelines = m_game.GetGpuSkinningPipelines();
 
-            // editor-core-separation-8 campaign, PHASE1 (Step 3.4b) - a
-            // single, whole-stage on/off switch: this provider is
-            // ProviderScope::Once and pushes per-dispatch RenderPassDesc
-            // entries under DYNAMIC names (request.name), never the literal
-            // string "GpuSkinning", so RenderPipeline::DeclareOnePhase()'s
-            // own choke point can never see/disable this whole stage by
-            // that name - one of exactly 2 confirmed exceptions needing
-            // their own direct consult of the toggle registry.
             if (!m_renderPassToggleRegistry.IsEnabled("GpuSkinning")) {
                 return;
             }
@@ -901,16 +608,6 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                         request.textured ? pipelines.PositionNormalUvPipeline() : pipelines.PositionNormalPipeline();
                     const std::uint32_t vertexCount = request.vertexCount;
 
-                    // better-render-pass-1 campaign, PHASE4
-                    // (PHASE4_MIGRATE_CULLING_AND_GPU_SKINNING_COMPUTE_PASSES.md)
-                    // - migrated onto rg::CommandBuffer (PHASE3) -
-                    // DispatchOverSize() computes the correct groupX/Y/Z from
-                    // the bound pipeline's own reflected LocalGroupSize()
-                    // (== {256,1,1}, matching the old kSkinningLocalSizeX
-                    // constant exactly) via ComputeDispatch.h's existing
-                    // ComputeGroupCount3D(), degrading correctly to the
-                    // previous 1D ComputeGroupCount() call for this flat
-                    // vertexCount dispatch.
                     rg::CommandBuffer cmd = ctx.Cmd();
                     cmd.BindComputePipeline(pipeline);
                     cmd.BindDescriptorSet(request.descriptorSet);
@@ -924,11 +621,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 kGpuSkinningOutputsKey, m_gpuSkinningHandlesThisFrame);
         });
 
-    // "ClearViewTarget" - PerActiveView, BeforeEverything. Guarantees every
-    // active view's color+depth target is cleared each frame, independent of
-    // whether "RenderOpaque" itself runs - BeforeEverything forces this pass
-    // first regardless of registration order. Permanently denylisted (never
-    // toggleable): a view with no clear has no safe fallback content.
+    // Clears color and depth targets at the start of each active view.
     m_offscreenRenderPipeline.Register("ClearViewTarget", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
             const RenderPassViewData* viewData = FindViewData(frame.currentView);
@@ -938,13 +631,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
 
             const rg::TextureHandle viewTarget = viewData->colorTarget;
 
-            // CRITICAL - not decorative. This pass runs every frame for every
-            // active view (deny-listed, PerActiveView), so adding viewTarget
-            // to finalTextureOutputs here is what keeps its write (and every
-            // other real writer of the same target - RenderOpaque, the
-            // feature-registered view-content pass tagged AfterOpaques,
-            // RenderTransparent) alive through RenderGraphCompiler's
-            // reachability culling, even when every other writer is disabled.
+            // Adding viewTarget to outputs keeps the attachment clear alive during graph compilation.
             frame.finalTextureOutputs.push_back(viewTarget);
 
             rg::RenderPassDesc desc;
@@ -958,39 +645,11 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 pass.WriteColorAttachment(viewTarget, kGameClearColor);
                 pass.WriteDepthStencilAttachment(viewTarget, kGameClearDepth);
             };
-            // Deliberately NO desc.execute - RenderGraph::ExecuteCompiledGraph()
-            // already tolerates a null execute (`if (pass.execute) { ... }`,
-            // RenderGraph.cpp) - this pass's entire job is the load-op CLEAR its
-            // attachment writes above request; it issues no draw call of its own.
+            // No execute body: attachment load-op performs the clear.
             out.push_back(std::move(desc));
         });
 
-    // "PreOpaqueFeatures" - ProviderScope::PerActiveView,
-    // BeforeDeferredPasses (the SAME phase "RenderOpaque" itself runs
-    // in - the DEFAULT ProviderTiming, left unspecified here exactly
-    // like "RenderOpaque"'s own Register() call below). better-render-
-    // pass-5 effort, BLOCK 3, PHASE3
-    // (task_manager/better-render-pass-5/PHASE3_CORE_PREOPAQUE_PROVIDER_AND_RUNTIME_GUARD.md).
-    // Registered TEXTUALLY before "RenderOpaque"'s own Register(...)
-    // call purely for human readability - this textual position is
-    // NEVER what guarantees ordering (PHASE0_MASTER_STRATEGY.md, Step
-    // 2): the real guarantee is entirely RenderPassEvent::PreOpaques
-    // (1000) being strictly less than RenderPassEvent::Opaques (2000),
-    // combined with every pass a PreOpaque callback declares being
-    // tagged that way - enforced by the DeclaredPassCount()/
-    // PassEventAt() check immediately below, which is the ONLY
-    // mechanism in this engine that can catch a pass mistakenly left at
-    // the implicit default RenderPassEvent::Opaques (the SAME tier
-    // "RenderOpaque" itself uses) - DetectRenderPassEventContradictions()
-    // only fires on a STRICT inequality and is structurally blind to an
-    // EQUAL-tier mistake. Deliberately registered as its OWN, separate
-    // provider rather than routed through the existing
-    // "PluginRenderFeatures" AfterDeferredPasses provider
-    // (RenderFeatureCompositor::ContributeRenderGraphPasses()) - that
-    // provider's own phase is reached strictly AFTER "RenderOpaque" has
-    // already been declared, unconditionally, regardless of any
-    // RenderPassEvent tag (see RenderPipeline.h's own ProviderTiming
-    // doc comment).
+    // Custom feature passes executed before opaque geometry.
     m_offscreenRenderPipeline.Register("PreOpaqueFeatures", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
             if (m_renderFeatureCompositorPtr == nullptr) {
@@ -1003,44 +662,25 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     continue;
                 }
 
-                // better-render-pass-5 effort, BLOCK 3, PHASE3, Step 4 of
-                // the source spec - the real runtime safety net. Snapshot
-                // the pass count immediately before and after invoking
-                // this feature's own callback (which declares its own
-                // real pass(es) IMMEDIATELY, directly against
-                // frame.builder - exactly like a registered pass provider
-                // already does), then hand the [before, after) range to
-                // FindPassesNotTaggedPreOpaque() (PHASE1,
-                // src/Core/Plugins/ProjectPreOpaqueCallback.h) - the PURE
-                // logic half of this check, Tier-1 tested in isolation
-                // (PHASE6). This function call site is the ONLY place in
-                // the engine that turns a non-empty result into the real
-                // GTE_LOG_WARNING + assert() side effects.
                 const std::size_t before = frame.builder.DeclaredPassCount();
                 const rg::RenderFeatureScope scope(frame.builder, entry.name);
-                entry.callback(frame.builder, frame.blackboard, frame.currentView); // Step 2.5 item 1 - 3-arg signature.
+                entry.callback(frame.builder, frame.blackboard, frame.currentView);
                 const std::size_t after = frame.builder.DeclaredPassCount();
 
+                // Validate that all declared passes use RenderPassEvent::PreOpaques.
                 const std::vector<std::size_t> violations =
                     FindPassesNotTaggedPreOpaque(frame.builder, before, after);
                 for (const std::size_t index : violations) {
                     const rg::RenderPassEvent actual = frame.builder.PassEventAt(index);
                     GTE_LOG_WARNING("RenderFeatureCompositor",
-                        "PreOpaque feature '" + entry.name + "' declared a pass (declaration index "
-                        + std::to_string(index) + ") tagged RenderPassEvent::" + rg::ToString(actual)
-                        + " instead of the REQUIRED RenderPassEvent::PreOpaques - this pass is not "
-                        "provably guaranteed to run before \"RenderOpaque\" and may silently produce stale "
-                        "or missing data for whatever reads it. See "
-                        "docs/conventions/project-assembly-system.md's PreOpaque subsection.");
-                    assert(false
-                        && "A PreOpaque feature declared a pass not tagged RenderPassEvent::PreOpaques - see "
-                           "the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\") for "
-                           "which feature and which pass.");
+                        "PreOpaque feature '" + entry.name + "' declared a pass tagged RenderPassEvent::"
+                        + rg::ToString(actual) + " instead of REQUIRED RenderPassEvent::PreOpaques.");
+                    assert(false && "PreOpaque pass not tagged RenderPassEvent::PreOpaques.");
                 }
             }
         });
 
-    // "RenderOpaque" - ProviderScope::PerActiveView.
+    // Standard opaque geometry pass.
     m_offscreenRenderPipeline.Register("RenderOpaque", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
             const std::vector<rg::BufferHandle> gpuSkinningBuffers =
@@ -1059,18 +699,12 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             IFrameDebuggerCaptureRecorder* frameDebuggerCapture =
                 isGameView ? m_currentFrameDebuggerCaptureForOffscreenPipeline : nullptr;
 
-            // Block 4 (task_manager/better-render-pass-6) - resolve THIS view's own
-            // published scene-service handles NOW, while frame.currentView/
-            // frame.blackboard are still correct for THIS specific invocation. Never
-            // move this below desc.setup/desc.execute's own construction, and never
-            // read frame.currentView/frame.blackboard from inside either lambda's body
-            // - see PHASE7_CORE_WIRING_RENDEROPAQUE_PROVIDER.md's own hazard warning.
             std::array<std::optional<rg::TextureHandle>, kSceneServiceSlotCount> publishedServiceSlots{};
             for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
                 publishedServiceSlots[slotIndex] = frame.blackboard.Fetch<rg::TextureHandle>(
                     SceneServiceBlackboardKey(slotIndex, frame.currentView));
             }
-            const rg::RenderViewId currentViewForServices = frame.currentView; // plain by-value copy - see hazard warning above.
+            const rg::RenderViewId currentViewForServices = frame.currentView;
 
             rg::RenderPassDesc desc;
             desc.debugName = "RenderOpaque";
@@ -1080,20 +714,11 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             desc.legacyCategory = rg::RenderPassCategory::General;
             desc.owningFeatureName = "Scene Rendering";
             desc.setup = [viewTarget, gpuSkinningBuffers, publishedServiceSlots](rg::RenderGraphBuilder::PassBuilder& pass) {
-                // LOAD is intentional here - "ClearViewTarget" (registered
-                // above) already owns the one guaranteed clear of this
-                // resource every frame, regardless of whether this pass runs.
                 pass.WriteColorAttachment(viewTarget);
                 pass.WriteDepthStencilAttachment(viewTarget);
                 DeclareGpuSkinningReads(pass, gpuSkinningBuffers);
                 for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
                     if (publishedServiceSlots[slotIndex].has_value()) {
-                        // isDepthResource MUST match the slot's own registration
-                        // (SceneServiceSlotIsDepthResource) - e.g. the ShadowMap
-                        // slot's real texture is a depth image; getting this
-                        // wrong makes the barrier planner synchronize the WRONG
-                        // physical half of the resource, leaving the real image
-                        // in the wrong Vulkan layout when a shader samples it.
                         pass.ReadTexture(*publishedServiceSlots[slotIndex], rg::ResourceAccess::ShaderRead,
                             SceneServiceSlotIsDepthResource(slotIndex));
                     }
@@ -1104,14 +729,6 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolvedServiceSlots{};
                 for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
                     if (publishedServiceSlots[slotIndex].has_value()) {
-                        // Depth-kind slots (e.g. ShadowMap) were declared via
-                        // pass.ReadTexture(..., isDepthResource=true) above and
-                        // physically live in a handle's DEPTH sub-resource -
-                        // resolveReadTexture() only ever returns the COLOR half,
-                        // so a depth slot MUST resolve through
-                        // resolveDepthTexture() instead, or it silently binds a
-                        // null/wrong view against a resource left in the wrong
-                        // Vulkan image layout.
                         if (SceneServiceSlotIsDepthResource(slotIndex)) {
                             const rg::PassContext::ResolvedDepthTexture resolved =
                                 ctx.resolveDepthTexture(*publishedServiceSlots[slotIndex]);
@@ -1124,23 +741,14 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                             resolvedServiceSlots[slotIndex].sampler = resolved.sampler;
                         }
                     }
-                    // else: leave both VK_NULL_HANDLE - SceneServicesDescriptorSet::Rewrite()
-                    // substitutes its own dummy for any slot left this way (and also for a
-                    // slot that resolved but came back with a null view or null sampler -
-                    // see PHASE0 global rule 12).
                 }
                 const DescriptorSetHandle sceneServicesSet =
                     m_sceneServicesDescriptorSet.Rewrite(currentViewForServices, resolvedServiceSlots);
                 if (isGameView) {
-                    // Per-draw-call granularity: CommandBuffer::Draw() opens/closes
-                    // its own BeginGraphPassRecording()/EndGraphPassRecording()
-                    // bracket per entity draw - do not wrap another one here.
                     rg::CommandBuffer cmd = ctx.Cmd();
                     m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture, std::nullopt,
                         m_gpuDrivenBatchedEntitiesThisFrame, sceneServicesSet, &cmd);
                 } else {
-                    // Scene View draws straight through renderer.Submit() - owns
-                    // its own single Begin/End bracket since nothing else does.
                     m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
                     m_game.Render(m_renderer, aspectWidthOverHeight, &viewProjectionOverride, nullptr, std::nullopt, {},
                         sceneServicesSet);
@@ -1150,11 +758,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             out.push_back(std::move(desc));
         });
 
-    // "GpuDrivenBatches" - PerActiveView.
-    //
-    // CORRECTNESS-CRITICAL PLACEMENT: this Register(...) call must stay
-    // TEXTUALLY AFTER "RenderOpaque"'s own Register(...) call and TEXTUALLY
-    // BEFORE the feature-registered view-content pass tagged AfterOpaques.
+    // GPU-driven culling and indirect drawing passes.
     m_offscreenRenderPipeline.Register("GpuDrivenBatches", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
             if (frame.currentView != rg::RenderViewId::Named("Game")) {
@@ -1170,12 +774,6 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             const std::array<Plane, 6> frustumPlanes = ExtractFrustumPlanes(m_gpuDrivenGameViewProjectionThisFrame);
             const bool useCompaction = m_renderer.SupportsDrawIndirectCount();
             const Mat4 viewProjection = m_gpuDrivenGameViewProjectionThisFrame;
-            // Mirrors RenderOpaque's own "capture a plain by-value
-            // currentViewForServices" pattern - frame.currentView is only
-            // valid inside this outer Register() callback, never read
-            // directly from inside desc.execute. RenderOpaque is guaranteed
-            // to run first for this view, so its own Rewrite() call has
-            // already populated this view's set by the time this runs.
             const rg::RenderViewId currentViewForServices = frame.currentView;
 
             for (const GpuDrivenBatchRenderData& batch : m_gpuDrivenBatchesThisFrame) {
@@ -1190,22 +788,13 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 const MeshHandle meshHandle = batch.mesh;
                 const PipelineHandle originalPipelineHandle = batch.originalPipeline;
 
-                // Resolves THIS batch's own "<batch> IndirectDraw" pass
-                // toggle state EARLY, before that pass's own RenderPassDesc
-                // is even built below - RenderPipeline::DeclareOnePhase()'s
-                // own later, generic gate re-checks this exact name again
-                // once this batch's IndirectDraw desc reaches it below, and
-                // is guaranteed to agree with this answer (both read the
-                // same registry entry). RenderOpaque's own exclusion set
-                // must only ever contain this batch's entities when this
-                // pass is actually going to draw them - never merely because
-                // the batch was ELIGIBLE for batching at collection time.
+                // Only exclude batched entities from normal drawing if the indirect pass is enabled.
                 const bool indirectDrawEnabledThisFrame = rg::ShouldDeclareBuiltInPassThisFrame(
                     &m_renderPassToggleRegistry, batch.indirectDrawPassName);
                 AppendGpuDrivenBatchEntityExclusionsIfIndirectDrawEnabled(
                     indirectDrawEnabledThisFrame, batch.entities, m_gpuDrivenBatchedEntitiesThisFrame);
 
-                // --- "<batch> ResetCount" (Compute) ----------------------
+                // --- Reset instance count buffer ---
                 {
                     rg::RenderPassDesc desc;
                     desc.debugName = batch.resetPassName;
@@ -1222,7 +811,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     out.push_back(std::move(desc));
                 }
 
-                // --- "<batch> Culling" (Compute) --------------------------
+                // --- Frustum culling compute pass ---
                 {
                     rg::RenderPassDesc desc;
                     desc.debugName = batch.cullingPassName;
@@ -1243,8 +832,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                             std::uint32_t useCompaction;
                         };
                         static_assert(sizeof(CullingPushConstants) == kCullingPushConstantSize,
-                            "CullingPushConstants must match Shaders/FrustumCull.comp's own PushConstants block "
-                            "exactly");
+                            "Push constant size must match shader declaration.");
 
                         CullingPushConstants pc{};
                         for (std::size_t i = 0; i < 6; ++i) {
@@ -1253,17 +841,6 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                         pc.instanceCount = static_cast<std::uint32_t>(instanceCount);
                         pc.useCompaction = useCompaction ? 1u : 0u;
 
-                        // better-render-pass-1 campaign, PHASE4
-                        // (PHASE4_MIGRATE_CULLING_AND_GPU_SKINNING_COMPUTE_PASSES.md)
-                        // - migrated onto rg::CommandBuffer (PHASE3) -
-                        // DispatchOverSize() computes the correct groupX/Y/Z
-                        // from CullingPipelines::Pipeline()'s own reflected
-                        // LocalGroupSize() (== {256,1,1}, matching the old,
-                        // now-deleted kCullingLocalSizeX constant exactly)
-                        // via ComputeDispatch.h's existing
-                        // ComputeGroupCount3D(), degrading correctly to the
-                        // previous 1D ComputeGroupCount() call for this flat
-                        // instanceCount dispatch.
                         rg::CommandBuffer cmd = ctx.Cmd();
                         cmd.BindComputePipeline(m_gpuDrivenBatchCache.Pipelines().Pipeline());
                         cmd.BindDescriptorSet(cullingDescriptorSet);
@@ -1273,7 +850,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     out.push_back(std::move(desc));
                 }
 
-                // --- "<batch> IndirectDraw" (Graphics) --------------------
+                // --- Indirect draw pass ---
                 {
                     rg::RenderPassDesc desc;
                     desc.debugName = batch.indirectDrawPassName;
@@ -1306,17 +883,14 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                             return;
                         }
 
-                        // RenderOpaque already resolved/wrote this view's real
-                        // Scene Services set earlier this SAME frame - reuse it
-                        // via the read-only accessor instead of resolving twice.
                         const DescriptorSetHandle sceneServicesSet =
                             m_sceneServicesDescriptorSet.DescriptorSetFor(currentViewForServices);
 
                         m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
                         const VkBuffer countBufferForCall = useCompaction ? countBufferNative : VK_NULL_HANDLE;
                         m_renderer.SubmitIndirect(*instancedPipeline, *mesh, indirectBufferNative,
-                            /*indirectOffset=*/0, static_cast<std::uint32_t>(instanceCount), countBufferForCall,
-                            /*countBufferOffset=*/0, instanceBufferDescriptorSet, sceneServicesSet, viewProjection);
+                            0, static_cast<std::uint32_t>(instanceCount), countBufferForCall,
+                            0, instanceBufferDescriptorSet, sceneServicesSet, viewProjection);
                         if (ctx.recordIndirectDraw) {
                             ctx.recordIndirectDraw();
                         }
@@ -1327,7 +901,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             }
         });
 
-    // "RenderTransparent" - ProviderScope::PerActiveView, Transparents.
+    // Transparent geometry and scene overlays.
     m_offscreenRenderPipeline.Register("RenderTransparent", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
             const RenderPassViewData* viewData = FindViewData(frame.currentView);
@@ -1370,15 +944,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             out.push_back(std::move(desc));
         });
 
-    // "PostOpaqueFeatures" - PerActiveView, AfterDeferredPasses. Registered
-    // strictly between the deferred composite pass above and
-    // "PluginRenderFeatures" so (a) anything published onto frame.blackboard
-    // here is visible to "PluginRenderFeatures" in the same phase, and
-    // (b) every PostOpaque pass gets a later declaration index than the
-    // feature-registered view-content pass tagged AfterOpaques (both share
-    // that tier), letting RenderGraphCompiler resolve it as the real writer
-    // a PostOpaque pass's read depends on. Re-verify if either side's own
-    // timing/phase is ever retimed.
+    // Feature passes executed immediately after opaque geometry.
     m_offscreenRenderPipeline.Register("PostOpaqueFeatures", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
             if (m_renderFeatureCompositorPtr == nullptr) {
@@ -1407,42 +973,22 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 for (const std::size_t index : tagViolations) {
                     const rg::RenderPassEvent actual = frame.builder.PassEventAt(index);
                     GTE_LOG_WARNING("RenderFeatureCompositor",
-                        "PostOpaque feature '" + entry.name + "' declared a pass (declaration index "
-                        + std::to_string(index) + ") tagged RenderPassEvent::" + rg::ToString(actual)
-                        + " instead of the REQUIRED RenderPassEvent::AfterOpaques - this pass is not provably "
-                        "guaranteed to run in the right position. See "
-                        "docs/conventions/project-assembly-system.md's PostOpaque subsection.");
-                    assert(false
-                        && "A PostOpaque feature declared a pass not tagged RenderPassEvent::AfterOpaques - see "
-                           "the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\") for "
-                           "which feature and which pass.");
+                        "PostOpaque feature '" + entry.name + "' declared a pass tagged RenderPassEvent::"
+                        + rg::ToString(actual) + " instead of REQUIRED RenderPassEvent::AfterOpaques.");
+                    assert(false && "PostOpaque pass not tagged RenderPassEvent::AfterOpaques.");
                 }
 
                 if (FindScenePassCallbackMissingReadDeclaration(
                         frame.builder, before, after, handles->colorHandle, handles->depthHandle)) {
                     GTE_LOG_WARNING("RenderFeatureCompositor",
-                        "PostOpaque feature '" + entry.name + "' declared at least one pass but never declared a "
-                        "ReadTexture() usage against the color/depth handles it was given - this is an "
-                        "undeclared, unbarriered GPU read if its own execute lambda samples them anyway. See "
-                        "docs/conventions/project-assembly-system.md's PostOpaque subsection.");
-                    assert(false
-                        && "A PostOpaque feature declared a pass without declaring a matching ReadTexture() - see "
-                           "the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\").");
+                        "PostOpaque feature '" + entry.name + "' did not declare ReadTexture() usage on handles.");
+                    assert(false && "PostOpaque pass missing ReadTexture() declaration.");
                 }
             }
         },
         rg::ProviderTiming::AfterDeferredPasses);
 
-    // "PostTransparentFeatures" - ProviderScope::PerActiveView,
-    // AfterDeferredPasses. Registered after "PostOpaqueFeatures" and before
-    // "PluginRenderFeatures", for the same two reasons PostOpaqueFeatures'
-    // own doc comment above gives, applied against whatever AfterTransparents-
-    // tier, AfterDeferredPasses-phase pass is registered earlier (today: the
-    // deferred composite pass that reads the view's color/depth and writes a
-    // separate output texture) - sharing its exact tier+phase is safe by
-    // construction today, but does not automatically generalize to some
-    // future third same-tier, same-phase provider that also writes into the
-    // view's own color/depth handle.
+    // Feature passes executed immediately after transparent geometry.
     m_offscreenRenderPipeline.Register("PostTransparentFeatures", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
             if (m_renderFeatureCompositorPtr == nullptr) {
@@ -1471,36 +1017,22 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 for (const std::size_t index : tagViolations) {
                     const rg::RenderPassEvent actual = frame.builder.PassEventAt(index);
                     GTE_LOG_WARNING("RenderFeatureCompositor",
-                        "PostTransparent feature '" + entry.name + "' declared a pass (declaration index "
-                        + std::to_string(index) + ") tagged RenderPassEvent::" + rg::ToString(actual)
-                        + " instead of the REQUIRED RenderPassEvent::AfterTransparents - this pass is not "
-                        "provably guaranteed to run in the right position. See "
-                        "docs/conventions/project-assembly-system.md's PostTransparent subsection.");
-                    assert(false
-                        && "A PostTransparent feature declared a pass not tagged RenderPassEvent::AfterTransparents "
-                           "- see the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\").");
+                        "PostTransparent feature '" + entry.name + "' declared a pass tagged RenderPassEvent::"
+                        + rg::ToString(actual) + " instead of REQUIRED RenderPassEvent::AfterTransparents.");
+                    assert(false && "PostTransparent pass not tagged RenderPassEvent::AfterTransparents.");
                 }
 
                 if (FindScenePassCallbackMissingReadDeclaration(
                         frame.builder, before, after, handles->colorHandle, handles->depthHandle)) {
                     GTE_LOG_WARNING("RenderFeatureCompositor",
-                        "PostTransparent feature '" + entry.name + "' declared at least one pass but never "
-                        "declared a ReadTexture() usage against the color/depth handles it was given - this is an "
-                        "undeclared, unbarriered GPU read if its own execute lambda samples them anyway. See "
-                        "docs/conventions/project-assembly-system.md's PostTransparent subsection.");
-                    assert(false
-                        && "A PostTransparent feature declared a pass without declaring a matching ReadTexture() - "
-                           "see the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\").");
+                        "PostTransparent feature '" + entry.name + "' did not declare ReadTexture() usage on handles.");
+                    assert(false && "PostTransparent pass missing ReadTexture() declaration.");
                 }
             }
         },
         rg::ProviderTiming::AfterDeferredPasses);
 
-    // This provider's body is one generic loop over every registered
-    // IPluginCapabilityOrchestrator (m_capabilityOrchestrators, populated
-    // once by RegisterBuiltinCapabilityOrchestrators()). Still the LAST
-    // Register() call in this function, after every deferred-phase pass
-    // above.
+    // Dispatches custom passes from registered capability orchestrators.
     m_offscreenRenderPipeline.Register("PluginRenderFeatures", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
             for (auto& orchestrator : m_capabilityOrchestrators) {
@@ -1510,23 +1042,14 @@ void Core::RegisterOffscreenRenderPipelineProviders()
         rg::ProviderTiming::AfterDeferredPasses);
 }
 
-// render-pass-3 campaign, PHASE3 (Step 3.5) - the swapchain regime's own
-// RenderPipeline, with exactly one provider, "Present". Relocated verbatim
-// from Application::RegisterPresentRenderPipelineProvider(), PHASE13.
+// Registers the swapchain presentation pass.
 void Core::RegisterPresentRenderPipelineProvider()
 {
     m_presentRenderPipeline.SetLegacyViewScopeTranslator(&TranslateLegacyViewScope);
-    // editor-core-separation-8 campaign, PHASE1 - see RenderPassToggleRegistry.h's
-    // own header comment for the full contract.
     m_presentRenderPipeline.SetPassToggleRegistry(&m_renderPassToggleRegistry);
 
     m_presentRenderPipeline.Register("Present", rg::ProviderScope::Once,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
-            // This provider's lambda never populates its own deferred desc
-            // out-vector - it calls AddGpuSkinningPasses()/AddPresentPass()
-            // directly and synchronously instead (Pathway B in spirit, even
-            // though reached through a "Once" provider) - open the scope as
-            // the very first statement, covering both nested calls.
             const rg::RenderFeatureScope scope(frame.builder, "Present");
             const std::vector<rg::BufferHandle> gpuSkinningBuffers = m_needsDirectGameRenderThisFrame
                 ? AddGpuSkinningPasses(frame.builder, m_game, m_renderer, &m_renderPassToggleRegistry)
@@ -1539,31 +1062,13 @@ void Core::RegisterPresentRenderPipelineProvider()
 
 void Core::BuildFrame()
 {
-    // editor-core-separation-27 campaign, PHASE7 (BIG STEP 3 of 4) - must
-    // run EXACTLY once per real engine frame, unconditionally, strictly
-    // before either ExecuteTimingMode regime's Execute() call this frame -
-    // see BIG_STEP_3 Section 8. Core::Present() (a SEPARATE method, called
-    // AFTER this one returns by EditorHost::Run()'s own per-frame loop)
-    // issues the OTHER regime's Execute() call - this call must precede
-    // BOTH.
     m_renderGraph.BeginPersistentResourceFrame();
 
-    // Reset every finalize-for-sampling hook's cached result UNCONDITIONALLY,
-    // before any early-exit below - a hook's callback does not necessarily
-    // run every frame (e.g. neither Game nor Scene view rendered at all this
-    // frame), so a stale, several-frames-old pointer never lingers.
     for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
         entry.lastResult = nullptr;
     }
 
-    // editor-core-separation-1 campaign, PHASE13 (Locked Design Decision #8's
-    // first bucket) - GameViewTarget()/SceneViewTarget()/
-    // PrepareFrameDebuggerCaptureContext() are called ONLY here, through
-    // Core's own null-checked m_editorLayer hook. A nullptr hook (a Player
-    // host) makes gameTarget/sceneTarget/frameDebuggerCapture all stay
-    // nullptr, which - exactly like NullEditorLayer's own all-no-op methods
-    // already did for Application - makes every render-graph-building branch
-    // below a safe, silent no-op.
+    // Query active editor render targets.
     RenderTexture* gameTarget = (m_editorLayer != nullptr) ? m_editorLayer->GameViewTarget() : nullptr;
     RenderTexture* sceneTarget = (m_editorLayer != nullptr) ? m_editorLayer->SceneViewTarget() : nullptr;
     m_gameTargetThisFrame = gameTarget;
@@ -1572,8 +1077,7 @@ void Core::BuildFrame()
     IFrameDebuggerCaptureRecorder* frameDebuggerCapture =
         (m_editorLayer != nullptr) ? m_editorLayer->PrepareFrameDebuggerCaptureContext() : nullptr;
 
-    // Call 1 of 2: the SYNCHRONOUS offscreen regime - Game view + Scene view
-    // together.
+    // Execute offscreen rendering for Game and Scene views.
     if (gameTarget != nullptr || sceneTarget != nullptr) {
         try {
             GTE_PROFILE_SCOPE("RenderGraph::Execute(Offscreen)");
@@ -1589,21 +1093,6 @@ void Core::BuildFrame()
                             b.ImportBuffer(request.name, request.outputBuffer, request.outputBufferSize));
                     }
 
-                    // editor-core-separation-22 campaign, PHASE6
-                    // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step
-                    // 3.3 item 2) - `blackboard` is now a real Core MEMBER
-                    // (m_offscreenBlackboardThisFrame, see Core.h's own doc
-                    // comment on it) rather than a plain stack local, so it
-                    // survives past this callback's own return - the SAME
-                    // object Application/EditorHost's own IEditorLayer::
-                    // BuildUI() call later reads back through
-                    // Core::GetOffscreenBlackboardForFrameDebugger() for the
-                    // new Clause C "disabled side effect still visible"
-                    // detector. `.BeginFrame()` is still called here, every
-                    // frame, exactly as before - this promotion changes
-                    // nothing about WHEN/HOW OFTEN this blackboard's own
-                    // contents are cleared and rebuilt, only how long the
-                    // object itself lives.
                     m_offscreenBlackboardThisFrame.BeginFrame();
                     rg::RenderPassFrameContext frame{
                         {}, rg::RenderViewId::Shared(), m_offscreenBlackboardThisFrame, b, {}, {} };
@@ -1615,6 +1104,7 @@ void Core::BuildFrame()
                     m_gpuDrivenBatchDebugInfoLastFrame.clear();
                     float gameAspectForReplay = 1.0f;
 
+                    // Set up Game View rendering.
                     if (gameTarget != nullptr) {
                         const Extent2D extent = gameTarget->Extent();
                         const float aspect =
@@ -1668,8 +1158,7 @@ void Core::BuildFrame()
                                         m_renderer, frameEntry.pipeline, m_sceneServicesDescriptorSet.Layout());
                                 } catch (const std::exception& e) {
                                     std::fprintf(stderr,
-                                        "GpuDrivenBatches: failed to resolve instanced pipeline for a batch: "
-                                        "%s\n",
+                                        "GpuDrivenBatches: failed to resolve instanced pipeline for a batch: %s\n",
                                         e.what());
                                     instancedPipelineResolved = false;
                                 }
@@ -1698,17 +1187,6 @@ void Core::BuildFrame()
                                 data.cullingPassName = names.cullingPassName;
                                 data.indirectDrawPassName = names.indirectDrawPassName;
                                 data.displayName = names.displayName;
-                                // editor-core-separation-22 campaign, PHASE3
-                                // (PHASE2_COMPLETION_REPORT.md finding #19) -
-                                // this batch's own entities are no longer
-                                // inserted into m_gpuDrivenBatchedEntitiesThisFrame
-                                // HERE, unconditionally, before this batch's
-                                // own "<batch> IndirectDraw" pass toggle state
-                                // is even known - carried on `data` instead,
-                                // and only folded into the exclusion set by
-                                // the "GpuDrivenBatches" provider below, once
-                                // that SPECIFIC pass is confirmed to have
-                                // survived its own toggle check this frame.
                                 data.entities.reserve(frameEntry.commands.size());
                                 for (const DrawCommand& command : frameEntry.commands) {
                                     data.entities.push_back(command.entity);
@@ -1718,16 +1196,11 @@ void Core::BuildFrame()
                         }
                     }
 
+                    // Set up Scene View rendering.
                     if (sceneTarget != nullptr) {
                         const Extent2D extent = sceneTarget->Extent();
                         const float aspect =
                             AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
-                        // editor-core-separation-1 campaign, PHASE13 - reached
-                        // only when sceneTarget != nullptr, which itself can
-                        // only be true when m_editorLayer != nullptr
-                        // (SceneViewTarget() above only ever returns non-null
-                        // through a real hook) - safe without a second,
-                        // redundant null-check here.
                         const Mat4 sceneViewProjection = m_editorLayer->SceneViewProjection(aspect);
                         const Vec3 sceneEyeWorldPosition = m_editorLayer->SceneViewCameraWorldPosition();
 
@@ -1760,16 +1233,14 @@ void Core::BuildFrame()
                     m_offscreenBlackboardThisFrame.ReportUnusedPublishesIfAny();
 #endif
 
-                    // A PreOpaque/PostOpaque/PostTransparent callback has no access to
-                    // RenderPassFrameContext::finalTextureOutputs - it marks a plain texture
-                    // output as a required root through the builder instead. Merge it into
-                    // this frame's own root set here.
+                    // Merge outputs explicitly requested by pass builders.
                     for (const rg::TextureHandle& handle : b.FinalTextureOutputs()) {
                         frame.finalTextureOutputs.push_back(handle);
                     }
 
                     std::vector<rg::TextureHandle> outputs = std::move(frame.finalTextureOutputs);
 
+                    // Add frame replay passes for debugging if requested.
                     if (gameTarget != nullptr && frameDebuggerCapture != nullptr && m_editorLayer != nullptr
                         && m_editorLayer->ConsumePendingFrameDebuggerReplayRequest()) {
                         const std::vector<rg::BufferHandle> gpuSkinningBuffersForReplay =
@@ -1789,10 +1260,7 @@ void Core::BuildFrame()
                     return outputs;
                 });
 
-            // GPU-Driven Frustum Culling + Indirect Draw campaign
-            // (render-pass-5), PHASE6 - copies each eligible batch's own
-            // atomic visible-count buffer into its persistent, host-visible
-            // countReadbackBuffer.
+            // Copy visible instance count buffers to staging buffers for CPU readback.
             for (const GpuDrivenBatchRenderData& batch : m_gpuDrivenBatchesThisFrame) {
                 const GpuDrivenBatchKey copyKey{ batch.mesh, batch.originalPipeline };
                 const GpuDrivenBatchCache::Entry* entry = m_gpuDrivenBatchCache.TryGet(copyKey);
@@ -1826,7 +1294,7 @@ void Core::BuildFrame()
                     offscreenCmd, batch.countBufferNative, entry->countReadbackBuffer.Native(), 1, &region);
             }
 
-            // Manual finalize.
+            // Finalize textures for external sampling (e.g. editor UI viewport panels).
             if (gameTarget != nullptr) {
                 gameTarget->FinalizeForExternalSampling(offscreenCmd);
                 m_renderGraph.NotifyDebugTextureStateOverride(
@@ -1838,8 +1306,6 @@ void Core::BuildFrame()
                         "GameViewComposited", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
                 }
                 if (m_editorLayer != nullptr) {
-                    // Pass through as-is, every frame, including null - readers
-                    // already fall back to the live view on their own.
                     m_editorLayer->SetGameViewCompositedTexture(composited);
                 }
             }
@@ -1857,11 +1323,8 @@ void Core::BuildFrame()
                     m_editorLayer->SetSceneViewCompositedTexture(composited);
                 }
             }
-            // Generic sweep: any other registered finalize-for-sampling hook
-            // (today: none) runs unconditionally, once per frame. Wrapped
-            // into an engine-owned rg::CommandBuffer here too - same null
-            // DrawStats/default write-target/null event-sink as
-            // DispatchFinalizeForSamplingHook() above.
+
+            // Execute any remaining registered sampling finalization hooks.
             for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
                 if (entry.name == "GameViewComposited" || entry.name == "SceneViewComposited") {
                     continue;
@@ -1871,9 +1334,7 @@ void Core::BuildFrame()
             }
             m_renderer.EndOffscreenRenderGraphRecording();
 
-            // GPU-Driven Frustum Culling + Indirect Draw campaign
-            // (render-pass-5), PHASE6 - reads back this frame's real
-            // "instances culled" count for every eligible batch.
+            // Read back culled instance counts for debugging.
             for (const GpuDrivenBatchRenderData& batch : m_gpuDrivenBatchesThisFrame) {
                 const GpuDrivenBatchKey key{ batch.mesh, batch.originalPipeline };
                 GpuDrivenBatchDebugInfo info;
@@ -1883,16 +1344,6 @@ void Core::BuildFrame()
                 m_gpuDrivenBatchDebugInfoLastFrame.push_back(info);
             }
 
-            // editor-core-separation-1 campaign, PHASE13 - the Game-View
-            // FrameCaptureBridge success-path capture is a HOST-LEVEL
-            // AUTOMATION concern (design doc Section 6.1) - it was
-            // RELOCATED OUT of this try block, into Application::Run()
-            // itself, now running right after BuildFrame() RETURNS (safe:
-            // EndOffscreenRenderGraphRecording() above already fence-waited
-            // by the time this method returns) - see
-            // Core::GetGameViewTargetThisFrame()'s own doc comment (Core.h)
-            // and PHASE13_COMPLETION_REPORT.md for the full reasoning.
-
             m_renderGraph.FinalizeSynchronousGpuTiming();
         } catch (const std::exception& e) {
             std::fprintf(stderr, "RenderGraph offscreen Execute() failed: %s\n", e.what());
@@ -1900,10 +1351,7 @@ void Core::BuildFrame()
         }
     }
 
-    // GPU stats for every registered view-content pass (RenderOpaque/
-    // RenderTransparent plus whatever features registered via
-    // RegisterViewContentPassName()) - same name list for both views, so
-    // built once rather than duplicated per view.
+    // Collect GPU pass stats for active views.
     std::vector<rg::PassGpuStats> viewContentStats;
     viewContentStats.reserve(m_viewContentPassNames.size());
     for (const std::string& passName : m_viewContentPassNames) {
@@ -1942,15 +1390,6 @@ void Core::Present()
                 m_needsDirectGameRenderThisFrame = needsDirectGameRender;
                 m_directGameRenderAspectThisFrame = directGameRenderAspect;
                 m_swapchainImageThisFrame = swapchainImage;
-                // editor-core-separation-1 campaign, PHASE13 - IEditorLayer::
-                // Render() is explicitly HOST-LEVEL (Locked Design Decision
-                // #8's second bucket) - m_presentImGuiRecorder is a callback
-                // Application/EditorHost itself constructed (capturing ITS
-                // OWN m_editorLayer, never Core's), handed in once via
-                // SetPresentImGuiRecorder() - Core merely stores/forwards it,
-                // never calls IEditorLayer::Render() itself. A default-
-                // constructed (empty) std::function here is a safe no-op via
-                // AddPresentPass()'s own existing truthiness check.
                 m_recordImGuiThisFrame = m_presentImGuiRecorder;
 
                 rg::RenderPassBlackboard presentBlackboard;
@@ -1968,13 +1407,6 @@ void Core::Present()
         std::fprintf(stderr, "RenderGraph Present Execute() failed: %s\n", e.what());
         assert(false && "RenderGraph Present Execute() threw - see stderr");
     }
-
-    // editor-core-separation-1 campaign, PHASE13 - the swapchain
-    // FrameCaptureBridge success-path capture is a HOST-LEVEL AUTOMATION
-    // concern (design doc Section 6.1) - RELOCATED OUT of this method,
-    // into Application::Run() itself, now running right after Present()
-    // RETURNS (safe - see this method's own final fence-wait inside
-    // Renderer::PresentViaRenderGraph()). See PHASE13_COMPLETION_REPORT.md.
 
     if (presentStats.has_value()) {
         Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::Present,
