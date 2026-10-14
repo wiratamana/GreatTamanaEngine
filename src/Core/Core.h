@@ -74,6 +74,11 @@
 // campaign audit) - GtePluginRenderFeatureDescriptor is genuinely, permanently
 // needed here, not ABI-only (see that header's own top-of-file comment).
 #include "Plugins/RenderFeatureDescriptor.h"
+// Migration scaffold (see chat history) - PHASE 1 of "create a universal
+// RegisterRenderPass() front door, migrate features one at a time, delete
+// the old surface last." Purely additive: FrameEvent/UniversalRenderPassAction
+// only, zero changes to any type above.
+#include "Plugins/UniversalRenderPassCallback.h"
 // better-render-pass-3 campaign, BLOCK 2 (Arbitrary Render Views) - thin
 // pass-throughs below (CreateRenderView()/FindRenderViewTarget()) need the
 // real RenderViewRegistry class, held by value as a new m_renderViewRegistry
@@ -379,14 +384,6 @@ public:
     bool RegisterProjectRenderFeature(const char* debugName, RenderFeatureStage stage,
         RenderFeatureBlendMode blendMode, std::int32_t priority, ProjectRenderFeatureCallback callback);
 
-    // Engine-owned sibling of RegisterProjectRenderFeature() - same
-    // preconditions and refusal rules, but routes to
-    // RenderFeatureCompositor::RegisterBuiltInFeature() and is never recorded
-    // in ProjectAssemblyRegistrationLedger (a built-in feature lives for the
-    // process lifetime, never torn down by project hot-reload).
-    bool RegisterBuiltInRenderFeature(const char* debugName, RenderFeatureStage stage,
-        RenderFeatureBlendMode blendMode, std::int32_t priority, ProjectRenderFeatureCallback callback);
-
     // Teardown counterpart of RegisterProjectRenderFeature(). Null-safe; a
     // safe no-op if debugName was never successfully registered.
     void UnregisterProjectRenderFeature(const char* debugName);
@@ -399,15 +396,6 @@ public:
     // duplicate.
     bool AddPreOpaquePass(const char* debugName, ProjectPreOpaqueCallback callback, std::int32_t priority = 0);
 
-    // Engine-owned sibling of AddPreOpaquePass() immediately above - same
-    // preconditions/refusal rules, but marks the registered entry
-    // RenderFeatureOwner::Engine (DebugSnapshot() then reports
-    // isProjectFeature == false for it) and is never recorded in
-    // ProjectAssemblyRegistrationLedger (a built-in feature lives for the
-    // process lifetime, never torn down by project hot-reload) - mirrors
-    // RegisterBuiltInRenderFeature()'s own exact shape above.
-    bool AddBuiltInPreOpaquePass(const char* debugName, ProjectPreOpaqueCallback callback, std::int32_t priority = 0);
-
     // Teardown counterpart of AddPreOpaquePass() immediately above,
     // mirroring UnregisterProjectRenderFeature()'s own shape. Null-safe;
     // a safe no-op if debugName was never successfully registered.
@@ -419,21 +407,12 @@ public:
     // docs/conventions/project-assembly-system.md's PostOpaque subsection.
     bool AddPostOpaquePass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
 
-    // Engine-owned sibling of AddPostOpaquePass() immediately above - same
-    // contract as AddBuiltInPreOpaquePass() above, for the PostOpaque stage.
-    bool AddBuiltInPostOpaquePass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
     void RemovePostOpaquePass(const char* debugName);
 
     // Same contract, for the PostTransparent stage - every pass the
     // callback declares must carry rg::RenderPassEvent::AfterTransparents.
     bool AddPostTransparentPass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
 
-    // Engine-owned sibling of AddPostTransparentPass() immediately above -
-    // same contract as AddBuiltInPreOpaquePass() above, for the
-    // PostTransparent stage. No real built-in caller exists today - added
-    // for symmetry with the other two stages' AddBuiltIn... siblings.
-    bool AddBuiltInPostTransparentPass(
-        const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
     void RemovePostTransparentPass(const char* debugName);
 
     // Mints (or returns the already-existing) persistent, named render
@@ -470,6 +449,24 @@ public:
     bool AddScreenPostProcessPass(const char* debugName, ProjectRenderFeatureCallback callback,
         RenderFeatureBlendMode blendMode = RenderFeatureBlendMode::AlphaOver,
         std::optional<std::int32_t> priority = std::nullopt);
+
+    // Migration scaffold (see chat history) - PHASE 3 COMPLETE (full
+    // deletion, per explicit instruction). The single front door for a
+    // built-in feature's own render passes - the ONE and ONLY way to
+    // register one now. The 4 old methods this used to dispatch onto
+    // (AddBuiltInPreOpaquePass/AddBuiltInPostOpaquePass/
+    // AddBuiltInPostTransparentPass/RegisterBuiltInRenderFeature) are
+    // DELETED entirely, not merely hidden - their validation/logging bodies
+    // are inlined directly into this method's own switch statement
+    // (Core.cpp). See UniversalRenderPassCallback.h for the full contract
+    // (which fields of `action`'s parameter list are real vs.
+    // safe-placeholder for a given FrameEvent) and for why
+    // FrameEvent::BeforeEverything/AfterEverything are deliberately not
+    // options here. `blendMode` is ignored for every FrameEvent except
+    // PostComposite/PreUI (those two are the only stages with a real blend
+    // chain to join). Returns false (logged internally) on any failure.
+    bool RegisterRenderPass(FrameEvent event, const char* debugName, std::int32_t priority,
+        UniversalRenderPassAction action, RenderFeatureBlendMode blendMode = RenderFeatureBlendMode::AlphaOver);
 
     // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
     // BIG-STEP 2), PHASE4 - mirrors GetRenderer()'s own existing precedent
@@ -586,6 +583,15 @@ public:
     bool RegisterViewContentPassName(const char* name);
 
 private:
+    // Migration scaffold (see chat history) - PHASE 3 COMPLETE (full
+    // deletion, per explicit instruction). The 4 engine-owned methods that
+    // used to live here (RegisterBuiltInRenderFeature, AddBuiltInPreOpaquePass,
+    // AddBuiltInPostOpaquePass, AddBuiltInPostTransparentPass) are GONE -
+    // their bodies are now inlined directly into RegisterRenderPass()'s own
+    // switch statement (Core.cpp). An exhaustive, whole-repository search
+    // confirmed they had no caller left anywhere except RegisterRenderPass()
+    // itself before this deletion, so nothing else could break.
+
     // One eligible GPU-driven batch's own per-frame render data - the
     // "GpuDrivenBatches" provider (registered between "RenderOpaque" and
     // the feature-registered view-content pass tagged AfterOpaques) declares

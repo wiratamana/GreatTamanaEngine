@@ -331,6 +331,34 @@ public:
         return false;
     }
 
+    // True iff `index`'s pass declared a WriteDepthStencilAttachment() on
+    // `handle`. ResourceAccess::DepthStencilAttachmentReadWrite is, by
+    // construction, a REAL combined read+write - a depth test reads the
+    // attachment's existing contents (early/late fragment test) before
+    // conditionally writing it (see RenderGraphBarrierPlanner.cpp's own doc
+    // comment on this exact ResourceAccess value) - so this is every bit as
+    // real a declared dependency on `handle` as an explicit ReadTexture()
+    // call. Lets a depth-tested in-place write (e.g. a sky/background pass
+    // that only fills in pixels the depth-EQUAL test leaves untouched)
+    // satisfy FindScenePassCallbackMissingReadDeclaration() honestly,
+    // without lying to the barrier planner via a fake ReadTexture(handle,
+    // ShaderRead) declaration - that would demand
+    // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL for the same handle
+    // WriteDepthStencilAttachment() already demands
+    // VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL for, in the same
+    // pass - two contradictory required layouts for one resource.
+    bool PassWritesTextureAsDepthReadWrite(std::size_t index, TextureHandle handle) const
+    {
+        assert(index < m_passes.size() && "RenderGraphBuilder::PassWritesTextureAsDepthReadWrite() - index out of range");
+        for (const ResourceUsage& usage : m_passes[index].writes) {
+            if (usage.kind == ResourceKind::Texture && usage.texture == handle
+                && usage.access == ResourceAccess::DepthStencilAttachmentReadWrite) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     struct ImportedTextureSamplers {
         VkSampler colorSampler = VK_NULL_HANDLE;
         VkImageView depthImageView = VK_NULL_HANDLE;

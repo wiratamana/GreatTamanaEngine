@@ -7,10 +7,12 @@
 
 namespace gte {
 
-// PreOpaque/PostOpaque/PostTransparent are each wired through their own
-// dedicated entry point (Core::AddPreOpaquePass()/AddPostOpaquePass()/
-// AddPostTransparentPass()). PostComposite/PreUI go through
-// Core::RegisterProjectRenderFeature()/RegisterBuiltInRenderFeature(). Values
+// PreOpaque/PostOpaque/PostTransparent/PostComposite/PreUI are each wired
+// through their own dedicated entry point for a Project Assembly caller
+// (Core::AddPreOpaquePass()/AddPostOpaquePass()/AddPostTransparentPass()/
+// RegisterProjectRenderFeature()); a built-in engine feature reaches every
+// one of these 5 stages through the single Core::RegisterRenderPass()
+// front door instead (Core::Plugins::UniversalRenderPassCallback.h). Values
 // are stable and must never be renumbered once shipped.
 enum class RenderFeatureStage : std::uint32_t {
     PreOpaque       = 0,

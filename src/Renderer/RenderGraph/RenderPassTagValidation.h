@@ -55,7 +55,15 @@ inline std::vector<std::size_t> FindPassesNotTaggedScenePass(
 // True only when at least one pass was declared in [before, after) and NONE
 // of them read colorHandle or depthHandle - a likely forgotten dependency
 // declaration. False for an empty range (nothing declared is never a
-// violation).
+// violation). A pass that declared WriteDepthStencilAttachment() on
+// depthHandle ALSO counts as a declared dependency, not just a plain
+// ReadTexture() - see RenderGraphBuilder::PassWritesTextureAsDepthReadWrite()'s
+// own doc comment for why that write is, by construction, a real combined
+// read+write (a depth-tested in-place write, e.g. a sky/background fill,
+// genuinely depends on the existing depth buffer without ever sampling it
+// as a shader resource - declaring a second, fake ReadTexture() on the same
+// handle just to satisfy this check would demand a contradictory Vulkan
+// image layout for the same resource in the same pass).
 inline bool FindScenePassCallbackMissingReadDeclaration(const rg::RenderGraphBuilder& builder, std::size_t before,
     std::size_t after, rg::TextureHandle colorHandle, rg::TextureHandle depthHandle)
 {
@@ -67,7 +75,8 @@ inline bool FindScenePassCallbackMissingReadDeclaration(const rg::RenderGraphBui
     }
 
     for (std::size_t index = before; index < after; ++index) {
-        if (builder.PassReadsTexture(index, colorHandle) || builder.PassReadsTexture(index, depthHandle)) {
+        if (builder.PassReadsTexture(index, colorHandle) || builder.PassReadsTexture(index, depthHandle)
+            || builder.PassWritesTextureAsDepthReadWrite(index, depthHandle)) {
             return false;
         }
     }
