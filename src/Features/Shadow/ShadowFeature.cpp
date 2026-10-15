@@ -11,6 +11,7 @@
 #include "../../Application/RenderPassViewData.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleGuard.h"
+#include "../../Renderer/RenderGraph/ViewScopeUtil.h"
 
 #include <algorithm>
 #include <cassert>
@@ -24,8 +25,13 @@ namespace gte {
 using rg::operator""_passId;
 
 namespace {
-constexpr rg::RenderPassId kShadowMapGameKey = "Shadow.Map.Game"_passId;
-constexpr rg::RenderPassId kShadowMapSceneKey = "Shadow.Map.Scene"_passId;
+// Indexed by rg::ViewScope (Shared, GameView, SceneView); the Shared entry is unused.
+constexpr rg::ViewPair<rg::RenderPassId> kShadowMapKey{
+    { rg::RenderPassId{}, "Shadow.Map.Game"_passId, "Shadow.Map.Scene"_passId } };
+constexpr rg::ViewPair<rg::RenderPassId> kShadowMaskKey{
+    { rg::RenderPassId{}, "Shadow.Mask.Game"_passId, "Shadow.Mask.Scene"_passId } };
+constexpr rg::ViewPair<const char*> kShadowMapViewName{ { nullptr, "Shadow.Map.GameView", "Shadow.Map.SceneView" } };
+constexpr rg::ViewPair<const char*> kShadowMaskName{ { nullptr, "Shadow.Mask.GameView", "Shadow.Mask.SceneView" } };
 
 constexpr std::int32_t kShadowDepthPassPriority = 10;
 constexpr std::int32_t kShadowCompositePriority = -500;
@@ -39,8 +45,6 @@ struct ShadowMapBlackboardEntry {
 struct ShadowMaskBlackboardEntry {
     rg::TextureHandle maskHandle;
 };
-constexpr rg::RenderPassId kShadowMaskGameKey = "Shadow.Mask.Game"_passId;
-constexpr rg::RenderPassId kShadowMaskSceneKey = "Shadow.Mask.Scene"_passId;
 } // namespace
 
 ShadowFeature::ShadowFeature(Core& core)
@@ -95,14 +99,14 @@ void ShadowFeature::EnsureDepthPipelinesBuilt(Renderer& renderer)
 
         if (m_depthPipelineFailedAttempts >= kMaxBuildAttempts) {
             m_depthPipelineGaveUp = true;
-            GTE_LOG_WARNING("Shadow", std::string("EnsureDepthPipelinesBuilt(): pipeline build failed ('") +
+            GTE_LOG_WARNING(kShadowFeatureName, std::string("EnsureDepthPipelinesBuilt(): pipeline build failed ('") +
                 e.what() + "') after " + std::to_string(m_depthPipelineFailedAttempts) +
                 " attempts - giving up. Depth casting stays disabled for the rest of this process.");
             return;
         }
 
         m_depthPipelineRetryCooldownFramesRemaining = kRetryCooldownFrames;
-        GTE_LOG_WARNING("Shadow", std::string("EnsureDepthPipelinesBuilt(): pipeline build failed ('") + e.what() +
+        GTE_LOG_WARNING(kShadowFeatureName, std::string("EnsureDepthPipelinesBuilt(): pipeline build failed ('") + e.what() +
             "') - rolled back this attempt's pipelines. Retrying in " + std::to_string(kRetryCooldownFrames) +
             " frames (attempt " + std::to_string(m_depthPipelineFailedAttempts) + "/" +
             std::to_string(kMaxBuildAttempts) + ").");
@@ -124,8 +128,13 @@ void ShadowFeature::RegisterPasses()
                     &m_core.GetRenderPassToggleRegistryMutable(), "Shadow.DepthPass.Draw")) {
                 return;
             }
-            // Group all shadow passes under "Shadow" in debug views.
-            const rg::RenderFeatureScope scope(builder, "Shadow");
+            // Shadow supports the Game and Scene views only.
+            const rg::ViewScope scope = TranslateLegacyViewScope(currentView);
+            if (scope == rg::ViewScope::Shared) {
+                return;
+            }
+            // Group all shadow passes under the feature name in debug views.
+            const rg::RenderFeatureScope featureScope(builder, kShadowFeatureName);
             const std::optional<RenderPassViewData> viewData = m_core.FindRenderPassViewData(currentView);
             if (!viewData.has_value()) {
                 return;
@@ -139,7 +148,7 @@ void ShadowFeature::RegisterPasses()
                 m_mapResolutionInUse = std::max<std::uint32_t>(1u, m_settings.mapResolution);
                 m_mapResolutionLocked = true;
             } else if (m_settings.mapResolution != m_mapResolutionInUse && !m_mapResolutionMismatchWarned) {
-                GTE_LOG_WARNING("Shadow",
+                GTE_LOG_WARNING(kShadowFeatureName,
                     "ShadowSettings::mapResolution changed after the shadow map's first frame - "
                     "the view is fixed-size for its whole process lifetime. Still using the original "
                     "resolution this session; restart to apply a new one. This warning is logged once.");
@@ -148,8 +157,7 @@ void ShadowFeature::RegisterPasses()
 
             const ShadowSettings safeSettings = SanitizeShadowSettings(m_settings);
 
-            const bool isGameView = (currentView == rg::RenderViewId::Named("Game"));
-            const char* viewName = isGameView ? "Shadow.Map.GameView" : "Shadow.Map.SceneView";
+            const char* viewName = kShadowMapViewName.For(scope);
 
             const rg::RenderViewId shadowView = m_core.CreateRenderView(viewName, m_mapResolutionInUse,
                 m_mapResolutionInUse, /*depthOnly=*/true, /*allowDepthSampledAccess=*/true);
@@ -186,8 +194,8 @@ void ShadowFeature::RegisterPasses()
 
             builder.KeepTextureOutput(shadowHandle);
 
-            const rg::RenderPassId key = isGameView ? kShadowMapGameKey : kShadowMapSceneKey;
-            blackboard.Publish<ShadowMapBlackboardEntry>(key, ShadowMapBlackboardEntry{ shadowHandle, lightViewProj });
+            blackboard.Publish<ShadowMapBlackboardEntry>(
+                kShadowMapKey.For(scope), ShadowMapBlackboardEntry{ shadowHandle, lightViewProj });
 
             // Publish shadow map and lighting uniforms for scene material shaders.
             blackboard.Publish<rg::TextureHandle>(SceneServiceBlackboardKey(m_shadowMapSlot, currentView), shadowHandle);
@@ -209,15 +217,12 @@ void ShadowFeature::RegisterPasses()
                     &m_core.GetRenderPassToggleRegistryMutable(), "Shadow.Mask.Dispatch")) {
                 return;
             }
-            // Shadow supports the Game and Scene views only.
-            const rg::ViewScope viewScope = TranslateLegacyViewScope(currentView);
-            if (viewScope == rg::ViewScope::Shared) {
+            const rg::ViewScope scope = TranslateLegacyViewScope(currentView);
+            if (scope == rg::ViewScope::Shared) {
                 return;
             }
-            const bool isGameView = (viewScope == rg::ViewScope::GameView);
-            const rg::RenderPassId mapKey = isGameView ? kShadowMapGameKey : kShadowMapSceneKey;
             const std::optional<ShadowMapBlackboardEntry> shadowMap =
-                blackboard.Fetch<ShadowMapBlackboardEntry>(mapKey);
+                blackboard.Fetch<ShadowMapBlackboardEntry>(kShadowMapKey.For(scope));
             if (!shadowMap.has_value() || !shadowMap->shadowMapHandle.IsValid()) {
                 return;
             }
@@ -233,8 +238,8 @@ void ShadowFeature::RegisterPasses()
 
             const ShadowSettings safeSettings = SanitizeShadowSettings(m_settings);
             ShadowMaskInputs maskInputs;
-            maskInputs.outputName = isGameView ? "Shadow.Mask.GameView" : "Shadow.Mask.SceneView";
-            maskInputs.viewScope = viewScope;
+            maskInputs.outputName = kShadowMaskName.For(scope);
+            maskInputs.viewScope = scope;
             maskInputs.viewExtent = viewData->renderTexture->Extent();
             maskInputs.invViewProjection = realCameraData.invViewProjection;
             maskInputs.lightViewProjection = shadowMap->lightSpaceViewProjection;
@@ -247,9 +252,8 @@ void ShadowFeature::RegisterPasses()
             }
 
             builder.KeepTextureOutput(maskHandle);
-
-            const rg::RenderPassId maskKey = isGameView ? kShadowMaskGameKey : kShadowMaskSceneKey;
-            blackboard.Publish<ShadowMaskBlackboardEntry>(maskKey, ShadowMaskBlackboardEntry{ maskHandle });
+            blackboard.Publish<ShadowMaskBlackboardEntry>(
+                kShadowMaskKey.For(scope), ShadowMaskBlackboardEntry{ maskHandle });
         });
     assert(maskRegistered && "Shadow.Mask registration failed");
 
@@ -263,16 +267,18 @@ void ShadowFeature::RegisterPasses()
                     &m_core.GetRenderPassToggleRegistryMutable(), "Shadow.Composite.Draw")) {
                 return;
             }
-            const bool isGameView = (currentView == rg::RenderViewId::Named("Game"));
-            const rg::RenderPassId maskKey = isGameView ? kShadowMaskGameKey : kShadowMaskSceneKey;
+            const rg::ViewScope scope = TranslateLegacyViewScope(currentView);
+            if (scope == rg::ViewScope::Shared) {
+                return;
+            }
             const std::optional<ShadowMaskBlackboardEntry> mask =
-                blackboard.Fetch<ShadowMaskBlackboardEntry>(maskKey);
+                blackboard.Fetch<ShadowMaskBlackboardEntry>(kShadowMaskKey.For(scope));
             if (!mask.has_value() || !mask->maskHandle.IsValid()) {
                 return;
             }
 
             const ShadowSettings safeSettings = SanitizeShadowSettings(m_settings);
-            m_compositeRenderer.AddCompositePass(builder, m_core.GetRenderer(), isGameView ? "Game" : "Scene",
+            m_compositeRenderer.AddCompositePass(builder, m_core.GetRenderer(), kShadowMaskName.For(scope),
                 privateTarget, extent, currentViewHandles.colorHandle, mask->maskHandle,
                 currentViewHandles.depthHandle, safeSettings.strength);
         },
@@ -287,6 +293,6 @@ std::unique_ptr<IEngineFeatureModule> CreateShadowFeatureModule(Core& core)
 }
 } // namespace
 
-GTE_REGISTER_BUILTIN_FEATURE_MODULE("Shadow", &CreateShadowFeatureModule);
+GTE_REGISTER_BUILTIN_FEATURE_MODULE(kShadowFeatureName, &CreateShadowFeatureModule);
 
 } // namespace gte

@@ -26,7 +26,7 @@ public:
     ShadowFeature(ShadowFeature&&) = delete;
     ShadowFeature& operator=(ShadowFeature&&) = delete;
 
-    const char* ModuleName() const override { return "Shadow"; }
+    const char* ModuleName() const override { return kShadowFeatureName; }
 
     ShadowSettings& Settings() noexcept { return m_settings; }
 

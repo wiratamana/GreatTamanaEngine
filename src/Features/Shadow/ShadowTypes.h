@@ -4,6 +4,9 @@
 
 namespace gte {
 
+// Feature module name, render-feature scope owner and log category.
+inline constexpr const char* kShadowFeatureName = "Shadow";
+
 // Shadow feature tunables - plain data, no behavior. Always run through
 // ShadowMath::SanitizeShadowSettings() before use; never read a raw field
 // directly inside a render-graph pass body.

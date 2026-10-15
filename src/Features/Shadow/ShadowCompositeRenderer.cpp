@@ -1,5 +1,7 @@
 #include "ShadowCompositeRenderer.h"
 
+#include "ShadowTypes.h"
+
 #include "../../Core/PipelineDesc.h"
 #include "../../Renderer/Compute/ComputeDescriptorSet.h"
 #include "../../Renderer/Renderer.h"
@@ -89,7 +91,7 @@ void ShadowCompositeRenderer::AddCompositePass(rg::RenderGraphBuilder& builder, 
     const char* viewKey, rg::TextureHandle privateTarget, Extent2D extent, rg::TextureHandle sceneColorHandle,
     rg::TextureHandle maskHandle, rg::TextureHandle sceneDepthHandle, float strength)
 {
-    const rg::RenderFeatureScope scope(builder, "Shadow");
+    const rg::RenderFeatureScope scope(builder, kShadowFeatureName);
     EnsurePipeline(renderer);
     const ComputeDescriptorSet descriptorSet = EnsureViewDescriptorSet(renderer, viewKey);
 

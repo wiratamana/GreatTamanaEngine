@@ -1,5 +1,7 @@
 #include "ShadowMaskRenderer.h"
 
+#include "ShadowTypes.h"
+
 #include "../../Core/PixelFormat.h"
 #include "../../Renderer/RenderGraph/ComputePass.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
@@ -24,7 +26,7 @@ rg::TextureHandle ShadowMaskRenderer::AddMaskPass(rg::RenderGraphBuilder& builde
     if (!shadowMap.IsValid() || inputs.viewScope == rg::ViewScope::Shared) {
         return rg::TextureHandle{};
     }
-    const rg::RenderFeatureScope scope(builder, "Shadow");
+    const rg::RenderFeatureScope scope(builder, kShadowFeatureName);
 
     ViewState& view = m_views.For(inputs.viewScope);
     const rg::TextureHandle mask =
