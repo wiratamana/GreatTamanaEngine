@@ -1,6 +1,7 @@
 // Tier-2 (headless GPU) tests for RenderGraphPersistentResourceCache.
 // Skipped when the headless fixture is unusable.
 
+#include "Renderer/RenderGraph/GpuParams.h"
 #include "Renderer/RenderGraph/RenderGraphPersistentResourceCache.h"
 #include "Renderer/RenderGraph/RenderGraphPersistentResourceOwners.h"
 
@@ -1474,6 +1475,71 @@ TEST(RenderGraphPersistentResourceCacheTest, ReRequestingAnExistingEntryWithADif
         return {};
     });
     EXPECT_FALSE(refused.has_value());
+}
+
+// A failed persistent texture create returns an invalid handle and logs once per token.
+TEST(RenderGraphPersistentResourceCacheTest, BuilderReturnsInvalidHandleAndLogsOnceWhenCreateFails)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    RecordingLogSink sink;
+    ScopedLogSinkInstall logGuard(&sink);
+    PersistentTextureCacheToken token;
+    bool created = false;
+    for (int frame = 0; frame < 2; ++frame) {
+        fixture.GetRenderGraph().BeginPersistentResourceFrame();
+        fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
+            created = b.GetOrCreatePersistentTexture(token, "BuilderOwner", "Huge", MakeColorDesc(100000, 100000)).IsValid();
+            return {};
+        });
+    }
+    if (created) {
+        GTEST_SKIP() << "This driver accepted a 100000x100000 image; cannot force a failed create.";
+    }
+
+    EXPECT_TRUE(token.refusalLogged);
+    int errors = 0;
+    for (const RecordingLogSink::Recorded& entry : sink.entries) {
+        if (entry.level == LogLevel::Error && entry.message.find("could not be created") != std::string::npos) {
+            ++errors;
+        }
+    }
+    EXPECT_EQ(errors, 1);
+}
+
+// A failed buffer create returns false, logs once and leaves no partial state.
+TEST(RenderGraphPersistentResourceCacheTest, GpuParamsUploadReturnsFalseAndLogsOnceWhenCreateFails)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    RecordingLogSink sink;
+    ScopedLogSinkInstall logGuard(&sink);
+    GpuParamsBuffer params;
+    const char byte = 0;
+    bool uploaded = true;
+    fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
+        uploaded = params.Upload(b, &byte, std::size_t{ 1 } << 46, "HugeParams");
+        uploaded = params.Upload(b, &byte, std::size_t{ 1 } << 46, "HugeParams") || uploaded;
+        return {};
+    });
+    if (uploaded) {
+        GTEST_SKIP() << "This driver accepted a 64 TiB buffer; cannot force a failed create.";
+    }
+
+    EXPECT_EQ(params.Handle(), BufferObjectHandle::Invalid);
+    int errors = 0;
+    for (const RecordingLogSink::Recorded& entry : sink.entries) {
+        if (entry.level == LogLevel::Error && entry.message.find("failed") != std::string::npos) {
+            ++errors;
+        }
+    }
+    EXPECT_EQ(errors, 1);
 }
 
 } // namespace gte::rg

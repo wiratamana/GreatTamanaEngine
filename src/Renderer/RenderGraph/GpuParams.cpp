@@ -5,9 +5,19 @@
 #include "../Renderer.h"
 #include "../../Core/Logging.h"
 
+#include <exception>
 #include <string>
+#include <utility>
 
 namespace gte::rg {
+
+void GpuParamsBuffer::LogRefusalOnce(const std::string& message)
+{
+    if (!m_refusalLogged) {
+        m_refusalLogged = true;
+        GTE_LOG_ERROR("GpuParams", message);
+    }
+}
 
 GpuParamsUploadDecision DecideGpuParamsUpload(
     std::size_t existingSize, std::size_t newSize, bool pipelinedRegime) noexcept
@@ -55,20 +65,24 @@ bool GpuParamsBuffer::Upload(RenderGraphBuilder& builder, const void* data, std:
         refusal = "the builder has no renderer";
     }
     if (refusal != nullptr) {
-        if (!m_refusalLogged) {
-            m_refusalLogged = true;
-            GTE_LOG_ERROR("GpuParams",
-                std::string("Upload to \"") + (debugName != nullptr ? debugName : "") + "\" refused: " + refusal + ".");
-        }
+        LogRefusalOnce(std::string("Upload to \"") + (debugName != nullptr ? debugName : "") + "\" refused: " + refusal + ".");
         return false;
     }
 
-    if (decision == GpuParamsUploadDecision::Create) {
-        m_buffer = std::make_unique<Buffer>(builder.OwningRenderer().CreateBuffer(
-            size, BufferUsage::StorageBuffer, BufferMemoryUsage::CpuToGpu, debugName));
-        m_size = size;
+    try {
+        if (decision == GpuParamsUploadDecision::Create) {
+            auto buffer = std::make_unique<Buffer>(builder.OwningRenderer().CreateBuffer(
+                size, BufferUsage::StorageBuffer, BufferMemoryUsage::CpuToGpu, debugName));
+            buffer->Upload(data, size);
+            m_buffer = std::move(buffer);
+            m_size = size;
+        } else {
+            m_buffer->Upload(data, size);
+        }
+    } catch (const std::exception& e) {
+        LogRefusalOnce(std::string("Upload to \"") + (debugName != nullptr ? debugName : "") + "\" failed: " + e.what());
+        return false;
     }
-    m_buffer->Upload(data, size);
     return true;
 }
 

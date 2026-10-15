@@ -6,6 +6,7 @@
 #include "../VulkanFormatInfo.h"
 
 #include <cstring>
+#include <exception>
 #include <string>
 
 namespace gte::rg {
@@ -430,9 +431,18 @@ TextureHandle RenderGraphBuilder::GetOrCreatePersistentTexture(
         return MintPersistentHandle(*resolved);
     }
 
-    // Slow path: resolve by name, then refresh the token.
-    const std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved = m_persistentCache->Resolve(
-        owner, name, desc, m_persistentCacheCurrentFrame, m_persistentCacheTimingMode);
+    // Slow path: resolve by name, then refresh the token. Creation failures must not reach the frame loop.
+    std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved;
+    try {
+        resolved = m_persistentCache->Resolve(owner, name, desc, m_persistentCacheCurrentFrame, m_persistentCacheTimingMode);
+    } catch (const std::exception& e) {
+        if (!token.refusalLogged) {
+            token.refusalLogged = true;
+            GTE_LOG_ERROR("RenderGraphBuilder",
+                std::string("Persistent texture \"") + (name != nullptr ? name : "") + "\" could not be created: " + e.what());
+        }
+        return TextureHandle{};
+    }
     if (!resolved.has_value()) {
         return TextureHandle{};
     }

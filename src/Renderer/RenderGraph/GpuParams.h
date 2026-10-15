@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <string>
 #include <type_traits>
 
 namespace gte {
@@ -44,6 +45,8 @@ public:
     BufferObjectHandle Handle() const noexcept;
 
 private:
+    void LogRefusalOnce(const std::string& message);
+
     std::unique_ptr<Buffer> m_buffer;
     std::size_t m_size = 0;
     bool m_refusalLogged = false;
