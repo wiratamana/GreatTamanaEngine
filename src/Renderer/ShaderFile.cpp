@@ -41,6 +41,7 @@ const std::filesystem::path& ExecutableDir()
     return dir;
 }
 
+// Prefers the executable's directory; falls back to the working directory because tests run from the build root.
 std::filesystem::path ResolvePath(const std::string& path)
 {
     const std::filesystem::path requested(path);

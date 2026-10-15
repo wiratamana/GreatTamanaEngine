@@ -37,6 +37,7 @@ public:
     void BeginFrame(std::uint64_t currentFrame, std::uint64_t staleFrames = kDefaultStaleFrames);
 
     // Frees every set allocated against `layout`. The caller guarantees the GPU is done with them.
+    // Runs once per frame, so a driver that reuses a layout handle within the same frame can alias a stale key.
     void Release(VkDescriptorSetLayout layout);
 
     static constexpr std::uint64_t kDefaultStaleFrames = 600;

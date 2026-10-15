@@ -8,7 +8,6 @@
 #include "../../Core/Logging.h"
 
 #include <cassert>
-#include <optional>
 #include <string>
 #include <utility>
 

@@ -2286,6 +2286,7 @@ set(GTE_TEST_SOURCES
     Network/InstantiateAssetEndpointEndToEndTests.cpp
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
+    Application/ViewScopeUtilTests.cpp
     Application/MemorySnapshotBuilderTests.cpp
     Application/FrameCaptureBridgeTests.cpp
     Application/EngineCommandBridgeTests.cpp
@@ -2323,6 +2324,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/ViewScopeUtilTests.cpp
     Renderer/RenderGraph/PerViewTests.cpp
     Renderer/RenderGraph/GpuParamsPolicyTests.cpp
+    Renderer/RenderGraph/GpuParamsUploadTests.cpp
     Renderer/RenderGraph/PersistentTargetTests.cpp
     Renderer/RenderGraph/BuildRetryGateTests.cpp
     Renderer/RenderGraph/BoundedRetryGatesTests.cpp
