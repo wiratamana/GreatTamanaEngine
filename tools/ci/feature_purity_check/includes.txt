@@ -1,0 +1,7 @@
+# #include paths feature code must not use. Substring match on the include path; Core/FeatureKit/ is allowed.
+Renderer/
+Core/Core.h
+Game/Game.h
+Game/SceneQuery.h
+Game/RenderSystem.h
+Application/

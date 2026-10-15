@@ -1,0 +1,39 @@
+# Names feature code (src/Features, outside Editor/) must not use. Whole identifier, case-sensitive.
+# Vulkan
+volk.h
+Vk*
+vk*
+VK_*
+# Engine wrappers
+Renderer
+Core
+Game
+RenderSystem
+Buffer
+Pipeline
+ComputePipeline
+RenderTexture
+Texture2D
+VolumeTexture
+Mesh
+ComputeDescriptorSet
+ComputeDescriptorWrite
+CommandBuffer
+PassContext
+RenderGraph
+RenderGraphBuilder
+PassBuilder
+RenderPassBlackboard
+SceneServicesDescriptorSet
+RenderViewRegistry
+BlitSpec
+Native(
+WaitForGpuIdle
+BeginGraphPassRecording
+DrawScene
+ImportTexture
+GetOrCreatePersistentTexture
+RegisterSceneServiceSlot
+ImageViewHandle
+SamplerHandle
+BufferObjectHandle

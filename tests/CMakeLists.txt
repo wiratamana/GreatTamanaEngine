@@ -2800,3 +2800,13 @@ add_test(NAME NativeLeakCheck
             --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/native_leak_check/allowlist.txt"
             --comments skip --strings scan
 )
+
+# Fails when render feature code (src/Features, outside Editor/) names Vulkan or raw engine wrappers.
+# See tools/ci/feature_purity_check/README.md.
+add_test(NAME FeaturePurityCheck
+    COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src/Features" --skip-dir Editor
+            --tokens "${CMAKE_SOURCE_DIR}/tools/ci/feature_purity_check/tokens.txt"
+            --includes "${CMAKE_SOURCE_DIR}/tools/ci/feature_purity_check/includes.txt"
+            --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/feature_purity_check/allowlist.txt"
+            --comments skip --strings skip
+)
