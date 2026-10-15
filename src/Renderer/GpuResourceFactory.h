@@ -11,14 +11,17 @@
 #include "Texture2D.h"
 #include "TextureArray2D.h"
 #include "VolumeTexture.h"
+#include "Vulkan/DescriptorPoolGrowth.h"
 #include "Vulkan/VulkanAllocator.h"
 
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace gte {
@@ -120,7 +123,11 @@ public:
     MaterialTexture CreateMaterialTexture2D(
         const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
 
+    // Allocates from the compute descriptor pool set; adds a pool when full. Throws when the pool cap is reached.
     ComputeDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
+
+    // Returns a set to the pool it came from. Unknown sets are ignored. The set must not be in use by the GPU.
+    void FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept;
 
     // Memory Tracking
     GpuMemoryTracker::Totals GetMemoryTotals() const;
@@ -129,6 +136,9 @@ public:
 
 private:
     void Destroy() noexcept;
+
+    // Creates one compute descriptor pool; VK_NULL_HANDLE on failure.
+    VkDescriptorPool CreateComputeDescriptorPool(const PoolCapacity& capacity) const noexcept;
 
     void ImmediateSubmitInternal(const std::function<void(VkCommandBuffer)>& recordFn) const;
 
@@ -146,7 +156,12 @@ private:
     VkDescriptorPool m_materialDescriptorPool = VK_NULL_HANDLE;
 
     VkDescriptorSetLayout m_instanceBufferSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool m_computeDescriptorPool = VK_NULL_HANDLE;
+
+    // Compute descriptor pools (newest last) and the pool index each live set came from; guarded by the mutex.
+    mutable std::mutex m_computePoolMutex;
+    mutable std::vector<VkDescriptorPool> m_computePools;
+    mutable PoolCapacity m_lastComputePoolCapacity;
+    mutable std::unordered_map<VkDescriptorSet, std::uint32_t> m_computeSetPool;
 };
 
 } // namespace gte

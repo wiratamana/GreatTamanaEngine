@@ -2,9 +2,10 @@
 
 #include "../Compute/ComputeDescriptorSet.h"
 #include "../GraphicsHandleRegistry.h"
-#include "RenderGraphHandles.h" // ViewScope - see Resolve()'s own doc comment below.
+#include "BoundedOnceSet.h"
+#include "RenderGraphComputeBindingKey.h"
 
-#include <string>
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -14,52 +15,47 @@ class Renderer;
 
 namespace gte::rg {
 
-// Owns every VkDescriptorSet the compute-binding API (RenderGraphBuilder::
-// PassBuilder::Bind*()) allocates - keyed by a pass's own stable name
-// COMBINED WITH its ViewScope (same string-literal identity convention
-// AddPass()/AddRenderPass() already require for the name half). The
-// ViewScope half of the key is required because a pass declared once per
-// view (e.g. "AtmosphereAerialPerspectiveCompositePass", called once for
-// GameView and once for SceneView, same literal name both times) would
-// otherwise collapse onto ONE shared VkDescriptorSet - a genuine
-// cross-view data race: Vulkan does not snapshot descriptor contents at
-// vkCmdBindDescriptorSets time, so the SECOND view's rewrite would
-// silently corrupt the FIRST view's already-recorded dispatch before the
-// GPU ever executes it. Keying by (name, viewScope) gives every
-// legitimately-distinct per-view declaration of the same pass name its
-// own real descriptor set, while a Shared-scope pass (declared once per
-// frame, period) still resolves to exactly one, same as before. Resolves
-// ONCE per (name, viewScope) identity, re-rewritten with fresh
-// ComputeDescriptorWrite entries every call afterward - mirrors
-// RenderGraphPersistentResourceCache's own "resolve once per stable
-// identity, reuse forever" shape.
+// Owns the descriptor sets of passes that declare Bind*() resources.
+// One set per (pass name, ViewScope, layout): per-view passes never share a set, which would be a data race.
 class RenderGraphComputeBindingCache {
 public:
     explicit RenderGraphComputeBindingCache(Renderer& renderer) noexcept;
 
-    // Allocates a VkDescriptorSet against `layout` the first time this
-    // (passName, viewScope) pair is seen (from the engine's shared compute
-    // descriptor pool - see Renderer::AllocateComputeDescriptorSet()),
-    // mints its opaque DescriptorSetHandle once, then rewrites it against
-    // `writes` every call. Logs and refuses (returns DescriptorSetHandle::
-    // Invalid) if `layout` ever differs from what this identity was first
-    // resolved against - a pass's own descriptor set layout can never
-    // legitimately change build-to-build. May throw std::runtime_error if
-    // the underlying vkAllocateDescriptorSets call fails (first call for
-    // this identity only).
-    DescriptorSetHandle Resolve(const char* passName, ViewScope viewScope, VkDescriptorSetLayout layout,
-        const std::vector<ComputeDescriptorWrite>& writes);
+    // Sets are freed individually only by BeginFrame()/Release(); the factory destroys its pools in bulk.
+    ~RenderGraphComputeBindingCache() = default;
+
+    RenderGraphComputeBindingCache(const RenderGraphComputeBindingCache&) = delete;
+    RenderGraphComputeBindingCache& operator=(const RenderGraphComputeBindingCache&) = delete;
+
+    // Returns the set for this identity, rewritten with `writes`. Never throws:
+    // allocation failure is logged once and yields DescriptorSetHandle::Invalid.
+    DescriptorSetHandle Resolve(
+        const char* passName, ViewScope viewScope, VkDescriptorSetLayout layout, const std::vector<ComputeDescriptorWrite>& writes);
+
+    // Frees sets unused for more than `staleFrames`. The age guard keeps in-flight command buffers safe.
+    void BeginFrame(std::uint64_t currentFrame, std::uint64_t staleFrames = kDefaultStaleFrames);
+
+    // Frees every set allocated against `layout`. The caller guarantees the GPU is done with them.
+    void Release(VkDescriptorSetLayout layout);
+
+    std::size_t EntryCount() const noexcept { return m_entries.size(); }
+
+    static constexpr std::uint64_t kDefaultStaleFrames = 600;
 
 private:
     struct Entry {
         VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
-        VkDescriptorSetLayout layout = VK_NULL_HANDLE;
         DescriptorSetHandle handle = DescriptorSetHandle::Invalid;
+        std::uint64_t lastUsedFrame = 0;
     };
+
+    void FreeEntry(const Entry& entry) noexcept;
 
     Renderer* m_renderer = nullptr;
     VkDevice m_device = VK_NULL_HANDLE;
-    std::unordered_map<std::string, Entry> m_entries;
+    std::uint64_t m_currentFrame = 0;
+    std::unordered_map<ComputeBindingKey, Entry, ComputeBindingKeyHash, ComputeBindingKeyEqual> m_entries;
+    BoundedOnceSet<64> m_reportedFailures;
 };
 
 } // namespace gte::rg

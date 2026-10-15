@@ -1,0 +1,207 @@
+#include "ShaderBindings.h"
+
+#include <algorithm>
+
+namespace gte::rg {
+
+namespace {
+
+constexpr std::uint32_t kNameableSet = 0;
+
+bool IsTextureKind(BindingResourceKind kind) noexcept
+{
+    return kind == BindingResourceKind::Texture || kind == BindingResourceKind::DepthTexture;
+}
+
+std::string Quote(std::string_view name)
+{
+    return "'" + std::string(name) + "'";
+}
+
+// Empty when the resource kind fits the descriptor type, otherwise the reason.
+std::string KindMismatch(VkDescriptorType type, BindingResourceKind kind)
+{
+    switch (type) {
+    case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+        return IsTextureKind(kind) ? std::string{} : "is a sampler: supply a texture, not a buffer";
+    case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+        if (kind == BindingResourceKind::Buffer) {
+            return "is a storage image: supply a texture, not a buffer";
+        }
+        return kind == BindingResourceKind::DepthTexture ? "is a storage image: a depth view is only valid on a sampler"
+                                                         : std::string{};
+    case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        return kind == BindingResourceKind::Buffer ? std::string{} : "is a storage buffer: supply a buffer, not a texture";
+    default:
+        return "has a descriptor type that name binding does not support";
+    }
+}
+
+} // namespace
+
+std::string ValidNamesText(std::span<const ReflectedDescriptorBinding> reflected)
+{
+    std::string text = "valid names: ";
+    bool first = true;
+    for (const ReflectedDescriptorBinding& binding : reflected) {
+        if (binding.set != kNameableSet || binding.name.empty()) {
+            continue;
+        }
+        if (!first) {
+            text += ", ";
+        }
+        text += binding.name;
+        first = false;
+    }
+    return first ? text + "(none)" : text;
+}
+
+BindingPlanResult PlanBindings(std::span<const ReflectedDescriptorBinding> reflected,
+    std::span<const BindingArgument> args, const DescribeTextureFn& describeTexture)
+{
+    std::vector<std::string> problems;
+    std::vector<const ReflectedDescriptorBinding*> slots; // Set-0 bindings, reflected order.
+    for (const ReflectedDescriptorBinding& binding : reflected) {
+        if (binding.set == kNameableSet) {
+            slots.push_back(&binding);
+        }
+    }
+
+    std::vector<std::uint8_t> supplied(slots.size(), 0);
+    std::vector<const BindingArgument*> matched(slots.size(), nullptr);
+
+    for (const ReflectedDescriptorBinding* slot : slots) {
+        if (slot->name.empty()) {
+            problems.push_back("set 0 binding " + std::to_string(slot->binding)
+                + " has no name in the shader (anonymous block): give it an instance name");
+        } else if (slot->count > 1) {
+            problems.push_back(Quote(slot->name) + " is a descriptor array: not supported by name binding");
+        }
+    }
+
+    for (const BindingArgument& arg : args) {
+        const auto found = std::find_if(slots.begin(), slots.end(),
+            [&arg](const ReflectedDescriptorBinding* slot) { return !slot->name.empty() && slot->name == arg.name; });
+        if (found == slots.end()) {
+            problems.push_back("unknown name " + Quote(arg.name));
+            continue;
+        }
+        const std::size_t index = static_cast<std::size_t>(found - slots.begin());
+        const ReflectedDescriptorBinding& slot = **found;
+        if (supplied[index] != 0) {
+            problems.push_back(Quote(arg.name) + " was bound twice");
+            continue;
+        }
+        supplied[index] = 1;
+
+        if (const std::string mismatch = KindMismatch(slot.type, arg.kind); !mismatch.empty()) {
+            problems.push_back(Quote(arg.name) + " " + mismatch);
+            continue;
+        }
+        if (IsTextureKind(arg.kind) ? !arg.texture.IsValid() : arg.buffer == BufferObjectHandle::Invalid) {
+            problems.push_back(Quote(arg.name) + " was given an invalid resource handle");
+            continue;
+        }
+        if (arg.kind == BindingResourceKind::DepthTexture) {
+            const std::optional<TextureDesc> desc = describeTexture ? describeTexture(arg.texture) : std::nullopt;
+            if (!desc.has_value() || !desc->hasDepth) {
+                problems.push_back(Quote(arg.name) + " was given a depth view of a texture without a depth aspect");
+                continue;
+            }
+        }
+        matched[index] = &arg;
+    }
+
+    for (std::size_t i = 0; i < slots.size(); ++i) {
+        if (supplied[i] == 0 && !slots[i]->name.empty() && slots[i]->count <= 1) {
+            problems.push_back(Quote(slots[i]->name) + " was never bound");
+        }
+    }
+
+    BindingPlanResult result;
+    if (!problems.empty()) {
+        const std::string suffix = "; " + ValidNamesText(reflected);
+        for (const std::string& problem : problems) {
+            if (!result.error.empty()) {
+                result.error += '\n';
+            }
+            result.error += problem + suffix;
+        }
+        return result;
+    }
+
+    result.plan.bindings.reserve(slots.size());
+    for (std::size_t i = 0; i < slots.size(); ++i) {
+        const BindingArgument& arg = *matched[i];
+        PlannedBinding planned;
+        planned.binding = slots[i]->binding;
+        planned.type = slots[i]->type;
+        planned.access = slots[i]->access;
+        planned.kind = arg.kind;
+        planned.texture = arg.texture;
+        planned.buffer = arg.buffer;
+        result.plan.bindings.push_back(planned);
+    }
+    return result;
+}
+
+std::optional<std::string> ValidatePushConstantSize(
+    bool shaderHasPushConstants, std::uint32_t reflectedSize, std::uint32_t providedSize)
+{
+    if (shaderHasPushConstants && providedSize == 0) {
+        return "shader declares a " + std::to_string(reflectedSize) + "-byte push-constant block but none was supplied";
+    }
+    if (!shaderHasPushConstants && providedSize != 0) {
+        return "shader has no push-constant block but " + std::to_string(providedSize) + " bytes were supplied";
+    }
+    if (shaderHasPushConstants && providedSize != reflectedSize) {
+        return "push-constant size mismatch: shader declares " + std::to_string(reflectedSize) + " bytes, got "
+            + std::to_string(providedSize);
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> DeclareBindings(
+    RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout)
+{
+    if (layout == DescriptorSetLayoutHandle::Invalid) {
+        return "invalid descriptor set layout";
+    }
+    for (const PlannedBinding& binding : plan.bindings) {
+        if (const std::string mismatch = KindMismatch(binding.type, binding.kind); !mismatch.empty()) {
+            return "binding " + std::to_string(binding.binding) + " " + mismatch;
+        }
+    }
+
+    pass.BindDescriptorSetLayout(layout);
+    for (const PlannedBinding& binding : plan.bindings) {
+        switch (binding.type) {
+        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+            if (binding.kind == BindingResourceKind::DepthTexture) {
+                pass.SampleDepth(binding.binding, binding.texture);
+            } else {
+                pass.SampleTexture(binding.binding, binding.texture);
+            }
+            break;
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+            if (binding.access == ReflectedAccess::WriteOnly) {
+                pass.WriteStorageImage(binding.binding, binding.texture);
+            } else if (binding.access == ReflectedAccess::ReadOnly) {
+                pass.ReadTexture(binding.texture, ResourceAccess::ComputeShaderRead, /*isDepthResource=*/false);
+                pass.BindStorageImage(binding.binding, binding.texture);
+            } else {
+                pass.ReadTexture(binding.texture, ResourceAccess::ComputeShaderRead, /*isDepthResource=*/false);
+                pass.WriteStorageImage(binding.binding, binding.texture);
+            }
+            break;
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+            pass.ReadStorageBuffer(binding.binding, binding.buffer); // External buffers are not graph-tracked.
+            break;
+        default:
+            break; // Unreachable: rejected by KindMismatch above.
+        }
+    }
+    return std::nullopt;
+}
+
+} // namespace gte::rg

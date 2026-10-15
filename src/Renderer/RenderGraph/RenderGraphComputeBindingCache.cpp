@@ -2,23 +2,13 @@
 
 #include "../Renderer.h"
 #include "../../Core/Logging.h"
+#include "RenderGraphPersistentResourceCache.h"
 
-#include <cassert>
+#include <exception>
+#include <string>
+#include <string_view>
 
 namespace gte::rg {
-
-namespace {
-
-// Combines a pass name with its ViewScope into one map key - see this
-// class's own header comment for exactly why the ViewScope half is required
-// (two legitimately-distinct per-view declarations of the same pass name
-// must never collapse onto one shared VkDescriptorSet).
-std::string CombineKey(const char* passName, ViewScope viewScope)
-{
-    return std::string(passName) + "#" + std::to_string(static_cast<unsigned>(viewScope));
-}
-
-} // namespace
 
 RenderGraphComputeBindingCache::RenderGraphComputeBindingCache(Renderer& renderer) noexcept
     : m_renderer(&renderer)
@@ -26,36 +16,73 @@ RenderGraphComputeBindingCache::RenderGraphComputeBindingCache(Renderer& rendere
 {
 }
 
+void RenderGraphComputeBindingCache::FreeEntry(const Entry& entry) noexcept
+{
+    if (entry.handle != DescriptorSetHandle::Invalid) {
+        UnregisterDescriptorSet(entry.handle);
+    }
+    m_renderer->FreeComputeDescriptorSet(entry.descriptorSet);
+}
+
 DescriptorSetHandle RenderGraphComputeBindingCache::Resolve(
     const char* passName, ViewScope viewScope, VkDescriptorSetLayout layout, const std::vector<ComputeDescriptorWrite>& writes)
 {
-    assert(passName != nullptr && passName[0] != '\0' &&
-        "RenderGraphComputeBindingCache::Resolve requires a non-empty pass name");
     if (passName == nullptr || passName[0] == '\0' || layout == VK_NULL_HANDLE) {
         return DescriptorSetHandle::Invalid;
     }
 
-    const std::string key = CombineKey(passName, viewScope);
-    auto [it, inserted] = m_entries.try_emplace(key);
+    const ComputeBindingKeyView lookup{ std::string_view(passName), viewScope, layout };
+    auto it = m_entries.find(lookup);
+    if (it == m_entries.end()) {
+        try {
+            Entry entry;
+            entry.descriptorSet = m_renderer->AllocateComputeDescriptorSet(layout).Native();
+            entry.handle = RegisterDescriptorSet(entry.descriptorSet);
+            entry.lastUsedFrame = m_currentFrame;
+            try {
+                it = m_entries.emplace(ComputeBindingKey{ std::string(passName), viewScope, layout }, entry).first;
+            } catch (...) {
+                FreeEntry(entry);
+                throw;
+            }
+        } catch (const std::exception& e) {
+            const std::string message = std::string("Pass \"") + passName + "\": " + e.what();
+            if (m_reportedFailures.Note(message) == BoundedOnceSet<64>::Result::First) {
+                GTE_LOG_ERROR("RenderGraphComputeBindingCache", message);
+            }
+            return DescriptorSetHandle::Invalid;
+        }
+    }
+
     Entry& entry = it->second;
-    if (inserted) {
-        entry.descriptorSet = m_renderer->AllocateComputeDescriptorSet(layout).Native();
-        entry.layout = layout;
-        entry.handle = RegisterDescriptorSet(entry.descriptorSet);
-    }
-
-    assert(entry.layout == layout &&
-        "RenderGraphComputeBindingCache::Resolve: this pass identity's descriptor set layout changed since it "
-        "was first resolved - a pass's layout can never legitimately change build-to-build");
-    if (entry.layout != layout) {
-        GTE_LOG_ERROR("RenderGraphComputeBindingCache",
-            "Resolve() called for pass \"" + key
-                + "\" with a descriptor set layout different from its first resolve - refusing.");
-        return DescriptorSetHandle::Invalid;
-    }
-
+    entry.lastUsedFrame = m_currentFrame;
     ComputeDescriptorSet(entry.descriptorSet, m_device).Rewrite(writes);
     return entry.handle;
+}
+
+void RenderGraphComputeBindingCache::BeginFrame(std::uint64_t currentFrame, std::uint64_t staleFrames)
+{
+    m_currentFrame = currentFrame;
+    for (auto it = m_entries.begin(); it != m_entries.end();) {
+        if (IsStaleCacheEntry(it->second.lastUsedFrame, currentFrame, staleFrames)) {
+            FreeEntry(it->second);
+            it = m_entries.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void RenderGraphComputeBindingCache::Release(VkDescriptorSetLayout layout)
+{
+    for (auto it = m_entries.begin(); it != m_entries.end();) {
+        if (it->first.layout == layout) {
+            FreeEntry(it->second);
+            it = m_entries.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 } // namespace gte::rg

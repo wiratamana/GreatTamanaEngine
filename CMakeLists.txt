@@ -755,6 +755,7 @@ add_library(gte_core STATIC
     src/Renderer/ShaderFile.h
     src/Renderer/Vulkan/DescriptorSetLayoutBuilder.cpp
     src/Renderer/Vulkan/DescriptorSetLayoutBuilder.h
+    src/Renderer/Vulkan/DescriptorPoolGrowth.h
     # task_manager/better-render-pass-1 campaign, PHASE1
     # (PHASE1_SPIRV_REFLECT_DEPENDENCY_AND_SHADER_REFLECTION_CORE.md) - pure,
     # Tier-1-testable SPIR-V reflection (descriptor bindings/push-constant
@@ -778,7 +779,10 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/PersistentTarget.h
     src/Renderer/RenderGraph/GpuParams.h
     src/Renderer/RenderGraph/GpuParams.cpp
-    src/Renderer/RenderGraph/RenderGraphPersistentResourceCache.cpp
+    src/Renderer/RenderGraph/BuildRetryGate.h
+    src/Renderer/RenderGraph/ShaderBindings.h
+    src/Renderer/RenderGraph/ShaderBindings.cpp
+    src/Renderer/RenderGraph/RenderGraphComputeBindingKey.h
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.h
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.cpp
     src/Renderer/RenderGraph/RenderGraphBarrierPlanner.h

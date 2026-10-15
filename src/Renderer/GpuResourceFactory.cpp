@@ -1,8 +1,9 @@
 #include "GpuResourceFactory.h"
 
-#include "GraphicsHandleRegistry.h" // RegisterDescriptorSet() - MaterialTexture/compute descriptor sets leave this file as engine handles.
-#include "SceneServicesDescriptorSet.h" // Block 4 - gte::kSceneServiceSlotCount, for this file's own static_asserts.
-#include "VulkanFormatInfo.h" // ToVkFormat() - the one place this file translates PixelFormat->VkFormat for its own pre-construction capability checks.
+#include "../Core/Logging.h"
+#include "GraphicsHandleRegistry.h" // RegisterDescriptorSet() - sets leave this file as engine handles.
+#include "SceneServicesDescriptorSet.h" // gte::kSceneServiceSlotCount for the pool budget static_asserts.
+#include "VulkanFormatInfo.h" // ToVkFormat() for pre-construction capability checks.
 #include "Vulkan/DescriptorSetLayoutBuilder.h"
 #include "Vulkan/FormatCapabilities.h"
 #include "Vulkan/VulkanDevice.h"
@@ -54,10 +55,7 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
         throw std::runtime_error("GpuResourceFactory: vkCreateDescriptorSetLayout failed");
     }
 
-    // Generously sized for every material texture this process is ever
-    // likely to load in one run (a single richly-materialed PMX model can
-    // easily have several dozen) - individual sets are never freed (see
-    // MaterialTexture.h), only the whole pool at once, in Destroy().
+    // Material sets are never freed individually; the whole pool dies in Destroy().
     constexpr std::uint32_t kMaxMaterialTextures = 4096;
     VkDescriptorPoolSize poolSize{};
     poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -75,81 +73,37 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
         throw std::runtime_error("GpuResourceFactory: vkCreateDescriptorPool failed");
     }
 
-    // Phase 3 (COMPUTE_PHASE3_DESCRIPTOR_BINDING_MODEL_STRATEGY_v1.md) - a
-    // SECOND, dedicated descriptor pool for compute-shaped descriptor
-    // types - never shared with m_materialDescriptorPool above (see
-    // m_computeDescriptorPool's own comment in GpuResourceFactory.h).
-    // Generously sized (a low hundreds, not thousands - compute shaders
-    // are far less numerous per-frame than material textures) for every
-    // distinct compute-bound resource this engine is realistically likely
-    // to need in one process lifetime; individual sets allocated from it
-    // are never freed (see AllocateComputeDescriptorSet()), only the whole
-    // pool at once, in Destroy().
-    constexpr std::uint32_t kMaxComputeStorageBuffers = 256;
-    constexpr std::uint32_t kMaxComputeStorageImages = 128;
-    constexpr std::uint32_t kMaxComputeCombinedImageSamplers = 128;
-    constexpr std::uint32_t kMaxComputeDescriptorSets = 256;
+    // First compute descriptor pool; more are added on demand (see AllocateComputeDescriptorSet()).
+    constexpr PoolCapacity kInitialComputePool{ .sets = 256,
+        .storageBuffers = 256,
+        .storageImages = 128,
+        .combinedSamplers = 128,
+        .uniformBuffers = 64 };
 
-    // Block 4 "Global Scene Services Descriptor Set" - binding 8 is a plain
-    // uniform buffer, one per concurrently-tracked render view (Game, Scene),
-    // plus one each for the Editor's AssetPreviewMesh/BoneViewerWindow
-    // "local set=1" lighting stand-in (see Renderer::
-    // AllocateComputeDescriptorSet(DescriptorSetLayoutHandle)).
-    constexpr std::uint32_t kMaxComputeUniformBuffers = 4;
+    // Known consumers of the first pool: 2 views of scene services (8 samplers, 1 UBO, 1 set each),
+    // plus the asset preview and bone viewer local sets (1 UBO, 1 set each).
+    static_assert(gte::kSceneServiceSlotCount * 2 <= kInitialComputePool.combinedSamplers,
+        "Scene services for 2 views must fit the first compute pool's sampler budget.");
+    static_assert(4 <= kInitialComputePool.sets, "Known set consumers must fit the first compute pool.");
+    static_assert(4 <= kInitialComputePool.uniformBuffers, "Known UBO consumers must fit the first compute pool.");
 
-    // Block 4 "Global Scene Services Descriptor Set"
-    // (task_manager/better-render-pass-6) - SceneServicesDescriptorSet
-    // allocates kSceneServiceSlotCount (8) COMBINED_IMAGE_SAMPLER descriptors
-    // PER concurrently-tracked render view (today: Game + Scene = 2), plus one
-    // whole VkDescriptorSet per view, from this SAME shared pool. A cheap,
-    // compiler-checked first line of defense for TODAY's own numbers only -
-    // re-derive by hand whenever slot count, tracked-view count, or
-    // GPU-driven-batch descriptor consumption sharing this pool actually grows.
-    static_assert(gte::kSceneServiceSlotCount * 2 <= kMaxComputeCombinedImageSamplers,
-        "SceneServicesDescriptorSet: 2 known views * 8 slots must fit the shared compute-descriptor-sampler budget.");
-    static_assert(2 <= kMaxComputeDescriptorSets,
-        "SceneServicesDescriptorSet: at least 2 concurrently-tracked views (Game, Scene) must fit the shared "
-        "compute-descriptor-set budget.");
-    static_assert(2 <= kMaxComputeUniformBuffers,
-        "SceneServicesDescriptorSet: at least 2 concurrently-tracked views (Game, Scene) must fit the shared "
-        "compute-descriptor UBO budget.");
-
-    VkDescriptorPoolSize computePoolSizes[4]{};
-    computePoolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    computePoolSizes[0].descriptorCount = kMaxComputeStorageBuffers;
-    computePoolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    computePoolSizes[1].descriptorCount = kMaxComputeStorageImages;
-    computePoolSizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    computePoolSizes[2].descriptorCount = kMaxComputeCombinedImageSamplers;
-    computePoolSizes[3].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    computePoolSizes[3].descriptorCount = kMaxComputeUniformBuffers;
-
-    VkDescriptorPoolCreateInfo computePoolInfo{};
-    computePoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    computePoolInfo.maxSets = kMaxComputeDescriptorSets;
-    computePoolInfo.poolSizeCount = 4;
-    computePoolInfo.pPoolSizes = computePoolSizes;
-
-    if (vkCreateDescriptorPool(m_device, &computePoolInfo, nullptr, &m_computeDescriptorPool) != VK_SUCCESS) {
+    const VkDescriptorPool firstComputePool = CreateComputeDescriptorPool(kInitialComputePool);
+    if (firstComputePool == VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(m_device, m_materialDescriptorPool, nullptr);
         vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
         throw std::runtime_error("GpuResourceFactory: vkCreateDescriptorPool (compute) failed");
     }
+    m_computePools.push_back(firstComputePool);
+    m_lastComputePoolCapacity = kInitialComputePool;
 
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE2 - the one shared instance-buffer descriptor-set-layout (see
-    // InstanceBufferDescriptorSetLayout()'s own comment in
-    // GpuResourceFactory.h): a single readonly storage buffer, VERTEX
-    // stage, set = 0 binding = 0 - built via DescriptorSetLayoutBuilder
-    // (Vulkan/DescriptorSetLayoutBuilder.h), same pattern
-    // GpuSkinningPipelines.cpp already establishes for its own descriptor-
-    // set layouts.
+    // Shared instance-buffer layout: one readonly storage buffer, vertex stage, set 0 binding 0.
     try {
         DescriptorSetLayoutBuilder instanceBufferLayoutBuilder(m_device);
         m_instanceBufferSetLayout = instanceBufferLayoutBuilder.AddStorageBuffer(/*binding=*/0, VK_SHADER_STAGE_VERTEX_BIT).Build();
     } catch (...) {
-        vkDestroyDescriptorPool(m_device, m_computeDescriptorPool, nullptr);
+        vkDestroyDescriptorPool(m_device, firstComputePool, nullptr);
+        m_computePools.clear();
         vkDestroyDescriptorPool(m_device, m_materialDescriptorPool, nullptr);
         vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
@@ -174,10 +128,11 @@ void GpuResourceFactory::Destroy() noexcept
         vkDestroyDescriptorPool(m_device, m_materialDescriptorPool, nullptr);
         m_materialDescriptorPool = VK_NULL_HANDLE;
     }
-    if (m_computeDescriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(m_device, m_computeDescriptorPool, nullptr);
-        m_computeDescriptorPool = VK_NULL_HANDLE;
+    for (const VkDescriptorPool pool : m_computePools) {
+        vkDestroyDescriptorPool(m_device, pool, nullptr);
     }
+    m_computePools.clear();
+    m_computeSetPool.clear();
     if (m_materialSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
         m_materialSetLayout = VK_NULL_HANDLE;
@@ -568,21 +523,86 @@ MaterialTexture GpuResourceFactory::CreateMaterialTexture2D(
     return MaterialTexture{ std::move(texture), RegisterDescriptorSet(descriptorSet) };
 }
 
+VkDescriptorPool GpuResourceFactory::CreateComputeDescriptorPool(const PoolCapacity& capacity) const noexcept
+{
+    const VkDescriptorPoolSize sizes[4] = {
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, capacity.storageBuffers },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, capacity.storageImages },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, capacity.combinedSamplers },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, capacity.uniformBuffers },
+    };
+
+    VkDescriptorPoolCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    info.maxSets = capacity.sets;
+    info.poolSizeCount = 4;
+    info.pPoolSizes = sizes;
+
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    return vkCreateDescriptorPool(m_device, &info, nullptr, &pool) == VK_SUCCESS ? pool : VK_NULL_HANDLE;
+}
+
 ComputeDescriptorSet GpuResourceFactory::AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const
 {
+    const std::scoped_lock lock(m_computePoolMutex);
+
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = m_computeDescriptorPool;
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &layout;
 
-    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
-    if (vkAllocateDescriptorSets(m_device, &allocInfo, &descriptorSet) != VK_SUCCESS) {
-        throw std::runtime_error(
-            "GpuResourceFactory::AllocateComputeDescriptorSet: vkAllocateDescriptorSets failed "
-            "(consider raising GpuResourceFactory.cpp's compute descriptor pool sizes).");
+    // Newest pool first; freed sets may also have opened room in an older one.
+    const auto tryAllocate = [&]() -> std::optional<VkDescriptorSet> {
+        for (std::size_t i = m_computePools.size(); i-- > 0;) {
+            allocInfo.descriptorPool = m_computePools[i];
+            VkDescriptorSet set = VK_NULL_HANDLE;
+            const VkResult result = vkAllocateDescriptorSets(m_device, &allocInfo, &set);
+            if (result == VK_SUCCESS) {
+                m_computeSetPool.emplace(set, static_cast<std::uint32_t>(i));
+                return set;
+            }
+            if (result != VK_ERROR_OUT_OF_POOL_MEMORY && result != VK_ERROR_FRAGMENTED_POOL) {
+                throw std::runtime_error("GpuResourceFactory::AllocateComputeDescriptorSet: vkAllocateDescriptorSets failed.");
+            }
+        }
+        return std::nullopt;
+    };
+
+    std::optional<VkDescriptorSet> set = tryAllocate();
+    while (!set.has_value()) {
+        const std::optional<PoolCapacity> next = NextPoolCapacity(m_lastComputePoolCapacity, m_computePools.size());
+        if (!next.has_value()) {
+            throw std::runtime_error("GpuResourceFactory::AllocateComputeDescriptorSet: all "
+                + std::to_string(m_computePools.size()) + " compute descriptor pools are full.");
+        }
+        const VkDescriptorPool pool = CreateComputeDescriptorPool(*next);
+        if (pool == VK_NULL_HANDLE) {
+            throw std::runtime_error("GpuResourceFactory::AllocateComputeDescriptorSet: vkCreateDescriptorPool failed (pool "
+                + std::to_string(m_computePools.size() + 1) + ").");
+        }
+        m_computePools.push_back(pool);
+        m_lastComputePoolCapacity = *next;
+        GTE_LOG_WARNING("GpuResourceFactory",
+            "Compute descriptor pool added: " + std::to_string(m_computePools.size()) + " pools, newest holds "
+                + std::to_string(next->sets) + " sets.");
+        set = tryAllocate();
     }
-    return ComputeDescriptorSet(descriptorSet, m_device); // Device bound here, once - callers never see VkDevice.
+    return ComputeDescriptorSet(*set, m_device); // Device bound here, once - callers never see VkDevice.
+}
+
+void GpuResourceFactory::FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept
+{
+    if (descriptorSet == VK_NULL_HANDLE) {
+        return;
+    }
+    const std::scoped_lock lock(m_computePoolMutex);
+    const auto it = m_computeSetPool.find(descriptorSet);
+    if (it == m_computeSetPool.end() || it->second >= m_computePools.size()) {
+        return;
+    }
+    vkFreeDescriptorSets(m_device, m_computePools[it->second], 1, &descriptorSet);
+    m_computeSetPool.erase(it);
 }
 
 GpuMemoryTracker::Totals GpuResourceFactory::GetMemoryTotals() const

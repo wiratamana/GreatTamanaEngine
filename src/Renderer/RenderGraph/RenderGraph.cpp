@@ -35,12 +35,14 @@ RenderGraph::RenderGraph(Renderer& renderer)
     m_renderer = &renderer;
 }
 
-// Call once per engine frame to advance persistent resource tracking.
+// Call once per engine frame, outside graph execution. Binding sets are freed only after
+// kDefaultStaleFrames of disuse, so no in-flight command buffer can still reference one.
 void RenderGraph::BeginPersistentResourceFrame() noexcept
 {
     ++m_persistentResourceFrameCounter;
     m_persistentResourceCache.BeginFrame(
         m_persistentResourceFrameCounter, kPersistentResourceStaleThresholdFrames);
+    m_computeBindingCache.BeginFrame(m_persistentResourceFrameCounter);
 }
 
 void RenderGraph::EnsureTextureResolved(
@@ -375,7 +377,7 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
 
     const DescriptorSetHandle set = m_computeBindingCache.Resolve(pass.name, pass.viewScope, layout, writes);
     if (set == DescriptorSetHandle::Invalid) {
-        ReportSkippedOnce(pass, std::nullopt, "descriptor set could not be allocated or its layout changed.");
+        ReportSkippedOnce(pass, std::nullopt, "descriptor set could not be allocated.");
     }
     return set;
 }

@@ -188,6 +188,9 @@ public:
     ComputeDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
     ComputeDescriptorSet AllocateComputeDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const;
 
+    // Frees a set from AllocateComputeDescriptorSet(). The GPU must be done with it.
+    void FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept;
+
     // Layout shared by instanced indirect draw buffers.
     VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept;
 

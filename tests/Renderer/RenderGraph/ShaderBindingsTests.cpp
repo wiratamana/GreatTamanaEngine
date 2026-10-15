@@ -1,0 +1,444 @@
+// Tier-1 tests for name-based binding: planning, validation and declaration.
+
+#include "Renderer/RenderGraph/ShaderBindings.h"
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <string>
+#include <vector>
+
+namespace gte::rg {
+namespace {
+
+const TextureHandle kShadowDepth{ 1, 1 };
+const TextureHandle kSceneDepth{ 2, 1 };
+const TextureHandle kMask{ 3, 1 };
+const BufferObjectHandle kParams = static_cast<BufferObjectHandle>(42);
+const DescriptorSetLayoutHandle kLayout = static_cast<DescriptorSetLayoutHandle>(7);
+
+ReflectedDescriptorBinding Slot(std::uint32_t set, std::uint32_t binding, VkDescriptorType type, const char* name,
+    ReflectedAccess access = ReflectedAccess::ReadWrite, std::uint32_t count = 1)
+{
+    ReflectedDescriptorBinding slot;
+    slot.set = set;
+    slot.binding = binding;
+    slot.type = type;
+    slot.name = name;
+    slot.access = access;
+    slot.count = count;
+    return slot;
+}
+
+std::vector<ReflectedDescriptorBinding> FixtureBindings()
+{
+    return {
+        Slot(0, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, "params", ReflectedAccess::ReadOnly),
+        Slot(0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, "inputDepthA", ReflectedAccess::ReadOnly),
+        Slot(0, 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, "inputDepthB", ReflectedAccess::ReadOnly),
+        Slot(0, 3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, "maskOutput", ReflectedAccess::WriteOnly),
+    };
+}
+
+BindingArgument Tex(std::string_view name, TextureHandle handle)
+{
+    BindingArgument arg;
+    arg.name = name;
+    arg.kind = BindingResourceKind::Texture;
+    arg.texture = handle;
+    return arg;
+}
+
+BindingArgument Depth(std::string_view name, TextureHandle handle)
+{
+    BindingArgument arg = Tex(name, handle);
+    arg.kind = BindingResourceKind::DepthTexture;
+    return arg;
+}
+
+BindingArgument Buf(std::string_view name, BufferObjectHandle handle)
+{
+    BindingArgument arg;
+    arg.name = name;
+    arg.kind = BindingResourceKind::Buffer;
+    arg.buffer = handle;
+    return arg;
+}
+
+std::optional<TextureDesc> AllDepth(TextureHandle)
+{
+    TextureDesc desc;
+    desc.hasDepth = true;
+    return desc;
+}
+
+std::optional<TextureDesc> NoneHaveDepth(TextureHandle)
+{
+    return TextureDesc{};
+}
+
+std::vector<BindingArgument> HappyArgs()
+{
+    return { Buf("params", kParams), Depth("inputDepthA", kShadowDepth), Depth("inputDepthB", kSceneDepth),
+        Tex("maskOutput", kMask) };
+}
+
+BindingPlanResult Plan(const std::vector<ReflectedDescriptorBinding>& reflected, const std::vector<BindingArgument>& args,
+    DescribeTextureFn describe = AllDepth)
+{
+    return PlanBindings(reflected, args, describe);
+}
+
+bool Contains(const std::string& text, const char* needle)
+{
+    return text.find(needle) != std::string::npos;
+}
+
+TEST(ShaderBindingsTest, HappyPathPlansEveryBindingInReflectedOrder)
+{
+    const BindingPlanResult result = Plan(FixtureBindings(), HappyArgs());
+    ASSERT_TRUE(result.Ok()) << result.error;
+    ASSERT_EQ(result.plan.bindings.size(), 4u);
+
+    EXPECT_EQ(result.plan.bindings[0].binding, 0u);
+    EXPECT_EQ(result.plan.bindings[0].type, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    EXPECT_EQ(result.plan.bindings[0].kind, BindingResourceKind::Buffer);
+    EXPECT_EQ(result.plan.bindings[0].buffer, kParams);
+
+    EXPECT_EQ(result.plan.bindings[1].binding, 1u);
+    EXPECT_EQ(result.plan.bindings[1].kind, BindingResourceKind::DepthTexture);
+    EXPECT_EQ(result.plan.bindings[1].texture, kShadowDepth);
+    EXPECT_EQ(result.plan.bindings[2].binding, 2u);
+    EXPECT_EQ(result.plan.bindings[2].texture, kSceneDepth);
+
+    EXPECT_EQ(result.plan.bindings[3].binding, 3u);
+    EXPECT_EQ(result.plan.bindings[3].access, ReflectedAccess::WriteOnly);
+    EXPECT_EQ(result.plan.bindings[3].texture, kMask);
+}
+
+TEST(ShaderBindingsTest, ArgumentOrderDoesNotMatter)
+{
+    std::vector<BindingArgument> args = HappyArgs();
+    std::reverse(args.begin(), args.end());
+    const BindingPlanResult result = Plan(FixtureBindings(), args);
+    ASSERT_TRUE(result.Ok()) << result.error;
+    EXPECT_EQ(result.plan.bindings[0].binding, 0u);
+    EXPECT_EQ(result.plan.bindings[3].binding, 3u);
+}
+
+TEST(ShaderBindingsTest, UnknownNameIsAnErrorAndListsValidNames)
+{
+    std::vector<BindingArgument> args = HappyArgs();
+    args.push_back(Tex("typoName", kMask));
+    const BindingPlanResult result = Plan(FixtureBindings(), args);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "unknown name 'typoName'"));
+    EXPECT_TRUE(Contains(result.error, "valid names: params, inputDepthA, inputDepthB, maskOutput"));
+    EXPECT_TRUE(result.plan.bindings.empty());
+}
+
+TEST(ShaderBindingsTest, SameNameTwiceIsAnError)
+{
+    std::vector<BindingArgument> args = HappyArgs();
+    args.push_back(Tex("maskOutput", kMask));
+    const BindingPlanResult result = Plan(FixtureBindings(), args);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'maskOutput' was bound twice"));
+}
+
+TEST(ShaderBindingsTest, BufferOnTextureSlotIsAnError)
+{
+    std::vector<BindingArgument> args = HappyArgs();
+    args[3] = Buf("maskOutput", kParams);
+    const BindingPlanResult result = Plan(FixtureBindings(), args);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'maskOutput' is a storage image"));
+}
+
+TEST(ShaderBindingsTest, TextureOnBufferSlotIsAnError)
+{
+    std::vector<BindingArgument> args = HappyArgs();
+    args[0] = Tex("params", kMask);
+    const BindingPlanResult result = Plan(FixtureBindings(), args);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'params' is a storage buffer"));
+}
+
+TEST(ShaderBindingsTest, BufferOnSamplerSlotIsAnError)
+{
+    std::vector<BindingArgument> args = HappyArgs();
+    args[1] = Buf("inputDepthA", kParams);
+    const BindingPlanResult result = Plan(FixtureBindings(), args);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'inputDepthA' is a sampler"));
+}
+
+TEST(ShaderBindingsTest, DepthViewOnStorageImageIsAnError)
+{
+    std::vector<BindingArgument> args = HappyArgs();
+    args[3] = Depth("maskOutput", kMask);
+    const BindingPlanResult result = Plan(FixtureBindings(), args);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "depth view is only valid on a sampler"));
+}
+
+TEST(ShaderBindingsTest, InvalidTextureHandleIsAnError)
+{
+    std::vector<BindingArgument> args = HappyArgs();
+    args[3] = Tex("maskOutput", TextureHandle{});
+    const BindingPlanResult result = Plan(FixtureBindings(), args);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'maskOutput' was given an invalid resource handle"));
+}
+
+TEST(ShaderBindingsTest, InvalidBufferHandleIsAnError)
+{
+    std::vector<BindingArgument> args = HappyArgs();
+    args[0] = Buf("params", BufferObjectHandle::Invalid);
+    const BindingPlanResult result = Plan(FixtureBindings(), args);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'params' was given an invalid resource handle"));
+}
+
+TEST(ShaderBindingsTest, DepthViewOfTextureWithoutDepthIsAnError)
+{
+    const BindingPlanResult result = Plan(FixtureBindings(), HappyArgs(), NoneHaveDepth);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'inputDepthA' was given a depth view of a texture without a depth aspect"));
+    EXPECT_TRUE(Contains(result.error, "'inputDepthB' was given a depth view of a texture without a depth aspect"));
+}
+
+TEST(ShaderBindingsTest, DepthViewWithUnknownTextureIsAnError)
+{
+    const BindingPlanResult result = Plan(FixtureBindings(), HappyArgs(), DescribeTextureFn{});
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "without a depth aspect"));
+}
+
+TEST(ShaderBindingsTest, UnsuppliedBindingIsListedByName)
+{
+    std::vector<BindingArgument> args = HappyArgs();
+    args.pop_back();
+    const BindingPlanResult result = Plan(FixtureBindings(), args);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'maskOutput' was never bound"));
+}
+
+TEST(ShaderBindingsTest, DescriptorArrayIsRefused)
+{
+    std::vector<ReflectedDescriptorBinding> reflected = FixtureBindings();
+    reflected.push_back(Slot(0, 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, "layers", ReflectedAccess::ReadOnly, 4));
+    const BindingPlanResult result = Plan(reflected, HappyArgs());
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'layers' is a descriptor array: not supported by name binding"));
+    EXPECT_FALSE(Contains(result.error, "'layers' was never bound"));
+}
+
+TEST(ShaderBindingsTest, EmptyReflectedNameNamesItsSlot)
+{
+    std::vector<ReflectedDescriptorBinding> reflected = FixtureBindings();
+    reflected.push_back(Slot(0, 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, ""));
+    const BindingPlanResult result = Plan(reflected, HappyArgs());
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "set 0 binding 5 has no name"));
+}
+
+TEST(ShaderBindingsTest, EngineOwnedSetsAreIgnored)
+{
+    std::vector<ReflectedDescriptorBinding> reflected = FixtureBindings();
+    reflected.push_back(Slot(1, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, "sceneService"));
+    reflected.push_back(Slot(1, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, ""));
+    const BindingPlanResult result = Plan(reflected, HappyArgs());
+    ASSERT_TRUE(result.Ok()) << result.error;
+    EXPECT_EQ(result.plan.bindings.size(), 4u);
+}
+
+TEST(ShaderBindingsTest, SetOneNameIsNotNameable)
+{
+    std::vector<ReflectedDescriptorBinding> reflected = FixtureBindings();
+    reflected.push_back(Slot(1, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, "sceneService"));
+    std::vector<BindingArgument> args = HappyArgs();
+    args.push_back(Tex("sceneService", kMask));
+    const BindingPlanResult result = Plan(reflected, args);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "unknown name 'sceneService'"));
+    EXPECT_FALSE(Contains(result.error, "valid names: params, inputDepthA, inputDepthB, maskOutput, sceneService"));
+}
+
+TEST(ShaderBindingsTest, MultipleProblemsAreAllReported)
+{
+    std::vector<BindingArgument> args = { Tex("bogus", kMask), Tex("params", kMask) };
+    const BindingPlanResult result = Plan(FixtureBindings(), args);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "unknown name 'bogus'"));
+    EXPECT_TRUE(Contains(result.error, "'params' is a storage buffer"));
+    EXPECT_TRUE(Contains(result.error, "'inputDepthA' was never bound"));
+    EXPECT_TRUE(Contains(result.error, "'inputDepthB' was never bound"));
+    EXPECT_TRUE(Contains(result.error, "'maskOutput' was never bound"));
+    EXPECT_GE(std::count(result.error.begin(), result.error.end(), '\n'), 4);
+}
+
+TEST(ShaderBindingsTest, ValidNamesTextListsSetZeroOnly)
+{
+    std::vector<ReflectedDescriptorBinding> reflected = FixtureBindings();
+    reflected.push_back(Slot(1, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, "engineOwned"));
+    EXPECT_EQ(ValidNamesText(reflected), "valid names: params, inputDepthA, inputDepthB, maskOutput");
+    EXPECT_EQ(ValidNamesText({}), "valid names: (none)");
+}
+
+// --- DeclareBindings -------------------------------------------------------
+
+TEST(ShaderBindingsTest, DeclareHappyPathProducesReadsWritesAndBindings)
+{
+    const BindingPlanResult result = Plan(FixtureBindings(), HappyArgs());
+    ASSERT_TRUE(result.Ok()) << result.error;
+
+    PassRecord record;
+    RenderGraphBuilder::PassBuilder pass(record);
+    ASSERT_FALSE(DeclareBindings(pass, result.plan, kLayout).has_value());
+
+    EXPECT_EQ(record.computeBindingLayout, kLayout);
+    ASSERT_EQ(record.reads.size(), 2u);
+    EXPECT_TRUE(record.reads[0].isDepthResource);
+    EXPECT_TRUE(record.reads[1].isDepthResource);
+    EXPECT_EQ(record.reads[0].access, ResourceAccess::ShaderRead);
+    ASSERT_EQ(record.writes.size(), 1u);
+    EXPECT_EQ(record.writes[0].access, ResourceAccess::ComputeShaderWrite);
+    EXPECT_EQ(record.writes[0].texture, kMask);
+
+    ASSERT_EQ(record.bindings.size(), 4u);
+    EXPECT_EQ(record.bindings[0].kind, BindingKind::StorageBuffer);
+    EXPECT_EQ(record.bindings[0].bufferObjectHandle, kParams);
+    EXPECT_EQ(record.bindings[1].kind, BindingKind::CombinedImageSampler);
+    EXPECT_EQ(record.bindings[1].textureAspect, TextureAspect::Depth);
+    EXPECT_EQ(record.bindings[3].kind, BindingKind::StorageImage);
+    EXPECT_EQ(record.bindings[3].binding, 3u);
+}
+
+TEST(ShaderBindingsTest, DeclareColorSamplerIsNotADepthRead)
+{
+    std::vector<ReflectedDescriptorBinding> reflected = {
+        Slot(0, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, "source", ReflectedAccess::ReadOnly) };
+    const BindingPlanResult result = Plan(reflected, { Tex("source", kMask) });
+    ASSERT_TRUE(result.Ok()) << result.error;
+
+    PassRecord record;
+    RenderGraphBuilder::PassBuilder pass(record);
+    ASSERT_FALSE(DeclareBindings(pass, result.plan, kLayout).has_value());
+    ASSERT_EQ(record.reads.size(), 1u);
+    EXPECT_FALSE(record.reads[0].isDepthResource);
+    EXPECT_EQ(record.bindings[0].textureAspect, TextureAspect::Color);
+}
+
+TEST(ShaderBindingsTest, DeclareWriteOnlyImageHasNoRead)
+{
+    std::vector<ReflectedDescriptorBinding> reflected = {
+        Slot(0, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, "outImage", ReflectedAccess::WriteOnly) };
+    const BindingPlanResult result = Plan(reflected, { Tex("outImage", kMask) });
+    ASSERT_TRUE(result.Ok()) << result.error;
+
+    PassRecord record;
+    RenderGraphBuilder::PassBuilder pass(record);
+    ASSERT_FALSE(DeclareBindings(pass, result.plan, kLayout).has_value());
+    EXPECT_TRUE(record.reads.empty());
+    ASSERT_EQ(record.writes.size(), 1u);
+    EXPECT_EQ(record.bindings.size(), 1u);
+}
+
+TEST(ShaderBindingsTest, DeclareReadOnlyImageHasNoWrite)
+{
+    std::vector<ReflectedDescriptorBinding> reflected = {
+        Slot(0, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, "inImage", ReflectedAccess::ReadOnly) };
+    const BindingPlanResult result = Plan(reflected, { Tex("inImage", kMask) });
+    ASSERT_TRUE(result.Ok()) << result.error;
+
+    PassRecord record;
+    RenderGraphBuilder::PassBuilder pass(record);
+    ASSERT_FALSE(DeclareBindings(pass, result.plan, kLayout).has_value());
+    ASSERT_EQ(record.reads.size(), 1u);
+    EXPECT_EQ(record.reads[0].access, ResourceAccess::ComputeShaderRead);
+    EXPECT_TRUE(record.writes.empty());
+    EXPECT_EQ(record.bindings.size(), 1u);
+}
+
+TEST(ShaderBindingsTest, DeclareReadWriteImageHasReadWriteAndOneBinding)
+{
+    std::vector<ReflectedDescriptorBinding> reflected = {
+        Slot(0, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, "history", ReflectedAccess::ReadWrite) };
+    const BindingPlanResult result = Plan(reflected, { Tex("history", kMask) });
+    ASSERT_TRUE(result.Ok()) << result.error;
+
+    PassRecord record;
+    RenderGraphBuilder::PassBuilder pass(record);
+    ASSERT_FALSE(DeclareBindings(pass, result.plan, kLayout).has_value());
+    ASSERT_EQ(record.reads.size(), 1u);
+    EXPECT_EQ(record.reads[0].access, ResourceAccess::ComputeShaderRead);
+    ASSERT_EQ(record.writes.size(), 1u);
+    EXPECT_EQ(record.writes[0].access, ResourceAccess::ComputeShaderWrite);
+    EXPECT_EQ(record.bindings.size(), 1u);
+}
+
+TEST(ShaderBindingsTest, DeclareRejectsInvalidLayoutAndDeclaresNothing)
+{
+    const BindingPlanResult result = Plan(FixtureBindings(), HappyArgs());
+    ASSERT_TRUE(result.Ok()) << result.error;
+
+    PassRecord record;
+    RenderGraphBuilder::PassBuilder pass(record);
+    EXPECT_TRUE(DeclareBindings(pass, result.plan, DescriptorSetLayoutHandle::Invalid).has_value());
+    EXPECT_TRUE(record.bindings.empty());
+    EXPECT_TRUE(record.reads.empty());
+}
+
+TEST(ShaderBindingsTest, DeclareRejectsMismatchedPlanEntryAndDeclaresNothing)
+{
+    BindingPlan plan;
+    PlannedBinding good;
+    good.binding = 0;
+    good.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    good.kind = BindingResourceKind::Texture;
+    good.texture = kMask;
+    PlannedBinding bad;
+    bad.binding = 1;
+    bad.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bad.kind = BindingResourceKind::Texture;
+    bad.texture = kMask;
+    plan.bindings = { good, bad };
+
+    PassRecord record;
+    RenderGraphBuilder::PassBuilder pass(record);
+    const std::optional<std::string> error = DeclareBindings(pass, plan, kLayout);
+    ASSERT_TRUE(error.has_value());
+    EXPECT_TRUE(Contains(*error, "binding 1"));
+    EXPECT_TRUE(record.bindings.empty());
+    EXPECT_TRUE(record.writes.empty());
+}
+
+// --- Push constants --------------------------------------------------------
+
+TEST(ShaderBindingsTest, PushConstantSizeMatchIsOk)
+{
+    EXPECT_FALSE(ValidatePushConstantSize(true, 16, 16).has_value());
+    EXPECT_FALSE(ValidatePushConstantSize(false, 0, 0).has_value());
+}
+
+TEST(ShaderBindingsTest, PushConstantSizeMismatchIsAnError)
+{
+    const std::optional<std::string> error = ValidatePushConstantSize(true, 16, 8);
+    ASSERT_TRUE(error.has_value());
+    EXPECT_TRUE(Contains(*error, "16"));
+    EXPECT_TRUE(Contains(*error, "8"));
+}
+
+TEST(ShaderBindingsTest, PushConstantSuppliedWithoutShaderBlockIsAnError)
+{
+    EXPECT_TRUE(ValidatePushConstantSize(false, 0, 4).has_value());
+}
+
+TEST(ShaderBindingsTest, PushConstantMissingForShaderBlockIsAnError)
+{
+    EXPECT_TRUE(ValidatePushConstantSize(true, 4, 0).has_value());
+}
+
+} // namespace
+} // namespace gte::rg

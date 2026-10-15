@@ -479,6 +479,10 @@ ComputeDescriptorSet Renderer::AllocateComputeDescriptorSet(DescriptorSetLayoutH
 {
     return m_resources.AllocateComputeDescriptorSet(Native(layoutHandle));
 }
+void Renderer::FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept
+{
+    m_resources.FreeComputeDescriptorSet(descriptorSet);
+}
 
 VkDescriptorSetLayout Renderer::InstanceBufferDescriptorSetLayout() const noexcept
 {
