@@ -4,6 +4,7 @@
 #include "AtmospherePassToggleLogic.h"
 #include "../../Core/PipelineDesc.h"
 #include "../../Renderer/RenderTarget.h"
+#include "../../Renderer/ShaderFile.h"
 #include "../../Renderer/RenderGraph/CommandBuffer.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
@@ -12,7 +13,6 @@
 
 #include <cstdint>
 #include <cstring>
-#include <fstream>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -49,20 +49,6 @@ struct AerialPerspectiveCompositePushConstants {
     // x = strength, y = max distance (km), z = depth exponent, w = padding.
     float aerialPerspectiveStrengthAndPad[4];
 };
-
-std::vector<std::byte> ReadShaderFileBytes(const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error(
-            "AtmosphereLutRenderer::Impl: failed to open shader file '" + path + "' - was it compiled?");
-    }
-    const std::size_t size = static_cast<std::size_t>(file.tellg());
-    std::vector<std::byte> buffer(size);
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(size));
-    return buffer;
-}
 
 // Push constants for AtmosphereSkyBackground.frag (80 bytes).
 struct SkyBackgroundPushConstants {

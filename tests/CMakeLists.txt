@@ -2359,6 +2359,7 @@ set(GTE_TEST_SOURCES
     # near add_executable(GreatTamanaEngineTests ...)). No Vulkan device
     # involved at all - pure SPIR-V binary parsing.
     Renderer/Vulkan/ShaderReflectionTests.cpp
+    Renderer/ShaderFileTests.cpp
     # editor-core-separation-27 campaign, PHASE4
     # (PHASE4_HEADLESS_TEST_FIXTURE_AND_CACHE_CONSTRUCTION.md) - Tier-2 (real,
     # headless GPU, tests/Fakes/HeadlessRenderGraphFixture.h) tests for

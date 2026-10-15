@@ -1,28 +1,14 @@
 #include "ShaderModule.h"
 
+#include "../ShaderFile.h"
+
 #include <cstdint>
-#include <fstream>
 #include <stdexcept>
 #include <vector>
 
 namespace gte {
 
 namespace {
-
-std::vector<char> ReadFile(const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error(
-            "ShaderModule: failed to open shader file '" + path + "' - was it compiled? See cmake/CompileShaders.cmake.");
-    }
-
-    const std::size_t size = static_cast<std::size_t>(file.tellg());
-    std::vector<char> buffer(size);
-    file.seekg(0);
-    file.read(buffer.data(), static_cast<std::streamsize>(size));
-    return buffer;
-}
 
 VkShaderModule CreateModuleFromBytes(VkDevice device, const void* code, std::size_t codeSize)
 {
@@ -42,7 +28,7 @@ VkShaderModule CreateModuleFromBytes(VkDevice device, const void* code, std::siz
 
 VkShaderModule LoadShaderModule(VkDevice device, const std::string& spirvPath)
 {
-    const std::vector<char> spirv = ReadFile(spirvPath);
+    const std::vector<std::byte> spirv = ReadShaderFileBytes(spirvPath);
     return CreateModuleFromBytes(device, spirv.data(), spirv.size());
 }
 

@@ -3,31 +3,18 @@
 #include "../../Core/PipelineDesc.h"
 #include "../../Renderer/Compute/ComputeDescriptorSet.h"
 #include "../../Renderer/Renderer.h"
+#include "../../Renderer/ShaderFile.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
 
 #include <cstring>
-#include <fstream>
 #include <stdexcept>
 #include <vector>
 
 namespace gte {
 
 namespace {
-
-std::vector<std::byte> ReadShaderFileBytes(const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error("ShadowCompositeRenderer: failed to open shader file '" + path + "'.");
-    }
-    const std::size_t size = static_cast<std::size_t>(file.tellg());
-    std::vector<std::byte> buffer(size);
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(size));
-    return buffer;
-}
 
 // Must match Shaders/ShadowComposite.frag's push-constant block exactly (4 bytes).
 struct PushConstants {

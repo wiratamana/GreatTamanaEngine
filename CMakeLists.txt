@@ -751,6 +751,8 @@ add_library(gte_core STATIC
     src/Renderer/Vulkan/FormatCapabilities.h
     src/Renderer/Vulkan/ShaderModule.cpp
     src/Renderer/Vulkan/ShaderModule.h
+    src/Renderer/ShaderFile.cpp
+    src/Renderer/ShaderFile.h
     src/Renderer/Vulkan/DescriptorSetLayoutBuilder.cpp
     src/Renderer/Vulkan/DescriptorSetLayoutBuilder.h
     # task_manager/better-render-pass-1 campaign, PHASE1

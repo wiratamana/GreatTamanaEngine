@@ -1,4 +1,4 @@
-﻿#include "AssetPreviewMesh.h"
+#include "AssetPreviewMesh.h"
 
 #include "ProjectPanelData.h" // Utf8ToPath()
 #include "../Assets/AssetTypes.h" // AssetType
@@ -9,6 +9,7 @@
 #include "../Renderer/Buffer.h"
 #include "../Renderer/Compute/ComputeDescriptorSet.h"
 #include "../Renderer/Renderer.h"
+#include "../Renderer/ShaderFile.h"
 #include "../Renderer/RenderGraph/CommandBuffer.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/Texture2D.h"
@@ -20,7 +21,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
-#include <fstream>
 #include <stdexcept>
 #include <vector>
 
@@ -35,20 +35,6 @@ struct PreviewVertex {
     float position[3];
     float normal[3];
 };
-
-std::vector<std::byte> ReadShaderFileBytes(const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error(
-            "AssetPreviewMesh: failed to open shader file '" + path + "' - was it compiled? See cmake/CompileShaders.cmake.");
-    }
-    const std::size_t size = static_cast<std::size_t>(file.tellg());
-    std::vector<std::byte> buffer(size);
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(size));
-    return buffer;
-}
 
 } // namespace
 

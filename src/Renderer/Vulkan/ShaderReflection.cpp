@@ -1,8 +1,9 @@
 #include "ShaderReflection.h"
 
+#include "../ShaderFile.h"
+
 #include <spirv_reflect.h>
 
-#include <fstream>
 #include <map>
 #include <stdexcept>
 
@@ -10,32 +11,7 @@ namespace gte {
 
 namespace {
 
-// Mirrors (deliberately duplicates, never calls) ShaderModule.cpp's own
-// anonymous-namespace ReadFile() helper - that function has internal
-// linkage and ShaderModule.h's only exported function always takes a live
-// VkDevice, incompatible with this module's own explicit "no VkDevice
-// anywhere in this file" design requirement. See PHASE1's own task doc,
-// Step 2.2.
-std::vector<char> ReadShaderSpirvFile(const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error(
-            "ShaderReflection: failed to open shader file '" + path + "' - was it compiled? See cmake/CompileShaders.cmake.");
-    }
-
-    const std::size_t size = static_cast<std::size_t>(file.tellg());
-    std::vector<char> buffer(size);
-    file.seekg(0);
-    file.read(buffer.data(), static_cast<std::streamsize>(size));
-    return buffer;
-}
-
-// Maps a reflected SPIR-V descriptor type onto the three VkDescriptorType
-// values this engine's own DescriptorSetLayoutBuilder/ComputeDescriptorSet
-// understand today (see ComputeDescriptorSet.h's own three static
-// factories) - any other reflected type is a loud, explicit error, never a
-// silent drop.
+// Maps a reflected descriptor type to a supported VkDescriptorType; anything else throws.
 VkDescriptorType MapDescriptorType(SpvReflectDescriptorType type, const std::string& shaderSpirvPath)
 {
     switch (type) {
@@ -57,7 +33,7 @@ VkDescriptorType MapDescriptorType(SpvReflectDescriptorType type, const std::str
 
 ShaderReflectionResult ReflectComputeShader(const std::string& shaderSpirvPath)
 {
-    const std::vector<char> spirv = ReadShaderSpirvFile(shaderSpirvPath);
+    const std::vector<std::byte> spirv = ReadShaderFileBytes(shaderSpirvPath);
 
     SpvReflectShaderModule module{};
     const SpvReflectResult createResult = spvReflectCreateShaderModule(spirv.size(), spirv.data(), &module);

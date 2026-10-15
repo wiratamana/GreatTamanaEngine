@@ -2,31 +2,13 @@
 
 #include "../Core/PipelineDesc.h"
 #include "../Renderer/Renderer.h"
+#include "../Renderer/ShaderFile.h"
 
 #include <cstring>
-#include <fstream>
 #include <stdexcept>
 #include <vector>
 
 namespace gte {
-
-namespace {
-
-std::vector<std::byte> ReadShaderFileBytes(const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error(
-            "SceneGridRenderer: failed to open shader file '" + path + "' - was it compiled? See cmake/CompileShaders.cmake.");
-    }
-    const std::size_t size = static_cast<std::size_t>(file.tellg());
-    std::vector<std::byte> buffer(size);
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(size));
-    return buffer;
-}
-
-} // namespace
 
 SceneGridRenderer::~SceneGridRenderer()
 {
