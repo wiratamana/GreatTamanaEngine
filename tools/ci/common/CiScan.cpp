@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -29,6 +30,7 @@ struct Options {
     MaskOptions mask{ false, true };
     bool ignoreCase = false;
     bool report = false;
+    std::size_t commentBlockLimit = 0; // > 0: comment-rule mode, longest allowed comment block in lines.
 };
 
 bool ReadFile(const fs::path& path, std::string& out)
@@ -68,6 +70,8 @@ bool ParseArgs(int argc, char** argv, Options& o)
             o.mask.scanStrings = std::string(value()) == "scan";
         } else if (arg == "--ignore-case") {
             o.ignoreCase = true;
+        } else if (arg == "--comment-rules") {
+            o.commentBlockLimit = static_cast<std::size_t>(std::strtoul(value(), nullptr, 10));
         } else if (arg == "--report") {
             o.report = true;
         } else {
@@ -75,8 +79,8 @@ bool ParseArgs(int argc, char** argv, Options& o)
             return false;
         }
     }
-    if (o.root.empty() || (o.tokensFile.empty() && o.includesFile.empty())) {
-        std::fprintf(stderr, "gte_ci_scan: --root and at least one of --tokens/--includes are required\n");
+    if (o.root.empty() || (o.tokensFile.empty() && o.includesFile.empty() && o.commentBlockLimit == 0)) {
+        std::fprintf(stderr, "gte_ci_scan: --root and one of --tokens/--includes/--comment-rules are required\n");
         return false;
     }
     return true;
@@ -149,9 +153,14 @@ ScanResult Scan(const Options& o, const TokenSet& tokens, const std::vector<std:
         }
         ++result.scanned;
         const std::vector<Kind> kinds = Classify(text);
-        std::vector<Hit> hits = FindTokens(Mask(text, kinds, o.mask), tokens);
-        std::vector<Hit> includeHits = FindForbiddenIncludes(text, kinds, includes);
-        hits.insert(hits.end(), includeHits.begin(), includeHits.end());
+        std::vector<Hit> hits;
+        if (o.commentBlockLimit > 0) {
+            hits = FindCommentViolations(text, kinds, o.commentBlockLimit);
+        } else {
+            hits = FindTokens(Mask(text, kinds, o.mask), tokens);
+            std::vector<Hit> includeHits = FindForbiddenIncludes(text, kinds, includes);
+            hits.insert(hits.end(), includeHits.begin(), includeHits.end());
+        }
         if (!hits.empty()) {
             result.found[rel] = std::move(hits);
         }
@@ -188,6 +197,24 @@ int main(int argc, char** argv)
     if (scan.scanned == 0) {
         std::fprintf(stderr, "gte_ci_scan: scanned 0 files under %s - wrong --root/--only?\n", o.root.string().c_str());
         return 2;
+    }
+
+    if (o.commentBlockLimit > 0) {
+        // No allowlist: any comment that names history or a document, or runs past the block limit, fails.
+        std::size_t total = 0;
+        for (const auto& [path, hits] : scan.found) {
+            for (const Hit& hit : hits) {
+                if (!o.report && total < 200) {
+                    std::printf("%s:%zu: %s\n", path.c_str(), hit.line, hit.token.c_str());
+                }
+                ++total;
+            }
+            if (o.report) {
+                std::printf("%s # %zu hits\n", path.c_str(), hits.size());
+            }
+        }
+        std::printf("# scanned %zu files, %zu comment violations\n", scan.scanned, total);
+        return (total == 0 || o.report) ? 0 : 1;
     }
 
     if (o.report) {

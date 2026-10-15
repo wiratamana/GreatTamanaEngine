@@ -349,6 +349,80 @@ inline std::vector<Hit> FindForbiddenIncludes(
     return hits;
 }
 
+// Comment text that names project history or a document, and comment blocks (consecutive comment-only lines)
+// longer than `maxBlockLines`.
+inline std::vector<Hit> FindCommentViolations(std::string_view text, const std::vector<Kind>& kinds, std::size_t maxBlockLines)
+{
+    const std::vector<std::size_t> starts = LineStarts(text);
+    const auto isComment = [&kinds](std::size_t i) { return kinds[i] == Kind::LineComment || kinds[i] == Kind::BlockComment; };
+
+    std::string commentText(text.size(), ' ');
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (isComment(i) || text[i] == '\n') {
+            commentText[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(text[i])));
+        }
+    }
+
+    std::vector<Hit> hits;
+    const auto digitAfterPhase = [&commentText](std::size_t at) {
+        std::size_t p = at + 5;
+        while (p < commentText.size() && (commentText[p] == ' ' || commentText[p] == '_')) {
+            ++p;
+        }
+        return p < commentText.size() && commentText[p] >= '0' && commentText[p] <= '9';
+    };
+    for (const char* word : { "campaign", "task_manager", "locked design" }) {
+        for (std::size_t at = commentText.find(word); at != std::string::npos; at = commentText.find(word, at + 1)) {
+            hits.push_back(Hit{ LineOf(starts, at), std::string("comment names '") + word + "'" });
+        }
+    }
+    for (std::size_t at = commentText.find("phase"); at != std::string::npos; at = commentText.find("phase", at + 1)) {
+        if (digitAfterPhase(at)) {
+            hits.push_back(Hit{ LineOf(starts, at), "comment names a numbered phase" });
+        }
+    }
+    for (std::size_t at = commentText.find(".md"); at != std::string::npos; at = commentText.find(".md", at + 1)) {
+        const bool leftIdent = at > 0 && IsIdentChar(commentText[at - 1]);
+        const bool rightIdent = at + 3 < commentText.size() && IsIdentChar(commentText[at + 3]);
+        if (leftIdent && !rightIdent) {
+            hits.push_back(Hit{ LineOf(starts, at), "comment names a document (*.md)" });
+        }
+    }
+
+    // Block length: a line is a comment line when its only non-blank bytes are comment bytes.
+    std::size_t run = 0;
+    std::size_t runStart = 0;
+    const auto closeRun = [&]() {
+        if (run > maxBlockLines) {
+            hits.push_back(Hit{ runStart, "comment block of " + std::to_string(run) + " lines (max "
+                    + std::to_string(maxBlockLines) + ")" });
+        }
+        run = 0;
+    };
+    for (std::size_t line = 0; line < starts.size(); ++line) {
+        const std::size_t begin = starts[line];
+        const std::size_t end = line + 1 < starts.size() ? starts[line + 1] : text.size();
+        bool hasComment = false;
+        bool hasCode = false;
+        for (std::size_t i = begin; i < end; ++i) {
+            if (text[i] == ' ' || text[i] == '\t' || text[i] == '\r' || text[i] == '\n') {
+                continue;
+            }
+            (isComment(i) ? hasComment : hasCode) = true;
+        }
+        if (hasComment && !hasCode) {
+            if (run == 0) {
+                runStart = line + 1;
+            }
+            ++run;
+        } else {
+            closeRun();
+        }
+    }
+    closeRun();
+    return hits;
+}
+
 struct AllowEntry {
     std::string path; // Forward slashes, relative to the scan root.
     std::string reason;

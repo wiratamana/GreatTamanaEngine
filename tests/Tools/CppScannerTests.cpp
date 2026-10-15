@@ -303,5 +303,43 @@ TEST(CppScannerTest, RatchetCountsEveryProblemOnce)
     EXPECT_EQ(result.failures, 2); // One stale line plus one file with violations.
     EXPECT_EQ(result.messages.size(), 3u);
 }
+
+std::vector<Hit> CommentHits(const std::string& source, std::size_t maxBlock = 3)
+{
+    return FindCommentViolations(source, Classify(source), maxBlock);
+}
+
+TEST(CppScannerTest, CommentRulesFlagHistoryAndDocumentNames)
+{
+    EXPECT_EQ(CommentHits("// A campaign step.\nint a;\n").size(), 1u);
+    EXPECT_EQ(CommentHits("int a; // PHASE7 shell\n").size(), 1u);
+    EXPECT_EQ(CommentHits("// phase 12 gap\n").size(), 1u);
+    EXPECT_EQ(CommentHits("/* see task_manager */ int a;\n").size(), 1u);
+    EXPECT_EQ(CommentHits("// The Locked Design says no.\n").size(), 1u);
+    EXPECT_EQ(CommentHits("// See PLAN_v2.md for details.\n").size(), 1u);
+}
+
+TEST(CppScannerTest, CommentRulesIgnoreCodeAndPlainWords)
+{
+    EXPECT_TRUE(CommentHits("const char* a = \"campaign\"; auto b = x.md;\n").empty());
+    EXPECT_TRUE(CommentHits("// The phase of the moon.\n// Markdown is fine.\n").empty());
+}
+
+TEST(CppScannerTest, CommentBlocksLongerThanTheLimitAreFlagged)
+{
+    const std::string three = "// a\n// b\n// c\nint x;\n";
+    const std::string four = "// a\n// b\n// c\n// d\nint x;\n";
+    EXPECT_TRUE(CommentHits(three).empty());
+    ASSERT_EQ(CommentHits(four).size(), 1u);
+    EXPECT_EQ(CommentHits(four)[0].line, 1u);
+}
+
+TEST(CppScannerTest, CommentBlockRunsBreakOnCodeAndBlankLines)
+{
+    EXPECT_TRUE(CommentHits("// a\n// b\n// c\n\n// d\n// e\n// f\n").empty());
+    EXPECT_TRUE(CommentHits("// a\nint x; // b\n// c\n// d\n// e\n").empty());
+    EXPECT_EQ(CommentHits("/* a\n b\n c\n d */\n").size(), 1u);
+}
+
 } // namespace
 } // namespace gte::ci
