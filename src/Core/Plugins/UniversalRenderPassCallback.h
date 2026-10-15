@@ -1,8 +1,7 @@
 #pragma once
 
-// Types behind Core::RegisterRenderPass(), the one way to register a built-in render pass.
-// Passes that must write straight into the shared view target use Core::RegisterProjectRenderPassProvider()
-// instead; RegisterViewContentPassName()/RegisterFinalizeForSamplingHook() register no pass at all.
+// Types behind Core::RegisterRenderPass(), the one way to register a built-in render pass. Passes that write
+// straight into the shared view target use Core::RegisterProjectRenderPassProvider() instead.
 
 #include "ProjectRenderFeatureCallback.h"
 #include "RenderFeatureDescriptor.h"

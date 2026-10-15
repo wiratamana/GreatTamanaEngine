@@ -22,9 +22,8 @@ public:
     ProjectAssemblyHost(ProjectAssemblyHost&&) = delete;
     ProjectAssemblyHost& operator=(ProjectAssemblyHost&&) = delete;
 
-    // Loads every "*_Game.dll"/"*_Editor.dll" directly inside `outputDirectory` (no recursion) and calls
-    // each GTE_RegisterProject export once. A missing directory is fine. `core` must outlive the process.
-    // `editorHost` is nullptr for a standalone host; a "*_Editor.dll" is then skipped with a logged warning.
+    // Loads every "*_Game.dll"/"*_Editor.dll" in `outputDirectory` (no recursion) and calls each GTE_RegisterProject
+    // export once. `editorHost` is nullptr for a standalone host: "*_Editor.dll" files are then skipped with a warning.
     void LoadProjectAssemblies(const std::filesystem::path& outputDirectory,
         Core& core, EditorHost* editorHost);
 

@@ -1,8 +1,7 @@
 #pragma once
 
-// Scene services: the fixed engine-wide vocabulary for scene-wide optional textures (depth maps, GI and
-// other reserved slots), the per-(slot, view) blackboard key that keeps concurrent views from colliding,
-// and the SceneServicesDescriptorSet class that owns the layout, per-view sets and dummy fallbacks.
+// Scene services: engine-wide slots for optional scene textures (depth maps, GI), a per-(slot, view) blackboard key,
+// and the descriptor-set class that owns the layout, per-view sets and dummy fallbacks.
 
 #include "RenderGraph/RenderPipeline.h" // rg::RenderPassId, rg::RenderViewId
 #include "Buffer.h"

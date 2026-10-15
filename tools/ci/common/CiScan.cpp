@@ -1,4 +1,4 @@
-// gte_ci_scan: one guardrail check over a source tree (see tools/ci/<check>/README.md).
+// gte_ci_scan: one guardrail check over a source tree (each check folder under tools/ci explains its own use).
 // Check mode exits 1 on a new hit or a stale allowlist line; --report lists files with hits and exits 0.
 
 #include "CppScanner.h"

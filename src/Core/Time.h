@@ -8,11 +8,8 @@ namespace gte {
 // paused or not; every other method reads what the last Advance() computed.
 class Time {
 public:
-    // Advances by one real frame.
-    //   realDeltaSeconds   - wall-clock seconds since the previous call; always feeds UnscaledDeltaTime().
-    //   isPaused           - pause state decided by the Play/Pause owner.
-    //   isSteppedThisFrame - one-frame Step request; ignored unless isPaused.
-    //   fixedStepSeconds   - simulated time of a Step and of the first frame after a resume (must be > 0).
+    // Advances by one real frame. A Step request is ignored unless paused; fixedStepSeconds (> 0) is the
+    // simulated time of a Step and of the first frame after a resume.
     void Advance(double realDeltaSeconds, bool isPaused, bool isSteppedThisFrame, double fixedStepSeconds) noexcept;
 
     // The delta simulation code should use: the real delta while running, fixedStepSeconds on a Step frame
