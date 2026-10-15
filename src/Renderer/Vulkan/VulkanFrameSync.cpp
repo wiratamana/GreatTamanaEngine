@@ -1,4 +1,4 @@
-﻿#include "VulkanFrameSync.h"
+#include "VulkanFrameSync.h"
 
 #include <stdexcept>
 #include <utility>
@@ -59,11 +59,7 @@ void VulkanFrameSync::CreatePerFrameObjects(std::uint32_t framesInFlight)
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    // Sized (with every entry starting VK_NULL_HANDLE) before the creation
-    // loop below, so that if any single vkCreate* call fails partway
-    // through, Destroy() - called right before the throw - can safely walk
-    // the whole vector and only destroy the handles that actually got
-    // created, instead of leaking them.
+    // Pre-sized with null handles so Destroy() can free only what was created if a vkCreate* fails.
     m_imageAvailableSemaphores.resize(framesInFlight, VK_NULL_HANDLE);
     m_inFlightFences.resize(framesInFlight, VK_NULL_HANDLE);
 

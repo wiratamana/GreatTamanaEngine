@@ -1,20 +1,7 @@
 #pragma once
 
-// Pure, ImGui-free "flatten a compiled graph into something displayable"
-// reshape, mirroring MemoryPanelData.h/ProfilerPanelData.h's own small,
-// dedicated, directly-testable reshaping module shape.
-//
-// Deliberately its own header/translation unit, not folded into
-// RenderGraph.h/.cpp: RenderGraph.h includes this (to store/serve a
-// snapshot per ExecuteTimingMode regime), but BuildRenderGraphSnapshot()
-// itself needs nothing but already-computed plain data (a CompiledGraph, a
-// CompiledGraphInput, and a caller-supplied stats-lookup function) - no
-// live RenderGraph/VkDevice/Renderer - so it is directly testable with
-// hand-fabricated inputs.
-//
-// PassGpuStats is the one small, genuinely shared type between
-// RenderGraph.h and this file - giving it a single home here (rather than
-// two copies, or a circular include) is the cleanest resolution.
+// Pure, ImGui-free reshape of a compiled graph into something displayable, kept out of RenderGraph.h so
+// tests can feed it hand-made inputs. PassGpuStats lives here as the one type shared with RenderGraph.h.
 
 #include "RenderGraphBuilder.h"
 #include "RenderGraphDebugMetadataSink.h"
@@ -29,87 +16,48 @@
 
 namespace gte::rg {
 
-// One pass's last-known stats, as of whichever Execute() call most recently
-// ran it. `timing` is a Renderer-local tri-state GpuTimingSample (see
-// GpuTiming.h); `drawStats` is real, fused-per-draw-call data.
+// One pass's last-known stats, from the most recent Execute() that ran it.
 struct PassGpuStats {
     DrawStats drawStats;
     GpuTimingSample timing;
 };
 
-// Combines N passes' own last-known PassGpuStats into one aggregate, for a
-// group of passes a caller treats as logically "one thing". Pure,
-// allocation-light, testable - takes plain PassGpuStats values, no live
-// RenderGraph/VkDevice needed.
-//
-// `drawStats`: plain sum of every entry's drawCallCount/triangleCount.
-//
-// `timing`: sums `milliseconds` across every entry whose status is Present
-// (result status is Present too, in that case). If none are Present, falls
-// back to Unsupported if any entry reports Unsupported, otherwise Absent.
-// An empty `stats` input returns a default-constructed PassGpuStats{}.
+// Combines several passes' stats into one aggregate for a group treated as one thing. Draw stats are
+// summed. Timing sums `milliseconds` over the entries that are Present; with none Present the result is
+// Unsupported if any entry is, else Absent. An empty input gives a default PassGpuStats.
 PassGpuStats CombinePassGpuStats(const std::vector<PassGpuStats>& stats);
 
-// One pass, ready to display. `name`/`readNames`/`writeNames` are already
-// resolved into plain, owned strings (never a raw `const char*` into
-// PassRecord/RenderGraphBuilder's own name tables, which only live as long
-// as the CompiledGraphInput that produced this snapshot) - a snapshot must
-// remain valid and displayable indefinitely once captured.
+// One pass, ready to display. Names are owned strings, not pointers into PassRecord tables, so a
+// snapshot stays valid indefinitely.
 struct RenderGraphPassSnapshot {
     std::string name;
     bool isCulled = false;
     std::vector<std::string> readNames;
     std::vector<std::string> writeNames;
 
-    // `kind == PassKind::Compute` for a real compute dispatch. Copied
-    // straight through for both a surviving and a culled pass - a culled
-    // compute pass must still truthfully report this.
+    // The next five fields are copied through for surviving and culled passes alike.
     PassKind kind = PassKind::Graphics;
-
-    // Which conceptual group this pass belongs to. Copied straight through
-    // for both a surviving and a culled pass, same as `kind` above.
     RenderPassCategory category = RenderPassCategory::General;
-
-    // What kind of draw this pass issues (or would have issued if culled).
-    // Copied straight through for both a surviving and a culled pass.
     RenderPassDrawKind drawKind = RenderPassDrawKind::DrawMesh;
-
-    // Which view this pass belongs to. Copied straight through for both a
-    // surviving and a culled pass.
     ViewScope viewScope = ViewScope::Shared;
-
-    // Where this pass sorts in the frame. Copied straight through for both
-    // a surviving and a culled pass.
     RenderPassEvent renderPassEvent = RenderPassEvent::Opaques;
 
-    // Parallel to readNames/writeNames above (same index, same length) -
-    // which ResourceKind each entry actually is, so a consumer never has to
-    // guess/probe multiple registries.
+    // Parallel to readNames/writeNames: the ResourceKind of each entry.
     std::vector<ResourceKind> readKinds;
     std::vector<ResourceKind> writeKinds;
 
-    // Editor Inspector binding-stage display - parallel to readNames/
-    // writeNames exactly like readKinds/writeKinds above. The declared
-    // ResourceAccess for each entry, resolved into a human label via
-    // rg::BindingStageLabel() at the RenderGraphMetadata layer.
+    // Parallel to readNames/writeNames: the declared access, resolved to a label by BindingStageLabel().
     std::vector<ResourceAccess> readAccess;
     std::vector<ResourceAccess> writeAccess;
 
-    // Parallel to writeNames - one barrier transition label per declared
-    // write ("" when no barrier was applied this frame for that write, or
-    // no sink is installed). Resolved once, at snapshot-build time, via the
-    // optional barrierLabelLookup callback below - never recomputed on the
-    // hot Vulkan recording path.
+    // Parallel to writeNames: the barrier transition label, "" when no barrier was applied this frame
+    // or no sink is installed. Resolved once at snapshot-build time.
     std::vector<std::string> writeBarrierLabels;
 
-    // Left at its default (an empty DrawStats, an Absent GpuTimingSample)
-    // for a culled pass - see BuildRenderGraphSnapshot()'s own doc comment
-    // below for why.
+    // Default (empty draw stats, Absent timing) for a culled pass.
     PassGpuStats stats;
 
-    // Which feature owns this pass. Copied straight through for both a
-    // surviving and a culled pass, same as the fields above. "ENGINE_UNOWNED"
-    // only for a pass declared with no active RenderFeatureScope at all.
+    // The owning feature; "ENGINE_UNOWNED" when declared outside any RenderFeatureScope.
     std::string owningFeatureName;
 };
 
@@ -117,84 +65,33 @@ struct RenderGraphPassSnapshot {
 struct RenderGraphResourceSnapshot {
     std::string name;
     bool isImported = false;
-    // Indices into RenderGraphSnapshot::passesInExecutionOrder's own
-    // surviving (non-culled) prefix - i.e. ResourceLifetime::firstUsePassIndex/
-    // lastUsePassIndex, unchanged (-1 means "never used"). Never an index
-    // into the culled passes appended after that prefix.
+    // Indices into the surviving prefix of RenderGraphSnapshot::passesInExecutionOrder (-1 = never used).
     std::int32_t firstUsePassIndex = -1;
     std::int32_t lastUsePassIndex = -1;
 };
 
-// The whole displayable snapshot of one RenderGraph::Execute() call.
+// The displayable snapshot of one RenderGraph::Execute() call.
 struct RenderGraphSnapshot {
-    // Every surviving (non-culled) pass first, in real execution order
-    // (matching CompiledGraph::executionOrder exactly), followed by every
-    // culled pass appended after them, in their original declaration order.
-    // A culled pass must still be visible here, distinguishable purely via
-    // `isCulled`, and never reachable via a ResourceSnapshot's
-    // firstUse/lastUsePassIndex (both of which only ever index into the
-    // surviving prefix).
+    // Surviving passes first in execution order, then culled passes in declaration order. Culled passes
+    // are told apart by `isCulled` and are never referenced by a resource's use indices.
     std::vector<RenderGraphPassSnapshot> passesInExecutionOrder;
     std::vector<RenderGraphResourceSnapshot> resources;
 
-    // True if this regime's fixed GPU-timing slot budget
-    // (RenderGraph::kSynchronousTimingSlotBudget / kPipelinedTimingSlotBudget)
-    // was already fully assigned to other pass names at least once during
-    // the Execute() call that produced this snapshot - i.e. at least one
-    // surviving pass this call could not be assigned a timing slot at all,
-    // and its own PassGpuStats::timing will permanently read Status::Absent
-    // for as long as this remains true. The Editor's "Render Graph" panel
-    // should surface this structurally rather than leaving a reader to
-    // infer it from a timing that quietly never updates.
+    // True if at least one pass found the regime's fixed timing-slot budget exhausted. Such a pass reads
+    // Status::Absent for as long as this stays true.
     bool timingSlotBudgetExhausted = false;
 };
 
-// Pure reshape: `compiled`/`input` are exactly RenderGraphCompiler::Compile()'s
-// own inputs/outputs for one Execute() call - `input` is read after that
-// call's whole pass loop has already run, so `statsLookup` sees this
-// frame's real, freshly-recorded PassGpuStats for every surviving pass.
-// `statsLookup` resolves a pass name into its last-known PassGpuStats (in
-// production, RenderGraph::LastKnownStatsFor() - a test can supply any
-// stand-in, e.g. a lambda returning a canned value, which is what keeps
-// this function itself testable with no live RenderGraph at all).
-//
-// A culled pass's `stats` is always left at its default (an empty
-// DrawStats, an Absent GpuTimingSample) - deliberately never calling
-// `statsLookup()` for one. A culled pass did not run this call, so showing
-// whatever an earlier, different call happened to leave behind under the
-// same name would misleadingly suggest it ran again.
-//
-// `timingSlotBudgetExhausted` - trailing, defaulted parameter so every
-// pre-existing 3-argument call site keeps compiling unmodified - passed
-// straight through to RenderGraphSnapshot::timingSlotBudgetExhausted.
-//
-// `metadataLookup` - trailing, defaulted parameter. Resolves one declared
-// pass's category/drawKind/tags by declarationIndex (the same index space
-// CompiledGraphInput::passes already uses). Returns false (or is left
-// empty/unset) to mean "no metadata available for this index" -
-// BuildPassSnapshot() leaves RenderGraphPassSnapshot::category/::drawKind/
-// ::tags at their own struct defaults in that case. In production,
-// RenderGraph::ExecuteCompiledGraph() supplies a real lookup backed by its
-// own installed IPassDebugMetadataProvider*; a test can supply any
-// stand-in.
-//
-// `barrierLabelLookup` - a third, trailing, defaulted parameter. Resolves
-// one declared write's barrier transition label by (declarationIndex,
-// resourceName), mirroring metadataLookup's own "empty means nothing
-// available" convention. In production, RenderGraph::ExecuteCompiledGraph()
-// supplies a real lookup backed by IPassDebugMetadataProvider::
-// QueryBarrierTransitionLabel().
+// Reshapes one Execute() call into a snapshot. `statsLookup` maps a pass name to its last-known stats
+// (never called for a culled pass). `metadataLookup` and `barrierLabelLookup` resolve per-pass metadata
+// and write barrier labels by declaration index; an empty function or false leaves the defaults.
 RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, const CompiledGraphInput& input,
     const std::function<PassGpuStats(const char*)>& statsLookup, bool timingSlotBudgetExhausted = false,
     const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup = {},
     const std::function<bool(std::size_t, const std::string&, std::string&)>& barrierLabelLookup = {});
 
-// Resolves a declared usage's resource name from whichever of
-// CompiledGraphInput's texture/buffer/volume-texture/texture-array tables
-// actually applies. Degrades to an empty string for a stale or
-// out-of-range index - a display helper, never an assertion. Shared by
-// RenderGraphSnapshot.cpp's own BuildPassSnapshot() and RenderGraph.cpp's
-// barrier-applied sink call, so both resolve a usage's name identically.
+// Name of a declared usage's resource from whichever table applies; empty for a stale or out-of-range
+// index. A display helper, never asserts.
 std::string ResourceUsageName(const ResourceUsage& usage, const CompiledGraphInput& input);
 
 } // namespace gte::rg

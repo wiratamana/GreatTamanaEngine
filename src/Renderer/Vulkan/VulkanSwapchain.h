@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <volk.h>
 
@@ -7,14 +7,8 @@
 
 namespace gte {
 
-// RAII wrapper around a VkSwapchainKHR + its per-image VkImageViews. Owns
-// both for its entire lifetime: created in the constructor, destroyed in the
-// destructor. Does NOT own the VkPhysicalDevice/VkDevice/VkSurfaceKHR passed
-// in - all three must outlive this swapchain.
-//
-// Supports in-place Recreate() (e.g. on window resize, or when
-// vkAcquireNextImageKHR/vkQueuePresentKHR report VK_ERROR_OUT_OF_DATE_KHR),
-// which tears down and rebuilds the swapchain and its image views.
+// RAII wrapper around a VkSwapchainKHR and its image views. Does not own the physical device, device or
+// surface; all three must outlive it. Recreate() rebuilds it in place (resize, or an out-of-date result).
 class VulkanSwapchain {
 public:
     VulkanSwapchain(VkPhysicalDevice physicalDevice,

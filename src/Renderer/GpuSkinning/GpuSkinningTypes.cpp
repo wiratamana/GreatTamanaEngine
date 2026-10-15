@@ -11,9 +11,7 @@ std::vector<GpuBindPoseVertex> PackBindPoseVertices(const std::vector<Vec3>& pos
 
     for (std::size_t i = 0; i < positions.size(); ++i) {
         const Vec3& position = positions[i];
-        // Mirrors Animation/VertexSkinning.cpp's SkinVertexRange() own
-        // fallback exactly - a mismatched/missing normal degrades to
-        // Vec3::Up(), never an out-of-bounds read or uninitialized data.
+        // A missing or mismatched normal falls back to Up, never an out-of-bounds read.
         const Vec3 normal = hasNormals ? normals[i] : Vec3::Up();
 
         GpuBindPoseVertex vertex{};
@@ -57,12 +55,7 @@ std::vector<GpuSkinWeights> PackSkinWeights(const std::vector<VertexSkinWeights>
             const float weight = weights.boneWeights[slot];
 
             if (boneIndex < 0) {
-                // Unused slot (see VertexSkinWeights' own "unused slot"
-                // invariant, MeshData.h) - pack as bone 0 / weight 0.0,
-                // never a raw bit-reinterpreted -1 (which would alias a
-                // huge, out-of-bounds std::uint32_t index if the GPU kernel
-                // ever indexed into the bone matrix buffer with it before
-                // checking the weight).
+                // Unused slot: bone 0 / weight 0, never a bit-cast -1 (a huge out-of-bounds index).
                 gpu.boneIndices[slot] = 0;
                 gpu.weights[slot] = 0.0f;
             } else {

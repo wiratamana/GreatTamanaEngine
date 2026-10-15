@@ -2,19 +2,9 @@
 
 #include <volk.h>
 
-// VMA's implementation section (compiled only where VMA_IMPLEMENTATION is
-// defined before this header is first seen - see VulkanAllocator.cpp) picks
-// between statically-linked, self-fetched, or externally-supplied Vulkan
-// function pointers based on these two macros. This project resolves every
-// Vulkan entry point dynamically through volk rather than linking a classic
-// loader import lib (see FetchVulkan.cmake), so VMA is told to fetch its own
-// function table (VMA_DYNAMIC_VULKAN_FUNCTIONS) starting from just
-// vkGetInstanceProcAddr/vkGetDeviceProcAddr - the two entry points volk
-// itself exposes as plain global function pointers once
-// volkInitialize()/volkLoadInstance()/volkLoadDevice() have run (see
-// VulkanAllocator.cpp). Defined here (guarded, so callers can override
-// before including this header) rather than only in VulkanAllocator.cpp so
-// every translation unit that sees vk_mem_alloc.h agrees on the same values.
+// This project resolves Vulkan entry points through volk, so VMA fetches its own function table
+// (dynamic) from vkGetInstanceProcAddr/vkGetDeviceProcAddr. Defined here, overridable, so every
+// translation unit seeing vk_mem_alloc.h agrees.
 #ifndef VMA_STATIC_VULKAN_FUNCTIONS
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #endif
@@ -28,17 +18,8 @@
 
 namespace gte {
 
-// RAII wrapper around a VmaAllocator (Vulkan Memory Allocator) - created in
-// the constructor, destroyed in the destructor. Does NOT own the
-// VkInstance/VkPhysicalDevice/VkDevice passed in - all three must outlive
-// this object (same convention as VulkanDevice/VulkanSwapchain not owning
-// the instance/surface passed to them).
-//
-// This is the allocator every GPU resource type (RenderTexture today, future
-// vertex/index/uniform/staging buffers) should create its VkImage/VkBuffer
-// through via vmaCreateImage()/vmaCreateBuffer() instead of the manual
-// FindMemoryType() + vkAllocateMemory()/vkBindImageMemory() dance those used
-// to do by hand.
+// RAII wrapper around a VmaAllocator. Does not own the instance, physical device or device; all three
+// must outlive it. GPU resources create their images and buffers through it.
 class VulkanAllocator {
 public:
     VulkanAllocator(VkInstance instance, VkPhysicalDevice physicalDevice, VkDevice device, std::uint32_t apiVersion);
@@ -52,15 +33,8 @@ public:
 
     VmaAllocator Native() const noexcept { return m_allocator; }
 
-    // Returns one VmaBudget entry per memory heap on this device (see
-    // vmaGetHeapBudgets()) - the REAL, driver-reported current usage/budget
-    // for each heap (via VK_EXT_memory_budget if the driver supports it, an
-    // estimate otherwise), as opposed to GpuMemoryTracker's tally
-    // (src/Renderer/Memory/GpuMemoryTracker.h) of just this engine's own
-    // tracked Buffer/RenderTexture resources. Cheap - a single
-    // vmaGetHeapBudgets() call, no allocation beyond the returned vector -
-    // safe to call every frame (see its own doc comment in vk_mem_alloc.h:
-    // "fast to calculate... suitable to be called every frame").
+    // One VmaBudget per memory heap: the driver-reported usage and budget (an estimate without
+    // VK_EXT_memory_budget). Cheap enough to call every frame.
     std::vector<VmaBudget> GetHeapBudgets() const;
 
 private:

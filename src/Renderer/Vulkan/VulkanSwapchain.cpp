@@ -1,4 +1,4 @@
-﻿#include "VulkanSwapchain.h"
+#include "VulkanSwapchain.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -21,10 +21,7 @@ VkSurfaceFormatKHR ChooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& fo
 
 VkPresentModeKHR ChoosePresentMode(const std::vector<VkPresentModeKHR>& modes)
 {
-    // FIFO is the only present mode guaranteed to always be available, and
-    // gives plain vsync-locked presentation - the simplest correct choice to
-    // start with. MAILBOX (lower-latency triple buffering) could be
-    // preferred here later if present in `modes`.
+    // FIFO is always available and gives vsync; MAILBOX could be preferred later for lower latency.
     (void)modes;
     return VK_PRESENT_MODE_FIFO_KHR;
 }

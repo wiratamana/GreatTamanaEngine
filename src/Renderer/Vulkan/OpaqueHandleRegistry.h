@@ -7,13 +7,9 @@
 
 namespace gte {
 
-// Thread-safe slot map behind every opaque 64-bit handle this engine hands
-// out to callers outside src/Renderer (DescriptorSetHandle, SamplerHandle,
-// ImageViewHandle, DescriptorSetLayoutHandle, UiTextureHandle - see
-// Core/GraphicsHandles.h, Core/UiTextureHandle.h). The 64-bit handle value
-// packs a generational slot index: low 32 bits = index, high 32 bits =
-// generation - minted only by Insert() below, never constructed from a raw
-// integer by calling code. Renderer-internal only.
+// Thread-safe slot map behind the opaque 64-bit handles handed out outside src/Renderer. A handle packs
+// a generational slot: low 32 bits index, high 32 bits generation. Minted only by Insert().
+// Renderer-internal.
 template <typename Native>
 class OpaqueHandleRegistry {
 public:
@@ -53,9 +49,7 @@ public:
         return true;
     }
 
-    // Returns a default-constructed Native{} for an invalid/stale handle -
-    // never throws, never asserts (mirrors ResourcePool::TryGet()'s own
-    // "safe to query a dead handle" guarantee).
+    // A default Native{} for an invalid or stale handle; never throws or asserts.
     Native Get(std::uint64_t handle) const
     {
         std::lock_guard lock(m_mutex);

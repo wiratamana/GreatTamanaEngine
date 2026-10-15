@@ -2,8 +2,7 @@
 
 namespace gte::rg {
 
-// See this function's own doc comment in RenderGraphSnapshot.h for the
-// full contract.
+// See the declaration in RenderGraphSnapshot.h.
 PassGpuStats CombinePassGpuStats(const std::vector<PassGpuStats>& stats)
 {
     PassGpuStats combined;
@@ -87,12 +86,8 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t de
     snapshot.viewScope = pass.viewScope;
     snapshot.renderPassEvent = pass.renderPassEvent;
 
-    // category/drawKind/owningFeatureName no longer live on PassRecord - they
-    // start at RenderGraphPassSnapshot's own struct defaults (General/
-    // DrawMesh/empty) and are only overwritten when metadataLookup is
-    // supplied AND actually has an entry for this exact declarationIndex.
-    // This is the graceful fallback for a headless build (no sink
-    // installed) and for any call site that does not pass a metadataLookup.
+    // Category, draw kind and owner keep their struct defaults unless metadataLookup has an entry
+    // (headless builds install no sink).
     if (metadataLookup) {
         PassDebugMetadata metadata;
         if (metadataLookup(declarationIndex, metadata)) {
@@ -129,9 +124,7 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t de
         }
     }
 
-    // See this file's header comment - a culled pass's stats are
-    // deliberately left at PassGpuStats{}'s own default, never resolved via
-    // statsLookup().
+    // A culled pass keeps default stats; it did not run this call.
     if (!isCulled && statsLookup) {
         snapshot.stats = statsLookup(pass.name);
     }
@@ -150,10 +143,7 @@ RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, cons
     snapshot.timingSlotBudgetExhausted = timingSlotBudgetExhausted;
     snapshot.passesInExecutionOrder.reserve(compiled.executionOrder.size() + input.passes.size());
 
-    // Surviving passes first, in real execution order. handle.index IS this
-    // pass's own declarationIndex - the same index space
-    // CompiledGraphInput::passes already uses (PassHandle::index), so no
-    // new correlation problem is introduced.
+    // Surviving passes first, in execution order; handle.index is the declaration index.
     for (const PassHandle& handle : compiled.executionOrder) {
         if (handle.index >= input.passes.size()) {
             continue; // Defensive - never expected against a real Compile() result.
@@ -162,9 +152,7 @@ RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, cons
             /*isCulled=*/false, statsLookup, metadataLookup, barrierLabelLookup));
     }
 
-    // Culled passes appended afterwards, in their original declaration
-    // order - still visible, per this file's own header comment. The loop
-    // index IS this pass's own declarationIndex.
+    // Culled passes follow in declaration order; the loop index is the declaration index.
     for (std::size_t i = 0; i < input.passes.size(); ++i) {
         const PassRecord& pass = input.passes[i];
         if (!pass.isCulled) {

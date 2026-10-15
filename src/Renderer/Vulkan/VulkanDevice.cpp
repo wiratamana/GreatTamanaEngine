@@ -76,17 +76,8 @@ bool SupportsDynamicRendering(VkPhysicalDevice device)
     return features13.dynamicRendering == VK_TRUE;
 }
 
-// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-// PHASE2 (task_manager/render-pass-5/
-// PHASE2_INSTANCED_DRAW_PRIMITIVE_AND_INDIRECT_SUBMIT.md) - queries
-// VkPhysicalDeviceVulkan12Features::drawIndirectCount via a SEPARATE
-// vkGetPhysicalDeviceFeatures2() call, BEFORE vkCreateDevice() - see
-// CreateLogicalDevice() below, which only REQUESTS this feature in the
-// actual device-creation chain if this query reported it available.
-// Enabling an unsupported feature makes vkCreateDevice() fail outright,
-// which would be a real regression for every device that doesn't support
-// it - exactly why Locked Design Decision 4 requires this genuine
-// query-first-then-conditionally-request discipline.
+// Queries drawIndirectCount in a separate call before vkCreateDevice(); the feature is only requested
+// at device creation when this reports it available.
 bool QueryDrawIndirectCountSupport(VkPhysicalDevice device)
 {
     VkPhysicalDeviceVulkan12Features features12{};
@@ -142,10 +133,7 @@ VulkanDevice::VulkanDevice(VkInstance instance, VkSurfaceKHR surface)
     PickPhysicalDevice(instance, surface);
     CreateLogicalDevice();
     QueryTimestampCapability();
-    // editor-core-separation-26 campaign, PHASE6 (Locked Decision 4) - see
-    // SupportsDepthBlit()'s own doc comment (VulkanDevice.h). PickDepthFormat()
-    // only needs m_physicalDevice (no VkDevice), so it is already safe to
-    // call at this point.
+    // Needs only the physical device, so it is safe to call here.
     m_supportsDepthBlit = SupportsBlitSrcDst(m_physicalDevice, PickDepthFormat());
 }
 
@@ -240,13 +228,8 @@ void VulkanDevice::CreateLogicalDevice()
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
 
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE2 - drawIndirectCount capability probe (Locked Design Decision
-    // 4, PHASE0_MASTER_STRATEGY.md): query FIRST
-    // (QueryDrawIndirectCountSupport(), a SEPARATE vkGetPhysicalDeviceFeatures2()
-    // call, before this vkCreateDevice() call), only REQUEST it in the
-    // actual device-creation chain if the query reported it available -
-    // see QueryDrawIndirectCountSupport()'s own comment for why.
+    // Probe drawIndirectCount first and request it only when available: enabling an unsupported
+    // feature makes vkCreateDevice() fail.
     m_supportsDrawIndirectCount = QueryDrawIndirectCountSupport(m_physicalDevice);
 
     VkPhysicalDeviceVulkan12Features features12{};

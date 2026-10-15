@@ -1,19 +1,8 @@
 #pragma once
 
-// Data-driven Vulkan Synchronization2 barrier planner: given a resource's
-// previous known state and its next declared ResourceAccess, produces the
-// exact VkImageMemoryBarrier2/VkBufferMemoryBarrier2 needed to transition
-// between them, for any number of passes touching any number of resources
-// in any order.
-//
-// Split into a pure decision half (RequiredStateFor/RequiresBarrier/
-// BuildImageMemoryBarrier2/BuildBufferMemoryBarrier2 - no live VkDevice/
-// VkCommandBuffer involved, just POD construction) and a thin Vulkan-call
-// half (EmitImageBarrier/EmitBufferBarrier - builds via the pure half, then
-// issues a single vkCmdPipelineBarrier2). Per-resource state TRACKING
-// across a compiled pass list is the execution engine's job, not this
-// file's - this file only provides the per-transition decision and the
-// thin call wrappers the engine drives in a loop.
+// Synchronization2 barrier planner: builds the barrier for a resource's transition from its previous
+// state to the next declared access. Pure half: RequiredStateFor, RequiresBarrier, Build*Barrier2.
+// Thin half: Emit*Barrier. Tracking state across passes is the executor's job.
 
 #include "RenderGraphTypes.h"
 
@@ -25,17 +14,8 @@
 
 namespace gte::rg {
 
-// A resource's known GPU-visible state at one point in time - what layout
-// it's actually in (images only - see below), and what pipeline stage/
-// access mask last touched it (or will next touch it). This is the whole
-// "previous" / "next" pair RequiresBarrier()/BuildImageMemoryBarrier2()/
-// BuildBufferMemoryBarrier2() operate on.
-//
-// `layout` is meaningless for a BUFFER transition (buffers have no concept
-// of image layout) - callers building a buffer-to-buffer transition simply
-// leave it at its default (VK_IMAGE_LAYOUT_UNDEFINED) and
-// BuildBufferMemoryBarrier2() never reads it. This mirrors the strategy
-// document's own "buffers use a dummy/ignored value here" note (Step 3.1).
+// A resource's GPU-visible state at one point: image layout plus the last (or next) stage and access.
+// `layout` is ignored for buffers; leave it UNDEFINED.
 struct ResourceState {
     VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkPipelineStageFlags2 stageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
@@ -44,84 +24,24 @@ struct ResourceState {
     friend bool operator==(const ResourceState&, const ResourceState&) noexcept = default;
 };
 
-// Pure decision: what GPU-visible state does a resource need to be in for a
-// pass to legally perform `access` against it? A straightforward,
-// EXHAUSTIVE switch over ResourceAccess (Phase 1) - deliberately NO
-// `default:` case, mirroring IsWriteAccess()/ToString()'s own rule in
-// RenderGraphTypes.h/.cpp, so a future ResourceAccess enumerator added
-// without updating this function fails to compile here until it is.
-//
-// `isDepthResource` is asserted against `access` in debug builds (a
-// ColorAttachmentWrite request against a depth resource, or a
-// DepthStencilAttachmentReadWrite request against a non-depth resource, is
-// always a caller mistake - these two ResourceAccess values are already
-// mutually exclusive by name, so this parameter exists purely as a
-// same-call-site sanity check, not because it changes either access
-// kind's own resulting ResourceState) - both asserts are compiled out
-// entirely in a release (NDEBUG) build, zero cost. For ShaderRead/
-// TransferSrc/TransferDst, `isDepthResource` has no effect at all (either a
-// depth or a color resource can legally be sampled/copied) - callers pass
-// whatever is actually true for documentation purposes only.
-//
-// This function's job stops at "what state is needed" - it does NOT decide
-// whether a barrier is actually required to reach it (see RequiresBarrier()
-// below) or emit anything (see EmitImageBarrier()/EmitBufferBarrier()
-// below).
+// The state a resource must be in for a pass to perform `access`. Exhaustive switch without a default.
+// `isDepthResource` is a debug-only sanity check against `access`; it does not change the result.
 ResourceState RequiredStateFor(ResourceAccess access, bool isDepthResource) noexcept;
 
-// Pure decision: does `access` target a texture's DEPTH state, or its COLOR
-// state? Every ResourceAccess value targets the COLOR half of a texture's
-// tracked state EXCEPT DepthStencilAttachmentReadWrite - this is the single
-// exception RenderGraph.cpp's ApplyUsageBarrierIfNeeded() branches on to
-// decide whether to update tex.depthState or tex.colorState. Extracted here
-// as its own standalone, Tier-1-testable function (rather than left as an
-// inline `usage.access == ResourceAccess::DepthStencilAttachmentReadWrite`
-// comparison inside RenderGraph.cpp, which needs a live VkDevice to test at
-// all) specifically so Phase 5 of the compute-shader campaign
-// (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md) could directly VERIFY,
-// rather than merely assert by inspection, that a storage-image compute
-// access (ComputeShaderRead/ComputeShaderWrite) is correctly routed to a
-// texture's color half, never its depth half - see
-// tests/Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp. Meaningless
-// for a buffer usage (buffers have no depth/color split at all) - callers
-// only ever consult this for a ResourceKind::Texture usage.
+// True when `access` targets a texture's depth state, false for its color state. Only
+// DepthStencilAttachmentReadWrite targets depth; compute storage accesses target color.
+// Meaningless for buffers.
 bool TargetsDepthState(ResourceAccess access) noexcept;
 
-// Pure decision: does `access`, when declared as a texture WRITE, mark a
-// pass as needing a real vkCmdBeginRendering COLOR ATTACHMENT bracket in
-// RenderGraph::Execute()? True only for ColorAttachmentWrite - every other
-// ResourceAccess value (including the compute-shader storage-image kinds,
-// ComputeShaderRead/ComputeShaderWrite) must NOT trigger one. Extracted
-// here, alongside TargetsDepthState() above, for the exact same reason:
-// this decision used to live inline inside RenderGraph.cpp's
-// ExecuteCompiledGraph() (`usage.access == ResourceAccess::ColorAttachmentWrite`),
-// which needs a live VkDevice to exercise at all. Phase 6 of the
-// compute-shader campaign (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md)
-// explicitly calls for this exclusion to be VERIFIED, not merely assumed,
-// once a pass can declare a pure compute write via
-// RenderGraphBuilder::PassBuilder::WriteTexture() - see
-// tests/Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp.
+// True when `access`, declared as a texture write, needs a color-attachment rendering bracket.
+// Only ColorAttachmentWrite does; compute storage writes do not.
 bool IsColorAttachmentWriteAccess(ResourceAccess access) noexcept;
 
-// Pure decision: is a barrier even NEEDED to transition a resource from
-// `previous` to `next`? A resource read by two consecutive ShaderRead
-// passes with an IDENTICAL layout/stage/access needs no barrier at all
-// between them - a well-known Vulkan optimization (see the Vulkan spec's
-// own synchronization guidance: a memory dependency that changes nothing
-// is a no-op) this planner must not skip. Pure value equality - true for
-// ANY difference in layout, stage mask, or access mask alone.
+// True when any of layout, stage mask or access mask differs; identical consecutive states need no barrier.
 bool RequiresBarrier(const ResourceState& previous, const ResourceState& next) noexcept;
 
-// Pure decision: the per-layer counterpart of RequiresBarrier() above, for
-// a TextureArrayHandle usage that targets exactly one layer (see
-// ResourceUsage::arrayLayerIndex). Does NOT mutate `layerState` itself -
-// the caller decides whether to emit a barrier and update the tracked
-// state afterward, mirroring every other ApplyUsageBarrierIfNeeded()
-// branch's own "if (RequiresBarrier(...)) { ...emit... } state = next;"
-// shape. Reuses RequiresBarrier() rather than reimplementing it - its own
-// value is naming the per-layer VkImageSubresourceRange construction
-// (baseArrayLayer = layerIndex, layerCount = 1) as a reusable, pure,
-// Tier-1-testable unit.
+// Per-layer counterpart of RequiresBarrier() for a usage that targets one array layer. Does not
+// mutate `layerState`; the caller updates the tracked state after emitting.
 struct TextureArraySubresourceDecision {
     bool requiresBarrier = false;
     VkImageSubresourceRange range{};
@@ -131,44 +51,27 @@ TextureArraySubresourceDecision DecideTextureArrayLayerTransition(
     const ResourceState& layerState, VkImageAspectFlags aspect, std::uint32_t layerIndex,
     const ResourceState& next) noexcept;
 
-// Pure: populates a VkImageMemoryBarrier2 from two already-decided
-// ResourceStates - no Vulkan call of any kind, just filling in a plain POD
-// struct's fields (srcQueueFamilyIndex/dstQueueFamilyIndex are always
-// VK_QUEUE_FAMILY_IGNORED - see "What We Will NOT Do": no queue-family-
-// ownership-transfer support in the MVP). This is what makes the exact
-// barrier-field values this function produces Tier-1-testable without any
-// live VkDevice/VkCommandBuffer at all - see
-// tests/Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp.
+// Fills a VkImageMemoryBarrier2 from two decided states. No Vulkan call; queue family ownership
+// transfer is not supported (both indices are VK_QUEUE_FAMILY_IGNORED).
 VkImageMemoryBarrier2 BuildImageMemoryBarrier2(
     VkImage image, VkImageSubresourceRange subresourceRange, const ResourceState& previous, const ResourceState& next) noexcept;
 
-// Pure buffer counterpart - see BuildImageMemoryBarrier2() above. `layout`
-// on either ResourceState is ignored entirely (see this file's own
-// ResourceState comment).
+// Buffer counterpart; `layout` is ignored.
 VkBufferMemoryBarrier2 BuildBufferMemoryBarrier2(
     VkBuffer buffer, uint64_t offset, uint64_t size, const ResourceState& previous, const ResourceState& next) noexcept;
 
-// Thin Vulkan-call half: builds the barrier via BuildImageMemoryBarrier2()
-// above and issues it via a single vkCmdPipelineBarrier2 call. Contains NO
-// decision logic of its own - callers are expected to have already checked
-// RequiresBarrier() themselves if they want to skip a redundant call
-// (mirroring GpuTimingService's own "thin" recording methods, which never
-// decide anything RequiredStateFor()/ResolveGpuTimingStatus() didn't
-// already decide for them).
+// Builds the barrier and issues it with one vkCmdPipelineBarrier2. No decision logic: callers check
+// RequiresBarrier() first when they want to skip a redundant call.
 void EmitImageBarrier(
     VkCommandBuffer cmd, VkImage image, VkImageSubresourceRange subresourceRange, const ResourceState& previous, const ResourceState& next);
 
-// Thin Vulkan-call buffer counterpart - see EmitImageBarrier() above.
 void EmitBufferBarrier(
     VkCommandBuffer cmd, VkBuffer buffer, uint64_t offset, uint64_t size, const ResourceState& previous, const ResourceState& next);
 
-// Short Editor-display label for one VkImageLayout value - e.g. "RT",
-// "Shader Read". Falls back to "Other" for anything not explicitly listed.
+// Short editor label for an image layout (e.g. "RT", "Shader Read"); "Other" when unlisted.
 const char* ShortLayoutLabel(VkImageLayout layout) noexcept;
 
-// "<old> -> <new>" barrier transition label for the Editor Inspector's
-// "OUTPUT TARGETS" section - built once, at execute time, never recomputed
-// on a hot Vulkan recording path.
+// "<old> -> <new>" label for the editor Inspector, built once at execute time.
 inline std::string BarrierTransitionLabel(VkImageLayout oldLayout, VkImageLayout newLayout)
 {
     return std::string(ShortLayoutLabel(oldLayout)) + " -> " + ShortLayoutLabel(newLayout);

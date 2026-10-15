@@ -7,33 +7,12 @@
 
 namespace gte {
 
-// Loads a compiled SPIR-V binary off disk and wraps it in a VkShaderModule -
-// the one shared primitive both Pipeline (graphics) and ComputePipeline
-// (compute - see ComputePipeline.h) build their own pipelines from, so this
-// exact "read file bytes -> vkCreateShaderModule" dance exists in exactly
-// ONE place rather than two near-identical private copies.
-//
-// `spirvPath` must point at an already-compiled SPIR-V binary (see
-// cmake/CompileShaders.cmake's gte_add_shader(), which compiles
-// src/Shaders/*.vert/*.frag/*.comp into "<exe dir>/shaders/*.spv" at build
-// time) - NOT a path to GLSL source.
-//
-// The returned VkShaderModule is only ever needed transiently, to build a
-// VkPipeline/VkComputePipeline from - the caller is responsible for
-// destroying it (vkDestroyShaderModule) once that pipeline has been built,
-// exactly as Pipeline's own constructor already does for its two shader
-// modules today.
-//
-// Throws std::runtime_error (never returns VK_NULL_HANDLE) if the file
-// can't be opened or vkCreateShaderModule fails - mirrors Pipeline.cpp's
-// own pre-extraction error message style exactly, so this refactor changes
-// no observable behavior.
+// Loads a compiled SPIR-V binary (a path to the .spv, not GLSL source) into a VkShaderModule, the one
+// primitive both graphics and compute pipelines build from. The caller destroys the module once its
+// pipeline is built. Throws std::runtime_error if the file cannot be read or creation fails.
 VkShaderModule LoadShaderModule(VkDevice device, const std::string& spirvPath);
 
-// Byte-span sibling - wraps already-in-memory compiled SPIR-V (e.g. an
-// embedded resource, or bytes read by a caller through its own path) instead
-// of reading a file off disk. Same ownership/error-handling contract as the
-// path-based overload above.
+// Same contract for SPIR-V that is already in memory.
 VkShaderModule LoadShaderModule(VkDevice device, std::span<const std::byte> spirv);
 
 } // namespace gte

@@ -4,12 +4,7 @@ namespace gte::rg {
 
 bool IsWriteAccess(ResourceAccess access) noexcept
 {
-    // Deliberately NO `default:` case - see RenderGraphTypes.h's own
-    // comment on this function: a future ResourceAccess enumerator added
-    // without updating this switch must produce a compiler warning (this
-    // engine's convention for every exhaustive enum switch - see
-    // GpuTiming.cpp/FrameGraphData.cpp for the same precedent), not
-    // silently fall through to some default answer.
+    // No default case, so a new enumerator warns here.
     switch (access) {
     case ResourceAccess::ColorAttachmentWrite:
         return true;
@@ -26,18 +21,18 @@ bool IsWriteAccess(ResourceAccess access) noexcept
     case ResourceAccess::ComputeShaderWrite:
         return true;
     case ResourceAccess::IndirectCommandRead:
-        return false; // The indirect-draw buffer is only ever READ by vkCmdDraw(Indexed)Indirect.
+        return false; // Only read by indirect draws.
     case ResourceAccess::VertexBufferRead:
-        return false; // A vertex buffer bound for drawing is only ever READ by the vertex-input stage.
+        return false; // Only read by vertex input.
     case ResourceAccess::VertexShaderStorageRead:
-        return false; // A vertex-shader storage-buffer read (render-pass-5 campaign) is only ever READ.
+        return false; // Only read.
     }
     return false;
 }
 
 const char* ToString(ResourceAccess access) noexcept
 {
-    // Deliberately NO `default:` case - see IsWriteAccess() above.
+    // No default case, so a new enumerator warns here.
     switch (access) {
     case ResourceAccess::ColorAttachmentWrite:
         return "ColorAttachmentWrite";
@@ -63,9 +58,7 @@ const char* ToString(ResourceAccess access) noexcept
     return "Unknown";
 }
 
-// Editor Inspector display label - which pipeline stage/binding point a
-// declared access resolves to. Deliberately NO `default:` case, mirroring
-// ToString(ResourceAccess) above.
+// Editor Inspector label: the pipeline stage or binding point a declared access resolves to.
 const char* BindingStageLabel(ResourceAccess access) noexcept
 {
     switch (access) {
@@ -98,11 +91,9 @@ bool IsResolvedViewMissingItsSampler(VkImageView view, VkSampler sampler) noexce
     return view != VK_NULL_HANDLE && sampler == VK_NULL_HANDLE;
 }
 
-// Render Pass campaign (task_manager/render-pass-1), PHASE1 - see
-// RenderGraphTypes.h's own comment on PassKind for why this exists.
 const char* ToString(PassKind kind) noexcept
 {
-    // Deliberately NO `default:` case - see this file's own header comment.
+    // No default case, so a new enumerator warns here.
     switch (kind) {
     case PassKind::Graphics:
         return "Graphics";
@@ -114,8 +105,6 @@ const char* ToString(PassKind kind) noexcept
     return "Unknown";
 }
 
-// Render Pass campaign, PHASE1 - see RenderGraphTypes.h's own comment on
-// RenderPassCategory for why this exists.
 const char* ToString(RenderPassCategory category) noexcept
 {
     switch (category) {
@@ -129,12 +118,9 @@ const char* ToString(RenderPassCategory category) noexcept
     return "Unknown";
 }
 
-// Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2),
-// PHASE1 - see RenderGraphTypes.h's own comment on RenderPassDrawKind for
-// why this exists.
 const char* ToString(RenderPassDrawKind drawKind) noexcept
 {
-    // Deliberately NO `default:` case - see this file's own header comment.
+    // No default case, so a new enumerator warns here.
     switch (drawKind) {
     case RenderPassDrawKind::DrawMesh:
         return "DrawMesh";
@@ -146,11 +132,9 @@ const char* ToString(RenderPassDrawKind drawKind) noexcept
     return "Unknown";
 }
 
-// render-pass-3 campaign (task_manager/render-pass-3), PHASE1 - see
-// RenderGraphTypes.h's own comment on RenderPassEvent for why this exists.
 const char* ToString(RenderPassEvent renderPassEvent) noexcept
 {
-    // Deliberately NO `default:` case - see this file's own header comment.
+    // No default case, so a new enumerator warns here.
     switch (renderPassEvent) {
     case RenderPassEvent::BeforeEverything:
         return "BeforeEverything";
@@ -170,11 +154,7 @@ const char* ToString(RenderPassEvent renderPassEvent) noexcept
     return "Unknown";
 }
 
-// Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE2 - see
-// RenderGraphTypes.h's own doc comment on this function. Plain value
-// comparison against entry 0 - no Vulkan call, no live VkDevice/VkImage
-// involved, which is exactly why this is Tier-1-testable (see
-// tests/Renderer/RenderGraph/RenderGraphTypesTests.cpp).
+// Index of the first extent that differs from entry 0, if any.
 std::optional<std::size_t> FindMismatchedColorAttachmentExtent(const std::vector<VkExtent2D>& extents) noexcept
 {
     if (extents.size() < 2) {
@@ -194,8 +174,7 @@ BlitFilter ResolveEffectiveBlitFilter(const BlitSpec& spec) noexcept
     return (spec.srcIsDepth || spec.dstIsDepth) ? BlitFilter::Nearest : spec.filter;
 }
 
-// editor-core-separation-26 campaign, PHASE3 - see RenderGraphTypes.h's own
-// doc comment on this function.
+// An all-zero region means the full extent.
 ResolvedBlitRegion ResolveBlitRegion(
     VkOffset3D regionMin, VkOffset3D regionMax, VkExtent2D resolvedExtent) noexcept
 {
@@ -214,8 +193,7 @@ ResolvedBlitRegion ResolveBlitRegion(
     return ResolvedBlitRegion{ regionMin, regionMax };
 }
 
-// editor-core-separation-26 campaign, PHASE3 - see RenderGraphTypes.h's own
-// doc comment on this function.
+// A resolved region is valid when max > min on every axis and it fits the extent (z within [0, 1]).
 bool IsValidBlitRegion(const ResolvedBlitRegion& region, VkExtent2D resolvedExtent) noexcept
 {
     return region.max.x > region.min.x &&

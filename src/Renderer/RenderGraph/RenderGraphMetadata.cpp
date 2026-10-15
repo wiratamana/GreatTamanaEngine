@@ -10,12 +10,8 @@ namespace gte::rg {
 
 namespace {
 
-// Zips `names`/`kinds`/`access` (same-length parallel arrays on
-// RenderGraphPassSnapshot) into the JSON-friendlier "one array of
-// {name,kind,bindingStageLabel} structs" shape. Clamped to the shortest of
-// the three vectors rather than asserting - a silently-shorter result beats
-// an out-of-bounds read. `barrierLabels`, when non-null, is
-// RenderGraphPassSnapshot::writeBarrierLabels (nullptr for a reads call).
+// Zips the parallel name/kind/access arrays into one array of ref structs, clamped to the shortest.
+// `barrierLabels` is the write-barrier label list, or null for reads.
 std::vector<RenderGraphResourceRefMetadata> BuildResourceRefs(const std::vector<std::string>& names,
     const std::vector<ResourceKind>& kinds, const std::vector<ResourceAccess>& access,
     const std::vector<std::string>* barrierLabels)
@@ -53,9 +49,7 @@ RenderGraphPassMetadata BuildPassMetadata(const RenderGraphPassSnapshot& pass)
     metadata.reads = BuildResourceRefs(pass.readNames, pass.readKinds, pass.readAccess, nullptr);
     metadata.writes = BuildResourceRefs(pass.writeNames, pass.writeKinds, pass.writeAccess, &pass.writeBarrierLabels);
 
-    // Falls out correctly for a culled pass with no special-case branch -
-    // a culled pass's own `stats` is always left at its default by
-    // BuildRenderGraphSnapshot().
+    // A culled pass has default stats, so no special case is needed.
     metadata.drawCallCount = pass.stats.drawStats.drawCallCount;
     metadata.triangleCount = pass.stats.drawStats.triangleCount;
     metadata.gpuTimingText = FormatGpuTiming(pass.stats.timing);
@@ -102,13 +96,7 @@ RenderGraphRegimeMetadata BuildRegimeMetadata(const char* regimeName, const Rend
     return regime;
 }
 
-// Grouping helpers for GroupPassMetadataByName() below. All pure, all local
-// to this TU.
-
-// Short display label for an already-resolved ViewScope string
-// (RenderGraphPassMetadata::viewScope is always exactly "Shared" /
-// "GameView" / "SceneView"). The `default:`-shaped fallback is correct here
-// since this maps an already-resolved std::string, not an exhaustive enum.
+// Short display label of a resolved view scope string ("Game", "Scene", "Shared").
 const char* ShortViewLabel(const std::string& viewScope)
 {
     if (viewScope == "GameView") {
@@ -123,9 +111,7 @@ const char* ShortViewLabel(const std::string& viewScope)
     return viewScope.c_str(); // Defensive fallback - should never happen.
 }
 
-// Fixed priority for deterministic ordering when combining more than one
-// instance's short view label into either the row's viewLabel badge or its
-// per-view gpuTimingText breakdown.
+// Fixed order when combining view labels, so the output is deterministic.
 int ShortViewLabelPriority(const std::string& shortLabel)
 {
     if (shortLabel == "Game") {
@@ -140,12 +126,8 @@ int ShortViewLabelPriority(const std::string& shortLabel)
     return 3;
 }
 
-// Builds the row's view-label badge text (e.g. "Game+Scene", "Game only",
-// "Shared") from `contributors` - the caller decides which subset of a
-// group's instances counts as a contributor (normally the non-culled
-// subset, falling back to every instance when the whole group is culled).
-// Distinct short labels only, sorted by ShortViewLabelPriority(), joined
-// with "+". A lone "Game"/"Scene" label gets an " only" suffix.
+// View badge ("Game+Scene", "Game only", "Shared") from the contributing instances: distinct short
+// labels sorted by priority and joined with "+"; a lone Game or Scene gets " only".
 std::string BuildViewLabel(const std::vector<const RenderGraphPassMetadata*>& contributors)
 {
     std::vector<std::string> distinct;
@@ -175,13 +157,8 @@ std::string BuildViewLabel(const std::vector<const RenderGraphPassMetadata*>& co
     return joined;
 }
 
-// Per-view GPU timing breakdown text (e.g. "Game: 0.12 ms, Scene: 0.08 ms") -
-// never summed/maxed, since GPU timing is not meaningfully additive across
-// logically-separate view passes the way draw/triangle counts are. A
-// single-instance group shows that instance's own gpuTimingText verbatim.
-// Ordered by ShortViewLabelPriority() for the same determinism reason
-// BuildViewLabel() sorts by it; std::stable_sort keeps two same-viewScope
-// instances in their original relative order.
+// Per-view timing text ("Game: 0.12 ms, Scene: 0.08 ms"), not summed. A single instance shows its own
+// text. Views are ordered by ShortViewLabelPriority(); equal views keep their relative order.
 std::string BuildGroupedGpuTimingText(const std::vector<RenderGraphPassMetadata>& instances)
 {
     if (instances.size() == 1) {
@@ -205,9 +182,7 @@ std::string BuildGroupedGpuTimingText(const std::vector<RenderGraphPassMetadata>
     return joined;
 }
 
-// Combined, de-duplicated (order-preserving, first-seen) resource names
-// across every instance sharing this group's name - `reads` selects
-// RenderGraphPassMetadata::reads when true, ::writes when false.
+// Combined, de-duplicated (first-seen order) names of every instance's reads (or writes when !reads).
 std::vector<std::string> CombineResourceRefNames(const std::vector<RenderGraphPassMetadata>& instances, bool reads)
 {
     std::vector<std::string> combined;
@@ -237,10 +212,7 @@ RenderGraphMetadata BuildRenderGraphMetadata(const RenderGraphSnapshot& offscree
     return metadata;
 }
 
-// Groups `ungrouped` by pass name - see this function's declaration in
-// RenderGraphMetadata.h for the full contract. std::map<std::string, ...>
-// gives sorted-by-key iteration for free, which is what makes the result's
-// row order independent of `ungrouped`'s own input order.
+// std::map iteration is sorted by name, so row order does not depend on input order.
 std::vector<RenderGraphGroupedPassMetadata> GroupPassMetadataByName(const std::vector<RenderGraphPassMetadata>& ungrouped)
 {
     std::map<std::string, std::vector<RenderGraphPassMetadata>> instancesByName;
@@ -267,10 +239,7 @@ std::vector<RenderGraphGroupedPassMetadata> GroupPassMetadataByName(const std::v
             allInstances.push_back(&instance);
         }
         group.isCulled = allCulled;
-        // A pass surviving in one view but culled in the other must not
-        // read as fully culled, and its viewLabel badge must reflect only
-        // the view(s) that actually contributed a real, non-culled
-        // instance this frame.
+        // The badge reflects only views that contributed a non-culled instance.
         group.viewLabel = BuildViewLabel(nonCulled.empty() ? allInstances : nonCulled);
 
         group.gpuTimingText = BuildGroupedGpuTimingText(instances);
@@ -284,12 +253,7 @@ std::vector<RenderGraphGroupedPassMetadata> GroupPassMetadataByName(const std::v
 }
 
 // --- JSON (namespace gte::rg) --------------------------------------------
-//
-// Explicit, field-by-field, snake_case JSON keys - matching every existing
-// NetworkRoutes.cpp JSON body's own key convention, even though the C++
-// struct fields are camelCase. Defined bottom-up (a sub-struct's own
-// to_json() appears before the first to_json() that embeds it) so ordinary
-// unqualified lookup finds each one without relying on ADL alone.
+// Snake_case keys, matching the other HTTP JSON bodies. Defined bottom-up so unqualified lookup finds each one.
 
 void to_json(nlohmann::json& j, const RenderGraphResourceRefMetadata& ref)
 {
@@ -367,9 +331,7 @@ void to_json(nlohmann::json& j, const RenderGraphMetadata& metadata)
 
 namespace gte {
 
-// See RenderGraphMetadata.h's own matching declaration for why these two
-// live here, in namespace gte, rather than inside
-// GpuDrivenBatchDebugInfo.h/RenderFeatureDebugEntry.h themselves.
+// Defined here so GpuDrivenBatchDebugInfo.h and RenderFeatureDebugEntry.h need no json include.
 
 void to_json(nlohmann::json& j, const GpuDrivenBatchDebugInfo& info)
 {
@@ -387,11 +349,9 @@ void to_json(nlohmann::json& j, const RenderFeatureDebugEntry& entry)
         { "stage", entry.stage },
         { "priority", entry.priority },
         { "blend_mode", entry.blendMode },
-        // Host-side enable/disable override, reported via the existing
-        // GET /render_graph endpoint.
+        // Host-side enable/disable override.
         { "enabled", entry.enabled },
-        // True for a render feature declared by a loaded project, false for
-        // a built-in engine feature - see RenderFeatureDebugEntry.h.
+        // True for a feature declared by a loaded project.
         { "is_project_feature", entry.isProjectFeature },
     };
 }

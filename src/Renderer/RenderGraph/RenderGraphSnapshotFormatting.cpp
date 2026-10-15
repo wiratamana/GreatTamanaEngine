@@ -5,12 +5,7 @@
 
 namespace gte::rg {
 
-// Relocated verbatim (character-for-character body) from
-// RenderGraphPanel.cpp's own anonymous-namespace FormatGpuTiming() - see
-// that function's original doc comment there for the "why" (mirrors
-// Panels/ProfilerPanel.cpp's own FormatGpuTimingLine() convention exactly -
-// never a fabricated "0.00 ms" for Absent/Unsupported, see AGENTS.md,
-// "Profiling").
+// Never a fabricated "0.00 ms" for Absent or Unsupported.
 std::string FormatGpuTiming(const GpuTimingSample& timing)
 {
     switch (timing.status) {
@@ -27,7 +22,6 @@ std::string FormatGpuTiming(const GpuTimingSample& timing)
     }
 }
 
-// Relocated verbatim from RenderGraphPanel.cpp's own anonymous namespace.
 std::string JoinNames(const std::vector<std::string>& names)
 {
     if (names.empty()) {
@@ -43,13 +37,7 @@ std::string JoinNames(const std::vector<std::string>& names)
     return joined;
 }
 
-// Relocated (body unchanged) and RENAMED from RenderGraphPanel.cpp's own
-// anonymous-namespace PassNameAtSurvivingIndex() - resolves a resource's
-// first/last-use POSITION (an index into snapshot.passesInExecutionOrder's
-// own surviving prefix - see RenderGraphResourceSnapshot's own doc comment)
-// back into that pass's real NAME - a raw integer index is meaningless to a
-// human reader; a pass name is what actually answers "when is this resource
-// alive".
+// Name of the pass at a resource's first/last-use position (an index into the surviving prefix).
 const char* ResolvePassNameAtSurvivingIndex(const RenderGraphSnapshot& snapshot, std::int32_t index)
 {
     if (index < 0 || static_cast<std::size_t>(index) >= snapshot.passesInExecutionOrder.size()) {
@@ -59,11 +47,7 @@ const char* ResolvePassNameAtSurvivingIndex(const RenderGraphSnapshot& snapshot,
     return name.empty() ? "(unnamed)" : name.c_str();
 }
 
-// NEW (this phase) - mirrors RenderGraphTypes.cpp's own ToString()
-// precedent exactly: a plain switch, deliberately NO `default:` case, so a
-// future new ResourceKind enumerator fails to compile here until updated -
-// the same "no silent fallback" discipline DispatchByKind() (RenderGraphTypes.h)
-// already documents for ResourceKind.
+// No default case, so a new enumerator warns here.
 const char* ToString(ResourceKind kind) noexcept
 {
     switch (kind) {
@@ -79,7 +63,7 @@ const char* ToString(ResourceKind kind) noexcept
     return "Unknown";
 }
 
-// NEW (this phase) - same "no default: case" discipline, for ViewScope.
+// No default case, so a new enumerator warns here.
 const char* ToString(ViewScope scope) noexcept
 {
     switch (scope) {

@@ -1,11 +1,7 @@
 #pragma once
 
-// RAII marker: every pass declared while one of these is alive belongs to
-// the named feature. Pushed on construction, popped on destruction - a
-// stack, so nesting is safe (an inner scope temporarily overrides an outer
-// one, then control reverts automatically). Builder-local state, not
-// thread_local/global - zero multithreading hazard, nothing to reset
-// between tests.
+// RAII marker: passes declared while it is alive belong to the named feature. Scopes nest as a stack
+// on the builder, so an inner scope overrides an outer one until it ends.
 
 #include "RenderGraphBuilder.h"
 

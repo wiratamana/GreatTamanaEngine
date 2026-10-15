@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <volk.h>
 
@@ -7,25 +7,9 @@
 
 namespace gte {
 
-// RAII wrapper around every semaphore/fence Renderer needs to synchronize
-// frames:
-//   - `framesInFlight` sets of (image-available semaphore, in-flight fence)
-//     for Present()'s swapchain acquire/submit pipeline.
-//   - One render-finished semaphore per swapchain image (sized off the
-//     swapchain's own image count, NOT framesInFlight - see
-//     RenderFinishedSemaphore() below for why those can't share a count).
-//   - One dedicated fence for RenderOffscreen()'s separate, synchronous
-//     submit path (see Renderer.h's m_offscreenCommandBuffer comment for
-//     why that path doesn't reuse the per-frame objects above).
-//
-// Created in the constructor, destroyed in the destructor - same
-// convention as VulkanSwapchain/VulkanAllocator/etc. Does NOT own the
-// VkDevice passed in; it must outlive this object.
-//
-// RecreateRenderFinishedSemaphores() is the one piece that must be redone
-// whenever the swapchain itself is recreated (its image count can change
-// across a resize) - see Renderer::RecreateSwapchain(). The per-frame
-// objects and the offscreen fence never need to change after construction.
+// RAII owner of the synchronization objects frames need: per frame in flight an image-available
+// semaphore and an in-flight fence; one render-finished semaphore per swapchain image; and one fence for
+// the separate synchronous offscreen submit path. Does not own the VkDevice, which must outlive it.
 class VulkanFrameSync {
 public:
     VulkanFrameSync(VkDevice device, std::uint32_t framesInFlight, std::uint32_t swapchainImageCount);
@@ -37,19 +21,15 @@ public:
     VulkanFrameSync(VulkanFrameSync&& other) noexcept;
     VulkanFrameSync& operator=(VulkanFrameSync&& other) noexcept;
 
-    // Rebuilds just the per-swapchain-image render-finished semaphores, for
-    // a swapchain that was just recreated with a possibly-different image
-    // count (see VulkanSwapchain::Recreate()). The per-frame objects
-    // (image-available semaphores/in-flight fences) and the offscreen
-    // fence are untouched.
+    // Rebuilds only the per-swapchain-image render-finished semaphores after a swapchain recreate,
+    // whose image count may change.
     void RecreateRenderFinishedSemaphores(std::uint32_t swapchainImageCount);
 
     VkSemaphore ImageAvailableSemaphore(std::uint32_t frameIndex) const { return m_imageAvailableSemaphores[frameIndex]; }
     VkFence InFlightFence(std::uint32_t frameIndex) const { return m_inFlightFences[frameIndex]; }
 
-    // One per swapchain image (not per frame-in-flight) - required so a
-    // semaphore is never re-signaled while a previous present using it may
-    // still be in flight. See VulkanSwapchain::ImageCount().
+    // One per swapchain image, not per frame in flight, so a semaphore is never re-signaled while a
+    // present using it may still be pending.
     VkSemaphore RenderFinishedSemaphore(std::uint32_t imageIndex) const { return m_renderFinishedSemaphores[imageIndex]; }
 
     VkFence OffscreenFence() const noexcept { return m_offscreenFence; }

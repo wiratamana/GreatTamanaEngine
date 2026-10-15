@@ -1,15 +1,8 @@
 #pragma once
 
-// Core-owned hook pair for passing per-pass debug metadata (category, draw
-// kind, owning feature name, barrier transition labels) out to the Editor's
-// Frame Debugger without Core ever storing or interpreting any of it itself.
-//
-// IPassDebugMetadataSink is the write side, called as passes are declared.
-// IPassDebugMetadataProvider is the read side, queried back when a frame
-// snapshot is built. Both are pure-virtual and implemented only by the
-// Editor (src/Editor/FrameDebuggerPassMetadataRecorder.h) - Core never
-// implements either. A build that never links the editor library never
-// installs either pointer, so every call site costs one null check.
+// Hook pair that passes per-pass debug metadata (category, draw kind, owner, barrier labels) to the
+// Editor's Frame Debugger. IPassDebugMetadataSink is written as passes are declared; the provider is
+// queried when a snapshot is built. Only the Editor implements them; unset pointers cost one null check.
 
 #include "RenderGraphTypes.h"
 

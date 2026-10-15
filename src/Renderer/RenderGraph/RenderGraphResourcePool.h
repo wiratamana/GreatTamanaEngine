@@ -15,15 +15,9 @@ class Renderer;
 
 namespace gte::rg {
 
-// Owns every physical texture/buffer the render graph has created, and reuses one whenever a request has an
-// identical desc. Entries are never evicted.
-//
-// Matching key: (desc, claimed-this-frame == false). The first unclaimed entry whose desc equals the request
-// is claimed; otherwise a new entry is created. A claimed entry is excluded until BeginFrame(), so a pooled
-// resource is used by at most one virtual resource per frame (two live ping/pong textures never alias).
-//
-// Imported resources never go through this pool. Entries live in a std::deque so a returned reference stays
-// valid when a later call appends a new entry.
+// Owns every physical texture/buffer the graph creates and reuses an unclaimed entry with an equal desc;
+// a claimed entry is excluded until BeginFrame(), so no two live resources alias. Never evicts.
+// Imported resources bypass it. Entries live in a std::deque so returned references stay valid.
 class RenderGraphResourcePool {
 public:
     explicit RenderGraphResourcePool(Renderer& renderer) noexcept;

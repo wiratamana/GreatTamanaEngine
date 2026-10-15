@@ -32,12 +32,7 @@ AABB ComputeLocalAABB(const std::vector<Vec3>& positions)
 
 namespace {
 
-// Builds a normalized Plane from a raw (a, b, c, d) row extracted out of a
-// view-projection matrix (see ExtractFrustumPlanes() below) - dividing by
-// the normal's own length turns the raw row into a genuinely meaningful unit
-// plane equation. Guards against a (should-never-happen-for-a-real-
-// projection-matrix) degenerate zero-length normal rather than dividing by
-// (near) zero.
+// Normalizes a raw (a, b, c, d) plane row; a zero-length normal falls back to +Z instead of dividing by zero.
 Plane MakeNormalizedPlane(float a, float b, float c, float d) noexcept
 {
     const float length = std::sqrt(a * a + b * b + c * c);
@@ -60,9 +55,7 @@ std::array<Plane, 6> ExtractFrustumPlanes(const Mat4& viewProjection)
     const Mat4& m = viewProjection;
 
     std::array<Plane, 6> planes;
-    // Gribb/Hartmann extraction - m(row, col) always returns the
-    // conventional mathematical row/col entry regardless of Mat4's own
-    // column-major physical storage (see this file's own header comment).
+    // Gribb/Hartmann rows; m(row, col) is storage-order independent.
     // Left:   row3 + row0  (x >= -w)
     planes[0] = MakeNormalizedPlane(
         m(3, 0) + m(0, 0), m(3, 1) + m(0, 1), m(3, 2) + m(0, 2), m(3, 3) + m(0, 3));
@@ -106,10 +99,7 @@ GpuCullingInstanceInput PackCullingInstanceInput(const Mat4& worldMatrix, const 
 {
     GpuCullingInstanceInput input{};
 
-    // Mat4 is COLUMN-MAJOR storage and Data() already returns a contiguous
-    // column-major float[16], bit-identical to what a GLSL std430 `mat4`
-    // expects (see Mat4.h's own class comment, and this file's own header
-    // comment) - a straight memcpy, NO transpose needed.
+    // Mat4 is column-major, bit-identical to a std430 mat4: copy without transposing.
     static_assert(sizeof(input.worldMatrix) == sizeof(float) * 16, "worldMatrix must be exactly 16 floats");
     std::memcpy(input.worldMatrix, worldMatrix.Data(), sizeof(input.worldMatrix));
 

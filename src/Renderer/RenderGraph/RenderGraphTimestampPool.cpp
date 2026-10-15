@@ -15,13 +15,8 @@ RenderGraphTimestampPool::RenderGraphTimestampPool(VkDevice device, Renderer& re
     , m_pipelinedSlotBudget(pipelinedSlotBudget)
 {
 #if !GTE_ENABLE_PROFILER
-    // Mirrors GpuTimingService's own constructor guard exactly (see
-    // GpuTimingService.cpp) - a GTE_ENABLE_PROFILER=OFF build never
-    // creates a VkQueryPool here either, regardless of what the device
-    // itself reports. This is the ONLY place this class reads
-    // GTE_ENABLE_PROFILER - every other method is unconditional and
-    // simply inert whenever IsSupported() ends up false, whatever the
-    // reason.
+    // The only place that reads GTE_ENABLE_PROFILER: a profiler-off build creates no query pool.
+    // Every other method is inert whenever IsSupported() is false.
     m_capability.supported = false;
 #endif
 
@@ -29,20 +24,11 @@ RenderGraphTimestampPool::RenderGraphTimestampPool(VkDevice device, Renderer& re
         return;
     }
 
-    // Two INDEPENDENT pools, one per regime - see this class's own header
-    // comment / RenderGraph.h's top-of-file comment for why the
-    // synchronous-offscreen and pipelined-present regimes must never share
-    // one slot range. Sized generously (kSynchronousTimingSlotBudget/
-    // kPipelinedTimingSlotBudget, RenderGraph.h) up front and never
-    // resized/recreated for this object's entire lifetime.
+    // Two independent fixed-size pools, one per regime; never resized.
     m_synchronousPool.emplace(m_device, synchronousSlotBudget * 2);
     m_pipelinedPool.emplace(m_device, pipelinedSlotBudget * pipelinedFramesInFlight * 2);
 
-    // Full, one-time, up-front reset of every slot in BOTH pools -
-    // mirrors GpuTimingService::WarmUpResetEntirePool()'s own reasoning
-    // exactly (validation-layer-friendly first use, even though the
-    // Vulkan spec itself treats a freshly created query as already
-    // "unavailable"/reset-equivalent).
+    // One-time reset of every slot in both pools, so first use is clean for the validation layer.
     WarmUpResetPool(*m_synchronousPool, renderer, graphicsQueueFamily);
     WarmUpResetPool(*m_pipelinedPool, renderer, graphicsQueueFamily);
 }
@@ -163,10 +149,7 @@ RenderGraphTimestampPool::RawTicks RenderGraphTimestampPool::ReadBack(
     const std::uint32_t base = QueryBase(pipelined, bufferIndex, slot);
 
     std::uint64_t ticks[2] = { 0, 0 };
-    // VK_QUERY_RESULT_WAIT_BIT is not required here - the caller has
-    // already confirmed (via its own, pre-existing synchronization) that
-    // this exact submission is complete before calling this - mirrors
-    // GpuTimingService::ReadResultAt()'s own identical omission/reasoning.
+    // No WAIT bit: the caller has already confirmed this submission is complete.
     vkGetQueryPoolResults(
         m_device, pool, base, 2, sizeof(ticks), ticks, sizeof(std::uint64_t), VK_QUERY_RESULT_64_BIT);
     return RawTicks{ ticks[0], ticks[1] };

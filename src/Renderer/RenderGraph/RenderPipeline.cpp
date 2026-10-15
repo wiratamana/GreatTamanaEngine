@@ -10,11 +10,8 @@ namespace gte::rg {
 
 namespace {
 
-// A plain function-local static - debug-only, never touched in release,
-// never used for runtime identity comparisons (see RenderPassId's own doc
-// comment in RenderPipeline.h). Deliberately NOT inside operator""_passId
-// itself - a consteval function cannot host a mutable function-local
-// static (see that comment for the full reasoning).
+// Debug-only name registry; never used for identity comparisons. A consteval operator""_passId cannot
+// host a mutable static, so it lives here.
 std::unordered_map<std::uint64_t, const char*>& PassIdDebugNameRegistry()
 {
     static std::unordered_map<std::uint64_t, const char*> registry;

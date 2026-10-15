@@ -7,22 +7,14 @@
 
 namespace gte {
 
-// RAII wrapper around a VkInstance (+ its VK_EXT_debug_utils messenger, if
-// validation is enabled). Owns the underlying Vulkan handles for its entire
-// lifetime: acquired in the constructor, released in the destructor.
-//
-// Also responsible for the one-time volkInitialize() call and for loading
-// instance-level function pointers via volkLoadInstance() once the instance
-// exists. VulkanDevice::Native() loads device-level pointers separately via
-// volkLoadDevice() for faster dispatch.
+// RAII wrapper around a VkInstance and its debug messenger (when validation is on). Also does the
+// one-time volkInitialize() and loads instance-level function pointers; VulkanDevice loads the
+// device-level ones.
 class VulkanInstance {
 public:
-    // requiredExtensions: platform-specific extensions the window system
-    // needs (e.g. from ISurfaceProvider::VulkanInstanceExtensions() -
-    // Core/ISurfaceProvider.h). enableValidation
-    // requests VK_LAYER_KHRONOS_validation + VK_EXT_debug_utils; if the
-    // validation layer isn't available on this machine, this silently falls
-    // back to running without it rather than failing the whole application.
+    // requiredExtensions: window-system extensions (ISurfaceProvider::VulkanInstanceExtensions()).
+    // enableValidation requests the Khronos validation layer and debug utils; without the layer on this
+    // machine it runs unvalidated instead of failing.
     VulkanInstance(const std::string& applicationName,
                    const std::vector<std::string>& requiredExtensions,
                    bool enableValidation);
