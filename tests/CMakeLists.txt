@@ -2820,3 +2820,10 @@ add_test(NAME EngineVocabularyCheck
             --comments scan --strings scan --ignore-case
 )
 
+# Vulkan-free header probe: `src` is its only include directory, so a header that pulls in volk.h cannot compile.
+add_library(gte_header_purity_probe OBJECT EXCLUDE_FROM_ALL "${CMAKE_SOURCE_DIR}/tests/Tools/HeaderPurityProbe.cpp")
+target_include_directories(gte_header_purity_probe PRIVATE "${CMAKE_SOURCE_DIR}/src")
+target_compile_features(gte_header_purity_probe PRIVATE cxx_std_20)
+add_test(NAME HeaderPurity
+    COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target gte_header_purity_probe
+)
