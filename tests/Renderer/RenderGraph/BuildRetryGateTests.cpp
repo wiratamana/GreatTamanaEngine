@@ -4,6 +4,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <limits>
 
 namespace gte::rg {
@@ -11,52 +14,51 @@ namespace {
 
 using FailureKind = BuildRetryGate::FailureKind;
 
+// Frames from `failFrame` until the gate lets the next attempt through.
+std::uint64_t CooldownAfter(const BuildRetryGate& gate, std::uint64_t failFrame)
+{
+    std::uint64_t frame = failFrame;
+    while (!gate.ShouldAttempt(frame)) {
+        ++frame;
+    }
+    return frame - failFrame;
+}
+
 TEST(BuildRetryGateTest, FreshGateAttemptsAtAnyFrame)
 {
     const BuildRetryGate gate;
     EXPECT_TRUE(gate.ShouldAttempt(0));
     EXPECT_TRUE(gate.ShouldAttempt(12345));
-    EXPECT_FALSE(gate.IsFailing());
 }
 
 TEST(BuildRetryGateTest, FirstFailureBlocksForInitialCooldown)
 {
     BuildRetryGate gate;
     EXPECT_EQ(gate.OnFailure(1000), FailureKind::First);
-    EXPECT_TRUE(gate.IsFailing());
     EXPECT_FALSE(gate.ShouldAttempt(1000));
     EXPECT_FALSE(gate.ShouldAttempt(1000 + BuildRetryGate::kInitialCooldownFrames - 1));
     EXPECT_TRUE(gate.ShouldAttempt(1000 + BuildRetryGate::kInitialCooldownFrames));
 }
 
-TEST(BuildRetryGateTest, RepeatFailureDoublesCooldown)
+TEST(BuildRetryGateTest, CooldownDoublesThenStaysAtTheCap)
 {
     BuildRetryGate gate;
-    gate.OnFailure(0);
-    EXPECT_EQ(gate.OnFailure(120), FailureKind::Repeat);
-    EXPECT_EQ(gate.CooldownFrames(), 240u);
-    EXPECT_FALSE(gate.ShouldAttempt(120 + 239));
-    EXPECT_TRUE(gate.ShouldAttempt(120 + 240));
+    const std::uint64_t expected[] = { 120, 240, 480, 960, 1800, 1800, 1800 };
+    for (std::size_t i = 0; i < std::size(expected); ++i) {
+        EXPECT_EQ(gate.OnFailure(0), i == 0 ? FailureKind::First : FailureKind::Repeat);
+        EXPECT_EQ(CooldownAfter(gate, 0), expected[i]) << "failure " << i;
+    }
 }
 
-TEST(BuildRetryGateTest, CooldownIsCapped)
+TEST(BuildRetryGateTest, NeverPermanentlyBlockedAfterManyFailures)
 {
     BuildRetryGate gate;
     std::uint64_t frame = 0;
-    for (int i = 0; i < 20; ++i) {
+    for (int i = 0; i < 1000; ++i) {
         gate.OnFailure(frame);
-        frame = gate.NextAttemptFrame();
-    }
-    EXPECT_EQ(gate.CooldownFrames(), BuildRetryGate::kMaxCooldownFrames);
-}
-
-TEST(BuildRetryGateTest, CooldownSequenceReachesCapWithoutOvershoot)
-{
-    BuildRetryGate gate;
-    const std::uint64_t expected[] = { 120, 240, 480, 960, 1800, 1800 };
-    for (const std::uint64_t cooldown : expected) {
-        gate.OnFailure(0);
-        EXPECT_EQ(gate.CooldownFrames(), cooldown);
+        const std::uint64_t cooldown = CooldownAfter(gate, frame);
+        ASSERT_LE(cooldown, BuildRetryGate::kMaxCooldownFrames);
+        frame += cooldown;
     }
 }
 
@@ -65,7 +67,6 @@ TEST(BuildRetryGateTest, SuccessAfterFailureReportsRecoveryOnce)
     BuildRetryGate gate;
     gate.OnFailure(10);
     EXPECT_TRUE(gate.OnSuccess());
-    EXPECT_FALSE(gate.IsFailing());
     EXPECT_TRUE(gate.ShouldAttempt(10));
     EXPECT_FALSE(gate.OnSuccess());
 }
@@ -83,19 +84,7 @@ TEST(BuildRetryGateTest, SuccessResetsCooldownSoNextFailureIsFirstAgain)
     gate.OnFailure(120);
     gate.OnSuccess();
     EXPECT_EQ(gate.OnFailure(500), FailureKind::First);
-    EXPECT_EQ(gate.CooldownFrames(), BuildRetryGate::kInitialCooldownFrames);
-}
-
-TEST(BuildRetryGateTest, NeverPermanentlyBlockedAfterManyFailures)
-{
-    BuildRetryGate gate;
-    std::uint64_t frame = 0;
-    for (int i = 0; i < 1000; ++i) {
-        gate.OnFailure(frame);
-        frame = gate.NextAttemptFrame();
-        ASSERT_TRUE(gate.ShouldAttempt(frame));
-    }
-    EXPECT_LE(gate.CooldownFrames(), BuildRetryGate::kMaxCooldownFrames);
+    EXPECT_EQ(CooldownAfter(gate, 500), BuildRetryGate::kInitialCooldownFrames);
 }
 
 TEST(BuildRetryGateTest, FrameCounterNearMaxSaturates)
@@ -103,7 +92,7 @@ TEST(BuildRetryGateTest, FrameCounterNearMaxSaturates)
     BuildRetryGate gate;
     const std::uint64_t maxFrame = std::numeric_limits<std::uint64_t>::max();
     gate.OnFailure(maxFrame - 1);
-    EXPECT_EQ(gate.NextAttemptFrame(), maxFrame);
+    EXPECT_FALSE(gate.ShouldAttempt(maxFrame - 1));
     EXPECT_TRUE(gate.ShouldAttempt(maxFrame));
 }
 

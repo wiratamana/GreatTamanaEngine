@@ -34,6 +34,9 @@ DescriptorSetHandle RenderGraphComputeBindingCache::Resolve(
     const ComputeBindingKeyView lookup{ std::string_view(passName), viewScope, layout };
     auto it = m_entries.find(lookup);
     if (it == m_entries.end()) {
+        if (!m_failingKeys.ShouldAttempt(lookup, m_currentFrame)) {
+            return DescriptorSetHandle::Invalid;
+        }
         try {
             Entry entry;
             entry.descriptorSet = m_renderer->AllocateComputeDescriptorSet(layout).Native();
@@ -46,11 +49,14 @@ DescriptorSetHandle RenderGraphComputeBindingCache::Resolve(
                 throw;
             }
         } catch (const std::exception& e) {
-            const std::string message = std::string("Pass \"") + passName + "\": " + e.what();
-            if (m_reportedFailures.Note(message) == BoundedOnceSet<64>::Result::First) {
-                GTE_LOG_ERROR("RenderGraphComputeBindingCache", message);
+            const ComputeBindingKey key{ std::string(passName), viewScope, layout };
+            if (m_failingKeys.OnFailure(key, m_currentFrame) == BuildRetryGate::FailureKind::First) {
+                GTE_LOG_ERROR("RenderGraphComputeBindingCache", std::string("Pass \"") + passName + "\": " + e.what());
             }
             return DescriptorSetHandle::Invalid;
+        }
+        if (m_failingKeys.OnSuccess(lookup)) {
+            GTE_LOG_INFO("RenderGraphComputeBindingCache", std::string("Pass \"") + passName + "\": descriptor set allocation recovered.");
         }
     }
 
@@ -83,6 +89,7 @@ void RenderGraphComputeBindingCache::Release(VkDescriptorSetLayout layout)
             ++it;
         }
     }
+    m_failingKeys.EraseIf([layout](const ComputeBindingKey& key) { return key.layout == layout; });
 }
 
 } // namespace gte::rg

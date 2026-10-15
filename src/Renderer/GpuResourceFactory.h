@@ -11,6 +11,7 @@
 #include "Texture2D.h"
 #include "TextureArray2D.h"
 #include "VolumeTexture.h"
+#include "Vulkan/BoundedKeySet.h"
 #include "Vulkan/DescriptorPoolGrowth.h"
 #include "Vulkan/VulkanAllocator.h"
 
@@ -123,8 +124,11 @@ public:
     MaterialTexture CreateMaterialTexture2D(
         const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
 
-    // Allocates from the compute descriptor pool set; adds a pool when full. Throws when the pool cap is reached.
+    // Allocates from the compute descriptor pool set; adds at most one pool per call. Throws when no pool fits.
     ComputeDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
+
+    // Drops the "does not fit any pool" memory for a layout that is about to be destroyed.
+    void ForgetComputeLayout(VkDescriptorSetLayout layout) const noexcept;
 
     // Returns a set to the pool it came from. Unknown sets are ignored. The set must not be in use by the GPU.
     void FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept;
@@ -162,6 +166,7 @@ private:
     mutable std::vector<VkDescriptorPool> m_computePools;
     mutable PoolCapacity m_lastComputePoolCapacity;
     mutable std::unordered_map<VkDescriptorSet, std::uint32_t> m_computeSetPool;
+    mutable BoundedKeySet<VkDescriptorSetLayout, 64> m_unsatisfiableLayouts;
 };
 
 } // namespace gte

@@ -20,12 +20,6 @@ struct PoolCapacity {
 
 inline constexpr std::size_t kMaxDescriptorPools = 8;
 
-// One request may add one pool; if a fresh pool still cannot hold the layout, more pools will not help.
-constexpr bool CanGrowPoolForRequest(std::size_t poolsAddedForRequest) noexcept
-{
-    return poolsAddedForRequest < 1;
-}
-
 namespace detail {
 constexpr std::uint32_t DoubleSaturating(std::uint32_t v) noexcept
 {

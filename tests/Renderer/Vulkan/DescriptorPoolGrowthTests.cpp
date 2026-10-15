@@ -48,12 +48,5 @@ TEST(DescriptorPoolGrowthTest, EveryAllowedPoolGrowsMonotonically)
     }
 }
 
-TEST(DescriptorPoolGrowthTest, OneRequestAddsAtMostOnePool)
-{
-    EXPECT_TRUE(CanGrowPoolForRequest(0));
-    EXPECT_FALSE(CanGrowPoolForRequest(1));
-    EXPECT_FALSE(CanGrowPoolForRequest(7));
-}
-
 } // namespace
 } // namespace gte

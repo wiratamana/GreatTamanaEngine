@@ -37,8 +37,6 @@ public:
         return result == Result::First || result == Result::Overflow;
     }
 
-    std::size_t Size() const noexcept { return m_keys.size(); }
-
 private:
     struct TransparentStringHash {
         using is_transparent = void;

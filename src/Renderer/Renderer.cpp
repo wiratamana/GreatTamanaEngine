@@ -487,6 +487,7 @@ void Renderer::FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noe
 
 void Renderer::QueueComputeBindingRelease(VkDescriptorSetLayout layout) noexcept
 {
+    m_resources.ForgetComputeLayout(layout);
     try {
         const std::lock_guard<std::mutex> lock(m_bindingReleaseMutex);
         m_bindingReleaseQueue.push_back(layout);

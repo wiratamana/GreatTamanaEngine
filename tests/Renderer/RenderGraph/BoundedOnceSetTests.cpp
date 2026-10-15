@@ -4,8 +4,6 @@
 
 #include <gtest/gtest.h>
 
-#include <string>
-
 namespace gte::rg {
 namespace {
 
@@ -16,7 +14,6 @@ TEST(BoundedOnceSetTest, FirstThenRepeat)
     Set set;
     EXPECT_EQ(set.Note("a"), Set::Result::First);
     EXPECT_EQ(set.Note("a"), Set::Result::Repeat);
-    EXPECT_EQ(set.Size(), 1u);
 }
 
 TEST(BoundedOnceSetTest, DistinctKeysUpToCapacityAreAllFirst)
@@ -25,19 +22,17 @@ TEST(BoundedOnceSetTest, DistinctKeysUpToCapacityAreAllFirst)
     EXPECT_EQ(set.Note("a"), Set::Result::First);
     EXPECT_EQ(set.Note("b"), Set::Result::First);
     EXPECT_EQ(set.Note("c"), Set::Result::First);
-    EXPECT_EQ(set.Size(), 3u);
 }
 
-TEST(BoundedOnceSetTest, OverflowIsReportedOnceAndNeverGrows)
+TEST(BoundedOnceSetTest, OverflowIsReportedOnceAndNeverRemembersNewKeys)
 {
     Set set;
     set.Note("a");
     set.Note("b");
     set.Note("c");
     EXPECT_EQ(set.Note("d"), Set::Result::Overflow);
+    EXPECT_EQ(set.Note("d"), Set::Result::OverflowRepeat);
     EXPECT_EQ(set.Note("e"), Set::Result::OverflowRepeat);
-    EXPECT_EQ(set.Note("f"), Set::Result::OverflowRepeat);
-    EXPECT_EQ(set.Size(), 3u);
 }
 
 TEST(BoundedOnceSetTest, KnownKeyStillRepeatsAfterOverflow)
@@ -48,6 +43,14 @@ TEST(BoundedOnceSetTest, KnownKeyStillRepeatsAfterOverflow)
     set.Note("c");
     set.Note("d");
     EXPECT_EQ(set.Note("a"), Set::Result::Repeat);
+}
+
+TEST(BoundedOnceSetTest, OnlyFirstAndOverflowDeserveALogLine)
+{
+    EXPECT_TRUE(Set::ShouldLog(Set::Result::First));
+    EXPECT_TRUE(Set::ShouldLog(Set::Result::Overflow));
+    EXPECT_FALSE(Set::ShouldLog(Set::Result::Repeat));
+    EXPECT_FALSE(Set::ShouldLog(Set::Result::OverflowRepeat));
 }
 
 } // namespace

@@ -2,9 +2,10 @@
 
 #include "../Compute/ComputeDescriptorSet.h"
 #include "../GraphicsHandleRegistry.h"
-#include "BoundedOnceSet.h"
+#include "BoundedRetryGates.h"
 #include "RenderGraphComputeBindingKey.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -47,13 +48,17 @@ private:
         std::uint64_t lastUsedFrame = 0;
     };
 
+    // Identities whose allocation failed back off per key; a failing key is never retried every frame.
+    static constexpr std::size_t kMaxFailingKeys = 64;
+    using FailingKeys = BoundedRetryGates<ComputeBindingKey, ComputeBindingKeyHash, ComputeBindingKeyEqual, kMaxFailingKeys>;
+
     void FreeEntry(const Entry& entry) noexcept;
 
     Renderer* m_renderer = nullptr;
     VkDevice m_device = VK_NULL_HANDLE;
     std::uint64_t m_currentFrame = 0;
     std::unordered_map<ComputeBindingKey, Entry, ComputeBindingKeyHash, ComputeBindingKeyEqual> m_entries;
-    BoundedOnceSet<64> m_reportedFailures;
+    FailingKeys m_failingKeys;
 };
 
 } // namespace gte::rg

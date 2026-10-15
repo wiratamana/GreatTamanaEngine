@@ -2325,7 +2325,9 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/GpuParamsPolicyTests.cpp
     Renderer/RenderGraph/PersistentTargetTests.cpp
     Renderer/RenderGraph/BuildRetryGateTests.cpp
+    Renderer/RenderGraph/BoundedRetryGatesTests.cpp
     Renderer/RenderGraph/RenderGraphComputeBindingKeyTests.cpp
+    Renderer/Vulkan/BoundedKeySetTests.cpp
     Renderer/Vulkan/DescriptorPoolGrowthTests.cpp
     Renderer/RenderGraph/ShaderBindingsTests.cpp
     Renderer/RenderGraph/StaticNameTests.cpp

@@ -36,10 +36,6 @@ public:
         return recovered;
     }
 
-    bool IsFailing() const noexcept { return m_failing; }
-    std::uint64_t CooldownFrames() const noexcept { return m_cooldown; }
-    std::uint64_t NextAttemptFrame() const noexcept { return m_nextAttemptFrame; }
-
 private:
     static constexpr std::uint64_t NextCooldown(std::uint64_t cooldown) noexcept
     {
