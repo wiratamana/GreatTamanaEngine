@@ -45,10 +45,10 @@ void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rende
     std::optional<float> directGameRenderAspect, const std::function<void(VkCommandBuffer)>& recordImGui,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {});
 
-// Declares one compute pass per model/output group that needs GPU skinning this frame and imports its output
-// buffer. Returns the handles in pass order. Call inside the Execute() build lambda that declares the consumers;
+// Declares one compute dispatch per model/output group that needs GPU skinning this frame and imports its output
+// buffer. Returns the handles in dispatch order. Call inside the Execute() build lambda that declares the consumers;
 // `toggleRegistry` is consulted once for the "GpuSkinning" toggle.
-std::vector<rg::BufferHandle> AddGpuSkinningPasses(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer,
-    rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
+std::vector<rg::BufferHandle> AddGpuSkinningPasses(
+    rg::RenderGraphBuilder& builder, Game& game, rg::RenderPassToggleRegistry* toggleRegistry = nullptr);
 
 } // namespace gte

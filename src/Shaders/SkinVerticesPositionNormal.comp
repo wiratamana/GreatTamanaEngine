@@ -1,38 +1,9 @@
 #version 450
 
-// GPU Vertex Skinning - Phase 2: Compute Kernel (PositionNormal variant).
-//
-// See task_manager/gpu_skinning/GPU_SKINNING_PHASE2_COMPUTE_KERNEL_STRATEGY_v1.md
-// for the full design reasoning, and src/Renderer/GpuSkinning/GpuSkinningTypes.h
-// for the byte-for-byte C++ struct layouts every binding below must match
-// EXACTLY. This shader mirrors Animation/VertexSkinning.cpp's
-// SkinVertexRange() line-for-line - re-read that file directly before
-// changing anything here; do not "improve"/re-derive the math from memory.
-//
-// Sibling file: SkinVerticesPositionNormalUv.comp - identical blend math,
-// plus a UV pass-through and one extra input binding. A small amount of
-// duplication between the two files is DELIBERATE (see the Phase 2 strategy
-// doc's own "What We Will NOT Do": no shader permutation / #ifdef-guarded
-// single file).
-//
-// Binding convention - see GpuSkinningTypes.h's own binding-number comment
-// block (the single source of truth both this file and Phase 4's future
-// descriptor-set-building code must cite, never re-derive independently):
-//   binding 0 - bind-pose vertex buffer (read-only, std430, array-of-structs)
-//   binding 1 - skin-weight buffer      (read-only, std430, array-of-structs)
-//   binding 2 - bone matrix buffer      (read-only, std430, plain mat4[])
-//   binding 3 - skinned output buffer   (read-write, TIGHTLY PACKED floats -
-//                                        NOT std430-vec-padded, since this
-//                                        buffer is read afterward by the
-//                                        graphics pipeline's fixed-function
-//                                        vertex-input assembler, exactly
-//                                        like MeshVertex/MeshVertexUv are
-//                                        read today - see GpuSkinningTypes.h)
-//
-// local_size_x = 256 - MUST match src/Renderer/GpuSkinning/GpuSkinningPipelines.h's
-// own kSkinningLocalSizeX constant exactly (see ComputeDispatch.h's own
-// header comment on why this pairing is a hand-maintained, per-shader
-// convention, never enforced by the build system).
+// GPU vertex skinning, position + normal variant. Mirrors SkinVertexRange() in Animation/VertexSkinning.cpp.
+// Buffer layouts must match src/Renderer/GpuSkinning/GpuSkinningTypes.h; the C++ side binds by the names below.
+//   bindPose (read-only), skinWeights (read-only), boneMatrices (read-only), outputBuffer (tightly packed floats)
+// local_size_x must equal kSkinningLocalSizeX in GpuSkinningPipelines.h.
 layout(local_size_x = 256) in;
 
 // Matches GpuBindPoseVertex (GpuSkinningTypes.h) exactly: position padded to

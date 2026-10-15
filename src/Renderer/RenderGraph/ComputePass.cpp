@@ -66,7 +66,13 @@ bool ComputePass::Dispatch(Extent2D requested, std::uint32_t depth)
 
     builder.AddRenderPass(
         m_state.name.value, DefaultPassKind(DeclarativePassType::Compute), m_state.scope, RenderPassCategory::General,
-        [&](RenderGraphBuilder::PassBuilder& pass) { DeclareBindings(pass, *planned, layout); },
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            DeclareBindings(pass, *planned, layout);
+            pass.SetBindingInstance(m_instance);
+            for (const BufferHandle handle : m_bufferWrites) {
+                pass.WriteBuffer(handle, ResourceAccess::ComputeShaderWrite);
+            }
+        },
         [pipeline, push = std::move(m_state.push), size, depth](PassContext& ctx) {
             const DescriptorSetHandle set = ctx.BoundDescriptorSet();
             if (set == DescriptorSetHandle::Invalid) {

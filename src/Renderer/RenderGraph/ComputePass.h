@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <vector>
 
 namespace gte::rg {
 
@@ -34,6 +35,13 @@ public:
     ComputePass(ComputePass&&) = delete;
     ComputePass& operator=(ComputePass&&) = delete;
 
+    // Gives this dispatch its own descriptor set when the same pass name repeats in one view (one per instance key).
+    ComputePass& Instance(std::uint64_t key) noexcept
+    {
+        m_instance = key;
+        return *this;
+    }
+
     // Uploads `size` bytes and binds the buffer to the shader variable "params".
     ComputePass& ParamsBytes(GpuParamsBuffer& params, const void* data, std::size_t size);
 
@@ -51,9 +59,22 @@ public:
         return Bind("params", params.Handle());
     }
 
+    // Declares a graph write the shader performs on an imported buffer that is also bound by name with Bind().
+    ComputePass& Writes(BufferHandle buffer)
+    {
+        if (!m_state.inert) {
+            m_bufferWrites.push_back(buffer);
+        }
+        return *this;
+    }
+
     // Dispatches over `size` elements, clamped to the first written storage image.
     // Returns false when nothing was declared (inert shader or invalid bindings).
     bool Dispatch(Extent2D size, std::uint32_t depth = 1);
+
+private:
+    std::uint64_t m_instance = 0;
+    std::vector<BufferHandle> m_bufferWrites;
 };
 
 } // namespace gte::rg

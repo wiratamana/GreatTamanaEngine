@@ -1,56 +1,51 @@
 #pragma once
 
-#include "../Compute/ComputeDescriptorSet.h"
-#include "../Compute/ComputePipeline.h"
 #include "../RenderGraph/GpuBuffer.h"
-
-#include <volk.h>
+#include "../RenderGraph/RenderGraphHandles.h"
+#include "../RenderGraph/Shader.h"
 
 #include <cstdint>
-#include <optional>
 
 namespace gte {
 
-class Renderer;
+namespace rg {
+class RenderGraphBuilder;
+} // namespace rg
 
-// The two GPU-skinning compute pipelines (untextured, and textured with a UV buffer at binding 4), built lazily.
-// Keep one alive while any GPU-skinned model is in use.
+// One skinning dispatch: the model's input buffers, the output group's buffer and the graph handle it was imported as.
+struct GpuSkinningDispatch {
+    const rg::GpuBuffer* bindPose = nullptr;
+    const rg::GpuBuffer* skinWeights = nullptr;
+    const rg::GpuBuffer* boneMatrices = nullptr;
+    const rg::GpuBuffer* uv = nullptr; // Set only for the textured variant.
+    const rg::GpuBuffer* output = nullptr;
+    rg::BufferHandle outputHandle;
+    std::uint32_t vertexCount = 0;
+    std::uint64_t instance = 0; // Unique per output group; gives each dispatch its own descriptor set.
+};
+
+// The two skinning compute shaders (untextured and textured), built lazily on first use.
+// Every dispatch shares one pass name; the instance key tells the groups apart.
 class GpuSkinningPipelines {
 public:
     GpuSkinningPipelines() = default;
-    ~GpuSkinningPipelines();
+    ~GpuSkinningPipelines() = default;
 
     GpuSkinningPipelines(const GpuSkinningPipelines&) = delete;
     GpuSkinningPipelines& operator=(const GpuSkinningPipelines&) = delete;
     GpuSkinningPipelines(GpuSkinningPipelines&&) = delete;
     GpuSkinningPipelines& operator=(GpuSkinningPipelines&&) = delete;
 
-    // Builds both pipelines on the first call; later calls do nothing.
-    void EnsureInitialized(Renderer& renderer);
-
-    bool IsInitialized() const noexcept { return m_positionNormalPipeline.has_value(); }
-
-    // Bindings 0-3: bind pose, skin weights, bone matrices, output. Borrowed from the pipeline.
-    VkDescriptorSetLayout PositionNormalDescriptorSetLayout() const noexcept { return m_positionNormalLayout; }
-    const ComputePipeline& PositionNormalPipeline() const noexcept { return *m_positionNormalPipeline; }
-
-    // Bindings 0-4: the same plus the UV buffer. Borrowed from the pipeline.
-    VkDescriptorSetLayout PositionNormalUvDescriptorSetLayout() const noexcept { return m_positionNormalUvLayout; }
-    const ComputePipeline& PositionNormalUvPipeline() const noexcept { return *m_positionNormalUvPipeline; }
-
-    // Writes one model group's buffers into a set made from the matching layout; `uv` is set only for the textured variant.
-    static void BindBuffers(ComputeDescriptorSet& set, const rg::GpuBuffer& bindPose, const rg::GpuBuffer& skinWeights,
-        const rg::GpuBuffer& boneMatrices, const rg::GpuBuffer& output, const rg::GpuBuffer* uv);
+    // Declares the dispatch. False when nothing was declared (shader not ready or a missing buffer); the shader logs why.
+    bool Declare(rg::RenderGraphBuilder& builder, const GpuSkinningDispatch& dispatch, rg::ViewScope scope,
+        rg::RenderPassEvent event);
 
 private:
-    VkDescriptorSetLayout m_positionNormalLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout m_positionNormalUvLayout = VK_NULL_HANDLE;
-
-    std::optional<ComputePipeline> m_positionNormalPipeline;
-    std::optional<ComputePipeline> m_positionNormalUvPipeline;
+    rg::Shader m_positionNormal{ "SkinVerticesPositionNormal" };
+    rg::Shader m_positionNormalUv{ "SkinVerticesPositionNormalUv" };
 };
 
-// Must match `local_size_x` of both skinning shaders. Only the editor's raw skinning validation still reads it.
+// Must match `local_size_x` of both skinning shaders.
 inline constexpr std::uint32_t kSkinningLocalSizeX = 256;
 
 } // namespace gte

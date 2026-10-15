@@ -1,8 +1,5 @@
 #pragma once
 
-#include "../../Core/GraphicsHandles.h" // DescriptorSetHandle
-#include "../../Renderer/Compute/ComputeDescriptorSet.h"
-#include "../../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../../Renderer/MeshHandle.h"
 #include "../../Renderer/RenderGraph/GpuBuffer.h"
 
@@ -27,11 +24,8 @@ public:
         // Written by the skinning compute pass, read as the vertex buffer of the group's meshes below.
         rg::GpuBuffer outputVertexBuffer;
 
-        // Bound once at registration; the buffers have a fixed identity for the model's lifetime.
-        ComputeDescriptorSet descriptorSet;
-
-        // Engine handle of `descriptorSet`, registered once.
-        DescriptorSetHandle descriptorSetHandle = DescriptorSetHandle::Invalid;
+        // Unique per group: the skinning pass uses it to give each group its own descriptor set.
+        std::uint64_t instanceKey = 0;
 
         // True: output uses the position-normal-uv layout; false: position-normal.
         bool isTextured = false;
@@ -39,7 +33,7 @@ public:
         // The model's full vertex count; every group's output covers every vertex.
         std::uint32_t vertexCount = 0;
 
-        // Stable label "<file>#SkinGroup<N>" used as pass and resource name; static for the process lifetime.
+        // Label "<file>#SkinGroup<N>" used as the imported buffer's name; lives as long as the entry.
         std::string debugName;
 
         // Each CPU-mode part mesh and its GPU-skinned counterpart; the runtime switch swaps between them.
@@ -71,14 +65,14 @@ public:
     };
 
     // Builds the model's GPU resources. No-op for a boneless or empty model, or one with no resolvable parts.
-    // Initializes `pipelines` on first use.
-    void Register(Renderer& renderer, RenderSystem& renderSystem, GpuSkinningPipelines& pipelines,
-        const std::string& absoluteGtaPath, const SkinnedMeshData& data, const std::vector<MeshAssetPart>& parts);
+    void Register(Renderer& renderer, RenderSystem& renderSystem, const std::string& absoluteGtaPath,
+        const SkinnedMeshData& data, const std::vector<MeshAssetPart>& parts);
 
     const GpuModelEntry* TryGet(const std::string& absoluteGtaPath) const;
 
 private:
     std::unordered_map<std::string, GpuModelEntry> m_models;
+    std::uint64_t m_nextInstanceKey = 1;
 };
 
 } // namespace gte

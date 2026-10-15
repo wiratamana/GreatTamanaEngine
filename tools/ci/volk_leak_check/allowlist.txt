@@ -58,7 +58,6 @@ Encoding/HdrColorVisualization.h # debt: pixel conversion switches on VkFormat
 Encoding/SingleChannelVisualization.cpp # debt: pixel conversion switches on VkFormat
 Encoding/SingleChannelVisualization.h # debt: pixel conversion switches on VkFormat
 Game/Animation/AnimationSystem.h # debt: game systems hold raw Vulkan handles
-Game/Animation/GpuSkinningRigCache.cpp # debt: game systems hold raw Vulkan handles
 Game/Game.cpp # debt: game systems hold raw Vulkan handles
 Game/Game.h # debt: game systems hold raw Vulkan handles
 Game/Instantiation/MeshAssetGpuCatalog.cpp # debt: game systems hold raw Vulkan handles

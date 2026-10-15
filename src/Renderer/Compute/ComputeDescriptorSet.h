@@ -32,6 +32,8 @@ struct ComputeDescriptorWrite {
 
     static ComputeDescriptorWrite CombinedImageSampler(
         std::uint32_t binding, VkImageView imageView, VkSampler sampler);
+
+    friend bool operator==(const ComputeDescriptorWrite&, const ComputeDescriptorWrite&) = default;
 };
 
 class ComputeDescriptorSet {

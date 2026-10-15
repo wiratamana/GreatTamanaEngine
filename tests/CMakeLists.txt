@@ -2311,7 +2311,7 @@ set(GTE_TEST_SOURCES
     # barrier state - RenderTexture::CurrentState()/FinalizeForExternalSampling().
     Renderer/RenderTextureTests.cpp
     Renderer/GpuSkinning/GpuSkinningTypesTests.cpp
-    Renderer/Culling/CullingTypesTests.cpp
+    Renderer/GpuSkinning/GpuSkinningPassTests.cpp
     Renderer/VolumetricFroxelMathTests.cpp
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
     Renderer/RenderGraph/PersistentSlotTableTests.cpp
@@ -2685,6 +2685,16 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_RENDER_FEATURE_BLEND_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/RenderFeatureBlend.comp.spv"
 )
 
+# The skinning shaders are declared by the root gte_add_shader() calls; their test pins the names the pass binds.
+target_sources(GreatTamanaEngineTests PRIVATE
+    "${CMAKE_BINARY_DIR}/shaders/SkinVerticesPositionNormal.comp.spv"
+    "${CMAKE_BINARY_DIR}/shaders/SkinVerticesPositionNormalUv.comp.spv"
+)
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_TEST_SKIN_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SkinVerticesPositionNormal.comp.spv"
+    GTE_TEST_SKIN_UV_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SkinVerticesPositionNormalUv.comp.spv"
+)
+
 # The lighting layout test reads the shared GLSL include straight from the source tree.
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_LIGHTING_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/DirectionalLightingAndReceiverMask.glsl"
@@ -2845,7 +2855,9 @@ set(GTE_COMMENT_RULE_TESTS
     Renderer/RenderGraph/RealTargetBindingTests.cpp Renderer/RenderGraph/RecordedPassTests.cpp
     Renderer/RenderGraph/RenderPassToggleRegistryTests.cpp Renderer/RenderGraph/ShaderBindingsTests.cpp
     Renderer/RenderGraph/TransferReadbackGpuTests.cpp Renderer/Vulkan/ShaderReflectionTests.cpp
-    Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderPurityProbe.cpp)
+Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderPurityProbe.cpp
+    Renderer/GpuSkinning/GpuSkinningPassTests.cpp Renderer/RenderGraph/RenderGraphComputeBindingKeyTests.cpp
+    Renderer/RenderGraph/PassIdentityTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

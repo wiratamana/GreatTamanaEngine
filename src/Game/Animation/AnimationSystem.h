@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../Core/GraphicsHandles.h" // DescriptorSetHandle - GpuSkinningDispatchRequest below.
+#include "../../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../../Renderer/RenderGraph/GpuBuffer.h"
 #include "../../ECS/Entity.h"
 #include "../../ECS/Registry.h"
@@ -58,11 +58,10 @@ public:
     void RegisterGpuSkinnedMesh(Renderer& renderer, const std::string& absoluteGtaPath, const SkinnedMeshData& data,
         const std::vector<MeshAssetPart>& parts)
     {
-        m_gpuSkinningPipelines.EnsureInitialized(renderer);
-        m_gpuRigCache.Register(renderer, m_renderSystem, m_gpuSkinningPipelines, absoluteGtaPath, data, parts);
+        m_gpuRigCache.Register(renderer, m_renderSystem, absoluteGtaPath, data, parts);
     }
 
-    // The shared skinning compute pipelines, for the pass that dispatches them.
+    // The shared skinning shaders, for the pass that dispatches them.
     GpuSkinningPipelines& GetGpuSkinningPipelines() noexcept { return m_gpuSkinningPipelines; }
 
     // Starts a clip on an entity. False, with no component change, when the entity is dead, has no mesh asset
@@ -82,15 +81,12 @@ public:
     // One compute dispatch the skinning pass must record this frame, per model output group. A model is listed once,
     // so no output buffer is written twice. Empty in CpuJobSystem mode, with nothing animating, and on frozen frames.
     struct GpuSkinningDispatchRequest {
-        // Stable name for the pass and the imported buffer; lives as long as the rig cache.
+        // Stable name for the imported output buffer; lives as long as the rig cache.
         const char* name = nullptr;
 
-        // The skinned vertex output; owned by the rig cache and valid for this frame.
-        const rg::GpuBuffer* outputBuffer = nullptr;
-        DescriptorSetHandle descriptorSet = DescriptorSetHandle::Invalid;
-        std::uint32_t vertexCount = 0;
-        // Selects the textured or untextured pipeline the descriptor set was built for.
-        bool textured = false;
+        // Buffers and sizes of the dispatch, owned by the rig cache and valid for this frame.
+        // `outputHandle` is filled by whoever imports the output into the graph.
+        GpuSkinningDispatch dispatch;
     };
     std::vector<GpuSkinningDispatchRequest> CollectModelsNeedingGpuSkinningThisFrame() const;
 

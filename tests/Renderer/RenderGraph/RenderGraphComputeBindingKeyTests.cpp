@@ -1,11 +1,14 @@
-// Tier-1 tests for the allocation-free binding cache key.
+// Tier-1 tests for the allocation-free binding cache key, the rewrite policy and entry staleness.
 
+#include "Renderer/RenderGraph/RenderGraphComputeBindingCache.h"
 #include "Renderer/RenderGraph/RenderGraphComputeBindingKey.h"
+#include "Renderer/RenderGraph/RenderGraphPersistentResourceCache.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace gte::rg {
 namespace {
@@ -60,6 +63,58 @@ TEST(ComputeBindingKeyTest, StringViewLookupFindsOwnedKey)
 
     EXPECT_EQ(map.find(ComputeBindingKeyView{ literal, ViewScope::GameView, FakeLayout(24) }), map.end());
     EXPECT_EQ(map.find(ComputeBindingKeyView{ literal, ViewScope::SceneView, FakeLayout(32) }), map.end());
+}
+
+TEST(ComputeBindingKeyTest, InstanceIsPartOfEqualityAndHash)
+{
+    const ComputeBindingKeyEqual eq;
+    const ComputeBindingKeyHash hash;
+    const ComputeBindingKeyView base{ "Pass", ViewScope::Shared, FakeLayout(8), 1 };
+    EXPECT_TRUE(eq(base, ComputeBindingKeyView{ "Pass", ViewScope::Shared, FakeLayout(8), 1 }));
+    EXPECT_FALSE(eq(base, ComputeBindingKeyView{ "Pass", ViewScope::Shared, FakeLayout(8), 2 }));
+    EXPECT_FALSE(eq(base, ComputeBindingKeyView{ "Pass", ViewScope::Shared, FakeLayout(8) }));
+    EXPECT_NE(hash(base), hash(ComputeBindingKeyView{ "Pass", ViewScope::Shared, FakeLayout(8), 2 }));
+}
+
+TEST(ComputeBindingKeyTest, ManyInstancesOfOneNameAreManyEntries)
+{
+    Map map;
+    for (std::uint64_t instance = 0; instance < 50; ++instance) {
+        map.emplace(ComputeBindingKey{ "GpuSkinning.Dispatch", ViewScope::Shared, FakeLayout(8), instance },
+            static_cast<int>(instance));
+    }
+    EXPECT_EQ(map.size(), 50u);
+    const auto hit = map.find(ComputeBindingKeyView{ "GpuSkinning.Dispatch", ViewScope::Shared, FakeLayout(8), 17 });
+    ASSERT_NE(hit, map.end());
+    EXPECT_EQ(hit->second, 17);
+}
+
+TEST(DescriptorWritesNeedRewriteTest, IdenticalBufferWritesAreNotRewritten)
+{
+    const std::vector<ComputeDescriptorWrite> writes = {
+        ComputeDescriptorWrite::StorageBuffer(0, reinterpret_cast<VkBuffer>(std::uintptr_t{ 16 })),
+        ComputeDescriptorWrite::StorageBuffer(1, reinterpret_cast<VkBuffer>(std::uintptr_t{ 32 })) };
+    EXPECT_TRUE(DescriptorWritesNeedRewrite({}, writes));
+    EXPECT_FALSE(DescriptorWritesNeedRewrite(writes, writes));
+
+    std::vector<ComputeDescriptorWrite> changed = writes;
+    changed[1] = ComputeDescriptorWrite::StorageBuffer(1, reinterpret_cast<VkBuffer>(std::uintptr_t{ 48 }));
+    EXPECT_TRUE(DescriptorWritesNeedRewrite(writes, changed));
+}
+
+TEST(DescriptorWritesNeedRewriteTest, ImageWritesAlwaysRewrite)
+{
+    const std::vector<ComputeDescriptorWrite> writes = {
+        ComputeDescriptorWrite::StorageImage(0, reinterpret_cast<VkImageView>(std::uintptr_t{ 16 })) };
+    EXPECT_TRUE(DescriptorWritesNeedRewrite(writes, writes));
+}
+
+// Entries of rigs that disappear are freed once they go unused for kDefaultStaleFrames.
+TEST(ComputeBindingCacheStalenessTest, UnusedEntriesAreStaleOnlyPastTheThreshold)
+{
+    constexpr std::uint64_t kStale = RenderGraphComputeBindingCache::kDefaultStaleFrames;
+    EXPECT_FALSE(IsStaleCacheEntry(10, 10 + kStale, kStale));
+    EXPECT_TRUE(IsStaleCacheEntry(10, 10 + kStale + 1, kStale));
 }
 
 } // namespace

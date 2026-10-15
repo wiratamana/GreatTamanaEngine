@@ -2,7 +2,6 @@
 
 #include "../Game/Animation/AnimationSystem.h"
 #include "../Game/Game.h"
-#include "../Renderer/Compute/ComputePipeline.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
@@ -48,10 +47,8 @@ void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rende
 }
 
 std::vector<rg::BufferHandle> AddGpuSkinningPasses(
-    rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::RenderPassToggleRegistry* toggleRegistry)
+    rg::RenderGraphBuilder& builder, Game& game, rg::RenderPassToggleRegistry* toggleRegistry)
 {
-    // Kept for signature stability: the dispatch reaches its renderer through PassContext::Cmd().
-    (void)renderer;
     std::vector<rg::BufferHandle> handles;
 
     // One checkbox gates both this path and the offscreen "GpuSkinning" provider.
@@ -68,30 +65,10 @@ std::vector<rg::BufferHandle> AddGpuSkinningPasses(
     handles.reserve(requests.size());
 
     for (const AnimationSystem::GpuSkinningDispatchRequest& request : requests) {
-        const rg::BufferHandle handle = builder.Import(*request.outputBuffer, request.name);
-
-        builder.AddRenderPass(
-            request.name, rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
-            [handle](rg::RenderGraphBuilder::PassBuilder& pass) {
-                pass.WriteBuffer(handle, rg::ResourceAccess::ComputeShaderWrite);
-            },
-            [&pipelines, request](rg::PassContext& ctx) {
-                const ComputePipeline& pipeline =
-                    request.textured ? pipelines.PositionNormalUvPipeline() : pipelines.PositionNormalPipeline();
-                const std::uint32_t vertexCount = request.vertexCount;
-
-                // DispatchOverSize() computes the correct groupX/Y/Z from the
-                // bound pipeline's own reflected LocalGroupSize() (== {256,1,1})
-                // via ComputeDispatch.h's existing ComputeGroupCount3D().
-                rg::CommandBuffer cmd = ctx.Cmd();
-                cmd.BindComputePipeline(pipeline);
-                cmd.BindDescriptorSet(request.descriptorSet);
-                cmd.SetPushConstants(vertexCount);
-                cmd.DispatchOverSize(vertexCount, 1, 1);
-            },
-            rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::Opaques);
-
-        handles.push_back(handle);
+        GpuSkinningDispatch dispatch = request.dispatch;
+        dispatch.outputHandle = builder.Import(*dispatch.output, request.name);
+        pipelines.Declare(builder, dispatch, rg::ViewScope::Shared, rg::RenderPassEvent::Opaques);
+        handles.push_back(dispatch.outputHandle);
     }
 
     return handles;

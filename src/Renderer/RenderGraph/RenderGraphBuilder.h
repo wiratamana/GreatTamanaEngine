@@ -123,6 +123,9 @@ public:
         // Must be called before binding descriptor slots for this pass.
         void BindDescriptorSetLayout(DescriptorSetLayoutHandle layout);
 
+        // Distinguishes passes that share a name and scope but need their own descriptor set. Default 0.
+        void SetBindingInstance(std::uint64_t instance);
+
         void BindStorageBuffer(std::uint32_t binding, BufferHandle handle, uint64_t offset = 0,
             uint64_t range = VK_WHOLE_SIZE);
 

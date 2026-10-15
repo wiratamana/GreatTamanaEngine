@@ -16,8 +16,21 @@ class Renderer;
 
 namespace gte::rg {
 
+// False only when `next` is identical to the last written set of buffer-only writes: a rewrite would then change
+// nothing, and an in-flight frame may still be reading the set. Image views can be recreated, so images always rewrite.
+inline bool DescriptorWritesNeedRewrite(
+    const std::vector<ComputeDescriptorWrite>& last, const std::vector<ComputeDescriptorWrite>& next) noexcept
+{
+    for (const ComputeDescriptorWrite& write : next) {
+        if (write.type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER && write.type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
+            return true;
+        }
+    }
+    return last != next;
+}
+
 // Owns the descriptor sets of passes that declare Bind*() resources.
-// One set per (pass name, ViewScope, layout): per-view passes never share a set, which would be a data race.
+// One set per (pass name, ViewScope, layout, instance): per-view passes never share a set, which would be a data race.
 class RenderGraphComputeBindingCache {
 public:
     explicit RenderGraphComputeBindingCache(Renderer& renderer) noexcept;
@@ -30,8 +43,8 @@ public:
 
     // Returns the set for this identity, rewritten with `writes`. Never throws:
     // allocation failure is logged once and yields DescriptorSetHandle::Invalid.
-    DescriptorSetHandle Resolve(
-        const char* passName, ViewScope viewScope, VkDescriptorSetLayout layout, const std::vector<ComputeDescriptorWrite>& writes);
+    DescriptorSetHandle Resolve(const char* passName, ViewScope viewScope, VkDescriptorSetLayout layout,
+        const std::vector<ComputeDescriptorWrite>& writes, std::uint64_t instance = 0);
 
     // Frees sets unused for more than `staleFrames`. The age guard keeps in-flight command buffers safe.
     void BeginFrame(std::uint64_t currentFrame, std::uint64_t staleFrames = kDefaultStaleFrames);
@@ -47,6 +60,7 @@ private:
         VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
         DescriptorSetHandle handle = DescriptorSetHandle::Invalid;
         std::uint64_t lastUsedFrame = 0;
+        std::vector<ComputeDescriptorWrite> lastWrites;
     };
 
     // Identities whose allocation failed back off per key; a failing key is never retried every frame.

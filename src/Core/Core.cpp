@@ -573,40 +573,20 @@ void Core::RegisterOffscreenRenderPipelineProviders()
     m_offscreenRenderPipeline.SetPassToggleRegistry(&m_renderPassToggleRegistry);
     m_renderGraph.SetRenderPassToggleRegistry(&m_renderPassToggleRegistry);
 
-    // Compute passes for GPU skinning.
+    // Compute passes for GPU skinning: one shared pass name, one descriptor set per output group.
     m_offscreenRenderPipeline.Register("GpuSkinning", rg::ProviderScope::Once,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
             GpuSkinningPipelines& pipelines = m_game.GetGpuSkinningPipelines();
 
             if (!m_renderPassToggleRegistry.IsEnabled("GpuSkinning")) {
                 return;
             }
 
+            const rg::RenderFeatureScope scope(frame.builder, "GPU Skinning");
             for (std::size_t i = 0; i < m_gpuSkinningRequestsThisFrame.size(); ++i) {
-                const AnimationSystem::GpuSkinningDispatchRequest& request = m_gpuSkinningRequestsThisFrame[i];
-                const rg::BufferHandle handle = m_gpuSkinningHandlesThisFrame[i];
-
-                rg::RenderPassDesc desc;
-                desc.debugName = request.name;
-                desc.kind = rg::PassKind::Compute;
-                desc.order = rg::RenderPassEvent::PreOpaques;
-                desc.view = rg::RenderViewId::Shared();
-                desc.owningFeatureName = "GPU Skinning";
-                desc.setup = [handle](rg::RenderGraphBuilder::PassBuilder& pass) {
-                    pass.WriteBuffer(handle, rg::ResourceAccess::ComputeShaderWrite);
-                };
-                desc.execute = [this, &pipelines, request](rg::PassContext& ctx) {
-                    const ComputePipeline& pipeline =
-                        request.textured ? pipelines.PositionNormalUvPipeline() : pipelines.PositionNormalPipeline();
-                    const std::uint32_t vertexCount = request.vertexCount;
-
-                    rg::CommandBuffer cmd = ctx.Cmd();
-                    cmd.BindComputePipeline(pipeline);
-                    cmd.BindDescriptorSet(request.descriptorSet);
-                    cmd.SetPushConstants(vertexCount);
-                    cmd.DispatchOverSize(vertexCount, 1, 1);
-                };
-                out.push_back(std::move(desc));
+                GpuSkinningDispatch dispatch = m_gpuSkinningRequestsThisFrame[i].dispatch;
+                dispatch.outputHandle = m_gpuSkinningHandlesThisFrame[i];
+                pipelines.Declare(frame.builder, dispatch, rg::ViewScope::Shared, rg::RenderPassEvent::PreOpaques);
             }
 
             frame.blackboard.Publish<std::vector<rg::BufferHandle>>(
@@ -1050,7 +1030,7 @@ void Core::RegisterPresentRenderPipelineProvider()
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
             const rg::RenderFeatureScope scope(frame.builder, "Present");
             const std::vector<rg::BufferHandle> gpuSkinningBuffers = m_needsDirectGameRenderThisFrame
-                ? AddGpuSkinningPasses(frame.builder, m_game, m_renderer, &m_renderPassToggleRegistry)
+                ? AddGpuSkinningPasses(frame.builder, m_game, &m_renderPassToggleRegistry)
                 : std::vector<rg::BufferHandle>{};
 
             AddPresentPass(frame.builder, m_game, m_renderer, m_swapchainImageThisFrame,
@@ -1087,7 +1067,7 @@ void Core::BuildFrame()
                     m_gpuSkinningHandlesThisFrame.reserve(m_gpuSkinningRequestsThisFrame.size());
                     for (const AnimationSystem::GpuSkinningDispatchRequest& request :
                         m_gpuSkinningRequestsThisFrame) {
-                        m_gpuSkinningHandlesThisFrame.push_back(b.Import(*request.outputBuffer, request.name));
+                        m_gpuSkinningHandlesThisFrame.push_back(b.Import(*request.dispatch.output, request.name));
                     }
 
                     m_offscreenBlackboardThisFrame.BeginFrame();
@@ -1133,7 +1113,7 @@ void Core::BuildFrame()
                             gpuSkinnedOutputBuffers.reserve(m_gpuSkinningRequestsThisFrame.size());
                             for (const AnimationSystem::GpuSkinningDispatchRequest& request :
                                 m_gpuSkinningRequestsThisFrame) {
-                                gpuSkinnedOutputBuffers.insert(request.outputBuffer->Handle());
+                                gpuSkinnedOutputBuffers.insert(request.dispatch.output->Handle());
                             }
 
                             RenderSystem& renderSystem = m_game.GetRenderSystem();

@@ -24,14 +24,14 @@ void RenderGraphComputeBindingCache::FreeEntry(const Entry& entry) noexcept
     m_renderer->FreeComputeDescriptorSet(entry.descriptorSet);
 }
 
-DescriptorSetHandle RenderGraphComputeBindingCache::Resolve(
-    const char* passName, ViewScope viewScope, VkDescriptorSetLayout layout, const std::vector<ComputeDescriptorWrite>& writes)
+DescriptorSetHandle RenderGraphComputeBindingCache::Resolve(const char* passName, ViewScope viewScope,
+    VkDescriptorSetLayout layout, const std::vector<ComputeDescriptorWrite>& writes, std::uint64_t instance)
 {
     if (passName == nullptr || passName[0] == '\0' || layout == VK_NULL_HANDLE) {
         return DescriptorSetHandle::Invalid;
     }
 
-    const ComputeBindingKeyView lookup{ std::string_view(passName), viewScope, layout };
+    const ComputeBindingKeyView lookup{ std::string_view(passName), viewScope, layout, instance };
     auto it = m_entries.find(lookup);
     if (it == m_entries.end()) {
         if (!m_failingKeys.ShouldAttempt(lookup, m_currentFrame)) {
@@ -43,13 +43,13 @@ DescriptorSetHandle RenderGraphComputeBindingCache::Resolve(
             entry.handle = RegisterDescriptorSet(entry.descriptorSet);
             entry.lastUsedFrame = m_currentFrame;
             try {
-                it = m_entries.emplace(ComputeBindingKey{ std::string(passName), viewScope, layout }, entry).first;
+                it = m_entries.emplace(ComputeBindingKey{ std::string(passName), viewScope, layout, instance }, entry).first;
             } catch (...) {
                 FreeEntry(entry);
                 throw;
             }
         } catch (const std::exception& e) {
-            const ComputeBindingKey key{ std::string(passName), viewScope, layout };
+            const ComputeBindingKey key{ std::string(passName), viewScope, layout, instance };
             if (m_failingKeys.OnFailure(key, m_currentFrame) == BuildRetryGate::FailureKind::First) {
                 GTE_LOG_ERROR("RenderGraphComputeBindingCache", std::string("Pass \"") + passName + "\": " + e.what());
             }
@@ -62,7 +62,10 @@ DescriptorSetHandle RenderGraphComputeBindingCache::Resolve(
 
     Entry& entry = it->second;
     entry.lastUsedFrame = m_currentFrame;
-    ComputeDescriptorSet(entry.descriptorSet, m_device).Rewrite(writes);
+    if (DescriptorWritesNeedRewrite(entry.lastWrites, writes)) {
+        ComputeDescriptorSet(entry.descriptorSet, m_device).Rewrite(writes);
+        entry.lastWrites = writes;
+    }
     return entry.handle;
 }
 

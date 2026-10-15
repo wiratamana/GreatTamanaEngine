@@ -1,40 +1,9 @@
 #version 450
 
-// GPU Vertex Skinning - Phase 2: Compute Kernel (PositionNormalUv variant).
-//
-// See task_manager/gpu_skinning/GPU_SKINNING_PHASE2_COMPUTE_KERNEL_STRATEGY_v1.md
-// for the full design reasoning, and src/Renderer/GpuSkinning/GpuSkinningTypes.h
-// for the byte-for-byte C++ struct layouts every binding below must match
-// EXACTLY. Sibling file: SkinVerticesPositionNormal.comp - identical blend
-// math; see that file's own header comment first, this one only documents
-// what's DIFFERENT here (the UV pass-through and its extra binding).
-//
-// Binding convention - bindings 0-3 are exactly GpuSkinningTypes.h's own
-// documented table (see SkinVerticesPositionNormal.comp for the full
-// per-binding reasoning). BINDING 4 IS A PHASE 2 ADDITION, needed only by
-// this Uv variant: Phase 1's fixed 4-binding table has no slot for the
-// bind-pose UV buffer, because UVs never change under skinning (they are
-// copied straight through, unmodified, from the bind-pose UV buffer to the
-// output buffer - exactly like the CPU path's own
-// MeshVertexPacking.cpp/PackMeshVertexUvRange() copies `skinData->uvs`
-// verbatim). Per the Phase 2 strategy doc's own "if the GLSL side turns out
-// to want a different physical layout... that is a Phase 1 revision, not a
-// Phase 2 workaround" rule: this is an ADDITIVE extension of Phase 1's
-// table (a new binding 4, used ONLY by this Uv variant's own descriptor set
-// layout - the plain PositionNormal variant's layout is unaffected and
-// still has exactly 4 bindings), not a redefinition of bindings 0-3.
-//   binding 0 - bind-pose vertex buffer (read-only, std430, array-of-structs)
-//   binding 1 - skin-weight buffer      (read-only, std430, array-of-structs)
-//   binding 2 - bone matrix buffer      (read-only, std430, plain mat4[])
-//   binding 3 - skinned output buffer   (read-write, TIGHTLY PACKED floats)
-//   binding 4 - bind-pose UV buffer     (read-only, std430, plain vec2[] -
-//                                        matches GpuUv exactly, no padding
-//                                        needed at std430's own 8-byte vec2
-//                                        alignment) - UV-VARIANT ONLY.
-//
-// local_size_x = 256 - MUST match
-// src/Renderer/GpuSkinning/GpuSkinningPipelines.h's own kSkinningLocalSizeX
-// constant exactly, same as the sibling file.
+// GPU vertex skinning, position + normal + uv variant: the same blend as SkinVerticesPositionNormal.comp plus a UV copy.
+// Buffer layouts must match src/Renderer/GpuSkinning/GpuSkinningTypes.h; the C++ side binds by the names below.
+//   bindPose, skinWeights, boneMatrices (read-only), outputBuffer (tightly packed floats), bindPoseUv (read-only vec2[])
+// local_size_x must equal kSkinningLocalSizeX in GpuSkinningPipelines.h.
 layout(local_size_x = 256) in;
 
 struct BindPoseVertex {

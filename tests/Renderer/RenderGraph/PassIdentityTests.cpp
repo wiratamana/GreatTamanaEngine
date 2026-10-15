@@ -125,5 +125,53 @@ TEST(PassIdentityTest, RefusedPassKeepsItsResourceDeclarationsForBarriers)
     EXPECT_EQ(input.passes[1].writes[0].texture, texture);
 }
 
+void DeclareBoundInstance(RenderGraphBuilder& builder, const char* name, ViewScope scope, std::uint64_t instance)
+{
+    builder.AddComputePass(
+        name, scope,
+        [instance](RenderGraphBuilder::PassBuilder& pass) {
+            pass.BindDescriptorSetLayout(kLayout);
+            pass.SetBindingInstance(instance);
+            pass.BindStorageBuffer(0, BufferObjectHandle::Invalid);
+        },
+        NoOpExecute);
+}
+
+TEST(PassIdentityTest, SameNameAndScopeWithDifferentInstancesAreAllAllowed)
+{
+    RenderGraphBuilder builder;
+    for (std::uint64_t instance = 1; instance <= 5; ++instance) {
+        DeclareBoundInstance(builder, "Skin", ViewScope::Shared, instance);
+    }
+
+    const CompiledGraphInput input = builder.Finish();
+    ASSERT_EQ(input.passes.size(), 5u);
+    for (std::size_t i = 0; i < input.passes.size(); ++i) {
+        EXPECT_FALSE(input.passes[i].skipExecute) << i;
+        EXPECT_EQ(input.passes[i].bindingInstance, i + 1);
+    }
+}
+
+TEST(PassIdentityTest, SameNameScopeAndInstanceTwiceRefusesTheSecond)
+{
+    RenderGraphBuilder builder;
+    DeclareBoundInstance(builder, "Skin", ViewScope::Shared, 7);
+    DeclareBoundInstance(builder, "Skin", ViewScope::Shared, 7);
+
+    const CompiledGraphInput input = builder.Finish();
+    EXPECT_FALSE(input.passes[0].skipExecute);
+    EXPECT_TRUE(input.passes[1].skipExecute);
+}
+
+TEST(PassIdentityTest, InstanceZeroKeepsTheOldIdentityRule)
+{
+    RenderGraphBuilder builder;
+    DeclareBound(builder, "Pass", ViewScope::GameView);
+    DeclareBoundInstance(builder, "Pass", ViewScope::GameView, 0);
+
+    const CompiledGraphInput input = builder.Finish();
+    EXPECT_TRUE(input.passes[1].skipExecute);
+}
+
 } // namespace
 } // namespace gte::rg

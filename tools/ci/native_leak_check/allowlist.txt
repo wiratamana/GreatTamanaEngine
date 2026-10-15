@@ -19,6 +19,4 @@ Editor/RenderGraphTexturePreview.cpp # debt: editor tool uses raw wrappers or on
 Editor/SceneGridRenderer.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Features/Atmosphere/AtmosphereLutRendererImpl.cpp # debt: RawCommandBuffer for external sampling finalize and raw wrappers; removed when the feature kit migrates this feature
 Features/Atmosphere/AtmosphereLutRendererImpl.h # debt: feature passes use raw wrappers until the feature kit exists
-Game/Animation/GpuSkinningRigCache.cpp # debt: owns a ComputeDescriptorSet per output group; removed when the skinning dispatch pass moves onto ComputePass
-Game/Animation/GpuSkinningRigCache.h # debt: holds a ComputeDescriptorSet per output group; removed when the skinning dispatch pass moves onto ComputePass
 Window/Window.h # permanent: Native() returns the SDL window handle, not a GPU object

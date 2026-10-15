@@ -399,7 +399,8 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
         return DescriptorSetHandle::Invalid;
     }
 
-    const DescriptorSetHandle set = m_computeBindingCache.Resolve(pass.name, pass.viewScope, layout, writes);
+    const DescriptorSetHandle set =
+        m_computeBindingCache.Resolve(pass.name, pass.viewScope, layout, writes, pass.bindingInstance);
     if (set == DescriptorSetHandle::Invalid) {
         ReportSkippedOnce(pass, std::nullopt, "descriptor set could not be allocated.");
     }

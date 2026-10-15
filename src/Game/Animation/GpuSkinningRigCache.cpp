@@ -52,8 +52,8 @@ MeshHandle GpuSkinningRigCache::GpuModelEntry::TryGetCpuMeshHandle(MeshHandle gp
     return kInvalidMeshHandle;
 }
 
-void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSystem, GpuSkinningPipelines& pipelines,
-    const std::string& absoluteGtaPath, const SkinnedMeshData& data, const std::vector<MeshAssetPart>& parts)
+void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSystem, const std::string& absoluteGtaPath,
+    const SkinnedMeshData& data, const std::vector<MeshAssetPart>& parts)
 {
     if (data.skeleton.bones.empty() || data.bindPositions.empty() || parts.empty()) {
         return;
@@ -63,8 +63,6 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
     if (groups.empty()) {
         return;
     }
-
-    pipelines.EnsureInitialized(renderer);
 
     using rg::GpuBuffer;
     using rg::GpuBufferUse;
@@ -111,14 +109,7 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
             : static_cast<std::size_t>(vertexCount) * sizeof(GpuSkinnedVertexPositionNormal);
         outputGroup.outputVertexBuffer =
             GpuBuffer(device, outputSize, "GpuSkinningOutput", GpuBufferUse::Storage | GpuBufferUse::Vertex);
-
-        const VkDescriptorSetLayout layout = group.textured ? pipelines.PositionNormalUvDescriptorSetLayout()
-                                                             : pipelines.PositionNormalDescriptorSetLayout();
-        outputGroup.descriptorSet = ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(layout));
-        GpuSkinningPipelines::BindBuffers(outputGroup.descriptorSet, entry.bindPoseBuffer, entry.skinWeightsBuffer,
-            entry.boneMatricesBuffer, outputGroup.outputVertexBuffer,
-            group.textured && entry.uvBuffer.has_value() ? &*entry.uvBuffer : nullptr);
-        outputGroup.descriptorSetHandle = RegisterDescriptorSet(outputGroup.descriptorSet.Native());
+        outputGroup.instanceKey = m_nextInstanceKey++;
 
         // One GPU-skinned mesh per part, all sharing the group's output as their vertex buffer.
         for (const std::size_t partIndex : group.partIndices) {

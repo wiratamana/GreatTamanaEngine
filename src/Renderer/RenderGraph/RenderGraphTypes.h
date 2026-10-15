@@ -273,6 +273,8 @@ struct PassRecord {
     // Bind*() state, filled by RenderGraphBuilder::PassBuilder. Empty `bindings` means no descriptor set.
     DescriptorSetLayoutHandle computeBindingLayout = DescriptorSetLayoutHandle::Invalid;
     std::vector<PendingBinding> bindings;
+    // Part of the descriptor-set identity next to name and scope; lets one pass name bind many sets.
+    std::uint64_t bindingInstance = 0;
 
     // Set by the builder when the pass was refused (duplicate binding identity): barriers stay, execute is skipped.
     bool skipExecute = false;

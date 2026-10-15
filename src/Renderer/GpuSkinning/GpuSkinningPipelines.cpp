@@ -1,43 +1,33 @@
 #include "GpuSkinningPipelines.h"
 
-#include "../Renderer.h"
-#include "../RenderGraph/GpuBufferInternal.h"
-
-#include <vector>
+#include "../RenderGraph/ComputePass.h"
+#include "../RenderGraph/RenderGraphBuilder.h"
 
 namespace gte {
 
-// The pipelines own the reflected layouts; this class only borrows them.
-GpuSkinningPipelines::~GpuSkinningPipelines() = default;
-
-void GpuSkinningPipelines::EnsureInitialized(Renderer& renderer)
+bool GpuSkinningPipelines::Declare(rg::RenderGraphBuilder& builder, const GpuSkinningDispatch& dispatch,
+    rg::ViewScope scope, rg::RenderPassEvent event)
 {
-    if (IsInitialized()) {
-        return;
+    if (dispatch.bindPose == nullptr || dispatch.skinWeights == nullptr || dispatch.boneMatrices == nullptr
+        || dispatch.output == nullptr) {
+        builder.ReportOnce("GpuSkinning", "a dispatch is missing one of its buffers; nothing was declared");
+        return false;
     }
+    const bool textured = dispatch.uv != nullptr;
+    rg::Shader& shader = textured ? m_positionNormalUv : m_positionNormal;
 
-    m_positionNormalPipeline.emplace(renderer.CreateComputePipeline("shaders/SkinVerticesPositionNormal.comp.spv"));
-    m_positionNormalLayout = m_positionNormalPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
-
-    m_positionNormalUvPipeline.emplace(
-        renderer.CreateComputePipeline("shaders/SkinVerticesPositionNormalUv.comp.spv"));
-    m_positionNormalUvLayout = m_positionNormalUvPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
-}
-
-void GpuSkinningPipelines::BindBuffers(ComputeDescriptorSet& set, const rg::GpuBuffer& bindPose,
-    const rg::GpuBuffer& skinWeights, const rg::GpuBuffer& boneMatrices, const rg::GpuBuffer& output,
-    const rg::GpuBuffer* uv)
-{
-    using rg::GpuBufferAccess;
-    std::vector<ComputeDescriptorWrite> writes;
-    writes.push_back(ComputeDescriptorWrite::StorageBuffer(0, GpuBufferAccess::Underlying(bindPose).Native()));
-    writes.push_back(ComputeDescriptorWrite::StorageBuffer(1, GpuBufferAccess::Underlying(skinWeights).Native()));
-    writes.push_back(ComputeDescriptorWrite::StorageBuffer(2, GpuBufferAccess::Underlying(boneMatrices).Native()));
-    writes.push_back(ComputeDescriptorWrite::StorageBuffer(3, GpuBufferAccess::Underlying(output).Native()));
-    if (uv != nullptr) {
-        writes.push_back(ComputeDescriptorWrite::StorageBuffer(4, GpuBufferAccess::Underlying(*uv).Native()));
+    rg::ComputePass pass(builder, shader, "GpuSkinning.Dispatch", scope, event);
+    pass.Instance(dispatch.instance)
+        .Bind("bindPose", dispatch.bindPose->Handle())
+        .Bind("skinWeights", dispatch.skinWeights->Handle())
+        .Bind("boneMatrices", dispatch.boneMatrices->Handle())
+        .Bind("outputBuffer", dispatch.output->Handle())
+        .Writes(dispatch.outputHandle)
+        .Push(dispatch.vertexCount);
+    if (textured) {
+        pass.Bind("bindPoseUv", dispatch.uv->Handle());
     }
-    set.Rewrite(writes);
+    return pass.Dispatch(Extent2D{ dispatch.vertexCount, 1 });
 }
 
 } // namespace gte

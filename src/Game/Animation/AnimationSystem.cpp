@@ -392,13 +392,19 @@ std::vector<AnimationSystem::GpuSkinningDispatchRequest> AnimationSystem::Collec
             if (!group.outputVertexBuffer.IsValid()) {
                 continue;
             }
+            if (group.isTextured && !entry->uvBuffer.has_value()) {
+                continue; // The textured shader needs the UV input; the untextured one would write the wrong stride.
+            }
 
             GpuSkinningDispatchRequest request;
             request.name = group.debugName.c_str();
-            request.outputBuffer = &group.outputVertexBuffer;
-            request.descriptorSet = group.descriptorSetHandle;
-            request.vertexCount = group.vertexCount;
-            request.textured = group.isTextured;
+            request.dispatch.bindPose = &entry->bindPoseBuffer;
+            request.dispatch.skinWeights = &entry->skinWeightsBuffer;
+            request.dispatch.boneMatrices = &entry->boneMatricesBuffer;
+            request.dispatch.uv = group.isTextured && entry->uvBuffer.has_value() ? &*entry->uvBuffer : nullptr;
+            request.dispatch.output = &group.outputVertexBuffer;
+            request.dispatch.vertexCount = group.vertexCount;
+            request.dispatch.instance = group.instanceKey;
             requests.push_back(request);
         }
     }

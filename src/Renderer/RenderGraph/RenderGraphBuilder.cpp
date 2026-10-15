@@ -83,6 +83,11 @@ void RenderGraphBuilder::PassBuilder::BindDescriptorSetLayout(DescriptorSetLayou
     m_pass.computeBindingLayout = layout;
 }
 
+void RenderGraphBuilder::PassBuilder::SetBindingInstance(std::uint64_t instance)
+{
+    m_pass.bindingInstance = instance;
+}
+
 void RenderGraphBuilder::PassBuilder::BindStorageBuffer(
     std::uint32_t binding, BufferHandle handle, uint64_t offset, uint64_t range)
 {
@@ -200,7 +205,8 @@ void RenderGraphBuilder::ClaimBindingIdentity(std::size_t passIndex)
     }
     for (const std::size_t other : m_bindingPassIndices) {
         const PassRecord& owner = m_passes[other];
-        if (owner.viewScope == pass.viewScope && std::strcmp(owner.name, pass.name) == 0) {
+        if (owner.bindingInstance == pass.bindingInstance && owner.viewScope == pass.viewScope
+            && std::strcmp(owner.name, pass.name) == 0) {
             pass.computeBindingLayout = DescriptorSetLayoutHandle::Invalid;
             pass.bindings.clear();
             pass.skipExecute = true;
