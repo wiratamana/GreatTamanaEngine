@@ -22,12 +22,14 @@ Texture& RenderGraphResourcePool::AcquireTexture(const TextureDesc& desc, const 
     }
 
     // PixelFormat::Undefined is passed through: the Renderer resolves it (color or depth format), so every
-    // "default format" request still compares equal. Only the Storage usage bit is wired through.
+    // "default format" request still compares equal. Storage and transfer usage bits are wired through (2D only).
     std::unique_ptr<Texture> texture;
     switch (desc.dimension) {
     case TextureDimension::Tex2D:
         texture = std::make_unique<RenderTexture>(m_renderer->CreateRenderTexture(static_cast<int>(desc.width),
-            static_cast<int>(desc.height), desc.format, debugName, nullptr, HasFlag(desc.usage, TextureUsage::Storage)));
+            static_cast<int>(desc.height), desc.format, debugName, nullptr, HasFlag(desc.usage, TextureUsage::Storage),
+            /*allowDepthSampledAccess=*/false, /*createDepthCompanion=*/true, /*createColorImage=*/true,
+            HasFlag(desc.usage, TextureUsage::TransferSrc), HasFlag(desc.usage, TextureUsage::TransferDst)));
         break;
     case TextureDimension::Array2D:
     case TextureDimension::Cube:

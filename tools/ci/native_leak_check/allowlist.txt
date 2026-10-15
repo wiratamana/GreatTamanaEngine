@@ -20,10 +20,8 @@ Editor/Panels/FrameDebuggerPanel.cpp # debt: editor tool uses raw wrappers or on
 Editor/Panels/RenderGraphPanel.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/RenderGraphTexturePreview.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/SceneGridRenderer.cpp # debt: editor tool uses raw wrappers or one-shot submits
-Features/Atmosphere/AtmosphereFeature.cpp # debt: feature passes use raw wrappers until the feature kit exists
 Features/Atmosphere/AtmosphereLutRendererImpl.cpp # debt: feature passes use raw wrappers until the feature kit exists
 Features/Atmosphere/AtmosphereLutRendererImpl.h # debt: feature passes use raw wrappers until the feature kit exists
-Features/Shadow/ShadowFeature.cpp # debt: feature passes use raw wrappers until the feature kit exists
 Game/Animation/GpuSkinningRigCache.cpp # debt: GPU skinning cache uses raw compute wrappers
 Game/Animation/GpuSkinningRigCache.h # debt: GPU skinning cache uses raw compute wrappers
 Window/Window.h # permanent: Native() returns the SDL window handle, not a GPU object

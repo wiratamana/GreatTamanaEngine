@@ -243,6 +243,9 @@ TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTa
     desc.height = externalTarget.extent.height;
     desc.format = FromVkFormat(externalTarget.format);
     desc.hasDepth = externalTarget.depthImage != VK_NULL_HANDLE;
+    if (desc.hasDepth) {
+        desc.depthFormat = FromVkFormat(externalTarget.depthFormat);
+    }
 
     TextureImportInfo importInfo;
     importInfo.isImported = true;

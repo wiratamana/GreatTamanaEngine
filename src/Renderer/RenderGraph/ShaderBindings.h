@@ -4,9 +4,11 @@
 // Pure logic: access (read/write) is inferred from reflection, no GPU calls.
 
 #include "RenderGraphBuilder.h"
+#include "Shader.h"
 #include "../Vulkan/ShaderReflection.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -65,16 +67,41 @@ std::optional<std::string> ValidatePushConstantSize(std::uint32_t reflectedSize,
 void DeclareBindings(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout);
 
 // Why a graphics shader cannot back a fullscreen pass, or nullopt. Fullscreen passes use set 0 only,
-// sample combined image samplers only, and a push block at offset 0.
+// bind combined image samplers and uniform buffers, and have a push block at offset 0.
 std::optional<std::string> ValidateFullscreenReflection(const ShaderReflectionResult& reflection);
 
-// Why `target` (the DescOf() of the pass target) cannot be rendered to, or nullopt.
+// Why `target` (the DescOf() of a pass target) cannot be rendered to as a color target, or nullopt.
 std::optional<std::string> ValidateFullscreenTarget(const std::optional<TextureDesc>& target);
 
-// Declares a fullscreen pass: bindings, the color target, and declare-only depth reads
-// (`depthAcknowledgements` are sampled by no shader; the compositor requires the view's depth to be read).
+// The optional depth test of a fullscreen pass: the DescOf() of the depth texture and the test state.
+struct FullscreenDepthRequest {
+    static constexpr std::size_t kNoTarget = ~std::size_t{ 0 };
+
+    bool enabled = false;
+    std::optional<TextureDesc> desc;
+    CompareOp compare = CompareOp::Always;
+    bool write = false;
+    // Index of the color target that is the same texture as the depth texture (a view target), or kNoTarget.
+    std::size_t sameTextureAsTarget = kNoTarget;
+};
+
+struct FullscreenAttachmentPlan {
+    FullscreenKey key; // Attachment formats and depth state; valid when `error` is empty.
+    std::string error;
+
+    bool Ok() const noexcept { return error.empty(); }
+};
+
+// Validates the color targets (all equal extent, color only, at most FullscreenKey::kMaxTargets) and the optional
+// depth test, and builds the pipeline key. `rendererDepthFormat` fills in a depth texture without a known format.
+FullscreenAttachmentPlan PlanFullscreenAttachments(std::span<const std::optional<TextureDesc>> targets,
+    const FullscreenDepthRequest& depth, PixelFormat rendererDepthFormat, BlendMode blend);
+
+// Declares a fullscreen pass: bindings, the color targets (all cleared with `clearColor` when set), the optional
+// depth test attachment, and declare-only depth reads (`depthAcknowledgements` are sampled by no shader; the
+// compositor requires the view's depth to be read).
 void DeclareFullscreen(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout,
-    TextureHandle target, const std::optional<std::array<float, 4>>& clearColor,
-    std::span<const TextureHandle> depthAcknowledgements);
+    std::span<const TextureHandle> targets, const std::optional<std::array<float, 4>>& clearColor,
+    std::span<const TextureHandle> depthAcknowledgements, const std::optional<TextureHandle>& depthTest);
 
 } // namespace gte::rg

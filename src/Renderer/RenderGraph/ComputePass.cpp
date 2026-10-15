@@ -1,5 +1,6 @@
 #include "ComputePass.h"
 
+#include "PassKindDefaults.h"
 #include "RenderGraph.h"
 #include "RenderGraphBuilder.h"
 #include "Shader.h"
@@ -52,7 +53,7 @@ bool ComputePass::Dispatch(Extent2D requested, std::uint32_t depth)
     const DescriptorSetLayoutHandle layout = m_state.shader.Layout();
 
     builder.AddRenderPass(
-        m_state.name.value, PassKind::Compute, m_state.scope, RenderPassCategory::General,
+        m_state.name.value, DefaultPassKind(DeclarativePassType::Compute), m_state.scope, RenderPassCategory::General,
         [&](RenderGraphBuilder::PassBuilder& pass) { DeclareBindings(pass, *planned, layout); },
         [pipeline, push = std::move(m_state.push), size, depth](PassContext& ctx) {
             const DescriptorSetHandle set = ctx.BoundDescriptorSet();
@@ -67,7 +68,7 @@ bool ComputePass::Dispatch(Extent2D requested, std::uint32_t depth)
             }
             cmd.DispatchOverSize(size.width, size.height, depth);
         },
-        RenderPassDrawKind::DrawMesh, m_state.event);
+        DefaultDrawKind(DeclarativePassType::Compute), m_state.event);
     return true;
 }
 

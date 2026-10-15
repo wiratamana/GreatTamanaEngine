@@ -96,7 +96,8 @@ RenderGraphPersistentResourceCache::Resolve(const char* owner, const char* name,
             it->second.texture.emplace(m_renderer->CreateRenderTexture(static_cast<int>(desc.width),
                 static_cast<int>(desc.height), desc.format, it->first.c_str(), /*depthDebugName=*/nullptr,
                 HasFlag(desc.usage, TextureUsage::Storage), /*allowDepthSampledAccess=*/false,
-                /*createDepthCompanion=*/false));
+                /*createDepthCompanion=*/false, /*createColorImage=*/true, HasFlag(desc.usage, TextureUsage::TransferSrc),
+                HasFlag(desc.usage, TextureUsage::TransferDst)));
             it->second.desc = desc;
             it->second.ownKeyForDebugAssert = &it->first;
             BindSlot(it->second);
@@ -262,7 +263,9 @@ std::vector<PersistentSlotRef> RenderGraphPersistentResourceCache::FlushPendingR
             RenderTexture fresh = m_renderer->CreateRenderTexture(static_cast<int>(pending.newWidth),
                 static_cast<int>(pending.newHeight), entry->desc.format, entry->ownKeyForDebugAssert->c_str(),
                 /*depthDebugName=*/nullptr, HasFlag(entry->desc.usage, TextureUsage::Storage),
-                /*allowDepthSampledAccess=*/false, /*createDepthCompanion=*/false);
+                /*allowDepthSampledAccess=*/false, /*createDepthCompanion=*/false, /*createColorImage=*/true,
+                HasFlag(entry->desc.usage, TextureUsage::TransferSrc),
+                HasFlag(entry->desc.usage, TextureUsage::TransferDst));
             m_retired.push_back(std::move(*entry->texture)); // Capacity reserved above, move is noexcept.
             entry->texture.emplace(std::move(fresh));
         } catch (const std::exception& e) {

@@ -47,7 +47,7 @@ public:
     RenderTexture CreateRenderTexture(int width, int height, PixelFormat format, const char* debugName,
         const char* depthDebugName = nullptr, bool allowStorageImageAccess = false,
         bool allowDepthSampledAccess = false, bool createDepthCompanion = true,
-        bool createColorImage = true) const;
+        bool createColorImage = true, bool transferSrc = false, bool transferDst = false) const;
 
     // Buffers - `usage`/`extraUsage` use the engine's BufferUsage bitmask, never raw Vulkan flags.
     Buffer CreateBuffer(uint64_t size, BufferUsage usage, BufferMemoryUsage memoryUsage,

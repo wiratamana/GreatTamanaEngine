@@ -54,14 +54,13 @@ const char* BindingStageLabel(ResourceAccess access) noexcept;
 // True when a resolved view is non-null but its paired sampler is null (an upstream plumbing mistake).
 bool IsResolvedViewMissingItsSampler(VkImageView view, VkSampler sampler) noexcept;
 
-// What a graph-owned texture may be used for. Sampled is the implicit default; only Storage changes image creation.
+// What a graph-owned 2D texture may be used for. Sampled is the implicit default; Storage and the transfer
+// flags add image usage bits at creation (a copy, clear or blit needs them).
 enum class TextureUsage : std::uint32_t {
     None = 0,
     Sampled = 1u << 0,
     Storage = 1u << 1,
-    // Not wired into image creation yet.
     TransferSrc = 1u << 2,
-    // Not wired into image creation yet.
     TransferDst = 1u << 3,
 };
 
@@ -97,6 +96,8 @@ struct TextureDesc {
     TextureDimension dimension = TextureDimension::Tex2D;
     std::uint32_t depth = 1;       // Z slices (Tex3D only).
     std::uint32_t arrayLayers = 1; // Layer count (Array2D/Cube; cube needs a positive multiple of 6 and width == height).
+    // Format of the depth companion. Set only on imported textures; Undefined means "the renderer's depth format".
+    PixelFormat depthFormat = PixelFormat::Undefined;
 
     friend bool operator==(const TextureDesc&, const TextureDesc&) noexcept = default;
 };
@@ -157,11 +158,14 @@ struct ArrayLayerAttachmentDesc {
 // (always nullopt for 0 or 1 attachments).
 std::optional<std::size_t> FindMismatchedColorAttachmentExtent(const std::vector<VkExtent2D>& extents) noexcept;
 
+// Sampling filter of a blit. Engine vocabulary: no Vulkan type in the pass API.
+enum class BlitFilter : std::uint8_t { Linear, Nearest };
+
 // Fixed-shape spec of a raw image blit pass (see RenderGraphBuilder::AddBlitPass()).
 struct BlitSpec {
     TextureHandle src;
     TextureHandle dst;
-    VkFilter filter = VK_FILTER_LINEAR;
+    BlitFilter filter = BlitFilter::Linear;
     bool srcIsDepth = false;
     bool dstIsDepth = false;
     // Regions default to the full extent when min and max are both {0,0,0}.
@@ -172,8 +176,14 @@ struct BlitSpec {
     VkOffset3D dstRegionMax{};
 };
 
-// Effective blit filter: spec.filter, forced to NEAREST when either side is depth (linear is invalid there).
-VkFilter ResolveEffectiveBlitFilter(const BlitSpec& spec) noexcept;
+// Effective blit filter: spec.filter, forced to Nearest when either side is depth (linear is invalid there).
+BlitFilter ResolveEffectiveBlitFilter(const BlitSpec& spec) noexcept;
+
+// The Vulkan filter for a blit filter.
+constexpr VkFilter ToVkFilter(BlitFilter filter) noexcept
+{
+    return filter == BlitFilter::Nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+}
 
 // One resolved [min, max) 3D region, in the SAME coordinate space
 // vkCmdBlitImage's own VkOffset3D srcOffsets[2]/dstOffsets[2] expect.

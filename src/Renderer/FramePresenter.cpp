@@ -222,7 +222,7 @@ DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTe
     // escape hatch), never Draw()/Dispatch(), which require a real Renderer.
     const std::function<void(VkCommandBuffer)> rawRecordExtra = [&recordExtra](VkCommandBuffer cmd) {
         if (recordExtra) {
-            rg::CommandBuffer wrapped = rg::CommandBuffer::WrapRaw(cmd);
+            rg::CommandBuffer wrapped = rg::CommandBuffer::AdoptRaw(cmd);
             recordExtra(wrapped);
         }
     };

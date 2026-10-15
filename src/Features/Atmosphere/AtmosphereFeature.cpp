@@ -7,6 +7,7 @@
 #include "../../Core/Plugins/BuiltinFeatureModuleRegistry.h"
 #include "../../Core/ViewBackgroundReplayKey.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
+#include "../../Renderer/RenderGraph/MeshPass.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 #include "../../Renderer/RenderGraph/CommandBuffer.h"
 
@@ -169,11 +170,10 @@ void AtmosphereFeature::RegisterPasses()
                     pass.WriteColorAttachment(viewTarget);
                     pass.WriteDepthStencilAttachment(viewTarget);
                 },
-                [this, recordSkyBackground](rg::PassContext& ctx) {
-                    m_core.GetRenderer().BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+                [recordSkyBackground](rg::PassContext& ctx) {
+                    const rg::SceneRecording recording(ctx);
                     rg::CommandBuffer cmd = ctx.Cmd();
                     recordSkyBackground(cmd);
-                    m_core.GetRenderer().EndGraphPassRecording();
                 },
                 rg::RenderPassDrawKind::DrawQuad, rg::RenderPassEvent::AfterOpaques);
         });

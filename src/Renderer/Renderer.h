@@ -93,11 +93,12 @@ public:
     PixelFormat ColorPixelFormat() const noexcept;
     PixelFormat DepthPixelFormat() const noexcept;
 
-    // Creates an offscreen render target.
+    // Creates an offscreen render target. transferSrc/transferDst add the image usage bits copy, clear and blit need.
     RenderTexture CreateRenderTexture(int width, int height, PixelFormat format = PixelFormat::Undefined,
         const char* debugName = nullptr, const char* depthDebugName = nullptr,
         bool allowStorageImageAccess = false, bool allowDepthSampledAccess = false,
-        bool createDepthCompanion = true, bool createColorImage = true) const;
+        bool createDepthCompanion = true, bool createColorImage = true, bool transferSrc = false,
+        bool transferDst = false) const;
 
     // Holds raw image pixels read back from the GPU.
     struct CapturedRawPixels {

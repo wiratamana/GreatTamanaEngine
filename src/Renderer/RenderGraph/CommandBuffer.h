@@ -39,8 +39,7 @@ struct CommandBufferWriteTargetInfo {
     VkFormat depthFormat = VK_FORMAT_UNDEFINED;
 };
 
-// Passkey: only PassContext (and CommandBuffer::WrapRaw) can mint one, so CommandBuffer cannot be constructed
-// anywhere else; WrapRaw() is the sanctioned route for call sites that have no PassContext.
+// Passkey: only PassContext and CommandBuffer itself can mint one, so a CommandBuffer cannot be built anywhere else.
 class CommandBufferKey {
 private:
     CommandBufferKey() = default;
@@ -52,22 +51,22 @@ class CommandBuffer {
 public:
     using WriteTargetInfo = CommandBufferWriteTargetInfo;
 
-    // 'key' is a passkey (see CommandBufferKey above) - only PassContext::Cmd() can supply one,
-    // so this constructor is effectively unreachable from anywhere else in the codebase.
+    // `key` is a passkey: only PassContext::Cmd() (or the factories below) can supply one.
     CommandBuffer(CommandBufferKey key, VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats,
         WriteTargetInfo writeTarget = {}, FrameDebuggerEventSink* eventSink = nullptr) noexcept;
 
-    // Wraps a raw VkCommandBuffer outside a pass's PassContext (immediate submits, hooks, replay steps).
-    // `passDrawStats` stays null unless the recording should be counted against a pass.
-    static CommandBuffer WrapRaw(VkCommandBuffer cmd, Renderer* renderer = nullptr,
+    // Wraps a raw command buffer for call sites that have no PassContext (hooks, replay steps, immediate submits).
+    // Temporary route: NativeLeakCheck lists every use outside src/Renderer.
+    static CommandBuffer AdoptRaw(VkCommandBuffer cmd, Renderer* renderer = nullptr,
         DrawStats* passDrawStats = nullptr, WriteTargetInfo writeTarget = {},
         FrameDebuggerEventSink* eventSink = nullptr) noexcept
     {
         return CommandBuffer(CommandBufferKey{}, cmd, renderer, passDrawStats, writeTarget, eventSink);
     }
 
-    // Get the native Vulkan command buffer handle.
-    VkCommandBuffer Native() const noexcept { return m_cmd; }
+    // The raw command buffer, for platform glue and not-yet-migrated hand recording. NativeLeakCheck tracks every
+    // use outside src/Renderer.
+    VkCommandBuffer RawCommandBuffer() const noexcept { return m_cmd; }
 
     // Stage compute state for the next dispatch.
     void BindComputePipeline(const ComputePipeline& pipeline) noexcept { m_boundComputePipeline = &pipeline; }

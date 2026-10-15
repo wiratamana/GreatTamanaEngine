@@ -1,10 +1,12 @@
 #include "FullscreenPass.h"
 
+#include "PassKindDefaults.h"
 #include "RenderGraph.h"
 #include "RenderGraphBuilder.h"
 #include "Shader.h"
 #include "ShaderBindings.h"
 #include "../Pipeline.h"
+#include "../Renderer.h"
 
 #include <cstdint>
 #include <utility>
@@ -32,8 +34,24 @@ FullscreenPass& FullscreenPass::Acknowledge(TextureHandle depth)
 
 FullscreenPass& FullscreenPass::Target(TextureHandle target, std::optional<std::array<float, 4>> clear)
 {
-    m_target = target;
+    m_targets.assign(1, target);
     m_clear = clear;
+    return *this;
+}
+
+FullscreenPass& FullscreenPass::Targets(
+    std::initializer_list<TextureHandle> targets, std::optional<std::array<float, 4>> clear)
+{
+    m_targets.assign(targets.begin(), targets.end());
+    m_clear = clear;
+    return *this;
+}
+
+FullscreenPass& FullscreenPass::DepthTest(TextureHandle depth, CompareOp op, bool write)
+{
+    m_depth = depth;
+    m_depthCompare = op;
+    m_depthWrite = write;
     return *this;
 }
 
@@ -54,13 +72,34 @@ bool FullscreenPass::Draw()
     }
 
     RenderGraphBuilder& builder = m_state.builder;
-    const std::optional<TextureDesc> targetDesc = m_target.IsValid() ? builder.DescOf(m_target) : std::nullopt;
-    if (const auto error = ValidateFullscreenTarget(targetDesc)) {
-        m_state.Report(*error);
+    std::vector<std::optional<TextureDesc>> targetDescs;
+    targetDescs.reserve(m_targets.size());
+    for (const TextureHandle target : m_targets) {
+        targetDescs.push_back(target.IsValid() ? builder.DescOf(target) : std::nullopt);
+    }
+
+    FullscreenDepthRequest depth;
+    if (m_depth.has_value()) {
+        depth.enabled = true;
+        depth.desc = m_depth->IsValid() ? builder.DescOf(*m_depth) : std::nullopt;
+        depth.compare = m_depthCompare;
+        depth.write = m_depthWrite;
+        for (std::size_t i = 0; i < m_targets.size(); ++i) {
+            if (m_targets[i] == *m_depth) {
+                depth.sameTextureAsTarget = i;
+            }
+        }
+    }
+
+    Renderer* renderer = builder.RendererOrNull();
+    const PixelFormat rendererDepthFormat = renderer != nullptr ? renderer->DepthPixelFormat() : PixelFormat::Undefined;
+    const FullscreenAttachmentPlan attachments = PlanFullscreenAttachments(targetDescs, depth, rendererDepthFormat, m_blend);
+    if (!attachments.Ok()) {
+        m_state.Report(attachments.error);
         return false;
     }
 
-    const Pipeline* pipeline = m_state.shader.GraphicsPipeline(builder, FullscreenKey{ targetDesc->format, m_blend });
+    const Pipeline* pipeline = m_state.shader.GraphicsPipeline(builder, attachments.key);
     if (pipeline == nullptr) {
         return false; // The shader logged the build failure and retries on a cooldown.
     }
@@ -68,9 +107,9 @@ bool FullscreenPass::Draw()
     const ShaderStageMask pushStages = m_state.shader.PushStages();
 
     builder.AddRenderPass(
-        m_state.name.value, PassKind::Graphics, m_state.scope, RenderPassCategory::General,
+        m_state.name.value, DefaultPassKind(DeclarativePassType::Fullscreen), m_state.scope, RenderPassCategory::General,
         [&](RenderGraphBuilder::PassBuilder& pass) {
-            DeclareFullscreen(pass, *planned, layout, m_target, m_clear, m_depthAcknowledgements);
+            DeclareFullscreen(pass, *planned, layout, m_targets, m_clear, m_depthAcknowledgements, m_depth);
         },
         [pipeline, pushStages, push = std::move(m_state.push)](PassContext& ctx) {
             const DescriptorSetHandle set = ctx.BoundDescriptorSet();
@@ -85,7 +124,7 @@ bool FullscreenPass::Draw()
             }
             cmd.Draw(3);
         },
-        RenderPassDrawKind::DrawQuad, m_state.event);
+        DefaultDrawKind(DeclarativePassType::Fullscreen), m_state.event);
     return true;
 }
 

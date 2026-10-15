@@ -6,6 +6,7 @@
 #include "../../Core/PipelineDesc.h"
 
 #include <array>
+#include <initializer_list>
 #include <optional>
 #include <vector>
 
@@ -13,8 +14,9 @@ namespace gte::rg {
 
 class Shader;
 
-// One fullscreen triangle into a single color target, textures bound by shader variable name.
-// Declare it with the scope of the view it draws for: a Shared pass cannot carry per-view bindings.
+// One fullscreen triangle into one or more color targets (MRT), textures bound by shader variable name.
+// An optional depth test reads the depth of a texture. Declare it with the scope of the view it draws for:
+// a Shared pass cannot carry per-view bindings. Attachment formats come from the declared textures.
 class FullscreenPass : public PassChain<FullscreenPass> {
 public:
     FullscreenPass(RenderGraphBuilder& builder, Shader& shader, StaticName name, ViewScope scope,
@@ -29,8 +31,16 @@ public:
     // Declares a depth read the shader does not perform (the compositor wants the view's depth acknowledged).
     FullscreenPass& Acknowledge(TextureHandle depth);
 
-    // The color attachment. `clear` set clears it, unset loads it.
+    // The one color attachment. `clear` set clears it, unset loads it.
     FullscreenPass& Target(TextureHandle target, std::optional<std::array<float, 4>> clear = std::nullopt);
+
+    // Several color attachments, in the order of the shader's `layout(location = N) out` slots.
+    FullscreenPass& Targets(std::initializer_list<TextureHandle> targets,
+        std::optional<std::array<float, 4>> clear = std::nullopt);
+
+    // Tests (and, with `write`, updates) the depth of `depth`. It may be the same texture as a color target
+    // (a view target carries both). The depth is loaded, never cleared.
+    FullscreenPass& DepthTest(TextureHandle depth, CompareOp op, bool write);
 
     FullscreenPass& Blend(BlendMode blend);
 
@@ -39,8 +49,11 @@ public:
 
 private:
     std::vector<TextureHandle> m_depthAcknowledgements;
-    TextureHandle m_target{};
+    std::vector<TextureHandle> m_targets;
     std::optional<std::array<float, 4>> m_clear;
+    std::optional<TextureHandle> m_depth;
+    CompareOp m_depthCompare = CompareOp::Always;
+    bool m_depthWrite = false;
     BlendMode m_blend = BlendMode::Opaque;
 };
 

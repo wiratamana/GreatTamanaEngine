@@ -710,8 +710,10 @@ TEST(RenderGraphResolveEffectiveBlitFilterTest, ReturnsSpecFilterWhenNeitherSide
     BlitSpec spec;
     spec.srcIsDepth = false;
     spec.dstIsDepth = false;
-    spec.filter = VK_FILTER_LINEAR;
-    EXPECT_EQ(ResolveEffectiveBlitFilter(spec), VK_FILTER_LINEAR);
+    spec.filter = BlitFilter::Linear;
+    EXPECT_EQ(ResolveEffectiveBlitFilter(spec), BlitFilter::Linear);
+    spec.filter = BlitFilter::Nearest;
+    EXPECT_EQ(ResolveEffectiveBlitFilter(spec), BlitFilter::Nearest);
 }
 
 TEST(RenderGraphResolveEffectiveBlitFilterTest, ForcesNearestWhenSrcIsDepth)
@@ -719,8 +721,8 @@ TEST(RenderGraphResolveEffectiveBlitFilterTest, ForcesNearestWhenSrcIsDepth)
     BlitSpec spec;
     spec.srcIsDepth = true;
     spec.dstIsDepth = false;
-    spec.filter = VK_FILTER_LINEAR;
-    EXPECT_EQ(ResolveEffectiveBlitFilter(spec), VK_FILTER_NEAREST);
+    spec.filter = BlitFilter::Linear;
+    EXPECT_EQ(ResolveEffectiveBlitFilter(spec), BlitFilter::Nearest);
 }
 
 TEST(RenderGraphResolveEffectiveBlitFilterTest, ForcesNearestWhenDstIsDepth)
@@ -728,8 +730,14 @@ TEST(RenderGraphResolveEffectiveBlitFilterTest, ForcesNearestWhenDstIsDepth)
     BlitSpec spec;
     spec.srcIsDepth = false;
     spec.dstIsDepth = true;
-    spec.filter = VK_FILTER_LINEAR;
-    EXPECT_EQ(ResolveEffectiveBlitFilter(spec), VK_FILTER_NEAREST);
+    spec.filter = BlitFilter::Linear;
+    EXPECT_EQ(ResolveEffectiveBlitFilter(spec), BlitFilter::Nearest);
+}
+
+TEST(RenderGraphBlitFilterTest, MapsToTheMatchingVulkanFilter)
+{
+    EXPECT_EQ(ToVkFilter(BlitFilter::Linear), VK_FILTER_LINEAR);
+    EXPECT_EQ(ToVkFilter(BlitFilter::Nearest), VK_FILTER_NEAREST);
 }
 
 TEST(RenderGraphResolveBlitRegionTest, AllZeroSentinelResolvesToFullExtent)

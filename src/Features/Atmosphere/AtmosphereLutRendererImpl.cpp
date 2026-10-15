@@ -496,7 +496,7 @@ void AtmosphereLutRenderer::Impl::FinalizeAerialPerspectiveCompositeForSampling(
     if (it == aerialPerspectiveCompositeViewStates.end() || !it->second.output.has_value()) {
         return;
     }
-    it->second.output->FinalizeForExternalSampling(cmd.Native());
+    it->second.output->FinalizeForExternalSampling(cmd.RawCommandBuffer());
 }
 
 int AtmosphereLutRenderer::Impl::AerialPerspectiveVolumeDepth(const char* aerialPerspectiveVolumeName) const noexcept

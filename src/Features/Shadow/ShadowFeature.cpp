@@ -10,6 +10,7 @@
 #include "../../Game/SceneQuery.h"
 #include "../../Application/RenderPassViewData.h"
 #include "../../Renderer/RenderGraph/FullscreenPass.h"
+#include "../../Renderer/RenderGraph/MeshPass.h"
 #include "../../Renderer/PipelineHandle.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleGuard.h"
@@ -175,13 +176,11 @@ void ShadowFeature::RegisterPasses()
                     pass.WriteDepthStencilAttachment(shadowHandle, /*clearDepth=*/1.0f);
                 },
                 [this, lightViewProj](rg::PassContext& ctx) {
-                    Renderer& renderer = m_core.GetRenderer();
-                    renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+                    const rg::SceneRecording recording(ctx);
                     SceneDrawRequest request;
                     request.viewProjection = lightViewProj;
                     request.pipelineOverrideSet = m_depthPipelines;
-                    gte::DrawScene(m_core.GetGame().GetRenderSystem(), m_core.GetRegistry(), renderer, request);
-                    renderer.EndGraphPassRecording();
+                    gte::DrawScene(m_core.GetGame().GetRenderSystem(), m_core.GetRegistry(), m_core.GetRenderer(), request);
                 },
                 rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::PreOpaques);
 

@@ -798,7 +798,13 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/PassChain.cpp
     src/Renderer/RenderGraph/FullscreenPass.h
     src/Renderer/RenderGraph/FullscreenPass.cpp
-    src/Renderer/RenderGraph/RenderGraphComputeBindingKey.h
+    src/Renderer/RenderGraph/TransferPass.h
+    src/Renderer/RenderGraph/TransferPass.cpp
+    src/Renderer/RenderGraph/MeshPass.h
+    src/Renderer/RenderGraph/MeshPass.cpp
+    src/Renderer/RenderGraph/IndirectDrawPass.h
+    src/Renderer/RenderGraph/IndirectDrawPass.cpp
+    src/Renderer/RenderGraph/PassKindDefaults.h
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.h
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.cpp
     src/Renderer/RenderGraph/RenderGraphBarrierPlanner.h

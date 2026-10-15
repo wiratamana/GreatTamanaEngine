@@ -187,27 +187,27 @@ const Texture2D& FrameDebuggerPreviewRenderer::RenderPreview(Renderer& renderer,
     renderer.ImmediateSubmit([&](rg::CommandBuffer& cmd) {
         const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-        rg::EmitImageBarrier(cmd.Native(), sourceImage, range, sourcePreviousState, sourceComputeSampledState);
-        rg::EmitImageBarrier(cmd.Native(), outputImage, range, outputPreviousState, outputWriteState);
+        rg::EmitImageBarrier(cmd.RawCommandBuffer(), sourceImage, range, sourcePreviousState, sourceComputeSampledState);
+        rg::EmitImageBarrier(cmd.RawCommandBuffer(), outputImage, range, outputPreviousState, outputWriteState);
 
-        vkCmdBindPipeline(cmd.Native(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineHandle);
-        vkCmdBindDescriptorSets(cmd.Native(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &rawDescriptorSet, 0, nullptr);
-        vkCmdPushConstants(cmd.Native(), pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
+        vkCmdBindPipeline(cmd.RawCommandBuffer(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineHandle);
+        vkCmdBindDescriptorSets(cmd.RawCommandBuffer(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &rawDescriptorSet, 0, nullptr);
+        vkCmdPushConstants(cmd.RawCommandBuffer(), pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
 
         const std::uint32_t groupCountX = ComputeGroupCountLocal(outputWidth, kLocalSizeX);
         const std::uint32_t groupCountY = ComputeGroupCountLocal(outputHeight, kLocalSizeY);
-        vkCmdDispatch(cmd.Native(), groupCountX, groupCountY, 1);
+        vkCmdDispatch(cmd.RawCommandBuffer(), groupCountX, groupCountY, 1);
 
         // Restore the source retained texture to its real, expected state -
         // a later ImGui sample of the SAME texture (e.g. flipping Channels
         // back to "All") must see it exactly as FrameDebuggerHistory/
         // FrameDebuggerPanel still believe it is.
-        rg::EmitImageBarrier(cmd.Native(), sourceImage, range, sourceComputeSampledState, sourcePreviousState);
+        rg::EmitImageBarrier(cmd.RawCommandBuffer(), sourceImage, range, sourceComputeSampledState, sourcePreviousState);
 
         // Transition the freshly-written output straight to ShaderRead too
         // (rather than leaving it in GENERAL) - see outputFinalState's own
         // comment above for why.
-        rg::EmitImageBarrier(cmd.Native(), outputImage, range, outputWriteState, outputFinalState);
+        rg::EmitImageBarrier(cmd.RawCommandBuffer(), outputImage, range, outputWriteState, outputFinalState);
     });
 
     m_outputTextureState = outputFinalState;

@@ -11,6 +11,7 @@
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
+#include "../Renderer/RenderGraph/MeshPass.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "FrameDebuggerCapture.h"
 #include "../Renderer/RenderGraph/RenderPassToggleRegistry.h"
@@ -131,22 +132,14 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
             },
             [&game, &renderer, aspectWidthOverHeight, maxDrawCount, isBackgroundStep, recordBackgroundStep](
                 rg::PassContext& ctx) {
-                renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                // frameDebuggerCapture is ALWAYS nullptr here, never the
-                // real, armed capture context - RecordDraw()/RecordEntityDraw()
-                // are not idempotent/deduplicated by draw identity, so a real
-                // capture pointer here would balloon DrawRecords() into
-                // O(N^2) duplicated entries.
-                game.Render(renderer, aspectWidthOverHeight, nullptr, /*frameDebuggerCapture=*/nullptr, maxDrawCount);
-                renderer.EndGraphPassRecording();
-                // The background is drawn on exactly one dedicated step. Wrapped
-                // here (null DrawStats/default write-target/null event-sink,
-                // same as every other raw-VkCommandBuffer-to-rg::CommandBuffer
-                // boundary this replay path crosses) - never attributed to
-                // this step's own DrawStats, matching this step's pre-existing
-                // behavior exactly.
+                {
+                    // The capture context stays null: recording draws into it again would duplicate every record.
+                    const rg::SceneRecording recording(ctx);
+                    game.Render(renderer, aspectWidthOverHeight, nullptr, /*frameDebuggerCapture=*/nullptr, maxDrawCount);
+                }
+                // The background is drawn on exactly one step and is not counted in this step's draw stats.
                 if (isBackgroundStep && recordBackgroundStep) {
-                    rg::CommandBuffer wrappedForBackground = rg::CommandBuffer::WrapRaw(ctx.cmd, &renderer);
+                    rg::CommandBuffer wrappedForBackground = rg::CommandBuffer::AdoptRaw(ctx.RawCommandBuffer(), &renderer);
                     recordBackgroundStep(wrappedForBackground);
                 }
             });

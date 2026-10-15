@@ -30,7 +30,7 @@ namespace {
 
 constexpr const char* kLogCategory = "Shader";
 
-// Today's key space is 4 color formats x 3 blend modes; the cap bounds growth if either list grows.
+// Pipelines kept per shader. A shader is normally drawn into one or two target setups; the cap bounds growth.
 constexpr std::size_t kMaxGraphicsPipelines = 8;
 
 // An evicted pipeline may still be referenced by commands recorded this frame or by frames in flight.
@@ -39,7 +39,17 @@ constexpr std::uint64_t kRetireFrames = 3;
 struct FullscreenKeyHash {
     std::size_t operator()(const FullscreenKey& key) const noexcept
     {
-        return (static_cast<std::size_t>(key.colorFormat) << 8) ^ static_cast<std::size_t>(key.blend);
+        std::size_t hash = 1469598103934665603ull;
+        const auto mix = [&hash](std::size_t value) { hash = (hash ^ value) * 1099511628211ull; };
+        for (std::size_t i = 0; i < key.colorCount; ++i) {
+            mix(static_cast<std::size_t>(key.colorFormats[i]));
+        }
+        mix(key.colorCount);
+        mix(static_cast<std::size_t>(key.depthFormat));
+        mix(static_cast<std::size_t>(key.blend));
+        mix(static_cast<std::size_t>(key.depthCompare));
+        mix((key.depthTest ? 1u : 0u) | (key.depthWrite ? 2u : 0u));
+        return hash;
     }
 };
 
@@ -130,12 +140,18 @@ Pipeline Shader::BuildFullscreenPipeline(const Impl& impl, Renderer& renderer, c
 {
     const Impl::Graphics& graphics = *impl.graphics;
 
-    PipelineDesc desc = PipelinePreset::Opaque(key.colorFormat, PixelFormat::Undefined);
+    PipelineDesc desc{};
     desc.blendMode = key.blend;
     desc.vertexLayout = VertexLayout::None;
     desc.cullMode = CullMode::None;
-    desc.depthTest = false;
-    desc.depthWrite = false;
+    desc.depthTest = key.depthTest;
+    desc.depthWrite = key.depthWrite;
+    desc.depthCompare = key.depthCompare;
+    desc.colorAttachmentCount = key.colorCount;
+    for (std::size_t i = 0; i < key.colorCount; ++i) {
+        desc.colorAttachmentFormats[i] = key.colorFormats[i];
+    }
+    desc.depthAttachmentFormat = key.depthFormat;
     desc.debugName = impl.label.c_str();
 
     const DescriptorSetLayoutHandle setLayouts[] = { impl.layout };

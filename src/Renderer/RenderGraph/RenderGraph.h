@@ -259,8 +259,8 @@ private:
 };
 
 // Execution context passed to each pass's execute callback.
+// The command buffer is private: record through Cmd(), the pass kinds, or SceneRecording.
 struct PassContext {
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkExtent2D colorAttachmentExtent{};
 
     // Representative write targets for attachment 0 (for debugging).
@@ -277,6 +277,11 @@ struct PassContext {
     struct ResolvedDepthTexture {
         VkImageView view = VK_NULL_HANDLE;
         VkSampler sampler = VK_NULL_HANDLE;
+    };
+
+    struct ResolvedImage {
+        VkImage image = VK_NULL_HANDLE;
+        VkExtent2D extent{};
     };
 
     struct ResolvedVolumeTexture {
@@ -307,6 +312,8 @@ struct PassContext {
     ResolvedTexture resolveTexture(TextureHandle handle) const noexcept { return resolveReadTexture(handle); }
     ResolvedDepthTexture resolveDepthTexture(TextureHandle handle) const noexcept;
     VkBuffer resolveBuffer(BufferHandle handle) const noexcept;
+    // Color image and extent of a Tex2D texture (transfer passes); null when unresolved.
+    ResolvedImage resolveColorImage(TextureHandle handle) const noexcept;
     // Non-2D resolvers: `handle` must name a Tex3D / Array2D-Cube texture.
     ResolvedVolumeTexture resolveVolumeTexture(TextureHandle handle) const noexcept;
     ResolvedTextureArray resolveTextureArray(TextureHandle handle) const noexcept;
@@ -331,12 +338,20 @@ struct PassContext {
     // Constructs a CommandBuffer wrapper for recording draws in this pass.
     CommandBuffer Cmd() const noexcept
     {
-        return CommandBuffer(CommandBufferKey{}, cmd, renderer, recordDraw.drawStats,
+        return CommandBuffer(CommandBufferKey{}, m_cmd, renderer, recordDraw.drawStats,
             CommandBuffer::WriteTargetInfo{
                 writeTargetColorImage, colorAttachmentExtent, writeTargetColorFormat, writeTargetDepthImage,
                 writeTargetDepthFormat },
             eventSink);
     }
+
+    // The raw command buffer, for platform glue only (UI backend, overlay hooks). NativeLeakCheck tracks every use.
+    VkCommandBuffer RawCommandBuffer() const noexcept { return m_cmd; }
+
+private:
+    friend class RenderGraph;
+
+    VkCommandBuffer m_cmd = VK_NULL_HANDLE;
 };
 
 } // namespace gte::rg

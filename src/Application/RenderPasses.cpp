@@ -6,6 +6,7 @@
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
+#include "../Renderer/RenderGraph/MeshPass.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 
@@ -42,16 +43,12 @@ void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rende
         },
         [&game, &renderer, directGameRenderAspect, recordImGui](rg::PassContext& ctx) {
             if (directGameRenderAspect.has_value()) {
-                renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                // Fallback regime: no CommandBuffer is threaded through here,
-                // so RenderSystem::Draw() never calls CommandBuffer::Draw()
-                // in this branch - Frame Debugger per-draw capture cannot
-                // fire for a frame rendered this way.
+                // Fallback regime: no CommandBuffer is threaded through, so per-draw capture cannot fire here.
+                const rg::SceneRecording recording(ctx);
                 game.Render(renderer, *directGameRenderAspect);
-                renderer.EndGraphPassRecording();
             }
             if (recordImGui) {
-                recordImGui(ctx.cmd);
+                recordImGui(ctx.RawCommandBuffer());
             }
         });
 }

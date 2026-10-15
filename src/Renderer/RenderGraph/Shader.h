@@ -4,6 +4,7 @@
 #include "../../Core/PipelineDesc.h"
 #include "../../Core/PixelFormat.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -26,10 +27,27 @@ enum class ShaderKind : std::uint8_t {
     Graphics, // shaders/<base>.vert.spv + shaders/<base>.frag.spv
 };
 
-// One fullscreen pipeline variant: the target format and the blend mode.
+// One fullscreen pipeline variant: the attachment formats and the blend and depth state.
 struct FullscreenKey {
-    PixelFormat colorFormat = PixelFormat::Undefined;
+    static constexpr std::size_t kMaxTargets = PipelineDesc::kMaxColorAttachments;
+
+    std::array<PixelFormat, kMaxTargets> colorFormats{};
+    std::uint8_t colorCount = 0;
+    PixelFormat depthFormat = PixelFormat::Undefined; // Undefined: no depth attachment.
     BlendMode blend = BlendMode::Opaque;
+    CompareOp depthCompare = CompareOp::Always;
+    bool depthTest = false;
+    bool depthWrite = false;
+
+    // One color target, no depth.
+    static constexpr FullscreenKey Single(PixelFormat color, BlendMode blend = BlendMode::Opaque) noexcept
+    {
+        FullscreenKey key;
+        key.colorFormats[0] = color;
+        key.colorCount = 1;
+        key.blend = blend;
+        return key;
+    }
 
     friend constexpr bool operator==(const FullscreenKey&, const FullscreenKey&) = default;
 };

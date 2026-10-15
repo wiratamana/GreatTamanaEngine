@@ -189,12 +189,9 @@ std::optional<std::size_t> FindMismatchedColorAttachmentExtent(const std::vector
     return std::nullopt;
 }
 
-// editor-core-separation-26 campaign, PHASE3 - see RenderGraphTypes.h's own
-// doc comment on this function. Genuinely this simple - do not
-// over-engineer it.
-VkFilter ResolveEffectiveBlitFilter(const BlitSpec& spec) noexcept
+BlitFilter ResolveEffectiveBlitFilter(const BlitSpec& spec) noexcept
 {
-    return (spec.srcIsDepth || spec.dstIsDepth) ? VK_FILTER_NEAREST : spec.filter;
+    return (spec.srcIsDepth || spec.dstIsDepth) ? BlitFilter::Nearest : spec.filter;
 }
 
 // editor-core-separation-26 campaign, PHASE3 - see RenderGraphTypes.h's own

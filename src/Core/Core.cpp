@@ -8,8 +8,12 @@
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/Culling/CullingPipelines.h"
+#include "../Renderer/RenderGraph/IndirectDrawPass.h"
+#include "../Renderer/RenderGraph/MeshPass.h"
+#include "../Renderer/RenderGraph/PassKindDefaults.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
+#include "../Renderer/RenderGraph/TransferPass.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
 #include "../Renderer/RenderGraph/RenderFeatureScope.h"
 #include "../Renderer/RenderGraph/RenderPassToggleGuard.h"
@@ -68,9 +72,11 @@ struct GpuDrivenBatchNames {
     const char* resetPassName = nullptr;
     const char* cullingPassName = nullptr;
     const char* indirectDrawPassName = nullptr;
+    const char* readbackPassName = nullptr;
     const char* inputBufferName = nullptr;
     const char* indirectBufferName = nullptr;
     const char* countBufferName = nullptr;
+    const char* readbackBufferName = nullptr;
     const char* displayName = nullptr;
 };
 
@@ -86,15 +92,18 @@ public:
         }
 
         const std::size_t index = m_entries.size();
+        const std::string base = "GpuDrivenBatch" + std::to_string(index);
         Entry entry;
         entry.key = key;
-        entry.names.resetPassName = Intern("GpuDrivenBatch" + std::to_string(index) + " ResetCount");
-        entry.names.cullingPassName = Intern("GpuDrivenBatch" + std::to_string(index) + " Culling");
-        entry.names.indirectDrawPassName = Intern("GpuDrivenBatch" + std::to_string(index) + " IndirectDraw");
-        entry.names.inputBufferName = Intern("GpuDrivenBatch" + std::to_string(index) + ".Input");
-        entry.names.indirectBufferName = Intern("GpuDrivenBatch" + std::to_string(index) + ".IndirectCommands");
-        entry.names.countBufferName = Intern("GpuDrivenBatch" + std::to_string(index) + ".VisibleCount");
-        entry.names.displayName = Intern("GpuDrivenBatch" + std::to_string(index));
+        entry.names.resetPassName = Intern(base + " ResetCount");
+        entry.names.cullingPassName = Intern(base + " Culling");
+        entry.names.indirectDrawPassName = Intern(base + " IndirectDraw");
+        entry.names.readbackPassName = Intern(base + " CountReadback");
+        entry.names.inputBufferName = Intern(base + ".Input");
+        entry.names.indirectBufferName = Intern(base + ".IndirectCommands");
+        entry.names.countBufferName = Intern(base + ".VisibleCount");
+        entry.names.readbackBufferName = Intern(base + ".VisibleCountReadback");
+        entry.names.displayName = Intern(base);
         m_entries.push_back(std::move(entry));
         return m_entries.back().names;
     }
@@ -532,7 +541,7 @@ RenderTexture* Core::DispatchFinalizeForSamplingHook(const char* name, VkCommand
 {
     for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
         if (entry.name == name) {
-            rg::CommandBuffer wrapped = rg::CommandBuffer::WrapRaw(cmd, &m_renderer);
+            rg::CommandBuffer wrapped = rg::CommandBuffer::AdoptRaw(cmd, &m_renderer);
             entry.lastResult = entry.callback ? entry.callback(wrapped) : nullptr;
             return entry.lastResult;
         }
@@ -731,10 +740,9 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture, std::nullopt,
                         m_gpuDrivenBatchedEntitiesThisFrame, sceneServicesSet, &cmd);
                 } else {
-                    m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+                    const rg::SceneRecording recording(ctx);
                     m_game.Render(m_renderer, aspectWidthOverHeight, &viewProjectionOverride, nullptr, std::nullopt, {},
                         sceneServicesSet);
-                    m_renderer.EndGraphPassRecording();
                 }
             };
             out.push_back(std::move(desc));
@@ -762,8 +770,6 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 const rg::BufferHandle inputHandle = batch.inputHandle;
                 const rg::BufferHandle indirectHandle = batch.indirectHandle;
                 const rg::BufferHandle countHandle = batch.countHandle;
-                const VkBuffer indirectBufferNative = batch.indirectBufferNative;
-                const VkBuffer countBufferNative = batch.countBufferNative;
                 const DescriptorSetHandle cullingDescriptorSet = batch.cullingDescriptorSet;
                 const DescriptorSetHandle instanceBufferDescriptorSet = batch.instanceBufferDescriptorSet;
                 const std::size_t instanceCount = batch.instanceCount;
@@ -778,18 +784,16 @@ void Core::RegisterOffscreenRenderPipelineProviders()
 
                 // --- Reset instance count buffer ---
                 {
+                    const rg::TransferRecord reset = rg::TransferRecord::Fill(countHandle, 0, 0, sizeof(std::uint32_t));
+
                     rg::RenderPassDesc desc;
                     desc.debugName = batch.resetPassName;
-                    desc.kind = rg::PassKind::Compute;
+                    desc.kind = rg::DefaultPassKind(rg::DeclarativePassType::Transfer);
                     desc.order = rg::RenderPassEvent::Opaques;
                     desc.view = frame.currentView;
                     desc.owningFeatureName = "GPU Driven Batches";
-                    desc.setup = [countHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
-                        pass.WriteBuffer(countHandle, rg::ResourceAccess::TransferDst);
-                    };
-                    desc.execute = [countBufferNative](rg::PassContext& ctx) {
-                        vkCmdFillBuffer(ctx.cmd, countBufferNative, 0, sizeof(std::uint32_t), 0);
-                    };
+                    desc.setup = [reset](rg::RenderGraphBuilder::PassBuilder& pass) { rg::DeclareTransfer(pass, reset); };
+                    desc.execute = [reset](rg::PassContext& ctx) { rg::ExecuteTransfer(ctx, reset); };
                     out.push_back(std::move(desc));
                 }
 
@@ -834,28 +838,30 @@ void Core::RegisterOffscreenRenderPipelineProviders()
 
                 // --- Indirect draw pass ---
                 {
+                    rg::IndirectDrawRecord record;
+                    record.target = viewTarget;
+                    record.indirect = indirectHandle;
+                    record.count = countHandle;
+                    record.instances = inputHandle;
+                    record.maxDrawCount = static_cast<std::uint32_t>(instanceCount);
+                    record.useCount = useCompaction;
+
                     rg::RenderPassDesc desc;
                     desc.debugName = batch.indirectDrawPassName;
-                    desc.kind = rg::PassKind::Graphics;
+                    desc.kind = rg::DefaultPassKind(rg::DeclarativePassType::IndirectDraw);
                     desc.order = rg::RenderPassEvent::Opaques;
                     desc.view = frame.currentView;
                     desc.legacyCategory = rg::RenderPassCategory::General;
                     desc.owningFeatureName = "GPU Driven Batches";
-                    desc.setup = [viewTarget, indirectHandle, countHandle, inputHandle](
-                                     rg::RenderGraphBuilder::PassBuilder& pass) {
-                        pass.WriteColorAttachment(viewTarget);
-                        pass.WriteDepthStencilAttachment(viewTarget);
-                        pass.ReadBuffer(indirectHandle, rg::ResourceAccess::IndirectCommandRead);
-                        pass.ReadBuffer(countHandle, rg::ResourceAccess::IndirectCommandRead);
-                        pass.ReadBuffer(inputHandle, rg::ResourceAccess::VertexShaderStorageRead);
+                    desc.setup = [record](rg::RenderGraphBuilder::PassBuilder& pass) {
+                        rg::DeclareIndirectDraw(pass, record);
                     };
-                    desc.execute = [this, meshHandle, originalPipelineHandle, indirectBufferNative, countBufferNative,
-                                        instanceBufferDescriptorSet, instanceCount, useCompaction, viewProjection,
-                                        currentViewForServices](rg::PassContext& ctx) {
-                        const Mesh* mesh = m_game.GetRenderSystem().TryGetMesh(meshHandle);
-                        const Pipeline* instancedPipeline = nullptr;
+                    desc.execute = [this, record, meshHandle, originalPipelineHandle, instanceBufferDescriptorSet,
+                                        viewProjection, currentViewForServices](rg::PassContext& ctx) {
+                        rg::IndirectDrawInputs inputs;
+                        inputs.mesh = m_game.GetRenderSystem().TryGetMesh(meshHandle);
                         try {
-                            instancedPipeline = &m_gpuDrivenBatchCache.ResolveInstancedPipeline(
+                            inputs.pipeline = &m_gpuDrivenBatchCache.ResolveInstancedPipeline(
                                 m_renderer, originalPipelineHandle, m_sceneServicesDescriptorSet.Layout());
                         } catch (const std::exception& e) {
                             const std::string failure =
@@ -864,23 +870,30 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                                 GTE_LOG_ERROR("Core", failure);
                             }
                         }
-                        if (mesh == nullptr || instancedPipeline == nullptr) {
-                            return;
-                        }
-
-                        const DescriptorSetHandle sceneServicesSet =
-                            m_sceneServicesDescriptorSet.DescriptorSetFor(currentViewForServices);
-
-                        m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                        const VkBuffer countBufferForCall = useCompaction ? countBufferNative : VK_NULL_HANDLE;
-                        m_renderer.SubmitIndirect(*instancedPipeline, *mesh, indirectBufferNative,
-                            0, static_cast<std::uint32_t>(instanceCount), countBufferForCall,
-                            0, instanceBufferDescriptorSet, sceneServicesSet, viewProjection);
-                        if (ctx.recordIndirectDraw) {
-                            ctx.recordIndirectDraw();
-                        }
-                        m_renderer.EndGraphPassRecording();
+                        inputs.instanceSet = instanceBufferDescriptorSet;
+                        inputs.sceneSet = m_sceneServicesDescriptorSet.DescriptorSetFor(currentViewForServices);
+                        inputs.viewProjection = viewProjection;
+                        rg::ExecuteIndirectDraw(ctx, record, inputs);
                     };
+                    out.push_back(std::move(desc));
+                }
+
+                // --- Visible count readback for the debug panel ---
+                {
+                    const rg::TransferRecord readback = rg::TransferRecord::CopyBuffer(
+                        countHandle, batch.readbackHandle, sizeof(std::uint32_t));
+                    frame.builder.KeepBufferOutput(batch.readbackHandle);
+
+                    rg::RenderPassDesc desc;
+                    desc.debugName = batch.readbackPassName;
+                    desc.kind = rg::DefaultPassKind(rg::DeclarativePassType::Transfer);
+                    desc.order = rg::RenderPassEvent::Opaques;
+                    desc.view = frame.currentView;
+                    desc.owningFeatureName = "GPU Driven Batches";
+                    desc.setup = [readback](rg::RenderGraphBuilder::PassBuilder& pass) {
+                        rg::DeclareTransfer(pass, readback);
+                    };
+                    desc.execute = [readback](rg::PassContext& ctx) { rg::ExecuteTransfer(ctx, readback); };
                     out.push_back(std::move(desc));
                 }
             }
@@ -921,10 +934,9 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 pass.WriteColorAttachment(viewTarget);
                 pass.WriteDepthStencilAttachment(viewTarget);
             };
-            desc.execute = [this, recordSceneOverlay, viewProjection](rg::PassContext& ctx) {
-                m_renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
-                recordSceneOverlay(ctx.cmd, viewProjection);
-                m_renderer.EndGraphPassRecording();
+            desc.execute = [recordSceneOverlay, viewProjection](rg::PassContext& ctx) {
+                const rg::SceneRecording recording(ctx);
+                recordSceneOverlay(ctx.RawCommandBuffer(), viewProjection);
             };
             out.push_back(std::move(desc));
         });
@@ -1167,13 +1179,15 @@ void Core::BuildFrame()
                                     cacheEntry->indirectCommandBuffer.Size());
                                 data.countHandle = b.ImportBuffer(names.countBufferName,
                                     cacheEntry->countBuffer.ObjectHandle(), cacheEntry->countBuffer.Size());
-                                data.indirectBufferNative = cacheEntry->indirectCommandBuffer.Native();
-                                data.countBufferNative = cacheEntry->countBuffer.Native();
+                                data.readbackHandle = b.ImportBuffer(names.readbackBufferName,
+                                    cacheEntry->countReadbackBuffer.ObjectHandle(),
+                                    cacheEntry->countReadbackBuffer.Size());
                                 data.cullingDescriptorSet = cacheEntry->cullingDescriptorSet;
                                 data.instanceBufferDescriptorSet = cacheEntry->instanceBufferDescriptorSet;
                                 data.resetPassName = names.resetPassName;
                                 data.cullingPassName = names.cullingPassName;
                                 data.indirectDrawPassName = names.indirectDrawPassName;
+                                data.readbackPassName = names.readbackPassName;
                                 data.displayName = names.displayName;
                                 data.entities.reserve(frameEntry.commands.size());
                                 for (const DrawCommand& command : frameEntry.commands) {
@@ -1248,40 +1262,6 @@ void Core::BuildFrame()
                     return outputs;
                 });
 
-            // Copy visible instance count buffers to staging buffers for CPU readback.
-            for (const GpuDrivenBatchRenderData& batch : m_gpuDrivenBatchesThisFrame) {
-                const GpuDrivenBatchKey copyKey{ batch.mesh, batch.originalPipeline };
-                const GpuDrivenBatchCache::Entry* entry = m_gpuDrivenBatchCache.TryGet(copyKey);
-                if (entry == nullptr) {
-                    continue;
-                }
-
-                VkBufferMemoryBarrier2 preCopyBarrier{};
-                preCopyBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
-                preCopyBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-                preCopyBarrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
-                preCopyBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-                preCopyBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
-                preCopyBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                preCopyBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                preCopyBarrier.buffer = batch.countBufferNative;
-                preCopyBarrier.offset = 0;
-                preCopyBarrier.size = sizeof(std::uint32_t);
-
-                VkDependencyInfo preCopyDependency{};
-                preCopyDependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-                preCopyDependency.bufferMemoryBarrierCount = 1;
-                preCopyDependency.pBufferMemoryBarriers = &preCopyBarrier;
-                vkCmdPipelineBarrier2(offscreenCmd, &preCopyDependency);
-
-                VkBufferCopy region{};
-                region.srcOffset = 0;
-                region.dstOffset = 0;
-                region.size = sizeof(std::uint32_t);
-                vkCmdCopyBuffer(
-                    offscreenCmd, batch.countBufferNative, entry->countReadbackBuffer.Native(), 1, &region);
-            }
-
             // Finalize textures for external sampling (e.g. editor UI viewport panels).
             if (gameTarget != nullptr) {
                 gameTarget->FinalizeForExternalSampling(offscreenCmd);
@@ -1317,7 +1297,7 @@ void Core::BuildFrame()
                 if (entry.name == "GameViewComposited" || entry.name == "SceneViewComposited") {
                     continue;
                 }
-                rg::CommandBuffer wrappedForGenericHook = rg::CommandBuffer::WrapRaw(offscreenCmd, &m_renderer);
+                rg::CommandBuffer wrappedForGenericHook = rg::CommandBuffer::AdoptRaw(offscreenCmd, &m_renderer);
                 entry.lastResult = entry.callback(wrappedForGenericHook);
             }
             m_renderer.EndOffscreenRenderGraphRecording();

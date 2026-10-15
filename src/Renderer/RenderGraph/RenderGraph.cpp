@@ -406,7 +406,7 @@ PassContext RenderGraph::BuildPassContext(VkCommandBuffer cmd, std::vector<Physi
     std::vector<PhysicalBuffer>& physicalBuffers, DrawStats& passDrawStats)
 {
     PassContext ctx;
-    ctx.cmd = cmd;
+    ctx.m_cmd = cmd;
     ctx.textures = &physicalTextures;
     ctx.buffers = &physicalBuffers;
     ctx.renderer = m_renderer;
@@ -455,6 +455,16 @@ VkBuffer PassContext::resolveBuffer(BufferHandle handle) const noexcept
         return (*buffers)[handle.index].buffer;
     }
     return VK_NULL_HANDLE;
+}
+
+PassContext::ResolvedImage PassContext::resolveColorImage(TextureHandle handle) const noexcept
+{
+    if (textures != nullptr && handle.index < textures->size() && (*textures)[handle.index].resolved
+        && (*textures)[handle.index].dimension == TextureDimension::Tex2D) {
+        const RenderGraph::PhysicalTexture& tex = (*textures)[handle.index];
+        return ResolvedImage{ tex.target.image, tex.target.extent };
+    }
+    return ResolvedImage{};
 }
 
 PassContext::ResolvedVolumeTexture PassContext::resolveVolumeTexture(TextureHandle handle) const noexcept
@@ -901,7 +911,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             assert(((!spec.srcIsDepth && !spec.dstIsDepth) || m_renderer->SupportsDepthBlit())
                 && "RenderGraph::ExecuteCompiledGraph: device does not support depth blitting.");
 
-            const VkFilter effectiveFilter = ResolveEffectiveBlitFilter(spec);
+            const VkFilter effectiveFilter = ToVkFilter(ResolveEffectiveBlitFilter(spec));
 
             VkImageBlit2 region{};
             region.sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2;

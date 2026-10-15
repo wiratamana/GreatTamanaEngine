@@ -8,13 +8,15 @@ namespace gte {
 RenderTexture::RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
     int width, int height, PixelFormat format, PixelFormat depthFormat, const char* debugName,
     const char* depthDebugName, bool allowStorageImageAccess, bool allowDepthSampledAccess, bool createDepthCompanion,
-    bool createColorImage)
+    bool createColorImage, bool transferSrc, bool transferDst)
     : Texture(allocator, tracker, device,
           TextureCreateInfo{ .width = width,
               .height = height,
               .format = format,
               .renderTarget = true,
               .storage = allowStorageImageAccess,
+              .transferSrc = transferSrc,
+              .transferDst = transferDst,
               .createImage = createColorImage,
               .debugName = debugName })
 {

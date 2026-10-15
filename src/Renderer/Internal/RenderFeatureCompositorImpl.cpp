@@ -6,6 +6,7 @@
 #include "../../Renderer/Compute/ComputeDispatch.h"
 #include "../../Renderer/GraphicsHandleRegistry.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
+#include "../../Renderer/RenderGraph/MeshPass.h"
 #include "../../Renderer/RenderGraph/RenderPassTagValidation.h"
 #include "../../Renderer/VulkanFormatInfo.h"
 
@@ -795,10 +796,9 @@ void RenderFeatureCompositor::Impl::DispatchBlend(rg::RenderGraphBuilder& builde
             const Extent3D groupCounts =
                 ComputeGroupCount3D(Extent3D{ extent.width, extent.height, 1 }, Extent3D{ 16, 16, 1 });
 
-            renderer.BeginGraphPassRecording(ctx.cmd, ctx.recordDraw);
+            const rg::SceneRecording recording(ctx);
             renderer.Dispatch(*blendPipeline, state.blendDescriptorSet.Native(), &pushConstants, sizeof(pushConstants),
                 groupCounts.width, groupCounts.height, groupCounts.depth);
-            renderer.EndGraphPassRecording();
         },
         rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything);
 }

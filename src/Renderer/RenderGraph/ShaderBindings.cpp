@@ -240,17 +240,73 @@ std::optional<std::string> ValidateFullscreenTarget(const std::optional<TextureD
         return std::string("the target format is Undefined");
     }
     if (target->hasDepth) {
-        return std::string("the target is a depth texture: a fullscreen pass writes one color target");
+        return std::string("the target is a depth texture: a fullscreen pass writes color targets");
     }
     return std::nullopt;
 }
 
+FullscreenAttachmentPlan PlanFullscreenAttachments(std::span<const std::optional<TextureDesc>> targets,
+    const FullscreenDepthRequest& depth, PixelFormat rendererDepthFormat, BlendMode blend)
+{
+    FullscreenAttachmentPlan result;
+    if (targets.empty()) {
+        result.error = "no color target was set";
+        return result;
+    }
+    if (targets.size() > FullscreenKey::kMaxTargets) {
+        result.error = "more than " + std::to_string(FullscreenKey::kMaxTargets) + " color targets";
+        return result;
+    }
+
+    FullscreenKey key;
+    key.blend = blend;
+    key.colorCount = static_cast<std::uint8_t>(targets.size());
+    for (std::size_t i = 0; i < targets.size(); ++i) {
+        // A view target carries a depth companion; that is fine when the same texture is the depth test target.
+        std::optional<TextureDesc> color = targets[i];
+        if (color.has_value() && depth.enabled && depth.sameTextureAsTarget == i) {
+            color->hasDepth = false;
+        }
+        if (const auto error = ValidateFullscreenTarget(color)) {
+            result.error = "target " + std::to_string(i) + ": " + *error;
+            return result;
+        }
+        if (color->width != targets[0]->width || color->height != targets[0]->height) {
+            result.error = "target " + std::to_string(i) + " has a different extent than target 0";
+            return result;
+        }
+        key.colorFormats[i] = color->format;
+    }
+
+    if (depth.enabled) {
+        if (!depth.desc.has_value() || !depth.desc->hasDepth) {
+            result.error = "the depth test texture is missing or has no depth aspect";
+            return result;
+        }
+        if (depth.desc->width != targets[0]->width || depth.desc->height != targets[0]->height) {
+            result.error = "the depth test texture has a different extent than the color targets";
+            return result;
+        }
+        key.depthFormat = depth.desc->depthFormat != PixelFormat::Undefined ? depth.desc->depthFormat : rendererDepthFormat;
+        key.depthTest = true;
+        key.depthWrite = depth.write;
+        key.depthCompare = depth.compare;
+    }
+    result.key = key;
+    return result;
+}
+
 void DeclareFullscreen(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout,
-    TextureHandle target, const std::optional<std::array<float, 4>>& clearColor,
-    std::span<const TextureHandle> depthAcknowledgements)
+    std::span<const TextureHandle> targets, const std::optional<std::array<float, 4>>& clearColor,
+    std::span<const TextureHandle> depthAcknowledgements, const std::optional<TextureHandle>& depthTest)
 {
     DeclareBindings(pass, plan, layout);
-    pass.WriteColorAttachment(target, clearColor);
+    for (const TextureHandle target : targets) {
+        pass.WriteColorAttachment(target, clearColor);
+    }
+    if (depthTest.has_value()) {
+        pass.WriteDepthStencilAttachment(*depthTest);
+    }
     for (const TextureHandle depth : depthAcknowledgements) {
         pass.ReadTexture(depth, ResourceAccess::ShaderRead, /*isDepthResource=*/true);
     }

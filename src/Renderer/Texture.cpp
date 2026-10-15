@@ -153,6 +153,9 @@ void Texture::Create()
         if (m_info.storage) {
             imageInfo.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
         }
+        if (m_info.transferSrc) {
+            imageInfo.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        }
         if (m_info.transferDst) {
             imageInfo.usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         }

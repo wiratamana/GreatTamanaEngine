@@ -30,6 +30,7 @@ struct TextureCreateInfo {
     bool renderTarget = false; // Color or depth attachment, depending on `format`.
     bool sampled = true;
     bool storage = false;
+    bool transferSrc = false;
     bool transferDst = false;
     bool perLayerViews = false; // One extra 2D view per layer (see LayerView()).
     bool createImage = true;    // false: only records size/format, creates no Vulkan objects (depth-only RenderTexture).

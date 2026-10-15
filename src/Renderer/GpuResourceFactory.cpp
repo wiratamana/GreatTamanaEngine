@@ -152,7 +152,7 @@ void GpuResourceFactory::Destroy() noexcept
 
 RenderTexture GpuResourceFactory::CreateRenderTexture(int width, int height, PixelFormat format, const char* debugName,
     const char* depthDebugName, bool allowStorageImageAccess, bool allowDepthSampledAccess,
-    bool createDepthCompanion, bool createColorImage) const
+    bool createDepthCompanion, bool createColorImage, bool transferSrc, bool transferDst) const
 {
     // The VkFormat is needed only for this capability check; the depth format is stored as VkFormat.
     if (allowStorageImageAccess && !SupportsStorageImageUsage(m_physicalDevice, ToVkFormat(format))) {
@@ -162,7 +162,7 @@ RenderTexture GpuResourceFactory::CreateRenderTexture(int width, int height, Pix
     }
     return RenderTexture(m_allocator, m_memoryTracker, m_device, width, height, format, FromVkFormat(m_depthFormat),
         debugName, depthDebugName, allowStorageImageAccess, allowDepthSampledAccess, createDepthCompanion,
-        createColorImage);
+        createColorImage, transferSrc, transferDst);
 }
 
 Buffer GpuResourceFactory::CreateBuffer(

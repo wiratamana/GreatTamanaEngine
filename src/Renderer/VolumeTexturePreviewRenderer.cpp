@@ -147,19 +147,19 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
     renderer.ImmediateSubmit([&](rg::CommandBuffer& cmd) {
         const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-        rg::EmitImageBarrier(cmd.Native(), volumeImage, range, previousState, volumeSampledState);
-        rg::EmitImageBarrier(cmd.Native(), outputImage, range, outputPreviousState, outputWriteState);
+        rg::EmitImageBarrier(cmd.RawCommandBuffer(), volumeImage, range, previousState, volumeSampledState);
+        rg::EmitImageBarrier(cmd.RawCommandBuffer(), outputImage, range, outputPreviousState, outputWriteState);
 
-        vkCmdBindPipeline(cmd.Native(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineHandle);
-        vkCmdBindDescriptorSets(cmd.Native(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &rawDescriptorSet, 0, nullptr);
-        vkCmdPushConstants(cmd.Native(), pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
+        vkCmdBindPipeline(cmd.RawCommandBuffer(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineHandle);
+        vkCmdBindDescriptorSets(cmd.RawCommandBuffer(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &rawDescriptorSet, 0, nullptr);
+        vkCmdPushConstants(cmd.RawCommandBuffer(), pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
 
         const std::uint32_t groupCountX = ComputeGroupCount(static_cast<std::uint32_t>(kOutputWidth), kLocalSizeX);
         const std::uint32_t groupCountY = ComputeGroupCount(static_cast<std::uint32_t>(kOutputHeight), kLocalSizeY);
-        vkCmdDispatch(cmd.Native(), groupCountX, groupCountY, 1);
+        vkCmdDispatch(cmd.RawCommandBuffer(), groupCountX, groupCountY, 1);
 
         // Restore the volume's previous state: later graph frames still expect it.
-        rg::EmitImageBarrier(cmd.Native(), volumeImage, range, volumeSampledState, previousState);
+        rg::EmitImageBarrier(cmd.RawCommandBuffer(), volumeImage, range, volumeSampledState, previousState);
 
         // The output stays in GENERAL; CaptureImagePixels() transitions it from the state it is told.
     });

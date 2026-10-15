@@ -16,12 +16,13 @@ namespace gte {
 // A depth-only RenderTexture (e.g. a light's depth map) has an imageless base, so Image()/View()/Sampler() are null.
 class RenderTexture : public Texture {
 public:
-    // At least one of createColorImage/createDepthCompanion must be true.
-    // debugName/depthDebugName are stored by pointer and must outlive this object.
+    // At least one of createColorImage/createDepthCompanion must be true. transferSrc/transferDst add the image
+    // usage bits that copy, clear and blit passes need. debugName/depthDebugName are stored by pointer.
     RenderTexture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
         int height, PixelFormat format = PixelFormat::BGRA8_UNorm, PixelFormat depthFormat = PixelFormat::D32_Float,
         const char* debugName = nullptr, const char* depthDebugName = nullptr, bool allowStorageImageAccess = false,
-        bool allowDepthSampledAccess = false, bool createDepthCompanion = true, bool createColorImage = true);
+        bool allowDepthSampledAccess = false, bool createDepthCompanion = true, bool createColorImage = true,
+        bool transferSrc = false, bool transferDst = false);
     ~RenderTexture() override;
 
     RenderTexture(RenderTexture&& other) noexcept;

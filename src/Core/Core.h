@@ -211,13 +211,13 @@ private:
         rg::BufferHandle inputHandle;
         rg::BufferHandle indirectHandle;
         rg::BufferHandle countHandle;
-        VkBuffer indirectBufferNative = VK_NULL_HANDLE;
-        VkBuffer countBufferNative = VK_NULL_HANDLE;
+        rg::BufferHandle readbackHandle;
         DescriptorSetHandle cullingDescriptorSet = DescriptorSetHandle::Invalid;
         DescriptorSetHandle instanceBufferDescriptorSet = DescriptorSetHandle::Invalid;
         const char* resetPassName = nullptr;
         const char* cullingPassName = nullptr;
         const char* indirectDrawPassName = nullptr;
+        const char* readbackPassName = nullptr;
         const char* displayName = nullptr;
         std::vector<Entity> entities; // Entities included in this indirect batch.
     };
