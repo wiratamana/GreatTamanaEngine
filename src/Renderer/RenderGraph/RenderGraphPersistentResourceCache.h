@@ -23,6 +23,7 @@ enum class ExecuteTimingMode : std::uint8_t;
 // and use after the entry was evicted (it just reports dead).
 struct PersistentTextureCacheToken {
     PersistentSlotRef slot;
+    bool refusalLogged = false; // Caller-side refusals log once per token.
 };
 
 // True iff `lastUsedFrame` is more than `staleThresholdFrames` frames behind `currentFrame`.

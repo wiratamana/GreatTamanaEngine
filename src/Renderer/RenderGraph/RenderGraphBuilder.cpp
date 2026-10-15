@@ -1,5 +1,6 @@
 #include "RenderGraphBuilder.h"
 
+#include "RenderGraph.h"
 #include "../../Core/Logging.h"
 #include "../GraphicsHandleRegistry.h" // Native(SamplerHandle)/Native(BufferObjectHandle) - ResolveImportedTextureSamplers()/MintPersistentHandle() below.
 #include "../VulkanFormatInfo.h"
@@ -437,6 +438,42 @@ TextureHandle RenderGraphBuilder::GetOrCreatePersistentTexture(
     }
     token.slot = resolved->slot;
     return MintPersistentHandle(*resolved);
+}
+
+TextureHandle RenderGraphBuilder::GetOrCreatePersistentTexture(
+    PersistentTextureCacheToken& token, const char* name, const TextureDesc& desc)
+{
+    const char* refusal = nullptr;
+    if (!HasOwningFeatureScope()) {
+        refusal = "no feature scope is open, so the texture has no owner";
+    } else if (desc.format == PixelFormat::Undefined) {
+        refusal = "the format is Undefined";
+    } else if (desc.width == 0 || desc.height == 0) {
+        refusal = "the extent is empty";
+    }
+    if (refusal != nullptr) {
+        if (!token.refusalLogged) {
+            token.refusalLogged = true;
+            GTE_LOG_ERROR("RenderGraphBuilder",
+                std::string("Persistent texture \"") + (name != nullptr ? name : "") + "\" refused: " + refusal + ".");
+        }
+        return TextureHandle{};
+    }
+    // std::string storage is NUL-terminated, so the owner is a valid C string for the call.
+    return GetOrCreatePersistentTexture(token, m_owningFeatureScope.back().c_str(), name, desc);
+}
+
+bool RenderGraphBuilder::IsPersistentRegimePipelined() const noexcept
+{
+    return m_persistentCacheTimingMode == ExecuteTimingMode::PipelinedDeferredReadback;
+}
+
+std::optional<TextureDesc> RenderGraphBuilder::DescOf(TextureHandle handle) const
+{
+    if (!handle.IsValid() || handle.index >= m_textures.size()) {
+        return std::nullopt;
+    }
+    return m_textures[handle.index].desc;
 }
 
 CompiledGraphInput RenderGraphBuilder::Finish()

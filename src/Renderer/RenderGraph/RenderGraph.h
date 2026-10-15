@@ -57,6 +57,7 @@ public:
         builder.SetDebugMetadataSink(m_debugMetadataSink);
         builder.SetPassToggleRegistry(m_renderPassToggleRegistry);
         builder.SetPersistentResourceCache(&m_persistentResourceCache, timingMode, m_persistentResourceFrameCounter);
+        builder.SetRenderer(m_renderer);
 
         if (m_debugMetadataSink != nullptr) {
             m_debugMetadataSink->BeginFrame();

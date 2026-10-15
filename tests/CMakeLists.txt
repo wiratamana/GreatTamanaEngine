@@ -2320,6 +2320,10 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/BoundedOnceSetTests.cpp
     Renderer/RenderGraph/PassBuilderFusedBindingTests.cpp
     Renderer/RenderGraph/PassIdentityTests.cpp
+    Renderer/RenderGraph/ViewScopeUtilTests.cpp
+    Renderer/RenderGraph/PerViewTests.cpp
+    Renderer/RenderGraph/GpuParamsPolicyTests.cpp
+    Renderer/RenderGraph/PersistentTargetTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderPassTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp

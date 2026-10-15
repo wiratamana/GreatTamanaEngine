@@ -773,6 +773,11 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphPersistentResourceOwners.h
     src/Renderer/RenderGraph/PersistentSlotTable.h
     src/Renderer/RenderGraph/BoundedOnceSet.h
+    src/Renderer/RenderGraph/ViewScopeUtil.h
+    src/Renderer/RenderGraph/PerView.h
+    src/Renderer/RenderGraph/PersistentTarget.h
+    src/Renderer/RenderGraph/GpuParams.h
+    src/Renderer/RenderGraph/GpuParams.cpp
     src/Renderer/RenderGraph/RenderGraphPersistentResourceCache.cpp
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.h
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.cpp

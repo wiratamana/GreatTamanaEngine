@@ -16,10 +16,15 @@
 #include <cassert>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+namespace gte {
+class Renderer;
+}
 
 namespace gte::rg {
 
@@ -264,12 +269,31 @@ public:
         m_persistentCacheCurrentFrame = currentFrame;
     }
 
+    // True when frames in flight overlap, so CPU-written buffers and resizes are unsafe.
+    bool IsPersistentRegimePipelined() const noexcept;
+
+    // Only code that calls OwningRenderer() needs a renderer; a bare builder has none.
+    void SetRenderer(Renderer* renderer) noexcept { m_renderer = renderer; }
+    Renderer* RendererOrNull() const noexcept { return m_renderer; }
+    Renderer& OwningRenderer() const
+    {
+        assert(m_renderer != nullptr && "RenderGraphBuilder has no renderer installed");
+        return *m_renderer;
+    }
+
+    // Physical desc (extent, format, depth) of a declared texture; imported ones report the real image.
+    std::optional<TextureDesc> DescOf(TextureHandle handle) const;
+
     // Retrieves or allocates a persistent cross-frame texture.
     TextureHandle GetOrCreatePersistentTexture(const char* owner, const char* name, const TextureDesc& desc);
 
     // Fast-path lookup for persistent textures using a cached token.
     TextureHandle GetOrCreatePersistentTexture(
         PersistentTextureCacheToken& token, const char* owner, const char* name, const TextureDesc& desc);
+
+    // Same, owned by the open RenderFeatureScope. Refused (invalid handle) when no scope is open.
+    TextureHandle GetOrCreatePersistentTexture(
+        PersistentTextureCacheToken& token, const char* name, const TextureDesc& desc);
 
     // Pass inspection queries.
     std::size_t DeclaredPassCount() const noexcept { return m_passes.size(); }
@@ -345,6 +369,7 @@ public:
     // Feature scope tracking for pass categorization and debugging.
     void PushOwningFeatureScope(std::string_view name) { m_owningFeatureScope.push_back(std::string(name)); }
     void PopOwningFeatureScope() noexcept { m_owningFeatureScope.pop_back(); }
+    bool HasOwningFeatureScope() const noexcept { return !m_owningFeatureScope.empty(); }
 
     std::string_view CurrentOwningFeatureName() const noexcept
     {
@@ -397,6 +422,7 @@ private:
     RenderGraphPersistentResourceCache* m_persistentCache = nullptr;
     ExecuteTimingMode m_persistentCacheTimingMode{};
     std::uint64_t m_persistentCacheCurrentFrame = 0;
+    Renderer* m_renderer = nullptr;
 };
 
 } // namespace gte::rg

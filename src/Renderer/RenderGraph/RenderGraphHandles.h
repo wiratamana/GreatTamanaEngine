@@ -4,6 +4,7 @@
 // plugin callback needs to NAME, without pulling in Vulkan. RenderGraphTypes.h
 // and RenderPipeline.h include this instead of redefining these types.
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 
@@ -72,6 +73,11 @@ enum class ViewScope : std::uint8_t {
     GameView,
     SceneView,
 };
+
+// Number of ViewScope enumerators. Enumerators are contiguous from 0, so a scope is also its array index.
+inline constexpr std::size_t kViewScopeCount = 3;
+static_assert(kViewScopeCount == static_cast<std::size_t>(ViewScope::SceneView) + 1,
+    "kViewScopeCount must track the ViewScope enumerators");
 
 // Graphics (dynamic-rendering draw bracket), Compute (vkCmdDispatch), or
 // Blit (raw image copy).
