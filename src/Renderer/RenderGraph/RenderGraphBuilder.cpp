@@ -328,7 +328,7 @@ TextureHandle RenderGraphBuilder::MintPersistentHandle(
 {
     const TextureHandle handle = ImportTexture(resolved.combinedKey->c_str(), resolved.texture->Target(),
         FromVkImageLayout(resolved.lastKnownLayout), resolved.texture->SamplerObjectHandle());
-    m_persistentCacheTextures.push_back(handle);
+    m_persistentCacheTextures.push_back(PersistentTextureUse{ handle, resolved.slot });
     return handle;
 }
 
@@ -336,8 +336,7 @@ TextureHandle RenderGraphBuilder::GetOrCreatePersistentTexture(
     const char* owner, const char* name, const TextureDesc& desc)
 {
     assert(m_persistentCache != nullptr
-        && "RenderGraphBuilder::GetOrCreatePersistentTexture requires a RenderGraphBuilder obtained through "
-           "RenderGraph::Execute() (a bare, default-constructed RenderGraphBuilder has no persistent cache)");
+        && "GetOrCreatePersistentTexture requires a builder obtained through RenderGraph::Execute()");
     if (m_persistentCache == nullptr) {
         GTE_LOG_ERROR("RenderGraphBuilder",
             "GetOrCreatePersistentTexture() called with no persistent cache installed - refusing.");
@@ -355,38 +354,33 @@ TextureHandle RenderGraphBuilder::GetOrCreatePersistentTexture(
     PersistentTextureCacheToken& token, const char* owner, const char* name, const TextureDesc& desc)
 {
     assert(m_persistentCache != nullptr
-        && "RenderGraphBuilder::GetOrCreatePersistentTexture requires a RenderGraphBuilder obtained through "
-           "RenderGraph::Execute()");
+        && "GetOrCreatePersistentTexture requires a builder obtained through RenderGraph::Execute()");
     if (m_persistentCache == nullptr) {
         GTE_LOG_ERROR("RenderGraphBuilder",
             "GetOrCreatePersistentTexture() called with no persistent cache installed - refusing.");
         return TextureHandle{};
     }
 
-    if (m_persistentCache->IsTokenLive(token.entry, token.entryEpoch)) {
+    if (m_persistentCache->IsTokenLive(token)) {
 #ifndef NDEBUG
-        assert(m_persistentCache->DebugTokenIdentityMatches(token.entry, owner, name)
-            && "RenderGraphBuilder::GetOrCreatePersistentTexture: this token was already resolved against a "
-               "DIFFERENT (owner, name) identity - a token must never be reused across two unrelated identities");
+        assert(m_persistentCache->DebugTokenIdentityMatches(token.slot, owner, name)
+            && "A persistent token must not be reused across different (owner, name) identities");
 #endif
         const std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved =
-            m_persistentCache->ResolveFast(
-                token.entry, desc, m_persistentCacheCurrentFrame, m_persistentCacheTimingMode);
+            m_persistentCache->ResolveFast(token.slot, desc, m_persistentCacheCurrentFrame, m_persistentCacheTimingMode);
         if (!resolved.has_value()) {
-            return TextureHandle{}; // e.g. a same-frame double-request - already logged inside Resolve*().
+            return TextureHandle{}; // Refused, already logged.
         }
         return MintPersistentHandle(*resolved);
     }
 
-    // Slow path - identical to the no-token overload, then refresh `token`
-    // for every subsequent call this session.
+    // Slow path: resolve by name, then refresh the token.
     const std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved = m_persistentCache->Resolve(
         owner, name, desc, m_persistentCacheCurrentFrame, m_persistentCacheTimingMode);
     if (!resolved.has_value()) {
         return TextureHandle{};
     }
-    token.entry = resolved->entry;
-    token.entryEpoch = resolved->entryEpoch;
+    token.slot = resolved->slot;
     return MintPersistentHandle(*resolved);
 }
 

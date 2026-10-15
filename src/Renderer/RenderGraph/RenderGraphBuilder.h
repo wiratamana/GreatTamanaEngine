@@ -62,6 +62,12 @@ struct BufferSlot {
     BufferImportInfo importInfo;
 };
 
+// A persistent-cache texture used this frame, with the slot its final layout is recorded against.
+struct PersistentTextureUse {
+    TextureHandle handle;
+    PersistentSlotRef slot;
+};
+
 // Uncompiled frame description passed to the compiler.
 struct CompiledGraphInput {
     std::vector<PassRecord> passes;
@@ -72,7 +78,7 @@ struct CompiledGraphInput {
     // Output roots that must not be culled during compilation.
     std::vector<TextureHandle> finalTextureOutputs;
     std::vector<BufferHandle> finalBufferOutputs;
-    std::vector<TextureHandle> persistentCacheTextures;
+    std::vector<PersistentTextureUse> persistentCacheTextures; // Also roots.
 };
 
 // Records passes and resources for a single frame.
@@ -354,7 +360,7 @@ private:
 
     std::vector<TextureHandle> m_finalTextureOutputs;
     std::vector<BufferHandle> m_finalBufferOutputs;
-    std::vector<TextureHandle> m_persistentCacheTextures;
+    std::vector<PersistentTextureUse> m_persistentCacheTextures;
 
     RenderGraphPersistentResourceCache* m_persistentCache = nullptr;
     ExecuteTimingMode m_persistentCacheTimingMode{};

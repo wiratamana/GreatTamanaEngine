@@ -20,6 +20,16 @@ bool ContainsTextureHandle(std::span<const TextureHandle> handles, const Texture
     return false;
 }
 
+bool IsPersistentTexture(std::span<const PersistentTextureUse> uses, const TextureHandle& handle)
+{
+    for (const PersistentTextureUse& use : uses) {
+        if (use.handle == handle) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Roots for buffers: a buffer write is only kept alive by KeepBufferOutput() or by a kept reader.
 bool ContainsBufferHandle(std::span<const BufferHandle> handles, const BufferHandle& handle)
 {
@@ -430,70 +440,8 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
            "possibly-missing) resource dependency - see the stderr output immediately above this assert for "
            "exactly which passes and why. See task_manager/render-pass-4/PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md.");
 
-    // --- Step 2: backward reachability from finalOutputs (Step 3.2.2) ---
-    //
-    // Every pass that writes a `finalOutputs` texture (or a
-    // `finalVolumeTextureOutputs` volume texture - see below) is a root;
-    // walking backwards along `predecessors` from every root marks every
-    // pass that (directly or transitively) contributes to a final output as
-    // "kept". Everything never reached is dead code - PassRecord::isCulled
-    // gets written `true` for exactly those passes, and none of their
-    // declared reads/writes are allowed to extend any resource's lifetime
-    // (Step 4 below only ever scans `executionOrder`, which excludes
-    // them entirely).
-    //
-    // UPDATED (Atmosphere Scattering campaign, Phase 6 -
-    // ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md): this scan
-    // used to be "ALREADY correctly three-way-safe as written" per Phase
-    // 2's own precheck - true as far as it went (a Buffer usage could
-    // never accidentally be treated as a root), but that same
-    // "usage.kind == ResourceKind::Texture is the only branch that marks a
-    // pass kept" property was ALSO a genuine correctness GAP, not just a
-    // safety guarantee: it meant a VolumeTextureHandle could NEVER be a
-    // root either, so a pass whose only write was a VolumeTextureHandle
-    // (e.g. a feature-owned volumetric data pass) was ALWAYS silently
-    // culled, no matter what it declared - discovered
-    // directly by this phase's own real workload (see
-    // ATMOSPHERE_PHASE6_COMPLETION_REPORT.md). Fixed here by ALSO checking
-    // `input.finalVolumeTextureOutputs` (populated via
-    // RenderGraphBuilder::KeepVolumeTextureOutput() - see
-    // RenderGraphBuilder.h) for a VolumeTexture write.
-    //
-    // UPDATED AGAIN (editor-core-separation-26 campaign, PHASE1 -
-    // BIG_STEP_2_BUFFER_ROOTS_AND_BLIT_PASSES_2026-09-29.txt, Part A): the
-    // sentence directly above used to end "a BufferHandle still can never
-    // be a root (matching the existing, deliberate rule that it never
-    // could be one either)" - that was true right up until this phase,
-    // which closes this exact gap: a compute pass whose only observable
-    // effect is a buffer write, with no in-frame reader (e.g. "fill this
-    // buffer this frame purely for a LATER frame's own ImportBuffer() to
-    // read"), used to be silently culled no matter what it declared. Fixed
-    // here by ALSO checking `input.finalBufferOutputs` (populated via
-    // RenderGraphBuilder::KeepBufferOutput() - see RenderGraphBuilder.h)
-    // for a Buffer write - a THIRD, independent, opt-in root set mirroring
-    // finalVolumeTextureOutputs exactly.
-    //
-    // UPDATED AGAIN (editor-core-separation-27 campaign, PHASE3 -
-    // BIG_STEP_3_PERSISTENT_RESOURCE_CACHE_HONEST_LAYOUT_HISTORY_REV2_2026-09-30.txt,
-    // Section 5.2, "the keep-alive guarantee"): a TextureHandle already had
-    // `finalOutputs` as its own root set - unlike Buffer/VolumeTexture, which
-    // had NONE before their own fixes above - but that single root set was
-    // never enough for a persistent-cache texture (RenderGraphPersistentResourceCache,
-    // PHASE4 onward): a pass whose ONLY write is a persistent-cache
-    // TextureHandle, with nothing else reading/writing it this frame, and the
-    // handle not present in this call's own `finalOutputs`, was silently
-    // culled every frame, forever - with no crash, no error, no log, just a
-    // history buffer that quietly never updates. Fixed here by ALSO checking
-    // `input.persistentCacheTextures` (populated internally by
-    // RenderGraphBuilder::GetOrCreatePersistentTexture() - PHASE8; the vector
-    // itself already exists, unpopulated, since PHASE2) for a Texture write -
-    // an OR of TWO vectors for TextureHandle specifically, since ordinary
-    // textures keep their pre-existing `finalOutputs` root set unchanged and
-    // this campaign adds a second, independent way for a TextureHandle write
-    // to qualify as a root. No new helper function was needed:
-    // ContainsTextureHandle() (top of this file) already takes
-    // `std::span<const TextureHandle>`, so it is reused directly for the
-    // second vector too.
+    // Backward reachability from the root writes (final outputs, kept outputs, persistent textures).
+    // Passes never reached are culled and extend no resource lifetime.
     std::vector<bool> kept(static_cast<std::size_t>(passCount), false);
     std::vector<std::int32_t> stack;
 
@@ -506,7 +454,7 @@ CompiledGraph Compile(CompiledGraphInput& input, std::span<const TextureHandle> 
                 [&](TextureHandle h) {
                     return ContainsTextureHandle(finalOutputs, h)
                         || ContainsTextureHandle(input.finalTextureOutputs, h)
-                        || ContainsTextureHandle(input.persistentCacheTextures, h);
+                        || IsPersistentTexture(input.persistentCacheTextures, h);
                 },
                 [&](BufferHandle h) { return ContainsBufferHandle(input.finalBufferOutputs, h); });
             if (isRoot) {

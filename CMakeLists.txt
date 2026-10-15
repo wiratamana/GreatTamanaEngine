@@ -769,6 +769,7 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphResourcePool.h
     src/Renderer/RenderGraph/RenderGraphResourcePool.cpp
     src/Renderer/RenderGraph/RenderGraphPersistentResourceOwners.h
+    src/Renderer/RenderGraph/PersistentSlotTable.h
     src/Renderer/RenderGraph/RenderGraphPersistentResourceCache.h
     src/Renderer/RenderGraph/RenderGraphPersistentResourceCache.cpp
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.h

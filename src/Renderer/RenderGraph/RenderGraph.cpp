@@ -911,13 +911,12 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         }
     }
 
-    // Record layout changes for persistent cached textures and flush pending resizes.
-    for (const TextureHandle& h : input.persistentCacheTextures) {
-        if (h.index >= physicalTextures.size() || !physicalTextures[h.index].resolved) {
+    // Record layouts of persistent cached textures and flush pending resizes.
+    for (const PersistentTextureUse& use : input.persistentCacheTextures) {
+        if (use.handle.index >= physicalTextures.size() || !physicalTextures[use.handle.index].resolved) {
             continue;
         }
-        m_persistentResourceCache.RecordFinalLayout(
-            input.textures[h.index].name, physicalTextures[h.index].colorState.layout);
+        m_persistentResourceCache.RecordFinalLayout(use.slot, physicalTextures[use.handle.index].colorState.layout);
     }
     if (!isPipelined) {
         m_persistentResourceCache.FlushPendingResizes();

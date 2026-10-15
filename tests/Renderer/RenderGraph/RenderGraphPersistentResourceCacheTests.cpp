@@ -1,32 +1,5 @@
-// editor-core-separation-27 campaign, PHASE4
-// (PHASE4_HEADLESS_TEST_FIXTURE_AND_CACHE_CONSTRUCTION.md) - Tier-2 (real,
-// headless GPU) tests for RenderGraphPersistentResourceCache's own
-// construction/ownership/exception-safety core (source document Section 6,
-// 6.1, 6.2, 7). GTEST_SKIP()-guarded exactly like every other
-// HeadlessSurfaceProvider consumer in this codebase - see
-// tests/Fakes/HeadlessRenderGraphFixture.h's own top-of-file comment.
-//
-// PHASE5 (PHASE5_CACHE_AGE_TRACKING_DOUBLE_REQUEST_GUARD_AND_EVICTION.md)
-// EXTENDS this SAME file (never a second one) with age-tracking/eviction/the
-// same-real-frame double-request guard/the debug-only token misuse guard
-// tests. Every PHASE4 Resolve() call site grew a new, mandatory trailing
-// `currentFrame` argument that same phase.
-//
-// PHASE6 (PHASE6_CACHE_BATCHED_RESIZE.md) EXTENDS this SAME file again with
-// the batched-resize tests (bottom of this file) - Resolve() grew a FIFTH,
-// mandatory trailing `ExecuteTimingMode timingMode` parameter this same
-// phase, so every earlier call site below was updated to pass `kSync`
-// (`ExecuteTimingMode::SynchronousImmediateReadback`) - no other production
-// caller existed yet, so this was safe to change freely, per this phase's
-// own .md Step 3.2.
-//
-// Scope: PHASE4's own construction/collision-safety/exception-safety/
-// color-only acceptance criteria, PHASE5's own age-tracking/
-// double-request-guard/eviction/debug-misuse-guard acceptance criteria, and
-// PHASE6's own batched-resize/format-change-refusal/pipelined-regime-resize-
-// refusal acceptance criteria. Honest-layout-recording (PHASE8) is still a
-// later phase of this same campaign, extending this SAME class further -
-// none of that is attempted here.
+// Tier-2 (headless GPU) tests for RenderGraphPersistentResourceCache.
+// Skipped when the headless fixture is unusable.
 
 #include "Renderer/RenderGraph/RenderGraphPersistentResourceCache.h"
 #include "Renderer/RenderGraph/RenderGraphPersistentResourceOwners.h"
@@ -613,19 +586,8 @@ TEST(RenderGraphPersistentResourceCacheTest, ARequestInALaterFrameAfterASameFram
     EXPECT_EQ(frame6->texture, frame5First->texture);
 }
 
-// 12. Stale-token safety (the accepted-risk test, this phase's own
-// "Situation" section requirement): resolve an identity, capture its
-// entry/epoch, evict it (small threshold + BeginFrame()), THEN resolve a
-// DIFFERENT, brand-new identity (to encourage, though never guarantee, the
-// allocator reusing the freed node), and finally call IsTokenLive() with
-// the ORIGINAL (now-stale) entry pointer/epoch - must return false and,
-// most importantly, must not crash. This engine's normal cmake --build
-// build is NOT compiled with AddressSanitizer/UndefinedBehaviorSanitizer
-// (confirmed: no -fsanitize= flag anywhere in this project's own
-// CMakeLists.txt - only third_party/ktx's vendored, unrelated basisu
-// sub-build opts into it for ITS OWN code) - this is disclosed here
-// plainly, per this phase's own .md instruction, rather than silently
-// assumed available.
+// A token that outlives its entry's eviction reports dead and never touches freed memory,
+// even after the slot is reused by a new identity.
 TEST(RenderGraphPersistentResourceCacheTest, IsTokenLiveReturnsFalseForAnEvictedEntryWithoutCrashing)
 {
     HeadlessRenderGraphFixture fixture;
@@ -637,45 +599,58 @@ TEST(RenderGraphPersistentResourceCacheTest, IsTokenLiveReturnsFalseForAnEvicted
     const TextureDesc desc = MakeColorDesc();
     constexpr std::uint64_t kSmallThreshold = 1;
 
-    const PersistentResourceCacheEntry* staleEntry = nullptr;
-    std::uint64_t staleEpoch = 0;
+    PersistentTextureCacheToken staleToken;
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
         std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved =
             cache.Resolve(kPersistentOwnerCacheValidation, "StaleToken", desc, /*currentFrame=*/1, kSync);
         if (resolved.has_value()) {
-            staleEntry = resolved->entry;
-            staleEpoch = resolved->entryEpoch;
+            staleToken.slot = resolved->slot;
         }
         return {};
     });
 
-    ASSERT_NE(staleEntry, nullptr);
-    EXPECT_TRUE(cache.IsTokenLive(staleEntry, staleEpoch));
+    ASSERT_NE(staleToken.slot.epoch, 0u);
+    EXPECT_TRUE(cache.IsTokenLive(staleToken));
 
-    // Walk the frame counter far enough forward, with no further Resolve()
-    // call for this identity, to evict it.
     cache.BeginFrame(1, kSmallThreshold);
     cache.BeginFrame(10, kSmallThreshold);
     ASSERT_FALSE(cache.FramesUntilEviction(kPersistentOwnerCacheValidation, "StaleToken", 10).has_value());
+    EXPECT_FALSE(cache.IsTokenLive(staleToken));
 
-    // Resolve a DIFFERENT, brand-new identity - encourages (never
-    // guarantees) the allocator reusing the freed unordered_map node.
+    // A new identity reuses the freed slot index, but the old token stays dead.
+    std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> reused;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        (void)cache.Resolve(kPersistentOwnerCacheValidation, "AfterEviction", desc, /*currentFrame=*/10, kSync);
+        reused = cache.Resolve(kPersistentOwnerCacheValidation, "AfterEviction", desc, /*currentFrame=*/10, kSync);
         return {};
     });
-
-    // The stale token must report NOT live, and this call itself must not
-    // crash/UB-sanitizer-flag anything (see this test's own header comment
-    // for this build's real ASan/UBSan availability status).
-    EXPECT_FALSE(cache.IsTokenLive(staleEntry, staleEpoch));
+    ASSERT_TRUE(reused.has_value());
+    EXPECT_EQ(reused->slot.index, staleToken.slot.index);
+    EXPECT_NE(reused->slot.epoch, staleToken.slot.epoch);
+    EXPECT_FALSE(cache.IsTokenLive(staleToken));
+    EXPECT_FALSE(cache.ResolveFast(staleToken.slot, desc, 11, kSync).has_value());
 }
 
-// 13. DebugTokenIdentityMatches() - debug builds only (mirrors the
-// production code's own #ifndef NDEBUG guard exactly, so a release-
-// configured ctest run does not fail to find symbols that don't exist in
-// that build).
+// A resize queued for an entry that is evicted before the flush is skipped.
+TEST(RenderGraphPersistentResourceCacheTest, FlushSkipsResizeOfAnEvictedEntry)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
+    fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
+        (void)cache.Resolve(kPersistentOwnerCacheValidation, "EvictedResize", MakeColorDesc(64, 64), 1, kSync);
+        (void)cache.Resolve(kPersistentOwnerCacheValidation, "EvictedResize", MakeColorDesc(128, 128), 2, kSync);
+        return {};
+    });
+    cache.BeginFrame(100, /*staleThresholdFrames=*/1);
+    cache.FlushPendingResizes(); // Must not touch the evicted entry.
+    EXPECT_FALSE(cache.FramesUntilEviction(kPersistentOwnerCacheValidation, "EvictedResize", 100).has_value());
+}
+
+// Debug builds only: the guard does not exist in release builds.
 #ifndef NDEBUG
 TEST(RenderGraphPersistentResourceCacheTest, DebugTokenIdentityMatchesConfirmsOrRefutesTheOriginalOwnerName)
 {
@@ -694,9 +669,9 @@ TEST(RenderGraphPersistentResourceCacheTest, DebugTokenIdentityMatchesConfirmsOr
     });
     ASSERT_TRUE(resolved.has_value());
 
-    EXPECT_TRUE(cache.DebugTokenIdentityMatches(resolved->entry, kPersistentOwnerCacheValidation, "IdentityCheck"));
-    EXPECT_FALSE(cache.DebugTokenIdentityMatches(resolved->entry, "SomeoneElse", "IdentityCheck"));
-    EXPECT_TRUE(cache.DebugTokenIdentityMatches(nullptr, "Anything", "Anything"));
+    EXPECT_TRUE(cache.DebugTokenIdentityMatches(resolved->slot, kPersistentOwnerCacheValidation, "IdentityCheck"));
+    EXPECT_FALSE(cache.DebugTokenIdentityMatches(resolved->slot, "SomeoneElse", "IdentityCheck"));
+    EXPECT_TRUE(cache.DebugTokenIdentityMatches(PersistentSlotRef{}, "Anything", "Anything"));
 }
 #endif // !NDEBUG
 

@@ -2316,6 +2316,7 @@ set(GTE_TEST_SOURCES
     Renderer/Culling/CullingTypesTests.cpp
     Renderer/VolumetricFroxelMathTests.cpp
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
+    Renderer/RenderGraph/PersistentSlotTableTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderPassTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp

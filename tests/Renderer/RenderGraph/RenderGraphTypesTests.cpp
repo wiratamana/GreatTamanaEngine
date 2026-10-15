@@ -857,15 +857,7 @@ TEST(RenderGraphIsValidBlitRegionTest, AcceptsFullResolvedExtent)
     EXPECT_TRUE(IsValidBlitRegion(resolved, extent));
 }
 
-// --- IsStaleCacheEntry() / PersistentTextureCacheToken (editor-core-
-// separation-27 campaign, PHASE2 -
-// BIG_STEP_3_PERSISTENT_RESOURCE_CACHE_HONEST_LAYOUT_HISTORY_REV2_2026-09-30.txt,
-// Section 8/Section 4) -------------------------------------------------------
-//
-// Pure, Vulkan-device-free decisions - no RenderGraphPersistentResourceCache
-// instance involved anywhere in this block, mirroring
-// FindMismatchedColorAttachmentExtent()/IsValidBlitRegion()'s own precedent
-// above.
+// --- IsStaleCacheEntry() / PersistentTextureCacheToken: pure, device-free ---
 
 TEST(RenderGraphIsStaleCacheEntryTest, ZeroFramesIdleIsNeverStaleRegardlessOfThreshold)
 {
@@ -896,8 +888,7 @@ TEST(RenderGraphIsStaleCacheEntryTest, LargeRealisticGapIsStale)
 TEST(RenderGraphPersistentTextureCacheTokenTest, DefaultConstructedTokenIsNeverResolvedYet)
 {
     const PersistentTextureCacheToken token;
-    EXPECT_EQ(token.entry, nullptr);
-    EXPECT_EQ(token.entryEpoch, 0u);
+    EXPECT_EQ(token.slot.epoch, 0u);
 }
 
 } // namespace
