@@ -44,7 +44,6 @@ Core Requirements:
 2. Modern C++ Standard (C++20):
    - Use Modern C++ (C++20) idioms.
    - Enforce strict RAII for all native handles and resources (zero memory leaks, zero resource leaks).
-   - Prefer flat data structures, simple functions, value semantics, and `std::span` over complex class hierarchies.
    - Do not use raw `new`/`delete` or useless wrapper classes.
 
 3. Modern Vulkan Standards (Vulkan 1.3 Dynamic Rendering):
