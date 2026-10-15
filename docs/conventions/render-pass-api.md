@@ -30,7 +30,7 @@ The layer under every render feature. Pass code never touches Vulkan and never n
    | Blit | `AddBlitPass` with `rg::BlitFilter` | `BlitSpec` |
 
    Attachment formats come from the declared textures (`DescOf`), never from `ColorPixelFormat()`.
-5. **One-shot execution** of the same verbs outside the frame graph: not built yet.
+5. **One-shot execution** of the same pass chains outside the frame loop (`rg::OneShot`, see below).
 6. **First-class GPU buffer handle** (`rg::GpuBuffer`): not built yet.
 
 ## Rules
@@ -50,6 +50,25 @@ The layer under every render feature. Pass code never touches Vulkan and never n
 - `TextureDesc::hasColor` is false only for depth-only textures (a depth map). Those are sampled through `rg::Depth()`
   and are never a color target or a storage image. A view target (color plus depth companion) is an ordinary color
   texture and can also be sampled through `rg::Depth()`.
+
+## One-shot execution
+
+`rg::OneShot os(renderer)` imports textures, takes the same pass chains on `os.Builder()` and `os.Run()` submits and
+waits. It is for user-driven or one-time work (editor previews, a capture copy), never per frame.
+
+Decision: a small executor that shares the graph's barrier planner and descriptor-write code
+(`RenderGraph::RunOneShot`), not the frame loop. A real frame run also does GPU timing slots, debug texture
+snapshots, event snapshots, persistent-resource bookkeeping and a shared binding cache, none of which a one-shot may
+touch (the snapshots would show up in `/list_textures`).
+
+- Supported passes: compute and transfer. A pass with attachments or a blit is skipped with one logged error.
+- Imported textures keep their tracked state (`CurrentState()` on `RenderTexture` and `Texture2D`). Each import has a
+  `FinalState`: `Restore` (back to the imported state), `ShaderRead` or `Keep`. Tracked states are written back only
+  after the wait succeeded; a failed run leaves them unchanged and logs once.
+- `ImportReadOnly(texture, state)` states the state of a texture whose tracked state is unknown.
+- Descriptor sets are allocated per run and freed after the wait, so no binding-cache entry outlives the run.
+- The blocking submit reuses fences from a small pool in `Renderer`.
+- A volume import takes an engine sampler handle so a pass can bind it by name.
 
 ## Checks
 

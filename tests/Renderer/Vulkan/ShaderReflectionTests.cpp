@@ -59,6 +59,36 @@ gte::ShaderReflectionResult ReflectGraphicsFixture()
     };
     return gte::ReflectShader(stages);
 }
+// One-shot previews bind these shaders by name and push a struct of an exact size.
+TEST(ShaderReflectionTests, VolumePreviewShaderExposesItsBoundNamesAndPushSize)
+{
+    const gte::ShaderStageFile stage{ VK_SHADER_STAGE_COMPUTE_BIT, GTE_TEST_VOLUME_PREVIEW_SPV_PATH };
+    const gte::ShaderReflectionResult result = gte::ReflectShader(std::span<const gte::ShaderStageFile>(&stage, 1));
+
+    const ReflectedDescriptorBinding* volume = FindByName(result, "volumeTex");
+    const ReflectedDescriptorBinding* output = FindByName(result, "outputImage");
+    ASSERT_NE(volume, nullptr);
+    ASSERT_NE(output, nullptr);
+    EXPECT_EQ(volume->type, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    EXPECT_EQ(output->type, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+    ASSERT_TRUE(result.hasPushConstantRange);
+    EXPECT_EQ(result.pushConstantRange.size, 92u);
+}
+
+TEST(ShaderReflectionTests, FramePreviewShaderExposesItsBoundNamesAndPushSize)
+{
+    const gte::ShaderStageFile stage{ VK_SHADER_STAGE_COMPUTE_BIT, GTE_TEST_FRAME_PREVIEW_SPV_PATH };
+    const gte::ShaderReflectionResult result = gte::ReflectShader(std::span<const gte::ShaderStageFile>(&stage, 1));
+
+    const ReflectedDescriptorBinding* source = FindByName(result, "sourceTex");
+    const ReflectedDescriptorBinding* output = FindByName(result, "outputImage");
+    ASSERT_NE(source, nullptr);
+    ASSERT_NE(output, nullptr);
+    EXPECT_EQ(source->type, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    EXPECT_EQ(output->type, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+    ASSERT_TRUE(result.hasPushConstantRange);
+    EXPECT_EQ(result.pushConstantRange.size, 12u);
+}
 
 TEST(ShaderReflectionTests, ReflectsBoxBlurBindingsPushConstantsAndLocalSize)
 {

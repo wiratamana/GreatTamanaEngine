@@ -1,14 +1,13 @@
 #pragma once
 
-#include "Compute/ComputeDescriptorSet.h"
-#include "Compute/ComputePipeline.h"
+#include "GraphicsHandleRegistry.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h" // gte::rg::ResourceState
+#include "RenderGraph/Shader.h"
 #include "Texture2D.h"
 #include "VolumeTarget.h"
 
 #include <cstdint>
 #include <optional>
-#include <string>
 #include <vector>
 #include <volk.h>
 
@@ -23,7 +22,7 @@ enum class VolumeTexturePreviewInterpretation : std::int32_t {
 };
 
 // On-demand compute renderer that raymarches a VolumeTexture into a 256x256 RGBA8 thumbnail for HTTP fetches.
-// Records its own dispatch via ImmediateSubmit(), so it needs no render graph.
+// Runs as a one-shot graph, so it blocks until the GPU is done.
 class VolumeTexturePreviewRenderer {
 public:
     VolumeTexturePreviewRenderer() = default;
@@ -42,6 +41,7 @@ public:
 
     // Renders one blocking raymarch thumbnail of `volume` (at `previousState`) and reads it back; at most once per
     // request. The layout is restored; `interpretation` picks texel decoding, framing and proxy shape.
+    // Empty pixels when the run failed.
     CapturedRawPixels RenderPreview(Renderer& renderer, const VolumeTarget& volume, const rg::ResourceState& previousState,
         VolumeTexturePreviewInterpretation interpretation = VolumeTexturePreviewInterpretation::GenericDensityInAlpha);
 
@@ -53,20 +53,12 @@ private:
     static constexpr int kStepCount = 64;
     static constexpr float kDensityScale = 4.0f; // One fixed default is enough for debug visualization.
 
-    // Must match `layout(local_size_x = 16, local_size_y = 16) in;` in src/Shaders/VolumeTexturePreview.comp.
-    static constexpr std::uint32_t kLocalSizeX = 16;
-    static constexpr std::uint32_t kLocalSizeY = 16;
-
     bool m_initialized = false;
     VkDevice m_device = VK_NULL_HANDLE;
     VkSampler m_volumeSampler = VK_NULL_HANDLE; // Trilinear, clamp-to-edge; created once.
-    VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
-    std::optional<ComputePipeline> m_pipeline;
-    // Allocated once; its bindings are rewritten on every call because each call may preview a different volume.
-    ComputeDescriptorSet m_descriptorSet;
+    CachedSamplerHandle m_volumeSamplerHandle;
+    rg::Shader m_shader{ "VolumeTexturePreview" };
     std::optional<Texture2D> m_outputTexture; // Created once, overwritten by every call.
-    // Current state of m_outputTexture: SHADER_READ_ONLY after init, GENERAL after every RenderPreview().
-    rg::ResourceState m_outputTextureState;
 };
 
 } // namespace gte

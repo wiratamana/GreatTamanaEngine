@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -116,6 +117,21 @@ public:
         m_renderPassToggleRegistry = registry;
     }
 
+    // The state a texture must be left in after RunOneShot; no state keeps whatever the passes left.
+    struct OneShotFinal {
+        TextureHandle texture;
+        std::optional<ResourceState> state;
+    };
+
+    // Compiles, records, submits and waits for a graph of attachment-free passes (compute, transfer), with no
+    // timing, snapshots or persistent resources. `states` holds the color state of every touched texture (nullopt
+    // otherwise), set only after the wait succeeded. On failure it is untouched and one error is logged.
+    bool RunOneShot(CompiledGraphInput input, std::span<const TextureHandle> outputs,
+        std::span<const OneShotFinal> finals, std::vector<std::optional<ResourceState>>& states);
+
+    OnceErrorLog* OnceLog() noexcept { return &m_onceLog; }
+    std::uint64_t NextOneShotFrame() noexcept { return ++m_oneShotFrame; }
+
     // Reference to a pass write target captured for debugging.
     struct FrameDebuggerEventSnapshotRef {
         const char* passName = nullptr;
@@ -185,6 +201,10 @@ private:
     // Returns Invalid if any declared binding cannot be resolved; never writes a partial descriptor set.
     DescriptorSetHandle ResolveComputeBindingDescriptorSet(const PassRecord& pass,
         const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers);
+
+    // The descriptor writes of a pass's bindings; false if any binding cannot be resolved.
+    bool BuildDescriptorWrites(const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures,
+        const std::vector<PhysicalBuffer>& physicalBuffers, std::vector<ComputeDescriptorWrite>& writes);
 
     // Logs a skipped binding (or the whole pass when `binding` is nullopt) once per distinct key.
     void ReportSkippedOnce(const PassRecord& pass, std::optional<std::uint32_t> binding, const char* reason);
@@ -258,6 +278,7 @@ private:
 
     std::uint64_t m_debugTextureFrameCounter = 0;
     std::uint64_t m_persistentResourceFrameCounter = 0;
+    std::uint64_t m_oneShotFrame = 0;
 };
 
 // Execution context passed to each pass's execute callback.

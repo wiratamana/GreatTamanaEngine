@@ -1,5 +1,6 @@
 #pragma once
 
+#include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "Texture.h"
 
 namespace gte {
@@ -18,6 +19,13 @@ public:
                   .debugName = debugName })
     {
     }
+
+    // Last known GPU barrier state of the image; written back by one-shot runs.
+    rg::ResourceState CurrentState() const noexcept { return m_currentState; }
+    void SetCurrentState(rg::ResourceState state) noexcept { m_currentState = state; }
+
+private:
+    rg::ResourceState m_currentState{};
 };
 
 } // namespace gte

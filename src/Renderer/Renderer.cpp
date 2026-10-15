@@ -135,6 +135,9 @@ Renderer::~Renderer()
 {
     if (m_device.Native() != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(m_device.Native());
+        for (const VkFence fence : m_fencePool) {
+            vkDestroyFence(m_device.Native(), fence, nullptr);
+        }
     }
 }
 
@@ -344,23 +347,56 @@ void Renderer::ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& re
     submit.commandBufferInfoCount = 1;
     submit.pCommandBufferInfos = &cmdSubmit;
 
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkFence fence = VK_NULL_HANDLE;
-    if (vkCreateFence(m_device.Native(), &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
+    const VkFence fence = AcquireFence();
+    if (fence == VK_NULL_HANDLE) {
         m_resources.FreeTransientCommandBuffer(vkCmd);
         throw std::runtime_error("Renderer::ImmediateSubmit: vkCreateFence failed.");
     }
 
     if (m_device.SubmitToGraphicsQueue(submit, fence) != VK_SUCCESS) {
-        vkDestroyFence(m_device.Native(), fence, nullptr);
+        ReleaseFence(fence);
         m_resources.FreeTransientCommandBuffer(vkCmd);
         throw std::runtime_error("Renderer::ImmediateSubmit: vkQueueSubmit2 failed.");
     }
 
     vkWaitForFences(m_device.Native(), 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
-    vkDestroyFence(m_device.Native(), fence, nullptr);
+    ReleaseFence(fence);
     m_resources.FreeTransientCommandBuffer(vkCmd);
+}
+
+VkFence Renderer::AcquireFence() const
+{
+    {
+        const std::lock_guard<std::mutex> lock(m_fencePoolMutex);
+        if (!m_fencePool.empty()) {
+            const VkFence fence = m_fencePool.back();
+            m_fencePool.pop_back();
+            return fence;
+        }
+    }
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence = VK_NULL_HANDLE;
+    return vkCreateFence(m_device.Native(), &fenceInfo, nullptr, &fence) == VK_SUCCESS ? fence : VK_NULL_HANDLE;
+}
+
+void Renderer::ReleaseFence(VkFence fence) const noexcept
+{
+    vkResetFences(m_device.Native(), 1, &fence);
+    try {
+        const std::lock_guard<std::mutex> lock(m_fencePoolMutex);
+        m_fencePool.push_back(fence);
+    } catch (...) {
+        vkDestroyFence(m_device.Native(), fence, nullptr);
+    }
+}
+
+rg::RenderGraph& Renderer::OneShotGraph()
+{
+    if (!m_oneShotGraph) {
+        m_oneShotGraph = std::make_unique<rg::RenderGraph>(*this);
+    }
+    return *m_oneShotGraph;
 }
 
 VkResult Renderer::SubmitToGraphicsQueue(const VkSubmitInfo2& submit, VkFence fence) const

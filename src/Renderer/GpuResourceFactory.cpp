@@ -424,6 +424,7 @@ Texture2D GpuResourceFactory::CreateTexture2D(
             nullptr, 0, nullptr, 1, &toShaderRead);
     });
     // staging is destroyed here; the copy has already completed.
+    texture.SetCurrentState(rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
 
     return texture;
 }

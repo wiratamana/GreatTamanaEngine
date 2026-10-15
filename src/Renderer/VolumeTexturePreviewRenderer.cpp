@@ -1,8 +1,8 @@
 #include "VolumeTexturePreviewRenderer.h"
 
-#include "Compute/ComputeDispatch.h"
 #include "Renderer.h"
-#include "RenderGraph/CommandBuffer.h"
+#include "RenderGraph/ComputePass.h"
+#include "RenderGraph/OneShot.h"
 #include "VolumeTexturePreviewMath.h"
 
 #include <stdexcept>
@@ -31,6 +31,7 @@ struct PushConstants {
     float aerialPreviewExposure = 0.0f; // Only used when interpretationMode == 1.
     std::int32_t shapeMode = 0; // 0 = axis-aligned box (IntersectRayBox), 1 = tapering frustum (IntersectRayFrustum).
 };
+static_assert(sizeof(PushConstants) == 92, "the shader's push block is 92 bytes");
 
 // Exposure applied before the shader's Reinhard tonemap for the aerial perspective interpretation.
 // Its in-scattering values are tiny, so this lifts them into a legible mid-range.
@@ -40,8 +41,7 @@ static constexpr float kAerialPreviewExposure = 3200.0f;
 
 VolumeTexturePreviewRenderer::~VolumeTexturePreviewRenderer()
 {
-    // m_pipeline and m_outputTexture clean up themselves. m_descriptorSetLayout is borrowed from m_pipeline
-    // (destroying it here would double-free). m_descriptorSet comes from a shared pool and is never freed alone.
+    m_volumeSamplerHandle.Resolve(VK_NULL_HANDLE); // Unregister before the sampler goes away.
     if (m_volumeSampler != VK_NULL_HANDLE) {
         vkDestroySampler(m_device, m_volumeSampler, nullptr);
     }
@@ -53,8 +53,7 @@ void VolumeTexturePreviewRenderer::EnsureInitialized(Renderer& renderer)
         return;
     }
 
-    const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
-    m_device = context.device;
+    m_device = renderer.GetVulkanContextInfo().device;
 
     // Trilinear, clamp-to-edge in all three axes, like VolumeTexture's sampler (VolumeTarget carries none).
     VkSamplerCreateInfo samplerInfo{};
@@ -71,20 +70,10 @@ void VolumeTexturePreviewRenderer::EnsureInitialized(Renderer& renderer)
         throw std::runtime_error("VolumeTexturePreviewRenderer: vkCreateSampler failed.");
     }
 
-    // Layout and push constants come from the compiled shader's reflection:
-    // binding 0 is the source volume's sampler3D, binding 1 the output image2D.
-    m_pipeline.emplace(renderer.CreateComputePipeline("shaders/VolumeTexturePreview.comp.spv"));
-    m_descriptorSetLayout = m_pipeline->ReflectedDescriptorSetLayout(/*set=*/0);
-
-    m_descriptorSet = ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(m_descriptorSetLayout));
-
-    // Zero-filled is enough: the first dispatch overwrites every pixel. A new Texture2D starts in
-    // SHADER_READ_ONLY_OPTIMAL, which is m_outputTextureState's initial value below.
+    // Zero-filled is enough: the first dispatch overwrites every pixel.
     const std::vector<std::uint8_t> zeroFilledPixels(static_cast<std::size_t>(kOutputWidth) * kOutputHeight * 4, 0);
     m_outputTexture.emplace(renderer.CreateTexture2D(zeroFilledPixels.data(), kOutputWidth, kOutputHeight,
         "VolumeTexturePreviewOutput", /*allowStorageImageAccess=*/true));
-
-    m_outputTextureState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
 
     m_initialized = true;
 }
@@ -95,18 +84,12 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
 {
     EnsureInitialized(renderer);
 
-    const VolumeCameraSetup setup = (interpretation == VolumeTexturePreviewInterpretation::AerialPerspectiveFrustum)
+    const bool aerial = interpretation == VolumeTexturePreviewInterpretation::AerialPerspectiveFrustum;
+    const VolumeCameraSetup setup = aerial
         ? ComputeAerialPerspectivePreviewCameraSetup(static_cast<int>(volume.extent.width),
               static_cast<int>(volume.extent.height), static_cast<int>(volume.extent.depth))
         : ComputeVolumeCameraSetup(static_cast<int>(volume.extent.width), static_cast<int>(volume.extent.height),
               static_cast<int>(volume.extent.depth));
-
-    // Each call may preview a different volume, so binding 0 is rewritten every time (binding 1 rides along).
-    m_descriptorSet.Rewrite(
-        std::vector<ComputeDescriptorWrite>{
-            ComputeDescriptorWrite::CombinedImageSampler(0, volume.imageView, m_volumeSampler),
-            ComputeDescriptorWrite::StorageImage(1, m_outputTexture->View()),
-        });
 
     PushConstants pushConstants{};
     pushConstants.eyePosition = setup.eyePosition;
@@ -118,60 +101,36 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
     pushConstants.up = setup.up;
     pushConstants.boxHalfExtents = setup.boxHalfExtents;
     pushConstants.interpretationMode = static_cast<std::int32_t>(interpretation);
-    pushConstants.aerialPreviewExposure =
-        (interpretation == VolumeTexturePreviewInterpretation::AerialPerspectiveFrustum) ? kAerialPreviewExposure : 0.0f;
+    pushConstants.aerialPreviewExposure = aerial ? kAerialPreviewExposure : 0.0f;
 
     // The aerial perspective preview raymarches a frustum: boxHalfExtents carries its far size and half depth.
-    if (interpretation == VolumeTexturePreviewInterpretation::AerialPerspectiveFrustum) {
+    if (aerial) {
         pushConstants.shapeMode = 1;
         const FrustumProxy frustum = ComputeAerialPerspectivePreviewFrustum();
         pushConstants.boxHalfExtents = Vec3(frustum.farHalfWidth, frustum.farHalfHeight, frustum.halfDepth);
     }
 
-    // A compute-stage sampler read has no ResourceAccess enumerator (ShaderRead maps to the fragment stage,
-    // ComputeShaderRead to GENERAL), so this state is built by hand.
-    const rg::ResourceState volumeSampledState{
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-    };
-    const rg::ResourceState outputWriteState = rg::RequiredStateFor(rg::ResourceAccess::ComputeShaderWrite, false);
-    const rg::ResourceState outputPreviousState = m_outputTextureState;
+    {
+        rg::OneShot oneShot(renderer);
+        const rg::TextureHandle source =
+            oneShot.Import(volume, previousState, m_volumeSamplerHandle.Resolve(m_volumeSampler));
+        const rg::TextureHandle output = oneShot.Import(*m_outputTexture, rg::FinalState::Keep);
+        rg::ComputePass(oneShot.Builder(), m_shader, "VolumeTexturePreview", rg::ViewScope::Shared,
+            rg::RenderPassEvent::Opaques)
+            .Bind("volumeTex", source)
+            .Bind("outputImage", output)
+            .Push(pushConstants)
+            .Dispatch(Extent2D{ static_cast<std::uint32_t>(kOutputWidth), static_cast<std::uint32_t>(kOutputHeight) });
+        if (!oneShot.Run()) {
+            return {};
+        }
+    }
 
-    const VkImage volumeImage = volume.image;
-    const VkImage outputImage = m_outputTexture->Image();
-    const VkPipeline pipelineHandle = m_pipeline->Native();
-    const VkPipelineLayout pipelineLayout = m_pipeline->Layout();
-    const VkDescriptorSet rawDescriptorSet = m_descriptorSet.Native();
-
-    renderer.ImmediateSubmit([&](rg::CommandBuffer& cmd) {
-        const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-        rg::EmitImageBarrier(cmd.RawCommandBuffer(), volumeImage, range, previousState, volumeSampledState);
-        rg::EmitImageBarrier(cmd.RawCommandBuffer(), outputImage, range, outputPreviousState, outputWriteState);
-
-        vkCmdBindPipeline(cmd.RawCommandBuffer(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineHandle);
-        vkCmdBindDescriptorSets(cmd.RawCommandBuffer(), VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &rawDescriptorSet, 0, nullptr);
-        vkCmdPushConstants(cmd.RawCommandBuffer(), pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstants), &pushConstants);
-
-        const std::uint32_t groupCountX = ComputeGroupCount(static_cast<std::uint32_t>(kOutputWidth), kLocalSizeX);
-        const std::uint32_t groupCountY = ComputeGroupCount(static_cast<std::uint32_t>(kOutputHeight), kLocalSizeY);
-        vkCmdDispatch(cmd.RawCommandBuffer(), groupCountX, groupCountY, 1);
-
-        // Restore the volume's previous state: later graph frames still expect it.
-        rg::EmitImageBarrier(cmd.RawCommandBuffer(), volumeImage, range, volumeSampledState, previousState);
-
-        // The output stays in GENERAL; CaptureImagePixels() transitions it from the state it is told.
-    });
-
-    m_outputTextureState = outputWriteState;
-
-    // The output is R8G8B8A8, never BGRA, so no channel swizzle is needed.
+    // The output is R8G8B8A8, never BGRA, so no channel swizzle is needed. It stays in the compute-write state.
     const Renderer::CapturedRawPixels raw = renderer.CaptureImagePixels(m_outputTexture->Image(),
         VK_IMAGE_ASPECT_COLOR_BIT, VK_FORMAT_R8G8B8A8_UNORM,
         Extent2D{ static_cast<std::uint32_t>(kOutputWidth), static_cast<std::uint32_t>(kOutputHeight) },
-        m_outputTextureState);
-    // CaptureImagePixels() restores GENERAL, which m_outputTextureState already holds.
+        m_outputTexture->CurrentState());
 
     CapturedRawPixels result;
     result.pixels = raw.pixels;

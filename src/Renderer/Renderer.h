@@ -42,6 +42,7 @@ class RenderGraph;
 class RenderGraphBuilder;
 class RenderGraphPersistentResourceCache;
 class RenderGraphComputeBindingCache;
+class OneShot;
 } // namespace gte::rg
 
 namespace gte {
@@ -297,6 +298,7 @@ private:
     friend class rg::RenderGraph;
     friend class rg::RenderGraphPersistentResourceCache;
     friend class rg::RenderGraphComputeBindingCache;
+    friend class rg::OneShot;
     friend class SceneServicesDescriptorSet;
     friend class GpuDrivenBatchCache;
     friend class VolumeTexturePreviewRenderer;
@@ -325,6 +327,16 @@ private:
 
     mutable std::mutex m_bindingReleaseMutex;
     std::vector<VkDescriptorSetLayout> m_bindingReleaseQueue;
+
+    // Reusable fences for blocking submits.
+    VkFence AcquireFence() const;
+    void ReleaseFence(VkFence fence) const noexcept;
+    mutable std::mutex m_fencePoolMutex;
+    mutable std::vector<VkFence> m_fencePool;
+
+    // Runs one-shot graphs; created on first use. Declared last so it is destroyed first.
+    rg::RenderGraph& OneShotGraph();
+    std::unique_ptr<rg::RenderGraph> m_oneShotGraph;
 };
 
 // Global helper to query context info for RenderGraph.

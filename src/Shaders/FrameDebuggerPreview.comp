@@ -1,45 +1,22 @@
 #version 450
 
-// task_manager/frame-debugger-3 campaign, PHASE6
-// (PHASE6_CHANNELS_AND_LEVELS_REAL_PREVIEW.md) - the Frame Debugger's own
-// Channels (All/R/G/B/A) + Levels preview-compositing shader. A direct GLSL
-// transcription of src/Editor/FrameDebuggerPreviewProcessing.cpp's own
-// ApplyFrameDebuggerPreviewTransform() (the pure CPU oracle - that file is
-// right by definition; if this shader ever disagrees with it, THIS is what
-// needs fixing, mirroring AtmosphereMath.h/VolumeTexturePreview.comp's own
-// identical "CPU oracle first" precedent - see AGENTS.md, "Atmosphere
-// Scattering").
-//
-// BINDING CONVENTION (matches
-// src/Editor/FrameDebuggerPreviewProcessing.cpp exactly - see
-// Vulkan/DescriptorSetLayoutBuilder.h's own documented "read-only Texture
-// first, RWTexture output last" ordering): binding 0 = the source retained
-// history preview texture (read-only combined image sampler, 1:1 same size
-// as the output - see FrameDebuggerPreviewRenderer::EnsureOutputTexture()),
-// binding 1 = this shader's own persistent RGBA8 output image.
-//
-// local_size_x/y = 16 - matches this codebase's other 2D-output compute
-// passes (e.g. src/Shaders/VolumeTexturePreview.comp) - MUST match
-// FrameDebuggerPreviewProcessing.h's own kLocalSizeX/kLocalSizeY constants
-// exactly.
+// Channels and levels preview of a retained frame texture. Mirrors ApplyFrameDebuggerPreviewTransform() in
+// FrameDebuggerPreviewProcessing.cpp; if they disagree, the CPU function is right.
+// Bindings by name: sourceTex (sampled source) and outputImage (same-size RGBA8 output).
 layout(local_size_x = 16, local_size_y = 16) in;
 
 layout(binding = 0) uniform sampler2D sourceTex;
 layout(binding = 1, rgba8) uniform writeonly image2D outputImage;
 
-// MUST match FrameDebuggerPreviewProcessing.cpp's own PushConstants struct
-// exactly - three plain scalars, no vec3/std140 alignment concerns.
-// `channel`: 0=All, 1=R, 2=G, 3=B, 4=A - matches
-// gte::FrameDebuggerPreviewChannel's own declaration order exactly (see
-// FrameDebuggerPreviewProcessing.h).
+// Matches PushConstants in FrameDebuggerPreviewProcessing.cpp. `channel` follows FrameDebuggerPreviewChannel:
+// 0=All, 1=R, 2=G, 3=B, 4=A.
 layout(push_constant) uniform PushConstants {
     int channel;
     float levelsBlack;
     float levelsWhite;
 } pc;
 
-// A direct GLSL transcription of FrameDebuggerPreviewProcessing.cpp's own
-// anonymous-namespace RemapLevels() - identical formula.
+// Same formula as RemapLevels() in FrameDebuggerPreviewProcessing.cpp.
 float RemapLevels(float value, float levelsBlack, float levelsWhite)
 {
     float denom = max(levelsWhite - levelsBlack, 1e-5);
@@ -54,10 +31,7 @@ void main()
         return;
     }
 
-    // The output image is always created at the source's own exact size
-    // (see FrameDebuggerPreviewRenderer::EnsureOutputTexture()) - a plain
-    // pixel-center UV lookup is therefore always a 1:1 texel mapping, never
-    // a resample.
+    // The output has the source's size, so this is a 1:1 texel lookup.
     vec2 uv = (vec2(pixel) + 0.5) / vec2(outSize);
     vec4 src = texture(sourceTex, uv);
 

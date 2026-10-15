@@ -30,9 +30,7 @@ Editor/EditorSceneIOCapability.cpp # debt: editor code uses raw Vulkan types
 Editor/EditorSceneIOCapability.h # debt: editor code uses raw Vulkan types
 Editor/FrameDebuggerCapture.cpp # debt: editor code uses raw Vulkan types
 Editor/FrameDebuggerCapture.h # debt: editor code uses raw Vulkan types
-Editor/FrameDebuggerHistory.cpp # debt: editor code uses raw Vulkan types
 Editor/FrameDebuggerPassMetadataRecorder.h # debt: editor code uses raw Vulkan types
-Editor/FrameDebuggerPreviewProcessing.cpp # debt: editor code uses raw Vulkan types
 Editor/FrameDebuggerPreviewProcessing.h # debt: editor code uses raw Vulkan types
 Editor/GpuDrivenBatchTestSpawner.cpp # debt: editor code uses raw Vulkan types
 Editor/GpuDrivenBatchTestSpawner.h # debt: editor code uses raw Vulkan types

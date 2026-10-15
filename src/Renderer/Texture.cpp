@@ -153,7 +153,7 @@ void Texture::Create()
         if (m_info.storage) {
             imageInfo.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
         }
-        if (m_info.transferSrc) {
+        if (m_info.transferSrc || (m_info.renderTarget && !m_isDepth)) {
             imageInfo.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         }
         if (m_info.transferDst) {

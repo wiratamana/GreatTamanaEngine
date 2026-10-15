@@ -4,8 +4,7 @@
 // front-to-back alpha composite through a fixed-camera, origin-centered proxy shape.
 // IntersectRayBox/IntersectRayFrustum/MapFrustumLocalPositionToUvw mirror src/Renderer/VolumeTexturePreviewMath.h
 // (the CPU reference); if they disagree, the CPU side is right.
-// Bindings match src/Renderer/VolumeTexturePreviewRenderer.cpp: 0 = volume (sampler), 1 = output image.
-// local_size must match VolumeTexturePreviewRenderer.h kLocalSizeX/kLocalSizeY.
+// Bindings by name: volumeTex (sampled volume) and outputImage (RGBA8 output).
 layout(local_size_x = 16, local_size_y = 16) in;
 
 layout(binding = 0) uniform sampler3D volumeTex;

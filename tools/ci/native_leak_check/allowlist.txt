@@ -11,9 +11,6 @@ Editor/BoneViewerWindow.cpp # debt: editor tool uses raw wrappers or one-shot su
 Editor/BoneViewerWindow.h # debt: editor tool uses raw wrappers or one-shot submits
 Editor/EditorHost.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/EditorProjectLifecycleCapability.cpp # debt: editor tool uses raw wrappers or one-shot submits
-Editor/FrameDebuggerHistory.cpp # debt: RawCommandBuffer for image copy barriers; removed when the editor render code step moves the copy onto a one-shot transfer
-Editor/FrameDebuggerPreviewProcessing.cpp # debt: RawCommandBuffer for hand-recorded compute; removed when the editor render code step moves previews onto a one-shot compute pass
-Editor/FrameDebuggerPreviewProcessing.h # debt: editor tool uses raw wrappers or one-shot submits
 Editor/FrameDebuggerReplayPasses.cpp # debt: AdoptRaw for the background replay callback; removed when the Core GPU-driven code and Frame Debugger replay passes move onto pass kinds (engine systems step)
 Editor/ImGuiEditorLayer.cpp # permanent: ImGui Vulkan backend needs the device idle and raw handles
 Editor/Panels/FrameDebuggerPanel.cpp # debt: editor tool uses raw wrappers or one-shot submits

@@ -849,6 +849,9 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RecordedPass.h
     src/Renderer/RenderGraph/RecordedPass.cpp
     src/Renderer/RenderGraph/OnceErrorLog.h
+    src/Renderer/RenderGraph/OneShot.h
+    src/Renderer/RenderGraph/OneShot.cpp
+    src/Renderer/RenderGraph/RenderGraphOneShot.cpp
     src/Renderer/RenderGraph/OnceErrorLog.cpp
     src/Renderer/RenderGraph/PassKindDefaults.h
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.h

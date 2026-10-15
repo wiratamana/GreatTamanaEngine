@@ -176,9 +176,9 @@ public:
     // externalBuffer is an engine handle (Core/GraphicsHandles.h), never a raw VkBuffer.
     BufferHandle ImportBuffer(const char* name, BufferObjectHandle externalBuffer, uint64_t size);
 
-    // Imports a 3D volume / 2D array / cube owned outside the graph. All return the one TextureHandle type.
-    TextureHandle ImportVolumeTexture(
-        const char* name, const VolumeTarget& externalVolumeTarget, ImageLayout currentLayout);
+    // A volume has no sampler of its own: pass one to bind it by name as a sampled texture.
+    TextureHandle ImportVolumeTexture(const char* name, const VolumeTarget& externalVolumeTarget,
+        ImageLayout currentLayout, SamplerHandle sampler = SamplerHandle::Invalid);
 
     TextureHandle ImportTextureArray(
         const char* name, const TextureArrayTarget& externalTarget, ImageLayout currentLayout);

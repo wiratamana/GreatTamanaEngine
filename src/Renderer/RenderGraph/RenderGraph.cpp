@@ -91,6 +91,7 @@ void RenderGraph::EnsureTextureResolved(
             const VolumeTarget& volume = importInfo.externalVolumeTarget;
             tex.target.image = volume.image;
             tex.target.imageView = volume.imageView;
+            tex.sampler = Native(importInfo.colorSampler);
             tex.target.extent = VkExtent2D{ volume.extent.width, volume.extent.height };
             tex.target.format = volume.format;
             tex.depthSlices = volume.extent.depth;
@@ -274,22 +275,11 @@ void RenderGraph::ReportSkippedOnce(
     }
 }
 
-// Resolves a pass's Bind*() declarations into a descriptor set. All-or-nothing: one unresolved binding
+// Resolves a pass's Bind*() declarations into descriptor writes. All-or-nothing: one unresolved binding
 // invalidates the pass, so a stale view from an earlier frame can never stay in the set.
-DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRecord& pass,
-    const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers)
+bool RenderGraph::BuildDescriptorWrites(const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures,
+    const std::vector<PhysicalBuffer>& physicalBuffers, std::vector<ComputeDescriptorWrite>& writes)
 {
-    if (pass.bindings.empty()) {
-        return DescriptorSetHandle::Invalid;
-    }
-
-    const VkDescriptorSetLayout layout = Native(pass.computeBindingLayout);
-    if (layout == VK_NULL_HANDLE) {
-        ReportSkippedOnce(pass, std::nullopt, "Bind*() used without BindDescriptorSetLayout().");
-        return DescriptorSetHandle::Invalid;
-    }
-
-    std::vector<ComputeDescriptorWrite> writes;
     writes.reserve(pass.bindings.size());
     bool complete = true;
     const auto skip = [&](const PendingBinding& binding, const char* reason) {
@@ -390,7 +380,22 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
         }
     }
 
-    if (!complete) {
+    return complete;
+}
+
+DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRecord& pass,
+    const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers)
+{
+    if (pass.bindings.empty()) {
+        return DescriptorSetHandle::Invalid;
+    }
+    const VkDescriptorSetLayout layout = Native(pass.computeBindingLayout);
+    if (layout == VK_NULL_HANDLE) {
+        ReportSkippedOnce(pass, std::nullopt, "Bind*() used without BindDescriptorSetLayout().");
+        return DescriptorSetHandle::Invalid;
+    }
+    std::vector<ComputeDescriptorWrite> writes;
+    if (!BuildDescriptorWrites(pass, physicalTextures, physicalBuffers, writes)) {
         return DescriptorSetHandle::Invalid;
     }
 

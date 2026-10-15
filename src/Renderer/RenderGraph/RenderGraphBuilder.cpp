@@ -304,7 +304,7 @@ BufferHandle RenderGraphBuilder::ImportBuffer(const char* name, BufferObjectHand
 }
 
 TextureHandle RenderGraphBuilder::ImportVolumeTexture(
-    const char* name, const VolumeTarget& externalVolumeTarget, ImageLayout currentLayout)
+    const char* name, const VolumeTarget& externalVolumeTarget, ImageLayout currentLayout, SamplerHandle sampler)
 {
     assert(name != nullptr && name[0] != '\0' &&
         "RenderGraphBuilder::ImportVolumeTexture requires a non-empty, static-storage-duration name");
@@ -322,6 +322,7 @@ TextureHandle RenderGraphBuilder::ImportVolumeTexture(
     importInfo.isImported = true;
     importInfo.externalVolumeTarget = externalVolumeTarget;
     importInfo.currentLayout = currentLayout;
+    importInfo.colorSampler = sampler;
 
     m_textures.push_back(TextureSlot{ desc, name, importInfo });
     return TextureHandle{ index, 1 };

@@ -2343,6 +2343,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/ComputePassTests.cpp
     Renderer/RenderGraph/FullscreenPassTests.cpp
     Renderer/RenderGraph/RealTargetBindingTests.cpp
+    Renderer/RenderGraph/OneShotTests.cpp
     Renderer/RenderGraph/RecordedPassTests.cpp
     Renderer/RenderGraph/TransferReadbackGpuTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
@@ -2656,6 +2657,8 @@ endforeach()
 target_sources(GreatTamanaEngineTests PRIVATE "${CMAKE_BINARY_DIR}/shaders/BoxBlur.comp.spv")
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_BOXBLUR_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/BoxBlur.comp.spv"
+    GTE_TEST_VOLUME_PREVIEW_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/VolumeTexturePreview.comp.spv"
+    GTE_TEST_FRAME_PREVIEW_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/FrameDebuggerPreview.comp.spv"
 )
 
 # The shadow mask shader is declared by the root gte_add_shader() calls; the feature self-check reflects its real binary.
