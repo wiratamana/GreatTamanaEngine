@@ -419,7 +419,7 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/FeatureSetup.h
     src/Core/FeatureKit/FeatureSetup.cpp
     src/Core/FeatureKit/FeatureModule.cpp
-    src/Core/FeatureKit/Frame.h
+    src/Core/FeatureKit/RegistrationRunner.cpp
     src/Core/FeatureKit/FrameContext.h
     src/Core/FeatureKit/FrameVerbs.cpp
     src/Core/FeatureKit/FullscreenChain.h

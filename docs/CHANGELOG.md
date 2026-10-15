@@ -11,8 +11,14 @@ engine. For the short, current-state summary, see the main
   `ComputePass`, `FullscreenPass` (MRT, depth test), `MeshPass`, `IndirectDrawPass`, `TransferPass`,
   `BlitFilter`, transfer usage bits on graph textures. The raw command buffer is no longer public
   (`PassContext::RawCommandBuffer()` / `CommandBuffer::AdoptRaw()` are tracked by NativeLeakCheck).
-- Feature kit shell (`gte::fx`, `src/Core/FeatureKit`): `Feature`, `FeatureSetup`, typed frames, `Gate`,
-  `GTE_REGISTER_RENDER_FEATURE`. Verbs and resources are not built yet.
+- Feature kit (`gte::fx`, `src/Core/FeatureKit`): `Feature`, `FeatureSetup`, typed frames, `Gate`,
+  `GTE_REGISTER_RENDER_FEATURE`; frame verbs `Compute`, `Fullscreen`, `SceneDraw`, `Blit`, `Keep`, `PublishToScene`,
+  `SetSceneUniforms`; resources `PerView`, `PersistentTarget`, `OffscreenTarget`, `GpuParams`, `Channel`, `SceneSlot`;
+  shader wrappers `ComputeShader`, `FullscreenShader`, `SceneShaderSet`. The Shadow feature is written on the kit
+  (`ShadowFeature.cpp` about 110 lines) and has no CI allowlist entry; `ShadowMaskRenderer` is gone.
+- `TextureDesc::hasColor`: a depth-only texture is the only one that must be sampled through `rg::Depth()`; a view
+  target with a depth companion is an ordinary color texture for `Bind()` and `Target()`.
+- `fx::Texture` serials are per view and frame (`FrameSerial`), so textures pass between callbacks of one view.
 - CI guardrails (`gte_ci_scan`): VolkLeak, NativeLeak, FeaturePurity, EngineVocabulary and the header purity probe.
   A stale allowlist line fails the check; a scan of zero files fails the check.
 - Shader files resolve against the executable directory only.

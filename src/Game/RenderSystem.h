@@ -102,14 +102,8 @@ public:
     PipelineHandle RegisterPipeline(Pipeline&& pipeline) { return m_pipelines.Insert(std::move(pipeline)); }
     MaterialTextureHandle RegisterTexture(MaterialTexture&& texture) { return m_textures.Insert(std::move(texture)); }
 
-    // Frees a previously-registered Pipeline's slot. Only safe to call for a
-    // handle guaranteed to be unreferenced by any entity's MeshRenderer -
-    // this pool tracks no back-references, so removing a handle still in
-    // use elsewhere just makes those entities silently stop drawing
-    // (TryGet() returns nullptr, Draw() skips them like any stale handle).
-    // Exists for same-call rollback of a just-inserted, not-yet-exposed
-    // pipeline (see ShadowFeature::EnsureDepthPipelinesBuilt()) - not a
-    // general-purpose live-unload API.
+    // Frees a pipeline slot. Only safe for a handle no MeshRenderer references: the pool keeps no back-references,
+    // and entities holding a removed handle silently stop drawing. For rollback and owner teardown.
     bool UnregisterPipeline(PipelineHandle handle) { return m_pipelines.Remove(handle); }
 
     // Direct, mutable access to an already-registered Mesh by handle -

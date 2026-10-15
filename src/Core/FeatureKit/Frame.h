@@ -27,7 +27,7 @@ namespace detail {
 struct FrameContext;
 } // namespace detail
 
-// Per-callback context. One serial per callback invocation; textures it hands out carry that serial.
+// Per-callback context. Textures it hands out carry the serial of this view in this frame (see FrameSerial).
 // A frame made without an engine context (tests) turns every verb into a logged no-op.
 class Frame {
 public:
@@ -44,7 +44,7 @@ public:
     Registry& Scene() const noexcept { return *m_scene; }
     std::uint64_t Serial() const noexcept { return m_serial; }
 
-    // True when `texture` was produced by this callback. A copy kept from an earlier frame is refused.
+    // True when `texture` was made for this view in this frame. A copy kept from an earlier frame is refused.
     bool Owns(const Texture& texture) const noexcept { return texture.IsValid() && texture.frameSerial == m_serial; }
 
     // Stamps a handle with this frame's serial.

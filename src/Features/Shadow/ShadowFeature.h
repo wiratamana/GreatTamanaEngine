@@ -1,55 +1,56 @@
 #pragma once
 
-#include "../../Core/Plugins/IEngineFeatureModule.h"
-#include "../../Game/SceneQuery.h"
-#include "../../Renderer/RenderGraph/BuildRetryGate.h"
-#include "../../Renderer/RenderGraph/Shader.h"
-#include "../../Renderer/SceneServicesDescriptorSet.h"
-#include "ShadowMaskRenderer.h"
+#include "ShadowMath.h"
 #include "ShadowTypes.h"
+#include "../../Core/FeatureKit/FeatureKit.h"
+#include "../../Math/Mat4.h"
 
 #include <cstdint>
 
 namespace gte {
 
-class Core;
+// What the depth pass hands to the mask pass.
+struct ShadowMapData {
+    fx::Texture texture;
+    Mat4 lightViewProjection;
+};
+
+// Per-view resources.
+struct ShadowViewState {
+    fx::OffscreenTarget map{ "Shadow.Map" };
+    fx::PersistentTarget mask{ "Shadow.Mask" };
+    fx::GpuParams<ShadowMaskParamsGpu> params;
+};
 
 // One sun, one shadow map: a PreOpaque depth pass, a PostOpaque compute mask pass and a PostComposite darken pass.
-class ShadowFeature final : public IEngineFeatureModule {
+class ShadowFeature final : public fx::Feature {
 public:
-    explicit ShadowFeature(Core& core);
+    explicit ShadowFeature(fx::FeatureHost& host);
 
-    ShadowFeature(const ShadowFeature&) = delete;
-    ShadowFeature& operator=(const ShadowFeature&) = delete;
-    ShadowFeature(ShadowFeature&&) = delete;
-    ShadowFeature& operator=(ShadowFeature&&) = delete;
-
-    const char* ModuleName() const override { return kShadowFeatureName; }
+    const char* Name() const override { return kShadowFeatureName; }
+    void Setup(fx::FeatureSetup& setup) override;
 
     ShadowSettings& Settings() noexcept { return m_settings; }
 
 private:
-    void RegisterPasses();
-    void EnsureDepthPipelinesBuilt(Renderer& renderer, std::uint64_t frame);
+    void DepthPass(fx::PreOpaqueFrame& f);
+    void MaskPass(fx::PostOpaqueFrame& f);
+    void CompositePass(fx::CompositeFrame& f);
 
-    Core& m_core;
+    // The map size is fixed on first use; a later settings change only warns once.
+    std::uint32_t LockedMapResolution(const ShadowSettings& settings);
+
     ShadowSettings m_settings;
+    std::uint32_t m_mapResolution = 0;
+    bool m_resolutionWarned = false;
 
-    // One depth-only pipeline per supported vertex layout; instanced layouts are not shadow-cast.
-    PipelineOverrideSet m_depthPipelines;
-    bool m_depthPipelinesBuilt = false;
-    rg::BuildRetryGate m_depthPipelineGate;
-
-    // Locked on the depth pass's first frame (see ShadowTypes.h).
-    bool m_mapResolutionLocked = false;
-    bool m_mapResolutionMismatchWarned = false;
-    std::uint32_t m_mapResolutionInUse = 0;
-
-    // Scene Services slot this feature publishes its depth map into.
-    std::uint32_t m_shadowMapSlot = kInvalidSceneServiceSlotIndex;
-
-    ShadowMaskRenderer m_maskRenderer;
-    rg::Shader m_compositeShader{ "ShadowComposite", rg::ShaderKind::Graphics };
+    fx::PerView<ShadowViewState> m_views;
+    fx::SceneSlot m_shadowMapSlot;
+    fx::ComputeShader m_maskShader{ "ShadowMask" };
+    fx::FullscreenShader m_compositeShader{ "ShadowComposite" };
+    fx::SceneShaderSet m_depthShaders = fx::SceneShaderSet::DepthOnly("ShadowDepth");
+    fx::Channel<ShadowMapData> m_mapData{ "Map" };
+    fx::Channel<fx::Texture> m_maskData{ "Mask" };
 };
 
 } // namespace gte

@@ -44,6 +44,12 @@ The layer under every render feature. Pass code never touches Vulkan and never n
   `CommandBuffer::RawCommandBuffer()` and `CommandBuffer::AdoptRaw()`; NativeLeakCheck lists every use outside
   `src/Renderer`.
 - Transfer and blit passes on a graph texture need `TextureUsage::TransferSrc` / `TransferDst` (2D textures).
+- `rg::MeshPass` lives in `src/Renderer`, which must not depend on `src/Game`. The scene draw itself (`DrawScene`, the
+  pipeline override set, the camera) therefore lives in `gte::SceneDrawPass` (`src/Game`), a thin wrapper over
+  `MeshPass`; the kit's `SceneDraw` wraps that.
+- `TextureDesc::hasColor` is false only for depth-only textures (a depth map). Those are sampled through `rg::Depth()`
+  and are never a color target or a storage image. A view target (color plus depth companion) is an ordinary color
+  texture and can also be sampled through `rg::Depth()`.
 
 ## Checks
 

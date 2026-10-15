@@ -1,12 +1,11 @@
 #include "FeatureRegistration.h"
 #include "FeatureLife.h"
 #include "FrameContext.h"
+#include "RegistrationRunner.h"
 #include "SceneSlotRegistrar.h"
 #include "SharedOncePerFrame.h"
 #include "../../Application/RenderPassViewData.h"
 #include "../../Renderer/RenderGraph/BoundedOnceSet.h"
-#include "../../Renderer/RenderGraph/RenderFeatureScope.h"
-#include "../../Renderer/RenderGraph/RenderPassToggleGuard.h"
 #include "../../Renderer/RenderTexture.h"
 #include "../Core.h"
 #include "../Logging.h"
@@ -29,8 +28,6 @@ Registry& FeatureHost::Scene() const noexcept
 }
 
 namespace {
-
-constexpr const char* kLogCategory = "FeatureKit";
 
 FrameEvent ToFrameEvent(Stage stage) noexcept
 {
@@ -152,28 +149,8 @@ private:
         rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView, rg::TextureHandle privateTarget, Extent2D extent,
         const ScenePassReadHandles& handles)
     {
-        // Gate first: a disabled pass must not run any side effect.
-        const rg::RenderPassToggleRegistry* toggles = &m_core.GetRenderPassToggleRegistryMutable();
-        const auto isEnabled = [toggles](std::string_view pass) {
-            return rg::ShouldDeclareBuiltInPassThisFrame(toggles, pass);
-        };
-        if (!GateAllows(registration.gate, registration.name, isEnabled)) {
-            return;
-        }
-
-        const bool shared = sharedLatch != nullptr;
         const std::optional<View> view = BuildView(m_core, currentView);
-        if (!ShouldInvokeFeatureCallback(view, shared ? CallbackScope::Shared : CallbackScope::PerView)) {
-            return;
-        }
-        const std::uint64_t frameIndex = builder.FrameIndex();
-        if (shared && !sharedLatch->ShouldRun(frameIndex)) {
-            return;
-        }
-
-        const rg::RenderFeatureScope scope(builder, m_name);
         Registry& scene = m_core.GetRegistry();
-        const std::uint64_t serial = ++m_serial;
 
         detail::FrameContext context;
         context.builder = &builder;
@@ -182,49 +159,23 @@ private:
         context.view = currentView;
         context.featureName = m_name;
         context.event = ToPassEvent(registration.stage);
-        context.toggles = toggles;
-        context.scope = shared ? rg::ViewScope::Shared : view->scope;
-        context.serial = serial;
+        context.toggles = &m_core.GetRenderPassToggleRegistryMutable();
         context.channels = &m_channelNames;
-        try {
-            switch (registration.stage) {
-            case Stage::PreOpaque: {
-                PreOpaqueFrame frame(*view, scene, serial, &context);
-                std::get<PreOpaqueCallback>(registration.callback)(frame);
-                break;
-            }
-            case Stage::PostOpaque:
-            case Stage::PostTransparent: {
-                PostOpaqueFrame frame(*view, scene, serial, handles.colorHandle, handles.depthHandle, &context);
-                std::get<PostOpaqueCallback>(registration.callback)(frame);
-                break;
-            }
-            case Stage::PostComposite:
-            case Stage::PreUI: {
-                CompositeFrame frame(
-                    *view, scene, serial, handles.colorHandle, handles.depthHandle, privateTarget, extent, &context);
-                std::get<CompositeCallback>(registration.callback)(frame);
-                break;
-            }
-            case Stage::PreOpaqueShared: {
-                SharedFrame frame(scene, serial, &context);
-                std::get<SharedCallback>(registration.callback)(frame);
-                break;
-            }
-            }
-            if (shared) {
-                sharedLatch->MarkDone(frameIndex);
-            }
-        } catch (const std::exception& e) {
-            if (shared) {
-                sharedLatch->MarkFailed(frameIndex);
-            }
-            // A throw would end the whole offscreen frame; log it once and drop this callback's work.
-            const std::string message = "feature '" + m_name + "', callback '" + registration.name + "': " + e.what();
-            if (rg::BoundedOnceSet<32>::ShouldLog(m_failuresLogged.Note(message))) {
-                GTE_LOG_ERROR(kLogCategory, message);
-            }
-        }
+
+        detail::RunInput input;
+        input.registration = &registration;
+        input.sharedLatch = sharedLatch;
+        input.view = &view;
+        input.scene = &scene;
+        input.context = &context;
+        input.sceneColor = handles.colorHandle;
+        input.sceneDepth = handles.depthHandle;
+        input.privateTarget = privateTarget;
+        input.extent = extent;
+        input.frameIndex = builder.FrameIndex();
+        const bool perView = sharedLatch == nullptr && view.has_value();
+        input.serial = FrameSerial(input.frameIndex, perView ? view->scope : rg::ViewScope::Shared);
+        detail::RunRegistration(input, m_failuresLogged);
     }
 
     Core& m_core;
@@ -232,7 +183,6 @@ private:
     FeatureHost m_host;
     std::shared_ptr<FeatureLife> m_life;
     std::unique_ptr<Feature> m_feature;
-    std::uint64_t m_serial = 0;
     std::deque<SharedOncePerFrame> m_sharedLatches; // One per shared registration; addresses stay stable.
     rg::BoundedOnceSet<32> m_failuresLogged;
     detail::ChannelNames m_channelNames;

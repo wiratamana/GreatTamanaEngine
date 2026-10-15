@@ -7,29 +7,25 @@
 
 namespace gte {
 
-// Light-space view * projection: an orthographic box of `halfExtentWorld`
-// centered on `sceneCenterWorld`. `directionTowardSun` must be normalized.
-// Caller must pass already-sanitized values (see SanitizeShadowSettings()).
+// Orthographic light-space view * projection box centered on `sceneCenterWorld`.
+// `directionTowardSun` must be normalized; pass sanitized values.
 Mat4 BuildDirectionalShadowViewProjection(const Vec3& directionTowardSun, const Vec3& sceneCenterWorld,
     float halfExtentWorld, float nearZ, float farZ) noexcept;
 
-// World-space position from one depth sample, via a camera's own inverse view-projection.
+// World position of one depth sample through a camera's inverse view-projection.
 Vec3 ReconstructWorldPositionFromDepth(
     const Mat4& invViewProjection, float ndcX, float ndcY, float depthZeroToOne) noexcept;
 
-// Clamps every numeric field into a safe range, every frame:
-//   - orthoHalfExtentWorld: min 0.01 (never zero/negative area).
-//   - nearZ: min 0.01 (this engine's [0,1] depth convention needs a positive near plane).
-//   - farZ: clamped so (2*halfExtentWorld + farZ) never drops below 0.01.
-//   - depthBias: left unclamped (a small positive or negative PCF bias is both legitimate).
-//   - strength: clamped to [0, 1].
-//   - mapResolution: NOT touched here - see ShadowTypes.h.
+// Clamps every numeric field into a safe range (extent and near >= 0.01, box depth >= 0.01, strength in [0,1]).
+// Depth bias and map resolution are left as given.
 ShadowSettings SanitizeShadowSettings(const ShadowSettings& settings) noexcept;
 
-// Packs the real per-frame sun/shadow data into the exact byte layout
-// Scene Services binding 8 expects (SceneLightingUniformData) - a plain,
-// pure, Tier-1-testable data transform (see tests/Features/Shadow/).
+// Packs the per-frame sun/shadow data into the byte layout scene-services binding 8 expects.
 SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirectionalLight& sun,
     const Mat4& lightViewProjection, const ShadowSettings& safeSettings, std::uint32_t mapResolutionInUse) noexcept;
+
+// Parameter block of the mask compute pass. A zero resolution gives a zero texel size.
+ShadowMaskParamsGpu MakeShadowMaskParams(const Mat4& invViewProjection, const Mat4& lightViewProjection,
+    float depthBias, std::uint32_t mapResolution) noexcept;
 
 } // namespace gte

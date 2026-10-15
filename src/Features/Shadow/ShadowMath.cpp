@@ -56,7 +56,7 @@ SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirectionalL
     const Mat4& lightViewProjection, const ShadowSettings& safeSettings, std::uint32_t mapResolutionInUse) noexcept
 {
     SceneLightingUniformData data{};
-    std::memcpy(data.lightViewProjection, lightViewProjection.Data(), sizeof(data.lightViewProjection));
+    data.lightViewProjection = lightViewProjection;
 
     data.sunDirectionAndBias[0] = sun.directionTowardSun.x;
     data.sunDirectionAndBias[1] = sun.directionTowardSun.y;
@@ -68,12 +68,19 @@ SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirectionalL
     data.sunIlluminanceAndStrength[2] = sun.sunIlluminance.z;
     data.sunIlluminanceAndStrength[3] = safeSettings.strength;
 
-    data.shadowTexelSizeAndPad[0] = mapResolutionInUse > 0 ? 1.0f / static_cast<float>(mapResolutionInUse) : 0.0f;
-    data.shadowTexelSizeAndPad[1] = 0.0f;
-    data.shadowTexelSizeAndPad[2] = 0.0f;
-    data.shadowTexelSizeAndPad[3] = 0.0f;
-
+    data.occlusionTexelSizeAndPad[0] = mapResolutionInUse > 0 ? 1.0f / static_cast<float>(mapResolutionInUse) : 0.0f;
     return data;
+}
+
+ShadowMaskParamsGpu MakeShadowMaskParams(const Mat4& invViewProjection, const Mat4& lightViewProjection,
+    float depthBias, std::uint32_t mapResolution) noexcept
+{
+    ShadowMaskParamsGpu params;
+    params.invViewProjection = invViewProjection;
+    params.lightViewProjection = lightViewProjection;
+    params.depthBias = depthBias;
+    params.shadowTexelSize = mapResolution > 0 ? 1.0f / static_cast<float>(mapResolution) : 0.0f;
+    return params;
 }
 
 } // namespace gte

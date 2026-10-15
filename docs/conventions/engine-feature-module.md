@@ -303,34 +303,30 @@ inside that feature's own folder; only files truly exclusive to it do.
    engine/Vulkan code, mirroring `AtmosphereMath.h`'s own "CPU oracle first"
    precedent. Add a matching `tests/Features/ShadowMathTests.cpp` (Tier 1 —
    see `TESTING.md`).
-4. Write `ShadowFeature.h`:
+4. Write `ShadowFeature.h`: derive from `fx::Feature` (see
+   `docs/conventions/render-feature-authoring.md`):
    ```cpp
-   class ShadowFeature final : public IEngineFeatureModule {
+   class ShadowFeature final : public fx::Feature {
    public:
-       explicit ShadowFeature(Core& core);
-       const char* ModuleName() const override { return "Shadow"; }
+       explicit ShadowFeature(fx::FeatureHost& host);
+       const char* Name() const override { return "Shadow"; }
+       void Setup(fx::FeatureSetup& setup) override;
    private:
-       void RegisterPasses();
-       Core& m_core;
+       void DepthPass(fx::PreOpaqueFrame& f);
        ShadowSettings m_settings;
    };
    ```
-5. Write `ShadowFeature.cpp` — constructor calls `RegisterPasses()`, which
-   registers the feature's own render-graph passes via the engine's already
-   public `Core::AddPreOpaquePass()`/`Core::AddPostOpaquePass()`/
-   `Core::RegisterProjectRenderFeature()` (see
-   `docs/conventions/atmosphere-scattering.md` for the full worked example
-   of a real feature's own pass-registration shape — this page intentionally
-   does not duplicate that Render Graph API). At the bottom:
+5. Write `ShadowFeature.cpp` — `Setup()` registers the feature's passes with
+   `setup.PreOpaque(...)`, `setup.PostOpaque(...)`, `setup.PostComposite(...)`
+   and each callback declares its work through the frame verbs (`f.Compute`,
+   `f.Fullscreen`, `f.SceneDraw`). The kit adapter owns the module, the
+   registration, the toggle gate and the per-view frame. At the bottom:
    ```cpp
-   namespace {
-   std::unique_ptr<IEngineFeatureModule> CreateShadowFeatureModule(Core& core)
-   {
-       return std::make_unique<ShadowFeature>(core);
-   }
-   } // namespace
-   GTE_REGISTER_BUILTIN_FEATURE_MODULE("Shadow", &CreateShadowFeatureModule);
+   GTE_REGISTER_RENDER_FEATURE("Shadow", ShadowFeature);
    ```
+   A feature that talks to `Core&` directly through `IEngineFeatureModule` and
+   `GTE_REGISTER_BUILTIN_FEATURE_MODULE` still works (Atmosphere does), but new
+   render features use the kit.
 6. (Optional) Write `Editor/ShadowPluginPanelModule.h/.cpp` the same way,
    ending in `GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("Shadow", &CreateShadowPanelModule);`.
 7. Drop any `.vert`/`.frag`/`.comp` files into `src/Features/Shadow/Shaders/`.

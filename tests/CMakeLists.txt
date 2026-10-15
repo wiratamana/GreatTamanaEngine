@@ -2331,6 +2331,7 @@ set(GTE_TEST_SOURCES
     Core/FeatureKit/FeatureKitTests.cpp
     Core/FeatureKit/KitChainTests.cpp
     Core/FeatureKit/KitDataFlowTests.cpp
+    Core/FeatureKit/KitModuleTests.cpp
     Core/FeatureKit/KitSceneTests.cpp
     Game/SceneDrawPassTests.cpp
     Renderer/Vulkan/ShaderStageMaskTests.cpp
@@ -2671,6 +2672,11 @@ target_sources(GreatTamanaEngineTests PRIVATE
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_SHADOW_COMPOSITE_VERT_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ShadowComposite.vert.spv"
     GTE_TEST_SHADOW_COMPOSITE_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ShadowComposite.frag.spv"
+)
+
+# The lighting layout test reads the shared GLSL include straight from the source tree.
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_TEST_LIGHTING_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/DirectionalLightingAndReceiverMask.glsl"
 )
 
 # Engine-owned reflection fixtures with abstract names (not shipped).

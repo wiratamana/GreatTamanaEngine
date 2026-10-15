@@ -144,9 +144,7 @@ TEST(ShadowMathTest, PackSceneLightingUniformDataMatchesExactKnownInputBytes)
     const SceneLightingUniformData packed =
         PackSceneLightingUniformData(sun, lightViewProjection, safeSettings, mapResolutionInUse);
 
-    for (int i = 0; i < 16; ++i) {
-        EXPECT_FLOAT_EQ(packed.lightViewProjection[i], lightViewProjection.Data()[i]);
-    }
+    EXPECT_TRUE(ApproximatelyEqual(packed.lightViewProjection, lightViewProjection));
 
     EXPECT_FLOAT_EQ(packed.sunDirectionAndBias[0], 0.3f);
     EXPECT_FLOAT_EQ(packed.sunDirectionAndBias[1], 0.8f);
@@ -158,10 +156,10 @@ TEST(ShadowMathTest, PackSceneLightingUniformDataMatchesExactKnownInputBytes)
     EXPECT_FLOAT_EQ(packed.sunIlluminanceAndStrength[2], 1.8f);
     EXPECT_FLOAT_EQ(packed.sunIlluminanceAndStrength[3], 0.6f);
 
-    EXPECT_FLOAT_EQ(packed.shadowTexelSizeAndPad[0], 1.0f / 2048.0f);
-    EXPECT_FLOAT_EQ(packed.shadowTexelSizeAndPad[1], 0.0f);
-    EXPECT_FLOAT_EQ(packed.shadowTexelSizeAndPad[2], 0.0f);
-    EXPECT_FLOAT_EQ(packed.shadowTexelSizeAndPad[3], 0.0f);
+    EXPECT_FLOAT_EQ(packed.occlusionTexelSizeAndPad[0], 1.0f / 2048.0f);
+    EXPECT_FLOAT_EQ(packed.occlusionTexelSizeAndPad[1], 0.0f);
+    EXPECT_FLOAT_EQ(packed.occlusionTexelSizeAndPad[2], 0.0f);
+    EXPECT_FLOAT_EQ(packed.occlusionTexelSizeAndPad[3], 0.0f);
 }
 
 } // namespace

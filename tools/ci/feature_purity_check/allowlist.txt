@@ -9,7 +9,3 @@ Atmosphere/AtmosphereLutRendererImpl.cpp # debt: Atmosphere passes talk to Rende
 Atmosphere/AtmosphereLutRendererImpl.h # debt: Atmosphere passes talk to Renderer and Core directly until the feature kit exists
 Atmosphere/AtmospherePassSequence.cpp # debt: Atmosphere passes talk to Renderer and Core directly until the feature kit exists
 Atmosphere/AtmospherePassSequence.h # debt: Atmosphere passes talk to Renderer and Core directly until the feature kit exists
-Shadow/ShadowFeature.cpp # debt: Shadow feature talks to Core and Renderer directly until the feature kit exists
-Shadow/ShadowFeature.h # debt: Shadow feature talks to Core and Renderer directly until the feature kit exists
-Shadow/ShadowMaskRenderer.cpp # debt: mask pass includes renderer headers until the feature kit exists
-Shadow/ShadowMaskRenderer.h # debt: mask pass includes renderer headers until the feature kit exists
