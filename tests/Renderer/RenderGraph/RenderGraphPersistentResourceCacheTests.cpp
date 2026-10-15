@@ -1542,4 +1542,32 @@ TEST(RenderGraphPersistentResourceCacheTest, GpuParamsUploadReturnsFalseAndLogsO
     EXPECT_EQ(errors, 1);
 }
 
+// Storage usage on a format no device can store to is refused, logged once, and creates no entry.
+TEST(RenderGraphPersistentResourceCacheTest, StorageUsageOnANonStorageFormatIsRefusedAndLoggedOnce)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
+    TextureDesc desc = MakeColorDesc();
+    desc.format = PixelFormat::D32_Float;
+    desc.usage = TextureUsage::Storage;
+
+    RecordingLogSink sink;
+    ScopedLogSinkInstall logGuard(&sink);
+    std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> first;
+    std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> second;
+    EXPECT_NO_THROW({
+        first = cache.Resolve(kPersistentOwnerCacheValidation, "NoStorageFormat", desc, 1, kSync);
+        second = cache.Resolve(kPersistentOwnerCacheValidation, "NoStorageFormat", desc, 2, kSync);
+    });
+
+    EXPECT_FALSE(first.has_value());
+    EXPECT_FALSE(second.has_value());
+    EXPECT_FALSE(cache.FramesUntilEviction(kPersistentOwnerCacheValidation, "NoStorageFormat", 2).has_value());
+    EXPECT_EQ(sink.entries.size(), 1u);
+}
+
 } // namespace gte::rg

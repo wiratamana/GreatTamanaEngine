@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BoundedOnceSet.h"
 #include "PersistentSlotTable.h"
 #include "RenderGraphTypes.h"
 #include "../RenderTexture.h"
@@ -45,6 +46,9 @@ struct PersistentResourceCacheEntry {
 
 // Frames an identity may go unrequested before BeginFrame() evicts it.
 inline constexpr std::uint64_t kPersistentResourceStaleThresholdFrames = 300;
+
+// Distinct refused identities remembered so each refusal is logged once.
+inline constexpr std::size_t kRefusalLogCapacity = 64;
 
 // Owns cross-frame named color textures; creates, resizes and evicts them on demand.
 class RenderGraphPersistentResourceCache {
@@ -126,6 +130,7 @@ private:
     std::vector<PersistentResourceCacheEntry*> m_slotEntries; // Indexed by slot index.
     std::vector<PendingResize> m_pendingResizes;
     std::vector<RenderTexture> m_retired; // Freed at the next BeginFrame().
+    BoundedOnceSet<kRefusalLogCapacity> m_refusalsLogged; // Identities whose refusal was already logged.
 };
 
 } // namespace gte::rg

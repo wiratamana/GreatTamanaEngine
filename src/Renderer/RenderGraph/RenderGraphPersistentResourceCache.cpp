@@ -1,6 +1,8 @@
 #include "RenderGraphPersistentResourceCache.h"
 
 #include "../Renderer.h"
+#include "../VulkanFormatInfo.h"
+#include "../Vulkan/FormatCapabilities.h"
 #include "../../Core/Logging.h"
 #include "RenderGraph.h"
 
@@ -76,8 +78,17 @@ RenderGraphPersistentResourceCache::Resolve(const char* owner, const char* name,
         return std::nullopt;
     }
 
-    auto [it, inserted] = m_entries.try_emplace(key);
+    // A storage usage on a format the device cannot store to would make the image create throw every frame.
+    if (HasFlag(desc.usage, TextureUsage::Storage)
+        && !SupportsStorageImageUsage(m_renderer->GetVulkanContextInfo().physicalDevice, ToVkFormat(desc.format))) {
+        if (BoundedOnceSet<kRefusalLogCapacity>::ShouldLog(m_refusalsLogged.Note(key))) {
+            GTE_LOG_ERROR("RenderGraphPersistentResourceCache",
+                "\"" + key + "\" requests storage usage, but this device cannot use its format as a storage image - refusing.");
+        }
+        return std::nullopt;
+    }
 
+    auto [it, inserted] = m_entries.try_emplace(key);
     // The texture's debug name points at the map's own stable key, so the entry is inserted first.
     if (!it->second.texture.has_value()) {
         try {
