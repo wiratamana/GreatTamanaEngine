@@ -1,0 +1,5 @@
+# Vulkan symbols. Only src/Renderer may name the graphics backend.
+volk.h
+Vk*
+vk*
+VK_*

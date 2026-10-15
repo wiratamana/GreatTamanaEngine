@@ -2287,6 +2287,7 @@ set(GTE_TEST_SOURCES
     Input/InputStateTests.cpp
     Application/EventTranslatorTests.cpp
     Application/ViewScopeUtilTests.cpp
+    Tools/CppScannerTests.cpp
     Application/MemorySnapshotBuilderTests.cpp
     Application/FrameCaptureBridgeTests.cpp
     Application/EngineCommandBridgeTests.cpp
@@ -2768,6 +2769,15 @@ sdl3_copy_runtime_dll(GreatTamanaEngineTests)
 include(GoogleTest)
 gtest_discover_tests(GreatTamanaEngineTests)
 
+# Scanner behind the guardrail checks below (tools/ci/common). Std-only; linked statically so ctest needs no runtime DLLs.
+add_executable(gte_ci_scan "${CMAKE_SOURCE_DIR}/tools/ci/common/CiScan.cpp")
+target_compile_features(gte_ci_scan PRIVATE cxx_std_20)
+if(MINGW)
+    target_link_options(gte_ci_scan PRIVATE -static)
+endif()
+add_dependencies(GreatTamanaEngineTests gte_ci_scan)
+target_include_directories(GreatTamanaEngineTests PRIVATE "${CMAKE_SOURCE_DIR}/tools/ci/common")
+
 # Fails (non-zero) if Core.h/Core.cpp/EditorLayer.h ever mention "Atmosphere"
 # again - see tools/ci/atmosphere_core_decoupling_check/CheckAtmosphereCoreDecoupling.cmake.
 add_test(NAME AtmosphereCoreDecouplingCheck
@@ -2775,12 +2785,10 @@ add_test(NAME AtmosphereCoreDecouplingCheck
             -P "${CMAKE_SOURCE_DIR}/tools/ci/atmosphere_core_decoupling_check/CheckAtmosphereCoreDecoupling.cmake"
 )
 
-# Fails (non-zero) if any Vk*/vk*/VK_*/volk.h symbol appears outside
-# src/Renderer - see tools/ci/volk_leak_check/CheckVolkLeak.cmake. Comments
-# are stripped before matching; comment_only_allowlist.txt is a shrink-only
-# pre-existing-debt list, never grown to silence a new real leak.
+# Fails if Vulkan names (volk.h, Vk*, vk*, VK_*) appear outside src/Renderer. See tools/ci/volk_leak_check/README.md.
 add_test(NAME VolkLeakCheck
-    COMMAND "${CMAKE_COMMAND}" -D "SRC_ROOT=${CMAKE_SOURCE_DIR}/src"
-            -D "ALLOWLIST_FILE=${CMAKE_SOURCE_DIR}/tools/ci/volk_leak_check/comment_only_allowlist.txt"
-            -P "${CMAKE_SOURCE_DIR}/tools/ci/volk_leak_check/CheckVolkLeak.cmake"
+    COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src" --skip Renderer/
+            --tokens "${CMAKE_SOURCE_DIR}/tools/ci/volk_leak_check/tokens.txt"
+            --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/volk_leak_check/allowlist.txt"
+            --comments skip --strings scan
 )
