@@ -567,11 +567,17 @@ ComputeDescriptorSet GpuResourceFactory::AllocateComputeDescriptorSet(VkDescript
     };
 
     std::optional<VkDescriptorSet> set = tryAllocate();
-    while (!set.has_value()) {
-        const std::optional<PoolCapacity> next = NextPoolCapacity(m_lastComputePoolCapacity, m_computePools.size());
+    for (std::size_t poolsAddedForRequest = 0; !set.has_value(); ++poolsAddedForRequest) {
+        const std::optional<PoolCapacity> next = CanGrowPoolForRequest(poolsAddedForRequest)
+            ? NextPoolCapacity(m_lastComputePoolCapacity, m_computePools.size())
+            : std::nullopt;
         if (!next.has_value()) {
-            throw std::runtime_error("GpuResourceFactory::AllocateComputeDescriptorSet: all "
-                + std::to_string(m_computePools.size()) + " compute descriptor pools are full.");
+            // A fresh pool could not satisfy this layout, or the pool cap is reached: more pools will not help.
+            const std::string stats = std::to_string(m_computePools.size()) + " pools, newest holds "
+                + std::to_string(m_lastComputePoolCapacity.sets) + " sets";
+            GTE_LOG_ERROR("GpuResourceFactory", "Compute descriptor set allocation failed (" + stats + ").");
+            throw std::runtime_error("GpuResourceFactory::AllocateComputeDescriptorSet: no pool can hold this layout ("
+                + stats + ").");
         }
         const VkDescriptorPool pool = CreateComputeDescriptorPool(*next);
         if (pool == VK_NULL_HANDLE) {
