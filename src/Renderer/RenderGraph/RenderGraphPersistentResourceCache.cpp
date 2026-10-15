@@ -225,14 +225,22 @@ void RenderGraphPersistentResourceCache::QueueResize(
     m_pendingResizes.push_back(PendingResize{ slot, newWidth, newHeight });
 }
 
-void RenderGraphPersistentResourceCache::FlushPendingResizes()
+const RenderTexture* RenderGraphPersistentResourceCache::TextureFor(PersistentSlotRef slot) const noexcept
 {
+    const PersistentResourceCacheEntry* entry = EntryFor(slot);
+    return (entry != nullptr && entry->texture.has_value()) ? &*entry->texture : nullptr;
+}
+
+std::vector<PersistentSlotRef> RenderGraphPersistentResourceCache::FlushPendingResizes()
+{
+    std::vector<PersistentSlotRef> resized;
     if (m_pendingResizes.empty()) {
-        return;
+        return resized;
     }
 
     // One stall for the whole batch.
     vkDeviceWaitIdle(m_device);
+    resized.reserve(m_pendingResizes.size());
     for (const PendingResize& pending : m_pendingResizes) {
         PersistentResourceCacheEntry* entry = EntryFor(pending.slot);
         if (entry == nullptr) {
@@ -242,8 +250,10 @@ void RenderGraphPersistentResourceCache::FlushPendingResizes()
         entry->desc.width = pending.newWidth;
         entry->desc.height = pending.newHeight;
         entry->lastKnownLayout = VK_IMAGE_LAYOUT_UNDEFINED; // A recreated image starts undefined.
+        resized.push_back(pending.slot);
     }
     m_pendingResizes.clear();
+    return resized;
 }
 
 } // namespace gte::rg

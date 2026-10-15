@@ -646,7 +646,7 @@ TEST(RenderGraphPersistentResourceCacheTest, FlushSkipsResizeOfAnEvictedEntry)
         return {};
     });
     cache.BeginFrame(100, /*staleThresholdFrames=*/1);
-    cache.FlushPendingResizes(); // Must not touch the evicted entry.
+    EXPECT_TRUE(cache.FlushPendingResizes().empty()); // Must not touch the evicted entry.
     EXPECT_FALSE(cache.FramesUntilEviction(kPersistentOwnerCacheValidation, "EvictedResize", 100).has_value());
 }
 
@@ -715,7 +715,11 @@ TEST(RenderGraphPersistentResourceCacheTest, ResizeIsQueuedNotAppliedUntilFlushP
     EXPECT_EQ(secondResolve->texture, texture);
     EXPECT_EQ(secondResolve->texture->Extent().width, 64u);
 
-    cache.FlushPendingResizes();
+    const std::vector<PersistentSlotRef> resized = cache.FlushPendingResizes();
+    ASSERT_EQ(resized.size(), 1u);
+    EXPECT_EQ(resized[0], secondResolve->slot);
+    EXPECT_EQ(cache.TextureFor(resized[0]), texture);
+    EXPECT_TRUE(cache.FlushPendingResizes().empty()); // Nothing pending anymore.
 
     // (b) after the flush, the SAME RenderTexture* is now the new size.
     EXPECT_EQ(texture->Extent().width, 128u);

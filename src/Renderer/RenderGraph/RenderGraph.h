@@ -202,6 +202,9 @@ private:
     DepthAttachmentResult BuildDepthAttachmentInfo(const PassRecord& pass,
         const std::vector<PhysicalTexture>& physicalTextures, TextureHandle depthHandle) const;
 
+    // Writes one 2D texture's debug snapshot (the single place a snapshot entry is built).
+    void UpsertDebugTextureSnapshot(ExecuteTimingMode timingMode, const char* name, const PhysicalTexture& tex);
+
     // Registers resolved 2D textures / 3D volumes with the debug inspector (other dimensions are not inspected).
     void RegisterDebugTextureSnapshots(ExecuteTimingMode timingMode, const CompiledGraphInput& input,
         const std::vector<PhysicalTexture>& physicalTextures);

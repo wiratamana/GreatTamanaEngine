@@ -13,6 +13,7 @@
 #include "../Renderer/PipelineHandle.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/SceneServicesDescriptorSet.h"
+#include "../Renderer/RenderGraph/BoundedOnceSet.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/RenderGraph/RenderPipeline.h"
 #include "FrameDebuggerCaptureRecorder.h"
@@ -272,6 +273,9 @@ private:
     std::unordered_set<Entity> m_gpuDrivenBatchedEntitiesThisFrame;
     Mat4 m_gpuDrivenGameViewProjectionThisFrame;
     std::vector<GpuDrivenBatchDebugInfo> m_gpuDrivenBatchDebugInfoLastFrame;
+
+    // De-duplicates frame-build failure logs (a failing frame repeats every frame).
+    rg::BoundedOnceSet<64> m_frameFailureOnce;
 
     // Present pass state.
     bool m_needsDirectGameRenderThisFrame = false;

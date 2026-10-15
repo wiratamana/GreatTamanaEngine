@@ -30,6 +30,11 @@ public:
         m_keys.emplace(key);
         return Result::First;
     }
+    // True for the results that deserve one log line (a new key, or the first overflow).
+    static constexpr bool ShouldLog(Result result) noexcept
+    {
+        return result == Result::First || result == Result::Overflow;
+    }
 
     std::size_t Size() const noexcept { return m_keys.size(); }
 

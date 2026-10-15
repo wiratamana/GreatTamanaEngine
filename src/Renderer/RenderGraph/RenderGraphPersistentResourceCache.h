@@ -87,8 +87,12 @@ public:
     // Stores the layout the texture was left in at the end of the frame. No-op for a dead slot.
     void RecordFinalLayout(PersistentSlotRef slot, VkImageLayout layout);
 
-    // Applies queued resizes behind one device idle. Skips entries evicted since queueing.
-    void FlushPendingResizes();
+    // Applies queued resizes behind one device idle and returns the slots that were recreated.
+    // Skips entries evicted since queueing. Allocates nothing when no resize is pending.
+    std::vector<PersistentSlotRef> FlushPendingResizes();
+
+    // The live texture behind a slot, or nullptr if the slot is dead.
+    const RenderTexture* TextureFor(PersistentSlotRef slot) const noexcept;
 
 private:
     struct PendingResize {

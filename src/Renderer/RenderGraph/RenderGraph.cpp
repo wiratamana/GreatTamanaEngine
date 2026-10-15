@@ -610,6 +610,22 @@ RenderGraph::DepthAttachmentResult RenderGraph::BuildDepthAttachmentInfo(
     return result;
 }
 
+void RenderGraph::UpsertDebugTextureSnapshot(
+    ExecuteTimingMode timingMode, const char* name, const PhysicalTexture& tex)
+{
+    DebugTextureSnapshot snapshot;
+    snapshot.name = name;
+    snapshot.regime = timingMode;
+    snapshot.target = tex.target;
+    snapshot.hasDepth = tex.hasDepth;
+    snapshot.sampler = tex.sampler;
+    snapshot.depthSampler = tex.depthSampler;
+    snapshot.colorState = tex.colorState;
+    snapshot.depthState = tex.depthState;
+    snapshot.lastUpdatedFrameCounter = m_debugTextureFrameCounter;
+    m_debugTextures.Upsert(snapshot);
+}
+
 // Registers resolved 2D textures with the debug inspector.
 void RenderGraph::RegisterDebugTextureSnapshots(ExecuteTimingMode timingMode, const CompiledGraphInput& input,
     const std::vector<PhysicalTexture>& physicalTextures)
@@ -623,18 +639,7 @@ void RenderGraph::RegisterDebugTextureSnapshots(ExecuteTimingMode timingMode, co
         if (name == nullptr || name[0] == '\0') {
             continue;
         }
-
-        DebugTextureSnapshot snapshot;
-        snapshot.name = name;
-        snapshot.regime = timingMode;
-        snapshot.target = tex.target;
-        snapshot.hasDepth = tex.hasDepth;
-        snapshot.sampler = tex.sampler;
-        snapshot.depthSampler = tex.depthSampler;
-        snapshot.colorState = tex.colorState;
-        snapshot.depthState = tex.depthState;
-        snapshot.lastUpdatedFrameCounter = m_debugTextureFrameCounter;
-        m_debugTextures.Upsert(snapshot);
+        UpsertDebugTextureSnapshot(timingMode, name, tex);
     }
 }
 
@@ -981,7 +986,26 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         m_persistentResourceCache.RecordFinalLayout(use.slot, physicalTextures[use.handle.index].colorState.layout);
     }
     if (!isPipelined) {
-        m_persistentResourceCache.FlushPendingResizes();
+        const std::vector<PersistentSlotRef> resized = m_persistentResourceCache.FlushPendingResizes();
+        // The resize replaced the image behind the snapshot registered above: re-register it.
+        for (const PersistentSlotRef& slot : resized) {
+            for (const PersistentTextureUse& use : input.persistentCacheTextures) {
+                if (!(use.slot == slot) || use.handle.index >= physicalTextures.size()) {
+                    continue;
+                }
+                PhysicalTexture& tex = physicalTextures[use.handle.index];
+                const RenderTexture* renderTexture = m_persistentResourceCache.TextureFor(slot);
+                const char* name = input.textures[use.handle.index].name;
+                if (!tex.resolved || renderTexture == nullptr || name == nullptr || name[0] == '\0') {
+                    continue;
+                }
+                tex.target = renderTexture->Target();
+                tex.sampler = renderTexture->Sampler();
+                tex.colorState = ResourceState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                    VK_ACCESS_2_NONE };
+                UpsertDebugTextureSnapshot(timingMode, name, tex);
+            }
+        }
     }
 
     // Build the debug snapshot for the editor frame inspector.

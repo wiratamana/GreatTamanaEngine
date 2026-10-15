@@ -8,6 +8,7 @@
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/Culling/CullingPipelines.h"
+#include "Logging.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
@@ -857,8 +858,11 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                             instancedPipeline = &m_gpuDrivenBatchCache.ResolveInstancedPipeline(
                                 m_renderer, originalPipelineHandle, m_sceneServicesDescriptorSet.Layout());
                         } catch (const std::exception& e) {
-                            std::fprintf(
-                                stderr, "GpuDrivenBatches: failed to resolve instanced pipeline: %s\n", e.what());
+                            const std::string failure =
+                                std::string("GpuDrivenBatches: failed to resolve instanced pipeline: ") + e.what();
+                            if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
+                                GTE_LOG_ERROR("Core", failure);
+                            }
                         }
                         if (mesh == nullptr || instancedPipeline == nullptr) {
                             return;
@@ -1138,9 +1142,12 @@ void Core::BuildFrame()
                                     m_gpuDrivenBatchCache.ResolveInstancedPipeline(
                                         m_renderer, frameEntry.pipeline, m_sceneServicesDescriptorSet.Layout());
                                 } catch (const std::exception& e) {
-                                    std::fprintf(stderr,
-                                        "GpuDrivenBatches: failed to resolve instanced pipeline for a batch: %s\n",
-                                        e.what());
+                                    const std::string failure =
+                                        std::string("GpuDrivenBatches: failed to resolve instanced pipeline for a batch: ")
+                                        + e.what();
+                                    if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
+                                        GTE_LOG_ERROR("Core", failure);
+                                    }
                                     instancedPipelineResolved = false;
                                 }
                                 if (!instancedPipelineResolved) {
@@ -1327,8 +1334,12 @@ void Core::BuildFrame()
 
             m_renderGraph.FinalizeSynchronousGpuTiming();
         } catch (const std::exception& e) {
-            std::fprintf(stderr, "RenderGraph offscreen Execute() failed: %s\n", e.what());
-            assert(false && "RenderGraph offscreen Execute() threw - see stderr");
+            // A failure that repeats every frame is logged once per distinct message.
+            const std::string failure = std::string("RenderGraph offscreen Execute() failed: ") + e.what();
+            if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
+                GTE_LOG_ERROR("Core", failure);
+            }
+            assert(false && "RenderGraph offscreen Execute() threw - see the engine log");
         }
     }
 
@@ -1385,8 +1396,11 @@ void Core::Present()
                 return std::vector<rg::TextureHandle>{ swapchainImage };
             });
     } catch (const std::exception& e) {
-        std::fprintf(stderr, "RenderGraph Present Execute() failed: %s\n", e.what());
-        assert(false && "RenderGraph Present Execute() threw - see stderr");
+        const std::string failure = std::string("RenderGraph Present Execute() failed: ") + e.what();
+        if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
+            GTE_LOG_ERROR("Core", failure);
+        }
+        assert(false && "RenderGraph Present Execute() threw - see the engine log");
     }
 
     if (presentStats.has_value()) {
