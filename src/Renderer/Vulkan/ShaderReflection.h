@@ -50,8 +50,7 @@ struct ShaderStageFile {
 };
 
 // Reflects and merges every stage (compute, or vertex + fragment).
-// Throws std::runtime_error on an unreadable or invalid file, a stage that does not match the
-// file, an unsupported descriptor type, or stages that disagree on a slot or on the push block.
+// Throws std::runtime_error on an invalid file, stage mismatch, unsupported type or conflicting stages.
 ShaderReflectionResult ReflectShader(std::span<const ShaderStageFile> stages);
 
 // Merges one stage's bindings into `merged`: same (set, binding) becomes one entry with the

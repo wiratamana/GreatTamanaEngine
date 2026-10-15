@@ -194,7 +194,7 @@ public:
 
     // Asks the render graph to drop the cached descriptor sets built for a destroyed pipeline layout.
     void QueueComputeBindingRelease(VkDescriptorSetLayout layout) noexcept;
-    std::vector<VkDescriptorSetLayout> TakeQueuedComputeBindingReleases();
+    std::vector<VkDescriptorSetLayout> TakeQueuedComputeBindingReleases() noexcept;
 
     // Layout shared by instanced indirect draw buffers.
     VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept;

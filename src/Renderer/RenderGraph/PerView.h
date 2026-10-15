@@ -16,14 +16,6 @@ public:
     T& For(ViewScope scope) noexcept { return m_slots[ViewScopeIndex(scope)]; }
     const T& For(ViewScope scope) const noexcept { return m_slots[ViewScopeIndex(scope)]; }
 
-    template <typename Fn>
-    void ForEach(Fn&& fn)
-    {
-        for (T& slot : m_slots) {
-            fn(slot);
-        }
-    }
-
 private:
     std::array<T, kViewScopeCount> m_slots{};
 };

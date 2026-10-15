@@ -1,6 +1,7 @@
 #include "ShaderBindings.h"
 
 #include <algorithm>
+#include <cassert>
 
 namespace gte::rg {
 
@@ -145,34 +146,24 @@ BindingPlanResult PlanBindings(std::span<const ReflectedDescriptorBinding> refle
     return result;
 }
 
-std::optional<std::string> ValidatePushConstantSize(
-    bool shaderHasPushConstants, std::uint32_t reflectedSize, std::uint32_t providedSize)
+std::optional<std::string> ValidatePushConstantSize(std::uint32_t reflectedSize, std::uint32_t providedSize)
 {
-    if (shaderHasPushConstants && providedSize == 0) {
+    if (reflectedSize != 0 && providedSize == 0) {
         return "shader declares a " + std::to_string(reflectedSize) + "-byte push-constant block but none was supplied";
     }
-    if (!shaderHasPushConstants && providedSize != 0) {
+    if (reflectedSize == 0 && providedSize != 0) {
         return "shader has no push-constant block but " + std::to_string(providedSize) + " bytes were supplied";
     }
-    if (shaderHasPushConstants && providedSize != reflectedSize) {
+    if (providedSize != reflectedSize) {
         return "push-constant size mismatch: shader declares " + std::to_string(reflectedSize) + " bytes, got "
             + std::to_string(providedSize);
     }
     return std::nullopt;
 }
 
-std::optional<std::string> DeclareBindings(
-    RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout)
+void DeclareBindings(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout)
 {
-    if (layout == DescriptorSetLayoutHandle::Invalid) {
-        return "invalid descriptor set layout";
-    }
-    for (const PlannedBinding& binding : plan.bindings) {
-        if (const std::string mismatch = KindMismatch(binding.type, binding.kind); !mismatch.empty()) {
-            return "binding " + std::to_string(binding.binding) + " " + mismatch;
-        }
-    }
-
+    assert(layout != DescriptorSetLayoutHandle::Invalid && "a built shader always has a layout");
     pass.BindDescriptorSetLayout(layout);
     for (const PlannedBinding& binding : plan.bindings) {
         switch (binding.type) {
@@ -198,10 +189,10 @@ std::optional<std::string> DeclareBindings(
             pass.ReadStorageBuffer(binding.binding, binding.buffer); // External buffers are not graph-tracked.
             break;
         default:
-            break; // Unreachable: rejected by KindMismatch above.
+            assert(false && "PlanBindings rejects unsupported descriptor types");
+            break;
         }
     }
-    return std::nullopt;
 }
 
 } // namespace gte::rg

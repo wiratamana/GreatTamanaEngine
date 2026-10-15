@@ -16,9 +16,8 @@ namespace gte::rg {
 
 class RenderGraphBuilder;
 
-// A compute shader loaded from "shaders/<baseName>.comp.spv". The pipeline is built lazily on first
-// use. A failed build never throws: the shader stays unusable and retries on a growing cooldown.
-// The owning Renderer must outlive it, and the host idles the device before it is destroyed.
+// Compute shader loaded from "shaders/<baseName>.comp.spv"; the pipeline is built lazily and a failed
+// build retries on a cooldown, never throwing. The Renderer must outlive it; idle the device before destroying.
 class Shader {
 public:
     explicit Shader(const char* baseName);
@@ -38,7 +37,6 @@ private:
     bool EnsureBuilt(RenderGraphBuilder& builder);
 
     std::span<const ReflectedDescriptorBinding> ReflectedBindings() const noexcept;
-    bool HasPushConstants() const noexcept;
     std::uint32_t PushConstantSize() const noexcept;
     const ComputePipeline* Pipeline() const noexcept;
     DescriptorSetLayoutHandle Layout() const noexcept;

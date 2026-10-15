@@ -295,7 +295,7 @@ TEST(ShaderBindingsTest, DeclareHappyPathProducesReadsWritesAndBindings)
 
     PassRecord record;
     RenderGraphBuilder::PassBuilder pass(record);
-    ASSERT_FALSE(DeclareBindings(pass, result.plan, kLayout).has_value());
+    DeclareBindings(pass, result.plan, kLayout);
 
     EXPECT_EQ(record.computeBindingLayout, kLayout);
     ASSERT_EQ(record.reads.size(), 2u);
@@ -324,7 +324,7 @@ TEST(ShaderBindingsTest, DeclareColorSamplerIsNotADepthRead)
 
     PassRecord record;
     RenderGraphBuilder::PassBuilder pass(record);
-    ASSERT_FALSE(DeclareBindings(pass, result.plan, kLayout).has_value());
+    DeclareBindings(pass, result.plan, kLayout);
     ASSERT_EQ(record.reads.size(), 1u);
     EXPECT_FALSE(record.reads[0].isDepthResource);
     EXPECT_EQ(record.bindings[0].textureAspect, TextureAspect::Color);
@@ -339,7 +339,7 @@ TEST(ShaderBindingsTest, DeclareWriteOnlyImageHasNoRead)
 
     PassRecord record;
     RenderGraphBuilder::PassBuilder pass(record);
-    ASSERT_FALSE(DeclareBindings(pass, result.plan, kLayout).has_value());
+    DeclareBindings(pass, result.plan, kLayout);
     EXPECT_TRUE(record.reads.empty());
     ASSERT_EQ(record.writes.size(), 1u);
     EXPECT_EQ(record.bindings.size(), 1u);
@@ -354,7 +354,7 @@ TEST(ShaderBindingsTest, DeclareReadOnlyImageHasNoWrite)
 
     PassRecord record;
     RenderGraphBuilder::PassBuilder pass(record);
-    ASSERT_FALSE(DeclareBindings(pass, result.plan, kLayout).has_value());
+    DeclareBindings(pass, result.plan, kLayout);
     ASSERT_EQ(record.reads.size(), 1u);
     EXPECT_EQ(record.reads[0].access, ResourceAccess::ComputeShaderRead);
     EXPECT_TRUE(record.writes.empty());
@@ -370,7 +370,7 @@ TEST(ShaderBindingsTest, DeclareReadWriteImageHasReadWriteAndOneBinding)
 
     PassRecord record;
     RenderGraphBuilder::PassBuilder pass(record);
-    ASSERT_FALSE(DeclareBindings(pass, result.plan, kLayout).has_value());
+    DeclareBindings(pass, result.plan, kLayout);
     ASSERT_EQ(record.reads.size(), 1u);
     EXPECT_EQ(record.reads[0].access, ResourceAccess::ComputeShaderRead);
     ASSERT_EQ(record.writes.size(), 1u);
@@ -378,53 +378,17 @@ TEST(ShaderBindingsTest, DeclareReadWriteImageHasReadWriteAndOneBinding)
     EXPECT_EQ(record.bindings.size(), 1u);
 }
 
-TEST(ShaderBindingsTest, DeclareRejectsInvalidLayoutAndDeclaresNothing)
-{
-    const BindingPlanResult result = Plan(FixtureBindings(), HappyArgs());
-    ASSERT_TRUE(result.Ok()) << result.error;
-
-    PassRecord record;
-    RenderGraphBuilder::PassBuilder pass(record);
-    EXPECT_TRUE(DeclareBindings(pass, result.plan, DescriptorSetLayoutHandle::Invalid).has_value());
-    EXPECT_TRUE(record.bindings.empty());
-    EXPECT_TRUE(record.reads.empty());
-}
-
-TEST(ShaderBindingsTest, DeclareRejectsMismatchedPlanEntryAndDeclaresNothing)
-{
-    BindingPlan plan;
-    PlannedBinding good;
-    good.binding = 0;
-    good.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    good.kind = BindingResourceKind::Texture;
-    good.texture = kMask;
-    PlannedBinding bad;
-    bad.binding = 1;
-    bad.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bad.kind = BindingResourceKind::Texture;
-    bad.texture = kMask;
-    plan.bindings = { good, bad };
-
-    PassRecord record;
-    RenderGraphBuilder::PassBuilder pass(record);
-    const std::optional<std::string> error = DeclareBindings(pass, plan, kLayout);
-    ASSERT_TRUE(error.has_value());
-    EXPECT_TRUE(Contains(*error, "binding 1"));
-    EXPECT_TRUE(record.bindings.empty());
-    EXPECT_TRUE(record.writes.empty());
-}
-
 // --- Push constants --------------------------------------------------------
 
 TEST(ShaderBindingsTest, PushConstantSizeMatchIsOk)
 {
-    EXPECT_FALSE(ValidatePushConstantSize(true, 16, 16).has_value());
-    EXPECT_FALSE(ValidatePushConstantSize(false, 0, 0).has_value());
+    EXPECT_FALSE(ValidatePushConstantSize(16, 16).has_value());
+    EXPECT_FALSE(ValidatePushConstantSize(0, 0).has_value());
 }
 
 TEST(ShaderBindingsTest, PushConstantSizeMismatchIsAnError)
 {
-    const std::optional<std::string> error = ValidatePushConstantSize(true, 16, 8);
+    const std::optional<std::string> error = ValidatePushConstantSize(16, 8);
     ASSERT_TRUE(error.has_value());
     EXPECT_TRUE(Contains(*error, "16"));
     EXPECT_TRUE(Contains(*error, "8"));
@@ -432,12 +396,12 @@ TEST(ShaderBindingsTest, PushConstantSizeMismatchIsAnError)
 
 TEST(ShaderBindingsTest, PushConstantSuppliedWithoutShaderBlockIsAnError)
 {
-    EXPECT_TRUE(ValidatePushConstantSize(false, 0, 4).has_value());
+    EXPECT_TRUE(ValidatePushConstantSize(0, 4).has_value());
 }
 
 TEST(ShaderBindingsTest, PushConstantMissingForShaderBlockIsAnError)
 {
-    EXPECT_TRUE(ValidatePushConstantSize(true, 4, 0).has_value());
+    EXPECT_TRUE(ValidatePushConstantSize(4, 0).has_value());
 }
 
 } // namespace

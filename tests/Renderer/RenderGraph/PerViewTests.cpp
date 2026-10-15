@@ -35,17 +35,5 @@ TEST(PerViewTest, ConstLookupMatchesNonConst)
     EXPECT_EQ(&constViews.For(ViewScope::SceneView), &views.For(ViewScope::SceneView));
 }
 
-TEST(PerViewTest, ForEachVisitsEverySlotOnce)
-{
-    PerView<Slot> views;
-    int visited = 0;
-    views.ForEach([&](Slot& slot) {
-        slot.value = ++visited;
-    });
-    EXPECT_EQ(visited, 3);
-    EXPECT_EQ(views.For(ViewScope::Shared).value, 1);
-    EXPECT_EQ(views.For(ViewScope::SceneView).value, 3);
-}
-
 } // namespace
 } // namespace gte::rg

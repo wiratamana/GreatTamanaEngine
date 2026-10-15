@@ -63,16 +63,6 @@ void ComputePass::Add(const Argument& argument)
     }
 }
 
-bool ComputePass::Dispatch(Extent2D size, std::uint32_t depth)
-{
-    return Finish(size, /*useImageExtent=*/false, depth);
-}
-
-bool ComputePass::Dispatch()
-{
-    return Finish(Extent2D{}, /*useImageExtent=*/true, 1);
-}
-
 void ComputePass::Report(const std::string& text)
 {
     const std::string message = std::string("Pass '") + m_name.value + "': " + text;
@@ -81,7 +71,7 @@ void ComputePass::Report(const std::string& text)
     }
 }
 
-bool ComputePass::Finish(Extent2D requested, bool useImageExtent, std::uint32_t depth)
+bool ComputePass::Dispatch(Extent2D requested, std::uint32_t depth)
 {
     if (m_dispatched) {
         Report("Dispatch() called twice on one chain");
@@ -110,32 +100,21 @@ bool ComputePass::Finish(Extent2D requested, bool useImageExtent, std::uint32_t 
         Report(planned.error);
         return false;
     }
-    if (const auto pushError = ValidatePushConstantSize(
-            m_shader.HasPushConstants(), m_shader.PushConstantSize(), static_cast<std::uint32_t>(m_push.size()))) {
+    if (const auto pushError =
+            ValidatePushConstantSize(m_shader.PushConstantSize(), static_cast<std::uint32_t>(m_push.size()))) {
         Report(*pushError);
         return false;
     }
 
     // The first written storage image bounds the dispatch (a persistent target resizes one frame late).
-    std::optional<Extent2D> imageExtent;
+    Extent2D size = requested;
     for (const PlannedBinding& binding : planned.plan.bindings) {
         if (binding.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE && binding.access != ReflectedAccess::ReadOnly) {
             if (const auto desc = m_builder.DescOf(binding.texture)) {
-                imageExtent = Extent2D{ desc->width, desc->height };
+                size = ClampDispatchSize(requested, Extent2D{ desc->width, desc->height });
             }
             break;
         }
-    }
-
-    Extent2D size = requested;
-    if (useImageExtent) {
-        if (!imageExtent.has_value()) {
-            Report("Dispatch() without a size needs a written storage image to take the size from");
-            return false;
-        }
-        size = *imageExtent;
-    } else if (imageExtent.has_value()) {
-        size = ClampDispatchSize(requested, *imageExtent);
     }
     if (size.width == 0 || size.height == 0 || depth == 0) {
         Report("dispatch size has a zero dimension");
@@ -144,11 +123,10 @@ bool ComputePass::Finish(Extent2D requested, bool useImageExtent, std::uint32_t 
 
     const ComputePipeline* pipeline = m_shader.Pipeline();
     const DescriptorSetLayoutHandle layout = m_shader.Layout();
-    std::optional<std::string> declareError;
 
     m_builder.AddRenderPass(
         m_name.value, PassKind::Compute, m_scope, RenderPassCategory::General,
-        [&](RenderGraphBuilder::PassBuilder& pass) { declareError = DeclareBindings(pass, planned.plan, layout); },
+        [&](RenderGraphBuilder::PassBuilder& pass) { DeclareBindings(pass, planned.plan, layout); },
         [pipeline, push = std::move(m_push), size, depth](PassContext& ctx) {
             const DescriptorSetHandle set = ctx.BoundDescriptorSet();
             if (set == DescriptorSetHandle::Invalid) {
@@ -163,11 +141,6 @@ bool ComputePass::Finish(Extent2D requested, bool useImageExtent, std::uint32_t 
             cmd.DispatchOverSize(size.width, size.height, depth);
         },
         RenderPassDrawKind::DrawMesh, m_event);
-
-    if (declareError.has_value()) {
-        Report(*declareError);
-        return false;
-    }
     return true;
 }
 

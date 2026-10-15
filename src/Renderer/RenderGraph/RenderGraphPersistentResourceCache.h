@@ -58,10 +58,8 @@ public:
         PersistentSlotRef slot;
     };
 
-    // Resolves (creating on first use) the texture for (owner, name). An empty owner keeps
-    // `name` as the identity verbatim. Color only. A format/usage change on an existing entry
-    // is refused; a width/height change queues a resize. Returns nullopt on refusal (logged).
-    // Throws std::runtime_error if texture creation fails.
+    // Resolves (creating on first use) the color texture for (owner, name); an empty owner keeps `name` as is.
+    // Refuses (nullopt, logged) a format/usage change or an unsupported storage format; throws if creation fails.
     std::optional<ResolvedTexture> Resolve(const char* owner, const char* name, const TextureDesc& desc,
         std::uint64_t currentFrame, ExecuteTimingMode timingMode);
 
@@ -90,9 +88,8 @@ public:
     // Stores the layout the texture was left in at the end of the frame. No-op for a dead slot.
     void RecordFinalLayout(PersistentSlotRef slot, VkImageLayout layout);
 
-    // Recreates every queued texture at its new size and returns the recreated slots. The old
-    // textures are retired, not destroyed: the open command buffer may still reference them.
-    // A failed create keeps the old texture (logged). Skips entries evicted since queueing.
+    // Recreates queued textures at their new size; old ones are retired (the open command buffer may use them).
+    // A failed create keeps the old texture. Returns the recreated slots.
     std::vector<PersistentSlotRef> FlushPendingResizes();
 
     // The live texture behind a slot, or nullptr if the slot is dead.

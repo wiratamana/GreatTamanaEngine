@@ -495,10 +495,14 @@ void Renderer::QueueComputeBindingRelease(VkDescriptorSetLayout layout) noexcept
     }
 }
 
-std::vector<VkDescriptorSetLayout> Renderer::TakeQueuedComputeBindingReleases()
+std::vector<VkDescriptorSetLayout> Renderer::TakeQueuedComputeBindingReleases() noexcept
 {
-    const std::lock_guard<std::mutex> lock(m_bindingReleaseMutex);
-    return std::exchange(m_bindingReleaseQueue, {});
+    try {
+        const std::lock_guard<std::mutex> lock(m_bindingReleaseMutex);
+        return std::exchange(m_bindingReleaseQueue, {});
+    } catch (...) {
+        return {}; // The stale-set sweep still frees those sets later.
+    }
 }
 
 VkDescriptorSetLayout Renderer::InstanceBufferDescriptorSetLayout() const noexcept

@@ -38,10 +38,8 @@ constexpr Extent2D ClampDispatchSize(Extent2D requested, Extent2D imageExtent) n
     };
 }
 
-// One compute dispatch, bound by shader variable name; read/write access comes from the shader.
+// One compute dispatch bound by shader variable name; access comes from reflection. End with Dispatch().
 //   ComputePass(builder, shader, "Pass.Name", scope, event).Bind("src", tex).Dispatch(extent);
-// Use as a temporary and always end with Dispatch(). Names must be string literals.
-// A shader that is not ready makes the whole chain inert: it declares nothing.
 class ComputePass {
 public:
     ComputePass(RenderGraphBuilder& builder, Shader& shader, StaticName name, ViewScope scope, RenderPassEvent event);
@@ -86,9 +84,6 @@ public:
     // Returns false when nothing was declared (inert shader or invalid bindings).
     bool Dispatch(Extent2D size, std::uint32_t depth = 1);
 
-    // Dispatches over the extent of the first written storage image.
-    bool Dispatch();
-
 private:
     struct Argument {
         std::string_view name;
@@ -99,7 +94,6 @@ private:
     };
 
     void Add(const Argument& argument);
-    bool Finish(Extent2D requested, bool useImageExtent, std::uint32_t depth);
     void Report(const std::string& text);
 
     RenderGraphBuilder& m_builder;

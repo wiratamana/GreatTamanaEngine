@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -17,7 +18,7 @@ public:
     // First: new key, log it. Repeat: already seen. Overflow: set is full, log the overflow once.
     Result Note(std::string_view key)
     {
-        if (m_keys.find(std::string(key)) != m_keys.end()) {
+        if (m_keys.find(key) != m_keys.end()) { // Heterogeneous lookup: no allocation.
             return Result::Repeat;
         }
         if (m_keys.size() >= Capacity) {
@@ -39,7 +40,12 @@ public:
     std::size_t Size() const noexcept { return m_keys.size(); }
 
 private:
-    std::unordered_set<std::string> m_keys;
+    struct TransparentStringHash {
+        using is_transparent = void;
+        std::size_t operator()(std::string_view key) const noexcept { return std::hash<std::string_view>{}(key); }
+    };
+
+    std::unordered_set<std::string, TransparentStringHash, std::equal_to<>> m_keys;
     bool m_overflowReported = false;
 };
 

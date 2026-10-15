@@ -38,8 +38,6 @@ public:
     // Frees every set allocated against `layout`. The caller guarantees the GPU is done with them.
     void Release(VkDescriptorSetLayout layout);
 
-    std::size_t EntryCount() const noexcept { return m_entries.size(); }
-
     static constexpr std::uint64_t kDefaultStaleFrames = 600;
 
 private:

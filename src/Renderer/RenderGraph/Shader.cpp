@@ -96,11 +96,6 @@ std::span<const ReflectedDescriptorBinding> Shader::ReflectedBindings() const no
                                         : std::span<const ReflectedDescriptorBinding>{};
 }
 
-bool Shader::HasPushConstants() const noexcept
-{
-    return PushConstantSize() != 0;
-}
-
 std::uint32_t Shader::PushConstantSize() const noexcept
 {
     return m_impl->pipeline.has_value() ? m_impl->pipeline->PushConstantSize() : 0;

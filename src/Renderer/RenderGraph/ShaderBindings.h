@@ -57,13 +57,10 @@ std::string ValidNamesText(std::span<const ReflectedDescriptorBinding> reflected
 BindingPlanResult PlanBindings(std::span<const ReflectedDescriptorBinding> reflected,
     std::span<const BindingArgument> args, const DescribeTextureFn& describeTexture);
 
-// providedSize 0 means no push constants were supplied.
-std::optional<std::string> ValidatePushConstantSize(
-    bool shaderHasPushConstants, std::uint32_t reflectedSize, std::uint32_t providedSize);
+// A size of 0 means no push-constant block (reflected) or none supplied (provided).
+std::optional<std::string> ValidatePushConstantSize(std::uint32_t reflectedSize, std::uint32_t providedSize);
 
-// Declares the layout, reads/writes and bindings. Returns an error (declaring nothing) if the plan
-// holds an entry that cannot be expressed.
-std::optional<std::string> DeclareBindings(
-    RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout);
+// Declares the layout, reads/writes and bindings of an already validated plan.
+void DeclareBindings(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout);
 
 } // namespace gte::rg

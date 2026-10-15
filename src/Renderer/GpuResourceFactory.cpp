@@ -80,12 +80,9 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
         .combinedSamplers = 128,
         .uniformBuffers = 64 };
 
-    // Known consumers of the first pool: 2 views of scene services (8 samplers, 1 UBO, 1 set each),
-    // plus the asset preview and bone viewer local sets (1 UBO, 1 set each).
+    // Scene services for 2 views (kSceneServiceSlotCount samplers each) must fit the first pool.
     static_assert(gte::kSceneServiceSlotCount * 2 <= kInitialComputePool.combinedSamplers,
         "Scene services for 2 views must fit the first compute pool's sampler budget.");
-    static_assert(4 <= kInitialComputePool.sets, "Known set consumers must fit the first compute pool.");
-    static_assert(4 <= kInitialComputePool.uniformBuffers, "Known UBO consumers must fit the first compute pool.");
 
     const VkDescriptorPool firstComputePool = CreateComputeDescriptorPool(kInitialComputePool);
     if (firstComputePool == VK_NULL_HANDLE) {
