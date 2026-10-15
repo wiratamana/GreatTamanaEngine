@@ -173,18 +173,6 @@ void RenderGraphBuilder::PassBuilder::WriteStorageImage(std::uint32_t binding, T
     BindStorageImage(binding, handle);
 }
 
-void RenderGraphBuilder::PassBuilder::ReadStorageBuffer(std::uint32_t binding, BufferHandle handle)
-{
-    ReadBuffer(handle, ResourceAccess::ComputeShaderRead);
-    BindStorageBuffer(binding, handle);
-}
-
-void RenderGraphBuilder::PassBuilder::WriteStorageBuffer(std::uint32_t binding, BufferHandle handle)
-{
-    WriteBuffer(handle, ResourceAccess::ComputeShaderWrite);
-    BindStorageBuffer(binding, handle);
-}
-
 void RenderGraphBuilder::PassBuilder::ReadStorageBuffer(std::uint32_t binding, BufferObjectHandle handle)
 {
     BindStorageBuffer(binding, handle);
@@ -387,24 +375,6 @@ TextureHandle RenderGraphBuilder::MintPersistentHandle(
         FromVkImageLayout(resolved.lastKnownLayout), resolved.texture->SamplerObjectHandle());
     m_persistentCacheTextures.push_back(PersistentTextureUse{ handle, resolved.slot });
     return handle;
-}
-
-TextureHandle RenderGraphBuilder::GetOrCreatePersistentTexture(
-    const char* owner, const char* name, const TextureDesc& desc)
-{
-    assert(m_persistentCache != nullptr
-        && "GetOrCreatePersistentTexture requires a builder obtained through RenderGraph::Execute()");
-    if (m_persistentCache == nullptr) {
-        GTE_LOG_ERROR("RenderGraphBuilder",
-            "GetOrCreatePersistentTexture() called with no persistent cache installed - refusing.");
-        return TextureHandle{};
-    }
-    const std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved = m_persistentCache->Resolve(
-        owner, name, desc, m_persistentCacheCurrentFrame, m_persistentCacheTimingMode);
-    if (!resolved.has_value()) {
-        return TextureHandle{};
-    }
-    return MintPersistentHandle(*resolved);
 }
 
 TextureHandle RenderGraphBuilder::GetOrCreatePersistentTexture(

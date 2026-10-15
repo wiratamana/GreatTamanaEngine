@@ -3,6 +3,8 @@
 #include "Renderer/RenderGraph/PersistentTarget.h"
 #include "Renderer/RenderGraph/RenderFeatureScope.h"
 
+#include "../../Fakes/RecordingLogSink.h"
+
 #include <gtest/gtest.h>
 
 namespace gte::rg {
@@ -27,16 +29,19 @@ TEST(PersistentTargetTest, UndefinedFormatIsRefusedInsideAScope)
 
 TEST(PersistentTargetTest, RefusalIsLoggedOncePerToken)
 {
+    test::RecordingLogSink sink;
+    const test::ScopedLogSinkInstall logGuard(&sink);
     RenderGraphBuilder builder;
     PersistentTextureCacheToken token;
-    TextureDesc desc{ 8, 8, PixelFormat::R8_UNorm, false };
+    const TextureDesc desc{ 8, 8, PixelFormat::R8_UNorm, false };
     EXPECT_FALSE(token.refusalLogged);
     EXPECT_FALSE(builder.GetOrCreatePersistentTexture(token, "Mask", desc).IsValid());
     EXPECT_TRUE(token.refusalLogged);
     EXPECT_FALSE(builder.GetOrCreatePersistentTexture(token, "Mask", desc).IsValid());
+    EXPECT_EQ(test::CountErrorsByCategory(sink, "RenderGraphBuilder"), 1);
 }
 
-TEST(PersistentTargetTest, FeatureScopeTracksOpenState)
+TEST(RenderFeatureScopeTest, TracksOpenState)
 {
     RenderGraphBuilder builder;
     EXPECT_FALSE(builder.HasOwningFeatureScope());

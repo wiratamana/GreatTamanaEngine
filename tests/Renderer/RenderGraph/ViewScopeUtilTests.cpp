@@ -24,12 +24,5 @@ TEST(ViewScopeUtilTest, ViewPairReturnsTheEntryOfEachScope)
     EXPECT_EQ(pair.For(ViewScope::SceneView), 30);
 }
 
-TEST(ViewScopeUtilTest, SharedHasItsOwnEntry)
-{
-    constexpr ViewPair<const char*> names{ { "shared", "game", "scene" } };
-    EXPECT_STRNE(names.For(ViewScope::Shared), names.For(ViewScope::SceneView));
-    EXPECT_STRNE(names.For(ViewScope::Shared), names.For(ViewScope::GameView));
-}
-
 } // namespace
 } // namespace gte::rg

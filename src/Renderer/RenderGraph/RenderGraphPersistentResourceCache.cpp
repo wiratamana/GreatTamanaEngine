@@ -7,6 +7,7 @@
 #include "RenderGraph.h"
 
 #include <cassert>
+#include <exception>
 
 namespace gte::rg {
 

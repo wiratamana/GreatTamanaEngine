@@ -1,22 +1,7 @@
 #pragma once
 
-// editor-core-separation-27 campaign, PHASE4 - a small, reusable, real,
-// headless (VK_EXT_headless_surface) GPU test fixture: a real Renderer +
-// a real RenderGraph, with NO Core/Game/EditorLayer/SDL/ImGui involved at
-// all. Built on top of HeadlessSurfaceProvider.h (editor-core-separation-1,
-// PHASE18) - the SAME "GTEST_SKIP() if this machine's Vulkan driver/loader
-// doesn't report VK_EXT_headless_surface" discipline every existing
-// consumer of that fixture already follows. Unlike every existing
-// consumer, this ALSO drives real RenderGraph::Execute() frames - the
-// first fixture in this codebase to do so.
-//
-// Usage:
-//   HeadlessRenderGraphFixture fixture;
-//   if (!fixture.IsUsable()) { GTEST_SKIP() << fixture.SkipReason(); }
-//   fixture.RunSynchronousFrame([&](rg::RenderGraphBuilder& b) -> std::vector<rg::TextureHandle> {
-//       ... declare passes ...
-//       return {};
-//   });
+// Headless (VK_EXT_headless_surface) GPU fixture: a real Renderer and RenderGraph, no Core/Game/Editor/SDL.
+// Usage: if (!fixture.IsUsable()) { GTEST_SKIP() << fixture.SkipReason(); }  then fixture.RunSynchronousFrame(build).
 
 #include "../../src/Renderer/Renderer.h"
 #include "../../src/Renderer/RenderGraph/RenderGraph.h"
@@ -51,17 +36,10 @@ public:
     Renderer& GetRenderer() { return *m_renderer; }
     rg::RenderGraph& GetRenderGraph() { return *m_renderGraph; }
 
-    // Test-only accessor for Renderer::GetVulkanContextInfo().device - this
-    // fixture is friended by Renderer specifically so tests never need
-    // direct GetVulkanContextInfo() access of their own.
+    // Test-only access to the Vulkan device (this fixture is a friend of Renderer).
     VkDevice Device() const noexcept { return m_renderer->GetVulkanContextInfo().device; }
 
-    // Drives exactly ONE real SynchronousImmediateReadback Execute() call -
-    // mirrors Core::BuildFrame()'s own Begin/Execute/End sequence exactly
-    // (Renderer::BeginOffscreenRenderGraphRecording() ->
-    // RenderGraph::Execute() -> Renderer::EndOffscreenRenderGraphRecording()),
-    // with no gameTarget/sceneTarget/Editor concept involved at all -
-    // `build` may declare whatever passes/resources a test needs.
+    // Drives one SynchronousImmediateReadback Execute(); `build` declares whatever passes/resources a test needs.
     void RunSynchronousFrame(
         const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&)>& build)
     {

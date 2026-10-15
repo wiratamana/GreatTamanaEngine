@@ -10,9 +10,12 @@
 namespace gte::rg {
 namespace {
 
-static_assert(!std::is_constructible_v<StaticName, const char*>);
-static_assert(!std::is_constructible_v<StaticName, std::string>);
-static_assert(std::is_constructible_v<StaticName, const char (&)[5]>);
+TEST(StaticNameTest, OnlyLiteralsConvert)
+{
+    EXPECT_FALSE((std::is_constructible_v<StaticName, const char*>));
+    EXPECT_FALSE((std::is_constructible_v<StaticName, std::string>));
+    EXPECT_TRUE((std::is_constructible_v<StaticName, const char (&)[5]>));
+}
 
 TEST(StaticNameTest, ValueIsTheLiteral)
 {

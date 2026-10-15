@@ -8,7 +8,6 @@ namespace gte::rg {
 namespace {
 
 const TextureHandle kTexture{ 3, 1 };
-const BufferHandle kBuffer{ 5, 1 };
 
 TEST(PassBuilderFusedBindingTest, SampleDepthDeclaresDepthReadAndDepthSamplerBinding)
 {
@@ -72,27 +71,6 @@ TEST(PassBuilderFusedBindingTest, WriteStorageImageDeclaresComputeWriteAndStorag
     EXPECT_EQ(record.bindings[0].binding, 3u);
     EXPECT_EQ(record.bindings[0].kind, BindingKind::StorageImage);
     EXPECT_EQ(record.bindings[0].textureHandle, kTexture);
-}
-
-TEST(PassBuilderFusedBindingTest, StorageBufferHelpersDeclareComputeAccessAndBinding)
-{
-    PassRecord record;
-    RenderGraphBuilder::PassBuilder pass(record);
-    pass.ReadStorageBuffer(0, kBuffer);
-    pass.WriteStorageBuffer(1, kBuffer);
-
-    ASSERT_EQ(record.reads.size(), 1u);
-    EXPECT_EQ(record.reads[0].kind, ResourceKind::Buffer);
-    EXPECT_EQ(record.reads[0].access, ResourceAccess::ComputeShaderRead);
-    ASSERT_EQ(record.writes.size(), 1u);
-    EXPECT_EQ(record.writes[0].kind, ResourceKind::Buffer);
-    EXPECT_EQ(record.writes[0].access, ResourceAccess::ComputeShaderWrite);
-
-    ASSERT_EQ(record.bindings.size(), 2u);
-    EXPECT_EQ(record.bindings[0].binding, 0u);
-    EXPECT_EQ(record.bindings[0].kind, BindingKind::StorageBuffer);
-    EXPECT_EQ(record.bindings[0].bufferHandle, kBuffer);
-    EXPECT_EQ(record.bindings[1].binding, 1u);
 }
 
 TEST(PassBuilderFusedBindingTest, ExternalStorageBufferDeclaresBindingOnly)

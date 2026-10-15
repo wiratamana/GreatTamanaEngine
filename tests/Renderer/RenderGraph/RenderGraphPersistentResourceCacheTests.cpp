@@ -1,30 +1,27 @@
 // Tier-2 (headless GPU) tests for RenderGraphPersistentResourceCache.
 // Skipped when the headless fixture is unusable.
 
-#include "Renderer/RenderGraph/GpuParams.h"
 #include "Renderer/RenderGraph/RenderGraphPersistentResourceCache.h"
-#include "Renderer/RenderGraph/RenderGraphPersistentResourceOwners.h"
 
 #include "../../Fakes/HeadlessRenderGraphFixture.h"
-
-#include "Core/LogSink.h" // PHASE5 - RecordingLogSink, for the double-request-refusal
-    // logged-exactly-once regression test below.
-#include "Editor/Logger.h" // PHASE5 - LoggerLogSink::Instance(), to restore the real sink
-    // afterward - mirrors Core/LogSinkTests.cpp's own precedent exactly.
+#include "../../Fakes/RecordingLogSink.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstdint>
+#include <exception>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace gte::rg {
 namespace {
 
-// A fresh, color-only (hasDepth == false) TextureDesc - every test below
-// that doesn't need a specific size/format uses this.
+constexpr const char* kTestOwner = "PersistentResourceCacheValidation";
+
+// A fresh, color-only TextureDesc.
 TextureDesc MakeColorDesc(std::uint32_t width = 64, std::uint32_t height = 64)
 {
     TextureDesc desc;
@@ -35,47 +32,18 @@ TextureDesc MakeColorDesc(std::uint32_t width = 64, std::uint32_t height = 64)
     return desc;
 }
 
-// PHASE6 - short, readable aliases for Resolve()'s new mandatory trailing
-// ExecuteTimingMode parameter, used throughout this whole file.
 constexpr ExecuteTimingMode kSync = ExecuteTimingMode::SynchronousImmediateReadback;
 constexpr ExecuteTimingMode kPipelined = ExecuteTimingMode::PipelinedDeferredReadback;
 
-// PHASE5 - a small, test-only ILogSink recording every call verbatim,
-// mirroring Core/LogSinkTests.cpp's own RecordingLogSink precedent exactly.
-class RecordingLogSink : public ILogSink {
-public:
-    struct Recorded {
-        LogLevel level;
-        std::string category;
-        std::string message;
-    };
+using test::CountByCategory;
+using test::RecordingLogSink;
+using test::ScopedLogSinkInstall;
 
-    void Log(LogLevel level, std::string_view category, std::string_view message, bool isBlocking = false) override
-    {
-        entries.push_back(Recorded{ level, std::string(category), std::string(message) });
-        (void)isBlocking;
-    }
-
-    std::vector<Recorded> entries;
-};
-
-// PHASE5 - RAII guard restoring the REAL sink (gte::LoggerLogSink::Instance())
-// on scope exit regardless of pass/fail/early-return, so a test installing a
-// fake sink to observe GTE_LOG_ERROR never leaves a later test in this SAME
-// binary talking to a stale/fake sink - mirrors Core/LogSinkTests.cpp's own
-// TearDown() precedent, adapted to a plain TEST() (no fixture class) here.
-class ScopedLogSinkInstall {
-public:
-    explicit ScopedLogSinkInstall(ILogSink* sink) { InstallLogSink(sink); }
-    ~ScopedLogSinkInstall() { InstallLogSink(&LoggerLogSink::Instance()); }
-};
+constexpr std::string_view kCacheLogCategory = "RenderGraphPersistentResourceCache";
 
 } // namespace
 
-// 1. Basic construct-and-reuse - the single most important proof in this
-// phase: Resolve() called across three SEPARATE, real, driven Execute()
-// frames returns the SAME RenderTexture* / same underlying VkImage every
-// time.
+// Resolve() across three separate frames returns the same texture and image.
 TEST(RenderGraphPersistentResourceCacheTest, ResolveReturnsTheSamePhysicalTextureAcrossThreeSeparateFrames)
 {
     HeadlessRenderGraphFixture fixture;
@@ -92,8 +60,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ResolveReturnsTheSamePhysicalTextur
     for (int frame = 0; frame < 3; ++frame) {
         std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved;
         fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-            resolved = cache.Resolve(
-                kPersistentOwnerCacheValidation, "BasicReuse", desc, static_cast<std::uint64_t>(frame + 1), kSync);
+            resolved = cache.Resolve(kTestOwner, "BasicReuse", desc, static_cast<std::uint64_t>(frame + 1), kSync);
             return {};
         });
 
@@ -110,10 +77,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ResolveReturnsTheSamePhysicalTextur
     }
 }
 
-// 2. Two owners, same name, same desc, never collide - the concrete
-// regression test for Section 6.2 population (a)'s collision-safety
-// guarantee (the single most important NEW test the source document itself
-// calls out, Section 12).
+// Two owners with the same name and desc never share a texture.
 TEST(RenderGraphPersistentResourceCacheTest, TwoOwnersWithTheSameNameAndDescNeverCollide)
 {
     HeadlessRenderGraphFixture fixture;
@@ -140,17 +104,7 @@ TEST(RenderGraphPersistentResourceCacheTest, TwoOwnersWithTheSameNameAndDescNeve
     EXPECT_NE(resolvedA->texture->Image(), resolvedB->texture->Image());
 }
 
-// 3. Exception safety - genuinely hard to force a real vmaCreateImage()
-// failure on demand, so this confirms the STRUCTURAL guarantee directly: a
-// deliberately huge (but positive, see this phase's own .md for why
-// UINT32_MAX is the wrong choice) desc that IS expected to fail on real
-// hardware throws (never silently returns a broken handle), and an
-// immediate retry with a sane desc for the SAME (owner, name) succeeds
-// cleanly afterward (the failed placeholder did not permanently poison that
-// key). Honestly documented, machine-dependent limitation: if this
-// machine's driver/GPU somehow accepts a 100000x100000 image, this test
-// SKIPS rather than fabricating a false-positive pass - see this phase's
-// own completion report for what actually happened on this dev machine.
+// A failed create throws and leaves the key retryable. Skips when the driver accepts the huge size.
 TEST(RenderGraphPersistentResourceCacheTest, FailedResolveThrowsAndLeavesTheKeyRetryableAfterward)
 {
     HeadlessRenderGraphFixture fixture;
@@ -164,7 +118,7 @@ TEST(RenderGraphPersistentResourceCacheTest, FailedResolveThrowsAndLeavesTheKeyR
     bool threw = false;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
         try {
-            (void)cache.Resolve(kPersistentOwnerCacheValidation, "ExceptionSafety", hugeDesc, /*currentFrame=*/1, kSync);
+            (void)cache.Resolve(kTestOwner, "ExceptionSafety", hugeDesc, /*currentFrame=*/1, kSync);
         } catch (const std::exception&) {
             threw = true;
         }
@@ -172,16 +126,13 @@ TEST(RenderGraphPersistentResourceCacheTest, FailedResolveThrowsAndLeavesTheKeyR
     });
 
     if (!threw) {
-        GTEST_SKIP() << "This machine's Vulkan driver/GPU did not reject a 100000x100000 image allocation as "
-                        "expected - cannot exercise the exception-safety path here on this hardware (see this "
-                        "phase's own .md, Step 4 item 3, for why this is a documented, honest, machine-dependent "
-                        "limitation rather than a fabricated pass).";
+        GTEST_SKIP() << "This driver accepted a 100000x100000 image; cannot exercise the failed-create path.";
     }
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> retryResolved;
     const TextureDesc saneDesc = MakeColorDesc();
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        retryResolved = cache.Resolve(kPersistentOwnerCacheValidation, "ExceptionSafety", saneDesc, /*currentFrame=*/2, kSync);
+        retryResolved = cache.Resolve(kTestOwner, "ExceptionSafety", saneDesc, /*currentFrame=*/2, kSync);
         return {};
     });
 
@@ -189,18 +140,7 @@ TEST(RenderGraphPersistentResourceCacheTest, FailedResolveThrowsAndLeavesTheKeyR
     EXPECT_NE(retryResolved->texture, nullptr);
 }
 
-// 4. desc.hasDepth == true / null / empty owner / null / empty name - each
-// guarded by a plain assert() immediately before its GTE_LOG_ERROR() +
-// std::nullopt fallback (see RenderGraphPersistentResourceCache.cpp's
-// Resolve()) - this repo's normal cmake --build build + ctest cycle never
-// defines NDEBUG (confirmed, see this phase's own .md), so assert() stays
-// live and each of these ABORTS THE WHOLE PROCESS rather than gracefully
-// returning std::nullopt - exactly mirroring RenderGraphBuilderTests.cpp's
-// own WriteColorAttachmentExceedingCapAssertsInDebug precedent. The
-// release-build (NDEBUG defined), log-and-refuse std::nullopt-returning
-// half of this behavior is NOT exercised by this project's normal ctest run
-// at all - the same accepted, disclosed scope limit that precedent already
-// lives with.
+// Debug builds only: invalid arguments hit an assert before the log-and-refuse fallback.
 #ifndef NDEBUG
 
 TEST(RenderGraphPersistentResourceCacheDeathTest, ResolveAssertsWhenDescHasDepthIsTrue)
@@ -217,7 +157,7 @@ TEST(RenderGraphPersistentResourceCacheDeathTest, ResolveAssertsWhenDescHasDepth
             RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
             TextureDesc desc = MakeColorDesc();
             desc.hasDepth = true;
-            (void)cache.Resolve(kPersistentOwnerCacheValidation, "DepthRefusal", desc, /*currentFrame=*/1, kSync);
+            (void)cache.Resolve(kTestOwner, "DepthRefusal", desc, /*currentFrame=*/1, kSync);
         },
         "");
 }
@@ -253,7 +193,7 @@ TEST(RenderGraphPersistentResourceCacheDeathTest, ResolveAssertsOnNullName)
             HeadlessRenderGraphFixture fixture;
             RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
             const TextureDesc desc = MakeColorDesc();
-            (void)cache.Resolve(kPersistentOwnerCacheValidation, nullptr, desc, /*currentFrame=*/1, kSync);
+            (void)cache.Resolve(kTestOwner, nullptr, desc, /*currentFrame=*/1, kSync);
         },
         "");
 }
@@ -297,20 +237,14 @@ TEST(RenderGraphPersistentResourceCacheDeathTest, ResolveAssertsOnEmptyName)
             HeadlessRenderGraphFixture fixture;
             RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
             const TextureDesc desc = MakeColorDesc();
-            (void)cache.Resolve(kPersistentOwnerCacheValidation, "", desc, /*currentFrame=*/1, kSync);
+            (void)cache.Resolve(kTestOwner, "", desc, /*currentFrame=*/1, kSync);
         },
         "");
 }
 
 #endif // !NDEBUG
 
-// 5. No depth companion allocated - the concrete regression test for
-// Section 7's createDepthCompanion requirement. Both RenderTexture's own
-// color image AND DepthBuffer register as GpuResourceType::Texture
-// (confirmed: RenderTexture.cpp/DepthBuffer.cpp both call
-// tracker->Track(GpuResourceType::Texture, ...)), so a textureCount delta
-// of exactly 1 (never 2) across this call proves no depth companion was
-// silently still allocated.
+// Render textures and depth buffers both register as Texture: a delta of exactly 1 proves no depth companion.
 TEST(RenderGraphPersistentResourceCacheTest, ResolveNeverAllocatesADepthCompanion)
 {
     HeadlessRenderGraphFixture fixture;
@@ -325,7 +259,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ResolveNeverAllocatesADepthCompanio
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        resolved = cache.Resolve(kPersistentOwnerCacheValidation, "NoDepthCheck", desc, /*currentFrame=*/1, kSync);
+        resolved = cache.Resolve(kTestOwner, "NoDepthCheck", desc, /*currentFrame=*/1, kSync);
         return {};
     });
 
@@ -335,12 +269,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ResolveNeverAllocatesADepthCompanio
     EXPECT_EQ(after.textureCount, before.textureCount + 1);
 }
 
-// 6. A dozen distinct identities, container growth - the concrete
-// regression test for TR4's node-stability requirement: std::unordered_map
-// never invalidates an existing node's address/reference on insertion of
-// new keys (unlike a std::vector, which would relocate every existing
-// element on growth, silently dangling every RenderTexture::m_debugName
-// pointer already handed out).
+// Map growth must not move earlier entries: their pointers and images stay valid.
 TEST(RenderGraphPersistentResourceCacheTest, EarlierResolvedIdentitiesStayValidAfterManyMoreAreAdded)
 {
     HeadlessRenderGraphFixture fixture;
@@ -366,7 +295,7 @@ TEST(RenderGraphPersistentResourceCacheTest, EarlierResolvedIdentitiesStayValidA
             const TextureDesc desc =
                 MakeColorDesc(32u + static_cast<std::uint32_t>(i), 32u + static_cast<std::uint32_t>(i));
             std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved =
-                cache.Resolve(kPersistentOwnerCacheValidation, name.c_str(), desc, /*currentFrame=*/1, kSync);
+                cache.Resolve(kTestOwner, name.c_str(), desc, /*currentFrame=*/1, kSync);
             if (!resolved.has_value() || resolved->texture == nullptr) {
                 ADD_FAILURE() << "Resolve() unexpectedly failed for identity " << name;
                 continue;
@@ -379,14 +308,11 @@ TEST(RenderGraphPersistentResourceCacheTest, EarlierResolvedIdentitiesStayValidA
 
     ASSERT_EQ(recorded.size(), static_cast<std::size_t>(kIdentityCount));
 
-    // Re-resolve every identity again inside a SECOND, separate real frame -
-    // every EARLIER pointer/handle/extent must still be the exact same,
-    // correctly-sized resource.
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
         for (const Recorded& entry : recorded) {
             const TextureDesc desc = MakeColorDesc(entry.extent.width, entry.extent.height);
             std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved =
-                cache.Resolve(kPersistentOwnerCacheValidation, entry.name.c_str(), desc, /*currentFrame=*/2, kSync);
+                cache.Resolve(kTestOwner, entry.name.c_str(), desc, /*currentFrame=*/2, kSync);
             if (!resolved.has_value()) {
                 ADD_FAILURE() << "Re-Resolve() unexpectedly failed for identity " << entry.name;
                 continue;
@@ -400,13 +326,7 @@ TEST(RenderGraphPersistentResourceCacheTest, EarlierResolvedIdentitiesStayValidA
     });
 }
 
-// --- PHASE5 (PHASE5_CACHE_AGE_TRACKING_DOUBLE_REQUEST_GUARD_AND_EVICTION.md) ---
-
-// 7. Eviction, basic - an entry nobody has requested for more than
-// staleThresholdFrames real frames is destroyed and its GPU memory freed on
-// the next BeginFrame() sweep that walks past that threshold. Uses a SMALL
-// threshold passed directly to BeginFrame() (never the real 300-frame
-// default), so this test never has to actually iterate 300 real frames.
+// An entry idle for more than the threshold is destroyed on the next sweep. A small threshold avoids 300 frames.
 TEST(RenderGraphPersistentResourceCacheTest, EvictionRemovesAnIdleEntryAndFreesItsGpuMemory)
 {
     HeadlessRenderGraphFixture fixture;
@@ -422,34 +342,29 @@ TEST(RenderGraphPersistentResourceCacheTest, EvictionRemovesAnIdleEntryAndFreesI
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
         std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved =
-            cache.Resolve(kPersistentOwnerCacheValidation, "EvictMe", desc, /*currentFrame=*/1, kSync);
+            cache.Resolve(kTestOwner, "EvictMe", desc, /*currentFrame=*/1, kSync);
         if (!resolved.has_value()) {
             ADD_FAILURE() << "Resolve() unexpectedly failed for EvictMe";
         }
         return {};
     });
-    cache.BeginFrame(1, kSmallThreshold); // elapsed 0 - never evicted the very frame it was created.
+    cache.BeginFrame(1, kSmallThreshold); // Elapsed 0: never evicted on its creation frame.
 
     const GpuMemoryTracker::Totals afterCreate = fixture.GetRenderer().GetMemoryTotals();
     EXPECT_EQ(afterCreate.textureCount, before.textureCount + 1);
-    EXPECT_TRUE(cache.FramesUntilEviction(kPersistentOwnerCacheValidation, "EvictMe", 1).has_value());
+    EXPECT_TRUE(cache.FramesUntilEviction(kTestOwner, "EvictMe", 1).has_value());
 
-    // Walk the frame counter forward with NO further Resolve() call for this
-    // identity - lastUsedFrame stays pinned at 1.
-    cache.BeginFrame(2, kSmallThreshold); // elapsed 1, not yet stale (threshold is 2).
-    EXPECT_TRUE(cache.FramesUntilEviction(kPersistentOwnerCacheValidation, "EvictMe", 2).has_value());
+    cache.BeginFrame(2, kSmallThreshold); // Elapsed 1, threshold 2: still alive.
+    EXPECT_TRUE(cache.FramesUntilEviction(kTestOwner, "EvictMe", 2).has_value());
 
-    cache.BeginFrame(4, kSmallThreshold); // elapsed 3 > 2 - evicted this sweep.
-    EXPECT_FALSE(cache.FramesUntilEviction(kPersistentOwnerCacheValidation, "EvictMe", 4).has_value());
+    cache.BeginFrame(4, kSmallThreshold); // Elapsed 3 > 2: evicted.
+    EXPECT_FALSE(cache.FramesUntilEviction(kTestOwner, "EvictMe", 4).has_value());
 
     const GpuMemoryTracker::Totals afterEvict = fixture.GetRenderer().GetMemoryTotals();
     EXPECT_EQ(afterEvict.textureCount, before.textureCount);
 }
 
-// 8. Eviction does not fire while still in active use - the direct
-// regression test for "an entry requested every real frame always
-// evaluates as zero-or-one frames idle at sweep time, never accidentally
-// evicted mid-use".
+// An entry requested every frame is never evicted mid-use.
 TEST(RenderGraphPersistentResourceCacheTest, EntryRequestedEveryFrameIsNeverEvicted)
 {
     HeadlessRenderGraphFixture fixture;
@@ -465,7 +380,7 @@ TEST(RenderGraphPersistentResourceCacheTest, EntryRequestedEveryFrameIsNeverEvic
     for (std::uint64_t frame = 1; frame <= 10; ++frame) {
         fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
             std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved =
-                cache.Resolve(kPersistentOwnerCacheValidation, "AlwaysActive", desc, frame, kSync);
+                cache.Resolve(kTestOwner, "AlwaysActive", desc, frame, kSync);
             if (!resolved.has_value() || resolved->texture == nullptr) {
                 ADD_FAILURE() << "Resolve() unexpectedly failed on frame " << frame;
                 return {};
@@ -480,10 +395,10 @@ TEST(RenderGraphPersistentResourceCacheTest, EntryRequestedEveryFrameIsNeverEvic
         cache.BeginFrame(frame, kSmallThreshold);
     }
 
-    EXPECT_TRUE(cache.FramesUntilEviction(kPersistentOwnerCacheValidation, "AlwaysActive", 10).has_value());
+    EXPECT_TRUE(cache.FramesUntilEviction(kTestOwner, "AlwaysActive", 10).has_value());
 }
 
-// 9. FramesUntilEviction()'s two overloads agree with each other.
+// FramesUntilEviction()'s two overloads agree with each other.
 TEST(RenderGraphPersistentResourceCacheTest, FramesUntilEvictionOverloadsAgree)
 {
     HeadlessRenderGraphFixture fixture;
@@ -496,28 +411,20 @@ TEST(RenderGraphPersistentResourceCacheTest, FramesUntilEvictionOverloadsAgree)
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        resolved = cache.Resolve(kPersistentOwnerCacheValidation, "AgreeCheck", desc, /*currentFrame=*/1, kSync);
+        resolved = cache.Resolve(kTestOwner, "AgreeCheck", desc, /*currentFrame=*/1, kSync);
         return {};
     });
     ASSERT_TRUE(resolved.has_value());
     ASSERT_NE(resolved->combinedKey, nullptr);
 
     const std::optional<std::uint64_t> byCombined = cache.FramesUntilEviction(*resolved->combinedKey, 5);
-    const std::optional<std::uint64_t> byOwnerName = cache.FramesUntilEviction(kPersistentOwnerCacheValidation, "AgreeCheck", 5);
+    const std::optional<std::uint64_t> byOwnerName = cache.FramesUntilEviction(kTestOwner, "AgreeCheck", 5);
     ASSERT_TRUE(byCombined.has_value());
     ASSERT_TRUE(byOwnerName.has_value());
     EXPECT_EQ(*byCombined, *byOwnerName);
 }
 
-// 10. Double-request refusal, order A - within ONE simulated frame value,
-// requesting the SAME identity twice must succeed the first time and
-// refuse (std::nullopt) every subsequent time that same frame, logging the
-// GTE_LOG_ERROR exactly once ever for this identity - never once per
-// refused call. Order B (the reverse call order) is meaningless for THIS
-// phase's own tests, since Resolve() itself has no concept of which
-// ExecuteTimingMode regime called it - see this phase's own .md, Step 4
-// item 5, for why a fabricated "regime order" test is deliberately NOT
-// added here.
+// A second request for one identity within the same frame is refused and logged once, never per call.
 TEST(RenderGraphPersistentResourceCacheTest, DoubleRequestWithinTheSameFrameIsRefusedAndLoggedExactlyOnce)
 {
     HeadlessRenderGraphFixture fixture;
@@ -535,9 +442,9 @@ TEST(RenderGraphPersistentResourceCacheTest, DoubleRequestWithinTheSameFrameIsRe
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> second;
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> third;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        first = cache.Resolve(kPersistentOwnerCacheValidation, "Dup", desc, /*currentFrame=*/5, kSync);
-        second = cache.Resolve(kPersistentOwnerCacheValidation, "Dup", desc, /*currentFrame=*/5, kSync);
-        third = cache.Resolve(kPersistentOwnerCacheValidation, "Dup", desc, /*currentFrame=*/5, kSync);
+        first = cache.Resolve(kTestOwner, "Dup", desc, /*currentFrame=*/5, kSync);
+        second = cache.Resolve(kTestOwner, "Dup", desc, /*currentFrame=*/5, kSync);
+        third = cache.Resolve(kTestOwner, "Dup", desc, /*currentFrame=*/5, kSync);
         return {};
     });
 
@@ -547,7 +454,7 @@ TEST(RenderGraphPersistentResourceCacheTest, DoubleRequestWithinTheSameFrameIsRe
 
     int matchingErrorCount = 0;
     for (const RecordingLogSink::Recorded& entry : sink.entries) {
-        if (entry.category == "RenderGraphPersistentResourceCache" && entry.level == LogLevel::Error
+        if (entry.category == kCacheLogCategory && entry.level == LogLevel::Error
             && entry.message.find("Dup") != std::string::npos) {
             ++matchingErrorCount;
         }
@@ -555,9 +462,7 @@ TEST(RenderGraphPersistentResourceCacheTest, DoubleRequestWithinTheSameFrameIsRe
     EXPECT_EQ(matchingErrorCount, 1);
 }
 
-// 11. A request in a LATER frame after a same-frame refusal succeeds
-// normally, returning the SAME underlying RenderTexture* - proves a
-// same-frame refusal never poisons the entry for future frames.
+// A same-frame refusal does not poison the entry: a later frame gets the same texture.
 TEST(RenderGraphPersistentResourceCacheTest, ARequestInALaterFrameAfterASameFrameRefusalSucceedsNormally)
 {
     HeadlessRenderGraphFixture fixture;
@@ -571,8 +476,8 @@ TEST(RenderGraphPersistentResourceCacheTest, ARequestInALaterFrameAfterASameFram
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> frame5First;
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> frame5Second;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        frame5First = cache.Resolve(kPersistentOwnerCacheValidation, "LaterFrameRetry", desc, /*currentFrame=*/5, kSync);
-        frame5Second = cache.Resolve(kPersistentOwnerCacheValidation, "LaterFrameRetry", desc, /*currentFrame=*/5, kSync);
+        frame5First = cache.Resolve(kTestOwner, "LaterFrameRetry", desc, /*currentFrame=*/5, kSync);
+        frame5Second = cache.Resolve(kTestOwner, "LaterFrameRetry", desc, /*currentFrame=*/5, kSync);
         return {};
     });
     ASSERT_TRUE(frame5First.has_value());
@@ -580,7 +485,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ARequestInALaterFrameAfterASameFram
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> frame6;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        frame6 = cache.Resolve(kPersistentOwnerCacheValidation, "LaterFrameRetry", desc, /*currentFrame=*/6, kSync);
+        frame6 = cache.Resolve(kTestOwner, "LaterFrameRetry", desc, /*currentFrame=*/6, kSync);
         return {};
     });
     ASSERT_TRUE(frame6.has_value());
@@ -604,7 +509,7 @@ TEST(RenderGraphPersistentResourceCacheTest, IsTokenLiveReturnsFalseForAnEvicted
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
         std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved =
-            cache.Resolve(kPersistentOwnerCacheValidation, "StaleToken", desc, /*currentFrame=*/1, kSync);
+            cache.Resolve(kTestOwner, "StaleToken", desc, /*currentFrame=*/1, kSync);
         if (resolved.has_value()) {
             staleToken.slot = resolved->slot;
         }
@@ -616,13 +521,13 @@ TEST(RenderGraphPersistentResourceCacheTest, IsTokenLiveReturnsFalseForAnEvicted
 
     cache.BeginFrame(1, kSmallThreshold);
     cache.BeginFrame(10, kSmallThreshold);
-    ASSERT_FALSE(cache.FramesUntilEviction(kPersistentOwnerCacheValidation, "StaleToken", 10).has_value());
+    ASSERT_FALSE(cache.FramesUntilEviction(kTestOwner, "StaleToken", 10).has_value());
     EXPECT_FALSE(cache.IsTokenLive(staleToken));
 
     // A new identity reuses the freed slot index, but the old token stays dead.
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> reused;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        reused = cache.Resolve(kPersistentOwnerCacheValidation, "AfterEviction", desc, /*currentFrame=*/10, kSync);
+        reused = cache.Resolve(kTestOwner, "AfterEviction", desc, /*currentFrame=*/10, kSync);
         return {};
     });
     ASSERT_TRUE(reused.has_value());
@@ -642,13 +547,13 @@ TEST(RenderGraphPersistentResourceCacheTest, FlushSkipsResizeOfAnEvictedEntry)
 
     RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        (void)cache.Resolve(kPersistentOwnerCacheValidation, "EvictedResize", MakeColorDesc(64, 64), 1, kSync);
-        (void)cache.Resolve(kPersistentOwnerCacheValidation, "EvictedResize", MakeColorDesc(128, 128), 2, kSync);
+        (void)cache.Resolve(kTestOwner, "EvictedResize", MakeColorDesc(64, 64), 1, kSync);
+        (void)cache.Resolve(kTestOwner, "EvictedResize", MakeColorDesc(128, 128), 2, kSync);
         return {};
     });
     cache.BeginFrame(100, /*staleThresholdFrames=*/1);
     EXPECT_TRUE(cache.FlushPendingResizes().empty()); // Must not touch the evicted entry.
-    EXPECT_FALSE(cache.FramesUntilEviction(kPersistentOwnerCacheValidation, "EvictedResize", 100).has_value());
+    EXPECT_FALSE(cache.FramesUntilEviction(kTestOwner, "EvictedResize", 100).has_value());
 }
 
 // A resize retires the old texture instead of destroying it; BeginFrame frees it.
@@ -661,8 +566,8 @@ TEST(RenderGraphPersistentResourceCacheTest, FlushRetiresTheOldTextureUntilTheNe
 
     RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        (void)cache.Resolve(kPersistentOwnerCacheValidation, "Retire", MakeColorDesc(64, 64), 1, kSync);
-        (void)cache.Resolve(kPersistentOwnerCacheValidation, "Retire", MakeColorDesc(128, 128), 2, kSync);
+        (void)cache.Resolve(kTestOwner, "Retire", MakeColorDesc(64, 64), 1, kSync);
+        (void)cache.Resolve(kTestOwner, "Retire", MakeColorDesc(128, 128), 2, kSync);
         return {};
     });
 
@@ -689,8 +594,8 @@ TEST(RenderGraphPersistentResourceCacheTest, FailedResizeKeepsTheOldTexture)
     RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> first;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        first = cache.Resolve(kPersistentOwnerCacheValidation, "FailResize", MakeColorDesc(64, 64), 1, kSync);
-        (void)cache.Resolve(kPersistentOwnerCacheValidation, "FailResize", MakeColorDesc(100000, 100000), 2, kSync);
+        first = cache.Resolve(kTestOwner, "FailResize", MakeColorDesc(64, 64), 1, kSync);
+        (void)cache.Resolve(kTestOwner, "FailResize", MakeColorDesc(100000, 100000), 2, kSync);
         return {};
     });
     ASSERT_TRUE(first.has_value());
@@ -707,12 +612,12 @@ TEST(RenderGraphPersistentResourceCacheTest, FailedResizeKeepsTheOldTexture)
     EXPECT_EQ(first->texture->Extent().width, 64u);
     EXPECT_EQ(cache.RetiredTextureCount(), 0u);
     EXPECT_EQ(cache.TextureFor(first->slot), first->texture);
-    EXPECT_EQ(sink.entries.size(), 1u); // Exactly one error.
+    EXPECT_EQ(CountByCategory(sink, kCacheLogCategory), 1); // Exactly one error.
 
     // The same failing size is not queued again.
-    (void)cache.Resolve(kPersistentOwnerCacheValidation, "FailResize", MakeColorDesc(100000, 100000), 3, kSync);
+    (void)cache.Resolve(kTestOwner, "FailResize", MakeColorDesc(100000, 100000), 3, kSync);
     EXPECT_TRUE(cache.FlushPendingResizes().empty());
-    EXPECT_EQ(sink.entries.size(), 1u);
+    EXPECT_EQ(CountByCategory(sink, kCacheLogCategory), 1);
 }
 
 // Debug builds only: the guard does not exist in release builds.
@@ -729,25 +634,19 @@ TEST(RenderGraphPersistentResourceCacheTest, DebugTokenIdentityMatchesConfirmsOr
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        resolved = cache.Resolve(kPersistentOwnerCacheValidation, "IdentityCheck", desc, /*currentFrame=*/1, kSync);
+        resolved = cache.Resolve(kTestOwner, "IdentityCheck", desc, /*currentFrame=*/1, kSync);
         return {};
     });
     ASSERT_TRUE(resolved.has_value());
 
-    EXPECT_TRUE(cache.DebugTokenIdentityMatches(resolved->slot, kPersistentOwnerCacheValidation, "IdentityCheck"));
+    EXPECT_TRUE(cache.DebugTokenIdentityMatches(resolved->slot, kTestOwner, "IdentityCheck"));
     EXPECT_FALSE(cache.DebugTokenIdentityMatches(resolved->slot, "SomeoneElse", "IdentityCheck"));
     EXPECT_TRUE(cache.DebugTokenIdentityMatches(PersistentSlotRef{}, "Anything", "Anything"));
 }
 #endif // !NDEBUG
 
-// --- PHASE6 (PHASE6_CACHE_BATCHED_RESIZE.md) ---
-
-// 14. Basic resize - a re-requested identity with a different width/height
-// is NOT resized inline: this call's own returned texture/extent is still
-// the OLD one, and only AFTER an explicit FlushPendingResizes() call does
-// the SAME RenderTexture* report the NEW extent, with lastKnownLayout reset
-// to VK_IMAGE_LAYOUT_UNDEFINED (Section 5.1 - a freshly recreated VkImage
-// really is undefined again).
+// A re-requested identity with a new size is queued, not resized inline. Only FlushPendingResizes() applies it
+// to the same RenderTexture and resets the layout to UNDEFINED.
 TEST(RenderGraphPersistentResourceCacheTest, ResizeIsQueuedNotAppliedUntilFlushPendingResizesIsCalled)
 {
     HeadlessRenderGraphFixture fixture;
@@ -761,7 +660,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ResizeIsQueuedNotAppliedUntilFlushP
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> firstResolve;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        firstResolve = cache.Resolve(kPersistentOwnerCacheValidation, "Resize", desc64, /*currentFrame=*/1, kSync);
+        firstResolve = cache.Resolve(kTestOwner, "Resize", desc64, /*currentFrame=*/1, kSync);
         return {};
     });
     ASSERT_TRUE(firstResolve.has_value());
@@ -771,12 +670,11 @@ TEST(RenderGraphPersistentResourceCacheTest, ResizeIsQueuedNotAppliedUntilFlushP
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> secondResolve;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        secondResolve = cache.Resolve(kPersistentOwnerCacheValidation, "Resize", desc128, /*currentFrame=*/2, kSync);
+        secondResolve = cache.Resolve(kTestOwner, "Resize", desc128, /*currentFrame=*/2, kSync);
         return {};
     });
     ASSERT_TRUE(secondResolve.has_value());
-    // (a) the resize hasn't happened yet - THIS call's own returned extent
-    // is still the OLD one.
+    // Not resized yet: this call still sees the old extent.
     EXPECT_EQ(secondResolve->texture, texture);
     EXPECT_EQ(secondResolve->texture->Extent().width, 64u);
 
@@ -786,23 +684,21 @@ TEST(RenderGraphPersistentResourceCacheTest, ResizeIsQueuedNotAppliedUntilFlushP
     EXPECT_EQ(cache.TextureFor(resized[0]), texture);
     EXPECT_TRUE(cache.FlushPendingResizes().empty()); // Nothing pending anymore.
 
-    // (b) after the flush, the SAME RenderTexture* is now the new size.
+    // After the flush the same RenderTexture has the new size.
     EXPECT_EQ(texture->Extent().width, 128u);
     EXPECT_EQ(texture->Extent().height, 128u);
 
-    // (c) lastKnownLayout was reset to VK_IMAGE_LAYOUT_UNDEFINED on that
-    // same entry - confirmed via a fresh Resolve() call's own returned
-    // ResolvedTexture::lastKnownLayout.
+    // The recreated image is UNDEFINED again.
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> thirdResolve;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        thirdResolve = cache.Resolve(kPersistentOwnerCacheValidation, "Resize", desc128, /*currentFrame=*/3, kSync);
+        thirdResolve = cache.Resolve(kTestOwner, "Resize", desc128, /*currentFrame=*/3, kSync);
         return {};
     });
     ASSERT_TRUE(thirdResolve.has_value());
     EXPECT_EQ(thirdResolve->lastKnownLayout, VK_IMAGE_LAYOUT_UNDEFINED);
 }
 
-// 15. Three entries queue different new sizes across two frames; one flush applies all of them.
+// Three entries queue different new sizes across two frames; one flush applies all of them.
 TEST(RenderGraphPersistentResourceCacheTest, BatchedResizeAppliesAllQueuedEntriesInOneFlushCall)
 {
     HeadlessRenderGraphFixture fixture;
@@ -817,9 +713,9 @@ TEST(RenderGraphPersistentResourceCacheTest, BatchedResizeAppliesAllQueuedEntrie
     RenderTexture* textureC = nullptr;
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        auto a = cache.Resolve(kPersistentOwnerCacheValidation, "BatchA", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
-        auto b = cache.Resolve(kPersistentOwnerCacheValidation, "BatchB", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
-        auto c = cache.Resolve(kPersistentOwnerCacheValidation, "BatchC", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
+        auto a = cache.Resolve(kTestOwner, "BatchA", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
+        auto b = cache.Resolve(kTestOwner, "BatchB", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
+        auto c = cache.Resolve(kTestOwner, "BatchC", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
         if (!a.has_value() || !b.has_value() || !c.has_value()) {
             ADD_FAILURE() << "Initial Resolve() unexpectedly failed for one of BatchA/BatchB/BatchC";
             return {};
@@ -834,13 +730,13 @@ TEST(RenderGraphPersistentResourceCacheTest, BatchedResizeAppliesAllQueuedEntrie
     ASSERT_NE(textureC, nullptr);
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        (void)cache.Resolve(kPersistentOwnerCacheValidation, "BatchA", MakeColorDesc(64, 64), /*currentFrame=*/2, kSync);
-        (void)cache.Resolve(kPersistentOwnerCacheValidation, "BatchB", MakeColorDesc(96, 96), /*currentFrame=*/2, kSync);
-        (void)cache.Resolve(kPersistentOwnerCacheValidation, "BatchC", MakeColorDesc(128, 128), /*currentFrame=*/2, kSync);
+        (void)cache.Resolve(kTestOwner, "BatchA", MakeColorDesc(64, 64), /*currentFrame=*/2, kSync);
+        (void)cache.Resolve(kTestOwner, "BatchB", MakeColorDesc(96, 96), /*currentFrame=*/2, kSync);
+        (void)cache.Resolve(kTestOwner, "BatchC", MakeColorDesc(128, 128), /*currentFrame=*/2, kSync);
         return {};
     });
 
-    // Every entry's extent is STILL the old one - not resized yet.
+    // Nothing is resized before the flush.
     EXPECT_EQ(textureA->Extent().width, 32u);
     EXPECT_EQ(textureB->Extent().width, 32u);
     EXPECT_EQ(textureC->Extent().width, 32u);
@@ -852,16 +748,8 @@ TEST(RenderGraphPersistentResourceCacheTest, BatchedResizeAppliesAllQueuedEntrie
     EXPECT_EQ(textureC->Extent().width, 128u);
 }
 
-// 16. Last-request-wins - two DIFFERENT resize requests for the SAME
-// identity, before ever calling FlushPendingResizes(), only ever apply the
-// SECOND (most recent) one. Deliberately issued across TWO SEPARATE real
-// frames (never the literal same currentFrame value for the SAME identity)
-// - PHASE5's own same-real-frame double-request guard (Section 5.3) already
-// refuses a second Resolve() call for the SAME identity within one literal
-// frame value unconditionally, so that scenario can never reach this
-// resize-queuing logic at all in production; QueueResize()'s own
-// "last request wins" branch is what protects an entry that requests a
-// NEW size on more than one real frame before a flush ever happens.
+// Two resize requests for one identity on separate frames: only the later one applies.
+// (Same-frame repeats are refused earlier, so they never reach the resize queue.)
 TEST(RenderGraphPersistentResourceCacheTest, LastResizeRequestBeforeAFlushWinsOverAnEarlierOne)
 {
     HeadlessRenderGraphFixture fixture;
@@ -873,8 +761,7 @@ TEST(RenderGraphPersistentResourceCacheTest, LastResizeRequestBeforeAFlushWinsOv
     RenderTexture* texture = nullptr;
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        auto resolved =
-            cache.Resolve(kPersistentOwnerCacheValidation, "LastWins", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
+        auto resolved = cache.Resolve(kTestOwner, "LastWins", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
         if (!resolved.has_value()) {
             ADD_FAILURE() << "Initial Resolve() unexpectedly failed for LastWins";
             return {};
@@ -885,30 +772,23 @@ TEST(RenderGraphPersistentResourceCacheTest, LastResizeRequestBeforeAFlushWinsOv
     ASSERT_NE(texture, nullptr);
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        (void)cache.Resolve(kPersistentOwnerCacheValidation, "LastWins", MakeColorDesc(64, 64), /*currentFrame=*/2, kSync);
+        (void)cache.Resolve(kTestOwner, "LastWins", MakeColorDesc(64, 64), /*currentFrame=*/2, kSync);
         return {};
     });
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        (void)cache.Resolve(kPersistentOwnerCacheValidation, "LastWins", MakeColorDesc(96, 96), /*currentFrame=*/3, kSync);
+        (void)cache.Resolve(kTestOwner, "LastWins", MakeColorDesc(96, 96), /*currentFrame=*/3, kSync);
         return {};
     });
 
-    // Still not applied - nothing flushed yet.
-    EXPECT_EQ(texture->Extent().width, 32u);
+    EXPECT_EQ(texture->Extent().width, 32u); // Nothing flushed yet.
 
     cache.FlushPendingResizes();
 
-    // Only the SECOND (most recent) request's size ever took effect.
     EXPECT_EQ(texture->Extent().width, 96u);
     EXPECT_EQ(texture->Extent().height, 96u);
 }
 
-// 17. Pipelined-regime resize refusal - a resize requested while
-// timingMode == ExecuteTimingMode::PipelinedDeferredReadback (a) still
-// SUCCEEDS (a valid ResolvedTexture, not std::nullopt - only the resize
-// portion is refused), (b) leaves the entry's extent UNCHANGED, and (c)
-// queues nothing (confirmed indirectly: a subsequent FlushPendingResizes()
-// call does not touch this entry's extent at all).
+// A resize requested in the pipelined regime is refused, but the call still succeeds and queues nothing.
 TEST(RenderGraphPersistentResourceCacheTest, ResizeRequestedFromThePipelinedRegimeIsRefusedButTheCallStillSucceeds)
 {
     HeadlessRenderGraphFixture fixture;
@@ -920,8 +800,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ResizeRequestedFromThePipelinedRegi
     RenderTexture* texture = nullptr;
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        auto resolved = cache.Resolve(
-            kPersistentOwnerCacheValidation, "PipelinedRefusal", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
+        auto resolved = cache.Resolve(kTestOwner, "PipelinedRefusal", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
         if (!resolved.has_value()) {
             ADD_FAILURE() << "Initial Resolve() unexpectedly failed for PipelinedRefusal";
             return {};
@@ -933,27 +812,20 @@ TEST(RenderGraphPersistentResourceCacheTest, ResizeRequestedFromThePipelinedRegi
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> pipelinedResolve;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        pipelinedResolve = cache.Resolve(
-            kPersistentOwnerCacheValidation, "PipelinedRefusal", MakeColorDesc(128, 128), /*currentFrame=*/2, kPipelined);
+        pipelinedResolve =
+            cache.Resolve(kTestOwner, "PipelinedRefusal", MakeColorDesc(128, 128), /*currentFrame=*/2, kPipelined);
         return {};
     });
 
-    // (a) the call still SUCCEEDS.
     ASSERT_TRUE(pipelinedResolve.has_value());
     EXPECT_EQ(pipelinedResolve->texture, texture);
-    // (b) the entry's extent is UNCHANGED afterward.
     EXPECT_EQ(texture->Extent().width, 32u);
 
-    // (c) nothing was queued for it - a subsequent flush does not touch
-    // this entry's extent at all.
-    cache.FlushPendingResizes();
+    cache.FlushPendingResizes(); // Nothing was queued.
     EXPECT_EQ(texture->Extent().width, 32u);
 }
 
-// 18. Format-change refusal - re-requesting an EXISTING entry with the SAME
-// width/height but a DIFFERENT desc.format is a hard refusal
-// (std::nullopt), regardless of timingMode - always a caller bug, never
-// silently reinterpreted, never queued as a resize.
+// A format change on an existing entry is a hard refusal in every regime, never a resize.
 TEST(RenderGraphPersistentResourceCacheTest, ReRequestingAnExistingEntryWithADifferentFormatIsRefusedRegardlessOfRegime)
 {
     HeadlessRenderGraphFixture fixture;
@@ -964,8 +836,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ReRequestingAnExistingEntryWithADif
     RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        auto resolved = cache.Resolve(
-            kPersistentOwnerCacheValidation, "FormatRefusal", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
+        auto resolved = cache.Resolve(kTestOwner, "FormatRefusal", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
         if (!resolved.has_value()) {
             ADD_FAILURE() << "Initial Resolve() unexpectedly failed for FormatRefusal";
         }
@@ -977,29 +848,20 @@ TEST(RenderGraphPersistentResourceCacheTest, ReRequestingAnExistingEntryWithADif
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> refusedSync;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        refusedSync =
-            cache.Resolve(kPersistentOwnerCacheValidation, "FormatRefusal", differentFormatDesc, /*currentFrame=*/2, kSync);
+        refusedSync = cache.Resolve(kTestOwner, "FormatRefusal", differentFormatDesc, /*currentFrame=*/2, kSync);
         return {};
     });
     EXPECT_FALSE(refusedSync.has_value());
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> refusedPipelined;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        refusedPipelined = cache.Resolve(
-            kPersistentOwnerCacheValidation, "FormatRefusal", differentFormatDesc, /*currentFrame=*/3, kPipelined);
+        refusedPipelined = cache.Resolve(kTestOwner, "FormatRefusal", differentFormatDesc, /*currentFrame=*/3, kPipelined);
         return {};
     });
     EXPECT_FALSE(refusedPipelined.has_value());
 }
 
-// --- PHASE7 (PHASE7_RENDERGRAPH_INTEGRATION_AND_FRAME_COUNTER.md) ---
-
-// 19. CurrentPersistentResourceFrameCounter() - starts at 0, pre-increments
-// on every BeginPersistentResourceFrame() call (1 after the first, 2 after
-// the second, etc.) - the direct regression test for this phase's own
-// frame-counter plumbing, using the SAME HeadlessRenderGraphFixture (a real
-// rg::RenderGraph, via fixture.GetRenderGraph()) every other test in this
-// file already uses.
+// The frame counter starts at 0 and advances once per BeginPersistentResourceFrame().
 TEST(RenderGraphPersistentResourceCacheTest, CurrentPersistentResourceFrameCounterAdvancesOncePerBeginCall)
 {
     HeadlessRenderGraphFixture fixture;
@@ -1020,64 +882,10 @@ TEST(RenderGraphPersistentResourceCacheTest, CurrentPersistentResourceFrameCount
     EXPECT_EQ(renderGraph.CurrentPersistentResourceFrameCounter(), 3u);
 }
 
-// 20. RenderGraph::Execute()'s own template body now ALSO calls
-// SetPersistentResourceCache() every single call (this phase's own new
-// wiring) - a basic smoke check confirming an ordinary, empty-build
-// SynchronousImmediateReadback frame still runs with zero crash/misbehavior
-// now that this extra setter call happens on every Execute(). Full
-// end-to-end confirmation that the THREE values genuinely reach
-// GetOrCreatePersistentTexture() correctly is deliberately deferred to
-// PHASE8's own tests (that method does not exist yet this phase) - see this
-// phase's own .md, Step 4 item 2.
-TEST(RenderGraphPersistentResourceCacheTest, ExecuteStillRunsANormalEmptyFrameAfterGainingTheNewSetterCall)
-{
-    HeadlessRenderGraphFixture fixture;
-    if (!fixture.IsUsable()) {
-        GTEST_SKIP() << fixture.SkipReason();
-    }
+// Builder tests: call BeginPersistentResourceFrame() each frame and touch the handle in a pass
+// (culled passes never resolve a texture, so no debug snapshot exists).
 
-    fixture.GetRenderGraph().BeginPersistentResourceFrame();
-    EXPECT_NO_THROW({
-        fixture.RunSynchronousFrame(
-            [](RenderGraphBuilder&) -> std::vector<TextureHandle> { return {}; });
-    });
-}
-
-// --- PHASE8 (PHASE8_BUILDER_GETORCREATEPERSISTENTTEXTURE_AND_HONEST_LAYOUT_WIRING.md) ---
-//
-// Everything below drives the feature through the REAL, production-shaped
-// entry point, RenderGraphBuilder::GetOrCreatePersistentTexture() - NOT
-// RenderGraphPersistentResourceCache::Resolve()/ResolveFast() directly (the
-// tests above, PHASE4-6, deliberately used the lower-level API since the
-// builder wiring didn't exist yet) - through the SAME real, internal cache
-// `fixture.GetRenderGraph()` itself owns (RenderGraph::m_persistentResourceCache),
-// never a second, test-constructed instance. Every test below calls
-// `fixture.GetRenderGraph().BeginPersistentResourceFrame()` immediately
-// before each `RunSynchronousFrame()` call, exactly mirroring
-// `Core::BuildFrame()`'s own real per-frame call order (Correction 1/Locked
-// Decision 2, PHASE0_MASTER_STRATEGY.md) - this is REQUIRED, not cosmetic:
-// skipping it would leave `RenderGraph::m_persistentResourceFrameCounter`
-// pinned at 0 forever, which would incorrectly trip the same-real-frame
-// double-request guard (Section 5.3) on every single call after the first.
-
-// 21. Same VkImage across 3 real frames, via the real builder API - the
-// single most important proof THIS phase adds (mirrors test 1 above, this
-// time through GetOrCreatePersistentTexture() + a real Execute() cycle
-// end-to-end, confirmed via the SAME DebugTextureSnapshotFor() query
-// GET /get_texture itself is built on). A real, declared touching pass
-// (WriteColorAttachment with NO clear color -> VK_ATTACHMENT_LOAD_OP_LOAD,
-// preserving whatever content is already there) is REQUIRED here, not
-// optional: RenderGraphCompiler::Compile()'s root-marking scan only makes a
-// PASS survive culling (never a bare, pass-less handle), and
-// RegisterDebugTextureSnapshots()/DebugTextureSnapshotFor() only ever
-// reflect a texture a SURVIVING pass actually resolved this call
-// (physicalTextures[h.index].resolved) - a call to
-// GetOrCreatePersistentTexture() with NO pass at all touching the returned
-// handle would leave it unresolved this frame, and DebugTextureSnapshotFor()
-// would correctly return std::nullopt (a real, confirmed-live defect found
-// and fixed in this exact shape during this phase's own dispatch_sub_agent
-// double-check, before this file was committed - see this phase's own
-// completion report).
+// The same VkImage is returned across three frames when one token is reused.
 TEST(RenderGraphPersistentResourceCacheTest, BuilderGetOrCreatePersistentTextureReturnsTheSamePhysicalTextureAcrossThreeFrames)
 {
     HeadlessRenderGraphFixture fixture;
@@ -1086,13 +894,14 @@ TEST(RenderGraphPersistentResourceCacheTest, BuilderGetOrCreatePersistentTexture
     }
 
     const TextureDesc desc = MakeColorDesc();
-    const std::string combinedKey = std::string(kPersistentOwnerCacheValidation) + "::BuilderReuse";
+    const std::string combinedKey = std::string(kTestOwner) + "::BuilderReuse";
+    PersistentTextureCacheToken token;
     VkImage firstImage = VK_NULL_HANDLE;
 
     for (int frame = 0; frame < 3; ++frame) {
         fixture.GetRenderGraph().BeginPersistentResourceFrame();
         fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-            const TextureHandle h = b.GetOrCreatePersistentTexture(kPersistentOwnerCacheValidation, "BuilderReuse", desc);
+            const TextureHandle h = b.GetOrCreatePersistentTexture(token, kTestOwner, "BuilderReuse", desc);
             EXPECT_TRUE(h.IsValid());
             b.AddPass(
                 "BuilderReuseTouchPass",
@@ -1112,17 +921,8 @@ TEST(RenderGraphPersistentResourceCacheTest, BuilderGetOrCreatePersistentTexture
     }
 }
 
-// 22. Token-based fast path - identical result to the plain overload, AND a
-// real, if indirect, proxy that the fast path itself was genuinely taken on
-// frames 2/3 (not merely "produced the identical result", which the slow
-// path would also do): RenderGraphBuilder::GetOrCreatePersistentTexture()'s
-// token overload only ever calls RenderGraphPersistentResourceCache::
-// DebugTokenIdentityMatches()'s debug-only assert STRICTLY INSIDE its own
-// `if (IsTokenLive(...))` branch (see RenderGraphBuilder.cpp) - this whole
-// test completing normally (never aborting) across 3 repeated calls with a
-// STABLE token is therefore real evidence that branch (and only that
-// branch) executed on the second and third calls. See test 21's own doc
-// comment above for why a real, declared touching pass is required here too.
+// The first call mints a live token slot; later calls keep that slot and the same image.
+// The graph's cache is private, so slot stability stands in for IsTokenLive().
 TEST(RenderGraphPersistentResourceCacheTest, BuilderGetOrCreatePersistentTextureTokenFastPathReusesTheSameImage)
 {
     HeadlessRenderGraphFixture fixture;
@@ -1131,14 +931,15 @@ TEST(RenderGraphPersistentResourceCacheTest, BuilderGetOrCreatePersistentTexture
     }
 
     const TextureDesc desc = MakeColorDesc();
-    const std::string combinedKey = std::string(kPersistentOwnerCacheValidation) + "::TokenReuse";
+    const std::string combinedKey = std::string(kTestOwner) + "::TokenReuse";
     PersistentTextureCacheToken token;
+    PersistentSlotRef firstSlot;
+    VkImage firstImage = VK_NULL_HANDLE;
 
     for (int frame = 0; frame < 3; ++frame) {
         fixture.GetRenderGraph().BeginPersistentResourceFrame();
         fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-            const TextureHandle h =
-                b.GetOrCreatePersistentTexture(token, kPersistentOwnerCacheValidation, "TokenReuse", desc);
+            const TextureHandle h = b.GetOrCreatePersistentTexture(token, kTestOwner, "TokenReuse", desc);
             EXPECT_TRUE(h.IsValid());
             b.AddPass(
                 "TokenReuseTouchPass",
@@ -1146,38 +947,23 @@ TEST(RenderGraphPersistentResourceCacheTest, BuilderGetOrCreatePersistentTexture
                 [](PassContext&) {});
             return {};
         });
-    }
 
-    const std::optional<DebugTextureSnapshot> snapshot = fixture.GetRenderGraph().DebugTextureSnapshotFor(combinedKey);
-    ASSERT_TRUE(snapshot.has_value());
-    EXPECT_NE(snapshot->target.image, static_cast<VkImage>(VK_NULL_HANDLE));
+        const std::optional<DebugTextureSnapshot> snapshot = fixture.GetRenderGraph().DebugTextureSnapshotFor(combinedKey);
+        ASSERT_TRUE(snapshot.has_value());
+        if (frame == 0) {
+            ASSERT_NE(token.slot.epoch, 0u);
+            firstSlot = token.slot;
+            firstImage = snapshot->target.image;
+            EXPECT_NE(firstImage, static_cast<VkImage>(VK_NULL_HANDLE));
+        } else {
+            EXPECT_EQ(token.slot, firstSlot);
+            EXPECT_EQ(snapshot->target.image, firstImage);
+        }
+    }
 }
 
-// 23. Write-on-frame-N, read-correctly-on-frame-N+1 - the concrete "no
-// discard" proof. Frame 1 writes a known, real clear-color pattern via a
-// genuine declared pass (VK_ATTACHMENT_LOAD_OP_CLEAR), with NO reader that
-// same frame (Section 5.2's own recommended canonical shape - a
-// write-only pass kept alive purely by the persistent-cache root). Frame 2
-// declares a SECOND real, genuinely-surviving pass against the SAME
-// identity - a WriteColorAttachment call with NO clear color (so
-// VK_ATTACHMENT_LOAD_OP_LOAD, NOT _CLEAR - it must LOAD the existing
-// content, never discard it) - this is a DELIBERATE, corrected choice from
-// this test's own original draft, which tried a ReadTexture()-ONLY pass:
-// RenderGraphCompiler::Compile()'s root-marking scan only ever scans
-// `pass.writes` (confirmed by direct code read, RenderGraphCompiler.cpp
-// ~line 542) - a pass with ZERO declared writes can NEVER become a root by
-// itself, and with no other pass in that same frame to be a dependency
-// predecessor of, a pure ReadTexture()-only pass is UNCONDITIONALLY culled -
-// a real, confirmed-live defect found and fixed in this exact shape during
-// this phase's own dispatch_sub_agent double-check, before this file was
-// committed (see this phase's own completion report). This corrected
-// LOAD_OP_LOAD write pass IS a real, meaningful regression check in its own
-// right: if this cache's own honest-layout-recording (RecordFinalLayout())
-// or the builder's `resolved.lastKnownLayout` -> ImportTexture() plumbing
-// were ever wrong, VK_ATTACHMENT_LOAD_OP_LOAD against a falsely-assumed
-// layout would read back GARBAGE, not frame 1's real content - this test's
-// own final pixel read-back (via Renderer::CaptureImagePixels(), the exact
-// same primitive GET /get_texture itself is built on) would then fail.
+// Content written on frame N is still there on frame N+1: the layout bookkeeping must not discard it.
+// Frame 2 uses a write pass without a clear color (LOAD, not CLEAR); a read-only pass would be culled.
 TEST(RenderGraphPersistentResourceCacheTest, ContentWrittenOnFrameNSurvivesReadableOnFrameNPlusOne)
 {
     HeadlessRenderGraphFixture fixture;
@@ -1187,12 +973,12 @@ TEST(RenderGraphPersistentResourceCacheTest, ContentWrittenOnFrameNSurvivesReada
 
     const TextureDesc desc = MakeColorDesc(16, 16);
     const std::array<float, 4> knownColor{ 0.25f, 0.5f, 0.75f, 1.0f };
-    const std::string combinedKey = std::string(kPersistentOwnerCacheValidation) + "::WriteReadRoundTrip";
+    const std::string combinedKey = std::string(kTestOwner) + "::WriteReadRoundTrip";
+    PersistentTextureCacheToken token;
 
     fixture.GetRenderGraph().BeginPersistentResourceFrame();
     fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-        const TextureHandle h =
-            b.GetOrCreatePersistentTexture(kPersistentOwnerCacheValidation, "WriteReadRoundTrip", desc);
+        const TextureHandle h = b.GetOrCreatePersistentTexture(token, kTestOwner, "WriteReadRoundTrip", desc);
         b.AddPass(
             "PersistentTextureKnownPatternWrite",
             [&](RenderGraphBuilder::PassBuilder& pb) { pb.WriteColorAttachment(h, knownColor); },
@@ -1206,7 +992,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ContentWrittenOnFrameNSurvivesReada
         afterFrame1->target.image, VK_IMAGE_ASPECT_COLOR_BIT, afterFrame1->target.format,
         FromVkExtent2D(afterFrame1->target.extent), afterFrame1->colorState);
     ASSERT_EQ(pixelsAfterFrame1.pixels.size(), static_cast<std::size_t>(16 * 16 * 4));
-    // VK_FORMAT_R8G8B8A8_UNORM - each channel is round(component * 255).
+    // VK_FORMAT_R8G8B8A8_UNORM: each channel is round(component * 255).
     EXPECT_NEAR(pixelsAfterFrame1.pixels[0], 64, 2);
     EXPECT_NEAR(pixelsAfterFrame1.pixels[1], 128, 2);
     EXPECT_NEAR(pixelsAfterFrame1.pixels[2], 191, 2);
@@ -1214,18 +1000,17 @@ TEST(RenderGraphPersistentResourceCacheTest, ContentWrittenOnFrameNSurvivesReada
 
     fixture.GetRenderGraph().BeginPersistentResourceFrame();
     fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-        const TextureHandle h =
-            b.GetOrCreatePersistentTexture(kPersistentOwnerCacheValidation, "WriteReadRoundTrip", desc);
+        const TextureHandle h = b.GetOrCreatePersistentTexture(token, kTestOwner, "WriteReadRoundTrip", desc);
         b.AddPass(
             "PersistentTextureKnownPatternLoadPreserve",
-            [&](RenderGraphBuilder::PassBuilder& pb) { pb.WriteColorAttachment(h); }, // no clearColor -> LOAD, not CLEAR.
+            [&](RenderGraphBuilder::PassBuilder& pb) { pb.WriteColorAttachment(h); }, // No clear color: LOAD.
             [](PassContext&) {});
         return {};
     });
 
     const std::optional<DebugTextureSnapshot> afterFrame2 = fixture.GetRenderGraph().DebugTextureSnapshotFor(combinedKey);
     ASSERT_TRUE(afterFrame2.has_value());
-    EXPECT_EQ(afterFrame2->target.image, afterFrame1->target.image); // same physical VkImage - no discard/recreate.
+    EXPECT_EQ(afterFrame2->target.image, afterFrame1->target.image); // Same VkImage: no discard or recreate.
     const Renderer::CapturedRawPixels pixelsAfterFrame2 = fixture.GetRenderer().CaptureImagePixels(
         afterFrame2->target.image, VK_IMAGE_ASPECT_COLOR_BIT, afterFrame2->target.format,
         FromVkExtent2D(afterFrame2->target.extent), afterFrame2->colorState);
@@ -1236,17 +1021,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ContentWrittenOnFrameNSurvivesReada
     EXPECT_NEAR(pixelsAfterFrame2.pixels[3], 255, 2);
 }
 
-// 24. Keep-alive in practice, through the REAL builder - a pass whose ONLY
-// declared usage of a GetOrCreatePersistentTexture()-minted handle is a
-// write, with NOTHING else reading/writing it this frame and the handle NOT
-// present in `finalOutputs`, still runs (is NOT culled) every single real
-// frame - proving PHASE3's compiler root-marking fix and this phase's own
-// builder wiring genuinely connect end-to-end. A genuinely CULLED pass would
-// never resolve this texture, so RegisterDebugTextureSnapshots() would never
-// Upsert() a fresh entry for it - `lastUpdatedFrameCounter` strictly
-// advancing past this iteration's own `counterBefore` snapshot is the
-// direct, observable proof this pass really executed THIS frame, not merely
-// that a stale entry from an earlier frame is still sitting in the registry.
+// A write-only pass on a persistent handle with no reader is never culled: its snapshot advances every frame.
 TEST(RenderGraphPersistentResourceCacheTest, WriteOnlyPersistentTextureWithNoReaderSurvivesCullingEveryFrame)
 {
     HeadlessRenderGraphFixture fixture;
@@ -1255,19 +1030,19 @@ TEST(RenderGraphPersistentResourceCacheTest, WriteOnlyPersistentTextureWithNoRea
     }
 
     const TextureDesc desc = MakeColorDesc();
-    const std::string combinedKey = std::string(kPersistentOwnerCacheValidation) + "::KeepAliveOnly";
+    const std::string combinedKey = std::string(kTestOwner) + "::KeepAliveOnly";
+    PersistentTextureCacheToken token;
 
     for (int frame = 0; frame < 3; ++frame) {
         fixture.GetRenderGraph().BeginPersistentResourceFrame();
         const std::uint64_t counterBefore = fixture.GetRenderGraph().CurrentDebugTextureFrameCounter();
         fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-            const TextureHandle h =
-                b.GetOrCreatePersistentTexture(kPersistentOwnerCacheValidation, "KeepAliveOnly", desc);
+            const TextureHandle h = b.GetOrCreatePersistentTexture(token, kTestOwner, "KeepAliveOnly", desc);
             b.AddPass(
                 "PersistentKeepAliveWritePass",
                 [&](RenderGraphBuilder::PassBuilder& pb) { pb.WriteColorAttachment(h); },
                 [](PassContext&) {});
-            return {}; // deliberately empty - `h` is NEVER a finalOutput.
+            return {}; // `h` is never a final output.
         });
 
         const std::optional<DebugTextureSnapshot> snapshot = fixture.GetRenderGraph().DebugTextureSnapshotFor(combinedKey);
@@ -1276,11 +1051,7 @@ TEST(RenderGraphPersistentResourceCacheTest, WriteOnlyPersistentTextureWithNoRea
     }
 }
 
-// 25. Two different owners, same name, same desc - re-confirms PHASE4's own
-// lower-level test (test 2 above), this time through the full,
-// production-shaped GetOrCreatePersistentTexture() call path. See test 21's
-// own doc comment above for why a real, declared touching pass per handle is
-// required here too.
+// Two owners with the same name and desc get separate textures through the builder.
 TEST(RenderGraphPersistentResourceCacheTest, BuilderGetOrCreatePersistentTextureTwoOwnersWithTheSameNameNeverCollide)
 {
     HeadlessRenderGraphFixture fixture;
@@ -1289,11 +1060,13 @@ TEST(RenderGraphPersistentResourceCacheTest, BuilderGetOrCreatePersistentTexture
     }
 
     const TextureDesc desc = MakeColorDesc();
+    PersistentTextureCacheToken tokenA;
+    PersistentTextureCacheToken tokenB;
 
     fixture.GetRenderGraph().BeginPersistentResourceFrame();
     fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-        const TextureHandle a = b.GetOrCreatePersistentTexture("BuilderOwnerA", "History", desc);
-        const TextureHandle c = b.GetOrCreatePersistentTexture("BuilderOwnerB", "History", desc);
+        const TextureHandle a = b.GetOrCreatePersistentTexture(tokenA, "BuilderOwnerA", "History", desc);
+        const TextureHandle c = b.GetOrCreatePersistentTexture(tokenB, "BuilderOwnerB", "History", desc);
         EXPECT_TRUE(a.IsValid());
         EXPECT_TRUE(c.IsValid());
         EXPECT_NE(a.index, c.index);
@@ -1313,19 +1086,8 @@ TEST(RenderGraphPersistentResourceCacheTest, BuilderGetOrCreatePersistentTexture
     EXPECT_NE(snapA->target.image, snapB->target.image);
 }
 
-// 26. Re-confirming PHASE4/5's own debug-assert-driven refusals still fire
-// correctly when reached THROUGH GetOrCreatePersistentTexture() itself (not
-// just Resolve()/ResolveFast() directly, as tests 4/12 above already cover).
-// The PipelinedDeferredReadback regime-aware resize-refusal case (PHASE6) is
-// DELIBERATELY NOT re-tested through the real builder here - HeadlessRenderGraphFixture
-// only ever drives a SynchronousImmediateReadback Execute() call
-// (RunSynchronousFrame()'s own fixed regime), and GetOrCreatePersistentTexture()
-// itself adds NO timingMode-specific logic of its own (it forwards
-// m_persistentCacheTimingMode to Resolve()/ResolveFast() completely
-// unconditionally) - that refusal path is already directly, fully covered by
-// PHASE6's own ResizeRequestedFromThePipelinedRegimeIsRefusedButTheCallStillSucceeds
-// test, unaffected by this phase's ResolveAgainstEntry() extraction (confirmed
-// by re-running the full PHASE4-6 suite unmodified after this phase's refactor).
+// Debug asserts still fire when reached through the builder. The pipelined resize refusal is covered by the
+// direct Resolve() test above: the builder only forwards the timing mode.
 #ifndef NDEBUG
 
 TEST(RenderGraphPersistentResourceCacheDeathTest, BuilderGetOrCreatePersistentTextureAssertsWhenDescHasDepthIsTrue)
@@ -1341,9 +1103,10 @@ TEST(RenderGraphPersistentResourceCacheDeathTest, BuilderGetOrCreatePersistentTe
             HeadlessRenderGraphFixture fixture;
             TextureDesc desc = MakeColorDesc();
             desc.hasDepth = true;
+            PersistentTextureCacheToken token;
             fixture.GetRenderGraph().BeginPersistentResourceFrame();
             fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-                (void)b.GetOrCreatePersistentTexture(kPersistentOwnerCacheValidation, "BuilderDepthRefusal", desc);
+                (void)b.GetOrCreatePersistentTexture(token, kTestOwner, "BuilderDepthRefusal", desc);
                 return {};
             });
         },
@@ -1359,9 +1122,10 @@ TEST(RenderGraphPersistentResourceCacheTest, BuilderGetOrCreatePersistentTexture
     }
 
     const TextureDesc desc = MakeColorDesc();
+    PersistentTextureCacheToken token;
     fixture.GetRenderGraph().BeginPersistentResourceFrame();
     fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-        const TextureHandle h = b.GetOrCreatePersistentTexture("", "BuilderLiteralIdentity", desc);
+        const TextureHandle h = b.GetOrCreatePersistentTexture(token, "", "BuilderLiteralIdentity", desc);
         EXPECT_TRUE(h.IsValid());
         b.AddPass(
             "BuilderLiteralIdentityTouchPass",
@@ -1414,7 +1178,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ResolveThreadsStorageUsageIntoTheCr
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        resolved = cache.Resolve(kPersistentOwnerCacheValidation, "StorageUsage", storageDesc, /*currentFrame=*/1, kSync);
+        resolved = cache.Resolve(kTestOwner, "StorageUsage", storageDesc, /*currentFrame=*/1, kSync);
         return {};
     });
 
@@ -1436,7 +1200,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ResolveWithoutStorageUsageNeverAllo
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        resolved = cache.Resolve(kPersistentOwnerCacheValidation, "NoStorageUsage", desc, /*currentFrame=*/1, kSync);
+        resolved = cache.Resolve(kTestOwner, "NoStorageUsage", desc, /*currentFrame=*/1, kSync);
         return {};
     });
 
@@ -1445,7 +1209,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ResolveWithoutStorageUsageNeverAllo
     EXPECT_FALSE(resolved->texture->AllowsStorageImageAccess());
 }
 
-// A usage change on an existing entry needs a full VkImage recreation -
+// A usage change on an existing entry needs a full VkImage recreation:
 // treated as a caller bug, same as a format change, never silently applied.
 TEST(RenderGraphPersistentResourceCacheTest, ReRequestingAnExistingEntryWithADifferentUsageIsRefused)
 {
@@ -1457,8 +1221,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ReRequestingAnExistingEntryWithADif
     RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        auto resolved = cache.Resolve(
-            kPersistentOwnerCacheValidation, "UsageRefusal", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
+        auto resolved = cache.Resolve(kTestOwner, "UsageRefusal", MakeColorDesc(32, 32), /*currentFrame=*/1, kSync);
         if (!resolved.has_value()) {
             ADD_FAILURE() << "Initial Resolve() unexpectedly failed for UsageRefusal";
         }
@@ -1470,8 +1233,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ReRequestingAnExistingEntryWithADif
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> refused;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        refused =
-            cache.Resolve(kPersistentOwnerCacheValidation, "UsageRefusal", differentUsageDesc, /*currentFrame=*/2, kSync);
+        refused = cache.Resolve(kTestOwner, "UsageRefusal", differentUsageDesc, /*currentFrame=*/2, kSync);
         return {};
     });
     EXPECT_FALSE(refused.has_value());
@@ -1510,38 +1272,6 @@ TEST(RenderGraphPersistentResourceCacheTest, BuilderReturnsInvalidHandleAndLogsO
     EXPECT_EQ(errors, 1);
 }
 
-// A failed buffer create returns false, logs once and leaves no partial state.
-TEST(RenderGraphPersistentResourceCacheTest, GpuParamsUploadReturnsFalseAndLogsOnceWhenCreateFails)
-{
-    HeadlessRenderGraphFixture fixture;
-    if (!fixture.IsUsable()) {
-        GTEST_SKIP() << fixture.SkipReason();
-    }
-
-    RecordingLogSink sink;
-    ScopedLogSinkInstall logGuard(&sink);
-    GpuParamsBuffer params;
-    const char byte = 0;
-    bool uploaded = true;
-    fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-        uploaded = params.Upload(b, &byte, std::size_t{ 1 } << 46, "HugeParams");
-        uploaded = params.Upload(b, &byte, std::size_t{ 1 } << 46, "HugeParams") || uploaded;
-        return {};
-    });
-    if (uploaded) {
-        GTEST_SKIP() << "This driver accepted a 64 TiB buffer; cannot force a failed create.";
-    }
-
-    EXPECT_EQ(params.Handle(), BufferObjectHandle::Invalid);
-    int errors = 0;
-    for (const RecordingLogSink::Recorded& entry : sink.entries) {
-        if (entry.level == LogLevel::Error && entry.message.find("failed") != std::string::npos) {
-            ++errors;
-        }
-    }
-    EXPECT_EQ(errors, 1);
-}
-
 // Storage usage on a format no device can store to is refused, logged once, and creates no entry.
 TEST(RenderGraphPersistentResourceCacheTest, StorageUsageOnANonStorageFormatIsRefusedAndLoggedOnce)
 {
@@ -1560,14 +1290,51 @@ TEST(RenderGraphPersistentResourceCacheTest, StorageUsageOnANonStorageFormatIsRe
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> first;
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> second;
     EXPECT_NO_THROW({
-        first = cache.Resolve(kPersistentOwnerCacheValidation, "NoStorageFormat", desc, 1, kSync);
-        second = cache.Resolve(kPersistentOwnerCacheValidation, "NoStorageFormat", desc, 2, kSync);
+        first = cache.Resolve(kTestOwner, "NoStorageFormat", desc, 1, kSync);
+        second = cache.Resolve(kTestOwner, "NoStorageFormat", desc, 2, kSync);
     });
 
     EXPECT_FALSE(first.has_value());
     EXPECT_FALSE(second.has_value());
-    EXPECT_FALSE(cache.FramesUntilEviction(kPersistentOwnerCacheValidation, "NoStorageFormat", 2).has_value());
-    EXPECT_EQ(sink.entries.size(), 1u);
+    EXPECT_FALSE(cache.FramesUntilEviction(kTestOwner, "NoStorageFormat", 2).has_value());
+    EXPECT_EQ(CountByCategory(sink, kCacheLogCategory), 1);
+}
+
+// A resize swaps the image behind a persistent texture; its debug snapshot must follow to the new image.
+TEST(RenderGraphPersistentResourceCacheTest, DebugSnapshotFollowsThePersistentTextureAfterAResize)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    const std::string combinedKey = std::string(kTestOwner) + "::SnapFollowsResize";
+    PersistentTextureCacheToken token;
+    const auto runFrame = [&](const TextureDesc& desc) {
+        fixture.GetRenderGraph().BeginPersistentResourceFrame();
+        fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
+            const TextureHandle h = b.GetOrCreatePersistentTexture(token, kTestOwner, "SnapFollowsResize", desc);
+            b.AddPass(
+                "SnapFollowsResizeWrite",
+                [&](RenderGraphBuilder::PassBuilder& pb) { pb.WriteColorAttachment(h); },
+                [](PassContext&) {});
+            return {};
+        });
+        return fixture.GetRenderGraph().DebugTextureSnapshotFor(combinedKey);
+    };
+
+    const std::optional<DebugTextureSnapshot> before = runFrame(MakeColorDesc(64, 64));
+    ASSERT_TRUE(before.has_value());
+    EXPECT_EQ(before->target.extent.width, 64u);
+
+    const std::optional<DebugTextureSnapshot> afterResize = runFrame(MakeColorDesc(128, 128));
+    ASSERT_TRUE(afterResize.has_value());
+    EXPECT_EQ(afterResize->target.extent.width, 128u);
+    EXPECT_NE(afterResize->target.image, before->target.image);
+
+    const std::optional<DebugTextureSnapshot> steady = runFrame(MakeColorDesc(128, 128));
+    ASSERT_TRUE(steady.has_value());
+    EXPECT_EQ(steady->target.image, afterResize->target.image);
 }
 
 } // namespace gte::rg

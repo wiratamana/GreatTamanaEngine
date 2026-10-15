@@ -31,9 +31,8 @@ namespace gte::rg {
 // Forward declaration to avoid circular include with RenderGraph.h.
 enum class ExecuteTimingMode : std::uint8_t;
 
-// Import metadata for textures owned outside the render graph. Which target is meaningful depends on
-// the slot's TextureDesc::dimension: Tex2D -> externalTarget, Tex3D -> externalVolumeTarget,
-// Array2D/Cube -> externalArrayTarget.
+// Import metadata for textures owned outside the graph; the TextureDesc::dimension picks which
+// external target (2D, volume or array) is meaningful.
 struct TextureImportInfo {
     bool isImported = false;
     RenderTarget externalTarget{};
@@ -152,10 +151,6 @@ public:
         // Writes a texture through a storage image (compute write + storage image binding).
         void WriteStorageImage(std::uint32_t binding, TextureHandle handle);
 
-        // Graph-tracked storage buffers: compute read/write access + binding.
-        void ReadStorageBuffer(std::uint32_t binding, BufferHandle handle);
-        void WriteStorageBuffer(std::uint32_t binding, BufferHandle handle);
-
         // Externally owned buffer: binding only, the graph does not track it.
         void ReadStorageBuffer(std::uint32_t binding, BufferObjectHandle handle);
 
@@ -168,17 +163,12 @@ public:
     TextureHandle CreateTexture(const char* name, const TextureDesc& desc);
     BufferHandle CreateBuffer(const char* name, const BufferDesc& desc);
 
-    // Imports an externally managed resource into the graph. colorSampler/
-    // depthSampler are engine-native SamplerHandle opaque handles (Core/
-    // GraphicsHandles.h), never a raw VkSampler - see
-    // RenderTexture::SamplerObjectHandle()/DepthSamplerObjectHandle().
+    // Imports an externally managed resource into the graph; samplers are engine handles, never raw VkSampler.
     TextureHandle ImportTexture(const char* name, const RenderTarget& externalTarget, ImageLayout currentLayout,
         SamplerHandle colorSampler = SamplerHandle::Invalid, SamplerHandle depthSampler = SamplerHandle::Invalid,
         RenderTexture* trackedOwner = nullptr);
 
-    // externalBuffer is an engine-native BufferObjectHandle opaque handle
-    // (Core/GraphicsHandles.h), never a raw VkBuffer - see
-    // Buffer::ObjectHandle().
+    // externalBuffer is an engine handle (Core/GraphicsHandles.h), never a raw VkBuffer.
     BufferHandle ImportBuffer(const char* name, BufferObjectHandle externalBuffer, uint64_t size);
 
     // Imports a 3D volume / 2D array / cube owned outside the graph. All return the one TextureHandle type.
@@ -287,10 +277,7 @@ public:
     // Physical desc (extent, format, depth) of a declared texture; imported ones report the real image.
     std::optional<TextureDesc> DescOf(TextureHandle handle) const;
 
-    // Retrieves or allocates a persistent cross-frame texture.
-    TextureHandle GetOrCreatePersistentTexture(const char* owner, const char* name, const TextureDesc& desc);
-
-    // Fast-path lookup for persistent textures using a cached token.
+    // Retrieves or allocates a persistent cross-frame texture. The token is the fast path across frames.
     TextureHandle GetOrCreatePersistentTexture(
         PersistentTextureCacheToken& token, const char* owner, const char* name, const TextureDesc& desc);
 
@@ -329,22 +316,8 @@ public:
         return false;
     }
 
-    // True iff `index`'s pass declared a WriteDepthStencilAttachment() on
-    // `handle`. ResourceAccess::DepthStencilAttachmentReadWrite is, by
-    // construction, a REAL combined read+write - a depth test reads the
-    // attachment's existing contents (early/late fragment test) before
-    // conditionally writing it (see RenderGraphBarrierPlanner.cpp's own doc
-    // comment on this exact ResourceAccess value) - so this is every bit as
-    // real a declared dependency on `handle` as an explicit ReadTexture()
-    // call. Lets a depth-tested in-place write (e.g. a sky/background pass
-    // that only fills in pixels the depth-EQUAL test leaves untouched)
-    // satisfy FindScenePassCallbackMissingReadDeclaration() honestly,
-    // without lying to the barrier planner via a fake ReadTexture(handle,
-    // ShaderRead) declaration - that would demand
-    // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL for the same handle
-    // WriteDepthStencilAttachment() already demands
-    // VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL for, in the same
-    // pass - two contradictory required layouts for one resource.
+    // True iff the pass declared WriteDepthStencilAttachment() on `handle`. A depth test reads the attachment,
+    // so this counts as a real dependency without a fake ShaderRead (which would demand a conflicting layout).
     bool PassWritesTextureAsDepthReadWrite(std::size_t index, TextureHandle handle) const
     {
         assert(index < m_passes.size() && "RenderGraphBuilder::PassWritesTextureAsDepthReadWrite() - index out of range");
