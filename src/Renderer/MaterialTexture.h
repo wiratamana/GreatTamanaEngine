@@ -8,28 +8,8 @@
 
 namespace gte {
 
-// Bundles a Texture2D with the engine-owned DescriptorSetHandle (one
-// combined-image-sampler binding, set = 0, binding = 0) already written to
-// point at it - built once by GpuResourceFactory::CreateMaterialTexture2D()
-// against the ONE shared material descriptor-set-layout every textured
-// Pipeline is built with (see GpuResourceFactory::MaterialDescriptorSetLayout()
-// and Pipeline.h's VertexLayout::PositionNormalUv), so any MaterialTexture can
-// be bound directly against any textured Pipeline's layout with no further
-// wiring - this is the "material" half of a per-submesh draw (see
-// ECS/Components/MeshRenderer.h::texture and RenderSystem::Draw()), the
-// Mesh-equivalent primitive for "what to sample" rather than "what to draw".
-//
-// descriptorSet is a DescriptorSetHandle (not a raw VkDescriptorSet) - see
-// Core/GraphicsHandles.h/Renderer/GraphicsHandleRegistry.h. It is registered
-// ONCE, at construction time (CreateMaterialTexture2D()), and never
-// re-registered/unregistered afterward: the underlying VkDescriptorSet is
-// allocated from GpuResourceFactory's own persistent m_materialDescriptorPool
-// and is NEVER individually freed - only ever destroyed implicitly, all at
-// once, when that pool itself is destroyed alongside the whole
-// GpuResourceFactory/Renderer - so this struct owns no Vulkan handle of its
-// own to release besides Texture2D's own (RAII-owned) image/view/sampler.
-// Move-only, exactly like Texture2D itself (Texture2D has no copy
-// constructor - see Texture2D.h).
+// A Texture2D plus the shared-layout descriptor set (set 0, binding 0, combined sampler) already written for it.
+// The set comes from a persistent pool and is never freed individually. Move-only.
 struct MaterialTexture {
     Texture2D texture;
     DescriptorSetHandle descriptorSet = DescriptorSetHandle::Invalid;

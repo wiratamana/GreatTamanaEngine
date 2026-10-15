@@ -8,12 +8,7 @@
 
 namespace {
 
-// The ONLY place in this entire engine a gte::BufferUsage bitmask ever
-// becomes a real VkBufferUsageFlags value - see BufferUsage's own doc
-// comment (Buffer.h) for the full reasoning. Deliberately a plain
-// if-chain (not a switch - BufferUsage is a bitmask, not a scoped set of
-// mutually exclusive values) mirroring ToVkShaderStageFlags()'s own shape
-// (Renderer.cpp).
+// The only place a BufferUsage bitmask becomes VkBufferUsageFlags.
 VkBufferUsageFlags ToVkBufferUsageFlags(gte::BufferUsage usage) noexcept
 {
     VkBufferUsageFlags flags = 0;
@@ -77,20 +72,13 @@ Buffer::Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker
         throw std::runtime_error("Buffer: vmaCreateBuffer failed.");
     }
 
-    // Non-null exactly when VMA_ALLOCATION_CREATE_MAPPED_BIT was requested
-    // above (CpuToGpu/GpuToCpu) - stays valid for this Buffer's entire
-    // lifetime, unmapped automatically by vmaDestroyBuffer().
+    // Non-null exactly for CpuToGpu/GpuToCpu; VMA unmaps it in vmaDestroyBuffer().
     m_mappedData = allocationInfo.pMappedData;
 
-    // Registers this exact allocation with the tracker - see AGENTS.md
-    // ("GPU resource memory tracking"): the record must reflect the actual
-    // allocation VMA gave us (allocationInfo.size, and the real memory
-    // location it landed in), not just the requested `size`/memoryUsage.
+    // The record uses the real allocation size and memory location VMA picked, not the requested ones.
     const GpuMemoryLocation location = ClassifyGpuMemoryLocation(m_allocator, m_allocation);
     m_handle = m_tracker->Track(GpuResourceType::Buffer, location, allocationInfo.size);
-    // editor-core-separation-1 campaign, PHASE4 - unconditional now (no
-    // `#if GTE_ENABLE_EDITOR` guard anywhere here anymore); SetDebugName()
-    // itself is a cheap no-op when no debug-name observer is installed.
+    // Cheap no-op when no debug-name observer is installed.
     if (debugName != nullptr) {
         m_tracker->SetDebugName(m_handle, debugName);
     }
@@ -135,13 +123,7 @@ void Buffer::Upload(const void* data, std::size_t size, std::size_t offset)
         throw std::runtime_error(
             "Buffer::Upload: buffer is not host-mapped (was it created with BufferMemoryUsage::GpuOnly?).");
     }
-    // Guard against writing past the end of this buffer's actual allocation -
-    // offset/size are plain caller-supplied values with nothing else
-    // validating them before the memcpy below, so a mistake here would
-    // otherwise silently corrupt whatever host-visible memory happens to
-    // follow this allocation instead of failing loudly right at the call
-    // that got it wrong. The offset > m_size check comes first so the size
-    // comparison below can never underflow (size_t is unsigned).
+    // Bounds are checked before the memcpy; the offset test comes first so the subtraction cannot underflow.
     const auto bufferSize = static_cast<std::size_t>(m_size);
     if (offset > bufferSize || size > bufferSize - offset) {
         throw std::out_of_range(

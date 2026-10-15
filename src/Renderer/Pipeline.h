@@ -10,133 +10,32 @@
 
 namespace gte {
 
-// VertexLayout/kVertexLayoutCount moved to VertexLayout.h (included above) -
-// zero Vulkan dependency, shared with PipelineDesc.h.
-// Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
-// maximum number of color attachments a single Pipeline can be built
-// against. Mirrors gte::rg::kMaxColorAttachments
-// (Renderer/RenderGraph/RenderGraphTypes.h) exactly, but is kept as its own,
-// independent, LOCAL constant here rather than an #include of that
-// higher-level rg:: header - Pipeline is a lower-level Renderer primitive
-// (constructible with no RenderGraph involved at all, e.g. the original
-// hardcoded triangle demo) and should not reach upward into the RenderGraph
-// layer that is built on top of Renderer/Pipeline, not the other way
-// around (see AGENTS.md's "Clean Architecture" guideline). If
-// gte::rg::kMaxColorAttachments is ever changed, update this value to
-// match it.
+// Local copy of rg::kMaxColorAttachments: Pipeline is a lower-level primitive and must not include the graph.
+// Keep the two values equal.
 inline constexpr std::size_t kPipelineMaxColorAttachments = 8;
 
-// RAII wrapper around a VkPipeline + its VkPipelineLayout, built for dynamic
-// rendering (no VkRenderPass/VkFramebuffer) against an exact color AND
-// depth format. Owns both for its entire lifetime: created in the
-// constructor, destroyed in the destructor. Construct via
-// Renderer::CreatePipeline() rather than directly (same convention as
-// Buffer/RenderTexture/Mesh) - it needs the device and the exact color/depth
-// formats Renderer negotiated (see AGENTS.md, "Render Target Format
-// Matching": a pipeline built for one format cannot legally draw into a
-// target of a different one - depth now follows this exact same rule as
-// color, via Renderer::DepthFormat()/VulkanDevice::PickDepthFormat()).
-// Always depth-tests/writes (VK_COMPARE_OP_LESS, standard "smaller = closer
-// to the camera" convention matching this engine's PerspectiveFovLH_ZO's
-// [0,1] depth range) - every render target this pipeline draws into is
-// paired with a real DepthBuffer (see DepthBuffer.h/RenderTarget.h), so real
-// (non-coplanar) 3D geometry is correctly occluded instead of drawing in
-// whatever order it happened to be submitted in.
-//
-// `vertexLayout` (see VertexLayout above) selects which vertex
-// binding/attribute description this pipeline is built against - still no
-// descriptor sets, and viewport/scissor left as dynamic state so the exact
-// same pipeline can draw into either the swapchain or an Editor
-// RenderTexture, whatever size each currently is. DOES carry one push
-// constant range: a "model" matrix followed immediately by a "viewProj"
-// matrix (vertex stage only, offset 0, 128 bytes total - the guaranteed
-// minimum maxPushConstantsSize on every conformant Vulkan implementation,
-// so this never needs a per-GPU size check) - see RenderSystem.h/
-// FrameRecorder.h for how a per-draw world matrix and the active Camera's
-// view-projection matrix reach this via vkCmdPushConstants, and Shaders/
-// Triangle.vert/Mesh.vert for the matching `layout(push_constant)` block,
-// shared identically by both vertex layouts. Grow this further (a real
-// shader/material system, descriptor sets for textures/uniforms, ...) once
-// there's more than these two hardcoded vertex layouts to draw.
+// RAII owner of a VkPipeline and its layout for dynamic rendering; it only draws into targets of the exact
+// formats it was built for. Create through Renderer::CreatePipeline(). Depth test and write are always on (LESS).
+// Push constants: "model" then "viewProj" matrices (vertex stage, offset 0, 128 bytes).
 class Pipeline {
 public:
-    // vertexShaderSpirvPath/fragmentShaderSpirvPath point at compiled
-    // SPIR-V binaries - see cmake/CompileShaders.cmake, which compiles
-    // src/Shaders/*.vert/*.frag into "<exe dir>/shaders/*.spv" at build
-    // time (gitignored; only the GLSL source is version-controlled). NOT
-    // paths to GLSL source.
-    // `materialSetLayout` is only meaningful (non-VK_NULL_HANDLE) for
-    // VertexLayout::PositionNormalUv - see that enumerator's own comment -
-    // and must be GpuResourceFactory::MaterialDescriptorSetLayout() exactly,
-    // so every MaterialTexture's descriptor set (allocated against that
-    // exact same layout) stays binding-compatible with this Pipeline's
-    // layout. Left VK_NULL_HANDLE (the default) for every other vertex
-    // layout, which then builds a VkPipelineLayout with no descriptor sets
-    // at all, exactly as before this parameter existed.
-    // `debugName` (optional, default nullptr - stored as an empty string
-    // then) is a purely COSMETIC, human-readable label describing which
-    // real shader files/vertex layout this Pipeline was built with (e.g.
-    // "Mesh.vert/Mesh.frag (PositionNormal)") - never folded into any
-    // equality-compared/cache-key struct, mirroring RenderGraphTypes.h's
-    // own explicit "a resource's human-readable name is threaded as its
-    // OWN separate parameter" precedent (see task_manager/frame-debugger-3/
-    // PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md). Consumed by
-    // RenderSystem::Draw() when a FrameDebuggerCaptureContext is armed -
-    // see DebugName() below.
-    //
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE2 - `instanceBufferSetLayout` (default VK_NULL_HANDLE) is only
-    // meaningful for VertexLayout::PositionNormalInstanced - see that
-    // enumerator's own comment - and must be GpuResourceFactory::
-    // InstanceBufferDescriptorSetLayout() exactly. A SEPARATE, independent
-    // parameter from `materialSetLayout` above (never reused/renamed) -
-    // the two concepts (a material texture set, an instance-transform-
-    // buffer set) are unrelated; asserted (debug builds only, see
-    // Pipeline.cpp) to never both be non-VK_NULL_HANDLE at once (Locked
-    // Design Decision 8, PHASE0_MASTER_STRATEGY.md - no Pipeline needs
-    // both today).
-    //
-    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
-    // PHASE3 (task_manager/better-render-pass-6/PHASE3_PIPELINE_SET1_WIRING.md)
-    // - `sceneServicesSetLayout` (default VK_NULL_HANDLE) is a genuinely NEW,
-    // trailing parameter, appended AFTER `instanceBufferSetLayout` so every
-    // existing call site (which only ever supplies positional arguments up
-    // through `instanceBufferSetLayout`) keeps compiling completely
-    // unmodified. When non-VK_NULL_HANDLE, it must be Core's one
-    // SceneServicesDescriptorSet::Layout() exactly, and the resulting
-    // VkPipelineLayout carries it at `set = 1`, CONTIGUOUSLY with whatever
-    // (if anything) occupies `set = 0` - Vulkan forbids a hole at `set = 0`
-    // if `set = 1` is present, so when neither `materialSetLayout` nor
-    // `instanceBufferSetLayout` is supplied, this Pipeline synthesizes its
-    // own small, owned, zero-binding filler layout for `set = 0` (see
-    // Pipeline.cpp) rather than leaving a gap. Owned by whoever calls in
-    // (Core's one SceneServicesDescriptorSet instance), never reached-for by
-    // Pipeline itself. See HasSceneServicesSet() below.
-    //
-    // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - this
-    // single-VkFormat constructor is now a thin forwarder (see Pipeline.cpp)
-    // onto the new std::span<const VkFormat> constructor below, built as a
-    // one-element span. Its own signature/behavior/PSO output are
-    // completely unchanged from before this campaign - every existing call
-    // site keeps compiling and behaving identically.
+    // The SPIR-V paths point at compiled binaries in "<exe dir>/shaders/*.spv", not GLSL source.
+    // `debugName` is a cosmetic label, never part of a cache key.
+    // `sceneServicesSetLayout` (set 1) must be Core's SceneServicesDescriptorSet::Layout().
+
+    // `materialSetLayout` (set 0): only for PositionNormalUv, must be GpuResourceFactory::MaterialDescriptorSetLayout().
+    // `instanceBufferSetLayout` (set 0): only for PositionNormalInstanced, never combined with a material set.
+
+    // When set 0 would be empty but set 1 exists, the pipeline owns a zero-binding filler (no gap allowed).
+    // This single-format constructor forwards to the span constructor below.
     Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
         VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr,
         VkDescriptorSetLayout instanceBufferSetLayout = VK_NULL_HANDLE,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE);
 
-    // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
-    // real N-color-attachment constructor: builds a VkPipelineRenderingCreateInfo
-    // with `colorAttachmentCount == colorFormats.size()` and one
-    // VkPipelineColorBlendAttachmentState per entry (all identical - opaque,
-    // no blending, full RGBA write mask, matching this engine's existing
-    // single-target default exactly; per-attachment blend-state
-    // customization is out of scope for this campaign). `colorFormats` must
-    // be non-empty and no larger than kPipelineMaxColorAttachments (asserted
-    // in the .cpp, debug builds only). Every other parameter behaves
-    // identically to the single-format constructor above, including the new
-    // trailing `instanceBufferSetLayout` (render-pass-5 campaign, PHASE2) and
-    // `sceneServicesSetLayout` (better-render-pass-6 campaign, PHASE3).
+    // Multi-render-target form: one opaque, full-write blend state per entry. `colorFormats` must be non-empty
+    // and at most kPipelineMaxColorAttachments. Other parameters behave as above.
     Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
         const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
         VertexLayout vertexLayout = VertexLayout::PositionColor,
@@ -144,17 +43,9 @@ public:
         VkDescriptorSetLayout instanceBufferSetLayout = VK_NULL_HANDLE,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE);
 
-    // Configurable constructor (GAP2 - engine-wide gte::PipelineDesc, see
-    // Core/PipelineDesc.h) - built directly from in-memory compiled SPIR-V
-    // bytes (no file path), with a fully caller-resolved blend/cull/compare/
-    // topology shape and an arbitrary extra descriptor-set-layout list +
-    // optional push-constant range. Distinguished from the two constructors
-    // above purely by parameter type (std::span<const std::byte> vs.
-    // std::string) - never mixed with them on the same object.
-    // HasSceneServicesSet()/HasMaterialSet() stay false for a Pipeline built
-    // this way (Renderer::Submit()'s own set-0/set-1 gating convention does
-    // not apply here - a pass built through CommandBuffer binds its own
-    // extra sets directly via BindDescriptorSet()).
+    // Configurable form built from in-memory SPIR-V with caller-resolved blend, cull, compare, topology, extra
+    // set layouts and an optional push-constant range. HasSceneServicesSet()/HasMaterialSet() stay false: the
+    // pass binds its own sets through CommandBuffer.
     Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
         std::span<const std::byte> vertexSpirv, std::span<const std::byte> fragmentSpirv, VertexLayout vertexLayout,
         VkPrimitiveTopology topology, VkCullModeFlags cullMode, bool depthTest, bool depthWrite,
@@ -173,39 +64,17 @@ public:
     VkPipeline Native() const noexcept { return m_pipeline; }
     VkPipelineLayout Layout() const noexcept { return m_layout; }
 
-    // See `debugName` above - empty string when this Pipeline was built
+    // Empty when built without a `debugName`.
     const std::string& DebugName() const noexcept { return m_debugName; }
 
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE4 (task_manager/render-pass-5/
-    // PHASE4_PER_BATCH_RESOURCE_MANAGEMENT_AND_BATCHING.md) - which
-    // VertexLayout this Pipeline was actually built with (see the
-    // constructor's own `vertexLayout` parameter above). Needed so
-    // RenderSystem::CollectGpuDrivenBatches() can check PHASE0's Locked
-    // Design Decision 7(c) ("a group's shared Pipeline was built with
-    // EXACTLY VertexLayout::PositionNormal") without this campaign
-    // inventing a second, parallel place to track a fact this class already
-    // knows internally - mirrors DebugName() above's own "small, additive,
-    // purely descriptive accessor" precedent.
+    // The vertex layout this pipeline was built with.
     VertexLayout VertexLayoutKind() const noexcept { return m_vertexLayout; }
 
-    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
-    // PHASE3 - true if this Pipeline was built with a non-VK_NULL_HANDLE
-    // `sceneServicesSetLayout` (see the constructor's own comment above),
-    // i.e. its VkPipelineLayout carries a real `set = 1`. Mirrors
-    // VertexLayoutKind() above's own "small, additive, purely descriptive
-    // accessor" precedent - used downstream (PHASE5) to gate whether
-    // Renderer::Submit() is given a scene-services VkDescriptorSet to bind,
-    // and (PHASE0 global rule 10) to assert Renderer::SubmitIndirect() is
-    // never called with a Pipeline built this way.
+    // True when the layout carries a real set 1 (a non-null `sceneServicesSetLayout`).
     bool HasSceneServicesSet() const noexcept { return m_hasSceneServicesSet; }
 
-    // True iff built with a non-null materialSetLayout - this Pipeline's
-    // VkPipelineLayout actually declares a descriptor set at index 0 for a
-    // material texture. Mirrors HasSceneServicesSet(). A depth-only pipeline
-    // built with useMaterialTexture = false reports false here, which is what
-    // lets Renderer::Submit() safely drop a non-null materialDescriptorSet
-    // instead of binding it against a pipeline layout with no set 0.
+    // True when the layout declares a material texture at set 0; false for depth-only pipelines, so Submit()
+    // can drop a material set instead of binding it against a layout without set 0.
     bool HasMaterialSet() const noexcept { return m_hasMaterialSet; }
 
 private:
@@ -217,16 +86,9 @@ private:
     std::string m_debugName;
     VertexLayout m_vertexLayout = VertexLayout::PositionColor;
 
-    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
-    // PHASE3 - see HasSceneServicesSet() above.
     bool m_hasSceneServicesSet = false;
-
-    // See HasMaterialSet() above.
     bool m_hasMaterialSet = false;
-    // Owned ONLY when this Pipeline needed a zero-binding filler at set = 0
-    // (sceneServicesSetLayout != VK_NULL_HANDLE AND neither
-    // materialSetLayout nor instanceBufferSetLayout was supplied).
-    // VK_NULL_HANDLE otherwise.
+    // Owned only when a zero-binding filler was needed at set 0; VK_NULL_HANDLE otherwise.
     VkDescriptorSetLayout m_syntheticSetZeroLayout = VK_NULL_HANDLE;
 };
 

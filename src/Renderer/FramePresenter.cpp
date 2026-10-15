@@ -36,11 +36,7 @@ FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device,
     m_pendingHeight = height;
 
     CreateCommandObjects();
-    // m_depthBuffers is deliberately NOT created here - see its own comment
-    // in FramePresenter.h for why the swapchain's own depth buffers are
-    // allocated lazily (EnsureDepthBuffersForSwapchain(), called from
-    // PresentViaRenderGraph()/RenderOffscreen(), only once a frame is
-    // actually found to need one) rather than unconditionally up front.
+    // m_depthBuffers are created lazily (EnsureDepthBuffersForSwapchain()), not here.
 }
 
 FramePresenter::~FramePresenter()
@@ -54,8 +50,7 @@ void FramePresenter::Destroy() noexcept
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
         m_commandPool = VK_NULL_HANDLE;
     }
-    // m_depthBuffers, m_frameSync, m_swapchain clean themselves up
-    // automatically right after this, in reverse declaration order.
+    // The depth buffers, frame sync and swapchain clean themselves up in reverse declaration order.
 }
 
 void FramePresenter::CreateCommandObjects()
@@ -79,9 +74,7 @@ void FramePresenter::CreateCommandObjects()
         throw std::runtime_error("FramePresenter: vkAllocateCommandBuffers failed");
     }
 
-    // Separate command buffer for RenderOffscreen() - see the member
-    // comment in FramePresenter.h for why this doesn't share the per-frame
-    // ones above.
+    // Separate from the per-frame buffers so offscreen work never contends with them.
     VkCommandBufferAllocateInfo offscreenAllocInfo{};
     offscreenAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     offscreenAllocInfo.commandPool = m_commandPool;
@@ -95,15 +88,8 @@ void FramePresenter::CreateCommandObjects()
 
 void FramePresenter::CreateDepthBuffers()
 {
-    // Engine-owned depth buffers, one per swapchain image (see the class
-    // comment in FramePresenter.h for why indexed by image index) - named
-    // here (rather than left "(unnamed)" in the Editor's "Memory" panel) so
-    // they're identifiable at a glance instead of showing up as anonymous
-    // GPU textures. debugName must have static storage duration (see
-    // DepthBuffer's constructor comment) - a fixed table of string literals
-    // covers every swapchain image count this engine could realistically
-    // negotiate (2-4 in practice); an index beyond the table falls back to
-    // unnamed rather than risking a dangling pointer from a computed name.
+    // Named so they show up in the Memory panel. debugName needs static storage, so a fixed table covers the
+    // realistic image counts; an index beyond it stays unnamed.
     static const char* kSwapchainDepthNames[] = {
         "SwapchainDepth[0]",
         "SwapchainDepth[1]",
@@ -128,11 +114,7 @@ void FramePresenter::CreateDepthBuffers()
 
 void FramePresenter::EnsureDepthBuffersForSwapchain()
 {
-    // No-op once they already exist - see m_depthBuffers' own comment in
-    // FramePresenter.h for why they're deliberately not created eagerly in
-    // the constructor. Called from PresentViaRenderGraph() only on a frame
-    // that's actually found to need one (its own `needsSwapchainDepth`
-    // parameter).
+    // Created lazily, only on a frame that needs swapchain depth.
     if (m_depthBuffers.empty()) {
         CreateDepthBuffers();
     }
@@ -148,9 +130,7 @@ void FramePresenter::OnResize(int width, int height)
 void FramePresenter::RecreateSwapchain()
 {
     if (m_pendingWidth <= 0 || m_pendingHeight <= 0) {
-        // Minimized (or otherwise zero-sized) - nothing sensible to build
-        // yet. Leave m_resizeRequested set so we keep retrying each frame
-        // until the window has a real size again.
+        // Minimized or zero-sized: keep m_resizeRequested set and retry each frame.
         return;
     }
 
@@ -158,29 +138,18 @@ void FramePresenter::RecreateSwapchain()
 
     m_swapchain.Recreate(m_pendingWidth, m_pendingHeight);
 
-    // Per-swapchain-image semaphores must be rebuilt alongside the
-    // swapchain, since the image count can change (or just to be safe).
+    // The image count can change, so the per-image semaphores are rebuilt too.
     m_frameSync.RecreateRenderFinishedSemaphores(m_swapchain.ImageCount());
 
-    // network-impl-2 campaign, Phase 4
-    // (PHASE4_SWAPCHAIN_PIPELINED_CAPTURE_SERVICE.md) - a real resize means
-    // every readback buffer is the wrong size now, and any currently-pending
-    // capture's source image no longer exists at that size/identity - see
-    // SwapchainCaptureService::NotifySwapchainRecreated()'s own doc comment.
-    // Placed right after the early minimized-window return above, so this
-    // never fires for a resize that never actually happened.
+    // A real resize invalidates every readback buffer and any pending capture; this point is past the
+    // minimized-window early return, so it only fires for a resize that happened.
     m_swapchainCapture.NotifySwapchainRecreated();
 
-    // Same reasoning for the per-swapchain-image depth buffers - a
-    // genuinely new size (and possibly image count) means genuinely new
-    // depth images, not a resize-in-place. Only rebuilds them if they
-    // already existed, though (see m_depthBuffers' own comment in
-    // FramePresenter.h) - never creates them from scratch here; a
-    // presenter that never actually needed them stays that way across a
-    // resize too.
+    // New size (and maybe image count) needs new depth images. Rebuilt only if they already existed.
     if (!m_depthBuffers.empty()) {
         CreateDepthBuffers();
     }
+
 
     m_resizeRequested = false;
 }
@@ -200,26 +169,15 @@ DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTe
         throw std::runtime_error("vkBeginCommandBuffer failed (offscreen)");
     }
 
-    // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - reset (both
-    // slots) + a TOP_OF_PIPE timestamp write, recorded BEFORE
-    // frameRecorder.RecordFrame() below records its own
-    // vkCmdBeginRendering/vkCmdEndRendering pair - vkCmdResetQueryPool must
-    // never be recorded INSIDE a dynamic rendering instance (see that
-    // document's own Step 2.3), which this placement satisfies by
-    // construction. Safe to reset+write here specifically because the
-    // vkWaitForFences() above already proved the LAST use of this exact
-    // slot pair (last frame's call for this SAME logical pass) is complete.
-    // A no-op (no Vulkan call at all) when timingSlot is std::nullopt.
+    // The query reset and start timestamp are recorded before RecordFrame() because a reset must not happen
+    // inside a rendering instance. The fence wait above proves this slot pair's last use is complete.
+    // Nothing is recorded when timingSlot is nullopt.
     if (timingSlot.has_value()) {
         m_gpuTiming->RecordOffscreenPassStart(m_offscreenCommandBuffer, *timingSlot);
     }
 
-    // FrameRecorder::RecordFrame() is a Renderer-internal-only primitive
-    // still speaking raw VkCommandBuffer - wrap `recordExtra` (the opaque,
-    // outside-Renderer-facing signature) around it so a caller never needs
-    // a raw handle of its own. `renderer`/`passDrawStats` are null here:
-    // recordExtra callbacks only ever use CommandBuffer::Native() (the raw
-    // escape hatch), never Draw()/Dispatch(), which require a real Renderer.
+    // RecordFrame() speaks raw VkCommandBuffer; wrap `recordExtra` so callers never need a raw handle.
+    // recordExtra callbacks only use the raw escape hatch, never Draw()/Dispatch(), which need a Renderer.
     const std::function<void(VkCommandBuffer)> rawRecordExtra = [&recordExtra](VkCommandBuffer cmd) {
         if (recordExtra) {
             rg::CommandBuffer wrapped = rg::CommandBuffer::AdoptRaw(cmd);
@@ -229,11 +187,7 @@ DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTe
     const DrawStats drawStats = frameRecorder.RecordFrame(m_offscreenCommandBuffer, target.Target(), ColorFormat(),
         m_depthFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, rawRecordExtra);
 
-    // BOTTOM_OF_PIPE timestamp write - see the RecordOffscreenPassStart()
-    // comment above for why this placement (bracketing the WHOLE recorded
-    // pass, including recordExtra) is correct, and never inside
-    // FrameRecorder::RecordFrame() itself (see AGENTS.md-equivalent
-    // reasoning in PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md, Step 2.3).
+    // The end timestamp brackets the whole pass including recordExtra, never inside RecordFrame().
     if (timingSlot.has_value()) {
         m_gpuTiming->RecordOffscreenPassEnd(m_offscreenCommandBuffer, *timingSlot);
     }
@@ -255,14 +209,10 @@ DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTe
         throw std::runtime_error("vkQueueSubmit2 failed (offscreen)");
     }
 
-    // Synchronous for now - see the declaration comment in Renderer.h.
+    // Synchronous for now.
     vkWaitForFences(m_device, 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
 
-    // Safe to read back now - the fence wait immediately above already
-    // guarantees this exact submission (including the timestamp writes
-    // above) has fully completed. A no-op (no Vulkan call, no cache update)
-    // when timingSlot is std::nullopt - see
-    // PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md, Phase 4C.
+    // The fence wait proves the submission (and its timestamp writes) completed, so reading back is safe.
     if (timingSlot.has_value()) {
         m_gpuTiming->ReadOffscreenResultNow(*timingSlot);
     }
@@ -284,16 +234,7 @@ VkCommandBuffer FramePresenter::BeginOffscreenRecording()
         throw std::runtime_error("vkBeginCommandBuffer failed (offscreen render graph)");
     }
 
-    // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
-    // GPU timestamp queries (GpuTimingService) are NOT wired into the
-    // render-graph-driven offscreen/present paths yet, matching Phase 6's
-    // own explicitly-documented scope decision (see
-    // RENDERGRAPH_PHASE6_COMPLETION_REPORT.md's "A deliberate scope
-    // decision") - RenderGraph's own PassGpuStats::timing is honestly
-    // Status::Absent for every pass today (see RenderGraph.h's own "GPU
-    // TIMING NOTE"). Generalizing GpuTimingService's fixed-3-slot pool into
-    // a real, per-pass-name query pool remains a follow-up, not done in
-    // this session - see RENDERGRAPH_PHASE7_COMPLETION_REPORT.md.
+    // GPU timestamps are not wired into the render-graph offscreen and present paths; pass timing reads Absent.
     return m_offscreenCommandBuffer;
 }
 
@@ -317,8 +258,7 @@ void FramePresenter::EndOffscreenRecording()
         throw std::runtime_error("vkQueueSubmit2 failed (offscreen render graph)");
     }
 
-    // Synchronous for now - matches RenderOffscreen()'s own documented
-    // behavior (see the declaration comment in Renderer.h).
+    // Synchronous, like RenderOffscreen().
     vkWaitForFences(m_device, 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
 }
 
@@ -339,18 +279,8 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
     const VkFence fence = m_frameSync.InFlightFence(m_currentFrame);
     vkWaitForFences(m_device, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
 
-    // network-impl-2 campaign, Phase 4
-    // (PHASE4_SWAPCHAIN_PIPELINED_CAPTURE_SERVICE.md) - the fence wait above
-    // just proved whatever GPU work was submitted the LAST time
-    // m_currentFrame had this same value (kFramesInFlight frames ago,
-    // including any readback copy RecordCaptureIfRequested() recorded into
-    // that slot's buffer back then) is now fully complete - this is the
-    // exact, zero-extra-wait point to safely read a previous capture's
-    // results. Read BEFORE any RecreateSwapchain() call further down this
-    // function could ever invalidate this same slot out from under it - see
-    // the phase document's own Step 3.3 for why this ordering is safe
-    // either way (a resize either already ran, clearing every slot before
-    // this line, or hasn't happened yet).
+    // The fence wait proved the GPU work from this slot's previous use is done, including any capture copy, so
+    // the earlier capture can be read now with no extra wait. Read before any swapchain recreation clears slots.
     m_lastCompletedCapture = m_swapchainCapture.TryTakeCompletedCapture(m_currentFrame);
 
     std::uint32_t imageIndex = 0;
@@ -387,9 +317,7 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
     target.extent = m_swapchain.Extent();
     target.format = m_swapchain.ImageFormat();
     if (needsSwapchainDepth) {
-        // Depth buffer paired with THIS swapchain image - see the class
-        // comment for why indexing by imageIndex (not m_currentFrame) is
-        // what makes this safe with no extra synchronization.
+        // Indexed by image index (not frame slot), which is what makes this safe without extra sync.
         const DepthBuffer& depthBuffer = m_depthBuffers[imageIndex];
         target.depthImage = depthBuffer.Image();
         target.depthImageView = depthBuffer.View();
@@ -397,12 +325,7 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
         target.depthHasStencil = depthBuffer.HasStencilComponent();
     }
 
-    // The render graph's own Compile() step can, in principle, throw
-    // std::runtime_error on a genuine dependency cycle (structurally
-    // unreachable through any graph this engine declares today - see
-    // RENDERGRAPH_PHASE3_COMPLETION_REPORT.md) - deliberately NOT caught
-    // here; the caller (Application::Run()) is responsible for that, per
-    // RENDERGRAPH_PHASE6_COMPLETION_REPORT.md's own Step 3.5 guidance.
+    // A dependency cycle in Compile() would throw; it is not caught here, the caller handles it.
     graph.Execute(cmd, rg::ExecuteTimingMode::PipelinedDeferredReadback,
         [&](rg::RenderGraphBuilder& builder) -> std::vector<rg::TextureHandle> {
             // The swapchain image is never sampled, only presented - no sampler exists for it.
@@ -411,35 +334,15 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
             return build(builder, swapchainHandle);
         });
 
-    // network-impl-2 campaign, Phase 4
-    // (PHASE4_SWAPCHAIN_PIPELINED_CAPTURE_SERVICE.md) - right after
-    // graph.Execute() returns and BEFORE the existing manual finalize block
-    // below (see this file's own "Manual finalize" comment right after this
-    // block for why this is the established, precedented seam a swapchain
-    // pixel-readback copy hooks into) - if a capture was requested, this
-    // records the readback copy + both required barriers, and the existing
-    // finalize block's own "previous" state must become TransferSrcOptimal
-    // instead of ColorAttachmentWrite for THIS call only (see below).
+    // A requested capture records its copy and barriers here, before the manual finalize below.
+    // That finalize then starts from TransferSrcOptimal for this call.
     const bool capturedThisFrame =
         m_swapchainCapture.RecordCaptureIfRequested(cmd, target.image, target.extent, target.format, m_currentFrame);
 
-    // Manual finalize: the render graph itself never learns that THIS
-    // particular imported resource is about to be handed to
-    // vkQueuePresentKHR (no pass ever declares a "PresentSrc" usage - see
-    // RENDERGRAPH_PHASE5_COMPLETION_REPORT.md's own "design decision worth
-    // flagging" note) - so the swapchain image's final transition from
-    // ColorAttachmentWrite to VK_IMAGE_LAYOUT_PRESENT_SRC_KHR is done here,
-    // by hand, using the exact same pure Phase 5 helpers
-    // (RequiredStateFor()/EmitImageBarrier()) the graph itself uses
-    // internally - safe here because graph.Execute() above has already
-    // closed its own vkCmdBeginRendering/vkCmdEndRendering bracket.
+    // The graph never learns this image goes to present, so the final transition to PRESENT_SRC_KHR is done by
+    // hand with the graph's own helpers; safe because Execute() has closed its rendering bracket.
     {
-        // network-impl-2 Phase 4: if RecordCaptureIfRequested() above just
-        // recorded a readback copy, it already transitioned the image to
-        // TransferSrcOptimal (and left it there - see that method's own doc
-        // comment) - this call's own "previous" state must reflect that
-        // instead of the usual ColorAttachmentWrite the "Present" pass
-        // itself left it in.
+        // After a capture copy the image is in TransferSrcOptimal instead of ColorAttachmentWrite.
         const rg::ResourceState previous = capturedThisFrame
             ? rg::ResourceState{ VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                   VK_ACCESS_2_TRANSFER_READ_BIT }
@@ -450,13 +353,7 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
         const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
         rg::EmitImageBarrier(cmd, target.image, range, previous, next);
 
-        // network-impl-4 campaign, Phase 3 - Locked Design Decision 7's fourth
-        // (of four) call site. Called unconditionally, every real Present -
-        // this manual PRESENT_SRC_KHR transition ALWAYS runs here (unlike
-        // ComputeBlurValidation's own conditional finalize above), so there is
-        // no "did this actually run this frame" ambiguity to handle. Must use
-        // the EXACT same `next` value just computed above - never re-derived
-        // separately, so the two can never silently drift apart.
+        // Runs on every present, and reuses `next` so the debug state cannot drift from the real transition.
         graph.NotifyDebugTextureStateOverride("Swapchain", next);
     }
 

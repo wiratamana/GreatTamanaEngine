@@ -30,45 +30,12 @@ namespace gte {
 class VulkanDevice;
 
 
-// Owns the swapchain, every per-frame/per-image synchronization object (see
-// VulkanFrameSync), the command buffers (one set per frame-in-flight for
-// PresentViaRenderGraph(), plus a dedicated one for RenderOffscreen()/
-// BeginOffscreenRecording() - see VulkanFrameSync's class comment for why
-// the offscreen path doesn't share the per-frame objects), and one
-// DepthBuffer PER SWAPCHAIN IMAGE (see DepthBuffer.h, allocated LAZILY -
-// see m_depthBuffers below) needed to actually record and submit a frame's
-// Vulkan work. This is the part of the old monolithic Renderer that
-// literally talks to vkAcquireNextImageKHR/vkQueueSubmit/vkQueuePresentKHR.
-//
-// Depth buffers are indexed by SWAPCHAIN IMAGE INDEX (the same index
-// vkAcquireNextImageKHR returns), not by frame-in-flight slot - this is
-// deliberate, not arbitrary: vkAcquireNextImageKHR's own semaphore already
-// guarantees a given swapchain image (and therefore whatever is paired with
-// it) is genuinely free to write again before returning that index (see
-// VulkanFrameSync::RenderFinishedSemaphore()'s own comment for the exact
-// same reasoning applied to render-finished semaphores) - reusing that same
-// guarantee for depth buffers avoids having to separately reason about
-// frames-in-flight potentially overlapping on the GPU (kFramesInFlight can
-// legitimately differ from the swapchain's own image count).
-//
-// Does NOT own the VkPhysicalDevice/VkDevice/VkSurfaceKHR/VkQueue/
-// VmaAllocator handles passed in - all must outlive this object (same
-// convention as VulkanSwapchain itself not owning the device/surface passed
-// to it). DOES own its swapchain, frame-sync objects, per-swapchain-image
-// DepthBuffers, and command pool/buffers for its entire lifetime.
-//
-// RenderOffscreen() takes a FrameRecorder& parameter rather than storing
-// one, but this class DOES hold a non-owning VulkanDevice* back into its
-// owning Renderer's own m_device sub-object (see m_vulkanDevice below) - so
-// it must never be moved independently, and Renderer itself is non-movable
-// for the exact same reason (see Renderer.h).
+// Owns the swapchain, frame-sync objects, command buffers and per-swapchain-image depth buffers; it talks to
+// acquire, submit and present. Does not own the device, surface, queues or allocator.
+// It points into the Renderer's VulkanDevice, so it is not movable.
 class FramePresenter {
 public:
-    // `vulkanDevice` is stored as a non-owning pointer (must outlive this
-    // object) purely so PresentViaRenderGraph()/RenderOffscreen()/
-    // EndOffscreenRecording() can submit through
-    // VulkanDevice::SubmitToGraphicsQueue() - the one choke point every
-    // submit to the graphics queue must go through, engine-wide.
+    // `vulkanDevice` must outlive this object; all graphics-queue submits go through it.
     FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
         std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue graphicsQueue,
         VkQueue presentQueue, int width, int height, VmaAllocator allocator, VkFormat depthFormat,
@@ -79,80 +46,44 @@ public:
     FramePresenter(const FramePresenter&) = delete;
     FramePresenter& operator=(const FramePresenter&) = delete;
 
-    // Deleted, not just omitted: m_vulkanDevice points back at the owning
-    // Renderer's m_device, so a plain member-wise move would silently
-    // dangle once the source is destroyed. Nothing needs this to be
-    // movable - only Renderer ever held one, and Renderer's own move is
-    // deleted for the same reason.
+    // Deleted because m_vulkanDevice points into the owning Renderer and would dangle after a move.
     FramePresenter(FramePresenter&&) = delete;
     FramePresenter& operator=(FramePresenter&&) = delete;
 
-    // The color format this swapchain actually negotiated at runtime - see
-    // Renderer::ColorFormat().
+    // The color format the swapchain negotiated.
     VkFormat ColorFormat() const noexcept { return m_swapchain.ImageFormat(); }
 
-    // Current swapchain image count - see Renderer::GetVulkanContextInfo().
     std::uint32_t ImageCount() const noexcept { return m_swapchain.ImageCount(); }
 
-    // How many frames this presenter keeps in flight - see
-    // Renderer::GetVulkanContextInfo().
     static constexpr std::uint32_t FramesInFlight() noexcept { return kFramesInFlight; }
 
-    // See Renderer::OnResize().
     void OnResize(int width, int height);
 
-    // See Renderer::RenderOffscreen(). Always has a real DrawStats to
-    // return, never std::nullopt. `timingSlot` is threaded
-    // straight through to GpuTimingService's Record*/Read* calls (Phase 4C,
-    // PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) bracketing the call to
-    // frameRecorder.RecordFrame() below - std::nullopt means "don't touch a
-    // query slot for this call at all" (see Renderer::RenderOffscreen()'s
-    // own doc comment for why this matters).
+    // See Renderer::RenderOffscreen(). `timingSlot` brackets frameRecorder.RecordFrame() with GPU timestamps;
+    // nullopt leaves the query slots untouched.
     DrawStats RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
         std::optional<GpuTimingSlot> timingSlot, const std::function<void(rg::CommandBuffer&)>& recordExtra);
 
-    // --- Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md)
-    // - Render Graph integration ---------------------------------------
-    //
-    // Begins recording m_offscreenCommandBuffer - waits on its fence, resets
-    // it, calls vkBeginCommandBuffer() - and returns it for the caller
-    // (Renderer::BeginOffscreenRenderGraphRecording()) to record one or more
-    // RenderGraph passes against. Must be paired with EndOffscreenRecording()
-    // below.
+    // Waits on the offscreen command buffer's fence, resets and begins it, and returns it for the caller to
+    // record render graph passes into. Pair with EndOffscreenRecording().
     VkCommandBuffer BeginOffscreenRecording();
 
-    // Ends/submits m_offscreenCommandBuffer and blocks until the GPU
-    // finishes - the offscreen path's own synchronous behavior, matching
-    // RenderOffscreen() above.
+    // Ends and submits the offscreen command buffer and blocks until the GPU finishes.
     void EndOffscreenRecording();
 
-    // See Renderer::PresentViaRenderGraph(). Returns false (never touching
-    // `graph`) under the same circumstances that make a swapchain frame
-    // unrecordable (minimized window, still-pending resize, just-recreated
-    // swapchain) - true otherwise, after a full acquire -> record via
-    // `graph` -> submit -> present cycle.
+    // See Renderer::PresentViaRenderGraph(). Returns false without touching `graph` when no swapchain frame can
+    // be recorded (minimized window, pending resize, just-recreated swapchain); otherwise runs a full
+    // acquire, record, submit and present cycle.
     bool PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwapchainDepth,
         const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build);
 
-    // network-impl-2 campaign, Phase 4
-    // (PHASE4_SWAPCHAIN_PIPELINED_CAPTURE_SERVICE.md) - requests a one-shot
-    // capture of the real swapchain image, fulfilled TWO real frames later
-    // (kFramesInFlight == 2) with zero added GPU stall - see
-    // SwapchainCaptureService's own class comment. A safe no-op if a
-    // capture is already pending.
+    // Requests a one-shot capture of the swapchain image, fulfilled two frames later with no added GPU stall.
+    // No-op while one is pending.
     void RequestSwapchainCapture();
 
-    // Returns (and clears) whatever capture PresentViaRenderGraph() itself
-    // completed during its OWN most recent call - std::nullopt if none
-    // completed that call. Deliberately NOT a thin forward to
-    // SwapchainCaptureService::TryTakeCompletedCapture() directly (that
-    // needs a specific frameInFlightIndex tied to a specific moment inside
-    // PresentViaRenderGraph()'s own execution, not "whatever m_currentFrame
-    // happens to be when some caller outside this class asks") - this is
-    // what lets a caller (Renderer::TakeLastCompletedSwapchainCapture())
-    // retrieve a same-frame result via a simple, argument-free call right
-    // after PresentViaRenderGraph() returns, with no frame-in-flight
-    // bookkeeping of its own.
+    // Returns and clears the capture that PresentViaRenderGraph() completed during its own latest call, or
+    // nullopt. It cannot forward to SwapchainCaptureService directly: that needs the frame-in-flight index of
+    // a specific moment inside PresentViaRenderGraph().
     std::optional<CapturedSwapchainPixels> TakeLastCompletedSwapchainCapture();
 
 private:
@@ -160,11 +91,7 @@ private:
 
     void CreateCommandObjects();
     void CreateDepthBuffers();
-    // Lazily creates m_depthBuffers (via CreateDepthBuffers()) the first
-    // time they're actually needed - a no-op if they already exist. See
-    // PresentViaRenderGraph()/m_depthBuffers' own comment for why "actually
-    // needed" isn't simply "always", unlike a RenderTexture's own companion
-    // DepthBuffer.
+    // Creates m_depthBuffers on first need; no-op once they exist.
     void EnsureDepthBuffersForSwapchain();
     void RecreateSwapchain();
     void Destroy() noexcept;
@@ -174,62 +101,31 @@ private:
     VkQueue m_presentQueue = VK_NULL_HANDLE;
     std::uint32_t m_graphicsQueueFamily = 0;
 
-    // The ONE choke point every submit to m_graphicsQueue goes through -
-    // not owned (must outlive this object, same convention as everything
-    // else this class doesn't own).
+    // The one choke point for graphics-queue submits; not owned.
     VulkanDevice* m_vulkanDevice = nullptr;
 
-    // Needed to (re)build m_depthBuffers below whenever the swapchain
-    // itself is (re)created - not owned (must outlive this object, same
-    // convention as everything else this class doesn't own).
+    // Needed to rebuild m_depthBuffers when the swapchain is recreated; not owned.
     VmaAllocator m_allocator = VK_NULL_HANDLE;
     VkFormat m_depthFormat = VK_FORMAT_UNDEFINED;
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker;
 
-    // The SAME GpuTimingService instance Renderer itself owns (see
-    // Renderer.h's m_gpuTiming) - RenderOffscreen() below calls its Record*/
-    // Read* methods to bracket an offscreen pass's GPU timing (Phase 4C,
-    // PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md).
+    // The same service the Renderer owns; RenderOffscreen() brackets passes with it.
     std::shared_ptr<GpuTimingService> m_gpuTiming;
 
     VulkanSwapchain m_swapchain;
-    // Per-frame/per-image semaphores/fences, and the dedicated offscreen
-    // fence - see VulkanFrameSync.h. Its per-swapchain-image semaphores are
-    // rebuilt (RecreateRenderFinishedSemaphores()) whenever the swapchain
-    // itself is recreated - see RecreateSwapchain().
+    // Per-frame and per-image sync objects plus the offscreen fence; render-finished semaphores are rebuilt on
+    // swapchain recreation.
     VulkanFrameSync m_frameSync;
 
-    // One DepthBuffer per swapchain image (see the class comment for why
-    // this is indexed by swapchain image index, not frame-in-flight slot).
-    // Deliberately EMPTY until EnsureDepthBuffersForSwapchain() first
-    // creates them (see PresentViaRenderGraph()) - unlike a RenderTexture's
-    // own companion DepthBuffer (always real geometry drawn into it), the
-    // swapchain's own pass, in the common Editor case, draws NOTHING but
-    // Dear ImGui's own (never depth-tested) chrome - Game's actual geometry
-    // is consumed entirely by the two RenderOffscreen() calls into "Game"/
-    // "Scene" before the swapchain pass ever runs (see Application::Run()).
-    // Rather than unconditionally pay ~1 window-resolution-sized depth
-    // image PER swapchain image for a pass that then never depth-tests
-    // anything, these are only ever allocated once a frame is actually
-    // found to need one - see PresentViaRenderGraph()'s own
-    // `needsSwapchainDepth` parameter (Application::Run() computes this as
-    // "no Game/Scene view exists to render Game into this frame" - a
-    // release build with no Editor at all, or the rare Editor edge case
-    // where both "Game" and "Scene" panels are simultaneously hidden - see
-    // Application.cpp's `needsDirectGameRender`). Once created, kept alive
-    // for the rest of this FramePresenter's lifetime and rebuilt alongside the swapchain in
-    // RecreateSwapchain() (same as m_frameSync's render-finished
-    // semaphores) - but RecreateSwapchain() itself only rebuilds them if
-    // they already existed, never creates them from scratch.
+    // One DepthBuffer per swapchain image, empty until EnsureDepthBuffersForSwapchain() needs them: the
+    // swapchain pass usually only draws UI, which is never depth-tested. Once created they are kept and rebuilt
+    // with the swapchain, but a recreation never creates them from scratch.
     std::vector<DepthBuffer> m_depthBuffers;
 
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
     std::array<VkCommandBuffer, kFramesInFlight> m_commandBuffers{};
 
-    // Separate command buffer for RenderOffscreen() (paired with
-    // m_frameSync.OffscreenFence()), so off-screen rendering (Editor
-    // panels) never contends with the swapchain's own per-frame-in-flight
-    // command buffers/fences.
+    // Separate from the per-frame buffers so offscreen rendering never contends with the swapchain's.
     VkCommandBuffer m_offscreenCommandBuffer = VK_NULL_HANDLE;
 
     std::uint32_t m_currentFrame = 0;
@@ -238,17 +134,10 @@ private:
     int m_pendingWidth = 0;
     int m_pendingHeight = 0;
 
-    // network-impl-2 campaign, Phase 4
-    // (PHASE4_SWAPCHAIN_PIPELINED_CAPTURE_SERVICE.md) - see
-    // RequestSwapchainCapture()/TakeLastCompletedSwapchainCapture() above.
-    // A plain value member (SwapchainCaptureService has no forward-declare
-    // requirement of its own - see FramePresenter.cpp's own constructor).
+    // See RequestSwapchainCapture()/TakeLastCompletedSwapchainCapture().
     SwapchainCaptureService m_swapchainCapture;
 
-    // Populated ONLY from inside PresentViaRenderGraph() itself, right
-    // after its own per-slot vkWaitForFences() call - see
-    // TakeLastCompletedSwapchainCapture()'s own doc comment above for why
-    // this indirection exists.
+    // Set only inside PresentViaRenderGraph(), right after its per-slot fence wait.
     std::optional<CapturedSwapchainPixels> m_lastCompletedCapture;
 };
 

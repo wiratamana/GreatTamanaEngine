@@ -14,10 +14,8 @@ void FrameRecorder::IssueDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, V
 {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
-    // Matches Shaders/Triangle.vert's `layout(push_constant) uniform
-    // PushConstants { mat4 model; mat4 viewProj; } pc;` exactly - model
-    // first (offset 0, 64 bytes), viewProj right after (offset 64, 64
-    // bytes), 128 bytes total - see Pipeline.cpp's VkPushConstantRange.
+    // Mirrors the `PushConstants { mat4 model; mat4 viewProj; }` block in Triangle.vert: model at offset 0,
+    // viewProj at 64, 128 bytes total (see Pipeline.cpp).
     struct PushConstants {
         float model[16];
         float viewProj[16];
@@ -26,20 +24,12 @@ void FrameRecorder::IssueDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, V
     std::memcpy(pushConstants.viewProj, viewProj.Data(), sizeof(pushConstants.viewProj));
     vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
 
-    // Bind this draw's material texture (a per-submesh diffuse texture -
-    // see Renderer/MaterialTexture.h), when it has one - only a Pipeline
-    // built with VertexLayout::PositionNormalUv actually declares
-    // descriptor set 0, so this is skipped entirely for every other
-    // pipeline (materialDescriptorSet stays VK_NULL_HANDLE otherwise).
+    // Set 0: the per-submesh material texture; only PositionNormalUv pipelines declare it, others pass null.
     if (materialDescriptorSet != VK_NULL_HANDLE) {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &materialDescriptorSet, 0, nullptr);
     }
 
-    // Global Scene Services Descriptor Set campaign (better-render-pass-6),
-    // PHASE5 - bind `set = 1`, independently of the `set = 0` bind above,
-    // whenever a real scene-services set was resolved for this draw (see
-    // Renderer::Submit(), which already gated this against
-    // Pipeline::HasSceneServicesSet() before ever reaching here).
+    // Set 1: bound independently of set 0 when a scene-services set was resolved (Renderer::Submit() gates it).
     if (sceneServicesSet != VK_NULL_HANDLE) {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, /*firstSet=*/1, 1, &sceneServicesSet, 0, nullptr);
     }
@@ -64,10 +54,7 @@ void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pip
 {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
-    // Same push-constant SHAPE as every other Pipeline (model then
-    // viewProj, 128 bytes total - see Pipeline.cpp) - the `model` half is
-    // left zero-initialized here (never read by Shaders/MeshInstanced.vert
-    // - see that shader's own header comment for why).
+    // Same push-constant shape as every pipeline; the `model` half stays zero (unused by the instanced shader).
     struct PushConstants {
         float model[16];
         float viewProj[16];
@@ -75,17 +62,11 @@ void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pip
     std::memcpy(pushConstants.viewProj, viewProj.Data(), sizeof(pushConstants.viewProj));
     vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
 
-    // Unlike IssueDrawCommand()'s optional materialDescriptorSet, this is
-    // NEVER optional - every indirect draw goes through the new
-    // VertexLayout::PositionNormalInstanced pipeline, which always
-    // declares descriptor set 0 for its instance buffer.
+    // Never optional: every indirect draw uses the instanced pipeline, which always declares set 0.
     vkCmdBindDescriptorSets(
         cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &instanceBufferDescriptorSet, 0, nullptr);
 
-    // Bound right after set = 0, exactly like IssueDrawCommand() already
-    // does for the non-indirect path - only when a real set was resolved
-    // (Renderer::SubmitIndirect() already gated this against
-    // Pipeline::HasSceneServicesSet()).
+    // Set 1, bound only when a scene-services set was resolved (SubmitIndirect() gates it).
     if (sceneServicesSet != VK_NULL_HANDLE) {
         vkCmdBindDescriptorSets(
             cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, /*firstSet=*/1, 1, &sceneServicesSet, 0, nullptr);
@@ -93,9 +74,7 @@ void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pip
 
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
-    // This campaign is VkDrawIndexedIndirectCommand-only (Locked Design
-    // Decision 6, PHASE0_MASTER_STRATEGY.md) - always indexed, unlike
-    // IssueDrawCommand()'s optional indexBuffer.
+    // Indirect draws are always indexed.
     vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
     constexpr std::uint32_t stride = sizeof(IndirectDrawCommand);
@@ -105,27 +84,16 @@ void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pip
                "support drawIndirectCount - see Renderer::SubmitIndirect()'s own caller-side contract (PHASE4/5's "
                "own per-batch resource code must decide this ONCE, per batch, never guess).");
         if (supportsDrawIndirectCount) {
-            // The REAL, counted path (Locked Design Decision 4) -
-            // vkCmdDrawIndexedIndirectCount reads the actual surviving
-            // instance count from `countBuffer` itself (written by
-            // PHASE3's real culling compute shader), capped at
-            // `maxDrawCount`.
+            // Counted path: the surviving instance count comes from `countBuffer`, capped at `maxDrawCount`.
             vkCmdDrawIndexedIndirectCount(cmd, indirectBuffer, static_cast<VkDeviceSize>(indirectOffset), countBuffer,
                 static_cast<VkDeviceSize>(countBufferOffset), maxDrawCount, stride);
             return;
         }
-        // Release-build fallback only (the assert above already caught
-        // this in debug builds as a genuine caller-side logic error) -
-        // fall through to the fixed-maxDrawCount path below instead of
-        // crashing.
+        // Release fallback for a caller-side logic error (asserted above): use the fixed-count path below.
     }
 
-    // The FALLBACK, degenerate-padded path (Locked Design Decision 4) - a
-    // fixed, CPU-known `maxDrawCount`; PHASE3's real culling compute shader
-    // is expected to pad every non-surviving instance's own command with a
-    // degenerate (indexCount == 0) entry on a device that reaches this
-    // branch because it lacks real drawIndirectCount support, so this still
-    // draws exactly the surviving instances, just without a GPU-side count.
+    // Fallback: a fixed CPU-known `maxDrawCount`. Culling pads non-surviving instances with degenerate
+    // (indexCount == 0) commands, so exactly the survivors still draw.
     vkCmdDrawIndexedIndirect(cmd, indirectBuffer, static_cast<VkDeviceSize>(indirectOffset), maxDrawCount, stride);
 }
 
@@ -164,24 +132,12 @@ void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat
 DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target, VkFormat expectedFormat,
     VkFormat expectedDepthFormat, VkImageLayout finalLayout, const std::function<void(VkCommandBuffer)>& recordExtra)
 {
-    // Fail fast (debug builds only) if this target's format doesn't match
-    // Renderer::ColorFormat()/DepthFormat() - the shared defaults every
-    // pipeline is expected to be built against (see AGENTS.md, "Render
-    // Target Format Matching"). A target that's deliberately a different
-    // format needs its own dedicated pipeline variant recorded through
-    // recordExtra; this catches a mismatch right here, at the one recording
-    // path shared by every RecordFrame() caller
-    // (FramePresenter::RenderOffscreen()), instead of a confusing
-    // validation-layer warning (or silent misrendering on a driver that
-    // happens to tolerate it). Compiled out entirely in release (NDEBUG) -
-    // zero cost.
+    // Debug-only: the target must match the renderer's default formats every pipeline is built against.
+    // A deliberately different format needs its own pipeline variant recorded through recordExtra.
     assert(target.format == expectedFormat &&
         "FrameRecorder::RecordFrame: target format does not match Renderer::ColorFormat() - "
         "any pipeline recorded via recordExtra here must have been built for THIS target's exact format.");
-    // Only enforced when this target actually carries a depth image -
-    // target.depthImage == VK_NULL_HANDLE deliberately means "skip the depth
-    // attachment for this pass entirely" (see below) - for a target with
-    // nothing depth-tested to draw into it.
+    // A null depthImage means the depth attachment is skipped, so only check the format when one exists.
     assert((target.depthImage == VK_NULL_HANDLE || target.depthFormat == expectedDepthFormat) &&
         "FrameRecorder::RecordFrame: target depth format does not match Renderer::DepthFormat().");
 
@@ -203,12 +159,8 @@ DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& ta
     toColorAttachment.image = target.image;
     toColorAttachment.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-    // Depth image aspect mask/layout must match whatever it actually is
-    // (depth-only vs. combined depth+stencil - see DepthBuffer::
-    // HasStencilComponent()). Old layout is UNDEFINED here too - always
-    // valid when the attachment's own loadOp is CLEAR (see below), which
-    // discards whatever was in it beforehand anyway. Only built/used when
-    // hasDepth is true - see below.
+    // The depth aspect and layout follow the real format (depth-only or depth+stencil). The old layout is
+    // UNDEFINED because loadOp = CLEAR discards the contents anyway.
     const VkImageAspectFlags depthAspectMask =
         VK_IMAGE_ASPECT_DEPTH_BIT | (target.depthHasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
     const VkImageLayout depthAttachmentLayout =
@@ -272,29 +224,16 @@ DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& ta
     renderingInfo.layerCount = 1;
     renderingInfo.colorAttachmentCount = 1;
     renderingInfo.pColorAttachments = &colorAttachment;
-    // NULL when this target has no depth image (see hasDepth above) - a
-    // pipeline that itself requires a real depth attachment (e.g. this
-    // engine's own Pipeline, built with depthAttachmentFormat =
-    // Renderer::DepthFormat()) is never actually bound/drawn with in that
-    // case, since a target with no depth image has nothing depth-tested to
-    // draw into it in the first place.
+    // Null when the target has no depth image; nothing depth-tested is drawn into such a target.
     renderingInfo.pDepthAttachment = hasDepth ? &depthAttachment : nullptr;
 
     vkCmdBeginRendering(cmd, &renderingInfo);
 
-    // Accumulated once per queued item, INLINE inside the exact loop below
-    // that already issues vkCmdDraw/vkCmdDrawIndexed for it - never from a
-    // separate pass over m_drawQueue. See DrawStats.h's own header comment
-    // for why this fused design is a correctness requirement (Phase 3 -
-    // PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md, Step 3.1/3.2), not a
-    // style choice. Stays {0, 0} (never populated) on a frame where
-    // m_drawQueue is empty - see this function's own return statement below.
+    // Accumulated inline in the loop below that issues each draw, never in a separate pass over m_drawQueue.
+    // Stays {0, 0} when the queue is empty.
     DrawStats drawStats;
 
-    // Engine (Game) geometry queued via Submit() this frame - recorded
-    // first, before any overlay, so an Editor's ImGui chrome always draws
-    // on top of it. Cleared right after being recorded - see this
-    // function's declaration comment in FrameRecorder.h.
+    // Queued geometry is recorded before any overlay so UI chrome draws on top, then the queue is cleared.
     if (!m_drawQueue.empty()) {
         VkViewport viewport{};
         viewport.x = 0.0f;
@@ -313,11 +252,7 @@ DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& ta
             IssueDrawCommand(cmd, item.pipeline, item.layout, item.vertexBuffer, item.vertexCount, item.indexBuffer,
                 item.indexCount, item.model, item.viewProj, item.materialDescriptorSet, item.sceneServicesSet);
 
-            // Accumulated on the exact same path that just issued the real
-            // vkCmdDraw/vkCmdDrawIndexed above - never before it, never
-            // unconditionally at the top of the loop body - so this count
-            // can never overstate what the GPU actually received. See
-            // DrawStats.h's own header comment (AccumulateDrawStats()).
+            // Counted only after the draw was issued, so it can never overstate what the GPU received.
             AccumulateDrawStats(drawStats, item.indexBuffer != VK_NULL_HANDLE, item.vertexCount, item.indexCount);
         }
 
@@ -349,10 +284,7 @@ DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& ta
         toFinal.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
         toFinal.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
     } else {
-        // Any other finalLayout (e.g. VK_IMAGE_LAYOUT_PRESENT_SRC_KHR):
-        // nothing further touches the image on our side before whatever
-        // consumes it next (the presentation engine, for a swapchain
-        // image) does.
+        // Any other finalLayout (e.g. PRESENT_SRC_KHR): the next consumer is not on our side.
         toFinal.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
         toFinal.dstAccessMask = VK_ACCESS_2_NONE;
     }
@@ -363,10 +295,7 @@ DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& ta
     toFinalDep.pImageMemoryBarriers = &toFinal;
     vkCmdPipelineBarrier2(cmd, &toFinalDep);
 
-    // The depth image is never touched again after this pass (see the
-    // declaration comment in FrameRecorder.h) - no final transition needed;
-    // the next RecordFrame() call against it starts over from
-    // VK_IMAGE_LAYOUT_UNDEFINED via loadOp = CLEAR again either way.
+    // No final depth transition: the next RecordFrame() starts again from UNDEFINED with loadOp = CLEAR.
 
     return drawStats;
 }

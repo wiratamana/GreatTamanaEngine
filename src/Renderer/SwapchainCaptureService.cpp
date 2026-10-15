@@ -17,7 +17,7 @@ SwapchainCaptureService::SwapchainCaptureService(
 void SwapchainCaptureService::RequestCapture()
 {
     if (m_captureRequested) {
-        return; // Already pending - FrameCaptureBridge never lets this happen anyway (Phase 2).
+        return; // Already pending; only one request is tracked at a time.
     }
     m_captureRequested = true;
 }
@@ -33,11 +33,7 @@ bool SwapchainCaptureService::RecordCaptureIfRequested(
 
     const uint64_t size = uint64_t(extent.width) * extent.height * 4;
     if (!slot.readbackBuffer.has_value() || slot.readbackBuffer->Size() != size) {
-        // In practice NotifySwapchainRecreated() will already have reset
-        // every slot's buffer by the time a real size mismatch could ever
-        // happen here - this check is retained purely as cheap defensive
-        // belt-and-braces, not the primary rebuild path (see the phase
-        // document's own Step 3.2, point 3).
+        // Defensive: NotifySwapchainRecreated() normally resets the buffers before a size mismatch can occur.
         slot.readbackBuffer.reset();
         slot.readbackBuffer.emplace(m_allocator, m_memoryTracker, size, BufferUsage::TransferDst,
             BufferMemoryUsage::GpuToCpu, "SwapchainCaptureReadback");
@@ -45,11 +41,7 @@ bool SwapchainCaptureService::RecordCaptureIfRequested(
 
     const VkImageSubresourceRange colorRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-    // The swapchain image is coming out of the "Present" render-graph
-    // pass's own color-attachment write, not a sampled texture - so the
-    // "previous" state here is ColorAttachmentWrite, not ShaderRead (unlike
-    // Phase 3's Renderer::CaptureRenderTexturePixels(), which reads a
-    // RenderTexture that's always left in SHADER_READ_ONLY_OPTIMAL).
+    // The image comes out of the present pass's color-attachment write, not a sampled texture.
     const rg::ResourceState previous = rg::RequiredStateFor(rg::ResourceAccess::ColorAttachmentWrite, false);
     const rg::ResourceState transferSrcState{
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT
@@ -63,32 +55,21 @@ bool SwapchainCaptureService::RecordCaptureIfRequested(
     vkCmdCopyImageToBuffer(
         cmd, swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, slot.readbackBuffer->Native(), 1, &region);
 
-    // REQUIRED: a fence wait alone (TryTakeCompletedCapture()'s caller's own
-    // per-slot vkWaitForFences) guarantees this copy finished EXECUTING, but
-    // the Vulkan spec still requires an explicit memory dependency whose
-    // destination stage/access includes HOST_BIT/HOST_READ_BIT before a
-    // device write is guaranteed VISIBLE to a later host read - see the
-    // phase document's own Step 2, point 6 and Step 3.2, point 4. `layout`
-    // is ignored for buffer barriers (see ResourceState's own doc comment
-    // in RenderGraphBarrierPlanner.h) - VK_IMAGE_LAYOUT_UNDEFINED is simply
-    // the required placeholder value.
+    // The caller's fence wait only proves the copy executed; a transfer-write to host-read dependency is still
+    // needed for host visibility. `layout` is ignored for buffer barriers, so UNDEFINED is a placeholder.
     const rg::ResourceState transferWriteState{
         VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT
     };
     const rg::ResourceState hostReadState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT };
     rg::EmitBufferBarrier(cmd, slot.readbackBuffer->Native(), 0, size, transferWriteState, hostReadState);
 
-    // There is NO "transition back" step for the image afterward - the
-    // caller's own subsequent manual finalize block (FramePresenter's
-    // existing PRESENT_SRC_KHR transition) is what takes the image the rest
-    // of the way, treating TransferSrcOptimal as its own "previous" state
-    // for this one call.
+    // No transition back: the caller's finalize step treats TransferSrcOptimal as its previous state.
 
     slot.pendingCapture = true;
     slot.capturedWidth = static_cast<int>(extent.width);
     slot.capturedHeight = static_cast<int>(extent.height);
     slot.capturedFormat = format;
-    m_captureRequested = false; // The REQUEST is satisfied - the copy is now in flight, not "still wanted".
+    m_captureRequested = false; // The request is satisfied; the copy is now in flight.
 
     return true;
 }
@@ -118,12 +99,7 @@ void SwapchainCaptureService::NotifySwapchainRecreated()
         slot.readbackBuffer.reset();
         slot.pendingCapture = false;
     }
-    // A resize-in-progress capture request is simply dropped - the network
-    // thread's own fixed timeout in FrameCaptureBridge (Phase 2) is what
-    // ultimately surfaces this to the caller as a timeout, without this
-    // service needing its own separate "failed" signal path back to
-    // Application (see this class's own NotifySwapchainRecreated() doc
-    // comment in the header).
+    // A capture request caught by a resize is dropped; the bridge's own timeout reports it to the caller.
     m_captureRequested = false;
 }
 

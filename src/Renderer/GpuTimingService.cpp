@@ -10,10 +10,7 @@ namespace gte {
 
 namespace {
 
-// Raw whole-pool slot count: 4 offscreen slots (Offscreen0 start/end,
-// Offscreen1 start/end) + kGpuTimingFramesInFlight * 2 Present slots (one
-// start/end pair per frame-in-flight index) - see GpuTimingService.h's own
-// class comment for the full 8-slot layout table.
+// Whole-pool slot count: 4 offscreen slots plus a start/end pair per frame-in-flight for present.
 constexpr std::uint32_t kOffscreenSlotCount = 4;
 constexpr std::uint32_t kTotalQuerySlotCount = kOffscreenSlotCount + kGpuTimingFramesInFlight * 2;
 
@@ -24,14 +21,8 @@ GpuTimingService::GpuTimingService(VulkanDevice& vulkanDevice, const GpuTimestam
     , m_capability(capability)
 {
 #if !GTE_ENABLE_PROFILER
-    // A GTE_ENABLE_PROFILER=OFF build behaves EXACTLY as if the device
-    // reported no timestamp support at all - no VkQueryPool is ever created
-    // for the lifetime of the process, matching the "genuinely zero cost,
-    // not just small" bar ScopeTimer's own compiled-out branch sets (see
-    // AGENTS.md, "Profiling", and PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md,
-    // Step 2.3). This is the ONLY place this class reads GTE_ENABLE_PROFILER
-    // - every other method below is unconditional and simply inert whenever
-    // m_capability.supported ends up false, whatever the reason.
+    // A profiler-off build behaves as if the device had no timestamp support: no VkQueryPool is created.
+    // This is the only place the class reads GTE_ENABLE_PROFILER; every other method is inert when unsupported.
     m_capability.supported = false;
 #endif
 
@@ -41,12 +32,7 @@ GpuTimingService::GpuTimingService(VulkanDevice& vulkanDevice, const GpuTimestam
 
     m_queryPool.emplace(m_device, kTotalQuerySlotCount);
 
-    // Full, one-time, up-front reset of every slot - what makes it safe for
-    // RecordOffscreenPassStart()/RecordPresentPassStart()'s own per-call
-    // reset-then-write sequences (Phase 4C/4D) to assume every slot starts
-    // life already reset, rather than needing a separate "is this the very
-    // first use" branch scattered through their own logic. See
-    // PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md, Phase 4B.
+    // Every slot starts reset, so the per-call reset-then-write sequences need no first-use branch.
     WarmUpResetEntirePool(vulkanDevice);
 }
 
@@ -82,10 +68,7 @@ void GpuTimingService::WarmUpResetEntirePool(VulkanDevice& vulkanDevice)
         throw std::runtime_error("GpuTimingService: vkBeginCommandBuffer failed (warm-up reset)");
     }
 
-    // vkCmdResetQueryPool must be recorded OUTSIDE a dynamic rendering
-    // instance (never between vkCmdBeginRendering/vkCmdEndRendering) - see
-    // PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md, Step 2.3. Trivially true
-    // here: this throwaway command buffer never begins one at all.
+    // The reset must be recorded outside a dynamic rendering instance; this throwaway buffer never begins one.
     vkCmdResetQueryPool(cmd, m_queryPool->Native(), 0, m_queryPool->SlotCount());
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
@@ -124,8 +107,7 @@ void GpuTimingService::WarmUpResetEntirePool(VulkanDevice& vulkanDevice)
 
 std::uint32_t GpuTimingService::OffscreenSlotBase(GpuTimingSlot slot) noexcept
 {
-    // Offscreen0 (0) -> base 0; Offscreen1 (1) -> base 2. Never called with
-    // GpuTimingSlot::SwapchainPresent (that's PresentSlotBase()'s job).
+    // Offscreen0 -> base 0, Offscreen1 -> base 2; never called with SwapchainPresent.
     return static_cast<std::uint32_t>(slot) * 2;
 }
 
@@ -137,13 +119,7 @@ std::uint32_t GpuTimingService::PresentSlotBase(std::uint32_t frameInFlightIndex
 GpuTimingSample GpuTimingService::ReadResultAt(std::uint32_t slotBase) noexcept
 {
     std::uint64_t ticks[2] = { 0, 0 };
-    // VK_QUERY_RESULT_WAIT_BIT is not required here - the caller has
-    // already confirmed (via its own fence wait) that this exact
-    // submission is complete before calling this (see
-    // ReadOffscreenResultNow()/ReadPresentResultIfAvailable() above) - but
-    // is harmless to add defensively; deliberately omitted to keep this
-    // call an obvious, honest reflection of "this data is already known
-    // ready", not a hidden second wait.
+    // No WAIT bit: callers only read after their own fence wait, so this is not a hidden second wait.
     vkGetQueryPoolResults(m_device, m_queryPool->Native(), slotBase, 2, sizeof(ticks), ticks, sizeof(std::uint64_t),
         VK_QUERY_RESULT_64_BIT);
 
@@ -173,11 +149,7 @@ void GpuTimingService::RecordOffscreenPassEnd(VkCommandBuffer cmd, GpuTimingSlot
 
 GpuTimingSample GpuTimingService::ReadOffscreenResultNow(GpuTimingSlot slot) noexcept
 {
-    // RenderOffscreen() is already fully synchronous (see
-    // PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md, Step 2.1) - there is no
-    // Offscreen-path warm-up concept the way Present has, so
-    // `hasWrittenData` is unconditionally true whenever this is even
-    // reached in a state that would actually read the pool.
+    // The offscreen path is fully synchronous, so there is no warm-up: hasWrittenData is always true here.
     const GpuTimingSample::Status status = ResolveGpuTimingStatus(IsSupported(), m_captureEnabled, /*hasWrittenData=*/true);
     GpuTimingSample sample{ status, 0.0 };
     if (status == GpuTimingSample::Status::Present) {

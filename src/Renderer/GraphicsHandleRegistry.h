@@ -5,12 +5,8 @@
 
 namespace gte {
 
-// Renderer-internal only - the ONLY place DescriptorSetHandle/SamplerHandle/
-// ImageViewHandle/DescriptorSetLayoutHandle (Core/GraphicsHandles.h) convert
-// to/from a real Vk* value. Every Register*() mints a fresh, generation-
-// checked handle wrapping `value`; every Native() returns VK_NULL_HANDLE for
-// an invalid/stale/Invalid handle rather than asserting - mirrors
-// ResourcePool::TryGet()'s existing "safe to query a dead handle" guarantee.
+// Renderer-internal: the only place the opaque graphics handles convert to and from Vk* values.
+// Register*() mints a generation-checked handle; Native() returns VK_NULL_HANDLE for an invalid or stale one.
 DescriptorSetHandle RegisterDescriptorSet(VkDescriptorSet value) noexcept;
 VkDescriptorSet Native(DescriptorSetHandle handle) noexcept;
 void UnregisterDescriptorSet(DescriptorSetHandle handle) noexcept;
@@ -31,13 +27,8 @@ BufferObjectHandle RegisterBufferObject(VkBuffer value) noexcept;
 VkBuffer Native(BufferObjectHandle handle) noexcept;
 void UnregisterBufferObject(BufferObjectHandle handle) noexcept;
 
-// Re-mints a SamplerHandle only when the underlying VkSampler actually
-// changed since the last Resolve() call - a call site that re-resolves the
-// SAME stable VkSampler every frame (the common case: a view's own render
-// target sampler never changes unless that render target is itself resized
-// or recreated) gets back the SAME handle instead of minting a brand-new,
-// never-freed one every frame. VK_NULL_HANDLE always resolves to
-// SamplerHandle::Invalid, never registered.
+// Re-mints a SamplerHandle only when the VkSampler changed since the last Resolve(), so a stable sampler
+// resolved every frame keeps one handle. VK_NULL_HANDLE resolves to SamplerHandle::Invalid.
 struct CachedSamplerHandle {
     VkSampler native = VK_NULL_HANDLE;
     SamplerHandle handle = SamplerHandle::Invalid;

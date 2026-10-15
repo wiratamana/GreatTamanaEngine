@@ -5,14 +5,7 @@
 
 namespace gte {
 
-// Cheap, POD, 8-byte generational identifier for a Pipeline owned by a
-// ResourcePool<Pipeline, PipelineHandle> (see ResourcePool.h) - same shape
-// and rationale as MeshHandle (see MeshHandle.h)/Entity (ECS/Entity.h)/
-// GpuResourceHandle (Memory/GpuResourceHandle.h). See AGENTS.md
-// ("Entity-Component-System").
-//
-// Deliberately a standalone header with ZERO dependency on Pipeline.h/
-// Vulkan - see MeshHandle.h's comment for why.
+// Generational id of a Pipeline in a ResourcePool. Standalone (no Vulkan), like MeshHandle.
 struct PipelineHandle {
     std::uint32_t index = 0;
     std::uint32_t generation = 0; // 0 == never assigned / invalid.

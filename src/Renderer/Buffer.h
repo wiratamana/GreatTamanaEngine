@@ -10,38 +10,18 @@
 
 namespace gte {
 
-// How a Buffer's underlying GPU memory should be allocated - passed to
-// Renderer::CreateBuffer() (see Renderer.h) and translated into the right
-// VMA allocation flags under the hood.
+// How a Buffer's GPU memory is allocated (translated to VMA flags by Renderer::CreateBuffer()).
 enum class BufferMemoryUsage {
-    // Device-local memory, not mappable from the CPU. Fastest for the GPU
-    // to read - the right choice for vertex/index buffers and other static
-    // data, uploaded once via a staging buffer (see
-    // Renderer::CreateDeviceLocalBuffer()).
+    // Device-local, not CPU-mappable; upload through a staging buffer.
     GpuOnly,
-    // Host-visible memory, persistently mapped for the buffer's entire
-    // lifetime (MappedData() is valid immediately after construction).
-    // Sequential-write access pattern - the common case for staging
-    // buffers and per-frame uniform buffers the CPU writes to every frame.
+    // Host-visible, persistently mapped, sequential CPU writes (staging and per-frame uniform buffers).
     CpuToGpu,
-    // Host-visible memory, persistently mapped, optimized for the GPU
-    // writing and the CPU later reading it back (e.g. a query/readback
-    // buffer). Less common than CpuToGpu.
+    // Host-visible, persistently mapped, for GPU writes read back by the CPU.
     GpuToCpu,
 };
 
-// Engine-native buffer-usage flags - zero Vulkan dependency, usable from any
-// layer (Renderer::CreateBuffer()/CreateDeviceLocalBuffer()/
-// CreateStructuredBuffer(), BufferDesc (RenderGraph/RenderGraphTypes.h), and
-// every call site across Editor/Game/Features that used to pass a raw
-// VK_BUFFER_USAGE_*_BIT literal directly). Buffer.cpp is the ONLY place this
-// ever converts to a real VkBufferUsageFlags bitmask (see the anonymous
-// ToVkBufferUsageFlags() helper in Buffer.cpp) - mirrors PixelFormat's own
-// "one translation choke point" convention (see Core/PixelFormat.h and
-// Renderer/VulkanFormatInfo.h) applied to a bitmask instead of a plain enum.
-// Only the bits this engine actually has a real use for today are declared -
-// extend this (and ToVkBufferUsageFlags()) if a future feature genuinely
-// needs another VK_BUFFER_USAGE_*_BIT.
+// Engine buffer-usage flags with no Vulkan dependency; Buffer.cpp is the only place they become VkBufferUsageFlags.
+// Only the bits the engine uses are declared.
 enum class BufferUsage : std::uint32_t {
     None = 0,
     TransferSrc = 1u << 0,
@@ -67,32 +47,12 @@ constexpr bool HasUsage(BufferUsage mask, BufferUsage flag) noexcept
     return (static_cast<std::uint32_t>(mask) & static_cast<std::uint32_t>(flag)) != 0u;
 }
 
-// RAII wrapper around a VkBuffer + its backing VmaAllocation (GPU memory,
-// sub-allocated by VMA - see Vulkan/VulkanAllocator.h): owns both for its
-// entire lifetime, created in the constructor, destroyed in the destructor.
-// The general-purpose GPU buffer primitive for vertex/index/uniform/staging
-// data - construct via Renderer::CreateBuffer()/CreateDeviceLocalBuffer()
-// rather than directly, same convention as RenderTexture.
-//
-// Does NOT own the VmaAllocator passed in - it must outlive this Buffer.
-//
-// Registers itself with a GpuMemoryTracker (see Memory/GpuMemoryTracker.h)
-// on construction and deregisters on destruction, so the engine always
-// knows exactly how much memory is live and where (GPU-only/host-visible/
-// shared) without needing a debugger or an external tool.
+// RAII owner of a VkBuffer and its VMA allocation; registers with the GpuMemoryTracker for its lifetime.
+// Create through Renderer::CreateBuffer()/CreateDeviceLocalBuffer(). The VmaAllocator must outlive it.
 class Buffer {
 public:
-    // debugName is optional and purely cosmetic - a plain, cheap
-    // `const char*` rather than a std::string, so passing one costs nothing
-    // beyond a pointer copy even when it IS used. GpuMemoryTracker itself
-    // never stores it (editor-core-separation-1 campaign, PHASE4) - it is
-    // only ever observed by whichever debug-name observer is installed (see
-    // GpuMemoryTracker::SetDebugNameObserver()), e.g. the Editor's
-    // EditorGpuMemoryNameOverlay.
-    //
-    // `usage` is this engine's own BufferUsage bitmask (see above), NEVER a
-    // raw VkBufferUsageFlags - this constructor is the ONE place that value
-    // is translated into a real VkBufferUsageFlags bitmask (see Buffer.cpp).
+    // `debugName` is cosmetic and never stored by the tracker; only the installed debug-name observer sees it.
+    // `usage` is the engine bitmask; this constructor is the one place it becomes VkBufferUsageFlags.
     Buffer(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, uint64_t size, BufferUsage usage,
         BufferMemoryUsage memoryUsage, const char* debugName = nullptr);
     ~Buffer();
@@ -106,32 +66,21 @@ public:
     VkBuffer Native() const noexcept { return m_buffer; }
     uint64_t Size() const noexcept { return m_size; }
 
-    // Non-null only for buffers created with BufferMemoryUsage::CpuToGpu/
-    // GpuToCpu (persistently mapped by VMA) - nullptr for GpuOnly buffers,
-    // which cannot be written to directly from the CPU.
+    // Non-null only for CpuToGpu/GpuToCpu buffers (persistently mapped); null for GpuOnly.
     void* MappedData() const noexcept { return m_mappedData; }
 
-    // Copies `size` bytes from `data` into this buffer's mapped memory at
-    // `offset`. Only valid for buffers with non-null MappedData() - throws
-    // std::runtime_error otherwise. Also throws std::out_of_range if
-    // `offset + size` would write past this buffer's actual Size() - this is
-    // checked explicitly (rather than left as a caller responsibility)
-    // because memcpy has no idea how large the destination allocation is.
+    // Copies into the mapped memory at `offset`. Throws std::runtime_error when not host-mapped and
+    // std::out_of_range when `offset + size` passes Size().
     void Upload(const void* data, std::size_t size, std::size_t offset = 0);
 
     // Copies `size` bytes at `offset` out of the mapped memory, invalidating the CPU cache first so GPU writes are
     // seen on non-coherent memory. False when the buffer is not host-mapped or the range is out of bounds.
     bool Download(void* data, std::size_t size, std::size_t offset = 0) const;
 
-    // Handle into the GpuMemoryTracker this Buffer is registered with -
-    // valid for this Buffer's entire lifetime, kInvalidGpuResourceHandle
-    // once moved-from.
+    // Memory-tracker handle; kInvalidGpuResourceHandle once moved-from.
     GpuResourceHandle Handle() const noexcept { return m_handle; }
 
-    // Opaque handle for the render-graph compute-binding API
-    // (RenderGraphBuilder::PassBuilder::BindStorageBuffer) - lazily registers
-    // this buffer's native VkBuffer on first call, reuses the same handle
-    // for every later call.
+    // Opaque handle for the graph's compute-binding API; registered on first call, then reused.
     BufferObjectHandle ObjectHandle() const noexcept { return m_objectHandle.Resolve(m_buffer); }
 
 private:
@@ -146,8 +95,7 @@ private:
     uint64_t m_size = 0;
     void* m_mappedData = nullptr;
 
-    // Lazily populated by ObjectHandle() above - mutable since resolving is
-    // logically const (just caches an opaque registry handle).
+    // Filled lazily by ObjectHandle(); mutable because it only caches a registry handle.
     mutable CachedBufferObjectHandle m_objectHandle;
 };
 

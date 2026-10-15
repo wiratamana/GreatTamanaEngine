@@ -6,13 +6,8 @@ namespace gte {
 
 namespace {
 
-// One process-wide registry per native type - this engine owns exactly one
-// Vulkan device/Renderer for its entire lifetime, so a single static
-// instance per handle kind (rather than a per-Renderer member reachable
-// only via a Renderer&) is what lets Native()/Register*() stay plain free
-// functions, matching every call site this family of handles is used from
-// (CommandBuffer.h in particular has no Renderer instance of its own to
-// route through - see BindDescriptorSet(DescriptorSetHandle)).
+// One process-wide registry per native type: the engine owns one device, and CommandBuffer has no Renderer
+// to route through, so Native()/Register*() stay free functions.
 OpaqueHandleRegistry<VkDescriptorSet>& DescriptorSetRegistry()
 {
     static OpaqueHandleRegistry<VkDescriptorSet> registry;

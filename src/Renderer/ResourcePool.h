@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <cstdint>
 #include <optional>
@@ -7,33 +7,9 @@
 
 namespace gte {
 
-// Generic owning slot-map keyed by a generational handle (HandleT) - the
-// same slot + free-list + generation-bump recipe as EntityManager (see
-// ECS/EntityManager.h/.cpp) and GpuMemoryTracker (see
-// Memory/GpuMemoryTracker.h/.cpp), just genuinely shared as ONE generic
-// implementation this time, rather than hand-copied a third/fourth time -
-// unlike EntityManager vs. GpuMemoryTracker (which differ in real ways: one
-// tracks aggregate byte totals + Editor debug names, the other just
-// alive/dead), there is zero semantic divergence between "a pool of Mesh"
-// and "a pool of Pipeline": both need exactly insert/remove/lookup with a
-// generation guard, differing only in the payload type T. See AGENTS.md
-// ("Entity-Component-System") for why this project uses this exact pattern
-// (index + generation, minted only by the owning container) everywhere a
-// handle is needed.
-//
-// HandleT must be a plain POD shaped like Entity/GpuResourceHandle/
-// MeshHandle/PipelineHandle - an `index` + `generation` field pair,
-// aggregate-constructible as `HandleT{index, generation}` - see
-// MeshHandle.h/PipelineHandle.h.
-//
-// Unlike GpuMemoryTracker (which only ever TRACKS a resource that owns
-// itself), this pool OWNS T for its entire lifetime - constructed in
-// Insert(), destroyed in Remove()/the pool's own destructor. This is what
-// lets a plain-data component (e.g. ECS/Components/MeshRenderer.h) reference
-// a live Mesh/Pipeline by a cheap handle without ever embedding/owning one
-// directly, per the rule AGENTS.md lays out for exactly that component.
-//
-// Not thread-safe (matches the rest of this single-threaded engine).
+// Owning slot map keyed by a generational handle: insert, remove and lookup with a stale-handle guard.
+// HandleT is a POD with `index` and `generation`, constructible as HandleT{index, generation}.
+// The pool owns T until Remove() or destruction. Not thread-safe.
 template <typename T, typename HandleT>
 class ResourcePool {
 public:
@@ -44,10 +20,7 @@ public:
     ResourcePool(ResourcePool&&) = default;
     ResourcePool& operator=(ResourcePool&&) = default;
 
-    // Takes ownership of `value`, returning a fresh handle - either reusing
-    // a freed slot (bumping its generation forward, with the same
-    // wraparound-skips-zero guard as EntityManager::Create()) or growing the
-    // slot array.
+    // Takes ownership of `value`: reuses a freed slot (generation bumped, skipping 0) or grows the slot array.
     HandleT Insert(T&& value)
     {
         std::uint32_t index;
@@ -72,11 +45,7 @@ public:
         return HandleT{ index, m_slots[index].generation };
     }
 
-    // Destroys this handle's resource and frees its slot for reuse. Safe to
-    // call with an already-removed or otherwise invalid/stale handle
-    // (no-op) - mirrors EntityManager::Destroy()/GpuMemoryTracker::Untrack()'s
-    // same safety guarantee. Returns true if a resource was actually
-    // removed.
+    // Destroys the resource and frees its slot. No-op for an invalid or stale handle; true if something was removed.
     bool Remove(HandleT handle)
     {
         if (!IsValid(handle)) {
@@ -87,9 +56,7 @@ public:
         return true;
     }
 
-    // True only for a handle returned by Insert() that hasn't since been
-    // Remove()'d - false for a default-constructed/invalid handle, a
-    // not-yet-inserted index, or a stale handle from a since-reused slot.
+    // True only for a handle from Insert() that has not been Remove()'d: false for invalid, unknown or stale handles.
     bool IsValid(HandleT handle) const noexcept
     {
         return handle.generation != 0 && handle.index < m_slots.size() && m_slots[handle.index].value.has_value() &&

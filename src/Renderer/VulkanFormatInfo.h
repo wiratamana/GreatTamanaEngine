@@ -18,11 +18,8 @@ int BytesPerTexelForFormat(VkFormat format) noexcept;
 VkFormat ToVkFormat(PixelFormat format) noexcept;
 PixelFormat FromVkFormat(VkFormat format) noexcept;
 
-// Renderer-internal only - the ONLY place gte::ImageLayout converts to/from
-// a real VkImageLayout (see ImageLayout's own doc comment, Core/ImageLayout.h,
-// for exactly which boundary this is and which internals deliberately stay
-// raw VkImageLayout instead). Unknown/unsupported values map to
-// VK_IMAGE_LAYOUT_UNDEFINED/ImageLayout::Undefined rather than asserting.
+// Renderer-internal: the only place gte::ImageLayout converts to and from VkImageLayout.
+// Unknown values map to Undefined rather than asserting.
 VkImageLayout ToVkImageLayout(ImageLayout layout) noexcept;
 ImageLayout FromVkImageLayout(VkImageLayout layout) noexcept;
 

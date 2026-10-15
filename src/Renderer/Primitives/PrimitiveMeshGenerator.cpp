@@ -21,10 +21,7 @@ Vertex MakeVertex(const Vec3& position, const Vec3& normal) noexcept
         { kNeutralColor.x, kNeutralColor.y, kNeutralColor.z } };
 }
 
-// Appends one flat-shaded (hard-edged) triangle: all three vertices share
-// the SAME real face normal - used for Cube/Cone/Plane, where an abrupt
-// normal change from one face to the next is exactly what a real edge
-// should look like.
+// Appends one flat-shaded triangle: all three vertices share the face normal (Cube/Cone/Plane).
 void AddFlatTriangle(std::vector<Vertex>& vertices, const Vec3& a, const Vec3& b, const Vec3& c)
 {
     const Vec3 normal = Normalize(Cross(b - a, c - a));
@@ -33,20 +30,15 @@ void AddFlatTriangle(std::vector<Vertex>& vertices, const Vec3& a, const Vec3& b
     vertices.push_back(MakeVertex(c, normal));
 }
 
-// Appends one quad (a,b,c,d, in order around its perimeter) as two flat-
-// shaded triangles sharing that same face normal - the face normal is
-// computed from (a,b,c) alone, so callers must list corners so THAT triangle
-// alone already has the correct outward winding (see GenerateCube()'s own
-// comment for the worked-out per-face winding).
+// Appends one quad (a,b,c,d around its perimeter) as two flat triangles. The normal comes from (a,b,c),
+// so that triangle must already wind outward.
 void AddFlatQuad(std::vector<Vertex>& vertices, const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& d)
 {
     AddFlatTriangle(vertices, a, b, c);
     AddFlatTriangle(vertices, a, c, d);
 }
 
-// Appends one smooth-shaded triangle: each vertex gets its OWN real normal -
-// used for Sphere/Capsule, where the surface should look continuously
-// curved rather than faceted.
+// Appends one smooth-shaded triangle with a normal per vertex (Sphere/Capsule).
 void AddSmoothTriangle(std::vector<Vertex>& vertices, const Vec3& posA, const Vec3& normalA, const Vec3& posB,
     const Vec3& normalB, const Vec3& posC, const Vec3& normalC)
 {
@@ -55,17 +47,8 @@ void AddSmoothTriangle(std::vector<Vertex>& vertices, const Vec3& posA, const Ve
     vertices.push_back(MakeVertex(posC, normalC));
 }
 
-// Shared by GenerateSphere() and GenerateCapsule()'s two end caps: a UV
-// hemisphere of `radius` centered at `center`. Its pole sits at
-// center + (0, apexSign * radius, 0) and its equator (a full circle of the
-// given radius) at center's own height - `apexSign` is +1 for a cap whose
-// pole points up (a capsule's top cap, or a full sphere's top half) or -1
-// for one whose pole points down (a capsule's bottom cap, or a full
-// sphere's bottom half). Every vertex's normal is simply
-// Normalize(position - center) - always geometrically correct for a
-// sphere/hemisphere regardless of triangle winding, which is why this
-// (unlike GenerateCube()/GenerateCone()) never has to reason about winding
-// order at all.
+// UV hemisphere of `radius` at `center`; the pole is at center + (0, apexSign * radius, 0) (+1 up, -1 down).
+// Normals are Normalize(position - center), so winding order does not matter.
 void AddHemisphere(std::vector<Vertex>& vertices, const Vec3& center, float radius, float apexSign,
     int latitudeSegments, int longitudeSegments)
 {
@@ -215,11 +198,7 @@ std::vector<Vertex> PrimitiveMeshGenerator::GenerateCapsule()
 
     std::vector<Vertex> vertices;
 
-    // Cylindrical body: one band from y=-cylinderHalfHeight to
-    // y=+cylinderHalfHeight. Every vertex's normal is the pure radial
-    // direction (cos(phi), 0, sin(phi)) - smoothly shaded around the
-    // circumference, and exactly matching the hemisphere caps' own equator
-    // normals at y = +-cylinderHalfHeight, so there's no visible seam.
+    // Cylindrical body: radial normals match the caps' equator normals, so there is no seam.
     for (int i = 0; i < radialSegments; ++i) {
         const float phi0 = kTwoPi * (static_cast<float>(i) / static_cast<float>(radialSegments));
         const float phi1 = kTwoPi * (static_cast<float>(i + 1) / static_cast<float>(radialSegments));
@@ -265,11 +244,7 @@ std::vector<Vertex> PrimitiveMeshGenerator::GenerateCone()
         const Vec3 base0{ radius * std::cos(a0), -height * 0.5f, radius * std::sin(a0) };
         const Vec3 base1{ radius * std::cos(a1), -height * 0.5f, radius * std::sin(a1) };
 
-        // Lateral face - flat-shaded per facet (a faceted "low-poly" cone
-        // rather than a smoothly-curved one - see the class comment).
-        // Order (apex, base1, base0) is what makes the computed face normal
-        // point outward-and-up, matching the cone's true slope (see
-        // tests/Renderer/PrimitiveMeshGeneratorTests.cpp for the derivation).
+        // Flat-shaded lateral facet; (apex, base1, base0) order makes the normal point outward and up.
         AddFlatTriangle(vertices, apex, base1, base0);
 
         // Base cap - a flat disk facing straight down (0,-1,0);

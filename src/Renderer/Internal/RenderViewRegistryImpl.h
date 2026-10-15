@@ -36,11 +36,7 @@ struct RenderViewRegistry::Impl {
         std::optional<RenderTexture> target;
     };
 
-    // Keyed by NAME (not by RenderViewId) - the name is the caller-facing
-    // identity; the RenderViewId is derived from it (rg::RenderViewId::
-    // Named(name)) and is recoverable from it at any time, so a reverse
-    // index is never needed. FindViewTarget() does a small linear scan over
-    // this same map instead.
+    // Keyed by name; the RenderViewId is derived from it, so no reverse index is needed.
     std::unordered_map<std::string, Entry> views;
 };
 

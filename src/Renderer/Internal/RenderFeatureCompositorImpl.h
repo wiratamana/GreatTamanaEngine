@@ -1,9 +1,6 @@
 #pragma once
 
-// Renderer-internal only - never included by a Project Assembly. Holds
-// every Vk*/RenderTexture/ComputePipeline field and private helper
-// RenderFeatureCompositor.h used to expose directly. Only
-// RenderFeatureCompositor.cpp includes this.
+// Renderer-internal state of the feature compositor; only RenderFeatureCompositor.cpp includes it.
 
 #include "../../Core/Plugins/RenderFeatureCompositor.h"
 #include "../../Core/Plugins/RenderFeatureNamePool.h"

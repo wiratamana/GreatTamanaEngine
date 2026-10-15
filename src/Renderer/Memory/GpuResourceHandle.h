@@ -1,23 +1,11 @@
-﻿#pragma once
+#pragma once
 
 #include <cstdint>
 
 namespace gte {
 
-// Cheap, POD, 8-byte identifier for a GPU resource tracked by
-// GpuMemoryTracker (see GpuMemoryTracker.h) - deliberately NOT a pointer or
-// string. Handles are meant to be copied/stored/compared by the thousands
-// with no real cost (unlike a std::string, which is large and unpredictable
-// memory-wise), and are always generated automatically by the tracker -
-// calling code never invents/assigns its own id. See AGENTS.md ("GPU
-// resource memory tracking") for the full rationale.
-//
-// `index` is a direct slot index into GpuMemoryTracker's internal array (an
-// O(1) lookup, not a hash). `generation` guards against a stale handle
-// silently referring to a different resource that was later created in the
-// same (reused) slot - this isn't a theoretical concern here, since e.g.
-// RenderTexture::Resize() destroys and immediately recreates its
-// allocation, which can and does reuse the just-freed slot.
+// Cheap POD id of a resource tracked by GpuMemoryTracker; always minted by the tracker.
+// `index` is a direct slot index; `generation` rejects stale handles to a reused slot (e.g. after a resize).
 struct GpuResourceHandle {
     std::uint32_t index = 0;
     std::uint32_t generation = 0; // 0 == never assigned / invalid.

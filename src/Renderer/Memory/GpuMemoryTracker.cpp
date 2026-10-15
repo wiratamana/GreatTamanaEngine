@@ -1,4 +1,4 @@
-﻿#include "GpuMemoryTracker.h"
+#include "GpuMemoryTracker.h"
 
 namespace gte {
 
@@ -62,20 +62,14 @@ void GpuMemoryTracker::Untrack(GpuResourceHandle handle)
 
     RemoveFromTotals(slot.record);
 
-    // editor-core-separation-1 campaign, PHASE4 - notifies the installed
-    // debug-name observer (if any) that this handle should be forgotten,
-    // via the documented `name == nullptr` sentinel (see GpuMemoryTracker.h).
-    // Unconditional - no `#if GTE_ENABLE_EDITOR` guard anymore.
+    // Tell the debug-name observer to forget this handle (name == nullptr sentinel).
     if (m_debugNameObserver != nullptr) {
         m_debugNameObserver(m_debugNameObserverUserData, handle, nullptr);
     }
 
     slot.record = GpuResourceRecord{};
     slot.occupied = false;
-    // slot.generation deliberately left as-is here (not reset to 0) - it's
-    // exactly the value Track() bumps forward from the next time this slot
-    // is reused, so two different resources that ever occupied the same
-    // slot can never share a handle.
+    // The generation stays as-is: Track() bumps it on reuse, so two resources never share a handle.
     m_freeList.push_back(handle.index);
 }
 

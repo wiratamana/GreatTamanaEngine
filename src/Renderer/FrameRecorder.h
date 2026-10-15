@@ -15,198 +15,71 @@
 
 namespace gte {
 
-// Everything Game (or a future Editor) hands Renderer every frame BEFORE any
-// actual Vulkan recording happens: the color to clear to (Clear()) and the
-// list of Pipeline+Mesh draw calls queued for this frame (Submit()) - plus
-// RecordFrame(), the shared routine used by
-// Renderer::RenderOffscreen() (target = a RenderTexture) that turns that
-// CPU-side state into the actual dynamic-rendering command sequence
-// (barrier -> clear -> queued draws -> caller-supplied overlay -> barrier),
-// and IssueDrawCommand(), the thin per-item Vulkan-call primitive that
-// RecordFrame() itself uses internally AND Renderer::Submit() calls
-// directly while a real gte::rg::RenderGraph pass is being recorded (see
-// Renderer::BeginGraphPassRecording()) - see FramePresenter.h, which owns
-// the actual command-buffer/queue plumbing around RenderOffscreen().
-//
-// Deliberately holds no Vulkan device/queue/command-pool state of its own -
-// just CPU-side data plus recording logic against a caller-supplied
-// VkCommandBuffer - so it needs no custom constructor/destructor and is
-// trivially/safely movable (implicit move ctor/assignment), unlike the
-// objects around it that actually own Vulkan handles.
+// CPU-side frame state: the clear color, the queued Pipeline+Mesh draws, and RecordFrame(), which turns them into
+// the dynamic-rendering sequence for Renderer::RenderOffscreen(). IssueDrawCommand() is the per-item primitive
+// shared with Renderer::Submit() while a graph pass records. It holds no device state, so it is trivially movable.
 class FrameRecorder {
 public:
-    // Sets the color the render target will be cleared to on the next
-    // RecordFrame() call (0-255 per channel). See Renderer::Clear().
+    // Sets the clear color (0-255 per channel) for the next RecordFrame(). See Renderer::Clear().
     void Clear(std::uint8_t r = 0, std::uint8_t g = 0, std::uint8_t b = 0, std::uint8_t a = 255);
 
-    // Call once per frame, before Game::Update()/Render() - clears any draw
-    // items queued last frame via Submit() (see below) so this frame always
-    // starts from an empty queue. Also guards against a queue growing
-    // unbounded across frames where nothing ever consumes it (e.g. a
-    // minimized window with no Editor - see RecordFrame). See
-    // Renderer::BeginFrame().
+    // Call once per frame: drops draws queued last frame so the queue cannot grow unbounded. See Renderer::BeginFrame().
     void BeginFrame();
 
-    // Queues one draw call - a Pipeline plus the Mesh to draw with it, plus
-    // the world matrix (pushed to the shader via vkCmdPushConstants - see
-    // Pipeline.h's push constant range and Shaders/Triangle.vert) and the
-    // view-projection matrix of whichever camera this recording's target is
-    // being rendered through - to be recorded the next time RecordFrame()
-    // runs. Both default to Mat4::Identity() so existing callers that don't
-    // care about a transform/camera are unaffected. See Renderer::Submit()
-    // for the full seam this is part of. `materialDescriptorSet` (default
-    // VK_NULL_HANDLE) is bound as descriptor set 0 right before this draw
-    // when non-null - see Renderer::Submit()'s own matching parameter.
-    // `sceneServicesSet` (Global Scene Services Descriptor Set campaign,
-    // better-render-pass-6, PHASE5 - default VK_NULL_HANDLE, trailing) is
-    // bound as descriptor set 1 right before this draw when non-null - see
-    // Renderer::Submit()'s own matching, already-gated parameter (this
-    // (legacy/queued) path exists for type/call-site consistency with the
-    // render-graph-recording path below; no real production caller is
-    // expected to pass a non-default value here today).
+    // Queues one draw for the next RecordFrame(): a Pipeline and Mesh plus the world and view-projection
+    // matrices (pushed to the shader). `materialDescriptorSet` is bound as set 0 and `sceneServicesSet` as
+    // set 1 when non-null. See Renderer::Submit().
     void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
         const Mat4& viewProjMatrix = Mat4::Identity(), VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE,
         VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
 
-    // Phase 7 (RENDERGRAPH_PHASE7_APPLICATION_MIGRATION_STRATEGY_v2.md) -
-    // issues ONE draw call's worth of real Vulkan commands directly against
-    // `cmd`: bind pipeline, push constants (model then viewProj - see
-    // Submit()'s own comment above for the exact layout), optionally bind a
-    // material descriptor set, bind vertex/index buffers, then
-    // vkCmdDraw()/vkCmdDrawIndexed() depending on whether `indexBuffer` is
-    // VK_NULL_HANDLE. This is the exact per-item body RecordFrame()'s own
-    // draw loop already used inline - pulled out into this public static
-    // method so Renderer::Submit() can call it DIRECTLY when recording
-    // inside a RenderGraph pass (see Renderer::BeginGraphPassRecording())
-    // instead of only ever being reachable via this class's own queued
-    // m_drawQueue/RecordFrame(). Never touches m_drawQueue or DrawStats
-    // itself - purely a thin, stateless Vulkan-call wrapper, mirroring
-    // RenderGraphBarrierPlanner's own EmitImageBarrier()/EmitBufferBarrier()
-    // "thin Vulkan-call half" precedent. `sceneServicesSet` (Global Scene
-    // Services Descriptor Set campaign, better-render-pass-6, PHASE5 -
-    // default VK_NULL_HANDLE via Submit()'s own already-gated parameter) is
-    // bound as descriptor set 1, immediately after the existing set-0
-    // materialDescriptorSet bind, when non-null - an independent,
-    // non-overlapping vkCmdBindDescriptorSets() call (Vulkan does not
-    // require rebinding set 0 just because set 1 is also bound).
+    // Issues one draw directly against `cmd`: bind pipeline, push constants (model then viewProj), optional
+    // set 0 (material) and set 1 (scene services), bind vertex/index buffers, then vkCmdDraw or
+    // vkCmdDrawIndexed depending on whether `indexBuffer` is null. Stateless; never touches the queue or DrawStats.
     static void IssueDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
         VkBuffer vertexBuffer, std::uint32_t vertexCount, VkBuffer indexBuffer, std::uint32_t indexCount,
         const Mat4& model, const Mat4& viewProj, VkDescriptorSet materialDescriptorSet,
         VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
 
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE2 (task_manager/render-pass-5/
-    // PHASE2_INSTANCED_DRAW_PRIMITIVE_AND_INDIRECT_SUBMIT.md) - the
-    // indirect-draw sibling of IssueDrawCommand() above: binds `pipeline`,
-    // ALWAYS binds `instanceBufferDescriptorSet` at descriptor set 0
-    // (unlike IssueDrawCommand()'s optional materialDescriptorSet, this is
-    // NEVER optional - every indirect draw goes through the new
-    // VertexLayout::PositionNormalInstanced pipeline, which always
-    // declares descriptor set 0 for its instance buffer), pushes `viewProj`
-    // at the SAME push-constant offset every other draw uses (the `model`
-    // half of the pushed 128 bytes is left zeroed - never read by
-    // Shaders/MeshInstanced.vert), binds `vertexBuffer`/`indexBuffer`
-    // (always both - this campaign is VkDrawIndexedIndirectCommand-only,
-    // Locked Design Decision 6), then issues EXACTLY ONE
-    // vkCmdDrawIndexedIndirectCount (when `countBuffer != VK_NULL_HANDLE`
-    // AND `supportsDrawIndirectCount`) or vkCmdDrawIndexedIndirect
-    // (otherwise, using `maxDrawCount` as a literal, fixed draw count - the
-    // degenerate-padded fallback, Locked Design Decision 4). The caller
-    // (Renderer::SubmitIndirect()) resolves `supportsDrawIndirectCount`
-    // from VulkanDevice::SupportsDrawIndirectCount() ONCE; never re-queried
-    // here. Never touches DrawStats - see Renderer::SubmitIndirect()'s own
-    // doc comment for why.
-    // `sceneServicesSet` (default VK_NULL_HANDLE via Renderer::SubmitIndirect()'s
-    // own gate) is bound at set = 1, right after set = 0, exactly like
-    // IssueDrawCommand() already does for the non-indirect path.
+    // Indirect-draw sibling of IssueDrawCommand(): binds the instance set at set 0 and `sceneServicesSet` at set 1
+    // (when non-null), pushes `viewProj`, then issues an indirect draw: counted when a count buffer and device
+    // support exist, else with `maxDrawCount` as a fixed count. Never touches DrawStats.
     static void IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
         VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet instanceBufferDescriptorSet,
         VkDescriptorSet sceneServicesSet, const Mat4& viewProj, VkBuffer indirectBuffer, uint64_t indirectOffset,
         std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset, bool supportsDrawIndirectCount);
 
-    // Records the undefined->color-attachment (and, when target carries a
-    // real depth image, undefined->depth-attachment) barriers, the dynamic-
-    // rendering clear + every queued Submit() draw + recordExtra, and the
-    // final transition to `finalLayout` - used by
-    // FramePresenter::RenderOffscreen() (target = a RenderTexture,
-    // finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL). The
-    // swapchain's own Present pass no longer goes through this class at
-    // all - it's recorded directly via a real gte::rg::RenderGraph (see
-    // Application/RenderPasses.cpp's AddPresentPass() and
-    // FrameRecorder::IssueDrawCommand() above, which the render graph's own
-    // Submit() path calls directly instead).
-    //
-    // expectedFormat is asserted (debug builds only) against target.format;
-    // expectedDepthFormat likewise against target.depthFormat, but ONLY
-    // when target.depthImage != VK_NULL_HANDLE - see AGENTS.md ("Render
-    // Target Format Matching") - the caller passes whatever
-    // Renderer::ColorFormat()/Renderer::DepthFormat() currently are.
-    //
-    // target.depthImage == VK_NULL_HANDLE means "skip the depth attachment
-    // for this pass entirely" (no barrier, no depth clear,
-    // VkRenderingInfo::pDepthAttachment left NULL) - used whenever a target
-    // has nothing depth-tested to draw into it (e.g. an offscreen preview
-    // with no depth buffer of its own), since a pipeline that itself
-    // requires a real depth attachment is never actually bound in that case
-    // anyway. Whenever a real depth image IS supplied, it's always cleared
-    // (loadOp = CLEAR, clearValue = 1.0 - the far plane) and its contents
-    // discarded afterwards (storeOp = DONT_CARE) - nothing ever samples a
-    // depth buffer built this way, it exists purely for this one draw
-    // pass's own occlusion testing.
-    //
-    // Clears the queued draw list right after recording it (NOT at the top
-    // of this call) so a second RecordFrame() call later in the SAME frame
-    // never redraws it - see BeginFrame()/Submit() above.
-    //
-    // Returns this call's own DrawStats (see DrawStats.h) - one
-    // AccumulateDrawStats() call per queued item, made INLINE inside the
-    // very loop that already issues vkCmdDraw/vkCmdDrawIndexed for it
-    // (never a separate pass over m_drawQueue) - see DrawStats.h's own
-    // header comment for exactly why this fused design is a correctness
-    // requirement, not a style choice (PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md,
-    // Step 3.1/3.2). The caller (FramePresenter::RenderOffscreen()) threads
-    // this back up to Application::Run(), the one place that knows which
-    // named GpuPass (see Profiling/ProfilingTypes.h) this recording
-    // corresponds to.
+    // Records the barriers to attachment state, the dynamic-rendering clear, every queued draw, `recordExtra`,
+    // and the final transition to `finalLayout`. Clears the queue afterwards so a second call does not redraw it.
+    // The formats are asserted in debug builds against the target (depth only when a depth image exists).
+
+    // A null target.depthImage skips the depth attachment. A real one is cleared to 1.0 and discarded afterwards.
+    // Returns this call's DrawStats, accumulated inline in the loop that issues each draw.
     DrawStats RecordFrame(VkCommandBuffer cmd, const RenderTarget& target, VkFormat expectedFormat,
         VkFormat expectedDepthFormat, VkImageLayout finalLayout, const std::function<void(VkCommandBuffer)>& recordExtra);
 
 private:
-    // One queued Submit() call's worth of plain Vulkan handles - deliberately
-    // NOT a reference/pointer to the Pipeline/Mesh themselves (those are
-    // owned by whoever called Submit(), typically Game, and must outlive
-    // the RecordFrame() call that consumes this - which is always true
-    // within a single frame, since Submit() is called from Game::Render()
-    // and consumed later that same frame). `layout` is needed alongside
-    // `pipeline` because vkCmdPushConstants() takes a VkPipelineLayout, not
-    // a VkPipeline - see Pipeline::Layout().
+    // One queued Submit(): plain Vulkan handles, not references to the Pipeline/Mesh, which the caller owns for
+    // the frame. `layout` is kept because vkCmdPushConstants takes a layout.
     struct DrawItem {
         VkPipeline pipeline = VK_NULL_HANDLE;
         VkPipelineLayout layout = VK_NULL_HANDLE;
         VkBuffer vertexBuffer = VK_NULL_HANDLE;
         std::uint32_t vertexCount = 0;
-        // VK_NULL_HANDLE means "this Mesh had no index buffer" (see
-        // Mesh::HasIndexBuffer()) - RecordFrame() below issues a plain
-        // vkCmdDraw() in that case, vkCmdDrawIndexed() otherwise.
+        // Null means the mesh has no index buffer, so RecordFrame() issues vkCmdDraw.
         VkBuffer indexBuffer = VK_NULL_HANDLE;
         std::uint32_t indexCount = 0;
-        Mat4 model = Mat4::Identity(); // Mat4's default ctor is all-zero, NOT identity - see Math/Mat4.h.
-        Mat4 viewProj = Mat4::Identity(); // The active camera's view-projection matrix at Submit() time - see Renderer::Submit().
-        // VK_NULL_HANDLE means "no material texture to bind" - see
-        // Submit()'s own `materialDescriptorSet` parameter above.
+        Mat4 model = Mat4::Identity(); // Mat4's default ctor is all-zero, not identity.
+        Mat4 viewProj = Mat4::Identity(); // The active camera's view-projection at Submit() time.
+        // Null means no material texture to bind.
         VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE;
-        // VK_NULL_HANDLE means "no scene-services set to bind" - see
-        // Submit()'s own `sceneServicesSet` parameter above (PHASE5, Global
-        // Scene Services Descriptor Set campaign, better-render-pass-6).
+        // Null means no scene-services set to bind.
         VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE;
     };
 
     std::array<float, 4> m_clearColor{ 0.0f, 0.0f, 0.0f, 1.0f };
 
-    // This frame's queued Submit() calls. Cleared at the top of every frame
-    // (BeginFrame()) AND immediately after being recorded (RecordFrame()),
-    // so a frame is never drawn twice and never silently
-    // accumulates across frames where nothing consumes it.
+    // This frame's queued draws; cleared by BeginFrame() and after RecordFrame().
     std::vector<DrawItem> m_drawQueue;
 };
 

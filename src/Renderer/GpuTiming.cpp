@@ -9,10 +9,7 @@ double ConvertTimestampDeltaToMilliseconds(
         return 0.0;
     }
 
-    // A validBits of 64 (or, defensively, anything >= 64) means "the full
-    // counter width" - shifting a std::uint64_t by 64 is undefined
-    // behavior in C++, so that case is handled as an all-ones mask
-    // directly rather than computing (1 << 64).
+    // validBits >= 64 means the full counter: shifting a uint64_t by 64 is undefined, so use an all-ones mask.
     const std::uint64_t mask =
         (validBits >= 64) ? ~std::uint64_t{ 0 } : ((std::uint64_t{ 1 } << validBits) - 1);
 
