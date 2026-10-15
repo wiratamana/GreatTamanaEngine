@@ -22,42 +22,19 @@
 
 namespace gte {
 
-// Fixed upper bound on how many scene-service slots can ever be registered -
-// a shipped feature's own preferredIndex is a durable shader-binding contract
-// (every consuming .frag file hardcodes `layout(set = 1, binding = N)`).
+// Upper bound on scene-service slots; a feature's preferredIndex is a durable shader binding contract
+// (consuming shaders hardcode `layout(set = 1, binding = N)`).
 inline constexpr std::uint32_t kSceneServiceSlotCount = 8;
 
-// Every slot is a VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER at the Vulkan
-// descriptor level (uniform across all 8) - this enum exists ONLY to pick
-// which underlying GPU resource TYPE (Texture2D vs VolumeTexture) backs a
-// given slot's real data AND its dummy/neutral fallback, since a
-// VK_IMAGE_VIEW_TYPE_2D view is not interchangeable with a
-// VK_IMAGE_VIEW_TYPE_3D one for a shader that declared `sampler3D`.
+// Every slot is a combined image sampler; this enum only picks the backing resource type (2D or 3D view) for real data
+// and the dummy fallback, since a 2D view cannot stand in for a sampler3D.
 enum class SceneServiceResourceKind : std::uint8_t { Image2D, Image3D };
 
-// A return value >= kSceneServiceSlotCount from any function below means
-// "no usable slot" - the one sentinel this whole API uses for every failure
-// shape.
+// A return value >= kSceneServiceSlotCount means "no usable slot".
 inline constexpr std::uint32_t kInvalidSceneServiceSlotIndex = kSceneServiceSlotCount;
 
-// Registers (or re-confirms, if already registered under this exact name) a
-// scene-service slot. Idempotent by debugName: a second call with the SAME
-// name returns the SAME index every time. An out-of-range preferredIndex, a
-// preferredIndex collision with a DIFFERENT name, a full registry, or a
-// null/empty debugName are all refused: GTE_LOG_ERROR once per distinct
-// (name, reason), return kInvalidSceneServiceSlotIndex (or, for a collision,
-// the EXISTING occupant's own index). A null/empty debugName re-logs on
-// EVERY such call (there is no name to key a "once" suppression entry on) -
-// this is the one deliberate exception to the "once per distinct (name,
-// reason)" promise above. Copies debugName into owned storage - the
-// caller's buffer may be freed immediately after this call returns.
-// Startup-only: refused once SceneServicesDescriptorSet::Rewrite() has
-// completed anywhere in the process for the first time. Never call from
-// code any frame-declare loop/render pass/provider invokes more than once.
-//
-// `isDepthResource` must be true when the published texture is a depth-format image (e.g. a light's
-// depth map): the read declaration needs it to pick the depth half to transition. A wrong value leaves
-// the depth image in the wrong layout when sampled, which can crash a driver.
+// Registers a scene-service slot, idempotent by debugName (the name is copied). Startup-only: refused after the first Rewrite().
+// Bad input logs once and returns kInvalidSceneServiceSlotIndex. `isDepthResource` must be true for a depth-format image, else its layout is wrong when sampled.
 [[nodiscard]] std::uint32_t RegisterSceneServiceSlot(const char* debugName, SceneServiceResourceKind kind,
     std::optional<std::uint32_t> preferredIndex = std::nullopt, bool isDepthResource = false);
 
@@ -71,22 +48,15 @@ std::uint32_t RegisteredSceneServiceSlotIndexAt(std::size_t i) noexcept;
 const char* SceneServiceSlotDebugName(std::uint32_t slotIndex) noexcept;
 SceneServiceResourceKind SceneServiceSlotResourceKind(std::uint32_t slotIndex) noexcept;
 
-// False ("color aspect") for a slot index that was never registered (or is
-// out of range) - see RegisterSceneServiceSlot()'s own `isDepthResource` doc
-// comment above for why a generic reader needs this.
+// False (color aspect) for a slot index that was never registered or is out of range.
 bool SceneServiceSlotIsDepthResource(std::uint32_t slotIndex) noexcept;
 
 // Testing-only: clears every registered slot, the registration-order list,
 // the failure-memory table, and the Runtime Sealing latch.
 void ResetSceneServiceRegistryForTesting() noexcept;
 
-// The RenderPassBlackboard key a PreOpaque feature Publish()es its
-// rg::TextureHandle under for `slot`, for the specific render view ITS OWN
-// callback was invoked with (never a cached/stale view). CRITICAL: folds
-// BOTH `slot` and `view.Hash()` into the result via a REAL FNV-1a avalanche
-// (see this header's own implementation comment in the .cpp) - two
-// concurrently-active views (this engine always has Game+Scene active
-// together whenever the Editor is up) must never alias onto the same key.
+// Blackboard key a PreOpaque feature publishes its TextureHandle under for `slot` and the view its callback got.
+// Folds `slot` and `view.Hash()` through FNV-1a so concurrently active views never alias.
 rg::RenderPassId SceneServiceBlackboardKey(std::uint32_t slotIndex, rg::RenderViewId view) noexcept;
 class Renderer; // forward-declared only - the .cpp includes Renderer.h.
 
@@ -94,12 +64,8 @@ class Renderer; // forward-declared only - the .cpp includes Renderer.h.
 // settings struct must fit inside this many bytes.
 inline constexpr uint64_t kSceneGlobalUniformBlockSize = 128;
 
-// Owns ONE reserved "scene services" descriptor-set LAYOUT (set = 1 at the
-// Pipeline level - see Pipeline.h's own new sceneServicesSetLayout
-// constructor parameter, PHASE3) and ONE real VkDescriptorSet PER
-// concurrently-active rg::RenderViewId (never one shared instance - see
-// PHASE0's global rule 5 for why a shared set is unsafe with this engine's
-// confirmed same-frame Game+Scene dual-view rendering).
+// Owns the scene-services descriptor-set layout (set 1 at the Pipeline level) and one VkDescriptorSet per active view;
+// a shared set would be unsafe with same-frame Game and Scene views.
 class SceneServicesDescriptorSet {
 public:
     explicit SceneServicesDescriptorSet(Renderer& renderer);
@@ -107,11 +73,7 @@ public:
 
     SceneServicesDescriptorSet(const SceneServicesDescriptorSet&) = delete;
     SceneServicesDescriptorSet& operator=(const SceneServicesDescriptorSet&) = delete;
-    // Core owns exactly ONE instance for its entire lifetime (mirrors
-    // RenderViewRegistry's own "create once, never torn down" convention) -
-    // move is intentionally NOT provided; add it later only if a genuine
-    // need arises, following Pipeline's own move-safety discipline exactly
-    // (see PHASE0 global rule 9) if that day comes.
+    // Core owns exactly one instance for its whole lifetime, so move is not provided.
 
     VkDescriptorSetLayout Layout() const noexcept { return m_layout; }
 
@@ -120,23 +82,12 @@ public:
         VkSampler sampler = VK_NULL_HANDLE;
     };
 
-    // Rewrites (ONE vkUpdateDescriptorSets call) the VkDescriptorSet
-    // belonging to `view`, allocating/caching it on first use for that
-    // view. A slot counts as "really published this call" ONLY when BOTH
-    // resolved[slot].view AND .sampler are non-VK_NULL_HANDLE (PHASE0
-    // global rule 12 - an imported-texture-handle edge case can otherwise
-    // resolve a valid view with a null sampler) - every other slot gets
-    // this class's own dummy resource substituted in, selected via
-    // SceneServiceSlotResourceKind(slot). Call ONCE per view per frame,
-    // from inside the SAME pass's own execute() callback that is about to
-    // Submit() against it (see PHASE7) - never from outside a pass's
-    // execution window.
+    // Rewrites `view`'s descriptor set in one vkUpdateDescriptorSets call (allocated on first use). A slot counts as
+    // published only if both view and sampler are non-null; others get the dummy. Call once per view per frame, from the consuming pass's execute().
     DescriptorSetHandle Rewrite(rg::RenderViewId view, const std::array<ResolvedSlot, kSceneServiceSlotCount>& resolved);
 
-    // Writes an opaque, fixed-size byte blob (<= kSceneGlobalUniformBlockSize)
-    // into the uniform buffer bound at Scene Services binding 8, for `view`.
-    // Content/schema is owned entirely by the caller - this class never
-    // interprets it. Call once per view per frame, same discipline as Rewrite().
+    // Writes an opaque byte blob (<= kSceneGlobalUniformBlockSize) into `view`'s binding-8 uniform buffer.
+    // The caller owns the schema. Call once per view per frame, like Rewrite().
     void UpdateGlobalUniformBlock(rg::RenderViewId view, std::span<const std::byte> bytes);
 
     // The most recent Rewrite()-produced VkDescriptorSet for `view`, or
@@ -156,37 +107,18 @@ private:
 
     struct PerViewSet {
         rg::RenderViewId view;
-        // Registered ONCE, the moment this view's set is first lazily
-        // allocated (see Rewrite()'s own "freshlyAllocated" branch) - never
-        // re-registered afterward, only re-Rewrite()'d in place (the
-        // underlying VkDescriptorSet is pool-owned and never individually
-        // freed, matching MaterialTexture's own convention).
+        // Registered once when the set is first allocated; afterwards only rewritten in place (pool-owned set).
         DescriptorSetHandle handle = DescriptorSetHandle::Invalid;
     };
     std::vector<PerViewSet> m_perViewSets;
 
-    // Deliberately TWO SEPARATE, correctly-typed dummy containers. Keyed by
-    // raw slot index - only the Image2D map is populated per-slot; the single
-    // Image3D dummy below backs any Image3D-kind slot directly.
+    // Separately typed dummies: the Image2D map is keyed by slot index; one Image3D dummy backs any Image3D slot.
     std::unordered_map<std::uint32_t, Texture2D> m_dummyImage2DTextures;
-    // Built unconditionally regardless of registry state. Safe only while at
-    // most one Image3D-kind slot is ever registered before this constructor
-    // runs.
+    // Built unconditionally; safe only while at most one Image3D-kind slot is registered before construction.
     VolumeTexture m_dummyImage3DTexture;
 
-    // DECLARATION ORDER IS LOAD-BEARING: must stay strictly after m_device
-    // and m_dummyImage3DTexture above, matching the constructor's own
-    // initializer-list order (C++ initializes in declaration order, not
-    // init-list order).
-    //
-    // ROBUSTNESS: binding 8 has NO per-call fallback the way bindings 0-7
-    // do inside Rewrite()'s own loop (that loop only ever touches indices
-    // 0..kSceneServiceSlotCount-1). A brand-new per-view set's binding 8 is
-    // written with this dummy buffer as PART OF Rewrite()'s own single
-    // batched vkUpdateDescriptorSets call (never a separate call - two
-    // back-to-back descriptor-set updates against a freshly allocated set
-    // is a known crash trigger on at least one targeted Vulkan driver).
-    // Built ONCE in the constructor, zero-filled.
+    // Declared after m_device and m_dummyImage3DTexture to match the constructor's init order. Binding 8 has no
+    // per-call fallback: its dummy is written in Rewrite()'s single batched update (two back-to-back updates crash some drivers).
     Buffer m_dummyGlobalUniformBuffer;
 
     // Per-view UBO backing binding 8 - populated lazily by

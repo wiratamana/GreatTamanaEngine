@@ -1,32 +1,20 @@
 #include "EditorHost.h"
 
-#include "Logger.h" // LoggerLogSink::Instance() - the ONE real ILogSink this engine ships.
+#include "Logger.h" // LoggerLogSink::Instance().
 #include "EditorSceneIOCapability.h"
-#include "EditorLogQueryCapability.h" // editor-core-separation-2 campaign, PHASE3.
-#include "EditorHotReloadDebugCapability.h" // editor-core-separation-12 campaign, PHASE3.
-// editor-core-separation-16 campaign (On-Engine Project Workflow plan,
-// BIG-STEP 2), PHASE3 - EditorProjectLifecycleCapability/ActiveProjectAssemblyState.
+#include "EditorLogQueryCapability.h"
+#include "EditorHotReloadDebugCapability.h"
 #include "EditorProjectLifecycleCapability.h"
 #include "ActiveProjectAssemblyState.h"
-// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
-// BIG-STEP 2), PHASE4 - ResolveProjectAssemblyOutputDirectory(), the shared
-// gte_core-tier helper this file's own LoadProjectAssemblies() call site
-// below now uses instead of an inline "/ \"project_assemblies\"" literal.
+// ResolveProjectAssemblyOutputDirectory().
 #include "../Core/Plugins/ProjectAssemblyBuildRunner.h"
-// editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
-// BIG-STEP 3), PHASE3 - PerformProjectAssemblyHotReload(), called from this
-// file's own new Run() drain point below.
+// PerformProjectAssemblyHotReload().
 #include "../Core/Plugins/ProjectAssemblyHotReload.h"
-// Generic built-in-feature-module registry - replaces a direct, named
-// construction of any concrete feature.
+// Built-in feature modules are created generically through this registry.
 #include "../Core/Plugins/BuiltinFeatureModuleRegistry.h"
-#include "ProjectRootPath.h" // editor-core-separation-3 campaign, PHASE2 - ExecutableDirectory().
-#include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
-// editor-core-separation-6 campaign, PHASE7
-// (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - needed for the real
-// RenderFeatureCompositor::DebugSnapshot() call below (Core.h itself only
-// forward-declares the type for its own GetRenderFeatureCompositor()
-// accessor).
+#include "ProjectRootPath.h" // ExecutableDirectory().
+#include "../Core/EditorPanelRegistry.h"
+// RenderFeatureCompositor::DebugSnapshot() needs the full type (Core.h only forward-declares it).
 #include "../Core/Plugins/RenderFeatureCompositor.h"
 #include "../Application/EventTranslator.h"
 #include "../Application/EngineCommandDispatch.h"
@@ -42,15 +30,10 @@
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
-// editor-core-separation-7 campaign, PHASE4 - GET /render_graph support
-// (BuildRenderGraphMetadata(), called below inside the existing
-// "IEditorLayer::BuildUI" scoped block).
+// BuildRenderGraphMetadata() for GET /render_graph.
 #include "../Renderer/RenderGraph/RenderGraphMetadata.h"
 
-// GET /get_window's own capture path - floating (undocked) ImGui windows only,
-// by title. ImGuiWindow/ImGui::FindWindowByName() are internal API
-// (imgui_internal.h, not part of ImGui's stable public header) - there is
-// no supported public alternative to resolve a window by its exact title.
+// GET /get_window needs ImGuiWindow and FindWindowByName(), which only imgui_internal.h exposes.
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <backends/imgui_impl_vulkan.h>
@@ -67,10 +50,7 @@ namespace gte {
 
 namespace {
 
-// GET /list_textures' own small, human-readable resolution helpers.
-// Deliberately narrow (only the enumerators/formats this engine's render
-// graph can actually produce today) - an unrecognized regime/format falls
-// back to a safe, clearly-labeled string rather than a crash.
+// GET /list_textures label helpers; an unrecognized regime or format falls back to a safe string.
 const char* ToDebugTextureRegimeString(rg::ExecuteTimingMode mode)
 {
     switch (mode) {
@@ -94,53 +74,21 @@ std::string DebugTextureColorFormatName(VkFormat format)
     return std::string(buffer);
 }
 
-// editor-core-separation-2 campaign, PHASE3
-// (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md) - the ONE real
-// EditorLogQueryCapability instance this engine ships, wired into
-// NetworkServer's constructor below. Pure delegation with no state of its
-// own (mirrors s_editorSceneIOCapability's own identical reasoning) - a
-// single whole-process-lifetime instance is all this needs. Deliberately a
-// NAMESPACE-scope static (not a function-local static declared inside the
-// constructor BODY like s_editorSceneIOCapability below) - its ADDRESS is
-// needed inside EditorHost's own member-INITIALIZER LIST (to construct
-// m_networkServer, since ILogQueryCapability's own wiring destination is
-// NetworkServer's constructor argument list directly, unlike
-// ISceneIOCapability's own EditorHost-owned-member-plus-manual-threading
-// shape - see this phase's own strategy doc, Step 3.5), which runs BEFORE
-// the constructor body - a static declared inside the body would not yet
-// be in scope at that point. Safe as a plain namespace-scope static despite
-// running before main(): this class holds zero data members and its
-// constructor touches no other global, so there is no static-initialization-
-// order risk to guard against.
+// The one log query capability instance. A stateless namespace-scope static: its address is needed in the
+// member-initializer list (for m_networkServer), before the constructor body runs.
 EditorLogQueryCapability s_editorLogQueryCapability;
 
-// editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
-// BIG-STEP 1) - the ONE real EditorHotReloadDebugCapability instance this
-// engine ships, wired into NetworkServer's constructor below AND used
-// directly by the ExecuteEngineCommand() call site (Run()'s own
-// EngineCommandBridge servicing code) for GetSceneSnapshot. Same
-// namespace-scope-static reasoning as s_editorLogQueryCapability
-// immediately above.
+// The one hot reload debug capability instance; used by the network server and by the engine command call site.
 EditorHotReloadDebugCapability s_editorHotReloadDebugCapability;
 
-// editor-core-separation-16 campaign (On-Engine Project Workflow plan,
-// BIG-STEP 2), PHASE3 - the ONE real EditorProjectLifecycleCapability
-// instance this engine ships. Wiring into NetworkServer's constructor and
-// into m_editorLayer (for the "New Project..." ImGui window) is PHASE4's
-// job - this phase only needs the instance to exist and be wireable. Same
-// namespace-scope-static reasoning as s_editorHotReloadDebugCapability
-// immediately above.
+// The one project lifecycle capability instance; a namespace-scope static for the same reason as above.
 EditorProjectLifecycleCapability s_editorProjectLifecycleCapability;
 
 } // namespace
 
 EditorHost::SdlContext::SdlContext()
 {
-    // Must be installed before SDL_Init() - indeed, before literally any
-    // SDL call - see SdlMemoryTracker's own doc comment for why. Mirrors
-    // Application::SdlContext::SdlContext()'s exact precedent
-    // (Application.cpp) verbatim. See AGENTS.md ("CPU Dependency Memory
-    // Tracking").
+    // The memory tracker must be installed before any SDL call, including SDL_Init().
     SdlMemoryTracker::Install();
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -156,202 +104,70 @@ EditorHost::SdlContext::~SdlContext()
 EditorHost::EditorHost(const std::string& title, int width, int height)
     : m_sdlContext()
     , m_window(title, width, height)
-    // m_hostServices has no constructor dependencies of its own (a
-    // stateless adapter) - m_core is constructed injecting m_window (as
-    // ISurfaceProvider&) and m_hostServices (as IHostServices&), both
-    // already fully constructed by this point (matches this class's own
-    // member declaration order, EditorHost.h).
+    // m_core is built from m_window (ISurfaceProvider) and m_hostServices (IHostServices); both exist by now.
     , m_hostServices()
     , m_core(m_window, m_hostServices)
-    // editor-core-separation-1 campaign, PHASE16 - REFERENCE members bound
-    // to m_core's own real, owned instances (mirrors
-    // Application::Application()'s own identical binding, PHASE12/PHASE13).
+    // References bound to m_core's own instances.
     , m_renderer(m_core.GetRenderer())
     , m_renderGraph(m_core.GetRenderGraph())
-    // CreateEditorLayer() (src/Editor/EditorLayer.h) - PHASE9's own rename
-    // (Locked Design Decision #9) means this resolves unambiguously to
-    // ImGuiEditorLayer.cpp's real, ImGui-backed implementation, with
-    // exactly ONE definition of this name anywhere in the link.
+    // CreateEditorLayer() resolves to the ImGui-backed implementation.
     , m_editorLayer(CreateEditorLayer(m_window, m_renderer))
     , m_game(m_core.GetGame())
     , m_engineContext(m_core.GetEngineContext())
-    // network-impl-2 campaign, Phase 3 - hands FrameCaptureBridge's address
-    // into NetworkServer's constructor (a defaulted pointer parameter - see
-    // NetworkServer.h) so its /get_game_view route handler can reach it.
-    // Safe: m_captureBridge is declared (and thus constructed) before
-    // m_networkServer, per EditorHost.h's own member ordering. The four
-    // other bridge addresses mirror Application's own identical precedent.
-    // editor-core-separation-2 campaign, PHASE3 - the sixth argument,
-    // &s_editorLogQueryCapability (this file's own namespace-scope static,
-    // above), so GET /get_logs/POST /clear_logs can reach the real Logger
-    // singleton through the new ILogQueryCapability bridge.
-    // editor-core-separation-8 campaign, PHASE5 - the seventh argument,
-    // &m_renderGraphControlCommandBridge, so the 6 new GET /render_graph/*
-    // routes can reach it.
-    // editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
-    // BIG-STEP 1) - the eighth argument, &s_editorHotReloadDebugCapability,
-    // so every GET/POST /project_assembly/* route can reach it.
-    // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 2), PHASE4 - the ninth argument, &s_editorProjectLifecycleCapability,
-    // so POST /project_assembly/create_project can reach it.
-    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 4), PHASE3 - the tenth argument, &s_editorProjectLifecycleCapability
-    // again (legal - two independently-typed base-sub-object pointers into the
-    // SAME object, see PHASE3's own doc comment for why), so POST
-    // /project_assembly/create_asset can reach it.
+    // The network server gets the bridges and capabilities its routes need; they are declared (and
+    // constructed) before m_networkServer. The lifecycle capability is passed twice via its two bases.
     , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge, &m_frameDebuggerCommandBridge,
           &m_assetImportCommandBridge, &s_editorLogQueryCapability, &m_renderGraphControlCommandBridge,
           &s_editorHotReloadDebugCapability, &s_editorProjectLifecycleCapability, &s_editorProjectLifecycleCapability)
 {
-    // editor-core-separation-1 campaign, PHASE3
-    // (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - installs the ONE real
-    // ILogSink this engine ships into the global sink mechanism
-    // (Core/LogSink.h), FIRST, before anything else in this constructor
-    // body runs (including NetworkServer::Start() below, which can itself
-    // call GTE_LOG_*) - install-once, idempotent.
+    // Installs the real log sink first: everything below, including the network server start, may log.
     gte::InstallLogSink(&gte::LoggerLogSink::Instance());
 
-    // editor-core-separation-25 campaign - installs this session's ONE
-    // pass-debug-metadata sink/provider onto the ONE real, live
-    // RenderGraph this EditorHost owns (m_renderGraph, bound above via
-    // this constructor's own member-initializer list, already fully
-    // constructed by the time this body runs) - mirrors
-    // EditorGpuMemoryNameOverlay::Install()'s own "install this session's
-    // one X" placement precedent, grouped here rather than inside
-    // CreateEditorLayer() because CreateEditorLayer(Window&, Renderer&)
-    // has no RenderGraph& to install onto (see this phase's own strategy
-    // file, task_manager/editor-core-separation-25/
-    // PHASE4_RENDERGRAPH_PRODUCTION_WIRING_AND_EDITOR_INSTALL.md, for the
-    // full reasoning). Safe here regardless of ordering relative to
-    // SetEditorLayerHook() below - RenderGraph::Execute() is never called
-    // during construction of anything this constructor builds, only much
-    // later, from inside Core::BuildFrame() once Run()'s own main loop
-    // starts.
+    // Installs the pass-debug metadata sink and provider here: CreateEditorLayer() has no RenderGraph.
+    // Order is irrelevant: Execute() only runs later, from Core::BuildFrame().
     m_renderGraph.SetDebugMetadataSink(&m_passMetadataRecorder);
     m_renderGraph.SetDebugMetadataProvider(&m_passMetadataRecorder);
 
-    // Per-draw event capture - installs this session's one, stable
-    // FrameDebuggerEventSink instance (owned by m_editorLayer's own Frame
-    // Debugger panel) onto the live RenderGraph, mirroring the two calls
-    // immediately above exactly. Null for NullEditorLayer (a release build).
+    // Installs the per-draw event sink owned by the Frame Debugger panel (null in a release build).
     if (FrameDebuggerEventSink* eventSink = m_editorLayer->FrameDebuggerGetEventSinkForInstall()) {
         m_renderGraph.SetFrameDebuggerEventSink(eventSink);
     }
 
-    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8 - the ONE new
-    // wiring call this whole campaign exists to add: Core::BuildFrame()'s
-    // own render-graph-frame-building hooks (Phase 13) need a genuinely
-    // non-null m_editorLayer from this point onward, forever. The
-    // debug-only assert below exists specifically to catch a future
-    // "forgot/mistyped this exact call, or passed the wrong pointer"
-    // regression immediately at startup.
+    // Core::BuildFrame() needs a non-null editor layer from here on; the assert catches a missed or wrong call at startup.
     assert(m_editorLayer != nullptr && "EditorHost: m_editorLayer must be non-null before SetEditorLayerHook()");
     m_core.SetEditorLayerHook(m_editorLayer.get());
 
-    // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 2), PHASE4 - gives the real ImGui implementation
-    // (ImGuiEditorLayer) a live IProjectLifecycleCapability* so its "New
-    // Project..." window can call CreateNewProjectAssembly() directly. Safe
-    // here: s_editorProjectLifecycleCapability (PHASE3's own namespace-scope
-    // static) already exists via ordinary static initialization, strictly
-    // before this constructor body ever runs.
+    // Gives the editor layer the project lifecycle capability (a namespace-scope static, alive before this body runs).
     m_editorLayer->SetProjectLifecycleCapability(&s_editorProjectLifecycleCapability);
 
-    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 4), PHASE3 - gives the real ImGui implementation
-    // (ImGuiEditorLayer) a live IAssetScaffoldingCapability* so its "Create ->
-    // Render Pass/Compute Shader/Shader Pair" window can call
-    // CreateAssetScaffold() directly. Safe here: same
-    // s_editorProjectLifecycleCapability static already exists via ordinary
-    // static initialization, strictly before this constructor body ever runs -
-    // multiple inheritance means one object, two independently-typed pointers
-    // to its two base sub-objects.
+    // Gives the editor layer the asset scaffolding capability: the same object as the lifecycle capability, via its second base.
     m_editorLayer->SetAssetScaffoldingCapability(&s_editorProjectLifecycleCapability);
 
-    // editor-core-separation-19 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 5), PHASE1 - gives the real ImGui implementation
-    // (ImGuiEditorLayer) a live IHotReloadDebugCapability* so its own
-    // "Project > Compile" menu item can call TriggerCompileOnly()/
-    // IsCompileInFlight() directly. Safe here: s_editorHotReloadDebugCapability
-    // (this same file's own namespace-scope static) already exists via
-    // ordinary static initialization, strictly before this constructor body
-    // ever runs - the exact SAME pointer already passed as m_networkServer's
-    // 8th constructor argument (line 214).
+    // Gives the editor layer the hot reload debug capability (the same object the network server uses).
     m_editorLayer->SetHotReloadDebugCapability(&s_editorHotReloadDebugCapability);
 
-    // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
-    // BIG-STEP 2), PHASE4 - hands EditorHotReloadDebugCapability a live
-    // ProjectAssemblyHost& (via Core::GetProjectAssemblyHost()), strictly
-    // AFTER m_core already exists but BEFORE m_networkServer.Start(8080)
-    // below ever accepts a real HTTP request - see
-    // EditorHotReloadDebugCapability::SetProjectAssemblyHost()'s own doc
-    // comment for the full "why a setter, not a constructor parameter"
-    // reasoning. Placed UNCONDITIONALLY (never inside the
-    // `#if GTE_ENABLE_PROJECT_ASSEMBLIES` guard below) because
-    // Core::m_projectAssemblyHost itself is an unconditional Core member -
-    // only the LoadProjectAssemblies() CALL SITE below is gated.
+    // Hands the debug capability the project assembly host before the network server accepts requests.
+    // Unconditional: Core always owns the host; only the load call below is gated.
     s_editorHotReloadDebugCapability.SetProjectAssemblyHost(m_core.GetProjectAssemblyHost());
 
-    // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 2), PHASE3 - gives ActiveProjectAssemblyState a live
-    // ProjectAssemblyHost& so GetActive()'s own isLoaded field is real, not
-    // always-false. Same "setter, not a constructor parameter" placement as
-    // every capability wiring call immediately above.
+    // Gives the active project state a live ProjectAssemblyHost so its isLoaded field is real.
     ActiveProjectAssemblyState::Instance().SetProjectAssemblyHost(m_core.GetProjectAssemblyHost());
 
-    // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
-    // BIG-STEP 3), PHASE3 - hands EditorHotReloadDebugCapability a live
-    // ProjectAssemblyHotReloadCommandBridge& (m_hotReloadCommandBridge, this
-    // class's own member, already constructed by this point in the
-    // initializer list), so TriggerHotReload() can submit into it. Same
-    // "setter, not a constructor parameter" placement as the call above.
+    // Gives the hot reload capability the hot reload command bridge (already constructed by now).
     s_editorHotReloadDebugCapability.SetHotReloadCommandBridge(m_hotReloadCommandBridge);
 
-    // editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
-    // BIG-STEP 4), PHASE4 - hands EditorHotReloadDebugCapability a live
-    // EngineCommandBridge& (m_commandBridge, EditorHost's own GENERAL
-    // command bridge - already constructed by this point in the
-    // initializer list), so SetProbeHotReloadMarkerValueForTesting() can
-    // submit into it. Same "setter, not a constructor parameter" placement
-    // as the two calls above.
+    // Gives the hot reload capability the general command bridge (already constructed by now).
     s_editorHotReloadDebugCapability.SetEngineCommandBridge(m_commandBridge);
 
-    // editor-core-separation-17 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 3), PHASE3 - hands EditorProjectLifecycleCapability the new
-    // bridge + a live Core&/EditorHost* so OpenProjectAssembly()/
-    // OpenProjectAssemblyOnMainThread() can both do real work. Same "setter,
-    // not a constructor parameter" placement as every capability wiring call
-    // above.
+    // Gives the project lifecycle capability its load bridge and live Core/EditorHost references.
     s_editorProjectLifecycleCapability.SetLoadCommandBridge(m_projectLifecycleLoadCommandBridge);
     s_editorProjectLifecycleCapability.SetEngineReferences(m_core, this);
 
-    // editor-core-separation-1 campaign, PHASE16 - hands Core the ONE
-    // callback that actually calls IEditorLayer::Render(cmd) - an explicitly
-    // HOST-LEVEL IEditorLayer method (Locked Design Decision #8's second
-    // bucket) that EditorHost (not Core) must keep calling directly against
-    // its own m_editorLayer. This lambda captures `this` (EditorHost's own
-    // `this`, never Core's), so the real call still textually happens here
-    // - Core merely stores/forwards this std::function value, never calling
-    // IEditorLayer::Render() itself. Mirrors Application's own identical
-    // wiring exactly (PHASE13) - set once, since this callback's own
-    // behavior never varies frame-to-frame.
+    // Core only stores this callback; the editor's own Render(cmd) is still called from here, on EditorHost.
     m_core.SetPresentImGuiRecorder([this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); });
 
-    // editor-core-separation-3 campaign, PHASE4
-    // (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) - seeds
-    // EditorPanelRegistry with every built-in panel name BEFORE any plugin
-    // panel is ever registered (so AllNames()'s own registration order
-    // always lists every built-in panel first, plugins after) - this exact
-    // literal list must match EditorPanelCatalog.h's own former
-    // kKnownEditorPanelNames[] content byte-for-byte (confirmed before this
-    // file was deleted by this same phase).
-    //
-    // editor-core-separation-6 campaign, PHASE3
-    // (PHASE3_EDITOR_PANEL_ORCHESTRATOR_MIGRATION.md) - moved to run BEFORE
-    // Core::LoadPlugins() (below), not after, so the "built-ins first"
-    // invariant still holds now that EditorPanelCapabilityOrchestrator
-    // registers every plugin panel automatically INSIDE
-    // Core::LoadPlugins() itself (Locked Design Decision #6).
+    // Seeds the panel registry with every built-in panel name before any plugin panel registers,
+    // so built-ins always list first. The list must match the panel catalog.
     EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Hierarchy");
     EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Inspector");
     EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Scene");
@@ -365,65 +181,27 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Project");
 #endif
 
-    // better-render-pass-2 campaign, PHASE2
-    // (PHASE2_DISABLE_RUNTIME_CALL_SITES.md) - this used to be
-    // `#if GTE_ENABLE_PLUGINS m_core.LoadPlugins(gte::ExecutableDirectory() /
-    // "plugins"); #endif`, the one call site that ever scanned plugins/ at
-    // runtime. Deleted outright (Decision D2, PHASE0_MASTER_STRATEGY.md
-    // Section 2.4) - this is purely "never invoke it again". PHASE3
-    // (PHASE3_DELETE_ABI_HOST_CODE.md) has since deleted Core::LoadPlugins()
-    // and PluginHost themselves outright too. Confirmed harmless:
-    // RenderFeatureCompositor (the one orchestrator Project Assembly
-    // actually depends on) never needed OnPluginsLoaded() to run in the
-    // first place.
-
-    // editor-core-separation-11 campaign (Project Assembly system), PHASE5 -
-    // loaded exactly once, here, at EditorHost construction time, mirroring
-    // Core::LoadPlugins()'s own call immediately above. Deliberately its OWN,
-    // separate scan (GTE_PROJECT_ASSEMBLY_OUTPUT_DIR's own runtime folder,
-    // "<exe dir>/project_assemblies/" - NEVER "<exe dir>/plugins/") - the two
-    // coexisting systems must never be confused for one another. `this`
-    // (EditorHost) is passed as the live gte::EditorHost& every loaded
-    // "*_Editor.dll" receives. Gated by GTE_ENABLE_PROJECT_ASSEMBLIES - its
-    // OWN flag, never GTE_ENABLE_PLUGINS (PHASE0_MASTER_STRATEGY.md, Finding
-    // D).
+    // Project assemblies load once, from their own output folder (never "plugins/"); `this` is the EditorHost
+    // every "*_Editor.dll" receives. Gated by GTE_ENABLE_PROJECT_ASSEMBLIES.
 #if GTE_ENABLE_PROJECT_ASSEMBLIES
     m_core.LoadProjectAssemblies(ResolveProjectAssemblyOutputDirectory(gte::ExecutableDirectory()), this);
 #endif
 
-    // Constructed after every RegisterBuiltinPanelName() call above, then
-    // bound as plugin panels - preserves the "built-ins first, plugins
-    // after" EditorPanelRegistry order. Generic: EditorHost never names a
-    // concrete built-in feature module (see BuiltinFeatureModuleRegistry.h).
+    // Created after every built-in panel name is registered, so plugin panels come after built-ins.
+    // EditorHost never names a concrete feature module.
     m_builtinFeatureModules = BuiltinFeatureModuleRegistry::Instance().CreateAll(m_core);
     m_editorLayer->AttachBuiltinFeatureModules(m_builtinFeatureModules, m_renderer, m_renderGraph);
 
-    // editor-core-separation-1 campaign, PHASE16 - wires the ONE real
-    // ISceneIOCapability implementation this engine ships
-    // (Editor/EditorSceneIOCapability.h) into the nullable pointer
-    // EngineCommandDispatch.cpp (Core-destined, always-compiled) consults at
-    // runtime. This is the PERMANENT home for this wiring (Application's own
-    // SetSceneIOCapability()-based version, PHASE5/PHASE6, was explicitly
-    // documented as temporary). A function-local `static` (mirrors
-    // LoggerLogSink::Instance()'s own Meyers-singleton precedent) -
-    // EditorSceneIOCapability is pure delegation with no state of its own,
-    // so one whole-process-lifetime instance is all this needs.
+    // Scene IO for the engine command dispatch. Stateless delegation, so one process-lifetime instance is enough.
     static EditorSceneIOCapability s_editorSceneIOCapability;
     m_sceneIOCapability = &s_editorSceneIOCapability;
 
 #if GTE_ENABLE_NETWORK
-    // Loopback-only (127.0.0.1 is baked into NetworkServer itself - Start()
-    // deliberately has no host parameter, see Phase 2), port 8080 - see
-    // AGENTS.md, "Networking". A bind failure (e.g. another instance of the
-    // engine already running and holding port 8080) is logged by
-    // NetworkServer itself and is NON-FATAL - the rest of EditorHost still
-    // starts normally either way.
+    // Loopback only, port 8080. A bind failure (e.g. another instance running) is logged by the server and is non-fatal.
     m_networkServer.Start(8080);
 #endif
 
-    // logger-1 campaign, Phase 2 - proves GTE_LOG_* is reachable, right
-    // after every other subsystem (including the network server, above) is
-    // already constructed/started.
+    // Proves logging is reachable once every other subsystem is up.
     GTE_LOG_INFO("EditorHost",
         "EditorHost constructed: SdlContext -> Window -> Core -> CreateEditorLayer() -> "
         "Core::SetEditorLayerHook() all completed, with a genuinely non-null IEditorLayer*, "
@@ -438,48 +216,22 @@ EditorHost::~EditorHost()
 
 int EditorHost::Run()
 {
-    // editor-core-separation-1 campaign, PHASE16
-    // (PHASE16_EDITORHOST_MAIN_LOOP_AND_AUTOMATION_BRIDGES.md) - the REAL
-    // main loop, copied byte-for-byte (member names/order preserved) from
-    // Application::Run()'s own post-PHASE13 shape (see
-    // PHASE13_COMPLETION_REPORT.md for the full itemized accounting of
-    // which IEditorLayer call sites live here, host-level, versus inside
-    // Core::BuildFrame()). This REPLACES PHASE15's own deliberate, temporary
-    // stub - EditorHost is now FULLY functionally equivalent to the old
-    // Application-based executable.
     bool running = true;
-    // Identifies EditorHost's own main game window among possibly several
-    // real SDL windows (once Dear ImGui's multi-viewport feature creates
-    // extra ones for panels dragged outside it) - see the mainWindowId doc
-    // comment on EventTranslator::Translate(). Fetched once: an SDL window's
-    // ID never changes over its lifetime.
+    // Identifies this host's window among the SDL windows ImGui multi-viewport may create; an SDL window ID never changes.
     const Uint32 mainWindowId = m_window.Id();
     Uint64 lastTicksNs = SDL_GetTicksNS();
 
     InputState inputState;
 
     while (running) {
-        // Brackets the WHOLE frame for the Profiling module (src/Profiling/)
-        // - see PROFILER_STRATEGY_v2.md, Phase 1. A true no-op (frame count
-        // doesn't advance) whenever GTE_ENABLE_PROFILER is off or the
-        // runtime capture-enabled flag is false - see
-        // Profiling::FrameProfiler.
+        // Brackets the whole frame for the profiler; a no-op while profiling is disabled.
         Profiling::FrameProfiler::Instance().BeginFrame();
 
-        // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - the
-        // runtime layer of GpuTimingService's two-layer on/off gate (see
-        // AGENTS.md, "Profiling", and Renderer::SetGpuTimingCaptureEnabled()'s
-        // own doc comment): reuses the Editor's EXISTING "Capture" checkbox
-        // rather than adding a new, Profiler-panel-specific control.
+        // GPU timing follows the editor's "Capture" checkbox, for the renderer and for the graph's own timestamp pool.
         m_renderer.SetGpuTimingCaptureEnabled(Profiling::FrameProfiler::Instance().IsCaptureEnabled());
-        // B.1 (B1_REAL_GPU_TIMING_STRATEGY_v1.md) - the same runtime toggle,
-        // now ALSO applied to the render graph's own, independent
-        // RenderGraphTimestampPool.
         m_renderGraph.SetGpuTimingCaptureEnabled(Profiling::FrameProfiler::Instance().IsCaptureEnabled());
 
-        // Event snapshot capture (Frame Debugger per-pass preview) is gated
-        // the same way: only pay the vkCmdCopyImage2 cost while the Frame
-        // Debugger itself is enabled, never unconditionally in every build.
+        // Event snapshot capture (per-pass preview) costs a copy, so it runs only while the Frame Debugger is enabled.
         m_renderGraph.SetEventSnapshotCaptureEnabled(m_editorLayer->FrameDebuggerGetState().enabled);
 
         // Clear last frame's transient "just pressed/released" flags and
@@ -490,10 +242,7 @@ int EditorHost::Run()
             GTE_PROFILE_SCOPE("EditorHost::PollEvents");
             SDL_Event sdlEvent;
             while (SDL_PollEvent(&sdlEvent)) {
-                // Editor gets first look at every raw event (its own SDL3
-                // backend tracks mouse/keyboard for ImGui widgets). HOST-LEVEL
-                // (Locked Design Decision #8's second bucket) - stays
-                // directly on m_editorLayer, never routed through Core.
+                // The editor sees every raw event first, directly (never through Core).
                 m_editorLayer->ProcessEvent(sdlEvent);
 
                 const std::optional<Event> event = EventTranslator::Translate(sdlEvent, mainWindowId);
@@ -506,25 +255,13 @@ int EditorHost::Run()
                 } else if (event->type == EventType::WindowResized) {
                     const auto& resized = std::get<WindowResizedEventData>(event->data);
                     m_renderer.OnResize(resized.width, resized.height);
-                    // editor-core-separation-1 campaign, PHASE13 - keeps
-                    // Core's own present-regime "no Game/Scene panel
-                    // visible, render Game directly to swapchain" fallback
-                    // aspect-ratio computation correct across a live resize
-                    // - see Core::NotifyWindowResized()'s own doc comment.
+                    // Keeps Core's direct-to-swapchain fallback aspect ratio correct across a live resize.
                     m_core.NotifyWindowResized(resized.width, resized.height);
-                    // Keeps the Editor's Game-view RenderTexture tracking the
-                    // window's size (no-op in a release build) - see
-                    // ImGuiEditorLayer::OnWindowResized.
+                    // Keeps the Game-view RenderTexture tracking the window size (no-op in a release build).
                     m_editorLayer->OnWindowResized(resized.width, resized.height);
                 }
 
-                // Withhold mouse/keyboard events the Editor UI itself wants this
-                // frame (e.g. the cursor is over an ImGui panel, a slider is
-                // being dragged, a text field has keyboard focus, ...) from
-                // ever reaching gameplay - otherwise clicking/typing into the
-                // Editor's own panels would ALSO register as gameplay input
-                // underneath them (the classic ImGui-in-a-game-engine
-                // "click-through" problem).
+                // Events the editor UI wants (cursor over a panel, focused text field) must not reach gameplay.
                 const bool isMouseEvent = event->type == EventType::MouseMoved
                     || event->type == EventType::MouseButtonDown
                     || event->type == EventType::MouseButtonUp
@@ -541,11 +278,7 @@ int EditorHost::Run()
             }
         }
 
-        // network-impl-3 campaign (task_manager/network-impl-3/) - drains at
-        // most ONE pending network-issued engine command
-        // (instantiate_primitive/delete_entity) per frame, as EARLY as
-        // possible - right after input polling, BEFORE Game::Update()/
-        // Physics/Animation run this frame.
+        // Drains at most one network engine command per frame, right after input and before Game::Update().
         if (const std::optional<EngineCommandRequest> request = m_commandBridge.TryPeekPendingCommandRequest()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteEngineCommand");
             const EngineCommandResult result = ExecuteEngineCommand(m_game, m_renderer, m_sceneIOCapability,
@@ -553,34 +286,13 @@ int EditorHost::Run()
             m_commandBridge.FulfillCommand(result);
         }
 
-        // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
-        // BIG-STEP 3), PHASE3 - drained at most once per frame, exactly like the
-        // existing EngineCommandBridge block immediately above. Unlike that
-        // bridge, servicing this request BLOCKS this same thread for the ENTIRE
-        // duration of PerformProjectAssemblyHotReload() once PHASE4 replaces its
-        // temporary body (LDD-HR4) - this is intentional: the whole point of this
-        // feature is a hard, synchronous freeze. No other per-frame work below
-        // this point runs until it returns.
+        // Hot reload: at most once per frame, and it blocks this thread until done (a deliberate hard freeze).
         if (const std::optional<std::string> requestedProject = m_hotReloadCommandBridge.TryPeekPendingProjectName()) {
             GTE_PROFILE_SCOPE("EditorHost::PerformProjectAssemblyHotReload");
-            // Resolved HERE, on the main thread (gte_editor-tier - this file already
-            // includes ProjectRootPath.h/ProjectAssemblyBuildRunner.h for its own
-            // LoadProjectAssemblies() call above), and passed into the orchestrator
-            // as plain std::filesystem::path VALUES - PerformProjectAssemblyHotReload()
-            // itself lives in src/Core/Plugins/ (gte_core-tier, see that header's own
-            // doc comment) and must NEVER call gte::ExecutableDirectory() itself
-            // (gte_editor-tier, defined only in ProjectRootPath.cpp) - see
-            // PHASE0_MASTER_STRATEGY.md, Section 2.2 item 6, for the full layering
-            // hazard this avoids.
+            // Paths are resolved here (editor tier) and passed by value: the Core-tier orchestrator must not call ExecutableDirectory().
             const std::filesystem::path outputDirectory = ResolveProjectAssemblyOutputDirectory(gte::ExecutableDirectory());
             const std::filesystem::path buildDirectory = ResolveCMakeBuildDirectory(gte::ExecutableDirectory());
-            // editor-core-separation-15 campaign (Project Assembly Hot Reload
-            // plan, BIG-STEP 4), PHASE1 - resolved HERE for the exact same
-            // reason outputDirectory/buildDirectory are: this file is
-            // gte_editor-tier (already includes ProjectRootPath.h - confirmed,
-            // this translation unit's own #include list), and
-            // PerformProjectAssemblyHotReload() itself is gte_core-tier and
-            // must never resolve this path internally.
+            // Resolved here for the same reason: the Core-tier orchestrator must not resolve paths itself.
             const std::filesystem::path projectRootDirectory = ResolveProjectRootDirectory();
             PerformProjectAssemblyHotReload(*requestedProject, m_core, m_renderer, this, outputDirectory, buildDirectory, projectRootDirectory);
             m_hotReloadCommandBridge.FulfillPending();
@@ -590,53 +302,34 @@ int EditorHost::Run()
         const double deltaSeconds = static_cast<double>(nowTicksNs - lastTicksNs) / 1000000000.0;
         lastTicksNs = nowTicksNs;
 
-        // frame-debugger-1 campaign, PHASE4 - read the Editor's own Pause/Step
-        // toolbar state (see PHASE3's IEditorLayer::IsPlaybackPaused()/
-        // TryConsumeStepRequest()) - HOST-LEVEL (Locked Design Decision #8's
-        // second bucket).
+        // Reads the toolbar Pause/Step state. The step request is consumed every frame so a stale one never lingers.
         const bool playbackPaused = m_editorLayer->IsPlaybackPaused();
-        // Deliberately called EVERY frame, unconditionally (never short-circuited
-        // by `playbackPaused &&`) so a stray/stale pending step request can never
-        // linger un-cleared.
         const bool stepRequestedRaw = m_editorLayer->TryConsumeStepRequest();
         const bool steppedThisFrame = playbackPaused && stepRequestedRaw;
 
-        // task_manager/frame-debugger-3 campaign, PHASE3 - records "a Step
-        // happened this frame" for the Frame Debugger's own later use -
-        // HOST-LEVEL, stays directly on m_editorLayer.
+        // Tells the Frame Debugger a Step happened this frame.
         if (steppedThisFrame) {
             m_editorLayer->NotifyFrameDebuggerStepConsumed();
         }
 
-        // editor-core-separation-1 campaign, PHASE13 - advances Time
-        // (respecting the already-resolved Pause/Step booleans above) and
-        // dispatches Game::Update().
+        // Advances time (honoring Pause/Step) and runs Game::Update().
         InputFrame inputFrame;
         inputFrame.inputState = &inputState;
         inputFrame.playbackPaused = playbackPaused;
         inputFrame.stepRequested = stepRequestedRaw;
         m_core.Update(inputFrame, static_cast<float>(deltaSeconds));
 
-        // logger-1 campaign, Phase 2 - stamps every Logger entry recorded
-        // from here until the next Advance() (now inside Core::Update()
-        // above) with THIS frame's number. Safe to call unconditionally -
-        // this call itself never touches m_editorLayer, so it stays here
-        // directly on EditorHost rather than moving into Core (Core must
-        // never #include Editor/Logger.h).
+        // Stamps log entries until the next Advance() with this frame's number; lives here because Core must not include Logger.h.
         gte::Logger::SetCurrentFrame(m_engineContext.time.FrameCount());
 
         m_editorLayer->NewFrame();
 
-        // network-impl-7 campaign - drains at most ONE pending
-        // GET /activate_tab request per frame, IMMEDIATELY after
-        // NewFrame() and BEFORE BuildUI().
+        // Drains at most one pending GET /activate_tab request per frame, after NewFrame() and before BuildUI().
         if (const std::optional<EditorUiCommandRequest> uiRequest = m_uiCommandBridge.TryPeekPendingCommandRequest()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteEditorUiCommand");
             EditorUiCommandResult uiResult;
             uiResult.kind = uiRequest->kind;
-            // GPU-Driven Frustum Culling + Indirect Draw campaign
-            // (render-pass-5), PHASE6 - a second EditorUiCommandKind now
-            // exists (SpawnGpuDrivenTestBatch).
+            // Two command kinds: spawn a GPU-driven test batch, or activate a tab.
             if (uiRequest->kind == EditorUiCommandKind::SpawnGpuDrivenTestBatch) {
                 const GpuDrivenTestBatchSpawnResult spawned = m_editorLayer->SpawnGpuDrivenTestBatch(m_game, m_renderer,
                     uiRequest->spawnGpuDrivenTestBatch.instanceCount, m_core.GetSceneServicesDescriptorSet().Layout());
@@ -652,10 +345,7 @@ int EditorHost::Run()
             m_uiCommandBridge.FulfillCommand(uiResult);
         }
 
-        // task_manager/frame-debugger-3 campaign, PHASE7 - drains at most
-        // ONE pending Frame Debugger command per frame, at the SAME point in
-        // the loop EditorUiCommandBridge's own pump immediately above
-        // already runs.
+        // Drains at most one pending Frame Debugger command per frame, right after the UI command pump.
         if (const std::optional<FrameDebuggerCommandRequest> fdRequest =
                 m_frameDebuggerCommandBridge.TryPeekPendingCommandRequest()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteFrameDebuggerCommand");
@@ -728,21 +418,7 @@ int EditorHost::Run()
                 if (!applied) {
                     rgcResult.errorMessage = "\"" + rgcRequest->setPassEnabled.name + "\" cannot be disabled (deny-listed).";
                 } else {
-                    // editor-core-separation-21 campaign, PHASE2
-                    // (PHASE2_FIX_AERIAL_PERSPECTIVE_COMPOSITE_TOGGLE_LIE.md) -
-                    // this mutation runs BEFORE BuildUI() even starts this
-                    // frame (see this loop's own placement, above
-                    // m_editorLayer->BuildUI() further down), so it cannot
-                    // use RenderGraphPanel::Build()'s own same-frame
-                    // EditorContext flag (see that flag's own doc comment,
-                    // EditorContext.h) - it tells the Frame Debugger directly
-                    // instead, exactly like FrameDebuggerCommandKind::CaptureNow
-                    // above already does: a safe no-op (returns false,
-                    // ignored here) whenever the Frame Debugger isn't
-                    // currently Enabled, otherwise arms one fresh capture for
-                    // the next frame - fixes PHASE1_COMPLETION_REPORT.md's
-                    // confirmed root cause for this, the HTTP-driven mutation
-                    // path.
+                    // Runs before BuildUI(), so tell the Frame Debugger directly (no-op unless it is enabled).
                     m_editorLayer->FrameDebuggerCaptureNow();
                 }
                 break;
@@ -799,8 +475,7 @@ int EditorHost::Run()
             m_renderGraphControlCommandBridge.FulfillCommand(rgcResult);
         }
 
-        // task_manager/stl-parser-2, PHASE1 - drains at most ONE pending
-        // /import_asset request per frame.
+        // Drains at most one pending /import_asset request per frame.
         if (const std::optional<AssetImportCommandRequest> importRequest =
                 m_assetImportCommandBridge.TryPeekPendingCommandRequest()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteAssetImportCommand");
@@ -825,13 +500,7 @@ int EditorHost::Run()
             m_assetImportCommandBridge.FulfillCommand(importResult);
         }
 
-        // editor-core-separation-17 campaign (On-Engine Project Workflow plan,
-        // BIG-STEP 3), PHASE3 - drains at most ONE pending Tier-3 "Open Project"
-        // load request per frame, submitted ONLY by
-        // EditorProjectLifecycleCapability::OpenProjectAssembly() (the
-        // network-thread-facing method) - the ImGui-facing
-        // OpenProjectAssemblyOnMainThread() never reaches this bridge at all (see
-        // PHASE0_MASTER_STRATEGY.md, Section 2.2).
+        // Drains at most one pending "Open Project" load request per frame (submitted from the network thread).
         if (const std::optional<LoadProjectAssemblyCommandRequest> loadRequest =
                 m_projectLifecycleLoadCommandBridge.TryPeekPendingCommandRequest()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteProjectLifecycleLoad");
@@ -846,32 +515,20 @@ int EditorHost::Run()
             m_projectLifecycleLoadCommandBridge.FulfillCommand(loadResult);
         }
 
-        // Clears last frame's queued Submit() draw items before Game gets a
-        // chance to queue this frame's - see Renderer::BeginFrame().
+        // Clears last frame's queued Submit() draws before Game queues this frame's.
         m_renderer.BeginFrame();
 
-        // editor-core-separation-1 campaign, PHASE13 - the REAL per-frame
-        // Render Graph orchestration now lives entirely inside
-        // Core::BuildFrame().
+        // Builds the frame's render graph.
         m_core.BuildFrame();
 
-        // network-impl-2 campaign, Phase 3 - the FrameCaptureBridge
-        // fast-fail + success-path capture for the Game View - a HOST-LEVEL
-        // AUTOMATION concern (design doc Section 6.1) that stays here,
-        // running right AFTER BuildFrame() returns (safe: BuildFrame()
-        // already fence-waited internally before returning).
+        // Game View capture: host-level automation, safe after BuildFrame() because it already fence-waited.
         RenderTexture* gameTargetThisFrame = m_core.GetGameViewTargetThisFrame();
         if (gameTargetThisFrame == nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
             m_captureBridge.FailPendingRequest(FrameCaptureKind::GameView, FrameCaptureFailureReason::TargetNotAvailable);
         }
         if (gameTargetThisFrame != nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
-            // Always capture the real Game View target - the render graph's
-            // PostComposite blend chain (Core::Plugins/RenderFeatureCompositor)
-            // always fully resolves every registered feature's contribution
-            // back into THIS texture. A per-feature "*Composited" side
-            // texture only reflects that ONE feature's own early position in
-            // the chain - it goes stale once any later feature runs, so it
-            // must never be treated as "the final frame" here.
+            // Capture the real Game View target: the PostComposite chain resolves every feature into it,
+            // while a per-feature "*Composited" texture goes stale once a later feature runs.
             Renderer::CapturedRawPixels raw = m_renderer.CaptureRenderTexturePixels(*gameTargetThisFrame);
             if (Encoding::IsBgraFormat(raw.format)) {
                 Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
@@ -881,85 +538,43 @@ int EditorHost::Run()
                 CapturedPngImage{ std::move(png), raw.width, raw.height });
         }
 
-        // Build every editor panel (Hierarchy/Inspector/Scene/Game/Memory/menu
-        // bar) now that the Game/Scene view textures (if any) have this
-        // frame's contents. HOST-LEVEL (Locked Design Decision #8's second
-        // bucket) - stays directly on m_editorLayer.
+        // Builds every editor panel now that the view textures hold this frame's contents.
         {
             GTE_PROFILE_SCOPE("IEditorLayer::BuildUI");
-            // editor-core-separation-6 campaign, PHASE7
-            // (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - mirrors
-            // m_core.GetGpuDrivenBatchDebugInfo()'s own exact "computed here,
-            // passed as a plain trailing argument" precedent immediately
-            // below: null-checked, since GetRenderFeatureCompositor() can, in
-            // principle, be null (see Core.h's own doc comment) even though
-            // RegisterBuiltinCapabilityOrchestrators() always registers one
-            // today.
+            // The compositor may be null; the debug snapshot is computed here and passed to BuildUI().
             const RenderFeatureCompositor* renderFeatureCompositor = m_core.GetRenderFeatureCompositor();
             const std::vector<RenderFeatureDebugEntry> renderFeatureEntries =
                 renderFeatureCompositor != nullptr ? renderFeatureCompositor->DebugSnapshot()
                                                     : std::vector<RenderFeatureDebugEntry>{};
             m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph,
                 m_core.GetGpuDrivenBatchDebugInfo(), renderFeatureEntries,
-                // editor-core-separation-8 campaign, PHASE3 - 2 new trailing
-                // arguments. NOTE: deliberately calling
-                // m_core.GetRenderFeatureCompositor() a SECOND, fresh time
-                // here rather than reusing the `renderFeatureCompositor`
-                // local declared a few lines above - that local is typed
-                // `const RenderFeatureCompositor*` (its own declared type
-                // never changed; only Core::GetRenderFeatureCompositor()'s
-                // OWN return type widened in PHASE2) and would not compile
-                // against BuildUI()'s new plain (non-const)
-                // `RenderFeatureCompositor*` parameter. This second call is
-                // cheap (Core.h's own noexcept accessor just returns an
-                // already-cached pointer).
+                // The mutable compositor is fetched again: the const local above does not fit BuildUI()'s parameter.
                 m_core.GetRenderPassToggleRegistryMutable(), m_core.GetRenderFeatureCompositor(),
-                // editor-core-separation-22 campaign, PHASE6
-                // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3
-                // item 2) - the new, LAST trailing argument, feeding
-                // Panels/FrameDebuggerPanel.cpp's own new Clause C detector.
                 m_core.GetOffscreenBlackboardForFrameDebugger(),
-                // Stage 2 (Universal Lit Shader) - Core's real
-                // SceneServicesDescriptorSet::Layout(), threaded into every
-                // Editor-side spawn path reached from BuildUI().
+                // Layout threaded into every editor spawn path reached from BuildUI().
                 m_core.GetSceneServicesDescriptorSet().Layout());
 
-            // editor-core-separation-7 campaign, PHASE4 - GET /render_graph
-            // support. Reuses renderFeatureEntries (still in scope here) so
-            // RenderFeatureCompositor::DebugSnapshot() is never called a
-            // second time this Run() iteration (PHASE0_MASTER_STRATEGY.md's
-            // Locked Design Decision #7). Independent of RenderGraphPanel's
-            // own "Pause" checkbox - always the truly latest frame's real
-            // data (Locked Design Decision #9).
+            // GET /render_graph data: reuses renderFeatureEntries and ignores the panel's Pause checkbox (always the latest frame).
             m_captureBridge.PublishRenderGraphMetadata(rg::BuildRenderGraphMetadata(
                 m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback),
                 m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback),
                 m_core.GetGpuDrivenBatchDebugInfo(), renderFeatureEntries));
         }
 
-        // File > Exit (or any other future programmatic "close" UI action)
-        // ends the loop exactly like a Quit event/closing the OS window.
+        // File > Exit and other programmatic close actions end the loop like a Quit event.
         if (m_editorLayer->WantsExit()) {
             running = false;
         }
 
-        // network-impl-2 campaign, Phase 5 - must run BEFORE Core::Present()
-        // below so SwapchainCaptureService::RecordCaptureIfRequested() sees
-        // m_captureRequested == true in time this frame.
+        // Must run before Present() so the swapchain service sees the capture request this frame.
         if (m_captureBridge.IsCaptureRequested(FrameCaptureKind::Swapchain)) {
             m_renderer.RequestSwapchainCapture();
         }
 
-        // editor-core-separation-1 campaign, PHASE13 - Call 2 of 2: the
-        // PIPELINED swapchain-present regime, now entirely inside
-        // Core::Present().
+        // Pipelined swapchain present.
         m_core.Present();
 
-        // network-impl-2 campaign, Phase 5 - the FrameCaptureBridge
-        // success-path capture for the swapchain - HOST-LEVEL AUTOMATION,
-        // running right AFTER Present() returns (safe - Present()'s own
-        // Renderer::PresentViaRenderGraph() call already fence-waits before
-        // returning).
+        // Swapchain capture success path; safe here because Present() already fence-waited.
         if (std::optional<CapturedSwapchainPixels> raw = m_renderer.TakeLastCompletedSwapchainCapture()) {
             if (Encoding::IsBgraFormat(raw->format)) {
                 Encoding::ConvertBgraToRgbaInPlace(raw->pixels.data(), raw->width, raw->height);
@@ -969,15 +584,10 @@ int EditorHost::Run()
                 CapturedPngImage{ std::move(png), raw->width, raw->height });
         }
 
-        // Update/present any panel the user has dragged outside the main OS
-        // window (Dear ImGui multi-viewport/"platform windows" - a no-op in
-        // a release build, see NullEditorLayer::RenderPlatformWindows()).
+        // Presents panels dragged outside the main OS window (no-op in a release build).
         m_editorLayer->RenderPlatformWindows();
 
-        // GET /get_window's own capture path - floating (undocked) ImGui
-        // windows only, by title. Must run AFTER RenderPlatformWindows() above:
-        // that call is what actually submits+presents a floating window's
-        // own separate swapchain image this frame.
+        // GET /get_window: floating (undocked) windows only. Must follow RenderPlatformWindows(), which presents them.
         if (m_captureBridge.IsCaptureRequested(FrameCaptureKind::NamedWindow)) {
             const std::string title = m_captureBridge.RequestedWindowTitle();
             ImGuiWindow* window = ImGui::FindWindowByName(title.c_str());
@@ -986,9 +596,7 @@ int EditorHost::Run()
                 : nullptr;
 
             if (platformWindow == nullptr || platformWindow->Swapchain == VK_NULL_HANDLE) {
-                // Either the title is wrong, or this window is still docked
-                // into the main viewport - fail fast instead of waiting out
-                // a timeout; the caller should use /get_swapchain instead.
+                // Wrong title or still docked: fail fast; the caller should use /get_swapchain.
                 m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedWindow, FrameCaptureFailureReason::TargetNotAvailable);
             } else {
                 const ImGui_ImplVulkanH_Frame& frame = platformWindow->Frames[platformWindow->FrameIndex];
@@ -997,12 +605,7 @@ int EditorHost::Run()
                 const rg::ResourceState presentState{
                     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_NONE };
 
-                // This backbuffer is only queued this frame (ImGui's own
-                // fence-wait happens at the START of its NEXT frame), and it
-                // is not tracked by the render graph's barrier planner - so,
-                // same as the NamedTexture capture above, a full device
-                // stall is the only correct option for this one-shot,
-                // user/AI-driven debug readback.
+                // The backbuffer is only queued and untracked by the barrier planner, so a full device stall is the only safe readback.
                 m_renderer.WaitForGpuIdle();
                 const Renderer::CapturedRawPixels raw = m_renderer.CaptureImagePixels(
                     frame.Backbuffer, VK_IMAGE_ASPECT_COLOR_BIT, platformWindow->SurfaceFormat.format, extent, presentState);
@@ -1021,11 +624,7 @@ int EditorHost::Run()
             }
         }
 
-        // network-impl-4 campaign, Phase 4 - GET /get_texture's own capture
-        // path. Placed here (unconditionally, once per Run() iteration,
-        // AFTER every render-graph Execute() call this frame) so
-        // RenderGraph::DebugTextureSnapshotFor() sees the freshest possible
-        // registry state.
+        // GET /get_texture capture: runs after every graph Execute() so the texture snapshot is the freshest.
         if (m_captureBridge.IsCaptureRequested(FrameCaptureKind::NamedTexture)) {
             const std::string requestedName = m_captureBridge.RequestedTextureName();
             const DebugTextureChannel requestedChannel = m_captureBridge.RequestedTextureChannel();
@@ -1033,33 +632,13 @@ int EditorHost::Run()
             if (const std::optional<rg::DebugTextureSnapshot> snapshot = m_renderGraph.DebugTextureSnapshotFor(requestedName)) {
                 const bool wantsDepth = (requestedChannel == DebugTextureChannel::Depth);
                 if (wantsDepth && !snapshot->hasDepth) {
-                    // Positively known, permanent-for-this-registration failure -
-                    // fail fast (409) rather than waiting out the full timeout.
+                    // Known permanent failure: fail fast (409) instead of waiting out the timeout.
                     m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
                 } else if (!wantsDepth && snapshot->target.image == VK_NULL_HANDLE) {
-                    // better-render-pass-3 campaign, BLOCK2 PHASE4 (Arbitrary
-                    // Render Views) - the mirror-image gap of the check
-                    // immediately above, found live during this phase's own
-                    // verification: a genuinely colorless (depth-only,
-                    // RenderTexture::createColorImage == false) registered
-                    // texture's target.image stays VK_NULL_HANDLE for its
-                    // whole lifetime (see RenderTexture.h). The default/
-                    // explicit "color" channel request against one of these
-                    // used to fall straight through to the capture path
-                    // below and call vkCmdCopyImageToBuffer() against a
-                    // VK_NULL_HANDLE image - a real, confirmed, reproducible
-                    // ENGINE CRASH (see
-                    // task_manager/better-render-pass-4/PHASE4_COMPLETION_REPORT.md
-                    // for the live repro). A positively known, permanent-
-                    // for-this-registration failure, so fail fast instead of
-                    // crashing or waiting out the full timeout.
+                    // A colorless (depth-only) texture never has a color image: copying it would crash, so fail fast.
                     m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
                 } else {
-                    // PHASE0_MASTER_STRATEGY.md's (network-impl-4 campaign)
-                    // Locked Design Decision 4 - computed BEFORE
-                    // WaitForGpuIdle()/the readback below, from the snapshot
-                    // as it was at the moment this request was actually
-                    // serviced.
+                    // Measured before the GPU idle, from the snapshot as it was when the request was serviced.
                     const std::uint64_t framesSinceUpdate =
                         m_renderGraph.CurrentDebugTextureFrameCounter() - snapshot->lastUpdatedFrameCounter;
 
@@ -1074,20 +653,14 @@ int EditorHost::Run()
                         m_renderer.CaptureImagePixels(image, aspect, format, FromVkExtent2D(snapshot->target.extent), state);
 
                     if (raw.pixels.empty()) {
-                        // BytesPerTexelForFormat() didn't recognize `format` -
-                        // fail cleanly instead of encoding a garbage buffer.
+                        // Unrecognized format: fail cleanly instead of encoding garbage.
                         m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
                     } else {
                         std::vector<std::uint8_t> converted;
                         const std::uint8_t* encodePixels = raw.pixels.data();
                         bool ok = true;
                         if (wantsDepth) {
-                            // Safe to write in-place into the SAME buffer it
-                            // reads from - every pixel's 4 input bytes are
-                            // fully read into a local temporary BEFORE any of
-                            // that pixel's own 4 output bytes are written,
-                            // and input/output share the exact same
-                            // per-pixel byte offset (no shift).
+                            // In-place is safe: each pixel's input bytes are read before its output bytes are written.
                             ok = Encoding::ConvertDepthToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, raw.pixels.data());
                         } else if (raw.format == VK_FORMAT_R16G16B16A16_SFLOAT) {
                             converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
@@ -1100,15 +673,10 @@ int EditorHost::Run()
                         } else if (Encoding::IsBgraFormat(raw.format)) {
                             Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
                         }
-                        // else: already tightly-packed RGBA8 (e.g.
-                        // VK_FORMAT_R8G8B8A8_UNORM) - no conversion needed.
+                        // else: already tightly packed RGBA8.
 
                         if (!ok) {
-                            // Depth format this device negotiated isn't one
-                            // ConvertDepthToGrayscaleRgba8() recognizes, or the
-                            // color format isn't one ConvertHdrRgba16fToRgba8()/
-                            // Convert1ChannelToGrayscaleRgba8() recognizes - an
-                            // accepted, documented, narrow risk.
+                            // The device's depth or color format is not one the converters recognize.
                             m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
                         } else {
                             std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(encodePixels, raw.width, raw.height);
@@ -1119,52 +687,34 @@ int EditorHost::Run()
                 }
             } else if (const std::optional<rg::DebugVolumeTextureSnapshot> volumeSnapshot =
                            m_renderGraph.DebugVolumeTextureSnapshotFor(requestedName)) {
-                // network-impl-6 campaign, Phase 4 - a name that isn't a
-                // registered 2D texture but IS a registered volume texture
-                // now renders a fresh raymarch thumbnail on demand instead
-                // of copying already-rendered pixels.
+                // A registered volume texture renders a fresh raymarch thumbnail on demand.
                 if (requestedChannel == DebugTextureChannel::Depth) {
-                    // A volume texture has no depth-companion concept at all
-                    // (see VolumeTarget.h) - the same positively-known,
-                    // permanent-failure fast-fail (409) the 2D branch above
-                    // uses.
+                    // A volume texture has no depth companion: fail fast (409) like the 2D branch.
                     m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
                 } else {
-                    // Computed BEFORE WaitForGpuIdle()/the render below, from
-                    // the snapshot as it was at the moment this request was
-                    // actually serviced - exactly mirroring the 2D branch's
-                    // own identical reasoning above.
+                    // Measured before the GPU idle, from the snapshot as it was when the request was serviced.
                     const std::uint64_t framesSinceUpdate =
                         m_renderGraph.CurrentDebugTextureFrameCounter() - volumeSnapshot->lastUpdatedFrameCounter;
 
                     m_renderer.WaitForGpuIdle();
 
-                    // Auto-detects a volume texture's preview interpretation
-                    // from its name (see SelectVolumeTexturePreviewInterpretation()).
+                    // The preview interpretation is auto-detected from the texture name.
                     const VolumeTexturePreviewInterpretation interpretation =
                         SelectVolumeTexturePreviewInterpretation(requestedName);
 
                     const VolumeTexturePreviewRenderer::CapturedRawPixels raw = m_volumeTexturePreviewRenderer.RenderPreview(
                         m_renderer, volumeSnapshot->target, volumeSnapshot->state, interpretation);
 
-                    // raw.pixels is already tightly-packed RGBA8 - no BGRA
-                    // swizzle, no HDR conversion, no depth-to-grayscale
-                    // conversion needed at all, unlike the 2D branch's
-                    // several format-dependent branches above.
+                    // raw.pixels is already tightly packed RGBA8: no conversion needed.
                     std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw.pixels.data(), raw.width, raw.height);
                     m_captureBridge.FulfillPendingRequest(FrameCaptureKind::NamedTexture,
                         CapturedPngImage{ std::move(png), raw.width, raw.height, framesSinceUpdate });
                 }
             }
-            // else: this name has never been registered as EITHER kind yet
-            // this session - leave the request pending; either it starts
-            // rendering within the bridge's existing fixed timeout, or the
-            // caller eventually gets HTTP 504.
+            // else: name not registered yet; leave the request pending until it appears or the bridge times out (504).
         }
 
-        // network-impl-4 campaign, Phase 5 - GET /list_textures' only data
-        // source. Resolved to plain PublishedTextureListEntry values HERE,
-        // never inside FrameCaptureBridge itself.
+        // Data source for GET /list_textures; resolved to plain values here, never inside FrameCaptureBridge.
         {
             const std::vector<rg::DebugTextureSnapshot> snapshots = m_renderGraph.ListDebugTextures();
             const std::uint64_t currentFrameCounter = m_renderGraph.CurrentDebugTextureFrameCounter();
@@ -1180,13 +730,11 @@ int EditorHost::Run()
                 entry.height = snap.target.extent.height;
                 entry.hasDepth = snap.hasDepth;
                 entry.framesSinceUpdate = currentFrameCounter - snap.lastUpdatedFrameCounter;
-                entry.kind = "texture2d"; // network-impl-6 campaign, Phase 5 - explicit at every call site.
+                entry.kind = "texture2d";
                 published.push_back(std::move(entry));
             }
 
-            // network-impl-6 campaign, Phase 5 - every registered VOLUME
-            // texture also gets its own PublishedTextureListEntry, appended
-            // right after every 2D one.
+            // Registered volume textures are listed after the 2D ones.
             for (const rg::DebugVolumeTextureSnapshot& vol : m_renderGraph.ListDebugVolumeTextures()) {
                 PublishedTextureListEntry entry;
                 entry.name = vol.name;
@@ -1204,12 +752,7 @@ int EditorHost::Run()
             m_captureBridge.PublishTextureList(std::move(published));
         }
 
-        // Phase 5 (GPU memory usage over time) - one real GPU memory
-        // snapshot per profiler frame, taken as late as possible in the
-        // frame (still inside this BeginFrame()/EndFrame() bracket) so it
-        // reflects every resource created/destroyed anywhere this frame,
-        // including by IEditorLayer::BuildUI()'s own Inspector/Project-panel
-        // asset loading above.
+        // One GPU memory snapshot per profiler frame, taken late so it sees every resource created this frame.
         Profiling::FrameProfiler::Instance().SetMemorySnapshot(BuildMemorySnapshot(m_renderer.GetMemoryTotals()));
 
         Profiling::FrameProfiler::Instance().EndFrame();

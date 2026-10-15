@@ -11,8 +11,7 @@
 
 namespace gte {
 
-// Defined in Application/RenderPassViewData.h (Vulkan-bearing) - only ever
-// touched by pointer here, so this header never needs its full definition.
+// Only used by pointer here; defined in Application/RenderPassViewData.h.
 struct RenderPassViewData;
 
 struct RenderFeatureCameraData {
@@ -21,11 +20,7 @@ struct RenderFeatureCameraData {
     bool invViewProjectionValid = false;
 };
 
-// Pure, Tier-1-testable "already warned" bookkeeping for the singular-matrix
-// log-once-per-view behavior below - a linear-scanned std::vector wrapped in
-// a resettable class (mirrors ImGuiIdConflictTracker's own shape) rather than
-// a bare function-local static, so a test can construct a fresh instance and
-// never contaminate another test case's own expectations.
+// Log-once-per-view bookkeeping for singular matrices; a resettable class so tests start clean.
 class RenderFeatureCameraDataWarningTracker {
 public:
     void Reset();
@@ -38,12 +33,8 @@ private:
     std::vector<rg::RenderViewId> m_warnedViews;
 };
 
-// Resolves `view`'s current eye position and a checked inverse
-// view-projection matrix (Mat4::TryInverse(), never the unchecked
-// Mat4::Inverse()). Returns a quiet, default-constructed, invalid result
-// when `viewData` is null (no data for this view yet - not an error). On a
-// singular source matrix, falls back to Mat4::Identity() and logs a warning
-// at most once per distinct `view` for the process lifetime.
+// Resolves `view`'s eye position and a checked inverse view-projection. Returns an invalid result when
+// `viewData` is null; a singular matrix falls back to identity and warns once per view.
 RenderFeatureCameraData ResolveRenderFeatureCameraData(rg::RenderViewId view, const RenderPassViewData* viewData);
 
 } // namespace gte

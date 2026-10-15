@@ -26,10 +26,8 @@ enum class VolumeTexturePreviewInterpretation : std::int32_t {
 // volume's prefix resolves to GenericDensityInAlpha. Pure, no GPU state.
 VolumeTexturePreviewInterpretation SelectVolumeTexturePreviewInterpretation(const std::string& volumeTextureName);
 
-// On-demand (never per-frame) compute renderer that raymarches a live VolumeTexture into a fixed-size 2D RGBA8
-// thumbnail, for fetching over HTTP.
-// It uses one ImmediateSubmit() per RenderPreview() (plus one inside CaptureImagePixels() for the readback) and
-// records its own dispatch, so it needs no render graph. Lives in core so it builds without the editor.
+// On-demand compute renderer that raymarches a VolumeTexture into a 256x256 RGBA8 thumbnail for HTTP fetches.
+// Records its own dispatch via ImmediateSubmit(), so it needs no render graph.
 class VolumeTexturePreviewRenderer {
 public:
     VolumeTexturePreviewRenderer() = default;
@@ -46,9 +44,8 @@ public:
         int height = 0;
     };
 
-    // Synchronously renders one raymarch thumbnail of `volume` (at `previousState`) and reads it back.
-    // Blocking: call at most once per network request. The volume's layout is restored to `previousState`.
-    // `interpretation` selects the texel decoding, the camera/box framing and the proxy shape; pass it explicitly.
+    // Renders one blocking raymarch thumbnail of `volume` (at `previousState`) and reads it back; at most once per
+    // request. The layout is restored; `interpretation` picks texel decoding, framing and proxy shape.
     CapturedRawPixels RenderPreview(Renderer& renderer, const VolumeTarget& volume, const rg::ResourceState& previousState,
         VolumeTexturePreviewInterpretation interpretation = VolumeTexturePreviewInterpretation::GenericDensityInAlpha);
 

@@ -57,16 +57,8 @@ namespace gte {
 
 rg::RenderPassId SceneServiceBlackboardKey(std::uint32_t slotIndex, rg::RenderViewId view) noexcept
 {
-    // Reuses the EXACT SAME FNV-1a offset-basis/prime this codebase's own
-    // operator""_passId / RenderViewId::Named() already use (RenderPipeline.h)
-    // - continuing ONE running accumulator across the 8 bytes of
-    // view.Hash() immediately followed by the 4 bytes of
-    // static_cast<std::uint32_t>(slot), exactly as mandated by the source
-    // design doc (BLOCK4_GLOBAL_SCENE_SERVICES_DESCRIPTOR_SET.txt, Section 3,
-    // "IMPLEMENTATION REQUIREMENT"). A weak combiner (plain XOR/addition)
-    // can silently alias two DIFFERENT (slot, view) pairs onto the SAME key
-    // for some unlucky pair of view hashes - this must be correct by
-    // construction, not merely "probably fine against the views tested".
+    // One running FNV-1a over view.Hash() then the slot index. A weak combiner (xor/add) could alias two
+    // (slot, view) pairs onto one key, so this must be correct by construction.
     std::uint64_t hash = 2166136261u;
 
     const std::uint64_t viewHash = view.Hash();
@@ -87,12 +79,7 @@ rg::RenderPassId SceneServiceBlackboardKey(std::uint32_t slotIndex, rg::RenderVi
     return rg::RenderPassId{ hash };
 }
 
-// --- Additive runtime slot registry ----------------------------------------
-//
-// Lets any built-in feature claim a scene-service slot by debug name at
-// startup instead of this header hand-naming every consumer. See this
-// header's own doc comments for the exact contract each function below
-// implements.
+// --- Runtime slot registry: a feature claims a slot by debug name at startup ---
 
 std::uint32_t RegisterSceneServiceSlot(
     const char* debugName, SceneServiceResourceKind kind, std::optional<std::uint32_t> preferredIndex,
@@ -235,33 +222,20 @@ void ResetSceneServiceRegistryForTesting() noexcept
     SceneServiceRegistrySealedFlag() = false;
 }
 
-// --- SceneServicesDescriptorSet (PHASE2) -----------------------------------
+// --- SceneServicesDescriptorSet --------------------------------------------
 
 SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
     : m_renderer(&renderer)
     , m_device(renderer.GetVulkanContextInfo().device)
-    // The one Image3D-kind slot's real, uploaded dummy - a neutral,
-    // zero-density 1x1x1 value. VK_FORMAT_R8G8B8A8_UNORM is a Vulkan
-    // mandatory-support format for VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT (see
-    // the Vulkan spec's own "Mandatory format support" table), so
-    // GpuResourceFactory::CreateVolumeTexture()'s own
-    // SupportsStorageImageUsage() check is guaranteed to pass on every
-    // Vulkan-conformant device this engine targets - no fallback format
-    // branch is needed in practice (confirmed live by this phase's own
-    // integration test actually constructing this class against a real
-    // device).
+    // The Image3D slot's dummy: a neutral 1x1x1 value. RGBA8_UNORM has mandatory storage-image support,
+    // so creation passes on every conformant device and needs no fallback format.
     , m_dummyImage3DTexture(renderer.CreateVolumeTexture(1, 1, 1, PixelFormat::RGBA8_UNorm, "SceneServiceImage3DDummy"))
-    // Binding 8's own zero-filled dummy fallback - see this member's own
-    // doc comment in the header for why Rewrite()'s per-slot loop cannot
-    // cover it.
+    // Binding 8's zero-filled dummy fallback (Rewrite()'s per-slot loop does not cover it).
     , m_dummyGlobalUniformBuffer(renderer.CreateBuffer(kSceneGlobalUniformBlockSize, BufferUsage::UniformBuffer,
           BufferMemoryUsage::CpuToGpu, "SceneGlobalUniformBlockDummy"))
 {
-    // The one reserved "scene services" descriptor-set layout - 8 combined-
-    // image-sampler bindings (fragment-stage), plus one plain uniform buffer
-    // at binding 8 (the packed per-frame lighting UBO - see
-    // kSceneGlobalUniformBlockSize) - this set is consumed by a fragment
-    // shader, never a compute one.
+    // The scene-services layout: 8 fragment-stage combined image samplers plus the lighting UBO at binding 8
+    // (see kSceneGlobalUniformBlockSize). Consumed by fragment shaders only.
     DescriptorSetLayoutBuilder layoutBuilder(m_device);
     for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
         layoutBuilder.AddCombinedImageSampler(i, VK_SHADER_STAGE_FRAGMENT_BIT);
@@ -269,10 +243,7 @@ SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
     layoutBuilder.AddUniformBuffer(kSceneServiceSlotCount, VK_SHADER_STAGE_FRAGMENT_BIT);
     m_layout = layoutBuilder.Build();
 
-    // Every Image2D-kind slot's real, uploaded dummy - a single opaque-white
-    // {255,255,255,255} pixel (semantically "fully lit / neutral / no extra
-    // contribution" - re-confirm this neutral meaning against any future
-    // slot's own real semantics before relying on it).
+    // Every Image2D-kind slot gets a dummy: one opaque-white pixel, meaning "fully lit / neutral".
     const unsigned char whitePixel[4] = { 255, 255, 255, 255 };
     for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
         if (SceneServiceSlotResourceKind(i) == SceneServiceResourceKind::Image2D) {
@@ -288,10 +259,7 @@ SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
 
 SceneServicesDescriptorSet::~SceneServicesDescriptorSet()
 {
-    // Texture2D/VolumeTexture (RAII) and the per-view VkDescriptorSets
-    // (pool-owned, never individually freed - see this class's own header
-    // comment) need no explicit cleanup here - only the hand-built,
-    // non-reflected layout this class itself owns.
+    // Textures are RAII and the per-view sets are pool-owned; only the hand-built layout needs destroying.
     if (m_layout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(m_device, m_layout, nullptr);
     }
@@ -324,10 +292,8 @@ DescriptorSetHandle SceneServicesDescriptorSet::Rewrite(
         VkImageView view_ = resolved[i].view;
         VkSampler sampler = resolved[i].sampler;
 
-        // A slot counts as "really published this call" ONLY when BOTH
-        // halves are non-null; a half-null pair (e.g. a resolved IMPORTED
-        // texture handle with a null sampler) falls back to the dummy
-        // instead of ever reaching vkUpdateDescriptorSets().
+        // A slot is published only when both view and sampler are non-null; a half-null pair (e.g. an imported
+        // texture without a sampler) uses the dummy instead of reaching vkUpdateDescriptorSets().
         if (view_ == VK_NULL_HANDLE || sampler == VK_NULL_HANDLE) {
             if (SceneServiceSlotResourceKind(i) == SceneServiceResourceKind::Image2D) {
                 const Texture2D& dummy = m_dummyImage2DTextures.at(i);
@@ -353,10 +319,8 @@ DescriptorSetHandle SceneServicesDescriptorSet::Rewrite(
         writes[i].pImageInfo = &imageInfos[i];
     }
 
-    // binding 8 has no per-slot fallback above - a freshly allocated set
-    // needs it written too, batched into this SAME call (never a separate
-    // vkUpdateDescriptorSets - two back-to-back updates against a brand-new
-    // set is a known crash trigger on at least one targeted Vulkan driver).
+    // Binding 8 has no per-slot fallback: a fresh set gets it written in this same batched update
+    // (two back-to-back updates on a new set crash some drivers).
     VkDescriptorBufferInfo dummyBufferInfo{};
     std::uint32_t writeCount = kSceneServiceSlotCount;
     if (freshlyAllocated) {
@@ -412,9 +376,7 @@ void SceneServicesDescriptorSet::UpdateGlobalUniformBlock(rg::RenderViewId view,
                 BufferMemoryUsage::CpuToGpu, "SceneGlobalUniformBlock") });
         entry = &m_perViewUniformBuffers.back();
     }
-    // Every frame just memcpy's fresh bytes into this view's OWN already-
-    // mapped buffer - the buffer HANDLE never changes again after today, so
-    // the descriptor set below never needs to be touched again either.
+    // The mapped buffer handle never changes, so every later frame only memcpy's fresh bytes.
     entry->buffer.Upload(bytes.data(), bytes.size());
 
     // Allocate the shared per-view set lazily here too: the first caller for a view creates it and the
@@ -434,13 +396,8 @@ void SceneServicesDescriptorSet::UpdateGlobalUniformBlock(rg::RenderViewId view,
         m_perViewSets.push_back(PerViewSet{ view, handle });
     }
 
-    // Binding 8 only ever needs to be POINTED at this view's buffer ONCE -
-    // re-running vkUpdateDescriptorSets every frame against a set that may
-    // still be in-flight on the GPU is unsafe and a known crash trigger on
-    // at least one targeted Vulkan driver. Only touch it the one frame
-    // either the buffer or the set is brand new; every later frame just
-    // relies on the Upload() above to refresh the bytes this SAME binding
-    // already points at.
+    // Point binding 8 at the buffer only once: updating a set that may still be in flight is unsafe (crashes some
+    // drivers). Only the frame the buffer or set is new touches it; later frames just refresh the bytes via Upload().
     if (freshlyCreatedBuffer || freshlyAllocatedSet) {
         VkDescriptorBufferInfo bufferInfo{ entry->buffer.Native(), 0, kSceneGlobalUniformBlockSize };
         VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };

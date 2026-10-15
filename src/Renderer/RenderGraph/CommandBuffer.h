@@ -39,22 +39,8 @@ struct CommandBufferWriteTargetInfo {
     VkFormat depthFormat = VK_FORMAT_UNDEFINED;
 };
 
-// Access-control token ("passkey" idiom): only PassContext can construct one of
-// these directly, which in turn means only PassContext can construct a
-// CommandBuffer below via its own constructor. CommandBuffer itself is ALSO a
-// friend (not any of ITS callers) - this is what lets CommandBuffer::WrapRaw()
-// (see below) mint a key internally and hand out a CommandBuffer to the
-// handful of legitimate call sites that need to wrap a raw VkCommandBuffer
-// OUTSIDE of any one render-graph pass's own PassContext (Core::
-// DispatchFinalizeForSamplingHook()/Core::BuildFrame()'s generic
-// finalize-for-sampling-hook sweep, Renderer::ImmediateSubmit(),
-// FramePresenter::RenderOffscreen()'s recordExtra wrap,
-// FrameDebuggerReplayPasses.cpp's background-step wrap - none of which have a
-// PassContext of their own to mint a key from) - WITHOUT growing this list of
-// friends every time one more such call site is added. The CommandBuffer
-// constructor stays public, but is unreachable without a valid key -
-// attempting `CommandBuffer(...)` from anywhere else still fails to compile;
-// WrapRaw() is the one sanctioned way around that for this specific need.
+// Passkey: only PassContext (and CommandBuffer::WrapRaw) can mint one, so CommandBuffer cannot be constructed
+// anywhere else; WrapRaw() is the sanctioned route for call sites that have no PassContext.
 class CommandBufferKey {
 private:
     CommandBufferKey() = default;
@@ -71,13 +57,8 @@ public:
     CommandBuffer(CommandBufferKey key, VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats,
         WriteTargetInfo writeTarget = {}, FrameDebuggerEventSink* eventSink = nullptr) noexcept;
 
-    // The one sanctioned way to wrap a raw VkCommandBuffer into a
-    // CommandBuffer OUTSIDE of any one render-graph pass's own PassContext -
-    // see CommandBufferKey's own doc comment above for the full list of
-    // legitimate call sites and why they need this. `passDrawStats` stays
-    // nullptr by default (the common case: this draw/dispatch is never
-    // attributed to any one pass's own DrawStats) - pass a real one only if
-    // the caller genuinely wants this recording counted somewhere.
+    // Wraps a raw VkCommandBuffer outside a pass's PassContext (immediate submits, hooks, replay steps).
+    // `passDrawStats` stays null unless the recording should be counted against a pass.
     static CommandBuffer WrapRaw(VkCommandBuffer cmd, Renderer* renderer = nullptr,
         DrawStats* passDrawStats = nullptr, WriteTargetInfo writeTarget = {},
         FrameDebuggerEventSink* eventSink = nullptr) noexcept
@@ -151,9 +132,7 @@ public:
         Dispatch(groupX, groupY, groupZ);
     }
 
-    // Submit a mesh draw to the renderer. materialDescriptorSet/sceneServicesSet
-    // are engine-owned DescriptorSetHandle values (not raw VkDescriptorSet) -
-    // see Core/GraphicsHandles.h/GraphicsHandleRegistry.h.
+    // Submits a mesh draw. The descriptor sets are engine handles, not raw VkDescriptorSet.
     void Draw(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
         const Mat4& viewProjMatrix = Mat4::Identity(),
         DescriptorSetHandle materialDescriptorSet = DescriptorSetHandle::Invalid,

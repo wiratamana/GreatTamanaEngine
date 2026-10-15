@@ -1,11 +1,7 @@
 #pragma once
 
-// Renderer-internal validation helpers for the plugin render-feature
-// callback contracts (Core/Plugins/ProjectRenderFeatureCallback.h/
-// ProjectScenePassCallback.h) - these need the full rg::RenderGraphBuilder
-// definition, so they live here instead of in those Vulkan-free headers.
-// Used only by Core.cpp/RenderFeatureCompositor.cpp to confirm a callback's
-// own declared passes carry the RenderPassEvent tag their stage requires.
+// Validation helpers for the plugin render-feature callback contracts. They need the full RenderGraphBuilder,
+// so they live here and not in the Vulkan-free callback headers. Used by Core.cpp and RenderFeatureCompositor.cpp.
 
 #include "RenderGraphBuilder.h"
 #include "RenderGraphTypes.h"
@@ -16,9 +12,8 @@
 
 namespace gte {
 
-// Every pass in [before, after) must be tagged RenderPassEvent::AfterEverything
-// (the PostComposite/PreUI stage's one required tag). Returns the
-// (builder-relative) indices of every violator - empty means all correct.
+// Every pass in [before, after) must be tagged RenderPassEvent::AfterEverything.
+// Returns the (builder-relative) indices of every violator.
 inline std::vector<std::size_t> FindPassesNotTaggedAfterEverything(
     const rg::RenderGraphBuilder& builder, std::size_t before, std::size_t after)
 {
@@ -34,9 +29,8 @@ inline std::vector<std::size_t> FindPassesNotTaggedAfterEverything(
     return violations;
 }
 
-// Every pass in [before, after) must be tagged exactly `expected`
-// (AfterOpaques for PostOpaque, AfterTransparents for PostTransparent).
-// Returns the indices of every violator - empty means all correct.
+// Every pass in [before, after) must be tagged exactly `expected` (AfterOpaques or AfterTransparents).
+// Returns the indices of every violator.
 inline std::vector<std::size_t> FindPassesNotTaggedScenePass(
     const rg::RenderGraphBuilder& builder, std::size_t before, std::size_t after, rg::RenderPassEvent expected)
 {
@@ -52,9 +46,8 @@ inline std::vector<std::size_t> FindPassesNotTaggedScenePass(
     return violations;
 }
 
-// True when at least one pass was declared in [before, after) and none read colorHandle or depthHandle:
-// a likely forgotten dependency. An empty range is never a violation. A WriteDepthStencilAttachment() on
-// depthHandle counts as a dependency (a depth test reads it; a fake ReadTexture() would demand a conflicting layout).
+// True when passes were declared in [before, after) and none read colorHandle or depthHandle (a likely forgotten
+// dependency). A depth-attachment write on depthHandle counts: a depth test reads it, and a fake read needs another layout.
 inline bool FindScenePassCallbackMissingReadDeclaration(const rg::RenderGraphBuilder& builder, std::size_t before,
     std::size_t after, rg::TextureHandle colorHandle, rg::TextureHandle depthHandle)
 {
@@ -74,9 +67,7 @@ inline bool FindScenePassCallbackMissingReadDeclaration(const rg::RenderGraphBui
     return true;
 }
 
-// Depth-aspect-aware sibling of FindScenePassCallbackMissingReadDeclaration()
-// above - flags a violation even if a pass only declared a color-only read
-// against the same handle, which does not resolve the depth sub-resource.
+// Depth-aware variant: a color-only read of the same handle does not count as reading its depth sub-resource.
 inline bool FindMissingDeclaredDepthReadForResolve(
     const rg::RenderGraphBuilder& builder, std::size_t before, std::size_t after, rg::TextureHandle depthHandle)
 {

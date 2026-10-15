@@ -1,11 +1,5 @@
-// gte_ci_scan: one guardrail check over a source tree. See tools/ci/<check>/README.md for each check.
-//
-//   gte_ci_scan --root DIR [--tokens FILE] [--includes FILE] [--allowlist FILE]
-//               [--only PREFIX]... [--skip PREFIX]... [--skip-dir NAME]... [--comments scan|skip] [--strings scan|skip]
-//               [--ignore-case] [--report]
-//
-// Check mode exits 1 on a new hit or a stale/duplicate allowlist line. --report prints the files that
-// have hits, one `path # N hits` line each, and always exits 0.
+// gte_ci_scan: one guardrail check over a source tree (see tools/ci/<check>/README.md).
+// Check mode exits 1 on a new hit or a stale allowlist line; --report lists files with hits and exits 0.
 
 #include "CppScanner.h"
 

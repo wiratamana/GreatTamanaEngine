@@ -40,17 +40,8 @@ struct MeshVertex {
     }
 };
 
-// Vertex layout for an imported, INDEXED, TEXTURED mesh submesh (see
-// Pipeline.h's VertexLayout::PositionNormalUv and
-// Game::EnsureMeshAsset()/CreateMeshEntityFromGtaFile(), src/Game/Game.cpp) -
-// position + normal + UV, tightly packed (32 bytes/vertex). A separate
-// struct from MeshVertex above (rather than growing it) for the same reason
-// MeshVertex itself is separate from Vertex (Vertex.h): a Pipeline/Mesh pair
-// must agree byte-for-byte on vertex layout (see VertexLayout's own
-// comment), and every consumer of the plain, untextured MeshVertex/
-// VertexLayout::PositionNormal pipeline (e.g. a material-less PMX submesh,
-// or a future non-PMX mesh importer with no UVs at all) is unaffected by
-// this one growing.
+// Vertex for an indexed, textured mesh: position + normal + UV, tightly packed (32 bytes).
+// A separate struct so untextured MeshVertex pipelines keep their layout.
 struct MeshVertexUv {
     float position[3];
     float normal[3];

@@ -13,9 +13,8 @@ namespace gte::rg {
 
 class Shader;
 
-// One fullscreen triangle drawn into a single color target; textures are bound by shader variable name.
-//   FullscreenPass(builder, shader, "Pass.Name", scope).Bind("src", tex).Target(out).Draw();
-// Declare it with the scope of the view it draws for: Shared passes cannot carry bindings per view.
+// One fullscreen triangle into a single color target, textures bound by shader variable name.
+// Declare it with the scope of the view it draws for: a Shared pass cannot carry per-view bindings.
 class FullscreenPass : public PassChain<FullscreenPass> {
 public:
     FullscreenPass(RenderGraphBuilder& builder, Shader& shader, StaticName name, ViewScope scope,

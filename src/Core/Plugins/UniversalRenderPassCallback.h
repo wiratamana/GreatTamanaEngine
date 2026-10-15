@@ -9,19 +9,8 @@
 
 namespace gte {
 
-// Mirrors RenderFeatureStage (RenderFeatureDescriptor.h) exactly, under a
-// friendlier name - does NOT mirror rg::RenderPassEvent's raw tag set
-// (RenderGraphHandles.h). Two values that exist over there are deliberately
-// absent over here:
-//   - BeforeEverything: permanently reserved for Core's own internal,
-//     denylisted "ClearViewTarget" pass (Core.cpp) - no sanctioned external
-//     registration path has ever existed for it, and adding one is real new
-//     engine work, not a renaming exercise.
-//   - AfterEverything: not something a feature ever "chooses" - a
-//     PostComposite/PreUI feature's OWN declared passes are REQUIRED to
-//     carry this tag already (enforced by a runtime assert inside
-//     RenderFeatureCompositorImpl.cpp), so it is not a meaningful fourth
-//     choice alongside the 5 below.
+// Mirrors RenderFeatureStage. BeforeEverything (Core's internal clear pass) and AfterEverything
+// (required on PostComposite/PreUI passes) are deliberately not choosable here.
 enum class FrameEvent {
     PreOpaque,       // Before any opaque geometry is drawn.
     PostOpaque,      // Immediately after opaque geometry is drawn.
@@ -30,23 +19,8 @@ enum class FrameEvent {
     PreUI,           // Same contract as PostComposite, runs immediately after it, same frame.
 };
 
-// The ONE callback shape every FrameEvent above shares - identical to the
-// existing ProjectRenderFeatureCallback (PostComposite/PreUI's own real
-// shape already). For FrameEvent::PreOpaque/PostOpaque/PostTransparent,
-// Core::RegisterRenderPass() hands your callback safe, default-constructed
-// PLACEHOLDER values for the fields that genuinely do not exist yet at that
-// point in the frame:
-//   - `privateTarget` -> a default rg::TextureHandle{} (IsValid() == false)
-//   - `extent`         -> Extent2D{} (0 x 0)
-//   - `cameraData`     -> RenderFeatureCameraData{} (invViewProjectionValid == false)
-//   - `currentViewHandles` -> ScenePassReadHandles{} (every handle invalid) -
-//     PreOpaque ONLY (PostOpaque/PostTransparent still receive the real,
-//     valid read handles, exactly like today).
-// Reading one of these placeholder fields anyway is a silent logic bug, not
-// a compile error - this is the one real, accepted safety trade-off of
-// using a single shared signature instead of 3 narrower ones. Keep each
-// callback's body scoped to only the fields that make sense for the
-// FrameEvent you registered it under.
+// One callback shape for every FrameEvent. Before PostComposite, fields that do not exist yet are placeholders:
+// invalid `privateTarget`, empty `extent`/`cameraData`, and (PreOpaque only) invalid `currentViewHandles`.
 using UniversalRenderPassAction = ProjectRenderFeatureCallback;
 
 } // namespace gte

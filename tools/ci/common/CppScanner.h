@@ -1,8 +1,7 @@
 #pragma once
 
-// Token-level C++ source scanner for the CI guardrail checks. std-only, no engine dependencies.
-// It classifies every byte as code, comment, string or char literal, so a check can look at
-// exactly the parts of a file it cares about (see Mask) and match whole identifiers (see FindTokens).
+// Token-level C++ scanner for the CI guardrail checks (std-only). Classifies every byte as code, comment,
+// string or char literal (see Mask), then matches whole identifiers (see FindTokens).
 
 #include <algorithm>
 #include <cctype>
@@ -157,10 +156,8 @@ struct Hit {
     std::string token;
 };
 
-// One token per line; '#' starts a comment. Three forms:
-//   Foo      whole identifier
-//   Vk*      identifier starting with "Vk" followed by an uppercase letter
-//   a.b(     any other text; an end that is an identifier character must sit on an identifier boundary
+// One token per line ('#' starts a comment): `Foo` whole identifier, `Vk*` identifier starting with Vk + uppercase,
+// anything else is plain text whose identifier-character ends must sit on identifier boundaries.
 struct TokenSet {
     std::unordered_set<std::string> words;
     std::vector<std::string> prefixes;

@@ -16,22 +16,14 @@ namespace gte {
 
 namespace {
 
-// True for a combined depth+stencil format - see VulkanDevice::
-// PickDepthFormat() (which always prefers a depth-only format when the
-// device supports one) and DepthBuffer::HasStencilComponent() (the same
-// check, applied to an actual live DepthBuffer rather than a bare format).
+// True for a combined depth+stencil format.
 bool DepthFormatHasStencil(VkFormat format)
 {
     return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT ||
         format == VK_FORMAT_D16_UNORM_S8_UINT;
 }
 
-// Which binding/attribute description to build against - see VertexLayout's
-// own comment in Pipeline.h. Each layout's own struct (Vertex.h/MeshVertex.h)
-// knows its own binding/attributes; shared by every Pipeline constructor so
-// this switch exists in exactly one place. Returns the vertex BINDING count
-// (0 or 1) actually used - VertexLayout::None has none at all, so a caller
-// must use this return value instead of assuming 1.
+// Fills the binding/attribute descriptions for a layout; returns the binding count (0 for None, else 1).
 std::uint32_t BuildVertexInputState(
     VertexLayout vertexLayout, VkVertexInputBindingDescription& binding, std::vector<VkVertexInputAttributeDescription>& attributes)
 {
@@ -41,13 +33,7 @@ std::uint32_t BuildVertexInputState(
         return 0;
     case VertexLayout::PositionNormal:
     case VertexLayout::PositionNormalInstanced: {
-        // GPU-Driven Frustum Culling + Indirect Draw campaign
-        // (render-pass-5), PHASE2 - PositionNormalInstanced shares the
-        // EXACT same vertex INPUT attributes as PositionNormal (see
-        // Shaders/MeshInstanced.vert's own header comment) - only the
-        // model matrix SOURCE differs (a per-instance storage buffer
-        // instead of the push constant), which is a vertex-SHADER
-        // concern, not a vertex-INPUT-layout one.
+        // Instanced shares PositionNormal's vertex input attributes; only the model matrix source differs.
         binding = MeshVertex::BindingDescription();
         const auto layoutAttributes = MeshVertex::AttributeDescriptions();
         attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
@@ -88,23 +74,11 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
     , m_debugName(debugName != nullptr ? debugName : std::string())
     , m_vertexLayout(vertexLayout)
 {
-    // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 - the
-    // 8-attachment cap matches gte::rg::kMaxColorAttachments
-    // (RenderGraphTypes.h) exactly (see kPipelineMaxColorAttachments's own
-    // comment in Pipeline.h for why this is a local, independent constant
-    // rather than an #include of that header). Debug-only, mirroring every
-    // other cap-style assert in this codebase (e.g.
-    // RenderGraphBuilder::PassBuilder::WriteColorAttachment()).
+    // The 8-attachment cap matches gte::rg::kMaxColorAttachments; debug-only like the other cap asserts.
     assert(colorFormats.size() <= kPipelineMaxColorAttachments
         && "Pipeline: colorFormats must be no larger than kPipelineMaxColorAttachments (8).");
 
-    // Shader modules are only needed transiently, to build the VkPipeline
-    // below - both are destroyed before this constructor returns (success
-    // or failure), regardless of what vkCreateGraphicsPipelines does with
-    // them. LoadShaderModule() (Vulkan/ShaderModule.h) is the one shared
-    // "read SPIR-V bytes off disk -> vkCreateShaderModule" primitive both
-    // this graphics pipeline and ComputePipeline (see ComputePipeline.h)
-    // build their own pipelines from.
+    // Shader modules are only needed to build the pipeline; both are destroyed before returning, on success or failure.
     VkShaderModule vertModule = LoadShaderModule(device, vertexShaderSpirvPath);
     VkShaderModule fragModule = VK_NULL_HANDLE;
     try {
@@ -141,11 +115,7 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
-        // Actual viewport/scissor rectangles are supplied per-draw via
-        // vkCmdSetViewport/vkCmdSetScissor (see FrameRecorder::RecordFrame)
-        // since this same Pipeline can draw into targets of different sizes
-        // (the swapchain vs. an Editor RenderTexture) - only the counts
-        // matter here.
+        // Viewport and scissor are set per draw (one Pipeline draws into targets of different sizes); only counts matter here.
         VkPipelineViewportStateCreateInfo viewportState{};
         viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
         viewportState.viewportCount = 1;
@@ -154,9 +124,7 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         VkPipelineRasterizationStateCreateInfo rasterizer{};
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-        // No backface culling yet - avoids having to reason about winding
-        // order for one hardcoded triangle. Revisit once real meshes with a
-        // consistent winding convention exist.
+        // No backface culling.
         rasterizer.cullMode = VK_CULL_MODE_NONE;
         rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
         rasterizer.lineWidth = 1.0f;
@@ -165,12 +133,7 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
         multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-        // Standard "closer to the camera wins" depth test/write - see the
-        // class comment in Pipeline.h for why this is unconditional (every
-        // render target this pipeline draws into is always paired with a
-        // real DepthBuffer now). VK_COMPARE_OP_LESS matches this engine's
-        // [0,1] (near=0, far=1) depth range - see Math/Mat4.h's
-        // PerspectiveFovLH_ZO.
+        // Depth test/write with LESS, matching the engine's [0,1] depth range (see PerspectiveFovLH_ZO).
         VkPipelineDepthStencilStateCreateInfo depthStencil{};
         depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
         depthStencil.depthTestEnable = VK_TRUE;
@@ -179,12 +142,7 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         depthStencil.depthBoundsTestEnable = VK_FALSE;
         depthStencil.stencilTestEnable = VK_FALSE;
 
-        // Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE3 -
-        // one VkPipelineColorBlendAttachmentState per color target, all
-        // identical (opaque, no blending, full RGBA write mask) - matching
-        // this engine's existing single-target default exactly.
-        // Per-attachment blend-state customization is explicitly out of
-        // scope for this campaign.
+        // One identical opaque blend state per color target (no blending, full RGBA write mask).
         std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments(colorFormats.size());
         for (VkPipelineColorBlendAttachmentState& state : colorBlendAttachments) {
             state.blendEnable = VK_FALSE;
@@ -203,13 +161,8 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         dynamicState.dynamicStateCount = static_cast<std::uint32_t>(std::size(dynamicStates));
         dynamicState.pDynamicStates = dynamicStates;
 
-        // One push constant range: a "model" Mat4 immediately followed by a
-        // "viewProj" Mat4, vertex stage only - see the class comment in
-        // Pipeline.h and Shaders/Triangle.vert's matching
-        // `layout(push_constant)` block. PLUS, when `materialSetLayout` is
-        // non-VK_NULL_HANDLE (VertexLayout::PositionNormalUv only - see
-        // that enumerator's own comment), one descriptor set (set = 0) for
-        // a single combined-image-sampler.
+        // One push constant range: "model" Mat4 then "viewProj" Mat4, vertex stage. A set-0 combined image
+        // sampler layout is added when `materialSetLayout` is set.
         VkPushConstantRange pushConstantRange{};
         pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         pushConstantRange.offset = 0;
@@ -220,37 +173,19 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         layoutInfo.pushConstantRangeCount = 1;
         layoutInfo.pPushConstantRanges = &pushConstantRange;
 
-        // GPU-Driven Frustum Culling + Indirect Draw campaign
-        // (render-pass-5), PHASE2 - `materialSetLayout` and
-        // `instanceBufferSetLayout` are two SEPARATE, unrelated concepts
-        // (see Pipeline.h's own comment on both parameters) that both
-        // happen to occupy descriptor set 0 - never used together on the
-        // same Pipeline today (Locked Design Decision 8,
-        // PHASE0_MASTER_STRATEGY.md: textured instanced batches are out of
-        // scope this campaign).
+        // materialSetLayout and instanceBufferSetLayout both occupy set 0 and are never used together.
         m_hasSceneServicesSet = (sceneServicesSetLayout != VK_NULL_HANDLE);
         m_hasMaterialSet = (materialSetLayout != VK_NULL_HANDLE);
 
         assert(!(materialSetLayout != VK_NULL_HANDLE && instanceBufferSetLayout != VK_NULL_HANDLE)
             && "Pipeline: materialSetLayout and instanceBufferSetLayout are mutually exclusive - no Pipeline needs "
-               "both at once (render-pass-5 campaign, Locked Design Decision 8).");
+               "both at once.");
 
         const VkDescriptorSetLayout setZeroLayout =
             materialSetLayout != VK_NULL_HANDLE ? materialSetLayout : instanceBufferSetLayout;
 
-        // Global Scene Services Descriptor Set campaign (better-render-pass-6),
-        // PHASE3 (task_manager/better-render-pass-6/PHASE3_PIPELINE_SET1_WIRING.md)
-        // - when sceneServicesSetLayout is supplied, build a CONTIGUOUS set-
-        // layout array ([set 0][set 1]) - Vulkan forbids a hole at set = 0
-        // if set = 1 is present. If nothing already occupies set = 0,
-        // synthesize a small, owned, zero-binding filler layout rather than
-        // leaving a gap (a descriptor set layout with zero bindings is never
-        // "statically used" by any shader stage, so Vulkan's binding
-        // validation never requires anything bound for set 0 in this case -
-        // no filler VkDescriptorSet is ever needed, only the filler
-        // VkDescriptorSetLayout). `setLayouts` must stay alive until
-        // vkCreatePipelineLayout() is actually called a few lines below -
-        // it is a local in this same scope, same as setZeroLayout above.
+        // Set layouts must be contiguous: with a scene-services set 1 and nothing at set 0, a zero-binding
+        // filler layout owns set 0. `setLayouts` must outlive vkCreatePipelineLayout() below.
         std::vector<VkDescriptorSetLayout> setLayouts;
         if (sceneServicesSetLayout != VK_NULL_HANDLE) {
             if (setZeroLayout != VK_NULL_HANDLE) {
@@ -279,14 +214,8 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
             throw std::runtime_error("Pipeline: vkCreatePipelineLayout failed.");
         }
 
-        // Dynamic rendering (no VkRenderPass/VkFramebuffer) - this pipeline
-        // must be built against the exact color AND depth format(s) it will
-        // actually draw into. See AGENTS.md ("Render Target Format
-        // Matching"). stencilAttachmentFormat is only set for a combined
-        // depth+stencil format (DepthFormatHasStencil() above) - this
-        // engine has no stencil use today, but the spec requires this field
-        // to match the image's actual format whenever it also carries a
-        // stencil aspect.
+        // Dynamic rendering: the pipeline is built against the exact color and depth formats it draws into.
+        // The stencil format is set only for a combined depth+stencil format, as the spec requires.
         const bool depthHasStencil = DepthFormatHasStencil(depthFormat);
         VkPipelineRenderingCreateInfo renderingInfo{};
         renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
@@ -317,12 +246,7 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
             throw std::runtime_error("Pipeline: vkCreateGraphicsPipelines failed.");
         }
     } catch (...) {
-        // Global Scene Services Descriptor Set campaign (better-render-pass-6),
-        // PHASE3 - if the synthetic set-0 filler layout was already created
-        // before a LATER failure (vkCreatePipelineLayout/
-        // vkCreateGraphicsPipelines), it must be cleaned up here too - it is
-        // never referenced by m_layout/m_pipeline, so nothing else would
-        // ever destroy it on this failure path.
+        // The synthetic set-0 filler layout may already exist; no member owns it yet, so destroy it here.
         if (m_syntheticSetZeroLayout != VK_NULL_HANDLE) {
             vkDestroyDescriptorSetLayout(device, m_syntheticSetZeroLayout, nullptr);
             m_syntheticSetZeroLayout = VK_NULL_HANDLE;
@@ -406,10 +330,7 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         depthStencil.depthBoundsTestEnable = VK_FALSE;
         depthStencil.stencilTestEnable = VK_FALSE;
 
-        // One identical blend attachment state per color target - a single
-        // BlendMode applies uniformly across every attachment (per-attachment
-        // blend customization is out of scope, same as the fixed-shape
-        // constructors above).
+        // One identical blend state per color target; the single BlendMode applies to every attachment.
         std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments(colorFormats.size(), blendState);
 
         VkPipelineColorBlendStateCreateInfo colorBlend{};

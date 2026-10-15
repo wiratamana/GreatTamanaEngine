@@ -5,9 +5,8 @@
 
 namespace gte {
 
-// Bridges Renderer::GetUiTextureHandle()/ReleaseUiTextureHandle() to an ImGui Vulkan backend without
-// the renderer including ImGui (a standalone build has no ImGui). The editor installs it once at startup,
-// before any GetUiTextureHandle() call.
+// Bridges Renderer::GetUiTextureHandle()/ReleaseUiTextureHandle() to an ImGui Vulkan backend without the renderer
+// including ImGui. The editor installs it once at startup, before any GetUiTextureHandle() call.
 void SetUiTextureBackend(
     std::function<VkDescriptorSet(VkSampler, VkImageView)> addFn, std::function<void(VkDescriptorSet)> removeFn);
 

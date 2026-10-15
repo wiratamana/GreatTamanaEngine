@@ -24,10 +24,7 @@ const char* ToString(PrimitiveType type) noexcept;
 // untouched for anything else, including an empty string.
 bool TryParsePrimitiveTypeName(const std::string& name, PrimitiveType& outType) noexcept;
 
-// Pure CPU-side geometry for the built-in primitives (no GPU, ECS or Vulkan). Every shape is centered on
-// the origin at Unity's unit size; Transform::scale resizes it. Meshes are plain non-indexed triangle
-// lists with a real normal per vertex (flat per face for Cube/Cone/Plane, smooth for Sphere/Capsule)
-// plus a flat neutral color; Triangle.frag does the lighting.
+// CPU-side unit-size geometry centered on the origin: non-indexed triangles with a normal and a neutral color per vertex.
 class PrimitiveMeshGenerator {
 public:
     static std::vector<Vertex> Generate(PrimitiveType type);

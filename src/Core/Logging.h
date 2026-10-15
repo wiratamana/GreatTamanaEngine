@@ -6,33 +6,14 @@
 #include <string_view>
 #include <vector>
 
-// PHASE3 (editor-core-separation-1 campaign,
-// PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md; see also
-// PHASE0_MASTER_STRATEGY.md's Locked Design Decision #1) - this header is
-// gte_core-owned (lives next to Core/Time.h/EngineContext.h) and carries
-// EVERY plain logging type/macro that used to live only in the Editor-only
-// src/Editor/Logger.h: LogLevel/LogEntry/LogQueryFilter/ToString()/
-// TryParseLogLevel(), and the GTE_LOG_DEBUG/INFO/WARNING/ERROR macros
-// themselves. This file, and everything in it, is UNCONDITIONAL - no
-// #if GTE_ENABLE_EDITOR branch anywhere, ever (unlike the old Logger.h,
-// which used to define two completely different macro bodies depending on
-// that macro). See Core/LogSink.h for the ILogSink interface/
-// InstallLogSink()/IsLogSinkInstalled()/LogToActiveSink() this file's own
-// macros route through instead of calling ::gte::Logger::Log() directly -
-// gte_core itself never includes anything under src/Editor/, including
-// Logger.h, ever again after this phase.
+// Engine logging types and GTE_LOG_* macros, unconditional (no editor branch). The macros route through
+// the sink in Core/LogSink.h; gte_core never includes the editor Logger.
 
 namespace gte {
 
 enum class LogLevel : std::uint8_t { Debug, Info, Warning, Error };
 
-// "Debug"/"Info"/"Warning"/"Error" - used by the Editor Log panel and by
-// GET /get_logs' own JSON "level" field. An out-of-range value falls back
-// to "Unknown", never reads out of bounds. Moved verbatim from
-// Editor/Logger.h (PHASE3) - already unconditional/inline there, for the
-// exact link-safety reason documented at the old location (Network/
-// NetworkRoutes.h/.cpp calls this from an always-compiled translation
-// unit) - now living in its permanent, gte_core-owned home instead.
+// Level name for the Log panel and GET /get_logs; out-of-range values give "Unknown".
 inline const char* ToString(LogLevel level) noexcept
 {
     switch (level) {
@@ -48,10 +29,7 @@ inline const char* ToString(LogLevel level) noexcept
     return "Unknown";
 }
 
-// Case-insensitive parse of "debug"/"info"/"warning"/"error" -> LogLevel,
-// used by Network/NetworkRoutes.h's ParseGetLogsQuery(). Returns false
-// (leaving *outLevel untouched) for anything else. Moved verbatim from
-// Editor/Logger.h (PHASE3).
+// Case-insensitive "debug"/"info"/"warning"/"error" -> LogLevel. Returns false and leaves *outLevel untouched otherwise.
 inline bool TryParseLogLevel(const std::string& text, LogLevel* outLevel) noexcept
 {
     if (outLevel == nullptr) {
@@ -93,11 +71,7 @@ struct LogEntry {
     bool isBlocking = false;       // True for a failure an automated caller must treat as blocking (e.g. GET /get_blocking_errors).
 };
 
-// Query parameters for Logger::Query() - every field is a filter that is
-// SKIPPED (matches everything) when left at its default/empty value. All
-// filters that ARE set must ALL match for an entry to be included (logical
-// AND), mirroring every other multi-field filter/parse struct already in
-// this codebase (e.g. Network/NetworkRoutes.h's request-parsing structs).
+// Query filter: an unset field matches everything; all set fields must match (AND).
 struct LogQueryFilter {
     std::uint64_t sinceId = 0;         // Only entries with id > sinceId. 0 = from the very start.
     bool hasMinLevel = false;
@@ -112,26 +86,10 @@ struct LogQueryFilter {
     bool onlyBlocking = false;         // True = only entries with isBlocking == true match.
 };
 
-// editor-core-separation-2 campaign, PHASE3
-// (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md) - the real
-// VALUE of Editor/Logger.h's own `Logger::kCapacity`, relocated here so
-// Network/NetworkRoutes.cpp (a gte_core-tier file) can clamp GET /get_logs'
-// own `limit` query parameter against it WITHOUT needing to #include the
-// gte_editor-only Logger class just for one compile-time constant.
-// `Logger::kCapacity` itself is unchanged in every other respect (same
-// qualified name, same value, same call sites) - it simply becomes
-// `static constexpr std::size_t kCapacity = kLogCapacity;` instead of
-// re-stating the literal `2000` a second time (see Editor/Logger.h).
+// Log buffer capacity; also the upper clamp for GET /get_logs' `limit`.
 inline constexpr std::size_t kLogCapacity = 2000;
 
-// Forward declarations only - real definitions live in Core/LogSink.h/.cpp
-// (kept in a separate header/translation unit since they need the
-// ILogSink interface, which this file deliberately does NOT define, to
-// keep Logging.h a pure-data/macro header with no interface/vtable
-// concept in it at all). Declared here (not just in LogSink.h) so the
-// GTE_LOG_* macros below can reference them without LogSink.h needing to
-// be included at every GTE_LOG_* call site in the engine - only whoever
-// installs/queries the sink directly needs to include LogSink.h.
+// Declared here so GTE_LOG_* call sites need not include LogSink.h (which defines ILogSink).
 bool IsLogSinkInstalled() noexcept;
 void LogToActiveSink(LogLevel level, std::string_view category, std::string_view message, bool isBlocking = false);
 
