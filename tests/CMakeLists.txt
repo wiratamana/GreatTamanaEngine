@@ -2792,3 +2792,11 @@ add_test(NAME VolkLeakCheck
             --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/volk_leak_check/allowlist.txt"
             --comments skip --strings scan
 )
+
+# Fails on raw engine wrappers and hand-rolled GPU calls outside src/Renderer. See tools/ci/native_leak_check/README.md.
+add_test(NAME NativeLeakCheck
+    COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src" --skip Renderer/
+            --tokens "${CMAKE_SOURCE_DIR}/tools/ci/native_leak_check/tokens.txt"
+            --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/native_leak_check/allowlist.txt"
+            --comments skip --strings scan
+)

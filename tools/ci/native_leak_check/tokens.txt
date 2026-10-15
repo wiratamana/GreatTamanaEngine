@@ -1,0 +1,17 @@
+# Raw engine wrappers and hand-rolled GPU calls that code outside src/Renderer must not use.
+# Native( covers .Native(), ->Native() and the free function Native(handle).
+Native(
+ComputeDescriptorSet
+ComputeDescriptorWrite
+AllocateComputeDescriptorSet
+ComputePipeline
+EmitImageBarrier
+ImmediateSubmit
+BeginGraphPassRecording
+WrapRaw
+ctx.cmd
+PassContext::cmd
+ColorPixelFormat(
+DepthPixelFormat(
+WaitForGpuIdle
+vkDeviceWaitIdle

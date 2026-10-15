@@ -1,0 +1,29 @@
+# Files outside src/Renderer that still use raw engine wrappers. Starting debt: lines are only ever removed.
+# Format: path relative to src, then '# one-line reason'. A line whose file is gone or clean fails the check.
+
+Application/RenderPasses.cpp # debt: application layer records through raw pass wrappers
+Core/Core.cpp # debt: Core hand-records GPU work and idles the device
+Core/Plugins/ProjectAssemblyHost.cpp # debt: idles the device before unloading a project assembly
+Editor/AssetPreviewMesh.cpp # debt: editor tool uses raw wrappers or one-shot submits
+Editor/AssetPreviewMesh.h # debt: editor tool uses raw wrappers or one-shot submits
+Editor/AssetPreviewTexture.cpp # debt: editor tool uses raw wrappers or one-shot submits
+Editor/BoneViewerWindow.cpp # debt: editor tool uses raw wrappers or one-shot submits
+Editor/BoneViewerWindow.h # debt: editor tool uses raw wrappers or one-shot submits
+Editor/EditorHost.cpp # debt: editor tool uses raw wrappers or one-shot submits
+Editor/EditorProjectLifecycleCapability.cpp # debt: editor tool uses raw wrappers or one-shot submits
+Editor/FrameDebuggerHistory.cpp # debt: editor tool uses raw wrappers or one-shot submits
+Editor/FrameDebuggerPreviewProcessing.cpp # debt: editor tool uses raw wrappers or one-shot submits
+Editor/FrameDebuggerPreviewProcessing.h # debt: editor tool uses raw wrappers or one-shot submits
+Editor/FrameDebuggerReplayPasses.cpp # debt: editor tool uses raw wrappers or one-shot submits
+Editor/ImGuiEditorLayer.cpp # permanent: ImGui Vulkan backend needs the device idle and raw handles
+Editor/Panels/FrameDebuggerPanel.cpp # debt: editor tool uses raw wrappers or one-shot submits
+Editor/Panels/RenderGraphPanel.cpp # debt: editor tool uses raw wrappers or one-shot submits
+Editor/RenderGraphTexturePreview.cpp # debt: editor tool uses raw wrappers or one-shot submits
+Editor/SceneGridRenderer.cpp # debt: editor tool uses raw wrappers or one-shot submits
+Features/Atmosphere/AtmosphereFeature.cpp # debt: feature passes use raw wrappers until the feature kit exists
+Features/Atmosphere/AtmosphereLutRendererImpl.cpp # debt: feature passes use raw wrappers until the feature kit exists
+Features/Atmosphere/AtmosphereLutRendererImpl.h # debt: feature passes use raw wrappers until the feature kit exists
+Features/Shadow/ShadowFeature.cpp # debt: feature passes use raw wrappers until the feature kit exists
+Game/Animation/GpuSkinningRigCache.cpp # debt: GPU skinning cache uses raw compute wrappers
+Game/Animation/GpuSkinningRigCache.h # debt: GPU skinning cache uses raw compute wrappers
+Window/Window.h # permanent: Native() returns the SDL window handle, not a GPU object
