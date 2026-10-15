@@ -1,25 +1,26 @@
 #include "FrameDebuggerPanel.h"
 
 #include "../EditorContext.h"
-#include "../MemoryPanelData.h" // gte::ToString(VkFormat) - reused for the real render-target format label (PHASE3).
-#include "../../Encoding/HdrColorVisualization.h" // task_manager/frame-debugger-9 campaign, PHASE3 - Encoding::ConvertHdrRgba16fToRgba8().
-#include "../../Encoding/CapturedPixelConversion.h" // gte::Encoding::IsBgraFormat() - the one canonical copy.
-#include "../../Encoding/DepthVisualization.h" // Encoding::ConvertDepthToGrayscaleRgba8() - depth-only per-draw event captures.
-#include "../../Encoding/PixelConversion.h" // PHASE3 - Encoding::ConvertBgraToRgbaInPlace().
-#include "../../Encoding/PngEncoder.h" // Frame Debugger per-draw event capture - Encoding::EncodeRgba8ToPng().
+#include "../MemoryPanelData.h" // gte::ToString(VkFormat)
+#include "../../Encoding/HdrColorVisualization.h"
+#include "../../Encoding/CapturedPixelConversion.h"
+#include "../../Encoding/DepthVisualization.h"
+#include "../../Encoding/PixelConversion.h"
+#include "../../Encoding/PngEncoder.h"
 #include "../../Encoding/SingleChannelVisualization.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
-#include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h" // editor-core-separation-21 campaign, PHASE5 - IsEnabled() lookup for the honesty detector.
-#include "../../Renderer/RenderGraph/RenderPipeline.h" // editor-core-separation-22 campaign, PHASE6 - rg::RenderPassBlackboard::WasPublishedThisFrame() for the Clause C detector.
+#include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
+#include "../../Renderer/RenderGraph/RenderPipeline.h"
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/RenderTexture.h"
-#include "../../Core/Logging.h" // editor-core-separation-21 campaign, PHASE2 - the new auto-recapture-on-toggle log line (Build()).
-#include "../RenderPassHonestyChecker.h" // editor-core-separation-21 campaign, PHASE5 - the pure mismatch detector.
-#include "../RenderPassHonestyGuard.h" // editor-core-separation-21 campaign, PHASE5 - log-once-per-new-incident wrapper.
-#include "../FrameDebuggerCoverageChecker.h" // editor-core-separation-22 campaign, PHASE6 - Clause B pure detector.
-#include "../FrameDebuggerCoverageGuard.h" // editor-core-separation-22 campaign, PHASE6 - Clause B log-once-per-new-incident wrapper.
-#include "../FrameDebuggerSideChannelChecker.h" // editor-core-separation-22 campaign, PHASE6 - Clause C pure detector.
-#include "../FrameDebuggerSideChannelGuard.h" // editor-core-separation-22 campaign, PHASE6 - Clause C log-once-per-new-incident wrapper.
+#include "../../Core/Logging.h"
+#include "../RenderPassHonestyChecker.h"
+#include "../RenderPassHonestyGuard.h"
+#include "../FrameDebuggerCoverageChecker.h"
+#include "../FrameDebuggerCoverageGuard.h"
+#include "../FrameDebuggerSideChannelChecker.h"
+#include "../FrameDebuggerSideChannelGuard.h"
+#include "../VolumeTexturePreviewSelection.h"
 
 #include <backends/imgui_impl_vulkan.h>
 #include <imgui.h>

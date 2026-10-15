@@ -65,10 +65,11 @@ BindingArgument Buf(std::string_view name, BufferObjectHandle handle)
     return arg;
 }
 
-std::optional<TextureDesc> AllDepth(TextureHandle)
+// The two depth fixtures have a depth aspect; every other handle is a color texture.
+std::optional<TextureDesc> DepthForDepthHandles(TextureHandle handle)
 {
     TextureDesc desc;
-    desc.hasDepth = true;
+    desc.hasDepth = (handle == kShadowDepth || handle == kSceneDepth);
     return desc;
 }
 
@@ -84,7 +85,7 @@ std::vector<BindingArgument> HappyArgs()
 }
 
 BindingPlanResult Plan(const std::vector<ReflectedDescriptorBinding>& reflected, const std::vector<BindingArgument>& args,
-    DescribeTextureFn describe = AllDepth)
+    DescribeTextureFn describe = DepthForDepthHandles)
 {
     return PlanBindings(reflected, args, describe);
 }
@@ -213,6 +214,31 @@ TEST(ShaderBindingsTest, DepthViewWithUnknownTextureIsAnError)
     const BindingPlanResult result = Plan(FixtureBindings(), HappyArgs(), DescribeTextureFn{});
     ASSERT_FALSE(result.Ok());
     EXPECT_TRUE(Contains(result.error, "without a depth aspect"));
+}
+
+TEST(ShaderBindingsTest, PlainBindOfADepthTextureOnASamplerAsksForDepth)
+{
+    std::vector<BindingArgument> args = HappyArgs();
+    args[1] = Tex("inputDepthA", kShadowDepth);
+    const BindingPlanResult result = Plan(FixtureBindings(), args);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'inputDepthA' is a depth texture: use rg::Depth()"));
+}
+
+TEST(ShaderBindingsTest, DepthTextureOnAStorageImageIsAnError)
+{
+    std::vector<BindingArgument> args = HappyArgs();
+    args[3] = Tex("maskOutput", kSceneDepth);
+    const BindingPlanResult result = Plan(FixtureBindings(), args);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'maskOutput' is a depth texture: it cannot be bound to a storage image"));
+}
+
+TEST(ShaderBindingsTest, PlainBindOfAColorTextureWithUnknownDescIsAccepted)
+{
+    // Without a descriptor the depth aspect cannot be judged, so only an explicit Depth() view is refused.
+    const BindingPlanResult result = Plan(FixtureBindings(), HappyArgs(), DescribeTextureFn{});
+    EXPECT_FALSE(Contains(result.error, "use rg::Depth()"));
 }
 
 TEST(ShaderBindingsTest, UnsuppliedBindingIsListedByName)
@@ -402,6 +428,56 @@ TEST(ShaderBindingsTest, PushConstantSuppliedWithoutShaderBlockIsAnError)
 TEST(ShaderBindingsTest, PushConstantMissingForShaderBlockIsAnError)
 {
     EXPECT_TRUE(ValidatePushConstantSize(4, 0).has_value());
+}
+
+// --- Uniform buffers ---------------------------------------------------------
+
+std::vector<ReflectedDescriptorBinding> UniformBindings()
+{
+    return { Slot(0, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, "tint", ReflectedAccess::ReadOnly),
+        Slot(0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, "outputImage", ReflectedAccess::WriteOnly) };
+}
+
+TEST(ShaderBindingsTest, UniformBufferTakesABufferAndDeclaresAUniformBinding)
+{
+    const BindingPlanResult result = Plan(UniformBindings(), { Buf("tint", kParams), Tex("outputImage", kMask) });
+    ASSERT_TRUE(result.Ok()) << result.error;
+
+    PassRecord record;
+    RenderGraphBuilder::PassBuilder pass(record);
+    DeclareBindings(pass, result.plan, kLayout);
+
+    ASSERT_EQ(record.bindings.size(), 2u);
+    EXPECT_EQ(record.bindings[0].kind, BindingKind::UniformBuffer);
+    EXPECT_EQ(record.bindings[0].bufferObjectHandle, kParams);
+    EXPECT_EQ(record.bindings[0].binding, 0u);
+    EXPECT_TRUE(record.reads.empty()); // An external buffer is not graph-tracked.
+}
+
+TEST(ShaderBindingsTest, TextureOnAUniformBufferSlotIsAnError)
+{
+    const BindingPlanResult result = Plan(UniformBindings(), { Tex("tint", kMask), Tex("outputImage", kMask) });
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'tint' is a uniform buffer"));
+}
+
+TEST(ShaderBindingsTest, InvalidBufferOnAUniformBufferSlotIsAnError)
+{
+    const BindingPlanResult result =
+        Plan(UniformBindings(), { Buf("tint", BufferObjectHandle::Invalid), Tex("outputImage", kMask) });
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'tint' was given an invalid resource handle"));
+}
+
+TEST(ShaderBindingsTest, FullscreenReflectionAcceptsUniformBuffersButNotStorageBuffers)
+{
+    ShaderReflectionResult reflection;
+    reflection.descriptorBindings = { Slot(0, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, "source"),
+        Slot(0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, "tint") };
+    EXPECT_FALSE(ValidateFullscreenReflection(reflection).has_value());
+
+    reflection.descriptorBindings.push_back(Slot(0, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, "bad"));
+    EXPECT_TRUE(ValidateFullscreenReflection(reflection).has_value());
 }
 
 } // namespace

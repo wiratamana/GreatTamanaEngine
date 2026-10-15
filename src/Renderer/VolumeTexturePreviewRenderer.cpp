@@ -38,13 +38,6 @@ static constexpr float kAerialPreviewExposure = 3200.0f;
 
 } // namespace
 
-VolumeTexturePreviewInterpretation SelectVolumeTexturePreviewInterpretation(const std::string& volumeTextureName)
-{
-    const bool isAerialPerspectiveVolume = volumeTextureName.rfind("AtmosphereAerialPerspectiveVolume", 0) == 0;
-    return isAerialPerspectiveVolume ? VolumeTexturePreviewInterpretation::AerialPerspectiveFrustum
-                                      : VolumeTexturePreviewInterpretation::GenericDensityInAlpha;
-}
-
 VolumeTexturePreviewRenderer::~VolumeTexturePreviewRenderer()
 {
     // m_pipeline and m_outputTexture clean up themselves. m_descriptorSetLayout is borrowed from m_pipeline

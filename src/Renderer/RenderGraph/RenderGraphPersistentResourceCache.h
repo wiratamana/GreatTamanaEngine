@@ -6,6 +6,7 @@
 #include "../RenderTexture.h"
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -36,7 +37,8 @@ struct PersistentResourceCacheEntry {
     TextureDesc desc;                // Desc of the last successful (re)build.
     PersistentSlotRef slot;          // Liveness handle for tokens.
     std::uint64_t lastUsedFrame = 0; // Eviction input.
-    std::uint64_t lastRequestedFrame = 0; // Detects a second request in the same frame.
+    // Frame of the last request; "none yet" until the first one, so frame 0 is a valid first request.
+    std::uint64_t lastRequestedFrame = std::numeric_limits<std::uint64_t>::max();
     bool hasLoggedDoubleRequest = false;
     VkImageLayout lastKnownLayout = VK_IMAGE_LAYOUT_UNDEFINED; // Layout at the end of the last used frame.
     const std::string* ownKeyForDebugAssert = nullptr;         // Points at this entry's own map key.

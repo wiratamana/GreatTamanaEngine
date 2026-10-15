@@ -120,13 +120,20 @@ public:
         const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
 
     // Allocates from the compute descriptor pool set; adds at most one pool per call. Throws when no pool fits.
+    // Failures log once per failing layout (and once per exhaustion), never on every call.
     ComputeDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
 
-    // Drops the "does not fit any pool" memory for a layout that is about to be destroyed.
+    // Tells the pool accounting what one set of `layout` costs. Re-registering a layout overwrites its cost.
+    void RegisterLayoutCost(VkDescriptorSetLayout layout, const PoolCapacity& cost) const;
+
+    // Drops the remembered state (does-not-fit, cost) of a layout that is about to be destroyed.
     void ForgetComputeLayout(VkDescriptorSetLayout layout) const noexcept;
 
     // Returns a set to the pool it came from. Unknown sets are ignored. The set must not be in use by the GPU.
     void FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept;
+
+    // Pool counts for the GPU Memory panel: capacity, sets and descriptors in use, peak use.
+    DescriptorPoolStats DescriptorStats() const;
 
     // Memory Tracking
     GpuMemoryTracker::Totals GetMemoryTotals() const;
@@ -156,12 +163,20 @@ private:
 
     VkDescriptorSetLayout m_instanceBufferSetLayout = VK_NULL_HANDLE;
 
-    // Compute descriptor pools (newest last) and the pool index each live set came from; guarded by the mutex.
+    // Compute descriptor pools (newest last), their accounting and the live sets; guarded by the mutex.
+    struct ComputeSetInfo {
+        std::uint32_t pool = 0;
+        PoolCapacity cost;
+    };
     mutable std::mutex m_computePoolMutex;
     mutable std::vector<VkDescriptorPool> m_computePools;
     mutable PoolCapacity m_lastComputePoolCapacity;
-    mutable std::unordered_map<VkDescriptorSet, std::uint32_t> m_computeSetPool;
+    mutable DescriptorBudget m_computeBudget;
+    mutable std::unordered_map<VkDescriptorSet, ComputeSetInfo> m_computeSets;
+    mutable std::unordered_map<VkDescriptorSetLayout, PoolCapacity> m_layoutCosts;
     mutable BoundedKeySet<VkDescriptorSetLayout, 64> m_unsatisfiableLayouts;
+    mutable bool m_unsatisfiableOverflowLogged = false;
+    mutable bool m_poolCapLogged = false;
 };
 
 } // namespace gte

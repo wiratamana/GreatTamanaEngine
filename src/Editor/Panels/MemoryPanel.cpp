@@ -9,18 +9,14 @@
 
 #include <imgui.h>
 
+#include <cstdint>
+#include <vector>
+
 namespace gte {
 
 namespace {
 
-// "CPU (Engine Dependencies)" section - SdlMemoryTracker/ImGuiMemoryTracker
-// (src/Memory/SdlMemoryTracker.h, src/Editor/ImGuiMemoryTracker.h) each
-// install a byte-counting wrapper around their own library's allocator, so
-// these numbers are exact live totals for THAT dependency specifically -
-// not a guess, and not the whole process (see GetVmaHeapBudgets()'s section
-// below for a real, driver-reported, whole-GPU-heap cross-check, and Task
-// Manager/a process explorer for the whole-process CPU RAM ceiling to
-// compare all of this against).
+// Live byte totals of the SDL and ImGui allocators (exact for those libraries, not the whole process).
 void BuildCpuDependenciesSection()
 {
     if (!ImGui::CollapsingHeader("CPU (Engine Dependencies)", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -33,11 +29,7 @@ void BuildCpuDependenciesSection()
         static_cast<unsigned long long>(ImGuiMemoryTracker::LiveAllocationCount()));
 }
 
-// "GPU (Tracked by Engine)" section - GpuMemoryTracker's own tally of every
-// Buffer/RenderTexture this engine has created and not yet destroyed (see
-// Renderer::GetMemoryTotals()/GetMemoryResources()) - unchanged from before
-// this function existed, just pulled out of BuildMemoryPanel() so it reads
-// the same as the two sections around it.
+// Every buffer and render texture the engine created and has not destroyed yet.
 void BuildGpuTrackedSection(Renderer& renderer)
 {
     if (!ImGui::CollapsingHeader("GPU (Tracked by Engine)", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -57,9 +49,7 @@ void BuildGpuTrackedSection(Renderer& renderer)
     ImGui::Separator();
 
     const std::vector<GpuMemoryTracker::Entry> entries = renderer.GetMemoryResources();
-    // editor-core-separation-1 campaign, PHASE4 - names now live entirely on
-    // the Editor side (EditorGpuMemoryNameOverlay), never inside Renderer/
-    // GpuMemoryTracker itself.
+    // Debug names live in the Editor overlay, never in the renderer.
     const std::vector<MemoryRow> rows =
         BuildMemoryRows(entries, [](GpuResourceHandle handle) { return EditorGpuMemoryNameOverlay::GetDebugName(handle); });
 
@@ -100,15 +90,7 @@ void BuildGpuTrackedSection(Renderer& renderer)
     }
 }
 
-// "GPU Heap Budgets (Driver-Reported)" section - the REAL, driver-reported
-// usage/budget for every Vulkan memory heap (see
-// Renderer::GetVmaHeapBudgets()/VulkanAllocator::GetHeapBudgets()), fetched
-// straight from VMA rather than tallied by this engine. This is the section
-// that answers the actual question this whole panel exists for: does
-// GpuMemoryTracker's total above plausibly account for everything a real
-// GPU tool (or Task Manager's dedicated GPU memory column) would show for
-// this heap, or is something else - the swapchain's own images, ImGui's own
-// Vulkan backend, driver/loader overhead - unaccounted for?
+// Driver-reported usage and budget per Vulkan memory heap (straight from VMA, not tallied by the engine).
 void BuildGpuHeapBudgetSection(Renderer& renderer)
 {
     if (!ImGui::CollapsingHeader("GPU Heap Budgets (Driver-Reported)", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -151,6 +133,62 @@ void BuildGpuHeapBudgetSection(Renderer& renderer)
     }
 }
 
+// Descriptor pool use per descriptor type: in use / capacity, with the high-water mark.
+void BuildDescriptorPoolSection(Renderer& renderer)
+{
+    if (!ImGui::CollapsingHeader("Descriptor Pools", ImGuiTreeNodeFlags_DefaultOpen)) {
+        return;
+    }
+
+    const DescriptorPoolStats stats = renderer.GetDescriptorPoolStats();
+    ImGui::Text("Pools: %zu", stats.poolCount);
+
+    struct Row {
+        const char* label;
+        std::uint32_t used;
+        std::uint32_t capacity;
+        std::uint32_t highWater;
+    };
+    const Row rows[] = {
+        { "Sets", stats.used.sets, stats.capacity.sets, stats.highWater.sets },
+        { "Storage buffers", stats.used.storageBuffers, stats.capacity.storageBuffers, stats.highWater.storageBuffers },
+        { "Storage images", stats.used.storageImages, stats.capacity.storageImages, stats.highWater.storageImages },
+        { "Combined samplers", stats.used.combinedSamplers, stats.capacity.combinedSamplers,
+            stats.highWater.combinedSamplers },
+        { "Uniform buffers", stats.used.uniformBuffers, stats.capacity.uniformBuffers, stats.highWater.uniformBuffers },
+    };
+
+    constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable;
+    if (ImGui::BeginTable("DescriptorPoolsTable", 4, tableFlags, ImVec2(0.0f, 0.0f))) {
+        ImGui::TableSetupColumn("Type");
+        ImGui::TableSetupColumn("In use");
+        ImGui::TableSetupColumn("Capacity");
+        ImGui::TableSetupColumn("High water");
+        ImGui::TableHeadersRow();
+
+        for (const Row& row : rows) {
+            ImGui::TableNextRow();
+            const bool warn = DescriptorBudget::Fraction(row.used, row.capacity) > DescriptorBudget::kWarnFraction;
+            if (warn) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.2f, 1.0f));
+            }
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted(row.label);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%u", row.used);
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%u", row.capacity);
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%u", row.highWater);
+            if (warn) {
+                ImGui::PopStyleColor();
+            }
+        }
+
+        ImGui::EndTable();
+    }
+}
+
 } // namespace
 
 void BuildMemoryPanel(EditorContext& /*ctx*/, Renderer& renderer)
@@ -162,6 +200,8 @@ void BuildMemoryPanel(EditorContext& /*ctx*/, Renderer& renderer)
     BuildGpuTrackedSection(renderer);
     ImGui::Separator();
     BuildGpuHeapBudgetSection(renderer);
+    ImGui::Separator();
+    BuildDescriptorPoolSection(renderer);
 
     ImGui::End();
 }

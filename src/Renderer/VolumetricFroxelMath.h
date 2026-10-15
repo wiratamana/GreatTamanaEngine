@@ -2,11 +2,8 @@
 
 namespace gte {
 
-// Shared, feature-free CPU oracle for the froxel slice-index <-> view-depth
-// mapping any Z-sliced VolumeTexture fill can reuse. Mirrors
-// src/Shaders/VolumetricFroxelMath.glsl byte-for-formula - if the two ever
-// disagree, this file is right by definition (see AtmosphereMath.h's own
-// identical "CPU oracle first" rule).
+// CPU reference for the froxel slice <-> view depth mapping in src/Shaders/VolumetricFroxelMath.glsl.
+// If the two disagree, this file is right.
 
 // slice boundary -> view-space distance, same units as maxDistanceKm.
 float FroxelSliceToViewDepth(float slice, float sliceCount, float maxDistanceKm, float depthExponent) noexcept;

@@ -4,6 +4,7 @@
 #include "RenderGraph/RenderGraph.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "UiTextureBackend.h"
+#include "Vulkan/DescriptorCost.h"
 #include "Vulkan/DescriptorSetLayoutBuilder.h"
 #include "Vulkan/ReflectedSetLayouts.h"
 #include "Vulkan/ShaderStageMask.h"
@@ -647,24 +648,31 @@ void Renderer::SetGpuTimingCaptureEnabled(bool enabled) noexcept
 DescriptorSetLayoutHandle Renderer::CreateDescriptorSetLayout(std::span<const DescriptorBindingDesc> bindings) const
 {
     DescriptorSetLayoutBuilder builder(m_device.Native());
+    PoolCapacity cost{ .sets = 1 };
     for (const DescriptorBindingDesc& binding : bindings) {
         const VkShaderStageFlags stages = ToVkShaderStageFlags(binding.stages);
         switch (binding.kind) {
             case DescriptorKind::CombinedImageSampler:
                 builder.AddCombinedImageSampler(binding.binding, stages, binding.count);
+                AddDescriptorCost(cost, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, binding.count);
                 break;
             case DescriptorKind::UniformBuffer:
                 builder.AddUniformBuffer(binding.binding, stages, binding.count);
+                AddDescriptorCost(cost, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, binding.count);
                 break;
             case DescriptorKind::StorageBuffer:
                 builder.AddStorageBuffer(binding.binding, stages, binding.count);
+                AddDescriptorCost(cost, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, binding.count);
                 break;
             case DescriptorKind::StorageImage:
                 builder.AddStorageImage(binding.binding, stages, binding.count);
+                AddDescriptorCost(cost, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, binding.count);
                 break;
         }
     }
-    return RegisterDescriptorSetLayout(builder.Build());
+    const VkDescriptorSetLayout layout = builder.Build();
+    m_resources.RegisterLayoutCost(layout, cost);
+    return RegisterDescriptorSetLayout(layout);
 }
 
 void Renderer::DestroyDescriptorSetLayout(DescriptorSetLayoutHandle handle) const noexcept
@@ -672,6 +680,7 @@ void Renderer::DestroyDescriptorSetLayout(DescriptorSetLayoutHandle handle) cons
     const VkDescriptorSetLayout layout = Native(handle);
     UnregisterDescriptorSetLayout(handle);
     if (layout != VK_NULL_HANDLE) {
+        m_resources.ForgetComputeLayout(layout);
         vkDestroyDescriptorSetLayout(m_device.Native(), layout, nullptr);
     }
 }
@@ -679,7 +688,16 @@ void Renderer::DestroyDescriptorSetLayout(DescriptorSetLayoutHandle handle) cons
 ReflectedSetLayouts Renderer::CreateReflectedSetLayouts(
     const std::vector<ReflectedDescriptorBinding>& bindings, const std::string& label) const
 {
-    return ReflectedSetLayouts(m_device.Native(), bindings, label);
+    ReflectedSetLayouts layouts(m_device.Native(), bindings, label);
+    for (const DescriptorBindingSetGroup& group : GroupDescriptorBindingsBySet(bindings)) {
+        m_resources.RegisterLayoutCost(layouts.Native(group.set), DescriptorCostOf(group.bindings));
+    }
+    return layouts;
+}
+
+DescriptorPoolStats Renderer::GetDescriptorPoolStats() const
+{
+    return m_resources.DescriptorStats();
 }
 
 Pipeline Renderer::CreatePipeline(

@@ -16,6 +16,14 @@ ComputeDescriptorWrite ComputeDescriptorWrite::StorageBuffer(
     return write;
 }
 
+ComputeDescriptorWrite ComputeDescriptorWrite::UniformBuffer(
+    std::uint32_t binding, VkBuffer buffer, uint64_t offset, uint64_t range)
+{
+    ComputeDescriptorWrite write = StorageBuffer(binding, buffer, offset, range);
+    write.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    return write;
+}
+
 ComputeDescriptorWrite ComputeDescriptorWrite::StorageImage(std::uint32_t binding, VkImageView imageView)
 {
     ComputeDescriptorWrite write;
@@ -45,11 +53,7 @@ void ComputeDescriptorSet::Rewrite(const std::vector<ComputeDescriptorWrite>& wr
         return;
     }
 
-    // Buffer/image info structs must stay alive until vkUpdateDescriptorSets()
-    // is actually called below - held in parallel vectors, reserved up
-    // front so pointers taken into them (while building each
-    // VkWriteDescriptorSet) are never invalidated by a mid-loop
-    // reallocation.
+    // Info structs must stay alive until vkUpdateDescriptorSets(); reserve so pointers into them stay valid.
     std::vector<VkDescriptorBufferInfo> bufferInfos;
     std::vector<VkDescriptorImageInfo> imageInfos;
     bufferInfos.reserve(writes.size());
@@ -66,7 +70,7 @@ void ComputeDescriptorSet::Rewrite(const std::vector<ComputeDescriptorWrite>& wr
         vkWrite.descriptorCount = 1;
         vkWrite.descriptorType = write.type;
 
-        if (write.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
+        if (write.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER || write.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
             VkDescriptorBufferInfo bufferInfo{};
             bufferInfo.buffer = write.buffer;
             bufferInfo.offset = static_cast<VkDeviceSize>(write.bufferOffset);
@@ -74,10 +78,7 @@ void ComputeDescriptorSet::Rewrite(const std::vector<ComputeDescriptorWrite>& wr
             bufferInfos.push_back(bufferInfo);
             vkWrite.pBufferInfo = &bufferInfos.back();
         } else {
-            // VK_DESCRIPTOR_TYPE_STORAGE_IMAGE or
-            // VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER - both are plain
-            // image-info writes, differing only in imageLayout/whether a
-            // sampler is set (see the two matching factory helpers above).
+            // Storage image or combined image sampler: a plain image-info write.
             VkDescriptorImageInfo imageInfo{};
             imageInfo.imageView = write.imageView;
             imageInfo.imageLayout = write.imageLayout;

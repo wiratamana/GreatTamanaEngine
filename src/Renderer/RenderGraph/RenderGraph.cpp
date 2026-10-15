@@ -322,6 +322,18 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
                 ComputeDescriptorWrite::StorageBuffer(binding.binding, buffer, binding.bufferOffset, binding.bufferRange));
             break;
         }
+        case BindingKind::UniformBuffer: {
+            const VkBuffer buffer = binding.bufferObjectHandle != BufferObjectHandle::Invalid
+                ? Native(binding.bufferObjectHandle)
+                : VK_NULL_HANDLE;
+            if (buffer == VK_NULL_HANDLE) {
+                skip(binding, "uniform buffer handle is invalid.");
+                break;
+            }
+            writes.push_back(
+                ComputeDescriptorWrite::UniformBuffer(binding.binding, buffer, binding.bufferOffset, binding.bufferRange));
+            break;
+        }
         case BindingKind::CombinedImageSampler: {
             const PhysicalTexture* tex = resolvedTexture(binding.textureHandle);
             if (tex == nullptr) {

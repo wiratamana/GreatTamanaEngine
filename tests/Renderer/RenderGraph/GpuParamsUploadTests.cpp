@@ -1,5 +1,5 @@
 // Tier-2 (headless GPU) tests for GpuParamsBuffer::Upload failure handling.
-// Skipped when the headless fixture is unusable.
+// Skipped only when the headless fixture itself is unusable.
 
 #include "Renderer/RenderGraph/GpuParams.h"
 
@@ -34,15 +34,14 @@ TEST(GpuParamsUploadTest, UploadReturnsFalseAndLogsOnceWhenCreateFails)
     ScopedLogSinkInstall logGuard(&sink);
     GpuParamsBuffer params;
     const char byte = 0;
+    const std::size_t impossibleSize = fixture.UnsupportedBufferSize();
     bool uploaded = true;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-        uploaded = params.Upload(b, &byte, std::size_t{ 1 } << 46, "HugeParams");
-        uploaded = params.Upload(b, &byte, std::size_t{ 1 } << 46, "HugeParams") || uploaded;
+        uploaded = params.Upload(b, &byte, impossibleSize, "HugeParams");
+        uploaded = params.Upload(b, &byte, impossibleSize, "HugeParams") || uploaded;
         return {};
     });
-    if (uploaded) {
-        GTEST_SKIP() << "This driver accepted a 64 TiB buffer; cannot force a failed create.";
-    }
+    ASSERT_FALSE(uploaded) << "a buffer larger than every memory heap must not be created";
 
     EXPECT_EQ(params.Handle(), BufferObjectHandle::Invalid);
     EXPECT_EQ(CountErrorsByCategory(sink, "GpuParams"), 1);

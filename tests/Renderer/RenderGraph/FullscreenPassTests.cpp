@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 
 namespace gte::rg {
 namespace {
@@ -233,6 +234,38 @@ TEST(FullscreenPassTest, EvictedPipelineIsFreedOnlyAfterTheRetireFramesPass)
     // A few frames later the victim is released.
     ASSERT_TRUE(DrawValid(fixture, shader, frame + 3, PixelFormat::RGBA16_Float, BlendMode::Additive));
     EXPECT_EQ(shader.RetiredPipelineCount(), 0u);
+}
+
+TEST(FullscreenPassTest, ErrorsPastTheOnceCapAreCoveredByOneHonestSuppressedNotice)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+    RecordingLogSink sink;
+    const ScopedLogSinkInstall logGuard(&sink);
+    Shader shader("ReflectFixture", ShaderKind::Graphics);
+
+    // 64 distinct messages fit; every later distinct message must not be logged again.
+    constexpr int kAttempts = 70;
+    for (int i = 0; i < kAttempts; ++i) {
+        const std::string badName = "nope" + std::to_string(i);
+        DeclareScene scene(fixture, static_cast<std::uint64_t>(i + 1), PixelFormat::RGBA8_UNorm);
+        EXPECT_FALSE(FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::GameView)
+                         .Bind(badName, scene.source)
+                         .Bind("sourceMask", scene.mask)
+                         .Push(0.5f)
+                         .Target(scene.target)
+                         .Draw());
+    }
+
+    EXPECT_EQ(CountByCategory(sink, "PassChain"), 65);
+    ASSERT_FALSE(sink.entries.empty());
+    int notices = 0;
+    for (const RecordingLogSink::Recorded& entry : sink.entries) {
+        notices += entry.message.find("suppressed") != std::string::npos ? 1 : 0;
+    }
+    EXPECT_EQ(notices, 1);
 }
 
 } // namespace

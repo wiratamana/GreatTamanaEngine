@@ -33,6 +33,8 @@ std::string KindMismatch(VkDescriptorType type, BindingResourceKind kind)
                                                          : std::string{};
     case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
         return kind == BindingResourceKind::Buffer ? std::string{} : "is a storage buffer: supply a buffer, not a texture";
+    case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+        return kind == BindingResourceKind::Buffer ? std::string{} : "is a uniform buffer: supply a buffer, not a texture";
     default:
         return "has a descriptor type that name binding does not support";
     }
@@ -103,12 +105,18 @@ BindingPlanResult PlanBindings(std::span<const ReflectedDescriptorBinding> refle
             problems.push_back(Quote(arg.name) + " was given an invalid resource handle");
             continue;
         }
-        if (arg.kind == BindingResourceKind::DepthTexture) {
-            const std::optional<TextureDesc> desc = describeTexture ? describeTexture(arg.texture) : std::nullopt;
-            if (!desc.has_value() || !desc->hasDepth) {
-                problems.push_back(Quote(arg.name) + " was given a depth view of a texture without a depth aspect");
-                continue;
-            }
+        const std::optional<TextureDesc> desc =
+            IsTextureKind(arg.kind) && describeTexture ? describeTexture(arg.texture) : std::nullopt;
+        if (arg.kind == BindingResourceKind::DepthTexture && (!desc.has_value() || !desc->hasDepth)) {
+            problems.push_back(Quote(arg.name) + " was given a depth view of a texture without a depth aspect");
+            continue;
+        }
+        if (arg.kind == BindingResourceKind::Texture && desc.has_value() && desc->hasDepth) {
+            problems.push_back(Quote(arg.name)
+                + (slot.type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                        ? " is a depth texture: use rg::Depth() to sample it"
+                        : " is a depth texture: it cannot be bound to a storage image"));
+            continue;
         }
         matched[index] = &arg;
     }
@@ -188,6 +196,9 @@ void DeclareBindings(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& p
         case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
             pass.ReadStorageBuffer(binding.binding, binding.buffer); // External buffers are not graph-tracked.
             break;
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+            pass.BindUniformBuffer(binding.binding, binding.buffer);
+            break;
         default:
             assert(false && "PlanBindings rejects unsupported descriptor types");
             break;
@@ -203,8 +214,8 @@ std::optional<std::string> ValidateFullscreenReflection(const ShaderReflectionRe
             return "binding " + std::to_string(binding.binding) + " is in set " + std::to_string(binding.set)
                 + ": fullscreen passes use set 0 only";
         }
-        if (binding.type != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-            return "binding " + std::to_string(binding.binding) + " is not a combined image sampler";
+        if (binding.type != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER && binding.type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
+            return "binding " + std::to_string(binding.binding) + " is not a combined image sampler or uniform buffer";
         }
         hasSetZero = true;
     }
@@ -227,6 +238,9 @@ std::optional<std::string> ValidateFullscreenTarget(const std::optional<TextureD
     }
     if (target->format == PixelFormat::Undefined) {
         return std::string("the target format is Undefined");
+    }
+    if (target->hasDepth) {
+        return std::string("the target is a depth texture: a fullscreen pass writes one color target");
     }
     return std::nullopt;
 }

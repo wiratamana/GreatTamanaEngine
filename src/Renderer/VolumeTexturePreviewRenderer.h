@@ -22,10 +22,6 @@ enum class VolumeTexturePreviewInterpretation : std::int32_t {
     AerialPerspectiveFrustum = 1, // Aerial perspective volume: frustum proxy and dedicated framing.
 };
 
-// Picks the interpretation from the registered texture name; every name except the aerial perspective
-// volume's prefix resolves to GenericDensityInAlpha. Pure, no GPU state.
-VolumeTexturePreviewInterpretation SelectVolumeTexturePreviewInterpretation(const std::string& volumeTextureName);
-
 // On-demand compute renderer that raymarches a VolumeTexture into a 256x256 RGBA8 thumbnail for HTTP fetches.
 // Records its own dispatch via ImmediateSubmit(), so it needs no render graph.
 class VolumeTexturePreviewRenderer {

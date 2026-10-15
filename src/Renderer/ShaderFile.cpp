@@ -41,21 +41,22 @@ const std::filesystem::path& ExecutableDir()
     return dir;
 }
 
-// Prefers the executable's directory; falls back to the working directory because tests run from the build root.
-std::filesystem::path ResolvePath(const std::string& path)
-{
-    const std::filesystem::path requested(path);
-    if (requested.is_absolute() || ExecutableDir().empty()) {
-        return requested;
-    }
-    const std::filesystem::path besideExe = ExecutableDir() / requested;
-    std::error_code ec;
-    return std::filesystem::exists(besideExe, ec) ? besideExe : requested;
-}
-
 [[noreturn]] void Fail(const std::string& path, const char* reason)
 {
     throw std::runtime_error("shader file '" + path + "' " + reason + " - was it compiled?");
+}
+
+// Relative paths resolve against the executable directory only, never the working directory.
+std::filesystem::path ResolvePath(const std::string& path)
+{
+    const std::filesystem::path requested(path);
+    if (requested.is_absolute()) {
+        return requested;
+    }
+    if (ExecutableDir().empty()) {
+        Fail(path, "cannot be resolved: executable directory unknown");
+    }
+    return ExecutableDir() / requested;
 }
 
 } // namespace

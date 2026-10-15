@@ -1,13 +1,13 @@
-// Tier-1 tests for SelectVolumeTexturePreviewInterpretation(): pure name-based selection, no GPU.
+// Tier-1 tests for the editor's name -> volume preview interpretation choice (pure, no GPU).
 
-#include "Renderer/VolumeTexturePreviewRenderer.h"
+#include "Editor/VolumeTexturePreviewSelection.h"
 
 #include <gtest/gtest.h>
 
 namespace gte {
 namespace {
 
-TEST(VolumeTexturePreviewRendererTest, AerialPerspectiveVolumeNamePrefixSelectsTheFrustumInterpretation)
+TEST(VolumeTexturePreviewSelectionTest, AerialPerspectiveVolumeNamePrefixSelectsTheFrustumInterpretation)
 {
     EXPECT_EQ(SelectVolumeTexturePreviewInterpretation("AtmosphereAerialPerspectiveVolume_GameView"),
         VolumeTexturePreviewInterpretation::AerialPerspectiveFrustum);
@@ -15,16 +15,15 @@ TEST(VolumeTexturePreviewRendererTest, AerialPerspectiveVolumeNamePrefixSelectsT
         VolumeTexturePreviewInterpretation::AerialPerspectiveFrustum);
 }
 
-TEST(VolumeTexturePreviewRendererTest, AnyOtherNameSelectsGenericInterpretation)
+TEST(VolumeTexturePreviewSelectionTest, AnyOtherNameSelectsGenericInterpretation)
 {
     EXPECT_EQ(SelectVolumeTexturePreviewInterpretation("SomeOtherVolumeTexture"),
         VolumeTexturePreviewInterpretation::GenericDensityInAlpha);
     EXPECT_EQ(SelectVolumeTexturePreviewInterpretation(""), VolumeTexturePreviewInterpretation::GenericDensityInAlpha);
 }
 
-TEST(VolumeTexturePreviewRendererTest, NamePrefixMatchIsAnchoredAtTheStartNotJustAnySubstring)
+TEST(VolumeTexturePreviewSelectionTest, PrefixMatchIsAnchoredAtTheStart)
 {
-    // The prefix must be at the very start of the name; containing it elsewhere does not match.
     EXPECT_EQ(SelectVolumeTexturePreviewInterpretation("PrefixedAtmosphereAerialPerspectiveVolume"),
         VolumeTexturePreviewInterpretation::GenericDensityInAlpha);
 }

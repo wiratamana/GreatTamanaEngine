@@ -2305,11 +2305,7 @@ set(GTE_TEST_SOURCES
     Renderer/GpuTimingTests.cpp
     Renderer/ComputeDispatchTests.cpp
     Renderer/VolumeTexturePreviewMathTests.cpp
-    Renderer/VolumeTexturePreviewRendererTests.cpp
-    # better-render-pass-3 campaign, BLOCK2 PHASE1
-    # (task_manager/better-render-pass-4/PHASE1_RENDERTEXTURE_COLORLESS_EXTENSION.md)
-    # - Tier-2 (real, headless GPU, tests/Fakes/HeadlessRenderGraphFixture.h)
-    # tests for RenderTexture's new createColorImage constructor parameter.
+    # Headless-GPU test for RenderTexture's colorless constructor option.
     Renderer/RenderTextureColorlessTests.cpp
     # Tier-2 (real, headless GPU) test for RenderTexture's own tracked
     # barrier state - RenderTexture::CurrentState()/FinalizeForExternalSampling().
@@ -2500,14 +2496,7 @@ set(GTE_TEST_SOURCES
     Physics/JointPhysicsOverrideApplicationTests.cpp
 )
 
-# Editor/EditorCamera.h/.cpp (see src/Editor/EditorCamera.h) is always
-# compiled into gte_editor today - the whole src/Editor/ folder besides
-# EditorLayer.h/NullEditorLayer.cpp is part of the same always-compiled
-# gte_editor source list (see the root CMakeLists.txt's "Editor library"
-# comment). EditorCamera itself is still genuinely Tier 1 (see its own file
-# comment). editor-core-separation-1 campaign, PHASE9 - the `if(TRUE)` below
-# is kept as a harmless, permanently-true wrapper (mechanical file movement
-# only, per this phase's own scope) rather than restructured/de-indented.
+# Editor tests (gte_editor is always compiled).
 if(TRUE)
     list(APPEND GTE_TEST_SOURCES
         Editor/EditorCameraTests.cpp
@@ -2515,9 +2504,8 @@ if(TRUE)
         Editor/SelectionTests.cpp
         Editor/ImGuiMemoryTrackerTests.cpp
         Editor/MemoryPanelDataTests.cpp
-        # editor-core-separation-1 campaign, PHASE4 - the Editor-owned
-        # debug-name overlay (see src/Editor/EditorGpuMemoryNameOverlay.h).
-        # Genuinely Tier 1 (no live VmaAllocator/VkDevice needed).
+        Editor/VolumeTexturePreviewSelectionTests.cpp
+        # Pure test of the Editor-owned debug-name overlay (no live device).
         Editor/EditorGpuMemoryNameOverlayTests.cpp
         # editor-core-separation-25 campaign, PHASE2
         # (PHASE2_EDITOR_FRAME_DEBUGGER_PASS_METADATA_RECORDER.md) - pure,
@@ -2680,16 +2668,15 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
 gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.comp)
 gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.vert)
 gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.frag)
+gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixtureUniform.comp)
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_REFLECT_COMP_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixture.comp.spv"
     GTE_TEST_REFLECT_VERT_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixture.vert.spv"
     GTE_TEST_REFLECT_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixture.frag.spv"
+    GTE_TEST_REFLECT_UNIFORM_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixtureUniform.comp.spv"
 )
 
-# Same "already declared by root CMakeLists.txt's own gte_add_shader() call"
-# reasoning as GTE_TEST_BOXBLUR_SPV_PATH immediately above - these two
-# shaders are only ever registered against GreatTamanaEditor, never a second
-# time here.
+# Compiled by the root target; the tests only depend on the output and take its absolute path.
 target_sources(GreatTamanaEngineTests PRIVATE
     "${CMAKE_BINARY_DIR}/shaders/VolumetricFroxelExamplePerCellFill.comp.spv"
     "${CMAKE_BINARY_DIR}/shaders/VolumetricFroxelExamplePerColumnFill.comp.spv"
@@ -2699,33 +2686,19 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_FROXEL_PERCOLUMN_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/VolumetricFroxelExamplePerColumnFill.comp.spv"
 )
 
-# editor-core-separation-1 campaign, PHASE14
-# (PHASE14_WINDOW_SDL_RELOCATION_TO_EDITOR.md) - lets
-# Build/SdlLinkageRegressionTests.cpp's new
-# GteCoreArchiveNoLongerReferencesRealSdl3FunctionSymbols test locate
-# gte_core's own built static library file reliably regardless of build-
-# directory layout/generator (mirrors sdl3_copy_runtime_dll()'s own
-# $<TARGET_FILE:...> generator-expression precedent), so it can mechanically
-# scan gte_core.a's own bytes for any real SDL3 function symbol name.
+# Every shader the editor compiles is staged next to the test exe: relative "shaders/<name>.spv" paths
+# resolve against the exe directory only.
+get_property(GTE_ALL_COMPILED_SHADERS GLOBAL PROPERTY GTE_COMPILED_SHADERS)
+foreach(GTE_TEST_STAGED_SHADER ${GTE_ALL_COMPILED_SHADERS})
+    gte_stage_shader(GreatTamanaEngineTests "${GTE_TEST_STAGED_SHADER}")
+endforeach()
+
+# Lets the SDL-linkage test scan the built gte_core archive.
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_CORE_ARCHIVE_PATH="$<TARGET_FILE:gte_core>"
 )
 
-# editor-core-separation-1 campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md,
-# Step 9) - links gte_editor (never gte_core directly, matching
-# GreatTamanaEditor's own Rule-4 precedent above): Editor/*Tests.cpp above
-# (EditorCameraTests.cpp, LoggerTests.cpp, FrameDebuggerDataTests.cpp, ...)
-# needs symbols that now permanently live in gte_editor's own archive.
-# gte_editor's own PUBLIC dependency on gte_core brings it in transitively.
-#
-# gte_editor is linked with a plain, single-pass target_link_libraries()
-# call because gte_core's own object files carry zero unresolved references
-# to any gte_editor-only symbol - see
-# task_manager/editor-core-separation-2/PHASE2_FRAME_DEBUGGER_CAPTURE_RECORDER_INTERFACE.md
-# and PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md for the two
-# fixes that made this true, and tools/ci/gte_core_player_link_probe/ for
-# the permanent, mechanical proof (a real executable link against gte_core.a
-# alone, no gte_editor involved at all).
+# Links gte_editor (brings gte_core in transitively). gte_core has no unresolved gte_editor symbols.
 target_link_libraries(GreatTamanaEngineTests PRIVATE
     gte_editor
     GTest::gtest

@@ -194,6 +194,7 @@ bool IsValidBlitRegion(const ResolvedBlitRegion& region, VkExtent2D resolvedExte
 // implies a barrier; the matching ReadTexture()/WriteTexture() call still owns that.
 enum class BindingKind : std::uint8_t {
     StorageBuffer,
+    UniformBuffer,
     CombinedImageSampler,
     StorageImage,
     // Combined-image-sampler against an already-resolved ImageViewHandle/SamplerHandle pair that is not a graph resource.

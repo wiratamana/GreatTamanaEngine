@@ -128,6 +128,10 @@ public:
         void BindStorageBuffer(std::uint32_t binding, BufferObjectHandle handle, uint64_t offset = 0,
             uint64_t range = VK_WHOLE_SIZE);
 
+        // Binds an untracked, externally managed uniform buffer.
+        void BindUniformBuffer(std::uint32_t binding, BufferObjectHandle handle, uint64_t offset = 0,
+            uint64_t range = VK_WHOLE_SIZE);
+
         // If sampler is Invalid, uses the texture's own sampler (a volume has none: pass one).
         void BindCombinedImageSampler(
             std::uint32_t binding, TextureHandle handle, SamplerHandle sampler = SamplerHandle::Invalid);

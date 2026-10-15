@@ -13,7 +13,16 @@
 #include <initializer_list>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 
 namespace gte {
 namespace {
@@ -101,6 +110,95 @@ TEST(ShaderFileTest, GoodFileReturnsExactBytes)
 
     ASSERT_EQ(bytes.size(), expected.size());
     EXPECT_EQ(std::memcmp(bytes.data(), expected.data(), expected.size()), 0);
+}
+
+// Directory of the test executable (the base ReadShaderFileBytes uses for relative paths).
+std::filesystem::path TestExecutableDir()
+{
+    std::wstring buffer(MAX_PATH, L'\0');
+    for (;;) {
+        const DWORD len = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (len == 0) {
+            return {};
+        }
+        if (len < buffer.size()) {
+            buffer.resize(len);
+            return std::filesystem::path(buffer).parent_path();
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+}
+
+// Writes a file at `path` and removes it on destruction.
+class ScopedFileAt {
+public:
+    ScopedFileAt(std::filesystem::path path, const std::string& bytes)
+        : m_path(std::move(path))
+    {
+        std::ofstream out(m_path, std::ios::binary | std::ios::trunc);
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    }
+    ~ScopedFileAt()
+    {
+        std::error_code ec;
+        std::filesystem::remove(m_path, ec);
+    }
+    ScopedFileAt(const ScopedFileAt&) = delete;
+    ScopedFileAt& operator=(const ScopedFileAt&) = delete;
+
+private:
+    std::filesystem::path m_path;
+};
+
+// Switches the working directory and restores it on destruction.
+class ScopedWorkingDir {
+public:
+    explicit ScopedWorkingDir(const std::filesystem::path& dir)
+        : m_previous(std::filesystem::current_path())
+    {
+        std::filesystem::current_path(dir);
+    }
+    ~ScopedWorkingDir()
+    {
+        std::error_code ec;
+        std::filesystem::current_path(m_previous, ec);
+    }
+    ScopedWorkingDir(const ScopedWorkingDir&) = delete;
+    ScopedWorkingDir& operator=(const ScopedWorkingDir&) = delete;
+
+private:
+    std::filesystem::path m_previous;
+};
+
+TEST(ShaderFileTest, RelativePathResolvesAgainstExecutableDirectory)
+{
+    const std::filesystem::path exeDir = TestExecutableDir();
+    ASSERT_FALSE(exeDir.empty());
+
+    const std::string expected = Words({ kMagic, 0x00010600u });
+    const std::string name = "gte_shaderfile_exe_relative.spv";
+    const ScopedFileAt file(exeDir / name, expected);
+
+    const std::vector<std::byte> bytes = ReadShaderFileBytes(name);
+    ASSERT_EQ(bytes.size(), expected.size());
+    EXPECT_EQ(std::memcmp(bytes.data(), expected.data(), expected.size()), 0);
+}
+
+TEST(ShaderFileTest, RelativePathPresentOnlyInWorkingDirectoryIsNotFound)
+{
+    const std::filesystem::path exeDir = TestExecutableDir();
+    ASSERT_FALSE(exeDir.empty());
+
+    const std::filesystem::path cwdDir = std::filesystem::temp_directory_path() / "gte_shaderfile_cwd_only";
+    std::filesystem::create_directories(cwdDir);
+    const std::string name = "gte_shaderfile_cwd_only.spv";
+    ASSERT_FALSE(std::filesystem::exists(exeDir / name));
+
+    const ScopedFileAt file(cwdDir / name, Words({ kMagic, 0x00010600u }));
+    const ScopedWorkingDir cwd(cwdDir);
+
+    EXPECT_THROW(ReadShaderFileBytes(name), std::runtime_error);
+    EXPECT_NO_THROW(ReadShaderFileBytes((cwdDir / name).string()));
 }
 
 } // namespace

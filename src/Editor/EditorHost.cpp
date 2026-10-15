@@ -13,6 +13,7 @@
 // Built-in feature modules are created generically through this registry.
 #include "../Core/Plugins/BuiltinFeatureModuleRegistry.h"
 #include "ProjectRootPath.h" // ExecutableDirectory().
+#include "VolumeTexturePreviewSelection.h"
 #include "../Core/EditorPanelRegistry.h"
 // RenderFeatureCompositor::DebugSnapshot() needs the full type (Core.h only forward-declares it).
 #include "../Core/Plugins/RenderFeatureCompositor.h"

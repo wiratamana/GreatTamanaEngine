@@ -7,6 +7,9 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <map>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -157,10 +160,12 @@ struct Hit {
 };
 
 // One token per line ('#' starts a comment): `Foo` whole identifier, `Vk*` identifier starting with Vk + uppercase,
-// anything else is plain text whose identifier-character ends must sit on identifier boundaries.
+// `*Foo*` identifier containing Foo anywhere, anything else is plain text whose identifier-character ends must sit
+// on identifier boundaries. A plain-text token ending in '(' also matches with whitespace before the '('.
 struct TokenSet {
     std::unordered_set<std::string> words;
     std::vector<std::string> prefixes;
+    std::vector<std::string> contains;
     std::vector<std::string> phrases;
     bool ignoreCase = false;
 };
@@ -201,9 +206,17 @@ inline TokenSet ParseTokens(std::string_view fileText, bool ignoreCase)
             continue;
         }
         const std::string token = ignoreCase ? ToLower(line) : std::string(line);
+        const auto isIdentText = [](std::string_view s) {
+            return !s.empty() && std::all_of(s.begin(), s.end(), [](char c) { return IsIdentChar(c); });
+        };
+        if (token.size() > 2 && token.front() == '*' && token.back() == '*'
+            && isIdentText(std::string_view(token).substr(1, token.size() - 2))) {
+            set.contains.push_back(token.substr(1, token.size() - 2));
+            continue;
+        }
         const bool wildcard = token.size() > 1 && token.back() == '*';
         const std::string body = wildcard ? token.substr(0, token.size() - 1) : token;
-        const bool allIdent = std::all_of(body.begin(), body.end(), [](char c) { return IsIdentChar(c); });
+        const bool allIdent = isIdentText(body);
         if (wildcard && allIdent) {
             set.prefixes.push_back(body);
         } else if (allIdent) {
@@ -255,6 +268,9 @@ inline std::vector<Hit> FindTokens(std::string_view masked, const TokenSet& toke
                 && std::isupper(static_cast<unsigned char>(masked[i + prefix.size()])) != 0;
             matched = matched || upperNext;
         }
+        for (const std::string& part : tokens.contains) {
+            matched = matched || run.find(part) != std::string_view::npos;
+        }
         if (matched) {
             hits.push_back(Hit{ LineOf(starts, i), std::string(masked.substr(i, end - i)) });
         }
@@ -262,10 +278,21 @@ inline std::vector<Hit> FindTokens(std::string_view masked, const TokenSet& toke
     }
 
     for (const std::string& phrase : tokens.phrases) {
-        for (std::size_t at = text.find(phrase); at != std::string_view::npos; at = text.find(phrase, at + 1)) {
-            const bool leftOk = !IsIdentChar(phrase.front()) || at == 0 || !IsIdentChar(text[at - 1]);
-            const std::size_t after = at + phrase.size();
-            const bool rightOk = !IsIdentChar(phrase.back()) || after >= text.size() || !IsIdentChar(text[after]);
+        // A phrase ending in '(' also matches with whitespace (or a newline) before the '('.
+        const bool callForm = phrase.size() > 1 && phrase.back() == '(';
+        const std::string_view stem = callForm ? std::string_view(phrase).substr(0, phrase.size() - 1) : std::string_view(phrase);
+        for (std::size_t at = text.find(stem); at != std::string_view::npos; at = text.find(stem, at + 1)) {
+            const bool leftOk = !IsIdentChar(stem.front()) || at == 0 || !IsIdentChar(text[at - 1]);
+            std::size_t after = at + stem.size();
+            bool rightOk = false;
+            if (callForm) {
+                while (after < text.size() && (text[after] == ' ' || text[after] == '\t' || text[after] == '\r' || text[after] == '\n')) {
+                    ++after;
+                }
+                rightOk = after < text.size() && text[after] == '(';
+            } else {
+                rightOk = !IsIdentChar(stem.back()) || after >= text.size() || !IsIdentChar(text[after]);
+            }
             if (leftOk && rightOk) {
                 hits.push_back(Hit{ LineOf(starts, at), phrase });
             }
@@ -356,6 +383,45 @@ inline bool ParseAllowlist(std::string_view fileText, std::vector<AllowEntry>& o
         out.push_back(std::move(entry));
     }
     return true;
+}
+
+using HitsByFile = std::map<std::string, std::vector<Hit>>;
+
+struct RatchetResult {
+    std::vector<std::string> messages;
+    int failures = 0;
+};
+
+// Allowlist ratchet. Fails on: a duplicate line, a line whose file is gone, a line whose file is clean,
+// and every file with hits that is not listed. `exists` answers whether a scan-root-relative path exists.
+inline RatchetResult CheckAllowlist(
+    const HitsByFile& found, const std::vector<AllowEntry>& allowed, const std::function<bool(const std::string&)>& exists)
+{
+    RatchetResult result;
+    std::set<std::string> seen;
+    for (const AllowEntry& entry : allowed) {
+        const std::string where = " (line " + std::to_string(entry.line) + ")";
+        if (!seen.insert(entry.path).second) {
+            result.messages.push_back("stale line: remove it - " + entry.path + " is listed twice" + where);
+            ++result.failures;
+        } else if (!exists(entry.path)) {
+            result.messages.push_back("stale line: remove it - " + entry.path + " no longer exists" + where);
+            ++result.failures;
+        } else if (found.find(entry.path) == found.end()) {
+            result.messages.push_back("stale line: remove it - " + entry.path + " is clean now" + where);
+            ++result.failures;
+        }
+    }
+    for (const auto& [path, hits] : found) {
+        if (seen.count(path) != 0) {
+            continue;
+        }
+        for (const Hit& hit : hits) {
+            result.messages.push_back("violation: " + path + ":" + std::to_string(hit.line) + ": " + hit.token);
+        }
+        ++result.failures;
+    }
+    return result;
 }
 
 } // namespace gte::ci

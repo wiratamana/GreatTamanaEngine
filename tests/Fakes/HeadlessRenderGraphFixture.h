@@ -7,6 +7,9 @@
 #include "../../src/Renderer/RenderGraph/RenderGraph.h"
 #include "HeadlessSurfaceProvider.h"
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -38,6 +41,26 @@ public:
 
     // Test-only access to the Vulkan device (this fixture is a friend of Renderer).
     VkDevice Device() const noexcept { return m_renderer->GetVulkanContextInfo().device; }
+
+    // Square 2D image edge no device can create: one past maxImageDimension2D.
+    std::uint32_t UnsupportedImageExtent() const
+    {
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(m_renderer->GetVulkanContextInfo().physicalDevice, &properties);
+        return properties.limits.maxImageDimension2D + 1u;
+    }
+
+    // Buffer size no device can allocate: one byte more than its largest memory heap.
+    std::size_t UnsupportedBufferSize() const
+    {
+        VkPhysicalDeviceMemoryProperties memory{};
+        vkGetPhysicalDeviceMemoryProperties(m_renderer->GetVulkanContextInfo().physicalDevice, &memory);
+        VkDeviceSize largest = 0;
+        for (std::uint32_t i = 0; i < memory.memoryHeapCount; ++i) {
+            largest = std::max(largest, memory.memoryHeaps[i].size);
+        }
+        return static_cast<std::size_t>(largest) + 1u;
+    }
 
     // Drives one SynchronousImmediateReadback Execute(); `build` declares whatever passes/resources a test needs.
     void RunSynchronousFrame(

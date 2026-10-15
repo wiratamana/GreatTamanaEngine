@@ -1,0 +1,15 @@
+#version 450
+
+// Reflection fixture: a named uniform buffer and a storage image.
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(std140, set = 0, binding = 0) uniform TintBlock {
+    vec4 color;
+} tint;
+
+layout(set = 0, binding = 1, rgba8) uniform writeonly image2D outputImage;
+
+void main()
+{
+    imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), tint.color);
+}

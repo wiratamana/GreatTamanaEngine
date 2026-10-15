@@ -25,6 +25,9 @@ struct ComputeDescriptorWrite {
     static ComputeDescriptorWrite StorageBuffer(
         std::uint32_t binding, VkBuffer buffer, uint64_t offset = 0, uint64_t range = VK_WHOLE_SIZE);
 
+    static ComputeDescriptorWrite UniformBuffer(
+        std::uint32_t binding, VkBuffer buffer, uint64_t offset = 0, uint64_t range = VK_WHOLE_SIZE);
+
     static ComputeDescriptorWrite StorageImage(std::uint32_t binding, VkImageView imageView);
 
     static ComputeDescriptorWrite CombinedImageSampler(

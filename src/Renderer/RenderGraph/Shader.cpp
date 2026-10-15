@@ -93,9 +93,7 @@ struct Shader::Impl {
     }
 };
 
-namespace {
-
-void BuildCompute(Shader::Impl& impl, Renderer& renderer)
+void Shader::BuildCompute(Impl& impl, Renderer& renderer)
 {
     ComputePipeline built = renderer.CreateComputePipeline(impl.stages.front().spirvPath);
     ValidateBindingNames(built.ReflectedBindings(), impl.label);
@@ -107,7 +105,7 @@ void BuildCompute(Shader::Impl& impl, Renderer& renderer)
     impl.layout = layout;
 }
 
-void BuildGraphics(Shader::Impl& impl, Renderer& renderer)
+void Shader::BuildGraphics(Impl& impl, Renderer& renderer)
 {
     ShaderReflectionResult reflection = ReflectShader(impl.stages);
     ValidateBindingNames(reflection.descriptorBindings, impl.label);
@@ -120,7 +118,7 @@ void BuildGraphics(Shader::Impl& impl, Renderer& renderer)
         throw std::runtime_error("shader '" + impl.label + "' declares no descriptor set 0");
     }
 
-    Shader::Impl::Graphics graphics;
+    Impl::Graphics graphics;
     graphics.pushStages = ToShaderStageMask(reflection.pushConstantStages);
     graphics.reflection = std::move(reflection);
     graphics.layouts = std::move(layouts);
@@ -128,9 +126,9 @@ void BuildGraphics(Shader::Impl& impl, Renderer& renderer)
     impl.layout = layout;
 }
 
-Pipeline BuildFullscreenPipeline(const Shader::Impl& impl, Renderer& renderer, const FullscreenKey& key)
+Pipeline Shader::BuildFullscreenPipeline(const Impl& impl, Renderer& renderer, const FullscreenKey& key)
 {
-    const Shader::Impl::Graphics& graphics = *impl.graphics;
+    const Impl::Graphics& graphics = *impl.graphics;
 
     PipelineDesc desc = PipelinePreset::Opaque(key.colorFormat, PixelFormat::Undefined);
     desc.blendMode = key.blend;
@@ -151,8 +149,6 @@ Pipeline BuildFullscreenPipeline(const Shader::Impl& impl, Renderer& renderer, c
     const std::vector<std::byte> fragment = ReadShaderFileBytes(impl.stages[1].spirvPath);
     return renderer.CreatePipeline(desc, vertex, fragment);
 }
-
-} // namespace
 
 Shader::Shader(const char* baseName, ShaderKind kind)
     : m_impl(std::make_unique<Impl>())
@@ -193,6 +189,7 @@ bool Shader::EnsureBuilt(RenderGraphBuilder& builder)
         return false;
     }
 
+    bool failed = false;
     std::string failure;
     try {
         if (impl.kind == ShaderKind::Compute) {
@@ -201,12 +198,14 @@ bool Shader::EnsureBuilt(RenderGraphBuilder& builder)
             BuildGraphics(impl, *renderer);
         }
     } catch (const std::exception& e) {
+        failed = true;
         failure = e.what();
     } catch (...) {
+        failed = true;
         failure = "unknown error while building '" + impl.label + "'";
     }
 
-    if (!failure.empty()) {
+    if (failed) {
         impl.compute.reset();
         impl.graphics.reset();
         impl.layout = DescriptorSetLayoutHandle::Invalid;
@@ -286,6 +285,7 @@ const Pipeline* Shader::GraphicsPipeline(RenderGraphBuilder& builder, const Full
         return graphics.pipelines[touched.slot].get();
     }
 
+    bool failed = false;
     std::string failure;
     try {
         if (graphics.pipelines[touched.slot] != nullptr) {
@@ -294,12 +294,14 @@ const Pipeline* Shader::GraphicsPipeline(RenderGraphBuilder& builder, const Full
         graphics.pipelines[touched.slot] =
             std::make_unique<Pipeline>(BuildFullscreenPipeline(impl, *impl.renderer, key));
     } catch (const std::exception& e) {
+        failed = true;
         failure = e.what();
     } catch (...) {
+        failed = true;
         failure = "unknown error while building a pipeline for '" + impl.label + "'";
     }
 
-    if (!failure.empty()) {
+    if (failed) {
         graphics.pipelines[touched.slot].reset();
         graphics.index.Release(touched.slot);
         if (graphics.gates.OnFailure(key, frame) == BuildRetryGate::FailureKind::First) {
@@ -318,9 +320,18 @@ std::size_t Shader::RetiredPipelineCount() const noexcept
     return m_impl->graphics.has_value() ? m_impl->graphics->retired.size() : 0;
 }
 
-bool Shader::NoteOnce(std::string_view key)
+OnceLog Shader::NoteOnce(std::string_view key)
 {
-    return m_impl->onceKeys.Note(key) == BoundedOnceSet<64>::Result::First;
+    const auto result = m_impl->onceKeys.Note(key);
+    if (!BoundedOnceSet<64>::ShouldLog(result)) {
+        return OnceLog::Skip;
+    }
+    return result == BoundedOnceSet<64>::Result::First ? OnceLog::Message : OnceLog::SuppressedNotice;
+}
+
+std::string_view Shader::Label() const noexcept
+{
+    return m_impl->label;
 }
 
 } // namespace gte::rg

@@ -317,17 +317,14 @@ TEST(RenderViewRegistryTest, FailedCreateOrGetViewLeavesTheNameRetryableAfterwar
     HeadlessRenderGraphFixture fixture;
     if (!fixture.IsUsable()) { GTEST_SKIP() << fixture.SkipReason(); }
     RenderViewRegistry registry(fixture.GetRenderer());
+    const std::uint32_t impossibleExtent = fixture.UnsupportedImageExtent();
     bool threw = false;
     try {
-        (void)registry.CreateOrGetView("HugeView", MakeColorDesc(100000, 100000));
+        (void)registry.CreateOrGetView("HugeView", MakeColorDesc(impossibleExtent, impossibleExtent));
     } catch (const std::exception&) {
         threw = true;
     }
-    if (!threw) {
-        GTEST_SKIP() << "This machine's driver/GPU did not reject a 100000x100000 image as expected - see "
-                        "RenderGraphPersistentResourceCacheTests.cpp's own identical, honestly-documented "
-                        "machine-dependent limitation.";
-    }
+    ASSERT_TRUE(threw) << "an image larger than maxImageDimension2D must be rejected";
     const rg::RenderViewId retry = registry.CreateOrGetView("HugeView", MakeColorDesc());
     EXPECT_NE(registry.FindViewTarget(retry), nullptr);
 }

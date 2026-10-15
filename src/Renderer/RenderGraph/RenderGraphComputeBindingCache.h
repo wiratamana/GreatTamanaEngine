@@ -36,8 +36,8 @@ public:
     // Frees sets unused for more than `staleFrames`. The age guard keeps in-flight command buffers safe.
     void BeginFrame(std::uint64_t currentFrame, std::uint64_t staleFrames = kDefaultStaleFrames);
 
-    // Frees every set allocated against `layout`. The caller guarantees the GPU is done with them.
-    // Runs once per frame, so a driver that reuses a layout handle within the same frame can alias a stale key.
+    // Frees every set allocated against `layout`. A destroyed shader queues its release; the queue drains once
+    // per frame in BeginPersistentResourceFrame, never inside Execute (frames in flight may still use the sets).
     void Release(VkDescriptorSetLayout layout);
 
     static constexpr std::uint64_t kDefaultStaleFrames = 600;

@@ -24,6 +24,9 @@ ReflectedSetLayouts::ReflectedSetLayouts(
                 case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
                     builder.AddStorageBuffer(binding.binding, binding.stages, binding.count);
                     break;
+                case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+                    builder.AddUniformBuffer(binding.binding, binding.stages, binding.count);
+                    break;
                 case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
                     builder.AddStorageImage(binding.binding, binding.stages, binding.count);
                     break;

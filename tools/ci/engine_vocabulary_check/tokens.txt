@@ -1,13 +1,15 @@
 # Feature and gameplay words the engine layer (src/Renderer, src/Core) must not contain. Case-insensitive.
-Atmosphere
-Shadow
+# `*Word*` matches inside any identifier, comment or string (ATMOSPHERE_X, AtmosphereLutRenderer).
+# Bare words match whole identifiers only (Sky, Fog, Water, Volumetric would hit unrelated names).
+*Atmosphere*
+*Shadow*
+*Cloud*
+*Weather*
+*Terrain*
+*Player*
+*Enemy*
+*Gameplay*
 Sky
-Cloud
-Volumetric
 Fog
-Weather
-Terrain
 Water
-Player
-Enemy
-Gameplay
+Volumetric

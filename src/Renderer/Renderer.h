@@ -46,7 +46,6 @@ class RenderGraphComputeBindingCache;
 
 namespace gte {
 
-class AtmosphereLutRenderer;
 class GpuDrivenBatchCache;
 class HeadlessRenderGraphFixture;
 class ISurfaceProvider;
@@ -244,6 +243,7 @@ public:
     std::shared_ptr<GpuMemoryTracker> GetMemoryTracker() const noexcept { return m_resources.GetMemoryTracker(); }
     VmaAllocator GetVmaAllocator() const noexcept { return m_allocator.Native(); }
     std::vector<VmaBudget> GetVmaHeapBudgets() const;
+    DescriptorPoolStats GetDescriptorPoolStats() const; // Sets and descriptors in use per type.
 
     // GPU timing queries.
     GpuTimingSample LastGpuTiming(GpuTimingSlot slot) const noexcept;
@@ -300,7 +300,6 @@ private:
     friend class GpuDrivenBatchCache;
     friend class VolumeTexturePreviewRenderer;
     friend class RenderFeatureCompositor;
-    friend class AtmosphereLutRenderer;
     friend class HeadlessRenderGraphFixture;
 
     // Helper for RenderGraph initialization before member lists are ready.

@@ -35,21 +35,23 @@ VkDescriptorType MapDescriptorType(SpvReflectDescriptorType type, const std::str
     switch (type) {
         case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER:
             return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+            return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE:
             return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         case SPV_REFLECT_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
             return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         default:
             throw std::runtime_error("ShaderReflection: '" + path
-                + "' declares an unsupported descriptor type (only storage buffer, storage image and "
-                  "combined image sampler are supported).");
+                + "' declares an unsupported descriptor type (only uniform buffer, storage buffer, storage image "
+                  "and combined image sampler are supported).");
     }
 }
 
-// Samplers are always read. Storage resources follow the readonly/writeonly decorations.
+// Samplers and uniform buffers are always read. Storage resources follow the readonly/writeonly decorations.
 ReflectedAccess InferAccess(const SpvReflectDescriptorBinding& binding, VkDescriptorType type)
 {
-    if (type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+    if (type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER || type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
         return ReflectedAccess::ReadOnly;
     }
     const bool nonWritable = (binding.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE) != 0;

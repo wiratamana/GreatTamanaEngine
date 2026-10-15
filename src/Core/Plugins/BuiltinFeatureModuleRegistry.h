@@ -8,26 +8,17 @@
 
 namespace gte {
 
-// Meyers-singleton, mirroring EditorPanelRegistry::Instance() - the vector
-// is only constructed on first real use, so there is no static-init-order
-// risk.
+// Meyers singleton: the factory list is built on first use, so there is no static-init-order risk.
 class BuiltinFeatureModuleRegistry {
 public:
     static BuiltinFeatureModuleRegistry& Instance();
 
-    // Called by each feature's self-registration macro, at static-init
-    // time, before main(). Only appends to a factory list - never touches
-    // Core, never constructs anything. A duplicate debugName is refused:
-    // logged unconditionally, asserted in debug builds; a release build
-    // keeps the first registration and drops the second.
+    // Called by the self-registration macro before main(); only stores the factory.
+    // A duplicate debugName is refused (logged, asserted in debug): the first registration wins.
     void RegisterFactory(const char* debugName, EngineFeatureModuleFactory factory);
 
-    // Called exactly once, by EditorHost (or a future PlayerHost), after
-    // Core exists. Constructs one instance per factory, in registration
-    // order. Caller owns the result; this registry keeps only the factory
-    // list. Each factory call is wrapped in try/catch - a misbehaving
-    // module's constructor throwing is logged by name and skipped, it does
-    // not take every other already-registered feature down with it.
+    // Called once by the host after Core exists: one instance per factory, in registration order.
+    // A factory that throws is logged by name and skipped. The caller owns the result.
     std::vector<std::unique_ptr<IEngineFeatureModule>> CreateAll(Core& core) const;
 
 private:

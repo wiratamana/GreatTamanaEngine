@@ -77,6 +77,32 @@ TEST(RenderGraphPersistentResourceCacheTest, ResolveReturnsTheSamePhysicalTextur
     }
 }
 
+// The very first request may happen at frame 0; only a second request in the same frame is refused.
+TEST(RenderGraphPersistentResourceCacheTest, FirstRequestAtFrameZeroIsAcceptedAndASecondOneInThatFrameIsRefused)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    RecordingLogSink sink;
+    const ScopedLogSinkInstall logGuard(&sink);
+    RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
+    const TextureDesc desc = MakeColorDesc();
+
+    std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> first;
+    std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> second;
+    fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
+        first = cache.Resolve(kTestOwner, "FrameZero", desc, /*currentFrame=*/0, kSync);
+        second = cache.Resolve(kTestOwner, "FrameZero", desc, /*currentFrame=*/0, kSync);
+        return {};
+    });
+
+    EXPECT_TRUE(first.has_value());
+    EXPECT_FALSE(second.has_value());
+    EXPECT_EQ(CountByCategory(sink, kCacheLogCategory), 1);
+}
+
 // Two owners with the same name and desc never share a texture.
 TEST(RenderGraphPersistentResourceCacheTest, TwoOwnersWithTheSameNameAndDescNeverCollide)
 {
@@ -104,7 +130,7 @@ TEST(RenderGraphPersistentResourceCacheTest, TwoOwnersWithTheSameNameAndDescNeve
     EXPECT_NE(resolvedA->texture->Image(), resolvedB->texture->Image());
 }
 
-// A failed create throws and leaves the key retryable. Skips when the driver accepts the huge size.
+// A failed create throws and leaves the key retryable.
 TEST(RenderGraphPersistentResourceCacheTest, FailedResolveThrowsAndLeavesTheKeyRetryableAfterward)
 {
     HeadlessRenderGraphFixture fixture;
@@ -113,7 +139,8 @@ TEST(RenderGraphPersistentResourceCacheTest, FailedResolveThrowsAndLeavesTheKeyR
     }
 
     RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
-    const TextureDesc hugeDesc = MakeColorDesc(100000u, 100000u);
+    const std::uint32_t impossibleExtent = fixture.UnsupportedImageExtent();
+    const TextureDesc hugeDesc = MakeColorDesc(impossibleExtent, impossibleExtent);
 
     bool threw = false;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
@@ -124,10 +151,7 @@ TEST(RenderGraphPersistentResourceCacheTest, FailedResolveThrowsAndLeavesTheKeyR
         }
         return {};
     });
-
-    if (!threw) {
-        GTEST_SKIP() << "This driver accepted a 100000x100000 image; cannot exercise the failed-create path.";
-    }
+    ASSERT_TRUE(threw) << "an image larger than maxImageDimension2D must be rejected";
 
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> retryResolved;
     const TextureDesc saneDesc = MakeColorDesc();
@@ -592,10 +616,11 @@ TEST(RenderGraphPersistentResourceCacheTest, FailedResizeKeepsTheOldTexture)
     }
 
     RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
+    const std::uint32_t impossibleExtent = fixture.UnsupportedImageExtent();
     std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> first;
     fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
         first = cache.Resolve(kTestOwner, "FailResize", MakeColorDesc(64, 64), 1, kSync);
-        (void)cache.Resolve(kTestOwner, "FailResize", MakeColorDesc(100000, 100000), 2, kSync);
+        (void)cache.Resolve(kTestOwner, "FailResize", MakeColorDesc(impossibleExtent, impossibleExtent), 2, kSync);
         return {};
     });
     ASSERT_TRUE(first.has_value());
@@ -604,9 +629,7 @@ TEST(RenderGraphPersistentResourceCacheTest, FailedResizeKeepsTheOldTexture)
     RecordingLogSink sink;
     ScopedLogSinkInstall logGuard(&sink);
     const std::vector<PersistentSlotRef> resized = cache.FlushPendingResizes();
-    if (!resized.empty()) {
-        GTEST_SKIP() << "This driver accepted a 100000x100000 image; cannot force a failed create.";
-    }
+    ASSERT_TRUE(resized.empty()) << "an image larger than maxImageDimension2D must be rejected";
 
     EXPECT_EQ(first->texture->Image(), oldImage);
     EXPECT_EQ(first->texture->Extent().width, 64u);
@@ -615,7 +638,7 @@ TEST(RenderGraphPersistentResourceCacheTest, FailedResizeKeepsTheOldTexture)
     EXPECT_EQ(CountByCategory(sink, kCacheLogCategory), 1); // Exactly one error.
 
     // The same failing size is not queued again.
-    (void)cache.Resolve(kTestOwner, "FailResize", MakeColorDesc(100000, 100000), 3, kSync);
+    (void)cache.Resolve(kTestOwner, "FailResize", MakeColorDesc(impossibleExtent, impossibleExtent), 3, kSync);
     EXPECT_TRUE(cache.FlushPendingResizes().empty());
     EXPECT_EQ(CountByCategory(sink, kCacheLogCategory), 1);
 }
@@ -1249,18 +1272,18 @@ TEST(RenderGraphPersistentResourceCacheTest, BuilderReturnsInvalidHandleAndLogsO
 
     RecordingLogSink sink;
     ScopedLogSinkInstall logGuard(&sink);
+    const std::uint32_t impossibleExtent = fixture.UnsupportedImageExtent();
     PersistentTextureCacheToken token;
     bool created = false;
     for (int frame = 0; frame < 2; ++frame) {
         fixture.GetRenderGraph().BeginPersistentResourceFrame();
         fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-            created = b.GetOrCreatePersistentTexture(token, "BuilderOwner", "Huge", MakeColorDesc(100000, 100000)).IsValid();
+            created = b.GetOrCreatePersistentTexture(
+                token, "BuilderOwner", "Huge", MakeColorDesc(impossibleExtent, impossibleExtent)).IsValid();
             return {};
         });
     }
-    if (created) {
-        GTEST_SKIP() << "This driver accepted a 100000x100000 image; cannot force a failed create.";
-    }
+    ASSERT_FALSE(created) << "an image larger than maxImageDimension2D must be rejected";
 
     EXPECT_TRUE(token.refusalLogged);
     int errors = 0;

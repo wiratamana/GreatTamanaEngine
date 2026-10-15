@@ -107,6 +107,18 @@ void RenderGraphBuilder::PassBuilder::BindStorageBuffer(
     m_pass.bindings.push_back(pending);
 }
 
+void RenderGraphBuilder::PassBuilder::BindUniformBuffer(
+    std::uint32_t binding, BufferObjectHandle handle, uint64_t offset, uint64_t range)
+{
+    PendingBinding pending;
+    pending.binding = binding;
+    pending.kind = BindingKind::UniformBuffer;
+    pending.bufferObjectHandle = handle;
+    pending.bufferOffset = offset;
+    pending.bufferRange = range;
+    m_pass.bindings.push_back(pending);
+}
+
 void RenderGraphBuilder::PassBuilder::BindCombinedImageSampler(
     std::uint32_t binding, TextureHandle handle, SamplerHandle sampler)
 {

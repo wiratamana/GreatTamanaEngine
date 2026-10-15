@@ -200,5 +200,108 @@ TEST(CppScannerTest, AllowlistLineWithoutAReasonIsRejected)
     EXPECT_FALSE(ParseAllowlist("Game/Game.cpp #   \n", entries, error));
 }
 
+TEST(CppScannerTest, ContainsTokenMatchesInsideIdentifiersCommentsAndStrings)
+{
+    const std::string source = "int AtmosphereLutRenderer; int ATMOSPHERE_PHASE2_X; // see atmosphere docs\n"
+                               "const char* s = \"Features/Atmosphere/Foo.h\"; int Unrelated;\n";
+    const std::vector<Hit> hits = Scan(source, "*Atmosphere*", kEverything, /*ignoreCase=*/true);
+    EXPECT_EQ(Tokens(hits),
+        (std::vector<std::string>{ "AtmosphereLutRenderer", "ATMOSPHERE_PHASE2_X", "atmosphere", "Atmosphere" }));
+}
+
+TEST(CppScannerTest, ContainsTokenIsCaseSensitiveWithoutIgnoreCase)
+{
+    const std::string source = "int AtmosphereX; int atmosphereY;\n";
+    EXPECT_EQ(Tokens(Scan(source, "*Atmosphere*", kCodeOnly)), std::vector<std::string>{ "AtmosphereX" });
+}
+
+TEST(CppScannerTest, WholeWordTokenStillIgnoresLongerIdentifiersNextToAContainsToken)
+{
+    const std::string source = "int Sky; int SkyBox; int SkyShadow;\n";
+    EXPECT_EQ(Tokens(Scan(source, "Sky\n*Shadow*", kCodeOnly, /*ignoreCase=*/true)),
+        (std::vector<std::string>{ "Sky", "SkyShadow" }));
+}
+
+TEST(CppScannerTest, ContainsTokenIsParsedIntoItsOwnList)
+{
+    const TokenSet set = ParseTokens("*Shadow*\nSky\nVk*\n", true);
+    EXPECT_EQ(set.contains, std::vector<std::string>{ "shadow" });
+    EXPECT_EQ(set.words.count("sky"), 1u);
+    EXPECT_EQ(set.prefixes, std::vector<std::string>{ "vk" });
+}
+
+TEST(CppScannerTest, CallPhraseMatchesWhitespaceAndNewlineBeforeTheParenthesis)
+{
+    const std::string source = "a.Native ();\nb\n    .Native\n(h);\nNative (h);\nxNative(h);\nNativeX(h);\nNative;\n";
+    const std::vector<Hit> hits = Scan(source, "Native(", kCodeOnly);
+    ASSERT_EQ(hits.size(), 3u);
+    EXPECT_EQ(hits[0].line, 1u);
+    EXPECT_EQ(hits[1].line, 3u);
+    EXPECT_EQ(hits[2].line, 5u);
+}
+
+HitsByFile OneHit(const std::string& path)
+{
+    HitsByFile found;
+    found[path].push_back(Hit{ 7, "Token" });
+    return found;
+}
+
+AllowEntry Entry(const std::string& path, std::size_t line)
+{
+    return AllowEntry{ path, "reason", line };
+}
+
+const auto kAllExist = [](const std::string&) { return true; };
+
+TEST(CppScannerTest, RatchetPassesWhenEveryHitFileIsListed)
+{
+    const RatchetResult result = CheckAllowlist(OneHit("a.cpp"), { Entry("a.cpp", 1) }, kAllExist);
+    EXPECT_EQ(result.failures, 0);
+    EXPECT_TRUE(result.messages.empty());
+}
+
+TEST(CppScannerTest, RatchetReportsANewViolationWithFileLineAndToken)
+{
+    const RatchetResult result = CheckAllowlist(OneHit("b.cpp"), {}, kAllExist);
+    EXPECT_EQ(result.failures, 1);
+    ASSERT_EQ(result.messages.size(), 1u);
+    EXPECT_EQ(result.messages[0], "violation: b.cpp:7: Token");
+}
+
+TEST(CppScannerTest, RatchetFailsOnAStaleLineForAMissingFile)
+{
+    const auto missing = [](const std::string& path) { return path != "gone.cpp"; };
+    const RatchetResult result = CheckAllowlist({}, { Entry("gone.cpp", 4) }, missing);
+    EXPECT_EQ(result.failures, 1);
+    ASSERT_EQ(result.messages.size(), 1u);
+    EXPECT_NE(result.messages[0].find("no longer exists"), std::string::npos);
+    EXPECT_NE(result.messages[0].find("line 4"), std::string::npos);
+}
+
+TEST(CppScannerTest, RatchetFailsOnAStaleLineForACleanFile)
+{
+    const RatchetResult result = CheckAllowlist({}, { Entry("clean.cpp", 2) }, kAllExist);
+    EXPECT_EQ(result.failures, 1);
+    ASSERT_EQ(result.messages.size(), 1u);
+    EXPECT_NE(result.messages[0].find("is clean now"), std::string::npos);
+}
+
+TEST(CppScannerTest, RatchetFailsOnADuplicateLine)
+{
+    const RatchetResult result = CheckAllowlist(OneHit("a.cpp"), { Entry("a.cpp", 1), Entry("a.cpp", 2) }, kAllExist);
+    EXPECT_EQ(result.failures, 1);
+    ASSERT_EQ(result.messages.size(), 1u);
+    EXPECT_NE(result.messages[0].find("listed twice"), std::string::npos);
+}
+
+TEST(CppScannerTest, RatchetCountsEveryProblemOnce)
+{
+    HitsByFile found = OneHit("new.cpp");
+    found["new.cpp"].push_back(Hit{ 9, "Other" });
+    const RatchetResult result = CheckAllowlist(found, { Entry("clean.cpp", 1) }, kAllExist);
+    EXPECT_EQ(result.failures, 2); // One stale line plus one file with violations.
+    EXPECT_EQ(result.messages.size(), 3u);
+}
 } // namespace
 } // namespace gte::ci

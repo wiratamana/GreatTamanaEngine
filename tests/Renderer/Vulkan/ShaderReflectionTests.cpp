@@ -113,15 +113,41 @@ TEST(ShaderReflectionTests, ComputeFixtureReportsNamesTypesAccessAndLocalSize)
     EXPECT_EQ(result.localSize.y, 16u);
 }
 
-// Fails if the shader compiler ever strips debug names: name-based binding needs them.
+gte::ShaderReflectionResult ReflectUniformFixture()
+{
+    const gte::ShaderStageFile stage{ VK_SHADER_STAGE_COMPUTE_BIT, GTE_TEST_REFLECT_UNIFORM_SPV_PATH };
+    return gte::ReflectShader(std::span<const gte::ShaderStageFile>(&stage, 1));
+}
+
+// Name-based binding needs OpName in the SPIR-V. Fails if glslc is ever run with -O or -g0 (see
+// cmake/CompileShaders.cmake): every reflected name of every fixture must be non-empty.
 TEST(ShaderReflectionTests, FixtureBindingNamesSurviveCompilation)
 {
-    const gte::ShaderReflectionResult result = ReflectComputeFixture();
-    ASSERT_FALSE(result.descriptorBindings.empty());
-    for (const ReflectedDescriptorBinding& binding : result.descriptorBindings) {
-        EXPECT_FALSE(binding.name.empty());
+    const gte::ShaderReflectionResult results[] = { ReflectComputeFixture(), ReflectGraphicsFixture(), ReflectUniformFixture() };
+    for (const gte::ShaderReflectionResult& result : results) {
+        ASSERT_FALSE(result.descriptorBindings.empty());
+        for (const ReflectedDescriptorBinding& binding : result.descriptorBindings) {
+            EXPECT_FALSE(binding.name.empty()) << "set " << binding.set << " binding " << binding.binding;
+        }
+        EXPECT_NO_THROW(gte::ValidateBindingNames(result.descriptorBindings, "fixture"));
     }
-    EXPECT_NO_THROW(gte::ValidateBindingNames(result.descriptorBindings, "ReflectFixture.comp"));
+}
+
+TEST(ShaderReflectionTests, UniformBufferIsReflectedByInstanceNameAndIsReadOnly)
+{
+    const gte::ShaderReflectionResult result = ReflectUniformFixture();
+
+    ASSERT_EQ(result.descriptorBindings.size(), 2u);
+    const ReflectedDescriptorBinding* tint = FindByName(result, "tint");
+    const ReflectedDescriptorBinding* output = FindByName(result, "outputImage");
+    ASSERT_NE(tint, nullptr);
+    ASSERT_NE(output, nullptr);
+    EXPECT_EQ(tint->type, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    EXPECT_EQ(tint->access, ReflectedAccess::ReadOnly);
+    EXPECT_EQ(tint->binding, 0u);
+    EXPECT_EQ(output->type, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+    EXPECT_EQ(output->access, ReflectedAccess::WriteOnly);
+    EXPECT_EQ(result.localSize.x, 8u);
 }
 
 TEST(ShaderReflectionTests, GraphicsFixtureMergesStagesAndPushBlock)

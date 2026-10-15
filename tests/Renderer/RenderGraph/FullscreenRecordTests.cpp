@@ -6,6 +6,7 @@
 
 #include <array>
 #include <optional>
+#include <string>
 
 namespace gte::rg {
 namespace {
@@ -49,6 +50,15 @@ TEST(ValidateFullscreenTargetTest, UndefinedFormatIsRefused)
     TextureDesc desc = ColorDesc();
     desc.format = PixelFormat::Undefined;
     EXPECT_TRUE(ValidateFullscreenTarget(desc).has_value());
+}
+
+TEST(ValidateFullscreenTargetTest, DepthTargetIsRefused)
+{
+    TextureDesc desc = ColorDesc();
+    desc.hasDepth = true;
+    const std::optional<std::string> error = ValidateFullscreenTarget(desc);
+    ASSERT_TRUE(error.has_value());
+    EXPECT_NE(error->find("depth texture"), std::string::npos);
 }
 
 TEST(ValidateFullscreenTargetTest, ColorTargetIsAccepted)

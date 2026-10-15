@@ -1,5 +1,6 @@
 // gte_ci_scan: one guardrail check over a source tree (each check folder under tools/ci explains its own use).
 // Check mode exits 1 on a new hit or a stale allowlist line; --report lists files with hits and exits 0.
+// Exit 2 means the scan itself is broken (bad arguments, nothing scanned, unreadable file).
 
 #include "CppScanner.h"
 
@@ -7,11 +8,9 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
-#include <map>
-#include <set>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -123,27 +122,42 @@ std::vector<std::string> ReadLines(const fs::path& path)
     return lines;
 }
 
-// Relative path -> hits, for every scanned file that has at least one.
-std::map<std::string, std::vector<Hit>> Scan(const Options& o, const TokenSet& tokens, const std::vector<std::string>& includes)
+struct ScanResult {
+    HitsByFile found;                      // Relative path -> hits, for every scanned file that has at least one.
+    std::size_t scanned = 0;               // Files that were in scope and read.
+    std::vector<std::string> unreadable;   // Files in scope that could not be read.
+};
+
+ScanResult Scan(const Options& o, const TokenSet& tokens, const std::vector<std::string>& includes)
 {
-    std::map<std::string, std::vector<Hit>> result;
-    for (const fs::directory_entry& entry : fs::recursive_directory_iterator(o.root)) {
+    ScanResult result;
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(o.root, ec), end; !ec && it != end; it.increment(ec)) {
+        const fs::directory_entry& entry = *it;
         const std::string ext = entry.path().extension().string();
         if (!entry.is_regular_file() || (ext != ".h" && ext != ".cpp")) {
             continue;
         }
         const std::string rel = fs::relative(entry.path(), o.root).generic_string();
-        std::string text;
-        if (IsSkipped(rel, o) || !ReadFile(entry.path(), text)) {
+        if (IsSkipped(rel, o)) {
             continue;
         }
+        std::string text;
+        if (!ReadFile(entry.path(), text)) {
+            result.unreadable.push_back(rel);
+            continue;
+        }
+        ++result.scanned;
         const std::vector<Kind> kinds = Classify(text);
         std::vector<Hit> hits = FindTokens(Mask(text, kinds, o.mask), tokens);
         std::vector<Hit> includeHits = FindForbiddenIncludes(text, kinds, includes);
         hits.insert(hits.end(), includeHits.begin(), includeHits.end());
         if (!hits.empty()) {
-            result[rel] = std::move(hits);
+            result.found[rel] = std::move(hits);
         }
+    }
+    if (ec) {
+        result.unreadable.push_back("<directory walk failed: " + ec.message() + ">");
     }
     return result;
 }
@@ -162,15 +176,27 @@ int main(int argc, char** argv)
         return 2;
     }
     const TokenSet tokens = ParseTokens(tokenText, o.ignoreCase);
-    const std::map<std::string, std::vector<Hit>> found = Scan(o, tokens, ReadLines(o.includesFile));
+    const ScanResult scan = Scan(o, tokens, ReadLines(o.includesFile));
+
+    // Fail closed: a scan that saw nothing, or could not read a file, proves nothing.
+    if (!scan.unreadable.empty()) {
+        for (const std::string& path : scan.unreadable) {
+            std::fprintf(stderr, "gte_ci_scan: cannot read %s\n", path.c_str());
+        }
+        return 2;
+    }
+    if (scan.scanned == 0) {
+        std::fprintf(stderr, "gte_ci_scan: scanned 0 files under %s - wrong --root/--only?\n", o.root.string().c_str());
+        return 2;
+    }
 
     if (o.report) {
         std::size_t total = 0;
-        for (const auto& [path, hits] : found) {
+        for (const auto& [path, hits] : scan.found) {
             std::printf("%s # %zu hits\n", path.c_str(), hits.size());
             total += hits.size();
         }
-        std::printf("# %zu files, %zu hits\n", found.size(), total);
+        std::printf("# scanned %zu files, %zu files with hits, %zu hits\n", scan.scanned, scan.found.size(), total);
         return 0;
     }
 
@@ -182,31 +208,13 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    int failures = 0;
-    std::set<std::string> seen;
-    for (const AllowEntry& entry : allowed) {
-        if (!seen.insert(entry.path).second) {
-            std::printf("stale line: remove it - %s is listed twice (line %zu)\n", entry.path.c_str(), entry.line);
-            ++failures;
-        } else if (!fs::exists(o.root / entry.path)) {
-            std::printf("stale line: remove it - %s no longer exists (line %zu)\n", entry.path.c_str(), entry.line);
-            ++failures;
-        } else if (found.find(entry.path) == found.end()) {
-            std::printf("stale line: remove it - %s is clean now (line %zu)\n", entry.path.c_str(), entry.line);
-            ++failures;
-        }
+    const RatchetResult ratchet = CheckAllowlist(
+        scan.found, allowed, [&o](const std::string& rel) { return fs::exists(o.root / rel); });
+    for (const std::string& message : ratchet.messages) {
+        std::printf("%s\n", message.c_str());
     }
-    for (const auto& [path, hits] : found) {
-        if (seen.count(path) != 0) {
-            continue;
-        }
-        for (const Hit& hit : hits) {
-            std::printf("violation: %s:%zu: %s\n", path.c_str(), hit.line, hit.token.c_str());
-        }
-        ++failures;
+    if (ratchet.failures == 0) {
+        std::printf("ok: scanned %zu files, %zu with hits, all on the allowlist\n", scan.scanned, scan.found.size());
     }
-    if (failures == 0) {
-        std::printf("ok: %zu files with hits, all on the allowlist\n", found.size());
-    }
-    return failures == 0 ? 0 : 1;
+    return ratchet.failures == 0 ? 0 : 1;
 }
