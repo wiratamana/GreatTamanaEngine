@@ -650,6 +650,70 @@ TEST(RenderGraphPersistentResourceCacheTest, FlushSkipsResizeOfAnEvictedEntry)
     EXPECT_FALSE(cache.FramesUntilEviction(kPersistentOwnerCacheValidation, "EvictedResize", 100).has_value());
 }
 
+// A resize retires the old texture instead of destroying it; BeginFrame frees it.
+TEST(RenderGraphPersistentResourceCacheTest, FlushRetiresTheOldTextureUntilTheNextBeginFrame)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
+    fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
+        (void)cache.Resolve(kPersistentOwnerCacheValidation, "Retire", MakeColorDesc(64, 64), 1, kSync);
+        (void)cache.Resolve(kPersistentOwnerCacheValidation, "Retire", MakeColorDesc(128, 128), 2, kSync);
+        return {};
+    });
+
+    const GpuMemoryTracker::Totals before = fixture.GetRenderer().GetMemoryTotals();
+    ASSERT_EQ(cache.FlushPendingResizes().size(), 1u);
+
+    // Old and new image both exist until the next frame starts.
+    EXPECT_EQ(cache.RetiredTextureCount(), 1u);
+    EXPECT_EQ(fixture.GetRenderer().GetMemoryTotals().textureCount, before.textureCount + 1);
+
+    cache.BeginFrame(3, kPersistentResourceStaleThresholdFrames);
+    EXPECT_EQ(cache.RetiredTextureCount(), 0u);
+    EXPECT_EQ(fixture.GetRenderer().GetMemoryTotals().textureCount, before.textureCount);
+}
+
+// A resize whose create fails keeps the old texture and is not retried at the same size.
+TEST(RenderGraphPersistentResourceCacheTest, FailedResizeKeepsTheOldTexture)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
+    std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> first;
+    fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
+        first = cache.Resolve(kPersistentOwnerCacheValidation, "FailResize", MakeColorDesc(64, 64), 1, kSync);
+        (void)cache.Resolve(kPersistentOwnerCacheValidation, "FailResize", MakeColorDesc(100000, 100000), 2, kSync);
+        return {};
+    });
+    ASSERT_TRUE(first.has_value());
+    const VkImage oldImage = first->texture->Image();
+
+    RecordingLogSink sink;
+    ScopedLogSinkInstall logGuard(&sink);
+    const std::vector<PersistentSlotRef> resized = cache.FlushPendingResizes();
+    if (!resized.empty()) {
+        GTEST_SKIP() << "This driver accepted a 100000x100000 image; cannot force a failed create.";
+    }
+
+    EXPECT_EQ(first->texture->Image(), oldImage);
+    EXPECT_EQ(first->texture->Extent().width, 64u);
+    EXPECT_EQ(cache.RetiredTextureCount(), 0u);
+    EXPECT_EQ(cache.TextureFor(first->slot), first->texture);
+    EXPECT_EQ(sink.entries.size(), 1u); // Exactly one error.
+
+    // The same failing size is not queued again.
+    (void)cache.Resolve(kPersistentOwnerCacheValidation, "FailResize", MakeColorDesc(100000, 100000), 3, kSync);
+    EXPECT_TRUE(cache.FlushPendingResizes().empty());
+    EXPECT_EQ(sink.entries.size(), 1u);
+}
+
 // Debug builds only: the guard does not exist in release builds.
 #ifndef NDEBUG
 TEST(RenderGraphPersistentResourceCacheTest, DebugTokenIdentityMatchesConfirmsOrRefutesTheOriginalOwnerName)
@@ -737,18 +801,7 @@ TEST(RenderGraphPersistentResourceCacheTest, ResizeIsQueuedNotAppliedUntilFlushP
     EXPECT_EQ(thirdResolve->lastKnownLayout, VK_IMAGE_LAYOUT_UNDEFINED);
 }
 
-// 15. Batched - the single most important test in this phase: three
-// distinct persistent entries each queue their OWN different new size,
-// across TWO separate real frames (never flushed in between), and exactly
-// ONE FlushPendingResizes() call resizes ALL THREE correctly. This project
-// has no Vulkan-call-counting test harness, so the "exactly one
-// vkDeviceWaitIdle() total, no matter how many entries" claim is proven
-// HERE by this test confirming the batching logic itself is correct (all
-// three entries updated by a SINGLE FlushPendingResizes() call), combined
-// with a direct code-read fact stated plainly in this phase's own
-// completion report: FlushPendingResizes()'s body contains exactly one,
-// unconditional vkDeviceWaitIdle() statement, outside any loop, guarded
-// only by an early-return when m_pendingResizes is empty.
+// 15. Three entries queue different new sizes across two frames; one flush applies all of them.
 TEST(RenderGraphPersistentResourceCacheTest, BatchedResizeAppliesAllQueuedEntriesInOneFlushCall)
 {
     HeadlessRenderGraphFixture fixture;

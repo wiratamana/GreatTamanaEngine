@@ -16,7 +16,6 @@ bool IsStaleCacheEntry(
 
 RenderGraphPersistentResourceCache::RenderGraphPersistentResourceCache(Renderer& renderer) noexcept
     : m_renderer(&renderer)
-    , m_device(renderer.GetVulkanContextInfo().device)
 {
 }
 
@@ -145,10 +144,10 @@ RenderGraphPersistentResourceCache::ResolveAgainstEntry(PersistentResourceCacheE
 
     if (desc.width != entry.desc.width || desc.height != entry.desc.height) {
         if (timingMode == ExecuteTimingMode::PipelinedDeferredReadback) {
-            // That regime must never reach the device idle in FlushPendingResizes().
+            // The old image may still be in flight, so that regime cannot retire it safely.
             GTE_LOG_ERROR("RenderGraphPersistentResourceCache",
                 "\"" + key + "\" resize requested from the PipelinedDeferredReadback regime - refusing the resize.");
-        } else {
+        } else if (desc.width != entry.failedResizeWidth || desc.height != entry.failedResizeHeight) {
             QueueResize(entry.slot, desc.width, desc.height);
         }
     }
@@ -170,6 +169,7 @@ void RenderGraphPersistentResourceCache::RecordFinalLayout(PersistentSlotRef slo
 
 void RenderGraphPersistentResourceCache::BeginFrame(std::uint64_t currentFrame, std::uint64_t staleThresholdFrames)
 {
+    m_retired.clear(); // The previous frame has been submitted and waited on by now.
     for (auto it = m_entries.begin(); it != m_entries.end();) {
         if (IsStaleCacheEntry(it->second.lastUsedFrame, currentFrame, staleThresholdFrames)) {
             ReleaseSlot(it->second.slot);
@@ -238,15 +238,29 @@ std::vector<PersistentSlotRef> RenderGraphPersistentResourceCache::FlushPendingR
         return resized;
     }
 
-    // One stall for the whole batch.
-    vkDeviceWaitIdle(m_device);
     resized.reserve(m_pendingResizes.size());
+    m_retired.reserve(m_retired.size() + m_pendingResizes.size());
     for (const PendingResize& pending : m_pendingResizes) {
         PersistentResourceCacheEntry* entry = EntryFor(pending.slot);
-        if (entry == nullptr) {
+        if (entry == nullptr || !entry->texture.has_value()) {
             continue; // Evicted since it was queued.
         }
-        entry->texture->Resize(static_cast<int>(pending.newWidth), static_cast<int>(pending.newHeight));
+        try {
+            // Create first so a failure leaves the old texture in place.
+            RenderTexture fresh = m_renderer->CreateRenderTexture(static_cast<int>(pending.newWidth),
+                static_cast<int>(pending.newHeight), entry->desc.format, entry->ownKeyForDebugAssert->c_str(),
+                /*depthDebugName=*/nullptr, HasFlag(entry->desc.usage, TextureUsage::Storage),
+                /*allowDepthSampledAccess=*/false, /*createDepthCompanion=*/false);
+            m_retired.push_back(std::move(*entry->texture)); // Capacity reserved above, move is noexcept.
+            entry->texture.emplace(std::move(fresh));
+        } catch (const std::exception& e) {
+            GTE_LOG_ERROR("RenderGraphPersistentResourceCache",
+                "Resize of \"" + *entry->ownKeyForDebugAssert + "\" to " + std::to_string(pending.newWidth) + "x"
+                    + std::to_string(pending.newHeight) + " failed, keeping the old texture: " + e.what());
+            entry->failedResizeWidth = pending.newWidth;
+            entry->failedResizeHeight = pending.newHeight;
+            continue;
+        }
         entry->desc.width = pending.newWidth;
         entry->desc.height = pending.newHeight;
         entry->lastKnownLayout = VK_IMAGE_LAYOUT_UNDEFINED; // A recreated image starts undefined.

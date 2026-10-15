@@ -39,6 +39,8 @@ struct PersistentResourceCacheEntry {
     bool hasLoggedDoubleRequest = false;
     VkImageLayout lastKnownLayout = VK_IMAGE_LAYOUT_UNDEFINED; // Layout at the end of the last used frame.
     const std::string* ownKeyForDebugAssert = nullptr;         // Points at this entry's own map key.
+    std::uint32_t failedResizeWidth = 0;  // Size of the last failed resize; not retried until it changes.
+    std::uint32_t failedResizeHeight = 0;
 };
 
 // Frames an identity may go unrequested before BeginFrame() evicts it.
@@ -63,7 +65,8 @@ public:
     std::optional<ResolvedTexture> Resolve(const char* owner, const char* name, const TextureDesc& desc,
         std::uint64_t currentFrame, ExecuteTimingMode timingMode);
 
-    // Evicts every entry unused for more than staleThresholdFrames. Call once per real frame.
+    // Frees retired textures and evicts every entry unused for more than staleThresholdFrames.
+    // Call once per real frame, after the previous frame's work has finished on the GPU.
     void BeginFrame(std::uint64_t currentFrame, std::uint64_t staleThresholdFrames);
 
     // Frames left before an identity is evicted, or nullopt if it does not exist.
@@ -87,12 +90,16 @@ public:
     // Stores the layout the texture was left in at the end of the frame. No-op for a dead slot.
     void RecordFinalLayout(PersistentSlotRef slot, VkImageLayout layout);
 
-    // Applies queued resizes behind one device idle and returns the slots that were recreated.
-    // Skips entries evicted since queueing. Allocates nothing when no resize is pending.
+    // Recreates every queued texture at its new size and returns the recreated slots. The old
+    // textures are retired, not destroyed: the open command buffer may still reference them.
+    // A failed create keeps the old texture (logged). Skips entries evicted since queueing.
     std::vector<PersistentSlotRef> FlushPendingResizes();
 
     // The live texture behind a slot, or nullptr if the slot is dead.
     const RenderTexture* TextureFor(PersistentSlotRef slot) const noexcept;
+
+    // Textures replaced by a resize and still waiting for the next BeginFrame().
+    std::size_t RetiredTextureCount() const noexcept { return m_retired.size(); }
 
 private:
     struct PendingResize {
@@ -117,11 +124,11 @@ private:
         std::uint64_t currentFrame, ExecuteTimingMode timingMode);
 
     Renderer* m_renderer = nullptr;
-    VkDevice m_device = VK_NULL_HANDLE;
     std::unordered_map<std::string, PersistentResourceCacheEntry> m_entries; // Node-stable.
     PersistentSlotTable m_slots;
     std::vector<PersistentResourceCacheEntry*> m_slotEntries; // Indexed by slot index.
     std::vector<PendingResize> m_pendingResizes;
+    std::vector<RenderTexture> m_retired; // Freed at the next BeginFrame().
 };
 
 } // namespace gte::rg
