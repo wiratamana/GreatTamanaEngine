@@ -104,6 +104,14 @@ macro call must actually be *compiled and linked in*, or the registration
 never happens (this is exactly what the CMake auto-discovery section below
 guarantees, generically, for every feature folder).
 
+## Writing the module on the feature kit
+
+A render feature can derive from `fx::Feature` (`src/Core/FeatureKit/FeatureKit.h`) instead of implementing
+`IEngineFeatureModule` by hand: `Setup(fx::FeatureSetup&)` collects the registrations, and
+`GTE_REGISTER_RENDER_FEATURE("Name", Class)` wraps `GTE_REGISTER_BUILTIN_FEATURE_MODULE` with a module that runs
+`Setup()` atomically and commits the passes to Core. Editor code reaches the feature with `fx::FeatureOf<T>(module)`.
+See [render-feature-authoring.md](render-feature-authoring.md) for what the kit offers today and what is still missing.
+
 ## What `Core.cpp`/`EditorHost.cpp` Need to Know
 
 **Nothing, by name.** Confirmed by reading the actual code:

@@ -117,6 +117,13 @@ than subsystem-specific):
   the `src/Features/<Name>/` folder convention, and the generic, zero-CMake-
   touch build auto-discovery every feature folder gets for free. Atmosphere
   Scattering (below) is the one real, shipped feature built this way.
+- **[Render Pass API](conventions/render-pass-api.md)** — `gte::rg`: one reflected
+  `rg::Shader`, binding by name, the declarative pass kinds (compute, fullscreen,
+  mesh, indirect draw, transfer, blit), the hidden raw command buffer and the
+  ratchet checks that guard it.
+- **[Render Feature Authoring](conventions/render-feature-authoring.md)** — `gte::fx`,
+  the Vulkan-free feature kit: `fx::Feature`, atomic setup, gates, typed frames,
+  `GTE_REGISTER_RENDER_FEATURE`, and what is still missing.
 - **[Project Assembly System](conventions/project-assembly-system.md)** — the
   per-developer `Projects/<Name>/` source tree that compiles into two `.dll`s
   (`<Name>_Game.dll`/`<Name>_Editor.dll`) linked directly against

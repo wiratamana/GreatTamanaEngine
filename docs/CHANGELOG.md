@@ -4,6 +4,21 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## Render pass API and feature kit (branch `fix/great-refactor`)
+
+- Render pass API (`gte::rg`): one reflected `rg::Shader` for compute and graphics, binding by name with inferred
+  access, uniform buffers, growable descriptor pools with per-type statistics (Memory panel, `/get_logs` above 75%),
+  `ComputePass`, `FullscreenPass` (MRT, depth test), `MeshPass`, `IndirectDrawPass`, `TransferPass`,
+  `BlitFilter`, transfer usage bits on graph textures. The raw command buffer is no longer public
+  (`PassContext::RawCommandBuffer()` / `CommandBuffer::AdoptRaw()` are tracked by NativeLeakCheck).
+- Feature kit shell (`gte::fx`, `src/Core/FeatureKit`): `Feature`, `FeatureSetup`, typed frames, `Gate`,
+  `GTE_REGISTER_RENDER_FEATURE`. Verbs and resources are not built yet.
+- CI guardrails (`gte_ci_scan`): VolkLeak, NativeLeak, FeaturePurity, EngineVocabulary and the header purity probe.
+  A stale allowlist line fails the check; a scan of zero files fails the check.
+- Shader files resolve against the executable directory only.
+- See [render-pass-api.md](conventions/render-pass-api.md) and
+  [render-feature-authoring.md](conventions/render-feature-authoring.md).
+
 Early foundation stage, but past the basic-scaffolding phase for several
 pieces:
 
