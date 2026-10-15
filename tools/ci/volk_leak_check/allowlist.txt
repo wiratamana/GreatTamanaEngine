@@ -67,8 +67,6 @@ Game/Instantiation/MeshInstantiationSystem.cpp # debt: game systems hold raw Vul
 Game/Instantiation/MeshInstantiationSystem.h # debt: game systems hold raw Vulkan handles
 Game/Instantiation/PrimitiveGpuCatalog.cpp # debt: game systems hold raw Vulkan handles
 Game/Instantiation/PrimitiveGpuCatalog.h # debt: game systems hold raw Vulkan handles
-Game/RenderSystem.cpp # debt: game systems hold raw Vulkan handles
-Game/RenderSystem.h # debt: game systems hold raw Vulkan handles
 Game/SceneQuery.h # debt: game systems hold raw Vulkan handles
 Scene/SceneBuilder.cpp # debt: scene builder takes raw Vulkan handles
 Scene/SceneBuilder.h # debt: scene builder takes raw Vulkan handles

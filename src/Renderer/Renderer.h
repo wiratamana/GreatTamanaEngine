@@ -11,6 +11,7 @@
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
 #include "Pipeline.h"
+#include "RenderGraph/GpuBuffer.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "RenderGraph/RenderGraphTypes.h"
 #include "RenderTexture.h"
@@ -119,6 +120,9 @@ public:
     // Blocks until all GPU execution finishes. Call only during teardown or manual captures.
     void WaitForGpuIdle() const;
 
+    // The device reference rg::GpuBuffer is created from.
+    rg::DeviceRef Device() noexcept { return rg::DeviceRef(this); }
+
     // Schedules an asynchronous swapchain readback.
     void RequestSwapchainCapture();
 
@@ -223,6 +227,11 @@ public:
         const void* vertexData, uint64_t vertexDataSize, const char* debugName = nullptr) const;
 
     Mesh CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVertexBuffer, std::uint32_t vertexCount,
+        const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
+        const char* debugName = nullptr) const;
+
+    // The same, sharing the vertex buffer of a GpuBuffer (for example a skinning output).
+    Mesh CreateMeshFromSharedVertexBuffer(const rg::GpuBuffer& sharedVertexBuffer, std::uint32_t vertexCount,
         const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
         const char* debugName = nullptr) const;
 

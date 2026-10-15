@@ -2,40 +2,46 @@
 
 #include "../IndirectDrawTypes.h"
 #include "../Renderer.h"
+#include "../RenderGraph/GpuBufferInternal.h"
 
 #include <cstring>
 
 namespace gte {
 
+using rg::GpuBuffer;
+using rg::GpuBufferAccess;
+using rg::GpuBufferUse;
+
 void GpuDrivenBatchCache::EnsureCapacity(Renderer& renderer, const GpuDrivenBatchKey& key, std::size_t instanceCount)
 {
     if (instanceCount == 0) {
-        return; // Nothing to allocate for an empty batch - see this method's own doc comment.
+        return;
     }
 
     const auto found = m_entries.find(key);
     if (found != m_entries.end() && found->second.capacity >= instanceCount) {
-        return; // Already big enough - reallocate ONLY when instanceCount GREW past capacity.
+        return;
     }
 
+    const rg::DeviceRef device = renderer.Device();
     Entry entry{
-        renderer.CreateStructuredBuffer(sizeof(GpuCullingInstanceInput), static_cast<std::uint32_t>(instanceCount),
-            BufferMemoryUsage::CpuToGpu, /*extraUsage=*/BufferUsage::None, "GpuDrivenBatch.Input"),
-        renderer.CreateStructuredBuffer(sizeof(IndirectDrawCommand), static_cast<std::uint32_t>(instanceCount),
-            BufferMemoryUsage::GpuOnly, /*extraUsage=*/BufferUsage::IndirectBuffer,
-            "GpuDrivenBatch.IndirectCommands"),
-        // The count is filled (transfer dst), read by the draw (indirect) and copied to the readback (transfer src).
-        renderer.CreateStructuredBuffer(sizeof(std::uint32_t), /*elementCount=*/1, BufferMemoryUsage::GpuOnly,
-            BufferUsage::IndirectBuffer | BufferUsage::TransferSrc, "GpuDrivenBatch.VisibleCount"),
+        GpuBuffer(device, sizeof(GpuCullingInstanceInput) * instanceCount, "GpuDrivenBatch.Input",
+            GpuBufferUse::Storage | GpuBufferUse::HostWrite),
+        GpuBuffer(device, sizeof(IndirectDrawCommand) * instanceCount, "GpuDrivenBatch.IndirectCommands",
+            GpuBufferUse::Storage | GpuBufferUse::Indirect),
+        // Filled (transfer dst), read by the draw (indirect) and copied to the readback (transfer src).
+        GpuBuffer(device, sizeof(std::uint32_t), "GpuDrivenBatch.VisibleCount",
+            GpuBufferUse::Storage | GpuBufferUse::Indirect | GpuBufferUse::TransferSrc),
         instanceCount,
-        // Replaced by the existing readback buffer below when an entry grows.
-        renderer.CreateStructuredBuffer(sizeof(std::uint32_t), /*elementCount=*/1, BufferMemoryUsage::GpuToCpu,
-            BufferUsage::TransferDst, "GpuDrivenBatch.VisibleCountReadback"),
+        GpuBuffer(device, sizeof(std::uint32_t), "GpuDrivenBatch.VisibleCountReadback",
+            GpuBufferUse::HostRead | GpuBufferUse::TransferDst),
     };
 
     if (found != m_entries.end()) {
-        // The count readback is one uint32 regardless of capacity, so the existing buffer is kept on a grow.
+        // The readback is one uint32 whatever the capacity, so the existing buffer survives a grow.
         entry.countReadbackBuffer = std::move(found->second.countReadbackBuffer);
+        entry.cullingDescriptorSet = found->second.cullingDescriptorSet;
+        entry.instanceBufferDescriptorSet = found->second.instanceBufferDescriptorSet;
         found->second = std::move(entry);
     } else {
         m_entries.emplace(key, std::move(entry));
@@ -50,7 +56,7 @@ void GpuDrivenBatchCache::PackThisFrame(const GpuDrivenBatchKey& key, const std:
 
     const auto found = m_entries.find(key);
     if (found == m_entries.end()) {
-        return; // EnsureCapacity() was never called for this key this frame - degrade gracefully, never crash.
+        return;
     }
 
     found->second.inputBuffer.Upload(instances.data(), instances.size() * sizeof(GpuCullingInstanceInput));
@@ -79,13 +85,14 @@ void GpuDrivenBatchCache::EnsureDescriptorSetsWritten(Renderer& renderer, const 
 {
     const auto found = m_entries.find(key);
     if (found == m_entries.end()) {
-        return; // No capacity was ensured for this key this frame.
+        return;
     }
     Entry& entry = found->second;
 
-    m_pipelines.EnsureInitialized(renderer); // Safe to call every frame.
+    m_pipelines.EnsureInitialized(renderer);
 
     const VkDevice device = renderer.GetVulkanContextInfo().device;
+    const VkBuffer input = GpuBufferAccess::Underlying(entry.inputBuffer).Native();
 
     if (entry.cullingDescriptorSet == DescriptorSetHandle::Invalid) {
         entry.cullingDescriptorSet =
@@ -94,9 +101,9 @@ void GpuDrivenBatchCache::EnsureDescriptorSetsWritten(Renderer& renderer, const 
     ComputeDescriptorSet(Native(entry.cullingDescriptorSet), device)
         .Rewrite(
             {
-                ComputeDescriptorWrite::StorageBuffer(0, entry.inputBuffer.Native()),
-                ComputeDescriptorWrite::StorageBuffer(1, entry.indirectCommandBuffer.Native()),
-                ComputeDescriptorWrite::StorageBuffer(2, entry.countBuffer.Native()),
+                ComputeDescriptorWrite::StorageBuffer(0, input),
+                ComputeDescriptorWrite::StorageBuffer(1, GpuBufferAccess::Underlying(entry.indirectCommandBuffer).Native()),
+                ComputeDescriptorWrite::StorageBuffer(2, GpuBufferAccess::Underlying(entry.countBuffer).Native()),
             });
 
     if (entry.instanceBufferDescriptorSet == DescriptorSetHandle::Invalid) {
@@ -104,14 +111,9 @@ void GpuDrivenBatchCache::EnsureDescriptorSetsWritten(Renderer& renderer, const 
             renderer.AllocateComputeDescriptorSet(renderer.InstanceBufferDescriptorSetLayout()).Native());
     }
     ComputeDescriptorSet(Native(entry.instanceBufferDescriptorSet), device)
-        .Rewrite(
-            {
-                ComputeDescriptorWrite::StorageBuffer(0, entry.inputBuffer.Native()),
-            });
+        .Rewrite({ ComputeDescriptorWrite::StorageBuffer(0, input) });
 }
 
-// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5), PHASE5 -
-// see this method's own doc comment in GpuDrivenBatchCache.h.
 const Pipeline& GpuDrivenBatchCache::ResolveInstancedPipeline(
     Renderer& renderer, PipelineHandle originalHandle, VkDescriptorSetLayout sceneServicesSetLayout)
 {

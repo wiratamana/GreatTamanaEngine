@@ -70,6 +70,30 @@ touch (the snapshots would show up in `/list_textures`).
 - The blocking submit reuses fences from a small pool in `Renderer`.
 - A volume import takes an engine sampler handle so a pass can bind it by name.
 
+## GPU buffers
+
+`rg::GpuBuffer` owns a device buffer (RAII, Vulkan-free header). It is created from an `rg::DeviceRef` that `Renderer::Device()`
+hands out; there is no global renderer lookup.
+
+- `GpuBufferUse` states what the buffer is for (`Storage`, `Uniform`, `Indirect`, `Vertex`, `TransferSrc`, `TransferDst`,
+  `HostWrite`, `HostRead`). `HostWrite` is host-visible memory for `Upload`; `HostRead` is for `Download`, which
+  invalidates the CPU cache first. Device-local buffers are always a valid transfer destination.
+- `Upload` and `Download` return false and log once when the range does not fit or the buffer has the wrong host use.
+- `GpuBuffer::CreateWithData` makes a device-local buffer filled through a staging upload.
+- `builder.Import(gpuBuffer, graphName)` imports it into the graph; `Handle()` is what `Bind("name", buffer)` takes.
+- `gte::Buffer` stays inside `src/Renderer`; `GpuBufferInternal.h` is the only way from a `GpuBuffer` to it.
+
+Consumers (R = rewritten on the pass verbs, M = moved into `src/Renderer` behind a Vulkan-free interface):
+
+| Consumer | Choice | Why |
+| --- | --- | --- |
+| GPU-driven batch buffers (`GpuDrivenBatchCache`) | M | Stays in `src/Renderer`; `Core.cpp` imports its `GpuBuffer` entries and holds no `VkBuffer`. |
+| GPU skinning buffers (`GpuSkinningRigCache`) | M | Buffers are `GpuBuffer`; the raw descriptor writes moved to `GpuSkinningPipelines::BindBuffers`. |
+| GPU skinning dispatch (`AddGpuSkinningPasses`, `Core.cpp`) | R | Still hand-records the dispatch; moves to `ComputePass` with the engine-system step. The request carries a `GpuBuffer`. |
+| Mesh vertex buffers | M | Meshes share vertex buffers; `Mesh::VertexBufferHandle()` replaces the raw handle for batch eligibility. |
+| `GpuParams` | R | Built on `GpuBuffer`. |
+| Editor mesh preview uniform buffers | M | Still raw (`AssetPreviewMesh`, `BoneViewerWindow`); moves with the editor render code step. |
+
 ## Checks
 
 `gte_ci_scan` runs VolkLeakCheck, NativeLeakCheck, FeaturePurityCheck and EngineVocabularyCheck (ctest); the

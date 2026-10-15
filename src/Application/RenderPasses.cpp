@@ -10,12 +10,6 @@
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 
-// IFrameDebuggerCaptureRecorder (src/Core/FrameDebuggerCaptureRecorder.h) is
-// the gte_core-owned abstract interface FrameDebuggerCaptureContext (src/
-// Editor/FrameDebuggerCapture.h, still gte_editor-only) implements - this
-// file only ever holds/forwards a bare IFrameDebuggerCaptureRecorder*
-// pointer, never dereferencing it itself.
-
 #include <cstdint>
 
 namespace gte {
@@ -56,17 +50,11 @@ void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rende
 std::vector<rg::BufferHandle> AddGpuSkinningPasses(
     rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::RenderPassToggleRegistry* toggleRegistry)
 {
-    // `renderer` is no longer dereferenced anywhere in this function's own
-    // body (the real dispatch below goes entirely through rg::CommandBuffer,
-    // which reaches its own Renderer* via PassContext::Cmd() instead) - kept
-    // as a parameter for signature stability.
+    // Kept for signature stability: the dispatch reaches its renderer through PassContext::Cmd().
     (void)renderer;
     std::vector<rg::BufferHandle> handles;
 
-    // A single, whole-stage on/off switch, mirroring Core.cpp's own
-    // OFFSCREEN "GpuSkinning" provider's identical shape (both consult the
-    // SAME registry entry name, so one checkbox honestly gates whichever of
-    // the two paths is actually reachable this frame).
+    // One checkbox gates both this path and the offscreen "GpuSkinning" provider.
     if (toggleRegistry != nullptr && !toggleRegistry->IsEnabled("GpuSkinning")) {
         return handles;
     }
@@ -80,8 +68,7 @@ std::vector<rg::BufferHandle> AddGpuSkinningPasses(
     handles.reserve(requests.size());
 
     for (const AnimationSystem::GpuSkinningDispatchRequest& request : requests) {
-        const rg::BufferHandle handle =
-            builder.ImportBuffer(request.name, request.outputBuffer, request.outputBufferSize);
+        const rg::BufferHandle handle = builder.Import(*request.outputBuffer, request.name);
 
         builder.AddRenderPass(
             request.name, rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,

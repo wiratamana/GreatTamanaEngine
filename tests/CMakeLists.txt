@@ -2322,6 +2322,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/PerViewTests.cpp
     Renderer/RenderGraph/GpuParamsPolicyTests.cpp
     Renderer/RenderGraph/GpuParamsUploadTests.cpp
+    Renderer/RenderGraph/GpuBufferTests.cpp
     Renderer/RenderGraph/PersistentTargetTests.cpp
     Renderer/RenderGraph/BuildRetryGateTests.cpp
     Renderer/RenderGraph/BoundedRetryGatesTests.cpp

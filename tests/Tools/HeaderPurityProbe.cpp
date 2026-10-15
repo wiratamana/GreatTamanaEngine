@@ -8,6 +8,7 @@
 #include "Features/Shadow/ShadowTypes.h"
 #include "Renderer/RenderGraph/ComputePass.h"
 #include "Renderer/RenderGraph/FullscreenPass.h"
+#include "Renderer/RenderGraph/GpuBuffer.h"
 #include "Renderer/RenderGraph/GpuParams.h"
 #include "Renderer/RenderGraph/PassChain.h"
 #include "Renderer/RenderGraph/PerView.h"

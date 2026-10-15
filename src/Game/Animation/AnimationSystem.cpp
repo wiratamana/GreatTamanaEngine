@@ -29,37 +29,16 @@ namespace gte {
 
 namespace {
 
-// VMD's own fixed frame grid - see Assets/MotionData.h's own file comment.
+// VMD motions use a fixed 30 frames per second grid.
 constexpr float kVmdFramesPerSecond = 30.0f;
 
-// Job System Phase 6 (First Production Consumer - Animation / Vertex
-// Skinning - see AGENTS.md, "Job System", and
-// task_manager/job_system/JOB_SYSTEM_PHASE6_COMPLETION_REPORT.md): below
-// this vertex count, CPU vertex skinning (and, as of the multithreaded
-// CPU-skinning optimization below, vertex PACKING too) runs inline,
-// serially, on the calling (main) thread - scheduling a
-// gte::Jobs::Dispatch() for a genuinely tiny model would spend more time
-// on the Job System's own per-Dispatch() scheduling overhead than the
-// actual work itself (see
-// JOBSYSTEM_PHASE6_FIRST_PRODUCTION_CONSUMER_ANIMATION_SKINNING_v2.md,
-// Step 2, point 1 in the wider campaign's own Phase 2 rationale).
+// Below this vertex count skinning and packing run inline: a job dispatch would cost more than the work.
 constexpr std::size_t kMinVerticesToParallelize = 512;
 
-// The floor gte::Jobs::Dispatch() itself uses when splitting a large
-// model's vertex array into batches - never split smaller than this many
-// vertices into their own batch, even if that means fewer batches than
-// there are workers.
+// Never split a model into batches smaller than this many vertices.
 constexpr std::uint32_t kMinVerticesPerBatch = 256;
 
-// The per-batch job context handed through gte::Jobs::Dispatch()'s opaque
-// payload pointer. Every field is a plain pointer into data owned by THIS
-// call's own SkeletalAnimator iteration (skinData's cached bind-pose
-// arrays, the freshly-computed skinningMatrices, and this call's own
-// skinnedPositions/skinnedNormals output vectors) - all of it outlives the
-// whole Dispatch()+WaitForJobs() bracket below, since nothing else touches
-// it until WaitForJobs() returns. Never copied or freed by this struct
-// itself - see JobDispatch.h's own "payload lifetime is the caller's
-// responsibility" convention.
+// Per-batch job context: pointers into data owned by the caller, which outlives the dispatch and its wait.
 struct SkinningBatchContext {
     const std::vector<Vec3>* bindPositions;
     const std::vector<Vec3>* bindNormals;
@@ -69,18 +48,10 @@ struct SkinningBatchContext {
     std::vector<Vec3>* outNormals;
 };
 
-// The job-body trampoline gte::Jobs::Dispatch() actually schedules - skins
-// exactly this batch's own [beginIndex, endIndex) slice of vertices via
-// SkinVertexRange() (src/Animation/VertexSkinning.h), writing into this
-// batch's own disjoint slice of the shared output vectors. Reads shared,
-// read-only input data (bindPositions/bindNormals/skinWeights/
-// skinningMatrices) - safe for any number of concurrent batches to read at
-// once, per Phase 4's own thread-safety audit of the pure Animation/
-// modules (see AGENTS.md, "Job System").
+// Job body: skins one batch's slice of vertices. Inputs are read-only and shared; each batch writes a disjoint slice.
 void RunSkinningBatch(std::uint32_t beginIndex, std::uint32_t endIndex, void* payload)
 {
-    // The ONE sanctioned way to profile code running inside a job body -
-    // see AGENTS.md, "Job System" (Phase 5) - never GTE_PROFILE_SCOPE here.
+    // Job bodies are profiled only with the job scope macro.
     GTE_PROFILE_JOB_SCOPE("SkinVertices");
 
     SkinningBatchContext* context = static_cast<SkinningBatchContext*>(payload);
@@ -88,21 +59,7 @@ void RunSkinningBatch(std::uint32_t beginIndex, std::uint32_t endIndex, void* pa
         *context->skinningMatrices, *context->outPositions, *context->outNormals);
 }
 
-// Multithreaded CPU-skinning optimization, Stage 2 (parallelize the
-// PACKING step too - see
-// task_manager/optimizing_multi_thread_cpu_skinning/
-// MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md): mirrors
-// SkinningBatchContext/RunSkinningBatch above exactly, but for
-// MeshVertexPacking.h's PackMeshVertexRange()/PackMeshVertexUvRange()
-// instead of SkinVertexRange(). Packing is just as embarrassingly parallel
-// per-vertex as the skin blend it now runs alongside (via its own,
-// separate Dispatch()+WaitForJobs() bracket - see RunPendingGroups() below)
-// - previously this pack step ran single-threaded, on the main thread,
-// once per MATERIAL PART (i.e. up to partCount times for the same data);
-// Stage 1 (the shared vertex buffer - see MeshAssetGpuCatalog.cpp) already
-// collapses that down to once per DISTINCT underlying GPU vertex buffer,
-// and this Stage 2 addition further moves that one remaining pass onto the
-// worker pool.
+// Packing is parallel per vertex like the skin blend; these mirror SkinningBatchContext for the pack functions.
 struct PackUntexturedBatchContext {
     const std::vector<Vec3>* positions;
     const std::vector<Vec3>* normals;
@@ -130,16 +87,8 @@ void RunPackTexturedBatch(std::uint32_t beginIndex, std::uint32_t endIndex, void
     PackMeshVertexUvRange(beginIndex, endIndex, *context->positions, *context->normals, *context->uvs, *context->out);
 }
 
-// Phase 5 (GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md) -
-// keeps every MeshRenderer under `animatorEntity` (its direct children -
-// a model's own submesh "parts" are always direct children of its root,
-// see EntityInstantiator.cpp/MeshAssetGpuCatalog.cpp) pointed at whichever
-// Mesh (CPU-skinned or GPU-skinned) matches `mode`. Idempotent and safe to
-// call every frame regardless of whether `mode` actually changed since the
-// last call - a MeshRenderer already pointing at the "right" handle for
-// `mode` is simply left untouched (neither TryGetGpuMeshHandle() nor
-// TryGetCpuMeshHandle() ever matches its OWN handle back to itself, so at
-// most one of the two branches below ever does anything on a given frame).
+// Points every MeshRenderer on the entity's direct children (a model's parts) at the CPU- or GPU-skinned mesh that
+// matches `mode`. Idempotent: a renderer already on the right mesh is left alone.
 void ApplyMeshHandleForSkinningMode(Registry& registry, Entity animatorEntity,
     const GpuSkinningRigCache::GpuModelEntry& gpuEntry, AnimationSystem::SkinningMode mode)
 {
@@ -202,15 +151,10 @@ void AnimationSystem::EvaluatePoses(Registry& registry, double deltaSeconds)
 
     ComponentStorage<SkeletalAnimator>& animators = registry.Storage<SkeletalAnimator>();
 
-    // Phase 1 (verlet-integration-7) - tracks which entities got a fresh,
-    // genuinely-ANIMATED pose from the loop below this frame, so the second
-    // loop (DynamicChainRig baseline pass, below) never clobbers it.
+    // Entities given an animated pose below; the baseline pass must not overwrite them.
     std::unordered_set<Entity> animatedThisFrame;
 
-    // No GPU/Renderer/Mesh state touched anywhere in this loop - safe to
-    // reason about (and, per Phase 3's own "What We Will NOT Do", safe to
-    // parallelize in a future phase) independently of SkinAndUpload()'s own
-    // strictly-sequential shared-GPU-buffer constraint below.
+    // This loop touches no GPU state.
     for (std::size_t i = 0; i < animators.Size(); ++i) {
         SkeletalAnimator& animator = animators.ComponentAt(i);
         const Entity animatorEntity = animators.EntityAt(i);
@@ -247,17 +191,8 @@ void AnimationSystem::EvaluatePoses(Registry& registry, double deltaSeconds)
             }
         }
 
-        // Sample -> IK-solve -> append/grant-inherit, in that exact,
-        // correctness-critical fixed order - see
-        // Animation/AnimationPoseEvaluator.h's own file comment. This pure
-        // math module is NOT touched by this refactor at all, regardless of
-        // skinning mode - GPU mode still evaluates the pose entirely on the
-        // CPU (see GPU_SKINNING_PHASE0_MASTER_STRATEGY_v2.md's own "What We
-        // Will NOT Do": no GPU-side pose evaluation). Deliberately stops one
-        // step short of ComputeSkinningMatrices() - see
-        // EvaluateAnimatedPoseBeforePhysics()'s own doc comment - so
-        // PhysicsSystem::Update() gets a genuine hook point between this and
-        // SkinAndUpload().
+        // Sample, IK, then append, in that fixed order. The pose stops before the skinning matrices so physics can
+        // adjust it; GPU mode also evaluates the pose on the CPU.
         std::vector<BoneLocalOffset> pose = EvaluateAnimatedPoseBeforePhysics(skinData->skeleton, binding, animator.frame);
 
         ResolvedAnimationPose* resolvedPose = registry.TryGetComponent<ResolvedAnimationPose>(animatorEntity);
@@ -268,23 +203,8 @@ void AnimationSystem::EvaluatePoses(Registry& registry, double deltaSeconds)
         animatedThisFrame.insert(animatorEntity);
     }
 
-    // Phase 1 (verlet-integration-7 - PHASE1_BASELINE_RESOLVED_POSE_FOR_NONANIMATED_PHYSICS_RIGS.md):
-    // second pass, narrow scope - only entities with an ENABLED
-    // DynamicChainRig (per the user's own explicit "narrow" answer, see
-    // PHASE0_MASTER_STRATEGY.md, Step 1) that did NOT already get a fresh,
-    // genuinely-ANIMATED pose from the loop above this same call. This is
-    // the ONLY thing that unblocks PhysicsSystem::Update() for a model that
-    // has never had Game::PlayAnimationOnEntity() called on it at all - a
-    // pure T-pose model - since PhysicsSystem::Update() itself unconditionally
-    // skips any entity with no ResolvedAnimationPose component yet. The
-    // baseline is always the model's own bind/T-pose (an all-default
-    // BoneLocalOffset per bone - see Animation/SkeletonPose.h's own
-    // documented convention), always a full fresh overwrite (never merged
-    // with a previous frame's leftover value) - this runs BEFORE
-    // PhysicsSystem::Update() every frame (see Game::Update()'s fixed call
-    // order), so this is always exactly the "before physics touches it"
-    // snapshot, whether the entity is animated or not. Touches no
-    // Renderer/Mesh/GPU state, same as the loop above.
+    // Entities with an enabled DynamicChainRig and no animated pose get a bind-pose baseline, so physics also runs on
+    // models that never played a clip. Always a full overwrite; it runs before physics every frame.
     ComponentStorage<DynamicChainRig>& rigs = registry.Storage<DynamicChainRig>();
     for (std::size_t i = 0; i < rigs.Size(); ++i) {
         DynamicChainRig& rig = rigs.ComponentAt(i);
@@ -309,13 +229,7 @@ void AnimationSystem::EvaluatePoses(Registry& registry, double deltaSeconds)
     }
 }
 
-// Phase 2 (task_manager/verlet-integration-7/
-// PHASE2_SKIN_AND_UPLOAD_VISIBILITY_FOR_PHYSICS_ONLY_ENTITIES.md) - the
-// ENTIRE per-entity skin/pack/upload body SkinAndUpload() used to run
-// inline for its own SkeletalAnimator loop, extracted verbatim (zero logic
-// change - see AnimationSystem.h's own doc comment on this method). Called
-// for an entity discovered via EITHER a playing SkeletalAnimator OR an
-// enabled DynamicChainRig.
+// Skins and uploads one entity's model, found through a playing animator or an enabled DynamicChainRig.
 void AnimationSystem::SkinAndUploadOneEntity(
     Registry& registry, Entity entity, const std::string& meshGtaPath, SkinningMode mode)
 {
@@ -324,37 +238,23 @@ void AnimationSystem::SkinAndUploadOneEntity(
         return; // Its model's own skinning data isn't (or is no longer) cached - nothing to do.
     }
 
-    // Reads whatever EvaluatePoses() (and, in between, PhysicsSystem::
-    // Update()) left in ResolvedAnimationPose::pose this frame - this
-    // method does not, and must not, care whether physics touched it.
-    // An entity with none yet (EvaluatePoses() skipped it this frame -
-    // e.g. it wasn't playing) is simply skipped here too, the identical
-    // guard EvaluatePoses() itself applies.
+    // Reads the pose EvaluatePoses() (and physics in between) left; skips an entity with none.
     const ResolvedAnimationPose* resolvedPose = registry.TryGetComponent<ResolvedAnimationPose>(entity);
     if (resolvedPose == nullptr) {
         return;
     }
     const std::vector<Mat4> skinningMatrices = ComputeSkinningMatrices(skinData->skeleton, resolvedPose->pose);
 
-    // Phase 5 - keep this model's own MeshRenderers pointed at whichever
-    // Mesh (CPU or GPU) matches the CURRENT mode, regardless of which
-    // branch below actually runs this frame - this is what makes a
-    // mid-session mode switch take effect on the very next frame.
+    // Keep the model's renderers on the mesh that matches the current mode, so a mode switch applies next frame.
     const GpuSkinningRigCache::GpuModelEntry* gpuEntry = m_gpuRigCache.TryGet(meshGtaPath);
     if (gpuEntry != nullptr) {
         ApplyMeshHandleForSkinningMode(registry, entity, *gpuEntry, mode);
     }
 
     if (mode == SkinningMode::GpuCompute) {
-        // Phase 5's ENTIRE per-frame CPU cost for this model: one
-        // Buffer::Upload() call, main-thread-only, no Jobs::Dispatch()
-        // involved at all - see this phase's own strategy document,
-        // Step 3.2/"What We Will NOT Do". The real vkCmdDispatch is
-        // recorded later, from src/Application/RenderPasses.cpp's
-        // AddGpuSkinningPasses(), once CollectModelsNeedingGpuSkinningThisFrame()
-        // is called after this whole SkinAndUpload() has returned.
+        // The whole CPU cost in GPU mode is one upload; the dispatch is recorded later by the skinning pass.
         if (gpuEntry == nullptr) {
-            return; // Never registered for GPU skinning (see Phase 4) - nothing to dispatch.
+            return; // Never registered for GPU skinning.
         }
         gpuEntry->boneMatricesBuffer.Upload(skinningMatrices.data(), skinningMatrices.size() * sizeof(Mat4));
 
@@ -366,16 +266,7 @@ void AnimationSystem::SkinAndUploadOneEntity(
         return;
     }
 
-    // --- CpuJobSystem mode: existing CPU skinning path, UNCHANGED. ---
-
-    // Stage 3 (reuse scratch buffers across frames, per model - see
-    // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md): owned by
-    // this AnimationSystem instance, keyed by mesh path, instead of a
-    // fresh std::vector allocated on every SkinAndUpload() call for
-    // every entity. resize() is a no-op once a buffer's capacity
-    // already covers `vertexCount`, which holds true for every frame
-    // after the first (a model's own vertex count never changes after
-    // load).
+    // CpuJobSystem mode. The scratch arrays are kept per model between frames; resize() allocates only the first time.
     const std::size_t vertexCount = skinData->bindPositions.size();
     AnimatorScratchBuffers& scratch = m_scratchBuffers[meshGtaPath];
     std::vector<Vec3>& skinnedPositions = scratch.skinnedPositions;
@@ -383,12 +274,7 @@ void AnimationSystem::SkinAndUploadOneEntity(
     skinnedPositions.resize(vertexCount);
     skinnedNormals.resize(vertexCount);
 
-    // Job System Phase 6: CPU vertex skinning itself - dispatched across
-    // the worker pool for a model with enough vertices to be worth it,
-    // otherwise run inline. Either way, `skinnedPositions`/
-    // `skinnedNormals` hold the exact same values SkinVertices() alone
-    // would have produced (see tests/Animation/VertexSkinningParityTests.cpp) -
-    // this is purely a "where/how" change, never a "what" change.
+    // CPU skinning runs on the worker pool for models large enough to benefit, inline otherwise; the result is the same.
     if (vertexCount < kMinVerticesToParallelize) {
         SkinVertexRange(0, static_cast<std::uint32_t>(vertexCount), skinData->bindPositions,
             skinData->bindNormals, skinData->skinWeights, skinningMatrices, skinnedPositions, skinnedNormals);
@@ -398,11 +284,7 @@ void AnimationSystem::SkinAndUploadOneEntity(
         Jobs::JobHandle skinningHandle;
         Jobs::Dispatch(&RunSkinningBatch, static_cast<std::uint32_t>(vertexCount), &context, skinningHandle,
             kMinVerticesPerBatch);
-        // Exactly ONE wait, for THIS ONE model's entire skinning
-        // dispatch, before this call's packing/GPU-upload work below
-        // runs - see SkinAndUpload()'s own header comment on why the
-        // NEXT entity's own Dispatch() must never begin before this
-        // WaitForJobs() call returns.
+        // One wait per model: the next model's dispatch must not start before this one finishes.
         Jobs::JobSystem::Instance().WaitForJobs(skinningHandle);
     }
 
@@ -411,31 +293,11 @@ void AnimationSystem::SkinAndUploadOneEntity(
         return;
     }
 
-    // Multithreaded CPU-skinning optimization, Stage 1 (see
-    // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md): several of
-    // this model's own MeshAssetParts may now point at the exact SAME
-    // underlying GPU vertex buffer (e.g. every textured-material
-    // submesh, built via Renderer::CreateMeshFromSharedVertexBuffer() -
-    // see MeshAssetGpuCatalog.cpp) - previously every part re-packed
-    // and re-uploaded a FULL copy of the whole model's vertex data,
-    // unconditionally, turning this loop's true cost into
-    // O(vertexCount x partCount). Group parts by their Mesh's own
-    // VertexBufferIdentity() first (via the SHARED
-    // GroupMeshAssetPartsBySharedVertexBuffer() helper - GPU Vertex
-    // Skinning campaign, Phase 4, also used by GpuSkinningRigCache - see
-    // MeshAssetPartGrouping.h), so each DISTINCT underlying buffer is
-    // packed/uploaded exactly ONCE per frame, no matter how many parts
-    // reference it.
+    // Parts that share one GPU vertex buffer are grouped so each distinct buffer is packed and uploaded once.
     const std::vector<MeshAssetPartGroup> groups = GroupMeshAssetPartsBySharedVertexBuffer(m_renderSystem, *parts);
 
-    // For each distinct vertex buffer: pack (Stage 2 - parallelized via
-    // the worker pool exactly like the skin blend above, for a model
-    // large enough for it to be worth it) directly from this frame's
-    // freshly-skinned positions/normals into a reused scratch vector
-    // (Stage 3), then upload it ONCE (Stage 1) - this GPU upload step
-    // stays main-thread-only, unconditionally, exactly matching
-    // AGENTS.md's Job System Phase 4 audit table's `Renderer`/`Mesh`
-    // row (NEVER for a job body to touch).
+    // For each distinct vertex buffer: pack from the freshly skinned arrays (on the worker pool for large models)
+    // and upload once. The upload stays on the main thread.
     for (const MeshAssetPartGroup& group : groups) {
         if (group.textured) {
             std::vector<MeshVertexUv>& packed = scratch.packedTextured;
@@ -477,48 +339,15 @@ void AnimationSystem::SkinAndUpload(Registry& registry)
 {
     GTE_PROFILE_SCOPE("AnimationSystem::SkinAndUpload");
 
-    // Phase 5 - snapshotted ONCE, at the very top, so one model's entire
-    // per-frame processing below is never torn between two different modes
-    // mid-iteration - see this phase's own strategy document, Step 3.4.
+    // The mode is captured once so one model is never processed under two modes.
     const SkinningMode mode = m_mode;
     m_gpuModelsNeedingDispatchThisFrame.clear();
 
-    // Job System Phase 6 (First Production Consumer - see
-    // task_manager/job_system/JOBSYSTEM_PHASE6_FIRST_PRODUCTION_CONSUMER_ANIMATION_SKINNING_v2.md,
-    // Section 3.6, and JOB_SYSTEM_PHASE6_COMPLETION_REPORT.md), extended by
-    // Phase 2 of task_manager/verlet-integration-7 to cover a second entity
-    // source (below):
-    //
-    // *** THIS OUTER PROCESSING MUST REMAIN STRICTLY SEQUENTIAL, ONE MODEL
-    // AT A TIME, REGARDLESS OF WHICH SOURCE DISCOVERED IT - NEVER
-    // "HELPFULLY" RESTRUCTURED TO FIRE OFF EVERY ENTITY'S OWN Dispatch()
-    // CALL UP FRONT AND WAIT ON ALL OF THEM TOGETHER. ***
-    //
-    // Two entities spawned from the SAME *.gta file share one underlying
-    // Mesh (see README.md's own documented limitation, "A spawned MMD
-    // model can now actually be ANIMATED..."), including the very GPU
-    // vertex buffer(s) SkinAndUploadOneEntity() is about to upload into.
-    // Today that sharing is safe ONLY because this loop processes one
-    // entity's ENTIRE per-model sequence (every part's skinning + GPU
-    // upload) to full completion before the next entity's own sequence
-    // begins - at any given instant, at most one entity is ever touching
-    // that shared memory. Overlapping two entities' own Dispatch()/
-    // WaitForJobs() work on the worker pool at the same time would turn
-    // this into a genuine, unsynchronized DATA RACE on that shared buffer,
-    // not merely today's harmless "last write wins" visual bug. This rule
-    // may only be lifted once every spawned model instance owns its own
-    // private GPU mesh buffers - a separate, unstarted piece of engine work
-    // (see README.md/TODO.md). GPU mode is no exception to this rule
-    // either - see GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md.
-    // (Phase 3, verlet-integration-1: this constraint applies ONLY to this
-    // method now - EvaluatePoses() above touches no Renderer/Mesh state at
-    // all, so it is not bound by it - see this method's own header comment,
-    // AnimationSystem.h.)
-
+    // Models must be processed strictly one at a time, whatever source found them: instances of one model share
+    // GPU mesh buffers, so overlapping two models' dispatches would be a data race. This holds in GPU mode too.
     std::unordered_set<Entity> processedThisFrame;
 
-    // Source 1 - every actively-playing SkeletalAnimator, EXACT existing
-    // order/logic, now delegated to SkinAndUploadOneEntity().
+    // Source 1: every playing SkeletalAnimator.
     ComponentStorage<SkeletalAnimator>& animators = registry.Storage<SkeletalAnimator>();
     for (std::size_t i = 0; i < animators.Size(); ++i) {
         SkeletalAnimator& animator = animators.ComponentAt(i);
@@ -530,14 +359,8 @@ void AnimationSystem::SkinAndUpload(Registry& registry)
         processedThisFrame.insert(animatorEntity);
     }
 
-    // Source 2 (task_manager/verlet-integration-7, Phase 2 -
-    // PHASE2_SKIN_AND_UPLOAD_VISIBILITY_FOR_PHYSICS_ONLY_ENTITIES.md) -
-    // every enabled DynamicChainRig entity Phase 1's EvaluatePoses()
-    // guaranteed a fresh ResolvedAnimationPose for THIS SAME frame, that
-    // Source 1 above did NOT already process (an entity may legitimately
-    // carry BOTH components - it must be skinned/uploaded exactly ONCE per
-    // frame, never twice, which would double-upload the same shared GPU
-    // vertex buffer).
+    // Source 2: enabled DynamicChainRig entities with a fresh pose that source 1 did not process (an entity may
+    // carry both components and must be uploaded only once).
     ComponentStorage<DynamicChainRig>& rigs = registry.Storage<DynamicChainRig>();
     for (std::size_t i = 0; i < rigs.Size(); ++i) {
         DynamicChainRig& rig = rigs.ComponentAt(i);
@@ -549,7 +372,7 @@ void AnimationSystem::SkinAndUpload(Registry& registry)
             continue;
         }
         if (!registry.HasComponent<ResolvedAnimationPose>(entity)) {
-            continue; // Phase 1 didn't (or couldn't - e.g. unregistered model) produce one this frame.
+            continue; // EvaluatePoses() produced no pose for it this frame.
         }
         SkinAndUploadOneEntity(registry, entity, rig.meshGtaPath, mode);
     }
@@ -566,14 +389,13 @@ std::vector<AnimationSystem::GpuSkinningDispatchRequest> AnimationSystem::Collec
         }
 
         for (const GpuSkinningRigCache::OutputGroup& group : entry->outputGroups) {
-            if (!group.outputVertexBuffer) {
+            if (!group.outputVertexBuffer.IsValid()) {
                 continue;
             }
 
             GpuSkinningDispatchRequest request;
             request.name = group.debugName.c_str();
-            request.outputBuffer = group.outputVertexBuffer->ObjectHandle();
-            request.outputBufferSize = group.outputVertexBuffer->Size();
+            request.outputBuffer = &group.outputVertexBuffer;
             request.descriptorSet = group.descriptorSetHandle;
             request.vertexCount = group.vertexCount;
             request.textured = group.isTextured;

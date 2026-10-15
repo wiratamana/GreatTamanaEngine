@@ -6,24 +6,6 @@
 #include "Renderer/Renderer.h"
 #include "Renderer/RenderGraph/CommandBuffer.h"
 
-// editor-core-separation-2 campaign, PHASE2 - the free function
-// gte::RecordFrameDebuggerDraws() (declared in RenderSystem.h,
-// PHASE2_FRAME_DEBUGGER_CAPTURE_POINTER_SAFETY_FIX.md's own former fix) is
-// GONE - Draw() below now calls capture->RecordFrameDebuggerDraw(...), a
-// virtual method on the gte_core-owned IFrameDebuggerCaptureRecorder
-// interface (src/Core/FrameDebuggerCaptureRecorder.h) `capture` now points
-// to, instead of a gte_editor-only free function by name (closing
-// "Defect A" - see task_manager/editor-core-separation-2/
-// PHASE0_MASTER_STRATEGY.md). This file still contains ZERO #include of
-// FrameDebuggerCapture.h and ZERO reference to the concrete
-// FrameDebuggerCaptureContext type - RenderSystem.h's own #include of the
-// interface header (never the concrete type) is all this file needs. A
-// virtual call through a pointer to a COMPLETE abstract-interface type
-// needs only a vtable read at runtime (satisfied by whichever concrete
-// object - always FrameDebuggerCaptureContext, gte_editor-owned - the
-// pointer actually points at), requiring ZERO link-time symbol in
-// gte_core.a itself, unlike the old direct free-function call by name.
-
 namespace gte {
 
 std::vector<DrawCommand> RenderSystem::CollectRenderables(Registry& registry)
@@ -39,12 +21,7 @@ std::vector<DrawCommand> RenderSystem::CollectRenderables(Registry& registry)
         const Entity entity = renderers.EntityAt(i);
         const MeshRenderer& meshRenderer = renderers.ComponentAt(i);
 
-        // ComputeWorldMatrix() (ECS/TransformHierarchy.h) walks this
-        // entity's whole parent chain, composing parentWorld * local at
-        // every level - for an entity with no parent (or no Transform at
-        // all) this is exactly transform->LocalToWorldMatrix()/
-        // Mat4::Identity(), the same fallback this used to compute inline
-        // before parenting existed.
+        // The world matrix composes the whole parent chain; identity without a Transform.
         const Mat4 model = ComputeWorldMatrix(registry, entity);
 
         commands.push_back(DrawCommand{ entity, meshRenderer.mesh, meshRenderer.pipeline, meshRenderer.texture, model });
@@ -53,9 +30,7 @@ std::vector<DrawCommand> RenderSystem::CollectRenderables(Registry& registry)
     return commands;
 }
 
-// Render Pass campaign, PHASE2 - see this method's own doc comment in
-// RenderSystem.h. Always empty today - `registry` is intentionally unused
-// (kept, named, for signature stability - see that header comment).
+// Always empty: nothing marks a renderable transparent yet.
 std::vector<DrawCommand> RenderSystem::CollectTransparentRenderables(Registry& registry)
 {
     (void)registry;
@@ -74,12 +49,7 @@ Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float a
 
         const Entity entity = cameras.EntityAt(i);
 
-        // ComputeWorldTransform() (ECS/TransformHierarchy.h) resolves this
-        // camera entity's Transform through its whole parent chain first -
-        // a Camera parented under a moving entity (e.g. a vehicle) now
-        // genuinely follows it, matching Unity's own behavior. Falls back
-        // to an identity Transform (origin, no rotation) when this camera
-        // entity has no Transform of its own at all, same as before.
+        // The camera follows its parents; an entity without a Transform uses identity.
         Transform transform;
         if (registry.TryGetComponent<Transform>(entity) != nullptr) {
             transform = ComputeWorldTransform(registry, entity);
@@ -88,10 +58,7 @@ Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float a
         return camera.ProjectionMatrix(aspectWidthOverHeight) * Camera::ViewMatrix(transform);
     }
 
-    // No active Camera anywhere in the Registry - Identity() is the
-    // multiplicative no-op, so every draw's clip-space position ends up
-    // being exactly its model matrix's output, matching this engine's
-    // original (pre-Camera) triangle-demo behavior.
+    // No active camera: identity leaves vertices in clip space, as authored.
     return Mat4::Identity();
 }
 
@@ -122,8 +89,6 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidt
 }
 
 namespace {
-// Readable name for a GTE_LOG_WARNING message - RenderSystem.cpp only, not
-// part of any public header.
 const char* VertexLayoutDebugName(VertexLayout layout)
 {
     switch (layout) {
@@ -155,12 +120,7 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
         }
         ++consideredCount;
 
-        // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-        // PHASE5 - a batched entity is skipped by this per-entity path (its
-        // own indirect-draw pass draws it instead this frame) but STILL
-        // counts toward consideredCount above, matching maxDrawCount's own
-        // "iteration count, not resolved-draw count" contract - see this
-        // method's own header doc comment (RenderSystem.h).
+        // A batched entity is drawn by its indirect pass, but still counts toward maxDrawCount.
         if (batchedEntities.contains(command.entity)) {
             continue;
         }
@@ -200,21 +160,13 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
             const DescriptorSetHandle descriptorSet =
                 materialTexture != nullptr ? materialTexture->descriptorSet : DescriptorSetHandle::Invalid;
 
-            // editor-core-separation-2 campaign, PHASE2 -
-            // zero-overhead-when-disarmed: this call collapses to one
-            // already-taken "is this pointer null" branch when `capture` is
-            // nullptr (the common case) - no string formatting, no vector
-            // work happens.
+            // Costs one null check when no capture is armed.
             if (capture != nullptr) {
                 capture->RecordFrameDebuggerDraw(
                     registry, renderer, command.entity, *mesh, *pipeline, materialTexture, viewProjection);
             }
 
-            // Per-draw-call granularity: a non-null `cmd` routes this draw
-            // through gte::rg::CommandBuffer::Draw() instead, which feeds
-            // FrameDebuggerEventSink::NoteCommandResult() for the Frame
-            // Debugger's per-draw-call texture capture - see RenderSystem.h's
-            // own `cmd` doc comment. Both paths issue identical Vulkan work.
+            // A command buffer routes the draw through the frame debugger's per-draw capture; the GPU work is identical.
             if (cmd != nullptr) {
                 cmd->Draw(*pipeline, *mesh, command.model, viewProjection, descriptorSet, sceneServicesSet);
             } else {
@@ -224,10 +176,8 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
     }
 }
 
-// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-// PHASE4 - see this method's own doc comment in RenderSystem.h.
 std::vector<GpuDrivenBatchFrameEntry> RenderSystem::CollectGpuDrivenBatches(Registry& registry, Renderer& renderer,
-    GpuDrivenBatchCache& cache, const std::unordered_set<VkBuffer>& gpuSkinnedOutputBuffersThisFrame,
+    GpuDrivenBatchCache& cache, const std::unordered_set<BufferObjectHandle>& gpuSkinnedOutputBuffersThisFrame,
     std::size_t minInstancesForGpuDrivenBatch)
 {
     GTE_PROFILE_SCOPE("RenderSystem::CollectGpuDrivenBatches");
@@ -244,9 +194,8 @@ std::vector<GpuDrivenBatchFrameEntry> RenderSystem::CollectGpuDrivenBatches(Regi
             continue; // Unresolvable handle - never eligible, mirrors Draw()'s own "skip, never crash" convention.
         }
 
-        // Locked Design Decision 7(d), PHASE0 - see this method's own doc
-        // comment in RenderSystem.h for the full cross-reference reasoning.
-        const bool isGpuSkinned = gpuSkinnedOutputBuffersThisFrame.contains(mesh->VertexBuffer());
+        // A GPU-skinned mesh draws from a skinning output buffer and never joins a GPU-driven batch.
+        const bool isGpuSkinned = gpuSkinnedOutputBuffersThisFrame.contains(mesh->VertexBufferHandle());
 
         if (!IsGpuDrivenEligible(group, mesh->HasIndexBuffer(), pipeline->VertexLayoutKind(), isGpuSkinned,
                 minInstancesForGpuDrivenBatch)) {
@@ -258,11 +207,7 @@ std::vector<GpuDrivenBatchFrameEntry> RenderSystem::CollectGpuDrivenBatches(Regi
 
         cache.EnsureCapacity(renderer, key, instanceCount);
 
-        // Every instance in this batch shares the exact same Mesh, so its
-        // LOCAL bounds are computed once here and re-transformed per
-        // instance below - mirrors this frame's own per-entity Transform
-        // resolution cost exactly (TransformAABB() is as cheap as the
-        // world-matrix multiply CollectRenderables() already did).
+        // The batch shares one mesh, so its local bounds are computed once and transformed per instance.
         const AABB localBounds = mesh->LocalBounds().value_or(AABB{});
 
         std::vector<GpuCullingInstanceInput> instances;
@@ -275,17 +220,7 @@ std::vector<GpuDrivenBatchFrameEntry> RenderSystem::CollectGpuDrivenBatches(Regi
 
         cache.PackThisFrame(key, instances);
 
-        // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-        // PHASE5 - (re)allocates/rewrites this batch's two persistent
-        // descriptor sets (culling + instance-buffer) so they always point
-        // at whatever buffers `cache` currently holds for `key` this frame -
-        // a no-op cost-wise on a frame where EnsureCapacity() above didn't
-        // reallocate (Rewrite() is cheap - see ComputeDescriptorSet's own
-        // "safe/expected every frame" convention). Also lazily
-        // EnsureInitialized()s `cache`'s own shared CullingPipelines the
-        // first time any batch is ever collected this session - see
-        // GpuDrivenBatchCache.h's own doc comment on why PHASE4 deliberately
-        // never did this itself.
+        // Points the batch's descriptor sets at the cache's current buffers; cheap when nothing was reallocated.
         cache.EnsureDescriptorSetsWritten(renderer, key);
 
         GpuDrivenBatchFrameEntry entry;

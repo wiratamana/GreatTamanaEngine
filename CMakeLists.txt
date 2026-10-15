@@ -827,6 +827,9 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/PerView.h
     src/Renderer/RenderGraph/PersistentTarget.h
     src/Renderer/RenderGraph/GpuParams.h
+    src/Renderer/RenderGraph/GpuBuffer.h
+    src/Renderer/RenderGraph/GpuBufferInternal.h
+    src/Renderer/RenderGraph/GpuBuffer.cpp
     src/Renderer/RenderGraph/GpuParams.cpp
     src/Renderer/RenderGraph/BuildRetryGate.h
     src/Renderer/RenderGraph/ShaderBindings.h

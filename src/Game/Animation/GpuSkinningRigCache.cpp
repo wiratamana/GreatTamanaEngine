@@ -16,21 +16,8 @@ namespace gte {
 
 namespace {
 
-// Display-only helper for OutputGroup::debugName below - the Editor's
-// "Render Graph" panel (Panels/RenderGraphPanel.cpp) shows this pass/
-// imported-buffer name verbatim, so it must stay a short, human-readable
-// label ("Furina.gta#SkinGroup0"), never the full absolute on-disk path
-// ("C:\Users\...\build\Project\Furina.gta#SkinGroup0") the caller actually
-// hands Register() (see AnimationSystem::RegisterGpuSkinnedMesh()'s own
-// `absoluteGtaPath` parameter, which is - and must stay - the full path,
-// since it also doubles as this cache's own m_models lookup key).
-//
-// Same std::u8string round-trip MeshAssetGpuCatalog.cpp's own
-// Utf8PathFromGamePath()/PathToUtf8() use - std::filesystem::path must be
-// built from an explicit std::u8string, never straight from a plain
-// std::string, or a non-ASCII (e.g. Japanese) path/filename gets
-// reinterpreted through the OS's native/legacy codepage instead of UTF-8 on
-// Windows and comes out corrupted.
+// The file name only: the render graph panel shows this label, and a full path would leak the folder layout.
+// Built through u8string so non-ASCII names survive on Windows.
 std::string FileNameOnly(const std::string& absoluteUtf8Path)
 {
     const std::filesystem::path path(
@@ -69,58 +56,46 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
     const std::string& absoluteGtaPath, const SkinnedMeshData& data, const std::vector<MeshAssetPart>& parts)
 {
     if (data.skeleton.bones.empty() || data.bindPositions.empty() || parts.empty()) {
-        return; // Boneless/riggless/empty model - nothing to register (mirrors SkeletalRigCache/AnimationSystem's own convention).
+        return;
     }
 
     const std::vector<MeshAssetPartGroup> groups = GroupMeshAssetPartsBySharedVertexBuffer(renderSystem, parts);
     if (groups.empty()) {
-        return; // None of `parts`' handles resolved to a live Mesh - nothing to build against.
+        return;
     }
 
     pipelines.EnsureInitialized(renderer);
 
-    // GpuModelEntry is deliberately NOT default-constructible (Buffer has
-    // no default constructor - see Buffer.h) - every GpuModelEntry must be
-    // built as a single, fully-formed aggregate-initialization. Compute
-    // every per-model buffer as a plain local first, then construct `entry`
-    // from them in one step below.
+    using rg::GpuBuffer;
+    using rg::GpuBufferUse;
+    const rg::DeviceRef device = renderer.Device();
+
     const std::vector<GpuBindPoseVertex> packedBindPose = PackBindPoseVertices(data.bindPositions, data.bindNormals);
-    Buffer bindPoseBuffer = renderer.CreateDeviceLocalBuffer(packedBindPose.data(),
-        static_cast<uint64_t>(packedBindPose.size() * sizeof(GpuBindPoseVertex)),
-        BufferUsage::StorageBuffer, "GpuSkinningBindPose");
+    GpuBuffer bindPoseBuffer = GpuBuffer::CreateWithData(device, packedBindPose.data(),
+        packedBindPose.size() * sizeof(GpuBindPoseVertex), "GpuSkinningBindPose", GpuBufferUse::Storage);
 
     const std::vector<GpuSkinWeights> packedSkinWeights = PackSkinWeights(data.skinWeights);
-    Buffer skinWeightsBuffer = renderer.CreateDeviceLocalBuffer(packedSkinWeights.data(),
-        static_cast<uint64_t>(packedSkinWeights.size() * sizeof(GpuSkinWeights)),
-        BufferUsage::StorageBuffer, "GpuSkinningWeights");
+    GpuBuffer skinWeightsBuffer = GpuBuffer::CreateWithData(device, packedSkinWeights.data(),
+        packedSkinWeights.size() * sizeof(GpuSkinWeights), "GpuSkinningWeights", GpuBufferUse::Storage);
 
-    // The one genuinely per-frame-rewritten input - sized here, uploaded by
-    // AnimationSystem::Update() every frame this model is animated in GPU
-    // mode. See this phase's own strategy document, Step 3.3.
-    Buffer boneMatricesBuffer = renderer.CreateStructuredBuffer(sizeof(Mat4),
-        static_cast<std::uint32_t>(data.skeleton.bones.size()), BufferMemoryUsage::CpuToGpu, BufferUsage::None,
-        "GpuSkinningBoneMatrices");
+    // The one input rewritten every animated frame.
+    GpuBuffer boneMatricesBuffer(device, sizeof(Mat4) * data.skeleton.bones.size(), "GpuSkinningBoneMatrices",
+        GpuBufferUse::Storage | GpuBufferUse::HostWrite);
 
     const bool anyTextured =
         std::any_of(groups.begin(), groups.end(), [](const MeshAssetPartGroup& group) { return group.textured; });
-    std::optional<Buffer> uvBuffer;
+    std::optional<GpuBuffer> uvBuffer;
     if (anyTextured) {
         const std::vector<GpuUv> packedUvs = PackUvs(data.uvs);
-        uvBuffer.emplace(renderer.CreateDeviceLocalBuffer(packedUvs.data(),
-            static_cast<uint64_t>(packedUvs.size() * sizeof(GpuUv)), BufferUsage::StorageBuffer,
-            "GpuSkinningUv"));
+        uvBuffer.emplace(GpuBuffer::CreateWithData(
+            device, packedUvs.data(), packedUvs.size() * sizeof(GpuUv), "GpuSkinningUv", GpuBufferUse::Storage));
     }
 
     GpuModelEntry entry{ std::move(bindPoseBuffer), std::move(skinWeightsBuffer), std::move(uvBuffer),
         std::move(boneMatricesBuffer), {} };
 
     const std::uint32_t vertexCount = static_cast<std::uint32_t>(data.bindPositions.size());
-
     entry.outputGroups.reserve(groups.size());
-
-    // Computed once, outside the loop below - see FileNameOnly()'s own doc
-    // comment for why this (never absoluteGtaPath itself) is what feeds
-    // OutputGroup::debugName.
     const std::string displayFileName = FileNameOnly(absoluteGtaPath);
 
     std::size_t groupIndex = 0;
@@ -128,53 +103,24 @@ void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSyste
         OutputGroup outputGroup;
         outputGroup.isTextured = group.textured;
         outputGroup.vertexCount = vertexCount;
-        // Phase 5 - a stable, persistent name for this group's compute pass/
-        // imported buffer, living as long as this OutputGroup does (see
-        // OutputGroup::debugName's own doc comment above for why this must
-        // never be a per-frame temporary).
         outputGroup.debugName = displayFileName + "#SkinGroup" + std::to_string(groupIndex);
         ++groupIndex;
 
-        const uint64_t outputSize = group.textured
-            ? static_cast<uint64_t>(vertexCount) * sizeof(GpuSkinnedVertexPositionNormalUv)
-            : static_cast<uint64_t>(vertexCount) * sizeof(GpuSkinnedVertexPositionNormal);
-
-        outputGroup.outputVertexBuffer = std::make_shared<Buffer>(
-            renderer.CreateGpuSkinningTargetBuffer(outputSize, "GpuSkinningOutput"));
+        const std::size_t outputSize = group.textured
+            ? static_cast<std::size_t>(vertexCount) * sizeof(GpuSkinnedVertexPositionNormalUv)
+            : static_cast<std::size_t>(vertexCount) * sizeof(GpuSkinnedVertexPositionNormal);
+        outputGroup.outputVertexBuffer =
+            GpuBuffer(device, outputSize, "GpuSkinningOutput", GpuBufferUse::Storage | GpuBufferUse::Vertex);
 
         const VkDescriptorSetLayout layout = group.textured ? pipelines.PositionNormalUvDescriptorSetLayout()
                                                              : pipelines.PositionNormalDescriptorSetLayout();
         outputGroup.descriptorSet = ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(layout));
-
-        // Bound once, per Phase 1's binding table (bind pose / skin
-        // weights / bone matrices / output, + UV at binding 4 for a
-        // textured group - see GpuSkinningTypes.h) - never re-Rewrite()'d
-        // afterward (see this class's own OutputGroup::descriptorSet doc
-        // comment).
-        std::vector<ComputeDescriptorWrite> writes;
-        writes.push_back(ComputeDescriptorWrite::StorageBuffer(0, entry.bindPoseBuffer.Native()));
-        writes.push_back(ComputeDescriptorWrite::StorageBuffer(1, entry.skinWeightsBuffer.Native()));
-        writes.push_back(ComputeDescriptorWrite::StorageBuffer(2, entry.boneMatricesBuffer.Native()));
-        writes.push_back(ComputeDescriptorWrite::StorageBuffer(3, outputGroup.outputVertexBuffer->Native()));
-        if (group.textured && entry.uvBuffer.has_value()) {
-            writes.push_back(ComputeDescriptorWrite::StorageBuffer(4, entry.uvBuffer->Native()));
-        }
-        outputGroup.descriptorSet.Rewrite(writes);
-
-        // Registered ONCE here - this group's descriptor set is never
-        // Rewrite()'d again after this (see OutputGroup::descriptorSetHandle's
-        // own doc comment) - so there is exactly one RegisterDescriptorSet()
-        // call for this handle's entire lifetime.
+        GpuSkinningPipelines::BindBuffers(outputGroup.descriptorSet, entry.bindPoseBuffer, entry.skinWeightsBuffer,
+            entry.boneMatricesBuffer, outputGroup.outputVertexBuffer,
+            group.textured && entry.uvBuffer.has_value() ? &*entry.uvBuffer : nullptr);
         outputGroup.descriptorSetHandle = RegisterDescriptorSet(outputGroup.descriptorSet.Native());
 
-        // Build a GPU-skinned Mesh PER PART in this group, all sharing this
-        // group's own output vertex buffer - mirrors the CPU path's own
-        // "several textured parts share one vertex buffer, each with its
-        // own index buffer/range" shape exactly (see
-        // Renderer::CreateMeshFromSharedVertexBuffer()). A part whose
-        // MeshAssetPart::indices is empty (e.g. built before that field
-        // existed) is simply skipped - never crashes, mirrors this whole
-        // module's "degrade gracefully" convention.
+        // One GPU-skinned mesh per part, all sharing the group's output as their vertex buffer.
         for (const std::size_t partIndex : group.partIndices) {
             const MeshAssetPart& part = parts[partIndex];
             if (part.indices.empty()) {

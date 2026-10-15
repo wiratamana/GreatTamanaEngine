@@ -2,6 +2,7 @@
 
 // Declarative builder API to record frame render passes and resources.
 
+#include "GpuBuffer.h"
 #include "OnceErrorLog.h"
 #include "RenderGraphTypes.h"
 #include "RenderGraphDebugMetadataSink.h"
@@ -173,7 +174,10 @@ public:
         SamplerHandle colorSampler = SamplerHandle::Invalid, SamplerHandle depthSampler = SamplerHandle::Invalid,
         RenderTexture* trackedOwner = nullptr);
 
-    // externalBuffer is an engine handle (Core/GraphicsHandles.h), never a raw VkBuffer.
+    // Imports a GpuBuffer. `graphName` (static storage) defaults to the buffer's own name.
+    BufferHandle Import(const GpuBuffer& buffer, const char* graphName = nullptr);
+
+    // Low-level form of Import(): an engine handle (Core/GraphicsHandles.h) plus its size.
     BufferHandle ImportBuffer(const char* name, BufferObjectHandle externalBuffer, uint64_t size);
 
     // A volume has no sampler of its own: pass one to bind it by name as a sampled texture.

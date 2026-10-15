@@ -71,13 +71,15 @@ bool GpuParamsBuffer::Upload(RenderGraphBuilder& builder, const void* data, std:
 
     try {
         if (decision == GpuParamsUploadDecision::Create) {
-            auto buffer = std::make_unique<Buffer>(builder.OwningRenderer().CreateBuffer(
-                size, BufferUsage::StorageBuffer, BufferMemoryUsage::CpuToGpu, debugName));
-            buffer->Upload(data, size);
+            auto buffer = std::make_unique<GpuBuffer>(builder.OwningRenderer().Device(), size, debugName,
+                GpuBufferUse::Storage | GpuBufferUse::HostWrite);
+            if (!buffer->Upload(data, size)) {
+                return false;
+            }
             m_buffer = std::move(buffer);
             m_size = size;
-        } else {
-            m_buffer->Upload(data, size);
+        } else if (!m_buffer->Upload(data, size)) {
+            return false;
         }
     } catch (const std::exception& e) {
         LogRefusalOnce(std::string("Upload to \"") + (debugName != nullptr ? debugName : "") + "\" failed: " + e.what());
@@ -88,7 +90,7 @@ bool GpuParamsBuffer::Upload(RenderGraphBuilder& builder, const void* data, std:
 
 BufferObjectHandle GpuParamsBuffer::Handle() const noexcept
 {
-    return m_buffer != nullptr ? m_buffer->ObjectHandle() : BufferObjectHandle::Invalid;
+    return m_buffer != nullptr ? m_buffer->Handle() : BufferObjectHandle::Invalid;
 }
 
 } // namespace gte::rg

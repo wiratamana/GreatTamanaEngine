@@ -1,6 +1,7 @@
 #include "Renderer.h"
 
 #include "../Core/ISurfaceProvider.h"
+#include "RenderGraph/GpuBufferInternal.h"
 #include "RenderGraph/RenderGraph.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "UiTextureBackend.h"
@@ -604,6 +605,13 @@ Mesh Renderer::CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer> sharedVe
 {
     return m_resources.CreateMeshFromSharedVertexBuffer(
         std::move(sharedVertexBuffer), vertexCount, indexData, indexDataSize, indexCount, debugName);
+}
+
+Mesh Renderer::CreateMeshFromSharedVertexBuffer(const rg::GpuBuffer& sharedVertexBuffer, std::uint32_t vertexCount,
+    const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount, const char* debugName) const
+{
+    return m_resources.CreateMeshFromSharedVertexBuffer(rg::GpuBufferAccess::Shared(sharedVertexBuffer), vertexCount,
+        indexData, indexDataSize, indexCount, debugName);
 }
 
 Texture2D Renderer::CreateTexture2D(

@@ -1,15 +1,12 @@
 #pragma once
 
+#include "GpuBuffer.h"
 #include "../../Core/GraphicsHandles.h"
 
 #include <cstddef>
 #include <memory>
 #include <string>
 #include <type_traits>
-
-namespace gte {
-class Buffer;
-}
 
 namespace gte::rg {
 
@@ -47,7 +44,7 @@ public:
 private:
     void LogRefusalOnce(const std::string& message);
 
-    std::unique_ptr<Buffer> m_buffer;
+    std::unique_ptr<GpuBuffer> m_buffer;
     std::size_t m_size = 0;
     bool m_refusalLogged = false;
 };

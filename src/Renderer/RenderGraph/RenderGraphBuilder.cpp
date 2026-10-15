@@ -283,6 +283,11 @@ RenderGraphBuilder::ImportedTextureSamplers RenderGraphBuilder::ResolveImportedT
     return resolved;
 }
 
+BufferHandle RenderGraphBuilder::Import(const GpuBuffer& buffer, const char* graphName)
+{
+    return ImportBuffer(graphName != nullptr ? graphName : buffer.Name(), buffer.Handle(), buffer.Size());
+}
+
 BufferHandle RenderGraphBuilder::ImportBuffer(const char* name, BufferObjectHandle externalBuffer, uint64_t size)
 {
     assert(name != nullptr && name[0] != '\0' &&

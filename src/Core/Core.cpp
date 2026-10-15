@@ -1087,8 +1087,7 @@ void Core::BuildFrame()
                     m_gpuSkinningHandlesThisFrame.reserve(m_gpuSkinningRequestsThisFrame.size());
                     for (const AnimationSystem::GpuSkinningDispatchRequest& request :
                         m_gpuSkinningRequestsThisFrame) {
-                        m_gpuSkinningHandlesThisFrame.push_back(
-                            b.ImportBuffer(request.name, request.outputBuffer, request.outputBufferSize));
+                        m_gpuSkinningHandlesThisFrame.push_back(b.Import(*request.outputBuffer, request.name));
                     }
 
                     m_offscreenBlackboardThisFrame.BeginFrame();
@@ -1130,11 +1129,11 @@ void Core::BuildFrame()
 
                         m_gpuDrivenGameViewProjectionThisFrame = gameViewProjection;
                         {
-                            std::unordered_set<VkBuffer> gpuSkinnedOutputBuffers;
+                            std::unordered_set<BufferObjectHandle> gpuSkinnedOutputBuffers;
                             gpuSkinnedOutputBuffers.reserve(m_gpuSkinningRequestsThisFrame.size());
                             for (const AnimationSystem::GpuSkinningDispatchRequest& request :
                                 m_gpuSkinningRequestsThisFrame) {
-                                gpuSkinnedOutputBuffers.insert(Native(request.outputBuffer));
+                                gpuSkinnedOutputBuffers.insert(request.outputBuffer->Handle());
                             }
 
                             RenderSystem& renderSystem = m_game.GetRenderSystem();
@@ -1173,16 +1172,12 @@ void Core::BuildFrame()
                                 data.mesh = frameEntry.mesh;
                                 data.originalPipeline = frameEntry.pipeline;
                                 data.instanceCount = frameEntry.instanceCount;
-                                data.inputHandle = b.ImportBuffer(names.inputBufferName,
-                                    cacheEntry->inputBuffer.ObjectHandle(), cacheEntry->inputBuffer.Size());
-                                data.indirectHandle = b.ImportBuffer(names.indirectBufferName,
-                                    cacheEntry->indirectCommandBuffer.ObjectHandle(),
-                                    cacheEntry->indirectCommandBuffer.Size());
-                                data.countHandle = b.ImportBuffer(names.countBufferName,
-                                    cacheEntry->countBuffer.ObjectHandle(), cacheEntry->countBuffer.Size());
-                                data.readbackHandle = b.ImportBuffer(names.readbackBufferName,
-                                    cacheEntry->countReadbackBuffer.ObjectHandle(),
-                                    cacheEntry->countReadbackBuffer.Size());
+                                data.inputHandle = b.Import(cacheEntry->inputBuffer, names.inputBufferName);
+                                data.indirectHandle =
+                                    b.Import(cacheEntry->indirectCommandBuffer, names.indirectBufferName);
+                                data.countHandle = b.Import(cacheEntry->countBuffer, names.countBufferName);
+                                data.readbackHandle =
+                                    b.Import(cacheEntry->countReadbackBuffer, names.readbackBufferName);
                                 data.cullingDescriptorSet = cacheEntry->cullingDescriptorSet;
                                 data.instanceBufferDescriptorSet = cacheEntry->instanceBufferDescriptorSet;
                                 data.resetPassName = names.resetPassName;
