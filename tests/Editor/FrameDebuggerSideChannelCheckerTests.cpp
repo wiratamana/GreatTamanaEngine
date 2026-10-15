@@ -46,9 +46,7 @@ TEST(FrameDebuggerSideChannelCheckerTest, EnabledToggleNeverReportsEvenIfPublish
 
 TEST(FrameDebuggerSideChannelCheckerTest, DisabledToggleWithKeyPublishedIsReported)
 {
-    // The exact side-channel-leak shape PHASE1/PHASE3 of this campaign
-    // fixed: the gating toggle reports DISABLED, yet the key was still
-    // published this frame.
+    // A disabled toggle whose key was still published is reported.
     const std::vector<KnownRiskBlackboardKeyRule> rules{
         { "Atmosphere.GameSkyBackgroundCallback"_passId, "Atmosphere.GameSkyBackgroundCallback", "DrawSkyBackground" },
     };

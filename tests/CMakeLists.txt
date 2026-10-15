@@ -2812,6 +2812,44 @@ add_test(NAME EngineVocabularyCheck
             --comments scan --strings scan --ignore-case
 )
 
+# Fails on comments that name history or a document (campaign, PHASE<n>, task_manager, Locked Design, *.md) and on
+# comment blocks longer than 3 lines. The scope is an explicit directory/file list; there is no allowlist.
+set(GTE_COMMENT_RULE_SRC
+    Renderer/ Core/FeatureKit/ Features/Shadow/
+    Application/RenderPasses.cpp Application/RenderPasses.h Core/Core.cpp Core/Core.h
+    Editor/FrameDebuggerHistory.cpp Editor/FrameDebuggerHistory.h
+    Editor/FrameDebuggerPreviewProcessing.cpp Editor/FrameDebuggerPreviewProcessing.h
+    Editor/FrameDebuggerSideChannelChecker.cpp Editor/FrameDebuggerSideChannelChecker.h
+    Editor/Panels/FrameDebuggerPanel.cpp
+    Game/Animation/AnimationSystem.cpp Game/Animation/AnimationSystem.h
+    Game/Animation/GpuSkinningRigCache.cpp Game/Animation/GpuSkinningRigCache.h
+    Game/RenderSystem.cpp Game/RenderSystem.h Game/SceneDrawPass.cpp Game/SceneDrawPass.h)
+set(GTE_COMMENT_RULE_TESTS
+    Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
+    Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
+    Features/Shadow/ShadowMathTests.cpp Game/SceneDrawPassTests.cpp
+    Renderer/RenderGraph/CommandBufferTests.cpp Renderer/RenderGraph/FullscreenPassTests.cpp
+    Renderer/RenderGraph/FullscreenRecordTests.cpp Renderer/RenderGraph/GpuBufferTests.cpp
+    Renderer/RenderGraph/OneShotTests.cpp Renderer/RenderGraph/PassKindRecordTests.cpp
+    Renderer/RenderGraph/RealTargetBindingTests.cpp Renderer/RenderGraph/RecordedPassTests.cpp
+    Renderer/RenderGraph/RenderPassToggleRegistryTests.cpp Renderer/RenderGraph/ShaderBindingsTests.cpp
+    Renderer/RenderGraph/TransferReadbackGpuTests.cpp Renderer/Vulkan/ShaderReflectionTests.cpp
+    Tools/CppScannerTests.cpp Tools/HeaderPurityProbe.cpp)
+set(GTE_COMMENT_RULE_SRC_ARGS "")
+foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
+    list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")
+endforeach()
+set(GTE_COMMENT_RULE_TESTS_ARGS "")
+foreach(path IN LISTS GTE_COMMENT_RULE_TESTS)
+    list(APPEND GTE_COMMENT_RULE_TESTS_ARGS --only "${path}")
+endforeach()
+add_test(NAME CommentRulesSrc
+    COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src" ${GTE_COMMENT_RULE_SRC_ARGS} --comment-rules 3
+)
+add_test(NAME CommentRulesTests
+    COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/tests" ${GTE_COMMENT_RULE_TESTS_ARGS} --comment-rules 3
+)
+
 # Vulkan-free header probe: `src` is its only include directory, so a header that pulls in volk.h cannot compile.
 add_library(gte_header_purity_probe OBJECT EXCLUDE_FROM_ALL "${CMAKE_SOURCE_DIR}/tests/Tools/HeaderPurityProbe.cpp")
 target_include_directories(gte_header_purity_probe PRIVATE "${CMAKE_SOURCE_DIR}/src")
