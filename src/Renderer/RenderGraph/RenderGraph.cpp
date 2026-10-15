@@ -333,6 +333,10 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
                     skip(binding, "texture has no depth view.");
                     break;
                 }
+                if (tex->depthSampler == VK_NULL_HANDLE) {
+                    skip(binding, "texture has no depth sampler.");
+                    break;
+                }
                 writes.push_back(ComputeDescriptorWrite::CombinedImageSampler(
                     binding.binding, tex->target.depthImageView, tex->depthSampler));
                 break;

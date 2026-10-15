@@ -63,14 +63,14 @@ void ComputePass::Add(const Argument& argument)
     }
 }
 
-void ComputePass::Dispatch(Extent2D size, std::uint32_t depth)
+bool ComputePass::Dispatch(Extent2D size, std::uint32_t depth)
 {
-    Finish(size, /*useImageExtent=*/false, depth);
+    return Finish(size, /*useImageExtent=*/false, depth);
 }
 
-void ComputePass::Dispatch()
+bool ComputePass::Dispatch()
 {
-    Finish(Extent2D{}, /*useImageExtent=*/true, 1);
+    return Finish(Extent2D{}, /*useImageExtent=*/true, 1);
 }
 
 void ComputePass::Report(const std::string& text)
@@ -81,15 +81,15 @@ void ComputePass::Report(const std::string& text)
     }
 }
 
-void ComputePass::Finish(Extent2D requested, bool useImageExtent, std::uint32_t depth)
+bool ComputePass::Finish(Extent2D requested, bool useImageExtent, std::uint32_t depth)
 {
     if (m_dispatched) {
         Report("Dispatch() called twice on one chain");
-        return;
+        return false;
     }
     m_dispatched = true;
     if (m_inert || m_failed) {
-        return;
+        return false;
     }
 
     std::vector<BindingArgument> arguments;
@@ -108,12 +108,12 @@ void ComputePass::Finish(Extent2D requested, bool useImageExtent, std::uint32_t 
     BindingPlanResult planned = PlanBindings(m_shader.ReflectedBindings(), arguments, describe);
     if (!planned.Ok()) {
         Report(planned.error);
-        return;
+        return false;
     }
     if (const auto pushError = ValidatePushConstantSize(
             m_shader.HasPushConstants(), m_shader.PushConstantSize(), static_cast<std::uint32_t>(m_push.size()))) {
         Report(*pushError);
-        return;
+        return false;
     }
 
     // The first written storage image bounds the dispatch (a persistent target resizes one frame late).
@@ -131,7 +131,7 @@ void ComputePass::Finish(Extent2D requested, bool useImageExtent, std::uint32_t 
     if (useImageExtent) {
         if (!imageExtent.has_value()) {
             Report("Dispatch() without a size needs a written storage image to take the size from");
-            return;
+            return false;
         }
         size = *imageExtent;
     } else if (imageExtent.has_value()) {
@@ -139,7 +139,7 @@ void ComputePass::Finish(Extent2D requested, bool useImageExtent, std::uint32_t 
     }
     if (size.width == 0 || size.height == 0 || depth == 0) {
         Report("dispatch size has a zero dimension");
-        return;
+        return false;
     }
 
     const ComputePipeline* pipeline = m_shader.Pipeline();
@@ -166,7 +166,9 @@ void ComputePass::Finish(Extent2D requested, bool useImageExtent, std::uint32_t 
 
     if (declareError.has_value()) {
         Report(*declareError);
+        return false;
     }
+    return true;
 }
 
 } // namespace gte::rg

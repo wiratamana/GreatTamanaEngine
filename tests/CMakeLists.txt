@@ -2651,6 +2651,12 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_BOXBLUR_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/BoxBlur.comp.spv"
 )
 
+# The shadow mask shader is declared by the root gte_add_shader() calls; the feature self-check reflects its real binary.
+target_sources(GreatTamanaEngineTests PRIVATE "${CMAKE_BINARY_DIR}/shaders/ShadowMask.comp.spv")
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_TEST_SHADOW_MASK_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ShadowMask.comp.spv"
+)
+
 # Engine-owned reflection fixtures with abstract names (not shipped).
 gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.comp)
 gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.vert)

@@ -83,10 +83,11 @@ public:
     }
 
     // Dispatches over `size` elements, clamped to the first written storage image.
-    void Dispatch(Extent2D size, std::uint32_t depth = 1);
+    // Returns false when nothing was declared (inert shader or invalid bindings).
+    bool Dispatch(Extent2D size, std::uint32_t depth = 1);
 
     // Dispatches over the extent of the first written storage image.
-    void Dispatch();
+    bool Dispatch();
 
 private:
     struct Argument {
@@ -98,7 +99,7 @@ private:
     };
 
     void Add(const Argument& argument);
-    void Finish(Extent2D requested, bool useImageExtent, std::uint32_t depth);
+    bool Finish(Extent2D requested, bool useImageExtent, std::uint32_t depth);
     void Report(const std::string& text);
 
     RenderGraphBuilder& m_builder;

@@ -1,26 +1,22 @@
 #pragma once
 #include "../../Core/Extent.h"
-#include "../../Core/GraphicsHandles.h"
 #include "../../Math/Mat4.h"
-#include "../../Renderer/Buffer.h"
-#include "../../Renderer/Compute/ComputeDescriptorSet.h"
-#include "../../Renderer/Compute/ComputePipeline.h"
+#include "../../Renderer/RenderGraph/GpuParams.h"
+#include "../../Renderer/RenderGraph/PerView.h"
+#include "../../Renderer/RenderGraph/PersistentTarget.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
-#include "../../Renderer/RenderTexture.h"
+#include "../../Renderer/RenderGraph/Shader.h"
 
 #include <cstdint>
-#include <optional>
-#include <string>
-#include <unordered_map>
+#include <type_traits>
 
 namespace gte {
 
-class Renderer;
-
 // Per-view inputs for the shadow mask pass.
 struct ShadowMaskInputs {
-    // Stable, static-storage-duration string: debug name, import name and this view's key into m_viewStates.
+    // Static-storage string: the persistent texture's name within the feature scope.
     const char* outputName = nullptr;
+    rg::ViewScope viewScope = rg::ViewScope::Shared;
     Extent2D viewExtent;
     Mat4 invViewProjection;
     Mat4 lightViewProjection;
@@ -28,31 +24,37 @@ struct ShadowMaskInputs {
     std::uint32_t shadowMapResolution = 0;
 };
 
-// Reconstructs world position from view depth + the shadow map, writes a
-// single-channel (r8) shadow mask. A plain compute dispatch wrapper.
+// Matches the std430 block in ShadowMask.comp (144 bytes).
+struct ShadowMaskParamsGpu {
+    Mat4 invViewProjection;
+    Mat4 lightViewProjection;
+    float depthBias = 0.0f;
+    float unused = 0.0f;
+    float shadowTexelSize = 0.0f; // 1 / shadow map resolution.
+    float pad = 0.0f;
+};
+static_assert(sizeof(Mat4) == 64);
+static_assert(sizeof(ShadowMaskParamsGpu) == 144);
+static_assert(std::is_trivially_copyable_v<ShadowMaskParamsGpu>);
+
+ShadowMaskParamsGpu MakeShadowMaskParams(const ShadowMaskInputs& inputs) noexcept;
+
+// Reconstructs world position from view depth and the shadow map, writes an r8 shadow mask.
 class ShadowMaskRenderer {
 public:
-    // Both depth textures are resolved (view + sampler) from the render graph inside the pass.
-    // Returns an invalid handle if `shadowMap` is invalid.
-    rg::TextureHandle AddMaskPass(rg::RenderGraphBuilder& builder, Renderer& renderer, const ShadowMaskInputs& inputs,
+    // Returns an invalid handle when the shadow map is invalid, the scope is not a per-view scope,
+    // or the mask texture was refused.
+    rg::TextureHandle AddMaskPass(rg::RenderGraphBuilder& builder, const ShadowMaskInputs& inputs,
         rg::TextureHandle shadowMap, rg::TextureHandle sceneDepth);
 
 private:
-    void EnsurePipelineBuilt(Renderer& renderer);
-
-    // One entry per calling view (Game, Scene) - never shared. Each view's
-    // own descriptor set is rewritten and bound entirely within that same
-    // AddMaskPass() call, so two views recorded into the same frame's
-    // command buffer never alias each other's bound resource at GPU-execution time.
     struct ViewState {
-        ComputeDescriptorSet descriptorSet;
-        std::optional<Buffer> paramsBuffer;
-        std::optional<RenderTexture> output;
+        rg::PersistentTarget mask;
+        rg::GpuParams<ShadowMaskParamsGpu> params;
     };
-    ViewState& EnsureViewState(Renderer& renderer, const char* outputName, Extent2D extent);
 
-    std::optional<ComputePipeline> m_pipeline;
-    std::unordered_map<std::string, ViewState> m_viewStates;
+    rg::Shader m_shader{ "ShadowMask" };
+    rg::PerView<ViewState> m_views;
 };
 
 } // namespace gte

@@ -8,7 +8,9 @@
 #include "../../Core/Plugins/RenderFeatureCameraData.h"
 #include "../../Game/Lighting/DirectionalLightResolver.h"
 #include "../../Game/SceneQuery.h"
+#include "../../Application/RenderPassViewData.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
+#include "../../Renderer/RenderGraph/RenderPassToggleGuard.h"
 
 #include <algorithm>
 #include <cassert>
@@ -118,6 +120,10 @@ void ShadowFeature::RegisterPasses()
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
             rg::TextureHandle /*privateTarget*/, Extent2D /*extent*/,
             const ScenePassReadHandles& /*currentViewHandles*/, const RenderFeatureCameraData& /*cameraData*/) {
+            if (!rg::ShouldDeclareBuiltInPassThisFrame(
+                    &m_core.GetRenderPassToggleRegistryMutable(), "Shadow.DepthPass.Draw")) {
+                return;
+            }
             // Group all shadow passes under "Shadow" in debug views.
             const rg::RenderFeatureScope scope(builder, "Shadow");
             const std::optional<RenderPassViewData> viewData = m_core.FindRenderPassViewData(currentView);
@@ -199,7 +205,16 @@ void ShadowFeature::RegisterPasses()
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
             rg::TextureHandle /*privateTarget*/, Extent2D /*extent*/, const ScenePassReadHandles& currentViewHandles,
             const RenderFeatureCameraData& /*cameraData*/) {
-            const bool isGameView = (currentView == rg::RenderViewId::Named("Game"));
+            if (!rg::ShouldDeclareBuiltInPassThisFrame(
+                    &m_core.GetRenderPassToggleRegistryMutable(), "Shadow.Mask.Dispatch")) {
+                return;
+            }
+            // Shadow supports the Game and Scene views only.
+            const rg::ViewScope viewScope = TranslateLegacyViewScope(currentView);
+            if (viewScope == rg::ViewScope::Shared) {
+                return;
+            }
+            const bool isGameView = (viewScope == rg::ViewScope::GameView);
             const rg::RenderPassId mapKey = isGameView ? kShadowMapGameKey : kShadowMapSceneKey;
             const std::optional<ShadowMapBlackboardEntry> shadowMap =
                 blackboard.Fetch<ShadowMapBlackboardEntry>(mapKey);
@@ -219,13 +234,14 @@ void ShadowFeature::RegisterPasses()
             const ShadowSettings safeSettings = SanitizeShadowSettings(m_settings);
             ShadowMaskInputs maskInputs;
             maskInputs.outputName = isGameView ? "Shadow.Mask.GameView" : "Shadow.Mask.SceneView";
+            maskInputs.viewScope = viewScope;
             maskInputs.viewExtent = viewData->renderTexture->Extent();
             maskInputs.invViewProjection = realCameraData.invViewProjection;
             maskInputs.lightViewProjection = shadowMap->lightSpaceViewProjection;
             maskInputs.depthBias = safeSettings.depthBias;
             maskInputs.shadowMapResolution = m_mapResolutionInUse;
             const rg::TextureHandle maskHandle = m_maskRenderer.AddMaskPass(
-                builder, m_core.GetRenderer(), maskInputs, shadowMap->shadowMapHandle, currentViewHandles.depthHandle);
+                builder, maskInputs, shadowMap->shadowMapHandle, currentViewHandles.depthHandle);
             if (!maskHandle.IsValid()) {
                 return;
             }
@@ -243,6 +259,10 @@ void ShadowFeature::RegisterPasses()
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
             rg::TextureHandle privateTarget, Extent2D extent, const ScenePassReadHandles& currentViewHandles,
             const RenderFeatureCameraData&) {
+            if (!rg::ShouldDeclareBuiltInPassThisFrame(
+                    &m_core.GetRenderPassToggleRegistryMutable(), "Shadow.Composite.Draw")) {
+                return;
+            }
             const bool isGameView = (currentView == rg::RenderViewId::Named("Game"));
             const rg::RenderPassId maskKey = isGameView ? kShadowMaskGameKey : kShadowMaskSceneKey;
             const std::optional<ShadowMaskBlackboardEntry> mask =
