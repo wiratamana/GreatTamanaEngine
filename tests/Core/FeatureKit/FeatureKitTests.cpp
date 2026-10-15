@@ -2,13 +2,19 @@
 // collect-then-commit setup and the lifetime guard. No Core, no GPU.
 
 #include "Core/FeatureKit/FeatureKit.h"
+#include "Core/FeatureKit/FrameContext.h"
 #include "ECS/Registry.h"
+#include "Renderer/RenderGraph/RenderPassToggleRegistry.h"
+
+#include "../../Fakes/RecordingLogSink.h"
 
 #include <gtest/gtest.h>
 
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace gte::fx {
@@ -332,6 +338,114 @@ TEST(FxWhileAliveTest, ConvertsToAStdFunctionOfTheSameShape)
     life.reset();
     callback(2, "y");
     EXPECT_EQ(calls, 1);
+}
+
+// --- Verbs ---------------------------------------------------------------------
+
+using test::CountErrorsByCategory;
+using test::RecordingLogSink;
+using test::ScopedLogSinkInstall;
+
+static_assert(!std::is_convertible_v<std::string, rg::StaticName>, "pass names must be literals");
+static_assert(!std::is_convertible_v<const char*, rg::StaticName>, "pass names must be literals");
+
+TEST(FxVerbTest, DepthWrapsTheSameTexture)
+{
+    const Texture texture{ rg::TextureHandle{ 4, 1 }, 9 };
+    EXPECT_EQ(Depth(texture).texture.handle, texture.handle);
+    EXPECT_EQ(Depth(texture).texture.frameSerial, 9u);
+}
+
+TEST(FxVerbTest, PersistentNameAddsTheViewSuffix)
+{
+    EXPECT_EQ(PersistentName("Mask", rg::ViewScope::GameView), "Mask.GameView");
+    EXPECT_EQ(PersistentName("Mask", rg::ViewScope::SceneView), "Mask.SceneView");
+    EXPECT_EQ(PersistentName("Mask", rg::ViewScope::Shared), "Mask");
+}
+
+TEST(FxVerbTest, VerbsOnAFrameWithoutContextAreInertAndLogOnce)
+{
+    RecordingLogSink sink;
+    const ScopedLogSinkInstall guard(&sink);
+    ComputeShader compute("DoesNotExist");
+    FullscreenShader fullscreen("DoesNotExist");
+    GpuParams<float> params;
+    PreOpaqueFrame frame(View{}, FakeScene(), 1);
+
+    EXPECT_FALSE(frame.Compute(compute, "Test.Dispatch").Params(params, 1.0f).Bind("a", Texture{}).Push(2).Dispatch(Extent2D{ 8, 8 }));
+    EXPECT_FALSE(frame.Fullscreen(fullscreen, "Test.Draw").Bind("a", Depth(Texture{})).Target(Texture{}).Draw());
+    frame.Keep(Texture{});
+    EXPECT_FALSE(frame.Blit("Test.Blit", Texture{}, Texture{}, BlitFilter::Linear));
+    EXPECT_EQ(CountErrorsByCategory(sink, "FeatureKit"), 1);
+}
+
+// A frame with a context over a bare builder: no renderer, so shaders stay inert and verbs declare no pass.
+struct BareContext {
+    BareContext()
+    {
+        context.builder = &builder;
+        context.scope = rg::ViewScope::GameView;
+        context.event = rg::RenderPassEvent::AfterOpaques;
+        context.serial = 1;
+    }
+
+    rg::RenderGraphBuilder builder;
+    detail::FrameContext context;
+};
+
+TEST(FxVerbTest, ATextureFromAnotherFrameIsRefusedOnceAndTheChainDeclaresNothing)
+{
+    RecordingLogSink sink;
+    const ScopedLogSinkInstall guard(&sink);
+    BareContext bare;
+    ComputeShader compute("DoesNotExist");
+    PostOpaqueFrame frame(View{}, FakeScene(), 1, rg::TextureHandle{ 1, 1 }, rg::TextureHandle{ 2, 1 }, &bare.context);
+    const Texture foreign{ rg::TextureHandle{ 3, 1 }, 99 };
+
+    for (int i = 0; i < 2; ++i) {
+        EXPECT_FALSE(frame.Compute(compute, "Test.Dispatch").Bind("a", foreign).Dispatch(Extent2D{ 8, 8 }));
+    }
+    EXPECT_EQ(bare.builder.DeclaredPassCount(), 0u);
+    EXPECT_EQ(CountErrorsByCategory(sink, "FeatureKit"), 1);
+}
+
+TEST(FxVerbTest, ABlitIsDeclaredWithTheFramesScopeAndAFrameOwnedPair)
+{
+    BareContext bare;
+    PostOpaqueFrame frame(View{}, FakeScene(), 1, rg::TextureHandle{ 1, 1 }, rg::TextureHandle{ 2, 1 }, &bare.context);
+
+    EXPECT_TRUE(frame.Blit("Test.Blit", frame.SceneColor(), frame.Stamp(rg::TextureHandle{ 5, 1 }), BlitFilter::Nearest));
+    EXPECT_EQ(bare.builder.DeclaredPassCount(), 1u);
+}
+
+TEST(FxVerbTest, ATogglePassDeclaresNothingAndStaysSilent)
+{
+    RecordingLogSink sink;
+    const ScopedLogSinkInstall guard(&sink);
+    BareContext bare;
+    rg::RenderPassToggleRegistry toggles;
+    toggles.SetEnabled("Test.Blit", false);
+    toggles.SetEnabled("Test.Dispatch", false);
+    bare.context.toggles = &toggles;
+    ComputeShader compute("DoesNotExist");
+    PostOpaqueFrame frame(View{}, FakeScene(), 1, rg::TextureHandle{ 1, 1 }, rg::TextureHandle{ 2, 1 }, &bare.context);
+
+    EXPECT_FALSE(frame.Blit("Test.Blit", frame.SceneColor(), frame.SceneDepth(), BlitFilter::Linear));
+    EXPECT_FALSE(frame.Compute(compute, "Test.Dispatch").Bind("a", Texture{}).Dispatch(Extent2D{ 8, 8 }));
+    EXPECT_EQ(bare.builder.DeclaredPassCount(), 0u);
+    EXPECT_EQ(CountErrorsByCategory(sink, "FeatureKit"), 0);
+}
+
+TEST(FxVerbTest, AMovedFromChainIsSafe)
+{
+    BareContext bare;
+    ComputeShader compute("DoesNotExist");
+    PostOpaqueFrame frame(View{}, FakeScene(), 1, rg::TextureHandle{ 1, 1 }, rg::TextureHandle{ 2, 1 }, &bare.context);
+
+    ComputeChain first = frame.Compute(compute, "Test.Dispatch");
+    ComputeChain second = std::move(first);
+    EXPECT_FALSE(first.Bind("a", frame.SceneColor()).Dispatch(Extent2D{ 8, 8 }));
+    EXPECT_FALSE(second.Dispatch(Extent2D{ 8, 8 }));
 }
 
 } // namespace

@@ -15,4 +15,17 @@ struct Texture {
     bool IsValid() const noexcept { return handle.IsValid() && frameSerial != 0; }
 };
 
+// Binds a texture through its depth aspect (depth sampling).
+struct DepthRef {
+    Texture texture;
+};
+
+inline DepthRef Depth(Texture texture) noexcept
+{
+    return DepthRef{ texture };
+}
+
+// Sampling filter of a blit.
+enum class BlitFilter : std::uint8_t { Linear, Nearest };
+
 } // namespace gte::fx

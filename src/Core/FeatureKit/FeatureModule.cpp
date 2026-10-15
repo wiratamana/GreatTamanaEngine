@@ -1,5 +1,6 @@
 #include "FeatureRegistration.h"
 #include "FeatureLife.h"
+#include "FrameContext.h"
 #include "SharedOncePerFrame.h"
 #include "../../Application/RenderPassViewData.h"
 #include "../../Renderer/RenderGraph/BoundedOnceSet.h"
@@ -46,6 +47,24 @@ FrameEvent ToFrameEvent(Stage stage) noexcept
         return FrameEvent::PreUI;
     }
     return FrameEvent::PreOpaque;
+}
+
+// The graph ordering tag every pass a callback declares carries.
+rg::RenderPassEvent ToPassEvent(Stage stage) noexcept
+{
+    switch (stage) {
+    case Stage::PreOpaque:
+    case Stage::PreOpaqueShared:
+        return rg::RenderPassEvent::PreOpaques;
+    case Stage::PostOpaque:
+        return rg::RenderPassEvent::AfterOpaques;
+    case Stage::PostTransparent:
+        return rg::RenderPassEvent::AfterTransparents;
+    case Stage::PostComposite:
+    case Stage::PreUI:
+        return rg::RenderPassEvent::AfterEverything;
+    }
+    return rg::RenderPassEvent::PreOpaques;
 }
 
 RenderFeatureBlendMode ToCoreBlend(Blend blend) noexcept
@@ -115,10 +134,10 @@ private:
         if (registration.stage == Stage::PreOpaqueShared) {
             latch = &m_sharedLatches.emplace_back();
         }
-        const auto run = [this, registration, latch](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard&,
+        const auto run = [this, registration, latch](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard,
                              rg::RenderViewId currentView, rg::TextureHandle privateTarget, Extent2D extent,
                              const ScenePassReadHandles& handles, const RenderFeatureCameraData&) {
-            Run(registration, latch, builder, currentView, privateTarget, extent, handles);
+            Run(registration, latch, builder, blackboard, currentView, privateTarget, extent, handles);
         };
         if (!m_core.RegisterRenderPass(ToFrameEvent(registration.stage), registration.name.c_str(),
                 registration.priority, WhileAlive(std::weak_ptr<FeatureLife>(m_life), run), ToCoreBlend(registration.blend))) {
@@ -127,7 +146,8 @@ private:
     }
 
     void Run(const Registration& registration, SharedOncePerFrame* sharedLatch, rg::RenderGraphBuilder& builder,
-        rg::RenderViewId currentView, rg::TextureHandle privateTarget, Extent2D extent, const ScenePassReadHandles& handles)
+        rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView, rg::TextureHandle privateTarget, Extent2D extent,
+        const ScenePassReadHandles& handles)
     {
         // Gate first: a disabled pass must not run any side effect.
         const rg::RenderPassToggleRegistry* toggles = &m_core.GetRenderPassToggleRegistryMutable();
@@ -151,27 +171,39 @@ private:
         const rg::RenderFeatureScope scope(builder, m_name);
         Registry& scene = m_core.GetRegistry();
         const std::uint64_t serial = ++m_serial;
+
+        detail::FrameContext context;
+        context.builder = &builder;
+        context.blackboard = &blackboard;
+        context.core = &m_core;
+        context.view = currentView;
+        context.featureName = m_name;
+        context.event = ToPassEvent(registration.stage);
+        context.toggles = toggles;
+        context.scope = shared ? rg::ViewScope::Shared : view->scope;
+        context.serial = serial;
         try {
             switch (registration.stage) {
             case Stage::PreOpaque: {
-                PreOpaqueFrame frame(*view, scene, serial);
+                PreOpaqueFrame frame(*view, scene, serial, &context);
                 std::get<PreOpaqueCallback>(registration.callback)(frame);
                 break;
             }
             case Stage::PostOpaque:
             case Stage::PostTransparent: {
-                PostOpaqueFrame frame(*view, scene, serial, handles.colorHandle, handles.depthHandle);
+                PostOpaqueFrame frame(*view, scene, serial, handles.colorHandle, handles.depthHandle, &context);
                 std::get<PostOpaqueCallback>(registration.callback)(frame);
                 break;
             }
             case Stage::PostComposite:
             case Stage::PreUI: {
-                CompositeFrame frame(*view, scene, serial, handles.colorHandle, handles.depthHandle, privateTarget, extent);
+                CompositeFrame frame(
+                    *view, scene, serial, handles.colorHandle, handles.depthHandle, privateTarget, extent, &context);
                 std::get<CompositeCallback>(registration.callback)(frame);
                 break;
             }
             case Stage::PreOpaqueShared: {
-                SharedFrame frame(scene, serial);
+                SharedFrame frame(scene, serial, &context);
                 std::get<SharedCallback>(registration.callback)(frame);
                 break;
             }

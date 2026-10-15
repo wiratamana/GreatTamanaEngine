@@ -50,14 +50,21 @@ struct PassChainState {
         }
     }
 
+    void SetPushBytes(const void* data, std::size_t size)
+    {
+        if (!inert) {
+            push.resize(size);
+            if (size != 0) {
+                std::memcpy(push.data(), data, size);
+            }
+        }
+    }
+
     template <typename T>
     void SetPush(const T& value)
     {
         static_assert(std::is_trivially_copyable_v<T>, "push constants are copied as raw bytes");
-        if (!inert) {
-            push.resize(sizeof(T));
-            std::memcpy(push.data(), &value, sizeof(T));
-        }
+        SetPushBytes(&value, sizeof(T));
     }
 
     // Logs "Pass '<name>': <text>" once per distinct message for the graph's lifetime.
@@ -112,6 +119,18 @@ public:
     Derived& Push(const T& value)
     {
         m_state.SetPush(value);
+        return Self();
+    }
+    Derived& PushBytes(const void* data, std::size_t size)
+    {
+        m_state.SetPushBytes(data, size);
+        return Self();
+    }
+
+    // Makes the terminal call declare nothing, without a "forgotten terminal call" report.
+    Derived& Abandon()
+    {
+        m_state.failed = true;
         return Self();
     }
 

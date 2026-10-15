@@ -409,6 +409,10 @@ add_library(gte_core STATIC
     src/Core/Plugins/BuiltinFeatureModuleRegistry.h
     src/Core/Plugins/BuiltinFeatureModuleRegistry.cpp
     src/Core/FeatureKit/FeatureKit.h
+    src/Core/FeatureKit/ComputeChain.h
+    src/Core/FeatureKit/ComputeShader.h
+    src/Core/FeatureKit/ComputeShader.cpp
+    src/Core/FeatureKit/ComputeVerb.cpp
     src/Core/FeatureKit/Feature.h
     src/Core/FeatureKit/FeatureLife.h
     src/Core/FeatureKit/FeatureRegistration.h
@@ -416,8 +420,19 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/FeatureSetup.cpp
     src/Core/FeatureKit/FeatureModule.cpp
     src/Core/FeatureKit/Frame.h
+    src/Core/FeatureKit/FrameContext.h
+    src/Core/FeatureKit/FrameVerbs.cpp
+    src/Core/FeatureKit/FullscreenChain.h
+    src/Core/FeatureKit/FullscreenShader.h
+    src/Core/FeatureKit/FullscreenShader.cpp
+    src/Core/FeatureKit/FullscreenVerb.cpp
     src/Core/FeatureKit/Gate.h
+    src/Core/FeatureKit/GpuParams.h
+    src/Core/FeatureKit/PerView.h
+    src/Core/FeatureKit/PersistentTarget.h
+    src/Core/FeatureKit/PersistentTarget.cpp
     src/Core/FeatureKit/Texture.h
+    src/Core/FeatureKit/VerbSupport.h
     src/Core/FeatureKit/View.h
     # editor-core-separation-6 campaign, PHASE4
     # (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the third

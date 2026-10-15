@@ -34,6 +34,9 @@ public:
     ComputePass(ComputePass&&) = delete;
     ComputePass& operator=(ComputePass&&) = delete;
 
+    // Uploads `size` bytes and binds the buffer to the shader variable "params".
+    ComputePass& ParamsBytes(GpuParamsBuffer& params, const void* data, std::size_t size);
+
     // Uploads `value` and binds the buffer to the shader variable "params".
     template <typename T>
     ComputePass& Params(GpuParams<T>& params, const T& value)
