@@ -741,7 +741,7 @@ TEST(RenderGraphCompilerTest, PersistentCacheTextureWriteSurvivesCullingWithNoFi
         NoOpExecute); // index 0 - its only write is a persistent-cache texture, no in-frame reader.
 
     CompiledGraphInput input = builder.Finish();
-    input.persistentCacheTextures.push_back(history);
+    input.persistentCacheTextures.push_back(PersistentTextureUse{ history, PersistentSlotRef{} });
 
     // Deliberately EMPTY finalOutputs - proves the persistent-cache vector
     // alone is enough to keep this pass alive.
@@ -810,7 +810,7 @@ TEST(RenderGraphCompilerTest, PersistentCacheRootDoesNotCrossContaminateAnUnrela
         NoOpExecute); // index 2 - never kept/read by anything, must stay culled.
 
     CompiledGraphInput input = builder.Finish();
-    input.persistentCacheTextures.push_back(history);
+    input.persistentCacheTextures.push_back(PersistentTextureUse{ history, PersistentSlotRef{} });
     const TextureHandle finalOutputs[] = { otherColor };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 

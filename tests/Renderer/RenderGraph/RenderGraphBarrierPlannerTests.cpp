@@ -69,7 +69,7 @@ TEST(RenderGraphBarrierPlannerTest, RequiredStateForShaderRead)
     const ResourceState state = RequiredStateFor(ResourceAccess::ShaderRead, false);
 
     EXPECT_EQ(state.layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    EXPECT_EQ(state.stageMask, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+    EXPECT_EQ(state.stageMask, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
     EXPECT_EQ(state.accessMask, VK_ACCESS_2_SHADER_READ_BIT);
 }
 
@@ -230,7 +230,7 @@ TEST(RenderGraphBarrierPlannerTest, ComputeShaderWriteFollowedByShaderReadEmitsE
     EXPECT_EQ(barrier.newLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     EXPECT_EQ(barrier.srcStageMask, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
     EXPECT_EQ(barrier.srcAccessMask, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
-    EXPECT_EQ(barrier.dstStageMask, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+    EXPECT_EQ(barrier.dstStageMask, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
     EXPECT_EQ(barrier.dstAccessMask, VK_ACCESS_2_SHADER_READ_BIT);
 }
 
@@ -578,7 +578,7 @@ TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersRenderOffscre
     // FrameRecorder.cpp's `toFinal` when finalLayout ==
     // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: srcStageMask =
     // COLOR_ATTACHMENT_OUTPUT, srcAccessMask = COLOR_ATTACHMENT_WRITE,
-    // dstStageMask = FRAGMENT_SHADER, dstAccessMask = SHADER_READ,
+    // dstStageMask = FRAGMENT_SHADER | COMPUTE_SHADER, dstAccessMask = SHADER_READ,
     // oldLayout = COLOR_ATTACHMENT_OPTIMAL, newLayout =
     // SHADER_READ_ONLY_OPTIMAL - this one DOES come straight from
     // RequiredStateFor(ShaderRead, ...), since sampling a previous pass's
@@ -591,7 +591,7 @@ TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersRenderOffscre
 
     EXPECT_EQ(barrier.srcStageMask, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
     EXPECT_EQ(barrier.srcAccessMask, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-    EXPECT_EQ(barrier.dstStageMask, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+    EXPECT_EQ(barrier.dstStageMask, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
     EXPECT_EQ(barrier.dstAccessMask, VK_ACCESS_2_SHADER_READ_BIT);
     EXPECT_EQ(barrier.oldLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     EXPECT_EQ(barrier.newLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);

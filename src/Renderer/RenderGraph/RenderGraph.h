@@ -3,6 +3,7 @@
 // Coordinates render graph compilation, physical resource allocation,
 // barrier generation, and execution across frames.
 
+#include "BoundedOnceSet.h"
 #include "CommandBuffer.h"
 #include "RenderGraphBarrierPlanner.h"
 #include "RenderGraphBuilder.h"
@@ -179,8 +180,12 @@ private:
         std::vector<PhysicalTexture>& physicalTextures, std::vector<PhysicalBuffer>& physicalBuffers,
         AppliedBarrierInfo* outBarrierInfo = nullptr);
 
+    // Returns Invalid if any declared binding cannot be resolved; never writes a partial descriptor set.
     DescriptorSetHandle ResolveComputeBindingDescriptorSet(const PassRecord& pass,
         const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers);
+
+    // Logs a skipped binding (or the whole pass when `binding` is nullopt) once per distinct key.
+    void ReportSkippedOnce(const PassRecord& pass, std::optional<std::uint32_t> binding, const char* reason);
 
     PassContext BuildPassContext(VkCommandBuffer cmd, std::vector<PhysicalTexture>& physicalTextures,
         std::vector<PhysicalBuffer>& physicalBuffers, DrawStats& passDrawStats);
@@ -230,6 +235,9 @@ private:
 
     std::vector<std::string> m_reportedSynchronousOverflows;
     std::vector<std::string> m_reportedPipelinedOverflows;
+
+    static constexpr std::size_t kMaxReportedSkippedBindings = 256;
+    BoundedOnceSet<kMaxReportedSkippedBindings> m_reportedSkippedBindings;
 
     std::uint32_t m_pipelinedFrameCounter = 0;
     bool m_pipelinedHasWritten[kPipelinedTimingSlotBudget][kGpuTimingFramesInFlight]{};

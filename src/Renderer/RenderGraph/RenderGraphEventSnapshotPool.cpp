@@ -161,7 +161,9 @@ void CopyImageIntoSnapshot(VkCommandBuffer cmd, EventSnapshotResource& dst, VmaA
     EmitImageBarrier(cmd, srcImage, range, srcTransfer, srcState); // restore - invisible to the graph.
 
     const ResourceState dstRead{
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        VK_ACCESS_2_SHADER_READ_BIT
     };
     EmitImageBarrier(cmd, dst.Image(), range, dstTransfer, dstRead);
     dst.State() = dstRead;

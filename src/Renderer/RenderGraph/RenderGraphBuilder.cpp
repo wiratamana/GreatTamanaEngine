@@ -4,6 +4,7 @@
 #include "../GraphicsHandleRegistry.h" // Native(SamplerHandle)/Native(BufferObjectHandle) - ResolveImportedTextureSamplers()/MintPersistentHandle() below.
 #include "../VulkanFormatInfo.h"
 
+#include <cstring>
 #include <string>
 
 namespace gte::rg {
@@ -150,8 +151,62 @@ void RenderGraphBuilder::PassBuilder::BindStorageImage(std::uint32_t binding, Te
     m_pass.bindings.push_back(pending);
 }
 
+// --- Fused declarations ----------------------------------------------------
+
+void RenderGraphBuilder::PassBuilder::SampleTexture(std::uint32_t binding, TextureHandle handle, SamplerHandle sampler)
+{
+    ReadTexture(handle, ResourceAccess::ShaderRead, /*isDepthResource=*/false);
+    BindCombinedImageSampler(binding, handle, sampler);
+}
+
+void RenderGraphBuilder::PassBuilder::SampleDepth(std::uint32_t binding, TextureHandle handle)
+{
+    ReadTexture(handle, ResourceAccess::ShaderRead, /*isDepthResource=*/true);
+    BindCombinedImageSampler(binding, handle, TextureAspect::Depth);
+}
+
+void RenderGraphBuilder::PassBuilder::WriteStorageImage(std::uint32_t binding, TextureHandle handle)
+{
+    WriteTexture(handle, ResourceAccess::ComputeShaderWrite);
+    BindStorageImage(binding, handle);
+}
+
+void RenderGraphBuilder::PassBuilder::ReadStorageBuffer(std::uint32_t binding, BufferHandle handle)
+{
+    ReadBuffer(handle, ResourceAccess::ComputeShaderRead);
+    BindStorageBuffer(binding, handle);
+}
+
+void RenderGraphBuilder::PassBuilder::WriteStorageBuffer(std::uint32_t binding, BufferHandle handle)
+{
+    WriteBuffer(handle, ResourceAccess::ComputeShaderWrite);
+    BindStorageBuffer(binding, handle);
+}
+
+void RenderGraphBuilder::PassBuilder::ReadStorageBuffer(std::uint32_t binding, BufferObjectHandle handle)
+{
+    BindStorageBuffer(binding, handle);
+}
 
 // --- RenderGraphBuilder ------------------------------------------------
+
+void RenderGraphBuilder::ClaimBindingIdentity(std::size_t passIndex)
+{
+    PassRecord& pass = m_passes[passIndex];
+    if (pass.computeBindingLayout == DescriptorSetLayoutHandle::Invalid) {
+        return;
+    }
+    for (const std::size_t other : m_bindingPassIndices) {
+        const PassRecord& owner = m_passes[other];
+        if (owner.viewScope == pass.viewScope && std::strcmp(owner.name, pass.name) == 0) {
+            pass.computeBindingLayout = DescriptorSetLayoutHandle::Invalid;
+            pass.bindings.clear();
+            pass.skipExecute = true;
+            return;
+        }
+    }
+    m_bindingPassIndices.push_back(passIndex);
+}
 
 TextureHandle RenderGraphBuilder::CreateTexture(const char* name, const TextureDesc& desc)
 {

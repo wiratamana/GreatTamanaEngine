@@ -2317,6 +2317,9 @@ set(GTE_TEST_SOURCES
     Renderer/VolumetricFroxelMathTests.cpp
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
     Renderer/RenderGraph/PersistentSlotTableTests.cpp
+    Renderer/RenderGraph/BoundedOnceSetTests.cpp
+    Renderer/RenderGraph/PassBuilderFusedBindingTests.cpp
+    Renderer/RenderGraph/PassIdentityTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderPassTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp

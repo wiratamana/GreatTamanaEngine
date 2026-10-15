@@ -571,13 +571,12 @@ struct PassRecord {
     // WriteArrayLayer() asserts against a second call on the same pass.
     std::optional<ArrayLayerAttachmentDesc> arrayLayerAttachment;
 
-    // Compute-binding vocabulary - see PendingBinding's own doc comment
-    // above. Populated exclusively by RenderGraphBuilder::PassBuilder's
-    // BindDescriptorSetLayout()/Bind*() calls. Empty `bindings` (every
-    // pre-existing pass today) costs nothing beyond one empty-vector check
-    // in RenderGraph::ExecuteCompiledGraph().
+    // Bind*() state, filled by RenderGraphBuilder::PassBuilder. Empty `bindings` means no descriptor set.
     DescriptorSetLayoutHandle computeBindingLayout = DescriptorSetLayoutHandle::Invalid;
     std::vector<PendingBinding> bindings;
+
+    // Set by the builder when the pass was refused (duplicate binding identity): barriers stay, execute is skipped.
+    bool skipExecute = false;
 };
 
 } // namespace gte::rg

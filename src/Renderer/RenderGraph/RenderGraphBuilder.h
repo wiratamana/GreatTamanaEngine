@@ -136,6 +136,24 @@ public:
 
         void BindStorageImage(std::uint32_t binding, TextureHandle handle);
 
+        // --- Fused declarations: access (barrier) and binding in one call ---
+
+        // Samples a color texture in a shader (read + combined image sampler).
+        void SampleTexture(std::uint32_t binding, TextureHandle handle, SamplerHandle sampler = SamplerHandle::Invalid);
+
+        // Samples the depth aspect of a texture (read + depth combined image sampler).
+        void SampleDepth(std::uint32_t binding, TextureHandle handle);
+
+        // Writes a texture through a storage image (compute write + storage image binding).
+        void WriteStorageImage(std::uint32_t binding, TextureHandle handle);
+
+        // Graph-tracked storage buffers: compute read/write access + binding.
+        void ReadStorageBuffer(std::uint32_t binding, BufferHandle handle);
+        void WriteStorageBuffer(std::uint32_t binding, BufferHandle handle);
+
+        // Externally owned buffer: binding only, the graph does not track it.
+        void ReadStorageBuffer(std::uint32_t binding, BufferObjectHandle handle);
+
     private:
         PassRecord& m_pass;
     };
@@ -175,39 +193,28 @@ public:
     template <typename SetupFn, typename ExecuteFn>
     void AddPass(const char* name, SetupFn&& setup, ExecuteFn&& execute)
     {
-        assert(name != nullptr && name[0] != '\0' &&
-            "RenderGraphBuilder::AddPass requires a non-empty, static-storage-duration pass name");
-
-        m_passes.push_back(PassRecord{});
-        PassRecord& pass = m_passes.back();
-        pass.name = name;
-
-        PassBuilder passBuilder(pass);
-        setup(passBuilder);
-
-        pass.execute = std::function<void(PassContext&)>(std::forward<ExecuteFn>(execute));
+        AddPassImpl(name, ViewScope::Shared, PassKind::Graphics, std::forward<SetupFn>(setup),
+            std::forward<ExecuteFn>(execute));
     }
 
     template <typename SetupFn, typename ExecuteFn>
     void AddPass(const char* name, ViewScope viewScope, SetupFn&& setup, ExecuteFn&& execute)
     {
-        AddPass(name, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
-        m_passes.back().viewScope = viewScope;
+        AddPassImpl(name, viewScope, PassKind::Graphics, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
     }
 
     // Declares a compute pass.
     template <typename SetupFn, typename ExecuteFn>
     void AddComputePass(const char* name, SetupFn&& setup, ExecuteFn&& execute)
     {
-        AddPass(name, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
-        m_passes.back().kind = PassKind::Compute;
+        AddPassImpl(name, ViewScope::Shared, PassKind::Compute, std::forward<SetupFn>(setup),
+            std::forward<ExecuteFn>(execute));
     }
 
     template <typename SetupFn, typename ExecuteFn>
     void AddComputePass(const char* name, ViewScope viewScope, SetupFn&& setup, ExecuteFn&& execute)
     {
-        AddComputePass(name, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
-        m_passes.back().viewScope = viewScope;
+        AddPassImpl(name, viewScope, PassKind::Compute, std::forward<SetupFn>(setup), std::forward<ExecuteFn>(execute));
     }
 
     // Main entry point for declaring passes with debugging and toggle support.
@@ -350,7 +357,32 @@ public:
 private:
     TextureHandle MintPersistentHandle(const RenderGraphPersistentResourceCache::ResolvedTexture& resolved);
 
+    // Declares the pass, runs setup, then claims its (name, ViewScope) binding identity.
+    template <typename SetupFn, typename ExecuteFn>
+    void AddPassImpl(const char* name, ViewScope viewScope, PassKind kind, SetupFn&& setup, ExecuteFn&& execute)
+    {
+        assert(name != nullptr && name[0] != '\0' &&
+            "RenderGraphBuilder::AddPass requires a non-empty, static-storage-duration pass name");
+
+        m_passes.push_back(PassRecord{});
+        PassRecord& pass = m_passes.back();
+        pass.name = name;
+        pass.viewScope = viewScope;
+        pass.kind = kind;
+
+        PassBuilder passBuilder(pass);
+        setup(passBuilder);
+        ClaimBindingIdentity(m_passes.size() - 1);
+
+        pass.execute = std::function<void(PassContext&)>(std::forward<ExecuteFn>(execute));
+    }
+
+    // Two passes with the same (name, ViewScope) and a binding layout would share one descriptor set.
+    // The later one loses its bindings and is marked skipExecute.
+    void ClaimBindingIdentity(std::size_t passIndex);
+
     std::vector<PassRecord> m_passes;
+    std::vector<std::size_t> m_bindingPassIndices; // Passes that own a binding identity this frame.
     IPassDebugMetadataSink* m_debugMetadataSink = nullptr;
     std::vector<std::string> m_owningFeatureScope;
     RenderPassToggleRegistry* m_passToggleRegistry = nullptr;

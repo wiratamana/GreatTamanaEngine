@@ -250,7 +250,27 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
         });
 }
 
-// Resolves pending pass bindings into a descriptor set using the compute binding cache.
+void RenderGraph::ReportSkippedOnce(
+    const PassRecord& pass, std::optional<std::uint32_t> binding, const char* reason)
+{
+    const std::string passName = pass.name != nullptr ? pass.name : "<unnamed>";
+    const std::string key = passName + (binding ? "#" + std::to_string(*binding) : std::string("#pass"));
+    switch (m_reportedSkippedBindings.Note(key)) {
+    case BoundedOnceSet<kMaxReportedSkippedBindings>::Result::First:
+        GTE_LOG_ERROR("RenderGraph",
+            "Pass \"" + passName + "\" skipped" + (binding ? " binding " + std::to_string(*binding) : std::string())
+                + ": " + reason);
+        break;
+    case BoundedOnceSet<kMaxReportedSkippedBindings>::Result::Overflow:
+        GTE_LOG_ERROR("RenderGraph", "Too many distinct skipped bindings; further reports are suppressed.");
+        break;
+    default:
+        break;
+    }
+}
+
+// Resolves a pass's Bind*() declarations into a descriptor set. All-or-nothing: one unresolved binding
+// invalidates the pass, so a stale view from an earlier frame can never stay in the set.
 DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRecord& pass,
     const std::vector<PhysicalTexture>& physicalTextures, const std::vector<PhysicalBuffer>& physicalBuffers)
 {
@@ -260,14 +280,24 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
 
     const VkDescriptorSetLayout layout = Native(pass.computeBindingLayout);
     if (layout == VK_NULL_HANDLE) {
-        GTE_LOG_ERROR("RenderGraph",
-            "Pass \"" + std::string(pass.name != nullptr ? pass.name : "<unnamed>")
-                + "\" declared Bind*() calls but never called BindDescriptorSetLayout() - refusing to resolve.");
+        ReportSkippedOnce(pass, std::nullopt, "Bind*() used without BindDescriptorSetLayout().");
         return DescriptorSetHandle::Invalid;
     }
 
     std::vector<ComputeDescriptorWrite> writes;
     writes.reserve(pass.bindings.size());
+    bool complete = true;
+    const auto skip = [&](const PendingBinding& binding, const char* reason) {
+        ReportSkippedOnce(pass, binding.binding, reason);
+        complete = false;
+    };
+
+    const auto resolvedTexture = [&](TextureHandle handle) -> const PhysicalTexture* {
+        if (!handle.IsValid() || handle.index >= physicalTextures.size() || !physicalTextures[handle.index].resolved) {
+            return nullptr;
+        }
+        return &physicalTextures[handle.index];
+    };
 
     for (const PendingBinding& binding : pass.bindings) {
         switch (binding.kind) {
@@ -280,61 +310,74 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
                 buffer = Native(binding.bufferObjectHandle);
             }
             if (buffer == VK_NULL_HANDLE) {
-                continue;
+                skip(binding, "storage buffer handle is invalid or unresolved.");
+                break;
             }
             writes.push_back(
                 ComputeDescriptorWrite::StorageBuffer(binding.binding, buffer, binding.bufferOffset, binding.bufferRange));
             break;
         }
         case BindingKind::CombinedImageSampler: {
-            if (!binding.textureHandle.IsValid() || binding.textureHandle.index >= physicalTextures.size()
-                || !physicalTextures[binding.textureHandle.index].resolved) {
-                continue;
+            const PhysicalTexture* tex = resolvedTexture(binding.textureHandle);
+            if (tex == nullptr) {
+                skip(binding, "sampled texture handle is invalid or unresolved.");
+                break;
             }
-            const PhysicalTexture& tex = physicalTextures[binding.textureHandle.index];
             if (binding.textureAspect == TextureAspect::Depth) {
-                if (!tex.hasDepth || tex.target.depthImageView == VK_NULL_HANDLE) {
-                    continue;
+                if (!tex->hasDepth || tex->target.depthImageView == VK_NULL_HANDLE) {
+                    skip(binding, "texture has no depth view.");
+                    break;
                 }
                 writes.push_back(ComputeDescriptorWrite::CombinedImageSampler(
-                    binding.binding, tex.target.depthImageView, tex.depthSampler));
+                    binding.binding, tex->target.depthImageView, tex->depthSampler));
                 break;
             }
             // A volume has no sampler of its own, so its binding must name one explicitly.
             const VkSampler sampler =
-                (binding.explicitSampler != SamplerHandle::Invalid) ? Native(binding.explicitSampler) : tex.sampler;
+                (binding.explicitSampler != SamplerHandle::Invalid) ? Native(binding.explicitSampler) : tex->sampler;
             if (sampler == VK_NULL_HANDLE) {
-                continue;
+                skip(binding, "texture has no sampler and none was given.");
+                break;
             }
             writes.push_back(
-                ComputeDescriptorWrite::CombinedImageSampler(binding.binding, tex.target.imageView, sampler));
+                ComputeDescriptorWrite::CombinedImageSampler(binding.binding, tex->target.imageView, sampler));
             break;
         }
         case BindingKind::CombinedImageViewSampler: {
             if (binding.explicitImageView == ImageViewHandle::Invalid
                 || binding.explicitSampler == SamplerHandle::Invalid) {
-                continue;
+                skip(binding, "image view or sampler handle is invalid.");
+                break;
             }
             writes.push_back(ComputeDescriptorWrite::CombinedImageSampler(
                 binding.binding, Native(binding.explicitImageView), Native(binding.explicitSampler)));
             break;
         }
         case BindingKind::StorageImage: {
-            if (!binding.textureHandle.IsValid() || binding.textureHandle.index >= physicalTextures.size()
-                || !physicalTextures[binding.textureHandle.index].resolved) {
-                continue;
+            const PhysicalTexture* tex = resolvedTexture(binding.textureHandle);
+            if (tex == nullptr) {
+                skip(binding, "storage image texture handle is invalid or unresolved.");
+                break;
             }
-            const VkImageView view = physicalTextures[binding.textureHandle.index].target.imageView;
-            if (view == VK_NULL_HANDLE) {
-                continue;
+            if (tex->target.imageView == VK_NULL_HANDLE) {
+                skip(binding, "storage image has no view.");
+                break;
             }
-            writes.push_back(ComputeDescriptorWrite::StorageImage(binding.binding, view));
+            writes.push_back(ComputeDescriptorWrite::StorageImage(binding.binding, tex->target.imageView));
             break;
         }
         }
     }
 
-    return m_computeBindingCache.Resolve(pass.name, pass.viewScope, layout, writes);
+    if (!complete) {
+        return DescriptorSetHandle::Invalid;
+    }
+
+    const DescriptorSetHandle set = m_computeBindingCache.Resolve(pass.name, pass.viewScope, layout, writes);
+    if (set == DescriptorSetHandle::Invalid) {
+        ReportSkippedOnce(pass, std::nullopt, "descriptor set could not be allocated or its layout changed.");
+    }
+    return set;
 }
 
 // Constructs PassContext provided to the pass execute callback.
@@ -720,6 +763,14 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 
         ctx.computeDescriptorSet = ResolveComputeBindingDescriptorSet(pass, physicalTextures, physicalBuffers);
 
+        // A refused pass or one with an unresolved descriptor set must not record: barriers already ran.
+        bool skipExecute = pass.skipExecute;
+        if (pass.skipExecute) {
+            ReportSkippedOnce(pass, std::nullopt, "duplicate (pass name, view) binding identity in one frame.");
+        } else if (!pass.bindings.empty() && ctx.computeDescriptorSet == DescriptorSetHandle::Invalid) {
+            skipExecute = true;
+        }
+
         bool didBeginRendering = false;
         if (hasAnyAttachment) {
             std::vector<VkExtent2D> resolvedExtents;
@@ -793,7 +844,9 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         }
 
         if (pass.execute) {
-            pass.execute(ctx);
+            if (!skipExecute) {
+                pass.execute(ctx);
+            }
         } else if (pass.kind == PassKind::Blit && pass.blitCommand.has_value()) {
             // Execute image copy/blit pass.
             const BlitSpec& spec = *pass.blitCommand;
