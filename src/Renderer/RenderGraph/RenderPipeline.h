@@ -270,12 +270,7 @@ public:
         return false;
     }
 
-    // Called once at the start of each frame's declaration. Clears entries
-    // but keeps whatever backing storage was already reserved from the
-    // previous frame's high-water mark (vector::clear() never releases
-    // capacity) - avoids rebuilding the container from nothing every
-    // single frame (design doc Section 11's "reused, not reallocated"
-    // performance discipline).
+    // Called once at the start of each frame's declaration. Clears entries but keeps the reserved capacity.
     void BeginFrame() { m_slots.clear(); }
 
     // Testing-only accessor (mirrors this codebase's own established

@@ -1,7 +1,7 @@
 // gte_ci_scan: one guardrail check over a source tree. See tools/ci/<check>/README.md for each check.
 //
 //   gte_ci_scan --root DIR [--tokens FILE] [--includes FILE] [--allowlist FILE]
-//               [--skip PREFIX]... [--skip-dir NAME]... [--comments scan|skip] [--strings scan|skip]
+//               [--only PREFIX]... [--skip PREFIX]... [--skip-dir NAME]... [--comments scan|skip] [--strings scan|skip]
 //               [--ignore-case] [--report]
 //
 // Check mode exits 1 on a new hit or a stale/duplicate allowlist line. --report prints the files that
@@ -30,6 +30,7 @@ struct Options {
     fs::path tokensFile;
     fs::path includesFile;
     fs::path allowlistFile;
+    std::vector<std::string> onlyPrefixes;
     std::vector<std::string> skipPrefixes;
     std::vector<std::string> skipDirs;
     MaskOptions mask{ false, true };
@@ -62,6 +63,8 @@ bool ParseArgs(int argc, char** argv, Options& o)
             o.includesFile = value();
         } else if (arg == "--allowlist") {
             o.allowlistFile = value();
+        } else if (arg == "--only") {
+            o.onlyPrefixes.emplace_back(value());
         } else if (arg == "--skip") {
             o.skipPrefixes.emplace_back(value());
         } else if (arg == "--skip-dir") {
@@ -88,6 +91,11 @@ bool ParseArgs(int argc, char** argv, Options& o)
 
 bool IsSkipped(const std::string& rel, const Options& o)
 {
+    if (!o.onlyPrefixes.empty()
+        && std::none_of(o.onlyPrefixes.begin(), o.onlyPrefixes.end(),
+            [&rel](const std::string& prefix) { return rel.rfind(prefix, 0) == 0; })) {
+        return true;
+    }
     for (const std::string& prefix : o.skipPrefixes) {
         if (rel.rfind(prefix, 0) == 0) {
             return true;

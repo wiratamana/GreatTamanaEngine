@@ -150,9 +150,7 @@ private:
     VmaAllocator m_allocator = VK_NULL_HANDLE;
     std::shared_ptr<GpuMemoryTracker> m_tracker;
     VkDevice m_device = VK_NULL_HANDLE;
-    // Defaults OFF - only EditorHost's per-frame pump (driven by the Frame
-    // Debugger's own enabled state) ever turns this on. Never on by default
-    // in any build, including Player/Release.
+    // Off by default in every build; only the editor's per-frame pump enables it.
     bool m_captureEnabled = false;
     std::uint32_t m_slotBudget = 0;
     std::uint32_t m_regionCount = 1;

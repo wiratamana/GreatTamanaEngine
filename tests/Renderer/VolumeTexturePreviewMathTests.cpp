@@ -1,9 +1,4 @@
-// Unit tests for the network-impl-6 campaign's Phase 3 CPU oracle
-// (src/Renderer/VolumeTexturePreviewMath.h/.cpp) - see
-// task_manager/network-impl-6/PHASE3_VOLUME_RAYMARCH_PREVIEW_RENDERER.md,
-// Step 3.2. No Vulkan/Renderer/live GPU device involved at all - every
-// function under test is pure, taking/returning only plain ints/Vec3/float
-// values.
+// Tier-1 tests for the volume preview CPU oracle (src/Renderer/VolumeTexturePreviewMath.h): pure math, no GPU.
 
 #include "Renderer/VolumeTexturePreviewMath.h"
 
@@ -29,10 +24,7 @@ TEST(VolumeTexturePreviewMathTest, PerfectCubeProducesExactHalfExtents)
 
 TEST(VolumeTexturePreviewMathTest, NonCubicVolumeScalesShorterAxesProportionally)
 {
-    // The real Atmosphere aerial-perspective volume shape - see
-    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision 7. Longest axis
-    // (width/height, 128) maps to exactly 0.5; depth (32) is 32/128 = 0.25
-    // of that -> 0.125.
+    // Longest axis (128) maps to 0.5; depth (32) is a quarter of that: 0.125.
     const VolumeCameraSetup setup = ComputeVolumeCameraSetup(128, 128, 32);
     EXPECT_NEAR(setup.boxHalfExtents.x, 0.5f, kEpsilon);
     EXPECT_NEAR(setup.boxHalfExtents.y, 0.5f, kEpsilon);
@@ -122,22 +114,8 @@ TEST(VolumeTexturePreviewMathTest, RayThatMissesTheBoxEntirelyReturnsFalse)
     EXPECT_FALSE(IntersectRayBox(rayOrigin, rayDir, boxHalfExtents, tEnter, tExit));
 }
 
-// --- atmosphere-scattering-3 campaign, Phase 1 -----------------------------
-// (task_manager/atmosphere-scattering-3/PHASE1_ROOT_CAUSE_INSTRUMENTATION_AND_REGRESSION_TESTS.md)
-// Codifies, as a permanent checked fact, the exact geometry defect
-// PHASE0_MASTER_STRATEGY.md's own investigation found:
-// ComputeVolumeCameraSetup() scales boxHalfExtents directly proportional to
-// raw texel counts, which is CORRECT for a genuine spatial volume but WRONG
-// for the Aerial Perspective froxel volume (128x128x32 - see
-// AtmosphereLutRenderer.cpp's kAerialPerspectiveVolumeWidth/Height/Depth),
-// whose Z axis is a camera-relative DISTANCE SLICE index, not a comparable
-// physical length to its X/Y screen-column/row indices. This test is NOT a
-// "fails before fix, passes after" regression test - ComputeVolumeCameraSetup()
-// itself is NEVER changed by this campaign (see PHASE0's own Locked Design
-// Decision 2); it is a CHARACTERIZATION test, permanently documenting the
-// generic function's own (still correct, for an ACTUAL spatial volume)
-// behavior, so a future reader can see exactly why Phase 2 needed a SECOND,
-// separate function instead of just tweaking constants inside this one.
+// Characterization: the generic setup scales the box by raw texel counts. That is right for a spatial volume but
+// flattens the aerial perspective volume (128x128x32), whose Z is a distance-slice index, not a length.
 TEST(VolumeTexturePreviewMathTest, AerialPerspectiveVolumeDimensionsProduceSeverelyFlattenedDepthAxisUnderGenericFunction)
 {
     const VolumeCameraSetup setup = ComputeVolumeCameraSetup(128, 128, 32);
@@ -156,28 +134,19 @@ TEST(VolumeTexturePreviewMathTest, AerialPerspectiveVolumeDimensionsProduceSever
     EXPECT_LT(depthToWidthRatio, 0.3f); // 0.25 in practice - comfortably confirms the flattening.
 }
 
-// --- atmosphere-scattering-3 campaign, Phase 2 -----------------------------
-// (task_manager/atmosphere-scattering-3/PHASE2_ATMOSPHERE_AWARE_PREVIEW_CAMERA_FRAMING.md)
-// ComputeAtmosphereAerialPerspectivePreviewCameraSetup() - the SECOND,
-// dedicated camera + proxy-box setup used ONLY for the Aerial Perspective
-// froxel volume's own HTTP preview. Deliberately the OPPOSITE of the generic
-// function's own behavior for these same dimensions (see Phase 1's own
-// characterization test above) - depth must now be the visually DOMINANT
-// axis, not the smallest.
+// --- ComputeAerialPerspectivePreviewCameraSetup() ---------------------------
+// The dedicated setup for the aerial perspective volume: depth must be the dominant axis, unlike the generic one.
 
-TEST(VolumeTexturePreviewMathTest, AtmosphereAerialPerspectivePreviewProducesADepthDominantBox)
+TEST(VolumeTexturePreviewMathTest, AerialPerspectivePreviewProducesADepthDominantBox)
 {
-    const VolumeCameraSetup setup = ComputeAtmosphereAerialPerspectivePreviewCameraSetup(128, 128, 32);
-    // The OPPOSITE of the generic function's own behavior for these same
-    // dimensions (see PHASE1's characterization test) - depth must now be
-    // the LARGEST axis, not the smallest.
+    const VolumeCameraSetup setup = ComputeAerialPerspectivePreviewCameraSetup(128, 128, 32);
     EXPECT_GT(setup.boxHalfExtents.z, setup.boxHalfExtents.x);
     EXPECT_GT(setup.boxHalfExtents.z, setup.boxHalfExtents.y);
 }
 
-TEST(VolumeTexturePreviewMathTest, AtmosphereAerialPerspectivePreviewCameraBasisIsOrthonormal)
+TEST(VolumeTexturePreviewMathTest, AerialPerspectivePreviewCameraBasisIsOrthonormal)
 {
-    const VolumeCameraSetup setup = ComputeAtmosphereAerialPerspectivePreviewCameraSetup(128, 128, 32);
+    const VolumeCameraSetup setup = ComputeAerialPerspectivePreviewCameraSetup(128, 128, 32);
     EXPECT_NEAR(Length(setup.forward), 1.0f, 1e-4f);
     EXPECT_NEAR(Length(setup.right), 1.0f, 1e-4f);
     EXPECT_NEAR(Length(setup.up), 1.0f, 1e-4f);
@@ -186,17 +155,14 @@ TEST(VolumeTexturePreviewMathTest, AtmosphereAerialPerspectivePreviewCameraBasis
     EXPECT_NEAR(Dot(setup.right, setup.up), 0.0f, 1e-4f);
 }
 
-TEST(VolumeTexturePreviewMathTest, AtmosphereAerialPerspectivePreviewEyeSitsOutsideTheBoundingSphere)
+TEST(VolumeTexturePreviewMathTest, AerialPerspectivePreviewEyeSitsOutsideTheBoundingSphere)
 {
-    const VolumeCameraSetup setup = ComputeAtmosphereAerialPerspectivePreviewCameraSetup(128, 128, 32);
+    const VolumeCameraSetup setup = ComputeAerialPerspectivePreviewCameraSetup(128, 128, 32);
     const float boundingRadius = Length(setup.boxHalfExtents);
     EXPECT_GT(Length(setup.eyePosition), boundingRadius);
 }
 
-// --- atmosphere-scattering-3 campaign, Phase 3 -----------------------------
-// (task_manager/atmosphere-scattering-3/PHASE3_FRUSTUM_SHAPED_RAYMARCH_PROXY.md)
-// IntersectRayFrustum()/MapFrustumLocalPositionToUvw() - the new frustum-
-// shaped raymarch proxy used ONLY for the Aerial Perspective preview.
+// --- IntersectRayFrustum() / MapFrustumLocalPositionToUvw() ---------------
 
 TEST(VolumeTexturePreviewMathTest, IntersectRayFrustumAlongCentralAxisSpansFullDepth)
 {
@@ -212,9 +178,7 @@ TEST(VolumeTexturePreviewMathTest, IntersectRayFrustumAlongCentralAxisSpansFullD
     float tExit = 0.0f;
     ASSERT_TRUE(IntersectRayFrustum(rayOrigin, rayDirection, frustum, tEnter, tExit));
 
-    // tEnter/tExit are RAY-PARAMETER offsets from rayOrigin, not raw z
-    // coordinates - see this phase's own strategy document for the exact
-    // wording correction this test reflects.
+    // tEnter/tExit are ray-parameter offsets from rayOrigin, not z coordinates.
     EXPECT_NEAR(rayOrigin.z + tEnter, -frustum.halfDepth, kEpsilon);
     EXPECT_NEAR(rayOrigin.z + tExit, frustum.halfDepth, kEpsilon);
     EXPECT_NEAR(tExit - tEnter, 2.0f * frustum.halfDepth, kEpsilon);
@@ -254,9 +218,7 @@ TEST(VolumeTexturePreviewMathTest, IntersectRayFrustumMissingRayReturnsFalse)
     frustum.farHalfWidth = 1.0f;
     frustum.farHalfHeight = 1.0f;
 
-    // Offset in X by MORE than farHalfWidth (the frustum's single widest
-    // point at any z), parallel to Z - guaranteed to miss regardless of
-    // where along Z it passes.
+    // Offset in X beyond farHalfWidth (the widest point), parallel to Z: misses at any depth.
     const Vec3 rayOrigin(2.0f, 0.0f, -10.0f);
     const Vec3 rayDirection(0.0f, 0.0f, 1.0f);
 
@@ -290,10 +252,7 @@ TEST(VolumeTexturePreviewMathTest, MapFrustumLocalPositionToUvwApexMapsToCenterU
     frustum.farHalfWidth = 2.0f;
     frustum.farHalfHeight = 2.0f;
 
-    // The cross-section at z == -halfDepth is exactly zero, so x == 0 /
-    // y == 0 is the ONLY genuinely-inside-the-frustum point at that z -
-    // this test must only assert this exact apex point, never a nonzero
-    // x/y at the same z (see this phase's own strategy document for why).
+    // The cross-section at the apex is zero, so only x == y == 0 is inside the frustum there.
     const Vec3 localPos(0.0f, 0.0f, -frustum.halfDepth);
     const Vec3 uvw = MapFrustumLocalPositionToUvw(localPos, frustum);
     EXPECT_NEAR(uvw.x, 0.5f, kEpsilon);

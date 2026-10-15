@@ -2810,3 +2810,13 @@ add_test(NAME FeaturePurityCheck
             --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/feature_purity_check/allowlist.txt"
             --comments skip --strings skip
 )
+
+# Fails when the engine layer (src/Renderer, src/Core) names a feature or gameplay word, comments included.
+# See tools/ci/engine_vocabulary_check/README.md.
+add_test(NAME EngineVocabularyCheck
+    COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src" --only Renderer/ --only Core/
+            --tokens "${CMAKE_SOURCE_DIR}/tools/ci/engine_vocabulary_check/tokens.txt"
+            --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/engine_vocabulary_check/allowlist.txt"
+            --comments scan --strings scan --ignore-case
+)
+

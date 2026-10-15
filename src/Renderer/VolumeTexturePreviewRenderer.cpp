@@ -12,11 +12,8 @@ namespace gte {
 
 namespace {
 
-// MUST match src/Shaders/VolumeTexturePreview.comp's own `layout(push_constant)`
-// block exactly - every Vec3 followed immediately by one float gives a
-// natural 16-byte-aligned group with no compiler-inserted padding (Vec3 is
-// three tightly-packed floats, alignof 4 - see Math/Vec3.h), matching
-// std140's own vec3-then-scalar packing rule.
+// Must match the `layout(push_constant)` block in src/Shaders/VolumeTexturePreview.comp.
+// Each Vec3 followed by one float forms a 16-byte group with no padding (std140 vec3-then-scalar packing).
 struct PushConstants {
     Vec3 eyePosition;
     float tanHalfFovY = 0.0f;
@@ -26,78 +23,32 @@ struct PushConstants {
     std::int32_t stepCount = 0;
     Vec3 up;
     float _padding0 = 0.0f;
-    // Box's own local-space half-extents when shapeMode == 0 (the default/
-    // generic path, UNCHANGED). atmosphere-scattering-3 campaign, Phase 3
-    // (task_manager/atmosphere-scattering-3/PHASE3_FRUSTUM_SHAPED_RAYMARCH_PROXY.md)
-    // REUSES this same field to carry (farHalfWidth, farHalfHeight, halfDepth)
-    // - NOTE the different field order than FrustumProxy's own C++ struct
-    // declaration (halfDepth, farHalfWidth, farHalfHeight) - when
-    // shapeMode == 1. No new Vec3 field was added purely for this.
+    // Box half-extents when shapeMode == 0. When shapeMode == 1 it carries (farHalfWidth, farHalfHeight, halfDepth),
+    // a different order than FrustumProxy declares them.
     Vec3 boxHalfExtents;
     float _padding1 = 0.0f;
-    // atmosphere-scattering-2 campaign, Phase 4
-    // (task_manager/atmosphere-scattering-2/PHASE4_ATMOSPHERE_AWARE_VOLUME_DEBUG_PREVIEW.md)
-    // - appended at the tail so every existing field above keeps its exact
-    // pre-Phase-4 offset. This `int` immediately followed by a `float` packs
-    // into 8 bytes with no gap needed - the preceding field (`_padding1`)
-    // ends the struct's existing groups exactly 16-byte aligned (5 groups of
-    // 16 bytes = offset 80), so this new 8-byte tail needs no extra padding
-    // of its own either.
     std::int32_t interpretationMode = 0; // VolumeTexturePreviewInterpretation, as int.
-    float aerialPreviewExposure = 0.0f; // Only meaningful when interpretationMode == 1; 0 when mode == 0 (unused).
-    // atmosphere-scattering-3 campaign, Phase 3
-    // (task_manager/atmosphere-scattering-3/PHASE3_FRUSTUM_SHAPED_RAYMARCH_PROXY.md)
-    // - appended at the true tail, after aerialPreviewExposure, so every
-    // existing field keeps its exact pre-Phase-3 offset. 0 = axis-aligned
-    // box (IntersectRayBox, existing/default), 1 = tapering frustum
-    // (IntersectRayFrustum).
-    std::int32_t shapeMode = 0;
+    float aerialPreviewExposure = 0.0f; // Only used when interpretationMode == 1.
+    std::int32_t shapeMode = 0; // 0 = axis-aligned box (IntersectRayBox), 1 = tapering frustum (IntersectRayFrustum).
 };
 
-// atmosphere-scattering-2 campaign, Phase 4 - fixed exposure multiplier
-// applied ONLY when interpretationMode == AtmosphereAerialPerspective,
-// BEFORE the shader's own Reinhard tonemap - chosen empirically so this
-// campaign's own typical in-scattering magnitudes (see
-// AERIAL_PERSPECTIVE_INVESTIGATION_FINDINGS.md's own cited numbers, ~1e-5 to
-// ~1e-3 pre-Phase-3, larger after Phase 3's exaggeration multiplier) land in
-// a visually legible mid-range rather than crushing to black. Re-tune this
-// constant (not kDensityScale, not any call site) if Phase 3's own final
-// chosen exaggeration default changes substantially later.
-static constexpr float kAerialPreviewExposure = 3200.0f; // atmosphere-scattering-3 Phase 4: raised from 2000 -> 3200 so the far (hazy) end of the frustum reads as a brighter, more glowing blue - closer to the reference diagram's own bright, near-white far-end glow - without visibly blowing out/flattening the near-to-far gradient (checked against a live capture at each step, see PHASE4_COMPLETION_REPORT.md).
+// Exposure applied before the shader's Reinhard tonemap for the aerial perspective interpretation.
+// Its in-scattering values are tiny, so this lifts them into a legible mid-range.
+static constexpr float kAerialPreviewExposure = 3200.0f;
 
 } // namespace
 
-// frame-debugger-5 campaign, PHASE4
-// (task_manager/frame-debugger-5/PHASE4_VOLUME_TEXTURE_RAYMARCH_PREVIEW_REUSE.md)
-// - see this function's own header (VolumeTexturePreviewRenderer.h) doc
-// comment for the full contract. Byte-for-byte the same rule
-// Application.cpp's own GET /get_texture volume-texture branch used inline
-// before this phase - extracted here, unchanged, so a second call site
-// (FrameDebuggerHistory::CaptureFrame()) can reuse it verbatim.
 VolumeTexturePreviewInterpretation SelectVolumeTexturePreviewInterpretation(const std::string& volumeTextureName)
 {
     const bool isAerialPerspectiveVolume = volumeTextureName.rfind("AtmosphereAerialPerspectiveVolume", 0) == 0;
-    return isAerialPerspectiveVolume ? VolumeTexturePreviewInterpretation::AtmosphereAerialPerspective
+    return isAerialPerspectiveVolume ? VolumeTexturePreviewInterpretation::AerialPerspectiveFrustum
                                       : VolumeTexturePreviewInterpretation::GenericDensityInAlpha;
 }
 
 VolumeTexturePreviewRenderer::~VolumeTexturePreviewRenderer()
 {
-    // m_pipeline/m_outputTexture are RAII types and clean up themselves;
-    // m_volumeSampler is a plain Vulkan handle this class owns directly,
-    // mirroring AtmosphereLutRenderer's own identical destructor shape.
-    // m_descriptorSetLayout is now BORROWED from m_pipeline's own
-    // ReflectedDescriptorSetLayout(0) - owned and destroyed by m_pipeline
-    // itself (ComputePipeline::Destroy()'s own m_ownedReflectedLayouts
-    // cleanup, PHASE2 of task_manager/better-render-pass-1). Keeping the old
-    // vkDestroyDescriptorSetLayout() call here would be a genuine
-    // double-free the instant this destructor ran - see
-    // task_manager/better-render-pass-1/PHASE4_COMPLETION_REPORT.md's own
-    // identical fix for the first-ever precedent of this exact bug class.
-    // m_descriptorSet (a ComputeDescriptorSet) owns no Vulkan handle of its
-    // own - the descriptor set it wraps was allocated from a shared pool
-    // and is never individually freed (see ComputeDescriptorSet.h's own
-    // class comment).
+    // m_pipeline and m_outputTexture clean up themselves. m_descriptorSetLayout is borrowed from m_pipeline
+    // (destroying it here would double-free). m_descriptorSet comes from a shared pool and is never freed alone.
     if (m_volumeSampler != VK_NULL_HANDLE) {
         vkDestroySampler(m_device, m_volumeSampler, nullptr);
     }
@@ -112,10 +63,7 @@ void VolumeTexturePreviewRenderer::EnsureInitialized(Renderer& renderer)
     const Renderer::VulkanContextInfo context = renderer.GetVulkanContextInfo();
     m_device = context.device;
 
-    // Trilinear, clamp-to-edge in all three axes - mirrors VolumeTexture's
-    // own sampler description exactly (see VolumeTexture.cpp). VolumeTarget
-    // itself, unlike VolumeTexture, carries no sampler of its own, so this
-    // class must build its own.
+    // Trilinear, clamp-to-edge in all three axes, like VolumeTexture's sampler (VolumeTarget carries none).
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -130,23 +78,15 @@ void VolumeTexturePreviewRenderer::EnsureInitialized(Renderer& renderer)
         throw std::runtime_error("VolumeTexturePreviewRenderer: vkCreateSampler failed.");
     }
 
-    // task_manager/better-render-pass-1 campaign, PHASE6 - path-only,
-    // reflection-based pipeline creation (PHASE2) replaces the old hand-built
-    // DescriptorSetLayoutBuilder + manual VkPushConstantRange entirely.
-    // Binding 0 (the source volume's own trilinear sampler3D, read-only) /
-    // binding 1 (the output image2D) and this file's own PushConstants block
-    // are both now read directly from
-    // Shaders/VolumeTexturePreview.comp.spv's own compiled reflection data.
+    // Layout and push constants come from the compiled shader's reflection:
+    // binding 0 is the source volume's sampler3D, binding 1 the output image2D.
     m_pipeline.emplace(renderer.CreateComputePipeline("shaders/VolumeTexturePreview.comp.spv"));
     m_descriptorSetLayout = m_pipeline->ReflectedDescriptorSetLayout(/*set=*/0);
 
     m_descriptorSet = ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(m_descriptorSetLayout));
 
-    // A zero-filled buffer is correct and sufficient here - the very first
-    // compute dispatch overwrites every pixel anyway via imageStore (see
-    // Texture2D.h's own doc comment for why a freshly-created Texture2D is
-    // otherwise left in VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, which is
-    // this class's own m_outputTextureState initial value below).
+    // Zero-filled is enough: the first dispatch overwrites every pixel. A new Texture2D starts in
+    // SHADER_READ_ONLY_OPTIMAL, which is m_outputTextureState's initial value below.
     const std::vector<std::uint8_t> zeroFilledPixels(static_cast<std::size_t>(kOutputWidth) * kOutputHeight * 4, 0);
     m_outputTexture.emplace(renderer.CreateTexture2D(zeroFilledPixels.data(), kOutputWidth, kOutputHeight,
         "VolumeTexturePreviewOutput", /*allowStorageImageAccess=*/true));
@@ -162,17 +102,13 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
 {
     EnsureInitialized(renderer);
 
-    const VolumeCameraSetup setup = (interpretation == VolumeTexturePreviewInterpretation::AtmosphereAerialPerspective)
-        ? ComputeAtmosphereAerialPerspectivePreviewCameraSetup(static_cast<int>(volume.extent.width),
+    const VolumeCameraSetup setup = (interpretation == VolumeTexturePreviewInterpretation::AerialPerspectiveFrustum)
+        ? ComputeAerialPerspectivePreviewCameraSetup(static_cast<int>(volume.extent.width),
               static_cast<int>(volume.extent.height), static_cast<int>(volume.extent.depth))
         : ComputeVolumeCameraSetup(static_cast<int>(volume.extent.width), static_cast<int>(volume.extent.height),
               static_cast<int>(volume.extent.depth));
 
-    // Every call serves a DIFFERENT volume image (unlike a per-model cache
-    // elsewhere in this engine that only rewrites once) - binding 0 must be
-    // refreshed every time. Binding 1 (the output image) never actually
-    // changes across calls since the SAME output texture is reused every
-    // time, but costs nothing extra to rewrite alongside binding 0.
+    // Each call may preview a different volume, so binding 0 is rewritten every time (binding 1 rides along).
     m_descriptorSet.Rewrite(
         std::vector<ComputeDescriptorWrite>{
             ComputeDescriptorWrite::CombinedImageSampler(0, volume.imageView, m_volumeSampler),
@@ -188,40 +124,19 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
     pushConstants.stepCount = kStepCount;
     pushConstants.up = setup.up;
     pushConstants.boxHalfExtents = setup.boxHalfExtents;
-    // atmosphere-scattering-2 campaign, Phase 4 - the exposure value is only
-    // meaningful when interpretationMode == AtmosphereAerialPerspective;
-    // left at 0 (its PushConstants default) for the generic interpretation,
-    // exactly mirroring this struct's own doc comment above.
     pushConstants.interpretationMode = static_cast<std::int32_t>(interpretation);
     pushConstants.aerialPreviewExposure =
-        (interpretation == VolumeTexturePreviewInterpretation::AtmosphereAerialPerspective) ? kAerialPreviewExposure : 0.0f;
+        (interpretation == VolumeTexturePreviewInterpretation::AerialPerspectiveFrustum) ? kAerialPreviewExposure : 0.0f;
 
-    // atmosphere-scattering-3 campaign, Phase 3
-    // (task_manager/atmosphere-scattering-3/PHASE3_FRUSTUM_SHAPED_RAYMARCH_PROXY.md)
-    // - the Aerial Perspective preview swaps the raymarch proxy SHAPE from an
-    // axis-aligned box to a tapering frustum, overwriting boxHalfExtents
-    // (already assigned above from `setup`) to instead carry
-    // (farHalfWidth, farHalfHeight, halfDepth) - see PushConstants::
-    // boxHalfExtents's own doc comment for the exact field-order caveat.
-    // The camera's own eyePosition/forward/right/up/tanHalfFovY from
-    // ComputeAtmosphereAerialPerspectivePreviewCameraSetup() above are left
-    // unchanged; only this shape-related field is overridden here. Every
-    // OTHER (generic) interpretation leaves shapeMode at its PushConstants
-    // default (0) and boxHalfExtents exactly as ComputeVolumeCameraSetup()
-    // produced it - zero regression to that path.
-    if (interpretation == VolumeTexturePreviewInterpretation::AtmosphereAerialPerspective) {
+    // The aerial perspective preview raymarches a frustum: boxHalfExtents carries its far size and half depth.
+    if (interpretation == VolumeTexturePreviewInterpretation::AerialPerspectiveFrustum) {
         pushConstants.shapeMode = 1;
-        const FrustumProxy frustum = ComputeAtmosphereAerialPerspectivePreviewFrustum();
+        const FrustumProxy frustum = ComputeAerialPerspectivePreviewFrustum();
         pushConstants.boxHalfExtents = Vec3(frustum.farHalfWidth, frustum.farHalfHeight, frustum.halfDepth);
     }
 
-    // A COMBINED IMAGE SAMPLER read from a COMPUTE shader has no existing
-    // ResourceAccess enumerator to reuse via RequiredStateFor() -
-    // ResourceAccess::ShaderRead maps to the FRAGMENT shader stage, and
-    // ResourceAccess::ComputeShaderRead maps to VK_IMAGE_LAYOUT_GENERAL (a
-    // storage-image/imageLoad case, not a sampler read) - so this
-    // ResourceState is built by hand (see this phase's own strategy
-    // document, Step 3.4).
+    // A compute-stage sampler read has no ResourceAccess enumerator (ShaderRead maps to the fragment stage,
+    // ComputeShaderRead to GENERAL), so this state is built by hand.
     const rg::ResourceState volumeSampledState{
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -250,29 +165,20 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
         const std::uint32_t groupCountY = ComputeGroupCount(static_cast<std::uint32_t>(kOutputHeight), kLocalSizeY);
         vkCmdDispatch(cmd.Native(), groupCountX, groupCountY, 1);
 
-        // Restore the volume image to its real previous state - a later
-        // graph-recorded frame touching the SAME volume texture must see
-        // it exactly as the render graph itself still believes it is.
+        // Restore the volume's previous state: later graph frames still expect it.
         rg::EmitImageBarrier(cmd.Native(), volumeImage, range, volumeSampledState, previousState);
 
-        // Deliberately leave m_outputTexture's image in GENERAL - the next
-        // step reads it back via Renderer::CaptureImagePixels(), which
-        // performs its own transition dance given whatever ResourceState it
-        // is told the image is CURRENTLY in.
+        // The output stays in GENERAL; CaptureImagePixels() transitions it from the state it is told.
     });
 
     m_outputTextureState = outputWriteState;
 
-    // This output format is never BGRA (VK_FORMAT_R8G8B8A8_UNORM), so no
-    // Encoding::ConvertBgraToRgbaInPlace() swizzle is ever needed for this
-    // capture kind - see this phase's own strategy document, Step 3.4g.
+    // The output is R8G8B8A8, never BGRA, so no channel swizzle is needed.
     const Renderer::CapturedRawPixels raw = renderer.CaptureImagePixels(m_outputTexture->Image(),
         VK_IMAGE_ASPECT_COLOR_BIT, VK_FORMAT_R8G8B8A8_UNORM,
         Extent2D{ static_cast<std::uint32_t>(kOutputWidth), static_cast<std::uint32_t>(kOutputHeight) },
         m_outputTextureState);
-    // CaptureImagePixels() restores the image to GENERAL afterward (per its
-    // own contract) - m_outputTextureState is already GENERAL, so no
-    // further update is needed here.
+    // CaptureImagePixels() restores GENERAL, which m_outputTextureState already holds.
 
     CapturedRawPixels result;
     result.pixels = raw.pixels;

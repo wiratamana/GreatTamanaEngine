@@ -48,20 +48,11 @@ public:
     //                        passes a fixed 1/60 (see PHASE4).
     void Advance(double realDeltaSeconds, bool isPaused, bool isSteppedThisFrame, double fixedStepSeconds) noexcept;
 
-    // The delta simulation/gameplay code should actually use (Unity's own
-    // Time.deltaTime equivalent): realDeltaSeconds while running normally,
-    // exactly fixedStepSeconds on a Step frame OR on the one frame
-    // immediately after resuming from a pause, or exactly 0.0 while
-    // frozen (paused, not stepping) - see IsFrozenThisFrame().
+    // The delta simulation code should use: the real delta while running, fixedStepSeconds on a Step frame
+    // or the frame after resuming, and 0.0 while frozen (see IsFrozenThisFrame()).
     double DeltaTime() const noexcept { return m_deltaSeconds; }
 
-    // Always the real, wall-clock elapsed seconds since the last Advance()
-    // call, REGARDLESS of pause - Unity's own Time.unscaledDeltaTime
-    // equivalent. Exposed for any future pause-INDEPENDENT per-frame logic
-    // (UI animations, a future frame-debugger overlay, ...) - nothing in
-    // this campaign currently reads it (the Editor's Scene camera is
-    // driven by raw per-pixel mouse deltas, not a time base at all - see
-    // EditorCamera::Update()).
+    // Real wall-clock seconds since the last Advance(), regardless of pause (like Unity's unscaledDeltaTime).
     double UnscaledDeltaTime() const noexcept { return m_unscaledDeltaSeconds; }
 
     bool IsPaused() const noexcept { return m_isPaused; }

@@ -13,7 +13,7 @@
 namespace gte {
 
 // Off-screen render target: a color Texture (this class's base) plus an optional companion DepthBuffer.
-// A depth-only RenderTexture (shadow map) has an imageless base, so Image()/View()/Sampler() are null.
+// A depth-only RenderTexture (e.g. a light's depth map) has an imageless base, so Image()/View()/Sampler() are null.
 class RenderTexture : public Texture {
 public:
     // At least one of createColorImage/createDepthCompanion must be true.

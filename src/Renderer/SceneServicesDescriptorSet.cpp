@@ -417,13 +417,8 @@ void SceneServicesDescriptorSet::UpdateGlobalUniformBlock(rg::RenderViewId view,
     // the descriptor set below never needs to be touched again either.
     entry->buffer.Upload(bytes.data(), bytes.size());
 
-    // Lazily allocate+register the shared per-view set here too - do NOT
-    // assert Rewrite() already ran. Whichever of the two runs first for a
-    // view creates the set; the other just reuses it from m_perViewSets.
-    // Mirrors Rewrite()'s own lazy-allocate pattern exactly - never
-    // "simplify" this back into an assert, the ordering is load-bearing
-    // (Shadow.DepthPass runs at PreOpaques, strictly BEFORE RenderOpaque,
-    // so it may well be the FIRST thing to touch a view's set this frame).
+    // Allocate the shared per-view set lazily here too: the first caller for a view creates it and the
+    // other reuses it. Do not turn this into an assert; a PreOpaque depth pass may touch the view first.
     DescriptorSetHandle handle = DescriptorSetHandle::Invalid;
     for (PerViewSet& perView : m_perViewSets) {
         if (perView.view == view) {

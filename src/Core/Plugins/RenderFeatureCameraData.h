@@ -1,10 +1,8 @@
 #pragma once
 
-// Per-view camera data for a PostComposite/PreUI render-feature callback -
-// everything a depth-based or camera-aware effect (fog, outlines, custom
-// post-processing) needs about the camera that is NOT already covered by
-// ScenePassReadHandles' color/depth read handles. Deliberately a separate
-// struct/file pair - never folded onto ScenePassReadHandles.
+// Per-view camera data for a PostComposite/PreUI render-feature callback: what a depth-based or
+// camera-aware effect needs beyond ScenePassReadHandles' color/depth read handles.
+
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
 #include "../../Renderer/RenderGraph/RenderGraphHandles.h"

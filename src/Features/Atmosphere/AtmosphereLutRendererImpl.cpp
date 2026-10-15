@@ -9,7 +9,6 @@
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
-#include "../../Renderer/RenderGraph/RenderGraphPersistentResourceOwners.h"
 
 #include <cstdint>
 #include <cstring>
@@ -21,6 +20,9 @@
 namespace gte {
 
 namespace {
+
+// Owner of this feature's persistent textures.
+constexpr const char* kPersistentOwner = "Atmosphere";
 
 // Transmittance LUT resolution.
 constexpr int kTransmittanceLutWidth = 256;
@@ -171,7 +173,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddMultiScatteringLutPass(rg::Ren
     desc.format = PixelFormat::RGBA16_Float;
     desc.usage = rg::TextureUsage::Storage;
     const rg::TextureHandle outputHandle = builder.GetOrCreatePersistentTexture(
-        multiScatteringLutToken, rg::kPersistentOwnerAtmosphere, "MultiScatteringLut", desc);
+        multiScatteringLutToken, kPersistentOwner, "MultiScatteringLut", desc);
 
     builder.AddRenderPass(
         "AtmosphereMultiScatteringLutPass", rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
@@ -251,7 +253,7 @@ rg::TextureHandle AtmosphereLutRenderer::Impl::AddSkyViewLutPass(rg::RenderGraph
     desc.format = PixelFormat::RGBA16_Float;
     desc.usage = rg::TextureUsage::Storage;
     const rg::TextureHandle outputHandle = builder.GetOrCreatePersistentTexture(
-        viewState.token, rg::kPersistentOwnerAtmosphere, outputTextureName, desc);
+        viewState.token, kPersistentOwner, outputTextureName, desc);
 
     builder.AddRenderPass(
         "AtmosphereSkyViewLutPass", rg::PassKind::Compute, viewScope, rg::RenderPassCategory::General,
@@ -567,7 +569,7 @@ void AtmosphereLutRenderer::Impl::DrawSkyBackground(Renderer& renderer, rg::Comm
     const AtmosphereFrameUniforms& frameUniforms, const char* skyViewLutName, float skyExposure)
 {
     // Retrieve Sky-View LUT snapshot by name from render graph.
-    const std::string key = std::string(rg::kPersistentOwnerAtmosphere) + "::" + skyViewLutName;
+    const std::string key = std::string(kPersistentOwner) + "::" + skyViewLutName;
     const std::optional<rg::DebugTextureSnapshot> snapshot = renderGraph.DebugTextureSnapshotFor(key);
     if (!snapshot.has_value()) {
         return;

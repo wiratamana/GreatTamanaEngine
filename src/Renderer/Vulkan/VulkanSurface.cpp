@@ -9,11 +9,7 @@ namespace gte {
 VulkanSurface::VulkanSurface(VkInstance instance, const ISurfaceProvider& surfaceProvider)
     : m_instance(instance)
 {
-    // ISurfaceProvider::CreateVulkanSurface() returns the SDL-typedef'd (or,
-    // for a future headless/Player implementation, whatever-else-typedef'd)
-    // VkSurfaceKHR; it is structurally identical to volk's/vulkan.h's own
-    // VkSurfaceKHR (see the comment in Core/ISurfaceProvider.h), so no
-    // conversion is needed here beyond the implicit pointer type match.
+    // The provider's VkSurfaceKHR is structurally identical to volk's (see Core/ISurfaceProvider.h): no conversion.
     m_surface = surfaceProvider.CreateVulkanSurface(instance);
 }
 

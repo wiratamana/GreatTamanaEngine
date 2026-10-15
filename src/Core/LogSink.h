@@ -4,55 +4,25 @@
 
 #include <string_view>
 
-// PHASE3 (editor-core-separation-1 campaign,
-// PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - the global, registrable
-// log-sink mechanism GTE_LOG_* (Core/Logging.h) routes through instead of
-// calling ::gte::Logger::Log() directly. gte_core NEVER implements
-// ILogSink itself and NEVER includes anything under src/Editor/ - only
-// gte_editor's Logger (via its new LoggerLogSink wrapper, Editor/Logger.h)
-// installs a real sink, exactly once, at startup. A Player host that never
-// calls InstallLogSink() gets a safe, silent no-op automatically - no
-// macro/switch needed for that "OFF" behavior at all (Locked Design
-// Decision #1, PHASE0_MASTER_STRATEGY.md).
+// Global, registrable log sink that GTE_LOG_* routes through. Core never implements a sink; the editor's
+// Logger installs one at startup. A standalone host that installs none gets a silent no-op.
 
 namespace gte {
 
-// One small, single-purpose interface any log CONSUMER implements. Mirrors
-// the already-proven FrameDebuggerCaptureContext* opaque-pointer/interface
-// shape this campaign reuses everywhere else (PHASE0's Locked Design
-// Decision #2) - Core holds/uses only a plain, nullable pointer to this
-// interface (via the free functions below), never a concrete Editor type.
+// Implemented by a log consumer. Core only holds a nullable pointer to it, never a concrete editor type.
 class ILogSink {
 public:
     virtual ~ILogSink() = default;
     virtual void Log(LogLevel level, std::string_view category, std::string_view message, bool isBlocking = false) = 0;
 };
 
-// Install-once, idempotent (safe to call more than once - see LogSink.cpp
-// for exactly what happens then), process-global sink pointer - mirrors
-// SdlMemoryTracker's own precedent (AGENTS.md, "CPU Dependency Memory
-// Tracking"): call once, before the sink is first used, from whichever
-// host composes the app (Application today; EditorHost from Phase 15
-// onward). Passing nullptr is legal and means "uninstall" (LogToActiveSink()
-// becomes a safe no-op again, and IsLogSinkInstalled() reports false) -
-// useful for tests that need a clean slate between cases. A second
-// Install call with a DIFFERENT non-null pointer is accepted too (simple
-// last-write-wins, never asserted/rejected) - this repo's own single
-// composition-root call site only ever calls this once in practice, so the
-// only realistic "second call" caller is a test harness swapping in a
-// fake sink deliberately.
+// Installs the process-global sink; the last call wins. nullptr uninstalls (logging becomes a no-op).
 void InstallLogSink(ILogSink* sink) noexcept;
 
-// True once InstallLogSink() has most recently been called with a
-// non-null pointer - the cheap, always-safe-to-call check GTE_LOG_*
-// (Core/Logging.h) uses to skip building the category/message expressions
-// entirely when nothing is listening.
+// True while a non-null sink is installed. GTE_LOG_* checks it to skip building the message when nobody listens.
 bool IsLogSinkInstalled() noexcept;
 
-// Routes one log entry to whichever sink is currently installed - a true,
-// silent no-op if none is. Never called directly by feature code - see
-// the GTE_LOG_* macros (Core/Logging.h), which already guard this call
-// behind IsLogSinkInstalled() themselves.
+// Routes one entry to the installed sink; a silent no-op when none is. Call through the GTE_LOG_* macros.
 void LogToActiveSink(LogLevel level, std::string_view category, std::string_view message, bool isBlocking);
 
 } // namespace gte

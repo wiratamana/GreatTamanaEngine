@@ -1,19 +1,8 @@
 #pragma once
 
-// Block 4 "Global Scene Services Descriptor Set"
-// (task_manager/better-render-pass-6/PHASE0_MASTER_STRATEGY.md), PHASE1
-// (PHASE1_SCENE_SERVICE_TYPES_AND_BLACKBOARD_KEY.md) - the fixed, versioned,
-// engine-wide vocabulary every future "scene-wide optional texture" feature
-// (shadow maps, GI, fog, and 5 more reserved slots) shares forever:
-// SceneServiceSlot, its resource-kind classifier, and the per-(slot, view)
-// RenderPassBlackboard key function that lets a PreOpaque feature publish
-// data without colliding across concurrently-active render views (Game +
-// Scene, same frame).
-//
-// PHASE2 (PHASE2_SCENE_SERVICES_DESCRIPTOR_SET_CLASS.md) EXTENDS this same
-// header with the real, owning SceneServicesDescriptorSet CLASS below - the
-// owned VkDescriptorSetLayout, per-view VkDescriptorSets, real uploaded
-// dummy fallback resources, and Rewrite()/DescriptorSetFor().
+// Scene services: the fixed engine-wide vocabulary for scene-wide optional textures (depth maps, GI and
+// other reserved slots), the per-(slot, view) blackboard key that keeps concurrent views from colliding,
+// and the SceneServicesDescriptorSet class that owns the layout, per-view sets and dummy fallbacks.
 
 #include "RenderGraph/RenderPipeline.h" // rg::RenderPassId, rg::RenderViewId
 #include "Buffer.h"
@@ -66,13 +55,9 @@ inline constexpr std::uint32_t kInvalidSceneServiceSlotIndex = kSceneServiceSlot
 // completed anywhere in the process for the first time. Never call from
 // code any frame-declare loop/render pass/provider invokes more than once.
 //
-// `isDepthResource` MUST be true for a slot whose real published texture is
-// ever a depth-format image (e.g. a shadow map) - the generic per-slot
-// render-graph read declaration (Core.cpp's RenderOpaque) has no other way
-// to know which physical half (color vs depth) of an imported handle to
-// synchronize/transition. Getting this wrong leaves the real depth image in
-// the wrong Vulkan image layout when a shader samples it - undefined
-// behavior that can crash a GPU driver outright.
+// `isDepthResource` must be true when the published texture is a depth-format image (e.g. a light's
+// depth map): the read declaration needs it to pick the depth half to transition. A wrong value leaves
+// the depth image in the wrong layout when sampled, which can crash a driver.
 [[nodiscard]] std::uint32_t RegisterSceneServiceSlot(const char* debugName, SceneServiceResourceKind kind,
     std::optional<std::uint32_t> preferredIndex = std::nullopt, bool isDepthResource = false);
 
@@ -105,9 +90,8 @@ void ResetSceneServiceRegistryForTesting() noexcept;
 rg::RenderPassId SceneServiceBlackboardKey(std::uint32_t slotIndex, rg::RenderViewId view) noexcept;
 class Renderer; // forward-declared only - the .cpp includes Renderer.h.
 
-// Fixed ceiling for binding 8's packed per-frame lighting UBO - std140-safe,
-// the domain schema living in Features/Shadow/ShadowTypes.h must fit inside
-// this many bytes.
+// Fixed ceiling for binding 8's packed per-frame lighting UBO (std140-safe). The feature's own
+// settings struct must fit inside this many bytes.
 inline constexpr uint64_t kSceneGlobalUniformBlockSize = 128;
 
 // Owns ONE reserved "scene services" descriptor-set LAYOUT (set = 1 at the

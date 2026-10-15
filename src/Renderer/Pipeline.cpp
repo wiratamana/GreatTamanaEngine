@@ -417,8 +417,7 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         colorBlend.attachmentCount = static_cast<std::uint32_t>(colorBlendAttachments.size());
         colorBlend.pAttachments = colorBlendAttachments.data();
 
-        // Dynamic depth bias too (GAP2 - avoids a pipeline-permutation per
-        // shadow-bias tweak) on top of the fixed constructors' viewport/scissor.
+        // Dynamic depth bias too, so a bias change needs no new pipeline.
         const VkDynamicState dynamicStates[] = {
             VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS
         };

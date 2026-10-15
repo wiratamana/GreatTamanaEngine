@@ -59,18 +59,9 @@ public:
     ProjectAssemblyHost(ProjectAssemblyHost&&) = delete;
     ProjectAssemblyHost& operator=(ProjectAssemblyHost&&) = delete;
 
-    // Enumerates every "*_Game.dll"/"*_Editor.dll" directly inside
-    // `outputDirectory` (no recursion - mirrors PluginHost::LoadPlugins()'s
-    // own "directly inside, no subfolder recursion" rule), loads each, and
-    // calls its GTE_RegisterProject export exactly once. Safe to call with
-    // a non-existent directory (a fresh checkout with no Projects/ folder
-    // yet must never crash - mirrors PluginHost's own identical guarantee).
-    // `core` must outlive this call by the engine's entire remaining
-    // process lifetime. `editorHost` is `nullptr` for a Player-shaped host
-    // that never constructs one (mirrors IEditorPanelModule_v1's own "never
-    // queried by a Player host" precedent) - a "*_Editor.dll" found while
-    // `editorHost == nullptr` is skipped with a loud, logged warning, never
-    // crashed on.
+    // Loads every "*_Game.dll"/"*_Editor.dll" directly inside `outputDirectory` (no recursion) and calls
+    // each GTE_RegisterProject export once. A missing directory is fine. `core` must outlive the process.
+    // `editorHost` is nullptr for a standalone host; a "*_Editor.dll" is then skipped with a logged warning.
     void LoadProjectAssemblies(const std::filesystem::path& outputDirectory,
         Core& core, EditorHost* editorHost);
 

@@ -7,12 +7,8 @@
 
 namespace gte {
 
-// Plain vertex format for the engine's primitive-shape draw path: a 3D
-// position, a per-vertex normal, and a per-vertex color, interpolated
-// across each triangle by the rasterizer. Triangle.frag shades from the
-// normal (real per-pixel directional light + shadow) and multiplies in the
-// color as a flat base tint - see Renderer/Primitives/
-// PrimitiveMeshGenerator.h for how both fields are actually generated.
+// Vertex for the primitive-shape draw path: position, normal and a flat base color.
+// Triangle.frag lights from the normal; see Renderer/Primitives/PrimitiveMeshGenerator.h.
 struct Vertex {
     float position[3];
     float normal[3];

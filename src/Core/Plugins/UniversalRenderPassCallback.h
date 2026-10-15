@@ -1,35 +1,8 @@
 #pragma once
 
-// PHASE 3 COMPLETE (see chat history - "create universal, migrate
-// Atmosphere, migrate Shadow, then DELETE the legacy surface entirely").
-// This header defines the types behind Core::RegisterRenderPass()
-// (Core.h/Core.cpp) - the ONE AND ONLY way to register a built-in render
-// pass now. The 4 methods this used to sit on top of as an additive wrapper
-// (Core::AddBuiltInPreOpaquePass(), Core::AddBuiltInPostOpaquePass(),
-// Core::AddBuiltInPostTransparentPass(), Core::RegisterBuiltInRenderFeature())
-// are DELETED - not hidden, not private, gone - their validation/logging
-// bodies are inlined directly into RegisterRenderPass()'s own switch
-// statement. The real engine machinery underneath (RenderFeatureCompositor/
-// RenderFeatureCompositorImpl.cpp - the GPU-slot + private-texture +
-// compute-shader blend chain for PostComposite/PreUI) is UNCHANGED - every
-// real safety check it enforces (name-collision detection, the
-// PreOpaque/AfterOpaques/AfterTransparents pass-tag asserts, the
-// PostComposite/PreUI "did you forget to ReadTexture() the depth handle"
-// assert) still runs exactly as before.
-//
-// Deliberately does NOT cover:
-//   - Core::RegisterProjectRenderPassProvider() (the raw/no-safety-net
-//     escape hatch) - stays separate on purpose. See
-//     Features/Atmosphere/AtmosphereFeature.cpp's "DrawSkyBackground"
-//     registration for a real, confirmed case that cannot go through this
-//     front door at all (it must write directly into the shared, already-
-//     drawn view target - every FrameEvent below only ever hands out a
-//     private target or a read-only view, by design).
-//   - Core::RegisterViewContentPassName()/RegisterFinalizeForSamplingHook() -
-//     neither one registers a render PASS at all (one is pure GPU-stats
-//     bookkeeping, the other runs once, after the whole graph has already
-//     executed) - folding either into "a kind of RegisterRenderPass call"
-//     would be a type error dressed up as a simplification.
+// Types behind Core::RegisterRenderPass(), the one way to register a built-in render pass.
+// Passes that must write straight into the shared view target use Core::RegisterProjectRenderPassProvider()
+// instead; RegisterViewContentPassName()/RegisterFinalizeForSamplingHook() register no pass at all.
 
 #include "ProjectRenderFeatureCallback.h"
 #include "RenderFeatureDescriptor.h"

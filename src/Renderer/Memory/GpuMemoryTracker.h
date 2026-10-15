@@ -161,13 +161,8 @@ public:
     // see Untrack() above and SetDebugName() below.
     using DebugNameObserver = void (*)(void* userData, GpuResourceHandle handle, const char* name);
 
-    // Installs `observer` (plus `userData`, forwarded back on every call) as
-    // this tracker's ONE debug-name observer. Safe to call more than once -
-    // the LATEST call always wins (last-write-wins, documented, not
-    // asserted - mirrors Core/LogSink.h's own InstallLogSink() precedent).
-    // Pass nullptr to uninstall - the default, so a Player host that never
-    // calls this pays only one branch (a null-pointer check) per
-    // SetDebugName()/Untrack() call, and zero name-storage cost at all.
+    // Installs the one debug-name observer (last call wins). nullptr uninstalls and is the default: a
+    // host without an observer pays one null check per SetDebugName()/Untrack() and stores no names.
     void SetDebugNameObserver(DebugNameObserver observer, void* userData) noexcept
     {
         m_debugNameObserver = observer;

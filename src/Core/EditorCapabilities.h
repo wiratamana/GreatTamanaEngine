@@ -1,52 +1,9 @@
 #pragma once
 
-// editor-core-separation-1 campaign, PHASE5
-// (PHASE5_EDITOR_CAPABILITY_INTERFACES_DESIGN.md) - Bucket B capability
-// interfaces (design doc Section 2.6/7.1 Step 3, PHASE0_MASTER_STRATEGY.md's
-// Locked Design Decision #2): MANY small, single-purpose interfaces, one per
-// GENUINELY NEW "is the Editor's capability actually available" gap - never
-// one big "god interface". Each interface here mirrors the already-proven,
-// ALREADY-DESIGNED FrameDebuggerCaptureContext*/IEditorLayer* opaque-pointer
-// pattern (Locked Design Decision #8) exactly: gte_core-destined code holds
-// only a nullable pointer to the abstract interface (never the real
-// gte_editor-owned implementation), asks a plain runtime null-check instead
-// of a compile-time `#if GTE_ENABLE_EDITOR`, and a future Player host that
-// never registers a capability gets a safe, uniform "not available" answer
-// for free, with zero macro anywhere.
-//
-// Deliberately does NOT touch or duplicate IEditorLayer/
-// FrameDebuggerCaptureContext* themselves - those are two ALREADY-DESIGNED,
-// pre-existing hooks with their own dedicated phases (Phase 2, Phases 12-13)
-// per Locked Design Decision #8, not new capability gaps this file declares
-// interfaces for.
-//
-// ONLY ONE interface lives here as of PHASE5, not four, despite this
-// campaign's own PHASE5 strategy file sketching four candidates (scene IO,
-// Editor UI commands, asset import, GPU-driven-batch test spawning). Reading
-// the real, current code (not guessing) found that THREE of those four
-// candidate gaps are NOT genuinely new capability gaps at all - their real
-// CORE-side call site (Application::Run(), Application.cpp) already routes
-// unconditionally through the pre-existing, already-designed IEditorLayer*
-// pointer, which already has a complete, correct "not available in this
-// build" answer via NullEditorLayer.cpp - see PHASE5_COMPLETION_REPORT.md's
-// own "Findings" section for the full, evidence-based reasoning behind each
-// of the three:
-//   - EditorUiCommandBridge.h (ActivateTab) -> IEditorLayer::ActivateTab()
-//   - AssetImportCommandBridge.h -> IEditorLayer::ImportExternalAssetIntoProject()
-//   - GpuDrivenBatchTestSpawner.h -> IEditorLayer::SpawnGpuDrivenTestBatch()
-// Per Locked Design Decision #2's own text ("This rule governs ONLY the
-// genuinely NEW Bucket B capability gaps"), a capability question that is
-// already fully answered by the existing, out-of-scope IEditorLayer* hook
-// gets no new interface here - inventing a duplicate mechanism for a
-// question IEditorLayer already answers would itself violate Locked Design
-// Decision #8's "never redesign/fragment IEditorLayer" rule by creating a
-// second, parallel way to ask the exact same thing.
-// Game.h/Game.cpp were also re-checked directly (search_in_dir for
-// "GTE_ENABLE_EDITOR"/"not available" scoped to src/Game/) and confirmed to
-// carry ZERO remaining macro or fallback-message content at all - nothing to
-// design there either.
+// Small single-purpose interfaces for editor capabilities. Core code holds a nullable pointer to each;
+// a standalone host that registers none gets a safe "not available" answer.
 
-#include "Logging.h" // editor-core-separation-2 campaign, PHASE3 - LogEntry/LogQueryFilter for ILogQueryCapability below.
+#include "Logging.h" // LogEntry/LogQueryFilter for ILogQueryCapability.
 
 #include <volk.h>
 
@@ -123,22 +80,8 @@ public:
     virtual std::filesystem::path DefaultScenePath() const = 0;
 };
 
-// editor-core-separation-2 campaign, PHASE3 - closes the real, pre-existing
-// gte_core -> gte_editor-only-symbol dependency editor-core-separation-1
-// left open (NetworkServer.cpp calling Logger::Query()/Clear()/EntryCount()/
-// IsEnabled()/LatestEntryId() directly - see that campaign's own
-// CAMPAIGN_COMPLETION_REPORT.md, "What remains genuinely open", option (b)).
-// Mirrors ISceneIOCapability exactly: gte_core-tier code (NetworkServer.cpp)
-// holds only a nullable pointer to this interface, asking a plain runtime
-// null-check instead of a compile-time #if - a future Player host that
-// never registers a real implementation gets a safe "logging unavailable"
-// answer for free.
-//
-// `IsEnabled()` mirrors Logger::IsEnabled()'s own real, current signature
-// (a `static constexpr bool` returning `true` unconditionally today) - a
-// `nullptr` ILogQueryCapability* at the NetworkServer.cpp call site is what
-// represents "this build has no logger at all", NOT a `false` return from
-// this method; the two must never be conflated.
+// Log query capability. Core code holds a nullable pointer: nullptr means the build has no logger,
+// which is distinct from IsEnabled() returning false.
 class ILogQueryCapability {
 public:
     virtual ~ILogQueryCapability() = default;

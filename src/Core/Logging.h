@@ -137,29 +137,8 @@ void LogToActiveSink(LogLevel level, std::string_view category, std::string_view
 
 } // namespace gte
 
-// GTE_LOG_* macros - the ONE sanctioned way any call site anywhere in the
-// engine talks to logging (see AGENTS.md, "Logging", and
-// PHASE0_MASTER_STRATEGY.md's Locked Design Decision #1). Defined
-// UNCONDITIONALLY - no #if GTE_ENABLE_EDITOR branch at all, ever, unlike
-// the old Editor/Logger.h - mirroring Profiling/ScopeTimer.h's
-// GTE_PROFILE_SCOPE dual-branch PRECEDENT in spirit ("a call site never
-// needs its own #ifdef"), but NOT in mechanism: there is no compile-time
-// OFF branch here at all anymore. Instead, each macro expands to a
-// ternary that checks IsLogSinkInstalled() FIRST, deliberately preserving
-// this engine's existing "category/message expressions are never even
-// evaluated when nothing is listening" property (AGENTS.md, "Logging":
-// "a full release runtime game build pays EXACTLY zero cost... including
-// the cost of building the message string itself") for a Player host that
-// never calls InstallLogSink() at all - see PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md's
-// own flagged ambiguity and PHASE3_COMPLETION_REPORT.md for the full
-// reasoning. This is NOT literally free (an atomic load + branch remains,
-// unlike the old compile-time-erased `((void)0)`), but it is the closest
-// achievable approximation now that "is logging compiled in at all" has
-// become a RUNTIME question (whether a sink is installed) instead of a
-// COMPILE-TIME one (GTE_ENABLE_EDITOR) - preserving the one property
-// (never building the message string for nothing) that actually costs
-// real work at a typical call site (e.g. NetworkServer.cpp's
-// std::string-concatenation-heavy messages).
+// GTE_LOG_* is the one way to log. Each macro checks IsLogSinkInstalled() first, so the category and
+// message expressions are never evaluated when nothing is listening.
 #define GTE_LOG_DEBUG(category, message) \
     (::gte::IsLogSinkInstalled() ? (void)::gte::LogToActiveSink(::gte::LogLevel::Debug, (category), (message)) : (void)0)
 #define GTE_LOG_INFO(category, message) \

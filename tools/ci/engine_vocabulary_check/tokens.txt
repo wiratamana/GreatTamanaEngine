@@ -1,0 +1,13 @@
+# Feature and gameplay words the engine layer (src/Renderer, src/Core) must not contain. Case-insensitive.
+Atmosphere
+Shadow
+Sky
+Cloud
+Volumetric
+Fog
+Weather
+Terrain
+Water
+Player
+Enemy
+Gameplay

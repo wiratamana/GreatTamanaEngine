@@ -7,22 +7,8 @@
 
 namespace gte {
 
-// Vertex layout for imported, INDEXED mesh assets (a *.gta AssetType::Mesh
-// file - see src/Assets/MeshFile.h/PmxLoader.h) - position + normal, tightly
-// packed (24 bytes/vertex). Deliberately a SEPARATE struct from this
-// engine's original position+color Vertex (see Vertex.h) rather than
-// growing Vertex itself to carry both: PrimitiveMeshGenerator's built-in
-// shapes bake a fixed-direction "faux-lit" shade directly into a per-vertex
-// COLOR (see its own class comment) and have no real per-vertex normal
-// concept at all, whereas an imported mesh's actual authored normals need to
-// reach the fragment shader untouched instead. Mirrors
-// src/Editor/AssetPreviewMesh.cpp's own (Editor-only) PreviewVertex layout
-// exactly (same two attributes, same offsets) - this is that same layout,
-// promoted out of the Editor-only Inspector preview into the shared
-// Renderer/ layer so real GAMEPLAY rendering can use it too: see
-// Pipeline.h's VertexLayout::PositionNormal and
-// Game::CreateMeshEntityFromGtaFile() (src/Game/Game.h/.cpp), which is what
-// actually builds a Mesh of these from a decoded MeshData.
+// Vertex for imported indexed mesh assets: position + normal, tightly packed (24 bytes).
+// Separate from Vertex (position + color); matches the editor preview vertex layout.
 struct MeshVertex {
     float position[3];
     float normal[3];
