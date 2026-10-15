@@ -25,4 +25,5 @@
 #include "SceneSlot.h"
 #include "SharedOncePerFrame.h"
 #include "Texture.h"
+#include "TransientTarget.h"
 #include "View.h"

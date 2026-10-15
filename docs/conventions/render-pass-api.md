@@ -99,3 +99,9 @@ Consumers (R = rewritten on the pass verbs, M = moved into `src/Renderer` behind
 `gte_ci_scan` runs VolkLeakCheck, NativeLeakCheck, FeaturePurityCheck and EngineVocabularyCheck (ctest); the
 HeaderPurity probe compiles the Vulkan-free headers with `src` as the only include directory. Allowlists only
 shrink; a stale line fails the check.
+
+## Pool eviction and strict validation
+
+Pooled textures and buffers idle for `kPoolStaleFrames` (120) frames are freed when the next frame starts, and their
+debug snapshots are dropped. `cmake -DGTE_STRICT_RENDER_VALIDATION=ON` makes the headless GPU fixture fail a test when
+the graph logged a new validation error (`OnceErrorLog::StrictViolationCount()`); the default is OFF.

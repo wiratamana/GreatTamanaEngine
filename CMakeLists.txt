@@ -122,6 +122,9 @@ option(GTE_CORE_STANDALONE_PROBE_ONLY "CI-ONLY: configure ONLY gte_core, skippin
 # preference).
 option(GTE_ENABLE_PROJECT_ASSEMBLIES "Auto-discover and load per-developer Projects/<Name>/ Project Assembly .dll's (editor-core-separation-11)" ON)
 
+# CI-only: headless GPU tests fail when a render validation error was logged (every new once-per-identity error counts).
+option(GTE_STRICT_RENDER_VALIDATION "Count render validation errors so GPU tests can fail on them" OFF)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchSDL3)
 include(FetchVulkan)
@@ -431,6 +434,8 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/PerView.h
     src/Core/FeatureKit/PersistentTarget.h
     src/Core/FeatureKit/PersistentTarget.cpp
+    src/Core/FeatureKit/TransientTarget.h
+    src/Core/FeatureKit/TransientTarget.cpp
     src/Core/FeatureKit/PersistentVolume.cpp
     src/Core/FeatureKit/Channel.h
     src/Core/FeatureKit/Channel.cpp
@@ -1425,6 +1430,9 @@ target_compile_definitions(gte_core PUBLIC GTE_ENABLE_NETWORK=$<BOOL:${GTE_ENABL
 # independent flag, never GTE_ENABLE_PLUGINS, Finding D). PUBLIC for the
 # same reason as the definition above.
 target_compile_definitions(gte_core PUBLIC GTE_ENABLE_PROJECT_ASSEMBLIES=$<BOOL:${GTE_ENABLE_PROJECT_ASSEMBLIES}>)
+
+# Exposes the strict render validation switch to C++ as a 1/0 macro (see OnceErrorLog.h).
+target_compile_definitions(gte_core PUBLIC GTE_STRICT_RENDER_VALIDATION=$<BOOL:${GTE_STRICT_RENDER_VALIDATION}>)
 
 # PUBLIC (not PRIVATE) for the same reason as the compile definition above:
 # any consumer of gte_core (GreatTamanaEditor's main.cpp, and every test in

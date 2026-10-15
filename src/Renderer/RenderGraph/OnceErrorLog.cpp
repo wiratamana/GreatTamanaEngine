@@ -12,12 +12,13 @@ void OnceErrorLog::Error(std::string_view category, std::string_view text)
     key.reserve(category.size() + 1 + text.size());
     key.append(category).push_back('\x1f');
     key.append(text);
-
     switch (m_seen.Note(key)) {
     case BoundedOnceSet<kCapacity>::Result::First:
+        ++m_newMessages;
         GTE_LOG_ERROR(category, text);
         break;
     case BoundedOnceSet<kCapacity>::Result::Overflow:
+        ++m_newMessages;
         GTE_LOG_ERROR(category, "Further render pass errors are suppressed");
         break;
     default:

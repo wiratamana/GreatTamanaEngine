@@ -6,6 +6,7 @@
 #include "RenderPassToggleRegistry.h"
 #include "../../Core/Logging.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 #include <stdexcept>
@@ -704,9 +705,15 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 {
     const bool isPipelined = (timingMode == ExecuteTimingMode::PipelinedDeferredReadback);
 
-    // A synchronous execution starts a new frame: reset pool state.
+    // A synchronous execution starts a new frame: unclaim pool entries and free the stale ones.
     if (!isPipelined) {
-        m_resourcePool.BeginFrame();
+        m_resourcePool.BeginFrame(m_persistentResourceFrameCounter);
+        const std::vector<VkImage> evicted = m_resourcePool.TakeEvictedImages();
+        if (!evicted.empty()) {
+            m_debugTextures.RemoveIf([&evicted](const DebugTextureSnapshot& snapshot) {
+                return std::find(evicted.begin(), evicted.end(), snapshot.target.image) != evicted.end();
+            });
+        }
         ++m_debugTextureFrameCounter;
     }
 

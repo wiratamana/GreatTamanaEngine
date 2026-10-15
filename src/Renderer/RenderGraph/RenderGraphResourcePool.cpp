@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <stdexcept>
+#include <type_traits>
 
 namespace gte::rg {
 
@@ -17,6 +18,7 @@ Texture& RenderGraphResourcePool::AcquireTexture(const TextureDesc& desc, const 
     for (TextureEntry& entry : m_textureEntries) {
         if (!entry.claimedThisFrame && entry.desc == desc) {
             entry.claimedThisFrame = true;
+            entry.lastClaimedFrame = m_currentFrame;
             return *entry.texture;
         }
     }
@@ -41,7 +43,7 @@ Texture& RenderGraphResourcePool::AcquireTexture(const TextureDesc& desc, const 
         throw std::logic_error("RenderGraphResourcePool::AcquireTexture: a 3D texture cannot be pooled (import-only).");
     }
 
-    TextureEntry& entry = m_textureEntries.emplace_back(TextureEntry{ desc, std::move(texture), true });
+    TextureEntry& entry = m_textureEntries.emplace_back(TextureEntry{ desc, std::move(texture), true, m_currentFrame });
     return *entry.texture;
 }
 
@@ -63,23 +65,36 @@ Buffer& RenderGraphResourcePool::AcquireBuffer(const BufferDesc& desc, const cha
     for (BufferEntry& entry : m_bufferEntries) {
         if (!entry.claimedThisFrame && entry.desc == desc) {
             entry.claimedThisFrame = true;
+            entry.lastClaimedFrame = m_currentFrame;
             return entry.buffer;
         }
     }
 
     BufferEntry& entry = m_bufferEntries.emplace_back(
-        BufferEntry{ desc, m_renderer->CreateBuffer(desc.size, desc.usage, BufferMemoryUsage::GpuOnly, debugName), true });
+        BufferEntry{ desc, m_renderer->CreateBuffer(desc.size, desc.usage, BufferMemoryUsage::GpuOnly, debugName), true,
+            m_currentFrame });
     return entry.buffer;
 }
 
-void RenderGraphResourcePool::BeginFrame() noexcept
+void RenderGraphResourcePool::BeginFrame(std::uint64_t currentFrame) noexcept
 {
-    for (TextureEntry& entry : m_textureEntries) {
-        entry.claimedThisFrame = false;
-    }
-    for (BufferEntry& entry : m_bufferEntries) {
-        entry.claimedThisFrame = false;
-    }
+    m_currentFrame = currentFrame;
+    const auto evict = [&](auto& entries) {
+        for (auto it = entries.begin(); it != entries.end();) {
+            it->claimedThisFrame = false;
+            if (IsStalePoolEntry(false, it->lastClaimedFrame, currentFrame)) {
+                if constexpr (std::is_same_v<std::remove_reference_t<decltype(*it)>, TextureEntry>) {
+                    m_evictedImages.push_back(it->texture->Image());
+                }
+                it = entries.erase(it);
+                ++m_evictedEntries;
+            } else {
+                ++it;
+            }
+        }
+    };
+    evict(m_textureEntries);
+    evict(m_bufferEntries);
 }
 
 } // namespace gte::rg

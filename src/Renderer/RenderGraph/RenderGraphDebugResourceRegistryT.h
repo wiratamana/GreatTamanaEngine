@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <vector>
@@ -38,6 +39,13 @@ public:
 
     // Every known entry, in first-seen order.
     std::vector<SnapshotT> ListAll() const { return m_entries; }
+
+    // Drops every entry the predicate accepts (a snapshot whose resource was destroyed).
+    template <typename Pred>
+    void RemoveIf(Pred&& pred)
+    {
+        m_entries.erase(std::remove_if(m_entries.begin(), m_entries.end(), pred), m_entries.end());
+    }
 
 protected:
     // In-place lookup for a derived class's state override; nullptr if `name` was never Upsert()-ed.

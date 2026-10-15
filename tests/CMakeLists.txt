@@ -2333,6 +2333,8 @@ set(GTE_TEST_SOURCES
     Core/FeatureKit/KitChainTests.cpp
     Core/FeatureKit/KitDataFlowTests.cpp
     Core/FeatureKit/KitSharedVolumeTests.cpp
+    Core/FeatureKit/KitTransientTargetTests.cpp
+    Renderer/RenderGraph/ResourcePoolEvictionTests.cpp
     Core/FeatureKit/KitModuleTests.cpp
     Core/FeatureKit/KitSceneTests.cpp
     Game/SceneDrawPassTests.cpp
@@ -2858,7 +2860,7 @@ set(GTE_COMMENT_RULE_TESTS
     Renderer/RenderGraph/TransferReadbackGpuTests.cpp Renderer/Vulkan/ShaderReflectionTests.cpp
 Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderPurityProbe.cpp
     Renderer/GpuSkinning/GpuSkinningPassTests.cpp Renderer/RenderGraph/RenderGraphComputeBindingKeyTests.cpp
-    Renderer/RenderGraph/PassIdentityTests.cpp)
+    Renderer/RenderGraph/PassIdentityTests.cpp Renderer/RenderGraph/ResourcePoolEvictionTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

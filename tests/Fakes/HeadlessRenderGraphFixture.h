@@ -7,6 +7,8 @@
 #include "../../src/Renderer/RenderGraph/RenderGraph.h"
 #include "HeadlessSurfaceProvider.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -30,6 +32,16 @@ public:
                                         "Vulkan driver/loader most likely does not support "
                                         "VK_EXT_headless_surface (see HeadlessSurfaceProvider.h). Underlying "
                                         "error: ") + e.what();
+        }
+    }
+
+    // A strict-validation build fails the test when the graph logged any new validation error.
+    ~HeadlessRenderGraphFixture()
+    {
+        if constexpr (rg::StrictValidationEnabled()) {
+            if (m_renderGraph != nullptr) {
+                EXPECT_EQ(m_renderGraph->OnceLog()->StrictViolationCount(), 0u) << "render validation errors were logged";
+            }
         }
     }
 
