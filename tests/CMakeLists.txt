@@ -2335,6 +2335,7 @@ set(GTE_TEST_SOURCES
     Core/FeatureKit/KitModuleTests.cpp
     Core/FeatureKit/KitSceneTests.cpp
     Game/SceneDrawPassTests.cpp
+    Core/Plugins/RenderFeatureBlendTests.cpp
     Renderer/Vulkan/ShaderStageMaskTests.cpp
     Renderer/RenderGraph/RenderGraphComputeBindingKeyTests.cpp
     Renderer/Vulkan/BoundedKeySetTests.cpp
@@ -2678,6 +2679,12 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_SHADOW_COMPOSITE_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ShadowComposite.frag.spv"
 )
 
+# The compositor blend shader is declared by the root gte_add_shader() calls; its test reflects the real binary.
+target_sources(GreatTamanaEngineTests PRIVATE "${CMAKE_BINARY_DIR}/shaders/RenderFeatureBlend.comp.spv")
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_TEST_RENDER_FEATURE_BLEND_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/RenderFeatureBlend.comp.spv"
+)
+
 # The lighting layout test reads the shared GLSL include straight from the source tree.
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_LIGHTING_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/DirectionalLightingAndReceiverMask.glsl"
@@ -2817,6 +2824,10 @@ add_test(NAME EngineVocabularyCheck
 set(GTE_COMMENT_RULE_SRC
     Renderer/ Core/FeatureKit/ Features/Shadow/
     Application/RenderPasses.cpp Application/RenderPasses.h Core/Core.cpp Core/Core.h
+    Core/Plugins/RenderFeatureBlendPush.h Core/Plugins/RenderFeatureCompositor.cpp
+    Core/Plugins/RenderFeatureCompositor.h Core/Plugins/RenderFeatureCompositorBlend.cpp
+    Core/Plugins/RenderFeatureCompositorImpl.cpp Core/Plugins/RenderFeatureCompositorImpl.h
+    Core/Plugins/RenderFeatureNamePool.h
     Editor/FrameDebuggerHistory.cpp Editor/FrameDebuggerHistory.h
     Editor/FrameDebuggerPreviewProcessing.cpp Editor/FrameDebuggerPreviewProcessing.h
     Editor/FrameDebuggerSideChannelChecker.cpp Editor/FrameDebuggerSideChannelChecker.h
@@ -2834,7 +2845,7 @@ set(GTE_COMMENT_RULE_TESTS
     Renderer/RenderGraph/RealTargetBindingTests.cpp Renderer/RenderGraph/RecordedPassTests.cpp
     Renderer/RenderGraph/RenderPassToggleRegistryTests.cpp Renderer/RenderGraph/ShaderBindingsTests.cpp
     Renderer/RenderGraph/TransferReadbackGpuTests.cpp Renderer/Vulkan/ShaderReflectionTests.cpp
-    Tools/CppScannerTests.cpp Tools/HeaderPurityProbe.cpp)
+    Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderPurityProbe.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

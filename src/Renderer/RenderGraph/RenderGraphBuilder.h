@@ -348,6 +348,13 @@ public:
     // Resolves samplers for an imported texture at declaration time.
     ImportedTextureSamplers ResolveImportedTextureSamplers(TextureHandle handle) const noexcept;
 
+    // True when an imported texture can be sampled as depth (it has a depth view and sampler).
+    bool HasSampleableDepth(TextureHandle handle) const noexcept
+    {
+        const ImportedTextureSamplers samplers = ResolveImportedTextureSamplers(handle);
+        return samplers.depthSampler != VK_NULL_HANDLE && samplers.depthImageView != VK_NULL_HANDLE;
+    }
+
     // Finalizes the builder and returns the compiled graph input.
     CompiledGraphInput Finish();
 

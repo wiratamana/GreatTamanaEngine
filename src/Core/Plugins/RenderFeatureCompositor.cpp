@@ -1,13 +1,13 @@
 #include "RenderFeatureCompositor.h"
 
-#include "../../Renderer/Internal/RenderFeatureCompositorImpl.h"
+#include "RenderFeatureCompositorImpl.h"
 
 #include <utility>
 
 namespace gte {
 
-RenderFeatureCompositor::RenderFeatureCompositor(Core& core, Renderer& renderer)
-    : m_impl(std::make_unique<Impl>(core, renderer))
+RenderFeatureCompositor::RenderFeatureCompositor(Core& core, Renderer& /*renderer*/)
+    : m_impl(std::make_unique<Impl>(core))
 {
 }
 

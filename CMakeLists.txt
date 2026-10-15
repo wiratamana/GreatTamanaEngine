@@ -992,8 +992,10 @@ add_library(gte_core STATIC
     src/Renderer/Vulkan/OpaqueHandleRegistry.h
     src/Renderer/RenderGraph/RenderGraphHandles.h
     src/Renderer/RenderGraph/RenderPassTagValidation.h
-    src/Renderer/Internal/RenderFeatureCompositorImpl.h
-    src/Renderer/Internal/RenderFeatureCompositorImpl.cpp
+    src/Core/Plugins/RenderFeatureBlendPush.h
+    src/Core/Plugins/RenderFeatureCompositorImpl.h
+    src/Core/Plugins/RenderFeatureCompositorImpl.cpp
+    src/Core/Plugins/RenderFeatureCompositorBlend.cpp
     src/Renderer/Internal/RenderViewRegistryImpl.h
 )
 

@@ -1,14 +1,7 @@
 #include "RenderFeatureCompositorImpl.h"
 
-#include "../../Core/Core.h"
-#include "../../Core/Logging.h"
-#include "../../Core/Plugins/RenderFeatureCameraData.h"
-#include "../../Renderer/Compute/ComputeDispatch.h"
-#include "../../Renderer/GraphicsHandleRegistry.h"
-#include "../../Renderer/RenderGraph/RenderFeatureScope.h"
-#include "../../Renderer/RenderGraph/MeshPass.h"
-#include "../../Renderer/RenderGraph/RenderPassTagValidation.h"
-#include "../../Renderer/VulkanFormatInfo.h"
+#include "../Core.h"
+#include "../Logging.h"
 
 #include <algorithm>
 #include <cassert>
@@ -18,12 +11,6 @@
 namespace gte {
 
 namespace {
-
-// Must match Shaders/RenderFeatureBlend.comp's push-constant block exactly
-// (16 bytes) - .x = blendMode (RenderFeatureBlendMode, cast to float).
-struct RenderFeatureBlendPushConstants {
-    float blendModeAndPad[4] = {};
-};
 
 const char* ToString(RenderFeatureStage stage) noexcept
 {
@@ -61,9 +48,8 @@ const char* ToString(RenderFeatureBlendMode blendMode) noexcept
 
 } // namespace
 
-RenderFeatureCompositor::Impl::Impl(Core& coreRef, Renderer& rendererRef)
+RenderFeatureCompositor::Impl::Impl(Core& coreRef)
     : core(coreRef)
-    , renderer(rendererRef)
 {
     for (int i = 0; i < kMaxConcurrentProjectRenderFeatures; ++i) {
         freeProjectFeatureSlots.push_back(i);
@@ -376,14 +362,6 @@ bool RenderFeatureCompositor::Impl::RegisterFeature(
     targetStage.push_back(std::move(entry));
     SortAndDetectCollisionsInStage(targetStage, isPreUi ? "PreUI" : "PostComposite");
 
-    const std::string gpuStateKey = "ProjectFeatureSlot" + std::to_string(claimedSlot);
-    static constexpr const char* kViewNames[] = { "Game", "Scene" };
-    for (const char* viewName : kViewNames) {
-        namePool.PrivateName(gpuStateKey, viewName);
-        namePool.AccumName(gpuStateKey, viewName);
-        namePool.BlendPassName(gpuStateKey, viewName);
-    }
-
     GTE_LOG_INFO("RenderFeatureCompositor",
         std::string("RegisterFeature('") + descriptor.name + "') succeeded - claimed GPU-state slot "
         + std::to_string(claimedSlot) + ".");
@@ -693,231 +671,5 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::Impl::DebugSnapsho
     return snapshot;
 }
 
-void RenderFeatureCompositor::Impl::EnsureTextureSized(
-    std::optional<RenderTexture>& texture, const char* internedName, VkExtent2D extent)
-{
-    const int width = extent.width > 0 ? static_cast<int>(extent.width) : 1;
-    const int height = extent.height > 0 ? static_cast<int>(extent.height) : 1;
-
-    if (!texture.has_value()) {
-        texture.emplace(renderer.CreateRenderTexture(width, height, PixelFormat::RGBA8_UNorm, internedName,
-            /*depthDebugName=*/nullptr, /*allowStorageImageAccess=*/true));
-        return;
-    }
-
-    const Extent2D currentExtent = texture->Extent();
-    if (currentExtent.width != extent.width || currentExtent.height != extent.height) {
-        // Resizes are rare/user-driven (dragging the Game/Scene panel's
-        // border) - a full device stall here is the simplest correct thing.
-        renderer.WaitForGpuIdle();
-        texture->Resize(width, height);
-    }
-}
-
-RenderFeatureCompositor::Impl::PrivateTargetState& RenderFeatureCompositor::Impl::EnsurePrivateTargetState(
-    const char* internedName, VkExtent2D extent)
-{
-    const auto existing = privateTargetStates.find(internedName);
-    if (existing != privateTargetStates.end()) {
-        EnsureTextureSized(existing->second.texture, internedName, extent);
-        return existing->second;
-    }
-
-    PrivateTargetState state;
-    EnsureTextureSized(state.texture, internedName, extent);
-    const auto inserted = privateTargetStates.emplace(internedName, std::move(state));
-    return inserted.first->second;
-}
-
-RenderFeatureCompositor::Impl::BlendStageState& RenderFeatureCompositor::Impl::EnsureBlendStageDescriptorOnly(
-    const char* internedName)
-{
-    const auto existing = blendStageStates.find(internedName);
-    if (existing != blendStageStates.end()) {
-        return existing->second;
-    }
-
-    // Must run before AllocateComputeDescriptorSet() just below, since that
-    // call reads blendDescriptorSetLayout, lazily built here on first use.
-    EnsureBlendPipelineInitialized();
-
-    BlendStageState state;
-    state.blendDescriptorSet = ComputeDescriptorSet(renderer.AllocateComputeDescriptorSet(blendDescriptorSetLayout));
-    const auto inserted = blendStageStates.emplace(internedName, std::move(state));
-    return inserted.first->second;
-}
-
-RenderFeatureCompositor::Impl::BlendStageState& RenderFeatureCompositor::Impl::EnsureBlendStageState(
-    const char* internedName, VkExtent2D extent)
-{
-    BlendStageState& state = EnsureBlendStageDescriptorOnly(internedName);
-    EnsureTextureSized(state.texture, internedName, extent);
-    return state;
-}
-
-void RenderFeatureCompositor::Impl::EnsureBlendPipelineInitialized()
-{
-    if (blendPipeline.has_value()) {
-        return;
-    }
-    blendPipeline.emplace(renderer.CreateComputePipeline("shaders/RenderFeatureBlend.comp.spv"));
-    blendDescriptorSetLayout = blendPipeline->ReflectedDescriptorSetLayout(/*set=*/0);
-}
-
-void RenderFeatureCompositor::Impl::DispatchBlend(rg::RenderGraphBuilder& builder, rg::TextureHandle dstIn,
-    VkSampler dstInSampler, rg::TextureHandle srcIn, VkSampler srcInSampler, rg::TextureHandle destination,
-    BlendStageState& state, const char* debugName, VkExtent2D extent, RenderFeatureBlendMode blendMode,
-    std::string_view groupHeading)
-{
-    const rg::RenderFeatureScope scope(builder, groupHeading);
-
-    EnsureBlendPipelineInitialized();
-    builder.AddRenderPass(debugName, rg::PassKind::Compute, rg::ViewScope::Shared, rg::RenderPassCategory::General,
-        [dstIn, srcIn, destination](rg::RenderGraphBuilder::PassBuilder& pass) {
-            pass.ReadTexture(dstIn, rg::ResourceAccess::ShaderRead);
-            pass.ReadTexture(srcIn, rg::ResourceAccess::ShaderRead);
-            pass.WriteTexture(destination, rg::ResourceAccess::ComputeShaderWrite);
-        },
-        [this, &state, dstIn, dstInSampler, srcIn, srcInSampler, destination, extent, blendMode](rg::PassContext& ctx) {
-            const rg::PassContext::ResolvedTexture dstResolved = ctx.resolveTexture(dstIn);
-            const rg::PassContext::ResolvedTexture srcResolved = ctx.resolveTexture(srcIn);
-            const rg::PassContext::ResolvedTexture destResolved = ctx.resolveTexture(destination);
-
-            state.blendDescriptorSet.Rewrite(
-                std::vector<ComputeDescriptorWrite>{
-                    ComputeDescriptorWrite::CombinedImageSampler(0, dstResolved.view, dstInSampler),
-                    ComputeDescriptorWrite::CombinedImageSampler(1, srcResolved.view, srcInSampler),
-                    ComputeDescriptorWrite::StorageImage(2, destResolved.view),
-                });
-
-            RenderFeatureBlendPushConstants pushConstants;
-            pushConstants.blendModeAndPad[0] = static_cast<float>(static_cast<std::uint32_t>(blendMode));
-
-            const Extent3D groupCounts =
-                ComputeGroupCount3D(Extent3D{ extent.width, extent.height, 1 }, Extent3D{ 16, 16, 1 });
-
-            const rg::SceneRecording recording(ctx);
-            renderer.Dispatch(*blendPipeline, state.blendDescriptorSet.Native(), &pushConstants, sizeof(pushConstants),
-                groupCounts.width, groupCounts.height, groupCounts.depth);
-        },
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::AfterEverything);
-}
-
-void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
-    const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&)
-{
-    std::vector<Entry> combinedList;
-    combinedList.reserve(postComposite.size() + preUi.size());
-    combinedList.insert(combinedList.end(), postComposite.begin(), postComposite.end());
-    combinedList.insert(combinedList.end(), preUi.begin(), preUi.end());
-
-    combinedList.erase(std::remove_if(combinedList.begin(), combinedList.end(),
-        [this](const Entry& entry) {
-            return !IsEffectivelyEnabled(entry.descriptor.name, entry.enabledOverride);
-        }), combinedList.end());
-    if (combinedList.empty()) {
-        return;
-    }
-
-    const std::optional<Core::PluginRenderFeatureTargetInfo> resolved = core.FindPluginRenderFeatureTarget(frame);
-    if (!resolved.has_value()) {
-        return;
-    }
-
-    const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
-    const std::string viewName = isGameView ? "Game" : "Scene";
-    const VkExtent2D extent = resolved->extent;
-
-    const char* seedName = namePool.SeedName(viewName);
-    BlendStageState& seedState = EnsureBlendStageState(seedName, extent);
-    const rg::TextureHandle seedHandle = frame.builder.ImportTexture(
-        seedName, seedState.texture->Target(), ImageLayout::Undefined, seedState.texture->SamplerObjectHandle());
-    DispatchBlend(frame.builder, resolved->target, resolved->sampler, resolved->target, resolved->sampler, seedHandle,
-        seedState, namePool.SeedCopyPassName(viewName), extent, RenderFeatureBlendMode::Replace, "Post Processing");
-
-    rg::TextureHandle currentInput = seedHandle;
-    VkSampler currentInputSampler = seedState.texture->Sampler();
-
-    for (std::size_t i = 0; i < combinedList.size(); ++i) {
-        const Entry& entry = combinedList[i];
-        const std::string featureName = entry.descriptor.name;
-        const std::string gpuStateKey = (entry.projectCallback)
-            ? ("ProjectFeatureSlot" + std::to_string(entry.projectFeatureSlot))
-            : featureName;
-        const bool isLast = (i + 1 == combinedList.size());
-
-        const char* privateName = namePool.PrivateName(gpuStateKey, viewName);
-        PrivateTargetState& privateState = EnsurePrivateTargetState(privateName, extent);
-        const rg::TextureHandle privateTarget = frame.builder.ImportTexture(
-            privateName, privateState.texture->Target(), ImageLayout::Undefined, privateState.texture->SamplerObjectHandle());
-
-        if (entry.projectCallback) {
-            const rg::RenderFeatureScope scope(frame.builder, featureName);
-            const std::optional<RenderPassViewData> viewDataOpt = core.FindRenderPassViewData(frame.currentView);
-            const RenderPassViewData* viewData = viewDataOpt.has_value() ? &(*viewDataOpt) : nullptr;
-            ScenePassReadHandles handles;
-            handles.colorHandle = currentInput;
-            bool viewHasSampleableDepth = false;
-            if (viewData != nullptr) {
-                handles.depthHandle = viewData->colorTarget;
-                viewHasSampleableDepth =
-                    frame.builder.ResolveImportedTextureSamplers(viewData->colorTarget).depthSampler != VK_NULL_HANDLE;
-            }
-
-            const RenderFeatureCameraData cameraData = ResolveRenderFeatureCameraData(frame.currentView, viewData);
-
-            const std::size_t before = frame.builder.DeclaredPassCount();
-            entry.projectCallback(frame.builder, frame.blackboard, frame.currentView, privateTarget,
-                FromVkExtent2D(extent), handles, cameraData);
-            const std::size_t after = frame.builder.DeclaredPassCount();
-
-            if (viewHasSampleableDepth
-                && FindMissingDeclaredDepthReadForResolve(frame.builder, before, after, handles.depthHandle)) {
-                GTE_LOG_WARNING("RenderFeatureCompositor",
-                    "Render feature '" + featureName + "' declared at least one pass but never declared a "
-                    "ReadTexture(..., isDepthResource=true) usage against the depth handle it was given - this is "
-                    "an undeclared, unbarriered GPU read if its own execute lambda samples it anyway. See "
-                    "docs/conventions/project-assembly-system.md's PostComposite/PreUI subsection.");
-                assert(false
-                    && "A render feature declared a pass without declaring a matching depth ReadTexture() - see "
-                       "the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\").");
-            }
-
-            if (const std::vector<std::size_t> mistagged =
-                    FindPassesNotTaggedAfterEverything(frame.builder, before, after);
-                !mistagged.empty()) {
-                GTE_LOG_WARNING("RenderFeatureCompositor",
-                    "Render feature '" + featureName + "' declared " + std::to_string(mistagged.size())
-                    + " pass(es) not tagged RenderPassEvent::AfterEverything - every PostComposite/PreUI pass "
-                    "must use this exact tag. See docs/conventions/project-assembly-system.md's PostComposite/"
-                    "PreUI subsection.");
-                assert(false
-                    && "A render feature declared a pass with a RenderPassEvent other than AfterEverything - see "
-                       "the GTE_LOG_WARNING immediately above (category \"RenderFeatureCompositor\").");
-            }
-        }
-
-        rg::TextureHandle outputTarget;
-        BlendStageState* outputState = nullptr;
-        if (isLast) {
-            outputTarget = resolved->target;
-            outputState = &EnsureBlendStageDescriptorOnly(namePool.AccumName(gpuStateKey, viewName));
-        } else {
-            const char* accumName = namePool.AccumName(gpuStateKey, viewName);
-            outputState = &EnsureBlendStageState(accumName, extent);
-            outputTarget = frame.builder.ImportTexture(
-                accumName, outputState->texture->Target(), ImageLayout::Undefined, outputState->texture->SamplerObjectHandle());
-        }
-
-        DispatchBlend(frame.builder, currentInput, currentInputSampler, privateTarget, privateState.texture->Sampler(),
-            outputTarget, *outputState, namePool.BlendPassName(gpuStateKey, viewName), extent,
-            entry.descriptor.blendMode, entry.projectCallback ? "Project Features" : "Post Processing");
-
-        currentInput = outputTarget;
-        currentInputSampler = isLast ? VK_NULL_HANDLE : outputState->texture->Sampler();
-    }
-
-    frame.finalTextureOutputs.push_back(resolved->target);
-}
 
 } // namespace gte

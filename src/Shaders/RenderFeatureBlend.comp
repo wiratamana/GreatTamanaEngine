@@ -1,16 +1,7 @@
 #version 450
 
-// editor-core-separation-6 campaign, PHASE5
-// (PHASE5_BLEND_MODE_COMPUTE_SHADER_AND_PREUI_STAGE.md) - the real,
-// permanent, 5-mode blend uber-shader, replacing PHASE4's own throwaway
-// RenderFeatureBlendStub.comp. binding 0 = dstIn (the accumulator/scene
-// color BEFORE this plugin, i.e. RenderFeatureCompositor's own
-// `currentInput`); binding 1 = srcIn (this plugin's own PRIVATE target,
-// straight, non-premultiplied alpha); binding 2 = destinationImage
-// (rgba8, write-only - RenderFeatureCompositor's own `outputTarget`,
-// NEVER the same physical resource as binding 0, mirroring this codebase's
-// existing "a compute pass never reads and writes the exact SAME storage
-// image in the same dispatch" convention, ComputeBlurValidation.h).
+// Blends one feature's private target (srcIn, straight alpha) over the scene color so far (dstIn).
+// destinationImage is never the same image as dstIn.
 layout(local_size_x = 16, local_size_y = 16) in;
 
 layout(push_constant) uniform PushConstants {
