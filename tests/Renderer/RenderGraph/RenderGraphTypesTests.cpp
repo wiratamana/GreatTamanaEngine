@@ -1,10 +1,4 @@
-// Unit tests for Phase 1's pure, Vulkan-free-of-behavior render graph
-// vocabulary (src/Renderer/RenderGraph/RenderGraphTypes.h) - handles,
-// resource descriptors, and the ResourceAccess enum's pure helper
-// functions. No live VkDevice/Renderer/Registry involved at all - see
-// RENDERGRAPH_PHASE1_CORE_DATA_MODEL_STRATEGY_v2.md, Step 3.3, and
-// tests/Renderer/DrawStatsTests.cpp for the table-driven style this
-// mirrors.
+// Tier-1 tests for the render graph vocabulary in RenderGraphTypes.h: handles, descriptors and pure helpers.
 
 #include "Renderer/RenderGraph/RenderGraphTypes.h"
 #include "Renderer/RenderGraph/RenderGraphPersistentResourceCache.h"
@@ -90,12 +84,7 @@ TEST(RenderGraphHandleTest, PassHandleEqualityComparesBothFields)
     EXPECT_FALSE(a == differentGeneration);
 }
 
-
-// --- TextureDesc / BufferDesc value equality ------------------------------
-//
-// This is the exact behavior Phase 4's pool-matching logic will depend on
-// ("does an already-pooled resource have a desc that equals this one?") -
-// pinned here first, independently, before Phase 4 ever exists.
+// --- TextureDesc / BufferDesc value equality (pool matching depends on it) ---
 
 TEST(RenderGraphDescTest, IdenticalTextureDescsCompareEqual)
 {
@@ -132,9 +121,7 @@ TEST(RenderGraphDescTest, TextureDescsDifferingInHasDepthCompareUnequal)
     EXPECT_FALSE(a == b);
 }
 
-// --- TextureUsage / TextureDesc::usage (better-render-pass-1 campaign,
-// PHASE8 - PHASE8_TEXTUREDESC_USAGE_FIELD_AND_RESOURCE_POOL_AUDIT.md, R5)
-// ---------------------------------------------------------------------------
+// --- TextureUsage / TextureDesc::usage ---
 
 TEST(RenderGraphTextureUsageTest, DefaultIsNone)
 {
@@ -166,11 +153,7 @@ TEST(RenderGraphTextureUsageTest, HasFlagIsFalseForNoneAgainstAnyRealBit)
     EXPECT_FALSE(HasFlag(TextureUsage::None, TextureUsage::TransferDst));
 }
 
-// This is the core pooling-safety property this whole phase exists to
-// guarantee - two TextureDesc values differing ONLY in `usage` must compare
-// UNEQUAL, so RenderGraphResourcePool::AcquireTexture() never silently
-// hands a non-storage-capable pooled entry back to a caller that asked for
-// TextureUsage::Storage (or vice versa).
+// Descs differing only in `usage` must compare unequal, so the pool never hands back a non-storage image for a storage request.
 TEST(RenderGraphDescTest, TextureDescsDifferingOnlyInUsageCompareUnequal)
 {
     TextureDesc a{ 1920, 1080, PixelFormat::RGBA8_UNorm, true };
@@ -189,9 +172,7 @@ TEST(RenderGraphDescTest, TextureDescsWithIdenticalUsageCompareEqual)
     EXPECT_TRUE(a == b);
 }
 
-// No existing test in this suite covers a plain default-constructed
-// TextureDesc at all (confirmed by direct reading before this phase) - add
-// one here, asserting every field's default, not just the new `usage` one.
+// Every field of a default-constructed TextureDesc.
 TEST(RenderGraphDescTest, DefaultConstructedTextureDescHasExpectedDefaults)
 {
     const TextureDesc desc{};
@@ -202,14 +183,7 @@ TEST(RenderGraphDescTest, DefaultConstructedTextureDescHasExpectedDefaults)
     EXPECT_EQ(desc.usage, TextureUsage::None);
 }
 
-// v2 regression test: this exact class of struct used to (v1) carry a
-// `debugName` field compared by raw pointer identity - two structurally
-// identical descs built from entirely separate, non-string-literal-folded
-// runtime inputs must still compare equal, since TextureDesc/BufferDesc no
-// longer carry ANY field that isn't a genuine determinant of physical-
-// resource shareability. Building each field from a runtime function call
-// (rather than a compile-time constant) defeats any compiler folding that
-// could otherwise mask a reintroduced identity-based comparison.
+// Descs built from separate runtime inputs must compare equal: no identity-based field may take part in equality.
 TEST(RenderGraphDescTest, TextureDescsBuiltFromSeparateRuntimeInputsStillCompareEqualWhenStructurallyIdentical)
 {
     auto makeWidth = [](int scale) { return static_cast<std::uint32_t>(640 * scale); };
@@ -336,9 +310,6 @@ TEST(RenderGraphResourceAccessTest, TransferDstIsAWrite)
     EXPECT_TRUE(IsWriteAccess(ResourceAccess::TransferDst));
 }
 
-// Phase 5 of the compute-shader campaign
-// (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md) - the three new
-// enumerators.
 TEST(RenderGraphResourceAccessTest, ComputeShaderReadIsNotAWrite)
 {
     EXPECT_FALSE(IsWriteAccess(ResourceAccess::ComputeShaderRead));
@@ -354,18 +325,11 @@ TEST(RenderGraphResourceAccessTest, IndirectCommandReadIsNotAWrite)
     EXPECT_FALSE(IsWriteAccess(ResourceAccess::IndirectCommandRead));
 }
 
-// GPU Vertex Skinning campaign, Phase 3
-// (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) - the
-// fourth new enumerator.
 TEST(RenderGraphResourceAccessTest, VertexBufferReadIsNotAWrite)
 {
     EXPECT_FALSE(IsWriteAccess(ResourceAccess::VertexBufferRead));
 }
 
-// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-// PHASE1 (task_manager/render-pass-5/
-// PHASE1_FOUNDATIONS_BOUNDS_INDIRECT_TYPES_AND_VOCABULARY.md) - the fifth
-// new enumerator.
 TEST(RenderGraphResourceAccessTest, VertexShaderStorageReadIsNotAWrite)
 {
     EXPECT_FALSE(IsWriteAccess(ResourceAccess::VertexShaderStorageRead));
@@ -469,15 +433,7 @@ TEST(RenderGraphIsResolvedViewMissingItsSamplerTest, TrueWhenViewIsNonNullAndSam
     EXPECT_TRUE(IsResolvedViewMissingItsSampler(view, VK_NULL_HANDLE));
 }
 
-// --- PassRecord / ResourceUsage - basic plain-data sanity -----------------
-//
-// Not compared for equality (see RenderGraphTypes.h's own comment on
-// PassRecord::name) - just confirms the shape holds the fields later
-// phases need and defaults sanely. ResourceUsage's ForTexture()/ForBuffer()
-// tagged-union shape (grown in Phase 2, see RenderGraphTypes.h's own
-// comment on ResourceUsage and RENDERGRAPH_PHASE2_BUILDER_API_STRATEGY_v2.md)
-// is covered here rather than in RenderGraphBuilderTests.cpp since
-// ResourceUsage itself still lives in, and is owned by, this Phase 1 file.
+// --- PassRecord / ResourceUsage - plain-data defaults and tagged-union constructors ---
 
 TEST(RenderGraphPassRecordTest, DefaultConstructedPassRecordIsEmptyAndNotCulled)
 {
@@ -486,8 +442,6 @@ TEST(RenderGraphPassRecordTest, DefaultConstructedPassRecordIsEmptyAndNotCulled)
     EXPECT_TRUE(record.reads.empty());
     EXPECT_TRUE(record.writes.empty());
     EXPECT_FALSE(record.isCulled);
-    // Render Pass campaign (task_manager/render-pass-1), PHASE1 - RENAMED
-    // from the original plain `bool isComputePass` to `PassKind kind`.
     EXPECT_EQ(record.kind, PassKind::Graphics);
     EXPECT_FALSE(static_cast<bool>(record.execute));
 }
@@ -526,10 +480,7 @@ TEST(RenderGraphResourceUsageTest, ForTextureHasNoArrayLayerIndex)
     EXPECT_FALSE(usage.arrayLayerIndex.has_value());
 }
 
-// --- DispatchByKind() ----------------------------------------------------
-//
-// Confirms the generic dispatcher (RenderGraphTypes.h) routes to exactly ONE of its two callables, with the
-// correct handle, and that a non-void return type round-trips.
+// --- DispatchByKind(): routes to exactly one callable with the right handle; non-void results round-trip ---
 
 TEST(RenderGraphDispatchByKindTest, TextureUsageDispatchesOnlyToOnTextureWithTheCorrectHandle)
 {
@@ -596,19 +547,7 @@ TEST(RenderGraphPassRecordTest, ReadsAndWritesCanBeAppendedIndependently)
     EXPECT_EQ(record.writes[0].access, ResourceAccess::ColorAttachmentWrite);
 }
 
-// editor-core-separation-25 campaign, PHASE3
-// (PHASE3_PASSRECORD_FIELD_MIGRATION_AND_SNAPSHOT_REWIRING.md) - the old
-// DefaultConstructedPassRecordHasGeneralCategory test (Render Pass campaign,
-// task_manager/render-pass-1, PHASE1 / render-pass-7 campaign, PHASE1) was
-// REMOVED here: PassRecord::category/::tags no longer exist on this struct
-// at all (moved to RenderGraphDebugMetadataSink.h's own PassDebugMetadata -
-// see RenderGraphTypes.h's own PassRecord doc comment) - there is nothing
-// left to assert a default value for on THIS struct. Coverage for
-// PassDebugMetadata's own defaults now lives in
-// FrameDebuggerPassMetadataRecorderTests.cpp/RenderGraphSnapshotTests.cpp
-// instead.
-
-// --- PassKind / RenderPassCategory (Render Pass campaign, PHASE1) --------
+// --- PassKind / RenderPassCategory ---
 
 TEST(RenderGraphPassKindTest, ToStringCoversEveryEnumeratorNonNullNonEmpty)
 {
@@ -654,8 +593,7 @@ TEST(RenderGraphRenderPassCategoryTest, ToStringProducesDistinctNamesForDistinct
     EXPECT_STREQ(ToString(RenderPassCategory::FrameDebuggerInternal), "FrameDebuggerInternal");
 }
 
-// --- RenderPassDrawKind (Frame Debugger Pass-Ownership campaign,
-// task_manager/render-pass-2, PHASE1) --------------------------------------
+// --- RenderPassDrawKind ---
 
 TEST(RenderGraphRenderPassDrawKindTest, ToStringCoversEveryEnumeratorNonNullNonEmpty)
 {
@@ -679,8 +617,7 @@ TEST(RenderGraphRenderPassDrawKindTest, ToStringProducesDistinctNamesForDistinct
     EXPECT_STREQ(ToString(RenderPassDrawKind::Blit), "Blit");
 }
 
-// --- RenderPassEvent (render-pass-3 campaign, PHASE1 -
-// PHASE1_CORE_VOCABULARY_AND_BLACKBOARD.md) ---------------------------------
+// --- RenderPassEvent ---
 
 TEST(RenderGraphRenderPassEventTest, ToStringCoversEveryEnumeratorNonNullNonEmpty)
 {
@@ -712,21 +649,14 @@ TEST(RenderGraphRenderPassEventTest, ToStringProducesDistinctNamesForDistinctEnu
     EXPECT_STREQ(ToString(RenderPassEvent::AfterEverything), "AfterEverything");
 }
 
-// render-pass-3 campaign, PHASE1 - PassRecord::renderPassEvent defaults to
-// Opaques, mirroring category's own default-value test above.
+// PassRecord::renderPassEvent defaults to Opaques.
 TEST(RenderGraphPassRecordTest, DefaultConstructedPassRecordHasOpaquesRenderPassEvent)
 {
     const PassRecord record;
     EXPECT_EQ(record.renderPassEvent, RenderPassEvent::Opaques);
 }
 
-// --- FindMismatchedColorAttachmentExtent (MRT campaign, task_manager/mrt-1,
-// PHASE2) -------------------------------------------------------------------
-//
-// Pure, Vulkan-device-free decision - see RenderGraphTypes.h's own doc
-// comment on this function for the full contract this mirrors
-// (RenderGraph::ExecuteCompiledGraph()'s own mismatched-extent throw is
-// built directly on top of this).
+// --- FindMismatchedColorAttachmentExtent (pure, no device) ---
 
 TEST(RenderGraphFindMismatchedColorAttachmentExtentTest, ZeroExtentsHasNoMismatch)
 {
@@ -773,13 +703,7 @@ TEST(RenderGraphFindMismatchedColorAttachmentExtentTest, MismatchIsFoundEvenWhen
     EXPECT_EQ(*mismatch, 1u);
 }
 
-// --- BlitSpec / ResolveEffectiveBlitFilter / ResolveBlitRegion /
-// IsValidBlitRegion (editor-core-separation-26 campaign, PHASE3 -
-// PHASE3_BLITSPEC_PASSKIND_AND_PURE_HELPERS.md, Locked Decision 1) --------
-//
-// Pure, Vulkan-device-free decisions - no VkDevice/VkImage/vkCmdBlitImage
-// call involved anywhere in this block, mirroring
-// FindMismatchedColorAttachmentExtent()'s own precedent immediately above.
+// --- BlitSpec / ResolveEffectiveBlitFilter / ResolveBlitRegion / IsValidBlitRegion (pure, no device) ---
 
 TEST(RenderGraphResolveEffectiveBlitFilterTest, ReturnsSpecFilterWhenNeitherSideIsDepth)
 {

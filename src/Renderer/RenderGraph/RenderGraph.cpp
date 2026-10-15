@@ -675,7 +675,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 {
     const bool isPipelined = (timingMode == ExecuteTimingMode::PipelinedDeferredReadback);
 
-    // Synchronous execution is the first phase each frame; reset pool state here.
+    // A synchronous execution starts a new frame: reset pool state.
     if (!isPipelined) {
         m_resourcePool.BeginFrame();
         ++m_debugTextureFrameCounter;

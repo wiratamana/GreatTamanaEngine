@@ -1,8 +1,7 @@
 #pragma once
 
-// Vulkan-free render-graph vocabulary: every handle/enum a Project Assembly
-// plugin callback needs to NAME, without pulling in Vulkan. RenderGraphTypes.h
-// and RenderPipeline.h include this instead of redefining these types.
+// Vulkan-free render-graph vocabulary: the handles and enums plugin callbacks need to name.
+// RenderGraphTypes.h and RenderPipeline.h include this instead of redefining them.
 
 #include <cstddef>
 #include <cstdint>
@@ -113,9 +112,7 @@ enum class RenderPassEvent : std::uint32_t {
     AfterEverything = 9000,
 };
 
-// Opaque view identifier - Shared() is the only built-in value; Named() lets
-// any future named view exist for free (identity is a hashed opaque name,
-// never a fixed enum).
+// Opaque view identifier: a hashed name. Shared() is the only built-in value.
 class RenderViewId {
 public:
     RenderViewId() noexcept = default; // Defaults to the same reserved hash Shared() returns.
@@ -186,9 +183,7 @@ struct ResourceUsage {
     }
 };
 
-// Forward-declared only - a plugin callback type alias only needs these two
-// names to exist, never their full definition (owned by RenderGraphBuilder.h/
-// RenderPipeline.h, both Vulkan-bearing).
+// Forward declarations only; the full types live in the Vulkan-bearing RenderGraphBuilder.h / RenderPipeline.h.
 class RenderGraphBuilder;
 class RenderPassBlackboard;
 

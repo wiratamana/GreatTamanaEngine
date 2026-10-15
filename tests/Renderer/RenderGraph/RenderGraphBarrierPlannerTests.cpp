@@ -1,37 +1,5 @@
-// Unit tests for Phase 5's pure barrier-synthesis decision logic
-// (src/Renderer/RenderGraph/RenderGraphBarrierPlanner.h) - entirely Tier-1:
-// RequiredStateFor()/RequiresBarrier()/BuildImageMemoryBarrier2()/
-// BuildBufferMemoryBarrier2() never touch a live VkDevice/VkCommandBuffer -
-// constructing a VkImageMemoryBarrier2/VkBufferMemoryBarrier2 is just
-// populating a plain POD struct. EmitImageBarrier()/EmitBufferBarrier() (the
-// thin Vulkan-call half - a real vkCmdPipelineBarrier2 call) are
-// deliberately NOT exercised here (Tier 2, need a live VkCommandBuffer) -
-// see RENDERGRAPH_PHASE5_BARRIER_SYNTHESIS_STRATEGY_v2.md, Step 3.4, for the
-// exact coverage list this file follows.
-//
-// The single most important test in this file is
-// RegressionMatchesFrameRecorderPresentPathFieldForField/
-// RegressionMatchesFrameRecorderRenderOffscreenPathFieldForField below -
-// see that phase's own "Step 5: Their Role" for why: this is the proof that
-// migrating FrameRecorder::RecordFrame()'s hand-written barriers onto this
-// new, general system (a future phase) cannot silently change rendering
-// behavior for the three passes that already work correctly today.
-//
-// Note on the strategy document's own last 3.4 bullet (preserving
-// FrameRecorder::RecordFrame()'s debug-build format-matching ASSERTION,
-// not just matching barrier field VALUES): that assertion
-// (`target.format == expectedFormat` / `target.depthFormat ==
-// expectedDepthFormat`, see FrameRecorder.cpp and AGENTS.md's "Render
-// Target Format Matching") lives entirely in Phase 6's future execution
-// harness, which is the thing that will actually resolve a pass's
-// attachment(s) against a live RenderTarget/Pipeline - this file has no
-// such resolution step to assert inside at all (it operates purely on
-// already-decided ResourceState values, never a RenderTarget/Pipeline
-// format). This is intentionally left as a documented, explicit
-// manual-verification note for whoever implements Phase 6 (see this
-// engine's AGENTS.md, "Render Target Format Matching", and Phase 5's own
-// completion report) rather than a test here that cannot actually exist
-// yet.
+// Tier-1 tests for the pure barrier decision logic in RenderGraphBarrierPlanner.h (no live Vulkan device).
+// The Regression* tests pin the planner's output to FrameRecorder.cpp's hand-written barriers field for field.
 
 #include "Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 
@@ -53,8 +21,7 @@ TEST(RenderGraphBarrierPlannerTest, RequiredStateForColorAttachmentWrite)
 
 TEST(RenderGraphBarrierPlannerTest, RequiredStateForDepthStencilAttachmentReadWriteMatchesFrameRecordersOwnDepthBarrier)
 {
-    // Matches FrameRecorder.cpp's existing `toDepthAttachment` barrier
-    // fields exactly - see this phase's own regression-safety requirement.
+    // Matches the hand-written depth attachment barrier in FrameRecorder.cpp.
     const ResourceState state = RequiredStateFor(ResourceAccess::DepthStencilAttachmentReadWrite, true);
 
     EXPECT_EQ(state.layout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
@@ -91,8 +58,7 @@ TEST(RenderGraphBarrierPlannerTest, RequiredStateForTransferDst)
     EXPECT_EQ(state.accessMask, VK_ACCESS_2_TRANSFER_WRITE_BIT);
 }
 
-// --- RequiredStateFor() - Phase 5 of the compute-shader campaign's new -----
-// --- enumerators (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md) -----------
+// --- RequiredStateFor() - compute and indirect accesses ---
 
 TEST(RenderGraphBarrierPlannerTest, RequiredStateForComputeShaderRead)
 {
@@ -120,8 +86,7 @@ TEST(RenderGraphBarrierPlannerTest, RequiredStateForIndirectCommandRead)
     EXPECT_EQ(state.accessMask, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
 }
 
-// --- RequiredStateFor() - GPU Vertex Skinning campaign's own Phase 3 -------
-// --- new enumerator (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) ---
+// --- RequiredStateFor() - VertexBufferRead ---
 
 TEST(RenderGraphBarrierPlannerTest, RequiredStateForVertexBufferRead)
 {
@@ -131,10 +96,7 @@ TEST(RenderGraphBarrierPlannerTest, RequiredStateForVertexBufferRead)
     EXPECT_EQ(state.accessMask, VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT);
 }
 
-// --- RequiredStateFor() - GPU-Driven Frustum Culling + Indirect Draw -------
-// --- campaign's own PHASE1 (render-pass-5,
-// --- PHASE1_FOUNDATIONS_BOUNDS_INDIRECT_TYPES_AND_VOCABULARY.md) - the -----
-// --- fifth new enumerator ---------------------------------------------------
+// --- RequiredStateFor() - VertexShaderStorageRead ---
 
 TEST(RenderGraphBarrierPlannerTest, RequiredStateForVertexShaderStorageRead)
 {
@@ -144,12 +106,7 @@ TEST(RenderGraphBarrierPlannerTest, RequiredStateForVertexShaderStorageRead)
     EXPECT_EQ(state.accessMask, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
 }
 
-
-// ComputeShaderRead/ComputeShaderWrite must produce the exact SAME
-// ResourceState value regardless of the resource kind it's applied against
-// (a buffer's `layout` field is simply unused - see BuildBufferMemoryBarrier2()
-// and RequiredStateFor()'s own comment on this) - mirroring TransferSrc/
-// TransferDst's own existing dual applicability.
+// Compute read and write differ only in access mask; layout and stage are equal for buffers and images.
 TEST(RenderGraphBarrierPlannerTest, ComputeShaderReadAndWriteAreSymmetricApartFromAccessDirection)
 {
     const ResourceState readState = RequiredStateFor(ResourceAccess::ComputeShaderRead, false);
@@ -160,13 +117,8 @@ TEST(RenderGraphBarrierPlannerTest, ComputeShaderReadAndWriteAreSymmetricApartFr
     EXPECT_NE(readState.accessMask, writeState.accessMask);
 }
 
-// --- TargetsDepthState() - one case per enumerator -------------------------
-//
-// Confirms, directly (not merely by inspection), that a storage-image
-// compute access is routed to a texture's COLOR half, never its depth half -
-// see COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md's own Step 3
-// ("write a targeted unit test proving it rather than trusting it by
-// inspection alone").
+// --- TargetsDepthState() - one case per enumerator ---
+// Storage-image compute access must route to the color half, never the depth half.
 
 TEST(RenderGraphBarrierPlannerTest, TargetsDepthStateIsTrueOnlyForDepthStencilAttachmentReadWrite)
 {
@@ -182,14 +134,8 @@ TEST(RenderGraphBarrierPlannerTest, TargetsDepthStateIsTrueOnlyForDepthStencilAt
     EXPECT_FALSE(TargetsDepthState(ResourceAccess::VertexShaderStorageRead));
 }
 
-// --- IsColorAttachmentWriteAccess() - one case per enumerator --------------
-//
-// Phase 6 of the compute-shader campaign
-// (COMPUTE_PHASE6_RENDERGRAPH_INTEGRATION_STRATEGY_v2.md) - confirms,
-// directly, that a pure compute-shader texture write
-// (PassBuilder::WriteTexture(handle, ComputeShaderWrite)) is correctly
-// EXCLUDED from RenderGraph::Execute()'s hasColorWrite scan, so a
-// compute-only pass never gets a vkCmdBeginRendering bracket at all.
+// --- IsColorAttachmentWriteAccess() - one case per enumerator ---
+// A pure compute texture write must not count, so a compute-only pass gets no rendering bracket.
 
 TEST(RenderGraphBarrierPlannerTest, IsColorAttachmentWriteAccessIsTrueOnlyForColorAttachmentWrite)
 {
@@ -205,17 +151,8 @@ TEST(RenderGraphBarrierPlannerTest, IsColorAttachmentWriteAccessIsTrueOnlyForCol
     EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::VertexShaderStorageRead));
 }
 
-// --- Texture-side hand-simulated sequence: ComputeShaderWrite (an ---------
-// --- RWTexture) -> ShaderRead (the same texture, sampled normally by a ----
-// --- later graphics pass) --------------------------------------------------
-//
-// The texture-side sibling of the companion GPU-driven-rendering document's
-// own buffer-side ComputeShaderWrite -> IndirectCommandRead regression test
-// (see COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md, Step 3) - together the
-// two prove the ResourceAccess extension generalizes correctly across both
-// resource kinds. Confirms exactly one barrier is emitted with
-// VK_IMAGE_LAYOUT_GENERAL -> VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL and the
-// matching stage/access masks.
+// --- Texture-side sequence: ComputeShaderWrite -> ShaderRead ---
+// Exactly one barrier, GENERAL -> SHADER_READ_ONLY_OPTIMAL, with the matching stage/access masks.
 TEST(RenderGraphBarrierPlannerTest, ComputeShaderWriteFollowedByShaderReadEmitsExactlyOneCorrectBarrier)
 {
     const ResourceState afterComputeWrite = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
@@ -234,16 +171,8 @@ TEST(RenderGraphBarrierPlannerTest, ComputeShaderWriteFollowedByShaderReadEmitsE
     EXPECT_EQ(barrier.dstAccessMask, VK_ACCESS_2_SHADER_READ_BIT);
 }
 
-// --- Buffer-side hand-simulated sequence: ComputeShaderWrite -> -----------
-// --- IndirectCommandRead - the still-missing regression test flagged, but --
-// --- never closed, by the compute-shader campaign's own Phase 5 -----------
-// --- (render-pass-5 campaign, PHASE1) --------------------------------------
-//
-// The buffer-side sibling of ComputeShaderWriteFollowedByShaderReadEmitsExactlyOneCorrectBarrier
-// immediately above - together the two prove the ResourceAccess extension
-// generalizes correctly across both resource kinds. Confirms exactly one
-// barrier is emitted with the DRAW_INDIRECT stage/INDIRECT_COMMAND_READ
-// access as its destination.
+// --- Buffer-side sequence: ComputeShaderWrite -> IndirectCommandRead ---
+// Exactly one barrier, with DRAW_INDIRECT / INDIRECT_COMMAND_READ as destination.
 TEST(RenderGraphBarrierPlannerTest, ComputeShaderWriteFollowedByIndirectCommandReadEmitsExactlyOneCorrectBarrier)
 {
     const ResourceState afterComputeWrite = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
@@ -260,11 +189,7 @@ TEST(RenderGraphBarrierPlannerTest, ComputeShaderWriteFollowedByIndirectCommandR
     EXPECT_EQ(barrier.dstAccessMask, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
 }
 
-// Sibling test proving the new PHASE1 VertexShaderStorageRead enumerator's
-// own barrier fields (VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT/
-// VK_ACCESS_2_SHADER_STORAGE_READ_BIT) - the new instanced graphics pass
-// (PHASE2 onward) declares this against the SAME per-instance buffer the
-// culling compute pass just wrote via ComputeShaderWrite.
+// Compute write -> vertex-shader storage read (instanced draw reading a culling output buffer).
 TEST(RenderGraphBarrierPlannerTest, ComputeShaderWriteFollowedByVertexShaderStorageReadEmitsExactlyOneCorrectBarrier)
 {
     const ResourceState afterComputeWrite = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
@@ -281,12 +206,7 @@ TEST(RenderGraphBarrierPlannerTest, ComputeShaderWriteFollowedByVertexShaderStor
     EXPECT_EQ(barrier.dstAccessMask, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
 }
 
-// Two consecutive ComputeShaderWrite usages against the SAME resource (e.g.
-// two dispatches within the same declared pass, or two passes that both
-// write the same RWTexture back-to-back with no intervening read) need NO
-// barrier at all between them - identical layout/stage/access, same
-// "already-known-safe redundant transition is skipped" optimization
-// RequiresBarrier() already provides for ShaderRead/ShaderRead above.
+// Two consecutive ComputeShaderWrite usages of one resource need no barrier: the state is identical.
 TEST(RenderGraphBarrierPlannerTest, RequiresBarrierIsFalseForTwoConsecutiveComputeShaderWrites)
 {
     const ResourceState a = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
@@ -295,56 +215,23 @@ TEST(RenderGraphBarrierPlannerTest, RequiresBarrierIsFalseForTwoConsecutiveCompu
     EXPECT_FALSE(RequiresBarrier(a, b));
 }
 
-// --- GPU Vertex Skinning campaign, Phase 3's own WAW-hazard mitigation -----
-// (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md, Step 3.6) -
-//
-// The test immediately above is the CONFIRMED hazard that Step 3.6's own
-// "Step 1" verification asked for: two passes writing the SAME buffer with
-// the SAME ResourceAccess (e.g. two SkeletalAnimators sharing one GPU
-// skinning output buffer, both dispatching ComputeShaderWrite) get NO
-// barrier between them at all, since RequiresBarrier() is a pure state-diff
-// with no notion of "a different pass already wrote this". This is a real,
-// unsynchronized GPU write-after-write hazard - strictly worse than the CPU
-// path's own well-defined "last write wins" behavior for the same shared-
-// Mesh scenario.
-//
-// The mitigation (Step 3.6's "Step 2"): the SECOND (and any subsequent)
-// writer declares a "phantom" ComputeShaderRead of its own output buffer
-// immediately BEFORE its real ComputeShaderWrite - even though its own
-// compute shader body never actually reads the buffer's prior contents.
-// Since ComputeShaderRead and ComputeShaderWrite are DIFFERENT
-// ResourceAccess values (different access masks), RequiredStateFor()
-// necessarily produces two DIFFERENT ResourceState values for them - which
-// means RequiresBarrier() is GUARANTEED to return true for the transition
-// INTO the phantom read (from whatever the previous writer left behind),
-// and AGAIN for the transition from that phantom read to the real write -
-// closing the hazard unconditionally, regardless of how RequiresBarrier()
-// itself happens to be implemented. This is proven directly below, not
-// merely asserted by inspection.
+// --- Write-after-write hazard mitigation ---
+// A second writer declares a phantom ComputeShaderRead before its write; the differing access masks force barriers.
 TEST(RenderGraphBarrierPlannerTest, ReadBeforeWriteMitigationForcesBarriersWhereConsecutiveWritesAloneWouldNotHaveOne)
 {
-    // Pass A (the first SkeletalAnimator) writes the shared output buffer.
+    // Pass A writes the shared output buffer.
     const ResourceState afterPassAWrite = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
 
-    // Pass B (the second SkeletalAnimator sharing the same Mesh) declares
-    // its own mitigation: a phantom read BEFORE its real write.
+    // Pass B declares a phantom read before its real write.
     const ResourceState passBPhantomRead = RequiredStateFor(ResourceAccess::ComputeShaderRead, false);
     const ResourceState passBRealWrite = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
 
-    // Without the mitigation, transitioning straight from Pass A's write to
-    // Pass B's write would need NO barrier at all (see the test immediately
-    // above) - the mitigation's whole point is that inserting the phantom
-    // read in between makes BOTH of these transitions require one.
+    // Write -> write alone needs no barrier; the phantom read in between makes both transitions need one.
     EXPECT_TRUE(RequiresBarrier(afterPassAWrite, passBPhantomRead));
     EXPECT_TRUE(RequiresBarrier(passBPhantomRead, passBRealWrite));
 }
 
-// The graphics pass that then DRAWS from the GPU-skinned output buffer
-// declares ResourceAccess::VertexBufferRead against the very same handle -
-// this must also unconditionally require a barrier against whichever
-// compute pass most recently wrote it (ComputeShaderWrite), since the two
-// access kinds have distinct stage/access masks (VERTEX_INPUT/
-// VERTEX_ATTRIBUTE_READ vs. COMPUTE_SHADER/SHADER_STORAGE_WRITE).
+// A vertex-buffer read after a compute write always needs a barrier (distinct stage/access masks).
 TEST(RenderGraphBarrierPlannerTest, ComputeShaderWriteFollowedByVertexBufferReadRequiresABarrier)
 {
     const ResourceState afterComputeWrite = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
@@ -400,14 +287,8 @@ TEST(RenderGraphBarrierPlannerTest, RequiresBarrierIsTrueWhenAccessMaskDiffersAl
     EXPECT_TRUE(RequiresBarrier(a, b));
 }
 
-// --- Three-pass hand-simulated ping-pong sequence --------------------------
-//
-// A writes color -> B reads as shader-read -> C writes color again. Starts
-// from a resource ALREADY in the ColorAttachmentWrite state (e.g. left over
-// from a previous use, the same way an imported RenderTexture is seeded
-// per Phase 2's ImportTexture()) - so entering pass A needs no barrier at
-// all, and exactly 2 barriers are needed overall (one after A, one after
-// B) - not 3 (one per pass boundary) and not 1.
+// --- Three-pass ping-pong sequence ---
+// Color write -> shader read -> color write, starting in the write state: exactly 2 barriers.
 TEST(RenderGraphBarrierPlannerTest, ThreePassPingPongSequenceEmitsExactlyTwoBarriers)
 {
     ResourceState current = RequiredStateFor(ResourceAccess::ColorAttachmentWrite, false);
@@ -493,20 +374,12 @@ TEST(RenderGraphBarrierPlannerTest, BuildBufferMemoryBarrier2PopulatesEveryField
     EXPECT_EQ(barrier.dstQueueFamilyIndex, static_cast<std::uint32_t>(VK_QUEUE_FAMILY_IGNORED));
 }
 
-// --- Regression: field-for-field match against FrameRecorder.cpp's own ----
-// --- existing, hand-written barriers ---------------------------------------
-//
-// This is the single most important test in this whole phase - see this
-// file's own header comment. Every field asserted below is transcribed
-// directly from src/Renderer/FrameRecorder.cpp's own
-// toColorAttachment/toDepthAttachment/toFinal VkImageMemoryBarrier2 structs.
+// --- Regression: field-for-field match against the hand-written barriers in FrameRecorder.cpp ---
+// Every field asserted below is copied from FrameRecorder.cpp's toColorAttachment/toDepthAttachment/toFinal.
 
 TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersOwnColorAttachmentEntryBarrier)
 {
-    // FrameRecorder.cpp's `toColorAttachment`: srcStageMask = TOP_OF_PIPE,
-    // srcAccessMask = NONE, dstStageMask = COLOR_ATTACHMENT_OUTPUT,
-    // dstAccessMask = COLOR_ATTACHMENT_WRITE, oldLayout = UNDEFINED,
-    // newLayout = COLOR_ATTACHMENT_OPTIMAL.
+    // Color attachment transition: TOP_OF_PIPE/NONE -> COLOR_ATTACHMENT_OUTPUT/COLOR_ATTACHMENT_WRITE.
     const ResourceState previous{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE };
     const ResourceState next = RequiredStateFor(ResourceAccess::ColorAttachmentWrite, false);
 
@@ -523,12 +396,7 @@ TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersOwnColorAttac
 
 TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersOwnDepthAttachmentEntryBarrier)
 {
-    // FrameRecorder.cpp's `toDepthAttachment`: srcStageMask = TOP_OF_PIPE,
-    // srcAccessMask = NONE, dstStageMask = EARLY_FRAGMENT_TESTS |
-    // LATE_FRAGMENT_TESTS, dstAccessMask = DEPTH_STENCIL_ATTACHMENT_WRITE,
-    // oldLayout = UNDEFINED, newLayout = DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-    // (this planner's MVP always uses the combined depth+stencil layout -
-    // see RequiredStateFor()'s own comment).
+    // Depth attachment transition (the planner always uses the combined depth+stencil layout).
     const ResourceState previous{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE };
     const ResourceState next = RequiredStateFor(ResourceAccess::DepthStencilAttachmentReadWrite, true);
 
@@ -547,17 +415,7 @@ TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersOwnDepthAttac
 
 TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersPresentPathFieldForField)
 {
-    // FrameRecorder.cpp's `toFinal` when finalLayout ==
-    // VK_IMAGE_LAYOUT_PRESENT_SRC_KHR: srcStageMask =
-    // COLOR_ATTACHMENT_OUTPUT, srcAccessMask = COLOR_ATTACHMENT_WRITE,
-    // dstStageMask = BOTTOM_OF_PIPE, dstAccessMask = NONE, oldLayout =
-    // COLOR_ATTACHMENT_OPTIMAL, newLayout = PRESENT_SRC_KHR. There is no
-    // ResourceAccess enumerator for "about to be presented" (presenting is
-    // not something any pass "reads"/"writes" through the graph's own
-    // vocabulary - see RenderGraphTypes.h) - the fixed present-source state
-    // is therefore hand-built here exactly as Phase 6's future execution
-    // harness will need to for an imported SWAPCHAIN resource specifically,
-    // not derived from RequiredStateFor().
+    // Final PRESENT_SRC transition: no ResourceAccess models presentation, so the state is hand-built.
     const ResourceState afterColorWrite = RequiredStateFor(ResourceAccess::ColorAttachmentWrite, false);
     const ResourceState presentSource{ VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
         VK_ACCESS_2_NONE };
@@ -575,14 +433,7 @@ TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersPresentPathFi
 
 TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersRenderOffscreenPathFieldForField)
 {
-    // FrameRecorder.cpp's `toFinal` when finalLayout ==
-    // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: srcStageMask =
-    // COLOR_ATTACHMENT_OUTPUT, srcAccessMask = COLOR_ATTACHMENT_WRITE,
-    // dstStageMask = FRAGMENT_SHADER | COMPUTE_SHADER, dstAccessMask = SHADER_READ,
-    // oldLayout = COLOR_ATTACHMENT_OPTIMAL, newLayout =
-    // SHADER_READ_ONLY_OPTIMAL - this one DOES come straight from
-    // RequiredStateFor(ShaderRead, ...), since sampling a previous pass's
-    // output is exactly what ResourceAccess::ShaderRead already models.
+    // Final SHADER_READ_ONLY transition: comes straight from RequiredStateFor(ShaderRead).
     const ResourceState afterColorWrite = RequiredStateFor(ResourceAccess::ColorAttachmentWrite, false);
     const ResourceState shaderReadSource = RequiredStateFor(ResourceAccess::ShaderRead, false);
 
@@ -597,16 +448,11 @@ TEST(RenderGraphBarrierPlannerTest, RegressionMatchesFrameRecordersRenderOffscre
     EXPECT_EQ(barrier.newLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
-// --- DecideTextureArrayLayerTransition() - per-layer state tracking -------
-//
-// Proves two per-layer writes against the SAME handle, DIFFERENT layer
-// indices, do not alias: each layer's own ResourceState entry is tracked
-// independently, so both report "barrier required" even after the first
-// layer's own entry has already transitioned.
+// --- DecideTextureArrayLayerTransition() - per-layer state tracking ---
+// Writes to different layers of one handle do not alias: each layer's state is tracked independently.
 TEST(RenderGraphBarrierPlannerTest, DecideTextureArrayLayerTransitionDoesNotAliasAcrossLayers)
 {
-    // Two independent layerStates entries, both default-constructed (a
-    // fresh resource, never touched).
+    // Two untouched layer states.
     ResourceState layer0State{};
     ResourceState layer1State{};
 
@@ -614,17 +460,13 @@ TEST(RenderGraphBarrierPlannerTest, DecideTextureArrayLayerTransitionDoesNotAlia
 
     const TextureArraySubresourceDecision decision0 =
         DecideTextureArrayLayerTransition(layer0State, VK_IMAGE_ASPECT_DEPTH_BIT, /*layerIndex=*/0, next);
-    // Mirrors the real per-layer update step - done here explicitly so
-    // decision1 below observes the POST-update layer0State, exactly as the
-    // second of two real per-layer passes would.
+    // Mirrors the real per-layer state update, so decision1 sees the post-update layer0State.
     layer0State = next;
 
     const TextureArraySubresourceDecision decision1 =
         DecideTextureArrayLayerTransition(layer1State, VK_IMAGE_ASPECT_DEPTH_BIT, /*layerIndex=*/1, next);
 
-    // The assertion this test exists for: layer 1's decision is independent
-    // of layer 0 already having transitioned to `next` - both require a
-    // barrier, since both layers independently started untouched.
+    // Layer 1 is independent of layer 0 having transitioned: it still needs a barrier.
     EXPECT_TRUE(decision0.requiresBarrier);
     EXPECT_TRUE(decision1.requiresBarrier);
 
@@ -635,9 +477,7 @@ TEST(RenderGraphBarrierPlannerTest, DecideTextureArrayLayerTransitionDoesNotAlia
     EXPECT_EQ(decision0.range.aspectMask, static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_DEPTH_BIT));
 }
 
-// A second call against the SAME, now-updated layer state correctly reports
-// "no barrier needed" - the behavior that distinguishes "correctly per-layer"
-// from "no tracking at all".
+// A second call against the already-updated layer state needs no barrier.
 TEST(RenderGraphBarrierPlannerTest, DecideTextureArrayLayerTransitionSkipsRedundantBarrierForSameLayer)
 {
     ResourceState layerState{};
@@ -686,12 +526,8 @@ TEST(RenderGraphBarrierTransitionLabelTest, ConcatenatesUndefinedToColorAttachme
     EXPECT_EQ(label, "Undefined -> RT");
 }
 
-// --- isDepthResource assertion guard (debug builds only) -------------------
-//
-// Guarded by NDEBUG since a release build compiles assert() down to a
-// no-op entirely - these death tests would otherwise not actually die. See
-// RenderGraphBuilderTests.cpp's own identical guard for this codebase's
-// established pattern.
+// --- isDepthResource assertion guard ---
+// Debug only: assert() is compiled out under NDEBUG, so the death tests would not die.
 #ifndef NDEBUG
 
 TEST(RenderGraphBarrierPlannerDeathTest, ColorAttachmentWriteRejectsIsDepthResourceTrue)

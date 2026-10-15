@@ -28,9 +28,7 @@ namespace gte {
 
 namespace {
 
-// Per-vertex layout THIS preview's own pipeline expects - position + normal,
-// tightly packed (24 bytes/vertex), byte-identical to gte::MeshVertex
-// (src/Renderer/MeshVertex.h) - see AssetPreviewMesh.h's class comment.
+// Position + normal, tightly packed (24 bytes); byte-identical to gte::MeshVertex.
 struct PreviewVertex {
     float position[3];
     float normal[3];
@@ -48,8 +46,7 @@ void AssetPreviewMesh::Reset()
     if (m_renderer != nullptr
         && (m_vertexBuffer || m_indexBuffer || m_renderTexture || m_descriptor != UiTextureHandle::Invalid
             || m_pipeline)) {
-        // Same "stall before releasing, this is a rare user-driven event
-        // not a per-frame cost" reasoning as AssetPreviewTexture::Reset().
+        // Rare user-driven event, so a GPU stall before release is acceptable.
         m_renderer->WaitForGpuIdle();
     }
 
@@ -76,10 +73,7 @@ void AssetPreviewMesh::Reset()
     m_setZeroFillerLayoutHandle = DescriptorSetLayoutHandle::Invalid;
     m_pipeline.reset();
 
-    // m_localSetOneDescriptorSet came from Renderer's own shared compute
-    // descriptor pool (AllocateComputeDescriptorSet()) - never individually
-    // freed, same convention as every other compute-shaped descriptor set
-    // in this engine.
+    // m_localSetOneDescriptorSet lives in the shared compute pool and is never freed individually.
     m_localWhiteTexture.reset();
     m_localUniformBuffer.reset();
     m_localSetOneDescriptorSet = ComputeDescriptorSet();
@@ -92,12 +86,7 @@ void AssetPreviewMesh::EnsurePipeline(Renderer& renderer)
     }
     m_renderer = &renderer;
 
-    // Opaque-handle layout for set=1's lighting/shadow stand-in
-    // (MeshPreview.frag samples DirectionalLightingAndReceiverMask.glsl's
-    // shared interface) - this SAME layout handle is used both to allocate
-    // the real, writable descriptor set below and to build the pipeline's
-    // own layout, so there is exactly one definition of this binding set,
-    // never a hand-built duplicate.
+    // Set 1 stand-in for MeshPreview.frag's lighting interface; one layout serves both the set and the pipeline.
     constexpr DescriptorBindingDesc kSetOneBindings[] = {
         { .binding = 0, .kind = DescriptorKind::CombinedImageSampler, .stages = ShaderStageMask::Fragment },
         { .binding = 8, .kind = DescriptorKind::UniformBuffer, .stages = ShaderStageMask::Fragment },
@@ -111,10 +100,7 @@ void AssetPreviewMesh::EnsurePipeline(Renderer& renderer)
     m_localWhiteTexture =
         std::make_unique<Texture2D>(renderer.CreateTexture2D(whitePixel, 1, 1, "AssetPreviewMeshDummyWhite"));
 
-    // Zero-filled - must be at least as large as the shared
-    // SceneGlobalUniformBlock (112 bytes, std140); 128 matches Scene
-    // Services binding 8's own ceiling, purely coincidentally - this
-    // class never includes SceneServicesDescriptorSet.h.
+    // Zero-filled; must be at least as large as the 112-byte std140 scene global uniform block.
     constexpr uint64_t kLocalDummyUniformBlockSize = 128;
     m_localUniformBuffer = std::make_unique<Buffer>(renderer.CreateBuffer(kLocalDummyUniformBlockSize,
         BufferUsage::UniformBuffer, BufferMemoryUsage::CpuToGpu, "AssetPreviewMeshDummyUniformBlock"));
@@ -157,9 +143,7 @@ bool AssetPreviewMesh::EnsureMeshUploaded(Renderer& renderer, const std::string&
         return true; // Unchanged since last call - whatever m_cachedIsValid says still holds.
     }
 
-    // Release only the mesh-specific GPU state (buffers) - NOT the
-    // pipeline/RenderTexture/descriptor, which are reused across different
-    // selected mesh assets. A full Reset() would be wrong here.
+    // Release only mesh buffers; pipeline, render texture and descriptor are reused across assets.
     if (m_vertexBuffer || m_indexBuffer) {
         renderer.WaitForGpuIdle();
     }
@@ -271,13 +255,7 @@ std::optional<AssetPreviewMesh::Preview> AssetPreviewMesh::Render(
     const int height = std::max(1, viewportHeight);
     EnsureRenderTexture(renderer, width, height);
 
-    // Slowly spins the mesh around its own up axis, driven directly by
-    // elapsed time - no per-frame state to track (see class comment). The
-    // camera itself never moves; recentering via -m_boundsCenter (applied
-    // BEFORE the spin - see Mat4's "A*B applies B first" composition
-    // convention, Math/Mat4.h) is what keeps an off-center mesh spinning
-    // around its own visual middle rather than orbiting around whatever
-    // arbitrary point its original modeling package considered the origin.
+    // Spins around the mesh's own up axis; -m_boundsCenter is applied first so it spins about its visual middle.
     constexpr float kSpinDegreesPerSecond = 24.0f;
     const float angleDeg = std::fmod(static_cast<float>(ImGui::GetTime()) * kSpinDegreesPerSecond, 360.0f);
     const Quat spin = Quat::FromAxisAngle(Vec3::Up(), DegToRad(angleDeg));
@@ -285,10 +263,7 @@ std::optional<AssetPreviewMesh::Preview> AssetPreviewMesh::Render(
 
     const float radius = m_boundsRadius;
     const float fovYRadians = DegToRad(45.0f);
-    // Distance that puts the whole bounding sphere inside the vertical FOV,
-    // plus a margin so it doesn't touch the panel's edges - see class
-    // comment for why this doesn't need to be a pixel-perfect Unity-style
-    // fit.
+    // Distance that fits the bounding sphere in the vertical FOV, plus a margin.
     const float distance = (radius / std::tan(fovYRadians * 0.5f)) * 1.35f;
     const Vec3 eye(0.0f, radius * 0.35f, -distance);
     const Vec3 target(0.0f, radius * 0.05f, 0.0f);
@@ -305,13 +280,7 @@ std::optional<AssetPreviewMesh::Preview> AssetPreviewMesh::Render(
     std::memcpy(pushConstants.model, model.Data(), sizeof(pushConstants.model));
     std::memcpy(pushConstants.viewProj, viewProj.Data(), sizeof(pushConstants.viewProj));
 
-    // Neutral dark backdrop, matching AssetPreviewTexture/BuildTextureViewer's
-    // own viewer background (see Panels/InspectorPanel.cpp) - this Clear()
-    // only affects THIS RenderOffscreen() call immediately below (see this
-    // class's own header comment for why sharing Renderer's one Clear()
-    // color with Game's own Clear() calls is safe: each Clear()+
-    // RenderOffscreen()/Present() pair this engine ever does happens
-    // synchronously back-to-back, never interleaved).
+    // Neutral dark backdrop; Clear() only affects the RenderOffscreen() call right below.
     renderer.Clear(35, 35, 35, 255);
 
     const Pipeline& pipeline = *m_pipeline;
@@ -321,11 +290,7 @@ std::optional<AssetPreviewMesh::Preview> AssetPreviewMesh::Render(
     const std::uint32_t indexCount = m_indexCount;
     const Extent2D extent = m_renderTexture->Extent();
 
-    // Phase 4C (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - std::nullopt:
-    // this Inspector mesh preview is not one of the Profiler's three named
-    // passes, and must never silently share a query slot with (or overwrite
-    // the cached timing of) "Game View"/"Scene View" - see
-    // Renderer::RenderOffscreen()'s own doc comment.
+    // No GPU timing slot: this preview must not overwrite the Profiler's Game/Scene View timings.
     renderer.RenderOffscreen(*m_renderTexture, std::nullopt, [&](rg::CommandBuffer& cmd) {
         cmd.SetViewportAndScissor(extent.width, extent.height);
         cmd.BindPipeline(pipeline);

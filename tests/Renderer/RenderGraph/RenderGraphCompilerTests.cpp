@@ -1,17 +1,5 @@
-// Unit tests for Phase 3's pure "Smart Planner" compilation algorithm
-// (src/Renderer/RenderGraph/RenderGraphCompiler.h) - dependency resolution,
-// culling, deterministic topological ordering, and resource lifetimes. No
-// live VkDevice/Renderer involved at all - see
-// RENDERGRAPH_PHASE3_COMPILATION_STRATEGY_v1.md, Step 3.4, for the coverage
-// list this file follows, and RENDERGRAPH_PHASE3_COMPLETION_REPORT.md for a
-// documented finding on why a literal "cycle among declared passes" case
-// cannot actually be constructed through RenderGraphBuilder (see the
-// "Cycle detection" section below).
-//
-// Every fixture below is built through a real RenderGraphBuilder (readable,
-// and proves this compiler works against exactly what Phase 2 actually
-// hands off) rather than hand-poking CompiledGraphInput's fields directly -
-// this phase's own strategy document explicitly allows either approach.
+// Unit tests for RenderGraphCompiler: dependency resolution, culling, ordering and lifetimes.
+// Fixtures are built through RenderGraphBuilder; no Vulkan device is involved.
 
 #include "Renderer/RenderGraph/RenderGraphCompiler.h"
 
@@ -157,9 +145,7 @@ TEST(RenderGraphCompilerTest, DiamondDependencyOrdersCorrectlyWithDeterministicS
     const TextureHandle finalOutputs[] = { tFinal };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    // A must precede both B and C; both B and C must precede D; B/C's own
-    // relative order matches their declaration order (1 before 2) - the
-    // exact determinism this phase's Step 3.3 requires.
+    // A precedes B and C, both precede D, and B/C keep declaration order.
     EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1, 2, 3 }));
     for (const auto& pass : input.passes) {
         EXPECT_FALSE(pass.isCulled);
@@ -225,28 +211,20 @@ TEST(RenderGraphCompilerTest, LifetimeBoundsSpanFromFirstWriterThroughLaterOfTwo
     const TextureHandle finalOutputs[] = { tFinal };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    // executionOrder is {A=0, B=1, C=2, D=3} (positions == declaration
-    // index here, see the diamond test above) - T0 is written at position
-    // 0 and read by both B (position 1) and C (position 2), so its
-    // lifetime spans [0, 2] (the LATER of the two readers), not [0, 1].
+    // T0 is written at position 0 and read at 1 and 2, so its lifetime is [0, 2] (the later reader).
     ASSERT_EQ(compiled.textureLifetimes.size(), 4u);
     const ResourceLifetime& t0Lifetime = compiled.textureLifetimes[t0.index];
     EXPECT_EQ(t0Lifetime.firstUsePassIndex, 0);
     EXPECT_EQ(t0Lifetime.lastUsePassIndex, 2);
 
-    // TFinal is only ever touched by D, the LAST pass in executionOrder -
-    // its lastUsePassIndex must equal that pass's own position (3), never
-    // one-past-the-end (an off-by-one this test exists to pin down).
+    // TFinal is only touched by the last pass, so its last use is that pass's position (3), not one past it.
     const ResourceLifetime& finalLifetime = compiled.textureLifetimes[tFinal.index];
     EXPECT_EQ(finalLifetime.firstUsePassIndex, 3);
     EXPECT_EQ(finalLifetime.lastUsePassIndex, 3);
 }
 
-// --- Array lifetime ------------------------------------------------------------------
-//
-// One pass writes an array texture, a later pass reads it AND writes a plain texture that is a real
-// finalOutputs root. The array's lifetime spans both passes. (A reader-only pass is never a root, so the
-// reader writes the final output - exactly how a real shadow-cascade consumer is structured.)
+// --- Array lifetime ----------------------------------------------------------
+// An array written by one pass and read by a later pass (which writes the final output) spans both passes.
 TEST(RenderGraphCompilerTest, TextureArrayLifetimeTracksFirstAndLastUsePassIndex)
 {
     RenderGraphBuilder builder;
@@ -322,9 +300,7 @@ TEST(RenderGraphCompilerTest, CompilingTheSameGraphTwiceProducesByteIdenticalExe
     CompiledGraphInput inputA = builderA.Finish();
     const TextureHandle finalOutputsA[] = { aFinal };
 
-    // An independently, identically-constructed second copy - proves
-    // Compile() itself is deterministic, not merely that re-running it on
-    // the exact same object is a no-op.
+    // An independently built identical copy: Compile() is deterministic, not just idempotent.
     RenderGraphBuilder builderB;
     const TextureHandle bT0 = builderB.CreateTexture("T0", MakeTextureDesc());
     const TextureHandle bT1 = builderB.CreateTexture("T1", MakeTextureDesc());
@@ -385,8 +361,7 @@ TEST(RenderGraphCompilerTest, CompilingTheSameInputObjectTwiceIsIdempotent)
     EXPECT_FALSE(input.passes[0].isCulled);
 }
 
-// --- Edge cases (Step 5's own "every edge case a compilers/graph-
-// algorithms course would flag" bar) -------------------------------------
+// --- Edge cases --------------------------------------------------------------
 
 TEST(RenderGraphCompilerTest, SelfLoopReadAndWriteOfSameResourceDoesNotCrashOrCycle)
 {
@@ -419,8 +394,7 @@ TEST(RenderGraphCompilerTest, DisconnectedPassWithNoReadsOrWritesIsCulled)
 
     builder.AddPass(
         "A", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); }, NoOpExecute);
-    // A pass that declares nothing at all - can never be a root, can
-    // never be reached backwards from one either.
+    // Declares nothing: never a root and never reached from one.
     builder.AddPass("Disconnected", [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
 
     CompiledGraphInput input = builder.Finish();
@@ -446,26 +420,13 @@ TEST(RenderGraphCompilerTest, FinalOutputHandleNeverProducedByAnythingDoesNotCra
 
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    // Nothing writes `neverWritten`, so there is no root at all - the one
-    // declared pass simply has no path to any real final output and is
-    // culled, exactly as if finalOutputs had been empty.
+    // Nothing writes `neverWritten`, so there is no root and the pass is culled.
     EXPECT_TRUE(compiled.executionOrder.empty());
     EXPECT_TRUE(input.passes[0].isCulled);
 }
 
-// --- Compute-shader campaign Phase 5's own buffer-reachability caveat -----
-// (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md, Step 6) -------------------
-//
-// RenderGraphCompiler::Compile()'s `finalOutputs` root set is TextureHandle-
-// only - there is no BufferHandle equivalent, and RenderGraphBuilder has no
-// ImportBuffer() counterpart to ImportTexture() at all. A compute pass whose
-// ONLY declared write is a buffer can therefore be silently culled unless
-// some OTHER, ALSO-kept pass reads that buffer and itself has a path (direct
-// or transitive) to a real texture write in `finalOutputs` - exactly the
-// buffer-side sibling of every existing texture-culling test above. Three
-// passes: PassA writes buffer B (no texture write of its own) - PassB reads
-// B and writes texture T, a real finalOutputs root - PassC ALSO writes
-// buffer B but has no reader and no path to finalOutputs at all.
+// --- Buffer reachability -----------------------------------------------------
+// A buffer-only write survives only if a kept pass reads it and reaches a finalOutputs texture.
 TEST(RenderGraphCompilerTest, BufferOnlyWriteSurvivesCullingOnlyWhenAReaderReachesATextureFinalOutput)
 {
     RenderGraphBuilder builder;
@@ -492,21 +453,15 @@ TEST(RenderGraphCompilerTest, BufferOnlyWriteSurvivesCullingOnlyWhenAReaderReach
     const TextureHandle finalOutputs[] = { textureT };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    // PassA/PassB both survive (PassA's buffer write is kept alive
-    // transitively through PassB's own real texture output), in that
-    // execution order; PassC is correctly culled.
+    // PassA survives through PassB's texture output; PassC is culled.
     EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1 }));
     EXPECT_FALSE(input.passes[0].isCulled);
     EXPECT_FALSE(input.passes[1].isCulled);
     EXPECT_TRUE(input.passes[2].isCulled);
 }
 
-// --- Volume roots ---------------------------------------------------------------
-//
-// A 3D volume is a TextureHandle like any other, but a pass whose ONLY write is a volume has no
-// `finalOutputs` texture to reach, so it survives culling only when explicitly kept via KeepTextureOutput().
-// VolumeA is kept and must survive; VolumeB is written but never kept/read and must still be culled -
-// proving keeping is opt-in, not a blanket "every volume write survives".
+// --- Volume roots ------------------------------------------------------------
+// A volume-only write survives only when kept via KeepTextureOutput(); VolumeA is kept, VolumeB is culled.
 TEST(RenderGraphCompilerTest, VolumeTextureOnlyWriteSurvivesCullingOnlyWhenExplicitlyKeptAsOutput)
 {
     RenderGraphBuilder builder;
@@ -591,23 +546,8 @@ TEST(RenderGraphCompilerTest, KeepTextureOutputRootsEveryTextureDimension)
     EXPECT_FALSE(input.passes[2].isCulled);
 }
 
-// --- editor-core-separation-26 campaign, PHASE1's own BufferHandle
-// root-set fix (BIG_STEP_2_BUFFER_ROOTS_AND_BLIT_PASSES_2026-09-29.txt,
-// Part A) -
-//
-// Before this phase, `finalOutputs` (TextureHandle-only) and
-// `finalVolumeTextureOutputs` (VolumeTextureHandle-only, Atmosphere
-// Scattering campaign, Phase 6) were the only two root sets Compile() ever
-// consulted - a pass whose ONLY declared write was a BufferHandle had
-// structurally NO way to survive culling on its own (see
-// BufferOnlyWriteSurvivesCullingOnlyWhenAReaderReachesATextureFinalOutput
-// above, which proves the pre-existing TRANSITIVE case only).
-// RenderGraphBuilder::KeepBufferOutput() is the fix: a THIRD, independent
-// root set (CompiledGraphInput::finalBufferOutputs) Compile() now also
-// checks. bufferA is explicitly kept via KeepBufferOutput() and must
-// survive; bufferB is written but never kept/read by anything and must
-// still be culled, proving this fix is correctly OPT-IN, not a blanket
-// "every buffer write always survives" regression.
+// --- Kept buffer roots -------------------------------------------------------
+// KeepBufferOutput() is an opt-in root: bufferA (kept) survives, bufferB (never kept or read) is culled.
 TEST(RenderGraphCompilerTest, BufferOnlyWriteSurvivesCullingOnlyWhenExplicitlyKeptAsOutput)
 {
     RenderGraphBuilder builder;
@@ -652,10 +592,7 @@ TEST(RenderGraphCompilerTest, BufferWriteNeverKeptIsCulledEvenWithNoTextureFinal
         },
         NoOpExecute);
 
-    // Deliberately never call KeepBufferOutput() - this is the exact
-    // pre-fix behavior (and remains correct post-fix): a buffer write
-    // nobody ever marks as a root is dead code, same as any other
-    // never-read/never-kept resource.
+    // Never kept: a buffer write nobody marks as a root is dead code.
     CompiledGraphInput input = builder.Finish();
     const CompiledGraph compiled = Compile(input, {});
 
@@ -663,20 +600,8 @@ TEST(RenderGraphCompilerTest, BufferWriteNeverKeptIsCulledEvenWithNoTextureFinal
     EXPECT_TRUE(input.passes[0].isCulled);
 }
 
-// --- GPU Vertex Skinning campaign, Phase 3's own WAW-hazard mitigation -----
-// (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md, Step 3.6) -
-//
-// Two "SkinModel" compute passes sharing ONE imported output buffer (the
-// two-SkeletalAnimators-sharing-one-Mesh scenario this campaign's own
-// documented limitation describes), followed by a graphics pass that reads
-// that same buffer as a vertex buffer. The SECOND skinning pass applies the
-// Step 3.6 mitigation (a phantom ComputeShaderRead declared immediately
-// before its real ComputeShaderWrite) - this test proves the COMPILER
-// (independent of the barrier planner's own field-level tests in
-// RenderGraphBarrierPlannerTests.cpp) still produces the correct, fully
-// serialized execution order: first writer, then second writer/reader,
-// then the draw - and that none of the three passes are ever culled, since
-// all three have a real path to the final color output.
+// --- Two compute writers sharing one buffer ----------------------------------
+// The second writer declares a read first; a draw then reads the buffer. Order is kept and nothing is culled.
 TEST(RenderGraphCompilerTest, GpuSkinningReadBeforeWriteMitigationPreservesOrderForSharedOutputBuffer)
 {
     RenderGraphBuilder builder;
@@ -690,11 +615,7 @@ TEST(RenderGraphCompilerTest, GpuSkinningReadBeforeWriteMitigationPreservesOrder
     builder.AddComputePass(
         "SkinModel:InstanceB",
         [&](RenderGraphBuilder::PassBuilder& pass) {
-            // The Step 3.6 mitigation - a phantom read declared BEFORE the
-            // real write, forcing a dependency edge/barrier against
-            // whichever pass most recently wrote this same handle, even
-            // though this pass's own compute shader never actually reads
-            // the buffer's prior contents.
+            // Read declared before the write forces a dependency on the previous writer of this buffer.
             pass.ReadBuffer(output, ResourceAccess::ComputeShaderRead);
             pass.WriteBuffer(output, ResourceAccess::ComputeShaderWrite);
         },
@@ -717,18 +638,8 @@ TEST(RenderGraphCompilerTest, GpuSkinningReadBeforeWriteMitigationPreservesOrder
     EXPECT_FALSE(input.passes[2].isCulled);
 }
 
-// --- editor-core-separation-27 campaign, PHASE3's own TextureHandle
-// persistent-cache root-set fix
-// (BIG_STEP_3_PERSISTENT_RESOURCE_CACHE_HONEST_LAYOUT_HISTORY_REV2_2026-09-30.txt,
-// Section 5.2, "the keep-alive guarantee") -
-//
-// GetOrCreatePersistentTexture() does not exist yet (PHASE8's job) - these
-// tests build a CompiledGraphInput via a real RenderGraphBuilder/Finish(),
-// then directly push_back() onto its own persistentCacheTextures field
-// before calling Compile(), exactly mirroring
-// BufferOnlyWriteSurvivesCullingOnlyWhenExplicitlyKeptAsOutput's own
-// hand-fabrication approach above - Compile() only ever READS this vector,
-// with zero opinion on how it got populated.
+// --- Persistent-cache roots --------------------------------------------------
+// Entries are pushed onto persistentCacheTextures directly; Compile() only reads that list.
 
 TEST(RenderGraphCompilerTest, PersistentCacheTextureWriteSurvivesCullingWithNoFinalOutputsAtAll)
 {
@@ -743,8 +654,7 @@ TEST(RenderGraphCompilerTest, PersistentCacheTextureWriteSurvivesCullingWithNoFi
     CompiledGraphInput input = builder.Finish();
     input.persistentCacheTextures.push_back(PersistentTextureUse{ history, PersistentSlotRef{} });
 
-    // Deliberately EMPTY finalOutputs - proves the persistent-cache vector
-    // alone is enough to keep this pass alive.
+    // Empty finalOutputs: the persistent-cache entry alone keeps the pass alive.
     const CompiledGraph compiled = Compile(input, {});
 
     EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0 }));
@@ -761,9 +671,7 @@ TEST(RenderGraphCompilerTest, TextureWriteNotInPersistentCacheOrFinalOutputsIsSt
         [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteTexture(history); },
         NoOpExecute);
 
-    // Deliberately never push onto persistentCacheTextures, and finalOutputs
-    // is empty too - proves this fix is additive, not accidentally
-    // permissive for every texture write.
+    // No persistent-cache entry and no finalOutputs: a texture write is not a root by itself.
     CompiledGraphInput input = builder.Finish();
     const CompiledGraph compiled = Compile(input, {});
 
@@ -779,8 +687,7 @@ TEST(RenderGraphCompilerTest, OrdinaryFinalOutputsRootStillWorksWithEmptyPersist
     builder.AddPass(
         "Opaque", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(color); }, NoOpExecute);
 
-    // input.persistentCacheTextures stays empty (default) - confirms the
-    // pre-existing finalOutputs path is completely untouched by this fix.
+    // persistentCacheTextures stays empty: the plain finalOutputs path is unaffected.
     CompiledGraphInput input = builder.Finish();
     const TextureHandle finalOutputs[] = { color };
     const CompiledGraph compiled = Compile(input, finalOutputs);
@@ -819,14 +726,8 @@ TEST(RenderGraphCompilerTest, PersistentCacheRootDoesNotCrossContaminateAnUnrela
     EXPECT_TRUE(input.passes[2].isCulled);
 }
 
-// --- render-pass-4 campaign, PHASE1 -----------------------------------------
-// (task_manager/render-pass-4/PHASE1_DEPENDENCY_EVENT_CONTRADICTION_SAFETY_NET.md)
-//
-// DetectRenderPassEventContradictions() is exercised DIRECTLY here (never
-// through Compile()) - it is a pure, side-effect-free function that never
-// prints or asserts, so it is completely safe to call with a deliberately
-// contradicting graph, unlike Compile() itself (which turns a non-empty
-// result into an unconditional stderr report plus a debug-build assert()).
+// --- Event contradiction detection -------------------------------------------
+// DetectRenderPassEventContradictions() is pure and never asserts, so it is called directly here.
 
 TEST(RenderGraphCompilerTest, NoReadsOrWritesProducesNoContradictions)
 {
@@ -860,10 +761,7 @@ TEST(RenderGraphCompilerTest, NormalWriterBeforeReaderProducesNoContradictions)
     EXPECT_TRUE(contradictions.empty());
 }
 
-// The permanent regression test for the exact historical bug (PHASE0's
-// Locked Design Decision 5) - a reader ("Composite") declared BEFORE its
-// writer ("Opaque"), exactly reproducing AtmosphereComposite/RenderOpaque's
-// real, historical shape (see PHASE0_MASTER_STRATEGY.md, Step 2).
+// A reader ("Composite") declared before its writer ("Opaque") with a later event tag is an orphan read.
 TEST(RenderGraphCompilerTest, OrphanReadWithLaterWriterIsDetected)
 {
     RenderGraphBuilder builder;
@@ -958,10 +856,7 @@ TEST(RenderGraphCompilerTest, ProjectRenderFeatureStyleAfterEverythingPassesNeve
     EXPECT_TRUE(contradictions.empty());
 }
 
-// Confirms 3.2's new Compile() wiring doesn't fire a false positive against
-// a graph that was always fine, and that executionOrder/isCulled are
-// unchanged from what DiamondDependencyOrdersCorrectlyWithDeterministicSiblingOrder
-// (above) already asserts - a consistent graph must never abort here.
+// A consistent graph must never abort Compile(), and keeps the same order as the diamond test.
 TEST(RenderGraphCompilerTest, CallingCompileWithAConsistentGraphNeverAborts)
 {
     RenderGraphBuilder builder;
@@ -1006,20 +901,8 @@ TEST(RenderGraphCompilerTest, CallingCompileWithAConsistentGraphNeverAborts)
     }
 }
 
-// --- render-pass-4 campaign, PHASE2 -----------------------------------------
-// (task_manager/render-pass-4/PHASE2_REAL_RENDERPASSEVENT_ORDERING_ENFORCEMENT.md)
-//
-// The one genuine, deliberate BEHAVIOR CHANGE in this whole campaign: Compile()
-// now processes passes in an "effective order" (every pass stable-sorted by
-// RenderPassEvent, ties broken by original declaration index) for both its
-// RAW/WAW edge scan and Kahn's-algorithm ready-set tie-break, instead of raw
-// declaration order.
-
-// The permanent regression test for the REAL fix - mirrors PHASE1's own
-// OrphanReadWithLaterWriterIsDetected, but calls the REAL Compile() end-to-end
-// instead of just the detector. Reproduces the exact historical
-// AtmosphereComposite/RenderOpaque bug shape: "Composite" (a reader, tagged
-// AfterTransparents) declared BEFORE "Opaque" (its writer, tagged Opaques).
+// --- RenderPassEvent ordering ------------------------------------------------
+// Compile() walks passes in event order (ties by declaration index), so a late-tagged reader still follows its writer.
 TEST(RenderGraphCompilerTest, ReaderTaggedEarlierThanItsTextuallyLaterWriterStillResolvesCorrectly)
 {
     RenderGraphBuilder builder;
@@ -1041,13 +924,7 @@ TEST(RenderGraphCompilerTest, ReaderTaggedEarlierThanItsTextuallyLaterWriterStil
     const TextureHandle finalOutputs[] = { compositeOutput };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    // Before this phase: "Opaque" (index 1) had no RAW edge linking it to
-    // "Composite" at all (its write was never "declared so far" when the
-    // reader was processed), and no other path to a final output either - it
-    // was silently CULLED, leaving executionOrder with only "Composite" in
-    // it. After this phase: effective order walks "Opaque" (Opaques) before
-    // "Composite" (AfterTransparents) regardless of declaration order, so the
-    // RAW edge forms correctly and both passes survive, in the correct order.
+    // Event order walks "Opaque" before "Composite", so the RAW edge forms and neither pass is culled.
     ASSERT_EQ(compiled.executionOrder.size(), 2u);
     EXPECT_EQ(compiled.executionOrder[0].index, 1u); // "Opaque" (writer) first.
     EXPECT_EQ(compiled.executionOrder[1].index, 0u); // "Composite" (reader) second.
@@ -1055,10 +932,7 @@ TEST(RenderGraphCompilerTest, ReaderTaggedEarlierThanItsTextuallyLaterWriterStil
     EXPECT_FALSE(input.passes[1].isCulled);
 }
 
-// Two passes with NO shared resource at all - proves RenderPassEvent now
-// decides relative order even between passes with zero real dependency on
-// each other (Kahn's-algorithm ready-set tie-break), overriding declaration
-// order, exactly this phase's own stated goal.
+// Two independent passes: event tier alone decides their order, overriding declaration order.
 TEST(RenderGraphCompilerTest, TwoIndependentPassesWithNoSharedResourceExecuteInRenderPassEventOrderRegardlessOfDeclarationOrder)
 {
     RenderGraphBuilder builder;
@@ -1081,9 +955,7 @@ TEST(RenderGraphCompilerTest, TwoIndependentPassesWithNoSharedResourceExecuteInR
     EXPECT_EQ(compiled.executionOrder[1].index, 0u); // "First" (AfterOpaques) second, despite being declared first.
 }
 
-// A second, WAW-shaped regression test for this phase's own reorder - the RAW
-// test above only exercises the read-side "orphan" fix; this one exercises
-// the write-side WAW edge-construction rewire directly.
+// Write-after-write edges follow event order, not declaration order.
 TEST(RenderGraphCompilerTest, WriteAfterWriteAcrossDifferentRenderPassEventTiersResolvesByEffectiveOrderNotDeclarationOrder)
 {
     RenderGraphBuilder builder;
@@ -1100,10 +972,7 @@ TEST(RenderGraphCompilerTest, WriteAfterWriteAcrossDifferentRenderPassEventTiers
     const TextureHandle finalOutputs[] = { t0 };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    // Before this phase: raw declaration order processes "Late" (0) then
-    // "Early" (1), forming a WAW edge 0->1 ("Late" before "Early"). After
-    // this phase: effective order processes "Early" (Opaques) before "Late"
-    // (AfterTransparents), so the edge direction REVERSES (1->0).
+    // Event order puts "Early" (Opaques) before "Late" (AfterTransparents), so the WAW edge points Early -> Late.
     ASSERT_EQ(compiled.executionOrder.size(), 2u);
     EXPECT_EQ(compiled.executionOrder[0].index, 1u); // "Early" first.
     EXPECT_EQ(compiled.executionOrder[1].index, 0u); // "Late" second.
@@ -1111,11 +980,7 @@ TEST(RenderGraphCompilerTest, WriteAfterWriteAcrossDifferentRenderPassEventTiers
     EXPECT_FALSE(input.passes[1].isCulled);
 }
 
-// Confirms the stable-sort tie-break: two passes sharing the SAME
-// RenderPassEvent tier, with a real WAW dependency between them, must still
-// execute in their original declaration order, byte-identical to before this
-// phase (mirrors MultipleWritersToSameResourcePreserveWriteAfterWriteOrder's
-// own graph shape above, using the AddRenderPass() overload instead).
+// Two passes in the same event tier with a WAW dependency keep their declaration order.
 TEST(RenderGraphCompilerTest, PassesSharingTheSameRenderPassEventTierPreserveTheirOriginalDeclarationOrder)
 {
     RenderGraphBuilder builder;
@@ -1136,34 +1001,11 @@ TEST(RenderGraphCompilerTest, PassesSharingTheSameRenderPassEventTierPreserveThe
     EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1 }));
 }
 
-// --- Cycle detection --------------------------------------------------------
-//
-// RENDERGRAPH_PHASE3_COMPILATION_STRATEGY_v1.md's own Step 3.4 asks for a
-// "pass A reads what B writes AND writes what B reads -> throws" test.
-// This is deliberately NOT implemented as a literal test here - see
-// RenderGraphCompiler.cpp's own header comment and
-// RENDERGRAPH_PHASE3_COMPLETION_REPORT.md for the full reasoning: this
-// compiler's edge-construction rule (an edge only ever goes from a
-// strictly-lower declaration index to a strictly-higher one) makes the
-// produced graph a DAG BY CONSTRUCTION, so no CompiledGraphInput any
-// RenderGraphBuilder caller can actually produce is capable of forming a
-// real cycle. The throw path itself is still implemented (see
-// RenderGraphCompiler.cpp) as correct defensive code, exactly as this
-// phase's own strategy document asks for ("Kahn's algorithm... naturally
-// DETECTS a cycle... without a separate... pass") - it simply has no
-// reachable unit test given today's edge-construction rule, the same way
-// a `default:` branch of a switch already proven exhaustive by the
-// compiler would have no reachable test either.
+// --- Cycle detection ---------------------------------------------------------
+// No test: edges only go from a lower to a higher declaration index, so no builder input can form a cycle.
 
-// --- Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE1 -------
-//
-// Directly proves PHASE0_MASTER_STRATEGY.md's own confirmed claim that
-// RenderGraphCompiler::Compile() needs ZERO changes to correctly handle a
-// REAL 3-color-write G-buffer-shaped pass (rather than trusting that claim
-// blindly): a single pass declares three WriteColorAttachment() calls
-// against three distinct handles, all three kept reachable via a later pass
-// that reads them all and itself reaches a real finalOutputs root - the
-// G-buffer pass must survive culling entirely (not just partially).
+// --- Multiple render targets -------------------------------------------------
+// A pass with three color writes survives culling entirely when a later pass reads all three.
 TEST(RenderGraphCompilerTest, PassWithThreeColorWritesSurvivesCompileAndIsNotCulled)
 {
     RenderGraphBuilder builder;
@@ -1200,21 +1042,8 @@ TEST(RenderGraphCompilerTest, PassWithThreeColorWritesSurvivesCompileAndIsNotCul
     EXPECT_FALSE(input.passes[1].isCulled);
 }
 
-// --- Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE5 -------
-//
-// Step 3.2's own required regression guard: PHASE1's `ColorAttachmentDesc`
-// doc comment flags a real risk - "writes order doesn't necessarily match
-// colorAttachments order" - since `PassRecord::writes` (the generic vector
-// every ResourceAccess, of any kind, is pushed onto) and
-// `PassRecord::colorAttachments` (the new, PHASE1-added, color-attachment-
-// only ordered list) are two SEPARATE vectors populated by two SEPARATE
-// code paths. This test proves a pass carrying a real, ordered,
-// multi-entry `colorAttachments` list (the MRT case) coexists correctly,
-// in the SAME graph, with a completely unrelated pass declaring an
-// ordinary non-attachment buffer write (`WriteBuffer()`,
-// `ResourceAccess::ComputeShaderWrite` - never pushed onto
-// `colorAttachments` at all) - both halves must independently cull/order
-// correctly, with neither one's presence perturbing the other's.
+// --- MRT pass next to an unrelated buffer-write pass -------------------------
+// colorAttachments and writes are separate lists: an MRT pass and a plain buffer write must cull and order independently.
 TEST(RenderGraphCompilerTest, MrtPassAndSeparateNonAttachmentBufferWritePassBothCullAndOrderCorrectly)
 {
     RenderGraphBuilder builder;
@@ -1264,20 +1093,8 @@ TEST(RenderGraphCompilerTest, MrtPassAndSeparateNonAttachmentBufferWritePassBoth
     EXPECT_FALSE(input.passes[3].isCulled);
 }
 
-// --- render-pass-6 campaign, PHASE4 -----------------------------------------
-// (task_manager/render-pass-6/PHASE4_COMPILER_ADJACENCY_LIST_REWRITE.md)
-//
-// RenderGraphCompiler::Compile()'s O(P^2) adjacency-matrix rewrite to
-// adjacency lists. The hard acceptance gate for this phase is byte-identical
-// executionOrder for every fixture ABOVE this point in the file (unmodified)
-// - everything below is NEW coverage targeting the rewrite's own new risk
-// surface (duplicate edges, long WAW chains, larger graphs, the fast-path
-// contradiction check folded into Step 1, and the self-exclusion guard).
-
-// Duplicate-edge scenario (read side): a pass with 2+ reads of the SAME
-// resource, both resolving to the SAME earlier writer - addEdge(writer, i)
-// is called twice with identical arguments. Confirms no crash/infinite loop
-// and the writer still precedes the reader exactly once in executionOrder.
+// --- Duplicate edges, long chains, large graphs, self-exclusion --------------
+// Two reads of the same resource resolving to one earlier writer: the writer precedes the reader once.
 TEST(RenderGraphCompilerTest, PassWithTwoReadsOfSameResourceResolvingToSameEarlierWriterOrdersCorrectlyWithNoDuplicateEdgeIssues)
 {
     RenderGraphBuilder builder;
@@ -1289,8 +1106,7 @@ TEST(RenderGraphCompilerTest, PassWithTwoReadsOfSameResourceResolvingToSameEarli
     builder.AddPass(
         "ReaderTwice",
         [&](RenderGraphBuilder::PassBuilder& pass) {
-            // Two reads of the SAME resource, both resolving to the SAME
-            // earlier writer.
+            // Two reads of the same resource resolve to the same earlier writer.
             pass.ReadTexture(t0);
             pass.ReadTexture(t0);
             pass.WriteColorAttachment(t1);
@@ -1306,10 +1122,7 @@ TEST(RenderGraphCompilerTest, PassWithTwoReadsOfSameResourceResolvingToSameEarli
     EXPECT_FALSE(input.passes[1].isCulled);
 }
 
-// Duplicate-edge scenario (WAW side, the write-side sibling of the read-side
-// duplicate above): a pass with 2+ writes to DIFFERENT resources that both
-// happen to share the SAME earlier writer pass - addEdge(earlierWriter, i)
-// is called twice with identical arguments (once per resource).
+// Writes to two resources that share the same earlier writer produce one ordering, not a duplicate-edge problem.
 TEST(RenderGraphCompilerTest, PassWithTwoWritesToDifferentResourcesSharingTheSameEarlierWriterOrdersCorrectlyWithNoDuplicateEdgeIssues)
 {
     RenderGraphBuilder builder;
@@ -1326,9 +1139,7 @@ TEST(RenderGraphCompilerTest, PassWithTwoWritesToDifferentResourcesSharingTheSam
     builder.AddPass(
         "SecondWriterOfBoth",
         [&](RenderGraphBuilder::PassBuilder& pass) {
-            // WAW against BOTH r1 and r2, both resolving to the SAME
-            // earlier writer (index 0) - the (0 -> 1) edge is requested
-            // twice, once per resource.
+            // Two WAW hazards against the same earlier writer.
             pass.WriteColorAttachment(r1);
             pass.WriteColorAttachment(r2);
         },
@@ -1343,9 +1154,7 @@ TEST(RenderGraphCompilerTest, PassWithTwoWritesToDifferentResourcesSharingTheSam
     EXPECT_FALSE(input.passes[1].isCulled);
 }
 
-// A long WAW chain (3+ writers in a row) - confirms the adjacency-list edges
-// correctly chain writer1 -> writer2 -> writer3 -> reader, matching the
-// matrix version's own behavior.
+// A chain of 3 writers then a reader runs in declaration order.
 TEST(RenderGraphCompilerTest, LongWriteAfterWriteChainOrdersAllWritersThenTheFinalReaderInSequence)
 {
     RenderGraphBuilder builder;
@@ -1376,14 +1185,7 @@ TEST(RenderGraphCompilerTest, LongWriteAfterWriteChainOrdersAllWritersThenTheFin
     }
 }
 
-// A large-ish synthetic fan-out/fan-in graph (52 passes) - a correctness
-// stress test at a size where an O(P^2)-vs-O(P+E) bug (a missed edge, a
-// duplicate causing a wrong in-degree, an off-by-one in the new list-walk
-// loops) would be far more likely to surface than at single-digit pass
-// counts. One root pass writes a texture 50 independent "fan" passes all
-// read (and each writes its own distinct output); a final pass reads all 50
-// fan outputs. Not a performance-timing assertion (this engine has no
-// timing-based test convention) - purely a correctness check at scale.
+// Correctness at scale: one root, 50 independent fan passes, one final pass reading all fan outputs.
 TEST(RenderGraphCompilerTest, LargeFanOutFanInGraphCompilesCorrectlyExercisingTheAdjacencyListPathAtScale)
 {
     constexpr std::uint32_t kFanCount = 50;
@@ -1425,13 +1227,7 @@ TEST(RenderGraphCompilerTest, LargeFanOutFanInGraphCompilesCorrectlyExercisingTh
     const TextureHandle finalOutputs[] = { finalOutput };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    // Everything here is naturally already in a valid topological order by
-    // declaration index (root -> 50 independent fan passes, in any relative
-    // order among themselves -> final pass), and all 50 fan passes share the
-    // same RenderPassEvent tier/effective position bucket as each other, so
-    // Kahn's tie-break (lowest effective position) resolves them in their
-    // original declaration order - executionOrder is therefore expected to
-    // be the identity permutation [0, 1, ..., kFanCount + 1].
+    // Same event tier for all fan passes, so the order is the identity permutation [0 .. kFanCount + 1].
     std::vector<std::uint32_t> expected(kFanCount + 2);
     for (std::uint32_t i = 0; i < expected.size(); ++i) {
         expected[i] = i;
@@ -1442,17 +1238,8 @@ TEST(RenderGraphCompilerTest, LargeFanOutFanInGraphCompilesCorrectlyExercisingTh
     }
 }
 
-// The self-exclusion guard's OWN dedicated regression test (as opposed to
-// the pre-existing SelfLoopReadAndWriteOfSameResourceDoesNotCrashOrCycle
-// test above, which incidentally also exercises it but was never written
-// with this guard in mind): a pass that reads AND writes the SAME resource
-// nothing else ever writes must never be reported as contradicting itself
-// by Compile()'s new inline fast path (see
-// PHASE4_COMPILER_ADJACENCY_LIST_REWRITE.md, Step 3.4's "required
-// self-exclusion guard" - firstXWriter[resource] can legitimately BE this
-// same pass's own index). If this guard were ever removed, this exact test
-// would silently crash the whole test process via Compile()'s own
-// debug-build assert() instead of reporting a normal gtest failure.
+// A pass that reads and writes a resource nothing else writes must not be reported as contradicting itself.
+// Without the self-exclusion guard Compile() would assert and take down the test process.
 TEST(RenderGraphCompilerTest, SelfExclusionGuardPreventsFalsePositiveContradictionForSelfLoopReadWriteOfNeverOtherwiseWrittenResource)
 {
     RenderGraphBuilder builder;
@@ -1469,19 +1256,14 @@ TEST(RenderGraphCompilerTest, SelfExclusionGuardPreventsFalsePositiveContradicti
     CompiledGraphInput input = builder.Finish();
     const TextureHandle finalOutputs[] = { depth };
 
-    // Must not crash/abort - see this test's own header comment above.
+    // Must not crash/abort.
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
     EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0 }));
     EXPECT_FALSE(input.passes[0].isCulled);
 }
 
-// The "never-written-resource" equivalence case: a read of a resource
-// nothing ever writes (firstXWriter[resource] == -1) must produce NO
-// contradiction from either the standalone function OR Compile()'s own
-// internal fast path - confirms the "no writer anywhere" case is handled
-// identically to the "writer exists later" case the death tests below
-// cover.
+// A read of a never-written resource is no contradiction for the standalone detector or Compile().
 TEST(RenderGraphCompilerTest, ReadOfNeverWrittenResourceProducesNoContradictionFromEitherPath)
 {
     RenderGraphBuilder builder;
@@ -1504,9 +1286,7 @@ TEST(RenderGraphCompilerTest, ReadOfNeverWrittenResourceProducesNoContradictionF
     EXPECT_TRUE(standaloneContradictions.empty());
 
     const TextureHandle finalOutputs[] = { output };
-    // Must not crash/abort - proves the fast path's firstXWriter[...] == -1
-    // case is handled identically to the standalone function's own "no
-    // writer anywhere" case.
+    // Must not crash/abort: a read with no writer anywhere is no contradiction.
     const CompiledGraph compiled = Compile(input, finalOutputs);
     EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0 }));
     EXPECT_FALSE(input.passes[0].isCulled);
@@ -1514,55 +1294,14 @@ TEST(RenderGraphCompilerTest, ReadOfNeverWrittenResourceProducesNoContradictionF
 
 #ifndef NDEBUG
 
-// The mandatory fast-path/standalone-function EQUIVALENCE proof (Step
-// 3.4/3.5's own required test) - the direct proof that folding the
-// contradiction check into Step 1 is a real optimization, not a silent
-// behavior change. fastContradictions is Compile()'s own internal state
-// with no public accessor (a deliberate choice, confirmed via
-// ask_questions - see PHASE4_COMPLETION_REPORT.md for the "internal hook
-// vs. indirect observation" reasoning), so equivalence is observed
-// INDIRECTLY here, mirroring CallingCompileWithAConsistentGraphNeverAborts's
-// own established pattern in REVERSE: reproduce a graph shape the
-// standalone-function-focused OrphanReadWithLaterWriterIsDetected test
-// above already proves the STANDALONE function reports a contradiction for,
-// then confirm Compile() itself - now driven ENTIRELY by its own new inline
-// fast path, with the old standalone-function call site genuinely removed -
-// still aborts via the exact same debug-build assert(), exactly as it did
-// before this phase's rewrite. Death tests spawn a genuine sub-process (see
-// gtest's own death-test docs), so this crash never takes down the real
-// test binary.
-//
-// IMPORTANT, confirmed via ask_questions during this phase's own
-// implementation: only the OrphanReadWithLaterWriter contradiction kind is
-// tested here. DeclaredEventOrderDisagreesWithRealDependency (the OTHER
-// standalone-function-tested kind, see EdgeContradictingDeclaredEventOrderIsDetected
-// above) is STRUCTURALLY UNREACHABLE through a real end-to-end Compile()
-// call, both BEFORE and AFTER this phase (a pre-existing fact this phase
-// merely discovered, not something it changed): Compile()'s own
-// effective-order walk only ever resolves a writer as a real (non-orphan)
-// "nearest writer" for a read if that writer was walked BEFORE the read in
-// effective order, which by construction of the (RenderPassEvent, original
-// index) stable sort always means writer.renderPassEvent <=
-// reader.renderPassEvent - so the "writer.renderPassEvent >
-// reader.renderPassEvent" contradiction condition can never actually be
-// observed from a real Compile() call, only from the standalone function's
-// own direct unit test using a hand-built, deliberately-inconsistent
-// processingOrder (exactly what EdgeContradictingDeclaredEventOrderIsDetected
-// already does, and exactly the same class of "kept as genuinely correct
-// but practically unreachable through any real caller" situation as this
-// file's own existing cycle-detection throw, see Compile()'s own header
-// comment above).
+// Compile() aborts on an orphan read with a later writer, same as the standalone detector.
+// Only this contradiction kind is reachable through Compile().
 TEST(RenderGraphCompilerDeathTest, FastPathDetectsOrphanReadWithLaterWriterAndAbortsJustLikeTheStandaloneFunctionWould)
 {
     RenderGraphBuilder builder;
     const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
 
-    // Same RenderPassEvent tier for both (Opaques) - keeps effective order
-    // identical to declaration order (reader first, writer second), so the
-    // reader is walked BEFORE the writer and genuinely resolves as an
-    // orphan read with a later writer, exactly like
-    // OrphanReadWithLaterWriterIsDetected's own standalone-function fixture
-    // above, but driven through a REAL Compile() call this time.
+    // Same event tier keeps declaration order, so the reader is walked before its writer (an orphan read).
     builder.AddRenderPass(
         "Composite", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(t0); },
         NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 0 - reader, declared FIRST.

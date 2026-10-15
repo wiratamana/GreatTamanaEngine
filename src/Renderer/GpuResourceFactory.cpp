@@ -36,9 +36,7 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
         throw std::runtime_error("GpuResourceFactory: vkCreateCommandPool failed");
     }
 
-    // The one shared material descriptor-set-layout - a single combined-
-    // image-sampler, fragment stage only (see MaterialDescriptorSetLayout()'s
-    // own comment in GpuResourceFactory.h).
+    // Shared material set layout: one combined image sampler, fragment stage.
     VkDescriptorSetLayoutBinding samplerBinding{};
     samplerBinding.binding = 0;
     samplerBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -148,13 +146,7 @@ RenderTexture GpuResourceFactory::CreateRenderTexture(int width, int height, Pix
     const char* depthDebugName, bool allowStorageImageAccess, bool allowDepthSampledAccess,
     bool createDepthCompanion, bool createColorImage) const
 {
-    // Pre-construction capability check needs the real VkFormat - translate
-    // once, here, purely for this check (RenderTexture's own constructor
-    // independently re-translates `format` itself for the real image it
-    // creates - see RenderTexture.cpp). m_depthFormat is this factory's own
-    // already-VkFormat depth format (resolved once from Renderer::DepthFormat()
-    // at construction) - translated back to PixelFormat here since
-    // RenderTexture's constructor now only ever accepts PixelFormat.
+    // The VkFormat is needed only for this capability check; the depth format is stored as VkFormat.
     if (allowStorageImageAccess && !SupportsStorageImageUsage(m_physicalDevice, ToVkFormat(format))) {
         throw std::runtime_error(
             "GpuResourceFactory::CreateRenderTexture: requested allowStorageImageAccess = true, but this "
@@ -177,9 +169,7 @@ Buffer GpuResourceFactory::CreateStructuredBuffer(uint64_t elementStride, std::u
     const uint64_t size = elementStride * static_cast<uint64_t>(elementCount);
     BufferUsage usage = BufferUsage::StorageBuffer | extraUsage;
     if (memoryUsage == BufferMemoryUsage::GpuOnly) {
-        // Mirrors CreateDeviceLocalBuffer()'s own convention - so a
-        // GpuOnly structured buffer can still be initialized once via a
-        // caller-driven staging upload (ImmediateSubmit() + vkCmdCopyBuffer).
+        // GpuOnly buffers need TransferDst so they can be filled by a staging upload.
         usage |= BufferUsage::TransferDst;
     }
     return CreateBuffer(size, usage, memoryUsage, debugName);
@@ -188,9 +178,7 @@ Buffer GpuResourceFactory::CreateStructuredBuffer(uint64_t elementStride, std::u
 Buffer GpuResourceFactory::CreateDeviceLocalBuffer(
     const void* data, uint64_t size, BufferUsage usage, const char* debugName) const
 {
-    // The staging buffer is intentionally unnamed (nullptr) - it's a
-    // throwaway that never outlives this function, so it's never worth
-    // showing up as a named entry in a future Memory panel.
+    // Unnamed throwaway staging buffer.
     Buffer staging = CreateBuffer(size, BufferUsage::TransferSrc, BufferMemoryUsage::CpuToGpu);
     staging.Upload(data, static_cast<std::size_t>(size));
 
@@ -202,8 +190,7 @@ Buffer GpuResourceFactory::CreateDeviceLocalBuffer(
         copyRegion.size = static_cast<VkDeviceSize>(size);
         vkCmdCopyBuffer(cmd, staging.Native(), deviceLocal.Native(), 1, &copyRegion);
     });
-    // staging goes out of scope here and is destroyed - the copy above has
-    // already completed (ImmediateSubmitInternal blocks until the GPU is done).
+    // staging is destroyed here; ImmediateSubmitInternal already waited for the copy.
 
     return deviceLocal;
 }
@@ -333,16 +320,12 @@ Mesh GpuResourceFactory::CreateSkinnedMesh(const void* vertexData, uint64_t vert
     std::uint32_t vertexCount, const void* indexData, uint64_t indexDataSize, std::uint32_t indexCount,
     const char* debugName) const
 {
-    // Host-visible + persistently mapped (BufferMemoryUsage::CpuToGpu),
-    // unlike CreateMesh()'s device-local vertex buffer - initialized with
-    // the bind pose right away, then re-written every frame afterwards via
-    // Mesh::UpdateVertexData() (see Game::UpdateSkeletalAnimators()).
+    // Host-visible, persistently mapped vertex buffer: rewritten every frame via Mesh::UpdateVertexData().
     Buffer vertexBuffer = CreateBuffer(vertexDataSize, BufferUsage::VertexBuffer, BufferMemoryUsage::CpuToGpu,
         debugName);
     vertexBuffer.Upload(vertexData, static_cast<std::size_t>(vertexDataSize));
 
-    // The index buffer never changes as a mesh animates - keep it static/
-    // device-local exactly like CreateMesh()'s own indexed overload.
+    // Indices never change while a mesh animates: static, device-local.
     Buffer indexBuffer =
         CreateDeviceLocalBuffer(indexData, indexDataSize, BufferUsage::IndexBuffer, debugName);
 
@@ -389,8 +372,7 @@ Texture2D GpuResourceFactory::CreateTexture2D(
     const auto safeHeight = static_cast<uint64_t>(texture.Height());
     const uint64_t size = safeWidth * safeHeight * 4;
 
-    // Unnamed - same reasoning as CreateDeviceLocalBuffer()'s own staging
-    // buffer above: a throwaway that never outlives this function.
+    // Unnamed throwaway staging buffer.
     Buffer staging = CreateBuffer(size, BufferUsage::TransferSrc, BufferMemoryUsage::CpuToGpu);
     staging.Upload(pixelsRgba8, static_cast<std::size_t>(size));
 
@@ -427,8 +409,7 @@ Texture2D GpuResourceFactory::CreateTexture2D(
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
             nullptr, 0, nullptr, 1, &toShaderRead);
     });
-    // staging goes out of scope here and is destroyed - the copy above has
-    // already completed (ImmediateSubmit blocks until the GPU is done).
+    // staging is destroyed here; the copy has already completed.
 
     return texture;
 }
@@ -447,17 +428,12 @@ VolumeTexture GpuResourceFactory::CreateVolumeTexture(
 TextureArray2D GpuResourceFactory::CreateTextureArray(int width, int height, int arrayLayers, PixelFormat format,
     bool hasDepth, bool isCubemap, bool allowStorageImageAccess, const char* debugName) const
 {
-    // Caller-trust boundary: `format` must already be a concrete, resolved
-    // PixelFormat by the time it reaches this method - PixelFormat::Undefined
-    // resolution happens one layer up, in Renderer::CreateTextureArray()
-    // (see this method's own declaration comment in GpuResourceFactory.h).
+    // `format` must already be resolved; Undefined is handled in Renderer::CreateTextureArray().
     assert(format != PixelFormat::Undefined &&
         "GpuResourceFactory::CreateTextureArray requires an already-resolved concrete format - "
         "PixelFormat::Undefined resolution happens one layer up, in Renderer::CreateTextureArray()");
 
-    // Hard Vulkan API preconditions for VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
-    // - a real, unconditional throw, not a caller-trust boundary (see this
-    // method's own declaration comment).
+    // Vulkan cube-compatible images need a multiple of 6 layers and square faces.
     if (isCubemap && (arrayLayers < 6 || arrayLayers % 6 != 0)) {
         throw std::runtime_error(
             "GpuResourceFactory::CreateTextureArray: isCubemap requires arrayLayers to be a "
@@ -469,8 +445,7 @@ TextureArray2D GpuResourceFactory::CreateTextureArray(int width, int height, int
             "(Vulkan requires square faces for a cube-compatible image).");
     }
 
-    // Only ever checked when actually requested AND hasDepth == false -
-    // never for the depth case (see this method's own declaration comment).
+    // Only checked for color arrays; depth arrays skip it.
     if (allowStorageImageAccess && !hasDepth && !SupportsStorageImageUsage(m_physicalDevice, ToVkFormat(format))) {
         throw std::runtime_error(
             "GpuResourceFactory::CreateTextureArray: requested allowStorageImageAccess = true, but this "
@@ -513,10 +488,7 @@ MaterialTexture GpuResourceFactory::CreateMaterialTexture2D(
     write.pImageInfo = &imageInfo;
     vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
 
-    // Registered ONCE, here, at creation time - this VkDescriptorSet is
-    // pool-owned and never individually freed/reallocated afterward (see
-    // MaterialTexture.h's own doc comment), so there is exactly one
-    // RegisterDescriptorSet() call for this set's entire lifetime.
+    // Registered once; the set is pool-owned and never freed or reallocated individually.
     return MaterialTexture{ std::move(texture), RegisterDescriptorSet(descriptorSet) };
 }
 

@@ -544,9 +544,7 @@ void AtmosphereLutRenderer::Impl::DrawSkyBackgroundPass(Renderer& renderer, rg::
 
     EnsureSkyBackgroundPipelineInitialized(renderer);
 
-    // Unwrap to native Vulkan only right here, at the single leaf call that
-    // actually needs it - GraphicsHandleRegistry.h is the only place these
-    // handles ever convert back to a real Vk* value.
+    // Handles are unwrapped to native Vulkan only at this leaf call.
     skyBackgroundDescriptorSet.Rewrite(
         std::vector<ComputeDescriptorWrite>{
             ComputeDescriptorWrite::CombinedImageSampler(0, Native(skyViewLutView), Native(skyViewLutSampler)),
@@ -575,9 +573,7 @@ void AtmosphereLutRenderer::Impl::DrawSkyBackground(Renderer& renderer, rg::Comm
         return;
     }
 
-    // Resolve this frame's raw Vk snapshot fields into stable, engine-owned
-    // handles once here - DrawSkyBackgroundPass() itself never sees a raw
-    // VkImageView/VkSampler.
+    // Resolve raw snapshot fields into engine handles; DrawSkyBackgroundPass() never sees raw Vk handles.
     const ImageViewHandle skyViewLutView = skyViewLutImageViewHandle.Resolve(snapshot->target.imageView);
     const SamplerHandle skyViewLutSampler = skyViewLutSamplerHandle.Resolve(snapshot->sampler);
 

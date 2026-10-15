@@ -6,10 +6,7 @@ namespace gte::rg {
 
 ResourceState RequiredStateFor(ResourceAccess access, bool isDepthResource) noexcept
 {
-    // Deliberately NO `default:` case - see this file's header comment and
-    // RenderGraphTypes.cpp's IsWriteAccess()/ToString() for the same rule:
-    // a future ResourceAccess enumerator added without updating this
-    // switch must fail to compile here, never silently fall through.
+    // No `default:` on purpose: a new ResourceAccess must fail to compile here.
     switch (access) {
     case ResourceAccess::ColorAttachmentWrite:
         assert(!isDepthResource &&
@@ -25,13 +22,7 @@ ResourceState RequiredStateFor(ResourceAccess access, bool isDepthResource) noex
             "RequiredStateFor: DepthStencilAttachmentReadWrite requested against a resource NOT flagged as "
             "depth - these two ResourceAccess/isDepthResource combinations are mutually exclusive by "
             "construction.");
-        // Matches FrameRecorder.cpp's existing `toDepthAttachment` barrier
-        // fields exactly (this phase's own load-bearing regression
-        // requirement - see RENDERGRAPH_PHASE5_BARRIER_SYNTHESIS_STRATEGY_v2.md,
-        // Step 3.4) - dstAccessMask is WRITE only (not READ | WRITE),
-        // matching the old hand-written code precisely, even though a
-        // depth test both reads (early fragment test) and writes (late
-        // fragment test) the attachment.
+        // Access mask is WRITE only (not READ | WRITE), matching the established depth-attachment barrier.
         return ResourceState{
             VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
@@ -56,50 +47,29 @@ ResourceState RequiredStateFor(ResourceAccess access, bool isDepthResource) noex
             VK_ACCESS_2_TRANSFER_WRITE_BIT,
         };
     case ResourceAccess::ComputeShaderRead:
-        // Phase 5 (COMPUTE_PHASE5_SYNCHRONIZATION_STRATEGY_v2.md) - valid
-        // for BOTH resource kinds: for a texture (an RWTexture read via
-        // imageLoad/sampler2D-as-storage-image), VK_IMAGE_LAYOUT_GENERAL is
-        // the only layout a storage image can be read/written through in
-        // core Vulkan; for a buffer (a StructuredBuffer/RWStructuredBuffer),
-        // `layout` is simply ignored (see BuildBufferMemoryBarrier2() and
-        // this file's own ResourceState comment) - the exact same
-        // ResourceState value applies to both kinds, matching
-        // TransferSrc/TransferDst's own existing dual applicability above.
+        // Textures: GENERAL is the only layout a storage image can be read/written in. Buffers ignore layout.
         return ResourceState{
             VK_IMAGE_LAYOUT_GENERAL,
             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
             VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
         };
     case ResourceAccess::ComputeShaderWrite:
-        // The write-side counterpart of ComputeShaderRead immediately
-        // above - same layout/stage, WRITE access instead of READ.
+        // Same layout/stage as ComputeShaderRead, write access.
         return ResourceState{
             VK_IMAGE_LAYOUT_GENERAL,
             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
             VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
         };
     case ResourceAccess::IndirectCommandRead:
-        // Buffer-only in practice (see RenderGraphTypes.h's own comment on
-        // this enumerator) - `layout` is left at its default
-        // (VK_IMAGE_LAYOUT_UNDEFINED) since it is never read for a buffer
-        // barrier (BuildBufferMemoryBarrier2() never touches it).
+        // Buffer-only; layout is unused.
         return ResourceState{
             VK_IMAGE_LAYOUT_UNDEFINED,
             VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
             VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
         };
     case ResourceAccess::VertexBufferRead:
-        // GPU Vertex Skinning campaign, Phase 3
-        // (GPU_SKINNING_PHASE3_RENDERGRAPH_SYNCHRONIZATION_STRATEGY_v2.md) -
-        // buffer-only in practice, same as IndirectCommandRead immediately
-        // above (`layout` left at its default, never read for a buffer
-        // barrier). The fixed-function vertex-input assembler stage reads
-        // a bound vertex buffer at VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT
-        // with VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT - this is what a
-        // GPU-skinned model's graphics pass declares to synchronize
-        // against the skinning compute pass's own ComputeShaderWrite of
-        // the exact same buffer (see RenderGraphTypes.h's own doc comment
-        // on this enumerator for the full "phantom read" reasoning).
+        // Buffer-only; layout is unused. Sync against a compute pass that wrote the same vertex buffer
+        // (e.g. GPU skinning) via the vertex-input stage.
         return ResourceState{
             VK_IMAGE_LAYOUT_UNDEFINED,
             VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT,
@@ -118,21 +88,13 @@ ResourceState RequiredStateFor(ResourceAccess access, bool isDepthResource) noex
 
 bool TargetsDepthState(ResourceAccess access) noexcept
 {
-    // DepthStencilAttachmentReadWrite is the ONE ResourceAccess value that
-    // targets a texture's depth half - everything else (including the
-    // Phase 5 compute-shader additions, ComputeShaderRead/ComputeShaderWrite)
-    // targets its color half. See this function's own doc comment.
+    // The only access that targets a texture's depth half; everything else targets color.
     return access == ResourceAccess::DepthStencilAttachmentReadWrite;
 }
 
 bool IsColorAttachmentWriteAccess(ResourceAccess access) noexcept
 {
-    // ColorAttachmentWrite is the ONE ResourceAccess value that marks a
-    // pass as needing a real vkCmdBeginRendering COLOR attachment bracket
-    // in RenderGraph::Execute() - everything else (including the Phase 5
-    // compute-shader additions, ComputeShaderRead/ComputeShaderWrite, used
-    // by Phase 6 of the compute-shader campaign's WriteTexture()) must
-    // never trigger one. See this function's own doc comment.
+    // The only access that needs a vkCmdBeginRendering color attachment bracket.
     return access == ResourceAccess::ColorAttachmentWrite;
 }
 

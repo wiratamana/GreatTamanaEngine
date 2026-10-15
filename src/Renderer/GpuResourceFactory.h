@@ -43,18 +43,13 @@ public:
     GpuResourceFactory(GpuResourceFactory&&) = delete;
     GpuResourceFactory& operator=(GpuResourceFactory&&) = delete;
 
-    // Render textures - `format` is this engine's own PixelFormat (never a
-    // raw VkFormat); translated internally wherever Vulkan actually needs
-    // it (the real VkFormat constructors of RenderTexture/VolumeTexture/
-    // TextureArray2D themselves - see each class's own constructor body).
+    // Render textures - `format` is the engine's PixelFormat, never a raw VkFormat.
     RenderTexture CreateRenderTexture(int width, int height, PixelFormat format, const char* debugName,
         const char* depthDebugName = nullptr, bool allowStorageImageAccess = false,
         bool allowDepthSampledAccess = false, bool createDepthCompanion = true,
         bool createColorImage = true) const;
 
-    // Buffers - `usage`/`extraUsage` are this engine's own BufferUsage
-    // bitmask (Buffer.h), never a raw VkBufferUsageFlags - see BufferUsage's
-    // own doc comment for why.
+    // Buffers - `usage`/`extraUsage` use the engine's BufferUsage bitmask, never raw Vulkan flags.
     Buffer CreateBuffer(uint64_t size, BufferUsage usage, BufferMemoryUsage memoryUsage,
         const char* debugName = nullptr) const;
 

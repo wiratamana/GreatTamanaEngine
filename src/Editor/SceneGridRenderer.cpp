@@ -30,18 +30,11 @@ void SceneGridRenderer::EnsurePipeline(Renderer& renderer)
     }
     m_renderer = &renderer;
 
-    // Full-screen triangle synthesized from gl_VertexIndex - no vertex
-    // input. Depth TEST enabled (occluded correctly by real scene geometry),
-    // depth WRITE disabled (a semi-transparent overlay must never poison the
-    // depth buffer), standard alpha blending.
+    // Fullscreen triangle from gl_VertexIndex. Depth test on, depth write off: a translucent overlay must not touch depth.
     PipelineDesc desc = PipelinePreset::AlphaBlend(renderer.ColorPixelFormat(), renderer.DepthPixelFormat());
     desc.vertexLayout = VertexLayout::None;
     desc.cullMode = CullMode::None;
-    // mat4 invViewProj immediately followed by mat4 viewProj, 128 bytes
-    // total, FRAGMENT stage only - matches SceneGrid.frag's own
-    // layout(push_constant) block exactly. Deliberately NOT
-    // ShaderStageMask::Vertex (unlike every other pipeline in this engine) -
-    // SceneGrid.vert reads no push constants at all.
+    // Fragment-only push constants (invViewProj + viewProj); must match SceneGrid.frag's push block.
     desc.layout.pushConstantByteSize = sizeof(float) * 32; // 2 x mat4
     desc.layout.pushConstantStages = ShaderStageMask::Fragment;
 

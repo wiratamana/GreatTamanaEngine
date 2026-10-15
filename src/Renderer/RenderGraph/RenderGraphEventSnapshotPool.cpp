@@ -5,8 +5,7 @@
 
 namespace gte::rg {
 
-// Mirrors Texture2D.cpp's own ctor/dtor/move pattern - VMA image + VMA
-// allocation + GpuMemoryTracker registration, never raw new/delete.
+// Owns a VMA image, its allocation and its GpuMemoryTracker entry.
 EventSnapshotResource::EventSnapshotResource(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker,
     VkDevice device, VkExtent2D extent, VkFormat format, VkImageAspectFlags aspect, const char* debugName)
     : m_allocator(allocator)
@@ -25,10 +24,8 @@ EventSnapshotResource::EventSnapshotResource(VmaAllocator allocator, std::shared
     imageInfo.arrayLayers = 1;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    // TRANSFER_DST: copied into every capture. SAMPLED: displayed later via
-    // an ImGui/HTTP-readback descriptor. COLOR/DEPTH_ATTACHMENT mirrors the
-    // source resource's own usage class - never actually rendered into here,
-    // kept only so validation stays clean.
+    // TRANSFER_DST: copied into on capture. SAMPLED: shown later by the UI / HTTP readback.
+    // The attachment bit only mirrors the source's usage class (keeps validation clean).
     imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
         | (isDepth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -101,8 +98,7 @@ EventSnapshotResource& EventSnapshotResource::operator=(EventSnapshotResource&& 
     return *this;
 }
 
-// Safe on a default-constructed or already-moved-from instance - every
-// handle is VK_NULL_HANDLE in that state, so both guards below are no-ops.
+// Safe on a default-constructed or moved-from instance (all handles null).
 void EventSnapshotResource::Destroy() noexcept
 {
     if (m_imageView != VK_NULL_HANDLE) {
@@ -129,11 +125,8 @@ void CopyImageIntoSnapshot(VkCommandBuffer cmd, EventSnapshotResource& dst, VmaA
 
     const VkImageSubresourceRange range{ aspect, 0, 1, 0, 1 };
 
-    // Side-channel copy: barrier src to TRANSFER_SRC, barrier dst to
-    // TRANSFER_DST, copy, then barrier src back to EXACTLY srcState - the
-    // real pass graph's own tracked PhysicalTexture state never learns this
-    // happened. This is the one rule that makes this safe to bolt onto an
-    // already-correct barrier planner without corrupting it.
+    // Side-channel copy: src goes to TRANSFER_SRC and back to EXACTLY srcState, so the graph's own
+    // tracked state never sees it.
     const ResourceState srcTransfer{
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT
     };
@@ -169,12 +162,8 @@ void CopyImageIntoSnapshot(VkCommandBuffer cmd, EventSnapshotResource& dst, VmaA
     dst.State() = dstRead;
 }
 
-// Pre-sizes m_slots up front to its full, fixed capacity - the region
-// protection this class exists for only holds if every physical area
-// already exists before the first real capture ever runs. Every entry
-// starts default-constructed (all-null handles, Extent() == {0,0}) -
-// AcquireSlot() treats that as "first real use" and replaces it in place
-// exactly like a genuine resize.
+// Pre-sizes m_slots to its fixed capacity so every region exists before the first capture.
+// A default-constructed slot (Extent() == {0,0}) is replaced in place on first use.
 RenderGraphEventSnapshotPool::RenderGraphEventSnapshotPool(VmaAllocator allocator,
     std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, std::uint32_t slotBudget, std::uint32_t framesInFlight)
     : m_allocator(allocator)
@@ -203,11 +192,8 @@ std::int32_t RenderGraphEventSnapshotPool::CaptureAfterPass(VkCommandBuffer cmd,
 EventSnapshotResource& RenderGraphEventSnapshotPool::AcquireSlot(
     VkExtent2D /*extent*/, VkFormat /*format*/, VkImageAspectFlags /*aspect*/)
 {
-    // Physical index = this call's own EXCLUSIVE region - m_slots is
-    // pre-sized to m_slotBudget * m_regionCount in the constructor, so this
-    // is always in-bounds; never grown/shrunk after that. The actual
-    // (re)creation-if-needed decision is CopyImageIntoSnapshot()'s job, not
-    // this method's - it always receives the right physical slot reference.
+    // m_slots is pre-sized in the constructor, so this index is always in bounds. Recreating on a size
+    // change is CopyImageIntoSnapshot()'s job.
     const std::size_t idx =
         static_cast<std::size_t>(m_activeRegion) * m_slotBudget + static_cast<std::size_t>(m_nextSlot - 1);
     return m_slots[idx];
