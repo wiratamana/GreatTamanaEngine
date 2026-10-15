@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "GraphicsHandleRegistry.h"
 #include "Memory/GpuMemoryTracker.h"
@@ -118,6 +118,10 @@ public:
     // checked explicitly (rather than left as a caller responsibility)
     // because memcpy has no idea how large the destination allocation is.
     void Upload(const void* data, std::size_t size, std::size_t offset = 0);
+
+    // Copies `size` bytes at `offset` out of the mapped memory, invalidating the CPU cache first so GPU writes are
+    // seen on non-coherent memory. False when the buffer is not host-mapped or the range is out of bounds.
+    bool Download(void* data, std::size_t size, std::size_t offset = 0) const;
 
     // Handle into the GpuMemoryTracker this Buffer is registered with -
     // valid for this Buffer's entire lifetime, kInvalidGpuResourceHandle

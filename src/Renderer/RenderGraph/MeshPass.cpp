@@ -3,7 +3,6 @@
 #include "PassKindDefaults.h"
 #include "RenderGraph.h"
 #include "../Renderer.h"
-#include "../../Core/Logging.h"
 
 #include <cassert>
 #include <utility>
@@ -56,8 +55,13 @@ MeshPass::~MeshPass()
 {
     if (!m_drawn) {
         assert(false && "MeshPass destroyed without Draw()");
-        GTE_LOG_ERROR("MeshPass", std::string("Pass '") + m_name.value + "': chain ended without Draw(): nothing was declared");
+        Report("chain ended without Draw(): nothing was declared");
     }
+}
+
+void MeshPass::Report(const std::string& text)
+{
+    m_builder.ReportOnce("MeshPass", std::string("Pass '") + m_name.value + "': " + text);
 }
 
 MeshPass& MeshPass::Color(TextureHandle target, std::optional<std::array<float, 4>> clear)
@@ -77,16 +81,16 @@ MeshPass& MeshPass::Depth(TextureHandle target, std::optional<float> clear)
 bool MeshPass::Draw(std::function<void()> draw)
 {
     if (m_drawn) {
-        GTE_LOG_ERROR("MeshPass", std::string("Pass '") + m_name.value + "': Draw() called twice on one chain");
+        Report("Draw() called twice on one chain");
         return false;
     }
     m_drawn = true;
     if (const auto error = ValidateMeshPassRecord(m_record)) {
-        GTE_LOG_ERROR("MeshPass", std::string("Pass '") + m_name.value + "': " + *error);
+        Report(*error);
         return false;
     }
     if (!draw) {
-        GTE_LOG_ERROR("MeshPass", std::string("Pass '") + m_name.value + "': no draw function was given");
+        Report("no draw function was given");
         return false;
     }
 

@@ -411,6 +411,7 @@ PassContext RenderGraph::BuildPassContext(VkCommandBuffer cmd, std::vector<Physi
     ctx.buffers = &physicalBuffers;
     ctx.renderer = m_renderer;
     ctx.eventSink = m_frameDebuggerEventSink;
+    ctx.onceLog = &m_onceLog;
     ctx.recordDraw.drawStats = &passDrawStats;
     ctx.recordIndirectDraw.drawStats = &passDrawStats;
     return ctx;

@@ -37,9 +37,11 @@ TextureDesc ColorDesc(PixelFormat format)
 
 // A bare builder with a renderer and a frame counter, enough to build shaders and declare passes.
 struct DeclareScene {
-    DeclareScene(HeadlessRenderGraphFixture& fixture, std::uint64_t frame, PixelFormat targetFormat)
+    DeclareScene(HeadlessRenderGraphFixture& fixture, std::uint64_t frame, PixelFormat targetFormat,
+        OnceErrorLog* onceLog = nullptr)
     {
         builder.SetRenderer(&fixture.GetRenderer());
+        builder.SetOnceLog(onceLog);
         builder.SetPersistentResourceCache(nullptr, kSync, frame);
         source = builder.CreateTexture("Source", ColorDesc(PixelFormat::RGBA8_UNorm));
         mask = builder.CreateTexture("Mask", ColorDesc(PixelFormat::R8_UNorm));
@@ -113,9 +115,10 @@ TEST(FullscreenPassTest, UnknownBindingNameDeclaresNothingAndIsLoggedOnce)
     RecordingLogSink sink;
     const ScopedLogSinkInstall logGuard(&sink);
     Shader shader("ReflectFixture", ShaderKind::Graphics);
+    OnceErrorLog onceLog;
 
     for (std::uint64_t frame = 1; frame <= 2; ++frame) {
-        DeclareScene scene(fixture, frame, PixelFormat::RGBA8_UNorm);
+        DeclareScene scene(fixture, frame, PixelFormat::RGBA8_UNorm, &onceLog);
         const bool drawn = FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::GameView)
                                .Bind("nope", scene.source)
                                .Bind("sourceMask", scene.mask)
@@ -245,12 +248,13 @@ TEST(FullscreenPassTest, ErrorsPastTheOnceCapAreCoveredByOneHonestSuppressedNoti
     RecordingLogSink sink;
     const ScopedLogSinkInstall logGuard(&sink);
     Shader shader("ReflectFixture", ShaderKind::Graphics);
+    OnceErrorLog onceLog;
 
-    // 64 distinct messages fit; every later distinct message must not be logged again.
-    constexpr int kAttempts = 70;
+    // The log holds 128 distinct messages; every later distinct message must not be logged again.
+    constexpr int kAttempts = 140;
     for (int i = 0; i < kAttempts; ++i) {
         const std::string badName = "nope" + std::to_string(i);
-        DeclareScene scene(fixture, static_cast<std::uint64_t>(i + 1), PixelFormat::RGBA8_UNorm);
+        DeclareScene scene(fixture, static_cast<std::uint64_t>(i + 1), PixelFormat::RGBA8_UNorm, &onceLog);
         EXPECT_FALSE(FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::GameView)
                          .Bind(badName, scene.source)
                          .Bind("sourceMask", scene.mask)
@@ -259,7 +263,7 @@ TEST(FullscreenPassTest, ErrorsPastTheOnceCapAreCoveredByOneHonestSuppressedNoti
                          .Draw());
     }
 
-    EXPECT_EQ(CountByCategory(sink, "PassChain"), 65);
+    EXPECT_EQ(CountByCategory(sink, "PassChain"), 129);
     ASSERT_FALSE(sink.entries.empty());
     int notices = 0;
     for (const RecordingLogSink::Recorded& entry : sink.entries) {

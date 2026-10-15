@@ -30,11 +30,13 @@ struct TransferRecord {
     std::uint64_t dstOffset = 0;
     std::uint32_t fillValue = 0;
     std::array<float, 4> clearColor{};
+    bool hostRead = false; // Buffer copy whose destination the CPU reads after the frame (adds a HOST barrier).
 
     static TransferRecord Fill(BufferHandle dst, std::uint32_t value, std::uint64_t offset = 0,
         std::uint64_t size = kWholeBuffer);
     static TransferRecord CopyBuffer(BufferHandle src, BufferHandle dst, std::uint64_t size,
         std::uint64_t srcOffset = 0, std::uint64_t dstOffset = 0);
+    static TransferRecord Readback(BufferHandle src, BufferHandle hostBuffer, std::uint64_t size);
     static TransferRecord CopyTexture(TextureHandle src, TextureHandle dst);
     static TransferRecord Clear(TextureHandle dst, const std::array<float, 4>& color);
 };
@@ -74,6 +76,7 @@ public:
 
 private:
     void Set(const TransferRecord& record);
+    void Report(const std::string& text);
 
     RenderGraphBuilder& m_builder;
     StaticName m_name;

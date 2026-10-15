@@ -1,13 +1,10 @@
 #include "TransferPass.h"
 
-#include "BoundedOnceSet.h"
 #include "PassKindDefaults.h"
 #include "RenderGraph.h"
-#include "../../Core/Logging.h"
 
 #include <algorithm>
 #include <cassert>
-#include <mutex>
 #include <utility>
 
 namespace gte::rg {
@@ -16,25 +13,14 @@ namespace {
 
 constexpr const char* kLogCategory = "TransferPass";
 
-// Logs a message once per distinct text, so a bad chain declared every frame cannot flood the log.
-void LogOnce(const std::string& message)
-{
-    static std::mutex mutex;
-    static BoundedOnceSet<32> seen;
-    const std::scoped_lock lock(mutex);
-    switch (seen.Note(message)) {
-    case BoundedOnceSet<32>::Result::First:
-        GTE_LOG_ERROR(kLogCategory, message);
-        break;
-    case BoundedOnceSet<32>::Result::Overflow:
-        GTE_LOG_ERROR(kLogCategory, "Further transfer pass errors are suppressed");
-        break;
-    default:
-        break;
-    }
-}
-
 } // namespace
+
+TransferRecord TransferRecord::Readback(BufferHandle src, BufferHandle hostBuffer, std::uint64_t size)
+{
+    TransferRecord record = CopyBuffer(src, hostBuffer, size);
+    record.hostRead = true;
+    return record;
+}
 
 TransferRecord TransferRecord::Fill(BufferHandle dst, std::uint32_t value, std::uint64_t offset, std::uint64_t size)
 {
@@ -150,46 +136,74 @@ void ExecuteTransfer(PassContext& ctx, const TransferRecord& record)
 {
     using Op = TransferRecord::Op;
     const VkCommandBuffer cmd = ctx.RawCommandBuffer();
+    const auto unresolved = [&ctx](const char* what) {
+        ctx.ReportOnce(kLogCategory, std::string("transfer skipped: ") + what + " did not resolve");
+    };
     switch (record.op) {
     case Op::None:
         break;
     case Op::FillBuffer: {
         const VkBuffer buffer = ctx.resolveBuffer(record.dstBuffer);
-        if (buffer != VK_NULL_HANDLE) {
-            vkCmdFillBuffer(cmd, buffer, record.dstOffset, record.size, record.fillValue);
+        if (buffer == VK_NULL_HANDLE) {
+            unresolved("the fill buffer");
+            break;
         }
+        vkCmdFillBuffer(cmd, buffer, record.dstOffset, record.size, record.fillValue);
         break;
     }
     case Op::CopyBuffer: {
         const VkBuffer src = ctx.resolveBuffer(record.srcBuffer);
         const VkBuffer dst = ctx.resolveBuffer(record.dstBuffer);
-        if (src != VK_NULL_HANDLE && dst != VK_NULL_HANDLE) {
-            const VkBufferCopy region{ record.srcOffset, record.dstOffset, record.size };
-            vkCmdCopyBuffer(cmd, src, dst, 1, &region);
+        if (src == VK_NULL_HANDLE || dst == VK_NULL_HANDLE) {
+            unresolved(src == VK_NULL_HANDLE ? "the source buffer" : "the destination buffer");
+            break;
+        }
+        const VkBufferCopy region{ record.srcOffset, record.dstOffset, record.size };
+        vkCmdCopyBuffer(cmd, src, dst, 1, &region);
+        if (record.hostRead) {
+            // Make the copy visible to the host read that follows the frame's fence wait.
+            VkBufferMemoryBarrier2 barrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+            barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            barrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+            barrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.buffer = dst;
+            barrier.offset = record.dstOffset;
+            barrier.size = record.size;
+            VkDependencyInfo dependency{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            dependency.bufferMemoryBarrierCount = 1;
+            dependency.pBufferMemoryBarriers = &barrier;
+            vkCmdPipelineBarrier2(cmd, &dependency);
         }
         break;
     }
     case Op::CopyTexture: {
         const PassContext::ResolvedImage src = ctx.resolveColorImage(record.srcTexture);
         const PassContext::ResolvedImage dst = ctx.resolveColorImage(record.dstTexture);
-        if (src.image != VK_NULL_HANDLE && dst.image != VK_NULL_HANDLE) {
-            VkImageCopy region{};
-            region.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-            region.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-            region.extent = { std::min(src.extent.width, dst.extent.width), std::min(src.extent.height, dst.extent.height), 1 };
-            vkCmdCopyImage(cmd, src.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst.image,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        if (src.image == VK_NULL_HANDLE || dst.image == VK_NULL_HANDLE) {
+            unresolved(src.image == VK_NULL_HANDLE ? "the source texture" : "the destination texture");
+            break;
         }
+        VkImageCopy region{};
+        region.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        region.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        region.extent = { std::min(src.extent.width, dst.extent.width), std::min(src.extent.height, dst.extent.height), 1 };
+        vkCmdCopyImage(cmd, src.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst.image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
         break;
     }
     case Op::ClearTexture: {
         const PassContext::ResolvedImage dst = ctx.resolveColorImage(record.dstTexture);
-        if (dst.image != VK_NULL_HANDLE) {
-            VkClearColorValue color{};
-            std::copy(record.clearColor.begin(), record.clearColor.end(), color.float32);
-            const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-            vkCmdClearColorImage(cmd, dst.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1, &range);
+        if (dst.image == VK_NULL_HANDLE) {
+            unresolved("the clear target");
+            break;
         }
+        VkClearColorValue color{};
+        std::copy(record.clearColor.begin(), record.clearColor.end(), color.float32);
+        const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        vkCmdClearColorImage(cmd, dst.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1, &range);
         break;
     }
     }
@@ -207,7 +221,7 @@ TransferPass::~TransferPass()
 {
     if (!m_recorded) {
         assert(false && "TransferPass destroyed without Record()");
-        LogOnce(std::string("Pass '") + m_name.value + "': chain ended without Record(): nothing was declared");
+        Report("chain ended without Record(): nothing was declared");
     }
 }
 
@@ -244,7 +258,7 @@ TransferPass& TransferPass::Clear(TextureHandle dst, const std::array<float, 4>&
 
 TransferPass& TransferPass::Readback(BufferHandle src, BufferHandle hostBuffer, std::uint64_t size)
 {
-    Set(TransferRecord::CopyBuffer(src, hostBuffer, size));
+    Set(TransferRecord::Readback(src, hostBuffer, size));
     m_keep = hostBuffer;
     return *this;
 }
@@ -252,17 +266,17 @@ TransferPass& TransferPass::Readback(BufferHandle src, BufferHandle hostBuffer, 
 bool TransferPass::Record()
 {
     if (m_recorded) {
-        LogOnce(std::string("Pass '") + m_name.value + "': Record() called twice on one chain");
+        Report("Record() called twice on one chain");
         return false;
     }
     m_recorded = true;
 
     if (m_duplicateOp) {
-        LogOnce(std::string("Pass '") + m_name.value + "': one transfer pass carries one operation");
+        Report("one transfer pass carries one operation");
         return false;
     }
     if (const auto error = ValidateTransferRecord(m_record)) {
-        LogOnce(std::string("Pass '") + m_name.value + "': " + *error);
+        Report(*error);
         return false;
     }
 
@@ -275,6 +289,11 @@ bool TransferPass::Record()
         m_builder.KeepBufferOutput(m_keep);
     }
     return true;
+}
+
+void TransferPass::Report(const std::string& text)
+{
+    m_builder.ReportOnce(kLogCategory, std::string("Pass '") + m_name.value + "': " + text);
 }
 
 } // namespace gte::rg

@@ -13,6 +13,7 @@
 #include "../Renderer/RenderGraph/PassKindDefaults.h"
 #include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
+#include "../Renderer/RenderGraph/RecordedPass.h"
 #include "../Renderer/RenderGraph/TransferPass.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
 #include "../Renderer/RenderGraph/RenderFeatureScope.h"
@@ -783,17 +784,16 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     indirectDrawEnabledThisFrame, batch.entities, m_gpuDrivenBatchedEntitiesThisFrame);
 
                 // --- Reset instance count buffer ---
-                {
-                    const rg::TransferRecord reset = rg::TransferRecord::Fill(countHandle, 0, 0, sizeof(std::uint32_t));
-
+                if (auto body = rg::MakeTransferBody(frame.builder, batch.resetPassName,
+                        rg::TransferRecord::Fill(countHandle, 0, 0, sizeof(std::uint32_t)))) {
                     rg::RenderPassDesc desc;
                     desc.debugName = batch.resetPassName;
                     desc.kind = rg::DefaultPassKind(rg::DeclarativePassType::Transfer);
                     desc.order = rg::RenderPassEvent::Opaques;
                     desc.view = frame.currentView;
                     desc.owningFeatureName = "GPU Driven Batches";
-                    desc.setup = [reset](rg::RenderGraphBuilder::PassBuilder& pass) { rg::DeclareTransfer(pass, reset); };
-                    desc.execute = [reset](rg::PassContext& ctx) { rg::ExecuteTransfer(ctx, reset); };
+                    desc.setup = std::move(body->setup);
+                    desc.execute = std::move(body->execute);
                     out.push_back(std::move(desc));
                 }
 
@@ -846,18 +846,8 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     record.maxDrawCount = static_cast<std::uint32_t>(instanceCount);
                     record.useCount = useCompaction;
 
-                    rg::RenderPassDesc desc;
-                    desc.debugName = batch.indirectDrawPassName;
-                    desc.kind = rg::DefaultPassKind(rg::DeclarativePassType::IndirectDraw);
-                    desc.order = rg::RenderPassEvent::Opaques;
-                    desc.view = frame.currentView;
-                    desc.legacyCategory = rg::RenderPassCategory::General;
-                    desc.owningFeatureName = "GPU Driven Batches";
-                    desc.setup = [record](rg::RenderGraphBuilder::PassBuilder& pass) {
-                        rg::DeclareIndirectDraw(pass, record);
-                    };
-                    desc.execute = [this, record, meshHandle, originalPipelineHandle, instanceBufferDescriptorSet,
-                                        viewProjection, currentViewForServices](rg::PassContext& ctx) {
+                    auto resolveInputs = [this, meshHandle, originalPipelineHandle, instanceBufferDescriptorSet,
+                                             viewProjection, currentViewForServices]() {
                         rg::IndirectDrawInputs inputs;
                         inputs.mesh = m_game.GetRenderSystem().TryGetMesh(meshHandle);
                         try {
@@ -873,28 +863,39 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                         inputs.instanceSet = instanceBufferDescriptorSet;
                         inputs.sceneSet = m_sceneServicesDescriptorSet.DescriptorSetFor(currentViewForServices);
                         inputs.viewProjection = viewProjection;
-                        rg::ExecuteIndirectDraw(ctx, record, inputs);
+                        return inputs;
                     };
-                    out.push_back(std::move(desc));
+
+                    if (auto body = rg::MakeIndirectDrawBody(
+                            frame.builder, batch.indirectDrawPassName, record, std::move(resolveInputs))) {
+                        rg::RenderPassDesc desc;
+                        desc.debugName = batch.indirectDrawPassName;
+                        desc.kind = rg::DefaultPassKind(rg::DeclarativePassType::IndirectDraw);
+                        desc.order = rg::RenderPassEvent::Opaques;
+                        desc.view = frame.currentView;
+                        desc.legacyCategory = rg::RenderPassCategory::General;
+                        desc.owningFeatureName = "GPU Driven Batches";
+                        desc.setup = std::move(body->setup);
+                        desc.execute = std::move(body->execute);
+                        out.push_back(std::move(desc));
+                    }
                 }
 
                 // --- Visible count readback for the debug panel ---
                 {
-                    const rg::TransferRecord readback = rg::TransferRecord::CopyBuffer(
-                        countHandle, batch.readbackHandle, sizeof(std::uint32_t));
                     frame.builder.KeepBufferOutput(batch.readbackHandle);
-
-                    rg::RenderPassDesc desc;
-                    desc.debugName = batch.readbackPassName;
-                    desc.kind = rg::DefaultPassKind(rg::DeclarativePassType::Transfer);
-                    desc.order = rg::RenderPassEvent::Opaques;
-                    desc.view = frame.currentView;
-                    desc.owningFeatureName = "GPU Driven Batches";
-                    desc.setup = [readback](rg::RenderGraphBuilder::PassBuilder& pass) {
-                        rg::DeclareTransfer(pass, readback);
-                    };
-                    desc.execute = [readback](rg::PassContext& ctx) { rg::ExecuteTransfer(ctx, readback); };
-                    out.push_back(std::move(desc));
+                    if (auto body = rg::MakeTransferBody(frame.builder, batch.readbackPassName,
+                            rg::TransferRecord::Readback(countHandle, batch.readbackHandle, sizeof(std::uint32_t)))) {
+                        rg::RenderPassDesc desc;
+                        desc.debugName = batch.readbackPassName;
+                        desc.kind = rg::DefaultPassKind(rg::DeclarativePassType::Transfer);
+                        desc.order = rg::RenderPassEvent::Opaques;
+                        desc.view = frame.currentView;
+                        desc.owningFeatureName = "GPU Driven Batches";
+                        desc.setup = std::move(body->setup);
+                        desc.execute = std::move(body->execute);
+                        out.push_back(std::move(desc));
+                    }
                 }
             }
         });

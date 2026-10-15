@@ -1,4 +1,4 @@
-﻿#include "Buffer.h"
+#include "Buffer.h"
 
 #include <cstdint>
 #include <cstring>
@@ -149,6 +149,18 @@ void Buffer::Upload(const void* data, std::size_t size, std::size_t offset)
             ") exceeds this buffer's size (" + std::to_string(bufferSize) + " bytes).");
     }
     std::memcpy(static_cast<std::uint8_t*>(m_mappedData) + offset, data, size);
+}
+
+bool Buffer::Download(void* data, std::size_t size, std::size_t offset) const
+{
+    const auto bufferSize = static_cast<std::size_t>(m_size);
+    if (m_mappedData == nullptr || offset > bufferSize || size > bufferSize - offset) {
+        return false;
+    }
+    // Host-visible memory is not guaranteed coherent; this is a no-op when it is.
+    vmaInvalidateAllocation(m_allocator, m_allocation, static_cast<VkDeviceSize>(offset), static_cast<VkDeviceSize>(size));
+    std::memcpy(data, static_cast<const std::uint8_t*>(m_mappedData) + offset, size);
+    return true;
 }
 
 void Buffer::Destroy() noexcept

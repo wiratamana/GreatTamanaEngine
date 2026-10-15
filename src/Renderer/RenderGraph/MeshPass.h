@@ -66,6 +66,8 @@ public:
     bool Draw(std::function<void()> draw);
 
 private:
+    void Report(const std::string& text);
+
     RenderGraphBuilder& m_builder;
     StaticName m_name;
     ViewScope m_scope;

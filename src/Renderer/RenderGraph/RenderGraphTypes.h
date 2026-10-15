@@ -98,7 +98,7 @@ struct TextureDesc {
     std::uint32_t arrayLayers = 1; // Layer count (Array2D/Cube; cube needs a positive multiple of 6 and width == height).
     // Format of the depth companion. Set only on imported textures; Undefined means "the renderer's depth format".
     PixelFormat depthFormat = PixelFormat::Undefined;
-    // True when the texture has a color image. False only for depth-only textures (a shadow map): those are
+    // True when the texture has a color image. False only for depth-only textures: those are
     // sampled through rg::Depth() and are never a color target or a storage image.
     bool hasColor = true;
 

@@ -56,6 +56,7 @@ public:
         RenderGraphBuilder builder;
         builder.SetDebugMetadataSink(m_debugMetadataSink);
         builder.SetPassToggleRegistry(m_renderPassToggleRegistry);
+        builder.SetOnceLog(&m_onceLog);
         builder.SetPersistentResourceCache(&m_persistentResourceCache, timingMode, m_persistentResourceFrameCounter);
         builder.SetRenderer(m_renderer);
 
@@ -242,6 +243,7 @@ private:
 
     static constexpr std::size_t kMaxReportedSkippedBindings = 256;
     BoundedOnceSet<kMaxReportedSkippedBindings> m_reportedSkippedBindings;
+    OnceErrorLog m_onceLog;
 
     std::uint32_t m_pipelinedFrameCounter = 0;
     bool m_pipelinedHasWritten[kPipelinedTimingSlotBudget][kGpuTimingFramesInFlight]{};
@@ -303,6 +305,15 @@ struct PassContext {
 
     Renderer* renderer = nullptr;
     FrameDebuggerEventSink* eventSink = nullptr;
+
+    // The graph's once-log; set for every pass the graph executes.
+    OnceErrorLog* onceLog = nullptr;
+    void ReportOnce(std::string_view category, std::string_view text) const
+    {
+        if (onceLog != nullptr) {
+            onceLog->Error(category, text);
+        }
+    }
 
     DescriptorSetHandle computeDescriptorSet = DescriptorSetHandle::Invalid;
     DescriptorSetHandle BoundDescriptorSet() const noexcept { return computeDescriptorSet; }

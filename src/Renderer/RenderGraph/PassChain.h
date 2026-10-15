@@ -60,7 +60,7 @@ struct PassChainState {
         }
     }
 
-    // Logs "Pass '<name>': <text>" once per distinct message per shader.
+    // Logs "Pass '<name>': <text>" once per distinct message for the graph's lifetime.
     void Report(const std::string& text);
 
     // Starts the terminal call (Dispatch/Draw). False when the chain declares nothing: a second terminal call,

@@ -2,7 +2,6 @@
 
 #include "RenderGraphBuilder.h"
 #include "ShaderBindings.h"
-#include "../../Core/Logging.h"
 
 #include <cassert>
 #include <utility>
@@ -32,18 +31,7 @@ PassChainState::PassChainState(
 
 void PassChainState::Report(const std::string& text)
 {
-    const std::string message = std::string("Pass '") + name.value + "': " + text;
-    switch (shader.NoteOnce(message)) {
-    case OnceLog::Message:
-        GTE_LOG_ERROR(kLogCategory, message);
-        break;
-    case OnceLog::SuppressedNotice:
-        GTE_LOG_ERROR(kLogCategory,
-            "Further pass errors for shader '" + std::string(shader.Label()) + "' are suppressed");
-        break;
-    case OnceLog::Skip:
-        break;
-    }
+    builder.ReportOnce(kLogCategory, std::string("Pass '") + name.value + "': " + text);
 }
 
 bool PassChainState::Begin(const char* terminal)

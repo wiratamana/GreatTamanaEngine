@@ -2,6 +2,7 @@
 
 // Declarative builder API to record frame render passes and resources.
 
+#include "OnceErrorLog.h"
 #include "RenderGraphTypes.h"
 #include "RenderGraphDebugMetadataSink.h"
 #include "RenderGraphPersistentResourceCache.h"
@@ -359,6 +360,13 @@ public:
 
     void SetPassToggleRegistry(RenderPassToggleRegistry* registry) noexcept { m_passToggleRegistry = registry; }
 
+    // Installs the graph's once-log, so an error repeated every frame is logged once for the graph's lifetime.
+    void SetOnceLog(OnceErrorLog* log) noexcept { m_onceLog = log; }
+    void ReportOnce(std::string_view category, std::string_view text)
+    {
+        (m_onceLog != nullptr ? *m_onceLog : m_ownOnceErrorLog).Error(category, text);
+    }
+
 private:
     TextureHandle MintPersistentHandle(const RenderGraphPersistentResourceCache::ResolvedTexture& resolved);
 
@@ -391,6 +399,8 @@ private:
     IPassDebugMetadataSink* m_debugMetadataSink = nullptr;
     std::vector<std::string> m_owningFeatureScope;
     RenderPassToggleRegistry* m_passToggleRegistry = nullptr;
+    OnceErrorLog* m_onceLog = nullptr;
+    OnceErrorLog m_ownOnceErrorLog; // Used when no graph installed one (a bare builder).
 
     std::vector<TextureSlot> m_textures;
     std::vector<BufferSlot> m_buffers;

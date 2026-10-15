@@ -36,12 +36,15 @@ void DeclareIndirectDraw(RenderGraphBuilder::PassBuilder& pass, const IndirectDr
 
 void ExecuteIndirectDraw(PassContext& ctx, const IndirectDrawRecord& record, const IndirectDrawInputs& inputs)
 {
+    constexpr const char* kCategory = "IndirectDrawPass";
     if (inputs.pipeline == nullptr || inputs.mesh == nullptr || ctx.renderer == nullptr) {
+        ctx.ReportOnce(kCategory, "draw skipped: the pipeline, mesh or renderer is missing");
         return;
     }
     const VkBuffer indirect = ctx.resolveBuffer(record.indirect);
     const VkBuffer count = record.useCount ? ctx.resolveBuffer(record.count) : VK_NULL_HANDLE;
     if (indirect == VK_NULL_HANDLE || (record.useCount && count == VK_NULL_HANDLE)) {
+        ctx.ReportOnce(kCategory, "draw skipped: the indirect or count buffer did not resolve");
         return;
     }
 

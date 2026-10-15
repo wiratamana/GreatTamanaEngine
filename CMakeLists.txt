@@ -815,6 +815,10 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/MeshPass.cpp
     src/Renderer/RenderGraph/IndirectDrawPass.h
     src/Renderer/RenderGraph/IndirectDrawPass.cpp
+    src/Renderer/RenderGraph/RecordedPass.h
+    src/Renderer/RenderGraph/RecordedPass.cpp
+    src/Renderer/RenderGraph/OnceErrorLog.h
+    src/Renderer/RenderGraph/OnceErrorLog.cpp
     src/Renderer/RenderGraph/PassKindDefaults.h
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.h
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.cpp
