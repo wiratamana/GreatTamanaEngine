@@ -9,15 +9,17 @@
 #include "../../Game/Lighting/DirectionalLightResolver.h"
 #include "../../Game/SceneQuery.h"
 #include "../../Application/RenderPassViewData.h"
+#include "../../Renderer/PipelineHandle.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleGuard.h"
 #include "../../Renderer/RenderGraph/ViewScopeUtil.h"
 
 #include <algorithm>
 #include <cassert>
+#include <exception>
 #include <memory>
 #include <span>
-#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace gte {
@@ -57,18 +59,10 @@ ShadowFeature::ShadowFeature(Core& core)
     RegisterPasses();
 }
 
-// Compiles depth-only pipelines for supported vertex layouts with retry on failure.
-void ShadowFeature::EnsureDepthPipelinesBuilt(Renderer& renderer)
+// Builds the depth-only pipelines once. A failed build is rolled back and retried with back-off, never abandoned.
+void ShadowFeature::EnsureDepthPipelinesBuilt(Renderer& renderer, std::uint64_t frame)
 {
-    constexpr std::uint32_t kRetryCooldownFrames = 120;
-    constexpr std::uint32_t kMaxBuildAttempts = 5;
-
-    if (m_depthPipelinesBuilt || m_depthPipelineGaveUp) {
-        return;
-    }
-
-    if (m_depthPipelineRetryCooldownFramesRemaining > 0) {
-        --m_depthPipelineRetryCooldownFramesRemaining;
+    if (m_depthPipelinesBuilt || !m_depthPipelineGate.ShouldAttempt(frame)) {
         return;
     }
 
@@ -95,24 +89,16 @@ void ShadowFeature::EnsureDepthPipelinesBuilt(Renderer& renderer)
             renderSystem.UnregisterPipeline(handle);
         }
         m_depthPipelines = PipelineOverrideSet{};
-        ++m_depthPipelineFailedAttempts;
-
-        if (m_depthPipelineFailedAttempts >= kMaxBuildAttempts) {
-            m_depthPipelineGaveUp = true;
-            GTE_LOG_WARNING(kShadowFeatureName, std::string("EnsureDepthPipelinesBuilt(): pipeline build failed ('") +
-                e.what() + "') after " + std::to_string(m_depthPipelineFailedAttempts) +
-                " attempts - giving up. Depth casting stays disabled for the rest of this process.");
-            return;
+        if (m_depthPipelineGate.OnFailure(frame) == rg::BuildRetryGate::FailureKind::First) {
+            GTE_LOG_WARNING(kShadowFeatureName,
+                std::string("Depth pipeline build failed ('") + e.what() + "'). Rolled back; retrying with back-off.");
         }
-
-        m_depthPipelineRetryCooldownFramesRemaining = kRetryCooldownFrames;
-        GTE_LOG_WARNING(kShadowFeatureName, std::string("EnsureDepthPipelinesBuilt(): pipeline build failed ('") + e.what() +
-            "') - rolled back this attempt's pipelines. Retrying in " + std::to_string(kRetryCooldownFrames) +
-            " frames (attempt " + std::to_string(m_depthPipelineFailedAttempts) + "/" +
-            std::to_string(kMaxBuildAttempts) + ").");
         return;
     }
 
+    if (m_depthPipelineGate.OnSuccess()) {
+        GTE_LOG_INFO(kShadowFeatureName, "Depth pipelines built after an earlier failure.");
+    }
     m_depthPipelinesBuilt = true;
 }
 
@@ -141,7 +127,7 @@ void ShadowFeature::RegisterPasses()
             }
 
             Renderer& renderer = m_core.GetRenderer();
-            EnsureDepthPipelinesBuilt(renderer);
+            EnsureDepthPipelinesBuilt(renderer, builder.FrameIndex());
 
             // Lock shadow map resolution on first use.
             if (!m_mapResolutionLocked) {

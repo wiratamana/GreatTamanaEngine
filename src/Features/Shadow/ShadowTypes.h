@@ -7,13 +7,9 @@ namespace gte {
 // Feature module name, render-feature scope owner and log category.
 inline constexpr const char* kShadowFeatureName = "Shadow";
 
-// Shadow feature tunables - plain data, no behavior. Always run through
-// ShadowMath::SanitizeShadowSettings() before use; never read a raw field
-// directly inside a render-graph pass body.
+// Shadow tunables. Always pass through SanitizeShadowSettings() before use in a pass body.
 struct ShadowSettings {
-    // Locked to whatever value this holds on the first frame Shadow.DepthPass
-    // runs - the shadow map's render view cannot be resized later. Do not
-    // expose a live Inspector slider for this field.
+    // Locked on the first depth-pass frame; the shadow map cannot be resized later.
     std::uint32_t mapResolution = 2048;
 
     float orthoHalfExtentWorld = 20.0f; // Half-size of the light frustum box, world units.
@@ -23,9 +19,7 @@ struct ShadowSettings {
     float strength = 0.6f; // 0 = no darkening, 1 = fully black in shadow.
 };
 
-// Packed, GPU-ready layout for Scene Services binding 8 - must match
-// DirectionalLightingAndReceiverMask.glsl's own SceneGlobalUniformBlock
-// byte-for-byte (112 bytes, fits Renderer's 128-byte ceiling, std140).
+// Scene Services binding 8 layout (std140, 112 bytes). Must match SceneGlobalUniformBlock in DirectionalLightingAndReceiverMask.glsl.
 struct SceneLightingUniformData {
     float lightViewProjection[16];
     float sunDirectionAndBias[4];
