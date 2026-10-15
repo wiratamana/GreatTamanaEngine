@@ -272,6 +272,9 @@ public:
     // True when frames in flight overlap, so CPU-written buffers and resizes are unsafe.
     bool IsPersistentRegimePipelined() const noexcept;
 
+    // Real-frame counter of this graph execution (0 on a bare builder).
+    std::uint64_t FrameIndex() const noexcept { return m_persistentCacheCurrentFrame; }
+
     // Only code that calls OwningRenderer() needs a renderer; a bare builder has none.
     void SetRenderer(Renderer* renderer) noexcept { m_renderer = renderer; }
     Renderer* RendererOrNull() const noexcept { return m_renderer; }

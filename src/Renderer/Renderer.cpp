@@ -479,9 +479,26 @@ ComputeDescriptorSet Renderer::AllocateComputeDescriptorSet(DescriptorSetLayoutH
 {
     return m_resources.AllocateComputeDescriptorSet(Native(layoutHandle));
 }
+
 void Renderer::FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept
 {
     m_resources.FreeComputeDescriptorSet(descriptorSet);
+}
+
+void Renderer::QueueComputeBindingRelease(VkDescriptorSetLayout layout) noexcept
+{
+    try {
+        const std::lock_guard<std::mutex> lock(m_bindingReleaseMutex);
+        m_bindingReleaseQueue.push_back(layout);
+    } catch (...) {
+        // Out of memory: the stale-set sweep still frees the entries later.
+    }
+}
+
+std::vector<VkDescriptorSetLayout> Renderer::TakeQueuedComputeBindingReleases()
+{
+    const std::lock_guard<std::mutex> lock(m_bindingReleaseMutex);
+    return std::exchange(m_bindingReleaseQueue, {});
 }
 
 VkDescriptorSetLayout Renderer::InstanceBufferDescriptorSetLayout() const noexcept

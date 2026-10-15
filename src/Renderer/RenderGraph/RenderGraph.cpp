@@ -43,6 +43,9 @@ void RenderGraph::BeginPersistentResourceFrame() noexcept
     m_persistentResourceCache.BeginFrame(
         m_persistentResourceFrameCounter, kPersistentResourceStaleThresholdFrames);
     m_computeBindingCache.BeginFrame(m_persistentResourceFrameCounter);
+    for (const VkDescriptorSetLayout layout : m_renderer->TakeQueuedComputeBindingReleases()) {
+        m_computeBindingCache.Release(layout);
+    }
 }
 
 void RenderGraph::EnsureTextureResolved(

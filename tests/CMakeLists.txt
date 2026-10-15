@@ -2328,6 +2328,8 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/RenderGraphComputeBindingKeyTests.cpp
     Renderer/Vulkan/DescriptorPoolGrowthTests.cpp
     Renderer/RenderGraph/ShaderBindingsTests.cpp
+    Renderer/RenderGraph/StaticNameTests.cpp
+    Renderer/RenderGraph/ComputePassTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderPassTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp

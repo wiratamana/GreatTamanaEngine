@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -191,6 +192,10 @@ public:
     // Frees a set from AllocateComputeDescriptorSet(). The GPU must be done with it.
     void FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept;
 
+    // Asks the render graph to drop the cached descriptor sets built for a destroyed pipeline layout.
+    void QueueComputeBindingRelease(VkDescriptorSetLayout layout) noexcept;
+    std::vector<VkDescriptorSetLayout> TakeQueuedComputeBindingReleases();
+
     // Layout shared by instanced indirect draw buffers.
     VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept;
 
@@ -319,6 +324,9 @@ private:
 
     VkCommandBuffer m_currentGraphPassCmd = VK_NULL_HANDLE;
     std::function<void(bool, std::uint32_t, std::uint32_t)> m_currentGraphPassRecordDrawStats;
+
+    mutable std::mutex m_bindingReleaseMutex;
+    std::vector<VkDescriptorSetLayout> m_bindingReleaseQueue;
 };
 
 // Global helper to query context info for RenderGraph.

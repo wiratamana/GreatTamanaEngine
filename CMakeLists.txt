@@ -782,6 +782,11 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/BuildRetryGate.h
     src/Renderer/RenderGraph/ShaderBindings.h
     src/Renderer/RenderGraph/ShaderBindings.cpp
+    src/Renderer/RenderGraph/Shader.h
+    src/Renderer/RenderGraph/Shader.cpp
+    src/Renderer/RenderGraph/StaticName.h
+    src/Renderer/RenderGraph/ComputePass.h
+    src/Renderer/RenderGraph/ComputePass.cpp
     src/Renderer/RenderGraph/RenderGraphComputeBindingKey.h
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.h
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.cpp
