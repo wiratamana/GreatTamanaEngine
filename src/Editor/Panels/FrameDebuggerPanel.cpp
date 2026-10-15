@@ -48,27 +48,13 @@ void BuildPropertyRow(const char* label, const std::string& value)
 
 FrameDebuggerPanel::~FrameDebuggerPanel()
 {
-    // Same "wait for the GPU to actually be done with it first" reasoning as
-    // BoneViewerWindow::Reset() - m_previewDescriptor may still be
-    // referenced by an in-flight command buffer from a recent frame. PHASE6
-    // widened this to an unconditional wait (whenever a live VkDevice is
-    // even known) rather than gating on m_previewDescriptor alone -
-    // m_previewProcessor (PHASE6) may itself own live GPU resources
-    // (a ComputePipeline/descriptor set/scratch Texture2D) even in the rare
-    // case m_previewDescriptor happens to be null at shutdown time, and
-    // those must be just as safe to destroy as m_previewDescriptor's own
-    // wrapped texture.
+    // In-flight command buffers may still reference the preview descriptor and the preview processor's GPU
+    // resources: wait for the GPU whenever a device is known.
     if (m_frameRenderer != nullptr) {
         m_frameRenderer->WaitForGpuIdle();
     }
     ReleasePreviewDescriptor();
-    // task_manager/frame-debugger-9 campaign, PHASE3 - defense-in-depth only
-    // (see ReleaseShaderPropertyTexturePreview()'s own doc comment,
-    // FrameDebuggerPanel.h): the REQUIRED release site is
-    // ImGuiEditorLayer::~ImGuiEditorLayer(), BEFORE ImGui_ImplVulkan_Shutdown()
-    // runs - by the time THIS destructor's own member-destruction-order cleanup
-    // would otherwise run, that has already happened, making this call a safe,
-    // idempotent no-op in ordinary shutdown.
+    // Defense in depth: ImGuiEditorLayer releases this before ImGui_ImplVulkan_Shutdown(), so this is normally a no-op.
     ReleaseShaderPropertyTexturePreview();
 }
 
@@ -81,9 +67,7 @@ void FrameDebuggerPanel::ReleasePreviewDescriptor()
     }
 }
 
-// task_manager/frame-debugger-9 campaign, PHASE3 - see this method's own doc
-// comment (FrameDebuggerPanel.h, PUBLIC section) for the full list of call
-// sites and the "why public" reasoning.
+// Releases the shader-property preview texture and its descriptor (see FrameDebuggerPanel.h).
 void FrameDebuggerPanel::ReleaseShaderPropertyTexturePreview()
 {
     if ((m_shaderPropertyPreviewTexture.has_value() || m_shaderPropertyPreviewDescriptor != VK_NULL_HANDLE)
@@ -100,15 +84,10 @@ void FrameDebuggerPanel::ReleaseShaderPropertyTexturePreview()
     m_shaderPropertyPreviewExtent = VkExtent2D{};
 }
 
-// task_manager/frame-debugger-9 campaign, PHASE3 - the "View" button's own
-// click handler - see this method's own doc comment (FrameDebuggerPanel.h,
-// private section) for the full contract. Always releases whatever was
-// previously shown first (Locked Design Decision #2, PHASE0_MASTER_STRATEGY.md),
-// then performs EXACTLY ONE fresh capture/raymarch + GPU upload for
-// `textureName`/`kind`.
+// Click handler of the "View" button: releases the shown preview, then does one fresh capture and upload.
 void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& textureName, rg::ResourceKind kind)
 {
-    ReleaseShaderPropertyTexturePreview(); // Locked Design Decision #2 - always start fresh.
+    ReleaseShaderPropertyTexturePreview(); // Always start fresh.
 
     if (m_frameRenderer == nullptr || m_frameRenderGraph == nullptr) {
         return; // Defensive only - unreachable in practice, see this method's own header doc comment.
@@ -116,18 +95,7 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
 
     m_shaderPropertyPreviewKind = kind;
 
-    // task_manager/frame-debugger-9 campaign, PHASE3 - the actual CreateTexture2D()
-    // upload (common to both branches below) is wrapped in try/catch: Texture2D's
-    // real constructor (Texture2D.cpp) can throw std::runtime_error on a genuine
-    // vmaCreateImage/vkCreateImageView/vkCreateSampler failure - a rare but real
-    // GPU-resource-exhaustion edge case that has NOTHING to do with the
-    // allowStorageImageAccess opt-in this call never uses. This mirrors
-    // AssetPreviewTexture::Resolve()'s own identical try/catch around its own,
-    // otherwise-identical CreateTexture2D() call - an uncaught exception here
-    // would unwind straight out of an ImGui button click handler mid-Begin()/
-    // End() pair, almost certainly crashing the Editor process instead of
-    // showing the honest "not currently available" placeholder this method
-    // already has ready for every OTHER failure mode.
+    // The texture upload can throw on GPU resource exhaustion; an exception must not escape an ImGui click handler.
     auto uploadOrFail = [this, &textureName](const void* pixelsRgba8, int width, int height, const char* debugName) -> bool {
         try {
             m_shaderPropertyPreviewTexture.emplace(m_frameRenderer->CreateTexture2D(pixelsRgba8, width, height, debugName));
@@ -213,25 +181,16 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
         }
         m_shaderPropertyPreviewExtent = VkExtent2D{ static_cast<std::uint32_t>(raw.width), static_cast<std::uint32_t>(raw.height) };
     } else if (kind == rg::ResourceKind::TextureArray) {
-        // better-render-pass-3 campaign, BLOCK5, Phase 3 - no real
-        // texture-array preview exists yet (no per-layer VkImageView - see
-        // TextureArray2D.h's own header comment and this campaign's own
-        // Section 5 non-goal), so this row gets the exact same honest
-        // "not previewable" placeholder behavior the Buffer branch
-        // immediately below already uses - never a fabricated preview.
+        // No texture-array preview exists (no per-layer image view): show the "not previewable" placeholder.
         return;
     } else {
-        // rg::ResourceKind::Buffer - no "View" button is ever drawn for a Buffer
-        // row at all (Locked Design Decision #8), so this branch is reachable
-        // ONLY for Buffer - TextureArray now has its own explicit branch
-        // immediately above, since its own "View" button IS drawn (see the
-        // isRenderGraphResource/kind check further down this file).
+        // Buffer: no "View" button is drawn for buffer rows, so this is unreachable in practice.
         return;
     }
 
     m_shaderPropertyPreviewDescriptor = ImGui_ImplVulkan_AddTexture(
         m_shaderPropertyPreviewTexture->Sampler(), m_shaderPropertyPreviewTexture->View(),
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL); // Correct here (unlike a live registry wrap) - this is a freshly-uploaded, fully-owned Texture2D, always left in this exact layout post-upload.
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL); // A freshly uploaded Texture2D is always left in this layout.
     m_shaderPropertyPreviewName = textureName;
     m_shaderPropertyPreviewLookupFailed = false;
 }
@@ -243,14 +202,8 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     const std::optional<FrameDebuggerEventDetails> selectedDetails =
         (entry != nullptr) ? FindEventDetailsByIndex(entry->snapshot, m_selectedEventIndex) : std::nullopt;
 
-    // Fast path for a leaf touching a PRIVATE render-graph resource (a
-    // compute LUT pass, a depth-only pass, ...) - checked FIRST, falling
-    // through to the unchanged path below on a miss. Same desiredView/
-    // desiredSampler convention the unchanged fallback path below already
-    // uses - zero stall, zero CPU readback, matching every other branch's
-    // cost profile. See FrameDebuggerEventDetails::privateWriteTextureName's
-    // own doc comment (FrameDebuggerData.h) for why this is always correct
-    // "as of this step" with no replay/redraw needed.
+    // A leaf that touches a private render-graph resource is previewed straight from that texture: no stall, no
+    // CPU readback. On a miss, fall through to the retained-capture path below.
     std::optional<rg::DebugTextureSnapshot> privatePreview;
     if (selectedDetails.has_value() && selectedDetails->privateWriteTextureName.has_value()
         && m_frameRenderGraph != nullptr) {
@@ -269,18 +222,8 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
         return;
     }
 
-    // task_manager/frame-debugger-7 campaign, PHASE4
-    // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.4) - REWRITTEN. The
-    // old `isViewingGameViewLeaf`/`selectedComputePassPreview` boolean-soup
-    // (frame-debugger-4/frame-debugger-5 campaigns) is GONE - the currently-
-    // selected event node's own `FrameDebuggerEventDetails::stepPreviewKind`/
-    // `stepPreviewIndex` (FrameDebuggerData.h, computed once by
-    // BuildRealFrameDebuggerSnapshot()) now drive
-    // ChooseFrameDebuggerPreviewSource() directly. Nothing selected at all
-    // (m_selectedEventIndex == -1, or no capture yet) defaults to
-    // `PostComposite` - the same "final, fog-inclusive image" bucket an
-    // explicit Post-GameView-at/after-composite selection also falls into
-    // (see ChooseFrameDebuggerPreviewSource()'s own doc comment).
+    // The selected event's stepPreviewKind/stepPreviewIndex drive the choice. With nothing selected the final
+    // composited image (PostComposite) is shown.
     FrameDebuggerStepPreviewKind stepPreviewKind = FrameDebuggerStepPreviewKind::PostComposite;
     int stepPreviewIndex = -1;
     if (selectedDetails.has_value()) {
@@ -288,11 +231,7 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
         stepPreviewIndex = selectedDetails->stepPreviewIndex;
     }
 
-    // Does the selected PerObjectStep leaf's own stepPreviewIndex actually
-    // resolve to a real entry in entry->perObjectStepPreviews? Resolved
-    // HERE (the caller), never by ChooseFrameDebuggerPreviewSource() itself
-    // (which stays free of any FrameDebuggerHistoryEntry/RenderTexture
-    // dependency, per that function's own pre-existing philosophy).
+    // Resolved here (not in ChooseFrameDebuggerPreviewSource): does the step's preview index name a retained texture?
     const bool hasPerObjectStepPreviewAtIndex = entry != nullptr
         && stepPreviewKind == FrameDebuggerStepPreviewKind::PerObjectStep && stepPreviewIndex >= 0
         && static_cast<std::size_t>(stepPreviewIndex) < entry->perObjectStepPreviews.size();
@@ -321,24 +260,14 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     }
 
     if (selectedSource == nullptr) {
-        // Nothing to preview right now - see this function's own original
-        // comment (no capture has ever happened yet, an honest "nothing
-        // drawn yet" NotYetDrawn state, or - defensively - the relevant
-        // retained texture is unpopulated for the current capture).
+        // Nothing to preview: no capture yet, nothing drawn yet, or the retained texture is missing.
         ReleasePreviewDescriptor();
         return;
     }
 
-    // PHASE6 (task_manager/frame-debugger-3/PHASE6_CHANNELS_AND_LEVELS_REAL_PREVIEW.md,
-    // Step 3.2) - Channels/Levels at their neutral defaults is a valid,
-    // cheap optimization: display the RAW retained capture texture
-    // directly, skipping the compute dispatch entirely. Anything else
-    // re-dispatches FrameDebuggerPreviewRenderer (only when actually dirty -
-    // see below) and displays ITS OWN separate scratch texture instead -
-    // the retained captured copy itself is never mutated in place
-    // (Locked Design Decision #8). PHASE1 (frame-debugger-4) - every read
-    // below is now against `*selectedSource` (the just-decided pointer,
-    // above), not unconditionally against `entry->preview` anymore.
+    // Neutral channel/levels: show the retained capture texture directly and skip the compute dispatch.
+    // Anything else re-dispatches the preview renderer (only when dirty) into its own scratch texture;
+    // the retained copy is never mutated.
     const bool isNeutral =
         (m_channel == FrameDebuggerPreviewChannel::All) && (m_levelsBlack <= 0.0f) && (m_levelsWhite >= 1.0f);
 
@@ -383,10 +312,7 @@ void FrameDebuggerPanel::NotifyStepConsumed() noexcept
     m_stepCaptureRequested = true;
 }
 
-// task_manager/frame-debugger-7 campaign, PHASE3
-// (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step 3.0)
-// - the EARLY half of the two-bool pending/serviced handshake - see this
-// method's own doc comment (FrameDebuggerPanel.h) for the full contract.
+// Early half of the pending/serviced replay handshake (see FrameDebuggerPanel.h).
 bool FrameDebuggerPanel::ConsumePendingReplayRequest()
 {
     if (!m_pendingCaptureTrigger) {
@@ -400,34 +326,15 @@ bool FrameDebuggerPanel::ConsumePendingReplayRequest()
 void FrameDebuggerPanel::TriggerCapture()
 {
     if (m_frameRenderer == nullptr || m_frameRenderGraph == nullptr || m_frameGameView == nullptr) {
-        // Defensive only - Build() below always sets these, unconditionally,
-        // before BuildToolbarRow() (the only caller of TriggerCapture())
-        // ever runs, so this should be unreachable in practice.
+        // Unreachable in practice: Build() sets these before the toolbar row runs.
         return;
     }
 
     const rg::RenderGraphSnapshot graphSnapshot =
         m_frameRenderGraph->LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback);
 
-    // task_manager/editor-core-separation-21 campaign, PHASE5
-    // (PHASE5_IRON_RULE_PERMANENT_MISMATCH_DETECTOR.md) - the permanent,
-    // self-enforcing "Render Pass Honesty" detector, run once per real
-    // capture (mirrors ImGuiIdConflictTracker/DetectRenderPassEventContradictions's
-    // own precedent - see AGENTS.md). Compares THIS graphSnapshot.passesInExecutionOrder
-    // (the real, just-captured set of executed/non-culled passes) against
-    // m_frameToggleRegistry's own recorded enabled state for every pass name
-    // found here - any pass that is BOTH non-culled AND reports disabled is
-    // a genuine contradiction: the render pass and the Frame Debugger
-    // disagree. A no-op whenever m_frameToggleRegistry is null (defensive
-    // only - every real production call site supplies a real registry, see
-    // Build()'s own new parameter). PHASE1's own temporary,
-    // single-pass-name-hardcoded diagnostic logging that used to live here
-    // (category "RenderPassHonestyDiag") already proved this exact
-    // comparison is what pins down a real mismatch - see
-    // PHASE1_COMPLETION_REPORT.md - it was removed once PHASE2 landed the
-    // real fix (the stale-capture root cause), since it added noisy
-    // per-capture logging with no permanent, generic value on its own; THIS
-    // detector is that permanent, generic replacement.
+    // Render pass honesty detector, once per capture: a pass that is non-culled yet reported disabled is a
+    // contradiction between the graph and the toggle registry. A no-op without a registry.
     if (m_frameToggleRegistry != nullptr) {
         const std::vector<std::string> mismatches = DetectRenderPassHonestyMismatches(
             graphSnapshot.passesInExecutionOrder,
@@ -435,16 +342,8 @@ void FrameDebuggerPanel::TriggerCapture()
         RenderPassHonestyGuard::Instance().ReportCaptureMismatches(mismatches);
     }
 
-    // editor-core-separation-22 campaign, PHASE6
-    // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3) - Clause C
-    // "disabled side effect still visible" detector: a narrow, curated
-    // allowlist of previously-leaky `RenderPassBlackboard` keys
-    // (FrameDebuggerSideChannelChecker.h's own `KnownRiskBlackboardKeyRules()`
-    // - see PHASE6_COMPLETION_REPORT.md's own "honest scoping" section for
-    // why this is intentionally NOT a fully general detector). A no-op
-    // whenever EITHER m_frameToggleRegistry or m_frameBlackboard is null
-    // (defensive only - every real production call site supplies both, see
-    // Build()'s own new parameter).
+    // "Disabled side effect still visible" detector over a curated list of known-risk blackboard keys.
+    // A no-op without a toggle registry or blackboard.
     if (m_frameToggleRegistry != nullptr && m_frameBlackboard != nullptr) {
         const std::vector<std::string> leaks = DetectDisabledPassBlackboardKeyLeaks(
             KnownRiskBlackboardKeyRules(),
@@ -461,100 +360,32 @@ void FrameDebuggerPanel::TriggerCapture()
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, m_captureContext, renderTargetInfo);
 
-    // editor-core-separation-22 campaign, PHASE6
-    // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.1) - the
-    // permanent, self-enforcing Clause B "ran but not shown" detector, run
-    // once per real capture, mirroring RenderPassHonestyGuard's own
-    // "log-once-per-new-incident" shape immediately above (Clause A) but
-    // against a DIFFERENT contradiction: a pass that genuinely, non-culled,
-    // executed this frame (per `graphSnapshot`) yet has NO corresponding
-    // leaf anywhere in the just-built `snapshot` tree. Always runs (no
-    // toggle-registry/blackboard nullability concern here - both inputs are
-    // already unconditionally available at this point in TriggerCapture()).
+    // "Ran but not shown" detector, once per capture: a non-culled pass that executed but has no leaf in the
+    // snapshot tree.
     const std::vector<std::string> missingFromTree =
         DetectPassesMissingFromFrameDebuggerTree(graphSnapshot.passesInExecutionOrder, snapshot);
     FrameDebuggerCoverageGuard::Instance().ReportCaptureMismatches(missingFromTree);
 
-    // task_manager/frame-debugger-7 campaign, PHASE4
-    // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.2 point 2) - widened
-    // CaptureFrame() call with the new, LAST `m_captureContext` argument, so
-    // Phase 3's own ReplayStepPreviews() gets moved into permanent storage
-    // (FrameDebuggerHistoryEntry::perObjectStepPreviews) before this same
-    // frame's later Reset() would otherwise wipe it.
+    // Pass m_captureContext so the per-object step previews move into the history entry before Reset() wipes them.
     m_currentCapture.CaptureFrame(
         *m_frameRenderer, *m_frameRenderGraph, snapshot, *m_frameGameView, m_frameGameViewComposited, m_captureContext);
     SetSelectedEventIndex(-1);
 }
 
-// task_manager/frame-debugger-9 campaign, PHASE2
-// (PHASE2_DRAGGABLE_FRAME_STEP_SLIDER.md, Step 3.1) - the ONE chokepoint for
-// changing m_selectedEventIndex - see this method's own doc comment
-// (FrameDebuggerPanel.h) for the full contract. `newIndex` is always already
-// clamped by the caller.
+// The single place that changes m_selectedEventIndex. `newIndex` is already clamped by the caller.
 void FrameDebuggerPanel::SetSelectedEventIndex(int newIndex)
 {
     if (newIndex == m_selectedEventIndex) {
         return; // No real change - nothing to release/refresh.
     }
     m_selectedEventIndex = newIndex;
-    // task_manager/frame-debugger-9 campaign, PHASE3 - "the user went
-    // elsewhere" (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #2):
-    // whenever the selected event genuinely changes, any currently-displayed
-    // shader-property one-shot texture preview is released, falling back to
-    // the newly-selected event's own ordinary step preview.
+    // The user went elsewhere: drop any shader-property preview and fall back to the event's step preview.
     ReleaseShaderPropertyTexturePreview();
 }
 
-// task_manager/frame-debugger-3 campaign, PHASE7
-// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - the exact
-// same false->true-edge effect the "Enable" checkbox has always had
-// (frame-debugger-2's Locked Design Decision #3 + PHASE3's Step 3.2 call
-// site 1), now shared by BOTH BuildToolbarRow()'s own checkbox AND
-// SetEnabledFromCommand() (the new HTTP-automation entry point) - see this
-// method's own callers for why the false->true edge auto-engages Pause, and
-// why turning Enable back OFF deliberately does NOT auto-resume (a user
-// inspecting a paused frame should not be silently un-paused just for
-// closing/disabling this debug window, whether that happened by hand or via
-// GET /frame_debugger/enable).
-//
-// task_manager/frame-debugger-7 campaign, PHASE1
-// (PHASE1_REMOVE_HISTORY_AND_SINGLE_CAPTURE_LIFECYCLE.md) - the true->false
-// edge (Enable unticked) now ALSO clears the current capture
-// (m_currentCapture.Clear()) - "the frame info got removed from memory" is
-// the user's own exact wording for this new rule (PHASE0_MASTER_STRATEGY.md's
-// Step 1) - only the captured DATA disappears; m_enabled itself is already
-// set to `newEnabled` immediately above, exactly wherever the caller wanted
-// it.
-//
-// task_manager/frame-debugger-7 campaign, PHASE2
-// (PHASE2_DEFERRED_CAPTURE_TRIGGER.md) - the false->true edge NO LONGER
-// captures synchronously. This used to be Bug 1's real root cause: THIS
-// exact frame's own m_captureContext was armed (PrepareCaptureContextForThisFrame())
-// based on m_enabled as of the END of LAST frame - still false at that
-// point - and that arming call happens BEFORE Game::Render() runs, so this
-// frame's RenderSystem::Draw() calls never recorded any per-object
-// FrameDebuggerDrawRecords at all; a capture built moments later from that
-// same frame's data was therefore real (render graph/pass list intact) but
-// had zero per-entity draw records, so the "GameView" node's children
-// (terrain/smoke cube/...) were silently missing. The fix: this edge no
-// longer calls TriggerCapture() itself at all - it only sets
-// m_pendingCaptureTrigger = true (see that member's own doc comment,
-// FrameDebuggerPanel.h).
-//
-// task_manager/frame-debugger-7 campaign, PHASE3
-// (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step 3.0)
-// - RENAMED m_pendingCaptureAfterEnable to m_pendingCaptureTrigger, and the
-// actual capture is now deferred TWO steps further than Phase 2's own
-// description above: EARLY the very next frame, Application::Run() calls
-// IEditorLayer::ConsumePendingFrameDebuggerReplayRequest() (before that
-// frame's "GameView" pass is even declared), which consumes
-// m_pendingCaptureTrigger and, if it was set, declares this phase's N new
-// replay passes AND sets m_replayServicedThisFrame = true; LATE that SAME
-// frame, the top of Build() consumes m_replayServicedThisFrame and only
-// THEN calls TriggerCapture() - by which point this frame's Game::Render()
-// (and the replay passes) have already executed with everything correctly
-// armed. See ConsumePendingReplayRequest()'s own doc comment (this file,
-// above) for the full two-bool handshake.
+// Shared by the "Enable" checkbox and SetEnabledFromCommand(). Enabling pauses playback and requests a deferred
+// capture (armed next frame, so that frame's draw records are recorded); disabling clears the capture but does
+// not resume playback. The capture runs two steps later: ConsumePendingReplayRequest(), then Build().
 void FrameDebuggerPanel::ApplyEnabledEdge(EditorContext& ctx, bool newEnabled)
 {
     const bool wasEnabled = m_enabled;
@@ -562,18 +393,11 @@ void FrameDebuggerPanel::ApplyEnabledEdge(EditorContext& ctx, bool newEnabled)
     if (m_enabled && !wasEnabled) {
         ctx.playbackPaused = true;
 
-        // PHASE2 (frame-debugger-7 campaign) - defer the real capture to
-        // the next Build() call instead of calling TriggerCapture()
-        // synchronously here - see this method's own doc comment above.
-        // PHASE3 - renamed to m_pendingCaptureTrigger; see that member's
-        // own doc comment (FrameDebuggerPanel.h).
+        // Capture is deferred to the next Build() so this frame's draw records are armed first.
         m_pendingCaptureTrigger = true;
     } else if (!m_enabled && wasEnabled) {
-        // NEW (frame-debugger-7 campaign, PHASE1) - "clear on Disable".
+        // Disabling clears the capture; a shader-property preview of it must not linger.
         m_currentCapture.Clear();
-        // task_manager/frame-debugger-9 campaign, PHASE3 - a shader-property
-        // one-shot preview referencing this now-cleared capture must not
-        // linger on screen.
         ReleaseShaderPropertyTexturePreview();
     }
 }
@@ -588,20 +412,7 @@ void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
 
     ImGui::SameLine();
 
-    // PHASE3's new explicit "Capture" button - re-captures on demand
-    // without stepping (e.g. after moving the Scene-view camera, or after
-    // an unrelated scene edit, while the simulation itself stays paused).
-    // Only enabled/clickable while m_enabled is true.
-    //
-    // task_manager/frame-debugger-7 campaign, PHASE3
-    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
-    // 3.0) - no longer calls TriggerCapture() synchronously (this frame's
-    // "GameView" pass, and any replay passes, have ALREADY been declared/
-    // executed by the time this button click is even processed - deferring
-    // is what lets a future frame declare the replay passes BEFORE
-    // Game::Render() runs). Only sets m_pendingCaptureTrigger = true - see
-    // ConsumePendingReplayRequest()'s own doc comment for the rest of the
-    // handshake.
+    // "Capture" re-captures on demand while paused; it only sets the pending flag (the capture is deferred).
     ImGui::BeginDisabled(!m_enabled);
     if (ImGui::Button("Capture")) {
         m_pendingCaptureTrigger = true;
@@ -610,12 +421,7 @@ void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
 
     ImGui::SameLine();
 
-    // Cosmetic-only stub - this engine has no Play/Edit-mode split (see
-    // frame-debugger-1's own Locked Design Decision #1), so there is
-    // nothing real for this control to switch between yet; it exists
-    // purely for visual parity with the reference screenshot. Permanently
-    // disabled - never becomes interactive by any state change in this
-    // campaign.
+    // Cosmetic stub: there is no Play/Edit split, so this combo is permanently disabled.
     static constexpr const char* kModeItems[] = { "Editor" };
     int modeIndex = 0;
     ImGui::SetNextItemWidth(120.0f);
@@ -623,20 +429,8 @@ void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
     ImGui::Combo("##FrameDebuggerMode", &modeIndex, kModeItems, 1);
     ImGui::EndDisabled();
 
-    // PHASE3's Step-triggered capture (one of the three trigger sites) -
-    // serviced HERE (rather than back where NotifyStepConsumed() itself
-    // was called, Application::Run(), early in the frame, well before
-    // Game::Render() even ran). Re-checks m_enabled here (its freshest
-    // value THIS frame, including any edit the Enable checkbox above just
-    // made) rather than trusting whatever it was back when
-    // NotifyStepConsumed() was called.
-    //
-    // task_manager/frame-debugger-7 campaign, PHASE3
-    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
-    // 3.0) - no longer calls TriggerCapture() synchronously; only sets
-    // m_pendingCaptureTrigger = true (see this file's own
-    // ConsumePendingReplayRequest()/ApplyEnabledEdge() for the same
-    // deferral applied to the other two trigger sites, and why).
+    // A requested step capture is serviced here, after Game::Render(), using the freshest m_enabled. It only sets
+    // the pending flag; the capture itself is deferred like the other two trigger sites.
     if (m_stepCaptureRequested) {
         m_stepCaptureRequested = false;
         if (m_enabled) {
@@ -647,12 +441,7 @@ void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
 
 void FrameDebuggerPanel::BuildFrameStepperRow(const FrameDebuggerSnapshot& snapshot)
 {
-    // task_manager/frame-debugger-9 campaign, PHASE2
-    // (PHASE2_DRAGGABLE_FRAME_STEP_SLIDER.md) - REAL, interactive control (was
-    // a purely cosmetic, always-disabled slider before this campaign).
-    // ImGui::SliderInt() returns true on EVERY value change while being
-    // actively dragged (not just on mouse release), so this already satisfies
-    // "drag and see the preview update immediately" with no extra plumbing.
+    // SliderInt returns true on every change while dragging, so the preview updates live.
     int stepperValue = m_selectedEventIndex < 0 ? 0 : m_selectedEventIndex;
     const bool hasAnyEvents = snapshot.totalEventCount > 0;
 
@@ -663,12 +452,7 @@ void FrameDebuggerPanel::BuildFrameStepperRow(const FrameDebuggerSnapshot& snaps
         SetSelectedEventIndex(ClampSelectedEventIndex(stepperValue, snapshot.totalEventCount));
     }
 
-    // task_manager/frame-debugger-9 campaign, PHASE2 - Left/Right arrow-key
-    // nudge, one event at a time, while this slider itself has keyboard focus
-    // (ImGui::IsItemFocused() refers to the SliderInt just drawn above - must
-    // be checked immediately after it, before any other widget steals focus
-    // tracking). `repeat = true` mirrors holding the key down to keep
-    // stepping, matching ordinary OS scrollbar/slider key-repeat behavior.
+    // Left/Right nudges one event while the slider has focus; IsItemFocused() must follow the SliderInt directly.
     if (hasAnyEvents && ImGui::IsItemFocused()) {
         if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, /*repeat=*/true)) {
             SetSelectedEventIndex(ClampSelectedEventIndex(stepperValue - 1, snapshot.totalEventCount));
@@ -685,22 +469,10 @@ void FrameDebuggerPanel::BuildFrameStepperRow(const FrameDebuggerSnapshot& snaps
 
 void FrameDebuggerPanel::RenderEventNode(const FrameDebuggerEventNode& node)
 {
-    // frame-debugger-6 campaign, PHASE4 - branches on "does this node have
-    // children" FIRST, regardless of `isDrawCall`, so a selectable leaf that
-    // ALSO has real children (the new "GameView" shape, once it has
-    // per-entity draw-record children - see BuildRealFrameDebuggerSnapshot())
-    // renders as an expandable AND selectable row, while every pre-existing
-    // leaf/group shape (no children at all, or a pure group with
-    // isDrawCall == false) keeps rendering exactly as before this phase.
+    // A node with children renders as an expandable row (and selectable when it is a draw call), whatever isDrawCall says.
     if (!node.children.empty()) {
-        // Handles BOTH a pure group (isDrawCall == false, e.g.
-        // "Compute Dispatches (Pre-GameView)") AND a selectable leaf that ALSO
-        // has real children (new this campaign - "GameView" itself, once it
-        // has per-entity draw-record children). ImGuiTreeNodeFlags_Selected
-        // highlights the row exactly like the leaf-only Selectable() branch
-        // below already does; IsItemClicked() right after TreeNodeEx() is
-        // what makes clicking the row (not just its arrow) select it,
-        // mirroring Selectable()'s own click-to-select behavior.
+        // A pure group or a selectable leaf with children. IsItemClicked() makes a click on the row (not just
+        // its arrow) select it.
         ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen;
         if (node.isDrawCall && node.eventIndex == m_selectedEventIndex) {
             flags |= ImGuiTreeNodeFlags_Selected;
@@ -719,17 +491,11 @@ void FrameDebuggerPanel::RenderEventNode(const FrameDebuggerEventNode& node)
     }
 
     if (!node.isDrawCall) {
-        // Defensive only - every real group this engine builds today only
-        // gets added when it already has >= 1 child (see
-        // BuildRealFrameDebuggerSnapshot()'s own "only add if non-empty"
-        // rule) - this branch should be unreachable in practice.
+        // Unreachable in practice: groups are only added when they have a child.
         return;
     }
 
-    // A leaf draw-call row with NO children - unchanged from every prior
-    // campaign. Highlighted when it matches m_selectedEventIndex; clicking
-    // it selects it (feeding PHASE6's BuildEventDetailsSection() via
-    // FindEventDetailsByIndex()).
+    // A leaf draw-call row without children: highlighted when selected, click selects it.
     const bool isSelected = (node.eventIndex == m_selectedEventIndex);
     if (ImGui::Selectable(node.name.c_str(), isSelected)) {
         SetSelectedEventIndex(node.eventIndex);
@@ -739,16 +505,7 @@ void FrameDebuggerPanel::RenderEventNode(const FrameDebuggerEventNode& node)
 void FrameDebuggerPanel::BuildEventTreePane(const FrameDebuggerSnapshot& snapshot)
 {
     if (snapshot.rootNodes.empty()) {
-        // Real, reachable state whenever nothing has ever been captured yet
-        // (e.g. the window was just opened and "Enable"/"Capture" hasn't run
-        // this session) - see PHASE0_MASTER_STRATEGY.md's Locked Design
-        // Decision #2: zero fake/mock rows, ever. task_manager/
-        // frame-debugger-7 campaign, PHASE2 (PHASE2_DEFERRED_CAPTURE_TRIGGER.md,
-        // Step 3.6) - this is also the exact fallback shown during the one
-        // real frame between the Enable checkbox's false->true edge and its
-        // deferred capture landing (m_pendingCaptureAfterEnable == true,
-        // m_currentCapture.CurrentEntry() still nullptr) - an honest "not
-        // captured YET" state, never a wrong/incomplete tree.
+        // Nothing captured yet, or the deferred capture has not landed: show an honest empty state, never a fake tree.
         ImGui::TextDisabled("No frame captured yet.");
         return;
     }
@@ -776,13 +533,7 @@ void FrameDebuggerPanel::BuildInspectorPane(
     ImGui::SameLine();
     ImGui::TextUnformatted("Channels");
     ImGui::SameLine();
-    // PHASE6 (task_manager/frame-debugger-3/PHASE6_CHANNELS_AND_LEVELS_REAL_PREVIEW.md,
-    // Locked Design Decision #8) - now genuinely real: clicking a button
-    // sets m_channel directly (read by EnsurePreviewDescriptor()), and is
-    // highlighted (reusing the existing ImGuiCol_ButtonActive theme color -
-    // never a hardcoded one, mirroring BoneViewerWindow.cpp/
-    // Panels/InspectorPanel.cpp's own splitter-button precedent) exactly
-    // when it is the currently active channel.
+    // Each button sets m_channel; the active one uses the theme's ButtonActive color.
     static constexpr std::pair<const char*, FrameDebuggerPreviewChannel> kChannelButtons[] = {
         { "All", FrameDebuggerPreviewChannel::All },
         { "R", FrameDebuggerPreviewChannel::R },
@@ -808,13 +559,8 @@ void FrameDebuggerPanel::BuildInspectorPane(
     ImGui::TextUnformatted("Levels");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1.0f);
-    // A real two-handle range control (PHASE6) - writes m_levelsBlack/
-    // m_levelsWhite directly (read by EnsurePreviewDescriptor()).
-    // ImGuiSliderFlags_AlwaysClamp keeps both handles inside [0, 1] and
-    // never lets them cross - the extra clamp immediately below is cheap,
-    // purely defensive insurance on top of that (ApplyFrameDebuggerPreviewTransform()'s
-    // own remap already tolerates a degenerate/inverted pair without ever
-    // dividing by zero regardless).
+    // Two-handle range writing m_levelsBlack/m_levelsWhite. AlwaysClamp keeps both in [0, 1]; the clamp below
+    // keeps white above black.
     ImGui::DragFloatRange2("##FrameDebuggerLevels", &m_levelsBlack, &m_levelsWhite, 0.005f, 0.0f, 1.0f, "Black %.2f",
         "White %.2f", ImGuiSliderFlags_AlwaysClamp);
     m_levelsWhite = std::max(m_levelsWhite, m_levelsBlack + 0.001f);
@@ -827,42 +573,16 @@ void FrameDebuggerPanel::BuildInspectorPane(
     const std::optional<FrameDebuggerEventDetails> details
         = FindEventDetailsByIndex(snapshot, m_selectedEventIndex);
 
-    // PHASE4 - real preview display (Locked Design Decision #5,
-    // PHASE0_MASTER_STRATEGY.md): the retained preview texture is a
-    // per-CAPTURED-FRAME thing (one real image, taken right when the
-    // "GameView" pass finished), not a per-EVENT thing - so it is shown
-    // whenever the current capture actually has one. Nothing selected
-    // (m_selectedEventIndex == -1) falls through to showing the texture
-    // too, matching the RenderTarget row's own "frame-level, not
-    // event-level" framing immediately above.
-    //
-    // task_manager/frame-debugger-7 campaign, PHASE4
-    // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.4) - the OLD dead
-    // "hide the whole-frame preview specifically for a GPU-skinning leaf"
-    // special case (`selectedEventIsGpuSkinning`, frame-debugger-5
-    // campaign) is REMOVED - it is now fully superseded by
-    // `m_lastPreviewChoice` (set by EnsurePreviewDescriptor(), called
-    // earlier this SAME Build() call): `m_previewDescriptor` is already
-    // VK_NULL_HANDLE for EVERY step whose image genuinely isn't available
-    // (including every Pre-GameView compute leaf, not just one hardcoded
-    // name), so `showPreviewTexture` needs no extra special-casing at all.
+    // The retained preview belongs to the captured frame, not to one event, so it shows whenever the capture has
+    // one. m_previewDescriptor is already null for every step without an image (set by EnsurePreviewDescriptor()).
     const bool showPreviewTexture = (m_previewDescriptor != VK_NULL_HANDLE) && (currentEntry != nullptr);
 
     const float previewHeight = std::max(120.0f, ImGui::GetContentRegionAvail().y * 0.5f);
-    // task_manager/frame-debugger-9 campaign, PHASE1
-    // (PHASE1_ASPECT_RATIO_CORRECT_PREVIEW.md, Locked Design Decision #4,
-    // PHASE0_MASTER_STRATEGY.md) - a solid, opaque black background behind
-    // the WHOLE preview child window, whether an image or placeholder text
-    // ends up drawn inside it - the classic letterbox/pillarbox video-player
-    // look, applied uniformly regardless of which branch below actually runs.
+    // Opaque black behind the whole preview box (letterbox look), whether it shows an image or placeholder text.
     ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(0, 0, 0, 255));
     ImGui::BeginChild("FrameDebuggerTexturePreview", ImVec2(0.0f, previewHeight), true);
     {
-        // task_manager/frame-debugger-9 campaign, PHASE3 - a one-shot
-        // shader-property texture preview (Locked Design Decision #2,
-        // PHASE0_MASTER_STRATEGY.md) takes over this WHOLE box, replacing the
-        // ordinary step preview entirely, whenever one is currently being
-        // shown - the two are never displayed at once.
+        // A shader-property preview replaces the whole box; the two previews are never shown together.
         if (!m_shaderPropertyPreviewName.empty()) {
             ImGui::TextDisabled("Viewing: %s", m_shaderPropertyPreviewName.c_str());
             ImGui::SameLine();
@@ -882,11 +602,7 @@ void FrameDebuggerPanel::BuildInspectorPane(
                 }
             } else {
                 const ImVec2 avail = ImGui::GetContentRegionAvail();
-                // PHASE3 - an honest, distinct placeholder for the "lookup or
-                // GPU upload genuinely failed" case, separate from the plain
-                // "No Texture" bucket below (see
-                // m_shaderPropertyPreviewLookupFailed's own doc comment,
-                // FrameDebuggerPanel.h).
+                // Distinct placeholder for a failed lookup or upload, separate from the plain "No Texture" case.
                 const char* placeholderText = m_shaderPropertyPreviewLookupFailed
                     ? "Texture not currently available for preview."
                     : "No Texture";
@@ -898,15 +614,7 @@ void FrameDebuggerPanel::BuildInspectorPane(
         } else if (showPreviewTexture) {
             const ImVec2 avail = ImGui::GetContentRegionAvail();
             if (avail.x >= 1.0f && avail.y >= 1.0f) {
-                // task_manager/frame-debugger-9 campaign, PHASE1
-                // (PHASE1_ASPECT_RATIO_CORRECT_PREVIEW.md, Locked Design
-                // Decision #7) - never stretch the real texture to fill
-                // `avail`; instead fit it, preserving its own real aspect
-                // ratio (snapshot.renderTarget.width/height - already
-                // correct for every one of the three possible preview
-                // sources, per this phase's own "Situation" section), and
-                // center the result, leaving solid black bars on whichever
-                // axis has slack.
+                // Fit the texture to its own aspect ratio, centered; black bars fill the slack axis.
                 const FrameDebuggerAspectFitRect fit = ComputeAspectFitImageRect(avail.x, avail.y,
                     static_cast<float>(snapshot.renderTarget.width),
                     static_cast<float>(snapshot.renderTarget.height));
@@ -917,12 +625,7 @@ void FrameDebuggerPanel::BuildInspectorPane(
             }
         } else {
             const ImVec2 avail = ImGui::GetContentRegionAvail();
-            // task_manager/frame-debugger-7 campaign, PHASE4
-            // (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.4) - a second,
-            // distinct placeholder message for the honest "nothing drawn to
-            // the screen yet" NotYetDrawn state (a Pre-GameView compute
-            // leaf), right next to the ordinary "No Texture" one (Locked
-            // Design Decision #6 - never fabricate an image for this bucket).
+            // Distinct placeholder for the NotYetDrawn state (a pre-view compute leaf); no image is fabricated.
             const char* placeholderText = (m_lastPreviewChoice == FrameDebuggerPreviewSourceChoice::NotYetDrawn)
                 ? "Nothing drawn yet at this point in the frame."
                 : "No Texture";
@@ -943,9 +646,7 @@ void FrameDebuggerPanel::BuildInspectorPane(
 void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebuggerEventDetails>& details)
 {
     if (!details.has_value()) {
-        // Real, reachable state whenever nothing is currently selected
-        // (e.g. right after a fresh capture, which always resets
-        // m_selectedEventIndex to -1 - see TriggerCapture()).
+        // Nothing selected (a fresh capture resets the selection to -1).
         ImGui::TextDisabled("No event selected.");
         return;
     }
@@ -972,40 +673,20 @@ void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebug
 
     if (ImGui::BeginTabBar("FrameDebuggerEventTabs")) {
         if (ImGui::BeginTabItem("Preview")) {
-            // A real per-draw-call preview render is out of scope for
-            // this campaign (see PHASE6's own Step 2) - a much larger,
-            // separately-sized future feature.
+            // A per-draw-call preview render does not exist yet.
             ImGui::TextDisabled("Not available yet.");
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("ShaderProperties")) {
             if (!d.textures.empty()) {
                 ImGui::SeparatorText("Textures");
-                // task_manager/frame-debugger-9 campaign, PHASE3 - indexed by
-                // this row's own position (i), NOT just texture.valueLabel -
-                // a compute pass that reads AND writes a resource under the
-                // exact same registered name (an in-place/accumulation-style
-                // dispatch) would otherwise produce two rows with an
-                // identical valueLabel, and a "View##" + valueLabel button ID
-                // would collide between them (Dear ImGui IDs must be unique
-                // within the same window/ID-stack scope). No such pass exists
-                // in this engine today, but nothing structurally prevents one
-                // being added later, and indexing the loop instead is free.
+                // Button IDs use the row index: two rows can share a valueLabel (a pass reading and writing one
+                // name) and ImGui IDs must be unique.
                 for (std::size_t i = 0; i < d.textures.size(); ++i) {
                     const FrameDebuggerTextureProperty& texture = d.textures[i];
                     BuildPropertyRow(texture.name.c_str(), texture.valueLabel);
-                    // Locked Design Decisions #1/#3/#8 (PHASE0_MASTER_STRATEGY.md):
-                    // only a real render-graph 2D/volume texture gets a "View"
-                    // button - never a Buffer row, never a Material Texture row
-                    // (isRenderGraphResource is already false for those).
-                    // better-render-pass-3 campaign, BLOCK5, Phase 3 - ALSO never a
-                    // TextureArray row: no real texture-array preview exists yet
-                    // (see RequestShaderPropertyTexturePreview()'s own matching
-                    // TextureArray branch above, which just returns honestly) -
-                    // showing a "View" button that silently does nothing when
-                    // clicked would be exactly the kind of UI dishonesty this
-                    // codebase's own render-pass-toggle-honesty/side-channel-
-                    // honesty conventions exist to prevent.
+                    // Only a render-graph 2D or volume texture gets a "View" button: a buffer, material
+                    // texture or texture array has no preview, and a button that does nothing would be dishonest.
                     if (texture.isRenderGraphResource && texture.kind != rg::ResourceKind::Buffer
                         && texture.kind != rg::ResourceKind::TextureArray) {
                         ImGui::SameLine();
@@ -1034,10 +715,7 @@ void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebug
                 for (const FrameDebuggerMatrixProperty& matrix : d.matrices) {
                     ImGui::TextUnformatted(matrix.name.c_str());
                     const std::string formatted = FormatMatrixProperty(matrix);
-                    // Split on '\n' and draw each row as its own
-                    // ImGui::Text() call - see FormatMatrixProperty()'s
-                    // own doc comment for why a single multi-line
-                    // ImGui::Text() call is avoided here.
+                    // One ImGui::Text() per row (see FormatMatrixProperty()).
                     std::size_t start = 0;
                     while (start <= formatted.size()) {
                         const std::size_t newlinePos = formatted.find('\n', start);
@@ -1059,126 +737,54 @@ void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebug
 
 void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph,
     RenderTexture& gameView, RenderTexture* compositedGameView, rg::RenderPassToggleRegistry* toggleRegistry,
-    const rg::RenderPassBlackboard* offscreenBlackboard) // editor-core-separation-22 campaign, PHASE6.
+    const rg::RenderPassBlackboard* offscreenBlackboard)
 {
-    // task_manager/frame-debugger-7 campaign, PHASE3
-    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
-    // 3.0) - the LATE half of the two-bool pending/serviced handshake,
-    // checked at the very TOP of Build(), before anything else runs (see
-    // ConsumePendingReplayRequest()'s own doc comment for the EARLY half).
-    // By the time this runs, THIS frame's Game::Render() (and, if a replay
-    // was actually declared this frame, AddFrameDebuggerReplayPasses()'s
-    // own N replay passes) have ALREADY executed - Build() is only ever
-    // called from ImGuiEditorLayer::BuildUI(), which always runs after
-    // RenderGraph::Execute() for the offscreen regime has returned - so it
-    // is now safe and correct to call TriggerCapture() right here.
+    // Late half of the replay handshake: Build() runs after the offscreen graph has executed, so this frame's
+    // draw records and replay passes exist and the capture can run now.
     if (m_replayServicedThisFrame) {
         m_replayServicedThisFrame = false;
         TriggerCapture();
     }
 
-    // task_manager/frame-debugger-7 campaign, PHASE1
-    // (PHASE1_REMOVE_HISTORY_AND_SINGLE_CAPTURE_LIFECYCLE.md) - the new
-    // "clear on Resume-while-Enabled" rule (PHASE0_MASTER_STRATEGY.md's Step
-    // 1), checked at the very TOP of Build(), before anything else runs:
-    // detects a paused->running transition (most likely via the "Resume"
-    // button in PlaybackControls.cpp, which this class has no direct hook
-    // into - it only shares EditorContext) and, if the Frame Debugger is
-    // still Enabled, clears the current capture. m_enabled itself is NOT
-    // forced back to false here - only the captured DATA disappears
-    // (matches the user's own exact wording: "the frame info got removed
-    // from memory"). m_wasPlaybackPaused is refreshed unconditionally right
-    // after, every single Build() call, so the NEXT call can detect the
-    // next such transition.
+    // Resuming playback while enabled clears the capture (m_enabled stays set). The Resume button lives elsewhere,
+    // so detect the paused->running edge here and refresh m_wasPlaybackPaused on every call.
     if (m_enabled && m_wasPlaybackPaused && !ctx.playbackPaused) {
         m_currentCapture.Clear();
-        // task_manager/frame-debugger-9 campaign, PHASE3 - same "the frame
-        // info got removed from memory" rule applies to a currently-displayed
-        // shader-property one-shot preview too.
+        // A displayed shader-property preview is cleared with the capture.
         ReleaseShaderPropertyTexturePreview();
     }
     m_wasPlaybackPaused = ctx.playbackPaused;
 
-    // editor-core-separation-21 campaign, PHASE2
-    // (PHASE2_FIX_AERIAL_PERSPECTIVE_COMPOSITE_TOGGLE_LIE.md) - the FOURTH
-    // capture trigger (joining the Enable-edge/Step/explicit "Capture"
-    // button triggers documented in AGENTS.md's "Frame Debugger" section):
-    // RenderGraphPanel::Build() (called earlier THIS SAME frame - see
-    // ImGuiEditorLayer::BuildUI()'s own call order) sets this shared
-    // EditorContext flag the instant a checkbox click there actually changed
-    // RenderPassToggleRegistry state. Consumed (read-and-cleared)
-    // unconditionally right here, every single Build() call - fixes
-    // PHASE1_COMPLETION_REPORT.md's confirmed root cause: a disabled pass
-    // used to keep showing up as a real, populated Frame Debugger leaf until
-    // a human/HTTP caller remembered to request a SECOND capture after the
-    // toggle. Mirrors ApplyEnabledEdge()'s own false->true edge exactly -
-    // only arms m_pendingCaptureTrigger (never calls TriggerCapture()
-    // synchronously) and only while m_enabled is actually true (matches
-    // CaptureNowFromCommand()'s own "Capture" button guard). The OTHER
-    // mutation path (GET /render_graph/set_pass_enabled, EditorHost.cpp's
-    // RenderGraphControlCommandBridge pump, which runs BEFORE BuildUI() even
-    // starts) does not go through this flag at all - it calls
-    // IEditorLayer::FrameDebuggerCaptureNow() directly at its own call site
-    // instead (see EditorHost.cpp's SetBuiltInPassEnabled case).
+    // A toggle change in the Render Graph panel (earlier this frame) arms a re-capture while enabled, so a disabled
+    // pass does not stay visible. Only arms the deferred trigger; the set_pass_enabled HTTP route captures directly.
     if (ctx.renderPassToggleRegistryChangedThisFrame) {
         ctx.renderPassToggleRegistryChangedThisFrame = false;
         if (m_enabled) {
             m_pendingCaptureTrigger = true;
             GTE_LOG_DEBUG("FrameDebugger",
                 "Build() - RenderPassToggleRegistry changed this frame while Enabled - arming an automatic "
-                "re-capture for the next frame (editor-core-separation-21 campaign, PHASE2).");
+                "re-capture for the next frame.");
         }
     }
 
-    // PHASE3 - cached for TriggerCapture()'s own use for the rest of THIS
-    // call (BuildToolbarRow(), below, is the only thing that reads these) -
-    // see this class's own header comment for why these are safe,
-    // non-owning raw pointers/reference here. Set unconditionally, even
-    // though the window itself may turn out to be closed below - cheap
-    // (a few pointer/reference copies), and keeps this the ONE place that
-    // ever touches these members.
+    // Cached for TriggerCapture() and the toolbar row; set even when the window is closed, in this one place.
     m_frameRenderer = &renderer;
     m_frameRenderGraph = &renderGraph;
     m_frameGameView = &gameView;
-    m_frameGameViewComposited = compositedGameView; // PHASE1 (frame-debugger-4) - nullable, see header comment.
-    m_frameToggleRegistry = toggleRegistry; // editor-core-separation-21 campaign, PHASE5 - nullable, see header comment.
-    m_frameBlackboard = offscreenBlackboard; // editor-core-separation-22 campaign, PHASE6 - nullable, see header comment.
+    m_frameGameViewComposited = compositedGameView; // Nullable.
+    m_frameToggleRegistry = toggleRegistry; // Nullable.
+    m_frameBlackboard = offscreenBlackboard; // Nullable.
 
-    // Per-draw event capture - cheap/idempotent, see
-    // FrameDebuggerCaptureContext::InitializeEventCapture()'s own doc
-    // comment for why this must run unconditionally, every call, before the
-    // early-return below.
+    // Cheap and idempotent: must run every call, before the early return below.
     m_captureContext.InitializeEventCapture(renderer);
 
     if (!ctx.frameDebuggerWindowOpen) {
         return;
     }
 
-    // Passing &ctx.frameDebuggerWindowOpen as p_open keeps the window's
-    // own titlebar [x] close button in sync with the SAME bool the
-    // "Window > Frame Debugger" menu item flips (DockLayout.cpp) -
-    // clicking either one closes/reopens the same shared state, with no
-    // extra code needed on either side.
-    //
-    // task_manager/frame-debugger-3 campaign, PHASE7
-    // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md, Step
-    // 3.4) - the main-viewport pin: whenever RequestOpenWindow() armed
-    // m_pinToMainViewportNextOpen (a PROGRAMMATIC open, e.g. via
-    // GET /frame_debugger/open), force this window onto the main ImGui
-    // viewport, at a fixed generous size anchored inside its own work
-    // area - copying DockLayout.cpp's own already-proven
-    // ImGui::SetNextWindowPos(viewport->WorkPos) precedent for the main
-    // dockspace host window, PLUS an explicit SetNextWindowViewport() call
-    // (the one piece that precedent doesn't need, since the dockspace host
-    // is already the main-viewport window by construction) - this is what
-    // prevents Dear ImGui from ever classifying THIS window as a separate
-    // platform window (see ImGuiEditorLayer.cpp's own
-    // ImGuiConfigFlags_ViewportsEnable comment), so GET /get_swapchain (which
-    // only ever reads back the MAIN window's own swapchain image) can see it
-    // on the very first frame it opens. A ONE-SHOT pin - cleared immediately
-    // after, so a human can still freely drag it away afterwards, exactly
-    // like ordinary manual "Window > Frame Debugger" use (which never sets
-    // this bool at all, and therefore never takes this branch).
+    // p_open keeps the title-bar close button in sync with the "Window > Frame Debugger" menu bool.
+    // A programmatic open pins the window once onto the main ImGui viewport, so swapchain captures can see it;
+    // later it can be dragged away freely.
     if (m_pinToMainViewportNextOpen) {
         const ImGuiViewport* mainViewport = ImGui::GetMainViewport();
         const ImVec2 pinnedSize(
@@ -1191,9 +797,7 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
         ImGui::SetNextWindowSize(ImVec2(900.0f, 600.0f), ImGuiCond_FirstUseEver);
     }
     if (!ImGui::Begin("Frame Debugger", &ctx.frameDebuggerWindowOpen)) {
-        // Collapsed - still need End() (Dear ImGui's own Begin()/End()
-        // pairing contract requires End() even when Begin() returns
-        // false), but nothing worth drawing.
+        // Collapsed: End() is still required after Begin() returns false.
         ImGui::End();
         return;
     }
@@ -1201,34 +805,14 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     BuildToolbarRow(ctx);
     ImGui::Separator();
 
-    // PHASE4 (task_manager/frame-debugger-3/
-    // PHASE4_PANEL_REAL_TREE_AND_FRAME_HISTORY_UI.md, Step 3.1) - swap the
-    // displayed snapshot's own source from BuildPlaceholderFrameDebuggerSnapshot()
-    // to the current capture's own data, falling back to that exact same
-    // placeholder's own empty-tree behavior whenever no real capture has
-    // ever happened yet this session (m_currentCapture.CurrentEntry() ==
-    // nullptr) - a real, honest, reachable "enabled, but not yet captured"
-    // state (see BuildEventTreePane()'s own updated comment above).
+    // Show the current capture, or an empty tree when nothing has been captured yet.
     const FrameDebuggerHistoryEntry* currentEntry = m_currentCapture.CurrentEntry();
     const FrameDebuggerSnapshot snapshot =
         (currentEntry != nullptr) ? currentEntry->snapshot : BuildPlaceholderFrameDebuggerSnapshot();
 
-    // PHASE4 - clears any stale event selection whenever the CAPTURED entry
-    // itself changes underneath us. eventIndex values are only meaningful
-    // relative to the specific snapshot they were assigned in - a brand-new
-    // capture already resets m_selectedEventIndex directly, in
-    // TriggerCapture(), and Clear() (Disable/Resume-while-Enabled) leaves
-    // currentEntry == nullptr, which this same check below also handles.
-    // Compared via the entry's own RAW retained preview VkImageView
-    // (guaranteed fresh on every single real capture - see
-    // FrameDebuggerCurrentCapture::CaptureFrame()'s own doc comment) tracked
-    // in m_lastKnownRawPreviewView - PHASE6 deliberately does NOT reuse
-    // m_lastKnownPreviewView for this check, since that field can instead
-    // hold m_previewProcessor's own processed scratch VkImageView (a
-    // non-neutral Channels/Levels state) - see m_lastKnownRawPreviewView's
-    // own doc comment (FrameDebuggerPanel.h) for why reusing
-    // m_lastKnownPreviewView here would have incorrectly reset the
-    // selection on every single frame in that case.
+    // Event indices are only valid within their snapshot, so a changed capture clears the selection. Detected via
+    // the retained raw preview view (fresh on every capture); m_lastKnownPreviewView may hold a processed
+    // scratch view and would reset the selection every frame.
     {
         const VkImageView previousRawPreviewView = m_lastKnownRawPreviewView;
         const VkImageView newRawPreviewView =
@@ -1240,10 +824,7 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
         m_lastKnownRawPreviewView = newRawPreviewView;
     }
 
-    // PHASE4 - keeps m_previewDescriptor in sync with the current capture
-    // (see EnsurePreviewDescriptor()'s own doc comment). Called
-    // unconditionally here (cheap - a no-op unless the underlying
-    // VkImageView actually changed).
+    // Keeps m_previewDescriptor in sync with the current capture (a no-op unless the image view changed).
     EnsurePreviewDescriptor();
 
     BuildFrameStepperRow(snapshot);
@@ -1279,10 +860,7 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     ImGui::End();
 }
 
-// task_manager/frame-debugger-3 campaign, PHASE7
-// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - HTTP
-// automation entry points (see FrameDebuggerPanel.h's own doc comments for
-// each method's exact contract).
+// HTTP automation entry points (contracts in FrameDebuggerPanel.h).
 
 void FrameDebuggerPanel::RequestOpenWindow(EditorContext& ctx)
 {
@@ -1300,28 +878,10 @@ void FrameDebuggerPanel::SetEnabledFromCommand(EditorContext& ctx, bool enabled)
 bool FrameDebuggerPanel::CaptureNowFromCommand()
 {
     if (!m_enabled) {
-        // Mirrors the "Capture" button's own BeginDisabled(!m_enabled)
-        // guard - a real capture without Enable first would only ever
-        // reflect stale/never-armed FrameDebuggerCaptureContext data (see
-        // PrepareCaptureContextForThisFrame()'s own doc comment), so this
-        // is a safe, honest no-op rather than a dishonest "successful"
-        // capture of nothing meaningful.
+        // Same guard as the "Capture" button: without Enable the capture context holds no armed data.
         return false;
     }
-    // task_manager/frame-debugger-7 campaign, PHASE3
-    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
-    // 3.0) - mirrors the hand-driven "Capture" button's own new deferred
-    // behavior (BuildToolbarRow()) exactly: no longer calls TriggerCapture()
-    // synchronously (this frame's "GameView" pass/replay passes have
-    // ALREADY been declared/executed by the time an HTTP request is even
-    // processed) - only sets m_pendingCaptureTrigger = true, deferring the
-    // real capture (and this frame's worth of replay passes) to the next
-    // properly-armed frame via ConsumePendingReplayRequest()/the
-    // m_replayServicedThisFrame check at the top of Build(). This was a
-    // genuine gap found and fixed during this phase's own Step 4 manual
-    // spot-check (confirmed via a second HTTP-driven capture producing an
-    // EMPTY ReplayStepPreviews() before this fix, since no replay passes
-    // had been declared that frame).
+    // Like the "Capture" button: only arms the deferred trigger, because this frame's graph has already executed.
     m_pendingCaptureTrigger = true;
     return true;
 }
@@ -1379,11 +939,7 @@ FrameDebuggerStateSnapshotView FrameDebuggerPanel::BuildStateSnapshotView(const 
     view.totalEventCount = (currentEntry != nullptr) ? currentEntry->snapshot.totalEventCount : 0;
     view.selectedEventIndex = m_selectedEventIndex;
 
-    // Deliberately NO `default:` case - the same exhaustive-switch
-    // convention RenderGraphTypes.cpp's ToString(ResourceAccess)/
-    // IsWriteAccess() already establish (see PHASE6_COMPLETION_REPORT.md) -
-    // a future channel enumerator added without updating this function
-    // fails to compile.
+    // No `default:` so a new channel enumerator fails to compile here.
     switch (m_channel) {
     case FrameDebuggerPreviewChannel::All:
         view.channel = "all";
@@ -1422,11 +978,7 @@ FrameDebuggerEventTextureResult FrameDebuggerPanel::GetEventTextureFromCommand(i
         return result;
     }
 
-    // Real aspect this exact capture was taken with - a depth-only pass
-    // (e.g. Shadow.DepthPass.Draw) retains a depth image here, never color.
-    // See CommandBuffer::Draw()'s own "color when both are present, depth
-    // only when color is absent" preference, mirrored by
-    // FrameDebuggerCaptureContext::FlushPendingCapture().
+    // Use the aspect of this capture: a depth-only pass retains a depth image, never color.
     const bool isDepth = m_captureContext.RetainedEventIsDepth();
     const VkImageAspectFlags aspect = isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 

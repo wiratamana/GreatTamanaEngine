@@ -15,10 +15,8 @@ class RenderSystem;
 // The request a scene redraw hands to DrawScene: the camera and the per-layout pipeline overrides.
 SceneDrawRequest MakeSceneDrawRequest(const Mat4& viewProjection, const PipelineOverrideSet& overrides);
 
-// Redraws the scene into the given attachments with the given camera and override pipelines.
-//   SceneDrawPass(builder, system, registry, renderer, "Depth.Draw", scope, event)
-//       .Pipelines(set).Camera(viewProjection).Depth(map, 1.0f).Draw();
-// The draw callback captures by value; the engine objects must outlive the frame.
+// Redraws the scene into the given attachments. The draw callback captures by value; the engine objects
+// must outlive the frame. Usage: SceneDrawPass(...).Pipelines(set).Camera(vp).Depth(map, 1.0f).Draw();
 class SceneDrawPass {
 public:
     SceneDrawPass(rg::RenderGraphBuilder& builder, RenderSystem& system, Registry& registry, Renderer& renderer,
