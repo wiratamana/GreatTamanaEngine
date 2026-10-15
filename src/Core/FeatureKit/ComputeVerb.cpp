@@ -74,10 +74,11 @@ ComputeChain& ComputeChain::PushBytes(const void* data, std::size_t size)
     return *this;
 }
 
-ComputeChain& ComputeChain::ParamsBytes(rg::GpuParamsBuffer& params, const void* data, std::size_t size)
+ComputeChain& ComputeChain::ParamsBytes(
+    std::string_view bindingName, rg::GpuParamsBuffer& params, const void* data, std::size_t size)
 {
     if (m_impl && m_impl->pass) {
-        m_impl->pass->ParamsBytes(params, data, size);
+        m_impl->pass->ParamsBytes(bindingName, params, data, size);
     }
     return *this;
 }

@@ -41,7 +41,14 @@ public:
     template <typename T>
     ComputeChain& Params(GpuParams<T>& params, const T& value)
     {
-        return ParamsBytes(detail::ParamsAccess::Of(params), &value, sizeof(T));
+        return ParamsBytes("params", detail::ParamsAccess::Of(params), &value, sizeof(T));
+    }
+
+    // Same, bound to the shader variable `bindingName` (a literal), for a shader with several parameter blocks.
+    template <typename T>
+    ComputeChain& Params(std::string_view bindingName, GpuParams<T>& params, const T& value)
+    {
+        return ParamsBytes(bindingName, detail::ParamsAccess::Of(params), &value, sizeof(T));
     }
 
     // Dispatches over `size` elements, clamped to the first written storage image.
@@ -54,7 +61,7 @@ private:
     explicit ComputeChain(std::unique_ptr<Impl> impl) noexcept;
 
     ComputeChain& PushBytes(const void* data, std::size_t size);
-    ComputeChain& ParamsBytes(rg::GpuParamsBuffer& params, const void* data, std::size_t size);
+    ComputeChain& ParamsBytes(std::string_view bindingName, rg::GpuParamsBuffer& params, const void* data, std::size_t size);
 
     std::unique_ptr<Impl> m_impl;
 };

@@ -22,7 +22,8 @@ ComputePass::~ComputePass()
     m_state.ReportUnfinished("Dispatch");
 }
 
-ComputePass& ComputePass::ParamsBytes(GpuParamsBuffer& params, const void* data, std::size_t size)
+ComputePass& ComputePass::ParamsBytes(
+    std::string_view bindingName, GpuParamsBuffer& params, const void* data, std::size_t size)
 {
     if (m_state.inert) {
         return *this;
@@ -31,7 +32,7 @@ ComputePass& ComputePass::ParamsBytes(GpuParamsBuffer& params, const void* data,
         m_state.failed = true;
         return *this;
     }
-    return Bind("params", params.Handle());
+    return Bind(bindingName, params.Handle());
 }
 
 bool ComputePass::Dispatch(Extent2D requested, std::uint32_t depth)

@@ -2332,6 +2332,7 @@ set(GTE_TEST_SOURCES
     Core/FeatureKit/FeatureKitTests.cpp
     Core/FeatureKit/KitChainTests.cpp
     Core/FeatureKit/KitDataFlowTests.cpp
+    Core/FeatureKit/KitSharedVolumeTests.cpp
     Core/FeatureKit/KitModuleTests.cpp
     Core/FeatureKit/KitSceneTests.cpp
     Game/SceneDrawPassTests.cpp

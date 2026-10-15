@@ -19,6 +19,7 @@
 #include "OffscreenTarget.h"
 #include "PerView.h"
 #include "PersistentTarget.h"
+#include "PersistentVolume.h"
 #include "SceneDrawChain.h"
 #include "SceneShaderSet.h"
 #include "SceneSlot.h"

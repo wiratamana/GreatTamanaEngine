@@ -43,7 +43,13 @@ public:
     }
 
     // Uploads `size` bytes and binds the buffer to the shader variable "params".
-    ComputePass& ParamsBytes(GpuParamsBuffer& params, const void* data, std::size_t size);
+    ComputePass& ParamsBytes(GpuParamsBuffer& params, const void* data, std::size_t size)
+    {
+        return ParamsBytes("params", params, data, size);
+    }
+
+    // Same, bound to the shader variable `bindingName` (a literal: it is read at Dispatch()).
+    ComputePass& ParamsBytes(std::string_view bindingName, GpuParamsBuffer& params, const void* data, std::size_t size);
 
     // Uploads `value` and binds the buffer to the shader variable "params".
     template <typename T>

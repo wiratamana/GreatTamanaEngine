@@ -431,6 +431,7 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/PerView.h
     src/Core/FeatureKit/PersistentTarget.h
     src/Core/FeatureKit/PersistentTarget.cpp
+    src/Core/FeatureKit/PersistentVolume.cpp
     src/Core/FeatureKit/Channel.h
     src/Core/FeatureKit/Channel.cpp
     src/Core/FeatureKit/ChannelKey.h
