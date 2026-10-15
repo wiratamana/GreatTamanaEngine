@@ -67,6 +67,18 @@ PixelFormat FromVkFormat(VkFormat format) noexcept
     }
 }
 
+PixelFormat CapturedPixelFormatFromVk(VkFormat format) noexcept
+{
+    switch (format) {
+        case VK_FORMAT_R8G8B8A8_SRGB:
+            return PixelFormat::RGBA8_UNorm;
+        case VK_FORMAT_B8G8R8A8_SRGB:
+            return PixelFormat::BGRA8_UNorm;
+        default:
+            return FromVkFormat(format);
+    }
+}
+
 VkImageLayout ToVkImageLayout(ImageLayout layout) noexcept
 {
     switch (layout) {

@@ -5,19 +5,7 @@
 
 namespace gte::Encoding {
 
-// atmosphere-scattering-2 campaign, Phase 5
-// (task_manager/atmosphere-scattering-2/PHASE5_AERIAL_LUT_NUMERIC_VALIDATION_TOOL.md)
-// - moved out of this file's own anonymous namespace (was a private
-// `HalfToFloat()` helper) and renamed to `DecodeHalfFloat()`, now declared
-// publicly in HdrColorVisualization.h - a PURE visibility change, this
-// function's own body/behavior is completely unchanged.
-//
-// Plain IEEE 754 binary16 -> binary32 conversion (handles zero, subnormals,
-// normals, infinities, and NaN) - no hardware F16C instruction dependency,
-// since this is a rare, human/LLM-triggered debug-capture path, never a
-// per-frame hot path (see AGENTS.md's own "Named Texture Capture" section
-// on GET /get_texture's already-accepted vkDeviceWaitIdle() cost - this
-// function's own cost is negligible in comparison).
+// IEEE 754 binary16 to binary32 without hardware F16C; only used on rare debug-capture paths.
 float DecodeHalfFloat(std::uint16_t half) noexcept
 {
     const std::uint32_t sign = static_cast<std::uint32_t>(half & 0x8000u) << 16;
@@ -51,28 +39,14 @@ float DecodeHalfFloat(std::uint16_t half) noexcept
 
 namespace {
 
-// A multi-scattering "response" value is typically small in absolute terms
-// (a fraction of the Transmittance LUT's own [0, 1] scale - scattering
-// coefficients are ~0.006 km^-1 and phase functions are normalized over the
-// full sphere, see AtmosphereMultiScatteringLut.comp) - a debug-only fixed
-// exposure multiplier is applied BEFORE the Reinhard tonemap below purely so
-// a genuinely spatially-varying-but-small-magnitude LUT is actually visible
-// as a gradient in an 8-bit preview image, instead of quantizing to solid
-// black. This constant affects ONLY this debug visualization path - it is
-// never used by any real shading/compositing math anywhere in this
-// campaign (Phase 7's real sky/aerial-perspective passes will have their
-// own, separate, deliberately-designed exposure/tonemapping).
+// Fixed debug exposure applied before the tonemap so small-magnitude values stay visible in 8 bits.
 constexpr float kDebugVisualizationExposure = 400.0f;
 
-// Reinhard tonemap + [0,255] quantization - see this file's own header
-// comment for why a plain clamp would be actively misleading here.
+// Reinhard tonemap and [0,255] quantization.
 std::uint8_t TonemapToByte(float value) noexcept
 {
     if (!(value > 0.0f)) {
-        // Handles exactly 0, negative (shouldn't occur for a physical
-        // scattering quantity, but stay safe), and NaN (NaN > 0.0f is
-        // false) uniformly - never propagate a NaN into the output image.
-        return 0;
+        return 0; // Zero, negative and NaN all map to black.
     }
     const float exposed = value * kDebugVisualizationExposure;
     float tonemapped = exposed / (1.0f + exposed);
@@ -85,16 +59,16 @@ std::uint8_t TonemapToByte(float value) noexcept
 } // namespace
 
 bool ConvertHdrRgba16fToRgba8(
-    const std::uint8_t* rawRgba16f, VkFormat colorFormat, int width, int height, std::uint8_t* outRgba8)
+    const std::uint8_t* rawRgba16f, PixelFormat colorFormat, int width, int height, std::uint8_t* outRgba8)
 {
     if (width <= 0 || height <= 0) {
-        return true; // Safe no-op - mirrors ConvertDepthToGrayscaleRgba8()'s own convention.
+        return true;
     }
     if (rawRgba16f == nullptr || outRgba8 == nullptr) {
         return false;
     }
-    if (colorFormat != VK_FORMAT_R16G16B16A16_SFLOAT) {
-        return false; // Unrecognized format - see this function's own header doc comment.
+    if (colorFormat != PixelFormat::RGBA16_Float) {
+        return false;
     }
 
     const std::size_t pixelCount = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
@@ -106,7 +80,7 @@ bool ConvertHdrRgba16fToRgba8(
         rgba[0] = TonemapToByte(DecodeHalfFloat(channels[0]));
         rgba[1] = TonemapToByte(DecodeHalfFloat(channels[1]));
         rgba[2] = TonemapToByte(DecodeHalfFloat(channels[2]));
-        rgba[3] = 255; // Alpha carries no meaningful data for this LUT (imageStore()'s own alpha is always 0.0) - always fully opaque for display.
+        rgba[3] = 255; // Alpha carries no data here; keep it opaque for display.
 
         std::memcpy(outRgba8 + i * 4, rgba, 4);
     }

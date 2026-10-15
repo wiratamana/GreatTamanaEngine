@@ -18,6 +18,9 @@ int BytesPerTexelForFormat(VkFormat format) noexcept;
 VkFormat ToVkFormat(PixelFormat format) noexcept;
 PixelFormat FromVkFormat(VkFormat format) noexcept;
 
+// Format reported for a readback: sRGB variants share the byte layout of their UNORM twins.
+PixelFormat CapturedPixelFormatFromVk(VkFormat format) noexcept;
+
 // Renderer-internal: the only place gte::ImageLayout converts to and from VkImageLayout.
 // Unknown values map to Undefined rather than asserting.
 VkImageLayout ToVkImageLayout(ImageLayout layout) noexcept;

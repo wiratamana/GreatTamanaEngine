@@ -17,17 +17,17 @@ std::uint8_t ClampToByte(float value)
 } // namespace
 
 bool ConvertDepthToGrayscaleRgba8(
-    const std::uint8_t* rawDepth, VkFormat depthFormat, int width, int height, std::uint8_t* outRgba8)
+    const std::uint8_t* rawDepth, PixelFormat depthFormat, int width, int height, std::uint8_t* outRgba8)
 {
     if (width <= 0 || height <= 0) {
-        return true; // Nothing to do - a 0-sized buffer is a safe no-op, mirroring ConvertBgraToRgbaInPlace()'s own convention.
+        return true;
     }
     if (rawDepth == nullptr || outRgba8 == nullptr) {
-        return false; // Defensive - mirrors ConvertBgraToRgbaInPlace()'s own null-pointer guard; should never happen given today's one real caller (Phase 4), which always passes a real, correctly-sized buffer.
+        return false;
     }
-    if (depthFormat != VK_FORMAT_D32_SFLOAT && depthFormat != VK_FORMAT_D32_SFLOAT_S8_UINT
-        && depthFormat != VK_FORMAT_D24_UNORM_S8_UINT) {
-        return false; // Unrecognized format - see this function's own header doc comment.
+    if (depthFormat != PixelFormat::D32_Float && depthFormat != PixelFormat::D32_Float_S8_UInt
+        && depthFormat != PixelFormat::D24_UNorm_S8_UInt) {
+        return false;
     }
 
     const std::size_t pixelCount = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
@@ -36,7 +36,7 @@ bool ConvertDepthToGrayscaleRgba8(
         std::memcpy(&word, rawDepth + i * 4, 4);
 
         std::uint8_t gray = 0;
-        if (depthFormat == VK_FORMAT_D24_UNORM_S8_UINT) {
+        if (depthFormat == PixelFormat::D24_UNorm_S8_UInt) {
             const std::uint32_t depth24 = word & 0x00FFFFFFu;
             gray = ClampToByte(static_cast<float>(depth24) / static_cast<float>(0x00FFFFFFu));
         } else {

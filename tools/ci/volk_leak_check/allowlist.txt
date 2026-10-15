@@ -49,14 +49,6 @@ Editor/SceneGridRenderer.cpp # debt: editor code uses raw Vulkan types
 Editor/SceneGridRenderer.h # debt: editor code uses raw Vulkan types
 Editor/SceneIO.cpp # debt: editor code uses raw Vulkan types
 Editor/SceneIO.h # debt: editor code uses raw Vulkan types
-Encoding/CapturedPixelConversion.cpp # debt: pixel conversion switches on VkFormat
-Encoding/CapturedPixelConversion.h # debt: pixel conversion switches on VkFormat
-Encoding/DepthVisualization.cpp # debt: pixel conversion switches on VkFormat
-Encoding/DepthVisualization.h # debt: pixel conversion switches on VkFormat
-Encoding/HdrColorVisualization.cpp # debt: pixel conversion switches on VkFormat
-Encoding/HdrColorVisualization.h # debt: pixel conversion switches on VkFormat
-Encoding/SingleChannelVisualization.cpp # debt: pixel conversion switches on VkFormat
-Encoding/SingleChannelVisualization.h # debt: pixel conversion switches on VkFormat
 Game/Animation/AnimationSystem.h # debt: game systems hold raw Vulkan handles
 Game/Game.cpp # debt: game systems hold raw Vulkan handles
 Game/Game.h # debt: game systems hold raw Vulkan handles

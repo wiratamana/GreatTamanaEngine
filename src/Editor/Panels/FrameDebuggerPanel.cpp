@@ -135,11 +135,11 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
         std::vector<std::uint8_t> converted;
         const std::uint8_t* rgba8Pixels = raw.pixels.data();
         bool ok = true;
-        if (raw.format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+        if (raw.format == PixelFormat::RGBA16_Float) {
             converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
             ok = Encoding::ConvertHdrRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data());
             rgba8Pixels = converted.data();
-        } else if (raw.format == VK_FORMAT_R8_UNORM) {
+        } else if (raw.format == PixelFormat::R8_UNorm) {
             converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
             ok = Encoding::Convert1ChannelToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data());
             rgba8Pixels = converted.data();
@@ -1002,7 +1002,7 @@ FrameDebuggerEventTextureResult FrameDebuggerPanel::GetEventTextureFromCommand(i
         if (!Encoding::ConvertDepthToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, raw.pixels.data())) {
             return result; // Depth format not recognized - fail cleanly.
         }
-    } else if (raw.format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+    } else if (raw.format == PixelFormat::RGBA16_Float) {
         converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
         if (!Encoding::ConvertHdrRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data())) {
             return result;

@@ -23,6 +23,7 @@
 #include "Vulkan/VulkanInstance.h"
 #include "Vulkan/VulkanSurface.h"
 
+#include "../Core/CapturedPixels.h"
 #include "../Core/CaptureResult.h"
 #include "../Core/PipelineDesc.h"
 #include "../Core/UiTextureHandle.h"
@@ -102,13 +103,8 @@ public:
         bool createDepthCompanion = true, bool createColorImage = true, bool transferSrc = false,
         bool transferDst = false) const;
 
-    // Holds raw image pixels read back from the GPU.
-    struct CapturedRawPixels {
-        std::vector<std::uint8_t> pixels;
-        int width = 0;
-        int height = 0;
-        VkFormat format = VK_FORMAT_UNDEFINED;
-    };
+    // Raw image pixels read back from the GPU.
+    using CapturedRawPixels = CapturedPixels;
 
     // Synchronously reads back color pixels from a RenderTexture.
     CapturedRawPixels CaptureRenderTexturePixels(RenderTexture& texture) const;

@@ -6,6 +6,7 @@
 
 #include <volk.h>
 
+#include "../Core/CapturedPixels.h"
 #include "Buffer.h"
 #include "Memory/GpuMemoryTracker.h"
 
@@ -16,12 +17,8 @@
 
 namespace gte {
 
-struct CapturedSwapchainPixels {
-    std::vector<std::uint8_t> pixels; // tightly packed, width*height*4 bytes
-    int width = 0;
-    int height = 0;
-    VkFormat format = VK_FORMAT_UNDEFINED;
-};
+// Tightly packed width*height*4 bytes.
+using CapturedSwapchainPixels = CapturedPixels;
 
 // FramePresenter only calls into this class; it records no copy or barrier itself.
 class SwapchainCaptureService {

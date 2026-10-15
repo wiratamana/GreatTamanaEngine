@@ -4,7 +4,7 @@
 namespace gte::Encoding {
 
 bool Convert1ChannelToGrayscaleRgba8(
-    const std::uint8_t* raw, VkFormat colorFormat, int width, int height, std::uint8_t* outRgba8)
+    const std::uint8_t* raw, PixelFormat colorFormat, int width, int height, std::uint8_t* outRgba8)
 {
     if (width <= 0 || height <= 0) {
         return true;
@@ -12,7 +12,7 @@ bool Convert1ChannelToGrayscaleRgba8(
     if (raw == nullptr || outRgba8 == nullptr) {
         return false;
     }
-    if (colorFormat != VK_FORMAT_R8_UNORM) {
+    if (colorFormat != PixelFormat::R8_UNorm) {
         return false;
     }
 

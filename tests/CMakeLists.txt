@@ -2836,7 +2836,10 @@ add_test(NAME EngineVocabularyCheck
 # comment blocks longer than 3 lines. The scope is an explicit directory/file list; there is no allowlist.
 set(GTE_COMMENT_RULE_SRC
     Renderer/ Core/FeatureKit/ Features/Shadow/
-    Application/RenderPasses.cpp Application/RenderPasses.h Core/Core.cpp Core/Core.h
+    Application/RenderPasses.cpp Application/RenderPasses.h Core/Core.cpp Core/Core.h Core/CapturedPixels.h
+    Encoding/CapturedPixelConversion.cpp Encoding/CapturedPixelConversion.h Encoding/DepthVisualization.cpp
+    Encoding/DepthVisualization.h Encoding/HdrColorVisualization.cpp Encoding/HdrColorVisualization.h
+    Encoding/SingleChannelVisualization.cpp Encoding/SingleChannelVisualization.h Editor/EditorHost.cpp
     Core/Plugins/RenderFeatureBlendPush.h Core/Plugins/RenderFeatureCompositor.cpp
     Core/Plugins/RenderFeatureCompositor.h Core/Plugins/RenderFeatureCompositorBlend.cpp
     Core/Plugins/RenderFeatureCompositorImpl.cpp Core/Plugins/RenderFeatureCompositorImpl.h

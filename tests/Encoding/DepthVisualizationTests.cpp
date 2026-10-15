@@ -1,9 +1,5 @@
-// Unit tests for DepthVisualization (src/Encoding/DepthVisualization.h) -
-// hand-built 2x2 buffers of known raw depth-aspect-only bytes for each of the
-// three formats VulkanDevice::PickDepthFormat() can ever return, plus
-// unrecognized-format/null-pointer/degenerate-size safe-no-op cases. Pure
-// logic, no GPU involved - see tests/Encoding/PixelConversionTests.cpp for
-// the sibling pattern this mirrors.
+// Tier-1 tests for DepthVisualization: hand-built 2x2 depth buffers for each supported format,
+// plus unrecognized-format, null-pointer and zero-size cases.
 
 #include "Encoding/DepthVisualization.h"
 
@@ -41,7 +37,7 @@ TEST(DepthVisualizationTest, D32Sfloat_ConvertsFloatValuesToGrayscale)
     AppendFloat(raw, 1.0f); // -> 255
 
     std::vector<std::uint8_t> out(4 * 4, 0xAB);
-    ASSERT_TRUE(ConvertDepthToGrayscaleRgba8(raw.data(), VK_FORMAT_D32_SFLOAT, 2, 2, out.data()));
+    ASSERT_TRUE(ConvertDepthToGrayscaleRgba8(raw.data(), PixelFormat::D32_Float, 2, 2, out.data()));
 
     const std::vector<std::uint8_t> expected{
         255, 255, 255, 255,
@@ -61,7 +57,7 @@ TEST(DepthVisualizationTest, D32SfloatS8Uint_IdenticalToD32SfloatForDepthOnlyCop
     AppendFloat(raw, 0.75f);
 
     std::vector<std::uint8_t> out(4 * 4, 0);
-    ASSERT_TRUE(ConvertDepthToGrayscaleRgba8(raw.data(), VK_FORMAT_D32_SFLOAT_S8_UINT, 2, 2, out.data()));
+    ASSERT_TRUE(ConvertDepthToGrayscaleRgba8(raw.data(), PixelFormat::D32_Float_S8_UInt, 2, 2, out.data()));
 
     EXPECT_EQ(out[0], 255);
     EXPECT_EQ(out[3], 255); // alpha
@@ -82,7 +78,7 @@ TEST(DepthVisualizationTest, D24UnormS8Uint_UsesLow24BitsIgnoringStencilByte)
     AppendWord(raw, 0x00FFFFFFu);
 
     std::vector<std::uint8_t> out(4 * 4, 0);
-    ASSERT_TRUE(ConvertDepthToGrayscaleRgba8(raw.data(), VK_FORMAT_D24_UNORM_S8_UINT, 2, 2, out.data()));
+    ASSERT_TRUE(ConvertDepthToGrayscaleRgba8(raw.data(), PixelFormat::D24_UNorm_S8_UInt, 2, 2, out.data()));
 
     const std::vector<std::uint8_t> expected{
         255, 255, 255, 255,
@@ -97,7 +93,7 @@ TEST(DepthVisualizationTest, UnrecognizedFormat_ReturnsFalseAndLeavesOutputUntou
 {
     std::vector<std::uint8_t> raw(4, 0);
     std::vector<std::uint8_t> out(4, 0xCD); // sentinel fill
-    EXPECT_FALSE(ConvertDepthToGrayscaleRgba8(raw.data(), VK_FORMAT_R8G8B8A8_UNORM, 1, 1, out.data()));
+    EXPECT_FALSE(ConvertDepthToGrayscaleRgba8(raw.data(), PixelFormat::RGBA8_UNorm, 1, 1, out.data()));
 
     const std::vector<std::uint8_t> expectedUntouched(4, 0xCD);
     EXPECT_EQ(out, expectedUntouched);
@@ -106,7 +102,7 @@ TEST(DepthVisualizationTest, UnrecognizedFormat_ReturnsFalseAndLeavesOutputUntou
 TEST(DepthVisualizationTest, NullRawDepthWithPositiveDimensions_ReturnsFalseAndLeavesOutputUntouched)
 {
     std::vector<std::uint8_t> out(4, 0xCD);
-    EXPECT_FALSE(ConvertDepthToGrayscaleRgba8(nullptr, VK_FORMAT_D32_SFLOAT, 1, 1, out.data()));
+    EXPECT_FALSE(ConvertDepthToGrayscaleRgba8(nullptr, PixelFormat::D32_Float, 1, 1, out.data()));
 
     const std::vector<std::uint8_t> expectedUntouched(4, 0xCD);
     EXPECT_EQ(out, expectedUntouched);
@@ -115,16 +111,16 @@ TEST(DepthVisualizationTest, NullRawDepthWithPositiveDimensions_ReturnsFalseAndL
 TEST(DepthVisualizationTest, NullOutRgba8WithPositiveDimensions_ReturnsFalse)
 {
     std::vector<std::uint8_t> raw(4, 0);
-    EXPECT_FALSE(ConvertDepthToGrayscaleRgba8(raw.data(), VK_FORMAT_D32_SFLOAT, 1, 1, nullptr));
+    EXPECT_FALSE(ConvertDepthToGrayscaleRgba8(raw.data(), PixelFormat::D32_Float, 1, 1, nullptr));
 }
 
 TEST(DepthVisualizationTest, ZeroSizedBuffer_IsSafeNoOpAndReturnsTrue)
 {
-    EXPECT_TRUE(ConvertDepthToGrayscaleRgba8(nullptr, VK_FORMAT_D32_SFLOAT, 0, 5, nullptr));
-    EXPECT_TRUE(ConvertDepthToGrayscaleRgba8(nullptr, VK_FORMAT_D32_SFLOAT, 5, 0, nullptr));
+    EXPECT_TRUE(ConvertDepthToGrayscaleRgba8(nullptr, PixelFormat::D32_Float, 0, 5, nullptr));
+    EXPECT_TRUE(ConvertDepthToGrayscaleRgba8(nullptr, PixelFormat::D32_Float, 5, 0, nullptr));
 
     std::uint8_t dummy = 0xAB;
-    EXPECT_TRUE(ConvertDepthToGrayscaleRgba8(&dummy, VK_FORMAT_D32_SFLOAT, 0, 0, &dummy));
+    EXPECT_TRUE(ConvertDepthToGrayscaleRgba8(&dummy, PixelFormat::D32_Float, 0, 0, &dummy));
     EXPECT_EQ(dummy, 0xAB);
 }
 

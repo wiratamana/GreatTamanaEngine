@@ -1,13 +1,14 @@
 #pragma once
+
+#include "../Core/PixelFormat.h"
+
 #include <cstdint>
-#include <volk.h>
 
 namespace gte::Encoding {
 
-// Converts a tightly-packed single-channel 8-bit color readback into
-// grayscale RGBA8 (R=G=B=value, A=255). Supports VK_FORMAT_R8_UNORM only;
-// returns false (outRgba8 untouched) for any other format.
+// Converts a tightly packed R8_UNorm readback into grayscale RGBA8 (R=G=B=value, A=255).
+// Any other format returns false and leaves `outRgba8` untouched.
 bool Convert1ChannelToGrayscaleRgba8(
-    const std::uint8_t* raw, VkFormat colorFormat, int width, int height, std::uint8_t* outRgba8);
+    const std::uint8_t* raw, PixelFormat colorFormat, int width, int height, std::uint8_t* outRgba8);
 
 } // namespace gte::Encoding

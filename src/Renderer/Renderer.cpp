@@ -261,7 +261,7 @@ Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageA
     std::memcpy(result.pixels.data(), readback.MappedData(), static_cast<std::size_t>(size));
     result.width = static_cast<int>(extent.width);
     result.height = static_cast<int>(extent.height);
-    result.format = format;
+    result.format = CapturedPixelFormatFromVk(format);
     return result;
 }
 
@@ -812,7 +812,7 @@ CaptureResult Renderer::CaptureRenderTarget(const RenderTexture& target) const
 
     CaptureResult result;
     result.extent = Extent2D{ static_cast<std::uint32_t>(raw.width), static_cast<std::uint32_t>(raw.height) };
-    result.format = FromVkFormat(raw.format);
+    result.format = raw.format;
     result.pixels.resize(raw.pixels.size());
     std::memcpy(result.pixels.data(), raw.pixels.data(), raw.pixels.size());
     return result;

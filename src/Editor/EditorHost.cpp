@@ -663,11 +663,11 @@ int EditorHost::Run()
                         if (wantsDepth) {
                             // In-place is safe: each pixel's input bytes are read before its output bytes are written.
                             ok = Encoding::ConvertDepthToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, raw.pixels.data());
-                        } else if (raw.format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+                        } else if (raw.format == PixelFormat::RGBA16_Float) {
                             converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
                             ok = Encoding::ConvertHdrRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data());
                             encodePixels = converted.data();
-                        } else if (raw.format == VK_FORMAT_R8_UNORM) {
+                        } else if (raw.format == PixelFormat::R8_UNorm) {
                             converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
                             ok = Encoding::Convert1ChannelToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data());
                             encodePixels = converted.data();

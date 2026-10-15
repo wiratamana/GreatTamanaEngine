@@ -1,7 +1,7 @@
 #include "SwapchainCaptureService.h"
 
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
-
+#include "VulkanFormatInfo.h"
 #include <cstring>
 
 namespace gte {
@@ -89,7 +89,7 @@ std::optional<CapturedSwapchainPixels> SwapchainCaptureService::TryTakeCompleted
     std::memcpy(result.pixels.data(), slot.readbackBuffer->MappedData(), byteCount);
     result.width = slot.capturedWidth;
     result.height = slot.capturedHeight;
-    result.format = slot.capturedFormat;
+    result.format = CapturedPixelFormatFromVk(slot.capturedFormat);
     return result;
 }
 
