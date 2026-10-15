@@ -1,24 +1,15 @@
 #pragma once
 
-// Generalized early-exit guard: call this at the very TOP of any provider
-// body that performs a side effect (a RenderPassBlackboard::Publish() call,
-// a cached-callback hand-off, a member-variable write some OTHER,
-// independently-toggled pass might later read) BEFORE that side effect
-// happens - never only immediately before declaring the pass. A disabled
-// pass must never leak its side effect just because the late "don't declare
-// it" decision happens after the side effect already ran.
-//
-// `registry` may be nullptr - returns true unconditionally in that case, so
-// callers never need their own separate null check. Read-only: the real
-// registration (RenderPassToggleRegistry::NoteDeclaredWithOwner()) happens
-// automatically, later, the moment AddRenderPass()/AddBlitPass() actually
-// runs for this exact name - this guard never registers anything itself.
+// Early-exit guard for providers with side effects: call it at the top of the body, before anything is
+// published or stored, so a disabled pass leaks nothing. A null registry means "enabled". Read-only.
 
 #include "RenderPassToggleRegistry.h"
 
+#include <string_view>
+
 namespace gte::rg {
 
-inline bool ShouldDeclareBuiltInPassThisFrame(RenderPassToggleRegistry* registry, const char* name)
+inline bool ShouldDeclareBuiltInPassThisFrame(const RenderPassToggleRegistry* registry, std::string_view name)
 {
     return registry == nullptr || registry->IsEnabled(name);
 }

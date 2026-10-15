@@ -1,12 +1,11 @@
 #pragma once
 
-// Tracks whether one declared render pass, identified by its own debug
-// name, is currently enabled, plus which feature owns it. Main-thread-only,
-// no mutex - touched only from RenderGraphBuilder::AddRenderPass()/
-// AddBlitPass(), the Render Graph panel, and RenderGraphControlCommandBridge's
-// pump, all on the main thread.
+// Enabled state and owning feature of each declared render pass, keyed by pass name.
+// Main-thread only, no mutex. Lookups take string_view and never allocate.
 
+#include <cstddef>
 #include <deque>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -30,42 +29,35 @@ class RenderPassToggleRegistry {
 public:
     RenderPassToggleRegistry() = default;
 
-    // Called ONLY by RenderGraphBuilder::AddRenderPass()/AddBlitPass() - no
-    // feature file calls this directly, ever. Auto-registers an unseen name
-    // as enabled=true with the given owner. A no-op for an empty name.
-    void NoteDeclaredWithOwner(const std::string& name, std::string_view owningFeatureName);
+    // Called only by RenderGraphBuilder::AddRenderPass()/AddBlitPass().
+    // Auto-registers an unseen name as enabled with the given owner. No-op for an empty name.
+    void NoteDeclaredWithOwner(std::string_view name, std::string_view owningFeatureName);
 
-    // Called by Core::SetBuiltInRenderPassEnabled(). Upserts `name` if
-    // unseen. Returns false, unapplied, if `name` is deny-listed.
+    // Upserts `name` if unseen. Returns false, unapplied, if `name` is deny-listed.
     bool SetEnabled(const std::string& name, bool enabled);
 
     // Current enabled state - true (safe default) if `name` is unknown.
-    bool IsEnabled(const std::string& name) const;
+    bool IsEnabled(std::string_view name) const;
 
-    // Plain existence check - NEVER creates an entry, unlike SetEnabled()/
-    // NoteDeclaredWithOwner(). Use this before mirroring a write from an
-    // unrelated namespace into SetEnabled() - see
-    // RenderFeatureCompositor::SetFeatureEnabled().
-    bool HasEntry(const std::string& name) const noexcept
-    {
-        return m_entries.find(name) != m_entries.end();
-    }
+    // Plain existence check; never creates an entry.
+    bool HasEntry(std::string_view name) const noexcept { return m_entries.find(name) != m_entries.end(); }
 
     // Every known entry, sorted by name - deterministic UI/JSON order.
     std::vector<RenderPassToggleState> ListAll() const;
 
-    // Names that can never be disabled: "Present" (final swapchain
-    // blit) and "ClearViewTarget" (the view's one guaranteed clear).
+    // Names that can never be disabled: "Present" and "ClearViewTarget".
     static bool IsDenyListed(const std::string& name) noexcept;
 
-    // Max simultaneous entries with everDeclaredThisSession == false. Bounds
-    // damage from typo'd/garbage HTTP input; a real pass is never evicted -
-    // NoteDeclaredWithOwner() promotes it out of ghost tracking the moment
-    // it actually runs once.
+    // Max simultaneous never-declared (ghost) entries; bounds damage from typo'd HTTP input.
     static constexpr std::size_t kMaxGhostEntries = 256;
 
 private:
-    std::unordered_map<std::string, RenderPassToggleState> m_entries;
+    struct NameHash {
+        using is_transparent = void;
+        std::size_t operator()(std::string_view name) const noexcept { return std::hash<std::string_view>{}(name); }
+    };
+
+    std::unordered_map<std::string, RenderPassToggleState, NameHash, std::equal_to<>> m_entries;
     std::deque<std::string> m_ghostInsertionOrder; // FIFO, ghost entries only.
 };
 

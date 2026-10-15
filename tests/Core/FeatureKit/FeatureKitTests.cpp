@@ -84,7 +84,7 @@ TEST(FxFrameTest, SharedFrameHasTheSharedScope)
 TEST(FxGateTest, EmptyGateAsksForTheRegisteredName)
 {
     std::vector<std::string> asked;
-    const PassEnabledFn isEnabled = [&](std::string_view name) {
+    const auto isEnabled = [&](std::string_view name) {
         asked.emplace_back(name);
         return true;
     };
@@ -95,22 +95,59 @@ TEST(FxGateTest, EmptyGateAsksForTheRegisteredName)
 
 TEST(FxGateTest, ADisabledPassBlocksTheCallback)
 {
-    const PassEnabledFn isEnabled = [](std::string_view name) { return name != "Effect.Mask.Dispatch"; };
+    const auto isEnabled = [](std::string_view name) { return name != "Effect.Mask.Dispatch"; };
     EXPECT_FALSE(GateAllows(Gate{ "Effect.Mask.Dispatch" }, "Effect.Mask", isEnabled));
 }
 
 TEST(FxGateTest, AListedGateRunsWhenAnyPassIsEnabled)
 {
-    const PassEnabledFn onlyB = [](std::string_view name) { return name == "B.Pass"; };
+    const auto onlyB = [](std::string_view name) { return name == "B.Pass"; };
     EXPECT_TRUE(GateAllows(Gate{ "A.Pass", "B.Pass" }, "Registered", onlyB));
 
-    const PassEnabledFn none = [](std::string_view) { return false; };
+    const auto none = [](std::string_view) { return false; };
     EXPECT_FALSE(GateAllows(Gate{ "A.Pass", "B.Pass" }, "Registered", none));
 }
 
-TEST(FxGateTest, NoToggleRegistryMeansEverythingRuns)
+TEST(FxGateTest, AnAlwaysEnabledPredicateLetsEverythingRun)
 {
-    EXPECT_TRUE(GateAllows(Gate{ "A.Pass" }, "Registered", PassEnabledFn{}));
+    EXPECT_TRUE(GateAllows(Gate{ "A.Pass" }, "Registered", [](std::string_view) { return true; }));
+}
+
+// --- Shared once per frame -----------------------------------------------------
+
+TEST(FxSharedOncePerFrameTest, RunsOnceThenSkipsTheRestOfTheFrame)
+{
+    SharedOncePerFrame latch;
+    EXPECT_TRUE(latch.ShouldRun(1));
+    latch.MarkDone(1);
+    EXPECT_FALSE(latch.ShouldRun(1)); // The second view of frame 1.
+    EXPECT_TRUE(latch.ShouldRun(2));
+}
+
+TEST(FxSharedOncePerFrameTest, FrameZeroIsAValidFirstFrame)
+{
+    SharedOncePerFrame latch;
+    EXPECT_TRUE(latch.ShouldRun(0));
+    latch.MarkDone(0);
+    EXPECT_FALSE(latch.ShouldRun(0));
+}
+
+TEST(FxSharedOncePerFrameTest, AFailedCallbackIsNotRetriedInTheSameFrame)
+{
+    SharedOncePerFrame latch;
+    latch.MarkFailed(5);
+    EXPECT_FALSE(latch.ShouldRun(5));
+    EXPECT_EQ(latch.StateFor(5), SharedOncePerFrame::State::Failed);
+    EXPECT_EQ(latch.StateFor(6), SharedOncePerFrame::State::Idle);
+    EXPECT_TRUE(latch.ShouldRun(6));
+}
+
+TEST(FxSharedOncePerFrameTest, NothingIsMarkedUntilTheCallbackFinished)
+{
+    SharedOncePerFrame latch;
+    EXPECT_TRUE(latch.ShouldRun(3)); // Asking does not mark.
+    EXPECT_TRUE(latch.ShouldRun(3));
+    EXPECT_EQ(latch.StateFor(3), SharedOncePerFrame::State::Idle);
 }
 
 // --- Callback policy -----------------------------------------------------------

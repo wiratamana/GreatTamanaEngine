@@ -3,7 +3,6 @@
 #include "View.h"
 
 #include <cstdint>
-#include <functional>
 #include <initializer_list>
 #include <optional>
 #include <string>
@@ -26,20 +25,16 @@ struct Gate {
     }
 };
 
-using PassEnabledFn = std::function<bool(std::string_view passName)>;
-
 // Whether the callback may run: any listed pass (or the registered name, when the gate is empty) is enabled.
-// A missing predicate means "no toggle registry": everything is enabled.
-inline bool GateAllows(const Gate& gate, std::string_view registeredName, const PassEnabledFn& isEnabled)
+// `isEnabled` is any callable taking a std::string_view; no allocation happens here.
+template <typename Pred>
+bool GateAllows(const Gate& gate, std::string_view registeredName, Pred&& isEnabled)
 {
-    if (!isEnabled) {
-        return true;
-    }
     if (gate.passNames.empty()) {
         return isEnabled(registeredName);
     }
     for (const std::string& name : gate.passNames) {
-        if (isEnabled(name)) {
+        if (isEnabled(std::string_view(name))) {
             return true;
         }
     }

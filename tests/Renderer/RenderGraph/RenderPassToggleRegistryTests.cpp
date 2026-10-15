@@ -139,5 +139,17 @@ TEST(RenderPassToggleRegistryTest, PassThatActuallyRunsIsNeverEvictedAsAGhost)
     EXPECT_TRUE(registry.HasEntry("RealPass"));
 }
 
+TEST(RenderPassToggleRegistryTest, LookupsTakeAStringViewIntoALongerBuffer)
+{
+    RenderPassToggleRegistry registry;
+    registry.NoteDeclaredWithOwner("Shadow.Mask.Dispatch", "Shadow");
+    ASSERT_TRUE(registry.SetEnabled("Shadow.Mask.Dispatch", false));
+
+    const std::string_view inLongerText = std::string_view("xx Shadow.Mask.Dispatch yy").substr(3, 20);
+    EXPECT_TRUE(registry.HasEntry(inLongerText));
+    EXPECT_FALSE(registry.IsEnabled(inLongerText));
+    EXPECT_TRUE(registry.IsEnabled(std::string_view("Shadow.Mask")));
+}
+
 } // namespace
 } // namespace gte::rg

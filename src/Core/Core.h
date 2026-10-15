@@ -193,6 +193,12 @@ public:
     // Returns camera and target view data for a given render view.
     std::optional<RenderPassViewData> FindRenderPassViewData(rg::RenderViewId view) const noexcept;
 
+    // Same data without a copy; null when the view has none. Valid for the current frame only.
+    const RenderPassViewData* FindRenderPassViewDataNoCopy(rg::RenderViewId view) const noexcept
+    {
+        return FindViewData(view);
+    }
+
     // Hook callback to finalize feature output textures for sampling.
     using FinalizeForSamplingCallback = std::function<RenderTexture*(rg::CommandBuffer& cmd)>;
 

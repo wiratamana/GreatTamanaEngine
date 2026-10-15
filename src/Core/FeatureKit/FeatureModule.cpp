@@ -1,6 +1,6 @@
 #include "FeatureRegistration.h"
-
 #include "FeatureLife.h"
+#include "SharedOncePerFrame.h"
 #include "../../Application/RenderPassViewData.h"
 #include "../../Renderer/RenderGraph/BoundedOnceSet.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
@@ -11,6 +11,7 @@
 #include "../Plugins/RenderFeatureCameraData.h"
 
 #include <cstdint>
+#include <deque>
 #include <exception>
 #include <memory>
 #include <optional>
@@ -67,11 +68,11 @@ RenderFeatureBlendMode ToCoreBlend(Blend blend) noexcept
 // The view a callback runs for, or nothing when the engine has no data for it.
 std::optional<View> BuildView(Core& core, rg::RenderViewId currentView)
 {
-    const std::optional<RenderPassViewData> data = core.FindRenderPassViewData(currentView);
-    if (!data.has_value()) {
+    const RenderPassViewData* data = core.FindRenderPassViewDataNoCopy(currentView);
+    if (data == nullptr) {
         return std::nullopt;
     }
-    const RenderFeatureCameraData camera = ResolveRenderFeatureCameraData(currentView, &*data);
+    const RenderFeatureCameraData camera = ResolveRenderFeatureCameraData(currentView, data);
     View view;
     view.scope = TranslateLegacyViewScope(currentView);
     if (data->renderTexture != nullptr) {
@@ -110,10 +111,14 @@ public:
 private:
     void Commit(const Registration& registration) override
     {
-        const auto run = [this, registration](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard&,
+        SharedOncePerFrame* latch = nullptr;
+        if (registration.stage == Stage::PreOpaqueShared) {
+            latch = &m_sharedLatches.emplace_back();
+        }
+        const auto run = [this, registration, latch](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard&,
                              rg::RenderViewId currentView, rg::TextureHandle privateTarget, Extent2D extent,
                              const ScenePassReadHandles& handles, const RenderFeatureCameraData&) {
-            Run(registration, builder, currentView, privateTarget, extent, handles);
+            Run(registration, latch, builder, currentView, privateTarget, extent, handles);
         };
         if (!m_core.RegisterRenderPass(ToFrameEvent(registration.stage), registration.name.c_str(),
                 registration.priority, WhileAlive(std::weak_ptr<FeatureLife>(m_life), run), ToCoreBlend(registration.blend))) {
@@ -121,34 +126,29 @@ private:
         }
     }
 
-    void Run(const Registration& registration, rg::RenderGraphBuilder& builder, rg::RenderViewId currentView,
-        rg::TextureHandle privateTarget, Extent2D extent, const ScenePassReadHandles& handles)
+    void Run(const Registration& registration, SharedOncePerFrame* sharedLatch, rg::RenderGraphBuilder& builder,
+        rg::RenderViewId currentView, rg::TextureHandle privateTarget, Extent2D extent, const ScenePassReadHandles& handles)
     {
         // Gate first: a disabled pass must not run any side effect.
-        const PassEnabledFn isEnabled = [this](std::string_view pass) {
-            return rg::ShouldDeclareBuiltInPassThisFrame(
-                &m_core.GetRenderPassToggleRegistryMutable(), std::string(pass).c_str());
+        const rg::RenderPassToggleRegistry* toggles = &m_core.GetRenderPassToggleRegistryMutable();
+        const auto isEnabled = [toggles](std::string_view pass) {
+            return rg::ShouldDeclareBuiltInPassThisFrame(toggles, pass);
         };
         if (!GateAllows(registration.gate, registration.name, isEnabled)) {
             return;
         }
 
-        const bool shared = registration.stage == Stage::PreOpaqueShared;
+        const bool shared = sharedLatch != nullptr;
         const std::optional<View> view = BuildView(m_core, currentView);
         if (!ShouldInvokeFeatureCallback(view, shared ? CallbackScope::Shared : CallbackScope::PerView)) {
             return;
         }
-        if (shared) {
-            // Once per frame: later views of the same frame skip it.
-            const std::uint64_t frame = builder.FrameIndex();
-            if (m_hasRunShared && m_lastSharedFrame == frame) {
-                return;
-            }
-            m_hasRunShared = true;
-            m_lastSharedFrame = frame;
+        const std::uint64_t frameIndex = builder.FrameIndex();
+        if (shared && !sharedLatch->ShouldRun(frameIndex)) {
+            return;
         }
 
-        const rg::RenderFeatureScope scope(builder, m_name.c_str());
+        const rg::RenderFeatureScope scope(builder, m_name);
         Registry& scene = m_core.GetRegistry();
         const std::uint64_t serial = ++m_serial;
         try {
@@ -176,7 +176,13 @@ private:
                 break;
             }
             }
+            if (shared) {
+                sharedLatch->MarkDone(frameIndex);
+            }
         } catch (const std::exception& e) {
+            if (shared) {
+                sharedLatch->MarkFailed(frameIndex);
+            }
             // A throw would end the whole offscreen frame; log it once and drop this callback's work.
             const std::string message = "feature '" + m_name + "', callback '" + registration.name + "': " + e.what();
             if (rg::BoundedOnceSet<32>::ShouldLog(m_failuresLogged.Note(message))) {
@@ -191,8 +197,7 @@ private:
     std::shared_ptr<FeatureLife> m_life;
     std::unique_ptr<Feature> m_feature;
     std::uint64_t m_serial = 0;
-    std::uint64_t m_lastSharedFrame = 0;
-    bool m_hasRunShared = false;
+    std::deque<SharedOncePerFrame> m_sharedLatches; // One per shared registration; addresses stay stable.
     rg::BoundedOnceSet<32> m_failuresLogged;
 };
 

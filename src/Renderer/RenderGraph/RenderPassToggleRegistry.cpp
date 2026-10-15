@@ -6,7 +6,7 @@
 
 namespace gte::rg {
 
-void RenderPassToggleRegistry::NoteDeclaredWithOwner(const std::string& name, std::string_view owningFeatureName)
+void RenderPassToggleRegistry::NoteDeclaredWithOwner(std::string_view name, std::string_view owningFeatureName)
 {
     if (name.empty()) {
         return;
@@ -14,22 +14,21 @@ void RenderPassToggleRegistry::NoteDeclaredWithOwner(const std::string& name, st
     auto it = m_entries.find(name);
     if (it == m_entries.end()) {
         RenderPassToggleState state;
-        state.name = name;
+        state.name = std::string(name);
         state.enabled = true;
         state.everDeclaredThisSession = true;
         state.owningFeatureName = std::string(owningFeatureName);
-        m_entries.emplace(name, std::move(state));
+        std::string key = state.name;
+        m_entries.emplace(std::move(key), std::move(state));
         return;
     }
     if (!it->second.everDeclaredThisSession) {
-        // Promote: this was a ghost (set via SetEnabled before ever
-        // running) - it just proved itself real. Drop it from ghost
-        // tracking so it can never be evicted.
-        std::erase(m_ghostInsertionOrder, name);
+        // A ghost proved itself real: stop tracking it so it can never be evicted.
+        std::erase(m_ghostInsertionOrder, it->first);
     }
     it->second.everDeclaredThisSession = true;
     if (it->second.owningFeatureName.empty()) {
-        it->second.owningFeatureName = std::string(owningFeatureName); // First sight wins, sticky for the session.
+        it->second.owningFeatureName = std::string(owningFeatureName); // First sight wins.
     }
 }
 
@@ -44,9 +43,7 @@ bool RenderPassToggleRegistry::SetEnabled(const std::string& name, bool enabled)
         return true;
     }
 
-    // Unknown name: either a legitimate pre-disable of a pass that has not
-    // run yet this session, or a typo from an HTTP client. Cannot tell them
-    // apart - accept it, but cap the damage.
+    // Unknown name: a pre-disable of a pass that has not run yet, or a typo. Accept it, but cap the damage.
     if (m_ghostInsertionOrder.size() >= kMaxGhostEntries) {
         const std::string oldest = m_ghostInsertionOrder.front();
         m_ghostInsertionOrder.pop_front();
@@ -69,7 +66,7 @@ bool RenderPassToggleRegistry::SetEnabled(const std::string& name, bool enabled)
     return true;
 }
 
-bool RenderPassToggleRegistry::IsEnabled(const std::string& name) const
+bool RenderPassToggleRegistry::IsEnabled(std::string_view name) const
 {
     const auto it = m_entries.find(name);
     return it == m_entries.end() ? true : it->second.enabled;
@@ -89,9 +86,7 @@ std::vector<RenderPassToggleState> RenderPassToggleRegistry::ListAll() const
 
 bool RenderPassToggleRegistry::IsDenyListed(const std::string& name) noexcept
 {
-    // "ClearViewTarget" - the ONE guaranteed clear of the Game/Scene View
-    // target every frame - disabling it would leave a view with no safe
-    // fallback content, with no in-process recovery, exactly like "Present".
+    // Disabling either would leave a view with no safe fallback and no in-process recovery.
     return name == "Present" || name == "ClearViewTarget";
 }
 

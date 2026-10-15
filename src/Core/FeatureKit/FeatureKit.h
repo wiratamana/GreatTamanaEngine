@@ -9,5 +9,6 @@
 #include "FeatureSetup.h"
 #include "Frame.h"
 #include "Gate.h"
+#include "SharedOncePerFrame.h"
 #include "Texture.h"
 #include "View.h"
