@@ -408,6 +408,17 @@ add_library(gte_core STATIC
     src/Core/Plugins/IEngineFeatureModule.h
     src/Core/Plugins/BuiltinFeatureModuleRegistry.h
     src/Core/Plugins/BuiltinFeatureModuleRegistry.cpp
+    src/Core/FeatureKit/FeatureKit.h
+    src/Core/FeatureKit/Feature.h
+    src/Core/FeatureKit/FeatureLife.h
+    src/Core/FeatureKit/FeatureRegistration.h
+    src/Core/FeatureKit/FeatureSetup.h
+    src/Core/FeatureKit/FeatureSetup.cpp
+    src/Core/FeatureKit/FeatureModule.cpp
+    src/Core/FeatureKit/Frame.h
+    src/Core/FeatureKit/Gate.h
+    src/Core/FeatureKit/Texture.h
+    src/Core/FeatureKit/View.h
     # editor-core-separation-6 campaign, PHASE4
     # (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the third
     # real IPluginCapabilityOrchestrator implementation, the real `_v2`

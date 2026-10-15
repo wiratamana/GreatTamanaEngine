@@ -2,6 +2,7 @@
 // fails to compile here (file not found). Target: gte_header_purity_probe; ctest: HeaderPurity.
 
 #include "Core/Extent.h"
+#include "Core/FeatureKit/FeatureKit.h"
 #include "Core/GraphicsHandles.h"
 #include "Core/PixelFormat.h"
 #include "Features/Shadow/ShadowTypes.h"

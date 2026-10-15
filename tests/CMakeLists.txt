@@ -2328,6 +2328,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/BoundedLruIndexTests.cpp
     Renderer/RenderGraph/FullscreenRecordTests.cpp
     Renderer/RenderGraph/PassKindRecordTests.cpp
+    Core/FeatureKit/FeatureKitTests.cpp
     Renderer/Vulkan/ShaderStageMaskTests.cpp
     Renderer/RenderGraph/RenderGraphComputeBindingKeyTests.cpp
     Renderer/Vulkan/BoundedKeySetTests.cpp
