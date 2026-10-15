@@ -216,7 +216,11 @@ TextureHandle RenderGraphBuilder::CreateTexture(const char* name, const TextureD
         "RenderGraphBuilder::CreateTexture requires a non-empty, static-storage-duration name");
 
     const std::uint32_t index = static_cast<std::uint32_t>(m_textures.size());
-    m_textures.push_back(TextureSlot{ desc, name, TextureImportInfo{} });
+    TextureDesc stored = desc;
+    if (stored.dimension == TextureDimension::Array2D || stored.dimension == TextureDimension::Cube) {
+        stored.hasColor = !stored.hasDepth; // An array is either a color or a depth image.
+    }
+    m_textures.push_back(TextureSlot{ stored, name, TextureImportInfo{} });
     return TextureHandle{ index, 1 };
 }
 
@@ -243,6 +247,7 @@ TextureHandle RenderGraphBuilder::ImportTexture(const char* name, const RenderTa
     desc.height = externalTarget.extent.height;
     desc.format = FromVkFormat(externalTarget.format);
     desc.hasDepth = externalTarget.depthImage != VK_NULL_HANDLE;
+    desc.hasColor = externalTarget.image != VK_NULL_HANDLE;
     if (desc.hasDepth) {
         desc.depthFormat = FromVkFormat(externalTarget.depthFormat);
     }
@@ -336,6 +341,7 @@ TextureHandle RenderGraphBuilder::ImportTextureArray(
     desc.arrayLayers = externalTarget.arrayLayers;
     desc.format = FromVkFormat(externalTarget.format);
     desc.hasDepth = externalTarget.hasDepth;
+    desc.hasColor = !externalTarget.hasDepth;
 
     TextureImportInfo importInfo;
     importInfo.isImported = true;

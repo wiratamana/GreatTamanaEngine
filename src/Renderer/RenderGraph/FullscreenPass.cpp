@@ -84,11 +84,6 @@ bool FullscreenPass::Draw()
         depth.desc = m_depth->IsValid() ? builder.DescOf(*m_depth) : std::nullopt;
         depth.compare = m_depthCompare;
         depth.write = m_depthWrite;
-        for (std::size_t i = 0; i < m_targets.size(); ++i) {
-            if (m_targets[i] == *m_depth) {
-                depth.sameTextureAsTarget = i;
-            }
-        }
     }
 
     Renderer* renderer = builder.RendererOrNull();

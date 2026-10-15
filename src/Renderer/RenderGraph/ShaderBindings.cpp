@@ -111,11 +111,11 @@ BindingPlanResult PlanBindings(std::span<const ReflectedDescriptorBinding> refle
             problems.push_back(Quote(arg.name) + " was given a depth view of a texture without a depth aspect");
             continue;
         }
-        if (arg.kind == BindingResourceKind::Texture && desc.has_value() && desc->hasDepth) {
+        if (arg.kind == BindingResourceKind::Texture && desc.has_value() && !desc->hasColor) {
             problems.push_back(Quote(arg.name)
                 + (slot.type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-                        ? " is a depth texture: use rg::Depth() to sample it"
-                        : " is a depth texture: it cannot be bound to a storage image"));
+                        ? " is a depth-only texture: use rg::Depth() to sample it"
+                        : " is a depth-only texture: it cannot be bound to a storage image"));
             continue;
         }
         matched[index] = &arg;
@@ -239,8 +239,8 @@ std::optional<std::string> ValidateFullscreenTarget(const std::optional<TextureD
     if (target->format == PixelFormat::Undefined) {
         return std::string("the target format is Undefined");
     }
-    if (target->hasDepth) {
-        return std::string("the target is a depth texture: a fullscreen pass writes color targets");
+    if (!target->hasColor) {
+        return std::string("the target is a depth-only texture: a fullscreen pass writes color targets");
     }
     return std::nullopt;
 }
@@ -262,11 +262,7 @@ FullscreenAttachmentPlan PlanFullscreenAttachments(std::span<const std::optional
     key.blend = blend;
     key.colorCount = static_cast<std::uint8_t>(targets.size());
     for (std::size_t i = 0; i < targets.size(); ++i) {
-        // A view target carries a depth companion; that is fine when the same texture is the depth test target.
-        std::optional<TextureDesc> color = targets[i];
-        if (color.has_value() && depth.enabled && depth.sameTextureAsTarget == i) {
-            color->hasDepth = false;
-        }
+        const std::optional<TextureDesc>& color = targets[i];
         if (const auto error = ValidateFullscreenTarget(color)) {
             result.error = "target " + std::to_string(i) + ": " + *error;
             return result;

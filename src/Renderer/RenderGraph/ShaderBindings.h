@@ -75,14 +75,10 @@ std::optional<std::string> ValidateFullscreenTarget(const std::optional<TextureD
 
 // The optional depth test of a fullscreen pass: the DescOf() of the depth texture and the test state.
 struct FullscreenDepthRequest {
-    static constexpr std::size_t kNoTarget = ~std::size_t{ 0 };
-
     bool enabled = false;
     std::optional<TextureDesc> desc;
     CompareOp compare = CompareOp::Always;
     bool write = false;
-    // Index of the color target that is the same texture as the depth texture (a view target), or kNoTarget.
-    std::size_t sameTextureAsTarget = kNoTarget;
 };
 
 struct FullscreenAttachmentPlan {

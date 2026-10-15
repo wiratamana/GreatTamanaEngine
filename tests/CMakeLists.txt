@@ -2337,6 +2337,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/StaticNameTests.cpp
     Renderer/RenderGraph/ComputePassTests.cpp
     Renderer/RenderGraph/FullscreenPassTests.cpp
+    Renderer/RenderGraph/RealTargetBindingTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderPassTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp

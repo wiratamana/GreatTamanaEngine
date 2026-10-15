@@ -65,11 +65,13 @@ BindingArgument Buf(std::string_view name, BufferObjectHandle handle)
     return arg;
 }
 
-// The two depth fixtures have a depth aspect; every other handle is a color texture.
+// The two depth fixtures are depth-only textures; every other handle is a color texture.
 std::optional<TextureDesc> DepthForDepthHandles(TextureHandle handle)
 {
     TextureDesc desc;
-    desc.hasDepth = (handle == kShadowDepth || handle == kSceneDepth);
+    const bool depthOnly = (handle == kShadowDepth || handle == kSceneDepth);
+    desc.hasDepth = depthOnly;
+    desc.hasColor = !depthOnly;
     return desc;
 }
 
@@ -216,22 +218,42 @@ TEST(ShaderBindingsTest, DepthViewWithUnknownTextureIsAnError)
     EXPECT_TRUE(Contains(result.error, "without a depth aspect"));
 }
 
-TEST(ShaderBindingsTest, PlainBindOfADepthTextureOnASamplerAsksForDepth)
+TEST(ShaderBindingsTest, PlainBindOfADepthOnlyTextureOnASamplerAsksForDepth)
 {
     std::vector<BindingArgument> args = HappyArgs();
     args[1] = Tex("inputDepthA", kShadowDepth);
     const BindingPlanResult result = Plan(FixtureBindings(), args);
     ASSERT_FALSE(result.Ok());
-    EXPECT_TRUE(Contains(result.error, "'inputDepthA' is a depth texture: use rg::Depth()"));
+    EXPECT_TRUE(Contains(result.error, "'inputDepthA' is a depth-only texture: use rg::Depth()"));
 }
 
-TEST(ShaderBindingsTest, DepthTextureOnAStorageImageIsAnError)
+TEST(ShaderBindingsTest, DepthOnlyTextureOnAStorageImageIsAnError)
 {
     std::vector<BindingArgument> args = HappyArgs();
     args[3] = Tex("maskOutput", kSceneDepth);
     const BindingPlanResult result = Plan(FixtureBindings(), args);
     ASSERT_FALSE(result.Ok());
-    EXPECT_TRUE(Contains(result.error, "'maskOutput' is a depth texture: it cannot be bound to a storage image"));
+    EXPECT_TRUE(Contains(result.error, "'maskOutput' is a depth-only texture: it cannot be bound to a storage image"));
+}
+
+// A view target carries a depth companion next to its color image: it is a normal color texture.
+std::optional<TextureDesc> ColorWithDepthCompanion(TextureHandle)
+{
+    TextureDesc desc;
+    desc.hasDepth = true;
+    desc.hasColor = true;
+    return desc;
+}
+
+TEST(ShaderBindingsTest, ColorTextureWithADepthCompanionBindsAsColorAndAsDepth)
+{
+    std::vector<ReflectedDescriptorBinding> reflected = {
+        Slot(0, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, "sceneColor", ReflectedAccess::ReadOnly),
+        Slot(0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, "sceneDepth", ReflectedAccess::ReadOnly),
+        Slot(0, 2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, "outImage", ReflectedAccess::WriteOnly) };
+    const BindingPlanResult result = Plan(reflected,
+        { Tex("sceneColor", kMask), Depth("sceneDepth", kMask), Tex("outImage", kMask) }, ColorWithDepthCompanion);
+    EXPECT_TRUE(result.Ok()) << result.error;
 }
 
 TEST(ShaderBindingsTest, PlainBindOfAColorTextureWithUnknownDescIsAccepted)

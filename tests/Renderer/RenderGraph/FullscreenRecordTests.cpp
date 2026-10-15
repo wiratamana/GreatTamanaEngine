@@ -53,13 +53,21 @@ TEST(ValidateFullscreenTargetTest, UndefinedFormatIsRefused)
     EXPECT_TRUE(ValidateFullscreenTarget(desc).has_value());
 }
 
-TEST(ValidateFullscreenTargetTest, DepthTargetIsRefused)
+TEST(ValidateFullscreenTargetTest, DepthOnlyTargetIsRefused)
 {
     TextureDesc desc = ColorDesc();
     desc.hasDepth = true;
+    desc.hasColor = false;
     const std::optional<std::string> error = ValidateFullscreenTarget(desc);
     ASSERT_TRUE(error.has_value());
-    EXPECT_NE(error->find("depth texture"), std::string::npos);
+    EXPECT_NE(error->find("depth-only texture"), std::string::npos);
+}
+
+TEST(ValidateFullscreenTargetTest, ColorTargetWithDepthCompanionIsAccepted)
+{
+    TextureDesc desc = ColorDesc();
+    desc.hasDepth = true;
+    EXPECT_FALSE(ValidateFullscreenTarget(desc).has_value());
 }
 
 TEST(ValidateFullscreenTargetTest, ColorTargetIsAccepted)
@@ -257,7 +265,6 @@ TEST(PlanFullscreenAttachmentsTest, DepthTestOnTheViewTargetItselfIsAccepted)
     depth.desc = ViewTargetDesc();
     depth.compare = CompareOp::Equal;
     depth.write = false;
-    depth.sameTextureAsTarget = 0;
 
     const FullscreenAttachmentPlan plan = PlanFullscreenAttachments(targets, depth, PixelFormat::D32_Float, BlendMode::Opaque);
     ASSERT_TRUE(plan.Ok()) << plan.error;
@@ -278,14 +285,25 @@ TEST(PlanFullscreenAttachmentsTest, ADepthTextureWithoutDepthAspectIsRefused)
     EXPECT_NE(plan.error.find("depth aspect"), std::string::npos);
 }
 
-TEST(PlanFullscreenAttachmentsTest, ADepthCompanionOnAnotherTargetThanTheDepthTextureIsRefused)
+TEST(PlanFullscreenAttachmentsTest, ADepthOnlyTargetIsRefused)
+{
+    TextureDesc depthOnly = ColorDesc();
+    depthOnly.hasDepth = true;
+    depthOnly.hasColor = false;
+    const std::optional<TextureDesc> targets[] = { depthOnly };
+    const FullscreenAttachmentPlan plan =
+        PlanFullscreenAttachments(targets, FullscreenDepthRequest{}, PixelFormat::D32_Float, BlendMode::Opaque);
+    EXPECT_FALSE(plan.Ok());
+    EXPECT_NE(plan.error.find("depth-only"), std::string::npos);
+}
+
+TEST(PlanFullscreenAttachmentsTest, AColorTargetWithADepthCompanionIsAnOrdinaryColorTarget)
 {
     const std::optional<TextureDesc> targets[] = { ViewTargetDesc() };
-    FullscreenDepthRequest depth;
-    depth.enabled = true;
-    depth.desc = ViewTargetDesc(); // A different texture than the color target.
-    const FullscreenAttachmentPlan plan = PlanFullscreenAttachments(targets, depth, PixelFormat::D32_Float, BlendMode::Opaque);
-    EXPECT_FALSE(plan.Ok());
+    const FullscreenAttachmentPlan plan =
+        PlanFullscreenAttachments(targets, FullscreenDepthRequest{}, PixelFormat::D32_Float, BlendMode::Opaque);
+    ASSERT_TRUE(plan.Ok()) << plan.error;
+    EXPECT_FALSE(plan.key.depthTest);
 }
 
 TEST(PlanFullscreenAttachmentsTest, UnknownDepthFormatFallsBackToTheRenderersDepthFormat)
@@ -296,7 +314,6 @@ TEST(PlanFullscreenAttachmentsTest, UnknownDepthFormatFallsBackToTheRenderersDep
     FullscreenDepthRequest depth;
     depth.enabled = true;
     depth.desc = depthDesc;
-    depth.sameTextureAsTarget = 0;
     const FullscreenAttachmentPlan plan =
         PlanFullscreenAttachments(targets, depth, PixelFormat::D24_UNorm_S8_UInt, BlendMode::Opaque);
     ASSERT_TRUE(plan.Ok()) << plan.error;
