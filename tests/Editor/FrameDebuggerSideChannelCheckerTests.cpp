@@ -1,12 +1,6 @@
-// Unit tests for DetectDisabledPassBlackboardKeyLeaks()/KnownRiskBlackboardKeyRules()
-// (src/Editor/FrameDebuggerSideChannelChecker.h) - task_manager/editor-core-separation-22
-// campaign, PHASE6 (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3,
-// Clause C). Genuinely Tier 1: exercises pure logic over hand-fabricated
-// rules and plain lambda lookups - no live RenderPassToggleRegistry/
-// RenderPassBlackboard object needed at all, mirroring
-// tests/Editor/RenderPassHonestyCheckerTests.cpp's own "pure detector,
-// hand-built fixture" precedent exactly.
+// Tier-1 tests for the side-channel detector and its curated key table (pure logic, no GPU).
 
+#include "Core/FeatureKit/ChannelKey.h"
 #include "Editor/FrameDebuggerSideChannelChecker.h"
 
 #include <gtest/gtest.h>
@@ -122,10 +116,7 @@ TEST(FrameDebuggerSideChannelCheckerTest, EmptyCallablesReturnEmptyDefensively)
         DetectDisabledPassBlackboardKeyLeaks(rules, MakeEnabledLookup({}), emptyPublishedLookup).empty());
 }
 
-// Sanity check on the REAL, curated allowlist itself (Step 3.3 item 1) -
-// confirms every entry PHASE6_COMPLETION_REPORT.md documents is actually
-// present, so a future accidental deletion of an entry is caught here
-// instead of silently shrinking the detector's own coverage.
+// The curated table keeps every documented entry.
 TEST(FrameDebuggerSideChannelCheckerTest, RealKnownRiskBlackboardKeyRulesContainsEveryDocumentedEntry)
 {
     const std::vector<KnownRiskBlackboardKeyRule>& rules = KnownRiskBlackboardKeyRules();
@@ -137,7 +128,41 @@ TEST(FrameDebuggerSideChannelCheckerTest, RealKnownRiskBlackboardKeyRulesContain
 
     EXPECT_NE(gatingToggleNames.find("DrawSkyBackground"), gatingToggleNames.end());
     EXPECT_NE(gatingToggleNames.find("GpuSkinning"), gatingToggleNames.end());
-    EXPECT_GE(rules.size(), 3u); // GameSkyBackgroundCallback + GameSkyBackgroundReplayCallback + GpuSkinning.OutputBuffers.
+    EXPECT_GE(rules.size(), 3u);
+}
+
+bool HasRuleWithKey(const std::vector<KnownRiskBlackboardKeyRule>& rules, std::uint64_t key, const char* toggle)
+{
+    for (const KnownRiskBlackboardKeyRule& rule : rules) {
+        if (rule.key.hash == key && rule.gatingToggleName == toggle) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The channel rules use the same key function the kit publishes with.
+TEST(FrameDebuggerSideChannelCheckerTest, ChannelRulesUseTheKitsOwnKeyFunction)
+{
+    const std::vector<KnownRiskBlackboardKeyRule>& rules = KnownRiskBlackboardKeyRules();
+    for (const char* view : { "Game", "Scene" }) {
+        const rg::RenderViewId id = rg::RenderViewId::Named(view);
+        EXPECT_TRUE(HasRuleWithKey(rules, fx::ChannelKey("Shadow", "Map", id), "Shadow.DepthPass.Draw")) << view;
+        EXPECT_TRUE(HasRuleWithKey(rules, fx::ChannelKey("Shadow", "Mask", id), "Shadow.Mask.Dispatch")) << view;
+    }
+}
+
+TEST(FrameDebuggerSideChannelCheckerTest, APublishedChannelWithItsToggleOffIsReported)
+{
+    const std::vector<KnownRiskBlackboardKeyRule>& rules = KnownRiskBlackboardKeyRules();
+    const rg::RenderPassId published{ fx::ChannelKey("Shadow", "Map", rg::RenderViewId::Named("Game")) };
+
+    const std::vector<std::string> leaks = DetectDisabledPassBlackboardKeyLeaks(
+        rules, [](const std::string& toggle) { return toggle != "Shadow.DepthPass.Draw"; },
+        [published](rg::RenderPassId key) { return key == published; });
+
+    ASSERT_EQ(leaks.size(), 1u);
+    EXPECT_EQ(leaks[0], "Shadow.Map (Game)");
 }
 
 } // namespace

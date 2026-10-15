@@ -153,9 +153,9 @@ public:
     bool AddPostTransparentPass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
     void RemovePostTransparentPass(const char* debugName);
 
-    // Creates or gets a persistent named render view and target.
+    // Creates or gets a persistent named render view; colorFormat Undefined matches the renderer's color format.
     rg::RenderViewId CreateRenderView(const char* name, std::uint32_t width, std::uint32_t height,
-        bool depthOnly = false, bool allowDepthSampledAccess = false);
+        bool depthOnly = false, bool allowDepthSampledAccess = false, PixelFormat colorFormat = PixelFormat::Undefined);
     RenderTexture* FindRenderViewTarget(rg::RenderViewId view) const noexcept;
 
     // Registers a post-processing pass executed after scene composition.

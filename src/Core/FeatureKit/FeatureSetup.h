@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -45,6 +46,11 @@ struct Registration {
 // whole setup fail, so a feature never ends up half registered.
 class FeatureSetup {
 public:
+    explicit FeatureSetup(ISceneSlotRegistrar* slots = nullptr) noexcept
+        : m_slots(slots)
+    {
+    }
+
     void PreOpaque(std::string name, std::int32_t priority, PreOpaqueCallback callback, Gate gate = {});
     void PostOpaque(std::string name, std::int32_t priority, PostOpaqueCallback callback, Gate gate = {});
     void PostTransparent(std::string name, std::int32_t priority, PostOpaqueCallback callback, Gate gate = {});
@@ -52,12 +58,17 @@ public:
     void PreUI(std::string name, std::int32_t priority, Blend blend, CompositeCallback callback, Gate gate = {});
     void PreOpaqueShared(std::string name, std::int32_t priority, SharedCallback callback, Gate gate = {});
 
+    // Declares a scene-services slot at startup. Invalid (and one log) when it cannot be declared.
+    SceneSlot DeclareSceneSlot(std::string_view name, SceneSlotKind kind, std::uint32_t preferredIndex);
+
     const std::vector<Registration>& Registrations() const noexcept { return m_registrations; }
     const std::vector<std::string>& Errors() const noexcept { return m_errors; }
 
 private:
     void Add(Registration registration);
 
+    ISceneSlotRegistrar* m_slots;
+    bool m_missingRegistrarLogged = false;
     std::vector<Registration> m_registrations;
     std::vector<std::string> m_errors;
 };

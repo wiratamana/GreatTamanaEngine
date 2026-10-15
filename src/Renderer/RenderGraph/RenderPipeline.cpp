@@ -39,12 +39,25 @@ const char* DebugNameForPassId(RenderPassId id) noexcept
 
 #endif // !NDEBUG
 
-// Reuses the same FNV-1a constants/byte order SceneServiceBlackboardKey()
-// (Renderer/SceneServicesDescriptorSet.cpp) established - the view's own
-// Hash() folded first (fixed-width segment), then `name` folded byte-by-byte
-// (variable-length segment last). A null/empty name is treated as an empty
-// string and never crashes; it is logged once per process lifetime in debug
-// builds only, since it almost always indicates a caller bug.
+// FNV-1a: the view's hash first (fixed width), then the name bytes.
+RenderPassId SceneResourceKeyOf(std::string_view name, RenderViewId view) noexcept
+{
+    std::uint64_t hash = 2166136261u;
+
+    const std::uint64_t viewHash = view.Hash();
+    unsigned char viewBytes[sizeof(viewHash)];
+    std::memcpy(viewBytes, &viewHash, sizeof(viewHash));
+    for (unsigned char b : viewBytes) {
+        hash ^= static_cast<std::uint64_t>(b);
+        hash *= 16777619u;
+    }
+    for (const char c : name) {
+        hash ^= static_cast<std::uint64_t>(static_cast<unsigned char>(c));
+        hash *= 16777619u;
+    }
+    return RenderPassId{ hash };
+}
+
 RenderPassId NamedSceneResourceKey(const char* name, RenderViewId view) noexcept
 {
     const bool nameIsEmpty = (name == nullptr || name[0] == '\0');
@@ -58,24 +71,7 @@ RenderPassId NamedSceneResourceKey(const char* name, RenderViewId view) noexcept
     }
 #endif
 
-    std::uint64_t hash = 2166136261u;
-
-    const std::uint64_t viewHash = view.Hash();
-    unsigned char viewBytes[sizeof(viewHash)];
-    std::memcpy(viewBytes, &viewHash, sizeof(viewHash));
-    for (unsigned char b : viewBytes) {
-        hash ^= static_cast<std::uint64_t>(b);
-        hash *= 16777619u;
-    }
-
-    if (!nameIsEmpty) {
-        for (const char* p = name; *p != '\0'; ++p) {
-            hash ^= static_cast<std::uint64_t>(static_cast<unsigned char>(*p));
-            hash *= 16777619u;
-        }
-    }
-
-    const RenderPassId key{ hash };
+    const RenderPassId key = SceneResourceKeyOf(nameIsEmpty ? std::string_view{} : std::string_view(name), view);
 
 #ifndef NDEBUG
     RegisterPassIdDebugName(key, nameIsEmpty ? "(unnamed)" : name);

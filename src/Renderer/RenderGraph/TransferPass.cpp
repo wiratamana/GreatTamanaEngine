@@ -1,11 +1,9 @@
 #include "TransferPass.h"
 
-#include "PassKindDefaults.h"
 #include "RenderGraph.h"
 
 #include <algorithm>
-#include <cassert>
-#include <utility>
+#include <string>
 
 namespace gte::rg {
 
@@ -207,93 +205,6 @@ void ExecuteTransfer(PassContext& ctx, const TransferRecord& record)
         break;
     }
     }
-}
-
-TransferPass::TransferPass(RenderGraphBuilder& builder, StaticName name, ViewScope scope, RenderPassEvent event)
-    : m_builder(builder)
-    , m_name(name)
-    , m_scope(scope)
-    , m_event(event)
-{
-}
-
-TransferPass::~TransferPass()
-{
-    if (!m_recorded) {
-        assert(false && "TransferPass destroyed without Record()");
-        Report("chain ended without Record(): nothing was declared");
-    }
-}
-
-void TransferPass::Set(const TransferRecord& record)
-{
-    m_duplicateOp = m_duplicateOp || m_record.op != TransferRecord::Op::None;
-    m_record = record;
-}
-
-TransferPass& TransferPass::Fill(BufferHandle dst, std::uint32_t value, std::uint64_t offset, std::uint64_t size)
-{
-    Set(TransferRecord::Fill(dst, value, offset, size));
-    return *this;
-}
-
-TransferPass& TransferPass::Copy(
-    BufferHandle src, BufferHandle dst, std::uint64_t size, std::uint64_t srcOffset, std::uint64_t dstOffset)
-{
-    Set(TransferRecord::CopyBuffer(src, dst, size, srcOffset, dstOffset));
-    return *this;
-}
-
-TransferPass& TransferPass::Copy(TextureHandle src, TextureHandle dst)
-{
-    Set(TransferRecord::CopyTexture(src, dst));
-    return *this;
-}
-
-TransferPass& TransferPass::Clear(TextureHandle dst, const std::array<float, 4>& color)
-{
-    Set(TransferRecord::Clear(dst, color));
-    return *this;
-}
-
-TransferPass& TransferPass::Readback(BufferHandle src, BufferHandle hostBuffer, std::uint64_t size)
-{
-    Set(TransferRecord::Readback(src, hostBuffer, size));
-    m_keep = hostBuffer;
-    return *this;
-}
-
-bool TransferPass::Record()
-{
-    if (m_recorded) {
-        Report("Record() called twice on one chain");
-        return false;
-    }
-    m_recorded = true;
-
-    if (m_duplicateOp) {
-        Report("one transfer pass carries one operation");
-        return false;
-    }
-    if (const auto error = ValidateTransferRecord(m_record)) {
-        Report(*error);
-        return false;
-    }
-
-    m_builder.AddRenderPass(
-        m_name.value, DefaultPassKind(DeclarativePassType::Transfer), m_scope, RenderPassCategory::General,
-        [record = m_record](RenderGraphBuilder::PassBuilder& pass) { DeclareTransfer(pass, record); },
-        [record = m_record](PassContext& ctx) { ExecuteTransfer(ctx, record); },
-        DefaultDrawKind(DeclarativePassType::Transfer), m_event);
-    if (m_keep.IsValid()) {
-        m_builder.KeepBufferOutput(m_keep);
-    }
-    return true;
-}
-
-void TransferPass::Report(const std::string& text)
-{
-    m_builder.ReportOnce(kLogCategory, std::string("Pass '") + m_name.value + "': " + text);
 }
 
 } // namespace gte::rg

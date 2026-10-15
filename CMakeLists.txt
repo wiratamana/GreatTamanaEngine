@@ -431,6 +431,22 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/PerView.h
     src/Core/FeatureKit/PersistentTarget.h
     src/Core/FeatureKit/PersistentTarget.cpp
+    src/Core/FeatureKit/Channel.h
+    src/Core/FeatureKit/Channel.cpp
+    src/Core/FeatureKit/ChannelKey.h
+    src/Core/FeatureKit/ChannelKey.cpp
+    src/Core/FeatureKit/ChannelNames.h
+    src/Core/FeatureKit/GatedBuild.h
+    src/Core/FeatureKit/OffscreenTarget.h
+    src/Core/FeatureKit/OffscreenTarget.cpp
+    src/Core/FeatureKit/SceneDrawChain.h
+    src/Core/FeatureKit/SceneDrawVerb.cpp
+    src/Core/FeatureKit/SceneShaderSet.h
+    src/Core/FeatureKit/SceneShaderSet.cpp
+    src/Core/FeatureKit/SceneSlot.h
+    src/Core/FeatureKit/SceneSlotRegistrar.h
+    src/Core/FeatureKit/SceneSlotRegistrar.cpp
+    src/Core/FeatureKit/SceneVerbs.cpp
     src/Core/FeatureKit/Texture.h
     src/Core/FeatureKit/VerbSupport.h
     src/Core/FeatureKit/View.h
@@ -906,6 +922,8 @@ add_library(gte_core STATIC
     src/Game/RenderBatching.h
     src/Game/RenderBatching.cpp
     src/Game/RenderSystem.cpp
+    src/Game/SceneDrawPass.h
+    src/Game/SceneDrawPass.cpp
     src/Game/RenderSystem.h
     src/Game/SceneQuery.cpp
     src/Game/SceneQuery.h

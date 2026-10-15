@@ -1,11 +1,15 @@
 #pragma once
 
+#include "SceneSlot.h"
 #include "Texture.h"
 #include "View.h"
 #include "../../Renderer/RenderGraph/StaticName.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
+#include <type_traits>
 
 namespace gte {
 class Registry;
@@ -17,6 +21,7 @@ class ComputeChain;
 class ComputeShader;
 class FullscreenChain;
 class FullscreenShader;
+class SceneDrawChain;
 
 namespace detail {
 struct FrameContext;
@@ -57,23 +62,40 @@ public:
     // Copies `src` into `dst` with a scaled blit. False when nothing was declared.
     bool Blit(rg::StaticName passName, Texture src, Texture dst, BlitFilter filter);
 
+    // A scene redraw (depth pre-pass, outline, ...). Declares nothing while its pass is toggled off.
+    SceneDrawChain SceneDraw(rg::StaticName passName);
+
+    // Makes `texture` the content of `slot` for the scene's material shaders. A logged no-op for a bad slot or texture.
+    void PublishToScene(SceneSlot slot, Texture texture);
+
+    // Writes this view's scene uniform block (read by material shaders).
+    template <typename T>
+    void SetSceneUniforms(const T& value)
+    {
+        static_assert(std::is_trivially_copyable_v<T>, "scene uniforms are copied as raw bytes");
+        static_assert(sizeof(T) <= kMaxSceneUniformBytes, "scene uniforms must fit the engine's uniform block");
+        SetSceneUniformBytes(std::as_bytes(std::span<const T, 1>(&value, 1)));
+    }
+
     // Engine context behind the verbs; null for a frame made outside a render callback.
     detail::FrameContext* Context() const noexcept { return m_context; }
 
     // Logs `text` as an error once per distinct text (once per frame object without a context).
-    void ReportOnce(std::string_view text);
+    void ReportOnce(std::string_view text) const;
 
 protected:
     // The depth a fullscreen draw acknowledges by default (invalid for frames without scene depth).
     void SetAcknowledgedDepth(rg::TextureHandle depth) noexcept { m_acknowledgedDepth = depth; }
 
 private:
+    void SetSceneUniformBytes(std::span<const std::byte> bytes);
+
     fx::View m_view;
     Registry* m_scene;
     std::uint64_t m_serial;
     detail::FrameContext* m_context;
     rg::TextureHandle m_acknowledgedDepth{};
-    bool m_noContextLogged = false;
+    mutable bool m_noContextLogged = false;
 };
 
 // Before any opaque geometry, once per active view.

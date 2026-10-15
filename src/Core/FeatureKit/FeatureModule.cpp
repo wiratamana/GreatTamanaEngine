@@ -1,6 +1,7 @@
 #include "FeatureRegistration.h"
 #include "FeatureLife.h"
 #include "FrameContext.h"
+#include "SceneSlotRegistrar.h"
 #include "SharedOncePerFrame.h"
 #include "../../Application/RenderPassViewData.h"
 #include "../../Renderer/RenderGraph/BoundedOnceSet.h"
@@ -128,6 +129,8 @@ public:
     Feature* FeatureOrNull() noexcept { return m_feature.get(); }
 
 private:
+    ISceneSlotRegistrar* SlotRegistrar() noexcept override { return &m_slotRegistrar; }
+
     void Commit(const Registration& registration) override
     {
         SharedOncePerFrame* latch = nullptr;
@@ -182,6 +185,7 @@ private:
         context.toggles = toggles;
         context.scope = shared ? rg::ViewScope::Shared : view->scope;
         context.serial = serial;
+        context.channels = &m_channelNames;
         try {
             switch (registration.stage) {
             case Stage::PreOpaque: {
@@ -231,6 +235,8 @@ private:
     std::uint64_t m_serial = 0;
     std::deque<SharedOncePerFrame> m_sharedLatches; // One per shared registration; addresses stay stable.
     rg::BoundedOnceSet<32> m_failuresLogged;
+    detail::ChannelNames m_channelNames;
+    detail::EngineSceneSlotRegistrar m_slotRegistrar;
 };
 
 } // namespace

@@ -2330,6 +2330,9 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/PassKindRecordTests.cpp
     Core/FeatureKit/FeatureKitTests.cpp
     Core/FeatureKit/KitChainTests.cpp
+    Core/FeatureKit/KitDataFlowTests.cpp
+    Core/FeatureKit/KitSceneTests.cpp
+    Game/SceneDrawPassTests.cpp
     Renderer/Vulkan/ShaderStageMaskTests.cpp
     Renderer/RenderGraph/RenderGraphComputeBindingKeyTests.cpp
     Renderer/Vulkan/BoundedKeySetTests.cpp

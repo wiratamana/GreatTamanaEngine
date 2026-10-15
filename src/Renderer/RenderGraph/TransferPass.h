@@ -50,42 +50,4 @@ void DeclareTransfer(RenderGraphBuilder::PassBuilder& pass, const TransferRecord
 // Records the copy, fill or clear. Textures must be 2D color images created with the transfer usage bits.
 void ExecuteTransfer(PassContext& ctx, const TransferRecord& record);
 
-// One transfer pass: Fill, Copy, Clear or Readback, then Record().
-//   TransferPass(builder, "Batch.ResetCount", scope, event).Fill(count, 0).Record();
-class TransferPass {
-public:
-    TransferPass(RenderGraphBuilder& builder, StaticName name, ViewScope scope, RenderPassEvent event);
-    ~TransferPass();
-
-    TransferPass(const TransferPass&) = delete;
-    TransferPass& operator=(const TransferPass&) = delete;
-    TransferPass(TransferPass&&) = delete;
-    TransferPass& operator=(TransferPass&&) = delete;
-
-    TransferPass& Fill(BufferHandle dst, std::uint32_t value, std::uint64_t offset = 0, std::uint64_t size = kWholeBuffer);
-    TransferPass& Copy(BufferHandle src, BufferHandle dst, std::uint64_t size, std::uint64_t srcOffset = 0,
-        std::uint64_t dstOffset = 0);
-    TransferPass& Copy(TextureHandle src, TextureHandle dst);
-    TransferPass& Clear(TextureHandle dst, const std::array<float, 4>& color);
-
-    // Copies `size` bytes of a graph buffer into a host-readable buffer and keeps that buffer alive.
-    TransferPass& Readback(BufferHandle src, BufferHandle hostBuffer, std::uint64_t size);
-
-    // Declares the pass. False (and one error in the log) when the record is invalid or set twice.
-    bool Record();
-
-private:
-    void Set(const TransferRecord& record);
-    void Report(const std::string& text);
-
-    RenderGraphBuilder& m_builder;
-    StaticName m_name;
-    ViewScope m_scope;
-    RenderPassEvent m_event;
-    TransferRecord m_record;
-    BufferHandle m_keep;
-    bool m_duplicateOp = false;
-    bool m_recorded = false;
-};
-
 } // namespace gte::rg

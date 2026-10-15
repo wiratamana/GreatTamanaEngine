@@ -1,10 +1,24 @@
 #include "Feature.h"
 
+#include "../Logging.h"
+
 #include <algorithm>
 #include <exception>
 #include <utility>
 
 namespace gte::fx {
+
+SceneSlot FeatureSetup::DeclareSceneSlot(std::string_view name, SceneSlotKind kind, std::uint32_t preferredIndex)
+{
+    if (m_slots == nullptr) {
+        if (!m_missingRegistrarLogged) {
+            m_missingRegistrarLogged = true;
+            GTE_LOG_ERROR("FeatureKit", "DeclareSceneSlot('" + std::string(name) + "'): this setup has no scene registrar");
+        }
+        return SceneSlot{};
+    }
+    return m_slots->Declare(name, kind, preferredIndex);
+}
 
 void FeatureSetup::Add(Registration registration)
 {
@@ -66,7 +80,7 @@ void FeatureSetup::PreOpaqueShared(std::string name, std::int32_t priority, Shar
 
 std::optional<std::string> SetupAndCommit(Feature& feature, IRegistrationSink& sink)
 {
-    FeatureSetup setup;
+    FeatureSetup setup(sink.SlotRegistrar());
     try {
         feature.Setup(setup);
     } catch (const std::exception& e) {

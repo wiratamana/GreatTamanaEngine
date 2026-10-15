@@ -18,7 +18,7 @@ rg::BlitFilter ToRgFilter(BlitFilter filter) noexcept
 
 } // namespace
 
-void Frame::ReportOnce(std::string_view text)
+void Frame::ReportOnce(std::string_view text) const
 {
     if (m_context != nullptr && m_context->builder != nullptr) {
         m_context->builder->ReportOnce(kLogCategory, text);

@@ -198,15 +198,15 @@ void Core::UnregisterProjectRenderPassProvider(const char* debugName)
     m_offscreenRenderPipeline.Unregister(debugName);
 }
 
-// Creates or retrieves a persistent render view.
 rg::RenderViewId Core::CreateRenderView(const char* name, std::uint32_t width, std::uint32_t height,
-    bool depthOnly, bool allowDepthSampledAccess)
+    bool depthOnly, bool allowDepthSampledAccess, PixelFormat colorFormat)
 {
     RenderViewDesc desc;
     desc.width = width;
     desc.height = height;
     desc.hasColor = !depthOnly;
     desc.hasDepth = true;
+    desc.colorFormat = colorFormat;
     desc.allowDepthSampledAccess = allowDepthSampledAccess;
     return m_renderViewRegistry.CreateOrGetView(name, desc);
 }

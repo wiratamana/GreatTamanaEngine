@@ -1,6 +1,8 @@
 // Tier-2 (headless GPU): a graph transfer pass copies a count into a host-readable buffer and the host reads it.
 
 #include "Renderer/Buffer.h"
+#include "Renderer/RenderGraph/PassKindDefaults.h"
+#include "Renderer/RenderGraph/RecordedPass.h"
 #include "Renderer/RenderGraph/RenderGraph.h"
 #include "Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "Renderer/RenderGraph/TransferPass.h"
@@ -10,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace gte::rg {
@@ -36,9 +39,15 @@ TEST(TransferReadbackGpuTest, CountCopiedByTheGraphIsReadOnTheHost)
     fixture.RunSynchronousFrame([&](RenderGraphBuilder& builder) -> std::vector<TextureHandle> {
         const BufferHandle src = builder.ImportBuffer("Test.Count", source.ObjectHandle(), sizeof(kCount));
         const BufferHandle dst = builder.ImportBuffer("Test.CountReadback", host.ObjectHandle(), sizeof(kCount));
-        recorded = TransferPass(builder, "Test.CountReadback", ViewScope::Shared, RenderPassEvent::Opaques)
-                       .Readback(src, dst, sizeof(kCount))
-                       .Record();
+        std::optional<PassBody> body =
+            MakeTransferBody(builder, "Test.CountReadback", TransferRecord::Readback(src, dst, sizeof(kCount)));
+        if (body.has_value()) {
+            builder.AddRenderPass("Test.CountReadback", DefaultPassKind(DeclarativePassType::Transfer), ViewScope::Shared,
+                RenderPassCategory::General, body->setup, body->execute, DefaultDrawKind(DeclarativePassType::Transfer),
+                RenderPassEvent::Opaques);
+            builder.KeepBufferOutput(dst);
+            recorded = true;
+        }
         return {};
     });
     ASSERT_TRUE(recorded);

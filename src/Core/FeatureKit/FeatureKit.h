@@ -3,6 +3,8 @@
 // Umbrella header of the feature kit: everything a render feature includes. Vulkan-free by contract
 // (compiled by the header purity probe with `src` as its only include directory).
 
+#include "Channel.h"
+#include "ChannelKey.h"
 #include "ComputeChain.h"
 #include "ComputeShader.h"
 #include "Feature.h"
@@ -14,8 +16,12 @@
 #include "FullscreenShader.h"
 #include "Gate.h"
 #include "GpuParams.h"
+#include "OffscreenTarget.h"
 #include "PerView.h"
 #include "PersistentTarget.h"
+#include "SceneDrawChain.h"
+#include "SceneShaderSet.h"
+#include "SceneSlot.h"
 #include "SharedOncePerFrame.h"
 #include "Texture.h"
 #include "View.h"

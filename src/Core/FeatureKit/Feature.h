@@ -44,6 +44,9 @@ public:
 
     // May throw; the first failure stops the commit.
     virtual void Commit(const Registration& registration) = 0;
+
+    // Where Setup() declares scene slots; null when the sink has no engine behind it.
+    virtual ISceneSlotRegistrar* SlotRegistrar() noexcept { return nullptr; }
 };
 
 // Runs feature.Setup() and commits to `sink` only if Setup() neither threw nor recorded an error, so a feature is

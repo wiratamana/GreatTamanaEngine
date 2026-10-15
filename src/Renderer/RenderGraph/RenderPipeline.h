@@ -16,6 +16,7 @@
 #include <cstring>
 #include <functional>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace gte::rg {
@@ -44,8 +45,11 @@ void RegisterPassIdDebugName(RenderPassId id, const char* name) noexcept;
 const char* DebugNameForPassId(RenderPassId id) noexcept; // "<unknown>" if never registered.
 #endif
 
-// Key for a low-frequency, string-named cross-feature handoff through RenderPassBlackboard.
-// `name` must have static storage duration. Call only from the frame-declaration thread.
+// Key for a string-named cross-feature handoff: a pure hash of (name, view), no registration.
+RenderPassId SceneResourceKeyOf(std::string_view name, RenderViewId view) noexcept;
+
+// Same hash for a name with static storage duration; also records the name for debug diagnostics.
+// Call only from the frame-declaration thread.
 RenderPassId NamedSceneResourceKey(const char* name, RenderViewId view) noexcept;
 
 // A plain value describing one pass; produced by providers, consumed generically by RenderPipeline.

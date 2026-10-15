@@ -2,6 +2,7 @@
 
 // Kit-private: what a frame callback needs behind its verbs. Not reachable from FeatureKit.h.
 
+#include "ChannelNames.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 
@@ -24,6 +25,7 @@ struct FrameContext {
     const rg::RenderPassToggleRegistry* toggles = nullptr; // Null means "everything enabled".
     rg::ViewScope scope = rg::ViewScope::Shared;
     std::uint64_t serial = 0;
+    ChannelNames* channels = nullptr; // Null skips the key-clash check.
 };
 
 } // namespace gte::fx::detail

@@ -24,9 +24,9 @@ The layer under every render feature. Pass code never touches Vulkan and never n
    |---|---|---|
    | Compute | `ComputePass(...).Bind().Params().Dispatch()` | bindings, push bytes |
    | Fullscreen | `FullscreenPass(...).Bind().Push().Target()/Targets({...}).DepthTest().Draw()` | attachments, key |
-   | Mesh | `MeshPass(...).Color()/Depth().Draw(fn)` | `MeshPassRecord` |
-   | Indirect draw | `DeclareIndirectDraw` / `ExecuteIndirectDraw` | `IndirectDrawRecord` |
-   | Transfer | `TransferPass(...).Fill()/Copy()/Clear()/Readback().Record()` | `TransferRecord` |
+   | Mesh | `MeshPass(...).Color()/Depth().Draw(fn)`; `SceneDrawPass` (Game) adds the camera and pipeline overrides | `MeshPassRecord` |
+   | Indirect draw | `MakeIndirectDrawBody` (validated setup/execute pair) | `IndirectDrawRecord` |
+   | Transfer | `MakeTransferBody` (validated setup/execute pair) | `TransferRecord` (Fill, CopyBuffer, Readback, CopyTexture, Clear) |
    | Blit | `AddBlitPass` with `rg::BlitFilter` | `BlitSpec` |
 
    Attachment formats come from the declared textures (`DescOf`), never from `ColorPixelFormat()`.

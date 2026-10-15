@@ -1,6 +1,7 @@
 // Tier-1 tests: the graph's once-log, validated pass bodies and the culling roots of a host readback.
 
 #include "Renderer/RenderGraph/OnceErrorLog.h"
+#include "Renderer/RenderGraph/PassKindDefaults.h"
 #include "Renderer/RenderGraph/RecordedPass.h"
 #include "Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "Renderer/RenderGraph/RenderGraphCompiler.h"
@@ -10,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <string>
 
 namespace gte::rg {
@@ -130,6 +132,19 @@ TEST(TransferReadbackTest, RecordMarksTheCopyAsAHostRead)
     EXPECT_FALSE(TransferRecord::CopyBuffer(kBufferA, kBufferB, 4).hostRead);
 }
 
+// Declares `record` the way production does: validated body into AddRenderPass.
+bool DeclareTransfer(RenderGraphBuilder& builder, const char* name, const TransferRecord& record)
+{
+    std::optional<PassBody> body = MakeTransferBody(builder, name, record);
+    if (!body.has_value()) {
+        return false;
+    }
+    builder.AddRenderPass(name, DefaultPassKind(DeclarativePassType::Transfer), ViewScope::GameView,
+        RenderPassCategory::General, body->setup, body->execute, DefaultDrawKind(DeclarativePassType::Transfer),
+        RenderPassEvent::Opaques);
+    return true;
+}
+
 // A pass whose only output is a host buffer must survive culling when that buffer is kept.
 TEST(TransferReadbackTest, ReadbackPassSurvivesCullingBecauseItsBufferIsKept)
 {
@@ -140,9 +155,8 @@ TEST(TransferReadbackTest, ReadbackPassSurvivesCullingBecauseItsBufferIsKept)
     builder.AddComputePass(
         "WritesCount", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteBuffer(count, ResourceAccess::ComputeShaderWrite); },
         [](PassContext&) {});
-    ASSERT_TRUE(TransferPass(builder, "Test.CountReadback", ViewScope::GameView, RenderPassEvent::Opaques)
-                    .Readback(count, host, 4)
-                    .Record());
+    ASSERT_TRUE(DeclareTransfer(builder, "Test.CountReadback", TransferRecord::Readback(count, host, 4)));
+    builder.KeepBufferOutput(host);
 
     CompiledGraphInput input = builder.Finish();
     const CompiledGraph compiled = Compile(input, {});
@@ -158,9 +172,7 @@ TEST(TransferReadbackTest, ACopyIntoAnUnkeptBufferIsCulled)
     const BufferHandle count = builder.ImportBuffer("Count", BufferObjectHandle::Invalid, 4);
     const BufferHandle host = builder.ImportBuffer("Host", BufferObjectHandle::Invalid, 4);
 
-    ASSERT_TRUE(TransferPass(builder, "Test.Copy", ViewScope::GameView, RenderPassEvent::Opaques)
-                    .Copy(count, host, 4)
-                    .Record());
+    ASSERT_TRUE(DeclareTransfer(builder, "Test.Copy", TransferRecord::CopyBuffer(count, host, 4)));
 
     CompiledGraphInput input = builder.Finish();
     const CompiledGraph compiled = Compile(input, {});

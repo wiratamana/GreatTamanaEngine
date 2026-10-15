@@ -127,59 +127,6 @@ TEST(TransferRecordTest, TextureCopyAndClearRefuseInvalidAndSameTextures)
     EXPECT_TRUE(Contains(ValidateTransferRecord(TransferRecord::Clear(TextureHandle{}, {})), "invalid"));
 }
 
-// --- TransferPass chain --------------------------------------------------------
-
-TEST(TransferPassTest, RecordDeclaresOnePassWithTheGivenEvent)
-{
-    RenderGraphBuilder builder;
-    EXPECT_TRUE(TransferPass(builder, "Test.Reset", ViewScope::GameView, RenderPassEvent::Opaques)
-                    .Fill(kBufferA, 0, 0, 4)
-                    .Record());
-    EXPECT_EQ(builder.DeclaredPassCount(), 1u);
-    EXPECT_EQ(builder.PassEventAt(0), RenderPassEvent::Opaques);
-}
-
-TEST(TransferPassTest, InvalidRecordDeclaresNothing)
-{
-    RenderGraphBuilder builder;
-    EXPECT_FALSE(TransferPass(builder, "Test.Bad", ViewScope::GameView, RenderPassEvent::Opaques)
-                     .Copy(kBufferA, kBufferA, 4)
-                     .Record());
-    EXPECT_EQ(builder.DeclaredPassCount(), 0u);
-}
-
-TEST(TransferPassTest, TwoOperationsOnOneChainDeclareNothing)
-{
-    RenderGraphBuilder builder;
-    EXPECT_FALSE(TransferPass(builder, "Test.Two", ViewScope::GameView, RenderPassEvent::Opaques)
-                     .Fill(kBufferA, 0, 0, 4)
-                     .Copy(kBufferA, kBufferB, 4)
-                     .Record());
-    EXPECT_EQ(builder.DeclaredPassCount(), 0u);
-}
-
-TEST(TransferPassTest, ReadbackIsACopyIntoAKeptBuffer)
-{
-    RenderGraphBuilder builder;
-    const BufferHandle source = builder.CreateBuffer("Test.Src", BufferDesc{ 16, BufferUsage::StorageBuffer });
-    const BufferHandle host = builder.CreateBuffer("Test.Host", BufferDesc{ 16, BufferUsage::TransferDst });
-    EXPECT_TRUE(TransferPass(builder, "Test.Readback", ViewScope::GameView, RenderPassEvent::AfterOpaques)
-                    .Readback(source, host, 4)
-                    .Record());
-    EXPECT_EQ(builder.DeclaredPassCount(), 1u);
-    EXPECT_EQ(builder.PassEventAt(0), RenderPassEvent::AfterOpaques);
-}
-
-TEST(TransferPassTest, ASecondRecordCallDeclaresNothingMore)
-{
-    RenderGraphBuilder builder;
-    TransferPass pass(builder, "Test.Twice", ViewScope::GameView, RenderPassEvent::Opaques);
-    pass.Fill(kBufferA, 0, 0, 4);
-    EXPECT_TRUE(pass.Record());
-    EXPECT_FALSE(pass.Record());
-    EXPECT_EQ(builder.DeclaredPassCount(), 1u);
-}
-
 // --- MeshPass ------------------------------------------------------------------
 
 TEST(MeshPassRecordTest, NeedsAtLeastOneAttachment)
