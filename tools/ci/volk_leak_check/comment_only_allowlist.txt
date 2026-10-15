@@ -76,8 +76,6 @@ Features\Atmosphere\Editor\AtmosphereAerialPerspectiveLutInspection.h
 Features\Atmosphere\Editor\AtmosphereAerialPerspectiveSkyPurityValidation.cpp
 Features\Atmosphere\Editor\AtmosphereTransmittanceLutValidation.cpp
 Features\Atmosphere\Editor\AtmosphereTransmittanceLutValidation.h
-Features\Shadow\ShadowCompositeRenderer.cpp
-Features\Shadow\ShadowCompositeRenderer.h
 Features\Shadow\ShadowFeature.cpp
 Features\Shadow\ShadowMaskRenderer.cpp
 Features\Shadow\ShadowMaskRenderer.h

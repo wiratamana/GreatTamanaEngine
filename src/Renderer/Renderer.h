@@ -186,9 +186,9 @@ public:
     // Frees a set from AllocateComputeDescriptorSet(). The GPU must be done with it.
     void FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept;
 
-    // Asks the render graph to drop the cached descriptor sets built for a destroyed pipeline layout.
-    void QueueComputeBindingRelease(VkDescriptorSetLayout layout) noexcept;
-    std::vector<VkDescriptorSetLayout> TakeQueuedComputeBindingReleases() noexcept;
+    // Asks the render graph to drop the cached descriptor sets built for a destroyed shader layout.
+    void QueueBindingRelease(VkDescriptorSetLayout layout) noexcept;
+    std::vector<VkDescriptorSetLayout> TakeQueuedBindingReleases() noexcept;
 
     // Layout shared by instanced indirect draw buffers.
     VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept;
@@ -252,6 +252,10 @@ public:
     // Descriptor set layout helpers.
     DescriptorSetLayoutHandle CreateDescriptorSetLayout(std::span<const DescriptorBindingDesc> bindings) const;
     void DestroyDescriptorSetLayout(DescriptorSetLayoutHandle handle) const noexcept;
+
+    // One layout per reflected set; the result owns and destroys them.
+    ReflectedSetLayouts CreateReflectedSetLayouts(
+        const std::vector<ReflectedDescriptorBinding>& bindings, const std::string& label) const;
 
     // Builds a dynamic graphics pipeline from a descriptive configuration.
     Pipeline CreatePipeline(const PipelineDesc& desc, std::span<const std::byte> vertexSpirv,

@@ -430,7 +430,11 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
         "every automation bridge attached, and NetworkServer started.");
 }
 
-EditorHost::~EditorHost() = default;
+// Idle once before any member dies: feature modules free GPU objects in their destructors without waiting.
+EditorHost::~EditorHost()
+{
+    m_renderer.WaitForGpuIdle();
+}
 
 int EditorHost::Run()
 {

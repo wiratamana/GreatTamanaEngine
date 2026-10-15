@@ -3,8 +3,8 @@
 #include "../../Core/Plugins/IEngineFeatureModule.h"
 #include "../../Game/SceneQuery.h"
 #include "../../Renderer/RenderGraph/BuildRetryGate.h"
+#include "../../Renderer/RenderGraph/Shader.h"
 #include "../../Renderer/SceneServicesDescriptorSet.h"
-#include "ShadowCompositeRenderer.h"
 #include "ShadowMaskRenderer.h"
 #include "ShadowTypes.h"
 
@@ -49,7 +49,7 @@ private:
     std::uint32_t m_shadowMapSlot = kInvalidSceneServiceSlotIndex;
 
     ShadowMaskRenderer m_maskRenderer;
-    ShadowCompositeRenderer m_compositeRenderer;
+    rg::Shader m_compositeShader{ "ShadowComposite", rg::ShaderKind::Graphics };
 };
 
 } // namespace gte

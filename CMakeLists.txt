@@ -756,6 +756,10 @@ add_library(gte_core STATIC
     src/Renderer/Vulkan/DescriptorSetLayoutBuilder.cpp
     src/Renderer/Vulkan/DescriptorSetLayoutBuilder.h
     src/Renderer/Vulkan/DescriptorPoolGrowth.h
+    src/Renderer/Vulkan/BoundedKeySet.h
+    src/Renderer/Vulkan/ReflectedSetLayouts.cpp
+    src/Renderer/Vulkan/ReflectedSetLayouts.h
+    src/Renderer/Vulkan/ShaderStageMask.h
     # task_manager/better-render-pass-1 campaign, PHASE1
     # (PHASE1_SPIRV_REFLECT_DEPENDENCY_AND_SHADER_REFLECTION_CORE.md) - pure,
     # Tier-1-testable SPIR-V reflection (descriptor bindings/push-constant
@@ -776,6 +780,8 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphPersistentResourceCache.cpp
     src/Renderer/RenderGraph/PersistentSlotTable.h
     src/Renderer/RenderGraph/BoundedOnceSet.h
+    src/Renderer/RenderGraph/BoundedRetryGates.h
+    src/Renderer/RenderGraph/BoundedLruIndex.h
     src/Renderer/RenderGraph/ViewScopeUtil.h
     src/Renderer/RenderGraph/PerView.h
     src/Renderer/RenderGraph/PersistentTarget.h
@@ -789,6 +795,10 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/StaticName.h
     src/Renderer/RenderGraph/ComputePass.h
     src/Renderer/RenderGraph/ComputePass.cpp
+    src/Renderer/RenderGraph/PassChain.h
+    src/Renderer/RenderGraph/PassChain.cpp
+    src/Renderer/RenderGraph/FullscreenPass.h
+    src/Renderer/RenderGraph/FullscreenPass.cpp
     src/Renderer/RenderGraph/RenderGraphComputeBindingKey.h
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.h
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.cpp

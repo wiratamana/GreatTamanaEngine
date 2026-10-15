@@ -5,30 +5,11 @@
 #include "../Compute/ComputePipeline.h"
 #include "../Pipeline.h"
 #include "../Renderer.h"
+#include "../Vulkan/ShaderStageMask.h"
 
 #include <cassert>
 
 namespace gte::rg {
-
-namespace {
-
-// Converts engine stage mask to Vulkan shader stage flags.
-VkShaderStageFlags ToVkShaderStageFlags(ShaderStageMask mask) noexcept
-{
-    VkShaderStageFlags flags = 0;
-    if (HasStage(mask, ShaderStageMask::Vertex)) {
-        flags |= VK_SHADER_STAGE_VERTEX_BIT;
-    }
-    if (HasStage(mask, ShaderStageMask::Fragment)) {
-        flags |= VK_SHADER_STAGE_FRAGMENT_BIT;
-    }
-    if (HasStage(mask, ShaderStageMask::Compute)) {
-        flags |= VK_SHADER_STAGE_COMPUTE_BIT;
-    }
-    return flags;
-}
-
-} // namespace
 
 CommandBuffer::CommandBuffer(CommandBufferKey, VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats,
     WriteTargetInfo writeTarget, FrameDebuggerEventSink* eventSink) noexcept

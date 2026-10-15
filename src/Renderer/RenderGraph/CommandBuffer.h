@@ -100,6 +100,10 @@ public:
 
     // Bind descriptor set at a specific index using the current pipeline layout.
     void BindDescriptorSet(std::uint32_t setIndex, VkDescriptorSet set) noexcept;
+    void BindDescriptorSet(std::uint32_t setIndex, DescriptorSetHandle set) noexcept
+    {
+        BindDescriptorSet(setIndex, ::gte::Native(set));
+    }
 
     // Push graphics constants immediately.
     void PushConstants(const void* data, std::uint32_t size, ShaderStageMask stages) noexcept;

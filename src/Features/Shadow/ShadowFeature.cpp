@@ -9,6 +9,7 @@
 #include "../../Game/Lighting/DirectionalLightResolver.h"
 #include "../../Game/SceneQuery.h"
 #include "../../Application/RenderPassViewData.h"
+#include "../../Renderer/RenderGraph/FullscreenPass.h"
 #include "../../Renderer/PipelineHandle.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleGuard.h"
@@ -37,6 +38,12 @@ constexpr rg::ViewPair<const char*> kShadowMaskName{ { nullptr, "Shadow.Mask.Gam
 
 constexpr std::int32_t kShadowDepthPassPriority = 10;
 constexpr std::int32_t kShadowCompositePriority = -500;
+
+// Push block of ShadowComposite.frag.
+struct CompositePush {
+    float strength;
+};
+static_assert(sizeof(CompositePush) == 4);
 
 struct ShadowMapBlackboardEntry {
     rg::TextureHandle shadowMapHandle;
@@ -247,7 +254,7 @@ void ShadowFeature::RegisterPasses()
     const bool compositeRegistered = m_core.RegisterRenderPass(FrameEvent::PostComposite, "Shadow.Composite",
         kShadowCompositePriority,
         [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
-            rg::TextureHandle privateTarget, Extent2D extent, const ScenePassReadHandles& currentViewHandles,
+            rg::TextureHandle privateTarget, Extent2D /*extent*/, const ScenePassReadHandles& currentViewHandles,
             const RenderFeatureCameraData&) {
             if (!rg::ShouldDeclareBuiltInPassThisFrame(
                     &m_core.GetRenderPassToggleRegistryMutable(), "Shadow.Composite.Draw")) {
@@ -263,10 +270,15 @@ void ShadowFeature::RegisterPasses()
                 return;
             }
 
-            const ShadowSettings safeSettings = SanitizeShadowSettings(m_settings);
-            m_compositeRenderer.AddCompositePass(builder, m_core.GetRenderer(), kShadowMaskName.For(scope),
-                privateTarget, extent, currentViewHandles.colorHandle, mask->maskHandle,
-                currentViewHandles.depthHandle, safeSettings.strength);
+            const CompositePush push{ SanitizeShadowSettings(m_settings).strength };
+            const rg::RenderFeatureScope featureScope(builder, kShadowFeatureName);
+            rg::FullscreenPass(builder, m_compositeShader, "Shadow.Composite.Draw", scope)
+                .Bind("sceneColor", currentViewHandles.colorHandle)
+                .Bind("shadowMask", mask->maskHandle)
+                .Push(push)
+                .Acknowledge(currentViewHandles.depthHandle)
+                .Target(privateTarget)
+                .Draw();
         },
         RenderFeatureBlendMode::ScreenSpaceMask);
     assert(compositeRegistered && "Shadow.Composite registration failed");

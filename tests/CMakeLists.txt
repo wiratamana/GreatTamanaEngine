@@ -2328,12 +2328,16 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/PersistentTargetTests.cpp
     Renderer/RenderGraph/BuildRetryGateTests.cpp
     Renderer/RenderGraph/BoundedRetryGatesTests.cpp
+    Renderer/RenderGraph/BoundedLruIndexTests.cpp
+    Renderer/RenderGraph/FullscreenRecordTests.cpp
+    Renderer/Vulkan/ShaderStageMaskTests.cpp
     Renderer/RenderGraph/RenderGraphComputeBindingKeyTests.cpp
     Renderer/Vulkan/BoundedKeySetTests.cpp
     Renderer/Vulkan/DescriptorPoolGrowthTests.cpp
     Renderer/RenderGraph/ShaderBindingsTests.cpp
     Renderer/RenderGraph/StaticNameTests.cpp
     Renderer/RenderGraph/ComputePassTests.cpp
+    Renderer/RenderGraph/FullscreenPassTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderPassTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp
@@ -2659,6 +2663,16 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
 target_sources(GreatTamanaEngineTests PRIVATE "${CMAKE_BINARY_DIR}/shaders/ShadowMask.comp.spv")
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_SHADOW_MASK_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ShadowMask.comp.spv"
+)
+
+# Same for the shadow composite stages.
+target_sources(GreatTamanaEngineTests PRIVATE
+    "${CMAKE_BINARY_DIR}/shaders/ShadowComposite.vert.spv"
+    "${CMAKE_BINARY_DIR}/shaders/ShadowComposite.frag.spv"
+)
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_TEST_SHADOW_COMPOSITE_VERT_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ShadowComposite.vert.spv"
+    GTE_TEST_SHADOW_COMPOSITE_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ShadowComposite.frag.spv"
 )
 
 # Engine-owned reflection fixtures with abstract names (not shipped).

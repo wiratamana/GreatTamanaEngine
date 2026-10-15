@@ -6,6 +6,7 @@
 #include "RenderGraphBuilder.h"
 #include "../Vulkan/ShaderReflection.h"
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -62,5 +63,18 @@ std::optional<std::string> ValidatePushConstantSize(std::uint32_t reflectedSize,
 
 // Declares the layout, reads/writes and bindings of an already validated plan.
 void DeclareBindings(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout);
+
+// Why a graphics shader cannot back a fullscreen pass, or nullopt. Fullscreen passes use set 0 only,
+// sample combined image samplers only, and a push block at offset 0.
+std::optional<std::string> ValidateFullscreenReflection(const ShaderReflectionResult& reflection);
+
+// Why `target` (the DescOf() of the pass target) cannot be rendered to, or nullopt.
+std::optional<std::string> ValidateFullscreenTarget(const std::optional<TextureDesc>& target);
+
+// Declares a fullscreen pass: bindings, the color target, and declare-only depth reads
+// (`depthAcknowledgements` are sampled by no shader; the compositor requires the view's depth to be read).
+void DeclareFullscreen(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout,
+    TextureHandle target, const std::optional<std::array<float, 4>>& clearColor,
+    std::span<const TextureHandle> depthAcknowledgements);
 
 } // namespace gte::rg

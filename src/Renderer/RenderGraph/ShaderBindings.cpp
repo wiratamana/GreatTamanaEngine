@@ -195,4 +195,51 @@ void DeclareBindings(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& p
     }
 }
 
+std::optional<std::string> ValidateFullscreenReflection(const ShaderReflectionResult& reflection)
+{
+    bool hasSetZero = false;
+    for (const ReflectedDescriptorBinding& binding : reflection.descriptorBindings) {
+        if (binding.set != kNameableSet) {
+            return "binding " + std::to_string(binding.binding) + " is in set " + std::to_string(binding.set)
+                + ": fullscreen passes use set 0 only";
+        }
+        if (binding.type != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+            return "binding " + std::to_string(binding.binding) + " is not a combined image sampler";
+        }
+        hasSetZero = true;
+    }
+    if (!hasSetZero) {
+        return std::string("the shader declares no descriptor set 0");
+    }
+    if (reflection.hasPushConstantRange && reflection.pushConstantRange.offset != 0) {
+        return std::string("the push-constant block must start at offset 0");
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> ValidateFullscreenTarget(const std::optional<TextureDesc>& target)
+{
+    if (!target.has_value()) {
+        return std::string("the target is missing or not a valid texture");
+    }
+    if (target->width == 0 || target->height == 0) {
+        return std::string("the target has a zero extent");
+    }
+    if (target->format == PixelFormat::Undefined) {
+        return std::string("the target format is Undefined");
+    }
+    return std::nullopt;
+}
+
+void DeclareFullscreen(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& plan, DescriptorSetLayoutHandle layout,
+    TextureHandle target, const std::optional<std::array<float, 4>>& clearColor,
+    std::span<const TextureHandle> depthAcknowledgements)
+{
+    DeclareBindings(pass, plan, layout);
+    pass.WriteColorAttachment(target, clearColor);
+    for (const TextureHandle depth : depthAcknowledgements) {
+        pass.ReadTexture(depth, ResourceAccess::ShaderRead, /*isDepthResource=*/true);
+    }
+}
+
 } // namespace gte::rg

@@ -5,6 +5,8 @@
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "UiTextureBackend.h"
 #include "Vulkan/DescriptorSetLayoutBuilder.h"
+#include "Vulkan/ReflectedSetLayouts.h"
+#include "Vulkan/ShaderStageMask.h"
 #include "VulkanFormatInfo.h"
 
 #include <cassert>
@@ -27,21 +29,6 @@ constexpr bool kEnableValidation = true;
 #endif
 
 // Conversion helpers for PipelineDesc to Vulkan types.
-VkShaderStageFlags ToVkShaderStageFlags(ShaderStageMask mask) noexcept
-{
-    VkShaderStageFlags flags = 0;
-    if (HasStage(mask, ShaderStageMask::Vertex)) {
-        flags |= VK_SHADER_STAGE_VERTEX_BIT;
-    }
-    if (HasStage(mask, ShaderStageMask::Fragment)) {
-        flags |= VK_SHADER_STAGE_FRAGMENT_BIT;
-    }
-    if (HasStage(mask, ShaderStageMask::Compute)) {
-        flags |= VK_SHADER_STAGE_COMPUTE_BIT;
-    }
-    return flags;
-}
-
 VkPrimitiveTopology ToVkTopology(Topology topology) noexcept
 {
     switch (topology) {
@@ -485,7 +472,7 @@ void Renderer::FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noe
     m_resources.FreeComputeDescriptorSet(descriptorSet);
 }
 
-void Renderer::QueueComputeBindingRelease(VkDescriptorSetLayout layout) noexcept
+void Renderer::QueueBindingRelease(VkDescriptorSetLayout layout) noexcept
 {
     m_resources.ForgetComputeLayout(layout);
     try {
@@ -496,7 +483,7 @@ void Renderer::QueueComputeBindingRelease(VkDescriptorSetLayout layout) noexcept
     }
 }
 
-std::vector<VkDescriptorSetLayout> Renderer::TakeQueuedComputeBindingReleases() noexcept
+std::vector<VkDescriptorSetLayout> Renderer::TakeQueuedBindingReleases() noexcept
 {
     try {
         const std::lock_guard<std::mutex> lock(m_bindingReleaseMutex);
@@ -687,6 +674,12 @@ void Renderer::DestroyDescriptorSetLayout(DescriptorSetLayoutHandle handle) cons
     if (layout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(m_device.Native(), layout, nullptr);
     }
+}
+
+ReflectedSetLayouts Renderer::CreateReflectedSetLayouts(
+    const std::vector<ReflectedDescriptorBinding>& bindings, const std::string& label) const
+{
+    return ReflectedSetLayouts(m_device.Native(), bindings, label);
 }
 
 Pipeline Renderer::CreatePipeline(
