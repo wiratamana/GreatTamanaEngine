@@ -346,17 +346,17 @@ struct PassContext {
     RecordDrawFn recordDraw;
     RecordIndirectDrawFn recordIndirectDraw;
 
-    // Constructs a CommandBuffer wrapper for recording draws in this pass.
+    // CommandBuffer wrapper for recording draws in this pass.
     CommandBuffer Cmd() const noexcept
     {
-        return CommandBuffer(CommandBufferKey{}, m_cmd, renderer, recordDraw.drawStats,
+        return CommandBuffer(m_cmd, renderer, recordDraw.drawStats,
             CommandBuffer::WriteTargetInfo{
                 writeTargetColorImage, colorAttachmentExtent, writeTargetColorFormat, writeTargetDepthImage,
                 writeTargetDepthFormat },
             eventSink);
     }
 
-    // The raw command buffer, for platform glue only (UI backend, overlay hooks). NativeLeakCheck tracks every use.
+    // Temporary escape: the raw command buffer for platform glue and not-yet-migrated hand recording.
     VkCommandBuffer RawCommandBuffer() const noexcept { return m_cmd; }
 
 private:

@@ -22,7 +22,7 @@ class Renderer;
 } // namespace gte
 
 namespace gte::rg {
-struct PassContext; // forward declaration, needed only for the CommandBufferKey friendship below
+struct PassContext;
 
 // Checks if supplied push constant size matches reflected size (0 means unreflected).
 constexpr bool PushConstantSizeMatches(std::uint32_t suppliedSize, std::uint32_t reflectedSize) noexcept
@@ -39,33 +39,19 @@ struct CommandBufferWriteTargetInfo {
     VkFormat depthFormat = VK_FORMAT_UNDEFINED;
 };
 
-// Passkey: only PassContext and CommandBuffer itself can mint one, so a CommandBuffer cannot be built anywhere else.
-class CommandBufferKey {
-private:
-    CommandBufferKey() = default;
-    friend struct PassContext;
-    friend class CommandBuffer;
-};
-
 class CommandBuffer {
 public:
     using WriteTargetInfo = CommandBufferWriteTargetInfo;
 
-    // `key` is a passkey: only PassContext::Cmd() (or the factories below) can supply one.
-    CommandBuffer(CommandBufferKey key, VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats,
-        WriteTargetInfo writeTarget = {}, FrameDebuggerEventSink* eventSink = nullptr) noexcept;
-
-    // Wraps a raw command buffer for call sites that have no PassContext (hooks, replay steps, immediate submits).
-    // Temporary route: NativeLeakCheck lists every use outside src/Renderer.
+    // Temporary escape for code that still records raw Vulkan commands outside a pass (hooks, replay, one-shots).
     static CommandBuffer AdoptRaw(VkCommandBuffer cmd, Renderer* renderer = nullptr,
         DrawStats* passDrawStats = nullptr, WriteTargetInfo writeTarget = {},
         FrameDebuggerEventSink* eventSink = nullptr) noexcept
     {
-        return CommandBuffer(CommandBufferKey{}, cmd, renderer, passDrawStats, writeTarget, eventSink);
+        return CommandBuffer(cmd, renderer, passDrawStats, writeTarget, eventSink);
     }
 
-    // The raw command buffer, for platform glue and not-yet-migrated hand recording. NativeLeakCheck tracks every
-    // use outside src/Renderer.
+    // Temporary escape: the raw command buffer for not-yet-migrated hand recording.
     VkCommandBuffer RawCommandBuffer() const noexcept { return m_cmd; }
 
     // Stage compute state for the next dispatch.
@@ -138,6 +124,11 @@ public:
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid);
 
 private:
+    friend struct PassContext;
+
+    CommandBuffer(VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats, WriteTargetInfo writeTarget,
+        FrameDebuggerEventSink* eventSink) noexcept;
+
     std::function<void(bool, std::uint32_t, std::uint32_t)> MakeRecordDrawStatsCallback() const;
 
     VkCommandBuffer m_cmd = VK_NULL_HANDLE;

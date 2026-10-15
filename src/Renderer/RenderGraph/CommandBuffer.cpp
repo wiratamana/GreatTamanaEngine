@@ -11,7 +11,7 @@
 
 namespace gte::rg {
 
-CommandBuffer::CommandBuffer(CommandBufferKey, VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats,
+CommandBuffer::CommandBuffer(VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats,
     WriteTargetInfo writeTarget, FrameDebuggerEventSink* eventSink) noexcept
     : m_cmd(cmd)
     , m_renderer(renderer)
