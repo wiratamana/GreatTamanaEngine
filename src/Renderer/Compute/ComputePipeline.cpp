@@ -32,7 +32,8 @@ ComputePipeline::ComputePipeline(VkDevice device, const std::string& shaderSpirv
 
     if (useReflection) {
         try {
-            const ShaderReflectionResult reflection = ReflectComputeShader(shaderSpirvPath);
+            const ShaderStageFile computeStage{ VK_SHADER_STAGE_COMPUTE_BIT, shaderSpirvPath };
+            ShaderReflectionResult reflection = ReflectShader(std::span<const ShaderStageFile>(&computeStage, 1));
 
             const std::vector<DescriptorBindingSetGroup> setGroups =
                 GroupDescriptorBindingsBySet(reflection.descriptorBindings);
@@ -43,16 +44,16 @@ ComputePipeline::ComputePipeline(VkDevice device, const std::string& shaderSpirv
             for (const DescriptorBindingSetGroup& group : setGroups) {
                 DescriptorSetLayoutBuilder layoutBuilder(device);
                 for (const ReflectedDescriptorBinding& binding : group.bindings) {
+                    const VkShaderStageFlags stages = binding.stages;
                     switch (binding.type) {
                         case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-                            layoutBuilder.AddStorageBuffer(binding.binding, VK_SHADER_STAGE_COMPUTE_BIT, binding.count);
+                            layoutBuilder.AddStorageBuffer(binding.binding, stages, binding.count);
                             break;
                         case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
-                            layoutBuilder.AddStorageImage(binding.binding, VK_SHADER_STAGE_COMPUTE_BIT, binding.count);
+                            layoutBuilder.AddStorageImage(binding.binding, stages, binding.count);
                             break;
                         case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
-                            layoutBuilder.AddCombinedImageSampler(
-                                binding.binding, VK_SHADER_STAGE_COMPUTE_BIT, binding.count);
+                            layoutBuilder.AddCombinedImageSampler(binding.binding, stages, binding.count);
                             break;
                         default:
                             throw std::runtime_error(
@@ -68,7 +69,7 @@ ComputePipeline::ComputePipeline(VkDevice device, const std::string& shaderSpirv
 
             if (reflection.hasPushConstantRange) {
                 VkPushConstantRange range{};
-                range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+                range.stageFlags = reflection.pushConstantStages;
                 range.offset = reflection.pushConstantRange.offset;
                 range.size = reflection.pushConstantRange.size;
                 resolvedPushConstantRange = range;
@@ -78,6 +79,7 @@ ComputePipeline::ComputePipeline(VkDevice device, const std::string& shaderSpirv
             m_localSize.width = reflection.localSize.x;
             m_localSize.height = reflection.localSize.y;
             m_localSize.depth = reflection.localSize.z;
+            m_reflectedBindings = std::move(reflection.descriptorBindings);
         } catch (...) {
             destroyOwnedReflectedLayouts();
             throw;
@@ -137,6 +139,7 @@ ComputePipeline::ComputePipeline(ComputePipeline&& other) noexcept
     , m_pipeline(std::exchange(other.m_pipeline, VK_NULL_HANDLE))
     , m_ownedReflectedLayouts(std::move(other.m_ownedReflectedLayouts))
     , m_ownedReflectedSetNumbers(std::move(other.m_ownedReflectedSetNumbers))
+    , m_reflectedBindings(std::move(other.m_reflectedBindings))
     , m_pushConstantSize(std::exchange(other.m_pushConstantSize, 0))
     , m_localSize(std::exchange(other.m_localSize, Extent3D{ 1, 1, 1 }))
     , m_reflectedLayoutHandles(std::move(other.m_reflectedLayoutHandles))
@@ -155,6 +158,8 @@ ComputePipeline& ComputePipeline::operator=(ComputePipeline&& other) noexcept
         m_pipeline = std::exchange(other.m_pipeline, VK_NULL_HANDLE);
         m_ownedReflectedLayouts = std::move(other.m_ownedReflectedLayouts);
         m_ownedReflectedSetNumbers = std::move(other.m_ownedReflectedSetNumbers);
+        m_reflectedBindings = std::move(other.m_reflectedBindings);
+        other.m_reflectedBindings.clear();
         m_pushConstantSize = std::exchange(other.m_pushConstantSize, 0);
         m_localSize = std::exchange(other.m_localSize, Extent3D{ 1, 1, 1 });
         m_reflectedLayoutHandles = std::move(other.m_reflectedLayoutHandles);

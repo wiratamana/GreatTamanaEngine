@@ -11,8 +11,26 @@ namespace gte {
 
 namespace {
 
-// Maps a reflected descriptor type to a supported VkDescriptorType; anything else throws.
-VkDescriptorType MapDescriptorType(SpvReflectDescriptorType type, const std::string& shaderSpirvPath)
+// Owns one SpvReflectShaderModule.
+class ReflectModule {
+public:
+    ReflectModule(const std::vector<std::byte>& spirv, const std::string& path)
+    {
+        if (spvReflectCreateShaderModule(spirv.size(), spirv.data(), &m_module) != SPV_REFLECT_RESULT_SUCCESS) {
+            throw std::runtime_error("ShaderReflection: '" + path + "' is not a valid compiled SPIR-V binary.");
+        }
+    }
+    ~ReflectModule() { spvReflectDestroyShaderModule(&m_module); }
+    ReflectModule(const ReflectModule&) = delete;
+    ReflectModule& operator=(const ReflectModule&) = delete;
+
+    SpvReflectShaderModule& Get() noexcept { return m_module; }
+
+private:
+    SpvReflectShaderModule m_module{};
+};
+
+VkDescriptorType MapDescriptorType(SpvReflectDescriptorType type, const std::string& path)
 {
     switch (type) {
         case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER:
@@ -22,111 +40,191 @@ VkDescriptorType MapDescriptorType(SpvReflectDescriptorType type, const std::str
         case SPV_REFLECT_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
             return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         default:
-            throw std::runtime_error(
-                "ShaderReflection: shader '" + shaderSpirvPath + "' declares a descriptor type this engine's "
-                "DescriptorSetLayoutBuilder/ComputeDescriptorSet cannot express - only STORAGE_BUFFER / "
-                "STORAGE_IMAGE / COMBINED_IMAGE_SAMPLER are supported (see ComputeDescriptorSet.h).");
+            throw std::runtime_error("ShaderReflection: '" + path
+                + "' declares an unsupported descriptor type (only storage buffer, storage image and "
+                  "combined image sampler are supported).");
     }
+}
+
+// Samplers are always read. Storage resources follow the readonly/writeonly decorations.
+ReflectedAccess InferAccess(const SpvReflectDescriptorBinding& binding, VkDescriptorType type)
+{
+    if (type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+        return ReflectedAccess::ReadOnly;
+    }
+    const bool nonWritable = (binding.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE) != 0;
+    const bool nonReadable = (binding.decoration_flags & SPV_REFLECT_DECORATION_NON_READABLE) != 0;
+    if (nonWritable && !nonReadable) {
+        return ReflectedAccess::ReadOnly;
+    }
+    if (nonReadable && !nonWritable) {
+        return ReflectedAccess::WriteOnly;
+    }
+    return ReflectedAccess::ReadWrite;
+}
+
+ReflectedAccess MergeAccess(ReflectedAccess a, ReflectedAccess b)
+{
+    return a == b ? a : ReflectedAccess::ReadWrite;
+}
+
+std::string SlotText(std::uint32_t set, std::uint32_t binding)
+{
+    return "(set " + std::to_string(set) + ", binding " + std::to_string(binding) + ")";
+}
+
+struct StageReflection {
+    std::vector<ReflectedDescriptorBinding> bindings;
+    bool hasPush = false;
+    ReflectedPushConstantRange push;
+    ReflectedLocalSize localSize;
+};
+
+StageReflection ReflectStage(const ShaderStageFile& file)
+{
+    const std::vector<std::byte> spirv = ReadShaderFileBytes(file.spirvPath);
+    ReflectModule module(spirv, file.spirvPath);
+    SpvReflectShaderModule& mod = module.Get();
+
+    if (static_cast<VkShaderStageFlagBits>(mod.shader_stage) != file.stage) {
+        throw std::runtime_error("ShaderReflection: '" + file.spirvPath + "' is not the declared shader stage.");
+    }
+
+    StageReflection out;
+
+    std::uint32_t bindingCount = 0;
+    if (spvReflectEnumerateDescriptorBindings(&mod, &bindingCount, nullptr) != SPV_REFLECT_RESULT_SUCCESS) {
+        throw std::runtime_error("ShaderReflection: cannot enumerate descriptor bindings of '" + file.spirvPath + "'.");
+    }
+    std::vector<SpvReflectDescriptorBinding*> bindings(bindingCount);
+    if (bindingCount > 0
+        && spvReflectEnumerateDescriptorBindings(&mod, &bindingCount, bindings.data()) != SPV_REFLECT_RESULT_SUCCESS) {
+        throw std::runtime_error("ShaderReflection: cannot enumerate descriptor bindings of '" + file.spirvPath + "'.");
+    }
+
+    out.bindings.reserve(bindingCount);
+    for (const SpvReflectDescriptorBinding* binding : bindings) {
+        ReflectedDescriptorBinding reflected;
+        reflected.set = binding->set;
+        reflected.binding = binding->binding;
+        reflected.type = MapDescriptorType(binding->descriptor_type, file.spirvPath);
+        reflected.count = binding->count > 0 ? binding->count : 1;
+        reflected.name = binding->name != nullptr ? binding->name : "";
+        reflected.stages = static_cast<VkShaderStageFlags>(file.stage);
+        reflected.access = InferAccess(*binding, reflected.type);
+        out.bindings.push_back(std::move(reflected));
+    }
+
+    std::uint32_t pushCount = 0;
+    if (spvReflectEnumeratePushConstantBlocks(&mod, &pushCount, nullptr) != SPV_REFLECT_RESULT_SUCCESS) {
+        throw std::runtime_error("ShaderReflection: cannot enumerate push constants of '" + file.spirvPath + "'.");
+    }
+    if (pushCount > 1) {
+        throw std::runtime_error(
+            "ShaderReflection: '" + file.spirvPath + "' declares more than one push-constant block.");
+    }
+    if (pushCount == 1) {
+        SpvReflectBlockVariable* block = nullptr;
+        if (spvReflectEnumeratePushConstantBlocks(&mod, &pushCount, &block) != SPV_REFLECT_RESULT_SUCCESS) {
+            throw std::runtime_error("ShaderReflection: cannot enumerate push constants of '" + file.spirvPath + "'.");
+        }
+        out.hasPush = true;
+        out.push = { block->offset, block->size };
+    }
+
+    if (file.stage == VK_SHADER_STAGE_COMPUTE_BIT && mod.entry_point_count > 0) {
+        const SpvReflectEntryPoint& entry = mod.entry_points[0];
+        out.localSize = { entry.local_size.x, entry.local_size.y, entry.local_size.z };
+    }
+    return out;
 }
 
 } // namespace
 
-ShaderReflectionResult ReflectComputeShader(const std::string& shaderSpirvPath)
+void MergeStageBindings(
+    std::vector<ReflectedDescriptorBinding>& merged, std::span<const ReflectedDescriptorBinding> stageBindings)
 {
-    const std::vector<std::byte> spirv = ReadShaderFileBytes(shaderSpirvPath);
-
-    SpvReflectShaderModule module{};
-    const SpvReflectResult createResult = spvReflectCreateShaderModule(spirv.size(), spirv.data(), &module);
-    if (createResult != SPV_REFLECT_RESULT_SUCCESS) {
-        throw std::runtime_error(
-            "ShaderReflection: spvReflectCreateShaderModule failed for '" + shaderSpirvPath +
-            "' - is this a valid compiled SPIR-V binary?");
-    }
-
-    // RAII-via-try/catch, mirroring ComputePipeline's own constructor shape
-    // (see PHASE1's own task doc, Step 2.2) - every path (success or a
-    // thrown "unsupported descriptor type"/"more than one push-constant
-    // block" error) must call spvReflectDestroyShaderModule() exactly once.
-    try {
-        ShaderReflectionResult result;
-
-        // --- Descriptor bindings --------------------------------------
-        std::uint32_t bindingCount = 0;
-        SpvReflectResult enumResult = spvReflectEnumerateDescriptorBindings(&module, &bindingCount, nullptr);
-        if (enumResult != SPV_REFLECT_RESULT_SUCCESS) {
-            throw std::runtime_error(
-                "ShaderReflection: spvReflectEnumerateDescriptorBindings (count) failed for '" + shaderSpirvPath + "'.");
-        }
-
-        std::vector<SpvReflectDescriptorBinding*> bindings(bindingCount);
-        if (bindingCount > 0) {
-            enumResult = spvReflectEnumerateDescriptorBindings(&module, &bindingCount, bindings.data());
-            if (enumResult != SPV_REFLECT_RESULT_SUCCESS) {
-                throw std::runtime_error(
-                    "ShaderReflection: spvReflectEnumerateDescriptorBindings failed for '" + shaderSpirvPath + "'.");
+    for (const ReflectedDescriptorBinding& incoming : stageBindings) {
+        ReflectedDescriptorBinding* existing = nullptr;
+        for (ReflectedDescriptorBinding& candidate : merged) {
+            if (candidate.set == incoming.set && candidate.binding == incoming.binding) {
+                existing = &candidate;
+                break;
             }
         }
-
-        result.descriptorBindings.reserve(bindingCount);
-        for (const SpvReflectDescriptorBinding* binding : bindings) {
-            ReflectedDescriptorBinding reflected;
-            reflected.set = binding->set;
-            reflected.binding = binding->binding;
-            reflected.type = MapDescriptorType(binding->descriptor_type, shaderSpirvPath);
-            reflected.count = binding->count > 0 ? binding->count : 1;
-            reflected.name = binding->name != nullptr ? std::string(binding->name) : std::string();
-            result.descriptorBindings.push_back(reflected);
+        if (existing == nullptr) {
+            merged.push_back(incoming);
+            continue;
         }
-
-        // --- Push-constant block ---------------------------------------
-        std::uint32_t pushConstantCount = 0;
-        enumResult = spvReflectEnumeratePushConstantBlocks(&module, &pushConstantCount, nullptr);
-        if (enumResult != SPV_REFLECT_RESULT_SUCCESS) {
-            throw std::runtime_error(
-                "ShaderReflection: spvReflectEnumeratePushConstantBlocks (count) failed for '" + shaderSpirvPath + "'.");
+        if (existing->type != incoming.type || existing->name != incoming.name || existing->count != incoming.count) {
+            throw std::runtime_error("ShaderReflection: stages disagree on type, name or count of slot "
+                + SlotText(incoming.set, incoming.binding) + " ('" + existing->name + "' vs '" + incoming.name + "').");
         }
-        if (pushConstantCount > 1) {
-            throw std::runtime_error(
-                "ShaderReflection: shader '" + shaderSpirvPath + "' declares more than one push-constant block - "
-                "this engine's convention is exactly one layout(push_constant) block per shader.");
-        }
-        if (pushConstantCount == 1) {
-            SpvReflectBlockVariable* block = nullptr;
-            enumResult = spvReflectEnumeratePushConstantBlocks(&module, &pushConstantCount, &block);
-            if (enumResult != SPV_REFLECT_RESULT_SUCCESS) {
-                throw std::runtime_error(
-                    "ShaderReflection: spvReflectEnumeratePushConstantBlocks failed for '" + shaderSpirvPath + "'.");
-            }
-            result.hasPushConstantRange = true;
-            result.pushConstantRange.offset = block->offset;
-            result.pushConstantRange.size = block->size;
-        }
-
-        // --- Declared local work-group size (from the shader's first/only
-        //     entry point - this engine only ever compiles single-entry-
-        //     point compute shaders) ---------------------------------
-        if (module.entry_point_count > 0) {
-            const SpvReflectEntryPoint& entryPoint = module.entry_points[0];
-            result.localSize.x = entryPoint.local_size.x;
-            result.localSize.y = entryPoint.local_size.y;
-            result.localSize.z = entryPoint.local_size.z;
-        }
-
-        spvReflectDestroyShaderModule(&module);
-        return result;
-    } catch (...) {
-        spvReflectDestroyShaderModule(&module);
-        throw;
+        existing->stages |= incoming.stages;
+        existing->access = MergeAccess(existing->access, incoming.access);
     }
 }
 
-// task_manager/better-render-pass-1 campaign, PHASE2
-// (PHASE2_REFLECTION_BASED_COMPUTE_PIPELINE_CREATION.md) - a plain std::map
-// keyed by `set` keeps distinct set numbers in ascending order "for free"
-// (map iteration order == key order), and each bucket's own std::vector
-// preserves the original relative order of bindings pushed into it
-// (push_back never reorders).
-std::vector<DescriptorBindingSetGroup> GroupDescriptorBindingsBySet(const std::vector<ReflectedDescriptorBinding>& bindings)
+void MergePushConstantRange(
+    ShaderReflectionResult& result, const ReflectedPushConstantRange& range, VkShaderStageFlags stages)
+{
+    if (!result.hasPushConstantRange) {
+        result.hasPushConstantRange = true;
+        result.pushConstantRange = range;
+        result.pushConstantStages = stages;
+        return;
+    }
+    if (result.pushConstantRange.size != range.size || result.pushConstantRange.offset != range.offset) {
+        throw std::runtime_error("ShaderReflection: stages declare push-constant blocks of different size ("
+            + std::to_string(result.pushConstantRange.size) + " vs " + std::to_string(range.size) + " bytes).");
+    }
+    result.pushConstantStages |= stages;
+}
+
+void ValidateBindingNames(std::span<const ReflectedDescriptorBinding> bindings, const std::string& shaderLabel)
+{
+    std::string unnamed;
+    for (const ReflectedDescriptorBinding& binding : bindings) {
+        if (binding.name.empty()) {
+            unnamed += (unnamed.empty() ? "" : ", ") + SlotText(binding.set, binding.binding);
+        }
+    }
+    if (!unnamed.empty()) {
+        throw std::runtime_error("ShaderReflection: '" + shaderLabel + "' has unnamed bindings " + unnamed
+            + " - give the variable an instance name and compile without stripping debug names.");
+    }
+    for (std::size_t i = 0; i < bindings.size(); ++i) {
+        for (std::size_t j = i + 1; j < bindings.size(); ++j) {
+            if (bindings[i].name == bindings[j].name) {
+                throw std::runtime_error("ShaderReflection: '" + shaderLabel + "' uses the name '" + bindings[i].name
+                    + "' for " + SlotText(bindings[i].set, bindings[i].binding) + " and "
+                    + SlotText(bindings[j].set, bindings[j].binding) + ".");
+            }
+        }
+    }
+}
+
+ShaderReflectionResult ReflectShader(std::span<const ShaderStageFile> stages)
+{
+    if (stages.empty()) {
+        throw std::runtime_error("ShaderReflection: no shader stages given.");
+    }
+    ShaderReflectionResult result;
+    for (const ShaderStageFile& file : stages) {
+        const StageReflection stage = ReflectStage(file);
+        MergeStageBindings(result.descriptorBindings, stage.bindings);
+        if (stage.hasPush) {
+            MergePushConstantRange(result, stage.push, static_cast<VkShaderStageFlags>(file.stage));
+        }
+        if (file.stage == VK_SHADER_STAGE_COMPUTE_BIT) {
+            result.localSize = stage.localSize;
+        }
+    }
+    return result;
+}
+
+std::vector<DescriptorBindingSetGroup> GroupDescriptorBindingsBySet(
+    const std::vector<ReflectedDescriptorBinding>& bindings)
 {
     std::map<std::uint32_t, std::vector<ReflectedDescriptorBinding>> bindingsBySet;
     for (const ReflectedDescriptorBinding& binding : bindings) {
@@ -136,10 +234,7 @@ std::vector<DescriptorBindingSetGroup> GroupDescriptorBindingsBySet(const std::v
     std::vector<DescriptorBindingSetGroup> result;
     result.reserve(bindingsBySet.size());
     for (auto& [set, groupBindings] : bindingsBySet) {
-        DescriptorBindingSetGroup group;
-        group.set = set;
-        group.bindings = std::move(groupBindings);
-        result.push_back(std::move(group));
+        result.push_back({ set, std::move(groupBindings) });
     }
     return result;
 }

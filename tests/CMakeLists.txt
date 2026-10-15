@@ -2353,15 +2353,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/PostTransparentStageOrderingTests.cpp
     Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp
     Renderer/RenderGraph/RenderGraphNameSlotTableTests.cpp
-    # task_manager/better-render-pass-1 campaign, PHASE1
-    # (PHASE1_SPIRV_REFLECT_DEPENDENCY_AND_SHADER_REFLECTION_CORE.md) - Tier-1
-    # test for the new, pure gte::ReflectComputeShader()
-    # (src/Renderer/Vulkan/ShaderReflection.h/.cpp), asserted against the
-    # real, already-compiled Shaders/BoxBlur.comp.spv fixture (see
-    # gte_add_shader(GreatTamanaEngineTests ...) + the
-    # GTE_TEST_BOXBLUR_SPV_PATH compile definition added below,
-    # near add_executable(GreatTamanaEngineTests ...)). No Vulkan device
-    # involved at all - pure SPIR-V binary parsing.
+    # Pure SPIR-V reflection tests against compiled fixture shaders (no Vulkan device).
     Renderer/Vulkan/ShaderReflectionTests.cpp
     Renderer/ShaderFileTests.cpp
     # editor-core-separation-27 campaign, PHASE4
@@ -2646,31 +2638,21 @@ foreach(GTE_FEATURE_TEST_DIR ${GTE_FEATURE_TEST_DIRS})
     endif()
 endforeach()
 
-# task_manager/better-render-pass-1 campaign, PHASE1
-# (PHASE1_SPIRV_REFLECT_DEPENDENCY_AND_SHADER_REFLECTION_CORE.md) -
-# Renderer/Vulkan/ShaderReflectionTests.cpp asserts gte::ReflectComputeShader()
-# against the real, already-compiled Shaders/BoxBlur.comp.spv fixture.
-# DELIBERATE DEVIATION from this phase's own task doc, confirmed live: the
-# doc assumed this would be the FIRST gte_add_shader() call for BoxBlur.comp
-# anywhere in the project, but the root CMakeLists.txt already calls
-# gte_add_shader(GreatTamanaEditor src/Shaders/BoxBlur.comp) - that function's
-# own OUTPUT-based add_custom_command targets a FIXED,
-# target-name-independent path ("${CMAKE_BINARY_DIR}/shaders/BoxBlur.comp.spv"),
-# and CMake/ninja both reject a second add_custom_command declaring the same
-# OUTPUT ("multiple rules generate shaders/BoxBlur.comp.spv", confirmed via a
-# real failed ninja generate). Since root CMakeLists.txt's
-# add_subdirectory(tests) runs AFTER that existing call, the custom command
-# already exists by the time this file is processed - so this test target
-# just depends on that SAME already-declared generated file directly (a
-# plain target_sources() of the existing generated path) instead of calling
-# gte_add_shader() a second time for the identical shader source.
-# GTE_TEST_BOXBLUR_SPV_PATH bakes in the real, absolute, build-resolved path
-# at compile time (gtest_discover_tests() does not guarantee the test
-# binary's current working directory equals its own directory) - mirrors
-# this same file's own GTE_CORE_ARCHIVE_PATH idiom immediately below.
+# Reflection fixtures. BoxBlur.comp.spv is already declared by the root gte_add_shader() call, so
+# the test target only depends on that generated file; the paths are baked in as absolute.
 target_sources(GreatTamanaEngineTests PRIVATE "${CMAKE_BINARY_DIR}/shaders/BoxBlur.comp.spv")
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_BOXBLUR_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/BoxBlur.comp.spv"
+)
+
+# Engine-owned reflection fixtures with abstract names (not shipped).
+gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.comp)
+gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.vert)
+gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.frag)
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_TEST_REFLECT_COMP_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixture.comp.spv"
+    GTE_TEST_REFLECT_VERT_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixture.vert.spv"
+    GTE_TEST_REFLECT_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixture.frag.spv"
 )
 
 # Same "already declared by root CMakeLists.txt's own gte_add_shader() call"

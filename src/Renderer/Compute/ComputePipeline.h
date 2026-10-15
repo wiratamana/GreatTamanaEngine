@@ -3,10 +3,12 @@
 #include <volk.h>
 
 #include "../GraphicsHandleRegistry.h"
+#include "../Vulkan/ShaderReflection.h"
 #include "ComputeDispatch.h"
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -36,10 +38,10 @@ public:
     std::uint32_t PushConstantSize() const noexcept { return m_pushConstantSize; }
     Extent3D LocalGroupSize() const noexcept { return m_localSize; }
 
-    // Opaque sibling of ReflectedDescriptorSetLayout() above - lazily
-    // registers the reflected VkDescriptorSetLayout for `set` on first call,
-    // caches it, and returns the same handle afterward. Invalid if `set`
-    // wasn't reflected (mirrors the raw accessor's own VK_NULL_HANDLE case).
+    // Every reflected binding of every set (empty if built manually).
+    std::span<const ReflectedDescriptorBinding> ReflectedBindings() const noexcept { return m_reflectedBindings; }
+
+    // Registers the reflected layout for `set` on first call and caches it. Invalid if `set` was not reflected.
     DescriptorSetLayoutHandle ReflectedDescriptorSetLayoutHandle(std::uint32_t set = 0) const noexcept;
 
 private:
@@ -52,11 +54,11 @@ private:
     // Owned layouts created by reflection
     std::vector<VkDescriptorSetLayout> m_ownedReflectedLayouts;
     std::vector<std::uint32_t> m_ownedReflectedSetNumbers;
+    std::vector<ReflectedDescriptorBinding> m_reflectedBindings;
     std::uint32_t m_pushConstantSize = 0;
     Extent3D m_localSize{ 1, 1, 1 };
 
-    // Lazily populated by ReflectedDescriptorSetLayoutHandle() above - one
-    // (set, handle) pair per distinct `set` ever queried.
+    // One (set, handle) pair per distinct `set` ever queried.
     mutable std::vector<std::pair<std::uint32_t, DescriptorSetLayoutHandle>> m_reflectedLayoutHandles;
 };
 

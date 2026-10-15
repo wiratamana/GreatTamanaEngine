@@ -1,0 +1,21 @@
+#version 450
+
+// Reflection fixture: named bindings, access qualifiers, local size 16x16.
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer ParamsBlock {
+    vec4 values[4];
+} params;
+
+layout(set = 0, binding = 1) uniform sampler2D inputDepthA;
+layout(set = 0, binding = 2) uniform sampler2D inputDepthB;
+layout(set = 0, binding = 3, r8) uniform writeonly image2D maskOutput;
+
+void main()
+{
+    const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    const vec2 uv = (vec2(p) + 0.5) / vec2(imageSize(maskOutput));
+    const float a = texture(inputDepthA, uv).r;
+    const float b = texture(inputDepthB, uv).r;
+    imageStore(maskOutput, p, vec4(a * b * params.values[0].x));
+}

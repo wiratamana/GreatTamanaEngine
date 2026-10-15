@@ -79,7 +79,7 @@ function(gte_add_shader TARGET SOURCE)
     foreach(EXTRA_DEP ${GTE_ADD_SHADER_EXTRA_DEPENDS})
         list(APPEND EXTRA_DEPENDS_ABSOLUTE "${CMAKE_SOURCE_DIR}/${EXTRA_DEP}")
     endforeach()
-
+    # Reflection reads binding names from OpName: do not add -O or -g0 (they strip names).
     add_custom_command(
         OUTPUT "${COMPILED}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/shaders"
