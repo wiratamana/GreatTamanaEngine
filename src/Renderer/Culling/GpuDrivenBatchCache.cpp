@@ -1,5 +1,6 @@
 #include "GpuDrivenBatchCache.h"
 
+#include "../DescriptorSet.h"
 #include "../IndirectDrawTypes.h"
 #include "../Renderer.h"
 #include "../RenderGraph/GpuBufferInternal.h"
@@ -96,22 +97,22 @@ void GpuDrivenBatchCache::EnsureDescriptorSetsWritten(Renderer& renderer, const 
 
     if (entry.cullingDescriptorSet == DescriptorSetHandle::Invalid) {
         entry.cullingDescriptorSet =
-            RegisterDescriptorSet(renderer.AllocateComputeDescriptorSet(m_pipelines.DescriptorSetLayout()).Native());
+            RegisterDescriptorSet(renderer.AllocateDescriptorSet(m_pipelines.DescriptorSetLayout()).Native());
     }
-    ComputeDescriptorSet(Native(entry.cullingDescriptorSet), device)
+    DescriptorSet(Native(entry.cullingDescriptorSet), device)
         .Rewrite(
             {
-                ComputeDescriptorWrite::StorageBuffer(0, input),
-                ComputeDescriptorWrite::StorageBuffer(1, GpuBufferAccess::Underlying(entry.indirectCommandBuffer).Native()),
-                ComputeDescriptorWrite::StorageBuffer(2, GpuBufferAccess::Underlying(entry.countBuffer).Native()),
+                DescriptorWrite::StorageBuffer(0, input),
+                DescriptorWrite::StorageBuffer(1, GpuBufferAccess::Underlying(entry.indirectCommandBuffer).Native()),
+                DescriptorWrite::StorageBuffer(2, GpuBufferAccess::Underlying(entry.countBuffer).Native()),
             });
 
     if (entry.instanceBufferDescriptorSet == DescriptorSetHandle::Invalid) {
         entry.instanceBufferDescriptorSet = RegisterDescriptorSet(
-            renderer.AllocateComputeDescriptorSet(renderer.InstanceBufferDescriptorSetLayout()).Native());
+            renderer.AllocateDescriptorSet(renderer.InstanceBufferDescriptorSetLayout()).Native());
     }
-    ComputeDescriptorSet(Native(entry.instanceBufferDescriptorSet), device)
-        .Rewrite({ ComputeDescriptorWrite::StorageBuffer(0, input) });
+    DescriptorSet(Native(entry.instanceBufferDescriptorSet), device)
+        .Rewrite({ DescriptorWrite::StorageBuffer(0, input) });
 }
 
 const Pipeline& GpuDrivenBatchCache::ResolveInstancedPipeline(

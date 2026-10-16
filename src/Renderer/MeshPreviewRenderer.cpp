@@ -1,7 +1,7 @@
 #include "MeshPreviewRenderer.h"
 
 #include "Buffer.h"
-#include "Compute/ComputeDescriptorSet.h"
+#include "DescriptorSet.h"
 #include "Pipeline.h"
 #include "Renderer.h"
 #include "RenderTexture.h"
@@ -47,8 +47,9 @@ struct MeshPreviewRenderer::Impl {
     {
         renderer.WaitForGpuIdle();
         ReleaseUiHandle();
+        UnregisterDescriptorSet(setOneHandle);
         if (setOne.has_value()) {
-            renderer.FreeComputeDescriptorSet(setOne->Native());
+            renderer.FreeDescriptorSet(setOne->Native());
         }
         renderer.DestroyDescriptorSetLayout(setOneLayout);
         renderer.DestroyDescriptorSetLayout(zeroLayout);
@@ -71,7 +72,8 @@ struct MeshPreviewRenderer::Impl {
         };
         zeroLayout = renderer.CreateDescriptorSetLayout({});
         setOneLayout = renderer.CreateDescriptorSetLayout(kSetOneBindings);
-        setOne.emplace(renderer.AllocateComputeDescriptorSet(setOneLayout));
+        setOne.emplace(renderer.AllocateDescriptorSet(setOneLayout));
+        setOneHandle = RegisterDescriptorSet(setOne->Native());
 
         const unsigned char whitePixel[4] = { 255, 255, 255, 255 };
         whiteTexture.emplace(renderer.CreateTexture2D(whitePixel, 1, 1, "MeshPreviewDummyWhite"));
@@ -81,14 +83,14 @@ struct MeshPreviewRenderer::Impl {
         const std::array<std::byte, kDummyUniformBlockSize> zeroBytes{};
         uniformBuffer->Upload(zeroBytes.data(), zeroBytes.size());
 
-        ComputeDescriptorWrite uniformWrite;
+        DescriptorWrite uniformWrite;
         uniformWrite.binding = 8;
         uniformWrite.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         uniformWrite.buffer = uniformBuffer->Native();
         uniformWrite.bufferOffset = 0;
         uniformWrite.bufferRange = kDummyUniformBlockSize;
-        setOne->Rewrite(std::vector<ComputeDescriptorWrite>{
-            ComputeDescriptorWrite::CombinedImageSampler(0, whiteTexture->View(), whiteTexture->Sampler()),
+        setOne->Rewrite(std::vector<DescriptorWrite>{
+            DescriptorWrite::CombinedImageSampler(0, whiteTexture->View(), whiteTexture->Sampler()),
             uniformWrite,
         });
 
@@ -138,7 +140,8 @@ struct MeshPreviewRenderer::Impl {
     Renderer& renderer;
     DescriptorSetLayoutHandle zeroLayout = DescriptorSetLayoutHandle::Invalid;
     DescriptorSetLayoutHandle setOneLayout = DescriptorSetLayoutHandle::Invalid;
-    std::optional<ComputeDescriptorSet> setOne;
+    std::optional<DescriptorSet> setOne;
+    DescriptorSetHandle setOneHandle = DescriptorSetHandle::Invalid;
     std::optional<Texture2D> whiteTexture;
     std::optional<Buffer> uniformBuffer;
     std::optional<Pipeline> pipeline;
@@ -215,7 +218,7 @@ UiTextureHandle MeshPreviewRenderer::Render(const Mat4& model, const Mat4& viewP
     impl.renderer.Clear(clearColorRgba[0], clearColorRgba[1], clearColorRgba[2], clearColorRgba[3]);
 
     const Pipeline& pipeline = *impl.pipeline;
-    const VkDescriptorSet setOne = impl.setOne->Native();
+    const DescriptorSetHandle setOneHandle = impl.setOneHandle;
     const Buffer& vertexBuffer = *impl.vertexBuffer;
     const Buffer& indexBuffer = *impl.indexBuffer;
     const std::uint32_t indexCount = impl.indexCount;
@@ -225,7 +228,7 @@ UiTextureHandle MeshPreviewRenderer::Render(const Mat4& model, const Mat4& viewP
     impl.renderer.RenderOffscreen(*impl.target, std::nullopt, [&](rg::CommandBuffer& cmd) {
         cmd.SetViewportAndScissor(extent.width, extent.height);
         cmd.BindPipeline(pipeline);
-        cmd.BindDescriptorSet(/*setIndex=*/1, setOne);
+        cmd.BindDescriptorSet(/*setIndex=*/1, setOneHandle);
         cmd.PushConstants(push, ShaderStageMask::Vertex);
         cmd.BindVertexBuffer(vertexBuffer);
         cmd.BindIndexBuffer(indexBuffer);

@@ -26,6 +26,7 @@
 
 #include "../Fakes/HeadlessRenderGraphFixture.h"
 
+#include "Renderer/DescriptorSet.h"
 #include "Renderer/Renderer.h"
 #include "Renderer/RenderGraph/RecordingAccess.h"
 #include "Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
@@ -177,7 +178,7 @@ void SubmitIndirectAgainstPipelineWithSceneServicesSetBindsSetOne()
         vertices, sizeof(vertices), 3, indices, sizeof(indices), 3, "RendererSubmitIndirectTest.Mesh");
 
     const DescriptorSetHandle instanceBufferDescriptorSet =
-        RegisterDescriptorSet(renderer.AllocateComputeDescriptorSet(renderer.InstanceBufferDescriptorSetLayout()).Native());
+        RegisterDescriptorSet(renderer.AllocateDescriptorSet(renderer.InstanceBufferDescriptorSetLayout()).Native());
 
     const rg::RecordingContext recording = renderer.BeginOffscreenRenderGraphRecording();
     renderer.BeginGraphPassRecording(rg::RecordingAccess::Native(recording), {});

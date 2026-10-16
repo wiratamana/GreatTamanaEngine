@@ -1,5 +1,6 @@
 #include "SceneServicesDescriptorSet.h"
 
+#include "DescriptorSet.h"
 #include "Renderer.h"
 #include "Vulkan/DescriptorSetLayoutBuilder.h"
 #include "../Core/Logging.h"
@@ -183,11 +184,6 @@ std::size_t RegisteredSceneServiceSlotCount() noexcept
     return SceneServiceRegistrationOrder().size();
 }
 
-std::uint32_t RegisteredSceneServiceSlotIndexAt(std::size_t i) noexcept
-{
-    return SceneServiceRegistrationOrder()[i];
-}
-
 const char* SceneServiceSlotDebugName(std::uint32_t slotIndex) noexcept
 {
     if (slotIndex >= kSceneServiceSlotCount || !SceneServiceSlotTable()[slotIndex].registered) {
@@ -279,7 +275,7 @@ DescriptorSetHandle SceneServicesDescriptorSet::Rewrite(
     VkDescriptorSet set = Native(handle);
     const bool freshlyAllocated = (set == VK_NULL_HANDLE);
     if (freshlyAllocated) {
-        set = m_renderer->AllocateComputeDescriptorSet(m_layout.Native()).Native();
+        set = m_renderer->AllocateDescriptorSet(m_layout.Native()).Native();
         handle = RegisterDescriptorSet(set);
         m_perViewSets.push_back(PerViewSet{ view, handle });
     }
@@ -390,7 +386,7 @@ void SceneServicesDescriptorSet::UpdateGlobalUniformBlock(rg::RenderViewId view,
     VkDescriptorSet set = Native(handle);
     const bool freshlyAllocatedSet = (set == VK_NULL_HANDLE);
     if (freshlyAllocatedSet) {
-        set = m_renderer->AllocateComputeDescriptorSet(m_layout.Native()).Native();
+        set = m_renderer->AllocateDescriptorSet(m_layout.Native()).Native();
         handle = RegisterDescriptorSet(set);
         m_perViewSets.push_back(PerViewSet{ view, handle });
     }

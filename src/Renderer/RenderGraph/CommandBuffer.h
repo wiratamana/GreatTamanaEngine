@@ -45,7 +45,6 @@ public:
 
     // Stage compute state for the next dispatch.
     void BindComputePipeline(const ComputePipeline& pipeline) noexcept { m_boundComputePipeline = &pipeline; }
-    void BindDescriptorSet(VkDescriptorSet set) noexcept { m_boundDescriptorSet = set; }
     void BindDescriptorSet(DescriptorSetHandle set) noexcept { BindDescriptorSet(::gte::Native(set)); }
 
     // --- Graphics Recording ---
@@ -54,7 +53,6 @@ public:
     void BindPipeline(const Pipeline& pipeline) noexcept;
 
     // Bind descriptor set at a specific index using the current pipeline layout.
-    void BindDescriptorSet(std::uint32_t setIndex, VkDescriptorSet set) noexcept;
     void BindDescriptorSet(std::uint32_t setIndex, DescriptorSetHandle set) noexcept
     {
         BindDescriptorSet(setIndex, ::gte::Native(set));
@@ -107,6 +105,10 @@ private:
 
     CommandBuffer(VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats, WriteTargetInfo writeTarget,
         FrameDebuggerEventSink* eventSink) noexcept;
+
+    // Raw-handle forms of BindDescriptorSet: callers outside the recorder pass engine handles.
+    void BindDescriptorSet(VkDescriptorSet set) noexcept { m_boundDescriptorSet = set; }
+    void BindDescriptorSet(std::uint32_t setIndex, VkDescriptorSet set) noexcept;
 
     std::function<void(bool, std::uint32_t, std::uint32_t)> MakeRecordDrawStatsCallback() const;
 

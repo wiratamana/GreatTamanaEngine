@@ -765,7 +765,7 @@ pieces:
   See `AGENTS.md`'s new "GPU Vertex Skinning" section for the load-bearing
   rules this feature depends on (the CPU path stays the permanent oracle;
   a "phantom" `VertexBufferRead` declaration that looks like dead code but
-  isn't; `ComputeDescriptorSet::Rewrite()` called once per model, not every
+  isn't; `DescriptorSet::Rewrite()` called once per model, not every
   frame; a GPU-skinned model deliberately owns two separate `Mesh` objects
   at once). Full build/regression testing and a real, measured CPU-vs-GPU
   performance comparison are still outstanding - see `TODO.md`.
@@ -1207,7 +1207,7 @@ pieces:
   `Editor/BoneViewerWindow.cpp` had already dropped their own local
   `VkDescriptorPool`/`VkDescriptorSetLayout` in the prior pass (`98fd2af6`) -
   both are now fully migrated too: their `m_localSetOneDescriptorSet` field
-  is a `ComputeDescriptorSet` value (not a raw `VkDescriptorSet`), rewritten
+  is a `DescriptorSet` value (not a raw `VkDescriptorSet`), rewritten
   once via the device-less `Rewrite(writes)` and bound via `.Native()`,
   mirroring `Editor/FrameDebuggerPreviewProcessing.cpp`/
   `Game/Animation/GpuSkinningRigCache.cpp`'s own already-migrated pattern.
@@ -1218,6 +1218,6 @@ pieces:
   a free function this proposal does not touch. (The proposal's own draft
   additionally named `Features/Shadow/ShadowCompositeRenderer.cpp` as a 4th
   exception - on inspection it never actually owned a local
-  `VkDescriptorPool`, so fixing its one `ComputeDescriptorSet::Rewrite()`
+  `VkDescriptorPool`, so fixing its one `DescriptorSet::Rewrite()`
   call site was enough to fix it fully; it needs no friend grant and is not
   part of this exception list.)

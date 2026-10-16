@@ -2,7 +2,6 @@
 
 #include "../Math/Mat4.h"
 #include "Buffer.h"
-#include "Compute/ComputeDispatch.h"
 #include "FramePresenter.h"
 #include "FrameRecorder.h"
 #include "GpuResourceFactory.h"
@@ -19,13 +18,13 @@
 #include "Texture2D.h"
 #include "TextureArray2D.h"
 #include "VolumeTexture.h"
+#include "Vulkan/ReflectedSetLayouts.h"
 #include "Vulkan/VulkanAllocator.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanInstance.h"
 #include "Vulkan/VulkanSurface.h"
 
 #include "../Core/CapturedPixels.h"
-#include "../Core/CaptureResult.h"
 #include "../Core/PipelineDesc.h"
 #include "../Core/UiTextureHandle.h"
 #include "GraphicsHandleRegistry.h"
@@ -52,6 +51,8 @@ class EventSnapshotResource;
 
 namespace gte {
 
+class ComputePipeline;
+class DescriptorSet;
 class GpuDrivenBatchCache;
 class HeadlessRenderGraphFixture;
 class ISurfaceProvider;
@@ -193,11 +194,11 @@ public:
         const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts = {},
         std::optional<VkPushConstantRange> pushConstantRange = std::nullopt) const;
 
-    ComputeDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
-    ComputeDescriptorSet AllocateComputeDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const;
+    DescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout layout) const;
+    DescriptorSet AllocateDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const;
 
-    // Frees a set from AllocateComputeDescriptorSet(). The GPU must be done with it.
-    void FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept;
+    // Frees a set from AllocateDescriptorSet(). The GPU must be done with it.
+    void FreeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept;
 
     // Asks the render graph to drop the cached descriptor sets built for a destroyed shader layout.
     void QueueBindingRelease(VkDescriptorSetLayout layout) noexcept;
@@ -264,8 +265,7 @@ public:
     std::vector<VmaBudget> GetVmaHeapBudgets() const;
     DescriptorPoolStats GetDescriptorPoolStats() const; // Sets and descriptors in use per type.
 
-    // GPU timing queries.
-    GpuTimingSample LastGpuTiming(GpuTimingSlot slot) const noexcept;
+    // GPU timing capture.
     void SetGpuTimingCaptureEnabled(bool enabled) noexcept;
 
     // Descriptor set layout helpers.
@@ -290,9 +290,6 @@ public:
 
     // Waits for the GPU, then releases `handle` and destroys `texture`. Either may be empty.
     void RetireUiTexture(UiTextureHandle handle, std::unique_ptr<Texture2D> texture) noexcept;
-
-    // Reads back a render target into engine pixel format for inspection.
-    CaptureResult CaptureRenderTarget(const RenderTexture& target) const;
 
     // Context details needed by external backends (e.g. ImGui).
     struct VulkanContextInfo {

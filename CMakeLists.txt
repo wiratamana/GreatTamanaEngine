@@ -747,8 +747,8 @@ add_library(gte_core STATIC
     src/Renderer/Pipeline.h
     src/Renderer/Compute/ComputePipeline.cpp
     src/Renderer/Compute/ComputePipeline.h
-    src/Renderer/Compute/ComputeDescriptorSet.cpp
-    src/Renderer/Compute/ComputeDescriptorSet.h
+    src/Renderer/DescriptorSet.cpp
+    src/Renderer/DescriptorSet.h
     # Block 4 "Global Scene Services Descriptor Set" campaign
     # (task_manager/better-render-pass-6), PHASE1 - pure-logic
     # SceneServiceSlot/SceneServiceResourceKind/SceneServiceBlackboardKey()
@@ -991,7 +991,6 @@ add_library(gte_core STATIC
     # Vulkan/volk dependency decoupling - engine-wide, Vulkan-free value types
     # plus their Renderer-internal registries/conversions.
     src/Core/BufferSlice.h
-    src/Core/CaptureResult.h
     src/Core/Extent.h
     src/Core/GraphicsHandles.h
     src/Core/PipelineDesc.h

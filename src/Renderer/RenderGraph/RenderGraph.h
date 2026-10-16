@@ -110,9 +110,6 @@ public:
     // Sets the sink for frame debugger draw events.
     void SetFrameDebuggerEventSink(FrameDebuggerEventSink* sink) noexcept { m_frameDebuggerEventSink = sink; }
 
-    // Enables or disables per-pass write target snapshot capture.
-    void SetEventSnapshotCaptureEnabled(bool enabled) noexcept { m_eventSnapshotPool.SetCaptureEnabled(enabled); }
-
     // Sets the registry for toggling passes dynamically.
     void SetRenderPassToggleRegistry(RenderPassToggleRegistry* registry) noexcept
     {
@@ -133,20 +130,6 @@ public:
 
     OnceErrorLog* OnceLog() noexcept { return &m_onceLog; }
     std::uint64_t NextOneShotFrame() noexcept { return ++m_oneShotFrame; }
-
-    // Reference to a pass write target captured for debugging.
-    struct FrameDebuggerEventSnapshotRef {
-        const char* passName = nullptr;
-        TextureHandle resource;
-        std::int32_t slot = kNoNameSlot;
-        std::uint32_t region = 0;
-    };
-    const std::vector<FrameDebuggerEventSnapshotRef>& EventSnapshotsThisFrame() const noexcept
-    {
-        return m_eventSnapshotsThisFrame;
-    }
-
-    const RenderGraphEventSnapshotPool& EventSnapshotPool() const noexcept { return m_eventSnapshotPool; }
 
 private:
     // PassContext needs access to internal physical resource types for resolution.
@@ -206,7 +189,7 @@ private:
 
     // The descriptor writes of a pass's bindings; false if any binding cannot be resolved.
     bool BuildDescriptorWrites(const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures,
-        const std::vector<PhysicalBuffer>& physicalBuffers, std::vector<ComputeDescriptorWrite>& writes);
+        const std::vector<PhysicalBuffer>& physicalBuffers, std::vector<DescriptorWrite>& writes);
 
     // Logs a skipped binding (or the whole pass when `binding` is nullopt) once per distinct key.
     void ReportSkippedOnce(const PassRecord& pass, std::optional<std::uint32_t> binding, const char* reason);
@@ -241,7 +224,6 @@ private:
 
     static constexpr std::uint32_t kSynchronousTimingSlotBudget = 16;
     static constexpr std::uint32_t kPipelinedTimingSlotBudget = 8;
-    static constexpr std::uint32_t kEventSnapshotSlotBudget = 64;
 
     RenderGraphResourcePool m_resourcePool;
     RenderGraphPersistentResourceCache m_persistentResourceCache;
@@ -256,9 +238,6 @@ private:
     RenderGraphTimestampPool m_timestampPool;
     RenderGraphNameSlotTable m_synchronousTimingSlots{ kSynchronousTimingSlotBudget };
     RenderGraphNameSlotTable m_pipelinedTimingSlots{ kPipelinedTimingSlotBudget };
-
-    RenderGraphEventSnapshotPool m_eventSnapshotPool;
-    std::vector<FrameDebuggerEventSnapshotRef> m_eventSnapshotsThisFrame;
 
     std::vector<std::string> m_reportedSynchronousOverflows;
     std::vector<std::string> m_reportedPipelinedOverflows;

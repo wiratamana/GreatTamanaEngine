@@ -41,13 +41,5 @@ constexpr Extent2D FromVkExtent2D(VkExtent2D e) noexcept
 {
     return Extent2D{ e.width, e.height };
 }
-constexpr VkExtent3D ToVkExtent3D(Extent3D e) noexcept
-{
-    return VkExtent3D{ e.width, e.height, e.depth };
-}
-constexpr Extent3D FromVkExtent3D(VkExtent3D e) noexcept
-{
-    return Extent3D{ e.width, e.height, e.depth };
-}
 
 } // namespace gte

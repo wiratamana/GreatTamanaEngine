@@ -47,25 +47,6 @@ struct CachedSamplerHandle {
     }
 };
 
-// ImageView sibling of CachedSamplerHandle above - identical reasoning.
-struct CachedImageViewHandle {
-    VkImageView native = VK_NULL_HANDLE;
-    ImageViewHandle handle = ImageViewHandle::Invalid;
-
-    ImageViewHandle Resolve(VkImageView current) noexcept
-    {
-        if (current == native && handle != ImageViewHandle::Invalid) {
-            return handle;
-        }
-        if (handle != ImageViewHandle::Invalid) {
-            UnregisterImageView(handle);
-        }
-        native = current;
-        handle = (current != VK_NULL_HANDLE) ? RegisterImageView(current) : ImageViewHandle::Invalid;
-        return handle;
-    }
-};
-
 // Buffer sibling of CachedSamplerHandle above - identical reasoning.
 struct CachedBufferObjectHandle {
     VkBuffer native = VK_NULL_HANDLE;

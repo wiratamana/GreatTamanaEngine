@@ -52,9 +52,6 @@ struct FullscreenKey {
     friend constexpr bool operator==(const FullscreenKey&, const FullscreenKey&) = default;
 };
 
-// What to do with a message keyed to a shader: log it, log the one "suppressed" notice, or stay silent.
-enum class OnceLog : std::uint8_t { Skip, Message, SuppressedNotice };
-
 // A shader loaded from "shaders/", reflected once. Pipelines are built lazily; a failed build retries on a
 // cooldown and never throws. The Renderer must outlive it, and the device must be idle when it is destroyed.
 class Shader {
@@ -96,9 +93,6 @@ private:
     // Pipeline for this target format and blend mode, built on first use. Null while a failed build cools down.
     // Valid until its frame ends: an evicted pipeline is retired, not destroyed.
     const Pipeline* GraphicsPipeline(RenderGraphBuilder& builder, const FullscreenKey& key);
-
-    // Tells the caller whether `key` deserves a log line: once per key, then one notice when the key set is full.
-    OnceLog NoteOnce(std::string_view key);
 
     std::unique_ptr<Impl> m_impl;
 };

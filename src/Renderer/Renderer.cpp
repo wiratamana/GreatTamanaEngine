@@ -1,6 +1,9 @@
 #include "Renderer.h"
 
 #include "../Core/ISurfaceProvider.h"
+#include "Compute/ComputeDispatch.h"
+#include "Compute/ComputePipeline.h"
+#include "DescriptorSet.h"
 #include "RenderGraph/GpuBufferInternal.h"
 #include "RenderGraph/RenderGraph.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
@@ -527,19 +530,19 @@ ComputePipeline Renderer::CreateComputePipeline(const std::string& shaderSpirvPa
     return m_resources.CreateComputePipeline(shaderSpirvPath, descriptorSetLayouts, pushConstantRange);
 }
 
-ComputeDescriptorSet Renderer::AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const
+DescriptorSet Renderer::AllocateDescriptorSet(VkDescriptorSetLayout layout) const
 {
-    return m_resources.AllocateComputeDescriptorSet(layout);
+    return m_resources.AllocateDescriptorSet(layout);
 }
 
-ComputeDescriptorSet Renderer::AllocateComputeDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const
+DescriptorSet Renderer::AllocateDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const
 {
-    return m_resources.AllocateComputeDescriptorSet(Native(layoutHandle));
+    return m_resources.AllocateDescriptorSet(Native(layoutHandle));
 }
 
-void Renderer::FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept
+void Renderer::FreeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept
 {
-    m_resources.FreeComputeDescriptorSet(descriptorSet);
+    m_resources.FreeDescriptorSet(descriptorSet);
 }
 
 void Renderer::QueueBindingRelease(VkDescriptorSetLayout layout) noexcept
@@ -711,11 +714,6 @@ std::vector<VmaBudget> Renderer::GetVmaHeapBudgets() const
     return m_allocator.GetHeapBudgets();
 }
 
-GpuTimingSample Renderer::LastGpuTiming(GpuTimingSlot slot) const noexcept
-{
-    return m_gpuTiming->LastKnown(slot);
-}
-
 void Renderer::SetGpuTimingCaptureEnabled(bool enabled) noexcept
 {
     m_gpuTiming->SetCaptureEnabled(enabled);
@@ -854,20 +852,6 @@ void Renderer::RetireUiTexture(UiTextureHandle handle, std::unique_ptr<Texture2D
     WaitForGpuIdle();
     ReleaseUiTextureHandle(handle);
     texture.reset();
-}
-
-CaptureResult Renderer::CaptureRenderTarget(const RenderTexture& target) const
-{
-    const rg::ResourceState shaderReadState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
-    const CapturedRawPixels raw =
-        CaptureImagePixels(target.Image(), VK_IMAGE_ASPECT_COLOR_BIT, target.NativeFormat(), target.Extent(), shaderReadState);
-
-    CaptureResult result;
-    result.extent = Extent2D{ static_cast<std::uint32_t>(raw.width), static_cast<std::uint32_t>(raw.height) };
-    result.format = raw.format;
-    result.pixels.resize(raw.pixels.size());
-    std::memcpy(result.pixels.data(), raw.pixels.data(), raw.pixels.size());
-    return result;
 }
 
 } // namespace gte

@@ -38,10 +38,8 @@ inline constexpr std::uint32_t kInvalidSceneServiceSlotIndex = kSceneServiceSlot
 [[nodiscard]] std::uint32_t RegisterSceneServiceSlot(const char* debugName, SceneServiceResourceKind kind,
     std::optional<std::uint32_t> preferredIndex = std::nullopt, bool isDepthResource = false);
 
-// Registration-order enumeration (Editor/debug-facing only - Core never
-// interprets these strings). i must be < RegisteredSceneServiceSlotCount().
+// Number of registered slots (debug-facing only).
 std::size_t RegisteredSceneServiceSlotCount() noexcept;
-std::uint32_t RegisteredSceneServiceSlotIndexAt(std::size_t i) noexcept;
 
 // "<unregistered>" / SceneServiceResourceKind::Image2D for a slot index that
 // was never registered (or is out of range).

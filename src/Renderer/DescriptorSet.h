@@ -7,7 +7,7 @@
 
 namespace gte {
 
-struct ComputeDescriptorWrite {
+struct DescriptorWrite {
     std::uint32_t binding = 0;
     VkDescriptorType type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 
@@ -22,24 +22,24 @@ struct ComputeDescriptorWrite {
     VkSampler sampler = VK_NULL_HANDLE;
 
     // Factory helpers
-    static ComputeDescriptorWrite StorageBuffer(
+    static DescriptorWrite StorageBuffer(
         std::uint32_t binding, VkBuffer buffer, uint64_t offset = 0, uint64_t range = VK_WHOLE_SIZE);
 
-    static ComputeDescriptorWrite UniformBuffer(
+    static DescriptorWrite UniformBuffer(
         std::uint32_t binding, VkBuffer buffer, uint64_t offset = 0, uint64_t range = VK_WHOLE_SIZE);
 
-    static ComputeDescriptorWrite StorageImage(std::uint32_t binding, VkImageView imageView);
+    static DescriptorWrite StorageImage(std::uint32_t binding, VkImageView imageView);
 
-    static ComputeDescriptorWrite CombinedImageSampler(
+    static DescriptorWrite CombinedImageSampler(
         std::uint32_t binding, VkImageView imageView, VkSampler sampler);
 
-    friend bool operator==(const ComputeDescriptorWrite&, const ComputeDescriptorWrite&) = default;
+    friend bool operator==(const DescriptorWrite&, const DescriptorWrite&) = default;
 };
 
-class ComputeDescriptorSet {
+class DescriptorSet {
 public:
-    ComputeDescriptorSet() = default;
-    ComputeDescriptorSet(VkDescriptorSet descriptorSet, VkDevice device) noexcept
+    DescriptorSet() = default;
+    DescriptorSet(VkDescriptorSet descriptorSet, VkDevice device) noexcept
         : m_descriptorSet(descriptorSet)
         , m_device(device)
     {
@@ -48,7 +48,7 @@ public:
     VkDescriptorSet Native() const noexcept { return m_descriptorSet; }
     bool IsValid() const noexcept { return m_descriptorSet != VK_NULL_HANDLE; }
 
-    void Rewrite(const std::vector<ComputeDescriptorWrite>& writes) const;
+    void Rewrite(const std::vector<DescriptorWrite>& writes) const;
 
 private:
     VkDescriptorSet m_descriptorSet = VK_NULL_HANDLE;

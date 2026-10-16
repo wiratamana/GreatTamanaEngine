@@ -1,7 +1,6 @@
 #pragma once
 
-// Gated capture of what a pass just wrote: the write target is copied into a pooled scratch image. Off by default;
-// it only costs a copy and barrier while enabled (see RenderGraph::SetEventSnapshotCaptureEnabled()).
+// Scratch images the Frame Debugger copies a pass's write target into, and the copy helpers.
 
 #include "RecordingContext.h"
 #include "RenderGraphBarrierPlanner.h"
@@ -65,57 +64,5 @@ void CopyImageIntoSnapshot(VkCommandBuffer cmd, EventSnapshotResource& dst, VmaA
 // allocator, tracker and device from `renderer`.
 void CaptureAttachmentIntoSnapshot(const RecordingContext& cmd, Renderer& renderer, EventSnapshotResource& dst,
     const AttachmentWrite& write, const char* debugName);
-
-// Fixed pool of slots, pre-sized to slotBudget * regionCount; each region owns an exclusive area so in-flight slots
-// are never replaced. Region 0 is the synchronous regime, [1, framesInFlight] the pipelined buffer indices.
-class RenderGraphEventSnapshotPool {
-public:
-    // `framesInFlight` must match FramePresenter::kFramesInFlight; one extra region is reserved for the synchronous regime.
-    RenderGraphEventSnapshotPool(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
-        std::uint32_t slotBudget, std::uint32_t framesInFlight);
-
-    RenderGraphEventSnapshotPool(const RenderGraphEventSnapshotPool&) = delete;
-    RenderGraphEventSnapshotPool& operator=(const RenderGraphEventSnapshotPool&) = delete;
-
-    void SetCaptureEnabled(bool enabled) noexcept { m_captureEnabled = enabled; }
-    bool IsCaptureEnabled() const noexcept { return m_captureEnabled; }
-
-    // Call once at the top of ExecuteCompiledGraph(); selects this call's exclusive region.
-    void BeginFrame(bool pipelined, std::uint32_t bufferIndex) noexcept
-    {
-        m_activeRegion = RegionFor(pipelined, bufferIndex);
-        m_nextSlot = 0;
-    }
-
-    // Copies `srcImage` into this region's scratch slot and restores it to `srcState`, invisible to the barrier
-    // planner. Returns kNoNameSlot if disarmed or the region's slot budget is exhausted.
-    std::int32_t CaptureAfterPass(VkCommandBuffer cmd, VkImage srcImage, VkExtent2D srcExtent, VkFormat srcFormat,
-        VkImageAspectFlags aspect, ResourceState srcState);
-
-    // `region` must be RegionFor() of the pipelined/bufferIndex the slot was captured under.
-    // Do not cache the result across a later BeginFrame() for that region: the slot gets replaced.
-    const EventSnapshotResource* ReadSnapshot(std::uint32_t region, std::int32_t slot) const noexcept;
-
-    // Region 0 is the synchronous regime's; regions [1, framesInFlight] are the pipelined buffer indices.
-    std::uint32_t RegionFor(bool pipelined, std::uint32_t bufferIndex) const noexcept
-    {
-        return pipelined ? (1u + bufferIndex) : 0u;
-    }
-
-private:
-    EventSnapshotResource& AcquireSlot(VkExtent2D extent, VkFormat format, VkImageAspectFlags aspect);
-
-    VmaAllocator m_allocator = VK_NULL_HANDLE;
-    std::shared_ptr<GpuMemoryTracker> m_tracker;
-    VkDevice m_device = VK_NULL_HANDLE;
-    // Off by default in every build; only the editor's per-frame pump enables it.
-    bool m_captureEnabled = false;
-    std::uint32_t m_slotBudget = 0;
-    std::uint32_t m_regionCount = 1;
-    std::uint32_t m_activeRegion = 0;
-    std::uint32_t m_nextSlot = 0;
-    // Fixed capacity slotBudget * regionCount, indexed `region * slotBudget + logicalSlot`.
-    std::vector<EventSnapshotResource> m_slots;
-};
 
 } // namespace gte::rg

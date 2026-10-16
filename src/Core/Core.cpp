@@ -786,14 +786,6 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     };
                     desc.execute = [this, cullingDescriptorSet, instanceCount, frustumPlanes, useCompaction](
                                         rg::PassContext& ctx) {
-                        struct CullingPushConstants {
-                            Plane planes[6];
-                            std::uint32_t instanceCount;
-                            std::uint32_t useCompaction;
-                        };
-                        static_assert(sizeof(CullingPushConstants) == kCullingPushConstantSize,
-                            "Push constant size must match shader declaration.");
-
                         CullingPushConstants pc{};
                         for (std::size_t i = 0; i < 6; ++i) {
                             pc.planes[i] = frustumPlanes[i];
@@ -802,10 +794,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                         pc.useCompaction = useCompaction ? 1u : 0u;
 
                         rg::CommandBuffer cmd = ctx.Cmd();
-                        cmd.BindComputePipeline(m_gpuDrivenBatchCache.Pipelines().Pipeline());
-                        cmd.BindDescriptorSet(cullingDescriptorSet);
-                        cmd.SetPushConstants(pc);
-                        cmd.DispatchOverSize(static_cast<std::uint32_t>(instanceCount), 1, 1);
+                        m_gpuDrivenBatchCache.RecordCulling(cmd, cullingDescriptorSet, pc);
                     };
                     out.push_back(std::move(desc));
                 }

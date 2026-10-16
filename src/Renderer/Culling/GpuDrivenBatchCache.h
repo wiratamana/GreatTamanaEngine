@@ -6,7 +6,6 @@
 #include "CullingPipelines.h"
 #include "CullingTypes.h"
 #include "../../Core/GraphicsHandles.h" // DescriptorSetHandle
-#include "../Compute/ComputeDescriptorSet.h"
 #include "../MeshHandle.h"
 #include "../Pipeline.h"
 #include "../PipelineHandle.h"
@@ -21,6 +20,10 @@
 namespace gte {
 
 class Renderer;
+
+namespace rg {
+class CommandBuffer;
+} // namespace rg
 
 // One batch: a single (mesh, pipeline) pair. There is no view dimension: batches are built for the game view only.
 struct GpuDrivenBatchKey {
@@ -85,8 +88,11 @@ public:
     // Reads the readback buffer without waiting. Call only after the frame's fence wait. Nullopt for an unknown key.
     std::optional<std::uint32_t> ReadLastKnownVisibleCount(const GpuDrivenBatchKey& key) const;
 
-    // The culling pipelines shared by every batch.
-    CullingPipelines& Pipelines() noexcept { return m_pipelines; }
+    // Records one batch's culling dispatch into `cmd`. Call after EnsureDescriptorSetsWritten() for the key.
+    void RecordCulling(rg::CommandBuffer& cmd, DescriptorSetHandle cullingSet, const CullingPushConstants& push) const
+    {
+        m_pipelines.RecordDispatch(cmd, cullingSet, push);
+    }
 
     // Allocates (once) and rewrites the key's two descriptor sets against its current buffers.
     // Call after EnsureCapacity(); no-op for an unknown key.

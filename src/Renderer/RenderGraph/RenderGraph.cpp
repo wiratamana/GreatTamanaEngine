@@ -30,8 +30,6 @@ RenderGraph::RenderGraph(Renderer& renderer)
           QueryVulkanContextInfoForRenderGraph(renderer).graphicsQueueFamily,
           QueryVulkanContextInfoForRenderGraph(renderer).timestampCapability, kSynchronousTimingSlotBudget,
           kPipelinedTimingSlotBudget, kGpuTimingFramesInFlight)
-    , m_eventSnapshotPool(renderer.GetVmaAllocator(), renderer.GetMemoryTracker(),
-          QueryVulkanContextInfoForRenderGraph(renderer).device, kEventSnapshotSlotBudget, kGpuTimingFramesInFlight)
 {
     m_renderer = &renderer;
 }
@@ -280,7 +278,7 @@ void RenderGraph::ReportSkippedOnce(
 // Resolves a pass's Bind*() declarations into descriptor writes. All-or-nothing: one unresolved binding
 // invalidates the pass, so a stale view from an earlier frame can never stay in the set.
 bool RenderGraph::BuildDescriptorWrites(const PassRecord& pass, const std::vector<PhysicalTexture>& physicalTextures,
-    const std::vector<PhysicalBuffer>& physicalBuffers, std::vector<ComputeDescriptorWrite>& writes)
+    const std::vector<PhysicalBuffer>& physicalBuffers, std::vector<DescriptorWrite>& writes)
 {
     writes.reserve(pass.bindings.size());
     bool complete = true;
@@ -311,7 +309,7 @@ bool RenderGraph::BuildDescriptorWrites(const PassRecord& pass, const std::vecto
                 break;
             }
             writes.push_back(
-                ComputeDescriptorWrite::StorageBuffer(binding.binding, buffer, binding.bufferOffset, binding.bufferRange));
+                DescriptorWrite::StorageBuffer(binding.binding, buffer, binding.bufferOffset, binding.bufferRange));
             break;
         }
         case BindingKind::UniformBuffer: {
@@ -323,7 +321,7 @@ bool RenderGraph::BuildDescriptorWrites(const PassRecord& pass, const std::vecto
                 break;
             }
             writes.push_back(
-                ComputeDescriptorWrite::UniformBuffer(binding.binding, buffer, binding.bufferOffset, binding.bufferRange));
+                DescriptorWrite::UniformBuffer(binding.binding, buffer, binding.bufferOffset, binding.bufferRange));
             break;
         }
         case BindingKind::CombinedImageSampler: {
@@ -341,7 +339,7 @@ bool RenderGraph::BuildDescriptorWrites(const PassRecord& pass, const std::vecto
                     skip(binding, "texture has no depth sampler.");
                     break;
                 }
-                writes.push_back(ComputeDescriptorWrite::CombinedImageSampler(
+                writes.push_back(DescriptorWrite::CombinedImageSampler(
                     binding.binding, tex->target.depthImageView, tex->depthSampler));
                 break;
             }
@@ -353,7 +351,7 @@ bool RenderGraph::BuildDescriptorWrites(const PassRecord& pass, const std::vecto
                 break;
             }
             writes.push_back(
-                ComputeDescriptorWrite::CombinedImageSampler(binding.binding, tex->target.imageView, sampler));
+                DescriptorWrite::CombinedImageSampler(binding.binding, tex->target.imageView, sampler));
             break;
         }
         case BindingKind::CombinedImageViewSampler: {
@@ -362,7 +360,7 @@ bool RenderGraph::BuildDescriptorWrites(const PassRecord& pass, const std::vecto
                 skip(binding, "image view or sampler handle is invalid.");
                 break;
             }
-            writes.push_back(ComputeDescriptorWrite::CombinedImageSampler(
+            writes.push_back(DescriptorWrite::CombinedImageSampler(
                 binding.binding, Native(binding.explicitImageView), Native(binding.explicitSampler)));
             break;
         }
@@ -376,7 +374,7 @@ bool RenderGraph::BuildDescriptorWrites(const PassRecord& pass, const std::vecto
                 skip(binding, "storage image has no view.");
                 break;
             }
-            writes.push_back(ComputeDescriptorWrite::StorageImage(binding.binding, tex->target.imageView));
+            writes.push_back(DescriptorWrite::StorageImage(binding.binding, tex->target.imageView));
             break;
         }
         }
@@ -396,7 +394,7 @@ DescriptorSetHandle RenderGraph::ResolveComputeBindingDescriptorSet(const PassRe
         ReportSkippedOnce(pass, std::nullopt, "Bind*() used without BindDescriptorSetLayout().");
         return DescriptorSetHandle::Invalid;
     }
-    std::vector<ComputeDescriptorWrite> writes;
+    std::vector<DescriptorWrite> writes;
     if (!BuildDescriptorWrites(pass, physicalTextures, physicalBuffers, writes)) {
         return DescriptorSetHandle::Invalid;
     }
@@ -736,10 +734,6 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         }
     }
 
-    // Begin per-pass write target snapshot capture.
-    m_eventSnapshotPool.BeginFrame(isPipelined, pipelinedBufferIndex);
-    m_eventSnapshotsThisFrame.clear();
-
     const CompiledGraph compiled = Compile(input, std::span<const TextureHandle>(finalOutputs));
 
     std::vector<PhysicalTexture> physicalTextures(input.textures.size());
@@ -960,35 +954,6 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             m_pipelinedHasWritten[static_cast<std::size_t>(timingSlot)][pipelinedBufferIndex] = true;
         }
 
-        // Capture write targets for debugging when enabled.
-        const bool eventSnapshotKillSwitchEnabled = m_renderPassToggleRegistry == nullptr
-            || m_renderPassToggleRegistry->IsEnabled("FrameDebuggerEventSnapshot");
-        if (m_eventSnapshotPool.IsCaptureEnabled() && eventSnapshotKillSwitchEnabled) {
-            for (const ResourceUsage& usage : pass.writes) {
-                if (usage.kind != ResourceKind::Texture) {
-                    continue;
-                }
-                PhysicalTexture& tex = physicalTextures[usage.texture.index];
-                if (tex.dimension != TextureDimension::Tex2D) {
-                    continue; // Only plain 2D textures are captured per event.
-                }
-                const bool isDepth = TargetsDepthState(usage.access);
-                const VkImage image = isDepth ? tex.target.depthImage : tex.target.image;
-                if (image == VK_NULL_HANDLE) {
-                    continue;
-                }
-                const VkFormat format = isDepth ? tex.target.depthFormat : tex.target.format;
-                const VkImageAspectFlags aspect = isDepth
-                    ? (VK_IMAGE_ASPECT_DEPTH_BIT | (tex.target.depthHasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0))
-                    : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT);
-                ResourceState& state = isDepth ? tex.depthState : tex.colorState;
-
-                const std::int32_t eventSlot =
-                    m_eventSnapshotPool.CaptureAfterPass(cmd, image, tex.target.extent, format, aspect, state);
-                m_eventSnapshotsThisFrame.push_back({ pass.name, usage.texture, eventSlot,
-                    m_eventSnapshotPool.RegionFor(isPipelined, pipelinedBufferIndex) });
-            }
-        }
 
         if (m_frameDebuggerEventSink != nullptr) {
             m_frameDebuggerEventSink->FlushPendingCapture(RecordingAccess::Wrap(cmd, m_renderer));

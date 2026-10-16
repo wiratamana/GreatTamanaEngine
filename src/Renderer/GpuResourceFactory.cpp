@@ -1,6 +1,8 @@
 #include "GpuResourceFactory.h"
 
 #include "../Core/Logging.h"
+#include "Compute/ComputePipeline.h"
+#include "DescriptorSet.h"
 #include "GraphicsHandleRegistry.h" // RegisterDescriptorSet() - sets leave this file as engine handles.
 #include "SceneServicesDescriptorSet.h" // gte::kSceneServiceSlotCount for the pool budget static_asserts.
 #include "VulkanFormatInfo.h" // ToVkFormat() for pre-construction capability checks.
@@ -72,7 +74,7 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
         throw std::runtime_error("GpuResourceFactory: vkCreateDescriptorPool failed");
     }
 
-    // First compute descriptor pool; more are added on demand (see AllocateComputeDescriptorSet()).
+    // First compute descriptor pool; more are added on demand (see AllocateDescriptorSet()).
     constexpr PoolCapacity kInitialComputePool{ .sets = 256,
         .storageBuffers = 256,
         .storageImages = 128,
@@ -543,13 +545,13 @@ DescriptorPoolStats GpuResourceFactory::DescriptorStats() const
         m_computeBudget.HighWater() };
 }
 
-ComputeDescriptorSet GpuResourceFactory::AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const
+DescriptorSet GpuResourceFactory::AllocateDescriptorSet(VkDescriptorSetLayout layout) const
 {
     const std::scoped_lock lock(m_computePoolMutex);
 
     // A layout that already failed on a fresh pool is refused without growing anything (and without logging again).
     if (m_unsatisfiableLayouts.Contains(layout)) {
-        throw std::runtime_error("GpuResourceFactory::AllocateComputeDescriptorSet: layout does not fit any pool.");
+        throw std::runtime_error("GpuResourceFactory::AllocateDescriptorSet: layout does not fit any pool.");
     }
 
     VkDescriptorSetAllocateInfo allocInfo{};
@@ -572,7 +574,7 @@ ComputeDescriptorSet GpuResourceFactory::AllocateComputeDescriptorSet(VkDescript
                 return set;
             }
             if (result != VK_ERROR_OUT_OF_POOL_MEMORY && result != VK_ERROR_FRAGMENTED_POOL) {
-                throw std::runtime_error("GpuResourceFactory::AllocateComputeDescriptorSet: vkAllocateDescriptorSets failed.");
+                throw std::runtime_error("GpuResourceFactory::AllocateDescriptorSet: vkAllocateDescriptorSets failed.");
             }
         }
         return std::nullopt;
@@ -587,7 +589,7 @@ ComputeDescriptorSet GpuResourceFactory::AllocateComputeDescriptorSet(VkDescript
         if (next.has_value()) {
             const VkDescriptorPool pool = CreateComputeDescriptorPool(*next);
             if (pool == VK_NULL_HANDLE) {
-                throw std::runtime_error("GpuResourceFactory::AllocateComputeDescriptorSet: vkCreateDescriptorPool failed (pool "
+                throw std::runtime_error("GpuResourceFactory::AllocateDescriptorSet: vkCreateDescriptorPool failed (pool "
                     + std::to_string(m_computePools.size() + 1) + ").");
             }
             m_computePools.push_back(pool);
@@ -622,7 +624,7 @@ ComputeDescriptorSet GpuResourceFactory::AllocateComputeDescriptorSet(VkDescript
             m_poolCapLogged = true;
             GTE_LOG_ERROR("GpuResourceFactory", "Compute descriptor pool set is exhausted (" + stats + ").");
         }
-        throw std::runtime_error("GpuResourceFactory::AllocateComputeDescriptorSet: no pool can hold this layout ("
+        throw std::runtime_error("GpuResourceFactory::AllocateDescriptorSet: no pool can hold this layout ("
             + stats + ").");
     }
 
@@ -640,7 +642,7 @@ ComputeDescriptorSet GpuResourceFactory::AllocateComputeDescriptorSet(VkDescript
                 + std::to_string(m_computeBudget.Used().uniformBuffers) + "/"
                 + std::to_string(m_computeBudget.Capacity().uniformBuffers) + " uniform buffers.");
     }
-    return ComputeDescriptorSet(*set, m_device); // Device bound here, once - callers never see VkDevice.
+    return DescriptorSet(*set, m_device); // Device bound here, once - callers never see VkDevice.
 }
 
 void GpuResourceFactory::ForgetComputeLayout(VkDescriptorSetLayout layout) const noexcept
@@ -650,7 +652,7 @@ void GpuResourceFactory::ForgetComputeLayout(VkDescriptorSetLayout layout) const
     m_layoutCosts.erase(layout);
 }
 
-void GpuResourceFactory::FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept
+void GpuResourceFactory::FreeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept
 {
     if (descriptorSet == VK_NULL_HANDLE) {
         return;

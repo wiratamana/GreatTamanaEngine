@@ -16,8 +16,8 @@ RenderTexture
 Texture2D
 VolumeTexture
 Mesh
-ComputeDescriptorSet
-ComputeDescriptorWrite
+DescriptorSet
+DescriptorWrite
 CommandBuffer
 PassContext
 RenderGraph

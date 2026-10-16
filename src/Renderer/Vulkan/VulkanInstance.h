@@ -27,7 +27,6 @@ public:
     VulkanInstance& operator=(VulkanInstance&& other) noexcept;
 
     VkInstance Native() const noexcept { return m_instance; }
-    bool ValidationEnabled() const noexcept { return m_validationEnabled; }
 
 private:
     void CreateInstance(const std::string& applicationName,

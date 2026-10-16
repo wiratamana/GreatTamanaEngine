@@ -1,13 +1,13 @@
-#include "ComputeDescriptorSet.h"
+#include "DescriptorSet.h"
 
 #include <cassert>
 
 namespace gte {
 
-ComputeDescriptorWrite ComputeDescriptorWrite::StorageBuffer(
+DescriptorWrite DescriptorWrite::StorageBuffer(
     std::uint32_t binding, VkBuffer buffer, uint64_t offset, uint64_t range)
 {
-    ComputeDescriptorWrite write;
+    DescriptorWrite write;
     write.binding = binding;
     write.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     write.buffer = buffer;
@@ -16,17 +16,17 @@ ComputeDescriptorWrite ComputeDescriptorWrite::StorageBuffer(
     return write;
 }
 
-ComputeDescriptorWrite ComputeDescriptorWrite::UniformBuffer(
+DescriptorWrite DescriptorWrite::UniformBuffer(
     std::uint32_t binding, VkBuffer buffer, uint64_t offset, uint64_t range)
 {
-    ComputeDescriptorWrite write = StorageBuffer(binding, buffer, offset, range);
+    DescriptorWrite write = StorageBuffer(binding, buffer, offset, range);
     write.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     return write;
 }
 
-ComputeDescriptorWrite ComputeDescriptorWrite::StorageImage(std::uint32_t binding, VkImageView imageView)
+DescriptorWrite DescriptorWrite::StorageImage(std::uint32_t binding, VkImageView imageView)
 {
-    ComputeDescriptorWrite write;
+    DescriptorWrite write;
     write.binding = binding;
     write.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     write.imageView = imageView;
@@ -34,10 +34,10 @@ ComputeDescriptorWrite ComputeDescriptorWrite::StorageImage(std::uint32_t bindin
     return write;
 }
 
-ComputeDescriptorWrite ComputeDescriptorWrite::CombinedImageSampler(
+DescriptorWrite DescriptorWrite::CombinedImageSampler(
     std::uint32_t binding, VkImageView imageView, VkSampler sampler)
 {
-    ComputeDescriptorWrite write;
+    DescriptorWrite write;
     write.binding = binding;
     write.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     write.imageView = imageView;
@@ -46,9 +46,9 @@ ComputeDescriptorWrite ComputeDescriptorWrite::CombinedImageSampler(
     return write;
 }
 
-void ComputeDescriptorSet::Rewrite(const std::vector<ComputeDescriptorWrite>& writes) const
+void DescriptorSet::Rewrite(const std::vector<DescriptorWrite>& writes) const
 {
-    assert(m_descriptorSet != VK_NULL_HANDLE && "ComputeDescriptorSet::Rewrite() called on an invalid descriptor set");
+    assert(m_descriptorSet != VK_NULL_HANDLE && "DescriptorSet::Rewrite() called on an invalid descriptor set");
     if (writes.empty()) {
         return;
     }
@@ -62,7 +62,7 @@ void ComputeDescriptorSet::Rewrite(const std::vector<ComputeDescriptorWrite>& wr
     std::vector<VkWriteDescriptorSet> descriptorWrites;
     descriptorWrites.reserve(writes.size());
 
-    for (const ComputeDescriptorWrite& write : writes) {
+    for (const DescriptorWrite& write : writes) {
         VkWriteDescriptorSet vkWrite{};
         vkWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         vkWrite.dstSet = m_descriptorSet;

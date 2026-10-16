@@ -35,9 +35,9 @@ rules whenever touching this feature:
   this up" as dead code — see `RenderGraphTypes.h`'s own `ResourceAccess`
   doc comment and `GPU_SKINNING_PHASE3_COMPLETION_REPORT.md` for the
   write-after-write hazard this closes.
-- **`GpuSkinningRigCache`'s `ComputeDescriptorSet::Rewrite()` is called
+- **`GpuSkinningRigCache`'s `DescriptorSet::Rewrite()` is called
   EXACTLY ONCE per model, at registration time, never every frame** — a
-  deliberate exception to `ComputeDescriptorSet`'s general "safe, and
+  deliberate exception to `DescriptorSet`'s general "safe, and
   expected, to call every frame" convention, justified because every one of
   a GPU-skinned model's four buffers (bind pose, skin weights, bone
   matrices, output) has a permanently stable identity for the model's whole

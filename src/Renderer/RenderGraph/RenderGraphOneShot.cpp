@@ -34,7 +34,7 @@ public:
     {
         for (const Lease& lease : m_leases) {
             UnregisterDescriptorSet(lease.handle);
-            m_renderer.FreeComputeDescriptorSet(lease.set);
+            m_renderer.FreeDescriptorSet(lease.set);
         }
     }
     SetLeases(const SetLeases&) = delete;
@@ -82,13 +82,13 @@ bool RenderGraph::RunOneShot(CompiledGraphInput input, std::span<const TextureHa
                 DrawStats drawStats;
                 PassContext ctx = BuildPassContext(cmd, physicalTextures, physicalBuffers, drawStats);
                 if (!pass.bindings.empty()) {
-                    std::vector<ComputeDescriptorWrite> writes;
+                    std::vector<DescriptorWrite> writes;
                     const VkDescriptorSetLayout layout = Native(pass.computeBindingLayout);
                     if (layout == VK_NULL_HANDLE || !BuildDescriptorWrites(pass, physicalTextures, physicalBuffers, writes)) {
                         m_onceLog.Error("OneShot", "pass '" + passName + "' has unresolved bindings, skipped");
                         continue;
                     }
-                    ComputeDescriptorSet set = m_renderer->AllocateComputeDescriptorSet(layout);
+                    DescriptorSet set = m_renderer->AllocateDescriptorSet(layout);
                     const VkDescriptorSet raw = set.Native();
                     set.Rewrite(writes);
                     ctx.computeDescriptorSet = RegisterDescriptorSet(raw);

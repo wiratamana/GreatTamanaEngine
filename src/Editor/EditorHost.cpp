@@ -207,9 +207,6 @@ int EditorHost::Run()
         m_renderer.SetGpuTimingCaptureEnabled(Profiling::FrameProfiler::Instance().IsCaptureEnabled());
         m_renderGraph.SetGpuTimingCaptureEnabled(Profiling::FrameProfiler::Instance().IsCaptureEnabled());
 
-        // Event snapshot capture (per-pass preview) costs a copy, so it runs only while the Frame Debugger is enabled.
-        m_renderGraph.SetEventSnapshotCaptureEnabled(m_editorLayer->FrameDebuggerGetState().enabled);
-
         // Clear last frame's transient "just pressed/released" flags and
         // per-frame mouse/wheel deltas before this frame's events arrive.
         inputState.BeginFrame();

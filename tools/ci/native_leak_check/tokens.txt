@@ -2,9 +2,11 @@
 # Native( covers .Native(), ->Native() and the free function Native(handle).
 # RecordingAccess and PlatformHandle( are the only routes to a raw VkCommandBuffer (RecordingContext, CommandBuffer).
 Native(
-ComputeDescriptorSet
-ComputeDescriptorWrite
-AllocateComputeDescriptorSet
+DescriptorSet
+DescriptorWrite
+AllocateDescriptorSet
+FreeDescriptorSet
+CreateComputePipeline
 ComputePipeline
 EmitImageBarrier
 ImmediateSubmit

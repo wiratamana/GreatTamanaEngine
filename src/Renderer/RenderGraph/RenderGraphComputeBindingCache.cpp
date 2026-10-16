@@ -21,11 +21,11 @@ void RenderGraphComputeBindingCache::FreeEntry(const Entry& entry) noexcept
     if (entry.handle != DescriptorSetHandle::Invalid) {
         UnregisterDescriptorSet(entry.handle);
     }
-    m_renderer->FreeComputeDescriptorSet(entry.descriptorSet);
+    m_renderer->FreeDescriptorSet(entry.descriptorSet);
 }
 
 DescriptorSetHandle RenderGraphComputeBindingCache::Resolve(const char* passName, ViewScope viewScope,
-    VkDescriptorSetLayout layout, const std::vector<ComputeDescriptorWrite>& writes, std::uint64_t instance)
+    VkDescriptorSetLayout layout, const std::vector<DescriptorWrite>& writes, std::uint64_t instance)
 {
     if (passName == nullptr || passName[0] == '\0' || layout == VK_NULL_HANDLE) {
         return DescriptorSetHandle::Invalid;
@@ -39,7 +39,7 @@ DescriptorSetHandle RenderGraphComputeBindingCache::Resolve(const char* passName
         }
         try {
             Entry entry;
-            entry.descriptorSet = m_renderer->AllocateComputeDescriptorSet(layout).Native();
+            entry.descriptorSet = m_renderer->AllocateDescriptorSet(layout).Native();
             entry.handle = RegisterDescriptorSet(entry.descriptorSet);
             entry.lastUsedFrame = m_currentFrame;
             try {
@@ -63,7 +63,7 @@ DescriptorSetHandle RenderGraphComputeBindingCache::Resolve(const char* passName
     Entry& entry = it->second;
     entry.lastUsedFrame = m_currentFrame;
     if (DescriptorWritesNeedRewrite(entry.lastWrites, writes)) {
-        ComputeDescriptorSet(entry.descriptorSet, m_device).Rewrite(writes);
+        DescriptorSet(entry.descriptorSet, m_device).Rewrite(writes);
         entry.lastWrites = writes;
     }
     return entry.handle;

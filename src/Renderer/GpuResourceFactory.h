@@ -1,8 +1,6 @@
 #pragma once
 
 #include "Buffer.h"
-#include "Compute/ComputeDescriptorSet.h"
-#include "Compute/ComputePipeline.h"
 #include "MaterialTexture.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
@@ -27,6 +25,8 @@
 
 namespace gte {
 
+class ComputePipeline;
+class DescriptorSet;
 class VulkanDevice;
 
 // Factory for creating and managing GPU resources (buffers, textures, pipelines, meshes).
@@ -113,7 +113,6 @@ public:
         bool isCubemap, bool allowStorageImageAccess = false, const char* debugName = nullptr) const;
 
     // Descriptors and Materials
-    VkDescriptorSetLayout MaterialDescriptorSetLayout() const noexcept { return m_materialSetLayout; }
     VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept { return m_instanceBufferSetLayout; }
 
     MaterialTexture CreateMaterialTexture2D(
@@ -121,7 +120,7 @@ public:
 
     // Allocates from the compute descriptor pool set; adds at most one pool per call. Throws when no pool fits.
     // Failures log once per failing layout (and once per exhaustion), never on every call.
-    ComputeDescriptorSet AllocateComputeDescriptorSet(VkDescriptorSetLayout layout) const;
+    DescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout layout) const;
 
     // Tells the pool accounting what one set of `layout` costs. Re-registering a layout overwrites its cost.
     void RegisterLayoutCost(VkDescriptorSetLayout layout, const PoolCapacity& cost) const;
@@ -130,7 +129,7 @@ public:
     void ForgetComputeLayout(VkDescriptorSetLayout layout) const noexcept;
 
     // Returns a set to the pool it came from. Unknown sets are ignored. The set must not be in use by the GPU.
-    void FreeComputeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept;
+    void FreeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept;
 
     // Pool counts for the GPU Memory panel: capacity, sets and descriptors in use, peak use.
     DescriptorPoolStats DescriptorStats() const;

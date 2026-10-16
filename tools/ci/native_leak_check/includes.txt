@@ -1,0 +1,4 @@
+# Renderer-internal headers that no file outside src/Renderer may include. Substring match on the include path.
+Compute/ComputePipeline.h
+Compute/ComputeDispatch.h
+/DescriptorSet.h

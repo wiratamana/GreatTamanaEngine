@@ -159,25 +159,6 @@ GpuTimingSample GpuTimingService::ReadOffscreenResultNow(GpuTimingSlot slot) noe
     return sample;
 }
 
-void GpuTimingService::RecordPresentPassStart(VkCommandBuffer cmd, std::uint32_t frameInFlightIndex) noexcept
-{
-    if (!IsSupported() || !m_captureEnabled) {
-        return;
-    }
-    const std::uint32_t base = PresentSlotBase(frameInFlightIndex);
-    vkCmdResetQueryPool(cmd, m_queryPool->Native(), base, 2);
-    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, m_queryPool->Native(), base);
-}
-
-void GpuTimingService::RecordPresentPassEnd(VkCommandBuffer cmd, std::uint32_t frameInFlightIndex) noexcept
-{
-    if (!IsSupported() || !m_captureEnabled) {
-        return;
-    }
-    const std::uint32_t base = PresentSlotBase(frameInFlightIndex);
-    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, m_queryPool->Native(), base + 1);
-}
-
 GpuTimingSample GpuTimingService::ReadPresentResultIfAvailable(std::uint32_t frameInFlightIndex) noexcept
 {
     const bool hasWritten =

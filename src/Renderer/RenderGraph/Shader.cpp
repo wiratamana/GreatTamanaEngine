@@ -78,7 +78,6 @@ struct Shader::Impl {
     std::string label;
     std::vector<ShaderStageFile> stages;
     BuildRetryGate gate;
-    BoundedOnceSet<64> onceKeys;
     Renderer* renderer = nullptr; // Set by the first successful build.
     DescriptorSetLayoutHandle layout = DescriptorSetLayoutHandle::Invalid;
     std::optional<ComputePipeline> compute;
@@ -334,15 +333,6 @@ const Pipeline* Shader::GraphicsPipeline(RenderGraphBuilder& builder, const Full
 std::size_t Shader::RetiredPipelineCount() const noexcept
 {
     return m_impl->graphics.has_value() ? m_impl->graphics->retired.size() : 0;
-}
-
-OnceLog Shader::NoteOnce(std::string_view key)
-{
-    const auto result = m_impl->onceKeys.Note(key);
-    if (!BoundedOnceSet<64>::ShouldLog(result)) {
-        return OnceLog::Skip;
-    }
-    return result == BoundedOnceSet<64>::Result::First ? OnceLog::Message : OnceLog::SuppressedNotice;
 }
 
 std::string_view Shader::Label() const noexcept

@@ -289,29 +289,16 @@ drop the pass that writes it.
 
 **Finding F, resolved**: a Project Assembly's own compiled shader is
 referenced as a plain, bare relative path string,
-`"project_assemblies/shaders/<Name>.spv"` — the exact same convention every
-existing internal `ComputePipeline` construction call site already uses
-(`Renderer::CreateComputePipeline()`, never a raw `ComputePipeline`
-constructor call, since `Renderer` never exposes a `VkDevice` to a Project
-Assembly at all — `Renderer::GetVulkanContextInfo()` is private to
-`src/Renderer` and its narrow, reviewed friend list; every pipeline/
-descriptor-set construction a Project Assembly needs already goes through
-`Renderer`'s own factory methods, which resolve the device internally).
+`"project_assemblies/shaders/<Name>.spv"`. The engine loads it through its
+shader types (`rg::ComputeShader` / `rg::FullscreenShader` behind the pass
+verbs); a Project Assembly never builds a raw pipeline or descriptor set and
+never sees a `VkDevice`.
 
 The generated scaffold templates (`src/Editor/EditorProjectLifecycleCapability.cpp`) include only `Core/Core.h`,
 `Renderer/RenderGraph/RenderGraphTypes.h` and `Renderer/RenderGraph/RenderPipeline.h` (plus standard headers). They do
-not include `ComputePipeline.h`, `ComputeDescriptorSet.h`, `ComputeDispatch.h` or `RenderGraphBuilder.h`; a compute
-scaffold only leaves a TODO comment where the project builds its own pipeline.
-
-`ProjectAssemblyProbe_Game.dll`'s own `HelloGame.cpp` is the full, working,
-concrete example of all three Findings combined: it mints a transient
-256x256 texture, lazily builds a `ComputePipeline`/`ComputeDescriptorSet` on
-first use (a process-lifetime `std::optional<gte::ComputePipeline>` — never
-`std::unique_ptr`, matching every other real call site in this codebase), and
-dispatches `ProbeCompute.comp` (a solid-color fill shader,
-`local_size_x/y = 16`, matching `ComputeGroupCount(256, 16) == 16` on both
-axes) against it every frame — confirmed, live, visible in both the Editor's
-real "Render Graph" panel and `GET /render_graph`'s JSON.
+not include the Renderer-internal headers (`Compute/ComputePipeline.h`, `Compute/ComputeDispatch.h`, `DescriptorSet.h`);
+NativeLeakCheck forbids those includes outside `src/Renderer`. A compute scaffold only leaves a TODO comment where the
+project builds its own pipeline.
 
 ### On-screen Game View compositing — safe today via `Core::RegisterProjectRenderFeature()`
 
@@ -839,8 +826,8 @@ this system's own permanent `Projects/ProjectAssemblyProbe/` fixture's
 `ProbeHotReloadMarker` component, whose runtime-MUTATED value survives both
 a successful reload AND a rolled-back one). Anything a Project Assembly's
 own code keeps OUTSIDE the ECS Registry - a bare C++ global, a non-ECS
-manager object, GPU resources a render pass owns opaquely (like this same
-probe fixture's own lazily-built `ComputePipeline`) - does NOT survive: it
+manager object, GPU resources a render pass owns opaquely (like a pipeline the
+project builds itself) - does NOT survive: it
 is destroyed and rebuilt from scratch, exactly like a fresh process start,
 on every single reload. The concrete, already-existing example: a
 hypothetical `ProbeEditorPanel::m_clickCount` (a plain `int` tracking how

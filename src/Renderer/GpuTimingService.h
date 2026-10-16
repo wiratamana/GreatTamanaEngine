@@ -46,9 +46,7 @@ public:
     // own fence wait; this never waits.
     GpuTimingSample ReadOffscreenResultNow(GpuTimingSlot slot) noexcept;
 
-    // Present-pass equivalents, indexed by frame-in-flight (0..kGpuTimingFramesInFlight-1).
-    void RecordPresentPassStart(VkCommandBuffer cmd, std::uint32_t frameInFlightIndex) noexcept;
-    void RecordPresentPassEnd(VkCommandBuffer cmd, std::uint32_t frameInFlightIndex) noexcept;
+    // Present-pass timing, indexed by frame-in-flight (0..kGpuTimingFramesInFlight-1).
     // Returns Absent without touching Vulkan until this frame-in-flight slot has been written once.
     GpuTimingSample ReadPresentResultIfAvailable(std::uint32_t frameInFlightIndex) noexcept;
     // Marks the slot as written; same guard as the Record* calls, so callers can invoke it unconditionally.

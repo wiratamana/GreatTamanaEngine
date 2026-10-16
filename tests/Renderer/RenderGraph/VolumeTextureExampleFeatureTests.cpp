@@ -8,7 +8,7 @@
 // every other Tier-2 test in this folder already uses.
 
 #include "Renderer/Renderer.h"
-#include "Renderer/Compute/ComputeDescriptorSet.h"
+#include "Renderer/DescriptorSet.h"
 #include "Renderer/Compute/ComputePipeline.h"
 #include "Renderer/VolumetricFroxelMath.h"
 #include "Encoding/HdrColorVisualization.h"
@@ -64,8 +64,8 @@ TEST(VolumeTextureExampleFeatureTest, PerCellParallelFillWritesEveryCellsOwnCoor
         static_cast<int>(kSize), static_cast<int>(kSize), static_cast<int>(kSize), PixelFormat::RGBA16_Float, kVolumeName);
 
     ComputePipeline pipeline = fixture.GetRenderer().CreateComputePipeline(GTE_TEST_FROXEL_PERCELL_SPV_PATH);
-    ComputeDescriptorSet descriptorSet =
-        fixture.GetRenderer().AllocateComputeDescriptorSet(pipeline.ReflectedDescriptorSetLayout(0));
+    DescriptorSet descriptorSet =
+        fixture.GetRenderer().AllocateDescriptorSet(pipeline.ReflectedDescriptorSetLayout(0));
 
     fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
         const TextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), ImageLayout::Undefined);
@@ -76,11 +76,11 @@ TEST(VolumeTextureExampleFeatureTest, PerCellParallelFillWritesEveryCellsOwnCoor
             },
             [&](PassContext& ctx) {
                 const PassContext::ResolvedVolumeTexture dest = ctx.resolveVolumeTexture(handle);
-                descriptorSet.Rewrite({ ComputeDescriptorWrite::StorageImage(0, dest.view) });
+                descriptorSet.Rewrite({ DescriptorWrite::StorageImage(0, dest.view) });
 
                 auto cmd = ctx.Cmd();
                 cmd.BindComputePipeline(pipeline);
-                cmd.BindDescriptorSet(descriptorSet.Native());
+                cmd.BindDescriptorSet(RegisterDescriptorSet(descriptorSet.Native()));
                 cmd.DispatchOverSize(kSize, kSize, kSize);
             });
         // Mandatory - a pass whose only write is a volume texture handle is
@@ -135,8 +135,8 @@ TEST(VolumeTextureExampleFeatureTest, PerColumnSequentialFillMatchesTheCpuOracle
         static_cast<int>(kWidth), static_cast<int>(kHeight), static_cast<int>(kDepth), PixelFormat::RGBA16_Float, kVolumeName);
 
     ComputePipeline pipeline = fixture.GetRenderer().CreateComputePipeline(GTE_TEST_FROXEL_PERCOLUMN_SPV_PATH);
-    ComputeDescriptorSet descriptorSet =
-        fixture.GetRenderer().AllocateComputeDescriptorSet(pipeline.ReflectedDescriptorSetLayout(0));
+    DescriptorSet descriptorSet =
+        fixture.GetRenderer().AllocateDescriptorSet(pipeline.ReflectedDescriptorSetLayout(0));
 
     struct PushConstants {
         float maxDistanceKm;
@@ -153,11 +153,11 @@ TEST(VolumeTextureExampleFeatureTest, PerColumnSequentialFillMatchesTheCpuOracle
             },
             [&](PassContext& ctx) {
                 const PassContext::ResolvedVolumeTexture dest = ctx.resolveVolumeTexture(handle);
-                descriptorSet.Rewrite({ ComputeDescriptorWrite::StorageImage(0, dest.view) });
+                descriptorSet.Rewrite({ DescriptorWrite::StorageImage(0, dest.view) });
 
                 auto cmd = ctx.Cmd();
                 cmd.BindComputePipeline(pipeline);
-                cmd.BindDescriptorSet(descriptorSet.Native());
+                cmd.BindDescriptorSet(RegisterDescriptorSet(descriptorSet.Native()));
                 cmd.SetPushConstants(pushConstants);
                 cmd.DispatchOverSize(kWidth, kHeight, 1);
             });

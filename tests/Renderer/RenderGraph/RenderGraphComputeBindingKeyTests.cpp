@@ -91,21 +91,21 @@ TEST(ComputeBindingKeyTest, ManyInstancesOfOneNameAreManyEntries)
 
 TEST(DescriptorWritesNeedRewriteTest, IdenticalBufferWritesAreNotRewritten)
 {
-    const std::vector<ComputeDescriptorWrite> writes = {
-        ComputeDescriptorWrite::StorageBuffer(0, reinterpret_cast<VkBuffer>(std::uintptr_t{ 16 })),
-        ComputeDescriptorWrite::StorageBuffer(1, reinterpret_cast<VkBuffer>(std::uintptr_t{ 32 })) };
+    const std::vector<DescriptorWrite> writes = {
+        DescriptorWrite::StorageBuffer(0, reinterpret_cast<VkBuffer>(std::uintptr_t{ 16 })),
+        DescriptorWrite::StorageBuffer(1, reinterpret_cast<VkBuffer>(std::uintptr_t{ 32 })) };
     EXPECT_TRUE(DescriptorWritesNeedRewrite({}, writes));
     EXPECT_FALSE(DescriptorWritesNeedRewrite(writes, writes));
 
-    std::vector<ComputeDescriptorWrite> changed = writes;
-    changed[1] = ComputeDescriptorWrite::StorageBuffer(1, reinterpret_cast<VkBuffer>(std::uintptr_t{ 48 }));
+    std::vector<DescriptorWrite> changed = writes;
+    changed[1] = DescriptorWrite::StorageBuffer(1, reinterpret_cast<VkBuffer>(std::uintptr_t{ 48 }));
     EXPECT_TRUE(DescriptorWritesNeedRewrite(writes, changed));
 }
 
 TEST(DescriptorWritesNeedRewriteTest, ImageWritesAlwaysRewrite)
 {
-    const std::vector<ComputeDescriptorWrite> writes = {
-        ComputeDescriptorWrite::StorageImage(0, reinterpret_cast<VkImageView>(std::uintptr_t{ 16 })) };
+    const std::vector<DescriptorWrite> writes = {
+        DescriptorWrite::StorageImage(0, reinterpret_cast<VkImageView>(std::uintptr_t{ 16 })) };
     EXPECT_TRUE(DescriptorWritesNeedRewrite(writes, writes));
 }
 

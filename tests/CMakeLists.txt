@@ -2809,6 +2809,7 @@ add_test(NAME VolkLeakCheck
 add_test(NAME NativeLeakCheck
     COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src" --skip Renderer/
             --tokens "${CMAKE_SOURCE_DIR}/tools/ci/native_leak_check/tokens.txt"
+            --includes "${CMAKE_SOURCE_DIR}/tools/ci/native_leak_check/includes.txt"
             --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/native_leak_check/allowlist.txt"
             --comments skip --strings scan
 )
