@@ -140,7 +140,7 @@ std::optional<ScenePassReadHandles> ResolveScenePassReadHandles(
     if (viewData == nullptr || viewData->renderTexture == nullptr) {
         return std::nullopt;
     }
-    if (builder.ResolveImportedTextureSamplers(viewData->colorTarget).depthSampler == VK_NULL_HANDLE) {
+    if (!builder.HasSampleableDepth(viewData->colorTarget)) {
         return std::nullopt;
     }
     ScenePassReadHandles handles;
@@ -537,13 +537,12 @@ bool Core::RegisterViewContentPassName(const char* name)
     return true;
 }
 
-// Invokes registered texture finalization hook with a wrapped command buffer.
-RenderTexture* Core::DispatchFinalizeForSamplingHook(const char* name, VkCommandBuffer cmd)
+// Invokes the registered finalization hook for `name`.
+RenderTexture* Core::DispatchFinalizeForSamplingHook(const char* name, const rg::RecordingContext& cmd)
 {
     for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
         if (entry.name == name) {
-            rg::CommandBuffer wrapped = rg::CommandBuffer::AdoptRaw(cmd, &m_renderer);
-            entry.lastResult = entry.callback ? entry.callback(wrapped) : nullptr;
+            entry.lastResult = entry.callback ? entry.callback(cmd) : nullptr;
             return entry.lastResult;
         }
     }
@@ -561,8 +560,7 @@ std::optional<Core::PluginRenderFeatureTargetInfo> Core::FindPluginRenderFeature
 
     PluginRenderFeatureTargetInfo info;
     info.target = viewData->colorTarget;
-    info.extent = viewData->renderTexture != nullptr ? ToVkExtent2D(viewData->renderTexture->Extent()) : VkExtent2D{};
-    info.sampler = viewData->renderTexture != nullptr ? viewData->renderTexture->Sampler() : VK_NULL_HANDLE;
+    info.extent = viewData->renderTexture != nullptr ? viewData->renderTexture->Extent() : Extent2D{};
     return info;
 }
 
@@ -902,7 +900,8 @@ void Core::RegisterOffscreenRenderPipelineProviders()
 
             const rg::TextureHandle viewTarget = viewData->colorTarget;
             const Mat4 viewProjection = viewData->viewProjection;
-            const std::function<void(VkCommandBuffer, const Mat4&)> recordSceneOverlay = viewData->recordSceneOverlay;
+            const std::function<void(const rg::RecordingContext&, const Mat4&)> recordSceneOverlay =
+                viewData->recordSceneOverlay;
 
             rg::RenderPassDesc desc;
             desc.debugName = "RenderTransparent";
@@ -917,7 +916,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             };
             desc.execute = [recordSceneOverlay, viewProjection](rg::PassContext& ctx) {
                 const rg::SceneRecording recording(ctx);
-                recordSceneOverlay(ctx.RawCommandBuffer(), viewProjection);
+                recordSceneOverlay(ctx.Recording(), viewProjection);
             };
             out.push_back(std::move(desc));
         });
@@ -1059,7 +1058,7 @@ void Core::BuildFrame()
     if (gameTarget != nullptr || sceneTarget != nullptr) {
         try {
             GTE_PROFILE_SCOPE("RenderGraph::Execute(Offscreen)");
-            const VkCommandBuffer offscreenCmd = m_renderer.BeginOffscreenRenderGraphRecording();
+            const rg::RecordingContext offscreenCmd = m_renderer.BeginOffscreenRenderGraphRecording();
             m_renderGraph.Execute(offscreenCmd, rg::ExecuteTimingMode::SynchronousImmediateReadback,
                 [&](rg::RenderGraphBuilder& b) {
                     m_gpuSkinningRequestsThisFrame = m_game.CollectGpuSkinningDispatchRequests();
@@ -1192,7 +1191,7 @@ void Core::BuildFrame()
                         sceneViewData.aspectWidthOverHeight = aspect;
                         sceneViewData.viewProjection = sceneViewProjection;
                         sceneViewData.eyeWorldPosition = sceneEyeWorldPosition;
-                        sceneViewData.recordSceneOverlay = [this](VkCommandBuffer cmd, const Mat4& viewProj) {
+                        sceneViewData.recordSceneOverlay = [this](const rg::RecordingContext& cmd, const Mat4& viewProj) {
                             if (m_editorLayer != nullptr) {
                                 m_editorLayer->RenderSceneGrid(m_renderer, cmd, viewProj);
                             }
@@ -1204,9 +1203,10 @@ void Core::BuildFrame()
 
                     m_offscreenRenderPipeline.DeclareInto(b, frame);
 
-                    const std::optional<std::function<void(rg::CommandBuffer&)>> viewBackgroundCallbackForReplay =
-                        m_offscreenBlackboardThisFrame.Fetch<std::function<void(rg::CommandBuffer&)>>(
-                            kViewBackgroundReplayCallbackKey);
+                    const std::optional<std::function<void(const rg::RecordingContext&)>>
+                        viewBackgroundCallbackForReplay =
+                            m_offscreenBlackboardThisFrame.Fetch<std::function<void(const rg::RecordingContext&)>>(
+                                kViewBackgroundReplayCallbackKey);
 #ifndef NDEBUG
                     m_offscreenBlackboardThisFrame.ReportUnusedPublishesIfAny();
 #endif
@@ -1224,8 +1224,8 @@ void Core::BuildFrame()
                         const std::vector<rg::BufferHandle> gpuSkinningBuffersForReplay =
                             m_offscreenBlackboardThisFrame.Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey)
                                 .value_or(std::vector<rg::BufferHandle>{});
-                        const std::function<void(rg::CommandBuffer&)> recordViewBackground =
-                            viewBackgroundCallbackForReplay.value_or(std::function<void(rg::CommandBuffer&)>{});
+                        const std::function<void(const rg::RecordingContext&)> recordViewBackground =
+                            viewBackgroundCallbackForReplay.value_or(std::function<void(const rg::RecordingContext&)>{});
                         const std::size_t objectCount = m_game.CountGameViewDrawCommandsThisFrame();
                         const std::vector<rg::TextureHandle> replayStepHandles = frameDebuggerCapture->AddReplayPasses(
                             b, m_game, m_renderer, gameAspectForReplay, objectCount, gpuSkinningBuffersForReplay,
@@ -1273,8 +1273,7 @@ void Core::BuildFrame()
                 if (entry.name == "GameViewComposited" || entry.name == "SceneViewComposited") {
                     continue;
                 }
-                rg::CommandBuffer wrappedForGenericHook = rg::CommandBuffer::AdoptRaw(offscreenCmd, &m_renderer);
-                entry.lastResult = entry.callback(wrappedForGenericHook);
+                entry.lastResult = entry.callback(offscreenCmd);
             }
             m_renderer.EndOffscreenRenderGraphRecording();
 

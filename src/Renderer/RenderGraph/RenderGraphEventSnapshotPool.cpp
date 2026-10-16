@@ -1,5 +1,9 @@
 #include "RenderGraphEventSnapshotPool.h"
 
+#include "RecordingAccess.h"
+#include "../Renderer.h"
+#include "../VulkanFormatInfo.h"
+
 #include <stdexcept>
 #include <utility>
 
@@ -160,6 +164,18 @@ void CopyImageIntoSnapshot(VkCommandBuffer cmd, EventSnapshotResource& dst, VmaA
     };
     EmitImageBarrier(cmd, dst.Image(), range, dstTransfer, dstRead);
     dst.State() = dstRead;
+}
+
+void CaptureAttachmentIntoSnapshot(const RecordingContext& cmd, Renderer& renderer, EventSnapshotResource& dst,
+    const AttachmentWrite& write, const char* debugName)
+{
+    const VkImageAspectFlags aspect = write.isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+    ResourceState attachmentState = RequiredStateFor(
+        write.isDepth ? ResourceAccess::DepthStencilAttachmentReadWrite : ResourceAccess::ColorAttachmentWrite,
+        write.isDepth);
+    CopyImageIntoSnapshot(RecordingAccess::Native(cmd), dst, renderer.GetVmaAllocator(), renderer.GetMemoryTracker(),
+        renderer.GetImGuiVulkanBackendInfo().device, RecordingAccess::Image(write.image),
+        ToVkExtent2D(write.extent), ToVkFormat(write.format), aspect, attachmentState, debugName);
 }
 
 // Pre-sizes m_slots to its fixed capacity so every region exists before the first capture.

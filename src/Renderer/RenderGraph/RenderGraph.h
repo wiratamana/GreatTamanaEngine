@@ -5,6 +5,7 @@
 
 #include "BoundedOnceSet.h"
 #include "CommandBuffer.h"
+#include "RecordingAccess.h"
 #include "RenderGraphBarrierPlanner.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphCompiler.h"
@@ -52,7 +53,7 @@ public:
 
     // Builds and executes passes using the provided build callback.
     template <typename BuildFn>
-    void Execute(VkCommandBuffer cmd, ExecuteTimingMode timingMode, BuildFn&& build)
+    void Execute(const RecordingContext& cmd, ExecuteTimingMode timingMode, BuildFn&& build)
     {
         RenderGraphBuilder builder;
         builder.SetDebugMetadataSink(m_debugMetadataSink);
@@ -66,7 +67,7 @@ public:
         }
 
         const std::vector<TextureHandle> finalOutputs = build(builder);
-        ExecuteCompiledGraph(cmd, timingMode, builder.Finish(), finalOutputs);
+        ExecuteCompiledGraph(RecordingAccess::Native(cmd), timingMode, builder.Finish(), finalOutputs);
     }
 
     // Returns the most recently recorded draw and GPU timing stats for a pass.
@@ -377,13 +378,23 @@ struct PassContext {
             eventSink);
     }
 
-    // Temporary escape: the raw command buffer for platform glue and not-yet-migrated hand recording.
-    VkCommandBuffer RawCommandBuffer() const noexcept { return m_cmd; }
+    // Vulkan-free handle for this pass's command buffer; recorders built from it count draws and notify the
+    // frame debugger like Cmd().
+    RecordingContext Recording() const noexcept { return RecordingAccess::Wrap(m_cmd, renderer, this); }
+
+    // Same, but recorders built from it neither count draws nor notify the frame debugger.
+    RecordingContext RecordingUncounted() const noexcept { return RecordingAccess::Wrap(m_cmd, renderer); }
 
 private:
     friend class RenderGraph;
+    friend struct RecordingAccess;
 
     VkCommandBuffer m_cmd = VK_NULL_HANDLE;
 };
+
+inline VkCommandBuffer RecordingAccess::Native(const PassContext& ctx) noexcept
+{
+    return ctx.m_cmd;
+}
 
 } // namespace gte::rg

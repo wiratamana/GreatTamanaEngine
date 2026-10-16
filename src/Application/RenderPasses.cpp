@@ -22,7 +22,7 @@ void DeclareGpuSkinningReads(
 }
 
 void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle swapchainImage,
-    std::optional<float> directGameRenderAspect, const std::function<void(VkCommandBuffer)>& recordImGui,
+    std::optional<float> directGameRenderAspect, const std::function<void(const rg::RecordingContext&)>& recordImGui,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers)
 {
     builder.AddRenderPass(
@@ -41,7 +41,7 @@ void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& rende
                 game.Render(renderer, *directGameRenderAspect);
             }
             if (recordImGui) {
-                recordImGui(ctx.RawCommandBuffer());
+                recordImGui(ctx.Recording());
             }
         });
 }

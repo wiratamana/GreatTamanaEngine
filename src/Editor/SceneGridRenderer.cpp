@@ -2,6 +2,7 @@
 
 #include "../Core/PipelineDesc.h"
 #include "../Renderer/Renderer.h"
+#include "../Renderer/RenderGraph/CommandBuffer.h"
 #include "../Renderer/ShaderFile.h"
 
 #include <cstring>
@@ -43,7 +44,7 @@ void SceneGridRenderer::EnsurePipeline(Renderer& renderer)
     m_pipeline = std::make_unique<Pipeline>(renderer.CreatePipeline(desc, vertSpirv, fragSpirv));
 }
 
-void SceneGridRenderer::Draw(Renderer& renderer, VkCommandBuffer cmd, const Mat4& sceneViewProjection)
+void SceneGridRenderer::Draw(Renderer& renderer, const rg::RecordingContext& ctx, const Mat4& sceneViewProjection)
 {
     Mat4 invViewProj;
     if (!sceneViewProjection.TryInverse(invViewProj)) {
@@ -59,10 +60,10 @@ void SceneGridRenderer::Draw(Renderer& renderer, VkCommandBuffer cmd, const Mat4
     std::memcpy(pushConstants.invViewProj, invViewProj.Data(), sizeof(pushConstants.invViewProj));
     std::memcpy(pushConstants.viewProj, sceneViewProjection.Data(), sizeof(pushConstants.viewProj));
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->Native());
-    vkCmdPushConstants(
-        cmd, m_pipeline->Layout(), VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pushConstants), &pushConstants);
-    vkCmdDraw(cmd, 3, 1, 0, 0);
+    rg::CommandBuffer cmd = ctx.Commands();
+    cmd.BindPipeline(*m_pipeline);
+    cmd.PushConstants(pushConstants, ShaderStageMask::Fragment);
+    cmd.Draw(3);
 }
 
 } // namespace gte

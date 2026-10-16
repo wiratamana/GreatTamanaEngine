@@ -872,13 +872,12 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphTimestampPool.cpp
     src/Renderer/RenderGraph/RenderGraphEventSnapshotPool.h
     src/Renderer/RenderGraph/RenderGraphEventSnapshotPool.cpp
-    # task_manager/better-render-pass-1 campaign, PHASE3
-    # (PHASE3_ENGINE_COMMAND_BUFFER_AND_TYPE_SAFE_PUSH_CONSTANTS.md) - R1/R4:
-    # the engine-owned, pass-author-facing CommandBuffer facade over
-    # Renderer::BeginGraphPassRecording()/Dispatch()/Submit()/
-    # EndGraphPassRecording(), obtained via PassContext::Cmd() (RenderGraph.h).
+    # Pass-author command facade (PassContext::Cmd()) and the Vulkan-free recording handle.
     src/Renderer/RenderGraph/CommandBuffer.h
     src/Renderer/RenderGraph/CommandBuffer.cpp
+    src/Renderer/RenderGraph/RecordingAccess.h
+    src/Renderer/RenderGraph/RecordingContext.h
+    src/Renderer/RenderGraph/RecordingContext.cpp
     src/Renderer/RenderGraph/RenderGraph.h
     src/Renderer/RenderGraph/RenderGraph.cpp
     src/Renderer/RenderGraph/RenderGraphSnapshot.h

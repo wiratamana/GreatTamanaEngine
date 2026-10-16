@@ -2,10 +2,9 @@
 
 #include "../Math/Mat4.h"
 #include "../Math/Vec3.h"
+#include "../Renderer/RenderGraph/RecordingContext.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
 #include "../Renderer/RenderGraph/RenderPipeline.h"
-
-#include <volk.h>
 
 #include <functional>
 
@@ -24,7 +23,7 @@ struct RenderPassViewData {
     Vec3 eyeWorldPosition;
 
     // Scene View only: draws the editor ground-grid overlay.
-    std::function<void(VkCommandBuffer, const Mat4&)> recordSceneOverlay;
+    std::function<void(const rg::RecordingContext&, const Mat4&)> recordSceneOverlay;
 };
 
 // Maps a named view to the ViewScope used by the Frame Debugger, Profiler and per-view pass identity.

@@ -10,8 +10,6 @@
 // Include at file scope: the header opens its own `namespace gte`, so including it inside one would nest gte::gte.
 #include "../Core/FrameDebuggerCaptureRecorder.h"
 
-#include <volk.h>
-
 #include <array>
 #include <cstddef>
 #include <functional>
@@ -42,7 +40,7 @@ void DeclareGpuSkinningReads(
 // set (both view panels hidden) it also writes depth and calls Game::Render() into the swapchain first, in the same
 // pass so the swapchain is cleared once; `recordImGui` runs last. The direct render passes no capture.
 void AddPresentPass(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer, rg::TextureHandle swapchainImage,
-    std::optional<float> directGameRenderAspect, const std::function<void(VkCommandBuffer)>& recordImGui,
+    std::optional<float> directGameRenderAspect, const std::function<void(const rg::RecordingContext&)>& recordImGui,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers = {});
 
 // Declares one compute dispatch per model/output group that needs GPU skinning this frame and imports its output

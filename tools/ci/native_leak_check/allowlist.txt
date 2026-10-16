@@ -1,8 +1,6 @@
 # Files outside src/Renderer that still use raw engine wrappers. Starting debt: lines are only ever removed.
 # Format: path relative to src, then '# one-line reason'. A line whose file is gone or clean fails the check.
 
-Application/RenderPasses.cpp # debt: hands the raw command buffer to the ImGui backend; removed when the editor render code step moves the UI pass into src/Renderer
-Core/Core.cpp # debt: AdoptRaw/RawCommandBuffer for hooks and overlay; removed when the Core GPU-driven code and Frame Debugger replay passes move onto pass kinds (engine systems step)
 Core/Plugins/ProjectAssemblyHost.cpp # debt: idles the device before unloading a project assembly
 Editor/AssetPreviewMesh.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/AssetPreviewMesh.h # debt: editor tool uses raw wrappers or one-shot submits
@@ -11,7 +9,6 @@ Editor/BoneViewerWindow.cpp # debt: editor tool uses raw wrappers or one-shot su
 Editor/BoneViewerWindow.h # debt: editor tool uses raw wrappers or one-shot submits
 Editor/EditorHost.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/EditorProjectLifecycleCapability.cpp # debt: editor tool uses raw wrappers or one-shot submits
-Editor/FrameDebuggerReplayPasses.cpp # debt: AdoptRaw for the background replay callback; removed when the Core GPU-driven code and Frame Debugger replay passes move onto pass kinds (engine systems step)
 Editor/ImGuiEditorLayer.cpp # permanent: ImGui Vulkan backend needs the device idle and raw handles
 Editor/Panels/FrameDebuggerPanel.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/Panels/RenderGraphPanel.cpp # debt: editor tool uses raw wrappers or one-shot submits

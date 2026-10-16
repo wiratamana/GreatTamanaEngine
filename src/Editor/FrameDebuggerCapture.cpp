@@ -9,20 +9,7 @@ namespace gte {
 
 FrameDebuggerStandardPipelineState DescribeStandardPipelineState()
 {
-    // Every value below is transcribed directly from Pipeline.cpp's own
-    // real, hardcoded construction code (confirmed at implementation
-    // time - never guessed from an operator's name alone):
-    //   - colorBlendAttachment.blendEnable = VK_FALSE                      -> "Opaque (no blend)".
-    //   - rasterizer.depthClampEnable left at its zero-initialized default
-    //     (VK_FALSE) -> real geometry IS clipped against the near/far
-    //     planes -> ZClip "On".
-    //   - depthStencil.depthTestEnable = VK_TRUE, depthCompareOp =
-    //     VK_COMPARE_OP_LESS - this is "Less", NOT "LEqual"/"LessEqual"
-    //     (that would be the currently-unused VK_COMPARE_OP_LESS_OR_EQUAL).
-    //   - depthStencil.depthWriteEnable = VK_TRUE -> ZWrite "On".
-    //   - rasterizer.cullMode = VK_CULL_MODE_NONE -> Cull "None".
-    //   - depthStencil.stencilTestEnable = VK_FALSE, no stencil struct
-    //     populated anywhere -> every stencil field "n/a (no stencil test)".
+    // Values mirror Pipeline.cpp: opaque, depth clip on, depth test Less, depth write on, no culling, no stencil.
     FrameDebuggerStandardPipelineState state;
     state.blendMode = "Opaque (no blend)";
     state.zClip = "On";
@@ -39,25 +26,8 @@ FrameDebuggerStandardPipelineState DescribeStandardPipelineState()
 
 FrameDebuggerStandardPipelineState DescribeSkyBackgroundPipelineState()
 {
-    // Every value below is transcribed directly from
-    // AtmosphereSkyBackgroundRenderer.cpp's own EnsurePipeline() real,
-    // hardcoded construction code (confirmed at implementation time -
-    // never guessed):
-    //   - colorBlendAttachment.blendEnable = VK_FALSE -> "Opaque (no blend)".
-    //   - rasterizer.depthClampEnable left at its zero-initialized default
-    //     (VK_FALSE) -> ZClip "On" (same as DescribeStandardPipelineState()).
-    //   - depthStencil.depthTestEnable = VK_TRUE, depthCompareOp =
-    //     VK_COMPARE_OP_EQUAL - "Equal", DELIBERATELY DIFFERENT from
-    //     DescribeStandardPipelineState()'s own "Less" - this pass only
-    //     ever survives at a pixel whose depth is still exactly the
-    //     frame's own clear value (see that renderer class's own header
-    //     comment for the full reasoning).
-    //   - depthStencil.depthWriteEnable = VK_FALSE -> "Off", DELIBERATELY
-    //     DIFFERENT from DescribeStandardPipelineState()'s own "On" -
-    //     nothing is ever meant to occlude behind the sky.
-    //   - rasterizer.cullMode = VK_CULL_MODE_NONE -> "None" (same).
-    //   - depthStencil.stencilTestEnable = VK_FALSE, no stencil struct
-    //     populated -> every stencil field "n/a (no stencil test)" (same).
+    // Values mirror the sky pipeline (see the sky background renderer): depth test Equal, depth write Off.
+    // The pass only survives at pixels still holding the clear depth, and must never occlude geometry.
     FrameDebuggerStandardPipelineState state;
     state.blendMode = "Opaque (no blend)";
     state.zClip = "On";
@@ -106,13 +76,6 @@ void FrameDebuggerCaptureContext::RecordEntityDraw(std::uint32_t entityIndex, st
     m_drawRecords.push_back(std::move(record));
 }
 
-// Render Pass campaign (task_manager/render-pass-1), PHASE4
-// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.4) -
-// RecordSkyBackgroundDraw() REMOVED here - see FrameDebuggerCapture.h's own
-// updated doc comment for why (the Sky Background draw is now a real,
-// separate, generically-discovered "DrawSkyBackground" Render Graph pass,
-// PHASE2 of this campaign, with no fabricated draw record needed at all).
-
 void FrameDebuggerCaptureContext::Reset()
 {
     m_pipelineDebugNames.clear();
@@ -120,27 +83,19 @@ void FrameDebuggerCaptureContext::Reset()
     m_drawCallCount = 0;
     m_lastViewProjection = Mat4::Identity();
     m_drawRecords.clear();
-    // task_manager/frame-debugger-7 campaign, PHASE3 - RAII-destroys any
-    // leftover replay-step RenderTextures from a previous armed frame (see
-    // AGENTS.md's own RAII rule) - see SetReplayStepPreviews()'s own doc
-    // comment (FrameDebuggerCapture.h) for why this must be empty on every
-    // frame that isn't itself a capture-trigger frame.
+    // Leftover replay-step targets must not outlive the capture frame.
     m_replayStepPreviews.clear();
-    // Snapshots the PREVIOUS frame's own total before zeroing the counter
-    // for the next one - see LastFrameEventCount()'s own doc comment.
+    // Remember the previous frame's event total before zeroing the counter.
     m_lastFrameEventCount = m_nextEventIndex;
     m_nextEventIndex = 0;
 }
 
 void FrameDebuggerCaptureContext::InitializeEventCapture(Renderer& renderer) noexcept
 {
-    m_eventCaptureAllocator = renderer.GetVmaAllocator();
-    m_eventCaptureTracker = renderer.GetMemoryTracker();
-    m_eventCaptureDevice = renderer.GetImGuiVulkanBackendInfo().device;
+    m_eventCaptureRenderer = &renderer;
 }
 
-void FrameDebuggerCaptureContext::NoteCommandResult(
-    VkImage image, VkExtent2D extent, VkFormat format, VkImageAspectFlags aspect)
+void FrameDebuggerCaptureContext::NoteCommandResult(const AttachmentWrite& write)
 {
     if (m_armedEventIndex < 0) {
         NextEventIndex(); // Keep this frame's counter advancing even while disarmed.
@@ -150,27 +105,21 @@ void FrameDebuggerCaptureContext::NoteCommandResult(
     if (index != m_armedEventIndex) {
         return;
     }
-    m_pendingEventCapture = PendingEventCapture{ image, extent, format, aspect };
+    m_pendingEventCapture = write;
 }
 
-void FrameDebuggerCaptureContext::FlushPendingCapture(VkCommandBuffer cmd)
+void FrameDebuggerCaptureContext::FlushPendingCapture(const rg::RecordingContext& cmd)
 {
-    if (!m_pendingEventCapture.has_value() || m_eventCaptureAllocator == VK_NULL_HANDLE) {
+    if (!m_pendingEventCapture.has_value() || m_eventCaptureRenderer == nullptr) {
         return;
     }
-    const PendingEventCapture capture = *m_pendingEventCapture;
+    const AttachmentWrite capture = *m_pendingEventCapture;
     m_pendingEventCapture.reset();
 
-    const bool isDepth = (capture.aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
-    rg::ResourceState srcState = rg::RequiredStateFor(
-        isDepth ? rg::ResourceAccess::DepthStencilAttachmentReadWrite : rg::ResourceAccess::ColorAttachmentWrite,
-        isDepth);
-
-    rg::CopyImageIntoSnapshot(cmd, m_retainedEventImage, m_eventCaptureAllocator, m_eventCaptureTracker,
-        m_eventCaptureDevice, capture.image, capture.extent, capture.format, capture.aspect, srcState,
-        "FrameDebuggerPerDrawEventSnapshot");
+    rg::CaptureAttachmentIntoSnapshot(
+        cmd, *m_eventCaptureRenderer, m_retainedEventImage, capture, "FrameDebuggerPerDrawEventSnapshot");
     m_retainedEventIndex = m_armedEventIndex;
-    m_retainedEventIsDepth = isDepth;
+    m_retainedEventIsDepth = capture.isDepth;
 }
 
 } // namespace gte

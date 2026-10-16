@@ -990,7 +990,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         }
 
         if (m_frameDebuggerEventSink != nullptr) {
-            m_frameDebuggerEventSink->FlushPendingCapture(cmd);
+            m_frameDebuggerEventSink->FlushPendingCapture(RecordingAccess::Wrap(cmd, m_renderer));
         }
 
         UpdateDrawStatsFor(pass.name, passDrawStats);

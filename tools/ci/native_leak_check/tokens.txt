@@ -1,6 +1,6 @@
 # Raw engine wrappers and hand-rolled GPU calls that code outside src/Renderer must not use.
 # Native( covers .Native(), ->Native() and the free function Native(handle).
-# RawCommandBuffer( and AdoptRaw( are the only routes to a raw VkCommandBuffer (PassContext, CommandBuffer).
+# RecordingAccess and PlatformHandle( are the only routes to a raw VkCommandBuffer (RecordingContext, CommandBuffer).
 Native(
 ComputeDescriptorSet
 ComputeDescriptorWrite
@@ -9,8 +9,8 @@ ComputePipeline
 EmitImageBarrier
 ImmediateSubmit
 BeginGraphPassRecording
-RawCommandBuffer(
-AdoptRaw(
+RecordingAccess
+PlatformHandle(
 ColorPixelFormat(
 DepthPixelFormat(
 WaitForGpuIdle

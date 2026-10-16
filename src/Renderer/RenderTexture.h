@@ -3,6 +3,7 @@
 #include "../Core/PixelFormat.h"
 #include "DepthBuffer.h"
 #include "GraphicsHandleRegistry.h" // CachedSamplerHandle
+#include "RenderGraph/RecordingContext.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "RenderTarget.h"
 #include "Texture.h"
@@ -45,7 +46,7 @@ public:
     void SetCurrentState(rg::ResourceState state) noexcept { m_currentState = state; }
 
     // Transitions the color image from CurrentState() to ShaderRead.
-    void FinalizeForExternalSampling(VkCommandBuffer cmd);
+    void FinalizeForExternalSampling(const rg::RecordingContext& cmd);
 
 private:
     void ReleaseSamplerHandles() noexcept;

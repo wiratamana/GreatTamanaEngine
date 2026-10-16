@@ -67,7 +67,7 @@ RenderTexture* AtmosphereLutRenderer::CompositedOutput(const char* outputTexture
 }
 
 void AtmosphereLutRenderer::FinalizeAerialPerspectiveCompositeForSampling(
-    rg::CommandBuffer& cmd, const char* outputTextureName)
+    const rg::RecordingContext& cmd, const char* outputTextureName)
 {
     m_impl->FinalizeAerialPerspectiveCompositeForSampling(cmd, outputTextureName);
 }

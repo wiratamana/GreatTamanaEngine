@@ -26,8 +26,6 @@
 #include "Plugins/UniversalRenderPassCallback.h"
 #include "Plugins/RenderViewRegistry.h"
 
-#include <volk.h>
-
 #include <functional>
 #include <memory>
 #include <optional>
@@ -108,8 +106,8 @@ public:
     // Game view render target for this frame (nullptr if game view is inactive).
     RenderTexture* GetGameViewTargetThisFrame() const noexcept { return m_gameTargetThisFrame; }
 
-    // Sets callback for recording UI / ImGui commands during present.
-    void SetPresentImGuiRecorder(std::function<void(VkCommandBuffer)> recorder)
+    // Sets the callback that records UI / ImGui commands during present.
+    void SetPresentImGuiRecorder(std::function<void(const rg::RecordingContext&)> recorder)
     {
         m_presentImGuiRecorder = std::move(recorder);
     }
@@ -179,11 +177,10 @@ public:
         return m_renderFeatureCompositorPtr;
     }
 
-    // Render target and texture info for a feature view.
+    // Render target handle and extent of a feature view.
     struct PluginRenderFeatureTargetInfo {
         rg::TextureHandle target;
-        VkExtent2D extent{};
-        VkSampler sampler = VK_NULL_HANDLE;
+        Extent2D extent{};
     };
 
     // Resolves the current view's original render target.
@@ -199,8 +196,8 @@ public:
         return FindViewData(view);
     }
 
-    // Hook callback to finalize feature output textures for sampling.
-    using FinalizeForSamplingCallback = std::function<RenderTexture*(rg::CommandBuffer& cmd)>;
+    // Hook that finalizes a feature's output texture for sampling; returns it, or nullptr when stale.
+    using FinalizeForSamplingCallback = std::function<RenderTexture*(const rg::RecordingContext& cmd)>;
 
     // Registers a texture finalization hook run after offscreen rendering.
     bool RegisterFinalizeForSamplingHook(const char* name, FinalizeForSamplingCallback callback);
@@ -232,7 +229,7 @@ private:
     void RegisterOffscreenRenderPipelineProviders();
     void RegisterPresentRenderPipelineProvider();
     const RenderPassViewData* FindViewData(rg::RenderViewId view) const noexcept;
-    RenderTexture* DispatchFinalizeForSamplingHook(const char* name, VkCommandBuffer cmd);
+    RenderTexture* DispatchFinalizeForSamplingHook(const char* name, const rg::RecordingContext& cmd);
 
     IEditorLayer* m_editorLayer = nullptr; // Optional editor hook.
 
@@ -287,8 +284,8 @@ private:
     bool m_needsDirectGameRenderThisFrame = false;
     std::optional<float> m_directGameRenderAspectThisFrame;
     rg::TextureHandle m_swapchainImageThisFrame;
-    std::function<void(VkCommandBuffer)> m_recordImGuiThisFrame;
-    std::function<void(VkCommandBuffer)> m_presentImGuiRecorder;
+    std::function<void(const rg::RecordingContext&)> m_recordImGuiThisFrame;
+    std::function<void(const rg::RecordingContext&)> m_presentImGuiRecorder;
 
     ProjectAssemblyHost m_projectAssemblyHost;
     AssetDatabase m_assetDatabase;

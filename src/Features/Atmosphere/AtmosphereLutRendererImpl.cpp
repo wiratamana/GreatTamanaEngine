@@ -490,13 +490,13 @@ RenderTexture* AtmosphereLutRenderer::Impl::CompositedOutput(const char* outputT
 }
 
 void AtmosphereLutRenderer::Impl::FinalizeAerialPerspectiveCompositeForSampling(
-    rg::CommandBuffer& cmd, const char* outputTextureName)
+    const rg::RecordingContext& cmd, const char* outputTextureName)
 {
     const auto it = aerialPerspectiveCompositeViewStates.find(outputTextureName);
     if (it == aerialPerspectiveCompositeViewStates.end() || !it->second.output.has_value()) {
         return;
     }
-    it->second.output->FinalizeForExternalSampling(cmd.RawCommandBuffer());
+    it->second.output->FinalizeForExternalSampling(cmd);
 }
 
 int AtmosphereLutRenderer::Impl::AerialPerspectiveVolumeDepth(const char* aerialPerspectiveVolumeName) const noexcept

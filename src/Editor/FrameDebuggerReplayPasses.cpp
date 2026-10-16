@@ -1,9 +1,5 @@
-// Defines FrameDebuggerCaptureContext::AddReplayPasses() - the concrete
-// implementation of IFrameDebuggerCaptureRecorder::AddReplayPasses()
-// (src/Core/FrameDebuggerCaptureRecorder.h). Reached from gte_core-tier
-// Core::BuildFrame() only through a virtual call on a null-checked
-// IFrameDebuggerCaptureRecorder* pointer - never a gte_editor-only
-// free-function symbol by name.
+// Defines FrameDebuggerCaptureContext::AddReplayPasses(), the Frame Debugger's replay passes.
+// Core reaches it only through the IFrameDebuggerCaptureRecorder interface.
 
 #include "../Application/RenderPasses.h"
 
@@ -26,21 +22,16 @@ namespace gte {
 
 namespace {
 
-// Permanent, ever-growing pool of "FrameDebuggerReplayStepN" pass names.
-// Must never be a per-frame/per-capture temporary - RenderGraphBuilder
-// pass names must stay valid for the rest of the process's lifetime.
-// std::deque (never std::vector) so growing this pool never invalidates
-// a c_str() pointer already handed out from a previous capture.
+// Permanent pool of "FrameDebuggerReplayStepN" pass names: graph pass names must outlive the process's frames.
+// A deque, so growing it never invalidates a c_str() pointer already handed out.
 std::deque<std::string>& ReplayStepPassNamePool()
 {
     static std::deque<std::string> pool;
     return pool;
 }
 
-// Returns a STABLE, permanent const char* naming replay step `index` -
-// lazily grows the pool the first time `index` is ever requested, then
-// reuses the SAME std::string (and therefore the SAME pointer) for that
-// index forever afterwards, across every future capture this session.
+// Returns the stable name of replay step `index`, growing the pool on first use.
+// The same pointer is returned for that index for the rest of the session.
 const char* ReplayStepPassName(std::size_t index)
 {
     std::deque<std::string>& pool = ReplayStepPassNamePool();
@@ -57,7 +48,7 @@ const char* ReplayStepPassName(std::size_t index)
 std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::RenderGraphBuilder& builder,
     Game& game, Renderer& renderer, float aspectWidthOverHeight, std::size_t objectCount,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-    const std::function<void(rg::CommandBuffer&)>& recordBackgroundStep, RenderTexture& gameTarget,
+    const std::function<void(const rg::RecordingContext&)>& recordBackgroundStep, RenderTexture& gameTarget,
     rg::RenderPassToggleRegistry* toggleRegistry)
 {
     std::vector<rg::TextureHandle> destHandles;
@@ -109,20 +100,16 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
         const rg::TextureHandle destHandle = builder.ImportTexture(passName, destinations[i].Target(),
             ImageLayout::Undefined, destinations[i].SamplerObjectHandle(), destinations[i].DepthSamplerObjectHandle());
 
-        // isBackgroundStep is true for exactly one index: the extra,
-        // dedicated step (only reachable when includeBackgroundStep is
-        // true, always equal to objectCount). Every other index is a real
-        // per-object step and never draws the background.
+        // True for exactly one index: the extra step at objectCount, which also draws the background.
+        // Every other step is a per-object step.
         const bool isBackgroundStep = includeBackgroundStep && (i == objectCount);
         // Real per-object steps redraw objects [0..i]. The one dedicated
         // background step redraws every real object, then the background -
         // matching the real "GameView" pass's own true order.
         const std::size_t maxDrawCount = isBackgroundStep ? objectCount : (i + 1);
 
-        // These N debug-only replay passes declare through AddRenderPass(),
-        // tagged FrameDebuggerInternal so BuildRealFrameDebuggerSnapshot()'s
-        // own view-region walk skips them instead of leaking them into the
-        // tree as spurious extra leaves.
+        // Tagged FrameDebuggerInternal so the snapshot builder's view-region walk skips these debug-only
+        // passes instead of listing them as extra leaves.
         builder.AddRenderPass(passName, rg::PassKind::Graphics, rg::ViewScope::GameView,
             rg::RenderPassCategory::FrameDebuggerInternal,
             [destHandle, gpuSkinningOutputBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
@@ -139,8 +126,7 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
                 }
                 // The background is drawn on exactly one step and is not counted in this step's draw stats.
                 if (isBackgroundStep && recordBackgroundStep) {
-                    rg::CommandBuffer wrappedForBackground = rg::CommandBuffer::AdoptRaw(ctx.RawCommandBuffer(), &renderer);
-                    recordBackgroundStep(wrappedForBackground);
+                    recordBackgroundStep(ctx.RecordingUncounted());
                 }
             });
 

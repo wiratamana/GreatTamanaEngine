@@ -43,17 +43,6 @@ class CommandBuffer {
 public:
     using WriteTargetInfo = CommandBufferWriteTargetInfo;
 
-    // Temporary escape for code that still records raw Vulkan commands outside a pass (hooks, replay, one-shots).
-    static CommandBuffer AdoptRaw(VkCommandBuffer cmd, Renderer* renderer = nullptr,
-        DrawStats* passDrawStats = nullptr, WriteTargetInfo writeTarget = {},
-        FrameDebuggerEventSink* eventSink = nullptr) noexcept
-    {
-        return CommandBuffer(cmd, renderer, passDrawStats, writeTarget, eventSink);
-    }
-
-    // Temporary escape: the raw command buffer for not-yet-migrated hand recording.
-    VkCommandBuffer RawCommandBuffer() const noexcept { return m_cmd; }
-
     // Stage compute state for the next dispatch.
     void BindComputePipeline(const ComputePipeline& pipeline) noexcept { m_boundComputePipeline = &pipeline; }
     void BindDescriptorSet(VkDescriptorSet set) noexcept { m_boundDescriptorSet = set; }
@@ -125,6 +114,8 @@ public:
 
 private:
     friend struct PassContext;
+    friend struct RecordingAccess;
+    friend class RecordingContext;
 
     CommandBuffer(VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats, WriteTargetInfo writeTarget,
         FrameDebuggerEventSink* eventSink) noexcept;

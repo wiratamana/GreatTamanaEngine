@@ -27,6 +27,7 @@
 #include "../Fakes/HeadlessRenderGraphFixture.h"
 
 #include "Renderer/Renderer.h"
+#include "Renderer/RenderGraph/RecordingAccess.h"
 #include "Renderer/Vulkan/DescriptorSetLayoutBuilder.h"
 
 #include <gtest/gtest.h>
@@ -151,9 +152,10 @@ void SubmitIndirectAgainstPipelineWithSceneServicesSetBindsSetOne()
     const VkDescriptorSetLayout throwawaySceneServicesLayout =
         DescriptorSetLayoutBuilder(device).AddCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT).Build();
 
+    const DescriptorSetLayoutHandle throwawaySceneServicesLayoutHandle = RegisterDescriptorSetLayout(throwawaySceneServicesLayout);
     Pipeline pipeline = renderer.CreatePipeline("shaders/MeshInstanced.vert.spv", "shaders/Mesh.frag.spv",
         VertexLayout::PositionNormalInstanced, /*useMaterialTexture=*/false,
-        "RendererSubmitIndirectTest.Pipeline", /*useInstanceBuffer=*/true, throwawaySceneServicesLayout);
+        "RendererSubmitIndirectTest.Pipeline", /*useInstanceBuffer=*/true, throwawaySceneServicesLayoutHandle);
 
     MeshVertex vertices[3]{};
     vertices[0].position[0] = 0.0f;
@@ -177,8 +179,8 @@ void SubmitIndirectAgainstPipelineWithSceneServicesSetBindsSetOne()
     const DescriptorSetHandle instanceBufferDescriptorSet =
         RegisterDescriptorSet(renderer.AllocateComputeDescriptorSet(renderer.InstanceBufferDescriptorSetLayout()).Native());
 
-    const VkCommandBuffer cmd = renderer.BeginOffscreenRenderGraphRecording();
-    renderer.BeginGraphPassRecording(cmd, {});
+    const rg::RecordingContext recording = renderer.BeginOffscreenRenderGraphRecording();
+    renderer.BeginGraphPassRecording(rg::RecordingAccess::Native(recording), {});
 
     // New `sceneServicesSet` parameter sits right before viewProjMatrix in
     // SubmitIndirect()'s signature - VK_NULL_HANDLE is enough here, this
@@ -190,6 +192,7 @@ void SubmitIndirectAgainstPipelineWithSceneServicesSetBindsSetOne()
 
     renderer.EndGraphPassRecording();
 
+    UnregisterDescriptorSetLayout(throwawaySceneServicesLayoutHandle);
     vkDestroyDescriptorSetLayout(device, throwawaySceneServicesLayout, nullptr);
 }
 

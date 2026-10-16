@@ -24,7 +24,6 @@ namespace {
 constexpr rg::RenderPassId kAtmosphereSharedLutKey = "Atmosphere.SharedLuts"_passId;
 constexpr rg::RenderPassId kAtmosphereViewLutGameKey = "Atmosphere.ViewLut.Game"_passId;
 constexpr rg::RenderPassId kAtmosphereViewLutSceneKey = "Atmosphere.ViewLut.Scene"_passId;
-constexpr rg::RenderPassId kGameSkyBackgroundCallbackKey = "Atmosphere.GameSkyBackgroundCallback"_passId;
 
 // Blackboard entry storing shared atmosphere LUT handles and parameters.
 struct AtmosphereSharedLutBlackboardEntry {
@@ -145,16 +144,14 @@ void AtmosphereFeature::RegisterPasses()
             }
 
             const char* skyViewLutName = isGameView ? "AtmosphereSkyViewLut_GameView" : "AtmosphereSkyViewLut_SceneView";
-            const std::function<void(rg::CommandBuffer&)> recordSkyBackground =
+            const std::function<void(const rg::RecordingContext&)> recordSkyBackground =
                 MakeRecordSkyBackgroundCallback(m_renderer, m_core.GetRenderer(), m_core.GetRenderGraph(),
                     viewData->viewProjection, sharedLuts->parameters, viewLuts->frameUniforms, skyViewLutName,
                     m_settings.skyExposure);
 
             if (isGameView) {
-                // Publish callback for background replay and debug capture.
-                blackboard.Publish<std::function<void(rg::CommandBuffer&)>>(
-                    kGameSkyBackgroundCallbackKey, recordSkyBackground);
-                blackboard.Publish<std::function<void(rg::CommandBuffer&)>>(
+                // Published for the Frame Debugger's background replay step.
+                blackboard.Publish<std::function<void(const rg::RecordingContext&)>>(
                     kViewBackgroundReplayCallbackKey, recordSkyBackground);
             }
 
@@ -172,8 +169,7 @@ void AtmosphereFeature::RegisterPasses()
                 },
                 [recordSkyBackground](rg::PassContext& ctx) {
                     const rg::SceneRecording recording(ctx);
-                    rg::CommandBuffer cmd = ctx.Cmd();
-                    recordSkyBackground(cmd);
+                    recordSkyBackground(ctx.Recording());
                 },
                 rg::RenderPassDrawKind::DrawQuad, rg::RenderPassEvent::AfterOpaques);
         });
@@ -230,11 +226,11 @@ void AtmosphereFeature::RegisterPasses()
     assert(compositeRegistered && "AtmosphereComposite registration failed");
 
     // Finalize composited textures for external sampling.
-    m_core.RegisterFinalizeForSamplingHook("GameViewComposited", [this](rg::CommandBuffer& cmd) -> RenderTexture* {
+    m_core.RegisterFinalizeForSamplingHook("GameViewComposited", [this](const rg::RecordingContext& cmd) -> RenderTexture* {
         m_renderer.FinalizeAerialPerspectiveCompositeForSampling(cmd, "GameViewComposited");
         return FreshCompositedOutput("GameViewComposited");
     });
-    m_core.RegisterFinalizeForSamplingHook("SceneViewComposited", [this](rg::CommandBuffer& cmd) -> RenderTexture* {
+    m_core.RegisterFinalizeForSamplingHook("SceneViewComposited", [this](const rg::RecordingContext& cmd) -> RenderTexture* {
         m_renderer.FinalizeAerialPerspectiveCompositeForSampling(cmd, "SceneViewComposited");
         return FreshCompositedOutput("SceneViewComposited");
     });

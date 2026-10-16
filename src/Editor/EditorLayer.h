@@ -137,7 +137,7 @@ public:
     // Records the Scene panel's ground grid into `cmd`, inside the open Scene view pass after the scene
     // geometry so the grid is depth-tested. `sceneViewProjection` is the matrix the scene was drawn with.
     // A no-op for NullEditorLayer.
-    virtual void RenderSceneGrid(Renderer& renderer, VkCommandBuffer cmd, const Mat4& sceneViewProjection) = 0;
+    virtual void RenderSceneGrid(Renderer& renderer, const rg::RecordingContext& cmd, const Mat4& sceneViewProjection) = 0;
 
     // Builds every editor panel for this frame in a full-viewport dock space. Call after Game rendered.
     // `gpuDrivenBatchDebugInfo` has one entry per GPU-driven batch (Game view).
@@ -156,7 +156,7 @@ public:
 
     // Records this frame's UI draw data into `cmd`, called while the swapchain image is bound
     // as the current dynamic-rendering color attachment.
-    virtual void Render(VkCommandBuffer cmd) = 0;
+    virtual void Render(const rg::RecordingContext& cmd) = 0;
 
     // Updates and renders extra OS windows (panels dragged outside the main viewport).
     // Call after Renderer::Present(); a no-op on frames where Render() did not run.

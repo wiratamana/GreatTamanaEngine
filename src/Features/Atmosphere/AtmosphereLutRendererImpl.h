@@ -117,7 +117,7 @@ struct AtmosphereLutRenderer::Impl {
         float depthExponent, Extent2D extent, const char* outputTextureName, rg::ViewScope viewScope,
         rg::RenderPassToggleRegistry* toggleRegistry);
     RenderTexture* CompositedOutput(const char* outputTextureName) noexcept;
-    void FinalizeAerialPerspectiveCompositeForSampling(rg::CommandBuffer& cmd, const char* outputTextureName);
+    void FinalizeAerialPerspectiveCompositeForSampling(const rg::RecordingContext& cmd, const char* outputTextureName);
     int AerialPerspectiveVolumeDepth(const char* aerialPerspectiveVolumeName) const noexcept;
 };
 

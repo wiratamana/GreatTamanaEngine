@@ -2861,7 +2861,10 @@ set(GTE_COMMENT_RULE_SRC
     Game/Game.cpp Game/Game.h Game/Instantiation/MeshAssetGpuCatalog.cpp Game/Instantiation/MeshAssetGpuCatalog.h
     Game/Instantiation/MeshInstantiationSystem.cpp Game/Instantiation/MeshInstantiationSystem.h
     Game/Instantiation/PrimitiveGpuCatalog.cpp Game/Instantiation/PrimitiveGpuCatalog.h
-    Scene/SceneBuilder.cpp Scene/SceneBuilder.h)
+    Scene/SceneBuilder.cpp Scene/SceneBuilder.h
+    Core/FrameDebuggerEventSink.h Core/FrameDebuggerCaptureRecorder.h Application/RenderPassViewData.h
+    Editor/SceneGridRenderer.cpp Editor/SceneGridRenderer.h Editor/FrameDebuggerCapture.cpp
+    Editor/FrameDebuggerCapture.h Editor/FrameDebuggerReplayPasses.cpp)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp

@@ -3,8 +3,10 @@
 // Gated capture of what a pass just wrote: the write target is copied into a pooled scratch image. Off by default;
 // it only costs a copy and barrier while enabled (see RenderGraph::SetEventSnapshotCaptureEnabled()).
 
+#include "RecordingContext.h"
 #include "RenderGraphBarrierPlanner.h"
 #include "RenderGraphNameSlotTable.h"
+#include "../../Core/FrameDebuggerEventSink.h"
 #include "../Memory/GpuMemoryTracker.h"
 #include "../Vulkan/VulkanAllocator.h"
 
@@ -12,6 +14,10 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
+
+namespace gte {
+class Renderer;
+}
 
 namespace gte::rg {
 
@@ -54,6 +60,11 @@ private:
 void CopyImageIntoSnapshot(VkCommandBuffer cmd, EventSnapshotResource& dst, VmaAllocator allocator,
     const std::shared_ptr<GpuMemoryTracker>& tracker, VkDevice device, VkImage srcImage, VkExtent2D srcExtent,
     VkFormat srcFormat, VkImageAspectFlags aspect, ResourceState& srcState, const char* debugName);
+
+// Vulkan-free entry for the Frame Debugger: same copy as above for the attachment `write` named, taking the
+// allocator, tracker and device from `renderer`.
+void CaptureAttachmentIntoSnapshot(const RecordingContext& cmd, Renderer& renderer, EventSnapshotResource& dst,
+    const AttachmentWrite& write, const char* debugName);
 
 // Fixed pool of slots, pre-sized to slotBudget * regionCount; each region owns an exclusive area so in-flight slots
 // are never replaced. Region 0 is the synchronous regime, [1, framesInFlight] the pipelined buffer indices.

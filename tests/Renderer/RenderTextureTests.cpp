@@ -21,7 +21,7 @@ TEST(RenderTextureTest, FinalizeForExternalSamplingReadsTrackedStateNotAGuess)
     tex.SetCurrentState(computeWriteState);
     EXPECT_EQ(tex.CurrentState(), computeWriteState);
 
-    const VkCommandBuffer cmd = fixture.GetRenderer().BeginOffscreenRenderGraphRecording();
+    const rg::RecordingContext cmd = fixture.GetRenderer().BeginOffscreenRenderGraphRecording();
     tex.FinalizeForExternalSampling(cmd);
     fixture.GetRenderer().EndOffscreenRenderGraphRecording();
 

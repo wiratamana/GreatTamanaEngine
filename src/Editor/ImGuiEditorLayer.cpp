@@ -302,7 +302,7 @@ public:
     void SetSceneViewCompositedTexture(RenderTexture* texture) override { m_sceneViewComposited = texture; }
 
     // See IEditorLayer::RenderSceneGrid(). Called only when the Scene view rendered, so no visibility check is needed.
-    void RenderSceneGrid(Renderer& renderer, VkCommandBuffer cmd, const Mat4& sceneViewProjection) override
+    void RenderSceneGrid(Renderer& renderer, const rg::RecordingContext& cmd, const Mat4& sceneViewProjection) override
     {
         m_sceneGrid.Draw(renderer, cmd, sceneViewProjection);
     }
@@ -383,11 +383,12 @@ public:
         }
     }
 
-    void Render(VkCommandBuffer cmd) override
+    void Render(const rg::RecordingContext& cmd) override
     {
         ImGui::SetCurrentContext(m_context);
         ImGui::Render();
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+        // The ImGui Vulkan backend needs the raw command buffer; this is the only place allowed to open it.
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), static_cast<VkCommandBuffer>(cmd.PlatformHandle()));
 
         // RenderPlatformWindows() checks this: it runs every frame, even when Render() was skipped.
         m_frameRendered = true;

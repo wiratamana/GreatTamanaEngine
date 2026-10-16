@@ -77,7 +77,7 @@ AtmosphereViewLutHandles AddAtmosphereViewLutPasses(rg::RenderGraphBuilder& buil
 // regardless of what happens to the other arguments afterward.
 // `skyViewLutName` must be the SAME name just passed to
 // AddAtmosphereViewLutPasses() above for this view, this same frame.
-std::function<void(rg::CommandBuffer&)> MakeRecordSkyBackgroundCallback(AtmosphereLutRenderer& atmosphereLutRenderer,
+std::function<void(const rg::RecordingContext&)> MakeRecordSkyBackgroundCallback(AtmosphereLutRenderer& atmosphereLutRenderer,
     Renderer& renderer, const rg::RenderGraph& renderGraph, const Mat4& viewProjection,
     const AtmosphereParametersGpu& atmosphereParameters, const AtmosphereFrameUniforms& frameUniforms,
     const char* skyViewLutName, float skyExposure);

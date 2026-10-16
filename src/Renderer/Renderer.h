@@ -12,6 +12,7 @@
 #include "Mesh.h"
 #include "Pipeline.h"
 #include "RenderGraph/GpuBuffer.h"
+#include "RenderGraph/RecordingContext.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "RenderGraph/RenderGraphTypes.h"
 #include "RenderTexture.h"
@@ -76,7 +77,7 @@ public:
         const std::function<void(rg::CommandBuffer&)>& recordExtra = {});
 
     // Begins recording into the dedicated offscreen command buffer.
-    VkCommandBuffer BeginOffscreenRenderGraphRecording();
+    rg::RecordingContext BeginOffscreenRenderGraphRecording();
 
     // Ends recording and submits the offscreen command buffer, blocking until complete.
     void EndOffscreenRenderGraphRecording();

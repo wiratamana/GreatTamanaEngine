@@ -21,7 +21,7 @@ public:
     Vec3 SceneViewCameraWorldPosition() const override { return Vec3::Zero(); }
     void SetGameViewCompositedTexture(RenderTexture* /*texture*/) override { }
     void SetSceneViewCompositedTexture(RenderTexture* /*texture*/) override { }
-    void RenderSceneGrid(Renderer& /*renderer*/, VkCommandBuffer /*cmd*/, const Mat4& /*sceneViewProjection*/) override { }
+    void RenderSceneGrid(Renderer& /*renderer*/, const rg::RecordingContext& /*cmd*/, const Mat4& /*sceneViewProjection*/) override { }
     void BuildUI(Game& /*game*/, Renderer& /*renderer*/, const rg::RenderGraph& /*renderGraph*/,
         const std::vector<GpuDrivenBatchDebugInfo>& /*gpuDrivenBatchDebugInfo*/,
         const std::vector<RenderFeatureDebugEntry>& /*renderFeatureEntries*/,
@@ -31,7 +31,7 @@ public:
         DescriptorSetLayoutHandle /*sceneServicesSetLayout*/) override
     {
     }
-    void Render(VkCommandBuffer /*cmd*/) override { }
+    void Render(const rg::RecordingContext& /*cmd*/) override { }
     void RenderPlatformWindows() override { }
     bool WantsExit() const override { return false; }
     bool WantsCaptureMouse() const override { return false; }

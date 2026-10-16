@@ -180,7 +180,7 @@ DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTe
     // recordExtra callbacks only use the raw escape hatch, never Draw()/Dispatch(), which need a Renderer.
     const std::function<void(VkCommandBuffer)> rawRecordExtra = [&recordExtra](VkCommandBuffer cmd) {
         if (recordExtra) {
-            rg::CommandBuffer wrapped = rg::CommandBuffer::AdoptRaw(cmd);
+            rg::CommandBuffer wrapped = rg::RecordingAccess::Adopt(cmd);
             recordExtra(wrapped);
         }
     };
@@ -326,7 +326,7 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
     }
 
     // A dependency cycle in Compile() would throw; it is not caught here, the caller handles it.
-    graph.Execute(cmd, rg::ExecuteTimingMode::PipelinedDeferredReadback,
+    graph.Execute(rg::RecordingAccess::Wrap(cmd), rg::ExecuteTimingMode::PipelinedDeferredReadback,
         [&](rg::RenderGraphBuilder& builder) -> std::vector<rg::TextureHandle> {
             // The swapchain image is never sampled, only presented - no sampler exists for it.
             const rg::TextureHandle swapchainHandle =

@@ -165,7 +165,7 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     s_editorProjectLifecycleCapability.SetEngineReferences(m_core, this);
 
     // Core only stores this callback; the editor's own Render(cmd) is still called from here, on EditorHost.
-    m_core.SetPresentImGuiRecorder([this](VkCommandBuffer cmd) { m_editorLayer->Render(cmd); });
+    m_core.SetPresentImGuiRecorder([this](const rg::RecordingContext& cmd) { m_editorLayer->Render(cmd); });
 
     // Seeds the panel registry with every built-in panel name before any plugin panel registers,
     // so built-ins always list first. The list must match the panel catalog.

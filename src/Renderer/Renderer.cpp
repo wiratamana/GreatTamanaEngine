@@ -158,9 +158,9 @@ DrawStats Renderer::RenderOffscreen(
     return m_presenter.RenderOffscreen(m_frameRecorder, target, timingSlot, recordExtra);
 }
 
-VkCommandBuffer Renderer::BeginOffscreenRenderGraphRecording()
+rg::RecordingContext Renderer::BeginOffscreenRenderGraphRecording()
 {
-    return m_presenter.BeginOffscreenRecording();
+    return rg::RecordingAccess::Wrap(m_presenter.BeginOffscreenRecording(), this);
 }
 
 void Renderer::EndOffscreenRenderGraphRecording()
@@ -239,21 +239,22 @@ Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageA
     const rg::ResourceState transferSrcState = rg::RequiredStateFor(rg::ResourceAccess::TransferSrc, false);
 
     ImmediateSubmit([&](rg::CommandBuffer& cmd) {
-        rg::EmitImageBarrier(cmd.RawCommandBuffer(), image, range, previousState, transferSrcState);
+        const VkCommandBuffer rawCmd = rg::RecordingAccess::Native(cmd);
+        rg::EmitImageBarrier(rawCmd, image, range, previousState, transferSrcState);
 
         VkBufferImageCopy region{};
         region.imageSubresource.aspectMask = aspect;
         region.imageSubresource.layerCount = 1;
         region.imageOffset = { 0, 0, static_cast<std::int32_t>(zOffset) };
         region.imageExtent = { extent.width, extent.height, depth };
-        vkCmdCopyImageToBuffer(cmd.RawCommandBuffer(), image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.Native(), 1, &region);
+        vkCmdCopyImageToBuffer(rawCmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.Native(), 1, &region);
 
         // Memory barrier to ensure device copy is visible to host read.
         const rg::ResourceState transferWriteState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT };
         const rg::ResourceState hostReadState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT };
-        rg::EmitBufferBarrier(cmd.RawCommandBuffer(), readback.Native(), 0, size, transferWriteState, hostReadState);
+        rg::EmitBufferBarrier(rawCmd, readback.Native(), 0, size, transferWriteState, hostReadState);
 
-        rg::EmitImageBarrier(cmd.RawCommandBuffer(), image, range, transferSrcState, previousState);
+        rg::EmitImageBarrier(rawCmd, image, range, transferSrcState, previousState);
     });
 
     CapturedRawPixels result;
@@ -326,7 +327,7 @@ void Renderer::ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& re
         throw std::runtime_error("Renderer::ImmediateSubmit: vkBeginCommandBuffer failed.");
     }
 
-    rg::CommandBuffer cmd = rg::CommandBuffer::AdoptRaw(vkCmd, const_cast<Renderer*>(this));
+    rg::CommandBuffer cmd = rg::RecordingAccess::Adopt(vkCmd, const_cast<Renderer*>(this));
     try {
         recordFn(cmd);
     } catch (...) {

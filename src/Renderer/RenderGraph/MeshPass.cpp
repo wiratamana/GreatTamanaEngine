@@ -14,7 +14,7 @@ SceneRecording::SceneRecording(PassContext& ctx)
 {
     assert(m_renderer != nullptr && "SceneRecording needs a pass context that carries a renderer");
     if (m_renderer != nullptr) {
-        m_renderer->BeginGraphPassRecording(ctx.RawCommandBuffer(), ctx.recordDraw);
+        m_renderer->BeginGraphPassRecording(RecordingAccess::Native(ctx), ctx.recordDraw);
     }
 }
 

@@ -1,5 +1,8 @@
 #include "CommandBuffer.h"
 
+#include "RecordingAccess.h"
+#include "../VulkanFormatInfo.h"
+
 #include "../Buffer.h"
 #include "../Compute/ComputeDispatch.h"
 #include "../Compute/ComputePipeline.h"
@@ -85,16 +88,16 @@ void CommandBuffer::Draw(const Pipeline& pipeline, const Mesh& mesh, const Mat4&
     m_renderer->Submit(pipeline, mesh, modelMatrix, viewProjMatrix, materialDescriptorSet, sceneServicesSet);
     m_renderer->EndGraphPassRecording();
 
-    // Notify frame debugger (prefers color over depth target).
+    // Notify the frame debugger (prefers the color target over depth).
     if (m_eventSink != nullptr) {
         if (m_writeTarget.colorImage != VK_NULL_HANDLE) {
-            m_eventSink->NoteCommandResult(
-                m_writeTarget.colorImage, m_writeTarget.colorExtent, m_writeTarget.colorFormat,
-                VK_IMAGE_ASPECT_COLOR_BIT);
+            m_eventSink->NoteCommandResult(AttachmentWrite{ RecordingAccess::ImageToken(m_writeTarget.colorImage),
+                Extent2D{ m_writeTarget.colorExtent.width, m_writeTarget.colorExtent.height },
+                CapturedPixelFormatFromVk(m_writeTarget.colorFormat), false });
         } else if (m_writeTarget.depthImage != VK_NULL_HANDLE) {
-            m_eventSink->NoteCommandResult(
-                m_writeTarget.depthImage, m_writeTarget.colorExtent, m_writeTarget.depthFormat,
-                VK_IMAGE_ASPECT_DEPTH_BIT);
+            m_eventSink->NoteCommandResult(AttachmentWrite{ RecordingAccess::ImageToken(m_writeTarget.depthImage),
+                Extent2D{ m_writeTarget.colorExtent.width, m_writeTarget.colorExtent.height },
+                FromVkFormat(m_writeTarget.depthFormat), true });
         }
     }
 }

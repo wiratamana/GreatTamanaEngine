@@ -107,12 +107,9 @@ public:
     // GET /get_game_view's capture source.
     RenderTexture* CompositedOutput(const char* outputTextureName) noexcept;
 
-    // Transitions `outputTextureName`'s composited output to a real
-    // ShaderRead state, ready for Dear ImGui/GET /get_game_view/GET
-    // /get_texture to sample it directly. Must be called against the SAME
-    // command buffer the offscreen RenderGraph::Execute() call just
-    // recorded into, before that command buffer is ended/submitted.
-    void FinalizeAerialPerspectiveCompositeForSampling(rg::CommandBuffer& cmd, const char* outputTextureName);
+    // Transitions the composited output named `outputTextureName` to ShaderRead for UI and capture sampling.
+    // Must run on the command buffer the offscreen graph just recorded into, before it is submitted.
+    void FinalizeAerialPerspectiveCompositeForSampling(const rg::RecordingContext& cmd, const char* outputTextureName);
 
     // The real Z-slice count for `aerialPerspectiveVolumeName` - returns 0
     // if that volume has never been generated this session.

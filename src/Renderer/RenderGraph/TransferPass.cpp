@@ -133,7 +133,7 @@ void DeclareTransfer(RenderGraphBuilder::PassBuilder& pass, const TransferRecord
 void ExecuteTransfer(PassContext& ctx, const TransferRecord& record)
 {
     using Op = TransferRecord::Op;
-    const VkCommandBuffer cmd = ctx.RawCommandBuffer();
+    const VkCommandBuffer cmd = RecordingAccess::Native(ctx);
     const auto unresolved = [&ctx](const char* what) {
         ctx.ReportOnce(kLogCategory, std::string("transfer skipped: ") + what + " did not resolve");
     };

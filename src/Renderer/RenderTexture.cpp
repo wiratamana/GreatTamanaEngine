@@ -1,5 +1,7 @@
 #include "RenderTexture.h"
 
+#include "RenderGraph/RecordingAccess.h"
+
 #include <cassert>
 #include <utility>
 
@@ -89,12 +91,12 @@ RenderTarget RenderTexture::Target() const noexcept
     return target;
 }
 
-void RenderTexture::FinalizeForExternalSampling(VkCommandBuffer cmd)
+void RenderTexture::FinalizeForExternalSampling(const rg::RecordingContext& cmd)
 {
     assert(Image() != VK_NULL_HANDLE && "FinalizeForExternalSampling: no color image to transition");
     const rg::ResourceState next = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
     const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    rg::EmitImageBarrier(cmd, Image(), range, m_currentState, next);
+    rg::EmitImageBarrier(rg::RecordingAccess::Native(cmd), Image(), range, m_currentState, next);
     m_currentState = next;
 }
 

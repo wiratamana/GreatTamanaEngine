@@ -63,7 +63,7 @@ bool RenderGraph::RunOneShot(CompiledGraphInput input, std::span<const TextureHa
 
     try {
         m_renderer->ImmediateSubmit([&](CommandBuffer& commandBuffer) {
-            const VkCommandBuffer cmd = commandBuffer.RawCommandBuffer();
+            const VkCommandBuffer cmd = RecordingAccess::Native(commandBuffer);
             for (const PassHandle& passHandle : compiled.executionOrder) {
                 PassRecord& pass = input.passes[passHandle.index];
                 for (const ResourceUsage& usage : pass.reads) {

@@ -1,6 +1,7 @@
 #include "AtmospherePassSequence.h"
 
 #include "../../Renderer/Renderer.h"
+#include "../../Renderer/RenderGraph/CommandBuffer.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 
 namespace gte {
@@ -52,13 +53,14 @@ AtmosphereViewLutHandles AddAtmosphereViewLutPasses(rg::RenderGraphBuilder& buil
     return result;
 }
 
-std::function<void(rg::CommandBuffer&)> MakeRecordSkyBackgroundCallback(AtmosphereLutRenderer& atmosphereLutRenderer,
+std::function<void(const rg::RecordingContext&)> MakeRecordSkyBackgroundCallback(AtmosphereLutRenderer& atmosphereLutRenderer,
     Renderer& renderer, const rg::RenderGraph& renderGraph, const Mat4& viewProjection,
     const AtmosphereParametersGpu& atmosphereParameters, const AtmosphereFrameUniforms& frameUniforms,
     const char* skyViewLutName, float skyExposure)
 {
     return [&atmosphereLutRenderer, &renderer, &renderGraph, viewProjection, atmosphereParameters, frameUniforms,
-               skyViewLutName, skyExposure](rg::CommandBuffer& cmd) {
+               skyViewLutName, skyExposure](const rg::RecordingContext& recording) {
+        rg::CommandBuffer cmd = recording.Commands();
         atmosphereLutRenderer.DrawSkyBackground(renderer, cmd, renderGraph, viewProjection, atmosphereParameters,
             frameUniforms, skyViewLutName, skyExposure);
     };
