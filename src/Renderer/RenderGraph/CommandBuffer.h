@@ -83,8 +83,8 @@ public:
 
     // --- Compute Recording ---
 
-    // Stages push constants for the next dispatch. The bytes are copied, so `data` need not outlive the call;
-    // more than kMaxPushConstantBytes asserts in debug builds and stages nothing.
+    // Stages push constants for the next dispatch (bytes are copied). A block over kMaxPushConstantBytes, or null
+    // data with a size, stages nothing and logs one error; debug builds assert.
     void SetPushConstants(const void* data, std::uint32_t size) noexcept;
 
     template <typename T>

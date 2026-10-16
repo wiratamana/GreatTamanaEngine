@@ -46,7 +46,19 @@ void CommandBuffer::SetPushConstants(const void* data, std::uint32_t size) noexc
         && "CommandBuffer::SetPushConstants(): supplied size does not match the bound ComputePipeline's own "
            "reflected push-constant size - see ComputePipeline::PushConstantSize()/ShaderReflection.h.");
     assert(size <= kMaxPushConstantBytes && "CommandBuffer::SetPushConstants(): push constants exceed 128 bytes.");
-    if (size > kMaxPushConstantBytes || (size > 0 && data == nullptr)) {
+    if (size > kMaxPushConstantBytes) {
+        static std::atomic_flag logged;
+        if (!logged.test_and_set()) {
+            GTE_LOG_ERROR("CommandBuffer", "SetPushConstants: block is larger than 128 bytes; push constants dropped.");
+        }
+        m_pushConstantSize = 0;
+        return;
+    }
+    if (size > 0 && data == nullptr) {
+        static std::atomic_flag logged;
+        if (!logged.test_and_set()) {
+            GTE_LOG_ERROR("CommandBuffer", "SetPushConstants: null data with a non-zero size; push constants dropped.");
+        }
         m_pushConstantSize = 0;
         return;
     }
