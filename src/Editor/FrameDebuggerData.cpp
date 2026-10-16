@@ -226,25 +226,9 @@ const rg::RenderGraphPassSnapshot* FindViewRegionPivot(
     return nullptr;
 }
 
-// task_manager/frame-debugger-7 campaign, PHASE4
-// (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.1) - finds the real
-// execution-order index, among the surviving Post-GameView compute passes,
-// of the pass that writes the "GameViewComposited" texture - the SAME
-// literal texture name FrameDebuggerCurrentCapture::CaptureFrame()'s own
-// `compositedGameViewSource` parameter is always created under
-// (Application.cpp's "GameViewComposited" RenderTexture - see
-// FrameDebuggerHistory.h's own doc comments, which already reference this
-// exact name). This is a STRUCTURAL check against each pass's own real
-// `writeNames` (a real render-graph resource-name fact, cross-checked
-// against `AtmosphereLutRenderer::AddAerialPerspectiveCompositePass()`'s
-// own `outputTextureName` call-site argument at implementation time), NOT
-// a check against the pass's own NAME (e.g.
-// "AtmosphereAerialPerspectiveCompositePass") - so a hypothetical future
-// rename of that pass would not silently break this split. Returns -1 if
-// no surviving Post-GameView pass writes that texture this frame (e.g. a
-// captured frame taken before the composite pass has ever run this
-// session) - every Post-GameView leaf is then treated as PostComposite
-// (Step 2's own "or nothing selected"/default catch-all bucket).
+// Execution-order index, among the surviving Post-GameView compute passes, of the pass that writes the
+// "GameViewComposited" texture (matched by written resource name, not pass name). Returns -1 when none writes it
+// this frame; every Post-GameView leaf is then treated as PostComposite.
 int FindPostGameViewCompositePassExecutionIndex(const rg::RenderGraphSnapshot& graphSnapshot, int gameViewIndex)
 {
     for (int i = gameViewIndex + 1; i < static_cast<int>(graphSnapshot.passesInExecutionOrder.size()); ++i) {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <volk.h>
+#include "../Core/UiTextureHandle.h"
 
 #include <filesystem>
 #include <memory>
@@ -12,47 +12,10 @@ namespace gte {
 class Renderer;
 class Texture2D;
 
-// Decodes an on-disk image asset via stb_image and uploads it to a GPU
-// Texture2D (Renderer.h) wrapped in an ImGui descriptor set, for the
-// Editor's "Inspector" panel to display via ImGui::Image() when a
-// Project-panel image asset is selected (see Panels/InspectorPanel.cpp).
-// Handles TWO kinds of on-disk image asset:
-//   - A plain, not-yet-imported image file (PNG/JPEG/BMP/TGA/GIF/PSD/HDR/
-//     PNM - see AssetInspectorData.h's IsSupportedImageExtension()),
-//     decoded directly via stb_image - same as always.
-//   - A *.gta-wrapped KTX2 texture (AssetType::Texture - see
-//     src/Assets/AssetTypes.h/GtaFile.h), i.e. the result of
-//     AssetImporter::ImportAssetFile() gating a dropped PNG/JPG through the
-//     KTX2 import pipeline (src/Assets/AssetImporter.h): its payload is
-//     read via ReadGtaFile() and decoded via Ktx2Decoder.h's
-//     DecodeKtx2ToRgba8() instead of stb_image, but lands in the exact same
-//     RGBA8-pixels-in, GPU-texture-out path either way - the Inspector
-//     shows a live preview for a freshly-imported texture asset exactly the
-//     same way it already did for the original PNG/JPG before import.
-//
-// src/Assets/StbImageImpl.cpp (not this file) is the ONE place in the
-// entire engine that includes stb_image with STB_IMAGE_IMPLEMENTATION
-// defined - see its own comment for why that moved out of this Editor-only
-// file into an always-compiled module. Matches this project's
-// VMA_IMPLEMENTATION/single-definition convention for single-header
-// third-party libraries (see cmake/FetchVMA.cmake).
-//
-// Caches only the SINGLE most-recently-resolved texture (never a full
-// path->texture map) - Inspector only ever shows one selection at a time,
-// so this mirrors ImGuiEditorLayer's own single-slot m_gameView/m_sceneView
-// pattern rather than an unbounded cache. Re-decodes/re-uploads only when
-// the requested path OR that file's own last-write-time has changed since
-// the previous Resolve() call - switching the Inspector selection back and
-// forth to the SAME still-selected asset costs nothing extra.
-//
-// Owns its GPU Texture2D + ImGui descriptor set for as long as they're the
-// currently-cached entry - both are released (Editor-only ImGui backend
-// call + this object's own destructor) the moment a different path is
-// resolved, or this object itself is destroyed. Deliberately does NOT store
-// a Renderer& (see Resolve()'s own parameter) - same "don't hold a
-// reference to Renderer itself, only the plain Vulkan handles it hands
-// out" convention every other Editor type already follows (see AGENTS.md,
-// "Editor Module Structure").
+// Decodes an on-disk image asset (a plain image file, or a *.gta-wrapped KTX2 texture) and uploads it to a GPU
+// texture for the Inspector's ImGui::Image() preview.
+// Caches only the most recently resolved texture; it is re-decoded only when the path or the file's write time changes.
+// Call Reset() before the UI backend shuts down (the destructor also calls it).
 class AssetPreviewTexture {
 public:
     AssetPreviewTexture() = default;
@@ -62,39 +25,26 @@ public:
     AssetPreviewTexture& operator=(const AssetPreviewTexture&) = delete;
 
     struct Preview {
-        VkDescriptorSet descriptor = VK_NULL_HANDLE; // Ready to pass straight to ImGui::Image().
+        UiTextureHandle descriptor = UiTextureHandle::Invalid; // Ready to pass to ImGui::Image().
         int width = 0;
         int height = 0;
     };
 
-    // Returns this asset's decoded/uploaded preview, or std::nullopt if
-    // `absolutePath` doesn't currently decode as a supported image (a plain
-    // file) or a Texture-type *.gta at all (missing file, unsupported/
-    // corrupt content, a *.gta that isn't AssetType::Texture, ...) - the
-    // caller (InspectorPanel) is expected to fall back to plain
-    // AssetMetadata in that case, exactly like every other failure mode in
-    // this Editor degrades to a status message rather than a crash.
+    // Returns the decoded preview, or nullopt when `absolutePath` is not a decodable image or texture asset.
+    // The caller then falls back to plain asset metadata.
     std::optional<Preview> Resolve(Renderer& renderer, const std::string& absolutePath);
 
-    // Releases the currently-cached GPU texture/ImGui descriptor (if any),
-    // waiting for the GPU to be idle first - see Reset()'s own comment in
-    // AssetPreviewTexture.cpp for why. Called by the destructor, and MUST
-    // also be called explicitly by ImGuiEditorLayer's destructor BEFORE
-    // ImGui_ImplVulkan_Shutdown() (member destruction order alone would run
-    // too late - see ImGuiEditorLayer.cpp).
+    // Releases the cached texture and its UI handle after the GPU is idle. Safe to call repeatedly.
     void Reset();
 
 private:
-    // Non-owning - captured from whichever Renderer was passed to the most
-    // recent Resolve() call, used only to call WaitForGpuIdle() before
-    // releasing a stale texture/descriptor in Reset().
-    Renderer* m_renderer = nullptr;
+    Renderer* m_renderer = nullptr; // Non-owning; used to retire the cached texture.
 
     std::string m_cachedPath;
     std::filesystem::file_time_type m_cachedWriteTime{};
     bool m_cachedIsValid = false; // True if m_cachedPath decoded successfully last time.
     std::unique_ptr<Texture2D> m_texture;
-    VkDescriptorSet m_descriptor = VK_NULL_HANDLE;
+    UiTextureHandle m_descriptor = UiTextureHandle::Invalid;
     int m_width = 0;
     int m_height = 0;
 };

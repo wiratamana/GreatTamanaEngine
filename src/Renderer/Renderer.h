@@ -46,6 +46,8 @@ class RenderGraphBuilder;
 class RenderGraphPersistentResourceCache;
 class RenderGraphComputeBindingCache;
 class OneShot;
+struct DebugTextureSnapshot;
+class EventSnapshotResource;
 } // namespace gte::rg
 
 namespace gte {
@@ -112,6 +114,13 @@ public:
 
     // Synchronously reads back color pixels from a RenderTexture.
     CapturedRawPixels CaptureRenderTexturePixels(RenderTexture& texture) const;
+
+    // Waits for the GPU, then reads back a debug texture snapshot (its depth image when `depthAspect`).
+    // Empty pixels when the image is missing or its format is unsupported.
+    CapturedRawPixels CaptureDebugTexturePixels(const rg::DebugTextureSnapshot& snapshot, bool depthAspect) const;
+
+    // Waits for the GPU, then reads back a retained per-event snapshot (a shader-read color or depth image).
+    CapturedRawPixels CaptureEventSnapshotPixels(const rg::EventSnapshotResource& snapshot, bool depthAspect) const;
 
     // Synchronously reads back raw pixel data from any GPU image.
     CapturedRawPixels CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format, Extent2D extent,
@@ -270,7 +279,13 @@ public:
     // UI texture handles for immediate-mode GUI integration.
     UiTextureHandle GetUiTextureHandle(const Texture2D& texture);
     UiTextureHandle GetUiTextureHandle(const RenderTexture& target);
+
+    // UI handle for a debug texture snapshot's color view; Invalid when it has none or no UI backend exists.
+    UiTextureHandle GetUiTextureHandle(const rg::DebugTextureSnapshot& snapshot);
     void ReleaseUiTextureHandle(UiTextureHandle handle) noexcept;
+
+    // Waits for the GPU, then releases `handle` and destroys `texture`. Either may be empty.
+    void RetireUiTexture(UiTextureHandle handle, std::unique_ptr<Texture2D> texture) noexcept;
 
     // Reads back a render target into engine pixel format for inspection.
     CaptureResult CaptureRenderTarget(const RenderTexture& target) const;

@@ -298,6 +298,11 @@ Assembly at all — `Renderer::GetVulkanContextInfo()` is private to
 descriptor-set construction a Project Assembly needs already goes through
 `Renderer`'s own factory methods, which resolve the device internally).
 
+The generated scaffold templates (`src/Editor/EditorProjectLifecycleCapability.cpp`) include only `Core/Core.h`,
+`Renderer/RenderGraph/RenderGraphTypes.h` and `Renderer/RenderGraph/RenderPipeline.h` (plus standard headers). They do
+not include `ComputePipeline.h`, `ComputeDescriptorSet.h`, `ComputeDispatch.h` or `RenderGraphBuilder.h`; a compute
+scaffold only leaves a TODO comment where the project builds its own pipeline.
+
 `ProjectAssemblyProbe_Game.dll`'s own `HelloGame.cpp` is the full, working,
 concrete example of all three Findings combined: it mints a transient
 256x256 texture, lazily builds a `ComputePipeline`/`ComputeDescriptorSet` on

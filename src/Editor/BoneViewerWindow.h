@@ -7,11 +7,10 @@
 #include "../Core/GraphicsHandles.h"
 #include "../Core/UiTextureHandle.h"
 #include "../Math/Vec3.h"
-#include "../Physics/DynamicChainDefinition.h" // DynamicChainDefinition - task_manager/verlet-integration-5, Phase 2
-#include "../Game/Physics/DynamicChainRigCache.h" // DynamicChainRigCache::ModelEntry - used by BuildPartListPane()'s signature below
+#include "../Physics/DynamicChainDefinition.h" // DynamicChainDefinition
+#include "../Game/Physics/DynamicChainRigCache.h" // DynamicChainRigCache::ModelEntry, used by BuildPartListPane()
 #include "../Renderer/Compute/ComputeDescriptorSet.h"
 #include "../Renderer/Pipeline.h"
-#include <volk.h>
 
 #include <cstdint>
 #include <filesystem>
@@ -27,71 +26,17 @@ class Buffer;
 class Texture2D;
 class RenderTexture;
 class ModelRigCache;
-class PhysicsSystem; // task_manager/verlet-integration-5, Phase 2 - PhysicsSystem::GetDynamicChainRigCache()
+class PhysicsSystem;
 struct EditorContext;
-// A Unity-"Avatar configuration"-style debug window: opened on demand (via
-// a button in the Inspector - see Panels/InspectorPanel.cpp's
-// BuildEntityInspector()) as its own floating ImGui window ("on the fly",
-// separate from the main docked layout - and, since ImGuiConfigFlags_
-// ViewportsEnable is already set for the whole Editor, this floating window
-// can itself be dragged clean outside the main OS window like any other
-// panel), showing a live 3D view of a spawned MMD model's BIND-POSE mesh
-// with every one of its skeleton's bones drawn as a small gizmo dot (plus a
-// line to its parent bone), and that bone's own NAME shown on hover/search -
-// exactly the debugging tool needed to eyeball whether an imported model's
-// bone hierarchy/naming actually looks right, and to figure out why an
-// imported model + animation pairing doesn't match up (e.g. a renamed/
-// missing bone the animation's own MotionData never finds a match for - see
-// Animation/MotionSampler.h's ResolveBoneTracksToSkeleton() and Game.h's
-// PlayAnimationOnEntity() doc comment for the full "matched purely by name"
-// story this window is meant to help debug).
-//
-// As of task_manager/verlet-integration-2 (PHASE3_BONE_VIEWER_VIEW_MODE_DROPDOWN_AND_GIZMO.md),
-// this window can also show Rigid Bodies/Joints (m_viewMode, a "Bones /
-// Rigid Bodies / Joints" toolbar dropdown) instead of only Bones - loaded
-// via the shared ModelRigCache (see ModelRigCache.h) rather than decoding
-// RigFileData itself, and every selection interaction (tree row click,
-// direct viewport gizmo click) routes through the Editor's single
-// gate-keeper, Selection (see Selection.h's SelectModelPart()/
-// IsModelPartSelected()), instead of this class's own (now-removed) private
-// m_selectedBoneIndex.
-//
-// Deliberately reads STRAIGHT FROM THE SOURCE *.gta FILE on disk (via
-// GtaFile.h/MeshFile.h/RigFile.h, through ModelRigCache for the metadata
-// half), the exact same "asset importer" reading path AssetPreviewMesh.h
-// already uses for the Inspector's own Project-panel mesh preview - NOT from
-// Game's private, path-keyed skinning caches (Game.h's m_meshSkinningCache)
-// - so this window has zero dependency on Game's internal caching/
-// animation-runtime state at all, only on MeshAssetSource's own recorded
-// gtaPath (ECS/Components/MeshAssetSource.h) for whichever entity it's
-// currently showing. This ALWAYS shows the model's original BIND POSE
-// (identity model matrix, bones at their authored SkeletonData::position -
-// see Assets/SkeletonData.h's own doc comment for why that's already in the
-// same model-local space as MeshData::positions, needing no extra
-// transform) - it deliberately does NOT reflect whatever pose a live
-// SkeletalAnimator might currently be posing the SAME entity's GPU mesh into
-// (see ECS/Components/SkeletalAnimator.h) - a live posed-skeleton overlay is
-// a natural, but separate, follow-up once this static bind-pose view proves
-// useful.
-//
-// Builds its own small VkPipeline/VkPipelineLayout directly (reusing the
-// exact same MeshPreview.vert/.frag shader pair + PreviewVertex layout
-// AssetPreviewMesh.cpp already uses - both are simple position+normal,
-// fixed-direction-lambert previews, just with an independent, user-
-// orbitable camera here instead of AssetPreviewMesh's fixed auto-spin one)
-// and records its own draw via a Renderer::RenderOffscreen() recordExtra
-// callback - the same "an external Vulkan-based rendering backend owned by
-// the Editor module" pattern AGENTS.md sanctions (see "Editor Module
-// Structure"). Gated behind GTE_ENABLE_PROJECT_PANEL (like AssetPreviewMesh
-// itself) purely because MeshPreview.vert/frag are only ever compiled/
-// staged under that same switch (see CMakeLists.txt) - nothing about the
-// bone-viewing feature ITSELF is Project-panel-specific.
-//
-// Owns its GPU buffers/RenderTexture/UI-texture handle/pipeline for as long
-// as they're needed - all released by Reset() (called by the destructor,
-// and MUST also be called explicitly by ImGuiEditorLayer's destructor
-// BEFORE the ImGui Vulkan backend shuts down, same requirement as
-// AssetPreviewMesh::Reset()/AssetPreviewTexture::Reset()).
+// Floating debug window opened from the Inspector: a live, orbitable 3D view of a model's bind-pose mesh with every
+// bone drawn as a gizmo dot (plus a line to its parent) and its name on hover, to check imported bone hierarchies.
+// It can also show rigid bodies and joints (m_viewMode); selection goes through the Editor's Selection.
+// Reads the source *.gta file straight from disk (through ModelRigCache for the rig data), so it never depends on
+// the game's skinning caches and always shows the bind pose, not a live animated pose.
+// Builds its pipeline with the MeshPreview shader pair and records through CommandBuffer in a
+// Renderer::RenderOffscreen() callback. Gated behind GTE_ENABLE_PROJECT_PANEL because those shaders are only built
+// under that switch.
+// Call Reset() before the UI backend shuts down (the destructor also calls it).
 class BoneViewerWindow {
 public:
     BoneViewerWindow() = default;
@@ -100,35 +45,14 @@ public:
     BoneViewerWindow(const BoneViewerWindow&) = delete;
     BoneViewerWindow& operator=(const BoneViewerWindow&) = delete;
 
-    // Opens (or re-targets, if already open) the window onto `rootEntity` -
-    // called by the Inspector's "Open Bone Viewer" button
-    // (Panels/InspectorPanel.cpp) for whichever entity is currently
-    // selected. Does not itself validate `rootEntity` in any way (that
-    // happens every frame inside Build(), against whatever the Registry
-    // currently says) - opening onto a bad entity just shows a "no mesh
-    // asset" message until a valid one is opened instead.
+    // Opens (or re-targets) the window onto `rootEntity`. An invalid entity shows a "no mesh asset" message.
     void Open(Entity rootEntity) noexcept;
 
-    // Builds the floating window - a complete no-op if not currently open
-    // (see Open() above / the window's own close button). Called once per
-    // frame from ImGuiEditorLayer::BuildUI(), after BuildInspectorPanel().
-    // `ctx` is the shared EditorContext (read/written for Selection - see
-    // Selection.h) and `rigCache` is the shared ModelRigCache (Culprit A/E,
-    // PHASE0_MASTER_STRATEGY.md) both owned by ImGuiEditorLayer, passed by
-    // reference exactly like `registry`/`renderer` already are.
-    // `physicsSystem` (task_manager/verlet-integration-5, PHASE0_MASTER_STRATEGY.md,
-    // Culprit E) is "Verlet" mode's own source of truth - looked up FRESH
-    // every Build() call (PhysicsSystem::GetDynamicChainRigCache().TryGet())
-    // rather than cached into a new member field, since DynamicChainRigCache
-    // is already an in-memory, already-populated, O(1)-lookup map with no
-    // on-disk mtime concept to gate a reload against in the first place.
+    // Builds the floating window; a no-op while closed. Called once per frame from ImGuiEditorLayer::BuildUI().
+    // `rigCache` is the shared rig cache; `physicsSystem` is looked up fresh every call for the dynamic-chain view.
     void Build(Registry& registry, Renderer& renderer, EditorContext& ctx, ModelRigCache& rigCache, PhysicsSystem& physicsSystem);
 
-    // Releases every currently-held GPU resource (vertex/index buffers,
-    // RenderTexture, ImGui descriptor, pipeline) - waiting for the GPU to be
-    // idle first, same reasoning as AssetPreviewMesh::Reset(). Called by
-    // the destructor, and safe to call repeatedly/on an already-empty
-    // instance.
+    // Releases every held GPU resource after the GPU is idle. Also called by the destructor; safe to call repeatedly.
     void Reset();
 
 private:
@@ -229,16 +153,8 @@ private:
     DescriptorSetLayoutHandle m_setZeroFillerLayoutHandle = DescriptorSetLayoutHandle::Invalid;
     DescriptorSetLayoutHandle m_setOneLayoutHandle = DescriptorSetLayoutHandle::Invalid;
 
-    // MeshPreview.frag now samples the shared set=1 lighting/shadow
-    // interface (DirectionalLightingAndReceiverMask.glsl) - this window has
-    // no real per-frame scene light/shadow context, so it builds its own
-    // tiny, local, always-neutral stand-in, exactly mirroring
-    // AssetPreviewMesh's own identical local descriptor infra: a 1x1 white
-    // dummy texture at binding 0 + a zero-filled dummy UBO at binding 8,
-    // bound at set=1. Allocated directly against m_setOneLayoutHandle via
-    // Renderer::AllocateComputeDescriptorSet(), which also binds its
-    // owning VkDevice - the returned set comes from Renderer's own shared
-    // descriptor pool and is never individually freed.
+    // Neutral stand-in for the shared set=1 lighting interface: a 1x1 white texture at binding 0 and a
+    // zero-filled UBO at binding 8. The set comes from Renderer's shared pool and is never freed individually.
     ComputeDescriptorSet m_localSetOneDescriptorSet;
     std::unique_ptr<Texture2D> m_localWhiteTexture;
     std::unique_ptr<Buffer> m_localUniformBuffer;

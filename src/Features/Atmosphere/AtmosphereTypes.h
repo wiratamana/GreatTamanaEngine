@@ -7,53 +7,9 @@
 
 namespace gte {
 
-// ============================================================================
-// Atmosphere Scattering + Aerial Perspective - Phase 1: Physical Model
-// Foundations
-// ============================================================================
-// See task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md
-// for the full 9-phase campaign map and
-// task_manager/atmosphere-scattering-1/
-// ATMOSPHERE_PHASE1_REFERENCE_ANALYSIS_AND_PHYSICAL_MODEL_FOUNDATIONS_v1.md
-// for this phase's own design reasoning. This file defines the plain GPU
-// buffer LAYOUT every later phase's compute shader reads - it creates NO
-// Vulkan buffers/descriptor sets itself (a future phase's own orchestration
-// file does that, mirroring src/Renderer/GpuSkinning/'s own
-// GpuSkinningTypes.h [pure data] vs. GpuSkinningPipelines.h [live-VkDevice
-// orchestration] split).
-//
-// Deliberately Vulkan-header-free (no <volk.h>/<vulkan/vulkan.h> anywhere in
-// this file) - mirrors src/Renderer/GpuTiming.h's own "zero Vulkan-header
-// dependency" precedent exactly, so every struct here stays trivially
-// Tier-1-testable with no live VkDevice at all (see
-// tests/Renderer/Atmosphere/AtmosphereMathTests.cpp).
-//
-// PADDING/LAYOUT CONVENTION: every struct below is laid out as a sequence of
-// 16-byte GROUPS, matching GLSL's std140 alignment rule for a vec3 (a vec3
-// member aligns its GROUP to 16 bytes, and a scalar immediately following it
-// packs into that same group's trailing 4 bytes with zero gap - this is
-// exactly how the cloned reference's own plAtmosphereSettings struct
-// packs its vec3+float pairs, see
-// _reference/pl-sky/shaders/sky_interop.inc). As of the "Revision Notes"
-// double-check pass on this phase's own strategy document, these structs
-// will actually be bound as a read-only STORAGE buffer (std430), not a true
-// `uniform` block - by deliberate choice, matching every other Atmosphere
-// LUT pass's own storage-buffer convention (Scene Services binding 8 is
-// this engine's one, scoped UBO exception - see Shaders/
-// DirectionalLightingAndReceiverMask.glsl). std140 and std430 produce
-// IDENTICAL padding for a flat, array-free struct like both of these, so
-// every group below is std140-AND-std430-compatible with no changes needed
-// either way.
-//
-// `Vec3` (src/Math/Vec3.h) is used directly as each group's vec3 member
-// (rather than three separately-named float fields, unlike
-// src/Renderer/GpuSkinning/GpuSkinningTypes.h's own per-vertex structs) since
-// this file's structs are each created/read ONCE per frame (or once at
-// startup), not packed by the thousand per vertex - ergonomics for
-// AtmosphereMath.h's Vec3-based math clearly wins over the vertex-buffer
-// case's own "avoid any assumption about a math type's memory layout"
-// caution. The static_assert immediately below is what makes that
-// assumption an explicit, checked one rather than a silent hope.
+// Plain GPU buffer layouts read by the atmosphere compute shaders (bound as read-only storage buffers).
+// Vulkan-free on purpose. Every struct is a sequence of 16-byte groups: a Vec3 plus a scalar share one group,
+// which is identical under std140 and std430.
 static_assert(sizeof(Vec3) == 12,
     "AtmosphereParametersGpu/AtmosphereFrameUniforms below assume Vec3 is a "
     "tightly-packed 3xfloat POD (see src/Math/Vec3.h) so a Vec3 field "
@@ -61,67 +17,32 @@ static_assert(sizeof(Vec3) == 12,
     "matching GLSL's std140/std430 vec3+scalar layout rule with zero extra "
     "compiler-inserted padding.");
 
-// Every physical constant describing one planet's atmosphere - populated by
-// AtmosphereParameters.h's MakeDefaultEarthAtmosphereParameters() with
-// values transcribed verbatim from the cloned reference implementation
-// (hoffstadt/pl-sky) - see task_manager/atmosphere-scattering-1/
-// ATMOSPHERE_REFERENCE_NOTES.md, Section 1, for the full citation table.
-// Every scattering/absorption coefficient is in units of PER KILOMETER
-// (km^-1); every height/radius/thickness field is in KILOMETERS - matching
-// the reference's own units exactly (its planetRadius = 6371.0f is
-// unmistakably Earth's radius in km).
-//
-// DEVIATION FROM THIS PHASE'S OWN STRATEGY DOCUMENT (flagged per Phase 0's
-// "the real source always wins" rule): the strategy document anticipated a
-// Bruneton-style two-layer piecewise ozone absorption profile and a field
-// named `atmosphereRadiusKm`. The ACTUAL cloned reference uses a much
-// simpler single symmetric TENT profile (`ozoneTentCenterKm`/
-// `ozoneTentHalfWidthKm` below - see AtmosphereMath.h's
-// OzoneDensityAtHeight()) and stores the atmosphere's THICKNESS above the
-// ground (`atmosphereThicknessKm`, matching every one of the reference's own
-// ray/UV formulas, which consistently work in height-above-ground) rather
-// than an absolute radius from the planet's center - AtmosphereRadiusKm()
-// (AtmosphereParameters.h) is the one small helper that derives the latter
-// from the former for any call site that needs it.
+// Physical constants of one planet's atmosphere. Coefficients are per kilometer (km^-1); heights, radii and
+// thickness are in kilometers. The ozone layer is a single symmetric tent profile; the atmosphere is stored as
+// thickness above the ground (see AtmosphereRadiusKm() for the absolute radius).
 struct AtmosphereParametersGpu {
-    // Group 1 (16 bytes): Rayleigh scattering coefficient at sea level - this
-    // ALSO equals Rayleigh extinction (real air has ~zero Rayleigh
-    // absorption, so there is no separate rayleighAbsorption field - matches
-    // the reference exactly, see ATMOSPHERE_REFERENCE_NOTES.md Section 1) -
-    // plus the reciprocal of the Rayleigh density profile's exponential
-    // scale height (see AtmosphereMath.h's RayleighDensityAtHeight()).
+    // 16 bytes: Rayleigh scattering at sea level (it also equals Rayleigh extinction) plus the reciprocal of its
+    // exponential scale height.
     Vec3 rayleighScattering = Vec3(0.0058f, 0.0135f, 0.0331f);
     float rayleighDensityExpScale = 1.0f / 8.0f; // 1 / (8km scale height)
 
-    // Group 2 (16 bytes): Mie scattering coefficient - intentionally GREY
-    // (all three channels equal, mirroring the reference's own single float
-    // `scatteringMieGround` broadcast to every channel - Mie scattering off
-    // aerosols is essentially wavelength-independent, unlike Rayleigh) -
-    // plus the Cornette-Shanks phase function's asymmetry parameter g.
+    // 16 bytes: grey Mie scattering plus the Cornette-Shanks phase asymmetry g.
     Vec3 mieScattering = Vec3(0.006f, 0.006f, 0.006f);
     float miePhaseG = 0.76f;
 
-    // Group 3 (16 bytes): Mie absorption coefficient (also grey; derived
-    // from the reference's own extinctionMieGround(0.00666) -
-    // scatteringMieGround(0.006) = 0.00066) plus the reciprocal of the Mie
-    // density profile's exponential scale height.
+    // 16 bytes: grey Mie absorption plus the reciprocal of the Mie exponential scale height.
     Vec3 mieAbsorption = Vec3(0.00066f, 0.00066f, 0.00066f);
     float mieDensityExpScale = 1.0f / 1.2f; // 1 / (1.2km scale height)
 
-    // Group 4 (16 bytes): ozone absorption coefficient (the Chappuis
-    // absorption band - ozone scatters essentially nothing, only absorbs)
-    // plus the ozone "tent" density profile's center altitude.
+    // 16 bytes: ozone absorption plus the tent profile's center altitude.
     Vec3 ozoneAbsorption = Vec3(0.00065f, 0.00188f, 0.00008f);
     float ozoneTentCenterKm = 25.0f;
 
-    // Group 5 (16 bytes): ground albedo (the fraction of incident light a
-    // planet-surface hit reflects back - consumed by the Multi-Scattering
-    // LUT's ground-bounce term, Phase 4) plus the ozone tent's half-width.
+    // 16 bytes: ground albedo (used by the multi-scattering ground bounce) plus the tent's half-width.
     Vec3 groundAlbedo = Vec3(0.3f, 0.3f, 0.3f);
     float ozoneTentHalfWidthKm = 15.0f;
 
-    // Group 6 (16 bytes): planet/atmosphere sizing, a multi-scattering
-    // strength multiplier, plus one reserved padding float.
+    // 16 bytes: planet radius, atmosphere thickness, multi-scattering strength, one padding float.
     float planetRadiusKm = 6371.0f;
     float atmosphereThicknessKm = 100.0f;
     float multiScatteringStrength = 1.0f;
@@ -132,100 +53,47 @@ static_assert(sizeof(AtmosphereParametersGpu) == 96,
     "compatible groups (6 * 16 = 96 bytes) - see each group's own doc "
     "comment above.");
 
-// The PER-FRAME values every atmosphere-sampling pass from Phase 5 onward
-// needs, threaded in alongside AtmosphereParametersGpu above (which changes
-// only when the atmosphere's own physical constants change, i.e. almost
-// never).
+// Per-view, per-frame values the atmosphere passes read next to AtmosphereParametersGpu.
 struct AtmosphereFrameUniforms {
-    // Group 1 (16 bytes): the camera's position in ATMOSPHERE-SPACE
-    // kilometers (see AtmosphereParameters.h's
-    // WorldPositionToAtmosphereSpaceKm()) - i.e. height above the planet's
-    // center in the same coordinate frame every AtmosphereMath.h function
-    // above works in, NOT the engine's raw world-space Transform::position -
-    // plus one reserved padding float.
+    // 16 bytes: camera position in atmosphere space (km, measured from the planet center) plus padding.
     Vec3 cameraPositionAtmosphere = Vec3::Zero();
     float _pad0 = 0.0f;
 
-    // Group 2 (16 bytes): normalized direction FROM the scene TOWARD the
-    // sun, plus one reserved padding float.
+    // 16 bytes: normalized direction from the scene toward the sun plus padding.
     Vec3 sunDirection = Vec3::Up();
     float _pad1 = 0.0f;
 
-    // Group 3 (16 bytes): the sun's color/intensity (illuminance), plus one
-    // reserved padding float.
+    // 16 bytes: sun color/illuminance plus padding.
     Vec3 sunIlluminance = Vec3::One();
     float _pad2 = 0.0f;
 
-    // Groups 4-7 (64 bytes, Phase 6 -
-    // ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md): this VIEW's
-    // combined view-projection matrix, ALREADY INVERTED on the CPU side
-    // (never inverted in the shader - a 4x4 inverse is comparatively
-    // expensive and this value is only ever computed once per view per
-    // frame here, vs. once per froxel COLUMN if done in
-    // AtmosphereAerialPerspectiveVolume.comp instead). Needed to reconstruct
-    // a world-space view-ray DIRECTION for a given froxel column
-    // (AtmosphereCommon.glsl's FroxelColumnToViewRayDirection() unprojects
-    // two NDC points - near/far plane - through this matrix and takes their
-    // difference, which is handedness/projection-convention-agnostic,
-    // unlike pl-sky's own inverse-projection-diagonal shortcut - see this
-    // phase's own completion report for the full reasoning). `mat4` is
-    // ALREADY exactly 4 vec4 columns (64 bytes, 16-byte-aligned per column)
-    // in both this engine's own Mat4 layout (column-major, see Math/Mat4.h)
-    // AND GLSL's std140/std430 mat4 layout - no padding needed, matching
-    // Mat4::Data()'s existing "uploads with zero transpose" contract.
-    // Defaults to Identity() (never Mat4()'s own all-zero default - see
-    // Mat4.h) so a caller that forgets to set this (e.g. the Sky-View LUT's
-    // own call site, which does not need this field at all) still uploads
-    // an invertible, harmless placeholder rather than a singular all-zero
-    // matrix.
+    // 64 bytes: the view's inverse view-projection, inverted on the CPU. Shaders unproject two NDC points with it
+    // to get a world-space view ray. Defaults to identity so an unset value stays invertible.
     Mat4 invViewProjection = Mat4::Identity();
 
-    // Group 8 (16 bytes, atmosphere-scattering-2 campaign Phase 1) - the
-    // Aerial Perspective froxel volume's own tunable ray-march parameters,
-    // now sourced from AtmosphereSettings (Editor "Atmosphere" panel) instead
-    // of hardcoded shader constants - see AtmosphereAerialPerspectiveVolume.comp.
-    // Deliberately stored here (per-VIEW frame uniforms), not in
-    // AtmosphereParametersGpu (session-stable physical constants), since a
-    // future per-view override is plausible even though today both Game/Scene
-    // views always receive the SAME AtmosphereSettings-sourced values.
-    //
-    // Phase 3 (atmosphere-scattering-2) DELIBERATELY leaves these four
-    // struct-level DEFAULT member initializers at the OLD, physically-
-    // conservative pre-Phase-3 numbers (10km/2.0/8/1.0) rather than mirroring
-    // AtmosphereSettings's own new Phase 3 defaults below. These defaults are
-    // only ever actually observed by a caller that constructs an
-    // AtmosphereFrameUniforms{} directly WITHOUT going through
-    // AtmosphereSettings - no such production call site exists today,
-    // AddAtmosphereViewLutPasses() always overwrites all four fields from the
-    // live AtmosphereSettings first (see AtmospherePassSequence.cpp) - so this
-    // is a documented "safety net" choice, not a behavior-affecting one: if a
-    // future caller ever DOES construct this struct directly, it silently
-    // falls back to the original, unexaggerated, real-Earth-scale physical
-    // result rather than inheriting the new, deliberately exaggerated
-    // Editor-facing defaults.
+    // 16 bytes: aerial perspective ray-march tunables, copied from AtmosphereSettings every frame. These defaults
+    // are the unexaggerated real-scale values and only apply to a struct built without going through settings.
     float aerialPerspectiveMaxDistanceKm = 10.0f;
     float aerialPerspectiveDepthExponent = 2.0f;
-    float aerialPerspectiveSamplesPerSliceAsFloat = 8.0f; // Stored as float (GLSL storage-buffer int alignment is fiddly); shader rounds+clamps to [1, 8].
-    float aerialPerspectiveScatteringExaggeration = 1.0f; // Now consumed by AtmosphereAerialPerspectiveVolume.comp as of Phase 3 - see that file's own doc comment.
+    float aerialPerspectiveSamplesPerSliceAsFloat = 8.0f; // Stored as float; the shader rounds and clamps to [1, 8].
+    float aerialPerspectiveScatteringExaggeration = 1.0f; // Multiplies the extinction while marching the volume.
 };
 static_assert(sizeof(AtmosphereFrameUniforms) == 128,
     "AtmosphereFrameUniforms must be exactly three 16-byte std140/std430-"
     "compatible groups (3 * 16 = 48 bytes) plus one 64-byte mat4 group "
-    "(48 + 64 = 112 bytes) plus one new 16-byte group (atmosphere-scattering-2 "
-    "Phase 1 aerial perspective tunables) - 48 + 64 + 16 = 128 bytes total - "
+    "(48 + 64 = 112 bytes) plus one 16-byte group of aerial perspective "
+    "tunables - 48 + 64 + 16 = 128 bytes total - "
     "see each group's own doc comment above.");
 
-// Tunable atmosphere knobs, edited live via the Editor's "Atmosphere" panel.
-// Physical fields mirror AtmosphereParametersGpu, rebuilt every frame (see
-// AtmosphereFeature.cpp). Owned by Application, not EditorContext/ECS -
-// exactly one per running session.
+// Tunable atmosphere knobs, edited live in the Editor's "Atmosphere" panel. The physical fields mirror
+// AtmosphereParametersGpu and are re-read every frame by AtmosphereFeature. One instance per session.
 struct AtmosphereSettings {
     Vec3 rayleighScattering = Vec3(0.0058f, 0.0135f, 0.0331f);
-    float rayleighScaleHeightKm = 8.0f; // Scale height (km) - NOT the GPU struct's reciprocal, see AtmosphereMath.h.
+    float rayleighScaleHeightKm = 8.0f; // Scale height (km), not the GPU struct's reciprocal.
     Vec3 mieScattering = Vec3(0.006f, 0.006f, 0.006f);
     float miePhaseG = 0.76f;
     Vec3 mieAbsorption = Vec3(0.00066f, 0.00066f, 0.00066f);
-    float mieScaleHeightKm = 1.2f; // Scale height (km) - see rayleighScaleHeightKm above.
+    float mieScaleHeightKm = 1.2f; // Scale height (km).
     Vec3 ozoneAbsorption = Vec3(0.00065f, 0.00188f, 0.00008f);
     float ozoneTentCenterKm = 25.0f;
     Vec3 groundAlbedo = Vec3(0.3f, 0.3f, 0.3f); // Fraction of light the ground reflects back.
@@ -234,53 +102,14 @@ struct AtmosphereSettings {
     float atmosphereThicknessKm = 100.0f;
     float multiScatteringStrength = 1.0f;
 
-    // Overall multiplier for the Aerial Perspective Composite pass's
-    // effect strength - 1.0 reproduces the unscaled physical result
-    // exactly, 0.0 fully disables it (a pure pass-through of the
-    // pre-composite scene color), see
-    // AtmosphereAerialPerspectiveComposite.comp's own doc comment for the
-    // exact blend formula this scales.
+    // Strength of the aerial perspective composite: 1.0 is the physical result, 0.0 passes the scene color through.
     float aerialPerspectiveStrength = 1.0f;
 
-    // Exposure multiplier for the Sky Background pass's own fixed
-    // exponential tonemap (see AtmosphereSkyBackground.frag) - replaces
-    // what used to be a hardcoded `kSkyExposure = 12.0` constant.
+    // Exposure of the sky background's exponential tonemap.
     float skyExposure = 12.0f;
 
-    // atmosphere-scattering-2 campaign, Phase 1/3 - Aerial Perspective froxel
-    // volume ray-march tunables, mirrored into every view's own
-    // AtmosphereFrameUniforms (Application.cpp) each frame.
-    //
-    // Phase 3 (PHASE3_AERIAL_PERSPECTIVE_VISIBILITY_REBALANCE.md) ships NEW
-    // shipped DEFAULTS here - this is the actual visibility fix for "I can't
-    // see the blueish fog on far distance objects":
-    //   - aerialPerspectiveMaxDistanceKm: was 10.0f (Phase 1's own "zero
-    //     behavior change" value, identical to the pre-Phase-1 hardcoded
-    //     shader constant) - now 0.5f (500m), matched to typical engine
-    //     test-scene content scale (tens to a few hundred meters), per
-    //     AERIAL_PERSPECTIVE_INVESTIGATION_FINDINGS.md's own recommended
-    //     0.05-0.5km range.
-    //   - aerialPerspectiveDepthExponent: unchanged (2.0f) - the quadratic
-    //     near-camera slice density is still correct at this new, smaller
-    //     scale (re-confirmed dimensionless per Step 3.5 of the phase file).
-    //   - aerialPerspectiveSamplesPerSlice: unchanged (8).
-    //   - aerialPerspectiveScatteringExaggeration: was 1.0f (a documented
-    //     no-op placeholder, unused until this phase) - now 30.0f, re-tuned
-    //     EMPIRICALLY against a live scaled-primitive test scene (10m/100m/
-    //     400m from camera, using the network-impl-5 POST /set_entity_trs
-    //     command to scale each test cube proportionally to its distance so
-    //     all three keep a similar on-screen size) via
-    //     GET /get_texture?texture_name=SceneViewComposited (GET
-    //     /get_game_view itself 409'd - "Game" was the inactive dock tab
-    //     this session, see PHASE3_COMPLETION_REPORT.md for the full
-    //     reasoning) - see that same report for the exact before/after
-    //     screenshots and why 30.0f (not the phase file's own documented
-    //     6.0f STARTING point) was the value actually shipped: 6.0f and even
-    //     20.0f were visually indistinguishable from each other in this
-    //     engine's real-Earth-scale coefficients at these distances, while
-    //     30.0f produces a clearly visible darkening/tinting of far-distance
-    //     geometry relative to near, without drastically altering the sky's
-    //     own overall tone the way 50.0f did.
+    // Aerial perspective volume ray-march tunables. The 0.5km range and 30x exaggeration are tuned for scenes
+    // with content tens to a few hundred meters from the camera.
     float aerialPerspectiveMaxDistanceKm = 0.5f;
     float aerialPerspectiveDepthExponent = 2.0f;
     int aerialPerspectiveSamplesPerSlice = 8;

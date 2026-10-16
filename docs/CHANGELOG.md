@@ -9,8 +9,7 @@ engine. For the short, current-state summary, see the main
 - Render pass API (`gte::rg`): one reflected `rg::Shader` for compute and graphics, binding by name with inferred
   access, uniform buffers, growable descriptor pools with per-type statistics (Memory panel, `/get_logs` above 75%),
   `ComputePass`, `FullscreenPass` (MRT, depth test), `MeshPass`, `IndirectDrawPass`, `TransferPass`,
-  `BlitFilter`, transfer usage bits on graph textures. The raw command buffer is no longer public
-  (`PassContext::RawCommandBuffer()` / `CommandBuffer::AdoptRaw()` are tracked by NativeLeakCheck).
+  `BlitFilter`, transfer usage bits on graph textures. The raw command buffer is not reachable outside `src/Renderer`.
 - Feature kit (`gte::fx`, `src/Core/FeatureKit`): `Feature`, `FeatureSetup`, typed frames, `Gate`,
   `GTE_REGISTER_RENDER_FEATURE`; frame verbs `Compute`, `Fullscreen`, `SceneDraw`, `Blit`, `Keep`, `PublishToScene`,
   `SetSceneUniforms`; resources `PerView`, `PersistentTarget`, `OffscreenTarget`, `GpuParams`, `Channel`, `SceneSlot`;
@@ -22,6 +21,23 @@ engine. For the short, current-state summary, see the main
 - CI guardrails (`gte_ci_scan`): VolkLeak, NativeLeak, FeaturePurity, EngineVocabulary and the header purity probe.
   A stale allowlist line fails the check; a scan of zero files fails the check.
 - Shader files resolve against the executable directory only.
+- Recording context: code outside `src/Renderer` carries the Vulkan-free `rg::RecordingContext`.
+  `CommandBuffer::AdoptRaw`, `CommandBuffer::RawCommandBuffer` and `PassContext::RawCommandBuffer` are gone; only
+  `rg::RecordingAccess` inside `src/Renderer` opens the raw handle. See
+  [recording-context.md](architecture/recording-context.md).
+- Frame Debugger: `FrameDebuggerEventSink` takes an `AttachmentWrite` (opaque image token, extent, `PixelFormat`); the
+  snapshot copy is `rg::CaptureAttachmentIntoSnapshot` in `src/Renderer`. Editor previews use `UiTextureHandle`; readbacks
+  use `Renderer::CaptureDebugTexturePixels` / `CaptureEventSnapshotPixels`. The metadata sink gets barrier labels as strings.
+- Atmosphere is an `fx::Feature` on the kit. `AtmosphereLutRenderer`, `AtmosphereLutRendererImpl`,
+  `AtmospherePassSequence` and `AtmospherePassToggleLogic` are deleted. The compute shaders name their storage blocks
+  `params` and `frame`. The FeaturePurity allowlist is empty.
+- Kit: `ViewBackground` with `rg::FullscreenReplay` (Frame Debugger background replay), `FullscreenChain::DepthTest`,
+  `fx::ViewOutput` with `Frame::ExposeAsViewOutput` and `Core::ExposeViewOutput` (replaces
+  `RegisterFinalizeForSamplingHook`), `Renderer::ResizeRenderTexture`, `CountInViewStats`. A value published by a
+  `PreOpaqueShared` callback is visible to every view, and textures of the Shared callback pass `Frame::Owns`. See
+  [kit-view-background.md](architecture/kit-view-background.md) and [kit-view-output.md](architecture/kit-view-output.md).
+- A render-graph pass that skips a binding asserts in debug builds (it still logs once in release).
+- CI allowlists: FeaturePurity 0 lines, VolkLeak 9 lines, NativeLeak 10 lines.
 - See [render-pass-api.md](conventions/render-pass-api.md) and
   [render-feature-authoring.md](conventions/render-feature-authoring.md).
 

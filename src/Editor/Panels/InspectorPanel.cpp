@@ -1198,7 +1198,7 @@ void BuildTextureViewer(const AssetMetadata& metadata, const AssetPreviewTexture
         const float offsetX = (avail.x - displayWidth) * 0.5f;
         const float offsetY = (avail.y - displayHeight) * 0.5f;
         ImGui::SetCursorScreenPos(ImVec2(origin.x + offsetX, origin.y + offsetY));
-        ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(preview.descriptor)),
+        ImGui::Image(static_cast<ImTextureID>(static_cast<std::uint64_t>(preview.descriptor)),
             ImVec2(displayWidth, displayHeight));
 
         char overlay[64];

@@ -1,7 +1,6 @@
 #include "FrameDebuggerPanel.h"
 
 #include "../EditorContext.h"
-#include "../MemoryPanelData.h"
 #include "../../Encoding/HdrColorVisualization.h"
 #include "../../Encoding/CapturedPixelConversion.h"
 #include "../../Encoding/DepthVisualization.h"
@@ -22,7 +21,6 @@
 #include "../FrameDebuggerSideChannelGuard.h"
 #include "../VolumeTexturePreviewSelection.h"
 
-#include <backends/imgui_impl_vulkan.h>
 #include <imgui.h>
 
 #include <algorithm>
@@ -48,40 +46,37 @@ void BuildPropertyRow(const char* label, const std::string& value)
 
 FrameDebuggerPanel::~FrameDebuggerPanel()
 {
-    // In-flight command buffers may still reference the preview descriptor and the preview processor's GPU
-    // resources: wait for the GPU whenever a device is known.
+    // In-flight command buffers may still reference the preview descriptor and the preview renderers' GPU
+    // resources: retiring waits for the GPU whenever a renderer is known.
     if (m_frameRenderer != nullptr) {
-        m_frameRenderer->WaitForGpuIdle();
+        m_frameRenderer->RetireUiTexture(m_previewDescriptor, nullptr);
+        m_previewDescriptor = UiTextureHandle::Invalid;
+        m_lastKnownPreviewView = 0;
     }
-    ReleasePreviewDescriptor();
-    // Defense in depth: ImGuiEditorLayer releases this before ImGui_ImplVulkan_Shutdown(), so this is normally a no-op.
+    // Defense in depth: ImGuiEditorLayer releases this before the UI backend shuts down, so this is normally a no-op.
     ReleaseShaderPropertyTexturePreview();
 }
 
 void FrameDebuggerPanel::ReleasePreviewDescriptor()
 {
-    if (m_previewDescriptor != VK_NULL_HANDLE) {
-        ImGui_ImplVulkan_RemoveTexture(m_previewDescriptor);
-        m_previewDescriptor = VK_NULL_HANDLE;
-        m_lastKnownPreviewView = VK_NULL_HANDLE;
+    if (m_previewDescriptor != UiTextureHandle::Invalid && m_frameRenderer != nullptr) {
+        m_frameRenderer->ReleaseUiTextureHandle(m_previewDescriptor);
     }
+    m_previewDescriptor = UiTextureHandle::Invalid;
+    m_lastKnownPreviewView = 0;
 }
 
-// Releases the shader-property preview texture and its descriptor (see FrameDebuggerPanel.h).
 void FrameDebuggerPanel::ReleaseShaderPropertyTexturePreview()
 {
-    if ((m_shaderPropertyPreviewTexture.has_value() || m_shaderPropertyPreviewDescriptor != VK_NULL_HANDLE)
-        && m_frameRenderer != nullptr) {
-        m_frameRenderer->WaitForGpuIdle(); // Mirrors AssetPreviewTexture::Reset()'s own identical, already-accepted tradeoff.
-    }
-    if (m_shaderPropertyPreviewDescriptor != VK_NULL_HANDLE) {
-        ImGui_ImplVulkan_RemoveTexture(m_shaderPropertyPreviewDescriptor);
-        m_shaderPropertyPreviewDescriptor = VK_NULL_HANDLE;
+    // A rare, user-driven event: an occasional full GPU wait is accepted.
+    if (m_frameRenderer != nullptr && (m_shaderPropertyPreviewTexture || m_shaderPropertyPreviewDescriptor != UiTextureHandle::Invalid)) {
+        m_frameRenderer->RetireUiTexture(m_shaderPropertyPreviewDescriptor, std::move(m_shaderPropertyPreviewTexture));
     }
     m_shaderPropertyPreviewTexture.reset();
+    m_shaderPropertyPreviewDescriptor = UiTextureHandle::Invalid;
     m_shaderPropertyPreviewName.clear();
     m_shaderPropertyPreviewLookupFailed = false;
-    m_shaderPropertyPreviewExtent = VkExtent2D{};
+    m_shaderPropertyPreviewExtent = Extent2D{};
 }
 
 // Click handler of the "View" button: releases the shown preview, then does one fresh capture and upload.
@@ -90,7 +85,7 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
     ReleaseShaderPropertyTexturePreview(); // Always start fresh.
 
     if (m_frameRenderer == nullptr || m_frameRenderGraph == nullptr) {
-        return; // Defensive only - unreachable in practice, see this method's own header doc comment.
+        return; // Defensive only: Build() sets both before any button can be clicked.
     }
 
     m_shaderPropertyPreviewKind = kind;
@@ -98,7 +93,8 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
     // The texture upload can throw on GPU resource exhaustion; an exception must not escape an ImGui click handler.
     auto uploadOrFail = [this, &textureName](const void* pixelsRgba8, int width, int height, const char* debugName) -> bool {
         try {
-            m_shaderPropertyPreviewTexture.emplace(m_frameRenderer->CreateTexture2D(pixelsRgba8, width, height, debugName));
+            m_shaderPropertyPreviewTexture = std::make_unique<Texture2D>(
+                m_frameRenderer->CreateTexture2D(pixelsRgba8, width, height, debugName));
             return true;
         } catch (const std::exception&) {
             m_shaderPropertyPreviewTexture.reset();
@@ -116,17 +112,11 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
             return;
         }
 
-        m_frameRenderer->WaitForGpuIdle(); // Rare, explicit, human-driven - same accepted cost GET /get_texture already pays.
-
-        // NON-const, deliberately: the BGRA/single-channel branches below
-        // mutate/read raw.pixels, and CaptureImagePixels() already hands us
-        // a buffer we own exclusively.
-        Renderer::CapturedRawPixels raw = m_frameRenderer->CaptureImagePixels(
-            snapshot->target.image, VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format,
-            FromVkExtent2D(snapshot->target.extent), snapshot->colorState);
+        // Non-const: the BGRA and single-channel branches below convert raw.pixels in place.
+        Renderer::CapturedRawPixels raw = m_frameRenderer->CaptureDebugTexturePixels(*snapshot, /*depthAspect=*/false);
 
         if (raw.pixels.empty()) {
-            // BytesPerTexelForFormat() didn't recognize this format.
+            // The image is missing or its format is not supported.
             m_shaderPropertyPreviewName = textureName;
             m_shaderPropertyPreviewLookupFailed = true;
             return;
@@ -144,12 +134,9 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
             ok = Encoding::Convert1ChannelToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data());
             rgba8Pixels = converted.data();
         } else if (Encoding::IsBgraFormat(raw.format)) {
-            // Safe in-place swizzle - CaptureImagePixels() already handed us a
-            // buffer we own exclusively, and `raw` is non-const (see above), so
-            // no const_cast is needed at all.
             Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
         }
-        // else: already tightly-packed RGBA8 - no conversion needed.
+        // else: already tightly packed RGBA8.
 
         if (!ok) {
             m_shaderPropertyPreviewName = textureName;
@@ -160,7 +147,7 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
         if (!uploadOrFail(rgba8Pixels, raw.width, raw.height, "FrameDebuggerShaderPropertyPreview")) {
             return; // uploadOrFail() already set the lookup-failed state.
         }
-        m_shaderPropertyPreviewExtent = snapshot->target.extent;
+        m_shaderPropertyPreviewExtent = snapshot->ColorExtent();
     } else if (kind == rg::ResourceKind::VolumeTexture) {
         const std::optional<rg::DebugVolumeTextureSnapshot> snapshot =
             m_frameRenderGraph->DebugVolumeTextureSnapshotFor(textureName);
@@ -170,8 +157,6 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
             return;
         }
 
-        m_frameRenderer->WaitForGpuIdle();
-
         const VolumeTexturePreviewInterpretation interpretation = SelectVolumeTexturePreviewInterpretation(textureName);
         const VolumeTexturePreviewRenderer::CapturedRawPixels raw =
             m_shaderPropertyVolumeRenderer.RenderPreview(*m_frameRenderer, snapshot->target, snapshot->state, interpretation);
@@ -179,18 +164,16 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
         if (!uploadOrFail(raw.pixels.data(), raw.width, raw.height, "FrameDebuggerShaderPropertyVolumePreview")) {
             return;
         }
-        m_shaderPropertyPreviewExtent = VkExtent2D{ static_cast<std::uint32_t>(raw.width), static_cast<std::uint32_t>(raw.height) };
+        m_shaderPropertyPreviewExtent = Extent2D{ static_cast<std::uint32_t>(raw.width), static_cast<std::uint32_t>(raw.height) };
     } else if (kind == rg::ResourceKind::TextureArray) {
-        // No texture-array preview exists (no per-layer image view): show the "not previewable" placeholder.
+        // No texture-array preview exists: show the "not previewable" placeholder.
         return;
     } else {
-        // Buffer: no "View" button is drawn for buffer rows, so this is unreachable in practice.
+        // Buffer: no "View" button is drawn for buffer rows.
         return;
     }
 
-    m_shaderPropertyPreviewDescriptor = ImGui_ImplVulkan_AddTexture(
-        m_shaderPropertyPreviewTexture->Sampler(), m_shaderPropertyPreviewTexture->View(),
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL); // A freshly uploaded Texture2D is always left in this layout.
+    m_shaderPropertyPreviewDescriptor = m_frameRenderer->GetUiTextureHandle(*m_shaderPropertyPreviewTexture);
     m_shaderPropertyPreviewName = textureName;
     m_shaderPropertyPreviewLookupFailed = false;
 }
@@ -209,15 +192,13 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
         && m_frameRenderGraph != nullptr) {
         privatePreview = m_frameRenderGraph->DebugTextureSnapshotFor(*selectedDetails->privateWriteTextureName);
     }
-    if (privatePreview.has_value() && privatePreview->target.imageView != VK_NULL_HANDLE) {
-        const VkImageView desiredView = privatePreview->target.imageView;
-        const VkSampler desiredSampler = privatePreview->sampler;
-        if (m_previewDescriptor != VK_NULL_HANDLE && desiredView == m_lastKnownPreviewView) {
-            return; // Already wrapping the right VkImageView - nothing to do.
+    if (privatePreview.has_value() && privatePreview->ColorViewId() != 0 && m_frameRenderer != nullptr) {
+        const std::uint64_t desiredView = privatePreview->ColorViewId();
+        if (m_previewDescriptor != UiTextureHandle::Invalid && desiredView == m_lastKnownPreviewView) {
+            return; // Already wrapping the right view.
         }
         ReleasePreviewDescriptor();
-        m_previewDescriptor =
-            ImGui_ImplVulkan_AddTexture(desiredSampler, desiredView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_previewDescriptor = m_frameRenderer->GetUiTextureHandle(*privatePreview);
         m_lastKnownPreviewView = desiredView;
         return;
     }
@@ -259,7 +240,7 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
         break;
     }
 
-    if (selectedSource == nullptr) {
+    if (selectedSource == nullptr || m_frameRenderer == nullptr) {
         // Nothing to preview: no capture yet, nothing drawn yet, or the retained texture is missing.
         ReleasePreviewDescriptor();
         return;
@@ -271,11 +252,11 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     const bool isNeutral =
         (m_channel == FrameDebuggerPreviewChannel::All) && (m_levelsBlack <= 0.0f) && (m_levelsWhite >= 1.0f);
 
-    VkImageView desiredView = selectedSource->View();
-    VkSampler desiredSampler = selectedSource->Sampler();
+    std::uint64_t desiredView = selectedSource->ViewId();
+    const Texture2D* processedOutput = nullptr;
 
-    if (!isNeutral && m_frameRenderer != nullptr) {
-        const VkImageView sourceView = selectedSource->View();
+    if (!isNeutral) {
+        const std::uint64_t sourceView = selectedSource->ViewId();
         const bool dirty = (m_lastProcessedSourceView != sourceView) || (m_lastProcessedChannel != m_channel)
             || (m_lastProcessedLevelsBlack != m_levelsBlack) || (m_lastProcessedLevelsWhite != m_levelsWhite);
         if (dirty) {
@@ -285,18 +266,19 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
             m_lastProcessedLevelsBlack = m_levelsBlack;
             m_lastProcessedLevelsWhite = m_levelsWhite;
         }
-        if (const Texture2D* output = m_previewProcessor.OutputTexture()) {
-            desiredView = output->View();
-            desiredSampler = output->Sampler();
+        processedOutput = m_previewProcessor.OutputTexture();
+        if (processedOutput != nullptr) {
+            desiredView = processedOutput->ViewId();
         }
     }
 
-    if (m_previewDescriptor != VK_NULL_HANDLE && desiredView == m_lastKnownPreviewView) {
-        return; // Already wrapping the right VkImageView - nothing to do.
+    if (m_previewDescriptor != UiTextureHandle::Invalid && desiredView == m_lastKnownPreviewView) {
+        return; // Already wrapping the right view.
     }
 
     ReleasePreviewDescriptor();
-    m_previewDescriptor = ImGui_ImplVulkan_AddTexture(desiredSampler, desiredView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    m_previewDescriptor = processedOutput != nullptr ? m_frameRenderer->GetUiTextureHandle(*processedOutput)
+                                                     : m_frameRenderer->GetUiTextureHandle(*selectedSource);
     m_lastKnownPreviewView = desiredView;
 }
 
@@ -577,7 +559,7 @@ void FrameDebuggerPanel::BuildInspectorPane(
 
     // The retained preview belongs to the captured frame, not to one event, so it shows whenever the capture has
     // one. m_previewDescriptor is already null for every step without an image (set by EnsurePreviewDescriptor()).
-    const bool showPreviewTexture = (m_previewDescriptor != VK_NULL_HANDLE) && (currentEntry != nullptr);
+    const bool showPreviewTexture = (m_previewDescriptor != UiTextureHandle::Invalid) && (currentEntry != nullptr);
 
     const float previewHeight = std::max(120.0f, ImGui::GetContentRegionAvail().y * 0.5f);
     // Opaque black behind the whole preview box (letterbox look), whether it shows an image or placeholder text.
@@ -591,7 +573,7 @@ void FrameDebuggerPanel::BuildInspectorPane(
             if (ImGui::SmallButton("Back to Step Preview")) {
                 ReleaseShaderPropertyTexturePreview();
             }
-            if (m_shaderPropertyPreviewDescriptor != VK_NULL_HANDLE) {
+            if (m_shaderPropertyPreviewDescriptor != UiTextureHandle::Invalid) {
                 const ImVec2 avail = ImGui::GetContentRegionAvail();
                 if (avail.x >= 1.0f && avail.y >= 1.0f) {
                     const FrameDebuggerAspectFitRect fit = ComputeAspectFitImageRect(avail.x, avail.y,
@@ -599,7 +581,7 @@ void FrameDebuggerPanel::BuildInspectorPane(
                         static_cast<float>(m_shaderPropertyPreviewExtent.height));
                     const ImVec2 cursorBase = ImGui::GetCursorPos();
                     ImGui::SetCursorPos(ImVec2(cursorBase.x + fit.offsetX, cursorBase.y + fit.offsetY));
-                    ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_shaderPropertyPreviewDescriptor)),
+                    ImGui::Image(static_cast<ImTextureID>(static_cast<std::uint64_t>(m_shaderPropertyPreviewDescriptor)),
                         ImVec2(fit.width, fit.height));
                 }
             } else {
@@ -622,7 +604,7 @@ void FrameDebuggerPanel::BuildInspectorPane(
                     static_cast<float>(snapshot.renderTarget.height));
                 const ImVec2 cursorBase = ImGui::GetCursorPos();
                 ImGui::SetCursorPos(ImVec2(cursorBase.x + fit.offsetX, cursorBase.y + fit.offsetY));
-                ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_previewDescriptor)),
+                ImGui::Image(static_cast<ImTextureID>(static_cast<std::uint64_t>(m_previewDescriptor)),
                     ImVec2(fit.width, fit.height));
             }
         } else {
@@ -812,15 +794,12 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     const FrameDebuggerSnapshot snapshot =
         (currentEntry != nullptr) ? currentEntry->snapshot : BuildPlaceholderFrameDebuggerSnapshot();
 
-    // Event indices are only valid within their snapshot, so a changed capture clears the selection. Detected via
-    // the retained raw preview view (fresh on every capture); m_lastKnownPreviewView may hold a processed
-    // scratch view and would reset the selection every frame.
+    // A changed capture invalidates event indices, so the selection is cleared. Detected through the raw retained
+    // preview view (new on every capture); the processed scratch view would reset the selection every frame.
     {
-        const VkImageView previousRawPreviewView = m_lastKnownRawPreviewView;
-        const VkImageView newRawPreviewView =
-            (currentEntry != nullptr && currentEntry->preview.has_value()) ? currentEntry->preview->View()
-                                                                            : VK_NULL_HANDLE;
-        if (newRawPreviewView != previousRawPreviewView) {
+        const std::uint64_t newRawPreviewView =
+            (currentEntry != nullptr && currentEntry->preview.has_value()) ? currentEntry->preview->ViewId() : 0;
+        if (newRawPreviewView != m_lastKnownRawPreviewView) {
             m_selectedEventIndex = -1;
         }
         m_lastKnownRawPreviewView = newRawPreviewView;
@@ -976,22 +955,12 @@ FrameDebuggerEventTextureResult FrameDebuggerPanel::GetEventTextureFromCommand(i
     }
 
     const rg::EventSnapshotResource& retained = m_captureContext.RetainedEventImage();
-    if (retained.Image() == VK_NULL_HANDLE) {
-        return result;
-    }
 
-    // Use the aspect of this capture: a depth-only pass retains a depth image, never color.
+    // A depth-only pass retains a depth image, never color.
     const bool isDepth = m_captureContext.RetainedEventIsDepth();
-    const VkImageAspectFlags aspect = isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 
-    // Same rare, explicit, human/LLM-driven stall GET /get_texture already
-    // pays - never called from a per-frame path.
-    m_frameRenderer->WaitForGpuIdle();
-
-    Renderer::CapturedRawPixels raw = m_frameRenderer->CaptureImagePixels(
-        retained.Image(), aspect, retained.Format(), FromVkExtent2D(retained.Extent()),
-        rg::ResourceState{ VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            VK_ACCESS_2_SHADER_READ_BIT });
+    // Rare, explicit capture: the renderer waits for the GPU first.
+    Renderer::CapturedRawPixels raw = m_frameRenderer->CaptureEventSnapshotPixels(retained, isDepth);
     if (raw.pixels.empty()) {
         return result;
     }
@@ -999,8 +968,7 @@ FrameDebuggerEventTextureResult FrameDebuggerPanel::GetEventTextureFromCommand(i
     std::vector<std::uint8_t> converted;
     const std::uint8_t* encodePixels = raw.pixels.data();
     if (isDepth) {
-        // Safe in-place conversion - mirrors EditorHost.cpp's identical
-        // GET /get_texture depth-channel branch.
+        // In-place conversion, same as the /get_texture depth branch.
         if (!Encoding::ConvertDepthToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, raw.pixels.data())) {
             return result; // Depth format not recognized - fail cleanly.
         }

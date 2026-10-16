@@ -83,6 +83,7 @@ VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::Re
     VolumeTexturePreviewInterpretation interpretation)
 {
     EnsureInitialized(renderer);
+    renderer.WaitForGpuIdle(); // The volume may still be in use by the last frame.
 
     const bool aerial = interpretation == VolumeTexturePreviewInterpretation::AerialPerspectiveFrustum;
     const VolumeCameraSetup setup = aerial

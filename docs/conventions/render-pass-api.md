@@ -23,7 +23,7 @@ The layer under every render feature. Pass code never touches Vulkan and never n
    | Kind | Chain | Record |
    |---|---|---|
    | Compute | `ComputePass(...).Bind().Params().Dispatch()` | bindings, push bytes |
-   | Fullscreen | `FullscreenPass(...).Bind().Push().Target()/Targets({...}).DepthTest().Draw()` | attachments, key |
+   | Fullscreen | `FullscreenPass(...).Bind().Push().Target()/Targets({...}).DepthTest().Draw(replay)` | attachments, key; optional `FullscreenReplay` |
    | Mesh | `MeshPass(...).Color()/Depth().Draw(fn)`; `SceneDrawPass` (Game) adds the camera and pipeline overrides | `MeshPassRecord` |
    | Indirect draw | `MakeIndirectDrawBody` (validated setup/execute pair) | `IndirectDrawRecord` |
    | Transfer | `MakeTransferBody` (validated setup/execute pair) | `TransferRecord` (Fill, CopyBuffer, Readback, CopyTexture, Clear) |
@@ -31,7 +31,7 @@ The layer under every render feature. Pass code never touches Vulkan and never n
 
    Attachment formats come from the declared textures (`DescOf`), never from `ColorPixelFormat()`.
 5. **One-shot execution** of the same pass chains outside the frame loop (`rg::OneShot`, see below).
-6. **First-class GPU buffer handle** (`rg::GpuBuffer`): not built yet.
+6. **First-class GPU buffer handle** (`rg::GpuBuffer`, see below).
 
 ## Rules
 
@@ -39,10 +39,10 @@ The layer under every render feature. Pass code never touches Vulkan and never n
 - A pass declared per view must carry `GameView` or `SceneView`, never `Shared` (a `Shared` pass would share one
   descriptor set between views).
 - Execute lambdas capture values only; a chain object is a temporary.
-- The raw command buffer is not public. Use `PassContext::Cmd()`, the pass kinds or `rg::SceneRecording` (RAII
-  Begin/EndGraphPassRecording). The only raw routes are `PassContext::RawCommandBuffer()`,
-  `CommandBuffer::RawCommandBuffer()` and `CommandBuffer::AdoptRaw()`; NativeLeakCheck lists every use outside
-  `src/Renderer`.
+- The raw command buffer is not reachable outside `src/Renderer`. Use `PassContext::Cmd()`, `PassContext::Recording()`,
+  the pass kinds or `rg::SceneRecording` (RAII Begin/EndGraphPassRecording). `CommandBuffer::AdoptRaw()`,
+  `CommandBuffer::RawCommandBuffer()` and `PassContext::RawCommandBuffer()` do not exist; NativeLeakCheck forbids
+  `RecordingAccess` and `PlatformHandle(` outside `src/Renderer`.
 - Transfer and blit passes on a graph texture need `TextureUsage::TransferSrc` / `TransferDst` (2D textures).
 - `rg::MeshPass` lives in `src/Renderer`, which must not depend on `src/Game`. The scene draw itself (`DrawScene`, the
   pipeline override set, the camera) therefore lives in `gte::SceneDrawPass` (`src/Game`), a thin wrapper over
@@ -93,6 +93,19 @@ Consumers (R = rewritten on the pass verbs, M = moved into `src/Renderer` behind
 | Mesh vertex buffers | M | Meshes share vertex buffers; `Mesh::VertexBufferHandle()` replaces the raw handle for batch eligibility. |
 | `GpuParams` | R | Built on `GpuBuffer`. |
 | Editor mesh preview uniform buffers | M | Still raw (`AssetPreviewMesh`, `BoneViewerWindow`); moves with the editor render code step. |
+
+## Recording context
+
+Code outside `src/Renderer` carries `rg::RecordingContext`, a Vulkan-free handle to the command buffer being recorded.
+`PassContext::Recording()` and `Renderer::BeginOffscreenRenderGraphRecording()` make one. `Commands()` returns a
+`CommandBuffer`; `PlatformHandle()` is for the ImGui Vulkan backend glue only. `src/Renderer` reaches the raw handle only
+through `rg::RecordingAccess`. See [recording-context.md](../architecture/recording-context.md).
+
+`rg::FullscreenPass::Draw(FullscreenReplay*)` also fills an `rg::FullscreenReplay` (`declare(pass)` for the bindings,
+`record(ctx)` for the draw). The Frame Debugger records the same draw again in its replay pass with it. See
+[kit-view-background.md](../architecture/kit-view-background.md).
+
+A render-graph pass that skips a binding logs one error per distinct pass and binding, and asserts in debug builds.
 
 ## Checks
 

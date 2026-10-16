@@ -8,18 +8,8 @@ namespace gte {
 
 namespace {
 
-// Solves for the non-negative distance along `direction` (assumed already
-// normalized) from `originKm` to the sphere of radius `radiusKm` centered at
-// the coordinate origin - i.e. the planet-centered frame's own atmosphere
-// boundary sphere (see this file's own coordinate-convention doc comment in
-// AtmosphereMath.h). Since `direction` is unit-length, the quadratic's own
-// `a` coefficient is always exactly 1.0. Returns the LARGER root (the far
-// intersection), which is the correct "distance to exit the atmosphere"
-// answer for an origin that is inside (or on) the sphere - the only case
-// this campaign's own LUT-sampling call sites ever need (a sample position
-// is always at an altitude within [0, atmosphereThicknessKm]). Returns a
-// negative value if the ray never reaches the sphere at all (should not
-// happen for a well-formed call, but guarded rather than assumed).
+// Far intersection of the ray with the sphere of radius `radiusKm` at the origin; `direction` must be normalized.
+// For an origin inside the sphere this is the distance to exit it. Negative when the ray never reaches the sphere.
 float DistanceToSphereBoundary(Vec3 originKm, Vec3 direction, float radiusKm) noexcept
 {
     const float b = 2.0f * Dot(originKm, direction);
@@ -73,10 +63,7 @@ Vec3 ComputeOpticalDepthToTopOfAtmosphere(
 
     const Vec3 normalizedDirection = Normalize(direction);
     if (normalizedDirection == Vec3::Zero()) {
-        // Degenerate/zero-length input direction - Normalize() already
-        // degrades to Zero() rather than NaN/Inf (see Vec3.h), so mirror
-        // that same "no sensible answer, return the safe default" contract
-        // here instead of marching along a meaningless (0,0,0) direction.
+        // Normalize() degrades a zero-length input to Zero(); there is no direction to march along.
         return Vec3::Zero();
     }
 
@@ -93,11 +80,7 @@ Vec3 ComputeOpticalDepthToTopOfAtmosphere(
     Vec3 currentPositionKm = positionKm;
 
     for (int i = 0; i < sampleCount; ++i) {
-        // Advance THEN sample - matches the reference's own per-step order
-        // exactly (_reference/pl-sky/shaders/sky_transmission_lut.comp:
-        // `tCurrentPos += tStep;` happens before that step's density read),
-        // so this CPU oracle's numerical method matches the GPU shader's own
-        // bit for bit, not merely converges to a similar answer.
+        // Advance, then sample: the same per-step order as the transmittance shader.
         currentPositionKm += step;
 
         const float heightKm = std::max(Length(currentPositionKm) - params.planetRadiusKm, 0.0f);

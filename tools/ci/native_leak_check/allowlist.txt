@@ -4,13 +4,10 @@
 Core/Plugins/ProjectAssemblyHost.cpp # debt: idles the device before unloading a project assembly
 Editor/AssetPreviewMesh.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/AssetPreviewMesh.h # debt: editor tool uses raw wrappers or one-shot submits
-Editor/AssetPreviewTexture.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/BoneViewerWindow.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/BoneViewerWindow.h # debt: editor tool uses raw wrappers or one-shot submits
 Editor/EditorHost.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/ImGuiEditorLayer.cpp # permanent: ImGui Vulkan backend needs the device idle and raw handles
-Editor/Panels/FrameDebuggerPanel.cpp # debt: editor tool uses raw wrappers or one-shot submits
-Editor/Panels/RenderGraphPanel.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/RenderGraphTexturePreview.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/SceneGridRenderer.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Window/Window.h # permanent: Native() returns the SDL window handle, not a GPU object

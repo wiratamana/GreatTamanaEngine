@@ -4,12 +4,7 @@ namespace gte {
 
 AtmosphereParametersGpu MakeDefaultEarthAtmosphereParameters()
 {
-    // AtmosphereParametersGpu's own default member initializers (see
-    // AtmosphereTypes.h) already carry every value transcribed from the
-    // cloned reference implementation, so a plain value-initialized instance
-    // is already exactly right - this function is the one explicit,
-    // discoverable call site future phases should call rather than relying
-    // on that default-construction implicitly.
+    // The default member initializers already hold the Earth-like values.
     return AtmosphereParametersGpu{};
 }
 

@@ -382,9 +382,6 @@ struct PassContext {
     // frame debugger like Cmd().
     RecordingContext Recording() const noexcept { return RecordingAccess::Wrap(m_cmd, renderer, this); }
 
-    // Same, but recorders built from it neither count draws nor notify the frame debugger.
-    RecordingContext RecordingUncounted() const noexcept { return RecordingAccess::Wrap(m_cmd, renderer); }
-
 private:
     friend class RenderGraph;
     friend struct RecordingAccess;

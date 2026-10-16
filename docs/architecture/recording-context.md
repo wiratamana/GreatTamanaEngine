@@ -15,8 +15,7 @@ an opaque native pointer, the `Renderer*`, and an optional `const PassContext*` 
 
 ## Who makes one
 
-- `PassContext::Recording()`: counted. Draws feed the pass stats and the frame debugger.
-- `PassContext::RecordingUncounted()`: for work that must not be counted (replay background step).
+- `PassContext::Recording()`: draws feed the pass stats and the frame debugger.
 - `Renderer::BeginOffscreenRenderGraphRecording()`: the offscreen command buffer, outside any pass.
 
 ## Who opens one
@@ -29,9 +28,9 @@ It is the single friend of `CommandBuffer`, `PassContext` and `RecordingContext`
 
 ## Interfaces that carry it
 
-`Core::FinalizeForSamplingCallback`, `Core::SetPresentImGuiRecorder`, `RenderPassViewData::recordSceneOverlay`,
-`IEditorLayer::Render` / `RenderSceneGrid`, `IFrameDebuggerCaptureRecorder::AddReplayPasses` (background step),
+`Core::SetPresentImGuiRecorder`, `RenderPassViewData::recordSceneOverlay`, `IEditorLayer::Render` / `RenderSceneGrid`,
 `FrameDebuggerEventSink::FlushPendingCapture`, `RenderTexture::FinalizeForExternalSampling`, `RenderGraph::Execute`.
+The Frame Debugger background replay carries an `rg::FullscreenReplay` instead (see `kit-view-background.md`).
 
 ## Frame Debugger events
 

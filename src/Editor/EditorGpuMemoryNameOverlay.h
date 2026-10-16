@@ -25,21 +25,9 @@ namespace gte {
 // needs no per-instance plumbing of its own, and every call site that wants
 // a name (MemoryPanel.cpp/FrameDebuggerDrawRecording.cpp) only ever has a
 // bare GpuResourceHandle in hand anyway, never a GpuMemoryTracker&.
-//
-// MUST be installed (via Install()) BEFORE the first GPU resource this
-// process ever names is created, or that resource's name is silently
-// dropped (never observed, since nothing was listening yet). The ONE real
-// call site, `CreateEditorLayer()` (src/Editor/ImGuiEditorLayer.cpp), calls
-// Install() as the very first statement, BEFORE constructing
-// `ImGuiEditorLayer` itself (whose own constructor's member-initializer
-// list immediately creates its "GameView"/"SceneView" RenderTextures - too
-// late to install from inside that constructor's BODY). This is safe:
-// `Renderer`'s own constructor, and every other `Application` member
-// constructed before the Editor layer (`AtmosphereLutRenderer`,
-// `VolumeTexturePreviewRenderer`), create their own named GPU resources
-// LAZILY, on first real use, well after the Editor layer already exists -
-// confirmed by reading every one of their constructors during this phase,
-// not assumed.
+// Must be installed (via Install()) before the first GPU resource the process names is created, or that
+// resource's name is dropped. CreateEditorLayer() installs it before constructing ImGuiEditorLayer, which
+// creates the "GameView"/"SceneView" RenderTextures; other renderers create their named resources lazily.
 class EditorGpuMemoryNameOverlay {
 public:
     // Installs this overlay as `tracker`'s ONE debug-name observer. Safe to

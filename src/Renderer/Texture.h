@@ -67,6 +67,9 @@ public:
     bool AllowsStorageImageAccess() const noexcept { return m_info.storage; }
     GpuResourceHandle Handle() const noexcept { return m_handle; }
 
+    // Opaque identity of the image view: changes when the view is recreated, 0 when there is none.
+    std::uint64_t ViewId() const noexcept { return reinterpret_cast<std::uintptr_t>(m_imageView); }
+
     // Renderer-internal: raw Vulkan objects.
     VkImage Image() const noexcept { return m_image; }
     VkImageView View() const noexcept { return m_imageView; }

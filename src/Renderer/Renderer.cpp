@@ -279,6 +279,33 @@ Renderer::CapturedRawPixels Renderer::CaptureRenderTexturePixels(RenderTexture& 
         texture.Image(), VK_IMAGE_ASPECT_COLOR_BIT, texture.NativeFormat(), texture.Extent(), shaderReadState);
 }
 
+Renderer::CapturedRawPixels Renderer::CaptureDebugTexturePixels(
+    const rg::DebugTextureSnapshot& snapshot, bool depthAspect) const
+{
+    const VkImage image = depthAspect ? snapshot.target.depthImage : snapshot.target.image;
+    if (image == VK_NULL_HANDLE) {
+        return CapturedRawPixels{};
+    }
+    const VkImageAspectFlags aspect = depthAspect ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+    const VkFormat format = depthAspect ? snapshot.target.depthFormat : snapshot.target.format;
+    const rg::ResourceState& state = depthAspect ? snapshot.depthState : snapshot.colorState;
+    WaitForGpuIdle();
+    return CaptureImagePixels(image, aspect, format, snapshot.ColorExtent(), state);
+}
+
+Renderer::CapturedRawPixels Renderer::CaptureEventSnapshotPixels(
+    const rg::EventSnapshotResource& snapshot, bool depthAspect) const
+{
+    if (snapshot.Image() == VK_NULL_HANDLE) {
+        return CapturedRawPixels{};
+    }
+    const VkImageAspectFlags aspect = depthAspect ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+    const rg::ResourceState shaderRead{ VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        VK_ACCESS_2_SHADER_READ_BIT };
+    WaitForGpuIdle();
+    return CaptureImagePixels(snapshot.Image(), aspect, snapshot.Format(), FromVkExtent2D(snapshot.Extent()), shaderRead);
+}
+
 void Renderer::WaitForGpuIdle() const
 {
     vkDeviceWaitIdle(m_device.Native());
@@ -791,6 +818,20 @@ UiTextureHandle Renderer::GetUiTextureHandle(const RenderTexture& target)
     return static_cast<UiTextureHandle>(reinterpret_cast<std::uintptr_t>(set));
 }
 
+UiTextureHandle Renderer::GetUiTextureHandle(const rg::DebugTextureSnapshot& snapshot)
+{
+    if (snapshot.target.imageView == VK_NULL_HANDLE || snapshot.sampler == VK_NULL_HANDLE) {
+        return UiTextureHandle::Invalid;
+    }
+    const VkDescriptorSet set = AddUiTexture(snapshot.sampler, snapshot.target.imageView);
+    if (set == VK_NULL_HANDLE) {
+        return UiTextureHandle::Invalid;
+    }
+    std::lock_guard lock(g_uiTextureMutex);
+    g_liveUiTextures.insert(set);
+    return static_cast<UiTextureHandle>(reinterpret_cast<std::uintptr_t>(set));
+}
+
 void Renderer::ReleaseUiTextureHandle(UiTextureHandle handle) noexcept
 {
     const auto set = reinterpret_cast<VkDescriptorSet>(static_cast<std::uintptr_t>(static_cast<std::uint64_t>(handle)));
@@ -801,6 +842,13 @@ void Renderer::ReleaseUiTextureHandle(UiTextureHandle handle) noexcept
         }
     }
     RemoveUiTexture(set);
+}
+
+void Renderer::RetireUiTexture(UiTextureHandle handle, std::unique_ptr<Texture2D> texture) noexcept
+{
+    WaitForGpuIdle();
+    ReleaseUiTextureHandle(handle);
+    texture.reset();
 }
 
 CaptureResult Renderer::CaptureRenderTarget(const RenderTexture& target) const

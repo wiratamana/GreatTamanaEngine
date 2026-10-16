@@ -42,6 +42,37 @@ CURRENT, real system** — follow these rules whenever touching this window,
 its data model, its capture instrumentation, or its cross-wiring with the
 Pause/Resume toolbar or the embedded HTTP server:
 
+## Current implementation (takes precedence over the older text below)
+
+Where the older sections below name removed classes (`AtmosphereSkyBackgroundRenderer`, `AtmosphereLutRenderer`,
+`AddFrameDebuggerReplayPasses()`, `RecordSkyBackgroundDraw()`, `AddDrawSkyBackgroundPass()`), use this section.
+
+- **Sky background.** `"DrawSkyBackground"` is an ordinary graph pass declared by the Atmosphere feature through
+  `PostOpaqueFrame::ViewBackground` (see [render-feature-authoring.md](render-feature-authoring.md)). It is a fullscreen
+  draw that loads the view color and depth and tests depth `Equal` without writing. It has no special case in the
+  Frame Debugger data model.
+- **Background replay.** On a capture trigger the replay passes redraw the scene step by step. The background step
+  runs `rg::FullscreenReplay` (`src/Renderer/RenderGraph/FullscreenReplay.h`): `declare(pass)` in the replay pass setup
+  declares the shader bindings, and `record(ctx)` in its execute draws after the scene. Only the Game view publishes
+  a replay, on the blackboard key `kViewBackgroundReplayCallbackKey`. A toggled-off background pass publishes nothing, so
+  there is no background step. `IFrameDebuggerCaptureRecorder::AddReplayPasses` takes the `FullscreenReplay`; an empty
+  one means no background step. Replay textures are named `FrameDebuggerReplayStep<N>` and `GET /get_texture` reads them.
+- **Per-draw event capture.** `FrameDebuggerEventSink::NoteCommandResult` receives an `AttachmentWrite` (opaque
+  `NativeImageToken`, `Extent2D`, `PixelFormat`, `isDepth`). `FlushPendingCapture` receives an `rg::RecordingContext`
+  and calls `rg::CaptureAttachmentIntoSnapshot` (in `src/Renderer`) to copy the armed attachment into the retained
+  snapshot. No Vulkan type or raw command buffer is in the Editor files. See
+  [recording-context.md](../architecture/recording-context.md).
+- **Previews and capture.** Panel previews use the opaque `UiTextureHandle` (`Renderer::GetUiTextureHandle`,
+  `Renderer::RetireUiTexture`). Readbacks use `Renderer::CaptureDebugTexturePixels` and
+  `Renderer::CaptureEventSnapshotPixels`, which wait for the GPU themselves. `FrameDebuggerPanel.h/.cpp`,
+  `FrameDebuggerPreviewProcessing.h`, `MemoryPanelData` and `EditorContext.h` contain no Vulkan token.
+- **Barrier labels.** The graph tells the metadata recorder about each applied barrier with
+  `OnResourceBarrierApplied(declarationIndex, resourceName, transitionLabel)`; the label is a string built in
+  `src/Renderer`.
+- **Composited view textures.** The Atmosphere composite is exposed as a `ViewOutput` named `GameViewComposited` /
+  `SceneViewComposited`. The editor layer receives it through `SetGameViewCompositedTexture` /
+  `SetSceneViewCompositedTexture`, and the panel uses it as the composited source.
+
 ## What's new (`render-pass-1` campaign)
 
 The `render-pass-1` campaign

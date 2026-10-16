@@ -635,23 +635,15 @@ int EditorHost::Run()
                 if (wantsDepth && !snapshot->hasDepth) {
                     // Known permanent failure: fail fast (409) instead of waiting out the timeout.
                     m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
-                } else if (!wantsDepth && snapshot->target.image == VK_NULL_HANDLE) {
+                } else if (!wantsDepth && !snapshot->HasColorImage()) {
                     // A colorless (depth-only) texture never has a color image: copying it would crash, so fail fast.
                     m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
                 } else {
-                    // Measured before the GPU idle, from the snapshot as it was when the request was serviced.
+                    // Measured before the capture, which waits for the GPU.
                     const std::uint64_t framesSinceUpdate =
                         m_renderGraph.CurrentDebugTextureFrameCounter() - snapshot->lastUpdatedFrameCounter;
 
-                    m_renderer.WaitForGpuIdle();
-
-                    const VkImage image = wantsDepth ? snapshot->target.depthImage : snapshot->target.image;
-                    const VkImageAspectFlags aspect = wantsDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-                    const VkFormat format = wantsDepth ? snapshot->target.depthFormat : snapshot->target.format;
-                    const rg::ResourceState state = wantsDepth ? snapshot->depthState : snapshot->colorState;
-
-                    Renderer::CapturedRawPixels raw =
-                        m_renderer.CaptureImagePixels(image, aspect, format, FromVkExtent2D(snapshot->target.extent), state);
+                    Renderer::CapturedRawPixels raw = m_renderer.CaptureDebugTexturePixels(*snapshot, wantsDepth);
 
                     if (raw.pixels.empty()) {
                         // Unrecognized format: fail cleanly instead of encoding garbage.

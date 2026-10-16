@@ -7,17 +7,8 @@
 #include "../Renderer/Renderer.h"
 #include "../Renderer/Texture2D.h"
 
-// stb_image's actual implementation (STB_IMAGE_IMPLEMENTATION) lives in
-// src/Assets/StbImageImpl.cpp instead - an always-compiled module (no
-// GTE_ENABLE_EDITOR dependency), since the PNG/JPEG -> KTX2 import pipeline
-// (src/Assets/Ktx2Encoder.h) needs real image decoding in every build
-// configuration, not just an Editor build. This file only needs stb_image's
-// DECLARATIONS (no implementation macro) - defining STB_IMAGE_IMPLEMENTATION
-// here too would be an ODR violation (multiple definitions of every stbi_*
-// function across translation units).
+// Only stb_image's declarations are needed here; its implementation is compiled once in src/Assets/StbImageImpl.cpp.
 #include <stb_image.h>
-
-#include <backends/imgui_impl_vulkan.h>
 
 #include <algorithm>
 #include <cctype>
@@ -30,25 +21,8 @@ namespace gte {
 
 namespace {
 
-// Reads `absolutePath` (UTF-8) fully into memory, or returns std::nullopt
-// on any failure (missing file, permissions, ...) - never throws.
-//
-// Deliberately NOT stbi_load(path.c_str(), ...): stb_image's own file-path
-// entry point opens the file via the C runtime's narrow-char fopen(),
-// which on Windows interprets that byte string using the process's
-// current ANSI CODE PAGE, not UTF-8 - so any non-ASCII byte sequence (e.g.
-// a Japanese filename, UTF-8-encoded by PathToUtf8() - see
-// ProjectPanelData.h) is misinterpreted and fopen() silently fails to
-// resolve the file, even though the file genuinely exists (this is exactly
-// why AssetMetadata's size/last-write-time - built via std::filesystem,
-// which DOES go through the wide-char Win32 API under MSVC's STL -
-// resolve correctly while stbi_load() itself reported "failed to load").
-// Constructing an std::ifstream from a std::filesystem::path (rather than
-// a raw std::string/const char*) sidesteps this entirely - MSVC's STL
-// overload for that specific constructor already opens the file via the
-// wide-char API - then handing stb_image the raw bytes via
-// stbi_load_from_memory() (see Resolve() below) needs no path/fopen
-// involvement on stb_image's side at all.
+// Reads a UTF-8 path fully into memory, or nullopt on any failure. Goes through std::filesystem::path so
+// non-ASCII names work on Windows.
 std::optional<std::vector<unsigned char>> ReadFileBytes(const std::string& absolutePathUtf8)
 {
     std::ifstream file(Utf8ToPath(absolutePathUtf8), std::ios::binary | std::ios::ate);
@@ -69,9 +43,7 @@ std::optional<std::vector<unsigned char>> ReadFileBytes(const std::string& absol
     return bytes;
 }
 
-// True if `absolutePathUtf8` names a *.gta file (case-insensitive
-// extension match) - the same convention IsImportableAsKtx2Texture()/
-// AssetInspectorData's own extension checks use elsewhere.
+// True if `absolutePathUtf8` has the *.gta extension (case-insensitive).
 bool HasGtaExtension(const std::string& absolutePathUtf8)
 {
     std::string extension = PathToUtf8(Utf8ToPath(absolutePathUtf8).extension());
@@ -80,41 +52,22 @@ bool HasGtaExtension(const std::string& absolutePathUtf8)
     return extension == ".gta";
 }
 
-// A plain, ownership-agnostic view over decoded RGBA8 pixels - either
-// stb_image's own heap allocation (freed via stbi_image_free()) or a
-// std::vector owned by the *.gta/KTX2 path below - so DecodePixels() (and
-// Resolve()'s single CreateTexture2D() call site) don't need two near-
-// identical code paths just to get a `const void*` + width/height to
-// upload.
+// Decoded RGBA8 pixels, owned either by stb_image or by a caller-side vector.
 struct DecodedPixels {
     const void* data = nullptr;
     int width = 0;
     int height = 0;
 };
 
-// Decodes `absolutePath`'s pixels, from whichever of the two supported
-// sources it actually is (see AssetPreviewTexture.h's class comment):
-//   - A *.gta file (AssetType::Texture only) - read via ReadGtaFile() and
-//     decoded via Ktx2Decoder.h's DecodeKtx2ToRgba8(). A *.gta that isn't a
-//     Texture asset, or otherwise fails to decode, returns std::nullopt.
-//   - Anything else - read via ReadFileBytes() and decoded via stb_image's
-//     stbi_load_from_memory(), exactly as before.
-// `stbOwnedPixels` receives stb_image's own allocation (so the caller can
-// stbi_image_free() it after uploading) when the stb_image path was taken;
-// left untouched (nullptr) for the *.gta/KTX2 path, whose pixels instead
-// live in `gtaOwnedPixels` (owned by the caller for the same reason).
+// Decodes a texture-type *.gta (KTX2 payload) or any plain image file. `stbOwnedPixels` receives stb_image's
+// allocation (the caller frees it with stbi_image_free()); the *.gta path stores its pixels in `gtaOwnedPixels`.
 std::optional<DecodedPixels> DecodePixels(
     const std::string& absolutePath, unsigned char*& stbOwnedPixels, std::vector<std::uint8_t>& gtaOwnedPixels)
 {
     if (HasGtaExtension(absolutePath)) {
         const std::optional<GtaFileData> gta = ReadGtaFile(Utf8ToPath(absolutePath));
         if (!gta.has_value() || gta->header.Type() != AssetType::Texture) {
-            // Either not a valid *.gta at all, or a *.gta wrapping
-            // something other than a texture (a future Mesh/Scene/...
-            // asset) - InspectorPanel only calls Resolve() for a *.gta it
-            // already confirmed is AssetType::Texture (see
-            // Panels/InspectorPanel.cpp), so this is a defensive
-            // double-check, not the expected common case.
+            // Not a valid *.gta, or one that wraps something other than a texture.
             return std::nullopt;
         }
 
@@ -127,11 +80,7 @@ std::optional<DecodedPixels> DecodePixels(
         return DecodedPixels{ gtaOwnedPixels.data(), static_cast<int>(decoded->width), static_cast<int>(decoded->height) };
     }
 
-    // Read the file ourselves (Unicode-path-safe - see ReadFileBytes()'s
-    // own comment) and decode from the in-memory buffer via
-    // stbi_load_from_memory(), rather than handing stb_image the path
-    // directly - stb_image's own path-based stbi_load() cannot open a
-    // non-ASCII (e.g. Japanese) path correctly on Windows.
+    // Decode from memory: stb_image's own path-based loader cannot open non-ASCII paths on Windows.
     const std::optional<std::vector<unsigned char>> fileBytes = ReadFileBytes(absolutePath);
     if (!fileBytes.has_value()) {
         return std::nullopt;
@@ -162,26 +111,12 @@ AssetPreviewTexture::~AssetPreviewTexture()
 
 void AssetPreviewTexture::Reset()
 {
-    // A previous frame's command buffer might still be executing on the
-    // GPU and could still reference the descriptor/texture about to be
-    // destroyed below - stall until it's definitely done, exactly the same
-    // reasoning (and same blunt fix) ImGuiEditorLayer::GameViewTarget()/
-    // SceneViewTarget() already use before resizing/releasing their own
-    // descriptors on a user-driven (rather than per-frame) event. Switching
-    // the Inspector's selected asset is just as rare/user-driven, so an
-    // occasional full stall here is a fine trade for correctness. Skipped
-    // entirely when nothing is actually cached yet (e.g. the very first
-    // call), so a fresh AssetPreviewTexture never pays this cost for
-    // nothing.
-    if ((m_texture || m_descriptor != VK_NULL_HANDLE) && m_renderer != nullptr) {
-        m_renderer->WaitForGpuIdle();
-    }
-
-    if (m_descriptor != VK_NULL_HANDLE) {
-        ImGui_ImplVulkan_RemoveTexture(m_descriptor);
-        m_descriptor = VK_NULL_HANDLE;
+    // The GPU may still use the texture and its descriptor; retiring waits for it first.
+    if (m_renderer != nullptr && (m_texture || m_descriptor != UiTextureHandle::Invalid)) {
+        m_renderer->RetireUiTexture(m_descriptor, std::move(m_texture));
     }
     m_texture.reset();
+    m_descriptor = UiTextureHandle::Invalid;
     m_cachedPath.clear();
     m_cachedWriteTime = std::filesystem::file_time_type{};
     m_cachedIsValid = false;
@@ -199,9 +134,7 @@ std::optional<AssetPreviewTexture::Preview> AssetPreviewTexture::Resolve(
         std::filesystem::last_write_time(std::filesystem::path(absolutePath), timeEc);
 
     if (!absolutePath.empty() && absolutePath == m_cachedPath && !timeEc && writeTime == m_cachedWriteTime) {
-        // Same file, unchanged since last time - reuse whatever was
-        // resolved last call (a valid preview, OR a remembered "this isn't
-        // a decodable image"), without touching the filesystem/GPU again.
+        // Same unchanged file: reuse the last result (a valid preview or a remembered failure).
         if (!m_cachedIsValid) {
             return std::nullopt;
         }
@@ -218,9 +151,7 @@ std::optional<AssetPreviewTexture::Preview> AssetPreviewTexture::Resolve(
     std::vector<std::uint8_t> gtaOwnedPixels;
     const std::optional<DecodedPixels> decoded = DecodePixels(absolutePath, stbOwnedPixels, gtaOwnedPixels);
     if (!decoded.has_value()) {
-        // m_cachedIsValid stays false (set by Reset() above) - remembered
-        // as "not a decodable image" so re-selecting the same broken/
-        // unsupported file doesn't re-attempt a decode every frame.
+        // m_cachedIsValid stays false, so a broken file is not decoded again every frame.
         if (stbOwnedPixels != nullptr) {
             stbi_image_free(stbOwnedPixels);
         }
@@ -241,8 +172,7 @@ std::optional<AssetPreviewTexture::Preview> AssetPreviewTexture::Resolve(
         stbi_image_free(stbOwnedPixels);
     }
 
-    m_descriptor =
-        ImGui_ImplVulkan_AddTexture(m_texture->Sampler(), m_texture->View(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    m_descriptor = renderer.GetUiTextureHandle(*m_texture);
     m_width = decoded->width;
     m_height = decoded->height;
     m_cachedIsValid = true;

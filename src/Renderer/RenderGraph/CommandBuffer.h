@@ -95,17 +95,6 @@ public:
     // Dispatch using total element size (automatically calculates group count).
     void DispatchOverSize(std::uint32_t width, std::uint32_t height, std::uint32_t depth = 1);
 
-    // Convenience helper: binds pipeline, set, constants, and dispatches in one call.
-    template <typename PushConstants>
-    void DispatchCompute(const ComputePipeline& pipeline, DescriptorSetHandle set, const PushConstants& pushConstants,
-        std::uint32_t groupX, std::uint32_t groupY = 1, std::uint32_t groupZ = 1)
-    {
-        BindComputePipeline(pipeline);
-        BindDescriptorSet(set);
-        SetPushConstants(pushConstants);
-        Dispatch(groupX, groupY, groupZ);
-    }
-
     // Submits a mesh draw. The descriptor sets are engine handles, not raw VkDescriptorSet.
     void Draw(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
         const Mat4& viewProjMatrix = Mat4::Identity(),

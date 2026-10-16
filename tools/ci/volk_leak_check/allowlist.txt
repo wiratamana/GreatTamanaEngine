@@ -5,15 +5,8 @@ Assets/Ktx2Decoder.cpp # KTX2 files carry a vkFormat field
 Assets/Ktx2Encoder.cpp # KTX2 files carry a vkFormat field
 Core/ISurfaceProvider.h # permanent: surface provider hands out Vulkan instance extensions
 Editor/AssetPreviewMesh.cpp # debt: editor code uses raw Vulkan types
-Editor/AssetPreviewMesh.h # debt: editor code uses raw Vulkan types
-Editor/AssetPreviewTexture.cpp # debt: editor code uses raw Vulkan types
-Editor/AssetPreviewTexture.h # debt: editor code uses raw Vulkan types
 Editor/BoneViewerWindow.cpp # debt: editor code uses raw Vulkan types
-Editor/BoneViewerWindow.h # debt: editor code uses raw Vulkan types
 Editor/EditorHost.cpp # debt: editor code uses raw Vulkan types
 Editor/ImGuiEditorLayer.cpp # permanent: ImGui Vulkan backend setup
-Editor/Panels/FrameDebuggerPanel.cpp # debt: editor code uses raw Vulkan types
-Editor/Panels/FrameDebuggerPanel.h # debt: editor code uses raw Vulkan types
-Editor/Panels/RenderGraphPanel.cpp # debt: editor code uses raw Vulkan types
 Window/Window.cpp # permanent: SDL window creates the Vulkan surface
 Window/Window.h # permanent: SDL window creates the Vulkan surface

@@ -678,13 +678,8 @@ void RenderGraphPanel::DrawTimelineTrack(
     ImGui::Dummy(ImVec2(barWidth, kBarHeight));
 }
 
-// General-purpose "preview ANY pass's output, regardless of its current
-// Vulkan layout" path: a one-shot CPU capture + re-upload. Only resources
-// the engine explicitly finalizes for external sampling carry a guaranteed
-// VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL - directly wrapping an arbitrary
-// pass's own live imageView would be a validation-layer violation waiting
-// to happen. The single vkDeviceWaitIdle() per click is a reasonable price
-// for a rare, human-driven debug action, never a hot path.
+// One-shot CPU capture and re-upload: previews any pass's output regardless of its current image layout.
+// The capture waits for the GPU, a fair price for a rare, user-driven debug action.
 void RenderGraphPanel::RequestTexturePreview(
     const std::string& resourceName, Renderer& renderer, const rg::RenderGraph& renderGraph)
 {
@@ -694,10 +689,7 @@ void RenderGraphPanel::RequestTexturePreview(
         return;
     }
 
-    renderer.WaitForGpuIdle(); // One-shot, user-driven - not a per-frame cost.
-    const Renderer::CapturedRawPixels raw = renderer.CaptureImagePixels(
-        snapshot->target.image, VK_IMAGE_ASPECT_COLOR_BIT, snapshot->target.format, FromVkExtent2D(snapshot->target.extent),
-        snapshot->colorState);
+    const Renderer::CapturedRawPixels raw = renderer.CaptureDebugTexturePixels(*snapshot, /*depthAspect=*/false);
     if (raw.pixels.empty()) {
         m_texturePreview.Release();
         return;
@@ -713,7 +705,7 @@ void RenderGraphPanel::RequestTexturePreview(
         m_texturePreview.Request(renderer, resourceName,
             renderer.CreateTexture2D(rgba8.data(), raw.width, raw.height, "RenderGraphPreview"));
     } catch (const std::exception&) {
-        m_texturePreview.Release(); // vmaCreateImage/vkCreateImageView failure - rare, not fatal.
+        m_texturePreview.Release(); // GPU resource creation failed: rare, not fatal.
     }
 }
 

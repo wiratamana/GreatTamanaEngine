@@ -6,8 +6,6 @@
 #include "../Renderer/Compute/ComputeDescriptorSet.h"
 #include "../Renderer/Pipeline.h"
 
-#include <volk.h>
-
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -21,38 +19,11 @@ class Buffer;
 class Texture2D;
 class RenderTexture;
 
-// Renders a live, slowly-spinning 3D preview of an on-disk *.gta
-// AssetType::Mesh file (see src/Assets/MeshFile.h/AssetImporter.h - the
-// result of importing a .pmx model) for the Editor's "Inspector" panel to
-// display via ImGui::Image() when such an asset is selected (see
-// Panels/InspectorPanel.cpp) - the mesh equivalent of AssetPreviewTexture's
-// role for AssetType::Texture, but rendering a live 3D view instead of
-// displaying a static decoded image.
-//
-// Unlike AssetPreviewTexture (which decodes+uploads ONCE and reuses the same
-// static texture every frame), this class re-renders EVERY call - the
-// preview auto-rotates (a fixed-speed spin around the mesh's own up axis,
-// driven by ImGui::GetTime() - no per-frame state needs to be tracked for
-// this), so a fresh frame is genuinely needed each time the Inspector shows
-// it. The GPU vertex/index buffers themselves (and the bounding-sphere
-// auto-framing they were computed from) ARE still cached exactly like
-// AssetPreviewTexture caches its decoded texture - only re-uploaded when the
-// selected path or that file's own last-write-time changes.
-//
-// Needs a per-vertex NORMAL (not this engine's shared position+color
-// Vertex layout), so it builds its pipeline through Renderer's configurable
-// pipeline API (Core/PipelineDesc.h, VertexLayout::PositionNormal) instead
-// of the fixed-shape path-based CreatePipeline() overload. Records its draw
-// through gte::rg::CommandBuffer's own high-level methods (BindPipeline/
-// BindDescriptorSet/PushConstants/BindVertexBuffer/BindIndexBuffer/
-// DrawIndexed) via a Renderer::RenderOffscreen() recordExtra callback -
-// never touches CommandBuffer::Native()/a raw vkCmd* call.
-//
-// Owns its GPU buffers/RenderTexture/UI-texture handle/pipeline for as long
-// as they're needed - all released by Reset() (called by the destructor,
-// and MUST also be called explicitly by ImGuiEditorLayer's destructor
-// BEFORE the ImGui Vulkan backend shuts down, same requirement as
-// AssetPreviewTexture::Reset()).
+// Live, slowly spinning 3D preview of a mesh asset (*.gta) for the Inspector panel, shown through ImGui::Image().
+// It re-renders every call; the GPU buffers and the framing are cached until the path or its write time changes.
+// Builds its pipeline through the configurable pipeline API and records through CommandBuffer in a
+// Renderer::RenderOffscreen() callback.
+// Call Reset() before the UI backend shuts down (the destructor also calls it).
 class AssetPreviewMesh {
 public:
     AssetPreviewMesh() = default;
@@ -69,26 +40,11 @@ public:
         std::size_t triangleCount = 0;
     };
 
-    // Renders one fresh frame of `absolutePath`'s mesh into an internally-
-    // owned off-screen RenderTexture sized `viewportWidth` x
-    // `viewportHeight` (resized on demand, same as the Editor's Game/Scene
-    // views), auto-framed to the mesh's own bounding sphere and slowly
-    // spinning, and returns a ready-to-display preview - or std::nullopt if
-    // `absolutePath` doesn't currently resolve to a valid *.gta
-    // AssetType::Mesh file (missing file, bad magic/wrong asset type,
-    // corrupt/truncated payload, or an empty mesh with zero vertices) - the
-    // caller (InspectorPanel) falls back to plain AssetMetadata in that
-    // case, exactly like AssetPreviewTexture::Resolve()'s own failure mode.
-    // `viewportWidth`/`viewportHeight` are clamped to at least 1 internally,
-    // so a momentarily-zero-sized panel never attempts to create a
-    // zero-sized RenderTexture.
+    // Renders one fresh frame of `absolutePath`'s mesh into an internal off-screen texture of the given size
+    // (at least 1x1) and returns it ready to display, or nullopt when the path is not a valid non-empty mesh asset.
     std::optional<Preview> Render(Renderer& renderer, const std::string& absolutePath, int viewportWidth, int viewportHeight);
 
-    // Releases every currently-held GPU resource (vertex/index buffers,
-    // RenderTexture, UI-texture handle, pipeline) - waiting for the GPU to
-    // be idle first, same reasoning as AssetPreviewTexture::Reset(). Called
-    // by the destructor, and safe to call repeatedly/on an already-empty
-    // instance.
+    // Releases every held GPU resource after the GPU is idle. Also called by the destructor; safe to call repeatedly.
     void Reset();
 
 private:
@@ -100,21 +56,13 @@ private:
 
     Renderer* m_renderer = nullptr; // Non-owning - needed to destroy/release every handle below.
 
-    // Lazily built on first Render() call, then reused for every
-    // subsequently-selected mesh asset - built via Renderer's configurable
-    // pipeline API (Core/PipelineDesc.h) instead of hand-rolled Vulkan calls.
+    // Built on the first Render() call, then reused for every mesh.
     std::unique_ptr<Pipeline> m_pipeline;
     DescriptorSetLayoutHandle m_setZeroFillerLayoutHandle = DescriptorSetLayoutHandle::Invalid;
     DescriptorSetLayoutHandle m_setOneLayoutHandle = DescriptorSetLayoutHandle::Invalid;
 
-    // MeshPreview.frag samples the shared set=1 lighting/shadow interface -
-    // this preview has no real scene light/shadow context, so it builds its
-    // own tiny, always-neutral stand-in: a 1x1 white dummy texture at
-    // binding 0 + a zero-filled dummy UBO at binding 8. Allocated directly
-    // against m_setOneLayoutHandle via Renderer::AllocateComputeDescriptorSet(),
-    // which also binds its owning VkDevice - the returned set comes from
-    // Renderer's own shared descriptor pool and is never individually freed
-    // (same convention as every other compute-shaped descriptor set here).
+    // Neutral stand-in for the shared set=1 lighting interface: a 1x1 white texture at binding 0 and a
+    // zero-filled UBO at binding 8. The set comes from Renderer's shared pool and is never freed individually.
     ComputeDescriptorSet m_localSetOneDescriptorSet;
     std::unique_ptr<Texture2D> m_localWhiteTexture;
     std::unique_ptr<Buffer> m_localUniformBuffer;

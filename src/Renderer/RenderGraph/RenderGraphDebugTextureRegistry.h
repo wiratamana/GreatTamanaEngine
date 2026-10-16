@@ -4,6 +4,7 @@
 // RenderGraph calls Upsert() on every ExecuteCompiledGraph(), and every declared texture can appear here.
 
 #include "RenderGraphBarrierPlanner.h"
+#include "../../Core/Extent.h"
 #include "RenderGraphDebugResourceRegistryT.h"
 #include "../RenderTarget.h"
 
@@ -33,6 +34,12 @@ struct DebugTextureSnapshot {
 
     // Registry frame counter at the last Upsert(); ApplyColorStateOverride() does not touch it.
     std::uint64_t lastUpdatedFrameCounter = 0;
+
+    // Opaque identity of the color image view (0 when none), the color extent and whether a color image exists,
+    // without Vulkan types.
+    std::uint64_t ColorViewId() const noexcept { return reinterpret_cast<std::uintptr_t>(target.imageView); }
+    bool HasColorImage() const noexcept { return target.image != VK_NULL_HANDLE; }
+    Extent2D ColorExtent() const noexcept { return Extent2D{ target.extent.width, target.extent.height }; }
 };
 
 // Adds the color-state override a 2D texture needs; the shared base provides Upsert/FindByName/ListAll.
