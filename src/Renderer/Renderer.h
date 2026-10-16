@@ -231,10 +231,6 @@ public:
     // GPU timing capture.
     void SetGpuTimingCaptureEnabled(bool enabled) noexcept;
 
-    // Descriptor set layout helpers.
-    DescriptorSetLayoutHandle CreateDescriptorSetLayout(std::span<const DescriptorBindingDesc> bindings) const;
-    void DestroyDescriptorSetLayout(DescriptorSetLayoutHandle handle) const noexcept;
-
     // Builds a dynamic graphics pipeline from a descriptive configuration.
     Pipeline CreatePipeline(const PipelineDesc& desc, std::span<const std::byte> vertexSpirv,
         std::span<const std::byte> fragmentSpirv) const;
@@ -292,6 +288,10 @@ private:
     DescriptorSet AllocateDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const;
     // Frees a set from AllocateDescriptorSet(). The GPU must be done with it.
     void FreeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept;
+
+    // Layout from explicit bindings; the caller destroys it once no set or pipeline uses it.
+    DescriptorSetLayoutHandle CreateDescriptorSetLayout(std::span<const DescriptorBindingDesc> bindings) const;
+    void DestroyDescriptorSetLayout(DescriptorSetLayoutHandle handle) const noexcept;
 
     // Asks the render graph to drop the cached descriptor sets built for a destroyed shader layout.
     void QueueBindingRelease(VkDescriptorSetLayout layout) noexcept;

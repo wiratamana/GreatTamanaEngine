@@ -14,8 +14,10 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -64,31 +66,73 @@ MeshPreviewData BuildMeshPreviewData(std::span<const Vec3> positions, std::span<
 }
 
 struct MeshPreviewRenderer::Impl {
+    // Descriptor set layout made by the Renderer; destroyed with the owner.
+    struct LayoutOwner {
+        LayoutOwner(Renderer& owner, std::span<const DescriptorBindingDesc> bindings)
+            : renderer(owner)
+            , handle(owner.CreateDescriptorSetLayout(bindings))
+        {
+        }
+        ~LayoutOwner() { renderer.DestroyDescriptorSetLayout(handle); }
+        LayoutOwner(const LayoutOwner&) = delete;
+        LayoutOwner& operator=(const LayoutOwner&) = delete;
+
+        Renderer& renderer;
+        DescriptorSetLayoutHandle handle;
+    };
+
+    // Descriptor set from the Renderer pool plus its registry handle; both are released with the owner.
+    struct SetOwner {
+        SetOwner(Renderer& owner, DescriptorSetLayoutHandle layout)
+            : renderer(owner)
+            , set(owner.AllocateDescriptorSet(layout))
+            , handle(RegisterDescriptorSet(set.Native()))
+        {
+        }
+        ~SetOwner()
+        {
+            UnregisterDescriptorSet(handle);
+            renderer.FreeDescriptorSet(set.Native());
+        }
+        SetOwner(const SetOwner&) = delete;
+        SetOwner& operator=(const SetOwner&) = delete;
+
+        Renderer& renderer;
+        DescriptorSet set;
+        DescriptorSetHandle handle;
+    };
+
+    // The UI texture handle of the current target; released on Reset() and on destruction.
+    struct UiHandleOwner {
+        explicit UiHandleOwner(Renderer& owner) noexcept
+            : renderer(owner)
+        {
+        }
+        ~UiHandleOwner() { Reset(); }
+        UiHandleOwner(const UiHandleOwner&) = delete;
+        UiHandleOwner& operator=(const UiHandleOwner&) = delete;
+
+        void Reset() noexcept
+        {
+            if (handle != UiTextureHandle::Invalid) {
+                renderer.ReleaseUiTextureHandle(handle);
+                handle = UiTextureHandle::Invalid;
+            }
+        }
+        void Set(UiTextureHandle value) noexcept { handle = value; }
+
+        Renderer& renderer;
+        UiTextureHandle handle = UiTextureHandle::Invalid;
+    };
+
     explicit Impl(Renderer& owner)
         : renderer(owner)
+        , uiHandle(owner)
     {
     }
 
-    // Also runs for a half-built instance: whatever exists is released after the GPU stops using it.
-    ~Impl()
-    {
-        renderer.WaitForGpuIdle();
-        ReleaseUiHandle();
-        UnregisterDescriptorSet(setOneHandle);
-        if (setOne.has_value()) {
-            renderer.FreeDescriptorSet(setOne->Native());
-        }
-        renderer.DestroyDescriptorSetLayout(setOneLayout);
-        renderer.DestroyDescriptorSetLayout(zeroLayout);
-    }
-
-    void ReleaseUiHandle() noexcept
-    {
-        if (uiHandle != UiTextureHandle::Invalid) {
-            renderer.ReleaseUiTextureHandle(uiHandle);
-            uiHandle = UiTextureHandle::Invalid;
-        }
-    }
+    // Idles the GPU, then members release whatever was built (also for a half-built instance).
+    ~Impl() { renderer.WaitForGpuIdle(); }
 
     // Set 1 stands in for MeshPreview.frag's lighting interface; one layout serves the set and the pipeline.
     void Build()
@@ -97,10 +141,9 @@ struct MeshPreviewRenderer::Impl {
             { .binding = 0, .kind = DescriptorKind::CombinedImageSampler, .stages = ShaderStageMask::Fragment },
             { .binding = 8, .kind = DescriptorKind::UniformBuffer, .stages = ShaderStageMask::Fragment },
         };
-        zeroLayout = renderer.CreateDescriptorSetLayout({});
-        setOneLayout = renderer.CreateDescriptorSetLayout(kSetOneBindings);
-        setOne.emplace(renderer.AllocateDescriptorSet(setOneLayout));
-        setOneHandle = RegisterDescriptorSet(setOne->Native());
+        zeroLayout.emplace(renderer, std::span<const DescriptorBindingDesc>{});
+        setOneLayout.emplace(renderer, kSetOneBindings);
+        setOne.emplace(renderer, setOneLayout->handle);
 
         const unsigned char whitePixel[4] = { 255, 255, 255, 255 };
         whiteTexture.emplace(renderer.CreateTexture2D(whitePixel, 1, 1, "MeshPreviewDummyWhite"));
@@ -110,18 +153,12 @@ struct MeshPreviewRenderer::Impl {
         const std::array<std::byte, kDummyUniformBlockSize> zeroBytes{};
         uniformBuffer->Upload(zeroBytes.data(), zeroBytes.size());
 
-        DescriptorWrite uniformWrite;
-        uniformWrite.binding = 8;
-        uniformWrite.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        uniformWrite.buffer = uniformBuffer->Native();
-        uniformWrite.bufferOffset = 0;
-        uniformWrite.bufferRange = kDummyUniformBlockSize;
-        setOne->Rewrite(std::vector<DescriptorWrite>{
+        setOne->set.Rewrite(std::vector<DescriptorWrite>{
             DescriptorWrite::CombinedImageSampler(0, whiteTexture->View(), whiteTexture->Sampler()),
-            uniformWrite,
+            DescriptorWrite::UniformBuffer(8, uniformBuffer->Native(), 0, kDummyUniformBlockSize),
         });
 
-        const DescriptorSetLayoutHandle extraSets[] = { zeroLayout, setOneLayout };
+        const DescriptorSetLayoutHandle extraSets[] = { zeroLayout->handle, setOneLayout->handle };
         PipelineDesc desc = PipelinePreset::Opaque(renderer.ColorPixelFormat(), renderer.DepthPixelFormat());
         desc.vertexLayout = VertexLayout::PositionNormal;
         desc.cullMode = CullMode::None; // Imported meshes have no guaranteed winding.
@@ -148,13 +185,13 @@ struct MeshPreviewRenderer::Impl {
                 // Resize idles the GPU first; only then is the old ImGui descriptor safe to free.
                 renderer.ResizeRenderTexture(*target, width, height);
             }
-            ReleaseUiHandle();
+            uiHandle.Reset();
             targetWidth = width;
             targetHeight = height;
-            uiHandle = renderer.GetUiTextureHandle(*target);
+            uiHandle.Set(renderer.GetUiTextureHandle(*target));
             return true;
         } catch (const std::exception& e) {
-            ReleaseUiHandle();
+            uiHandle.Reset();
             target.reset();
             targetWidth = 0;
             targetHeight = 0;
@@ -166,11 +203,11 @@ struct MeshPreviewRenderer::Impl {
         }
     }
 
+    // Members are destroyed bottom-up: the UI handle goes before its target, the set before its layout.
     Renderer& renderer;
-    DescriptorSetLayoutHandle zeroLayout = DescriptorSetLayoutHandle::Invalid;
-    DescriptorSetLayoutHandle setOneLayout = DescriptorSetLayoutHandle::Invalid;
-    std::optional<DescriptorSet> setOne;
-    DescriptorSetHandle setOneHandle = DescriptorSetHandle::Invalid;
+    std::optional<LayoutOwner> zeroLayout;
+    std::optional<LayoutOwner> setOneLayout;
+    std::optional<SetOwner> setOne;
     std::optional<Texture2D> whiteTexture;
     std::optional<Buffer> uniformBuffer;
     std::optional<Pipeline> pipeline;
@@ -180,7 +217,7 @@ struct MeshPreviewRenderer::Impl {
     std::uint32_t indexCount = 0;
 
     std::optional<RenderTexture> target;
-    UiTextureHandle uiHandle = UiTextureHandle::Invalid;
+    UiHandleOwner uiHandle;
     int targetWidth = 0;
     int targetHeight = 0;
     bool targetFailureLogged = false;
@@ -248,7 +285,7 @@ UiTextureHandle MeshPreviewRenderer::Render(const Mat4& model, const Mat4& viewP
         clearColorRgba[2] / 255.0f, clearColorRgba[3] / 255.0f };
 
     const Pipeline& pipeline = *impl.pipeline;
-    const DescriptorSetHandle setOneHandle = impl.setOneHandle;
+    const DescriptorSetHandle setOneHandle = impl.setOne->handle;
     const Buffer& vertexBuffer = *impl.vertexBuffer;
     const Buffer& indexBuffer = *impl.indexBuffer;
     const std::uint32_t indexCount = impl.indexCount;
@@ -264,7 +301,7 @@ UiTextureHandle MeshPreviewRenderer::Render(const Mat4& model, const Mat4& viewP
         cmd.BindIndexBuffer(indexBuffer);
         cmd.DrawIndexed(indexCount);
     });
-    return impl.uiHandle;
+    return impl.uiHandle.handle;
 }
 
 int MeshPreviewRenderer::Width() const noexcept
