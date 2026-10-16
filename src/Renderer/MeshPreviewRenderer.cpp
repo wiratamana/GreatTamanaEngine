@@ -114,18 +114,20 @@ struct MeshPreviewRenderer::Impl {
             return true;
         }
         try {
-            ReleaseUiHandle();
             if (!target.has_value()) {
                 target.emplace(
                     renderer.CreateRenderTexture(width, height, PixelFormat::Undefined, "MeshPreview", "MeshPreviewDepth"));
             } else {
+                // Resize idles the GPU first; only then is the old ImGui descriptor safe to free.
                 renderer.ResizeRenderTexture(*target, width, height);
             }
+            ReleaseUiHandle();
             targetWidth = width;
             targetHeight = height;
             uiHandle = renderer.GetUiTextureHandle(*target);
             return true;
         } catch (const std::exception& e) {
+            ReleaseUiHandle();
             target.reset();
             targetWidth = 0;
             targetHeight = 0;
