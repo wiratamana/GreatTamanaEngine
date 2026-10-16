@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -119,7 +120,12 @@ struct MeshPreviewRenderer::Impl {
                 handle = UiTextureHandle::Invalid;
             }
         }
-        void Set(UiTextureHandle value) noexcept { handle = value; }
+        // Reset() first: the old handle must be released before a new one is made, and Set() never leaks one.
+        void Set(UiTextureHandle value) noexcept
+        {
+            assert(handle == UiTextureHandle::Invalid && "UiHandleOwner::Set: call Reset() first");
+            handle = value;
+        }
 
         Renderer& renderer;
         UiTextureHandle handle = UiTextureHandle::Invalid;
@@ -232,10 +238,10 @@ std::unique_ptr<MeshPreviewRenderer> MeshPreviewRenderer::TryCreate(Renderer& re
         GTE_LOG_ERROR(kLogCategory, std::string("Mesh preview could not be built: ") + e.what());
         return nullptr;
     }
-    return std::unique_ptr<MeshPreviewRenderer>(new MeshPreviewRenderer(std::move(impl)));
+    return std::make_unique<MeshPreviewRenderer>(CreateKey{}, std::move(impl));
 }
 
-MeshPreviewRenderer::MeshPreviewRenderer(std::unique_ptr<Impl> impl) noexcept
+MeshPreviewRenderer::MeshPreviewRenderer(CreateKey, std::unique_ptr<Impl> impl) noexcept
     : m_impl(std::move(impl))
 {
 }

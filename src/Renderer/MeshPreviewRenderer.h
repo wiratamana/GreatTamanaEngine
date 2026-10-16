@@ -59,8 +59,15 @@ public:
 
 private:
     struct Impl;
-    explicit MeshPreviewRenderer(std::unique_ptr<Impl> impl) noexcept;
+    // Lets std::make_unique call the constructor while only TryCreate can make the key.
+    struct CreateKey {
+        explicit CreateKey() = default;
+    };
 
+public:
+    MeshPreviewRenderer(CreateKey, std::unique_ptr<Impl> impl) noexcept;
+
+private:
     std::unique_ptr<Impl> m_impl;
 };
 

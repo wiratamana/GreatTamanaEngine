@@ -10,8 +10,8 @@ namespace gte {
 
 namespace {
 
-// Whole-pool slot count: a start/end pair for each of the two offscreen slots.
-constexpr std::uint32_t kTotalQuerySlotCount = 4;
+// Whole-pool slot count: a start/end pair for each timing slot.
+constexpr std::uint32_t kTotalQuerySlotCount = kGpuTimingSlotCount * 2;
 
 } // namespace
 
