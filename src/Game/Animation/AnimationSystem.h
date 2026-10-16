@@ -11,8 +11,6 @@
 #include "ResolvedAnimationBindingCache.h"
 #include "SkeletalRigCache.h"
 
-#include <volk.h>
-
 #include <cstdint>
 #include <string>
 #include <unordered_map>

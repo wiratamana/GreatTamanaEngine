@@ -1,4 +1,4 @@
-﻿#include "RenderGraphPanel.h"
+#include "RenderGraphPanel.h"
 
 #include "../EditorContext.h"
 #include "../EditorGpuMemoryNameOverlay.h"
@@ -9,6 +9,7 @@
 #include "../../Renderer/RenderGraph/RenderGraph.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleChangeDetectionLogic.h"
 #include "../../Renderer/Renderer.h"
+#include "../../Renderer/VulkanFormatInfo.h"
 
 #include <imgui.h>
 
@@ -77,7 +78,7 @@ void CollectResourceResolutionText(const rg::RenderGraphRegimeMetadata& regime, 
             return;
         }
         out[ref.name] = std::to_string(snapshot->target.extent.width) + "x"
-            + std::to_string(snapshot->target.extent.height) + ", " + ToString(snapshot->target.format);
+            + std::to_string(snapshot->target.extent.height) + ", " + ToString(FromVkFormat(snapshot->target.format));
     };
     for (const rg::RenderGraphPassMetadata& pass : regime.passes) {
         for (const rg::RenderGraphResourceRefMetadata& write : pass.writes) {

@@ -6,8 +6,6 @@
 #include "Renderer/Pipeline.h"
 #include "Renderer/PipelineHandle.h"
 
-#include <volk.h>
-
 #include <array>
 #include <cstddef>
 #include <optional>

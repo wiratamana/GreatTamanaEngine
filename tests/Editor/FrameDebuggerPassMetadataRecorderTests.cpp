@@ -1,4 +1,4 @@
-﻿// Unit tests for FrameDebuggerPassMetadataRecorder
+// Unit tests for FrameDebuggerPassMetadataRecorder
 // (src/Editor/FrameDebuggerPassMetadataRecorder.h). Pure, hand-fabricated
 // calls against one recorder instance - no RenderGraphBuilder/RenderGraph/
 // live device involved.
@@ -165,7 +165,7 @@ TEST(FrameDebuggerPassMetadataRecorderTest, BarrierLabelRoundTripsForSingleWrite
     FrameDebuggerPassMetadataRecorder recorder;
     recorder.OnPassDeclared(0, RenderPassCategory::General, RenderPassDrawKind::DrawMesh, /*owningFeatureName=*/"");
 
-    recorder.OnResourceBarrierApplied(0, "HDR_Scene", VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    recorder.OnResourceBarrierApplied(0, "HDR_Scene", "Undefined -> RT");
 
     std::string label;
     ASSERT_TRUE(recorder.QueryBarrierTransitionLabel(0, "HDR_Scene", label));
@@ -192,10 +192,9 @@ TEST(FrameDebuggerPassMetadataRecorderTest, DuplicateResourceNameWritesKeepIndep
     recorder.OnPassDeclared(0, RenderPassCategory::General, RenderPassDrawKind::DrawMesh, /*owningFeatureName=*/"");
 
     // Color attachment write, applied first.
-    recorder.OnResourceBarrierApplied(0, "SceneView", VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    recorder.OnResourceBarrierApplied(0, "SceneView", "Undefined -> RT");
     // Depth-stencil attachment write to the SAME resolved name, applied second.
-    recorder.OnResourceBarrierApplied(
-        0, "SceneView", VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+    recorder.OnResourceBarrierApplied(0, "SceneView", "Undefined -> Depth Test");
 
     // Queried in the same order RenderGraphSnapshot.cpp's write loop queries them.
     std::string colorLabel;
@@ -218,7 +217,7 @@ TEST(FrameDebuggerPassMetadataRecorderTest, BarrierLabelsDoNotLeakAcrossDeclarat
     recorder.OnPassDeclared(0, RenderPassCategory::General, RenderPassDrawKind::DrawMesh, /*owningFeatureName=*/"");
     recorder.OnPassDeclared(1, RenderPassCategory::General, RenderPassDrawKind::DrawMesh, /*owningFeatureName=*/"");
 
-    recorder.OnResourceBarrierApplied(0, "SceneView", VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    recorder.OnResourceBarrierApplied(0, "SceneView", "Undefined -> RT");
 
     std::string label;
     EXPECT_FALSE(recorder.QueryBarrierTransitionLabel(1, "SceneView", label));

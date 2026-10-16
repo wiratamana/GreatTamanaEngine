@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../Core/PixelFormat.h"
 #include "../Renderer/Memory/GpuMemoryTracker.h"
 
 #include <cstdint>
@@ -9,100 +10,47 @@
 
 namespace gte {
 
-// One display-ready row for the Editor's "Memory" panel (see
-// Panels/MemoryPanel.cpp) - a GpuMemoryTracker::Entry plus whatever debug
-// name (if any) GpuMemoryTracker::GetDebugName() has for its handle, both
-// already resolved into plain, ImGui-agnostic data. Deliberately kept free
-// of ImGui/Renderer/live-Vulkan-device knowledge so BuildMemoryRows() below
-// is Tier-1-testable exactly like the rest of this engine's pure ECS/math
-// logic (see AGENTS.md, "Testability & Regression Safety") despite living
-// under src/Editor/ - the same reasoning that already makes EditorCamera
-// (src/Editor/EditorCamera.h) Tier-1-testable.
+// One display-ready row of the "Memory" panel: a GpuMemoryTracker entry plus its resolved debug name.
+// Plain data, free of ImGui and device knowledge, so BuildMemoryRows() is unit-testable.
 struct MemoryRow {
     GpuResourceHandle handle;
     std::string name; // Empty if the resource was never given a debug name.
     GpuResourceType type = GpuResourceType::Buffer;
     GpuMemoryLocation location = GpuMemoryLocation::GpuOnly;
     uint64_t sizeBytes = 0;
-    // VK_FORMAT_UNDEFINED for a Buffer (format is meaningless there) - the
-    // resource's actual VkFormat for a Texture. See ToString(VkFormat)
-    // below for how this becomes the panel's "Format" column text.
-    VkFormat format = VK_FORMAT_UNDEFINED;
+    // Undefined for a buffer, or for a texture format the engine has no PixelFormat for.
+    PixelFormat format = PixelFormat::Undefined;
 };
 
-// Builds one MemoryRow per entry in `entries`, naming each via `nameLookup`
-// (in real use, EditorGpuMemoryNameOverlay::GetDebugName() - editor-core-
-// separation-1 campaign, PHASE4; a test can supply any stand-in), sorted by
-// sizeBytes descending, ties broken by handle index for a
-// stable/reproducible order. Biggest-contributor-first is Unity's own
-// Memory Profiler default sort, and is what actually answers "what's
-// contributing to memory usage" at a glance rather than requiring the user
-// to sort a raw list themselves every time.
+// Builds one row per entry, named through `nameLookup`, sorted by size descending (ties by handle index).
 std::vector<MemoryRow> BuildMemoryRows(const std::vector<GpuMemoryTracker::Entry>& entries,
     const std::function<std::string(GpuResourceHandle)>& nameLookup);
 
-// Formats a byte count as a human-readable string ("512 B", "12.30 KB",
-// "4.00 MB", "1.20 GB") - base-1024 (KiB/MiB/GiB magnitude, "KB"/"MB"/"GB"
-// label, matching Unity's own Memory Profiler display convention). Pulled
-// out as its own pure function so Panels/MemoryPanel.cpp and its test share
-// the exact same formatting rather than risking the two silently drifting
-// apart.
+// Human-readable byte count: "512 B", "12.30 KB", "4.00 MB", "1.20 GB" (base 1024).
 std::string FormatBytes(std::uint64_t bytes);
 
-// Short, human-readable labels for the panel's "Type"/"Location" columns -
-// pure lookups, kept here (rather than duplicated ad hoc inside
-// Panels/MemoryPanel.cpp) so they're covered by the same test file as
-// BuildMemoryRows()/FormatBytes() above.
+// Labels for the panel's "Type" and "Location" columns.
 const char* ToString(GpuResourceType type);
 const char* ToString(GpuMemoryLocation location);
 
-// Human-readable label for the panel's "Format" column - covers every
-// VkFormat this engine's own Texture resources actually use today
-// (RenderTexture's color image - VK_FORMAT_B8G8R8A8_UNORM/
-// VK_FORMAT_R8G8B8A8_UNORM - and DepthBuffer's depth/depth+stencil formats -
-// VK_FORMAT_D32_SFLOAT/VK_FORMAT_D32_SFLOAT_S8_UINT/
-// VK_FORMAT_D24_UNORM_S8_UINT, see VulkanDevice::PickDepthFormat()), plus
-// VK_FORMAT_UNDEFINED for a Buffer row (format doesn't apply to a raw byte
-// buffer). Falls back to a generic "VkFormat(<N>)" label for anything else
-// rather than a plain string literal, since that path needs the numeric
-// value baked in - hence returning std::string here rather than
-// `const char*` like the two overloads above.
-std::string ToString(VkFormat format);
+// Label for the "Format" column: "-" for a buffer, "Other" for a texture format without a PixelFormat.
+std::string FormatColumnLabel(GpuResourceType type, PixelFormat format);
 
-// One display-ready row for the Editor's "Memory" panel's VMA heap budget
-// section - the REAL, driver-reported usage/budget for one Vulkan memory
-// heap (see VulkanAllocator::GetHeapBudgets()/Renderer::GetVmaHeapBudgets()),
-// as opposed to GpuMemoryTracker's tally of just this engine's own tracked
-// Buffer/RenderTexture resources (MemoryRow above). Comparing the two is
-// exactly how you tell whether GpuMemoryTracker's numbers plausibly account
-// for everything Task Manager/a GPU tool would show for this heap, or
-// whether something else (the swapchain's own images, ImGui's Vulkan
-// backend, driver/loader overhead, ...) is unaccounted for.
+// One display-ready row of the heap budget section: driver-reported usage and budget of one memory heap,
+// next to what the allocator itself holds. Compare it with the tracked total to spot untracked memory.
 struct HeapBudgetRow {
     std::uint32_t heapIndex = 0;
-    uint64_t vmaBlockBytes = 0;      // Bytes VMA itself has actually requested from the driver for this heap.
-    std::uint32_t vmaBlockCount = 0;     // Number of separate VkDeviceMemory blocks VMA holds for this heap.
-    std::uint32_t vmaAllocationCount = 0; // Number of individual sub-allocations (Buffer/RenderTexture, ...) living inside those blocks.
-    uint64_t usageBytes = 0;    // Driver-reported CURRENT usage of this heap by this process.
-    uint64_t budgetBytes = 0;   // Driver-reported ESTIMATED ceiling this process can use of this heap.
+    uint64_t vmaBlockBytes = 0;          // Bytes the allocator requested from the driver for this heap.
+    std::uint32_t vmaBlockCount = 0;     // Number of memory blocks the allocator holds for this heap.
+    std::uint32_t vmaAllocationCount = 0; // Number of sub-allocations living inside those blocks.
+    uint64_t usageBytes = 0;             // Driver-reported current usage of this heap by this process.
+    uint64_t budgetBytes = 0;            // Driver-reported estimated ceiling for this process.
 };
 
-// Pure reshape of VulkanAllocator::GetHeapBudgets()'s raw VmaBudget entries
-// into the plain rows above, in heap-index order - no live VmaAllocator
-// needed (the caller already fetched `budgets`), so this stays
-// Tier-1-testable like BuildMemoryRows() above.
+// Reshapes the allocator's raw budget entries into rows, in heap-index order.
 std::vector<HeapBudgetRow> BuildHeapBudgetRows(const std::vector<VmaBudget>& budgets);
 
-// Formats a block/sub-allocation summary for the "VMA Allocated" column -
-// e.g. "64.00 MB across 1 block (3 sub-allocations)" - handling singular vs.
-// plural wording correctly. This is exactly the story behind a
-// GpuMemoryTracker total that looks much smaller than VMA's own block size:
-// VMA doesn't call vkAllocateMemory per-resource (slow, and limited by
-// maxMemoryAllocationCount) - it reserves whole blocks up front and
-// sub-allocates individual resources out of them, so a block can visibly be
-// mostly-unused headroom rather than a sign of a tracking gap. Pulled out as
-// its own pure function (like FormatBytes() above) so Panels/MemoryPanel.cpp
-// and its test share the exact same phrasing.
+// "64.00 MB across 1 block (3 sub-allocations)", with correct singular and plural wording.
 std::string FormatBlockSummary(uint64_t bytes, std::uint32_t blockCount, std::uint32_t allocationCount);
 
 } // namespace gte

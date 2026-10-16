@@ -1,6 +1,5 @@
 #pragma once
 
-#include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugMetadataSink.h"
 
 #include <cassert>
@@ -9,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace gte {
@@ -50,14 +50,13 @@ public:
     // (e.g. color + depth-stencil attachment of one combined render target) -
     // each occurrence is queued per-name, FIFO, so a later query consumes
     // labels in the same order they were produced instead of collapsing them.
-    void OnResourceBarrierApplied(std::size_t declarationIndex, const std::string& resourceName,
-        VkImageLayout oldLayout, VkImageLayout newLayout) override
+    void OnResourceBarrierApplied(
+        std::size_t declarationIndex, const std::string& resourceName, std::string transitionLabel) override
     {
         if (declarationIndex >= m_barrierLabelsByIndex.size()) {
             return; // Defensive - never expected against a real OnPassDeclared()-grown table.
         }
-        m_barrierLabelsByIndex[declarationIndex][resourceName].push_back(
-            rg::BarrierTransitionLabel(oldLayout, newLayout));
+        m_barrierLabelsByIndex[declarationIndex][resourceName].push_back(std::move(transitionLabel));
     }
 
     bool QueryPassDebugMetadata(std::size_t declarationIndex, rg::PassDebugMetadata& outMetadata) const override

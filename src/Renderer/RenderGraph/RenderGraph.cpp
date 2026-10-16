@@ -267,6 +267,7 @@ void RenderGraph::ReportSkippedOnce(
         GTE_LOG_ERROR("RenderGraph",
             "Pass \"" + passName + "\" skipped" + (binding ? " binding " + std::to_string(*binding) : std::string())
                 + ": " + reason);
+        assert(false && "a render pass skipped a binding; see the engine log");
         break;
     case BoundedOnceSet<kMaxReportedSkippedBindings>::Result::Overflow:
         GTE_LOG_ERROR("RenderGraph", "Too many distinct skipped bindings; further reports are suppressed.");
@@ -758,7 +759,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             ApplyUsageBarrierIfNeeded(cmd, usage, input, physicalTextures, physicalBuffers, &barrierInfo);
             if (barrierInfo.applied && m_debugMetadataSink != nullptr) {
                 m_debugMetadataSink->OnResourceBarrierApplied(passHandle.index, ResourceUsageName(usage, input),
-                    barrierInfo.oldLayout, barrierInfo.newLayout);
+                    BarrierTransitionLabel(barrierInfo.oldLayout, barrierInfo.newLayout));
             }
         }
 

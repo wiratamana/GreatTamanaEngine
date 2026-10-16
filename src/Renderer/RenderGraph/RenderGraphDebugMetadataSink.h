@@ -6,8 +6,6 @@
 
 #include "RenderGraphTypes.h"
 
-#include <volk.h>
-
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -39,10 +37,10 @@ public:
     // to reset whatever per-frame state the real implementation keeps.
     virtual void BeginFrame() = 0;
 
-    // Fires once per write that actually required a barrier, at execute
-    // time. declarationIndex matches OnPassDeclared()'s pass index.
-    virtual void OnResourceBarrierApplied(std::size_t declarationIndex, const std::string& resourceName,
-        VkImageLayout oldLayout, VkImageLayout newLayout) = 0;
+    // Fires once per write that actually required a barrier, at execute time.
+    // declarationIndex matches OnPassDeclared()'s pass index; `transitionLabel` is the display text, e.g. "Undefined -> RT".
+    virtual void OnResourceBarrierApplied(
+        std::size_t declarationIndex, const std::string& resourceName, std::string transitionLabel) = 0;
 };
 
 // Read-only counterpart to IPassDebugMetadataSink. Core queries this when

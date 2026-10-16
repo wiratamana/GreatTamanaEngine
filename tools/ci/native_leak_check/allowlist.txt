@@ -8,7 +8,6 @@ Editor/AssetPreviewTexture.cpp # debt: editor tool uses raw wrappers or one-shot
 Editor/BoneViewerWindow.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/BoneViewerWindow.h # debt: editor tool uses raw wrappers or one-shot submits
 Editor/EditorHost.cpp # debt: editor tool uses raw wrappers or one-shot submits
-Editor/EditorProjectLifecycleCapability.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/ImGuiEditorLayer.cpp # permanent: ImGui Vulkan backend needs the device idle and raw handles
 Editor/Panels/FrameDebuggerPanel.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/Panels/RenderGraphPanel.cpp # debt: editor tool uses raw wrappers or one-shot submits

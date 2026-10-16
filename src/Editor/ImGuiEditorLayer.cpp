@@ -70,10 +70,9 @@ public:
         , m_sceneView(renderer.CreateRenderTexture(window.Width(), window.Height(), PixelFormat::Undefined, "SceneView",
               "SceneViewDepth", /*allowStorageImageAccess=*/true, /*allowDepthSampledAccess=*/true))
     {
-        // See EditorContext::desiredExtent/desiredSceneExtent for why both
-        // are initialized to the OS window's startup size here.
-        m_ctx.desiredExtent = VkExtent2D{
-            static_cast<std::uint32_t>(window.Width()), static_cast<std::uint32_t>(window.Height()) };
+        // Both views start at the OS window's size so the first frame sees no resize mismatch.
+        m_ctx.desiredExtent =
+            Extent2D{ static_cast<std::uint32_t>(window.Width()), static_cast<std::uint32_t>(window.Height()) };
         m_ctx.desiredSceneExtent = m_ctx.desiredExtent;
 
         m_renderer = &renderer; // Non-owning - needed by Release*Descriptor() below, which take no renderer parameter.

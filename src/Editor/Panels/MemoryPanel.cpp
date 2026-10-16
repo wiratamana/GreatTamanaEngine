@@ -73,7 +73,7 @@ void BuildGpuTrackedSection(Renderer& renderer)
             ImGui::TextUnformatted(ToString(row.type));
 
             ImGui::TableSetColumnIndex(2);
-            ImGui::TextUnformatted(ToString(row.format).c_str());
+            ImGui::TextUnformatted(FormatColumnLabel(row.type, row.format).c_str());
 
             ImGui::TableSetColumnIndex(3);
             ImGui::TextUnformatted(ToString(row.location));

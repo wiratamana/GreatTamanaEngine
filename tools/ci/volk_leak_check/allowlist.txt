@@ -10,18 +10,10 @@ Editor/AssetPreviewTexture.cpp # debt: editor code uses raw Vulkan types
 Editor/AssetPreviewTexture.h # debt: editor code uses raw Vulkan types
 Editor/BoneViewerWindow.cpp # debt: editor code uses raw Vulkan types
 Editor/BoneViewerWindow.h # debt: editor code uses raw Vulkan types
-Editor/EditorContext.h # debt: editor code uses raw Vulkan types
 Editor/EditorHost.cpp # debt: editor code uses raw Vulkan types
-Editor/EditorProjectLifecycleCapability.cpp # debt: editor code uses raw Vulkan types
-Editor/FrameDebuggerPassMetadataRecorder.h # debt: editor code uses raw Vulkan types
-Editor/FrameDebuggerPreviewProcessing.h # debt: editor code uses raw Vulkan types
 Editor/ImGuiEditorLayer.cpp # permanent: ImGui Vulkan backend setup
-Editor/MemoryPanelData.cpp # debt: editor code uses raw Vulkan types
-Editor/MemoryPanelData.h # debt: editor code uses raw Vulkan types
 Editor/Panels/FrameDebuggerPanel.cpp # debt: editor code uses raw Vulkan types
 Editor/Panels/FrameDebuggerPanel.h # debt: editor code uses raw Vulkan types
 Editor/Panels/RenderGraphPanel.cpp # debt: editor code uses raw Vulkan types
-Game/Animation/AnimationSystem.h # debt: game systems hold raw Vulkan handles
-Game/SceneQuery.h # debt: game systems hold raw Vulkan handles
 Window/Window.cpp # permanent: SDL window creates the Vulkan surface
 Window/Window.h # permanent: SDL window creates the Vulkan surface

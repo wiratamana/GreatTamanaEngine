@@ -1,7 +1,7 @@
 #include "FrameDebuggerPanel.h"
 
 #include "../EditorContext.h"
-#include "../MemoryPanelData.h" // gte::ToString(VkFormat)
+#include "../MemoryPanelData.h"
 #include "../../Encoding/HdrColorVisualization.h"
 #include "../../Encoding/CapturedPixelConversion.h"
 #include "../../Encoding/DepthVisualization.h"
@@ -285,8 +285,10 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
             m_lastProcessedLevelsBlack = m_levelsBlack;
             m_lastProcessedLevelsWhite = m_levelsWhite;
         }
-        desiredView = m_previewProcessor.OutputView();
-        desiredSampler = m_previewProcessor.OutputSampler();
+        if (const Texture2D* output = m_previewProcessor.OutputTexture()) {
+            desiredView = output->View();
+            desiredSampler = output->Sampler();
+        }
     }
 
     if (m_previewDescriptor != VK_NULL_HANDLE && desiredView == m_lastKnownPreviewView) {

@@ -6,7 +6,6 @@
 #include <array>
 #include <cstdint>
 #include <optional>
-#include <volk.h>
 
 namespace gte {
 
@@ -41,12 +40,8 @@ public:
     const Texture2D& RenderPreview(Renderer& renderer, const RenderTexture& source, FrameDebuggerPreviewChannel channel,
         float levelsBlack, float levelsWhite);
 
-    // The scratch texture's view and sampler, in the shader-read state; null before the first RenderPreview().
-    VkImageView OutputView() const noexcept { return m_outputTexture.has_value() ? m_outputTexture->View() : VK_NULL_HANDLE; }
-    VkSampler OutputSampler() const noexcept
-    {
-        return m_outputTexture.has_value() ? m_outputTexture->Sampler() : VK_NULL_HANDLE;
-    }
+    // The scratch texture, in the shader-read state; null before the first RenderPreview().
+    const Texture2D* OutputTexture() const noexcept { return m_outputTexture.has_value() ? &*m_outputTexture : nullptr; }
 
 private:
     rg::Shader m_shader{ "FrameDebuggerPreview" };

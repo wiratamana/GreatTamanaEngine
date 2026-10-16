@@ -42,7 +42,7 @@ TEST(MemoryPanelDataTest, BuildMemoryRows_CopiesTypeLocationAndSizeFromEachEntry
     EXPECT_EQ(rows[0].type, GpuResourceType::Buffer);
     EXPECT_EQ(rows[0].location, GpuMemoryLocation::GpuOnly);
     EXPECT_EQ(rows[0].sizeBytes, 1024u);
-    EXPECT_EQ(rows[0].format, VK_FORMAT_UNDEFINED);
+    EXPECT_EQ(rows[0].format, PixelFormat::Undefined);
 }
 
 TEST(MemoryPanelDataTest, BuildMemoryRows_CopiesFormatFromEachEntry)
@@ -54,7 +54,7 @@ TEST(MemoryPanelDataTest, BuildMemoryRows_CopiesFormatFromEachEntry)
     const std::vector<MemoryRow> rows = BuildMemoryRows(entries, [](GpuResourceHandle) { return std::string(); });
 
     ASSERT_EQ(rows.size(), 1u);
-    EXPECT_EQ(rows[0].format, VK_FORMAT_D32_SFLOAT);
+    EXPECT_EQ(rows[0].format, PixelFormat::D32_Float);
 }
 
 TEST(MemoryPanelDataTest, BuildMemoryRows_SortsBySizeDescending)
@@ -139,34 +139,32 @@ TEST(MemoryPanelDataTest, ToString_ResourceTypeAndLocationAreNonNullAndDistinct)
     EXPECT_STRNE(ToString(GpuMemoryLocation::CpuOnly), ToString(GpuMemoryLocation::Shared));
 }
 
-TEST(MemoryPanelDataTest, ToStringVkFormat_UndefinedMeansNotApplicableForABuffer)
+TEST(MemoryPanelDataTest, FormatColumnLabel_BufferMeansNotApplicable)
 {
-    EXPECT_EQ(ToString(VK_FORMAT_UNDEFINED), "-");
+    EXPECT_EQ(FormatColumnLabel(GpuResourceType::Buffer, PixelFormat::Undefined), "-");
 }
 
-TEST(MemoryPanelDataTest, ToStringVkFormat_KnownColorAndDepthFormatsAreHumanReadableAndDistinct)
+TEST(MemoryPanelDataTest, FormatColumnLabel_KnownColorAndDepthFormatsAreHumanReadableAndDistinct)
 {
-    const std::string bgra = ToString(VK_FORMAT_B8G8R8A8_UNORM);
-    const std::string rgba = ToString(VK_FORMAT_R8G8B8A8_UNORM);
-    const std::string depth32 = ToString(VK_FORMAT_D32_SFLOAT);
-    const std::string depth32Stencil = ToString(VK_FORMAT_D32_SFLOAT_S8_UINT);
-    const std::string depth24Stencil = ToString(VK_FORMAT_D24_UNORM_S8_UINT);
-
-    // All distinct from each other and from the "-" (not applicable) case.
-    const std::vector<std::string> labels{ bgra, rgba, depth32, depth32Stencil, depth24Stencil };
+    const std::vector<std::string> labels{
+        FormatColumnLabel(GpuResourceType::Texture, PixelFormat::BGRA8_UNorm),
+        FormatColumnLabel(GpuResourceType::Texture, PixelFormat::RGBA8_UNorm),
+        FormatColumnLabel(GpuResourceType::Texture, PixelFormat::D32_Float),
+        FormatColumnLabel(GpuResourceType::Texture, PixelFormat::D32_Float_S8_UInt),
+        FormatColumnLabel(GpuResourceType::Texture, PixelFormat::D24_UNorm_S8_UInt),
+    };
     for (std::size_t i = 0; i < labels.size(); ++i) {
         EXPECT_NE(labels[i], "-");
+        EXPECT_NE(labels[i], "Other");
         for (std::size_t j = i + 1; j < labels.size(); ++j) {
             EXPECT_NE(labels[i], labels[j]);
         }
     }
 }
 
-TEST(MemoryPanelDataTest, ToStringVkFormat_UnknownFormatFallsBackToNumericLabelRatherThanCrashing)
+TEST(MemoryPanelDataTest, FormatColumnLabel_TextureWithoutAPixelFormatIsOther)
 {
-    const std::string label = ToString(static_cast<VkFormat>(999999));
-    EXPECT_NE(label, "-");
-    EXPECT_NE(label.find("999999"), std::string::npos);
+    EXPECT_EQ(FormatColumnLabel(GpuResourceType::Texture, PixelFormat::Undefined), "Other");
 }
 
 TEST(MemoryPanelDataTest, BuildHeapBudgetRows_EmptyInputProducesEmptyOutput)

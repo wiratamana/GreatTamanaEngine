@@ -1,121 +1,41 @@
 #pragma once
 
 #include "Selection.h"
+#include "../Core/Extent.h"
 #include "../Core/UiTextureHandle.h"
 #include "TransformGizmo.h"
 #include "RenderGraphRegimeChoice.h"
 #include <chrono>
 #include <string>
 
-#include <volk.h>
-
 namespace gte {
 
-// editor-core-separation-18 campaign (On-Engine Project Workflow plan,
-// BIG-STEP 4) - forward declaration only, NOT a full #include of
-// Core/EditorCapabilities.h (that header pulls in Logging.h/<filesystem>/
-// etc., and EditorContext.h is included by nearly every panel in this
-// codebase - see PHASE0_MASTER_STRATEGY.md's own risk register). Legal: a
-// plain C++11 scoped enum with the implicit default `int` underlying type
-// is used identically on both this forward declaration and the real
-// definition (Core/EditorCapabilities.h) - the two declarations are
-// therefore compatible, confirmed by the C++ standard's own rule that an
-// opaque-enum-declaration and its later definition must agree on the
-// (here, both-implicit, both-int) underlying type.
+// Forward declaration only: the full definition lives in Core/EditorCapabilities.h and is heavy.
 enum class AssetScaffoldKind;
 
-// Shared ImGui drag-and-drop payload type identifier for "a file path
-// dragged out of the Project panel" (see Panels/ProjectPanel.cpp's
-// RenderRightPaneEntry() - the drag SOURCE - and Panels/HierarchyPanel.cpp/
-// ScenePanel.cpp - the drag TARGETs that spawn a new entity from it via
-// Game::CreateMeshEntityFromGtaFile()). ImGui payload types are matched by
-// exact string content between BeginDragDropSource()'s SetDragDropPayload()
-// and BeginDragDropTarget()'s AcceptDragDropPayload(), so this one shared
-// constant is what keeps both sides from ever silently drifting apart.
-// Lives here (rather than in ProjectPanelData.h) so it's visible to every
-// panel regardless of whether GTE_ENABLE_PROJECT_PANEL is on - only the drag
-// SOURCE (ProjectPanel) is gated behind that switch; the drag TARGETs guard
-// their own use of it behind the same `#if GTE_ENABLE_PROJECT_PANEL` instead.
-// The payload itself is the dragged file's absolute filesystem path, UTF-8
-// encoded, NUL-terminated (see ProjectPanelData.h's PathToUtf8()).
+// ImGui drag-and-drop payload type for a file path dragged out of the Project panel (UTF-8, NUL-terminated).
 inline constexpr const char* kProjectAssetDragDropPayloadType = "GTE_PROJECT_ASSET_PATH";
 
-// Shared ImGui drag-and-drop payload type identifier for "an entity row
-// dragged within the Hierarchy panel itself" (see Panels/HierarchyPanel.cpp)
-// - both the attach/detach (reparent) and reorder halves of Hierarchy
-// drag-and-drop use this one payload type; which behavior happens is
-// decided by WHERE within the drop target's rect the entity was released
-// (see HierarchyPanel.cpp's own comment), not by a different payload type
-// per behavior. The payload itself is a single plain gte::Entity value
-// (trivially copyable - see Entity.h), never a pointer/index into anything
-// that could dangle.
+// ImGui drag-and-drop payload type for an entity row dragged within the Hierarchy panel (a plain Entity value).
 inline constexpr const char* kHierarchyEntityDragDropPayloadType = "GTE_HIERARCHY_ENTITY";
 
-// Plain shared state passed by reference into every Editor panel/dock-layout
-// function (see DockLayout.h, Panels/*.h) - the free-function equivalent of
-// what used to be ImGuiEditorLayer's own private member variables before the
-// panel split (see AGENTS.md, "Editor Module Structure"). Deliberately plain
-// data with no behavior of its own, the same "plain data, no virtual
-// behavior" philosophy AGENTS.md already applies to ECS components (see
-// ECS/Components/Transform.h) - only ImGuiEditorLayer (the composition root)
-// and the panel/dock-layout functions it calls ever touch this, in a fixed,
-// explicit order every frame.
-//
-// Holding raw VkExtent2D here is a DELIBERATE, Editor-only exception, NOT
-// an architectural leak elsewhere: these fields are written directly from
-// ImGui's own panel-size floats (GamePanel.cpp/ScenePanel.cpp), for Dear
-// ImGui's own Vulkan backend - "an external Vulkan-based rendering
-// backend... owned by the Editor module" (see Renderer.h). See AGENTS.md
-// ("Editor Module Structure") for the full rationale. NOTE: RenderTexture::
-// Extent() itself now returns the engine's own Extent2D, never VkExtent2D -
-// do not cite it as a reason raw Vulkan extents are acceptable elsewhere.
-// gameViewDescriptor/sceneViewDescriptor below use the opaque
-// UiTextureHandle (Renderer::GetUiTextureHandle()) instead - never a raw
-// VkDescriptorSet.
+// Plain shared state passed by reference into every Editor panel and dock-layout function.
+// Only ImGuiEditorLayer and the panel functions it calls touch it, in a fixed order every frame.
 struct EditorContext {
-    // The ImGui-side texture handle for the Game-view RenderTexture, created
-    // lazily by ImGuiEditorLayer::BuildUI() - read by GamePanel only. Never
-    // interpreted by engine code, just handed straight to ImGui::Image() as
-    // an opaque texture id.
+    // ImGui-side texture handle of the Game-view texture; created lazily by BuildUI(), read by GamePanel.
     UiTextureHandle gameViewDescriptor = UiTextureHandle::Invalid;
 
-    // The Scene-view equivalent of gameViewDescriptor above, for its own,
-    // separate RenderTexture (see ImGuiEditorLayer's class comment and
-    // EditorLayer.h's SceneViewTarget()) - read by ScenePanel only. "Game"
-    // and "Scene" each display their own texture now; they no longer share
-    // one.
+    // Same for the Scene view, read by ScenePanel.
     UiTextureHandle sceneViewDescriptor = UiTextureHandle::Invalid;
 
-    // Size (in pixels) the "Game" panel's content region actually was as of
-    // last frame's GamePanel::Build() (Panels/GamePanel.cpp) - what
-    // ImGuiEditorLayer::GameViewTarget() resizes the Game-view RenderTexture
-    // to at the start of the next frame. Initialized by ImGuiEditorLayer's
-    // constructor to the OS window's startup size, so the very first frame
-    // (before BuildUI() has ever run) doesn't see a spurious mismatch
-    // against the texture's own initial size.
-    VkExtent2D desiredExtent{};
+    // Size in pixels of the "Game" panel content last frame; the Game-view texture is resized to it next frame.
+    Extent2D desiredExtent{};
 
-    // The Scene-view equivalent of desiredExtent above, written by
-    // ScenePanel::Build() and applied by
-    // ImGuiEditorLayer::SceneViewTarget() - kept completely independent of
-    // desiredExtent so "Game" and "Scene" can each be resized/split to a
-    // different size without affecting the other's RenderTexture.
-    VkExtent2D desiredSceneExtent{};
+    // Same for the "Scene" panel, independent of the Game view.
+    Extent2D desiredSceneExtent{};
 
-    // True if the "Game"/"Scene" panel's ImGui::Begin() call actually
-    // returned true last frame (Panels/GamePanel.cpp/ScenePanel.cpp) - i.e.
-    // the panel is genuinely visible this frame (an active, undocked, or
-    // split-open tab), as opposed to an inactive tab hidden behind the
-    // other one. Read by ImGuiEditorLayer::GameViewTarget()/
-    // SceneViewTarget() to decide whether to bother resizing/returning that
-    // RenderTexture at all this frame - Application then skips the matching
-    // Renderer::RenderOffscreen() call entirely when the target comes back
-    // nullptr, so a hidden panel costs nothing to render. Initialized to
-    // true so the very first frame (before BuildUI() has ever run) still
-    // renders both views, same "safe default, corrected next frame" pattern
-    // as desiredExtent above. If "Scene" and "Game" are tabbed together,
-    // exactly one of these two is ever true at a time; if the user splits
-    // them apart, both are true simultaneously.
+    // True when the panel's ImGui::Begin() returned true last frame (the panel is visible).
+    // A hidden view is not rendered. Starts true so the first frame renders both.
     bool gameViewVisible = true;
     bool sceneViewVisible = true;
 
