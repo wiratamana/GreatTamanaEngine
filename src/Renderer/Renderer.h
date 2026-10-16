@@ -47,16 +47,21 @@ class RenderGraphPersistentResourceCache;
 class RenderGraphComputeBindingCache;
 class OneShot;
 struct DebugTextureSnapshot;
-class EventSnapshotResource;
+class RetainedEventSnapshot;
+class SceneRecording;
+class Shader;
+class RenderGraphTimestampPool;
 } // namespace gte::rg
 
 namespace gte {
 
 class ComputePipeline;
+class CullingPipelines;
 class DescriptorSet;
 class GpuDrivenBatchCache;
 class HeadlessRenderGraphFixture;
 class ISurfaceProvider;
+class MeshPreviewRenderer;
 class RenderFeatureCompositor;
 class SceneServicesDescriptorSet;
 class VolumeTexturePreviewRenderer;
@@ -87,11 +92,6 @@ public:
     std::optional<DrawStats> PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwapchainDepth,
         const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build);
 
-    // Binds an active command buffer for direct draw submissions during a graph pass.
-    void BeginGraphPassRecording(
-        VkCommandBuffer cmd, std::function<void(bool, std::uint32_t, std::uint32_t)> recordDrawStats);
-    void EndGraphPassRecording() noexcept;
-
     // Formats used by the current swapchain and depth buffer.
     VkFormat ColorFormat() const noexcept;
     VkFormat DepthFormat() const noexcept;
@@ -119,7 +119,7 @@ public:
     CapturedRawPixels CaptureDebugTexturePixels(const rg::DebugTextureSnapshot& snapshot, bool depthAspect) const;
 
     // Waits for the GPU, then reads back a retained per-event snapshot (a shader-read color or depth image).
-    CapturedRawPixels CaptureEventSnapshotPixels(const rg::EventSnapshotResource& snapshot, bool depthAspect) const;
+    CapturedRawPixels CaptureEventSnapshotPixels(const rg::RetainedEventSnapshot& snapshot, bool depthAspect) const;
 
     // Synchronously reads back raw pixel data from any GPU image.
     CapturedRawPixels CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format, Extent2D extent,
@@ -147,17 +147,6 @@ public:
 
     Buffer CreateDeviceLocalBuffer(
         const void* data, uint64_t size, BufferUsage usage, const char* debugName = nullptr) const;
-
-    Buffer CreateStructuredBuffer(uint64_t elementStride, std::uint32_t elementCount,
-        BufferMemoryUsage memoryUsage, BufferUsage extraUsage = BufferUsage::None, const char* debugName = nullptr) const;
-
-    Buffer CreateGpuSkinningTargetBuffer(uint64_t size, const char* debugName = nullptr) const;
-
-    // Executes a one-shot command buffer immediately on the graphics queue.
-    void ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& recordFn) const;
-
-    // Submits work directly to the graphics queue.
-    VkResult SubmitToGraphicsQueue(const VkSubmitInfo2& submit, VkFence fence) const;
 
     // Prepares the renderer for a new frame and clears queued draw commands.
     void BeginFrame();
@@ -187,32 +176,8 @@ public:
         bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false,
         DescriptorSetLayoutHandle sceneServicesSetLayout = DescriptorSetLayoutHandle::Invalid) const;
 
-    // Compute pipeline and descriptor factories.
-    ComputePipeline CreateComputePipeline(const std::string& shaderSpirvPath,
-        const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts = {},
-        std::optional<VkPushConstantRange> pushConstantRange = std::nullopt) const;
-
-    DescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout layout) const;
-    DescriptorSet AllocateDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const;
-
-    // Frees a set from AllocateDescriptorSet(). The GPU must be done with it.
-    void FreeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept;
-
-    // Asks the render graph to drop the cached descriptor sets built for a destroyed shader layout.
-    void QueueBindingRelease(VkDescriptorSetLayout layout) noexcept;
-    std::vector<VkDescriptorSetLayout> TakeQueuedBindingReleases() noexcept;
-
-    // Layout shared by instanced indirect draw buffers.
-    VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept;
-
-    // Hardware capability checks.
+    // Hardware capability check.
     bool SupportsDrawIndirectCount() const noexcept;
-    bool SupportsDepthBlit() const noexcept;
-
-    // Dispatches a compute pipeline within an active render graph pass.
-    void Dispatch(const ComputePipeline& pipeline, VkDescriptorSet descriptorSet, const void* pushConstants,
-        std::uint32_t pushConstantBytes, std::uint32_t groupCountX, std::uint32_t groupCountY = 1,
-        std::uint32_t groupCountZ = 1);
 
     // Mesh creation helpers.
     Mesh CreateMesh(const void* vertexData, uint64_t vertexDataSize, std::uint32_t vertexCount,
@@ -270,10 +235,6 @@ public:
     DescriptorSetLayoutHandle CreateDescriptorSetLayout(std::span<const DescriptorBindingDesc> bindings) const;
     void DestroyDescriptorSetLayout(DescriptorSetLayoutHandle handle) const noexcept;
 
-    // One layout per reflected set; the result owns and destroys them.
-    ReflectedSetLayouts CreateReflectedSetLayouts(
-        const std::vector<ReflectedDescriptorBinding>& bindings, const std::string& label) const;
-
     // Builds a dynamic graphics pipeline from a descriptive configuration.
     Pipeline CreatePipeline(const PipelineDesc& desc, std::span<const std::byte> vertexSpirv,
         std::span<const std::byte> fragmentSpirv) const;
@@ -312,6 +273,49 @@ public:
 
 private:
     VulkanContextInfo GetVulkanContextInfo() const;
+
+    // Raw GPU entry points for the src/Renderer internals named as friends below.
+    // Binds a command buffer for direct draw submissions during a graph pass.
+    void BeginGraphPassRecording(
+        VkCommandBuffer cmd, std::function<void(bool, std::uint32_t, std::uint32_t)> recordDrawStats);
+    void EndGraphPassRecording() noexcept;
+
+    // Runs a one-shot command buffer on the graphics queue and waits for it.
+    void ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& recordFn) const;
+    VkResult SubmitToGraphicsQueue(const VkSubmitInfo2& submit, VkFence fence) const;
+
+    ComputePipeline CreateComputePipeline(const std::string& shaderSpirvPath,
+        const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts = {},
+        std::optional<VkPushConstantRange> pushConstantRange = std::nullopt) const;
+
+    DescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout layout) const;
+    DescriptorSet AllocateDescriptorSet(DescriptorSetLayoutHandle layoutHandle) const;
+    // Frees a set from AllocateDescriptorSet(). The GPU must be done with it.
+    void FreeDescriptorSet(VkDescriptorSet descriptorSet) const noexcept;
+
+    // Asks the render graph to drop the cached descriptor sets built for a destroyed shader layout.
+    void QueueBindingRelease(VkDescriptorSetLayout layout) noexcept;
+    std::vector<VkDescriptorSetLayout> TakeQueuedBindingReleases() noexcept;
+
+    // Layout shared by instanced indirect draw buffers.
+    VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept;
+    bool SupportsDepthBlit() const noexcept;
+
+    // Dispatches a compute pipeline within an active graph pass.
+    void Dispatch(const ComputePipeline& pipeline, VkDescriptorSet descriptorSet, const void* pushConstants,
+        std::uint32_t pushConstantBytes, std::uint32_t groupCountX, std::uint32_t groupCountY = 1,
+        std::uint32_t groupCountZ = 1);
+
+    // One layout per reflected set; the result owns and destroys them.
+    ReflectedSetLayouts CreateReflectedSetLayouts(
+        const std::vector<ReflectedDescriptorBinding>& bindings, const std::string& label) const;
+
+    friend class rg::CommandBuffer;
+    friend class rg::SceneRecording;
+    friend class rg::Shader;
+    friend class rg::RenderGraphTimestampPool;
+    friend class CullingPipelines;
+    friend class MeshPreviewRenderer;
 
     friend class rg::RenderGraph;
     friend class rg::RenderGraphPersistentResourceCache;

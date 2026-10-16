@@ -1,6 +1,7 @@
 #include "FrameDebuggerCapture.h"
 
 #include "../Renderer/Renderer.h"
+#include "../Renderer/RenderGraph/RenderGraphEventSnapshotPool.h" // CaptureAttachmentIntoSnapshot()
 
 #include <algorithm>
 #include <utility>

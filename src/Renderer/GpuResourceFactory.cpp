@@ -121,12 +121,6 @@ GpuResourceFactory::~GpuResourceFactory()
     Destroy();
 }
 
-Buffer GpuResourceFactory::CreateGpuSkinningTargetBuffer(uint64_t size, const char* debugName) const
-{
-    return CreateBuffer(size, BufferUsage::StorageBuffer | BufferUsage::VertexBuffer,
-        BufferMemoryUsage::GpuOnly, debugName);
-}
-
 void GpuResourceFactory::Destroy() noexcept
 {
     if (m_materialDescriptorPool != VK_NULL_HANDLE) {
@@ -171,18 +165,6 @@ Buffer GpuResourceFactory::CreateBuffer(
     uint64_t size, BufferUsage usage, BufferMemoryUsage memoryUsage, const char* debugName) const
 {
     return Buffer(m_allocator, m_memoryTracker, size, usage, memoryUsage, debugName);
-}
-
-Buffer GpuResourceFactory::CreateStructuredBuffer(uint64_t elementStride, std::uint32_t elementCount,
-    BufferMemoryUsage memoryUsage, BufferUsage extraUsage, const char* debugName) const
-{
-    const uint64_t size = elementStride * static_cast<uint64_t>(elementCount);
-    BufferUsage usage = BufferUsage::StorageBuffer | extraUsage;
-    if (memoryUsage == BufferMemoryUsage::GpuOnly) {
-        // GpuOnly buffers need TransferDst so they can be filled by a staging upload.
-        usage |= BufferUsage::TransferDst;
-    }
-    return CreateBuffer(size, usage, memoryUsage, debugName);
 }
 
 Buffer GpuResourceFactory::CreateDeviceLocalBuffer(

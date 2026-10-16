@@ -3,6 +3,7 @@
 // Scratch images the Frame Debugger copies a pass's write target into, and the copy helpers.
 
 #include "RecordingContext.h"
+#include "RetainedEventSnapshot.h"
 #include "RenderGraphBarrierPlanner.h"
 #include "RenderGraphNameSlotTable.h"
 #include "../../Core/FrameDebuggerEventSink.h"
@@ -60,9 +61,9 @@ void CopyImageIntoSnapshot(VkCommandBuffer cmd, EventSnapshotResource& dst, VmaA
     const std::shared_ptr<GpuMemoryTracker>& tracker, VkDevice device, VkImage srcImage, VkExtent2D srcExtent,
     VkFormat srcFormat, VkImageAspectFlags aspect, ResourceState& srcState, const char* debugName);
 
-// Vulkan-free entry for the Frame Debugger: same copy as above for the attachment `write` named, taking the
-// allocator, tracker and device from `renderer`.
-void CaptureAttachmentIntoSnapshot(const RecordingContext& cmd, Renderer& renderer, EventSnapshotResource& dst,
+// Same copy for the attachment `write` named, with the allocator, tracker and device taken from `renderer`.
+// Skips (one error logged) an attachment of undefined format.
+void CaptureAttachmentIntoSnapshot(const RecordingContext& cmd, Renderer& renderer, RetainedEventSnapshot& dst,
     const AttachmentWrite& write, const char* debugName);
 
 } // namespace gte::rg

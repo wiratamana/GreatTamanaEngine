@@ -178,10 +178,10 @@ void SubmitIndirectAgainstPipelineWithSceneServicesSetBindsSetOne()
         vertices, sizeof(vertices), 3, indices, sizeof(indices), 3, "RendererSubmitIndirectTest.Mesh");
 
     const DescriptorSetHandle instanceBufferDescriptorSet =
-        RegisterDescriptorSet(renderer.AllocateDescriptorSet(renderer.InstanceBufferDescriptorSetLayout()).Native());
+        fixture.AllocateInstanceBufferDescriptorSet();
 
     const rg::RecordingContext recording = renderer.BeginOffscreenRenderGraphRecording();
-    renderer.BeginGraphPassRecording(rg::RecordingAccess::Native(recording), {});
+    fixture.BeginGraphPassRecording(recording);
 
     // New `sceneServicesSet` parameter sits right before viewProjMatrix in
     // SubmitIndirect()'s signature - VK_NULL_HANDLE is enough here, this
@@ -191,7 +191,7 @@ void SubmitIndirectAgainstPipelineWithSceneServicesSetBindsSetOne()
         /*maxDrawCount=*/1, /*countBuffer=*/VK_NULL_HANDLE, /*countBufferOffset=*/0, instanceBufferDescriptorSet,
         /*sceneServicesSet=*/DescriptorSetHandle::Invalid);
 
-    renderer.EndGraphPassRecording();
+    fixture.EndGraphPassRecording();
 
     UnregisterDescriptorSetLayout(throwawaySceneServicesLayoutHandle);
     vkDestroyDescriptorSetLayout(device, throwawaySceneServicesLayout, nullptr);

@@ -954,7 +954,7 @@ FrameDebuggerEventTextureResult FrameDebuggerPanel::GetEventTextureFromCommand(i
         return result; // Just (re)armed, or no Renderer cached yet - caller polls again.
     }
 
-    const rg::EventSnapshotResource& retained = m_captureContext.RetainedEventImage();
+    const rg::RetainedEventSnapshot& retained = m_captureContext.RetainedEventImage();
 
     // A depth-only pass retains a depth image, never color.
     const bool isDepth = m_captureContext.RetainedEventIsDepth();

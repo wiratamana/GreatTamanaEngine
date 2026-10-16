@@ -873,6 +873,7 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphTimestampPool.h
     src/Renderer/RenderGraph/RenderGraphTimestampPool.cpp
     src/Renderer/RenderGraph/RenderGraphEventSnapshotPool.h
+    src/Renderer/RenderGraph/RetainedEventSnapshot.h
     src/Renderer/RenderGraph/RenderGraphEventSnapshotPool.cpp
     # Pass-author command facade (PassContext::Cmd()) and the Vulkan-free recording handle.
     src/Renderer/RenderGraph/CommandBuffer.h

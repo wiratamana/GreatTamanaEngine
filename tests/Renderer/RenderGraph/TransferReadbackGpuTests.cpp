@@ -27,10 +27,10 @@ TEST(TransferReadbackGpuTest, CountCopiedByTheGraphIsReadOnTheHost)
     Renderer& renderer = fixture.GetRenderer();
 
     constexpr std::uint32_t kCount = 1234;
-    Buffer source = renderer.CreateStructuredBuffer(
-        sizeof(std::uint32_t), 1, BufferMemoryUsage::CpuToGpu, BufferUsage::TransferSrc, "Test.Count");
-    Buffer host = renderer.CreateStructuredBuffer(
-        sizeof(std::uint32_t), 1, BufferMemoryUsage::GpuToCpu, BufferUsage::TransferDst, "Test.CountReadback");
+    Buffer source = renderer.CreateBuffer(
+        sizeof(std::uint32_t), BufferUsage::StorageBuffer | BufferUsage::TransferSrc, BufferMemoryUsage::CpuToGpu, "Test.Count");
+    Buffer host = renderer.CreateBuffer(sizeof(std::uint32_t), BufferUsage::StorageBuffer | BufferUsage::TransferDst,
+        BufferMemoryUsage::GpuToCpu, "Test.CountReadback");
     source.Upload(&kCount, sizeof(kCount));
     const std::uint32_t zero = 0;
     host.Upload(&zero, sizeof(zero));

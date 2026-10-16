@@ -56,11 +56,6 @@ public:
     Buffer CreateDeviceLocalBuffer(
         const void* data, uint64_t size, BufferUsage usage, const char* debugName = nullptr) const;
 
-    Buffer CreateStructuredBuffer(uint64_t elementStride, std::uint32_t elementCount,
-        BufferMemoryUsage memoryUsage, BufferUsage extraUsage = BufferUsage::None, const char* debugName = nullptr) const;
-
-    Buffer CreateGpuSkinningTargetBuffer(uint64_t size, const char* debugName = nullptr) const;
-
     // Transient command buffer helpers
     VkCommandBuffer AllocateTransientCommandBuffer() const;
     void FreeTransientCommandBuffer(VkCommandBuffer cmd) const noexcept;

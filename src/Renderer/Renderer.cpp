@@ -292,16 +292,17 @@ Renderer::CapturedRawPixels Renderer::CaptureDebugTexturePixels(
 }
 
 Renderer::CapturedRawPixels Renderer::CaptureEventSnapshotPixels(
-    const rg::EventSnapshotResource& snapshot, bool depthAspect) const
+    const rg::RetainedEventSnapshot& retained, bool depthAspect) const
 {
-    if (snapshot.Image() == VK_NULL_HANDLE) {
+    const rg::EventSnapshotResource* snapshot = retained.Get();
+    if (snapshot == nullptr || snapshot->Image() == VK_NULL_HANDLE) {
         return CapturedRawPixels{};
     }
     const VkImageAspectFlags aspect = depthAspect ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     const rg::ResourceState shaderRead{ VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
         VK_ACCESS_2_SHADER_READ_BIT };
     WaitForGpuIdle();
-    return CaptureImagePixels(snapshot.Image(), aspect, snapshot.Format(), FromVkExtent2D(snapshot.Extent()), shaderRead);
+    return CaptureImagePixels(snapshot->Image(), aspect, snapshot->Format(), FromVkExtent2D(snapshot->Extent()), shaderRead);
 }
 
 void Renderer::WaitForGpuIdle() const
@@ -328,17 +329,6 @@ Buffer Renderer::CreateBuffer(
     uint64_t size, BufferUsage usage, BufferMemoryUsage memoryUsage, const char* debugName) const
 {
     return m_resources.CreateBuffer(size, usage, memoryUsage, debugName);
-}
-
-Buffer Renderer::CreateStructuredBuffer(uint64_t elementStride, std::uint32_t elementCount,
-    BufferMemoryUsage memoryUsage, BufferUsage extraUsage, const char* debugName) const
-{
-    return m_resources.CreateStructuredBuffer(elementStride, elementCount, memoryUsage, extraUsage, debugName);
-}
-
-Buffer Renderer::CreateGpuSkinningTargetBuffer(uint64_t size, const char* debugName) const
-{
-    return m_resources.CreateGpuSkinningTargetBuffer(size, debugName);
 }
 
 Buffer Renderer::CreateDeviceLocalBuffer(

@@ -4,7 +4,9 @@
 #include "../Renderer.h"
 
 #include <exception>
+#include <functional>
 #include <string>
+#include <utility>
 
 namespace gte::rg {
 
@@ -26,15 +28,15 @@ bool NeedsAttachments(const PassRecord& pass)
 // Descriptor sets of one run: freed after the GPU is done with them.
 class SetLeases {
 public:
-    explicit SetLeases(Renderer& renderer) noexcept
-        : m_renderer(renderer)
+    explicit SetLeases(std::function<void(VkDescriptorSet)> freeSet)
+        : m_freeSet(std::move(freeSet))
     {
     }
     ~SetLeases()
     {
         for (const Lease& lease : m_leases) {
             UnregisterDescriptorSet(lease.handle);
-            m_renderer.FreeDescriptorSet(lease.set);
+            m_freeSet(lease.set);
         }
     }
     SetLeases(const SetLeases&) = delete;
@@ -47,7 +49,7 @@ private:
         DescriptorSetHandle handle;
         VkDescriptorSet set;
     };
-    Renderer& m_renderer;
+    std::function<void(VkDescriptorSet)> m_freeSet;
     std::vector<Lease> m_leases;
 };
 
@@ -59,7 +61,7 @@ bool RenderGraph::RunOneShot(CompiledGraphInput input, std::span<const TextureHa
     const CompiledGraph compiled = Compile(input, outputs);
     std::vector<PhysicalTexture> physicalTextures(input.textures.size());
     std::vector<PhysicalBuffer> physicalBuffers(input.buffers.size());
-    SetLeases leases(*m_renderer);
+    SetLeases leases([this](VkDescriptorSet set) { m_renderer->FreeDescriptorSet(set); });
 
     try {
         m_renderer->ImmediateSubmit([&](CommandBuffer& commandBuffer) {

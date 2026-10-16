@@ -4,8 +4,7 @@
 #include "../Core/FrameDebuggerEventSink.h"
 #include "../Math/Mat4.h"
 #include "../Renderer/RenderTexture.h" // m_replayStepPreviews below.
-#include "../Renderer/RenderGraph/RenderGraphBarrierPlanner.h" // ResourceState/RequiredStateFor() - per-draw event capture.
-#include "../Renderer/RenderGraph/RenderGraphEventSnapshotPool.h" // EventSnapshotResource/CopyImageIntoSnapshot() - per-draw event capture.
+#include "../Renderer/RenderGraph/RetainedEventSnapshot.h"
 
 #include <cstdint>
 #include <memory>
@@ -114,7 +113,7 @@ public:
     }
 
     // Meaningful only when HasRetainedEventImage() is true.
-    const rg::EventSnapshotResource& RetainedEventImage() const noexcept { return m_retainedEventImage; }
+    const rg::RetainedEventSnapshot& RetainedEventImage() const noexcept { return m_retainedEventImage; }
 
     // True if the retained image is a depth-only capture (color is preferred when a draw wrote both).
     // Meaningful only when HasRetainedEventImage() is true.
@@ -166,7 +165,7 @@ private:
     int m_retainedEventIndex = -1;
     bool m_retainedEventIsDepth = false; // See RetainedEventIsDepth().
     std::optional<AttachmentWrite> m_pendingEventCapture;
-    rg::EventSnapshotResource m_retainedEventImage;
+    rg::RetainedEventSnapshot m_retainedEventImage;
 };
 
 } // namespace gte

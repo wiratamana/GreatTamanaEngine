@@ -168,7 +168,20 @@ void CopyImageIntoSnapshot(VkCommandBuffer cmd, EventSnapshotResource& dst, VmaA
     dst.State() = dstRead;
 }
 
-void CaptureAttachmentIntoSnapshot(const RecordingContext& cmd, Renderer& renderer, EventSnapshotResource& dst,
+RetainedEventSnapshot::RetainedEventSnapshot() = default;
+RetainedEventSnapshot::~RetainedEventSnapshot() = default;
+RetainedEventSnapshot::RetainedEventSnapshot(RetainedEventSnapshot&&) noexcept = default;
+RetainedEventSnapshot& RetainedEventSnapshot::operator=(RetainedEventSnapshot&&) noexcept = default;
+
+EventSnapshotResource& RetainedEventSnapshot::Resource()
+{
+    if (!m_resource) {
+        m_resource = std::make_unique<EventSnapshotResource>();
+    }
+    return *m_resource;
+}
+
+void CaptureAttachmentIntoSnapshot(const RecordingContext& cmd, Renderer& renderer, RetainedEventSnapshot& dst,
     const AttachmentWrite& write, const char* debugName)
 {
     const VkFormat format = ToVkFormat(write.format);
@@ -183,8 +196,8 @@ void CaptureAttachmentIntoSnapshot(const RecordingContext& cmd, Renderer& render
     ResourceState attachmentState = RequiredStateFor(
         write.isDepth ? ResourceAccess::DepthStencilAttachmentReadWrite : ResourceAccess::ColorAttachmentWrite,
         write.isDepth);
-    CopyImageIntoSnapshot(RecordingAccess::Native(cmd), dst, renderer.GetVmaAllocator(), renderer.GetMemoryTracker(),
-        renderer.GetImGuiVulkanBackendInfo().device, RecordingAccess::Image(write.image),
+    CopyImageIntoSnapshot(RecordingAccess::Native(cmd), dst.Resource(), renderer.GetVmaAllocator(),
+        renderer.GetMemoryTracker(), renderer.GetImGuiVulkanBackendInfo().device, RecordingAccess::Image(write.image),
         ToVkExtent2D(write.extent), format, aspect, attachmentState, debugName);
 }
 
