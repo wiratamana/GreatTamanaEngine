@@ -21,10 +21,13 @@ struct AtmosphereViewLuts {
     AtmosphereFrameUniforms frameUniforms;
 };
 
+// Size of the per-view aerial perspective volume in texels.
+inline constexpr fx::VolumeSize kAerialVolumeSize{ 128, 128, 32 };
+
 // Per-view resources.
 struct AtmosphereViewState {
     fx::PersistentTarget skyView{ "SkyViewLut" };
-    fx::PersistentVolume aerialVolume{ "AerialPerspectiveVolume", fx::VolumeSize{ 128, 128, 32 }, PixelFormat::RGBA16_Float };
+    fx::PersistentVolume aerialVolume{ "AerialPerspectiveVolume", kAerialVolumeSize, PixelFormat::RGBA16_Float };
     fx::GpuParams<AtmosphereFrameUniforms> frameParams;
 };
 

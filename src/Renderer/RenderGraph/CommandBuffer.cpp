@@ -9,10 +9,24 @@
 #include "../Pipeline.h"
 #include "../Renderer.h"
 #include "../Vulkan/ShaderStageMask.h"
+#include "../../Core/Logging.h"
 
+#include <atomic>
 #include <cassert>
 
 namespace gte::rg {
+
+namespace {
+
+void LogUndefinedWriteFormatOnce()
+{
+    static std::atomic_flag logged;
+    if (!logged.test_and_set()) {
+        GTE_LOG_ERROR("CommandBuffer", "Draw target has a pixel format the engine does not know; Frame Debugger capture skipped.");
+    }
+}
+
+} // namespace
 
 CommandBuffer::CommandBuffer(VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats,
     WriteTargetInfo writeTarget, FrameDebuggerEventSink* eventSink) noexcept
@@ -88,17 +102,27 @@ void CommandBuffer::Draw(const Pipeline& pipeline, const Mesh& mesh, const Mat4&
     m_renderer->Submit(pipeline, mesh, modelMatrix, viewProjMatrix, materialDescriptorSet, sceneServicesSet);
     m_renderer->EndGraphPassRecording();
 
-    // Notify the frame debugger (prefers the color target over depth).
-    if (m_eventSink != nullptr) {
-        if (m_writeTarget.colorImage != VK_NULL_HANDLE) {
-            m_eventSink->NoteCommandResult(AttachmentWrite{ RecordingAccess::ImageToken(m_writeTarget.colorImage),
-                Extent2D{ m_writeTarget.colorExtent.width, m_writeTarget.colorExtent.height },
-                CapturedPixelFormatFromVk(m_writeTarget.colorFormat), false });
-        } else if (m_writeTarget.depthImage != VK_NULL_HANDLE) {
-            m_eventSink->NoteCommandResult(AttachmentWrite{ RecordingAccess::ImageToken(m_writeTarget.depthImage),
-                Extent2D{ m_writeTarget.colorExtent.width, m_writeTarget.colorExtent.height },
-                FromVkFormat(m_writeTarget.depthFormat), true });
+    // Notify the frame debugger (prefers the color target over depth). A format the engine does not know is
+    // not reported: the debugger could not copy it.
+    if (m_eventSink == nullptr) {
+        return;
+    }
+    if (m_writeTarget.colorImage != VK_NULL_HANDLE) {
+        const PixelFormat format = CapturedPixelFormatFromVk(m_writeTarget.colorFormat);
+        if (format == PixelFormat::Undefined) {
+            LogUndefinedWriteFormatOnce();
+            return;
         }
+        m_eventSink->NoteCommandResult(AttachmentWrite{ RecordingAccess::ImageToken(m_writeTarget.colorImage),
+            Extent2D{ m_writeTarget.colorExtent.width, m_writeTarget.colorExtent.height }, format, false });
+    } else if (m_writeTarget.depthImage != VK_NULL_HANDLE) {
+        const PixelFormat format = FromVkFormat(m_writeTarget.depthFormat);
+        if (format == PixelFormat::Undefined) {
+            LogUndefinedWriteFormatOnce();
+            return;
+        }
+        m_eventSink->NoteCommandResult(AttachmentWrite{ RecordingAccess::ImageToken(m_writeTarget.depthImage),
+            Extent2D{ m_writeTarget.colorExtent.width, m_writeTarget.colorExtent.height }, format, true });
     }
 }
 

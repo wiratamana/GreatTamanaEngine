@@ -55,6 +55,10 @@ public:
     // Stamps a handle with this frame's serial.
     Texture Stamp(rg::TextureHandle handle) const noexcept { return Texture{ handle, m_serial }; }
 
+    // False while the pass `passName` is toggled off (or the frame has no engine context).
+    // Ask it before any side effect (Acquire, resize) that only an enabled pass needs.
+    bool PassEnabled(rg::StaticName passName) const;
+
     // One compute dispatch over `shader`. Declares nothing while its pass is toggled off.
     ComputeChain Compute(ComputeShader& shader, rg::StaticName passName);
 

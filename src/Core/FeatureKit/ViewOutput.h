@@ -21,8 +21,9 @@ public:
     ViewOutput(const ViewOutput&) = delete;
     ViewOutput& operator=(const ViewOutput&) = delete;
 
-    // The texture for the frame's view, imported into the graph and kept alive.
-    // Invalid when the size is zero or the engine could not make it (logged once, retried on a cooldown).
+    // The texture for the frame's view, imported into the graph and kept alive. Call it only for an enabled pass
+    // (see Frame::PassEnabled()). Invalid in a Shared callback, for a zero size, or when the engine could not make
+    // or resize it (logged once, retried on a cooldown).
     Texture Acquire(Frame& frame, Extent2D extent, PixelFormat format);
 
 private:

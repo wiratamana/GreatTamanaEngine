@@ -10,12 +10,7 @@ namespace gte {
 // Plain GPU buffer layouts read by the atmosphere compute shaders (bound as read-only storage buffers).
 // Vulkan-free on purpose. Every struct is a sequence of 16-byte groups: a Vec3 plus a scalar share one group,
 // which is identical under std140 and std430.
-static_assert(sizeof(Vec3) == 12,
-    "AtmosphereParametersGpu/AtmosphereFrameUniforms below assume Vec3 is a "
-    "tightly-packed 3xfloat POD (see src/Math/Vec3.h) so a Vec3 field "
-    "immediately followed by a float field packs into exactly 16 bytes, "
-    "matching GLSL's std140/std430 vec3+scalar layout rule with zero extra "
-    "compiler-inserted padding.");
+static_assert(sizeof(Vec3) == 12, "Vec3 must be 3 packed floats so Vec3 + float fills one 16-byte group");
 
 // Physical constants of one planet's atmosphere. Coefficients are per kilometer (km^-1); heights, radii and
 // thickness are in kilometers. The ozone layer is a single symmetric tent profile; the atmosphere is stored as
@@ -48,10 +43,7 @@ struct AtmosphereParametersGpu {
     float multiScatteringStrength = 1.0f;
     float _pad1 = 0.0f;
 };
-static_assert(sizeof(AtmosphereParametersGpu) == 96,
-    "AtmosphereParametersGpu must be exactly six 16-byte std140/std430-"
-    "compatible groups (6 * 16 = 96 bytes) - see each group's own doc "
-    "comment above.");
+static_assert(sizeof(AtmosphereParametersGpu) == 96, "AtmosphereParametersGpu must be 96 bytes (6 vec4 groups)");
 
 // Per-view, per-frame values the atmosphere passes read next to AtmosphereParametersGpu.
 struct AtmosphereFrameUniforms {
@@ -78,12 +70,7 @@ struct AtmosphereFrameUniforms {
     float aerialPerspectiveSamplesPerSliceAsFloat = 8.0f; // Stored as float; the shader rounds and clamps to [1, 8].
     float aerialPerspectiveScatteringExaggeration = 1.0f; // Multiplies the extinction while marching the volume.
 };
-static_assert(sizeof(AtmosphereFrameUniforms) == 128,
-    "AtmosphereFrameUniforms must be exactly three 16-byte std140/std430-"
-    "compatible groups (3 * 16 = 48 bytes) plus one 64-byte mat4 group "
-    "(48 + 64 = 112 bytes) plus one 16-byte group of aerial perspective "
-    "tunables - 48 + 64 + 16 = 128 bytes total - "
-    "see each group's own doc comment above.");
+static_assert(sizeof(AtmosphereFrameUniforms) == 128, "AtmosphereFrameUniforms must be 128 bytes (3 vec4 + mat4 + vec4)");
 
 // Tunable atmosphere knobs, edited live in the Editor's "Atmosphere" panel. The physical fields mirror
 // AtmosphereParametersGpu and are re-read every frame by AtmosphereFeature. One instance per session.

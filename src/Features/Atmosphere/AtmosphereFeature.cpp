@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstring>
 
 namespace gte {
 
@@ -20,25 +19,26 @@ constexpr std::int32_t kCompositePriority = -1000;
 constexpr Extent2D kTransmittanceSize{ 256, 256 };
 constexpr Extent2D kMultiScatteringSize{ 64, 64 };
 constexpr Extent2D kSkyViewSize{ 200, 100 };
-constexpr Extent2D kAerialVolumeSize{ 128, 128 }; // Each column marches through every Z slice itself.
+// Each aerial perspective column marches through every Z slice itself, so only X and Y are dispatched.
+constexpr Extent2D kAerialDispatchSize{ kAerialVolumeSize.width, kAerialVolumeSize.height };
 
 // Push constants of AtmosphereAerialPerspectiveComposite.comp.
 struct CompositePush {
-    float invViewProjection[16];
-    float cameraWorldPositionAndScale[4]; // xyz = camera world position, w = world units per km.
-    float strengthMaxDistanceExponentPad[4]; // x = strength, y = max distance (km), z = depth exponent.
+    Mat4 invViewProjection;
+    Vec4 cameraWorldPositionAndScale; // xyz = camera world position, w = world units per km.
+    Vec4 strengthMaxDistanceExponent; // x = strength, y = max distance (km), z = depth exponent, w = unused.
 };
-static_assert(sizeof(CompositePush) == 96, "must match AtmosphereAerialPerspectiveComposite.comp");
+static_assert(sizeof(CompositePush) == 96, "layout differs from AtmosphereAerialPerspectiveComposite.comp");
 
 // Push constants of AtmosphereSkyBackground.frag.
 struct SkyBackgroundPush {
-    float invViewProjection[16];
+    Mat4 invViewProjection;
     float eyeHeightKm;
     float planetRadiusKm;
     float skyExposure;
     float pad;
 };
-static_assert(sizeof(SkyBackgroundPush) == 80, "must match AtmosphereSkyBackground.frag");
+static_assert(sizeof(SkyBackgroundPush) == 80, "layout differs from AtmosphereSkyBackground.frag");
 
 AtmosphereParametersGpu MakeParameters(const AtmosphereSettings& settings)
 {
@@ -59,6 +59,7 @@ AtmosphereParametersGpu MakeParameters(const AtmosphereSettings& settings)
     return params;
 }
 
+// The view's inverse view-projection must be valid (checked by the caller).
 AtmosphereFrameUniforms MakeFrameUniforms(Registry& scene, const fx::View& view, const AtmosphereSettings& settings)
 {
     AtmosphereFrameUniforms uniforms;
@@ -73,7 +74,7 @@ AtmosphereFrameUniforms MakeFrameUniforms(Registry& scene, const fx::View& view,
     uniforms.sunDirection = sun.directionTowardSun;
     uniforms.sunIlluminance = sun.sunIlluminance;
 
-    uniforms.invViewProjection = view.viewProjection.Inverse();
+    uniforms.invViewProjection = view.invViewProjection;
     uniforms.aerialPerspectiveMaxDistanceKm = settings.aerialPerspectiveMaxDistanceKm;
     uniforms.aerialPerspectiveDepthExponent = settings.aerialPerspectiveDepthExponent;
     uniforms.aerialPerspectiveSamplesPerSliceAsFloat = static_cast<float>(settings.aerialPerspectiveSamplesPerSlice);
@@ -102,6 +103,9 @@ void AtmosphereFeature::SharedLuts(fx::SharedFrame& f)
 {
     const AtmosphereParametersGpu params = MakeParameters(m_settings);
 
+    if (!f.PassEnabled("AtmosphereTransmittanceLutPass")) {
+        return;
+    }
     const fx::Texture transmittance = m_transmittance.Acquire(f, kTransmittanceSize, PixelFormat::RGBA8_UNorm);
     if (!transmittance.IsValid()) {
         return;
@@ -114,6 +118,9 @@ void AtmosphereFeature::SharedLuts(fx::SharedFrame& f)
         return;
     }
 
+    if (!f.PassEnabled("AtmosphereMultiScatteringLutPass")) {
+        return;
+    }
     const fx::Texture multiScattering = m_multiScattering.Acquire(f, kMultiScatteringSize, PixelFormat::RGBA16_Float);
     if (!multiScattering.IsValid()) {
         return;
@@ -131,6 +138,9 @@ void AtmosphereFeature::SharedLuts(fx::SharedFrame& f)
 
 void AtmosphereFeature::ViewLuts(fx::PreOpaqueFrame& f)
 {
+    if (!f.View().invViewProjectionValid) {
+        return;
+    }
     const std::optional<AtmosphereSharedLuts> shared = m_sharedLuts.Fetch(f);
     if (!shared) {
         return;
@@ -139,32 +149,36 @@ void AtmosphereFeature::ViewLuts(fx::PreOpaqueFrame& f)
     AtmosphereViewLuts luts;
     luts.frameUniforms = MakeFrameUniforms(f.Scene(), f.View(), m_settings);
 
-    const fx::Texture skyView = view.skyView.Acquire(f, kSkyViewSize, PixelFormat::RGBA16_Float);
-    if (skyView.IsValid()) {
-        const bool done = f.Compute(m_skyViewShader, "AtmosphereSkyViewLutPass")
-                              .Params(m_sharedParams, shared->parameters)
-                              .Params("frame", view.frameParams, luts.frameUniforms)
-                              .Bind("transmittanceLut", shared->transmittance)
-                              .Bind("multiScatteringLut", shared->multiScattering)
-                              .Bind("destinationImage", skyView)
-                              .Dispatch(kSkyViewSize);
-        if (done) {
-            luts.skyView = skyView;
-            f.Keep(skyView);
+    if (f.PassEnabled("AtmosphereSkyViewLutPass")) {
+        const fx::Texture skyView = view.skyView.Acquire(f, kSkyViewSize, PixelFormat::RGBA16_Float);
+        if (skyView.IsValid()) {
+            const bool done = f.Compute(m_skyViewShader, "AtmosphereSkyViewLutPass")
+                                  .Params(m_sharedParams, shared->parameters)
+                                  .Params("frame", view.frameParams, luts.frameUniforms)
+                                  .Bind("transmittanceLut", shared->transmittance)
+                                  .Bind("multiScatteringLut", shared->multiScattering)
+                                  .Bind("destinationImage", skyView)
+                                  .Dispatch(kSkyViewSize);
+            if (done) {
+                luts.skyView = skyView;
+                f.Keep(skyView);
+            }
         }
     }
 
-    const fx::Texture volume = view.aerialVolume.Acquire(f);
-    if (volume.IsValid()) {
-        const bool done = f.Compute(m_aerialVolumeShader, "AtmosphereAerialPerspectiveVolumePass")
-                              .Params(m_sharedParams, shared->parameters)
-                              .Params("frame", view.frameParams, luts.frameUniforms)
-                              .Bind("transmittanceLut", shared->transmittance)
-                              .Bind("multiScatteringLut", shared->multiScattering)
-                              .Bind("destinationVolume", volume)
-                              .Dispatch(kAerialVolumeSize);
-        if (done) {
-            luts.aerialVolume = volume;
+    if (f.PassEnabled("AtmosphereAerialPerspectiveVolumePass")) {
+        const fx::Texture volume = view.aerialVolume.Acquire(f);
+        if (volume.IsValid()) {
+            const bool done = f.Compute(m_aerialVolumeShader, "AtmosphereAerialPerspectiveVolumePass")
+                                  .Params(m_sharedParams, shared->parameters)
+                                  .Params("frame", view.frameParams, luts.frameUniforms)
+                                  .Bind("transmittanceLut", shared->transmittance)
+                                  .Bind("multiScatteringLut", shared->multiScattering)
+                                  .Bind("destinationVolume", volume)
+                                  .Dispatch(kAerialDispatchSize);
+            if (done) {
+                luts.aerialVolume = volume;
+            }
         }
     }
     m_viewLuts.Publish(f, luts);
@@ -172,18 +186,17 @@ void AtmosphereFeature::ViewLuts(fx::PreOpaqueFrame& f)
 
 void AtmosphereFeature::SkyBackground(fx::PostOpaqueFrame& f)
 {
+    if (!f.View().invViewProjectionValid) {
+        return;
+    }
     const std::optional<AtmosphereViewLuts> luts = m_viewLuts.Fetch(f);
     const std::optional<AtmosphereSharedLuts> shared = m_sharedLuts.Fetch(f);
     if (!luts || !shared || !luts->skyView.IsValid()) {
         return;
     }
-    Mat4 invViewProjection;
-    if (!f.View().viewProjection.TryInverse(invViewProjection)) {
-        return;
-    }
 
     SkyBackgroundPush push{};
-    std::memcpy(push.invViewProjection, invViewProjection.Data(), sizeof(push.invViewProjection));
+    push.invViewProjection = f.View().invViewProjection;
     push.eyeHeightKm = luts->frameUniforms.cameraPositionAtmosphere.y;
     push.planetRadiusKm = shared->parameters.planetRadiusKm;
     push.skyExposure = m_settings.skyExposure;
@@ -192,7 +205,7 @@ void AtmosphereFeature::SkyBackground(fx::PostOpaqueFrame& f)
 
 void AtmosphereFeature::Composite(fx::CompositeFrame& f)
 {
-    if (!f.View().invViewProjectionValid) {
+    if (!f.View().invViewProjectionValid || !f.PassEnabled("AtmosphereAerialPerspectiveCompositePass")) {
         return;
     }
     const std::optional<AtmosphereViewLuts> luts = m_viewLuts.Fetch(f);
@@ -204,15 +217,12 @@ void AtmosphereFeature::Composite(fx::CompositeFrame& f)
         return;
     }
 
+    const fx::View& view = f.View();
     CompositePush push{};
-    std::memcpy(push.invViewProjection, luts->frameUniforms.invViewProjection.Data(), sizeof(push.invViewProjection));
-    push.cameraWorldPositionAndScale[0] = f.View().eye.x;
-    push.cameraWorldPositionAndScale[1] = f.View().eye.y;
-    push.cameraWorldPositionAndScale[2] = f.View().eye.z;
-    push.cameraWorldPositionAndScale[3] = kWorldUnitsPerKilometer;
-    push.strengthMaxDistanceExponentPad[0] = m_settings.aerialPerspectiveStrength;
-    push.strengthMaxDistanceExponentPad[1] = m_settings.aerialPerspectiveMaxDistanceKm;
-    push.strengthMaxDistanceExponentPad[2] = m_settings.aerialPerspectiveDepthExponent;
+    push.invViewProjection = view.invViewProjection;
+    push.cameraWorldPositionAndScale = Vec4(view.eye, kWorldUnitsPerKilometer);
+    push.strengthMaxDistanceExponent = Vec4(m_settings.aerialPerspectiveStrength, m_settings.aerialPerspectiveMaxDistanceKm,
+        m_settings.aerialPerspectiveDepthExponent, 0.0f);
 
     const bool dispatched = f.Compute(m_compositeShader, "AtmosphereAerialPerspectiveCompositePass")
                                 .Push(push)

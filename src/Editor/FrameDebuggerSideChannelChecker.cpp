@@ -1,5 +1,6 @@
 #include "FrameDebuggerSideChannelChecker.h"
 
+#include "../Core/ViewBackgroundReplayKey.h"
 #include "../Core/FeatureKit/ChannelKey.h"
 
 namespace gte {
@@ -19,19 +20,29 @@ void AddChannelRules(std::vector<KnownRiskBlackboardKeyRule>& rules, const char*
     }
 }
 
+// A feature channel published once per frame by the Shared callback.
+void AddSharedChannelRule(std::vector<KnownRiskBlackboardKeyRule>& rules, const char* feature, const char* channel,
+    const char* gatingToggle)
+{
+    rules.push_back(KnownRiskBlackboardKeyRule{
+        rg::RenderPassId{ fx::ChannelKey(feature, channel, rg::RenderViewId::Shared()) },
+        std::string(feature) + "." + channel + " (Shared)", gatingToggle });
+}
+
 } // namespace
 
 const std::vector<KnownRiskBlackboardKeyRule>& KnownRiskBlackboardKeyRules()
 {
-    // The literals mirror the keys the engine publishes; keep them in sync.
     static const std::vector<KnownRiskBlackboardKeyRule> kRules = [] {
         std::vector<KnownRiskBlackboardKeyRule> rules = {
-            { "Atmosphere.GameSkyBackgroundCallback"_passId, "Atmosphere.GameSkyBackgroundCallback", "DrawSkyBackground" },
-            { "Core.GameSkyBackgroundReplayCallback"_passId, "Core.GameSkyBackgroundReplayCallback", "DrawSkyBackground" },
+            { kViewBackgroundReplayCallbackKey, "Core.ViewBackgroundReplayCallback", "DrawSkyBackground" },
             { "GpuSkinning.OutputBuffers"_passId, "GpuSkinning.OutputBuffers", "GpuSkinning" },
         };
         AddChannelRules(rules, "Shadow", "Map", "Shadow.DepthPass.Draw");
         AddChannelRules(rules, "Shadow", "Mask", "Shadow.Mask.Dispatch");
+        // Published only when both LUT passes ran, so either toggle gates it.
+        AddSharedChannelRule(rules, "Atmosphere", "SharedLuts", "AtmosphereTransmittanceLutPass");
+        AddSharedChannelRule(rules, "Atmosphere", "SharedLuts", "AtmosphereMultiScatteringLutPass");
         return rules;
     }();
     return kRules;

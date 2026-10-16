@@ -3,7 +3,9 @@
 #include "RecordingAccess.h"
 #include "../Renderer.h"
 #include "../VulkanFormatInfo.h"
+#include "../../Core/Logging.h"
 
+#include <atomic>
 #include <stdexcept>
 #include <utility>
 
@@ -169,13 +171,21 @@ void CopyImageIntoSnapshot(VkCommandBuffer cmd, EventSnapshotResource& dst, VmaA
 void CaptureAttachmentIntoSnapshot(const RecordingContext& cmd, Renderer& renderer, EventSnapshotResource& dst,
     const AttachmentWrite& write, const char* debugName)
 {
+    const VkFormat format = ToVkFormat(write.format);
+    if (format == VK_FORMAT_UNDEFINED) {
+        static std::atomic_flag logged;
+        if (!logged.test_and_set()) {
+            GTE_LOG_ERROR("FrameDebugger", "Event snapshot skipped: the attachment has an undefined pixel format.");
+        }
+        return;
+    }
     const VkImageAspectFlags aspect = write.isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     ResourceState attachmentState = RequiredStateFor(
         write.isDepth ? ResourceAccess::DepthStencilAttachmentReadWrite : ResourceAccess::ColorAttachmentWrite,
         write.isDepth);
     CopyImageIntoSnapshot(RecordingAccess::Native(cmd), dst, renderer.GetVmaAllocator(), renderer.GetMemoryTracker(),
         renderer.GetImGuiVulkanBackendInfo().device, RecordingAccess::Image(write.image),
-        ToVkExtent2D(write.extent), ToVkFormat(write.format), aspect, attachmentState, debugName);
+        ToVkExtent2D(write.extent), format, aspect, attachmentState, debugName);
 }
 
 // Pre-sizes m_slots to its fixed capacity so every region exists before the first capture.

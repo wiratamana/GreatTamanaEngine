@@ -30,6 +30,14 @@ void Frame::ReportOnce(std::string_view text) const
     }
 }
 
+bool Frame::PassEnabled(rg::StaticName passName) const
+{
+    if (m_context == nullptr || m_context->builder == nullptr) {
+        return false;
+    }
+    return detail::PassEnabled(*m_context, passName);
+}
+
 void Frame::Keep(Texture texture)
 {
     if (m_context == nullptr || m_context->builder == nullptr) {
