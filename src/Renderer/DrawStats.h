@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <span>
 
 namespace gte {
 
@@ -31,15 +30,5 @@ inline void AccumulateIndirectDrawStats(DrawStats& stats) noexcept
 {
     ++stats.indirectDrawCount;
 }
-
-// One queued draw's countable shape, used only by CountDrawStats().
-struct CountableDrawItem {
-    bool hasIndexBuffer = false;
-    std::uint32_t vertexCount = 0;
-    std::uint32_t indexCount = 0;
-};
-
-// Applies AccumulateDrawStats() to every item in order; lets tests count without a live FrameRecorder.
-DrawStats CountDrawStats(std::span<const CountableDrawItem> items) noexcept;
 
 } // namespace gte

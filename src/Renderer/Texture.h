@@ -64,7 +64,6 @@ public:
     }
     PixelFormat Format() const noexcept { return FromVkFormat(m_format); }
     bool HasStencilComponent() const noexcept { return m_hasStencil; }
-    bool AllowsStorageImageAccess() const noexcept { return m_info.storage; }
     GpuResourceHandle Handle() const noexcept { return m_handle; }
 
     // Opaque identity of the image view: changes when the view is recreated, 0 when there is none.

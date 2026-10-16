@@ -171,35 +171,9 @@ TEST(RenderPassBlackboardTest, BeginFrameClearsAPreviouslyPublishedKey)
     EXPECT_FALSE(fetched.has_value());
 }
 
-// The "reused, not reallocated" contract (design doc Section 4/11) -
-// BeginFrame() must never shrink the underlying storage's own capacity
-// below its prior high-water mark, and a key published before BeginFrame()
-// must no longer be fetchable afterwards.
-TEST(RenderPassBlackboardTest, BeginFrameNeverShrinksCapacityBelowItsPriorHighWaterMark)
-{
-    RenderPassBlackboard blackboard;
+// --- SceneResourceKeyOf() --------------------------------------------
 
-    for (int i = 0; i < 8; ++i) {
-        blackboard.Publish<int>(RenderPassId{ static_cast<std::uint64_t>(i + 1) }, i);
-    }
-
-    const std::size_t capacityBeforeBeginFrame = blackboard.SlotCapacityForTesting();
-    blackboard.BeginFrame();
-    const std::size_t capacityAfterBeginFrame = blackboard.SlotCapacityForTesting();
-
-    EXPECT_GE(capacityAfterBeginFrame, capacityBeforeBeginFrame);
-
-    // A stronger, behavioral proof that BeginFrame() really did clear the
-    // logical contents (not just an incidental capacity observation).
-    for (int i = 0; i < 8; ++i) {
-        const RenderPassId key{ static_cast<std::uint64_t>(i + 1) };
-        EXPECT_FALSE(blackboard.Fetch<int>(key).has_value());
-    }
-}
-
-// --- NamedSceneResourceKey() --------------------------------------------
-
-TEST(NamedSceneResourceKeyTest, AllNameViewPairsProduceDistinctKeys)
+TEST(SceneResourceKeyOfTest, AllNameViewPairsProduceDistinctKeys)
 {
     const std::vector<const char*> names = { "Test.Foo", "Test.Bar", "Test.Baz" };
     const std::vector<RenderViewId> views = {
@@ -212,7 +186,7 @@ TEST(NamedSceneResourceKeyTest, AllNameViewPairsProduceDistinctKeys)
     keys.reserve(names.size() * views.size());
     for (const char* name : names) {
         for (const RenderViewId& view : views) {
-            keys.push_back(NamedSceneResourceKey(name, view).hash);
+            keys.push_back(SceneResourceKeyOf(name, view).hash);
         }
     }
 
@@ -224,23 +198,15 @@ TEST(NamedSceneResourceKeyTest, AllNameViewPairsProduceDistinctKeys)
     }
 }
 
-TEST(NamedSceneResourceKeyTest, NullNameAndEmptyNameProduceTheSameKey)
-{
-    const RenderViewId view = RenderViewId::Named("Game");
-    const RenderPassId fromNull = NamedSceneResourceKey(nullptr, view);
-    const RenderPassId fromEmpty = NamedSceneResourceKey("", view);
-    EXPECT_TRUE(fromNull == fromEmpty);
-}
-
-TEST(NamedSceneResourceKeyTest, PublishUnderOneViewIsNotVisibleUnderADifferentView)
+TEST(SceneResourceKeyOfTest, PublishUnderOneViewIsNotVisibleUnderADifferentView)
 {
     RenderPassBlackboard blackboard;
-    blackboard.Publish<int>(NamedSceneResourceKey("Test.Foo", RenderViewId::Named("Game")), 42);
+    blackboard.Publish<int>(SceneResourceKeyOf("Test.Foo", RenderViewId::Named("Game")), 42);
 
     const std::optional<int> sameViewFetch =
-        blackboard.Fetch<int>(NamedSceneResourceKey("Test.Foo", RenderViewId::Named("Game")));
+        blackboard.Fetch<int>(SceneResourceKeyOf("Test.Foo", RenderViewId::Named("Game")));
     const std::optional<int> otherViewFetch =
-        blackboard.Fetch<int>(NamedSceneResourceKey("Test.Foo", RenderViewId::Named("Scene")));
+        blackboard.Fetch<int>(SceneResourceKeyOf("Test.Foo", RenderViewId::Named("Scene")));
 
     ASSERT_TRUE(sameViewFetch.has_value());
     EXPECT_EQ(*sameViewFetch, 42);
@@ -253,7 +219,7 @@ TEST(NamedSceneResourceKeyTest, PublishUnderOneViewIsNotVisibleUnderADifferentVi
 TEST(RenderPassBlackboardDoublePublishDiagnosticTest, TwoPublishesUnderTheSameKeyWarnExactlyOnce)
 {
     RenderPassBlackboard blackboard;
-    const RenderPassId key = NamedSceneResourceKey("Test.DoublePublishA", RenderViewId::Shared());
+    const RenderPassId key = SceneResourceKeyOf("Test.DoublePublishA", RenderViewId::Shared());
 
     testing::internal::CaptureStderr();
     blackboard.Publish<int>(key, 1);
@@ -266,8 +232,8 @@ TEST(RenderPassBlackboardDoublePublishDiagnosticTest, TwoPublishesUnderTheSameKe
 TEST(RenderPassBlackboardDoublePublishDiagnosticTest, TwoPublishesUnderDifferentKeysNeverWarn)
 {
     RenderPassBlackboard blackboard;
-    const RenderPassId keyA = NamedSceneResourceKey("Test.DoublePublishB", RenderViewId::Shared());
-    const RenderPassId keyB = NamedSceneResourceKey("Test.DoublePublishC", RenderViewId::Shared());
+    const RenderPassId keyA = SceneResourceKeyOf("Test.DoublePublishB", RenderViewId::Shared());
+    const RenderPassId keyB = SceneResourceKeyOf("Test.DoublePublishC", RenderViewId::Shared());
 
     testing::internal::CaptureStderr();
     blackboard.Publish<int>(keyA, 1);
@@ -280,8 +246,8 @@ TEST(RenderPassBlackboardDoublePublishDiagnosticTest, TwoPublishesUnderDifferent
 TEST(RenderPassBlackboardDoublePublishDiagnosticTest, SameNameUnderDifferentViewsNeverWarns)
 {
     RenderPassBlackboard blackboard;
-    const RenderPassId gameKey = NamedSceneResourceKey("Test.DoublePublishSharedName", RenderViewId::Named("Game"));
-    const RenderPassId sceneKey = NamedSceneResourceKey("Test.DoublePublishSharedName", RenderViewId::Named("Scene"));
+    const RenderPassId gameKey = SceneResourceKeyOf("Test.DoublePublishSharedName", RenderViewId::Named("Game"));
+    const RenderPassId sceneKey = SceneResourceKeyOf("Test.DoublePublishSharedName", RenderViewId::Named("Scene"));
 
     testing::internal::CaptureStderr();
     blackboard.Publish<int>(gameKey, 1);
@@ -294,7 +260,7 @@ TEST(RenderPassBlackboardDoublePublishDiagnosticTest, SameNameUnderDifferentView
 TEST(RenderPassBlackboardDoublePublishDiagnosticTest, ThreePublishesUnderTheSameKeyStillWarnExactlyOnce)
 {
     RenderPassBlackboard blackboard;
-    const RenderPassId key = NamedSceneResourceKey("Test.DoublePublishD", RenderViewId::Shared());
+    const RenderPassId key = SceneResourceKeyOf("Test.DoublePublishD", RenderViewId::Shared());
 
     testing::internal::CaptureStderr();
     blackboard.Publish<int>(key, 1);

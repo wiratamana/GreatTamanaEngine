@@ -87,7 +87,6 @@ void RenderGraphResourcePool::BeginFrame(std::uint64_t currentFrame) noexcept
                     m_evictedImages.push_back(it->texture->Image());
                 }
                 it = entries.erase(it);
-                ++m_evictedEntries;
             } else {
                 ++it;
             }

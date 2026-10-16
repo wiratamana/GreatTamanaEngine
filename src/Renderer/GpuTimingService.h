@@ -14,9 +14,9 @@ namespace gte {
 class VulkanDevice;
 
 
-// Owns the one VkQueryPool behind every GPU timestamp measurement. Fixed 8-slot pool: 0-1 Offscreen0, 2-3 Offscreen1,
-// 4-5 and 6-7 present (frame-in-flight 0 and 1), start/end each. Every Record*/Read* call is a cheap no-op when
-// GTE_ENABLE_PROFILER is off or capture is disabled. Does not own the VulkanDevice, which must outlive it.
+// Owns the VkQueryPool behind the offscreen GPU timestamp measurements: 4 slots, a start/end pair for each of
+// Offscreen0 and Offscreen1. Every Record*/Read* call is a cheap no-op when GTE_ENABLE_PROFILER is off or capture
+// is disabled. Does not own the VulkanDevice, which must outlive it.
 class GpuTimingService {
 public:
     // `capability` comes from VulkanDevice::TimestampCapability(); a build without GTE_ENABLE_PROFILER forces
@@ -46,22 +46,14 @@ public:
     // own fence wait; this never waits.
     GpuTimingSample ReadOffscreenResultNow(GpuTimingSlot slot) noexcept;
 
-    // Present-pass timing, indexed by frame-in-flight (0..kGpuTimingFramesInFlight-1).
-    // Returns Absent without touching Vulkan until this frame-in-flight slot has been written once.
-    GpuTimingSample ReadPresentResultIfAvailable(std::uint32_t frameInFlightIndex) noexcept;
-    // Marks the slot as written; same guard as the Record* calls, so callers can invoke it unconditionally.
-    void MarkPresentSlotWritten(std::uint32_t frameInFlightIndex) noexcept;
-
     // Last sample cached by a Read* call; never touches Vulkan.
     GpuTimingSample LastKnown(GpuTimingSlot slot) const noexcept;
 
 private:
     // Whole-pool slot of the START timestamp (END is +1). Offscreen0/Offscreen1 only.
     static std::uint32_t OffscreenSlotBase(GpuTimingSlot slot) noexcept;
-    // Whole-pool slot of a frame-in-flight's START timestamp, past the 4 offscreen slots.
-    static std::uint32_t PresentSlotBase(std::uint32_t frameInFlightIndex) noexcept;
 
-    // Reads the two slots at `slotBase` into a Present sample; call only once a read is known to be safe.
+    // Reads the two slots at `slotBase` into a sample; call only once a read is known to be safe.
     GpuTimingSample ReadResultAt(std::uint32_t slotBase) noexcept;
 
     // One-time whole-pool reset on a throwaway command pool: the service is built before GpuResourceFactory, so
@@ -75,11 +67,8 @@ private:
     // Empty whenever !m_capability.supported.
     std::optional<VulkanQueryPool> m_queryPool;
 
-    // One cached sample per logical pass; the 8 raw query slots are not mirrored 1:1.
+    // One cached sample per logical pass; the raw query slots are not mirrored 1:1.
     std::array<GpuTimingSample, kGpuTimingSlotCount> m_lastKnown{};
-
-    // Per frame-in-flight: has the present slot ever been written.
-    std::array<bool, kGpuTimingFramesInFlight> m_presentSlotEverWritten{};
 };
 
 } // namespace gte

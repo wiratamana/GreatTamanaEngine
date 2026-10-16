@@ -101,9 +101,6 @@ public:
     // The live texture behind a slot, or nullptr if the slot is dead.
     const RenderTexture* TextureFor(PersistentSlotRef slot) const noexcept;
 
-    // Textures replaced by a resize and still waiting for the next BeginFrame().
-    std::size_t RetiredTextureCount() const noexcept { return m_retired.size(); }
-
 private:
     struct PendingResize {
         PersistentSlotRef slot;

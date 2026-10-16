@@ -10,9 +10,8 @@ namespace gte {
 
 namespace {
 
-// Whole-pool slot count: 4 offscreen slots plus a start/end pair per frame-in-flight for present.
-constexpr std::uint32_t kOffscreenSlotCount = 4;
-constexpr std::uint32_t kTotalQuerySlotCount = kOffscreenSlotCount + kGpuTimingFramesInFlight * 2;
+// Whole-pool slot count: a start/end pair for each of the two offscreen slots.
+constexpr std::uint32_t kTotalQuerySlotCount = 4;
 
 } // namespace
 
@@ -111,11 +110,6 @@ std::uint32_t GpuTimingService::OffscreenSlotBase(GpuTimingSlot slot) noexcept
     return static_cast<std::uint32_t>(slot) * 2;
 }
 
-std::uint32_t GpuTimingService::PresentSlotBase(std::uint32_t frameInFlightIndex) noexcept
-{
-    return kOffscreenSlotCount + PresentTimestampSlotBase(frameInFlightIndex);
-}
-
 GpuTimingSample GpuTimingService::ReadResultAt(std::uint32_t slotBase) noexcept
 {
     std::uint64_t ticks[2] = { 0, 0 };
@@ -157,29 +151,6 @@ GpuTimingSample GpuTimingService::ReadOffscreenResultNow(GpuTimingSlot slot) noe
     }
     m_lastKnown[static_cast<std::size_t>(slot)] = sample;
     return sample;
-}
-
-GpuTimingSample GpuTimingService::ReadPresentResultIfAvailable(std::uint32_t frameInFlightIndex) noexcept
-{
-    const bool hasWritten =
-        (frameInFlightIndex < kGpuTimingFramesInFlight) && m_presentSlotEverWritten[frameInFlightIndex];
-    const GpuTimingSample::Status status = ResolveGpuTimingStatus(IsSupported(), m_captureEnabled, hasWritten);
-    GpuTimingSample sample{ status, 0.0 };
-    if (status == GpuTimingSample::Status::Present) {
-        sample = ReadResultAt(PresentSlotBase(frameInFlightIndex));
-    }
-    m_lastKnown[static_cast<std::size_t>(GpuTimingSlot::SwapchainPresent)] = sample;
-    return sample;
-}
-
-void GpuTimingService::MarkPresentSlotWritten(std::uint32_t frameInFlightIndex) noexcept
-{
-    if (!IsSupported() || !m_captureEnabled) {
-        return;
-    }
-    if (frameInFlightIndex < kGpuTimingFramesInFlight) {
-        m_presentSlotEverWritten[frameInFlightIndex] = true;
-    }
 }
 
 GpuTimingSample GpuTimingService::LastKnown(GpuTimingSlot slot) const noexcept

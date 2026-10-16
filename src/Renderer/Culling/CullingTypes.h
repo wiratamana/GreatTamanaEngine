@@ -32,10 +32,6 @@ struct Plane {
 // Near tests z >= 0 (zero-to-one depth range), not z >= -w.
 std::array<Plane, 6> ExtractFrustumPlanes(const Mat4& viewProjection);
 
-// True if `worldAABB` touches or lies inside all 6 planes (p-vertex test).
-// Conservative: never culls a visible box, may keep a box that is just outside near a plane edge.
-bool AABBIntersectsFrustum(const AABB& worldAABB, const std::array<Plane, 6>& planes);
-
 // Per-instance input read by the culling compute shader and the instanced vertex shader.
 // std430, 16-byte aligned blocks.
 struct GpuCullingInstanceInput {

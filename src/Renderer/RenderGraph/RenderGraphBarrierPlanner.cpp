@@ -92,12 +92,6 @@ bool TargetsDepthState(ResourceAccess access) noexcept
     return access == ResourceAccess::DepthStencilAttachmentReadWrite;
 }
 
-bool IsColorAttachmentWriteAccess(ResourceAccess access) noexcept
-{
-    // The only access that needs a vkCmdBeginRendering color attachment bracket.
-    return access == ResourceAccess::ColorAttachmentWrite;
-}
-
 bool RequiresBarrier(const ResourceState& previous, const ResourceState& next) noexcept
 {
     return !(previous == next);

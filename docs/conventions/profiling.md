@@ -160,11 +160,7 @@ whenever touching profiling instrumentation, or adding a new call site:
   real recording loop actually does, including any future skip/validity
   branch added there - fusing the two into one loop makes divergence
   between "what was counted" and "what was actually drawn" structurally
-  impossible. `CountDrawStats()` (a batch wrapper over
-  `AccumulateDrawStats()`) exists purely so
-  `tests/Renderer/DrawStatsTests.cpp` can write table-driven tests without
-  a live `FrameRecorder` - production code always calls
-  `AccumulateDrawStats()` directly, never `CountDrawStats()`. Triangle
+  impossible. Triangle
   counting (`(indexed ? indexCount : vertexCount) / 3`) assumes every
   `Pipeline` is `VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST` (true today - see
   `Pipeline.cpp`) and every draw has `instanceCount == 1` (no instancing
@@ -255,13 +251,11 @@ whenever touching profiling instrumentation, or adding a new call site:
   `ResolveGpuTimingStatus()` (the pure tri-state PRIORITY decision -
   `Unsupported` always wins over `Absent` wins over `Present`). `VulkanQueryPool`
   (`Vulkan/`) is a thin RAII wrapper around one `VK_QUERY_TYPE_TIMESTAMP`
-  `VkQueryPool`, fixed 8-slot layout, never resized/recreated.
+  `VkQueryPool`, fixed 4-slot layout (a start/end pair per offscreen slot), never resized/recreated.
   `GpuTimingService` owns that pool and every actual
   `vkCmdResetQueryPool`/`vkCmdWriteTimestamp2`/`vkGetQueryPoolResults` call
   site - `FramePresenter` only ever calls INTO it (`RecordOffscreenPassStart/
-  End`/`ReadOffscreenResultNow` for `RenderOffscreen()`,
-  `RecordPresentPassStart/End`/`ReadPresentResultIfAvailable`/
-  `MarkPresentSlotWritten` for `Present()`), never issuing a raw query call
+  End`/`ReadOffscreenResultNow` for `RenderOffscreen()`), never issuing a raw query call
   itself, mirroring the same division of labor `FramePresenter` already has
   with `VulkanSwapchain`/`VulkanFrameSync`. **Gated by BOTH a compile-time
   switch (`GTE_ENABLE_PROFILER` - forces `GpuTimingService`'s effective

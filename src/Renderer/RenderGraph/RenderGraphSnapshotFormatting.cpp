@@ -22,21 +22,6 @@ std::string FormatGpuTiming(const GpuTimingSample& timing)
     }
 }
 
-std::string JoinNames(const std::vector<std::string>& names)
-{
-    if (names.empty()) {
-        return "-";
-    }
-    std::string joined;
-    for (const std::string& name : names) {
-        if (!joined.empty()) {
-            joined += ", ";
-        }
-        joined += name.empty() ? "(unnamed)" : name;
-    }
-    return joined;
-}
-
 // Name of the pass at a resource's first/last-use position (an index into the surviving prefix).
 const char* ResolvePassNameAtSurvivingIndex(const RenderGraphSnapshot& snapshot, std::int32_t index)
 {

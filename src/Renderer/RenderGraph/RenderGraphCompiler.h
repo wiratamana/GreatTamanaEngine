@@ -51,12 +51,6 @@ struct RenderPassEventContradiction {
     std::uint32_t resourceIndex = 0;
 };
 
-// Cross-checks declared events against real dependencies. Pure: never prints, asserts, throws or
-// mutates `input`. `processingOrder` is a permutation of [0, input.passes.size()); "before" and
-// "after" mean earlier/later in it, not smaller/larger declaration index.
-std::vector<RenderPassEventContradiction> DetectRenderPassEventContradictions(
-    const CompiledGraphInput& input, std::span<const std::int32_t> processingOrder);
-
 // Orders passes by data dependency (ties by RenderPassEvent, then declaration order) and culls passes
 // with no path to a root: `finalOutputs`, the Keep*Output() sets and persistent textures. Event
 // contradictions go to stderr (assert in debug). Writes PassRecord::isCulled; throws on a cycle.

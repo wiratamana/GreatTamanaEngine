@@ -64,9 +64,6 @@ public:
     Shader(Shader&&) = delete;
     Shader& operator=(Shader&&) = delete;
 
-    // Graphics pipelines evicted but not yet freed (the GPU may still read them for a few frames).
-    std::size_t RetiredPipelineCount() const noexcept;
-
 private:
     friend class ComputePass;
     friend class FullscreenPass;

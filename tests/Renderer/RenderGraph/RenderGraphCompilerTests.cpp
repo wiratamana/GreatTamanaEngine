@@ -726,136 +726,6 @@ TEST(RenderGraphCompilerTest, PersistentCacheRootDoesNotCrossContaminateAnUnrela
     EXPECT_TRUE(input.passes[2].isCulled);
 }
 
-// --- Event contradiction detection -------------------------------------------
-// DetectRenderPassEventContradictions() is pure and never asserts, so it is called directly here.
-
-TEST(RenderGraphCompilerTest, NoReadsOrWritesProducesNoContradictions)
-{
-    RenderGraphBuilder builder;
-    CompiledGraphInput input = builder.Finish();
-
-    const std::vector<RenderPassEventContradiction> contradictions =
-        DetectRenderPassEventContradictions(input, {});
-
-    EXPECT_TRUE(contradictions.empty());
-}
-
-TEST(RenderGraphCompilerTest, NormalWriterBeforeReaderProducesNoContradictions)
-{
-    RenderGraphBuilder builder;
-    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
-
-    builder.AddRenderPass(
-        "Opaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); },
-        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 0
-    builder.AddRenderPass(
-        "AfterOpaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(t0); },
-        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::AfterOpaques); // index 1
-
-    CompiledGraphInput input = builder.Finish();
-    const std::int32_t identity[] = { 0, 1 };
-
-    const std::vector<RenderPassEventContradiction> contradictions =
-        DetectRenderPassEventContradictions(input, identity);
-
-    EXPECT_TRUE(contradictions.empty());
-}
-
-// A reader ("Composite") declared before its writer ("Opaque") with a later event tag is an orphan read.
-TEST(RenderGraphCompilerTest, OrphanReadWithLaterWriterIsDetected)
-{
-    RenderGraphBuilder builder;
-    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
-
-    builder.AddRenderPass(
-        "Composite", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(t0); },
-        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::AfterTransparents); // index 0 - reader, declared FIRST.
-    builder.AddRenderPass(
-        "Opaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); },
-        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 1 - writer, declared SECOND.
-
-    CompiledGraphInput input = builder.Finish();
-    const std::int32_t identity[] = { 0, 1 };
-
-    const std::vector<RenderPassEventContradiction> contradictions =
-        DetectRenderPassEventContradictions(input, identity);
-
-    ASSERT_EQ(contradictions.size(), 1u);
-    EXPECT_EQ(contradictions[0].kind, RenderPassEventContradictionKind::OrphanReadWithLaterWriter);
-    EXPECT_EQ(contradictions[0].readerPassIndex, 0);
-    EXPECT_EQ(contradictions[0].writerPassIndex, 1);
-}
-
-TEST(RenderGraphCompilerTest, EdgeContradictingDeclaredEventOrderIsDetected)
-{
-    RenderGraphBuilder builder;
-    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
-
-    builder.AddRenderPass(
-        "Opaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); },
-        NoOpExecute, RenderPassDrawKind::DrawMesh,
-        RenderPassEvent::AfterTransparents); // index 0 - writer, DELIBERATELY mistagged late.
-    builder.AddRenderPass(
-        "Composite", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(t0); },
-        NoOpExecute, RenderPassDrawKind::DrawMesh,
-        RenderPassEvent::Opaques); // index 1 - reader, DELIBERATELY mistagged early.
-
-    CompiledGraphInput input = builder.Finish();
-    const std::int32_t identity[] = { 0, 1 };
-
-    const std::vector<RenderPassEventContradiction> contradictions =
-        DetectRenderPassEventContradictions(input, identity);
-
-    ASSERT_EQ(contradictions.size(), 1u);
-    EXPECT_EQ(contradictions[0].kind, RenderPassEventContradictionKind::DeclaredEventOrderDisagreesWithRealDependency);
-    EXPECT_EQ(contradictions[0].readerPassIndex, 1);
-    EXPECT_EQ(contradictions[0].writerPassIndex, 0);
-}
-
-TEST(RenderGraphCompilerTest, SameEventTierNeverProducesAContradiction)
-{
-    RenderGraphBuilder builder;
-    const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
-
-    builder.AddRenderPass(
-        "Opaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); },
-        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 0
-    builder.AddRenderPass(
-        "AlsoOpaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(t0); },
-        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 1 - same tier as the writer.
-
-    CompiledGraphInput input = builder.Finish();
-    const std::int32_t identity[] = { 0, 1 };
-
-    const std::vector<RenderPassEventContradiction> contradictions =
-        DetectRenderPassEventContradictions(input, identity);
-
-    EXPECT_TRUE(contradictions.empty());
-}
-
-TEST(RenderGraphCompilerTest, ProjectRenderFeatureStyleAfterEverythingPassesNeverContradict)
-{
-    RenderGraphBuilder builder;
-    const TextureHandle privateTarget = builder.CreateTexture("ProjectFeatureSlot0_Game_Private", MakeTextureDesc());
-
-    builder.AddRenderPass(
-        "MyProject.ScreenTint.Clear", PassKind::Graphics,
-        [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(privateTarget); },
-        NoOpExecute, RenderPassDrawKind::DrawQuad, RenderPassEvent::AfterEverything); // index 0 - the project's own pass.
-    builder.AddRenderPass(
-        "ProjectFeatureSlot0_Game_Blend", PassKind::Graphics,
-        [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(privateTarget); },
-        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::AfterEverything); // index 1 - stands in for DispatchBlend().
-
-    CompiledGraphInput input = builder.Finish();
-    const std::int32_t identity[] = { 0, 1 };
-
-    const std::vector<RenderPassEventContradiction> contradictions =
-        DetectRenderPassEventContradictions(input, identity);
-
-    EXPECT_TRUE(contradictions.empty());
-}
-
 // A consistent graph must never abort Compile(), and keeps the same order as the diamond test.
 TEST(RenderGraphCompilerTest, CallingCompileWithAConsistentGraphNeverAborts)
 {
@@ -1263,8 +1133,8 @@ TEST(RenderGraphCompilerTest, SelfExclusionGuardPreventsFalsePositiveContradicti
     EXPECT_FALSE(input.passes[0].isCulled);
 }
 
-// A read of a never-written resource is no contradiction for the standalone detector or Compile().
-TEST(RenderGraphCompilerTest, ReadOfNeverWrittenResourceProducesNoContradictionFromEitherPath)
+// A read of a never-written resource is no contradiction for Compile().
+TEST(RenderGraphCompilerTest, ReadOfNeverWrittenResourceProducesNoContradiction)
 {
     RenderGraphBuilder builder;
     const TextureHandle neverWritten = builder.CreateTexture("NeverWritten", MakeTextureDesc());
@@ -1279,11 +1149,6 @@ TEST(RenderGraphCompilerTest, ReadOfNeverWrittenResourceProducesNoContradictionF
         NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques);
 
     CompiledGraphInput input = builder.Finish();
-    const std::int32_t identity[] = { 0 };
-
-    const std::vector<RenderPassEventContradiction> standaloneContradictions =
-        DetectRenderPassEventContradictions(input, identity);
-    EXPECT_TRUE(standaloneContradictions.empty());
 
     const TextureHandle finalOutputs[] = { output };
     // Must not crash/abort: a read with no writer anywhere is no contradiction.
@@ -1294,7 +1159,7 @@ TEST(RenderGraphCompilerTest, ReadOfNeverWrittenResourceProducesNoContradictionF
 
 #ifndef NDEBUG
 
-// Compile() aborts on an orphan read with a later writer, same as the standalone detector.
+// Compile() aborts on an orphan read with a later writer.
 // Only this contradiction kind is reachable through Compile().
 TEST(RenderGraphCompilerDeathTest, FastPathDetectsOrphanReadWithLaterWriterAndAbortsJustLikeTheStandaloneFunctionWould)
 {

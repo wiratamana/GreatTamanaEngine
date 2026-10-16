@@ -77,23 +77,6 @@ std::array<Plane, 6> ExtractFrustumPlanes(const Mat4& viewProjection)
     return planes;
 }
 
-bool AABBIntersectsFrustum(const AABB& worldAABB, const std::array<Plane, 6>& planes)
-{
-    for (const Plane& plane : planes) {
-        // The "positive vertex" (p-vertex): the AABB corner furthest along
-        // this plane's own normal.
-        Vec3 positiveVertex;
-        positiveVertex.x = plane.normal.x >= 0.0f ? worldAABB.max.x : worldAABB.min.x;
-        positiveVertex.y = plane.normal.y >= 0.0f ? worldAABB.max.y : worldAABB.min.y;
-        positiveVertex.z = plane.normal.z >= 0.0f ? worldAABB.max.z : worldAABB.min.z;
-
-        if (Dot(plane.normal, positiveVertex) + plane.distance < 0.0f) {
-            return false; // Even the furthest-along-normal corner is outside this plane - the whole box is outside.
-        }
-    }
-    return true;
-}
-
 GpuCullingInstanceInput PackCullingInstanceInput(const Mat4& worldMatrix, const AABB& worldAABB,
     std::uint32_t firstIndex, std::uint32_t indexCount, std::int32_t vertexOffset)
 {

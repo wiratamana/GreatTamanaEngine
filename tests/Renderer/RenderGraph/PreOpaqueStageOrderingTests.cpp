@@ -1,26 +1,8 @@
-// Tier-1 tests for better-render-pass-5 effort, BLOCK 3 ("Wire
-// PreOpaque/PostOpaque stages") -
-// task_manager/better-render-pass-5/PHASE6_TIER1_TEST_COVERAGE.md.
-//
-// Covers the source spec's Section 7, Tests 1-3:
-//   1. Compiler-level ordering: a RenderPassEvent::PreOpaques-tagged
-//      writer always executes before an Opaques-tagged reader.
-//   2. The runtime safety net (FindPassesNotTaggedPreOpaque(),
-//      src/Core/Plugins/ProjectPreOpaqueCallback.h) genuinely detects
-//      the "forgot to tag, fell back to the implicit default" mistake -
-//      plus a direct, explicit proof that AddRenderPass()'s own
-//      implicit default really is RenderPassEvent::Opaques, the fact
-//      this entire design is built around.
-//   3. The OPPOSITE mistake (a writer mistagged to a tier LATER than
-//      its reader) is caught by the pre-existing, unmodified
-//      DetectRenderPassEventContradictions() - mirrors
-//      RenderGraphCompilerTests.cpp's own EdgeContradictingDeclaredEventOrderIsDetected
-//      precedent exactly, with PreOpaque-flavored names/tiers for this
-//      campaign's own explicit regression record.
-//
-// No Vulkan device/Core/RenderFeatureCompositor involved anywhere in
-// this file - pure RenderGraphBuilder/RenderGraphCompiler usage,
-// mirroring RenderGraphCompilerTests.cpp's own established convention.
+// Tier-1 tests for PreOpaque stage ordering:
+//   1. Compiler-level ordering: a PreOpaques-tagged writer executes before an Opaques-tagged reader.
+//   2. FindPassesNotTaggedPreOpaque() (src/Core/Plugins/ProjectPreOpaqueCallback.h) detects a pass that
+//      fell back to the implicit Opaques default; AddRenderPass()'s default really is Opaques.
+// No Vulkan device involved: pure RenderGraphBuilder/RenderGraphCompiler usage.
 
 #include "Core/Plugins/ProjectPreOpaqueCallback.h"
 #include "Renderer/RenderGraph/RenderGraphCompiler.h"
@@ -207,36 +189,6 @@ TEST(PreOpaqueStageOrderingTest, PassesOutsideTheGivenRangeAreNeverInspected)
     const std::size_t after = builder.DeclaredPassCount();
 
     EXPECT_TRUE(FindPassesNotTaggedPreOpaque(builder, before, after).empty());
-}
-
-// --- Test 3: the OPPOSITE mistake IS caught by the pre-existing,
-// unmodified DetectRenderPassEventContradictions() ---------------------------
-
-TEST(PreOpaqueStageOrderingTest, APreOpaqueFeatureMistaggedLaterThanOpaquesIsCaughtByContradictionDetector)
-{
-    rg::RenderGraphBuilder builder;
-    const rg::TextureHandle shadowMap = builder.CreateTexture("ShadowMap", MakeTextureDesc());
-
-    builder.AddRenderPass(
-        "MyProject.ShadowMap", rg::PassKind::Graphics,
-        [&](rg::RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(shadowMap); }, NoOpExecute,
-        rg::RenderPassDrawKind::DrawMesh,
-        rg::RenderPassEvent::AfterOpaques); // index 0 - writer, DELIBERATELY mistagged LATER than its reader.
-    builder.AddRenderPass(
-        "RenderOpaque_Stub", rg::PassKind::Graphics,
-        [&](rg::RenderGraphBuilder::PassBuilder& pass) { pass.ReadTexture(shadowMap); }, NoOpExecute,
-        rg::RenderPassDrawKind::DrawMesh, rg::RenderPassEvent::Opaques); // index 1 - reader.
-
-    rg::CompiledGraphInput input = builder.Finish();
-    const std::int32_t identity[] = { 0, 1 };
-
-    const std::vector<rg::RenderPassEventContradiction> contradictions =
-        rg::DetectRenderPassEventContradictions(input, identity);
-
-    ASSERT_EQ(contradictions.size(), 1u);
-    EXPECT_EQ(contradictions[0].kind, rg::RenderPassEventContradictionKind::DeclaredEventOrderDisagreesWithRealDependency);
-    EXPECT_EQ(contradictions[0].writerPassIndex, 0);
-    EXPECT_EQ(contradictions[0].readerPassIndex, 1);
 }
 
 } // namespace gte

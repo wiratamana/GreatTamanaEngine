@@ -59,13 +59,7 @@ inline GpuTimingSample::Status ResolveGpuTimingStatus(
 double ConvertTimestampDeltaToMilliseconds(
     std::uint64_t startTicks, std::uint64_t endTicks, float timestampPeriodNs, std::uint32_t validBits) noexcept;
 
-// Frames in flight the present-pass query pool needs slots for; must equal FramePresenter::kFramesInFlight.
+// Frames in flight the pipelined pass timers cycle through; must equal FramePresenter::kFramesInFlight.
 inline constexpr std::uint32_t kGpuTimingFramesInFlight = 2;
-
-// Present-local query slot of a frame-in-flight's START timestamp; its END timestamp is at the next slot.
-constexpr std::uint32_t PresentTimestampSlotBase(std::uint32_t frameInFlightIndex) noexcept
-{
-    return frameInFlightIndex * 2;
-}
 
 } // namespace gte

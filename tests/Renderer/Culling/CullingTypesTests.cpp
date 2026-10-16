@@ -1,11 +1,6 @@
-// Unit tests for GPU-Driven Frustum Culling + Indirect Draw campaign
-// (render-pass-5), PHASE1's pure, Vulkan-device-free bounds/frustum math
-// (src/Renderer/Culling/CullingTypes.h) - ComputeLocalAABB()/TransformAABB()/
-// ExtractFrustumPlanes()/AABBIntersectsFrustum()/PackCullingInstanceInput(),
-// plus IndirectDrawCommand's own documented byte size
-// (src/Renderer/IndirectDrawTypes.h). No live VkDevice/Renderer involved at
-// all - mirrors tests/Renderer/GpuSkinning/GpuSkinningTypesTests.cpp's own
-// precedent exactly.
+// Tier-1 tests for the Vulkan-free culling math in src/Renderer/Culling/CullingTypes.h:
+// ComputeLocalAABB(), TransformAABB(), ExtractFrustumPlanes(), PackCullingInstanceInput(), plus
+// IndirectDrawCommand's byte size.
 
 #include "Renderer/Culling/CullingTypes.h"
 #include "Renderer/IndirectDrawTypes.h"
@@ -136,35 +131,6 @@ TEST(CullingTypes, ExtractFrustumPlanesFromOrthographicProjectionMatchesHandComp
     // [5] Far: z <= 10
     EXPECT_TRUE(ApproximatelyEqual(planes[5].normal, Vec3(0.0f, 0.0f, -1.0f), 1e-4f));
     EXPECT_NEAR(planes[5].distance, 10.0f, 1e-4f);
-}
-
-// --- AABBIntersectsFrustum() -------------------------------------------------
-
-class CullingTypesAABBIntersectsFrustumTest : public ::testing::Test {
-protected:
-    // Same orthographic frustum as ExtractFrustumPlanesFromOrthographic...
-    // above: visible region is x in [-1,1], y in [-2,2], z in [0.5,10].
-    std::array<Plane, 6> planes = ExtractFrustumPlanes(Mat4::OrthographicLH_ZO(-1.0f, 1.0f, -2.0f, 2.0f, 0.5f, 10.0f));
-};
-
-TEST_F(CullingTypesAABBIntersectsFrustumTest, BoxFullyInsideEveryPlaneIntersects)
-{
-    const AABB box{ Vec3(-0.5f, -1.0f, 1.0f), Vec3(0.5f, 1.0f, 2.0f) };
-    EXPECT_TRUE(AABBIntersectsFrustum(box, planes));
-}
-
-TEST_F(CullingTypesAABBIntersectsFrustumTest, BoxFullyOutsideRightPlaneDoesNotIntersect)
-{
-    // Entirely beyond x > 1 (the right plane).
-    const AABB box{ Vec3(2.0f, 0.0f, 1.0f), Vec3(3.0f, 1.0f, 2.0f) };
-    EXPECT_FALSE(AABBIntersectsFrustum(box, planes));
-}
-
-TEST_F(CullingTypesAABBIntersectsFrustumTest, BoxStraddlingRightPlaneIsConservativelyConsideredIntersecting)
-{
-    // Straddles x == 1 (the right plane) - part inside, part outside.
-    const AABB box{ Vec3(0.5f, 0.0f, 1.0f), Vec3(1.5f, 1.0f, 2.0f) };
-    EXPECT_TRUE(AABBIntersectsFrustum(box, planes));
 }
 
 // --- PackCullingInstanceInput() / static_assert sizes -----------------------

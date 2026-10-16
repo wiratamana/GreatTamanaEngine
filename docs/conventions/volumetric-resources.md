@@ -122,18 +122,11 @@ For engine-level publishing without the kit, see
 
 ## 6. The slice-depth mapping utility
 
-The slice index to view depth mapping used by dispatch shape (b) is a separate,
-feature-free utility with a CPU and a GLSL version:
-
-- `src/Renderer/VolumetricFroxelMath.h/.cpp`: the CPU reference
-  (`FroxelSliceToViewDepth()`, `ViewDepthToFroxelSlice()`).
-- `src/Shaders/VolumetricFroxelMath.glsl`: the GLSL version, same formula and
-  parameter order. It is `#include`d by `AtmosphereCommon.glsl` and by
-  `VolumetricFroxelExamplePerColumnFill.comp`.
-
-Keep both languages whenever a formula is moved out of a feature: a shader cannot
-call a C++ header. A shader that needs the formula must `#include` the shared file,
-never keep its own copy.
+The slice index to view depth mapping used by dispatch shape (b) is a feature-free GLSL
+utility: `src/Shaders/VolumetricFroxelMath.glsl` (`FroxelSliceToViewDepth()`,
+`ViewDepthToFroxelSlice()`). It is `#include`d by `AtmosphereCommon.glsl` and by
+`VolumetricFroxelExamplePerColumnFill.comp`. A shader that needs the formula must
+`#include` the shared file, never keep its own copy.
 
 ## 7. What NOT to do
 

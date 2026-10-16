@@ -143,8 +143,6 @@ TEST(FxSharedOncePerFrameTest, AFailedCallbackIsNotRetriedInTheSameFrame)
     SharedOncePerFrame latch;
     latch.MarkFailed(5);
     EXPECT_FALSE(latch.ShouldRun(5));
-    EXPECT_EQ(latch.StateFor(5), SharedOncePerFrame::State::Failed);
-    EXPECT_EQ(latch.StateFor(6), SharedOncePerFrame::State::Idle);
     EXPECT_TRUE(latch.ShouldRun(6));
 }
 
@@ -153,7 +151,6 @@ TEST(FxSharedOncePerFrameTest, NothingIsMarkedUntilTheCallbackFinished)
     SharedOncePerFrame latch;
     EXPECT_TRUE(latch.ShouldRun(3)); // Asking does not mark.
     EXPECT_TRUE(latch.ShouldRun(3));
-    EXPECT_EQ(latch.StateFor(3), SharedOncePerFrame::State::Idle);
 }
 
 // --- Callback policy -----------------------------------------------------------

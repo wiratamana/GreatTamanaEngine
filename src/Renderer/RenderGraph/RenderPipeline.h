@@ -39,18 +39,8 @@ consteval RenderPassId operator""_passId(const char* s, std::size_t n) noexcept
     return RenderPassId{ hash };
 }
 
-#ifndef NDEBUG
-// Debug-only id -> source name lookup for diagnostics. The consteval literal cannot register names, so callers do.
-void RegisterPassIdDebugName(RenderPassId id, const char* name) noexcept;
-const char* DebugNameForPassId(RenderPassId id) noexcept; // "<unknown>" if never registered.
-#endif
-
 // Key for a string-named cross-feature handoff: a pure hash of (name, view), no registration.
 RenderPassId SceneResourceKeyOf(std::string_view name, RenderViewId view) noexcept;
-
-// Same hash for a name with static storage duration; also records the name for debug diagnostics.
-// Call only from the frame-declaration thread.
-RenderPassId NamedSceneResourceKey(const char* name, RenderViewId view) noexcept;
 
 // A plain value describing one pass; produced by providers, consumed generically by RenderPipeline.
 struct RenderPassDesc {
@@ -83,9 +73,9 @@ public:
 #ifndef NDEBUG
                 if (!slot.alreadyWarnedThisFrame) {
                     std::fprintf(stderr,
-                        "RenderPassBlackboard: key \"%s\" was Publish()'d more than once this frame - "
+                        "RenderPassBlackboard: key %llu was Publish()'d more than once this frame - "
                         "last-publish-wins; the earlier value is now lost.\n",
-                        DebugNameForPassId(key));
+                        static_cast<unsigned long long>(key.hash));
                     slot.alreadyWarnedThisFrame = true;
                 }
 #endif
@@ -135,9 +125,6 @@ public:
     // Called once at the start of each frame's declaration. Clears entries but keeps the reserved capacity.
     void BeginFrame() { m_slots.clear(); }
 
-    // Lets tests confirm BeginFrame() reuses capacity.
-    std::size_t SlotCapacityForTesting() const noexcept { return m_slots.capacity(); }
-
 #ifndef NDEBUG
     // Debug only: logs (never asserts) every key published but never fetched this frame.
     void ReportUnusedPublishesIfAny() const
@@ -145,9 +132,8 @@ public:
         for (const Slot& slot : m_slots) {
             if (!slot.wasFetched) {
                 std::fprintf(stderr,
-                    "RenderPassBlackboard: a value was published under key \"%s\" but never fetched this "
-                    "frame.\n",
-                    DebugNameForPassId(slot.key));
+                    "RenderPassBlackboard: a value was published under key %llu but never fetched this frame.\n",
+                    static_cast<unsigned long long>(slot.key.hash));
             }
         }
     }

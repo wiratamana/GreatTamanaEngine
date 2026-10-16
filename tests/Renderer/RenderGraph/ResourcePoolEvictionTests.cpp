@@ -1,11 +1,9 @@
-// Tests: pool staleness policy and eviction, the strict validation counter, snapshot removal.
+// Tests: pool staleness policy and eviction, snapshot removal.
 
-#include "Renderer/RenderGraph/OnceErrorLog.h"
 #include "Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
 #include "Renderer/RenderGraph/RenderGraphResourcePool.h"
 
 #include "../../Fakes/HeadlessRenderGraphFixture.h"
-#include "../../Fakes/RecordingLogSink.h"
 
 #include <gtest/gtest.h>
 
@@ -14,9 +12,6 @@
 
 namespace gte::rg {
 namespace {
-
-using test::RecordingLogSink;
-using test::ScopedLogSinkInstall;
 
 TEST(PoolStalenessTest, ExactlyTheLimitIsKeptAndOneMoreIsEvicted)
 {
@@ -38,25 +33,6 @@ TEST(PoolStalenessTest, AFrameCounterBehindTheClaimIsNotStale)
 TEST(PoolStalenessTest, TheLimitIsAboveTheFramesInFlight)
 {
     EXPECT_GT(kPoolStaleFrames, std::uint64_t{ 8 });
-}
-
-TEST(OnceErrorLogTest, TheStrictCounterCountsOnlyFirstTimeMessages)
-{
-    RecordingLogSink sink;
-    const ScopedLogSinkInstall guard(&sink);
-    OnceErrorLog log;
-
-    EXPECT_EQ(log.StrictViolationCount(), 0u);
-    log.Error("Cat", "first");
-    log.Error("Cat", "first");
-    log.Error("Cat", "second");
-    log.Error("Other", "first");
-    EXPECT_EQ(log.StrictViolationCount(), 3u);
-}
-
-TEST(OnceErrorLogTest, StrictValidationFollowsTheBuildOption)
-{
-    EXPECT_EQ(StrictValidationEnabled(), GTE_STRICT_RENDER_VALIDATION != 0);
 }
 
 TEST(DebugTextureRegistryTest, RemoveIfDropsOnlyTheMatchingSnapshots)
@@ -97,17 +73,11 @@ TEST(PoolEvictionGpuTest, IdleEntriesAreFreedAndClaimedOnesAreKept)
     pool.BeginFrame(1);
     pool.AcquireTexture(desc, "PoolTexture");
     pool.AcquireBuffer(bufferDesc, "PoolBuffer");
-    EXPECT_EQ(pool.TextureEntryCount(), 1u);
-    EXPECT_EQ(pool.BufferEntryCount(), 1u);
 
     pool.BeginFrame(1 + kPoolStaleFrames);
-    EXPECT_EQ(pool.TextureEntryCount(), 1u);
-    EXPECT_EQ(pool.EvictedEntryCount(), 0u);
+    EXPECT_TRUE(pool.TakeEvictedImages().empty());
 
     pool.BeginFrame(2 + kPoolStaleFrames);
-    EXPECT_EQ(pool.TextureEntryCount(), 0u);
-    EXPECT_EQ(pool.BufferEntryCount(), 0u);
-    EXPECT_EQ(pool.EvictedEntryCount(), 2u);
     EXPECT_EQ(pool.TakeEvictedImages().size(), 1u);
 }
 
@@ -129,7 +99,7 @@ TEST(PoolEvictionGpuTest, AReclaimedEntryIsReusedNotRecreated)
         pool.BeginFrame(frame);
         EXPECT_EQ(&pool.AcquireTexture(desc, "PoolTexture"), &first);
     }
-    EXPECT_EQ(pool.EvictedEntryCount(), 0u);
+    EXPECT_TRUE(pool.TakeEvictedImages().empty());
 }
 
 } // namespace

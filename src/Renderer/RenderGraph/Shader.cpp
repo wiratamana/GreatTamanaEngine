@@ -330,11 +330,6 @@ const Pipeline* Shader::GraphicsPipeline(RenderGraphBuilder& builder, const Full
     return graphics.pipelines[touched.slot].get();
 }
 
-std::size_t Shader::RetiredPipelineCount() const noexcept
-{
-    return m_impl->graphics.has_value() ? m_impl->graphics->retired.size() : 0;
-}
-
 std::string_view Shader::Label() const noexcept
 {
     return m_impl->label;

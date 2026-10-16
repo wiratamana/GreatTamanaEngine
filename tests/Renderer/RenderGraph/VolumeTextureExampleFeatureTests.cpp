@@ -10,13 +10,13 @@
 #include "Renderer/Renderer.h"
 #include "Renderer/DescriptorSet.h"
 #include "Renderer/Compute/ComputePipeline.h"
-#include "Renderer/VolumetricFroxelMath.h"
 #include "Encoding/HdrColorVisualization.h"
 
 #include "../../Fakes/HeadlessRenderGraphFixture.h"
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <optional>
@@ -111,12 +111,9 @@ TEST(VolumeTextureExampleFeatureTest, PerCellParallelFillWritesEveryCellsOwnCoor
     }
 }
 
-// Per-column-sequential: every (x, y) column loops its own 8 Z slices
-// internally, accumulating a running total via the SAME
-// VolumetricFroxelMath.glsl/.h FroxelSliceToViewDepth() formula the shader
-// #includes - proving (a) the sequential dispatch shape really executes in
-// order, (b) the shared GLSL file is genuinely #include-able/callable by a
-// second, independent shader, and (c) the GLSL and C++ oracles agree exactly.
+// Per-column-sequential: every (x, y) column loops its own 8 Z slices, accumulating a running total with
+// the same slice-depth formula as VolumetricFroxelMath.glsl. Proves the sequential dispatch shape runs in order
+// and the shared GLSL file is #include-able by a second shader.
 TEST(VolumeTextureExampleFeatureTest, PerColumnSequentialFillMatchesTheCpuOracleRunningTotal)
 {
     HeadlessRenderGraphFixture fixture;
@@ -175,8 +172,8 @@ TEST(VolumeTextureExampleFeatureTest, PerColumnSequentialFillMatchesTheCpuOracle
     std::vector<float> expectedRunningTotalPerSlice(kDepth, 0.0f);
     float runningTotal = 0.0f;
     for (std::uint32_t slice = 0; slice < kDepth; ++slice) {
-        const float viewDepthKm =
-            FroxelSliceToViewDepth(static_cast<float>(slice), static_cast<float>(kDepth), kMaxDistanceKm, kDepthExponent);
+        const float u = static_cast<float>(slice) / static_cast<float>(kDepth);
+        const float viewDepthKm = kMaxDistanceKm * std::pow(u, kDepthExponent);
         runningTotal += viewDepthKm;
         expectedRunningTotalPerSlice[slice] = runningTotal;
     }

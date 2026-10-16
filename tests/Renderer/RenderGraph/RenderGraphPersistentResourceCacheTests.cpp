@@ -599,11 +599,9 @@ TEST(RenderGraphPersistentResourceCacheTest, FlushRetiresTheOldTextureUntilTheNe
     ASSERT_EQ(cache.FlushPendingResizes().size(), 1u);
 
     // Old and new image both exist until the next frame starts.
-    EXPECT_EQ(cache.RetiredTextureCount(), 1u);
     EXPECT_EQ(fixture.GetRenderer().GetMemoryTotals().textureCount, before.textureCount + 1);
 
     cache.BeginFrame(3, kPersistentResourceStaleThresholdFrames);
-    EXPECT_EQ(cache.RetiredTextureCount(), 0u);
     EXPECT_EQ(fixture.GetRenderer().GetMemoryTotals().textureCount, before.textureCount);
 }
 
@@ -633,7 +631,6 @@ TEST(RenderGraphPersistentResourceCacheTest, FailedResizeKeepsTheOldTexture)
 
     EXPECT_EQ(first->texture->Image(), oldImage);
     EXPECT_EQ(first->texture->Extent().width, 64u);
-    EXPECT_EQ(cache.RetiredTextureCount(), 0u);
     EXPECT_EQ(cache.TextureFor(first->slot), first->texture);
     EXPECT_EQ(CountByCategory(sink, kCacheLogCategory), 1); // Exactly one error.
 
@@ -882,27 +879,6 @@ TEST(RenderGraphPersistentResourceCacheTest, ReRequestingAnExistingEntryWithADif
         return {};
     });
     EXPECT_FALSE(refusedPipelined.has_value());
-}
-
-// The frame counter starts at 0 and advances once per BeginPersistentResourceFrame().
-TEST(RenderGraphPersistentResourceCacheTest, CurrentPersistentResourceFrameCounterAdvancesOncePerBeginCall)
-{
-    HeadlessRenderGraphFixture fixture;
-    if (!fixture.IsUsable()) {
-        GTEST_SKIP() << fixture.SkipReason();
-    }
-
-    RenderGraph& renderGraph = fixture.GetRenderGraph();
-    EXPECT_EQ(renderGraph.CurrentPersistentResourceFrameCounter(), 0u);
-
-    renderGraph.BeginPersistentResourceFrame();
-    EXPECT_EQ(renderGraph.CurrentPersistentResourceFrameCounter(), 1u);
-
-    renderGraph.BeginPersistentResourceFrame();
-    EXPECT_EQ(renderGraph.CurrentPersistentResourceFrameCounter(), 2u);
-
-    renderGraph.BeginPersistentResourceFrame();
-    EXPECT_EQ(renderGraph.CurrentPersistentResourceFrameCounter(), 3u);
 }
 
 // Builder tests: call BeginPersistentResourceFrame() each frame and touch the handle in a pass
@@ -1186,51 +1162,6 @@ TEST(RenderGraphPersistentResourceCacheDeathTest, BuilderGetOrCreatePersistentTe
 }
 
 #endif // !NDEBUG
-
-// desc.usage == TextureUsage::Storage is threaded into the real created RenderTexture.
-TEST(RenderGraphPersistentResourceCacheTest, ResolveThreadsStorageUsageIntoTheCreatedTexture)
-{
-    HeadlessRenderGraphFixture fixture;
-    if (!fixture.IsUsable()) {
-        GTEST_SKIP() << fixture.SkipReason();
-    }
-
-    RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
-    TextureDesc storageDesc = MakeColorDesc();
-    storageDesc.usage = TextureUsage::Storage;
-
-    std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved;
-    fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        resolved = cache.Resolve(kTestOwner, "StorageUsage", storageDesc, /*currentFrame=*/1, kSync);
-        return {};
-    });
-
-    ASSERT_TRUE(resolved.has_value());
-    ASSERT_NE(resolved->texture, nullptr);
-    EXPECT_TRUE(resolved->texture->AllowsStorageImageAccess());
-}
-
-// A plain desc (TextureUsage::None) never opts into storage-image access.
-TEST(RenderGraphPersistentResourceCacheTest, ResolveWithoutStorageUsageNeverAllowsStorageImageAccess)
-{
-    HeadlessRenderGraphFixture fixture;
-    if (!fixture.IsUsable()) {
-        GTEST_SKIP() << fixture.SkipReason();
-    }
-
-    RenderGraphPersistentResourceCache cache(fixture.GetRenderer());
-    const TextureDesc desc = MakeColorDesc();
-
-    std::optional<RenderGraphPersistentResourceCache::ResolvedTexture> resolved;
-    fixture.RunSynchronousFrame([&](RenderGraphBuilder&) -> std::vector<TextureHandle> {
-        resolved = cache.Resolve(kTestOwner, "NoStorageUsage", desc, /*currentFrame=*/1, kSync);
-        return {};
-    });
-
-    ASSERT_TRUE(resolved.has_value());
-    ASSERT_NE(resolved->texture, nullptr);
-    EXPECT_FALSE(resolved->texture->AllowsStorageImageAccess());
-}
 
 // A usage change on an existing entry needs a full VkImage recreation:
 // treated as a caller bug, same as a format change, never silently applied.

@@ -16,9 +16,6 @@ namespace gte::rg {
 // Present -> "%.2f ms", Unsupported -> "Unsupported", Absent -> "N/A" (never a fabricated "0.00 ms").
 std::string FormatGpuTiming(const GpuTimingSample& timing);
 
-// Empty vector -> "-"; an empty name -> "(unnamed)"; joined with ", ".
-std::string JoinNames(const std::vector<std::string>& names);
-
 // Name of the pass at `index`; out of range -> "?", empty name -> "(unnamed)".
 const char* ResolvePassNameAtSurvivingIndex(const RenderGraphSnapshot& snapshot, std::int32_t index);
 

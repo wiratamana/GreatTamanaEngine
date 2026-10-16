@@ -650,7 +650,7 @@ registering a new named texture:
   campaign, by explicit product decision - the Investigation this campaign was
   based on flagged a real crash risk there (a reassigned pass's tier can
   silently break a real data dependency and trip `RenderGraphCompiler`'s own
-  `DetectRenderPassEventContradictions()` assert). Disabling a shared-name
+  event-contradiction assert). Disabling a shared-name
   built-in pass (`RenderOpaque`/`DrawSkyBackground`/`RenderTransparent`/
   `AtmosphereComposite` are each declared with the SAME literal `debugName` for
   BOTH the Game View and the Scene View) disables it for BOTH views at once -

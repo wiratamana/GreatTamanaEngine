@@ -134,23 +134,6 @@ TEST(RenderGraphBarrierPlannerTest, TargetsDepthStateIsTrueOnlyForDepthStencilAt
     EXPECT_FALSE(TargetsDepthState(ResourceAccess::VertexShaderStorageRead));
 }
 
-// --- IsColorAttachmentWriteAccess() - one case per enumerator ---
-// A pure compute texture write must not count, so a compute-only pass gets no rendering bracket.
-
-TEST(RenderGraphBarrierPlannerTest, IsColorAttachmentWriteAccessIsTrueOnlyForColorAttachmentWrite)
-{
-    EXPECT_TRUE(IsColorAttachmentWriteAccess(ResourceAccess::ColorAttachmentWrite));
-    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::DepthStencilAttachmentReadWrite));
-    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::ShaderRead));
-    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::TransferSrc));
-    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::TransferDst));
-    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::ComputeShaderRead));
-    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::ComputeShaderWrite));
-    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::IndirectCommandRead));
-    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::VertexBufferRead));
-    EXPECT_FALSE(IsColorAttachmentWriteAccess(ResourceAccess::VertexShaderStorageRead));
-}
-
 // --- Texture-side sequence: ComputeShaderWrite -> ShaderRead ---
 // Exactly one barrier, GENERAL -> SHADER_READ_ONLY_OPTIMAL, with the matching stage/access masks.
 TEST(RenderGraphBarrierPlannerTest, ComputeShaderWriteFollowedByShaderReadEmitsExactlyOneCorrectBarrier)

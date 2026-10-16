@@ -34,12 +34,6 @@ std::array<SceneServiceSlotEntry, gte::kSceneServiceSlotCount>& SceneServiceSlot
     return table;
 }
 
-std::vector<std::uint32_t>& SceneServiceRegistrationOrder()
-{
-    static std::vector<std::uint32_t> order;
-    return order;
-}
-
 std::vector<SceneServiceRegistrationFailure>& SceneServiceFailureMemory()
 {
     static std::vector<SceneServiceRegistrationFailure> failures;
@@ -175,21 +169,7 @@ std::uint32_t RegisterSceneServiceSlot(
     claimed.debugName = debugName;
     claimed.kind = kind;
     claimed.isDepthResource = isDepthResource;
-    SceneServiceRegistrationOrder().push_back(claimedIndex);
     return claimedIndex;
-}
-
-std::size_t RegisteredSceneServiceSlotCount() noexcept
-{
-    return SceneServiceRegistrationOrder().size();
-}
-
-const char* SceneServiceSlotDebugName(std::uint32_t slotIndex) noexcept
-{
-    if (slotIndex >= kSceneServiceSlotCount || !SceneServiceSlotTable()[slotIndex].registered) {
-        return "<unregistered>";
-    }
-    return SceneServiceSlotTable()[slotIndex].debugName.c_str();
 }
 
 SceneServiceResourceKind SceneServiceSlotResourceKind(std::uint32_t slotIndex) noexcept
@@ -206,16 +186,6 @@ bool SceneServiceSlotIsDepthResource(std::uint32_t slotIndex) noexcept
         return false;
     }
     return SceneServiceSlotTable()[slotIndex].isDepthResource;
-}
-
-void ResetSceneServiceRegistryForTesting() noexcept
-{
-    for (SceneServiceSlotEntry& entry : SceneServiceSlotTable()) {
-        entry = SceneServiceSlotEntry{};
-    }
-    SceneServiceRegistrationOrder().clear();
-    SceneServiceFailureMemory().clear();
-    SceneServiceRegistrySealedFlag() = false;
 }
 
 // --- SceneServicesDescriptorSet --------------------------------------------

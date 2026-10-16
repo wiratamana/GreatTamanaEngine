@@ -2,7 +2,6 @@
 
 #include "RenderGraphHandles.h"
 
-#include <array>
 #include <cassert>
 #include <cstddef>
 
@@ -15,13 +14,5 @@ constexpr std::size_t ViewScopeIndex(ViewScope scope) noexcept
     assert(index < kViewScopeCount && "ViewScope out of range");
     return index;
 }
-
-// One value per ViewScope, initialized in enumerator order: Shared, GameView, SceneView.
-template <typename T>
-struct ViewPair {
-    std::array<T, kViewScopeCount> items;
-
-    constexpr const T& For(ViewScope scope) const noexcept { return items[ViewScopeIndex(scope)]; }
-};
 
 } // namespace gte::rg

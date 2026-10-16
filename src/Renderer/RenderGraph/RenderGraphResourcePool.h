@@ -51,10 +51,6 @@ public:
     // `currentFrame` is the graph's persistent frame counter.
     void BeginFrame(std::uint64_t currentFrame) noexcept;
 
-    std::size_t TextureEntryCount() const noexcept { return m_textureEntries.size(); }
-    std::size_t BufferEntryCount() const noexcept { return m_bufferEntries.size(); }
-    std::uint64_t EvictedEntryCount() const noexcept { return m_evictedEntries; }
-
     // Color images freed by the last BeginFrame(); the graph drops their debug snapshots.
     std::vector<VkImage> TakeEvictedImages() noexcept { return std::move(m_evictedImages); }
 
@@ -78,7 +74,6 @@ private:
     std::list<TextureEntry> m_textureEntries;
     std::list<BufferEntry> m_bufferEntries;
     std::uint64_t m_currentFrame = 0;
-    std::uint64_t m_evictedEntries = 0;
     std::vector<VkImage> m_evictedImages;
 };
 

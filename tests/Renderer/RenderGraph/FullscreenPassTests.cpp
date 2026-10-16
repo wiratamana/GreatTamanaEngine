@@ -213,32 +213,6 @@ TEST(ComputePassKindTest, GraphicsShaderCannotBackAComputePass)
     EXPECT_EQ(scene.builder.DeclaredPassCount(), 0u);
 }
 
-TEST(FullscreenPassTest, EvictedPipelineIsFreedOnlyAfterTheRetireFramesPass)
-{
-    HeadlessRenderGraphFixture fixture;
-    if (!fixture.IsUsable()) {
-        GTEST_SKIP() << fixture.SkipReason();
-    }
-    Shader shader("ReflectFixture", ShaderKind::Graphics);
-
-    // Nine distinct (format, blend) variants overflow the 8-slot cache once, in one frame each.
-    std::uint64_t frame = 1;
-    for (const PixelFormat format : { PixelFormat::RGBA8_UNorm, PixelFormat::BGRA8_UNorm, PixelFormat::RGBA16_Float }) {
-        for (const BlendMode blend : { BlendMode::Opaque, BlendMode::AlphaBlend, BlendMode::Additive }) {
-            ASSERT_TRUE(DrawValid(fixture, shader, frame++, format, blend));
-        }
-    }
-    EXPECT_EQ(shader.RetiredPipelineCount(), 1u);
-
-    // Same frame: nothing is freed yet.
-    ASSERT_TRUE(DrawValid(fixture, shader, frame - 1, PixelFormat::RGBA16_Float, BlendMode::Additive));
-    EXPECT_EQ(shader.RetiredPipelineCount(), 1u);
-
-    // A few frames later the victim is released.
-    ASSERT_TRUE(DrawValid(fixture, shader, frame + 3, PixelFormat::RGBA16_Float, BlendMode::Additive));
-    EXPECT_EQ(shader.RetiredPipelineCount(), 0u);
-}
-
 TEST(FullscreenPassTest, ErrorsPastTheOnceCapAreCoveredByOneHonestSuppressedNotice)
 {
     HeadlessRenderGraphFixture fixture;

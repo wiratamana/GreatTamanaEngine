@@ -91,8 +91,7 @@
 #                                            PipelineHandle.
 #   - Renderer/DrawStatsTests.cpp             - Phase 3's pure per-item
 #                                            draw-call/triangle-count
-#                                            accumulator (AccumulateDrawStats()/
-#                                            CountDrawStats() -
+#                                            accumulator (AccumulateDrawStats() -
 #                                            src/Renderer/DrawStats.h) - no
 #                                            Vulkan/Renderer/live GPU
 #                                            involved at all.
@@ -101,8 +100,7 @@
 #                                            (InterpretTimestampCapability())
 #                                            and tick-delta -> millisecond/
 #                                            slot-indexing math
-#                                            (ConvertTimestampDeltaToMilliseconds()/
-#                                            PresentTimestampSlotBase() -
+#                                            (ConvertTimestampDeltaToMilliseconds() -
 #                                            src/Renderer/GpuTiming.h), PLUS
 #                                            Phase 4B's pure tri-state
 #                                            priority resolution
@@ -176,10 +174,7 @@
 #                                            hand-computed simple orthographic
 #                                            case, verified against Math/Mat4.h's
 #                                            actual column-major storage
-#                                            convention rather than assumed),
-#                                            AABBIntersectsFrustum() (fully
-#                                            inside, fully outside one plane,
-#                                            straddling one plane), and
+#                                            convention rather than assumed), and
 #                                            PackCullingInstanceInput()/every
 #                                            struct's documented byte size
 #                                            (including IndirectDrawCommand's
@@ -2312,7 +2307,6 @@ set(GTE_TEST_SOURCES
     Renderer/RenderTextureTests.cpp
     Renderer/GpuSkinning/GpuSkinningTypesTests.cpp
     Renderer/GpuSkinning/GpuSkinningPassTests.cpp
-    Renderer/VolumetricFroxelMathTests.cpp
     Renderer/RenderGraph/RenderGraphTypesTests.cpp
     Renderer/RenderGraph/PersistentSlotTableTests.cpp
     Renderer/RenderGraph/BoundedOnceSetTests.cpp

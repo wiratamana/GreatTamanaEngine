@@ -24,21 +24,14 @@ struct DebugVolumeTextureSnapshot {
     // The layout/stage/access the registry last believes the volume image is in (one state, no depth half).
     ResourceState state;
 
-    // Registry frame counter at the last Upsert(); ApplyStateOverride() does not touch it.
+    // Registry frame counter at the last Upsert().
     std::uint64_t lastUpdatedFrameCounter = 0;
 
     // Label of the format for GET /list_textures.
     std::string ColorFormatName() const;
 };
 
-// Adds the single-state override a volume texture needs; the shared base provides Upsert/FindByName/ListAll.
-class RenderGraphDebugVolumeTextureRegistry : public DebugResourceRegistryT<DebugVolumeTextureSnapshot> {
-public:
-    RenderGraphDebugVolumeTextureRegistry() = default;
-
-    // Overwrites only the ResourceState of `name` (no-op if unknown). Leaves `lastUpdatedFrameCounter`
-    // alone: a state correction is not a fresh capture.
-    void ApplyStateOverride(const std::string& name, const ResourceState& newState);
-};
+// The shared base provides Upsert/FindByName/ListAll.
+using RenderGraphDebugVolumeTextureRegistry = DebugResourceRegistryT<DebugVolumeTextureSnapshot>;
 
 } // namespace gte::rg

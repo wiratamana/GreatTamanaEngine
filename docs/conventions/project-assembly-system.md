@@ -374,7 +374,7 @@ thread, strictly before that `.dll` image is ever unmapped.
 **`RenderPassEvent::AfterEverything` is the ONLY tag any pass this callback
 declares may use** — this is what keeps the whole on-screen compositing chain
 provably last, unconditionally, matching every other pass `RenderFeatureCompositor`
-itself declares. `DetectRenderPassEventContradictions()` confirms zero
+itself declares. `Compile()` reports zero
 contradictions for this shape, live.
 
 **A registered feature is visible, and structurally distinguishable from a
@@ -582,7 +582,7 @@ the ONLY tag any pass this callback declares may use.** Tagging a pass
 with the implicit `AddRenderPass()` default (`RenderPassEvent::Opaques`
 — the SAME tier `"RenderOpaque"` itself uses) means your pass is no
 longer provably guaranteed to run first — and this exact mistake is
-silently uncaught by `DetectRenderPassEventContradictions()`, which only
+silently uncaught by the compiler's event-contradiction check, which only
 fires on a STRICTLY LATER tag, never an EQUAL one. The engine's own
 `"PreOpaqueFeatures"` provider (`Core.cpp`) runs a second, independent,
 debug-asserted runtime check for exactly this reason — a violation logs
@@ -710,7 +710,7 @@ declares MUST carry `rg::RenderPassEvent::AfterOpaques`; every pass a
 PostTransparent callback declares MUST carry
 `rg::RenderPassEvent::AfterTransparents`.** Exactly like PreOpaque's own
 Rule 1 above, a wrongly-tagged pass is silently uncaught by
-`DetectRenderPassEventContradictions()` (which only fires on a strictly
+the compiler's event-contradiction check (which only fires on a strictly
 LATER tag, never an equal one) — the engine's own `"PostOpaqueFeatures"`/
 `"PostTransparentFeatures"` providers (`Core.cpp`) each run a second,
 independent, debug-asserted runtime check for exactly this reason: a

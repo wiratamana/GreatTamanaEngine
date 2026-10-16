@@ -35,16 +35,6 @@ public:
         }
     }
 
-    // A strict-validation build fails the test when the graph logged any new validation error.
-    ~HeadlessRenderGraphFixture()
-    {
-        if constexpr (rg::StrictValidationEnabled()) {
-            if (m_renderGraph != nullptr) {
-                EXPECT_EQ(m_renderGraph->OnceLog()->StrictViolationCount(), 0u) << "render validation errors were logged";
-            }
-        }
-    }
-
     bool IsUsable() const noexcept { return m_renderer != nullptr && m_renderGraph != nullptr; }
     const std::string& SkipReason() const noexcept { return m_skipReason; }
 

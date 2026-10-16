@@ -38,20 +38,11 @@ inline constexpr std::uint32_t kInvalidSceneServiceSlotIndex = kSceneServiceSlot
 [[nodiscard]] std::uint32_t RegisterSceneServiceSlot(const char* debugName, SceneServiceResourceKind kind,
     std::optional<std::uint32_t> preferredIndex = std::nullopt, bool isDepthResource = false);
 
-// Number of registered slots (debug-facing only).
-std::size_t RegisteredSceneServiceSlotCount() noexcept;
-
-// "<unregistered>" / SceneServiceResourceKind::Image2D for a slot index that
-// was never registered (or is out of range).
-const char* SceneServiceSlotDebugName(std::uint32_t slotIndex) noexcept;
+// Resource kind of a registered slot; Image2D for a slot index that was never registered (or is out of range).
 SceneServiceResourceKind SceneServiceSlotResourceKind(std::uint32_t slotIndex) noexcept;
 
 // False (color aspect) for a slot index that was never registered or is out of range.
 bool SceneServiceSlotIsDepthResource(std::uint32_t slotIndex) noexcept;
-
-// Testing-only: clears every registered slot, the registration-order list,
-// the failure-memory table, and the Runtime Sealing latch.
-void ResetSceneServiceRegistryForTesting() noexcept;
 
 // Blackboard key a PreOpaque feature publishes its TextureHandle under for `slot` and the view its callback got.
 // Folds `slot` and `view.Hash()` through FNV-1a so concurrently active views never alias.
@@ -95,7 +86,6 @@ public:
 
     // Dummy fallback resources backing unresolved slots.
     const Texture2D& DummyImage2DTextureFor(std::uint32_t slotIndex) const;
-    const VolumeTexture& DummyImage3DTexture() const noexcept { return m_dummyImage3DTexture; }
 
 private:
     Renderer* m_renderer = nullptr;

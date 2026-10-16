@@ -27,8 +27,6 @@ public:
         m_frame = frame;
     }
 
-    State StateFor(std::uint64_t frame) const noexcept { return m_frame == frame ? m_state : State::Idle; }
-
 private:
     State m_state = State::Idle;
     std::uint64_t m_frame = 0;

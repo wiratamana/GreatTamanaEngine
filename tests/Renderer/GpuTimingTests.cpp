@@ -65,22 +65,6 @@ TEST(GpuTimingTest, ConvertTimestampDeltaToMillisecondsNonPositivePeriodReturnsZ
     EXPECT_DOUBLE_EQ(ConvertTimestampDeltaToMilliseconds(0, 1'000'000, -1.0f, 64), 0.0);
 }
 
-// --- PresentTimestampSlotBase() --------------------------------------------
-
-TEST(GpuTimingTest, PresentTimestampSlotBaseReturnsDocumentedValues)
-{
-    EXPECT_EQ(PresentTimestampSlotBase(0), 0u);
-    EXPECT_EQ(PresentTimestampSlotBase(1), 2u);
-}
-
-TEST(GpuTimingTest, PresentTimestampSlotBasePlusOneIsTheEndSlot)
-{
-    // The "+1 for the end timestamp" convention (see GpuTiming.h's own doc
-    // comment) is asserted directly rather than assumed.
-    EXPECT_EQ(PresentTimestampSlotBase(0) + 1, 1u);
-    EXPECT_EQ(PresentTimestampSlotBase(1) + 1, 3u);
-}
-
 // --- Fixed enum/constant layout ---------------------------------------------
 
 TEST(GpuTimingTest, GpuTimingSlotValuesAndCountAreExactlyAsDocumented)
@@ -146,12 +130,8 @@ TEST(GpuTimingTest, InterpretTimestampCapabilityStoresRawValuesEvenWhenUnsupport
 }
 
 // --- ResolveGpuTimingStatus() -----------------------------------------------
-// Phase 4B (PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md) - the pure
-// tri-state priority decision GpuTimingService::ReadOffscreenResultNow()/
-// ReadPresentResultIfAvailable() both build on. All 8 combinations of its 3
-// boolean inputs are exercised directly here, with no VkDevice/VkQueryPool
-// involved at all.
-
+// The pure tri-state priority decision GpuTimingService::ReadOffscreenResultNow() builds on. All 8 combinations
+// of its 3 boolean inputs are exercised, with no VkDevice/VkQueryPool involved.
 TEST(GpuTimingTest, ResolveGpuTimingStatusPresentWhenSupportedCapturingAndWritten)
 {
     EXPECT_EQ(ResolveGpuTimingStatus(true, true, true), GpuTimingSample::Status::Present);
@@ -166,9 +146,7 @@ TEST(GpuTimingTest, ResolveGpuTimingStatusAbsentWhenCaptureDisabled)
 
 TEST(GpuTimingTest, ResolveGpuTimingStatusAbsentWhenNotYetWritten)
 {
-    // A Present-path slot that hasn't been warmed up yet (see
-    // GpuTimingService::MarkPresentSlotWritten()) - also a TEMPORARY
-    // condition, also Absent, never Unsupported.
+    // A slot with no data yet is a TEMPORARY condition: Absent, never Unsupported.
     EXPECT_EQ(ResolveGpuTimingStatus(true, true, false), GpuTimingSample::Status::Absent);
 }
 

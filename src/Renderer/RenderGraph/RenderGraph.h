@@ -94,9 +94,6 @@ public:
     // Advances the persistent resource cache frame counter.
     void BeginPersistentResourceFrame() noexcept;
 
-    // Current frame counter for the persistent resource cache.
-    std::uint64_t CurrentPersistentResourceFrameCounter() const noexcept { return m_persistentResourceFrameCounter; }
-
     // Reads back and resolves GPU timestamps for synchronous execution.
     void FinalizeSynchronousGpuTiming();
 

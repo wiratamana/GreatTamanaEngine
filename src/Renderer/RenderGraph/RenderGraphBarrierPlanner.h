@@ -33,10 +33,6 @@ ResourceState RequiredStateFor(ResourceAccess access, bool isDepthResource) noex
 // Meaningless for buffers.
 bool TargetsDepthState(ResourceAccess access) noexcept;
 
-// True when `access`, declared as a texture write, needs a color-attachment rendering bracket.
-// Only ColorAttachmentWrite does; compute storage writes do not.
-bool IsColorAttachmentWriteAccess(ResourceAccess access) noexcept;
-
 // True when any of layout, stage mask or access mask differs; identical consecutive states need no barrier.
 bool RequiresBarrier(const ResourceState& previous, const ResourceState& next) noexcept;
 

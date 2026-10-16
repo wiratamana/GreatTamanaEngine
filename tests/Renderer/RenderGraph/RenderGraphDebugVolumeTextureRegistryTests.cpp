@@ -116,46 +116,5 @@ TEST(RenderGraphDebugVolumeTextureRegistryTest, UpsertOnExistingNameDoesNotMoveI
     EXPECT_EQ(all[1].name, "AtmosphereAerialPerspectiveVolume_SceneView");
 }
 
-TEST(RenderGraphDebugVolumeTextureRegistryTest, ApplyStateOverrideOnExistingNameUpdatesOnlyState)
-{
-    RenderGraphDebugVolumeTextureRegistry registry;
-    const DebugVolumeTextureSnapshot original = MakeFakeSnapshot("AtmosphereAerialPerspectiveVolume_GameView", 0x1000);
-    registry.Upsert(original);
-
-    ResourceState newState;
-    newState.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    newState.stageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-    newState.accessMask = VK_ACCESS_2_SHADER_READ_BIT;
-
-    registry.ApplyStateOverride("AtmosphereAerialPerspectiveVolume_GameView", newState);
-
-    const std::optional<DebugVolumeTextureSnapshot> found = registry.FindByName("AtmosphereAerialPerspectiveVolume_GameView");
-    ASSERT_TRUE(found.has_value());
-    EXPECT_EQ(found->state, newState);
-
-    // Every other field is unchanged - including lastUpdatedFrameCounter,
-    // since a state correction is not a fresh capture of contents (a
-    // regression here would silently make the "how many frames old" freshness
-    // metric wrong).
-    EXPECT_EQ(found->name, original.name);
-    EXPECT_EQ(found->regime, original.regime);
-    EXPECT_EQ(found->target.image, original.target.image);
-    EXPECT_EQ(found->lastUpdatedFrameCounter, original.lastUpdatedFrameCounter);
-}
-
-TEST(RenderGraphDebugVolumeTextureRegistryTest, ApplyStateOverrideOnUnknownNameIsSafeNoOp)
-{
-    RenderGraphDebugVolumeTextureRegistry registry;
-    registry.Upsert(MakeFakeSnapshot("AtmosphereAerialPerspectiveVolume_GameView", 0x1000));
-
-    ResourceState newState;
-    newState.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    registry.ApplyStateOverride("DoesNotExist", newState);
-
-    EXPECT_EQ(registry.ListAll().size(), 1u);
-    EXPECT_FALSE(registry.FindByName("DoesNotExist").has_value());
-}
-
 } // namespace
 } // namespace gte::rg

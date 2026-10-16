@@ -1,14 +1,6 @@
-// Unit tests for editor-core-separation-7 campaign, PHASE1
-// (PHASE1_EXTRACT_FORMATTING_AND_LABEL_HELPERS.md) - pure, ImGui-free
-// presentation-formatting helpers relocated (FormatGpuTiming()/JoinNames()/
-// ResolvePassNameAtSurvivingIndex()) or newly added (ToString(ResourceKind)/
-// ToString(ViewScope)) to
-// src/Renderer/RenderGraph/RenderGraphSnapshotFormatting.h/.cpp. None of
-// these had any test coverage before this phase - they were anonymous-
-// namespace, static-linkage functions inside RenderGraphPanel.cpp,
-// unreachable from any test binary. No live VkDevice/Renderer/RenderGraph
-// involved at all - mirrors RenderGraphSnapshotTests.cpp's own
-// include/namespace/test-registration style exactly.
+// Tier-1 tests for the ImGui-free formatting helpers in src/Renderer/RenderGraph/RenderGraphSnapshotFormatting.h:
+// FormatGpuTiming(), ResolvePassNameAtSurvivingIndex(), ToString(ResourceKind), ToString(ViewScope).
+// No live VkDevice/Renderer involved.
 
 #include "Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
 
@@ -45,28 +37,6 @@ TEST(RenderGraphSnapshotFormattingTest, FormatGpuTimingAbsentReportsNA)
     timing.status = GpuTimingSample::Status::Absent;
 
     EXPECT_EQ(FormatGpuTiming(timing), "N/A");
-}
-
-// --- JoinNames() -------------------------------------------------------------
-
-TEST(RenderGraphSnapshotFormattingTest, JoinNamesOfEmptyVectorReturnsDash)
-{
-    EXPECT_EQ(JoinNames({}), "-");
-}
-
-TEST(RenderGraphSnapshotFormattingTest, JoinNamesOfOneNameReturnsThatNameUnchanged)
-{
-    EXPECT_EQ(JoinNames({ "Albedo" }), "Albedo");
-}
-
-TEST(RenderGraphSnapshotFormattingTest, JoinNamesOfTwoNamesJoinsWithCommaSpace)
-{
-    EXPECT_EQ(JoinNames({ "Albedo", "Normal" }), "Albedo, Normal");
-}
-
-TEST(RenderGraphSnapshotFormattingTest, JoinNamesTreatsEmptyStringNameAsUnnamed)
-{
-    EXPECT_EQ(JoinNames({ "Albedo", "" }), "Albedo, (unnamed)");
 }
 
 // --- ResolvePassNameAtSurvivingIndex() ---------------------------------------
