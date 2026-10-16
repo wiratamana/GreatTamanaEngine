@@ -104,6 +104,9 @@ public:
         bool createDepthCompanion = true, bool createColorImage = true, bool transferSrc = false,
         bool transferDst = false) const;
 
+    // Resizes `texture` once the GPU no longer uses it. Its contents become undefined.
+    void ResizeRenderTexture(RenderTexture& texture, int width, int height) const;
+
     // Raw image pixels read back from the GPU.
     using CapturedRawPixels = CapturedPixels;
 

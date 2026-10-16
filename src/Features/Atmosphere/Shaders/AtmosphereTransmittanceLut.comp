@@ -35,7 +35,8 @@ layout(local_size_x = 16, local_size_y = 16) in;
 
 layout(std430, binding = 0) readonly buffer AtmosphereParametersBlock {
     AtmosphereParametersGpu atmosphereParameters;
-};
+} params;
+#define atmosphereParameters params.atmosphereParameters
 
 // The output LUT - VK_FORMAT_R8G8B8A8_UNORM on the C++ side (Texture2D's
 // own fixed format, see AtmosphereLutRenderer.cpp), so `rgba8` here must

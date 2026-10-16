@@ -43,11 +43,13 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(std430, binding = 0) readonly buffer AtmosphereParametersBlock {
     AtmosphereParametersGpu atmosphereParameters;
-};
+} params;
+#define atmosphereParameters params.atmosphereParameters
 
 layout(std430, binding = 1) readonly buffer AtmosphereFrameUniformsBlock {
     AtmosphereFrameUniforms frameUniforms;
-};
+} frame;
+#define frameUniforms frame.frameUniforms
 
 layout(binding = 2) uniform sampler2D transmittanceLut;
 layout(binding = 3) uniform sampler2D multiScatteringLut;

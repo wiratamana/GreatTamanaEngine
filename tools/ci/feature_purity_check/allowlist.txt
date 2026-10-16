@@ -1,11 +1,2 @@
 # Feature files (outside Editor/) that still use engine wrappers. Starting debt: lines are only ever removed.
 # Format: path relative to src/Features, then '# one-line reason'. A line whose file is gone or clean fails the check.
-
-Atmosphere/AtmosphereFeature.cpp # debt: Atmosphere passes talk to Renderer and Core directly until the feature kit exists
-Atmosphere/AtmosphereFeature.h # debt: Atmosphere passes talk to Renderer and Core directly until the feature kit exists
-Atmosphere/AtmosphereLutRenderer.cpp # debt: Atmosphere passes talk to Renderer and Core directly until the feature kit exists
-Atmosphere/AtmosphereLutRenderer.h # debt: Atmosphere passes talk to Renderer and Core directly until the feature kit exists
-Atmosphere/AtmosphereLutRendererImpl.cpp # debt: Atmosphere passes talk to Renderer and Core directly until the feature kit exists
-Atmosphere/AtmosphereLutRendererImpl.h # debt: Atmosphere passes talk to Renderer and Core directly until the feature kit exists
-Atmosphere/AtmospherePassSequence.cpp # debt: Atmosphere passes talk to Renderer and Core directly until the feature kit exists
-Atmosphere/AtmospherePassSequence.h # debt: Atmosphere passes talk to Renderer and Core directly until the feature kit exists

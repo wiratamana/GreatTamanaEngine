@@ -4,7 +4,7 @@
 // gte_core never needs a symbol from gte_editor. A nullptr means "not armed for this frame".
 
 #include "../Math/Mat4.h"
-#include "../Renderer/RenderGraph/RecordingContext.h"
+#include "../Renderer/RenderGraph/FullscreenReplay.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h" // rg::TextureHandle, rg::BufferHandle
 #include "../ECS/Entity.h"
 
@@ -36,13 +36,12 @@ public:
     virtual void RecordFrameDebuggerDraw(Registry& registry, Renderer& renderer, Entity entity, const Mesh& mesh,
         const Pipeline& pipeline, const MaterialTexture* materialTexture, const Mat4& viewProjection) = 0;
 
-    // Declares the replay passes: one per scene object, plus one for the view background when
-    // `recordBackgroundStep` is set. `toggleRegistry` gates the whole mechanism via "FrameDebuggerReplay".
+    // Declares the replay passes: one per scene object, plus one for the view background when `backgroundReplay`
+    // is set. `toggleRegistry` gates the whole mechanism via "FrameDebuggerReplay".
     virtual std::vector<rg::TextureHandle> AddReplayPasses(rg::RenderGraphBuilder& builder, Game& game,
         Renderer& renderer, float aspectWidthOverHeight, std::size_t objectCount,
-        const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-        const std::function<void(const rg::RecordingContext&)>& recordBackgroundStep, RenderTexture& gameTarget,
-        rg::RenderPassToggleRegistry* toggleRegistry = nullptr) = 0;
+        const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers, const rg::FullscreenReplay& backgroundReplay,
+        RenderTexture& gameTarget, rg::RenderPassToggleRegistry* toggleRegistry = nullptr) = 0;
 };
 
 } // namespace gte

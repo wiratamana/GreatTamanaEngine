@@ -2864,7 +2864,9 @@ set(GTE_COMMENT_RULE_SRC
     Scene/SceneBuilder.cpp Scene/SceneBuilder.h
     Core/FrameDebuggerEventSink.h Core/FrameDebuggerCaptureRecorder.h Application/RenderPassViewData.h
     Editor/SceneGridRenderer.cpp Editor/SceneGridRenderer.h Editor/FrameDebuggerCapture.cpp
-    Editor/FrameDebuggerCapture.h Editor/FrameDebuggerReplayPasses.cpp)
+    Editor/FrameDebuggerCapture.h Editor/FrameDebuggerReplayPasses.cpp
+    Features/Atmosphere/AtmosphereFeature.cpp Features/Atmosphere/AtmosphereFeature.h
+    Features/Atmosphere/Editor/AtmospherePluginPanelModule.cpp Features/Atmosphere/Editor/AtmospherePluginPanelModule.h)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp

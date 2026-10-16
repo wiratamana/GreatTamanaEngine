@@ -506,18 +506,16 @@ std::optional<RenderPassViewData> Core::FindRenderPassViewData(rg::RenderViewId 
     return viewData != nullptr ? std::optional<RenderPassViewData>(*viewData) : std::nullopt;
 }
 
-// Registers a callback to finalize a feature's output texture for sampling.
-bool Core::RegisterFinalizeForSamplingHook(const char* name, FinalizeForSamplingCallback callback)
+void Core::ExposeViewOutput(rg::ViewScope scope, RenderTexture& texture, std::string_view name)
 {
-    for (const FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
-        if (entry.name == name) {
-            GTE_LOG_ERROR("Core", std::string("RegisterFinalizeForSamplingHook: duplicate name '") + name + "' - refused.");
-            assert(false && "RegisterFinalizeForSamplingHook: duplicate name.");
-            return false;
+    for (ExposedViewOutput& existing : m_exposedViewOutputsThisFrame) {
+        if (existing.scope == scope) {
+            GTE_LOG_ERROR("Core", std::string("ExposeViewOutput: view already has an output this frame, '")
+                    + std::string(name) + "' is ignored.");
+            return;
         }
     }
-    m_finalizeForSamplingHooks.push_back({ name, std::move(callback) });
-    return true;
+    m_exposedViewOutputsThisFrame.push_back(ExposedViewOutput{ scope, &texture, std::string(name) });
 }
 
 // Registers a pass name to be included in GPU content stats.
@@ -537,19 +535,17 @@ bool Core::RegisterViewContentPassName(const char* name)
     return true;
 }
 
-// Invokes the registered finalization hook for `name`.
-RenderTexture* Core::DispatchFinalizeForSamplingHook(const char* name, const rg::RecordingContext& cmd)
+const Core::ExposedViewOutput* Core::FindExposedViewOutput(rg::ViewScope scope) const noexcept
 {
-    for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
-        if (entry.name == name) {
-            entry.lastResult = entry.callback ? entry.callback(cmd) : nullptr;
-            return entry.lastResult;
+    for (const ExposedViewOutput& output : m_exposedViewOutputsThisFrame) {
+        if (output.scope == scope) {
+            return &output;
         }
     }
     return nullptr;
 }
 
-// Resolves target texture, extent, and sampler for the active view.
+// Resolves the target handle and extent of the active view.
 std::optional<Core::PluginRenderFeatureTargetInfo> Core::FindPluginRenderFeatureTarget(
     const rg::RenderPassFrameContext& frame)
 {
@@ -1041,9 +1037,7 @@ void Core::BuildFrame()
 {
     m_renderGraph.BeginPersistentResourceFrame();
 
-    for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
-        entry.lastResult = nullptr;
-    }
+    m_exposedViewOutputsThisFrame.clear();
 
     // Query active editor render targets.
     RenderTexture* gameTarget = (m_editorLayer != nullptr) ? m_editorLayer->GameViewTarget() : nullptr;
@@ -1203,10 +1197,8 @@ void Core::BuildFrame()
 
                     m_offscreenRenderPipeline.DeclareInto(b, frame);
 
-                    const std::optional<std::function<void(const rg::RecordingContext&)>>
-                        viewBackgroundCallbackForReplay =
-                            m_offscreenBlackboardThisFrame.Fetch<std::function<void(const rg::RecordingContext&)>>(
-                                kViewBackgroundReplayCallbackKey);
+                    const std::optional<rg::FullscreenReplay> viewBackgroundForReplay =
+                        m_offscreenBlackboardThisFrame.Fetch<rg::FullscreenReplay>(kViewBackgroundReplayCallbackKey);
 #ifndef NDEBUG
                     m_offscreenBlackboardThisFrame.ReportUnusedPublishesIfAny();
 #endif
@@ -1224,12 +1216,11 @@ void Core::BuildFrame()
                         const std::vector<rg::BufferHandle> gpuSkinningBuffersForReplay =
                             m_offscreenBlackboardThisFrame.Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey)
                                 .value_or(std::vector<rg::BufferHandle>{});
-                        const std::function<void(const rg::RecordingContext&)> recordViewBackground =
-                            viewBackgroundCallbackForReplay.value_or(std::function<void(const rg::RecordingContext&)>{});
                         const std::size_t objectCount = m_game.CountGameViewDrawCommandsThisFrame();
                         const std::vector<rg::TextureHandle> replayStepHandles = frameDebuggerCapture->AddReplayPasses(
                             b, m_game, m_renderer, gameAspectForReplay, objectCount, gpuSkinningBuffersForReplay,
-                            recordViewBackground, *gameTarget, &m_renderPassToggleRegistry);
+                            viewBackgroundForReplay.value_or(rg::FullscreenReplay{}), *gameTarget,
+                            &m_renderPassToggleRegistry);
                         for (const rg::TextureHandle& replayHandle : replayStepHandles) {
                             outputs.push_back(replayHandle);
                         }
@@ -1238,42 +1229,32 @@ void Core::BuildFrame()
                     return outputs;
                 });
 
-            // Finalize textures for external sampling (e.g. editor UI viewport panels).
-            if (gameTarget != nullptr) {
-                gameTarget->FinalizeForExternalSampling(offscreenCmd);
-                m_renderGraph.NotifyDebugTextureStateOverride(
-                    "GameView", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+            // Finalize textures for external sampling (e.g. editor UI viewport panels). A view output a feature
+            // exposed this frame is finalized too and replaces the raw view in the editor.
+            const rg::ResourceState shaderReadState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
+            const auto finalizeView = [&](RenderTexture& target, const char* viewName, rg::ViewScope scope) {
+                target.FinalizeForExternalSampling(offscreenCmd);
+                m_renderGraph.NotifyDebugTextureStateOverride(viewName, shaderReadState);
 
-                RenderTexture* composited = DispatchFinalizeForSamplingHook("GameViewComposited", offscreenCmd);
-                if (composited != nullptr) {
-                    m_renderGraph.NotifyDebugTextureStateOverride(
-                        "GameViewComposited", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+                const ExposedViewOutput* exposed = FindExposedViewOutput(scope);
+                if (exposed == nullptr) {
+                    return static_cast<RenderTexture*>(nullptr);
                 }
+                exposed->texture->FinalizeForExternalSampling(offscreenCmd);
+                m_renderGraph.NotifyDebugTextureStateOverride(exposed->name, shaderReadState);
+                return exposed->texture;
+            };
+            if (gameTarget != nullptr) {
+                RenderTexture* exposed = finalizeView(*gameTarget, "GameView", rg::ViewScope::GameView);
                 if (m_editorLayer != nullptr) {
-                    m_editorLayer->SetGameViewCompositedTexture(composited);
+                    m_editorLayer->SetGameViewCompositedTexture(exposed);
                 }
             }
             if (sceneTarget != nullptr) {
-                sceneTarget->FinalizeForExternalSampling(offscreenCmd);
-                m_renderGraph.NotifyDebugTextureStateOverride(
-                    "SceneView", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-
-                RenderTexture* composited = DispatchFinalizeForSamplingHook("SceneViewComposited", offscreenCmd);
-                if (composited != nullptr) {
-                    m_renderGraph.NotifyDebugTextureStateOverride(
-                        "SceneViewComposited", rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
-                }
+                RenderTexture* exposed = finalizeView(*sceneTarget, "SceneView", rg::ViewScope::SceneView);
                 if (m_editorLayer != nullptr) {
-                    m_editorLayer->SetSceneViewCompositedTexture(composited);
+                    m_editorLayer->SetSceneViewCompositedTexture(exposed);
                 }
-            }
-
-            // Execute any remaining registered sampling finalization hooks.
-            for (FinalizeForSamplingHookEntry& entry : m_finalizeForSamplingHooks) {
-                if (entry.name == "GameViewComposited" || entry.name == "SceneViewComposited") {
-                    continue;
-                }
-                entry.lastResult = entry.callback(offscreenCmd);
             }
             m_renderer.EndOffscreenRenderGraphRecording();
 

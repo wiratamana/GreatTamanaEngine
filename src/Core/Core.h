@@ -30,6 +30,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -196,11 +197,10 @@ public:
         return FindViewData(view);
     }
 
-    // Hook that finalizes a feature's output texture for sampling; returns it, or nullptr when stale.
-    using FinalizeForSamplingCallback = std::function<RenderTexture*(const rg::RecordingContext& cmd)>;
-
-    // Registers a texture finalization hook run after offscreen rendering.
-    bool RegisterFinalizeForSamplingHook(const char* name, FinalizeForSamplingCallback callback);
+    // Marks `texture` as the output of the `scope` view for this frame. The editor panel and the HTTP endpoints
+    // show it instead of the raw view; it is finalized for sampling once the offscreen graph ran.
+    // `name` is the graph texture name it was imported under.
+    void ExposeViewOutput(rg::ViewScope scope, RenderTexture& texture, std::string_view name);
 
     // Registers a pass name to be counted in per-view GPU draw stats.
     bool RegisterViewContentPassName(const char* name);
@@ -225,11 +225,18 @@ private:
         std::vector<Entity> entities; // Entities included in this indirect batch.
     };
 
+    // A view output a feature exposed this frame (see ExposeViewOutput()).
+    struct ExposedViewOutput {
+        rg::ViewScope scope = rg::ViewScope::Shared;
+        RenderTexture* texture = nullptr;
+        std::string name;
+    };
+
     void RegisterBuiltinCapabilityOrchestrators();
     void RegisterOffscreenRenderPipelineProviders();
     void RegisterPresentRenderPipelineProvider();
     const RenderPassViewData* FindViewData(rg::RenderViewId view) const noexcept;
-    RenderTexture* DispatchFinalizeForSamplingHook(const char* name, const rg::RecordingContext& cmd);
+    const ExposedViewOutput* FindExposedViewOutput(rg::ViewScope scope) const noexcept;
 
     IEditorLayer* m_editorLayer = nullptr; // Optional editor hook.
 
@@ -249,12 +256,7 @@ private:
     rg::RenderPipeline m_presentRenderPipeline;
     rg::RenderPassToggleRegistry m_renderPassToggleRegistry;
 
-    struct FinalizeForSamplingHookEntry {
-        std::string name;
-        FinalizeForSamplingCallback callback;
-        RenderTexture* lastResult = nullptr;
-    };
-    std::vector<FinalizeForSamplingHookEntry> m_finalizeForSamplingHooks;
+    std::vector<ExposedViewOutput> m_exposedViewOutputsThisFrame; // Cleared at the start of each BuildFrame().
 
     std::vector<std::string> m_viewContentPassNames{ "RenderOpaque", "RenderTransparent" };
 

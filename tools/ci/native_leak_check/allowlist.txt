@@ -14,6 +14,4 @@ Editor/Panels/FrameDebuggerPanel.cpp # debt: editor tool uses raw wrappers or on
 Editor/Panels/RenderGraphPanel.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/RenderGraphTexturePreview.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/SceneGridRenderer.cpp # debt: editor tool uses raw wrappers or one-shot submits
-Features/Atmosphere/AtmosphereLutRendererImpl.cpp # debt: RawCommandBuffer for external sampling finalize and raw wrappers; removed when the feature kit migrates this feature
-Features/Atmosphere/AtmosphereLutRendererImpl.h # debt: feature passes use raw wrappers until the feature kit exists
 Window/Window.h # permanent: Native() returns the SDL window handle, not a GPU object

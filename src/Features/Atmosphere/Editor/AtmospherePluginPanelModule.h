@@ -13,13 +13,8 @@ namespace rg {
 class RenderGraph;
 } // namespace rg
 
-// Adapts BuildAtmospherePanel() onto IEditorPanelModule_v1 so the
-// "Atmosphere" panel draws through EditorPanelRegistry's generic
-// plugin-panel loop instead of a hardcoded ImGuiEditorLayer call.
-//
-// Never unregistered (a permanent, built-in panel - see
-// EditorLayerAtmosphereBinding.h). Constructed once and owned by
-// ImGuiEditorLayer for the rest of the process.
+// Adapts BuildAtmospherePanel() onto IEditorPanelModule_v1 so the "Atmosphere" panel draws through the generic
+// plugin-panel loop. A permanent built-in panel, owned by ImGuiEditorLayer.
 class AtmospherePluginPanelModule final : public IEditorPanelModule_v1 {
 public:
     AtmospherePluginPanelModule(EditorContext& ctx, Renderer& /*engineRenderer*/,

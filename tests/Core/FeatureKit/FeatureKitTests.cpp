@@ -58,7 +58,7 @@ TEST(FxFrameTest, TexturesCarryTheSerialOfTheFrameThatMadeThem)
 TEST(FxFrameTest, ATextureFromAnotherFrameIsNotOwned)
 {
     const PostOpaqueFrame first(View{}, FakeScene(), 1, rg::TextureHandle{ 1, 1 }, rg::TextureHandle{ 2, 1 });
-    const PostOpaqueFrame second(View{}, FakeScene(), 2, rg::TextureHandle{ 1, 1 }, rg::TextureHandle{ 2, 1 });
+    const PostOpaqueFrame second(View{}, FakeScene(), 5, rg::TextureHandle{ 1, 1 }, rg::TextureHandle{ 2, 1 });
 
     EXPECT_FALSE(second.Owns(first.SceneColor()));
     EXPECT_FALSE(second.Owns(Texture{}));

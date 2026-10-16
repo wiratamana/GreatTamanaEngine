@@ -1,48 +1,67 @@
 #pragma once
 
-#include "../../Core/Plugins/IEngineFeatureModule.h"
-#include "AtmosphereLutRenderer.h"
 #include "AtmosphereTypes.h"
+#include "../../Core/FeatureKit/FeatureKit.h"
 
 namespace gte {
 
-class Core;
+inline constexpr const char* kAtmosphereFeatureName = "Atmosphere";
 
-namespace rg {
-class RenderPassToggleRegistry;
-} // namespace rg
+// View-independent LUTs of one frame, made once by the shared callback and read by every view.
+struct AtmosphereSharedLuts {
+    fx::Texture transmittance;
+    fx::Texture multiScattering;
+    AtmosphereParametersGpu parameters;
+};
 
-// The ONE object owning everything feature-specific - AtmosphereSettings/
-// AtmosphereLutRenderer and every one of this feature's render-graph pass
-// registrations. Constructed by BuiltinFeatureModuleRegistry's own factory
-// (see the bottom of AtmosphereFeature.cpp) - never directly by Core.
-class AtmosphereFeature final : public IEngineFeatureModule {
+// One view's LUTs and frame uniforms. A texture is invalid when its pass did not run this frame.
+struct AtmosphereViewLuts {
+    fx::Texture skyView;
+    fx::Texture aerialVolume;
+    AtmosphereFrameUniforms frameUniforms;
+};
+
+// Per-view resources.
+struct AtmosphereViewState {
+    fx::PersistentTarget skyView{ "SkyViewLut" };
+    fx::PersistentVolume aerialVolume{ "AerialPerspectiveVolume", fx::VolumeSize{ 128, 128, 32 }, PixelFormat::RGBA16_Float };
+    fx::GpuParams<AtmosphereFrameUniforms> frameParams;
+};
+
+// Physically based sky: shared transmittance and multi-scattering LUTs, per-view sky-view LUT and aerial
+// perspective volume, a sky background drawn behind the scene and an aerial perspective composite.
+class AtmosphereFeature final : public fx::Feature {
 public:
-    explicit AtmosphereFeature(Core& core);
+    explicit AtmosphereFeature(fx::FeatureHost& host);
 
-    AtmosphereFeature(const AtmosphereFeature&) = delete;
-    AtmosphereFeature& operator=(const AtmosphereFeature&) = delete;
-    AtmosphereFeature(AtmosphereFeature&&) = delete;
-    AtmosphereFeature& operator=(AtmosphereFeature&&) = delete;
-
-    const char* ModuleName() const override { return "Atmosphere"; }
+    const char* Name() const override { return kAtmosphereFeatureName; }
+    void Setup(fx::FeatureSetup& setup) override;
 
     AtmosphereSettings& Settings() noexcept { return m_settings; }
-    AtmosphereLutRenderer& Renderer() noexcept { return m_renderer; }
 
 private:
-    // Registers all 4 render passes + 2 finalize-for-sampling hooks onto
-    // m_core. Called once, from the constructor.
-    void RegisterPasses();
+    void SharedLuts(fx::SharedFrame& f);
+    void ViewLuts(fx::PreOpaqueFrame& f);
+    void SkyBackground(fx::PostOpaqueFrame& f);
+    void Composite(fx::CompositeFrame& f);
 
-    // outputTextureName's output, or nullptr if the render graph did not
-    // write it this frame (disabled/stale-pass guard).
-    RenderTexture* FreshCompositedOutput(const char* outputTextureName);
-
-    Core& m_core;
-    rg::RenderPassToggleRegistry* m_toggleRegistry = nullptr;
     AtmosphereSettings m_settings;
-    AtmosphereLutRenderer m_renderer;
+
+    fx::PerView<AtmosphereViewState> m_views;
+    fx::PersistentTarget m_transmittance{ "TransmittanceLut" };
+    fx::PersistentTarget m_multiScattering{ "MultiScatteringLut" };
+    fx::ViewOutput m_composited{ "Composited" };
+    fx::GpuParams<AtmosphereParametersGpu> m_sharedParams;
+
+    fx::ComputeShader m_transmittanceShader{ "AtmosphereTransmittanceLut" };
+    fx::ComputeShader m_multiScatteringShader{ "AtmosphereMultiScatteringLut" };
+    fx::ComputeShader m_skyViewShader{ "AtmosphereSkyViewLut" };
+    fx::ComputeShader m_aerialVolumeShader{ "AtmosphereAerialPerspectiveVolume" };
+    fx::ComputeShader m_compositeShader{ "AtmosphereAerialPerspectiveComposite" };
+    fx::FullscreenShader m_skyBackgroundShader{ "AtmosphereSkyBackground" };
+
+    fx::Channel<AtmosphereSharedLuts> m_sharedLuts{ "SharedLuts" };
+    fx::Channel<AtmosphereViewLuts> m_viewLuts{ "ViewLuts" };
 };
 
 } // namespace gte

@@ -13,6 +13,7 @@
 namespace gte::rg {
 
 class Shader;
+struct FullscreenReplay;
 
 // One fullscreen triangle into one or more color targets (MRT), textures bound by shader variable name.
 // An optional depth test reads the depth of a texture. Declare it with the scope of the view it draws for:
@@ -45,7 +46,8 @@ public:
     FullscreenPass& Blend(BlendMode blend);
 
     // Declares the pass. Returns false when nothing was declared (inert shader or invalid chain).
-    bool Draw();
+    // When `replay` is set and the pass was declared, it receives a way to record the same draw again elsewhere.
+    bool Draw(FullscreenReplay* replay = nullptr);
 
 private:
     std::vector<TextureHandle> m_depthAcknowledgements;

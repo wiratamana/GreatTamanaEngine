@@ -1,5 +1,6 @@
 #include "FullscreenPass.h"
 
+#include "FullscreenReplay.h"
 #include "PassKindDefaults.h"
 #include "RenderGraph.h"
 #include "RenderGraphBuilder.h"
@@ -9,9 +10,30 @@
 #include "../Renderer.h"
 
 #include <cstdint>
+#include <memory>
 #include <utility>
 
 namespace gte::rg {
+
+namespace {
+
+// The execute step shared by the declared pass and its replay.
+void RecordFullscreen(PassContext& ctx, const Pipeline& pipeline, ShaderStageMask pushStages, const std::vector<std::byte>& push)
+{
+    const DescriptorSetHandle set = ctx.BoundDescriptorSet();
+    if (set == DescriptorSetHandle::Invalid) {
+        return; // The graph refused the bindings; drawing with a stale set is unsafe.
+    }
+    auto cmd = ctx.Cmd();
+    cmd.BindPipeline(pipeline);
+    cmd.BindDescriptorSet(0, set);
+    if (!push.empty()) {
+        cmd.PushConstants(push.data(), static_cast<std::uint32_t>(push.size()), pushStages);
+    }
+    cmd.Draw(3);
+}
+
+} // namespace
 
 FullscreenPass::FullscreenPass(
     RenderGraphBuilder& builder, Shader& shader, StaticName name, ViewScope scope, RenderPassEvent event)
@@ -61,7 +83,7 @@ FullscreenPass& FullscreenPass::Blend(BlendMode blend)
     return *this;
 }
 
-bool FullscreenPass::Draw()
+bool FullscreenPass::Draw(FullscreenReplay* replay)
 {
     if (!m_state.Begin("Draw")) {
         return false;
@@ -100,26 +122,21 @@ bool FullscreenPass::Draw()
     }
     const DescriptorSetLayoutHandle layout = m_state.shader.Layout();
     const ShaderStageMask pushStages = m_state.shader.PushStages();
+    const auto push = std::make_shared<const std::vector<std::byte>>(std::move(m_state.push));
 
     builder.AddRenderPass(
         m_state.name.value, DefaultPassKind(DeclarativePassType::Fullscreen), m_state.scope, RenderPassCategory::General,
         [&](RenderGraphBuilder::PassBuilder& pass) {
             DeclareFullscreen(pass, *planned, layout, m_targets, m_clear, m_depthAcknowledgements, m_depth);
         },
-        [pipeline, pushStages, push = std::move(m_state.push)](PassContext& ctx) {
-            const DescriptorSetHandle set = ctx.BoundDescriptorSet();
-            if (set == DescriptorSetHandle::Invalid) {
-                return; // The graph refused the bindings; drawing with a stale set is unsafe.
-            }
-            auto cmd = ctx.Cmd();
-            cmd.BindPipeline(*pipeline);
-            cmd.BindDescriptorSet(0, set);
-            if (!push.empty()) {
-                cmd.PushConstants(push.data(), static_cast<std::uint32_t>(push.size()), pushStages);
-            }
-            cmd.Draw(3);
-        },
+        [pipeline, pushStages, push](PassContext& ctx) { RecordFullscreen(ctx, *pipeline, pushStages, *push); },
         DefaultDrawKind(DeclarativePassType::Fullscreen), m_state.event);
+
+    if (replay != nullptr) {
+        const auto plan = std::make_shared<const BindingPlan>(std::move(*planned));
+        replay->declare = [plan, layout](RenderGraphBuilder::PassBuilder& pass) { DeclareBindings(pass, *plan, layout); };
+        replay->record = [pipeline, pushStages, push](PassContext& ctx) { RecordFullscreen(ctx, *pipeline, pushStages, *push); };
+    }
     return true;
 }
 

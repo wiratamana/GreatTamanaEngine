@@ -22,6 +22,12 @@ constexpr std::uint64_t FrameSerial(std::uint64_t frameIndex, rg::ViewScope scop
     return frameIndex * rg::kViewScopeCount + rg::ViewScopeIndex(scope) + 1;
 }
 
+// The serial of the Shared callbacks of the frame that `serial` belongs to; 0 for the invalid serial 0.
+constexpr std::uint64_t SharedSerialOf(std::uint64_t serial) noexcept
+{
+    return serial == 0 ? 0 : FrameSerial((serial - 1) / rg::kViewScopeCount, rg::ViewScope::Shared);
+}
+
 // Binds a texture through its depth aspect (depth sampling).
 struct DepthRef {
     Texture texture;

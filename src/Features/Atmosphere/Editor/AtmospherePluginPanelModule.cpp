@@ -1,15 +1,13 @@
 #include "AtmospherePluginPanelModule.h"
 
 #include "../AtmosphereFeature.h"
+#include "../../../Core/FeatureKit/FeatureRegistration.h"
 #include "../../../Editor/BuiltinFeatureEditorPanelRegistry.h"
 
 namespace gte {
 
 void AtmospherePluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/)
 {
-    // Ignores the restricted ctx parameter (established convention - see
-    // IPluginPanelDrawContext's own doc comment) and calls the real panel
-    // builder directly.
     BuildAtmospherePanel(m_ctx, m_feature.Settings());
 }
 
@@ -17,11 +15,9 @@ namespace {
 std::unique_ptr<IEditorPanelModule_v1> CreateAtmospherePanelModule(
     IEngineFeatureModule& module, EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph)
 {
-    // Safe: the ONLY IEngineFeatureModule ever registered under the exact
-    // name "Atmosphere" is AtmosphereFeature itself - this factory is only
-    // ever invoked for a module whose ModuleName() == "Atmosphere".
+    // Only invoked for the module registered as "Atmosphere", which holds an AtmosphereFeature.
     return std::make_unique<AtmospherePluginPanelModule>(
-        ctx, renderer, renderGraph, static_cast<AtmosphereFeature&>(module));
+        ctx, renderer, renderGraph, fx::FeatureOf<AtmosphereFeature>(module));
 }
 } // namespace
 

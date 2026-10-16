@@ -2,7 +2,9 @@
 
 #include "FullscreenShader.h"
 #include "VerbSupport.h"
+#include "../ViewBackgroundReplayKey.h"
 #include "../../Renderer/RenderGraph/FullscreenPass.h"
+#include "../../Renderer/RenderGraph/FullscreenReplay.h"
 
 #include <optional>
 #include <utility>
@@ -24,6 +26,21 @@ BlendMode ToBlendMode(FullscreenBlend blend) noexcept
     return BlendMode::Opaque;
 }
 
+CompareOp ToCompareOp(DepthCompare compare) noexcept
+{
+    switch (compare) {
+    case DepthCompare::Less:
+        return CompareOp::Less;
+    case DepthCompare::LessEqual:
+        return CompareOp::LessEqual;
+    case DepthCompare::Equal:
+        return CompareOp::Equal;
+    case DepthCompare::Always:
+        break;
+    }
+    return CompareOp::Always;
+}
+
 } // namespace
 
 // `pass` is empty when the chain is inert: pass toggled off, or the frame has no engine context.
@@ -39,6 +56,7 @@ struct FullscreenChain::Impl {
     rg::StaticName name;
     rg::TextureHandle defaultDepth; // Acknowledged at Draw() unless the author covered it.
     bool depthCovered = false;
+    bool publishReplay = false; // A successful Draw() publishes the replay for the Frame Debugger (Game view only).
     std::optional<rg::FullscreenPass> pass;
 };
 
@@ -52,6 +70,14 @@ FullscreenChain Frame::Fullscreen(FullscreenShader& shader, rg::StaticName passN
         impl->pass->Blend(ToBlendMode(detail::BlendOf(shader)));
     }
     return FullscreenChain(std::move(impl));
+}
+
+FullscreenChain PostOpaqueFrame::ViewBackground(FullscreenShader& shader, rg::StaticName passName)
+{
+    FullscreenChain chain = Fullscreen(shader, passName);
+    chain.Target(SceneColor()).DepthTest(SceneDepth(), DepthCompare::Equal, /*write=*/false);
+    chain.m_impl->publishReplay = true;
+    return chain;
 }
 
 FullscreenChain::FullscreenChain(std::unique_ptr<Impl> impl) noexcept
@@ -121,6 +147,19 @@ FullscreenChain& FullscreenChain::Target(Texture target, std::optional<std::arra
     return *this;
 }
 
+FullscreenChain& FullscreenChain::DepthTest(Texture depth, DepthCompare compare, bool write)
+{
+    if (m_impl && m_impl->pass) {
+        if (detail::CheckOwned(*m_impl->frame, depth, m_impl->name, "the depth test texture")) {
+            m_impl->pass->DepthTest(depth.handle, ToCompareOp(compare), write);
+            m_impl->depthCovered = m_impl->depthCovered || depth.handle == m_impl->defaultDepth;
+        } else {
+            m_impl->pass->Abandon();
+        }
+    }
+    return *this;
+}
+
 bool FullscreenChain::Draw()
 {
     if (!m_impl || !m_impl->pass) {
@@ -129,8 +168,15 @@ bool FullscreenChain::Draw()
     if (!m_impl->depthCovered && m_impl->defaultDepth.IsValid()) {
         m_impl->pass->Acknowledge(m_impl->defaultDepth);
     }
-    const bool declared = m_impl->pass->Draw();
+    rg::FullscreenReplay replay;
+    const bool declared = m_impl->pass->Draw(m_impl->publishReplay ? &replay : nullptr);
     m_impl->pass.reset();
+
+    detail::FrameContext* context = m_impl->frame->Context();
+    if (declared && replay && context != nullptr && context->blackboard != nullptr
+        && context->scope == rg::ViewScope::GameView) {
+        context->blackboard->Publish<rg::FullscreenReplay>(kViewBackgroundReplayCallbackKey, std::move(replay));
+    }
     return declared;
 }
 

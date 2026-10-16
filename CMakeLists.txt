@@ -437,6 +437,8 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/TransientTarget.h
     src/Core/FeatureKit/TransientTarget.cpp
     src/Core/FeatureKit/PersistentVolume.cpp
+    src/Core/FeatureKit/ViewOutput.h
+    src/Core/FeatureKit/ViewOutput.cpp
     src/Core/FeatureKit/Channel.h
     src/Core/FeatureKit/Channel.cpp
     src/Core/FeatureKit/ChannelKey.h

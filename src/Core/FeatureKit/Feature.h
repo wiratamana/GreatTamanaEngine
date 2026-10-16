@@ -45,6 +45,9 @@ public:
     // May throw; the first failure stops the commit.
     virtual void Commit(const Registration& registration) = 0;
 
+    // Counts the draws of `passName` in the per-view draw statistics. May throw like Commit().
+    virtual void CommitViewStatsPass(const std::string& /*passName*/) { }
+
     // Where Setup() declares scene slots; null when the sink has no engine behind it.
     virtual ISceneSlotRegistrar* SlotRegistrar() noexcept { return nullptr; }
 };

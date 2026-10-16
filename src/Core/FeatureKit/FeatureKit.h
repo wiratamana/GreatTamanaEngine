@@ -27,3 +27,4 @@
 #include "Texture.h"
 #include "TransientTarget.h"
 #include "View.h"
+#include "ViewOutput.h"

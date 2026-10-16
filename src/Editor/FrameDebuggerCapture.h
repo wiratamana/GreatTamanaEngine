@@ -82,9 +82,8 @@ public:
 
     std::vector<rg::TextureHandle> AddReplayPasses(rg::RenderGraphBuilder& builder, Game& game, Renderer& renderer,
         float aspectWidthOverHeight, std::size_t objectCount,
-        const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-        const std::function<void(const rg::RecordingContext&)>& recordBackgroundStep, RenderTexture& gameTarget,
-        rg::RenderPassToggleRegistry* toggleRegistry = nullptr) override;
+        const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers, const rg::FullscreenReplay& backgroundReplay,
+        RenderTexture& gameTarget, rg::RenderPassToggleRegistry* toggleRegistry = nullptr) override;
 
     // Clears every recorded fact. Call once at the top of every armed frame.
     void Reset();

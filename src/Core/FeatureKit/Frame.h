@@ -22,6 +22,7 @@ class ComputeShader;
 class FullscreenChain;
 class FullscreenShader;
 class SceneDrawChain;
+class ViewOutput;
 
 namespace detail {
 struct FrameContext;
@@ -44,8 +45,12 @@ public:
     Registry& Scene() const noexcept { return *m_scene; }
     std::uint64_t Serial() const noexcept { return m_serial; }
 
-    // True when `texture` was made for this view in this frame. A copy kept from an earlier frame is refused.
-    bool Owns(const Texture& texture) const noexcept { return texture.IsValid() && texture.frameSerial == m_serial; }
+    // True when `texture` was made for this view in this frame, or by a Shared callback of this frame.
+    // A copy kept from an earlier frame is refused.
+    bool Owns(const Texture& texture) const noexcept
+    {
+        return texture.IsValid() && (texture.frameSerial == m_serial || texture.frameSerial == SharedSerialOf(m_serial));
+    }
 
     // Stamps a handle with this frame's serial.
     Texture Stamp(rg::TextureHandle handle) const noexcept { return Texture{ handle, m_serial }; }
@@ -61,6 +66,10 @@ public:
 
     // Copies `src` into `dst` with a scaled blit. False when nothing was declared.
     bool Blit(rg::StaticName passName, Texture src, Texture dst, BlitFilter filter);
+
+    // Marks `produced` (the texture `output.Acquire()` returned in this callback) as this view's output for the
+    // editor and the HTTP endpoints. Call it only after the pass that writes the texture was declared.
+    void ExposeAsViewOutput(ViewOutput& output, Texture produced);
 
     // A scene redraw (depth pre-pass, outline, ...). Declares nothing while its pass is toggled off.
     SceneDrawChain SceneDraw(rg::StaticName passName);
@@ -118,6 +127,11 @@ public:
 
     Texture SceneColor() const noexcept { return Stamp(m_color); }
     Texture SceneDepth() const noexcept { return Stamp(m_depth); }
+
+    // A fullscreen draw into the view's own color, only where the depth test passes `Equal` (nothing was drawn
+    // there), without writing depth. In the Game view the Frame Debugger can replay it. Declares nothing while its
+    // pass is toggled off. Add Bind/Push as for any fullscreen draw, then Draw().
+    FullscreenChain ViewBackground(FullscreenShader& shader, rg::StaticName passName);
 
 private:
     rg::TextureHandle m_color;

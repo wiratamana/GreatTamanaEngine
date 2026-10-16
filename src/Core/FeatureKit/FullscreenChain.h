@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -13,6 +14,9 @@
 namespace gte::fx {
 
 class FullscreenShader;
+
+// How a depth test compares the draw's depth with the stored depth.
+enum class DepthCompare : std::uint8_t { Less, LessEqual, Equal, Always };
 
 // One fullscreen draw into a target, bound by shader variable name. Made by Frame::Fullscreen(), ended by Draw().
 // The frame's scene depth is acknowledged for you unless you bind or acknowledge it yourself.
@@ -42,11 +46,16 @@ public:
     // The color target. A clear value set clears it, unset loads it.
     FullscreenChain& Target(Texture target, std::optional<std::array<float, 4>> clear = std::nullopt);
 
+    // Tests (and, with `write`, updates) the depth of `depth` with `compare`. The depth is loaded, never cleared.
+    // `depth` may be the view's own scene depth: it then counts as acknowledged.
+    FullscreenChain& DepthTest(Texture depth, DepthCompare compare, bool write);
+
     // False when nothing was declared (disabled pass, inert shader, refused or invalid bindings).
     bool Draw();
 
 private:
     friend class Frame;
+    friend class PostOpaqueFrame;
     struct Impl;
     explicit FullscreenChain(std::unique_ptr<Impl> impl) noexcept;
 

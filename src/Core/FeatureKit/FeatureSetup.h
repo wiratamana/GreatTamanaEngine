@@ -61,7 +61,11 @@ public:
     // Declares a scene-services slot at startup. Invalid (and one log) when it cannot be declared.
     SceneSlot DeclareSceneSlot(std::string_view name, SceneSlotKind kind, std::uint32_t preferredIndex);
 
+    // Counts the draws of the pass named `passName` in the per-view draw statistics shown by the profiler.
+    void CountInViewStats(std::string passName);
+
     const std::vector<Registration>& Registrations() const noexcept { return m_registrations; }
+    const std::vector<std::string>& ViewStatsPasses() const noexcept { return m_viewStatsPasses; }
     const std::vector<std::string>& Errors() const noexcept { return m_errors; }
 
 private:
@@ -70,6 +74,7 @@ private:
     ISceneSlotRegistrar* m_slots;
     bool m_missingRegistrarLogged = false;
     std::vector<Registration> m_registrations;
+    std::vector<std::string> m_viewStatsPasses;
     std::vector<std::string> m_errors;
 };
 

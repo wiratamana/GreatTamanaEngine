@@ -145,6 +145,13 @@ private:
         }
     }
 
+    void CommitViewStatsPass(const std::string& passName) override
+    {
+        if (!m_core.RegisterViewContentPassName(passName.c_str())) {
+            throw std::runtime_error("Core refused the view stats pass '" + passName + "'");
+        }
+    }
+
     void Run(const Registration& registration, SharedOncePerFrame* sharedLatch, rg::RenderGraphBuilder& builder,
         rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView, rg::TextureHandle privateTarget, Extent2D extent,
         const ScenePassReadHandles& handles)
@@ -156,7 +163,7 @@ private:
         context.builder = &builder;
         context.blackboard = &blackboard;
         context.core = &m_core;
-        context.view = currentView;
+        context.view = sharedLatch != nullptr ? rg::RenderViewId::Shared() : currentView;
         context.featureName = m_name;
         context.event = ToPassEvent(registration.stage);
         context.toggles = &m_core.GetRenderPassToggleRegistryMutable();

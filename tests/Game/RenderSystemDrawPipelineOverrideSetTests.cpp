@@ -55,7 +55,7 @@ public:
     }
 
     std::vector<rg::TextureHandle> AddReplayPasses(rg::RenderGraphBuilder&, Game&, Renderer&, float, std::size_t,
-        const std::vector<rg::BufferHandle>&, const std::function<void(const rg::RecordingContext&)>&, RenderTexture&,
+        const std::vector<rg::BufferHandle>&, const rg::FullscreenReplay&, RenderTexture&,
         rg::RenderPassToggleRegistry* = nullptr) override
     {
         ADD_FAILURE() << "AddReplayPasses() is not expected to be called by any test in this file.";

@@ -2,261 +2,232 @@
 
 #include "AtmosphereMath.h"
 #include "AtmosphereParameters.h"
-#include "AtmospherePassSequence.h"
-#include "../../Core/Core.h"
-#include "../../Core/Plugins/BuiltinFeatureModuleRegistry.h"
-#include "../../Core/ViewBackgroundReplayKey.h"
-#include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
-#include "../../Renderer/RenderGraph/MeshPass.h"
-#include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
-#include "../../Renderer/RenderGraph/CommandBuffer.h"
+#include "../../Game/Lighting/DirectionalLightResolver.h"
 
-#include <cassert>
+#include <algorithm>
 #include <cstdint>
-#include <utility>
+#include <cstring>
 
 namespace gte {
 
-using rg::operator""_passId;
-
 namespace {
 
-constexpr rg::RenderPassId kAtmosphereSharedLutKey = "Atmosphere.SharedLuts"_passId;
-constexpr rg::RenderPassId kAtmosphereViewLutGameKey = "Atmosphere.ViewLut.Game"_passId;
-constexpr rg::RenderPassId kAtmosphereViewLutSceneKey = "Atmosphere.ViewLut.Scene"_passId;
+constexpr std::int32_t kSharedLutPriority = -10;
+constexpr std::int32_t kViewLutPriority = 0;
+constexpr std::int32_t kSkyBackgroundPriority = 100;
+constexpr std::int32_t kCompositePriority = -1000;
 
-// Blackboard entry storing shared atmosphere LUT handles and parameters.
-struct AtmosphereSharedLutBlackboardEntry {
-    AtmosphereSharedLutHandles handles;
-    AtmosphereParametersGpu parameters;
+constexpr Extent2D kTransmittanceSize{ 256, 256 };
+constexpr Extent2D kMultiScatteringSize{ 64, 64 };
+constexpr Extent2D kSkyViewSize{ 200, 100 };
+constexpr Extent2D kAerialVolumeSize{ 128, 128 }; // Each column marches through every Z slice itself.
+
+// Push constants of AtmosphereAerialPerspectiveComposite.comp.
+struct CompositePush {
+    float invViewProjection[16];
+    float cameraWorldPositionAndScale[4]; // xyz = camera world position, w = world units per km.
+    float strengthMaxDistanceExponentPad[4]; // x = strength, y = max distance (km), z = depth exponent.
 };
+static_assert(sizeof(CompositePush) == 96, "must match AtmosphereAerialPerspectiveComposite.comp");
+
+// Push constants of AtmosphereSkyBackground.frag.
+struct SkyBackgroundPush {
+    float invViewProjection[16];
+    float eyeHeightKm;
+    float planetRadiusKm;
+    float skyExposure;
+    float pad;
+};
+static_assert(sizeof(SkyBackgroundPush) == 80, "must match AtmosphereSkyBackground.frag");
+
+AtmosphereParametersGpu MakeParameters(const AtmosphereSettings& settings)
+{
+    AtmosphereParametersGpu params;
+    params.rayleighScattering = settings.rayleighScattering;
+    params.rayleighDensityExpScale = ReciprocalScaleHeightFromKm(settings.rayleighScaleHeightKm);
+    params.mieScattering = settings.mieScattering;
+    params.miePhaseG = settings.miePhaseG;
+    params.mieAbsorption = settings.mieAbsorption;
+    params.mieDensityExpScale = ReciprocalScaleHeightFromKm(settings.mieScaleHeightKm);
+    params.ozoneAbsorption = settings.ozoneAbsorption;
+    params.ozoneTentCenterKm = settings.ozoneTentCenterKm;
+    params.groundAlbedo = settings.groundAlbedo;
+    params.ozoneTentHalfWidthKm = settings.ozoneTentHalfWidthKm;
+    params.planetRadiusKm = settings.planetRadiusKm;
+    params.atmosphereThicknessKm = settings.atmosphereThicknessKm;
+    params.multiScatteringStrength = settings.multiScatteringStrength;
+    return params;
+}
+
+AtmosphereFrameUniforms MakeFrameUniforms(Registry& scene, const fx::View& view, const AtmosphereSettings& settings)
+{
+    AtmosphereFrameUniforms uniforms;
+
+    // Planet-centered frame: only the height above the ground matters, never the horizontal position.
+    const Vec3 eyeKm = WorldPositionToAtmosphereSpaceKm(view.eye);
+    const float heightAboveGroundKm = std::max(eyeKm.y, 0.0f);
+    uniforms.cameraPositionAtmosphere =
+        Vec3(0.0f, MakeDefaultEarthAtmosphereParameters().planetRadiusKm + heightAboveGroundKm, 0.0f);
+
+    const ResolvedDirectionalLight sun = ResolveActiveDirectionalLight(scene);
+    uniforms.sunDirection = sun.directionTowardSun;
+    uniforms.sunIlluminance = sun.sunIlluminance;
+
+    uniforms.invViewProjection = view.viewProjection.Inverse();
+    uniforms.aerialPerspectiveMaxDistanceKm = settings.aerialPerspectiveMaxDistanceKm;
+    uniforms.aerialPerspectiveDepthExponent = settings.aerialPerspectiveDepthExponent;
+    uniforms.aerialPerspectiveSamplesPerSliceAsFloat = static_cast<float>(settings.aerialPerspectiveSamplesPerSlice);
+    uniforms.aerialPerspectiveScatteringExaggeration = settings.aerialPerspectiveScatteringExaggeration;
+    return uniforms;
+}
 
 } // namespace
 
-AtmosphereFeature::AtmosphereFeature(Core& core)
-    : m_core(core)
-    , m_toggleRegistry(&core.GetRenderPassToggleRegistryMutable())
-    , m_settings()
-    , m_renderer()
+AtmosphereFeature::AtmosphereFeature(fx::FeatureHost&) { }
+
+void AtmosphereFeature::Setup(fx::FeatureSetup& s)
 {
-    RegisterPasses();
+    s.PreOpaqueShared("AtmosphereSharedLut", kSharedLutPriority, [this](fx::SharedFrame& f) { SharedLuts(f); },
+        fx::Gate{ "AtmosphereTransmittanceLutPass", "AtmosphereMultiScatteringLutPass" });
+    s.PreOpaque("AtmosphereViewLut", kViewLutPriority, [this](fx::PreOpaqueFrame& f) { ViewLuts(f); },
+        fx::Gate{ "AtmosphereSkyViewLutPass", "AtmosphereAerialPerspectiveVolumePass" });
+    s.PostOpaque("DrawSkyBackground", kSkyBackgroundPriority, [this](fx::PostOpaqueFrame& f) { SkyBackground(f); });
+    s.PostComposite("AtmosphereComposite", kCompositePriority, fx::Blend::AlphaOver,
+        [this](fx::CompositeFrame& f) { Composite(f); },
+        fx::Gate{ "AtmosphereAerialPerspectiveCompositePass", "AtmosphereComposite.CopyToPrivateTarget" });
+    s.CountInViewStats("DrawSkyBackground");
 }
 
-void AtmosphereFeature::RegisterPasses()
+void AtmosphereFeature::SharedLuts(fx::SharedFrame& f)
 {
-    // PreOpaque pass: generates view-independent transmittance and multi-scattering LUTs once per frame.
-    static constexpr std::int32_t kAtmosphereSharedLutPriority = -10;
-    const bool sharedLutRegistered = m_core.RegisterRenderPass(FrameEvent::PreOpaque, "AtmosphereSharedLut",
-        kAtmosphereSharedLutPriority,
-        [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
-            rg::TextureHandle /*privateTarget*/, Extent2D /*extent*/,
-            const ScenePassReadHandles& /*currentViewHandles*/, const RenderFeatureCameraData& /*cameraData*/) {
-            (void)currentView;
-            if (blackboard.Fetch<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey).has_value()) {
-                return; // Already generated by an earlier view this frame.
-            }
+    const AtmosphereParametersGpu params = MakeParameters(m_settings);
 
-            AtmosphereSharedLutBlackboardEntry entry;
-            AtmosphereParametersGpu params;
-            params.rayleighScattering = m_settings.rayleighScattering;
-            params.rayleighDensityExpScale = ReciprocalScaleHeightFromKm(m_settings.rayleighScaleHeightKm);
-            params.mieScattering = m_settings.mieScattering;
-            params.miePhaseG = m_settings.miePhaseG;
-            params.mieAbsorption = m_settings.mieAbsorption;
-            params.mieDensityExpScale = ReciprocalScaleHeightFromKm(m_settings.mieScaleHeightKm);
-            params.ozoneAbsorption = m_settings.ozoneAbsorption;
-            params.ozoneTentCenterKm = m_settings.ozoneTentCenterKm;
-            params.groundAlbedo = m_settings.groundAlbedo;
-            params.ozoneTentHalfWidthKm = m_settings.ozoneTentHalfWidthKm;
-            params.planetRadiusKm = m_settings.planetRadiusKm;
-            params.atmosphereThicknessKm = m_settings.atmosphereThicknessKm;
-            params.multiScatteringStrength = m_settings.multiScatteringStrength;
-            entry.parameters = params;
-            entry.handles = AddAtmosphereSharedLutPasses(
-                builder, m_core.GetRenderer(), m_renderer, entry.parameters, m_toggleRegistry);
-
-            // Mark shared LUTs as graph roots so they are not culled.
-            builder.KeepTextureOutput(entry.handles.transmittanceLutHandle);
-            builder.KeepTextureOutput(entry.handles.multiScatteringLutHandle);
-
-            blackboard.Publish<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey, entry);
-        });
-    assert(sharedLutRegistered && "AtmosphereSharedLut registration failed");
-
-    // PreOpaque pass: generates per-view sky-view LUT and aerial perspective volume.
-    static constexpr std::int32_t kAtmosphereViewLutPriority = 0;
-    const bool viewLutRegistered = m_core.RegisterRenderPass(FrameEvent::PreOpaque, "AtmosphereViewLut",
-        kAtmosphereViewLutPriority,
-        [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
-            rg::TextureHandle /*privateTarget*/, Extent2D /*extent*/,
-            const ScenePassReadHandles& /*currentViewHandles*/, const RenderFeatureCameraData& /*cameraData*/) {
-            const std::optional<RenderPassViewData> viewData = m_core.FindRenderPassViewData(currentView);
-            if (!viewData.has_value()) {
-                return;
-            }
-
-            const std::optional<AtmosphereSharedLutBlackboardEntry> sharedLuts =
-                blackboard.Fetch<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey);
-            if (!sharedLuts.has_value()) {
-                return;
-            }
-
-            const bool isGameView = (currentView == rg::RenderViewId::Named("Game"));
-            const char* skyViewLutName = isGameView ? "AtmosphereSkyViewLut_GameView" : "AtmosphereSkyViewLut_SceneView";
-            const char* aerialVolumeName =
-                isGameView ? "AtmosphereAerialPerspectiveVolume_GameView" : "AtmosphereAerialPerspectiveVolume_SceneView";
-            const rg::ViewScope legacyViewScope = isGameView ? rg::ViewScope::GameView : rg::ViewScope::SceneView;
-
-            AtmosphereViewLutHandles viewLuts = AddAtmosphereViewLutPasses(builder, m_core.GetRenderer(),
-                m_renderer, m_core.GetGame().GetRegistry(), sharedLuts->parameters, m_settings,
-                sharedLuts->handles, viewData->eyeWorldPosition, viewData->viewProjection, skyViewLutName,
-                aerialVolumeName, legacyViewScope, m_toggleRegistry);
-
-            // Mark view LUTs as graph roots.
-            builder.KeepTextureOutput(viewLuts.skyViewLutHandle);
-            builder.KeepTextureOutput(viewLuts.aerialPerspectiveVolumeHandle);
-
-            const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
-            blackboard.Publish<AtmosphereViewLutHandles>(viewLutKey, viewLuts);
-        });
-    assert(viewLutRegistered && "AtmosphereViewLut registration failed");
-
-    // PostOpaque pass: renders the sky background onto untouched depth pixels.
-    static constexpr std::int32_t kDrawSkyBackgroundPriority = 100;
-    const bool skyBackgroundRegistered = m_core.RegisterRenderPass(FrameEvent::PostOpaque, "DrawSkyBackground",
-        kDrawSkyBackgroundPriority,
-        [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
-            rg::TextureHandle /*privateTarget*/, Extent2D /*extent*/, const ScenePassReadHandles& /*currentViewHandles*/,
-            const RenderFeatureCameraData& /*cameraData*/) {
-            const std::optional<RenderPassViewData> viewData = m_core.FindRenderPassViewData(currentView);
-            if (!viewData.has_value()) {
-                return;
-            }
-
-            const bool isGameView = (currentView == rg::RenderViewId::Named("Game"));
-            const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
-            const std::optional<AtmosphereViewLutHandles> viewLuts =
-                blackboard.Fetch<AtmosphereViewLutHandles>(viewLutKey);
-            const std::optional<AtmosphereSharedLutBlackboardEntry> sharedLuts =
-                blackboard.Fetch<AtmosphereSharedLutBlackboardEntry>(kAtmosphereSharedLutKey);
-            if (!viewLuts.has_value() || !sharedLuts.has_value() || !viewLuts->skyViewLutHandle.IsValid()) {
-                return;
-            }
-
-            const char* skyViewLutName = isGameView ? "AtmosphereSkyViewLut_GameView" : "AtmosphereSkyViewLut_SceneView";
-            const std::function<void(const rg::RecordingContext&)> recordSkyBackground =
-                MakeRecordSkyBackgroundCallback(m_renderer, m_core.GetRenderer(), m_core.GetRenderGraph(),
-                    viewData->viewProjection, sharedLuts->parameters, viewLuts->frameUniforms, skyViewLutName,
-                    m_settings.skyExposure);
-
-            if (isGameView) {
-                // Published for the Frame Debugger's background replay step.
-                blackboard.Publish<std::function<void(const rg::RecordingContext&)>>(
-                    kViewBackgroundReplayCallbackKey, recordSkyBackground);
-            }
-
-            if (!recordSkyBackground) {
-                return;
-            }
-
-            const rg::TextureHandle viewTarget = viewData->colorTarget;
-
-            builder.AddRenderPass(
-                "DrawSkyBackground", rg::PassKind::Graphics, rg::ViewScope::Shared, rg::RenderPassCategory::General,
-                [viewTarget](rg::RenderGraphBuilder::PassBuilder& pass) {
-                    pass.WriteColorAttachment(viewTarget);
-                    pass.WriteDepthStencilAttachment(viewTarget);
-                },
-                [recordSkyBackground](rg::PassContext& ctx) {
-                    const rg::SceneRecording recording(ctx);
-                    recordSkyBackground(ctx.Recording());
-                },
-                rg::RenderPassDrawKind::DrawQuad, rg::RenderPassEvent::AfterOpaques);
-        });
-    assert(skyBackgroundRegistered && "DrawSkyBackground registration failed");
-
-    // Track "DrawSkyBackground" in view content statistics.
-    m_core.RegisterViewContentPassName("DrawSkyBackground");
-
-    // PostComposite pass: applies aerial perspective onto the view.
-    static constexpr std::int32_t kAtmosphereCompositePriority = -1000;
-    const bool compositeRegistered = m_core.RegisterRenderPass(FrameEvent::PostComposite, "AtmosphereComposite",
-        kAtmosphereCompositePriority,
-        [this](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView,
-            rg::TextureHandle privateTarget, Extent2D extent, const ScenePassReadHandles& currentViewHandles,
-            const RenderFeatureCameraData& cameraData) {
-            if (!cameraData.invViewProjectionValid) {
-                return;
-            }
-
-            const bool isGameView = (currentView == rg::RenderViewId::Named("Game"));
-            const rg::RenderPassId viewLutKey = isGameView ? kAtmosphereViewLutGameKey : kAtmosphereViewLutSceneKey;
-            const std::optional<AtmosphereViewLutHandles> viewLuts =
-                blackboard.Fetch<AtmosphereViewLutHandles>(viewLutKey);
-            if (!viewLuts.has_value() || !viewLuts->aerialPerspectiveVolumeHandle.IsValid()) {
-                return;
-            }
-
-            const char* aerialVolumeName =
-                isGameView ? "AtmosphereAerialPerspectiveVolume_GameView" : "AtmosphereAerialPerspectiveVolume_SceneView";
-            const char* outputTextureName = isGameView ? "GameViewComposited" : "SceneViewComposited";
-            const rg::ViewScope legacyViewScope = isGameView ? rg::ViewScope::GameView : rg::ViewScope::SceneView;
-
-            const rg::TextureHandle composited = AddAtmosphereCompositePass(builder, m_core.GetRenderer(),
-                m_renderer, currentViewHandles.colorHandle, currentViewHandles.depthHandle,
-                viewLuts->aerialPerspectiveVolumeHandle, aerialVolumeName,
-                viewLuts->frameUniforms, cameraData.eyeWorldPosition, m_settings.aerialPerspectiveStrength,
-                m_settings.aerialPerspectiveMaxDistanceKm, m_settings.aerialPerspectiveDepthExponent,
-                extent, outputTextureName, legacyViewScope, m_toggleRegistry);
-
-            if (!composited.IsValid()) {
-                return;
-            }
-
-            // Keep output texture alive and blit result into the pass target.
-            builder.KeepTextureOutput(composited);
-
-            rg::BlitSpec spec;
-            spec.src = composited;
-            spec.dst = privateTarget;
-            builder.AddBlitPass(
-                "AtmosphereComposite.CopyToPrivateTarget", spec, rg::RenderPassEvent::AfterEverything, legacyViewScope);
-        },
-        RenderFeatureBlendMode::AlphaOver);
-    assert(compositeRegistered && "AtmosphereComposite registration failed");
-
-    // Finalize composited textures for external sampling.
-    m_core.RegisterFinalizeForSamplingHook("GameViewComposited", [this](const rg::RecordingContext& cmd) -> RenderTexture* {
-        m_renderer.FinalizeAerialPerspectiveCompositeForSampling(cmd, "GameViewComposited");
-        return FreshCompositedOutput("GameViewComposited");
-    });
-    m_core.RegisterFinalizeForSamplingHook("SceneViewComposited", [this](const rg::RecordingContext& cmd) -> RenderTexture* {
-        m_renderer.FinalizeAerialPerspectiveCompositeForSampling(cmd, "SceneViewComposited");
-        return FreshCompositedOutput("SceneViewComposited");
-    });
-}
-
-// Returns the composited output if updated this frame, or nullptr if stale.
-RenderTexture* AtmosphereFeature::FreshCompositedOutput(const char* outputTextureName)
-{
-    RenderTexture* output = m_renderer.CompositedOutput(outputTextureName);
-    if (output == nullptr) {
-        return nullptr;
+    const fx::Texture transmittance = m_transmittance.Acquire(f, kTransmittanceSize, PixelFormat::RGBA8_UNorm);
+    if (!transmittance.IsValid()) {
+        return;
     }
-    const rg::RenderGraph& graph = m_core.GetRenderGraph();
-    const std::optional<rg::DebugTextureSnapshot> snapshot = graph.DebugTextureSnapshotFor(outputTextureName);
-    const bool freshThisFrame =
-        snapshot.has_value() && snapshot->lastUpdatedFrameCounter == graph.CurrentDebugTextureFrameCounter();
-    return freshThisFrame ? output : nullptr;
+    const bool transmittanceDone = f.Compute(m_transmittanceShader, "AtmosphereTransmittanceLutPass")
+                                       .Params(m_sharedParams, params)
+                                       .Bind("transmittanceLutImage", transmittance)
+                                       .Dispatch(kTransmittanceSize);
+    if (!transmittanceDone) {
+        return;
+    }
+
+    const fx::Texture multiScattering = m_multiScattering.Acquire(f, kMultiScatteringSize, PixelFormat::RGBA16_Float);
+    if (!multiScattering.IsValid()) {
+        return;
+    }
+    const bool multiScatteringDone = f.Compute(m_multiScatteringShader, "AtmosphereMultiScatteringLutPass")
+                                         .Params(m_sharedParams, params)
+                                         .Bind("transmittanceLut", transmittance)
+                                         .Bind("multiScatteringLutImage", multiScattering)
+                                         .Dispatch(kMultiScatteringSize);
+    if (!multiScatteringDone) {
+        return;
+    }
+    m_sharedLuts.Publish(f, AtmosphereSharedLuts{ transmittance, multiScattering, params }, { transmittance, multiScattering });
 }
 
-namespace {
-std::unique_ptr<IEngineFeatureModule> CreateAtmosphereFeatureModule(Core& core)
+void AtmosphereFeature::ViewLuts(fx::PreOpaqueFrame& f)
 {
-    return std::make_unique<AtmosphereFeature>(core);
-}
-} // namespace
+    const std::optional<AtmosphereSharedLuts> shared = m_sharedLuts.Fetch(f);
+    if (!shared) {
+        return;
+    }
+    AtmosphereViewState& view = m_views.For(f.Scope());
+    AtmosphereViewLuts luts;
+    luts.frameUniforms = MakeFrameUniforms(f.Scene(), f.View(), m_settings);
 
-GTE_REGISTER_BUILTIN_FEATURE_MODULE("Atmosphere", &CreateAtmosphereFeatureModule);
+    const fx::Texture skyView = view.skyView.Acquire(f, kSkyViewSize, PixelFormat::RGBA16_Float);
+    if (skyView.IsValid()) {
+        const bool done = f.Compute(m_skyViewShader, "AtmosphereSkyViewLutPass")
+                              .Params(m_sharedParams, shared->parameters)
+                              .Params("frame", view.frameParams, luts.frameUniforms)
+                              .Bind("transmittanceLut", shared->transmittance)
+                              .Bind("multiScatteringLut", shared->multiScattering)
+                              .Bind("destinationImage", skyView)
+                              .Dispatch(kSkyViewSize);
+        if (done) {
+            luts.skyView = skyView;
+            f.Keep(skyView);
+        }
+    }
+
+    const fx::Texture volume = view.aerialVolume.Acquire(f);
+    if (volume.IsValid()) {
+        const bool done = f.Compute(m_aerialVolumeShader, "AtmosphereAerialPerspectiveVolumePass")
+                              .Params(m_sharedParams, shared->parameters)
+                              .Params("frame", view.frameParams, luts.frameUniforms)
+                              .Bind("transmittanceLut", shared->transmittance)
+                              .Bind("multiScatteringLut", shared->multiScattering)
+                              .Bind("destinationVolume", volume)
+                              .Dispatch(kAerialVolumeSize);
+        if (done) {
+            luts.aerialVolume = volume;
+        }
+    }
+    m_viewLuts.Publish(f, luts);
+}
+
+void AtmosphereFeature::SkyBackground(fx::PostOpaqueFrame& f)
+{
+    const std::optional<AtmosphereViewLuts> luts = m_viewLuts.Fetch(f);
+    const std::optional<AtmosphereSharedLuts> shared = m_sharedLuts.Fetch(f);
+    if (!luts || !shared || !luts->skyView.IsValid()) {
+        return;
+    }
+    Mat4 invViewProjection;
+    if (!f.View().viewProjection.TryInverse(invViewProjection)) {
+        return;
+    }
+
+    SkyBackgroundPush push{};
+    std::memcpy(push.invViewProjection, invViewProjection.Data(), sizeof(push.invViewProjection));
+    push.eyeHeightKm = luts->frameUniforms.cameraPositionAtmosphere.y;
+    push.planetRadiusKm = shared->parameters.planetRadiusKm;
+    push.skyExposure = m_settings.skyExposure;
+    f.ViewBackground(m_skyBackgroundShader, "DrawSkyBackground").Bind("skyViewLut", luts->skyView).Push(push).Draw();
+}
+
+void AtmosphereFeature::Composite(fx::CompositeFrame& f)
+{
+    if (!f.View().invViewProjectionValid) {
+        return;
+    }
+    const std::optional<AtmosphereViewLuts> luts = m_viewLuts.Fetch(f);
+    if (!luts || !luts->aerialVolume.IsValid()) {
+        return;
+    }
+    const fx::Texture output = m_composited.Acquire(f, f.Extent(), PixelFormat::RGBA8_UNorm);
+    if (!output.IsValid()) {
+        return;
+    }
+
+    CompositePush push{};
+    std::memcpy(push.invViewProjection, luts->frameUniforms.invViewProjection.Data(), sizeof(push.invViewProjection));
+    push.cameraWorldPositionAndScale[0] = f.View().eye.x;
+    push.cameraWorldPositionAndScale[1] = f.View().eye.y;
+    push.cameraWorldPositionAndScale[2] = f.View().eye.z;
+    push.cameraWorldPositionAndScale[3] = kWorldUnitsPerKilometer;
+    push.strengthMaxDistanceExponentPad[0] = m_settings.aerialPerspectiveStrength;
+    push.strengthMaxDistanceExponentPad[1] = m_settings.aerialPerspectiveMaxDistanceKm;
+    push.strengthMaxDistanceExponentPad[2] = m_settings.aerialPerspectiveDepthExponent;
+
+    const bool dispatched = f.Compute(m_compositeShader, "AtmosphereAerialPerspectiveCompositePass")
+                                .Push(push)
+                                .Bind("sourceColor", f.SceneColor())
+                                .Bind("sourceDepth", fx::Depth(f.SceneDepth()))
+                                .Bind("aerialPerspectiveVolume", luts->aerialVolume)
+                                .Bind("destinationImage", output)
+                                .Dispatch(f.Extent());
+    if (!dispatched) {
+        return;
+    }
+    f.ExposeAsViewOutput(m_composited, output);
+    f.Blit("AtmosphereComposite.CopyToPrivateTarget", output, f.PrivateTarget(), fx::BlitFilter::Linear);
+}
+
+GTE_REGISTER_RENDER_FEATURE("Atmosphere", AtmosphereFeature);
 
 } // namespace gte

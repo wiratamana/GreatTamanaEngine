@@ -58,9 +58,13 @@ std::optional<std::any> FetchAny(const Frame& frame, std::string_view channelNam
         frame.ReportOnce("Channel::Fetch needs a frame that belongs to a render callback");
         return std::nullopt;
     }
-    CheckClash(frame, *context, channelName);
     const rg::RenderPassId key{ ChannelKey(context->featureName, channelName, context->view) };
     std::optional<ChannelValue> stored = context->blackboard->Fetch<ChannelValue>(key);
+    if (!stored.has_value() && !(context->view == rg::RenderViewId::Shared())) {
+        // A value published by the frame's Shared callback is visible to every view.
+        const rg::RenderPassId sharedKey{ ChannelKey(context->featureName, channelName, rg::RenderViewId::Shared()) };
+        stored = context->blackboard->Fetch<ChannelValue>(sharedKey);
+    }
     if (!stored.has_value()) {
         return std::nullopt;
     }

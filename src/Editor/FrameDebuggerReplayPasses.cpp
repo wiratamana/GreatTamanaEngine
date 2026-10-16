@@ -48,7 +48,7 @@ const char* ReplayStepPassName(std::size_t index)
 std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::RenderGraphBuilder& builder,
     Game& game, Renderer& renderer, float aspectWidthOverHeight, std::size_t objectCount,
     const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers,
-    const std::function<void(const rg::RecordingContext&)>& recordBackgroundStep, RenderTexture& gameTarget,
+    const rg::FullscreenReplay& backgroundReplay, RenderTexture& gameTarget,
     rg::RenderPassToggleRegistry* toggleRegistry)
 {
     std::vector<rg::TextureHandle> destHandles;
@@ -65,7 +65,7 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
 
     // A scene with zero mesh entities still draws the background every
     // frame, so it must still get exactly one selectable replay step.
-    const bool includeBackgroundStep = static_cast<bool>(recordBackgroundStep);
+    const bool includeBackgroundStep = static_cast<bool>(backgroundReplay);
     const std::size_t totalStepCount = objectCount + (includeBackgroundStep ? 1 : 0);
     if (totalStepCount == 0) {
         return destHandles;
@@ -112,21 +112,25 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
         // passes instead of listing them as extra leaves.
         builder.AddRenderPass(passName, rg::PassKind::Graphics, rg::ViewScope::GameView,
             rg::RenderPassCategory::FrameDebuggerInternal,
-            [destHandle, gpuSkinningOutputBuffers](rg::RenderGraphBuilder::PassBuilder& pass) {
+            [destHandle, gpuSkinningOutputBuffers, isBackgroundStep, backgroundReplay](
+                rg::RenderGraphBuilder::PassBuilder& pass) {
                 pass.WriteColorAttachment(destHandle, kGameClearColor);
                 pass.WriteDepthStencilAttachment(destHandle, kGameClearDepth);
                 DeclareGpuSkinningReads(pass, gpuSkinningOutputBuffers);
+                if (isBackgroundStep) {
+                    backgroundReplay.declare(pass);
+                }
             },
-            [&game, &renderer, aspectWidthOverHeight, maxDrawCount, isBackgroundStep, recordBackgroundStep](
+            [&game, &renderer, aspectWidthOverHeight, maxDrawCount, isBackgroundStep, backgroundReplay](
                 rg::PassContext& ctx) {
                 {
                     // The capture context stays null: recording draws into it again would duplicate every record.
                     const rg::SceneRecording recording(ctx);
                     game.Render(renderer, aspectWidthOverHeight, nullptr, /*frameDebuggerCapture=*/nullptr, maxDrawCount);
                 }
-                // The background is drawn on exactly one step and is not counted in this step's draw stats.
-                if (isBackgroundStep && recordBackgroundStep) {
-                    recordBackgroundStep(ctx.RecordingUncounted());
+                // The background is drawn on exactly one step, after the scene.
+                if (isBackgroundStep) {
+                    backgroundReplay.record(ctx);
                 }
             });
 

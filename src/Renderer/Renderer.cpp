@@ -222,6 +222,12 @@ RenderTexture Renderer::CreateRenderTexture(int width, int height, PixelFormat f
         transferDst);
 }
 
+void Renderer::ResizeRenderTexture(RenderTexture& texture, int width, int height) const
+{
+    WaitForGpuIdle();
+    texture.Resize(width, height);
+}
+
 Renderer::CapturedRawPixels Renderer::CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format,
     Extent2D extentIn, const rg::ResourceState& previousState, std::uint32_t zOffset, std::uint32_t depth) const
 {
