@@ -803,6 +803,12 @@ add_library(gte_core STATIC
     src/Renderer/Vulkan/ShaderModule.h
     src/Renderer/ShaderFile.cpp
     src/Renderer/ShaderFile.h
+    src/Renderer/DeviceIdleGuard.cpp
+    src/Renderer/DeviceIdleGuard.h
+    src/Renderer/MeshPreviewRenderer.cpp
+    src/Renderer/MeshPreviewRenderer.h
+    src/Renderer/SceneGridRenderer.cpp
+    src/Renderer/SceneGridRenderer.h
     src/Renderer/Vulkan/DescriptorSetLayoutBuilder.cpp
     src/Renderer/Vulkan/DescriptorSetLayoutBuilder.h
     src/Renderer/Vulkan/DescriptorPoolGrowth.h
@@ -1185,8 +1191,6 @@ add_library(gte_editor STATIC
     src/Editor/EditorCamera.cpp
     src/Editor/SceneGridMath.h
     src/Editor/SceneGridMath.cpp
-    src/Editor/SceneGridRenderer.h
-    src/Editor/SceneGridRenderer.cpp
     src/Editor/GpuDrivenBatchTestSpawner.h
     src/Editor/GpuDrivenBatchTestSpawner.cpp
     src/Editor/TransformGizmo.h
@@ -1695,7 +1699,7 @@ if(GTE_ENABLE_PROJECT_PANEL)
 endif()
 
 # The Editor's "Scene" panel infinite ground grid (Unity-style procedural
-# shader grid). Always compiled/staged - src/Editor/SceneGridRenderer.cpp is
+# shader grid). Always compiled/staged - src/Renderer/SceneGridRenderer.cpp is
 # always compiled into gte_core.
 gte_add_shader(GreatTamanaEditor src/Shaders/SceneGrid.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/SceneGrid.frag)

@@ -311,6 +311,11 @@ void Renderer::WaitForGpuIdle() const
     vkDeviceWaitIdle(m_device.Native());
 }
 
+void Renderer::DrainGpuForCodeUnload() const
+{
+    WaitForGpuIdle();
+}
+
 void Renderer::RequestSwapchainCapture()
 {
     m_presenter.RequestSwapchainCapture();

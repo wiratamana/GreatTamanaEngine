@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../Math/Mat4.h"
-#include "../Renderer/RenderGraph/RecordingContext.h"
+#include "RenderGraph/RecordingContext.h"
 
 #include <memory>
 
@@ -23,7 +23,7 @@ public:
     SceneGridRenderer& operator=(SceneGridRenderer&&) = delete;
 
     // Records the grid draw into `cmd`. `sceneViewProjection` must be the matrix the scene was drawn with.
-    // Builds the pipeline on first call. Draws nothing when the matrix is singular.
+    // Builds the pipeline on first call. Draws nothing when the matrix is singular or the pipeline cannot be built.
     // The caller must already have set a viewport and scissor covering the target.
     void Draw(Renderer& renderer, const rg::RecordingContext& cmd, const Mat4& sceneViewProjection);
 
@@ -31,10 +31,11 @@ public:
     void Reset();
 
 private:
-    void EnsurePipeline(Renderer& renderer);
+    bool EnsurePipeline(Renderer& renderer);
 
     Renderer* m_renderer = nullptr; // Non-owning; used only to wait for the GPU in Reset().
     std::unique_ptr<Pipeline> m_pipeline;
+    bool m_buildFailed = false;
 };
 
 } // namespace gte

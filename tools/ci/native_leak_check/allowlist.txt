@@ -1,13 +1,5 @@
-# Files outside src/Renderer that still use raw engine wrappers. Starting debt: lines are only ever removed.
+# Files outside src/Renderer that still use raw engine wrappers. Lines are only ever removed.
 # Format: path relative to src, then '# one-line reason'. A line whose file is gone or clean fails the check.
 
-Core/Plugins/ProjectAssemblyHost.cpp # debt: idles the device before unloading a project assembly
-Editor/AssetPreviewMesh.cpp # debt: editor tool uses raw wrappers or one-shot submits
-Editor/AssetPreviewMesh.h # debt: editor tool uses raw wrappers or one-shot submits
-Editor/BoneViewerWindow.cpp # debt: editor tool uses raw wrappers or one-shot submits
-Editor/BoneViewerWindow.h # debt: editor tool uses raw wrappers or one-shot submits
-Editor/EditorHost.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Editor/ImGuiEditorLayer.cpp # permanent: ImGui Vulkan backend needs the device idle and raw handles
-Editor/RenderGraphTexturePreview.cpp # debt: editor tool uses raw wrappers or one-shot submits
-Editor/SceneGridRenderer.cpp # debt: editor tool uses raw wrappers or one-shot submits
 Window/Window.h # permanent: Native() returns the SDL window handle, not a GPU object

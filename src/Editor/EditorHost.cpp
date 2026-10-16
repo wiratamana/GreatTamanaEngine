@@ -34,11 +34,6 @@
 // BuildRenderGraphMetadata() for GET /render_graph.
 #include "../Renderer/RenderGraph/RenderGraphMetadata.h"
 
-// GET /get_window needs ImGuiWindow and FindWindowByName(), which only imgui_internal.h exposes.
-#include <imgui.h>
-#include <imgui_internal.h>
-#include <backends/imgui_impl_vulkan.h>
-
 #include <SDL3/SDL.h>
 
 #include <cassert>
@@ -51,7 +46,7 @@ namespace gte {
 
 namespace {
 
-// GET /list_textures label helpers; an unrecognized regime or format falls back to a safe string.
+// GET /list_textures label for an execution regime; an unrecognized one falls back to a safe string.
 const char* ToDebugTextureRegimeString(rg::ExecuteTimingMode mode)
 {
     switch (mode) {
@@ -59,20 +54,6 @@ const char* ToDebugTextureRegimeString(rg::ExecuteTimingMode mode)
     case rg::ExecuteTimingMode::PipelinedDeferredReadback: return "pipelined";
     }
     return "unknown"; // Unreachable - every real enumerator handled above.
-}
-
-std::string DebugTextureColorFormatName(VkFormat format)
-{
-    switch (format) {
-    case VK_FORMAT_B8G8R8A8_UNORM: return "B8G8R8A8_UNORM";
-    case VK_FORMAT_B8G8R8A8_SRGB: return "B8G8R8A8_SRGB";
-    case VK_FORMAT_R8G8B8A8_UNORM: return "R8G8B8A8_UNORM";
-    case VK_FORMAT_R8G8B8A8_SRGB: return "R8G8B8A8_SRGB";
-    default: break;
-    }
-    char buffer[32];
-    std::snprintf(buffer, sizeof(buffer), "VkFormat(%d)", static_cast<int>(format));
-    return std::string(buffer);
 }
 
 // The one log query capability instance. A stateless namespace-scope static: its address is needed in the
@@ -207,12 +188,6 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
         "EditorHost constructed: SdlContext -> Window -> Core -> CreateEditorLayer() -> "
         "Core::SetEditorLayerHook() all completed, with a genuinely non-null IEditorLayer*, "
         "every automation bridge attached, and NetworkServer started.");
-}
-
-// Idle once before any member dies: feature modules free GPU objects in their destructors without waiting.
-EditorHost::~EditorHost()
-{
-    m_renderer.WaitForGpuIdle();
 }
 
 int EditorHost::Run()
@@ -590,38 +565,17 @@ int EditorHost::Run()
 
         // GET /get_window: floating (undocked) windows only. Must follow RenderPlatformWindows(), which presents them.
         if (m_captureBridge.IsCaptureRequested(FrameCaptureKind::NamedWindow)) {
-            const std::string title = m_captureBridge.RequestedWindowTitle();
-            ImGuiWindow* window = ImGui::FindWindowByName(title.c_str());
-            ImGui_ImplVulkanH_Window* platformWindow = (window != nullptr && window->Viewport != nullptr)
-                ? ImGui_ImplVulkanH_GetWindowDataFromViewport(window->Viewport)
-                : nullptr;
-
-            if (platformWindow == nullptr || platformWindow->Swapchain == VK_NULL_HANDLE) {
+            CapturedPixels raw = m_editorLayer->CapturePlatformWindow(m_renderer, m_captureBridge.RequestedWindowTitle());
+            if (raw.pixels.empty()) {
                 // Wrong title or still docked: fail fast; the caller should use /get_swapchain.
                 m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedWindow, FrameCaptureFailureReason::TargetNotAvailable);
             } else {
-                const ImGui_ImplVulkanH_Frame& frame = platformWindow->Frames[platformWindow->FrameIndex];
-                const Extent2D extent{
-                    static_cast<std::uint32_t>(platformWindow->Width), static_cast<std::uint32_t>(platformWindow->Height) };
-                const rg::ResourceState presentState{
-                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_NONE };
-
-                // The backbuffer is only queued and untracked by the barrier planner, so a full device stall is the only safe readback.
-                m_renderer.WaitForGpuIdle();
-                const Renderer::CapturedRawPixels raw = m_renderer.CaptureImagePixels(
-                    frame.Backbuffer, VK_IMAGE_ASPECT_COLOR_BIT, platformWindow->SurfaceFormat.format, extent, presentState);
-
-                if (raw.pixels.empty()) {
-                    m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedWindow, FrameCaptureFailureReason::TargetNotAvailable);
-                } else {
-                    std::vector<std::uint8_t> pixels = raw.pixels;
-                    if (Encoding::IsBgraFormat(raw.format)) {
-                        Encoding::ConvertBgraToRgbaInPlace(pixels.data(), raw.width, raw.height);
-                    }
-                    std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(pixels.data(), raw.width, raw.height);
-                    m_captureBridge.FulfillPendingRequest(
-                        FrameCaptureKind::NamedWindow, CapturedPngImage{ std::move(png), raw.width, raw.height });
+                if (Encoding::IsBgraFormat(raw.format)) {
+                    Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
                 }
+                std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw.pixels.data(), raw.width, raw.height);
+                m_captureBridge.FulfillPendingRequest(
+                    FrameCaptureKind::NamedWindow, CapturedPngImage{ std::move(png), raw.width, raw.height });
             }
         }
 
@@ -685,11 +639,9 @@ int EditorHost::Run()
                     // A volume texture has no depth companion: fail fast (409) like the 2D branch.
                     m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
                 } else {
-                    // Measured before the GPU idle, from the snapshot as it was when the request was serviced.
+                    // Measured from the snapshot as it was when the request was serviced.
                     const std::uint64_t framesSinceUpdate =
                         m_renderGraph.CurrentDebugTextureFrameCounter() - volumeSnapshot->lastUpdatedFrameCounter;
-
-                    m_renderer.WaitForGpuIdle();
 
                     // The preview interpretation is auto-detected from the texture name.
                     const VolumeTexturePreviewInterpretation interpretation =
@@ -718,7 +670,7 @@ int EditorHost::Run()
                 PublishedTextureListEntry entry;
                 entry.name = snap.name;
                 entry.regime = ToDebugTextureRegimeString(snap.regime);
-                entry.format = DebugTextureColorFormatName(snap.target.format);
+                entry.format = snap.ColorFormatName();
                 entry.width = snap.target.extent.width;
                 entry.height = snap.target.extent.height;
                 entry.hasDepth = snap.hasDepth;
@@ -732,7 +684,7 @@ int EditorHost::Run()
                 PublishedTextureListEntry entry;
                 entry.name = vol.name;
                 entry.regime = ToDebugTextureRegimeString(vol.regime);
-                entry.format = DebugTextureColorFormatName(vol.target.format);
+                entry.format = vol.ColorFormatName();
                 entry.width = vol.target.extent.width;
                 entry.height = vol.target.extent.height;
                 entry.hasDepth = false; // A volume texture has no depth-companion concept at all - see VolumeTarget.h.

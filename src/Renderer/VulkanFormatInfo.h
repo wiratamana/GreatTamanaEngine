@@ -5,6 +5,8 @@
 #include "../Core/ImageLayout.h"
 #include "../Core/PixelFormat.h"
 
+#include <string>
+
 namespace gte {
 
 // Bytes per texel for every VkFormat this engine creates a render target or
@@ -20,6 +22,9 @@ PixelFormat FromVkFormat(VkFormat format) noexcept;
 
 // Format reported for a readback: sRGB variants share the byte layout of their UNORM twins.
 PixelFormat CapturedPixelFormatFromVk(VkFormat format) noexcept;
+
+// Short label for logs and the texture list, e.g. "R8G8B8A8_SRGB"; "VkFormat(n)" for an unlisted format.
+std::string VkFormatDebugName(VkFormat format);
 
 // Renderer-internal: the only place gte::ImageLayout converts to and from VkImageLayout.
 // Unknown values map to Undefined rather than asserting.

@@ -79,6 +79,22 @@ PixelFormat CapturedPixelFormatFromVk(VkFormat format) noexcept
     }
 }
 
+std::string VkFormatDebugName(VkFormat format)
+{
+    switch (format) {
+        case VK_FORMAT_B8G8R8A8_UNORM:
+            return "B8G8R8A8_UNORM";
+        case VK_FORMAT_B8G8R8A8_SRGB:
+            return "B8G8R8A8_SRGB";
+        case VK_FORMAT_R8G8B8A8_UNORM:
+            return "R8G8B8A8_UNORM";
+        case VK_FORMAT_R8G8B8A8_SRGB:
+            return "R8G8B8A8_SRGB";
+        default:
+            return "VkFormat(" + std::to_string(static_cast<int>(format)) + ")";
+    }
+}
+
 VkImageLayout ToVkImageLayout(ImageLayout layout) noexcept
 {
     switch (layout) {

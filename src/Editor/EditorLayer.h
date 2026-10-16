@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../Core/CapturedPixels.h"
 #include "../Core/GraphicsHandles.h"
 
 #include "../Math/Mat4.h"
@@ -161,6 +162,10 @@ public:
     // Updates and renders extra OS windows (panels dragged outside the main viewport).
     // Call after Renderer::Present(); a no-op on frames where Render() did not run.
     virtual void RenderPlatformWindows() = 0;
+
+    // GET /get_window: reads back the floating (undocked) OS window titled `title`.
+    // Empty pixels when no such floating window exists. Call after RenderPlatformWindows(), which presents it.
+    virtual CapturedPixels CapturePlatformWindow(Renderer& renderer, const std::string& title) = 0;
 
     // True once the user picked File > Exit. Checked each frame to end the main loop.
     virtual bool WantsExit() const = 0;

@@ -3,19 +3,16 @@
 #include "../Core/UiTextureHandle.h"
 #include "../Renderer/Texture2D.h"
 
-#include <optional>
+#include <memory>
 #include <string>
 
 namespace gte {
 
 class Renderer;
 
-// Owns at most one ImGui-sampled texture preview: one Texture2D, one opaque
-// UiTextureHandle. Requesting a new preview always releases the old one
-// first. Destructor releases both - no caller-side cleanup required.
-//
-// Must be destroyed before ImGui_ImplVulkan_Shutdown() runs, like every
-// other panel-owned GPU resource in this editor.
+// Owns at most one ImGui-sampled texture preview: one Texture2D and one UI texture handle.
+// Requesting a new preview releases the old one first; the destructor releases both.
+// Must be destroyed before the UI backend shuts down, like every other panel-owned GPU resource.
 class RenderGraphTexturePreview {
 public:
     RenderGraphTexturePreview() = default;
@@ -27,20 +24,18 @@ public:
     // `renderer` is captured here, once, and reused by every later Release().
     void Request(Renderer& renderer, std::string resourceName, Texture2D texture);
 
-    // Waits for the GPU only if there is actually something live to
-    // release - an empty Release() (e.g. at shutdown, after an already-
-    // empty preview) is a free no-op, never a redundant stall.
+    // Stalls the GPU only when something is live; releasing an empty preview is free.
     void Release();
 
     UiTextureHandle Descriptor() const noexcept { return m_descriptor; }
     const std::string& ResourceName() const noexcept { return m_resourceName; }
-    int Width() const noexcept { return m_texture.has_value() ? m_texture->Width() : 0; }
-    int Height() const noexcept { return m_texture.has_value() ? m_texture->Height() : 0; }
+    int Width() const noexcept { return m_texture ? m_texture->Width() : 0; }
+    int Height() const noexcept { return m_texture ? m_texture->Height() : 0; }
 
 private:
     Renderer* m_renderer = nullptr; // Non-owning - captured by Request(), reused by Release().
     std::string m_resourceName;
-    std::optional<Texture2D> m_texture;
+    std::unique_ptr<Texture2D> m_texture;
     UiTextureHandle m_descriptor = UiTextureHandle::Invalid;
 };
 

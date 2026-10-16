@@ -14,14 +14,7 @@
 #include "../Game/Physics/PhysicsSystem.h" // PhysicsSystem::GetDynamicChainRigCache()
 #include "../Math/Mat4.h"
 #include "../Math/Vec4.h"
-#include "../Core/PipelineDesc.h"
-#include "../Renderer/Buffer.h"
-#include "../Renderer/Compute/ComputeDescriptorSet.h"
-#include "../Renderer/Renderer.h"
-#include "../Renderer/ShaderFile.h"
-#include "../Renderer/RenderGraph/CommandBuffer.h"
-#include "../Renderer/RenderTexture.h"
-#include "../Renderer/Texture2D.h"
+#include "../Renderer/MeshPreviewRenderer.h"
 
 #include <imgui.h>
 
@@ -31,17 +24,11 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
-#include <stdexcept>
+#include <iterator>
 
 namespace gte {
 
 namespace {
-
-// Per-vertex layout of this window's pipeline (position + normal, 24 bytes); matches MeshPreview.vert.
-struct PreviewVertex {
-    float position[3];
-    float normal[3];
-};
 
 // Projects a model-space point into [rectMin, rectMax) pixels.
 // Returns false (outScreen untouched) for points behind the camera.
@@ -77,6 +64,8 @@ struct OverlayPart {
 
 } // namespace
 
+BoneViewerWindow::BoneViewerWindow() = default;
+
 BoneViewerWindow::~BoneViewerWindow()
 {
     Reset();
@@ -90,24 +79,8 @@ void BoneViewerWindow::Open(Entity rootEntity) noexcept
 
 void BoneViewerWindow::Reset()
 {
-    if (m_renderer != nullptr
-        && (m_vertexBuffer || m_indexBuffer || m_renderTexture || m_descriptor != UiTextureHandle::Invalid
-            || m_pipeline)) {
-        // Stall before releasing GPU resources; this is a rare user-driven event.
-        m_renderer->WaitForGpuIdle();
-    }
-
-    if (m_descriptor != UiTextureHandle::Invalid && m_renderer != nullptr) {
-        m_renderer->ReleaseUiTextureHandle(m_descriptor);
-        m_descriptor = UiTextureHandle::Invalid;
-    }
-    m_renderTexture.reset();
-    m_vertexBuffer.reset();
-    m_indexBuffer.reset();
-    m_vertexCount = 0;
-    m_indexCount = 0;
-    m_texWidth = 0;
-    m_texHeight = 0;
+    m_preview.reset(); // Idles the GPU, then releases the preview's resources.
+    m_previewBuildFailed = false;
     m_bones.clear();
     m_rigidBodies.clear();
     m_joints.clear();
@@ -118,78 +91,7 @@ void BoneViewerWindow::Reset()
     m_cachedPath.clear();
     m_cachedWriteTime = std::filesystem::file_time_type{};
     m_cachedIsValid = false;
-
-    if (m_renderer) {
-        m_renderer->DestroyDescriptorSetLayout(m_setOneLayoutHandle);
-        m_renderer->DestroyDescriptorSetLayout(m_setZeroFillerLayoutHandle);
-    }
-    m_setOneLayoutHandle = DescriptorSetLayoutHandle::Invalid;
-    m_setZeroFillerLayoutHandle = DescriptorSetLayoutHandle::Invalid;
-    m_pipeline.reset();
-
-    // The set comes from the shared compute descriptor pool and is never freed individually.
-    m_localWhiteTexture.reset();
-    m_localUniformBuffer.reset();
-    m_localSetOneDescriptorSet = ComputeDescriptorSet();
 }
-
-void BoneViewerWindow::EnsurePipeline(Renderer& renderer)
-{
-    if (m_pipeline) {
-        return;
-    }
-
-    m_renderer = &renderer;
-
-    // Set 1 is a lighting/shadow stand-in for MeshPreview.frag; this layout backs both the set and the pipeline.
-    constexpr DescriptorBindingDesc kSetOneBindings[] = {
-        { .binding = 0, .kind = DescriptorKind::CombinedImageSampler, .stages = ShaderStageMask::Fragment },
-        { .binding = 8, .kind = DescriptorKind::UniformBuffer, .stages = ShaderStageMask::Fragment },
-    };
-    m_setZeroFillerLayoutHandle = renderer.CreateDescriptorSetLayout({});
-    m_setOneLayoutHandle = renderer.CreateDescriptorSetLayout(kSetOneBindings);
-
-    m_localSetOneDescriptorSet = renderer.AllocateComputeDescriptorSet(m_setOneLayoutHandle);
-
-    const unsigned char whitePixel[4] = { 255, 255, 255, 255 };
-    m_localWhiteTexture =
-        std::make_unique<Texture2D>(renderer.CreateTexture2D(whitePixel, 1, 1, "BoneViewerDummyWhite"));
-
-    // Zero-filled stand-in; must cover the 112-byte std140 scene uniform block.
-    constexpr uint64_t kLocalDummyUniformBlockSize = 128;
-    m_localUniformBuffer = std::make_unique<Buffer>(renderer.CreateBuffer(kLocalDummyUniformBlockSize,
-        BufferUsage::UniformBuffer, BufferMemoryUsage::CpuToGpu, "BoneViewerDummyUniformBlock"));
-    const std::array<std::byte, kLocalDummyUniformBlockSize> zeroBytes{};
-    m_localUniformBuffer->Upload(zeroBytes.data(), zeroBytes.size());
-
-    ComputeDescriptorWrite uniformWrite;
-    uniformWrite.binding = 8;
-    uniformWrite.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uniformWrite.buffer = m_localUniformBuffer->Native();
-    uniformWrite.bufferOffset = 0;
-    uniformWrite.bufferRange = kLocalDummyUniformBlockSize;
-
-    m_localSetOneDescriptorSet.Rewrite(std::vector<ComputeDescriptorWrite>{
-        ComputeDescriptorWrite::CombinedImageSampler(0, m_localWhiteTexture->View(), m_localWhiteTexture->Sampler()),
-        uniformWrite,
-    });
-
-    const DescriptorSetLayoutHandle extraSets[] = { m_setZeroFillerLayoutHandle, m_setOneLayoutHandle };
-
-    // No backface culling: imported PMX winding is not guaranteed to match the engine's.
-    PipelineDesc desc = PipelinePreset::Opaque(renderer.ColorPixelFormat(), renderer.DepthPixelFormat());
-    desc.vertexLayout = VertexLayout::PositionNormal;
-    desc.cullMode = CullMode::None;
-    desc.layout.extraSetLayouts = extraSets;
-    desc.layout.pushConstantByteSize = sizeof(float) * 32; // model + viewProj, matches MeshPreview.vert.
-    desc.layout.pushConstantStages = ShaderStageMask::Vertex;
-
-    // Shares the compiled shader pair with AssetPreviewMesh.
-    const std::vector<std::byte> vertSpirv = ReadShaderFileBytes("shaders/MeshPreview.vert.spv");
-    const std::vector<std::byte> fragSpirv = ReadShaderFileBytes("shaders/MeshPreview.frag.spv");
-    m_pipeline = std::make_unique<Pipeline>(renderer.CreatePipeline(desc, vertSpirv, fragSpirv));
-}
-
 
 bool BoneViewerWindow::EnsureDataLoaded(
     Renderer& renderer, const std::string& absoluteGtaPath, EditorContext& ctx, ModelRigCache& rigCache)
@@ -201,13 +103,14 @@ bool BoneViewerWindow::EnsureDataLoaded(
         return true; // Unchanged since last call - whatever m_cachedIsValid says still holds.
     }
 
-    if (m_vertexBuffer || m_indexBuffer) {
-        renderer.WaitForGpuIdle();
+    if (!m_preview && !m_previewBuildFailed) {
+        m_preview = MeshPreviewRenderer::TryCreate(renderer);
+        m_previewBuildFailed = (m_preview == nullptr);
     }
-    m_vertexBuffer.reset();
-    m_indexBuffer.reset();
-    m_vertexCount = 0;
-    m_indexCount = 0;
+    if (!m_preview) {
+        return false;
+    }
+    m_preview->SetMesh({}, {}); // Drops the previous model's mesh.
     m_bones.clear();
     m_rigidBodies.clear();
     m_joints.clear();
@@ -253,26 +156,16 @@ bool BoneViewerWindow::EnsureDataLoaded(
     RebuildBoneHierarchyIndex(); // Still only walks m_bones - RigidBody/Joint have no tree to build.
     RebuildRigidBodyAdjacencyIndex(); // Derives the rigid-body-centric graph "Select All (Branch)" walks.
 
-    std::vector<PreviewVertex> vertices(mesh->positions.size());
+    std::vector<MeshPreviewVertex> vertices(mesh->positions.size());
     const bool hasNormals = mesh->normals.size() == mesh->positions.size();
     Vec3 minBounds = mesh->positions[0];
     Vec3 maxBounds = mesh->positions[0];
     for (std::size_t i = 0; i < mesh->positions.size(); ++i) {
         const Vec3& p = mesh->positions[i];
-        vertices[i].position[0] = p.x;
-        vertices[i].position[1] = p.y;
-        vertices[i].position[2] = p.z;
         const Vec3 n = hasNormals ? mesh->normals[i] : Vec3::Up();
-        vertices[i].normal[0] = n.x;
-        vertices[i].normal[1] = n.y;
-        vertices[i].normal[2] = n.z;
-
-        minBounds.x = std::min(minBounds.x, p.x);
-        minBounds.y = std::min(minBounds.y, p.y);
-        minBounds.z = std::min(minBounds.z, p.z);
-        maxBounds.x = std::max(maxBounds.x, p.x);
-        maxBounds.y = std::max(maxBounds.y, p.y);
-        maxBounds.z = std::max(maxBounds.z, p.z);
+        vertices[i] = MeshPreviewVertex{ { p.x, p.y, p.z }, { n.x, n.y, n.z } };
+        minBounds = Vec3(std::min(minBounds.x, p.x), std::min(minBounds.y, p.y), std::min(minBounds.z, p.z));
+        maxBounds = Vec3(std::max(maxBounds.x, p.x), std::max(maxBounds.y, p.y), std::max(maxBounds.z, p.z));
     }
 
     m_boundsCenter = (minBounds + maxBounds) * 0.5f;
@@ -282,15 +175,7 @@ bool BoneViewerWindow::EnsureDataLoaded(
     }
     m_boundsRadius = radius > kEpsilon ? radius : 1.0f;
 
-    try {
-        m_vertexBuffer = std::make_unique<Buffer>(renderer.CreateDeviceLocalBuffer(
-            vertices.data(), vertices.size() * sizeof(PreviewVertex), BufferUsage::VertexBuffer,
-            "BoneViewerVertices"));
-        m_indexBuffer = std::make_unique<Buffer>(renderer.CreateDeviceLocalBuffer(mesh->indices.data(),
-            mesh->indices.size() * sizeof(std::uint32_t), BufferUsage::IndexBuffer, "BoneViewerIndices"));
-    } catch (const std::exception&) {
-        m_vertexBuffer.reset();
-        m_indexBuffer.reset();
+    if (!m_preview->SetMesh(vertices, mesh->indices)) {
         return true; // m_cachedIsValid stays false.
     }
 
@@ -299,32 +184,6 @@ bool BoneViewerWindow::EnsureDataLoaded(
     m_cachedIsValid = true;
     m_needsFraming = true; // A newly (re)loaded model - reframe the camera next Build() call.
     return true;
-}
-
-void BoneViewerWindow::EnsureRenderTexture(Renderer& renderer, int width, int height)
-{
-    if (m_renderTexture && m_texWidth == width && m_texHeight == height) {
-        return;
-    }
-
-    if (m_renderTexture || m_descriptor != UiTextureHandle::Invalid) {
-        renderer.WaitForGpuIdle();
-    }
-    if (m_descriptor != UiTextureHandle::Invalid) {
-        renderer.ReleaseUiTextureHandle(m_descriptor);
-        m_descriptor = UiTextureHandle::Invalid;
-    }
-
-    if (!m_renderTexture) {
-        m_renderTexture = std::make_unique<RenderTexture>(
-            renderer.CreateRenderTexture(width, height, PixelFormat::Undefined, "BoneViewer", "BoneViewerDepth"));
-    } else {
-        m_renderTexture->Resize(width, height);
-    }
-    m_texWidth = width;
-    m_texHeight = height;
-
-    m_descriptor = renderer.GetUiTextureHandle(*m_renderTexture);
 }
 
 void BoneViewerWindow::FrameCameraToBounds() noexcept
@@ -664,8 +523,6 @@ void BoneViewerWindow::Build(
         m_needsFraming = false;
     }
 
-    EnsurePipeline(renderer);
-
     // --- Toolbar -----------------------------------------------------------
     ImGui::PushItemWidth(240.0f);
     ImGui::InputTextWithHint("##BoneViewerSearch", "Search by name...", m_searchBuffer, sizeof(m_searchBuffer));
@@ -864,7 +721,6 @@ void BoneViewerWindow::Build(
     if (avail.x >= 1.0f && avail.y >= 1.0f) {
         const int width = std::max(1, static_cast<int>(avail.x));
         const int height = std::max(1, static_cast<int>(avail.y));
-        EnsureRenderTexture(renderer, width, height);
 
         const Vec3 eye = ComputeEyePosition();
         const Mat4 view = Mat4::LookAtLH(eye, m_camTarget, Vec3::Up());
@@ -875,36 +731,17 @@ void BoneViewerWindow::Build(
         const Mat4 proj = Mat4::PerspectiveFovLH_ZO(fovYRadians, aspect, nearZ, farZ, /*flipY=*/true);
         const Mat4 viewProj = proj * view;
 
-        struct PushConstants {
-            float model[16];
-            float viewProj[16];
-        } pushConstants;
-        std::memcpy(pushConstants.model, Mat4::Identity().Data(), sizeof(pushConstants.model));
-        std::memcpy(pushConstants.viewProj, viewProj.Data(), sizeof(pushConstants.viewProj));
-
-        // Neutral dark backdrop; only affects this RenderOffscreen() call.
-        renderer.Clear(30, 32, 38, 255);
-
-        const Pipeline& pipeline = *m_pipeline;
-        const VkDescriptorSet localSetOne = m_localSetOneDescriptorSet.Native();
-        const Buffer& vertexBuffer = *m_vertexBuffer;
-        const Buffer& indexBuffer = *m_indexBuffer;
-        const std::uint32_t indexCount = m_indexCount;
-        const Extent2D extent = m_renderTexture->Extent();
-
-        // nullopt: this viewport must not share a GPU timing slot with "Game View"/"Scene View".
-        renderer.RenderOffscreen(*m_renderTexture, std::nullopt, [&](rg::CommandBuffer& cmd) {
-            cmd.SetViewportAndScissor(extent.width, extent.height);
-            cmd.BindPipeline(pipeline);
-            cmd.BindDescriptorSet(/*setIndex=*/1, localSetOne);
-            cmd.PushConstants(pushConstants, ShaderStageMask::Vertex);
-            cmd.BindVertexBuffer(vertexBuffer);
-            cmd.BindIndexBuffer(indexBuffer);
-            cmd.DrawIndexed(indexCount);
-        });
+        // Neutral dark backdrop.
+        const UiTextureHandle previewTexture = m_preview->Render(Mat4::Identity(), viewProj, width, height, { 30, 32, 38, 255 });
+        if (previewTexture == UiTextureHandle::Invalid) {
+            ImGui::TextDisabled("The 3D preview is not available.");
+            ImGui::EndChild();
+            ImGui::End();
+            return;
+        }
 
         const ImVec2 imageMin = ImGui::GetCursorScreenPos();
-        ImGui::Image(static_cast<ImTextureID>(static_cast<std::uint64_t>(m_descriptor)), avail);
+        ImGui::Image(static_cast<ImTextureID>(static_cast<std::uint64_t>(previewTexture)), avail);
         const ImVec2 imageMax(imageMin.x + avail.x, imageMin.y + avail.y);
         const bool hovered = ImGui::IsItemHovered();
 

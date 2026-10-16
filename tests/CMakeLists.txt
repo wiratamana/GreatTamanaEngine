@@ -2864,8 +2864,7 @@ set(GTE_COMMENT_RULE_SRC
     Game/Instantiation/PrimitiveGpuCatalog.cpp Game/Instantiation/PrimitiveGpuCatalog.h
     Scene/SceneBuilder.cpp Scene/SceneBuilder.h
     Core/FrameDebuggerEventSink.h Core/FrameDebuggerCaptureRecorder.h Application/RenderPassViewData.h
-    Editor/SceneGridRenderer.cpp Editor/SceneGridRenderer.h Editor/FrameDebuggerCapture.cpp
-    Editor/FrameDebuggerCapture.h Editor/FrameDebuggerReplayPasses.cpp
+    Editor/FrameDebuggerCapture.cpp Editor/FrameDebuggerCapture.h Editor/FrameDebuggerReplayPasses.cpp
     Features/Atmosphere/)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp

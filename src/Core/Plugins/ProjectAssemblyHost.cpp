@@ -201,23 +201,15 @@ bool ProjectAssemblyHost::LoadOneProjectAssemblyFromExactPathIfExists(
     return LoadOneProjectAssemblyFromExactPath(dllPath, core, editorHost);
 }
 
-// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
-// BIG-STEP 2), PHASE4 - see this method's own doc comment in
-// ProjectAssemblyHost.h for the exact, non-negotiable 3-step order this
-// implements.
+// Unloads every assembly of `projectName` in three ordered steps (see the declaration): drain the GPU, unregister
+// everything the project registered, then FreeLibrary().
 void ProjectAssemblyHost::UnloadProjectAssembly(const std::string& projectName, Core& core, Renderer& renderer)
 {
-    // editor-core-separation-14 campaign (BIG-STEP 3), PHASE1 - closes the
-    // obligation HotReloadEngineStateMutex.h's own header comment already
-    // states. Covers the whole function, including the "nothing loaded,
-    // no-op" early-return below, so a concurrent read of
-    // GetLoadedAssemblyFileNames()/the registration ledger can never
-    // straddle that decision.
+    // Held for the whole call, including the early return, so readers of the loaded list and the ledger never
+    // see a half-finished unload.
     std::lock_guard<std::mutex> lock(GetHotReloadEngineStateMutex());
 
-    // Find every m_loadedAssemblies entry whose derived project name matches,
-    // BEFORE touching anything - this method must be all-or-nothing-safe to
-    // call for a projectName with zero matching entries.
+    // Collect the matching entries before touching anything, so an unknown project is a clean no-op.
     std::vector<std::size_t> matchingIndices;
     for (std::size_t i = 0; i < m_loadedAssemblies.size(); ++i) {
         if (DeriveProjectNameFromDllFileName(m_loadedAssemblies[i].dllFileName) == projectName) {
@@ -229,14 +221,13 @@ void ProjectAssemblyHost::UnloadProjectAssembly(const std::string& projectName, 
         return;
     }
 
-    // Step 1 - Hazard 4 fix. MUST happen before any FreeLibrary() below.
-    renderer.WaitForGpuIdle();
+    // Step 1: no in-flight GPU work may still use project code or objects. Must precede FreeLibrary().
+    renderer.DrainGpuForCodeUnload();
 
-    // Step 2 - Hazards 1/2 fix. MUST happen before any FreeLibrary() below.
+    // Step 2: drop every registration the project made. Must precede FreeLibrary().
     ProjectAssemblyRegistrationLedger::Instance().UnregisterEverythingFor(projectName, core);
 
-    // Step 3 - FreeLibrary(), Editor entry(s) first, then Game (reverse load
-    // order) - sort matchingIndices so "_Editor.dll" entries are freed first.
+    // Step 3: FreeLibrary() with "_Editor.dll" entries first, then Game (reverse of load order).
     std::sort(matchingIndices.begin(), matchingIndices.end(), [this](std::size_t a, std::size_t b) {
         const bool aIsEditor = m_loadedAssemblies[a].dllFileName.ends_with("_Editor.dll");
         const bool bIsEditor = m_loadedAssemblies[b].dllFileName.ends_with("_Editor.dll");

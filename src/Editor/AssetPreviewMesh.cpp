@@ -4,133 +4,30 @@
 #include "../Assets/AssetTypes.h" // AssetType
 #include "../Assets/GtaFile.h" // ReadGtaFile()
 #include "../Assets/MeshFile.h" // DecodeMeshDataFromBytes()
-#include "../Core/PipelineDesc.h"
 #include "../Math/Quat.h"
-#include "../Renderer/Buffer.h"
-#include "../Renderer/Compute/ComputeDescriptorSet.h"
-#include "../Renderer/Renderer.h"
-#include "../Renderer/ShaderFile.h"
-#include "../Renderer/RenderGraph/CommandBuffer.h"
-#include "../Renderer/RenderTexture.h"
-#include "../Renderer/Texture2D.h"
+#include "../Renderer/MeshPreviewRenderer.h"
 
 #include <imgui.h>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
-#include <cstddef>
-#include <cstring>
-#include <stdexcept>
 #include <vector>
 
 namespace gte {
 
-namespace {
+AssetPreviewMesh::AssetPreviewMesh() = default;
 
-// Position + normal, tightly packed (24 bytes); byte-identical to gte::MeshVertex.
-struct PreviewVertex {
-    float position[3];
-    float normal[3];
-};
-
-} // namespace
-
-AssetPreviewMesh::~AssetPreviewMesh()
-{
-    Reset();
-}
+AssetPreviewMesh::~AssetPreviewMesh() = default;
 
 void AssetPreviewMesh::Reset()
 {
-    if (m_renderer != nullptr
-        && (m_vertexBuffer || m_indexBuffer || m_renderTexture || m_descriptor != UiTextureHandle::Invalid
-            || m_pipeline)) {
-        // Rare user-driven event, so a GPU stall before release is acceptable.
-        m_renderer->WaitForGpuIdle();
-    }
-
-    if (m_descriptor != UiTextureHandle::Invalid && m_renderer != nullptr) {
-        m_renderer->ReleaseUiTextureHandle(m_descriptor);
-        m_descriptor = UiTextureHandle::Invalid;
-    }
-    m_renderTexture.reset();
-    m_vertexBuffer.reset();
-    m_indexBuffer.reset();
-    m_vertexCount = 0;
-    m_indexCount = 0;
-    m_texWidth = 0;
-    m_texHeight = 0;
+    m_preview.reset();
+    m_previewBuildFailed = false;
     m_cachedPath.clear();
     m_cachedWriteTime = std::filesystem::file_time_type{};
     m_cachedIsValid = false;
-
-    if (m_renderer != nullptr) {
-        m_renderer->DestroyDescriptorSetLayout(m_setOneLayoutHandle);
-        m_renderer->DestroyDescriptorSetLayout(m_setZeroFillerLayoutHandle);
-    }
-    m_setOneLayoutHandle = DescriptorSetLayoutHandle::Invalid;
-    m_setZeroFillerLayoutHandle = DescriptorSetLayoutHandle::Invalid;
-    m_pipeline.reset();
-
-    // m_localSetOneDescriptorSet lives in the shared compute pool and is never freed individually.
-    m_localWhiteTexture.reset();
-    m_localUniformBuffer.reset();
-    m_localSetOneDescriptorSet = ComputeDescriptorSet();
-}
-
-void AssetPreviewMesh::EnsurePipeline(Renderer& renderer)
-{
-    if (m_pipeline) {
-        return;
-    }
-    m_renderer = &renderer;
-
-    // Set 1 stand-in for MeshPreview.frag's lighting interface; one layout serves both the set and the pipeline.
-    constexpr DescriptorBindingDesc kSetOneBindings[] = {
-        { .binding = 0, .kind = DescriptorKind::CombinedImageSampler, .stages = ShaderStageMask::Fragment },
-        { .binding = 8, .kind = DescriptorKind::UniformBuffer, .stages = ShaderStageMask::Fragment },
-    };
-    m_setZeroFillerLayoutHandle = renderer.CreateDescriptorSetLayout({});
-    m_setOneLayoutHandle = renderer.CreateDescriptorSetLayout(kSetOneBindings);
-
-    m_localSetOneDescriptorSet = renderer.AllocateComputeDescriptorSet(m_setOneLayoutHandle);
-
-    const unsigned char whitePixel[4] = { 255, 255, 255, 255 };
-    m_localWhiteTexture =
-        std::make_unique<Texture2D>(renderer.CreateTexture2D(whitePixel, 1, 1, "AssetPreviewMeshDummyWhite"));
-
-    // Zero-filled; must be at least as large as the 112-byte std140 scene global uniform block.
-    constexpr uint64_t kLocalDummyUniformBlockSize = 128;
-    m_localUniformBuffer = std::make_unique<Buffer>(renderer.CreateBuffer(kLocalDummyUniformBlockSize,
-        BufferUsage::UniformBuffer, BufferMemoryUsage::CpuToGpu, "AssetPreviewMeshDummyUniformBlock"));
-    const std::array<std::byte, kLocalDummyUniformBlockSize> zeroBytes{};
-    m_localUniformBuffer->Upload(zeroBytes.data(), zeroBytes.size());
-
-    ComputeDescriptorWrite uniformWrite;
-    uniformWrite.binding = 8;
-    uniformWrite.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uniformWrite.buffer = m_localUniformBuffer->Native();
-    uniformWrite.bufferOffset = 0;
-    uniformWrite.bufferRange = kLocalDummyUniformBlockSize;
-
-    m_localSetOneDescriptorSet.Rewrite(std::vector<ComputeDescriptorWrite>{
-        ComputeDescriptorWrite::CombinedImageSampler(0, m_localWhiteTexture->View(), m_localWhiteTexture->Sampler()),
-        uniformWrite,
-    });
-
-    const DescriptorSetLayoutHandle extraSets[] = { m_setZeroFillerLayoutHandle, m_setOneLayoutHandle };
-
-    PipelineDesc desc = PipelinePreset::Opaque(renderer.ColorPixelFormat(), renderer.DepthPixelFormat());
-    desc.vertexLayout = VertexLayout::PositionNormal;
-    desc.cullMode = CullMode::None; // An imported .pmx's winding isn't guaranteed - show the shape, don't cull it.
-    desc.layout.extraSetLayouts = extraSets;
-    desc.layout.pushConstantByteSize = sizeof(float) * 32; // model + viewProj, matches MeshPreview.vert.
-    desc.layout.pushConstantStages = ShaderStageMask::Vertex;
-
-    const std::vector<std::byte> vertSpirv = ReadShaderFileBytes("shaders/MeshPreview.vert.spv");
-    const std::vector<std::byte> fragSpirv = ReadShaderFileBytes("shaders/MeshPreview.frag.spv");
-    m_pipeline = std::make_unique<Pipeline>(renderer.CreatePipeline(desc, vertSpirv, fragSpirv));
+    m_vertexCount = 0;
+    m_indexCount = 0;
 }
 
 bool AssetPreviewMesh::EnsureMeshUploaded(Renderer& renderer, const std::string& absolutePath)
@@ -143,51 +40,43 @@ bool AssetPreviewMesh::EnsureMeshUploaded(Renderer& renderer, const std::string&
         return true; // Unchanged since last call - whatever m_cachedIsValid says still holds.
     }
 
-    // Release only mesh buffers; pipeline, render texture and descriptor are reused across assets.
-    if (m_vertexBuffer || m_indexBuffer) {
-        renderer.WaitForGpuIdle();
+    if (!m_preview && !m_previewBuildFailed) {
+        m_preview = MeshPreviewRenderer::TryCreate(renderer);
+        m_previewBuildFailed = (m_preview == nullptr);
     }
-    m_vertexBuffer.reset();
-    m_indexBuffer.reset();
-    m_vertexCount = 0;
-    m_indexCount = 0;
+    if (!m_preview) {
+        return false;
+    }
 
     m_cachedPath = absolutePath;
     m_cachedIsValid = false;
+    m_vertexCount = 0;
+    m_indexCount = 0;
     if (!timeEc) {
         m_cachedWriteTime = writeTime;
     }
 
     const std::optional<GtaFileData> gta = ReadGtaFile(Utf8ToPath(absolutePath));
     if (!gta.has_value() || gta->header.Type() != AssetType::Mesh) {
-        return true; // Not a (valid) Mesh *.gta - m_cachedIsValid stays false.
+        m_preview->SetMesh({}, {}); // Drops the previous asset's mesh.
+        return true;
     }
-
     const std::optional<MeshData> mesh = DecodeMeshDataFromBytes(gta->payload);
     if (!mesh.has_value() || mesh->positions.empty() || mesh->indices.size() < 3) {
+        m_preview->SetMesh({}, {});
         return true;
     }
 
-    std::vector<PreviewVertex> vertices(mesh->positions.size());
+    std::vector<MeshPreviewVertex> vertices(mesh->positions.size());
     const bool hasNormals = mesh->normals.size() == mesh->positions.size();
     Vec3 minBounds = mesh->positions[0];
     Vec3 maxBounds = mesh->positions[0];
     for (std::size_t i = 0; i < mesh->positions.size(); ++i) {
         const Vec3& p = mesh->positions[i];
-        vertices[i].position[0] = p.x;
-        vertices[i].position[1] = p.y;
-        vertices[i].position[2] = p.z;
         const Vec3 n = hasNormals ? mesh->normals[i] : Vec3::Up();
-        vertices[i].normal[0] = n.x;
-        vertices[i].normal[1] = n.y;
-        vertices[i].normal[2] = n.z;
-
-        minBounds.x = std::min(minBounds.x, p.x);
-        minBounds.y = std::min(minBounds.y, p.y);
-        minBounds.z = std::min(minBounds.z, p.z);
-        maxBounds.x = std::max(maxBounds.x, p.x);
-        maxBounds.y = std::max(maxBounds.y, p.y);
-        maxBounds.z = std::max(maxBounds.z, p.z);
+        vertices[i] = MeshPreviewVertex{ { p.x, p.y, p.z }, { n.x, n.y, n.z } };
+        minBounds = Vec3(std::min(minBounds.x, p.x), std::min(minBounds.y, p.y), std::min(minBounds.z, p.z));
+        maxBounds = Vec3(std::max(maxBounds.x, p.x), std::max(maxBounds.y, p.y), std::max(maxBounds.z, p.z));
     }
 
     m_boundsCenter = (minBounds + maxBounds) * 0.5f;
@@ -197,49 +86,13 @@ bool AssetPreviewMesh::EnsureMeshUploaded(Renderer& renderer, const std::string&
     }
     m_boundsRadius = radius > kEpsilon ? radius : 1.0f;
 
-    try {
-        m_vertexBuffer = std::make_unique<Buffer>(renderer.CreateDeviceLocalBuffer(
-            vertices.data(), vertices.size() * sizeof(PreviewVertex), BufferUsage::VertexBuffer,
-            "AssetPreviewMeshVertices"));
-        m_indexBuffer = std::make_unique<Buffer>(renderer.CreateDeviceLocalBuffer(mesh->indices.data(),
-            mesh->indices.size() * sizeof(std::uint32_t), BufferUsage::IndexBuffer,
-            "AssetPreviewMeshIndices"));
-    } catch (const std::exception&) {
-        m_vertexBuffer.reset();
-        m_indexBuffer.reset();
+    if (!m_preview->SetMesh(vertices, mesh->indices)) {
         return true; // m_cachedIsValid stays false.
     }
-
-    m_vertexCount = static_cast<std::uint32_t>(vertices.size());
-    m_indexCount = static_cast<std::uint32_t>(mesh->indices.size());
+    m_vertexCount = vertices.size();
+    m_indexCount = mesh->indices.size();
     m_cachedIsValid = true;
     return true;
-}
-
-void AssetPreviewMesh::EnsureRenderTexture(Renderer& renderer, int width, int height)
-{
-    if (m_renderTexture && m_texWidth == width && m_texHeight == height) {
-        return;
-    }
-
-    if (m_renderTexture || m_descriptor != UiTextureHandle::Invalid) {
-        renderer.WaitForGpuIdle();
-    }
-    if (m_descriptor != UiTextureHandle::Invalid) {
-        renderer.ReleaseUiTextureHandle(m_descriptor);
-        m_descriptor = UiTextureHandle::Invalid;
-    }
-
-    if (!m_renderTexture) {
-        m_renderTexture = std::make_unique<RenderTexture>(
-            renderer.CreateRenderTexture(width, height, PixelFormat::Undefined, "AssetPreviewMesh", "AssetPreviewMeshDepth"));
-    } else {
-        m_renderTexture->Resize(width, height);
-    }
-    m_texWidth = width;
-    m_texHeight = height;
-
-    m_descriptor = renderer.GetUiTextureHandle(*m_renderTexture);
 }
 
 std::optional<AssetPreviewMesh::Preview> AssetPreviewMesh::Render(
@@ -249,11 +102,8 @@ std::optional<AssetPreviewMesh::Preview> AssetPreviewMesh::Render(
         return std::nullopt;
     }
 
-    EnsurePipeline(renderer);
-
     const int width = std::max(1, viewportWidth);
     const int height = std::max(1, viewportHeight);
-    EnsureRenderTexture(renderer, width, height);
 
     // Spins around the mesh's own up axis; -m_boundsCenter is applied first so it spins about its visual middle.
     constexpr float kSpinDegreesPerSecond = 24.0f;
@@ -271,40 +121,16 @@ std::optional<AssetPreviewMesh::Preview> AssetPreviewMesh::Render(
     const float aspect = static_cast<float>(width) / static_cast<float>(height);
     const Mat4 proj =
         Mat4::PerspectiveFovLH_ZO(fovYRadians, aspect, std::max(0.01f, radius * 0.02f), distance + radius * 4.0f, /*flipY=*/true);
-    const Mat4 viewProj = proj * view;
 
-    struct PushConstants {
-        float model[16];
-        float viewProj[16];
-    } pushConstants;
-    std::memcpy(pushConstants.model, model.Data(), sizeof(pushConstants.model));
-    std::memcpy(pushConstants.viewProj, viewProj.Data(), sizeof(pushConstants.viewProj));
-
-    // Neutral dark backdrop; Clear() only affects the RenderOffscreen() call right below.
-    renderer.Clear(35, 35, 35, 255);
-
-    const Pipeline& pipeline = *m_pipeline;
-    const VkDescriptorSet localSetOne = m_localSetOneDescriptorSet.Native();
-    const Buffer& vertexBuffer = *m_vertexBuffer;
-    const Buffer& indexBuffer = *m_indexBuffer;
-    const std::uint32_t indexCount = m_indexCount;
-    const Extent2D extent = m_renderTexture->Extent();
-
-    // No GPU timing slot: this preview must not overwrite the Profiler's Game/Scene View timings.
-    renderer.RenderOffscreen(*m_renderTexture, std::nullopt, [&](rg::CommandBuffer& cmd) {
-        cmd.SetViewportAndScissor(extent.width, extent.height);
-        cmd.BindPipeline(pipeline);
-        cmd.BindDescriptorSet(/*setIndex=*/1, localSetOne);
-        cmd.PushConstants(pushConstants, ShaderStageMask::Vertex);
-        cmd.BindVertexBuffer(vertexBuffer);
-        cmd.BindIndexBuffer(indexBuffer);
-        cmd.DrawIndexed(indexCount);
-    });
+    const UiTextureHandle handle = m_preview->Render(model, proj * view, width, height, { 35, 35, 35, 255 });
+    if (handle == UiTextureHandle::Invalid) {
+        return std::nullopt;
+    }
 
     Preview preview;
-    preview.descriptor = m_descriptor;
-    preview.width = m_texWidth;
-    preview.height = m_texHeight;
+    preview.descriptor = handle;
+    preview.width = m_preview->Width();
+    preview.height = m_preview->Height();
     preview.vertexCount = m_vertexCount;
     preview.triangleCount = m_indexCount / 3;
     return preview;

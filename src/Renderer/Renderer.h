@@ -129,6 +129,10 @@ public:
     // Blocks until all GPU execution finishes. Call only during teardown or manual captures.
     void WaitForGpuIdle() const;
 
+    // Blocks until no submitted GPU work remains. Call before unloading code (a project assembly) whose
+    // callbacks, pipelines or buffers the GPU may still be using.
+    void DrainGpuForCodeUnload() const;
+
     // The device reference rg::GpuBuffer is created from.
     rg::DeviceRef Device() noexcept { return rg::DeviceRef(this); }
 

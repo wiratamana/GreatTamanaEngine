@@ -26,6 +26,9 @@ struct DebugVolumeTextureSnapshot {
 
     // Registry frame counter at the last Upsert(); ApplyStateOverride() does not touch it.
     std::uint64_t lastUpdatedFrameCounter = 0;
+
+    // Label of the format for GET /list_textures.
+    std::string ColorFormatName() const;
 };
 
 // Adds the single-state override a volume texture needs; the shared base provides Upsert/FindByName/ListAll.

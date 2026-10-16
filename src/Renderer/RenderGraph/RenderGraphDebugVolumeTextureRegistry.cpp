@@ -1,6 +1,13 @@
 #include "RenderGraphDebugVolumeTextureRegistry.h"
 
+#include "../VulkanFormatInfo.h"
+
 namespace gte::rg {
+
+std::string DebugVolumeTextureSnapshot::ColorFormatName() const
+{
+    return VkFormatDebugName(target.format);
+}
 
 void RenderGraphDebugVolumeTextureRegistry::ApplyStateOverride(const std::string& name, const ResourceState& newState)
 {

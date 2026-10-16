@@ -27,7 +27,7 @@
 #include "Panels/ProfilerPanel.h"
 #include "Panels/RenderGraphPanel.h"
 #include "Panels/RenderFeaturesPanel.h"
-#include "SceneGridRenderer.h"
+#include "../Renderer/SceneGridRenderer.h"
 #if GTE_ENABLE_PROJECT_PANEL
 #include "AssetPreviewMesh.h"
 #include "AssetPreviewTexture.h"
@@ -47,6 +47,7 @@
 // RenderTextures and the shared EditorContext. Only src/Editor files know ImGui.
 // Each view texture follows its panel's size with one frame of lag; hidden panels are not rendered.
 #include <imgui.h>
+#include <imgui_internal.h> // FindWindowByName(), ImGuiWindow::Viewport
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_vulkan.h>
 
@@ -409,6 +410,29 @@ public:
             ImGui::UpdatePlatformWindows();
             ImGui::RenderPlatformWindowsDefault();
         }
+    }
+
+    CapturedPixels CapturePlatformWindow(Renderer& renderer, const std::string& title) override
+    {
+        ImGui::SetCurrentContext(m_context);
+        ImGuiWindow* window = ImGui::FindWindowByName(title.c_str());
+        ImGui_ImplVulkanH_Window* platformWindow = (window != nullptr && window->Viewport != nullptr)
+            ? ImGui_ImplVulkanH_GetWindowDataFromViewport(window->Viewport)
+            : nullptr;
+        if (platformWindow == nullptr || platformWindow->Swapchain == VK_NULL_HANDLE) {
+            return {}; // Wrong title or still docked.
+        }
+
+        const ImGui_ImplVulkanH_Frame& frame = platformWindow->Frames[platformWindow->FrameIndex];
+        const Extent2D extent{
+            static_cast<std::uint32_t>(platformWindow->Width), static_cast<std::uint32_t>(platformWindow->Height) };
+        const rg::ResourceState presentState{
+            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_NONE };
+
+        // The backbuffer is only queued and untracked by the barrier planner, so a full device stall is the only safe readback.
+        renderer.WaitForGpuIdle();
+        return renderer.CaptureImagePixels(
+            frame.Backbuffer, VK_IMAGE_ASPECT_COLOR_BIT, platformWindow->SurfaceFormat.format, extent, presentState);
     }
 
     bool WantsExit() const override { return m_ctx.exitRequested; }

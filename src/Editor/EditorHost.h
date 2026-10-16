@@ -10,6 +10,7 @@
 #include "EditorLayer.h"
 #include "../Game/Game.h"
 #include "../Network/NetworkServer.h"
+#include "../Renderer/DeviceIdleGuard.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/VolumeTexturePreviewRenderer.h"
@@ -80,7 +81,7 @@ class IEngineFeatureModule;
 class EditorHost {
 public:
     EditorHost(const std::string& title, int width, int height);
-    ~EditorHost();
+    ~EditorHost() = default;
 
     EditorHost(const EditorHost&) = delete;
     EditorHost& operator=(const EditorHost&) = delete;
@@ -222,6 +223,9 @@ private:
     // Run()'s own EngineCommandBridge servicing code
     // (ExecuteEngineCommand()).
     ISceneIOCapability* m_sceneIOCapability = nullptr;
+
+    // Declared last, so it idles the GPU before any member above frees GPU objects (feature modules do not wait).
+    DeviceIdleGuard m_gpuIdleGuard{ m_renderer };
 };
 
 } // namespace gte

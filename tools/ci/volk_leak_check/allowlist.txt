@@ -1,12 +1,9 @@
-# Files outside src/Renderer that still name Vulkan. Starting debt: lines are only ever removed.
+# Files outside src/Renderer that name Vulkan. Lines are only ever removed.
 # Format: path relative to src, then '# one-line reason'. A line whose file is gone or clean fails the check.
 
-Assets/Ktx2Decoder.cpp # KTX2 files carry a vkFormat field
-Assets/Ktx2Encoder.cpp # KTX2 files carry a vkFormat field
+Assets/Ktx2Decoder.cpp # permanent: KTX2 files carry a vkFormat field
+Assets/Ktx2Encoder.cpp # permanent: KTX2 files carry a vkFormat field
 Core/ISurfaceProvider.h # permanent: surface provider hands out Vulkan instance extensions
-Editor/AssetPreviewMesh.cpp # debt: editor code uses raw Vulkan types
-Editor/BoneViewerWindow.cpp # debt: editor code uses raw Vulkan types
-Editor/EditorHost.cpp # debt: editor code uses raw Vulkan types
 Editor/ImGuiEditorLayer.cpp # permanent: ImGui Vulkan backend setup
 Window/Window.cpp # permanent: SDL window creates the Vulkan surface
 Window/Window.h # permanent: SDL window creates the Vulkan surface

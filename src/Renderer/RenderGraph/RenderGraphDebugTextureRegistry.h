@@ -40,6 +40,9 @@ struct DebugTextureSnapshot {
     std::uint64_t ColorViewId() const noexcept { return reinterpret_cast<std::uintptr_t>(target.imageView); }
     bool HasColorImage() const noexcept { return target.image != VK_NULL_HANDLE; }
     Extent2D ColorExtent() const noexcept { return Extent2D{ target.extent.width, target.extent.height }; }
+
+    // Label of the color format for GET /list_textures.
+    std::string ColorFormatName() const;
 };
 
 // Adds the color-state override a 2D texture needs; the shared base provides Upsert/FindByName/ListAll.
