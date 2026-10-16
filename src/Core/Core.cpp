@@ -1176,7 +1176,7 @@ void Core::BuildFrame()
                         sceneViewData.eyeWorldPosition = sceneEyeWorldPosition;
                         sceneViewData.recordSceneOverlay = [this](const rg::RecordingContext& cmd, const Mat4& viewProj) {
                             if (m_editorLayer != nullptr) {
-                                m_editorLayer->RenderSceneGrid(m_renderer, cmd, viewProj);
+                                m_editorLayer->RenderSceneGrid(cmd, viewProj);
                             }
                         };
                         m_currentViewDataThisFrame.push_back(sceneViewData);

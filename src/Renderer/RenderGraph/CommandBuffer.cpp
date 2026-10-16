@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstring>
 
 namespace gte::rg {
 
@@ -44,7 +45,14 @@ void CommandBuffer::SetPushConstants(const void* data, std::uint32_t size) noexc
                || PushConstantSizeMatches(size, m_boundComputePipeline->PushConstantSize()))
         && "CommandBuffer::SetPushConstants(): supplied size does not match the bound ComputePipeline's own "
            "reflected push-constant size - see ComputePipeline::PushConstantSize()/ShaderReflection.h.");
-    m_pushConstantData = data;
+    assert(size <= kMaxPushConstantBytes && "CommandBuffer::SetPushConstants(): push constants exceed 128 bytes.");
+    if (size > kMaxPushConstantBytes || (size > 0 && data == nullptr)) {
+        m_pushConstantSize = 0;
+        return;
+    }
+    if (size > 0) {
+        std::memcpy(m_pushConstantData.data(), data, size);
+    }
     m_pushConstantSize = size;
 }
 
@@ -70,8 +78,8 @@ void CommandBuffer::Dispatch(std::uint32_t groupX, std::uint32_t groupY, std::ui
     }
 
     m_renderer->BeginGraphPassRecording(m_cmd, MakeRecordDrawStatsCallback());
-    m_renderer->Dispatch(*m_boundComputePipeline, m_boundDescriptorSet, m_pushConstantData, m_pushConstantSize,
-        groupX, groupY, groupZ);
+    m_renderer->Dispatch(*m_boundComputePipeline, m_boundDescriptorSet,
+        m_pushConstantSize > 0 ? m_pushConstantData.data() : nullptr, m_pushConstantSize, groupX, groupY, groupZ);
     m_renderer->EndGraphPassRecording();
 }
 

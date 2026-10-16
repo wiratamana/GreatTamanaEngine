@@ -135,10 +135,9 @@ public:
     // Scene-view equivalent of SetGameViewCompositedTexture().
     virtual void SetSceneViewCompositedTexture(RenderTexture* texture) = 0;
 
-    // Records the Scene panel's ground grid into `cmd`, inside the open Scene view pass after the scene
-    // geometry so the grid is depth-tested. `sceneViewProjection` is the matrix the scene was drawn with.
-    // A no-op for NullEditorLayer.
-    virtual void RenderSceneGrid(Renderer& renderer, const rg::RecordingContext& cmd, const Mat4& sceneViewProjection) = 0;
+    // Records the Scene panel's ground grid into `cmd`, inside the open Scene view pass after the scene geometry.
+    // `sceneViewProjection` is the matrix the scene was drawn with. A no-op for NullEditorLayer.
+    virtual void RenderSceneGrid(const rg::RecordingContext& cmd, const Mat4& sceneViewProjection) = 0;
 
     // Builds every editor panel for this frame in a full-viewport dock space. Call after Game rendered.
     // `gpuDrivenBatchDebugInfo` has one entry per GPU-driven batch (Game view).

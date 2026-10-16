@@ -26,19 +26,12 @@ static_assert(sizeof(GridPush) == 128, "layout differs from SceneGrid.frag");
 
 SceneGridRenderer::~SceneGridRenderer()
 {
-    Reset();
-}
-
-void SceneGridRenderer::Reset()
-{
-    if (m_renderer != nullptr && m_pipeline) {
-        m_renderer->WaitForGpuIdle();
+    if (m_pipeline) {
+        m_renderer.WaitForGpuIdle();
     }
-    m_pipeline.reset();
-    m_buildFailed = false;
 }
 
-bool SceneGridRenderer::EnsurePipeline(Renderer& renderer)
+bool SceneGridRenderer::EnsurePipeline()
 {
     if (m_pipeline) {
         return true;
@@ -46,10 +39,9 @@ bool SceneGridRenderer::EnsurePipeline(Renderer& renderer)
     if (m_buildFailed) {
         return false;
     }
-    m_renderer = &renderer;
 
     // Fullscreen triangle from gl_VertexIndex. Depth test on, depth write off: a translucent overlay must not touch depth.
-    PipelineDesc desc = PipelinePreset::AlphaBlend(renderer.ColorPixelFormat(), renderer.DepthPixelFormat());
+    PipelineDesc desc = PipelinePreset::AlphaBlend(m_renderer.ColorPixelFormat(), m_renderer.DepthPixelFormat());
     desc.vertexLayout = VertexLayout::None;
     desc.cullMode = CullMode::None;
     desc.layout.pushConstantByteSize = sizeof(GridPush);
@@ -58,7 +50,7 @@ bool SceneGridRenderer::EnsurePipeline(Renderer& renderer)
     try {
         const std::vector<std::byte> vertSpirv = ReadShaderFileBytes("shaders/SceneGrid.vert.spv");
         const std::vector<std::byte> fragSpirv = ReadShaderFileBytes("shaders/SceneGrid.frag.spv");
-        m_pipeline = std::make_unique<Pipeline>(renderer.CreatePipeline(desc, vertSpirv, fragSpirv));
+        m_pipeline = std::make_unique<Pipeline>(m_renderer.CreatePipeline(desc, vertSpirv, fragSpirv));
     } catch (const std::exception& e) {
         m_buildFailed = true;
         GTE_LOG_ERROR("SceneGrid", std::string("Grid pipeline could not be built: ") + e.what());
@@ -67,13 +59,13 @@ bool SceneGridRenderer::EnsurePipeline(Renderer& renderer)
     return true;
 }
 
-void SceneGridRenderer::Draw(Renderer& renderer, const rg::RecordingContext& ctx, const Mat4& sceneViewProjection)
+void SceneGridRenderer::Draw(const rg::RecordingContext& ctx, const Mat4& sceneViewProjection)
 {
     Mat4 invViewProjection;
     if (!sceneViewProjection.TryInverse(invViewProjection)) {
         return; // Degenerate camera matrix this frame.
     }
-    if (!EnsurePipeline(renderer)) {
+    if (!EnsurePipeline()) {
         return;
     }
 

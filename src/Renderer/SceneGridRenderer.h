@@ -14,7 +14,11 @@ class Renderer;
 // It is recorded inside the already-open Scene view pass, so it is depth-tested but never depth-written.
 class SceneGridRenderer {
 public:
-    SceneGridRenderer() = default;
+    // The Renderer must outlive this object; the destructor idles the GPU before the pipeline is freed.
+    explicit SceneGridRenderer(Renderer& renderer) noexcept
+        : m_renderer(renderer)
+    {
+    }
     ~SceneGridRenderer();
 
     SceneGridRenderer(const SceneGridRenderer&) = delete;
@@ -24,15 +28,12 @@ public:
 
     // Records the grid draw into `cmd` (viewport and scissor must already cover the target). Builds the pipeline
     // on first call; draws nothing if `sceneViewProjection` is singular or the pipeline cannot be built.
-    void Draw(Renderer& renderer, const rg::RecordingContext& cmd, const Mat4& sceneViewProjection);
-
-    // Releases the pipeline after the GPU is idle. Safe to call repeatedly.
-    void Reset();
+    void Draw(const rg::RecordingContext& cmd, const Mat4& sceneViewProjection);
 
 private:
-    bool EnsurePipeline(Renderer& renderer);
+    bool EnsurePipeline();
 
-    Renderer* m_renderer = nullptr; // Non-owning; used only to wait for the GPU in Reset().
+    Renderer& m_renderer;
     std::unique_ptr<Pipeline> m_pipeline;
     bool m_buildFailed = false;
 };

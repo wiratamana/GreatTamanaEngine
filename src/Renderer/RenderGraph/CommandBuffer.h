@@ -10,6 +10,8 @@
 #include "../../Core/FrameDebuggerEventSink.h"
 #include "../../Math/Mat4.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 
@@ -23,6 +25,9 @@ class Renderer;
 
 namespace gte::rg {
 struct PassContext;
+
+// Largest push-constant block the Vulkan spec guarantees every device supports.
+inline constexpr std::uint32_t kMaxPushConstantBytes = 128;
 
 // Checks if supplied push constant size matches reflected size (0 means unreflected).
 constexpr bool PushConstantSizeMatches(std::uint32_t suppliedSize, std::uint32_t reflectedSize) noexcept
@@ -78,7 +83,8 @@ public:
 
     // --- Compute Recording ---
 
-    // Stage push constants for the next dispatch.
+    // Stages push constants for the next dispatch. The bytes are copied, so `data` need not outlive the call;
+    // more than kMaxPushConstantBytes asserts in debug builds and stages nothing.
     void SetPushConstants(const void* data, std::uint32_t size) noexcept;
 
     template <typename T>
@@ -120,7 +126,7 @@ private:
 
     const ComputePipeline* m_boundComputePipeline = nullptr;
     VkDescriptorSet m_boundDescriptorSet = VK_NULL_HANDLE;
-    const void* m_pushConstantData = nullptr;
+    std::array<std::byte, kMaxPushConstantBytes> m_pushConstantData{}; // Copied in SetPushConstants().
     std::uint32_t m_pushConstantSize = 0;
 
     VkPipelineLayout m_boundGraphicsLayout = VK_NULL_HANDLE;

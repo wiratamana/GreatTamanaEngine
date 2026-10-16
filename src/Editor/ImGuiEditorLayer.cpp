@@ -70,6 +70,7 @@ public:
               "GameViewDepth", /*allowStorageImageAccess=*/true, /*allowDepthSampledAccess=*/true))
         , m_sceneView(renderer.CreateRenderTexture(window.Width(), window.Height(), PixelFormat::Undefined, "SceneView",
               "SceneViewDepth", /*allowStorageImageAccess=*/true, /*allowDepthSampledAccess=*/true))
+        , m_sceneGrid(renderer)
     {
         // Both views start at the OS window's size so the first frame sees no resize mismatch.
         m_ctx.desiredExtent =
@@ -302,9 +303,9 @@ public:
     void SetSceneViewCompositedTexture(RenderTexture* texture) override { m_sceneViewComposited = texture; }
 
     // See IEditorLayer::RenderSceneGrid(). Called only when the Scene view rendered, so no visibility check is needed.
-    void RenderSceneGrid(Renderer& renderer, const rg::RecordingContext& cmd, const Mat4& sceneViewProjection) override
+    void RenderSceneGrid(const rg::RecordingContext& cmd, const Mat4& sceneViewProjection) override
     {
-        m_sceneGrid.Draw(renderer, cmd, sceneViewProjection);
+        m_sceneGrid.Draw(cmd, sceneViewProjection);
     }
 
     void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
