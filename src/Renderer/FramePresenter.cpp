@@ -155,7 +155,8 @@ void FramePresenter::RecreateSwapchain()
 }
 
 DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
-    std::optional<GpuTimingSlot> timingSlot, const std::function<void(rg::CommandBuffer&)>& recordExtra)
+    std::optional<GpuTimingSlot> timingSlot, const std::array<float, 4>& clearColor,
+    const std::function<void(rg::CommandBuffer&)>& recordExtra)
 {
     const VkFence offscreenFence = m_frameSync.OffscreenFence();
     vkWaitForFences(m_device, 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
@@ -185,7 +186,7 @@ DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTe
         }
     };
     const DrawStats drawStats = frameRecorder.RecordFrame(m_offscreenCommandBuffer, target.Target(), ColorFormat(),
-        m_depthFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, rawRecordExtra);
+        m_depthFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, clearColor, rawRecordExtra);
 
     // The end timestamp brackets the whole pass including recordExtra, never inside RecordFrame().
     if (timingSlot.has_value()) {

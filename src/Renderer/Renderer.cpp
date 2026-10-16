@@ -145,20 +145,15 @@ Renderer::~Renderer()
     }
 }
 
-void Renderer::Clear(std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a)
-{
-    m_frameRecorder.Clear(r, g, b, a);
-}
-
 void Renderer::OnResize(int width, int height)
 {
     m_presenter.OnResize(width, height);
 }
 
-DrawStats Renderer::RenderOffscreen(
-    RenderTexture& target, std::optional<GpuTimingSlot> timingSlot, const std::function<void(rg::CommandBuffer&)>& recordExtra)
+DrawStats Renderer::RenderOffscreen(RenderTexture& target, std::optional<GpuTimingSlot> timingSlot,
+    const std::array<float, 4>& clearColor, const std::function<void(rg::CommandBuffer&)>& recordExtra)
 {
-    return m_presenter.RenderOffscreen(m_frameRecorder, target, timingSlot, recordExtra);
+    return m_presenter.RenderOffscreen(m_frameRecorder, target, timingSlot, clearColor, recordExtra);
 }
 
 rg::RecordingContext Renderer::BeginOffscreenRenderGraphRecording()

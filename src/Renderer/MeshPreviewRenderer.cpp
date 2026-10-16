@@ -217,7 +217,8 @@ UiTextureHandle MeshPreviewRenderer::Render(const Mat4& model, const Mat4& viewP
     }
 
     const PreviewPush push{ model, viewProjection };
-    impl.renderer.Clear(clearColorRgba[0], clearColorRgba[1], clearColorRgba[2], clearColorRgba[3]);
+    const std::array<float, 4> clearColor{ clearColorRgba[0] / 255.0f, clearColorRgba[1] / 255.0f,
+        clearColorRgba[2] / 255.0f, clearColorRgba[3] / 255.0f };
 
     const Pipeline& pipeline = *impl.pipeline;
     const DescriptorSetHandle setOneHandle = impl.setOneHandle;
@@ -227,7 +228,7 @@ UiTextureHandle MeshPreviewRenderer::Render(const Mat4& model, const Mat4& viewP
     const Extent2D extent = impl.target->Extent();
 
     // No GPU timing slot: this preview must not overwrite the Profiler's Game/Scene View timings.
-    impl.renderer.RenderOffscreen(*impl.target, std::nullopt, [&](rg::CommandBuffer& cmd) {
+    impl.renderer.RenderOffscreen(*impl.target, std::nullopt, clearColor, [&](rg::CommandBuffer& cmd) {
         cmd.SetViewportAndScissor(extent.width, extent.height);
         cmd.BindPipeline(pipeline);
         cmd.BindDescriptorSet(/*setIndex=*/1, setOneHandle);

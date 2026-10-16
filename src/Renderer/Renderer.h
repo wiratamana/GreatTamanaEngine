@@ -29,6 +29,7 @@
 #include "../Core/UiTextureHandle.h"
 #include "GraphicsHandleRegistry.h"
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -72,12 +73,9 @@ public:
     Renderer(Renderer&&) = delete;
     Renderer& operator=(Renderer&&) = delete;
 
-    // Sets the clear color for subsequent render operations.
-    void Clear(std::uint8_t r = 0, std::uint8_t g = 0, std::uint8_t b = 0, std::uint8_t a = 255);
-
-    // Synchronously renders into an offscreen render target.
+    // Synchronously renders into an offscreen render target, cleared to `clearColor` (linear RGBA).
     DrawStats RenderOffscreen(RenderTexture& target, std::optional<GpuTimingSlot> timingSlot,
-        const std::function<void(rg::CommandBuffer&)>& recordExtra = {});
+        const std::array<float, 4>& clearColor, const std::function<void(rg::CommandBuffer&)>& recordExtra = {});
 
     // Begins recording into the dedicated offscreen command buffer.
     rg::RecordingContext BeginOffscreenRenderGraphRecording();

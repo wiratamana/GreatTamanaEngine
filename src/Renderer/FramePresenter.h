@@ -62,7 +62,8 @@ public:
     // See Renderer::RenderOffscreen(). `timingSlot` brackets frameRecorder.RecordFrame() with GPU timestamps;
     // nullopt leaves the query slots untouched.
     DrawStats RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
-        std::optional<GpuTimingSlot> timingSlot, const std::function<void(rg::CommandBuffer&)>& recordExtra);
+        std::optional<GpuTimingSlot> timingSlot, const std::array<float, 4>& clearColor,
+        const std::function<void(rg::CommandBuffer&)>& recordExtra);
 
     // Waits on the offscreen command buffer's fence, resets and begins it, and returns it for the caller to
     // record render graph passes into. Pair with EndOffscreenRecording().

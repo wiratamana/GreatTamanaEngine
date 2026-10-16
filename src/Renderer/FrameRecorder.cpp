@@ -97,14 +97,6 @@ void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pip
     vkCmdDrawIndexedIndirect(cmd, indirectBuffer, static_cast<VkDeviceSize>(indirectOffset), maxDrawCount, stride);
 }
 
-void FrameRecorder::Clear(std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a)
-{
-    m_clearColor[0] = static_cast<float>(r) / 255.0f;
-    m_clearColor[1] = static_cast<float>(g) / 255.0f;
-    m_clearColor[2] = static_cast<float>(b) / 255.0f;
-    m_clearColor[3] = static_cast<float>(a) / 255.0f;
-}
-
 void FrameRecorder::BeginFrame()
 {
     m_drawQueue.clear();
@@ -130,7 +122,8 @@ void FrameRecorder::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat
 }
 
 DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& target, VkFormat expectedFormat,
-    VkFormat expectedDepthFormat, VkImageLayout finalLayout, const std::function<void(VkCommandBuffer)>& recordExtra)
+    VkFormat expectedDepthFormat, VkImageLayout finalLayout, const std::array<float, 4>& clearColor,
+    const std::function<void(VkCommandBuffer)>& recordExtra)
 {
     // Debug-only: the target must match the renderer's default formats every pipeline is built against.
     // A deliberately different format needs its own pipeline variant recorded through recordExtra.
@@ -203,9 +196,7 @@ DrawStats FrameRecorder::RecordFrame(VkCommandBuffer cmd, const RenderTarget& ta
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.clearValue.color = {
-        { m_clearColor[0], m_clearColor[1], m_clearColor[2], m_clearColor[3] }
-    };
+    colorAttachment.clearValue.color = { { clearColor[0], clearColor[1], clearColor[2], clearColor[3] } };
 
     VkRenderingAttachmentInfo depthAttachment{};
     depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;

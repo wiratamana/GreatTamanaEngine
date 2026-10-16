@@ -15,14 +15,10 @@
 
 namespace gte {
 
-// CPU-side frame state: the clear color, the queued Pipeline+Mesh draws, and RecordFrame(), which turns them into
-// the dynamic-rendering sequence for Renderer::RenderOffscreen(). IssueDrawCommand() is the per-item primitive
-// shared with Renderer::Submit() while a graph pass records. It holds no device state, so it is trivially movable.
+// CPU-side frame state: the queued Pipeline+Mesh draws, and RecordFrame(), which turns them into the
+// dynamic-rendering sequence for Renderer::RenderOffscreen(). Holds no device state, so it is trivially movable.
 class FrameRecorder {
 public:
-    // Sets the clear color (0-255 per channel) for the next RecordFrame(). See Renderer::Clear().
-    void Clear(std::uint8_t r = 0, std::uint8_t g = 0, std::uint8_t b = 0, std::uint8_t a = 255);
-
     // Call once per frame: drops draws queued last frame so the queue cannot grow unbounded. See Renderer::BeginFrame().
     void BeginFrame();
 
@@ -49,14 +45,13 @@ public:
         VkDescriptorSet sceneServicesSet, const Mat4& viewProj, VkBuffer indirectBuffer, uint64_t indirectOffset,
         std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset, bool supportsDrawIndirectCount);
 
-    // Records the barriers to attachment state, the dynamic-rendering clear, every queued draw, `recordExtra`,
-    // and the final transition to `finalLayout`. Clears the queue afterwards so a second call does not redraw it.
+    // Records the barriers to attachment state, the dynamic-rendering clear to `clearColor`, every queued draw,
+    // `recordExtra`, and the final transition to `finalLayout`. Clears the queue afterwards.
     // The formats are asserted in debug builds against the target (depth only when a depth image exists).
-
     // A null target.depthImage skips the depth attachment. A real one is cleared to 1.0 and discarded afterwards.
-    // Returns this call's DrawStats, accumulated inline in the loop that issues each draw.
     DrawStats RecordFrame(VkCommandBuffer cmd, const RenderTarget& target, VkFormat expectedFormat,
-        VkFormat expectedDepthFormat, VkImageLayout finalLayout, const std::function<void(VkCommandBuffer)>& recordExtra);
+        VkFormat expectedDepthFormat, VkImageLayout finalLayout, const std::array<float, 4>& clearColor,
+        const std::function<void(VkCommandBuffer)>& recordExtra);
 
 private:
     // One queued Submit(): plain Vulkan handles, not references to the Pipeline/Mesh, which the caller owns for
@@ -76,8 +71,6 @@ private:
         // Null means no scene-services set to bind.
         VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE;
     };
-
-    std::array<float, 4> m_clearColor{ 0.0f, 0.0f, 0.0f, 1.0f };
 
     // This frame's queued draws; cleared by BeginFrame() and after RecordFrame().
     std::vector<DrawItem> m_drawQueue;
