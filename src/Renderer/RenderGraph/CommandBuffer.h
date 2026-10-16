@@ -104,7 +104,6 @@ public:
 private:
     friend struct PassContext;
     friend struct RecordingAccess;
-    friend class RecordingContext;
 
     CommandBuffer(VkCommandBuffer cmd, Renderer* renderer, DrawStats* passDrawStats, WriteTargetInfo writeTarget,
         FrameDebuggerEventSink* eventSink) noexcept;

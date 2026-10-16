@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // Flat, name-keyed upsert table shared by the per-resource-kind debug registries. `SnapshotT` is a
@@ -49,7 +50,7 @@ public:
 
 protected:
     // In-place lookup for a derived class's state override; nullptr if `name` was never Upsert()-ed.
-    SnapshotT* FindMutable(const std::string& name)
+    SnapshotT* FindMutable(std::string_view name)
     {
         for (SnapshotT& entry : m_entries) {
             if (entry.name == name) {

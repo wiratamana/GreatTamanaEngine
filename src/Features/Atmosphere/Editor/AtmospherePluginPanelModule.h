@@ -6,19 +6,13 @@
 namespace gte {
 
 struct EditorContext;
-class Renderer;
 class AtmosphereFeature;
-
-namespace rg {
-class RenderGraph;
-} // namespace rg
 
 // Adapts BuildAtmospherePanel() onto IEditorPanelModule_v1 so the "Atmosphere" panel draws through the generic
 // plugin-panel loop. A permanent built-in panel, owned by ImGuiEditorLayer.
 class AtmospherePluginPanelModule final : public IEditorPanelModule_v1 {
 public:
-    AtmospherePluginPanelModule(EditorContext& ctx, Renderer& /*engineRenderer*/,
-        const rg::RenderGraph& /*renderGraph*/, AtmosphereFeature& feature)
+    AtmospherePluginPanelModule(EditorContext& ctx, AtmosphereFeature& feature)
         : m_ctx(ctx), m_feature(feature)
     {
     }

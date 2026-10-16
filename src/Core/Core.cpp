@@ -515,7 +515,7 @@ void Core::ExposeViewOutput(rg::ViewScope scope, RenderTexture& texture, std::st
             return;
         }
     }
-    m_exposedViewOutputsThisFrame.push_back(ExposedViewOutput{ scope, &texture, std::string(name) });
+    m_exposedViewOutputsThisFrame.push_back(ExposedViewOutput{ scope, &texture, name });
 }
 
 // Registers a pass name to be included in GPU content stats.

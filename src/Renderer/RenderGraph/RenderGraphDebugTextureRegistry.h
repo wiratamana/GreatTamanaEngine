@@ -49,7 +49,7 @@ public:
 
     // Overwrites only the color ResourceState of `name` (no-op if unknown). Leaves
     // `lastUpdatedFrameCounter` alone: a state correction is not a fresh capture.
-    void ApplyColorStateOverride(const std::string& name, const ResourceState& newColorState);
+    void ApplyColorStateOverride(std::string_view name, const ResourceState& newColorState);
 };
 
 } // namespace gte::rg

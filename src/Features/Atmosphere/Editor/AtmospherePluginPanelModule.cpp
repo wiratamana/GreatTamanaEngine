@@ -13,11 +13,10 @@ void AtmospherePluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/)
 
 namespace {
 std::unique_ptr<IEditorPanelModule_v1> CreateAtmospherePanelModule(
-    IEngineFeatureModule& module, EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph)
+    IEngineFeatureModule& module, EditorContext& ctx, Renderer&, const rg::RenderGraph&)
 {
     // Only invoked for the module registered as "Atmosphere", which holds an AtmosphereFeature.
-    return std::make_unique<AtmospherePluginPanelModule>(
-        ctx, renderer, renderGraph, fx::FeatureOf<AtmosphereFeature>(module));
+    return std::make_unique<AtmospherePluginPanelModule>(ctx, fx::FeatureOf<AtmosphereFeature>(module));
 }
 } // namespace
 

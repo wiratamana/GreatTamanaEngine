@@ -225,11 +225,12 @@ private:
         std::vector<Entity> entities; // Entities included in this indirect batch.
     };
 
-    // A view output a feature exposed this frame (see ExposeViewOutput()).
+    // A view output a feature exposed this frame (see ExposeViewOutput()). `name` points into the exposing
+    // feature's own storage and is valid for the frame.
     struct ExposedViewOutput {
         rg::ViewScope scope = rg::ViewScope::Shared;
         RenderTexture* texture = nullptr;
-        std::string name;
+        std::string_view name;
     };
 
     void RegisterBuiltinCapabilityOrchestrators();

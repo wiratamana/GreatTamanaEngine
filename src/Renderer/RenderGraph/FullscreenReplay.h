@@ -17,7 +17,7 @@ struct FullscreenReplay {
     // Binds the pipeline, the bound set and the push constants, then draws.
     std::function<void(PassContext&)> record;
 
-    explicit operator bool() const noexcept { return static_cast<bool>(record); }
+    explicit operator bool() const noexcept { return static_cast<bool>(declare) && static_cast<bool>(record); }
 };
 
 } // namespace gte::rg

@@ -31,6 +31,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace gte {
@@ -85,7 +86,7 @@ public:
     std::vector<DebugVolumeTextureSnapshot> ListDebugVolumeTextures() const;
 
     // Notifies the registry of an external layout transition for a debug texture.
-    void NotifyDebugTextureStateOverride(const std::string& name, const ResourceState& newColorState);
+    void NotifyDebugTextureStateOverride(std::string_view name, const ResourceState& newColorState);
 
     // Current frame counter used for debug texture freshness.
     std::uint64_t CurrentDebugTextureFrameCounter() const noexcept;

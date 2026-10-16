@@ -3,7 +3,7 @@
 namespace gte::rg {
 
 void RenderGraphDebugTextureRegistry::ApplyColorStateOverride(
-    const std::string& name, const ResourceState& newColorState)
+    std::string_view name, const ResourceState& newColorState)
 {
     if (DebugTextureSnapshot* entry = FindMutable(name)) {
         entry->colorState = newColorState;

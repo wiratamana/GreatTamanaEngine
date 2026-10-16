@@ -1170,7 +1170,7 @@ std::vector<DebugVolumeTextureSnapshot> RenderGraph::ListDebugVolumeTextures() c
     return m_debugVolumeTextures.ListAll();
 }
 
-void RenderGraph::NotifyDebugTextureStateOverride(const std::string& name, const ResourceState& newColorState)
+void RenderGraph::NotifyDebugTextureStateOverride(std::string_view name, const ResourceState& newColorState)
 {
     m_debugTextures.ApplyColorStateOverride(name, newColorState);
 }
