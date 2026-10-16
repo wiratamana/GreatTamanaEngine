@@ -188,6 +188,15 @@ bool SceneServiceSlotIsDepthResource(std::uint32_t slotIndex) noexcept
     return SceneServiceSlotTable()[slotIndex].isDepthResource;
 }
 
+void ResetSceneServiceRegistryForTesting() noexcept
+{
+    for (SceneServiceSlotEntry& entry : SceneServiceSlotTable()) {
+        entry = SceneServiceSlotEntry{};
+    }
+    SceneServiceFailureMemory().clear();
+    SceneServiceRegistrySealedFlag() = false;
+}
+
 // --- SceneServicesDescriptorSet --------------------------------------------
 
 namespace {

@@ -44,6 +44,11 @@ SceneServiceResourceKind SceneServiceSlotResourceKind(std::uint32_t slotIndex) n
 // False (color aspect) for a slot index that was never registered or is out of range.
 bool SceneServiceSlotIsDepthResource(std::uint32_t slotIndex) noexcept;
 
+// --- Testing only ---
+// Clears every slot, the registration-failure memory and the sealed flag. Never call from production code.
+void ResetSceneServiceRegistryForTesting() noexcept;
+// --- End testing only ---
+
 // Blackboard key a PreOpaque feature publishes its TextureHandle under for `slot` and the view its callback got.
 // Folds `slot` and `view.Hash()` through FNV-1a so concurrently active views never alias.
 rg::RenderPassId SceneServiceBlackboardKey(std::uint32_t slotIndex, rg::RenderViewId view) noexcept;
