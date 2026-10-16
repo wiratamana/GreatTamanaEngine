@@ -92,7 +92,9 @@ Consumers (R = rewritten on the pass verbs, M = moved into `src/Renderer` behind
 | GPU skinning dispatch (`AddGpuSkinningPasses`, `Core.cpp`) | R | Still hand-records the dispatch; moves to `ComputePass` with the engine-system step. The request carries a `GpuBuffer`. |
 | Mesh vertex buffers | M | Meshes share vertex buffers; `Mesh::VertexBufferHandle()` replaces the raw handle for batch eligibility. |
 | `GpuParams` | R | Built on `GpuBuffer`. |
-| Editor mesh preview uniform buffers | M | Still raw (`AssetPreviewMesh`, `BoneViewerWindow`); moves with the editor render code step. |
+| Editor mesh preview (`AssetPreviewMesh`, `BoneViewerWindow`) | M | `MeshPreviewRenderer` in `src/Renderer` owns the pipeline, dummy set, buffers and target behind a Vulkan-free interface. |
+| Scene grid overlay | M | `SceneGridRenderer` lives in `src/Renderer`; the editor layer passes a `RecordingContext` and the matrix. |
+| GPU idle outside `src/Renderer` | M | `DeviceIdleGuard` (RAII before teardown), `Renderer::RetireUiTexture`, `Renderer::DrainGpuForCodeUnload`; `WaitForGpuIdle` is only left in `ImGuiEditorLayer.cpp`. |
 
 ## Recording context
 
