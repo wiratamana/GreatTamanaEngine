@@ -242,6 +242,7 @@ SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
     }
     layoutBuilder.AddUniformBuffer(kSceneServiceSlotCount, VK_SHADER_STAGE_FRAGMENT_BIT);
     m_layout = layoutBuilder.Build();
+    m_layoutHandle = RegisterDescriptorSetLayout(m_layout);
 
     // Every Image2D-kind slot gets a dummy: one opaque-white pixel, meaning "fully lit / neutral".
     const unsigned char whitePixel[4] = { 255, 255, 255, 255 };
@@ -260,6 +261,9 @@ SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
 SceneServicesDescriptorSet::~SceneServicesDescriptorSet()
 {
     // Textures are RAII and the per-view sets are pool-owned; only the hand-built layout needs destroying.
+    if (m_layoutHandle != DescriptorSetLayoutHandle::Invalid) {
+        UnregisterDescriptorSetLayout(m_layoutHandle);
+    }
     if (m_layout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(m_device, m_layout, nullptr);
     }

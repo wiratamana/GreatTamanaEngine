@@ -106,7 +106,7 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
 } // namespace
 
 void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer,
-    IHotReloadDebugCapability* hotReloadDebugCapability, VkDescriptorSetLayout sceneServicesSetLayout)
+    IHotReloadDebugCapability* hotReloadDebugCapability, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);

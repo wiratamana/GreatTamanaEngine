@@ -18,7 +18,7 @@ bool EditorSceneIOCapability::SaveScene(Game& game, const std::filesystem::path&
 }
 
 bool EditorSceneIOCapability::LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scenePath,
-    VkDescriptorSetLayout sceneServicesSetLayout, std::string& outErrorMessage)
+    DescriptorSetLayoutHandle sceneServicesSetLayout, std::string& outErrorMessage)
 {
     // Same reasoning as SaveScene() above - byte-for-byte the same fallback
     // string EngineCommandDispatch.cpp's own ON-branch used to set directly.

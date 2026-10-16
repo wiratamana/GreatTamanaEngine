@@ -62,21 +62,10 @@ std::string BuildEntityLabel(Registry& registry, Entity entity)
     return std::string(label);
 }
 
-// Recursively renders `entity` and every descendant of it as an indented
-// ImGui tree (ImGui::TreeNodeEx()), wiring up selection + the drag-and-drop
-// attach/detach/reorder behavior described in HierarchyPanel.h's own doc
-// comment. `registry`/`game`/`renderer`/`ctx` are threaded straight through
-// from BuildHierarchyPanel() below.
+// Renders `entity` and its descendants as an ImGui tree with selection and drag-and-drop reparenting.
 void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Registry& registry, Entity entity,
-    VkDescriptorSetLayout sceneServicesSetLayout)
+    DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
-    // task_manager/editor-core-separation-10 campaign, PHASE3 - was
-    // ImGui::PushID(static_cast<int>(entity.index)) alone. entity.index is
-    // already genuinely unique per live entity, so this is uniform-coverage
-    // hardening (LDD1), not a bug fix - it ALSO now gets
-    // ImGuiIdConflictGuard's logging for free, which would catch a future
-    // hierarchy-CYCLE bug (the same entity visited twice in one recursive
-    // walk) that nothing today detects.
     ScopedUniqueId idScope(static_cast<int>(entity.index), "HierarchyPanel::RenderEntityNode");
 
     const std::string label = BuildEntityLabel(registry, entity);
@@ -188,7 +177,7 @@ void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Regist
 
 } // namespace
 
-void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, VkDescriptorSetLayout sceneServicesSetLayout)
+void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     Registry& registry = game.GetRegistry();
 
@@ -243,12 +232,7 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, VkD
         }
     }
 
-    // Unity-style right-click context menu: BeginPopupContextWindow() with
-    // no ImGuiPopupFlags_NoOpenOverItems opens on ANY right-click inside
-    // this window - over an existing entry or empty space alike, since
-    // there is no separate per-entity context menu yet (a per-entity menu,
-    // e.g. "Delete"/"Rename", is a natural follow-up once this engine has a
-    // Name component - see TODO.md).
+    // Right-click anywhere in the window opens the create menu.
     if (ImGui::BeginPopupContextWindow("HierarchyContextMenu")) {
         if (ImGui::BeginMenu("Create 3D Object")) {
             for (const PrimitiveType type : kCreatableShapes) {
@@ -261,25 +245,10 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, VkD
             }
             ImGui::EndMenu();
         }
-        // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
-        // (ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) - a plain
-        // top-level entry (not a submenu, since there's only ever this one
-        // light kind - see this campaign's own "no point/spot lights"
-        // refusal), mirroring "Create 3D Object"'s own "select what you
-        // just created" UX convention.
         if (ImGui::MenuItem("Create Directional Light")) {
             ctx.selection.SelectEntity(game.CreateDirectionalLightEntity());
         }
-        // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-        // PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
-        // - spawns 6 entities sharing one hand-authored, untextured, indexed,
-        // GPU-driven-eligible Mesh+Pipeline (>= kMinInstancesForGpuDrivenBatch
-        // = 4) - the real, repeatable way to get a qualifying batch into the
-        // scene for manual/HTTP-driven validation (see
-        // GpuDrivenBatchTestSpawner.h's own doc comment). Calls the spawner
-        // DIRECTLY (this file is itself Editor-only, so no IEditorLayer
-        // indirection is needed here, unlike the HTTP route's own call site -
-        // see IEditorLayer::SpawnGpuDrivenTestBatch()).
+        // Spawns 6 instances of one shared indexed mesh, enough to form a GPU-driven batch.
         if (ImGui::MenuItem("Create GPU-Driven Test Batch")) {
             GpuDrivenBatchTestSpawner::Spawn(game, renderer, /*instanceCount=*/6, sceneServicesSetLayout);
         }

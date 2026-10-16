@@ -16,7 +16,7 @@
 namespace gte {
 
 void BuildScenePanel(
-    Game& game, Renderer& renderer, EditorContext& ctx, EditorCamera& camera, VkDescriptorSetLayout sceneServicesSetLayout)
+    Game& game, Renderer& renderer, EditorContext& ctx, EditorCamera& camera, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     Registry& registry = game.GetRegistry();
     // ImGui::Begin() returns false when this panel isn't actually visible

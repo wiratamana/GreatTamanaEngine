@@ -283,7 +283,7 @@ int EditorHost::Run()
         if (const std::optional<EngineCommandRequest> request = m_commandBridge.TryPeekPendingCommandRequest()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteEngineCommand");
             const EngineCommandResult result = ExecuteEngineCommand(m_game, m_renderer, m_sceneIOCapability,
-                &s_editorHotReloadDebugCapability, m_core.GetSceneServicesDescriptorSet().Layout(), *request);
+                &s_editorHotReloadDebugCapability, m_core.GetSceneServicesDescriptorSet().LayoutHandle(), *request);
             m_commandBridge.FulfillCommand(result);
         }
 
@@ -333,7 +333,7 @@ int EditorHost::Run()
             // Two command kinds: spawn a GPU-driven test batch, or activate a tab.
             if (uiRequest->kind == EditorUiCommandKind::SpawnGpuDrivenTestBatch) {
                 const GpuDrivenTestBatchSpawnResult spawned = m_editorLayer->SpawnGpuDrivenTestBatch(m_game, m_renderer,
-                    uiRequest->spawnGpuDrivenTestBatch.instanceCount, m_core.GetSceneServicesDescriptorSet().Layout());
+                    uiRequest->spawnGpuDrivenTestBatch.instanceCount, m_core.GetSceneServicesDescriptorSet().LayoutHandle());
                 uiResult.spawnGpuDrivenTestBatch.success = spawned.success;
                 uiResult.spawnGpuDrivenTestBatch.editorAvailable = spawned.editorAvailable;
                 uiResult.spawnGpuDrivenTestBatch.errorMessage = spawned.errorMessage;
@@ -553,7 +553,7 @@ int EditorHost::Run()
                 m_core.GetRenderPassToggleRegistryMutable(), m_core.GetRenderFeatureCompositor(),
                 m_core.GetOffscreenBlackboardForFrameDebugger(),
                 // Layout threaded into every editor spawn path reached from BuildUI().
-                m_core.GetSceneServicesDescriptorSet().Layout());
+                m_core.GetSceneServicesDescriptorSet().LayoutHandle());
 
             // GET /render_graph data: reuses renderFeatureEntries and ignores the panel's Pause checkbox (always the latest frame).
             m_captureBridge.PublishRenderGraphMetadata(rg::BuildRenderGraphMetadata(

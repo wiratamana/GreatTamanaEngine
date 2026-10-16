@@ -1,11 +1,11 @@
 #pragma once
 
+#include "../../Core/GraphicsHandles.h"
+
 #include "../../ECS/Entity.h"
 #include "../../ECS/Registry.h"
 #include "MeshAssetGpuCatalog.h"
 #include "PrimitiveGpuCatalog.h"
-
-#include <volk.h>
 
 #include <string>
 
@@ -14,18 +14,7 @@ namespace gte {
 class Renderer;
 class RenderSystem;
 
-// The thin orchestrator both of Game's spawn-facing public methods
-// (CreatePrimitiveEntity()/CreateMeshEntityFromGtaFile()) forward into,
-// structurally parallel to RenderSystem (the established "this one class is
-// allowed to depend on both ECS and Renderer" seam - see AGENTS.md's
-// Entity-Component-System section, which this refactor's job is to also
-// name this class alongside).
-//
-// Owns one PrimitiveGpuCatalog and one MeshAssetGpuCatalog - each spawn
-// method is exactly: resolve an EntityBlueprint via the relevant catalog,
-// then call EntityInstantiator::Instantiate(). Also exposes the read-only
-// queries AnimationSystem needs (forwarding to MeshAssetGpuCatalog) - see
-// GameInstantiationRefactorProposal.txt, Step 3.3.
+// Spawn orchestrator: resolves a blueprint through the matching catalog, then instantiates it.
 class MeshInstantiationSystem {
 public:
     explicit MeshInstantiationSystem(RenderSystem& renderSystem)
@@ -33,26 +22,16 @@ public:
     {
     }
 
-    // Spawns a new entity built from one of the engine's built-in primitive
-    // shapes - see Game::CreatePrimitiveEntity()'s own doc comment (Game.h)
-    // for the full behavior contract this preserves exactly.
-    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
-    // Layout() - forwarded straight through to the catalogs below, no default.
+    // Spawns an entity from a built-in primitive shape.
+    // `sceneServicesSetLayout` is the layout of Core's scene-services set (pipeline set 1).
     Entity SpawnPrimitive(
-        Registry& registry, Renderer& renderer, PrimitiveType type, VkDescriptorSetLayout sceneServicesSetLayout);
+        Registry& registry, Renderer& renderer, PrimitiveType type, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
-    // Spawns a whole hierarchy of entities from an imported *.gta
-    // AssetType::Mesh file - see Game::CreateMeshEntityFromGtaFile()'s own
-    // doc comment (Game.h) for the full behavior contract this preserves
-    // exactly, including the kInvalidEntity-on-failure convention.
+    // Spawns an entity hierarchy from a *.gta mesh asset. Returns kInvalidEntity on failure.
     Entity SpawnMeshAsset(Registry& registry, Renderer& renderer, const std::string& absoluteGtaPath,
-        VkDescriptorSetLayout sceneServicesSetLayout);
+        DescriptorSetLayoutHandle sceneServicesSetLayout);
 
-    // Read-only queries used by AnimationSystem (constructor-injected a
-    // reference to this class - see AnimationSystem.h) to look up which GPU
-    // mesh parts belong to a given mesh path for per-frame re-upload, and
-    // whether/what skinning data a given mesh path has - both forwarded
-    // straight through to MeshAssetGpuCatalog.
+    // Read-only catalog queries used by AnimationSystem for per-frame re-upload.
     const std::vector<MeshAssetPart>* TryGetMeshAssetParts(const std::string& absoluteGtaPath) const
     {
         return m_meshAssetCatalog.TryGetParts(absoluteGtaPath);
@@ -62,21 +41,13 @@ public:
         return m_meshAssetCatalog.TryGetSkinnedMeshData(absoluteGtaPath);
     }
 
-    // task_manager/verlet-integration-11, PHASE3 - forwards straight to
-    // MeshAssetGpuCatalog::RefreshCachedJointPhysicsOverridesFromDisk() (see its
-    // own doc comment for the full contract) - NOT const, since it mutates the
-    // underlying cache, unlike TryGetMeshAssetParts()/TryGetSkinnedMeshData()
-    // above.
+    // Forwards to the catalog; patches the cached joint physics overrides from disk.
     bool RefreshCachedJointPhysicsOverridesFromDisk(const std::string& absoluteGtaPath)
     {
         return m_meshAssetCatalog.RefreshCachedJointPhysicsOverridesFromDisk(absoluteGtaPath);
     }
 
-    // task_manager/stl-parser-1, PHASE3 - forwards straight to
-    // MeshAssetGpuCatalog::InvalidateCachedMeshAsset() (see its own doc
-    // comment for the full contract) - NOT const, since it mutates the
-    // underlying cache, unlike TryGetMeshAssetParts()/TryGetSkinnedMeshData()
-    // above.
+    // Forwards to the catalog; drops the cached GPU mesh so the next spawn re-uploads it.
     void InvalidateCachedMeshAsset(const std::string& absoluteGtaPath)
     {
         m_meshAssetCatalog.InvalidateCachedMeshAsset(absoluteGtaPath);

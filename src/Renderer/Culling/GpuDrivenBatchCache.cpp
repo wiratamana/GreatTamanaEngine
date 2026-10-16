@@ -115,7 +115,7 @@ void GpuDrivenBatchCache::EnsureDescriptorSetsWritten(Renderer& renderer, const 
 }
 
 const Pipeline& GpuDrivenBatchCache::ResolveInstancedPipeline(
-    Renderer& renderer, PipelineHandle originalHandle, VkDescriptorSetLayout sceneServicesSetLayout)
+    Renderer& renderer, PipelineHandle originalHandle, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     const auto found = m_instancedPipelines.find(originalHandle);
     if (found != m_instancedPipelines.end()) {

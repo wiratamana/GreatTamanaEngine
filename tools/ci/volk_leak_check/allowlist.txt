@@ -1,8 +1,6 @@
 # Files outside src/Renderer that still name Vulkan. Starting debt: lines are only ever removed.
 # Format: path relative to src, then '# one-line reason'. A line whose file is gone or clean fails the check.
 
-Application/EngineCommandDispatch.cpp # debt: application layer passes raw Vulkan handles
-Application/EngineCommandDispatch.h # debt: application layer passes raw Vulkan handles
 Application/RenderPassViewData.h # debt: application layer passes raw Vulkan handles
 Application/RenderPasses.cpp # debt: application layer passes raw Vulkan handles
 Application/RenderPasses.h # debt: application layer passes raw Vulkan handles
@@ -10,7 +8,6 @@ Assets/Ktx2Decoder.cpp # KTX2 files carry a vkFormat field
 Assets/Ktx2Encoder.cpp # KTX2 files carry a vkFormat field
 Core/Core.cpp # debt: engine core records or passes raw Vulkan
 Core/Core.h # debt: engine core records or passes raw Vulkan
-Core/EditorCapabilities.h # debt: engine core records or passes raw Vulkan
 Core/FrameDebuggerCaptureRecorder.h # debt: engine core records or passes raw Vulkan
 Core/FrameDebuggerEventSink.h # debt: engine core records or passes raw Vulkan
 Core/ISurfaceProvider.h # permanent: surface provider hands out Vulkan instance extensions
@@ -20,46 +17,24 @@ Editor/AssetPreviewTexture.cpp # debt: editor code uses raw Vulkan types
 Editor/AssetPreviewTexture.h # debt: editor code uses raw Vulkan types
 Editor/BoneViewerWindow.cpp # debt: editor code uses raw Vulkan types
 Editor/BoneViewerWindow.h # debt: editor code uses raw Vulkan types
-Editor/DockLayout.cpp # debt: editor code uses raw Vulkan types
-Editor/DockLayout.h # debt: editor code uses raw Vulkan types
 Editor/EditorContext.h # debt: editor code uses raw Vulkan types
 Editor/EditorHost.cpp # debt: editor code uses raw Vulkan types
 Editor/EditorLayer.h # debt: editor code uses raw Vulkan types
 Editor/EditorProjectLifecycleCapability.cpp # debt: editor code uses raw Vulkan types
-Editor/EditorSceneIOCapability.cpp # debt: editor code uses raw Vulkan types
-Editor/EditorSceneIOCapability.h # debt: editor code uses raw Vulkan types
 Editor/FrameDebuggerCapture.cpp # debt: editor code uses raw Vulkan types
 Editor/FrameDebuggerCapture.h # debt: editor code uses raw Vulkan types
 Editor/FrameDebuggerPassMetadataRecorder.h # debt: editor code uses raw Vulkan types
 Editor/FrameDebuggerPreviewProcessing.h # debt: editor code uses raw Vulkan types
-Editor/GpuDrivenBatchTestSpawner.cpp # debt: editor code uses raw Vulkan types
-Editor/GpuDrivenBatchTestSpawner.h # debt: editor code uses raw Vulkan types
 Editor/ImGuiEditorLayer.cpp # permanent: ImGui Vulkan backend setup
 Editor/MemoryPanelData.cpp # debt: editor code uses raw Vulkan types
 Editor/MemoryPanelData.h # debt: editor code uses raw Vulkan types
 Editor/NullEditorLayer.cpp # debt: editor code uses raw Vulkan types
 Editor/Panels/FrameDebuggerPanel.cpp # debt: editor code uses raw Vulkan types
 Editor/Panels/FrameDebuggerPanel.h # debt: editor code uses raw Vulkan types
-Editor/Panels/HierarchyPanel.cpp # debt: editor code uses raw Vulkan types
-Editor/Panels/HierarchyPanel.h # debt: editor code uses raw Vulkan types
 Editor/Panels/RenderGraphPanel.cpp # debt: editor code uses raw Vulkan types
-Editor/Panels/ScenePanel.cpp # debt: editor code uses raw Vulkan types
-Editor/Panels/ScenePanel.h # debt: editor code uses raw Vulkan types
 Editor/SceneGridRenderer.cpp # debt: editor code uses raw Vulkan types
 Editor/SceneGridRenderer.h # debt: editor code uses raw Vulkan types
-Editor/SceneIO.cpp # debt: editor code uses raw Vulkan types
-Editor/SceneIO.h # debt: editor code uses raw Vulkan types
 Game/Animation/AnimationSystem.h # debt: game systems hold raw Vulkan handles
-Game/Game.cpp # debt: game systems hold raw Vulkan handles
-Game/Game.h # debt: game systems hold raw Vulkan handles
-Game/Instantiation/MeshAssetGpuCatalog.cpp # debt: game systems hold raw Vulkan handles
-Game/Instantiation/MeshAssetGpuCatalog.h # debt: game systems hold raw Vulkan handles
-Game/Instantiation/MeshInstantiationSystem.cpp # debt: game systems hold raw Vulkan handles
-Game/Instantiation/MeshInstantiationSystem.h # debt: game systems hold raw Vulkan handles
-Game/Instantiation/PrimitiveGpuCatalog.cpp # debt: game systems hold raw Vulkan handles
-Game/Instantiation/PrimitiveGpuCatalog.h # debt: game systems hold raw Vulkan handles
 Game/SceneQuery.h # debt: game systems hold raw Vulkan handles
-Scene/SceneBuilder.cpp # debt: scene builder takes raw Vulkan handles
-Scene/SceneBuilder.h # debt: scene builder takes raw Vulkan handles
 Window/Window.cpp # permanent: SDL window creates the Vulkan surface
 Window/Window.h # permanent: SDL window creates the Vulkan surface

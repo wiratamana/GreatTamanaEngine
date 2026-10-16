@@ -462,10 +462,10 @@ void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuff
 
 Pipeline Renderer::CreatePipeline(const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
-    const char* debugName, bool useInstanceBuffer, VkDescriptorSetLayout sceneServicesSetLayout) const
+    const char* debugName, bool useInstanceBuffer, DescriptorSetLayoutHandle sceneServicesSetLayout) const
 {
     return m_resources.CreatePipeline(ColorFormat(), vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
-        useMaterialTexture, debugName, useInstanceBuffer, sceneServicesSetLayout);
+        useMaterialTexture, debugName, useInstanceBuffer, Native(sceneServicesSetLayout));
 }
 
 Pipeline Renderer::CreatePipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,

@@ -5,14 +5,14 @@
 namespace gte {
 
 Entity MeshInstantiationSystem::SpawnPrimitive(
-    Registry& registry, Renderer& renderer, PrimitiveType type, VkDescriptorSetLayout sceneServicesSetLayout)
+    Registry& registry, Renderer& renderer, PrimitiveType type, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     const EntityBlueprint blueprint = m_primitiveCatalog.Resolve(m_renderSystem, renderer, type, sceneServicesSetLayout);
     return Instantiate(registry, blueprint);
 }
 
 Entity MeshInstantiationSystem::SpawnMeshAsset(Registry& registry, Renderer& renderer,
-    const std::string& absoluteGtaPath, VkDescriptorSetLayout sceneServicesSetLayout)
+    const std::string& absoluteGtaPath, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     const EntityBlueprint blueprint =
         m_meshAssetCatalog.Resolve(m_renderSystem, renderer, absoluteGtaPath, sceneServicesSetLayout);

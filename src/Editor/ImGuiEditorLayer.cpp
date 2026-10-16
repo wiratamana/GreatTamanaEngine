@@ -1,4 +1,4 @@
-﻿#include "EditorLayer.h"
+#include "EditorLayer.h"
 
 #include <cassert>
 
@@ -489,7 +489,7 @@ public:
         rg::RenderPassToggleRegistry& renderPassToggleRegistry,
         RenderFeatureCompositor* renderFeatureCompositor,
         const rg::RenderPassBlackboard& offscreenBlackboard,
-        VkDescriptorSetLayout sceneServicesSetLayout) override // Core's real SceneServicesDescriptorSet::Layout().
+        DescriptorSetLayoutHandle sceneServicesSetLayout) override
     {
         ImGui::SetCurrentContext(m_context);
 
@@ -764,7 +764,7 @@ public:
     // ImportExternalAssetIntoProject()'s own "thin forward into the real
     // implementation" shape immediately below.
     GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(Game& game, Renderer& renderer, std::uint32_t instanceCount,
-        VkDescriptorSetLayout sceneServicesSetLayout) override
+        DescriptorSetLayoutHandle sceneServicesSetLayout) override
     {
         const GpuDrivenBatchTestSpawnResult spawned =
             GpuDrivenBatchTestSpawner::Spawn(game, renderer, instanceCount, sceneServicesSetLayout);

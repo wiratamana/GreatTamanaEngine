@@ -95,7 +95,7 @@ public:
     // The instanced sibling of a batch's pipeline, built once per original pipeline and cached.
     // May throw from pipeline creation; the caller must then drop the batch from every decision.
     const Pipeline& ResolveInstancedPipeline(
-        Renderer& renderer, PipelineHandle originalHandle, VkDescriptorSetLayout sceneServicesSetLayout);
+        Renderer& renderer, PipelineHandle originalHandle, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
 private:
     struct PipelineHandleLess {

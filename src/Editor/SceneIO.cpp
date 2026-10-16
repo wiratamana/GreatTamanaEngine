@@ -47,7 +47,7 @@ bool SaveScene(Game& game)
 }
 
 bool LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scenePath,
-    VkDescriptorSetLayout sceneServicesSetLayout)
+    DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     std::ifstream file(scenePath, std::ios::binary);
     if (!file) {
@@ -61,19 +61,7 @@ bool LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scen
         return false; // Malformed file - do NOT touch the current scene at all.
     }
 
-    // editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
-    // BIG-STEP 4), PHASE3 - the recipe-aware reconstruction itself now lives
-    // in Scene/SceneBuilder.h/.cpp's ReconstructSceneFromDocument()
-    // (gte_core-tier), shared with Project Assembly Hot Reload's own restore
-    // path (Core/Plugins/ProjectAssemblyHotReload.cpp's
-    // RestoreProjectAssemblyHotReloadState()) - see that function's own doc
-    // comment for the full, exact, already-proven algorithm. This wrapper's
-    // own remaining job: resolve the project root, scan a fresh
-    // AssetDatabase (unchanged behavior from before this refactor - "scanned
-    // fresh, right here, against ResolveProjectRootDirectory() - never
-    // persisted/cached across calls", this file's own pre-existing doc
-    // comment in SceneIO.h, still true), clear the scene, then call the
-    // shared function.
+    // Scan a fresh AssetDatabase, clear the scene, then rebuild it from the document.
     const std::filesystem::path projectRoot = ResolveProjectRootDirectory();
     AssetDatabase assetDatabase;
     assetDatabase.RefreshFromDirectory(projectRoot);
@@ -83,7 +71,7 @@ bool LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scen
     return true;
 }
 
-bool LoadScene(Game& game, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout)
+bool LoadScene(Game& game, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     return LoadScene(game, renderer, DefaultScenePath(), sceneServicesSetLayout);
 }

@@ -9,7 +9,7 @@
 namespace gte {
 
 PipelineHandle PrimitiveGpuCatalog::EnsureDefaultPipeline(
-    RenderSystem& renderSystem, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout)
+    RenderSystem& renderSystem, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     if (!m_defaultPipeline.IsValid()) {
         // Shader source lives at src/Shaders/Triangle.vert/.frag (version-
@@ -34,7 +34,7 @@ MeshHandle PrimitiveGpuCatalog::EnsurePrimitiveMesh(RenderSystem& renderSystem, 
 }
 
 EntityBlueprint PrimitiveGpuCatalog::Resolve(
-    RenderSystem& renderSystem, Renderer& renderer, PrimitiveType type, VkDescriptorSetLayout sceneServicesSetLayout)
+    RenderSystem& renderSystem, Renderer& renderer, PrimitiveType type, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     EntityBlueprint blueprint;
     blueprint.pipeline = EnsureDefaultPipeline(renderSystem, renderer, sceneServicesSetLayout);

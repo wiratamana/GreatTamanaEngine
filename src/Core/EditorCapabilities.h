@@ -1,11 +1,11 @@
 #pragma once
 
+#include "GraphicsHandles.h"
+
 // Small single-purpose interfaces for editor capabilities. Core code holds a nullable pointer to each;
 // a standalone host that registers none gets a safe "not available" answer.
 
 #include "Logging.h" // LogEntry/LogQueryFilter for ILogQueryCapability.
-
-#include <volk.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -29,7 +29,7 @@ public:
     // True when the scene was fully replaced. On failure (missing file, parse error) the current scene is left
     // untouched and `outErrorMessage` is set. `sceneServicesSetLayout` is Core's scene services layout.
     virtual bool LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scenePath,
-        VkDescriptorSetLayout sceneServicesSetLayout, std::string& outErrorMessage) = 0;
+        DescriptorSetLayoutHandle sceneServicesSetLayout, std::string& outErrorMessage) = 0;
 
     // The default scene path used when a caller supplies an empty one.
     virtual std::filesystem::path DefaultScenePath() const = 0;

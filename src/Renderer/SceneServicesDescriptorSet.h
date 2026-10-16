@@ -76,6 +76,9 @@ public:
 
     VkDescriptorSetLayout Layout() const noexcept { return m_layout; }
 
+    // Opaque handle for code outside src/Renderer; valid for this object's lifetime.
+    DescriptorSetLayoutHandle LayoutHandle() const noexcept { return m_layoutHandle; }
+
     struct ResolvedSlot {
         VkImageView view = VK_NULL_HANDLE;
         VkSampler sampler = VK_NULL_HANDLE;
@@ -103,6 +106,7 @@ private:
     Renderer* m_renderer = nullptr;
     VkDevice m_device = VK_NULL_HANDLE; // cached at construction, for Destroy().
     VkDescriptorSetLayout m_layout = VK_NULL_HANDLE; // owned - hand-built, NOT reflected; must be destroyed by this class.
+    DescriptorSetLayoutHandle m_layoutHandle = DescriptorSetLayoutHandle::Invalid; // Non-owning handle to m_layout.
 
     struct PerViewSet {
         rg::RenderViewId view;

@@ -1,10 +1,10 @@
 #pragma once
 
+#include "../../Core/GraphicsHandles.h"
+
 #include "EntityBlueprint.h"
 #include "MaterialTextureGpuCache.h"
 #include "../Animation/SkeletalRigCache.h"
-
-#include <volk.h>
 
 #include <cstdint>
 #include <string>
@@ -74,21 +74,11 @@ struct MeshAssetPart {
 // are actually tested.
 class MeshAssetGpuCatalog {
 public:
-    // Loads (once per distinct `absoluteGtaPath`, then cached) and resolves
-    // a ready-to-instantiate ROOT+CHILDREN EntityBlueprint: root node named
-    // after the file stem, tagged with the source path (meshAssetSourcePath)
-    // - no MeshRenderer of its own; one child node per MeshAssetPart, named
-    // after its originating material where applicable. Returns a blueprint
-    // whose `children` is EMPTY (and which callers should therefore treat as
-    // a failure, never instantiating it) for anything that doesn't resolve
-    // to a valid, non-empty *.gta AssetType::Mesh file - missing file, bad
-    // magic, corrupt/truncated payload, or zero vertices/triangles.
-    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
-    // Layout() - forwarded straight through to EnsureMeshPipeline()/
-    // EnsureTexturedMeshPipeline() so every spawned part's pipeline can
-    // sample the real scene directional light/shadow map at set = 1.
+    // Loads (cached per path) and resolves a root + per-part children blueprint. `children` is empty
+    // when the file is missing, corrupt or has no geometry; callers treat that as failure.
+    // `sceneServicesSetLayout` is the layout of Core's scene-services set (pipeline set 1).
     EntityBlueprint Resolve(RenderSystem& renderSystem, Renderer& renderer, const std::string& absoluteGtaPath,
-        VkDescriptorSetLayout sceneServicesSetLayout);
+        DescriptorSetLayoutHandle sceneServicesSetLayout);
 
     // Read-only queries used by AnimationSystem (via MeshInstantiationSystem's
     // own forwarding methods) - see SkeletalRigCache.h for why the
@@ -138,9 +128,9 @@ public:
     void InvalidateCachedMeshAsset(const std::string& absoluteGtaPath);
 
 private:
-    PipelineHandle EnsureMeshPipeline(RenderSystem& renderSystem, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout);
+    PipelineHandle EnsureMeshPipeline(RenderSystem& renderSystem, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout);
     PipelineHandle EnsureTexturedMeshPipeline(
-        RenderSystem& renderSystem, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout);
+        RenderSystem& renderSystem, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
     const std::vector<MeshAssetPart>& EnsureMeshAsset(
         RenderSystem& renderSystem, Renderer& renderer, const std::string& absoluteGtaPath);

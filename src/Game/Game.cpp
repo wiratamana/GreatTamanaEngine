@@ -85,7 +85,7 @@ void Game::Update(const EngineContext& engineContext, const InputState& /*input*
     }
 }
 
-Entity Game::CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type, VkDescriptorSetLayout sceneServicesSetLayout)
+Entity Game::CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     return m_meshInstantiationSystem.SpawnPrimitive(m_registry, renderer, type, sceneServicesSetLayout);
 }
@@ -106,7 +106,7 @@ Entity Game::CreateDirectionalLightEntity()
 }
 
 Entity Game::CreateMeshEntityFromGtaFile(
-    Renderer& renderer, const std::string& absoluteGtaPath, VkDescriptorSetLayout sceneServicesSetLayout)
+    Renderer& renderer, const std::string& absoluteGtaPath, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     const Entity root = m_meshInstantiationSystem.SpawnMeshAsset(m_registry, renderer, absoluteGtaPath, sceneServicesSetLayout);
     if (root != kInvalidEntity) {
@@ -144,7 +144,7 @@ Entity Game::CreateMeshEntityFromGtaFile(
 }
 
 InstantiateMeshAssetOutcome Game::InstantiateMeshAssetFromGtaFile(
-    Renderer& renderer, const std::string& absoluteGtaPath, VkDescriptorSetLayout sceneServicesSetLayout)
+    Renderer& renderer, const std::string& absoluteGtaPath, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     InstantiateMeshAssetOutcome outcome;
 
@@ -172,7 +172,7 @@ bool Game::PlayAnimationOnEntity(Entity targetEntity, const std::string& absolut
 
 InstantiatePrimitiveOutcome Game::InstantiatePrimitive(Renderer& renderer, const std::string& shapeName,
     const std::string& requestedName, const Vec3& worldPosition, bool hasParent, const std::string& parentName,
-    VkDescriptorSetLayout sceneServicesSetLayout)
+    DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     InstantiatePrimitiveOutcome outcome;
 

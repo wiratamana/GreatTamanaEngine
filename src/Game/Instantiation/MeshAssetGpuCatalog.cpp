@@ -59,7 +59,7 @@ AABB ComputeSubsetLocalAABB(const std::vector<Vec3>& positions, const std::vecto
 } // namespace
 
 PipelineHandle MeshAssetGpuCatalog::EnsureMeshPipeline(
-    RenderSystem& renderSystem, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout)
+    RenderSystem& renderSystem, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     if (!m_meshPipeline.IsValid()) {
         m_meshPipeline = renderSystem.RegisterPipeline(renderer.CreatePipeline("shaders/Mesh.vert.spv",
@@ -70,7 +70,7 @@ PipelineHandle MeshAssetGpuCatalog::EnsureMeshPipeline(
 }
 
 PipelineHandle MeshAssetGpuCatalog::EnsureTexturedMeshPipeline(
-    RenderSystem& renderSystem, Renderer& renderer, VkDescriptorSetLayout sceneServicesSetLayout)
+    RenderSystem& renderSystem, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     if (!m_texturedMeshPipeline.IsValid()) {
         m_texturedMeshPipeline = renderSystem.RegisterPipeline(
@@ -271,7 +271,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
 }
 
 EntityBlueprint MeshAssetGpuCatalog::Resolve(RenderSystem& renderSystem, Renderer& renderer,
-    const std::string& absoluteGtaPath, VkDescriptorSetLayout sceneServicesSetLayout)
+    const std::string& absoluteGtaPath, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     const std::vector<MeshAssetPart>& parts = EnsureMeshAsset(renderSystem, renderer, absoluteGtaPath);
 

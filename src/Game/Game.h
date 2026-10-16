@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../Core/GraphicsHandles.h"
+
 #include "../Event/Event.h"
 #include "../Input/InputState.h"
 #include "../Core/EngineContext.h"
@@ -11,18 +13,6 @@
 #include "Physics/PhysicsSystem.h"
 #include "Renderer/Primitives/PrimitiveMeshGenerator.h"
 #include "RenderSystem.h"
-// editor-core-separation-2 campaign, PHASE2 - Game.h now #includes the
-// gte_core-owned IFrameDebuggerCaptureRecorder interface (src/Core/
-// FrameDebuggerCaptureRecorder.h) instead of forward-declaring the concrete,
-// gte_editor-only FrameDebuggerCaptureContext type - see that header's own
-// doc comment and PHASE0_MASTER_STRATEGY.md's Locked Design Decision #1.
-// Render() below only ever needs a POINTER to the interface, never
-// dereferencing it itself (it only ever forwards it onward into
-// RenderSystem::Draw()). MUST be included here, at file scope (NOT from
-// inside `namespace gte { ... }` below) - this header opens its own
-// `namespace gte { ... }` block, and including it from inside an
-// already-open `namespace gte { ... }` here would create a bogus nested
-// `gte::gte` namespace instead of extending the real `gte` namespace.
 #include "../Core/FrameDebuggerCaptureRecorder.h"
 
 #include <cstddef>
@@ -34,21 +24,8 @@ namespace gte {
 
 class Renderer;
 
-// Sits on top of Window/Renderer and has no direct knowledge of SDL, or of
-// Vulkan beyond the Renderer abstraction. Game is a thin COMPOSITION ROOT:
-// it owns the ECS World (m_registry) plus three collaborating systems -
-// RenderSystem (drawing), MeshInstantiationSystem (spawning primitives/
-// imported meshes), and AnimationSystem (playing back skeletal animation) -
-// and does nothing itself beyond entity/component lifecycle glue
-// (OnEvent/Update/Render) and one-line forwarding methods for its public
-// API. Game never touches a Mesh/Pipeline/Vulkan/skinning-cache detail
-// itself - all of the "how" lives in those three systems (and the smaller
-// pure modules they're built from - EntityBlueprint/EntityInstantiator,
-// MeshVertexPacking, MeshMaterialPartitioner, the Gpu catalogs, and the
-// three animation caches - see src/Game/*.h); Game only ever creates
-// entities/components indirectly through them and calls RenderSystem::Draw().
-// See GameInstantiationRefactorProposal.txt for the full design rationale
-// behind this split.
+// Composition root: owns the ECS registry plus the render, instantiation and animation systems.
+// It only does entity/component lifecycle glue and forwards its public API to those systems.
 class Game {
 public:
     Game() = default;
@@ -137,25 +114,10 @@ public:
     // doc comment for the full contract this forwards to.
     MeshInstantiationSystem& GetMeshInstantiationSystem() noexcept { return m_meshInstantiationSystem; }
 
-    // Spawns a new entity built from one of the engine's built-in primitive
-    // shapes (PrimitiveType - see Renderer/Primitives/
-    // PrimitiveMeshGenerator.h): a Transform at the origin (identity
-    // rotation/scale) plus a MeshRenderer referencing that shape's mesh -
-    // this engine's equivalent of Unity's GameObject.CreatePrimitive(), and
-    // deliberately a RUNTIME/Game-level operation rather than an Editor-only
-    // one (a real game could call this to spawn primitives too, exactly like
-    // Unity's own API is not editor-only). The Editor's "Hierarchy" right-
-    // click "Create 3D Object" menu (src/Editor/Panels/HierarchyPanel.cpp)
-    // is just the first caller of it. A one-line forward into
-    // MeshInstantiationSystem::SpawnPrimitive() - see that class (and
-    // PrimitiveGpuCatalog/EntityInstantiator, which it's built from) for the
-    // actual GPU-mesh-caching/entity-spawning behavior, unchanged from
-    // before this refactor.
-    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
-    // Layout() - deliberately no default value (see this document's own
-    // DECIDED rule): a missed caller is a compile error, never a silent
-    // pipeline/shader set=1 mismatch.
-    Entity CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type, VkDescriptorSetLayout sceneServicesSetLayout);
+    // Spawns an entity with an identity Transform and a MeshRenderer for a built-in primitive shape.
+    // `sceneServicesSetLayout` is the layout of Core's scene-services descriptor set; it has no default
+    // so a missed caller fails to compile.
+    Entity CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
     // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
     // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md)
@@ -173,69 +135,18 @@ public:
     Entity CreateDirectionalLightEntity();
 
 
-    // Spawns a whole hierarchy of entities from an imported *.gta
-    // AssetType::Mesh file (see src/Assets/MeshFile.h/PmxLoader.h - the
-    // result of importing a MikuMikuDance .pmx model via the Editor's
-    // "Project" panel) at `absoluteGtaPath` - this engine's answer to "drag
-    // a model asset into Hierarchy/Scene to instantiate it", the Mesh-asset
-    // equivalent of CreatePrimitiveEntity() above.
-    //
-    // A multi-part model is spawned as a real parent/child hierarchy
-    // (ECS/TransformHierarchy.h/Transform.h), not a flat list of independent
-    // siblings: ONE plain, empty ROOT entity (an identity Transform only -
-    // no MeshRenderer of its own, so it never renders anything by itself)
-    // is created first, named after the asset FILE itself (`absoluteGtaPath`'s
-    // own filename, minus its ".gta" extension - e.g. "Miku.gta" spawns a
-    // root named "Miku"), and every part entity is attached under it - moving/
-    // rotating/scaling the root moves the WHOLE model together, exactly like
-    // dragging a multi-material FBX/glTF model into a Unity scene creates one
-    // root GameObject with a child per submesh.
-    //
-    // A one-line forward into MeshInstantiationSystem::SpawnMeshAsset() (see
-    // that class, and MeshAssetGpuCatalog/EntityBlueprint/EntityInstantiator,
-    // which it's built from, for the full behavior this preserves exactly -
-    // material/texture partitioning, skinned-vs-static mesh upload, per-part
-    // naming, etc).
-    //
-    // Returns kInvalidEntity (never throws, and creates NO entities at all)
-    // if `absoluteGtaPath` doesn't currently resolve to a valid, non-empty
-    // *.gta AssetType::Mesh file (missing file, bad magic/wrong asset type,
-    // corrupt/truncated payload, or zero vertices/triangles) - the caller
-    // (HierarchyPanel/ScenePanel's drag-and-drop target) should simply
-    // ignore the drop in that case, same "degrade gracefully" convention as
-    // every other Editor drag-and-drop path (see AGENTS.md, "Editor Module
-    // Structure"). Otherwise returns the newly created ROOT entity.
-    //
-    // If the freshly-spawned model turns out to be SKINNED (has both a real
-    // bone hierarchy and matching per-vertex skin weights),
-    // MeshInstantiationSystem::TryGetSkinnedMeshData() is used right here to
-    // explicitly hand that data off to m_animationSystem's SkeletalRigCache
-    // (see AnimationSystem::RegisterSkinnedMesh()) - the one, real,
-    // visible-in-code wiring step that replaces the old hidden
-    // "EnsureMeshAsset() writes a private Game member, UpdateSkeletalAnimators()
-    // reads it" coupling (see GameInstantiationRefactorProposal.txt, Step
-    // 2.4/3.5).
-    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
-    // Layout() - deliberately no default value, same DECIDED rule as
-    // CreatePrimitiveEntity() above.
+    // Spawns a *.gta mesh asset as a hierarchy: one empty root named after the file, one child per part.
+    // Skinned models are handed to the animation system. Returns the root, or kInvalidEntity (no entities
+    // created, never throws) when the file is missing, corrupt or has no geometry.
+    // `sceneServicesSetLayout` is the layout of Core's scene-services descriptor set.
     Entity CreateMeshEntityFromGtaFile(
-        Renderer& renderer, const std::string& absoluteGtaPath, VkDescriptorSetLayout sceneServicesSetLayout);
+        Renderer& renderer, const std::string& absoluteGtaPath, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
-    // task_manager/stl-parser-2 campaign, PHASE3 - a network-command-friendly,
-    // Outcome-returning wrapper around CreateMeshEntityFromGtaFile() above -
-    // see that method's own doc comment for the FULL spawn behavior this
-    // preserves EXACTLY, unchanged (world origin, unparented, named after the
-    // file - PHASE0_MASTER_STRATEGY.md's Locked Design Decision #4, "bare-bones
-    // wrapper"). The only thing this method ADDS is a rich success/failure
-    // report: `outcome.success == false` (with `errorMessage` explaining why,
-    // and NO entity created) exactly when CreateMeshEntityFromGtaFile() would
-    // have returned kInvalidEntity - missing file, wrong/corrupt *.gta, or a
-    // decodable-but-empty (zero vertices/triangles) mesh. Never throws.
-    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
-    // Layout() - deliberately no default value, same DECIDED rule as
-    // CreateMeshEntityFromGtaFile() above (which this forwards into).
+    // Outcome-returning wrapper around CreateMeshEntityFromGtaFile(): `success == false` with an error
+    // message (and no entity) exactly when that call would return kInvalidEntity. Never throws.
+    // `sceneServicesSetLayout` is the layout of Core's scene-services descriptor set.
     InstantiateMeshAssetOutcome InstantiateMeshAssetFromGtaFile(
-        Renderer& renderer, const std::string& absoluteGtaPath, VkDescriptorSetLayout sceneServicesSetLayout);
+        Renderer& renderer, const std::string& absoluteGtaPath, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
     // Assigns/replaces the SkeletalAnimator component on `targetEntity` (a
     // live entity spawned by CreateMeshEntityFromGtaFile() - i.e. one that
@@ -343,41 +254,13 @@ public:
         return RenderSystem::CollectRenderables(m_registry).size();
     }
 
-    // Spawns a primitive shape by NAME (network-impl-3 campaign) - the same
-    // underlying spawn as CreatePrimitiveEntity() above (shares its GPU mesh/
-    // pipeline cache, PrimitiveGpuCatalog - a second "cube" spawned this way
-    // costs no new GPU upload), plus three additive steps: (1) `shapeName` is
-    // parsed case-insensitively via PrimitiveMeshGenerator::TryParsePrimitiveTypeName() -
-    // an unrecognized shape name fails the whole call (no entity created) with
-    // `errorMessage` explaining which names ARE valid; (2) `requestedName`
-    // (falling back to the shape's own ToString() when empty - e.g. an
-    // unqualified "Cube" for a plain cube spawn with no name given) is passed
-    // through EntityQuery.h's MakeUniqueEntityName() and the RESULT is what
-    // actually gets added as this entity's Name component - Unity's own
-    // "GameObject", "GameObject (1)", ... auto-de-duplication behavior (see
-    // AGENTS.md/network-impl-3's PHASE0's own Locked Design Decision #3);
-    // (3) the entity's Transform::position is set to `worldPosition` (valid
-    // since a freshly spawned, still-unparented entity's local position IS
-    // its world position - see ECS/Components/Transform.h), and if
-    // `hasParent` is true and `parentName` resolves (via EntityQuery.h's
-    // FindEntityByName()) to a live entity, ECS/TransformHierarchy.h's
-    // SetParent(..., worldPositionStays = true) attaches it there, preserving
-    // the exact world position just set. If `hasParent` is true but
-    // `parentName` does NOT resolve to a live entity, the entity is still
-    // created, left UNPARENTED (world space) -
-    // InstantiatePrimitiveOutcome::parentRequestedButNotFound is set to true
-    // and `requestedParentName` echoes `parentName` back, but this is never
-    // treated as a failure of the overall call (see network-impl-3's Locked
-    // Design Decision #2).
-    //
-    // Never throws. Returns an outcome with success == false (and creates NO
-    // entity at all) only for an unrecognized `shapeName`.
-    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
-    // Layout() - deliberately no default value, same DECIDED rule as
-    // CreatePrimitiveEntity() above (which this forwards into).
+    // Spawns a primitive by shape name (case-insensitive) with a unique name and world position, optionally
+    // parented by name. An unknown shape fails with no entity created. An unknown parent only sets
+    // `parentRequestedButNotFound` and leaves the entity unparented. Never throws.
+    // `sceneServicesSetLayout` is the layout of Core's scene-services descriptor set.
     InstantiatePrimitiveOutcome InstantiatePrimitive(Renderer& renderer, const std::string& shapeName,
         const std::string& requestedName, const Vec3& worldPosition, bool hasParent, const std::string& parentName,
-        VkDescriptorSetLayout sceneServicesSetLayout);
+        DescriptorSetLayoutHandle sceneServicesSetLayout);
 
     // Destroys the live entity (and every descendant of it - see
     // ECS/TransformHierarchy.h::DestroyEntityAndDescendants()) whose Name

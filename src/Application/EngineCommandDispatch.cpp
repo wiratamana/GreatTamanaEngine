@@ -10,7 +10,7 @@
 namespace gte {
 
 EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneIOCapability* sceneIOCapability,
-    IHotReloadDebugCapability* hotReloadDebugCapability, VkDescriptorSetLayout sceneServicesSetLayout,
+    IHotReloadDebugCapability* hotReloadDebugCapability, DescriptorSetLayoutHandle sceneServicesSetLayout,
     const EngineCommandRequest& request)
 {
     EngineCommandResult result;
@@ -26,11 +26,7 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneI
         result.deleteEntity = game.DeleteEntityByName(request.deleteEntity.name);
         break;
     }
-    // network-impl-5 campaign - neither of these two touches `renderer` at
-    // all (see PHASE2's own Testability note) - `renderer` stays
-    // unreferenced in these two branches, exactly mirroring
-    // DeleteEntity's own branch immediately above, which also never
-    // touches it.
+    // These two cases do not touch `renderer`.
     case EngineCommandKind::SetEntityTrs: {
         result.setEntityTrs = game.SetEntityTrs(request.setEntityTrs);
         break;
@@ -39,26 +35,13 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneI
         result.instantiateLight = game.InstantiateLight(request.instantiateLight);
         break;
     }
-    // task_manager/stl-parser-2 campaign, PHASE3 - spawns an already-
-    // imported Mesh *.gta asset. Touches `renderer` (the freshly-spawned
-    // GPU mesh must be uploaded through it), unlike SetEntityTrs/
-    // InstantiateLight immediately above.
+    // Spawns an imported mesh asset; uploads its GPU mesh through `renderer`.
     case EngineCommandKind::InstantiateMeshAsset: {
         result.instantiateMeshAsset = game.InstantiateMeshAssetFromGtaFile(
             renderer, request.instantiateMeshAsset.absoluteGtaPath, sceneServicesSetLayout);
         break;
     }
-    // task_manager/scene-serialization-2 campaign, PHASE5
-    // (PHASE5_NETWORK_SAVE_LOAD_SCENE_ENDPOINTS.md) - thin network bridge
-    // to Editor/SceneIO.h's SaveScene()/LoadScene(), now reached ONLY
-    // through the nullable ISceneIOCapability* hook (editor-core-separation-1
-    // campaign, PHASE6 - PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md)
-    // instead of a compile-time `#if GTE_ENABLE_EDITOR`. `sceneIOCapability
-    // == nullptr` (a future Player host, or today's GTE_ENABLE_EDITOR=OFF
-    // configuration - see Application.cpp's own PHASE6 wiring comment) hits
-    // the EXACT SAME fallback message this function's old `#else` branch
-    // used to set - a behavior-preserving refactor, not a chance to change
-    // what a capability-less build reports.
+    // Scene save/load goes through the scene IO capability; a null capability answers "not available".
     case EngineCommandKind::SaveScene: {
         if (sceneIOCapability != nullptr) {
             const std::filesystem::path path = request.saveScene.path.empty()
@@ -88,12 +71,7 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneI
         }
         break;
     }
-    // editor-core-separation-12 campaign, PHASE2 (Project Assembly Hot
-    // Reload plan, BIG-STEP 1) - reuses this SAME single-global-slot bridge
-    // for a READ-ONLY ECS world/scene snapshot request (see
-    // Core/EditorCapabilities.h's IHotReloadDebugCapability doc comment for
-    // why this must run through the main-thread-only bridge rather than a
-    // direct network-thread read of the live Registry).
+    // Read-only scene snapshot; runs here because the live registry is main-thread only.
     case EngineCommandKind::GetSceneSnapshot: {
         if (hotReloadDebugCapability != nullptr) {
             result.getSceneSnapshot.sceneJson = hotReloadDebugCapability->BuildSceneSnapshotJson(game);
@@ -105,35 +83,14 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneI
         }
         break;
     }
-    // editor-core-separation-15 campaign, PHASE4 (Project Assembly Hot
-    // Reload plan, BIG-STEP 4) - LDD-HR6. The ONE narrow, hardcoded,
-    // testing-only mutation route - sets the live "ProbeHotReloadMarker"
-    // component's own "value" field on whichever entity currently carries
-    // it, via the SAME generic, already-existing reflection primitives
-    // every other generic field-apply call site in this engine already
-    // uses - the ENTITY LOOKUP and the COMPONENT/FIELD NAMES this one case
-    // targets are hardcoded, permanently, to "ProbeHotReloadMarker"/"value"
-    // only (see Core/EditorCapabilities.h's own doc comment on this method).
+    // Test-only route: sets "value" on the first entity carrying the "ProbeHotReloadMarker" component.
     case EngineCommandKind::SetProbeHotReloadMarkerValueForTesting: {
         bool success = false;
         if (const ComponentTypeDescriptor* descriptor = ComponentTypeRegistry::Instance().Find("ProbeHotReloadMarker");
             descriptor != nullptr) {
             for (const Entity root : GetChildren(game.GetRegistry(), kInvalidEntity)) {
                 if (void* component = descriptor->tryGetMutableComponent(game.GetRegistry(), root); component != nullptr) {
-                    // MUST be a JSON OBJECT keyed by the field's own name
-                    // ("value"), never the bare scalar itself -
-                    // FieldDescriptor::readJson()'s real implementation
-                    // (ReflectFieldMacros.h's GTE_REFLECT_FIELD-generated
-                    // lambda) does `in.contains(#member)` /
-                    // `in.at(#member)` internally - passing a bare
-                    // nlohmann::json(value) here would make contains()
-                    // silently return false (nlohmann::json::contains() on
-                    // a non-object value is well-defined and simply
-                    // returns false, never throws), so readJson() would
-                    // silently return true having written NOTHING - a
-                    // false-positive "success" that never actually mutates
-                    // anything. Confirmed against the real, current
-                    // ReflectFieldMacros.h before writing this.
+                    // readJson() expects an object keyed by the field name, not a bare scalar.
                     nlohmann::json fields;
                     fields["value"] = request.setProbeHotReloadMarkerValueForTesting.value;
                     std::string errorMessage;
@@ -142,7 +99,7 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneI
                             success = field.readJson(component, fields, errorMessage);
                         }
                     }
-                    break; // First live entity carrying this component wins - Step 1's own fixture is a single, plain root, so this is unambiguous.
+                    break; // The first entity carrying the component wins.
                 }
             }
         }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../Core/GraphicsHandles.h"
+
 #include "../Math/Mat4.h"
 #include "../Math/Vec3.h"
 #include "../Renderer/RenderTexture.h"
@@ -348,109 +350,26 @@ public:
     // comment for the full reasoning.
     virtual void SetSceneViewCompositedTexture(RenderTexture* texture) = 0;
 
-    // Records the Editor's "Scene" panel infinite ground grid (see
-    // task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md) directly
-    // against `cmd` - called by Application::Run() from INSIDE
-    // AddSceneViewPass()'s own execute callback (RenderPasses.cpp), i.e.
-    // still inside that pass's open vkCmdBeginRendering/vkCmdEndRendering
-    // bracket, immediately AFTER Game::Render() has already recorded the real
-    // scene geometry for this frame - this exact ordering is what makes the
-    // grid correctly depth-tested/occluded by scene objects already in front
-    // of it (see SceneGridRenderer::Draw()'s own doc comment).
-    // `sceneViewProjection` is the exact same combined view-projection matrix
-    // Game::Render() was just called with for this same pass (see
-    // IEditorLayer::SceneViewProjection()). Always a safe no-op for
-    // NullEditorLayer (a release build has no "Scene" panel, and this is
-    // simply never meaningfully reachable there either way, since
-    // SceneViewTarget() already always returns nullptr for it).
+    // Records the Scene panel's ground grid into `cmd`, inside the open Scene view pass after the scene
+    // geometry so the grid is depth-tested. `sceneViewProjection` is the matrix the scene was drawn with.
+    // A no-op for NullEditorLayer.
     virtual void RenderSceneGrid(Renderer& renderer, VkCommandBuffer cmd, const Mat4& sceneViewProjection) = 0;
 
-    // Builds every editor panel for this frame - top menu bar (File > Exit,
-    // ...), Hierarchy (left), Inspector (right), Scene/Game (tabbed,
-    // center), and Memory (bottom, a Unity-Memory-Profiler-style GPU memory
-    // panel - see Panels/MemoryPanel.cpp) inside a full-viewport ImGui
-    // docking DockSpace, so the user can freely rearrange/split them (e.g.
-    // drag Scene and Game apart to view both at once). `game` is the same
-    // Game Application owns - Hierarchy lists its ECS world's entities
-    // (Game::GetRegistry()) and spawns new primitive entities via
-    // Game::CreatePrimitiveEntity() (its "Create 3D Object" context menu -
-    // see Panels/HierarchyPanel.cpp), Inspector edits the selected entity's
-    // components. Taking `Game&` here (rather than pre-extracting just
-    // Registry&, as before Create 3D Object existed) does not widen what the
-    // Editor can see: every panel still only ever calls Game's own small,
-    // deliberate public API (GetRegistry()/CreatePrimitiveEntity()), never
-    // anything Game keeps private (RenderSystem, Mesh/Pipeline pools, ...) -
-    // see Game.h's class comment. `renderer` is the same Renderer this
-    // Editor was constructed with (see CreateEditorLayer() below) - Memory
-    // reads its GetMemoryTotals()/GetMemoryResources() to show live GPU
-    // memory usage, and CreatePrimitiveEntity() needs it to build/upload
-    // that shape's GPU mesh the first time it's requested. Call after Game
-    // has finished rendering into GameViewTarget()/SceneViewTarget()
-    // (whichever came back non-null), so the "Game"/"Scene" panels have
-    // fresh contents to display this frame.
-    // `renderGraph` (Phase 8 -
-    // RENDERGRAPH_PHASE8_EDITOR_DEBUG_TOOLING_STRATEGY_v1.md) is the SAME
-    // gte::rg::RenderGraph Application drives every frame (two Execute()
-    // calls - see Application::Run()) - the "Render Graph" panel
-    // (Panels/RenderGraphPanel.h) reads its LastSnapshot() to show which
-    // passes ran/were culled last time each regime executed. Never mutated
-    // by the Editor - purely observed, same spirit as `game`/`renderer`
-    // above. `gpuDrivenBatchDebugInfo` (GPU-Driven Frustum Culling + Indirect
-    // Draw campaign, render-pass-5, PHASE6) is this frame's freshly-built
-    // "instances culled this frame" readout, one entry per real, eligible
-    // GPU-driven batch (Game View only - Locked Design Decision 11,
-    // PHASE0_MASTER_STRATEGY.md) - the "Render Graph" panel displays it
-    // alongside its own existing per-pass draw-call/triangle stats. Always
-    // empty on a frame with no eligible batch (including every frame in a
-    // release/non-Editor build, trivially, since this whole method is never
-    // called there).
-    // `renderFeatureEntries` (editor-core-separation-6 campaign, PHASE7 -
-    // PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) is this frame's freshly-built
-    // snapshot of every loaded `_v2` render-feature plugin's own REAL,
-    // resolved ordering decision (Core::GetRenderFeatureCompositor()-
-    // >DebugSnapshot(), or an empty vector when there is no compositor/no
-    // loaded `_v2` plugin) - the "Render Graph" panel's new "Plugin Render
-    // Features" section displays it, mirroring `gpuDrivenBatchDebugInfo`
-    // immediately above exactly (always empty on a frame/build with nothing
-    // to show). Placed LAST so every existing call site needs only one new
-    // trailing argument, never a full argument-order rewrite.
+    // Builds every editor panel for this frame inside a full-viewport dock space. Call after Game has
+    // rendered into the view targets so the Game/Scene panels show fresh contents.
+    // `renderGraph` is observed only. `gpuDrivenBatchDebugInfo` has one entry per GPU-driven batch (Game view).
+    // `renderFeatureEntries` is the resolved ordering of loaded render-feature plugins; empty when none.
     virtual void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
         const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
         const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
-        // editor-core-separation-8 campaign, PHASE3 - NEVER null (Core owns
-        // exactly one instance as a plain value member - see
-        // Core::GetRenderPassToggleRegistryMutable()). The "Render Graph" panel
-        // (PHASE4) reads/writes THROUGH this exact reference to draw and mutate
-        // its own "Enabled" checkbox column - see PHASE0_MASTER_STRATEGY.md's
-        // Step 2.6 for why this is passed as a plain mutable reference rather
-        // than routed through a bridge: both this call and
-        // RenderPipeline::DeclareOnePhase()'s own consult of the SAME registry
-        // happen on the main thread only, so there is no data race to guard
-        // against here (unlike the genuinely cross-thread HTTP path, PHASE5).
+        // Never null. The Render Graph panel reads and edits pass toggles through it (main thread only).
         rg::RenderPassToggleRegistry& renderPassToggleRegistry,
-        // editor-core-separation-8 campaign, PHASE3 - NULLABLE, mirroring
-        // Core::GetRenderFeatureCompositor()'s own existing nullability exactly
-        // (null whenever no loaded _v2 plugin exists this session). The "Render
-        // Graph" panel's own per-plugin-feature "Enabled" checkbox + priority
-        // DragInt (PHASE4) call SetFeatureEnabled()/SetFeaturePriority()
-        // directly through this pointer, always null-checked first.
+        // Null when no render-feature plugin is loaded. The panel edits plugin enable/priority through it.
         RenderFeatureCompositor* renderFeatureCompositor,
-        // editor-core-separation-22 campaign, PHASE6
-        // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3 item 2) -
-        // NEW, TRAILING parameter (every pre-existing call site keeps
-        // compiling with exactly one new argument, mirroring every prior
-        // BuildUI() extension above). NEVER null - Core owns exactly one
-        // instance as a plain value member (Core::m_offscreenBlackboardThisFrame),
-        // exposed via Core::GetOffscreenBlackboardForFrameDebugger() - see
-        // that accessor's own doc comment (Core.h) for why reading it here,
-        // AFTER Core::BuildFrame() has already returned this same frame, is
-        // safe. Forwarded through to Panels/FrameDebuggerPanel.cpp's new
+        // Never null. The offscreen blackboard of this frame, read by the Frame Debugger panel.
         const rg::RenderPassBlackboard& offscreenBlackboard,
-        // Stage 2 (Universal Lit Shader) - NEW, TRAILING parameter. Core's
-        // real SceneServicesDescriptorSet::Layout() - forwarded into every
-        // Editor-side spawn path (Hierarchy/Scene panel drag-and-drop,
-        // File > Open Scene) that must build a Pipeline opting into set=1.
-        VkDescriptorSetLayout sceneServicesSetLayout) = 0;
+        // Layout of Core's scene-services descriptor set, used by editor spawn paths.
+        DescriptorSetLayoutHandle sceneServicesSetLayout) = 0;
 
     // Records this frame's UI draw data into cmd. Called from inside
     // Renderer::Present()'s recordExtra hook - i.e. while the swapchain
@@ -737,27 +656,11 @@ public:
     // CommandBuffer::Draw() call sites exist anywhere in this engine yet).
     virtual FrameDebuggerEventTextureResult FrameDebuggerGetEventTexture(int eventIndex) = 0;
 
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
-    // - spawns `instanceCount` new entities sharing one hand-authored,
-    // untextured, indexed, VertexLayout::PositionNormal Mesh+Pipeline pair
-    // (see src/Editor/GpuDrivenBatchTestSpawner.h) - the real, repeatable
-    // way to get at least one live GPU-driven-eligible batch
-    // (>= kMinInstancesForGpuDrivenBatch) into the scene, confirmed via
-    // ask_questions since no existing demo-scene/asset content already
-    // qualifies. `game`/`renderer` are the SAME Game/Renderer Application
-    // owns - mirrors CreatePrimitiveEntity()'s own "Editor hands Game/
-    // Renderer through, the real spawn logic lives elsewhere" shape. Always
-    // returns success == false, editorAvailable == false for NullEditorLayer
-    // (a release build has no Editor-only validation tooling to spawn
-    // through at all) - mirrors ImportExternalAssetIntoProject()'s own
-    // "editorAvailable"-style graceful-unavailability precedent (editor-
-    // core-separation-1 campaign, PHASE8 - see GpuDrivenTestBatchSpawnResult's
-    // own doc comment above).
-    // `sceneServicesSetLayout` must be Core's real SceneServicesDescriptorSet::
-    // Layout() - forwarded into GpuDrivenBatchTestSpawner::Spawn().
+    // Spawns `instanceCount` entities sharing one indexed mesh and pipeline, forming a GPU-driven batch.
+    // Always unavailable (success == false) for NullEditorLayer.
+    // `sceneServicesSetLayout` is the layout of Core's scene-services descriptor set.
     virtual GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(
-        Game& game, Renderer& renderer, std::uint32_t instanceCount, VkDescriptorSetLayout sceneServicesSetLayout) = 0;
+        Game& game, Renderer& renderer, std::uint32_t instanceCount, DescriptorSetLayoutHandle sceneServicesSetLayout) = 0;
 
     // Hands every built-in feature module constructed this session (see
     // src/Core/Plugins/BuiltinFeatureModuleRegistry.h) to the real Editor

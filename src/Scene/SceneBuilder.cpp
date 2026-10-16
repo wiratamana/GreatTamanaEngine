@@ -122,7 +122,7 @@ void ClearEntireScene(Registry& registry)
 // here - this is a pure code-motion refactor; fix bugs, if any are ever
 // found, only as their own, separately-justified change.
 void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDocument& document,
-    const AssetDatabase& assetDatabase, VkDescriptorSetLayout sceneServicesSetLayout)
+    const AssetDatabase& assetDatabase, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     Registry& registry = game.GetRegistry();
 

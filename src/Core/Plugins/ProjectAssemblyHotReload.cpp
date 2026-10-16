@@ -58,7 +58,7 @@ void RestoreProjectAssemblyHotReloadState(Core& core, Renderer& renderer, const 
     // solid the entire time, LDD-HR4).
     ClearEntireScene(core.GetGame().GetRegistry());
     ReconstructSceneFromDocument(
-        core.GetGame(), renderer, snapshot.document, core.GetAssetDatabase(), core.GetSceneServicesDescriptorSet().Layout());
+        core.GetGame(), renderer, snapshot.document, core.GetAssetDatabase(), core.GetSceneServicesDescriptorSet().LayoutHandle());
 
     GTE_LOG_INFO("ProjectAssemblyHotReload",
         "RestoreProjectAssemblyHotReloadState: restored " + std::to_string(snapshot.document.entities.size()) + " entities.");

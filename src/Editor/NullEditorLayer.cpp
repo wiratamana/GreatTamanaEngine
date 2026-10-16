@@ -41,7 +41,7 @@ public:
         rg::RenderPassToggleRegistry& /*renderPassToggleRegistry*/,
         RenderFeatureCompositor* /*renderFeatureCompositor*/,
         const rg::RenderPassBlackboard& /*offscreenBlackboard*/,
-        VkDescriptorSetLayout /*sceneServicesSetLayout*/) override
+        DescriptorSetLayoutHandle /*sceneServicesSetLayout*/) override
     {
     }
     void Render(VkCommandBuffer /*cmd*/) override { }
@@ -108,7 +108,7 @@ public:
     // available" precedent above.
     GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(
         Game& /*game*/, Renderer& /*renderer*/, std::uint32_t /*instanceCount*/,
-        VkDescriptorSetLayout /*sceneServicesSetLayout*/) override
+        DescriptorSetLayoutHandle /*sceneServicesSetLayout*/) override
     {
         GpuDrivenTestBatchSpawnResult result;
         result.success = false;

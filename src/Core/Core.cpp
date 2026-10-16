@@ -832,7 +832,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                         inputs.mesh = m_game.GetRenderSystem().TryGetMesh(meshHandle);
                         try {
                             inputs.pipeline = &m_gpuDrivenBatchCache.ResolveInstancedPipeline(
-                                m_renderer, originalPipelineHandle, m_sceneServicesDescriptorSet.Layout());
+                                m_renderer, originalPipelineHandle, m_sceneServicesDescriptorSet.LayoutHandle());
                         } catch (const std::exception& e) {
                             const std::string failure =
                                 std::string("GpuDrivenBatches: failed to resolve instanced pipeline: ") + e.what();
@@ -1132,7 +1132,7 @@ void Core::BuildFrame()
                                 bool instancedPipelineResolved = true;
                                 try {
                                     m_gpuDrivenBatchCache.ResolveInstancedPipeline(
-                                        m_renderer, frameEntry.pipeline, m_sceneServicesDescriptorSet.Layout());
+                                        m_renderer, frameEntry.pipeline, m_sceneServicesDescriptorSet.LayoutHandle());
                                 } catch (const std::exception& e) {
                                     const std::string failure =
                                         std::string("GpuDrivenBatches: failed to resolve instanced pipeline for a batch: ")
