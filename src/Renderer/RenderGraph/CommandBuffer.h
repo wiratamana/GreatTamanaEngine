@@ -84,7 +84,7 @@ public:
     // --- Compute Recording ---
 
     // Stages push constants for the next dispatch (bytes are copied). A block over kMaxPushConstantBytes, or null
-    // data with a size, stages nothing and logs one error; debug builds assert.
+    // data with a size, logs one error and makes Dispatch() skip until the next valid call; debug builds assert.
     void SetPushConstants(const void* data, std::uint32_t size) noexcept;
 
     template <typename T>
@@ -128,6 +128,7 @@ private:
     VkDescriptorSet m_boundDescriptorSet = VK_NULL_HANDLE;
     std::array<std::byte, kMaxPushConstantBytes> m_pushConstantData{}; // Copied in SetPushConstants().
     std::uint32_t m_pushConstantSize = 0;
+    bool m_pushConstantsRejected = false; // The last SetPushConstants() was invalid: Dispatch() does nothing.
 
     VkPipelineLayout m_boundGraphicsLayout = VK_NULL_HANDLE;
 };

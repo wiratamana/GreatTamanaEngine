@@ -19,12 +19,20 @@ namespace gte::rg {
 
 namespace {
 
+std::atomic_flag g_undefinedFormatLogged;
+std::atomic_flag g_oversizedPushLogged;
+std::atomic_flag g_nullPushLogged;
+
+void LogErrorOnce(std::atomic_flag& flag, const char* message)
+{
+    if (!flag.test_and_set()) {
+        GTE_LOG_ERROR("CommandBuffer", message);
+    }
+}
+
 void LogUndefinedWriteFormatOnce()
 {
-    static std::atomic_flag logged;
-    if (!logged.test_and_set()) {
-        GTE_LOG_ERROR("CommandBuffer", "Draw target has a pixel format the engine does not know; Frame Debugger capture skipped.");
-    }
+    LogErrorOnce(g_undefinedFormatLogged, "Draw target has a pixel format the engine does not know; Frame Debugger capture skipped.");
 }
 
 } // namespace
@@ -46,20 +54,16 @@ void CommandBuffer::SetPushConstants(const void* data, std::uint32_t size) noexc
         && "CommandBuffer::SetPushConstants(): supplied size does not match the bound ComputePipeline's own "
            "reflected push-constant size - see ComputePipeline::PushConstantSize()/ShaderReflection.h.");
     assert(size <= kMaxPushConstantBytes && "CommandBuffer::SetPushConstants(): push constants exceed 128 bytes.");
+    m_pushConstantsRejected = false;
+    m_pushConstantSize = 0;
     if (size > kMaxPushConstantBytes) {
-        static std::atomic_flag logged;
-        if (!logged.test_and_set()) {
-            GTE_LOG_ERROR("CommandBuffer", "SetPushConstants: block is larger than 128 bytes; push constants dropped.");
-        }
-        m_pushConstantSize = 0;
+        LogErrorOnce(g_oversizedPushLogged, "SetPushConstants: block is larger than 128 bytes; the dispatch is skipped.");
+        m_pushConstantsRejected = true;
         return;
     }
     if (size > 0 && data == nullptr) {
-        static std::atomic_flag logged;
-        if (!logged.test_and_set()) {
-            GTE_LOG_ERROR("CommandBuffer", "SetPushConstants: null data with a non-zero size; push constants dropped.");
-        }
-        m_pushConstantSize = 0;
+        LogErrorOnce(g_nullPushLogged, "SetPushConstants: null data with a non-zero size; the dispatch is skipped.");
+        m_pushConstantsRejected = true;
         return;
     }
     if (size > 0) {
@@ -85,7 +89,7 @@ void CommandBuffer::Dispatch(std::uint32_t groupX, std::uint32_t groupY, std::ui
            "PassContext (see RenderGraph::BuildPassContext()).");
     assert(m_boundComputePipeline != nullptr
         && "CommandBuffer::Dispatch(): no compute pipeline bound - call BindComputePipeline() first.");
-    if (m_renderer == nullptr || m_boundComputePipeline == nullptr) {
+    if (m_renderer == nullptr || m_boundComputePipeline == nullptr || m_pushConstantsRejected) {
         return;
     }
 

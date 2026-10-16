@@ -871,15 +871,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 return;
             }
 
-            const std::vector<DrawCommand> transparentCommands =
-                RenderSystem::CollectTransparentRenderables(m_game.GetRegistry());
-            const bool hasOverlay = static_cast<bool>(viewData->recordSceneOverlay);
-
-            if (transparentCommands.empty() && !hasOverlay) {
-                return;
-            }
-
-            if (!hasOverlay) {
+            if (!viewData->recordSceneOverlay) {
                 return;
             }
 

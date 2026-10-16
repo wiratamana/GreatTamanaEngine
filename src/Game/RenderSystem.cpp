@@ -30,13 +30,6 @@ std::vector<DrawCommand> RenderSystem::CollectRenderables(Registry& registry)
     return commands;
 }
 
-// Always empty: nothing marks a renderable transparent yet.
-std::vector<DrawCommand> RenderSystem::CollectTransparentRenderables(Registry& registry)
-{
-    (void)registry;
-    return {};
-}
-
 Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float aspectWidthOverHeight)
 {
     ComponentStorage<Camera>& cameras = registry.Storage<Camera>();

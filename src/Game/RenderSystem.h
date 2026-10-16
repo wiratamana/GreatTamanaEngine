@@ -63,9 +63,6 @@ public:
     // One DrawCommand per entity with a MeshRenderer, with its world matrix. Touches only `registry`.
     static std::vector<DrawCommand> CollectRenderables(Registry& registry);
 
-    // Transparent renderables. Always empty: nothing marks a renderable transparent yet.
-    static std::vector<DrawCommand> CollectTransparentRenderables(Registry& registry);
-
     // View-projection of the first active Camera, or identity when there is none.
     static Mat4 ResolveActiveCameraViewProjection(Registry& registry, float aspectWidthOverHeight);
 
