@@ -1,10 +1,6 @@
 #version 450
 
-// Fragment shader half of the primitive-shape draw path (see Triangle.vert).
-// Real per-pixel lighting: samples the actual scene directional light +
-// shadow map via the shared ApplyDirectionalLightAndReceiverMask() function
-// (src/Shaders/DirectionalLightingAndReceiverMask.glsl), using the
-// interpolated per-vertex color as the base tint.
+// Primitive-shape fragment shader: directional light and shadow receiver mask, tinted by the vertex color.
 
 #include "DirectionalLightingAndReceiverMask.glsl"
 

@@ -3,165 +3,90 @@
 _Part of [GreatTamanaEngine](../../AGENTS.md)'s contributor conventions. See
 [docs/README.md](../README.md) for the full documentation index._
 
-## The problem this exists to prevent
+## The problem
 
-A real, live bug shipped from trusting application data for Dear ImGui widget
-ID uniqueness. Full forensic root-cause writeup:
-`C:\Users\F5954\Documents\TAMANA\GreatTamanaEngin-Ideas\bugs\2026-09-25_RenderGraphPanel_Duplicate_Checkbox_ID_Highlight_Bug.txt`.
-In short: `src/Editor/Panels/RenderGraphPanel.cpp`'s `BuildPassRow()` used to
-build a checkbox's ImGui ID purely from `"##Enabled_" + pass.name`. The
-"Offscreen Regime (Game View + Scene View)" table intentionally lists Game
-View's and Scene View's render-graph passes together, in one flat list, in
-one frame — and two Atmosphere passes are registered under a hard-coded
-literal name that is never made unique per view (a permanent, intentional
-design choice — see below), so the SAME name appeared twice in that one
-table, twice in one frame, and both rows' checkboxes ended up sharing the
-literal same ImGui ID. Dear ImGui's own built-in "ID Conflict" debug safety
-net (`io.ConfigDebugHighlightIdConflicts`, default `true`,
-`third_party/imgui/imgui.cpp`) then drew a red rectangle around both rows and
-showed a "Programmer error: N visible items with conflicting ID!" tooltip the
-instant either row was hovered — which looked exactly like a rendering bug,
-and cost real investigation time to correctly diagnose.
+Dear ImGui builds a widget's ID from the ID stack plus the label. Two widgets
+with the same ID in one frame silently share state. Dear ImGui's own safety net
+(`io.ConfigDebugHighlightIdConflicts`, default `true`) then draws a red rectangle
+around both widgets and shows "Programmer error: N visible items with conflicting
+ID!" on hover. It looks like a rendering bug and is slow to diagnose.
 
-The fix campaign that produced everything on this page is
-`task_manager/editor-core-separation-10/PHASE0_MASTER_STRATEGY.md` (four
-phases: detection foundation, the helper + the exact reported bug fixed,
-an Editor-wide retrofit sweep, then this documentation + a full regression
-pass). **The root cause — the two Atmosphere passes sharing one hard-coded
-name — was deliberately, permanently left untouched by that campaign**; see
-"What this does NOT fix" below.
+Pass names are not unique per view. The Atmosphere feature declares
+`"AtmosphereSkyViewLutPass"` and `"AtmosphereAerialPerspectiveVolumePass"` once
+for the Game view and once for the Scene view, under the same literal names
+(`src/Features/Atmosphere/AtmosphereFeature.cpp`, `ViewLuts()`). The toggle
+registry is keyed by pass name, so one checkbox controls both. Any UI list that
+builds an ID from a pass name alone can therefore see the same name twice in one
+frame. Never assume a data string is unique.
 
-## The two-layer system
+## The system
 
-### Layer 1 (structural prevention): `gte::ScopedUniqueId`
+### Layer 1: `gte::ScopedUniqueId`
 
-`src/Editor/ImGuiUniqueId.h`/`.cpp` — the ONE mandated way to enter a
-per-iteration Dear ImGui ID scope for any widget built inside a loop over
-runtime data. Construct it with the loop's own distinct iteration index —
-never a data-derived string alone — plus an optional human-readable debug
-key, and it manages `ImGui::PushID()`/`ImGui::PopID()` for you (an
-index-based push for real uniqueness, then an optional cosmetic nested
-push of the debug key purely for legibility under Dear ImGui's own Item
-Picker and this system's own conflict-log messages).
+`src/Editor/ImGuiUniqueId.h/.cpp` is the way to enter a per-iteration ID scope for
+any widget built inside a loop over runtime data. Construct it with the loop's own
+iteration index, a context string, and an optional debug key. It pushes the index
+(this gives the uniqueness), then pushes the debug key (only for readability in
+Dear ImGui's Item Picker and in log messages). It pops both in its destructor.
+It is a scope guard: not copyable, not movable.
 
 ```cpp
-// GOOD - index is always distinct across the loop's own iterations, in the
-// SAME frame, regardless of what any data string contains.
+// GOOD: the index differs for every iteration, whatever the data contains.
 for (std::size_t i = 0; i < items.size(); ++i) {
     gte::ScopedUniqueId idScope(static_cast<int>(i), "MyPanel::BuildRow", items[i].name.c_str());
     ImGui::Checkbox("##Enabled", &items[i].enabled);
 }
 
-// BAD - never do this. "This name is always unique" is NEVER a safe
-// assumption to build widget-ID uniqueness on top of - two rows with the
-// same items[i].name silently collide, and Dear ImGui's own red-highlight
-// safety net is the ONLY thing that will ever tell you (if you're lucky
-// enough to hover the right widget).
+// BAD: two rows with the same name collide.
 ImGui::PushID(items[i].name.c_str());
 ImGui::Checkbox(("##Enabled_" + items[i].name).c_str(), &items[i].enabled);
 ImGui::PopID();
 ```
 
-`ScopedUniqueId` is non-copyable and non-movable (it is a scope guard, not a
-value type) and its destructor pops in the correct reverse order regardless
-of how many pushes its constructor performed.
+### Layer 2: conflict detection
 
-### Layer 2 (proactive detection, a safety net for future code that bypasses Layer 1)
+- `src/Editor/ImGuiIdConflictTracker.h/.cpp`: a small class with no ImGui or
+  logger dependency. It works on plain `std::uint32_t` IDs (`Reset()`,
+  `RegisterAndCheckConflict()`, `DistinctIdCount()`).
+- `src/Editor/ImGuiIdConflictGuard.h/.cpp`: a process-global, main-thread-only
+  singleton on top of it.
+  - `BeginFrame()` runs once per UI frame from `ImGuiEditorLayer::NewFrame()`,
+    before any panel builds a widget. It resets the per-frame tracker. It does
+    not reset the set of ongoing conflicts.
+  - `CheckCurrentIdScope(debugContext, debugKey)` runs in the `ScopedUniqueId`
+    constructor. It reads the current ID with `ImGui::GetID("")` and checks it
+    against this frame's tracker.
 
-`src/Editor/ImGuiIdConflictTracker.h`/`.cpp` is a small, standalone,
-Tier-1-tested class (`tests/Editor/ImGuiIdConflictTrackerTests.cpp`) with
-ZERO dependency on `<imgui.h>` or `Logger` — it operates purely on plain
-`std::uint32_t` values a caller already resolved (`Reset()`,
-`RegisterAndCheckConflict(std::uint32_t)`, `DistinctIdCount()`).
+A conflict is logged with `GTE_LOG_ERROR("ImGuiIdConflict", ...)`, visible in the
+Editor "Log" panel and at `GET /get_logs?category=ImGuiIdConflict`. It is logged
+once when an ID starts to conflict. While the same conflict continues, the log
+stays silent. When the conflict has cleared for a frame and then comes back, it
+is logged again. The check never asserts, throws or crashes.
 
-`src/Editor/ImGuiIdConflictGuard.h`/`.cpp` is the real, Editor-owned,
-process-global, main-thread-only singleton built on top of it (mirroring
-`LoggerLogSink::Instance()`'s exact shape) — deliberately untested by any
-automated test, exactly like every other ImGui/Vulkan-owning class in this
-codebase (the same pure-vs-owning split `AGENTS.md` already documents for
-`GpuMemoryTracker` vs every Vulkan-owning class):
+### Layer 3: Dear ImGui's own highlight
 
-- `BeginFrame()` — called once per real UI frame from
-  `ImGuiEditorLayer::NewFrame()`, immediately after `ImGui::NewFrame()` and
-  before any panel builds a single widget. Resets the per-frame tracker;
-  does NOT reset which conflicts are considered "ongoing" (see below).
-- `CheckCurrentIdScope(const char* debugContext, const char* debugKey)` —
-  called by `ScopedUniqueId`'s own constructor, exactly once per ID scope
-  entered, immediately after the relevant `ImGui::PushID()` call(s).
-  Resolves the CURRENT real ImGui ID stack position via `ImGui::GetID("")`
-  and checks it against this frame's tracker.
+`io.ConfigDebugHighlightIdConflicts` stays at its default (`true`). It is the last
+line of defense for code that does not use `ScopedUniqueId`.
 
-A genuine conflict is logged via `GTE_LOG_ERROR("ImGuiIdConflict", ...)` —
-visible in the Editor's "Log" panel and via
-`GET /get_logs?category=ImGuiIdConflict` — but **only the first time a given
-real ImGui ID starts conflicting**. If the exact same conflict is still
-happening next frame too, it stays silent (no ~60-lines-per-second spam)
-until the conflict actually clears for at least one frame and then
-reappears — a genuinely NEW incident, worth a fresh log line. This is
-tracked via a persistent `m_ongoingConflicts` set that survives across
-frames, separate from the per-frame tracker `BeginFrame()` resets.
+## The rule
 
-This detection layer is a logged warning only — it never crashes, asserts,
-or throws. An autonomous AI-driven session must be able to keep running and
-keep working even if a conflict is (incorrectly) detected somewhere.
+Any ImGui widget built inside a loop over runtime data MUST enter its ID scope with
+`gte::ScopedUniqueId`, keyed by the loop's own iteration index. Do not build a
+widget ID from a name, label or path alone.
 
-### Layer 3 (unchanged, still a final backstop): Dear ImGui's own `io.ConfigDebugHighlightIdConflicts`
+## Where it is used
 
-Left at its Dear ImGui default (`true`), untouched, by every phase of the
-campaign that built the two layers above. This system is an ADDITIONAL,
-earlier, logged safety net — never a replacement for Dear ImGui's own
-built-in visual one. If a real conflict somehow still reaches Dear ImGui's
-own detector after this system (should be structurally impossible for
-anything routed through `ScopedUniqueId`, but never impossible for code
-that isn't), the red highlight staying available is a deliberate, permanent
-third line of defense.
+`ScopedUniqueId` scopes exist in:
 
-## The mandatory rule for all future code
+| File | Function(s) |
+|---|---|
+| `Panels/ProjectPanel.cpp` | `RenderLeftPaneFolder()`, `RenderBreadcrumb()`, `RenderRightPaneEntry()` |
+| `Panels/HierarchyPanel.cpp` | `RenderEntityNode()` |
+| `Panels/InspectorPanel.cpp` | Verlet chain and joint loops |
+| `Panels/RenderFeaturesPanel.cpp` | `BuildRenderFeaturesSection()` |
+| `BoneViewerWindow.cpp` | `RenderBoneTreeNode()`, `RenderFlatPartRow()`, `RenderVerletChainNode()` |
 
-Any ImGui widget built inside a loop over runtime data MUST enter its ID
-scope via `gte::ScopedUniqueId`, keyed by the loop's own distinct iteration
-index. Do not assume any name/label/path/data string is unique enough on
-its own to build a widget ID out of, no matter how unlikely a real-world
-collision seems — see the "GOOD" vs "BAD" snippet above.
-
-## What this does NOT fix (permanent, by design)
-
-The two Atmosphere passes (`"AtmosphereSkyViewLutPass"`,
-`"AtmosphereAerialPerspectiveVolumePass"`, both declared in
-`src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp`) keep their exact
-current hard-coded names, forever. The "Offscreen Regime" table legitimately
-showing two rows with an identical `pass.name` — and toggling one of those
-rows' checkboxes deliberately flipping BOTH rows' shared enabled/disabled
-state at once — is a permanent, intentional fact about this engine, both
-before and after the campaign that built this page. Nothing in
-`AtmosphereLutRenderer.cpp`, `AtmospherePassSequence.cpp`, `Core.cpp`'s
-Atmosphere provider, or `RenderPassToggleRegistry`'s keying scheme was ever
-touched by that campaign. The fix lives entirely at the ImGui-ID-scope
-layer — deriving uniqueness from loop position, never from data content —
-never at the data layer.
-
-## A permanent record of every call site the campaign touched
-
-Every existing `ImGui::PushID(...)` call site under `src/Editor/`, as of
-this campaign, was migrated onto `ScopedUniqueId`. Use this as a checklist
-if auditing "did this ever get applied consistently?" in the future — the
-only real (non-comment) `ImGui::PushID`/`ImGui::PopID` calls anywhere under
-`src/Editor/` today live inside `ImGuiUniqueId.cpp` itself (`ScopedUniqueId`'s
-own implementation, which legitimately calls the raw functions so every
-other file doesn't have to):
-
-| File | Function(s) | Notes |
-|---|---|---|
-| `Panels/RenderGraphPanel.cpp` | `BuildPassRow()`/`BuildPassTable()`, `BuildDisabledBuiltInPassesSection()`, `BuildPluginRenderFeaturesSection()` | The exact reported bug's own file — fixed first, PHASE2 |
-| `Panels/ProjectPanel.cpp` | `RenderLeftPaneFolder()`, `RenderBreadcrumb()`, `RenderRightPaneEntry()` | PHASE3 |
-| `Panels/HierarchyPanel.cpp` | `RenderEntityNode()` | PHASE3 (was already index-based; migrated onto `ScopedUniqueId` for consistency and Layer 2 coverage) |
-| `Panels/InspectorPanel.cpp` | Verlet chain/joint nested loops | PHASE3 (two distinctly-named nested scopes — `chainIdScope`/`jointIdScope`) |
-| `BoneViewerWindow.cpp` | `RenderBoneTreeNode()`, `RenderFlatPartRow()`, `RenderVerletChainNode()` | PHASE3 |
-
-New files this campaign added: `src/Editor/ImGuiIdConflictTracker.h/.cpp`,
-`src/Editor/ImGuiIdConflictGuard.h/.cpp`, `src/Editor/ImGuiUniqueId.h/.cpp`,
-`tests/Editor/ImGuiIdConflictTrackerTests.cpp`.
-
-Full campaign writeup: `task_manager/editor-core-separation-10/PHASE0_MASTER_STRATEGY.md`,
-each `PHASEn_COMPLETION_REPORT.md` in that same folder, and
-`CAMPAIGN_COMPLETION_REPORT.md`.
+`Panels/RenderGraphPanel.cpp` still calls `ImGui::PushID` with a pass name in
+`DrawPassTreeRow()` (one row per toggle-registry entry) and in
+`BuildGraphCanvas()` (one button per graph node). Those two sites do not use
+`ScopedUniqueId`. New code there must.

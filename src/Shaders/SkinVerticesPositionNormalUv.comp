@@ -1,8 +1,6 @@
 #version 450
 
-// GPU vertex skinning, position + normal + uv variant: the same blend as SkinVerticesPositionNormal.comp plus a UV copy.
-// Buffer layouts must match src/Renderer/GpuSkinning/GpuSkinningTypes.h; the C++ side binds by the names below.
-//   bindPose, skinWeights, boneMatrices (read-only), outputBuffer (tightly packed floats), bindPoseUv (read-only vec2[])
+// GPU vertex skinning (position + normal + uv): SkinVerticesPositionNormal.comp plus a UV copy.
 // local_size_x must equal kSkinningLocalSizeX in GpuSkinningPipelines.h.
 layout(local_size_x = 256) in;
 
@@ -26,17 +24,12 @@ layout(std430, binding = 2) readonly buffer BoneMatricesBuffer {
     mat4 matrices[];
 } boneMatrices;
 
-// Tightly-packed output - matches GpuSkinnedVertexPositionNormalUv
-// (GpuSkinningTypes.h) exactly: 8 floats per vertex (position.xyz,
-// normal.xyz, uv.xy), stride 8, NO std430 vec-padding - same reasoning as
-// the sibling file's own OutputBuffer.
+// Tightly packed floats, 8 per vertex (position.xyz, normal.xyz, uv.xy), no std430 vec padding.
 layout(std430, binding = 3) buffer OutputBuffer {
     float values[];
 } outputBuffer;
 
-// Matches GpuUv (GpuSkinningTypes.h) exactly - a plain, unpadded vec2 (8
-// bytes); std430's own alignment rule for vec2 needs no extra padding.
-// Uploaded once per model, at load time, same lifetime as bindings 0/1.
+// Unpadded bind pose UVs (vec2 needs no std430 padding).
 layout(std430, binding = 4) readonly buffer UvBuffer {
     vec2 uvs[];
 } bindPoseUv;
@@ -99,9 +92,7 @@ void main()
     outputBuffer.values[base + 4] = finalNormal.y;
     outputBuffer.values[base + 5] = finalNormal.z;
 
-    // UV pass-through - UVs never change under skinning, copied straight
-    // from the bind-pose UV buffer, unmodified (see this file's own header
-    // comment).
+    // Skinning never changes UVs.
     vec2 uv = bindPoseUv.uvs[i];
     outputBuffer.values[base + 6] = uv.x;
     outputBuffer.values[base + 7] = uv.y;

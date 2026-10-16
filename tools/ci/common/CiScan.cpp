@@ -132,6 +132,15 @@ struct ScanResult {
     std::vector<std::string> unreadable;   // Files in scope that could not be read.
 };
 
+// Source files the scan reads. Comment-rule mode also reads the GLSL shaders (same comment syntax).
+bool IsScannedExtension(const std::string& ext, bool commentRules)
+{
+    if (ext == ".h" || ext == ".cpp") {
+        return true;
+    }
+    return commentRules && (ext == ".comp" || ext == ".frag" || ext == ".vert" || ext == ".glsl");
+}
+
 ScanResult Scan(const Options& o, const TokenSet& tokens, const std::vector<std::string>& includes)
 {
     ScanResult result;
@@ -139,7 +148,7 @@ ScanResult Scan(const Options& o, const TokenSet& tokens, const std::vector<std:
     for (fs::recursive_directory_iterator it(o.root, ec), end; !ec && it != end; it.increment(ec)) {
         const fs::directory_entry& entry = *it;
         const std::string ext = entry.path().extension().string();
-        if (!entry.is_regular_file() || (ext != ".h" && ext != ".cpp")) {
+        if (!entry.is_regular_file() || !IsScannedExtension(ext, o.commentBlockLimit > 0)) {
             continue;
         }
         const std::string rel = fs::relative(entry.path(), o.root).generic_string();

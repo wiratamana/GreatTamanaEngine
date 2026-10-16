@@ -2833,9 +2833,10 @@ add_test(NAME EngineVocabularyCheck
 )
 
 # Fails on comments that name history or a document (campaign, PHASE<n>, task_manager, Locked Design, *.md) and on
-# comment blocks longer than 3 lines. The scope is an explicit directory/file list; there is no allowlist.
+# comment blocks longer than 3 lines, in C++ sources and GLSL shaders. The scope is an explicit directory/file list;
+# there is no allowlist.
 set(GTE_COMMENT_RULE_SRC
-    Renderer/ Core/FeatureKit/ Features/Shadow/
+    Renderer/ Core/FeatureKit/ Features/Shadow/ Shaders/
     Application/RenderPasses.cpp Application/RenderPasses.h Core/Core.cpp Core/Core.h Core/CapturedPixels.h
     Encoding/CapturedPixelConversion.cpp Encoding/CapturedPixelConversion.h Encoding/DepthVisualization.cpp
     Encoding/DepthVisualization.h Encoding/HdrColorVisualization.cpp Encoding/HdrColorVisualization.h

@@ -1,16 +1,13 @@
 #version 450
 
-// Raymarch preview of a 3D texture into a 2D RGBA8 image: one invocation per output pixel,
-// front-to-back alpha composite through a fixed-camera, origin-centered proxy shape.
-// IntersectRayBox/IntersectRayFrustum/MapFrustumLocalPositionToUvw mirror src/Renderer/VolumeTexturePreviewMath.h
-// (the CPU reference); if they disagree, the CPU side is right.
-// Bindings by name: volumeTex (sampled volume) and outputImage (RGBA8 output).
+// Raymarch preview of a 3D texture into a 2D RGBA8 image, one invocation per pixel.
+// The ray/shape helpers mirror src/Renderer/VolumeTexturePreviewMath.h; the CPU side is the reference.
 layout(local_size_x = 16, local_size_y = 16) in;
 
 layout(binding = 0) uniform sampler3D volumeTex;
 layout(binding = 1, rgba8) uniform writeonly image2D outputImage;
 
-// Must match PushConstants in VolumeTexturePreviewRenderer.cpp (every vec3 starts a 16-byte group).
+// Every vec3 starts a 16-byte group.
 layout(push_constant) uniform PushConstants {
     vec3 eyePosition;
     float tanHalfFovY;

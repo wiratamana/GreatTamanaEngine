@@ -1,42 +1,7 @@
 #version 450
 
-// Atmosphere Scattering + Aerial Perspective campaign, Phase 6
-// (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE6_AERIAL_PERSPECTIVE_FROXEL_VOLUME_v1.md)
-// - the camera-frustum-aligned 3D "froxel volume" that actually produces
-// AERIAL PERSPECTIVE data: for every froxel (x, y, z), stores the
-// accumulated in-scattered light (RGB) and transmittance (alpha, from the
-// camera to that voxel's own view-space depth). Phase 7's composite pass
-// will look this up per on-screen pixel (screen UV -> froxel column, real
-// view depth -> Z slice via AtmosphereCommon.glsl's ViewDepthToFroxelSlice())
-// and blend it onto already-rendered opaque geometry.
-//
-// ONE INVOCATION PER FROXEL COLUMN (x, y) - each invocation loops every Z
-// slice INTERNALLY, in order, since each slice's accumulated
-// transmittance/in-scattering depends on the PREVIOUS slice's own running
-// total (a genuine sequential dependency along Z) - mirrors
-// _reference/pl-sky/shaders/sky_aerial_lut.comp's own per-column-thread,
-// intra-thread-Z-loop design exactly (see this phase's own strategy
-// document, Step 2).
-//
-// BINDING CONVENTION (same as AtmosphereSkyViewLut.comp - see this
-// campaign's own "Revision Notes"): binding 0 = AtmosphereParametersGpu
-// (read-only STORAGE buffer, reused verbatim from Phase 3/4 - NEVER
-// `uniform`); binding 1 = AtmosphereFrameUniforms (a SECOND read-only
-// STORAGE buffer, this view's own per-frame data, including the
-// Phase-6-new `invViewProjection` field - also NEVER `uniform`); binding 2
-// = sampler2D transmittanceLut (Phase 3's own output); binding 3 =
-// sampler2D multiScatteringLut (Phase 4's own output); binding 4 = the
-// output image3D (rgba16f, write-only) - format matches Phase 2's
-// VolumeTexture exactly. Both C++
-// (src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp) and this file must be
-// kept in agreement by hand - this campaign deliberately has no shader
-// reflection.
-//
-// local_size_x/y = 8, local_size_z = 1 - one invocation per froxel COLUMN
-// (matches _reference/pl-sky/shaders/sky_aerial_lut.comp's own convention
-// exactly) - MUST match
-// src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp's own
-// kAerialPerspectiveVolumeLocalSizeX/Y/Z constants exactly.
+// Aerial perspective froxel volume: per (x, y, z) in-scattered light (RGB) and transmittance (A) from the camera.
+// One invocation per (x, y) column; it walks the Z slices in order because each slice builds on the previous total.
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 #include "AtmosphereCommon.glsl"
@@ -44,45 +9,27 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(std430, binding = 0) readonly buffer AtmosphereParametersBlock {
     AtmosphereParametersGpu atmosphereParameters;
 } params;
+// Alias so the code below can use the plain name of the block member.
 #define atmosphereParameters params.atmosphereParameters
 
 layout(std430, binding = 1) readonly buffer AtmosphereFrameUniformsBlock {
     AtmosphereFrameUniforms frameUniforms;
 } frame;
+// Alias so the code below can use the plain name of the block member.
 #define frameUniforms frame.frameUniforms
 
 layout(binding = 2) uniform sampler2D transmittanceLut;
 layout(binding = 3) uniform sampler2D multiScatteringLut;
 
-// rgba16f - RGB carries accumulated in-scattered luminance (routinely
-// exceeds 1.0, same reasoning as every other HDR LUT in this campaign),
-// alpha carries scalar transmittance (a plain average of the R/G/B
-// transmittance channels - see this file's own "DEVIATION" comment below).
+// RGB = accumulated in-scattered luminance (HDR), A = scalar transmittance.
 layout(binding = 4, rgba16f) uniform writeonly image3D destinationVolume;
-
-// SAME fixed constants as _reference/pl-sky/src/app.c's own defaults (see
-// task_manager/atmosphere-scattering-1/ATMOSPHERE_REFERENCE_NOTES.md,
-// Sections 2/5). As of atmosphere-scattering-2 campaign Phase 1, these are
-// now LIVE Editor-tunable values (Editor "Atmosphere" panel ->
-// AtmosphereSettings -> AtmosphereFrameUniforms, see frameUniforms.
-// aerialPerspectiveMaxDistanceKm/aerialPerspectiveDepthExponent/
-// aerialPerspectiveSamplesPerSliceAsFloat below), no longer fixed hardcoded
-// shader constants. The volume's actual width/height/depth are read from
-// imageSize(destinationVolume) below rather than hardcoded here too (matches
-// AtmosphereSkyViewLut.comp's own "read imageSize(), don't hardcode
-// resolution in the shader" convention), but MUST match
-// src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp's own
-// kAerialPerspectiveVolumeWidth/Height/Depth constants (128x128x32).
 
 void main()
 {
     ivec3 volumeSize = imageSize(destinationVolume);
     ivec2 froxelXY = ivec2(gl_GlobalInvocationID.xy);
     if (froxelXY.x >= volumeSize.x || froxelXY.y >= volumeSize.y) {
-        // The dispatch's own ceiling-division group count can legitimately
-        // cover more threads than there are real froxel columns - see
-        // ComputeDispatch.h's own header comment. Those extra invocations
-        // simply do nothing.
+        // The dispatch is rounded up to whole groups; extra threads do nothing.
         return;
     }
 
@@ -90,34 +37,19 @@ void main()
     float depthExponent = frameUniforms.aerialPerspectiveDepthExponent;
     int samplesPerSlice = clamp(int(frameUniforms.aerialPerspectiveSamplesPerSliceAsFloat + 0.5), 1, 8);
 
-    // atmosphere-scattering-2 campaign, Phase 3 - a purely ARTISTIC "turn up
-    // the fog density" multiplier, applied strictly LOCALLY inside this
-    // shader's own per-sample scattering/extinction computation below (see
-    // the "scatteringExaggeration" uses further down in this file) - the
-    // shared AtmosphereMath.h/AtmosphereCommon.glsl oracle functions this
-    // shader calls (ComputeExtinctionCoefficientAtHeight()/
-    // RayleighDensityAtHeight()/MieDensityAtHeight()) are NEVER modified, so
-    // the Sky-View LUT/Transmittance LUT/Multi-Scattering LUT passes, which
-    // also call those same shared functions, stay completely
-    // physically-accurate and unaffected by this per-view knob. Clamped to
-    // never go negative (a negative exaggeration would flip scattering/
-    // extinction signs, which is meaningless).
+    // Artistic fog density multiplier, applied only here; never negative so scattering keeps its sign.
     float scatteringExaggeration = max(frameUniforms.aerialPerspectiveScatteringExaggeration, 0.0);
 
     float planetRadiusKm = atmosphereParameters.planetRadiusKm;
 
-    // Same tiny surface-scale offset as AtmosphereSkyViewLut.comp's own
-    // fCameraSurfaceOffset - keeps a camera sitting exactly at ground
-    // level from producing a degenerate ray/sphere intersection.
+    // Tiny offset keeps a camera exactly at ground level from giving a degenerate ray/sphere hit.
     float surfaceOffsetKm = max(planetRadiusKm * 1e-7, 1e-6);
     float viewHeightKm = max(frameUniforms.cameraPositionAtmosphere.y, planetRadiusKm) + surfaceOffsetKm;
 
     vec3 rayOrigin = vec3(0.0, viewHeightKm, 0.0);
     vec3 viewDirection = FroxelColumnToViewRayDirection(froxelXY, volumeSize.xy, frameUniforms.invViewProjection);
 
-    // AtmosphereFrameUniforms::sunDirection is already the direction FROM
-    // the scene TOWARD the sun (see AtmosphereTypes.h's own doc comment) -
-    // no negation needed here, exactly like AtmosphereSkyViewLut.comp.
+    // Already the direction from the scene toward the sun.
     vec3 directionToSun = normalize(frameUniforms.sunDirection);
 
     float viewDotLight = clamp(dot(viewDirection, directionToSun), -1.0, 1.0);
@@ -148,14 +80,7 @@ void main()
             vec3 upAtSample = currentPositionKm / max(radialLengthKm, 1e-20);
             float currentHeightKm = radialLengthKm - planetRadiusKm;
 
-            // Once this ray has gone below the planet's own surface, the
-            // remaining aerial volume along it is invalid/occluded -
-            // mirrors the reference's own identical early-out exactly
-            // (break the INNER sample loop only; the outer per-slice loop
-            // keeps running and simply re-stores the same, now-frozen
-            // accumulated values for every remaining slice, since no
-            // further accumulation ever happens once every subsequent
-            // sample also starts below ground).
+            // Below the surface nothing more accumulates; later slices store the frozen total.
             if (currentHeightKm < 0.0) {
                 break;
             }
@@ -167,16 +92,7 @@ void main()
             vec3 multipleScatteredLuminance =
                 texture(multiScatteringLut, ClampLutUvHalfTexelInset(lutUv, multiScatteringLutSize)).rgb;
 
-            // Phase 3 - scatteringExaggeration multiplies BOTH the local
-            // extinction coefficient AND the local scattering coefficients by
-            // the SAME factor ("increase the fog's own physical density"),
-            // which keeps the single-scattering albedo (scattering /
-            // extinction) unchanged - the haze's own COLOR/character stays
-            // physically plausible even as its MAGNITUDE is exaggerated.
-            // ComputeExtinctionCoefficientAtHeight()/RayleighDensityAtHeight()/
-            // MieDensityAtHeight() themselves are called completely
-            // unmodified - the multiplier is applied to their RESULT, here,
-            // strictly locally to this shader.
+            // The exaggeration scales extinction and scattering together, so the haze color stays plausible.
             vec3 extinctionCoefficient =
                 ComputeExtinctionCoefficientAtHeight(atmosphereParameters, currentHeightKm) * scatteringExaggeration;
             vec3 scatterRayleigh =
@@ -191,10 +107,7 @@ void main()
             vec3 phaseTimesScattering = scatterRayleigh * rayleighPhaseValue + scatterMie * miePhaseValue;
             vec3 directSource = planetVisibility * transmittanceToSun * phaseTimesScattering;
 
-            // Same "do not double-count the direct solar shadow term"
-            // rule as AtmosphereSkyViewLut.comp - the multi-scattering LUT
-            // already represents incoming multiple-scattered luminance,
-            // multiplied by LOCAL scattering only here.
+            // The multi-scattering LUT already holds the sun shadowing, so only local scattering is applied.
             vec3 multipleScatteringSource = multipleScatteredLuminance * totalScattering;
 
             vec3 source = sunRadiance * (directSource + multipleScatteringSource);
@@ -204,21 +117,7 @@ void main()
             accumulatedTransmittance *= exp(-extinctionCoefficient * segmentLengthKm);
         }
 
-        // DEVIATION FROM THE REFERENCE (documented, not a design change):
-        // _reference/pl-sky/shaders/sky_aerial_lut.comp computes its own
-        // scalar transmittance as
-        // `dot(accumulatedTransmittance, vec3(1.0 / tAerialInfo.w))` -
-        // dividing by the SUN INTENSITY constant (3.0 by default), which is
-        // unrelated to transmittance at all. Its own commented-out
-        // alternative directly above that line -
-        // `dot(accumulatedTransmittance, vec3(1.0 / 3.0))` - reveals what
-        // this is actually meant to compute: a plain per-channel AVERAGE
-        // (dot with vec3(1/3) == sum/3), which only produces the same
-        // number as "divide by sun intensity" because that reference's own
-        // default sun intensity also happens to be 3.0. This shader
-        // computes the average directly, with no dependency on sun
-        // intensity at all - the mathematically correct interpretation of
-        // what both versions of the reference's own code are really doing.
+        // Scalar transmittance is the plain average of the R/G/B channels.
         float scalarTransmittance = (accumulatedTransmittance.r + accumulatedTransmittance.g + accumulatedTransmittance.b) / 3.0;
         imageStore(destinationVolume, ivec3(froxelXY, slice), vec4(accumulatedLuminance, scalarTransmittance));
     }

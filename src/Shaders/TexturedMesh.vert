@@ -1,15 +1,6 @@
 #version 450
 
-// Vertex shader for the engine's TEXTURED "imported mesh submesh" draw path
-// (see src/Renderer/MeshVertex.h's MeshVertexUv for the matching C++
-// layout, Pipeline.h's VertexLayout::PositionNormalUv, and
-// Game::EnsureMeshAsset(), src/Game/Game.cpp - the thing that actually
-// builds a Mesh of these, its Pipeline, and the per-material
-// MaterialTexture this pipeline samples). Distinct from Mesh.vert (which
-// consumes position+normal only, no UV, for a material-less submesh) -
-// same "model"+"viewProj" push-constant shape as every other vertex shader
-// in this engine (see Triangle.vert's own comment), so RenderSystem::Draw()/
-// Renderer::Submit() needs no special-casing for this pipeline either.
+// Textured mesh vertex shader: position + normal + uv vertices, world-space outputs.
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
@@ -28,10 +19,7 @@ void main()
 {
     vec4 worldPos4 = pc.model * vec4(inPosition, 1.0);
     gl_Position = pc.viewProj * worldPos4;
-    // mat3(pc.model) (no inverse-transpose) is only exactly correct for a
-    // uniform scale - see Mesh.vert's own comment for why this doesn't
-    // matter yet (every spawned mesh entity starts with an identity
-    // Transform).
+    // mat3(model) is exact only for rotation and uniform scale; no inverse-transpose.
     outWorldNormal = mat3(pc.model) * inNormal;
     outUv = inUv;
     outWorldPos = worldPos4.xyz;

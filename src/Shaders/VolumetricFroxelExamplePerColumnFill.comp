@@ -1,17 +1,7 @@
 #version 450
 
-// Minimal, standalone worked example of the PER-COLUMN-SEQUENTIAL dispatch
-// shape for filling a VolumeTexture: one invocation per (x, y) column,
-// looping every Z slice internally, because each slice's stored value
-// genuinely depends on the running state accumulated by every slice before
-// it - mirrors AtmosphereAerialPerspectiveVolume.comp's own local-size-z=1
-// sequential-column shape exactly. Reuses VolumetricFroxelMath.glsl's
-// FroxelSliceToViewDepth() for real, proving that shared file is usable by a
-// second, independent shader.
-//
-// Binding convention: binding 0 is the single writeonly RWTexture output.
-// Push constants: maxDistanceKm/depthExponent - sliceCount is read directly
-// from imageSize(outputImage).z rather than also being pushed down.
+// Per-column volume fill: one invocation per (x, y) column, looping Z because each slice depends on the previous ones.
+// The slice count comes from imageSize(outputImage).z.
 
 #include "VolumetricFroxelMath.glsl"
 

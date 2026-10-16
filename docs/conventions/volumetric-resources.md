@@ -3,310 +3,146 @@
 _Part of [GreatTamanaEngine](../../AGENTS.md)'s contributor conventions. See
 [docs/README.md](../README.md) for the full documentation index._
 
-This page documents the GENERIC recipe for building any future
-`VolumeTexture`-backed feature — a real 3D (`VK_IMAGE_TYPE_3D`) GPU-resident
-grid, filled by a compute pass, and sampled later. It is written against a
-minimal fictional example feature (`ExampleVolumeFeature`), never the real
-Atmosphere code, so a reader never has to mentally subtract unrelated physics
-to find the reusable shape underneath — every real code excerpt below is
-copy-pasted verbatim from this campaign's own compiling scratch examples
-(`tests/Renderer/RenderGraph/VolumeTextureExampleFeatureTests.cpp` and its two
-companion shaders), which exist for exactly this purpose.
-[`docs/conventions/atmosphere-scattering.md`](atmosphere-scattering.md)
-remains the authority for the one real shipped feature's own specific
-behavior, tuning, and history — its "genuine THIRD kind" section documents the
-exact same mechanism from that one feature's point of view. **A future change
-to the underlying mechanism itself** (how a `VolumeTexture` is created,
-imported, or written) **must update both pages in the same change.**
+How to build a feature on a real 3D (`VK_IMAGE_TYPE_3D`) GPU grid: a compute pass
+fills it, a later pass samples it. The examples use a fictional `ExampleVolumeFeature`
+written with the feature kit ([`render-feature-authoring.md`](render-feature-authoring.md)).
+[`atmosphere-scattering.md`](atmosphere-scattering.md) describes the one shipped
+feature that uses a volume (the aerial perspective volume). A change to how a
+volume is created, imported or written must update both pages.
 
 ## 1. Ownership and lifetime
 
-`GpuResourceFactory::CreateVolumeTexture()` / `Renderer::CreateVolumeTexture()`
-(`src/Renderer/Renderer.h`) is called **once**, at the owning feature's own
-construction time — verbatim from the per-cell example test:
+A volume is owned by `fx::PersistentVolume` (`src/Core/FeatureKit/PersistentVolume.h/.cpp`),
+a member of the feature (usually inside a `fx::PerView<State>` struct):
 
 ```cpp
-VolumeTexture volume = fixture.GetRenderer().CreateVolumeTexture(
-    static_cast<int>(kSize), static_cast<int>(kSize), static_cast<int>(kSize), VK_FORMAT_R16G16B16A16_SFLOAT, kVolumeName);
+fx::PersistentVolume m_volume{ "ExampleVolume", fx::VolumeSize{ 64, 64, 32 }, PixelFormat::RGBA16_Float };
 ```
 
-State the single most counter-intuitive fact plainly: a `VolumeTexture` is
-**persistent**, owned entirely by whichever system created it — it is
-**never** pooled or allocated by the render graph itself, unlike a plain
-`RenderGraphBuilder::CreateTexture()` transient resource. There is deliberately
-no pooled/transient counterpart to `ImportVolumeTexture()` (see
-`atmosphere-scattering.md`'s own identical statement) — do not build one
-speculatively; only a genuine future need (more than one distinct volume with
-varying sizes across frames) justifies it.
+- The size and format are fixed at construction. A zero axis is refused (logged once).
+- It keeps one `VolumeTexture` per view scope, created lazily on the first `Acquire()`.
+  A failed creation is logged once and retried on a cooldown.
+- It is persistent and owned by the feature. The render graph never pools or
+  allocates a volume. There is no transient volume. Do not build one without a
+  real need.
 
-## 2. Importing every frame — both real cases
+## 2. Acquire every frame
 
-Every frame, from inside a pass-declaring callback, the owning feature
-re-imports its persistent `VolumeTexture` into that frame's graph —
-`RenderGraphBuilder::ImportVolumeTexture(name, externalVolumeTarget,
-currentLayout)`:
+Call `Acquire(f)` from the callback that declares the pass. It imports the volume
+into this frame's graph with an undefined layout and keeps the handle alive:
 
 ```cpp
-const TextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), VK_IMAGE_LAYOUT_UNDEFINED);
+if (!f.PassEnabled("ExampleVolume.Fill")) {
+    return; // a disabled pass must not create or import anything
+}
+const fx::Texture volume = m_volume.Acquire(f);
+if (!volume.IsValid()) {
+    return;
+}
 ```
 
-- **Case (a), full rewrite every frame (the one shipped feature's real case,
-  and the only case either of this campaign's own tests exercise — shown
-  above).** Pass `VK_IMAGE_LAYOUT_UNDEFINED`. As of this writing, the ONLY
-  real `ImportVolumeTexture()` call site driving a shipped feature
-  (`src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp`, line 597) also always
-  passes `VK_IMAGE_LAYOUT_UNDEFINED` — there is no shipped feature and no
-  automated test exercising a non-`UNDEFINED` import for this resource kind.
-- **Case (b), partial/carried update (a plausible future need).** Pass the
-  real previous layout instead. The underlying mechanism threads a real
-  previous layout into the SAME barrier-planning path an imported plain 2D
-  resource already uses — this is an engine-wide simplification, not
-  something weaker for `VolumeTexture` specifically — so it is **expected to
-  work but unverified** for this resource kind; say so plainly to anyone
-  relying on it. The nearest real precedent for "a feature tracking a
-  resource's own previous layout across frames" is
-  `src/Renderer/RenderGraph/RenderGraphPersistentResourceCache.h`'s
-  `lastKnownLayout`/`RecordFinalLayout()` — but that cache is 2D-`TextureDesc`
-  only (no `VolumeTexture` support today) and is a full eviction/resize/
-  epoch-tracked cache, not a small drop-in piece of per-feature state; it is
-  NOT comparable to something as cosmetic as a debug name surviving a resize
-  — tracking a real `VkImageLayout` is a different, load-bearing concern. A
-  feature that needs case (b) today must track its own previous
-  `VkImageLayout` as a plain member variable, updated at the end of each
-  frame, and should consider itself the first real user of this exact path.
+Because the layout is undefined, the contents do not carry over between frames.
+A pass must rewrite the whole volume every frame. Carrying content from the
+previous frame is not supported by `PersistentVolume`.
 
-## 3. The compute pass — both valid dispatch shapes
+## 3. The compute pass: two dispatch shapes
 
-`PassBuilder::WriteTexture(handle, access)` declares the write. There
-are exactly two valid dispatch shapes, each proven by one of
-`tests/Renderer/RenderGraph/VolumeTextureExampleFeatureTests.cpp`'s two real,
-headless-GPU-executed tests:
+Bind the volume by shader variable name. `Dispatch(Extent2D size, depth)` takes
+the number of elements per axis. The engine rounds up to whole groups. The shader
+must bounds-check against `imageSize()`.
 
 ### (a) One invocation per cell `(x, y, z)`
 
-Correct when every cell's value can be computed completely independently of
-every other cell — execution order never matters. The minimal worked example,
-`src/Shaders/VolumetricFroxelExamplePerCellFill.comp`:
-
-```glsl
-layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
-
-layout(binding = 0, rgba16f) uniform writeonly image3D outputImage;
-
-void main()
-{
-    ivec3 cell = ivec3(gl_GlobalInvocationID);
-    ivec3 size = imageSize(outputImage);
-    if (cell.x >= size.x || cell.y >= size.y || cell.z >= size.z) {
-        return;
-    }
-    imageStore(outputImage, cell, vec4(float(cell.x), float(cell.y), float(cell.z), 1.0));
-}
-```
-
-dispatched with the Z extent included in the dispatch itself:
+Use it when every cell is computed independently. Example shader:
+`src/Shaders/VolumetricFroxelExamplePerCellFill.comp`
+(`local_size 4x4x4`, binding `outputImage`).
 
 ```cpp
-cmd.DispatchOverSize(kSize, kSize, kSize);
+const fx::VolumeSize n = kVolumeSize;
+f.Compute(m_fillShader, "ExampleVolume.Fill")
+    .Bind("outputImage", volume)
+    .Dispatch(Extent2D{ n.width, n.height }, n.depth);
 ```
 
-### (b) One invocation per `(x, y)` column, looping every Z slice internally
+### (b) One invocation per `(x, y)` column, looping over Z in the shader
 
-Correct whenever a slice's value genuinely depends on the previous slice's
-running state along the same column. This is the real shipped feature's own
-  case: `src/Features/Atmosphere/Shaders/AtmosphereAerialPerspectiveVolume.comp`
-(`local_size_x=8, local_size_y=8, local_size_z=1`), dispatched by
-`AtmosphereLutRenderer::AddAerialPerspectiveVolumePass()`
-(`src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp`, lines 574-656) via
-`cmd.DispatchOverSize(width, height, 1)` — Z group count fixed at 1 — because
-each slice's accumulated in-scattering depends on the slice before it. The
-campaign's own minimal, feature-free illustration of the same shape,
-`src/Shaders/VolumetricFroxelExamplePerColumnFill.comp`:
-
-```glsl
-#include "VolumetricFroxelMath.glsl"
-
-layout(local_size_x = 4, local_size_y = 4, local_size_z = 1) in;
-
-layout(binding = 0, rgba16f) uniform writeonly image3D outputImage;
-
-layout(push_constant) uniform PushConstants {
-    float maxDistanceKm;
-    float depthExponent;
-} pc;
-
-void main()
-{
-    ivec3 size = imageSize(outputImage);
-    ivec2 column = ivec2(gl_GlobalInvocationID.xy);
-    if (column.x >= size.x || column.y >= size.y) {
-        return;
-    }
-
-    float sliceCount = float(size.z);
-    float runningTotal = 0.0;
-    for (int slice = 0; slice < size.z; ++slice) {
-        float viewDepthKm = FroxelSliceToViewDepth(float(slice), sliceCount, pc.maxDistanceKm, pc.depthExponent);
-        runningTotal += viewDepthKm;
-        imageStore(outputImage, ivec3(column, slice), vec4(runningTotal, runningTotal, runningTotal, 1.0));
-    }
-}
-```
-
-dispatched with the Z extent fixed at 1:
+Use it when a slice depends on the previous slice of the same column. This is
+the Atmosphere aerial perspective volume
+(`src/Features/Atmosphere/Shaders/AtmosphereAerialPerspectiveVolume.comp`,
+`local_size 8x8x1`). The feature dispatches X and Y only:
 
 ```cpp
-cmd.DispatchOverSize(kWidth, kHeight, 1);
+f.Compute(m_aerialVolumeShader, "AtmosphereAerialPerspectiveVolumePass")
+    .Params(m_sharedParams, shared->parameters)
+    .Bind("destinationVolume", volume)
+    .Dispatch(kAerialDispatchSize);
 ```
 
-**The one-sentence selection rule**: if a given slice's fill value depends on
-any other slice's value, you must use shape (b); if every cell's value is
-fully independent, use shape (a) — picking the wrong one for a given
-algorithm produces no build error and no validation-layer warning, only
-silently wrong per-cell results.
+Feature-free example: `src/Shaders/VolumetricFroxelExamplePerColumnFill.comp`
+(`local_size 4x4x1`, binding `outputImage`, push constants `maxDistanceKm` and
+`depthExponent`).
 
-## 3b. Keeping the pass alive — the mandatory `KeepTextureOutput()` call
+**Selection rule**: if a slice's value depends on any other slice, use (b). If all
+cells are independent, use (a). Picking the wrong one gives no error and no
+validation warning, only wrong values.
 
-**This is the single most common way a first-time `VolumeTexture` feature
-silently fails — read this even if you skim everything else.** A volume
-`TextureHandle` is only a root when it is explicitly kept — nothing roots it
-by default. A pass whose only write is a `VolumeTexture` must have its handle
-passed to `RenderGraphBuilder::KeepTextureOutput(handle)` explicitly, or
-`RenderGraphCompiler::Compile()`'s backward-reachability culling drops the
-whole pass silently, every single frame — no build error, no validation-layer
-warning, just a volume that never gets filled.
+## 4. Culling: keep the written volume
 
-This is a real, verified trap, not a theoretical one:
-`AddAerialPerspectiveVolumePass()` itself (`AtmosphereLutRenderer.cpp`, lines
-574-656) does NOT call `KeepTextureOutput()` anywhere in its own body —
-its caller does, separately, at `src/Core/Core.cpp` line 848:
+A pass whose only output is a volume is culled by the graph unless its volume
+handle is kept. `PersistentVolume::Acquire()` already calls `KeepTextureOutput()`
+on the handle, so kit features need nothing more. Code that imports a volume with
+`RenderGraphBuilder::ImportVolumeTexture()` directly must call
+`KeepTextureOutput(handle)` itself, or the pass is dropped silently every frame.
 
-```cpp
-frame.builder.KeepTextureOutput(viewLuts.aerialPerspectiveVolumeHandle);
-```
+## 5. Making the result consumable
 
-Both of `VolumeTextureExampleFeatureTests.cpp`'s own tests declare a pass
-whose only write is a `VolumeTexture`, and both had to add this exact call,
-right after declaring the pass, for their own numeric assertions to pass —
-verbatim from the per-cell test's own `build` lambda:
+### (a) A `SceneSlotKind::Image3D` scene slot
 
-```cpp
-fixture.RunSynchronousFrame([&](RenderGraphBuilder& b) -> std::vector<TextureHandle> {
-    const TextureHandle handle = b.ImportVolumeTexture(kVolumeName, volume.Target(), VK_IMAGE_LAYOUT_UNDEFINED);
-    b.AddRenderPass(
-        "VolumeTextureExamplePerCellFillPass", PassKind::Compute,
-        [handle](RenderGraphBuilder::PassBuilder& pass) {
-            pass.WriteTexture(handle, ResourceAccess::ComputeShaderWrite);
-        },
-        [&](PassContext& ctx) {
-            const PassContext::ResolvedVolumeTexture dest = ctx.resolveVolumeTexture(handle);
-            descriptorSet.Rewrite(device, { ComputeDescriptorWrite::StorageImage(0, dest.view) });
+Use it when every opaque-shaded material should sample the volume from a fixed
+slot. Declare the slot in `Setup()` with `FeatureSetup::DeclareSceneSlot(name, SceneSlotKind::Image3D, preferredIndex)`
+and publish with `f.PublishToScene(slot, volume)`
+(`src/Core/FeatureKit/SceneSlot.h`, `src/Renderer/SceneServicesDescriptorSet.h`).
 
-            auto cmd = ctx.Cmd();
-            cmd.BindComputePipeline(pipeline);
-            cmd.BindDescriptorSet(descriptorSet.Native());
-            cmd.DispatchOverSize(kSize, kSize, kSize);
-        });
-    // Mandatory - a pass whose only write is a volume texture is
-    // silently culled without this call.
-    b.KeepTextureOutput(handle);
-    return {};
-});
-```
+Caveat: `Image2D` has one dummy texture per slot index. `Image3D` has ONE shared
+dummy (`m_dummyImage3DTexture` in `SceneServicesDescriptorSet`) for every
+`Image3D` slot. It is sound only while at most one `Image3D` slot exists. A second
+`Image3D` slot silently shares the same dummy and no error is logged. No shipped
+feature registers an `Image3D` slot today.
 
-## 4. Making the result consumable — two documented paths
+### (b) A channel plus a later pass
 
-### (a) A `SceneServiceResourceKind::Image3D` slot
+Publish the volume with a `fx::Channel<T>` (for example
+`AtmosphereViewLuts` in `AtmosphereFeature.h`) and read it in a later callback
+(`PostOpaque` or `PostComposite`) as a normal `Bind(...)` of a fullscreen or
+compute pass. Use it when the feature needs its own sampling or compositing step
+against scene depth. Atmosphere does this: `Composite()` binds
+`aerialPerspectiveVolume` in `AtmosphereAerialPerspectiveCompositePass`.
+For engine-level publishing without the kit, see
+[`scene-resource-publishing.md`](scene-resource-publishing.md).
 
-The right choice when every opaque-shaded object should sample this volume
-uniformly via a stable, registered slot index
-(`src/Renderer/SceneServicesDescriptorSet.h`). This slot kind is fully wired
-at the type/descriptor-set level (a real dummy `VolumeTexture` fallback,
-correct per-slot resource-kind dispatch) — but as of this writing no real
-feature has ever registered an `Image3D`-kind slot; only the dummy fallback
-path has ever run in practice.
+## 6. The slice-depth mapping utility
 
-State the load-bearing caveat plainly, confirmed by reading
-`SceneServicesDescriptorSet` directly: unlike `Image2D` (one real dummy
-texture PER slot index, in a per-index container,
-`m_dummyImage2DTextures`), the `Image3D` dummy fallback
-(`SceneServicesDescriptorSet.h`, line 158's `m_dummyImage3DTexture`,
-constructed unconditionally at `SceneServicesDescriptorSet.cpp` line 241) is a
-**single shared instance** used for EVERY `Image3D`-kind slot — sound only
-while at most one such slot exists. A second, independent feature registering
-an `Image3D`-kind slot must not assume its own distinct dummy — today it
-silently shares the exact same physical dummy resource (and whatever single
-"neutral" value it holds) with every other `Image3D`-kind slot, with no error
-or warning of any kind. The two resource kinds are NOT symmetric in this
-respect.
+The slice index to view depth mapping used by dispatch shape (b) is a separate,
+feature-free utility with a CPU and a GLSL version:
 
-### (b) `NamedSceneResourceKey()` + a PostOpaque/PostTransparent pass
+- `src/Renderer/VolumetricFroxelMath.h/.cpp`: the CPU reference
+  (`FroxelSliceToViewDepth()`, `ViewDepthToFroxelSlice()`).
+- `src/Shaders/VolumetricFroxelMath.glsl`: the GLSL version, same formula and
+  parameter order. It is `#include`d by `AtmosphereCommon.glsl` and by
+  `VolumetricFroxelExamplePerColumnFill.comp`.
 
-Publish the handle via
-[`docs/conventions/scene-resource-publishing.md`](scene-resource-publishing.md)'s
-`rg::NamedSceneResourceKey()` for a later PostOpaque/PostTransparent pass to
-sample/composite separately, as its own full-screen pass. This is the right
-choice for a feature needing its OWN sampling/compositing step against scene
-depth, rather than a value every material shader samples directly — exactly
-the shape `AtmosphereLutRenderer::AddAerialPerspectiveCompositePass()` already
-uses for the shipped feature's own volume.
-
-## 5. The slice-depth mapping utility
-
-The slice-index ↔ view-depth mapping used by dispatch shape (b) above is
-**not** itself part of the core `VolumeTexture` mechanism — it is a
-separately extracted, shared, feature-free utility:
-
-- `src/Renderer/VolumetricFroxelMath.h`/`.cpp` — the C++ CPU oracle
-  (`FroxelSliceToViewDepth()`/`ViewDepthToFroxelSlice()`), with its own unit
-  test, `tests/Renderer/VolumetricFroxelMathTests.cpp`.
-- `src/Shaders/VolumetricFroxelMath.glsl` — the GLSL mirror, byte-identical
-  formula, same parameter names/order in both languages. `#include`d by both
-  `src/Features/Atmosphere/Shaders/AtmosphereCommon.glsl` (the shipped Atmosphere feature's own
-  include, replacing what used to be an inline copy) and
-  `src/Shaders/VolumetricFroxelExamplePerColumnFill.comp` (this page's own
-  per-column example above) — real proof this file is genuinely reusable by a
-  second, independent shader, not merely relocated for tidiness.
-
-This is a pure, byte-identical relocation of a pre-existing formula, not new
-math — do not extract only the C++ side of a shared formula and call it
-"reusable"; a future shader cannot call a C++ header, so both languages are
-required whenever a genuinely resource-agnostic formula like this one is
-pulled out of a feature-specific file.
-
-## 6. Verification / test-harness nuance
-
-`tests/Fakes/HeadlessRenderGraphFixture.h` already drives a full, real,
-headless-GPU `RenderGraph::Execute()` frame end-to-end — this is not a gap.
-The real, narrower gap this page's own two reference tests
-(`VolumeTextureExampleFeatureTest.PerCellParallelFillWritesEveryCellsOwnCoordinates`/
-`VolumeTextureExampleFeatureTest.PerColumnSequentialFillMatchesTheCpuOracleRunningTotal`,
-`tests/Renderer/RenderGraph/VolumeTextureExampleFeatureTests.cpp`) close is
-the first real example of a `VolumeTexture`-writing compute pass declared
-through that exact fixture, dispatched for real, and read back via
-`Renderer::CaptureImagePixels()` (extended with an arbitrary-Z-slice readback
-capability — `zOffset`/`depth` trailing, defaulted parameters) and asserted
-numerically against a CPU-computed expected value. On a machine whose Vulkan
-driver/loader lacks `VK_EXT_headless_surface`, both tests report `SKIPPED`
-rather than a live pass — the same honest, pre-existing, environment-gated
-limitation every other `HeadlessRenderGraphFixture`-based test in this
-codebase already has.
+Keep both languages whenever a formula is moved out of a feature: a shader cannot
+call a C++ header. A shader that needs the formula must `#include` the shared file,
+never keep its own copy.
 
 ## 7. What NOT to do
 
-- Do not build a new "`VolumeTexture` pool" — it is deliberately import-only,
-  by design; this page documents the existing mechanism, it does not change
-  it.
-- Do not force-generalize feature-specific physics into a shared utility "for
-  tidiness" if it genuinely is not resource-shape-agnostic.
-- Do not extract only the C++ side of a shared formula and call it
-  "reusable" — both the CPU oracle and the GLSL mirror are required.
-- Do not let a relocated GLSL formula end up duplicated instead of shared —
-  the consuming file must `#include` it, never keep an independent copy.
-- Do not present either compute-dispatch shape as the one-and-only correct
-  recipe — pick the one the real data dependency actually demands.
-- Do not present the `Image3D` scene-service-slot path as fully symmetric to
-  `Image2D` — the single-shared-dummy caveat in section 4(a) above is real.
-- Do not omit the `KeepTextureOutput()` requirement (section 3b) or
-  treat it as a footnote — it is the single most common way a first-time
-  `VolumeTexture` feature silently fails.
+- Do not build a `VolumeTexture` pool. Volumes are import-only.
+- Do not move feature-specific physics into a shared utility if it is not
+  resource-shape-agnostic.
+- Do not present either dispatch shape as the only recipe. Pick the one the data
+  dependency requires.
+- Do not treat `Image3D` scene slots as symmetric to `Image2D` (single shared
+  dummy, section 5a).
+- Do not call `Acquire()` before checking `f.PassEnabled(...)`. A disabled pass must
+  not create, import or keep anything.

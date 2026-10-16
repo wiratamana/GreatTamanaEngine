@@ -1,24 +1,8 @@
 #version 450
 
-// Vertex shader for the engine's shared "imported mesh" draw path (see
-// src/Renderer/MeshVertex.h for the matching C++ layout, Pipeline.h's
-// VertexLayout::PositionNormal, and Game::CreateMeshEntityFromGtaFile(),
-// src/Game/Game.cpp - the thing that actually builds a Mesh of these and a
-// Pipeline against this shader pair). Distinct from Triangle.vert (which
-// consumes position+color instead) - an imported *.gta AssetType::Mesh
-// carries no per-vertex color, only a real per-vertex NORMAL (see
-// src/Assets/MeshData.h), so this shader pair exists specifically to shade
-// with that instead. Compiled to SPIR-V at build time by
-// cmake/CompileShaders.cmake (glslc) - never committed as a binary, see
-// .gitignore.
+// Imported-mesh vertex shader: position + normal inputs, world-space normal and position outputs.
 
-// Same push-constant SHAPE as Triangle.vert's own PushConstants block (a
-// "model" matrix immediately followed by a "viewProj" matrix, both
-// column-major, uploaded directly from Mat4::Data() - see Math/Mat4.h and
-// Renderer/FrameRecorder.cpp's vkCmdPushConstants call) - this is what lets
-// RenderSystem::Draw()/Renderer::Submit() treat this Pipeline exactly like
-// the default one, with no special-casing anywhere in the draw-submission
-// path.
+// Column-major model and view-projection matrices, uploaded straight from Mat4::Data().
 layout(push_constant) uniform PushConstants {
     mat4 model;
     mat4 viewProj;
@@ -27,14 +11,6 @@ layout(push_constant) uniform PushConstants {
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 
-// World-space normal + position, interpolated across the triangle and
-// consumed by Mesh.frag's real per-pixel directional lighting.
-// mat3(pc.model) (no inverse-transpose) is only exactly correct for a
-// uniform scale - see Math/Mat4.h's TransformNormal() for the general case -
-// but every entity spawned via Game::CreateMeshEntityFromGtaFile() starts
-// with an identity Transform (see its own comment), so this doesn't matter
-// yet; revisit if/when a spawned mesh entity's Transform is given a
-// non-uniform scale.
 layout(location = 0) out vec3 outWorldNormal;
 layout(location = 1) out vec3 outWorldPos;
 
@@ -42,6 +18,7 @@ void main()
 {
     vec4 worldPos4 = pc.model * vec4(inPosition, 1.0);
     gl_Position = pc.viewProj * worldPos4;
+    // mat3(model) is only exact for uniform scale (no inverse-transpose).
     outWorldNormal = mat3(pc.model) * inNormal;
     outWorldPos = worldPos4.xyz;
 }

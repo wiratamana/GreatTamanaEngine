@@ -1,38 +1,25 @@
 #version 450
 
-// Test-only fixture shader: a simple NxN box blur, kept alive purely as a
-// real-world SPIR-V reflection fixture for
-// tests/Renderer/Vulkan/ShaderReflectionTests.cpp. Not a shipped production
-// effect.
-//
-// Binding convention (see Vulkan/DescriptorSetLayoutBuilder.h): binding 0
-// is the read-only Texture input, binding 1 is the RWTexture output.
+// Test fixture: simple box blur used as a real-world SPIR-V reflection sample. Not a shipped effect.
 layout(local_size_x = 16, local_size_y = 16) in;
 
-// A plain, read-only Texture - a combined image sampler.
 layout(binding = 0) uniform sampler2D sourceTexture;
 
-// The RWTexture output - VK_FORMAT_R8G8B8A8_UNORM on the C++ side, so
-// `rgba8` here must always match it exactly.
 layout(binding = 1, rgba8) uniform writeonly image2D destinationImage;
 
-// Plain, per-shader push-constant block - the output's pixel dimensions,
-// needed to reject an out-of-bounds invocation and to convert a pixel
-// coordinate into a normalized UV for sourceTexture.
+// Output size in pixels.
 layout(push_constant) uniform PushConstants {
     uint width;
     uint height;
 } pc;
 
-// A small, fixed kernel radius - a simple, unoptimized box average.
 const int kBlurRadius = 3;
 
 void main()
 {
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
     if (pixel.x >= int(pc.width) || pixel.y >= int(pc.height)) {
-        // The dispatch's own ceiling-division group count can legitimately
-        // cover more threads than there are real pixels.
+        // The rounded-up dispatch covers more threads than pixels.
         return;
     }
 

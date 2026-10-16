@@ -1,13 +1,10 @@
 #version 450
 
-// GPU vertex skinning, position + normal variant. Mirrors SkinVertexRange() in Animation/VertexSkinning.cpp.
-// Buffer layouts must match src/Renderer/GpuSkinning/GpuSkinningTypes.h; the C++ side binds by the names below.
-//   bindPose (read-only), skinWeights (read-only), boneMatrices (read-only), outputBuffer (tightly packed floats)
+// GPU vertex skinning (position + normal); same blend as SkinVertexRange() on the CPU.
 // local_size_x must equal kSkinningLocalSizeX in GpuSkinningPipelines.h.
 layout(local_size_x = 256) in;
 
-// Matches GpuBindPoseVertex (GpuSkinningTypes.h) exactly: position padded to
-// a vec4, normal padded to a vec4 (32 bytes total, std430 vec4+vec4).
+// Bind pose vertex: position and normal, each padded to a vec4 (32 bytes).
 struct BindPoseVertex {
     vec4 positionAndPad;
     vec4 normalAndPad;
@@ -16,9 +13,7 @@ layout(std430, binding = 0) readonly buffer BindPoseBuffer {
     BindPoseVertex vertices[];
 } bindPose;
 
-// Matches GpuSkinWeights (GpuSkinningTypes.h) exactly: 4 bone indices (as
-// uvec4, matching GLSL's own unsigned convention) followed by 4 weights (as
-// vec4) - 32 bytes total, std430 uvec4+vec4.
+// Four bone indices and four weights per vertex (32 bytes).
 struct SkinWeightsEntry {
     uvec4 boneIndices;
     vec4 weights;
@@ -27,22 +22,12 @@ layout(std430, binding = 1) readonly buffer SkinWeightsBuffer {
     SkinWeightsEntry entries[];
 } skinWeights;
 
-// Plain mat4[] - Mat4::Data() (src/Math/Mat4.h) is already column-major,
-// matching GLSL's mat4 layout exactly, so this needs zero repacking on the
-// C++ side (see GpuSkinningTypes.h's own Step 3.3 reasoning). Re-uploaded
-// every frame, for every currently-playing animator - the one genuinely
-// dynamic input among this shader's four bindings.
+// Column-major bone matrices, re-uploaded every frame.
 layout(std430, binding = 2) readonly buffer BoneMatricesBuffer {
     mat4 matrices[];
 } boneMatrices;
 
-// Tightly-packed output - matches GpuSkinnedVertexPositionNormal
-// (GpuSkinningTypes.h) exactly: 6 floats per vertex (position.xyz,
-// normal.xyz), stride 6, NO std430 vec-padding. Declared as a flat float
-// array with manually computed offsets (per GpuSkinningTypes.h's own Step
-// 3.4 reasoning) specifically to avoid std430's automatic vec3/vec4
-// alignment rules applying to an output layout that must stay tightly
-// packed to remain byte-compatible with MeshVertex.
+// Tightly packed floats, 6 per vertex (position.xyz, normal.xyz): a flat array avoids std430 vec padding.
 layout(std430, binding = 3) buffer OutputBuffer {
     float values[];
 } outputBuffer;
@@ -55,9 +40,7 @@ void main()
 {
     uint i = gl_GlobalInvocationID.x;
     if (i >= pc.vertexCount) {
-        // ComputeGroupCount()'s own documented ceiling-division overshoot -
-        // see ComputeDispatch.h. These extra invocations simply do nothing.
-        return;
+        return; // The dispatch is rounded up to whole groups.
     }
 
     vec3 bindPosition = bindPose.vertices[i].positionAndPad.xyz;
@@ -75,26 +58,14 @@ void main()
         float weight = weights[slot];
         uint boneIndex = boneIndices[slot];
 
-        // Mirrors VertexSkinning.cpp's SkinVertexRange() exactly: an unused
-        // slot (weight == 0.0 - see GpuSkinningTypes.h's PackSkinWeights(),
-        // which packs every unused slot as bone 0 / weight 0.0, NEVER a raw
-        // bit-reinterpreted -1) contributes nothing, and a bone index that
-        // is somehow out of range against the ACTUAL bone-matrix buffer
-        // size this frame is defensively skipped too, matching the CPU
-        // path's own `static_cast<std::size_t>(boneIndex) >= boneCount`
-        // bounds check.
+        // Unused slots have weight 0; an out-of-range bone index is skipped too.
         if (weight == 0.0 || boneIndex >= boneCount) {
             continue;
         }
 
         mat4 m = boneMatrices.matrices[boneIndex];
 
-        // (m * vec4(bindPosition, 1.0)).xyz mirrors Mat4::TransformPoint()
-        // (w=1, applies translation) exactly; mat3(m) * bindNormal mirrors
-        // Mat4::TransformVector() (w=0, ignores translation) exactly - NOT
-        // Mat4::TransformNormal()'s inverse-transpose - see
-        // VertexSkinning.cpp's own call sites, which use TransformVector()
-        // for the normal, not TransformNormal().
+        // The normal uses mat3(m) (no translation, no inverse-transpose), like the CPU path.
         vec3 transformedPosition = (m * vec4(bindPosition, 1.0)).xyz;
         vec3 transformedNormal = mat3(m) * bindNormal;
 
@@ -106,16 +77,11 @@ void main()
     vec3 finalPosition;
     vec3 finalNormal;
     if (totalWeight > 0.0) {
-        // BDEF4 weights aren't guaranteed to sum to 1.0 by the format
-        // itself - normalize by the ACTUAL total, exactly like
-        // VertexSkinning.cpp's SkinVertexRange() does, never assuming
-        // pre-normalized input.
+        // Weights are not guaranteed to sum to 1, so divide by the actual total.
         finalPosition = skinnedPosition / totalWeight;
         finalNormal = normalize(skinnedNormal);
     } else {
-        // No valid influence at all (every slot unused/out of range) -
-        // degrade to the bind pose exactly like the CPU path, never
-        // collapsing to the origin.
+        // No valid influence: keep the bind pose.
         finalPosition = bindPosition;
         finalNormal = bindNormal;
     }

@@ -1,31 +1,7 @@
 #version 450
 
-// Fragment shader for the Atmosphere Sky Background pass (Phase 7 -
-// task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE7_SKY_BACKGROUND_AND_COMPOSITE_PASSES_v1.md).
-// For every pixel where nothing real was ever drawn this frame (see
-// AtmosphereSkyBackground.vert's own header comment on the depth trick that
-// guarantees this), samples this VIEW's own Sky-View LUT (Phase 5,
-// AtmosphereSkyViewLut.comp) given a per-pixel camera ray reconstructed
-// from `invViewProjection` - mirrors src/Shaders/SceneGrid.frag's own
-// near/far-NDC-unprojection technique exactly (see that file's own
-// SELF-CONSISTENCY NOTE, which applies identically here:
-// AtmosphereSkyBackground.vert synthesizes gl_Position directly from a raw
-// NDC full-screen triangle with no camera/projection matrix involved, so
-// unprojecting THIS shader's own inNdcXY through invViewProjection
-// reconstructs the correct world-space ray through the exact same physical
-// pixel the real scene geometry was drawn to - no extra Y-flip needed).
-//
-// A simple, fixed exponential ("Filmic"-style, 1 - exp(-x * exposure))
-// tonemap is applied before output - the Sky-View LUT's own raw HDR
-// luminance can exceed 1.0 near the sun (see AtmosphereSkyViewLut.comp's
-// own header comment/ATMOSPHERE_PHASE5_COMPLETION_REPORT.md), while this
-// engine's Game/Scene View color attachments are plain, non-HDR
-// UNORM/SRGB formats (Renderer::ColorFormat()) with no separate HDR
-// exposure pass of their own. `pc.skyExposure` (Phase 8 -
-// ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md) replaces what used
-// to be a hardcoded `kSkyExposure` constant - now a real, Editor
-// "Atmosphere" panel-tunable value (AtmosphereSettings::skyExposure),
-// still not a physically-derived constant.
+// Sky background: samples the view's sky-view LUT along the per-pixel camera ray, then tonemaps.
+// The ray comes from unprojecting the near/far NDC points through invViewProjection.
 
 layout(push_constant) uniform PushConstants {
     mat4 invViewProjection;
@@ -59,6 +35,7 @@ void main()
     vec2 uv = ViewDirectionToSkyViewLutUv(viewDirection, lutSize, viewHeightKm, pc.planetRadiusKm);
 
     vec3 radiance = texture(skyViewLut, uv).rgb;
+    // The LUT is HDR (above 1 near the sun) but the color target is not, so apply 1 - exp(-x * exposure).
     vec3 tonemapped = vec3(1.0) - exp(-max(radiance, vec3(0.0)) * pc.skyExposure);
 
     outColor = vec4(tonemapped, 1.0);

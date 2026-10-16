@@ -1,13 +1,7 @@
 #version 450
 
-// Minimal, standalone worked example of the PER-CELL-PARALLEL dispatch shape
-// for filling a VolumeTexture: one invocation per (x, y, z) cell, every cell
-// computed completely independently, with no cross-invocation dependency of
-// any kind - execution order never matters for a correctly-independent fill.
-// Each cell simply encodes its own coordinates, so a CPU-side readback can
-// verify every cell landed in the right place regardless of dispatch order.
-//
-// Binding convention: binding 0 is the single writeonly RWTexture output.
+// Per-cell volume fill: one invocation per (x, y, z) cell, each writing its own coordinates.
+// Cells are independent, so dispatch order does not matter.
 
 layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 

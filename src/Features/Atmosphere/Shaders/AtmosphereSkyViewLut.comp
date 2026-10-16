@@ -1,60 +1,7 @@
 #version 450
 
-// Atmosphere Scattering + Aerial Perspective campaign, Phase 5
-// (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE5_SKYVIEW_LUT_v1.md)
-// - the Sky-View LUT: a 2D texture parameterized by view direction (azimuth
-// + elevation relative to the LOCAL horizon - see AtmosphereCommon.glsl's
-// SkyViewLutUvToViewDirection()) that lets a future sky-background draw
-// (Phase 7) look up a plausible sky color for any background pixel with a
-// SINGLE cheap texture sample instead of ray-marching the atmosphere per
-// on-screen pixel.
-//
-// Unlike Phase 3/4's LUTs (computed once from fixed physical constants),
-// this is the campaign's FIRST genuinely PER-FRAME compute pass: its
-// content depends on the CURRENT camera height and CURRENT sun direction
-// (AtmosphereFrameUniforms, new this phase - see
-// src/Renderer/Atmosphere/AtmosphereLutRenderer.h's own per-view state, and
-// Application.cpp's temporary validation call site) - recomputed every
-// single frame, no dirty-flag question to consider here at all (this
-// phase's own "What We Will NOT Do").
-//
-// Faithfully transcribed from _reference/pl-sky/shaders/sky_lut.comp - see
-// task_manager/atmosphere-scattering-1/ATMOSPHERE_REFERENCE_NOTES.md,
-// Section 5, for this LUT's own variable 32-64 sample count / quadratic
-// distance distribution / t=0.3 mid-segment sampling, all matched exactly
-// below.
-//
-// DEVIATION FROM THE REFERENCE (documented, not a design change): the
-// per-segment source integral below reuses this campaign's own
-// AtmosphereCommon.glsl IntegrateInscattering() (added in Phase 4 for the
-// Multi-Scattering LUT) rather than transcribing the reference's own
-// SEPARATE pl__integrate_source() a second time - both compute the exact
-// same closed-form integral, (S - S*exp(-E*L)) / E; the only difference is
-// pl__integrate_source()'s extra "linear fallback via a bvec3 mix()" for a
-// near-zero extinction coefficient, versus IntegrateInscattering()'s
-// simpler max(extinction, 1e-5) denominator clamp - a minor numerical-
-// robustness nuance, not a formula difference, and not worth a third
-// near-duplicate integral function (see AGENTS.md's "Skeletal Animation
-// Pose Resolution" section for why this codebase refuses that pattern).
-//
-// BINDING CONVENTION (DescriptorSetLayoutBuilder.h's own documented
-// ordering: buffer bindings, then read-only textures, then storage images
-// last; see also this campaign's own "Revision Notes"): binding 0 =
-// AtmosphereParametersGpu (read-only STORAGE buffer, reused verbatim from
-// Phase 3/4 - NEVER `uniform`); binding 1 = AtmosphereFrameUniforms (a
-// SECOND read-only STORAGE buffer, THIS phase's own new per-view/per-frame
-// data - also NEVER `uniform`, per this campaign's own "Revision Notes");
-// binding 2 = sampler2D transmittanceLut (Phase 3's own output); binding 3
-// = sampler2D multiScatteringLut (Phase 4's own output); binding 4 = the
-// output image2D. Both C++ (src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp)
-// and this file must be kept in agreement by hand - this campaign
-// deliberately has no shader reflection.
-//
-// local_size_x/y = 8 - matches _reference/pl-sky/shaders/sky_lut.comp's own
-// established convention for THIS shader specifically (unlike the 16x16
-// Transmittance/Multi-Scattering LUTs) - MUST match
-// src/Renderer/Atmosphere/AtmosphereLutRenderer.cpp's own
-// kSkyViewLutLocalSizeX/Y constants exactly.
+// Sky-view LUT: sky radiance per (azimuth, local-horizon elevation) texel for the current camera height and sun.
+// Lets the sky background fetch a sky color with one texture sample instead of ray-marching per pixel.
 layout(local_size_x = 8, local_size_y = 8) in;
 
 #include "AtmosphereCommon.glsl"
@@ -62,28 +9,22 @@ layout(local_size_x = 8, local_size_y = 8) in;
 layout(std430, binding = 0) readonly buffer AtmosphereParametersBlock {
     AtmosphereParametersGpu atmosphereParameters;
 } params;
+// Alias so the code below can use the plain name of the block member.
 #define atmosphereParameters params.atmosphereParameters
 
 layout(std430, binding = 1) readonly buffer AtmosphereFrameUniformsBlock {
     AtmosphereFrameUniforms frameUniforms;
 } frame;
+// Alias so the code below can use the plain name of the block member.
 #define frameUniforms frame.frameUniforms
 
 layout(binding = 2) uniform sampler2D transmittanceLut;
 layout(binding = 3) uniform sampler2D multiScatteringLut;
 
-// HDR RenderTexture output (VK_FORMAT_R16G16B16A16_SFLOAT on the C++ side,
-// see AtmosphereLutRenderer.cpp) - the sky's own near-sun radiance
-// routinely exceeds 1.0, so `rgba16f` (never `rgba8`) here must always
-// match it exactly.
+// HDR output: near-sun radiance exceeds 1.0, so the format must be float.
 layout(binding = 4, rgba16f) uniform writeonly image2D destinationImage;
 
-// SAME variable sample-count knobs as
-// _reference/pl-sky/shaders/sky_lut.comp's own
-// SKY_VIEW_MIN/MAX_SAMPLE_COUNT/SKY_VIEW_SAMPLE_SEGMENT_T (see
-// ATMOSPHERE_REFERENCE_NOTES.md, Section 5) - fixed, hardcoded constants,
-// never a runtime-tunable Editor knob (see this phase's own "What We Will
-// NOT Do").
+// Ray-march sample count grows with ray length; samples sit 30% into each segment.
 const float kSkyViewMinSampleCount = 32.0;
 const int kSkyViewMaxSampleCount = 64;
 const float kSkyViewSampleSegmentT = 0.3;
@@ -93,10 +34,7 @@ void main()
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
     ivec2 lutSize = imageSize(destinationImage);
     if (texel.x >= lutSize.x || texel.y >= lutSize.y) {
-        // The dispatch's own ceiling-division group count can legitimately
-        // cover more threads than there are real texels - see
-        // ComputeDispatch.h's own header comment. Those extra invocations
-        // simply do nothing.
+        // The dispatch size is rounded up to whole groups; extra threads do nothing.
         return;
     }
 
@@ -105,9 +43,7 @@ void main()
     float planetRadiusKm = atmosphereParameters.planetRadiusKm;
     float atmosphereRadiusKm = AtmosphereRadiusKm(atmosphereParameters);
 
-    // A tiny surface-scale offset (mirrors the reference's own
-    // fCameraSurfaceOffset) keeps a camera sitting exactly at ground level
-    // from producing a degenerate ray/sphere intersection.
+    // A tiny offset keeps a camera exactly at ground level from a degenerate ray/sphere hit.
     float surfaceOffsetKm = max(planetRadiusKm * 1e-7, 1e-6);
     float viewHeightKm = max(frameUniforms.cameraPositionAtmosphere.y, planetRadiusKm) + surfaceOffsetKm;
 
@@ -115,10 +51,7 @@ void main()
 
     vec3 rayOrigin = vec3(0.0, viewHeightKm, 0.0);
 
-    // Combines a ground-hit test with an atmosphere-exit test, exactly
-    // like the reference's own pl_ray_intersection_planet(): a ground hit
-    // wins whenever it exists (the sky-view ray is blocked by the planet's
-    // own bulk before it would otherwise exit the atmosphere).
+    // A ground hit wins over the atmosphere exit: the planet blocks the ray first.
     float groundHitDistanceKm = RayIntersectsSphereNearest(rayOrigin, viewDirection, planetRadiusKm);
     bool hitsGround = groundHitDistanceKm >= 0.0;
     float atmosphereExitDistanceKm = DistanceToAtmosphereOuterBoundary(rayOrigin, viewDirection, atmosphereRadiusKm);
@@ -129,10 +62,7 @@ void main()
         return;
     }
 
-    // AtmosphereFrameUniforms::sunDirection is already the direction FROM
-    // the scene TOWARD the sun (see AtmosphereTypes.h's own doc comment) -
-    // no negation needed here, unlike the reference's own tSunDirection
-    // (which stores the direction light TRAVELS, the opposite sense).
+    // Already points from the scene toward the sun.
     vec3 directionToSun = normalize(frameUniforms.sunDirection);
 
     float viewDotLight = clamp(dot(viewDirection, directionToSun), -1.0, 1.0);
@@ -144,13 +74,11 @@ void main()
     vec3 accumulatedTransmittance = vec3(1.0);
     vec3 accumulatedLuminance = vec3(0.0);
 
-    // Increase the sample count as the ray becomes long relative to the
-    // atmosphere's own vertical thickness.
+    // More samples as the ray gets long relative to the atmosphere thickness.
     float sampleCountFactor = clamp(rayLengthKm / max(2.0 * atmosphereParameters.atmosphereThicknessKm, 1e-6), 0.0, 1.0);
     float sampleCount = mix(kSkyViewMinSampleCount, float(kSkyViewMaxSampleCount), sampleCountFactor);
 
-    // Handles a partial final segment, avoiding an abrupt change whenever
-    // the fractional sample count crosses an integer boundary.
+    // The partial last segment avoids a jump when the fractional count crosses an integer.
     float sampleCountFloor = max(floor(sampleCount), 1.0);
     float completeSegmentsRayLengthKm = rayLengthKm * sampleCountFloor / sampleCount;
 
@@ -166,7 +94,7 @@ void main()
         float interval0 = sampleNumber / sampleCountFloor;
         float interval1 = (sampleNumber + 1.0) / sampleCountFloor;
 
-        // Quadratic distribution concentrates samples near the camera.
+        // Quadratic distribution puts more samples near the camera.
         interval0 *= interval0;
         interval1 *= interval1;
 
@@ -178,13 +106,9 @@ void main()
             continue;
         }
 
-        // Position sampled 30% of the way into this segment, not its
-        // midpoint - matches Hillaire's own reference implementation
-        // exactly (SKY_VIEW_SAMPLE_SEGMENT_T).
         float sampleDistanceKm = mix(distance0Km, distance1Km, kSkyViewSampleSegmentT);
 
-        // Computed directly from the origin rather than incrementing a
-        // running position, avoiding accumulated floating-point error.
+        // Computed from the origin each time to avoid accumulated float error.
         vec3 currentPositionKm = rayOrigin + viewDirection * sampleDistanceKm;
         float radialLengthKm = length(currentPositionKm);
         vec3 upAtSample = currentPositionKm / max(radialLengthKm, 1e-20);
@@ -208,10 +132,7 @@ void main()
         vec3 phaseTimesScattering = scatterRayleigh * rayleighPhaseValue + scatterMie * miePhaseValue;
         vec3 directSource = planetVisibility * transmittanceToSun * phaseTimesScattering;
 
-        // The multiple-scattering LUT already represents incoming
-        // multiple-scattered luminance - multiplied by LOCAL scattering
-        // only here, never by the direct solar transmittance/shadow term
-        // again (that would double-count it).
+        // The LUT already holds multiply-scattered light; scale by local scattering only (no sun shadow again).
         vec3 multipleScatteringSource = multipleScatteredLuminance * totalScattering;
 
         vec3 source = sunRadiance * (directSource + multipleScatteringSource);

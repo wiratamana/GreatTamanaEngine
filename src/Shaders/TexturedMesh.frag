@@ -1,14 +1,6 @@
 #version 450
 
-// Fragment shader half of the engine's TEXTURED "imported mesh submesh"
-// draw path (see TexturedMesh.vert). Samples ONE combined-image-sampler
-// (set = 0, binding = 0 - see GpuResourceFactory::MaterialDescriptorSetLayout()/
-// CreateMaterialTexture2D() and Renderer/MaterialTexture.h) - a PMX
-// material's diffuse texture - and combines it with the real scene
-// directional light + shadow map via the shared
-// ApplyDirectionalLightAndReceiverMask() function (see Mesh.frag), so a
-// textured and untextured part of the SAME model still shade consistently
-// with each other.
+// Textured mesh fragment shader: diffuse texture (set 0) lit by the scene directional light and shadow map (set 1).
 
 #include "DirectionalLightingAndReceiverMask.glsl"
 
