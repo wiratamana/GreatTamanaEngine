@@ -106,7 +106,7 @@ void GpuTimingService::WarmUpResetEntirePool(VulkanDevice& vulkanDevice)
 
 std::uint32_t GpuTimingService::OffscreenSlotBase(GpuTimingSlot slot) noexcept
 {
-    // Offscreen0 -> base 0, Offscreen1 -> base 2; never called with SwapchainPresent.
+    // Offscreen0 -> base 0, Offscreen1 -> base 2 (a start/end pair per slot).
     return static_cast<std::uint32_t>(slot) * 2;
 }
 

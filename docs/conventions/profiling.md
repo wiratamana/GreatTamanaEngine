@@ -241,7 +241,7 @@ whenever touching profiling instrumentation, or adding a new call site:
   own precedent exactly) - `GpuTimestampCapability`/
   `InterpretTimestampCapability()` (device capability probing, queried
   once by `VulkanDevice::TimestampCapability()`), `GpuTimingSlot`
-  (`Offscreen0`/`Offscreen1`/`SwapchainPresent` - deliberately GENERIC
+  (`Offscreen0`/`Offscreen1` - deliberately GENERIC
   names, never `GameView`/`SceneView`, since `Renderer`/`FramePresenter`
   must never know Editor-facing pass naming), `GpuTimingSample` (a
   Renderer-local tri-state mirror of `Profiling::GpuSampleStatus`,

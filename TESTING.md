@@ -80,13 +80,10 @@ safe on any machine/CI runner, GPU or not:
 - `Renderer/ResourcePoolTests.cpp` - the generic `ResourcePool<T, HandleT>`
   slot-map's insert/remove/lookup and generation-guard semantics (backing
   `MeshHandle`/`PipelineHandle` - see `README.md`, "Entity-Component-System").
-- `Renderer/DrawStatsTests.cpp` - Phase 3's pure per-item draw-call/
-  triangle-count accumulator, `AccumulateDrawStats()`/`CountDrawStats()`
-  (`src/Renderer/DrawStats.h`) - empty/single/mixed/truncating-division/
-  degenerate-zero-vertex cases, plus a case proving the inline accumulator
-  (what `FrameRecorder::RecordFrame()` actually calls) and the batch
-  wrapper (what this test file mostly uses) agree exactly. No Vulkan/
-  Renderer/live GPU device involved at all.
+- `Renderer/DrawStatsTests.cpp` - the pure per-draw call/triangle-count
+  accumulator `AccumulateDrawStats()` (`src/Renderer/DrawStats.h`, what
+  `FrameRecorder::RecordFrame()` calls) - empty/single/mixed/truncating-division/
+  degenerate-zero-vertex cases. No Vulkan/Renderer/live GPU device involved at all.
 - `Renderer/GpuTimingTests.cpp` - Phase 4's (`PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md`)
   Vulkan-header-free pure math/decision logic behind real GPU timestamp
   queries (`src/Renderer/GpuTiming.h`):
@@ -94,8 +91,7 @@ safe on any machine/CI runner, GPU or not:
   non-round period, a zero delta, a `timestampPeriodNs <= 0` defensive
   floor, and - the most important regression case - a counter WRAPAROUND
   within `validBits` producing the correct small positive delta instead of
-  a garbage value), `PresentTimestampSlotBase()`'s documented slot indices
-  and its "+1 for the end slot" convention, the fixed `GpuTimingSlot`/
+  a garbage value), the fixed `GpuTimingSlot`/
   `kGpuTimingSlotCount`/`kGpuTimingFramesInFlight` layout,
   `InterpretTimestampCapability()` (a device reporting unsupported via any
   of its three independent signals - `timestampComputeAndGraphics ==

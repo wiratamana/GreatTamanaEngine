@@ -24,10 +24,9 @@ GpuTimestampCapability InterpretTimestampCapability(
 enum class GpuTimingSlot : std::uint32_t {
     Offscreen0 = 0,
     Offscreen1 = 1,
-    SwapchainPresent = 2,
 };
 
-inline constexpr std::uint32_t kGpuTimingSlotCount = 3;
+inline constexpr std::uint32_t kGpuTimingSlotCount = 2;
 
 // One resolved timing measurement; a Renderer-local tri-state so Renderer needs no Profiling header.
 struct GpuTimingSample {

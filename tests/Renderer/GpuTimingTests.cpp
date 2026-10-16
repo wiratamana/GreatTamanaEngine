@@ -71,8 +71,7 @@ TEST(GpuTimingTest, GpuTimingSlotValuesAndCountAreExactlyAsDocumented)
 {
     EXPECT_EQ(static_cast<std::uint32_t>(GpuTimingSlot::Offscreen0), 0u);
     EXPECT_EQ(static_cast<std::uint32_t>(GpuTimingSlot::Offscreen1), 1u);
-    EXPECT_EQ(static_cast<std::uint32_t>(GpuTimingSlot::SwapchainPresent), 2u);
-    EXPECT_EQ(kGpuTimingSlotCount, 3u);
+    EXPECT_EQ(kGpuTimingSlotCount, 2u);
 }
 
 TEST(GpuTimingTest, KGpuTimingFramesInFlightMatchesFramePresenterConvention)

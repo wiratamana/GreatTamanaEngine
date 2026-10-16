@@ -80,9 +80,8 @@ void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pip
     constexpr std::uint32_t stride = sizeof(IndirectDrawCommand);
     if (countBuffer != VK_NULL_HANDLE) {
         assert(supportsDrawIndirectCount
-            && "FrameRecorder::IssueIndirectDrawCommand: a real countBuffer was supplied, but this device does not "
-               "support drawIndirectCount - see Renderer::SubmitIndirect()'s own caller-side contract (PHASE4/5's "
-               "own per-batch resource code must decide this ONCE, per batch, never guess).");
+            && "IssueIndirectDrawCommand: a countBuffer was supplied but this device has no drawIndirectCount; "
+               "the caller must decide this once per batch.");
         if (supportsDrawIndirectCount) {
             // Counted path: the surviving instance count comes from `countBuffer`, capped at `maxDrawCount`.
             vkCmdDrawIndexedIndirectCount(cmd, indirectBuffer, static_cast<VkDeviceSize>(indirectOffset), countBuffer,
