@@ -29,6 +29,24 @@ for each subsystem lives under [`docs/conventions/`](docs/README.md).
   Engine), e.g. `namespace gte { class Window { ... }; }`. This keeps engine
   symbols from colliding with SDL's or third-party globals.
 
+## Vulkan Boundary (Strict)
+
+Only `src/Renderer/` may name or touch Vulkan. Everything else uses the engine's opaque types and the
+Render Feature Kit (`gte::fx`, `gte::rg`).
+
+- **Never** use `Vk*`, `vk*`, `VK_*`, `volk.h`, `VkFormat`, `VkImageView`, `VkBuffer` and similar outside `src/Renderer/`.
+  Not in code, not in `#include`, not in string literals. Use `PixelFormat`, `DescriptorSetHandle`, `UiTextureHandle`, etc.
+- **Never** use raw wrappers outside `src/Renderer/`: `.Native()` on GPU objects, `CommandBuffer::Native()`,
+  `ComputeDescriptorSet`, `ComputePipeline`, `ImmediateSubmit`, hand-written barriers or `vkCmd*`.
+  Use `rg::OneShot`, `rg::Shader`, `rg::GpuBuffer` and the pass kinds (Compute, Fullscreen, Mesh, Transfer).
+- Render features under `src/Features/<Name>/` (outside `Editor/`) may only include `fx::*`, ECS and Math headers.
+- Do not add files to the allowlists in `tools/ci/*/allowlist.txt`. They may only shrink.
+  The only allowed exceptions are: KTX2 `vkFormat` fields (`Assets/Ktx2*`), the SDL window and surface provider
+  (`Window/*`, `Core/ISurfaceProvider.h`) and the ImGui Vulkan backend setup (`Editor/ImGuiEditorLayer.cpp`).
+- If you need a GPU feature that the kit does not offer, add it inside `src/Renderer/` behind a Vulkan-free
+  interface. Do not leak Vulkan to the caller. Do not add a `friend` to `Renderer` just to reach a raw call from outside.
+- The ctest checks `VolkLeakCheck`, `NativeLeakCheck`, `FeaturePurityCheck` and `HeaderPurity` enforce this. Keep them green.
+
 # Development & Coding Guidelines
 
 Core Requirements:
