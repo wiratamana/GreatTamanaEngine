@@ -156,30 +156,15 @@ bool BoneViewerWindow::EnsureDataLoaded(
     RebuildBoneHierarchyIndex(); // Still only walks m_bones - RigidBody/Joint have no tree to build.
     RebuildRigidBodyAdjacencyIndex(); // Derives the rigid-body-centric graph "Select All (Branch)" walks.
 
-    std::vector<MeshPreviewVertex> vertices(mesh->positions.size());
-    const bool hasNormals = mesh->normals.size() == mesh->positions.size();
-    Vec3 minBounds = mesh->positions[0];
-    Vec3 maxBounds = mesh->positions[0];
-    for (std::size_t i = 0; i < mesh->positions.size(); ++i) {
-        const Vec3& p = mesh->positions[i];
-        const Vec3 n = hasNormals ? mesh->normals[i] : Vec3::Up();
-        vertices[i] = MeshPreviewVertex{ { p.x, p.y, p.z }, { n.x, n.y, n.z } };
-        minBounds = Vec3(std::min(minBounds.x, p.x), std::min(minBounds.y, p.y), std::min(minBounds.z, p.z));
-        maxBounds = Vec3(std::max(maxBounds.x, p.x), std::max(maxBounds.y, p.y), std::max(maxBounds.z, p.z));
-    }
+    const MeshPreviewData previewData = BuildMeshPreviewData(mesh->positions, mesh->normals);
+    m_boundsCenter = previewData.center;
+    m_boundsRadius = previewData.radius;
 
-    m_boundsCenter = (minBounds + maxBounds) * 0.5f;
-    float radius = 0.0f;
-    for (const Vec3& p : mesh->positions) {
-        radius = std::max(radius, Length(p - m_boundsCenter));
-    }
-    m_boundsRadius = radius > kEpsilon ? radius : 1.0f;
-
-    if (!m_preview->SetMesh(vertices, mesh->indices)) {
+    if (!m_preview->SetMesh(previewData.vertices, mesh->indices)) {
         return true; // m_cachedIsValid stays false.
     }
 
-    m_vertexCount = static_cast<std::uint32_t>(vertices.size());
+    m_vertexCount = static_cast<std::uint32_t>(previewData.vertices.size());
     m_indexCount = static_cast<std::uint32_t>(mesh->indices.size());
     m_cachedIsValid = true;
     m_needsFraming = true; // A newly (re)loaded model - reframe the camera next Build() call.

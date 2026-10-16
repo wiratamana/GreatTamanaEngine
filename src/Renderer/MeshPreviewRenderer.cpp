@@ -11,6 +11,7 @@
 #include "../Core/Logging.h"
 #include "../Core/PipelineDesc.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <exception>
@@ -35,6 +36,32 @@ static_assert(sizeof(PreviewPush) == 128, "layout differs from MeshPreview.vert"
 constexpr std::uint64_t kDummyUniformBlockSize = 128;
 
 } // namespace
+
+MeshPreviewData BuildMeshPreviewData(std::span<const Vec3> positions, std::span<const Vec3> normals)
+{
+    MeshPreviewData data;
+    if (positions.empty()) {
+        return data;
+    }
+    const bool hasNormals = normals.size() == positions.size();
+    data.vertices.resize(positions.size());
+    Vec3 minBounds = positions[0];
+    Vec3 maxBounds = positions[0];
+    for (std::size_t i = 0; i < positions.size(); ++i) {
+        const Vec3& p = positions[i];
+        const Vec3 n = hasNormals ? normals[i] : Vec3::Up();
+        data.vertices[i] = MeshPreviewVertex{ { p.x, p.y, p.z }, { n.x, n.y, n.z } };
+        minBounds = Vec3(std::min(minBounds.x, p.x), std::min(minBounds.y, p.y), std::min(minBounds.z, p.z));
+        maxBounds = Vec3(std::max(maxBounds.x, p.x), std::max(maxBounds.y, p.y), std::max(maxBounds.z, p.z));
+    }
+    data.center = (minBounds + maxBounds) * 0.5f;
+    float radius = 0.0f;
+    for (const Vec3& p : positions) {
+        radius = std::max(radius, Length(p - data.center));
+    }
+    data.radius = radius > kEpsilon ? radius : 1.0f;
+    return data;
+}
 
 struct MeshPreviewRenderer::Impl {
     explicit Impl(Renderer& owner)

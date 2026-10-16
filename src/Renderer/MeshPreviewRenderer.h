@@ -4,11 +4,13 @@
 
 #include "../Core/UiTextureHandle.h"
 #include "../Math/Mat4.h"
+#include "../Math/Vec3.h"
 
 #include <array>
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <vector>
 
 namespace gte {
 
@@ -20,6 +22,17 @@ struct MeshPreviewVertex {
     float normal[3];
 };
 static_assert(sizeof(MeshPreviewVertex) == 24, "layout differs from MeshPreview.vert");
+
+// Preview vertices plus the bounding sphere (centre of the AABB, radius from it) used to frame a camera.
+struct MeshPreviewData {
+    std::vector<MeshPreviewVertex> vertices;
+    Vec3 center = Vec3::Zero();
+    float radius = 1.0f;
+};
+
+// Converts positions and normals (up when `normals` does not match `positions`) into preview vertices and bounds.
+// Empty `positions` gives empty vertices. A degenerate radius becomes 1.
+MeshPreviewData BuildMeshPreviewData(std::span<const Vec3> positions, std::span<const Vec3> normals);
 
 // Owns the preview pipeline, one mesh and one render target. The Renderer must outlive it.
 class MeshPreviewRenderer {
