@@ -21,10 +21,9 @@ void ClearEntireScene(Registry& registry);
 class Game;
 class Renderer;
 
-// Spawns every record of `document` into `game`: primitives and mesh assets as real GPU-backed entities
-// (asset children reconciled by name), everything else as bare entities. Then applies saved components
-// and parenting, and ensures a default camera exists.
-// The caller must call ClearEntireScene() first. `sceneServicesSetLayout` is Core's scene-services layout.
+// Spawns every record of `document` into `game`: primitives and mesh assets as GPU-backed entities (asset
+// children reconciled by name), the rest as bare entities; then applies components, parenting and a default camera.
+// Call ClearEntireScene() first. `sceneServicesSetLayout` is Core's scene-services layout.
 void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDocument& document,
     const AssetDatabase& assetDatabase, DescriptorSetLayoutHandle sceneServicesSetLayout);
 

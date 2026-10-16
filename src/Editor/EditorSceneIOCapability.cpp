@@ -6,10 +6,7 @@ namespace gte {
 
 bool EditorSceneIOCapability::SaveScene(Game& game, const std::filesystem::path& scenePath, std::string& outErrorMessage)
 {
-    // gte::SaveScene() (SceneIO.h) returns a plain bool with no error-message
-    // output of its own - this fallback string is byte-for-byte the same one
-    // EngineCommandDispatch.cpp's own ON-branch used to set directly, before
-    // this phase's conversion (behavior-preserving, not a new message).
+    // gte::SaveScene() returns a plain bool, so a generic message is reported.
     const bool success = gte::SaveScene(game, scenePath);
     if (!success) {
         outErrorMessage = "failed to write scene file (I/O error) - see engine log";
@@ -20,8 +17,7 @@ bool EditorSceneIOCapability::SaveScene(Game& game, const std::filesystem::path&
 bool EditorSceneIOCapability::LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scenePath,
     DescriptorSetLayoutHandle sceneServicesSetLayout, std::string& outErrorMessage)
 {
-    // Same reasoning as SaveScene() above - byte-for-byte the same fallback
-    // string EngineCommandDispatch.cpp's own ON-branch used to set directly.
+    // gte::LoadScene() returns a plain bool, so a generic message is reported.
     const bool success = gte::LoadScene(game, renderer, scenePath, sceneServicesSetLayout);
     if (!success) {
         outErrorMessage = "failed to load scene file - it may not exist, or failed to parse (see engine log)";

@@ -8,11 +8,7 @@
 
 #include "../Game/Game.h"
 
-// imgui_internal.h is needed (only here, among the Editor's panel/layout
-// files) for the DockBuilder* API used to lay out the default Unity-style
-// panel arrangement below - it is not part of ImGui's stable public API,
-// but building a default dock layout programmatically has no supported
-// alternative in Dear ImGui today.
+// imgui_internal.h provides the DockBuilder* API; there is no public alternative.
 #include <imgui.h>
 #include <imgui_internal.h>
 
@@ -23,10 +19,7 @@ namespace gte {
 
 namespace {
 
-// True if the dockspace node itself doesn't exist yet, OR if any of our
-// four panels currently exists as a window but has never actually been
-// docked (DockId == 0) - see BuildDockspaceAndMenuBar()'s comment for why
-// this is checked only until latched, never on every frame forever.
+// True if the dockspace node is missing, or any panel window exists but was never docked (DockId == 0).
 bool DefaultDockLayoutIsNeeded(ImGuiID dockspaceId)
 {
     if (ImGui::DockBuilderGetNode(dockspaceId) == nullptr) {
@@ -41,22 +34,8 @@ bool DefaultDockLayoutIsNeeded(ImGuiID dockspaceId)
     return false;
 }
 
-// Unity-style default arrangement, built exactly once (see caller):
-//   +----------+-------------------------------+----------+
-//   |          |         (menu bar)             |          |
-//   | Hierarchy|      Scene | Game (tabs)        | Inspector|
-//   |  (left)  |         (center)                |  (right) |
-//   |          +---------------------------------+          |
-//   |          |             Memory (bottom)      |          |
-//   +----------+-------------------------------+----------+
-// "Scene" and "Game" are docked into the SAME center node (as tabs) - the
-// user can drag the "Scene" tab out to split it away from "Game" at any
-// time afterwards (see BuildDockspaceAndMenuBar()'s comment). "Memory"
-// (Unity-Memory-Profiler-style GPU memory panel, see Panels/MemoryPanel.cpp)
-// gets its own full-width strip along the bottom, mirroring where Unity's
-// own Profiler window normally lives - split off the dockspace BEFORE the
-// left/right panels below so it spans the complete width rather than just
-// the center column.
+// Default layout, built once: Hierarchy left, Inspector right, Scene/Game tabs center, wide bottom strip.
+// The bottom strip is split first so it spans the full width.
 void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
 {
     ImGui::DockBuilderRemoveNode(dockspaceId);
@@ -73,31 +52,16 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
     ImGui::DockBuilderDockWindow("Scene", center);
     ImGui::DockBuilderDockWindow("Game", center);
     ImGui::DockBuilderDockWindow("Memory", bottom);
-    // "Profiler" (Phase 7 - Panels/ProfilerPanel.h) is docked unconditionally
-    // alongside "Memory", exactly like "Memory" itself - it has no
-    // GTE_ENABLE_PROJECT_PANEL dependency at all.
     ImGui::DockBuilderDockWindow("Profiler", bottom);
-    // "Render Graph" is NOT docked here - it is a floating window (see
-    // Panels/RenderGraphPanel.h) with its own default size, same precedent
-    // as FrameDebuggerPanel. Its node canvas needs real screen space, not a
-    // quarter-height strip shared with four other panels.
-    // "Jobs" (Job System Phase 7 - Panels/JobsPanel.h) - docked
-    // unconditionally alongside Memory/Profiler; it has no
-    // GTE_ENABLE_PROJECT_PANEL dependency either.
+    // "Render Graph" is a floating window and is not docked here.
     ImGui::DockBuilderDockWindow("Jobs", bottom);
-    // "Log" (task_manager/logger-1 campaign, PHASE4 - Panels/LogPanel.h) -
-    // same "docked unconditionally alongside Memory/Profiler/Jobs"
-    // treatment; it has no GTE_ENABLE_PROJECT_PANEL dependency either.
     ImGui::DockBuilderDockWindow("Log", bottom);
 #if GTE_ENABLE_PROJECT_PANEL
-    // Tabbed alongside "Memory" - Unity's own default layout also puts
-    // "Project" (and "Console") along the bottom.
+    // Tabbed alongside "Memory", like Unity's bottom "Project" tab.
     ImGui::DockBuilderDockWindow("Project", bottom);
 #endif
 
-    // Every plugin panel (built-in, like "Atmosphere", or an external
-    // Project Assembly panel) gets tabbed into the SAME bottom node,
-    // generically, with zero hardcoded knowledge of any specific one.
+    // Every plugin panel (built-in or Project Assembly) is tabbed into the bottom node.
     for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
         ImGui::DockBuilderDockWindow(entry.name.c_str(), bottom);
     }
@@ -124,10 +88,7 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
     ImGui::Begin("EditorDockSpaceHost", nullptr, hostFlags);
     ImGui::PopStyleVar(3);
 
-    // Runs SaveScene()/LoadScene() and stamps ctx.sceneIo* status feedback -
-    // shared by both the File menu items below and the Ctrl+S/Ctrl+O global
-    // shortcut check further down, so the bookkeeping (message/error flag/
-    // timestamp) is never duplicated four times.
+    // Runs Save/Load and stamps the ctx.sceneIo* status; shared by the File menu and the Ctrl+S/O shortcuts.
     auto reportStatus = [&ctx](bool ok, const std::string& okMessage, const std::string& failMessage) {
         ctx.sceneIoStatusMessage = ok ? okMessage : failMessage;
         ctx.sceneIoStatusIsError = !ok;
@@ -146,26 +107,15 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
                     "Failed to load scene (missing or malformed file).");
             }
             ImGui::Separator();
-            // Simple example of a menu item that exits the application
-            // programmatically: sets ctx.exitRequested, which
-            // ImGuiEditorLayer::WantsExit() checks once per frame, rather
-            // than calling exit()/SDL_Quit() directly here, so shutdown
-            // still goes through Application's normal RAII teardown.
+            // Sets a flag instead of calling exit() so shutdown goes through the normal RAII teardown.
             if (ImGui::MenuItem("Exit")) {
                 ctx.exitRequested = true;
             }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Window")) {
-            // task_manager/frame-debugger-2 campaign (PHASE2) - the
-            // Frame Debugger is an on-demand floating window (like
-            // BoneViewerWindow), not part of the default dock layout,
-            // so it needs its own explicit way to be (re)opened once
-            // closed - a checkable menu item bound directly to
-            // ctx.frameDebuggerWindowOpen (see EditorContext.h). The
-            // checkmark reflects the window's actual current open state
-            // even if it was closed via its own titlebar [x] rather than
-            // this menu.
+            // Floating (not docked) window; the checkmark follows ctx.frameDebuggerWindowOpen,
+            // including a close via the titlebar [x].
             ImGui::MenuItem("Frame Debugger", nullptr, &ctx.frameDebuggerWindowOpen);
             // Render Graph is a floating window too (not docked), same
             // open/close convention as Frame Debugger above.
@@ -179,22 +129,13 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
             if (ImGui::MenuItem("New Project...")) {
                 ctx.newProjectWindowOpen = true;
             }
-            // editor-core-separation-17 campaign (On-Engine Project
-            // Workflow plan, BIG-STEP 3), PHASE4 - "Open Project..." is now
-            // real: wired to ctx.openProjectWindowOpen, opening
-            // OpenProjectWindow.h.
+            // Opens OpenProjectWindow.h.
             if (ImGui::MenuItem("Open Project...")) {
                 ctx.openProjectWindowOpen = true;
             }
             ImGui::Separator();
-            // editor-core-separation-19 campaign (On-Engine Project Workflow plan,
-            // BIG-STEP 5), PHASE1 - real now. Reads the SAME ActiveProjectAssemblyState
-            // singleton BIG-STEP 2/3/4 already read/wrote (LDD-PW2 - exactly one
-            // active project). The item stays ENABLED (never disabled) while a
-            // build is already in flight for this project - clicking it again must
-            // still be possible, to observe the "already in progress" status
-            // message (PHASE0_MASTER_STRATEGY.md, Section 3.4) - only its own label
-            // gains a "(compiling...)" suffix as a purely informational cue.
+            // Stays enabled while a build runs so a click can report "already in progress";
+            // only the label gains a "(compiling...)" suffix.
             {
                 const ActiveProjectAssemblyInfo active = ActiveProjectAssemblyState::Instance().GetActive();
                 const bool buildInFlight = (hotReloadDebugCapability != nullptr && active.hasActiveProject)
@@ -218,19 +159,12 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
         ImGui::EndMenuBar();
     }
 
-    // frame-debugger-1 campaign (task_manager/frame-debugger-1/
-    // PHASE3_EDITOR_PAUSE_STEP_STATE_AND_TOOLBAR_UI.md) - the Pause/Resume +
-    // Step playback toolbar, rendered as a fixed strip right under the menu
-    // bar, before the dockspace itself - see PlaybackControls.h.
+    // Pause/Step playback toolbar, a fixed strip under the menu bar (see PlaybackControls.h).
     BuildPlaybackToolbar(ctx);
 
     {
         ImGuiIO& io = ImGui::GetIO();
-        // WantTextInput guards against a user typing a literal 's'/'o' into
-        // an unrelated ImGui text field (e.g. renaming something, once that
-        // exists) from being misread as this shortcut - the same defensive
-        // pattern IEditorLayer::WantsCaptureKeyboard() already establishes
-        // for gameplay input (see AGENTS.md, "Editor Module Structure").
+        // Ignore Ctrl+S/O while a text field has focus.
         if (!io.WantTextInput && io.KeyCtrl) {
             if (ImGui::IsKeyPressed(ImGuiKey_S, /*repeat=*/false)) {
                 const bool saved = SaveScene(game);
@@ -247,35 +181,13 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
     const ImGuiID dockspaceId = ImGui::GetID("EditorDockSpace");
     ImGui::DockSpace(dockspaceId, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
 
-    // See below for why this whole block only ever runs until
-    // ctx.dockLayoutEnsured latches true, never again after that - this is
-    // what lets the user freely drag/split/undock any panel afterwards
-    // without ever fighting this code.
-    //
-    // This one-shot-ness is not just an optimization - it's required for
-    // correctness. Dragging a tab to split/detach it (e.g. pulling "Scene"
-    // away from "Game") makes Dear ImGui briefly report that window's
-    // DockId as 0 WHILE THE DRAG IS STILL IN PROGRESS, before the drop
-    // target is chosen - a naive "rebuild the default layout whenever any
-    // of our panels has DockId == 0" check run every frame would catch
-    // exactly that transient mid-drag state and immediately call
-    // DockBuilderRemoveNode() + redock everything back to the default
-    // layout, cancelling the user's drag before they can ever complete it.
-    // That made splitting/undocking ANY of these panels look completely
-    // impossible. Checking only until the layout is confirmed once (then
-    // never again) fixes this while still auto-repairing a stale
-    // imgui.ini saved by an older build of this engine, from before these
-    // panels existed (which would otherwise leave them as permanent tiny
-    // undocked floating windows).
+    // Runs only until ctx.dockLayoutEnsured latches. ImGui reports DockId == 0 mid-drag, so checking
+    // every frame would rebuild the default layout and cancel the user's split/undock drag.
+    // Also repairs a stale imgui.ini that predates some panels.
     if (!ctx.dockLayoutEnsured) {
         bool allPanelsAccountedFor = true;
         for (const std::string& panelName : EditorPanelRegistry::Instance().AllNames()) {
-            // A panel that has never called Begin() yet this session (e.g.
-            // this is the very first frame ever, before this same
-            // BuildUI() call reaches BuildHierarchyPanel()/etc.) doesn't
-            // exist as an ImGuiWindow yet - we can't yet be sure whether
-            // it'll end up docked or not, so don't latch "ensured" on this
-            // frame; just wait and check again next frame instead.
+            // A panel that never called Begin() yet has no window; wait and re-check next frame.
             if (ImGui::FindWindowByName(panelName.c_str()) == nullptr) {
                 allPanelsAccountedFor = false;
                 break;
@@ -286,22 +198,13 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
             BuildDefaultDockLayout(dockspaceId, viewport->WorkSize);
             ctx.dockLayoutEnsured = true; // We just fixed it ourselves - trust it, never recheck.
         } else if (allPanelsAccountedFor) {
-            // Nothing needed fixing AND we've actually observed a real,
-            // live window for all four panels with a real dock already
-            // (e.g. a valid saved imgui.ini) - safe to stop checking
-            // forever.
+            // Every panel has a live window with a real dock (e.g. a valid saved imgui.ini): stop checking.
             ctx.dockLayoutEnsured = true;
         }
-        // else: not enough information yet (some panel hasn't had its
-        // first Begin() this session) - leave ctx.dockLayoutEnsured false
-        // and re-evaluate next frame.
+        // else: some panel has not had its first Begin() yet; re-check next frame.
     }
 
-    // Short-lived colored status line for the last Save/Open Scene action
-    // (see ctx.sceneIoStatusMessage's own doc comment in EditorContext.h) -
-    // mirrors ProjectPanel::Build()'s own identical status-message pattern
-    // (Panels/ProjectPanel.cpp), just rendered here since this is where the
-    // action itself is triggered from.
+    // Short-lived colored status line for the last Save/Open Scene action.
     if (!ctx.sceneIoStatusMessage.empty()) {
         constexpr std::chrono::milliseconds kSceneIoStatusLifetime{ 4000 };
         if (std::chrono::steady_clock::now() - ctx.sceneIoStatusSetTime < kSceneIoStatusLifetime) {
@@ -313,10 +216,7 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
         }
     }
 
-    // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 2), PHASE4 - the shared "Project" menu action status toast
-    // (ctx.projectWorkflowStatusMessage's own doc comment, EditorContext.h) -
-    // mirrors the sceneIoStatusMessage block immediately above, exactly.
+    // Shared status toast for "Project" menu actions; same pattern as the scene IO status above.
     if (!ctx.projectWorkflowStatusMessage.empty()) {
         constexpr std::chrono::milliseconds kProjectWorkflowStatusLifetime{ 4000 };
         if (std::chrono::steady_clock::now() - ctx.projectWorkflowStatusSetTime < kProjectWorkflowStatusLifetime) {
@@ -331,17 +231,7 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
     ImGui::End();
 }
 
-// network-impl-7 campaign - see DockLayout.h's own doc comment for the full
-// contract. The "read with FindWindowByName() first, then call
-// SetWindowFocus() by name a second time" shape here is NOT reusing
-// DefaultDockLayoutIsNeeded()'s own loop above (that loop only ever calls
-// FindWindowByName() to check window->DockId == 0, never SetWindowFocus()) -
-// the double lookup is required because SetWindowFocus()'s own public-API
-// signature only takes a name, never a resolved ImGuiWindow*, so there is no
-// way to avoid a second name-based lookup internally without reaching for a
-// different, more internal API than this codebase already uses elsewhere
-// (ImGui::FocusWindow(ImGuiWindow*, ImGuiFocusRequestFlags = 0), also
-// declared in imgui_internal.h) - not worth it for no measurable benefit.
+// SetWindowFocus() only takes a name, so the window is looked up a second time by name here.
 bool FindAndFocusEditorWindow(const char* panelName)
 {
     const ImGuiWindow* window = ImGui::FindWindowByName(panelName);

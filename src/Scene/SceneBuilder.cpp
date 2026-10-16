@@ -16,13 +16,8 @@ namespace gte {
 
 namespace {
 
-// Recursive pre-order walk - visits `entity`, appends its own
-// SceneEntityRecord to `outDocument.entities`, THEN recurses into its
-// children (via GetChildren()) so a parent's own array index is always
-// already known (and thus can be captured by each child's own parentIndex)
-// by the time any child is visited. `outEntityOrder` is index-aligned with
-// `outDocument.entities` - PHASE4's own asset_guid resolution pass (below)
-// reuses it.
+// Pre-order walk: appends `entity`'s record, then recurses into its children, so a parent's index is
+// known when each child captures it. `outEntityOrder` is index-aligned with `outDocument.entities`.
 void WalkEntityRecursive(Registry& registry, Entity entity, std::optional<std::size_t> parentIndex,
     std::vector<Entity>& outEntityOrder, SceneDocument& outDocument)
 {
@@ -34,12 +29,8 @@ void WalkEntityRecursive(Registry& registry, Entity entity, std::optional<std::s
         record.siblingIndex = transform->siblingIndex;
     }
 
-    // Generic component capture - THE key new piece of logic this whole
-    // campaign is built around: walk EVERY registered component type, in
-    // AllSortedByTypeName() order, and if this entity has it, serialize
-    // it. No per-component-type branch anywhere in this function - a
-    // future component becomes part of a saved scene automatically the
-    // moment it registers itself (see PHASE2).
+    // Generic capture: serialize every registered component type the entity has, so new components
+    // become part of a saved scene by registering themselves.
     for (const ComponentTypeDescriptor& descriptor : ComponentTypeRegistry::Instance().AllSortedByTypeName()) {
         const void* component = descriptor.tryGetConstComponent(registry, entity);
         if (component == nullptr) {
@@ -70,28 +61,15 @@ SceneDocument BuildSceneDocumentFromRegistry(Registry& registry, const AssetData
         WalkEntityRecursive(registry, root, std::nullopt, entityOrder, document);
     }
 
-    // PHASE4 (task_manager/scene-serialization-2/
-    // PHASE4_RECIPE_SPAWN_RECONCILIATION_AND_LOAD_CORRECTNESS.md, section
-    // 3.1) - the asset_guid resolution pass PHASE3 deferred. Runs AFTER the
-    // recursive walk above finishes, so entityOrder/document are both fully
-    // built and index-aligned.
+    // Resolve asset guids after the walk, when entityOrder and document are fully built and index-aligned.
     for (std::size_t i = 0; i < entityOrder.size(); ++i) {
         if (const MeshAssetSource* meshAssetSource = registry.TryGetComponent<MeshAssetSource>(entityOrder[i]);
             meshAssetSource != nullptr) {
             if (const AssetRecord* asset = assetDatabase.FindByPath(meshAssetSource->gtaPath); asset != nullptr) {
                 document.entities[i].assetGuid = asset->guid.ToString();
             }
-            // else: not (or no longer) a tracked asset - leave assetGuid
-            // empty, exactly like scene-serialization-1's own original
-            // behavior - except this campaign does NOT skip/omit the
-            // entity's own record entirely (the old behavior) - it is
-            // still saved, generically, with whatever Transform/Name it
-            // has; it will simply come back on Load as a bare entity with
-            // no re-derived mesh, since Load has no Guid to resolve. This
-            // is a deliberate, small improvement over
-            // scene-serialization-1's old "skip the whole entity
-            // silently" - now at least ITS TRANSFORM/NAME still round-trips,
-            // even if its mesh can't be rebuilt.
+            // else: untracked asset - assetGuid stays empty; the record is still saved and reloads as a
+            // bare entity with its Transform/Name but no rebuilt mesh.
         }
     }
 
@@ -109,18 +87,8 @@ void ClearEntireScene(Registry& registry)
     }
 }
 
-// editor-core-separation-15 campaign (Project Assembly Hot Reload plan,
-// BIG-STEP 4), PHASE3 - see this function's own doc comment in
-// SceneBuilder.h for the full extraction history. This body is a faithful,
-// unmodified copy of Editor/SceneIO.cpp's own prior LoadScene() recipe-aware
-// reconstruction logic (Pass A/B1/B2/B3 + the markSubtreeUnresolved lambda +
-// the final EnsureDefaultCameraExists() call) - minus the file-I/O/
-// AssetDatabase-scan/ClearEntireScene() responsibilities, which now stay
-// with each of this function's two real callers (Editor::LoadScene(),
-// Core/Plugins/ProjectAssemblyHotReload.cpp's own
-// RestoreProjectAssemblyHotReloadState()). Do NOT "improve" this algorithm
-// here - this is a pure code-motion refactor; fix bugs, if any are ever
-// found, only as their own, separately-justified change.
+// Spawns the document's entities in recipe-aware passes (A: create, B1: parent, B2: fields, B3: sibling order).
+// File I/O, asset scanning and ClearEntireScene() stay with the caller.
 void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDocument& document,
     const AssetDatabase& assetDatabase, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
@@ -129,31 +97,15 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
     const std::size_t entityCount = document.entities.size();
     std::vector<Entity> resultEntities(entityCount, kInvalidEntity);
 
-    // consumedByRecipe[i] means: "this record's own identity/creation was
-    // already fully decided by Pass A - either spawned via a recipe
-    // (PrimitiveSource/MeshAssetSource), OR reconciled (matched or
-    // explicitly left unmatched) as an asset root's saved child, OR marked
-    // unreachable because an ancestor's asset failed to resolve." Consulted
-    // by Pass A's OWN dedup guard (below) and by Pass B2 (to skip
-    // re-applying the "PrimitiveSource" key onto an already-recipe-spawned
-    // entity).
+    // consumedByRecipe[i]: Pass A already decided this record (recipe-spawned, reconciled or dropped,
+    // or unreachable under an unresolved asset root). Pass A skips it; Pass B2 skips re-applying "PrimitiveSource".
     std::vector<bool> consumedByRecipe(entityCount, false);
 
-    // alreadyParentedByRecipe[i] means: "this record's LIVE entity is
-    // ALREADY correctly attached under its live parent, because
-    // CreateMeshEntityFromGtaFile() parented it there itself." Set ONLY on a
-    // saved child SUCCESSFULLY matched by-Name inside the reconciliation
-    // loop below - NEVER on the recipe root record itself (see Pass B1 for
-    // exactly why this distinction matters - conflating it with
-    // consumedByRecipe would silently revert a manually-reparented recipe
-    // root to being a top-level scene root on every Load).
+    // alreadyParentedByRecipe[i]: the live entity was already attached to its live parent by
+    // CreateMeshEntityFromGtaFile(). Set only on matched saved children, never on the recipe root itself.
     std::vector<bool> alreadyParentedByRecipe(entityCount, false);
 
-    // childrenOf[i] = every j where document.entities[j].parentIndex == i,
-    // in ascending j (== ascending saved-sibling) order. Built ONCE, up
-    // front, by a single linear scan over document.entities before Pass A
-    // starts - reused by the reconciliation loop AND by
-    // markSubtreeUnresolved() below.
+    // childrenOf[i] = indices j with parentIndex == i, in ascending (saved-sibling) order.
     std::vector<std::vector<std::size_t>> childrenOf(entityCount);
     for (std::size_t i = 0; i < entityCount; ++i) {
         if (document.entities[i].parentIndex.has_value()) {
@@ -161,17 +113,8 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
         }
     }
 
-    // Recursively marks i's ENTIRE saved subtree (i itself, plus every
-    // descendant, at any depth) as "already decided by Pass A - do not
-    // create a bare entity for it, ever." resultEntities stays
-    // kInvalidEntity for every one of them, forever. WITHOUT this, an
-    // unresolvable asset root's saved children (and grandchildren, if any)
-    // would each be reached later by Pass A's own i=0..N-1 loop with
-    // resultEntities[] still kInvalidEntity AND consumedByRecipe[] still
-    // false - indistinguishable from "never visited yet" - and would fall
-    // through to the "plain entity" branch, spawning a stray, UNPARENTED
-    // bare entity for each one (Pass B1 cannot parent it under a parent that
-    // itself never resolved).
+    // Marks i and every saved descendant as decided, so Pass A never spawns stray unparented bare
+    // entities for the children of an unresolvable asset root.
     std::function<void(std::size_t)> markSubtreeUnresolved = [&](std::size_t i) {
         consumedByRecipe[i] = true;
         for (const std::size_t childIndex : childrenOf[i]) {
@@ -181,18 +124,8 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
 
     // PASS A (recipe-aware entity creation).
     for (std::size_t i = 0; i < entityCount; ++i) {
-        // FIX (bug #1 from PHASE4's own revision note): checking ONLY
-        // "resultEntities[i] != kInvalidEntity" here is NOT sufficient - an
-        // unmatched reconciled child (see the reconciliation loop below: a
-        // saved child with no live counterpart gets resultEntities[j] left
-        // at kInvalidEntity ON PURPOSE) looks EXACTLY like "not yet
-        // visited" to that check alone, so this same loop would later
-        // reprocess it from scratch and spawn a brand-new bare entity for
-        // it - silently resurrecting a record this algorithm had already,
-        // deliberately, decided to drop. consumedByRecipe[i] is the flag
-        // that actually remembers "already decided" regardless of whether
-        // that decision happened to leave resultEntities[i] valid or
-        // invalid.
+        // resultEntities[i] alone cannot tell "dropped on purpose" (unmatched reconciled child) from
+        // "not visited yet"; consumedByRecipe[i] remembers that the record was already decided.
         if (resultEntities[i] != kInvalidEntity || consumedByRecipe[i]) {
             continue;
         }
@@ -207,14 +140,8 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
                 resultEntities[i] = game.CreatePrimitiveEntity(renderer, parsedType, sceneServicesSetLayout);
                 consumedByRecipe[i] = true;
             }
-            // else: malformed/unrecognized primitive type string - leave
-            // resultEntities[i] == kInvalidEntity AND consumedByRecipe[i]
-            // == false (degrade gracefully, matches this codebase's
-            // existing "malformed input for THIS one item never aborts the
-            // whole load" convention). No markSubtreeUnresolved() call
-            // needed here - PrimitiveSource.h documents "a primitive spawn
-            // is always a single node with no children", so there is no
-            // subtree to worry about.
+            // else: unrecognized primitive type - leave unresolved (a bad item never aborts the load).
+            // A primitive is a single node, so there is no subtree to mark.
             continue;
         }
 
@@ -222,11 +149,7 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
             const Guid guid = Guid::Parse(record.assetGuid); // Never throws - returns Guid::Invalid() for anything malformed.
             const AssetRecord* asset = assetDatabase.FindByGuid(guid);
             if (asset == nullptr) {
-                // FIX (bug #2): moved/deleted/malformed asset guid - this
-                // WHOLE root AND every one of its saved children (and
-                // grandchildren, if the source format ever produces any) is
-                // skipped entirely, matching scene-serialization-1's own
-                // original per-object skip behavior.
+                // Moved/deleted/malformed asset guid: skip this root and its whole saved subtree.
                 markSubtreeUnresolved(i);
                 continue;
             }
@@ -238,15 +161,8 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
             // Pass B1 below for why the root record itself must still be
             // free to run through the normal SetParent() step.
 
-            // --- Reconciliation: match this record's OWN saved children
-            // (childrenOf[i]) against the LIVE children
-            // CreateMeshEntityFromGtaFile() JUST created, by Name -
-            // first-unused-match, walking saved children in ascending
-            // saved-sibling order against live children in ascending
-            // GetChildren() order (ECS/TransformHierarchy.h documents
-            // GetChildren() as sorted by siblingIndex, ties broken by
-            // stable creation order) - a deterministic, reproducible
-            // pairing, not an arbitrary one. ---
+            // Reconciliation: match this record's saved children to the live children just created,
+            // by Name, first-unused-match, in ascending sibling order (deterministic pairing).
             const std::vector<Entity> liveChildren = GetChildren(registry, rootEntity);
             std::vector<bool> usedLiveChild(liveChildren.size(), false);
 
@@ -258,27 +174,15 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
                         savedChildName = nameJson.at("value").get<std::string>();
                     }
                 }
-                // "" both when the saved child record has NO Name block at
-                // all, and when it has one whose value is itself an empty
-                // string - both are treated identically by this loop. An
-                // earlier draft required "savedChildName != ''" here, i.e.
-                // it NEVER matched an unnamed saved child to anything - that
-                // directly contradicted this phase's own promise that a
-                // hand-edited Transform on an UNNAMED submesh part survives
-                // a round trip too; empty string is now just another valid
-                // (if weak) matching key, paired positionally like any
-                // repeated name.
+                // An empty name (no Name block, or an empty value) is a valid, weak matching key:
+                // unnamed saved children are paired positionally like any repeated name.
 
                 Entity match = kInvalidEntity;
                 for (std::size_t k = 0; k < liveChildren.size(); ++k) {
                     if (usedLiveChild[k]) {
                         continue;
                     }
-                    // A live part entity is NOT guaranteed to have a Name
-                    // component at all (whenever the source .pmx left that
-                    // material unnamed) - TryGetComponent (never a bare
-                    // GetComponent) is mandatory here for exactly that
-                    // reason.
+                    // A live part may have no Name (unnamed material), so TryGetComponent is required.
                     std::string liveName;
                     if (const Name* namePtr = registry.TryGetComponent<Name>(liveChildren[k]); namePtr != nullptr) {
                         liveName = namePtr->value;
@@ -299,48 +203,22 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
             continue;
         }
 
-        // Neither PrimitiveSource nor a resolvable assetGuid - a plain
-        // entity (Camera/Light/empty node/an unresolvable-asset's now-
-        // orphaned saved child, etc) - PHASE3's original bare-entity
-        // behavior, unchanged: a default Transform is added right here, up
-        // front, so Pass B1's SetParent() below (which requires one on both
-        // sides) can actually succeed - see PHASE3_COMPLETION_REPORT.md's
-        // own "Discrepancy found" note for why the literal "bare
-        // CreateEntity() only" pseudocode does not, by itself, work.
+        // Plain entity (Camera, Light, empty node, orphaned child). Gets a default Transform up front
+        // so SetParent() in Pass B1 can succeed.
         resultEntities[i] = registry.CreateEntity();
         registry.AddComponent<Transform>(resultEntities[i]);
     }
 
-    // PASS B1 (hierarchy wiring) - unchanged from PHASE3, with guards. Wire
-    // hierarchy FIRST (before applying Transform values - SetParent()'s
-    // worldPositionStays=true would otherwise RECOMPUTE local
-    // position/rotation/scale and CLOBBER whatever Pass B2 is about to
-    // write). worldPositionStays=false here is what avoids that.
+    // PASS B1 (hierarchy wiring) runs before Transform values are applied: SetParent() with
+    // worldPositionStays=true would recompute and clobber the local values Pass B2 writes.
     for (std::size_t i = 0; i < entityCount; ++i) {
         if (resultEntities[i] == kInvalidEntity) {
             continue; // Skip anything left unresolved (an unmatched reconciled child, or anything markSubtreeUnresolved() touched).
         }
         if (alreadyParentedByRecipe[i]) {
-            // FIX (bug #3): ONLY true for a matched asset-root CHILD -
-            // CreateMeshEntityFromGtaFile() already attached it under the
-            // SAME live root entity Pass A just resolved; re-parenting it
-            // again would be harmless but pointless.
-            //
-            // Deliberately NOT gated on consumedByRecipe[i] the way an
-            // earlier draft of this algorithm did. A PrimitiveSource/asset-
-            // root RECORD ITSELF must still run through the normal
-            // SetParent() step below whenever it has its OWN saved
-            // parentIndex, because CreatePrimitiveEntity()/
-            // CreateMeshEntityFromGtaFile() ALWAYS create their entity as a
-            // brand-new top-level scene root with no parent at all - they
-            // know nothing about whatever OTHER entity that root might have
-            // been manually dragged under in the Hierarchy panel before it
-            // was saved. Skipping SetParent() for every consumedByRecipe[i]
-            // == true record (the earlier draft's mistake) would mean an
-            // imported mesh (or a primitive) that had been reparented under
-            // some organizational "Group" node would silently revert to
-            // being a top-level scene root on every Load, a real, visible
-            // regression.
+            // A matched asset-root child is already attached by CreateMeshEntityFromGtaFile().
+            // Not gated on consumedByRecipe: recipe roots always spawn top-level, so a saved parentIndex
+            // must still go through SetParent() below.
             continue;
         }
         const SceneEntityRecord& record = document.entities[i];
@@ -349,21 +227,12 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
             if (parentEntity != kInvalidEntity) {
                 SetParent(registry, resultEntities[i], parentEntity, /*worldPositionStays=*/false);
             }
-            // else: this record's OWN saved parent itself never resolved.
-            // In practice this is already unreachable for a
-            // markSubtreeUnresolved()-affected record (its own
-            // resultEntities[i] is kInvalidEntity too, so this whole
-            // iteration is already skipped by the guard above) - this else
-            // branch is purely defensive.
+            // Defensive: the saved parent never resolved (already skipped by the guard above for unresolved subtrees).
         }
     }
 
-    // PASS B2 (generic field application) - unchanged from PHASE3, with a
-    // guard. This is what actually restores Transform/Name/Camera/etc to
-    // their EXACT saved values, INCLUDING for consumedByRecipe[i] == true
-    // entities - this is what restores a hand-edited child part's Transform
-    // (superseding scene-serialization-1's old Design Decision #3), and
-    // what restores the asset ROOT's own Name/Transform too.
+    // PASS B2 (generic field application): restores exact saved values (Transform, Name, Camera, ...),
+    // including on recipe-spawned entities and asset roots.
     for (std::size_t i = 0; i < entityCount; ++i) {
         if (resultEntities[i] == kInvalidEntity) {
             continue;
@@ -387,25 +256,14 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
             for (const FieldDescriptor& field : descriptor->fields) {
                 std::string errorMessage;
                 if (!field.readJson(component, it.value(), errorMessage)) {
-                    // A single malformed FIELD does not fail the whole
-                    // Load - this engine's general "degrade gracefully"
-                    // convention - deliberately relaxed here because a
-                    // single bad float in an otherwise-huge scene file
-                    // should not lose everything else in it. The field is
-                    // simply left at whatever ensureDefaultComponent()'s
-                    // default (or its prior value, if the component
-                    // already existed) left it as.
+                    // A malformed field is not fatal: it keeps the default (or prior) value.
                 }
             }
         }
     }
 
-    // PASS B3 (sibling ordering) - unchanged from PHASE3, with the same
-    // resultEntities[i] == kInvalidEntity guard added. No
-    // alreadyParentedByRecipe check here - re-applying a matched child's
-    // already-correct saved sibling index is harmless/idempotent, and a
-    // reparented recipe root (see the Pass B1 fix above) DOES need its
-    // saved sibling index re-applied like any other record.
+    // PASS B3 (sibling ordering). Re-applying a matched child's saved index is idempotent; a reparented
+    // recipe root needs its saved index like any other record.
     for (std::size_t i = 0; i < entityCount; ++i) {
         if (resultEntities[i] == kInvalidEntity) {
             continue;
@@ -413,12 +271,8 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
         SetSiblingIndex(registry, resultEntities[i], document.entities[i].siblingIndex);
     }
 
-    // PHASE4 (section 3.4) small hardening: guarantee a Camera exists
-    // immediately after this function returns, rather than only on the
-    // NEXT Game::Render() call (which is what actually invokes
-    // EnsureDefaultCameraExists() every frame). Harmless/idempotent when a
-    // Camera record WAS present in the loaded document (that method's own
-    // live-count guard makes this a no-op in that case).
+    // Guarantee a Camera exists right after load, not only on the next Game::Render().
+    // Idempotent when the document already had one.
     game.EnsureDefaultCameraExists();
 }
 

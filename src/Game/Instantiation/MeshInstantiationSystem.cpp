@@ -17,10 +17,7 @@ Entity MeshInstantiationSystem::SpawnMeshAsset(Registry& registry, Renderer& ren
     const EntityBlueprint blueprint =
         m_meshAssetCatalog.Resolve(m_renderSystem, renderer, absoluteGtaPath, sceneServicesSetLayout);
     if (blueprint.children.empty()) {
-        // MeshAssetGpuCatalog::Resolve() returns an empty-children blueprint
-        // to signal "this path didn't resolve to a valid, non-empty Mesh
-        // asset" - see its own doc comment (MeshAssetGpuCatalog.h) for the
-        // exact failure cases this covers.
+        // An empty-children blueprint means the path did not resolve to a valid, non-empty mesh asset.
         return kInvalidEntity;
     }
     return Instantiate(registry, blueprint);

@@ -2850,7 +2850,18 @@ set(GTE_COMMENT_RULE_SRC
     Editor/Panels/FrameDebuggerPanel.cpp
     Game/Animation/AnimationSystem.cpp Game/Animation/AnimationSystem.h
     Game/Animation/GpuSkinningRigCache.cpp Game/Animation/GpuSkinningRigCache.h
-    Game/RenderSystem.cpp Game/RenderSystem.h Game/SceneDrawPass.cpp Game/SceneDrawPass.h)
+    Game/RenderSystem.cpp Game/RenderSystem.h Game/SceneDrawPass.cpp Game/SceneDrawPass.h
+    Application/EngineCommandDispatch.cpp Application/EngineCommandDispatch.h Core/EditorCapabilities.h
+    Core/Plugins/ProjectAssemblyHotReload.cpp
+    Editor/DockLayout.cpp Editor/DockLayout.h Editor/EditorLayer.h Editor/EditorSceneIOCapability.cpp
+    Editor/EditorSceneIOCapability.h Editor/GpuDrivenBatchTestSpawner.cpp Editor/GpuDrivenBatchTestSpawner.h
+    Editor/ImGuiEditorLayer.cpp Editor/NullEditorLayer.cpp Editor/Panels/HierarchyPanel.cpp
+    Editor/Panels/HierarchyPanel.h Editor/Panels/ScenePanel.cpp Editor/Panels/ScenePanel.h
+    Editor/SceneIO.cpp Editor/SceneIO.h
+    Game/Game.cpp Game/Game.h Game/Instantiation/MeshAssetGpuCatalog.cpp Game/Instantiation/MeshAssetGpuCatalog.h
+    Game/Instantiation/MeshInstantiationSystem.cpp Game/Instantiation/MeshInstantiationSystem.h
+    Game/Instantiation/PrimitiveGpuCatalog.cpp Game/Instantiation/PrimitiveGpuCatalog.h
+    Scene/SceneBuilder.cpp Scene/SceneBuilder.h)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp

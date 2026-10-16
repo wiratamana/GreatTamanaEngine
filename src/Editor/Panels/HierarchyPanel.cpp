@@ -34,19 +34,10 @@ constexpr std::array<PrimitiveType, 5> kCreatableShapes = {
     PrimitiveType::Plane,
 };
 
-// A row's own on-screen rect is split into three vertical bands for
-// drag-and-drop purposes (see HierarchyPanel.h's own doc comment): the top
-// and bottom kReorderBandFraction of the row mean "insert as a sibling
-// before/after this row", the remaining middle band means "reparent as a
-// child of this row".
+// Row drop bands: the top and bottom fraction insert as a sibling before/after the row; the middle reparents as a child.
 constexpr float kReorderBandFraction = 0.25f;
 
-// Builds this entity's own display label: its Name component's own value
-// (see ECS/Components/Name.h - set e.g. by Game::CreateMeshEntityFromGtaFile()
-// for a spawned model's root/parts) when present and non-empty, otherwise
-// the synthesized "Entity %u" (or "Entity %u (Camera)") label this engine
-// has always shown - factored out so the recursive tree renderer below can
-// reuse it for both the label and the drag tooltip.
+// Display label: the Name component value when set, else "Entity %u" (with " (Camera)" for cameras).
 std::string BuildEntityLabel(Registry& registry, Entity entity)
 {
     if (const Name* name = registry.TryGetComponent<Name>(entity); name != nullptr && !name->value.empty()) {
@@ -82,11 +73,7 @@ void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Regist
 
     const bool opened = ImGui::TreeNodeEx(label.c_str(), flags);
 
-    // This row's own on-screen rect, captured right after submitting it
-    // (before any children get a chance to draw/become "the last item") -
-    // used below both to decide which of the three reorder/reparent bands
-    // a drop landed in, and as the drag SOURCE's own rect implicitly (via
-    // BeginDragDropSource(), which always attaches to the last item).
+    // Row rect, captured before children draw; picks the drop band, and the drag source attaches to this item.
     const ImVec2 itemMin = ImGui::GetItemRectMin();
     const ImVec2 itemMax = ImGui::GetItemRectMax();
 
@@ -106,19 +93,11 @@ void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Regist
 
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kHierarchyEntityDragDropPayloadType)) {
             const Entity dragged = *static_cast<const Entity*>(payload->Data);
-            // Dropping an entity onto itself, or one of the ancestors it
-            // could never legally become a child of anyway, is silently a
-            // no-op - SetParent() below already rejects both cases (and a
-            // stale/no-longer-alive `dragged` handle), so this is purely a
-            // safety net against doing needless work, not correctness-load-
-            // bearing on its own.
+            // Dropping onto itself is a no-op; SetParent() also rejects cycles and dead handles.
             if (dragged != entity && registry.IsAlive(dragged)) {
                 if (relativeY < kReorderBandFraction || relativeY > (1.0f - kReorderBandFraction)) {
-                    // Top/bottom band: reorder as a new sibling immediately
-                    // before/after `entity`, under `entity`'s OWN parent
-                    // (i.e. NOT necessarily reparenting - if `dragged`
-                    // already shares that same parent, this is a pure
-                    // reorder).
+                    // Top/bottom band: insert as a sibling before/after `entity` under its parent
+                    // (a pure reorder when `dragged` already shares that parent).
                     const Transform* targetTransform = registry.TryGetComponent<Transform>(entity);
                     const Entity newParent = targetTransform != nullptr ? targetTransform->parent : kInvalidEntity;
                     const std::uint32_t targetIndex = targetTransform != nullptr ? targetTransform->siblingIndex : 0;
@@ -136,20 +115,8 @@ void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Regist
         }
 
 #if GTE_ENABLE_PROJECT_PANEL
-        // Same Project-panel-asset drag-and-drop as the panel-wide target
-        // in BuildHierarchyPanel() below, but dropped directly onto a row
-        // instead. Two different outcomes depending on what was dropped
-        // (and onto what): dropping a Mesh *.gta spawns it as a CHILD of
-        // `entity` (Unity's own "drag a model onto another GameObject in
-        // Hierarchy to parent it" convention); dropping an ANIMATION *.gta
-        // directly onto an already-rigged model's own row instead PLAYS
-        // that clip on it (Game::PlayAnimationOnEntity()) rather than
-        // spawning anything new - Unity's own "drag an AnimationClip onto
-        // a rigged GameObject" convention. PlayAnimationOnEntity() is tried
-        // FIRST and only ever succeeds for a real Animation asset dropped
-        // onto a model that actually has skinning data, so this never
-        // changes any existing Mesh-drop behavior - it just silently does
-        // nothing and falls through to the spawn attempt otherwise.
+        // Project-panel asset dropped on a row: an animation plays on a rigged model; otherwise a mesh
+        // spawns as a child of `entity`. PlayAnimationOnEntity() is tried first and fails for non-animations.
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kProjectAssetDragDropPayloadType)) {
             const std::string absolutePath(static_cast<const char*>(payload->Data));
             if (!game.PlayAnimationOnEntity(entity, absolutePath)) {
@@ -183,10 +150,7 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, Des
 
     ImGui::Begin("Hierarchy");
 
-    // Root entities: every entity with a Transform whose own parent is
-    // kInvalidEntity (or, defensively, dangling - see GetChildren()'s own
-    // doc comment) - the top level of the real parent/child tree, walked
-    // recursively from here.
+    // Top-level entities: those whose parent is kInvalidEntity (or dangling).
     const std::vector<Entity> roots = GetChildren(registry, kInvalidEntity);
     for (const Entity root : roots) {
         RenderEntityNode(game, renderer, ctx, registry, root, sceneServicesSetLayout);
@@ -196,15 +160,8 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, Des
         ImGui::TextDisabled("(no entities)");
     }
 
-    // Drop target for whatever's left of the panel BELOW the tree above -
-    // dragging a Hierarchy entity here detaches it back to the scene root
-    // (Unity's own "drag onto empty Hierarchy space to unparent"
-    // convention); dragging a Project-panel asset here still spawns it at
-    // the scene root, exactly as before. An invisible button spanning the
-    // rest of the panel gives this a real rect to attach a drop target to -
-    // BeginDragDropTarget() alone only ever attaches to the MOST RECENTLY
-    // SUBMITTED item, and the entity tree above may be empty (or may not
-    // fill the whole panel).
+    // Drop target for the empty area below the tree: an entity drop unparents it, an asset drop spawns at the root.
+    // The invisible button gives the target a rect even when the tree is empty or short.
     {
         ImVec2 dropTargetSize = ImGui::GetContentRegionAvail();
         dropTargetSize.x = std::max(dropTargetSize.x, 1.0f);

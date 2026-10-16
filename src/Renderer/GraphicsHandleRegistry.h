@@ -85,5 +85,59 @@ struct CachedBufferObjectHandle {
     }
 };
 
+// Owns a VkDescriptorSetLayout plus its registry handle; the handle dies before the layout.
+class OwnedDescriptorSetLayout {
+public:
+    OwnedDescriptorSetLayout() noexcept = default;
+    OwnedDescriptorSetLayout(VkDevice device, VkDescriptorSetLayout layout)
+        : m_device(device), m_layout(layout)
+    {
+        if (m_layout != VK_NULL_HANDLE) {
+            m_handle = RegisterDescriptorSetLayout(m_layout);
+        }
+    }
+    ~OwnedDescriptorSetLayout() { Reset(); }
+
+    OwnedDescriptorSetLayout(const OwnedDescriptorSetLayout&) = delete;
+    OwnedDescriptorSetLayout& operator=(const OwnedDescriptorSetLayout&) = delete;
+    OwnedDescriptorSetLayout(OwnedDescriptorSetLayout&& other) noexcept
+        : m_device(other.m_device), m_layout(other.m_layout), m_handle(other.m_handle)
+    {
+        other.m_layout = VK_NULL_HANDLE;
+        other.m_handle = DescriptorSetLayoutHandle::Invalid;
+    }
+    OwnedDescriptorSetLayout& operator=(OwnedDescriptorSetLayout&& other) noexcept
+    {
+        if (this != &other) {
+            Reset();
+            m_device = other.m_device;
+            m_layout = other.m_layout;
+            m_handle = other.m_handle;
+            other.m_layout = VK_NULL_HANDLE;
+            other.m_handle = DescriptorSetLayoutHandle::Invalid;
+        }
+        return *this;
+    }
+
+    VkDescriptorSetLayout Native() const noexcept { return m_layout; }
+    DescriptorSetLayoutHandle Handle() const noexcept { return m_handle; }
+
+private:
+    void Reset() noexcept
+    {
+        if (m_handle != DescriptorSetLayoutHandle::Invalid) {
+            UnregisterDescriptorSetLayout(m_handle);
+            m_handle = DescriptorSetLayoutHandle::Invalid;
+        }
+        if (m_layout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(m_device, m_layout, nullptr);
+            m_layout = VK_NULL_HANDLE;
+        }
+    }
+
+    VkDevice m_device = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_layout = VK_NULL_HANDLE;
+    DescriptorSetLayoutHandle m_handle = DescriptorSetLayoutHandle::Invalid;
+};
 
 } // namespace gte

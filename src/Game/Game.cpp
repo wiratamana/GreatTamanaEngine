@@ -15,19 +15,7 @@
 namespace gte {
 
 namespace {
-// network-impl-5 campaign
-// (PHASE2_GAME_LEVEL_SET_ENTITY_TRS_AND_INSTANTIATE_LIGHT_APIS.md) - shared
-// between Game::CreateDirectionalLightEntity() (the Editor's "Create
-// Directional Light" menu path) and Game::InstantiateLight() (this
-// campaign's own new path) so the two can never silently drift apart - see
-// PHASE0_MASTER_STRATEGY.md's Locked Design Decision #5. Late-afternoon-ish
-// sun: pitched down toward the ground plus a bit of yaw so it isn't
-// perfectly axis-aligned - purely a sensible visual default (see
-// Quat::FromEulerDegrees()'s own "pitch around Right()" convention), not
-// physically derived. This is the EXACT SAME literal
-// Game::CreateDirectionalLightEntity() already used before this refactor -
-// extracting it here must not change that method's own observable
-// behavior at all.
+// Late-afternoon sun rotation shared by CreateDirectionalLightEntity() and InstantiateLight().
 Quat DefaultDirectionalLightRotation() noexcept
 {
     return Quat::FromEulerDegrees(45.0f, -30.0f, 0.0f);
@@ -36,51 +24,27 @@ Quat DefaultDirectionalLightRotation() noexcept
 
 void Game::OnEvent(const Event& /*event*/)
 {
-    // Discrete/one-shot event handling goes here (react to a single key
-    // press, window resized, etc). event.type tells you which alternative of
-    // event.data is active - see Event.h.
+    // One-shot event handling goes here; event.type selects the active alternative of event.data.
 }
 
 void Game::Update(const EngineContext& engineContext, const InputState& /*input*/)
 {
     GTE_PROFILE_SCOPE("Game::Update");
 
-    // Game/simulation logic goes here. Poll `input` for continuous state,
-    // e.g. `if (input.IsKeyDown(KeyCode::W)) { ... }` for held-key movement.
+    // Game/simulation logic goes here; poll `input` for continuous state.
 
     const Time& time = engineContext.time;
 
-    // frame-debugger-1 campaign - "freeze everything" (task_manager/
-    // frame-debugger-1/PHASE0_MASTER_STRATEGY.md). IsFrozenThisFrame() is
-    // true only while paused and NOT honoring a Step request - false on
-    // every normal frame AND on a Step frame (which DOES need one real
-    // simulation tick - see Time.h). Skipping these three calls entirely
-    // (rather than feeding them time.DeltaTime() == 0.0) is a deliberate
-    // choice: it is cheaper (no wasted IK-solve/vertex-pack/skin-upload
-    // work for output that provably cannot have changed) AND does not
-    // depend on every one of these three systems' own degenerate-zero-
-    // delta handling staying correct forever - see PHASE0's Locked Design
-    // Decision #2.
+    // Frozen = paused and not stepping. Skip the simulation stages entirely rather than feeding them a zero
+    // delta: cheaper, and independent of each system's zero-delta handling.
     if (!time.IsFrozenThisFrame()) {
-        // Phase 3 (task_manager/verlet-integration-1/
-        // PHASE3_PIPELINE_INTEGRATION_AND_FIXED_TIMESTEP.md, v3/v4) - three
-        // genuinely independent stages, communicating ONLY through the
-        // ResolvedAnimationPose ECS component (see that component's own doc
-        // comment): AnimationSystem samples/IK-solves/append-inherits and
-        // writes a fresh pose; PhysicsSystem optionally overwrites individual
-        // physics-driven bones in that SAME pose; AnimationSystem then skins and
-        // uploads whatever the pose currently holds, regardless of which of the
-        // two touched it last.
+        // Three stages sharing only the ResolvedAnimationPose component: animation writes the pose, physics may
+        // overwrite physics-driven bones, then animation skins and uploads whatever the pose holds.
         m_animationSystem.EvaluatePoses(m_registry, time.DeltaTime());
         m_physicsSystem.Update(m_registry, time.DeltaTime());
         m_animationSystem.SkinAndUpload(m_registry);
     } else {
-        // Nothing simulated this frame - make sure no STALE GPU-skinning
-        // compute dispatch request lingers from the last frame that
-        // actually ran SkinAndUpload() above (which is what normally
-        // rebuilds this list every call) - see
-        // AnimationSystem::ClearGpuSkinningDispatchThisFrame()'s own doc
-        // comment for why this is needed.
+        // Nothing simulated: drop any stale GPU-skinning dispatch request from the last simulated frame.
         m_animationSystem.ClearGpuSkinningDispatchThisFrame();
     }
 }
@@ -110,31 +74,15 @@ Entity Game::CreateMeshEntityFromGtaFile(
 {
     const Entity root = m_meshInstantiationSystem.SpawnMeshAsset(m_registry, renderer, absoluteGtaPath, sceneServicesSetLayout);
     if (root != kInvalidEntity) {
-        // Explicit hand-off: if this model turned out to be skinned, make
-        // its bind-pose/rig data available to AnimationSystem's own
-        // SkeletalRigCache right here - a real, visible-in-code call site,
-        // never an implicit shared-cache coupling (see this method's own
-        // doc comment, Game.h).
+        // Explicit hand-off: a skinned model's bind-pose/rig data is registered with AnimationSystem here.
         if (const SkinnedMeshData* skin = m_meshInstantiationSystem.TryGetSkinnedMeshData(absoluteGtaPath)) {
             m_animationSystem.RegisterSkinnedMesh(absoluteGtaPath, *skin);
 
-            // Phase 3/4 (task_manager/verlet-integration-1/) - the physics-side
-            // sibling of RegisterSkinnedMesh() above, called from the SAME
-            // hand-off site, ALONGSIDE (never through) AnimationSystem's own
-            // registration. PHASE3: both calls are provable no-ops (see
-            // PhysicsSystem.cpp) - PHASE4 is what makes real chain detection
-            // populate them.
+            // Physics-side registration, alongside (never through) the animation registration above.
             m_physicsSystem.RegisterDynamicChains(absoluteGtaPath, *skin);
             m_physicsSystem.AttachDynamicChainRigIfNeeded(m_registry, root, absoluteGtaPath);
 
-            // GPU Vertex Skinning campaign, Phase 4 (Per-Model Resource
-            // Management - see
-            // task_manager/gpu_skinning/GPU_SKINNING_PHASE4_PER_MODEL_RESOURCE_MANAGEMENT_STRATEGY_v1.md).
-            // Registered unconditionally, alongside RegisterSkinnedMesh()
-            // above, regardless of which skinning mode is currently active -
-            // see AnimationSystem::RegisterGpuSkinnedMesh()'s own doc
-            // comment for why this must never become a lazy/on-first-use
-            // registration.
+            // Registered unconditionally (never lazily), whichever skinning mode is active.
             if (const std::vector<MeshAssetPart>* parts = m_meshInstantiationSystem.TryGetMeshAssetParts(absoluteGtaPath)) {
                 m_animationSystem.RegisterGpuSkinnedMesh(renderer, absoluteGtaPath, *skin, *parts);
             }
@@ -188,11 +136,7 @@ InstantiatePrimitiveOutcome Game::InstantiatePrimitive(Renderer& renderer, const
     const std::string uniqueName = MakeUniqueEntityName(m_registry, baseName);
 
     const Entity entity = CreatePrimitiveEntity(renderer, type, sceneServicesSetLayout);
-    // Defensive - CreatePrimitiveEntity() is not currently documented to ever
-    // return kInvalidEntity, but this is cheap insurance against a future
-    // change there (e.g. a GPU resource creation failure surfaced as
-    // kInvalidEntity instead of an exception) silently producing a "success"
-    // outcome with a bogus entity handle.
+    // Defensive: never report success with a bogus entity handle.
     if (entity == kInvalidEntity) {
         outcome.success = false;
         outcome.errorMessage = "failed to create primitive entity";
@@ -335,36 +279,13 @@ InstantiateLightOutcome Game::InstantiateLight(const InstantiateLightParams& par
 
 void Game::EnsureDefaultCameraExists()
 {
-    // task_manager/scene-serialization-2/
-    // PHASE4_RECIPE_SPAWN_RECONCILIATION_AND_LOAD_CORRECTNESS.md (section
-    // 3.4) - fixed from a one-shot bool guard (m_defaultCameraEnsured, now
-    // removed) to an actual LIVE check. ClearEntireScene() (Scene/
-    // SceneBuilder.h, called by Editor/SceneIO.cpp's LoadScene()) destroys
-    // the engine's own default Camera entity too - it is an ordinary
-    // Camera+Transform entity like any other, no special protection (see
-    // PHASE0's Locked Design Decision #2: it is just ordinary serializable
-    // content now). The old one-shot guard would never re-trigger even if a
-    // Load results in ZERO Camera entities in the Registry, leaving the
-    // scene permanently un-renderable with no way to recover except
-    // manually creating a Camera. Checking the live component count instead
-    // makes this function correctly idempotent AND self-healing after ANY
-    // future scene-clearing operation, not just the engine's own startup.
+    // Live check (not a one-shot flag): a scene clear or a load with no Camera must self-heal.
     if (m_registry.Storage<Camera>().Size() > 0) {
         return; // A camera already exists (default OR loaded from a scene) - nothing to do.
     }
 
-    // The engine's one auto-created entity: a Camera sitting back along -Z
-    // (an identity rotation looks straight down +Z - see
-    // Camera::ViewMatrix(), ECS/Components/Camera.h) so a brand-new (or
-    // freshly-loaded - see task_manager/scene-serialization-1/) scene always
-    // has something to actually look through in "Scene"/"Game", instead of
-    // falling back to RenderSystem::ResolveActiveCameraViewProjection()'s
-    // Mat4::Identity() default. This is now the ONLY thing this function
-    // does - it used to also build 3 hardcoded demo triangles proving the
-    // ECS -> RenderSystem -> Renderer pipeline end to end; that scaffolding
-    // is gone now that real scene content (primitives, imported meshes, and
-    // - as of task_manager/scene-serialization-1/ - a real save/load loop)
-    // exists instead. See TODO.md's "Scene serialization" entry.
+    // Default camera: back along -Z (identity rotation looks down +Z) so a new or freshly loaded scene
+    // always has something to look through.
     const Entity cameraEntity = m_registry.CreateEntity();
     Transform& cameraTransform = m_registry.AddComponent<Transform>(cameraEntity);
     cameraTransform.position = Vec3{ 0.0f, 0.0f, -5.0f };
@@ -380,19 +301,12 @@ void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* v
     EnsureDefaultCameraExists();
 
     if (viewProjectionOverride != nullptr) {
-        // Scene View's own call site: maxDrawCount/batchedEntities/cmd never
-        // forward into this branch, frameDebuggerCapture stays nullptr. Every
-        // intervening defaulted parameter (capture, maxDrawCount,
-        // batchedEntities, pipelineOverrideSet) must be spelled out so
-        // sceneServicesSet lands in its real, trailing slot.
+        // Scene view: capture/maxDrawCount/batchedEntities/cmd are not forwarded; the defaulted
+        // parameters are spelled out so sceneServicesSet lands in its trailing slot.
         m_renderSystem.Draw(m_registry, renderer, *viewProjectionOverride, nullptr, std::nullopt, {}, std::nullopt,
             sceneServicesSet);
     } else {
-        // frameDebuggerCapture is never dereferenced here (or anywhere else
-        // in this file) - only forwarded onward, as a bare pointer, exactly
-        // like PHASE1's own Step 3.1b requires for a CORE, always-compiled
-        // file such as this one. See Game.h's own updated Render() comment.
-        // `cmd` forwards the same way - never dereferenced here either.
+        // Capture pointer and `cmd` are only forwarded, never dereferenced here.
         m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight, frameDebuggerCapture, maxDrawCount,
             batchedEntities, sceneServicesSet, cmd);
     }

@@ -30,43 +30,15 @@ class Game {
 public:
     Game() = default;
 
-    // Called once per discrete/translated event, before Update() runs for
-    // that frame. Use this for one-shot reactions (a key just pressed,
-    // window resized, etc) - anything continuous ("is this key held") should
-    // be read from the InputState passed to Update() instead.
+    // Called once per discrete event before Update(); continuous input is read from Update()'s InputState.
     void OnEvent(const Event& event);
 
-    // frame-debugger-1 campaign (task_manager/frame-debugger-1/
-    // PHASE2_GAME_UPDATE_SIGNATURE_AND_FREEZE_GATING.md) - takes the shared,
-    // Application-owned EngineContext instead of a raw deltaSeconds, so this
-    // method (and everything it calls) has access to the full Time contract
-    // (DeltaTime()/IsFrozenThisFrame()/...) rather than just one already-
-    // resolved number. Called EVERY frame regardless of pause state (see
-    // PHASE0's own Locked Design Decision #2) - the freeze itself is decided
-    // INSIDE this method's own body, not by the caller skipping the call.
+    // Runs every frame, paused or not; the freeze decision is made inside using the shared EngineContext.
     void Update(const EngineContext& engineContext, const InputState& input);
 
-    // Sets the clear color and, via RenderSystem::Draw(), queues this frame's
-    // draw calls for every entity that has a MeshRenderer. `aspectWidthOverHeight`
-    // is the aspect ratio of whichever render target this call's draws will
-    // land in (Game view and Scene view each call this once per frame with
-    // their own aspect). `viewProjectionOverride` (default nullptr) resolves
-    // the view-projection from the active ECS Camera when null (Game view);
-    // when non-null, renders with that matrix instead, bypassing ECS camera
-    // resolution (Scene view's own independently-orbitable EditorCamera).
-    // Does NOT call Renderer::Present()/RenderOffscreen() itself - where this
-    // frame ends up is decided by Application.
-    //
-    // `frameDebuggerCapture`/`maxDrawCount`/`batchedEntities`/`cmd` are all
-    // optional, defaulted, and forwarded ONLY into the Game-View branch
-    // (viewProjectionOverride == nullptr) - Scene View never receives any of
-    // them. `sceneServicesSet` is the one exception: forwarded into BOTH
-    // branches, since Scene View and Game View each need their own correct
-    // scene-services data for the same frame.
-    //
-    // `cmd` is a pointer to the render-graph CommandBuffer the calling pass
-    // is already recording through - see RenderSystem::Draw()'s own `cmd`
-    // doc comment for what routing a draw through it changes.
+    // Queues this frame's draws for entities with a MeshRenderer. `viewProjectionOverride` null = active ECS
+    // Camera (Game view); else that matrix (Scene view). `frameDebuggerCapture`, `maxDrawCount`, `batchedEntities`
+    // and `cmd` apply to the Game view only; `sceneServicesSet` to both. Does not present.
     void Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride = nullptr,
         IFrameDebuggerCaptureRecorder* frameDebuggerCapture = nullptr,
         std::optional<std::size_t> maxDrawCount = std::nullopt,
@@ -75,43 +47,16 @@ public:
         rg::CommandBuffer* cmd = nullptr);
 
 
-    // Read-only-in-spirit access to the ECS World for the Editor's
-    // Hierarchy/Inspector panels (src/Editor/ImGuiEditorLayer.cpp) to
-    // observe/edit - the exact "Editor only ever *observes* Game ... through
-    // its existing public accessors" boundary the class comment above (and
-    // EditorLayer.h) already documents. Non-const because the Inspector
-    // panel edits component fields (e.g. dragging a Transform's position) in
-    // place; Game itself never calls this on its own registry.
+    // ECS access for the Editor's Hierarchy/Inspector panels; non-const because the Inspector edits components in place.
     Registry& GetRegistry() noexcept { return m_registry; }
 
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE5 (task_manager/render-pass-5/
-    // PHASE5_RENDERGRAPH_PASS_WIRING_AND_PRODUCTION_CUTOVER.md) - a real,
-    // visible-in-code accessor for Application's new "GpuDrivenBatches"
-    // provider to call RenderSystem::CollectGpuDrivenBatches()/
-    // TryGetMesh()/TryGetPipeline() directly - mirrors GetRegistry()
-    // immediately above's own "Application/Editor observes through a public
-    // accessor" precedent (GetRegistry() itself is already called directly
-    // from Application.cpp today, e.g.
-    // RenderSystem::CollectTransparentRenderables(m_game.GetRegistry())).
+    // Access to the render system for GPU-driven batch collection and mesh/pipeline lookup.
     RenderSystem& GetRenderSystem() noexcept { return m_renderSystem; }
 
-    // Editor-facing accessor (PHASE4,
-    // task_manager/verlet-integration-1/PHASE4_PARAMETER_AUTHORING_AND_DATA_DRIVEN_CONFIG.md,
-    // 3.5) - mirrors GetRegistry()'s own "Editor observes/edits through a
-    // public accessor" convention, this time for the Inspector's "Dynamic
-    // Chain Physics" section (Panels/InspectorPanel.cpp) to read detected
-    // chain/joint counts, live-edit per-joint DynamicJointSettings, and show
-    // the current (read-only) GlobalPhysicsSettings.
+    // Editor access to dynamic chain physics (detected chains/joints, per-joint settings, global settings).
     PhysicsSystem& GetPhysicsSystem() noexcept { return m_physicsSystem; }
 
-    // Editor-facing accessor (task_manager/verlet-integration-11, PHASE3) -
-    // mirrors GetPhysicsSystem()'s own "Editor observes/acts through a public
-    // accessor" convention, this time so the Inspector's "Save Joint Physics to
-    // Asset" button (PHASE4) can keep THIS SESSION'S already-cached
-    // SkinnedMeshData in sync with whatever it just wrote to disk - see
-    // MeshInstantiationSystem::RefreshCachedJointPhysicsOverridesFromDisk()'s own
-    // doc comment for the full contract this forwards to.
+    // Editor access to the cached mesh-asset catalog (e.g. to refresh saved joint physics overrides).
     MeshInstantiationSystem& GetMeshInstantiationSystem() noexcept { return m_meshInstantiationSystem; }
 
     // Spawns an entity with an identity Transform and a MeshRenderer for a built-in primitive shape.
@@ -119,26 +64,14 @@ public:
     // so a missed caller fails to compile.
     Entity CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
-    // Atmosphere Scattering + Aerial Perspective campaign, Phase 8
-    // (task_manager/atmosphere-scattering-1/ATMOSPHERE_PHASE8_SUN_ECS_AND_EDITOR_CONTROLS_v1.md)
-    // - spawns a new "Sun" entity: a Transform (given a sensible default
-    // rotation looking somewhat downward, like a late-afternoon sun) plus a
-    // DirectionalLight component - this engine's equivalent of
-    // CreatePrimitiveEntity() above, just with no Renderer/GPU mesh
-    // involved at all (a light has nothing to rasterize). Needs no
-    // `Renderer&` parameter for exactly that reason. Given a Name of
-    // "Directional Light", auto-de-duplicated the same Unity-style way
-    // InstantiatePrimitive() already does for primitives (see
-    // ECS/EntityQuery.h's MakeUniqueEntityName()). The Editor's "Hierarchy"
-    // right-click "Create Directional Light" entry
-    // (src/Editor/Panels/HierarchyPanel.cpp) is the first caller of it.
+    // Spawns a "Directional Light" entity (Transform with a late-afternoon default rotation + DirectionalLight).
+    // Needs no Renderer; the name is de-duplicated like InstantiatePrimitive() does.
     Entity CreateDirectionalLightEntity();
 
 
-    // Spawns a *.gta mesh asset as a hierarchy: one empty root named after the file, one child per part.
-    // Skinned models are handed to the animation system. Returns the root, or kInvalidEntity (no entities
-    // created, never throws) when the file is missing, corrupt or has no geometry.
-    // `sceneServicesSetLayout` is the layout of Core's scene-services descriptor set.
+    // Spawns a *.gta mesh asset: an empty root named after the file plus one child per part; skinned models
+    // go to the animation system. Returns the root, or kInvalidEntity (nothing created, never throws) if the
+    // file is missing, corrupt or empty. `sceneServicesSetLayout` is Core's scene-services set layout.
     Entity CreateMeshEntityFromGtaFile(
         Renderer& renderer, const std::string& absoluteGtaPath, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
@@ -148,235 +81,66 @@ public:
     InstantiateMeshAssetOutcome InstantiateMeshAssetFromGtaFile(
         Renderer& renderer, const std::string& absoluteGtaPath, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
-    // Assigns/replaces the SkeletalAnimator component on `targetEntity` (a
-    // live entity spawned by CreateMeshEntityFromGtaFile() - i.e. one that
-    // carries a MeshAssetSource component, see ECS/Components/
-    // MeshAssetSource.h) so it plays back `absoluteAnimationGtaPath`'s
-    // motion (a *.gta AssetType::Animation - see Assets/VmdLoader.h/
-    // MotionFile.h) against its own model's skeleton
-    // (Assets/SkeletonData.h), driving every one of that model's mesh
-    // parts with real bone-deformed positions/normals from the next
-    // Update() call onward - this is what makes a spawned MMD model
-    // actually animate instead of always rendering its original bind pose.
-    //
-    // A one-line forward into AnimationSystem::Play() - see that class for
-    // the full "how a bone/weight mismatch between the model and the motion
-    // is handled" behavior this preserves exactly (bone-NAME resolution via
-    // Animation/MotionSampler.h's ResolveBoneTracksToSkeleton(), tolerant of
-    // a mismatch in either direction), and for the same documented
-    // known-limitation this refactor is NOT expected to fix (two
-    // simultaneously-animated instances of the same model *.gta still share
-    // - and fight over - the same underlying GPU mesh buffers).
-    //
-    // Returns false (no component added/changed) if `targetEntity` isn't a
-    // live entity with a MeshAssetSource component, its own model has no
-    // skinning data registered with AnimationSystem at all (a boneless
-    // mesh, one imported before rig extraction existed, or one whose
-    // skinned data was never handed off - see CreateMeshEntityFromGtaFile()
-    // above), or `absoluteAnimationGtaPath` doesn't currently resolve to a
-    // valid, non-empty *.gta AssetType::Animation file - same "degrade
-    // gracefully, never throw" convention as CreateMeshEntityFromGtaFile().
+    // Plays `absoluteAnimationGtaPath` on `targetEntity`'s model (forwards to AnimationSystem::Play()).
+    // Returns false, changing nothing, if the entity has no MeshAssetSource or registered skinning data,
+    // or the path is not a valid *.gta animation. Never throws.
     bool PlayAnimationOnEntity(Entity targetEntity, const std::string& absoluteAnimationGtaPath);
 
-    // GPU Vertex Skinning campaign, Phase 5 (Runtime CPU/GPU Switch - see
-    // task_manager/gpu_skinning/GPU_SKINNING_PHASE5_RUNTIME_CPU_GPU_SWITCH_STRATEGY_v2.md).
-    // One-line forwards into AnimationSystem, mirroring every other public
-    // method on this class - see AnimationSystem::SkinningMode/
-    // SetSkinningMode()/GetSkinningMode()'s own doc comments
-    // (Animation/AnimationSystem.h) for the full behavior.
+    // Forwards to AnimationSystem's CPU/GPU skinning mode switch.
     void SetSkinningMode(AnimationSystem::SkinningMode mode) noexcept { m_animationSystem.SetSkinningMode(mode); }
     AnimationSystem::SkinningMode GetSkinningMode() const noexcept { return m_animationSystem.GetSkinningMode(); }
 
-    // Called once per frame by src/Application/RenderPasses.cpp's
-    // AddGpuSkinningPasses(), AFTER Game::Update() has already run this
-    // frame - see AnimationSystem::CollectModelsNeedingGpuSkinningThisFrame().
+    // Called once per frame after Update(); see AnimationSystem::CollectModelsNeedingGpuSkinningThisFrame().
     std::vector<AnimationSystem::GpuSkinningDispatchRequest> CollectGpuSkinningDispatchRequests() const
     {
         return m_animationSystem.CollectModelsNeedingGpuSkinningThisFrame();
     }
 
-    // The shared compute-pipeline pair AddGpuSkinningPasses() dispatches
-    // against - see AnimationSystem::GetGpuSkinningPipelines()'s own doc
-    // comment.
+    // The shared compute-pipeline pair the GPU skinning passes dispatch against.
     GpuSkinningPipelines& GetGpuSkinningPipelines() noexcept { return m_animationSystem.GetGpuSkinningPipelines(); }
 
-    // task_manager/frame-debugger-7 campaign, PHASE3
-    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
-    // 3.1) - mirrors CollectGpuSkinningDispatchRequests() above's own "safe
-    // to call at build-time, before any pass executes" precedent -
-    // RenderSystem::CollectRenderables() only reads already-frozen ECS
-    // component data (Update() already ran this frame and will not run
-    // again until the next real frame), so this is safe to call
-    // synchronously while declaring this frame's Render Graph passes, with
-    // no live VkCommandBuffer/Renderer needed at all. Called once per
-    // capture-trigger frame by Application::Run(), BEFORE
-    // AddFrameDebuggerReplayPasses() is declared, so it knows exactly how
-    // many replay passes (one per real object this frame's "GameView" pass
-    // will draw) to add.
-    //
-    // Render Pass campaign (task_manager/render-pass-1), PHASE4
-    // (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.4) - the
-    // `frame-debugger-8` campaign's own note directly above this one (about
-    // `capture.DrawRecords().size() == objectCount + 1`, due to
-    // `RecordSkyBackgroundDraw()` appending one extra, non-entity record) NO
-    // LONGER APPLIES - that method was REMOVED (the Sky Background draw is
-    // now a real, separate, generically-discovered "DrawSkyBackground"
-    // Render Graph pass, never a fabricated FrameDebuggerDrawRecord). Every
-    // entry in `capture.DrawRecords()` is a real per-ENTITY record once
-    // again, so the ORIGINAL (pre-`frame-debugger-8`) relationship holds:
-    // `objectCount == capture.DrawRecords().size()` in every scenario this
-    // engine actually exercises today (see the very next paragraph's own
-    // "successfully-resolved draw" caveat, which still applies unchanged).
-    //
-    // IMPORTANT documented assumption (do not silently rely on this
-    // elsewhere without re-reading it): this is
-    // `RenderSystem::CollectRenderables(m_registry).size()` - the number of
-    // entities that HAVE a MeshRenderer component. This is NOT
-    // automatically identical to the number of entities that actually end
-    // up issuing a real `renderer.Submit()` call inside
-    // RenderSystem::Draw() - that function's own loop silently skips a
-    // DrawCommand whose mesh/pipeline handle no longer resolves (see
-    // RenderSystem.cpp's own comment), and only a SUCCESSFULLY-resolved
-    // draw calls capture->RecordEntityDraw() (i.e. only successful draws
-    // end up in capture.DrawRecords()). In every scenario this engine
-    // actually exercises today, every MeshRenderer's handles resolve
-    // successfully (mesh/pipeline pools are never partially unregistered
-    // mid-session), so `objectCount == capture.DrawRecords().size()` holds
-    // in practice - but if that ever stops being true (e.g. a future
-    // feature unregisters a mesh while entities still reference it), the
-    // i-th replay pass's own `maxDrawCount` cutoff (see RenderSystem::Draw())
-    // would silently stop lining up 1:1 with the i-th entry of
-    // capture.DrawRecords(), from the first skipped entity onward. Not
-    // reachable with today's engine - recorded here for a future
-    // maintainer who ever adds mesh/pipeline unregistration.
+    // Number of entities with a MeshRenderer. Safe to call while declaring render graph passes (reads frozen ECS data).
+    // Equals capture.DrawRecords().size() only while every MeshRenderer's mesh/pipeline handle resolves;
+    // a skipped draw would shift the replay passes' maxDrawCount cutoffs out of line with the records.
     std::size_t CountGameViewDrawCommandsThisFrame()
     {
         return RenderSystem::CollectRenderables(m_registry).size();
     }
 
     // Spawns a primitive by shape name (case-insensitive) with a unique name and world position, optionally
-    // parented by name. An unknown shape fails with no entity created. An unknown parent only sets
-    // `parentRequestedButNotFound` and leaves the entity unparented. Never throws.
-    // `sceneServicesSetLayout` is the layout of Core's scene-services descriptor set.
+    // parented by name. Unknown shape: no entity created. Unknown parent: entity left unparented, flagged
+    // in `parentRequestedButNotFound`. Never throws. `sceneServicesSetLayout` is Core's scene-services set layout.
     InstantiatePrimitiveOutcome InstantiatePrimitive(Renderer& renderer, const std::string& shapeName,
         const std::string& requestedName, const Vec3& worldPosition, bool hasParent, const std::string& parentName,
         DescriptorSetLayoutHandle sceneServicesSetLayout);
 
-    // Destroys the live entity (and every descendant of it - see
-    // ECS/TransformHierarchy.h::DestroyEntityAndDescendants()) whose Name
-    // component value exactly equals `name` (network-impl-3 campaign).
-    // Returns success == false (destroying NOTHING) if `name` is empty or no
-    // live entity currently has that exact name. If more than one live
-    // entity happens to share the same name (possible only through some
-    // OTHER naming path than InstantiatePrimitive() above, which always
-    // auto-dedupes - see network-impl-3's Locked Design Decision #3), the
-    // FIRST match found by EntityQuery.h::FindEntityByName()'s own
-    // dense-iteration-order rule is the one destroyed - documented as
-    // best-effort, matching FindEntityByName()'s own doc comment.
+    // Destroys the live entity named exactly `name`, plus all its descendants. Fails with nothing destroyed
+    // if `name` is empty or unknown. With duplicate names, the first match in dense iteration order is destroyed.
     DeleteEntityOutcome DeleteEntityByName(const std::string& name);
 
-    // network-impl-5 campaign
-    // (PHASE2_GAME_LEVEL_SET_ENTITY_TRS_AND_INSTANTIATE_LIGHT_APIS.md) -
-    // updates the LOCAL (parent-relative) Transform of an EXISTING live
-    // entity, looked up by Name (EntityQuery.h's FindEntityByName() - same
-    // lookup DeleteEntityByName() already uses). Operates ONLY on
-    // Transform::position/rotation/scale directly - NEVER a hierarchy-aware
-    // world-space conversion (ECS/TransformHierarchy.h's ComputeWorldMatrix()/
-    // ComputeWorldTransform() are never called here) - see
-    // PHASE0_MASTER_STRATEGY.md's Locked Design Decision #3. For an entity
-    // with no parent (every entity InstantiatePrimitive()/InstantiateLight()
-    // produce, unless explicitly parented) local IS world, so this already
-    // covers the common "move/rotate the thing I just spawned" case exactly.
-    //
-    // Each of params.hasTranslation/hasRotationEulerDegrees/hasScale is
-    // applied INDEPENDENTLY - a call with only hasScale == true leaves
-    // position/rotation completely untouched, and vice versa. A call with
-    // ALL THREE false is not an error - it changes nothing and simply
-    // returns the entity's current transform (see SetEntityTrsOutcome's own
-    // doc comment, EngineCommandResults.h, and PHASE0's Locked Design
-    // Decision #6).
-    //
-    // Never throws. Returns success == false (nothing changed) when:
-    // params.name is empty or does not resolve to any live entity at all
-    // (SetEntityTrsOutcome::entityNotFound == true in that specific case),
-    // OR the resolved entity exists but has no Transform component at all
-    // (entityNotFound stays false in THAT case - see that outcome field's
-    // own doc comment for why this distinction exists).
+    // Sets the LOCAL (parent-relative) Transform of the live entity named `params.name`, with no
+    // hierarchy-aware world conversion. Each has* flag is applied independently; all false changes nothing.
+    // Fails (nothing changed) if the name is empty/unknown (entityNotFound) or the entity has no Transform.
     SetEntityTrsOutcome SetEntityTrs(const SetEntityTrsParams& params);
 
-    // network-impl-5 campaign - spawns a new light entity BY PARAMETERS, the
-    // light-specific sibling of InstantiatePrimitive() above, built on the
-    // same spawn machinery CreateDirectionalLightEntity() above already
-    // established (a Transform + a DirectionalLight component), plus the
-    // same additive naming/positioning/parenting steps InstantiatePrimitive()
-    // itself already established (MakeUniqueEntityName()/FindEntityByName()/
-    // SetParent(..., worldPositionStays = true)). Needs no `Renderer&`
-    // parameter, for the exact same reason CreateDirectionalLightEntity()
-    // itself doesn't - a light has nothing to rasterize. (This is also
-    // exactly why, unlike InstantiatePrimitive(), this method is fully
-    // Tier-1-testable - see PHASE0_MASTER_STRATEGY.md's own Step 2 note.)
-    //
-    // params.lightType (case-insensitive; empty also means "directional")
-    // only ever recognizes "directional" today - this engine's only
-    // implemented light component (ECS/Components/DirectionalLight.h). ANY
-    // other non-empty value fails the whole call (success == false, NO
-    // entity created) with errorMessage explaining only "directional" is
-    // supported - see PHASE0's Locked Design Decision #9 for why this field
-    // exists at all today.
-    //
-    // Unlike InstantiatePrimitive()'s "rotation is always identity"
-    // behavior, this method gives a light with NO explicit rotation
-    // (params.hasRotationEulerDegrees == false) the SAME "late-afternoon"
-    // default rotation CreateDirectionalLightEntity() itself uses
-    // (Quat::FromEulerDegrees(45, -30, 0)) - see PHASE0's Locked Design
-    // Decision #5 for the rationale, and Game.cpp's own shared
-    // DefaultDirectionalLightRotation() helper for how this stays a SINGLE
-    // literal shared with CreateDirectionalLightEntity(), never two
-    // independently-drifting copies.
-    //
-    // Never throws. Returns success == false (and creates NO entity at all)
-    // only for an unrecognized params.lightType.
+    // Spawns a light entity from parameters (Transform + DirectionalLight); needs no Renderer. Only
+    // lightType "directional" (case-insensitive, empty = directional) is supported; anything else fails
+    // with no entity created. Without an explicit rotation it uses the same default as CreateDirectionalLightEntity().
     InstantiateLightOutcome InstantiateLight(const InstantiateLightParams& params);
 
-    // The engine's one auto-created entity: a Camera sitting back along -Z
-    // so a brand-new (or freshly-loaded - see task_manager/
-    // scene-serialization-1/) scene always has something to actually look
-    // through in "Scene"/"Game" - see this method's own doc comment in
-    // Game.cpp for the full rationale. Used to also build 3 hardcoded demo
-    // triangles proving the ECS -> RenderSystem -> Renderer pipeline end to
-    // end; that scaffolding is gone now that real scene content (primitives,
-    // imported meshes, and a real save/load loop) exists instead (see
-    // TODO.md's "Scene serialization" entry).
-    //
-    // Called once per frame by Render() below (unchanged). Also PUBLIC (a
-    // discrepancy against task_manager/scene-serialization-2/
-    // PHASE4_RECIPE_SPAWN_RECONCILIATION_AND_LOAD_CORRECTNESS.md's own
-    // section 3.4, which assumed this could be called from
-    // Editor/SceneIO.cpp's LoadScene() without checking - it was PRIVATE
-    // before this phase; making it callable from outside Game requires
-    // moving it here) - see PHASE4_COMPLETION_REPORT.md's own "Discrepancy
-    // found" note. Fixed (section 3.4) to check the LIVE Camera component
-    // count instead of a one-shot bool (see Game.cpp) - now self-healing
-    // after ClearEntireScene()/a Load that happens to produce zero Camera
-    // entities, not just idempotent across the engine's own startup.
+    // Auto-creates the default Camera (back along -Z) when the live Camera component count is zero.
+    // Called every frame by Render(); public so scene load/clear can restore it too.
     void EnsureDefaultCameraExists();
 
 private:
     Registry m_registry;
     RenderSystem m_renderSystem;
 
-    // Depends on m_renderSystem (constructor-injected reference) - declared
-    // after it so it's already constructed by the time these run.
+    // Constructor-injected with m_renderSystem, so declared after it.
     MeshInstantiationSystem m_meshInstantiationSystem{ m_renderSystem };
     AnimationSystem m_animationSystem{ m_renderSystem, m_meshInstantiationSystem };
 
-    // Phase 3 (task_manager/verlet-integration-1/
-    // PHASE3_PIPELINE_INTEGRATION_AND_FIXED_TIMESTEP.md, v3/v4) - a fourth,
-    // fully independent Game-layer orchestrator, sandwiched between
-    // m_animationSystem's EvaluatePoses()/SkinAndUpload() halves every frame
-    // (see Update(), Game.cpp). Takes no constructor dependencies (unlike
-    // AnimationSystem above) - it never touches Renderer/Mesh/RenderSystem/
-    // MeshInstantiationSystem at all, only the ECS Registry.
+    // Runs between the animation system's pose evaluation and skin upload each frame; only touches the Registry.
     PhysicsSystem m_physicsSystem;
 };
 

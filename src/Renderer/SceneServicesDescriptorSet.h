@@ -6,6 +6,7 @@
 #include "RenderGraph/RenderPipeline.h" // rg::RenderPassId, rg::RenderViewId
 #include "Buffer.h"
 #include "../Core/GraphicsHandles.h" // DescriptorSetHandle
+#include "GraphicsHandleRegistry.h" // OwnedDescriptorSetLayout
 #include "Texture2D.h"
 #include "VolumeTexture.h"
 
@@ -57,7 +58,8 @@ void ResetSceneServiceRegistryForTesting() noexcept;
 // Blackboard key a PreOpaque feature publishes its TextureHandle under for `slot` and the view its callback got.
 // Folds `slot` and `view.Hash()` through FNV-1a so concurrently active views never alias.
 rg::RenderPassId SceneServiceBlackboardKey(std::uint32_t slotIndex, rg::RenderViewId view) noexcept;
-class Renderer; // forward-declared only - the .cpp includes Renderer.h.
+
+class Renderer;
 
 // Fixed ceiling for binding 8's packed per-frame lighting UBO (std140-safe). The feature's own
 // settings struct must fit inside this many bytes.
@@ -74,10 +76,8 @@ public:
     SceneServicesDescriptorSet& operator=(const SceneServicesDescriptorSet&) = delete;
     // Core owns exactly one instance for its whole lifetime, so move is not provided.
 
-    VkDescriptorSetLayout Layout() const noexcept { return m_layout; }
-
     // Opaque handle for code outside src/Renderer; valid for this object's lifetime.
-    DescriptorSetLayoutHandle LayoutHandle() const noexcept { return m_layoutHandle; }
+    DescriptorSetLayoutHandle LayoutHandle() const noexcept { return m_layout.Handle(); }
 
     struct ResolvedSlot {
         VkImageView view = VK_NULL_HANDLE;
@@ -92,21 +92,17 @@ public:
     // The caller owns the schema. Call once per view per frame, like Rewrite().
     void UpdateGlobalUniformBlock(rg::RenderViewId view, std::span<const std::byte> bytes);
 
-    // The most recent Rewrite()-produced VkDescriptorSet for `view`, or
-    // VK_NULL_HANDLE if Rewrite() was never called for that view yet.
+    // The most recent Rewrite()-produced set for `view`, or Invalid if Rewrite() never ran for it.
     DescriptorSetHandle DescriptorSetFor(rg::RenderViewId view) const noexcept;
 
-    // Test-facing accessors confirming the real, uploaded dummy fallback
-    // resources backing an unresolved slot are valid.
+    // Dummy fallback resources backing unresolved slots.
     const Texture2D& DummyImage2DTextureFor(std::uint32_t slotIndex) const;
-    // Backs the Image3D-kind slot(s) registered so far - today, only ever one.
     const VolumeTexture& DummyImage3DTexture() const noexcept { return m_dummyImage3DTexture; }
 
 private:
     Renderer* m_renderer = nullptr;
-    VkDevice m_device = VK_NULL_HANDLE; // cached at construction, for Destroy().
-    VkDescriptorSetLayout m_layout = VK_NULL_HANDLE; // owned - hand-built, NOT reflected; must be destroyed by this class.
-    DescriptorSetLayoutHandle m_layoutHandle = DescriptorSetLayoutHandle::Invalid; // Non-owning handle to m_layout.
+    VkDevice m_device = VK_NULL_HANDLE;
+    OwnedDescriptorSetLayout m_layout; // Hand-built layout (not reflected); the registry handle goes with it.
 
     struct PerViewSet {
         rg::RenderViewId view;

@@ -20,11 +20,7 @@ namespace gte {
 
 namespace {
 
-// Lazily built exactly once per process - see GpuDrivenBatchTestSpawner.h's
-// own header comment for why plain function-local statics are safe here
-// (exactly one Game/RenderSystem instance ever exists per process lifetime,
-// mirroring Application.cpp's own BatchNamePool() "static ... pool;"
-// precedent).
+// Built once per process; safe as function-local statics because only one Game/RenderSystem exists.
 MeshHandle& SharedMeshHandle()
 {
     static MeshHandle handle;

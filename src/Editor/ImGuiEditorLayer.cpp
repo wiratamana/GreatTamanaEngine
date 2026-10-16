@@ -9,14 +9,14 @@
 #include "EditorContext.h"
 #include "EditorGpuMemoryNameOverlay.h"
 #include "GpuDrivenBatchTestSpawner.h"
-#include "ImGuiIdConflictGuard.h" // task_manager/editor-core-separation-10 campaign, PHASE1.
+#include "ImGuiIdConflictGuard.h"
 #include "ImGuiMemoryTracker.h"
-#include "NewProjectWindow.h" // editor-core-separation-16 campaign (On-Engine Project Workflow plan, BIG-STEP 2), PHASE4.
-#include "OpenProjectWindow.h" // editor-core-separation-17 campaign (On-Engine Project Workflow plan, BIG-STEP 3), PHASE4.
-#include "CreateAssetWindow.h" // editor-core-separation-18 campaign (On-Engine Project Workflow plan, BIG-STEP 4), PHASE3.
-#include "Plugins/PluginPanelDrawContextAdapter.h" // editor-core-separation-3 campaign, PHASE4.
-#include "../Core/EditorPanelRegistry.h" // editor-core-separation-3 campaign, PHASE4.
-#include "../Core/EditorPanelModule.h" // relocated here, better-render-pass-2 PHASE1.
+#include "NewProjectWindow.h"
+#include "OpenProjectWindow.h"
+#include "CreateAssetWindow.h"
+#include "Plugins/PluginPanelDrawContextAdapter.h"
+#include "../Core/EditorPanelRegistry.h"
+#include "../Core/EditorPanelModule.h"
 #include "Panels/FrameDebuggerPanel.h"
 #include "Panels/GamePanel.h"
 #include "Panels/HierarchyPanel.h"
@@ -43,78 +43,9 @@
 #include "../Renderer/UiTextureBackend.h"
 #include "../Window/Window.h"
 
-// This file - together with DockLayout.cpp and every Panels/*.cpp - is the
-// deliberate boundary for the Editor: nothing outside src/Editor/
-// (Application, Renderer, Game) ever includes an ImGui header or knows
-// ImGui exists, exactly like EventTranslator is the deliberate boundary
-// object for SDL in the Application layer (see AGENTS.md, "Editor Module
-// Structure", for the full rationale behind spreading this boundary across
-// several files instead of just this one).
-//
-// ImGuiEditorLayer itself is the Editor's composition root, not a monolith:
-// it owns the ImGui context/SDL3+Vulkan backend lifecycle (this file) and
-// the shared EditorContext (m_ctx - see EditorContext.h), while
-// BuildUI() below just calls out, in a fixed, deliberate order, to
-// BuildDockspaceAndMenuBar() (DockLayout.cpp) and each panel builder
-// (Panels/*.cpp) - none of which carry any persistent state of their own;
-// they read/write m_ctx instead.
-//
-// Owns:
-//   - the ImGui context itself (docking branch - see cmake/FetchImGui.cmake)
-//     with ImGuiConfigFlags_DockingEnable set, so every panel below can be
-//     freely dragged/split/tabbed by the user, Unity-style, PLUS
-//     ImGuiConfigFlags_ViewportsEnable set, so any of those same panels can
-//     also be dragged clean OUTSIDE the main OS window onto the desktop or
-//     another monitor (each becoming its own real, independently movable OS
-//     window) - see the constructor and RenderPlatformWindows() below.
-//   - the SDL3 platform backend (input) and Vulkan renderer backend
-//     (drawing), wired to the exact same device/swapchain format Renderer
-//     already uses (see Renderer::GetImGuiVulkanBackendInfo())
-//   - TWO RenderTextures - m_gameView ("the Game view") and m_sceneView
-//     ("the Scene view") - that Game's camera renders into each frame
-//     instead of the swapchain, one per panel, each tracking that panel's
-//     OWN content-region size (Unity's "Free Aspect" behavior) rather than
-//     the OS window's size or each other's. Size tracking works like this,
-//     mirrored independently for each view:
-//       - GamePanel::Build()/ScenePanel::Build() (Panels/*.cpp) reads the
-//         panel's current ImGui::GetContentRegionAvail() every frame it's
-//         actually visible and stores it as m_ctx.desiredExtent/
-//         desiredSceneExtent, and also stores whether ImGui::Begin()
-//         reported the panel visible at all as
-//         m_ctx.gameViewVisible/sceneViewVisible.
-//       - GameViewTarget()/SceneViewTarget() (called earlier next frame,
-//         before Game::Render()) return nullptr outright if that panel
-//         wasn't visible last frame (skipping a RenderOffscreen() pass
-//         nobody would see), otherwise compare the desired extent against
-//         the texture's actual current extent and resize it first if they
-//         differ - never mid-frame after this frame's ImGui::Image() call
-//         has already been recorded (see GameViewTarget() for why that
-//         would be unsafe).
-//     This introduces at most one frame of lag between a resize (or a
-//     visibility change) and the texture catching up, imperceptible in
-//     practice.
-//
-// The overall panel layout (built once via DockLayout.cpp's
-// BuildDockspaceAndMenuBar()/BuildDefaultDockLayout(), then left entirely to
-// imgui.ini / user dragging afterwards) mirrors Unity's default editor: a
-// full-viewport DockSpace hosting a top menu bar (File > Exit, ...),
-// "Hierarchy" docked left, "Inspector" docked right, and "Scene"/"Game"
-// tabbed together in the remaining center - the user can drag the "Scene"
-// tab out to split it side-by-side with "Game" (or anywhere else) at any
-// time, exactly like Unity's Scene/Game tabs. Application::Run() renders
-// into whichever of GameViewTarget()/SceneViewTarget() come back non-null
-// each frame: while tabbed together, exactly one is visible (so only that
-// one is actually rendered, at zero extra GPU cost for the hidden one);
-// split apart, both are visible and BOTH get rendered, each into its own
-// RenderTexture at its own panel's size/aspect.
-// "Game" still shows the scene through whatever ECS entity currently has
-// the active Camera component (see ECS/Components/Camera.h), but "Scene"
-// now shows it through its OWN independently-orbitable EditorCamera
-// (m_sceneCamera - see EditorCamera.h) instead - Unity-style middle-drag
-// pan / wheel dolly / right-drag look, handled entirely in
-// Panels/ScenePanel.cpp (the one place that reads ImGui's mouse state) -
-// see SceneViewProjection() below for how Application actually wires this
-// in ahead of RenderSystem::Draw().
+// Editor composition root: owns the ImGui context, the SDL3/Vulkan backends, the Game and Scene view
+// RenderTextures and the shared EditorContext. Only src/Editor files know ImGui.
+// Each view texture follows its panel's size with one frame of lag; hidden panels are not rendered.
 #include <imgui.h>
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_vulkan.h>
@@ -157,55 +88,21 @@ public:
         ImGui::SetCurrentContext(m_context);
         ImGui::StyleColorsDark();
 
-        // Docking lets Hierarchy/Inspector/Scene/Game be freely rearranged/
-        // split within the one OS window - see the class comment above.
-        // Viewports (multi-viewport/"platform windows") ADDITIONALLY lets
-        // any panel be dragged OUTSIDE the main OS window entirely, onto the
-        // desktop or another monitor, Unity/Unreal-style: each becomes its
-        // own real OS window, backed by its own SDL3 window (created/
-        // destroyed automatically by imgui_impl_sdl3.cpp's platform
-        // callbacks - registered unconditionally by ImGui_ImplSDL3_InitForVulkan()
-        // below, regardless of this flag) and its own Vulkan swapchain
-        // (created/destroyed automatically by imgui_impl_vulkan.cpp's
-        // renderer callbacks - registered by ImGui_ImplVulkan_Init() below,
-        // see ImGui_ImplVulkan_InitMultiViewportSupport()). What actually
-        // updates/presents those extra windows every frame is
-        // RenderPlatformWindows() below, called once per frame from
-        // Application::Run() right after the main swapchain is presented.
+        // Docking lets panels be rearranged; viewports let them be dragged out into their own OS windows
+        // (created by the SDL3/Vulkan backends, presented by RenderPlatformWindows()).
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
-        // Platform windows are separate, undocked OS windows - give them an
-        // opaque background and square corners (matching a normal OS
-        // window) instead of inheriting the main viewport's themed
-        // rounded/semi-transparent look, exactly as Dear ImGui's own
-        // demo/examples recommend whenever ViewportsEnable is on.
+        // Platform windows are real OS windows: use an opaque background and square corners.
         {
             ImGuiStyle& style = ImGui::GetStyle();
             style.WindowRounding = 0.0f;
             style.Colors[ImGuiCol_WindowBg].w = 1.0f;
         }
 
-        // Dear ImGui's built-in default font (ProggyClean) has no CJK
-        // glyphs at all - any Japanese/Chinese/Korean text (e.g. a
-        // non-ASCII filename shown in "Project"/"Inspector" - see
-        // Panels/ProjectPanel.cpp/InspectorPanel.cpp) would otherwise
-        // render as an unbroken run of fallback "?" glyphs, even though the
-        // underlying UTF-8 string data itself is perfectly correct (see
-        // AGENTS.md-adjacent PathToUtf8()/Utf8ToPath() in
-        // ProjectPanelData.h). Try a handful of CJK-capable fonts Windows
-        // ships by default (in preference order), covering Basic Latin +
-        // Hiragana/Katakana + a common Kanji set via
-        // GetGlyphRangesJapanese() - falls back to the plain built-in font
-        // only if none of them could be found/loaded (e.g. a minimal
-        // Windows installation missing these). This engine deliberately
-        // does NOT bundle its own CJK font (unlike stb_image/VMA/ImGui
-        // itself): most CJK typefaces are not freely redistributable,
-        // whereas every Windows install already ships one of these. Must
-        // happen here, before ImGui_ImplVulkan_Init() below - the font
-        // atlas texture is built/uploaded lazily on the first frame, but
-        // every AddFont*() call must happen before that, never after.
+        // The default ImGui font has no CJK glyphs. Try the CJK fonts Windows ships (none is bundled), else keep
+        // the built-in font. Must run before ImGui_ImplVulkan_Init(), as fonts cannot be added after atlas build.
         {
             const ImWchar* japaneseRanges = io.Fonts->GetGlyphRangesJapanese();
             constexpr const char* kCandidateCjkFonts[] = {
@@ -233,11 +130,7 @@ public:
             throw std::runtime_error("ImGui_ImplSDL3_InitForVulkan failed.");
         }
 
-        // The ONE place this file ever needs Renderer's own Vulkan context -
-        // a dedicated, narrowly-scoped bridge (GetVulkanContextInfo() itself
-        // stays private to src/Renderer). `context` is a LOCAL here, kept
-        // alive for the rest of this constructor, so `pColorAttachmentFormats`
-        // below stays valid through the real ImGui_ImplVulkan_Init() call.
+        // Renderer's Vulkan context via the dedicated ImGui bridge; kept alive so pColorAttachmentFormats stays valid.
         const Renderer::VulkanContextInfo context = renderer.GetImGuiVulkanBackendInfo();
 
         ImGui_ImplVulkan_InitInfo initInfo{};
@@ -247,11 +140,7 @@ public:
         initInfo.Device = context.device;
         initInfo.QueueFamily = context.graphicsQueueFamily;
         initInfo.Queue = context.graphicsQueue;
-        // Let the backend create/own its own descriptor pool instead of us
-        // managing a VkDescriptorPool ourselves - see the DescriptorPoolSize
-        // comment in imgui_impl_vulkan.h. Sized generously enough for the
-        // font atlas plus our own AddTexture() calls below for the Game/
-        // Scene views.
+        // The backend owns its descriptor pool; sized for the font atlas plus the Game/Scene view textures.
         initInfo.DescriptorPoolSize = 64;
         initInfo.MinImageCount = context.minImageCount;
         initInfo.ImageCount = context.imageCount;
@@ -289,29 +178,12 @@ public:
 
         ReleaseGameViewDescriptor();
         ReleaseSceneViewDescriptor();
-        // task_manager/frame-debugger-3 campaign, PHASE4 - same "release
-        // BEFORE ImGui_ImplVulkan_Shutdown()" requirement as
-        // Release*Descriptor() above (m_frameDebuggerPanel is declared,
-        // and therefore destroyed, later than m_context - see this class's
-        // own member-order comment below - so its OWN destructor alone
-        // would run too late otherwise).
+        // Panels declared after m_context must release their descriptors before ImGui_ImplVulkan_Shutdown().
         m_frameDebuggerPanel.ReleasePreviewDescriptor();
-        // task_manager/frame-debugger-9 campaign, PHASE3 - REQUIRED, not
-        // optional (see ReleaseShaderPropertyTexturePreview()'s own doc
-        // comment, FrameDebuggerPanel.h, for the full "why") - same ordering
-        // requirement as ReleasePreviewDescriptor() immediately above.
         m_frameDebuggerPanel.ReleaseShaderPropertyTexturePreview();
-        // m_renderGraphPanel is declared after m_context (same ordering
-        // problem as m_frameDebuggerPanel above) - release its texture
-        // preview descriptor explicitly before Shutdown() tears down the
-        // backend it was allocated from.
         m_renderGraphPanel.ReleaseTexturePreview();
 #if GTE_ENABLE_PROJECT_PANEL
-        // Must release its own GPU texture/ImGui descriptor(s) BEFORE
-        // ImGui_ImplVulkan_Shutdown() below - member destruction order
-        // alone would run AFTER Shutdown() (m_assetPreview/m_assetPreviewMesh/
-        // m_boneViewer are declared further down than m_context), which is
-        // too late (see AssetPreviewTexture::Reset()'s own comment).
+        // Release GPU textures/descriptors before ImGui_ImplVulkan_Shutdown(); member destruction runs too late.
         m_assetPreview.Reset();
         m_assetPreviewMesh.Reset();
         m_boneViewer.Reset();
@@ -327,17 +199,8 @@ public:
         ImGui_ImplSDL3_ProcessEvent(&event);
 
 #if GTE_ENABLE_PROJECT_PANEL
-        // An OS-level file/folder drag-and-drop (Windows Explorer, ...)
-        // landing on ANY of this process's windows - the main window, or an
-        // ImGui multi-viewport "platform window" (see the class comment
-        // above) - is routed straight to ProjectPanel, entirely independent
-        // of ImGui's own (widget-to-widget) drag-and-drop, which this event
-        // has nothing to do with. event.drop.x/y are window-RELATIVE, so
-        // they're converted to absolute desktop/screen coordinates here
-        // (matching what ImGui::GetWindowPos() reports - see
-        // ProjectPanel::Build()) by adding the source window's own screen
-        // position, before ProjectPanel decides whether that position
-        // actually falls within its own last-known on-screen rect.
+        // OS file drops on any window (main or ImGui platform window) go to ProjectPanel.
+        // Drop coordinates are window-relative, so convert them to screen coordinates first.
         if (event.type == SDL_EVENT_DROP_FILE) {
             float screenX = event.drop.x;
             float screenY = event.drop.y;
@@ -358,13 +221,7 @@ public:
 
     void OnWindowResized(int /*width*/, int /*height*/) override
     {
-        // Neither the Game-view nor Scene-view RenderTexture tracks the OS
-        // window's size at all - each tracks its own ImGui panel's own
-        // content-region size instead (see the class comment and
-        // GameViewTarget()/SceneViewTarget() below), so an OS window resize
-        // by itself is not a reason to resize either of them. Kept as a
-        // no-op (rather than removed) purely to satisfy IEditorLayer's
-        // interface - NullEditorLayer's version already does the same.
+        // Intentionally empty: the view textures follow their panels' sizes, not the OS window's.
     }
 
     void NewFrame() override
@@ -378,16 +235,10 @@ public:
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
 
-        // task_manager/editor-core-separation-10 campaign, PHASE1 - resets
-        // the ID-conflict-detection tracker for this fresh frame. Must run
-        // AFTER ImGui::NewFrame() (so ImGui::GetID() calls later this frame
-        // are meaningful) and BEFORE any panel builds a single widget.
+        // Reset ID-conflict tracking; must run after ImGui::NewFrame() and before any widget is built.
         ImGuiIdConflictGuard::Instance().BeginFrame();
 
-        // Required by ImGuizmo before any Manipulate() call this frame
-        // (Panels/ScenePanel.cpp, via TransformGizmo.h) - see
-        // BeginGizmoFrame()'s own comment for why this is called right
-        // here rather than from BuildUI() below.
+        // Required by ImGuizmo before any Manipulate() call this frame.
         BeginGizmoFrame();
     }
 
@@ -400,22 +251,12 @@ public:
             return nullptr;
         }
 
-        // Apply whatever panel size GamePanel::Build() captured LAST frame
-        // (Panels/GamePanel.cpp), before Game renders this frame - never
-        // mid/after-frame, since that could destroy the VkImage/VkImageView
-        // an already-recorded ImGui::Image() draw call (from this same
-        // frame) still references. Doing it here, right before Application
-        // calls Renderer::RenderOffscreen(), is the earliest point in the
-        // frame where it's both needed (Game is about to render into this)
-        // and safe (last frame's ImGui draw data was already submitted/
-        // executed before this frame started).
+        // Apply the panel size captured last frame before rendering; resizing mid-frame could destroy a
+        // texture that an already-recorded ImGui::Image() still references.
         if (m_ctx.desiredExtent.width > 0 && m_ctx.desiredExtent.height > 0) {
             const Extent2D current = m_gameView.Extent();
             if (current.width != m_ctx.desiredExtent.width || current.height != m_ctx.desiredExtent.height) {
-                // Resizes are rare/user-driven (dragging the panel's
-                // border), so a full device stall here is the simplest
-                // correct thing - not a per-frame cost. Same reasoning
-                // OnWindowResized used to apply for OS window resizes.
+                // Resizes are rare and user-driven, so a full GPU stall is acceptable.
                 m_renderer->WaitForGpuIdle();
                 ReleaseGameViewDescriptor();
                 m_gameView.Resize(
@@ -429,10 +270,7 @@ public:
 
     RenderTexture* SceneViewTarget() override
     {
-        // Same visibility-gated/resize-on-demand pattern as
-        // GameViewTarget() above, applied to the Scene view's own, entirely
-        // separate RenderTexture/EditorContext fields - see
-        // EditorContext::sceneViewVisible/desiredSceneExtent.
+        // Same visibility gating and resize-on-demand as GameViewTarget(), for the Scene view.
         if (!m_ctx.sceneViewVisible) {
             return nullptr;
         }
@@ -449,11 +287,7 @@ public:
         return &m_sceneView;
     }
 
-    // See IEditorLayer::SceneViewProjection() - m_sceneCamera is updated
-    // once per frame from Panels/ScenePanel.cpp's mouse handling during
-    // BuildUI() below, so this always reflects (up to one frame of lag,
-    // same as every other Scene/Game-view field in EditorContext) whatever
-    // the user last panned/rotated/dollied it to.
+    // Reflects the Scene camera as of the last BuildUI() (up to one frame of lag).
     Mat4 SceneViewProjection(float aspectWidthOverHeight) const override
     {
         return m_sceneCamera.ViewProjection(aspectWidthOverHeight);
@@ -463,21 +297,11 @@ public:
     Vec3 SceneViewCameraWorldPosition() const override { return m_sceneCamera.GetTransform().position; }
 
 
-    // See IEditorLayer::SetGameViewCompositedTexture()'s own doc comment -
-    // simply remembers the pointer; the actual (re)creation of
-    // m_ctx.gameViewDescriptor from it happens in BuildUI() below, the one
-    // place ImGui descriptor (re)creation already happens for every other
-    // texture this class displays.
+    // Remembers the pointer; BuildUI() creates the ImGui descriptor from it lazily.
     void SetGameViewCompositedTexture(RenderTexture* texture) override { m_gameViewComposited = texture; }
     void SetSceneViewCompositedTexture(RenderTexture* texture) override { m_sceneViewComposited = texture; }
 
-    // See IEditorLayer::RenderSceneGrid()'s own doc comment. Always called by
-    // Application::Run() whenever "Scene" was rendered at all this frame (see
-    // AddSceneViewPass()'s own new recordSceneOverlay parameter,
-    // PHASE4_RENDERGRAPH_INTEGRATION.md) - no additional visibility guard is
-    // needed here, since Application::Run() already only calls
-    // AddSceneViewPass() (and therefore only ever triggers this callback) when
-    // sceneTarget != nullptr, i.e. exactly when "Scene" is actually visible.
+    // See IEditorLayer::RenderSceneGrid(). Called only when the Scene view rendered, so no visibility check is needed.
     void RenderSceneGrid(Renderer& renderer, VkCommandBuffer cmd, const Mat4& sceneViewProjection) override
     {
         m_sceneGrid.Draw(renderer, cmd, sceneViewProjection);
@@ -497,40 +321,15 @@ public:
 
         BuildDockspaceAndMenuBar(m_ctx, game, renderer, m_hotReloadDebugCapability, sceneServicesSetLayout);
 
-        // editor-core-separation-16 campaign (On-Engine Project Workflow
-        // plan, BIG-STEP 2), PHASE4 - the "New Project..." floating window
-        // must be available in every real Editor build regardless of
-        // GTE_ENABLE_PROJECT_PANEL (that switch only gates the UNRELATED
-        // content-asset "Project" panel/Bone Viewer further down).
+        // New/Open Project and Create Asset windows are available in every build, regardless of
+        // GTE_ENABLE_PROJECT_PANEL.
         m_newProjectWindow.Build(m_ctx, m_projectLifecycleCapability);
-        // editor-core-separation-17 campaign (On-Engine Project Workflow
-        // plan, BIG-STEP 3), PHASE4 - same "always available regardless
-        // of GTE_ENABLE_PROJECT_PANEL" reasoning as m_newProjectWindow
-        // immediately above.
         m_openProjectWindow.Build(m_ctx, m_projectLifecycleCapability);
-        // editor-core-separation-18 campaign (On-Engine Project Workflow
-        // plan, BIG-STEP 4), PHASE3 - same "always available regardless
-        // of GTE_ENABLE_PROJECT_PANEL" reasoning as m_newProjectWindow/
-        // m_openProjectWindow immediately above.
         m_createAssetWindow.Build(m_ctx, m_assetScaffoldingCapability);
 
-        // Lazily (re)create the ImGui-side descriptors for the Game/Scene
-        // view textures - needed on first use, and again after
-        // GameViewTarget()/SceneViewTarget() invalidated the previous one
-        // (a resize). Each panel owns its own descriptor/texture.
-        //
-        // The "Game"/"Scene" panels always display the real m_gameView/
-        // m_sceneView target directly. The render graph's PostComposite
-        // blend chain (Core::Plugins/RenderFeatureCompositor) always fully
-        // resolves every registered feature's contribution back into THOSE
-        // textures by construction, regardless of how many features are
-        // registered or in what order - a per-feature "*Composited" side
-        // texture (m_gameViewComposited/m_sceneViewComposited, still kept
-        // around purely for FrameDebuggerPanel's own before/after
-        // comparison below) only reflects that ONE feature's own early
-        // position in the chain, so it must never be preferred here - doing
-        // so would silently hide any OTHER feature's contribution the
-        // moment it runs later in the same chain.
+        // Lazily (re)create the ImGui descriptors for the Game/Scene view textures (first use, or after a resize).
+        // The panels show m_gameView/m_sceneView directly: the compositor blends every feature into them,
+        // while a per-feature *Composited texture only reflects that feature's position in the chain.
         {
             RenderTexture* gameSource = &m_gameView;
             if (m_ctx.gameViewDescriptor == UiTextureHandle::Invalid || gameSource->View() != m_lastKnownGameView) {
@@ -560,90 +359,21 @@ public:
         m_profilerPanel.Build(m_ctx);
         m_renderGraphPanel.Build(m_ctx, renderer, renderGraph, renderPassToggleRegistry);
         m_renderFeaturesPanel.Build(m_ctx, gpuDrivenBatchDebugInfo, renderFeatureEntries, renderFeatureCompositor);
-        // Job System Phase 7 (Editor "Jobs" Panel) - reads Job System Phase
-        // 5's Profiling::BuildWorkerTimelinePoints() reshape internally; also
-        // hosts the GPU Vertex Skinning campaign's own Phase 7 CPU/GPU
-        // skinning-mode toggle (see
-        // task_manager/gpu_skinning/GPU_SKINNING_PHASE7_EDITOR_PROFILING_UX_STRATEGY_v1.md),
-        // which is why `game` is now passed through here too (mirrors
-        // BuildHierarchyPanel()/BuildScenePanel() above, which already take
-        // `game` for their own reasons).
+        // Jobs panel; also hosts the CPU/GPU skinning toggle, hence `game`.
         m_jobsPanel.Build(m_ctx, game);
-        // The Editor "Log" panel (Panels/LogPanel.h), docked alongside
-        // "Memory"/"Profiler"/"Jobs"/"Atmosphere" (see DockLayout.cpp). A
-        // small, stateful class with no cross-panel dependency beyond
-        // EditorContext - reads/mutates Editor/Logger.h's own thread-safe
-        // state directly, no bridge needed.
+        // Log panel; depends only on EditorContext and the thread-safe logger.
         m_logPanel.Build(m_ctx);
-        // task_manager/frame-debugger-2 campaign (PHASE2) - the Editor's
-        // on-demand "Frame Debugger" floating window (Panels/
-        // FrameDebuggerPanel.h). Build() itself is a complete no-op
-        // unless ctx.frameDebuggerWindowOpen is true (see
-        // FrameDebuggerPanel::Build()), so calling it unconditionally
-        // every frame here is cheap and matches every other panel's own
-        // call-site shape.
-        //
-        // task_manager/frame-debugger-3 campaign, PHASE3 - Build() now also
-        // needs `renderer`/`renderGraph`/m_gameView (this class's own real
-        // Game-View RenderTexture - see the class comment above) to service
-        // its own real capture TRIGGER (TriggerCapture(), called from
-        // BuildToolbarRow()).
-        //
-        // frame-debugger-5 campaign, PHASE2
-        // (PHASE2_GENERIC_COMPUTE_DISPATCH_EVENT_TREE_DISCOVERY.md) - this
-        // call site no longer resolves/threads a `gpuSkinningPassNames`
-        // list through (REMOVED - see PHASE0_MASTER_STRATEGY.md's Locked
-        // Design Decision #2/#6): GPU Skinning passes, and every other real
-        // compute dispatch, are now discovered generically inside
-        // BuildRealFrameDebuggerSnapshot() itself, purely via PHASE1's new
-        // RenderGraphPassSnapshot::kind (== rg::PassKind::Compute) flag - the old
-        // `game.CollectGpuSkinningDispatchRequests()` call this block used
-        // to make purely to resolve that name list is gone too (confirmed,
-        // via a full grep of this file, to have had no other purpose here).
-        //
-        // frame-debugger-4 campaign, PHASE1 - feeds the Frame Debugger BOTH
-        // the pre-composite "GameView" texture (m_gameView, always real) and
-        // the real post-atmosphere-composite final output
-        // (m_gameViewComposited, nullable until the composite pass has
-        // produced something at least once this session) - see
-        // FrameDebuggerHistory::CaptureFrame()'s own doc comment for exactly
-        // how these two flow into the ring buffer's own dual retained
-        // copies. Mirrors this SAME function's own earlier "Game" panel
-        // descriptor logic (the gameSource local a few dozen lines above)
-        // rather than introducing a second, differently-named local -
-        // m_gameViewComposited is a plain member, safe to read directly
-        // here too.
-        //
-        // editor-core-separation-21 campaign, PHASE5
-        // (PHASE5_IRON_RULE_PERMANENT_MISMATCH_DETECTOR.md) - the new,
-        // trailing `&renderPassToggleRegistry` argument feeds
-        // TriggerCapture()'s own new permanent "Render Pass Honesty"
-        // mismatch detector (RenderPassHonestyChecker.h/RenderPassHonestyGuard.h) -
-        // the SAME registry instance RenderGraphPanel::Build() (above) reads/
-        // mutates from its own checkboxes.
-        // editor-core-separation-22 campaign, PHASE6
-        // (PHASE6_IRON_RULE_V2_BIDIRECTIONAL_DETECTOR.md, Step 3.3 item 2) -
-        // the new, trailing `&offscreenBlackboard` argument feeds
-        // TriggerCapture()'s own new Clause C "disabled side effect still
-        // visible" detector - the SAME blackboard instance BuildFrame()'s
-        // own offscreen Execute() callback just declared every provider
-        // against this frame (Core::GetOffscreenBlackboardForFrameDebugger()).
+        // Frame Debugger window (Build() is a no-op unless open). It gets the raw and composited Game views for
+        // before/after comparison, plus the toggle registry and offscreen blackboard for its honesty checks.
         m_frameDebuggerPanel.Build(m_ctx, renderer, renderGraph, m_gameView, m_gameViewComposited,
             &renderPassToggleRegistry, &offscreenBlackboard);
 #if GTE_ENABLE_PROJECT_PANEL
         m_projectPanel.Build(m_ctx);
-        // The Bone Viewer is its own floating window (opened on demand via
-        // Inspector's "Open Bone Viewer" button - see
-        // Panels/InspectorPanel.cpp) rather than part of the fixed dock
-        // layout above - Build() itself is a complete no-op whenever it
-        // isn't currently open (see BoneViewerWindow.h).
+        // Bone Viewer floating window; Build() is a no-op while it is closed.
         m_boneViewer.Build(registry, renderer, m_ctx, m_modelRigCache, game.GetPhysicsSystem());
 #endif
 
-        // Draws every registered plugin panel generically - a permanent,
-        // built-in panel (e.g. "Atmosphere") registers through this exact
-        // same path as an external Project Assembly panel. Begin()/End()
-        // happen here; only the content goes through PluginPanelDrawContextAdapter.
+        // Draw every registered plugin panel; the content goes through PluginPanelDrawContextAdapter.
         for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
             if (ImGui::Begin(entry.name.c_str())) {
                 PluginPanelDrawContextAdapter drawContext;
@@ -659,11 +389,7 @@ public:
         ImGui::Render();
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
 
-        // Marks THIS frame as having actually reached ImGui::Render()/
-        // EndFrame() - see RenderPlatformWindows() below for why this
-        // matters (Application::Run() calls that unconditionally every
-        // frame, even ones where Renderer::Present() skipped calling this
-        // very method entirely, e.g. a minimized window).
+        // RenderPlatformWindows() checks this: it runs every frame, even when Render() was skipped.
         m_frameRendered = true;
     }
 
@@ -671,30 +397,13 @@ public:
     {
         ImGui::SetCurrentContext(m_context);
 
-        // Nothing to do if this frame never actually reached Render()
-        // above (e.g. the OS window is currently minimized, so
-        // Renderer::Present() bailed out before ever invoking the
-        // recordExtra hook that calls Render()) - ImGui::Render()/
-        // EndFrame() was never called this frame, and calling
-        // UpdatePlatformWindows()/RenderPlatformWindowsDefault() without
-        // that happening first would hit an internal Dear ImGui assert
-        // ("Forgot to call Render() or EndFrame() ...").
+        // Skip when this frame never reached Render() (e.g. minimized window): ImGui asserts if
+        // UpdatePlatformWindows() runs without a prior Render()/EndFrame().
         if (!m_frameRendered) {
             return;
         }
 
-        // Actually creates/resizes/destroys the extra real OS windows +
-        // their own Vulkan swapchains for every ImGui window currently
-        // dragged outside the main viewport (see
-        // ImGui_ImplVulkan_InitMultiViewportSupport()/
-        // ImGui_ImplSDL3_InitMultiViewportSupport(), wired up automatically
-        // back in the constructor), then records+submits+presents each of
-        // them - completely independent of, and unrelated to, the main
-        // swapchain Renderer::Present() just presented. A no-op whenever
-        // ImGuiConfigFlags_ViewportsEnable isn't set (never the case here -
-        // see the constructor - but this mirrors every official Dear ImGui
-        // backend example's own guard, and keeps this method safe to call
-        // unconditionally even if that ever changes).
+        // Create, resize and render the extra OS windows of panels dragged outside the main viewport.
         ImGuiIO& io = ImGui::GetIO();
         if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
             ImGui::UpdatePlatformWindows();
@@ -704,12 +413,8 @@ public:
 
     bool WantsExit() const override { return m_ctx.exitRequested; }
 
-    // Backed directly by ImGuiIO::WantCaptureMouse/WantCaptureKeyboard -
-    // ImGui already recomputes these every frame (as of the last
-    // NewFrame()/ProcessEvent() calls) from its own internal hover/focus/
-    // active-widget state, so there is nothing else to track here. See
-    // IEditorLayer::WantsCaptureMouse()/WantsCaptureKeyboard() for why
-    // Application checks these before forwarding input to Game.
+    // ImGui recomputes WantCapture* every frame from its hover/focus state; Application checks them
+    // before forwarding input to Game.
     bool WantsCaptureMouse() const override
     {
         ImGui::SetCurrentContext(m_context);
@@ -722,11 +427,7 @@ public:
         return ImGui::GetIO().WantCaptureKeyboard;
     }
 
-    // frame-debugger-1 campaign (task_manager/frame-debugger-1/
-    // PHASE3_EDITOR_PAUSE_STEP_STATE_AND_TOOLBAR_UI.md) - see
-    // IEditorLayer::IsPlaybackPaused()/TryConsumeStepRequest() for the full
-    // contract. Backed directly by EditorContext's own two toggle fields
-    // (see PlaybackControls.cpp, the only place that writes them).
+    // Backed by EditorContext's pause/step toggles; see IEditorLayer::IsPlaybackPaused().
     bool IsPlaybackPaused() const override { return m_ctx.playbackPaused; }
 
     bool TryConsumeStepRequest() override
@@ -738,16 +439,7 @@ public:
         return true;
     }
 
-    // network-impl-7 campaign - see IEditorLayer::ActivateTab()'s own doc
-    // comment (EditorLayer.h) for the full contract. Must set the current
-    // ImGui context first, same as every other method in this class that
-    // touches ImGui state outside a BuildUI()/Render() call that already
-    // did so earlier this same frame (see WantsCaptureMouse() immediately
-    // above for the identical pattern) - ActivateTab() is called from
-    // Application::Run() at a point where NewFrame() already ran this
-    // frame (see Phase 3), but nothing guarantees this is the LAST thing to
-    // touch the context before it, so setting it explicitly here is cheap
-    // insurance, not redundant.
+    // See IEditorLayer::ActivateTab(). Sets the ImGui context explicitly because it may not be current here.
     TabActivationResult ActivateTab(const std::string& panelName) override
     {
         ImGui::SetCurrentContext(m_context);
@@ -756,13 +448,7 @@ public:
         return result;
     }
 
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE6 - see IEditorLayer::SpawnGpuDrivenTestBatch()'s own doc comment
-    // (EditorLayer.h) for the full contract. A thin forward into
-    // GpuDrivenBatchTestSpawner::Spawn() - the real spawn logic lives there
-    // (not in this composition-root class), mirroring
-    // ImportExternalAssetIntoProject()'s own "thin forward into the real
-    // implementation" shape immediately below.
+    // Thin forward into GpuDrivenBatchTestSpawner::Spawn(), which holds the real spawn logic.
     GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(Game& game, Renderer& renderer, std::uint32_t instanceCount,
         DescriptorSetLayoutHandle sceneServicesSetLayout) override
     {
@@ -775,11 +461,7 @@ public:
         return result;
     }
 
-    // task_manager/stl-parser-2, PHASE1 - see
-    // IEditorLayer::ImportExternalAssetIntoProject()'s own doc comment
-    // (EditorLayer.h) for the full contract. #if-gated exactly like
-    // GTE_ENABLE_PROJECT_PANEL is its own separate switch (see CMakeLists.txt), so a real
-    // Editor build can still have this panel compiled out.
+    // See IEditorLayer::ImportExternalAssetIntoProject(); reports no project when GTE_ENABLE_PROJECT_PANEL is off.
     ProjectAssetImportResult ImportExternalAssetIntoProject(
         const std::string& sourceAbsolutePath, const std::string& destinationRelativeFolder) override
     {
@@ -791,12 +473,7 @@ public:
         result.success = imported.success;
         result.message = imported.message;
 
-        // std::filesystem::relative()'s error_code overload is used
-        // deliberately (never the throwing 2-argument overload) - this class
-        // has no surrounding try/catch, and this codebase's "never throws"
-        // degrade-gracefully convention (see AssetImportResult's own doc
-        // comment) means a relative-path computation failure here should fall
-        // back to something still useful, never propagate an exception.
+        // Non-throwing relative() overload; on failure fall back to the absolute path.
         std::error_code relEc;
         const std::filesystem::path relativePath =
             std::filesystem::relative(imported.finalPath, m_projectPanel.GetRootPath(), relEc);
@@ -818,12 +495,7 @@ public:
     }
 
 
-    // task_manager/frame-debugger-3 campaign, PHASE3 - see
-    // IEditorLayer::PrepareFrameDebuggerCaptureContext()/
-    // NotifyFrameDebuggerStepConsumed()'s own doc comments (EditorLayer.h)
-    // for the full contract; both simply forward into m_frameDebuggerPanel,
-    // which owns the real FrameDebuggerCaptureContext/FrameDebuggerHistory
-    // state.
+    // Frame Debugger capture hooks; both forward into m_frameDebuggerPanel, which owns the capture state.
     IFrameDebuggerCaptureRecorder* PrepareFrameDebuggerCaptureContext() override
     {
         return m_frameDebuggerPanel.PrepareCaptureContextForThisFrame(m_ctx);
@@ -831,20 +503,13 @@ public:
 
     void NotifyFrameDebuggerStepConsumed() override { m_frameDebuggerPanel.NotifyStepConsumed(); }
 
-    // task_manager/frame-debugger-7 campaign, PHASE3 - see
-    // IEditorLayer::ConsumePendingFrameDebuggerReplayRequest()'s own doc
-    // comment (EditorLayer.h) for the full contract; forwards straight
-    // into m_frameDebuggerPanel's own ConsumePendingReplayRequest().
+    // Forwards to m_frameDebuggerPanel.
     bool ConsumePendingFrameDebuggerReplayRequest() override
     {
         return m_frameDebuggerPanel.ConsumePendingReplayRequest();
     }
 
-    // task_manager/frame-debugger-3 campaign, PHASE7
-    // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - see
-    // EditorLayer.h's own doc comments for the full contract; every one of
-    // these simply forwards into m_frameDebuggerPanel's own matching
-    // *FromCommand()/RequestOpenWindow()/BuildStateSnapshotView() method.
+    // Frame Debugger HTTP commands; each forwards to the matching m_frameDebuggerPanel method.
     void FrameDebuggerOpenWindow() override { m_frameDebuggerPanel.RequestOpenWindow(m_ctx); }
     void FrameDebuggerSetEnabled(bool enabled) override { m_frameDebuggerPanel.SetEnabledFromCommand(m_ctx, enabled); }
 
@@ -857,43 +522,26 @@ public:
         return m_ctx.renderGraphWindowOpen;
     }
 
-    // editor-core-separation-16 campaign (On-Engine Project Workflow
-    // plan, BIG-STEP 2), PHASE4 - see IEditorLayer::
-    // SetProjectLifecycleCapability()'s own doc comment for the full
-    // contract. Stored, never called from here - m_newProjectWindow's
-    // own Build() call (below, inside BuildUI()) is what actually
-    // invokes it.
+    // Stored only; m_newProjectWindow's Build() invokes it.
     void SetProjectLifecycleCapability(IProjectLifecycleCapability* capability) override
     {
         m_projectLifecycleCapability = capability;
     }
 
-    // editor-core-separation-18 campaign (On-Engine Project Workflow
-    // plan, BIG-STEP 4), PHASE3 - see IEditorLayer::
-    // SetAssetScaffoldingCapability()'s own doc comment for the full
-    // contract. Stored, never called from here - m_createAssetWindow's
-    // own Build() call (above, inside BuildUI()) is what actually
-    // invokes it.
+    // Stored only; m_createAssetWindow's Build() invokes it.
     void SetAssetScaffoldingCapability(IAssetScaffoldingCapability* capability) override
     {
         m_assetScaffoldingCapability = capability;
     }
 
-    // editor-core-separation-19 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 5), PHASE1 - see IEditorLayer::
-    // SetHotReloadDebugCapability()'s own doc comment for the full
-    // contract. Stored, never called from here - DockLayout.cpp's own
-    // BuildDockspaceAndMenuBar() call (below, inside BuildUI()) is what
-    // actually invokes it.
+    // Stored only; BuildDockspaceAndMenuBar() invokes it.
     void SetHotReloadDebugCapability(IHotReloadDebugCapability* capability) override
     {
         m_hotReloadDebugCapability = capability;
     }
 
-    // Looks up each module's own Editor panel factory (if any) in
-    // BuiltinFeatureEditorPanelRegistry and registers it exactly once -
-    // called by EditorHost right after BuiltinFeatureModuleRegistry::
-    // CreateAll() returns.
+    // Registers each module's Editor panel (if any) from BuiltinFeatureEditorPanelRegistry, once.
+    // Called by EditorHost after BuiltinFeatureModuleRegistry::CreateAll().
     void AttachBuiltinFeatureModules(const std::vector<std::unique_ptr<IEngineFeatureModule>>& modules,
         Renderer& renderer, const rg::RenderGraph& renderGraph) override
     {
@@ -953,28 +601,17 @@ private:
     RenderTexture m_gameView;
     RenderTexture m_sceneView;
 
-    // Non-owning pointers to a composited Game/Scene view texture, set by
-    // SetGameViewCompositedTexture()/SetSceneViewCompositedTexture().
-    // m_lastKnownGameView/m_lastKnownSceneView track the last VkImageView
-    // an ImGui descriptor was created against, so BuildUI() can tell when
-    // a fresh descriptor is needed.
+    // Non-owning composited-view textures. m_lastKnown*View is the view each ImGui descriptor was made for,
+    // so BuildUI() can tell when a fresh descriptor is needed.
     RenderTexture* m_gameViewComposited = nullptr;
     RenderTexture* m_sceneViewComposited = nullptr;
     VkImageView m_lastKnownGameView = VK_NULL_HANDLE;
     VkImageView m_lastKnownSceneView = VK_NULL_HANDLE;
 
-    // The Scene view's own, independently-orbitable camera (see
-    // EditorCamera.h) - updated once per frame by Panels/ScenePanel.cpp
-    // (called from BuildUI() above) from that panel's own mouse input, and
-    // read back by SceneViewProjection() above.
+    // Scene view's own orbit camera; ScenePanel updates it from mouse input each frame.
     EditorCamera m_sceneCamera;
 
-    // The Editor's "Scene" panel infinite ground grid (see
-    // task_manager/editor-enchancements-1/PHASE0_MASTER_STRATEGY.md) - drawn
-    // every frame the "Scene" panel itself is visible/rendered, with no
-    // separate on/off toggle (a deliberate, confirmed design decision - see
-    // PHASE0_MASTER_STRATEGY.md's own "Locked Design Decisions"), exactly
-    // mirroring how Unity's own Scene grid has no such toggle either.
+    // Infinite ground grid for the Scene view; drawn whenever the Scene view renders, with no toggle.
     SceneGridRenderer m_sceneGrid;
 
     // True once Render(cmd) has actually run THIS frame (reset to false at
@@ -982,155 +619,66 @@ private:
     // this guard exists.
     bool m_frameRendered = false;
 
-    // The Editor's "Profiler" panel (see Panels/ProfilerPanel.h) - docked
-    // alongside "Memory" (DockLayout.cpp). Unlike every other panel here,
-    // it's NOT gated behind GTE_ENABLE_PROJECT_PANEL - it depends only on
-    // Profiling::FrameProfiler, which is always compiled regardless of that
-    // switch (see AGENTS.md, "Profiling").
+    // "Profiler" panel, docked with Memory. Not gated by GTE_ENABLE_PROJECT_PANEL.
     ProfilerPanel m_profilerPanel;
 
-    // The Editor "Render Graph" panel (Panels/RenderGraphPanel.h) - a
-    // floating window, independently opened/closed via
-    // ctx.renderGraphWindowOpen (see EditorContext.h) and the
-    // "Window > Render Graph" menu item, not part of the fixed dock
-    // layout. Not gated behind GTE_ENABLE_PROJECT_PANEL - only depends on
-    // the gte::rg::RenderGraph Application already owns and drives every
-    // frame, passed into BuildUI() above.
+    // "Render Graph" floating window, toggled by ctx.renderGraphWindowOpen and the Window menu.
     RenderGraphPanel m_renderGraphPanel;
 
-    // The Editor "Render Features" panel (Panels/RenderFeaturesPanel.h) -
-    // GPU-driven-batch culling readout + render-feature priority/enable
-    // authoring, split out of the Render Graph panel. Independently
-    // opened/closed via ctx.renderFeaturesWindowOpen.
+    // "Render Features" panel: GPU-driven batch culling readout and feature priority/enable authoring.
+    // Opened and closed via ctx.renderFeaturesWindowOpen.
     RenderFeaturesPanel m_renderFeaturesPanel;
 
-    // The Editor "Jobs" panel (Panels/JobsPanel.h), docked alongside
-    // "Memory"/"Profiler" (DockLayout.cpp). Not gated behind
-    // GTE_ENABLE_PROJECT_PANEL - depends only on
-    // gte::Profiling::FrameProfiler/gte::Jobs::JobSystem.
+    // "Jobs" panel, docked with Memory/Profiler. Depends only on the profiler and job system.
     JobsPanel m_jobsPanel;
 
-    // The Editor "Log" panel (Panels/LogPanel.h), docked alongside
-    // "Memory"/"Profiler"/"Jobs"/"Atmosphere" (DockLayout.cpp). Not gated
-    // behind GTE_ENABLE_PROJECT_PANEL - depends only on Editor/Logger.h's
-    // own thread-safe static state.
+    // "Log" panel, docked with Memory/Profiler/Jobs/Atmosphere. Depends only on the thread-safe logger state.
     LogPanel m_logPanel;
 
-    // task_manager/frame-debugger-2 campaign (PHASE2) - the Editor's
-    // on-demand "Frame Debugger" floating window (Panels/
-    // FrameDebuggerPanel.h). Unlike m_jobsPanel/m_profilerPanel/
-    // m_renderGraphPanel above, this one is NOT docked alongside
-    // "Memory" - it is a closeable floating window, opened via the
-    // "Window" menu (DockLayout.cpp) - but it is still owned here and
-    // called explicitly by name from BuildUI() below, exactly like every
-    // other stateful panel.
-    //
-    // task_manager/frame-debugger-3 campaign, PHASE4 - now also owns its own
-    // ImGui-side descriptor for its real retained preview texture (see
-    // FrameDebuggerPanel.h's own class comment) - this is why its
-    // ReleasePreviewDescriptor() must be called explicitly from THIS
-    // class's own destructor above, BEFORE ImGui_ImplVulkan_Shutdown(),
-    // since this member is declared (and destroyed, in reverse order) AFTER
-    // m_context, m_context's own real-Shutdown() teardown is called from an
-    // explicit destructor BODY that runs before any member destructor.
+    // Floating "Frame Debugger" window, opened from the Window menu. It owns an ImGui preview descriptor,
+    // so the destructor must release it before ImGui_ImplVulkan_Shutdown().
     FrameDebuggerPanel m_frameDebuggerPanel;
 
 #if GTE_ENABLE_PROJECT_PANEL
-    // The Editor's Unity-style "Project" panel (see Panels/ProjectPanel.h) -
-    // a live view of a "Project" folder next to the built .exe, plus
-    // external drag-and-drop file import. Only compiled/present at all when
-    // GTE_ENABLE_PROJECT_PANEL is its own switch (see the root CMakeLists.txt)
-    // - ProcessEvent() above feeds it SDL_EVENT_DROP_FILE, BuildUI() below calls its Build().
+    // "Project" panel: live folder view plus external drag-and-drop import.
+    // ProcessEvent() feeds it SDL_EVENT_DROP_FILE.
     ProjectPanel m_projectPanel;
 
-    // Backs the Inspector's live image-preview thumbnail (see
-    // Panels/InspectorPanel.cpp's BuildAssetInspector()) whenever the
-    // Project selection is a decodable image file - see
-    // AssetPreviewTexture.h. Explicitly Reset() in the destructor above
-    // BEFORE ImGui_ImplVulkan_Shutdown(), not left to member-destruction
-    // order alone (which would run too late).
+    // Inspector's image preview for decodable image files.
+    // Reset() in the destructor before ImGui_ImplVulkan_Shutdown().
     AssetPreviewTexture m_assetPreview;
 
-    // The Mesh-asset equivalent of m_assetPreview above - backs the
-    // Inspector's live, auto-rotating 3D mesh preview (see
-    // Panels/InspectorPanel.cpp's BuildAssetInspector()) whenever the
-    // Project selection is a *.gta AssetType::Mesh file - see
-    // AssetPreviewMesh.h. Also explicitly Reset() in the destructor above,
-    // same reasoning as m_assetPreview.
+    // Inspector's 3D mesh preview for *.gta Mesh assets. Reset() in the destructor, like m_assetPreview.
     AssetPreviewMesh m_assetPreviewMesh;
 
-    // The Editor's Unity-"Avatar configuration"-style Bone Viewer floating
-    // debug window (BoneViewerWindow.h) - opened on demand via Inspector's
-    // "Open Bone Viewer" button (Panels/InspectorPanel.cpp) for whichever
-    // entity is currently selected, and stays open (drawing whatever entity
-    // it was last opened onto) independent of the Hierarchy/Inspector
-    // selection changing afterwards. Also explicitly Reset() in the
-    // destructor above, same reasoning as m_assetPreview/m_assetPreviewMesh.
+    // Bone Viewer floating window, opened from the Inspector; keeps its entity when the selection changes.
+    // Reset() in the destructor, like m_assetPreview.
     BoneViewerWindow m_boneViewer;
 
-    // Shared by BoneViewerWindow (above) and (as of
-    // task_manager/verlet-integration-2/PHASE4_INSPECTOR_MODEL_PART_SECTION.md)
-    // InspectorPanel's own "Model Part" section - one mtime-cached
-    // RigFileData per currently-relevant model path, see ModelRigCache.h.
-    // Owned here (rather than inside BoneViewerWindow itself) so both
-    // consumers read the exact same cached data instead of two independent,
-    // silently-divergible reloads of the same file.
+    // Mtime-cached rig data shared by BoneViewerWindow and InspectorPanel, so both read one copy.
     ModelRigCache m_modelRigCache;
 #endif
 
-    // editor-core-separation-16 campaign (On-Engine Project Workflow
-    // plan, BIG-STEP 2), PHASE4 - the "Create New Project" floating
-    // utility window (NewProjectWindow.h), opened on demand via
-    // "Project > New Project..." (DockLayout.cpp). No GPU resources, so
-    // unlike m_boneViewer above it needs no explicit Reset() in this
-    // class's own destructor. NOT inside the "#if GTE_ENABLE_PROJECT_PANEL"
-    // block above - this window is independent of the (content-asset)
-    // "Project" panel and must exist in every build.
+    // "Create New Project" floating window (Project > New Project...). No GPU resources, so no Reset() needed.
+    // Outside GTE_ENABLE_PROJECT_PANEL: it must exist in every build.
     NewProjectWindow m_newProjectWindow;
-    // editor-core-separation-17 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 3), PHASE4 - the "Open Project" floating utility window
-    // (OpenProjectWindow.h), opened on demand via "Project > Open
-    // Project..." (DockLayout.cpp). Same "no GPU resources, always exists
-    // regardless of GTE_ENABLE_PROJECT_PANEL" reasoning as
-    // m_newProjectWindow immediately above.
+    // "Open Project" floating window (Project > Open Project...). No GPU resources; always present.
     OpenProjectWindow m_openProjectWindow;
-    // Non-owning - see IEditorLayer::SetProjectLifecycleCapability()'s
-    // own doc comment for the lifetime contract (EditorHost's own
-    // s_editorProjectLifecycleCapability static outlives this object).
+    // Non-owning; EditorHost's static capability outlives this object.
     IProjectLifecycleCapability* m_projectLifecycleCapability = nullptr;
-    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 4), PHASE3 - the "Create New Asset" floating utility window
-    // (CreateAssetWindow.h), opened on demand via the Project panel's own
-    // "[Active Project] <Name>" synthetic row's right-click "Create"
-    // submenu (ProjectPanel.cpp, PHASE2). Same "no GPU resources, always
-    // exists regardless of GTE_ENABLE_PROJECT_PANEL" reasoning as
-    // m_newProjectWindow/m_openProjectWindow immediately above.
+    // "Create New Asset" floating window, opened from the Project panel's Create submenu.
+    // No GPU resources; exists regardless of GTE_ENABLE_PROJECT_PANEL.
     CreateAssetWindow m_createAssetWindow;
-    // Non-owning - see IEditorLayer::SetAssetScaffoldingCapability()'s own
-    // doc comment for the lifetime contract (EditorHost's own
-    // s_editorProjectLifecycleCapability static outlives this object).
+    // Non-owning; EditorHost's static capability outlives this object.
     IAssetScaffoldingCapability* m_assetScaffoldingCapability = nullptr;
-    // editor-core-separation-19 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 5), PHASE1 - non-owning, see
-    // IEditorLayer::SetHotReloadDebugCapability()'s own doc comment for the
-    // lifetime contract (EditorHost's own s_editorHotReloadDebugCapability
-    // static outlives this object). Read directly by
-    // DockLayout.cpp's BuildDockspaceAndMenuBar() call below - unlike
-    // m_projectLifecycleCapability/m_assetScaffoldingCapability, this one
-    // is NOT handed to a separate floating-window Build() call, since the
-    // "Compile" menu item lives INSIDE the menu bar itself, not a later,
-    // separate window.
+    // Non-owning; EditorHost's static capability outlives this object. Read by BuildDockspaceAndMenuBar()
+    // because the "Compile" menu item lives in the menu bar.
     IHotReloadDebugCapability* m_hotReloadDebugCapability = nullptr;
 
-    // Shared state read/written by DockLayout.cpp's
-    // BuildDockspaceAndMenuBar() and every Panels/*.cpp builder called from
-    // BuildUI() above - see EditorContext.h for what each field means and
-    // exactly who reads/writes it.
+    // Shared state read and written by the dock layout and every panel builder; see EditorContext.h.
     EditorContext m_ctx;
 
-    // Owns every built-in feature module's own Editor panel, keyed by
-    // registration order via AttachBuiltinFeatureModules() above - never
-    // unregistered, lives for the rest of the process.
+    // Owns every built-in feature's Editor panel module; lives for the rest of the process.
     std::vector<std::unique_ptr<IEditorPanelModule_v1>> m_builtinFeaturePanelModules;
 };
 
@@ -1138,19 +686,8 @@ private:
 
 std::unique_ptr<IEditorLayer> CreateEditorLayer(Window& window, Renderer& renderer)
 {
-    // editor-core-separation-1 campaign, PHASE4
-    // (PHASE4_GPU_MEMORY_TRACKER_BUCKET_A_EXTRACTION.md) - installs the
-    // Editor's ONE debug-name overlay BEFORE constructing ImGuiEditorLayer
-    // itself, whose own constructor's member-initializer list immediately
-    // creates its "GameView"/"SceneView" RenderTextures (SetDebugName() is
-    // called from INSIDE RenderTexture's own constructor - too late to
-    // install from inside ImGuiEditorLayer's constructor BODY, which only
-    // runs after every member initializer has already completed). Safe:
-    // `renderer` (and every other Application member constructed before the
-    // Editor layer - AtmosphereLutRenderer, VolumeTexturePreviewRenderer)
-    // creates its own named GPU resources LAZILY, on first real use, well
-    // after this point - confirmed by reading every one of their
-    // constructors during this phase, not assumed.
+    // Install the debug-name overlay first: the view RenderTextures built by the constructor's
+    // member initializers name themselves on construction.
     EditorGpuMemoryNameOverlay::Install(*renderer.GetMemoryTracker());
     return std::make_unique<ImGuiEditorLayer>(window, renderer);
 }

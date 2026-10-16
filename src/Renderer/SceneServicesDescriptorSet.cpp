@@ -224,26 +224,31 @@ void ResetSceneServiceRegistryForTesting() noexcept
 
 // --- SceneServicesDescriptorSet --------------------------------------------
 
-SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
-    : m_renderer(&renderer)
-    , m_device(renderer.GetVulkanContextInfo().device)
-    // The Image3D slot's dummy: a neutral 1x1x1 value. RGBA8_UNORM has mandatory storage-image support,
-    // so creation passes on every conformant device and needs no fallback format.
-    , m_dummyImage3DTexture(renderer.CreateVolumeTexture(1, 1, 1, PixelFormat::RGBA8_UNorm, "SceneServiceImage3DDummy"))
-    // Binding 8's zero-filled dummy fallback (Rewrite()'s per-slot loop does not cover it).
-    , m_dummyGlobalUniformBuffer(renderer.CreateBuffer(kSceneGlobalUniformBlockSize, BufferUsage::UniformBuffer,
-          BufferMemoryUsage::CpuToGpu, "SceneGlobalUniformBlockDummy"))
+namespace {
+
+// 8 fragment-stage combined image samplers plus the lighting UBO at binding 8.
+VkDescriptorSetLayout BuildSceneServicesLayout(VkDevice device)
 {
-    // The scene-services layout: 8 fragment-stage combined image samplers plus the lighting UBO at binding 8
-    // (see kSceneGlobalUniformBlockSize). Consumed by fragment shaders only.
-    DescriptorSetLayoutBuilder layoutBuilder(m_device);
+    DescriptorSetLayoutBuilder layoutBuilder(device);
     for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
         layoutBuilder.AddCombinedImageSampler(i, VK_SHADER_STAGE_FRAGMENT_BIT);
     }
     layoutBuilder.AddUniformBuffer(kSceneServiceSlotCount, VK_SHADER_STAGE_FRAGMENT_BIT);
-    m_layout = layoutBuilder.Build();
-    m_layoutHandle = RegisterDescriptorSetLayout(m_layout);
+    return layoutBuilder.Build();
+}
 
+} // namespace
+
+SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
+    : m_renderer(&renderer)
+    , m_device(renderer.GetVulkanContextInfo().device)
+    , m_layout(m_device, BuildSceneServicesLayout(m_device))
+    // 1x1x1 RGBA8_UNORM: mandatory storage-image support, so no fallback format is needed.
+    , m_dummyImage3DTexture(renderer.CreateVolumeTexture(1, 1, 1, PixelFormat::RGBA8_UNorm, "SceneServiceImage3DDummy"))
+    // Zero-filled fallback for binding 8.
+    , m_dummyGlobalUniformBuffer(renderer.CreateBuffer(kSceneGlobalUniformBlockSize, BufferUsage::UniformBuffer,
+          BufferMemoryUsage::CpuToGpu, "SceneGlobalUniformBlockDummy"))
+{
     // Every Image2D-kind slot gets a dummy: one opaque-white pixel, meaning "fully lit / neutral".
     const unsigned char whitePixel[4] = { 255, 255, 255, 255 };
     for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
@@ -253,21 +258,11 @@ SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
         }
     }
 
-    // Zero-fill the dummy UBO exactly once - never written again after this.
     const std::array<std::byte, static_cast<std::size_t>(kSceneGlobalUniformBlockSize)> zeroBytes{};
     m_dummyGlobalUniformBuffer.Upload(zeroBytes.data(), zeroBytes.size());
 }
 
-SceneServicesDescriptorSet::~SceneServicesDescriptorSet()
-{
-    // Textures are RAII and the per-view sets are pool-owned; only the hand-built layout needs destroying.
-    if (m_layoutHandle != DescriptorSetLayoutHandle::Invalid) {
-        UnregisterDescriptorSetLayout(m_layoutHandle);
-    }
-    if (m_layout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_layout, nullptr);
-    }
-}
+SceneServicesDescriptorSet::~SceneServicesDescriptorSet() = default;
 
 DescriptorSetHandle SceneServicesDescriptorSet::Rewrite(
     rg::RenderViewId view, const std::array<ResolvedSlot, kSceneServiceSlotCount>& resolved)
@@ -284,7 +279,7 @@ DescriptorSetHandle SceneServicesDescriptorSet::Rewrite(
     VkDescriptorSet set = Native(handle);
     const bool freshlyAllocated = (set == VK_NULL_HANDLE);
     if (freshlyAllocated) {
-        set = m_renderer->AllocateComputeDescriptorSet(m_layout).Native();
+        set = m_renderer->AllocateComputeDescriptorSet(m_layout.Native()).Native();
         handle = RegisterDescriptorSet(set);
         m_perViewSets.push_back(PerViewSet{ view, handle });
     }
@@ -395,7 +390,7 @@ void SceneServicesDescriptorSet::UpdateGlobalUniformBlock(rg::RenderViewId view,
     VkDescriptorSet set = Native(handle);
     const bool freshlyAllocatedSet = (set == VK_NULL_HANDLE);
     if (freshlyAllocatedSet) {
-        set = m_renderer->AllocateComputeDescriptorSet(m_layout).Native();
+        set = m_renderer->AllocateComputeDescriptorSet(m_layout.Native()).Native();
         handle = RegisterDescriptorSet(set);
         m_perViewSets.push_back(PerViewSet{ view, handle });
     }

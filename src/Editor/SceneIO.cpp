@@ -28,10 +28,7 @@ bool SaveScene(Game& game, const std::filesystem::path& scenePath)
 
     std::error_code ec;
     std::filesystem::create_directories(scenePath.parent_path(), ec);
-    // Deliberately not checked/aborted-on: if scenePath.parent_path() already
-    // exists, create_directories() reports an ec that std::ofstream below
-    // will simply succeed past anyway - matching WriteGtaFile()'s own
-    // tolerant convention.
+    // Result intentionally ignored: an existing directory reports an error code, and the write below still succeeds.
 
     std::ofstream file(scenePath, std::ios::binary | std::ios::trunc);
     if (!file) {

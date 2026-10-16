@@ -165,11 +165,6 @@ public:
         const char* debugName = nullptr, bool useInstanceBuffer = false,
         DescriptorSetLayoutHandle sceneServicesSetLayout = DescriptorSetLayoutHandle::Invalid) const;
 
-    Pipeline CreatePipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
-        const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
-        bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false,
-        VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE) const;
-
     // Vulkan-free overload taking PixelFormat. An empty span builds a depth-only pipeline.
     Pipeline CreatePipeline(std::span<const PixelFormat> colorFormats, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,

@@ -19,15 +19,9 @@ inline constexpr std::size_t kPipelineMaxColorAttachments = 8;
 // Push constants: "model" then "viewProj" matrices (vertex stage, offset 0, 128 bytes).
 class Pipeline {
 public:
-    // The SPIR-V paths point at compiled binaries in "<exe dir>/shaders/*.spv", not GLSL source.
-    // `debugName` is a cosmetic label, never part of a cache key.
-    // `sceneServicesSetLayout` (set 1) must be Core's SceneServicesDescriptorSet::Layout().
-
-    // `materialSetLayout` (set 0): only for PositionNormalUv, must be GpuResourceFactory::MaterialDescriptorSetLayout().
-    // `instanceBufferSetLayout` (set 0): only for PositionNormalInstanced, never combined with a material set.
-
-    // When set 0 would be empty but set 1 exists, the pipeline owns a zero-binding filler (no gap allowed).
-    // This single-format constructor forwards to the span constructor below.
+    // Single-format form; forwards to the span constructor. SPIR-V paths are compiled "<exe dir>/shaders/*.spv".
+    // Set 0: `materialSetLayout` (PositionNormalUv) or `instanceBufferSetLayout` (PositionNormalInstanced), never both.
+    // Set 1: `sceneServicesSetLayout`. An empty set 0 with a set 1 gets a zero-binding filler (no gaps allowed).
     Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
         VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr,

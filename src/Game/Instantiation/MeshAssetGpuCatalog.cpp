@@ -7,7 +7,7 @@
 #include "../../Assets/MeshFile.h"
 #include "../../Assets/RigFile.h"
 #include "../../Renderer/MeshVertex.h"
-#include "../../Renderer/Culling/CullingTypes.h" // ComputeLocalAABB() - render-pass-5 campaign, PHASE4.
+#include "../../Renderer/Culling/CullingTypes.h" // ComputeLocalAABB()
 #include "../../Renderer/Renderer.h"
 #include "MeshMaterialPartitioner.h"
 #include "MeshVertexPacking.h"
@@ -20,8 +20,7 @@ namespace gte {
 
 namespace {
 
-// Same std::u8string round-trip Game.cpp's own Utf8PathFromGamePath() uses -
-// see that function's doc comment for the full "why".
+// UTF-8 game path to filesystem path, via std::u8string.
 std::filesystem::path Utf8PathFromGamePath(const std::string& utf8)
 {
     return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
@@ -33,17 +32,7 @@ std::string PathToUtf8(const std::filesystem::path& path)
     return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
 }
 
-// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-// PHASE4 (task_manager/render-pass-5/
-// PHASE4_PER_BATCH_RESOURCE_MANAGEMENT_AND_BATCHING.md, PHASE0's Locked
-// Design Decision 3) - computes a TIGHT local-space AABB for one submesh
-// (untextured or textured), i.e. only the subset of `positions` this
-// submesh's own `indices` actually reference - not the whole model's
-// vertex array, which `positions` itself always is (every submesh's
-// `indices` are plain indices into that SAME shared array - see
-// MeshData.h). An out-of-range index (should never happen for a
-// successfully-decoded MeshData, but this is CPU-side data read from disk)
-// is skipped rather than read out of bounds.
+// Tight local-space AABB of the vertices `indices` references (out-of-range indices are skipped).
 AABB ComputeSubsetLocalAABB(const std::vector<Vec3>& positions, const std::vector<std::uint32_t>& indices)
 {
     std::vector<Vec3> referenced;
@@ -100,36 +89,25 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
         return kEmpty; // Corrupt/truncated payload, or an empty mesh.
     }
 
-    // Materials/textures AND rig (skeleton/skin-weights) are optional
-    // metadata (see RigFile.h) - absent for a *.gta imported before this
-    // engine supported them, or a materialless/boneless .pmx.
+    // Materials/textures and rig are optional metadata (absent for materialless/boneless models).
     MaterialData materials;
     std::optional<RigFileData> rig = DecodeRigDataFromBytes(gta->metadata);
     if (rig.has_value()) {
         materials = rig->materials;
     }
 
-    // A model is "skinned" only when it carries BOTH a real bone hierarchy
-    // AND a per-vertex skin weight for every vertex - see SkinnedMeshData's
-    // own doc comment (SkeletalRigCache.h).
+    // Skinned = a bone hierarchy AND a skin weight for every vertex.
     const bool skinned = rig.has_value() && !rig->skeleton.bones.empty()
         && rig->skinWeights.size() == mesh->positions.size();
 
-    // Every material's texture is referenced purely by Guid (see
-    // MaterialTextureRef, MaterialData.h) - resolving one to an actual
-    // *.gta Texture asset's absolute path needs a real AssetDatabase scan, a
-    // fresh, purely local one scanned over this mesh *.gta's own parent
-    // directory (guaranteed to also cover its sibling "..._Textures"
-    // folder - see AssetImporter.cpp's ImportPmxMaterialTextures()).
+    // Textures are referenced by Guid; resolve them via a local scan of the mesh's own directory
+    // (which also covers its sibling "..._Textures" folder).
     AssetDatabase textureDatabase;
     if (!materials.textures.empty()) {
         textureDatabase.RefreshFromDirectory(Utf8PathFromGamePath(absoluteGtaPath).parent_path());
     }
 
-    // Pure index-range partitioning (MeshMaterialPartitioner.h) - deciding
-    // whether a slice ends up in the untextured merged bucket or gets its
-    // own textured submesh is the one impure decision left to this
-    // function (it needs the texture cache above).
+    // Pure index-range partitioning; whether a slice ends up textured depends on the texture cache below.
     const std::vector<MeshMaterialSlice> slices = PartitionMeshMaterials(mesh->indices.size(), materials.materials);
 
     std::vector<std::uint32_t> untexturedIndices;
@@ -161,9 +139,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
 
     std::vector<MeshAssetPart> parts;
 
-    // --- Untextured combined submesh (position+normal only) - built via
-    // the SHARED PackMeshVertices() helper (MeshVertexPacking.h), the exact
-    // same function AnimationSystem's per-frame re-upload uses.
+    // Untextured combined submesh (position+normal), packed with the same helper AnimationSystem re-uploads with.
     if (!untexturedIndices.empty()) {
         const std::vector<MeshVertex> vertices = PackMeshVertices(mesh->positions, mesh->normals);
 
@@ -176,20 +152,10 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
                   static_cast<std::uint32_t>(vertices.size()), untexturedIndices.data(),
                   untexturedIndices.size() * sizeof(std::uint32_t),
                   static_cast<std::uint32_t>(untexturedIndices.size()), "ImportedMesh");
-        // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-        // PHASE4 - real, tight local-space bounds for THIS submesh, computed
-        // once here at load time (Locked Design Decision 3) - the one real
-        // content path RenderSystem::CollectGpuDrivenBatches()'s eligibility
-        // rule can actually select today (untextured, PositionNormal, and -
-        // for a non-skinned model - indexed - see IsGpuDrivenEligible()).
+        // Tight local-space bounds, computed once at load; used by GPU-driven culling.
         gpuMesh.SetLocalBounds(ComputeSubsetLocalAABB(mesh->positions, untexturedIndices));
         const MeshHandle handle = renderSystem.RegisterMesh(std::move(gpuMesh));
-        // `indices` is only worth keeping around for a SKINNED model - see
-        // MeshAssetPart::indices' own doc comment (MeshAssetGpuCatalog.h) -
-        // a non-skinned model will never need a GPU-skinned counterpart
-        // Mesh, so there is no reason to keep a second, redundant CPU-side
-        // copy of its index data alive for the rest of this cache entry's
-        // lifetime.
+        // Index copy is kept only for skinned models (needed to build a GPU-skinned counterpart).
         MeshAssetPart part{ handle, kInvalidMaterialTextureHandle, std::string() };
         if (skinned) {
             part.indices = untexturedIndices;
@@ -197,17 +163,8 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
         parts.push_back(std::move(part));
     }
 
-    // --- Textured submeshes (position+normal+UV) - one shared vertex
-    // buffer built once here (via the SHARED PackMeshVertexUvs() helper) AND
-    // uploaded to the GPU exactly ONCE (see Renderer::CreateSharedMeshVertexBuffer()/
-    // CreateSharedSkinnedMeshVertexBuffer()) - every textured submesh Mesh
-    // below points at that SAME underlying vertex buffer, differing only in
-    // its own index buffer/range. This is Stage 1 of
-    // task_manager/optimizing_multi_thread_cpu_skinning/
-    // MULTITHREAD_CPU_SKINNING_OPTIMIZATION_STRATEGY_v1.md: a model with N
-    // textured materials used to get N full, independent copies of this
-    // same vertex data (both at load time AND, far more expensively, on
-    // every single animated frame afterwards) - now it gets exactly one.
+    // Textured submeshes (position+normal+UV): one shared vertex buffer is uploaded once; each submesh Mesh
+    // points at it and differs only in its own index buffer/range.
     if (!texturedSlices.empty()) {
         const std::vector<MeshVertexUv> texturedVertices = PackMeshVertexUvs(mesh->positions, mesh->normals, mesh->uvs);
         const uint64_t texturedVertexDataSize = texturedVertices.size() * sizeof(MeshVertexUv);
@@ -227,13 +184,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
             Mesh gpuMesh = renderer.CreateMeshFromSharedVertexBuffer(sharedTexturedVertexBuffer, texturedVertexCount,
                 sliceIndices.data(), sliceIndices.size() * sizeof(std::uint32_t),
                 static_cast<std::uint32_t>(sliceIndices.size()), "ImportedTexturedMesh");
-            // GPU-Driven Frustum Culling + Indirect Draw campaign
-            // (render-pass-5), PHASE4 - real, tight local-space bounds for
-            // THIS textured submesh (see the untextured branch above's own
-            // comment for the full reasoning). Textured (PositionNormalUv)
-            // batches are out of scope for this campaign (PHASE0's Locked
-            // Design Decision 8) - computed anyway for consistency/future
-            // use, at negligible one-time load cost.
+            // Tight local-space bounds for this submesh; textured batches are not GPU-driven yet.
             gpuMesh.SetLocalBounds(ComputeSubsetLocalAABB(mesh->positions, sliceIndices));
             const MeshHandle handle = renderSystem.RegisterMesh(std::move(gpuMesh));
             MeshAssetPart part{ handle, slice.texture, slice.name };
@@ -244,10 +195,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
         }
     }
 
-    // Keep the bind-pose CPU data (+ skeleton) around so it can be handed
-    // off to AnimationSystem's SkeletalRigCache explicitly (see this
-    // class's own doc comment, and TryGetSkinnedMeshData() below) - never
-    // pushed into any animation-owned cache from inside this function.
+    // Keep the bind-pose CPU data and skeleton for the explicit hand-off to AnimationSystem (see TryGetSkinnedMeshData()).
     if (skinned) {
         SkinnedMeshData skinData;
         skinData.bindPositions = mesh->positions;
@@ -261,8 +209,8 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
         }
         skinData.skinWeights = rig->skinWeights;
         skinData.skeleton = rig->skeleton;
-        skinData.physics = rig->physics; // PHASE4 - see SkinnedMeshData's own doc comment (SkeletalRigCache.h).
-        skinData.jointPhysicsOverrides = rig->jointPhysicsOverrides; // task_manager/verlet-integration-11, PHASE1.
+        skinData.physics = rig->physics;
+        skinData.jointPhysicsOverrides = rig->jointPhysicsOverrides;
         m_skinnedMeshCache.insert_or_assign(absoluteGtaPath, std::move(skinData));
     }
 
@@ -280,10 +228,7 @@ EntityBlueprint MeshAssetGpuCatalog::Resolve(RenderSystem& renderSystem, Rendere
         return root;
     }
 
-    // Root node: a bare hierarchy node (no mesh of its own), named after the
-    // asset FILE itself - absoluteGtaPath's own filename, minus its
-    // extension (e.g. "Miku.gta" -> "Miku") - and tagged with the source
-    // path so a MeshAssetSource component gets attached to it.
+    // Root node: a bare hierarchy node named after the file stem ("Miku.gta" -> "Miku"), tagged with the source path.
     root.name = PathToUtf8(Utf8PathFromGamePath(absoluteGtaPath).stem());
     root.meshAssetSourcePath = absoluteGtaPath;
 
@@ -319,12 +264,12 @@ bool MeshAssetGpuCatalog::RefreshCachedJointPhysicsOverridesFromDisk(const std::
 {
     const auto found = m_skinnedMeshCache.find(absoluteGtaPath);
     if (found == m_skinnedMeshCache.end()) {
-        return false; // Never cached this session - nothing to refresh (see this method's own header comment).
+        return false; // Never cached - nothing to refresh.
     }
 
     const std::optional<GtaFileData> gta = ReadGtaFile(Utf8PathFromGamePath(absoluteGtaPath));
     if (!gta.has_value() || gta->header.Type() != AssetType::Mesh) {
-        return false; // Leave the existing cached entry exactly as it was - never clear/corrupt it on a failed refresh.
+        return false; // Keep the existing cached entry on a failed refresh.
     }
     const std::optional<RigFileData> rig = DecodeRigDataFromBytes(gta->metadata);
     if (!rig.has_value()) {

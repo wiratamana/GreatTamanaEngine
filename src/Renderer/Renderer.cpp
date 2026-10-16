@@ -468,14 +468,6 @@ Pipeline Renderer::CreatePipeline(const std::string& vertexShaderSpirvPath,
         useMaterialTexture, debugName, useInstanceBuffer, Native(sceneServicesSetLayout));
 }
 
-Pipeline Renderer::CreatePipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
-    const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
-    const char* debugName, bool useInstanceBuffer, VkDescriptorSetLayout sceneServicesSetLayout) const
-{
-    return m_resources.CreatePipeline(colorFormats, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
-        useMaterialTexture, debugName, useInstanceBuffer, sceneServicesSetLayout);
-}
-
 Pipeline Renderer::CreatePipeline(std::span<const PixelFormat> colorFormats, const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
     const char* debugName, bool useInstanceBuffer, DescriptorSetLayoutHandle sceneServicesSetLayout) const

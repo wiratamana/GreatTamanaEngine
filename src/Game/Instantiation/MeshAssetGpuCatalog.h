@@ -16,62 +16,21 @@ namespace gte {
 class Renderer;
 class RenderSystem;
 
-// One entity CreateMeshEntityFromGtaFile()'s blueprint should spawn (as a
-// CHILD of that call's own root node) for a given *.gta asset - see
-// EnsureMeshAsset() below. Kept here (rather than nested private inside a
-// class) since both this catalog AND MeshInstantiationSystem's read-only
-// forwarding query for AnimationSystem's per-frame re-upload need the shape.
+// One child entity spawned for a *.gta asset.
 struct MeshAssetPart {
     MeshHandle mesh;
-    // kInvalidMaterialTextureHandle means "untextured - draw via the untextured
-    // Mesh.vert/.frag pipeline"; otherwise draw via the textured
-    // TexturedMesh.vert/.frag pipeline with this texture bound.
+    // kInvalidMaterialTextureHandle = untextured (Mesh pipeline); otherwise the TexturedMesh pipeline binds it.
     MaterialTextureHandle texture;
-    // The originating PMX material's own name (Material::name - see
-    // MaterialData.h), or empty when this part has no single originating
-    // material with a usable name (the combined untextured submesh, which
-    // may merge more than one material together, or a material whose own
-    // name PMX left blank).
+    // Originating material name; empty for the merged untextured submesh or an unnamed material.
     std::string name;
-    // This part's own triangle-index list (the exact CPU-side data
-    // `mesh`'s own index buffer was uploaded from) - kept around
-    // (GPU Vertex Skinning campaign, Phase 4: see
-    // task_manager/gpu_skinning/GPU_SKINNING_PHASE4_PER_MODEL_RESOURCE_MANAGEMENT_STRATEGY_v1.md)
-    // so a GPU-skinned counterpart Mesh can be built later (sharing a GPU
-    // skinning output buffer, but needing its OWN, private index buffer -
-    // see Mesh.h's own "the index buffer is always this ONE Mesh's own
-    // private buffer, never shared" rule) without ever needing a
-    // device-to-host GPU readback of `mesh`'s own index buffer. Empty for
-    // any MeshAssetPart built before this field existed, or a boneless/
-    // riggless model that will never need a GPU-skinned counterpart at
-    // all - GpuSkinningRigCache::Register() simply skips a part whose
-    // `indices` is empty.
+    // CPU copy of `mesh`'s triangle indices, so a GPU-skinned counterpart can own a private index buffer.
+    // Empty for a boneless model.
     std::vector<std::uint32_t> indices;
 };
 
-// Replaces Game::EnsureMeshAsset()/EnsureMeshPipeline()/
-// EnsureTexturedMeshPipeline() - decodes (once per distinct absolute *.gta
-// path, then cached) an imported Mesh asset into GPU MeshAssetParts, and
-// resolves them into a ready-to-instantiate ROOT+CHILDREN EntityBlueprint -
-// see GameInstantiationRefactorProposal.txt, Step 3.3.
-//
-// Internally, "load a mesh asset" is now a clean, named SEQUENCE of steps
-// instead of one 200-line function: decode *.gta + rig/material metadata ->
-// MeshMaterialPartitioner (pure) -> resolve each textured slice's texture
-// via MaterialTextureGpuCache (impure) -> MeshVertexPacking (pure, shared
-// with the per-frame re-upload path in AnimationSystem) to build the CPU
-// vertex arrays -> upload each submesh via Renderer::CreateMesh()/
-// CreateSkinnedMesh() -> cache the resulting MeshAssetPart list.
-//
-// Also exposes whatever SkinnedMeshData it decoded for a given path (for a
-// skinned model) so animation wiring can pick it up - it does NOT push this
-// into any animation-owned cache itself (see SkeletalRigCache.h); that
-// hand-off is made explicit one level up, in Game/MeshInstantiationSystem.
-//
-// Genuinely needs a live Renderer to do its real job - "Tier 2, no
-// automated coverage yet" (see AGENTS.md) - the PURE parts it depends on
-// (MeshMaterialPartitioner, MeshVertexPacking, EntityInstantiator) are what
-// are actually tested.
+// Decodes an imported mesh asset once per distinct absolute *.gta path, uploads it as MeshAssetParts and
+// resolves them into a ROOT+CHILDREN EntityBlueprint. Also exposes the decoded SkinnedMeshData;
+// the hand-off to animation is made one level up, in MeshInstantiationSystem. Needs a live Renderer.
 class MeshAssetGpuCatalog {
 public:
     // Loads (cached per path) and resolves a root + per-part children blueprint. `children` is empty
@@ -80,51 +39,17 @@ public:
     EntityBlueprint Resolve(RenderSystem& renderSystem, Renderer& renderer, const std::string& absoluteGtaPath,
         DescriptorSetLayoutHandle sceneServicesSetLayout);
 
-    // Read-only queries used by AnimationSystem (via MeshInstantiationSystem's
-    // own forwarding methods) - see SkeletalRigCache.h for why the
-    // SkinnedMeshData hand-off itself is a separate, explicit step rather
-    // than living here.
+    // Read-only queries used by AnimationSystem (via MeshInstantiationSystem's forwarding methods).
     const std::vector<MeshAssetPart>* TryGetParts(const std::string& absoluteGtaPath) const;
     const SkinnedMeshData* TryGetSkinnedMeshData(const std::string& absoluteGtaPath) const;
 
-    // task_manager/verlet-integration-11, PHASE3 - re-reads ONLY the *.gta's
-    // metadata's trailing jointPhysicsOverrides section (see Assets/RigFile.h,
-    // PHASE1) for `absoluteGtaPath` and updates the ALREADY-CACHED
-    // SkinnedMeshData for that exact path in place - never the mesh payload,
-    // skeleton, skin weights, morphs, materials, or any GPU resource. Called by
-    // Editor/Panels/InspectorPanel.cpp (via MeshInstantiationSystem's own
-    // forwarding accessor, PHASE3) immediately after
-    // SaveJointPhysicsOverridesToGtaFile() (PHASE4) succeeds, so a model
-    // respawned LATER IN THE SAME SESSION (not just after a full engine
-    // restart) also picks up the just-saved values - see
-    // PHASE0_MASTER_STRATEGY.md, Step 2.5, for why EnsureMeshAsset()'s own
-    // "once per distinct path, then cached forever" contract otherwise leaves
-    // an already-loaded path's cached SkinnedMeshData permanently stale.
-    //
-    // Returns false (and touches nothing) if `absoluteGtaPath` has never been
-    // cached by this MeshAssetGpuCatalog instance (nothing to keep in sync yet -
-    // that path's own eventual FIRST EnsureMeshAsset() call will read the
-    // freshly-saved file correctly on its own regardless), or if the file can't
-    // be read/decoded as a valid Mesh *.gta with decodable rig metadata (the
-    // existing cached entry is left untouched rather than being corrupted or
-    // cleared - a failed refresh is a silent no-op, never destructive).
+    // Re-reads only the trailing jointPhysicsOverrides section of the *.gta and patches the cached
+    // SkinnedMeshData in place (no mesh/GPU data touched). Returns false and changes nothing if the path
+    // is not cached or the file cannot be decoded.
     bool RefreshCachedJointPhysicsOverridesFromDisk(const std::string& absoluteGtaPath);
 
-    // Drops any cached MeshAssetPart/SkinnedMeshData entry for `absoluteGtaPath`
-    // (a no-op if this path was never cached), so the NEXT Resolve()/
-    // EnsureMeshAsset() call for that same path re-reads and re-uploads it fresh
-    // from disk - used after an operation that changed the *.gta's own vertex
-    // DATA in place (e.g. RecomputeAndSaveMeshNormalsToGtaFile() -
-    // MeshNormalRecomputePersistence.h), unlike
-    // RefreshCachedJointPhysicsOverridesFromDisk() above (which patches a
-    // cached value IN PLACE because that data is read fresh at attach-time, not
-    // baked into a GPU buffer) - normals ARE baked directly into the uploaded
-    // MeshVertex GPU buffer at upload time, so the only safe fix here is a
-    // fresh re-upload, not an in-place patch. Deliberately does NOT retroactively
-    // touch any ALREADY-SPAWNED Scene entity's current GPU mesh (those keep
-    // showing whatever normals they had at spawn time until deleted and
-    // re-spawned) - see this method's own call site in Panels/InspectorPanel.cpp
-    // for the exact user-facing wording of this limitation.
+    // Drops the cached parts/skinned data for `absoluteGtaPath` so the next Resolve() re-reads and re-uploads it.
+    // Needed after in-place vertex edits (e.g. normals); already-spawned entities keep their current GPU mesh.
     void InvalidateCachedMeshAsset(const std::string& absoluteGtaPath);
 
 private:

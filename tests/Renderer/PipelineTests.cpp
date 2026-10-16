@@ -46,10 +46,7 @@ TEST(PipelineTest, SceneServicesSetLayoutProducesHasSceneServicesSetTrueWithSynt
     Renderer& renderer = fixture.GetRenderer();
     const VkDevice device = fixture.Device();
 
-    // A small, throwaway, 1-binding layout - stands in for Core's real
-    // SceneServicesDescriptorSet::Layout() (PHASE2), which this phase does
-    // not yet consume (that is PHASE7's job) - only Pipeline's OWN
-    // contiguous-set-array/synthetic-filler logic is under test here.
+    // Throwaway 1-binding layout standing in for the scene-services set; only Pipeline's set-array/filler logic is tested.
     const VkDescriptorSetLayout throwawaySceneServicesLayout =
         DescriptorSetLayoutBuilder(device).AddCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT).Build();
 

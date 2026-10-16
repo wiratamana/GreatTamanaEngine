@@ -6,27 +6,11 @@
 #include "../Math/Vec3.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
-// editor-core-separation-6 campaign, PHASE7
-// (PHASE7_RENDER_GRAPH_PANEL_VISIBILITY.md) - a small, dependency-free
-// gte_core-owned struct (see that header's own doc comment for why it lives
-// there, co-located with RenderFeatureCompositor.h, instead of being defined
-// inline here) - included directly, mirroring GpuDrivenBatchDebugInfo.h
-// immediately above exactly.
 #include "../Core/Plugins/RenderFeatureDebugEntry.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
-// editor-core-separation-2 campaign, PHASE2 - the new gte_core-owned
-// IFrameDebuggerCaptureRecorder interface (src/Core/
-// FrameDebuggerCaptureRecorder.h) - a gte_core-owned, ImGui/SDL-free header,
-// so EditorLayer.h (the one documented gte_core-visible exception file - see
-// PHASE0_MASTER_STRATEGY.md's Locked Design Decision #8) including it
-// directly is completely safe and mirrors how this header already includes
-// other gte_core headers it needs. MUST be included here, at file scope
-// (NOT from inside `namespace gte { ... }` below) - this header opens its
-// own `namespace gte { ... }` block, and including it from inside an
-// already-open `namespace gte { ... }` here would create a bogus nested
-// `gte::gte` namespace instead of extending the real `gte` namespace.
+// Included at file scope: including it inside `namespace gte` below would create `gte::gte`.
 #include "../Core/FrameDebuggerCaptureRecorder.h"
-#include "../Core/FrameDebuggerEventSink.h" // Frame Debugger per-draw event capture - see FrameDebuggerGetEventSinkForInstall() below.
+#include "../Core/FrameDebuggerEventSink.h" // Per-draw event capture; see FrameDebuggerGetEventSinkForInstall().
 
 #include <cstdint>
 #include <memory>
@@ -34,10 +18,7 @@
 #include <string>
 #include <vector>
 
-// Forward-declared so this header needs no SDL dependency at all (matches
-// the Vulkan-handle forward-declare trick already used in Window.h) - only
-// whichever concrete implementation's .cpp needs the full SDL_Event
-// definition.
+// Forward-declared so this header needs no SDL dependency.
 union SDL_Event;
 
 namespace gte {
@@ -46,121 +27,27 @@ class Window;
 class Renderer;
 class Game;
 
-// Editor-only type (src/Editor/FrameDebuggerCapture.h) - forward-declared
-// ONLY (never #included here), since EditorLayer.h is a CORE, always-
-// compiled file (see task_manager/frame-debugger-3/
-// PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's own Step 3.1b, applied here
-// exactly like src/Game/RenderSystem.h already does) that must still
-// compile in a build where NullEditorLayer.cpp (rather than
-// ImGuiEditorLayer.cpp) is what got linked in - a build where this type does
-// NOT exist at all in that binary. A bare forward declaration of a pointee is always legal
-// even when the type is never defined in this translation unit, since
-// PrepareFrameDebuggerCaptureContext() below only ever needs a POINTER to
-// it.
-//
-// editor-core-separation-2 campaign, PHASE2 - FrameDebuggerCaptureContext is
-// still an Editor-only type, but PrepareFrameDebuggerCaptureContext() below
-// now returns a POINTER TO THE ABSTRACT INTERFACE it implements,
-// IFrameDebuggerCaptureRecorder (#included above, at file scope) - this
-// closes the exact undefined-reference hazard that a bare
-// `class FrameDebuggerCaptureContext;` forward declaration alone could never
-// cause here (this header never dereferences the pointer), but which every
-// DOWNSTREAM gte_core-tier consumer of this return value (Core.cpp) used to
-// hit once it called a gte_editor-only free function on it by name.
-
 namespace rg {
 class RenderGraph;
 class RenderGraphBuilder;
-class RenderPassToggleRegistry; // editor-core-separation-8 campaign, PHASE1/PHASE3.
-class RenderPassBlackboard; // editor-core-separation-22 campaign, PHASE6 - BuildUI()'s new trailing parameter.
+class RenderPassToggleRegistry;
+class RenderPassBlackboard;
 } // namespace rg
 
-// editor-core-separation-8 campaign, PHASE2/PHASE3 - forward-declared only,
-// mirrors "class Core;"'s own forward-declare-only precedent elsewhere in
-// this codebase - the REAL header (src/Core/Plugins/RenderFeatureCompositor.h)
-// is heavy (pulls in ComputeDescriptorSet.h/ComputePipeline.h/RenderTexture.h/
-// volk.h) and is only ever #included by the .cpp files that actually CALL a
-// method on this pointer (ImGuiEditorLayer.cpp, RenderGraphPanel.cpp) - this
-// header itself only ever passes the pointer through, never dereferences it.
+// Forward-declared: this header only passes these pointers through and never dereferences them.
 class RenderFeatureCompositor;
-
-// Generic "a built-in feature module" contract (src/Core/Plugins/
-// IEngineFeatureModule.h) - forward-declared only, see
-// AttachBuiltinFeatureModules() below.
 class IEngineFeatureModule;
-
-// editor-core-separation-16 campaign (On-Engine Project Workflow plan,
-// BIG-STEP 2), PHASE4 - forward-declared only, mirrors
-// "class RenderFeatureCompositor;" immediately above: this header only
-// ever stores/passes a POINTER to it, never dereferences one itself.
 class IProjectLifecycleCapability;
-
-// editor-core-separation-18 campaign (On-Engine Project Workflow plan,
-// BIG-STEP 4), PHASE3 - forward-declared only, mirrors
-// "class IProjectLifecycleCapability;" immediately above: this header only
-// ever stores/passes a POINTER to it, never dereferences one itself.
 class IAssetScaffoldingCapability;
-
-// editor-core-separation-19 campaign (On-Engine Project Workflow plan,
-// BIG-STEP 5), PHASE1 - forward-declared only, mirrors
-// "class IAssetScaffoldingCapability;" immediately above: this header only
-// ever stores/passes a POINTER to it, never dereferences one itself.
 class IHotReloadDebugCapability;
 
-// Abstraction boundary between engine-core (Application/Renderer/Game) and
-// the optional Editor/Debug UI. Dear ImGui-backed in real builds, but
-// nothing outside src/Editor/ (specifically: nothing outside whichever
-// files there only ever compile as part of the Editor's own build - see
-// AGENTS.md, "Editor Module Structure") ever includes an ImGui header -
-// Application only ever talks to this interface.
-//
-// Game never depends on this at all, in either direction: Game has no idea
-// the Editor exists, and the Editor only ever *observes*/edits Game/Renderer
-// through their existing public accessors (never the other way around) -
-// e.g. Game::GetRegistry() is what lets the Hierarchy/Inspector panels below
-// see and edit the ECS world without Game gaining any Editor awareness.
-// That is what makes linking a Player host against NullEditorLayer.cpp
-// alone, without ever seeing ImGuiEditorLayer.cpp's own source, a genuinely
-// zero-touch operation for gameplay code.
-//
-// Two implementations exist, selected entirely by which .cpp got compiled
-// (see CMakeLists.txt) - never both at once, so there's no #ifdef soup
-// anywhere that calls into this interface:
-//   - ImGuiEditorLayer (src/Editor/ImGuiEditorLayer.cpp) - the real thing:
-//     owns the ImGui context (docking branch), the SDL3 + Vulkan backends,
-//     TWO RenderTextures Game's camera renders into - one for the "Game"
-//     panel, one for the "Scene" panel, each tracking that panel's own
-//     content-region size/aspect independently (see GameViewTarget()/
-//     SceneViewTarget() below) - and the Unity-style docked layout
-//     (Hierarchy left, Inspector right, Scene/Game tabbed center, top menu
-//     bar). What this repo's own executable always links.
-//   - NullEditorLayer (src/Editor/NullEditorLayer.cpp) - every method is a
-//     no-op and GameViewTarget()/SceneViewTarget() always return nullptr,
-//     meaning "render straight to the swapchain" - i.e. a release build
-//     behaves exactly as if no Editor/ImGui ever existed. What a future
-//     Player host (linking gte_core alone, never seeing gte_editor's
-//     source) links instead, with zero ImGui code or linkage anywhere in
-//     that binary.
-// Result of ActivateTab() below - deliberately a SEPARATE, tiny,
-// dependency-free type from Application/EditorUiCommandBridge.h's own
-// ActivateTabOutcome (network-impl-7 campaign) - EditorLayer.h must never
-// depend on anything under src/Application/ (Application depends on
-// Editor, never the reverse - see this file's own class comment). Only
-// Application::Run() (Phase 3) ever converts one of these into the OTHER
-// type, one field at a time, at the one call site that legitimately
-// depends on both.
+// Result of ActivateTab(). Kept separate from Application's own outcome type so this header
+// never depends on src/Application/; Application::Run() converts between them.
 struct TabActivationResult {
     bool tabExists = false;
 };
 
-// task_manager/stl-parser-2, PHASE1 - result of ImportExternalAssetIntoProject()
-// below. Deliberately a SEPARATE, tiny, dependency-free type from
-// src/Application/AssetImportCommandBridge.h's own ImportExternalFileOutcome
-// (network-impl-7's own TabActivationResult/ActivateTabOutcome split
-// precedent, applied here) - EditorLayer.h must never depend on anything
-// under src/Application/. Application::Run() (Phase 3.7 below) is the one
-// place that converts one of these into the OTHER type, one field at a
-// time.
+// Result of ImportExternalAssetIntoProject(). Separate from Application's outcome type for the same reason.
 struct ProjectAssetImportResult {
     bool projectAvailable = true;
     bool success = false;
@@ -176,23 +63,11 @@ struct ProjectAssetImportResult {
     std::uint64_t meshTriangleCount = 0;
 };
 
-// task_manager/frame-debugger-3 campaign, PHASE7
-// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - the Frame
-// Debugger's own read-only state snapshot, mirroring TabActivationResult's
-// own "tiny, dependency-free, Editor-owned result type" precedent
-// immediately above - Application::Run() is the one place that copies this
-// into src/Application/FrameDebuggerCommandBridge.h's own, separate
-// FrameDebuggerStateOutcome, one field at a time (this header must never
-// depend on anything under src/Application/, same rule TabActivationResult
-// already follows).
+// Read-only Frame Debugger state snapshot. Application::Run() copies it into its own outcome type.
 struct FrameDebuggerStateSnapshotView {
     bool enabled = false;
     bool windowOpen = false;
-    // task_manager/frame-debugger-7 campaign, PHASE1
-    // (PHASE1_REMOVE_HISTORY_AND_SINGLE_CAPTURE_LIFECYCLE.md) - REPLACES
-    // `historyCount`/`historyCursor` (the old 8-slot ring buffer's own
-    // "how many"/"which one" fields) - there is only ever ONE captured
-    // frame now, so the only meaningful question is "is there one".
+    // True when a captured frame exists (only one is ever kept).
     bool hasCapturedFrame = false;
     int totalEventCount = 0;
     int selectedEventIndex = -1;
@@ -200,19 +75,12 @@ struct FrameDebuggerStateSnapshotView {
     float levelsBlack = 0.0f;
     float levelsWhite = 1.0f;
 
-    // Per-draw event capture - the live NextEventIndex() high-water mark
-    // for whichever frame is currently captured (0 until a real capture has
-    // happened at least once). A NEW, additive field - every existing
-    // field's own name/type/meaning is unchanged.
+    // High-water mark of per-draw event indices for the captured frame (0 before any capture).
     int perDrawEventCount = 0;
 };
 
-// Per-draw event capture - one real event's own captured image, by its
-// NextEventIndex() value (see FrameDebuggerCaptureContext.h). `pixels` is
-// already-PNG-encoded bytes, the same encoding GET /get_texture already
-// returns. `found` is false whenever that exact index has never been
-// captured yet (including the normal "just armed, wait for the next
-// captured frame" case) - the caller is expected to poll again.
+// One per-draw event's captured image. `pixels` is PNG-encoded, like GET /get_texture.
+// `found` is false until that index has been captured; the caller polls again.
 struct FrameDebuggerEventTextureResult {
     bool found = false;
     std::vector<std::uint8_t> pixels;
@@ -220,134 +88,50 @@ struct FrameDebuggerEventTextureResult {
     std::uint32_t height = 0;
 };
 
-// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-// PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
-// - GpuDrivenBatchDebugInfo itself now lives in
-// src/Renderer/Culling/GpuDrivenBatchDebugInfo.h (editor-core-separation-1
-// campaign, PHASE13) - see that header's own doc comment for why (a plain,
-// dependency-free data type gte_core's own Core::BuildFrame() produces every
-// frame, only ever CONSUMED here via IEditorLayer::BuildUI()'s own trailing
-// parameter below).
-
-// GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-// PHASE6 - result of SpawnGpuDrivenTestBatch() below. Deliberately a plain,
-// dependency-free struct (mirrors ProjectAssetImportResult's own
-// "editorAvailable"-style convention immediately above) - EditorLayer.h must
-// never depend on src/Editor/GpuDrivenBatchTestSpawner.h (an Editor-only
-// file's own real implementation), and must never depend on
-// src/Application/EditorUiCommandBridge.h's own separate outcome type
-// either (Application::Run() is the one place that converts one of these
-// into the other, one field at a time - see every other *Outcome/*Result
-// pair in this file for the identical precedent).
+// Result of SpawnGpuDrivenTestBatch(). `editorAvailable` is false when the build has no Editor,
+// so callers need not match on `errorMessage` text.
 struct GpuDrivenTestBatchSpawnResult {
     bool success = false;
-    // editor-core-separation-1 campaign, PHASE8 - a real, dedicated field
-    // (mirrors ProjectAssetImportResult's own "editorAvailable"-style
-    // convention immediately above) so a caller never needs to sniff
-    // `errorMessage`'s own TEXT for a literal substring to distinguish
-    // "structurally unavailable in this build" from "a caller mistake".
     bool editorAvailable = true;
     std::string errorMessage;
     std::uint32_t instanceCount = 0;
 };
 
+// Boundary between engine core and the optional Editor UI; only src/Editor/ ever includes ImGui.
+// The Editor observes Game/Renderer through their public accessors; Game never knows the Editor exists.
+// ImGuiEditorLayer is the real implementation; NullEditorLayer no-ops everything (render straight to swapchain).
 class IEditorLayer {
 public:
     virtual ~IEditorLayer() = default;
 
-    // Feeds one raw SDL event to the editor's own input handling (real
-    // impl only - Null impl no-ops). Application is the only layer that
-    // already touches SDL_Event, so it is the one that calls this - same
-    // boundary EventTranslator sits on.
+    // Feeds one raw SDL event to the editor's input handling.
     virtual void ProcessEvent(const SDL_Event& event) = 0;
 
-    // Called when the OS window is resized (Application forwards this
-    // straight from the same WindowResized event Renderer::OnResize()
-    // reacts to). The real implementation no-ops: the Game-view/Scene-view
-    // RenderTextures track their own ImGui panel's content-region size
-    // instead of the OS window's size (Unity-style "Free Aspect" - see
-    // GameViewTarget()/SceneViewTarget()/BuildUI() in ImGuiEditorLayer), so
-    // an OS window resize by itself is not a reason to resize either of
-    // them. Kept in the interface only in case a future implementation
-    // needs it - Null impl no-ops too.
+    // OS window resized. The real implementation ignores it: the Game/Scene views track their panel size.
     virtual void OnWindowResized(int width, int height) = 0;
 
-    // Starts a new UI frame. Call once per frame, before Game's
-    // Update()/Render().
+    // Starts a new UI frame. Call once per frame, before Game's Update()/Render().
     virtual void NewFrame() = 0;
 
-    // The render target Game's gameplay camera should draw into THIS
-    // frame for the "Game" panel: a RenderTexture, or nullptr meaning
-    // "don't bother rendering a Game view this frame" - either because
-    // there's no Editor at all (render straight to the swapchain,
-    // fullscreen instead - what the Null implementation always returns), or
-    // because the real implementation's "Game" panel is not currently
-    // visible (e.g. it's an inactive tab behind "Scene" - see
-    // Panels/GamePanel.cpp/EditorContext::gameViewVisible) - skipping a
-    // RenderOffscreen() pass nobody would ever see. The real implementation
-    // also resizes this texture here (if the "Game" panel's content-region
-    // size changed since last frame's BuildUI()) before returning it - the
-    // last safe/needed point to do so, since Game is about to render into
-    // it. See ImGuiEditorLayer's class comment.
+    // Render target for the "Game" panel this frame, or nullptr to render straight to the swapchain
+    // (no Editor) or skip the view (panel not visible). Resizes the texture to the panel size first.
     virtual RenderTexture* GameViewTarget() = 0;
 
-    // The Scene-view equivalent of GameViewTarget() above - its own,
-    // separate RenderTexture (never the same one as the Game view - each
-    // panel can be a different size/aspect, e.g. split side-by-side), or
-    // nullptr under the exact same two circumstances: no Editor at all, or
-    // the real implementation's "Scene" panel isn't currently visible (see
-    // Panels/ScenePanel.cpp/EditorContext::sceneViewVisible). Application
-    // calls this and GameViewTarget() independently each frame and renders
-    // into whichever one(s) come back non-null - if "Scene" and "Game" are
-    // tabbed together, exactly one is ever visible at a time (so only that
-    // one gets rendered); if the user has split them apart, BOTH are
-    // visible and BOTH get rendered.
+    // Scene-view equivalent of GameViewTarget(), with its own separate RenderTexture.
     virtual RenderTexture* SceneViewTarget() = 0;
 
-    // The combined projection * view matrix "Scene" should be rendered
-    // with THIS frame, for a render target of the given aspect ratio -
-    // Application passes this straight to Game::Render()'s
-    // viewProjectionOverride parameter for the Scene view specifically,
-    // in place of whatever ECS entity currently has the active Camera
-    // component (which is what the Game view still uses - see
-    // RenderSystem::ResolveActiveCameraViewProjection()). Backed by the
-    // real implementation's own independently-orbitable EditorCamera (see
-    // EditorCamera.h and Panels/ScenePanel.cpp for its Unity-style pan/
-    // rotate/dolly mouse controls) - always Mat4::Identity() for
-    // NullEditorLayer, though it is never actually consulted there in
-    // practice, since SceneViewTarget() above always returns nullptr for
-    // it (so Application never renders a Scene view at all in a release
-    // build).
+    // Projection * view the Scene view renders with, for a target of the given aspect ratio.
+    // Backed by the orbitable EditorCamera; Identity for NullEditorLayer.
     virtual Mat4 SceneViewProjection(float aspectWidthOverHeight) const = 0;
 
-    // The Scene view's own EditorCamera world-space eye position (its
-    // Transform's position - see EditorCamera::GetTransform()), needed by
-    // any feature resolving camera height above ground the same way
-    // RenderSystem::ResolveActiveCameraViewProjection()'s ECS Camera
-    // equivalent already is for the Game View. Always Vec3::Zero() for
-    // NullEditorLayer (never actually consulted there in practice, for the
-    // same reason SceneViewProjection() above never is either).
+    // World-space eye position of the Scene view's EditorCamera. Zero for NullEditorLayer.
     virtual Vec3 SceneViewCameraWorldPosition() const = 0;
 
-    // Hands this implementation a stable RenderTexture* to display in the
-    // "Game" panel INSTEAD of GameViewTarget()'s own m_gameView, whenever a
-    // feature publishes a final, post-process-composited output (a
-    // separate texture - "GameViewComposited" - written by a pass AFTER
-    // Game::Render() finishes) - never optional/debug-only, unlike the
-    // existing "Show Compute Blur (debug)" toggle. Called once per frame,
-    // once this frame's composite pass (if any) has finished and finalized
-    // it for external sampling - `texture` is nullptr on any frame the Game
-    // view wasn't actually rendered at all (mirrors GameViewTarget()'s own
-    // nullptr contract). A real implementation is expected to fall back to
-    // its own original m_gameView whenever this is nullptr (e.g. the very
-    // first frame, before anything has run yet) rather than showing nothing.
-    // A no-op for NullEditorLayer (a release build has no "Game" panel to
-    // update).
+    // Texture the "Game" panel shows instead of its raw view once a feature publishes a composited output.
+    // nullptr on frames where the Game view was not rendered; the panel then falls back to its own view.
     virtual void SetGameViewCompositedTexture(RenderTexture* texture) = 0;
 
-    // The Scene-view equivalent of SetGameViewCompositedTexture() above, for
-    // "SceneViewComposited" / the "Scene" panel - see that method's own doc
-    // comment for the full reasoning.
+    // Scene-view equivalent of SetGameViewCompositedTexture().
     virtual void SetSceneViewCompositedTexture(RenderTexture* texture) = 0;
 
     // Records the Scene panel's ground grid into `cmd`, inside the open Scene view pass after the scene
@@ -355,10 +139,9 @@ public:
     // A no-op for NullEditorLayer.
     virtual void RenderSceneGrid(Renderer& renderer, VkCommandBuffer cmd, const Mat4& sceneViewProjection) = 0;
 
-    // Builds every editor panel for this frame inside a full-viewport dock space. Call after Game has
-    // rendered into the view targets so the Game/Scene panels show fresh contents.
-    // `renderGraph` is observed only. `gpuDrivenBatchDebugInfo` has one entry per GPU-driven batch (Game view).
-    // `renderFeatureEntries` is the resolved ordering of loaded render-feature plugins; empty when none.
+    // Builds every editor panel for this frame in a full-viewport dock space. Call after Game rendered.
+    // `gpuDrivenBatchDebugInfo` has one entry per GPU-driven batch (Game view).
+    // `renderFeatureEntries` is the resolved order of loaded render-feature plugins; empty when none.
     virtual void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
         const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
         const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
@@ -371,289 +154,93 @@ public:
         // Layout of Core's scene-services descriptor set, used by editor spawn paths.
         DescriptorSetLayoutHandle sceneServicesSetLayout) = 0;
 
-    // Records this frame's UI draw data into cmd. Called from inside
-    // Renderer::Present()'s recordExtra hook - i.e. while the swapchain
-    // image is already bound as the current dynamic-rendering color
-    // attachment.
+    // Records this frame's UI draw data into `cmd`, called while the swapchain image is bound
+    // as the current dynamic-rendering color attachment.
     virtual void Render(VkCommandBuffer cmd) = 0;
 
-    // Updates/renders every extra OS window currently created because a
-    // panel was dragged outside the main viewport (Dear ImGui "multi-
-    // viewport"/"platform windows" - see the ImGuiConfigFlags_ViewportsEnable
-    // discussion in ImGuiEditorLayer's class comment). Call once per frame,
-    // AFTER the main swapchain has been fully presented (i.e. after
-    // Renderer::Present() returns) - each such window owns its own,
-    // completely independent Vulkan swapchain, so it has nothing to do with,
-    // and does not need to happen before/inside, the main window's own
-    // present. No-ops for NullEditorLayer (a release build has no Editor UI,
-    // so nothing can ever have been dragged outside a main window that
-    // doesn't even show one), and also safely no-ops on any frame where
-    // Render() above never actually ran (e.g. the main OS window was
-    // minimized that frame) - see ImGuiEditorLayer::RenderPlatformWindows().
+    // Updates and renders extra OS windows (panels dragged outside the main viewport).
+    // Call after Renderer::Present(); a no-op on frames where Render() did not run.
     virtual void RenderPlatformWindows() = 0;
 
-    // True the frame after the user picked File > Exit (or any other
-    // programmatic "please close the application" UI action) - checked by
-    // Application::Run() once per frame to end its main loop cleanly, the
-    // same way a Quit event/closing the OS window does. Always false for
-    // NullEditorLayer (a release build has no such menu to click).
+    // True once the user picked File > Exit. Checked each frame to end the main loop.
     virtual bool WantsExit() const = 0;
 
-    // True if the Editor UI currently wants exclusive use of mouse input
-    // this frame (e.g. the cursor is over an ImGui panel/widget, dragging a
-    // slider, resizing a dock border, ...). Application checks this before
-    // forwarding a translated mouse Event to InputState::Apply()/
-    // Game::OnEvent(), so clicking/dragging inside the Editor's own panels
-    // never also registers as gameplay input underneath them - the classic
-    // ImGui-in-a-game-engine "click-through" problem. Backed by
-    // ImGuiIO::WantCaptureMouse in the real implementation. Always false
-    // for NullEditorLayer - a release build has no Editor UI that could
-    // ever want mouse input, so Game always sees every mouse event, exactly
-    // as if no Editor existed.
+    // True if the Editor UI wants exclusive mouse input this frame (cursor over a panel, dragging, ...).
     virtual bool WantsCaptureMouse() const = 0;
 
-    // Same idea as WantsCaptureMouse(), but for keyboard input (e.g. a
-    // future ImGui text field currently has keyboard focus). Backed by
-    // ImGuiIO::WantCaptureKeyboard. Always false for NullEditorLayer.
+    // Keyboard equivalent of WantsCaptureMouse().
     virtual bool WantsCaptureKeyboard() const = 0;
 
-    // frame-debugger-1 campaign (task_manager/frame-debugger-1/
-    // PHASE3_EDITOR_PAUSE_STEP_STATE_AND_TOOLBAR_UI.md) - true whenever the
-    // user currently has gameplay simulation paused via the toolbar (see
-    // PlaybackControls.h). Read once per frame by Application::Run(), BEFORE
-    // NewFrame(), to decide this frame's EngineContext::Time::Advance() call
-    // (see PHASE4) - this necessarily reflects whatever the user last clicked
-    // as of the END of the PREVIOUS frame's BuildUI() call, exactly one frame
-    // of lag, the same acceptable lag every other Editor<->engine feedback
-    // loop in this codebase already has (see e.g. GameViewTarget()'s own doc
-    // comment on resize lag). Always false for NullEditorLayer (a release
-    // build has no toolbar to pause with at all).
+    // True while gameplay simulation is paused via the toolbar.
+    // Reflects the previous frame's BuildUI(), so it lags the click by one frame.
     virtual bool IsPlaybackPaused() const = 0;
 
-    // True, and CLEARS the pending request (read-and-clear, exactly once), if
-    // the user clicked "Step" since the last time this was called - false on
-    // every other call, including every call after the first one following a
-    // given click. Called unconditionally once per frame by
-    // Application::Run() (see PHASE4) so a stray/stale request set while NOT
-    // actually paused (should never happen - the button is rendered disabled
-    // then - but this is defensive) is still drained rather than left
-    // dangling forever. Always false for NullEditorLayer.
+    // Read-and-clear: true once per "Step" click. Called every frame so a stale request is drained.
     virtual bool TryConsumeStepRequest() = 0;
 
-    // network-impl-7 campaign - brings the named Editor panel/tab to the
-    // front (Dear ImGui's own SetWindowFocus(), which for a DOCKED window
-    // selects it as its dock node's active tab - exactly like a user
-    // clicking the tab). `panelName` is expected to already be validated
-    // against Core/EditorPanelRegistry.h's known panel list by the CALLER
-    // (Application::Run(), fed from EditorUiCommandBridge - see Phase 3) -
-    // this method itself does no such validation; it just tries to find and
-    // focus whatever exact name it's given. Returns tabExists == false, and
-    // does nothing else, if no live ImGui window with that exact name
-    // exists THIS FRAME (e.g. called before this panel's own first Begin()
-    // call ever ran this session). Must only ever be called between
-    // NewFrame() and BuildUI() in the SAME frame (see Application::Run(),
-    // Phase 3) - calling it before NewFrame() or after Render() is
-    // undefined with respect to which frame's tab-selection state it
-    // affects. Always returns tabExists == false for NullEditorLayer (a
-    // release build has no Editor UI/tabs to activate at all).
+    // Brings the named panel's tab to the front. The caller validates `panelName`.
+    // Returns tabExists == false if no live window has that name this frame.
+    // Call between NewFrame() and BuildUI() of the same frame.
     virtual TabActivationResult ActivateTab(const std::string& panelName) = 0;
 
-    // task_manager/stl-parser-2, PHASE1 - imports a single external file
-    // (anywhere on disk, `sourceAbsolutePath`) into the Editor's "Project"
-    // folder, at `destinationRelativeFolder` (a path relative to the Project
-    // root - "" means the Project root itself; auto-created if missing) -
-    // the programmatic equivalent of dragging a file onto the "Project" panel
-    // (see Panels/ProjectPanel.h's own HandleExternalFileDrop()). Routes
-    // through the EXACT SAME AssetImporter::ImportAssetFile() pipeline and the
-    // SAME live AssetDatabase instance ProjectPanel already owns, so the
-    // Project panel's own tree/selection reflect this import on its very next
-    // rendered frame, with no separate rescan needed from the caller. Returns
-    // projectAvailable == false (every other field meaningless) when this
-    // build has no "Project" panel at all - always true for NullEditorLayer,
-    // and for the real ImGuiEditorLayer impl only when GTE_ENABLE_PROJECT_PANEL
-    // is OFF (a real Editor build with the Project panel compiled out).
+    // Imports one external file into the Project folder at `destinationRelativeFolder` ("" = root).
+    // Same path as dropping a file on the Project panel. Returns projectAvailable == false when
+    // the build has no Project panel.
     virtual ProjectAssetImportResult ImportExternalAssetIntoProject(
         const std::string& sourceAbsolutePath, const std::string& destinationRelativeFolder) = 0;
 
-    // task_manager/frame-debugger-3 campaign, PHASE3
-    // (PHASE3_FRAME_HISTORY_RING_BUFFER_AND_CAPTURE_TRIGGER.md, Step 3.4) -
-    // the ONE place that decides whether the Frame Debugger's real capture
-    // context is ARMED for THIS frame's Game-View render: returns a real,
-    // non-null pointer (already Reset() for this fresh frame) whenever the
-    // Frame Debugger window is currently open AND its own "Enable" toggle
-    // is on, or nullptr otherwise (the overwhelmingly common case - see
-    // PHASE1's own "zero-overhead-when-disarmed" requirement). Call ONCE
-    // per frame, BEFORE Game::Render()'s Game-View branch runs (see
-    // Application::Run(), which threads the result straight into
-    // RenderPasses.h's AddGameViewPass()) - this necessarily reflects
-    // whatever the user's "Enable"/open state was as of the END of the
-    // PREVIOUS frame's BuildUI() call, the exact same one-frame lag every
-    // other Editor<->engine feedback loop in this codebase already has
-    // (see e.g. IsPlaybackPaused()'s own doc comment). Always nullptr for
-    // NullEditorLayer (a release build has no Frame Debugger to arm).
+    // Returns a freshly reset capture recorder if the Frame Debugger window is open and enabled, else nullptr.
+    // Call once per frame before the Game-view render. Reflects the previous frame's UI state.
     virtual IFrameDebuggerCaptureRecorder* PrepareFrameDebuggerCaptureContext() = 0;
 
-    // The Frame Debugger's own Step-triggered capture (PHASE3's Step 3.2,
-    // call site 2) - called by Application::Run() right where
-    // TryConsumeStepRequest() above is already checked, i.e. BEFORE
-    // Game::Render() even runs this frame, whenever that call returned
-    // true. Merely records "a Step happened this frame" - the REAL capture
-    // (which needs this frame's now-FINAL RenderGraphSnapshot/
-    // FrameDebuggerCaptureContext/Game View pixels) is actually performed
-    // later the SAME frame, from inside BuildUI() (see
-    // Panels/FrameDebuggerPanel.cpp's own TriggerCapture()), once the
-    // Game-View render this Step just drove has genuinely finished. A
-    // no-op for NullEditorLayer.
+    // Records that a Step happened this frame; the capture itself runs later this frame inside BuildUI().
     virtual void NotifyFrameDebuggerStepConsumed() = 0;
 
-    // task_manager/frame-debugger-7 campaign, PHASE3
-    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
-    // 3.0) - the EARLY half of the two-bool pending/serviced handshake
-    // this phase introduces, generalizing Phase 2's single-bool deferred-
-    // Enable-edge-capture mechanism to ALL THREE capture triggers (Enable
-    // edge / Step / Capture button). Called ONCE per frame by
-    // Application::Run(), from inside the offscreen `build` lambda, BEFORE
-    // this frame's "GameView" pass (and therefore
-    // AddFrameDebuggerReplayPasses(), if this returns true) is declared -
-    // read-and-clear, true for exactly the one frame following a real
-    // capture trigger. Forwards straight into
-    // FrameDebuggerPanel::ConsumePendingReplayRequest() - see that
-    // method's own doc comment (Panels/FrameDebuggerPanel.h) for the full
-    // two-bool handshake this is one half of. Always false for
-    // NullEditorLayer (a release build has no Frame Debugger to arm).
+    // Read-and-clear: true for the one frame after a capture trigger, so that frame can declare replay passes.
+    // Call once per frame before the "GameView" pass is declared.
     virtual bool ConsumePendingFrameDebuggerReplayRequest() = 0;
 
-    // task_manager/frame-debugger-3 campaign, PHASE7
-    // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - the
-    // HTTP-automation surface for the Frame Debugger window
-    // (`/frame_debugger/*` routes - see NetworkRoutes.h/NetworkServer.cpp
-    // and the new src/Application/FrameDebuggerCommandBridge.h). Each
-    // method below mirrors exactly what its corresponding piece of
-    // hand-driven UI already does (see Panels/FrameDebuggerPanel.cpp's own
-    // matching method for the real implementation) - Application::Run()'s
-    // own FrameDebuggerCommandBridge pump (mirroring EditorUiCommandBridge's
-    // own pump, ActivateTab() above) is what maps one bridge request's
-    // `kind` to exactly ONE of these calls.
-
-    // Opens the Frame Debugger window (idempotent - a no-op if already
-    // open) and arranges for it to be PINNED to the main ImGui viewport for
-    // that one opening only (see Panels/FrameDebuggerPanel.h's own
-    // m_pinToMainViewportNextOpen bool) - this is what guarantees
-    // GET /get_swapchain can see it on the very first frame it opens.
-    // Never touched by, and never regresses, ordinary manual "Window >
-    // Frame Debugger" use (DockLayout.cpp's own checkable menu item flips
-    // ctx.frameDebuggerWindowOpen directly and has no reference to this
-    // method at all). A no-op for NullEditorLayer.
+    // Opens the Frame Debugger window (idempotent) and pins it to the main viewport for that opening,
+    // so GET /get_swapchain can see it immediately.
     virtual void FrameDebuggerOpenWindow() = 0;
 
-    // Mirrors the "Enable" checkbox's own false->true/true->false edges
-    // exactly, including the false->true edge's "auto-engage Pause" side
-    // effect. task_manager/frame-debugger-7 campaign, PHASE2
-    // (PHASE2_DEFERRED_CAPTURE_TRIGGER.md) - the false->true edge no longer
-    // triggers a real capture synchronously here; it only arms a deferred
-    // one-shot flag consumed at the START of the very next Build() call
-    // (fixes Bug 1 - see Panels/FrameDebuggerPanel.cpp's own
-    // BuildToolbarRow()/ApplyEnabledEdge() doc comments for the full "why").
-    // A no-op for NullEditorLayer.
+    // Mirrors the "Enable" checkbox edges, including auto-pause on enable.
+    // The capture itself is deferred to the next Build().
     virtual void FrameDebuggerSetEnabled(bool enabled) = 0;
 
-    // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 2), PHASE4 - hands the real ImGui implementation a live
-    // IProjectLifecycleCapability* (Core/EditorCapabilities.h) so its own
-    // "New Project..." floating window (NewProjectWindow.h) can call
-    // CreateNewProjectAssembly() directly - the exact SAME method
-    // POST /project_assembly/create_project calls (LDD-PW5's "one function,
-    // two callers" rule). Called exactly ONCE, from EditorHost's own
-    // constructor body, immediately after Core::SetEditorLayerHook() -
-    // never per-frame, unlike BuildUI()'s own trailing parameters, since
-    // this pointer's value never changes for the life of the process
-    // (mirrors how m_sceneIOCapability/the hot-reload-debug-capability
-    // static are each wired exactly once too). Always a safe no-op for
-    // NullEditorLayer (a release build has no "New Project..." window to
-    // give a capability to at all).
+    // Hands the ImGui implementation the capability behind the "New Project..." window.
+    // Called once from EditorHost's constructor.
     virtual void SetProjectLifecycleCapability(IProjectLifecycleCapability* capability) = 0;
 
-    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 4), PHASE3 - hands the real ImGui implementation a live
-    // IAssetScaffoldingCapability* (Core/EditorCapabilities.h) so its own
-    // "Create -> Render Pass/Compute Shader/Shader Pair" floating window
-    // (CreateAssetWindow.h) can call CreateAssetScaffold() directly - the exact
-    // SAME method POST /project_assembly/create_asset calls (LDD-PW5's "one
-    // function, two callers" rule, mirroring SetProjectLifecycleCapability's
-    // own precedent immediately above). Called exactly ONCE, from
-    // EditorHost's own constructor body. Always a safe no-op for
-    // NullEditorLayer.
+    // Hands the ImGui implementation the capability behind the "Create New Asset" window.
+    // Called once from EditorHost's constructor.
     virtual void SetAssetScaffoldingCapability(IAssetScaffoldingCapability* capability) = 0;
 
-    // editor-core-separation-19 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 5), PHASE1 - hands the real ImGui implementation a live
-    // IHotReloadDebugCapability* (Core/EditorCapabilities.h) so
-    // DockLayout.cpp's own "Project > Compile" menu item can call
-    // TriggerCompileOnly()/IsCompileInFlight() directly - the exact SAME
-    // methods POST /project_assembly/debug/compile_only already calls
-    // (LDD-PW5's "one function, two callers" rule, mirroring
-    // SetProjectLifecycleCapability's own precedent above). Called exactly
-    // ONCE, from EditorHost's own constructor body. Always a safe no-op for
-    // NullEditorLayer (a release build has no menu bar to wire this into at
-    // all).
+    // Hands the ImGui implementation the capability behind the "Project > Compile" menu item.
+    // Called once from EditorHost's constructor.
     virtual void SetHotReloadDebugCapability(IHotReloadDebugCapability* capability) = 0;
 
-    // Requests a real capture - returns false (a safe no-op) if the Frame
-    // Debugger is not currently enabled (mirroring the "Capture" button's
-    // own BeginDisabled(!m_enabled) guard), true otherwise.
-    // task_manager/frame-debugger-7 campaign, PHASE3
-    // (PHASE3_UNIFIED_STEP_TIMELINE_AND_PER_DRAW_REPLAY_RENDERING.md, Step
-    // 3.0) - no longer forces a synchronous TriggerCapture() this frame;
-    // only arms the same deferred m_pendingCaptureTrigger flag the
-    // hand-driven "Capture" button now sets, so this frame's worth of
-    // replay passes can be declared before Game::Render() runs on the
-    // NEXT frame - see FrameDebuggerPanel::CaptureNowFromCommand()'s own
-    // doc comment. Always false for NullEditorLayer.
+    // Requests a capture. Returns false if the Frame Debugger is not enabled.
+    // Arms a deferred trigger; the capture happens on the next frame.
     virtual bool FrameDebuggerCaptureNow() = 0;
 
-    // Sets the currently-selected leaf event's global index (clamped via
-    // ClampSelectedEventIndex() against the currently-viewed captured
-    // frame's own totalEventCount, exactly like a tree-row click already
-    // does). A no-op for NullEditorLayer.
+    // Selects the leaf event with this global index (clamped to the captured frame's event count).
     virtual void FrameDebuggerSelectEvent(int index) = 0;
 
-    // Sets the Channels row's active channel from "all"/"r"/"g"/"b"/"a"
-    // (case-sensitive, lowercase-only - mirrors NetworkRoutes.cpp's own
-    // existing exact-lowercase-matching convention for every other query
-    // parameter in that file). Returns false (a safe no-op) for any other
-    // string - defense in depth only, since NetworkRoutes.cpp's own query
-    // parser already rejects an invalid value with its own 400 response
-    // before this is ever called. Always false for NullEditorLayer.
+    // Sets the active channel: lowercase "all"/"r"/"g"/"b"/"a". Returns false for any other string.
     virtual bool FrameDebuggerSetChannel(const std::string& channel) = 0;
 
-    // Sets the Levels black/white points directly (same defensive
-    // "white > black + 0.001f" clamp the DragFloatRange2 UI control itself
-    // already applies). A no-op for NullEditorLayer.
+    // Sets the Levels black/white points, keeping white > black + 0.001.
     virtual void FrameDebuggerSetLevels(float black, float white) = 0;
 
-    // Read-only status snapshot for GET /frame_debugger/state - always
-    // meaningful (never throws/asserts), reflecting whatever the Frame
-    // Debugger's real state currently is. All-default for NullEditorLayer
-    // (enabled == false, windowOpen == false, channel == "all", ...).
+    // Read-only status snapshot for GET /frame_debugger/state. Default-valued for NullEditorLayer.
     virtual FrameDebuggerStateSnapshotView FrameDebuggerGetState() const = 0;
 
-    // Returns this session's one, stable FrameDebuggerEventSink instance for
-    // Editor-tier startup code to install onto the live RenderGraph exactly
-    // once (mirrors RenderGraph::SetDebugMetadataSink()'s own "install once,
-    // on the one persistent owning object" placement) - nullptr for
-    // NullEditorLayer (a release build has no Frame Debugger to install one
-    // for).
+    // The session's single FrameDebuggerEventSink, installed once on the live RenderGraph. nullptr for NullEditorLayer.
     virtual FrameDebuggerEventSink* FrameDebuggerGetEventSinkForInstall() = 0;
 
-    // GET /frame_debugger/get_event_texture - returns whichever real
-    // per-draw event's image is CURRENTLY retained for `eventIndex`, and
-    // re-arms capture for `eventIndex` if it wasn't already armed (so a
-    // caller that keeps polling the same index eventually gets a real
-    // image, once the next captured frame actually produces one). Always
-    // `found == false` for NullEditorLayer. CURRENTLY ALWAYS `found ==
-    // false` for the real implementation too - see
-    // Core/FrameDebuggerEventSink.h's own doc comment for why (zero real
-    // CommandBuffer::Draw() call sites exist anywhere in this engine yet).
+    // Returns the image retained for per-draw event `eventIndex`, and re-arms capture for it if needed.
+    // Poll until `found`; always not found for NullEditorLayer.
     virtual FrameDebuggerEventTextureResult FrameDebuggerGetEventTexture(int eventIndex) = 0;
 
     // Spawns `instanceCount` entities sharing one indexed mesh and pipeline, forming a GPU-driven batch.
@@ -662,40 +249,20 @@ public:
     virtual GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(
         Game& game, Renderer& renderer, std::uint32_t instanceCount, DescriptorSetLayoutHandle sceneServicesSetLayout) = 0;
 
-    // Hands every built-in feature module constructed this session (see
-    // src/Core/Plugins/BuiltinFeatureModuleRegistry.h) to the real Editor
-    // implementation, exactly once, right after EditorHost constructs them -
-    // each module whose ModuleName() matches a registered
-    // BuiltinFeatureEditorPanelRegistry factory gets its own Editor panel
-    // built and registered. Always a safe no-op for NullEditorLayer.
+    // Hands every built-in feature module to the Editor once; modules with a registered
+    // Editor panel factory get their panel built.
     virtual void AttachBuiltinFeatureModules(const std::vector<std::unique_ptr<IEngineFeatureModule>>& modules,
         Renderer& renderer, const rg::RenderGraph& renderGraph) = 0;
 
-    // Sets which regime the "Render Graph" panel currently displays - true
-    // for "Present", false for "Offscreen (Game/Scene View)". Mirrors the
-    // panel's own toolbar Regime combo so an HTTP command and a human click
-    // always agree. Returns true if the "Render Graph" window was open (and
-    // therefore actually displaying `present`) at the moment this was
-    // applied. Always returns false for NullEditorLayer.
+    // Sets the Render Graph panel's regime: true = "Present", false = "Offscreen (Game/Scene View)".
+    // Returns true if the panel was open when applied. Always false for NullEditorLayer.
     virtual bool SetRenderGraphDisplayedRegime(bool present) = 0;
 };
 
-// Constructs the real ImGui-backed editor layer. editor-core-separation-1
-// campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md, Locked Design Decision
-// #9) - this is now the ONLY declaration of gte::CreateEditorLayer() in the
-// entire repository with exactly ONE definition (src/Editor/ImGuiEditorLayer.cpp,
-// gte_editor-only) - EditorHost/Application always call this one,
-// unambiguously.
+// Creates the real ImGui-backed editor layer (defined in src/Editor/ImGuiEditorLayer.cpp).
 std::unique_ptr<IEditorLayer> CreateEditorLayer(Window& window, Renderer& renderer);
 
-// Always-available, zero-ImGui/zero-SDL-dependency fallback living inside
-// gte_core itself (src/Editor/NullEditorLayer.cpp) - the ONE thing a future
-// Player host (linking gte_core alone, never seeing gte_editor's source)
-// can call to get a working, no-op IEditorLayer. Never called anywhere in
-// THIS repo - EditorHost/Application always call the real CreateEditorLayer()
-// above instead, which resolves unambiguously to gte_editor's own
-// ImGuiEditorLayer.cpp - there is no longer a second definition of THAT name
-// anywhere in the link (the ODR/link-order hazard this rename fixes).
+// Creates a no-op editor layer (defined in src/Editor/NullEditorLayer.cpp) for hosts without the Editor module.
 std::unique_ptr<IEditorLayer> CreateNullEditorLayer(Window& window, Renderer& renderer);
 
 } // namespace gte
