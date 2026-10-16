@@ -7,9 +7,7 @@ namespace gte {
 
 namespace {
 
-// Inert stand-in: every call is a no-op, and GameViewTarget() always
-// returns nullptr so Application/Game render straight to the swapchain,
-// fullscreen - exactly as if no Editor existed at all.
+// Inert stand-in: every call is a no-op and GameViewTarget() is null, so the game renders to the swapchain.
 class NullEditorLayer final : public IEditorLayer {
 public:
     void ProcessEvent(const SDL_Event& /*event*/) override { }

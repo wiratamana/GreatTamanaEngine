@@ -23,12 +23,8 @@ class Registry;
 class Renderer;
 struct EditorContext;
 
-// Floating debug window opened from the Inspector: an orbitable 3D view of a model's bind-pose mesh with every bone
-// drawn as a gizmo dot (plus a line to its parent) and its name on hover. It can also show rigid bodies, joints and
-// dynamic chains (m_viewMode); selection goes through the Editor's Selection.
-// Reads the source *.gta from disk (rig data through ModelRigCache), so it always shows the bind pose.
-// Gated behind GTE_ENABLE_PROJECT_PANEL because the preview shaders are only built under that switch.
-// Call Reset() before the UI backend shuts down (the destructor also calls it).
+// Floating Inspector window: orbitable bind-pose mesh with bone gizmos, rigid bodies, joints and dynamic chains.
+// Reads the source *.gta from disk. Call Reset() before the UI backend shuts down (the destructor also does).
 class BoneViewerWindow {
 public:
     BoneViewerWindow();

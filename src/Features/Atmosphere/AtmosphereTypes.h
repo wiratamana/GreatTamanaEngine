@@ -7,14 +7,12 @@
 
 namespace gte {
 
-// Plain GPU buffer layouts read by the atmosphere compute shaders (bound as read-only storage buffers).
-// Vulkan-free on purpose. Every struct is a sequence of 16-byte groups: a Vec3 plus a scalar share one group,
-// which is identical under std140 and std430.
+// GPU buffer layouts read by the atmosphere compute shaders, Vulkan-free. Each struct is a sequence of 16-byte
+// groups (a Vec3 plus a scalar), identical under std140 and std430.
 static_assert(sizeof(Vec3) == 12, "Vec3 must be 3 packed floats so Vec3 + float fills one 16-byte group");
 
-// Physical constants of one planet's atmosphere. Coefficients are per kilometer (km^-1); heights, radii and
-// thickness are in kilometers. The ozone layer is a single symmetric tent profile; the atmosphere is stored as
-// thickness above the ground (see AtmosphereRadiusKm() for the absolute radius).
+// Physical constants of one atmosphere. Coefficients are per km (km^-1); heights, radii and thickness are in km.
+// The ozone layer is one symmetric tent profile; thickness is measured above the ground.
 struct AtmosphereParametersGpu {
     // 16 bytes: Rayleigh scattering at sea level (it also equals Rayleigh extinction) plus the reciprocal of its
     // exponential scale height.

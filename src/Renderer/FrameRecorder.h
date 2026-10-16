@@ -22,33 +22,28 @@ public:
     // Call once per frame: drops draws queued last frame so the queue cannot grow unbounded. See Renderer::BeginFrame().
     void BeginFrame();
 
-    // Queues one draw for the next RecordFrame(): a Pipeline and Mesh plus the world and view-projection
-    // matrices (pushed to the shader). `materialDescriptorSet` is bound as set 0 and `sceneServicesSet` as
-    // set 1 when non-null. See Renderer::Submit().
+    // Queues one draw for the next RecordFrame(). `materialDescriptorSet` is bound as set 0 and `sceneServicesSet`
+    // as set 1 when non-null. See Renderer::Submit().
     void Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& modelMatrix = Mat4::Identity(),
         const Mat4& viewProjMatrix = Mat4::Identity(), VkDescriptorSet materialDescriptorSet = VK_NULL_HANDLE,
         VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
 
-    // Issues one draw directly against `cmd`: bind pipeline, push constants (model then viewProj), optional
-    // set 0 (material) and set 1 (scene services), bind vertex/index buffers, then vkCmdDraw or
-    // vkCmdDrawIndexed depending on whether `indexBuffer` is null. Stateless; never touches the queue or DrawStats.
+    // Issues one draw against `cmd`: pipeline, push constants (model, viewProj), optional set 0 (material) and
+    // set 1 (scene services), buffers, then an indexed or plain draw. Stateless; never touches the queue or DrawStats.
     static void IssueDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
         VkBuffer vertexBuffer, std::uint32_t vertexCount, VkBuffer indexBuffer, std::uint32_t indexCount,
         const Mat4& model, const Mat4& viewProj, VkDescriptorSet materialDescriptorSet,
         VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
 
-    // Indirect-draw sibling of IssueDrawCommand(): binds the instance set at set 0 and `sceneServicesSet` at set 1
-    // (when non-null), pushes `viewProj`, then issues an indirect draw: counted when a count buffer and device
-    // support exist, else with `maxDrawCount` as a fixed count. Never touches DrawStats.
+    // Indirect-draw sibling of IssueDrawCommand(): set 0 = instance set, set 1 = `sceneServicesSet` (when non-null).
+    // Counted draw when a count buffer and device support exist, else a fixed `maxDrawCount`. Never touches DrawStats.
     static void IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
         VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet instanceBufferDescriptorSet,
         VkDescriptorSet sceneServicesSet, const Mat4& viewProj, VkBuffer indirectBuffer, uint64_t indirectOffset,
         std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset, bool supportsDrawIndirectCount);
 
-    // Records the barriers to attachment state, the dynamic-rendering clear to `clearColor`, every queued draw,
-    // `recordExtra`, and the final transition to `finalLayout`. Clears the queue afterwards.
-    // The formats are asserted in debug builds against the target (depth only when a depth image exists).
-    // A null target.depthImage skips the depth attachment. A real one is cleared to 1.0 and discarded afterwards.
+    // Records attachment barriers, the dynamic-rendering clear to `clearColor`, the queued draws, `recordExtra` and the
+    // transition to `finalLayout`. A null target.depthImage skips depth; a real one is cleared to 1.0 and discarded.
     DrawStats RecordFrame(VkCommandBuffer cmd, const RenderTarget& target, VkFormat expectedFormat,
         VkFormat expectedDepthFormat, VkImageLayout finalLayout, const std::array<float, 4>& clearColor,
         const std::function<void(VkCommandBuffer)>& recordExtra);

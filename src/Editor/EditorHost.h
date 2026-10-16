@@ -20,64 +20,17 @@
 #include "../Application/EditorUiCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
 #include "../Application/FrameDebuggerCommandBridge.h"
-// editor-core-separation-8 campaign, PHASE5
-// (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - the new
-// RenderGraphControlCommandBridge (m_renderGraphControlCommandBridge below).
 #include "../Application/RenderGraphControlCommandBridge.h"
-// editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
-// BIG-STEP 3), PHASE3 - the new ProjectAssemblyHotReloadCommandBridge
-// (m_hotReloadCommandBridge below).
 #include "../Application/ProjectAssemblyHotReloadCommandBridge.h"
-// editor-core-separation-17 campaign (On-Engine Project Workflow plan,
-// BIG-STEP 3), PHASE3 - the new ProjectLifecycleLoadCommandBridge
-// (m_projectLifecycleLoadCommandBridge below).
 #include "../Application/ProjectLifecycleLoadCommandBridge.h"
-// editor-core-separation-25 campaign, PHASE4 - the new
-// FrameDebuggerPassMetadataRecorder (m_passMetadataRecorder below).
 #include "FrameDebuggerPassMetadataRecorder.h"
 
 namespace gte {
 
 class IEngineFeatureModule;
 
-// editor-core-separation-1 campaign, PHASE15
-// (PHASE15_EDITORHOST_COMPOSITION_ROOT_CORE_CONSTRUCTION.md) - the new
-// composition root that REPLACES Application's role (design doc Section 6,
-// "Editor's Composition Root Contract"): owns SdlContext + its own
-// authoring Window (NOT the same window instance a shipped Player build
-// would use - design doc Section 1.1), constructs Core (gte_core's own
-// public facade) by injecting Window as ISurfaceProvider& and its own
-// small EditorHostServices as IHostServices&, constructs the concrete
-// Editor UI/state via CreateEditorLayer() (src/Editor/EditorLayer.h,
-// resolving unambiguously to ImGuiEditorLayer.cpp since PHASE9's
-// CreateEditorLayer()/CreateNullEditorLayer() rename), and wires
-// Core::SetEditorLayerHook() - PHASE0_MASTER_STRATEGY.md's Locked Design
-// Decision #8, the ONE nullable "big" IEditorLayer* opaque hook - to that
-// freshly-constructed instance, in the constructor BODY (never the
-// initializer list, since m_editorLayer must already be fully constructed
-// first), so it is genuinely non-null before Run() is ever called.
-//
-// editor-core-separation-1 campaign, PHASE16
-// (PHASE16_EDITORHOST_MAIN_LOOP_AND_AUTOMATION_BRIDGES.md) - Run() now owns
-// the REAL main loop (byte-for-byte copied from Application::Run()'s own
-// post-PHASE13 shape - see EditorHost.cpp's own doc comment), and every
-// automation bridge (EngineCommandBridge/FrameCaptureBridge/
-// EditorUiCommandBridge/FrameDebuggerCommandBridge/AssetImportCommandBridge)
-// plus the embedded Network::NetworkServer now live HERE, never on Core
-// (design doc Section 6.1: "Core stays a pure engine facade: no HTTP
-// server, no automation-bridge knowledge, ever"). The ONE real Bucket B
-// capability adapter this campaign found (ISceneIOCapability -
-// PHASE5/PHASE6), previously wired through Application's own TEMPORARY
-// SetSceneIOCapability() setter, is now wired directly here, in this
-// class's own constructor body, its real, PERMANENT home.
-//
-// Application (src/Application/Application.h/.cpp) stays fully intact and
-// unused as of this phase (shrunk further to reflect the bridges' move
-// here - see that file's own doc comments) - only main.cpp stopped
-// constructing it (it now constructs EditorHost instead). PHASE17
-// (PHASE17_APPLICATION_RETIREMENT_AND_EXECUTABLE_RENAME.md) is what
-// actually retires Application once EditorHost fully covers its
-// responsibilities.
+// Editor composition root: owns SDL, the authoring Window, Core, the editor layer, the automation bridges
+// and the embedded HTTP server. Run() is the main loop.
 class EditorHost {
 public:
     EditorHost(const std::string& title, int width, int height);
@@ -88,19 +41,11 @@ public:
     EditorHost(EditorHost&&) = delete;
     EditorHost& operator=(EditorHost&&) = delete;
 
-    // Runs the main loop until the window is closed. Returns a process
-    // exit code. PHASE16: the REAL per-frame loop - see EditorHost.cpp for
-    // the full body, copied from Application::Run()'s own post-PHASE13
-    // shape.
+    // Runs the main loop until the window is closed. Returns a process exit code.
     int Run();
 
 private:
-    // RAII guard for SDL_Init()/SDL_Quit() - mirrors
-    // Application::SdlContext's exact shape/precedent (src/Application/
-    // Application.h) almost verbatim. Declared FIRST so it is constructed
-    // before, and destroyed after, every other SDL-owning member below it
-    // (Window, ...) - this keeps init/shutdown ordering correct
-    // automatically instead of relying on manual cleanup code.
+    // RAII guard for SDL_Init()/SDL_Quit(). Declared first so SDL outlives every SDL-owning member.
     struct SdlContext {
         SdlContext();
         ~SdlContext();
@@ -109,119 +54,48 @@ private:
         SdlContext& operator=(const SdlContext&) = delete;
     };
 
-    // Construction order matches Step 3.3 of PHASE15's own strategy file
-    // EXACTLY (SdlContext -> Window -> Core -> CreateEditorLayer() ->
-    // Core::SetEditorLayerHook(), the last of which happens in the
-    // constructor BODY, see EditorHost.cpp): each member below depends only
-    // on members declared BEFORE it (m_window needs m_sdlContext already
-    // initialized; m_core needs m_window - as ISurfaceProvider& - and
-    // m_hostServices already constructed; m_editorLayer needs m_window and
-    // m_core's own Renderer already constructed).
+    // Each member depends only on members declared before it; the editor layer hook is set in the constructor body.
     SdlContext m_sdlContext;
     Window m_window;
     EditorHostServices m_hostServices;
     Core m_core;
 
-    // DECLARATION ORDER IS LOAD-BEARING: must stay strictly after m_core
-    // (needs a live Core&) and strictly before m_editorLayer (which touches
-    // every module's live state every frame) - destruction runs in reverse
-    // declaration order, so every module's GPU resources are torn down
-    // before Core's Renderer/Vulkan device, and before m_editorLayer is
-    // gone.
+    // Must stay after m_core and before m_editorLayer: destruction runs in reverse order.
     std::vector<std::unique_ptr<IEngineFeatureModule>> m_builtinFeatureModules;
 
-    // editor-core-separation-1 campaign, PHASE16 - REFERENCE members bound
-    // to m_core's own real, owned instances, mirroring
-    // Application::m_renderer/m_renderGraph/m_game/m_engineContext's exact
-    // precedent (PHASE12/PHASE13) - Run()'s own host-level code (input
-    // handling, BuildUI(), the relocated FrameCaptureBridge success-path
-    // capture code) reaches these directly rather than through
-    // m_core.GetX() at every call site.
+    // References to objects owned by m_core, for direct use in Run().
     Renderer& m_renderer;
     rg::RenderGraph& m_renderGraph;
 
-    // editor-core-separation-25 campaign - the ONE, persistent, whole-
-    // session Editor-owned implementation of IPassDebugMetadataSink AND
-    // IPassDebugMetadataProvider, installed onto m_renderGraph once, below
-    // (EditorHost.cpp's own constructor body) - mirrors
-    // EditorGpuMemoryNameOverlay's own role for GpuMemoryTracker, kept as
-    // a plain, non-global member here (rather than all-static/global like
-    // that overlay) since nothing OUTSIDE this exact install call ever
-    // needs to reach this object directly - every real consumer
-    // (FrameDebuggerData.cpp, RenderGraphMetadata.cpp, etc.) already reads
-    // the resolved category/drawKind/tags values straight off
-    // RenderGraphPassSnapshot, which m_renderGraph itself populates using
-    // this object internally (PHASE3/PHASE4's own metadataLookup wiring).
+    // Whole-session pass metadata sink and provider, installed on m_renderGraph in the constructor body.
     FrameDebuggerPassMetadataRecorder m_passMetadataRecorder;
 
-    // Declared after Renderer/RenderGraph (and before Game) so it is
-    // destroyed before Renderer's Vulkan device/instance go away, but its
-    // lifetime doesn't need to relate to Game's at all.
+    // Declared after Renderer/RenderGraph so it is destroyed before the Vulkan device goes away.
     std::unique_ptr<IEditorLayer> m_editorLayer;
     Game& m_game;
     EngineContext& m_engineContext;
 
-    // network-impl-6 campaign, Phase 4 - the GET /get_texture volume-texture
-    // raymarch preview renderer. A genuinely lazy/on-demand class
-    // (EnsureInitialized() does nothing until the first real RenderPreview()
-    // call), so adding it unconditionally as a plain member here costs
-    // nothing at startup. HOST-LEVEL AUTOMATION concern (design doc Section
-    // 6.1) - never moves into Core.
+    // Volume-texture raymarch preview for GET /get_texture. Lazy: costs nothing until first used.
     VolumeTexturePreviewRenderer m_volumeTexturePreviewRenderer;
 
-    // editor-core-separation-1 campaign, PHASE16
-    // (PHASE16_EDITORHOST_MAIN_LOOP_AND_AUTOMATION_BRIDGES.md) - every
-    // automation bridge RELOCATED here from Application (design doc Section
-    // 6.1: "these attach to EditorHost, never to Core"). Declared in the
-    // exact same relative order/reasoning Application.h used to document:
-    // each bridge below is declared BEFORE m_networkServer (constructed
-    // first, destroyed last relative to it) so its address can be handed
-    // into m_networkServer's own constructor.
+    // Automation bridges. Declared before m_networkServer so their addresses can be handed to it.
     FrameCaptureBridge m_captureBridge;
     EngineCommandBridge m_commandBridge;
     EditorUiCommandBridge m_uiCommandBridge;
     FrameDebuggerCommandBridge m_frameDebuggerCommandBridge;
     AssetImportCommandBridge m_assetImportCommandBridge;
-    // editor-core-separation-8 campaign, PHASE5
-    // (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - the new bridge
-    // backing the 6 GET /render_graph/* mutation/discovery routes. Same
-    // "declared BEFORE m_networkServer" placement reasoning as every other
-    // bridge above.
+    // Backs the GET /render_graph/* mutation and discovery routes.
     RenderGraphControlCommandBridge m_renderGraphControlCommandBridge;
-    // editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
-    // BIG-STEP 3), PHASE3 - the cross-thread hand-off for
-    // PerformProjectAssemblyHotReload(). Same "declared BEFORE
-    // m_networkServer" placement reasoning as every other bridge above -
-    // this one, however, is NOT itself handed into NetworkServer's
-    // constructor (see EditorHotReloadDebugCapability::
-    // SetHotReloadCommandBridge(), this same phase, for how the route reaches
-    // it instead).
+    // Cross-thread hand-off for project assembly hot reload; not passed to NetworkServer's constructor.
     ProjectAssemblyHotReloadCommandBridge m_hotReloadCommandBridge;
 
-    // editor-core-separation-17 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 3), PHASE3 - the cross-thread hand-off for the "Open
-    // Project" Tier-3 real .dll load, submitted ONLY by
-    // EditorProjectLifecycleCapability::OpenProjectAssembly() (the
-    // network-thread-facing method - OpenProjectAssemblyOnMainThread(),
-    // the ImGui-facing method, never touches this bridge at all, see
-    // PHASE0_MASTER_STRATEGY.md Section 2.2). Same "declared BEFORE
-    // m_networkServer" placement reasoning as every other bridge above.
+    // Cross-thread hand-off for loading a project assembly, submitted only by the network-facing open method.
     ProjectLifecycleLoadCommandBridge m_projectLifecycleLoadCommandBridge;
 
-    // Networking campaign (task_manager/network-impl-1/) - an embedded,
-    // loopback-only HTTP server (see AGENTS.md, "Networking"). Declared
-    // LAST (after every bridge above) so it is DESTROYED FIRST, before the
-    // Editor/Renderer/Window/SDL start tearing down.
+    // Loopback-only HTTP server. Declared last so it is destroyed first.
     Network::NetworkServer m_networkServer;
 
-    // editor-core-separation-1 campaign, PHASE16 - the ONE real Bucket B
-    // capability this campaign found (ISceneIOCapability,
-    // Core/EditorCapabilities.h) - wired to a real EditorSceneIOCapability
-    // instance directly in this class's own constructor body (its
-    // PERMANENT home, replacing Application's own TEMPORARY
-    // SetSceneIOCapability() setter from PHASE5/PHASE6). Consulted by
-    // Run()'s own EngineCommandBridge servicing code
-    // (ExecuteEngineCommand()).
+    // Scene I/O capability wired in the constructor body; used when servicing engine commands.
     ISceneIOCapability* m_sceneIOCapability = nullptr;
 
     // Declared last, so it idles the GPU before any member above frees GPU objects (feature modules do not wait).

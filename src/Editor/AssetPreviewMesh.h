@@ -14,9 +14,8 @@ namespace gte {
 class MeshPreviewRenderer;
 class Renderer;
 
-// Live, slowly spinning 3D preview of a mesh asset (*.gta) for the Inspector panel, shown through ImGui::Image().
-// It re-renders every call; the GPU mesh and the framing are cached until the path or its write time changes.
-// Call Reset() before the UI backend shuts down (the destructor also calls it).
+// Spinning 3D preview of a mesh asset (*.gta) for the Inspector, shown via ImGui::Image(). The GPU mesh is cached
+// until the path or write time changes. Call Reset() before the UI backend shuts down (the destructor also does).
 class AssetPreviewMesh {
 public:
     AssetPreviewMesh();

@@ -1,9 +1,5 @@
 // src/Core/Plugins/ProjectAssemblyHost.cpp
-//
-// editor-core-separation-11 campaign (Project Assembly system), PHASE5.
-// See ProjectAssemblyHost.h's own header comment for the full design
-// rationale (mirrors PluginHost.cpp's own LoadLibraryW/GetProcAddress/
-// by construction - PHASE0_MASTER_STRATEGY.md, section 2.2).
+// Loads and unloads per-project game/editor DLLs via LoadLibraryW/GetProcAddress.
 #include "ProjectAssemblyHost.h"
 #include "../Logging.h"
 #include "ProjectAssemblyRegistrationLedger.h"
@@ -19,11 +15,7 @@
 namespace gte {
 
 namespace {
-// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
-// BIG-STEP 2), PHASE3 - strips a known Project Assembly .dll suffix to
-// recover the plain project name - the ONE place this derivation is needed
-// (TryLoadOneAssembly() already has `fileName` computed locally, right
-// before this).
+// Strips the "_Game.dll" / "_Editor.dll" suffix to recover the project name.
 std::string DeriveProjectNameFromDllFileName(const std::string& fileName)
 {
     static constexpr const char* kGameSuffix = "_Game.dll";
@@ -40,40 +32,15 @@ std::string DeriveProjectNameFromDllFileName(const std::string& fileName)
 
 ProjectAssemblyHost::~ProjectAssemblyHost()
 {
-    // Never FreeLibrary()'d before process exit - LDD4 (no hot reload,
-    // ever). Mirrors PluginHost's own reverse-destruction-order shape only
-    // in spirit; there is no per-assembly destroy export to call here (a
-    // Project Assembly's GTE_RegisterProject is a one-shot registration
-    // call, not a live capability object this class owns afterward), so
-    // this destructor intentionally does nothing but let the process itself
-    // tear down - the OS unmaps every loaded module at process exit
-    // regardless.
+    // Assemblies are never FreeLibrary()'d here: the OS unmaps them at process exit.
+    // Only UnloadProjectAssembly() frees a module.
 }
 
 void ProjectAssemblyHost::LoadProjectAssemblies(
     const std::filesystem::path& outputDirectory, Core& core, EditorHost* editorHost)
 {
-    // editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
-    // BIG-STEP 2), PHASE5 - found-and-fixed regression, confirmed LIVE by
-    // this phase's own isolation test. ComponentTypeRegistry::Instance()
-    // self-bootstraps RegisterBuiltinComponentReflections() lazily, on ITS
-    // OWN first call, from ANYWHERE in the process (ComponentTypeRegistry.cpp).
-    // If that first-ever call happens to land INSIDE a Project Assembly's own
-    // BeginRecordingFor()/EndRecording() bracket - which it did here, because
-    // ProjectAssemblyProbe's own _Game.dll GTE_RegisterProject is the first
-    // code anywhere to ever call RegisterComponentType<T>() (this phase's own
-    // new ProbeHotReloadMarker) - every one of the engine's own BUILT-IN
-    // component types gets misattributed to THAT project's own ledger entry.
-    // Confirmed live: GET /project_assembly/debug/ledger?name=ProjectAssemblyProbe
-    // listed "Transform"/"Name"/"Camera"/"DirectionalLight"/"PrimitiveSource"
-    // alongside its own real "ProbeHotReloadMarker" - none of the five
-    // built-ins are ProjectAssemblyProbe's own registrations. Forcing the
-    // bootstrap HERE, unconditionally, before the very first
-    // TryLoadOneAssembly() call below (and therefore before any project's
-    // own BeginRecordingFor() bracket can ever open), guarantees it always
-    // happens OUTSIDE any such bracket, regardless of directory-iteration
-    // order or which project's own registration function happens to be the
-    // first in the whole process to touch ComponentTypeRegistry.
+    // Force the registry's lazy built-in bootstrap here, outside any project's recording bracket, so built-in
+    // component types are never attributed to a project's ledger entry.
     ComponentTypeRegistry::Instance();
 
     if (!std::filesystem::exists(outputDirectory)) {
@@ -92,15 +59,7 @@ void ProjectAssemblyHost::LoadProjectAssemblies(
 bool ProjectAssemblyHost::TryLoadOneAssembly(
     const std::filesystem::path& dllPath, Core& core, EditorHost* editorHost)
 {
-    // editor-core-separation-14 campaign (BIG-STEP 3), PHASE1 - closes the
-    // obligation HotReloadEngineStateMutex.h's own header comment already
-    // states ("a future BIG-STEP 2/3 campaign MUST lock this... around
-    // every ... ProjectAssemblyHost load/unload call"). Safe to nest:
-    // ProjectAssemblyRegistrationLedger's own methods (called below, via
-    // GTE_RegisterProject's own registration calls) only ever take THEIR
-    // OWN internal mutex, never this one (confirmed,
-    // ProjectAssemblyRegistrationLedger.h's own header comment) - no
-    // deadlock risk.
+    // Serializes loads against hot reload and unload. Nesting is safe: the ledger only takes its own mutex.
     std::lock_guard<std::mutex> lock(GetHotReloadEngineStateMutex());
 
     const std::string fileName = dllPath.filename().string();
@@ -119,16 +78,8 @@ bool ProjectAssemblyHost::TryLoadOneAssembly(
         return false;
     }
 
-    // LOAD-BEARING: the exported symbol name is the SAME,
-    // "GTE_RegisterProject", for both a _Game.dll and an _Editor.dll -
-    // _Game vs. _Editor is decided ONLY by the filename suffix check
-    // above, BEFORE the export is ever resolved. See this file's own header
-    // comment (ProjectAssemblyHost.h) for why: there is no way to introspect
-    // a resolved function pointer's own parameter count at runtime, so
-    // getting this filename-based dispatch wrong (e.g. calling a
-    // 2-argument _Editor export through a 1-argument _Game-shaped function
-    // pointer) is undefined behavior with no guaranteed crash at the call
-    // site.
+    // Both assembly kinds export "GTE_RegisterProject" with different signatures; the filename suffix alone
+    // picks the call shape. A wrong shape is undefined behavior.
     if (isEditorAssembly) {
         if (editorHost == nullptr) {
             GTE_LOG_WARNING("ProjectAssembly", fileName + " is an _Editor assembly but no EditorHost exists in this process - skipped.");
@@ -142,12 +93,7 @@ bool ProjectAssemblyHost::TryLoadOneAssembly(
             FreeLibrary(module);
             return false;
         }
-        // editor-core-separation-13 campaign (Project Assembly Hot Reload
-        // plan, BIG-STEP 2), PHASE3 - brackets this GTE_RegisterProject call
-        // so every RegisterDescriptor()/RegisterPluginPanel()/
-        // RegisterProjectRenderPassProvider() call it makes gets attributed
-        // to this project's own ledger entry, additive/safe - does not
-        // change what gets loaded, in what order, or with what arguments.
+        // Attribute this project's registrations to its ledger entry.
         const std::string projectName = DeriveProjectNameFromDllFileName(fileName);
         ProjectAssemblyRegistrationLedger::Instance().BeginRecordingFor(projectName);
         entry(core, *editorHost);
@@ -160,8 +106,7 @@ bool ProjectAssemblyHost::TryLoadOneAssembly(
             FreeLibrary(module);
             return false;
         }
-        // editor-core-separation-13 campaign, PHASE3 - same bracket as the
-        // _Editor branch above (see that comment for the full reasoning).
+        // Attribute this project's registrations to its ledger entry, as in the _Editor branch.
         const std::string projectName = DeriveProjectNameFromDllFileName(fileName);
         ProjectAssemblyRegistrationLedger::Instance().BeginRecordingFor(projectName);
         entry(core);
@@ -177,12 +122,7 @@ bool ProjectAssemblyHost::TryLoadOneAssembly(
     return true;
 }
 
-// editor-core-separation-14 campaign (Project Assembly Hot Reload plan,
-// BIG-STEP 3), PHASE1. Thin wrapper over the now-public-facing
-// TryLoadOneAssembly() - see ProjectAssemblyHost.h's own doc comment for the
-// full reasoning (reused by PerformProjectAssemblyHotReload(), PHASE4, for
-// both the success-path fresh-compile load and the failure-path
-// backup-restore load).
+// Loads one assembly from an exact path; used by hot reload for both the fresh build and the backup restore.
 bool ProjectAssemblyHost::LoadOneProjectAssemblyFromExactPath(
     const std::filesystem::path& dllPath, Core& core, EditorHost* editorHost)
 {

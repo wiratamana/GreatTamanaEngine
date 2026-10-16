@@ -2860,6 +2860,9 @@ set(GTE_COMMENT_RULE_SRC
     Scene/SceneBuilder.cpp Scene/SceneBuilder.h
     Core/FrameDebuggerEventSink.h Core/FrameDebuggerCaptureRecorder.h Application/RenderPassViewData.h
     Editor/FrameDebuggerCapture.cpp Editor/FrameDebuggerCapture.h Editor/FrameDebuggerReplayPasses.cpp
+    Editor/AssetPreviewMesh.cpp Editor/AssetPreviewMesh.h Editor/BoneViewerWindow.cpp Editor/BoneViewerWindow.h
+    Editor/EditorHost.h Editor/RenderGraphTexturePreview.cpp Editor/RenderGraphTexturePreview.h
+    Core/Plugins/ProjectAssemblyHost.cpp
     Features/Atmosphere/)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp

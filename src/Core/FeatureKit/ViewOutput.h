@@ -10,9 +10,8 @@
 
 namespace gte::fx {
 
-// A texture the editor panel and the HTTP endpoints show for the view (see Frame::ExposeAsViewOutput()).
-// One engine-owned, storage-capable texture per view scope, named "GameView<suffix>" / "SceneView<suffix>".
-// It is resized on demand (waiting for the GPU first); the format is fixed by the first request.
+// One engine-owned, storage-capable texture per view scope ("GameView<suffix>" / "SceneView<suffix>"), shown by the
+// editor panel and HTTP endpoints. Resized on demand after a GPU wait; the format is fixed by the first request.
 class ViewOutput {
 public:
     explicit ViewOutput(std::string_view nameSuffix);
@@ -21,9 +20,8 @@ public:
     ViewOutput(const ViewOutput&) = delete;
     ViewOutput& operator=(const ViewOutput&) = delete;
 
-    // The texture for the frame's view, imported into the graph and kept alive. Call it only for an enabled pass
-    // (see Frame::PassEnabled()). Invalid in a Shared callback, for a zero size, or when the engine could not make
-    // or resize it (logged once, retried on a cooldown).
+    // The view's texture, imported and kept alive; call only for an enabled pass. Invalid in a Shared callback,
+    // for a zero size, or when the engine could not make or resize it (logged once, retried on a cooldown).
     Texture Acquire(Frame& frame, Extent2D extent, PixelFormat format);
 
 private:

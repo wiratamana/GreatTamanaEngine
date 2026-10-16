@@ -10,9 +10,8 @@ namespace gte {
 
 class Renderer;
 
-// Owns at most one ImGui-sampled texture preview: one Texture2D and one UI texture handle.
-// Requesting a new preview releases the old one first; the destructor releases both.
-// Must be destroyed before the UI backend shuts down, like every other panel-owned GPU resource.
+// Owns at most one ImGui-sampled texture preview; a new request releases the old one first.
+// Destroy it before the UI backend shuts down.
 class RenderGraphTexturePreview {
 public:
     RenderGraphTexturePreview() = default;

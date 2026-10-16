@@ -22,9 +22,8 @@ public:
     SceneGridRenderer(SceneGridRenderer&&) = delete;
     SceneGridRenderer& operator=(SceneGridRenderer&&) = delete;
 
-    // Records the grid draw into `cmd`. `sceneViewProjection` must be the matrix the scene was drawn with.
-    // Builds the pipeline on first call. Draws nothing when the matrix is singular or the pipeline cannot be built.
-    // The caller must already have set a viewport and scissor covering the target.
+    // Records the grid draw into `cmd` (viewport and scissor must already cover the target). Builds the pipeline
+    // on first call; draws nothing if `sceneViewProjection` is singular or the pipeline cannot be built.
     void Draw(Renderer& renderer, const rg::RecordingContext& cmd, const Mat4& sceneViewProjection);
 
     // Releases the pipeline after the GPU is idle. Safe to call repeatedly.
