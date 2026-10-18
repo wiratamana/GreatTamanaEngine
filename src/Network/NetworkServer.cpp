@@ -5,26 +5,12 @@
 #include "../Application/AssetImportCommandBridge.h"
 #include "../Application/EditorUiCommandBridge.h"
 #include "../Application/EngineCommandBridge.h"
+#include "../Application/FeatureDebugCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
 #include "../Application/FrameDebuggerCommandBridge.h"
-// editor-core-separation-8 campaign, PHASE5
-// (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - the new
-// RenderGraphControlCommandBridge, and the 6 new GET /render_graph/* routes
-// registered below.
 #include "../Application/RenderGraphControlCommandBridge.h"
-#include "../Core/EditorCapabilities.h" // ILogQueryCapability - editor-core-separation-2 campaign, PHASE3.
+#include "../Core/EditorCapabilities.h" // ILogQueryCapability.
 #include "../Core/Logging.h"
-// editor-core-separation-2 campaign, PHASE3
-// (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md) - this file no
-// longer #includes Editor/Logger.h at all. GET /get_logs and POST
-// /clear_logs (below) now call through the nullable ILogQueryCapability*
-// bridge (Core/EditorCapabilities.h, included above) instead of calling
-// gte::Logger::Query()/Clear()/EntryCount()/IsEnabled()/LatestEntryId()
-// directly - closing the real, pre-existing gte_core -> gte_editor-only-
-// symbol dependency editor-core-separation-1 left open (see that
-// campaign's own CAMPAIGN_COMPLETION_REPORT.md, "What remains genuinely
-// open", option (b), and this campaign's own PHASE0_MASTER_STRATEGY.md,
-// Defect C).
 #include "../Encoding/Base64.h"
 #include "../Math/Quat.h"
 #include "../Math/Vec3.h"
@@ -376,16 +362,68 @@ void RespondWithRenderGraphControlCommandResult(
         BuildRenderGraphControlCommandResponseJson(result.success, result.errorMessage, windowOpen), "application/json");
 }
 
-// The one, hand-written route table for this campaign - see
-// PHASE0_MASTER_STRATEGY.md's locked "Endpoint contract". A future endpoint
-// is added here as one more server.Get(...)/Post(...) line, forwarding to
-// its own NetworkRoutes.h function - never composing response text inline
-// in this lambda.
+// Registers GET /feature_debug/{list,state,set,invoke}; they answer 503 while `bridge` is null.
+void RegisterFeatureDebugRoutes(httplib::Server& server, FeatureDebugCommandBridge* bridge)
+{
+    const auto respond = [](httplib::Response& res, const FeatureDebugReply& reply) {
+        res.status = reply.status;
+        res.set_content(reply.body, "application/json");
+    };
+    const auto bridgeMissing = [respond](httplib::Response& res) {
+        respond(res, { 503, BuildGenericErrorResponseJson("feature debug command bridge not available") });
+    };
+
+    server.Get("/feature_debug/list", [bridge, respond, bridgeMissing](const httplib::Request&, httplib::Response& res) {
+        if (bridge == nullptr) {
+            bridgeMissing(res);
+            return;
+        }
+        FeatureDebugCommandRequest request;
+        request.kind = FeatureDebugCommandKind::List;
+        const FeatureDebugCommandBridge::SubmitResult submit = bridge->SubmitAndWait(std::move(request));
+        const std::vector<std::string> noNames;
+        respond(res, BuildFeatureDebugListReply(submit.alreadyPending, submit.timedOut,
+                         submit.result ? submit.result->featureNames : noNames));
+    });
+
+    const auto registerCommand = [&server, bridge, respond, bridgeMissing](
+                                     const char* path, FeatureDebugRoute route, FeatureDebugCommandKind kind) {
+        server.Get(path, [bridge, route, kind, respond, bridgeMissing](const httplib::Request& req, httplib::Response& res) {
+            std::vector<std::pair<std::string, std::string>> params(req.params.begin(), req.params.end());
+            ParsedFeatureDebugQuery parsed = ParseFeatureDebugQuery(route, params);
+            if (!parsed.valid) {
+                respond(res, { 400, BuildGenericErrorResponseJson(parsed.errorMessage) });
+                return;
+            }
+            if (bridge == nullptr) {
+                bridgeMissing(res);
+                return;
+            }
+            FeatureDebugCommandRequest request;
+            request.kind = kind;
+            request.featureName = parsed.featureName;
+            request.action = std::move(parsed.action);
+            request.args = std::move(parsed.args);
+            const FeatureDebugCommandBridge::SubmitResult submit = bridge->SubmitAndWait(std::move(request));
+            const fx::FeatureDebugResult empty;
+            respond(res, BuildFeatureDebugReply(submit.alreadyPending, submit.timedOut,
+                             submit.result && submit.result->found, parsed.featureName,
+                             submit.result ? submit.result->result : empty));
+        });
+    };
+    registerCommand("/feature_debug/state", FeatureDebugRoute::State, FeatureDebugCommandKind::GetState);
+    registerCommand("/feature_debug/set", FeatureDebugRoute::Set, FeatureDebugCommandKind::Set);
+    registerCommand("/feature_debug/invoke", FeatureDebugRoute::Invoke, FeatureDebugCommandKind::Invoke);
+}
+
+// The one, hand-written route table. A new endpoint is one more server.Get/Post line that forwards to its own
+// NetworkRoutes.h function; response text is never composed inline in a lambda.
 void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, EngineCommandBridge* commandBridge,
     EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge,
     AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability,
     RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability,
-    IProjectLifecycleCapability* projectLifecycleCapability, IAssetScaffoldingCapability* assetScaffoldingCapability)
+    IProjectLifecycleCapability* projectLifecycleCapability, IAssetScaffoldingCapability* assetScaffoldingCapability,
+    FeatureDebugCommandBridge* featureDebugCommandBridge)
 {
     server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
@@ -1646,6 +1684,8 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         body["success"] = success;
         res.set_content(body.dump(), "application/json");
     });
+
+    RegisterFeatureDebugRoutes(server, featureDebugCommandBridge);
 }
 
 } // namespace
@@ -1658,7 +1698,8 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     EditorUiCommandBridge* uiCommandBridge, FrameDebuggerCommandBridge* frameDebuggerCommandBridge,
     AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability,
     RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability,
-    IProjectLifecycleCapability* projectLifecycleCapability, IAssetScaffoldingCapability* assetScaffoldingCapability)
+    IProjectLifecycleCapability* projectLifecycleCapability, IAssetScaffoldingCapability* assetScaffoldingCapability,
+    FeatureDebugCommandBridge* featureDebugCommandBridge)
     : m_impl(std::make_unique<Impl>())
     , m_captureBridge(captureBridge)
     , m_commandBridge(commandBridge)
@@ -1670,29 +1711,12 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     , m_hotReloadDebugCapability(hotReloadDebugCapability)
     , m_projectLifecycleCapability(projectLifecycleCapability)
     , m_assetScaffoldingCapability(assetScaffoldingCapability)
+    , m_featureDebugCommandBridge(featureDebugCommandBridge)
 {
-    // Registered exactly ONCE per NetworkServer instance, here in the
-    // constructor - never inside Start() - so a Start()/Stop()/Start()
-    // restart cycle (or a Start() that overlaps a failed bind retry) can
-    // NEVER re-register the same route handler onto the same
-    // httplib::Server a second time.
+    // Routes are registered once here, never in Start(), so a restart cannot register them twice.
     RegisterRoutes(m_impl->server, m_captureBridge, m_commandBridge, m_uiCommandBridge, m_frameDebuggerCommandBridge,
         m_assetImportCommandBridge, m_logQueryCapability, m_renderGraphControlCommandBridge, m_hotReloadDebugCapability,
-        m_projectLifecycleCapability, m_assetScaffoldingCapability);
-    // task_manager/stl-parser-2 campaign, PHASE2 - m_assetImportCommandBridge
-    // is now actually consulted by RegisterRoutes() above (POST /import_asset).
-    // editor-core-separation-8 campaign, PHASE5 - m_renderGraphControlCommandBridge
-    // is now actually consulted by RegisterRoutes() above (the 6 new
-    // GET /render_graph/* routes).
-    // editor-core-separation-12 campaign - m_hotReloadDebugCapability is now
-    // actually consulted by RegisterRoutes() above (the 7 new
-    // GET/POST /project_assembly/* routes).
-    // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 2), PHASE4 - m_projectLifecycleCapability is now actually
-    // consulted by RegisterRoutes() above (POST /project_assembly/create_project).
-    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 4), PHASE3 - m_assetScaffoldingCapability is now actually
-    // consulted by RegisterRoutes() above (POST /project_assembly/create_asset).
+        m_projectLifecycleCapability, m_assetScaffoldingCapability, m_featureDebugCommandBridge);
 }
 
 NetworkServer::~NetworkServer()

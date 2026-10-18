@@ -12,6 +12,7 @@
 #include "../Core/Plugins/ProjectAssemblyHotReload.h"
 // Built-in feature modules are created generically through this registry.
 #include "../Core/Plugins/BuiltinFeatureModuleRegistry.h"
+#include "../Core/FeatureKit/FeatureRegistration.h"
 #include "ProjectRootPath.h" // ExecutableDirectory().
 #include "VolumeTexturePreviewSelection.h"
 #include "../Core/EditorPanelRegistry.h"
@@ -100,7 +101,8 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
     // constructed) before m_networkServer. The lifecycle capability is passed twice via its two bases.
     , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge, &m_frameDebuggerCommandBridge,
           &m_assetImportCommandBridge, &s_editorLogQueryCapability, &m_renderGraphControlCommandBridge,
-          &s_editorHotReloadDebugCapability, &s_editorProjectLifecycleCapability, &s_editorProjectLifecycleCapability)
+          &s_editorHotReloadDebugCapability, &s_editorProjectLifecycleCapability, &s_editorProjectLifecycleCapability,
+          &m_featureDebugCommandBridge)
 {
     // Installs the real log sink first: everything below, including the network server start, may log.
     gte::InstallLogSink(&gte::LoggerLogSink::Instance());
@@ -188,6 +190,48 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
         "EditorHost constructed: SdlContext -> Window -> Core -> CreateEditorLayer() -> "
         "Core::SetEditorLayerHook() all completed, with a genuinely non-null IEditorLayer*, "
         "every automation bridge attached, and NetworkServer started.");
+}
+
+void EditorHost::ServiceFeatureDebugCommand()
+{
+    const std::optional<FeatureDebugCommandRequest> request = m_featureDebugCommandBridge.TryPeekPendingCommandRequest();
+    if (!request) {
+        return;
+    }
+    GTE_PROFILE_SCOPE("EditorHost::ExecuteFeatureDebugCommand");
+
+    FeatureDebugCommandResult result;
+    for (const std::unique_ptr<IEngineFeatureModule>& module : m_builtinFeatureModules) {
+        fx::Feature* feature = module ? fx::FindFeature(*module) : nullptr;
+        fx::IFeatureDebugEndpoint* endpoint = feature ? feature->DebugEndpoint() : nullptr;
+        if (endpoint == nullptr) {
+            continue;
+        }
+        if (request->kind == FeatureDebugCommandKind::List) {
+            result.featureNames.emplace_back(feature->Name());
+            continue;
+        }
+        if (request->featureName != feature->Name()) {
+            continue;
+        }
+        result.found = true;
+        switch (request->kind) {
+        case FeatureDebugCommandKind::GetState:
+            result.result = endpoint->GetState();
+            break;
+        case FeatureDebugCommandKind::Set:
+            result.result = endpoint->Set(request->args);
+            break;
+        case FeatureDebugCommandKind::Invoke:
+            result.result = endpoint->Invoke(request->action, request->args);
+            break;
+        case FeatureDebugCommandKind::List:
+            break;
+        }
+        break;
+    }
+    result.found = result.found || request->kind == FeatureDebugCommandKind::List;
+    m_featureDebugCommandBridge.FulfillCommand(std::move(result));
 }
 
 int EditorHost::Run()
@@ -317,6 +361,8 @@ int EditorHost::Run()
             }
             m_uiCommandBridge.FulfillCommand(uiResult);
         }
+
+        ServiceFeatureDebugCommand();
 
         // Drains at most one pending Frame Debugger command per frame, right after the UI command pump.
         if (const std::optional<FrameDebuggerCommandRequest> fdRequest =

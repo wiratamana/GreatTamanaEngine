@@ -414,6 +414,7 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/ComputeShader.cpp
     src/Core/FeatureKit/ComputeVerb.cpp
     src/Core/FeatureKit/Feature.h
+    src/Core/FeatureKit/FeatureDebug.h
     src/Core/FeatureKit/FeatureLife.h
     src/Core/FeatureKit/FeatureRegistration.h
     src/Core/FeatureKit/FeatureSetup.h
@@ -674,6 +675,7 @@ add_library(gte_core STATIC
     src/Application/FrameCaptureBridge.cpp
     src/Application/EngineCommandBridge.h
     src/Application/EditorUiCommandBridge.h
+    src/Application/FeatureDebugCommandBridge.h
     src/Application/AssetImportCommandBridge.h
     src/Application/ProjectLifecycleLoadCommandBridge.h
     src/Application/FrameDebuggerCommandBridge.h

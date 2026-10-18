@@ -19,6 +19,7 @@
 #include "../Application/AssetImportCommandBridge.h"
 #include "../Application/EngineCommandBridge.h"
 #include "../Application/EditorUiCommandBridge.h"
+#include "../Application/FeatureDebugCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
 #include "../Application/FrameDebuggerCommandBridge.h"
 #include "../Application/RenderGraphControlCommandBridge.h"
@@ -44,6 +45,9 @@ public:
     int Run();
 
 private:
+    // Answers at most one pending feature debug request on the main thread.
+    void ServiceFeatureDebugCommand();
+
     // RAII guard for SDL_Init()/SDL_Quit(). Declared first so SDL outlives every SDL-owning member.
     struct SdlContext {
         SdlContext();
@@ -85,6 +89,8 @@ private:
     AssetImportCommandBridge m_assetImportCommandBridge;
     // Backs the GET /render_graph/* mutation and discovery routes.
     RenderGraphControlCommandBridge m_renderGraphControlCommandBridge;
+    // Backs the GET /feature_debug/* routes.
+    FeatureDebugCommandBridge m_featureDebugCommandBridge;
     // Cross-thread hand-off for project assembly hot reload; not passed to NetworkServer's constructor.
     ProjectAssemblyHotReloadCommandBridge m_hotReloadCommandBridge;
 

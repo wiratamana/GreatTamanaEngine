@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FeatureDebug.h"
 #include "FeatureSetup.h"
 
 #include <optional>
@@ -35,6 +36,9 @@ public:
     virtual const char* Name() const = 0;
 
     virtual void Setup(FeatureSetup& setup) = 0;
+
+    // Text debug hook of the feature, or null when it has none.
+    virtual IFeatureDebugEndpoint* DebugEndpoint() noexcept { return nullptr; }
 };
 
 // Receives the collected registrations once a whole Setup() has succeeded.

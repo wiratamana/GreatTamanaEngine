@@ -1,12 +1,15 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "../Core/EditorPanelRegistry.h"
-#include "../Core/EditorCapabilities.h" // IHotReloadDebugCapability::Status/LedgerEntry - editor-core-separation-12 campaign, PHASE3.
+#include "../Core/EditorCapabilities.h" // IHotReloadDebugCapability::Status/LedgerEntry.
+#include "../Core/FeatureKit/FeatureDebug.h"
 #include "../Core/Logging.h"
 // editor-core-separation-7 campaign, PHASE4 - GET /render_graph's response
 // body needs rg::RenderGraphMetadata's own to_json() (see
@@ -1152,5 +1155,40 @@ struct ParsedSetProbeMarkerValueQuery {
     int value = 0;
 };
 ParsedSetProbeMarkerValueQuery ParseSetProbeMarkerValueQuery(const std::string& valueParam);
+
+// --- GET /feature_debug/{list,state,set,invoke}: generic feature debug routes.
+
+inline constexpr std::size_t kMaxFeatureDebugArgs = 64;
+inline constexpr std::size_t kMaxFeatureDebugKeyBytes = 64;
+inline constexpr std::size_t kMaxFeatureDebugValueBytes = 256;
+
+enum class FeatureDebugRoute { State, Set, Invoke };
+
+// `name` is required. Invoke also requires `action`; every other key is an argument.
+// State accepts no argument. `valid == false` means `errorMessage` says why.
+struct ParsedFeatureDebugQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::string featureName;
+    std::string action;
+    std::vector<fx::FeatureDebugArg> args;
+};
+ParsedFeatureDebugQuery ParseFeatureDebugQuery(
+    FeatureDebugRoute route, const std::vector<std::pair<std::string, std::string>>& params);
+
+// HTTP status and JSON body of one reply.
+struct FeatureDebugReply {
+    int status = 200;
+    std::string body;
+};
+
+// 503 busy, 504 timeout (the request may still be applied later), 200 {"features":[...]}.
+FeatureDebugReply BuildFeatureDebugListReply(
+    bool alreadyPending, bool timedOut, const std::vector<std::string>& featureNames);
+
+// 503 busy, 504 timeout, 404 unknown feature, 400 failed command (names the key), else 200
+// {"feature":"X","fields":{...}}. A non-finite number is written as null.
+FeatureDebugReply BuildFeatureDebugReply(bool alreadyPending, bool timedOut, bool found,
+    const std::string& featureName, const fx::FeatureDebugResult& result);
 
 } // namespace gte::Network

@@ -22,6 +22,12 @@ Feature* FeatureOfModule(IEngineFeatureModule& module) noexcept;
 
 } // namespace detail
 
+// The feature behind `module`, or null when the module does not come from GTE_REGISTER_RENDER_FEATURE.
+inline Feature* FindFeature(IEngineFeatureModule& module) noexcept
+{
+    return detail::FeatureOfModule(module);
+}
+
 // The feature of type T behind `module`. The module must come from GTE_REGISTER_RENDER_FEATURE for T.
 template <typename T>
 T& FeatureOf(IEngineFeatureModule& module)

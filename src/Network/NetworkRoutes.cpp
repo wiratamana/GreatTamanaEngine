@@ -16,6 +16,9 @@
 
 #include <cmath>
 #include <mutex>
+#include <type_traits>
+#include <unordered_set>
+#include <variant>
 
 namespace gte::Network {
 
@@ -1284,6 +1287,138 @@ ParsedSetProbeMarkerValueQuery ParseSetProbeMarkerValueQuery(const std::string& 
     result.value = parsedValue;
     result.valid = true;
     return result;
+}
+
+namespace {
+
+std::string DumpFeatureDebugJson(const nlohmann::ordered_json& json)
+{
+    return json.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+nlohmann::ordered_json FeatureDebugValueToJson(const fx::FeatureDebugValue& value)
+{
+    return std::visit(
+        [](const auto& v) -> nlohmann::ordered_json {
+            if constexpr (std::is_same_v<std::decay_t<decltype(v)>, double>) {
+                return std::isfinite(v) ? nlohmann::ordered_json(v) : nlohmann::ordered_json(nullptr);
+            } else {
+                return nlohmann::ordered_json(v);
+            }
+        },
+        value);
+}
+
+FeatureDebugReply MakeFeatureDebugError(int status, const std::string& message, const std::string& badKey = {})
+{
+    nlohmann::ordered_json body;
+    body["success"] = false;
+    body["error"] = message;
+    if (!badKey.empty()) {
+        body["key"] = badKey;
+    }
+    return { status, DumpFeatureDebugJson(body) };
+}
+
+// Returns the error reply for a busy or timed-out bridge, or nothing when a result exists.
+std::optional<FeatureDebugReply> FeatureDebugTransportError(bool alreadyPending, bool timedOut)
+{
+    if (alreadyPending) {
+        return MakeFeatureDebugError(503, "another feature debug command is already in progress");
+    }
+    if (timedOut) {
+        return MakeFeatureDebugError(504,
+            "feature debug command timed out; it may still be applied later, so read the state before repeating a set");
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+ParsedFeatureDebugQuery ParseFeatureDebugQuery(
+    FeatureDebugRoute route, const std::vector<std::pair<std::string, std::string>>& params)
+{
+    ParsedFeatureDebugQuery parsed;
+    std::unordered_set<std::string> seen;
+    bool haveName = false;
+    bool haveAction = false;
+
+    for (const auto& [key, value] : params) {
+        if (key.empty() || key.size() > kMaxFeatureDebugKeyBytes) {
+            parsed.errorMessage = "query key '" + key.substr(0, kMaxFeatureDebugKeyBytes) + "' is empty or longer than "
+                + std::to_string(kMaxFeatureDebugKeyBytes) + " bytes";
+            return parsed;
+        }
+        if (value.size() > kMaxFeatureDebugValueBytes) {
+            parsed.errorMessage = "value of query key '" + key + "' is longer than "
+                + std::to_string(kMaxFeatureDebugValueBytes) + " bytes";
+            return parsed;
+        }
+        if (!seen.insert(key).second) {
+            parsed.errorMessage = "query key '" + key + "' appears more than once";
+            return parsed;
+        }
+        if (key == "name") {
+            parsed.featureName = value;
+            haveName = !value.empty();
+        } else if (key == "action" && route == FeatureDebugRoute::Invoke) {
+            parsed.action = value;
+            haveAction = !value.empty();
+        } else if (route == FeatureDebugRoute::State) {
+            parsed.errorMessage = "unexpected query key '" + key + "'";
+            return parsed;
+        } else if (parsed.args.size() >= kMaxFeatureDebugArgs) {
+            parsed.errorMessage = "more than " + std::to_string(kMaxFeatureDebugArgs) + " arguments";
+            return parsed;
+        } else {
+            parsed.args.push_back({ key, value });
+        }
+    }
+
+    if (!haveName) {
+        parsed.errorMessage = "missing required query parameter: name";
+    } else if (route == FeatureDebugRoute::Invoke && !haveAction) {
+        parsed.errorMessage = "missing required query parameter: action";
+    } else {
+        parsed.valid = true;
+    }
+    return parsed;
+}
+
+FeatureDebugReply BuildFeatureDebugListReply(
+    bool alreadyPending, bool timedOut, const std::vector<std::string>& featureNames)
+{
+    if (auto error = FeatureDebugTransportError(alreadyPending, timedOut)) {
+        return *error;
+    }
+    nlohmann::ordered_json body;
+    body["features"] = featureNames;
+    return { 200, DumpFeatureDebugJson(body) };
+}
+
+FeatureDebugReply BuildFeatureDebugReply(bool alreadyPending, bool timedOut, bool found,
+    const std::string& featureName, const fx::FeatureDebugResult& result)
+{
+    if (auto error = FeatureDebugTransportError(alreadyPending, timedOut)) {
+        return *error;
+    }
+    if (!found) {
+        return MakeFeatureDebugError(404, "no loaded feature named '" + featureName + "' has a debug endpoint");
+    }
+    if (!result.ok) {
+        return MakeFeatureDebugError(400, result.message, result.badKey);
+    }
+    nlohmann::ordered_json fields = nlohmann::ordered_json::object();
+    for (const fx::FeatureDebugField& field : result.fields) {
+        fields[field.key] = FeatureDebugValueToJson(field.value);
+    }
+    nlohmann::ordered_json body;
+    body["feature"] = featureName;
+    if (!result.message.empty()) {
+        body["message"] = result.message;
+    }
+    body["fields"] = std::move(fields);
+    return { 200, DumpFeatureDebugJson(body) };
 }
 
 } // namespace gte::Network

@@ -5,176 +5,32 @@
 #include <string>
 #include <thread>
 
-// Forward-declared rather than #including <httplib.h> here - keeps this
-// header cheap for any future consumer that only needs to hold/pass around
-// a NetworkServer&/pointer without itself needing httplib's own types. The
-// real httplib::Server member still has to be defined somewhere non-
-// forward-declarable though (a class member can't be a forward-declared
-// type by value) - see the Pimpl (Impl) member below for why this header
-// still works.
+// Forward declarations keep this header cheap for consumers that only pass a NetworkServer around.
 namespace httplib { class Server; }
-
-// Forward-declared rather than #including "../Application/FrameCaptureBridge.h"
-// here, for the same cheap-header reason as httplib::Server above -
-// network-impl-2 campaign, Phase 3
-// (PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md).
-namespace gte { class FrameCaptureBridge; }
-
-// Forward-declared for the same cheap-header reason as FrameCaptureBridge
-// above - network-impl-3 campaign, Phase 4
-// (PHASE4_ENGINE_COMMAND_BRIDGE_AND_MAIN_LOOP_INTEGRATION.md).
-namespace gte { class EngineCommandBridge; }
-
-// Forward-declared for the same cheap-header reason as FrameCaptureBridge/
-// EngineCommandBridge above - network-impl-7 campaign.
-namespace gte { class EditorUiCommandBridge; }
-
-// Forward-declared for the same cheap-header reason as FrameCaptureBridge/
-// EngineCommandBridge/EditorUiCommandBridge above - task_manager/
-// frame-debugger-3 campaign, PHASE7
-// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md).
-namespace gte { class FrameDebuggerCommandBridge; }
-
-// Forward-declared for the same cheap-header reason as FrameCaptureBridge/
-// EngineCommandBridge/EditorUiCommandBridge/FrameDebuggerCommandBridge
-// above - task_manager/stl-parser-2 campaign, PHASE1. Genuinely unused by
-// any route yet - PHASE2 is what actually registers `POST /import_asset`
-// against it - stored now purely so PHASE2 never needs to touch
-// Application.h/.cpp again (see PHASE0_MASTER_STRATEGY.md's own Locked
-// Design Decision #1 and this phase's own Definition of Done).
-namespace gte { class AssetImportCommandBridge; }
-
-// Forward-declared for the same cheap-header reason as FrameCaptureBridge/
-// EngineCommandBridge/EditorUiCommandBridge/FrameDebuggerCommandBridge/
-// AssetImportCommandBridge above - editor-core-separation-2 campaign, PHASE3
-// (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md).
-namespace gte { class ILogQueryCapability; }
-
-// Forward-declared for the same cheap-header reason as FrameCaptureBridge/
-// EngineCommandBridge/EditorUiCommandBridge/FrameDebuggerCommandBridge/
-// AssetImportCommandBridge/ILogQueryCapability above - editor-core-separation-8
-// campaign, PHASE5 (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md).
-namespace gte { class RenderGraphControlCommandBridge; }
-
-// Forward-declared for the same cheap-header reason as
-// FrameCaptureBridge/.../RenderGraphControlCommandBridge above -
-// editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
-// BIG-STEP 1).
-namespace gte { class IHotReloadDebugCapability; }
-
-// Forward-declared for the same cheap-header reason as
-// FrameCaptureBridge/.../IHotReloadDebugCapability above -
-// editor-core-separation-16 campaign (On-Engine Project Workflow plan,
-// BIG-STEP 2), PHASE4.
-namespace gte { class IProjectLifecycleCapability; }
-
-// Forward-declared for the same cheap-header reason as
-// FrameCaptureBridge/.../IProjectLifecycleCapability above -
-// editor-core-separation-18 campaign (On-Engine Project Workflow plan,
-// BIG-STEP 4), PHASE3.
-namespace gte { class IAssetScaffoldingCapability; }
+namespace gte {
+class FrameCaptureBridge;
+class EngineCommandBridge;
+class EditorUiCommandBridge;
+class FrameDebuggerCommandBridge;
+class AssetImportCommandBridge;
+class ILogQueryCapability;
+class RenderGraphControlCommandBridge;
+class IHotReloadDebugCapability;
+class IProjectLifecycleCapability;
+class IAssetScaffoldingCapability;
+class FeatureDebugCommandBridge;
+} // namespace gte
 
 namespace gte::Network {
 
-// Owns a real, embedded HTTP server (cpp-httplib) bound to loopback
-// (127.0.0.1) ONLY - this class has NO PARAMETER anywhere in its public API
-// that could express any other host (see PHASE0_MASTER_STRATEGY.md's locked
-// "bind address" decision - this is deliberately enforced by the shape of
-// Start() itself, not merely by what Application happens to pass it).
-// Start() returns immediately; the actual blocking accept/serve loop
-// (httplib::Server::listen_after_bind()) runs on a dedicated background
-// std::thread this class owns - so calling Start() never blocks the caller
-// (Application's main frame loop), and every registered route handler (see
-// NetworkRoutes.h) runs on that ONE background thread, never the main
-// thread. See AGENTS.md, "Networking", for the thread-safety rules this
-// implies for any route handler.
-//
-// RAII: the destructor calls Stop() automatically, so a NetworkServer that
-// goes out of scope always cleanly stops the socket and joins its thread -
-// never a leaked thread/socket, mirroring every other RAII-owned resource
-// in this engine (see AGENTS.md, "Coding Guidelines").
+// Embedded HTTP server (cpp-httplib), bound to loopback (127.0.0.1) only: no API can express another host.
+// Start() returns at once; requests are served on a background thread owned by this class. The destructor
+// calls Stop(), so the socket and the thread are never leaked.
 class NetworkServer {
 public:
-    // `captureBridge` (network-impl-2 campaign, Phase 3 -
-    // PHASE3_GAME_VIEW_CAPTURE_AND_GET_GAME_VIEW_ENDPOINT.md) is a
-    // DEFAULTED, non-owning pointer - kept default (nullptr) by every
-    // existing tests/Network/NetworkServerTests.cpp call site (seven
-    // no-argument `NetworkServer server;` constructions), so this remains a
-    // fully backward-compatible signature change. Non-null in production
-    // (Application owns the real FrameCaptureBridge and passes its address -
-    // see Application.cpp) - `nullptr` means "no engine-state-touching
-    // routes are wired up" (a route needing it responds 503 rather than
-    // crashing - see NetworkServer.cpp's own RegisterRoutes()).
-    // `commandBridge` (network-impl-3 campaign, Phase 4 -
-    // PHASE4_ENGINE_COMMAND_BRIDGE_AND_MAIN_LOOP_INTEGRATION.md) is a SECOND
-    // defaulted, non-owning pointer, appended AFTER `captureBridge` so every
-    // existing call site (including this constructor's own single-argument
-    // production use) keeps compiling unchanged. Non-null in production
-    // (Application owns the real EngineCommandBridge and passes its address) -
-    // `nullptr` means "POST /instantiate_primitive and POST /delete_entity
-    // (network-impl-3 campaign, Phase 5 -
-    // PHASE5_NETWORK_POST_ROUTES_AND_COMMAND_DISPATCH.md) both respond 503
-    // rather than crashing" - the exact same "nullptr degrades gracefully to
-    // a 503, never a crash" contract `captureBridge` already documents above.
-    // `uiCommandBridge` (network-impl-7 campaign) is a THIRD defaulted,
-    // non-owning pointer, appended AFTER `commandBridge` so every existing
-    // call site keeps compiling unchanged. Non-null in production
-    // (Application owns the real EditorUiCommandBridge and passes its
-    // address) - `nullptr` means "GET /activate_tab responds 503 rather
-    // than crashing" - the exact same "nullptr degrades gracefully" contract
-    // `frameDebuggerCommandBridge` (task_manager/frame-debugger-3 campaign,
-    // PHASE7) is a FOURTH defaulted, non-owning pointer, appended AFTER
-    // `uiCommandBridge` so every existing call site keeps compiling
-    // unchanged. Non-null in production (Application owns the real
-    // FrameDebuggerCommandBridge and passes its address) - `nullptr` means
-    // "every GET /frame_debugger/* route responds 503 rather than
-    // `crashing" - the exact same "nullptr degrades gracefully" contract
-    // `captureBridge`/`commandBridge`/`uiCommandBridge` already document
-    // above. `assetImportCommandBridge` (task_manager/stl-parser-2 campaign,
-    // PHASE1) is a FIFTH defaulted, non-owning pointer, appended AFTER
-    // `frameDebuggerCommandBridge` so every existing call site keeps
-    // compiling unchanged. Non-null in production (Application owns the
-    // real AssetImportCommandBridge and passes its address) - genuinely
-    // below) until PHASE2 registers `POST /import_asset` against it.
-    // `logQueryCapability` (editor-core-separation-2 campaign, PHASE3) is a
-    // SIXTH defaulted, non-owning pointer, appended AFTER
-    // `assetImportCommandBridge` so every existing call site keeps compiling
-    // unchanged - in particular, tests/Network/NetworkServerTests.cpp's
-    // multiple no-argument `NetworkServer server;` constructions. Non-null
-    // in production (EditorHost owns the real EditorLogQueryCapability and
-    // passes its address - see EditorHost.cpp) - `nullptr` means
-    // "GET /get_logs and POST /clear_logs both respond 503 rather than
-    // crashing" - the exact same "nullptr degrades gracefully to a 503,
-    // never a crash" contract every other bridge above already documents.
-    // `renderGraphControlCommandBridge` (editor-core-separation-8 campaign,
-    // PHASE5 - PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) is a
-    // SEVENTH defaulted, non-owning pointer, appended AFTER
-    // `logQueryCapability` so every existing call site keeps compiling
-    // unchanged. Non-null in production (EditorHost owns the real
-    // RenderGraphControlCommandBridge and passes its address) - `nullptr`
-    // means "every GET /render_graph/* route added by this campaign
-    // responds 503 rather than crashing" - the exact same "nullptr
-    // degrades gracefully to a 503, never a crash" contract every other
-    // bridge above already documents.
-    // `hotReloadDebugCapability` (editor-core-separation-12 campaign,
-    // Project Assembly Hot Reload plan, BIG-STEP 1) is an EIGHTH defaulted,
-    // non-owning pointer, appended AFTER `renderGraphControlCommandBridge`
-    // so every existing call site keeps compiling unchanged. Non-null in
-    // production (EditorHost owns the real EditorHotReloadDebugCapability
-    // and passes its address) - `nullptr` means "every GET/POST
-    // /project_assembly/* route this campaign adds responds 503 rather
-    // than crashing" - the exact same "nullptr degrades gracefully to a
-    // 503, never a crash" contract every other bridge above already
-    // documents.
-    // `projectLifecycleCapability` (editor-core-separation-16 campaign, On-
-    // Engine Project Workflow plan, BIG-STEP 2) is a NINTH defaulted,
-    // non-owning pointer, appended AFTER `hotReloadDebugCapability` so
-    // every existing call site keeps compiling unchanged. Non-null in
-    // production (EditorHost owns the real EditorProjectLifecycleCapability
-    // and passes its address) - `nullptr` means "POST
-    // /project_assembly/create_project responds 503 rather than crashing" -
-    // the exact same "nullptr degrades gracefully to a 503, never a crash"
-    // contract every other bridge above already documents.
+    // Every constructor parameter is a defaulted, non-owning pointer; the owner outlives this server.
+    // A null pointer makes the routes that need it answer 503 instead of crashing.
+    // New parameters are appended last so existing call sites keep compiling.
     explicit NetworkServer(FrameCaptureBridge* captureBridge = nullptr,
         EngineCommandBridge* commandBridge = nullptr,
         EditorUiCommandBridge* uiCommandBridge = nullptr,
@@ -184,7 +40,8 @@ public:
         RenderGraphControlCommandBridge* renderGraphControlCommandBridge = nullptr,
         IHotReloadDebugCapability* hotReloadDebugCapability = nullptr,
         IProjectLifecycleCapability* projectLifecycleCapability = nullptr,
-        IAssetScaffoldingCapability* assetScaffoldingCapability = nullptr);
+        IAssetScaffoldingCapability* assetScaffoldingCapability = nullptr,
+        FeatureDebugCommandBridge* featureDebugCommandBridge = nullptr);
     ~NetworkServer();
 
     NetworkServer(const NetworkServer&) = delete;
@@ -192,57 +49,21 @@ public:
     NetworkServer(NetworkServer&&) = delete;
     NetworkServer& operator=(NetworkServer&&) = delete;
 
-    // Binds to 127.0.0.1:port (synchronously - see this class's own .cpp
-    // comment for why bind and "start serving" are deliberately two
-    // separate steps) and spawns the background thread that actually serves
-    // requests. There is deliberately NO host parameter - loopback is the
-    // only address this class can ever bind to, enforced by this exact
-    // signature (see PHASE0_MASTER_STRATEGY.md's locked decision #2). port
-    // == 0 means "let the OS assign a free ephemeral port" - BoundPort()
-    // reports which one was actually chosen; used by
-    // tests/Network/NetworkServerTests.cpp (Phase 4) so the test never
-    // collides with a real running instance of the engine on the same
-    // machine. A second call while already running (IsRunning() == true) is
-    // a safe no-op - Start() is NOT re-entrant/thread-safe against itself or
-    // Stop() (see this class's own file comment in NetworkServer.cpp for
-    // why that's an acceptable, documented constraint rather than a bug:
-    // both are only ever called from the main thread, by Application).
-    //
-    // If the bind itself fails (e.g. the port is already in use), this logs
-    // a message to stderr and returns with IsRunning() staying false - this
-    // is NON-FATAL. A failed bind must never crash/throw and must never
-    // prevent the rest of the engine (window/renderer/game) from starting -
-    // see AGENTS.md, "Networking", for why this class treats every one of
-    // its own failure modes as "log and continue", never fatal.
+    // Binds 127.0.0.1:port and starts the serving thread. port == 0 picks a free port (see BoundPort()).
+    // A second call while running is a no-op. A failed bind is logged and non-fatal: IsRunning() stays false.
+    // Not thread-safe against itself or Stop(); call both from the main thread only.
     void Start(int port);
 
-    // Stops the server (httplib::Server::stop(), thread-safe) and joins the
-    // background thread. Safe to call even if Start() was never called, or
-    // was already stopped (a no-op in both cases). Called automatically by
-    // the destructor - production code (Application) does not need to call
-    // this explicitly, but may (e.g. a future explicit "Network" Editor
-    // panel toggle) since it's part of the public, documented lifecycle.
+    // Stops the server and joins the thread. Safe when never started or already stopped.
     void Stop();
 
-    // Whether the background thread is currently up and serving. False
-    // before the first Start() call, false again after Stop() (or a bind
-    // failure inside Start()).
     bool IsRunning() const noexcept;
 
-    // The actual bound TCP port - valid once IsRunning() is true. 0 before
-    // the first successful Start(), and after a failed bind. When Start()
-    // was called with an explicit non-zero port, this simply echoes it back
-    // (once bound); when called with port == 0, this is the OS-assigned
-    // ephemeral port.
+    // The bound TCP port: valid once IsRunning(), 0 before a successful Start() and after a failed bind.
     int BoundPort() const noexcept;
 
 private:
-    // Pimpl (std::unique_ptr<httplib::Server>, defined in the .cpp) rather
-    // than a direct httplib::Server member - this is what lets this header
-    // forward-declare httplib::Server above instead of #include <httplib.h>
-    // here, so any future consumer of NetworkServer.h that never touches
-    // httplib types directly doesn't transitively pull in httplib.h. See
-    // NetworkServer.cpp for the actual member.
+    // Pimpl keeps httplib out of this header.
     struct Impl;
     std::unique_ptr<Impl> m_impl;
 
@@ -250,47 +71,18 @@ private:
     std::atomic<bool> m_running{ false };
     std::atomic<int> m_boundPort{ 0 };
 
-    // Non-owning - see this class's own constructor doc comment above.
-    // Application owns the real instance and must outlive this NetworkServer.
+    // Non-owning; see the constructor.
     FrameCaptureBridge* m_captureBridge = nullptr;
-    // Non-owning - same lifetime contract as m_captureBridge above
-    // (network-impl-3 campaign, Phase 4).
     EngineCommandBridge* m_commandBridge = nullptr;
-    // Non-owning - same lifetime contract as m_captureBridge above
-    // (network-impl-7 campaign).
     EditorUiCommandBridge* m_uiCommandBridge = nullptr;
-    // Non-owning - same lifetime contract as m_captureBridge above
-    // (task_manager/frame-debugger-3 campaign, PHASE7).
     FrameDebuggerCommandBridge* m_frameDebuggerCommandBridge = nullptr;
-    // Non-owning - same lifetime contract as m_captureBridge above
-    // (task_manager/stl-parser-2 campaign, PHASE1). Not yet passed into
-    // RegisterRoutes() below - PHASE2 is what actually wires a real route
-    // handler against it, when POST /import_asset is registered.
     AssetImportCommandBridge* m_assetImportCommandBridge = nullptr;
-    // Non-owning - same lifetime contract as m_captureBridge above
-    // (editor-core-separation-2 campaign, PHASE3). Consulted by
-    // GET /get_logs and POST /clear_logs (RegisterRoutes() below).
     ILogQueryCapability* m_logQueryCapability = nullptr;
-    // Non-owning - same lifetime contract as m_captureBridge above
-    // (editor-core-separation-8 campaign, PHASE5). Consulted by every
-    // GET /render_graph/* mutation/discovery route this campaign adds
-    // (RegisterRoutes() below).
     RenderGraphControlCommandBridge* m_renderGraphControlCommandBridge = nullptr;
-    // Non-owning - same lifetime contract as m_captureBridge above
-    // (editor-core-separation-12 campaign). Consulted by every
-    // GET/POST /project_assembly/* route this campaign adds
-    // (RegisterRoutes() below).
     IHotReloadDebugCapability* m_hotReloadDebugCapability = nullptr;
-    // Non-owning - same lifetime contract as m_captureBridge above
-    // (editor-core-separation-16 campaign, On-Engine Project Workflow plan,
-    // BIG-STEP 2). Consulted by POST /project_assembly/create_project
-    // (RegisterRoutes() below).
     IProjectLifecycleCapability* m_projectLifecycleCapability = nullptr;
-    // Non-owning - same lifetime contract as m_captureBridge above
-    // (editor-core-separation-18 campaign, On-Engine Project Workflow plan,
-    // BIG-STEP 4). Consulted by POST /project_assembly/create_asset
-    // (RegisterRoutes() below).
     IAssetScaffoldingCapability* m_assetScaffoldingCapability = nullptr;
+    FeatureDebugCommandBridge* m_featureDebugCommandBridge = nullptr;
 };
 
 } // namespace gte::Network

@@ -8,6 +8,7 @@
 #include "ComputeChain.h"
 #include "ComputeShader.h"
 #include "Feature.h"
+#include "FeatureDebug.h"
 #include "FeatureLife.h"
 #include "FeatureRegistration.h"
 #include "FeatureSetup.h"
