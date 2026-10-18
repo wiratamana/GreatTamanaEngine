@@ -51,6 +51,13 @@ public:
         return ParamsBytes(bindingName, detail::ParamsAccess::Of(params), &value, sizeof(T));
     }
 
+    // Binds this frame's device buffer of `readback` to the shader variable `name` (a literal) as a written buffer.
+    template <typename T>
+    ComputeChain& BindOutput(std::string_view name, GpuReadback<T>& readback)
+    {
+        return BindReadback(name, detail::ReadbackAccess::Of(readback));
+    }
+
     // Dispatches over `size` elements, clamped to the first written storage image.
     // False when nothing was declared (disabled pass, inert shader, refused or invalid bindings).
     bool Dispatch(Extent2D size, std::uint32_t depth = 1);
@@ -61,6 +68,7 @@ private:
     explicit ComputeChain(std::unique_ptr<Impl> impl) noexcept;
 
     ComputeChain& PushBytes(const void* data, std::size_t size);
+    ComputeChain& BindReadback(std::string_view name, detail::ReadbackCore& readback);
     ComputeChain& ParamsBytes(std::string_view bindingName, rg::GpuParamsBuffer& params, const void* data, std::size_t size);
 
     std::unique_ptr<Impl> m_impl;

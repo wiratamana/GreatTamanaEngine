@@ -66,6 +66,19 @@ ComputeChain& ComputeChain::Bind(std::string_view name, DepthRef depth)
     return *this;
 }
 
+ComputeChain& ComputeChain::BindReadback(std::string_view name, detail::ReadbackCore& readback)
+{
+    if (m_impl && m_impl->pass) {
+        if (const auto binding = readback.Acquire(*m_impl->frame)) {
+            m_impl->pass->Bind(name, binding->deviceObject);
+            m_impl->pass->Writes(binding->device);
+        } else {
+            m_impl->pass->Abandon();
+        }
+    }
+    return *this;
+}
+
 ComputeChain& ComputeChain::PushBytes(const void* data, std::size_t size)
 {
     if (m_impl && m_impl->pass) {

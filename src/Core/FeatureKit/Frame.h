@@ -1,5 +1,6 @@
 #pragma once
 
+#include "GpuReadback.h"
 #include "SceneSlot.h"
 #include "Texture.h"
 #include "View.h"
@@ -93,6 +94,20 @@ public:
     // Copies `src` into `dst` with a scaled blit. False when nothing was declared.
     bool Blit(rg::StaticName passName, Texture src, Texture dst, BlitFilter filter);
 
+    // Fills this frame's device buffer of `readback` with `fillValue`. False when nothing was declared.
+    template <typename T>
+    bool ClearReadback(rg::StaticName passName, GpuReadback<T>& readback, std::uint32_t fillValue)
+    {
+        return ClearReadbackCore(passName, detail::ReadbackAccess::Of(readback), fillValue);
+    }
+
+    // Copies this frame's device buffer of `readback` to its host buffer. False when nothing was declared.
+    template <typename T>
+    bool CopyReadbackToHost(rg::StaticName passName, GpuReadback<T>& readback)
+    {
+        return CopyReadbackCore(passName, detail::ReadbackAccess::Of(readback));
+    }
+
     // Marks `produced` (the texture `output.Acquire()` returned in this callback) as this view's output for the
     // editor and the HTTP endpoints. Call it only after the pass that writes the texture was declared.
     void ExposeAsViewOutput(ViewOutput& output, Texture produced);
@@ -124,6 +139,8 @@ protected:
 
 private:
     void SetSceneUniformBytes(std::span<const std::byte> bytes);
+    bool ClearReadbackCore(rg::StaticName passName, detail::ReadbackCore& core, std::uint32_t fillValue);
+    bool CopyReadbackCore(rg::StaticName passName, detail::ReadbackCore& core);
 
     fx::View m_view;
     Registry* m_scene;

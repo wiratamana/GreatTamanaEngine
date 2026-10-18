@@ -16,6 +16,7 @@
 #include "FullscreenShader.h"
 #include "Gate.h"
 #include "GpuParams.h"
+#include "GpuReadback.h"
 #include "OffscreenTarget.h"
 #include "PerView.h"
 #include "PersistentTarget.h"

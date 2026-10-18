@@ -428,6 +428,9 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/FullscreenVerb.cpp
     src/Core/FeatureKit/Gate.h
     src/Core/FeatureKit/GpuParams.h
+    src/Core/FeatureKit/GpuReadback.h
+    src/Core/FeatureKit/GpuReadback.cpp
+    src/Core/FeatureKit/ReadbackVerbs.cpp
     src/Core/FeatureKit/PerView.h
     src/Core/FeatureKit/PersistentTarget.h
     src/Core/FeatureKit/PersistentTarget.cpp
