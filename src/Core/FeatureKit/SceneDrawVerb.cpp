@@ -31,6 +31,7 @@ struct SceneDrawChain::Impl {
     Texture depth;
     std::optional<float> depthClear;
     Texture color;
+    std::optional<float> cullPadding;
 };
 
 SceneDrawChain Frame::SceneDraw(rg::StaticName passName)
@@ -98,6 +99,14 @@ SceneDrawChain& SceneDrawChain::ColorTarget(Texture color)
     return *this;
 }
 
+SceneDrawChain& SceneDrawChain::CullToFrustum(float paddingFraction)
+{
+    if (m_impl) {
+        m_impl->cullPadding = paddingFraction;
+    }
+    return *this;
+}
+
 bool SceneDrawChain::Record()
 {
     if (!m_impl || !m_impl->active || m_impl->finished) {
@@ -127,6 +136,9 @@ bool SceneDrawChain::Record()
     }
     if (impl.depth.IsValid()) {
         pass.Depth(impl.depth.handle, impl.depthClear);
+    }
+    if (impl.cullPadding.has_value()) {
+        pass.CullToFrustum(*impl.cullPadding);
     }
     return pass.Draw();
 }

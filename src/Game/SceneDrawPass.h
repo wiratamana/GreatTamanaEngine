@@ -30,6 +30,9 @@ public:
     SceneDrawPass& Color(rg::TextureHandle target, std::optional<std::array<float, 4>> clear = std::nullopt);
     SceneDrawPass& Depth(rg::TextureHandle target, std::optional<float> clear = std::nullopt);
 
+    // Skips entities whose padded world bounds fall outside the camera's view-projection.
+    SceneDrawPass& CullToFrustum(float paddingFraction);
+
     // Declares the pass. False (and one error in the log) when it has no attachment.
     bool Draw();
 
@@ -40,6 +43,7 @@ private:
     Renderer* m_renderer;
     PipelineOverrideSet m_overrides;
     Mat4 m_viewProjection = Mat4::Identity();
+    std::optional<float> m_cullPadding;
 };
 
 } // namespace gte

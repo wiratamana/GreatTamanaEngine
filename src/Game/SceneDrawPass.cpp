@@ -45,12 +45,20 @@ SceneDrawPass& SceneDrawPass::Depth(rg::TextureHandle target, std::optional<floa
     return *this;
 }
 
+SceneDrawPass& SceneDrawPass::CullToFrustum(float paddingFraction)
+{
+    m_cullPadding = paddingFraction;
+    return *this;
+}
+
 bool SceneDrawPass::Draw()
 {
+    SceneDrawRequest request = MakeSceneDrawRequest(m_viewProjection, m_overrides);
+    if (m_cullPadding.has_value()) {
+        request.cull = SceneCullRequest{ m_viewProjection, *m_cullPadding };
+    }
     return m_mesh.Draw([system = m_system, registry = m_registry, renderer = m_renderer,
-                           request = MakeSceneDrawRequest(m_viewProjection, m_overrides)]() {
-        DrawScene(*system, *registry, *renderer, request);
-    });
+                           request = std::move(request)]() { DrawScene(*system, *registry, *renderer, request); });
 }
 
 } // namespace gte

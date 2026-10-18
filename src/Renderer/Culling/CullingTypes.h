@@ -12,7 +12,7 @@
 
 namespace gte {
 
-// Local-space axis-aligned bounding box; describes geometry shared by every instance of a mesh.
+// Axis-aligned bounding box; used for local-space mesh bounds and for world-space instance bounds.
 struct AABB {
     Vec3 min{ 0.0f, 0.0f, 0.0f };
     Vec3 max{ 0.0f, 0.0f, 0.0f };
@@ -31,6 +31,14 @@ struct Plane {
 // [0]=Left, [1]=Right, [2]=Bottom, [3]=Top, [4]=Near, [5]=Far.
 // Near tests z >= 0 (zero-to-one depth range), not z >= -w.
 std::array<Plane, 6> ExtractFrustumPlanes(const Mat4& viewProjection);
+
+// True when `worldBounds` lies fully behind one plane. Conservative: a touching box is never rejected,
+// and a box with a non-finite value or min > max is never rejected.
+bool IsAABBOutsideFrustum(const std::array<Plane, 6>& planes, const AABB& worldBounds) noexcept;
+
+// Grows `box` on every side by `fractionOfLargestExtent` times its largest extent.
+// A negative or non-finite fraction counts as 0.
+AABB PadAABB(const AABB& box, float fractionOfLargestExtent) noexcept;
 
 // Per-instance input read by the culling compute shader and the instanced vertex shader.
 // std430, 16-byte aligned blocks.

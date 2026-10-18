@@ -79,12 +79,14 @@ public:
 
     // Draw() with an explicit view-projection. `capture` records frame-debugger facts, `maxDrawCount` caps the commands
     // considered, `batchedEntities` are drawn by GPU-driven batches instead, `pipelineOverrideSet` picks a pipeline per
-    // vertex layout (an entity without an entry is skipped), `cmd` receives the draws instead of renderer.Submit().
+    // vertex layout (an entity without an entry is skipped), `cmd` receives the draws instead of renderer.Submit(),
+    // `cull` skips entities whose padded world bounds are outside its frustum (meshes without bounds are never skipped).
     void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
         IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
         const std::unordered_set<Entity>& batchedEntities = {},
         std::optional<PipelineOverrideSet> pipelineOverrideSet = std::nullopt,
-        DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid, rg::CommandBuffer* cmd = nullptr);
+        DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid, rg::CommandBuffer* cmd = nullptr,
+        std::optional<SceneCullRequest> cull = std::nullopt);
 
     // Groups this frame's draws by (mesh, pipeline), keeps the eligible groups and packs their instances into
     // `cache`. `gpuSkinnedOutputBuffersThisFrame` holds the vertex-buffer handles of meshes skinned on the GPU

@@ -77,6 +77,49 @@ std::array<Plane, 6> ExtractFrustumPlanes(const Mat4& viewProjection)
     return planes;
 }
 
+namespace {
+
+bool IsFinite(const Vec3& v) noexcept
+{
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
+} // namespace
+
+bool IsAABBOutsideFrustum(const std::array<Plane, 6>& planes, const AABB& worldBounds) noexcept
+{
+    const Vec3& lo = worldBounds.min;
+    const Vec3& hi = worldBounds.max;
+    if (!IsFinite(lo) || !IsFinite(hi) || lo.x > hi.x || lo.y > hi.y || lo.z > hi.z) {
+        return false;
+    }
+
+    for (const Plane& plane : planes) {
+        // The corner furthest along the normal is the last one to leave the plane's inside.
+        const Vec3 p(plane.normal.x >= 0.0f ? hi.x : lo.x, plane.normal.y >= 0.0f ? hi.y : lo.y,
+            plane.normal.z >= 0.0f ? hi.z : lo.z);
+        if (plane.normal.x * p.x + plane.normal.y * p.y + plane.normal.z * p.z + plane.distance < 0.0f) {
+            return true;
+        }
+    }
+    return false;
+}
+
+AABB PadAABB(const AABB& box, float fractionOfLargestExtent) noexcept
+{
+    const float fraction = (std::isfinite(fractionOfLargestExtent) && fractionOfLargestExtent > 0.0f)
+        ? fractionOfLargestExtent
+        : 0.0f;
+    const float largest =
+        std::max({ box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z, 0.0f });
+    const float pad = largest * fraction;
+
+    AABB result;
+    result.min = Vec3(box.min.x - pad, box.min.y - pad, box.min.z - pad);
+    result.max = Vec3(box.max.x + pad, box.max.y + pad, box.max.z + pad);
+    return result;
+}
+
 GpuCullingInstanceInput PackCullingInstanceInput(const Mat4& worldMatrix, const AABB& worldAABB,
     std::uint32_t firstIndex, std::uint32_t indexCount, std::int32_t vertexOffset)
 {

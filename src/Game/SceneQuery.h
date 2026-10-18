@@ -18,80 +18,47 @@ class Renderer;
 class RenderSystem;
 class IFrameDebuggerCaptureRecorder;
 
-// One optional override Pipeline per VertexLayout - lets a single DrawScene()
-// call route primitives, untextured meshes, and textured meshes each through
-// their own matching override pipeline (e.g. a depth-only pass, an outline
-// pass). An entity whose own pipeline's layout has no entry here is skipped
-// entirely for that call - it never falls back to its own original pipeline.
+// One optional override Pipeline per VertexLayout. An entity whose layout has no entry is skipped,
+// never drawn with its own pipeline.
 struct PipelineOverrideSet {
     std::array<std::optional<PipelineHandle>, kVertexLayoutCount> byLayout;
 };
 
-// Pure decision: which override pipeline (if any) matches entityLayout. No
-// Renderer/Pipeline pool involved - safe to unit test directly.
+// Override pipeline for `entityLayout`, if any. Pure.
 inline std::optional<PipelineHandle> ResolveOverridePipeline(
     const PipelineOverrideSet& overrides, VertexLayout entityLayout)
 {
     return overrides.byLayout[static_cast<std::size_t>(entityLayout)];
 }
 
-// Deliberately a PLAIN, pure-data struct - no behavior, no methods, mirrors
-// this codebase's existing "describe intent as data, not as a deep call
-// chain" convention (see RenderPassDesc, TextureDesc, etc.).
-//
-// LIFETIME CONTRACT (read before storing one of these anywhere): every
-// pointer field below (`frameDebuggerCapture`, `batchedEntities`) is a
-// plain, non-owning observer, meant to be read exactly once, SYNCHRONOUSLY,
-// for the duration of the single DrawScene() call it is passed into - the
-// same lifetime rule RenderSystem::Draw()'s own `capture`/`batchedEntities`
-// parameters already carry today, just now reachable through a struct field
-// instead of a direct function argument. Do NOT build one of these once and
-// reuse it across multiple frames/calls while letting `batchedEntities` keep
-// pointing at a set that may not outlive this frame - construct (or refresh
-// every field of) a fresh SceneDrawRequest for each DrawScene() call
-// instead.
+// Skip entities whose world bounds (padded by a fraction of their largest extent) lie outside this view-projection.
+struct SceneCullRequest {
+    Mat4 viewProjection = Mat4::Identity();
+    float paddingFraction = 0.0f;
+};
+
+// Plain data describing one DrawScene() call.
+// The pointer fields are non-owning and read only during that call; build a fresh request per call.
 struct SceneDrawRequest {
     Mat4 viewProjection = Mat4::Identity();
 
-    // Per-vertex-layout override table. When set, resolves per entity via
-    // ResolveOverridePipeline() - lets one call draw primitives, untextured
-    // meshes, and textured meshes each through their own matching pipeline
-    // in a single pass. An entity whose layout has no entry is skipped,
-    // never drawn with its own original pipeline. nullopt (default)
-    // disables overriding entirely: every entity draws through its own
-    // MeshRenderer::pipeline, unchanged.
+    // Per-layout override pipelines; nullopt draws every entity with its own MeshRenderer::pipeline.
     std::optional<PipelineOverrideSet> pipelineOverrideSet = std::nullopt;
 
-    // Non-owning. Must stay valid for the duration of this one DrawScene()
-    // call only - see this struct's own LIFETIME CONTRACT comment above.
     IFrameDebuggerCaptureRecorder* frameDebuggerCapture = nullptr;
     std::optional<std::size_t> maxDrawCount = std::nullopt;
 
-    // Non-owning, nullptr == empty set. Must stay valid for the duration of
-    // this one DrawScene() call only - see this struct's own LIFETIME
-    // CONTRACT comment above.
+    // Entities drawn by GPU-driven batches instead; nullptr is an empty set.
     const std::unordered_set<Entity>* batchedEntities = nullptr;
 
-    // The ONE resolved, per-view, per-frame "scene services" descriptor set
-    // (set = 1) to bind for every entity drawn by this one DrawScene() call -
-    // DescriptorSetHandle::Invalid means "no scene services this call".
-    // NEVER resolved per-entity - this is a single, call-scoped constant,
-    // mirroring pipelineOverrideSet's own "one value for the whole call"
-    // contract above.
+    // Scene-services descriptor set (set = 1) bound for every draw of this call; Invalid binds none.
     DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid;
+
+    // Frustum cull applied per entity; nullopt draws everything.
+    std::optional<SceneCullRequest> cull = std::nullopt;
 };
 
-// The ONE new public convenience entry point every "redraw the scene for a
-// different purpose" pass can call - built-in passes AND external Project
-// Assembly passes both go through this, so there is only ever ONE
-// scene-drawing code path in the whole engine, not "the real one
-// RenderSystem.cpp uses" plus "a second one plugins are stuck
-// re-implementing". Thin, one-call forward into RenderSystem::Draw().
-//
-// `renderSystem` is reachable from a Project Assembly's own registered
-// callback via `core.GetGame().GetRenderSystem()`; the matching
-// `registry`/`renderer` come from that SAME `core` via
-// `core.GetRegistry()`/`core.GetRenderer()`.
+// The single scene-drawing entry point for built-in and project passes; forwards to RenderSystem::Draw().
 void DrawScene(RenderSystem& renderSystem, Registry& registry, Renderer& renderer,
     const SceneDrawRequest& request);
 

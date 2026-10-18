@@ -98,12 +98,14 @@ const char* VertexLayoutDebugName(VertexLayout layout)
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
     IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
     const std::unordered_set<Entity>& batchedEntities, std::optional<PipelineOverrideSet> pipelineOverrideSet,
-    DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd)
+    DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd, std::optional<SceneCullRequest> cull)
 {
     GTE_PROFILE_SCOPE("RenderSystem::Draw");
 
     const std::vector<DrawCommand> commands = CollectRenderables(registry);
     const bool hasOverrideSet = pipelineOverrideSet.has_value();
+    const std::array<Plane, 6> cullPlanes =
+        cull.has_value() ? ExtractFrustumPlanes(cull->viewProjection) : std::array<Plane, 6>{};
 
     std::size_t consideredCount = 0;
 
@@ -119,6 +121,14 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
         }
 
         const Mesh* mesh = m_meshes.TryGet(command.mesh);
+        if (cull.has_value() && mesh != nullptr && mesh->LocalBounds().has_value()) {
+            const AABB worldBounds =
+                PadAABB(TransformAABB(*mesh->LocalBounds(), command.model), cull->paddingFraction);
+            if (IsAABBOutsideFrustum(cullPlanes, worldBounds)) {
+                continue;
+            }
+        }
+
         const Pipeline* originalPipeline = m_pipelines.TryGet(command.pipeline);
         const Pipeline* pipeline = originalPipeline;
 
