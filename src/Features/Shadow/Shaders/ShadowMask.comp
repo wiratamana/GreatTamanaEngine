@@ -1,47 +1,176 @@
 #version 450
 layout(local_size_x = 16, local_size_y = 16) in;
 
-// Read-only storage buffer - this engine's convention for compute shader parameters.
+// Member names and order match ShadowMaskParamsGpu.
 layout(std430, binding = 0) readonly buffer ShadowMaskParams {
-    mat4 invViewProjection;       // Current view's own pixel -> world.
-    mat4 lightViewProjection;     // World -> light clip space.
-    vec4 biasAndStrengthAndTexel; // x=depthBias, y=unused, z=1/mapResolution, w=pad.
+    mat4 invViewProjection;
+    mat4 cascadeViewProjection[4];
+    float cascadeSplitFar[4];             // View depth where cascade i ends.
+    float cascadeBlendWidth[4];           // Blend band width at the end of cascade i.
+    float cascadeTexelWorld[4];
+    float cascadeDepthRange[4];
+    vec4 cameraPositionAndFadeStart;      // xyz eye, w fade start.
+    vec4 cameraForwardAndFadeEnd;         // xyz forward, w fade end.
+    vec4 sunDirection;                    // xyz toward the sun.
+    vec4 biasParams;                      // x const, y normal offset, z slope (texels).
+    vec4 filterParams;                    // x radius texels, y samples, z cascade count, w 1 / map size.
 } params;
 
-layout(binding = 1) uniform sampler2D shadowDepth;  // The shadow map itself.
-layout(binding = 2) uniform sampler2D sceneDepth;   // Current view's own depth.
-layout(binding = 3, r8) uniform writeonly image2D maskOutput; // Single channel, 0=lit 1=shadowed.
+layout(binding = 1) uniform sampler2D shadowDepth0;
+layout(binding = 2) uniform sampler2D shadowDepth1;
+layout(binding = 3) uniform sampler2D shadowDepth2;
+layout(binding = 4) uniform sampler2D shadowDepth3;
+layout(binding = 5) uniform sampler2D sceneDepth;
+layout(binding = 6, r8) uniform writeonly image2D maskOutput;    // 0 = lit, 1 = shadowed.
+layout(binding = 7, r8) uniform writeonly image2D cascadeOutput; // (cascade index + 1) / 8, 0 = none.
+
+const float kSkyDepth = 0.999999;
+
+ivec2 gDepthSize;
+
+float FetchDepth(ivec2 p)
+{
+    return texelFetch(sceneDepth, clamp(p, ivec2(0), gDepthSize - ivec2(1)), 0).r;
+}
+
+vec3 WorldAt(ivec2 p, float depth)
+{
+    ivec2 q = clamp(p, ivec2(0), gDepthSize - ivec2(1));
+    vec2 uv = (vec2(q) + 0.5) / vec2(gDepthSize);
+    vec4 world = params.invViewProjection * vec4(uv * 2.0 - 1.0, depth, 1.0);
+    return world.xyz / world.w;
+}
+
+// Geometric normal from depth, using the neighbour with the smaller depth step on each axis.
+vec3 NormalFromDepth(ivec2 p, float depth, vec3 position, vec3 eye)
+{
+    float dxp = FetchDepth(p + ivec2(1, 0));
+    float dxn = FetchDepth(p - ivec2(1, 0));
+    float dyp = FetchDepth(p + ivec2(0, 1));
+    float dyn = FetchDepth(p - ivec2(0, 1));
+    vec3 dx = abs(dxp - depth) < abs(depth - dxn) ? WorldAt(p + ivec2(1, 0), dxp) - position
+                                                  : position - WorldAt(p - ivec2(1, 0), dxn);
+    vec3 dy = abs(dyp - depth) < abs(depth - dyn) ? WorldAt(p + ivec2(0, 1), dyp) - position
+                                                  : position - WorldAt(p - ivec2(0, 1), dyn);
+    vec3 toEye = normalize(eye - position);
+    vec3 n = cross(dx, dy);
+    float len = length(n);
+    if (!(len > 1e-12)) {
+        return toEye;
+    }
+    n /= len;
+    return dot(n, toEye) < 0.0 ? -n : n;
+}
+
+float ShadowDepthAt(int k, vec2 uv)
+{
+    switch (k) {
+    case 0: return textureLod(shadowDepth0, uv, 0.0).r;
+    case 1: return textureLod(shadowDepth1, uv, 0.0).r;
+    case 2: return textureLod(shadowDepth2, uv, 0.0).r;
+    default: return textureLod(shadowDepth3, uv, 0.0).r;
+    }
+}
+
+// Shadowed fraction in [0,1], or -1 when the point lies outside cascade k.
+float SampleCascade(int k, vec3 position, vec3 normal, float nDotL, float rotation)
+{
+    float texel = params.cascadeTexelWorld[k];
+    float range = params.cascadeDepthRange[k];
+    float tanTheta = clamp(sqrt(max(1.0 - nDotL * nDotL, 0.0)) / max(nDotL, 0.05), 0.0, 10.0);
+
+    vec3 offsetPosition = position + normal * (params.biasParams.y * texel);
+    vec4 clip = params.cascadeViewProjection[k] * vec4(offsetPosition, 1.0);
+    vec3 ndc = clip.xyz / clip.w;
+    vec2 uv = ndc.xy * 0.5 + 0.5;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || ndc.z < 0.0 || ndc.z > 1.0) {
+        return -1.0;
+    }
+
+    float biasNdc = texel * (params.biasParams.x + params.biasParams.z * tanTheta) / range;
+    int samples = int(params.filterParams.y + 0.5);
+    float radiusUv = params.filterParams.x * params.filterParams.w;
+
+    float occluded = 0.0;
+    for (int i = 0; i < samples; ++i) {
+        vec2 offset = vec2(0.0);
+        if (samples > 1) {
+            float r = sqrt((float(i) + 0.5) / float(samples));
+            float theta = float(i) * 2.39996323 + rotation;
+            offset = r * vec2(cos(theta), sin(theta)) * radiusUv;
+        }
+        occluded += (ndc.z - biasNdc > ShadowDepthAt(k, uv + offset)) ? 1.0 : 0.0;
+    }
+    return occluded / float(max(samples, 1));
+}
 
 void main()
 {
-    ivec2 size = imageSize(maskOutput);
+    ivec2 maskSize = imageSize(maskOutput);
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
-    if (texel.x >= size.x || texel.y >= size.y) {
+    if (texel.x >= maskSize.x || texel.y >= maskSize.y) {
         return;
     }
 
-    vec2 uv = (vec2(texel) + 0.5) / vec2(size);
-    float depth = texture(sceneDepth, uv).r;
-    if (depth >= 0.999999) { // Clear-depth sky pixel - nothing to shadow.
+    // The mask can be one frame older than the depth size, so map by uv.
+    gDepthSize = textureSize(sceneDepth, 0);
+    vec2 uv = (vec2(texel) + 0.5) / vec2(maskSize);
+    ivec2 depthTexel = clamp(ivec2(uv * vec2(gDepthSize)), ivec2(0), gDepthSize - ivec2(1));
+    float depth = FetchDepth(depthTexel);
+    if (depth >= kSkyDepth) {
         imageStore(maskOutput, texel, vec4(0.0));
+        imageStore(cascadeOutput, texel, vec4(0.0));
         return;
     }
 
-    vec4 worldPos4 = params.invViewProjection * vec4(uv * 2.0 - 1.0, depth, 1.0);
-    vec3 worldPos = worldPos4.xyz / worldPos4.w;
-    vec4 lightClip = params.lightViewProjection * vec4(worldPos, 1.0);
-    vec3 lightNdc = lightClip.xyz / lightClip.w;
-    vec2 lightUv = lightNdc.xy * 0.5 + 0.5;
+    vec3 eye = params.cameraPositionAndFadeStart.xyz;
+    float fadeStart = params.cameraPositionAndFadeStart.w;
+    float fadeEnd = params.cameraForwardAndFadeEnd.w;
+    vec3 position = WorldAt(depthTexel, depth);
+    float viewDepth = dot(position - eye, params.cameraForwardAndFadeEnd.xyz);
+    if (viewDepth >= fadeEnd) {
+        imageStore(maskOutput, texel, vec4(0.0));
+        imageStore(cascadeOutput, texel, vec4(0.0));
+        return;
+    }
 
-    float shadowFactor = 0.0;
-    float texelSize = params.biasAndStrengthAndTexel.z;
-    for (int y = -1; y <= 1; ++y) {
-        for (int x = -1; x <= 1; ++x) {
-            float storedDepth = texture(shadowDepth, lightUv + vec2(x, y) * texelSize).r;
-            shadowFactor += (lightNdc.z - params.biasAndStrengthAndTexel.x > storedDepth) ? 1.0 : 0.0;
+    vec3 normal = NormalFromDepth(depthTexel, depth, position, eye);
+    float nDotL = dot(normal, params.sunDirection.xyz);
+
+    int count = int(params.filterParams.z + 0.5);
+    int c = count - 1;
+    for (int i = 0; i < count; ++i) {
+        if (viewDepth < params.cascadeSplitFar[i]) {
+            c = i;
+            break;
         }
     }
-    shadowFactor /= 9.0;
 
-    imageStore(maskOutput, texel, vec4(shadowFactor));
+    // A ramp, not a sign test: a normal rebuilt from depth is noisy far from the camera.
+    float away = 1.0 - smoothstep(-0.05, 0.05, nDotL);
+    float shadow = 1.0;
+    if (away < 1.0) {
+        float lit = max(nDotL, 0.05);
+        float rotation = 6.2831853 * fract(52.9829189 * fract(dot(vec2(texel), vec2(0.06711056, 0.00583715))));
+
+        shadow = SampleCascade(c, position, normal, lit, rotation);
+        if (shadow < 0.0) {
+            shadow = c + 1 < count ? max(SampleCascade(c + 1, position, normal, lit, rotation), 0.0) : 0.0;
+        }
+        if (c + 1 < count) {
+            float width = params.cascadeBlendWidth[c];
+            float start = params.cascadeSplitFar[c] - width;
+            if (width > 0.0 && viewDepth > start) {
+                float next = SampleCascade(c + 1, position, normal, lit, rotation);
+                if (next >= 0.0) {
+                    shadow = mix(shadow, next, clamp((viewDepth - start) / width, 0.0, 1.0));
+                }
+            }
+        }
+        shadow = max(shadow, away);
+    }
+    shadow *= 1.0 - smoothstep(fadeStart, fadeEnd, viewDepth);
+
+    imageStore(maskOutput, texel, vec4(shadow));
+    imageStore(cascadeOutput, texel, vec4(float(c + 1) / 8.0));
 }

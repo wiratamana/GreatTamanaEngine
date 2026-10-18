@@ -1,0 +1,59 @@
+#version 450
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(push_constant) uniform Push {
+    mat4 invViewProjection;
+    vec4 eyeAndPad;
+    vec4 forwardAndPad;
+} pc;
+
+layout(binding = 0) uniform sampler2D sceneDepth;
+
+// Positive float bits order like the floats; the second word holds ~bits so a max becomes a min.
+layout(std430, binding = 1) buffer ReduceResult {
+    uint minDepthBits;
+    uint invMaxDepthBits;
+} reduceResult;
+
+shared uint sMin[256];
+shared uint sInvMax[256];
+
+void main()
+{
+    uint lid = gl_LocalInvocationIndex;
+    ivec2 size = textureSize(sceneDepth, 0);
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+
+    uint nearBits = 0xFFFFFFFFu;
+    uint invFarBits = 0xFFFFFFFFu;
+    if (p.x < size.x && p.y < size.y) {
+        float depth = texelFetch(sceneDepth, p, 0).r;
+        if (depth < 0.999999) {
+            vec2 uv = (vec2(p) + 0.5) / vec2(size);
+            vec4 world = pc.invViewProjection * vec4(uv * 2.0 - 1.0, depth, 1.0);
+            float z = dot(world.xyz / world.w - pc.eyeAndPad.xyz, pc.forwardAndPad.xyz);
+            if (z > 0.0 && !isnan(z) && !isinf(z)) {
+                nearBits = floatBitsToUint(z);
+                invFarBits = ~nearBits;
+            }
+        }
+    }
+    sMin[lid] = nearBits;
+    sInvMax[lid] = invFarBits;
+    memoryBarrierShared();
+    barrier();
+
+    for (uint stride = 128u; stride > 0u; stride >>= 1u) {
+        if (lid < stride) {
+            sMin[lid] = min(sMin[lid], sMin[lid + stride]);
+            sInvMax[lid] = min(sInvMax[lid], sInvMax[lid + stride]);
+        }
+        memoryBarrierShared();
+        barrier();
+    }
+
+    if (lid == 0u && sMin[0] != 0xFFFFFFFFu) {
+        atomicMin(reduceResult.minDepthBits, sMin[0]);
+        atomicMin(reduceResult.invMaxDepthBits, sInvMax[0]);
+    }
+}
