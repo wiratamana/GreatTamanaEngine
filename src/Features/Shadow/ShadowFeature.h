@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ShadowDebugEndpoint.h"
 #include "ShadowMath.h"
 #include "ShadowTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
@@ -43,6 +44,8 @@ public:
     // The last state of `scope`'s view; NotRendered when that view has not rendered for a few frames.
     ShadowViewSnapshot Snapshot(rg::ViewScope scope) const;
 
+    fx::IFeatureDebugEndpoint* DebugEndpoint() noexcept override { return &m_debugEndpoint; }
+
 private:
     void CascadesPass(fx::PreOpaqueFrame& f);
     void DepthRangePass(fx::PostOpaqueFrame& f);
@@ -51,6 +54,7 @@ private:
 
     ShadowSettings m_settings;
     std::uint64_t m_newestFrame = 0;
+    ShadowDebugEndpoint m_debugEndpoint{ *this };
 
     fx::PerView<ShadowViewState> m_views;
     fx::ComputeShader m_maskShader{ "ShadowMask" };
