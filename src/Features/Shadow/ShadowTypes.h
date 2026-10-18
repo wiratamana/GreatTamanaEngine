@@ -22,17 +22,6 @@ struct ShadowSettings {
     float strength = 0.6f; // 0 = no darkening, 1 = fully black in shadow.
 };
 
-// Scene Services binding 8 (std140, 112 bytes). Member names and order match SceneGlobalUniformBlock in
-// DirectionalLightingAndReceiverMask.glsl; a test compares the offsets.
-struct SceneLightingUniformData {
-    Mat4 lightViewProjection;
-    float sunDirectionAndBias[4];
-    float sunIlluminanceAndStrength[4];
-    float occlusionTexelSizeAndPad[4];
-};
-static_assert(sizeof(SceneLightingUniformData) == 112);
-static_assert(std::is_trivially_copyable_v<SceneLightingUniformData>);
-
 // Matches the std430 block in ShadowMask.comp (144 bytes).
 struct ShadowMaskParamsGpu {
     Mat4 invViewProjection;

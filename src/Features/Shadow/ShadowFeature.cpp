@@ -18,7 +18,6 @@ ShadowFeature::ShadowFeature(fx::FeatureHost&) { }
 
 void ShadowFeature::Setup(fx::FeatureSetup& s)
 {
-    m_shadowMapSlot = s.DeclareSceneSlot("ShadowMap", fx::SceneSlotKind::Depth2D, /*preferredIndex=*/0);
     // The gate names the pass shown in the Render Graph panel; a disabled gate skips the whole callback.
     s.PreOpaque("Shadow.DepthPass", kDepthPassPriority, [this](fx::PreOpaqueFrame& f) { DepthPass(f); },
         fx::Gate{ "Shadow.DepthPass.Draw" });
@@ -61,8 +60,6 @@ void ShadowFeature::DepthPass(fx::PreOpaqueFrame& f)
         return; // Shaders not ready: no map this frame, so the mask and composite stay out.
     }
     m_mapData.Publish(f, ShadowMapData{ map, lightViewProjection });
-    f.PublishToScene(m_shadowMapSlot, map);
-    f.SetSceneUniforms(PackSceneLightingUniformData(sun, lightViewProjection, cfg, m_mapResolution));
 }
 
 void ShadowFeature::MaskPass(fx::PostOpaqueFrame& f)

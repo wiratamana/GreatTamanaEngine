@@ -38,7 +38,7 @@ const std::vector<KnownRiskBlackboardKeyRule>& KnownRiskBlackboardKeyRules()
             { kViewBackgroundReplayCallbackKey, "Core.ViewBackgroundReplayCallback", "DrawSkyBackground" },
             { "GpuSkinning.OutputBuffers"_passId, "GpuSkinning.OutputBuffers", "GpuSkinning" },
         };
-        AddChannelRules(rules, "Shadow", "Map", "Shadow.DepthPass.Draw");
+        AddChannelRules(rules, "Shadow", "Map", "Shadow.Cascade0.Draw");
         AddChannelRules(rules, "Shadow", "Mask", "Shadow.Mask.Dispatch");
         // Published only when both LUT passes ran, so either toggle gates it.
         AddSharedChannelRule(rules, "Atmosphere", "SharedLuts", "AtmosphereTransmittanceLutPass");

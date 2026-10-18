@@ -20,10 +20,6 @@ Vec3 ReconstructWorldPositionFromDepth(
 // Depth bias and map resolution are left as given.
 ShadowSettings SanitizeShadowSettings(const ShadowSettings& settings) noexcept;
 
-// Packs the per-frame sun/shadow data into the byte layout scene-services binding 8 expects.
-SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirectionalLight& sun,
-    const Mat4& lightViewProjection, const ShadowSettings& safeSettings, std::uint32_t mapResolutionInUse) noexcept;
-
 // Parameter block of the mask compute pass. A zero resolution gives a zero texel size.
 ShadowMaskParamsGpu MakeShadowMaskParams(const Mat4& invViewProjection, const Mat4& lightViewProjection,
     float depthBias, std::uint32_t mapResolution) noexcept;

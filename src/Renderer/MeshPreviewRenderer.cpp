@@ -6,7 +6,6 @@
 #include "Renderer.h"
 #include "RenderTexture.h"
 #include "ShaderFile.h"
-#include "Texture2D.h"
 #include "RenderGraph/CommandBuffer.h"
 #include "../Core/Logging.h"
 #include "../Core/PipelineDesc.h"
@@ -35,7 +34,7 @@ struct PreviewPush {
 };
 static_assert(sizeof(PreviewPush) == 128, "layout differs from MeshPreview.vert");
 
-// Must cover the scene global uniform block that MeshPreview.frag declares.
+// Covers the scene global uniform block of MeshPreview.frag; all zeros selects the default light.
 constexpr std::uint64_t kDummyUniformBlockSize = 128;
 
 } // namespace
@@ -140,19 +139,15 @@ struct MeshPreviewRenderer::Impl {
     // Idles the GPU, then members release whatever was built (also for a half-built instance).
     ~Impl() { renderer.WaitForGpuIdle(); }
 
-    // Set 1 stands in for MeshPreview.frag's lighting interface; one layout serves the set and the pipeline.
+    // Set 1 holds only the lighting block; one layout serves the set and the pipeline.
     void Build()
     {
         constexpr DescriptorBindingDesc kSetOneBindings[] = {
-            { .binding = 0, .kind = DescriptorKind::CombinedImageSampler, .stages = ShaderStageMask::Fragment },
             { .binding = 8, .kind = DescriptorKind::UniformBuffer, .stages = ShaderStageMask::Fragment },
         };
         zeroLayout.emplace(renderer, std::span<const DescriptorBindingDesc>{});
         setOneLayout.emplace(renderer, kSetOneBindings);
         setOne.emplace(renderer, setOneLayout->handle);
-
-        const unsigned char whitePixel[4] = { 255, 255, 255, 255 };
-        whiteTexture.emplace(renderer.CreateTexture2D(whitePixel, 1, 1, "MeshPreviewDummyWhite"));
 
         uniformBuffer.emplace(renderer.CreateBuffer(
             kDummyUniformBlockSize, BufferUsage::UniformBuffer, BufferMemoryUsage::CpuToGpu, "MeshPreviewDummyUniformBlock"));
@@ -160,7 +155,6 @@ struct MeshPreviewRenderer::Impl {
         uniformBuffer->Upload(zeroBytes.data(), zeroBytes.size());
 
         setOne->set.Rewrite(std::vector<DescriptorWrite>{
-            DescriptorWrite::CombinedImageSampler(0, whiteTexture->View(), whiteTexture->Sampler()),
             DescriptorWrite::UniformBuffer(8, uniformBuffer->Native(), 0, kDummyUniformBlockSize),
         });
 
@@ -214,7 +208,6 @@ struct MeshPreviewRenderer::Impl {
     std::optional<LayoutOwner> zeroLayout;
     std::optional<LayoutOwner> setOneLayout;
     std::optional<SetOwner> setOne;
-    std::optional<Texture2D> whiteTexture;
     std::optional<Buffer> uniformBuffer;
     std::optional<Pipeline> pipeline;
 

@@ -45,7 +45,6 @@ private:
     bool m_resolutionWarned = false;
 
     fx::PerView<ShadowViewState> m_views;
-    fx::SceneSlot m_shadowMapSlot;
     fx::ComputeShader m_maskShader{ "ShadowMask" };
     fx::FullscreenShader m_compositeShader{ "ShadowComposite" };
     fx::SceneShaderSet m_depthShaders = fx::SceneShaderSet::DepthOnly("ShadowDepth");

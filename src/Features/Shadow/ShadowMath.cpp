@@ -52,26 +52,6 @@ ShadowSettings SanitizeShadowSettings(const ShadowSettings& settings) noexcept
     return sanitized;
 }
 
-SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirectionalLight& sun,
-    const Mat4& lightViewProjection, const ShadowSettings& safeSettings, std::uint32_t mapResolutionInUse) noexcept
-{
-    SceneLightingUniformData data{};
-    data.lightViewProjection = lightViewProjection;
-
-    data.sunDirectionAndBias[0] = sun.directionTowardSun.x;
-    data.sunDirectionAndBias[1] = sun.directionTowardSun.y;
-    data.sunDirectionAndBias[2] = sun.directionTowardSun.z;
-    data.sunDirectionAndBias[3] = safeSettings.depthBias;
-
-    data.sunIlluminanceAndStrength[0] = sun.sunIlluminance.x;
-    data.sunIlluminanceAndStrength[1] = sun.sunIlluminance.y;
-    data.sunIlluminanceAndStrength[2] = sun.sunIlluminance.z;
-    data.sunIlluminanceAndStrength[3] = safeSettings.strength;
-
-    data.occlusionTexelSizeAndPad[0] = mapResolutionInUse > 0 ? 1.0f / static_cast<float>(mapResolutionInUse) : 0.0f;
-    return data;
-}
-
 ShadowMaskParamsGpu MakeShadowMaskParams(const Mat4& invViewProjection, const Mat4& lightViewProjection,
     float depthBias, std::uint32_t mapResolution) noexcept
 {
