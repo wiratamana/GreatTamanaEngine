@@ -1,6 +1,8 @@
 #include "Frame.h"
 
+#include "ComputeShader.h"
 #include "VerbSupport.h"
+#include "../../Renderer/RenderGraph/Shader.h"
 #include "../Logging.h"
 
 #include <string>
@@ -28,6 +30,19 @@ void Frame::ReportOnce(std::string_view text) const
         m_noContextLogged = true;
         GTE_LOG_ERROR(kLogCategory, std::string(text));
     }
+}
+
+float Frame::DeltaSeconds() const noexcept
+{
+    return m_context != nullptr ? m_context->deltaSeconds : 0.0f;
+}
+
+bool Frame::ShaderReady(ComputeShader& shader)
+{
+    if (m_context == nullptr || m_context->builder == nullptr) {
+        return false;
+    }
+    return detail::ShaderOf(shader).IsReady(*m_context->builder);
 }
 
 bool Frame::PassEnabled(rg::StaticName passName) const

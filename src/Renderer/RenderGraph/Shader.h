@@ -64,6 +64,9 @@ public:
     Shader(Shader&&) = delete;
     Shader& operator=(Shader&&) = delete;
 
+    // Builds the shader if needed. True when it is ready; false while no renderer exists or a failed build cools down.
+    bool IsReady(RenderGraphBuilder& builder) { return EnsureBuilt(builder); }
+
 private:
     friend class ComputePass;
     friend class FullscreenPass;

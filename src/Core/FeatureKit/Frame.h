@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -28,6 +29,18 @@ namespace detail {
 struct FrameContext;
 } // namespace detail
 
+// Longest frame time the kit reports; a stall counts as this much.
+inline constexpr float kMaxFrameDeltaSeconds = 0.25f;
+
+// NaN, infinite or negative gives 0; above the maximum gives the maximum.
+constexpr float ClampFrameDeltaSeconds(double seconds) noexcept
+{
+    if (!(seconds > 0.0) || seconds > std::numeric_limits<double>::max()) {
+        return 0.0f;
+    }
+    return seconds > static_cast<double>(kMaxFrameDeltaSeconds) ? kMaxFrameDeltaSeconds : static_cast<float>(seconds);
+}
+
 // Per-callback context. Textures it hands out carry the serial of this view in this frame (see FrameSerial).
 // A frame made without an engine context (tests) turns every verb into a logged no-op.
 class Frame {
@@ -44,6 +57,15 @@ public:
     rg::ViewScope Scope() const noexcept { return m_view.scope; }
     Registry& Scene() const noexcept { return *m_scene; }
     std::uint64_t Serial() const noexcept { return m_serial; }
+
+    // Frame counter; the same for every view scope of one frame.
+    std::uint64_t FrameIndex() const noexcept { return m_serial == 0 ? 0 : (m_serial - 1) / rg::kViewScopeCount; }
+
+    // Real seconds since the previous frame, clamped to kMaxFrameDeltaSeconds. 0 without an engine context.
+    float DeltaSeconds() const noexcept;
+
+    // True when `shader` is built (builds it now if needed). False while a failed build cools down.
+    bool ShaderReady(ComputeShader& shader);
 
     // True when `texture` was made for this view in this frame, or by a Shared callback of this frame.
     // A copy kept from an earlier frame is refused.

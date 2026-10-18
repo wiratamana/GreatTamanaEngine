@@ -211,6 +211,11 @@ rg::RenderViewId Core::CreateRenderView(const char* name, std::uint32_t width, s
     return m_renderViewRegistry.CreateOrGetView(name, desc);
 }
 
+bool Core::ResizeRenderView(rg::RenderViewId view, std::uint32_t width, std::uint32_t height)
+{
+    return m_renderViewRegistry.ResizeView(view, width, height);
+}
+
 RenderTexture* Core::FindRenderViewTarget(rg::RenderViewId view) const noexcept
 {
     return m_renderViewRegistry.FindViewTarget(view);

@@ -23,9 +23,14 @@ struct ColorDepth {
 };
 
 // A render view owned by the engine, one per view scope, imported into the graph every frame.
-// Its size is fixed when it is first made: asking for another size logs one error and keeps the old target.
+// Acquire() with another size resizes it (the GPU goes idle once); a failed create or resize backs off
+// before it retries, and a different size retries at once. A resize is refused while the view runs pipelined.
+// Changing between depth-only and color logs one error and keeps the old target.
 class OffscreenTarget {
 public:
+    // Size Trim() shrinks an unused target to.
+    static constexpr std::uint32_t kTrimmedExtent = 4;
+
     explicit OffscreenTarget(std::string_view baseName);
     ~OffscreenTarget();
 
@@ -33,9 +38,13 @@ public:
     OffscreenTarget& operator=(const OffscreenTarget&) = delete;
 
     // The target for the frame's view; kept alive so the pass that writes it is never culled.
-    // Invalid when the engine could not make the view.
+    // Invalid when the engine could not make or resize the view.
     Texture Acquire(Frame& frame, DepthOnly request);
     Texture Acquire(Frame& frame, ColorDepth request);
+
+    // Shrinks an existing target to kTrimmedExtent to free its memory. Never creates one; the next
+    // Acquire() of the full size resizes it back. Call only while the owning pass is enabled.
+    void Trim(Frame& frame);
 
 private:
     struct Impl;

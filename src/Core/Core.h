@@ -157,6 +157,9 @@ public:
         bool depthOnly = false, bool allowDepthSampledAccess = false, PixelFormat colorFormat = PixelFormat::Undefined);
     RenderTexture* FindRenderViewTarget(rg::RenderViewId view) const noexcept;
 
+    // Resizes a view made by CreateRenderView (waits for the GPU to go idle). False when it failed.
+    bool ResizeRenderView(rg::RenderViewId view, std::uint32_t width, std::uint32_t height);
+
     // Registers a post-processing pass executed after scene composition.
     bool AddScreenPostProcessPass(const char* debugName, ProjectRenderFeatureCallback callback,
         RenderFeatureBlendMode blendMode = RenderFeatureBlendMode::AlphaOver,

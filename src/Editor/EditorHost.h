@@ -6,6 +6,7 @@
 #include "../Core/Core.h"
 #include "../Core/EditorCapabilities.h"
 #include "../Core/EngineContext.h"
+#include "../Core/Plugins/IEngineFeatureModule.h"
 #include "EditorHostServices.h"
 #include "EditorLayer.h"
 #include "../Game/Game.h"
@@ -26,8 +27,6 @@
 #include "FrameDebuggerPassMetadataRecorder.h"
 
 namespace gte {
-
-class IEngineFeatureModule;
 
 // Editor composition root: owns SDL, the authoring Window, Core, the editor layer, the automation bridges
 // and the embedded HTTP server. Run() is the main loop.

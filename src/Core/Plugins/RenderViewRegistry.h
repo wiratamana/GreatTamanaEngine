@@ -2,17 +2,12 @@
 
 #include "../../Renderer/RenderGraph/RenderGraphHandles.h"
 #include "../PixelFormat.h"
-#include "../UiTextureHandle.h"
 
 #include <cstdint>
 #include <memory>
 
-// Owns every dynamically created view's persistent render target, keyed by
-// name. "Create once, reuse every frame, live for the process's whole
-// lifetime" - a view's resolution and lifetime are both fixed at creation,
-// no resize/eviction/teardown API. Public, zero Vulkan dependency - every
-// Vulkan-bearing field lives in a private Impl (Renderer/Internal/
-// RenderViewRegistryImpl.h).
+// Owns every dynamically created view's persistent render target, keyed by name.
+// Views live for the process lifetime and can be resized. No Vulkan types here.
 namespace gte {
 
 class Renderer;
@@ -49,23 +44,17 @@ public:
     RenderViewRegistry(const RenderViewRegistry&) = delete;
     RenderViewRegistry& operator=(const RenderViewRegistry&) = delete;
 
-    // Idempotent by name - refused (reserved name / null-or-empty name /
-    // mismatched desc on an existing name) requests return
-    // rg::RenderViewId::Shared() and insert nothing. May throw
-    // std::runtime_error if the underlying render target construction
-    // genuinely fails (e.g. out-of-device-memory) - the registry itself
-    // remains safely retryable afterward for the same name.
+    // Idempotent by name. A refused request (reserved or empty name, mismatched desc on an existing name)
+    // returns rg::RenderViewId::Shared() and inserts nothing. Throws std::runtime_error when the render
+    // target cannot be created; the same name can be retried afterwards.
     rg::RenderViewId CreateOrGetView(const char* name, const RenderViewDesc& desc);
 
-    // nullptr if `view` was never created via CreateOrGetView() above.
-    // Kept for Core::FindRenderViewTarget()'s own callers - RenderTexture
-    // stays forward-declared only, never fully included here.
-    RenderTexture* FindViewTarget(rg::RenderViewId view) const noexcept;
+    // Resizes the view's images (waits for the GPU to go idle). True when the view has the requested size
+    // afterwards. On failure the target is dropped, so the next CreateOrGetView of that name rebuilds it.
+    bool ResizeView(rg::RenderViewId view, std::uint32_t width, std::uint32_t height);
 
-    // Opaque, Vulkan-free sibling of FindViewTarget() above - for a caller
-    // that only wants to display this view (ImGui::Image()), never touch it
-    // as a real render target.
-    UiTextureHandle FindViewUiTextureHandle(rg::RenderViewId view) const noexcept;
+    // nullptr if `view` was never created via CreateOrGetView().
+    RenderTexture* FindViewTarget(rg::RenderViewId view) const noexcept;
 
 private:
     struct Impl;

@@ -13,8 +13,10 @@ namespace gte::fx {
 
 // The pass names a registration answers to in the toggle panel. Empty: the registered callback name.
 // A callback that declares several separately toggled passes lists them all.
+// Always() is for work that is not a render pass and must never be silenced by a toggle.
 struct Gate {
     std::vector<std::string> passNames;
+    bool always = false;
 
     Gate() = default;
     Gate(std::initializer_list<const char*> names)
@@ -23,6 +25,13 @@ struct Gate {
             passNames.emplace_back(name);
         }
     }
+
+    static Gate Always()
+    {
+        Gate gate;
+        gate.always = true;
+        return gate;
+    }
 };
 
 // Whether the callback may run: any listed pass (or the registered name, when the gate is empty) is enabled.
@@ -30,6 +39,9 @@ struct Gate {
 template <typename Pred>
 bool GateAllows(const Gate& gate, std::string_view registeredName, Pred&& isEnabled)
 {
+    if (gate.always) {
+        return true;
+    }
     if (gate.passNames.empty()) {
         return isEnabled(registeredName);
     }

@@ -1,4 +1,4 @@
-﻿#include "RenderViewRegistry.h"
+#include "RenderViewRegistry.h"
 
 #include "../../Renderer/Internal/RenderViewRegistryImpl.h"
 #include "../../Renderer/Renderer.h"
@@ -7,6 +7,8 @@
 
 #include <cassert>
 #include <cstring>
+#include <exception>
+#include <string>
 
 namespace gte {
 
@@ -112,13 +114,42 @@ rg::RenderViewId RenderViewRegistry::CreateOrGetView(const char* name, const Ren
     if (!DescsMatchForSameName(desc, it->second.desc)) {
         if (!it->second.hasLoggedDescMismatch) {
             GTE_LOG_ERROR("RenderViewRegistry",
-                std::string("CreateOrGetView(\"") + name + "\") was re-requested with a DIFFERENT desc than its "
-                "existing view - this is always a caller bug (views are fixed-size for their whole lifetime); the "
-                "EXISTING view is returned unchanged.");
+                std::string("CreateOrGetView(\"") + name + "\") was re-requested with a different desc than its "
+                "existing view; the existing view is returned unchanged. Use ResizeView to change the size.");
             it->second.hasLoggedDescMismatch = true;
         }
     }
     return it->second.id;
+}
+
+bool RenderViewRegistry::ResizeView(rg::RenderViewId view, std::uint32_t width, std::uint32_t height)
+{
+    assert(std::this_thread::get_id() == m_impl->mainThreadId
+        && "RenderViewRegistry::ResizeView is main-thread-only - called from a different thread.");
+    for (auto& [name, entry] : m_impl->views) {
+        if (!(entry.id == view)) {
+            continue;
+        }
+        if (!entry.target.has_value()) {
+            return false;
+        }
+        if (entry.desc.width == width && entry.desc.height == height) {
+            return true;
+        }
+        try {
+            m_impl->renderer->ResizeRenderTexture(*entry.target, static_cast<int>(width), static_cast<int>(height));
+        } catch (const std::exception& e) {
+            // The failed resize may leave the target without images, so drop it; CreateOrGetView rebuilds it.
+            entry.target.reset();
+            GTE_LOG_ERROR("RenderViewRegistry",
+                std::string("ResizeView(\"") + name + "\") failed, the view target was dropped: " + e.what());
+            return false;
+        }
+        entry.desc.width = width;
+        entry.desc.height = height;
+        return true;
+    }
+    return false;
 }
 
 RenderTexture* RenderViewRegistry::FindViewTarget(rg::RenderViewId view) const noexcept
@@ -131,15 +162,6 @@ RenderTexture* RenderViewRegistry::FindViewTarget(rg::RenderViewId view) const n
         }
     }
     return nullptr;
-}
-
-UiTextureHandle RenderViewRegistry::FindViewUiTextureHandle(rg::RenderViewId view) const noexcept
-{
-    RenderTexture* target = FindViewTarget(view);
-    if (target == nullptr) {
-        return UiTextureHandle::Invalid;
-    }
-    return m_impl->renderer->GetUiTextureHandle(*target);
 }
 
 } // namespace gte

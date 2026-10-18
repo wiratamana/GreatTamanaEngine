@@ -167,6 +167,7 @@ private:
         context.featureName = m_name;
         context.event = ToPassEvent(registration.stage);
         context.toggles = &m_core.GetRenderPassToggleRegistryMutable();
+        context.deltaSeconds = ClampFrameDeltaSeconds(m_core.GetTime().UnscaledDeltaTime());
         context.channels = &m_channelNames;
 
         detail::RunInput input;

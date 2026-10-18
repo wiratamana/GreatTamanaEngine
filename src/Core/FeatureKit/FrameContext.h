@@ -25,6 +25,7 @@ struct FrameContext {
     const rg::RenderPassToggleRegistry* toggles = nullptr; // Null means "everything enabled".
     rg::ViewScope scope = rg::ViewScope::Shared;
     std::uint64_t serial = 0;
+    float deltaSeconds = 0.0f; // Clamped real frame time; 0 when unknown.
     ChannelNames* channels = nullptr; // Null skips the key-clash check.
 };
 
