@@ -107,7 +107,7 @@ It covers only the keys in `KnownRiskBlackboardKeyRules()`
 | --- | --- |
 | `Core.ViewBackgroundReplayCallback` | `DrawSkyBackground` |
 | `GpuSkinning.OutputBuffers` | `GpuSkinning` |
-| Shadow `Map` channel, Game and Scene view | `Shadow.DepthPass.Draw` |
+| Shadow `Map` channel, Game and Scene view | `Shadow.Cascade0.Draw` |
 | Shadow `Mask` channel, Game and Scene view | `Shadow.Mask.Dispatch` |
 | Atmosphere `SharedLuts` shared channel | `AtmosphereTransmittanceLutPass` and `AtmosphereMultiScatteringLutPass` (published only when both ran) |
 

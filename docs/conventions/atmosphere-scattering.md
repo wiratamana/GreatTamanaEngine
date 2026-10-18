@@ -42,7 +42,7 @@ captures the raw Game view target. When the composite pass is off, the raw view 
   `destinationVolume`, `transmittanceLut`, `multiScatteringLut`, `skyViewLut`, `sourceColor`, `sourceDepth`,
   `aerialPerspectiveVolume`. Rename a variable and the chain logs the valid names.
 - **`AtmosphereParametersGpu` and `AtmosphereFrameUniforms` are read-only storage buffers** (`layout(std430, ...)
-  readonly buffer`), never a uniform block. Scene Services binding 8 (`src/Shaders/DirectionalLightingAndReceiverMask.glsl`)
+  readonly buffer`), never a uniform block. Scene Services binding 8 (`src/Shaders/DirectionalLighting.glsl`)
   is the engine's one uniform-buffer exception.
 - **The aerial perspective volume is a real 3D `VolumeTexture`**, imported into the graph with `Tex3D` dimension and
   kept alive by `PersistentVolume`. A texture is only a graph root when kept; a pass whose only write is a volume must be

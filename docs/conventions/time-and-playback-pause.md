@@ -36,10 +36,10 @@ touching time-keeping, the pause/step toolbar, or anything that reads
     stepping).
   - `UnscaledDeltaTime()` - always the real, wall-clock elapsed seconds since
     the last `Advance()` call, REGARDLESS of pause (Unity's own
-    `Time.unscaledDeltaTime` equivalent) - reserved for any future
-    pause-independent per-frame logic; nothing in this campaign currently
-    reads it (the Editor's Scene camera is driven by raw per-pixel mouse
-    deltas, not a time base at all - see `EditorCamera::Update()`).
+    `Time.unscaledDeltaTime` equivalent). The feature kit reads it through
+    `fx::Frame::DeltaSeconds()` (clamped to 0.25 s), so render-feature smoothing keeps
+    running while playback is paused. The Editor's Scene camera is driven by raw
+    per-pixel mouse deltas, not a time base (see `EditorCamera::Update()`).
   - `IsPaused()` - this frame's raw pause/resume state, as decided by
     whoever owns the Play/Pause UI.
   - `IsFrozenThisFrame()` - **the one flag `Game::Update()` actually branches

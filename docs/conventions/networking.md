@@ -614,6 +614,25 @@ registering a new named texture:
   `task_manager/editor-core-separation-7/PHASE0_MASTER_STRATEGY.md` for the
   full five-phase campaign writeup.
 
+- **`GET /feature_debug/list`, `/feature_debug/state`, `/feature_debug/set`, `/feature_debug/invoke`** read and change
+  a built-in render feature that exposes `fx::IFeatureDebugEndpoint` (`Feature::DebugEndpoint()`). The routes are
+  generic: Core knows no feature name. One bridge (`FeatureDebugCommandBridge`) hands the request to the main thread,
+  and `EditorHost` serves it before the frame is built, so an edit shows in the frame built right after it.
+
+  | Route | Query | Reply |
+  |---|---|---|
+  | `/feature_debug/list` | none | `{"features":["Shadow", ...]}` (only features with an endpoint) |
+  | `/feature_debug/state` | `name` | `{"feature":"Shadow","fields":{...}}` |
+  | `/feature_debug/set` | `name`, then every other key is a value to set | the new state; all values apply or none |
+  | `/feature_debug/invoke` | `name`, `action`, extra keys are arguments | the state after the action |
+
+  Status codes: 400 for a bad query, an unknown or read-only key, or an unparsable value (the body names the key as
+  `"key"`); 404 when no feature of that name has an endpoint; 503 when the bridge is missing or another request is
+  pending; 504 when the main thread did not answer in time. A 504 request may still be applied later, so read the
+  state before you repeat a `set`. Limits: `name` is required, a duplicate key is a 400, at most 64 arguments, a key
+  up to 64 bytes, a value up to 256 bytes. A non-finite number is written as `null`. The Shadow endpoint is
+  described in `shadow-mapping.md`.
+
 - **`GET /render_graph/set_pass_enabled`, `GET /render_graph/passes`,
   `GET /render_graph/set_feature_enabled`, `GET /render_graph/set_feature_priority`,
   `GET /render_graph/set_blur_enabled`, `GET /render_graph/set_gbuffer_enabled`**

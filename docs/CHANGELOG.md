@@ -4,6 +4,20 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## Cascaded shadow maps (branch `fix/great-refactor`)
+
+- Shadow: up to four auto-fitted cascades with stable texel snapping, depth-range fitting from a GPU readback (two frames
+  late), per-cascade caster culling, live shadow-map resolution, one receive path in the mask compute shader and debug
+  views. See [shadow-mapping.md](conventions/shadow-mapping.md).
+- `SceneLighting` feature writes the sun uniforms (32 bytes, valid flag) every frame; material shaders keep only Lambert
+  (`DirectionalLighting.glsl`) and never turn black when Shadow is off.
+- Feature kit: `Frame::FrameIndex`, `Frame::DeltaSeconds` (real time, clamped to 0.25 s), `Frame::ShaderReady`,
+  `fx::GpuReadback`, `Gate::Always`, `SceneDrawChain::CullToFrustum`, `OffscreenTarget` resize and `Trim`.
+- Generic `GET /feature_debug/list|state|set|invoke` routes for features that expose `IFeatureDebugEndpoint`.
+- A dockable "Shadow" editor window. Primitive meshes now have local bounds.
+- Removed: the single fixed light box, the old single shadow-map texture (use `Shadow.Cascade<i>.*`), the shadow scene slot,
+  the receiver-mask half of the lighting include and the world-position varying of the mesh shaders.
+
 ## Render pass API and feature kit (branch `fix/great-refactor`)
 
 - Render pass API (`gte::rg`): one reflected `rg::Shader` for compute and graphics, binding by name with inferred
@@ -14,7 +28,7 @@ engine. For the short, current-state summary, see the main
   `GTE_REGISTER_RENDER_FEATURE`; frame verbs `Compute`, `Fullscreen`, `SceneDraw`, `Blit`, `Keep`, `PublishToScene`,
   `SetSceneUniforms`; resources `PerView`, `PersistentTarget`, `OffscreenTarget`, `GpuParams`, `Channel`, `SceneSlot`;
   shader wrappers `ComputeShader`, `FullscreenShader`, `SceneShaderSet`. The Shadow feature is written on the kit
-  (`ShadowFeature.cpp` about 110 lines) and has no CI allowlist entry; `ShadowMaskRenderer` is gone.
+  and has no CI allowlist entry.
 - `TextureDesc::hasColor`: a depth-only texture is the only one that must be sampled through `rg::Depth()`; a view
   target with a depth companion is an ordinary color texture for `Bind()` and `Target()`.
 - `fx::Texture` serials are per view and frame (`FrameSerial`), so textures pass between callbacks of one view.

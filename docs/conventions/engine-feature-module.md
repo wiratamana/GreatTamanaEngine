@@ -301,8 +301,7 @@ inside that feature's own folder; only files truly exclusive to it do.
 2. Write `ShadowTypes.h` (settings struct, plain data, no Vulkan types).
 3. Write `ShadowMath.h/.cpp` — pure CPU helper functions FIRST, before any
    engine/Vulkan code, mirroring `AtmosphereMath.h`'s own "CPU oracle first"
-   precedent. Add a matching `tests/Features/ShadowMathTests.cpp` (Tier 1 —
-   see `TESTING.md`).
+   precedent (cascade fit, settings sanitizing, GPU block packing).
 4. Write `ShadowFeature.h`: derive from `fx::Feature` (see
    `docs/conventions/render-feature-authoring.md`):
    ```cpp
@@ -311,8 +310,9 @@ inside that feature's own folder; only files truly exclusive to it do.
        explicit ShadowFeature(fx::FeatureHost& host);
        const char* Name() const override { return "Shadow"; }
        void Setup(fx::FeatureSetup& setup) override;
+       fx::IFeatureDebugEndpoint* DebugEndpoint() noexcept override;
    private:
-       void DepthPass(fx::PreOpaqueFrame& f);
+       void CascadesPass(fx::PreOpaqueFrame& f);
        ShadowSettings m_settings;
    };
    ```

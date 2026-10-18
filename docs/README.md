@@ -95,6 +95,9 @@ than subsystem-specific):
 - **[Atmosphere Scattering](conventions/atmosphere-scattering.md)** — the
   physically-based real-time atmosphere-scattering + aerial-perspective
   system and its permanent CPU oracle, `AtmosphereMath.h/.cpp`.
+- **[Shadow Mapping](conventions/shadow-mapping.md)** — cascaded shadow maps fitted
+  to the camera and the visible depth range, the single mask receive path, and the
+  `/feature_debug/*` HTTP recipe.
 - **[Entity-Component-System (ECS)](conventions/ecs.md)** — the `AGENTS.md`-
   side coding conventions for entities/components (distinct from, and
   cross-linked with, [`architecture/ecs.md`](architecture/ecs.md)'s engine
