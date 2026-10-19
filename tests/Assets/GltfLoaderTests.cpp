@@ -82,6 +82,7 @@ TEST_F(GltfLoaderTest, ReportsMaterialTextureSlotsAndAlphaMode)
     EXPECT_EQ(m.indexCount, 3u);
     EXPECT_EQ(m.alphaMode, AlphaMode::Mask);
     EXPECT_FLOAT_EQ(m.alphaCutoff, 0.25f);
+    EXPECT_TRUE(m.useBaseColorFactor);
     EXPECT_NE(r.materials.textures[0].sourcePath.find("white.png"), std::string::npos);
 }
 

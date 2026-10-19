@@ -290,6 +290,12 @@ std::size_t MaterialExtrasByteSize(const RigFileData& rig)
     return 4 + rig.materials.materials.size() * (4 * 4 + 1 + 4);
 }
 
+// Bytes of the trailing color-flag section: count + u8 per material.
+std::size_t MaterialColorFlagsByteSize(const RigFileData& rig)
+{
+    return 4 + rig.materials.materials.size();
+}
+
 // Bytes of the trailing joint-override section: count + (i32 + 3 f32) per override.
 std::size_t JointOverrideByteSize(const RigFileData& rig)
 {
@@ -302,7 +308,8 @@ TEST(RigFileTest, DecodeSucceedsOnABlobWithNoTrailingSections)
     RigFileData rig = BuildSampleRigData();
     rig.jointPhysicsOverrides.clear();
     std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
-    const std::size_t trailing = JointOverrideByteSize(rig) + MaterialExtrasByteSize(rig);
+    const std::size_t trailing =
+        JointOverrideByteSize(rig) + MaterialExtrasByteSize(rig) + MaterialColorFlagsByteSize(rig);
     ASSERT_GE(encoded.size(), trailing);
     encoded.resize(encoded.size() - trailing);
 
@@ -316,9 +323,9 @@ TEST(RigFileTest, DecodeSucceedsOnABlobWithNoTrailingSections)
 TEST(RigFileTest, DecodeSucceedsOnABlobWithoutMaterialExtras)
 {
     RigFileData rig = BuildSampleRigData();
-    rig.jointPhysicsOverrides.push_back(JointPhysicsOverride{ 2, 0.1f, 0.2f, 0.3f });
+    rig.jointPhysicsOverrides.assign(1, JointPhysicsOverride{ 2, 0.1f, 0.2f, 0.3f });
     std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
-    encoded.resize(encoded.size() - MaterialExtrasByteSize(rig));
+    encoded.resize(encoded.size() - MaterialExtrasByteSize(rig) - MaterialColorFlagsByteSize(rig));
 
     const std::optional<RigFileData> decoded = DecodeRigDataFromBytes(encoded);
     ASSERT_TRUE(decoded.has_value());
@@ -335,7 +342,7 @@ TEST(RigFileTest, DecodeFailsWhenJointOverrideSectionIsPresentButTruncated)
     RigFileData rig = BuildSampleRigData();
     rig.jointPhysicsOverrides.push_back(JointPhysicsOverride{ 0, 0.1f, 0.2f, 0.3f });
     std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
-    encoded.resize(encoded.size() - MaterialExtrasByteSize(rig)); // Drop the extras so the cut lands in the overrides.
+    encoded.resize(encoded.size() - MaterialExtrasByteSize(rig) - MaterialColorFlagsByteSize(rig)); // Cut lands in the overrides.
     encoded.resize(encoded.size() - 2);                           // Mid-way through the last float.
 
     EXPECT_FALSE(DecodeRigDataFromBytes(encoded).has_value());
@@ -346,7 +353,7 @@ TEST(RigFileTest, DecodeFailsWhenMaterialExtrasAreTruncated)
     RigFileData rig = BuildSampleRigData();
     ASSERT_FALSE(rig.materials.materials.empty());
     std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
-    encoded.resize(encoded.size() - 2);
+    encoded.resize(encoded.size() - MaterialColorFlagsByteSize(rig) - 2); // Cut lands inside the extras.
 
     EXPECT_FALSE(DecodeRigDataFromBytes(encoded).has_value());
 }
@@ -372,6 +379,35 @@ TEST(RigFileTest, MaterialExtrasSurviveEncodeThenDecode)
     EXPECT_EQ(d.emissiveTextureIndex, 6);
     EXPECT_EQ(d.alphaMode, AlphaMode::Mask);
     EXPECT_FLOAT_EQ(d.alphaCutoff, 0.25f);
+}
+
+TEST(RigFileTest, UseBaseColorFactorSurvivesEncodeThenDecode)
+{
+    RigFileData rig = BuildSampleRigData();
+    ASSERT_FALSE(rig.materials.materials.empty());
+    rig.materials.materials[0].useBaseColorFactor = true;
+
+    const std::optional<RigFileData> decoded = DecodeRigDataFromBytes(EncodeRigDataToBytes(rig));
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_TRUE(decoded->materials.materials[0].useBaseColorFactor);
+    for (std::size_t i = 1; i < decoded->materials.materials.size(); ++i) {
+        EXPECT_FALSE(decoded->materials.materials[i].useBaseColorFactor);
+    }
+}
+
+// A blob that ends after the material extras decodes with useBaseColorFactor = false.
+TEST(RigFileTest, DecodeSucceedsOnABlobWithoutColorFlags)
+{
+    RigFileData rig = BuildSampleRigData();
+    rig.materials.materials[0].useBaseColorFactor = true;
+    std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
+    encoded.resize(encoded.size() - MaterialColorFlagsByteSize(rig));
+
+    const std::optional<RigFileData> decoded = DecodeRigDataFromBytes(encoded);
+    ASSERT_TRUE(decoded.has_value());
+    for (const Material& m : decoded->materials.materials) {
+        EXPECT_FALSE(m.useBaseColorFactor);
+    }
 }
 
 } // namespace

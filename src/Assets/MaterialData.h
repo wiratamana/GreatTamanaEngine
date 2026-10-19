@@ -69,6 +69,10 @@ struct Material {
     AlphaMode alphaMode = AlphaMode::Opaque;
     float alphaCutoff = 0.5f;
 
+    // True for glTF materials: `diffuse` is a base color factor, and a material without a texture draws as flat color.
+    // False (PMX, STL): `diffuse` is not applied to rendering.
+    bool useBaseColorFactor = false;
+
     // Number of consecutive MeshData::indices this material draws, in materials order starting at 0.
     std::uint32_t indexCount = 0;
 };

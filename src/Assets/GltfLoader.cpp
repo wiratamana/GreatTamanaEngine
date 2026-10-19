@@ -284,6 +284,7 @@ Material ConvertMaterial(const cgltf_material& source, std::size_t index, Textur
 {
     Material m;
     m.name = source.name != nullptr ? source.name : "Material_" + std::to_string(index);
+    m.useBaseColorFactor = true;
 
     if (source.has_pbr_metallic_roughness) {
         const cgltf_pbr_metallic_roughness& pbr = source.pbr_metallic_roughness;
@@ -346,6 +347,7 @@ GltfLoadResult LoadGltfModel(const std::string& filePath)
         buckets[i].material = ConvertMaterial(data->materials[i], i, textures);
     }
     buckets.back().material.name = "Default";
+    buckets.back().material.useBaseColorFactor = true;
 
     std::size_t skippedPrimitives = 0;
     for (const cgltf_node* node : CollectSceneMeshNodes(*data)) {

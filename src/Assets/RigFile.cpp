@@ -697,6 +697,27 @@ bool ReadMaterialExtras(BinaryReader& r, std::vector<Material>* materials)
     return r.Ok();
 }
 
+void WriteMaterialColorFlags(BinaryWriter& w, const std::vector<Material>& materials)
+{
+    w.U32(static_cast<std::uint32_t>(materials.size()));
+    for (const Material& m : materials) {
+        w.Bool(m.useBaseColorFactor);
+    }
+}
+
+// The count must match the material list read earlier.
+bool ReadMaterialColorFlags(BinaryReader& r, std::vector<Material>* materials)
+{
+    const std::uint32_t count = r.U32();
+    if (!r.Ok() || count != materials->size()) {
+        return false;
+    }
+    for (Material& m : *materials) {
+        m.useBaseColorFactor = r.Bool();
+    }
+    return r.Ok();
+}
+
 } // namespace
 
 std::vector<std::uint8_t> EncodeRigDataToBytes(const RigFileData& rig)
@@ -712,6 +733,7 @@ std::vector<std::uint8_t> EncodeRigDataToBytes(const RigFileData& rig)
     WriteMaterialData(w, rig.materials);
     WriteJointPhysicsOverrides(w, rig.jointPhysicsOverrides); // Always written, count may be 0.
     WriteMaterialExtras(w, rig.materials.materials);
+    WriteMaterialColorFlags(w, rig.materials.materials);
 
     return bytes;
 }
@@ -752,6 +774,11 @@ std::optional<RigFileData> DecodeRigDataFromBytes(const std::vector<std::uint8_t
     }
     if (r.Cursor() < bytes.size()) {
         if (!ReadMaterialExtras(r, &rig.materials.materials)) {
+            return std::nullopt;
+        }
+    }
+    if (r.Cursor() < bytes.size()) {
+        if (!ReadMaterialColorFlags(r, &rig.materials.materials)) {
             return std::nullopt;
         }
     }

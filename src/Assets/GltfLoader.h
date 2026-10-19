@@ -9,7 +9,7 @@ namespace gte {
 
 // Version of the glTF import output. Bump it whenever the importer changes what it writes,
 // so cached imports made by an older importer are redone.
-inline constexpr int kGltfImporterVersion = 1;
+inline constexpr int kGltfImporterVersion = 2;
 
 // Result of one LoadGltfModel() call; always fully populated.
 struct GltfLoadResult {
