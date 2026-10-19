@@ -19,6 +19,11 @@ enum class TextureFilter : std::uint8_t {
     Nearest,
 };
 
+enum class TextureAddressMode : std::uint8_t {
+    ClampToEdge,
+    Repeat,
+};
+
 // Everything needed to create any GPU image. Aspect (color/depth/stencil) comes from `format`.
 struct TextureCreateInfo {
     TextureDimension dimension = TextureDimension::Tex2D;
@@ -26,6 +31,7 @@ struct TextureCreateInfo {
     int height = 1;
     int depth = 1;  // Z slices, Tex3D only.
     int layers = 1; // Array2D/Cube only.
+    std::uint32_t mipLevels = 1; // > 1 makes the sampler trilinear.
     PixelFormat format = PixelFormat::RGBA8_UNorm;
     bool renderTarget = false; // Color or depth attachment, depending on `format`.
     bool sampled = true;
@@ -35,6 +41,8 @@ struct TextureCreateInfo {
     bool perLayerViews = false; // One extra 2D view per layer (see LayerView()).
     bool createImage = true;    // false: only records size/format, creates no Vulkan objects (depth-only RenderTexture).
     TextureFilter filter = TextureFilter::Linear;
+    TextureAddressMode addressMode = TextureAddressMode::ClampToEdge;
+    float maxAnisotropy = 1.0f; // > 1 enables anisotropic filtering; the device feature must be enabled.
     const char* debugName = nullptr; // Stored by pointer - must outlive the Texture.
 };
 

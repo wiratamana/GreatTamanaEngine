@@ -1,6 +1,7 @@
 #include "VulkanDevice.h"
 
 #include "FormatCapabilities.h"
+#include "../SamplerAnisotropy.h"
 
 #include <cstring>
 #include <optional>
@@ -152,6 +153,7 @@ VulkanDevice::VulkanDevice(VulkanDevice&& other) noexcept
     , m_timestampCapability(other.m_timestampCapability)
     , m_supportsDrawIndirectCount(other.m_supportsDrawIndirectCount)
     , m_supportsDepthBlit(other.m_supportsDepthBlit)
+    , m_materialAnisotropy(other.m_materialAnisotropy)
 {
 }
 
@@ -168,6 +170,7 @@ VulkanDevice& VulkanDevice::operator=(VulkanDevice&& other) noexcept
         m_timestampCapability = other.m_timestampCapability;
         m_supportsDrawIndirectCount = other.m_supportsDrawIndirectCount;
         m_supportsDepthBlit = other.m_supportsDepthBlit;
+        m_materialAnisotropy = other.m_materialAnisotropy;
     }
     return *this;
 }
@@ -239,6 +242,17 @@ void VulkanDevice::CreateLogicalDevice()
 
     const char* extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
+    // Enable samplerAnisotropy only when the device reports it; an unsupported feature fails vkCreateDevice().
+    VkPhysicalDeviceFeatures supportedFeatures{};
+    vkGetPhysicalDeviceFeatures(m_physicalDevice, &supportedFeatures);
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
+    const bool anisotropySupported = supportedFeatures.samplerAnisotropy == VK_TRUE;
+    m_materialAnisotropy = ChooseMaterialAnisotropy(anisotropySupported, properties.limits.maxSamplerAnisotropy);
+
+    VkPhysicalDeviceFeatures enabledFeatures{};
+    enabledFeatures.samplerAnisotropy = anisotropySupported ? VK_TRUE : VK_FALSE;
+
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.pNext = &features13;
@@ -246,6 +260,7 @@ void VulkanDevice::CreateLogicalDevice()
     createInfo.pQueueCreateInfos = queueCreateInfos.data();
     createInfo.enabledExtensionCount = 1;
     createInfo.ppEnabledExtensionNames = extensions;
+    createInfo.pEnabledFeatures = &enabledFeatures;
 
     const VkResult result = vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device);
     if (result != VK_SUCCESS) {

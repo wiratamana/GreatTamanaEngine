@@ -26,6 +26,8 @@ struct MeshAssetPart {
     // CPU copy of `mesh`'s triangle indices, so a GPU-skinned counterpart can own a private index buffer.
     // Empty for a boneless model.
     std::vector<std::uint32_t> indices;
+    // True for an alpha-masked material: drawn with the alpha-test pipeline.
+    bool alphaTested = false;
 };
 
 // Decodes an imported mesh asset once per distinct absolute *.gta path, uploads it as MeshAssetParts and
@@ -56,12 +58,15 @@ private:
     PipelineHandle EnsureMeshPipeline(RenderSystem& renderSystem, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout);
     PipelineHandle EnsureTexturedMeshPipeline(
         RenderSystem& renderSystem, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout);
+    PipelineHandle EnsureTexturedAlphaTestPipeline(
+        RenderSystem& renderSystem, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
     const std::vector<MeshAssetPart>& EnsureMeshAsset(
         RenderSystem& renderSystem, Renderer& renderer, const std::string& absoluteGtaPath);
 
     PipelineHandle m_meshPipeline;
     PipelineHandle m_texturedMeshPipeline;
+    PipelineHandle m_texturedAlphaTestPipeline;
     MaterialTextureGpuCache m_materialTextureCache;
 
     std::unordered_map<std::string, std::vector<MeshAssetPart>> m_meshAssetCache;

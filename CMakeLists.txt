@@ -804,6 +804,9 @@ add_library(gte_core STATIC
     src/Renderer/RenderTarget.h
     src/Renderer/RenderTexture.cpp
     src/Renderer/Texture.cpp
+    src/Renderer/MipChain.h
+    src/Renderer/MipChain.cpp
+    src/Renderer/SamplerAnisotropy.h
     src/Renderer/Texture.h
     src/Renderer/DepthBuffer.h
     src/Renderer/RenderTexture.h
@@ -1662,7 +1665,8 @@ endif()
 # actual game executable needs these staged next to it - the test suite
 # never renders anything, see tests/CMakeLists.txt.
 gte_add_shader(GreatTamanaEditor src/Shaders/Triangle.vert)
-gte_add_shader(GreatTamanaEditor src/Shaders/Triangle.frag)
+gte_add_shader(GreatTamanaEditor src/Shaders/Triangle.frag
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl)
 
 # The shared "imported mesh" draw path (src/Renderer/MeshVertex.h,
 # Pipeline.h's VertexLayout::PositionNormal, Game::CreateMeshEntityFromGtaFile()
@@ -1673,7 +1677,8 @@ gte_add_shader(GreatTamanaEditor src/Shaders/Triangle.frag)
 # of whether the Editor's "Project" panel (today's only way to actually
 # trigger a spawn - see Panels/HierarchyPanel.cpp/ScenePanel.cpp) is built.
 gte_add_shader(GreatTamanaEditor src/Shaders/Mesh.vert)
-gte_add_shader(GreatTamanaEditor src/Shaders/Mesh.frag)
+gte_add_shader(GreatTamanaEditor src/Shaders/Mesh.frag
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl)
 
 # GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
 # PHASE2 (task_manager/render-pass-5/
@@ -1694,14 +1699,14 @@ gte_add_shader(GreatTamanaEditor src/Shaders/MeshInstanced.vert)
 # debug/Editor-only tool, so it must work in a non-Editor, release build too.
 gte_add_shader(GreatTamanaEditor src/Shaders/FrustumCull.comp)
 
-# The TEXTURED half of that same "imported mesh" draw path (src/Renderer/
-# MeshVertex.h's MeshVertexUv, Pipeline.h's VertexLayout::PositionNormalUv,
-# Game::EnsureMeshAsset() - src/Game/Game.h/.cpp) - a per-material PMX
-# submesh whose material resolves to a real texture file uses this pair
-# instead of Mesh.vert/.frag above. Unconditional for the same reason as
-# Mesh.vert/.frag above.
+# Textured half of the imported-mesh draw path (VertexLayout::PositionNormalUv): a material with a
+# texture uses this pair instead of Mesh.vert/.frag. The AlphaTest fragment shader serves alpha-masked
+# materials.
 gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMesh.vert)
-gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMesh.frag)
+gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMesh.frag
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl)
+gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMeshAlphaTest.frag
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl)
 
 # GPU Vertex Skinning, Phase 2 (compute kernels) -
 # task_manager/gpu_skinning/GPU_SKINNING_PHASE2_COMPUTE_KERNEL_STRATEGY_v1.md.
@@ -1724,7 +1729,8 @@ gte_add_shader(GreatTamanaEditor src/Shaders/SkinVerticesPositionNormalUv.comp)
 # GTE_ENABLE_PROJECT_PANEL's target_sources() block above).
 if(GTE_ENABLE_PROJECT_PANEL)
     gte_add_shader(GreatTamanaEditor src/Shaders/MeshPreview.vert)
-    gte_add_shader(GreatTamanaEditor src/Shaders/MeshPreview.frag)
+    gte_add_shader(GreatTamanaEditor src/Shaders/MeshPreview.frag
+        EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl)
 endif()
 
 # The Editor's "Scene" panel infinite ground grid (Unity-style procedural

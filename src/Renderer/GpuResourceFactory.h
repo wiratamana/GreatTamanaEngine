@@ -98,8 +98,10 @@ public:
         const char* debugName = nullptr) const;
 
     // Textures
+    // `generateMips` uploads a full box-filtered mip chain; `maxAnisotropy` > 1 needs the device feature.
     Texture2D CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName = nullptr,
-        bool allowStorageImageAccess = false) const;
+        bool allowStorageImageAccess = false, TextureAddressMode addressMode = TextureAddressMode::ClampToEdge,
+        bool generateMips = false, float maxAnisotropy = 1.0f) const;
 
     VolumeTexture CreateVolumeTexture(
         int width, int height, int depth, PixelFormat format, const char* debugName = nullptr) const;

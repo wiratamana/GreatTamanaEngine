@@ -14,8 +14,8 @@ void SceneLightingFeature::Setup(fx::FeatureSetup& s)
 {
     // Not a render pass: Always() keeps a pass toggle from silencing the uniform write.
     s.PreOpaque("SceneLighting.Uniforms", kUniformsPriority,
-        [](fx::PreOpaqueFrame& f) {
-            f.SetSceneUniforms(PackSceneLightingUniformData(ResolveActiveDirectionalLight(f.Scene())));
+        [this](fx::PreOpaqueFrame& f) {
+            f.SetSceneUniforms(PackSceneLightingUniformData(ResolveActiveDirectionalLight(f.Scene()), m_settings));
         },
         fx::Gate::Always());
 }

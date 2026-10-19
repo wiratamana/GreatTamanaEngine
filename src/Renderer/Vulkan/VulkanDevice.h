@@ -50,6 +50,10 @@ public:
     // BlitSpec::srcIsDepth/dstIsDepth must check it (RenderGraph asserts on it).
     bool SupportsDepthBlit() const noexcept { return m_supportsDepthBlit; }
 
+    // Anisotropy level material samplers may use: 1 when samplerAnisotropy is unsupported (and not
+    // enabled on the device), else min(8, device limit). Probed once before vkCreateDevice().
+    float MaterialAnisotropy() const noexcept { return m_materialAnisotropy; }
+
     // The one choke point for submits to the graphics queue: VkQueue access must be externally
     // synchronized and several systems submit to it. Nothing else may call vkQueueSubmit on it.
     VkResult SubmitToGraphicsQueue(const VkSubmitInfo2& submit, VkFence fence) const
@@ -78,6 +82,7 @@ private:
 
     bool m_supportsDrawIndirectCount = false;
     bool m_supportsDepthBlit = false;
+    float m_materialAnisotropy = 1.0f;
 
     // Guards SubmitToGraphicsQueue(); mutable so that method can stay const.
     mutable std::mutex m_graphicsQueueSubmitMutex;

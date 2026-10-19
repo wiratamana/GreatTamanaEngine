@@ -35,14 +35,14 @@ VkImageViewType ViewTypeFor(TextureDimension dimension, std::uint32_t layers) no
 }
 
 VkImageViewCreateInfo MakeViewInfo(VkImage image, VkImageViewType type, VkFormat format, VkImageAspectFlags aspect,
-    std::uint32_t baseLayer, std::uint32_t layerCount) noexcept
+    std::uint32_t levelCount, std::uint32_t baseLayer, std::uint32_t layerCount) noexcept
 {
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = image;
     viewInfo.viewType = type;
     viewInfo.format = format;
-    viewInfo.subresourceRange = { aspect, 0, 1, baseLayer, layerCount };
+    viewInfo.subresourceRange = { aspect, 0, std::max(levelCount, 1U), baseLayer, layerCount };
     return viewInfo;
 }
 
@@ -143,7 +143,7 @@ void Texture::Create()
         imageInfo.format = m_format;
         imageInfo.extent = { static_cast<std::uint32_t>(m_width), static_cast<std::uint32_t>(m_height),
             is3D ? static_cast<std::uint32_t>(m_depth) : 1U };
-        imageInfo.mipLevels = 1;
+        imageInfo.mipLevels = std::max(m_info.mipLevels, 1U);
         imageInfo.arrayLayers = imageLayers;
         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
         imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -190,8 +190,8 @@ void Texture::Create()
             }
         }
 
-        const VkImageViewCreateInfo viewInfo =
-            MakeViewInfo(m_image, ViewTypeFor(m_info.dimension, m_layers), m_format, aspect, 0, imageLayers);
+        const VkImageViewCreateInfo viewInfo = MakeViewInfo(
+            m_image, ViewTypeFor(m_info.dimension, m_layers), m_format, aspect, m_info.mipLevels, 0, imageLayers);
         if (vkCreateImageView(m_device, &viewInfo, nullptr, &m_imageView) != VK_SUCCESS) {
             throw std::runtime_error("Texture: vkCreateImageView failed.");
         }
@@ -200,7 +200,7 @@ void Texture::Create()
             m_layerViews.reserve(imageLayers);
             for (std::uint32_t i = 0; i < imageLayers; ++i) {
                 const VkImageViewCreateInfo layerInfo =
-                    MakeViewInfo(m_image, VK_IMAGE_VIEW_TYPE_2D, m_format, aspect, i, 1);
+                    MakeViewInfo(m_image, VK_IMAGE_VIEW_TYPE_2D, m_format, aspect, 1, i, 1);
                 VkImageView layerView = VK_NULL_HANDLE;
                 if (vkCreateImageView(m_device, &layerInfo, nullptr, &layerView) != VK_SUCCESS) {
                     throw std::runtime_error("Texture: vkCreateImageView (per-layer) failed.");
@@ -211,16 +211,25 @@ void Texture::Create()
 
         if (m_info.filter != TextureFilter::None) {
             const VkFilter filter = m_info.filter == TextureFilter::Nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+            const VkSamplerAddressMode address = m_info.addressMode == TextureAddressMode::Repeat
+                ? VK_SAMPLER_ADDRESS_MODE_REPEAT
+                : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            const bool mipmapped = m_info.mipLevels > 1;
+
             VkSamplerCreateInfo samplerInfo{};
             samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
             samplerInfo.magFilter = filter;
             samplerInfo.minFilter = filter;
-            samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-            samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-            samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-            samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            samplerInfo.mipmapMode = mipmapped ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+            samplerInfo.addressModeU = address;
+            samplerInfo.addressModeV = address;
+            samplerInfo.addressModeW = address;
             samplerInfo.minLod = 0.0f;
-            samplerInfo.maxLod = 1.0f;
+            samplerInfo.maxLod = mipmapped ? static_cast<float>(m_info.mipLevels) : 1.0f;
+            if (m_info.maxAnisotropy > 1.0f) {
+                samplerInfo.anisotropyEnable = VK_TRUE;
+                samplerInfo.maxAnisotropy = m_info.maxAnisotropy;
+            }
             if (vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler) != VK_SUCCESS) {
                 throw std::runtime_error("Texture: vkCreateSampler failed.");
             }

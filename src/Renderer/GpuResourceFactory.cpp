@@ -3,6 +3,7 @@
 #include "../Core/Logging.h"
 #include "Compute/ComputePipeline.h"
 #include "DescriptorSet.h"
+#include "MipChain.h"
 #include "GraphicsHandleRegistry.h" // RegisterDescriptorSet() - sets leave this file as engine handles.
 #include "SceneServicesDescriptorSet.h" // gte::kSceneServiceSlotCount for the pool budget static_asserts.
 #include "VulkanFormatInfo.h" // ToVkFormat() for pre-construction capability checks.
@@ -11,6 +12,7 @@
 #include "Vulkan/FormatCapabilities.h"
 #include "Vulkan/VulkanDevice.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <limits>
@@ -356,23 +358,47 @@ Mesh GpuResourceFactory::CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer
     return Mesh(std::move(sharedVertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
 }
 
-Texture2D GpuResourceFactory::CreateTexture2D(
-    const void* pixelsRgba8, int width, int height, const char* debugName, bool allowStorageImageAccess) const
+Texture2D GpuResourceFactory::CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName,
+    bool allowStorageImageAccess, TextureAddressMode addressMode, bool generateMips, float maxAnisotropy) const
 {
     if (allowStorageImageAccess && !SupportsStorageImageUsage(m_physicalDevice, VK_FORMAT_R8G8B8A8_UNORM)) {
         throw std::runtime_error(
             "GpuResourceFactory::CreateTexture2D: requested allowStorageImageAccess = true, but this physical "
             "device does not support VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for VK_FORMAT_R8G8B8A8_UNORM.");
     }
-    Texture2D texture(m_allocator, m_memoryTracker, m_device, width, height, debugName, allowStorageImageAccess);
+
+    // Level 0 only, unless a mip chain was requested and could be built.
+    MipChainRgba8 chain;
+    if (generateMips && width > 0 && height > 0) {
+        chain = BuildMipChainRgba8(static_cast<const std::uint8_t*>(pixelsRgba8), static_cast<std::uint32_t>(width),
+            static_cast<std::uint32_t>(height));
+    }
+    const std::uint32_t levelCount = std::max(chain.levelCount, 1U);
+
+    Texture2D texture(m_allocator, m_memoryTracker, m_device, width, height, debugName, allowStorageImageAccess,
+        addressMode, levelCount, maxAnisotropy);
 
     const auto safeWidth = static_cast<uint64_t>(texture.Width());
     const auto safeHeight = static_cast<uint64_t>(texture.Height());
-    const uint64_t size = safeWidth * safeHeight * 4;
+    const void* uploadData = chain.levelCount > 0 ? static_cast<const void*>(chain.pixels.data()) : pixelsRgba8;
+    const uint64_t size = chain.levelCount > 0 ? chain.pixels.size() : safeWidth * safeHeight * 4;
+
+    // One copy region per mip level (a single region without a chain).
+    std::vector<VkBufferImageCopy> regions;
+    regions.reserve(levelCount);
+    for (std::uint32_t level = 0; level < levelCount; ++level) {
+        VkBufferImageCopy region{};
+        region.bufferOffset = chain.levelCount > 0 ? chain.levelByteOffsets[level] : 0;
+        region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1 };
+        region.imageExtent = chain.levelCount > 0
+            ? VkExtent3D{ chain.levelWidths[level], chain.levelHeights[level], 1 }
+            : VkExtent3D{ static_cast<std::uint32_t>(texture.Width()), static_cast<std::uint32_t>(texture.Height()), 1 };
+        regions.push_back(region);
+    }
 
     // Unnamed throwaway staging buffer.
     Buffer staging = CreateBuffer(size, BufferUsage::TransferSrc, BufferMemoryUsage::CpuToGpu);
-    staging.Upload(pixelsRgba8, static_cast<std::size_t>(size));
+    staging.Upload(uploadData, static_cast<std::size_t>(size));
 
     ImmediateSubmitInternal([&](VkCommandBuffer cmd) {
         VkImageMemoryBarrier toTransferDst{};
@@ -382,22 +408,14 @@ Texture2D GpuResourceFactory::CreateTexture2D(
         toTransferDst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         toTransferDst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         toTransferDst.image = texture.Image();
-        toTransferDst.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        toTransferDst.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, levelCount, 0, 1 };
         toTransferDst.srcAccessMask = 0;
         toTransferDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
             nullptr, 1, &toTransferDst);
 
-        VkBufferImageCopy copyRegion{};
-        copyRegion.bufferOffset = 0;
-        copyRegion.bufferRowLength = 0;
-        copyRegion.bufferImageHeight = 0;
-        copyRegion.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        copyRegion.imageOffset = { 0, 0, 0 };
-        copyRegion.imageExtent = { static_cast<std::uint32_t>(texture.Width()),
-            static_cast<std::uint32_t>(texture.Height()), 1 };
-        vkCmdCopyBufferToImage(
-            cmd, staging.Native(), texture.Image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+        vkCmdCopyBufferToImage(cmd, staging.Native(), texture.Image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            static_cast<std::uint32_t>(regions.size()), regions.data());
 
         VkImageMemoryBarrier toShaderRead = toTransferDst;
         toShaderRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -459,7 +477,8 @@ TextureArray2D GpuResourceFactory::CreateTextureArray(int width, int height, int
 MaterialTexture GpuResourceFactory::CreateMaterialTexture2D(
     const void* pixelsRgba8, int width, int height, const char* debugName) const
 {
-    Texture2D texture = CreateTexture2D(pixelsRgba8, width, height, debugName);
+    Texture2D texture = CreateTexture2D(pixelsRgba8, width, height, debugName, false, TextureAddressMode::Repeat,
+        /*generateMips=*/true, m_vulkanDevice->MaterialAnisotropy());
 
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;

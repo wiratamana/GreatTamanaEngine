@@ -9,13 +9,18 @@ namespace gte {
 class Texture2D : public Texture {
 public:
     Texture2D(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
-        int height, const char* debugName = nullptr, bool allowStorageImageAccess = false)
+        int height, const char* debugName = nullptr, bool allowStorageImageAccess = false,
+        TextureAddressMode addressMode = TextureAddressMode::ClampToEdge, std::uint32_t mipLevels = 1,
+        float maxAnisotropy = 1.0f)
         : Texture(allocator, std::move(tracker), device,
               TextureCreateInfo{ .width = width,
                   .height = height,
+                  .mipLevels = mipLevels,
                   .format = PixelFormat::RGBA8_UNorm,
                   .storage = allowStorageImageAccess,
                   .transferDst = true,
+                  .addressMode = addressMode,
+                  .maxAnisotropy = maxAnisotropy,
                   .debugName = debugName })
     {
     }

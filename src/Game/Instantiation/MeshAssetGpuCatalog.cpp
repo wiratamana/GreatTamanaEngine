@@ -70,6 +70,18 @@ PipelineHandle MeshAssetGpuCatalog::EnsureTexturedMeshPipeline(
     return m_texturedMeshPipeline;
 }
 
+PipelineHandle MeshAssetGpuCatalog::EnsureTexturedAlphaTestPipeline(
+    RenderSystem& renderSystem, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout)
+{
+    if (!m_texturedAlphaTestPipeline.IsValid()) {
+        m_texturedAlphaTestPipeline = renderSystem.RegisterPipeline(
+            renderer.CreatePipeline("shaders/TexturedMesh.vert.spv", "shaders/TexturedMeshAlphaTest.frag.spv",
+                VertexLayout::PositionNormalUv, true, "TexturedMesh.vert/TexturedMeshAlphaTest.frag (PositionNormalUv)",
+                /*useInstanceBuffer=*/false, sceneServicesSetLayout));
+    }
+    return m_texturedAlphaTestPipeline;
+}
+
 const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
     RenderSystem& renderSystem, Renderer& renderer, const std::string& absoluteGtaPath)
 {
@@ -116,13 +128,16 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
         std::size_t count = 0;
         MaterialTextureHandle texture;
         std::string name;
+        bool alphaTested = false;
     };
     std::vector<TexturedSlice> texturedSlices;
 
     for (const MeshMaterialSlice& slice : slices) {
         MaterialTextureHandle texture = kInvalidMaterialTextureHandle;
+        bool alphaTested = false;
         if (slice.materialIndex >= 0 && static_cast<std::size_t>(slice.materialIndex) < materials.materials.size()) {
             const Material& material = materials.materials[static_cast<std::size_t>(slice.materialIndex)];
+            alphaTested = material.alphaMode == AlphaMode::Mask;
             if (material.textureIndex >= 0 && static_cast<std::size_t>(material.textureIndex) < materials.textures.size()) {
                 const Guid& textureGuid = materials.textures[static_cast<std::size_t>(material.textureIndex)].guid;
                 texture = m_materialTextureCache.Resolve(renderSystem, renderer, textureDatabase, textureGuid);
@@ -130,7 +145,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
         }
 
         if (texture.IsValid()) {
-            texturedSlices.push_back(TexturedSlice{ slice.start, slice.count, texture, slice.name });
+            texturedSlices.push_back(TexturedSlice{ slice.start, slice.count, texture, slice.name, alphaTested });
         } else {
             untexturedIndices.insert(untexturedIndices.end(), mesh->indices.begin() + static_cast<std::ptrdiff_t>(slice.start),
                 mesh->indices.begin() + static_cast<std::ptrdiff_t>(slice.start + slice.count));
@@ -188,6 +203,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
             gpuMesh.SetLocalBounds(ComputeSubsetLocalAABB(mesh->positions, sliceIndices));
             const MeshHandle handle = renderSystem.RegisterMesh(std::move(gpuMesh));
             MeshAssetPart part{ handle, slice.texture, slice.name };
+            part.alphaTested = slice.alphaTested;
             if (skinned) {
                 part.indices = sliceIndices;
             }
@@ -233,9 +249,10 @@ EntityBlueprint MeshAssetGpuCatalog::Resolve(RenderSystem& renderSystem, Rendere
     root.meshAssetSourcePath = absoluteGtaPath;
 
     for (const MeshAssetPart& part : parts) {
-        const PipelineHandle pipeline = part.texture.IsValid()
-            ? EnsureTexturedMeshPipeline(renderSystem, renderer, sceneServicesSetLayout)
-            : EnsureMeshPipeline(renderSystem, renderer, sceneServicesSetLayout);
+        const PipelineHandle pipeline = !part.texture.IsValid()
+            ? EnsureMeshPipeline(renderSystem, renderer, sceneServicesSetLayout)
+            : (part.alphaTested ? EnsureTexturedAlphaTestPipeline(renderSystem, renderer, sceneServicesSetLayout)
+                                : EnsureTexturedMeshPipeline(renderSystem, renderer, sceneServicesSetLayout));
 
         EntityBlueprintNode child;
         child.mesh = part.mesh;

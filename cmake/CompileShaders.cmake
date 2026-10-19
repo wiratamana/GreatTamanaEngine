@@ -50,6 +50,9 @@ endfunction()
 # Stages a shader that another target already compiles (gte_add_shader) next to <target>'s exe.
 function(gte_stage_shader TARGET SHADER_NAME)
     set(COMPILED "${CMAKE_BINARY_DIR}/shaders/${SHADER_NAME}.spv")
+    # The output is produced by another directory's custom command; mark it generated here so
+    # configure works before it has been built.
+    set_source_files_properties("${COMPILED}" PROPERTIES GENERATED TRUE)
     target_sources(${TARGET} PRIVATE "${COMPILED}")
     add_custom_command(TARGET ${TARGET} POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:${TARGET}>/shaders"

@@ -2294,6 +2294,7 @@ set(GTE_TEST_SOURCES
     Application/RenderGraphControlCommandBridgeTests.cpp
     Application/ProjectAssemblyHotReloadCommandBridgeTests.cpp
     Renderer/VertexTests.cpp
+    Renderer/MipChainTests.cpp
     Renderer/PrimitiveMeshGeneratorTests.cpp
     Renderer/ResourcePoolTests.cpp
     Renderer/PipelineHandleTests.cpp

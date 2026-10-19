@@ -112,6 +112,8 @@ TEST(SceneLightingUniformLayoutTest, EveryFieldMatchesTheStd140BlockInName_Order
     const std::vector<std::pair<const char*, std::size_t>> expected = {
         { "sunDirectionAndValid", offsetof(SceneLightingUniformData, sunDirectionAndValid) },
         { "sunIlluminanceAndPad", offsetof(SceneLightingUniformData, sunIlluminanceAndPad) },
+        { "skyAmbientAndIntensity", offsetof(SceneLightingUniformData, skyAmbientAndIntensity) },
+        { "groundAmbientAndExposure", offsetof(SceneLightingUniformData, groundAmbientAndExposure) },
     };
 
     ASSERT_EQ(block.members.size(), expected.size());
