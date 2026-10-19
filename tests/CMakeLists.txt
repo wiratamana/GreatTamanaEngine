@@ -2247,6 +2247,7 @@ set(GTE_TEST_SOURCES
     Assets/Ktx2EncoderTests.cpp
     Assets/Ktx2DecoderTests.cpp
     Assets/AssetImporterTests.cpp
+    Assets/ImportStampTests.cpp
     Assets/PmxLoaderTests.cpp
     Assets/VmdLoaderTests.cpp
     Assets/StlLoaderTests.cpp

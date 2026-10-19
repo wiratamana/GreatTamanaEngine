@@ -1,5 +1,6 @@
 #include "Assets/AssetImporter.h"
 
+#include "GltfTestFixture.h"
 #include "Assets/MotionFile.h"
 #include "Assets/RigFile.h"
 
@@ -334,6 +335,28 @@ TEST_F(AssetImporterTest, CorruptImageExtensionFallsBackToPlainCopy)
 
     std::error_code ec;
     EXPECT_TRUE(std::filesystem::exists(result.finalPath, ec));
+}
+
+TEST_F(AssetImporterTest, GltfWithAMissingImageStillImportsAndCountsTheMissingTexture)
+{
+    const std::filesystem::path source = test::WriteGltfTriangle(m_root, test::kMaskedTexturedMaterialJson, true);
+
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Out" / "tri.gltf");
+
+    ASSERT_TRUE(result.success) << result.message;
+    EXPECT_TRUE(result.convertedToMeshAsset);
+    EXPECT_EQ(result.textureCount, 1u);
+    EXPECT_EQ(result.missingTextureCount, 1u); // white.png was never written.
+}
+
+TEST_F(AssetImporterTest, GltfWithoutTexturesReportsNoMissingTexture)
+{
+    const std::filesystem::path source = test::WriteGltfTriangle(m_root);
+
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Out" / "tri.gltf");
+
+    ASSERT_TRUE(result.success) << result.message;
+    EXPECT_EQ(result.missingTextureCount, 0u);
 }
 
 TEST_F(AssetImporterTest, FailsGracefullyWhenSourceDoesNotExist)

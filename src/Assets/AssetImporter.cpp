@@ -26,19 +26,17 @@ std::string ToLowerAscii(const std::string& s)
     return result;
 }
 
-// Imports every resolvable texture a model's materials reference as its own Texture *.gta,
-// in a "<meshStem>_Textures" folder next to the Mesh *.gta, and stores each Guid back into
-// `materials`. A missing or undecodable source keeps Guid::Invalid(); it never fails the import.
-void ImportMaterialTextures(
+// Imports every texture a model's materials reference as its own Texture *.gta, in a
+// "<meshStem>_Textures" folder next to the Mesh *.gta, and stores each Guid back into `materials`.
+// Returns how many referenced textures could not be imported (missing file, undecodable, write failure).
+// Those keep Guid::Invalid(); it never fails the import.
+std::size_t ImportMaterialTextures(
     AssetDatabase& database, MaterialData& materials, const std::filesystem::path& meshGtaPath)
 {
-    if (materials.textures.empty()) {
-        return;
-    }
-
     const std::filesystem::path texturesDirectory
         = meshGtaPath.parent_path() / (PathToUtf8(meshGtaPath.stem()) + "_Textures");
 
+    std::size_t missingCount = 0;
     for (std::size_t i = 0; i < materials.textures.size(); ++i) {
         MaterialTextureRef& textureRef = materials.textures[i];
         if (textureRef.sourcePath.empty()) {
@@ -49,18 +47,17 @@ void ImportMaterialTextures(
 
         std::error_code existsEc;
         if (!std::filesystem::is_regular_file(sourcePath, existsEc) || existsEc) {
-            continue; // Referenced texture file is missing on disk - leave guid invalid.
+            ++missingCount;
+            continue;
         }
 
         const std::optional<Ktx2EncodeResult> encoded = EncodeImageFileToKtx2(sourcePath);
         if (!encoded.has_value()) {
-            continue; // Not actually decodable as a supported image - leave guid invalid.
+            ++missingCount;
+            continue;
         }
 
-        // "<index>_<originalStem>.gta" - the index prefix keeps two
-        // different source folders' same-named textures (e.g. two
-        // materials both referencing "diffuse.png") from colliding once
-        // they all land flattened in the one texturesDirectory.
+        // The index prefix keeps same-named textures from different folders apart.
         const std::filesystem::path textureGtaPath
             = texturesDirectory / (std::to_string(i) + "_" + PathToUtf8(sourcePath.stem()) + ".gta");
 
@@ -68,8 +65,11 @@ void ImportMaterialTextures(
             = database.ImportAsset(textureGtaPath, AssetType::Texture, std::vector<std::uint8_t>{}, encoded->ktx2Bytes);
         if (guid.has_value()) {
             textureRef.guid = *guid;
+        } else {
+            ++missingCount;
         }
     }
+    return missingCount;
 }
 
 // Shared tail of a successful mesh parse: keeps the destination *.gta's saved joint
@@ -94,7 +94,7 @@ AssetImportResult FinalizeMeshAssetImport(AssetDatabase& database, MeshData mesh
     rig.jointPhysicsOverrides = std::move(preservedJointPhysicsOverrides);
 
     // Must run before the rig is encoded so the metadata carries Guids, not source paths.
-    ImportMaterialTextures(database, rig.materials, gtaPath);
+    const std::size_t missingTextureCount = ImportMaterialTextures(database, rig.materials, gtaPath);
 
     const std::vector<std::uint8_t> payload = EncodeMeshDataToBytes(mesh);
     const std::vector<std::uint8_t> metadata = EncodeRigDataToBytes(rig);
@@ -117,13 +117,14 @@ AssetImportResult FinalizeMeshAssetImport(AssetDatabase& database, MeshData mesh
         result.jointCount = rig.physics.joints.size();
         result.materialCount = rig.materials.materials.size();
         result.textureCount = rig.materials.textures.size();
+        result.missingTextureCount = missingTextureCount;
         result.message = "Imported \"" + PathToUtf8(sourcePath.filename()) + "\" as a " + sourceFormatLabel + " mesh ("
             + std::to_string(result.meshVertexCount) + " vertices, " + std::to_string(result.meshTriangleCount)
             + " triangles, " + std::to_string(result.boneCount) + " bones, " + std::to_string(result.morphCount)
             + " morphs, " + std::to_string(result.rigidBodyCount) + " rigid bodies, "
             + std::to_string(result.jointCount) + " joints, " + std::to_string(result.materialCount)
-            + " materials, " + std::to_string(result.textureCount) + " textures) -> \""
-            + PathToUtf8(gtaPath.filename()) + "\".";
+            + " materials, " + std::to_string(result.textureCount) + " textures, "
+            + std::to_string(result.missingTextureCount) + " missing) -> \"" + PathToUtf8(gtaPath.filename()) + "\".";
     } else {
         result.success = false;
         result.message = "Parsed \"" + PathToUtf8(sourcePath.filename()) + "\" but failed to write its *.gta wrapper.";

@@ -1,9 +1,10 @@
 #include "Assets/GltfLoader.h"
 
+#include "Encoding/Utf8Path.h"
+#include "GltfTestFixture.h"
+
 #include <cstdint>
-#include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -11,12 +12,6 @@
 
 namespace gte {
 namespace {
-
-std::string ToUtf8(const std::filesystem::path& path)
-{
-    const std::u8string u8 = path.u8string();
-    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
-}
 
 class GltfLoaderTest : public ::testing::Test {
 protected:
@@ -36,39 +31,10 @@ protected:
         std::filesystem::remove_all(m_root, ec);
     }
 
-    // One triangle (0,0,0) (1,0,0) (0,1,0), normals +Z, uint16 indices, node scale 2.
     std::filesystem::path WriteTriangle(bool withMaterial)
     {
-        std::vector<std::uint8_t> bin(80, 0);
-        const float floats[18] = { 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1 };
-        std::memcpy(bin.data(), floats, sizeof(floats));
-        const std::uint16_t indices[3] = { 0, 1, 2 };
-        std::memcpy(bin.data() + 72, indices, sizeof(indices));
-        std::ofstream(m_root / "tri.bin", std::ios::binary)
-            .write(reinterpret_cast<const char*>(bin.data()), static_cast<std::streamsize>(bin.size()));
-
-        const std::string materialJson = withMaterial
-            ? R"(,"materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0}},
-                  "normalTexture":{"index":0},"alphaMode":"MASK","alphaCutoff":0.25}],
-                 "textures":[{"source":0}],"images":[{"uri":"white.png"}])"
-            : "";
-        const std::string primitiveMaterial = withMaterial ? R"(,"material":0)" : "";
-
-        const std::string gltf = R"({"asset":{"version":"2.0"},
-          "buffers":[{"uri":"tri.bin","byteLength":80}],
-          "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},
-                         {"buffer":0,"byteOffset":36,"byteLength":36},
-                         {"buffer":0,"byteOffset":72,"byteLength":6}],
-          "accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},
-                       {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
-                       {"bufferView":2,"componentType":5123,"count":3,"type":"SCALAR"}],
-          "meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":2)" + primitiveMaterial + R"(}]}],
-          "nodes":[{"mesh":0,"scale":[2,2,2]}],
-          "scenes":[{"nodes":[0]}],"scene":0)" + materialJson + "}";
-
-        const std::filesystem::path path = m_root / "tri.gltf";
-        std::ofstream(path, std::ios::binary).write(gltf.data(), static_cast<std::streamsize>(gltf.size()));
-        return path;
+        return withMaterial ? test::WriteGltfTriangle(m_root, test::kMaskedTexturedMaterialJson, true)
+                            : test::WriteGltfTriangle(m_root);
     }
 
     std::filesystem::path m_root;
@@ -76,7 +42,7 @@ protected:
 
 TEST_F(GltfLoaderTest, BakesNodeScaleAndMirrorsZ)
 {
-    const GltfLoadResult r = LoadGltfModel(ToUtf8(WriteTriangle(false)));
+    const GltfLoadResult r = LoadGltfModel(PathToUtf8(WriteTriangle(false)));
     ASSERT_TRUE(r.success) << r.message;
     ASSERT_EQ(r.mesh.positions.size(), 3u);
     EXPECT_FLOAT_EQ(r.mesh.positions[1].x, 2.0f);
@@ -88,7 +54,7 @@ TEST_F(GltfLoaderTest, BakesNodeScaleAndMirrorsZ)
 
 TEST_F(GltfLoaderTest, SwapsWindingForTheMirrorAndFillsMissingUvs)
 {
-    const GltfLoadResult r = LoadGltfModel(ToUtf8(WriteTriangle(false)));
+    const GltfLoadResult r = LoadGltfModel(PathToUtf8(WriteTriangle(false)));
     ASSERT_TRUE(r.success) << r.message;
     const std::vector<std::uint32_t> expected = { 0, 2, 1 };
     EXPECT_EQ(r.mesh.indices, expected);
@@ -97,7 +63,7 @@ TEST_F(GltfLoaderTest, SwapsWindingForTheMirrorAndFillsMissingUvs)
 
 TEST_F(GltfLoaderTest, PrimitiveWithoutMaterialGetsADefaultMaterialRun)
 {
-    const GltfLoadResult r = LoadGltfModel(ToUtf8(WriteTriangle(false)));
+    const GltfLoadResult r = LoadGltfModel(PathToUtf8(WriteTriangle(false)));
     ASSERT_TRUE(r.success) << r.message;
     ASSERT_EQ(r.materials.materials.size(), 1u);
     EXPECT_EQ(r.materials.materials[0].indexCount, 3u);
@@ -106,7 +72,7 @@ TEST_F(GltfLoaderTest, PrimitiveWithoutMaterialGetsADefaultMaterialRun)
 
 TEST_F(GltfLoaderTest, ReportsMaterialTextureSlotsAndAlphaMode)
 {
-    const GltfLoadResult r = LoadGltfModel(ToUtf8(WriteTriangle(true)));
+    const GltfLoadResult r = LoadGltfModel(PathToUtf8(WriteTriangle(true)));
     ASSERT_TRUE(r.success) << r.message;
     ASSERT_EQ(r.materials.materials.size(), 1u);
     ASSERT_EQ(r.materials.textures.size(), 1u); // Same image reused by two slots.
@@ -121,7 +87,7 @@ TEST_F(GltfLoaderTest, ReportsMaterialTextureSlotsAndAlphaMode)
 
 TEST_F(GltfLoaderTest, FailsGracefullyOnAMissingFile)
 {
-    const GltfLoadResult r = LoadGltfModel(ToUtf8(m_root / "nope.gltf"));
+    const GltfLoadResult r = LoadGltfModel(PathToUtf8(m_root / "nope.gltf"));
     EXPECT_FALSE(r.success);
     EXPECT_FALSE(r.message.empty());
 }
@@ -134,7 +100,7 @@ TEST(GltfLoaderRealModelSmokeTest, LoadsSponzaIfPresentOnThisMachine)
     if (!std::filesystem::exists(path, ec) || ec) {
         GTEST_SKIP() << "Sponza not present - skipping.";
     }
-    const GltfLoadResult r = LoadGltfModel(ToUtf8(path));
+    const GltfLoadResult r = LoadGltfModel(PathToUtf8(path));
     ASSERT_TRUE(r.success) << r.message;
     EXPECT_EQ(r.materials.materials.size(), 25u);
     EXPECT_EQ(r.mesh.normals.size(), r.mesh.positions.size());

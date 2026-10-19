@@ -45,9 +45,11 @@ struct AssetImportResult {
     std::size_t rigidBodyCount = 0;
     std::size_t jointCount = 0;
 
-    // Mesh imports only: material and texture counts.
+    // Mesh imports only: material and texture counts. `missingTextureCount` is how many referenced
+    // textures could not be imported (the import still succeeds).
     std::size_t materialCount = 0;
     std::size_t textureCount = 0;
+    std::size_t missingTextureCount = 0;
 
     // Motion imports only: keyframe counts per track (zero for an unused track is normal).
     std::size_t motionBoneKeyframeCount = 0;

@@ -657,6 +657,8 @@ add_library(gte_core STATIC
     src/Assets/Ktx2Decoder.cpp
     src/Assets/AssetImporter.h
     src/Assets/AssetImporter.cpp
+    src/Assets/ImportStamp.h
+    src/Assets/ImportStamp.cpp
     src/Assets/PmxLoader.h
     src/Assets/PmxLoader.cpp
     src/Assets/VmdLoader.h
