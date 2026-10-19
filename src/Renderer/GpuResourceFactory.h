@@ -109,8 +109,12 @@ public:
     // Descriptors and Materials
     VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept { return m_instanceBufferSetLayout; }
 
-    MaterialTexture CreateMaterialTexture2D(
-        const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
+    // Uploads `pixelsRgba8` as an sRGB base-color image with a mip chain and wraps it in a material.
+    MaterialTexture CreateMaterialTexture2D(const void* pixelsRgba8, int width, int height,
+        const MaterialParams& params = {}, const char* debugName = nullptr) const;
+
+    // A new material (own params block and descriptor set) over an image that already exists.
+    MaterialTexture CreateMaterialVariant(std::shared_ptr<Texture2D> image, const MaterialParams& params) const;
 
     // Allocates from the compute descriptor pool set; adds at most one pool per call. Throws when no pool fits.
     // Failures log once per failing layout (and once per exhaustion), never on every call.

@@ -1,17 +1,23 @@
 #pragma once
 
+#include "Buffer.h"
+#include "MaterialParams.h"
 #include "Texture2D.h"
 
 #include "../Core/GraphicsHandles.h" // DescriptorSetHandle
 
 #include <volk.h>
 
+#include <memory>
+
 namespace gte {
 
-// A Texture2D plus the shared-layout descriptor set (set 0, binding 0, combined sampler) already written for it.
-// The set comes from a persistent pool and is never freed individually. Move-only.
+// A material as the textured shaders see it: set 0 with the base-color image (binding 0) and the
+// MaterialParams block (binding 1). The set comes from a persistent pool and is never freed
+// individually. The image is shared by every material that uses it. Move-only.
 struct MaterialTexture {
-    Texture2D texture;
+    std::shared_ptr<Texture2D> texture;
+    Buffer params;
     DescriptorSetHandle descriptorSet = DescriptorSetHandle::Invalid;
 };
 

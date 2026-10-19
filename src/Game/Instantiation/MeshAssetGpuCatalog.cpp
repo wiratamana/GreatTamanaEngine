@@ -125,17 +125,24 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
         MaterialTextureHandle texture = kInvalidMaterialTextureHandle;
         bool alphaTested = false;
         if (slice.materialIndex >= 0 && static_cast<std::size_t>(slice.materialIndex) < materials.materials.size()) {
+            // A material always draws through the textured path: its texture, or a flat white image, times the factor.
             const Material& material = materials.materials[static_cast<std::size_t>(slice.materialIndex)];
             alphaTested = material.alphaMode == AlphaMode::Mask;
+            const MaterialParams params = MakeMaterialParams(
+                material.diffuse.x, material.diffuse.y, material.diffuse.z, material.diffuse.w, material.alphaCutoff);
             if (material.textureIndex >= 0 && static_cast<std::size_t>(material.textureIndex) < materials.textures.size()) {
                 const Guid& textureGuid = materials.textures[static_cast<std::size_t>(material.textureIndex)].guid;
-                texture = m_materialTextureCache.Resolve(renderSystem, renderer, textureDatabase, textureGuid);
+                texture = m_materialTextureCache.Resolve(renderSystem, renderer, textureDatabase, textureGuid, params);
+            }
+            if (!texture.IsValid()) {
+                texture = m_materialTextureCache.ResolveSolidColor(renderSystem, renderer, params);
             }
         }
 
         if (texture.IsValid()) {
             texturedSlices.push_back(TexturedSlice{ slice.start, slice.count, texture, slice.name, alphaTested });
         } else {
+            // No material at all (for example an STL): flat neutral grey.
             untexturedIndices.insert(untexturedIndices.end(), mesh->indices.begin() + static_cast<std::ptrdiff_t>(slice.start),
                 mesh->indices.begin() + static_cast<std::ptrdiff_t>(slice.start + slice.count));
         }

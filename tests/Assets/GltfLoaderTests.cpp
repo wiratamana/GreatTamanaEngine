@@ -85,6 +85,21 @@ TEST_F(GltfLoaderTest, ReportsMaterialTextureSlotsAndAlphaMode)
     EXPECT_NE(r.materials.textures[0].sourcePath.find("white.png"), std::string::npos);
 }
 
+TEST_F(GltfLoaderTest, UntexturedMaterialKeepsItsBaseColorFactor)
+{
+    const std::filesystem::path path = test::WriteGltfTriangle(m_root,
+        R"(,"materials":[{"pbrMetallicRoughness":{"baseColorFactor":[1,0,0,1]}}])", /*primitiveHasMaterial=*/true);
+    const GltfLoadResult r = LoadGltfModel(PathToUtf8(path));
+    ASSERT_TRUE(r.success) << r.message;
+    ASSERT_EQ(r.materials.materials.size(), 1u);
+    const Material& m = r.materials.materials[0];
+    EXPECT_EQ(m.textureIndex, -1);
+    EXPECT_FLOAT_EQ(m.diffuse.x, 1.0f);
+    EXPECT_FLOAT_EQ(m.diffuse.y, 0.0f);
+    EXPECT_FLOAT_EQ(m.diffuse.z, 0.0f);
+    EXPECT_FLOAT_EQ(m.diffuse.w, 1.0f);
+}
+
 TEST_F(GltfLoaderTest, FailsGracefullyOnAMissingFile)
 {
     const GltfLoadResult r = LoadGltfModel(PathToUtf8(m_root / "nope.gltf"));

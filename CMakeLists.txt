@@ -1706,9 +1706,9 @@ gte_add_shader(GreatTamanaEditor src/Shaders/FrustumCull.comp)
 # materials.
 gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMesh.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMesh.frag
-    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl)
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/MaterialParams.glsl)
 gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMeshAlphaTest.frag
-    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl)
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/MaterialParams.glsl)
 
 # GPU Vertex Skinning, Phase 2 (compute kernels) -
 # task_manager/gpu_skinning/GPU_SKINNING_PHASE2_COMPUTE_KERNEL_STRATEGY_v1.md.

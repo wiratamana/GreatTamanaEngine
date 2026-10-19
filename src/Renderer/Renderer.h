@@ -210,8 +210,12 @@ public:
     // Texture creation factories.
     Texture2D CreateTexture2D(const Texture2DUploadDesc& desc) const;
 
-    MaterialTexture CreateMaterialTexture2D(
-        const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;
+    // Uploads `pixelsRgba8` as an sRGB base-color image with a mip chain and wraps it in a material.
+    MaterialTexture CreateMaterialTexture2D(const void* pixelsRgba8, int width, int height,
+        const MaterialParams& params = {}, const char* debugName = nullptr) const;
+
+    // A new material (own params block and descriptor set) over an image that already exists.
+    MaterialTexture CreateMaterialVariant(std::shared_ptr<Texture2D> image, const MaterialParams& params) const;
 
     VolumeTexture CreateVolumeTexture(
         int width, int height, int depth, PixelFormat format, const char* debugName = nullptr) const;

@@ -1,8 +1,9 @@
 #version 450
 
-// Textured mesh fragment shader with alpha test: texels below the cutoff are discarded.
+// Textured mesh fragment shader with alpha test: fragments below the material's alpha cutoff are discarded.
 
 #include "DirectionalLighting.glsl"
+#include "MaterialParams.glsl"
 
 layout(set = 0, binding = 0) uniform sampler2D uDiffuseTexture;
 
@@ -11,14 +12,11 @@ layout(location = 1) in vec2 inUv;
 
 layout(location = 0) out vec4 outColor;
 
-// One cutoff for every masked material (the glTF default).
-const float kAlphaCutoff = 0.5;
-
 void main()
 {
-    vec4 texColor = texture(uDiffuseTexture, inUv); // SRGB format: already linear here.
-    if (texColor.a < kAlphaCutoff) {
+    vec4 color = texture(uDiffuseTexture, inUv) * uMaterial.baseColorFactor; // SRGB format: already linear here.
+    if (color.a < uMaterial.params.x) {
         discard;
     }
-    outColor = vec4(ApplyDirectionalLight(texColor.rgb, inWorldNormal), 1.0);
+    outColor = vec4(ApplyDirectionalLight(color.rgb, inWorldNormal), 1.0);
 }

@@ -638,10 +638,15 @@ Texture2D Renderer::CreateTexture2D(const Texture2DUploadDesc& desc) const
     return m_resources.CreateTexture2D(desc);
 }
 
-MaterialTexture Renderer::CreateMaterialTexture2D(
-    const void* pixelsRgba8, int width, int height, const char* debugName) const
+MaterialTexture Renderer::CreateMaterialTexture2D(const void* pixelsRgba8, int width, int height,
+    const MaterialParams& params, const char* debugName) const
 {
-    return m_resources.CreateMaterialTexture2D(pixelsRgba8, width, height, debugName);
+    return m_resources.CreateMaterialTexture2D(pixelsRgba8, width, height, params, debugName);
+}
+
+MaterialTexture Renderer::CreateMaterialVariant(std::shared_ptr<Texture2D> image, const MaterialParams& params) const
+{
+    return m_resources.CreateMaterialVariant(std::move(image), params);
 }
 
 VolumeTexture Renderer::CreateVolumeTexture(

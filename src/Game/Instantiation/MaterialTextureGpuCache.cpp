@@ -7,20 +7,36 @@
 #include "../../Renderer/Renderer.h"
 #include "../RenderSystem.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <optional>
+#include <string>
 
 namespace gte {
 
-MaterialTextureHandle MaterialTextureGpuCache::Resolve(
-    RenderSystem& renderSystem, Renderer& renderer, const AssetDatabase& database, const Guid& textureGuid)
+MaterialTextureHandle MaterialTextureGpuCache::GetMaterial(
+    RenderSystem& renderSystem, Renderer& renderer, Image& image, const MaterialParams& params)
+{
+    const auto found = std::find_if(image.materials.begin(), image.materials.end(),
+        [&](const auto& entry) { return entry.first == params; });
+    if (found != image.materials.end()) {
+        return found->second;
+    }
+    const MaterialTextureHandle handle
+        = renderSystem.RegisterTexture(renderer.CreateMaterialVariant(image.texture, params));
+    image.materials.emplace_back(params, handle);
+    return handle;
+}
+
+MaterialTextureHandle MaterialTextureGpuCache::Resolve(RenderSystem& renderSystem, Renderer& renderer,
+    const AssetDatabase& database, const Guid& textureGuid, const MaterialParams& params)
 {
     if (!textureGuid.IsValid()) {
         return kInvalidMaterialTextureHandle;
     }
 
-    if (const auto found = m_cache.find(textureGuid); found != m_cache.end()) {
-        return found->second;
+    if (const auto found = m_images.find(textureGuid); found != m_images.end()) {
+        return GetMaterial(renderSystem, renderer, found->second, params);
     }
 
     const AssetRecord* record = database.FindByGuid(textureGuid);
@@ -38,21 +54,30 @@ MaterialTextureHandle MaterialTextureGpuCache::Resolve(
         return kInvalidMaterialTextureHandle;
     }
 
-    // A genuinely per-instance debug name (derived from this texture
-    // asset's own Guid), NOT the old literal constant "MaterialTexture"
-    // every real MaterialTexture used to share - see task_manager/
-    // frame-debugger-3/PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md's Step 2:
-    // RenderSystem::Draw()'s FrameDebuggerCaptureContext needs every
-    // DISTINCT real bound MaterialTexture to actually report a DISTINCT
-    // name (via EditorGpuMemoryNameOverlay::GetDebugName() - editor-core-
-    // separation-1 campaign, PHASE4; formerly Renderer::GetMemoryDebugName()),
-    // which the old shared literal string could never do.
+    // Distinct per texture so the Frame Debugger lists each bound texture under its own name.
     const std::string debugName = "MaterialTexture " + textureGuid.ToString();
-    const MaterialTextureHandle handle = renderSystem.RegisterTexture(renderer.CreateMaterialTexture2D(
-        decoded->rgba8Pixels.data(), static_cast<int>(decoded->width), static_cast<int>(decoded->height),
-        debugName.c_str()));
-    m_cache.emplace(textureGuid, handle);
+    MaterialTexture material = renderer.CreateMaterialTexture2D(decoded->rgba8Pixels.data(),
+        static_cast<int>(decoded->width), static_cast<int>(decoded->height), params, debugName.c_str());
+
+    Image& image = m_images[textureGuid];
+    image.texture = material.texture;
+    const MaterialTextureHandle handle = renderSystem.RegisterTexture(std::move(material));
+    image.materials.emplace_back(params, handle);
     return handle;
+}
+
+MaterialTextureHandle MaterialTextureGpuCache::ResolveSolidColor(
+    RenderSystem& renderSystem, Renderer& renderer, const MaterialParams& params)
+{
+    if (!m_whiteImage.texture) {
+        const std::uint8_t whitePixel[4] = { 255, 255, 255, 255 };
+        MaterialTexture material = renderer.CreateMaterialTexture2D(whitePixel, 1, 1, params, "MaterialSolidColor");
+        m_whiteImage.texture = material.texture;
+        const MaterialTextureHandle handle = renderSystem.RegisterTexture(std::move(material));
+        m_whiteImage.materials.emplace_back(params, handle);
+        return handle;
+    }
+    return GetMaterial(renderSystem, renderer, m_whiteImage, params);
 }
 
 } // namespace gte
