@@ -1,0 +1,42 @@
+#version 450
+
+// Per column front-to-back integration. Each slice stores in-scatter (rgb) and transmittance (a) at its far boundary.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#include "VolumetricLightCommon.glsl"
+
+layout(push_constant) uniform PushConstants {
+    float maxDistance;
+    float depthExponent;
+} pc;
+
+layout(binding = 0) uniform sampler3D blendedVolume;
+layout(binding = 1, rgba16f) uniform writeonly image3D integratedOutput;
+
+void main()
+{
+    ivec3 size = imageSize(integratedOutput);
+    ivec2 column = ivec2(gl_GlobalInvocationID.xy);
+    if (column.x >= size.x || column.y >= size.y) {
+        return;
+    }
+    vec3 inScatter = vec3(0.0);
+    float transmittance = 1.0;
+    float d0 = 0.0;
+    for (int z = 0; z < size.z; ++z) {
+        float d1 = FroxelSliceToViewDepth(float(z + 1), float(size.z), pc.maxDistance, pc.depthExponent);
+        float dz = max(d1 - d0, 0.0);
+        d0 = d1;
+
+        vec4 s = texelFetch(blendedVolume, ivec3(column, z), 0); // rgb scattering, a extinction.
+        if (HasNonFinite(s)) {
+            s = vec4(0.0);
+        }
+        s = max(s, vec4(0.0));
+        float sliceT = exp(-s.a * dz);
+        vec3 sliceIn = s.a > 1e-6 ? (s.rgb - s.rgb * sliceT) / s.a : s.rgb * dz;
+        inScatter = min(inScatter + transmittance * sliceIn, vec3(60000.0)); // Stays inside RGBA16F.
+        transmittance *= sliceT;
+        imageStore(integratedOutput, ivec3(column, z), vec4(inScatter, transmittance));
+    }
+}

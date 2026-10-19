@@ -287,6 +287,36 @@ ShadowMaskParamsGpu MakeShadowMaskParams(
     return p;
 }
 
+SunShadowReceiver MakeSunShadowReceiver(const ShadowMapData& map) noexcept
+{
+    static_assert(kSunShadowReceiverMaxCascades == kMaxShadowCascades);
+    const ShadowCascadeSet& set = map.cascades;
+    SunShadowReceiver r;
+
+    const std::uint32_t count = std::min(set.count, kSunShadowReceiverMaxCascades);
+    r.cascadeCount = count;
+    r.resolution = map.resolution;
+    for (std::uint32_t c = 0; c < count; ++c) {
+        const ShadowCascade& cascade = set.cascades[c];
+        r.maps[c] = map.maps[c];
+        r.viewProjection[c] = cascade.viewProjection;
+        r.splitFar[c] = cascade.sliceEnd;
+        r.blendWidth[c] =
+            c + 1 < count ? std::max(0.0f, cascade.sliceEnd - set.cascades[c + 1].sliceStart) : 0.0f;
+        r.texelWorld[c] = cascade.texelWorldSize;
+        r.depthRange[c] = cascade.depthRange;
+    }
+    for (std::uint32_t c = count; c < kSunShadowReceiverMaxCascades && count > 0; ++c) {
+        r.splitFar[c] = set.cascades[count - 1].sliceEnd;
+    }
+
+    r.cameraPosition = set.cameraPosition;
+    r.cameraForward = set.cameraForward;
+    r.directionTowardSun = set.directionTowardSun;
+    r.shadowDistance = set.shadowDistance;
+    return r;
+}
+
 float SunElevationDegrees(const Vec3& directionTowardSun) noexcept
 {
     const Vec3 d = SafeSunDirection(directionTowardSun);

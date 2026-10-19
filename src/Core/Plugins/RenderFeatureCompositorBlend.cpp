@@ -78,6 +78,8 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
     }
 
     rg::TextureHandle currentInput = seed;
+    bool anyBlended = false;
+    bool wroteTarget = false;
     for (std::size_t i = 0; i < combinedList.size(); ++i) {
         const Entry& entry = combinedList[i];
         const std::string featureName = entry.descriptor.name;
@@ -92,6 +94,7 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
             return;
         }
 
+        bool declaredPasses = true;
         if (entry.projectCallback) {
             const rg::RenderFeatureScope featureScope(frame.builder, featureName);
             const RenderPassViewData* viewData = core.FindRenderPassViewDataNoCopy(frame.currentView);
@@ -109,6 +112,7 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
             entry.projectCallback(
                 frame.builder, frame.blackboard, frame.currentView, privateTarget, extent, handles, cameraData);
             const std::size_t after = frame.builder.DeclaredPassCount();
+            declaredPasses = after != before;
 
             if (viewHasSampleableDepth
                 && FindMissingDeclaredDepthReadForResolve(frame.builder, before, after, handles.depthHandle)) {
@@ -129,6 +133,11 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
             }
         }
 
+        // A callback that declared nothing did not write its private target: its pixels are stale.
+        if (!declaredPasses) {
+            continue;
+        }
+
         // The last blend writes the view target itself; every other blend writes an accumulator.
         const rg::TextureHandle output = isLast
             ? resolved->target
@@ -140,6 +149,15 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
             return;
         }
         currentInput = output;
+        anyBlended = true;
+        wroteTarget = isLast;
+    }
+
+    // The last entry may have been skipped: the view target still needs the running result.
+    if (anyBlended && !wroteTarget) {
+        DispatchBlend(frame.builder, currentInput, currentInput, resolved->target,
+            rg::StaticName::Interned(namePool.FinalCopyPassName(viewName)), scope, extent,
+            RenderFeatureBlendMode::Replace, "Post Processing");
     }
 }
 

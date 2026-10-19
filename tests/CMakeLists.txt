@@ -2698,6 +2698,20 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_GTAO_COMPOSITE_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/GtaoComposite.frag.spv"
 )
 
+# The VolumetricLight shaders come from the feature shader auto-discovery; the self-check reflects the real binaries.
+target_sources(GreatTamanaEngineTests PRIVATE
+    "${CMAKE_BINARY_DIR}/shaders/VolumetricLightInject.comp.spv"
+    "${CMAKE_BINARY_DIR}/shaders/VolumetricLightTemporal.comp.spv"
+    "${CMAKE_BINARY_DIR}/shaders/VolumetricLightIntegrate.comp.spv"
+    "${CMAKE_BINARY_DIR}/shaders/VolumetricLightComposite.comp.spv"
+)
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_TEST_VOLUMETRIC_INJECT_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/VolumetricLightInject.comp.spv"
+    GTE_TEST_VOLUMETRIC_TEMPORAL_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/VolumetricLightTemporal.comp.spv"
+    GTE_TEST_VOLUMETRIC_INTEGRATE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/VolumetricLightIntegrate.comp.spv"
+    GTE_TEST_VOLUMETRIC_COMPOSITE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/VolumetricLightComposite.comp.spv"
+)
+
 # The compositor blend shader is declared by the root gte_add_shader() calls; its test reflects the real binary.
 target_sources(GreatTamanaEngineTests PRIVATE "${CMAKE_BINARY_DIR}/shaders/RenderFeatureBlend.comp.spv")
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
@@ -2853,7 +2867,8 @@ add_test(NAME EngineVocabularyCheck
 # comment blocks longer than 3 lines, in C++ sources and GLSL shaders. The scope is an explicit directory/file list;
 # there is no allowlist.
 set(GTE_COMMENT_RULE_SRC
-    Renderer/ Core/FeatureKit/ Features/Shadow/ Features/Gtao/ Shaders/
+    Renderer/ Core/FeatureKit/ Features/Shadow/ Features/Gtao/ Features/VolumetricLight/ Shaders/
+    Game/Lighting/SunShadowReceiver.h
     Application/RenderPasses.cpp Application/RenderPasses.h Core/Core.cpp Core/Core.h Core/CapturedPixels.h
     Encoding/CapturedPixelConversion.cpp Encoding/CapturedPixelConversion.h Encoding/DepthVisualization.cpp
     Encoding/DepthVisualization.h Encoding/HdrColorVisualization.cpp Encoding/HdrColorVisualization.h
@@ -2891,6 +2906,7 @@ set(GTE_COMMENT_RULE_TESTS
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
     Features/Shadow/ShadowMathTests.cpp Game/SceneDrawPassTests.cpp
     Features/Gtao/GtaoMathTests.cpp Features/Gtao/GtaoParamsTests.cpp Features/Gtao/GtaoShaderNamesTests.cpp
+    Features/VolumetricLight/ Features/Shadow/ShadowReceiverTests.cpp
     Renderer/RenderGraph/CommandBufferTests.cpp Renderer/RenderGraph/FullscreenPassTests.cpp
     Renderer/RenderGraph/FullscreenRecordTests.cpp Renderer/RenderGraph/GpuBufferTests.cpp
     Renderer/RenderGraph/OneShotTests.cpp Renderer/RenderGraph/PassKindRecordTests.cpp

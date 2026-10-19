@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ShadowTypes.h"
+#include "../../Game/Lighting/SunShadowReceiver.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
 
@@ -28,6 +29,10 @@ ShadowCascadeSet BuildShadowCascades(const ShadowViewFrustum& frustum, const Vec
 // GPU parameter block of the mask pass. `safe` must be sanitized.
 ShadowMaskParamsGpu MakeShadowMaskParams(
     const ShadowMapData& map, const ShadowSettings& safe, const Mat4& invViewProjection) noexcept;
+
+// The cascade data other features sample the sun's shadow with.
+// Entries past the count stay zero, except splitFar, which repeats the last split.
+SunShadowReceiver MakeSunShadowReceiver(const ShadowMapData& map) noexcept;
 
 // Sun elevation above the horizon in degrees; a non-finite direction counts as straight up.
 float SunElevationDegrees(const Vec3& directionTowardSun) noexcept;

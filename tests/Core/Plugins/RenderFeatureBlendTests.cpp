@@ -78,6 +78,7 @@ TEST(RenderFeatureNamePoolTest, NamesAreStableAndDistinctPerKeyAndView)
     EXPECT_STREQ(game, "Fx_Game_Blend"); // Earlier pointers survive later insertions.
     EXPECT_STREQ(pool.SeedName("Game"), "RenderFeatureCompositor_Game_Seed");
     EXPECT_STREQ(pool.SeedCopyPassName("Scene"), "RenderFeatureCompositor_Scene_SeedCopy");
+    EXPECT_STREQ(pool.FinalCopyPassName("Scene"), "RenderFeatureCompositor_Scene_FinalCopy");
 }
 
 TEST(StaticNameInternedTest, KeepsThePooledPointer)

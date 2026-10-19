@@ -1,0 +1,148 @@
+#version 450
+
+// Writes scattering (rgb) and extinction (a) of the medium at one jittered sample per froxel.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#include "VolumetricLightCommon.glsl"
+
+// Member names and order match VolumetricLightInjectParamsGpu.
+layout(std430, binding = 0) readonly buffer InjectParams {
+    mat4 invViewProjection;
+    mat4 cascadeViewProjection[4];
+    float cascadeSplitFar[4];
+    float cascadeBlendWidth[4];
+    float cascadeTexelWorld[4];
+    float cascadeDepthRange[4];
+    vec4 eyeAndMaxDistance;     // xyz eye, w effective max distance.
+    vec4 forwardAndExponent;    // xyz camera forward, w depth exponent.
+    vec4 sunDirectionAndG;      // xyz toward the sun, w anisotropy g.
+    vec4 sunRadiance;
+    vec4 ambientRadiance;
+    vec4 densityParams;         // x density, y albedo, z start distance, w noise amount.
+    vec4 heightParams;          // x height density, y base, z falloff, w noise scale.
+    vec4 noiseOffset;           // xyz wind offset, world units.
+    vec4 jitter;                // xyz in [0,1).
+    vec4 shadowParams;          // x bias texels, y filter texels, z 1 / map size.
+    uvec4 counts;               // x cascade count, y shadow samples, z frame index.
+} params;
+
+layout(binding = 1) uniform sampler2D shadowDepth0;
+layout(binding = 2) uniform sampler2D shadowDepth1;
+layout(binding = 3) uniform sampler2D shadowDepth2;
+layout(binding = 4) uniform sampler2D shadowDepth3;
+layout(binding = 5, rgba16f) uniform writeonly image3D injectOutput;
+
+float ShadowDepthAt(int k, vec2 uv)
+{
+    switch (k) {
+    case 0: return textureLod(shadowDepth0, uv, 0.0).r;
+    case 1: return textureLod(shadowDepth1, uv, 0.0).r;
+    case 2: return textureLod(shadowDepth2, uv, 0.0).r;
+    default: return textureLod(shadowDepth3, uv, 0.0).r;
+    }
+}
+
+// Lit fraction in [0,1], or -1 when the point lies outside cascade k.
+float SampleCascadeLit(int k, vec3 world, float rotation)
+{
+    vec4 clip = params.cascadeViewProjection[k] * vec4(world, 1.0);
+    if (!(clip.w > 1e-6)) {
+        return -1.0;
+    }
+    vec3 ndc = clip.xyz / clip.w;
+    vec2 uv = ndc.xy * 0.5 + 0.5;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || ndc.z < 0.0 || ndc.z > 1.0) {
+        return -1.0;
+    }
+    float bias = params.cascadeTexelWorld[k] * params.shadowParams.x / max(params.cascadeDepthRange[k], 1e-6);
+    int samples = clamp(int(params.counts.y), 1, 8);
+    float radiusUv = params.shadowParams.y * params.shadowParams.z;
+    float lit = 0.0;
+    for (int i = 0; i < samples; ++i) {
+        vec2 offset = vec2(0.0);
+        if (samples > 1) {
+            float r = sqrt((float(i) + 0.5) / float(samples));
+            float theta = float(i) * 2.39996323 + rotation;
+            offset = r * vec2(cos(theta), sin(theta)) * radiusUv;
+        }
+        lit += (ndc.z - bias > ShadowDepthAt(k, uv + offset)) ? 0.0 : 1.0;
+    }
+    return lit / float(samples);
+}
+
+// Sun visibility in [0,1]. Without cascades, or outside all of them, the point is lit.
+float SunVisibility(vec3 world, float rotation)
+{
+    int count = clamp(int(params.counts.x), 0, 4);
+    if (count == 0) {
+        return 1.0;
+    }
+    float planar = dot(world - params.eyeAndMaxDistance.xyz, params.forwardAndExponent.xyz);
+    int c = count - 1;
+    for (int i = 0; i < count; ++i) {
+        if (planar < params.cascadeSplitFar[i]) {
+            c = i;
+            break;
+        }
+    }
+    float lit = SampleCascadeLit(c, world, rotation);
+    if (lit < 0.0) {
+        lit = c + 1 < count ? SampleCascadeLit(c + 1, world, rotation) : -1.0;
+        if (lit < 0.0) {
+            return 1.0;
+        }
+    }
+    if (c + 1 < count) {
+        float width = params.cascadeBlendWidth[c];
+        float start = params.cascadeSplitFar[c] - width;
+        if (width > 0.0 && planar > start) {
+            float next = SampleCascadeLit(c + 1, world, rotation);
+            if (next >= 0.0) {
+                lit = mix(lit, next, clamp((planar - start) / width, 0.0, 1.0));
+            }
+        }
+    }
+    return lit;
+}
+
+void main()
+{
+    ivec3 size = imageSize(injectOutput);
+    ivec3 cell = ivec3(gl_GlobalInvocationID);
+    if (any(greaterThanEqual(cell, size))) {
+        return;
+    }
+
+    vec3 jit = params.jitter.xyz;
+    vec2 uv = (vec2(cell.xy) + jit.xy) / vec2(size.xy);
+    float distance = FroxelSliceToViewDepth(
+        float(cell.z) + jit.z, float(size.z), params.eyeAndMaxDistance.w, params.forwardAndExponent.w);
+    vec3 dir = FroxelRayDirection(uv, params.invViewProjection);
+    vec3 world = params.eyeAndMaxDistance.xyz + dir * distance;
+
+    float sigmaT = params.densityParams.x
+        + params.heightParams.x * exp(-params.heightParams.z * max(world.y - params.heightParams.y, 0.0));
+    float noiseAmount = params.densityParams.w;
+    if (noiseAmount > 0.0) {
+        float n = ValueNoise3((world - params.noiseOffset.xyz) * params.heightParams.w);
+        sigmaT *= 1.0 - noiseAmount + 2.0 * noiseAmount * n;
+    }
+    float startDistance = params.densityParams.z;
+    if (startDistance > 0.0) {
+        sigmaT *= smoothstep(0.0, startDistance, distance);
+    }
+    sigmaT = max(sigmaT, 0.0);
+    float sigmaS = sigmaT * params.densityParams.y;
+
+    float rotation = 6.2831853
+        * InterleavedGradientNoise(vec2(cell.xy) + vec2(float(cell.z) * 7.0, float(cell.z) * 13.0), params.counts.z);
+    float visibility = SunVisibility(world, rotation);
+    float phase = HenyeyGreenstein(dot(dir, params.sunDirectionAndG.xyz), params.sunDirectionAndG.w);
+    vec3 scattering = sigmaS * (params.sunRadiance.rgb * (phase * visibility) + params.ambientRadiance.rgb);
+
+    vec4 value = vec4(scattering, sigmaT);
+    if (HasNonFinite(value)) {
+        value = vec4(0.0);
+    }
+    imageStore(injectOutput, cell, value);
+}

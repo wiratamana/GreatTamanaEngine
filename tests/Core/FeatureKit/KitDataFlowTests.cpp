@@ -148,6 +148,90 @@ TEST(KitChannelTest, AFrameWithoutAnEngineContextIsALoggedNoOp)
     EXPECT_EQ(CountErrorsByCategory(sink, "FeatureKit"), 1);
 }
 
+// A frame that runs as another feature, on the same blackboard and view.
+PreOpaqueFrame FrameOfFeature(Harness& harness, std::string_view featureName, detail::FrameContext& storage)
+{
+    storage = harness.context;
+    storage.featureName = featureName;
+    return PreOpaqueFrame(View{}, FakeScene(), 5, &storage);
+}
+
+TEST(KitChannelReaderTest, ReadsAValueAnotherFeaturePublished)
+{
+    Harness harness;
+    PreOpaqueFrame owner = harness.MakeFrame();
+    Channel<int>("X").Publish(owner, 11);
+
+    detail::FrameContext readerContext;
+    const PreOpaqueFrame reader = FrameOfFeature(harness, "Reader", readerContext);
+    const ChannelReader<int> view("Feature", "X");
+    ASSERT_TRUE(view.Fetch(reader).has_value());
+    EXPECT_EQ(*view.Fetch(reader), 11);
+    EXPECT_FALSE(Channel<int>("X").Fetch(reader).has_value());
+}
+
+TEST(KitChannelReaderTest, MissingChannelReturnsNothing)
+{
+    Harness harness;
+    PreOpaqueFrame frame = harness.MakeFrame();
+    EXPECT_FALSE(ChannelReader<int>("Feature", "Nothing").Fetch(frame).has_value());
+}
+
+TEST(KitChannelReaderTest, WrongTypeIsLoggedOnceAndReturnsNothing)
+{
+    RecordingLogSink sink;
+    const ScopedLogSinkInstall guard(&sink);
+    Harness harness;
+    PreOpaqueFrame frame = harness.MakeFrame();
+    Channel<int>("X").Publish(frame, 1);
+
+    const ChannelReader<std::string> wrong("Feature", "X");
+    EXPECT_FALSE(wrong.Fetch(frame).has_value());
+    EXPECT_FALSE(wrong.Fetch(frame).has_value());
+    EXPECT_EQ(CountErrorsByCategory(sink, "FeatureKit"), 1);
+}
+
+TEST(KitChannelReaderTest, EmptyOwnerOrNameIsLoggedOnceAndReturnsNothing)
+{
+    RecordingLogSink sink;
+    const ScopedLogSinkInstall guard(&sink);
+    Harness harness;
+    PreOpaqueFrame frame = harness.MakeFrame();
+    Channel<int>("X").Publish(frame, 1);
+
+    EXPECT_FALSE(ChannelReader<int>("", "X").Fetch(frame).has_value());
+    EXPECT_FALSE(ChannelReader<int>("Feature", "").Fetch(frame).has_value());
+    EXPECT_EQ(CountErrorsByCategory(sink, "FeatureKit"), 1);
+}
+
+TEST(KitChannelReaderTest, AnotherViewDoesNotSeeTheValue)
+{
+    Harness game(rg::RenderViewId::Named("Game"));
+    PreOpaqueFrame gameFrame = game.MakeFrame();
+    Channel<int>("X").Publish(gameFrame, 5);
+
+    detail::FrameContext sceneContext = game.context;
+    sceneContext.view = rg::RenderViewId::Named("Scene");
+    const PreOpaqueFrame sceneFrame(View{}, FakeScene(), 5, &sceneContext);
+    const ChannelReader<int> reader("Feature", "X");
+    EXPECT_FALSE(reader.Fetch(sceneFrame).has_value());
+    EXPECT_TRUE(reader.Fetch(gameFrame).has_value());
+}
+
+TEST(KitChannelReaderTest, ASharedValueIsVisibleToAViewReader)
+{
+    Harness shared(rg::RenderViewId::Shared());
+    PreOpaqueFrame sharedFrame = shared.MakeFrame();
+    Channel<int>("X").Publish(sharedFrame, 9);
+
+    detail::FrameContext gameContext = shared.context;
+    gameContext.view = rg::RenderViewId::Named("Game");
+    const PreOpaqueFrame gameFrame(View{}, FakeScene(), 5, &gameContext);
+    const auto value = ChannelReader<int>("Feature", "X").Fetch(gameFrame);
+    ASSERT_TRUE(value.has_value());
+    EXPECT_EQ(*value, 9);
+}
+
 TEST(KitSceneSlotTest, OnlyDepth2DIsADepthResource)
 {
     static_assert(IsDepthSlotKind(SceneSlotKind::Depth2D));

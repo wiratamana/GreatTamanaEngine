@@ -7,6 +7,8 @@
 #include "Core/PixelFormat.h"
 #include "Features/Gtao/GtaoTypes.h"
 #include "Features/Shadow/ShadowTypes.h"
+#include "Features/VolumetricLight/VolumetricLightTypes.h"
+#include "Game/Lighting/SunShadowReceiver.h"
 #include "Renderer/RenderGraph/ComputePass.h"
 #include "Renderer/RenderGraph/FullscreenPass.h"
 #include "Renderer/RenderGraph/GpuBuffer.h"

@@ -1,0 +1,79 @@
+#version 450
+
+// Blends this frame's injection with last frame's reprojected result and stores the result in the volume and the atlas.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#include "VolumetricLightCommon.glsl"
+
+// Member names and order match VolumetricLightTemporalParamsGpu.
+layout(std430, binding = 0) readonly buffer TemporalParams {
+    mat4 invViewProjection;
+    mat4 prevViewProjection;
+    vec4 eyeAndMaxDistance;         // Current frame.
+    vec4 prevEyeAndMaxDistance;     // Previous frame.
+    vec4 exponentsAndBlend;         // x current exponent, y previous exponent, z history weight, w valid.
+    uvec4 atlas;                    // x tiles across, y tiles down.
+} params;
+
+layout(binding = 1) uniform sampler3D rawVolume;
+layout(binding = 2) uniform sampler2D historyAtlas;
+layout(binding = 3, rgba16f) uniform writeonly image3D blendedOutput;
+layout(binding = 4, rgba16f) uniform writeonly image2D atlasOutput;
+
+ivec2 AtlasOrigin(int slice, ivec2 grid)
+{
+    return ivec2(slice % int(params.atlas.x), slice / int(params.atlas.x)) * grid;
+}
+
+// Trilinear history fetch at `c` in cell-index space (cell k centre = k).
+// xy is clamped to the tile interior, so the bilinear tap never reads a neighbouring tile.
+vec4 SampleHistory(vec3 c, ivec3 size)
+{
+    vec2 xy = clamp(c.xy, vec2(0.0), vec2(size.xy) - 1.0);
+    float z = clamp(c.z, 0.0, float(size.z - 1));
+    int z0 = int(floor(z));
+    int z1 = min(z0 + 1, size.z - 1);
+    vec2 atlasSize = vec2(textureSize(historyAtlas, 0));
+    vec2 uv0 = (vec2(AtlasOrigin(z0, size.xy)) + xy + 0.5) / atlasSize;
+    vec2 uv1 = (vec2(AtlasOrigin(z1, size.xy)) + xy + 0.5) / atlasSize;
+    return mix(textureLod(historyAtlas, uv0, 0.0), textureLod(historyAtlas, uv1, 0.0), z - float(z0));
+}
+
+void main()
+{
+    ivec3 size = imageSize(blendedOutput);
+    ivec3 cell = ivec3(gl_GlobalInvocationID);
+    if (any(greaterThanEqual(cell, size))) {
+        return;
+    }
+    vec4 current = texelFetch(rawVolume, cell, 0);
+    vec4 result = current;
+
+    float weight = params.exponentsAndBlend.z;
+    if (params.exponentsAndBlend.w > 0.5 && weight > 0.0) {
+        // Reproject the unjittered cell centre; the jitter is what the blend averages out.
+        float distance = FroxelSliceToViewDepth(
+            float(cell.z) + 0.5, float(size.z), params.eyeAndMaxDistance.w, params.exponentsAndBlend.x);
+        vec3 dir = FroxelRayDirection((vec2(cell.xy) + 0.5) / vec2(size.xy), params.invViewProjection);
+        vec3 world = params.eyeAndMaxDistance.xyz + dir * distance;
+
+        vec4 prevClip = params.prevViewProjection * vec4(world, 1.0);
+        if (prevClip.w > 0.0) {
+            vec2 prevUv = prevClip.xy / prevClip.w * 0.5 + 0.5;
+            float prevDistance = length(world - params.prevEyeAndMaxDistance.xyz);
+            bool inside = all(greaterThanEqual(prevUv, vec2(0.0))) && all(lessThanEqual(prevUv, vec2(1.0)))
+                && prevDistance <= params.prevEyeAndMaxDistance.w;
+            if (inside) {
+                float prevSlice = ViewDepthToFroxelSlice(
+                    prevDistance, float(size.z), params.prevEyeAndMaxDistance.w, params.exponentsAndBlend.y);
+                vec4 history = SampleHistory(vec3(prevUv * vec2(size.xy) - 0.5, prevSlice - 0.5), size);
+                if (HasNonFinite(history)) {
+                    history = current; // A NaN kept in the history would never wash out.
+                }
+                result = mix(current, history, weight);
+            }
+        }
+    }
+    imageStore(blendedOutput, cell, result);
+    imageStore(atlasOutput, AtlasOrigin(cell.z, size.xy) + cell.xy, result);
+}

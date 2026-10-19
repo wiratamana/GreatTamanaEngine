@@ -185,6 +185,7 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
     snap.resolutionInUse = resolution;
     if (failure == ShadowFrameStatus::Ok) {
         m_mapData.Publish(f, data);
+        m_receiverData.Publish(f, MakeSunShadowReceiver(data));
     }
     finish(failure);
 }

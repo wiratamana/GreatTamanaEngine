@@ -41,6 +41,12 @@ public:
         return Lookup("RenderFeatureCompositor_" + viewName + "_SeedCopy");
     }
 
+    // "RenderFeatureCompositor_<view>_FinalCopy": copies the running result to the view target when the last entry is skipped.
+    const char* FinalCopyPassName(const std::string& viewName)
+    {
+        return Lookup("RenderFeatureCompositor_" + viewName + "_FinalCopy");
+    }
+
 private:
     const char* Lookup(const std::string& key)
     {

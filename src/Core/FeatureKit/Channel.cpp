@@ -58,11 +58,25 @@ std::optional<std::any> FetchAny(const Frame& frame, std::string_view channelNam
         frame.ReportOnce("Channel::Fetch needs a frame that belongs to a render callback");
         return std::nullopt;
     }
-    const rg::RenderPassId key{ ChannelKey(context->featureName, channelName, context->view) };
+    return FetchAnyFrom(frame, context->featureName, channelName);
+}
+
+std::optional<std::any> FetchAnyFrom(const Frame& frame, std::string_view ownerName, std::string_view channelName)
+{
+    FrameContext* context = frame.Context();
+    if (context == nullptr || context->blackboard == nullptr) {
+        frame.ReportOnce("Channel::Fetch needs a frame that belongs to a render callback");
+        return std::nullopt;
+    }
+    if (ownerName.empty() || channelName.empty()) {
+        frame.ReportOnce("ChannelReader needs an owner and a channel name");
+        return std::nullopt;
+    }
+    const rg::RenderPassId key{ ChannelKey(ownerName, channelName, context->view) };
     std::optional<ChannelValue> stored = context->blackboard->Fetch<ChannelValue>(key);
     if (!stored.has_value() && !(context->view == rg::RenderViewId::Shared())) {
         // A value published by the frame's Shared callback is visible to every view.
-        const rg::RenderPassId sharedKey{ ChannelKey(context->featureName, channelName, rg::RenderViewId::Shared()) };
+        const rg::RenderPassId sharedKey{ ChannelKey(ownerName, channelName, rg::RenderViewId::Shared()) };
         stored = context->blackboard->Fetch<ChannelValue>(sharedKey);
     }
     if (!stored.has_value()) {

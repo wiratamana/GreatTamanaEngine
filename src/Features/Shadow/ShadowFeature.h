@@ -61,6 +61,7 @@ private:
     fx::FullscreenShader m_compositeShader{ "ShadowComposite" };
     fx::SceneShaderSet m_depthShaders = fx::SceneShaderSet::DepthOnly("ShadowDepth");
     fx::Channel<ShadowMapData> m_mapData{ "Map" };
+    fx::Channel<SunShadowReceiver> m_receiverData{ kSunShadowReceiverChannel };
     fx::Channel<fx::Texture> m_maskData{ "Mask" };
     fx::Channel<fx::Texture> m_cascadeIdData{ "CascadeId" };
 };
