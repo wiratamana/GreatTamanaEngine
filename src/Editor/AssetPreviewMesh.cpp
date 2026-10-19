@@ -1,6 +1,6 @@
 #include "AssetPreviewMesh.h"
 
-#include "ProjectPanelData.h" // Utf8ToPath()
+#include "../Encoding/Utf8Path.h"
 #include "../Assets/AssetTypes.h" // AssetType
 #include "../Assets/GtaFile.h" // ReadGtaFile()
 #include "../Assets/MeshFile.h" // DecodeMeshDataFromBytes()
@@ -34,7 +34,7 @@ bool AssetPreviewMesh::EnsureMeshUploaded(Renderer& renderer, const std::string&
 {
     std::error_code timeEc;
     const std::filesystem::file_time_type writeTime =
-        std::filesystem::last_write_time(Utf8ToPath(absolutePath), timeEc);
+        std::filesystem::last_write_time(PathFromUtf8(absolutePath), timeEc);
 
     if (!absolutePath.empty() && absolutePath == m_cachedPath && !timeEc && writeTime == m_cachedWriteTime) {
         return true; // Unchanged since last call - whatever m_cachedIsValid says still holds.
@@ -56,7 +56,7 @@ bool AssetPreviewMesh::EnsureMeshUploaded(Renderer& renderer, const std::string&
         m_cachedWriteTime = writeTime;
     }
 
-    const std::optional<GtaFileData> gta = ReadGtaFile(Utf8ToPath(absolutePath));
+    const std::optional<GtaFileData> gta = ReadGtaFile(PathFromUtf8(absolutePath));
     if (!gta.has_value() || gta->header.Type() != AssetType::Mesh) {
         m_preview->SetMesh({}, {}); // Drops the previous asset's mesh.
         return true;

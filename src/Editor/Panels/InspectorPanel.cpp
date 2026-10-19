@@ -23,7 +23,7 @@
 #include "../BoneViewerWindow.h"
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the asset size field below.
 #include "../ModelRigCache.h" // ModelRigCache::GetOrLoad() - shared bones/rigid-bodies/joints cache, Model Part section.
-#include "../ProjectPanelData.h" // Utf8ToPath()
+#include "../../Encoding/Utf8Path.h"
 #include "../../Assets/AssetTypes.h" // AssetType, AssetFlags, Guid
 #include "../../Assets/GtaFile.h" // ReadGtaHeader()/ReadGtaFile()
 #include "../../Assets/MotionFile.h" // DecodeMotionDataFromBytes()
@@ -1263,7 +1263,7 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
     const std::string& absolutePath = ctx.selection.SelectedAssetAbsolutePath();
     const std::string& relativePath = ctx.selection.SelectedAssetRelativePath();
 
-    const AssetMetadata metadata = BuildAssetMetadata(Utf8ToPath(absolutePath));
+    const AssetMetadata metadata = BuildAssetMetadata(PathFromUtf8(absolutePath));
 
     ImGui::Text("%s", metadata.name.empty() ? "(Project root)" : metadata.name.c_str());
     ImGui::TextDisabled("%s", relativePath.empty() ? "(root)" : relativePath.c_str());
@@ -1281,7 +1281,7 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
     // flags/payload size) for ANY *.gta asset, not only ones that also
     // happen to preview as an image or a mesh.
     const bool isGta = !metadata.isDirectory && metadata.extension == ".gta";
-    const std::optional<GtaHeader> gtaHeader = isGta ? ReadGtaHeader(Utf8ToPath(absolutePath)) : std::nullopt;
+    const std::optional<GtaHeader> gtaHeader = isGta ? ReadGtaHeader(PathFromUtf8(absolutePath)) : std::nullopt;
     const bool isGtaTexture = gtaHeader.has_value() && gtaHeader->Type() == AssetType::Texture;
     const bool isGtaMesh = gtaHeader.has_value() && gtaHeader->Type() == AssetType::Mesh;
     const bool isGtaAnimation = gtaHeader.has_value() && gtaHeader->Type() == AssetType::Animation;
@@ -1296,7 +1296,7 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
     // shows every OTHER (header-derived) field in that case.
     std::optional<MotionData> motionData;
     if (isGtaAnimation) {
-        if (const std::optional<GtaFileData> gtaFile = ReadGtaFile(Utf8ToPath(absolutePath)); gtaFile.has_value()) {
+        if (const std::optional<GtaFileData> gtaFile = ReadGtaFile(PathFromUtf8(absolutePath)); gtaFile.has_value()) {
             motionData = DecodeMotionDataFromBytes(gtaFile->payload);
         }
     }

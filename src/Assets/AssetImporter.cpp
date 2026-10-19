@@ -1,5 +1,6 @@
 #include "AssetImporter.h"
 
+#include "../Encoding/Utf8Path.h"
 #include "Ktx2Encoder.h"
 #include "MeshFile.h"
 #include "MotionFile.h"
@@ -16,19 +17,6 @@
 namespace gte {
 
 namespace {
-
-// Local copies of the helpers in AssetDatabase.cpp (src/Assets never depends on src/Editor).
-std::string PathToUtf8(const std::filesystem::path& path)
-{
-    const std::u8string u8 = path.u8string();
-    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
-}
-
-// Inverse of PathToUtf8(); texture source paths are stored as UTF-8.
-std::filesystem::path Utf8ToPath(const std::string& utf8)
-{
-    return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
-}
 
 std::string ToLowerAscii(const std::string& s)
 {
@@ -57,7 +45,7 @@ void ImportMaterialTextures(
             continue; // No texture in this slot at all - nothing to import.
         }
 
-        const std::filesystem::path sourcePath = Utf8ToPath(textureRef.sourcePath);
+        const std::filesystem::path sourcePath = PathFromUtf8(textureRef.sourcePath);
 
         std::error_code existsEc;
         if (!std::filesystem::is_regular_file(sourcePath, existsEc) || existsEc) {

@@ -3,6 +3,7 @@
 #include <cassert>
 
 #include "../Core/Logging.h"
+#include "../Encoding/Utf8Path.h"
 #include "BuiltinFeatureEditorPanelRegistry.h"
 #include "DockLayout.h"
 #include "EditorCamera.h"
@@ -493,7 +494,7 @@ public:
         ProjectAssetImportResult result;
 #if GTE_ENABLE_PROJECT_PANEL
         const AssetImportResult imported = m_projectPanel.ImportExternalFile(
-            Utf8ToPath(sourceAbsolutePath), destinationRelativeFolder);
+            PathFromUtf8(sourceAbsolutePath), destinationRelativeFolder);
         result.projectAvailable = true;
         result.success = imported.success;
         result.message = imported.message;

@@ -27,20 +27,6 @@ struct ProjectEntry {
     std::vector<ProjectEntry> children; // Only populated for a directory.
 };
 
-// Dear ImGui always expects UTF-8 text (see imgui.h's own docs), but
-// std::filesystem::path's string()/a bare path(std::string) construction go
-// through the OS's native narrow encoding instead - the current ANSI
-// codepage on Windows, NOT UTF-8 - so every ProjectEntry::name/relativePath
-// and every path built from a UTF-8 source (SDL_GetBasePath(), an
-// SDL_EVENT_DROP_FILE path, a selection stored as ProjectEntry::relativePath)
-// goes through these two helpers instead, never path::string()/a bare
-// path(std::string) construction, to keep non-ASCII filenames (e.g.
-// Japanese/accented names) displaying and round-tripping correctly. Both
-// route through std::u8string (path's own C++20 UTF-8-aware constructor/
-// accessor), not the deprecated std::filesystem::u8path() free function.
-std::string PathToUtf8(const std::filesystem::path& path);
-std::filesystem::path Utf8ToPath(const std::string& utf8);
-
 // Recursively scans `rootPath` (the Project folder itself - see
 // ProjectPanel's own root resolution) and returns its immediate children as
 // a tree of ProjectEntry, directories first then files, both

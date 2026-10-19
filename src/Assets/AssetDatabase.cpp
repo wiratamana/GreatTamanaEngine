@@ -1,5 +1,7 @@
 #include "AssetDatabase.h"
 
+#include "../Encoding/Utf8Path.h"
+
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -9,17 +11,6 @@
 namespace gte {
 
 namespace {
-
-// Same UTF-8 <-> std::filesystem::path convention ProjectPanelData.h uses
-// (see its own PathToUtf8()/Utf8ToPath() comment) - duplicated locally
-// rather than depending on it, since this module (src/Assets/) must stay
-// available with GTE_ENABLE_EDITOR/GTE_ENABLE_PROJECT_PANEL both OFF (it's
-// an engine-level concept, not an Editor one).
-std::string PathToUtf8(const std::filesystem::path& path)
-{
-    const std::u8string u8 = path.u8string();
-    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
-}
 
 std::string ToLowerAscii(const std::string& s)
 {

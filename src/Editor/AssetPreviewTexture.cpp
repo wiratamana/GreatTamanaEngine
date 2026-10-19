@@ -1,6 +1,6 @@
 #include "AssetPreviewTexture.h"
 
-#include "ProjectPanelData.h" // Utf8ToPath()/PathToUtf8() - see ReadFileBytes() below.
+#include "../Encoding/Utf8Path.h"
 #include "../Assets/AssetTypes.h" // AssetType
 #include "../Assets/GtaFile.h" // ReadGtaFile()
 #include "../Assets/Ktx2Decoder.h" // DecodeKtx2ToRgba8()
@@ -14,6 +14,7 @@
 #include <cctype>
 #include <exception>
 #include <fstream>
+#include <optional>
 #include <system_error>
 #include <vector>
 
@@ -25,7 +26,7 @@ namespace {
 // non-ASCII names work on Windows.
 std::optional<std::vector<unsigned char>> ReadFileBytes(const std::string& absolutePathUtf8)
 {
-    std::ifstream file(Utf8ToPath(absolutePathUtf8), std::ios::binary | std::ios::ate);
+    std::ifstream file(PathFromUtf8(absolutePathUtf8), std::ios::binary | std::ios::ate);
     if (!file) {
         return std::nullopt;
     }
@@ -46,7 +47,7 @@ std::optional<std::vector<unsigned char>> ReadFileBytes(const std::string& absol
 // True if `absolutePathUtf8` has the *.gta extension (case-insensitive).
 bool HasGtaExtension(const std::string& absolutePathUtf8)
 {
-    std::string extension = PathToUtf8(Utf8ToPath(absolutePathUtf8).extension());
+    std::string extension = PathToUtf8(PathFromUtf8(absolutePathUtf8).extension());
     std::transform(
         extension.begin(), extension.end(), extension.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return extension == ".gta";
@@ -65,7 +66,7 @@ std::optional<DecodedPixels> DecodePixels(
     const std::string& absolutePath, unsigned char*& stbOwnedPixels, std::vector<std::uint8_t>& gtaOwnedPixels)
 {
     if (HasGtaExtension(absolutePath)) {
-        const std::optional<GtaFileData> gta = ReadGtaFile(Utf8ToPath(absolutePath));
+        const std::optional<GtaFileData> gta = ReadGtaFile(PathFromUtf8(absolutePath));
         if (!gta.has_value() || gta->header.Type() != AssetType::Texture) {
             // Not a valid *.gta, or one that wraps something other than a texture.
             return std::nullopt;

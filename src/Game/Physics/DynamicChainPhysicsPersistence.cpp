@@ -3,27 +3,13 @@
 #include "../../Assets/AssetTypes.h"
 #include "../../Assets/GtaFile.h"
 #include "../../Assets/RigFile.h"
+#include "../../Encoding/Utf8Path.h"
 
 #include <filesystem>
 
 namespace gte {
 
 namespace {
-
-// Mirrors MeshAssetGpuCatalog.cpp's own Utf8PathFromGamePath() - same
-// std::u8string round-trip, same reasoning (a std::string holding UTF-8 game/
-// asset-relative-or-absolute path text must be reinterpreted through
-// std::u8string before handing it to std::filesystem::path, or non-ASCII
-// characters get mis-decoded via the platform's native narrow encoding on
-// Windows). Duplicated here rather than shared/exported from
-// MeshAssetGpuCatalog.cpp specifically because that function is an anonymous-
-// namespace implementation detail of a class in a different layer
-// (Game/Instantiation) - not a case to introduce a new shared utility header
-// for; if a THIRD call site ever needs this, promote it then.
-std::filesystem::path Utf8PathFromGamePath(const std::string& utf8)
-{
-    return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
-}
 
 void SetError(std::string* outErrorMessage, const char* message)
 {
@@ -37,7 +23,7 @@ void SetError(std::string* outErrorMessage, const char* message)
 bool SaveJointPhysicsOverridesToGtaFile(
     const std::string& absoluteGtaPath, const std::vector<DynamicChainDefinition>& chains, std::string* outErrorMessage)
 {
-    const std::optional<GtaFileData> gta = ReadGtaFile(Utf8PathFromGamePath(absoluteGtaPath));
+    const std::optional<GtaFileData> gta = ReadGtaFile(PathFromUtf8(absoluteGtaPath));
     if (!gta.has_value()) {
         SetError(outErrorMessage, "Could not read the *.gta file (missing, unreadable, or bad magic).");
         return false;
@@ -77,7 +63,7 @@ bool SaveJointPhysicsOverridesToGtaFile(
     rig->jointPhysicsOverrides = std::move(overrides);
 
     const std::vector<std::uint8_t> newMetadata = EncodeRigDataToBytes(*rig);
-    const bool wrote = WriteGtaFile(Utf8PathFromGamePath(absoluteGtaPath), gta->header.Type(), gta->header.Id(),
+    const bool wrote = WriteGtaFile(PathFromUtf8(absoluteGtaPath), gta->header.Type(), gta->header.Id(),
         gta->header.Flags(), newMetadata, gta->payload, gta->header.version);
     if (!wrote) {
         SetError(outErrorMessage, "Failed to write the *.gta file back to disk.");

@@ -22,7 +22,7 @@ struct AssetRecord {
     AssetType type = AssetType::Unknown;
     AssetFlags flags = AssetFlags::None;
     std::uint64_t version = 0;
-    std::string gtaPath; // Absolute path to the *.gta file itself, UTF-8 (see ProjectPanelData::PathToUtf8()).
+    std::string gtaPath; // Absolute path to the *.gta file itself, UTF-8 (see Encoding/Utf8Path.h).
     std::uintmax_t fileSizeBytes = 0; // Whole *.gta file's size on disk (header + metadata + payload).
 };
 

@@ -6,6 +6,7 @@
 #include "../../Assets/MaterialData.h"
 #include "../../Assets/MeshFile.h"
 #include "../../Assets/RigFile.h"
+#include "../../Encoding/Utf8Path.h"
 #include "../../Renderer/MeshVertex.h"
 #include "../../Renderer/Culling/CullingTypes.h" // ComputeLocalAABB()
 #include "../../Renderer/Renderer.h"
@@ -19,18 +20,6 @@
 namespace gte {
 
 namespace {
-
-// UTF-8 game path to filesystem path, via std::u8string.
-std::filesystem::path Utf8PathFromGamePath(const std::string& utf8)
-{
-    return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
-}
-
-std::string PathToUtf8(const std::filesystem::path& path)
-{
-    const std::u8string u8 = path.u8string();
-    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
-}
 
 // Tight local-space AABB of the vertices `indices` references (out-of-range indices are skipped).
 AABB ComputeSubsetLocalAABB(const std::vector<Vec3>& positions, const std::vector<std::uint32_t>& indices)
@@ -91,7 +80,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
         return found->second;
     }
 
-    const std::optional<GtaFileData> gta = ReadGtaFile(Utf8PathFromGamePath(absoluteGtaPath));
+    const std::optional<GtaFileData> gta = ReadGtaFile(PathFromUtf8(absoluteGtaPath));
     if (!gta.has_value() || gta->header.Type() != AssetType::Mesh) {
         return kEmpty; // Missing file, bad magic, or not a Mesh asset.
     }
@@ -116,7 +105,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
     // (which also covers its sibling "..._Textures" folder).
     AssetDatabase textureDatabase;
     if (!materials.textures.empty()) {
-        textureDatabase.RefreshFromDirectory(Utf8PathFromGamePath(absoluteGtaPath).parent_path());
+        textureDatabase.RefreshFromDirectory(PathFromUtf8(absoluteGtaPath).parent_path());
     }
 
     // Pure index-range partitioning; whether a slice ends up textured depends on the texture cache below.
@@ -245,7 +234,7 @@ EntityBlueprint MeshAssetGpuCatalog::Resolve(RenderSystem& renderSystem, Rendere
     }
 
     // Root node: a bare hierarchy node named after the file stem ("Miku.gta" -> "Miku"), tagged with the source path.
-    root.name = PathToUtf8(Utf8PathFromGamePath(absoluteGtaPath).stem());
+    root.name = PathToUtf8(PathFromUtf8(absoluteGtaPath).stem());
     root.meshAssetSourcePath = absoluteGtaPath;
 
     for (const MeshAssetPart& part : parts) {
@@ -284,7 +273,7 @@ bool MeshAssetGpuCatalog::RefreshCachedJointPhysicsOverridesFromDisk(const std::
         return false; // Never cached - nothing to refresh.
     }
 
-    const std::optional<GtaFileData> gta = ReadGtaFile(Utf8PathFromGamePath(absoluteGtaPath));
+    const std::optional<GtaFileData> gta = ReadGtaFile(PathFromUtf8(absoluteGtaPath));
     if (!gta.has_value() || gta->header.Type() != AssetType::Mesh) {
         return false; // Keep the existing cached entry on a failed refresh.
     }

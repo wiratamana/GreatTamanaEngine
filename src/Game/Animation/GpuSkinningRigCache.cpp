@@ -1,5 +1,6 @@
 #include "GpuSkinningRigCache.h"
 
+#include "../../Encoding/Utf8Path.h"
 #include "../../Math/Mat4.h"
 #include "../../Renderer/GpuSkinning/GpuSkinningTypes.h"
 #include "../../Renderer/Renderer.h"
@@ -17,13 +18,9 @@ namespace gte {
 namespace {
 
 // The file name only: the render graph panel shows this label, and a full path would leak the folder layout.
-// Built through u8string so non-ASCII names survive on Windows.
 std::string FileNameOnly(const std::string& absoluteUtf8Path)
 {
-    const std::filesystem::path path(
-        std::u8string(reinterpret_cast<const char8_t*>(absoluteUtf8Path.data()), absoluteUtf8Path.size()));
-    const std::u8string filenameU8 = path.filename().u8string();
-    return std::string(reinterpret_cast<const char*>(filenameU8.data()), filenameU8.size());
+    return PathToUtf8(PathFromUtf8(absoluteUtf8Path).filename());
 }
 
 } // namespace

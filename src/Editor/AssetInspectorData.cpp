@@ -1,6 +1,6 @@
 #include "AssetInspectorData.h"
 
-#include "ProjectPanelData.h" // PathToUtf8()
+#include "../Encoding/Utf8Path.h"
 
 #include <algorithm>
 #include <array>

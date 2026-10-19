@@ -1,6 +1,6 @@
 #include "ModelRigCache.h"
 
-#include "ProjectPanelData.h" // Utf8ToPath()
+#include "../Encoding/Utf8Path.h"
 #include "../Assets/AssetTypes.h" // AssetType
 #include "../Assets/GtaFile.h" // ReadGtaFile()
 
@@ -9,7 +9,7 @@ namespace gte {
 const RigFileData* ModelRigCache::GetOrLoad(const std::string& absoluteGtaPath)
 {
     std::error_code timeEc;
-    const std::filesystem::file_time_type writeTime = std::filesystem::last_write_time(Utf8ToPath(absoluteGtaPath), timeEc);
+    const std::filesystem::file_time_type writeTime = std::filesystem::last_write_time(PathFromUtf8(absoluteGtaPath), timeEc);
 
     if (!absoluteGtaPath.empty() && absoluteGtaPath == m_cachedPath && !timeEc && writeTime == m_cachedWriteTime) {
         return m_cachedRig.has_value() ? &m_cachedRig.value() : nullptr;
@@ -21,7 +21,7 @@ const RigFileData* ModelRigCache::GetOrLoad(const std::string& absoluteGtaPath)
         m_cachedWriteTime = writeTime;
     }
 
-    const std::optional<GtaFileData> gta = ReadGtaFile(Utf8ToPath(absoluteGtaPath));
+    const std::optional<GtaFileData> gta = ReadGtaFile(PathFromUtf8(absoluteGtaPath));
     if (!gta.has_value() || gta->header.Type() != AssetType::Mesh) {
         return nullptr;
     }

@@ -5,6 +5,7 @@
 #include "../Assets/AssetImporter.h"
 #include "../Assets/GtaFile.h"
 #include "../Assets/MeshFile.h"
+#include "../Encoding/Utf8Path.h"
 #include "../Core/Logging.h"
 #include "../ECS/Components/Camera.h"
 #include "../ECS/Components/DirectionalLight.h"
@@ -33,12 +34,6 @@ constexpr std::string_view kSponzaDirectory;
 constexpr const char* kLogCategory = "SponzaScene";
 constexpr const char* kRootName = "Sponza";
 constexpr float kEyeHeight = 1.7f;
-
-std::string PathToUtf8(const std::filesystem::path& path)
-{
-    const std::u8string u8 = path.u8string();
-    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
-}
 
 // Camera start: bounds center on X/Z, eye height above the lowest point.
 // Read back from the *.gta so it works for fresh and cached imports.

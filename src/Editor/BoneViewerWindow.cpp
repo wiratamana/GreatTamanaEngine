@@ -3,7 +3,7 @@
 #include "EditorContext.h"
 #include "ModelRigCache.h"
 #include "ImGuiUniqueId.h"
-#include "ProjectPanelData.h" // Utf8ToPath()
+#include "../Encoding/Utf8Path.h"
 #include "RigidBodyWireframe.h"
 #include "../Assets/AssetTypes.h" // AssetType
 #include "../Assets/GtaFile.h" // ReadGtaFile()
@@ -97,7 +97,7 @@ bool BoneViewerWindow::EnsureDataLoaded(
     Renderer& renderer, const std::string& absoluteGtaPath, EditorContext& ctx, ModelRigCache& rigCache)
 {
     std::error_code timeEc;
-    const std::filesystem::file_time_type writeTime = std::filesystem::last_write_time(Utf8ToPath(absoluteGtaPath), timeEc);
+    const std::filesystem::file_time_type writeTime = std::filesystem::last_write_time(PathFromUtf8(absoluteGtaPath), timeEc);
 
     if (!absoluteGtaPath.empty() && absoluteGtaPath == m_cachedPath && !timeEc && writeTime == m_cachedWriteTime) {
         return true; // Unchanged since last call - whatever m_cachedIsValid says still holds.
@@ -125,7 +125,7 @@ bool BoneViewerWindow::EnsureDataLoaded(
         m_cachedWriteTime = writeTime;
     }
 
-    const std::optional<GtaFileData> gta = ReadGtaFile(Utf8ToPath(absoluteGtaPath));
+    const std::optional<GtaFileData> gta = ReadGtaFile(PathFromUtf8(absoluteGtaPath));
     if (!gta.has_value() || gta->header.Type() != AssetType::Mesh) {
         return true; // Not a (valid) Mesh *.gta - m_cachedIsValid stays false.
     }

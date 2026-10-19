@@ -2233,6 +2233,7 @@ set(GTE_TEST_SOURCES
     Core/ScreenPostProcessPassPriorityAssignmentTests.cpp
     Memory/GpuResourceHandleTests.cpp
     Encoding/Base64Tests.cpp
+    Encoding/Utf8PathTests.cpp
     Encoding/PixelConversionTests.cpp
     Encoding/DepthVisualizationTests.cpp
     Encoding/PngEncoderTests.cpp

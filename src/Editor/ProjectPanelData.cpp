@@ -1,5 +1,7 @@
 #include "ProjectPanelData.h"
 
+#include "../Encoding/Utf8Path.h"
+
 #include <algorithm>
 #include <cctype>
 #include <exception>
@@ -85,17 +87,6 @@ std::vector<ProjectEntry> ScanChildren(const std::filesystem::path& dirAbsPath, 
 
 } // namespace
 
-std::string PathToUtf8(const std::filesystem::path& path)
-{
-    const std::u8string u8 = path.u8string();
-    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
-}
-
-std::filesystem::path Utf8ToPath(const std::string& utf8)
-{
-    return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
-}
-
 std::vector<ProjectEntry> ScanProjectDirectory(const std::filesystem::path& rootPath)
 {
     try {
@@ -136,7 +127,7 @@ std::filesystem::path ResolveDropTargetDirectory(
         return rootPath;
     }
 
-    const std::filesystem::path candidate = rootPath / Utf8ToPath(selectedRelativePath);
+    const std::filesystem::path candidate = rootPath / PathFromUtf8(selectedRelativePath);
 
     std::error_code ec;
     if (std::filesystem::is_directory(candidate, ec) && !ec) {
@@ -166,7 +157,7 @@ std::filesystem::path MakeUniqueDestinationPath(
     constexpr int kMaxAttempts = 1000;
     for (int suffix = 1; suffix <= kMaxAttempts; ++suffix) {
         std::filesystem::path candidateName = stem;
-        candidateName += Utf8ToPath(" (" + std::to_string(suffix) + ")");
+        candidateName += PathFromUtf8(" (" + std::to_string(suffix) + ")");
         candidateName += extension;
 
         const std::filesystem::path candidate = destinationDir / candidateName;

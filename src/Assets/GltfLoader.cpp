@@ -1,5 +1,6 @@
 #include "GltfLoader.h"
 
+#include "../Encoding/Utf8Path.h"
 #include "MeshNormalRecompute.h"
 
 #include <cgltf.h>
@@ -25,22 +26,11 @@ struct CgltfDataDeleter {
 };
 using CgltfDataPtr = std::unique_ptr<cgltf_data, CgltfDataDeleter>;
 
-std::string PathToUtf8(const std::filesystem::path& path)
-{
-    const std::u8string u8 = path.u8string();
-    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
-}
-
-std::filesystem::path Utf8ToPath(std::string_view utf8)
-{
-    return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
-}
-
 // File reader for cgltf that takes UTF-8 paths, so non-ASCII folders work on Windows.
 cgltf_result ReadFileUtf8(const cgltf_memory_options* memory, const cgltf_file_options*, const char* path,
     cgltf_size* size, void** data)
 {
-    std::ifstream file(Utf8ToPath(path), std::ios::binary | std::ios::ate);
+    std::ifstream file(PathFromUtf8(path), std::ios::binary | std::ios::ate);
     if (!file) {
         return cgltf_result_file_not_found;
     }
@@ -281,7 +271,7 @@ struct TextureTable {
         uri.resize(cgltf_decode_uri(uri.data())); // "%20" etc.
 
         MaterialTextureRef ref;
-        ref.sourcePath = PathToUtf8((baseDirectory / Utf8ToPath(uri)).lexically_normal());
+        ref.sourcePath = PathToUtf8((baseDirectory / PathFromUtf8(uri)).lexically_normal());
 
         const auto index = static_cast<std::int32_t>(out->textures.size());
         out->textures.push_back(std::move(ref));
@@ -344,7 +334,7 @@ GltfLoadResult LoadGltfModel(const std::string& filePath)
         return result;
     }
 
-    TextureTable textures{ Utf8ToPath(filePath).parent_path(), &result.materials, {} };
+    TextureTable textures{ PathFromUtf8(filePath).parent_path(), &result.materials, {} };
 
     // Group triangles per material so each material owns one contiguous index run.
     struct MaterialBucket {

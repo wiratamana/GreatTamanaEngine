@@ -3,6 +3,7 @@
 #include "../EditorContext.h"
 #include "../ProjectRootPath.h"
 #include "../../Assets/AssetImporter.h"
+#include "../../Encoding/Utf8Path.h"
 #include "../ImGuiUniqueId.h"
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the file-size tooltip below.
 
@@ -157,7 +158,7 @@ void ProjectPanel::SetStatus(const std::string& message, bool isError)
 void ProjectPanel::SetAssetSelection(EditorContext& ctx, const std::string& relativePath, bool isDirectory)
 {
     ctx.selection.SelectAsset(
-        PathToUtf8(relativePath.empty() ? m_rootPath : (m_rootPath / Utf8ToPath(relativePath))),
+        PathToUtf8(relativePath.empty() ? m_rootPath : (m_rootPath / PathFromUtf8(relativePath))),
         relativePath,
         isDirectory);
 }
@@ -369,7 +370,7 @@ void ProjectPanel::RenderRightPaneEntry(EditorContext& ctx, int entryIndex, cons
     // Game::CreateMeshEntityFromGtaFile()'s own "degrade gracefully"
     // contract), so this doesn't need its own extension check here.
     if (!entry.isDirectory && ImGui::BeginDragDropSource()) {
-        const std::string absolutePathUtf8 = PathToUtf8(m_rootPath / Utf8ToPath(entry.relativePath));
+        const std::string absolutePathUtf8 = PathToUtf8(m_rootPath / PathFromUtf8(entry.relativePath));
         ImGui::SetDragDropPayload(
             kProjectAssetDragDropPayloadType, absolutePathUtf8.c_str(), absolutePathUtf8.size() + 1);
         ImGui::TextUnformatted(entry.name.c_str());
@@ -415,7 +416,7 @@ void ProjectPanel::RenderRightPane(EditorContext& ctx)
 void ProjectPanel::CreateNewFolder()
 {
     const std::filesystem::path targetDir = ResolveDropTargetDirectory(m_rootPath, m_currentFolderRelativePath);
-    const std::filesystem::path destination = MakeUniqueDestinationPath(targetDir, Utf8ToPath("New Folder"));
+    const std::filesystem::path destination = MakeUniqueDestinationPath(targetDir, PathFromUtf8("New Folder"));
 
     std::error_code ec;
     std::filesystem::create_directory(destination, ec);
@@ -439,7 +440,7 @@ void ProjectPanel::DeleteSelected(EditorContext& ctx)
 
     const std::string selectedDisplay = ctx.selection.SelectedAssetRelativePath();
 
-    const std::filesystem::path target = m_rootPath / Utf8ToPath(selectedDisplay);
+    const std::filesystem::path target = m_rootPath / PathFromUtf8(selectedDisplay);
 
     std::error_code ec;
     const std::uintmax_t removedCount = std::filesystem::remove_all(target, ec);
@@ -586,7 +587,7 @@ void ProjectPanel::HandleExternalFileDrop(float screenX, float screenY, const st
     }
 
     try {
-        const std::filesystem::path source = Utf8ToPath(sourcePathUtf8);
+        const std::filesystem::path source = PathFromUtf8(sourcePathUtf8);
 
         std::error_code existsEc;
         if (!std::filesystem::exists(source, existsEc) || existsEc) {
@@ -677,11 +678,8 @@ AssetImportResult ProjectPanel::ImportExternalFile(
         return result;
     }
 
-    // Path-traversal hardening - PHASE0_MASTER_STRATEGY.md's Risk Register /
-    // Locked Design Decision #8. An empty destinationRelativeFolder means
-    // "the Project root itself", exactly like m_currentFolderRelativePath's
-    // own "" convention elsewhere in this class.
-    std::filesystem::path relFolder = Utf8ToPath(destinationRelativeFolder);
+    // Empty destinationRelativeFolder means the Project root; anything escaping the root is rejected below.
+    std::filesystem::path relFolder = PathFromUtf8(destinationRelativeFolder);
     // Rejects BOTH a fully-qualified absolute path (e.g. "C:\Windows") AND a
     // Windows DRIVE-RELATIVE or ROOT-RELATIVE path (e.g. "C:Temp" -
     // relative to whatever the current directory on the C: drive happens

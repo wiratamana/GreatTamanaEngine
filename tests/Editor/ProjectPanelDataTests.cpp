@@ -1,17 +1,5 @@
-// Unit tests for the Editor's "Project" panel data-shaping/filesystem logic
-// (src/Editor/ProjectPanelData.h) - ScanProjectDirectory()/
-// EnsureProjectRootExists()/ResolveDropTargetDirectory()/
-// MakeUniqueDestinationPath()/PathToUtf8()/Utf8ToPath() are deliberately
-// free of ImGui/Renderer/live-Vulkan-device/SDL-video knowledge, so they're
-// Tier-1-testable exactly like MemoryPanelData (see
-// tests/Editor/MemoryPanelDataTests.cpp) despite living under src/Editor/ -
-// see AGENTS.md, "Testability & Regression Safety". These DO touch a real
-// temp directory (created/torn down by the fixture below), which is still
-// "Tier 1" per tests/CMakeLists.txt's own taxonomy: no GPU/SDL window/live
-// Vulkan device is needed, just the filesystem. Only built when
-// GTE_ENABLE_EDITOR AND GTE_ENABLE_PROJECT_PANEL are both ON, since
-// ProjectPanelData.h/.cpp are only compiled into gte_core then (see the
-// root CMakeLists.txt).
+// Tier-1 tests for src/Editor/ProjectPanelData.h: directory scan, root creation, drop targets
+// and unique destination names. Uses a real temp directory; no GPU, window or ImGui.
 
 #include "Editor/ProjectPanelData.h"
 
@@ -51,27 +39,7 @@ protected:
     std::filesystem::path m_root;
 };
 
-// --- PathToUtf8() / Utf8ToPath() --------------------------------------------
-
-TEST(ProjectPanelDataUtf8Test, RoundTripsAsciiName)
-{
-    const std::string original = "hello_world.txt";
-    EXPECT_EQ(PathToUtf8(Utf8ToPath(original)), original);
-}
-
-TEST(ProjectPanelDataUtf8Test, RoundTripsNonAsciiName)
-{
-    // Built via \u escapes (rather than raw non-ASCII source bytes) so this
-    // test's meaning doesn't depend on the source file's own encoding -
-    // "café_日本語.txt".
-    const char8_t kNonAscii[] = u8"caf\u00e9_\u65e5\u672c\u8a9e.txt";
-    const std::string original(reinterpret_cast<const char*>(kNonAscii), sizeof(kNonAscii) / sizeof(char8_t) - 1);
-
-    EXPECT_EQ(PathToUtf8(Utf8ToPath(original)), original);
-}
-
 // --- EnsureProjectRootExists() ----------------------------------------------
-
 TEST_F(ProjectPanelDataTest, EnsureProjectRootExists_CreatesMissingDirectory)
 {
     const std::filesystem::path project = m_root / "Project";

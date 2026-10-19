@@ -1,5 +1,7 @@
 #include "PmxLoader.h"
 
+#include "../Encoding/Utf8Path.h"
+
 #include <Saba/Model/MMD/PMXFile.h>
 
 #include <filesystem>
@@ -23,44 +25,14 @@ bool HasBoneFlag(saba::PMXBoneFlags flags, saba::PMXBoneFlags bit)
 
 // --- Materials / Textures --------------------------------------------------
 
-// std::filesystem::path(const std::string&) goes through the OS's native
-// narrow encoding (the current ANSI codepage on Windows), NOT UTF-8 - same
-// pitfall Game.cpp's own Utf8PathFromGamePath() helper exists to avoid (see
-// that file's comment). `filePath` here is already UTF-8 (LoadPmxModel()'s
-// own parameter contract - see PmxLoader.h), so it must go through the
-// std::u8string round-trip too, same as PathToUtf8()/Utf8ToPath() do
-// elsewhere in this engine (AssetImporter.cpp/Game.cpp) - duplicated locally
-// rather than shared, for the same "src/Assets/ never depends on
-// src/Editor/" reasoning AssetImporter.cpp's own PathToUtf8() comment gives.
-std::filesystem::path Utf8ToPath(const std::string& utf8)
-{
-    return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
-}
-
-std::string PathToUtf8(const std::filesystem::path& path)
-{
-    const std::u8string u8 = path.u8string();
-    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
-}
-
-// Resolves one PMX texture record (a path RELATIVE to the .pmx file itself,
-// using whatever separator the authoring tool happened to write - PMX does
-// not mandate forward slashes) into an ABSOLUTE, UTF-8 path - see
-// MaterialData::textures' own doc comment for why this has to happen here,
-// at import time, rather than later. std::filesystem::path's own operator/
-// treats a backslash exactly like a forward slash on Windows (this engine's
-// only target platform - see AGENTS.md), so no manual separator rewriting
-// is needed. Does NOT check the resolved path actually exists - a dangling
-// reference (moved/deleted texture, or one the .pmx references but never
-// shipped) is left for a later consumer (Game::EnsureMeshAsset()) to
-// discover and degrade gracefully from, exactly like every other
-// best-effort file lookup in this engine.
+// Resolves a PMX texture record (relative to the .pmx, any separator) to an absolute UTF-8 path.
+// Does not check that the file exists; a dangling reference is handled by the consumer.
 std::string ResolveTexturePath(const std::filesystem::path& pmxDirectory, const std::string& rawTextureName)
 {
     if (rawTextureName.empty()) {
         return std::string();
     }
-    const std::filesystem::path resolved = pmxDirectory / Utf8ToPath(rawTextureName);
+    const std::filesystem::path resolved = pmxDirectory / PathFromUtf8(rawTextureName);
     return PathToUtf8(resolved.lexically_normal());
 }
 
@@ -125,7 +97,7 @@ MaterialData ConvertMaterialData(const saba::PMXFile& pmxFile, const std::string
 {
     MaterialData out;
 
-    const std::filesystem::path pmxDirectory = Utf8ToPath(filePath).parent_path();
+    const std::filesystem::path pmxDirectory = PathFromUtf8(filePath).parent_path();
     out.textures.reserve(pmxFile.m_textures.size());
     for (const auto& texture : pmxFile.m_textures) {
         // guid is left Guid::Invalid() here - LoadPmxModel() itself never
