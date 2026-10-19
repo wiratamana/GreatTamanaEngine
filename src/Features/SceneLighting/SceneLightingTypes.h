@@ -19,8 +19,8 @@ struct SceneLightingSettings {
     float skyAmbientR = 1.26f, skyAmbientG = 1.31f, skyAmbientB = 1.40f;
     float groundAmbientR = 0.66f, groundAmbientG = 0.57f, groundAmbientB = 0.46f;
     float ambientIntensity = 1.0f;
-    float exposure = 0.4f;       // Plain multiplier on the lit color.
-    float linearShading = 1.0f;  // 1 = light in linear space, 0 = legacy light on sRGB-encoded values.
+    float exposure = 1.0f;       // Plain multiplier on the lit color.
+    float linearShading = 0.0f;  // 0 = legacy light on sRGB-encoded values (default), 1 = light in linear space.
 };
 
 // Clamps every value; a non-finite value becomes its default. linearShading is rounded to 0 or 1.

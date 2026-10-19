@@ -81,6 +81,14 @@ TEST(SceneLightingSettingsTest, DefaultsSurviveSanitizing)
     EXPECT_FLOAT_EQ(out.groundAmbientR, d.groundAmbientR);
 }
 
+TEST(SceneLightingSettingsTest, DefaultsKeepLegacyLook)
+{
+    const SceneLightingSettings d;
+    EXPECT_FLOAT_EQ(d.linearShading, 0.0f);
+    EXPECT_FLOAT_EQ(d.exposure, 1.0f);
+    EXPECT_FLOAT_EQ(PackSceneLightingUniformData(ResolvedDirectionalLight{}, d).sunIlluminanceAndLinearFlag[3], 0.0f);
+}
+
 TEST(SceneLightingSettingsTest, SanitizeRoundsLinearShadingToZeroOrOne)
 {
     SceneLightingSettings s;
