@@ -12,9 +12,8 @@
 
 namespace gte {
 
-// A material as the textured shaders see it: set 0 with the base-color image (binding 0) and the
-// MaterialParams block (binding 1). The set comes from a persistent pool and is never freed
-// individually. The image is shared by every material that uses it. Move-only.
+// Textured-shader material: set 0 with the base-color image (binding 0) and MaterialParams (binding 1).
+// The image is shared between materials; the set lives in a persistent pool. Move-only.
 struct MaterialTexture {
     std::shared_ptr<Texture2D> texture;
     Buffer params;

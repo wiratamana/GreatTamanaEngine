@@ -7,11 +7,8 @@
 
 namespace gte {
 
-// Handoff for POST /project_assembly/hot_reload: the network thread submits and blocks,
-// the main thread runs the reload and fulfills.
-// Unlike SyncCommandBridge, a timeout does NOT free the slot: the reload still runs to
-// completion, and new submits report alreadyPending until FulfillPending(). So a late
-// completion can never wake a newer request.
+// Handoff for POST /project_assembly/hot_reload: the network thread submits and blocks, the main thread fulfills.
+// A timeout does not free the slot; new submits report alreadyPending until FulfillPending().
 class ProjectAssemblyHotReloadCommandBridge {
 public:
     ProjectAssemblyHotReloadCommandBridge() = default;

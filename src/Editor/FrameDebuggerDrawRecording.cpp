@@ -52,7 +52,7 @@ void FrameDebuggerCaptureContext::RecordFrameDebuggerDraw(Registry& registry, Re
     // (and RenderSystem::Draw()'s own call site), even though it is no
     // longer used here.
     const std::string materialTextureDebugName = materialTexture != nullptr
-? EditorGpuMemoryNameOverlay::GetDebugName(materialTexture->texture->Handle())
+        ? EditorGpuMemoryNameOverlay::GetDebugName(materialTexture->texture->Handle())
         : std::string();
     RecordDraw(pipeline.DebugName(), materialTextureDebugName, viewProjection);
 

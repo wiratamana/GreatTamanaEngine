@@ -16,14 +16,11 @@ class Renderer;
 class RenderSystem;
 class Texture2D;
 
-// Lazily uploads base-color images and creates materials over them. An image is uploaded once per
-// texture Guid; each distinct MaterialParams over it gets its own material (params block + descriptor set)
-// that shares the image. Owned by MeshAssetGpuCatalog. Needs a live Renderer, so it has no automated test.
+// Uploads each base-color image once per Guid and keeps one material per (image, MaterialParams).
 class MaterialTextureGpuCache {
 public:
-    // Material for the texture `textureGuid` with `params`. The texture *.gta is found through `database`
-    // and decoded from KTX2. Returns kInvalidMaterialTextureHandle (never throws for a bad asset) when the
-    // Guid is invalid, unknown, or undecodable; failures are not cached, so a fixed asset works on the next call.
+    // Material for `textureGuid` with `params`, or kInvalidMaterialTextureHandle if unknown or undecodable.
+    // Failures are not cached.
     MaterialTextureHandle Resolve(RenderSystem& renderSystem, Renderer& renderer, const AssetDatabase& database,
         const Guid& textureGuid, const MaterialParams& params);
 
