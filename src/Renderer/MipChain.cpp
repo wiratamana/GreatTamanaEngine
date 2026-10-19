@@ -5,10 +5,11 @@
 
 namespace gte {
 
-MipChainRgba8 BuildMipChainRgba8(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height)
+MipChainRgba8 BuildMipChainRgba8(
+    const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height, std::uint32_t maxLevels)
 {
     MipChainRgba8 chain;
-    if (rgba == nullptr || width == 0 || height == 0) {
+    if (rgba == nullptr || width == 0 || height == 0 || maxLevels == 0) {
         return chain;
     }
 
@@ -18,7 +19,7 @@ MipChainRgba8 BuildMipChainRgba8(const std::uint8_t* rgba, std::uint32_t width, 
         chain.levelHeights.push_back(h);
         chain.levelByteOffsets.push_back(total);
         total += static_cast<std::uint64_t>(w) * h * 4;
-        if (w == 1 && h == 1) {
+        if ((w == 1 && h == 1) || chain.levelWidths.size() >= maxLevels) {
             break;
         }
     }

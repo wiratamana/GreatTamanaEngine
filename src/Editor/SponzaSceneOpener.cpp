@@ -14,6 +14,7 @@
 #include "../Game/Game.h"
 
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <optional>
 #include <string_view>
@@ -73,6 +74,7 @@ OpenSponzaSceneResult Fail(std::string message)
 
 OpenSponzaSceneResult OpenSponzaScene(
     Game& game, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout)
+try
 {
     const std::filesystem::path sponzaGltf
         = std::filesystem::path(std::string(kSponzaDirectory)) / "glTF" / "Sponza.gltf";
@@ -132,6 +134,11 @@ OpenSponzaSceneResult OpenSponzaScene(
     result.message = result.importedThisCall ? "Imported and opened the Sponza scene." : "Opened the Sponza scene.";
     GTE_LOG_INFO(kLogCategory, "OpenSponzaScene: done");
     return result;
+}
+catch (const std::exception& e)
+{
+    // GPU upload and file errors surface as exceptions; the menu and the HTTP route must get a failure instead.
+    return Fail(std::string("Sponza open failed: ") + e.what());
 }
 
 } // namespace gte

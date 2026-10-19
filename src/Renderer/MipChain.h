@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace gte {
@@ -15,6 +16,8 @@ struct MipChainRgba8 {
 };
 
 // Returns an empty chain (levelCount == 0) for a null input or a zero size.
-MipChainRgba8 BuildMipChainRgba8(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
+// `maxLevels` caps the level count (1 = level 0 only).
+MipChainRgba8 BuildMipChainRgba8(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
+    std::uint32_t maxLevels = std::numeric_limits<std::uint32_t>::max());
 
 } // namespace gte

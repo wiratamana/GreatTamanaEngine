@@ -367,38 +367,32 @@ Texture2D GpuResourceFactory::CreateTexture2D(const void* pixelsRgba8, int width
             "device does not support VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for VK_FORMAT_R8G8B8A8_UNORM.");
     }
 
-    // Level 0 only, unless a mip chain was requested and could be built.
-    MipChainRgba8 chain;
-    if (generateMips && width > 0 && height > 0) {
-        chain = BuildMipChainRgba8(static_cast<const std::uint8_t*>(pixelsRgba8), static_cast<std::uint32_t>(width),
-            static_cast<std::uint32_t>(height));
+    // Level 0 only unless a mip chain was requested. Sizes below 1 are clamped like Texture does.
+    const MipChainRgba8 chain = BuildMipChainRgba8(static_cast<const std::uint8_t*>(pixelsRgba8),
+        static_cast<std::uint32_t>(std::max(width, 1)), static_cast<std::uint32_t>(std::max(height, 1)),
+        generateMips ? std::numeric_limits<std::uint32_t>::max() : 1U);
+    if (chain.levelCount == 0) {
+        throw std::runtime_error("GpuResourceFactory::CreateTexture2D: pixel data is null.");
     }
-    const std::uint32_t levelCount = std::max(chain.levelCount, 1U);
 
     Texture2D texture(m_allocator, m_memoryTracker, m_device, width, height, debugName, allowStorageImageAccess,
-        addressMode, levelCount, maxAnisotropy);
+        addressMode, chain.levelCount, maxAnisotropy);
 
-    const auto safeWidth = static_cast<uint64_t>(texture.Width());
-    const auto safeHeight = static_cast<uint64_t>(texture.Height());
-    const void* uploadData = chain.levelCount > 0 ? static_cast<const void*>(chain.pixels.data()) : pixelsRgba8;
-    const uint64_t size = chain.levelCount > 0 ? chain.pixels.size() : safeWidth * safeHeight * 4;
-
-    // One copy region per mip level (a single region without a chain).
+    // One copy region per mip level.
     std::vector<VkBufferImageCopy> regions;
-    regions.reserve(levelCount);
-    for (std::uint32_t level = 0; level < levelCount; ++level) {
+    regions.reserve(chain.levelCount);
+    for (std::uint32_t level = 0; level < chain.levelCount; ++level) {
         VkBufferImageCopy region{};
-        region.bufferOffset = chain.levelCount > 0 ? chain.levelByteOffsets[level] : 0;
+        region.bufferOffset = chain.levelByteOffsets[level];
         region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1 };
-        region.imageExtent = chain.levelCount > 0
-            ? VkExtent3D{ chain.levelWidths[level], chain.levelHeights[level], 1 }
-            : VkExtent3D{ static_cast<std::uint32_t>(texture.Width()), static_cast<std::uint32_t>(texture.Height()), 1 };
+        region.imageExtent = { chain.levelWidths[level], chain.levelHeights[level], 1 };
         regions.push_back(region);
     }
 
     // Unnamed throwaway staging buffer.
+    const uint64_t size = chain.pixels.size();
     Buffer staging = CreateBuffer(size, BufferUsage::TransferSrc, BufferMemoryUsage::CpuToGpu);
-    staging.Upload(uploadData, static_cast<std::size_t>(size));
+    staging.Upload(chain.pixels.data(), static_cast<std::size_t>(size));
 
     ImmediateSubmitInternal([&](VkCommandBuffer cmd) {
         VkImageMemoryBarrier toTransferDst{};
@@ -408,7 +402,7 @@ Texture2D GpuResourceFactory::CreateTexture2D(const void* pixelsRgba8, int width
         toTransferDst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         toTransferDst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         toTransferDst.image = texture.Image();
-        toTransferDst.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, levelCount, 0, 1 };
+        toTransferDst.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, chain.levelCount, 0, 1 };
         toTransferDst.srcAccessMask = 0;
         toTransferDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
