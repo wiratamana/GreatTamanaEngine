@@ -28,20 +28,25 @@ TEST(ShadowShaderNamesTest, MaskShaderExposesBoundNames)
     EXPECT_EQ(params->type, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     EXPECT_EQ(params->access, ReflectedAccess::ReadOnly);
 
-    const ReflectedDescriptorBinding* shadowDepth = Find(result, "shadowDepth");
-    ASSERT_NE(shadowDepth, nullptr);
-    EXPECT_EQ(shadowDepth->type, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    // One depth map per cascade.
+    for (const char* name : { "shadowDepth0", "shadowDepth1", "shadowDepth2", "shadowDepth3" }) {
+        const ReflectedDescriptorBinding* shadowDepth = Find(result, name);
+        ASSERT_NE(shadowDepth, nullptr) << name;
+        EXPECT_EQ(shadowDepth->type, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) << name;
+    }
 
     const ReflectedDescriptorBinding* sceneDepth = Find(result, "sceneDepth");
     ASSERT_NE(sceneDepth, nullptr);
     EXPECT_EQ(sceneDepth->type, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
-    const ReflectedDescriptorBinding* maskOutput = Find(result, "maskOutput");
-    ASSERT_NE(maskOutput, nullptr);
-    EXPECT_EQ(maskOutput->type, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
-    EXPECT_EQ(maskOutput->access, ReflectedAccess::WriteOnly);
+    for (const char* name : { "maskOutput", "cascadeOutput" }) {
+        const ReflectedDescriptorBinding* output = Find(result, name);
+        ASSERT_NE(output, nullptr) << name;
+        EXPECT_EQ(output->type, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) << name;
+        EXPECT_EQ(output->access, ReflectedAccess::WriteOnly) << name;
+    }
 
-    EXPECT_EQ(result.descriptorBindings.size(), 4u);
+    EXPECT_EQ(result.descriptorBindings.size(), 8u);
 }
 
 } // namespace

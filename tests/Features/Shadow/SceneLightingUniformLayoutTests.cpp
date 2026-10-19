@@ -1,7 +1,7 @@
-// Compares SceneLightingUniformData with the std140 block in DirectionalLightingAndReceiverMask.glsl,
+// Compares SceneLightingUniformData with the std140 block in DirectionalLighting.glsl,
 // field by field, so a swapped or renamed member fails (a size check alone cannot see that).
 
-#include "Features/Shadow/ShadowTypes.h"
+#include "Features/SceneLighting/SceneLightingTypes.h"
 
 #include <gtest/gtest.h>
 
@@ -110,10 +110,8 @@ TEST(SceneLightingUniformLayoutTest, EveryFieldMatchesTheStd140BlockInName_Order
     const Std140Block block = ParseBlock(ReadShader());
 
     const std::vector<std::pair<const char*, std::size_t>> expected = {
-        { "lightViewProjection", offsetof(SceneLightingUniformData, lightViewProjection) },
-        { "sunDirectionAndBias", offsetof(SceneLightingUniformData, sunDirectionAndBias) },
-        { "sunIlluminanceAndStrength", offsetof(SceneLightingUniformData, sunIlluminanceAndStrength) },
-        { "occlusionTexelSizeAndPad", offsetof(SceneLightingUniformData, occlusionTexelSizeAndPad) },
+        { "sunDirectionAndValid", offsetof(SceneLightingUniformData, sunDirectionAndValid) },
+        { "sunIlluminanceAndPad", offsetof(SceneLightingUniformData, sunIlluminanceAndPad) },
     };
 
     ASSERT_EQ(block.members.size(), expected.size());
