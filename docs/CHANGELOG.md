@@ -15,6 +15,10 @@ engine. For the short, current-state summary, see the main
   `fx::GpuReadback`, `Gate::Always`, `SceneDrawChain::CullToFrustum`, `OffscreenTarget` resize and `Trim`.
 - Generic `GET /feature_debug/list|state|set|invoke` routes for features that expose `IFeatureDebugEndpoint`.
 - A dockable "Shadow" editor window. Primitive meshes now have local bounds.
+- Shadow: `mask.status` state key, a frame clock that a pass toggle cannot freeze, no cascade draws while one cascade pass is
+  off, zero-size views skipped, GPU blocks carry integers as integers. `OffscreenTarget::Extent` reports the real map size.
+- Feature kit: `FeatureOf<T>` throws on a wrong type, callbacks that throw any type are logged once, editor feature-debug
+  commands answer an exception with an error result. Removed `ParseDebugInt`.
 - Removed: the single fixed light box, the old single shadow-map texture (use `Shadow.Cascade<i>.*`), the shadow scene slot,
   the receiver-mask half of the lighting include and the world-position varying of the mesh shaders.
 

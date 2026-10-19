@@ -86,9 +86,8 @@ public:
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid, rg::CommandBuffer* cmd = nullptr,
         std::optional<SceneCullRequest> cull = std::nullopt);
 
-    // Groups this frame's draws by (mesh, pipeline), keeps the eligible groups and packs their instances into
-    // `cache`. `gpuSkinnedOutputBuffersThisFrame` holds the vertex-buffer handles of meshes skinned on the GPU
-    // this frame; those never join a batch. Builds no render-graph passes and changes nothing Draw() does.
+    // Groups this frame's draws by (mesh, pipeline) and packs the eligible groups' instances into `cache`.
+    // Meshes skinned on the GPU this frame (`gpuSkinnedOutputBuffersThisFrame`) never join a batch. Builds no passes.
     std::vector<GpuDrivenBatchFrameEntry> CollectGpuDrivenBatches(Registry& registry, Renderer& renderer,
         GpuDrivenBatchCache& cache, const std::unordered_set<BufferObjectHandle>& gpuSkinnedOutputBuffersThisFrame = {},
         std::size_t minInstancesForGpuDrivenBatch = kMinInstancesForGpuDrivenBatch);

@@ -70,19 +70,24 @@ bool RunRegistration(const RunInput& in, rg::BoundedOnceSet<32>& failures)
     const rg::RenderFeatureScope scope(*context.builder, context.featureName);
     context.scope = shared ? rg::ViewScope::Shared : (*in.view)->scope;
     context.serial = in.serial;
-    try {
-        Invoke(in);
-    } catch (const std::exception& e) {
+    // A throw would end the whole offscreen frame; log it once and drop this callback's work.
+    const auto fail = [&](const char* what) {
         if (shared) {
             in.sharedLatch->MarkFailed(in.frameIndex);
         }
-        // A throw would end the whole offscreen frame; log it once and drop this callback's work.
         const std::string message = "feature '" + std::string(context.featureName) + "', callback '"
-            + registration.name + "': " + e.what();
+            + registration.name + "': " + what;
         if (rg::BoundedOnceSet<32>::ShouldLog(failures.Note(message))) {
             GTE_LOG_ERROR(kLogCategory, message);
         }
         return false;
+    };
+    try {
+        Invoke(in);
+    } catch (const std::exception& e) {
+        return fail(e.what());
+    } catch (...) {
+        return fail("unknown exception");
     }
     if (shared) {
         in.sharedLatch->MarkDone(in.frameIndex);

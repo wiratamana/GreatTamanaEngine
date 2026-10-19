@@ -215,18 +215,25 @@ void EditorHost::ServiceFeatureDebugCommand()
             continue;
         }
         result.found = true;
-        switch (request->kind) {
-        case FeatureDebugCommandKind::GetState:
-            result.result = endpoint->GetState();
-            break;
-        case FeatureDebugCommandKind::Set:
-            result.result = endpoint->Set(request->args);
-            break;
-        case FeatureDebugCommandKind::Invoke:
-            result.result = endpoint->Invoke(request->action, request->args);
-            break;
-        case FeatureDebugCommandKind::List:
-            break;
+        // An exception must not unwind through Run(); it becomes an error answer.
+        try {
+            switch (request->kind) {
+            case FeatureDebugCommandKind::GetState:
+                result.result = endpoint->GetState();
+                break;
+            case FeatureDebugCommandKind::Set:
+                result.result = endpoint->Set(request->args);
+                break;
+            case FeatureDebugCommandKind::Invoke:
+                result.result = endpoint->Invoke(request->action, request->args);
+                break;
+            case FeatureDebugCommandKind::List:
+                break;
+            }
+        } catch (const std::exception& e) {
+            result.result = fx::FeatureDebugResult{};
+            result.result.ok = false;
+            result.result.message = e.what();
         }
         break;
     }

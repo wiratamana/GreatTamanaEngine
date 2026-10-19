@@ -8,9 +8,9 @@ layout(location = 0) in vec2 inUv;
 
 layout(push_constant) uniform PushConstants {
     float strength;
-    float debugMode; // 0 off, 1 cascade colors, 2 mask.
-    float cascadeCount;
-    float pad;
+    uint debugMode; // 0 off, 1 cascade colors, 2 mask.
+    uint cascadeCount;
+    uint pad;
 } pc;
 
 const vec3 kCascadeColors[4] = vec3[4](vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(1.0, 1.0, 0.0));
@@ -20,12 +20,11 @@ void main()
     vec3 scene = texture(sceneColor, inUv).rgb;
     float mask = texture(shadowMask, inUv).r;
     int id = int(round(texture(cascadeId, inUv).r * 8.0));
-    int mode = int(pc.debugMode + 0.5);
 
-    if (mode == 1) {
-        int last = clamp(int(pc.cascadeCount + 0.5), 1, 4) - 1;
+    if (pc.debugMode == 1u) {
+        int last = int(clamp(pc.cascadeCount, 1u, 4u)) - 1;
         outColor = id > 0 ? vec4(mix(scene, kCascadeColors[min(id - 1, last)], 0.5), 1.0) : vec4(0.0);
-    } else if (mode == 2) {
+    } else if (pc.debugMode == 2u) {
         outColor = id > 0 ? vec4(vec3(mask), 1.0) : vec4(0.0);
     } else {
         outColor = vec4(scene * (1.0 - pc.strength * mask), mask);

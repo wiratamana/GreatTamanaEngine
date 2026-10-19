@@ -4,9 +4,9 @@
 #include "../Plugins/BuiltinFeatureModuleRegistry.h"
 #include "../Plugins/IEngineFeatureModule.h"
 
-#include <cassert>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 
 namespace gte::fx {
 
@@ -28,12 +28,14 @@ inline Feature* FindFeature(IEngineFeatureModule& module) noexcept
     return detail::FeatureOfModule(module);
 }
 
-// The feature of type T behind `module`. The module must come from GTE_REGISTER_RENDER_FEATURE for T.
+// The feature of type T behind `module`. Throws std::logic_error when the module does not hold a T.
 template <typename T>
 T& FeatureOf(IEngineFeatureModule& module)
 {
     T* feature = dynamic_cast<T*>(detail::FeatureOfModule(module));
-    assert(feature != nullptr && "FeatureOf<T>: the module does not hold a feature of that type");
+    if (feature == nullptr) {
+        throw std::logic_error("FeatureOf<T>: the module does not hold a feature of that type");
+    }
     return *feature;
 }
 

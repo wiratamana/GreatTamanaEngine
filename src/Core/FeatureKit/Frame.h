@@ -171,9 +171,8 @@ public:
     Texture SceneColor() const noexcept { return Stamp(m_color); }
     Texture SceneDepth() const noexcept { return Stamp(m_depth); }
 
-    // A fullscreen draw into the view's own color, only where the depth test passes `Equal` (nothing was drawn
-    // there), without writing depth. In the Game view the Frame Debugger can replay it. Declares nothing while its
-    // pass is toggled off. Add Bind/Push as for any fullscreen draw, then Draw().
+    // A fullscreen draw into the view's own color where nothing was drawn (depth test Equal, no depth write).
+    // Add Bind/Push, then Draw(). Declares nothing while its pass is toggled off.
     FullscreenChain ViewBackground(FullscreenShader& shader, rg::StaticName passName);
 
 private:

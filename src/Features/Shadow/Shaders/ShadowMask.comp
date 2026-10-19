@@ -13,7 +13,10 @@ layout(std430, binding = 0) readonly buffer ShadowMaskParams {
     vec4 cameraForwardAndFadeEnd;         // xyz forward, w fade end.
     vec4 sunDirection;                    // xyz toward the sun.
     vec4 biasParams;                      // x const, y normal offset, z slope (texels).
-    vec4 filterParams;                    // x radius texels, y samples, z cascade count, w 1 / map size.
+    float filterRadiusTexels;
+    float texelUvSize;                    // 1 / map size.
+    uint filterSamples;
+    uint cascadeCount;
 } params;
 
 layout(binding = 1) uniform sampler2D shadowDepth0;
@@ -88,8 +91,8 @@ float SampleCascade(int k, vec3 position, vec3 normal, float nDotL, float rotati
     }
 
     float biasNdc = texel * (params.biasParams.x + params.biasParams.z * tanTheta) / range;
-    int samples = int(params.filterParams.y + 0.5);
-    float radiusUv = params.filterParams.x * params.filterParams.w;
+    int samples = int(params.filterSamples);
+    float radiusUv = params.filterRadiusTexels * params.texelUvSize;
 
     float occluded = 0.0;
     for (int i = 0; i < samples; ++i) {
@@ -137,7 +140,7 @@ void main()
     vec3 normal = NormalFromDepth(depthTexel, depth, position, eye);
     float nDotL = dot(normal, params.sunDirection.xyz);
 
-    int count = int(params.filterParams.z + 0.5);
+    int count = int(params.cascadeCount);
     int c = count - 1;
     for (int i = 0; i < count; ++i) {
         if (viewDepth < params.cascadeSplitFar[i]) {

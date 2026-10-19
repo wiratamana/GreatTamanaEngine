@@ -200,4 +200,10 @@ void OffscreenTarget::Trim(Frame& frame)
     m_impl->Trim(frame);
 }
 
+Extent2D OffscreenTarget::Extent(const Frame& frame) const
+{
+    const Impl::Slot& slot = m_impl->slots[rg::ViewScopeIndex(frame.Scope())];
+    return slot.created ? Extent2D{ slot.width, slot.height } : Extent2D{};
+}
+
 } // namespace gte::fx

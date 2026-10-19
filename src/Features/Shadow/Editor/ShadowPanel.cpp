@@ -26,7 +26,7 @@ const char* StatusText(ShadowFrameStatus status) noexcept
     case ShadowFrameStatus::NotRendered: return "Not rendered (the view is not drawn)";
     case ShadowFrameStatus::NoValidCamera: return "No valid camera";
     case ShadowFrameStatus::ShadersNotReady: return "Shaders not ready";
-    case ShadowFrameStatus::TargetFailed: return "Cascade map allocation failed";
+    case ShadowFrameStatus::TargetFailed: return "Target allocation failed";
     case ShadowFrameStatus::PassDisabled: return "A cascade pass is disabled";
     }
     return "Unknown";
@@ -66,6 +66,8 @@ void DrawStatus(const ShadowViewSnapshot& game)
     const ImVec4 green(0.4f, 0.9f, 0.4f, 1.0f);
     const ImVec4 orange(1.0f, 0.65f, 0.2f, 1.0f);
     ImGui::TextColored(game.status == ShadowFrameStatus::Ok ? green : orange, "Game view: %s", StatusText(game.status));
+    ImGui::TextColored(
+        game.maskStatus == ShadowFrameStatus::Ok ? green : orange, "Mask: %s", StatusText(game.maskStatus));
     if (game.status != ShadowFrameStatus::NotRendered) {
         ImGui::Text("Sun elevation: %.1f deg", game.sunElevationDegrees);
         if (game.sunElevationDegrees < kLowSunDegrees) {

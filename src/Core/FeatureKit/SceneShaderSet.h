@@ -20,9 +20,8 @@ bool PrepareSceneShaders(SceneShaderSet& set, FrameContext& context);
 const PipelineOverrideSet& OverridesOf(const SceneShaderSet& set) noexcept;
 } // namespace detail
 
-// The pipelines a scene redraw uses instead of each object's own. Built lazily on first use; a failed
-// build is rolled back and retried on a growing cooldown, never given up. Registered pipelines are
-// removed again on destruction.
+// The pipelines a scene redraw uses instead of each object's own. Built lazily; a failed build is rolled
+// back and retried on a growing cooldown. Registered pipelines are removed on destruction.
 class SceneShaderSet {
 public:
     // Depth-only draw: shaders/<base>PositionColor.vert, <base>PositionNormal.vert, <base>PositionNormalUv.vert

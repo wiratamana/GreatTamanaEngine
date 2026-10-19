@@ -44,6 +44,9 @@ public:
     // Acquire() of the full size resizes it back. Call only while the owning pass is enabled.
     void Trim(Frame& frame);
 
+    // Current size of the frame's view target, or {0, 0} when none exists.
+    Extent2D Extent(const Frame& frame) const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;

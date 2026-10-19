@@ -18,7 +18,6 @@ struct ShadowViewState {
         fx::OffscreenTarget{ "Shadow.Cascade2" },
         fx::OffscreenTarget{ "Shadow.Cascade3" },
     };
-    std::array<std::uint32_t, kMaxShadowCascades> mapExtent{}; // Side of each map this view made, 0 = none.
     fx::PersistentTarget mask{ "Shadow.Mask" };
     fx::PersistentTarget cascadeId{ "Shadow.CascadeId" };
     fx::GpuParams<ShadowMaskParamsGpu> params;

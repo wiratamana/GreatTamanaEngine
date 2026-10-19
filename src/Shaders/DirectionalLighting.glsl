@@ -14,11 +14,11 @@ const vec3 kDefaultSunIlluminance = vec3(3.0, 2.85, 2.55);
 
 vec3 ApplyDirectionalLight(vec3 baseColor, vec3 worldNormal)
 {
-    const bool written = uSceneLighting.sunDirectionAndValid.w >= 0.5;
-    const vec3 sunDirection = written ? uSceneLighting.sunDirectionAndValid.xyz : kDefaultSunDirection;
-    const vec3 sunIlluminance = written ? uSceneLighting.sunIlluminanceAndPad.xyz : kDefaultSunIlluminance;
+    bool written = uSceneLighting.sunDirectionAndValid.w >= 0.5;
+    vec3 sunDirection = written ? uSceneLighting.sunDirectionAndValid.xyz : kDefaultSunDirection;
+    vec3 sunIlluminance = written ? uSceneLighting.sunIlluminanceAndPad.xyz : kDefaultSunIlluminance;
 
-    const float ndotl = max(dot(normalize(worldNormal), sunDirection), 0.0);
+    float ndotl = max(dot(normalize(worldNormal), sunDirection), 0.0);
     const float ambient = 0.35;
     return baseColor * (ambient + ndotl * (1.0 - ambient)) * sunIlluminance;
 }

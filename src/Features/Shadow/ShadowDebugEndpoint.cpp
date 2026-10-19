@@ -136,6 +136,7 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const ShadowV
     const auto key = [&](std::string_view name) { return std::string(prefix).append(name); };
 
     Add(out, key("status"), std::string(StatusName(v.status)));
+    Add(out, key("mask.status"), std::string(StatusName(v.maskStatus)));
     Add(out, key("frameIndex"), Count(v.frameIndex));
     Add(out, key("sunElevationDegrees"), Shown(v.sunElevationDegrees));
     Add(out, key("effectiveMaxDistance"), Shown(v.effectiveMaxDistance));
@@ -246,13 +247,16 @@ fx::FeatureDebugResult ShadowDebugEndpoint::Set(std::span<const fx::FeatureDebug
     return GetState();
 }
 
-fx::FeatureDebugResult ShadowDebugEndpoint::Invoke(std::string_view action, std::span<const fx::FeatureDebugArg>)
+fx::FeatureDebugResult ShadowDebugEndpoint::Invoke(std::string_view action, std::span<const fx::FeatureDebugArg> args)
 {
     if (action != "reset_defaults") {
         fx::FeatureDebugResult result;
         result.ok = false;
         result.message = "unknown action; supported: reset_defaults";
         return result;
+    }
+    if (!args.empty()) {
+        return Fail(args.front().key, "reset_defaults takes no arguments");
     }
     m_feature.ApplySettings(ShadowSettings{});
     return GetState();

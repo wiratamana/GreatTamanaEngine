@@ -2694,7 +2694,7 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
 
 # The lighting layout test reads the shared GLSL include straight from the source tree.
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
-    GTE_TEST_LIGHTING_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/DirectionalLightingAndReceiverMask.glsl"
+    GTE_TEST_LIGHTING_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/DirectionalLighting.glsl"
 )
 
 # Engine-owned reflection fixtures with abstract names (not shipped).

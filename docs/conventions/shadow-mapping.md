@@ -85,11 +85,13 @@ GET  /feature_debug/invoke?name=Shadow&action=reset_defaults
 GET  /get_logs?min_level=warning
 ```
 
-State keys: every setting above, plus read-only keys per view with the prefix `game.` or `scene.`: `status`,
-`frameIndex`, `sunElevationDegrees`, `effectiveMaxDistance`, `resolutionInUse`, `cascadeBytes`, `timing.deltaSeconds`,
+State keys: every setting above, plus read-only keys per view with the prefix `game.` or `scene.`: `status` (cascade
+stage), `mask.status` (mask stage), `frameIndex`, `sunElevationDegrees`, `effectiveMaxDistance`, `resolutionInUse`,
+`cascadeBytes` (size of the maps that really exist), `timing.deltaSeconds`,
 `cascade<i>.sliceStart|sliceEnd|radius|texelWorldSize|depthRange|gridX|gridY` and `sdsm.active|rawNear|rawFar|nearDepth|
 farDepth|ageFrames`. `gridX` and `gridY` are the snapped cascade center in whole texels: shadow edges may move only when
-they change. A bad key or value is a 400 that names the key; nothing is applied.
+they change. A bad key or value is a 400 that names the key; nothing is applied. `reset_defaults` takes no arguments.
+A status reads `NotRendered` when its view has not rendered for a few frames, or when its pass is toggled off.
 
 ## Limits
 

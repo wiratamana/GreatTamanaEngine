@@ -27,9 +27,8 @@ struct Plane {
     float distance = 0.0f;
 };
 
-// The 6 clip planes of a view-projection matrix (Gribb/Hartmann), in the order
-// [0]=Left, [1]=Right, [2]=Bottom, [3]=Top, [4]=Near, [5]=Far.
-// Near tests z >= 0 (zero-to-one depth range), not z >= -w.
+// The 6 clip planes of a view-projection matrix (Gribb/Hartmann): Left, Right, Bottom, Top, Near, Far.
+// Near tests z >= 0 (zero-to-one depth), not z >= -w.
 std::array<Plane, 6> ExtractFrustumPlanes(const Mat4& viewProjection);
 
 // True when `worldBounds` lies fully behind one plane. Conservative: a touching box is never rejected,

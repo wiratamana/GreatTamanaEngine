@@ -280,10 +280,10 @@ ShadowMaskParamsGpu MakeShadowMaskParams(
     p.biasParams[1] = safe.normalOffsetTexels;
     p.biasParams[2] = std::max(safe.slopeBiasTexels, safe.filterRadiusTexels);
 
-    p.filterParams[0] = safe.filterRadiusTexels;
-    p.filterParams[1] = static_cast<float>(safe.filterSamples);
-    p.filterParams[2] = static_cast<float>(count);
-    p.filterParams[3] = map.resolution > 0 ? 1.0f / static_cast<float>(map.resolution) : 0.0f;
+    p.filterRadiusTexels = safe.filterRadiusTexels;
+    p.texelUvSize = map.resolution > 0 ? 1.0f / static_cast<float>(map.resolution) : 0.0f;
+    p.filterSamples = safe.filterSamples;
+    p.cascadeCount = count;
     return p;
 }
 

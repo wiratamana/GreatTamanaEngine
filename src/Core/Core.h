@@ -200,9 +200,8 @@ public:
         return FindViewData(view);
     }
 
-    // Marks `texture` as the output of the `scope` view for this frame. The editor panel and the HTTP endpoints
-    // show it instead of the raw view; it is finalized for sampling once the offscreen graph ran.
-    // `name` is the graph texture name it was imported under.
+    // Marks `texture` as the `scope` view's output for this frame; the editor panel and HTTP endpoints show it
+    // instead of the raw view. `name` is the graph texture name it was imported under.
     void ExposeViewOutput(rg::ViewScope scope, RenderTexture& texture, std::string_view name);
 
     // Registers a pass name to be counted in per-view GPU draw stats.

@@ -93,9 +93,7 @@ rg::RenderViewId RenderViewRegistry::CreateOrGetView(const char* name, const Ren
         try {
             it->second.target.emplace(m_impl->renderer->CreateRenderTexture(static_cast<int>(desc.width),
                 static_cast<int>(desc.height), desc.colorFormat,
-                // Reusing this same map-owned, stable key string for BOTH
-                // debugName AND depthDebugName so a depth-only view's one
-                // real GPU allocation shows up named in the Memory panel.
+                // The map-owned key string names both the color and the depth allocation.
                 /*debugName=*/it->first.c_str(), /*depthDebugName=*/it->first.c_str(),
                 /*allowStorageImageAccess=*/false, /*allowDepthSampledAccess=*/desc.allowDepthSampledAccess,
                 /*createDepthCompanion=*/desc.hasDepth, /*createColorImage=*/desc.hasColor));

@@ -10,6 +10,7 @@ namespace gte {
 
 namespace {
 
+constexpr std::int32_t kFrameStampPriority = 30;
 constexpr std::int32_t kCascadesPriority = 10;
 constexpr std::int32_t kDepthRangePriority = 100;
 constexpr std::int32_t kMaskPriority = 0;
@@ -17,6 +18,8 @@ constexpr std::int32_t kCompositePriority = -500;
 
 // A snapshot older than this many frames (against the newest frame of any view) counts as not rendered.
 constexpr std::uint64_t kSnapshotStaleFrames = 2;
+
+constexpr std::uint64_t kDepthBytesPerTexel = 4; // 32-bit depth.
 
 constexpr std::array<rg::StaticName, kMaxShadowCascades> kCascadeDrawNames{
     "Shadow.Cascade0.Draw",
@@ -32,11 +35,18 @@ bool SdsmGroupEnabled(const fx::Frame& f)
         && f.PassEnabled("Shadow.DepthRange.Readback");
 }
 
-std::uint64_t MapBytes(const std::array<std::uint32_t, kMaxShadowCascades>& extents) noexcept
+bool HasNoPixels(const fx::View& view) noexcept
+{
+    return view.extent.width == 0 || view.extent.height == 0;
+}
+
+// Memory of the cascade maps that exist for the frame's view.
+std::uint64_t MapBytes(const ShadowViewState& view, const fx::Frame& f) noexcept
 {
     std::uint64_t bytes = 0;
-    for (const std::uint32_t side : extents) {
-        bytes += static_cast<std::uint64_t>(side) * side * 4u; // 32-bit depth.
+    for (const fx::OffscreenTarget& map : view.maps) {
+        const Extent2D e = map.Extent(f);
+        bytes += std::uint64_t{ e.width } * e.height * kDepthBytesPerTexel;
     }
     return bytes;
 }
@@ -47,6 +57,10 @@ ShadowFeature::ShadowFeature(fx::FeatureHost&) { }
 
 void ShadowFeature::Setup(fx::FeatureSetup& s)
 {
+    // Not a render pass: Always() keeps a toggle from freezing the frame clock the snapshots age against.
+    s.PreOpaque("Shadow.FrameStamp", kFrameStampPriority,
+        [this](fx::PreOpaqueFrame& f) { m_newestFrame = f.FrameIndex(); }, fx::Gate::Always());
+
     // Each gate lists the pass names shown in the Render Graph panel; a callback runs while any of them is enabled.
     s.PreOpaque("Shadow.Cascades", kCascadesPriority, [this](fx::PreOpaqueFrame& f) { CascadesPass(f); },
         fx::Gate{ "Shadow.Cascade0.Draw", "Shadow.Cascade1.Draw", "Shadow.Cascade2.Draw", "Shadow.Cascade3.Draw" });
@@ -66,25 +80,26 @@ void ShadowFeature::ApplySettings(const ShadowSettings& candidate)
 ShadowViewSnapshot ShadowFeature::Snapshot(rg::ViewScope scope) const
 {
     ShadowViewSnapshot snapshot = m_views.For(scope).snapshot;
-    if (m_newestFrame - snapshot.frameIndex > kSnapshotStaleFrames) {
+    const bool stale = snapshot.frameIndex > m_newestFrame || m_newestFrame - snapshot.frameIndex > kSnapshotStaleFrames;
+    if (stale) {
         snapshot.status = ShadowFrameStatus::NotRendered;
+        snapshot.maskStatus = ShadowFrameStatus::NotRendered;
     }
     return snapshot;
 }
 
 void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
 {
-    const ShadowSettings cfg = SanitizeShadowSettings(m_settings);
+    const ShadowSettings& cfg = m_settings;
     const std::uint32_t resolution = cfg.mapResolution;
     ShadowViewState& view = m_views.For(f.Scope());
-    m_newestFrame = std::max(m_newestFrame, f.FrameIndex());
 
     ShadowViewSnapshot snap;
     snap.frameIndex = f.FrameIndex();
     snap.deltaSeconds = f.DeltaSeconds();
-    snap.cascadeBytes = MapBytes(view.mapExtent);
     const auto finish = [&](ShadowFrameStatus status) {
         snap.status = status;
+        snap.cascadeBytes = MapBytes(view, f);
         snap.sdsm = view.sdsm;
         snap.sdsmAgeFrames = view.sdsm.valid ? f.FrameIndex() - view.sdsm.lastSampleFrame : 0;
         view.snapshot = snap;
@@ -125,30 +140,29 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
         return;
     }
 
-    // Every enabled cascade pass is declared; the Map channel is published only when all of them were.
+    // A toggled-off cascade pass voids the whole set, so no cascade is drawn then.
+    bool allEnabled = true;
+    for (std::uint32_t c = 0; c < set.count; ++c) {
+        allEnabled = allEnabled && f.PassEnabled(kCascadeDrawNames[c]);
+    }
+
+    // The Map channel is published only when every active cascade pass was recorded.
     ShadowMapData data;
     data.resolution = resolution;
     data.cascades = set;
-    bool allRecorded = true;
-    ShadowFrameStatus failure = ShadowFrameStatus::Ok;
+    ShadowFrameStatus failure = allEnabled ? ShadowFrameStatus::Ok : ShadowFrameStatus::PassDisabled;
     const auto fail = [&](ShadowFrameStatus status) {
-        allRecorded = false;
         if (failure == ShadowFrameStatus::Ok) {
             failure = status;
         }
     };
 
-    for (std::uint32_t c = 0; c < set.count; ++c) {
-        if (!f.PassEnabled(kCascadeDrawNames[c])) {
-            fail(ShadowFrameStatus::PassDisabled);
-            continue;
-        }
+    for (std::uint32_t c = 0; allEnabled && c < set.count; ++c) {
         const fx::Texture map = view.maps[c].Acquire(f, fx::DepthOnly{ resolution });
         if (!map.IsValid()) {
             fail(ShadowFrameStatus::TargetFailed);
             continue;
         }
-        view.mapExtent[c] = resolution;
         data.maps[c] = map;
 
         fx::SceneDrawChain chain = f.SceneDraw(kCascadeDrawNames[c]);
@@ -165,15 +179,11 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
     for (std::uint32_t c = set.count; c < kMaxShadowCascades; ++c) {
         if (f.PassEnabled(kCascadeDrawNames[c])) {
             view.maps[c].Trim(f);
-            if (view.mapExtent[c] != 0) {
-                view.mapExtent[c] = fx::OffscreenTarget::kTrimmedExtent;
-            }
         }
     }
 
-    snap.cascadeBytes = MapBytes(view.mapExtent);
     snap.resolutionInUse = resolution;
-    if (allRecorded) {
+    if (failure == ShadowFrameStatus::Ok) {
         m_mapData.Publish(f, data);
     }
     finish(failure);
@@ -181,8 +191,9 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
 
 void ShadowFeature::DepthRangePass(fx::PostOpaqueFrame& f)
 {
-    const ShadowSettings cfg = SanitizeShadowSettings(m_settings);
-    if (!f.View().invViewProjectionValid || !cfg.useSdsm || !SdsmGroupEnabled(f) || !f.ShaderReady(m_depthReduceShader)) {
+    const ShadowSettings& cfg = m_settings;
+    if (HasNoPixels(f.View()) || !f.View().invViewProjectionValid || !cfg.useSdsm || !SdsmGroupEnabled(f)
+        || !f.ShaderReady(m_depthReduceShader)) {
         return;
     }
     const ShadowViewFrustum frustum = ExtractViewFrustum(f.View().eye, f.View().invViewProjection);
@@ -200,7 +211,10 @@ void ShadowFeature::DepthRangePass(fx::PostOpaqueFrame& f)
     push.forwardAndPad[1] = frustum.forward.y;
     push.forwardAndPad[2] = frustum.forward.z;
 
-    f.ClearReadback("Shadow.DepthRange.Clear", view.depthRange, 0xFFFFFFFFu);
+    // Without the clear no reduce may run: its result would be read against stale buffer contents.
+    if (!f.ClearReadback("Shadow.DepthRange.Clear", view.depthRange, 0xFFFFFFFFu)) {
+        return;
+    }
     const bool dispatched = f.Compute(m_depthReduceShader, "Shadow.DepthRange.Reduce")
                                 .Push(push)
                                 .Bind("sceneDepth", fx::Depth(f.SceneDepth()))
@@ -215,19 +229,22 @@ void ShadowFeature::DepthRangePass(fx::PostOpaqueFrame& f)
 
 void ShadowFeature::MaskPass(fx::PostOpaqueFrame& f)
 {
+    ShadowViewState& view = m_views.For(f.Scope());
+    const auto finish = [&](ShadowFrameStatus status) { view.snapshot.maskStatus = status; };
+
     const std::optional<ShadowMapData> map = m_mapData.Fetch(f);
-    if (!map || !f.View().invViewProjectionValid) {
+    if (!map || HasNoPixels(f.View()) || !f.View().invViewProjectionValid) {
+        finish(ShadowFrameStatus::NotRendered);
         return;
     }
-    ShadowViewState& view = m_views.For(f.Scope());
     const fx::Texture mask = view.mask.Acquire(f, f.View().extent, PixelFormat::R8_UNorm);
     const fx::Texture cascadeId = view.cascadeId.Acquire(f, f.View().extent, PixelFormat::R8_UNorm);
     if (!mask.IsValid() || !cascadeId.IsValid()) {
+        finish(ShadowFrameStatus::TargetFailed);
         return;
     }
 
-    const ShadowSettings cfg = SanitizeShadowSettings(m_settings);
-    const ShadowMaskParamsGpu params = MakeShadowMaskParams(*map, cfg, f.View().invViewProjection);
+    const ShadowMaskParamsGpu params = MakeShadowMaskParams(*map, m_settings, f.View().invViewProjection);
 
     // Cascades past the active count read the first map; the shader never selects them.
     const auto& maps = map->maps;
@@ -242,10 +259,14 @@ void ShadowFeature::MaskPass(fx::PostOpaqueFrame& f)
                                 .Bind("maskOutput", mask)
                                 .Bind("cascadeOutput", cascadeId)
                                 .Dispatch(f.View().extent);
-    if (dispatched) {
-        m_maskData.Publish(f, mask);
-        m_cascadeIdData.Publish(f, cascadeId);
+    if (!dispatched) {
+        f.ReportOnce("Shadow.Mask.Dispatch was refused");
+        finish(ShadowFrameStatus::ShadersNotReady);
+        return;
     }
+    m_maskData.Publish(f, mask);
+    m_cascadeIdData.Publish(f, cascadeId);
+    finish(ShadowFrameStatus::Ok);
 }
 
 void ShadowFeature::CompositePass(fx::CompositeFrame& f)
@@ -255,17 +276,19 @@ void ShadowFeature::CompositePass(fx::CompositeFrame& f)
     if (!mask || !cascadeId) {
         return;
     }
-    const ShadowSettings cfg = SanitizeShadowSettings(m_settings);
-    const CompositeParams params{ cfg.strength, static_cast<float>(cfg.debugView),
-        static_cast<float>(cfg.cascadeCount), 0.0f };
-    f.Fullscreen(m_compositeShader, "Shadow.Composite.Draw")
-        .Bind("sceneColor", f.SceneColor())
-        .Bind("shadowMask", *mask)
-        .Bind("cascadeId", *cascadeId)
-        .Push(params)
-        .Acknowledge(f.SceneDepth())
-        .Target(f.PrivateTarget())
-        .Draw();
+    const ShadowSettings& cfg = m_settings;
+    const CompositeParams params{ cfg.strength, static_cast<std::uint32_t>(cfg.debugView), cfg.cascadeCount, 0u };
+    const bool drawn = f.Fullscreen(m_compositeShader, "Shadow.Composite.Draw")
+                           .Bind("sceneColor", f.SceneColor())
+                           .Bind("shadowMask", *mask)
+                           .Bind("cascadeId", *cascadeId)
+                           .Push(params)
+                           .Acknowledge(f.SceneDepth())
+                           .Target(f.PrivateTarget())
+                           .Draw();
+    if (!drawn) {
+        f.ReportOnce("Shadow.Composite.Draw was refused");
+    }
 }
 
 GTE_REGISTER_RENDER_FEATURE("Shadow", ShadowFeature);

@@ -25,10 +25,7 @@ struct RenderViewDesc {
     bool allowDepthSampledAccess = false;
 };
 
-// Equality used only to detect "same name, different desc" misuse in
-// CreateOrGetView() below - colorFormat is ignored whenever either side has
-// hasColor == false (a depth-only view requested twice with two different,
-// both-irrelevant colorFormat values is never a caller bug).
+// True when two descs match for one name. colorFormat is ignored while either side has no color.
 bool DescsMatchForSameName(const RenderViewDesc& a, const RenderViewDesc& b) noexcept;
 
 // Single source of truth for every view name this engine itself already

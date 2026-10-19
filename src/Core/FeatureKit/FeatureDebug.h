@@ -58,19 +58,6 @@ inline std::optional<bool> ParseDebugBool(std::string_view text) noexcept
     return std::nullopt;
 }
 
-inline std::optional<std::int64_t> ParseDebugInt(std::string_view text) noexcept
-{
-    if (text.starts_with('+')) {
-        return std::nullopt;
-    }
-    std::int64_t value = 0;
-    const auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), value);
-    if (ec != std::errc{} || end != text.data() + text.size()) {
-        return std::nullopt;
-    }
-    return value;
-}
-
 inline std::optional<std::uint64_t> ParseDebugUnsigned(std::string_view text) noexcept
 {
     if (text.empty() || text.front() == '+' || text.front() == '-') {

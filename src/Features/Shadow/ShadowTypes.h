@@ -120,7 +120,8 @@ struct ShadowMapData {
 
 // What the panel and the HTTP endpoint read, one per view scope.
 struct ShadowViewSnapshot {
-    ShadowFrameStatus status = ShadowFrameStatus::NotRendered;
+    ShadowFrameStatus status = ShadowFrameStatus::NotRendered;     // Cascade stage.
+    ShadowFrameStatus maskStatus = ShadowFrameStatus::NotRendered; // Mask stage.
     std::uint64_t frameIndex = 0;
     ShadowCascadeSet cascades;
     float sunElevationDegrees = 0.0f;
@@ -152,7 +153,10 @@ struct ShadowMaskParamsGpu {
     float cameraForwardAndFadeEnd[4] = {};    // xyz forward, w fade end.
     float sunDirection[4] = {};               // xyz toward sun.
     float biasParams[4] = {};   // x const, y normal offset, z effective slope (texels).
-    float filterParams[4] = {}; // x radius texels, y samples, z cascade count, w 1 / map resolution.
+    float filterRadiusTexels = 0.0f;
+    float texelUvSize = 0.0f; // 1 / map resolution.
+    std::uint32_t filterSamples = 1;
+    std::uint32_t cascadeCount = 1;
 };
 static_assert(sizeof(ShadowMaskParamsGpu) == 464);
 static_assert(std::is_trivially_copyable_v<ShadowMaskParamsGpu>);
@@ -160,9 +164,9 @@ static_assert(std::is_trivially_copyable_v<ShadowMaskParamsGpu>);
 // Push block of ShadowComposite.frag.
 struct CompositeParams {
     float strength = 0.0f;
-    float debugMode = 0.0f; // 0 off, 1 cascade colors, 2 mask.
-    float cascadeCount = 0.0f;
-    float pad = 0.0f;
+    std::uint32_t debugMode = 0; // 0 off, 1 cascade colors, 2 mask.
+    std::uint32_t cascadeCount = 0;
+    std::uint32_t pad = 0;
 };
 static_assert(sizeof(CompositeParams) == 16);
 static_assert(std::is_trivially_copyable_v<CompositeParams>);
