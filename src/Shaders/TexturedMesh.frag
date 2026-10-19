@@ -14,6 +14,6 @@ layout(location = 0) out vec4 outColor;
 
 void main()
 {
-    vec4 color = texture(uDiffuseTexture, inUv) * uMaterial.baseColorFactor; // SRGB format: already linear here.
-    outColor = vec4(ApplyDirectionalLight(color.rgb, inWorldNormal), color.a);
+    vec3 color = (texture(uDiffuseTexture, inUv) * uMaterial.baseColorFactor).rgb; // SRGB format: already linear here.
+    outColor = vec4(ApplyDirectionalLight(color, inWorldNormal), 1.0); // Opaque pipeline: alpha is always 1.
 }
