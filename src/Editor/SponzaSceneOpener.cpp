@@ -108,6 +108,9 @@ try
                 return Fail("Refusing to remove \"" + PathToUtf8(stale) + "\": outside the Sponza folder.");
             }
             std::filesystem::remove_all(stale, ec);
+            if (ec) {
+                return Fail("Cannot remove stale import output \"" + PathToUtf8(stale) + "\": " + ec.message());
+            }
         }
 
         AssetDatabase database;
