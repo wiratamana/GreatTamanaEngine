@@ -54,9 +54,8 @@ struct ReadbackAccess;
 
 } // namespace detail
 
-// A small GPU-written buffer the CPU reads two frames later. Owned by the feature; destroy it only while the GPU is idle.
-//   f.ClearReadback("Stats.Clear", r, 0xFFFFFFFFu); f.Compute(...).BindOutput("result", r).Dispatch(extent);
-//   f.CopyReadbackToHost("Stats.Readback", r);  ... later: r.Latest(f)
+// A small GPU-written buffer the CPU reads two frames later. Destroy it only while the GPU is idle.
+//   f.ClearReadback(n, r, 0u); f.Compute(...).BindOutput("result", r).Dispatch(extent); f.CopyReadbackToHost(n2, r); r.Latest(f)
 template <typename T>
 class GpuReadback {
     static_assert(std::is_trivially_copyable_v<T> && sizeof(T) % 4 == 0 && sizeof(T) <= 256,

@@ -44,9 +44,8 @@ public:
     RenderViewRegistry(const RenderViewRegistry&) = delete;
     RenderViewRegistry& operator=(const RenderViewRegistry&) = delete;
 
-    // Idempotent by name. A refused request (reserved or empty name, mismatched desc on an existing name)
-    // returns rg::RenderViewId::Shared() and inserts nothing. Throws std::runtime_error when the render
-    // target cannot be created; the same name can be retried afterwards.
+    // Idempotent by name. A refused request (bad name or desc) returns rg::RenderViewId::Shared().
+    // Throws std::runtime_error when the target cannot be created; the same name can be retried.
     rg::RenderViewId CreateOrGetView(const char* name, const RenderViewDesc& desc);
 
     // Resizes the view's images (waits for the GPU to go idle). True when the view has the requested size

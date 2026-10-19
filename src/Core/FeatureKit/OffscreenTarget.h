@@ -23,9 +23,7 @@ struct ColorDepth {
 };
 
 // A render view owned by the engine, one per view scope, imported into the graph every frame.
-// Acquire() with another size resizes it (the GPU goes idle once); a failed create or resize backs off
-// before it retries, and a different size retries at once. A resize is refused while the view runs pipelined.
-// Changing between depth-only and color logs one error and keeps the old target.
+// A new size resizes it (GPU idle once); a failed or refused create/resize gives an invalid Texture and backs off.
 class OffscreenTarget {
 public:
     // Size Trim() shrinks an unused target to.

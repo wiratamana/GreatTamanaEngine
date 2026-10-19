@@ -208,6 +208,7 @@ void ShadowFeature::DepthRangePass(fx::PostOpaqueFrame& f)
                                 .Dispatch(f.View().extent);
     if (!dispatched) {
         f.ReportOnce("Shadow.DepthRange.Reduce was refused; the cascades keep fixed splits");
+        return;
     }
     f.CopyReadbackToHost("Shadow.DepthRange.Readback", view.depthRange);
 }

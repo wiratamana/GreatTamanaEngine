@@ -142,9 +142,10 @@ Texture OffscreenTarget::Impl::Acquire(
         frame.ReportOnce("OffscreenTarget '" + slot.name + "' was made with another kind (depth-only or color); the new request is ignored");
     } else if (slot.width != width || slot.height != height) {
         if (context->builder->IsPersistentRegimePipelined()) {
-            frame.ReportOnce("OffscreenTarget '" + slot.name + "' cannot be resized while the view runs pipelined; keeping "
-                + std::to_string(slot.width) + "x" + std::to_string(slot.height));
-        } else if (!ShouldAttempt(slot, *context, width, height) || !Resize(slot, *context, width, height)) {
+            frame.ReportOnce("OffscreenTarget '" + slot.name + "' cannot be resized while the view runs pipelined");
+            return Texture{};
+        }
+        if (!ShouldAttempt(slot, *context, width, height) || !Resize(slot, *context, width, height)) {
             return Texture{};
         }
     }

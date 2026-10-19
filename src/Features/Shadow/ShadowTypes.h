@@ -18,9 +18,6 @@ inline constexpr std::uint32_t kMaxShadowCascades = 4;
 // Frames a depth-range sample stays usable without a newer one.
 inline constexpr std::uint64_t kSdsmMaxHoldFrames = 120;
 
-// A depth-range copy is read once it is at least this many frames old.
-inline constexpr std::uint64_t kSdsmSampleLagFrames = 2;
-
 enum class ShadowDebugView : std::uint8_t { Off, CascadeColors, Mask };
 
 enum class ShadowFrameStatus : std::uint8_t {

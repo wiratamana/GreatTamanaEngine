@@ -12,7 +12,6 @@
 namespace gte::fx {
 
 // The pass names a registration answers to in the toggle panel. Empty: the registered callback name.
-// A callback that declares several separately toggled passes lists them all.
 // Always() is for work that is not a render pass and must never be silenced by a toggle.
 struct Gate {
     std::vector<std::string> passNames;
