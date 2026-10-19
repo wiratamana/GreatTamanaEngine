@@ -1,6 +1,5 @@
 #include "GtaoPanel.h"
 
-#include "../../../Editor/EditorContext.h"
 #include "../GtaoTypes.h"
 
 #include <imgui.h>
@@ -53,7 +52,7 @@ void DrawStatus(const GtaoViewSnapshot& game)
 
 } // namespace
 
-bool BuildGtaoPanel(EditorContext& /*ctx*/, GtaoSettings& edit, const GtaoViewSnapshot& game, const GtaoViewSnapshot& scene)
+bool BuildGtaoPanel(GtaoSettings& edit, const GtaoViewSnapshot& game, const GtaoViewSnapshot& scene)
 {
     bool changed = false;
     ImGui::Begin("Gtao");

@@ -12,16 +12,16 @@ namespace gte {
 void GtaoPluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/)
 {
     GtaoSettings edit = m_feature.Settings();
-    if (BuildGtaoPanel(m_ctx, edit, m_feature.Snapshot(rg::ViewScope::GameView), m_feature.Snapshot(rg::ViewScope::SceneView))) {
+    if (BuildGtaoPanel(edit, m_feature.Snapshot(rg::ViewScope::GameView), m_feature.Snapshot(rg::ViewScope::SceneView))) {
         m_feature.ApplySettings(edit);
     }
 }
 
 namespace {
 std::unique_ptr<IEditorPanelModule_v1> CreateGtaoPanelModule(
-    IEngineFeatureModule& module, EditorContext& ctx, Renderer&, const rg::RenderGraph&)
+    IEngineFeatureModule& module, EditorContext&, Renderer&, const rg::RenderGraph&)
 {
-    return std::make_unique<GtaoPluginPanelModule>(ctx, fx::FeatureOf<GtaoFeature>(module));
+    return std::make_unique<GtaoPluginPanelModule>(fx::FeatureOf<GtaoFeature>(module));
 }
 } // namespace
 

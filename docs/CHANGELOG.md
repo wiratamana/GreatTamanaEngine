@@ -4,6 +4,13 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## Ambient occlusion (branch `feature/volumetric-light-impl`)
+
+- Gtao: screen-space ground-truth AO from the scene depth only, in a PostOpaque compute pair (sample, denoise with temporal
+  history) and a PostComposite linear-space multiply. Works in Game and Scene views. See
+  [ambient-occlusion.md](conventions/ambient-occlusion.md).
+- `GtaoMath` CPU oracle, `/feature_debug/*` endpoint (`debugView=AoOnly`, `reset_defaults`) and a dockable "Gtao" editor window.
+
 ## Cascaded shadow maps (branch `fix/great-refactor`)
 
 - Shadow: up to four auto-fitted cascades with stable texel snapping, depth-range fitting from a GPU readback (two frames

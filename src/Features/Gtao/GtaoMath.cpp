@@ -12,10 +12,10 @@ namespace {
 constexpr float kCutDistance = 20.0f;
 constexpr float kCutMinForwardDot = 0.5f;
 
-constexpr float kMinSpan = 1e-4f;      // Smallest usable image-plane span, world units.
-constexpr float kMaxSkew = 1e-3f;      // |dot(right, down)| limit.
-constexpr float kPerspectiveTol = 0.02f; // Relative change of the frustum width over depth.
-constexpr float kSquarePixelTol = 0.02f;
+constexpr float kMinSpan = 1e-4f;        // Smallest usable image-plane span, world units.
+constexpr float kMaxSkew = 1e-3f;        // |dot(right, down)| limit.
+constexpr float kPerspectiveTol = 0.005f; // Relative change of the frustum width over depth.
+constexpr float kSquarePixelTol = 0.01f;
 
 bool IsFinite(const Vec3& v) noexcept
 {
