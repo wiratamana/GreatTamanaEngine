@@ -6,6 +6,12 @@
 
 namespace gte {
 
+// Colour space of the stored RGB bytes. Srgb averages in linear light; alpha is always a plain average.
+enum class MipColorSpace : std::uint8_t {
+    Linear,
+    Srgb,
+};
+
 // Box-filtered mip chain down to 1x1. Level 0 is a copy of the input.
 struct MipChainRgba8 {
     std::uint32_t levelCount = 0;
@@ -18,6 +24,7 @@ struct MipChainRgba8 {
 // Returns an empty chain (levelCount == 0) for a null input or a zero size.
 // `maxLevels` caps the level count (1 = level 0 only).
 MipChainRgba8 BuildMipChainRgba8(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
-    std::uint32_t maxLevels = std::numeric_limits<std::uint32_t>::max());
+    std::uint32_t maxLevels = std::numeric_limits<std::uint32_t>::max(),
+    MipColorSpace colorSpace = MipColorSpace::Linear);
 
 } // namespace gte

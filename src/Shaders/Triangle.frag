@@ -11,5 +11,5 @@ layout(location = 0) out vec4 outColor;
 
 void main()
 {
-    outColor = vec4(ApplyDirectionalLight(fragColor, inWorldNormal), 1.0);
+    outColor = vec4(ApplyDirectionalLight(SrgbToLinear(fragColor), inWorldNormal), 1.0); // Vertex colors are sRGB.
 }

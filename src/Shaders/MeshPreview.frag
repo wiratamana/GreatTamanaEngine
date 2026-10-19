@@ -10,6 +10,6 @@ layout(location = 0) out vec4 outColor;
 
 void main()
 {
-    const vec3 baseColor = vec3(0.72, 0.73, 0.76); // Neutral light grey "clay" look.
+    const vec3 baseColor = SrgbToLinear(vec3(0.72, 0.73, 0.76)); // Neutral light grey "clay" look.
     outColor = vec4(ApplyDirectionalLight(baseColor, inWorldNormal), 1.0);
 }

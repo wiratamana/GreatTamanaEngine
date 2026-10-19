@@ -13,6 +13,6 @@ layout(location = 0) out vec4 outColor;
 
 void main()
 {
-    vec4 texColor = texture(uDiffuseTexture, inUv);
+    vec4 texColor = texture(uDiffuseTexture, inUv); // SRGB format: already linear here.
     outColor = vec4(ApplyDirectionalLight(texColor.rgb, inWorldNormal), texColor.a);
 }

@@ -1,12 +1,45 @@
 #include "MipChain.h"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstring>
 
 namespace gte {
 
-MipChainRgba8 BuildMipChainRgba8(
-    const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height, std::uint32_t maxLevels)
+namespace {
+
+constexpr int kEncodeSteps = 4096;
+
+// sRGB byte <-> linear lookup tables. Encode is sampled at kEncodeSteps linear values.
+struct SrgbTables {
+    std::array<float, 256> decode{};
+    std::array<std::uint8_t, kEncodeSteps> encode{};
+
+    SrgbTables()
+    {
+        for (int i = 0; i < 256; ++i) {
+            const double s = i / 255.0;
+            decode[i] = static_cast<float>(s <= 0.04045 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4));
+        }
+        for (int i = 0; i < kEncodeSteps; ++i) {
+            const double l = i / static_cast<double>(kEncodeSteps - 1);
+            const double s = l <= 0.0031308 ? l * 12.92 : 1.055 * std::pow(l, 1.0 / 2.4) - 0.055;
+            encode[i] = static_cast<std::uint8_t>(std::clamp(s * 255.0 + 0.5, 0.0, 255.0));
+        }
+    }
+};
+
+const SrgbTables& Tables()
+{
+    static const SrgbTables tables;
+    return tables;
+}
+
+} // namespace
+
+MipChainRgba8 BuildMipChainRgba8(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
+    std::uint32_t maxLevels, MipColorSpace colorSpace)
 {
     MipChainRgba8 chain;
     if (rgba == nullptr || width == 0 || height == 0 || maxLevels == 0) {
@@ -27,6 +60,9 @@ MipChainRgba8 BuildMipChainRgba8(
     chain.pixels.resize(total);
     std::memcpy(chain.pixels.data(), rgba, static_cast<std::size_t>(width) * height * 4);
 
+    const bool srgb = colorSpace == MipColorSpace::Srgb;
+    const SrgbTables& tables = Tables();
+
     for (std::uint32_t level = 1; level < chain.levelCount; ++level) {
         const std::uint8_t* src = chain.pixels.data() + chain.levelByteOffsets[level - 1];
         std::uint8_t* dst = chain.pixels.data() + chain.levelByteOffsets[level];
@@ -40,10 +76,21 @@ MipChainRgba8 BuildMipChainRgba8(
             for (std::uint32_t x = 0; x < dw; ++x) {
                 const std::uint32_t x0 = std::min(2 * x, sw - 1);
                 const std::uint32_t x1 = std::min(2 * x + 1, sw - 1);
+                const std::uint8_t* t00 = src + (y0 * sw + x0) * 4;
+                const std::uint8_t* t01 = src + (y0 * sw + x1) * 4;
+                const std::uint8_t* t10 = src + (y1 * sw + x0) * 4;
+                const std::uint8_t* t11 = src + (y1 * sw + x1) * 4;
+                std::uint8_t* out = dst + (y * dw + x) * 4;
                 for (std::uint32_t c = 0; c < 4; ++c) {
-                    const std::uint32_t sum = src[(y0 * sw + x0) * 4 + c] + src[(y0 * sw + x1) * 4 + c]
-                        + src[(y1 * sw + x0) * 4 + c] + src[(y1 * sw + x1) * 4 + c];
-                    dst[(y * dw + x) * 4 + c] = static_cast<std::uint8_t>((sum + 2) / 4);
+                    if (srgb && c < 3) {
+                        const float average
+                            = (tables.decode[t00[c]] + tables.decode[t01[c]] + tables.decode[t10[c]] + tables.decode[t11[c]])
+                            * 0.25f;
+                        out[c] = tables.encode[static_cast<int>(average * (kEncodeSteps - 1) + 0.5f)];
+                    } else {
+                        const std::uint32_t sum = t00[c] + t01[c] + t10[c] + t11[c];
+                        out[c] = static_cast<std::uint8_t>((sum + 2) / 4);
+                    }
                 }
             }
         }

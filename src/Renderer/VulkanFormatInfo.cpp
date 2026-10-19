@@ -27,6 +27,8 @@ VkFormat ToVkFormat(PixelFormat format) noexcept
     switch (format) {
         case PixelFormat::RGBA8_UNorm:
             return VK_FORMAT_R8G8B8A8_UNORM;
+        case PixelFormat::RGBA8_SRGB:
+            return VK_FORMAT_R8G8B8A8_SRGB;
         case PixelFormat::BGRA8_UNorm:
             return VK_FORMAT_B8G8R8A8_UNORM;
         case PixelFormat::RGBA16_Float:
@@ -50,6 +52,8 @@ PixelFormat FromVkFormat(VkFormat format) noexcept
     switch (format) {
         case VK_FORMAT_R8G8B8A8_UNORM:
             return PixelFormat::RGBA8_UNorm;
+        case VK_FORMAT_R8G8B8A8_SRGB:
+            return PixelFormat::RGBA8_SRGB;
         case VK_FORMAT_B8G8R8A8_UNORM:
             return PixelFormat::BGRA8_UNorm;
         case VK_FORMAT_R16G16B16A16_SFLOAT:

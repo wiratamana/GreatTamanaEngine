@@ -19,10 +19,11 @@ struct SceneLightingSettings {
     float skyAmbientR = 1.26f, skyAmbientG = 1.31f, skyAmbientB = 1.40f;
     float groundAmbientR = 0.66f, groundAmbientG = 0.57f, groundAmbientB = 0.46f;
     float ambientIntensity = 1.0f;
-    float exposure = 1.0f;
+    float exposure = 0.4f;       // Plain multiplier on the lit color.
+    float linearShading = 1.0f;  // 1 = light in linear space, 0 = legacy light on sRGB-encoded values.
 };
 
-// Clamps every value; a non-finite value becomes its default.
+// Clamps every value; a non-finite value becomes its default. linearShading is rounded to 0 or 1.
 inline SceneLightingSettings SanitizeSceneLightingSettings(const SceneLightingSettings& in) noexcept
 {
     const SceneLightingSettings d{};
@@ -38,16 +39,17 @@ inline SceneLightingSettings SanitizeSceneLightingSettings(const SceneLightingSe
     s.groundAmbientB = clamp(in.groundAmbientB, d.groundAmbientB, 0.0f, 4.0f);
     s.ambientIntensity = clamp(in.ambientIntensity, d.ambientIntensity, 0.0f, 8.0f);
     s.exposure = clamp(in.exposure, d.exposure, 0.01f, 16.0f);
+    s.linearShading = std::isfinite(in.linearShading) ? (in.linearShading >= 0.5f ? 1.0f : 0.0f) : d.linearShading;
     return s;
 }
 
 // Scene Services binding 8 (std140, 64 bytes). Member names and order match
 // SceneGlobalUniformBlock in DirectionalLighting.glsl.
 struct SceneLightingUniformData {
-    float sunDirectionAndValid[4];     // xyz = toward sun, w = 1 once written
-    float sunIlluminanceAndPad[4];     // xyz = color * intensity
-    float skyAmbientAndIntensity[4];   // rgb = sky ambient, w = ambient intensity
-    float groundAmbientAndExposure[4]; // rgb = ground ambient, w = exposure
+    float sunDirectionAndValid[4];         // xyz = toward sun, w = 1 once written
+    float sunIlluminanceAndLinearFlag[4];  // xyz = color * intensity, w = linear shading flag
+    float skyAmbientAndIntensity[4];       // rgb = sky ambient, w = ambient intensity
+    float groundAmbientAndExposure[4];     // rgb = ground ambient, w = exposure
 };
 static_assert(sizeof(SceneLightingUniformData) == 64);
 static_assert(std::is_trivially_copyable_v<SceneLightingUniformData>);
@@ -65,9 +67,10 @@ inline SceneLightingUniformData PackSceneLightingUniformData(
     data.sunDirectionAndValid[1] = direction.y;
     data.sunDirectionAndValid[2] = direction.z;
     data.sunDirectionAndValid[3] = 1.0f;
-    data.sunIlluminanceAndPad[0] = sun.sunIlluminance.x;
-    data.sunIlluminanceAndPad[1] = sun.sunIlluminance.y;
-    data.sunIlluminanceAndPad[2] = sun.sunIlluminance.z;
+    data.sunIlluminanceAndLinearFlag[0] = sun.sunIlluminance.x;
+    data.sunIlluminanceAndLinearFlag[1] = sun.sunIlluminance.y;
+    data.sunIlluminanceAndLinearFlag[2] = sun.sunIlluminance.z;
+    data.sunIlluminanceAndLinearFlag[3] = settings.linearShading;
     data.skyAmbientAndIntensity[0] = settings.skyAmbientR;
     data.skyAmbientAndIntensity[1] = settings.skyAmbientG;
     data.skyAmbientAndIntensity[2] = settings.skyAmbientB;

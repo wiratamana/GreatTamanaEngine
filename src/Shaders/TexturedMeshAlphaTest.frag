@@ -16,7 +16,7 @@ const float kAlphaCutoff = 0.5;
 
 void main()
 {
-    vec4 texColor = texture(uDiffuseTexture, inUv);
+    vec4 texColor = texture(uDiffuseTexture, inUv); // SRGB format: already linear here.
     if (texColor.a < kAlphaCutoff) {
         discard;
     }

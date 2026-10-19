@@ -9,6 +9,15 @@ bool SupportsStorageImageUsage(VkPhysicalDevice physicalDevice, VkFormat format)
     return (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) != 0;
 }
 
+bool SupportsLinearSampling(VkPhysicalDevice physicalDevice, VkFormat format)
+{
+    VkFormatProperties properties{};
+    vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &properties);
+    constexpr VkFormatFeatureFlags kRequired =
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    return (properties.optimalTilingFeatures & kRequired) == kRequired;
+}
+
 bool SupportsBlitSrcDst(VkPhysicalDevice physicalDevice, VkFormat format)
 {
     VkFormatProperties properties{};

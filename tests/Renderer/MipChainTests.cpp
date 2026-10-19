@@ -49,6 +49,32 @@ TEST(MipChainTest, NonPowerOfTwoSizesShrinkToOneByOne)
     }
 }
 
+TEST(MipChainTest, SrgbAveragesRgbInLinearLight)
+{
+    // Black and white texels: linear average 0.5 encodes to sRGB 188, not the plain average 128.
+    const std::uint8_t pixels[16] = { 0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 255, 255, 255, 255 };
+    const MipChainRgba8 linear = BuildMipChainRgba8(pixels, 2, 2, 2, MipColorSpace::Linear);
+    const MipChainRgba8 srgb = BuildMipChainRgba8(pixels, 2, 2, 2, MipColorSpace::Srgb);
+    ASSERT_EQ(srgb.levelCount, 2u);
+    const std::uint64_t offset = srgb.levelByteOffsets[1];
+    for (int c = 0; c < 3; ++c) {
+        EXPECT_EQ(linear.pixels[offset + c], 128);
+        EXPECT_NEAR(srgb.pixels[offset + c], 188, 1);
+    }
+    EXPECT_EQ(srgb.pixels[offset + 3], 128); // Alpha stays a plain average.
+}
+
+TEST(MipChainTest, SrgbKeepsUniformImagesUnchanged)
+{
+    for (const std::uint8_t value : { 0, 1, 13, 77, 128, 254, 255 }) {
+        const std::vector<std::uint8_t> pixels(4 * 4 * 4, value);
+        const MipChainRgba8 chain = BuildMipChainRgba8(pixels.data(), 4, 4, 3, MipColorSpace::Srgb);
+        for (const std::uint8_t out : chain.pixels) {
+            EXPECT_NEAR(out, value, 1) << "value " << int(value);
+        }
+    }
+}
+
 TEST(MipChainTest, NullInputOrZeroSizeGivesEmptyChain)
 {
     const std::uint8_t pixel[4] = { 1, 2, 3, 4 };

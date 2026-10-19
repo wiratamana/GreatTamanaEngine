@@ -4,9 +4,8 @@
 
 namespace gte {
 
-// Engine-native pixel/depth format - zero Vulkan dependency, usable from any
-// layer. Renderer/Vulkan/VulkanFormatInfo.h is the ONLY place this converts
-// to/from a real VkFormat.
+// Engine-native pixel/depth format, free of Vulkan. Renderer/VulkanFormatInfo is the only
+// place that converts to or from a real VkFormat.
 enum class PixelFormat : std::uint8_t {
     Undefined,
     RGBA8_UNorm,
@@ -16,15 +15,10 @@ enum class PixelFormat : std::uint8_t {
     D32_Float,
     D32_Float_S8_UInt,
     D24_UNorm_S8_UInt,
+    RGBA8_SRGB, // Sampling decodes sRGB to linear in hardware.
 };
 
-// Human-readable label for each PixelFormat value above - the engine-native
-// equivalent of Editor/MemoryPanelData.h's ToString(VkFormat), but zero
-// Vulkan dependency (no VkFormat involved, no ToVkFormat() round-trip
-// needed) so it can be called from any layer, exactly like PixelFormat
-// itself (see the file-level comment above). Falls back to "Unknown" only
-// for a value outside the enum's real range (e.g. a corrupted/garbage
-// byte) - every declared enumerator above has its own case.
+// Human-readable label of a PixelFormat; "Unknown" for a value outside the enum.
 inline const char* ToString(PixelFormat format) noexcept
 {
     switch (format) {
@@ -36,6 +30,7 @@ inline const char* ToString(PixelFormat format) noexcept
     case PixelFormat::D32_Float: return "D32_Float";
     case PixelFormat::D32_Float_S8_UInt: return "D32_Float_S8_UInt";
     case PixelFormat::D24_UNorm_S8_UInt: return "D24_UNorm_S8_UInt";
+    case PixelFormat::RGBA8_SRGB: return "RGBA8_SRGB";
     }
     return "Unknown";
 }

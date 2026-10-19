@@ -360,7 +360,14 @@ Mesh GpuResourceFactory::CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer
 
 Texture2D GpuResourceFactory::CreateTexture2D(const Texture2DUploadDesc& desc) const
 {
-    if (desc.allowStorageImageAccess && !SupportsStorageImageUsage(m_physicalDevice, ToVkFormat(desc.format))) {
+    if (desc.format != PixelFormat::RGBA8_UNorm && desc.format != PixelFormat::RGBA8_SRGB) {
+        throw std::runtime_error("GpuResourceFactory::CreateTexture2D: only RGBA8_UNorm and RGBA8_SRGB are supported.");
+    }
+    const VkFormat vkFormat = ToVkFormat(desc.format);
+    if (!SupportsLinearSampling(m_physicalDevice, vkFormat)) {
+        throw std::runtime_error("GpuResourceFactory::CreateTexture2D: this physical device cannot sample the requested format.");
+    }
+    if (desc.allowStorageImageAccess && !SupportsStorageImageUsage(m_physicalDevice, vkFormat)) {
         throw std::runtime_error(
             "GpuResourceFactory::CreateTexture2D: requested allowStorageImageAccess = true, but this physical "
             "device does not support VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for the requested format.");
@@ -369,7 +376,8 @@ Texture2D GpuResourceFactory::CreateTexture2D(const Texture2DUploadDesc& desc) c
     // Level 0 only unless a mip chain was requested. Sizes below 1 are clamped like Texture does.
     const MipChainRgba8 chain = BuildMipChainRgba8(static_cast<const std::uint8_t*>(desc.pixelsRgba8),
         static_cast<std::uint32_t>(std::max(desc.width, 1)), static_cast<std::uint32_t>(std::max(desc.height, 1)),
-        desc.generateMips ? std::numeric_limits<std::uint32_t>::max() : 1U);
+        desc.generateMips ? std::numeric_limits<std::uint32_t>::max() : 1U,
+        desc.format == PixelFormat::RGBA8_SRGB ? MipColorSpace::Srgb : MipColorSpace::Linear);
     if (chain.levelCount == 0) {
         throw std::runtime_error("GpuResourceFactory::CreateTexture2D: pixel data is null.");
     }
@@ -465,7 +473,7 @@ TextureArray2D GpuResourceFactory::CreateTextureArray(int width, int height, int
         isCubemap, allowStorageImageAccess, debugName);
 }
 
-
+// Material textures hold colour data: stored as sRGB, decoded to linear by the sampler.
 MaterialTexture GpuResourceFactory::CreateMaterialTexture2D(
     const void* pixelsRgba8, int width, int height, const char* debugName) const
 {
@@ -473,6 +481,7 @@ MaterialTexture GpuResourceFactory::CreateMaterialTexture2D(
         .width = width,
         .height = height,
         .debugName = debugName,
+        .format = PixelFormat::RGBA8_SRGB,
         .addressMode = TextureAddressMode::Repeat,
         .generateMips = true,
         .maxAnisotropy = m_vulkanDevice->MaterialAnisotropy() });

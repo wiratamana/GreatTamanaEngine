@@ -85,6 +85,8 @@ std::string FormatColumnLabel(GpuResourceType type, PixelFormat format)
         return "Texture (BGRA8 UNORM)";
     case PixelFormat::RGBA8_UNorm:
         return "Texture (RGBA8 UNORM)";
+    case PixelFormat::RGBA8_SRGB:
+        return "Texture (RGBA8 SRGB)";
     case PixelFormat::RGBA16_Float:
         return "Texture (RGBA16 Float)";
     case PixelFormat::R8_UNorm:
