@@ -122,6 +122,12 @@ option(GTE_CORE_STANDALONE_PROBE_ONLY "CI-ONLY: configure ONLY gte_core, skippin
 # preference).
 option(GTE_ENABLE_PROJECT_ASSEMBLIES "Auto-discover and load per-developer Projects/<Name>/ Project Assembly .dll's (editor-core-separation-11)" ON)
 
+# Sparse-clone ONLY Models/Sponza from KhronosGroup/glTF-Sample-Assets into
+# _reference/glTF-Sample-Assets/ on configure, if not already present (see
+# cmake/FetchSponza.cmake). Needs `git` on PATH. Turn OFF to never touch the
+# network for it.
+option(GTE_FETCH_SPONZA "Clone the Sponza glTF test model (Models/Sponza only) into _reference/ if missing" ON)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchSDL3)
 include(FetchVulkan)
@@ -248,6 +254,26 @@ fetch_ktx()
 # into gte_core below.
 include(FetchSaba)
 fetch_saba()
+
+# Clones ONLY Models/Sponza from KhronosGroup/glTF-Sample-Assets (git sparse +
+# partial clone - the rest of that very big repo is never downloaded) into
+# _reference/glTF-Sample-Assets/, if not already present. Test asset only:
+# a failed clone is a WARNING, never breaks configure. See
+# cmake/FetchSponza.cmake.
+if(GTE_FETCH_SPONZA AND NOT GTE_CORE_STANDALONE_PROBE_ONLY)
+    include(FetchSponza)
+    fetch_sponza()
+endif()
+
+# Downloads (if not already present) and stages cgltf.h for Windows:
+#   third_party/cgltf/cgltf.h - single-header, zero-dependency glTF 2.0 loader
+#                               (https://github.com/jkuhlmann/cgltf, MIT).
+# Also defines the `cgltf` INTERFACE target. Like stb_image/VMA, the real
+# implementation only exists once ONE translation unit does
+# `#define CGLTF_IMPLEMENTATION` before `#include <cgltf.h>` - nothing in the
+# engine does that yet. See cmake/FetchCgltf.cmake.
+include(FetchCgltf)
+fetch_cgltf()
 
 # Dear ImGui itself is always fetched/built - the Editor module is always
 # configured in this repo (editor-core-separation-1 campaign, PHASE8 -

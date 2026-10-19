@@ -88,6 +88,11 @@
 /third_party/saba/
 /third_party/glm/
 
+# cgltf.h (single-header glTF 2.0 loader) fetched by cmake/FetchCgltf.cmake
+# (regenerated automatically on configure — see CMakeLists.txt /
+# cmake/FetchCgltf.cmake)
+/third_party/cgltf/
+
 # GoogleTest artifacts fetched by cmake/FetchGTest.cmake (regenerated
 # automatically on configure when GTE_BUILD_TESTS is ON — see
 # CMakeLists.txt / cmake/FetchGTest.cmake / tests/CMakeLists.txt)
