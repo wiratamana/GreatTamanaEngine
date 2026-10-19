@@ -2,26 +2,25 @@
 
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
 #include "Texture.h"
+#include "Texture2DUploadDesc.h"
 
 namespace gte {
 
-// Immutable RGBA8 2D texture (imported image data). Created via Renderer::CreateTexture2D(), which uploads the pixels.
+// Immutable 2D texture (imported image data). Created via GpuResourceFactory::CreateTexture2D(), which uploads the pixels.
 class Texture2D : public Texture {
 public:
-    Texture2D(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device, int width,
-        int height, const char* debugName = nullptr, bool allowStorageImageAccess = false,
-        TextureAddressMode addressMode = TextureAddressMode::ClampToEdge, std::uint32_t mipLevels = 1,
-        float maxAnisotropy = 1.0f)
+    Texture2D(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> tracker, VkDevice device,
+        const Texture2DUploadDesc& desc, std::uint32_t mipLevels)
         : Texture(allocator, std::move(tracker), device,
-              TextureCreateInfo{ .width = width,
-                  .height = height,
+              TextureCreateInfo{ .width = desc.width,
+                  .height = desc.height,
                   .mipLevels = mipLevels,
-                  .format = PixelFormat::RGBA8_UNorm,
-                  .storage = allowStorageImageAccess,
+                  .format = desc.format,
+                  .storage = desc.allowStorageImageAccess,
                   .transferDst = true,
-                  .addressMode = addressMode,
-                  .maxAnisotropy = maxAnisotropy,
-                  .debugName = debugName })
+                  .addressMode = desc.addressMode,
+                  .maxAnisotropy = desc.maxAnisotropy,
+                  .debugName = desc.debugName })
     {
     }
 

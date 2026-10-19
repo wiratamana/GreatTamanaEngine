@@ -358,25 +358,23 @@ Mesh GpuResourceFactory::CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer
     return Mesh(std::move(sharedVertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
 }
 
-Texture2D GpuResourceFactory::CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName,
-    bool allowStorageImageAccess, TextureAddressMode addressMode, bool generateMips, float maxAnisotropy) const
+Texture2D GpuResourceFactory::CreateTexture2D(const Texture2DUploadDesc& desc) const
 {
-    if (allowStorageImageAccess && !SupportsStorageImageUsage(m_physicalDevice, VK_FORMAT_R8G8B8A8_UNORM)) {
+    if (desc.allowStorageImageAccess && !SupportsStorageImageUsage(m_physicalDevice, ToVkFormat(desc.format))) {
         throw std::runtime_error(
             "GpuResourceFactory::CreateTexture2D: requested allowStorageImageAccess = true, but this physical "
-            "device does not support VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for VK_FORMAT_R8G8B8A8_UNORM.");
+            "device does not support VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for the requested format.");
     }
 
     // Level 0 only unless a mip chain was requested. Sizes below 1 are clamped like Texture does.
-    const MipChainRgba8 chain = BuildMipChainRgba8(static_cast<const std::uint8_t*>(pixelsRgba8),
-        static_cast<std::uint32_t>(std::max(width, 1)), static_cast<std::uint32_t>(std::max(height, 1)),
-        generateMips ? std::numeric_limits<std::uint32_t>::max() : 1U);
+    const MipChainRgba8 chain = BuildMipChainRgba8(static_cast<const std::uint8_t*>(desc.pixelsRgba8),
+        static_cast<std::uint32_t>(std::max(desc.width, 1)), static_cast<std::uint32_t>(std::max(desc.height, 1)),
+        desc.generateMips ? std::numeric_limits<std::uint32_t>::max() : 1U);
     if (chain.levelCount == 0) {
         throw std::runtime_error("GpuResourceFactory::CreateTexture2D: pixel data is null.");
     }
 
-    Texture2D texture(m_allocator, m_memoryTracker, m_device, width, height, debugName, allowStorageImageAccess,
-        addressMode, chain.levelCount, maxAnisotropy);
+    Texture2D texture(m_allocator, m_memoryTracker, m_device, desc, chain.levelCount);
 
     // One copy region per mip level.
     std::vector<VkBufferImageCopy> regions;
@@ -471,8 +469,13 @@ TextureArray2D GpuResourceFactory::CreateTextureArray(int width, int height, int
 MaterialTexture GpuResourceFactory::CreateMaterialTexture2D(
     const void* pixelsRgba8, int width, int height, const char* debugName) const
 {
-    Texture2D texture = CreateTexture2D(pixelsRgba8, width, height, debugName, false, TextureAddressMode::Repeat,
-        /*generateMips=*/true, m_vulkanDevice->MaterialAnisotropy());
+    Texture2D texture = CreateTexture2D({ .pixelsRgba8 = pixelsRgba8,
+        .width = width,
+        .height = height,
+        .debugName = debugName,
+        .addressMode = TextureAddressMode::Repeat,
+        .generateMips = true,
+        .maxAnisotropy = m_vulkanDevice->MaterialAnisotropy() });
 
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;

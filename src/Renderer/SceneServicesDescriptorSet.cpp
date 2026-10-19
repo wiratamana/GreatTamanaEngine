@@ -229,7 +229,8 @@ SceneServicesDescriptorSet::SceneServicesDescriptorSet(Renderer& renderer)
     for (std::uint32_t i = 0; i < kSceneServiceSlotCount; ++i) {
         if (SceneServiceSlotResourceKind(i) == SceneServiceResourceKind::Image2D) {
             const std::string debugName = "SceneServiceSlot" + std::to_string(i) + "Dummy";
-            m_dummyImage2DTextures.emplace(i, renderer.CreateTexture2D(whitePixel, 1, 1, debugName.c_str()));
+            m_dummyImage2DTextures.emplace(i,
+                renderer.CreateTexture2D({ .pixelsRgba8 = whitePixel, .width = 1, .height = 1, .debugName = debugName.c_str() }));
         }
     }
 

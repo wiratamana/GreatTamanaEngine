@@ -2,6 +2,7 @@
 
 #include "../Core/Extent.h"
 #include "../Core/PixelFormat.h"
+#include "../Core/TextureAddressMode.h"
 #include "../Core/TextureDimension.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "VulkanFormatInfo.h"
@@ -17,11 +18,6 @@ enum class TextureFilter : std::uint8_t {
     None, // No sampler is created.
     Linear,
     Nearest,
-};
-
-enum class TextureAddressMode : std::uint8_t {
-    ClampToEdge,
-    Repeat,
 };
 
 // Everything needed to create any GPU image. Aspect (color/depth/stencil) comes from `format`.

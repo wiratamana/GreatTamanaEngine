@@ -160,8 +160,8 @@ std::optional<AssetPreviewTexture::Preview> AssetPreviewTexture::Resolve(
     }
 
     try {
-        m_texture = std::make_unique<Texture2D>(
-            renderer.CreateTexture2D(decoded->data, decoded->width, decoded->height, "AssetPreview"));
+        m_texture = std::make_unique<Texture2D>(renderer.CreateTexture2D(
+            { .pixelsRgba8 = decoded->data, .width = decoded->width, .height = decoded->height, .debugName = "AssetPreview" }));
     } catch (const std::exception&) {
         if (stbOwnedPixels != nullptr) {
             stbi_image_free(stbOwnedPixels);

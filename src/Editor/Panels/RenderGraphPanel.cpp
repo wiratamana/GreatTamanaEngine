@@ -703,7 +703,10 @@ void RenderGraphPanel::RequestTexturePreview(
 
     try {
         m_texturePreview.Request(renderer, resourceName,
-            renderer.CreateTexture2D(rgba8.data(), raw.width, raw.height, "RenderGraphPreview"));
+            renderer.CreateTexture2D({ .pixelsRgba8 = rgba8.data(),
+                .width = raw.width,
+                .height = raw.height,
+                .debugName = "RenderGraphPreview" }));
     } catch (const std::exception&) {
         m_texturePreview.Release(); // GPU resource creation failed: rare, not fatal.
     }

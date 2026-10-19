@@ -72,8 +72,11 @@ void VolumeTexturePreviewRenderer::EnsureInitialized(Renderer& renderer)
 
     // Zero-filled is enough: the first dispatch overwrites every pixel.
     const std::vector<std::uint8_t> zeroFilledPixels(static_cast<std::size_t>(kOutputWidth) * kOutputHeight * 4, 0);
-    m_outputTexture.emplace(renderer.CreateTexture2D(zeroFilledPixels.data(), kOutputWidth, kOutputHeight,
-        "VolumeTexturePreviewOutput", /*allowStorageImageAccess=*/true));
+    m_outputTexture.emplace(renderer.CreateTexture2D({ .pixelsRgba8 = zeroFilledPixels.data(),
+        .width = kOutputWidth,
+        .height = kOutputHeight,
+        .debugName = "VolumeTexturePreviewOutput",
+        .allowStorageImageAccess = true }));
 
     m_initialized = true;
 }

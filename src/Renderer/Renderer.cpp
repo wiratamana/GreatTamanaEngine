@@ -633,10 +633,9 @@ Mesh Renderer::CreateMeshFromSharedVertexBuffer(const rg::GpuBuffer& sharedVerte
         indexData, indexDataSize, indexCount, debugName);
 }
 
-Texture2D Renderer::CreateTexture2D(
-    const void* pixelsRgba8, int width, int height, const char* debugName, bool allowStorageImageAccess) const
+Texture2D Renderer::CreateTexture2D(const Texture2DUploadDesc& desc) const
 {
-    return m_resources.CreateTexture2D(pixelsRgba8, width, height, debugName, allowStorageImageAccess);
+    return m_resources.CreateTexture2D(desc);
 }
 
 MaterialTexture Renderer::CreateMaterialTexture2D(

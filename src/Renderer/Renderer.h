@@ -208,8 +208,7 @@ public:
         const char* debugName = nullptr) const;
 
     // Texture creation factories.
-    Texture2D CreateTexture2D(const void* pixelsRgba8, int width, int height, const char* debugName = nullptr,
-        bool allowStorageImageAccess = false) const;
+    Texture2D CreateTexture2D(const Texture2DUploadDesc& desc) const;
 
     MaterialTexture CreateMaterialTexture2D(
         const void* pixelsRgba8, int width, int height, const char* debugName = nullptr) const;

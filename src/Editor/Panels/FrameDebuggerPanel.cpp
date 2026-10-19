@@ -93,8 +93,8 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
     // The texture upload can throw on GPU resource exhaustion; an exception must not escape an ImGui click handler.
     auto uploadOrFail = [this, &textureName](const void* pixelsRgba8, int width, int height, const char* debugName) -> bool {
         try {
-            m_shaderPropertyPreviewTexture = std::make_unique<Texture2D>(
-                m_frameRenderer->CreateTexture2D(pixelsRgba8, width, height, debugName));
+            m_shaderPropertyPreviewTexture = std::make_unique<Texture2D>(m_frameRenderer->CreateTexture2D(
+                { .pixelsRgba8 = pixelsRgba8, .width = width, .height = height, .debugName = debugName }));
             return true;
         } catch (const std::exception&) {
             m_shaderPropertyPreviewTexture.reset();

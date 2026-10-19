@@ -62,8 +62,11 @@ const Texture2D& FrameDebuggerPreviewRenderer::RenderPreview(Renderer& renderer,
     const int height = static_cast<int>(extent.height);
     if (!m_outputTexture.has_value() || m_outputTexture->Width() != width || m_outputTexture->Height() != height) {
         const std::vector<std::uint8_t> zeroPixels(static_cast<std::size_t>(width) * height * 4, 0);
-        m_outputTexture.emplace(renderer.CreateTexture2D(
-            zeroPixels.data(), width, height, "FrameDebuggerPreviewScratch", /*allowStorageImageAccess=*/true));
+        m_outputTexture.emplace(renderer.CreateTexture2D({ .pixelsRgba8 = zeroPixels.data(),
+            .width = width,
+            .height = height,
+            .debugName = "FrameDebuggerPreviewScratch",
+            .allowStorageImageAccess = true }));
     }
 
     rg::OneShot oneShot(renderer);
