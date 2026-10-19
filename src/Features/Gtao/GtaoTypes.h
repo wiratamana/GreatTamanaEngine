@@ -10,7 +10,7 @@
 
 namespace gte {
 
-// Feature module name, render-feature scope owner and log category.
+// Name the feature registers under.
 inline constexpr const char* kGtaoFeatureName = "Gtao";
 
 // Largest sample radius in depth pixels; bounds the cost of close surfaces.

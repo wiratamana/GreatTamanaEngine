@@ -90,10 +90,12 @@ that names the key; nothing is applied. `reset_defaults` takes no arguments.
 - The multiply also darkens direct light. There is no albedo or multi-bounce term, so bright surfaces look too dark.
 - Normals come from the depth buffer. Edges and thin features can show wrong normals.
 - There is no depth mip chain. Large radii on close surfaces are capped at 192 px and lose detail.
-- Transparent surfaces write no depth, so they get no AO and do not occlude.
+- Transparent surfaces write no depth. The composite darkens them with the AO of the opaque surface behind them. They do not occlude anything.
 - Perspective cameras only. An orthographic or skewed camera gives status `NoValidCamera`.
 - The target is 8 bit. Strong AO on dark areas can band.
 - A size or divisor change drops the history; it is used again after a few stable frames.
-- A target resize that is refused (for example while a view runs in the pipelined regime) gives status `TargetFailed`.
-  No AO is drawn for that frame.
+- A target resize that is refused (for example while a view runs in the pipelined regime) is logged as an error. The old-size
+  texture stays in use, the status stays `Ok`, and the AO is stretched at the lower and right edges (shaders clamp to the texture size).
+- `TargetFailed` happens only when the target acquire returns an invalid texture. For example: a second request for the same
+  target in one frame, a changed format, or a device without RGBA16F storage-image support.
 - Memory per view: 3 textures x 8 bytes per AO texel. At 1080p that is about 50 MB with divisor 1 and 12 MB with divisor 2.
