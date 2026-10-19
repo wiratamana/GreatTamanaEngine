@@ -14,9 +14,10 @@ namespace gte {
 inline constexpr const char* kSceneLightingFeatureName = "SceneLighting";
 
 // Tunable lighting values; flat floats so the debug endpoint can reflect them.
+// Ambient is added to the sun term, not scaled by it.
 struct SceneLightingSettings {
-    float skyAmbientR = 0.42f, skyAmbientG = 0.46f, skyAmbientB = 0.55f;
-    float groundAmbientR = 0.22f, groundAmbientG = 0.20f, groundAmbientB = 0.18f;
+    float skyAmbientR = 1.26f, skyAmbientG = 1.31f, skyAmbientB = 1.40f;
+    float groundAmbientR = 0.66f, groundAmbientG = 0.57f, groundAmbientB = 0.46f;
     float ambientIntensity = 1.0f;
     float exposure = 1.0f;
 };

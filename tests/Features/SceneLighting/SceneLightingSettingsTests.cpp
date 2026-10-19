@@ -73,6 +73,14 @@ TEST(SceneLightingSettingsTest, DefaultSettingsKeepTheSunBytes)
     EXPECT_FLOAT_EQ(a.sunIlluminanceAndPad[2], 3.0f);
 }
 
+TEST(SceneLightingSettingsTest, DefaultsSurviveSanitizing)
+{
+    const SceneLightingSettings d;
+    const SceneLightingSettings out = SanitizeSceneLightingSettings(d);
+    EXPECT_FLOAT_EQ(out.skyAmbientB, d.skyAmbientB);
+    EXPECT_FLOAT_EQ(out.groundAmbientR, d.groundAmbientR);
+}
+
 TEST(SceneLightingDebugEndpointTest, SetExposureIsReportedInState)
 {
     SceneLightingSettings settings;
