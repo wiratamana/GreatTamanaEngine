@@ -3,6 +3,7 @@
 #include "../Core/EditorPanelRegistry.h"
 #include "PlaybackControls.h"
 #include "SceneIO.h"
+#include "SponzaSceneOpener.h"
 #include "../Core/EditorCapabilities.h" // IHotReloadDebugCapability - dereferenced below, needs the full type.
 #include "ActiveProjectAssemblyState.h"
 
@@ -105,6 +106,10 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
                 const bool loaded = LoadScene(game, renderer, sceneServicesSetLayout);
                 reportStatus(loaded, "Loaded scene from " + DefaultScenePath().string(),
                     "Failed to load scene (missing or malformed file).");
+            }
+            if (ImGui::MenuItem("Open Sponza Scene")) {
+                const OpenSponzaSceneResult opened = OpenSponzaScene(game, renderer, sceneServicesSetLayout);
+                reportStatus(opened.success, opened.message, opened.message);
             }
             ImGui::Separator();
             // Sets a flag instead of calling exit() so shutdown goes through the normal RAII teardown.

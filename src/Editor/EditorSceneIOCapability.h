@@ -14,6 +14,8 @@ public:
     bool LoadScene(Game& game, Renderer& renderer, const std::filesystem::path& scenePath,
         DescriptorSetLayoutHandle sceneServicesSetLayout, std::string& outErrorMessage) override;
     std::filesystem::path DefaultScenePath() const override;
+    OpenSceneOutcome OpenSponzaScene(
+        Game& game, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout) override;
 };
 
 } // namespace gte

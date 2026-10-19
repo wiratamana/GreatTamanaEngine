@@ -3,6 +3,7 @@
 #include "Ktx2Encoder.h"
 #include "MeshFile.h"
 #include "MotionFile.h"
+#include "GltfLoader.h"
 #include "PmxLoader.h"
 #include "RigFile.h"
 #include "StlLoader.h"
@@ -16,22 +17,14 @@ namespace gte {
 
 namespace {
 
-// Same small helpers AssetDatabase.cpp already keeps locally (see its own
-// comment) - duplicated here rather than shared, for the exact same
-// "src/Assets/ never depends on src/Editor/" reasoning as
-// IsImportableAsKtx2Texture()'s own doc comment.
+// Local copies of the helpers in AssetDatabase.cpp (src/Assets never depends on src/Editor).
 std::string PathToUtf8(const std::filesystem::path& path)
 {
     const std::u8string u8 = path.u8string();
     return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
 }
 
-// The exact inverse of PathToUtf8() above - same std::u8string round-trip
-// PmxLoader.cpp's own Utf8ToPath() uses, duplicated here for the same
-// "src/Assets/ never depends on src/Editor/" reasoning IsImportableAsKtx2Texture()'s
-// own doc comment gives. Needed to turn a MaterialTextureRef::sourcePath
-// (always UTF-8 - see PmxLoader.cpp's ResolveTexturePath()) back into a
-// real std::filesystem::path for ImportPmxMaterialTextures() below.
+// Inverse of PathToUtf8(); texture source paths are stored as UTF-8.
 std::filesystem::path Utf8ToPath(const std::string& utf8)
 {
     return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
@@ -45,27 +38,10 @@ std::string ToLowerAscii(const std::string& s)
     return result;
 }
 
-// Imports every resolvable texture a just-parsed .pmx model's materials
-// reference (see MaterialData::textures/MaterialTextureRef, MaterialData.h)
-// as its OWN standalone *.gta AssetType::Texture asset, sitting right next
-// to the model's own destination Mesh *.gta (in a
-// "<meshFileStem>_Textures" sibling folder) - this is what makes the
-// engine's runtime mesh/texture loading (Game::EnsureMeshAsset(),
-// src/Game/Game.cpp) resolve every material's texture purely by Guid
-// through an AssetDatabase, instead of ever reaching back out to wherever
-// the original source .pmx's own texture folder happened to live on THIS
-// machine (which may not even exist on whatever machine later loads the
-// resulting Mesh *.gta - the exact "referencing a texture from outside the
-// Project" problem this function exists to close).
-//
-// Mutates `materials` in place, filling in each MaterialTextureRef::guid
-// that was successfully imported - a slot whose sourcePath is empty, whose
-// source file no longer exists on disk, or that fails to decode as a
-// supported image is simply left at Guid::Invalid() (the same "missing
-// texture" degrade-gracefully convention MaterialData::textures' own doc
-// comment already documents), never treated as a hard failure of the
-// overall .pmx import. Never throws.
-void ImportPmxMaterialTextures(
+// Imports every resolvable texture a model's materials reference as its own Texture *.gta,
+// in a "<meshStem>_Textures" folder next to the Mesh *.gta, and stores each Guid back into
+// `materials`. A missing or undecodable source keeps Guid::Invalid(); it never fails the import.
+void ImportMaterialTextures(
     AssetDatabase& database, MaterialData& materials, const std::filesystem::path& meshGtaPath)
 {
     if (materials.textures.empty()) {
@@ -108,14 +84,9 @@ void ImportPmxMaterialTextures(
     }
 }
 
-// Shared tail of a successful mesh-format parse (PMX or STL): preserves an
-// already-imported destination *.gta's own jointPhysicsOverrides across a
-// re-import (see the existing inline comment this was extracted from -
-// task_manager/verlet-integration-11, PHASE1, 3.9), imports any material
-// textures `rig.materials` references (a no-op for an STL import, whose
-// `rig.materials.textures` is always empty), encodes+writes the Mesh
-// *.gta, and builds the resulting AssetImportResult. `mesh`/`rig` are
-// consumed (moved from) - the caller must not use them again afterwards.
+// Shared tail of a successful mesh parse: keeps the destination *.gta's saved joint
+// physics overrides across a re-import, imports the material textures, writes the
+// Mesh *.gta and builds the result. `mesh` and `rig` are consumed.
 AssetImportResult FinalizeMeshAssetImport(AssetDatabase& database, MeshData mesh, RigFileData rig,
     const std::filesystem::path& sourcePath, const std::filesystem::path& preferredDestinationPath,
     MeshSourceFormat sourceFormat, const std::string& sourceFormatLabel)
@@ -123,21 +94,7 @@ AssetImportResult FinalizeMeshAssetImport(AssetDatabase& database, MeshData mesh
     std::filesystem::path gtaPath = preferredDestinationPath;
     gtaPath.replace_extension(".gta");
 
-    // task_manager/verlet-integration-11, PHASE1 (3.9) - a re-import of an
-    // ALREADY-imported model must not silently discard a user's previously-
-    // saved joint physics tuning (Editor "Save Joint Physics to Asset",
-    // PHASE4) just because the freshly-reparsed source file itself
-    // obviously carries none of that engine-only, non-source-format data
-    // (see JointPhysicsOverride's own doc comment, Assets/PhysicsData.h -
-    // "never populated by PmxLoader.h"/StlLoader.h). Mirrors exactly how
-    // the ImportAsset() call below already preserves an EXISTING
-    // destination file's own Guid across a re-import (see
-    // AssetDatabase.cpp's own comment on that) - read BEFORE this
-    // function's own WriteGtaFile() call (via database.ImportAsset()
-    // below) overwrites the file, using the SAME gtaPath a moment later.
-    // Empty (never touched) for a brand-new import - nothing exists yet to
-    // preserve, which is the correct, intentional "no saved overrides yet"
-    // starting state for any freshly-imported model.
+    // Read the existing *.gta before ImportAsset() overwrites it.
     std::vector<JointPhysicsOverride> preservedJointPhysicsOverrides;
     if (const std::optional<GtaFileData> existingGta = ReadGtaFile(gtaPath);
         existingGta.has_value() && existingGta->header.Type() == AssetType::Mesh) {
@@ -146,17 +103,10 @@ AssetImportResult FinalizeMeshAssetImport(AssetDatabase& database, MeshData mesh
             preservedJointPhysicsOverrides = existingRig->jointPhysicsOverrides;
         }
     }
-    rig.jointPhysicsOverrides = std::move(preservedJointPhysicsOverrides); // task_manager/verlet-integration-11, PHASE1 (3.9).
+    rig.jointPhysicsOverrides = std::move(preservedJointPhysicsOverrides);
 
-    // Imports every material's referenced texture as its own *.gta
-    // AssetType::Texture asset (see ImportPmxMaterialTextures()'s own doc
-    // comment above) and fills in rig.materials.textures[*].guid
-    // accordingly - MUST happen before EncodeRigDataToBytes() below, so the
-    // RigFileData this mesh's *.gta metadata gets built from already
-    // carries the resolved Guids, never the original machine-local
-    // absolute source paths. A no-op (early return) for an STL import,
-    // whose rig.materials.textures is always empty.
-    ImportPmxMaterialTextures(database, rig.materials, gtaPath);
+    // Must run before the rig is encoded so the metadata carries Guids, not source paths.
+    ImportMaterialTextures(database, rig.materials, gtaPath);
 
     const std::vector<std::uint8_t> payload = EncodeMeshDataToBytes(mesh);
     const std::vector<std::uint8_t> metadata = EncodeRigDataToBytes(rig);
@@ -244,7 +194,7 @@ bool IsImportableAsKtx2Texture(const std::string& extensionLowercaseWithDot)
 
 bool IsImportableAsMeshAsset(const std::string& extensionLowercaseWithDot)
 {
-    return extensionLowercaseWithDot == ".pmx" || extensionLowercaseWithDot == ".stl";
+    return extensionLowercaseWithDot == ".pmx" || extensionLowercaseWithDot == ".stl" || extensionLowercaseWithDot == ".gltf";
 }
 
 bool IsImportableAsMotionAsset(const std::string& extensionLowercaseWithDot)
@@ -277,18 +227,30 @@ AssetImportResult ImportAssetFile(
         if (extension == ".stl") {
             StlLoadResult loaded = LoadStlModel(PathToUtf8(sourcePath));
             if (loaded.success) {
-                // An STL carries no skeleton/morphs/physics/materials at all
-                // - rig stays entirely default-constructed (all-empty),
-                // which RigFile.h's own doc comment already documents as a
-                // normal, well-formed, successful case (see
-                // PHASE0_MASTER_STRATEGY.md's own "What's genuinely missing"
-                // discussion).
-                RigFileData rig;
+                RigFileData rig; // An STL has no skeleton, morphs, physics or materials.
                 return FinalizeMeshAssetImport(database, std::move(loaded.mesh), std::move(rig), sourcePath,
                     preferredDestinationPath, MeshSourceFormat::Stl, "STL");
             }
             return ImportAsPlainCopy(
                 sourcePath, preferredDestinationPath, "Could not parse as a mesh, imported as-is instead. ");
+        }
+
+        if (extension == ".gltf") {
+            GltfLoadResult loaded = LoadGltfModel(PathToUtf8(sourcePath));
+            if (loaded.success) {
+                RigFileData rig; // No skeleton, morphs or physics.
+                rig.materials = std::move(loaded.materials);
+                AssetImportResult imported = FinalizeMeshAssetImport(database, std::move(loaded.mesh), std::move(rig),
+                    sourcePath, preferredDestinationPath, MeshSourceFormat::Gltf, "glTF");
+                if (imported.success) {
+                    imported.message += " " + loaded.message; // Adds the UV range and skipped-primitive count.
+                }
+                return imported;
+            }
+            // A lone .gltf copied as-is is useless (no .bin, no images): fail loudly.
+            AssetImportResult failed;
+            failed.message = "Could not import \"" + PathToUtf8(sourcePath.filename()) + "\": " + loaded.message;
+            return failed;
         }
     }
 

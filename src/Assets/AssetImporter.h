@@ -7,100 +7,49 @@
 
 namespace gte {
 
-// Which mesh-format loader actually produced a given
-// AssetImportResult::convertedToMeshAsset == true import - see
-// AssetImportResult::meshSourceFormat below. Explicit, never renumbered
-// once shipped, matching this codebase's existing enum-stability
-// convention (see AssetTypes.h's AssetType) - though, unlike AssetType,
-// this is NEVER itself serialized into a *.gta file; it only travels
-// through this one in-memory result struct for the duration of a single
-// ImportAssetFile() call, so a future re-ordering would be harmless in
-// practice. Kept explicit anyway for consistency with this codebase's
-// house style.
+// Which loader produced a mesh import (see AssetImportResult::meshSourceFormat).
+// Values are never renumbered; append only.
 enum class MeshSourceFormat {
-    Unknown = 0, // convertedToMeshAsset is false, or this AssetImportResult predates this field.
+    Unknown = 0, // Not a mesh import.
     Pmx = 1,
     Stl = 2,
+    Gltf = 3,
 };
 
-// The outcome of one ImportAssetFile() call below - always fully populated
-// (never partially, and `message` is always set) whether the import
-// succeeded or failed, so a caller (e.g. the Editor's "Project" panel) can
-// show a single status line either way without its own branching logic.
+// Outcome of one ImportAssetFile() call. Always fully populated; `message` is always set.
+// The convertedTo* flags are mutually exclusive; none set means a plain file copy.
 struct AssetImportResult {
     bool success = false;
 
-    // True if `sourcePath` was gated into the PNG/JPG -> KTX2 -> *.gta
-    // pipeline (see ImportAssetFile()'s own doc comment below) - false if
-    // it was imported as a plain, byte-for-byte, unmodified file copy
-    // instead (every non-image extension, or an image extension that
-    // failed to actually decode).
-    bool convertedToKtx2 = false;
+    bool convertedToKtx2 = false;       // Image -> KTX2 Texture *.gta.
+    bool convertedToMeshAsset = false;  // Model -> Mesh *.gta.
+    bool convertedToMotionAsset = false; // Motion -> Animation *.gta.
 
-    // True if `sourcePath` was gated into the .pmx -> MeshData -> *.gta
-    // (AssetType::Mesh) pipeline instead (see IsImportableAsMeshAsset()/
-    // ImportAssetFile()'s own doc comment below). Mutually exclusive with
-    // convertedToKtx2/convertedToMotionAsset - a given source file only
-    // ever matches ONE of these gating predicates.
-    bool convertedToMeshAsset = false;
-
-    // Only meaningful when convertedToMeshAsset is true - which mesh-format
-    // loader actually produced this import (see MeshSourceFormat above).
-    // MeshSourceFormat::Unknown otherwise.
+    // Only meaningful when convertedToMeshAsset is true.
     MeshSourceFormat meshSourceFormat = MeshSourceFormat::Unknown;
 
-    // True if `sourcePath` was gated into the .vmd -> MotionData -> *.gta
-    // (AssetType::Animation) pipeline instead (see IsImportableAsMotionAsset()/
-    // ImportAssetFile()'s own doc comment below). Mutually exclusive with
-    // convertedToKtx2/convertedToMeshAsset.
-    bool convertedToMotionAsset = false;
-
-    // Where the imported item actually ended up on disk - a *.gta path
-    // when convertedToKtx2, convertedToMeshAsset, or convertedToMotionAsset
-    // is true, otherwise wherever `preferredDestinationPath`
-    // (ImportAssetFile()'s own parameter) said to put it.
+    // The *.gta path when any convertedTo* flag is set, otherwise the plain-copy destination.
     std::filesystem::path finalPath;
 
-    // Only meaningful when convertedToKtx2, convertedToMeshAsset, or
-    // convertedToMotionAsset is true - the fresh (or reused, on re-import -
-    // see AssetDatabase::ImportAsset()) Guid this asset is now tracked
-    // under. Guid::Invalid() otherwise.
+    // The asset's Guid (reused on re-import) when any convertedTo* flag is set, otherwise invalid.
     Guid guid;
 
-    // Only meaningful when convertedToMeshAsset is true - the mesh's raw
-    // vertex/triangle counts, for a caller that wants to report them (e.g.
-    // the Editor's "Project" panel import status line) without re-reading
-    // and re-decoding the *.gta payload it just wrote.
+    // Mesh imports only: geometry counts.
     std::size_t meshVertexCount = 0;
     std::size_t meshTriangleCount = 0;
 
-    // Only meaningful when convertedToMeshAsset is true - counts of the
-    // rig data (see RigFile.h) bundled into the same *.gta's metadata
-    // section alongside the mesh payload: how many bones/morphs/rigid
-    // bodies/joints the source .pmx actually defined (all zero for a
-    // boneless/riggless static mesh - that's a normal, successful import,
-    // not a failure). skinnedVertexCount is always == meshVertexCount for
-    // a PMX import (see PmxLoader.h's PmxLoadResult::mesh doc comment) -
-    // reported separately anyway so a caller never needs to assume that.
+    // Mesh imports only: rig counts (all zero for a static mesh).
     std::size_t skinnedVertexCount = 0;
     std::size_t boneCount = 0;
     std::size_t morphCount = 0;
     std::size_t rigidBodyCount = 0;
     std::size_t jointCount = 0;
 
-    // Only meaningful when convertedToMeshAsset is true - how many
-    // materials/textures the source .pmx actually defined (see
-    // MaterialData.h) - zero materials for a materialless mesh is a normal,
-    // successful import, not a failure.
+    // Mesh imports only: material and texture counts.
     std::size_t materialCount = 0;
     std::size_t textureCount = 0;
 
-    // Only meaningful when convertedToMotionAsset is true - counts of the
-    // motion data (see MotionData.h) the source .vmd actually defined: how
-    // many bone/morph/camera/light/shadow/IK keyframes it carried (all zero
-    // for a given track is normal - e.g. a typical character-motion .vmd
-    // has zero camera/light/shadow keyframes, and a camera-work .vmd has
-    // zero bone/morph keyframes - see MotionData's own doc comment).
+    // Motion imports only: keyframe counts per track (zero for an unused track is normal).
     std::size_t motionBoneKeyframeCount = 0;
     std::size_t motionMorphKeyframeCount = 0;
     std::size_t motionCameraKeyframeCount = 0;
@@ -108,94 +57,29 @@ struct AssetImportResult {
     std::size_t motionShadowKeyframeCount = 0;
     std::size_t motionIkKeyframeCount = 0;
 
-    std::string message; // Human-readable status - always set, success or failure.
+    std::string message; // Human-readable status, success or failure.
 };
 
-// True if `extensionLowercaseWithDot` names a source image format this
-// engine's import pipeline knows how to decode+re-encode as KTX2 (see
-// Ktx2Encoder.h) - a plain, pure predicate, Tier-1-testable, and the single
-// place the "which formats get gated into KTX2" policy lives, so nothing
-// else ever needs to hand-roll its own extension allow-list. Matches
-// stb_image's own documented supported formats, same list as
-// src/Editor/AssetInspectorData.h's IsSupportedImageExtension() -
-// duplicated rather than shared, since src/Assets/ (an always-compiled,
-// engine-level module) must never depend on src/Editor/ (see AGENTS.md,
-// "Coding Guidelines": only Application is allowed to reach across a
-// similar layering boundary for SDL - the same "lower layer never depends
-// on a higher one" rule applies here).
+// True if the extension (lowercase, with dot) is an image format that is decoded and re-encoded as KTX2.
+// Same list as src/Editor/AssetInspectorData.h; duplicated so src/Assets never depends on src/Editor.
 bool IsImportableAsKtx2Texture(const std::string& extensionLowercaseWithDot);
 
-// True if `extensionLowercaseWithDot` names a source 3D model format this
-// engine's import pipeline knows how to parse into a MeshData (see
-// MeshData.h) - MikuMikuDance's ".pmx" (via PmxLoader.h/saba's PMXFile
-// reader - see FetchSaba.cmake) AND STereoLithography's ".stl" (both the
-// binary and ASCII variants, via StlLoader.h's LoadStlModel()). A future
-// OBJ/glTF importer would extend this same predicate (and
-// ImportAssetFile()'s matching branch below) rather than inventing a
-// separate gating function - this is the mesh-import equivalent of
-// IsImportableAsKtx2Texture() above, same Tier-1-testable pure-predicate
-// shape.
+// True if the extension (lowercase, with dot) is a model format parsed into a MeshData: ".pmx", ".stl"
+// or ".gltf". Textures a model references become sibling Texture *.gta files.
 bool IsImportableAsMeshAsset(const std::string& extensionLowercaseWithDot);
 
-// True if `extensionLowercaseWithDot` names a source motion/animation
-// format this engine's import pipeline knows how to parse into a
-// MotionData (see MotionData.h) - today just MikuMikuDance's ".vmd" (via
-// VmdLoader.h/saba's VMDFile reader - see FetchSaba.cmake). Same
-// Tier-1-testable pure-predicate shape as IsImportableAsMeshAsset()/
-// IsImportableAsKtx2Texture() above - the motion-import equivalent of both.
+// True if the extension (lowercase, with dot) is a motion format parsed into a MotionData (".vmd").
 bool IsImportableAsMotionAsset(const std::string& extensionLowercaseWithDot);
 
-// Imports `sourcePath` (a single FILE - never a directory; the caller is
-// responsible for handling directory imports itself, e.g. a recursive
-// filesystem copy) into the Project.
-//
-// The gating rules this function exists for, checked in order:
-//   1. If `sourcePath`'s extension is one IsImportableAsMeshAsset()
-//      recognizes, it's parsed into a MeshData - via PmxLoader.h's
-//      LoadPmxModel() for ".pmx", or StlLoader.h's LoadStlModel() for
-//      ".stl" (both binary and ASCII) - serialized via MeshFile.h's
-//      EncodeMeshDataToBytes(), and wrapped as a *.gta (AssetType::Mesh) at
-//      `preferredDestinationPath` with its extension replaced by ".gta",
-//      via `database.ImportAsset()`. The same PmxLoader.h call also
-//      extracts per-vertex skinning weights plus the model's bones/morphs/
-//      rigid-body-and-joint physics setup (see SkeletonData.h/MorphData.h/
-//      PhysicsData.h) - RigFile.h's EncodeRigDataToBytes() serializes ALL
-//      of that into the *.gta's METADATA section (see GtaFile.h), alongside
-//      the unchanged MeshFile.h payload in the same file. A boneless/
-//      riggless .pmx still imports successfully; its rig section simply
-//      encodes as all-empty - an .stl import (which has no skeleton/morphs/
-//      physics/materials concept at all) always produces exactly this same
-//      well-formed, all-empty rig section. AssetImportResult::meshSourceFormat
-//      records which of the two loaders actually produced a given import.
-//   2. Otherwise, if it's one IsImportableAsMotionAsset() recognizes, it's
-//      parsed into a MotionData (VmdLoader.h), serialized via MotionFile.h's
-//      EncodeMotionDataToBytes(), and wrapped as a *.gta
-//      (AssetType::Animation) the same way - as the PAYLOAD this time (a
-//      motion asset carries no separate mesh geometry to keep metadata/
-//      payload split for), with an empty metadata section. A .vmd with no
-//      keyframes of some particular kind (e.g. a character motion with zero
-//      camera keyframes) still imports successfully; that track simply
-//      encodes as empty.
-//   3. Otherwise, if it's one IsImportableAsKtx2Texture() recognizes, its
-//      pixels are decoded and re-encoded as a KTX2 container (Ktx2Encoder.h's
-//      EncodeImageFileToKtx2()), then wrapped as a *.gta (AssetType::Texture)
-//      the same way.
-// Any one of these branches is what makes the engine actually "know about"
-// the resulting asset immediately: it's already queryable through `database`
-// (FindByGuid()/FindByPath()) by the time this function returns, with no
-// separate RefreshFromDirectory() call needed. Every OTHER extension is
-// imported completely unchanged - a plain byte-for-byte file copy to
-// `preferredDestinationPath` exactly as given, no *.gta wrapping at all (see
-// README.md: "text file can stay still for now" - this is what keeps that
-// true for every non-mesh, non-motion, non-image asset).
-//
-// If `sourcePath` merely LOOKS like a supported mesh/motion/image by
-// extension but fails to actually parse/decode (corrupt/truncated/not
-// really that format despite its extension), this falls back to a plain
-// copy too (at `preferredDestinationPath`'s ORIGINAL extension, unchanged),
-// rather than failing the whole import outright - exactly like every other
-// degrade-gracefully failure mode already established in this Editor (see
-// AGENTS.md, "Editor Module Structure"). Never throws.
+// Imports one source FILE (never a directory) into the Project. Checked in order:
+//   1. Mesh formats: parsed into a MeshData, written as a Mesh *.gta at `preferredDestinationPath`
+//      (extension replaced by ".gta"); rig data and materials go into the *.gta metadata section.
+//      A mesh that fails to parse falls back to a plain copy, except ".gltf" which fails (a lone
+//      .gltf copy is useless).
+//   2. Motion formats: written as an Animation *.gta.
+//   3. Image formats: re-encoded as KTX2 and written as a Texture *.gta.
+// Every other extension is copied unchanged. The result is queryable through `database` on return.
+// Never throws.
 AssetImportResult ImportAssetFile(AssetDatabase& database, const std::filesystem::path& sourcePath,
     const std::filesystem::path& preferredDestinationPath);
 

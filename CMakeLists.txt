@@ -265,13 +265,9 @@ if(GTE_FETCH_SPONZA AND NOT GTE_CORE_STANDALONE_PROBE_ONLY)
     fetch_sponza()
 endif()
 
-# Downloads (if not already present) and stages cgltf.h for Windows:
-#   third_party/cgltf/cgltf.h - single-header, zero-dependency glTF 2.0 loader
-#                               (https://github.com/jkuhlmann/cgltf, MIT).
-# Also defines the `cgltf` INTERFACE target. Like stb_image/VMA, the real
-# implementation only exists once ONE translation unit does
-# `#define CGLTF_IMPLEMENTATION` before `#include <cgltf.h>` - nothing in the
-# engine does that yet. See cmake/FetchCgltf.cmake.
+# Fetches cgltf.h (single-header glTF 2.0 loader, MIT) into third_party/cgltf and
+# defines the `cgltf` INTERFACE target. Only src/Assets/CgltfImpl.cpp defines
+# CGLTF_IMPLEMENTATION. See cmake/FetchCgltf.cmake.
 include(FetchCgltf)
 fetch_cgltf()
 
@@ -685,6 +681,9 @@ add_library(gte_core STATIC
     src/Assets/MotionFile.cpp
     src/Assets/RigFile.h
     src/Assets/RigFile.cpp
+    src/Assets/CgltfImpl.cpp
+    src/Assets/GltfLoader.h
+    src/Assets/GltfLoader.cpp
     # editor-core-separation-1 campaign, PHASE14
     # (PHASE14_WINDOW_SDL_RELOCATION_TO_EDITOR.md) - live re-investigation
     # found SdlMemoryTracker.h/.cpp (#include <SDL3/SDL_stdinc.h>),
@@ -1151,6 +1150,8 @@ add_library(gte_editor STATIC
     src/Editor/ProjectRootPath.cpp
     src/Editor/SceneIO.h
     src/Editor/SceneIO.cpp
+    src/Editor/SponzaSceneOpener.h
+    src/Editor/SponzaSceneOpener.cpp
     # editor-core-separation-1 campaign, PHASE6
     # (PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md) - the real
     # ISceneIOCapability implementation wrapping SceneIO.h above.
@@ -1402,6 +1403,9 @@ endif()
 # own PUBLIC include directories/compile definitions/link libraries too,
 # without repeating them.
 target_link_libraries(gte_editor PUBLIC gte_core)
+
+# Absolute path of the Sponza sample, used by File > Open Sponza Scene (may be empty).
+target_compile_definitions(gte_editor PRIVATE "GTE_SPONZA_DIR=\"${GTE_SPONZA_DIR}\"")
 target_link_libraries(gte_editor PRIVATE imgui imguizmo)
 # editor-core-separation-1 campaign, PHASE14
 # (PHASE14_WINDOW_SDL_RELOCATION_TO_EDITOR.md) - SDL3 linkage moves here now
@@ -1528,6 +1532,9 @@ target_link_libraries(gte_core PUBLIC Threads::Threads)
 # changes usage-requirement propagation, not whether a STATIC library's own
 # archive gets linked transitively).
 target_link_libraries(gte_core PRIVATE saba_pmx)
+
+# cgltf is an implementation detail of src/Assets/GltfLoader.cpp.
+target_link_libraries(gte_core PRIVATE cgltf)
 
 # editor-core-separation-2 campaign, PHASE4 - the REAL, mechanical proof
 # that gte_core.a links standalone (design doc Section 1.3, Rule 3) - a

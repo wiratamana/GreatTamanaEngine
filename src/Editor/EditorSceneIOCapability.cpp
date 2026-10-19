@@ -1,6 +1,7 @@
 #include "EditorSceneIOCapability.h"
 
 #include "SceneIO.h"
+#include "SponzaSceneOpener.h"
 
 namespace gte {
 
@@ -28,6 +29,13 @@ bool EditorSceneIOCapability::LoadScene(Game& game, Renderer& renderer, const st
 std::filesystem::path EditorSceneIOCapability::DefaultScenePath() const
 {
     return gte::DefaultScenePath();
+}
+
+ISceneIOCapability::OpenSceneOutcome EditorSceneIOCapability::OpenSponzaScene(
+    Game& game, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout)
+{
+    OpenSponzaSceneResult result = gte::OpenSponzaScene(game, renderer, sceneServicesSetLayout);
+    return { result.success, result.importedThisCall, std::move(result.message), std::move(result.gtaPath) };
 }
 
 } // namespace gte

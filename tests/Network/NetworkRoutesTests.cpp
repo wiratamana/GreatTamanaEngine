@@ -1605,3 +1605,26 @@ TEST(BuildRenderGraphControlCommandResponseJsonTests, IncludesWindowOpenWhenSupp
 }
 
 } // namespace
+
+namespace {
+
+using gte::Network::BuildOpenSponzaSceneResponseJson;
+
+TEST(BuildOpenSponzaSceneResponseJsonTests, ReportsAllFields)
+{
+    const nlohmann::json parsed = nlohmann::json::parse(BuildOpenSponzaSceneResponseJson(true, "C:/x/Sponza.gta", "ok"));
+    EXPECT_EQ(parsed["success"], true);
+    EXPECT_EQ(parsed["imported_this_call"], true);
+    EXPECT_EQ(parsed["gta_path"], "C:/x/Sponza.gta");
+    EXPECT_EQ(parsed["message"], "ok");
+}
+
+TEST(BuildOpenSponzaSceneResponseJsonTests, EscapesBackslashAndQuote)
+{
+    const std::string message = "path \"C:\\x\" failed";
+    const nlohmann::json parsed = nlohmann::json::parse(BuildOpenSponzaSceneResponseJson(false, "C:\\x\\Sponza.gta", message));
+    EXPECT_EQ(parsed["gta_path"], "C:\\x\\Sponza.gta");
+    EXPECT_EQ(parsed["message"], message);
+}
+
+} // namespace

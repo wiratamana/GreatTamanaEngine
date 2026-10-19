@@ -241,11 +241,17 @@ TEST(IsImportableAsMeshAssetTest, RecognizesStl)
     EXPECT_TRUE(IsImportableAsMeshAsset(".stl"));
 }
 
+TEST(IsImportableAsMeshAssetTest, RecognizesGltf)
+{
+    EXPECT_TRUE(IsImportableAsMeshAsset(".gltf"));
+}
+
 TEST(IsImportableAsMeshAssetTest, RejectsNonMeshExtensions)
 {
     EXPECT_FALSE(IsImportableAsMeshAsset(".txt"));
     EXPECT_FALSE(IsImportableAsMeshAsset(".png"));
     EXPECT_FALSE(IsImportableAsMeshAsset(".gta"));
+    EXPECT_FALSE(IsImportableAsMeshAsset(".glb")); // Embedded images have no file to import.
     EXPECT_FALSE(IsImportableAsMeshAsset(""));
 }
 

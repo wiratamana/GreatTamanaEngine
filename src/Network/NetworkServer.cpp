@@ -1302,6 +1302,48 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(BuildScenePathResponseJson(outcome.success, outcome.errorMessage, outcome.resolvedPath), "application/json");
     });
 
+    // POST /open_sponza_scene: File > Open Sponza Scene for AI callers. No body.
+    // The first call imports Sponza, so it gets a much longer timeout than the 3 s default.
+    server.Post("/open_sponza_scene", [commandBridge](const httplib::Request&, httplib::Response& res) {
+        if (commandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("engine command bridge not available"), "application/json");
+            return;
+        }
+
+        EngineCommandRequest request;
+        request.kind = EngineCommandKind::OpenSponzaScene;
+
+        constexpr int kOpenSponzaTimeoutMilliseconds = 300000;
+        const EngineCommandBridge::SubmitResult submit =
+            commandBridge->SubmitAndWait(request, kOpenSponzaTimeoutMilliseconds);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another engine command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson(
+                                "engine command timed out - the import may still be running, check GET /get_logs"),
+                "application/json");
+            return;
+        }
+
+        const OpenSponzaSceneOutcome& outcome = submit.result->openSponzaScene;
+        if (!outcome.editorAvailable) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson(outcome.message), "application/json");
+            return;
+        }
+        // No caller input is involved, so a failure is an environment problem: 500.
+        res.status = outcome.success ? 200 : 500;
+        res.set_content(outcome.success
+                ? BuildOpenSponzaSceneResponseJson(outcome.importedThisCall, outcome.gtaPath, outcome.message)
+                : BuildGenericErrorResponseJson(outcome.message),
+            "application/json");
+    });
+
     // task_manager/logger-1 campaign, PHASE3
     // (PHASE3_NETWORK_ENDPOINTS_GET_LOGS_AND_CLEAR_LOGS.md) - GET /get_logs.
     // Needs NO bridge at all, exactly like GET /list_tabs above - Logger is

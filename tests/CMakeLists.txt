@@ -2249,6 +2249,7 @@ set(GTE_TEST_SOURCES
     Assets/PmxLoaderTests.cpp
     Assets/VmdLoaderTests.cpp
     Assets/StlLoaderTests.cpp
+    Assets/GltfLoaderTests.cpp
     Assets/MeshFileTests.cpp
     Assets/MotionFileTests.cpp
     Assets/RigFileTests.cpp
@@ -2650,6 +2651,9 @@ foreach(GTE_FEATURE_TEST_DIR ${GTE_FEATURE_TEST_DIRS})
         endif()
     endif()
 endforeach()
+
+# Sponza sample folder for the optional real-model glTF test (empty when not fetched).
+target_compile_definitions(GreatTamanaEngineTests PRIVATE GTE_TEST_SPONZA_DIR="${GTE_SPONZA_DIR}")
 
 # Reflection fixtures. BoxBlur.comp.spv is already declared by the root gte_add_shader() call, so
 # the test target only depends on that generated file; the paths are baked in as absolute.

@@ -284,41 +284,94 @@ TEST(RigFileTest, DecodeFailsWhenTruncatedRightAfterTheMagic)
     EXPECT_FALSE(DecodeRigDataFromBytes(encoded).has_value());
 }
 
-// task_manager/verlet-integration-11, PHASE1 - backward compatibility: a
-// blob with NO trailing joint-override section at all (as any *.gta written
-// by code that predates this phase would be) must still decode successfully,
-// with jointPhysicsOverrides left empty rather than the decode failing.
-TEST(RigFileTest, DecodeSucceedsOnABlobWithNoTrailingJointOverrideSection)
+// Bytes of the trailing material-extras section: count + 4 i32 + u8 + f32 per material.
+std::size_t MaterialExtrasByteSize(const RigFileData& rig)
+{
+    return 4 + rig.materials.materials.size() * (4 * 4 + 1 + 4);
+}
+
+// Bytes of the trailing joint-override section: count + (i32 + 3 f32) per override.
+std::size_t JointOverrideByteSize(const RigFileData& rig)
+{
+    return 4 + rig.jointPhysicsOverrides.size() * (4 + 3 * 4);
+}
+
+// A blob with no trailing sections at all (an older *.gta) must still decode.
+TEST(RigFileTest, DecodeSucceedsOnABlobWithNoTrailingSections)
 {
     RigFileData rig = BuildSampleRigData();
     rig.jointPhysicsOverrides.clear();
     std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
-    // Chop off exactly the trailing "count == 0" u32 this phase's own
-    // encoder just wrote, simulating a blob produced by code that predates
-    // this phase entirely (never wrote ANY trailing bytes).
-    ASSERT_GE(encoded.size(), 4u);
-    encoded.resize(encoded.size() - 4);
+    const std::size_t trailing = JointOverrideByteSize(rig) + MaterialExtrasByteSize(rig);
+    ASSERT_GE(encoded.size(), trailing);
+    encoded.resize(encoded.size() - trailing);
 
     const std::optional<RigFileData> decoded = DecodeRigDataFromBytes(encoded);
     ASSERT_TRUE(decoded.has_value());
     EXPECT_TRUE(decoded->jointPhysicsOverrides.empty());
-    // Also spot-check that everything ELSE still decoded correctly - proves
-    // the cursor-guard didn't accidentally swallow/misread any earlier
-    // section.
     EXPECT_EQ(decoded->materials.materials.size(), rig.materials.materials.size());
 }
 
-// task_manager/verlet-integration-11, PHASE1 - distinguishes "no trailing
-// section at all" (above, a normal/expected old-file case) from "a trailing
-// section IS present but is itself truncated/corrupt" (a genuine failure).
+// A blob with joint overrides but no material extras decodes with default extras.
+TEST(RigFileTest, DecodeSucceedsOnABlobWithoutMaterialExtras)
+{
+    RigFileData rig = BuildSampleRigData();
+    rig.jointPhysicsOverrides.push_back(JointPhysicsOverride{ 2, 0.1f, 0.2f, 0.3f });
+    std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
+    encoded.resize(encoded.size() - MaterialExtrasByteSize(rig));
+
+    const std::optional<RigFileData> decoded = DecodeRigDataFromBytes(encoded);
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_EQ(decoded->jointPhysicsOverrides.size(), 1u);
+    for (const Material& m : decoded->materials.materials) {
+        EXPECT_EQ(m.normalTextureIndex, -1);
+        EXPECT_EQ(m.alphaMode, AlphaMode::Opaque);
+    }
+}
+
+// A present-but-truncated trailing section is a real failure.
 TEST(RigFileTest, DecodeFailsWhenJointOverrideSectionIsPresentButTruncated)
 {
     RigFileData rig = BuildSampleRigData();
     rig.jointPhysicsOverrides.push_back(JointPhysicsOverride{ 0, 0.1f, 0.2f, 0.3f });
     std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
-    encoded.resize(encoded.size() - 2); // Mid-way through the last float.
+    encoded.resize(encoded.size() - MaterialExtrasByteSize(rig)); // Drop the extras so the cut lands in the overrides.
+    encoded.resize(encoded.size() - 2);                           // Mid-way through the last float.
 
     EXPECT_FALSE(DecodeRigDataFromBytes(encoded).has_value());
+}
+
+TEST(RigFileTest, DecodeFailsWhenMaterialExtrasAreTruncated)
+{
+    RigFileData rig = BuildSampleRigData();
+    ASSERT_FALSE(rig.materials.materials.empty());
+    std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
+    encoded.resize(encoded.size() - 2);
+
+    EXPECT_FALSE(DecodeRigDataFromBytes(encoded).has_value());
+}
+
+TEST(RigFileTest, MaterialExtrasSurviveEncodeThenDecode)
+{
+    RigFileData rig = BuildSampleRigData();
+    ASSERT_FALSE(rig.materials.materials.empty());
+    Material& m = rig.materials.materials[0];
+    m.normalTextureIndex = 3;
+    m.metallicRoughnessTextureIndex = 4;
+    m.occlusionTextureIndex = 5;
+    m.emissiveTextureIndex = 6;
+    m.alphaMode = AlphaMode::Mask;
+    m.alphaCutoff = 0.25f;
+
+    const std::optional<RigFileData> decoded = DecodeRigDataFromBytes(EncodeRigDataToBytes(rig));
+    ASSERT_TRUE(decoded.has_value());
+    const Material& d = decoded->materials.materials[0];
+    EXPECT_EQ(d.normalTextureIndex, 3);
+    EXPECT_EQ(d.metallicRoughnessTextureIndex, 4);
+    EXPECT_EQ(d.occlusionTextureIndex, 5);
+    EXPECT_EQ(d.emissiveTextureIndex, 6);
+    EXPECT_EQ(d.alphaMode, AlphaMode::Mask);
+    EXPECT_FLOAT_EQ(d.alphaCutoff, 0.25f);
 }
 
 } // namespace

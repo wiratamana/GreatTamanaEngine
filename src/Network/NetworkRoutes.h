@@ -823,7 +823,7 @@ struct ImportedAssetResponseView {
 // own documented split convention):
 //   {"success":true,"message":"...",
 //    "final_relative_path":"...","final_absolute_path":"...","guid":"...",
-//    "converted_to_mesh_asset":bool,"mesh_source_format":"stl"|"pmx"|"",
+//    "converted_to_mesh_asset":bool,"mesh_source_format":"stl"|"pmx"|"gltf"|"",
 //    "converted_to_ktx2":bool,"converted_to_motion_asset":bool,
 //    "mesh_vertex_count":uint64,"mesh_triangle_count":uint64}
 std::string BuildImportAssetResponseJson(const ImportedAssetResponseView& view);
@@ -899,6 +899,11 @@ ParsedScenePathRequest ParseScenePathRequest(const std::string& jsonBody);
 // Success shape: {"success":true,"resolved_path":"<resolvedPath>"}
 // Failure shape: identical to BuildGenericErrorResponseJson() below.
 std::string BuildScenePathResponseJson(bool success, const std::string& errorMessage, const std::string& resolvedPath);
+
+// Success: {"success":true,"imported_this_call":bool,"gta_path":"...","message":"..."}
+// Failures use BuildGenericErrorResponseJson().
+std::string BuildOpenSponzaSceneResponseJson(
+    bool importedThisCall, const std::string& gtaPath, const std::string& message);
 
 // --- task_manager/logger-1 campaign, PHASE3
 // (PHASE3_NETWORK_ENDPOINTS_GET_LOGS_AND_CLEAR_LOGS.md) - GET /get_logs and

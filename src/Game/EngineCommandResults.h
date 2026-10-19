@@ -255,6 +255,16 @@ struct LoadSceneOutcome {
     std::string resolvedPath; // the ABSOLUTE path actually read from, meaningful only when success == true.
 };
 
+// Outcome of one ISceneIOCapability::OpenSponzaScene() call.
+// editorAvailable == false means this build has no scene IO capability.
+struct OpenSponzaSceneOutcome {
+    bool success = false;
+    bool editorAvailable = true;
+    bool importedThisCall = false;
+    std::string message;
+    std::string gtaPath;
+};
+
 // editor-core-separation-12 campaign, PHASE1 (Project Assembly Hot Reload
 // plan, BIG-STEP 1) - outcome of one
 // IHotReloadDebugCapability::BuildSceneSnapshotJson(Game&) call, wrapped for

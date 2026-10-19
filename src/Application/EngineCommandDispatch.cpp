@@ -106,6 +106,21 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneI
         result.setProbeHotReloadMarkerValueForTesting.success = success;
         break;
     }
+    // Opens the Sponza sample; imports it on first use, so it can take a long time.
+    case EngineCommandKind::OpenSponzaScene: {
+        if (sceneIOCapability != nullptr) {
+            ISceneIOCapability::OpenSceneOutcome outcome =
+                sceneIOCapability->OpenSponzaScene(game, renderer, sceneServicesSetLayout);
+            result.openSponzaScene.success = outcome.success;
+            result.openSponzaScene.importedThisCall = outcome.importedThisCall;
+            result.openSponzaScene.message = std::move(outcome.message);
+            result.openSponzaScene.gtaPath = std::move(outcome.gtaPath);
+        } else {
+            result.openSponzaScene.editorAvailable = false;
+            result.openSponzaScene.message = "opening the Sponza scene requires the Editor module";
+        }
+        break;
+    }
     }
     return result;
 }

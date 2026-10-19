@@ -46,7 +46,7 @@ struct ImportExternalFileOutcome {
     std::string guid; // Guid::ToString() format, or "" if not applicable
 
     bool convertedToMeshAsset = false;
-    std::string meshSourceFormat; // "stl" / "pmx" / "" (meaningful only when convertedToMeshAsset)
+    std::string meshSourceFormat; // "stl" / "pmx" / "gltf" / "" (meaningful only when convertedToMeshAsset)
     bool convertedToKtx2 = false;
     bool convertedToMotionAsset = false;
 

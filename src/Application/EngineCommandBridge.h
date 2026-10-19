@@ -27,6 +27,7 @@ enum class EngineCommandKind {
     LoadScene,
     GetSceneSnapshot,
     SetProbeHotReloadMarkerValueForTesting,
+    OpenSponzaScene,
 };
 
 // Plain request payload for one InstantiatePrimitive command.
@@ -93,6 +94,7 @@ struct EngineCommandResult {
     LoadSceneOutcome loadScene;
     GetSceneSnapshotOutcome getSceneSnapshot;
     SetProbeHotReloadMarkerValueForTestingOutcome setProbeHotReloadMarkerValueForTesting;
+    OpenSponzaSceneOutcome openSponzaScene;
 };
 
 class EngineCommandBridge : public SyncCommandBridge<EngineCommandRequest, EngineCommandResult> {

@@ -33,6 +33,18 @@ public:
 
     // The default scene path used when a caller supplies an empty one.
     virtual std::filesystem::path DefaultScenePath() const = 0;
+
+    // Result of OpenSponzaScene(); `message` is a status line on success, the error text on failure.
+    struct OpenSceneOutcome {
+        bool success = false;
+        bool importedThisCall = false;
+        std::string message;
+        std::string gtaPath;
+    };
+
+    // Replaces the scene with the Sponza glTF sample, importing it first if needed. Main thread only.
+    virtual OpenSceneOutcome OpenSponzaScene(
+        Game& game, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout) = 0;
 };
 
 // Log query capability. Core code holds a nullable pointer: nullptr means the build has no logger,

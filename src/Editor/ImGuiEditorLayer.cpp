@@ -508,7 +508,8 @@ public:
         result.guid = imported.guid.IsValid() ? imported.guid.ToString() : std::string();
         result.convertedToMeshAsset = imported.convertedToMeshAsset;
         result.meshSourceFormat = (imported.meshSourceFormat == MeshSourceFormat::Stl) ? "stl"
-            : (imported.meshSourceFormat == MeshSourceFormat::Pmx) ? "pmx" : std::string();
+            : (imported.meshSourceFormat == MeshSourceFormat::Pmx) ? "pmx"
+            : (imported.meshSourceFormat == MeshSourceFormat::Gltf) ? "gltf" : std::string();
         result.convertedToKtx2 = imported.convertedToKtx2;
         result.convertedToMotionAsset = imported.convertedToMotionAsset;
         result.meshVertexCount = imported.meshVertexCount;

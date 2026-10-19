@@ -898,6 +898,17 @@ std::string BuildScenePathResponseJson(bool success, const std::string& errorMes
     return body.dump();
 }
 
+std::string BuildOpenSponzaSceneResponseJson(
+    bool importedThisCall, const std::string& gtaPath, const std::string& message)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["imported_this_call"] = importedThisCall;
+    body["gta_path"] = gtaPath;
+    body["message"] = message;
+    return body.dump();
+}
+
 // --- task_manager/logger-1 campaign, PHASE3
 // (PHASE3_NETWORK_ENDPOINTS_GET_LOGS_AND_CLEAR_LOGS.md) - GET /get_logs and
 // POST /clear_logs. See NetworkRoutes.h's own doc comments above each
