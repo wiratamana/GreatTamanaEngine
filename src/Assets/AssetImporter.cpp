@@ -26,10 +26,8 @@ std::string ToLowerAscii(const std::string& s)
     return result;
 }
 
-// Imports every texture a model's materials reference as its own Texture *.gta, in a
-// "<meshStem>_Textures" folder next to the Mesh *.gta, and stores each Guid back into `materials`.
-// Returns how many referenced textures could not be imported (missing file, undecodable, write failure).
-// Those keep Guid::Invalid(); it never fails the import.
+// Imports each texture a model's materials reference as its own Texture *.gta in "<meshStem>_Textures"; stores the Guids in `materials`.
+// Returns the number of textures that could not be imported (they keep Guid::Invalid()); never fails the import.
 std::size_t ImportMaterialTextures(
     AssetDatabase& database, MaterialData& materials, const std::filesystem::path& meshGtaPath)
 {
