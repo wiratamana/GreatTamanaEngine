@@ -2684,6 +2684,20 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_SHADOW_COMPOSITE_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ShadowComposite.frag.spv"
 )
 
+# The Gtao shaders come from the feature shader auto-discovery; the self-check reflects the real binaries.
+target_sources(GreatTamanaEngineTests PRIVATE
+    "${CMAKE_BINARY_DIR}/shaders/GtaoMain.comp.spv"
+    "${CMAKE_BINARY_DIR}/shaders/GtaoResolve.comp.spv"
+    "${CMAKE_BINARY_DIR}/shaders/GtaoComposite.vert.spv"
+    "${CMAKE_BINARY_DIR}/shaders/GtaoComposite.frag.spv"
+)
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_TEST_GTAO_MAIN_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/GtaoMain.comp.spv"
+    GTE_TEST_GTAO_RESOLVE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/GtaoResolve.comp.spv"
+    GTE_TEST_GTAO_COMPOSITE_VERT_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/GtaoComposite.vert.spv"
+    GTE_TEST_GTAO_COMPOSITE_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/GtaoComposite.frag.spv"
+)
+
 # The compositor blend shader is declared by the root gte_add_shader() calls; its test reflects the real binary.
 target_sources(GreatTamanaEngineTests PRIVATE "${CMAKE_BINARY_DIR}/shaders/RenderFeatureBlend.comp.spv")
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
@@ -2839,7 +2853,7 @@ add_test(NAME EngineVocabularyCheck
 # comment blocks longer than 3 lines, in C++ sources and GLSL shaders. The scope is an explicit directory/file list;
 # there is no allowlist.
 set(GTE_COMMENT_RULE_SRC
-    Renderer/ Core/FeatureKit/ Features/Shadow/ Shaders/
+    Renderer/ Core/FeatureKit/ Features/Shadow/ Features/Gtao/ Shaders/
     Application/RenderPasses.cpp Application/RenderPasses.h Core/Core.cpp Core/Core.h Core/CapturedPixels.h
     Encoding/CapturedPixelConversion.cpp Encoding/CapturedPixelConversion.h Encoding/DepthVisualization.cpp
     Encoding/DepthVisualization.h Encoding/HdrColorVisualization.cpp Encoding/HdrColorVisualization.h
@@ -2876,6 +2890,7 @@ set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
     Features/Shadow/ShadowMathTests.cpp Game/SceneDrawPassTests.cpp
+    Features/Gtao/GtaoMathTests.cpp Features/Gtao/GtaoParamsTests.cpp Features/Gtao/GtaoShaderNamesTests.cpp
     Renderer/RenderGraph/CommandBufferTests.cpp Renderer/RenderGraph/FullscreenPassTests.cpp
     Renderer/RenderGraph/FullscreenRecordTests.cpp Renderer/RenderGraph/GpuBufferTests.cpp
     Renderer/RenderGraph/OneShotTests.cpp Renderer/RenderGraph/PassKindRecordTests.cpp

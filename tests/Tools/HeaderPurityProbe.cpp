@@ -5,6 +5,7 @@
 #include "Core/FeatureKit/FeatureKit.h"
 #include "Core/GraphicsHandles.h"
 #include "Core/PixelFormat.h"
+#include "Features/Gtao/GtaoTypes.h"
 #include "Features/Shadow/ShadowTypes.h"
 #include "Renderer/RenderGraph/ComputePass.h"
 #include "Renderer/RenderGraph/FullscreenPass.h"

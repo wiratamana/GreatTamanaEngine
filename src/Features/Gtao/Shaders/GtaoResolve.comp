@@ -1,0 +1,112 @@
+#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// Member names and order match GtaoResolveParamsGpu.
+layout(std430, binding = 0) readonly buffer GtaoResolveParams {
+    mat4 invViewProjection;
+    mat4 prevViewProjection;
+    vec4 eye;
+    vec4 forward;
+    vec4 prevEye;
+    vec4 prevForward;
+    vec4 filterParams; // x depth sigma, y history weight, z history depth tolerance, w spatial on.
+    uvec4 counts;      // x divisor, y history valid, z depth width, w depth height.
+} params;
+
+layout(binding = 1) uniform sampler2D aoRaw;     // x visibility, y view depth (0 = sky).
+layout(binding = 2) uniform sampler2D aoHistory; // Previous result, same layout.
+layout(binding = 3, rgba16f) uniform writeonly image2D aoOutput;
+
+// Previous-frame AO at the world point this texel sees, or -1 when no history applies.
+float ReprojectHistory(ivec2 p, float viewZ, float tolerance)
+{
+    vec2 depthSize = vec2(params.counts.zw);
+    float divisor = float(params.counts.x);
+    vec2 ndc = ((vec2(p) * divisor) + 0.5) / depthSize * 2.0 - 1.0;
+    vec4 mid = params.invViewProjection * vec4(ndc, 0.5, 1.0);
+    vec3 rayDir = mid.xyz / mid.w - params.eye.xyz;
+    vec3 world = params.eye.xyz + rayDir * (viewZ / max(dot(rayDir, params.forward.xyz), 1e-4));
+
+    vec4 prevClip = params.prevViewProjection * vec4(world, 1.0);
+    float prevZ = dot(world - params.prevEye.xyz, params.prevForward.xyz);
+    if (prevClip.w <= 1e-4 || prevZ <= 1e-4) {
+        return -1.0;
+    }
+
+    // History texel space: texel i sits at depth pixel i * divisor.
+    vec2 prevUv = prevClip.xy / prevClip.w * 0.5 + 0.5;
+    vec2 t = (prevUv * depthSize - 0.5) / divisor;
+    ivec2 base = ivec2(floor(t));
+    vec2 f = fract(t);
+    ivec2 histSize = textureSize(aoHistory, 0);
+    float sum = 0.0;
+    float weightSum = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        ivec2 o = ivec2(i & 1, i >> 1);
+        ivec2 q = base + o;
+        if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, histSize))) {
+            continue;
+        }
+        vec2 h = texelFetch(aoHistory, q, 0).rg;
+        float bilinear = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+        float relative = abs(h.y - prevZ) / prevZ;
+        float valid = h.y > 0.0 ? 1.0 - smoothstep(0.5 * tolerance, tolerance, relative) : 0.0;
+        sum += h.x * bilinear * valid;
+        weightSum += bilinear * valid;
+    }
+    return weightSum > 0.25 ? sum / weightSum : -1.0;
+}
+
+void main()
+{
+    ivec2 size = imageSize(aoOutput);
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= size.x || p.y >= size.y) {
+        return;
+    }
+
+    ivec2 rawSize = textureSize(aoRaw, 0);
+    vec2 center = texelFetch(aoRaw, min(p, rawSize - ivec2(1)), 0).rg;
+    if (center.y <= 0.0) {
+        imageStore(aoOutput, p, vec4(1.0, 0.0, 0.0, 0.0));
+        return;
+    }
+
+    // 3x3 cross-bilateral filter; the min and max of the footprint also bound the history.
+    float depthTolerance = max(center.y * params.filterParams.x, 1e-4);
+    bool spatial = params.filterParams.w > 0.5;
+    float sum = 0.0;
+    float weightSum = 0.0;
+    float lo = center.x;
+    float hi = center.x;
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            vec2 s = texelFetch(aoRaw, clamp(p + ivec2(dx, dy), ivec2(0), rawSize - ivec2(1)), 0).rg;
+            if (s.y <= 0.0) {
+                continue;
+            }
+            lo = min(lo, s.x);
+            hi = max(hi, s.x);
+            bool isCenter = dx == 0 && dy == 0;
+            float kernel = isCenter ? 4.0 : ((dx == 0 || dy == 0) ? 2.0 : 1.0);
+            if (!spatial && !isCenter) {
+                kernel = 0.0;
+            }
+            float w = kernel * exp(-abs(s.y - center.y) / depthTolerance);
+            sum += s.x * w;
+            weightSum += w;
+        }
+    }
+    float result = sum / max(weightSum, 1e-5);
+
+    if (params.counts.y != 0u && params.filterParams.y > 0.0) {
+        float history = ReprojectHistory(p, center.y, params.filterParams.z);
+        if (history >= 0.0) {
+            result = mix(result, clamp(history, lo, hi), params.filterParams.y);
+        }
+    }
+    if (isnan(result)) {
+        result = 1.0;
+    }
+    imageStore(aoOutput, p, vec4(result, center.y, 0.0, 0.0));
+}
