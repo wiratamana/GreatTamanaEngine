@@ -5,8 +5,8 @@
 // gte::Network::NetworkServer, wired together exactly like gte::Application
 // does in production, hit over a REAL loopback socket via httplib::Client -
 // with a FAKE, ImGui-free stand-in (FakeEditorUiStandIn, below) standing in
-// for Application::Run()'s real per-frame TryPeekPendingCommandRequest()/
-// FulfillCommand() calls (and, transitively, for IEditorLayer::ActivateTab()
+// for Application::Run()'s real per-frame TryPeekPendingCommand()/
+// FulfillCommand(id, result) calls (and, transitively, for IEditorLayer::ActivateTab()
 // itself).
 //
 // There is no live Application/ImGui context/window anywhere in this file -
@@ -94,7 +94,8 @@ private:
     {
         while (!m_stop.load()) {
             if (!m_gated.load()) {
-                if (const std::optional<EditorUiCommandRequest> request = m_bridge.TryPeekPendingCommandRequest()) {
+                if (const auto pending = m_bridge.TryPeekPendingCommand()) {
+                    const EditorUiCommandRequest* const request = &pending->request;
                     EditorUiCommandResult result;
                     result.kind = request->kind;
                     {
@@ -102,7 +103,7 @@ private:
                         result.activateTab.success = m_nextSuccess;
                         result.activateTab.tabExists = m_nextTabExists;
                     }
-                    m_bridge.FulfillCommand(result);
+                    m_bridge.FulfillCommand(pending->id, result);
                 }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));

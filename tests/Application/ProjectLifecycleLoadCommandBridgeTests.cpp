@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <thread>
 
 namespace gte {
@@ -22,11 +23,7 @@ LoadProjectAssemblyCommandResult MakeLoadResult(bool loadSucceeded)
     return result;
 }
 
-// A separate thread fulfilling the request shortly after it starts must
-// wake the waiter well before a much longer timeout would have elapsed -
-// proves the condition_variable wakeup, not the timeout, resolved it. This
-// is the basic submit-from-one-thread + fulfill-from-another-thread round
-// trip (spec 3.3, case 1).
+// A fulfiller thread must wake the waiter long before the timeout.
 TEST(ProjectLifecycleLoadCommandBridgeTest, SubmitAndWaitReturnsFulfilledResult)
 {
     ProjectLifecycleLoadCommandBridge bridge;
@@ -35,10 +32,10 @@ TEST(ProjectLifecycleLoadCommandBridgeTest, SubmitAndWaitReturnsFulfilledResult)
         while (!bridge.IsCommandPending()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        const std::optional<LoadProjectAssemblyCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+        const auto peeked = bridge.TryPeekPendingCommand();
         ASSERT_TRUE(peeked.has_value());
-        EXPECT_EQ(peeked->projectName, "MyGame");
-        bridge.FulfillCommand(MakeLoadResult(true));
+        EXPECT_EQ(peeked->request.projectName, "MyGame");
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeLoadResult(true)));
     });
 
     const auto start = std::chrono::steady_clock::now();
@@ -55,29 +52,23 @@ TEST(ProjectLifecycleLoadCommandBridgeTest, SubmitAndWaitReturnsFulfilledResult)
     EXPECT_LT(elapsed, std::chrono::milliseconds(4000));
 }
 
-// A fresh bridge with nothing submitted returns std::nullopt, and
-// IsCommandPending() reports false - peek-when-idle (spec 3.3, case 2).
-TEST(ProjectLifecycleLoadCommandBridgeTest, TryPeekPendingCommandRequestReturnsNulloptWhenIdle)
+// A fresh bridge with nothing submitted returns std::nullopt.
+TEST(ProjectLifecycleLoadCommandBridgeTest, TryPeekPendingCommandReturnsNulloptWhenIdle)
 {
     ProjectLifecycleLoadCommandBridge bridge;
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 }
 
-// A second concurrent SubmitAndWait() call, started strictly after the
-// first has already registered as pending, must return alreadyPending ==
-// true IMMEDIATELY - never actually wait (spec 3.3, case 3).
+// A second submit while one is pending returns alreadyPending immediately.
 TEST(ProjectLifecycleLoadCommandBridgeTest, SubmitAndWaitReturnsAlreadyPendingWhenAnotherRequestIsInFlight)
 {
     ProjectLifecycleLoadCommandBridge bridge;
 
     std::thread firstRequester([&bridge] {
-        // Nobody ever fulfills this one - it will simply time out on its
-        // own after this test's own assertions are done reading it.
         bridge.SubmitAndWait(MakeLoadRequest("First"), 1500);
     });
 
-    // Give the first request a moment to actually register as pending.
     while (!bridge.IsCommandPending()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
@@ -97,8 +88,7 @@ TEST(ProjectLifecycleLoadCommandBridgeTest, SubmitAndWaitReturnsAlreadyPendingWh
     firstRequester.join();
 }
 
-// A request nobody ever fulfills must time out, roughly within the
-// requested timeout window (spec 3.3, case 4).
+// A request nobody ever fulfills must time out within the requested window.
 TEST(ProjectLifecycleLoadCommandBridgeTest, SubmitAndWaitTimesOutWhenNeverFulfilled)
 {
     ProjectLifecycleLoadCommandBridge bridge;
@@ -114,27 +104,36 @@ TEST(ProjectLifecycleLoadCommandBridgeTest, SubmitAndWaitTimesOutWhenNeverFulfil
     EXPECT_LT(elapsed, std::chrono::milliseconds(2000));
 }
 
-// A late FulfillCommand() call, arriving AFTER a request already timed out
-// and reset itself, must be a safe no-op - and must not corrupt the NEXT
-// request's own result (spec 3.3, case 5).
+// A late fulfil after a timeout is dropped and does not corrupt the next request.
 TEST(ProjectLifecycleLoadCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAndDoesNotCorruptNextRequest)
 {
     ProjectLifecycleLoadCommandBridge bridge;
 
+    std::uint64_t idA = 0;
+    std::thread peeker([&bridge, &idA] {
+        while (!bridge.IsCommandPending()) {
+            std::this_thread::yield();
+        }
+        const auto peeked = bridge.TryPeekPendingCommand();
+        if (peeked) {
+            idA = peeked->id;
+        }
+    });
     const ProjectLifecycleLoadCommandBridge::SubmitResult timedOut =
         bridge.SubmitAndWait(MakeLoadRequest("Stale"), 50);
+    peeker.join();
     EXPECT_TRUE(timedOut.timedOut);
+    ASSERT_NE(idA, 0u);
 
-    // This arrives long after the waiter already gave up - must not crash
-    // or assert, and must not affect anything.
-    bridge.FulfillCommand(MakeLoadResult(true));
+    EXPECT_FALSE(bridge.FulfillCommand(idA, MakeLoadResult(true)));
 
-    // A fresh request afterward must behave completely normally.
     std::thread fulfiller([&bridge] {
         while (!bridge.IsCommandPending()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        bridge.FulfillCommand(MakeLoadResult(false));
+        const auto peeked = bridge.TryPeekPendingCommand();
+        ASSERT_TRUE(peeked.has_value());
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeLoadResult(false)));
     });
 
     const ProjectLifecycleLoadCommandBridge::SubmitResult fresh =
@@ -145,22 +144,21 @@ TEST(ProjectLifecycleLoadCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAn
     EXPECT_FALSE(fresh.result->loadSucceeded);
 }
 
-// Calling FulfillCommand() with nothing ever submitted must not crash/assert.
-TEST(ProjectLifecycleLoadCommandBridgeTest, FulfillCommandIsANoOpWhenNothingIsPending)
+// Fulfilling with nothing pending is dropped.
+TEST(ProjectLifecycleLoadCommandBridgeTest, FulfillCommandIsDroppedWhenNothingIsPending)
 {
     ProjectLifecycleLoadCommandBridge bridge;
-    bridge.FulfillCommand(MakeLoadResult(true));
+    EXPECT_FALSE(bridge.FulfillCommand(1, MakeLoadResult(true)));
     EXPECT_FALSE(bridge.IsCommandPending());
 }
 
-// TryPeekPendingCommandRequest()/IsCommandPending() must reflect pending
-// state correctly, and go back to "nothing pending" once fulfilled.
+// Pending state is observable and clears after fulfilment.
 TEST(ProjectLifecycleLoadCommandBridgeTest, PendingStateIsObservableAndClearsAfterFulfillment)
 {
     ProjectLifecycleLoadCommandBridge bridge;
 
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 
     std::thread requester([&bridge] {
         bridge.SubmitAndWait(MakeLoadRequest("SomeProject"), 1000);
@@ -171,15 +169,15 @@ TEST(ProjectLifecycleLoadCommandBridgeTest, PendingStateIsObservableAndClearsAft
     }
 
     EXPECT_TRUE(bridge.IsCommandPending());
-    const std::optional<LoadProjectAssemblyCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+    const auto peeked = bridge.TryPeekPendingCommand();
     ASSERT_TRUE(peeked.has_value());
-    EXPECT_EQ(peeked->projectName, "SomeProject");
+    EXPECT_EQ(peeked->request.projectName, "SomeProject");
 
-    bridge.FulfillCommand(MakeLoadResult(false));
+    EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeLoadResult(false)));
     requester.join();
 
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 }
 
 } // namespace

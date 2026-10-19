@@ -3,12 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <thread>
-
-// task_manager/frame-debugger-3 campaign, PHASE7
-// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - mirrors
-// tests/Application/EditorUiCommandBridgeTests.cpp's own exact coverage
-// shape, applied to this campaign's brand-new, independent sibling bridge.
 
 namespace gte {
 namespace {
@@ -63,14 +59,14 @@ TEST(FrameDebuggerCommandBridgeTest, SubmitAndWaitReturnsFulfilledResult)
         while (!bridge.IsCommandPending()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        const std::optional<FrameDebuggerCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+        const auto peeked = bridge.TryPeekPendingCommand();
         ASSERT_TRUE(peeked.has_value());
-        EXPECT_EQ(peeked->kind, FrameDebuggerCommandKind::SetEnabled);
-        EXPECT_TRUE(peeked->setEnabled.enabled);
+        EXPECT_EQ(peeked->request.kind, FrameDebuggerCommandKind::SetEnabled);
+        EXPECT_TRUE(peeked->request.setEnabled.enabled);
         FrameDebuggerCommandResult result = MakeResult(FrameDebuggerCommandKind::SetEnabled, true);
         result.state.enabled = true;
         result.state.channel = "all";
-        bridge.FulfillCommand(result);
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, result));
     });
 
     const auto start = std::chrono::steady_clock::now();
@@ -118,39 +114,51 @@ TEST(FrameDebuggerCommandBridgeTest, SubmitAndWaitReturnsAlreadyPendingWhenAnoth
     firstRequester.join();
 }
 
-// Calling FulfillCommand() with nothing ever submitted must not crash/assert.
-TEST(FrameDebuggerCommandBridgeTest, FulfillCommandIsANoOpWhenNothingIsPending)
+// Fulfilling with nothing pending is dropped.
+TEST(FrameDebuggerCommandBridgeTest, FulfillCommandIsDroppedWhenNothingIsPending)
 {
     FrameDebuggerCommandBridge bridge;
-    bridge.FulfillCommand(MakeResult(FrameDebuggerCommandKind::GetState, true));
+    EXPECT_FALSE(bridge.FulfillCommand(1, MakeResult(FrameDebuggerCommandKind::GetState, true)));
     EXPECT_FALSE(bridge.IsCommandPending());
 }
 
 // A fresh bridge with nothing submitted returns std::nullopt.
-TEST(FrameDebuggerCommandBridgeTest, TryPeekPendingCommandRequestReturnsNulloptWhenIdle)
+TEST(FrameDebuggerCommandBridgeTest, TryPeekPendingCommandReturnsNulloptWhenIdle)
 {
     FrameDebuggerCommandBridge bridge;
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 }
 
-// A late FulfillCommand() call, arriving AFTER a request already timed out
-// and reset itself, must be a safe no-op - and must not corrupt the NEXT
-// request's own result.
+// A late fulfil after a timeout is dropped and does not corrupt the next request.
 TEST(FrameDebuggerCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAndDoesNotCorruptNextRequest)
 {
     FrameDebuggerCommandBridge bridge;
 
+    std::uint64_t idA = 0;
+    std::thread peeker([&bridge, &idA] {
+        while (!bridge.IsCommandPending()) {
+            std::this_thread::yield();
+        }
+        const auto peeked = bridge.TryPeekPendingCommand();
+        if (peeked) {
+            idA = peeked->id;
+        }
+    });
     const FrameDebuggerCommandBridge::SubmitResult timedOut = bridge.SubmitAndWait(MakeGetStateRequest(), 50);
+    peeker.join();
     EXPECT_TRUE(timedOut.timedOut);
+    ASSERT_NE(idA, 0u);
 
-    bridge.FulfillCommand(MakeResult(FrameDebuggerCommandKind::GetState, true));
+    EXPECT_FALSE(bridge.FulfillCommand(idA, MakeResult(FrameDebuggerCommandKind::GetState, true)));
 
     std::thread fulfiller([&bridge] {
         while (!bridge.IsCommandPending()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        bridge.FulfillCommand(MakeResult(FrameDebuggerCommandKind::CaptureNow, true));
+        const auto peeked = bridge.TryPeekPendingCommand();
+        ASSERT_TRUE(peeked.has_value());
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeResult(FrameDebuggerCommandKind::CaptureNow, true)));
     });
 
     FrameDebuggerCommandRequest captureRequest;
@@ -163,14 +171,13 @@ TEST(FrameDebuggerCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAndDoesNo
     EXPECT_EQ(fresh.result->kind, FrameDebuggerCommandKind::CaptureNow);
 }
 
-// TryPeekPendingCommandRequest()/IsCommandPending() must reflect pending
-// state correctly, and go back to "nothing pending" once fulfilled.
+// Pending state is observable and clears after fulfilment.
 TEST(FrameDebuggerCommandBridgeTest, PendingStateIsObservableAndClearsAfterFulfillment)
 {
     FrameDebuggerCommandBridge bridge;
 
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 
     std::thread requester([&bridge] {
         FrameDebuggerCommandRequest request;
@@ -184,16 +191,16 @@ TEST(FrameDebuggerCommandBridgeTest, PendingStateIsObservableAndClearsAfterFulfi
     }
 
     EXPECT_TRUE(bridge.IsCommandPending());
-    const std::optional<FrameDebuggerCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+    const auto peeked = bridge.TryPeekPendingCommand();
     ASSERT_TRUE(peeked.has_value());
-    EXPECT_EQ(peeked->kind, FrameDebuggerCommandKind::SelectEvent);
-    EXPECT_EQ(peeked->selectEvent.index, 3);
+    EXPECT_EQ(peeked->request.kind, FrameDebuggerCommandKind::SelectEvent);
+    EXPECT_EQ(peeked->request.selectEvent.index, 3);
 
-    bridge.FulfillCommand(MakeResult(FrameDebuggerCommandKind::SelectEvent, true));
+    EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeResult(FrameDebuggerCommandKind::SelectEvent, true)));
     requester.join();
 
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 }
 
 } // namespace

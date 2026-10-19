@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <thread>
 
 namespace gte {
@@ -57,10 +58,10 @@ TEST(AssetImportCommandBridgeTest, SubmitAndWaitReturnsFulfilledResult)
         while (!bridge.IsCommandPending()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        const std::optional<AssetImportCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+        const auto peeked = bridge.TryPeekPendingCommand();
         ASSERT_TRUE(peeked.has_value());
-        EXPECT_EQ(peeked->importExternalFile.sourceAbsolutePath, "C:\\some\\file.stl");
-        bridge.FulfillCommand(MakeImportResult(true, "ok"));
+        EXPECT_EQ(peeked->request.importExternalFile.sourceAbsolutePath, "C:\\some\\file.stl");
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeImportResult(true, "ok")));
     });
 
     const auto start = std::chrono::steady_clock::now();
@@ -112,42 +113,51 @@ TEST(AssetImportCommandBridgeTest, SubmitAndWaitReturnsAlreadyPendingWhenAnother
     firstRequester.join();
 }
 
-// Calling FulfillCommand() with nothing ever submitted must not crash/assert.
-TEST(AssetImportCommandBridgeTest, FulfillCommandIsANoOpWhenNothingIsPending)
+// Fulfilling with nothing pending is dropped.
+TEST(AssetImportCommandBridgeTest, FulfillCommandIsDroppedWhenNothingIsPending)
 {
     AssetImportCommandBridge bridge;
-    bridge.FulfillCommand(MakeImportResult(true));
+    EXPECT_FALSE(bridge.FulfillCommand(1, MakeImportResult(true)));
     EXPECT_FALSE(bridge.IsCommandPending());
 }
 
 // A fresh bridge with nothing submitted returns std::nullopt.
-TEST(AssetImportCommandBridgeTest, TryPeekPendingCommandRequestReturnsNulloptWhenIdle)
+TEST(AssetImportCommandBridgeTest, TryPeekPendingCommandReturnsNulloptWhenIdle)
 {
     AssetImportCommandBridge bridge;
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 }
 
-// A late FulfillCommand() call, arriving AFTER a request already timed out
-// and reset itself, must be a safe no-op - and must not corrupt the NEXT
-// request's own result.
+// A late fulfil after a timeout is dropped and does not corrupt the next request.
 TEST(AssetImportCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAndDoesNotCorruptNextRequest)
 {
     AssetImportCommandBridge bridge;
 
+    std::uint64_t idA = 0;
+    std::thread peeker([&bridge, &idA] {
+        while (!bridge.IsCommandPending()) {
+            std::this_thread::yield();
+        }
+        const auto peeked = bridge.TryPeekPendingCommand();
+        if (peeked) {
+            idA = peeked->id;
+        }
+    });
     const AssetImportCommandBridge::SubmitResult timedOut = bridge.SubmitAndWait(MakeImportRequest("C:\\a.stl"), 50);
+    peeker.join();
     EXPECT_TRUE(timedOut.timedOut);
+    ASSERT_NE(idA, 0u);
 
-    // This arrives long after the waiter already gave up - must not crash
-    // or assert, and must not affect anything.
-    bridge.FulfillCommand(MakeImportResult(true, "late"));
+    EXPECT_FALSE(bridge.FulfillCommand(idA, MakeImportResult(true, "late")));
 
-    // A fresh request afterward must behave completely normally.
     std::thread fulfiller([&bridge] {
         while (!bridge.IsCommandPending()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        bridge.FulfillCommand(MakeImportResult(true, "fresh"));
+        const auto peeked = bridge.TryPeekPendingCommand();
+        ASSERT_TRUE(peeked.has_value());
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeImportResult(true, "fresh")));
     });
 
     const AssetImportCommandBridge::SubmitResult fresh = bridge.SubmitAndWait(MakeImportRequest("C:\\b.stl"), 5000);
@@ -158,14 +168,13 @@ TEST(AssetImportCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAndDoesNotC
     EXPECT_EQ(fresh.result->importExternalFile.message, "fresh");
 }
 
-// TryPeekPendingCommandRequest()/IsCommandPending() must reflect pending
-// state correctly, and go back to "nothing pending" once fulfilled.
+// Pending state is observable and clears after fulfilment.
 TEST(AssetImportCommandBridgeTest, PendingStateIsObservableAndClearsAfterFulfillment)
 {
     AssetImportCommandBridge bridge;
 
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 
     std::thread requester([&bridge] {
         bridge.SubmitAndWait(MakeImportRequest("C:\\terrain.stl", "Meshes/Terrain"), 1000);
@@ -176,17 +185,17 @@ TEST(AssetImportCommandBridgeTest, PendingStateIsObservableAndClearsAfterFulfill
     }
 
     EXPECT_TRUE(bridge.IsCommandPending());
-    const std::optional<AssetImportCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+    const auto peeked = bridge.TryPeekPendingCommand();
     ASSERT_TRUE(peeked.has_value());
-    EXPECT_EQ(peeked->kind, AssetImportCommandKind::ImportExternalFile);
-    EXPECT_EQ(peeked->importExternalFile.sourceAbsolutePath, "C:\\terrain.stl");
-    EXPECT_EQ(peeked->importExternalFile.destinationRelativeFolder, "Meshes/Terrain");
+    EXPECT_EQ(peeked->request.kind, AssetImportCommandKind::ImportExternalFile);
+    EXPECT_EQ(peeked->request.importExternalFile.sourceAbsolutePath, "C:\\terrain.stl");
+    EXPECT_EQ(peeked->request.importExternalFile.destinationRelativeFolder, "Meshes/Terrain");
 
-    bridge.FulfillCommand(MakeImportResult(false, "nope"));
+    EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeImportResult(false, "nope")));
     requester.join();
 
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 }
 
 } // namespace

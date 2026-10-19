@@ -90,14 +90,15 @@ private:
     {
         while (!m_stop.load()) {
             if (!m_gated.load()) {
-                if (const std::optional<AssetImportCommandRequest> request = m_bridge.TryPeekPendingCommandRequest()) {
+                if (const auto pending = m_bridge.TryPeekPendingCommand()) {
+                    const AssetImportCommandRequest* const request = &pending->request;
                     AssetImportCommandResult result;
                     result.kind = request->kind;
                     {
                         std::lock_guard<std::mutex> lock(m_outcomeMutex);
                         result.importExternalFile = m_nextOutcome;
                     }
-                    m_bridge.FulfillCommand(result);
+                    m_bridge.FulfillCommand(pending->id, result);
                 }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));

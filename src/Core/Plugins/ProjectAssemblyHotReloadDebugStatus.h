@@ -1,26 +1,7 @@
 #pragma once
 
-// src/Core/Plugins/ProjectAssemblyHotReloadDebugStatus.h
-//
-// editor-core-separation-12 campaign (Project Assembly Hot Reload plan,
-// BIG-STEP 1), PHASE1. A plain, thread-safe, process-wide singleton
-// (Meyers singleton, mirrors ComponentTypeRegistry::Instance()'s own
-// precedent) - the ONE place a future BIG-STEP 3 campaign's
-// PerformProjectAssemblyHotReload() will report its own live progress, and
-// the ONE place EditorHotReloadDebugCapability::GetHotReloadStatus() (PHASE2)
-// reads it back from. Deliberately NOT a bridge/
-// TryPeekPendingCommandRequest()-shaped class - this must stay readable from
-// the network thread even while, in a future campaign, the main thread is
-// mid-freeze running a whole hot-reload cycle, which a frame-drain-dependent
-// bridge structurally cannot support (see PHASE0_MASTER_STRATEGY.md, Section
-// 3.1, Correction 2, for the general reasoning this mirrors).
-//
-// THIS campaign (editor-core-separation-12) adds ZERO Set()/Finish() call
-// sites anywhere - GetSnapshot() will report "Idle" (the default-constructed
-// Status) for this whole campaign's lifetime. That is expected and correct:
-// this class exists now so its OWN shape, and GetHotReloadStatus()'s own
-// route contract, are locked in and stable before a future BIG-STEP 3
-// campaign ever needs them.
+// Process-wide live status of the project assembly hot reload, readable from the network thread
+// even while the main thread is frozen inside a reload (a frame-drained bridge cannot do that).
 
 #include "../EditorCapabilities.h" // IHotReloadDebugCapability::Status.
 

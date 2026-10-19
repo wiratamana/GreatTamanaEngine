@@ -9,7 +9,7 @@
 // over a REAL loopback socket via httplib::Client - with a small, dedicated,
 // GPU/ECS-free stand-in (FakeInstantiateMeshAssetStandIn, below) servicing
 // ONLY EngineCommandKind::InstantiateMeshAsset the way Application::Run()'s
-// real per-frame TryPeekPendingCommandRequest()/FulfillCommand() drain would
+// real per-frame TryPeekPendingCommand()/FulfillCommand(id, result) drain would
 // (and, transitively, for Game::InstantiateMeshAssetFromGtaFile() itself).
 // This stand-in is DELIBERATELY its own small, separate class in this file
 // rather than reusing EngineCommandEndpointsEndToEndTests.cpp's own
@@ -100,14 +100,15 @@ private:
     {
         while (!m_stop.load()) {
             if (!m_gated.load()) {
-                if (const std::optional<EngineCommandRequest> request = m_bridge.TryPeekPendingCommandRequest()) {
+                if (const auto pending = m_bridge.TryPeekPendingCommand()) {
+                    const EngineCommandRequest* const request = &pending->request;
                     EngineCommandResult result;
                     result.kind = request->kind;
                     if (request->kind == EngineCommandKind::InstantiateMeshAsset) {
                         std::lock_guard<std::mutex> lock(m_outcomeMutex);
                         result.instantiateMeshAsset = m_nextOutcome;
                     }
-                    m_bridge.FulfillCommand(result);
+                    m_bridge.FulfillCommand(pending->id, result);
                 }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));

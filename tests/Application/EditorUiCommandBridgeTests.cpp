@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <thread>
 
 namespace gte {
@@ -53,10 +54,10 @@ TEST(EditorUiCommandBridgeTest, SubmitAndWaitReturnsFulfilledResult)
         while (!bridge.IsCommandPending()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        const std::optional<EditorUiCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+        const auto peeked = bridge.TryPeekPendingCommand();
         ASSERT_TRUE(peeked.has_value());
-        EXPECT_EQ(peeked->activateTab.tabName, "Profiler");
-        bridge.FulfillCommand(MakeActivateTabResult(true, true));
+        EXPECT_EQ(peeked->request.activateTab.tabName, "Profiler");
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeActivateTabResult(true, true)));
     });
 
     const auto start = std::chrono::steady_clock::now();
@@ -106,42 +107,51 @@ TEST(EditorUiCommandBridgeTest, SubmitAndWaitReturnsAlreadyPendingWhenAnotherReq
     firstRequester.join();
 }
 
-// Calling FulfillCommand() with nothing ever submitted must not crash/assert.
-TEST(EditorUiCommandBridgeTest, FulfillCommandIsANoOpWhenNothingIsPending)
+// Fulfilling with nothing pending is dropped.
+TEST(EditorUiCommandBridgeTest, FulfillCommandIsDroppedWhenNothingIsPending)
 {
     EditorUiCommandBridge bridge;
-    bridge.FulfillCommand(MakeActivateTabResult(true, true));
+    EXPECT_FALSE(bridge.FulfillCommand(1, MakeActivateTabResult(true, true)));
     EXPECT_FALSE(bridge.IsCommandPending());
 }
 
 // A fresh bridge with nothing submitted returns std::nullopt.
-TEST(EditorUiCommandBridgeTest, TryPeekPendingCommandRequestReturnsNulloptWhenIdle)
+TEST(EditorUiCommandBridgeTest, TryPeekPendingCommandReturnsNulloptWhenIdle)
 {
     EditorUiCommandBridge bridge;
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 }
 
-// A late FulfillCommand() call, arriving AFTER a request already timed out
-// and reset itself, must be a safe no-op - and must not corrupt the NEXT
-// request's own result.
+// A late fulfil after a timeout is dropped and does not corrupt the next request.
 TEST(EditorUiCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAndDoesNotCorruptNextRequest)
 {
     EditorUiCommandBridge bridge;
 
+    std::uint64_t idA = 0;
+    std::thread peeker([&bridge, &idA] {
+        while (!bridge.IsCommandPending()) {
+            std::this_thread::yield();
+        }
+        const auto peeked = bridge.TryPeekPendingCommand();
+        if (peeked) {
+            idA = peeked->id;
+        }
+    });
     const EditorUiCommandBridge::SubmitResult timedOut = bridge.SubmitAndWait(MakeActivateTabRequest("Profiler"), 50);
+    peeker.join();
     EXPECT_TRUE(timedOut.timedOut);
+    ASSERT_NE(idA, 0u);
 
-    // This arrives long after the waiter already gave up - must not crash
-    // or assert, and must not affect anything.
-    bridge.FulfillCommand(MakeActivateTabResult(true, true));
+    EXPECT_FALSE(bridge.FulfillCommand(idA, MakeActivateTabResult(true, true)));
 
-    // A fresh request afterward must behave completely normally.
     std::thread fulfiller([&bridge] {
         while (!bridge.IsCommandPending()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        bridge.FulfillCommand(MakeActivateTabResult(true, true));
+        const auto peeked = bridge.TryPeekPendingCommand();
+        ASSERT_TRUE(peeked.has_value());
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeActivateTabResult(true, true)));
     });
 
     const EditorUiCommandBridge::SubmitResult fresh = bridge.SubmitAndWait(MakeActivateTabRequest("Jobs"), 5000);
@@ -151,14 +161,13 @@ TEST(EditorUiCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAndDoesNotCorr
     EXPECT_TRUE(fresh.result->activateTab.success);
 }
 
-// TryPeekPendingCommandRequest()/IsCommandPending() must reflect pending
-// state correctly, and go back to "nothing pending" once fulfilled.
+// Pending state is observable and clears after fulfilment.
 TEST(EditorUiCommandBridgeTest, PendingStateIsObservableAndClearsAfterFulfillment)
 {
     EditorUiCommandBridge bridge;
 
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 
     std::thread requester([&bridge] {
         bridge.SubmitAndWait(MakeActivateTabRequest("Atmosphere"), 1000);
@@ -169,16 +178,16 @@ TEST(EditorUiCommandBridgeTest, PendingStateIsObservableAndClearsAfterFulfillmen
     }
 
     EXPECT_TRUE(bridge.IsCommandPending());
-    const std::optional<EditorUiCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+    const auto peeked = bridge.TryPeekPendingCommand();
     ASSERT_TRUE(peeked.has_value());
-    EXPECT_EQ(peeked->kind, EditorUiCommandKind::ActivateTab);
-    EXPECT_EQ(peeked->activateTab.tabName, "Atmosphere");
+    EXPECT_EQ(peeked->request.kind, EditorUiCommandKind::ActivateTab);
+    EXPECT_EQ(peeked->request.activateTab.tabName, "Atmosphere");
 
-    bridge.FulfillCommand(MakeActivateTabResult(false, false));
+    EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeActivateTabResult(false, false)));
     requester.join();
 
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 }
 
 } // namespace

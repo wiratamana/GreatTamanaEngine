@@ -6,8 +6,8 @@
 // together exactly like gte::Application does in production, hit over a REAL
 // loopback socket via httplib::Client - with a FAKE, GPU/ECS-free stand-in
 // (FakeEngineCommandStandIn, below) standing in for
-// Application::Run()'s real per-frame TryPeekPendingCommandRequest()/
-// FulfillCommand() calls (and, transitively, for Game::InstantiatePrimitive()/
+// Application::Run()'s real per-frame TryPeekPendingCommand()/
+// FulfillCommand(id, result) calls (and, transitively, for Game::InstantiatePrimitive()/
 // DeleteEntityByName() themselves).
 //
 // There is no live Application/Game/Renderer/Vulkan device anywhere in this
@@ -121,7 +121,8 @@ private:
 
         while (!m_stop.load()) {
             if (!m_gated.load()) {
-                if (const std::optional<EngineCommandRequest> request = m_bridge.TryPeekPendingCommandRequest()) {
+                if (const auto pending = m_bridge.TryPeekPendingCommand()) {
+                    const EngineCommandRequest* const request = &pending->request;
                     EngineCommandResult result;
                     result.kind = request->kind;
                     switch (request->kind) {
@@ -199,7 +200,7 @@ private:
                         break;
                     }
                     }
-                    m_bridge.FulfillCommand(result);
+                    m_bridge.FulfillCommand(pending->id, result);
                 }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));

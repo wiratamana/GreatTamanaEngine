@@ -3,13 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <thread>
-
-// editor-core-separation-8 campaign, PHASE5
-// (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - mirrors
-// tests/Application/FrameDebuggerCommandBridgeTests.cpp's own exact coverage
-// shape (itself mirroring EditorUiCommandBridgeTests.cpp), applied to this
-// campaign's brand-new, independent sibling bridge.
 
 namespace gte {
 namespace {
@@ -65,13 +60,13 @@ TEST(RenderGraphControlCommandBridgeTest, SubmitAndWaitReturnsFulfilledResult)
         while (!bridge.IsCommandPending()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        const std::optional<RenderGraphControlCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+        const auto peeked = bridge.TryPeekPendingCommand();
         ASSERT_TRUE(peeked.has_value());
-        EXPECT_EQ(peeked->kind, RenderGraphControlCommandKind::SetBuiltInPassEnabled);
-        EXPECT_EQ(peeked->setPassEnabled.name, "RenderTransparent");
-        EXPECT_FALSE(peeked->setPassEnabled.enabled);
+        EXPECT_EQ(peeked->request.kind, RenderGraphControlCommandKind::SetBuiltInPassEnabled);
+        EXPECT_EQ(peeked->request.setPassEnabled.name, "RenderTransparent");
+        EXPECT_FALSE(peeked->request.setPassEnabled.enabled);
         RenderGraphControlCommandResult result = MakeResult(RenderGraphControlCommandKind::SetBuiltInPassEnabled, true);
-        bridge.FulfillCommand(result);
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, result));
     });
 
     const auto start = std::chrono::steady_clock::now();
@@ -118,39 +113,51 @@ TEST(RenderGraphControlCommandBridgeTest, SubmitAndWaitReturnsAlreadyPendingWhen
     firstRequester.join();
 }
 
-// Calling FulfillCommand() with nothing ever submitted must not crash/assert.
-TEST(RenderGraphControlCommandBridgeTest, FulfillCommandIsANoOpWhenNothingIsPending)
+// Fulfilling with nothing pending is dropped.
+TEST(RenderGraphControlCommandBridgeTest, FulfillCommandIsDroppedWhenNothingIsPending)
 {
     RenderGraphControlCommandBridge bridge;
-    bridge.FulfillCommand(MakeResult(RenderGraphControlCommandKind::ListPassStates, true));
+    EXPECT_FALSE(bridge.FulfillCommand(1, MakeResult(RenderGraphControlCommandKind::ListPassStates, true)));
     EXPECT_FALSE(bridge.IsCommandPending());
 }
 
 // A fresh bridge with nothing submitted returns std::nullopt.
-TEST(RenderGraphControlCommandBridgeTest, TryPeekPendingCommandRequestReturnsNulloptWhenIdle)
+TEST(RenderGraphControlCommandBridgeTest, TryPeekPendingCommandReturnsNulloptWhenIdle)
 {
     RenderGraphControlCommandBridge bridge;
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 }
 
-// A late FulfillCommand() call, arriving AFTER a request already timed out
-// and reset itself, must be a safe no-op - and must not corrupt the NEXT
-// request's own result.
+// A late fulfil after a timeout is dropped and does not corrupt the next request.
 TEST(RenderGraphControlCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAndDoesNotCorruptNextRequest)
 {
     RenderGraphControlCommandBridge bridge;
 
+    std::uint64_t idA = 0;
+    std::thread peeker([&bridge, &idA] {
+        while (!bridge.IsCommandPending()) {
+            std::this_thread::yield();
+        }
+        const auto peeked = bridge.TryPeekPendingCommand();
+        if (peeked) {
+            idA = peeked->id;
+        }
+    });
     const RenderGraphControlCommandBridge::SubmitResult timedOut = bridge.SubmitAndWait(MakeListPassStatesRequest(), 50);
+    peeker.join();
     EXPECT_TRUE(timedOut.timedOut);
+    ASSERT_NE(idA, 0u);
 
-    bridge.FulfillCommand(MakeResult(RenderGraphControlCommandKind::ListPassStates, true));
+    EXPECT_FALSE(bridge.FulfillCommand(idA, MakeResult(RenderGraphControlCommandKind::ListPassStates, true)));
 
     std::thread fulfiller([&bridge] {
         while (!bridge.IsCommandPending()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        bridge.FulfillCommand(MakeResult(RenderGraphControlCommandKind::SetFeatureEnabled, true));
+        const auto peeked = bridge.TryPeekPendingCommand();
+        ASSERT_TRUE(peeked.has_value());
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeResult(RenderGraphControlCommandKind::SetFeatureEnabled, true)));
     });
 
     RenderGraphControlCommandRequest freshRequest;
@@ -163,14 +170,13 @@ TEST(RenderGraphControlCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAndD
     EXPECT_EQ(fresh.result->kind, RenderGraphControlCommandKind::SetFeatureEnabled);
 }
 
-// TryPeekPendingCommandRequest()/IsCommandPending() must reflect pending
-// state correctly, and go back to "nothing pending" once fulfilled.
+// Pending state is observable and clears after fulfilment.
 TEST(RenderGraphControlCommandBridgeTest, PendingStateIsObservableAndClearsAfterFulfillment)
 {
     RenderGraphControlCommandBridge bridge;
 
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 
     std::thread requester([&bridge] {
         RenderGraphControlCommandRequest request;
@@ -185,17 +191,17 @@ TEST(RenderGraphControlCommandBridgeTest, PendingStateIsObservableAndClearsAfter
     }
 
     EXPECT_TRUE(bridge.IsCommandPending());
-    const std::optional<RenderGraphControlCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+    const auto peeked = bridge.TryPeekPendingCommand();
     ASSERT_TRUE(peeked.has_value());
-    EXPECT_EQ(peeked->kind, RenderGraphControlCommandKind::SetFeaturePriority);
-    EXPECT_EQ(peeked->setFeaturePriority.name, "DemoRenderFeatureV2");
-    EXPECT_EQ(peeked->setFeaturePriority.priority, 3);
+    EXPECT_EQ(peeked->request.kind, RenderGraphControlCommandKind::SetFeaturePriority);
+    EXPECT_EQ(peeked->request.setFeaturePriority.name, "DemoRenderFeatureV2");
+    EXPECT_EQ(peeked->request.setFeaturePriority.priority, 3);
 
-    bridge.FulfillCommand(MakeResult(RenderGraphControlCommandKind::SetFeaturePriority, true));
+    EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeResult(RenderGraphControlCommandKind::SetFeaturePriority, true)));
     requester.join();
 
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 }
 
 } // namespace

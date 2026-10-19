@@ -343,7 +343,8 @@ private:
     void Run()
     {
         while (!m_stop.load()) {
-            if (const std::optional<EngineCommandRequest> request = m_bridge.TryPeekPendingCommandRequest()) {
+            if (const auto pending = m_bridge.TryPeekPendingCommand()) {
+                const EngineCommandRequest* const request = &pending->request;
                 EngineCommandResult result;
                 result.kind = request->kind;
                 if (request->kind == EngineCommandKind::GetSceneSnapshot) {
@@ -351,7 +352,7 @@ private:
                     result.getSceneSnapshot.editorAvailable = true;
                     result.getSceneSnapshot.sceneJson = R"({"entities":[],"fake":"scene_snapshot_stand_in"})";
                 }
-                m_bridge.FulfillCommand(result);
+                m_bridge.FulfillCommand(pending->id, result);
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }

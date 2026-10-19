@@ -67,6 +67,15 @@ EditorHotReloadDebugCapability s_editorHotReloadDebugCapability;
 // The one project lifecycle capability instance; a namespace-scope static for the same reason as above.
 EditorProjectLifecycleCapability s_editorProjectLifecycleCapability;
 
+// Delivers a result to the waiting caller; logs when the request already timed out.
+template <typename Bridge, typename Result>
+void FulfillOrLogDrop(Bridge& bridge, std::uint64_t id, Result&& result, const char* kind)
+{
+    if (!bridge.FulfillCommand(id, std::forward<Result>(result))) {
+        GTE_LOG_WARNING("EditorHost", std::string("Dropped a late result for a timed-out command (kind=") + kind + ")");
+    }
+}
+
 } // namespace
 
 EditorHost::SdlContext::SdlContext()
@@ -194,10 +203,11 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
 
 void EditorHost::ServiceFeatureDebugCommand()
 {
-    const std::optional<FeatureDebugCommandRequest> request = m_featureDebugCommandBridge.TryPeekPendingCommandRequest();
-    if (!request) {
+    const auto pending = m_featureDebugCommandBridge.TryPeekPendingCommand();
+    if (!pending) {
         return;
     }
+    const FeatureDebugCommandRequest* const request = &pending->request;
     GTE_PROFILE_SCOPE("EditorHost::ExecuteFeatureDebugCommand");
 
     FeatureDebugCommandResult result;
@@ -238,7 +248,7 @@ void EditorHost::ServiceFeatureDebugCommand()
         break;
     }
     result.found = result.found || request->kind == FeatureDebugCommandKind::List;
-    m_featureDebugCommandBridge.FulfillCommand(std::move(result));
+    FulfillOrLogDrop(m_featureDebugCommandBridge, pending->id, std::move(result), "FeatureDebug");
 }
 
 int EditorHost::Run()
@@ -303,11 +313,11 @@ int EditorHost::Run()
         }
 
         // Drains at most one network engine command per frame, right after input and before Game::Update().
-        if (const std::optional<EngineCommandRequest> request = m_commandBridge.TryPeekPendingCommandRequest()) {
+        if (const auto enginePending = m_commandBridge.TryPeekPendingCommand()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteEngineCommand");
             const EngineCommandResult result = ExecuteEngineCommand(m_game, m_renderer, m_sceneIOCapability,
-                &s_editorHotReloadDebugCapability, m_core.GetSceneServicesDescriptorSet().LayoutHandle(), *request);
-            m_commandBridge.FulfillCommand(result);
+                &s_editorHotReloadDebugCapability, m_core.GetSceneServicesDescriptorSet().LayoutHandle(), enginePending->request);
+            FulfillOrLogDrop(m_commandBridge, enginePending->id, result, "Engine");
         }
 
         // Hot reload: at most once per frame, and it blocks this thread until done (a deliberate hard freeze).
@@ -349,7 +359,8 @@ int EditorHost::Run()
         m_editorLayer->NewFrame();
 
         // Drains at most one pending GET /activate_tab request per frame, after NewFrame() and before BuildUI().
-        if (const std::optional<EditorUiCommandRequest> uiRequest = m_uiCommandBridge.TryPeekPendingCommandRequest()) {
+        if (const auto uiPending = m_uiCommandBridge.TryPeekPendingCommand()) {
+            const EditorUiCommandRequest* const uiRequest = &uiPending->request;
             GTE_PROFILE_SCOPE("EditorHost::ExecuteEditorUiCommand");
             EditorUiCommandResult uiResult;
             uiResult.kind = uiRequest->kind;
@@ -366,14 +377,14 @@ int EditorHost::Run()
                 uiResult.activateTab.tabExists = activation.tabExists;
                 uiResult.activateTab.success = activation.tabExists;
             }
-            m_uiCommandBridge.FulfillCommand(uiResult);
+            FulfillOrLogDrop(m_uiCommandBridge, uiPending->id, uiResult, "EditorUi");
         }
 
         ServiceFeatureDebugCommand();
 
         // Drains at most one pending Frame Debugger command per frame, right after the UI command pump.
-        if (const std::optional<FrameDebuggerCommandRequest> fdRequest =
-                m_frameDebuggerCommandBridge.TryPeekPendingCommandRequest()) {
+        if (const auto fdPending = m_frameDebuggerCommandBridge.TryPeekPendingCommand()) {
+            const FrameDebuggerCommandRequest* const fdRequest = &fdPending->request;
             GTE_PROFILE_SCOPE("EditorHost::ExecuteFrameDebuggerCommand");
             FrameDebuggerCommandResult fdResult;
             fdResult.kind = fdRequest->kind;
@@ -426,13 +437,13 @@ int EditorHost::Run()
             fdResult.state.levelsWhite = stateView.levelsWhite;
             fdResult.state.perDrawEventCount = stateView.perDrawEventCount;
 
-            m_frameDebuggerCommandBridge.FulfillCommand(fdResult);
+            FulfillOrLogDrop(m_frameDebuggerCommandBridge, fdPending->id, fdResult, "FrameDebugger");
         }
 
         // Drains at most one pending render-graph-control command per frame.
         // Built-in-pass/plugin-feature mutations go straight to m_core.
-        if (const std::optional<RenderGraphControlCommandRequest> rgcRequest =
-                m_renderGraphControlCommandBridge.TryPeekPendingCommandRequest()) {
+        if (const auto rgcPending = m_renderGraphControlCommandBridge.TryPeekPendingCommand()) {
+            const RenderGraphControlCommandRequest* const rgcRequest = &rgcPending->request;
             GTE_PROFILE_SCOPE("EditorHost::ExecuteRenderGraphControlCommand");
             RenderGraphControlCommandResult rgcResult;
             rgcResult.kind = rgcRequest->kind;
@@ -498,18 +509,18 @@ int EditorHost::Run()
                 break;
             }
             }
-            m_renderGraphControlCommandBridge.FulfillCommand(rgcResult);
+            FulfillOrLogDrop(m_renderGraphControlCommandBridge, rgcPending->id, rgcResult, "RenderGraphControl");
         }
 
         // Drains at most one pending /import_asset request per frame.
-        if (const std::optional<AssetImportCommandRequest> importRequest =
-                m_assetImportCommandBridge.TryPeekPendingCommandRequest()) {
+        if (const auto importPending = m_assetImportCommandBridge.TryPeekPendingCommand()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteAssetImportCommand");
+            const AssetImportCommandRequest& importRequest = importPending->request;
             AssetImportCommandResult importResult;
-            importResult.kind = importRequest->kind;
+            importResult.kind = importRequest.kind;
             const ProjectAssetImportResult layerResult = m_editorLayer->ImportExternalAssetIntoProject(
-                importRequest->importExternalFile.sourceAbsolutePath,
-                importRequest->importExternalFile.destinationRelativeFolder);
+                importRequest.importExternalFile.sourceAbsolutePath,
+                importRequest.importExternalFile.destinationRelativeFolder);
             ImportExternalFileOutcome& outcome = importResult.importExternalFile;
             outcome.projectAvailable = layerResult.projectAvailable;
             outcome.success = layerResult.success;
@@ -523,22 +534,21 @@ int EditorHost::Run()
             outcome.convertedToMotionAsset = layerResult.convertedToMotionAsset;
             outcome.meshVertexCount = layerResult.meshVertexCount;
             outcome.meshTriangleCount = layerResult.meshTriangleCount;
-            m_assetImportCommandBridge.FulfillCommand(importResult);
+            FulfillOrLogDrop(m_assetImportCommandBridge, importPending->id, importResult, "AssetImport");
         }
 
         // Drains at most one pending "Open Project" load request per frame (submitted from the network thread).
-        if (const std::optional<LoadProjectAssemblyCommandRequest> loadRequest =
-                m_projectLifecycleLoadCommandBridge.TryPeekPendingCommandRequest()) {
+        if (const auto loadPending = m_projectLifecycleLoadCommandBridge.TryPeekPendingCommand()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteProjectLifecycleLoad");
             const std::filesystem::path outputDirectory = ResolveProjectAssemblyOutputDirectory(gte::ExecutableDirectory());
-            const std::string& name = loadRequest->projectName;
+            const std::string& name = loadPending->request.projectName;
             LoadProjectAssemblyCommandResult loadResult;
             loadResult.loadSucceeded =
                 m_core.GetProjectAssemblyHost().LoadOneProjectAssemblyFromExactPath(
                     outputDirectory / (name + "_Game.dll"), m_core, this)
                 && m_core.GetProjectAssemblyHost().LoadOneProjectAssemblyFromExactPathIfExists(
                     outputDirectory / (name + "_Editor.dll"), m_core, this);
-            m_projectLifecycleLoadCommandBridge.FulfillCommand(loadResult);
+            FulfillOrLogDrop(m_projectLifecycleLoadCommandBridge, loadPending->id, loadResult, "ProjectLifecycleLoad");
         }
 
         // Clears last frame's queued Submit() draws before Game queues this frame's.

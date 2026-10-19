@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <thread>
 
 namespace gte {
@@ -27,8 +28,15 @@ EngineCommandResult MakeInstantiateResult(bool success, const std::string& resol
     return result;
 }
 
-// A request nobody ever fulfills must time out, roughly within the
-// requested timeout window.
+// Spins until a request is pending.
+void WaitUntilPending(const EngineCommandBridge& bridge)
+{
+    while (!bridge.IsCommandPending()) {
+        std::this_thread::yield();
+    }
+}
+
+// A request nobody fulfills must time out within the requested window.
 TEST(EngineCommandBridgeTest, RequestWithNoFulfillerTimesOut)
 {
     EngineCommandBridge bridge;
@@ -43,22 +51,17 @@ TEST(EngineCommandBridgeTest, RequestWithNoFulfillerTimesOut)
     EXPECT_LT(elapsed, std::chrono::milliseconds(2000));
 }
 
-// A separate thread fulfilling the request shortly after it starts must
-// wake the waiter well before a much longer timeout would have elapsed -
-// proves the condition_variable wakeup, not the timeout, resolved it.
+// A fulfiller thread must wake the waiter long before the timeout.
 TEST(EngineCommandBridgeTest, FulfilledRequestReturnsExactResultQuickly)
 {
     EngineCommandBridge bridge;
 
     std::thread fulfiller([&bridge] {
-        // Wait until the request is actually pending before fulfilling it.
-        while (!bridge.IsCommandPending()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
-        const std::optional<EngineCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+        WaitUntilPending(bridge);
+        const auto peeked = bridge.TryPeekPendingCommand();
         ASSERT_TRUE(peeked.has_value());
-        EXPECT_EQ(peeked->instantiatePrimitive.requestedName, "Foo");
-        bridge.FulfillCommand(MakeInstantiateResult(true, "Foo"));
+        EXPECT_EQ(peeked->request.instantiatePrimitive.requestedName, "Foo");
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeInstantiateResult(true, "Foo")));
     });
 
     const auto start = std::chrono::steady_clock::now();
@@ -76,26 +79,16 @@ TEST(EngineCommandBridgeTest, FulfilledRequestReturnsExactResultQuickly)
     EXPECT_LT(elapsed, std::chrono::milliseconds(4000));
 }
 
-// A second concurrent SubmitAndWait() call, started strictly after the
-// first has already registered as pending, must return alreadyPending ==
-// true IMMEDIATELY - never actually wait. This holds regardless of which
-// EngineCommandKind either request carries - the bridge has a single global
-// slot (PHASE0_MASTER_STRATEGY.md's Locked Design Decision #5), unlike
-// FrameCaptureBridge's per-kind slots.
+// A second submit while one is pending returns alreadyPending immediately, whatever its kind.
 TEST(EngineCommandBridgeTest, SecondConcurrentRequestReturnsAlreadyPendingImmediately)
 {
     EngineCommandBridge bridge;
 
     std::thread firstRequester([&bridge] {
-        // Nobody ever fulfills this one - it will simply time out on its
-        // own after this test's own assertions are done reading it.
         bridge.SubmitAndWait(MakeInstantiateRequest("First"), 1500);
     });
 
-    // Give the first request a moment to actually register as pending.
-    while (!bridge.IsCommandPending()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
+    WaitUntilPending(bridge);
 
     EngineCommandRequest deleteRequest;
     deleteRequest.kind = EngineCommandKind::DeleteEntity;
@@ -108,21 +101,18 @@ TEST(EngineCommandBridgeTest, SecondConcurrentRequestReturnsAlreadyPendingImmedi
     EXPECT_TRUE(second.alreadyPending);
     EXPECT_FALSE(second.timedOut);
     EXPECT_FALSE(second.result.has_value());
-    // Must not have actually waited - a real wait would be at least
-    // several hundred milliseconds given the timeouts above.
     EXPECT_LT(elapsed, std::chrono::milliseconds(500));
 
     firstRequester.join();
 }
 
-// TryPeekPendingCommandRequest()/IsCommandPending() must reflect pending
-// state correctly, and go back to "nothing pending" once fulfilled.
+// Pending state is observable and clears after fulfilment.
 TEST(EngineCommandBridgeTest, PendingStateIsObservableAndClearsAfterFulfillment)
 {
     EngineCommandBridge bridge;
 
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 
     std::thread requester([&bridge] {
         EngineCommandRequest deleteRequest;
@@ -131,46 +121,58 @@ TEST(EngineCommandBridgeTest, PendingStateIsObservableAndClearsAfterFulfillment)
         bridge.SubmitAndWait(deleteRequest, 1000);
     });
 
-    while (!bridge.IsCommandPending()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
+    WaitUntilPending(bridge);
 
     EXPECT_TRUE(bridge.IsCommandPending());
-    const std::optional<EngineCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+    const auto peeked = bridge.TryPeekPendingCommand();
     ASSERT_TRUE(peeked.has_value());
-    EXPECT_EQ(peeked->kind, EngineCommandKind::DeleteEntity);
-    EXPECT_EQ(peeked->deleteEntity.name, "ToDelete");
+    EXPECT_NE(peeked->id, 0u);
+    EXPECT_EQ(peeked->request.kind, EngineCommandKind::DeleteEntity);
+    EXPECT_EQ(peeked->request.deleteEntity.name, "ToDelete");
 
     EngineCommandResult result;
     result.kind = EngineCommandKind::DeleteEntity;
     result.deleteEntity.success = true;
-    bridge.FulfillCommand(result);
+    EXPECT_TRUE(bridge.FulfillCommand(peeked->id, result));
     requester.join();
 
     EXPECT_FALSE(bridge.IsCommandPending());
-    EXPECT_FALSE(bridge.TryPeekPendingCommandRequest().has_value());
+    EXPECT_FALSE(bridge.TryPeekPendingCommand().has_value());
 }
 
-// A late FulfillCommand() call, arriving AFTER a request already timed out
-// and reset itself, must be a safe no-op - and must not corrupt the NEXT
-// request's own result.
+// Fulfilling with nothing pending is a dropped no-op.
+TEST(EngineCommandBridgeTest, FulfillWithNothingPendingIsDropped)
+{
+    EngineCommandBridge bridge;
+    EXPECT_FALSE(bridge.FulfillCommand(1, MakeInstantiateResult(true, "Orphan")));
+    EXPECT_FALSE(bridge.IsCommandPending());
+}
+
+// A late fulfil after a timeout is dropped and does not corrupt the next request.
 TEST(EngineCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAndDoesNotCorruptNextRequest)
 {
     EngineCommandBridge bridge;
 
-    const EngineCommandBridge::SubmitResult timedOut = bridge.SubmitAndWait(MakeInstantiateRequest("Foo"), 50);
-    EXPECT_TRUE(timedOut.timedOut);
-
-    // This arrives long after the waiter already gave up - must not crash
-    // or assert, and must not affect anything.
-    bridge.FulfillCommand(MakeInstantiateResult(true, "Stale"));
-
-    // A fresh request afterward must behave completely normally.
-    std::thread fulfiller([&bridge] {
-        while (!bridge.IsCommandPending()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    std::uint64_t idA = 0;
+    std::thread peeker([&bridge, &idA] {
+        WaitUntilPending(bridge);
+        const auto peeked = bridge.TryPeekPendingCommand();
+        if (peeked) {
+            idA = peeked->id;
         }
-        bridge.FulfillCommand(MakeInstantiateResult(true, "Fresh"));
+    });
+    const EngineCommandBridge::SubmitResult timedOut = bridge.SubmitAndWait(MakeInstantiateRequest("Foo"), 50);
+    peeker.join();
+    EXPECT_TRUE(timedOut.timedOut);
+    ASSERT_NE(idA, 0u);
+
+    EXPECT_FALSE(bridge.FulfillCommand(idA, MakeInstantiateResult(true, "Stale")));
+
+    std::thread fulfiller([&bridge] {
+        WaitUntilPending(bridge);
+        const auto peeked = bridge.TryPeekPendingCommand();
+        ASSERT_TRUE(peeked.has_value());
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeInstantiateResult(true, "Fresh")));
     });
 
     const EngineCommandBridge::SubmitResult fresh = bridge.SubmitAndWait(MakeInstantiateRequest("Fresh"), 5000);
@@ -180,13 +182,89 @@ TEST(EngineCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAndDoesNotCorrup
     EXPECT_EQ(fresh.result->instantiatePrimitive.resolvedName, "Fresh");
 }
 
-// network-impl-5 campaign (PHASE3_ENGINE_COMMAND_BRIDGE_AND_DISPATCH_EXTENSION.md)
-// - a round-trip test per NEW EngineCommandKind, mirroring
-// FulfilledRequestReturnsExactResultQuickly's own exact shape above. These
-// exercise ONLY the bridge's existing generic mutex/condition-variable
-// mechanics - proving directly that adding two more EngineCommandKind values
-// needed zero changes to EngineCommandBridge.cpp itself (PHASE0's own Step 2
-// claim).
+// A stale result must not wake a newer request that is already waiting.
+TEST(EngineCommandBridgeTest, StaleFulfillWhileNextRequestWaitsIsDropped)
+{
+    EngineCommandBridge bridge;
+
+    EngineCommandBridge::SubmitResult resultA;
+    std::thread threadX([&] { resultA = bridge.SubmitAndWait(MakeInstantiateRequest("A"), 50); });
+
+    WaitUntilPending(bridge);
+    const auto peekedA = bridge.TryPeekPendingCommand();
+    ASSERT_TRUE(peekedA.has_value());
+    const std::uint64_t idA = peekedA->id;
+
+    threadX.join();
+    EXPECT_TRUE(resultA.timedOut);
+
+    EngineCommandBridge::SubmitResult resultB;
+    std::thread threadY([&] { resultB = bridge.SubmitAndWait(MakeInstantiateRequest("B"), 5000); });
+
+    WaitUntilPending(bridge);
+    const auto peekedB = bridge.TryPeekPendingCommand();
+    ASSERT_TRUE(peekedB.has_value());
+    const std::uint64_t idB = peekedB->id;
+    EXPECT_NE(idA, idB);
+    EXPECT_EQ(peekedB->request.instantiatePrimitive.requestedName, "B");
+
+    EXPECT_FALSE(bridge.FulfillCommand(idA, MakeInstantiateResult(true, "Stale")));
+    EXPECT_TRUE(bridge.IsCommandPending());
+
+    EXPECT_TRUE(bridge.FulfillCommand(idB, MakeInstantiateResult(true, "Fresh")));
+    threadY.join();
+
+    EXPECT_FALSE(resultB.timedOut);
+    ASSERT_TRUE(resultB.result.has_value());
+    EXPECT_EQ(resultB.result->instantiatePrimitive.resolvedName, "Fresh");
+}
+
+// Ids strictly increase and 0 is never issued.
+TEST(EngineCommandBridgeTest, RequestIdsIncreaseAndZeroIsNeverIssued)
+{
+    EngineCommandBridge bridge;
+
+    std::uint64_t previousId = 0;
+    for (int i = 0; i < 3; ++i) {
+        EngineCommandBridge::SubmitResult submitted;
+        std::thread requester([&] { submitted = bridge.SubmitAndWait(MakeInstantiateRequest("Req"), 5000); });
+
+        WaitUntilPending(bridge);
+        const auto peeked = bridge.TryPeekPendingCommand();
+        ASSERT_TRUE(peeked.has_value());
+        EXPECT_NE(peeked->id, 0u);
+        EXPECT_GT(peeked->id, previousId);
+        previousId = peeked->id;
+
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeInstantiateResult(true, "Ok")));
+        requester.join();
+        EXPECT_TRUE(submitted.result.has_value());
+    }
+}
+
+// A wrong id is dropped and must not wake the waiter.
+TEST(EngineCommandBridgeTest, FulfillWithWrongIdWhileRequestWaitsIsDroppedAndDoesNotWakeWaiter)
+{
+    EngineCommandBridge bridge;
+
+    EngineCommandBridge::SubmitResult submitted;
+    std::thread requester([&] { submitted = bridge.SubmitAndWait(MakeInstantiateRequest("Foo"), 5000); });
+
+    WaitUntilPending(bridge);
+    const auto peeked = bridge.TryPeekPendingCommand();
+    ASSERT_TRUE(peeked.has_value());
+
+    EXPECT_FALSE(bridge.FulfillCommand(peeked->id + 1000, MakeInstantiateResult(true, "Wrong")));
+    EXPECT_TRUE(bridge.IsCommandPending());
+
+    EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeInstantiateResult(true, "Right")));
+    requester.join();
+
+    ASSERT_TRUE(submitted.result.has_value());
+    EXPECT_EQ(submitted.result->instantiatePrimitive.resolvedName, "Right");
+}
+
+// Round trip for SetEntityTrs through the generic bridge.
 TEST(EngineCommandBridgeTest, FulfilledSetEntityTrsRequestReturnsExactResultQuickly)
 {
     EngineCommandBridge bridge;
@@ -198,21 +276,19 @@ TEST(EngineCommandBridgeTest, FulfilledSetEntityTrsRequestReturnsExactResultQuic
     request.setEntityTrs.translation = Vec3{ 0.0f, 5.0f, -2.0f };
 
     std::thread fulfiller([&bridge] {
-        while (!bridge.IsCommandPending()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
-        const std::optional<EngineCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+        WaitUntilPending(bridge);
+        const auto peeked = bridge.TryPeekPendingCommand();
         ASSERT_TRUE(peeked.has_value());
-        EXPECT_EQ(peeked->kind, EngineCommandKind::SetEntityTrs);
-        EXPECT_EQ(peeked->setEntityTrs.name, "MyLight");
-        EXPECT_TRUE(peeked->setEntityTrs.hasTranslation);
+        EXPECT_EQ(peeked->request.kind, EngineCommandKind::SetEntityTrs);
+        EXPECT_EQ(peeked->request.setEntityTrs.name, "MyLight");
+        EXPECT_TRUE(peeked->request.setEntityTrs.hasTranslation);
 
         EngineCommandResult result;
         result.kind = EngineCommandKind::SetEntityTrs;
         result.setEntityTrs.success = true;
         result.setEntityTrs.translationChanged = true;
         result.setEntityTrs.resultingPosition = Vec3{ 0.0f, 5.0f, -2.0f };
-        bridge.FulfillCommand(result);
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, result));
     });
 
     const auto start = std::chrono::steady_clock::now();
@@ -232,6 +308,7 @@ TEST(EngineCommandBridgeTest, FulfilledSetEntityTrsRequestReturnsExactResultQuic
     EXPECT_LT(elapsed, std::chrono::milliseconds(4000));
 }
 
+// Round trip for InstantiateLight through the generic bridge.
 TEST(EngineCommandBridgeTest, FulfilledInstantiateLightRequestReturnsExactResultQuickly)
 {
     EngineCommandBridge bridge;
@@ -243,19 +320,17 @@ TEST(EngineCommandBridgeTest, FulfilledInstantiateLightRequestReturnsExactResult
     request.instantiateLight.worldPosition = Vec3{ 0.0f, 10.0f, 0.0f };
 
     std::thread fulfiller([&bridge] {
-        while (!bridge.IsCommandPending()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
-        const std::optional<EngineCommandRequest> peeked = bridge.TryPeekPendingCommandRequest();
+        WaitUntilPending(bridge);
+        const auto peeked = bridge.TryPeekPendingCommand();
         ASSERT_TRUE(peeked.has_value());
-        EXPECT_EQ(peeked->kind, EngineCommandKind::InstantiateLight);
-        EXPECT_EQ(peeked->instantiateLight.requestedName, "Sun");
+        EXPECT_EQ(peeked->request.kind, EngineCommandKind::InstantiateLight);
+        EXPECT_EQ(peeked->request.instantiateLight.requestedName, "Sun");
 
         EngineCommandResult result;
         result.kind = EngineCommandKind::InstantiateLight;
         result.instantiateLight.success = true;
         result.instantiateLight.resolvedName = "Sun";
-        bridge.FulfillCommand(result);
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, result));
     });
 
     const auto start = std::chrono::steady_clock::now();
