@@ -30,8 +30,8 @@ GtaoFalloff MakeGtaoFalloff(float radius, float falloffFraction) noexcept;
 // Sample radius in depth pixels of a surface at `viewDepth`, capped at `maxPixels`.
 float GtaoScreenRadiusPixels(float radius, float viewDepth, float pixelScale, float maxPixels) noexcept;
 
-// CPU reference of the shader's per-slice math, used to check the shader against brute force.
 // One slice of a surface point: the normal projected into the slice plane.
+// Also the CPU reference of the shader's per-slice math.
 struct GtaoSliceFrame {
     Vec3 orthoDir;       // Unit, in the slice plane, perpendicular to the view vector. Side 0 points along it.
     float projLen = 0.0f;

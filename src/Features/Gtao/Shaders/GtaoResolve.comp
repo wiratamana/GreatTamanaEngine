@@ -17,8 +17,8 @@ layout(binding = 1) uniform sampler2D aoRaw;     // x visibility, y view depth (
 layout(binding = 2) uniform sampler2D aoHistory; // Previous result, same layout.
 layout(binding = 3, rgba16f) uniform writeonly image2D aoOutput;
 
-// Previous-frame AO at the world point this texel sees, or -1 when no history applies.
-float ReprojectHistory(ivec2 p, float viewZ, float tolerance)
+// Previous-frame AO at the world point this texel sees: x = filtered value, y = bilinear coverage.
+vec2 ReprojectHistory(ivec2 p, float viewZ, float tolerance)
 {
     vec2 depthSize = vec2(params.counts.zw);
     float divisor = float(params.counts.x);
@@ -30,7 +30,7 @@ float ReprojectHistory(ivec2 p, float viewZ, float tolerance)
     vec4 prevClip = params.prevViewProjection * vec4(world, 1.0);
     float prevZ = dot(world - params.prevEye.xyz, params.prevForward.xyz);
     if (prevClip.w <= 1e-4 || prevZ <= 1e-4) {
-        return -1.0;
+        return vec2(0.0);
     }
 
     // History texel space: texel i sits at depth pixel i * divisor.
@@ -54,7 +54,7 @@ float ReprojectHistory(ivec2 p, float viewZ, float tolerance)
         sum += h.x * bilinear * valid;
         weightSum += bilinear * valid;
     }
-    return weightSum > 0.25 ? sum / weightSum : -1.0;
+    return weightSum > 0.0 ? vec2(sum / weightSum, weightSum) : vec2(0.0);
 }
 
 void main()
@@ -100,9 +100,9 @@ void main()
     float result = sum / max(weightSum, 1e-5);
 
     if (params.counts.y != 0u && params.filterParams.y > 0.0) {
-        float history = ReprojectHistory(p, center.y, params.filterParams.z);
-        if (history >= 0.0) {
-            result = mix(result, clamp(history, lo, hi), params.filterParams.y);
+        vec2 history = ReprojectHistory(p, center.y, params.filterParams.z);
+        if (history.y > 0.25) {
+            result = mix(result, clamp(history.x, lo, hi), params.filterParams.y * min(history.y, 1.0));
         }
     }
     if (isnan(result)) {

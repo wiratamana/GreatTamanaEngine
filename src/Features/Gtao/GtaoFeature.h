@@ -1,7 +1,6 @@
 #pragma once
 
 #include "GtaoDebugEndpoint.h"
-#include "GtaoMath.h"
 #include "GtaoTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
 

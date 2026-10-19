@@ -1,5 +1,6 @@
 #include "GtaoFeature.h"
 
+#include "GtaoMath.h"
 #include "../../Core/PixelFormat.h"
 
 #include <optional>
@@ -72,6 +73,7 @@ void GtaoFeature::OcclusionPass(fx::PostOpaqueFrame& f)
     }
     const GtaoCameraBasis basis = DeriveGtaoCameraBasis(v.eye, v.invViewProjection, v.extent);
     if (!basis.valid) {
+        f.ReportOnce("Gtao: camera is not a square-pixel perspective camera, AO is off");
         bail(GtaoFrameStatus::NoValidCamera);
         return;
     }
