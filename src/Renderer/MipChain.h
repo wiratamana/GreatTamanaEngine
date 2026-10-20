@@ -27,4 +27,8 @@ MipChainRgba8 BuildMipChainRgba8(const std::uint8_t* rgba, std::uint32_t width, 
     std::uint32_t maxLevels = std::numeric_limits<std::uint32_t>::max(),
     MipColorSpace colorSpace = MipColorSpace::Linear);
 
+// Bytes of the whole chain BuildMipChainRgba8() returns for this size and level cap (0 for a zero size).
+std::uint64_t MipChainByteSize(std::uint32_t width, std::uint32_t height,
+    std::uint32_t maxLevels = std::numeric_limits<std::uint32_t>::max()) noexcept;
+
 } // namespace gte

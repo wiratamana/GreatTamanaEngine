@@ -213,6 +213,13 @@ public:
     // Texture creation factories.
     Texture2D CreateTexture2D(const Texture2DUploadDesc& desc) const;
 
+    // Batched upload with mip chains (sRGB for base color, UNORM otherwise); index-aligned with `uploads`,
+    // a null entry for an invalid upload. Throws on a GPU failure.
+    std::vector<std::shared_ptr<Texture2D>> CreateMaterialImages(std::span<const MaterialImageUpload> uploads) const;
+
+    // Finished texture uploads since creation (submits, images, staging bytes).
+    GpuUploadStats GetUploadStats() const noexcept;
+
     // Uploads `pixelsRgba8` as an sRGB base-color image with a mip chain and wraps it in a material.
     MaterialTexture CreateMaterialTexture2D(const void* pixelsRgba8, int width, int height,
         const MaterialParams& params = {}, const char* debugName = nullptr) const;

@@ -83,6 +83,30 @@ TEST(MipChainTest, NullInputOrZeroSizeGivesEmptyChain)
     EXPECT_EQ(BuildMipChainRgba8(pixel, 1, 0).levelCount, 0u);
 }
 
+TEST(MipChainTest, ByteSizeMatchesBuiltChain)
+{
+    struct Case {
+        std::uint32_t width;
+        std::uint32_t height;
+        std::uint32_t maxLevels;
+    };
+    const Case cases[] = { { 1, 1, 99 }, { 2, 2, 99 }, { 3, 5, 99 }, { 4, 1, 99 }, { 1024, 1024, 99 },
+        { 1024, 1024, 1 }, { 64, 64, 3 } };
+    for (const Case& c : cases) {
+        const std::vector<std::uint8_t> pixels(static_cast<std::size_t>(c.width) * c.height * 4, 1);
+        const MipChainRgba8 chain = BuildMipChainRgba8(pixels.data(), c.width, c.height, c.maxLevels);
+        EXPECT_EQ(MipChainByteSize(c.width, c.height, c.maxLevels), chain.pixels.size())
+            << c.width << "x" << c.height << " levels " << c.maxLevels;
+    }
+}
+
+TEST(MipChainTest, ByteSizeIsZeroForEmptyInput)
+{
+    EXPECT_EQ(MipChainByteSize(0, 4), 0u);
+    EXPECT_EQ(MipChainByteSize(4, 0), 0u);
+    EXPECT_EQ(MipChainByteSize(4, 4, 0), 0u);
+}
+
 TEST(SamplerAnisotropyTest, CapsToEightAndFallsBackToOne)
 {
     EXPECT_FLOAT_EQ(ChooseMaterialAnisotropy(true, 16.0f), 8.0f);

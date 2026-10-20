@@ -643,6 +643,17 @@ Texture2D Renderer::CreateTexture2D(const Texture2DUploadDesc& desc) const
     return m_resources.CreateTexture2D(desc);
 }
 
+std::vector<std::shared_ptr<Texture2D>> Renderer::CreateMaterialImages(
+    std::span<const MaterialImageUpload> uploads) const
+{
+    return m_resources.CreateMaterialImages(uploads);
+}
+
+GpuUploadStats Renderer::GetUploadStats() const noexcept
+{
+    return m_resources.UploadStats();
+}
+
 MaterialTexture Renderer::CreateMaterialTexture2D(const void* pixelsRgba8, int width, int height,
     const MaterialParams& params, const char* debugName) const
 {

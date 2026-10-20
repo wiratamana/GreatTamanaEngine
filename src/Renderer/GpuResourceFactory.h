@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Buffer.h"
+#include "MaterialImageRole.h"
 #include "MaterialTexture.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
@@ -8,11 +9,13 @@
 #include "RenderTexture.h"
 #include "Texture2D.h"
 #include "TextureArray2D.h"
+#include "UploadChunker.h"
 #include "VolumeTexture.h"
 #include "Vulkan/BoundedKeySet.h"
 #include "Vulkan/DescriptorPoolGrowth.h"
 #include "Vulkan/VulkanAllocator.h"
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -100,6 +103,14 @@ public:
     // Textures
     Texture2D CreateTexture2D(const Texture2DUploadDesc& desc) const;
 
+    // Uploads every image with a mip chain (sRGB for base color, UNORM otherwise). Images share staging buffers,
+    // command buffers and submits. Index-aligned with `uploads`; an entry is null when that upload is invalid.
+    // Throws on a GPU failure; none of the images of the failed chunk are returned.
+    std::vector<std::shared_ptr<Texture2D>> CreateMaterialImages(std::span<const MaterialImageUpload> uploads) const;
+
+    // Finished texture uploads since creation.
+    GpuUploadStats UploadStats() const noexcept;
+
     VolumeTexture CreateVolumeTexture(
         int width, int height, int depth, PixelFormat format, const char* debugName = nullptr) const;
 
@@ -143,7 +154,15 @@ private:
     // Creates one compute descriptor pool; VK_NULL_HANDLE on failure.
     VkDescriptorPool CreateComputeDescriptorPool(const PoolCapacity& capacity) const noexcept;
 
+    // Records, submits and waits on one command buffer. Logs and throws when the wait fails.
     void ImmediateSubmitInternal(const std::function<void(VkCommandBuffer)>& recordFn) const;
+
+    // Uploads one chunk with one staging buffer, one submit and one wait. Throws; nothing leaks on failure.
+    std::vector<Texture2D> UploadTexture2DChunk(std::span<const Texture2DUploadDesc> descs) const;
+
+    mutable std::atomic<std::uint64_t> m_uploadSubmitCount{ 0 };
+    mutable std::atomic<std::uint64_t> m_uploadImageCount{ 0 };
+    mutable std::atomic<std::uint64_t> m_uploadStagingBytes{ 0 };
 
     VkDevice m_device = VK_NULL_HANDLE;
     VmaAllocator m_allocator = VK_NULL_HANDLE;

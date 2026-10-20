@@ -2299,6 +2299,8 @@ set(GTE_TEST_SOURCES
     Application/ProjectAssemblyHotReloadCommandBridgeTests.cpp
     Renderer/VertexTests.cpp
     Renderer/MipChainTests.cpp
+    Renderer/UploadChunkerTests.cpp
+    Renderer/MaterialImageRoleTests.cpp
     Renderer/MaterialParamsTests.cpp
     Renderer/PrimitiveMeshGeneratorTests.cpp
     Renderer/ResourcePoolTests.cpp
@@ -2930,7 +2932,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Renderer/MaterialParamsTests.cpp Support/Std140Block.h
     Renderer/GpuSkinning/GpuSkinningPassTests.cpp Renderer/RenderGraph/RenderGraphComputeBindingKeyTests.cpp
     Renderer/RenderGraph/PassIdentityTests.cpp Renderer/RenderGraph/ResourcePoolEvictionTests.cpp
-    Assets/MeshTangentsTests.cpp)
+    Assets/MeshTangentsTests.cpp Renderer/UploadChunkerTests.cpp Renderer/MaterialImageRoleTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

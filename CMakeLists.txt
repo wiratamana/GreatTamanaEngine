@@ -761,6 +761,10 @@ add_library(gte_core STATIC
     src/Renderer/SwapchainCaptureService.h
     src/Renderer/GpuResourceFactory.cpp
     src/Renderer/GpuResourceFactory.h
+    src/Renderer/MaterialSetPool.cpp
+    src/Renderer/MaterialSetPool.h
+    src/Renderer/MaterialImageRole.h
+    src/Renderer/UploadChunker.h
     src/Renderer/Buffer.cpp
     src/Renderer/Buffer.h
     src/Renderer/Texture2D.h

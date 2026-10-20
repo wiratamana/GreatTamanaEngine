@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace gte {
@@ -263,10 +264,21 @@ void GpuResourceFactory::ImmediateSubmitInternal(const std::function<void(VkComm
         throw std::runtime_error("GpuResourceFactory::ImmediateSubmitInternal: vkQueueSubmit2 failed.");
     }
 
-    vkWaitForFences(m_device, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+    const VkResult waitResult =
+        vkWaitForFences(m_device, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+    if (waitResult != VK_SUCCESS) {
+        // The GPU may still touch the command buffer and the caller's resources: drain it once before cleanup.
+        GTE_LOG_ERROR("GpuResourceFactory",
+            "vkWaitForFences failed in an immediate submit (VkResult " + std::to_string(static_cast<int>(waitResult))
+                + "); waiting for the device.");
+        vkDeviceWaitIdle(m_device);
+    }
 
     vkDestroyFence(m_device, fence, nullptr);
     FreeTransientCommandBuffer(cmd);
+    if (waitResult != VK_SUCCESS) {
+        throw std::runtime_error("GpuResourceFactory::ImmediateSubmitInternal: vkWaitForFences failed.");
+    }
 }
 
 Pipeline GpuResourceFactory::CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
@@ -363,77 +375,175 @@ Mesh GpuResourceFactory::CreateMeshFromSharedVertexBuffer(std::shared_ptr<Buffer
     return Mesh(std::move(sharedVertexBuffer), vertexCount, std::move(indexBuffer), indexCount);
 }
 
+namespace {
+
+constexpr std::uint64_t kUploadStagingBudgetBytes = 64ull * 1024 * 1024;
+constexpr std::size_t kUploadMaxItemsPerChunk = 256;
+constexpr std::uint64_t kStagingAlignment = 16;
+
+constexpr std::uint64_t AlignUp(std::uint64_t value, std::uint64_t alignment) noexcept
+{
+    return (value + alignment - 1) / alignment * alignment;
+}
+
+} // namespace
+
 Texture2D GpuResourceFactory::CreateTexture2D(const Texture2DUploadDesc& desc) const
 {
-    if (desc.format != PixelFormat::RGBA8_UNorm && desc.format != PixelFormat::RGBA8_SRGB) {
-        throw std::runtime_error("GpuResourceFactory::CreateTexture2D: only RGBA8_UNorm and RGBA8_SRGB are supported.");
-    }
-    const VkFormat vkFormat = ToVkFormat(desc.format);
-    if (!SupportsLinearSampling(m_physicalDevice, vkFormat)) {
-        throw std::runtime_error("GpuResourceFactory::CreateTexture2D: this physical device cannot sample the requested format.");
-    }
-    if (desc.allowStorageImageAccess && !SupportsStorageImageUsage(m_physicalDevice, vkFormat)) {
-        throw std::runtime_error(
-            "GpuResourceFactory::CreateTexture2D: requested allowStorageImageAccess = true, but this physical "
-            "device does not support VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for the requested format.");
+    std::vector<Texture2D> textures = UploadTexture2DChunk(std::span<const Texture2DUploadDesc>(&desc, 1));
+    return std::move(textures.front());
+}
+
+std::vector<Texture2D> GpuResourceFactory::UploadTexture2DChunk(std::span<const Texture2DUploadDesc> descs) const
+{
+    std::vector<Texture2D> textures;
+    if (descs.empty()) {
+        return textures;
     }
 
-    // Level 0 only unless a mip chain was requested. Sizes below 1 are clamped like Texture does.
-    const MipChainRgba8 chain = BuildMipChainRgba8(static_cast<const std::uint8_t*>(desc.pixelsRgba8),
-        static_cast<std::uint32_t>(std::max(desc.width, 1)), static_cast<std::uint32_t>(std::max(desc.height, 1)),
-        desc.generateMips ? std::numeric_limits<std::uint32_t>::max() : 1U,
-        desc.format == PixelFormat::RGBA8_SRGB ? MipColorSpace::Srgb : MipColorSpace::Linear);
-    if (chain.levelCount == 0) {
-        throw std::runtime_error("GpuResourceFactory::CreateTexture2D: pixel data is null.");
+    for (const Texture2DUploadDesc& desc : descs) {
+        if (desc.format != PixelFormat::RGBA8_UNorm && desc.format != PixelFormat::RGBA8_SRGB) {
+            throw std::runtime_error(
+                "GpuResourceFactory::UploadTexture2DChunk: only RGBA8_UNorm and RGBA8_SRGB are supported.");
+        }
+        const VkFormat vkFormat = ToVkFormat(desc.format);
+        if (!SupportsLinearSampling(m_physicalDevice, vkFormat)) {
+            throw std::runtime_error(
+                "GpuResourceFactory::UploadTexture2DChunk: this physical device cannot sample the requested format.");
+        }
+        if (desc.allowStorageImageAccess && !SupportsStorageImageUsage(m_physicalDevice, vkFormat)) {
+            throw std::runtime_error(
+                "GpuResourceFactory::UploadTexture2DChunk: requested allowStorageImageAccess = true, but this "
+                "physical device does not support VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for the requested format.");
+        }
     }
 
-    Texture2D texture(m_allocator, m_memoryTracker, m_device, desc, chain.levelCount);
+    // Mip chains and their offsets inside the shared staging buffer. Sizes below 1 are clamped like Texture does.
+    std::vector<MipChainRgba8> chains;
+    std::vector<std::uint64_t> stagingOffsets;
+    chains.reserve(descs.size());
+    stagingOffsets.reserve(descs.size());
+    std::uint64_t stagingSize = 0;
+    for (const Texture2DUploadDesc& desc : descs) {
+        MipChainRgba8 chain = BuildMipChainRgba8(static_cast<const std::uint8_t*>(desc.pixelsRgba8),
+            static_cast<std::uint32_t>(std::max(desc.width, 1)), static_cast<std::uint32_t>(std::max(desc.height, 1)),
+            desc.generateMips ? std::numeric_limits<std::uint32_t>::max() : 1U,
+            desc.format == PixelFormat::RGBA8_SRGB ? MipColorSpace::Srgb : MipColorSpace::Linear);
+        if (chain.levelCount == 0) {
+            throw std::runtime_error("GpuResourceFactory::UploadTexture2DChunk: pixel data is null.");
+        }
+        stagingOffsets.push_back(stagingSize);
+        stagingSize += AlignUp(chain.pixels.size(), kStagingAlignment);
+        chains.push_back(std::move(chain));
+    }
 
-    // One copy region per mip level.
-    std::vector<VkBufferImageCopy> regions;
-    regions.reserve(chain.levelCount);
-    for (std::uint32_t level = 0; level < chain.levelCount; ++level) {
-        VkBufferImageCopy region{};
-        region.bufferOffset = chain.levelByteOffsets[level];
-        region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1 };
-        region.imageExtent = { chain.levelWidths[level], chain.levelHeights[level], 1 };
-        regions.push_back(region);
+    // Created before the staging buffer so a throw destroys every image made so far.
+    textures.reserve(descs.size());
+    for (std::size_t i = 0; i < descs.size(); ++i) {
+        textures.emplace_back(m_allocator, m_memoryTracker, m_device, descs[i], chains[i].levelCount);
     }
 
     // Unnamed throwaway staging buffer.
-    const uint64_t size = chain.pixels.size();
-    Buffer staging = CreateBuffer(size, BufferUsage::TransferSrc, BufferMemoryUsage::CpuToGpu);
-    staging.Upload(chain.pixels.data(), static_cast<std::size_t>(size));
+    Buffer staging = CreateBuffer(stagingSize, BufferUsage::TransferSrc, BufferMemoryUsage::CpuToGpu);
+    for (std::size_t i = 0; i < chains.size(); ++i) {
+        staging.Upload(chains[i].pixels.data(), chains[i].pixels.size(), static_cast<std::size_t>(stagingOffsets[i]));
+    }
+
+    const rg::ResourceState undefinedState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE };
+    const rg::ResourceState transferDst = rg::RequiredStateFor(rg::ResourceAccess::TransferDst, false);
+    const rg::ResourceState shaderRead = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
 
     ImmediateSubmitInternal([&](VkCommandBuffer cmd) {
-        VkImageMemoryBarrier toTransferDst{};
-        toTransferDst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        toTransferDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        toTransferDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        toTransferDst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        toTransferDst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        toTransferDst.image = texture.Image();
-        toTransferDst.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, chain.levelCount, 0, 1 };
-        toTransferDst.srcAccessMask = 0;
-        toTransferDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-            nullptr, 1, &toTransferDst);
+        std::vector<VkImageMemoryBarrier2> barriers(textures.size());
+        const auto emitBarriers = [&](const rg::ResourceState& from, const rg::ResourceState& to) {
+            for (std::size_t i = 0; i < textures.size(); ++i) {
+                const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, chains[i].levelCount, 0, 1 };
+                barriers[i] = rg::BuildImageMemoryBarrier2(textures[i].Image(), range, from, to);
+            }
+            VkDependencyInfo dependency{};
+            dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            dependency.imageMemoryBarrierCount = static_cast<std::uint32_t>(barriers.size());
+            dependency.pImageMemoryBarriers = barriers.data();
+            vkCmdPipelineBarrier2(cmd, &dependency);
+        };
 
-        vkCmdCopyBufferToImage(cmd, staging.Native(), texture.Image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            static_cast<std::uint32_t>(regions.size()), regions.data());
+        emitBarriers(undefinedState, transferDst);
 
-        VkImageMemoryBarrier toShaderRead = toTransferDst;
-        toShaderRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        toShaderRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        toShaderRead.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        toShaderRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
-            nullptr, 0, nullptr, 1, &toShaderRead);
+        std::vector<VkBufferImageCopy> regions;
+        for (std::size_t i = 0; i < textures.size(); ++i) {
+            const MipChainRgba8& chain = chains[i];
+            regions.clear();
+            for (std::uint32_t level = 0; level < chain.levelCount; ++level) {
+                VkBufferImageCopy region{};
+                region.bufferOffset = stagingOffsets[i] + chain.levelByteOffsets[level];
+                region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1 };
+                region.imageExtent = { chain.levelWidths[level], chain.levelHeights[level], 1 };
+                regions.push_back(region);
+            }
+            vkCmdCopyBufferToImage(cmd, staging.Native(), textures[i].Image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                static_cast<std::uint32_t>(regions.size()), regions.data());
+        }
+
+        emitBarriers(transferDst, shaderRead);
     });
-    // staging is destroyed here; the copy has already completed.
-    texture.SetCurrentState(rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false));
+    // staging is destroyed on return; the copies have already completed.
 
-    return texture;
+    for (Texture2D& texture : textures) {
+        texture.SetCurrentState(shaderRead);
+    }
+    m_uploadSubmitCount.fetch_add(1, std::memory_order_relaxed);
+    m_uploadImageCount.fetch_add(textures.size(), std::memory_order_relaxed);
+    m_uploadStagingBytes.fetch_add(stagingSize, std::memory_order_relaxed);
+    return textures;
+}
+
+std::vector<std::shared_ptr<Texture2D>> GpuResourceFactory::CreateMaterialImages(
+    std::span<const MaterialImageUpload> uploads) const
+{
+    std::vector<std::shared_ptr<Texture2D>> result(uploads.size());
+
+    // Valid uploads only; `names` is reserved up front so the c_str pointers in `descs` stay put.
+    std::vector<std::string> names;
+    std::vector<Texture2DUploadDesc> descs;
+    std::vector<std::size_t> resultIndex;
+    std::vector<std::uint64_t> chainBytes;
+    names.reserve(uploads.size());
+    descs.reserve(uploads.size());
+    resultIndex.reserve(uploads.size());
+    chainBytes.reserve(uploads.size());
+    for (std::size_t i = 0; i < uploads.size(); ++i) {
+        const MaterialImageUpload& upload = uploads[i];
+        if (upload.pixelsRgba8 == nullptr || upload.width < 1 || upload.height < 1) {
+            continue;
+        }
+        names.emplace_back(upload.debugName);
+        descs.push_back({ .pixelsRgba8 = upload.pixelsRgba8,
+            .width = upload.width,
+            .height = upload.height,
+            .debugName = names.back().c_str(),
+            .format = MaterialImageFormat(upload.role),
+            .addressMode = TextureAddressMode::Repeat,
+            .generateMips = true,
+            .maxAnisotropy = m_vulkanDevice->MaterialAnisotropy() });
+        resultIndex.push_back(i);
+        chainBytes.push_back(
+            MipChainByteSize(static_cast<std::uint32_t>(upload.width), static_cast<std::uint32_t>(upload.height)));
+    }
+
+    for (const UploadChunk& chunk : PlanUploadChunks(chainBytes, kUploadStagingBudgetBytes, kUploadMaxItemsPerChunk)) {
+        std::vector<Texture2D> uploaded = UploadTexture2DChunk(
+            std::span<const Texture2DUploadDesc>(descs.data() + chunk.first, chunk.count));
+        for (std::size_t i = 0; i < uploaded.size(); ++i) {
+            result[resultIndex[chunk.first + i]] = std::make_shared<Texture2D>(std::move(uploaded[i]));
+        }
+    }
+    return result;
+}
+
+GpuUploadStats GpuResourceFactory::UploadStats() const noexcept
+{
+    return GpuUploadStats{ m_uploadSubmitCount.load(std::memory_order_relaxed),
+        m_uploadImageCount.load(std::memory_order_relaxed), m_uploadStagingBytes.load(std::memory_order_relaxed) };
 }
 
 VolumeTexture GpuResourceFactory::CreateVolumeTexture(
