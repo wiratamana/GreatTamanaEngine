@@ -72,9 +72,12 @@ Rules:
 - A compute leaf uses the raw pass name as `passName` and `shaderName`. Its blend/Z/stencil rows read
   `n/a (compute pass)`. Its textures are labeled by `rg::ResourceKind` (`Read Texture`, `Write Buffer`,
   `Read Volume Texture`, ...). It also reports `GPU Time (ms)`.
-- The `RenderOpaque` leaf lists the distinct pipeline debug names and material texture names of the frame, the clear
-  color, `Draw Stats (Calls, Tris)` from the graph snapshot and the `ViewProjection` matrix. Its per-entity children
-  show their own pipeline name, material texture, `Triangle Count` and `Entity (Index, Generation)`.
+- The `RenderOpaque` leaf lists the distinct pipeline debug names of the frame, one row per distinct bound material image
+  (`<slot> Texture`: `Base Color`, `Normal`, `Metallic-Roughness`, `Occlusion`; value = image debug name, first-seen order), the
+  clear color, `Draw Stats (Calls, Tris)` from the graph snapshot and the `ViewProjection` matrix. Its per-entity children show
+  their own pipeline name, four material slot rows in role order (`None` for an unnamed image), `Triangle Count` and
+  `Entity (Index, Generation)`. Material slot rows are not render-graph resources, so the panel draws no "View" button for them.
+  Default images appear under their own names (`MaterialDefaultNormal`, ...), so a PMX draw lists three default rows.
 - Blend/Z/stencil facts come from `DescribeStandardPipelineState()`. `DrawSkyBackground` uses
   `DescribeSkyBackgroundPipelineState()` (depth test `Equal`, depth write off).
 - Group names are the owning feature names the graph recorded when the pass was declared. The Frame Debugger never
@@ -223,7 +226,7 @@ A pass declared through the render graph appears in the tree without any Frame D
 | --- | --- |
 | `src/Editor/FrameDebuggerData.h/.cpp` | snapshot model, tree builder, preview picking rule, aspect-fit helper |
 | `src/Editor/FrameDebuggerCapture.h/.cpp` | `FrameDebuggerCaptureContext`: draw records, per-draw event capture, pipeline state descriptions |
-| `src/Editor/FrameDebuggerDrawRecording.cpp` | records one scene draw (entity name, pipeline, material texture, triangles) |
+| `src/Editor/FrameDebuggerDrawRecording.cpp` | records one scene draw (entity name, pipeline, one slot per material image, triangles) |
 | `src/Editor/FrameDebuggerReplayPasses.cpp` | replay passes |
 | `src/Editor/FrameDebuggerHistory.h/.cpp` | the one retained capture |
 | `src/Editor/FrameDebuggerPreviewProcessing.h/.cpp` | channel/levels transform and its compute dispatcher |

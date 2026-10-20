@@ -455,15 +455,16 @@ FrameDebuggerEventNode BuildComputeDispatchLeaf(
     return leaf;
 }
 
-// Render Pass campaign (task_manager/render-pass-1), PHASE4
-// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.3) - builds the real
-// "RenderOpaque" pass LEAF node (RENAMED from the old "GameView" pass - see
-// PHASE2_RENDER_OPAQUE_SKY_SPLIT_AND_TRANSPARENT_STUB.md, which split the old
-// monolithic "GameView" pass into "RenderOpaque"/"DrawSkyBackground"/
-// "RenderTransparent"). Per-entity children are attached separately by the
-// caller (BuildRealFrameDebuggerSnapshot() below) - this function only ever
-// builds the parent leaf itself, exactly like BuildGameViewLeaf() (this
-// function's own pre-PHASE4 name) always did.
+// One Frame Debugger row for a material slot: "<slot> Texture" with the image name or "None".
+FrameDebuggerTextureProperty MakeMaterialSlotRow(const FrameDebuggerMaterialSlot& slot)
+{
+    FrameDebuggerTextureProperty texture;
+    texture.name = slot.slot + " Texture";
+    texture.valueLabel = slot.imageName.empty() ? "None" : slot.imageName;
+    return texture;
+}
+
+// Builds the "RenderOpaque" pass leaf. Per-entity children are attached by the caller.
 FrameDebuggerEventNode BuildRenderOpaqueLeaf(
     const rg::RenderGraphPassSnapshot& renderOpaquePass, const FrameDebuggerCaptureContext& capture, int eventIndex)
 {
@@ -498,14 +499,9 @@ FrameDebuggerEventNode BuildRenderOpaqueLeaf(
         details.shaderName = joined;
     }
 
-    // textures - one row per DISTINCT real bound MaterialTexture debug name
-    // - there is no per-slot "_MainTex"-style naming in this engine yet, so
-    // `name` is a stable, generic label rather than an invented one.
-    for (const std::string& textureName : capture.MaterialTextureDebugNames()) {
-        FrameDebuggerTextureProperty texture;
-        texture.name = "Material Texture";
-        texture.valueLabel = textureName;
-        details.textures.push_back(std::move(texture));
+    // One row per distinct bound material image.
+    for (const FrameDebuggerMaterialSlot& slot : capture.MaterialSlotRows()) {
+        details.textures.push_back(MakeMaterialSlotRow(slot));
     }
 
     // vectors - the real clear color, plus the real aggregate DrawStats
@@ -563,23 +559,7 @@ FrameDebuggerEventNode BuildRenderOpaqueLeaf(
     return leaf;
 }
 
-// frame-debugger-6 campaign, PHASE4 - one real, individually selectable leaf
-// per real per-entity draw call this frame's "RenderOpaque" pass actually
-// issued (FrameDebuggerCaptureContext::DrawRecords(), PHASE3 of that
-// campaign).
-//
-// Render Pass campaign (task_manager/render-pass-1), PHASE4
-// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.3/3.4) - the old Sky
-// Background branch (`record.isSkyBackgroundDraw`) is REMOVED entirely: the
-// Sky Background draw is now its own real, separate "DrawSkyBackground" pass
-// leaf (see BuildGraphicsPassLeaf() below), generically discovered by
-// BuildRealFrameDebuggerSnapshot()'s own view-region walk - it no longer
-// needs a fabricated FrameDebuggerDrawRecord at all. This function now ONLY
-// ever builds a per-entity leaf - the single, unbranched shape every
-// FrameDebuggerDrawRecord it receives always has today. Also renamed
-// `passName` from `"GameView (Entity Draw)"` to `"RenderOpaque (Entity
-// Draw)"` - a real, user-visible/HTTP-consumed fact that must stay accurate
-// now that the owning pass itself is named "RenderOpaque".
+// Builds one per-entity draw leaf under the "RenderOpaque" pass.
 FrameDebuggerEventNode BuildRenderOpaqueDrawRecordLeaf(
     const FrameDebuggerDrawRecord& record, const Mat4& sharedViewProjection, int eventIndex, int stepPreviewIndex)
 {
@@ -597,11 +577,8 @@ FrameDebuggerEventNode BuildRenderOpaqueDrawRecordLeaf(
     details.passName = "RenderOpaque (Entity Draw)";
     details.shaderName = record.pipelineDebugName;
 
-    if (!record.materialTextureDebugName.empty()) {
-        FrameDebuggerTextureProperty texture;
-        texture.name = "Material Texture";
-        texture.valueLabel = record.materialTextureDebugName;
-        details.textures.push_back(std::move(texture));
+    for (const FrameDebuggerMaterialSlot& slot : record.materialSlots) {
+        details.textures.push_back(MakeMaterialSlotRow(slot));
     }
 
     {

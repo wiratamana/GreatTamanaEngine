@@ -123,3 +123,29 @@ GPU skinning runs once, in the offscreen graph.
 `SceneView`, `SceneReferred` (the default tone map) for scene-referred previews such as `GameViewComposited` and Frame Debugger
 steps, and `DebugScaled` (fixed exposure, for tiny-valued LUTs) for everything else. `/get_game_view` always uses
 `DisplayReferred`; `/get_texture` classifies by texture name.
+
+## Materials
+
+Details and conventions: [PBR Materials](../conventions/pbr-materials.md).
+
+- **Material set (set 0, 5 bindings).** 0 base color, 1 `MaterialParams` (48 bytes), 2 normal, 3 metallic-roughness,
+  4 occlusion. A missing image is replaced by a 1x1 default image, so every set is complete and the old shaders that read
+  only bindings 0 and 1 stay valid. `MaterialTexture` holds the four images (`MaterialImages`, indexed by
+  `MaterialImageRole`), the params buffer and a `MaterialSetLease`.
+- **Set lease.** `MaterialSetPool` (`FREE_DESCRIPTOR_SET`, 4096 sets, 75% warning) allocates under a mutex. The lease frees
+  the set and unregisters the handle when the material is destroyed.
+- **Vertex layouts.** `PositionNormalUvTangent` (`MeshVertexTangent`, 48 bytes) joins the old layouts. `BuildVertexInputState`
+  has no `default:` label, so a new layout cannot silently get the wrong vertex input. Depth-only pipelines exist for every
+  layout in `fx::SceneShaderSet` (`DepthOnlyLayouts()`).
+- **Pipeline kinds.** `MeshAssetPipelineKind` (`Untextured`, `Textured`, `TexturedAlphaTest`, `Pbr`, `PbrAlphaTest`) is
+  chosen once per mesh part; `MeshAssetGpuCatalog::EnsurePipeline` builds the pipeline from one table.
+- **Scene block.** `SceneLightingUniformData` carries the eye position for every view (shadow data or not) and the material
+  debug view in `groundAmbientAndMaterialDebugView.w`.
+- **Batched texture upload.** `GpuResourceFactory::CreateMaterialImages` uploads images in chunks (64 MiB staging budget, at
+  most 256 images): one staging buffer, one command buffer, one submit and one fence wait per chunk. `CreateTexture2D` is the
+  one-image case of the same path. A failed fence wait is logged, the device is drained once and the call throws.
+  `Renderer::GetUploadStats()` returns the submit, image and staging byte counters.
+- **Draw guard.** `RenderSystem::Draw` skips a draw whose pipeline needs a material set that does not resolve (one warning per
+  handle), so a stale handle never binds an empty set 0.
+- **Release sweep.** `Core::BuildFrame()` calls `Game::ReleaseUnusedGpuMaterials()` before any pass is recorded. Unused
+  materials are destroyed through `RenderSystem::UnregisterTexture` after one `Renderer::DrainGpuForResourceRelease()`.

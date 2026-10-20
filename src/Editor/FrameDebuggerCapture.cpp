@@ -44,7 +44,7 @@ FrameDebuggerStandardPipelineState DescribeSkyBackgroundPipelineState()
 }
 
 void FrameDebuggerCaptureContext::RecordDraw(
-    const std::string& pipelineDebugName, const std::string& materialTextureDebugName, const Mat4& viewProjection)
+    const std::string& pipelineDebugName, const std::vector<FrameDebuggerMaterialSlot>& slots, const Mat4& viewProjection)
 {
     ++m_drawCallCount;
 
@@ -54,25 +54,26 @@ void FrameDebuggerCaptureContext::RecordDraw(
         m_pipelineDebugNames.push_back(pipelineDebugName);
     }
 
-    if (!materialTextureDebugName.empty()
-        && std::find(m_materialTextureDebugNames.begin(), m_materialTextureDebugNames.end(), materialTextureDebugName)
-            == m_materialTextureDebugNames.end()) {
-        m_materialTextureDebugNames.push_back(materialTextureDebugName);
+    for (const FrameDebuggerMaterialSlot& slot : slots) {
+        if (!slot.imageName.empty()
+            && std::find(m_materialSlotRows.begin(), m_materialSlotRows.end(), slot) == m_materialSlotRows.end()) {
+            m_materialSlotRows.push_back(slot);
+        }
     }
 
     m_lastViewProjection = viewProjection;
 }
 
 void FrameDebuggerCaptureContext::RecordEntityDraw(std::uint32_t entityIndex, std::uint32_t entityGeneration,
-    const std::string& displayName, const std::string& pipelineDebugName, const std::string& materialTextureDebugName,
-    std::uint32_t triangleCount)
+    const std::string& displayName, const std::string& pipelineDebugName,
+    const std::vector<FrameDebuggerMaterialSlot>& slots, std::uint32_t triangleCount)
 {
     FrameDebuggerDrawRecord record;
     record.entityIndex = entityIndex;
     record.entityGeneration = entityGeneration;
     record.displayName = displayName;
     record.pipelineDebugName = pipelineDebugName;
-    record.materialTextureDebugName = materialTextureDebugName;
+    record.materialSlots = slots;
     record.triangleCount = triangleCount;
     m_drawRecords.push_back(std::move(record));
 }
@@ -80,7 +81,7 @@ void FrameDebuggerCaptureContext::RecordEntityDraw(std::uint32_t entityIndex, st
 void FrameDebuggerCaptureContext::Reset()
 {
     m_pipelineDebugNames.clear();
-    m_materialTextureDebugNames.clear();
+    m_materialSlotRows.clear();
     m_drawCallCount = 0;
     m_lastViewProjection = Mat4::Identity();
     m_drawRecords.clear();

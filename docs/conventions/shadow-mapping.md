@@ -18,7 +18,9 @@ shadow maps. It fits the cascades to the camera every frame. No box has to be tu
   with no sample for 120 frames, the cascades use fixed splits over `[camera near, maxDistance]`.
 - **Caster culling.** Each cascade pass uses `CullToFrustum(casterCullPaddingFraction)`: an object is drawn only when its
   padded world box touches the cascade box. Meshes without bounds are never culled. Skinned meshes use rest-pose bounds, so
-  raise the padding or set `cullCasters=false` for large animations.
+  raise the padding or set `cullCasters=false` for large animations. The cascade draw uses one depth-only pipeline per vertex
+  layout (`ShadowDepth<Layout>.vert`, listed in `SceneShaderSet`), including `PositionNormalUvTangent` for imported PBR meshes.
+  A layout without a depth-only shader casts no shadow; `DepthOnlyLayoutTests` and `ShadowDepthShaderCoverageTests` guard this.
 - **Two receive paths, one algorithm.** Material shaders sample the cascade maps (scene slots 0..3) and remove only the sun
   term, so ambient light stays. `ShadowMask.comp` runs the same algorithm (cascade selection, normal offset, texel-scaled bias,
   Vogel-disk PCF, cascade blending, distance fade) for the screen-space mask. The mask and cascade-id textures are produced only

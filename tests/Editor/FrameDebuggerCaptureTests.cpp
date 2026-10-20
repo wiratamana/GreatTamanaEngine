@@ -1,47 +1,49 @@
-// Unit tests for the Frame Debugger's real renderer-capture instrumentation
-// (src/Editor/FrameDebuggerCapture.h) - FrameDebuggerCaptureContext::
-// RecordDraw()/Reset() and DescribeStandardPipelineState() are both plain,
-// ImGui-free, no-live-VkDevice-needed logic, so this is directly
-// Tier-1-testable exactly like FrameDebuggerData.h despite living under
-// src/Editor/ - see AGENTS.md, "Testability & Regression Safety". Only
-// built when GTE_ENABLE_EDITOR is ON, since FrameDebuggerCapture.h/.cpp are
-// only compiled into gte_core then (see the root CMakeLists.txt's "Editor
-// Module Structure") - the same "zero-touch when off" rule already applied
-// to tests/Editor/FrameDebuggerDataTests.cpp.
-//
-// task_manager/frame-debugger-3 campaign, PHASE1
-// (PHASE1_RENDERER_CAPTURE_INSTRUMENTATION.md).
+// Tier-1 tests of FrameDebuggerCaptureContext's recording and the standard pipeline state descriptions.
+// Built only when GTE_ENABLE_EDITOR is ON.
 
 #include "Editor/FrameDebuggerCapture.h"
 
 #include <gtest/gtest.h>
 
+#include <string>
+#include <vector>
+
 namespace gte {
 namespace {
+
+using Slots = std::vector<FrameDebuggerMaterialSlot>;
+
+Slots FourSlots(const std::string& baseColor, const std::string& normal = {}, const std::string& metallicRoughness = {},
+    const std::string& occlusion = {})
+{
+    return { { "Base Color", baseColor }, { "Normal", normal }, { "Metallic-Roughness", metallicRoughness },
+        { "Occlusion", occlusion } };
+}
 
 TEST(FrameDebuggerCaptureContextTest, StartsEmpty)
 {
     FrameDebuggerCaptureContext capture;
     EXPECT_TRUE(capture.PipelineDebugNames().empty());
-    EXPECT_TRUE(capture.MaterialTextureDebugNames().empty());
+    EXPECT_TRUE(capture.MaterialSlotRows().empty());
     EXPECT_EQ(capture.DrawCallCount(), 0);
     EXPECT_TRUE(ApproximatelyEqual(capture.LastViewProjection(), Mat4::Identity()));
-    EXPECT_TRUE(capture.DrawRecords().empty()); // frame-debugger-6, PHASE3.
+    EXPECT_TRUE(capture.DrawRecords().empty());
 }
 
 TEST(FrameDebuggerCaptureContextTest, RecordDrawDeduplicatesRepeatedNames)
 {
     FrameDebuggerCaptureContext capture;
     const Mat4 viewProj = Mat4::Translation(Vec3(1.0f, 2.0f, 3.0f));
+    const Slots slots = FourSlots("MaterialTexture abc123");
 
-    capture.RecordDraw("Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", viewProj);
-    capture.RecordDraw("Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", viewProj);
+    capture.RecordDraw("Mesh.vert/Mesh.frag (PositionNormal)", slots, viewProj);
+    capture.RecordDraw("Mesh.vert/Mesh.frag (PositionNormal)", slots, viewProj);
 
     ASSERT_EQ(capture.PipelineDebugNames().size(), 1u);
     EXPECT_EQ(capture.PipelineDebugNames()[0], "Mesh.vert/Mesh.frag (PositionNormal)");
-    ASSERT_EQ(capture.MaterialTextureDebugNames().size(), 1u);
-    EXPECT_EQ(capture.MaterialTextureDebugNames()[0], "MaterialTexture abc123");
-    EXPECT_EQ(capture.DrawCallCount(), 2); // Every RecordDraw() call counts, even a name-duplicate one.
+    ASSERT_EQ(capture.MaterialSlotRows().size(), 1u);
+    EXPECT_EQ(capture.MaterialSlotRows()[0], (FrameDebuggerMaterialSlot { "Base Color", "MaterialTexture abc123" }));
+    EXPECT_EQ(capture.DrawCallCount(), 2);
 }
 
 TEST(FrameDebuggerCaptureContextTest, RecordDrawKeepsDistinctNamesSeparate)
@@ -49,26 +51,40 @@ TEST(FrameDebuggerCaptureContextTest, RecordDrawKeepsDistinctNamesSeparate)
     FrameDebuggerCaptureContext capture;
     const Mat4 viewProj = Mat4::Identity();
 
-    capture.RecordDraw("Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", viewProj);
-    capture.RecordDraw("TexturedMesh.vert/TexturedMesh.frag (PositionNormalUv)", "MaterialTexture def456", viewProj);
+    capture.RecordDraw("Mesh.vert/Mesh.frag (PositionNormal)", FourSlots("MaterialTexture abc123"), viewProj);
+    capture.RecordDraw("TexturedMesh.vert/TexturedMesh.frag (PositionNormalUv)", FourSlots("MaterialTexture def456"), viewProj);
 
     ASSERT_EQ(capture.PipelineDebugNames().size(), 2u);
-    EXPECT_EQ(capture.PipelineDebugNames()[0], "Mesh.vert/Mesh.frag (PositionNormal)");
-    EXPECT_EQ(capture.PipelineDebugNames()[1], "TexturedMesh.vert/TexturedMesh.frag (PositionNormalUv)");
-    ASSERT_EQ(capture.MaterialTextureDebugNames().size(), 2u);
-    EXPECT_EQ(capture.MaterialTextureDebugNames()[0], "MaterialTexture abc123");
-    EXPECT_EQ(capture.MaterialTextureDebugNames()[1], "MaterialTexture def456");
+    ASSERT_EQ(capture.MaterialSlotRows().size(), 2u);
+    EXPECT_EQ(capture.MaterialSlotRows()[0].imageName, "MaterialTexture abc123");
+    EXPECT_EQ(capture.MaterialSlotRows()[1].imageName, "MaterialTexture def456");
     EXPECT_EQ(capture.DrawCallCount(), 2);
 }
 
-TEST(FrameDebuggerCaptureContextTest, RecordDrawIgnoresEmptyMaterialTextureName)
+TEST(FrameDebuggerCaptureContextTest, RecordDrawSkipsEmptyImageNames)
 {
     FrameDebuggerCaptureContext capture;
-    capture.RecordDraw("Triangle.vert/Triangle.frag (PositionColor)", std::string(), Mat4::Identity());
+    capture.RecordDraw("Triangle.vert/Triangle.frag (PositionColor)", Slots {}, Mat4::Identity());
+    capture.RecordDraw("PipelineA", FourSlots(""), Mat4::Identity());
 
-    EXPECT_EQ(capture.PipelineDebugNames().size(), 1u);
-    EXPECT_TRUE(capture.MaterialTextureDebugNames().empty()); // An untextured draw never adds a texture name.
-    EXPECT_EQ(capture.DrawCallCount(), 1);
+    EXPECT_EQ(capture.PipelineDebugNames().size(), 2u);
+    EXPECT_TRUE(capture.MaterialSlotRows().empty());
+    EXPECT_EQ(capture.DrawCallCount(), 2);
+}
+
+TEST(FrameDebuggerCaptureContextTest, MaterialSlotRowsDedupeBySlotAndImageInFirstSeenOrder)
+{
+    FrameDebuggerCaptureContext capture;
+    capture.RecordDraw("P", FourSlots("Base A", "Normal A", "MR A", "Occ A"), Mat4::Identity());
+    capture.RecordDraw("P", FourSlots("Base B", "Normal A", "MR A", "Occ A"), Mat4::Identity());
+
+    const auto& rows = capture.MaterialSlotRows();
+    ASSERT_EQ(rows.size(), 5u);
+    EXPECT_EQ(rows[0], (FrameDebuggerMaterialSlot { "Base Color", "Base A" }));
+    EXPECT_EQ(rows[1], (FrameDebuggerMaterialSlot { "Normal", "Normal A" }));
+    EXPECT_EQ(rows[2], (FrameDebuggerMaterialSlot { "Metallic-Roughness", "MR A" }));
+    EXPECT_EQ(rows[3], (FrameDebuggerMaterialSlot { "Occlusion", "Occ A" }));
+    EXPECT_EQ(rows[4], (FrameDebuggerMaterialSlot { "Base Color", "Base B" }));
 }
 
 TEST(FrameDebuggerCaptureContextTest, RecordDrawRemembersLastViewProjection)
@@ -77,8 +93,8 @@ TEST(FrameDebuggerCaptureContextTest, RecordDrawRemembersLastViewProjection)
     const Mat4 first = Mat4::Translation(Vec3(1.0f, 0.0f, 0.0f));
     const Mat4 second = Mat4::Translation(Vec3(0.0f, 5.0f, 0.0f));
 
-    capture.RecordDraw("PipelineA", "", first);
-    capture.RecordDraw("PipelineB", "", second);
+    capture.RecordDraw("PipelineA", Slots {}, first);
+    capture.RecordDraw("PipelineB", Slots {}, second);
 
     EXPECT_TRUE(ApproximatelyEqual(capture.LastViewProjection(), second));
 }
@@ -86,25 +102,24 @@ TEST(FrameDebuggerCaptureContextTest, RecordDrawRemembersLastViewProjection)
 TEST(FrameDebuggerCaptureContextTest, ResetClearsEverythingBackToEmpty)
 {
     FrameDebuggerCaptureContext capture;
-    capture.RecordDraw("PipelineA", "TextureA", Mat4::Translation(Vec3(1.0f, 1.0f, 1.0f)));
-    capture.RecordEntityDraw(2, 1, "terrain", "PipelineA", "TextureA", 1045458);
+    capture.RecordDraw("PipelineA", FourSlots("TextureA"), Mat4::Translation(Vec3(1.0f, 1.0f, 1.0f)));
+    capture.RecordEntityDraw(2, 1, "terrain", "PipelineA", FourSlots("TextureA"), 1045458);
     capture.Reset();
 
     EXPECT_TRUE(capture.PipelineDebugNames().empty());
-    EXPECT_TRUE(capture.MaterialTextureDebugNames().empty());
+    EXPECT_TRUE(capture.MaterialSlotRows().empty());
     EXPECT_EQ(capture.DrawCallCount(), 0);
     EXPECT_TRUE(ApproximatelyEqual(capture.LastViewProjection(), Mat4::Identity()));
-    EXPECT_TRUE(capture.DrawRecords().empty()); // frame-debugger-6, PHASE3.
+    EXPECT_TRUE(capture.DrawRecords().empty());
 }
-
-// frame-debugger-6 campaign, PHASE3 - RecordEntityDraw()/DrawRecords() tests.
 
 TEST(FrameDebuggerCaptureContextTest, RecordEntityDrawAppendsOneRecordPerCall)
 {
     FrameDebuggerCaptureContext capture;
 
-    capture.RecordEntityDraw(2, 1, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", 1045458);
-    capture.RecordEntityDraw(3, 1, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", "", 12);
+    capture.RecordEntityDraw(
+        2, 1, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", FourSlots("MaterialTexture abc123"), 1045458);
+    capture.RecordEntityDraw(3, 1, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", Slots {}, 12);
 
     ASSERT_EQ(capture.DrawRecords().size(), 2u);
 
@@ -113,99 +128,59 @@ TEST(FrameDebuggerCaptureContextTest, RecordEntityDrawAppendsOneRecordPerCall)
     EXPECT_EQ(first.entityGeneration, 1u);
     EXPECT_EQ(first.displayName, "terrain");
     EXPECT_EQ(first.pipelineDebugName, "Mesh.vert/Mesh.frag (PositionNormal)");
-    EXPECT_EQ(first.materialTextureDebugName, "MaterialTexture abc123");
+    ASSERT_EQ(first.materialSlots.size(), 4u);
+    EXPECT_EQ(first.materialSlots[0].imageName, "MaterialTexture abc123");
     EXPECT_EQ(first.triangleCount, 1045458u);
 
     const FrameDebuggerDrawRecord& second = capture.DrawRecords()[1];
     EXPECT_EQ(second.entityIndex, 3u);
-    EXPECT_EQ(second.entityGeneration, 1u);
     EXPECT_EQ(second.displayName, "SmokeTestCube");
-    EXPECT_EQ(second.pipelineDebugName, "Mesh.vert/Mesh.frag (PositionNormal)");
-    EXPECT_TRUE(second.materialTextureDebugName.empty()); // Untextured draw.
+    EXPECT_TRUE(second.materialSlots.empty()); // Untextured draw.
     EXPECT_EQ(second.triangleCount, 12u);
 }
 
-TEST(FrameDebuggerCaptureContextTest, RecordEntityDrawNeverDeduplicatesRepeatedEntityMeshCombinations)
+TEST(FrameDebuggerCaptureContextTest, RecordEntityDrawNeverDeduplicates)
 {
     FrameDebuggerCaptureContext capture;
 
-    // Unlike RecordDraw()'s own PipelineDebugNames()/MaterialTextureDebugNames(),
-    // repeating the exact same entity/mesh combination must still produce TWO
-    // separate records - one real, selectable tree leaf per real draw (PHASE4).
-    capture.RecordEntityDraw(5, 2, "terrain", "PipelineA", "TextureA", 100);
-    capture.RecordEntityDraw(5, 2, "terrain", "PipelineA", "TextureA", 100);
+    capture.RecordEntityDraw(5, 2, "terrain", "PipelineA", FourSlots("TextureA"), 100);
+    capture.RecordEntityDraw(5, 2, "terrain", "PipelineA", FourSlots("TextureA"), 100);
 
     ASSERT_EQ(capture.DrawRecords().size(), 2u);
-    EXPECT_EQ(capture.DrawRecords()[0].entityIndex, 5u);
-    EXPECT_EQ(capture.DrawRecords()[1].entityIndex, 5u);
 }
 
 TEST(FrameDebuggerCaptureContextTest, RecordEntityDrawDoesNotAffectRecordDrawBookkeeping)
 {
-    // RecordEntityDraw() is additive - it must never touch PipelineDebugNames()/
-    // MaterialTextureDebugNames()/DrawCallCount()/LastViewProjection(), which
-    // are only ever mutated by RecordDraw() (see this phase's own Step 3.3).
     FrameDebuggerCaptureContext capture;
 
-    capture.RecordEntityDraw(1, 1, "terrain", "PipelineA", "TextureA", 100);
+    capture.RecordEntityDraw(1, 1, "terrain", "PipelineA", FourSlots("TextureA"), 100);
 
     EXPECT_TRUE(capture.PipelineDebugNames().empty());
-    EXPECT_TRUE(capture.MaterialTextureDebugNames().empty());
+    EXPECT_TRUE(capture.MaterialSlotRows().empty());
     EXPECT_EQ(capture.DrawCallCount(), 0);
     ASSERT_EQ(capture.DrawRecords().size(), 1u);
 }
 
 TEST(DescribeStandardPipelineStateTest, ReportsRealHardcodedPipelineCppValues)
 {
-    // Cross-checked directly against Pipeline.cpp's own real
-    // VkPipelineColorBlendAttachmentState/VkPipelineDepthStencilStateCreateInfo
-    // construction at the time this test was written - if a future change
-    // to Pipeline.cpp's hardcoded state ever silently drifts, THIS test (not
-    // just DescribeStandardPipelineState() itself) is the regression-safety
-    // net that catches it (see this phase's own Step 3.5).
+    // Must match the fixed state in Pipeline.cpp.
     const FrameDebuggerStandardPipelineState state = DescribeStandardPipelineState();
 
-    EXPECT_EQ(state.blendMode, "Opaque (no blend)"); // colorBlendAttachment.blendEnable = VK_FALSE.
+    EXPECT_EQ(state.blendMode, "Opaque (no blend)");
     EXPECT_EQ(state.zClip, "On");
-    EXPECT_EQ(state.zTest, "Less"); // depthCompareOp = VK_COMPARE_OP_LESS, not LEqual/LessEqual.
-    EXPECT_EQ(state.zWrite, "On"); // depthWriteEnable = VK_TRUE.
-    EXPECT_EQ(state.cull, "None"); // rasterizer.cullMode = VK_CULL_MODE_NONE.
+    EXPECT_EQ(state.zTest, "Less");
+    EXPECT_EQ(state.zWrite, "On");
+    EXPECT_EQ(state.cull, "None");
     EXPECT_EQ(state.stencilRef, "n/a (no stencil test)");
     EXPECT_EQ(state.stencilComp, "n/a (no stencil test)");
     EXPECT_EQ(state.stencilPass, "n/a (no stencil test)");
     EXPECT_EQ(state.stencilFail, "n/a (no stencil test)");
     EXPECT_EQ(state.stencilZFail, "n/a (no stencil test)");
-
-    // Every field must be non-empty - see this phase's own Step 3.5.
-    EXPECT_FALSE(state.blendMode.empty());
-    EXPECT_FALSE(state.zClip.empty());
-    EXPECT_FALSE(state.zTest.empty());
-    EXPECT_FALSE(state.zWrite.empty());
-    EXPECT_FALSE(state.cull.empty());
-    EXPECT_FALSE(state.stencilRef.empty());
-    EXPECT_FALSE(state.stencilComp.empty());
-    EXPECT_FALSE(state.stencilPass.empty());
-    EXPECT_FALSE(state.stencilFail.empty());
-    EXPECT_FALSE(state.stencilZFail.empty());
 }
-
-// frame-debugger-8 campaign, PHASE1 - DescribeSkyBackgroundPipelineState()
-// test. Render Pass campaign (task_manager/render-pass-1), PHASE4
-// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.4/3.6) - the
-// `RecordSkyBackgroundDraw()` tests that used to live here are REMOVED
-// (that method itself no longer exists - the Sky Background draw is now a
-// real, separate, generically-discovered "DrawSkyBackground" Render Graph
-// pass instead of a fabricated FrameDebuggerDrawRecord - see
-// tests/Editor/FrameDebuggerSnapshotBuilderTests.cpp for its new tree-leaf
-// coverage). DescribeSkyBackgroundPipelineState() itself is UNCHANGED and
-// still real, still used (by FrameDebuggerData.cpp's new BuildGraphicsPassLeaf()
-// for the "DrawSkyBackground" leaf), so its own test stays.
 
 TEST(DescribeSkyBackgroundPipelineStateTest, ReturnsRealDistinctValues)
 {
-    // Proves DescribeSkyBackgroundPipelineState() only genuinely differs
-    // from DescribeStandardPipelineState() where it should (zTest/zWrite),
-    // and matches it everywhere else (see this phase's own Step 3.5).
+    // The sky state differs from the standard one only in depth test and depth write.
     const FrameDebuggerStandardPipelineState sky = DescribeSkyBackgroundPipelineState();
     const FrameDebuggerStandardPipelineState standard = DescribeStandardPipelineState();
 

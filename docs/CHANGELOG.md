@@ -4,6 +4,20 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## PBR material textures and GGX specular (branch `feature/hdr-tonemap-impl`)
+
+- Imported glTF meshes sample the normal, metallic-roughness and occlusion maps (new `PbrMesh` shaders, set 0 now has 5
+  bindings, `MaterialParams` is 48 bytes) and shade the sun with GGX plus a hemisphere ambient specular. PMX models and
+  primitives keep the old shaders. See [pbr-materials.md](conventions/pbr-materials.md).
+- Importer v4: material factors and tangents. A `TANGENT` is converted to engine space; a missing one is generated with
+  MikkTSpace (`MeshTangents`, vertex split where frames differ). The mesh payload and the rig blob have optional trailing
+  sections; corrupt counts return `nullopt` instead of throwing.
+- New `VertexLayout::PositionNormalUvTangent` with a depth-only shadow shader; `BuildVertexInputState` has no default case.
+- Batched material image upload (few submits, checked fence wait), default 1x1 images, `MaterialSetLease` with a freeable set pool,
+  and a release sweep that frees materials and images that no entity or cached asset uses.
+- SceneLighting: eye position in the scene block for every view, `materialDebugView` 0..8 (endpoint key and editor panel).
+- Frame Debugger: one row per material slot (`Base Color`, `Normal`, `Metallic-Roughness`, `Occlusion Texture`).
+
 ## Lighting retune (branch `feature/hdr-tonemap-impl`)
 
 - Defaults: SceneLighting `ambientIntensity` 0.35, ToneMapping exposure 0.8 / ACES / saturation 1.1 / dither 1.0, Shadow
