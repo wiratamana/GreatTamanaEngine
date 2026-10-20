@@ -1061,6 +1061,8 @@ RenderTexture* Core::AcquireDirectGameTarget()
 
 void Core::BuildFrame()
 {
+    m_game.ReleaseUnusedGpuMaterials(m_renderer);
+
     m_renderGraph.BeginPersistentResourceFrame();
 
     m_exposedViewOutputsThisFrame.clear();

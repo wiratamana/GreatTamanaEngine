@@ -115,7 +115,8 @@ try
         }
         GTE_LOG_INFO(kLogCategory, imported.message);
         if (hadOldImport) {
-            GTE_LOG_INFO(kLogCategory, "Re-imported a stale Sponza; GPU textures of the old import stay until exit.");
+            GTE_LOG_INFO(kLogCategory,
+                "Re-imported a stale Sponza; the GPU textures of the old import are released a few frames after the old scene is gone.");
         }
         result.importedThisCall = true;
         game.GetMeshInstantiationSystem().InvalidateCachedMeshAsset(result.gtaPath);

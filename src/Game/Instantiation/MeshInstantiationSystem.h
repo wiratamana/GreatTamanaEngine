@@ -7,6 +7,7 @@
 #include "MeshAssetGpuCatalog.h"
 #include "PrimitiveGpuCatalog.h"
 
+#include <cstddef>
 #include <string>
 
 namespace gte {
@@ -51,6 +52,16 @@ public:
     void InvalidateCachedMeshAsset(const std::string& absoluteGtaPath)
     {
         m_meshAssetCatalog.InvalidateCachedMeshAsset(absoluteGtaPath);
+    }
+
+    // True while the catalog has materials that may be unused.
+    bool MaterialReleasePending() const noexcept { return m_meshAssetCatalog.ReleasePending(); }
+
+    // Frees materials and images that no entity and no cached asset uses; returns the material count freed.
+    std::size_t ReleaseUnusedMaterials(Registry& registry, Renderer& renderer)
+    {
+        const MaterialReleaseResult result = m_meshAssetCatalog.ReleaseUnusedMaterials(registry, m_renderSystem, renderer);
+        return result.materialsFreed;
     }
 
 private:

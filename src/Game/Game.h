@@ -16,6 +16,7 @@
 #include "../Core/FrameDebuggerCaptureRecorder.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -132,6 +133,10 @@ public:
     // Called every frame by Render(); public so scene load/clear can restore it too.
     void EnsureDefaultCameraExists();
 
+    // Frees GPU materials no entity or cached asset uses; cheap when nothing is pending.
+    // Main thread, before any pass of the frame is recorded.
+    void ReleaseUnusedGpuMaterials(Renderer& renderer);
+
 private:
     Registry m_registry;
     RenderSystem m_renderSystem;
@@ -142,6 +147,8 @@ private:
 
     // Runs between the animation system's pose evaluation and skin upload each frame; only touches the Registry.
     PhysicsSystem m_physicsSystem;
+
+    std::uint64_t m_materialSweepFrame = 0;
 };
 
 } // namespace gte
