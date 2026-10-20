@@ -1,7 +1,7 @@
 // Tier-1 tests for the import stamp file and the removal guard.
 
+#include "Assets/GltfLoader.h"
 #include "Assets/ImportStamp.h"
-
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -94,6 +94,16 @@ TEST(ImportStampCurrentTest, DetectsVersionAndSizeMismatch)
     EXPECT_FALSE(IsImportStampCurrent(stamp, 3, 500)); // Older importer.
     EXPECT_FALSE(IsImportStampCurrent(stamp, 2, 501)); // Source changed.
     EXPECT_FALSE(IsImportStampCurrent(std::nullopt, 2, 500));
+}
+
+TEST(ImportStampCurrentTest, StampFromAnOlderGltfImporterIsNotCurrent)
+{
+    const ImportStamp oldStamp{ .importerVersion = 2, .sourceBytes = 500 };
+    EXPECT_GT(kGltfImporterVersion, 2);
+    EXPECT_FALSE(IsImportStampCurrent(oldStamp, kGltfImporterVersion, 500));
+
+    const ImportStamp currentStamp{ .importerVersion = kGltfImporterVersion, .sourceBytes = 500 };
+    EXPECT_TRUE(IsImportStampCurrent(currentStamp, kGltfImporterVersion, 500));
 }
 
 TEST_F(ImportStampTest, RemovalGuardAcceptsOnlyPathsStrictlyInsideTheDirectory)

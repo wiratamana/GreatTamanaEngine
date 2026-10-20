@@ -2737,9 +2737,10 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_SKIN_UV_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SkinVerticesPositionNormalUv.comp.spv"
 )
 
-# The lighting layout test reads the shared GLSL include straight from the source tree.
+# The layout tests read the shared GLSL includes straight from the source tree.
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_LIGHTING_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/DirectionalLighting.glsl"
+    GTE_TEST_MATERIAL_PARAMS_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/MaterialParams.glsl"
 )
 
 # Engine-owned reflection fixtures with abstract names (not shipped).
@@ -2925,6 +2926,7 @@ set(GTE_COMMENT_RULE_TESTS
     Renderer/RenderGraph/RenderPassToggleRegistryTests.cpp Renderer/RenderGraph/ShaderBindingsTests.cpp
     Renderer/RenderGraph/TransferReadbackGpuTests.cpp Renderer/Vulkan/ShaderReflectionTests.cpp
 Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderPurityProbe.cpp
+    Renderer/MaterialParamsTests.cpp Support/Std140Block.h
     Renderer/GpuSkinning/GpuSkinningPassTests.cpp Renderer/RenderGraph/RenderGraphComputeBindingKeyTests.cpp
     Renderer/RenderGraph/PassIdentityTests.cpp Renderer/RenderGraph/ResourcePoolEvictionTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")

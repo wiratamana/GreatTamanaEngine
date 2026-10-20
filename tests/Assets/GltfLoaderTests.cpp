@@ -101,6 +101,52 @@ TEST_F(GltfLoaderTest, UntexturedMaterialKeepsItsBaseColorFactor)
     EXPECT_FLOAT_EQ(m.diffuse.w, 1.0f);
 }
 
+TEST_F(GltfLoaderTest, LoadsMetallicRoughnessNormalScaleAndOcclusionStrength)
+{
+    const std::filesystem::path path = test::WriteGltfTriangle(m_root,
+        R"(,"materials":[{"pbrMetallicRoughness":{"metallicFactor":0.25,"roughnessFactor":0.75},
+              "normalTexture":{"index":0,"scale":2},"occlusionTexture":{"index":0,"strength":0.5}}],
+             "textures":[{"source":0}],"images":[{"uri":"white.png"}])", /*primitiveHasMaterial=*/true);
+    const GltfLoadResult r = LoadGltfModel(PathToUtf8(path));
+    ASSERT_TRUE(r.success) << r.message;
+    ASSERT_EQ(r.materials.materials.size(), 1u);
+    const Material& m = r.materials.materials[0];
+    EXPECT_FLOAT_EQ(m.metallicFactor, 0.25f);
+    EXPECT_FLOAT_EQ(m.roughnessFactor, 0.75f);
+    EXPECT_FLOAT_EQ(m.normalScale, 2.0f);
+    EXPECT_FLOAT_EQ(m.occlusionStrength, 0.5f);
+    EXPECT_EQ(m.normalTextureIndex, 0);
+    EXPECT_EQ(m.occlusionTextureIndex, 0);
+}
+
+TEST_F(GltfLoaderTest, MaterialWithoutPbrObjectOrTexturesUsesDefaultFactors)
+{
+    const std::filesystem::path path = test::WriteGltfTriangle(m_root, R"(,"materials":[{"name":"plain"}])",
+        /*primitiveHasMaterial=*/true);
+    const GltfLoadResult r = LoadGltfModel(PathToUtf8(path));
+    ASSERT_TRUE(r.success) << r.message;
+    ASSERT_EQ(r.materials.materials.size(), 1u);
+    const Material& m = r.materials.materials[0];
+    EXPECT_FLOAT_EQ(m.metallicFactor, 1.0f);
+    EXPECT_FLOAT_EQ(m.roughnessFactor, 1.0f);
+    EXPECT_FLOAT_EQ(m.normalScale, 1.0f);
+    EXPECT_FLOAT_EQ(m.occlusionStrength, 1.0f);
+    EXPECT_EQ(r.message.find("unsupported"), std::string::npos) << r.message;
+}
+
+TEST_F(GltfLoaderTest, ReportsUnsupportedTexcoordSetsAndShadingModels)
+{
+    const std::filesystem::path path = test::WriteGltfTriangle(m_root,
+        R"(,"materials":[{"normalTexture":{"index":0,"texCoord":1},
+              "extensions":{"KHR_materials_unlit":{}}}],
+             "textures":[{"source":0}],"images":[{"uri":"white.png"}],
+             "extensionsUsed":["KHR_materials_unlit"])", /*primitiveHasMaterial=*/true);
+    const GltfLoadResult r = LoadGltfModel(PathToUtf8(path));
+    ASSERT_TRUE(r.success) << r.message;
+    EXPECT_NE(r.message.find("1 texture slots use TEXCOORD_1+ (unsupported)."), std::string::npos) << r.message;
+    EXPECT_NE(r.message.find("1 materials use an unsupported shading model."), std::string::npos) << r.message;
+}
+
 TEST_F(GltfLoaderTest, FailsGracefullyOnAMissingFile)
 {
     const GltfLoadResult r = LoadGltfModel(PathToUtf8(m_root / "nope.gltf"));

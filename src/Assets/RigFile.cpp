@@ -6,12 +6,7 @@ namespace gte {
 
 namespace {
 
-// --- Binary writer ---------------------------------------------------------
-// A small, local append-only byte writer - same "plain helper functions
-// operating on a std::vector<uint8_t>&" shape as MeshFile.cpp's own
-// AppendU32()/AppendArray(), just with a few more primitive types (strings,
-// Vec3/Vec4/Quat, bool-as-u8) since RigFileData's shape is far less
-// uniform than MeshData's tightly-packed float arrays.
+// Append-only little-endian byte writer.
 class BinaryWriter {
 public:
     explicit BinaryWriter(std::vector<std::uint8_t>& bytes) : m_bytes(bytes) { }
@@ -62,19 +57,25 @@ private:
     std::vector<std::uint8_t>& m_bytes;
 };
 
-// --- Binary reader ---------------------------------------------------------
-// Mirrors BinaryWriter above. "Sticky failure" convention: once any Read*
-// call runs past the end of `m_bytes`, every subsequent Read* call becomes a
-// no-op (leaving the output untouched) and Ok() latches false - this lets
-// every decode function below just read fields in a straight line without
-// checking a return value after every single call, then check Ok() once at
-// the very end, same ergonomic shape as istream's own failbit.
+// Mirrors BinaryWriter. A read past the end latches Ok() to false and every later read returns zero,
+// so decoders read in a straight line and check Ok() once.
 class BinaryReader {
 public:
     BinaryReader(const std::vector<std::uint8_t>& bytes, std::size_t cursor) : m_bytes(bytes), m_cursor(cursor) { }
 
     bool Ok() const noexcept { return m_ok; }
     std::size_t Cursor() const noexcept { return m_cursor; }
+    std::size_t Remaining() const noexcept { return m_ok ? m_bytes.size() - m_cursor : 0; }
+
+    // Every counted item takes at least 4 bytes, so a larger count cannot be real.
+    bool CountFits(std::uint32_t count) noexcept
+    {
+        if (count > Remaining() / 4) {
+            m_ok = false;
+            return false;
+        }
+        return true;
+    }
 
     std::uint8_t U8()
     {
@@ -192,6 +193,9 @@ void WriteSkinWeights(BinaryWriter& w, const std::vector<VertexSkinWeights>& ski
 bool ReadSkinWeights(BinaryReader& r, std::vector<VertexSkinWeights>* out)
 {
     const std::uint32_t count = r.U32();
+    if (!r.CountFits(count)) {
+        return false;
+    }
     out->clear();
     out->reserve(count);
     for (std::uint32_t i = 0; i < count && r.Ok(); ++i) {
@@ -264,6 +268,9 @@ void WriteBones(BinaryWriter& w, const std::vector<Bone>& bones)
 bool ReadBones(BinaryReader& r, std::vector<Bone>* out)
 {
     const std::uint32_t count = r.U32();
+    if (!r.CountFits(count)) {
+        return false;
+    }
     out->clear();
     out->reserve(count);
     for (std::uint32_t i = 0; i < count && r.Ok(); ++i) {
@@ -305,6 +312,9 @@ bool ReadBones(BinaryReader& r, std::vector<Bone>* out)
         bone.ikIterationCount = r.I32();
         bone.ikAngleLimitRadians = r.F32();
         const std::uint32_t ikLinkCount = r.U32();
+        if (!r.CountFits(ikLinkCount)) {
+            return false;
+        }
         bone.ikLinks.reserve(ikLinkCount);
         for (std::uint32_t j = 0; j < ikLinkCount && r.Ok(); ++j) {
             Bone::IkLink link;
@@ -388,6 +398,9 @@ void WriteMorphs(BinaryWriter& w, const std::vector<Morph>& morphs)
 bool ReadMorphs(BinaryReader& r, std::vector<Morph>* out)
 {
     const std::uint32_t count = r.U32();
+    if (!r.CountFits(count)) {
+        return false;
+    }
     out->clear();
     out->reserve(count);
     for (std::uint32_t i = 0; i < count && r.Ok(); ++i) {
@@ -398,6 +411,9 @@ bool ReadMorphs(BinaryReader& r, std::vector<Morph>* out)
         morph.type = static_cast<MorphType>(r.U8());
 
         const std::uint32_t positionCount = r.U32();
+        if (!r.CountFits(positionCount)) {
+            return false;
+        }
         morph.positionOffsets.reserve(positionCount);
         for (std::uint32_t j = 0; j < positionCount && r.Ok(); ++j) {
             Morph::PositionOffset o;
@@ -407,6 +423,9 @@ bool ReadMorphs(BinaryReader& r, std::vector<Morph>* out)
         }
 
         const std::uint32_t uvCount = r.U32();
+        if (!r.CountFits(uvCount)) {
+            return false;
+        }
         morph.uvOffsets.reserve(uvCount);
         for (std::uint32_t j = 0; j < uvCount && r.Ok(); ++j) {
             Morph::UvOffset o;
@@ -416,6 +435,9 @@ bool ReadMorphs(BinaryReader& r, std::vector<Morph>* out)
         }
 
         const std::uint32_t boneCount = r.U32();
+        if (!r.CountFits(boneCount)) {
+            return false;
+        }
         morph.boneOffsets.reserve(boneCount);
         for (std::uint32_t j = 0; j < boneCount && r.Ok(); ++j) {
             Morph::BoneOffset o;
@@ -426,6 +448,9 @@ bool ReadMorphs(BinaryReader& r, std::vector<Morph>* out)
         }
 
         const std::uint32_t materialCount = r.U32();
+        if (!r.CountFits(materialCount)) {
+            return false;
+        }
         morph.materialOffsets.reserve(materialCount);
         for (std::uint32_t j = 0; j < materialCount && r.Ok(); ++j) {
             Morph::MaterialOffset o;
@@ -444,6 +469,9 @@ bool ReadMorphs(BinaryReader& r, std::vector<Morph>* out)
         }
 
         const std::uint32_t groupCount = r.U32();
+        if (!r.CountFits(groupCount)) {
+            return false;
+        }
         morph.groupOffsets.reserve(groupCount);
         for (std::uint32_t j = 0; j < groupCount && r.Ok(); ++j) {
             Morph::GroupOffset o;
@@ -453,6 +481,9 @@ bool ReadMorphs(BinaryReader& r, std::vector<Morph>* out)
         }
 
         const std::uint32_t flipCount = r.U32();
+        if (!r.CountFits(flipCount)) {
+            return false;
+        }
         morph.flipOffsets.reserve(flipCount);
         for (std::uint32_t j = 0; j < flipCount && r.Ok(); ++j) {
             Morph::FlipOffset o;
@@ -462,6 +493,9 @@ bool ReadMorphs(BinaryReader& r, std::vector<Morph>* out)
         }
 
         const std::uint32_t impulseCount = r.U32();
+        if (!r.CountFits(impulseCount)) {
+            return false;
+        }
         morph.impulseOffsets.reserve(impulseCount);
         for (std::uint32_t j = 0; j < impulseCount && r.Ok(); ++j) {
             Morph::ImpulseOffset o;
@@ -519,6 +553,9 @@ void WritePhysics(BinaryWriter& w, const PhysicsData& physics)
 bool ReadPhysics(BinaryReader& r, PhysicsData* out)
 {
     const std::uint32_t bodyCount = r.U32();
+    if (!r.CountFits(bodyCount)) {
+        return false;
+    }
     out->rigidBodies.clear();
     out->rigidBodies.reserve(bodyCount);
     for (std::uint32_t i = 0; i < bodyCount && r.Ok(); ++i) {
@@ -542,6 +579,9 @@ bool ReadPhysics(BinaryReader& r, PhysicsData* out)
     }
 
     const std::uint32_t jointCount = r.U32();
+    if (!r.CountFits(jointCount)) {
+        return false;
+    }
     out->joints.clear();
     out->joints.reserve(jointCount);
     for (std::uint32_t i = 0; i < jointCount && r.Ok(); ++i) {
@@ -599,6 +639,9 @@ void WriteMaterialData(BinaryWriter& w, const MaterialData& materials)
 bool ReadMaterialData(BinaryReader& r, MaterialData* out)
 {
     const std::uint32_t textureCount = r.U32();
+    if (!r.CountFits(textureCount)) {
+        return false;
+    }
     out->textures.clear();
     out->textures.reserve(textureCount);
     for (std::uint32_t i = 0; i < textureCount && r.Ok(); ++i) {
@@ -610,6 +653,9 @@ bool ReadMaterialData(BinaryReader& r, MaterialData* out)
     }
 
     const std::uint32_t materialCount = r.U32();
+    if (!r.CountFits(materialCount)) {
+        return false;
+    }
     out->materials.clear();
     out->materials.reserve(materialCount);
     for (std::uint32_t i = 0; i < materialCount && r.Ok(); ++i) {
@@ -651,6 +697,9 @@ void WriteJointPhysicsOverrides(BinaryWriter& w, const std::vector<JointPhysicsO
 bool ReadJointPhysicsOverrides(BinaryReader& r, std::vector<JointPhysicsOverride>* out)
 {
     const std::uint32_t count = r.U32();
+    if (!r.CountFits(count)) {
+        return false;
+    }
     out->clear();
     out->reserve(count);
     for (std::uint32_t i = 0; i < count && r.Ok(); ++i) {
@@ -718,6 +767,33 @@ bool ReadMaterialColorFlags(BinaryReader& r, std::vector<Material>* materials)
     return r.Ok();
 }
 
+void WriteMaterialPbrFactors(BinaryWriter& w, const std::vector<Material>& materials)
+{
+    w.U32(static_cast<std::uint32_t>(materials.size()));
+    for (const Material& m : materials) {
+        w.F32(m.metallicFactor);
+        w.F32(m.roughnessFactor);
+        w.F32(m.normalScale);
+        w.F32(m.occlusionStrength);
+    }
+}
+
+// The count must match the material list read earlier.
+bool ReadMaterialPbrFactors(BinaryReader& r, std::vector<Material>* materials)
+{
+    const std::uint32_t count = r.U32();
+    if (!r.Ok() || count != materials->size()) {
+        return false;
+    }
+    for (Material& m : *materials) {
+        m.metallicFactor = r.F32();
+        m.roughnessFactor = r.F32();
+        m.normalScale = r.F32();
+        m.occlusionStrength = r.F32();
+    }
+    return r.Ok();
+}
+
 } // namespace
 
 std::vector<std::uint8_t> EncodeRigDataToBytes(const RigFileData& rig)
@@ -734,6 +810,7 @@ std::vector<std::uint8_t> EncodeRigDataToBytes(const RigFileData& rig)
     WriteJointPhysicsOverrides(w, rig.jointPhysicsOverrides); // Always written, count may be 0.
     WriteMaterialExtras(w, rig.materials.materials);
     WriteMaterialColorFlags(w, rig.materials.materials);
+    WriteMaterialPbrFactors(w, rig.materials.materials);
 
     return bytes;
 }
@@ -779,6 +856,11 @@ std::optional<RigFileData> DecodeRigDataFromBytes(const std::vector<std::uint8_t
     }
     if (r.Cursor() < bytes.size()) {
         if (!ReadMaterialColorFlags(r, &rig.materials.materials)) {
+            return std::nullopt;
+        }
+    }
+    if (r.Cursor() < bytes.size()) {
+        if (!ReadMaterialPbrFactors(r, &rig.materials.materials)) {
             return std::nullopt;
         }
     }

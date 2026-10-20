@@ -12,16 +12,8 @@
 
 namespace gte {
 
-// The result of one DecodeRigDataFromBytes() call below - the "rig" half of
-// an imported MMD model (everything PmxLoader.h's LoadPmxModel() extracts
-// BESIDES plain positions/normals/UVs/indices, which stay in MeshData/
-// MeshFile.h exactly as before). Grouped into one struct/one blob rather
-// than four separate ones purely because they are always produced/consumed
-// together for a single imported model - see AssetImporter.cpp, which
-// stores this as the Mesh *.gta's METADATA section (see GtaFile.h's
-// GtaFileData::metadata - deliberately left an opaque "ad hoc bytes" slot
-// for exactly this kind of sidecar data) alongside the unchanged MeshFile.h
-// payload.
+// Everything an imported model carries besides plain mesh geometry.
+// Stored as the metadata section of a Mesh *.gta; the payload stays a MeshFile.
 struct RigFileData {
     std::vector<VertexSkinWeights> skinWeights;
     SkeletonData skeleton;
@@ -29,83 +21,18 @@ struct RigFileData {
     PhysicsData physics;
     MaterialData materials;
 
-    // task_manager/verlet-integration-11, PHASE1 - user-saved per-joint
-    // damping/stiffness/mass overrides (see JointPhysicsOverride's own doc
-    // comment, PhysicsData.h). ALWAYS encoded as a trailing, OPTIONAL section
-    // (see EncodeRigDataToBytes()/DecodeRigDataFromBytes()'s own updated doc
-    // comment below for the exact backward/forward-compatibility mechanism) -
-    // empty for a model that has never been saved with any joint edits
-    // (every model imported before this phase, and every model a user has
-    // simply never clicked "Save Joint Physics to Asset" for).
+    // User-saved per-joint physics overrides; empty when never saved.
     std::vector<JointPhysicsOverride> jointPhysicsOverrides;
 };
 
-// (De)serializes a RigFileData - per-vertex bone skinning weights, the bone
-// hierarchy, morphs, and rigid-body/joint physics setup - to/from a flat,
-// engine-private binary blob, the "Bones / Morphs / Physics / (skin weight
-// half of) Skinning" equivalent of MeshFile.h's own EncodeMeshDataToBytes()/
-// DecodeMeshDataFromBytes() for plain vertex geometry. Deliberately a
-// separate format/file from MeshFile.h rather than an extension of it: this
-// data is optional/model-level (a boneless static mesh has none of it) and
-// far more variable-shaped (nested per-bone/per-morph arrays, strings) than
-// MeshData's tightly-packed fixed-stride arrays, so keeping the two formats
-// independent means neither one's future evolution (e.g. a hypothetical
-// glTF skin importer that only ever produces skin weights, never
-// morphs/physics) needs to touch the other's on-disk layout at all.
-//
-// On-disk layout (all integers little-endian, all floats IEEE 754 binary32
-// - same conventions as MeshFile.h; every variable-length section is
-// length-prefixed with a uint32_t count/byte-length immediately before it,
-// so a reader never needs to know a section's size in advance):
-//
-//   8 bytes  : magic ("GTERIG03", no null terminator - exactly 8 bytes;
-//              bumped from "GTERIG02" when each texture slot gained a Guid
-//              alongside its source path - see MaterialTextureRef in
-//              MaterialData.h - an old "GTERIG01"/"GTERIG02" blob now fails
-//              to decode (returns std::nullopt) rather than silently
-//              misreading past its own end, same "never silently
-//              misinterpret an older layout" spirit as AssetTypes.h's own
-//              "only ever APPEND, never renumber" rule for its enums)
-//   uint32_t : skinWeights count, followed by that many fixed-size records
-//              (1 byte weight type + 4 int32 bone indices + 4 float weights
-//              + 3 Vec3 SDEF correction terms each)
-//   uint32_t : bones count, followed by that many variable-size bone
-//              records (two length-prefixed UTF-8 strings, fixed fields,
-//              then a length-prefixed IK link array)
-//   uint32_t : morphs count, followed by that many variable-size morph
-//              records (two strings, then 7 length-prefixed offset arrays -
-//              only the ones matching that morph's own type are ever
-//              non-empty, but every array is always present/zero-length
-//              otherwise, so decoding never needs to branch on type)
-//   uint32_t : rigid bodies count, followed by that many fixed-shape-per-
-//              record (two strings + fixed fields) rigid body records
-//   uint32_t : joints count, followed by that many fixed-shape-per-record
-//              (two strings + fixed fields) joint records
-//   uint32_t : texture count, followed by that many texture slot records
-//              (MaterialData::textures / MaterialTextureRef) - each a
-//              length-prefixed UTF-8 source-path string (import-time
-//              diagnostic only - see MaterialTextureRef's own doc comment,
-//              never read at runtime) followed by a 16-byte Guid
-//              (low uint64 then high uint64) - Guid::Invalid() (all-zero)
-//              when that texture was never actually imported as its own
-//              *.gta asset
-//   uint32_t : materials count, followed by that many variable-size
-//              material records (two strings, fixed color/texture-index/
-//              toon fields, then the material's own indexCount)
-//   uint32_t : joint physics override count (task_manager/verlet-integration-11,
-//              PHASE1) - followed by that many fixed-size records (1 int32
-//              bone index + 3 floats: damping, stiffness, mass). OPTIONAL -
-//              a blob with no bytes left after materials decodes with this
-//              list empty rather than failing; this is what lets a *.gta
-//              written by any version of the engine PRIOR to this phase keep
-//              decoding correctly forever, with no magic bump required (see
-//              DecodeRigDataFromBytes()'s own comment for the exact
-//              mechanism this relies on).
-//
-// Encodes/decodes never fail on a well-formed (even if entirely empty)
-// RigFileData; Decode only fails (returns std::nullopt) on a genuinely
-// malformed/truncated/wrong-magic blob - never throws, same failure
-// contract as MeshFile.h's own DecodeMeshDataFromBytes().
+// Flat little-endian binary blob of a RigFileData. Layout, in order:
+//   8 bytes magic "GTERIG03"
+//   u32 count + records: skin weights, bones (with IK links), morphs (7 offset lists each),
+//     rigid bodies, joints, texture refs (path + 16-byte Guid), materials
+//   OPTIONAL trailing sections, each u32 count + records; an older blob simply ends before them:
+//     joint physics overrides, material extras (slot indices, alpha), material color flags,
+//     material PBR factors (4 floats per material: metallic, roughness, normal scale, occlusion strength)
+// Decode returns nullopt for a malformed, truncated or wrong-magic blob. It never throws.
 inline constexpr char kRigFileMagic[8] = { 'G', 'T', 'E', 'R', 'I', 'G', '0', '3' };
 
 std::vector<std::uint8_t> EncodeRigDataToBytes(const RigFileData& rig);

@@ -286,6 +286,9 @@ Material ConvertMaterial(const cgltf_material& source, std::size_t index, Textur
     m.name = source.name != nullptr ? source.name : "Material_" + std::to_string(index);
     m.useBaseColorFactor = true;
 
+    // cgltf fills the glTF defaults (1, 1) before parsing, so this is valid without the pbr object.
+    m.metallicFactor = source.pbr_metallic_roughness.metallic_factor;
+    m.roughnessFactor = source.pbr_metallic_roughness.roughness_factor;
     if (source.has_pbr_metallic_roughness) {
         const cgltf_pbr_metallic_roughness& pbr = source.pbr_metallic_roughness;
         m.diffuse = Vec4(pbr.base_color_factor[0], pbr.base_color_factor[1], pbr.base_color_factor[2],
@@ -296,6 +299,13 @@ Material ConvertMaterial(const cgltf_material& source, std::size_t index, Textur
     m.normalTextureIndex = textures.Resolve(source.normal_texture);
     m.occlusionTextureIndex = textures.Resolve(source.occlusion_texture);
     m.emissiveTextureIndex = textures.Resolve(source.emissive_texture);
+    // cgltf leaves `scale` at 0 for a texture view that is not in the file; cgltf stores occlusion strength there too.
+    if (source.normal_texture.texture != nullptr) {
+        m.normalScale = source.normal_texture.scale;
+    }
+    if (source.occlusion_texture.texture != nullptr) {
+        m.occlusionStrength = source.occlusion_texture.scale;
+    }
 
     m.bothFacesVisible = source.double_sided != 0;
     m.alphaCutoff = source.alpha_cutoff;
@@ -305,6 +315,17 @@ Material ConvertMaterial(const cgltf_material& source, std::size_t index, Textur
     default: m.alphaMode = AlphaMode::Opaque; break;
     }
     return m;
+}
+
+// Number of used texture slots of one material that read a UV set other than TEXCOORD_0.
+std::size_t CountUnsupportedTexcoordSlots(const cgltf_material& m)
+{
+    const auto count = [](const cgltf_texture_view& v) { return v.texture != nullptr && v.texcoord != 0 ? 1u : 0u; };
+    std::size_t n = count(m.normal_texture) + count(m.occlusion_texture) + count(m.emissive_texture);
+    if (m.has_pbr_metallic_roughness) {
+        n += count(m.pbr_metallic_roughness.base_color_texture) + count(m.pbr_metallic_roughness.metallic_roughness_texture);
+    }
+    return n;
 }
 
 } // namespace
@@ -407,6 +428,21 @@ GltfLoadResult LoadGltfModel(const std::string& filePath)
         + std::to_string(skippedPrimitives) + " skipped primitives, UV range ["
         + std::to_string(uvMin.x) + "," + std::to_string(uvMin.y) + "]-["
         + std::to_string(uvMax.x) + "," + std::to_string(uvMax.y) + "].";
+
+    std::size_t unsupportedTexcoordSlots = 0;
+    std::size_t unsupportedShadingMaterials = 0;
+    for (std::size_t i = 0; i < data->materials_count; ++i) {
+        unsupportedTexcoordSlots += CountUnsupportedTexcoordSlots(data->materials[i]);
+        if (data->materials[i].has_pbr_specular_glossiness || data->materials[i].unlit) {
+            ++unsupportedShadingMaterials;
+        }
+    }
+    if (unsupportedTexcoordSlots > 0) {
+        result.message += " " + std::to_string(unsupportedTexcoordSlots) + " texture slots use TEXCOORD_1+ (unsupported).";
+    }
+    if (unsupportedShadingMaterials > 0) {
+        result.message += " " + std::to_string(unsupportedShadingMaterials) + " materials use an unsupported shading model.";
+    }
     return result;
 }
 
