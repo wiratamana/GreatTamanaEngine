@@ -13,9 +13,12 @@ SceneLightingFeature::SceneLightingFeature(fx::FeatureHost&) { }
 void SceneLightingFeature::Setup(fx::FeatureSetup& s)
 {
     // Not a render pass: Always() keeps a pass toggle from silencing the uniform write.
+    // Runs after the cascade pass (priority 10), so the receiver is already published.
     s.PreOpaque("SceneLighting.Uniforms", kUniformsPriority,
         [this](fx::PreOpaqueFrame& f) {
-            f.SetSceneUniforms(PackSceneLightingUniformData(ResolveActiveDirectionalLight(f.Scene()), m_settings));
+            const std::optional<SunShadowReceiver> receiver = m_receiver.Fetch(f);
+            f.SetSceneUniforms(PackSceneLightingUniformData(
+                ResolveActiveDirectionalLight(f.Scene()), m_settings, receiver ? &*receiver : nullptr));
         },
         fx::Gate::Always());
 }

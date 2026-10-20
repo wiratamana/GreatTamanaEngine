@@ -84,6 +84,35 @@ TEST(ShadowReceiverTest, EmptyMapGivesAnEmptyReceiver)
     EXPECT_FLOAT_EQ(receiver.splitFar[0], 0.0f);
 }
 
+TEST(ShadowReceiverTest, CarriesTheMaterialSamplingSettings)
+{
+    ShadowMapData map = MakeMap(3);
+    map.cascades.fadeStart = 27.0f;
+    ShadowSettings settings;
+    settings.strength = 0.8f;
+    settings.constBiasTexels = 2.0f;
+    settings.normalOffsetTexels = 3.0f;
+    settings.slopeBiasTexels = 0.5f;
+    settings.filterRadiusTexels = 1.5f;
+    settings.filterSamples = 4;
+    const SunShadowReceiver receiver = MakeSunShadowReceiver(map, SanitizeShadowSettings(settings));
+
+    EXPECT_FLOAT_EQ(receiver.fadeStart, 27.0f);
+    EXPECT_FLOAT_EQ(receiver.materialStrength, 0.8f);
+    EXPECT_FLOAT_EQ(receiver.constBiasTexels, 2.0f);
+    EXPECT_FLOAT_EQ(receiver.normalOffsetTexels, 3.0f);
+    EXPECT_FLOAT_EQ(receiver.filterRadiusTexels, 1.5f);
+    EXPECT_FLOAT_EQ(receiver.slopeBiasTexels, 1.5f); // max(slope, filter radius)
+    EXPECT_EQ(receiver.filterSamples, 4u);
+}
+
+TEST(ShadowReceiverTest, MaterialStrengthIsZeroWhenMaterialsDoNotApplyShadows)
+{
+    ShadowSettings settings;
+    settings.applyInMaterials = false;
+    EXPECT_FLOAT_EQ(MakeSunShadowReceiver(MakeMap(2), SanitizeShadowSettings(settings)).materialStrength, 0.0f);
+}
+
 TEST(ShadowReceiverTest, OwnerAndChannelMatchTheShadowFeatureKey)
 {
     EXPECT_STREQ(kSunShadowReceiverOwner, kShadowFeatureName);

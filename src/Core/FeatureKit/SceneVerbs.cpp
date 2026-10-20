@@ -1,6 +1,7 @@
 #include "Frame.h"
 
 #include "FrameContext.h"
+#include "SceneSlotKey.h"
 #include "../Core.h"
 #include "../../Renderer/SceneServicesDescriptorSet.h"
 
@@ -8,6 +9,11 @@ namespace gte::fx {
 
 static_assert(kSceneSlotCount == kSceneServiceSlotCount, "the kit's slot count must match the engine's");
 static_assert(kMaxSceneUniformBytes == kSceneGlobalUniformBlockSize, "the kit's uniform limit must match the engine's");
+
+rg::RenderPassId SceneSlotKey(std::uint32_t slotIndex, rg::RenderViewId view) noexcept
+{
+    return SceneServiceBlackboardKey(slotIndex, view);
+}
 
 void Frame::PublishToScene(SceneSlot slot, Texture texture)
 {

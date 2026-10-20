@@ -29,6 +29,15 @@ struct SunShadowReceiver {
     Vec3 cameraForward;
     Vec3 directionTowardSun = Vec3::Up();
     float shadowDistance = 0.0f;
+
+    // Sampling settings for material shaders.
+    float fadeStart = 0.0f;          // View depth where the distance fade begins.
+    float materialStrength = 0.0f;   // 0 = material shaders must not apply shadows.
+    float filterRadiusTexels = 0.0f;
+    float constBiasTexels = 0.0f;
+    float normalOffsetTexels = 0.0f;
+    float slopeBiasTexels = 0.0f;    // Already max(slope, filter radius).
+    std::uint32_t filterSamples = 1;
 };
 
 } // namespace gte

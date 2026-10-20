@@ -1,7 +1,9 @@
 #version 450
 
 // Mesh preview fragment shader: clay base color, display-encoded for an 8-bit target.
+// The preview's scene set holds only the lighting block, so cascade shadows are compiled out.
 
+#define DIRECTIONAL_LIGHTING_NO_SHADOWS
 #include "DirectionalLighting.glsl"
 
 layout(location = 0) in vec3 inWorldNormal;

@@ -70,6 +70,14 @@ void ShadowFeature::Setup(fx::FeatureSetup& s)
         fx::Gate{ "Shadow.Mask.Dispatch" });
     s.PostComposite("Shadow.Composite", kCompositePriority, fx::Blend::ScreenSpaceMask,
         [this](fx::CompositeFrame& f) { CompositePass(f); }, fx::Gate{ "Shadow.Composite.Draw" });
+
+    // The slot index is the shader binding in set 1; material shaders read the cascade maps there.
+    static constexpr const char* kSlotNames[kMaxShadowCascades] = {
+        "Shadow.Cascade0.Slot", "Shadow.Cascade1.Slot", "Shadow.Cascade2.Slot", "Shadow.Cascade3.Slot"
+    };
+    for (std::uint32_t c = 0; c < kMaxShadowCascades; ++c) {
+        m_cascadeSlots[c] = s.DeclareSceneSlot(kSlotNames[c], fx::SceneSlotKind::Depth2D, c);
+    }
 }
 
 void ShadowFeature::ApplySettings(const ShadowSettings& candidate)
@@ -184,8 +192,11 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
 
     snap.resolutionInUse = resolution;
     if (failure == ShadowFrameStatus::Ok) {
+        for (std::uint32_t c = 0; c < set.count; ++c) {
+            f.PublishToScene(m_cascadeSlots[c], data.maps[c]);
+        }
         m_mapData.Publish(f, data);
-        m_receiverData.Publish(f, MakeSunShadowReceiver(data));
+        m_receiverData.Publish(f, MakeSunShadowReceiver(data, cfg));
     }
     finish(failure);
 }
@@ -272,12 +283,16 @@ void ShadowFeature::MaskPass(fx::PostOpaqueFrame& f)
 
 void ShadowFeature::CompositePass(fx::CompositeFrame& f)
 {
+    const ShadowSettings& cfg = m_settings;
+    // Materials apply the shadow themselves; only the debug views are drawn here.
+    if (cfg.applyInMaterials && cfg.debugView == ShadowDebugView::Off) {
+        return;
+    }
     const std::optional<fx::Texture> mask = m_maskData.Fetch(f);
     const std::optional<fx::Texture> cascadeId = m_cascadeIdData.Fetch(f);
     if (!mask || !cascadeId) {
         return;
     }
-    const ShadowSettings& cfg = m_settings;
     const CompositeParams params{ cfg.strength, static_cast<std::uint32_t>(cfg.debugView), cfg.cascadeCount, 0u };
     const bool drawn = f.Fullscreen(m_compositeShader, "Shadow.Composite.Draw")
                            .Bind("sceneColor", f.SceneColor())

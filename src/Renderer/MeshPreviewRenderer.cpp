@@ -5,6 +5,7 @@
 #include "Pipeline.h"
 #include "Renderer.h"
 #include "RenderTexture.h"
+#include "SceneServicesDescriptorSet.h"
 #include "ShaderFile.h"
 #include "RenderGraph/CommandBuffer.h"
 #include "../Core/Logging.h"
@@ -34,8 +35,8 @@ struct PreviewPush {
 };
 static_assert(sizeof(PreviewPush) == 128, "layout differs from MeshPreview.vert");
 
-// Covers the scene global uniform block of MeshPreview.frag; all zeros selects the default light.
-constexpr std::uint64_t kDummyUniformBlockSize = 128;
+// Covers the whole scene lighting block of MeshPreview.frag; all zeros selects the default light.
+constexpr std::uint64_t kDummyUniformBlockSize = kSceneGlobalUniformBlockSize;
 
 } // namespace
 

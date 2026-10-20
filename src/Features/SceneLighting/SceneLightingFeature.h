@@ -3,10 +3,11 @@
 #include "SceneLightingDebugEndpoint.h"
 #include "SceneLightingTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
+#include "../../Game/Lighting/SunShadowReceiver.h"
 
 namespace gte {
 
-// Writes the sun and ambient block (scene-services binding 8) every frame for every view.
+// Writes the sun, ambient and sun-cascade block (scene-services binding 8) every frame for every view.
 class SceneLightingFeature final : public fx::Feature {
 public:
     explicit SceneLightingFeature(fx::FeatureHost& host);
@@ -18,6 +19,7 @@ public:
 private:
     SceneLightingSettings m_settings;
     SceneLightingDebugEndpoint m_endpoint{ m_settings };
+    fx::ChannelReader<SunShadowReceiver> m_receiver{ kSunShadowReceiverOwner, kSunShadowReceiverChannel };
 };
 
 } // namespace gte

@@ -30,9 +30,9 @@ ShadowCascadeSet BuildShadowCascades(const ShadowViewFrustum& frustum, const Vec
 ShadowMaskParamsGpu MakeShadowMaskParams(
     const ShadowMapData& map, const ShadowSettings& safe, const Mat4& invViewProjection) noexcept;
 
-// The cascade data other features sample the sun's shadow with.
+// The cascade data other features sample the sun's shadow with. `safe` must be sanitized.
 // Entries past the count stay zero, except splitFar, which repeats the last split.
-SunShadowReceiver MakeSunShadowReceiver(const ShadowMapData& map) noexcept;
+SunShadowReceiver MakeSunShadowReceiver(const ShadowMapData& map, const ShadowSettings& safe = ShadowSettings{}) noexcept;
 
 // Sun elevation above the horizon in degrees; a non-finite direction counts as straight up.
 float SunElevationDegrees(const Vec3& directionTowardSun) noexcept;

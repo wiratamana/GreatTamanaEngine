@@ -39,6 +39,7 @@ constexpr std::array kSettingKeys{
     SettingKey{ "filterRadiusTexels", &ShadowSettings::filterRadiusTexels },
     SettingKey{ "filterSamples", &ShadowSettings::filterSamples },
     SettingKey{ "strength", &ShadowSettings::strength },
+    SettingKey{ "applyInMaterials", &ShadowSettings::applyInMaterials },
     SettingKey{ "stabilizeCascades", &ShadowSettings::stabilizeCascades },
     SettingKey{ "useSdsm", &ShadowSettings::useSdsm },
     SettingKey{ "sdsmPaddingFraction", &ShadowSettings::sdsmPaddingFraction },

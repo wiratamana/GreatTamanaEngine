@@ -133,6 +133,17 @@ TEST(ShadowMathTest, SanitizeClampsStrengthIntoUnitRange)
     EXPECT_FLOAT_EQ(SanitizeShadowSettings(settings).strength, 1.0f);
 }
 
+TEST(ShadowMathTest, DefaultsApplyFullStrengthInMaterials)
+{
+    const ShadowSettings defaults;
+    EXPECT_FLOAT_EQ(defaults.strength, 1.0f);
+    EXPECT_TRUE(defaults.applyInMaterials);
+
+    ShadowSettings settings;
+    settings.applyInMaterials = false;
+    EXPECT_FALSE(SanitizeShadowSettings(settings).applyInMaterials);
+}
+
 TEST(ShadowMathTest, SanitizeClampsDistancesAndFractionsIntoTheirRanges)
 {
     ShadowSettings settings;

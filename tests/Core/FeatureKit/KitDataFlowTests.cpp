@@ -291,6 +291,12 @@ struct Uniforms112 {
     float values[28];
 };
 
+TEST(KitSceneUniformsTest, TheUniformBlockLimitIs512Bytes)
+{
+    static_assert(kMaxSceneUniformBytes == 512);
+    EXPECT_EQ(kMaxSceneUniformBytes, std::size_t{ 512 });
+}
+
 TEST(KitSceneUniformsTest, ASmallTriviallyCopyableBlockIsAccepted)
 {
     static_assert(sizeof(Uniforms112) <= kMaxSceneUniformBytes);

@@ -1,6 +1,7 @@
 // Compares SceneLightingUniformData with the std140 block in DirectionalLighting.glsl,
 // field by field, so a swapped or renamed member fails (a size check alone cannot see that).
 
+#include "Core/FeatureKit/SceneSlot.h"
 #include "Features/SceneLighting/SceneLightingTypes.h"
 
 #include <gtest/gtest.h>
@@ -109,12 +110,26 @@ TEST(SceneLightingUniformLayoutTest, EveryFieldMatchesTheStd140BlockInName_Order
 {
     const Std140Block block = ParseBlock(ReadShader());
 
+#define GTE_EXPECT_MEMBER(name) { #name, offsetof(SceneLightingUniformData, name) }
     const std::vector<std::pair<const char*, std::size_t>> expected = {
-        { "sunDirectionAndValid", offsetof(SceneLightingUniformData, sunDirectionAndValid) },
-        { "sunIlluminance", offsetof(SceneLightingUniformData, sunIlluminance) },
-        { "skyAmbientAndIntensity", offsetof(SceneLightingUniformData, skyAmbientAndIntensity) },
-        { "groundAmbientAndPad", offsetof(SceneLightingUniformData, groundAmbientAndPad) },
+        GTE_EXPECT_MEMBER(sunDirectionAndValid),
+        GTE_EXPECT_MEMBER(sunIlluminance),
+        GTE_EXPECT_MEMBER(skyAmbientAndIntensity),
+        GTE_EXPECT_MEMBER(groundAmbientAndPad),
+        GTE_EXPECT_MEMBER(shadowParams),
+        GTE_EXPECT_MEMBER(shadowBias),
+        GTE_EXPECT_MEMBER(cameraPositionAndFadeStart),
+        GTE_EXPECT_MEMBER(cameraForwardAndFadeEnd),
+        GTE_EXPECT_MEMBER(cascadeSplitFar),
+        GTE_EXPECT_MEMBER(cascadeBlendWidth),
+        GTE_EXPECT_MEMBER(cascadeTexelWorld),
+        GTE_EXPECT_MEMBER(cascadeDepthRange),
+        GTE_EXPECT_MEMBER(cascadeViewProjection0),
+        GTE_EXPECT_MEMBER(cascadeViewProjection1),
+        GTE_EXPECT_MEMBER(cascadeViewProjection2),
+        GTE_EXPECT_MEMBER(cascadeViewProjection3),
     };
+#undef GTE_EXPECT_MEMBER
 
     ASSERT_EQ(block.members.size(), expected.size());
     for (std::size_t i = 0; i < expected.size(); ++i) {
@@ -122,6 +137,13 @@ TEST(SceneLightingUniformLayoutTest, EveryFieldMatchesTheStd140BlockInName_Order
         EXPECT_EQ(block.members[i].offset, expected[i].second) << expected[i].first;
     }
     EXPECT_EQ(block.size, sizeof(SceneLightingUniformData));
+    EXPECT_EQ(block.size, 448u);
+}
+
+TEST(SceneLightingUniformLayoutTest, BlockFitsTheEngineUniformLimit)
+{
+    static_assert(sizeof(SceneLightingUniformData) <= fx::kMaxSceneUniformBytes);
+    EXPECT_LE(sizeof(SceneLightingUniformData), fx::kMaxSceneUniformBytes);
 }
 
 TEST(SceneLightingUniformLayoutTest, ParserComputesStd140OffsetsForMixedTypes)

@@ -14,10 +14,13 @@ layout(location = 2) in vec3 inColor;
 
 layout(location = 0) out vec3 outWorldNormal;
 layout(location = 1) out vec3 fragColor;
+layout(location = 2) out vec3 outWorldPos;
 
 void main()
 {
-    gl_Position = pc.viewProj * (pc.model * vec4(inPosition, 1.0));
+    vec4 world = pc.model * vec4(inPosition, 1.0);
+    gl_Position = pc.viewProj * world;
+    outWorldPos = world.xyz;
     outWorldNormal = mat3(pc.model) * inNormal;
     fragColor = inColor;
 }
