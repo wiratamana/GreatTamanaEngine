@@ -199,8 +199,6 @@ TEST(VolumetricLightParamsTest, CompositePushCarriesTheResultAndSettings)
     VolumetricLightSettings s = SanitizeVolumetricLightSettings(VolumetricLightSettings{});
     s.strength = 0.5f;
     s.skyDistanceFraction = 0.25f;
-    s.dither = 1.5f;
-    s.blendInLinearSpace = false;
     s.debugView = VolumetricLightDebugView::Transmittance;
 
     VolumetricLightResult result;
@@ -211,10 +209,10 @@ TEST(VolumetricLightParamsTest, CompositePushCarriesTheResultAndSettings)
 
     EXPECT_FLOAT_EQ(p.eyeAndMaxDistance[1], 2.0f);
     EXPECT_FLOAT_EQ(p.eyeAndMaxDistance[3], 33.0f);
-    EXPECT_FLOAT_EQ(p.strengthExponentLinearDither[0], 0.5f);
-    EXPECT_FLOAT_EQ(p.strengthExponentLinearDither[1], 2.0f);
-    EXPECT_FLOAT_EQ(p.strengthExponentLinearDither[2], 0.0f);
-    EXPECT_FLOAT_EQ(p.strengthExponentLinearDither[3], 1.5f);
+    EXPECT_FLOAT_EQ(p.strengthExponentReserved[0], 0.5f);
+    EXPECT_FLOAT_EQ(p.strengthExponentReserved[1], 2.0f);
+    EXPECT_FLOAT_EQ(p.strengthExponentReserved[2], 0.0f);
+    EXPECT_FLOAT_EQ(p.strengthExponentReserved[3], 0.0f);
     EXPECT_EQ(p.frameAndDebug[0], 5u);
     EXPECT_EQ(p.frameAndDebug[1], 2u);
     EXPECT_EQ(std::bit_cast<float>(p.frameAndDebug[2]), 0.25f);

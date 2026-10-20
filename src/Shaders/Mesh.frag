@@ -1,6 +1,6 @@
 #version 450
 
-// Imported-mesh fragment shader: directional light on a flat neutral base color.
+// Imported-mesh fragment shader: outputs linear scene color, lit on a flat neutral base color.
 
 #include "DirectionalLighting.glsl"
 

@@ -1,13 +1,13 @@
 #version 450
 
-// Sky background: samples the view's sky-view LUT along the per-pixel camera ray, then tonemaps.
+// Sky background: samples the view's sky-view LUT along the per-pixel camera ray, outputs linear radiance.
 // The ray comes from unprojecting the near/far NDC points through invViewProjection.
 
 layout(push_constant) uniform PushConstants {
     mat4 invViewProjection;
     float eyeHeightKm;
     float planetRadiusKm;
-    float skyExposure;
+    float skyIntensity;
     float _pad0;
 } pc;
 
@@ -35,8 +35,6 @@ void main()
     vec2 uv = ViewDirectionToSkyViewLutUv(viewDirection, lutSize, viewHeightKm, pc.planetRadiusKm);
 
     vec3 radiance = texture(skyViewLut, uv).rgb;
-    // The LUT is HDR (above 1 near the sun) but the color target is not, so apply 1 - exp(-x * exposure).
-    vec3 tonemapped = vec3(1.0) - exp(-max(radiance, vec3(0.0)) * pc.skyExposure);
-
-    outColor = vec4(tonemapped, 1.0);
+    // Linear scene radiance; a large sun-disk value must stay finite in 16-bit float.
+    outColor = vec4(min(max(radiance, vec3(0.0)) * pc.skyIntensity, vec3(60000.0)), 1.0);
 }

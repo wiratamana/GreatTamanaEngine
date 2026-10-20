@@ -25,7 +25,7 @@ rg::TextureHandle RenderFeatureCompositor::Impl::AcquireTarget(
     rg::RenderGraphBuilder& builder, const char* internedName, Extent2D extent)
 {
     const rg::RenderFeatureScope owner(builder, kTargetOwner);
-    return targets[internedName].Acquire(builder, internedName, extent, PixelFormat::RGBA8_UNorm);
+    return targets[internedName].Acquire(builder, internedName, extent, PixelFormat::RGBA16_Float);
 }
 
 bool RenderFeatureCompositor::Impl::DispatchBlend(rg::RenderGraphBuilder& builder, rg::TextureHandle dstIn,

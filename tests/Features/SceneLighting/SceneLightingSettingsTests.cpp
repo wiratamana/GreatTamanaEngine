@@ -28,13 +28,13 @@ double FieldValue(const FeatureDebugResult& result, const std::string& key)
     return 0.0;
 }
 
-TEST(SceneLightingSettingsTest, SanitizeClampsExposure)
+TEST(SceneLightingSettingsTest, SanitizeClampsAmbientIntensity)
 {
     SceneLightingSettings s;
-    s.exposure = 0.0f;
-    EXPECT_FLOAT_EQ(SanitizeSceneLightingSettings(s).exposure, 0.01f);
-    s.exposure = 100.0f;
-    EXPECT_FLOAT_EQ(SanitizeSceneLightingSettings(s).exposure, 16.0f);
+    s.ambientIntensity = -1.0f;
+    EXPECT_FLOAT_EQ(SanitizeSceneLightingSettings(s).ambientIntensity, 0.0f);
+    s.ambientIntensity = 100.0f;
+    EXPECT_FLOAT_EQ(SanitizeSceneLightingSettings(s).ambientIntensity, 8.0f);
 }
 
 TEST(SceneLightingSettingsTest, SanitizeReplacesNonFiniteWithDefault)
@@ -48,16 +48,15 @@ TEST(SceneLightingSettingsTest, SanitizeReplacesNonFiniteWithDefault)
     EXPECT_FLOAT_EQ(out.ambientIntensity, d.ambientIntensity);
 }
 
-TEST(SceneLightingSettingsTest, PackWritesAmbientAndExposure)
+TEST(SceneLightingSettingsTest, PackWritesAmbientAndLeavesPadZero)
 {
     SceneLightingSettings s;
-    s.exposure = 0.5f;
     s.ambientIntensity = 2.0f;
     const SceneLightingUniformData data = PackSceneLightingUniformData(ResolvedDirectionalLight{}, s);
-    EXPECT_FLOAT_EQ(data.groundAmbientAndExposure[3], 0.5f);
+    EXPECT_FLOAT_EQ(data.groundAmbientAndPad[3], 0.0f);
     EXPECT_FLOAT_EQ(data.skyAmbientAndIntensity[3], 2.0f);
     EXPECT_FLOAT_EQ(data.skyAmbientAndIntensity[0], s.skyAmbientR);
-    EXPECT_FLOAT_EQ(data.groundAmbientAndExposure[2], s.groundAmbientB);
+    EXPECT_FLOAT_EQ(data.groundAmbientAndPad[2], s.groundAmbientB);
 }
 
 TEST(SceneLightingSettingsTest, DefaultSettingsKeepTheSunBytes)
@@ -81,54 +80,56 @@ TEST(SceneLightingSettingsTest, DefaultsSurviveSanitizing)
     EXPECT_FLOAT_EQ(out.groundAmbientR, d.groundAmbientR);
 }
 
-TEST(SceneLightingSettingsTest, DefaultsUseLinearLightingExposure)
-{
-    const SceneLightingSettings d;
-    EXPECT_FLOAT_EQ(d.exposure, 0.4f);
-    EXPECT_FLOAT_EQ(PackSceneLightingUniformData(ResolvedDirectionalLight{}, d).sunIlluminance[3], 0.0f);
-}
-
-TEST(SceneLightingDebugEndpointTest, SetExposureIsReportedInState)
+TEST(SceneLightingDebugEndpointTest, SetAmbientIntensityIsReportedInState)
 {
     SceneLightingSettings settings;
     SceneLightingDebugEndpoint endpoint(settings);
-    const std::vector<FeatureDebugArg> args{ { "exposure", "0.5" } };
+    const std::vector<FeatureDebugArg> args{ { "ambientIntensity", "0.5" } };
     const FeatureDebugResult result = endpoint.Set(args);
     ASSERT_TRUE(result.ok);
-    EXPECT_DOUBLE_EQ(FieldValue(result, "exposure"), 0.5);
-    EXPECT_FLOAT_EQ(settings.exposure, 0.5f);
+    EXPECT_DOUBLE_EQ(FieldValue(result, "ambientIntensity"), 0.5);
+    EXPECT_FLOAT_EQ(settings.ambientIntensity, 0.5f);
+}
+
+TEST(SceneLightingDebugEndpointTest, StateHasNoExposureKey)
+{
+    SceneLightingSettings settings;
+    SceneLightingDebugEndpoint endpoint(settings);
+    for (const fx::FeatureDebugField& field : endpoint.GetState().fields) {
+        EXPECT_NE(field.key, "exposure");
+    }
 }
 
 TEST(SceneLightingDebugEndpointTest, BadValueFailsAndLeavesStateUnchanged)
 {
     SceneLightingSettings settings;
     SceneLightingDebugEndpoint endpoint(settings);
-    const std::vector<FeatureDebugArg> args{ { "ambientIntensity", "2" }, { "exposure", "nan" } };
+    const std::vector<FeatureDebugArg> args{ { "skyAmbientR", "2" }, { "ambientIntensity", "nan" } };
     const FeatureDebugResult result = endpoint.Set(args);
     EXPECT_FALSE(result.ok);
-    EXPECT_EQ(result.badKey, "exposure");
-    EXPECT_FLOAT_EQ(settings.ambientIntensity, SceneLightingSettings{}.ambientIntensity); // All or none.
+    EXPECT_EQ(result.badKey, "ambientIntensity");
+    EXPECT_FLOAT_EQ(settings.skyAmbientR, SceneLightingSettings{}.skyAmbientR); // All or none.
 }
 
 TEST(SceneLightingDebugEndpointTest, UnknownKeyFails)
 {
     SceneLightingSettings settings;
     SceneLightingDebugEndpoint endpoint(settings);
-    const std::vector<FeatureDebugArg> args{ { "nope", "1" } };
+    const std::vector<FeatureDebugArg> args{ { "exposure", "1" } };
     const FeatureDebugResult result = endpoint.Set(args);
     EXPECT_FALSE(result.ok);
-    EXPECT_EQ(result.badKey, "nope");
+    EXPECT_EQ(result.badKey, "exposure");
 }
 
 TEST(SceneLightingDebugEndpointTest, ResetDefaultsRestores)
 {
     SceneLightingSettings settings;
     SceneLightingDebugEndpoint endpoint(settings);
-    const std::vector<FeatureDebugArg> args{ { "exposure", "4" } };
+    const std::vector<FeatureDebugArg> args{ { "ambientIntensity", "4" } };
     ASSERT_TRUE(endpoint.Set(args).ok);
     const FeatureDebugResult reset = endpoint.Invoke("reset_defaults", {});
     ASSERT_TRUE(reset.ok);
-    EXPECT_FLOAT_EQ(settings.exposure, SceneLightingSettings{}.exposure);
+    EXPECT_FLOAT_EQ(settings.ambientIntensity, SceneLightingSettings{}.ambientIntensity);
     EXPECT_FALSE(endpoint.Invoke("bogus", {}).ok);
 }
 
@@ -136,9 +137,9 @@ TEST(SceneLightingDebugEndpointTest, SetClampsOutOfRangeValues)
 {
     SceneLightingSettings settings;
     SceneLightingDebugEndpoint endpoint(settings);
-    const std::vector<FeatureDebugArg> args{ { "exposure", "100" } };
+    const std::vector<FeatureDebugArg> args{ { "ambientIntensity", "100" } };
     ASSERT_TRUE(endpoint.Set(args).ok);
-    EXPECT_FLOAT_EQ(settings.exposure, 16.0f);
+    EXPECT_FLOAT_EQ(settings.ambientIntensity, 8.0f);
 }
 
 } // namespace

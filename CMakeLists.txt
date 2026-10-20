@@ -1721,6 +1721,10 @@ gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMeshAlphaTest.frag
 gte_add_shader(GreatTamanaEditor src/Shaders/SkinVerticesPositionNormal.comp)
 gte_add_shader(GreatTamanaEditor src/Shaders/SkinVerticesPositionNormalUv.comp)
 
+# Copies the engine-owned Game target into the swapchain when no view panel is shown.
+gte_add_shader(GreatTamanaEditor src/Shaders/PresentBlit.vert)
+gte_add_shader(GreatTamanaEditor src/Shaders/PresentBlit.frag)
+
 # The Inspector's Mesh Asset 3D preview viewer (src/Editor/AssetPreviewMesh.h)
 # needs its own small shader pair, compiled/staged the exact same way as
 # Triangle.vert/frag above - see that file's class comment for why it needs

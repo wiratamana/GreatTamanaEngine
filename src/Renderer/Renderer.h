@@ -98,6 +98,9 @@ public:
     PixelFormat ColorPixelFormat() const noexcept;
     PixelFormat DepthPixelFormat() const noexcept;
 
+    // Format of scene color: view targets and the pipelines that draw scene geometry into them.
+    PixelFormat ScenePixelFormat() const noexcept;
+
     // Creates an offscreen render target. transferSrc/transferDst add the image usage bits copy, clear and blit need.
     RenderTexture CreateRenderTexture(int width, int height, PixelFormat format = PixelFormat::Undefined,
         const char* debugName = nullptr, const char* depthDebugName = nullptr,
@@ -164,7 +167,7 @@ public:
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
         const Mat4& viewProjMatrix = Mat4::Identity());
 
-    // Graphics pipeline factories.
+    // Scene geometry pipeline. Builds against ScenePixelFormat().
     Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
         VertexLayout vertexLayout = VertexLayout::PositionColor, bool useMaterialTexture = false,
         const char* debugName = nullptr, bool useInstanceBuffer = false,

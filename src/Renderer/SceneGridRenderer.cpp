@@ -41,7 +41,7 @@ bool SceneGridRenderer::EnsurePipeline()
     }
 
     // Fullscreen triangle from gl_VertexIndex. Depth test on, depth write off: a translucent overlay must not touch depth.
-    PipelineDesc desc = PipelinePreset::AlphaBlend(m_renderer.ColorPixelFormat(), m_renderer.DepthPixelFormat());
+    PipelineDesc desc = PipelinePreset::AlphaBlend(m_renderer.ScenePixelFormat(), m_renderer.DepthPixelFormat());
     desc.vertexLayout = VertexLayout::None;
     desc.cullMode = CullMode::None;
     desc.layout.pushConstantByteSize = sizeof(GridPush);

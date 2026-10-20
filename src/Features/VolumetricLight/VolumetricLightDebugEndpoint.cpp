@@ -56,8 +56,6 @@ constexpr std::array kSettingKeys{
     SettingKey{ "historyBlend", &VolumetricLightSettings::historyBlend },
     SettingKey{ "strength", &VolumetricLightSettings::strength },
     SettingKey{ "skyDistanceFraction", &VolumetricLightSettings::skyDistanceFraction },
-    SettingKey{ "blendInLinearSpace", &VolumetricLightSettings::blendInLinearSpace },
-    SettingKey{ "dither", &VolumetricLightSettings::dither },
 };
 
 constexpr std::string_view kDebugViewKey = "debugView";

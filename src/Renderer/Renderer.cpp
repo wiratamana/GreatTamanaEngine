@@ -209,6 +209,11 @@ PixelFormat Renderer::DepthPixelFormat() const noexcept
     return FromVkFormat(DepthFormat());
 }
 
+PixelFormat Renderer::ScenePixelFormat() const noexcept
+{
+    return PixelFormat::RGBA16_Float;
+}
+
 RenderTexture Renderer::CreateRenderTexture(int width, int height, PixelFormat format, const char* debugName,
     const char* depthDebugName, bool allowStorageImageAccess, bool allowDepthSampledAccess,
     bool createDepthCompanion, bool createColorImage, bool transferSrc, bool transferDst) const
@@ -491,8 +496,8 @@ Pipeline Renderer::CreatePipeline(const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
     const char* debugName, bool useInstanceBuffer, DescriptorSetLayoutHandle sceneServicesSetLayout) const
 {
-    return m_resources.CreatePipeline(ColorFormat(), vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
-        useMaterialTexture, debugName, useInstanceBuffer, Native(sceneServicesSetLayout));
+    return m_resources.CreatePipeline(ToVkFormat(ScenePixelFormat()), vertexShaderSpirvPath, fragmentShaderSpirvPath,
+        vertexLayout, useMaterialTexture, debugName, useInstanceBuffer, Native(sceneServicesSetLayout));
 }
 
 Pipeline Renderer::CreatePipeline(std::span<const PixelFormat> colorFormats, const std::string& vertexShaderSpirvPath,

@@ -1,6 +1,6 @@
 #version 450
 
-// Primitive-shape fragment shader: directional light tinted by the vertex color.
+// Primitive-shape fragment shader: vertex color tint, outputs linear scene color.
 
 #include "DirectionalLighting.glsl"
 

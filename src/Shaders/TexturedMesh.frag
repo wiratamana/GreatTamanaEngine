@@ -1,6 +1,6 @@
 #version 450
 
-// Textured mesh fragment shader: base color texture times the material factor, lit by the scene directional light.
+// Textured mesh fragment shader: base color texture times the material factor, outputs linear scene color.
 
 #include "DirectionalLighting.glsl"
 #include "MaterialParams.glsl"

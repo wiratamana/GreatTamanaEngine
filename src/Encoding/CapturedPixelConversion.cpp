@@ -11,12 +11,12 @@ bool IsBgraFormat(PixelFormat format) noexcept
     return format == PixelFormat::BGRA8_UNorm;
 }
 
-std::vector<std::uint8_t> ConvertCapturedPixelsToRgba8(const CapturedPixels& raw)
+std::vector<std::uint8_t> ConvertCapturedPixelsToRgba8(const CapturedPixels& raw, HdrVisualization hdrMode)
 {
     std::vector<std::uint8_t> rgba8(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
 
     if (raw.format == PixelFormat::RGBA16_Float) {
-        if (!ConvertHdrRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, rgba8.data())) {
+        if (!ConvertRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, rgba8.data(), hdrMode)) {
             return {};
         }
         return rgba8;

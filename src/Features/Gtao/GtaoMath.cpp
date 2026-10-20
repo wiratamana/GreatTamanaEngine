@@ -245,9 +245,9 @@ GtaoCompositePush MakeGtaoCompositePush(const GtaoCameraBasis& basis, const Gtao
     p.invViewProjection = invViewProjection;
     Store(p.eye, basis.eye);
     Store(p.forward, basis.forward);
-    p.strengthLinearSigma[0] = safe.strength;
-    p.strengthLinearSigma[1] = safe.applyInLinearSpace ? 1.0f : 0.0f;
-    p.strengthLinearSigma[2] = safe.depthSigma;
+    p.strengthReservedSigma[0] = safe.strength;
+    p.strengthReservedSigma[1] = 0.0f;
+    p.strengthReservedSigma[2] = safe.depthSigma;
     p.divisorDebug[0] = divisor;
     p.divisorDebug[1] = static_cast<std::uint32_t>(safe.debugView);
     return p;

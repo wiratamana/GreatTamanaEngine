@@ -563,15 +563,17 @@ int EditorHost::Run()
             m_captureBridge.FailPendingRequest(FrameCaptureKind::GameView, FrameCaptureFailureReason::TargetNotAvailable);
         }
         if (gameTargetThisFrame != nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
-            // Capture the real Game View target: the PostComposite chain resolves every feature into it,
-            // while a per-feature "*Composited" texture goes stale once a later feature runs.
-            Renderer::CapturedRawPixels raw = m_renderer.CaptureRenderTexturePixels(*gameTargetThisFrame);
-            if (Encoding::IsBgraFormat(raw.format)) {
-                Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
+            // The Game View target holds the final display image after the PostComposite chain.
+            const Renderer::CapturedRawPixels raw = m_renderer.CaptureRenderTexturePixels(*gameTargetThisFrame);
+            const std::vector<std::uint8_t> rgba8 =
+                Encoding::ConvertCapturedPixelsToRgba8(raw, Encoding::HdrVisualization::DisplayReferred);
+            if (rgba8.empty()) {
+                m_captureBridge.FailPendingRequest(FrameCaptureKind::GameView, FrameCaptureFailureReason::TargetNotAvailable);
+            } else {
+                std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(rgba8.data(), raw.width, raw.height);
+                m_captureBridge.FulfillPendingRequest(FrameCaptureKind::GameView,
+                    CapturedPngImage{ std::move(png), raw.width, raw.height });
             }
-            std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw.pixels.data(), raw.width, raw.height);
-            m_captureBridge.FulfillPendingRequest(FrameCaptureKind::GameView,
-                CapturedPngImage{ std::move(png), raw.width, raw.height });
         }
 
         // Builds every editor panel now that the view textures hold this frame's contents.
@@ -671,7 +673,8 @@ int EditorHost::Run()
                             ok = Encoding::ConvertDepthToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, raw.pixels.data());
                         } else if (raw.format == PixelFormat::RGBA16_Float) {
                             converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
-                            ok = Encoding::ConvertHdrRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data());
+                            ok = Encoding::ConvertRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height,
+                                converted.data(), Encoding::HdrVisualizationForTextureName(requestedName));
                             encodePixels = converted.data();
                         } else if (raw.format == PixelFormat::R8_UNorm) {
                             converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);

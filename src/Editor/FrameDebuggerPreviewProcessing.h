@@ -21,10 +21,11 @@ enum class FrameDebuggerPreviewChannel {
     A,
 };
 
-// Per-pixel preview transform: levels remap first (clamped to [0, 1]), then channel isolation. An isolated
-// channel is replicated over RGB with alpha 1. The compute shader implements the same formula.
-std::array<float, 4> ApplyFrameDebuggerPreviewTransform(
-    std::array<float, 4> srcRgba, FrameDebuggerPreviewChannel channel, float levelsBlack, float levelsWhite) noexcept;
+// Per-pixel preview transform: optional tone mapping of linear scene color (rgb only), then levels remap
+// (clamped to [0, 1]), then channel isolation. An isolated channel is replicated over RGB with alpha 1.
+// The compute shader implements the same formula.
+std::array<float, 4> ApplyFrameDebuggerPreviewTransform(std::array<float, 4> srcRgba, FrameDebuggerPreviewChannel channel,
+    float levelsBlack, float levelsWhite, bool sceneReferred = false) noexcept;
 
 // Renders a retained history texture through the channel and levels transform into its own scratch texture,
 // on demand only. The source is never modified.
@@ -37,8 +38,9 @@ public:
 
     // `source` must be in the shader-read state, as retained history textures always are. The scratch texture
     // is recreated when the source size changes; the returned reference stays valid until the next call.
+    // `sceneReferred` marks the source as linear scene color to be tone mapped for display.
     const Texture2D& RenderPreview(Renderer& renderer, const RenderTexture& source, FrameDebuggerPreviewChannel channel,
-        float levelsBlack, float levelsWhite);
+        float levelsBlack, float levelsWhite, bool sceneReferred);
 
     // The scratch texture, in the shader-read state; null before the first RenderPreview().
     const Texture2D* OutputTexture() const noexcept { return m_outputTexture.has_value() ? &*m_outputTexture : nullptr; }

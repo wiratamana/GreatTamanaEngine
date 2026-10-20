@@ -45,7 +45,6 @@ struct GtaoSettings {
     bool temporal = true;
     float historyWeight = 0.9f;            // 0..0.98
     float depthSigma = 0.03f;              // Relative depth tolerance of the bilateral filters, 0.001..0.5.
-    bool applyInLinearSpace = true;        // false multiplies the encoded color directly.
     GtaoDebugView debugView = GtaoDebugView::Off;
 };
 
@@ -123,7 +122,7 @@ struct GtaoCompositePush {
     Mat4 invViewProjection;
     float eye[4] = {};
     float forward[4] = {};
-    float strengthLinearSigma[4] = {}; // x strength, y 1 = linear-space apply, z depth sigma.
+    float strengthReservedSigma[4] = {}; // x strength, y reserved, z depth sigma.
     std::uint32_t divisorDebug[4] = {}; // x divisor, y debug mode (0 off, 1 AO only).
 };
 static_assert(sizeof(GtaoCompositePush) == 128);

@@ -1,5 +1,5 @@
 #version 450
-// Writes the private target: rgb = scene color with AO applied, a = coverage. a == 0 keeps the scene color.
+// Writes the private target: rgb = linear scene color with AO applied, a = coverage. a == 0 keeps the scene color.
 layout(location = 0) out vec4 outColor;
 layout(location = 0) in vec2 inUv;
 
@@ -11,22 +11,11 @@ layout(push_constant) uniform PushConstants {
     mat4 invViewProjection;
     vec4 eye;
     vec4 forward;
-    vec4 strengthLinearSigma; // x strength, y 1 = linear-space apply, z depth sigma.
-    uvec4 divisorDebug;       // x divisor, y debug mode (0 off, 1 AO only).
+    vec4 strengthReservedSigma; // x strength, y reserved, z depth sigma.
+    uvec4 divisorDebug;         // x divisor, y debug mode (0 off, 1 AO only).
 } pc;
 
 const float kSkyDepth = 0.999999;
-
-vec3 SrgbToLinear(vec3 c)
-{
-    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
-}
-
-vec3 LinearToSrgb(vec3 c)
-{
-    c = clamp(c, vec3(0.0), vec3(1.0));
-    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
-}
 
 // Depth-aware bilinear upsample. AO texel i sits at depth pixel i * divisor.
 float UpsampleAo(ivec2 q, float viewZ)
@@ -35,7 +24,7 @@ float UpsampleAo(ivec2 q, float viewZ)
     vec2 t = vec2(q) / float(max(pc.divisorDebug.x, 1u));
     ivec2 base = ivec2(floor(t));
     vec2 f = fract(t);
-    float tolerance = max(viewZ * pc.strengthLinearSigma.z, 1e-4);
+    float tolerance = max(viewZ * pc.strengthReservedSigma.z, 1e-4);
     float sum = 0.0;
     float weightSum = 0.0;
     for (int i = 0; i < 4; ++i) {
@@ -72,12 +61,11 @@ void main()
         return;
     }
 
-    float factor = mix(1.0, ao, pc.strengthLinearSigma.x);
+    float factor = mix(1.0, ao, pc.strengthReservedSigma.x);
     vec3 scene = texture(sceneColor, inUv).rgb;
     if (factor > 0.9999) {
-        outColor = vec4(scene, 1.0); // Unoccluded: skip the encode round trip so the color stays bit exact.
+        outColor = vec4(scene, 1.0); // Unoccluded: scene color stays unchanged.
         return;
     }
-    vec3 result = pc.strengthLinearSigma.y > 0.5 ? LinearToSrgb(SrgbToLinear(scene) * factor) : scene * factor;
-    outColor = vec4(result, 1.0);
+    outColor = vec4(scene * factor, 1.0);
 }

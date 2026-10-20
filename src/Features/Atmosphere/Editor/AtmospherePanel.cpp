@@ -45,7 +45,7 @@ void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings)
     ImGui::SliderInt("Aerial Samples Per Slice", &settings.aerialPerspectiveSamplesPerSlice, 1, 8);
     ImGui::DragFloat(
         "Aerial Scattering Exaggeration", &settings.aerialPerspectiveScatteringExaggeration, 0.1f, 0.1f, 50.0f);
-    ImGui::DragFloat("Sky Exposure", &settings.skyExposure, 0.1f, 0.0f, 50.0f);
+    ImGui::DragFloat("Sky Intensity", &settings.skyIntensity, 0.1f, 0.0f, 50.0f);
 
     ImGui::TextDisabled(
         "Sun direction/color/illuminance are controlled by a DirectionalLight ECS entity - see \"Hierarchy\" > "

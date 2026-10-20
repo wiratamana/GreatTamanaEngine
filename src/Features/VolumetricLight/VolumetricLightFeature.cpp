@@ -263,7 +263,7 @@ void VolumetricLightFeature::CompositePass(fx::CompositeFrame& f)
     if (!result || !result->integrated.IsValid() || !(result->maxDistance > 0.0f)) {
         return;
     }
-    const fx::Texture output = m_composited.Acquire(f, f.Extent(), PixelFormat::RGBA8_UNorm);
+    const fx::Texture output = m_composited.Acquire(f, f.Extent(), PixelFormat::RGBA16_Float);
     if (!output.IsValid()) {
         return;
     }

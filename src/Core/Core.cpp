@@ -8,6 +8,7 @@
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/Culling/CullingPipelines.h"
+#include "../Renderer/RenderGraph/FullscreenPass.h"
 #include "../Renderer/RenderGraph/IndirectDrawPass.h"
 #include "../Renderer/RenderGraph/MeshPass.h"
 #include "../Renderer/RenderGraph/PassKindDefaults.h"
@@ -206,7 +207,7 @@ rg::RenderViewId Core::CreateRenderView(const char* name, std::uint32_t width, s
     desc.height = height;
     desc.hasColor = !depthOnly;
     desc.hasDepth = true;
-    desc.colorFormat = colorFormat;
+    desc.colorFormat = (colorFormat == PixelFormat::Undefined && desc.hasColor) ? m_renderer.ScenePixelFormat() : colorFormat;
     desc.allowDepthSampledAccess = allowDepthSampledAccess;
     return m_renderViewRegistry.CreateOrGetView(name, desc);
 }
@@ -515,8 +516,8 @@ void Core::ExposeViewOutput(rg::ViewScope scope, RenderTexture& texture, std::st
 {
     for (ExposedViewOutput& existing : m_exposedViewOutputsThisFrame) {
         if (existing.scope == scope) {
-            GTE_LOG_ERROR("Core", std::string("ExposeViewOutput: view already has an output this frame, '")
-                    + std::string(name) + "' is ignored.");
+            existing.texture = &texture;
+            existing.name = name;
             return;
         }
     }
@@ -613,7 +614,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             desc.legacyCategory = rg::RenderPassCategory::General;
             desc.owningFeatureName = "Scene Rendering";
             desc.setup = [viewTarget](rg::RenderGraphBuilder::PassBuilder& pass) {
-                pass.WriteColorAttachment(viewTarget, kGameClearColor);
+                pass.WriteColorAttachment(viewTarget, kSceneClearColor);
                 pass.WriteDepthStencilAttachment(viewTarget, kGameClearDepth);
             };
             // No execute body: attachment load-op performs the clear.
@@ -1001,22 +1002,61 @@ void Core::RegisterOffscreenRenderPipelineProviders()
         rg::ProviderTiming::AfterDeferredPasses);
 }
 
-// Registers the swapchain presentation pass.
+// Registers the swapchain presentation passes.
 void Core::RegisterPresentRenderPipelineProvider()
 {
     m_presentRenderPipeline.SetLegacyViewScopeTranslator(&TranslateLegacyViewScope);
     m_presentRenderPipeline.SetPassToggleRegistry(&m_renderPassToggleRegistry);
 
+    // Copies the engine-owned Game target into the swapchain (the offscreen graph left it sampleable).
+    m_presentRenderPipeline.Register("PresentGameView", rg::ProviderScope::Once,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
+            if (!m_directGameTargetUsedThisFrame || !m_directGameTarget.has_value()) {
+                return;
+            }
+            const rg::RenderFeatureScope scope(frame.builder, "Present");
+            bool copied = false;
+            if (rg::ShouldDeclareBuiltInPassThisFrame(&m_renderPassToggleRegistry, "PresentGameView")) {
+                RenderTexture& source = *m_directGameTarget;
+                const rg::TextureHandle sourceHandle = frame.builder.ImportTexture("PresentSourceGameView",
+                    source.Target(), ImageLayout::ShaderReadOnlyOptimal, source.SamplerObjectHandle(),
+                    SamplerHandle::Invalid, &source);
+                copied = rg::FullscreenPass(frame.builder, m_presentGameViewShader, "PresentGameView",
+                    rg::ViewScope::Shared, rg::RenderPassEvent::BeforeEverything)
+                             .Bind("sceneColor", sourceHandle)
+                             .Target(m_swapchainImageThisFrame, kGameClearColor)
+                             .Draw();
+            }
+            // Without the copy the Present pass must clear the swapchain itself.
+            m_directGameTargetUsedThisFrame = copied;
+        });
+
     m_presentRenderPipeline.Register("Present", rg::ProviderScope::Once,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
             const rg::RenderFeatureScope scope(frame.builder, "Present");
-            const std::vector<rg::BufferHandle> gpuSkinningBuffers = m_needsDirectGameRenderThisFrame
-                ? AddGpuSkinningPasses(frame.builder, m_game, &m_renderPassToggleRegistry)
-                : std::vector<rg::BufferHandle>{};
-
-            AddPresentPass(frame.builder, m_game, m_renderer, m_swapchainImageThisFrame,
-                m_directGameRenderAspectThisFrame, m_recordImGuiThisFrame, gpuSkinningBuffers);
+            AddPresentPass(frame.builder, m_swapchainImageThisFrame, !m_directGameTargetUsedThisFrame,
+                m_recordImGuiThisFrame);
         });
+}
+
+// Returns the engine-owned Game target sized to the window, creating it on first use.
+RenderTexture* Core::AcquireDirectGameTarget()
+{
+    if (m_windowWidth <= 0 || m_windowHeight <= 0) {
+        return nullptr;
+    }
+    if (!m_directGameTarget.has_value()) {
+        m_directGameTarget.emplace(m_renderer.CreateRenderTexture(m_windowWidth, m_windowHeight,
+            m_renderer.ScenePixelFormat(), "DirectGameView", "DirectGameViewDepth",
+            /*allowStorageImageAccess=*/true, /*allowDepthSampledAccess=*/true));
+        return &*m_directGameTarget;
+    }
+    const Extent2D extent = m_directGameTarget->Extent();
+    if (extent.width != static_cast<std::uint32_t>(m_windowWidth)
+        || extent.height != static_cast<std::uint32_t>(m_windowHeight)) {
+        m_renderer.ResizeRenderTexture(*m_directGameTarget, m_windowWidth, m_windowHeight);
+    }
+    return &*m_directGameTarget;
 }
 
 void Core::BuildFrame()
@@ -1025,11 +1065,15 @@ void Core::BuildFrame()
 
     m_exposedViewOutputsThisFrame.clear();
 
-    // Query active editor render targets.
+    // Query active editor render targets; without any, the Game view renders into an engine-owned target.
     RenderTexture* gameTarget = (m_editorLayer != nullptr) ? m_editorLayer->GameViewTarget() : nullptr;
     RenderTexture* sceneTarget = (m_editorLayer != nullptr) ? m_editorLayer->SceneViewTarget() : nullptr;
+    m_directGameTargetUsedThisFrame = false;
+    if (gameTarget == nullptr && sceneTarget == nullptr) {
+        gameTarget = AcquireDirectGameTarget();
+        m_directGameTargetUsedThisFrame = (gameTarget != nullptr);
+    }
     m_gameTargetThisFrame = gameTarget;
-    m_sceneTargetThisFrame = sceneTarget;
 
     IFrameDebuggerCaptureRecorder* frameDebuggerCapture =
         (m_editorLayer != nullptr) ? m_editorLayer->PrepareFrameDebuggerCaptureContext() : nullptr;
@@ -1261,6 +1305,8 @@ void Core::BuildFrame()
             if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
                 GTE_LOG_ERROR("Core", failure);
             }
+            // The target's contents are undefined; present clears the swapchain instead of copying it.
+            m_directGameTargetUsedThisFrame = false;
             assert(false && "RenderGraph offscreen Execute() threw - see the engine log");
         }
     }
@@ -1293,16 +1339,11 @@ void Core::BuildFrame()
 void Core::Present()
 {
     GTE_PROFILE_SCOPE("Renderer::PresentViaRenderGraph");
-    const bool needsDirectGameRender = (m_gameTargetThisFrame == nullptr && m_sceneTargetThisFrame == nullptr);
-    const std::optional<float> directGameRenderAspect =
-        needsDirectGameRender ? std::optional<float>(AspectRatioOf(m_windowWidth, m_windowHeight)) : std::nullopt;
 
     std::optional<DrawStats> presentStats;
     try {
-        presentStats = m_renderer.PresentViaRenderGraph(m_renderGraph, needsDirectGameRender,
+        presentStats = m_renderer.PresentViaRenderGraph(m_renderGraph, /*needsSwapchainDepth=*/false,
             [&](rg::RenderGraphBuilder& b, rg::TextureHandle swapchainImage) {
-                m_needsDirectGameRenderThisFrame = needsDirectGameRender;
-                m_directGameRenderAspectThisFrame = directGameRenderAspect;
                 m_swapchainImageThisFrame = swapchainImage;
                 m_recordImGuiThisFrame = m_presentImGuiRecorder;
 

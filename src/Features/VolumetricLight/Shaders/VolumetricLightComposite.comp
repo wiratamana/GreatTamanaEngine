@@ -1,6 +1,6 @@
 #version 450
 
-// finalColor = sceneColor * transmittance + inScatter, using the integrated volume at the pixel's distance.
+// Linear: finalColor = sceneColor * transmittance + inScatter, using the integrated volume at the pixel's distance.
 layout(local_size_x = 16, local_size_y = 16) in;
 
 #include "VolumetricLightCommon.glsl"
@@ -8,14 +8,14 @@ layout(local_size_x = 16, local_size_y = 16) in;
 layout(push_constant) uniform PushConstants {
     mat4 invViewProjection;
     vec4 eyeAndMaxDistance;
-    vec4 strengthExponentLinearDither;  // x strength, y exponent, z linear flag, w dither (8-bit steps).
+    vec4 strengthExponentReserved;      // x strength, y exponent, z and w reserved.
     uvec4 frameAndDebug;                // x frame index, y debug view (0 off, 1 in-scatter, 2 transmittance), z sky distance fraction (float bits).
 } pc;
 
 layout(binding = 0) uniform sampler2D sourceColor;
 layout(binding = 1) uniform sampler2D sourceDepth;
 layout(binding = 2) uniform sampler3D integratedVolume;
-layout(binding = 3, rgba8) uniform writeonly image2D destinationImage;
+layout(binding = 3, rgba16f) uniform writeonly image2D destinationImage;
 
 void main()
 {
@@ -37,7 +37,7 @@ void main()
     }
 
     float sliceCount = float(textureSize(integratedVolume, 0).z);
-    float slice = ViewDepthToFroxelSlice(distance, sliceCount, maxDistance, pc.strengthExponentLinearDither.y);
+    float slice = ViewDepthToFroxelSlice(distance, sliceCount, maxDistance, pc.strengthExponentReserved.y);
 
     // A slice holds the value at its far boundary, but texel centres sit half a texel inside.
     float halfTexel = 0.5 / sliceCount;
@@ -48,23 +48,17 @@ void main()
     }
     fog = mix(vec4(0.0, 0.0, 0.0, 1.0), fog, clamp(slice, 0.0, 1.0)); // Fade in over the first slice.
 
-    float strength = pc.strengthExponentLinearDither.x;
+    float strength = pc.strengthExponentReserved.x;
     vec3 inScatter = fog.rgb * strength;
     float transmittance = mix(1.0, fog.a, strength);
 
-    vec3 color = scene; // A pixel without fog stays bit-identical.
+    vec3 color = scene;
     if (pc.frameAndDebug.y == 1u) {
-        color = LinearToSrgb(inScatter);
+        color = inScatter;
     } else if (pc.frameAndDebug.y == 2u) {
         color = vec3(transmittance);
     } else if (transmittance < 0.9999 || max(inScatter.r, max(inScatter.g, inScatter.b)) > 1e-5) {
-        if (pc.strengthExponentLinearDither.z > 0.5) {
-            color = LinearToSrgb(SrgbToLinear(scene) * transmittance + inScatter);
-        } else {
-            color = scene * transmittance + inScatter;
-        }
-        float noise = InterleavedGradientNoise(vec2(texel), pc.frameAndDebug.x) - 0.5;
-        color += noise * pc.strengthExponentLinearDither.w / 255.0;
+        color = scene * transmittance + inScatter;
     }
-    imageStore(destinationImage, texel, vec4(clamp(color, 0.0, 1.0), 1.0));
+    imageStore(destinationImage, texel, vec4(max(color, vec3(0.0)), 1.0));
 }

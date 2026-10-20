@@ -35,7 +35,7 @@ struct SkyBackgroundPush {
     Mat4 invViewProjection;
     float eyeHeightKm;
     float planetRadiusKm;
-    float skyExposure;
+    float skyIntensity;
     float pad;
 };
 static_assert(sizeof(SkyBackgroundPush) == 80, "layout differs from AtmosphereSkyBackground.frag");
@@ -199,7 +199,7 @@ void AtmosphereFeature::SkyBackground(fx::PostOpaqueFrame& f)
     push.invViewProjection = f.View().invViewProjection;
     push.eyeHeightKm = luts->frameUniforms.cameraPositionAtmosphere.y;
     push.planetRadiusKm = shared->parameters.planetRadiusKm;
-    push.skyExposure = m_settings.skyExposure;
+    push.skyIntensity = m_settings.skyIntensity;
     f.ViewBackground(m_skyBackgroundShader, "DrawSkyBackground").Bind("skyViewLut", luts->skyView).Push(push).Draw();
 }
 
@@ -212,7 +212,7 @@ void AtmosphereFeature::Composite(fx::CompositeFrame& f)
     if (!luts || !luts->aerialVolume.IsValid()) {
         return;
     }
-    const fx::Texture output = m_composited.Acquire(f, f.Extent(), PixelFormat::RGBA8_UNorm);
+    const fx::Texture output = m_composited.Acquire(f, f.Extent(), PixelFormat::RGBA16_Float);
     if (!output.IsValid()) {
         return;
     }

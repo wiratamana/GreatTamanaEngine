@@ -87,7 +87,7 @@ TEST(ShaderReflectionTests, FramePreviewShaderExposesItsBoundNamesAndPushSize)
     EXPECT_EQ(source->type, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     EXPECT_EQ(output->type, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
     ASSERT_TRUE(result.hasPushConstantRange);
-    EXPECT_EQ(result.pushConstantRange.size, 12u);
+    EXPECT_EQ(result.pushConstantRange.size, 16u);
 }
 
 TEST(ShaderReflectionTests, ReflectsBoxBlurBindingsPushConstantsAndLocalSize)

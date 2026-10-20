@@ -19,7 +19,6 @@ struct SceneLightingSettings {
     float skyAmbientR = 1.26f, skyAmbientG = 1.31f, skyAmbientB = 1.40f;
     float groundAmbientR = 0.66f, groundAmbientG = 0.57f, groundAmbientB = 0.46f;
     float ambientIntensity = 1.0f;
-    float exposure = 0.4f;       // Plain multiplier on the lit color. Lighting is done in linear space.
 };
 
 // Clamps every value; a non-finite value becomes its default.
@@ -37,7 +36,6 @@ inline SceneLightingSettings SanitizeSceneLightingSettings(const SceneLightingSe
     s.groundAmbientG = clamp(in.groundAmbientG, d.groundAmbientG, 0.0f, 4.0f);
     s.groundAmbientB = clamp(in.groundAmbientB, d.groundAmbientB, 0.0f, 4.0f);
     s.ambientIntensity = clamp(in.ambientIntensity, d.ambientIntensity, 0.0f, 8.0f);
-    s.exposure = clamp(in.exposure, d.exposure, 0.01f, 16.0f);
     return s;
 }
 
@@ -47,7 +45,7 @@ struct SceneLightingUniformData {
     float sunDirectionAndValid[4];         // xyz = toward sun, w = 1 once written
     float sunIlluminance[4];               // xyz = color * intensity, w = padding
     float skyAmbientAndIntensity[4];       // rgb = sky ambient, w = ambient intensity
-    float groundAmbientAndExposure[4];     // rgb = ground ambient, w = exposure
+    float groundAmbientAndPad[4];          // rgb = ground ambient, w = padding
 };
 static_assert(sizeof(SceneLightingUniformData) == 64);
 static_assert(std::is_trivially_copyable_v<SceneLightingUniformData>);
@@ -73,10 +71,10 @@ inline SceneLightingUniformData PackSceneLightingUniformData(
     data.skyAmbientAndIntensity[1] = settings.skyAmbientG;
     data.skyAmbientAndIntensity[2] = settings.skyAmbientB;
     data.skyAmbientAndIntensity[3] = settings.ambientIntensity;
-    data.groundAmbientAndExposure[0] = settings.groundAmbientR;
-    data.groundAmbientAndExposure[1] = settings.groundAmbientG;
-    data.groundAmbientAndExposure[2] = settings.groundAmbientB;
-    data.groundAmbientAndExposure[3] = settings.exposure;
+    data.groundAmbientAndPad[0] = settings.groundAmbientR;
+    data.groundAmbientAndPad[1] = settings.groundAmbientG;
+    data.groundAmbientAndPad[2] = settings.groundAmbientB;
+    data.groundAmbientAndPad[3] = 0.0f;
     return data;
 }
 

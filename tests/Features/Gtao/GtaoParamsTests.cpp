@@ -46,7 +46,7 @@ TEST(GtaoParamsTest, ResolveAndCompositeBlockLayout)
     EXPECT_EQ(sizeof(GtaoResolveParamsGpu), 224u);
 
     EXPECT_EQ(offsetof(GtaoCompositePush, eye), 64u);
-    EXPECT_EQ(offsetof(GtaoCompositePush, strengthLinearSigma), 96u);
+    EXPECT_EQ(offsetof(GtaoCompositePush, strengthReservedSigma), 96u);
     EXPECT_EQ(offsetof(GtaoCompositePush, divisorDebug), 112u);
     EXPECT_EQ(sizeof(GtaoCompositePush), 128u);
 }
@@ -115,13 +115,12 @@ TEST(GtaoParamsTest, CompositePushCarriesStrengthModeAndDivisor)
 {
     GtaoSettings cfg;
     cfg.strength = 0.4f;
-    cfg.applyInLinearSpace = false;
     cfg.debugView = GtaoDebugView::AoOnly;
 
     const GtaoCompositePush p = MakeGtaoCompositePush(MakeBasis(), SanitizeGtaoSettings(cfg), Mat4::Identity(), 2);
 
-    EXPECT_FLOAT_EQ(p.strengthLinearSigma[0], 0.4f);
-    EXPECT_FLOAT_EQ(p.strengthLinearSigma[1], 0.0f);
+    EXPECT_FLOAT_EQ(p.strengthReservedSigma[0], 0.4f);
+    EXPECT_FLOAT_EQ(p.strengthReservedSigma[1], 0.0f);
     EXPECT_EQ(p.divisorDebug[0], 2u);
     EXPECT_EQ(p.divisorDebug[1], 1u);
     EXPECT_FLOAT_EQ(p.forward[2], 1.0f);

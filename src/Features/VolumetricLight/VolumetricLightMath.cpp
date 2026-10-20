@@ -147,7 +147,6 @@ VolumetricLightSettings SanitizeVolumetricLightSettings(const VolumetricLightSet
     s.historyBlend = SanitizeFloat(settings.historyBlend, 0.0f, 0.98f, d.historyBlend);
     s.strength = SanitizeFloat(settings.strength, 0.0f, 1.0f, d.strength);
     s.skyDistanceFraction = SanitizeFloat(settings.skyDistanceFraction, 0.0f, 1.0f, d.skyDistanceFraction);
-    s.dither = SanitizeFloat(settings.dither, 0.0f, 2.0f, d.dither);
     s.debugView = static_cast<std::uint8_t>(settings.debugView) <= static_cast<std::uint8_t>(VolumetricLightDebugView::Transmittance)
         ? settings.debugView
         : VolumetricLightDebugView::Off;
@@ -488,10 +487,10 @@ VolumetricLightCompositePush MakeVolumetricLightCompositePush(const VolumetricLi
     VolumetricLightCompositePush p;
     p.invViewProjection = invViewProjection;
     Store(p.eyeAndMaxDistance, eye, result.maxDistance);
-    p.strengthExponentLinearDither[0] = safe.strength;
-    p.strengthExponentLinearDither[1] = result.depthExponent;
-    p.strengthExponentLinearDither[2] = safe.blendInLinearSpace ? 1.0f : 0.0f;
-    p.strengthExponentLinearDither[3] = safe.dither;
+    p.strengthExponentReserved[0] = safe.strength;
+    p.strengthExponentReserved[1] = result.depthExponent;
+    p.strengthExponentReserved[2] = 0.0f;
+    p.strengthExponentReserved[3] = 0.0f;
     p.frameAndDebug[0] = static_cast<std::uint32_t>(frameIndex);
     p.frameAndDebug[1] = static_cast<std::uint32_t>(safe.debugView);
     p.frameAndDebug[2] = std::bit_cast<std::uint32_t>(safe.skyDistanceFraction);

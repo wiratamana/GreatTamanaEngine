@@ -150,6 +150,7 @@ private:
     FrameDebuggerPreviewChannel m_lastProcessedChannel = FrameDebuggerPreviewChannel::All;
     float m_lastProcessedLevelsBlack = 0.0f;
     float m_lastProcessedLevelsWhite = 1.0f;
+    bool m_lastProcessedSceneReferred = false;
 
     // UI handle of the displayed step preview (the raw retained texture or the processed scratch texture).
     // Invalid when there is nothing to preview.

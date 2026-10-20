@@ -23,7 +23,6 @@ constexpr std::array kSettingKeys{
     SettingKey{ "groundAmbientG", &SceneLightingSettings::groundAmbientG },
     SettingKey{ "groundAmbientB", &SceneLightingSettings::groundAmbientB },
     SettingKey{ "ambientIntensity", &SceneLightingSettings::ambientIntensity },
-    SettingKey{ "exposure", &SceneLightingSettings::exposure },
 };
 
 // A float shown with 6 significant digits, so 0.6f reads 0.6 and not 0.6000000238.

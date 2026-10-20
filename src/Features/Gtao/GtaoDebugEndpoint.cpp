@@ -42,7 +42,6 @@ constexpr std::array kSettingKeys{
     SettingKey{ "temporal", &GtaoSettings::temporal },
     SettingKey{ "historyWeight", &GtaoSettings::historyWeight },
     SettingKey{ "depthSigma", &GtaoSettings::depthSigma },
-    SettingKey{ "applyInLinearSpace", &GtaoSettings::applyInLinearSpace },
 };
 
 constexpr std::string_view kDebugViewKey = "debugView";

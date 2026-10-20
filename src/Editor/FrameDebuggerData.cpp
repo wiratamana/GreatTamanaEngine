@@ -443,21 +443,13 @@ FrameDebuggerEventNode BuildComputeDispatchLeaf(
         details.textures.push_back(std::move(texture));
     }
 
-    // vectors - real GPU timing (0.0ms whenever GPU timing is
-    // Absent/Unsupported, exactly like every other GPU-timing consumer in
-    // this engine today - see AGENTS.md's "Profiling" section). A compute
-    // dispatch never issues a draw call, so PassGpuStats::drawStats is
-    // deliberately never reported here (see RenderPasses.cpp's
-    // AddGpuSkinningPasses()/DrawStats.h's own header comment).
+    // GPU time only: a compute dispatch reports no draw stats.
     FrameDebuggerVectorProperty timing;
     timing.name = "GPU Time (ms)";
     timing.x = static_cast<float>(pass.stats.timing.milliseconds);
     details.vectors.push_back(timing);
 
-    // matrices deliberately left empty - a compute dispatch never uses a
-    // rasterizer-consumed camera matrix (mirrors the deleted
-    // BuildGpuSkinningLeaf()/BuildAerialPerspectiveCompositeLeaf()'s own
-    // identical convention).
+    // No matrices: a compute dispatch uses no camera matrix.
 
     leaf.details = std::move(details);
     return leaf;

@@ -499,7 +499,6 @@ TEST(VolumetricLightMathTest, LightingKeyChangesWithLitSettingsOnly)
 
     VolumetricLightSettings composite = base;
     composite.strength = 0.5f;
-    composite.dither = 0.0f;
     composite.historyBlend = 0.5f;
     EXPECT_EQ(VolumetricLightLightingKey(base), VolumetricLightLightingKey(composite));
 }

@@ -1,6 +1,6 @@
 #version 450
 
-// Textured mesh fragment shader with alpha test: fragments below the material's alpha cutoff are discarded.
+// Textured mesh fragment shader with alpha test (below the material cutoff is discarded); outputs linear scene color.
 
 #include "DirectionalLighting.glsl"
 #include "MaterialParams.glsl"

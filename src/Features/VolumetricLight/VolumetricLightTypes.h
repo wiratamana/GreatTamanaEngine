@@ -97,8 +97,6 @@ struct VolumetricLightSettings {
     // Composite.
     float strength = 1.0f;            // 0..1.
     float skyDistanceFraction = 0.3f; // 0..1. Share of maxDistance fog that sky pixels see.
-    bool blendInLinearSpace = true;
-    float dither = 1.0f;              // In 8-bit steps, 0..2.
     VolumetricLightDebugView debugView = VolumetricLightDebugView::Off;
 };
 
@@ -196,7 +194,7 @@ static_assert(std::is_trivially_copyable_v<VolumetricLightIntegratePush>);
 struct VolumetricLightCompositePush {
     Mat4 invViewProjection;
     float eyeAndMaxDistance[4] = {};
-    float strengthExponentLinearDither[4] = {}; // x strength, y exponent, z linear flag, w dither.
+    float strengthExponentReserved[4] = {};     // x strength, y exponent, z and w reserved.
     std::uint32_t frameAndDebug[4] = {};        // x frame index, y debug view, z sky distance fraction as float bits.
 };
 static_assert(sizeof(VolumetricLightCompositePush) == 112);

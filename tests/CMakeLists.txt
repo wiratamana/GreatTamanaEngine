@@ -2237,6 +2237,7 @@ set(GTE_TEST_SOURCES
     Encoding/PixelConversionTests.cpp
     Encoding/DepthVisualizationTests.cpp
     Encoding/PngEncoderTests.cpp
+    Encoding/HdrColorVisualizationTests.cpp
     # Tier-2 (real, headless GPU) round-trip test for
     # Convert1ChannelToGrayscaleRgba8() - single-channel (VK_FORMAT_R8_UNORM)
     # capture -> grayscale RGBA8 -> PNG encode -> PNG decode.
@@ -2438,6 +2439,7 @@ set(GTE_TEST_SOURCES
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp
     Math/QuatTests.cpp
+    Math/ToneMapCurvesTests.cpp
     ECS/EntityManagerTests.cpp
     ECS/ComponentStorageTests.cpp
     ECS/RegistryTests.cpp
@@ -2712,6 +2714,13 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_VOLUMETRIC_COMPOSITE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/VolumetricLightComposite.comp.spv"
 )
 
+# The ToneMapping shader comes from the feature shader auto-discovery; the self-check reflects the real binary.
+target_sources(GreatTamanaEngineTests PRIVATE "${CMAKE_BINARY_DIR}/shaders/ToneMapping.comp.spv")
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_TEST_TONEMAPPING_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ToneMapping.comp.spv"
+    GTE_TEST_TONEMAPPING_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Features/ToneMapping/Shaders/ToneMapping.comp"
+)
+
 # The compositor blend shader is declared by the root gte_add_shader() calls; its test reflects the real binary.
 target_sources(GreatTamanaEngineTests PRIVATE "${CMAKE_BINARY_DIR}/shaders/RenderFeatureBlend.comp.spv")
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
@@ -2867,7 +2876,8 @@ add_test(NAME EngineVocabularyCheck
 # comment blocks longer than 3 lines, in C++ sources and GLSL shaders. The scope is an explicit directory/file list;
 # there is no allowlist.
 set(GTE_COMMENT_RULE_SRC
-    Renderer/ Core/FeatureKit/ Features/Shadow/ Features/Gtao/ Features/VolumetricLight/ Shaders/
+    Renderer/ Core/FeatureKit/ Features/Shadow/ Features/Gtao/ Features/VolumetricLight/ Features/ToneMapping/ Shaders/
+    Math/ToneMapCurves.h
     Game/Lighting/SunShadowReceiver.h
     Application/RenderPasses.cpp Application/RenderPasses.h Core/Core.cpp Core/Core.h Core/CapturedPixels.h
     Encoding/CapturedPixelConversion.cpp Encoding/CapturedPixelConversion.h Encoding/DepthVisualization.cpp
@@ -2906,7 +2916,8 @@ set(GTE_COMMENT_RULE_TESTS
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
     Features/Shadow/ShadowMathTests.cpp Game/SceneDrawPassTests.cpp
     Features/Gtao/GtaoMathTests.cpp Features/Gtao/GtaoParamsTests.cpp Features/Gtao/GtaoShaderNamesTests.cpp
-    Features/VolumetricLight/ Features/Shadow/ShadowReceiverTests.cpp
+    Features/VolumetricLight/ Features/ToneMapping/ Math/ToneMapCurvesTests.cpp Features/Shadow/ShadowReceiverTests.cpp
+    Encoding/HdrColorVisualizationTests.cpp Editor/FrameDebuggerPreviewProcessingTests.cpp
     Renderer/RenderGraph/CommandBufferTests.cpp Renderer/RenderGraph/FullscreenPassTests.cpp
     Renderer/RenderGraph/FullscreenRecordTests.cpp Renderer/RenderGraph/GpuBufferTests.cpp
     Renderer/RenderGraph/OneShotTests.cpp Renderer/RenderGraph/PassKindRecordTests.cpp

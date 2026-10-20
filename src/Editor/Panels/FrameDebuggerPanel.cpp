@@ -127,7 +127,8 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
         bool ok = true;
         if (raw.format == PixelFormat::RGBA16_Float) {
             converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
-            ok = Encoding::ConvertHdrRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data());
+            ok = Encoding::ConvertRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height,
+                converted.data(), Encoding::HdrVisualizationForTextureName(textureName));
             rgba8Pixels = converted.data();
         } else if (raw.format == PixelFormat::R8_UNorm) {
             converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
@@ -246,11 +247,12 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
         return;
     }
 
-    // Neutral channel/levels: show the retained capture texture directly and skip the compute dispatch.
-    // Anything else re-dispatches the preview renderer (only when dirty) into its own scratch texture;
-    // the retained copy is never mutated.
-    const bool isNeutral =
-        (m_channel == FrameDebuggerPreviewChannel::All) && (m_levelsBlack <= 0.0f) && (m_levelsWhite >= 1.0f);
+    // Per-object step previews hold linear scene color and always go through the preview shader.
+    // Neutral channel/levels on any other source: show the retained texture directly and skip the dispatch.
+    // The retained copy is never mutated.
+    const bool sceneReferred = (choice == FrameDebuggerPreviewSourceChoice::PerObjectStepPreview);
+    const bool isNeutral = (m_channel == FrameDebuggerPreviewChannel::All) && (m_levelsBlack <= 0.0f)
+        && (m_levelsWhite >= 1.0f) && !sceneReferred;
 
     std::uint64_t desiredView = selectedSource->ViewId();
     const Texture2D* processedOutput = nullptr;
@@ -258,13 +260,16 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     if (!isNeutral) {
         const std::uint64_t sourceView = selectedSource->ViewId();
         const bool dirty = (m_lastProcessedSourceView != sourceView) || (m_lastProcessedChannel != m_channel)
-            || (m_lastProcessedLevelsBlack != m_levelsBlack) || (m_lastProcessedLevelsWhite != m_levelsWhite);
+            || (m_lastProcessedLevelsBlack != m_levelsBlack) || (m_lastProcessedLevelsWhite != m_levelsWhite)
+            || (m_lastProcessedSceneReferred != sceneReferred);
         if (dirty) {
-            m_previewProcessor.RenderPreview(*m_frameRenderer, *selectedSource, m_channel, m_levelsBlack, m_levelsWhite);
+            m_previewProcessor.RenderPreview(
+                *m_frameRenderer, *selectedSource, m_channel, m_levelsBlack, m_levelsWhite, sceneReferred);
             m_lastProcessedSourceView = sourceView;
             m_lastProcessedChannel = m_channel;
             m_lastProcessedLevelsBlack = m_levelsBlack;
             m_lastProcessedLevelsWhite = m_levelsWhite;
+            m_lastProcessedSceneReferred = sceneReferred;
         }
         processedOutput = m_previewProcessor.OutputTexture();
         if (processedOutput != nullptr) {
@@ -974,7 +979,9 @@ FrameDebuggerEventTextureResult FrameDebuggerPanel::GetEventTextureFromCommand(i
         }
     } else if (raw.format == PixelFormat::RGBA16_Float) {
         converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
-        if (!Encoding::ConvertHdrRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data())) {
+        // Event images hold scene color as drawn at that event.
+        if (!Encoding::ConvertRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data(),
+                Encoding::HdrVisualization::SceneReferred)) {
             return result;
         }
         encodePixels = converted.data();
