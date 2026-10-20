@@ -98,7 +98,8 @@ bool BuildVolumetricLightPanel(
         changed = true;
     }
     changed |= ImGui::SliderFloat("Ambient intensity", &edit.ambientIntensity, 0.0f, 16.0f);
-    ImGui::TextDisabled("Ambient fog light is not shadowed. Set 0 for sun-only shafts.");
+    changed |= ImGui::SliderFloat("Ambient in shadow", &edit.ambientShadowedFraction, 0.0f, 1.0f);
+    ImGui::TextDisabled("1 = ambient fog ignores sun shadows. 0 = ambient only in sunlit air (sharp shafts).");
 
     ImGui::SeparatorText("Shadow sampling");
     int sampleIndex = 0;

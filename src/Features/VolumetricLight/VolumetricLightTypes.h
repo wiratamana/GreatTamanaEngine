@@ -82,6 +82,7 @@ struct VolumetricLightSettings {
     float ambientG = 0.40f;
     float ambientB = 0.50f;
     float ambientIntensity = 0.3f;    // 0..16.
+    float ambientShadowedFraction = 1.0f; // 0..1. Ambient kept in sun-shadowed air: 1 ignores shadows, 0 lights only sunlit air.
 
     // Shadow sampling.
     std::uint32_t shadowSamples = 4;  // 1, 2, 4 or 8.
@@ -164,7 +165,7 @@ struct VolumetricLightInjectParamsGpu {
     float heightParams[4] = {};         // x height density, y base, z falloff, w noise scale.
     float noiseOffset[4] = {};          // xyz wind offset, world units.
     float jitter[4] = {};               // xyz in [0,1).
-    float shadowParams[4] = {};         // x bias texels, y filter texels, z 1 / map size.
+    float shadowParams[4] = {};         // x bias texels, y filter texels, z 1 / map size, w ambient shadowed fraction.
     std::uint32_t counts[4] = {};       // x cascade count, y shadow samples, z frame index.
 };
 static_assert(sizeof(VolumetricLightInjectParamsGpu) == 560);

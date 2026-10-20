@@ -116,6 +116,7 @@ TEST(VolumetricLightParamsTest, InjectFieldsLandInTheirSlots)
     s.shadowSamples = 8;
     s.shadowFilterTexels = 2.0f;
     s.shadowBiasTexels = 0.5f;
+    s.ambientShadowedFraction = 0.25f;
 
     const VolumetricLightFrameFacts facts = MakeFacts();
     const VolumetricLightInjectParamsGpu p = MakeVolumetricLightInjectParams(s, nullptr, facts);
@@ -141,6 +142,7 @@ TEST(VolumetricLightParamsTest, InjectFieldsLandInTheirSlots)
     EXPECT_FLOAT_EQ(p.jitter[2], 0.3f);
     EXPECT_FLOAT_EQ(p.shadowParams[0], 0.5f);
     EXPECT_FLOAT_EQ(p.shadowParams[1], 2.0f);
+    EXPECT_FLOAT_EQ(p.shadowParams[3], 0.25f);
     EXPECT_EQ(p.counts[1], 8u);
     EXPECT_EQ(p.counts[2], 77u);
 }

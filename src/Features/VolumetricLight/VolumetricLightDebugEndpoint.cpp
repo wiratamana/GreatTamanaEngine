@@ -47,6 +47,7 @@ constexpr std::array kSettingKeys{
     SettingKey{ "ambientG", &VolumetricLightSettings::ambientG },
     SettingKey{ "ambientB", &VolumetricLightSettings::ambientB },
     SettingKey{ "ambientIntensity", &VolumetricLightSettings::ambientIntensity },
+    SettingKey{ "ambientShadowedFraction", &VolumetricLightSettings::ambientShadowedFraction },
     SettingKey{ "shadowSamples", &VolumetricLightSettings::shadowSamples },
     SettingKey{ "shadowFilterTexels", &VolumetricLightSettings::shadowFilterTexels },
     SettingKey{ "shadowBiasTexels", &VolumetricLightSettings::shadowBiasTexels },

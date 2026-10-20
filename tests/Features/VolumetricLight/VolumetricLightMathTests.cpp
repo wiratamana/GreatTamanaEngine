@@ -504,5 +504,26 @@ TEST(VolumetricLightMathTest, LightingKeyChangesWithLitSettingsOnly)
     EXPECT_EQ(VolumetricLightLightingKey(base), VolumetricLightLightingKey(composite));
 }
 
+TEST(VolumetricLightMathTest, AmbientShadowedFractionDefaultsToTheOldBehaviourAndIsClamped)
+{
+    EXPECT_FLOAT_EQ(VolumetricLightSettings{}.ambientShadowedFraction, 1.0f);
+
+    VolumetricLightSettings s;
+    s.ambientShadowedFraction = 5.0f;
+    EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).ambientShadowedFraction, 1.0f);
+    s.ambientShadowedFraction = -2.0f;
+    EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).ambientShadowedFraction, 0.0f);
+    s.ambientShadowedFraction = kNaN;
+    EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).ambientShadowedFraction, 1.0f);
+}
+
+TEST(VolumetricLightMathTest, LightingKeyChangesWithTheAmbientShadowedFraction)
+{
+    const VolumetricLightSettings base = SanitizeVolumetricLightSettings(VolumetricLightSettings{});
+    VolumetricLightSettings masked = base;
+    masked.ambientShadowedFraction = 0.2f;
+    EXPECT_NE(VolumetricLightLightingKey(base), VolumetricLightLightingKey(masked));
+}
+
 } // namespace
 } // namespace gte

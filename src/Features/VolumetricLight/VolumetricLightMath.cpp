@@ -140,6 +140,7 @@ VolumetricLightSettings SanitizeVolumetricLightSettings(const VolumetricLightSet
     s.ambientG = SanitizeFloat(settings.ambientG, 0.0f, 4.0f, d.ambientG);
     s.ambientB = SanitizeFloat(settings.ambientB, 0.0f, 4.0f, d.ambientB);
     s.ambientIntensity = SanitizeFloat(settings.ambientIntensity, 0.0f, 16.0f, d.ambientIntensity);
+    s.ambientShadowedFraction = SanitizeFloat(settings.ambientShadowedFraction, 0.0f, 1.0f, d.ambientShadowedFraction);
     s.shadowSamples = NearestOf(kShadowSampleCounts, settings.shadowSamples);
     s.shadowFilterTexels = SanitizeFloat(settings.shadowFilterTexels, 0.0f, 8.0f, d.shadowFilterTexels);
     s.shadowBiasTexels = SanitizeFloat(settings.shadowBiasTexels, 0.0f, 16.0f, d.shadowBiasTexels);
@@ -157,8 +158,8 @@ std::uint64_t VolumetricLightLightingKey(const VolumetricLightSettings& safe) no
     std::uint64_t hash = 14695981039346656037ull;
     for (const float value : { safe.density, safe.albedo, safe.anisotropyG, safe.heightDensity, safe.heightBase,
              safe.heightFalloff, safe.noiseAmount, safe.noiseScale, safe.startDistance, safe.sunIntensity,
-             safe.ambientR, safe.ambientG, safe.ambientB, safe.ambientIntensity, safe.shadowFilterTexels,
-             safe.shadowBiasTexels, static_cast<float>(safe.shadowSamples) }) {
+             safe.ambientR, safe.ambientG, safe.ambientB, safe.ambientIntensity, safe.ambientShadowedFraction,
+             safe.shadowFilterTexels, safe.shadowBiasTexels, static_cast<float>(safe.shadowSamples) }) {
         hash = HashFloat(hash, value);
     }
     return hash;
@@ -454,6 +455,7 @@ VolumetricLightInjectParamsGpu MakeVolumetricLightInjectParams(const VolumetricL
     Store(p.jitter, facts.jitter);
     p.shadowParams[0] = safe.shadowBiasTexels;
     p.shadowParams[1] = safe.shadowFilterTexels;
+    p.shadowParams[3] = safe.ambientShadowedFraction;
     p.counts[1] = safe.shadowSamples;
     p.counts[2] = static_cast<std::uint32_t>(facts.frameIndex);
     return p;

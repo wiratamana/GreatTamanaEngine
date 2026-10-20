@@ -22,7 +22,7 @@ layout(std430, binding = 0) readonly buffer InjectParams {
     vec4 heightParams;          // x height density, y base, z falloff, w noise scale.
     vec4 noiseOffset;           // xyz wind offset, world units.
     vec4 jitter;                // xyz in [0,1).
-    vec4 shadowParams;          // x bias texels, y filter texels, z 1 / map size.
+    vec4 shadowParams;          // x bias texels, y filter texels, z 1 / map size, w ambient shadowed fraction.
     uvec4 counts;               // x cascade count, y shadow samples, z frame index.
 } params;
 
@@ -138,7 +138,9 @@ void main()
         * InterleavedGradientNoise(vec2(cell.xy) + vec2(float(cell.z) * 7.0, float(cell.z) * 13.0), params.counts.z);
     float visibility = SunVisibility(world, rotation);
     float phase = HenyeyGreenstein(dot(dir, params.sunDirectionAndG.xyz), params.sunDirectionAndG.w);
-    vec3 scattering = sigmaS * (params.sunRadiance.rgb * (phase * visibility) + params.ambientRadiance.rgb);
+    // Ambient follows the sun shadow: 1 keeps it everywhere, 0 leaves it only in sunlit air.
+    float ambientMask = mix(params.shadowParams.w, 1.0, visibility);
+    vec3 scattering = sigmaS * (params.sunRadiance.rgb * (phase * visibility) + params.ambientRadiance.rgb * ambientMask);
 
     vec4 value = vec4(scattering, sigmaT);
     if (HasNonFinite(value)) {
