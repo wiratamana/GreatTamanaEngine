@@ -70,7 +70,7 @@ TEST(SceneLightingSettingsTest, DefaultSettingsKeepTheSunBytes)
     EXPECT_EQ(std::memcmp(&a, &b, sizeof(a)), 0);
     EXPECT_FLOAT_EQ(a.sunDirectionAndValid[1], 1.0f);
     EXPECT_FLOAT_EQ(a.sunDirectionAndValid[3], 1.0f);
-    EXPECT_FLOAT_EQ(a.sunIlluminanceAndLinearFlag[2], 3.0f);
+    EXPECT_FLOAT_EQ(a.sunIlluminance[2], 3.0f);
 }
 
 TEST(SceneLightingSettingsTest, DefaultsSurviveSanitizing)
@@ -81,32 +81,11 @@ TEST(SceneLightingSettingsTest, DefaultsSurviveSanitizing)
     EXPECT_FLOAT_EQ(out.groundAmbientR, d.groundAmbientR);
 }
 
-TEST(SceneLightingSettingsTest, DefaultsKeepLegacyLook)
+TEST(SceneLightingSettingsTest, DefaultsUseLinearLightingExposure)
 {
     const SceneLightingSettings d;
-    EXPECT_FLOAT_EQ(d.linearShading, 0.0f);
-    EXPECT_FLOAT_EQ(d.exposure, 1.0f);
-    EXPECT_FLOAT_EQ(PackSceneLightingUniformData(ResolvedDirectionalLight{}, d).sunIlluminanceAndLinearFlag[3], 0.0f);
-}
-
-TEST(SceneLightingSettingsTest, SanitizeRoundsLinearShadingToZeroOrOne)
-{
-    SceneLightingSettings s;
-    s.linearShading = 0.4f;
-    EXPECT_FLOAT_EQ(SanitizeSceneLightingSettings(s).linearShading, 0.0f);
-    s.linearShading = 0.6f;
-    EXPECT_FLOAT_EQ(SanitizeSceneLightingSettings(s).linearShading, 1.0f);
-    s.linearShading = std::numeric_limits<float>::quiet_NaN();
-    EXPECT_FLOAT_EQ(SanitizeSceneLightingSettings(s).linearShading, SceneLightingSettings{}.linearShading);
-}
-
-TEST(SceneLightingSettingsTest, PackWritesLinearShadingFlag)
-{
-    SceneLightingSettings s;
-    s.linearShading = 0.0f;
-    EXPECT_FLOAT_EQ(PackSceneLightingUniformData(ResolvedDirectionalLight{}, s).sunIlluminanceAndLinearFlag[3], 0.0f);
-    s.linearShading = 1.0f;
-    EXPECT_FLOAT_EQ(PackSceneLightingUniformData(ResolvedDirectionalLight{}, s).sunIlluminanceAndLinearFlag[3], 1.0f);
+    EXPECT_FLOAT_EQ(d.exposure, 0.4f);
+    EXPECT_FLOAT_EQ(PackSceneLightingUniformData(ResolvedDirectionalLight{}, d).sunIlluminance[3], 0.0f);
 }
 
 TEST(SceneLightingDebugEndpointTest, SetExposureIsReportedInState)

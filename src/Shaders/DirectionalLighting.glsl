@@ -5,7 +5,7 @@
 // Scene-services binding 8; must match SceneLightingUniformData (64 bytes).
 layout(set = 1, binding = 8, std140) uniform SceneGlobalUniformBlock {
     vec4 sunDirectionAndValid;         // xyz = toward sun, w = 1 when written
-    vec4 sunIlluminanceAndLinearFlag;  // xyz = sun color * intensity, w = 1 for linear shading
+    vec4 sunIlluminance;               // xyz = sun color * intensity, w = padding
     vec4 skyAmbientAndIntensity;       // rgb = sky ambient, w = ambient intensity
     vec4 groundAmbientAndExposure;     // rgb = ground ambient, w = exposure
 } uSceneLighting;
@@ -14,6 +14,7 @@ layout(set = 1, binding = 8, std140) uniform SceneGlobalUniformBlock {
 const vec3 kDefaultSunDirection = vec3(0.70710678, 0.70710678, 0.0);
 const vec3 kDefaultSunIlluminance = vec3(3.0, 2.85, 2.55);
 const vec3 kDefaultAmbient = vec3(1.05, 1.0, 0.89);
+const float kDefaultExposure = 0.4;
 const float kDirectScale = 0.65;
 
 // Exact piecewise sRGB transfer functions (the same curve the GPU uses for *_SRGB formats).
@@ -29,13 +30,12 @@ vec3 LinearToSrgb(vec3 c)
 }
 
 // Takes a LINEAR base color and returns a display-ready sRGB color for the 8-bit target.
-// Linear shading lights in linear light; otherwise the legacy path lights the sRGB-encoded value.
+// Lighting is done in linear light; only the final result is sRGB-encoded.
 vec3 ApplyDirectionalLight(vec3 baseColorLinear, vec3 worldNormal)
 {
     bool written = uSceneLighting.sunDirectionAndValid.w >= 0.5;
-    bool linearShading = written && uSceneLighting.sunIlluminanceAndLinearFlag.w >= 0.5;
     vec3 sunDirection = written ? uSceneLighting.sunDirectionAndValid.xyz : kDefaultSunDirection;
-    vec3 sunIlluminance = written ? uSceneLighting.sunIlluminanceAndLinearFlag.xyz : kDefaultSunIlluminance;
+    vec3 sunIlluminance = written ? uSceneLighting.sunIlluminance.xyz : kDefaultSunIlluminance;
 
     vec3 n = normalize(worldNormal);
     float ndotl = max(dot(n, sunDirection), 0.0);
@@ -44,14 +44,11 @@ vec3 ApplyDirectionalLight(vec3 baseColorLinear, vec3 worldNormal)
     vec3 skyAmbient = uSceneLighting.skyAmbientAndIntensity.rgb * uSceneLighting.skyAmbientAndIntensity.w;
     vec3 groundAmbient = uSceneLighting.groundAmbientAndExposure.rgb * uSceneLighting.skyAmbientAndIntensity.w;
     vec3 ambient = written ? mix(groundAmbient, skyAmbient, n.y * 0.5 + 0.5) : kDefaultAmbient;
-    float exposure = written ? uSceneLighting.groundAmbientAndExposure.w : 1.0;
+    float exposure = written ? uSceneLighting.groundAmbientAndExposure.w : kDefaultExposure;
 
     // Ambient does not depend on the sun, so a dark sun still leaves a lit scene.
     vec3 light = (ambient + sunIlluminance * (ndotl * kDirectScale)) * exposure;
-    if (linearShading) {
-        return LinearToSrgb(baseColorLinear * light);
-    }
-    return LinearToSrgb(baseColorLinear) * light;
+    return LinearToSrgb(baseColorLinear * light);
 }
 
 #endif // DIRECTIONAL_LIGHTING_GLSL

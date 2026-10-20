@@ -1,4 +1,4 @@
-// Compares SceneLightingUniformData with the std140 block in DirectionalLighting.glsl,
+﻿// Compares SceneLightingUniformData with the std140 block in DirectionalLighting.glsl,
 // field by field, so a swapped or renamed member fails (a size check alone cannot see that).
 
 #include "Features/SceneLighting/SceneLightingTypes.h"
@@ -111,7 +111,7 @@ TEST(SceneLightingUniformLayoutTest, EveryFieldMatchesTheStd140BlockInName_Order
 
     const std::vector<std::pair<const char*, std::size_t>> expected = {
         { "sunDirectionAndValid", offsetof(SceneLightingUniformData, sunDirectionAndValid) },
-        { "sunIlluminanceAndLinearFlag", offsetof(SceneLightingUniformData, sunIlluminanceAndLinearFlag) },
+        { "sunIlluminance", offsetof(SceneLightingUniformData, sunIlluminance) },
         { "skyAmbientAndIntensity", offsetof(SceneLightingUniformData, skyAmbientAndIntensity) },
         { "groundAmbientAndExposure", offsetof(SceneLightingUniformData, groundAmbientAndExposure) },
     };

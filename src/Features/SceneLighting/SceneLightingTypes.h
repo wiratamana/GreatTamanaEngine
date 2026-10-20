@@ -19,11 +19,10 @@ struct SceneLightingSettings {
     float skyAmbientR = 1.26f, skyAmbientG = 1.31f, skyAmbientB = 1.40f;
     float groundAmbientR = 0.66f, groundAmbientG = 0.57f, groundAmbientB = 0.46f;
     float ambientIntensity = 1.0f;
-    float exposure = 1.0f;       // Plain multiplier on the lit color.
-    float linearShading = 0.0f;  // 0 = legacy light on sRGB-encoded values (default), 1 = light in linear space.
+    float exposure = 0.4f;       // Plain multiplier on the lit color. Lighting is done in linear space.
 };
 
-// Clamps every value; a non-finite value becomes its default. linearShading is rounded to 0 or 1.
+// Clamps every value; a non-finite value becomes its default.
 inline SceneLightingSettings SanitizeSceneLightingSettings(const SceneLightingSettings& in) noexcept
 {
     const SceneLightingSettings d{};
@@ -39,7 +38,6 @@ inline SceneLightingSettings SanitizeSceneLightingSettings(const SceneLightingSe
     s.groundAmbientB = clamp(in.groundAmbientB, d.groundAmbientB, 0.0f, 4.0f);
     s.ambientIntensity = clamp(in.ambientIntensity, d.ambientIntensity, 0.0f, 8.0f);
     s.exposure = clamp(in.exposure, d.exposure, 0.01f, 16.0f);
-    s.linearShading = std::isfinite(in.linearShading) ? (in.linearShading >= 0.5f ? 1.0f : 0.0f) : d.linearShading;
     return s;
 }
 
@@ -47,7 +45,7 @@ inline SceneLightingSettings SanitizeSceneLightingSettings(const SceneLightingSe
 // SceneGlobalUniformBlock in DirectionalLighting.glsl.
 struct SceneLightingUniformData {
     float sunDirectionAndValid[4];         // xyz = toward sun, w = 1 once written
-    float sunIlluminanceAndLinearFlag[4];  // xyz = color * intensity, w = linear shading flag
+    float sunIlluminance[4];               // xyz = color * intensity, w = padding
     float skyAmbientAndIntensity[4];       // rgb = sky ambient, w = ambient intensity
     float groundAmbientAndExposure[4];     // rgb = ground ambient, w = exposure
 };
@@ -67,10 +65,10 @@ inline SceneLightingUniformData PackSceneLightingUniformData(
     data.sunDirectionAndValid[1] = direction.y;
     data.sunDirectionAndValid[2] = direction.z;
     data.sunDirectionAndValid[3] = 1.0f;
-    data.sunIlluminanceAndLinearFlag[0] = sun.sunIlluminance.x;
-    data.sunIlluminanceAndLinearFlag[1] = sun.sunIlluminance.y;
-    data.sunIlluminanceAndLinearFlag[2] = sun.sunIlluminance.z;
-    data.sunIlluminanceAndLinearFlag[3] = settings.linearShading;
+    data.sunIlluminance[0] = sun.sunIlluminance.x;
+    data.sunIlluminance[1] = sun.sunIlluminance.y;
+    data.sunIlluminance[2] = sun.sunIlluminance.z;
+    data.sunIlluminance[3] = 0.0f;
     data.skyAmbientAndIntensity[0] = settings.skyAmbientR;
     data.skyAmbientAndIntensity[1] = settings.skyAmbientG;
     data.skyAmbientAndIntensity[2] = settings.skyAmbientB;
