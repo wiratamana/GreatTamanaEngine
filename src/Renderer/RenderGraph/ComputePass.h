@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <vector>
 
 namespace gte::rg {
 
@@ -65,22 +64,12 @@ public:
         return Bind("params", params.Handle());
     }
 
-    // Declares a graph write the shader performs on an imported buffer that is also bound by name with Bind().
-    ComputePass& Writes(BufferHandle buffer)
-    {
-        if (!m_state.inert) {
-            m_bufferWrites.push_back(buffer);
-        }
-        return *this;
-    }
-
-    // Dispatches over `size` elements, clamped to the first written storage image.
-    // Returns false when nothing was declared (inert shader or invalid bindings).
+    // Dispatches over `size` elements, clamped to the first written storage image. Refused when a
+    // dispatch axis needs more than 65535 work groups. Returns false when nothing was declared.
     bool Dispatch(Extent2D size, std::uint32_t depth = 1);
 
 private:
     std::uint64_t m_instance = 0;
-    std::vector<BufferHandle> m_bufferWrites;
 };
 
 } // namespace gte::rg

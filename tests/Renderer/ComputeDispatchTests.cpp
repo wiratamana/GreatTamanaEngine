@@ -43,6 +43,22 @@ TEST(ComputeDispatchTests, LargeItemCountDoesNotOverflowForReasonableGroupSizes)
     EXPECT_EQ(ComputeGroupCount(1'000'000, 256), 3907u);
 }
 
+TEST(ComputeDispatchTests, ItemCountNearUint32MaxRoundsUpWithoutWrapping)
+{
+    EXPECT_EQ(ComputeGroupCount(4294967295u, 64), 67108864u);
+    EXPECT_EQ(ComputeGroupCount(4294967295u, 1), 4294967295u);
+    EXPECT_EQ(ComputeGroupCount(65, 64), 2u);
+}
+
+TEST(ComputeDispatchTests, GuaranteedGroupCountLimitIsPerAxis)
+{
+    EXPECT_FALSE(ExceedsGuaranteedGroupCount(Extent3D{ 65535, 1, 1 }));
+    EXPECT_FALSE(ExceedsGuaranteedGroupCount(Extent3D{ 65535, 65535, 65535 }));
+    EXPECT_TRUE(ExceedsGuaranteedGroupCount(Extent3D{ 65536, 1, 1 }));
+    EXPECT_TRUE(ExceedsGuaranteedGroupCount(Extent3D{ 1, 65536, 1 }));
+    EXPECT_TRUE(ExceedsGuaranteedGroupCount(Extent3D{ 1, 1, 65536 }));
+}
+
 TEST(ComputeDispatchTests, GroupCount3DAppliesPerAxisIndependently)
 {
     // A 130x70x1 image dispatched with an 8x8x1 local size:

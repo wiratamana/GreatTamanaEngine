@@ -10,6 +10,18 @@ namespace gte::rg {
 
 namespace {
 constexpr const char* kLogCategory = "PassChain";
+
+// No `default:`: a new ArgumentKind must fail to compile here.
+BindingResourceKind ResourceKindOf(PassChainState::ArgumentKind kind) noexcept
+{
+    switch (kind) {
+    case PassChainState::ArgumentKind::Texture: return BindingResourceKind::Texture;
+    case PassChainState::ArgumentKind::Depth: return BindingResourceKind::DepthTexture;
+    case PassChainState::ArgumentKind::ExternalBuffer: return BindingResourceKind::Buffer;
+    case PassChainState::ArgumentKind::GraphBuffer: return BindingResourceKind::TrackedBuffer;
+    }
+    return BindingResourceKind::Texture;
+}
 } // namespace
 
 PassChainState::PassChainState(
@@ -60,15 +72,16 @@ std::optional<BindingPlan> PassChainState::BuildPlan()
     for (const Argument& a : arguments) {
         BindingArgument out;
         out.name = a.name;
-        out.kind = a.isBuffer ? BindingResourceKind::Buffer
-                              : (a.isDepth ? BindingResourceKind::DepthTexture : BindingResourceKind::Texture);
+        out.kind = ResourceKindOf(a.kind);
         out.texture = a.texture;
-        out.buffer = a.buffer;
+        out.buffer = a.externalBuffer;
+        out.trackedBuffer = a.graphBuffer;
         bound.push_back(out);
     }
 
     const DescribeTextureFn describe = [this](TextureHandle handle) { return builder.DescOf(handle); };
-    BindingPlanResult planned = PlanBindings(shader.ReflectedBindings(), bound, describe);
+    const DescribeBufferFn describeBuffer = [this](BufferHandle handle) { return builder.DescOfBuffer(handle); };
+    BindingPlanResult planned = PlanBindings(shader.ReflectedBindings(), bound, describe, describeBuffer);
     if (!planned.Ok()) {
         Report(planned.error);
         return std::nullopt;

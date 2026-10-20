@@ -152,8 +152,10 @@ private:
     struct PhysicalBuffer {
         bool resolved = false;
         VkBuffer buffer = VK_NULL_HANDLE;
+        BufferObjectHandle object = BufferObjectHandle::Invalid; // Generational identity of `buffer`.
         uint64_t size = 0;
         ResourceState state;
+        ResourceState lastWrite; // State of the last write usage; empty until the buffer is written.
     };
 
     struct NamedStats {

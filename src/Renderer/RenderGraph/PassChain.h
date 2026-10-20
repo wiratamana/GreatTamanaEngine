@@ -32,12 +32,14 @@ inline DepthRef Depth(TextureHandle texture) noexcept
 // State shared by every shader-bound pass chain: the bound arguments, push bytes and the chain's outcome.
 // A chain over a shader that is not ready is inert: it declares nothing and stays silent.
 struct PassChainState {
+    enum class ArgumentKind : std::uint8_t { Texture, Depth, ExternalBuffer, GraphBuffer };
+
     struct Argument {
         std::string_view name;
+        ArgumentKind kind = ArgumentKind::Texture;
         TextureHandle texture{};
-        BufferObjectHandle buffer = BufferObjectHandle::Invalid;
-        bool isBuffer = false;
-        bool isDepth = false;
+        BufferObjectHandle externalBuffer = BufferObjectHandle::Invalid;
+        BufferHandle graphBuffer{};
     };
 
     PassChainState(
@@ -98,19 +100,31 @@ class PassChain {
 public:
     Derived& Bind(std::string_view name, TextureHandle texture)
     {
-        m_state.Add(PassChainState::Argument{ name, texture, BufferObjectHandle::Invalid, false, false });
+        m_state.Add(PassChainState::Argument{
+            .name = name, .kind = PassChainState::ArgumentKind::Texture, .texture = texture });
         return Self();
     }
 
     Derived& Bind(std::string_view name, DepthRef depth)
     {
-        m_state.Add(PassChainState::Argument{ name, depth.texture, BufferObjectHandle::Invalid, false, true });
+        m_state.Add(PassChainState::Argument{
+            .name = name, .kind = PassChainState::ArgumentKind::Depth, .texture = depth.texture });
         return Self();
     }
 
+    // An external buffer the graph does not track: no read, no write, no barrier.
     Derived& Bind(std::string_view name, BufferObjectHandle buffer)
     {
-        m_state.Add(PassChainState::Argument{ name, TextureHandle{}, buffer, true, false });
+        m_state.Add(PassChainState::Argument{
+            .name = name, .kind = PassChainState::ArgumentKind::ExternalBuffer, .externalBuffer = buffer });
+        return Self();
+    }
+
+    // A graph buffer: ordered and barriered by the graph; read or write access comes from the shader.
+    Derived& Bind(std::string_view name, BufferHandle buffer)
+    {
+        m_state.Add(PassChainState::Argument{
+            .name = name, .kind = PassChainState::ArgumentKind::GraphBuffer, .graphBuffer = buffer });
         return Self();
     }
 

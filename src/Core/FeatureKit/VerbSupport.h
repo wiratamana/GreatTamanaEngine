@@ -28,4 +28,15 @@ inline bool CheckOwned(Frame& frame, const Texture& texture, rg::StaticName pass
     return false;
 }
 
+// True when `buffer` belongs to this frame callback; otherwise logs once and returns false.
+inline bool CheckOwned(Frame& frame, const GpuBufferRef& buffer, rg::StaticName passName, std::string_view what)
+{
+    if (frame.Owns(buffer)) {
+        return true;
+    }
+    frame.ReportOnce(std::string("Pass '") + passName.value + "': " + std::string(what)
+        + " is invalid or was made by another frame callback");
+    return false;
+}
+
 } // namespace gte::fx::detail

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Frame.h"
+#include "GpuBufferRef.h"
 #include "GpuParams.h"
 #include "Texture.h"
 #include "../Extent.h"
@@ -18,6 +19,7 @@ class ComputeShader;
 // One compute dispatch, bound by shader variable name. Made by Frame::Compute(), ended by Dispatch().
 // Bound names must be literals (they are read at Dispatch()). A refused call makes Dispatch() declare nothing.
 //   f.Compute(shader, "Blur.Dispatch").Params(params, p).Bind("src", tex).Bind("dst", out).Dispatch(extent);
+//   f.Compute(shader, "Cull.Dispatch").BindBuffer("items", items).BindBuffer("counter", counter).Dispatch(Extent2D{ n, 1 });
 class ComputeChain {
 public:
     ~ComputeChain();
@@ -28,6 +30,11 @@ public:
 
     ComputeChain& Bind(std::string_view name, Texture texture);
     ComputeChain& Bind(std::string_view name, DepthRef depth);
+
+    // Binds a graph buffer to the shader variable `name` (a literal). The access (read, write or both)
+    // comes from the shader's readonly / writeonly qualifiers; the graph orders and barriers it.
+    // Needs BufferUse::Storage on the buffer.
+    ComputeChain& BindBuffer(std::string_view name, GpuBufferRef buffer);
 
     // Push-constant block; its size must match the shader's.
     template <typename T>

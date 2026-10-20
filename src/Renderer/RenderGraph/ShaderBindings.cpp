@@ -14,6 +14,11 @@ bool IsTextureKind(BindingResourceKind kind) noexcept
     return kind == BindingResourceKind::Texture || kind == BindingResourceKind::DepthTexture;
 }
 
+bool IsBufferKind(BindingResourceKind kind) noexcept
+{
+    return kind == BindingResourceKind::Buffer || kind == BindingResourceKind::TrackedBuffer;
+}
+
 std::string Quote(std::string_view name)
 {
     return "'" + std::string(name) + "'";
@@ -26,14 +31,17 @@ std::string KindMismatch(VkDescriptorType type, BindingResourceKind kind)
     case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
         return IsTextureKind(kind) ? std::string{} : "is a sampler: supply a texture, not a buffer";
     case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
-        if (kind == BindingResourceKind::Buffer) {
+        if (IsBufferKind(kind)) {
             return "is a storage image: supply a texture, not a buffer";
         }
         return kind == BindingResourceKind::DepthTexture ? "is a storage image: a depth view is only valid on a sampler"
                                                          : std::string{};
     case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-        return kind == BindingResourceKind::Buffer ? std::string{} : "is a storage buffer: supply a buffer, not a texture";
+        return IsBufferKind(kind) ? std::string{} : "is a storage buffer: supply a buffer, not a texture";
     case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+        if (kind == BindingResourceKind::TrackedBuffer) {
+            return "is a uniform buffer: a graph buffer binds storage buffers only";
+        }
         return kind == BindingResourceKind::Buffer ? std::string{} : "is a uniform buffer: supply a buffer, not a texture";
     default:
         return "has a descriptor type that name binding does not support";
@@ -60,7 +68,7 @@ std::string ValidNamesText(std::span<const ReflectedDescriptorBinding> reflected
 }
 
 BindingPlanResult PlanBindings(std::span<const ReflectedDescriptorBinding> reflected,
-    std::span<const BindingArgument> args, const DescribeTextureFn& describeTexture)
+    std::span<const BindingArgument> args, const DescribeTextureFn& describeTexture, const DescribeBufferFn& describeBuffer)
 {
     std::vector<std::string> problems;
     std::vector<const ReflectedDescriptorBinding*> slots; // Set-0 bindings, reflected order.
@@ -101,9 +109,25 @@ BindingPlanResult PlanBindings(std::span<const ReflectedDescriptorBinding> refle
             problems.push_back(Quote(arg.name) + " " + mismatch);
             continue;
         }
-        if (IsTextureKind(arg.kind) ? !arg.texture.IsValid() : arg.buffer == BufferObjectHandle::Invalid) {
+        const bool invalid = IsTextureKind(arg.kind)
+            ? !arg.texture.IsValid()
+            : (arg.kind == BindingResourceKind::TrackedBuffer ? !arg.trackedBuffer.IsValid()
+                                                              : arg.buffer == BufferObjectHandle::Invalid);
+        if (invalid) {
             problems.push_back(Quote(arg.name) + " was given an invalid resource handle");
             continue;
+        }
+        if (arg.kind == BindingResourceKind::TrackedBuffer && describeBuffer) {
+            const std::optional<BufferDesc> bufferDesc = describeBuffer(arg.trackedBuffer);
+            if (!bufferDesc.has_value()) {
+                problems.push_back(Quote(arg.name) + " was given a buffer the graph does not know");
+                continue;
+            }
+            // BufferUsage::None means the usage is not declared (every import): nothing to check.
+            if (bufferDesc->usage != BufferUsage::None && !HasUsage(bufferDesc->usage, BufferUsage::StorageBuffer)) {
+                problems.push_back(Quote(arg.name) + " was given a buffer without storage usage");
+                continue;
+            }
         }
         const std::optional<TextureDesc> desc =
             IsTextureKind(arg.kind) && describeTexture ? describeTexture(arg.texture) : std::nullopt;
@@ -149,6 +173,7 @@ BindingPlanResult PlanBindings(std::span<const ReflectedDescriptorBinding> refle
         planned.kind = arg.kind;
         planned.texture = arg.texture;
         planned.buffer = arg.buffer;
+        planned.trackedBuffer = arg.trackedBuffer;
         result.plan.bindings.push_back(planned);
     }
     return result;
@@ -194,7 +219,15 @@ void DeclareBindings(RenderGraphBuilder::PassBuilder& pass, const BindingPlan& p
             }
             break;
         case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-            pass.ReadStorageBuffer(binding.binding, binding.buffer); // External buffers are not graph-tracked.
+            if (binding.kind == BindingResourceKind::TrackedBuffer) {
+                switch (binding.access) {
+                case ReflectedAccess::ReadOnly: pass.ReadStorageBuffer(binding.binding, binding.trackedBuffer); break;
+                case ReflectedAccess::WriteOnly: pass.WriteStorageBuffer(binding.binding, binding.trackedBuffer); break;
+                case ReflectedAccess::ReadWrite: pass.ReadWriteStorageBuffer(binding.binding, binding.trackedBuffer); break;
+                }
+            } else {
+                pass.ReadStorageBuffer(binding.binding, binding.buffer); // External buffers are not graph-tracked.
+            }
             break;
         case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
             pass.BindUniformBuffer(binding.binding, binding.buffer);

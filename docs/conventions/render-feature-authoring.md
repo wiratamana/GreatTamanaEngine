@@ -30,10 +30,11 @@ in that frame. Every verb also checks its own pass name and declares nothing whi
 
 | Verb | Result |
 |---|---|
-| `Compute(shader, "Pass.Name")` | `ComputeChain`: `Params`, `Push`, `Bind`, `BindOutput(name, readback)`, `Dispatch(extent)`. |
+| `Compute(shader, "Pass.Name")` | `ComputeChain`: `Params`, `Push`, `Bind`, `BindBuffer(name, GpuBufferRef)`, `BindOutput(name, readback)`, `Dispatch(extent)`. |
 | `Fullscreen(shader, "Pass.Name")` | `FullscreenChain`: `Bind`, `Push`, `Acknowledge`, `Target`, `DepthTest(texture, compare, write)`, `Draw()`. Scene depth is acknowledged for you. |
 | `ViewBackground(shader, "Pass.Name")` (post-opaque frames) | A `FullscreenChain` already set to draw into the scene color where the depth test passes `Equal`, without writing depth. In the Game view the Frame Debugger can replay it. |
 | `SceneDraw("Pass.Name")` | `SceneDrawChain`: `Shaders`, `Camera`, `ClearDepthTarget`, `ColorTarget`, `CullToFrustum(padding)` (skips draws whose world bounds miss the camera's view-projection; meshes without bounds are never skipped), `Record()`. |
+| `FillBuffer("Pass.Name", buffer, value)` | Clears the requested size of a buffer (rounded up to 4 bytes) with a 32-bit pattern. A host-visible buffer needs `BufferUse::TransferDst`. A false result means nothing was declared: do not dispatch. |
 | `Blit("Pass.Name", src, dst, filter)` | Scaled copy. |
 | `ExposeAsViewOutput(viewOutput, texture)` | Marks the texture `viewOutput.Acquire()` returned as this view's output for the editor and HTTP. Call it only after the pass that writes it was declared. |
 | `Keep(texture)` | Keeps an output that nothing reads. |
@@ -56,11 +57,68 @@ chain declares nothing and logs once.
 | `fx::PersistentVolume{base, size, format}` | 3D texture (storage and sampled) per view scope, imported every frame and kept alive. Its contents carry over only if a pass rewrites them. |
 | `fx::ViewOutput{suffix}` | Engine-owned texture per view named `GameView<suffix>` / `SceneView<suffix>`, resized on demand (the GPU is waited for first). It is what the editor panel and the HTTP endpoints show once exposed with `ExposeAsViewOutput`. A later exposure of the same view replaces an earlier one. |
 | `fx::GpuParams<T>` | CPU-written parameter block; its size is fixed by the first use. |
+| `fx::PersistentBuffer{base, use}` | Growable GPU buffer per view scope, named `<base>.GameView` / `<base>.SceneView`. `Acquire(frame, bytes)` imports it once per frame and keeps it alive; the allocation is a power of two (min 256 B, max 128 MiB) and its contents are undefined after a create or grow. `Upload()` needs `HostWrite`. Ask `f.PassEnabled()` before `Acquire()`. Destroy it only while the GPU is idle. |
+| `fx::GpuBufferRef` | Graph buffer handle stamped with the frame and view, like `fx::Texture`. |
 | `fx::GpuReadback<T>` | Small GPU-written value (`T` trivially copyable, multiple of 4 bytes, at most 256) the CPU reads two frames later. Ring of 3 cells per view. Declare `f.ClearReadback(name, r, fill)`, a `Compute(...).BindOutput("var", r)` pass, then `f.CopyReadbackToHost(name, r)`. `r.Latest(f)` returns the value recorded two frames ago and its frame, or nothing (first frames, a pass toggled off, a refused allocation). Declare all three passes together or none. |
 | `fx::ComputeShader{"Name"}`, `fx::FullscreenShader{"Name"}` | Load `shaders/<Name>.comp.spv`, or `.vert` and `.frag`. Built lazily; a failed build retries on a cooldown and never throws. |
 | `fx::SceneShaderSet::DepthOnly("Base")` | Per-vertex-layout depth pipelines; registered pipelines are removed on destruction. |
 | `fx::Channel<T>{"name"}` | Per-view hand-off between callbacks of one feature. The kit prefixes the feature name, so the key is `<Feature>.<name>`; do not repeat the feature in the channel name. A value published by a `PreOpaqueShared` callback is visible to every view of that frame. |
 | `fx::SceneSlot` | Slot in the scene-services set, declared in `Setup()` with `DeclareSceneSlot(name, kind, index)`. |
+
+## Buffers
+
+`BindBuffer` binds a graph buffer by shader variable name; the graph orders it, barriers it and keeps it alive.
+
+1. Mark every storage block `readonly` or `writeonly` when it is only read or only written. A block with no qualifier is
+   read AND written (needed for atomics) and costs one more barrier.
+2. Give every block an instance name. The instance name is the binding name (`} counter;` -> `"counter"`).
+3. Binding is whole-buffer. `.length()` is the allocation, not your element count. Pass the count in a push constant.
+4. Contents are undefined after the first `Acquire()` and after a grow. Write what you read, or `FillBuffer()` first.
+   `FillBuffer` clears the size you asked for (rounded up to 4 bytes), not the padding behind it.
+5. `Acquire()` once per callback per buffer; call `f.PassEnabled("Your.Pass")` BEFORE it. A second `Acquire()` in the
+   same callback returns the same buffer and refuses a larger size.
+6. Never read a buffer early and write it later in one frame. Use two `PersistentBuffer` objects and alternate them
+   by `f.FrameIndex() & 1` (like the history textures of the AO feature).
+7. A buffer written in a later stage cannot be read in an earlier stage of the same frame. A buffer-only compute belongs
+   in `PreOpaque`; the post stages also need a pass that reads the scene color or depth.
+8. `FillBuffer` of a host-visible buffer needs `BufferUse::TransferDst` in its flags.
+9. GPU-written, GPU-read buffers should be device-local (no `HostWrite` / `HostRead`). Use `HostWrite` only for small
+   CPU-written tables; the GPU reads host-visible memory more slowly.
+10. Give every `Compute` and `FillBuffer` call its own literal pass name. The same name twice in one view and frame drops
+    the second one (and asserts in debug builds).
+11. A dispatch needs at most 65535 work groups per axis. For more elements dispatch over two axes
+    (`Extent2D{ width, rows }`) and index with `y * width + x`.
+12. If `FillBuffer` returns false, return without dispatching: the clear pass can be toggled off while the dispatch pass
+    is on, and an atomic counter would then add onto stale data.
+
+```cpp
+fx::PersistentBuffer m_items{ "Count.Items", fx::BufferUse::Storage | fx::BufferUse::HostWrite };
+fx::PersistentBuffer m_counter{ "Count.Counter", fx::BufferUse::Storage };
+fx::ComputeShader m_shader{ "CountItems" };
+
+void CountPass(fx::PreOpaqueFrame& f)
+{
+    if (!f.PassEnabled("Count.Dispatch") || !f.ShaderReady(m_shader)) {
+        return;
+    }
+    const fx::GpuBufferRef items = m_items.Acquire(f, m_itemBytes);
+    const fx::GpuBufferRef counter = m_counter.Acquire(f, sizeof(std::uint32_t));
+    if (!items.IsValid() || !counter.IsValid()) {
+        return;
+    }
+    if (!m_items.Upload(f, m_itemData.data(), m_itemBytes) || !f.FillBuffer("Count.Clear", counter, 0u)) {
+        return;
+    }
+    f.Compute(m_shader, "Count.Dispatch")
+        .BindBuffer("items", items)
+        .BindBuffer("counter", counter)
+        .Push(m_itemCount)
+        .Dispatch(Extent2D{ m_itemCount, 1 });
+}
+```
+
+The counter is a graph output (`Acquire` keeps it), so the fill and the dispatch are never culled, even when no other
+pass reads the counter this frame.
 
 ## Worked examples
 

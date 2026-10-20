@@ -19,7 +19,8 @@
 
 namespace gte::rg {
 
-enum class BindingResourceKind : std::uint8_t { Texture, DepthTexture, Buffer };
+// Buffer = external buffer (untracked). TrackedBuffer = graph buffer (ordered and barriered by the graph).
+enum class BindingResourceKind : std::uint8_t { Texture, DepthTexture, Buffer, TrackedBuffer };
 
 // One caller-supplied resource, addressed by the shader's variable name.
 struct BindingArgument {
@@ -27,6 +28,7 @@ struct BindingArgument {
     BindingResourceKind kind = BindingResourceKind::Texture;
     TextureHandle texture{};
     BufferObjectHandle buffer = BufferObjectHandle::Invalid;
+    BufferHandle trackedBuffer{};
 };
 
 // A validated binding: slot number plus the access the shader performs.
@@ -37,6 +39,7 @@ struct PlannedBinding {
     BindingResourceKind kind = BindingResourceKind::Texture;
     TextureHandle texture{};
     BufferObjectHandle buffer = BufferObjectHandle::Invalid;
+    BufferHandle trackedBuffer{};
 };
 
 struct BindingPlan {
@@ -51,14 +54,16 @@ struct BindingPlanResult {
 };
 
 using DescribeTextureFn = std::function<std::optional<TextureDesc>(TextureHandle)>;
+using DescribeBufferFn = std::function<std::optional<BufferDesc>(BufferHandle)>;
 
 // "valid names: a, b, c" over the nameable (set 0) bindings.
 std::string ValidNamesText(std::span<const ReflectedDescriptorBinding> reflected);
 
 // Matches `args` against the reflected set-0 bindings and collects every problem.
-// Other sets are engine-owned and never nameable.
+// Other sets are engine-owned and never nameable. An empty describe callback skips its check.
 BindingPlanResult PlanBindings(std::span<const ReflectedDescriptorBinding> reflected,
-    std::span<const BindingArgument> args, const DescribeTextureFn& describeTexture);
+    std::span<const BindingArgument> args, const DescribeTextureFn& describeTexture,
+    const DescribeBufferFn& describeBuffer = {});
 
 // A size of 0 means no push-constant block (reflected) or none supplied (provided).
 std::optional<std::string> ValidatePushConstantSize(std::uint32_t reflectedSize, std::uint32_t providedSize);

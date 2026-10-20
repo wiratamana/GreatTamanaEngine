@@ -131,6 +131,12 @@ void Buffer::Upload(const void* data, std::size_t size, std::size_t offset)
             ") exceeds this buffer's size (" + std::to_string(bufferSize) + " bytes).");
     }
     std::memcpy(static_cast<std::uint8_t*>(m_mappedData) + offset, data, size);
+    // Host-visible memory is not guaranteed coherent; this is a no-op when it is.
+    if (size != 0
+        && vmaFlushAllocation(m_allocator, m_allocation, static_cast<VkDeviceSize>(offset), static_cast<VkDeviceSize>(size))
+            != VK_SUCCESS) {
+        throw std::runtime_error("Buffer::Upload: vmaFlushAllocation failed.");
+    }
 }
 
 bool Buffer::Download(void* data, std::size_t size, std::size_t offset) const

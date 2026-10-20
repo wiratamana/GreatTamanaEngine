@@ -87,6 +87,53 @@ TEST(PassBuilderFusedBindingTest, ExternalStorageBufferDeclaresBindingOnly)
     EXPECT_EQ(record.bindings[0].bufferObjectHandle, external);
 }
 
+const BufferHandle kBuffer{ 5, 1 };
+
+TEST(PassBuilderFusedBindingTest, GraphBufferReadDeclaresReadAndBinding)
+{
+    PassRecord record;
+    RenderGraphBuilder::PassBuilder pass(record);
+    pass.ReadStorageBuffer(2, kBuffer);
+
+    ASSERT_EQ(record.reads.size(), 1u);
+    EXPECT_EQ(record.reads[0].kind, ResourceKind::Buffer);
+    EXPECT_EQ(record.reads[0].buffer, kBuffer);
+    EXPECT_EQ(record.reads[0].access, ResourceAccess::ComputeShaderRead);
+    EXPECT_TRUE(record.writes.empty());
+    ASSERT_EQ(record.bindings.size(), 1u);
+    EXPECT_EQ(record.bindings[0].binding, 2u);
+    EXPECT_EQ(record.bindings[0].kind, BindingKind::StorageBuffer);
+    EXPECT_EQ(record.bindings[0].bufferHandle, kBuffer);
+    EXPECT_EQ(record.bindings[0].bufferObjectHandle, BufferObjectHandle::Invalid);
+}
+
+TEST(PassBuilderFusedBindingTest, GraphBufferWriteDeclaresWriteAndBinding)
+{
+    PassRecord record;
+    RenderGraphBuilder::PassBuilder pass(record);
+    pass.WriteStorageBuffer(1, kBuffer);
+
+    EXPECT_TRUE(record.reads.empty());
+    ASSERT_EQ(record.writes.size(), 1u);
+    EXPECT_EQ(record.writes[0].buffer, kBuffer);
+    EXPECT_EQ(record.writes[0].access, ResourceAccess::ComputeShaderWrite);
+    ASSERT_EQ(record.bindings.size(), 1u);
+    EXPECT_EQ(record.bindings[0].bufferHandle, kBuffer);
+}
+
+TEST(PassBuilderFusedBindingTest, GraphBufferReadWriteDeclaresReadThenWriteAndOneBinding)
+{
+    PassRecord record;
+    RenderGraphBuilder::PassBuilder pass(record);
+    pass.ReadWriteStorageBuffer(0, kBuffer);
+
+    ASSERT_EQ(record.reads.size(), 1u);
+    EXPECT_EQ(record.reads[0].access, ResourceAccess::ComputeShaderRead);
+    ASSERT_EQ(record.writes.size(), 1u);
+    EXPECT_EQ(record.writes[0].access, ResourceAccess::ComputeShaderWrite);
+    EXPECT_EQ(record.bindings.size(), 1u);
+}
+
 TEST(PassBuilderFusedBindingTest, BindingNumbersAreCopiedExactlyInCallOrder)
 {
     PassRecord record;

@@ -1157,6 +1157,107 @@ TEST(RenderGraphCompilerTest, ReadOfNeverWrittenResourceProducesNoContradiction)
     EXPECT_FALSE(input.passes[0].isCulled);
 }
 
+// --- Graph buffers through the fused storage helpers ---------------------------
+
+TEST(RenderGraphCompilerTest, GraphBufferWriterIsOrderedBeforeItsReader)
+{
+    RenderGraphBuilder builder;
+    const BufferHandle b = builder.CreateBuffer("B", BufferDesc{ 64, BufferUsage::StorageBuffer });
+    const TextureHandle t = builder.CreateTexture("T", MakeTextureDesc());
+
+    builder.AddComputePass(
+        "A", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteStorageBuffer(0, b); }, NoOpExecute);
+    builder.AddPass(
+        "R",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadStorageBuffer(0, b);
+            pass.WriteColorAttachment(t);
+        },
+        NoOpExecute);
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { t };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+    EXPECT_FALSE(input.passes[1].isCulled);
+}
+
+TEST(RenderGraphCompilerTest, BufferOnlyWriterIsCulledUnlessTheBufferIsKept)
+{
+    const auto compileWriter = [](bool keep) {
+        RenderGraphBuilder builder;
+        const BufferHandle b = builder.CreateBuffer("B", BufferDesc{ 64, BufferUsage::StorageBuffer });
+        builder.AddComputePass(
+            "A", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteStorageBuffer(0, b); }, NoOpExecute);
+        if (keep) {
+            builder.KeepBufferOutput(b);
+        }
+        CompiledGraphInput input = builder.Finish();
+        Compile(input, {});
+        return input.passes[0].isCulled;
+    };
+
+    EXPECT_TRUE(compileWriter(false));
+    EXPECT_FALSE(compileWriter(true));
+}
+
+TEST(RenderGraphCompilerTest, ReadWriteOfOneBufferInOnePassIsNotAContradiction)
+{
+    RenderGraphBuilder builder;
+    const BufferHandle b = builder.CreateBuffer("B", BufferDesc{ 64, BufferUsage::StorageBuffer });
+    builder.AddComputePass(
+        "A", [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadWriteStorageBuffer(0, b); }, NoOpExecute);
+    builder.KeepBufferOutput(b);
+
+    CompiledGraphInput input = builder.Finish();
+    const CompiledGraph compiled = Compile(input, {});
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0 }));
+    EXPECT_FALSE(input.passes[0].isCulled);
+}
+
+TEST(RenderGraphCompilerTest, TwoBufferWritersKeepDeclarationOrder)
+{
+    RenderGraphBuilder builder;
+    const BufferHandle b = builder.CreateBuffer("B", BufferDesc{ 64, BufferUsage::StorageBuffer });
+    builder.AddComputePass(
+        "A", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteStorageBuffer(0, b); }, NoOpExecute);
+    builder.AddComputePass(
+        "B", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteStorageBuffer(0, b); }, NoOpExecute);
+    builder.KeepBufferOutput(b);
+
+    CompiledGraphInput input = builder.Finish();
+    const CompiledGraph compiled = Compile(input, {});
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1 }));
+}
+
+TEST(RenderGraphCompilerTest, BufferReaderAfterTwoWritersDependsOnTheLastWriter)
+{
+    RenderGraphBuilder builder;
+    const BufferHandle b = builder.CreateBuffer("B", BufferDesc{ 64, BufferUsage::StorageBuffer });
+    const TextureHandle t = builder.CreateTexture("T", MakeTextureDesc());
+    builder.AddComputePass(
+        "A", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteStorageBuffer(0, b); }, NoOpExecute);
+    builder.AddComputePass(
+        "B", [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteStorageBuffer(0, b); }, NoOpExecute);
+    builder.AddPass(
+        "C",
+        [&](RenderGraphBuilder::PassBuilder& pass) {
+            pass.ReadStorageBuffer(0, b);
+            pass.WriteColorAttachment(t);
+        },
+        NoOpExecute);
+
+    CompiledGraphInput input = builder.Finish();
+    const TextureHandle finalOutputs[] = { t };
+    const CompiledGraph compiled = Compile(input, finalOutputs);
+
+    EXPECT_TRUE(ExecutionOrderEquals(compiled.executionOrder, { 0, 1, 2 }));
+}
+
 #ifndef NDEBUG
 
 // Compile() aborts on an orphan read with a later writer.
@@ -1173,6 +1274,24 @@ TEST(RenderGraphCompilerDeathTest, FastPathDetectsOrphanReadWithLaterWriterAndAb
     builder.AddRenderPass(
         "Opaque", PassKind::Graphics, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(t0); },
         NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques); // index 1 - writer, declared SECOND, SAME tier.
+
+    CompiledGraphInput input = builder.Finish();
+
+    EXPECT_DEATH({ Compile(input, {}); }, "");
+}
+
+// A buffer read declared before its writer in one tier is an orphan read (one buffer, read early, written late).
+TEST(RenderGraphCompilerDeathTest, OrphanBufferReadWithLaterWriterAborts)
+{
+    RenderGraphBuilder builder;
+    const BufferHandle b = builder.CreateBuffer("B", BufferDesc{ 64, BufferUsage::StorageBuffer });
+
+    builder.AddRenderPass(
+        "Reader", PassKind::Compute, [&](RenderGraphBuilder::PassBuilder& pass) { pass.ReadStorageBuffer(0, b); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques);
+    builder.AddRenderPass(
+        "Writer", PassKind::Compute, [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteStorageBuffer(0, b); },
+        NoOpExecute, RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques);
 
     CompiledGraphInput input = builder.Finish();
 

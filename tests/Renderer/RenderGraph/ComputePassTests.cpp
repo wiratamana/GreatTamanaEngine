@@ -59,5 +59,16 @@ TEST(ComputePassTest, InertChainWithoutDispatchDoesNotAssert)
     EXPECT_EQ(builder.DeclaredPassCount(), 0u);
 }
 
+TEST(ComputePassTest, GraphBufferBindOnAnInertChainDeclaresNothing)
+{
+    RenderGraphBuilder builder;
+    Shader shader("DoesNotExist");
+    ComputePass(builder, shader, "Test.Pass", ViewScope::GameView, RenderPassEvent::PreOpaques)
+        .Bind("items", BufferHandle{ 1, 1 })
+        .Bind("results", BufferHandle{ 2, 1 })
+        .Dispatch(Extent2D{ 8, 1 });
+    EXPECT_EQ(builder.DeclaredPassCount(), 0u);
+}
+
 } // namespace
 } // namespace gte::rg

@@ -458,7 +458,11 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/GpuParams.h
     src/Core/FeatureKit/GpuReadback.h
     src/Core/FeatureKit/GpuReadback.cpp
-    src/Core/FeatureKit/ReadbackVerbs.cpp
+    src/Core/FeatureKit/BufferVerbs.cpp
+    src/Core/FeatureKit/GpuBufferRef.h
+    src/Core/FeatureKit/PersistentBuffer.h
+    src/Core/FeatureKit/PersistentBuffer.cpp
+    src/Core/FeatureKit/PersistentBufferPolicy.h
     src/Core/FeatureKit/PerView.h
     src/Core/FeatureKit/PersistentTarget.h
     src/Core/FeatureKit/PersistentTarget.cpp

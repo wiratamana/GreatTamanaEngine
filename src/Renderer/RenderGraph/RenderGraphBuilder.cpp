@@ -195,6 +195,26 @@ void RenderGraphBuilder::PassBuilder::ReadStorageBuffer(std::uint32_t binding, B
     BindStorageBuffer(binding, handle);
 }
 
+void RenderGraphBuilder::PassBuilder::ReadStorageBuffer(std::uint32_t binding, BufferHandle handle)
+{
+    ReadBuffer(handle, ResourceAccess::ComputeShaderRead);
+    BindStorageBuffer(binding, handle);
+}
+
+void RenderGraphBuilder::PassBuilder::WriteStorageBuffer(std::uint32_t binding, BufferHandle handle)
+{
+    WriteBuffer(handle, ResourceAccess::ComputeShaderWrite);
+    BindStorageBuffer(binding, handle);
+}
+
+// The read comes first: the executor applies read barriers before write barriers.
+void RenderGraphBuilder::PassBuilder::ReadWriteStorageBuffer(std::uint32_t binding, BufferHandle handle)
+{
+    ReadBuffer(handle, ResourceAccess::ComputeShaderRead);
+    WriteBuffer(handle, ResourceAccess::ComputeShaderWrite);
+    BindStorageBuffer(binding, handle);
+}
+
 // --- RenderGraphBuilder ------------------------------------------------
 
 void RenderGraphBuilder::ClaimBindingIdentity(std::size_t passIndex)
@@ -487,6 +507,14 @@ std::optional<TextureDesc> RenderGraphBuilder::DescOf(TextureHandle handle) cons
         return std::nullopt;
     }
     return m_textures[handle.index].desc;
+}
+
+std::optional<BufferDesc> RenderGraphBuilder::DescOfBuffer(BufferHandle handle) const
+{
+    if (!handle.IsValid() || handle.index >= m_buffers.size()) {
+        return std::nullopt;
+    }
+    return m_buffers[handle.index].desc;
 }
 
 CompiledGraphInput RenderGraphBuilder::Finish()

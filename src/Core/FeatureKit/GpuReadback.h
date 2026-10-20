@@ -1,6 +1,5 @@
 #pragma once
 
-#include "../GraphicsHandles.h"
 #include "../../Renderer/RenderGraph/RenderGraphHandles.h"
 
 #include <cstddef>
@@ -25,7 +24,6 @@ public:
     struct Binding {
         rg::BufferHandle device;
         rg::BufferHandle host;
-        BufferObjectHandle deviceObject = BufferObjectHandle::Invalid;
         std::uint64_t size = 0;
     };
 

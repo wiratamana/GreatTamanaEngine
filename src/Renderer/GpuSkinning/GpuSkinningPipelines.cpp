@@ -21,8 +21,7 @@ bool GpuSkinningPipelines::Declare(rg::RenderGraphBuilder& builder, const GpuSki
         .Bind("bindPose", dispatch.bindPose->Handle())
         .Bind("skinWeights", dispatch.skinWeights->Handle())
         .Bind("boneMatrices", dispatch.boneMatrices->Handle())
-        .Bind("outputBuffer", dispatch.output->Handle())
-        .Writes(dispatch.outputHandle)
+        .Bind("outputBuffer", dispatch.outputHandle)
         .Push(dispatch.vertexCount);
     if (textured) {
         pass.Bind("bindPoseUv", dispatch.uv->Handle());

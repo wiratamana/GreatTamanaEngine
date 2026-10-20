@@ -163,6 +163,11 @@ public:
         // Externally owned buffer: binding only, the graph does not track it.
         void ReadStorageBuffer(std::uint32_t binding, BufferObjectHandle handle);
 
+        // Graph buffer: the access and the binding in one call. The graph orders and barriers it.
+        void ReadStorageBuffer(std::uint32_t binding, BufferHandle handle);
+        void WriteStorageBuffer(std::uint32_t binding, BufferHandle handle);
+        void ReadWriteStorageBuffer(std::uint32_t binding, BufferHandle handle);
+
     private:
         PassRecord& m_pass;
     };
@@ -288,6 +293,9 @@ public:
 
     // Physical desc (extent, format, depth) of a declared texture; imported ones report the real image.
     std::optional<TextureDesc> DescOf(TextureHandle handle) const;
+
+    // Declared shape of a graph buffer (an import reports its real size); nullopt for an unknown handle.
+    std::optional<BufferDesc> DescOfBuffer(BufferHandle handle) const;
 
     // Retrieves or allocates a persistent cross-frame texture. The token is the fast path across frames.
     TextureHandle GetOrCreatePersistentTexture(

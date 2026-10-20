@@ -13,7 +13,10 @@ The layer under every render feature. Pass code never touches Vulkan and never n
    (`readonly` / `writeonly`, none = read-write). Unknown name, name bound twice, wrong resource type, binding never
    supplied, push size mismatch, a depth texture bound without `rg::Depth()`, a depth view of a color texture and an
    invalid handle are loud errors that list the valid names. Supported descriptor types: combined image sampler,
-   storage image, storage buffer, uniform buffer.
+   storage image, storage buffer, uniform buffer. A storage buffer is bound by `BufferObjectHandle` (external: no
+   read, write or barrier is tracked) or by `rg::BufferHandle` (graph buffer: ordering, barriers and culling are tracked;
+   access comes from `readonly` / `writeonly`). A graph buffer binds storage buffers only and is whole-buffer. A dispatch
+   needs at most 65535 work groups per axis; a larger one is refused.
 3. **The graph owns descriptor sets, layouts, pipelines and barriers.** Sets come from growable pools keyed by
    (pass, view scope, layout). Pool statistics (in use / capacity / peak per type) show in the Memory panel and in
    `/get_logs` above 75%. Exhaustion skips the pass and logs once; it never throws into the frame.
@@ -80,7 +83,8 @@ hands out; there is no global renderer lookup.
   invalidates the CPU cache first. Device-local buffers are always a valid transfer destination.
 - `Upload` and `Download` return false and log once when the range does not fit or the buffer has the wrong host use.
 - `GpuBuffer::CreateWithData` makes a device-local buffer filled through a staging upload.
-- `builder.Import(gpuBuffer, graphName)` imports it into the graph; `Handle()` is what `Bind("name", buffer)` takes.
+- `builder.Import(gpuBuffer)` makes a graph buffer. Import it once per frame and bind the returned `rg::BufferHandle`.
+  `Handle()` is the external, untracked form.
 - `gte::Buffer` stays inside `src/Renderer`; `GpuBufferInternal.h` is the only way from a `GpuBuffer` to it.
 
 Consumers (R = rewritten on the pass verbs, M = moved into `src/Renderer` behind a Vulkan-free interface):
@@ -89,7 +93,7 @@ Consumers (R = rewritten on the pass verbs, M = moved into `src/Renderer` behind
 | --- | --- | --- |
 | GPU-driven batch buffers (`GpuDrivenBatchCache`) | M | Stays in `src/Renderer`; `Core.cpp` imports its `GpuBuffer` entries and holds no `VkBuffer`. |
 | GPU skinning buffers (`GpuSkinningRigCache`) | M | Buffers are `GpuBuffer`; the raw descriptor writes moved to `GpuSkinningPipelines::BindBuffers`. |
-| GPU skinning dispatch (`GpuSkinning` provider, `Core.cpp`) | R | Still hand-records the dispatch; moves to `ComputePass` with the engine-system step. The request carries a `GpuBuffer`. |
+| GPU skinning dispatch (`GpuSkinning` provider, `GpuSkinningPipelines::Declare`) | R | A `ComputePass`. Its output is bound as a graph buffer (write-only block), the input buffers stay external. |
 | Mesh vertex buffers | M | Meshes share vertex buffers; `Mesh::VertexBufferHandle()` replaces the raw handle for batch eligibility. |
 | `GpuParams` | R | Built on `GpuBuffer`. |
 | Editor mesh preview (`AssetPreviewMesh`, `BoneViewerWindow`) | M | `MeshPreviewRenderer` in `src/Renderer` owns the pipeline, dummy set, buffers and target behind a Vulkan-free interface. |

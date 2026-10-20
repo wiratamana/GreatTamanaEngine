@@ -2336,6 +2336,7 @@ set(GTE_TEST_SOURCES
     Core/FeatureKit/KitChainTests.cpp
     Core/FeatureKit/KitDataFlowTests.cpp
     Core/FeatureKit/KitSharedVolumeTests.cpp
+    Core/FeatureKit/KitBufferTests.cpp
     Core/FeatureKit/KitTransientTargetTests.cpp
     Renderer/RenderGraph/ResourcePoolEvictionTests.cpp
     Core/FeatureKit/KitModuleTests.cpp
@@ -2349,6 +2350,8 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/ShaderBindingsTests.cpp
     Renderer/RenderGraph/StaticNameTests.cpp
     Renderer/RenderGraph/ComputePassTests.cpp
+    Renderer/RenderGraph/DescriptorWriteIdentityTests.cpp
+    Renderer/RenderGraph/TrackedBufferGpuTests.cpp
     Renderer/RenderGraph/FullscreenPassTests.cpp
     Renderer/RenderGraph/RealTargetBindingTests.cpp
     Renderer/RenderGraph/OneShotTests.cpp
@@ -2759,11 +2762,13 @@ gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.comp
 gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.vert)
 gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.frag)
 gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixtureUniform.comp)
+gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/BufferFixture.comp)
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_REFLECT_COMP_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixture.comp.spv"
     GTE_TEST_REFLECT_VERT_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixture.vert.spv"
     GTE_TEST_REFLECT_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixture.frag.spv"
     GTE_TEST_REFLECT_UNIFORM_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixtureUniform.comp.spv"
+    GTE_TEST_BUFFER_FIXTURE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/BufferFixture.comp.spv"
 )
 
 # Compiled by the root target; the tests only depend on the output and take its absolute path.
@@ -2949,7 +2954,8 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Game/Instantiation/MaterialLifetimeRulesTests.cpp Game/Instantiation/MaterialCacheKeysTests.cpp
     Game/Instantiation/MeshAssetPipelineKindTests.cpp Game/MeshVertexPackingTests.cpp
     Core/FeatureKit/DepthOnlyLayoutTests.cpp Features/Shadow/ShadowDepthShaderCoverageTests.cpp
-    Math/PbrBrdfTests.cpp Features/SceneLighting/)
+    Math/PbrBrdfTests.cpp Features/SceneLighting/
+    Renderer/RenderGraph/DescriptorWriteIdentityTests.cpp Renderer/RenderGraph/TrackedBufferGpuTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

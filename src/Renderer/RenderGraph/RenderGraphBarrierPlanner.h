@@ -36,6 +36,17 @@ bool TargetsDepthState(ResourceAccess access) noexcept;
 // True when any of layout, stage mask or access mask differs; identical consecutive states need no barrier.
 bool RequiresBarrier(const ResourceState& previous, const ResourceState& next) noexcept;
 
+// Buffer counterpart of RequiresBarrier(): also true when the previous access wrote, so two
+// consecutive writes of one buffer are ordered.
+bool RequiresBufferBarrier(const ResourceState& previous, const ResourceState& next) noexcept;
+
+// True when `state` writes a buffer.
+bool IsBufferWriteState(const ResourceState& state) noexcept;
+
+// Source scope of a buffer barrier. After a read, the last write must still become visible to the next
+// access, so its stage and write access join the source scope.
+ResourceState BufferBarrierSource(const ResourceState& previous, const ResourceState& lastWrite) noexcept;
+
 // Per-layer counterpart of RequiresBarrier() for a usage that targets one array layer. Does not
 // mutate `layerState`; the caller updates the tracked state after emitting.
 struct TextureArraySubresourceDecision {
