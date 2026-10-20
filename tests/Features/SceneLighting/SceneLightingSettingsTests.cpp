@@ -49,15 +49,15 @@ TEST(SceneLightingSettingsTest, SanitizeReplacesNonFiniteWithDefault)
     EXPECT_FLOAT_EQ(out.ambientIntensity, d.ambientIntensity);
 }
 
-TEST(SceneLightingSettingsTest, PackWritesAmbientAndLeavesPadZero)
+TEST(SceneLightingSettingsTest, PackWritesAmbientAndLeavesDebugViewZero)
 {
     SceneLightingSettings s;
     s.ambientIntensity = 2.0f;
     const SceneLightingUniformData data = PackSceneLightingUniformData(ResolvedDirectionalLight{}, s);
-    EXPECT_FLOAT_EQ(data.groundAmbientAndPad[3], 0.0f);
+    EXPECT_FLOAT_EQ(data.groundAmbientAndMaterialDebugView[3], 0.0f);
     EXPECT_FLOAT_EQ(data.skyAmbientAndIntensity[3], 2.0f);
     EXPECT_FLOAT_EQ(data.skyAmbientAndIntensity[0], s.skyAmbientR);
-    EXPECT_FLOAT_EQ(data.groundAmbientAndPad[2], s.groundAmbientB);
+    EXPECT_FLOAT_EQ(data.groundAmbientAndMaterialDebugView[2], s.groundAmbientB);
 }
 
 SunShadowReceiver MakeReceiver(std::uint32_t cascades)

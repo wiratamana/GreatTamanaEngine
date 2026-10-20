@@ -47,7 +47,7 @@ struct SceneLightingUniformData {
     float sunDirectionAndValid[4];         // xyz = toward sun, w = 1 once written
     float sunIlluminance[4];               // xyz = color * intensity, w = padding
     float skyAmbientAndIntensity[4];       // rgb = sky ambient, w = ambient intensity
-    float groundAmbientAndPad[4];          // rgb = ground ambient, w = padding
+    float groundAmbientAndMaterialDebugView[4]; // rgb = ground ambient, w = material debug view
     float shadowParams[4];                 // x cascade count (0 = none), y strength, z 1 / map size, w filter radius (texels)
     float shadowBias[4];                   // x const bias, y normal offset, z slope bias (texels), w filter samples
     float cameraPositionAndFadeStart[4];   // xyz eye, w fade start
@@ -86,10 +86,10 @@ inline SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirec
     data.skyAmbientAndIntensity[1] = settings.skyAmbientG;
     data.skyAmbientAndIntensity[2] = settings.skyAmbientB;
     data.skyAmbientAndIntensity[3] = settings.ambientIntensity;
-    data.groundAmbientAndPad[0] = settings.groundAmbientR;
-    data.groundAmbientAndPad[1] = settings.groundAmbientG;
-    data.groundAmbientAndPad[2] = settings.groundAmbientB;
-    data.groundAmbientAndPad[3] = 0.0f;
+    data.groundAmbientAndMaterialDebugView[0] = settings.groundAmbientR;
+    data.groundAmbientAndMaterialDebugView[1] = settings.groundAmbientG;
+    data.groundAmbientAndMaterialDebugView[2] = settings.groundAmbientB;
+    data.groundAmbientAndMaterialDebugView[3] = 0.0f;
 
     if (receiver == nullptr || !(receiver->materialStrength > 0.0f) || receiver->cascadeCount == 0) {
         return data;

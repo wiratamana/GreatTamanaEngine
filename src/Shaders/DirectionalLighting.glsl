@@ -8,7 +8,7 @@ layout(set = 1, binding = 8, std140) uniform SceneGlobalUniformBlock {
     vec4 sunDirectionAndValid;         // xyz = toward sun, w = 1 when written
     vec4 sunIlluminance;               // xyz = sun color * intensity, w = padding
     vec4 skyAmbientAndIntensity;       // rgb = sky ambient, w = ambient intensity
-    vec4 groundAmbientAndPad;          // rgb = ground ambient, w = padding
+    vec4 groundAmbientAndMaterialDebugView; // rgb = ground ambient, w = material debug view
     vec4 shadowParams;                 // x cascade count (0 = none), y strength, z 1 / map size, w filter radius (texels)
     vec4 shadowBias;                   // x const bias, y normal offset, z slope bias (texels), w filter samples
     vec4 cameraPositionAndFadeStart;   // xyz eye, w fade start
@@ -144,21 +144,31 @@ float SunShadowAmount(vec3 position, vec3 normal, float nDotL)
 
 #endif // DIRECTIONAL_LIGHTING_NO_SHADOWS
 
+bool SceneSunWritten() { return uSceneLighting.sunDirectionAndValid.w >= 0.5; }
+vec3 SceneSunDirection() { return SceneSunWritten() ? uSceneLighting.sunDirectionAndValid.xyz : kDefaultSunDirection; }
+vec3 SceneSunIlluminance() { return SceneSunWritten() ? uSceneLighting.sunIlluminance.xyz : kDefaultSunIlluminance; }
+vec3 SceneEyePosition() { return uSceneLighting.cameraPositionAndFadeStart.xyz; }
+int SceneMaterialDebugView() { return int(uSceneLighting.groundAmbientAndMaterialDebugView.w + 0.5); }
+
+// Hemisphere ambient seen from direction `dir`: sky above, ground below (Y is up).
+vec3 SceneHemisphereAmbient(vec3 dir)
+{
+    vec3 skyAmbient = uSceneLighting.skyAmbientAndIntensity.rgb * uSceneLighting.skyAmbientAndIntensity.w;
+    vec3 groundAmbient = uSceneLighting.groundAmbientAndMaterialDebugView.rgb * uSceneLighting.skyAmbientAndIntensity.w;
+    return SceneSunWritten() ? mix(groundAmbient, skyAmbient, dir.y * 0.5 + 0.5) : kDefaultAmbient;
+}
+
 // Linear scene radiance of a surface lit by the sun and the hemisphere ambient.
 // Shadows remove only the sun term.
 vec3 ShadeDirectionalLinear(vec3 baseColorLinear, vec3 worldNormal, bool useShadow, vec3 worldPosition)
 {
-    bool written = uSceneLighting.sunDirectionAndValid.w >= 0.5;
-    vec3 sunDirection = written ? uSceneLighting.sunDirectionAndValid.xyz : kDefaultSunDirection;
-    vec3 sunIlluminance = written ? uSceneLighting.sunIlluminance.xyz : kDefaultSunIlluminance;
+    bool written = SceneSunWritten();
+    vec3 sunDirection = SceneSunDirection();
+    vec3 sunIlluminance = SceneSunIlluminance();
 
     vec3 n = normalize(worldNormal);
     float ndotl = max(dot(n, sunDirection), 0.0);
-
-    // Y is up: faces looking up get sky light, faces looking down get ground bounce.
-    vec3 skyAmbient = uSceneLighting.skyAmbientAndIntensity.rgb * uSceneLighting.skyAmbientAndIntensity.w;
-    vec3 groundAmbient = uSceneLighting.groundAmbientAndPad.rgb * uSceneLighting.skyAmbientAndIntensity.w;
-    vec3 ambient = written ? mix(groundAmbient, skyAmbient, n.y * 0.5 + 0.5) : kDefaultAmbient;
+    vec3 ambient = SceneHemisphereAmbient(n);
 
     float shadow = (useShadow && written && ndotl > 0.0) ? SunShadowAmount(worldPosition, n, ndotl) : 0.0;
     float sunVisibility = 1.0 - uSceneLighting.shadowParams.y * shadow;

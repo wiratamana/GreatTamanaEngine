@@ -2443,6 +2443,7 @@ set(GTE_TEST_SOURCES
     Math/Mat4Tests.cpp
     Math/QuatTests.cpp
     Math/ToneMapCurvesTests.cpp
+    Math/PbrBrdfTests.cpp
     ECS/EntityManagerTests.cpp
     ECS/ComponentStorageTests.cpp
     ECS/RegistryTests.cpp
@@ -2748,6 +2749,8 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_LIGHTING_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/DirectionalLighting.glsl"
     GTE_TEST_MATERIAL_PARAMS_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/MaterialParams.glsl"
+    GTE_TEST_PBR_BRDF_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/PbrBrdf.glsl"
+    GTE_TEST_PBR_MATERIAL_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/PbrMaterial.glsl"
     GTE_TEST_SHADOW_SHADER_DIR="${CMAKE_SOURCE_DIR}/src/Features/Shadow/Shaders"
 )
 
@@ -2923,7 +2926,7 @@ set(GTE_COMMENT_RULE_SRC
     Game/Instantiation/MaterialTextureGpuCache.h Game/Instantiation/MaterialTextureGpuCache.cpp
     Game/Instantiation/MaterialCacheKeys.h Game/Instantiation/MaterialLifetimeRules.h
     Game/Instantiation/MaterialLifetimeRules.cpp Game/Instantiation/MeshAssetPipelineKind.h
-    Game/Instantiation/MeshVertexPacking.h Game/Instantiation/MeshVertexPacking.cpp)
+    Game/Instantiation/MeshVertexPacking.h Game/Instantiation/MeshVertexPacking.cpp Math/PbrBrdf.h)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
@@ -2944,7 +2947,8 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Assets/MeshTangentsTests.cpp Renderer/UploadChunkerTests.cpp Renderer/MaterialImageRoleTests.cpp
     Game/Instantiation/MaterialLifetimeRulesTests.cpp Game/Instantiation/MaterialCacheKeysTests.cpp
     Game/Instantiation/MeshAssetPipelineKindTests.cpp Game/MeshVertexPackingTests.cpp
-    Core/FeatureKit/DepthOnlyLayoutTests.cpp Features/Shadow/ShadowDepthShaderCoverageTests.cpp)
+    Core/FeatureKit/DepthOnlyLayoutTests.cpp Features/Shadow/ShadowDepthShaderCoverageTests.cpp
+    Math/PbrBrdfTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

@@ -28,7 +28,7 @@ TEST(SceneLightingUniformLayoutTest, EveryFieldMatchesTheStd140BlockInName_Order
         GTE_EXPECT_MEMBER(sunDirectionAndValid),
         GTE_EXPECT_MEMBER(sunIlluminance),
         GTE_EXPECT_MEMBER(skyAmbientAndIntensity),
-        GTE_EXPECT_MEMBER(groundAmbientAndPad),
+        GTE_EXPECT_MEMBER(groundAmbientAndMaterialDebugView),
         GTE_EXPECT_MEMBER(shadowParams),
         GTE_EXPECT_MEMBER(shadowBias),
         GTE_EXPECT_MEMBER(cameraPositionAndFadeStart),

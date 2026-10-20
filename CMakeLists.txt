@@ -566,6 +566,7 @@ add_library(gte_core STATIC
     src/Math/Mat4.h
     src/Math/Quat.cpp
     src/Math/Quat.h
+    src/Math/PbrBrdf.h
     src/ECS/Entity.h
     src/ECS/EntityManager.cpp
     src/ECS/EntityManager.h
@@ -1727,6 +1728,15 @@ gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMesh.frag
     EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/MaterialParams.glsl)
 gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMeshAlphaTest.frag
     EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/MaterialParams.glsl)
+
+# PBR half of the imported-mesh draw path (VertexLayout::PositionNormalUvTangent).
+gte_add_shader(GreatTamanaEditor src/Shaders/PbrMesh.vert)
+gte_add_shader(GreatTamanaEditor src/Shaders/PbrMesh.frag
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/MaterialParams.glsl
+                  src/Shaders/PbrBrdf.glsl src/Shaders/PbrMaterial.glsl)
+gte_add_shader(GreatTamanaEditor src/Shaders/PbrMeshAlphaTest.frag
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/MaterialParams.glsl
+                  src/Shaders/PbrBrdf.glsl src/Shaders/PbrMaterial.glsl)
 
 # GPU Vertex Skinning, Phase 2 (compute kernels) -
 # task_manager/gpu_skinning/GPU_SKINNING_PHASE2_COMPUTE_KERNEL_STRATEGY_v1.md.
