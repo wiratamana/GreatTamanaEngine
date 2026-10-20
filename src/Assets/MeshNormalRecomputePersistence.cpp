@@ -5,6 +5,7 @@
 #include "GtaFile.h"
 #include "MeshFile.h"
 #include "MeshNormalRecompute.h"
+#include "MeshTangents.h"
 
 #include <filesystem>
 #include <optional>
@@ -41,6 +42,9 @@ bool RecomputeAndSaveMeshNormalsToGtaFile(const std::string& absoluteGtaPath, st
     }
 
     RecomputeMeshNormalsFromGeometry(*mesh);
+    if (!mesh->tangents.empty()) {
+        OrthonormalizeMeshTangents(*mesh); // Tangents must stay perpendicular to the new normals.
+    }
 
     const std::vector<std::uint8_t> newPayload = EncodeMeshDataToBytes(*mesh);
     const bool wrote = WriteGtaFile(PathFromUtf8(absoluteGtaPath), gta->header.Type(), gta->header.Id(),

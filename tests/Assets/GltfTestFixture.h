@@ -50,4 +50,69 @@ inline constexpr std::string_view kMaskedTexturedMaterialJson
           "normalTexture":{"index":0},"alphaMode":"MASK","alphaCutoff":0.25}],
          "textures":[{"source":0}],"images":[{"uri":"white.png"}])";
 
+// Knobs of WriteGltfQuad().
+struct QuadOptions {
+    std::string_view nodeJson = R"("scale":[1,1,1])";  // Members of the node object (no braces).
+    bool withTangents = false;                         // Adds a TANGENT attribute with `tangent` on every vertex.
+    float tangent[4] = { 1, 0, 0, 1 };                 // glTF space.
+    bool mirrorSecondTriangleUv = false;               // Second triangle gets uvs of the opposite orientation.
+    int primitiveCount = 1;                            // Every primitive reuses the same accessors.
+};
+
+// A flat quad in the XY plane: positions (0,0) (1,0) (1,1) (0,1), normals +Z, v pointing down the image,
+// two triangles (0,1,2) and (0,2,3). With the default uvs the authored tangent is (1,0,0,+1).
+inline std::filesystem::path WriteGltfQuad(const std::filesystem::path& directory, const QuadOptions& options = {})
+{
+    const float positions[12] = { 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0 };
+    const float normals[12] = { 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1 };
+    const float lastUv = options.mirrorSecondTriangleUv ? 1.0f : 0.0f;
+    const float uvs[8] = { 0, 1, 1, 1, 1, 0, lastUv, lastUv };
+    float tangents[16];
+    for (int i = 0; i < 4; ++i) {
+        std::memcpy(tangents + i * 4, options.tangent, sizeof(options.tangent));
+    }
+    const std::uint16_t indices[6] = { 0, 1, 2, 0, 2, 3 };
+
+    std::vector<std::uint8_t> bin;
+    const auto append = [&bin](const void* data, std::size_t size) {
+        const std::size_t offset = bin.size();
+        bin.resize(offset + size);
+        std::memcpy(bin.data() + offset, data, size);
+        return offset;
+    };
+    const std::size_t positionOffset = append(positions, sizeof(positions));
+    const std::size_t normalOffset = append(normals, sizeof(normals));
+    const std::size_t uvOffset = append(uvs, sizeof(uvs));
+    const std::size_t tangentOffset = append(tangents, sizeof(tangents));
+    const std::size_t indexOffset = append(indices, sizeof(indices));
+    bin.resize((bin.size() + 3) / 4 * 4);
+    std::ofstream(directory / "quad.bin", std::ios::binary)
+        .write(reinterpret_cast<const char*>(bin.data()), static_cast<std::streamsize>(bin.size()));
+
+    const auto view = [](std::size_t offset, std::size_t length) {
+        return R"({"buffer":0,"byteOffset":)" + std::to_string(offset) + R"(,"byteLength":)" + std::to_string(length) + "}";
+    };
+    std::string primitives;
+    for (int i = 0; i < options.primitiveCount; ++i) {
+        primitives += std::string(i > 0 ? "," : "") + R"({"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2)"
+            + (options.withTangents ? R"(,"TANGENT":3)" : "") + R"(},"indices":4})";
+    }
+    const std::string gltf = R"({"asset":{"version":"2.0"},"buffers":[{"uri":"quad.bin","byteLength":)"
+        + std::to_string(bin.size()) + R"(}],"bufferViews":[)" + view(positionOffset, sizeof(positions)) + ","
+        + view(normalOffset, sizeof(normals)) + "," + view(uvOffset, sizeof(uvs)) + ","
+        + view(tangentOffset, sizeof(tangents)) + "," + view(indexOffset, sizeof(indices)) + R"(],
+      "accessors":[{"bufferView":0,"componentType":5126,"count":4,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},
+                   {"bufferView":1,"componentType":5126,"count":4,"type":"VEC3"},
+                   {"bufferView":2,"componentType":5126,"count":4,"type":"VEC2"},
+                   {"bufferView":3,"componentType":5126,"count":4,"type":"VEC4"},
+                   {"bufferView":4,"componentType":5123,"count":6,"type":"SCALAR"}],
+      "meshes":[{"primitives":[)" + primitives + R"(]}],
+      "nodes":[{"mesh":0,)" + std::string(options.nodeJson) + R"(}],
+      "scenes":[{"nodes":[0]}],"scene":0})";
+
+    const std::filesystem::path path = directory / "quad.gltf";
+    std::ofstream(path, std::ios::binary).write(gltf.data(), static_cast<std::streamsize>(gltf.size()));
+    return path;
+}
+
 } // namespace gte::test

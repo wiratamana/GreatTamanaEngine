@@ -93,6 +93,9 @@
 # cmake/FetchCgltf.cmake)
 /third_party/cgltf/
 
+# MikkTSpace sources fetched by cmake/FetchMikkTSpace.cmake
+/third_party/mikktspace/
+
 # GoogleTest artifacts fetched by cmake/FetchGTest.cmake (regenerated
 # automatically on configure when GTE_BUILD_TESTS is ON — see
 # CMakeLists.txt / cmake/FetchGTest.cmake / tests/CMakeLists.txt)

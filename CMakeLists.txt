@@ -271,6 +271,11 @@ endif()
 include(FetchCgltf)
 fetch_cgltf()
 
+# Fetches mikktspace.h/.c (tangent generator, zlib) into third_party/mikktspace and
+# defines the STATIC `mikktspace` target. See cmake/FetchMikkTSpace.cmake.
+include(FetchMikkTSpace)
+fetch_mikktspace()
+
 # Dear ImGui itself is always fetched/built - the Editor module is always
 # configured in this repo (editor-core-separation-1 campaign, PHASE8 -
 # GTE_ENABLE_EDITOR no longer exists anywhere in this codebase; PHASE9 does
@@ -667,6 +672,8 @@ add_library(gte_core STATIC
     src/Assets/StlLoader.cpp
     src/Assets/MeshNormalRecompute.h
     src/Assets/MeshNormalRecompute.cpp
+    src/Assets/MeshTangents.h
+    src/Assets/MeshTangents.cpp
     src/Assets/MeshNormalRecomputePersistence.h
     src/Assets/MeshNormalRecomputePersistence.cpp
     src/Assets/MaterialData.h
@@ -1540,6 +1547,9 @@ target_link_libraries(gte_core PRIVATE saba_pmx)
 
 # cgltf is an implementation detail of src/Assets/GltfLoader.cpp.
 target_link_libraries(gte_core PRIVATE cgltf)
+
+# MikkTSpace is used by src/Assets/MeshTangents.cpp only.
+target_link_libraries(gte_core PRIVATE mikktspace)
 
 # editor-core-separation-2 campaign, PHASE4 - the REAL, mechanical proof
 # that gte_core.a links standalone (design doc Section 1.3, Rule 3) - a

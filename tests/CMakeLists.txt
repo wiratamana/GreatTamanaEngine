@@ -2258,6 +2258,7 @@ set(GTE_TEST_SOURCES
     Assets/RigFileTests.cpp
     Assets/MeshNormalRecomputeTests.cpp
     Assets/MeshNormalRecomputePersistenceTests.cpp
+    Assets/MeshTangentsTests.cpp
     Scene/SceneJsonFormatTests.cpp
     Scene/SceneBuilderTests.cpp
     Scene/SceneRoundTripIntegrationTests.cpp
@@ -2911,7 +2912,7 @@ set(GTE_COMMENT_RULE_SRC
     Editor/AssetPreviewMesh.cpp Editor/AssetPreviewMesh.h Editor/BoneViewerWindow.cpp Editor/BoneViewerWindow.h
     Editor/EditorHost.h Editor/RenderGraphTexturePreview.cpp Editor/RenderGraphTexturePreview.h
     Core/Plugins/ProjectAssemblyHost.cpp
-    Features/Atmosphere/)
+    Features/Atmosphere/ Assets/MeshTangents.h Assets/MeshTangents.cpp)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
@@ -2928,7 +2929,8 @@ set(GTE_COMMENT_RULE_TESTS
 Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderPurityProbe.cpp
     Renderer/MaterialParamsTests.cpp Support/Std140Block.h
     Renderer/GpuSkinning/GpuSkinningPassTests.cpp Renderer/RenderGraph/RenderGraphComputeBindingKeyTests.cpp
-    Renderer/RenderGraph/PassIdentityTests.cpp Renderer/RenderGraph/ResourcePoolEvictionTests.cpp)
+    Renderer/RenderGraph/PassIdentityTests.cpp Renderer/RenderGraph/ResourcePoolEvictionTests.cpp
+    Assets/MeshTangentsTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")
