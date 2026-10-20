@@ -504,9 +504,9 @@ TEST(VolumetricLightMathTest, LightingKeyChangesWithLitSettingsOnly)
     EXPECT_EQ(VolumetricLightLightingKey(base), VolumetricLightLightingKey(composite));
 }
 
-TEST(VolumetricLightMathTest, AmbientShadowedFractionDefaultsToTheOldBehaviourAndIsClamped)
+TEST(VolumetricLightMathTest, AmbientShadowedFractionDefaultIsLowAndIsClamped)
 {
-    EXPECT_FLOAT_EQ(VolumetricLightSettings{}.ambientShadowedFraction, 1.0f);
+    EXPECT_FLOAT_EQ(VolumetricLightSettings{}.ambientShadowedFraction, 0.15f);
 
     VolumetricLightSettings s;
     s.ambientShadowedFraction = 5.0f;
@@ -514,7 +514,23 @@ TEST(VolumetricLightMathTest, AmbientShadowedFractionDefaultsToTheOldBehaviourAn
     s.ambientShadowedFraction = -2.0f;
     EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).ambientShadowedFraction, 0.0f);
     s.ambientShadowedFraction = kNaN;
-    EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).ambientShadowedFraction, 1.0f);
+    EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).ambientShadowedFraction, 0.15f);
+}
+
+TEST(VolumetricLightMathTest, SkyDistanceFractionIsClampedAndExcludedFromTheLightingKey)
+{
+    VolumetricLightSettings s;
+    s.skyDistanceFraction = 5.0f;
+    EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).skyDistanceFraction, 1.0f);
+    s.skyDistanceFraction = -1.0f;
+    EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).skyDistanceFraction, 0.0f);
+    s.skyDistanceFraction = kNaN;
+    EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).skyDistanceFraction, 0.3f);
+
+    const VolumetricLightSettings base = SanitizeVolumetricLightSettings(VolumetricLightSettings{});
+    VolumetricLightSettings sky = base;
+    sky.skyDistanceFraction = 0.9f;
+    EXPECT_EQ(VolumetricLightLightingKey(base), VolumetricLightLightingKey(sky));
 }
 
 TEST(VolumetricLightMathTest, LightingKeyChangesWithTheAmbientShadowedFraction)

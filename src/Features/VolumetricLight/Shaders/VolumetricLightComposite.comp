@@ -9,7 +9,7 @@ layout(push_constant) uniform PushConstants {
     mat4 invViewProjection;
     vec4 eyeAndMaxDistance;
     vec4 strengthExponentLinearDither;  // x strength, y exponent, z linear flag, w dither (8-bit steps).
-    uvec4 frameAndDebug;                // x frame index, y debug view (0 off, 1 in-scatter, 2 transmittance).
+    uvec4 frameAndDebug;                // x frame index, y debug view (0 off, 1 in-scatter, 2 transmittance), z sky distance fraction (float bits).
 } pc;
 
 layout(binding = 0) uniform sampler2D sourceColor;
@@ -28,9 +28,9 @@ void main()
     float depth = texture(sourceDepth, uv).r;
     vec3 scene = texture(sourceColor, uv).rgb;
 
-    // Sky pixels see the whole fog column.
+    // Sky pixels see a fraction of the fog column.
     float maxDistance = pc.eyeAndMaxDistance.w;
-    float distance = maxDistance;
+    float distance = maxDistance * uintBitsToFloat(pc.frameAndDebug.z);
     if (depth < kSkyDepth) {
         vec4 w = pc.invViewProjection * vec4(uv * 2.0 - 1.0, depth, 1.0);
         distance = min(length(w.xyz / w.w - pc.eyeAndMaxDistance.xyz), maxDistance);

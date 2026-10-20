@@ -122,6 +122,7 @@ bool BuildVolumetricLightPanel(
     changed |= ImGui::SliderFloat("History blend", &edit.historyBlend, 0.0f, 0.98f);
 
     ImGui::SeparatorText("Composite");
+    changed |= ImGui::SliderFloat("Sky distance", &edit.skyDistanceFraction, 0.0f, 1.0f);
     changed |= ImGui::Checkbox("Blend in linear space", &edit.blendInLinearSpace);
     changed |= ImGui::SliderFloat("Dither (8-bit steps)", &edit.dither, 0.0f, 2.0f);
 

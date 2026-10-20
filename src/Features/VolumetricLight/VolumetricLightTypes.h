@@ -60,7 +60,7 @@ struct VolumetricLightSettings {
     bool applyInSceneView = true;     // false skips the editor Scene view.
 
     // Medium.
-    float density = 0.015f;           // Extinction per world unit, 0..1.
+    float density = 0.010f;           // Extinction per world unit, 0..1.
     float albedo = 0.9f;              // Scattering over extinction, 0..1.
     float anisotropyG = 0.7f;         // Henyey-Greenstein g, -0.95..0.95.
     float heightDensity = 0.0f;       // Extra extinction at heightBase, 0..1.
@@ -81,8 +81,8 @@ struct VolumetricLightSettings {
     float ambientR = 0.35f;           // Fog ambient color, 0..4.
     float ambientG = 0.40f;
     float ambientB = 0.50f;
-    float ambientIntensity = 0.3f;    // 0..16.
-    float ambientShadowedFraction = 1.0f; // 0..1. Ambient kept in sun-shadowed air: 1 ignores shadows, 0 lights only sunlit air.
+    float ambientIntensity = 0.03f;   // 0..16.
+    float ambientShadowedFraction = 0.15f; // 0..1. Ambient kept in sun-shadowed air: 1 ignores shadows, 0 lights only sunlit air.
 
     // Shadow sampling.
     std::uint32_t shadowSamples = 4;  // 1, 2, 4 or 8.
@@ -96,6 +96,7 @@ struct VolumetricLightSettings {
 
     // Composite.
     float strength = 1.0f;            // 0..1.
+    float skyDistanceFraction = 0.3f; // 0..1. Share of maxDistance fog that sky pixels see.
     bool blendInLinearSpace = true;
     float dither = 1.0f;              // In 8-bit steps, 0..2.
     VolumetricLightDebugView debugView = VolumetricLightDebugView::Off;
@@ -196,7 +197,7 @@ struct VolumetricLightCompositePush {
     Mat4 invViewProjection;
     float eyeAndMaxDistance[4] = {};
     float strengthExponentLinearDither[4] = {}; // x strength, y exponent, z linear flag, w dither.
-    std::uint32_t frameAndDebug[4] = {};        // x frame index, y debug view.
+    std::uint32_t frameAndDebug[4] = {};        // x frame index, y debug view, z sky distance fraction as float bits.
 };
 static_assert(sizeof(VolumetricLightCompositePush) == 112);
 static_assert(std::is_trivially_copyable_v<VolumetricLightCompositePush>);

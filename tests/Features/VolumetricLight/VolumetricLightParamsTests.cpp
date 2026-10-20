@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <fstream>
@@ -197,6 +198,7 @@ TEST(VolumetricLightParamsTest, CompositePushCarriesTheResultAndSettings)
 {
     VolumetricLightSettings s = SanitizeVolumetricLightSettings(VolumetricLightSettings{});
     s.strength = 0.5f;
+    s.skyDistanceFraction = 0.25f;
     s.dither = 1.5f;
     s.blendInLinearSpace = false;
     s.debugView = VolumetricLightDebugView::Transmittance;
@@ -215,6 +217,7 @@ TEST(VolumetricLightParamsTest, CompositePushCarriesTheResultAndSettings)
     EXPECT_FLOAT_EQ(p.strengthExponentLinearDither[3], 1.5f);
     EXPECT_EQ(p.frameAndDebug[0], 5u);
     EXPECT_EQ(p.frameAndDebug[1], 2u);
+    EXPECT_EQ(std::bit_cast<float>(p.frameAndDebug[2]), 0.25f);
 }
 
 TEST(VolumetricLightParamsTest, SunDirectScaleMatchesTheMaterialLighting)

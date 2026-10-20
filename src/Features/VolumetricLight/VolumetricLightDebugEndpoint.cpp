@@ -55,6 +55,7 @@ constexpr std::array kSettingKeys{
     SettingKey{ "jitter", &VolumetricLightSettings::jitter },
     SettingKey{ "historyBlend", &VolumetricLightSettings::historyBlend },
     SettingKey{ "strength", &VolumetricLightSettings::strength },
+    SettingKey{ "skyDistanceFraction", &VolumetricLightSettings::skyDistanceFraction },
     SettingKey{ "blendInLinearSpace", &VolumetricLightSettings::blendInLinearSpace },
     SettingKey{ "dither", &VolumetricLightSettings::dither },
 };
