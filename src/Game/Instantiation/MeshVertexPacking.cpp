@@ -51,6 +51,40 @@ void PackMeshVertexUvRange(std::uint32_t beginIndex, std::uint32_t endIndex, con
     }
 }
 
+void PackMeshVertexTangentRange(std::uint32_t beginIndex, std::uint32_t endIndex, const std::vector<Vec3>& positions,
+    const std::vector<Vec3>& normals, const std::vector<Vec2>& uvs, const std::vector<Vec4>& tangents,
+    std::vector<MeshVertexTangent>& out)
+{
+    const bool hasNormals = normals.size() == positions.size();
+    const bool hasUvs = uvs.size() == positions.size();
+    const bool hasTangents = tangents.size() == positions.size();
+
+    const std::size_t clampedEnd = std::min(static_cast<std::size_t>(endIndex), positions.size());
+    const std::size_t clampedOutEnd = std::min(clampedEnd, out.size());
+
+    for (std::size_t i = beginIndex; i < clampedOutEnd; ++i) {
+        const Vec3& p = positions[i];
+        out[i].position[0] = p.x;
+        out[i].position[1] = p.y;
+        out[i].position[2] = p.z;
+
+        const Vec3 n = hasNormals ? normals[i] : Vec3::Up();
+        out[i].normal[0] = n.x;
+        out[i].normal[1] = n.y;
+        out[i].normal[2] = n.z;
+
+        const Vec2 uv = hasUvs ? uvs[i] : Vec2::Zero();
+        out[i].uv[0] = uv.x;
+        out[i].uv[1] = uv.y;
+
+        const Vec4 t = hasTangents ? tangents[i] : Vec4(1.0f, 0.0f, 0.0f, 1.0f);
+        out[i].tangent[0] = t.x;
+        out[i].tangent[1] = t.y;
+        out[i].tangent[2] = t.z;
+        out[i].tangent[3] = t.w;
+    }
+}
+
 std::vector<MeshVertex> PackMeshVertices(const std::vector<Vec3>& positions, const std::vector<Vec3>& normals)
 {
     std::vector<MeshVertex> vertices(positions.size());
@@ -63,6 +97,15 @@ std::vector<MeshVertexUv> PackMeshVertexUvs(
 {
     std::vector<MeshVertexUv> vertices(positions.size());
     PackMeshVertexUvRange(0, static_cast<std::uint32_t>(positions.size()), positions, normals, uvs, vertices);
+    return vertices;
+}
+
+std::vector<MeshVertexTangent> PackMeshVertexTangents(const std::vector<Vec3>& positions,
+    const std::vector<Vec3>& normals, const std::vector<Vec2>& uvs, const std::vector<Vec4>& tangents)
+{
+    std::vector<MeshVertexTangent> vertices(positions.size());
+    PackMeshVertexTangentRange(
+        0, static_cast<std::uint32_t>(positions.size()), positions, normals, uvs, tangents, vertices);
     return vertices;
 }
 

@@ -120,6 +120,30 @@ TEST(PipelineTest, MaterialSetLayoutProducesHasMaterialSetTrue)
     vkDestroyDescriptorSetLayout(device, throwawayMaterialLayout, nullptr);
 }
 
+TEST(PipelineTest, TangentVertexLayoutWithMaterialSetLayoutBuilds)
+{
+    HeadlessRenderGraphFixture fixture;
+    if (!fixture.IsUsable()) {
+        GTEST_SKIP() << fixture.SkipReason();
+    }
+
+    Renderer& renderer = fixture.GetRenderer();
+    const VkDevice device = fixture.Device();
+
+    const VkDescriptorSetLayout throwawayMaterialLayout =
+        DescriptorSetLayoutBuilder(device).AddCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT).Build();
+
+    Pipeline pipeline(device, renderer.ColorFormat(), renderer.DepthFormat(), "shaders/TexturedMesh.vert.spv",
+        "shaders/TexturedMesh.frag.spv", VertexLayout::PositionNormalUvTangent, throwawayMaterialLayout,
+        "PipelineTest.TangentLayout");
+
+    EXPECT_TRUE(pipeline.HasMaterialSet());
+    EXPECT_NE(pipeline.Native(), static_cast<VkPipeline>(VK_NULL_HANDLE));
+
+    vkDestroyDescriptorSetLayout(device, throwawayMaterialLayout, nullptr);
+}
+
+
 TEST(PipelineTest, UnchangedConstructionWithNoMaterialSetLayoutReportsHasMaterialSetFalse)
 {
     HeadlessRenderGraphFixture fixture;

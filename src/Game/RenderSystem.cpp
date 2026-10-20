@@ -92,6 +92,7 @@ const char* VertexLayoutDebugName(VertexLayout layout)
     case VertexLayout::PositionColor: return "PositionColor";
     case VertexLayout::PositionNormal: return "PositionNormal";
     case VertexLayout::PositionNormalUv: return "PositionNormalUv";
+    case VertexLayout::PositionNormalUvTangent: return "PositionNormalUvTangent";
     case VertexLayout::PositionNormalInstanced: return "PositionNormalInstanced";
     case VertexLayout::None: return "None";
     }

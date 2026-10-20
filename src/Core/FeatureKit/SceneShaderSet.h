@@ -1,6 +1,10 @@
 #pragma once
 
+#include "../../Renderer/VertexLayout.h"
+
 #include <memory>
+#include <span>
+#include <string_view>
 
 namespace gte {
 struct PipelineOverrideSet;
@@ -20,12 +24,18 @@ bool PrepareSceneShaders(SceneShaderSet& set, FrameContext& context);
 const PipelineOverrideSet& OverridesOf(const SceneShaderSet& set) noexcept;
 } // namespace detail
 
+// The vertex layouts a depth-only set builds a pipeline for, in build order.
+std::span<const VertexLayout> DepthOnlyLayouts() noexcept;
+
+// Vertex shader name suffix of `layout`; empty when the layout has no depth-only shader.
+std::string_view DepthOnlyShaderSuffix(VertexLayout layout) noexcept;
+
 // The pipelines a scene redraw uses instead of each object's own. Built lazily; a failed build is rolled
 // back and retried on a growing cooldown. Registered pipelines are removed on destruction.
 class SceneShaderSet {
 public:
-    // Depth-only draw: shaders/<base>PositionColor.vert, <base>PositionNormal.vert, <base>PositionNormalUv.vert
-    // plus shaders/<base>.frag, one pipeline per vertex layout.
+    // Depth-only draw: shaders/<base><suffix>.vert for each suffix of DepthOnlyShaderSuffix()
+    // (PositionColor, PositionNormal, PositionNormalUv, PositionNormalUvTangent) plus shaders/<base>.frag.
     static SceneShaderSet DepthOnly(const char* baseName);
 
     ~SceneShaderSet();

@@ -45,14 +45,20 @@ std::uint32_t BuildVertexInputState(
         attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
         return 1;
     }
-    case VertexLayout::PositionColor:
-    default: {
+    case VertexLayout::PositionNormalUvTangent: {
+        binding = MeshVertexTangent::BindingDescription();
+        const auto layoutAttributes = MeshVertexTangent::AttributeDescriptions();
+        attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
+        return 1;
+    }
+    case VertexLayout::PositionColor: {
         binding = Vertex::BindingDescription();
         const auto layoutAttributes = Vertex::AttributeDescriptions();
         attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
         return 1;
     }
     }
+    throw std::logic_error("BuildVertexInputState: unknown VertexLayout");
 }
 
 } // namespace

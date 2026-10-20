@@ -27,13 +27,37 @@ struct LayoutShader {
 };
 
 // One vertex shader per supported vertex layout.
-constexpr std::array<LayoutShader, 3> kLayoutShaders{ {
+constexpr std::array<LayoutShader, 4> kLayoutShaders{ {
     { VertexLayout::PositionColor, "PositionColor" },
     { VertexLayout::PositionNormal, "PositionNormal" },
     { VertexLayout::PositionNormalUv, "PositionNormalUv" },
+    { VertexLayout::PositionNormalUvTangent, "PositionNormalUvTangent" },
 } };
 
+constexpr std::array<VertexLayout, kLayoutShaders.size()> kDepthOnlyLayouts = [] {
+    std::array<VertexLayout, kLayoutShaders.size()> layouts{};
+    for (std::size_t i = 0; i < layouts.size(); ++i) {
+        layouts[i] = kLayoutShaders[i].layout;
+    }
+    return layouts;
+}();
+
 } // namespace
+
+std::span<const VertexLayout> DepthOnlyLayouts() noexcept
+{
+    return kDepthOnlyLayouts;
+}
+
+std::string_view DepthOnlyShaderSuffix(VertexLayout layout) noexcept
+{
+    for (const LayoutShader& entry : kLayoutShaders) {
+        if (entry.layout == layout) {
+            return entry.suffix;
+        }
+    }
+    return {};
+}
 
 struct SceneShaderSet::Impl {
     explicit Impl(const char* base)

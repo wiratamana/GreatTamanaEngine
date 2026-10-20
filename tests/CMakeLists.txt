@@ -2468,6 +2468,9 @@ set(GTE_TEST_SOURCES
     Game/Instantiation/MeshAssetGpuCatalogJointOverrideRefreshTests.cpp
     Game/Instantiation/MaterialLifetimeRulesTests.cpp
     Game/Instantiation/MaterialCacheKeysTests.cpp
+    Game/Instantiation/MeshAssetPipelineKindTests.cpp
+    Game/MeshVertexPackingTests.cpp
+    Core/FeatureKit/DepthOnlyLayoutTests.cpp
     Game/MeshMaterialPartitionerTests.cpp
     Game/SkeletalRigCacheTests.cpp
     Game/AnimationClipCacheTests.cpp
@@ -2745,6 +2748,7 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_LIGHTING_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/DirectionalLighting.glsl"
     GTE_TEST_MATERIAL_PARAMS_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/MaterialParams.glsl"
+    GTE_TEST_SHADOW_SHADER_DIR="${CMAKE_SOURCE_DIR}/src/Features/Shadow/Shaders"
 )
 
 # Engine-owned reflection fixtures with abstract names (not shipped).
@@ -2918,7 +2922,8 @@ set(GTE_COMMENT_RULE_SRC
     Features/Atmosphere/ Assets/MeshTangents.h Assets/MeshTangents.cpp
     Game/Instantiation/MaterialTextureGpuCache.h Game/Instantiation/MaterialTextureGpuCache.cpp
     Game/Instantiation/MaterialCacheKeys.h Game/Instantiation/MaterialLifetimeRules.h
-    Game/Instantiation/MaterialLifetimeRules.cpp)
+    Game/Instantiation/MaterialLifetimeRules.cpp Game/Instantiation/MeshAssetPipelineKind.h
+    Game/Instantiation/MeshVertexPacking.h Game/Instantiation/MeshVertexPacking.cpp)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
@@ -2937,7 +2942,9 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Renderer/GpuSkinning/GpuSkinningPassTests.cpp Renderer/RenderGraph/RenderGraphComputeBindingKeyTests.cpp
     Renderer/RenderGraph/PassIdentityTests.cpp Renderer/RenderGraph/ResourcePoolEvictionTests.cpp
     Assets/MeshTangentsTests.cpp Renderer/UploadChunkerTests.cpp Renderer/MaterialImageRoleTests.cpp
-    Game/Instantiation/MaterialLifetimeRulesTests.cpp Game/Instantiation/MaterialCacheKeysTests.cpp)
+    Game/Instantiation/MaterialLifetimeRulesTests.cpp Game/Instantiation/MaterialCacheKeysTests.cpp
+    Game/Instantiation/MeshAssetPipelineKindTests.cpp Game/MeshVertexPackingTests.cpp
+    Core/FeatureKit/DepthOnlyLayoutTests.cpp Features/Shadow/ShadowDepthShaderCoverageTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")
