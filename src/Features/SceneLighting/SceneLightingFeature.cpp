@@ -10,6 +10,11 @@ constexpr std::int32_t kUniformsPriority = 20;
 
 SceneLightingFeature::SceneLightingFeature(fx::FeatureHost&) { }
 
+void SceneLightingFeature::ApplySettings(const SceneLightingSettings& candidate)
+{
+    m_settings = SanitizeSceneLightingSettings(candidate);
+}
+
 void SceneLightingFeature::Setup(fx::FeatureSetup& s)
 {
     // Not a render pass: Always() keeps a pass toggle from silencing the uniform write.
@@ -17,8 +22,8 @@ void SceneLightingFeature::Setup(fx::FeatureSetup& s)
     s.PreOpaque("SceneLighting.Uniforms", kUniformsPriority,
         [this](fx::PreOpaqueFrame& f) {
             const std::optional<SunShadowReceiver> receiver = m_receiver.Fetch(f);
-            f.SetSceneUniforms(PackSceneLightingUniformData(
-                ResolveActiveDirectionalLight(f.Scene()), m_settings, receiver ? &*receiver : nullptr));
+            f.SetSceneUniforms(PackSceneLightingUniformData(ResolveActiveDirectionalLight(f.Scene()), m_settings,
+                f.View().eye, receiver ? &*receiver : nullptr));
         },
         fx::Gate::Always());
 }

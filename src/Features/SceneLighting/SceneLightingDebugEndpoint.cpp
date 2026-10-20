@@ -25,6 +25,9 @@ constexpr std::array kSettingKeys{
     SettingKey{ "ambientIntensity", &SceneLightingSettings::ambientIntensity },
 };
 
+// Integer key; every key in the table above is a float.
+constexpr std::string_view kMaterialDebugViewKey = "materialDebugView";
+
 // A float shown with 6 significant digits, so 0.6f reads 0.6 and not 0.6000000238.
 double Shown(float value) noexcept
 {
@@ -54,6 +57,8 @@ fx::FeatureDebugResult SceneLightingDebugEndpoint::GetState() const
     for (const SettingKey& key : kSettingKeys) {
         out.fields.push_back({ std::string(key.name), Shown(m_settings.*key.member) });
     }
+    out.fields.push_back({ std::string(kMaterialDebugViewKey),
+        static_cast<std::int64_t>(static_cast<std::int32_t>(m_settings.materialDebugView)) });
     return out;
 }
 
@@ -61,6 +66,14 @@ fx::FeatureDebugResult SceneLightingDebugEndpoint::Set(std::span<const fx::Featu
 {
     SceneLightingSettings candidate = m_settings;
     for (const fx::FeatureDebugArg& arg : args) {
+        if (arg.key == kMaterialDebugViewKey) {
+            const auto view = fx::ParseDebugUnsigned(arg.value);
+            if (!view || *view >= static_cast<std::uint64_t>(kMaterialDebugViewCount)) {
+                return Fail(arg.key, "must be 0..8");
+            }
+            candidate.materialDebugView = static_cast<MaterialDebugView>(*view);
+            continue;
+        }
         const SettingKey* found = nullptr;
         for (const SettingKey& key : kSettingKeys) {
             if (key.name == arg.key) {

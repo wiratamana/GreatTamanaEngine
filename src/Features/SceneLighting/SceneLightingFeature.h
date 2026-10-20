@@ -16,6 +16,10 @@ public:
     void Setup(fx::FeatureSetup& setup) override;
     fx::IFeatureDebugEndpoint* DebugEndpoint() noexcept override { return &m_endpoint; }
 
+    const SceneLightingSettings& Settings() const noexcept { return m_settings; }
+    // Sanitizes and stores the settings. Main thread only.
+    void ApplySettings(const SceneLightingSettings& candidate);
+
 private:
     SceneLightingSettings m_settings;
     SceneLightingDebugEndpoint m_endpoint{ m_settings };

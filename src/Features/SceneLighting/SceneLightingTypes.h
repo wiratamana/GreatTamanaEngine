@@ -15,12 +15,19 @@ namespace gte {
 // Feature module name, render-feature scope owner and log category.
 inline constexpr const char* kSceneLightingFeatureName = "SceneLighting";
 
-// Tunable lighting values; flat floats so the debug endpoint can reflect them.
+// Material debug views; 0 = off. The shader reads the value as an integer.
+enum class MaterialDebugView : std::int32_t {
+    Off, ShadingNormal, Roughness, Metallic, Occlusion, Tangent, Handedness, Facing, BaseColor
+};
+inline constexpr std::int32_t kMaterialDebugViewCount = 9;
+
+// Tunable lighting values; the debug endpoint reflects them.
 // Ambient is added to the sun term, not scaled by it.
 struct SceneLightingSettings {
     float skyAmbientR = 1.26f, skyAmbientG = 1.31f, skyAmbientB = 1.40f;
     float groundAmbientR = 0.66f, groundAmbientG = 0.57f, groundAmbientB = 0.46f;
     float ambientIntensity = 0.35f;
+    MaterialDebugView materialDebugView = MaterialDebugView::Off;
 };
 
 // Clamps every value; a non-finite value becomes its default.
@@ -38,6 +45,8 @@ inline SceneLightingSettings SanitizeSceneLightingSettings(const SceneLightingSe
     s.groundAmbientG = clamp(in.groundAmbientG, d.groundAmbientG, 0.0f, 4.0f);
     s.groundAmbientB = clamp(in.groundAmbientB, d.groundAmbientB, 0.0f, 4.0f);
     s.ambientIntensity = clamp(in.ambientIntensity, d.ambientIntensity, 0.0f, 8.0f);
+    s.materialDebugView = static_cast<MaterialDebugView>(
+        std::clamp(static_cast<std::int32_t>(in.materialDebugView), 0, kMaterialDebugViewCount - 1));
     return s;
 }
 
@@ -64,14 +73,15 @@ struct SceneLightingUniformData {
 static_assert(sizeof(SceneLightingUniformData) == 448);
 static_assert(std::is_trivially_copyable_v<SceneLightingUniformData>);
 
-// Packs the sun, settings and optional cascade data; a non-finite direction becomes up.
-// No receiver, or zero material strength, leaves every shadow field at zero.
+// Packs the sun, settings, eye and optional cascade data; a non-finite direction becomes up.
+// No receiver, or zero material strength, leaves every cascade field at zero; the eye is always written.
 inline SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirectionalLight& sun,
-    const SceneLightingSettings& settings = {}, const SunShadowReceiver* receiver = nullptr) noexcept
+    const SceneLightingSettings& settings, const Vec3& eye, const SunShadowReceiver* receiver = nullptr) noexcept
 {
     const bool finite = std::isfinite(sun.directionTowardSun.x) && std::isfinite(sun.directionTowardSun.y)
         && std::isfinite(sun.directionTowardSun.z);
     const Vec3 direction = finite ? sun.directionTowardSun : Vec3::Up();
+    const bool eyeFinite = std::isfinite(eye.x) && std::isfinite(eye.y) && std::isfinite(eye.z);
 
     SceneLightingUniformData data{};
     data.sunDirectionAndValid[0] = direction.x;
@@ -89,7 +99,10 @@ inline SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirec
     data.groundAmbientAndMaterialDebugView[0] = settings.groundAmbientR;
     data.groundAmbientAndMaterialDebugView[1] = settings.groundAmbientG;
     data.groundAmbientAndMaterialDebugView[2] = settings.groundAmbientB;
-    data.groundAmbientAndMaterialDebugView[3] = 0.0f;
+    data.groundAmbientAndMaterialDebugView[3] = static_cast<float>(static_cast<std::int32_t>(settings.materialDebugView));
+    data.cameraPositionAndFadeStart[0] = eyeFinite ? eye.x : 0.0f;
+    data.cameraPositionAndFadeStart[1] = eyeFinite ? eye.y : 0.0f;
+    data.cameraPositionAndFadeStart[2] = eyeFinite ? eye.z : 0.0f;
 
     if (receiver == nullptr || !(receiver->materialStrength > 0.0f) || receiver->cascadeCount == 0) {
         return data;
@@ -104,9 +117,6 @@ inline SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirec
     data.shadowBias[1] = receiver->normalOffsetTexels;
     data.shadowBias[2] = receiver->slopeBiasTexels;
     data.shadowBias[3] = static_cast<float>(receiver->filterSamples);
-    data.cameraPositionAndFadeStart[0] = receiver->cameraPosition.x;
-    data.cameraPositionAndFadeStart[1] = receiver->cameraPosition.y;
-    data.cameraPositionAndFadeStart[2] = receiver->cameraPosition.z;
     data.cameraPositionAndFadeStart[3] = receiver->fadeStart;
     data.cameraForwardAndFadeEnd[0] = receiver->cameraForward.x;
     data.cameraForwardAndFadeEnd[1] = receiver->cameraForward.y;

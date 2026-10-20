@@ -2926,7 +2926,8 @@ set(GTE_COMMENT_RULE_SRC
     Game/Instantiation/MaterialTextureGpuCache.h Game/Instantiation/MaterialTextureGpuCache.cpp
     Game/Instantiation/MaterialCacheKeys.h Game/Instantiation/MaterialLifetimeRules.h
     Game/Instantiation/MaterialLifetimeRules.cpp Game/Instantiation/MeshAssetPipelineKind.h
-    Game/Instantiation/MeshVertexPacking.h Game/Instantiation/MeshVertexPacking.cpp Math/PbrBrdf.h)
+    Game/Instantiation/MeshVertexPacking.h Game/Instantiation/MeshVertexPacking.cpp Math/PbrBrdf.h
+    Features/SceneLighting/)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
@@ -2948,7 +2949,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Game/Instantiation/MaterialLifetimeRulesTests.cpp Game/Instantiation/MaterialCacheKeysTests.cpp
     Game/Instantiation/MeshAssetPipelineKindTests.cpp Game/MeshVertexPackingTests.cpp
     Core/FeatureKit/DepthOnlyLayoutTests.cpp Features/Shadow/ShadowDepthShaderCoverageTests.cpp
-    Math/PbrBrdfTests.cpp)
+    Math/PbrBrdfTests.cpp Features/SceneLighting/)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")
