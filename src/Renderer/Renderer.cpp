@@ -320,6 +320,11 @@ void Renderer::DrainGpuForCodeUnload() const
     WaitForGpuIdle();
 }
 
+void Renderer::DrainGpuForResourceRelease() const
+{
+    WaitForGpuIdle();
+}
+
 void Renderer::RequestSwapchainCapture()
 {
     m_presenter.RequestSwapchainCapture();
@@ -654,15 +659,9 @@ GpuUploadStats Renderer::GetUploadStats() const noexcept
     return m_resources.UploadStats();
 }
 
-MaterialTexture Renderer::CreateMaterialTexture2D(const void* pixelsRgba8, int width, int height,
-    const MaterialParams& params, const char* debugName) const
+MaterialTexture Renderer::CreateMaterialVariant(const MaterialImages& images, const MaterialParams& params) const
 {
-    return m_resources.CreateMaterialTexture2D(pixelsRgba8, width, height, params, debugName);
-}
-
-MaterialTexture Renderer::CreateMaterialVariant(std::shared_ptr<Texture2D> image, const MaterialParams& params) const
-{
-    return m_resources.CreateMaterialVariant(std::move(image), params);
+    return m_resources.CreateMaterialVariant(images, params);
 }
 
 VolumeTexture Renderer::CreateVolumeTexture(

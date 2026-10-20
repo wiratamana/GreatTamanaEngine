@@ -135,6 +135,9 @@ public:
     // code (a project assembly) whose callbacks, pipelines or buffers the GPU may still use.
     void DrainGpuForCodeUnload() const;
 
+    // Same wait, named as the sanctioned barrier before destroying textures, buffers or sets the GPU may still read.
+    void DrainGpuForResourceRelease() const;
+
     // The device reference rg::GpuBuffer is created from.
     rg::DeviceRef Device() noexcept { return rg::DeviceRef(this); }
 
@@ -220,12 +223,8 @@ public:
     // Finished texture uploads since creation (submits, images, staging bytes).
     GpuUploadStats GetUploadStats() const noexcept;
 
-    // Uploads `pixelsRgba8` as an sRGB base-color image with a mip chain and wraps it in a material.
-    MaterialTexture CreateMaterialTexture2D(const void* pixelsRgba8, int width, int height,
-        const MaterialParams& params = {}, const char* debugName = nullptr) const;
-
-    // A new material (own params block and descriptor set) over an image that already exists.
-    MaterialTexture CreateMaterialVariant(std::shared_ptr<Texture2D> image, const MaterialParams& params) const;
+    // A new material (own params block and set) over `images`; null entries use the default image of the slot.
+    MaterialTexture CreateMaterialVariant(const MaterialImages& images, const MaterialParams& params) const;
 
     VolumeTexture CreateVolumeTexture(
         int width, int height, int depth, PixelFormat format, const char* debugName = nullptr) const;

@@ -2,9 +2,13 @@
 
 #include "../Core/Logging.h"
 #include "ECS/TransformHierarchy.h"
+#include "Instantiation/MaterialLifetimeRules.h"
 #include "Profiling/ScopeTimer.h"
 #include "Renderer/Renderer.h"
+#include "Renderer/RenderGraph/BoundedOnceSet.h"
 #include "Renderer/RenderGraph/CommandBuffer.h"
+
+#include <string>
 
 namespace gte {
 
@@ -160,8 +164,16 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
 
         if (mesh != nullptr && pipeline != nullptr) {
             const MaterialTexture* materialTexture = m_textures.TryGet(command.texture);
+            if (!CanDrawWithMaterial(pipeline->HasMaterialSet(), materialTexture != nullptr)) {
+                const std::string key = std::to_string(command.texture.index) + "/" + std::to_string(command.texture.generation);
+                if (rg::BoundedOnceSet<64>::ShouldLog(m_warnedUnresolvedMaterials.Note(key))) {
+                    GTE_LOG_WARNING("RenderSystem",
+                        "Draw(): material handle " + key + " does not resolve; draws that need it are skipped.");
+                }
+                continue;
+            }
             const DescriptorSetHandle descriptorSet =
-                materialTexture != nullptr ? materialTexture->descriptorSet : DescriptorSetHandle::Invalid;
+                materialTexture != nullptr ? materialTexture->set.Handle() : DescriptorSetHandle::Invalid;
 
             // Costs one null check when no capture is armed.
             if (capture != nullptr) {

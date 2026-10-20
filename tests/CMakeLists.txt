@@ -2466,7 +2466,8 @@ set(GTE_TEST_SOURCES
     Game/GameUpdateFreezeGatingTests.cpp
     Game/EntityInstantiatorTests.cpp
     Game/Instantiation/MeshAssetGpuCatalogJointOverrideRefreshTests.cpp
-    Game/MeshVertexPackingTests.cpp
+    Game/Instantiation/MaterialLifetimeRulesTests.cpp
+    Game/Instantiation/MaterialCacheKeysTests.cpp
     Game/MeshMaterialPartitionerTests.cpp
     Game/SkeletalRigCacheTests.cpp
     Game/AnimationClipCacheTests.cpp
@@ -2914,7 +2915,10 @@ set(GTE_COMMENT_RULE_SRC
     Editor/AssetPreviewMesh.cpp Editor/AssetPreviewMesh.h Editor/BoneViewerWindow.cpp Editor/BoneViewerWindow.h
     Editor/EditorHost.h Editor/RenderGraphTexturePreview.cpp Editor/RenderGraphTexturePreview.h
     Core/Plugins/ProjectAssemblyHost.cpp
-    Features/Atmosphere/ Assets/MeshTangents.h Assets/MeshTangents.cpp)
+    Features/Atmosphere/ Assets/MeshTangents.h Assets/MeshTangents.cpp
+    Game/Instantiation/MaterialTextureGpuCache.h Game/Instantiation/MaterialTextureGpuCache.cpp
+    Game/Instantiation/MaterialCacheKeys.h Game/Instantiation/MaterialLifetimeRules.h
+    Game/Instantiation/MaterialLifetimeRules.cpp)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
@@ -2932,7 +2936,8 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Renderer/MaterialParamsTests.cpp Support/Std140Block.h
     Renderer/GpuSkinning/GpuSkinningPassTests.cpp Renderer/RenderGraph/RenderGraphComputeBindingKeyTests.cpp
     Renderer/RenderGraph/PassIdentityTests.cpp Renderer/RenderGraph/ResourcePoolEvictionTests.cpp
-    Assets/MeshTangentsTests.cpp Renderer/UploadChunkerTests.cpp Renderer/MaterialImageRoleTests.cpp)
+    Assets/MeshTangentsTests.cpp Renderer/UploadChunkerTests.cpp Renderer/MaterialImageRoleTests.cpp
+    Game/Instantiation/MaterialLifetimeRulesTests.cpp Game/Instantiation/MaterialCacheKeysTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

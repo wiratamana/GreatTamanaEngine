@@ -956,6 +956,9 @@ add_library(gte_core STATIC
     src/Game/Instantiation/PrimitiveGpuCatalog.h
     src/Game/Instantiation/MaterialTextureGpuCache.cpp
     src/Game/Instantiation/MaterialTextureGpuCache.h
+    src/Game/Instantiation/MaterialCacheKeys.h
+    src/Game/Instantiation/MaterialLifetimeRules.cpp
+    src/Game/Instantiation/MaterialLifetimeRules.h
     src/Game/Instantiation/MeshAssetGpuCatalog.cpp
     src/Game/Instantiation/MeshAssetGpuCatalog.h
     src/Game/Instantiation/MeshAssetPartGrouping.cpp

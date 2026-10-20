@@ -46,13 +46,10 @@ namespace gte {
 void FrameDebuggerCaptureContext::RecordFrameDebuggerDraw(Registry& registry, Renderer& /*renderer*/, Entity entity,
     const Mesh& mesh, const Pipeline& pipeline, const MaterialTexture* materialTexture, const Mat4& viewProjection)
 {
-    // editor-core-separation-1 campaign, PHASE4 - names now live entirely on
-    // the Editor side (EditorGpuMemoryNameOverlay); `renderer` is kept as a
-    // parameter for signature stability with the interface's declaration
-    // (and RenderSystem::Draw()'s own call site), even though it is no
-    // longer used here.
+    // Debug names live on the editor side; the base color image names the material.
     const std::string materialTextureDebugName = materialTexture != nullptr
-        ? EditorGpuMemoryNameOverlay::GetDebugName(materialTexture->texture->Handle())
+        ? EditorGpuMemoryNameOverlay::GetDebugName(
+              materialTexture->images[static_cast<std::size_t>(MaterialImageRole::BaseColor)]->Handle())
         : std::string();
     RecordDraw(pipeline.DebugName(), materialTextureDebugName, viewProjection);
 

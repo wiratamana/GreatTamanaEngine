@@ -42,20 +42,20 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
         throw std::runtime_error("GpuResourceFactory: vkCreateCommandPool failed");
     }
 
-    // Shared material set layout (fragment stage): binding 0 = base-color sampler, binding 1 = MaterialParams block.
-    VkDescriptorSetLayoutBinding materialBindings[2]{};
-    materialBindings[0].binding = 0;
-    materialBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    materialBindings[0].descriptorCount = 1;
-    materialBindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    materialBindings[1].binding = 1;
-    materialBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    materialBindings[1].descriptorCount = 1;
-    materialBindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    // Material set layout (fragment stage): 0 = base color, 1 = MaterialParams, 2 = normal,
+    // 3 = metallic-roughness, 4 = occlusion.
+    VkDescriptorSetLayoutBinding materialBindings[5]{};
+    for (std::uint32_t binding = 0; binding < 5; ++binding) {
+        materialBindings[binding].binding = binding;
+        materialBindings[binding].descriptorType
+            = binding == 1 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        materialBindings[binding].descriptorCount = 1;
+        materialBindings[binding].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
 
     VkDescriptorSetLayoutCreateInfo setLayoutInfo{};
     setLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    setLayoutInfo.bindingCount = 2;
+    setLayoutInfo.bindingCount = 5;
     setLayoutInfo.pBindings = materialBindings;
 
     if (vkCreateDescriptorSetLayout(m_device, &setLayoutInfo, nullptr, &m_materialSetLayout) != VK_SUCCESS) {
@@ -63,23 +63,13 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
         throw std::runtime_error("GpuResourceFactory: vkCreateDescriptorSetLayout failed");
     }
 
-    // Material sets are never freed individually; the whole pool dies in Destroy().
     constexpr std::uint32_t kMaxMaterials = 4096;
-    const VkDescriptorPoolSize materialPoolSizes[2] = {
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxMaterials },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kMaxMaterials },
-    };
-
-    VkDescriptorPoolCreateInfo poolCreateInfo{};
-    poolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolCreateInfo.maxSets = kMaxMaterials;
-    poolCreateInfo.poolSizeCount = 2;
-    poolCreateInfo.pPoolSizes = materialPoolSizes;
-
-    if (vkCreateDescriptorPool(m_device, &poolCreateInfo, nullptr, &m_materialDescriptorPool) != VK_SUCCESS) {
+    try {
+        m_materialSets = std::make_shared<MaterialSetPool>(m_device, m_materialSetLayout, kMaxMaterials);
+    } catch (...) {
         vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
-        throw std::runtime_error("GpuResourceFactory: vkCreateDescriptorPool failed");
+        throw;
     }
 
     // First compute descriptor pool; more are added on demand (see AllocateDescriptorSet()).
@@ -100,7 +90,7 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
 
     const VkDescriptorPool firstComputePool = CreateComputeDescriptorPool(kInitialComputePool);
     if (firstComputePool == VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(m_device, m_materialDescriptorPool, nullptr);
+        m_materialSets.reset();
         vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
         throw std::runtime_error("GpuResourceFactory: vkCreateDescriptorPool (compute) failed");
@@ -116,7 +106,7 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
     } catch (...) {
         vkDestroyDescriptorPool(m_device, firstComputePool, nullptr);
         m_computePools.clear();
-        vkDestroyDescriptorPool(m_device, m_materialDescriptorPool, nullptr);
+        m_materialSets.reset();
         vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
         throw;
@@ -131,10 +121,8 @@ GpuResourceFactory::~GpuResourceFactory()
 
 void GpuResourceFactory::Destroy() noexcept
 {
-    if (m_materialDescriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(m_device, m_materialDescriptorPool, nullptr);
-        m_materialDescriptorPool = VK_NULL_HANDLE;
-    }
+    m_defaultMaterialImages = {}; // Images go before the allocator they came from.
+    m_materialSets.reset();
     for (const VkDescriptorPool pool : m_computePools) {
         vkDestroyDescriptorPool(m_device, pool, nullptr);
     }
@@ -588,70 +576,76 @@ TextureArray2D GpuResourceFactory::CreateTextureArray(int width, int height, int
         isCubemap, allowStorageImageAccess, debugName);
 }
 
-// Material textures hold colour data: stored as sRGB, decoded to linear by the sampler.
-MaterialTexture GpuResourceFactory::CreateMaterialTexture2D(
-    const void* pixelsRgba8, int width, int height, const MaterialParams& params, const char* debugName) const
+std::shared_ptr<Texture2D> GpuResourceFactory::DefaultMaterialImage(MaterialImageRole role) const
 {
-    auto image = std::make_shared<Texture2D>(CreateTexture2D({ .pixelsRgba8 = pixelsRgba8,
-        .width = width,
-        .height = height,
-        .debugName = debugName,
-        .format = PixelFormat::RGBA8_SRGB,
-        .addressMode = TextureAddressMode::Repeat,
-        .generateMips = true,
-        .maxAnisotropy = m_vulkanDevice->MaterialAnisotropy() }));
-    return CreateMaterialVariant(std::move(image), params);
+    const std::scoped_lock lock(m_defaultMaterialImageMutex);
+    const std::size_t slot = static_cast<std::size_t>(role);
+    if (std::any_of(m_defaultMaterialImages.begin(), m_defaultMaterialImages.end(),
+            [](const std::shared_ptr<Texture2D>& image) { return image == nullptr; })) {
+        static constexpr std::uint8_t kWhite[4] = { 255, 255, 255, 255 };
+        static constexpr std::uint8_t kFlatNormal[4] = { 128, 128, 255, 255 }; // Decodes to about (0, 0, 1).
+        const std::array<MaterialImageUpload, kMaterialImageRoleCount> uploads = { {
+            { kWhite, 1, 1, MaterialImageRole::BaseColor, "MaterialDefaultBaseColor" },
+            { kFlatNormal, 1, 1, MaterialImageRole::Normal, "MaterialDefaultNormal" },
+            { kWhite, 1, 1, MaterialImageRole::MetallicRoughness, "MaterialDefaultMetallicRoughness" },
+            { kWhite, 1, 1, MaterialImageRole::Occlusion, "MaterialDefaultOcclusion" },
+        } };
+        std::vector<std::shared_ptr<Texture2D>> created = CreateMaterialImages(uploads);
+        if (created.size() != kMaterialImageRoleCount
+            || std::any_of(created.begin(), created.end(), [](const auto& image) { return image == nullptr; })) {
+            throw std::runtime_error("GpuResourceFactory: default material image upload failed.");
+        }
+        for (std::size_t i = 0; i < kMaterialImageRoleCount; ++i) {
+            m_defaultMaterialImages[i] = std::move(created[i]);
+        }
+    }
+    return m_defaultMaterialImages[slot];
 }
 
-MaterialTexture GpuResourceFactory::CreateMaterialVariant(
-    std::shared_ptr<Texture2D> image, const MaterialParams& params) const
+MaterialTexture GpuResourceFactory::CreateMaterialVariant(const MaterialImages& images, const MaterialParams& params) const
 {
-    if (!image) {
-        throw std::runtime_error("GpuResourceFactory::CreateMaterialVariant: image is null.");
+    // Resolve every slot first, so a failing default image never costs a set.
+    MaterialImages resolved;
+    for (std::size_t i = 0; i < kMaterialImageRoleCount; ++i) {
+        resolved[i] = images[i] ? images[i] : DefaultMaterialImage(static_cast<MaterialImageRole>(i));
     }
 
-    Buffer paramsBuffer = CreateBuffer(sizeof(MaterialParams), BufferUsage::UniformBuffer, BufferMemoryUsage::CpuToGpu,
-        "MaterialParams");
+    Buffer paramsBuffer = CreateBuffer(
+        sizeof(MaterialParams), BufferUsage::UniformBuffer, BufferMemoryUsage::CpuToGpu, "MaterialParams");
     paramsBuffer.Upload(&params, sizeof(params));
 
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = m_materialDescriptorPool;
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = &m_materialSetLayout;
+    const VkDescriptorSet descriptorSet = m_materialSets->Allocate();
+    MaterialSetLease lease(m_materialSets, descriptorSet); // Frees the set if anything below throws.
 
-    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
-    if (vkAllocateDescriptorSets(m_device, &allocInfo, &descriptorSet) != VK_SUCCESS) {
-        throw std::runtime_error("GpuResourceFactory::CreateMaterialVariant: vkAllocateDescriptorSets failed "
-            "(consider raising kMaxMaterials in GpuResourceFactory.cpp).");
+    // Image bindings in role order: base color, normal, metallic-roughness, occlusion.
+    static constexpr std::uint32_t kImageBindings[kMaterialImageRoleCount] = { 0, 2, 3, 4 };
+    VkDescriptorImageInfo imageInfos[kMaterialImageRoleCount]{};
+    VkWriteDescriptorSet writes[kMaterialImageRoleCount + 1]{};
+    for (std::size_t i = 0; i < kMaterialImageRoleCount; ++i) {
+        imageInfos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[i].imageView = resolved[i]->View();
+        imageInfos[i].sampler = resolved[i]->Sampler();
+        writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[i].dstSet = descriptorSet;
+        writes[i].dstBinding = kImageBindings[i];
+        writes[i].descriptorCount = 1;
+        writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[i].pImageInfo = &imageInfos[i];
     }
-
-    VkDescriptorImageInfo imageInfo{};
-    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    imageInfo.imageView = image->View();
-    imageInfo.sampler = image->Sampler();
 
     VkDescriptorBufferInfo bufferInfo{};
     bufferInfo.buffer = paramsBuffer.Native();
     bufferInfo.range = sizeof(MaterialParams);
+    VkWriteDescriptorSet& paramsWrite = writes[kMaterialImageRoleCount];
+    paramsWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    paramsWrite.dstSet = descriptorSet;
+    paramsWrite.dstBinding = 1;
+    paramsWrite.descriptorCount = 1;
+    paramsWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    paramsWrite.pBufferInfo = &bufferInfo;
+    vkUpdateDescriptorSets(m_device, kMaterialImageRoleCount + 1, writes, 0, nullptr);
 
-    VkWriteDescriptorSet writes[2]{};
-    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = descriptorSet;
-    writes[0].dstBinding = 0;
-    writes[0].descriptorCount = 1;
-    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writes[0].pImageInfo = &imageInfo;
-    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = descriptorSet;
-    writes[1].dstBinding = 1;
-    writes[1].descriptorCount = 1;
-    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    writes[1].pBufferInfo = &bufferInfo;
-    vkUpdateDescriptorSets(m_device, 2, writes, 0, nullptr);
-
-    // Registered once; the set is pool-owned and never freed or reallocated individually.
-    return MaterialTexture{ std::move(image), std::move(paramsBuffer), RegisterDescriptorSet(descriptorSet) };
+    return MaterialTexture{ std::move(resolved), std::move(paramsBuffer), std::move(lease) };
 }
 
 VkDescriptorPool GpuResourceFactory::CreateComputeDescriptorPool(const PoolCapacity& capacity) const noexcept

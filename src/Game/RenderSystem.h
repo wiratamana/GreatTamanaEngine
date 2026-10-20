@@ -14,6 +14,7 @@
 #include "Renderer/Mesh.h"
 #include "Renderer/Pipeline.h"
 #include "Renderer/PipelineHandle.h"
+#include "Renderer/RenderGraph/BoundedOnceSet.h"
 #include "Renderer/ResourcePool.h"
 #include "Renderer/MaterialTextureHandle.h"
 // SceneQuery.h only forward-declares RenderSystem; never include this header back from it.
@@ -51,6 +52,9 @@ public:
     MeshHandle RegisterMesh(Mesh&& mesh) { return m_meshes.Insert(std::move(mesh)); }
     PipelineHandle RegisterPipeline(Pipeline&& pipeline) { return m_pipelines.Insert(std::move(pipeline)); }
     MaterialTextureHandle RegisterTexture(MaterialTexture&& texture) { return m_textures.Insert(std::move(texture)); }
+
+    // Destroys the material; the handle goes stale. Only safe when no entity uses it and the GPU is done with it.
+    bool UnregisterTexture(MaterialTextureHandle handle) { return m_textures.Remove(handle); }
 
     // Frees a pipeline slot. Only safe for a handle no MeshRenderer references: the pool keeps no back-references,
     // and entities holding a removed handle silently stop drawing. For rollback and owner teardown.
@@ -100,6 +104,7 @@ private:
     // Warn-once state for pipelineOverrideSet; single-threaded, bounded by the distinct keys ever seen.
     std::unordered_set<VertexLayout> m_warnedMissingOverrideLayouts;
     std::unordered_set<PipelineHandle> m_warnedStaleOverrideSetHandles;
+    rg::BoundedOnceSet<64> m_warnedUnresolvedMaterials; // One warning per unresolved material handle.
 };
 
 } // namespace gte

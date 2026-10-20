@@ -131,14 +131,19 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
             alphaTested = gltf && material.alphaMode == AlphaMode::Mask;
             const MaterialParams params = gltf
                 ? MakeMaterialParams(material.diffuse.x, material.diffuse.y, material.diffuse.z, material.diffuse.w,
-                      material.alphaCutoff)
+                      material.alphaCutoff, material.metallicFactor, material.roughnessFactor, material.normalScale,
+                      material.occlusionStrength)
                 : MaterialParams{};
+            MaterialTextureSet set;
             if (material.textureIndex >= 0 && static_cast<std::size_t>(material.textureIndex) < materials.textures.size()) {
-                const Guid& textureGuid = materials.textures[static_cast<std::size_t>(material.textureIndex)].guid;
-                texture = m_materialTextureCache.Resolve(renderSystem, renderer, textureDatabase, textureGuid, params);
+                set.baseColor = materials.textures[static_cast<std::size_t>(material.textureIndex)].guid;
             }
-            if (!texture.IsValid() && gltf) {
-                texture = m_materialTextureCache.ResolveSolidColor(renderSystem, renderer, params);
+            if (set.baseColor.IsValid() || gltf) {
+                texture = m_materialTextureCache.Resolve(renderSystem, renderer, textureDatabase, set, params);
+            }
+            if (!texture.IsValid() && gltf && set.baseColor.IsValid()) {
+                set.baseColor = Guid::Invalid(); // Base image unavailable: flat factor color.
+                texture = m_materialTextureCache.Resolve(renderSystem, renderer, textureDatabase, set, params);
             }
         }
 
