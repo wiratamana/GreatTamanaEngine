@@ -26,9 +26,8 @@ struct ShadowViewState {
     ShadowViewSnapshot snapshot;
 };
 
-// Cascaded shadow maps fitted to the camera: PreOpaque cascade depth passes, a PostOpaque depth-range
-// reduction and mask pass, and a PostComposite pass that only draws debug views when materials apply shadows.
-// Cascade depth maps are published to scene slots 0..3.
+// Cascaded shadow maps fitted to the camera, published to scene slots 0..3.
+// The mask and composite passes run only for debug views or when materials do not apply shadows.
 class ShadowFeature final : public fx::Feature {
 public:
     explicit ShadowFeature(fx::FeatureHost& host);

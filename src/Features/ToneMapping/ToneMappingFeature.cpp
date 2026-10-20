@@ -75,8 +75,12 @@ void ToneMappingFeature::CompositePass(fx::CompositeFrame& f)
         finish(ToneMappingFrameStatus::ShadersNotReady);
         return;
     }
+    if (!f.Blit("ToneMapping.CopyToPrivateTarget", output, f.PrivateTarget(), fx::BlitFilter::Linear)) {
+        f.ReportOnce("ToneMapping.CopyToPrivateTarget was refused");
+        finish(ToneMappingFrameStatus::ShadersNotReady);
+        return;
+    }
     f.ExposeAsViewOutput(m_output, output);
-    f.Blit("ToneMapping.CopyToPrivateTarget", output, f.PrivateTarget(), fx::BlitFilter::Linear);
     finish(ToneMappingFrameStatus::Ok);
 }
 

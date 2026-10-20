@@ -8,7 +8,7 @@
 
 namespace gte::tonemap {
 
-// CPU reference of ToneMapping.comp. Every function maps NaN and infinity to 0.
+// CPU reference of ToneMapping.comp. Only ToneMapLinearToDisplay maps non-finite input to 0.
 
 enum class ToneMapMode : std::uint8_t { Clamp, Aces, PbrNeutral };
 

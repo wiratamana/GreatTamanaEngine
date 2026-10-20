@@ -40,7 +40,6 @@ void AddSceneSlotRules(std::vector<KnownRiskBlackboardKeyRule>& rules, const std
     }
 }
 
-
 } // namespace
 
 const std::vector<KnownRiskBlackboardKeyRule>& KnownRiskBlackboardKeyRules()

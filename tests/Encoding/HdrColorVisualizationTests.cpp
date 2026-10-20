@@ -103,11 +103,6 @@ TEST(HdrColorVisualizationTest, DebugScaledMatchesTheFixedExposureReinhardFormul
         }
         EXPECT_EQ(out[i * 4 + 3], 255);
     }
-
-    const std::vector<std::uint8_t> raw = Pack(texels);
-    std::vector<std::uint8_t> viaWrapper(texels.size() * 4, 0);
-    ASSERT_TRUE(ConvertHdrRgba16fToRgba8(raw.data(), PixelFormat::RGBA16_Float, 2, 1, viaWrapper.data()));
-    EXPECT_EQ(viaWrapper, out);
 }
 
 TEST(HdrColorVisualizationTest, NonHalfFloatFormatIsRejectedWithoutWriting)

@@ -22,10 +22,6 @@ HdrVisualization HdrVisualizationForTextureName(std::string_view name) noexcept;
 bool ConvertRgba16fToRgba8(const std::uint8_t* rawRgba16f, PixelFormat colorFormat, int width, int height,
     std::uint8_t* outRgba8, HdrVisualization mode);
 
-// DebugScaled conversion: Reinhard after a fixed exposure so values above 1.0 stay distinguishable.
-bool ConvertHdrRgba16fToRgba8(
-    const std::uint8_t* rawRgba16f, PixelFormat colorFormat, int width, int height, std::uint8_t* outRgba8);
-
 // IEEE 754 binary16 to binary32: zero, subnormals, normals, infinities and NaN, no F16C needed.
 float DecodeHalfFloat(std::uint16_t half) noexcept;
 

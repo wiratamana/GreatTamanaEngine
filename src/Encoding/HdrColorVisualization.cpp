@@ -142,10 +142,4 @@ bool ConvertRgba16fToRgba8(const std::uint8_t* rawRgba16f, PixelFormat colorForm
     return true;
 }
 
-bool ConvertHdrRgba16fToRgba8(
-    const std::uint8_t* rawRgba16f, PixelFormat colorFormat, int width, int height, std::uint8_t* outRgba8)
-{
-    return ConvertRgba16fToRgba8(rawRgba16f, colorFormat, width, height, outRgba8, HdrVisualization::DebugScaled);
-}
-
 } // namespace gte::Encoding

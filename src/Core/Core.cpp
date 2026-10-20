@@ -1070,7 +1070,15 @@ void Core::BuildFrame()
     RenderTexture* sceneTarget = (m_editorLayer != nullptr) ? m_editorLayer->SceneViewTarget() : nullptr;
     m_directGameTargetUsedThisFrame = false;
     if (gameTarget == nullptr && sceneTarget == nullptr) {
-        gameTarget = AcquireDirectGameTarget();
+        try {
+            gameTarget = AcquireDirectGameTarget();
+        } catch (const std::exception& e) {
+            const std::string failure = std::string("Core: failed to acquire the direct Game target: ") + e.what();
+            if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
+                GTE_LOG_ERROR("Core", failure);
+            }
+            gameTarget = nullptr;
+        }
         m_directGameTargetUsedThisFrame = (gameTarget != nullptr);
     }
     m_gameTargetThisFrame = gameTarget;

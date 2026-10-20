@@ -64,9 +64,8 @@ struct SceneLightingUniformData {
 static_assert(sizeof(SceneLightingUniformData) == 448);
 static_assert(std::is_trivially_copyable_v<SceneLightingUniformData>);
 
-// Packs the resolved sun, the settings and (optionally) the sun cascade data.
-// A non-finite direction becomes straight up. No receiver, or a receiver with zero
-// material strength, leaves every shadow field at zero.
+// Packs the sun, settings and optional cascade data; a non-finite direction becomes up.
+// No receiver, or zero material strength, leaves every shadow field at zero.
 inline SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirectionalLight& sun,
     const SceneLightingSettings& settings = {}, const SunShadowReceiver* receiver = nullptr) noexcept
 {

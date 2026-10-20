@@ -40,6 +40,12 @@ bool HasNoPixels(const fx::View& view) noexcept
     return view.extent.width == 0 || view.extent.height == 0;
 }
 
+// Materials apply the shadow themselves; the mask and composite passes run only for the debug views.
+bool ShadowDebugViewNeeded(const ShadowSettings& settings) noexcept
+{
+    return !settings.applyInMaterials || settings.debugView != ShadowDebugView::Off;
+}
+
 // Memory of the cascade maps that exist for the frame's view.
 std::uint64_t MapBytes(const ShadowViewState& view, const fx::Frame& f) noexcept
 {
@@ -245,7 +251,7 @@ void ShadowFeature::MaskPass(fx::PostOpaqueFrame& f)
     const auto finish = [&](ShadowFrameStatus status) { view.snapshot.maskStatus = status; };
 
     const std::optional<ShadowMapData> map = m_mapData.Fetch(f);
-    if (!map || HasNoPixels(f.View()) || !f.View().invViewProjectionValid) {
+    if (!ShadowDebugViewNeeded(m_settings) || !map || HasNoPixels(f.View()) || !f.View().invViewProjectionValid) {
         finish(ShadowFrameStatus::NotRendered);
         return;
     }
@@ -284,8 +290,7 @@ void ShadowFeature::MaskPass(fx::PostOpaqueFrame& f)
 void ShadowFeature::CompositePass(fx::CompositeFrame& f)
 {
     const ShadowSettings& cfg = m_settings;
-    // Materials apply the shadow themselves; only the debug views are drawn here.
-    if (cfg.applyInMaterials && cfg.debugView == ShadowDebugView::Off) {
+    if (!ShadowDebugViewNeeded(cfg)) {
         return;
     }
     const std::optional<fx::Texture> mask = m_maskData.Fetch(f);

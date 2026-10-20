@@ -2,7 +2,6 @@
 
 // Application-layer render graph passes shared by the offscreen and present graphs.
 
-#include "../Math/Mat4.h"
 // Full include: DeclareGpuSkinningReads() takes the nested PassBuilder type.
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
@@ -10,7 +9,6 @@
 #include "../Core/FrameDebuggerCaptureRecorder.h"
 
 #include <array>
-#include <cstddef>
 #include <functional>
 #include <vector>
 

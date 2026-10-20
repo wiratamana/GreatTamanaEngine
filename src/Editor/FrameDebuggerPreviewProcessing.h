@@ -21,8 +21,7 @@ enum class FrameDebuggerPreviewChannel {
     A,
 };
 
-// Per-pixel preview transform: optional tone mapping of linear scene color (rgb only), then levels remap
-// (clamped to [0, 1]), then channel isolation. An isolated channel is replicated over RGB with alpha 1.
+// Per-pixel preview: optional tone mapping (rgb), levels remap to [0, 1], then channel isolation.
 // The compute shader implements the same formula.
 std::array<float, 4> ApplyFrameDebuggerPreviewTransform(std::array<float, 4> srcRgba, FrameDebuggerPreviewChannel channel,
     float levelsBlack, float levelsWhite, bool sceneReferred = false) noexcept;
@@ -36,9 +35,7 @@ public:
     FrameDebuggerPreviewRenderer(const FrameDebuggerPreviewRenderer&) = delete;
     FrameDebuggerPreviewRenderer& operator=(const FrameDebuggerPreviewRenderer&) = delete;
 
-    // `source` must be in the shader-read state, as retained history textures always are. The scratch texture
-    // is recreated when the source size changes; the returned reference stays valid until the next call.
-    // `sceneReferred` marks the source as linear scene color to be tone mapped for display.
+    // `source` must be shader-read; `sceneReferred` tone maps linear scene color. The result is valid until the next call.
     const Texture2D& RenderPreview(Renderer& renderer, const RenderTexture& source, FrameDebuggerPreviewChannel channel,
         float levelsBlack, float levelsWhite, bool sceneReferred);
 
