@@ -24,7 +24,6 @@ FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device,
     , m_presentQueue(presentQueue)
     , m_graphicsQueueFamily(graphicsQueueFamily)
     , m_vulkanDevice(&vulkanDevice)
-    , m_allocator(allocator)
     , m_depthFormat(depthFormat)
     , m_memoryTracker(std::move(memoryTracker))
     , m_gpuTiming(std::move(gpuTiming))
@@ -36,7 +35,6 @@ FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device,
     m_pendingHeight = height;
 
     CreateCommandObjects();
-    // m_depthBuffers are created lazily (EnsureDepthBuffersForSwapchain()), not here.
 }
 
 FramePresenter::~FramePresenter()
@@ -50,7 +48,7 @@ void FramePresenter::Destroy() noexcept
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
         m_commandPool = VK_NULL_HANDLE;
     }
-    // The depth buffers, frame sync and swapchain clean themselves up in reverse declaration order.
+    // Frame sync and swapchain clean themselves up in reverse declaration order.
 }
 
 void FramePresenter::CreateCommandObjects()
@@ -86,40 +84,6 @@ void FramePresenter::CreateCommandObjects()
     }
 }
 
-void FramePresenter::CreateDepthBuffers()
-{
-    // Named so they show up in the Memory panel. debugName needs static storage, so a fixed table covers the
-    // realistic image counts; an index beyond it stays unnamed.
-    static const char* kSwapchainDepthNames[] = {
-        "SwapchainDepth[0]",
-        "SwapchainDepth[1]",
-        "SwapchainDepth[2]",
-        "SwapchainDepth[3]",
-        "SwapchainDepth[4]",
-        "SwapchainDepth[5]",
-        "SwapchainDepth[6]",
-        "SwapchainDepth[7]",
-    };
-    constexpr std::size_t kNamedCount = sizeof(kSwapchainDepthNames) / sizeof(kSwapchainDepthNames[0]);
-
-    const VkExtent2D extent = m_swapchain.Extent();
-    m_depthBuffers.clear();
-    m_depthBuffers.reserve(m_swapchain.ImageCount());
-    for (std::uint32_t i = 0; i < m_swapchain.ImageCount(); ++i) {
-        const char* debugName = (i < kNamedCount) ? kSwapchainDepthNames[i] : nullptr;
-        m_depthBuffers.emplace_back(m_allocator, m_memoryTracker, m_device, static_cast<int>(extent.width),
-            static_cast<int>(extent.height), FromVkFormat(m_depthFormat), debugName);
-    }
-}
-
-void FramePresenter::EnsureDepthBuffersForSwapchain()
-{
-    // Created lazily, only on a frame that needs swapchain depth.
-    if (m_depthBuffers.empty()) {
-        CreateDepthBuffers();
-    }
-}
-
 void FramePresenter::OnResize(int width, int height)
 {
     m_pendingWidth = width;
@@ -144,12 +108,6 @@ void FramePresenter::RecreateSwapchain()
     // A real resize invalidates every readback buffer and any pending capture; this point is past the
     // minimized-window early return, so it only fires for a resize that happened.
     m_swapchainCapture.NotifySwapchainRecreated();
-
-    // New size (and maybe image count) needs new depth images. Rebuilt only if they already existed.
-    if (!m_depthBuffers.empty()) {
-        CreateDepthBuffers();
-    }
-
 
     m_resizeRequested = false;
 }
@@ -263,7 +221,7 @@ void FramePresenter::EndOffscreenRecording()
     vkWaitForFences(m_device, 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
 }
 
-bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwapchainDepth,
+bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph,
     const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build)
 {
     if (m_pendingWidth <= 0 || m_pendingHeight <= 0) {
@@ -299,10 +257,6 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
 
     vkResetFences(m_device, 1, &fence);
 
-    if (needsSwapchainDepth) {
-        EnsureDepthBuffersForSwapchain();
-    }
-
     const VkCommandBuffer cmd = m_commandBuffers[m_currentFrame];
     vkResetCommandBuffer(cmd, 0);
 
@@ -317,14 +271,6 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwa
     target.imageView = m_swapchain.ImageView(imageIndex);
     target.extent = m_swapchain.Extent();
     target.format = m_swapchain.ImageFormat();
-    if (needsSwapchainDepth) {
-        // Indexed by image index (not frame slot), which is what makes this safe without extra sync.
-        const DepthBuffer& depthBuffer = m_depthBuffers[imageIndex];
-        target.depthImage = depthBuffer.Image();
-        target.depthImageView = depthBuffer.View();
-        target.depthFormat = depthBuffer.NativeFormat();
-        target.depthHasStencil = depthBuffer.HasStencilComponent();
-    }
 
     // A dependency cycle in Compile() would throw; it is not caught here, the caller handles it.
     graph.Execute(rg::RecordingAccess::Wrap(cmd), rg::ExecuteTimingMode::PipelinedDeferredReadback,

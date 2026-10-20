@@ -16,6 +16,7 @@ engine. For the short, current-state summary, see the main
 - Material shaders sample the four cascade depth maps (scene slots 0..3, set 1 bindings 0..3) and remove only the sun term in
   shadow; ambient stays. First production user of `DeclareSceneSlot`. See [shadow-mapping.md](conventions/shadow-mapping.md).
 - `ShadowSettings::applyInMaterials` (default true); `Shadow.Composite` then draws debug views only. `strength` default 1.0.
+- The mask and composite passes run only for debug views or when `applyInMaterials` is off.
 - Scene uniform block limit 128 -> 512 bytes; `SceneLightingUniformData` is 448 bytes and carries the cascade data from the
   `SunShadowReceiver`. Vertex shaders output the world position. Double-sided materials flip the normal on back faces.
 - `MeshPreview.frag` compiles without cascade samplers (`DIRECTIONAL_LIGHTING_NO_SHADOWS`).

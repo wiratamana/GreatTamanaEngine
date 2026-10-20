@@ -3,6 +3,7 @@
 #include "../Core/ViewBackgroundReplayKey.h"
 #include "../Core/FeatureKit/ChannelKey.h"
 #include "../Core/FeatureKit/SceneSlotKey.h"
+#include "../Game/Lighting/SunShadowReceiver.h"
 
 namespace gte {
 
@@ -52,8 +53,7 @@ const std::vector<KnownRiskBlackboardKeyRule>& KnownRiskBlackboardKeyRules()
         AddChannelRules(rules, "Shadow", "Map", "Shadow.Cascade0.Draw");
         AddChannelRules(rules, "Shadow", "Receiver", "Shadow.Cascade0.Draw");
         AddChannelRules(rules, "Shadow", "Mask", "Shadow.Mask.Dispatch");
-        // Cascade depth maps are published to scene slots 0..3 together with the Map channel.
-        for (std::uint32_t slot = 0; slot < 4; ++slot) {
+        for (std::uint32_t slot = 0; slot < kSunShadowReceiverMaxCascades; ++slot) {
             AddSceneSlotRules(rules, "Shadow.Cascade" + std::to_string(slot) + ".Slot", slot, "Shadow.Cascade0.Draw");
         }
         // Published only when both passes ran, so either toggle gates it.

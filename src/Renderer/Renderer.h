@@ -89,7 +89,7 @@ public:
     void EndOffscreenRenderGraphRecording();
 
     // Executes swapchain presentation passes using the render graph.
-    std::optional<DrawStats> PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwapchainDepth,
+    std::optional<DrawStats> PresentViaRenderGraph(rg::RenderGraph& graph,
         const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build);
 
     // Formats used by the current swapchain and depth buffer.

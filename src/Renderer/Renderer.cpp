@@ -166,10 +166,10 @@ void Renderer::EndOffscreenRenderGraphRecording()
     m_presenter.EndOffscreenRecording();
 }
 
-std::optional<DrawStats> Renderer::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwapchainDepth,
+std::optional<DrawStats> Renderer::PresentViaRenderGraph(rg::RenderGraph& graph,
     const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build)
 {
-    const bool ran = m_presenter.PresentViaRenderGraph(graph, needsSwapchainDepth, build);
+    const bool ran = m_presenter.PresentViaRenderGraph(graph, build);
     if (!ran) {
         return std::nullopt;
     }

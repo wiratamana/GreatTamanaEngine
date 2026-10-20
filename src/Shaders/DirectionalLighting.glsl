@@ -167,13 +167,7 @@ vec3 ShadeDirectionalLinear(vec3 baseColorLinear, vec3 worldNormal, bool useShad
     return baseColorLinear * (ambient + sunIlluminance * (ndotl * kDirectScale * sunVisibility));
 }
 
-// Scene shaders output linear HDR: no exposure, no curve, no sRGB encode. No shadows.
-vec3 ApplyDirectionalLight(vec3 baseColorLinear, vec3 worldNormal)
-{
-    return ShadeDirectionalLinear(baseColorLinear, worldNormal, false, vec3(0.0));
-}
-
-// Same as ApplyDirectionalLight, with sun cascade shadows at worldPosition.
+// Linear HDR sun and ambient lighting with cascade shadows at worldPosition.
 vec3 ApplyDirectionalLightShadowed(vec3 baseColorLinear, vec3 worldNormal, vec3 worldPosition)
 {
     return ShadeDirectionalLinear(baseColorLinear, worldNormal, true, worldPosition);

@@ -1350,7 +1350,7 @@ void Core::Present()
 
     std::optional<DrawStats> presentStats;
     try {
-        presentStats = m_renderer.PresentViaRenderGraph(m_renderGraph, /*needsSwapchainDepth=*/false,
+        presentStats = m_renderer.PresentViaRenderGraph(m_renderGraph,
             [&](rg::RenderGraphBuilder& b, rg::TextureHandle swapchainImage) {
                 m_swapchainImageThisFrame = swapchainImage;
                 m_recordImGuiThisFrame = m_presentImGuiRecorder;
