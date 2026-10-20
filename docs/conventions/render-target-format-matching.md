@@ -12,33 +12,30 @@ depending on the driver instead of failing loudly. Follow these rules
 whenever adding a real graphics pipeline or a new render target:
 
 - **`Renderer::ColorFormat()`** (`src/Renderer/Renderer.h/.cpp`) is the
-  single source of truth for "the" color format this engine renders with -
-  whatever `VulkanSwapchain` actually negotiated at runtime (see
+  swapchain format - whatever `VulkanSwapchain` actually negotiated at runtime (see
   `ChooseSurfaceFormat` in `VulkanSwapchain.cpp`), which can legitimately
   differ across GPUs/drivers. Never hardcode a `VkFormat` literal (e.g.
   `VK_FORMAT_B8G8R8A8_UNORM`) into a pipeline's
-  `VkPipelineRenderingCreateInfo` or into a `RenderTexture` you expect to
-  share a pipeline with the swapchain - read it from `Renderer::ColorFormat()`
-  instead.
+  `VkPipelineRenderingCreateInfo` - read it from the renderer instead.
+  Only what really draws into the swapchain (ImGui, the final blit) and the mesh
+  preview renderer (its own `RenderTexture` and pipeline) use it.
+- **`Renderer::ScenePixelFormat()`** is the one format of scene color: RGBA16_Float.
+  The Game and Scene view targets, the direct Game target, every scene geometry
+  pipeline (the 7-argument `Renderer::CreatePipeline()`), the scene grid and the
+  render-feature compositor targets are built against it. Scene color is linear HDR;
+  the ToneMapping feature turns it into display values. This is a deliberately
+  different format from the swapchain, so a scene pipeline must never be recorded
+  into a swapchain-format target.
 - **`Renderer::CreateRenderTexture()`'s `format` parameter defaults to
-  `VK_FORMAT_UNDEFINED`**, meaning "match `ColorFormat()` exactly" (resolved
-  internally in `Renderer.cpp`, not baked into the default argument as a
-  literal) - this is what lets a single pipeline built once against
-  `ColorFormat()` legally draw into either the swapchain or a default-format
-  `RenderTexture` (e.g. the Editor's "Game" view). Only pass an explicit
-  format when a target is deliberately different (e.g. a future HDR
-  intermediate or a shadow map) - that target needs its own dedicated
-  pipeline variant built for its exact format, never the default pipeline.
+  `Undefined`**, meaning "match `ColorFormat()` exactly" (resolved
+  internally in `Renderer.cpp`). View targets created through
+  `Core::CreateRenderView` resolve `Undefined` to `ScenePixelFormat()` instead.
+  Pass an explicit format when a target is deliberately different (e.g. a
+  shadow map) - that target needs its own dedicated pipeline variant built for its exact format.
 - **`FrameRecorder::RecordFrame()` asserts (debug builds only) that
-  every target it's given has `target.format == ColorFormat()`.** This is
-  the one recording path shared by `Present()` and `RenderOffscreen()`, so
-  it's the natural place a future pipeline-bound draw call (recorded via
-  `recordExtra`) runs - the assert exists to catch a format mismatch loudly,
-  right there, instead of a confusing validation-layer warning (or silent
-  misrendering on a driver that happens to tolerate it). A deliberately
-  different-format target (see above) needs its own recording path rather
-  than going through this assert unmodified - don't weaken or delete the
-  assert to make a special case fit.
+  every target it's given has `target.format == ColorFormat()`.** It serves
+  the swapchain `Present()` and `RenderOffscreen()` (used by the mesh preview).
+  Scene views do not go through it. Don't weaken the assert to fit a special case.
 - **This same discipline applies to DEPTH, not just color.**
   `Renderer::DepthFormat()` (`VulkanDevice::PickDepthFormat()`, queried once
   from the physical device rather than hardcoded) is depth's equivalent of

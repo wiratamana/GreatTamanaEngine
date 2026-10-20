@@ -48,7 +48,7 @@ is a side effect. Ask `f.PassEnabled("PassName")` first, and return early when i
 if (!f.PassEnabled("AtmosphereAerialPerspectiveCompositePass")) {
     return;
 }
-const fx::Texture output = m_composited.Acquire(f, f.Extent(), PixelFormat::RGBA8_UNorm);
+const fx::Texture output = m_composited.Acquire(f, f.Extent(), PixelFormat::RGBA16_Float);
 ```
 
 A callback with several separately toggled passes lists all their names in its

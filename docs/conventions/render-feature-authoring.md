@@ -37,7 +37,7 @@ in that frame. Every verb also checks its own pass name and declares nothing whi
 | `Blit("Pass.Name", src, dst, filter)` | Scaled copy. |
 | `ExposeAsViewOutput(viewOutput, texture)` | Marks the texture `viewOutput.Acquire()` returned as this view's output for the editor and HTTP. Call it only after the pass that writes it was declared. |
 | `Keep(texture)` | Keeps an output that nothing reads. |
-| `PublishToScene(slot, texture)`, `SetSceneUniforms(value)` | Feeds material shaders. The uniform block is at most 128 bytes (compile-time check). |
+| `PublishToScene(slot, texture)`, `SetSceneUniforms(value)` | Feeds material shaders. The uniform block is at most 512 bytes (compile-time check). |
 | `FrameIndex()` | Frame counter, the same for both view scopes of one frame. Use it for "N frames ago", never time. |
 | `DeltaSeconds()` | Real frame time in seconds (`Time::UnscaledDeltaTime()`), clamped to 0.25 s; 0 without an engine context. Independent of pause. Never divide by it. Turn a per-second rate into a per-frame step with `1 - exp(-dt / tau)`. |
 | `ShaderReady(computeShader)` | True when the shader is built (builds it now if needed). Check it before declaring passes that only make sense together with a dispatch. |
@@ -54,7 +54,7 @@ chain declares nothing and logs once.
 | `fx::PersistentTarget{base}` | Color texture that outlives the frame; name is `<base>.GameView` or `<base>.SceneView`, owner is the feature name. A resize applies one frame late. `Acquire` returns an invalid texture when refused. |
 | `fx::OffscreenTarget{base}` | Render view (a depth map, or color plus depth), imported every frame. `Acquire` with another size resizes it (the GPU goes idle once); a failed create or resize backs off (120 frames, doubling) and a different size retries at once. A resize is refused while the view runs pipelined. A change between depth-only and color logs one error. `Trim(frame)` shrinks an existing target to 4x4 to free memory; the next `Acquire` of the full size grows it back. |
 | `fx::PersistentVolume{base, size, format}` | 3D texture (storage and sampled) per view scope, imported every frame and kept alive. Its contents carry over only if a pass rewrites them. |
-| `fx::ViewOutput{suffix}` | Engine-owned texture per view named `GameView<suffix>` / `SceneView<suffix>`, resized on demand (the GPU is waited for first). It is what the editor panel and the HTTP endpoints show once exposed with `ExposeAsViewOutput`. |
+| `fx::ViewOutput{suffix}` | Engine-owned texture per view named `GameView<suffix>` / `SceneView<suffix>`, resized on demand (the GPU is waited for first). It is what the editor panel and the HTTP endpoints show once exposed with `ExposeAsViewOutput`. A later exposure of the same view replaces an earlier one. |
 | `fx::GpuParams<T>` | CPU-written parameter block; its size is fixed by the first use. |
 | `fx::GpuReadback<T>` | Small GPU-written value (`T` trivially copyable, multiple of 4 bytes, at most 256) the CPU reads two frames later. Ring of 3 cells per view. Declare `f.ClearReadback(name, r, fill)`, a `Compute(...).BindOutput("var", r)` pass, then `f.CopyReadbackToHost(name, r)`. `r.Latest(f)` returns the value recorded two frames ago and its frame, or nothing (first frames, a pass toggled off, a refused allocation). Declare all three passes together or none. |
 | `fx::ComputeShader{"Name"}`, `fx::FullscreenShader{"Name"}` | Load `shaders/<Name>.comp.spv`, or `.vert` and `.frag`. Built lazily; a failed build retries on a cooldown and never throws. |
@@ -72,7 +72,8 @@ the maps through a `Channel`. `Shadow.DepthRange` (`PostOpaque`) measures the vi
 (`PostComposite`) is a `Fullscreen` into the private target. `ShadowDebugEndpoint` exposes the settings over HTTP.
 
 `src/Features/SceneLighting/SceneLightingFeature.cpp`: one `PreOpaque` registration with `Gate::Always()` that writes the
-sun into the scene uniform block (`SetSceneUniforms`) for every view. It declares no pass.
+sun, the ambient and the cascade shadow data (read from the Shadow `Receiver` channel with `fx::ChannelReader`) into the
+scene uniform block (`SetSceneUniforms`) for every view. It declares no pass.
 
 `src/Features/Atmosphere/AtmosphereFeature.cpp`: four registrations.
 
@@ -83,6 +84,19 @@ sun into the scene uniform block (`SetSceneUniforms`) for every view. It declare
 - `DrawSkyBackground` (`PostOpaque`): `ViewBackground` into the view color where depth is untouched.
 - `AtmosphereComposite` (`PostComposite`): a `Compute` into a `ViewOutput`, `ExposeAsViewOutput`, then a `Blit` to the
   private target.
+
+`src/Features/ToneMapping/ToneMappingFeature.cpp`: the final `PostComposite` feature (priority +1000, `fx::Blend::Replace`),
+the display transform of the frame. `Setup()` registers a `PreOpaque` frame stamp (`Gate::Always()`) and the composite.
+The composite reads `f.SceneColor()` (the running linear HDR result of the earlier features), runs one `Compute`
+(`ToneMapping.comp`: exposure, saturation, curve, sRGB encode, dither) into a `ViewOutput` (RGBA8_UNorm,
+`GameViewToneMapped` / `SceneViewToneMapped`), calls `ExposeAsViewOutput` and `Blit`s the result into the private target.
+`Replace` makes the compositor write it over the view target. The last exposure of a view wins. If a pass is toggled off,
+nothing is declared and the view keeps raw linear color. The CPU reference is `src/Math/ToneMapCurves.h`; a test keeps its
+constants equal to the shader text. Use this feature as the template for a screen-space effect that must run after all others.
+
+`DeclareSceneSlot` first production user: the Shadow feature declares four `Depth2D` slots with preferred indices 0..3 and
+publishes each cascade map with `PublishToScene`. Material shaders read them at `layout(set = 1, binding = c)`. The kit sets the
+depth flag from the slot kind; never set it by hand.
 
 ## Adding a verb
 

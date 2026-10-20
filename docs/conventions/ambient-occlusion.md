@@ -15,8 +15,8 @@ per stage. The CPU oracle is `GtaoMath.h/.cpp`; the shaders mirror it.
   arc). The sample radius in pixels follows the view depth and is capped at 192 px.
 - **Denoise.** A bilateral spatial filter (depth-aware) and a temporal filter. The history is reprojected with the previous
   view-projection, rejected on depth gaps, camera cuts and size changes, and blended by coverage.
-- **Composite.** The AO multiplies the scene color after the scene is composed. With `applyInLinearSpace` the multiply is
-  done in linear space (sRGB decode, multiply, encode). The result is `color * mix(1, ao, strength)`.
+- **Composite.** The AO multiplies the linear scene color after the scene is composed. The result is
+  `color * mix(1, ao, strength)`. There is no sRGB path: tone mapping runs after this pass.
 
 ## Passes and textures
 
@@ -59,7 +59,6 @@ the scene file. A NaN or infinite float is replaced by the default.
 | `temporal` | true | history blend and per-frame noise rotation |
 | `historyWeight` | 0.9 | 0..0.98 |
 | `depthSigma` | 0.03 | 0.001..0.5 relative depth tolerance |
-| `applyInLinearSpace` | true | false multiplies the encoded color |
 | `debugView` | Off | `Off`, `AoOnly` |
 
 ## HTTP recipe
@@ -92,7 +91,7 @@ that names the key; nothing is applied. `reset_defaults` takes no arguments.
 - There is no depth mip chain. Large radii on close surfaces are capped at 192 px and lose detail.
 - Transparent surfaces write no depth. The composite darkens them with the AO of the opaque surface behind them. They do not occlude anything.
 - Perspective cameras only. An orthographic or skewed camera gives status `NoValidCamera`.
-- The target is 8 bit. Strong AO on dark areas can band.
+- The composite target is RGBA16F linear scene color, so there is no banding from the AO itself. Banding is handled by the ToneMapping dither.
 - A size or divisor change drops the history; it is used again after a few stable frames.
 - A target resize that is refused (for example while a view runs in the pipelined regime) is logged as an error. The old-size
   texture stays in use, the status stays `Ok`, and the AO is stretched at the lower and right edges (shaders clamp to the texture size).

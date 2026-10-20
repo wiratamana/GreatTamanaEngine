@@ -20,7 +20,7 @@ inline constexpr const char* kSceneLightingFeatureName = "SceneLighting";
 struct SceneLightingSettings {
     float skyAmbientR = 1.26f, skyAmbientG = 1.31f, skyAmbientB = 1.40f;
     float groundAmbientR = 0.66f, groundAmbientG = 0.57f, groundAmbientB = 0.46f;
-    float ambientIntensity = 1.0f;
+    float ambientIntensity = 0.35f;
 };
 
 // Clamps every value; a non-finite value becomes its default.

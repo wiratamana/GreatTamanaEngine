@@ -89,7 +89,7 @@ Consumers (R = rewritten on the pass verbs, M = moved into `src/Renderer` behind
 | --- | --- | --- |
 | GPU-driven batch buffers (`GpuDrivenBatchCache`) | M | Stays in `src/Renderer`; `Core.cpp` imports its `GpuBuffer` entries and holds no `VkBuffer`. |
 | GPU skinning buffers (`GpuSkinningRigCache`) | M | Buffers are `GpuBuffer`; the raw descriptor writes moved to `GpuSkinningPipelines::BindBuffers`. |
-| GPU skinning dispatch (`AddGpuSkinningPasses`, `Core.cpp`) | R | Still hand-records the dispatch; moves to `ComputePass` with the engine-system step. The request carries a `GpuBuffer`. |
+| GPU skinning dispatch (`GpuSkinning` provider, `Core.cpp`) | R | Still hand-records the dispatch; moves to `ComputePass` with the engine-system step. The request carries a `GpuBuffer`. |
 | Mesh vertex buffers | M | Meshes share vertex buffers; `Mesh::VertexBufferHandle()` replaces the raw handle for batch eligibility. |
 | `GpuParams` | R | Built on `GpuBuffer`. |
 | Editor mesh preview (`AssetPreviewMesh`, `BoneViewerWindow`) | M | `MeshPreviewRenderer` in `src/Renderer` owns the pipeline, dummy set, buffers and target behind a Vulkan-free interface. |

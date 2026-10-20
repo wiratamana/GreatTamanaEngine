@@ -18,8 +18,9 @@ in shader-read state at the end of the frame.
 
 ## Engine side
 
-`Core::ExposeViewOutput(ViewScope, RenderTexture&, name)` records the exposure for the frame.
-After the offscreen graph ran, `Core::BuildFrame` for every exposure:
+`Core::ExposeViewOutput(ViewScope, RenderTexture&, name)` records the exposure for the frame. A second call for the same view
+replaces the first.
+After the offscreen graph ran, `Core::BuildFrame` for every view's final exposure:
 
 1. finalizes the texture for sampling on the offscreen recording context;
 2. tells the graph its debug state is shader-read (`NotifyDebugTextureStateOverride`);
@@ -35,6 +36,11 @@ no snapshot lookup by name is needed.
 
 ## Rules
 
-- The texture name is the HTTP contract; the suffix keeps `GameViewComposited` and `SceneViewComposited` stable.
+- The last exposure of a view in a frame wins: a later `ExposeViewOutput` of the same view replaces an earlier one, with no error.
+  ToneMapping runs last in the PostComposite chain, so its `GameViewToneMapped` / `SceneViewToneMapped` (RGBA8_UNorm, final
+  display values) is the exposed "composited" texture of the view when the feature is on.
+- Only the final exposure of a view is finalized and handed to the editor layer. Each composite pass is still found by the
+  texture name it writes (Frame Debugger).
+- The texture name is the HTTP contract; the suffix keeps these names stable.
 - The engine owns exposure bookkeeping; the feature never sees a `RenderTexture`.
 - `Renderer::ResizeRenderTexture` is the only place that idles the GPU for a resize.

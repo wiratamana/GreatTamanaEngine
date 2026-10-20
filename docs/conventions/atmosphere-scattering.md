@@ -26,9 +26,10 @@ Toggle names (Render Graph panel and `/render_graph/set_pass_enabled`): `Atmosph
 `DrawSkyBackground`, `AtmosphereAerialPerspectiveCompositePass`, `AtmosphereComposite.CopyToPrivateTarget`.
 
 Sky background replay: the Frame Debugger replays the Game view sky background through `rg::FullscreenReplay` (see
-[frame-debugger.md](frame-debugger.md)). Composite output: the editor panels and the Frame Debugger show the exposed
-`ViewOutput` textures; `GET /get_texture?texture_name=GameViewComposited` captures one by name. `GET /get_game_view`
-captures the raw Game view target. When the composite pass is off, the raw view is shown.
+[frame-debugger.md](frame-debugger.md)). Composite output: the Frame Debugger shows the exposed
+`ViewOutput` textures; `GET /get_texture?texture_name=GameViewComposited` captures one by name (linear scene color, shown
+with the default tone map). `GET /get_game_view` captures the final Game view image (display values after ToneMapping).
+When the composite pass is off, the view still holds the scene color of the earlier passes.
 
 ## Rules
 
@@ -62,6 +63,11 @@ captures the raw Game view target. When the composite pass is off, the raw view 
 - **Aerial perspective is a full-screen post-process composite, never baked into a mesh shader.** `Mesh.frag`,
   `TexturedMesh.frag`, `MeshPreview.frag` and `SceneGrid.frag` stay free of atmosphere sampling. A feature that needs
   aerial perspective extends the composite pass.
+- **Everything the feature writes is linear HDR radiance.** The sky background writes `skyViewLut * skyIntensity` (setting
+  `AtmosphereSettings::skyIntensity`, default 6.0, a plain linear multiplier, clamped to stay finite in 16-bit float).
+  It applies no curve. The composite output (`m_composited`) is RGBA16F and computes `scene * transmittance + inScattering`
+  in linear space. The ToneMapping feature runs after it and owns exposure, the curve and the sRGB encode. The transmittance
+  LUT stays RGBA8_UNorm.
 - **The composite is a pass-through on pixels with no geometry** (`rawDepth >= 0.999999`, the clear depth). The sky
   background already finished those pixels. The decision is a CPU oracle in
   `AtmosphereAerialPerspectiveCompositeMath.h/.cpp` (`ShouldBypassAerialPerspectiveComposite`,
@@ -71,7 +77,7 @@ captures the raw Game view target. When the composite pass is off, the raw view 
   `aerialPerspectiveDepthExponent`, `aerialPerspectiveSamplesPerSlice`, `aerialPerspectiveScatteringExaggeration`.
   They reach the volume shader through `AtmosphereFrameUniforms` and the composite shader through push constants. They are
   live sliders in the "Atmosphere" panel (`Editor/AtmospherePanel.cpp`). Shipped defaults: 0.5 km max distance, depth
-  exponent 2.0, 8 samples per slice, scattering exaggeration 30.0 (real-Earth scale values are too faint at the
+  exponent 2.0, 8 samples per slice, scattering exaggeration 8.0 (real-Earth scale values are too faint at the
   distances the test content uses). The exaggeration multiplies only the extinction and scattering inside the volume
   shader; the shared oracle functions used by the LUTs are never scaled.
 - **`AtmosphereSettings` and `DirectionalLight` are not serialized.** `Scene/SceneTextFormat.h` stores only primitive and

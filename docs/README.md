@@ -81,7 +81,8 @@ than subsystem-specific):
   ID scope for any widget built inside a loop over runtime data, plus the
   proactive `ImGuiIdConflictTracker`/`ImGuiIdConflictGuard` detection layer.
 - **[Render Target Format Matching](conventions/render-target-format-matching.md)**
-  — always read `Renderer::ColorFormat()`/`DepthFormat()` rather than
+  — read `Renderer::ScenePixelFormat()` for scene color and
+  `Renderer::ColorFormat()`/`DepthFormat()` for the swapchain and depth rather than
   hardcoding a `VkFormat` literal.
 - **[Skeletal Animation Pose Resolution](conventions/skeletal-animation-pose-resolution.md)**
   — the per-frame MMD pose evaluation pipeline under `src/Animation/`
