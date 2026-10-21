@@ -938,7 +938,9 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     assert(false && "PostOpaque pass not tagged RenderPassEvent::AfterOpaques.");
                 }
 
-                if (FindScenePassCallbackMissingReadDeclaration(
+                // Kit features declare every sample through named bindings; only raw project callbacks can forget.
+                if (entry.owner == RenderFeatureOwner::Project
+                    && FindScenePassCallbackMissingReadDeclaration(
                         frame.builder, before, after, handles->colorHandle, handles->depthHandle)) {
                     GTE_LOG_WARNING("RenderFeatureCompositor",
                         "PostOpaque feature '" + entry.name + "' did not declare ReadTexture() usage on handles.");
@@ -982,7 +984,8 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     assert(false && "PostTransparent pass not tagged RenderPassEvent::AfterTransparents.");
                 }
 
-                if (FindScenePassCallbackMissingReadDeclaration(
+                if (entry.owner == RenderFeatureOwner::Project
+                    && FindScenePassCallbackMissingReadDeclaration(
                         frame.builder, before, after, handles->colorHandle, handles->depthHandle)) {
                     GTE_LOG_WARNING("RenderFeatureCompositor",
                         "PostTransparent feature '" + entry.name + "' did not declare ReadTexture() usage on handles.");

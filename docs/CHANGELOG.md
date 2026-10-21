@@ -24,6 +24,10 @@ engine. For the short, current-state summary, see the main
 - Shared GLSL: `SceneDepthConstants.glsl` (one clear-depth threshold), `InterleavedGradientNoise.glsl` (one noise definition) and
   `OrthoMapSetVisibility.glsl`.
 - The Atmosphere panel edits a copy and applies it through the sanitizer. Samples per slice go up to 16.
+- The volume pass takes no shadow taps for samples where the planet blocks the sun, the ray transmittance is below 1e-3 or the
+  sample lies beyond the last cascade split; `kAerialShadowTaps` is 2 (rotated per sample).
+- The compositor's "did not declare ReadTexture()" checks run only for raw project callbacks. Kit features declare every sample
+  through named bindings, so `VolumetricLight.Volume` and `ToneMapping` no longer warn or assert in Debug.
 
 ## Atmosphere sun and sky light (branch `feature/hdr-tonemap-impl`)
 

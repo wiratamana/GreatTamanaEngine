@@ -45,6 +45,21 @@ TEST(ShaderContractTest, AerialVolumeDefinesTheOrthoMacrosBeforeTheInclude)
         std::filesystem::path(GTE_TEST_ATMOSPHERE_SHADER_DIR) / "AtmosphereAerialPerspectiveVolume.comp");
 }
 
+TEST(ShaderContractTest, AerialVolumeSkipsShadowTapsThatCannotChangeTheImage)
+{
+    const std::string text =
+        ReadText(std::filesystem::path(GTE_TEST_ATMOSPHERE_SHADER_DIR) / "AtmosphereAerialPerspectiveVolume.comp");
+    ASSERT_FALSE(text.empty());
+    const std::size_t guard = text.find("planetVisibility > 0.0");
+    const std::size_t tap = text.find("OrthoMapSetVisibility(worldSample");
+    ASSERT_NE(guard, std::string::npos);
+    ASSERT_NE(tap, std::string::npos);
+    EXPECT_LT(guard, tap);
+    EXPECT_NE(text.find("kMinRayTransmittance"), std::string::npos);
+    EXPECT_NE(text.find("< lastSplitFar"), std::string::npos);
+    EXPECT_EQ(text.find("sceneDepth"), std::string::npos);
+}
+
 TEST(ShaderContractTest, VolumetricInjectDefinesTheOrthoMacrosBeforeTheInclude)
 {
     ExpectOrthoMacrosBeforeTheInclude(

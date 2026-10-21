@@ -47,8 +47,6 @@ layout(binding = 9) uniform sampler2D shadowDepth3;
 // RGB = light the shadows remove from the unshadowed sky along the column (never positive).
 layout(binding = 10, rgba16f) uniform writeonly image2D destinationShaftDelta;
 
-layout(binding = 11) uniform sampler2D sceneDepth;
-
 float OrthoMapDepthAt(int k, vec2 uv)
 {
     switch (k) {
@@ -74,6 +72,14 @@ float OrthoMapDepthAt(int k, vec2 uv)
 
 #include "OrthoMapSetVisibility.glsl"
 
+// Below this ray transmittance a sample cannot change the image.
+const float kMinRayTransmittance = 1e-3;
+
+float maxComponent(vec3 v)
+{
+    return max(v.x, max(v.y, v.z));
+}
+
 bool IsFiniteVec3(vec3 v)
 {
     return !(any(isnan(v)) || any(isinf(v)));
@@ -85,10 +91,6 @@ void main()
     ivec2 froxelXY = ivec2(gl_GlobalInvocationID.xy);
     if (froxelXY.x >= volumeSize.x || froxelXY.y >= volumeSize.y) {
         // The dispatch is rounded up to whole groups; extra threads do nothing.
-        return;
-    }
-    // Depth is never negative: the fetch only orders this pass after the scene depth.
-    if (texelFetch(sceneDepth, ivec2(0), 0).r < 0.0) {
         return;
     }
 
@@ -120,6 +122,7 @@ void main()
     vec3 eyeWorld = shadow.eyeAndUnitsPerKm.xyz;
     float worldUnitsPerKm = max(shadow.eyeAndUnitsPerKm.w, 1e-6);
     float shadowBlend = clamp(shadow.shadowParams.z, 0.0, 1.0);
+    float lastSplitFar = shadowed ? ORTHO_SPLIT_FAR(clamp(int(ORTHO_COUNT), 1, 4) - 1) : 0.0;
 
     ivec2 transmittanceLutSize = textureSize(transmittanceLut, 0);
     ivec2 multiScatteringLutSize = textureSize(multiScatteringLut, 0);
@@ -173,13 +176,19 @@ void main()
             float planetVisibility = PlanetVisibility(currentPositionKm, directionToSun, planetRadiusKm);
 
             // Mountain shadow on the sun path. The pattern is fixed per column, so nothing flickers.
+            // No taps where the sun is blocked by the planet, the ray is opaque, or beyond the last cascade.
             float sunVisibility = 1.0;
-            if (shadowed) {
+            bool tapped = false;
+            if (shadowed && planetVisibility > 0.0
+                && maxComponent(max(accumulatedTransmittance, shaftTransmittance)) > kMinRayTransmittance) {
                 vec3 worldSample = eyeWorld + viewDirection * (sampleDistanceKm * worldUnitsPerKm);
-                float rotation = 6.2831853
-                    * InterleavedGradientNoise(vec2(froxelXY)
-                            + vec2(float(slice) * 7.0 + float(sampleIndex) * 3.0, float(slice) * 13.0), 0u);
-                sunVisibility = mix(1.0, OrthoMapSetVisibility(worldSample, rotation), shadowBlend);
+                if (dot(worldSample - ORTHO_EYE, ORTHO_FORWARD) < lastSplitFar) {
+                    float rotation = 6.2831853
+                        * InterleavedGradientNoise(vec2(froxelXY)
+                                + vec2(float(slice) * 7.0 + float(sampleIndex) * 3.0, float(slice) * 13.0), 0u);
+                    sunVisibility = mix(1.0, OrthoMapSetVisibility(worldSample, rotation), shadowBlend);
+                    tapped = true;
+                }
             }
 
             vec3 phaseTimesScattering = scatterRayleigh * rayleighPhaseValue + scatterMie * miePhaseValue;
@@ -195,11 +204,13 @@ void main()
             accumulatedTransmittance *= exp(-extinctionCoefficient * segmentLengthKm);
 
             if (shadowed) {
-                // Light the shadows remove from the sky background, which is unexaggerated.
-                vec3 phasePhysical = scatterRayleighPhysical * rayleighPhaseValue + scatterMiePhysical * miePhaseValue;
-                vec3 removedSource = (sunVisibility - 1.0) * planetVisibility * transmittanceToSun * phasePhysical;
-                shaftDelta += shaftTransmittance
-                    * IntegrateInscattering(sunRadiance * removedSource, extinctionPhysical, segmentLengthKm);
+                if (tapped) {
+                    // Light the shadows remove from the sky background, which is unexaggerated.
+                    vec3 phasePhysical = scatterRayleighPhysical * rayleighPhaseValue + scatterMiePhysical * miePhaseValue;
+                    vec3 removedSource = (sunVisibility - 1.0) * planetVisibility * transmittanceToSun * phasePhysical;
+                    shaftDelta += shaftTransmittance
+                        * IntegrateInscattering(sunRadiance * removedSource, extinctionPhysical, segmentLengthKm);
+                }
                 shaftTransmittance *= exp(-extinctionPhysical * segmentLengthKm);
             }
         }

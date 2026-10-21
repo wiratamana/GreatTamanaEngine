@@ -48,7 +48,7 @@ When the composite pass is off, the view still holds the scene color of the earl
   (`AtmosphereParametersGpu`), `frame` (`AtmosphereFrameUniforms`, per view) and, in the aerial volume shader, `shadow`
   (`AerialShadowParamsGpu`, 384 bytes). Images and samplers keep their GLSL names: `transmittanceLutImage`,
   `multiScatteringLutImage`, `destinationImage`, `destinationVolume`, `destinationShaftDelta`, `transmittanceLut`,
-  `multiScatteringLut`, `shadowDepth0..3`, `sceneDepth`, `skyViewLut`, `sourceColor`, `sourceDepth`,
+  `multiScatteringLut`, `shadowDepth0..3`, `skyViewLut`, `sourceColor`, `sourceDepth`,
   `aerialPerspectiveVolume`, `aerialShaftDelta`. Rename a variable and the chain logs the valid names.
 - **`AtmosphereParametersGpu` and `AtmosphereFrameUniforms` are read-only storage buffers** (`layout(std430, ...)
   readonly buffer`), never a uniform block. Scene Services binding 8 (`src/Shaders/DirectionalLighting.glsl`)
@@ -100,7 +100,9 @@ When the composite pass is off, the view still holds the scene color of the earl
   `src/Shaders/OrthoMapSetVisibility.glsl` (one copy shared with `VolumetricLightInject.comp`; the includer defines the
   `ORTHO_*` macros first). In-scattering is shadowed by mountains. The multi-scattering LUT already holds sun shadowing and
   is not shadowed again. Air outside all cascades counts as lit. With no usable receiver the cascade count is 0 and no
-  shadow tap runs.
+  shadow tap runs. A sample also takes no taps (and adds no shaft delta) when the planet blocks the sun, when the ray
+  transmittance is below 1e-3, or when it lies beyond the last cascade split. Each tapped sample costs
+  `kAerialShadowTaps` (2) rotated depth taps per cascade looked up.
 - **The receiver is used only when it is safe.** `SunShadowReceiverUsable()` (`Game/Lighting/SunShadowReceiver.h`) must be
   true and `Dot(receiver.directionTowardSun, this frame's sun) >= 0.9999`. The state is `Used`, `Missing`, `Rejected` or
   `Mismatch` (`NotChecked` when the pass did not run). `Rejected` and `Mismatch` are reported once with `ReportOnce`.
@@ -109,9 +111,8 @@ When the composite pass is off, the view still holds the scene color of the earl
   composite applies it to sky pixels. The dispatch always writes it, so it is valid whenever the volume is.
 - **The pass publishes one record.** `AtmosphereAerialResult` (`AtmosphereFeature.h`: volume, shaft delta, max distance,
   depth exponent) goes out on the `AerialVolume` channel with a keep list, only after the dispatch was declared. The
-  composite takes max distance and depth exponent from it, never from `AtmosphereSettings`. The pass binds the scene depth
-  (`sceneDepth`) only so the `PostOpaque` callback declares a read of it. Each pass owns its own `GpuParams` object
-  (`skyFrameParams`, `aerialAtmosphereParams`, `aerialFrameParams`, `aerialShadowParams` per view).
+  composite takes max distance and depth exponent from it, never from `AtmosphereSettings`. Each pass owns its own
+  `GpuParams` object (`skyFrameParams`, `aerialAtmosphereParams`, `aerialFrameParams`, `aerialShadowParams` per view).
 - **Auto scale picks the haze range.** `AtmosphereSettings::autoScale` (default true) feeds `ComputeAerialScale`
   (`AtmosphereAerialPerspectiveMath.h`) with `visibleFarKm`, the last cascade split divided by 1000 from a receiver whose
   `depthFitted` is true. With `x = visibleFarKm * 1.25`: `maxDistanceKm = clamp(0.5 * exp2(ceil(log2(x / 0.5) * 4 - 1e-4) / 4),

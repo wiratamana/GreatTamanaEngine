@@ -114,7 +114,8 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
             const std::size_t after = frame.builder.DeclaredPassCount();
             declaredPasses = after != before;
 
-            if (viewHasSampleableDepth
+            // Kit features declare every sample through named bindings; only raw project callbacks can forget.
+            if (viewHasSampleableDepth && entry.owner == RenderFeatureOwner::Project
                 && FindMissingDeclaredDepthReadForResolve(frame.builder, before, after, handles.depthHandle)) {
                 GTE_LOG_WARNING("RenderFeatureCompositor",
                     "Render feature '" + featureName + "' declared a pass but never declared a depth "

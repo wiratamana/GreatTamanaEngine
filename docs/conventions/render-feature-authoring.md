@@ -48,6 +48,11 @@ Pass names are literals (`rg::StaticName`); a runtime string does not compile. S
 the access (read or write) comes from the SPIR-V. A chain that ends without its terminal call asserts in debug. A refused
 chain declares nothing and logs once.
 
+Scene reads: every sample goes through a named binding, so the kit declares it. A post-stage feature never needs a fake
+read of the scene color or depth, and a pass that does not sample them must not bind them. The compositor's "did not declare
+ReadTexture()" check (`PostOpaque`, `PostTransparent`, `PostComposite` depth) runs only for raw project callbacks, never for
+kit features. The `RenderFeatureCompositor` log category must stay empty in Debug and Release.
+
 ## Resources and data flow
 
 | Type | Notes |
@@ -80,8 +85,8 @@ chain declares nothing and logs once.
    same callback returns the same buffer and refuses a larger size.
 6. Never read a buffer early and write it later in one frame. Use two `PersistentBuffer` objects and alternate them
    by `f.FrameIndex() & 1` (like the history textures of the AO feature).
-7. A buffer written in a later stage cannot be read in an earlier stage of the same frame. A buffer-only compute belongs
-   in `PreOpaque`; the post stages also need a pass that reads the scene color or depth.
+7. A buffer written in a later stage cannot be read in an earlier stage of the same frame. A post-stage feature needs no
+   scene color or depth read for its own passes (see "Scene reads" above).
 8. `FillBuffer` of a host-visible buffer needs `BufferUse::TransferDst` in its flags.
 9. GPU-written, GPU-read buffers should be device-local (no `HostWrite` / `HostRead`). Use `HostWrite` only for small
    CPU-written tables; the GPU reads host-visible memory more slowly.

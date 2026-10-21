@@ -247,7 +247,6 @@ void AtmosphereFeature::AerialVolume(fx::PostOpaqueFrame& f)
                           .Bind("shadowDepth1", fx::Depth(map(1)))
                           .Bind("shadowDepth2", fx::Depth(map(2)))
                           .Bind("shadowDepth3", fx::Depth(map(3)))
-                          .Bind("sceneDepth", fx::Depth(f.SceneDepth()))
                           .Bind("destinationVolume", volume)
                           .Bind("destinationShaftDelta", shaftDelta)
                           .Dispatch(kAerialDispatchSize);

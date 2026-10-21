@@ -106,8 +106,8 @@ struct AtmosphereSettings {
     bool sceneLightFollowsAtmosphere = true;
 };
 
-// Number of sun-visibility taps per aerial perspective march sample, and the tap filter and bias in shadow texels.
-inline constexpr std::uint32_t kAerialShadowTaps = 4;
+// Sun-visibility taps per aerial perspective march sample (rotated per sample), and the tap filter and bias in texels.
+inline constexpr std::uint32_t kAerialShadowTaps = 2;
 inline constexpr float kAerialShadowFilterTexels = 1.5f;
 inline constexpr float kAerialShadowBiasTexels = 1.0f;
 
