@@ -1,0 +1,5 @@
+#version 450
+
+// Aerial perspective composite for frames whose volume has no shaft delta: sky pixels pass through.
+#define AERIAL_SHAFT_DELTA 0
+#include "AtmosphereAerialPerspectiveCompositeBody.glsl"

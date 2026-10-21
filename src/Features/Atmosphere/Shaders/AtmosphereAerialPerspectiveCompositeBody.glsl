@@ -1,0 +1,85 @@
+// Aerial perspective composite (linear): geometry gets sceneColor * transmittance + in-scattering; sky only loses shaft light.
+// The includer defines AERIAL_SHAFT_DELTA: 1 reads the shaft delta image for sky pixels, 0 leaves sky untouched.
+// Out-of-range threads of the rounded-up dispatch return early.
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "AtmosphereCommon.glsl"
+#include "SceneDepthConstants.glsl"
+
+layout(push_constant) uniform PushConstants {
+    mat4 invViewProjection;
+    // xyz = camera world position (world units), w = world units per km.
+    vec4 cameraWorldPositionAndScale;
+    // x = strength (1 = physical, 0 = pass-through), y = max distance (km), z = depth exponent, w = unused.
+    vec4 aerialPerspectiveStrengthAndPad;
+    // x = sky intensity (the sky background's scale), yzw = unused.
+    vec4 skyIntensityAndPad;
+} pc;
+
+layout(binding = 0) uniform sampler2D sourceColor;
+layout(binding = 1) uniform sampler2D sourceDepth;
+layout(binding = 2) uniform sampler3D aerialPerspectiveVolume;
+#if AERIAL_SHAFT_DELTA
+layout(binding = 3) uniform sampler2D aerialShaftDelta;
+#endif
+layout(binding = 4, rgba16f) uniform writeonly image2D destinationImage;
+
+void main()
+{
+    ivec2 outputSize = imageSize(destinationImage);
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (texel.x >= outputSize.x || texel.y >= outputSize.y) {
+        return;
+    }
+
+    vec2 uv = (vec2(texel) + vec2(0.5)) / vec2(outputSize);
+    float rawDepth = texture(sourceDepth, uv).r;
+    vec3 sceneColor = texture(sourceColor, uv).rgb;
+
+    // No geometry here: the sky background is final except for the light the mountains shadow in the air.
+    if (rawDepth >= kClearDepthThreshold) {
+#if AERIAL_SHAFT_DELTA
+        vec3 shaft = texture(aerialShaftDelta, uv).rgb * (pc.aerialPerspectiveStrengthAndPad.x * pc.skyIntensityAndPad.x);
+        vec3 skyColor = all(equal(shaft, vec3(0.0))) ? sceneColor : max(sceneColor + shaft, vec3(0.0));
+#else
+        vec3 skyColor = sceneColor;
+#endif
+        imageStore(destinationImage, texel, vec4(skyColor, 1.0));
+        return;
+    }
+
+    float maxDistanceKm = pc.aerialPerspectiveStrengthAndPad.y;
+    float depthExponent = pc.aerialPerspectiveStrengthAndPad.z;
+
+    vec2 ndc = uv * 2.0 - 1.0;
+    vec4 clipPos = vec4(ndc, rawDepth, 1.0);
+    vec4 worldPos4 = pc.invViewProjection * clipPos;
+    vec3 worldPos = worldPos4.xyz / worldPos4.w;
+    float worldDistance = length(worldPos - pc.cameraWorldPositionAndScale.xyz);
+    float viewDistanceKm = worldDistance / max(pc.cameraWorldPositionAndScale.w, 1e-6);
+
+    ivec3 volumeSize = textureSize(aerialPerspectiveVolume, 0);
+    float sliceCount = float(volumeSize.z);
+    float slice =
+        ViewDepthToFroxelSlice(viewDistanceKm, sliceCount, maxDistanceKm, depthExponent);
+    float boundaryU = clamp(slice / sliceCount, 0.0, 1.0);
+
+    // A slice stores the value at its far boundary but sampling hits texel centers: shift by half a texel.
+    float halfTexelZ = 0.5 / sliceCount;
+    float sliceUv = clamp(boundaryU - halfTexelZ, halfTexelZ, 1.0 - halfTexelZ);
+
+    vec4 sampledAerial = texture(aerialPerspectiveVolume, vec3(uv, sliceUv));
+
+    // Fade in across the coarse first slice to avoid a visible seam.
+    float firstSliceBlend = clamp(boundaryU * sliceCount, 0.0, 1.0);
+    vec4 aerial = mix(vec4(0.0, 0.0, 0.0, 1.0), sampledAerial, firstSliceBlend);
+
+    // Strength scales the effect: 0 gives transmittance 1 and no in-scattering.
+    float strength = pc.aerialPerspectiveStrengthAndPad.x;
+    vec3 inScattering = aerial.rgb * strength;
+    float transmittance = mix(1.0, aerial.a, strength);
+
+    vec3 finalColor = max(sceneColor * transmittance + inScattering, vec3(0.0));
+
+    imageStore(destinationImage, texel, vec4(finalColor, 1.0));
+}

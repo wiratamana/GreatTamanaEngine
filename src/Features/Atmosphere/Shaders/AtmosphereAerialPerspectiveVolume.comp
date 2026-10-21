@@ -2,6 +2,7 @@
 
 // Aerial perspective froxel volume: in-scattered light (RGB) and transmittance (A), one invocation per (x, y) column.
 // Sun cascades shadow the in-scattering; the light they remove from the unshadowed sky goes to a delta image.
+// Dispatched only with at least one cascade; the no-shadow variant is AtmosphereAerialPerspectiveVolumeUnshadowed.comp.
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 #include "AtmosphereCommon.glsl"
@@ -117,12 +118,11 @@ void main()
     float miePhaseValue = CornetteShanksMiePhaseFunction(atmosphereParameters.miePhaseG, viewDotLight);
     vec3 sunRadiance = frameUniforms.sunIlluminance;
 
-    bool shadowed = shadow.counts.x > 0u;
     vec3 eyeWorld = shadow.eyeAndUnitsPerKm.xyz;
     float worldUnitsPerKm = max(shadow.eyeAndUnitsPerKm.w, 1e-6);
     vec3 worldStepPerKm = viewDirection * worldUnitsPerKm;
     float shadowBlend = clamp(shadow.shadowParams.z, 0.0, 1.0);
-    float lastSplitFar = shadowed ? ORTHO_SPLIT_FAR(clamp(int(ORTHO_COUNT), 1, 4) - 1) : 0.0;
+    float lastSplitFar = ORTHO_SPLIT_FAR(clamp(int(ORTHO_COUNT), 1, 4) - 1);
 
     // Without exaggeration the shaft ray and the haze ray are the same ray.
     bool unexaggerated = scatteringExaggeration == 1.0;
@@ -185,7 +185,7 @@ void main()
 
             // Mountain shadow on the sun path. The pattern is fixed per column, so nothing flickers.
             // No taps where the sun is blocked by the planet, the ray is opaque, or beyond the last cascade.
-            if (shadowed && (!lookupEverySecondSample || (sampleIndex & 1) == 0)) {
+            if (!lookupEverySecondSample || (sampleIndex & 1) == 0) {
                 sunVisibility = 1.0;
                 tapped = false;
                 if (planetVisibility > 0.0
@@ -215,22 +215,20 @@ void main()
 
             accumulatedLuminance += accumulatedTransmittance * (source * inscatterFactor);
 
-            if (shadowed) {
-                if (unexaggerated) {
-                    if (tapped) {
-                        shaftDelta += shaftBefore * (sunRadiance * ((sunVisibility - 1.0) * sunTerm) * inscatterFactor);
-                    }
-                } else {
-                    vec3 shaftSegmentTransmittance = exp(-extinctionPhysical * segmentLengthKm);
-                    if (tapped) {
-                        // Light the shadows remove from the sky background, which is unexaggerated.
-                        vec3 phasePhysical = scatterRayleighPhysical * rayleighPhaseValue + scatterMiePhysical * miePhaseValue;
-                        vec3 removedSource = (sunVisibility - 1.0) * planetVisibility * transmittanceToSun * phasePhysical;
-                        vec3 shaftFactor = (vec3(1.0) - shaftSegmentTransmittance) / max(extinctionPhysical, vec3(1e-5));
-                        shaftDelta += shaftTransmittance * (sunRadiance * removedSource * shaftFactor);
-                    }
-                    shaftTransmittance *= shaftSegmentTransmittance;
+            if (unexaggerated) {
+                if (tapped) {
+                    shaftDelta += shaftBefore * (sunRadiance * ((sunVisibility - 1.0) * sunTerm) * inscatterFactor);
                 }
+            } else {
+                vec3 shaftSegmentTransmittance = exp(-extinctionPhysical * segmentLengthKm);
+                if (tapped) {
+                    // Light the shadows remove from the sky background, which is unexaggerated.
+                    vec3 phasePhysical = scatterRayleighPhysical * rayleighPhaseValue + scatterMiePhysical * miePhaseValue;
+                    vec3 removedSource = (sunVisibility - 1.0) * planetVisibility * transmittanceToSun * phasePhysical;
+                    vec3 shaftFactor = (vec3(1.0) - shaftSegmentTransmittance) / max(extinctionPhysical, vec3(1e-5));
+                    shaftDelta += shaftTransmittance * (sunRadiance * removedSource * shaftFactor);
+                }
+                shaftTransmittance *= shaftSegmentTransmittance;
             }
             accumulatedTransmittance *= segmentTransmittance;
         }

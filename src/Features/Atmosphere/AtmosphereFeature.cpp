@@ -227,38 +227,54 @@ void AtmosphereFeature::AerialVolume(fx::PostOpaqueFrame& f)
     view.aerialSnapshot = snap;
 
     const fx::Texture volume = view.aerialVolume.Acquire(f);
-    const fx::Texture shaftDelta = view.shaftDelta.Acquire(
-        f, Extent2D{ kAerialVolumeSize.width, kAerialVolumeSize.height }, PixelFormat::RGBA16_Float);
-    if (!volume.IsValid() || !shaftDelta.IsValid()) {
+    if (!volume.IsValid()) {
         return;
     }
 
-    // Without cascades the shader never samples the maps, but every sampler needs a valid depth texture.
-    const auto map = [&](std::uint32_t i) {
-        return sampled ? receiver->maps[std::min(i, receiver->cascadeCount - 1)] : f.SceneDepth();
-    };
-    const bool done = f.Compute(m_aerialVolumeShader, "AtmosphereAerialPerspectiveVolumePass")
-                          .Params(view.aerialAtmosphereParams, shared->parameters)
-                          .Params("frame", view.aerialFrameParams, frame)
-                          .Params("shadow", view.aerialShadowParams, shadowParams)
-                          .Bind("transmittanceLut", shared->transmittance)
-                          .Bind("multiScatteringLut", shared->multiScattering)
-                          .Bind("shadowDepth0", fx::Depth(map(0)))
-                          .Bind("shadowDepth1", fx::Depth(map(1)))
-                          .Bind("shadowDepth2", fx::Depth(map(2)))
-                          .Bind("shadowDepth3", fx::Depth(map(3)))
-                          .Bind("destinationVolume", volume)
-                          .Bind("destinationShaftDelta", shaftDelta)
-                          .Dispatch(kAerialDispatchSize);
+    // No cascades: the lean variant runs with 2 samplers and writes no shaft delta.
+    fx::Texture shaftDelta;
+    bool done = false;
+    if (sampled) {
+        shaftDelta = view.shaftDelta.Acquire(
+            f, Extent2D{ kAerialVolumeSize.width, kAerialVolumeSize.height }, PixelFormat::RGBA16_Float);
+        if (!shaftDelta.IsValid()) {
+            return;
+        }
+        const auto map = [&](std::uint32_t i) { return receiver->maps[std::min(i, receiver->cascadeCount - 1)]; };
+        done = f.Compute(m_aerialVolumeShader, "AtmosphereAerialPerspectiveVolumePass")
+                   .Params(view.aerialAtmosphereParams, shared->parameters)
+                   .Params("frame", view.aerialFrameParams, frame)
+                   .Params("shadow", view.aerialShadowParams, shadowParams)
+                   .Bind("transmittanceLut", shared->transmittance)
+                   .Bind("multiScatteringLut", shared->multiScattering)
+                   .Bind("shadowDepth0", fx::Depth(map(0)))
+                   .Bind("shadowDepth1", fx::Depth(map(1)))
+                   .Bind("shadowDepth2", fx::Depth(map(2)))
+                   .Bind("shadowDepth3", fx::Depth(map(3)))
+                   .Bind("destinationVolume", volume)
+                   .Bind("destinationShaftDelta", shaftDelta)
+                   .Dispatch(kAerialDispatchSize);
+    } else {
+        done = f.Compute(m_aerialVolumeUnshadowedShader, "AtmosphereAerialPerspectiveVolumePass")
+                   .Params(view.aerialAtmosphereParams, shared->parameters)
+                   .Params("frame", view.aerialFrameParams, frame)
+                   .Bind("transmittanceLut", shared->transmittance)
+                   .Bind("multiScatteringLut", shared->multiScattering)
+                   .Bind("destinationVolume", volume)
+                   .Dispatch(kAerialDispatchSize);
+    }
     if (!done) {
         f.ReportOnce("AtmosphereAerialPerspectiveVolumePass was refused");
         return;
     }
     // The keep list stops the graph from culling a pass whose outputs nothing reads this frame.
-    m_aerial.Publish(f,
-        AtmosphereAerialResult{ volume, shaftDelta, frame.aerialPerspectiveMaxDistanceKm,
-            frame.aerialPerspectiveDepthExponent },
-        { volume, shaftDelta });
+    const AtmosphereAerialResult result{ volume, shaftDelta, frame.aerialPerspectiveMaxDistanceKm,
+        frame.aerialPerspectiveDepthExponent };
+    if (sampled) {
+        m_aerial.Publish(f, result, { volume, shaftDelta });
+    } else {
+        m_aerial.Publish(f, result, { volume });
+    }
 }
 
 void AtmosphereFeature::PublishSunLight(fx::PreOpaqueFrame& f)
@@ -298,7 +314,7 @@ void AtmosphereFeature::Composite(fx::CompositeFrame& f)
         return;
     }
     const std::optional<AtmosphereAerialResult> aerial = m_aerial.Fetch(f);
-    if (!aerial || !aerial->volume.IsValid() || !aerial->shaftDelta.IsValid()) {
+    if (!aerial || !aerial->volume.IsValid()) {
         return;
     }
     const fx::Texture output = m_composited.Acquire(f, f.Extent(), PixelFormat::RGBA16_Float);
@@ -314,14 +330,26 @@ void AtmosphereFeature::Composite(fx::CompositeFrame& f)
         Vec4(m_settings.aerialPerspectiveStrength, aerial->maxDistanceKm, aerial->depthExponent, 0.0f);
     push.skyIntensityAndPad = Vec4(m_settings.skyIntensity, 0.0f, 0.0f, 0.0f);
 
-    const bool dispatched = f.Compute(m_compositeShader, "AtmosphereAerialPerspectiveCompositePass")
-                                .Push(push)
-                                .Bind("sourceColor", f.SceneColor())
-                                .Bind("sourceDepth", fx::Depth(f.SceneDepth()))
-                                .Bind("aerialPerspectiveVolume", aerial->volume)
-                                .Bind("aerialShaftDelta", aerial->shaftDelta)
-                                .Bind("destinationImage", output)
-                                .Dispatch(f.Extent());
+    // An invalid shaft delta means the volume was made without shadows, so sky pixels pass through.
+    bool dispatched = false;
+    if (aerial->shaftDelta.IsValid()) {
+        dispatched = f.Compute(m_compositeShader, "AtmosphereAerialPerspectiveCompositePass")
+                         .Push(push)
+                         .Bind("sourceColor", f.SceneColor())
+                         .Bind("sourceDepth", fx::Depth(f.SceneDepth()))
+                         .Bind("aerialPerspectiveVolume", aerial->volume)
+                         .Bind("aerialShaftDelta", aerial->shaftDelta)
+                         .Bind("destinationImage", output)
+                         .Dispatch(f.Extent());
+    } else {
+        dispatched = f.Compute(m_compositeUnshadowedShader, "AtmosphereAerialPerspectiveCompositePass")
+                         .Push(push)
+                         .Bind("sourceColor", f.SceneColor())
+                         .Bind("sourceDepth", fx::Depth(f.SceneDepth()))
+                         .Bind("aerialPerspectiveVolume", aerial->volume)
+                         .Bind("destinationImage", output)
+                         .Dispatch(f.Extent());
+    }
     if (!dispatched) {
         return;
     }

@@ -25,6 +25,7 @@ struct AtmosphereViewLuts {
 };
 
 // One view's aerial perspective volume and shaft delta image, with the values the composite must use.
+// The shaft delta is invalid when the volume was made without shadows.
 struct AtmosphereAerialResult {
     fx::Texture volume;
     fx::Texture shaftDelta;
@@ -90,8 +91,11 @@ private:
     fx::ComputeShader m_transmittanceShader{ "AtmosphereTransmittanceLut" };
     fx::ComputeShader m_multiScatteringShader{ "AtmosphereMultiScatteringLut" };
     fx::ComputeShader m_skyViewShader{ "AtmosphereSkyViewLut" };
+    // Shadowed variants need cascades and a shaft delta image; the unshadowed ones need neither.
     fx::ComputeShader m_aerialVolumeShader{ "AtmosphereAerialPerspectiveVolume" };
+    fx::ComputeShader m_aerialVolumeUnshadowedShader{ "AtmosphereAerialPerspectiveVolumeUnshadowed" };
     fx::ComputeShader m_compositeShader{ "AtmosphereAerialPerspectiveComposite" };
+    fx::ComputeShader m_compositeUnshadowedShader{ "AtmosphereAerialPerspectiveCompositeUnshadowed" };
     fx::FullscreenShader m_skyBackgroundShader{ "AtmosphereSkyBackground" };
 
     fx::Channel<AtmosphereSharedLuts> m_sharedLuts{ "SharedLuts" };

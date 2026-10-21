@@ -19,7 +19,7 @@ editor panel reaches it with `fx::FeatureOf<AtmosphereFeature>`. FeaturePurityCh
 | `AtmosphereSharedLut` | `PreOpaqueShared` (priority -10) | Transmittance LUT (256x256 RGBA8) and multi-scattering LUT (64x64 RGBA16F) as shared `PersistentTarget`s. Published through the `SharedLuts` channel that every view reads. |
 | `AtmosphereViewLut` | `PreOpaque` (priority 0) | Per view: sky-view LUT (200x100 RGBA16F, `PersistentTarget`). Published through the `ViewLuts` channel (sky-view LUT and frame values). Gate: `AtmosphereSkyViewLutPass`. |
 | `Atmosphere.SunLight` | `PreOpaque` (priority 5, `Gate::Always`) | Sun transmittance and sky light factors for materials and light shafts, published as `SunLightModulation` (`src/Game/Lighting/SunLightModulation.h`). |
-| `AtmosphereAerialVolume` | `PostOpaque` (priority 20) | Per view: aerial perspective volume (128x128x32 RGBA16F, `PersistentVolume`) and shaft delta image (128x128 RGBA16F, `PersistentTarget`), shadowed by the Shadow `Receiver`. Published through the `AerialVolume` channel. Gate: `AtmosphereAerialPerspectiveVolumePass`. |
+| `AtmosphereAerialVolume` | `PostOpaque` (priority 20) | Per view: aerial perspective volume (128x128x32 RGBA16F, `PersistentVolume`) and, when cascades exist, a shaft delta image (128x128 RGBA16F, `PersistentTarget`), shadowed by the Shadow `Receiver`. Published through the `AerialVolume` channel. Gate: `AtmosphereAerialPerspectiveVolumePass`. |
 | `DrawSkyBackground` | `PostOpaque` (priority 100) | `ViewBackground`: a fullscreen draw into the view color where depth is still the clear value. Counted in the per-view draw statistics. |
 | `AtmosphereComposite` | `PostComposite` (priority -1000, alpha over) | Aerial perspective composite compute into a `ViewOutput`, exposed as `GameViewComposited` / `SceneViewComposited`, then a blit to the private target. Reads the `AerialVolume` channel. |
 
@@ -109,9 +109,20 @@ When the composite pass is off, the view still holds the scene color of the earl
 - **The receiver is used only when it is safe.** `SunShadowReceiverUsable()` (`Game/Lighting/SunShadowReceiver.h`) must be
   true and `Dot(receiver.directionTowardSun, this frame's sun) >= 0.9999`. The state is `Used`, `Missing`, `Rejected` or
   `Mismatch` (`NotChecked` when the pass did not run). `Rejected` and `Mismatch` are reported once with `ReportOnce`.
-- **Shaft delta.** The same pass writes a 128x128 RGBA16F image (`PersistentTarget`) with the physical, unexaggerated sun
-  light that shadows remove along each column. It is always zero or negative and stops at the aerial max distance. The
-  composite applies it to sky pixels. The dispatch always writes it, so it is valid whenever the volume is.
+- **Shaft delta.** The shadowed pass also writes a 128x128 RGBA16F image (`PersistentTarget`) with the physical, unexaggerated
+  sun light that shadows remove along each column. It is always zero or negative and stops at the aerial max distance. The
+  composite applies it to sky pixels. Without cascades (count 0 or shadow blend 0) there is no image: the result carries an
+  invalid `shaftDelta` and the composite uses the unshadowed variant, where sky pixels pass through.
+- **Two variants of each shader, chosen per frame.** `AerialVolume()` picks `AtmosphereAerialPerspectiveVolume.comp`
+  (bindings 0..10: cascades, `shadowDepth0..3`, delta image) only when the cascade count is above 0. Otherwise it picks
+  `AtmosphereAerialPerspectiveVolumeUnshadowed.comp` (bindings 0..4, no shadow code, so register use stays low). The
+  composite likewise picks `AtmosphereAerialPerspectiveComposite.comp` (with `aerialShaftDelta`) or
+  `AtmosphereAerialPerspectiveCompositeUnshadowed.comp`; both include `AtmosphereAerialPerspectiveCompositeBody.glsl` with
+  `AERIAL_SHAFT_DELTA` 1 or 0. Both volume variants keep the pass name `AtmosphereAerialPerspectiveVolumePass`. Keep the
+  unshadowed math equal to the shadowed math with sun visibility 1.
+- **Samplers per view (compute pool limit 128, warning above 96).** Sky-view LUT 2. Volume: 6 shadowed (2 LUTs + 4 depth maps),
+  2 unshadowed. Composite: 4 shadowed (color, depth, volume, delta), 3 unshadowed. Per view 12 shadowed, 7 unshadowed. The
+  shared multi-scattering pass adds 1 per frame.
 - **The pass publishes one record.** `AtmosphereAerialResult` (`AtmosphereFeature.h`: volume, shaft delta, max distance,
   depth exponent) goes out on the `AerialVolume` channel with a keep list, only after the dispatch was declared. The
   composite takes max distance and depth exponent from it, never from `AtmosphereSettings`. Each pass owns its own

@@ -70,6 +70,28 @@ TEST(ShaderContractTest, AerialVolumeReusesSunVisibilityOnEverySecondSample)
     EXPECT_NE(text.find("scatteringExaggeration == 1.0"), std::string::npos);
 }
 
+// The no-shadow variants must stay lean: no cascade code, fewer samplers.
+TEST(ShaderContractTest, UnshadowedAerialVolumeHasNoShadowCode)
+{
+    const std::string text = ReadText(
+        std::filesystem::path(GTE_TEST_ATMOSPHERE_SHADER_DIR) / "AtmosphereAerialPerspectiveVolumeUnshadowed.comp");
+    ASSERT_FALSE(text.empty());
+    for (const std::string_view banned : { "shadowDepth", "OrthoMapSetVisibility", "destinationShaftDelta", "ORTHO_" }) {
+        EXPECT_EQ(text.find(banned), std::string::npos) << banned;
+    }
+    EXPECT_NE(text.find("binding = 4, rgba16f"), std::string::npos);
+    EXPECT_EQ(text.find("binding = 5"), std::string::npos);
+}
+
+TEST(ShaderContractTest, CompositeVariantsDifferOnlyByTheShaftDeltaSwitch)
+{
+    const std::filesystem::path dir(GTE_TEST_ATMOSPHERE_SHADER_DIR);
+    EXPECT_NE(ReadText(dir / "AtmosphereAerialPerspectiveComposite.comp").find("#define AERIAL_SHAFT_DELTA 1"),
+        std::string::npos);
+    EXPECT_NE(ReadText(dir / "AtmosphereAerialPerspectiveCompositeUnshadowed.comp").find("#define AERIAL_SHAFT_DELTA 0"),
+        std::string::npos);
+}
+
 TEST(ShaderContractTest, NoShaderAliasesTheClearDepthThreshold)
 {
     for (const std::filesystem::path dir : { std::filesystem::path(GTE_TEST_ATMOSPHERE_SHADER_DIR),
