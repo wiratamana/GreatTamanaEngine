@@ -70,7 +70,9 @@ void SsgiFeature::TracePass(fx::PostOpaqueFrame& f)
         bail(SsgiFrameStatus::PassDisabled);
         return;
     }
-    if (v.extent.width == 0 || v.extent.height == 0 || !v.invViewProjectionValid) {
+    // No active camera leaves the view-projection as identity; that is "no camera yet", not a bad camera.
+    if (v.extent.width == 0 || v.extent.height == 0 || !v.invViewProjectionValid
+        || ApproximatelyEqual(v.viewProjection, Mat4::Identity())) {
         bail(SsgiFrameStatus::NoValidCamera);
         return;
     }
