@@ -60,6 +60,29 @@ TEST(ShaderContractTest, AerialVolumeSkipsShadowTapsThatCannotChangeTheImage)
     EXPECT_EQ(text.find("sceneDepth"), std::string::npos);
 }
 
+TEST(ShaderContractTest, AerialVolumeReusesSunVisibilityOnEverySecondSample)
+{
+    const std::string text =
+        ReadText(std::filesystem::path(GTE_TEST_ATMOSPHERE_SHADER_DIR) / "AtmosphereAerialPerspectiveVolume.comp");
+    ASSERT_FALSE(text.empty());
+    EXPECT_NE(text.find("samplesPerSlice >= 4"), std::string::npos);
+    EXPECT_NE(text.find("(sampleIndex & 1) == 0"), std::string::npos);
+    EXPECT_NE(text.find("scatteringExaggeration == 1.0"), std::string::npos);
+}
+
+TEST(ShaderContractTest, NoShaderAliasesTheClearDepthThreshold)
+{
+    for (const std::filesystem::path dir : { std::filesystem::path(GTE_TEST_ATMOSPHERE_SHADER_DIR),
+             std::filesystem::path(GTE_TEST_VOLUMETRIC_SHADER_DIR), std::filesystem::path(GTE_TEST_SHADOW_SHADER_DIR),
+             std::filesystem::path(GTE_TEST_SHADERS_DIR) }) {
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            const std::string text = ReadText(entry.path());
+            EXPECT_EQ(text.find("kSkyDepth"), std::string::npos) << entry.path();
+            EXPECT_EQ(text.find("kEmptyDepth"), std::string::npos) << entry.path();
+        }
+    }
+}
+
 TEST(ShaderContractTest, VolumetricInjectDefinesTheOrthoMacrosBeforeTheInclude)
 {
     ExpectOrthoMacrosBeforeTheInclude(

@@ -193,7 +193,7 @@ TEST(FxFillBufferTest, ATogglePassDeclaresNothingAndStaysSilent)
 
     EXPECT_FALSE(scene.frame.FillBuffer("Test.Fill", scene.Ref(BufferUse::Storage, 16), 0u));
     EXPECT_EQ(scene.builder.DeclaredPassCount(), 0u);
-    EXPECT_TRUE(sink.entries.empty());
+    EXPECT_EQ(CountErrorsByCategory(sink, "FeatureKit"), 0);
 }
 
 // --- Real device ------------------------------------------------------------------

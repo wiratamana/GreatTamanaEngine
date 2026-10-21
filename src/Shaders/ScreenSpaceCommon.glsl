@@ -3,7 +3,6 @@
 #include "InterleavedGradientNoise.glsl"
 #include "SceneDepthConstants.glsl"
 
-const float kEmptyDepth = kClearDepthThreshold;
 const float kPi = 3.14159265359;
 
 float FetchDepth(sampler2D depthTex, ivec2 p)
@@ -29,10 +28,10 @@ vec3 NormalFromDepth(sampler2D depthTex, mat4 invViewProjection, ivec2 p, float 
     float dxn = FetchDepth(depthTex, p - ivec2(1, 0));
     float dyp = FetchDepth(depthTex, p + ivec2(0, 1));
     float dyn = FetchDepth(depthTex, p - ivec2(0, 1));
-    float errXp = dxp >= kEmptyDepth ? 1e6 : abs(dxp - depth);
-    float errXn = dxn >= kEmptyDepth ? 1e6 : abs(depth - dxn);
-    float errYp = dyp >= kEmptyDepth ? 1e6 : abs(dyp - depth);
-    float errYn = dyn >= kEmptyDepth ? 1e6 : abs(depth - dyn);
+    float errXp = dxp >= kClearDepthThreshold ? 1e6 : abs(dxp - depth);
+    float errXn = dxn >= kClearDepthThreshold ? 1e6 : abs(depth - dxn);
+    float errYp = dyp >= kClearDepthThreshold ? 1e6 : abs(dyp - depth);
+    float errYn = dyn >= kClearDepthThreshold ? 1e6 : abs(depth - dyn);
     if (min(errXp, errXn) > 1e5 || min(errYp, errYn) > 1e5) {
         return toEye;
     }

@@ -102,7 +102,10 @@ When the composite pass is off, the view still holds the scene color of the earl
   is not shadowed again. Air outside all cascades counts as lit. With no usable receiver the cascade count is 0 and no
   shadow tap runs. A sample also takes no taps (and adds no shaft delta) when the planet blocks the sun, when the ray
   transmittance is below 1e-3, or when it lies beyond the last cascade split. Each tapped sample costs
-  `kAerialShadowTaps` (2) rotated depth taps per cascade looked up.
+  `kAerialShadowTaps` (2) rotated depth taps per cascade looked up. With 4 or more samples per slice the cascade lookup
+  runs on every second sample and the odd sample reuses its sun visibility (shaft math still runs every sample). The
+  tap pattern (spiral directions, one sin/cos per lookup) is built once and shared by both maps of a blend. At
+  exaggeration exactly 1 the shaft ray equals the haze ray, so the pass reuses its transmittance, phase and in-scatter factor.
 - **The receiver is used only when it is safe.** `SunShadowReceiverUsable()` (`Game/Lighting/SunShadowReceiver.h`) must be
   true and `Dot(receiver.directionTowardSun, this frame's sun) >= 0.9999`. The state is `Used`, `Missing`, `Rejected` or
   `Mismatch` (`NotChecked` when the pass did not run). `Rejected` and `Mismatch` are reported once with `ReportOnce`.

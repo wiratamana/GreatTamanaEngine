@@ -15,9 +15,8 @@ struct AerialScale {
     float shadowBlend = 0.0f; // 0 = no air shadows, 1 = fully shadowed air.
 };
 
-// Scale for a visible depth range ending at `visibleFarKm`: 1.25x margin on a grid of 4 steps per octave from
-// 0.5 km, so values inside one grid cell never change the result. Non-finite or non-positive input gives the
-// small-scene values (0.5 km, 8x, no air shadows).
+// Scale for a visible range ending at `visibleFarKm`: 1.25x margin, snapped to a 4-steps-per-octave grid from 0.5 km.
+// Non-finite or non-positive input gives the small-scene values (0.5 km, 8x, no air shadows).
 AerialScale ComputeAerialScale(float visibleFarKm) noexcept;
 
 // Frames the last fitted scale stays in use while no depth-fitted cascades exist.
@@ -35,9 +34,8 @@ struct AerialScaleResult {
     bool held = false; // The scale comes from an earlier frame.
 };
 
-// Picks this frame's scale. `receiver` is null or an already checked receiver. `safe` must be sanitized.
-// Manual mode (autoScale off) uses the settings and full air shadows. Otherwise fitted cascades update `state`;
-// without them the state is held for kAerialScaleHoldFrames, then the settings apply with no air shadows.
+// Picks this frame's scale; `receiver` is null or checked, `safe` is sanitized. Manual mode uses the settings and full
+// air shadows; otherwise fitted cascades update `state`, which is held for kAerialScaleHoldFrames, then settings apply.
 AerialScaleResult ResolveAerialScale(AerialScaleState& state, const SunShadowReceiver* receiver,
     const AtmosphereSettings& safe, std::uint64_t frameIndex) noexcept;
 

@@ -7,7 +7,6 @@
 #include "SceneDepthConstants.glsl"
 
 const float kPi = 3.14159265359;
-const float kSkyDepth = kClearDepthThreshold;
 
 bool HasNonFinite(vec4 v)
 {

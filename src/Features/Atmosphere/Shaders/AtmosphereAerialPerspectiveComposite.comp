@@ -1,8 +1,7 @@
 #version 450
 
-// Aerial perspective composite (linear). Geometry: sceneColor * transmittance + inScattering from the volume.
-// Sky: only loses the sunlight mountains shadow in the air (the shaft delta); it never gains light.
-// 16x16 threads per group; the dispatch is rounded up, so out-of-range threads return early.
+// Aerial perspective composite (linear): geometry gets sceneColor * transmittance + in-scattering; sky only loses shaft light.
+// Out-of-range threads of the rounded-up dispatch return early.
 layout(local_size_x = 16, local_size_y = 16) in;
 
 #include "AtmosphereCommon.glsl"
