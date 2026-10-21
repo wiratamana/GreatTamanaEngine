@@ -3,6 +3,7 @@
 #include "SceneLightingDebugEndpoint.h"
 #include "SceneLightingTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
+#include "../../Game/Lighting/SunLightModulation.h"
 #include "../../Game/Lighting/SunShadowReceiver.h"
 
 namespace gte {
@@ -22,8 +23,10 @@ public:
 
 private:
     SceneLightingSettings m_settings;
-    SceneLightingDebugEndpoint m_endpoint{ m_settings };
+    fx::PerView<SunLightModulationSnapshot> m_applied;
+    SceneLightingDebugEndpoint m_endpoint{ m_settings, &m_applied };
     fx::ChannelReader<SunShadowReceiver> m_receiver{ kSunShadowReceiverOwner, kSunShadowReceiverChannel };
+    fx::ChannelReader<SunLightModulation> m_sunLight{ kSunLightModulationOwner, kSunLightModulationChannel };
 };
 
 } // namespace gte

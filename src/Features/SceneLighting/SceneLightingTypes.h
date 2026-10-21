@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../Game/Lighting/DirectionalLightResolver.h"
+#include "../../Game/Lighting/SunLightModulation.h"
 #include "../../Game/Lighting/SunShadowReceiver.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
@@ -74,13 +75,17 @@ static_assert(sizeof(SceneLightingUniformData) == 448);
 static_assert(std::is_trivially_copyable_v<SceneLightingUniformData>);
 
 // Packs the sun, settings, eye and optional cascade data; a non-finite direction becomes up.
+// The sun illuminance and the ambient intensity are scaled by `sunLight` (sanitized; null = identity).
 // No receiver, or zero material strength, leaves every cascade field at zero; the eye is always written.
 inline SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirectionalLight& sun,
-    const SceneLightingSettings& settings, const Vec3& eye, const SunShadowReceiver* receiver = nullptr) noexcept
+    const SceneLightingSettings& settings, const Vec3& eye, const SunShadowReceiver* receiver = nullptr,
+    const SunLightModulation* sunLight = nullptr) noexcept
 {
     const bool finite = std::isfinite(sun.directionTowardSun.x) && std::isfinite(sun.directionTowardSun.y)
         && std::isfinite(sun.directionTowardSun.z);
     const Vec3 direction = finite ? sun.directionTowardSun : Vec3::Up();
+    const SunLightModulation light = sunLight != nullptr ? SanitizeSunLightModulation(*sunLight) : SunLightModulation{};
+    const Vec3 sunRadiance = sun.sunIlluminance * light.sunTint;
     const bool eyeFinite = std::isfinite(eye.x) && std::isfinite(eye.y) && std::isfinite(eye.z);
 
     SceneLightingUniformData data{};
@@ -88,14 +93,14 @@ inline SceneLightingUniformData PackSceneLightingUniformData(const ResolvedDirec
     data.sunDirectionAndValid[1] = direction.y;
     data.sunDirectionAndValid[2] = direction.z;
     data.sunDirectionAndValid[3] = 1.0f;
-    data.sunIlluminance[0] = sun.sunIlluminance.x;
-    data.sunIlluminance[1] = sun.sunIlluminance.y;
-    data.sunIlluminance[2] = sun.sunIlluminance.z;
+    data.sunIlluminance[0] = sunRadiance.x;
+    data.sunIlluminance[1] = sunRadiance.y;
+    data.sunIlluminance[2] = sunRadiance.z;
     data.sunIlluminance[3] = 0.0f;
     data.skyAmbientAndIntensity[0] = settings.skyAmbientR;
     data.skyAmbientAndIntensity[1] = settings.skyAmbientG;
     data.skyAmbientAndIntensity[2] = settings.skyAmbientB;
-    data.skyAmbientAndIntensity[3] = settings.ambientIntensity;
+    data.skyAmbientAndIntensity[3] = settings.ambientIntensity * light.ambientScale;
     data.groundAmbientAndMaterialDebugView[0] = settings.groundAmbientR;
     data.groundAmbientAndMaterialDebugView[1] = settings.groundAmbientG;
     data.groundAmbientAndMaterialDebugView[2] = settings.groundAmbientB;

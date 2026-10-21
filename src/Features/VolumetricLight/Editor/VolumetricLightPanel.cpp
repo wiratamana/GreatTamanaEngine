@@ -53,6 +53,7 @@ void DrawStatus(const VolumetricLightViewSnapshot& game)
         ImGui::Text("Effective max distance: %.1f", game.effectiveMaxDistance);
         ImGui::Text("Temporal history: %s", game.historyUsed ? "in use" : "not used");
         ImGui::Text("Jitter index: %u", game.jitterIndex);
+        ImGui::Text("Atmosphere light: %s", game.atmosphereLight ? "used" : "not used");
     }
 }
 

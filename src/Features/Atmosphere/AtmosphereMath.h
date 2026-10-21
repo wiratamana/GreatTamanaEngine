@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AtmosphereTypes.h"
+#include "../../Game/Lighting/SunLightModulation.h"
 #include "../../Math/Vec3.h"
 
 namespace gte {
@@ -32,6 +33,17 @@ Vec3 ComputeOpticalDepthToTopOfAtmosphere(
 // exp(-opticalDepth) per channel: the fraction of light that survives to the top of the atmosphere.
 Vec3 ComputeTransmittanceToTopOfAtmosphere(
     const AtmosphereParametersGpu& params, Vec3 positionKm, Vec3 direction, int sampleCount) noexcept;
+
+// Sun transmittance (RGB) from `heightKm` above the ground to the top of the atmosphere.
+// `sunUpDot` is the sun direction along local up. A ray that hits the planet gives zero.
+// An invalid input or planet gives one (no air).
+Vec3 ComputeSunTransmittance(
+    const AtmosphereParametersGpu& params, float heightKm, float sunUpDot, int sampleCount) noexcept;
+
+// Sun light after the atmosphere, relative to an overhead sun at the same height.
+// An invalid input or a non-finite result gives the inactive record.
+SunLightModulation ComputeAtmosphereSunLight(
+    const AtmosphereParametersGpu& params, float heightKm, float sunUpDot) noexcept;
 
 // Rayleigh phase function, normalized over the sphere. `cosTheta` is the cosine of the scattering angle.
 float RayleighPhaseFunction(float cosTheta) noexcept;

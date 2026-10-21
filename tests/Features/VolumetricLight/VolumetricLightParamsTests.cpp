@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -168,6 +169,60 @@ TEST(VolumetricLightParamsTest, SunLightScalesWithTheDirectScaleAndFadesBelowThe
     EXPECT_FLOAT_EQ(night.sunRadiance[0], 0.0f);
     EXPECT_FLOAT_EQ(night.sunRadiance[1], 0.0f);
     EXPECT_FLOAT_EQ(night.ambientRadiance[1], 2.0f * kVolumetricLightNightAmbientFraction);
+}
+
+VolumetricLightSettings MakeLitSettings()
+{
+    VolumetricLightSettings s = SanitizeVolumetricLightSettings(VolumetricLightSettings{});
+    s.sunIntensity = 2.0f;
+    s.ambientIntensity = 1.0f;
+    s.ambientR = 1.0f;
+    s.ambientG = 2.0f;
+    s.ambientB = 4.0f;
+    return s;
+}
+
+TEST(VolumetricLightParamsTest, AtmosphereLightReplacesTheFadeAndTheNightFloor)
+{
+    VolumetricLightFrameFacts facts = MakeFacts();
+    facts.atmosphereLight = true;
+    facts.sunTint = Vec3{ 0.5f, 0.25f, 0.0f };
+    facts.ambientScale = 0.4f;
+    facts.sunDirection = Vec3{ 0.0f, -1.0f, 0.0f };
+
+    const VolumetricLightInjectParamsGpu p = MakeVolumetricLightInjectParams(MakeLitSettings(), nullptr, facts);
+    EXPECT_NEAR(p.sunRadiance[0], 1.3f, 1e-6f);
+    EXPECT_NEAR(p.sunRadiance[1], 0.325f, 1e-6f);
+    EXPECT_FLOAT_EQ(p.sunRadiance[2], 0.0f);
+    EXPECT_FLOAT_EQ(p.ambientRadiance[1], 2.0f * 0.4f);
+}
+
+TEST(VolumetricLightParamsTest, AtmosphereNightIsBlack)
+{
+    VolumetricLightFrameFacts facts = MakeFacts();
+    facts.atmosphereLight = true;
+    facts.sunTint = Vec3::Zero();
+    facts.ambientScale = 0.0f;
+
+    const VolumetricLightInjectParamsGpu p = MakeVolumetricLightInjectParams(MakeLitSettings(), nullptr, facts);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_FLOAT_EQ(p.sunRadiance[i], 0.0f) << i;
+        EXPECT_FLOAT_EQ(p.ambientRadiance[i], 0.0f) << i;
+    }
+}
+
+TEST(VolumetricLightParamsTest, AtmosphereLightFallsBackOnANonFiniteRecord)
+{
+    VolumetricLightFrameFacts facts = MakeFacts();
+    facts.atmosphereLight = true;
+    facts.sunTint = Vec3{ std::numeric_limits<float>::quiet_NaN(), 1.0f, 1.0f };
+    facts.sunDirection = Vec3{ 0.0f, -1.0f, 0.0f };
+
+    const VolumetricLightInjectParamsGpu p = MakeVolumetricLightInjectParams(MakeLitSettings(), nullptr, facts);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_FLOAT_EQ(p.sunRadiance[i], 0.0f) << i;
+    }
+    EXPECT_FLOAT_EQ(p.ambientRadiance[1], 2.0f * kVolumetricLightNightAmbientFraction);
 }
 
 TEST(VolumetricLightParamsTest, TemporalIgnoresTheHistoryUnlessUsable)

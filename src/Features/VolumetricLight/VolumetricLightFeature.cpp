@@ -149,7 +149,7 @@ VolumetricLightFeature::StageResult VolumetricLightFeature::RunIntegrate(
 
 void VolumetricLightFeature::VolumePass(fx::PostOpaqueFrame& f)
 {
-    // First statement: the data is fetched even when this pass bails, so the publisher never reports it unread.
+    // Shadow cascade data of this view; it may be missing.
     const std::optional<SunShadowReceiver> published = m_receiver.Fetch(f);
 
     VolumetricLightViewState& view = m_views.For(f.Scope());
@@ -202,6 +202,11 @@ void VolumetricLightFeature::VolumePass(fx::PostOpaqueFrame& f)
     facts.forward = hasReceiver ? receiver->cameraForward : DeriveVolumetricLightForward(v.invViewProjection);
     facts.sunDirection = sun.directionTowardSun;
     facts.sunIlluminance = sun.sunIlluminance;
+    const std::optional<SunLightModulation> sunLight = m_sunLight.Fetch(f);
+    const SunLightModulation light = sunLight ? SanitizeSunLightModulation(*sunLight) : SunLightModulation{};
+    facts.atmosphereLight = light.active;
+    facts.sunTint = light.sunTint;
+    facts.ambientScale = light.ambientScale;
     facts.windOffset = view.windOffset;
     facts.frameIndex = f.FrameIndex();
     facts.maxDistance = VolumetricLightEffectiveMaxDistance(
@@ -218,13 +223,16 @@ void VolumetricLightFeature::VolumePass(fx::PostOpaqueFrame& f)
     }
 
     // Only a frame whose temporal pass ran becomes history.
-    const std::uint64_t lightingKey = VolumetricLightLightingKey(cfg);
+    const std::uint64_t lightingKey = VolumetricLightLightingKey(cfg, facts.atmosphereLight);
     const TemporalResult temporal = RunTemporal(f, view, facts, injected.texture, lightingKey);
     const bool blended = temporal.blended.IsValid();
     view.previous = blended ? MakeVolumetricLightHistory(facts, cfg.depthExponent, lightingKey, view.previous)
                             : VolumetricLightHistory{};
 
     snap.cascadeCount = hasReceiver ? receiver->cascadeCount : 0;
+    snap.atmosphereLight = facts.atmosphereLight;
+    snap.sunTint = facts.sunTint;
+    snap.ambientScale = facts.ambientScale;
     snap.effectiveMaxDistance = facts.maxDistance;
     snap.historyUsed = temporal.historyUsed;
     // Raw volume, plus the blended volume and both history atlases when the temporal pass ran.

@@ -4,6 +4,15 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## Atmosphere sun and sky light (branch `feature/hdr-tonemap-impl`)
+
+- Sun colour, sun brightness and sky ambient of materials and light shafts follow the Atmosphere. A sun below the horizon is
+  black. New setting `sceneLightFollowsAtmosphere` (default on); off restores the old lighting.
+- New channel `Atmosphere.SunLight` (`SunLightModulation`, `src/Game/Lighting/SunLightModulation.h`) read by SceneLighting and
+  VolumetricLight. `/feature_debug/state` of Atmosphere, SceneLighting and VolumetricLight shows the record per view.
+- VolumetricLight keeps its sun fade and night ambient floor as the fallback. Its lighting key now includes the light mode.
+- Sky camera height uses the live planet radius.
+
 ## PBR material textures and GGX specular (branch `feature/hdr-tonemap-impl`)
 
 - Imported glTF meshes sample the normal, metallic-roughness and occlusion maps (new `PbrMesh` shaders, set 0 now has 5

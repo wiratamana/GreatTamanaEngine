@@ -18,6 +18,7 @@ editor panel reaches it with `fx::FeatureOf<AtmosphereFeature>`. FeaturePurityCh
 |---|---|---|
 | `AtmosphereSharedLut` | `PreOpaqueShared` | Transmittance LUT (256x256 RGBA8) and multi-scattering LUT (64x64 RGBA16F) as shared `PersistentTarget`s. Published through a `Channel` that every view reads. |
 | `AtmosphereViewLut` | `PreOpaque` | Per view: sky-view LUT (200x100 RGBA16F, `PersistentTarget`) and aerial perspective volume (128x128x32 RGBA16F, `PersistentVolume`). |
+| `Atmosphere.SunLight` | `PreOpaque` (`Gate::Always`) | Sun transmittance and sky light factors for materials and light shafts, published as `SunLightModulation` (`src/Game/Lighting/SunLightModulation.h`). |
 | `DrawSkyBackground` | `PostOpaque` | `ViewBackground`: a fullscreen draw into the view color where depth is still the clear value. Counted in the per-view draw statistics. |
 | `AtmosphereComposite` | `PostComposite` (alpha over) | Aerial perspective composite compute into a `ViewOutput`, exposed as `GameViewComposited` / `SceneViewComposited`, then a blit to the private target. |
 
@@ -59,7 +60,20 @@ When the composite pass is off, the view still holds the scene color of the earl
 - **`DirectionalLight` (`src/ECS/Components/DirectionalLight.h`) drives the sun and every lit material shader.**
   `ResolveActiveDirectionalLight()` (`src/Game/Lighting/DirectionalLightResolver.h`) picks the first entity with
   `active == true`. Only one sun is supported. With no active light it returns a fixed placeholder sun, so a scene
-  without a sun still shows a sky. Do not remove the fallback.
+  without a sun still shows a sky. Do not remove the fallback. SceneLighting and VolumetricLight scale the sun and
+  the ambient with the published `SunLightModulation` record (next rule).
+- **Scene light follows the atmosphere.** `Atmosphere.SunLight` (priority 5, `Gate::Always`) publishes a
+  `SunLightModulation` (`src/Game/Lighting/SunLightModulation.h`) once per view: a per-channel `sunTint` and an
+  `ambientScale`, both 1 for an overhead sun and 0 below the horizon. DirectionalLight colour and illuminance mean
+  "sun straight overhead after the atmosphere". The math is `ComputeSunTransmittance` / `ComputeAtmosphereSunLight` in
+  `AtmosphereMath`, evaluated at the camera height. The switch is `AtmosphereSettings::sceneLightFollowsAtmosphere`;
+  off or invalid input publishes an inactive record and the consumers keep their own lighting. A sun below the horizon
+  gives black light for materials and fog, while the sky background can still show twilight. A DirectionalLight that
+  points up gives a black scene. The sky background and the aerial perspective composite already do their own
+  transmittance and must NOT use the factors. Consumers call `SanitizeSunLightModulation` and include only the shared
+  header. The channel has no toggle and no textures, so it needs no side-channel rule.
+  `GET /feature_debug/state?name=Atmosphere` shows the published record per view; SceneLighting and VolumetricLight
+  show the record they applied.
 - **Aerial perspective is a full-screen post-process composite, never baked into a mesh shader.** `Mesh.frag`,
   `TexturedMesh.frag`, `MeshPreview.frag` and `SceneGrid.frag` stay free of atmosphere sampling. A feature that needs
   aerial perspective extends the composite pass.

@@ -22,6 +22,27 @@ float DistanceToSphereBoundary(Vec3 originKm, Vec3 direction, float radiusKm) no
     return (-b + sqrtDiscriminant) * 0.5f;
 }
 
+constexpr int kSunLightSampleCount = 128;
+
+// sin(0.5 degrees): the sun fades in over this height above the horizon.
+constexpr float kSunHorizonFadeSin = 0.0087265f;
+
+// smoothstep(0, edge, x)
+float SmoothStepFromZero(float edge, float x) noexcept
+{
+    const float t = std::clamp(x / edge, 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+float RelativeLuminance(Vec3 c) noexcept { return 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z; }
+
+bool IsUsableSunLightInput(const AtmosphereParametersGpu& params, float heightKm, float sunUpDot) noexcept
+{
+    return std::isfinite(heightKm) && std::isfinite(sunUpDot) && std::isfinite(params.planetRadiusKm)
+        && std::isfinite(params.atmosphereThicknessKm) && params.planetRadiusKm > 0.0f
+        && params.atmosphereThicknessKm > 0.0f;
+}
+
 } // namespace
 
 float RayleighDensityAtHeight(const AtmosphereParametersGpu& params, float heightKm) noexcept
@@ -117,6 +138,72 @@ void TransmittanceLutUvToHeightZenith(
     const float clampedU = std::clamp(lutGridU, 0.0f, 1.0f);
     outHeightKm = clampedU * params.atmosphereThicknessKm; // mix(0, thickness, u)
     outUpDot = std::max(lutGridV * 2.0f - 1.0f, -0.999f);
+}
+
+Vec3 ComputeSunTransmittance(
+    const AtmosphereParametersGpu& params, float heightKm, float sunUpDot, int sampleCount) noexcept
+{
+    if (sampleCount <= 0 || !IsUsableSunLightInput(params, heightKm, sunUpDot)) {
+        return Vec3::One();
+    }
+    const double radius = params.planetRadiusKm;
+    const double thickness = params.atmosphereThicknessKm;
+    const double top = radius + thickness;
+    const double r = radius + std::clamp(static_cast<double>(heightKm), 0.0, thickness);
+    const double up = std::clamp(static_cast<double>(sunUpDot), -1.0, 1.0);
+    const double along = r * up;
+
+    // A downward ray whose closest approach to the planet center lies inside the planet hits the ground.
+    if (up < 0.0 && r * r * (1.0 - up * up) < radius * radius) {
+        return Vec3::Zero();
+    }
+    const double discriminant = along * along + (top * top - r * r);
+    if (!(discriminant > 0.0)) {
+        return Vec3::One();
+    }
+    const double length = -along + std::sqrt(discriminant);
+    if (!(length > 0.0)) {
+        return Vec3::One();
+    }
+
+    Vec3 opticalDepth = Vec3::Zero();
+    const double count = static_cast<double>(sampleCount);
+    for (int i = 0; i < sampleCount; ++i) {
+        const double a = static_cast<double>(i) / count;
+        const double b = static_cast<double>(i + 1) / count;
+        const double t0 = length * a * a; // Quadratic spacing: dense where the air is thick.
+        const double t1 = length * b * b;
+        const double tm = 0.5 * (t0 + t1);
+        const double height = std::sqrt(std::max(r * r + 2.0 * along * tm + tm * tm, 0.0)) - radius;
+        const Vec3 extinction =
+            ComputeExtinctionCoefficientAtHeight(params, static_cast<float>(std::max(height, 0.0)));
+        opticalDepth += extinction * static_cast<float>(t1 - t0);
+    }
+    return Vec3(std::exp(-opticalDepth.x), std::exp(-opticalDepth.y), std::exp(-opticalDepth.z));
+}
+
+SunLightModulation ComputeAtmosphereSunLight(
+    const AtmosphereParametersGpu& params, float heightKm, float sunUpDot) noexcept
+{
+    SunLightModulation light;
+    if (!IsUsableSunLightInput(params, heightKm, sunUpDot)) {
+        return light;
+    }
+    const Vec3 overhead = ComputeSunTransmittance(params, heightKm, 1.0f, kSunLightSampleCount);
+    const Vec3 sun = ComputeSunTransmittance(params, heightKm, sunUpDot, kSunLightSampleCount);
+    const float fade = SmoothStepFromZero(kSunHorizonFadeSin, sunUpDot);
+    const auto relative = [fade](float value, float reference) {
+        return std::clamp(value / std::max(reference, 1e-6f), 0.0f, 1.0f) * fade;
+    };
+    const Vec3 tint(relative(sun.x, overhead.x), relative(sun.y, overhead.y), relative(sun.z, overhead.z));
+    const float scale = std::clamp(RelativeLuminance(tint), 0.0f, 1.0f);
+    if (!std::isfinite(tint.x) || !std::isfinite(tint.y) || !std::isfinite(tint.z) || !std::isfinite(scale)) {
+        return light;
+    }
+    light.sunTint = tint;
+    light.ambientScale = scale;
+    light.active = true;
+    return light;
 }
 
 float ReciprocalScaleHeightFromKm(float scaleHeightKm) noexcept

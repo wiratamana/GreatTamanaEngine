@@ -3,6 +3,7 @@
 #include "VolumetricLightDebugEndpoint.h"
 #include "VolumetricLightTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
+#include "../../Game/Lighting/SunLightModulation.h"
 #include "../../Game/Lighting/SunShadowReceiver.h"
 
 #include <array>
@@ -81,6 +82,7 @@ private:
     fx::ComputeShader m_compositeShader{ "VolumetricLightComposite" };
     fx::ViewOutput m_composited{ "VolumetricLight" };
     fx::ChannelReader<SunShadowReceiver> m_receiver{ kSunShadowReceiverOwner, kSunShadowReceiverChannel };
+    fx::ChannelReader<SunLightModulation> m_sunLight{ kSunLightModulationOwner, kSunLightModulationChannel };
     fx::Channel<VolumetricLightResult> m_result{ "Result" };
 };
 

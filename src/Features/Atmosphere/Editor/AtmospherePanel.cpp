@@ -46,10 +46,13 @@ void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings)
     ImGui::DragFloat(
         "Aerial Scattering Exaggeration", &settings.aerialPerspectiveScatteringExaggeration, 0.1f, 0.1f, 50.0f);
     ImGui::DragFloat("Sky Intensity", &settings.skyIntensity, 0.1f, 0.0f, 50.0f);
+    ImGui::Checkbox("Scene Light Follows Atmosphere", &settings.sceneLightFollowsAtmosphere);
+    ImGui::TextDisabled("Sun and sky light of surfaces and light shafts fade and redden with the sun height.");
 
     ImGui::TextDisabled(
         "Sun direction/color/illuminance are controlled by a DirectionalLight ECS entity - see \"Hierarchy\" > "
-        "right-click > \"Create Directional Light\", then edit its Transform/DirectionalLight in \"Inspector\".");
+        "right-click > \"Create Directional Light\", then edit its Transform/DirectionalLight in \"Inspector\". "
+        "Color and illuminance describe the sun straight overhead.");
 
     ImGui::End();
 }

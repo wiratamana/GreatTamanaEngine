@@ -2895,7 +2895,7 @@ add_test(NAME EngineVocabularyCheck
 set(GTE_COMMENT_RULE_SRC
     Renderer/ Core/FeatureKit/ Features/Shadow/ Features/Gtao/ Features/VolumetricLight/ Features/ToneMapping/ Shaders/
     Math/ToneMapCurves.h
-    Game/Lighting/SunShadowReceiver.h
+    Game/Lighting/SunShadowReceiver.h Game/Lighting/SunLightModulation.h
     Application/RenderPasses.cpp Application/RenderPasses.h Core/Core.cpp Core/Core.h Core/CapturedPixels.h
     Encoding/CapturedPixelConversion.cpp Encoding/CapturedPixelConversion.h Encoding/DepthVisualization.cpp
     Encoding/DepthVisualization.h Encoding/HdrColorVisualization.cpp Encoding/HdrColorVisualization.h

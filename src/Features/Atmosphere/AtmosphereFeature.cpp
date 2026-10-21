@@ -6,8 +6,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <string_view>
 
 namespace gte {
+
+static_assert(std::string_view(kSunLightModulationOwner) == std::string_view(kAtmosphereFeatureName));
 
 namespace {
 
@@ -67,8 +70,7 @@ AtmosphereFrameUniforms MakeFrameUniforms(Registry& scene, const fx::View& view,
     // Planet-centered frame: only the height above the ground matters, never the horizontal position.
     const Vec3 eyeKm = WorldPositionToAtmosphereSpaceKm(view.eye);
     const float heightAboveGroundKm = std::max(eyeKm.y, 0.0f);
-    uniforms.cameraPositionAtmosphere =
-        Vec3(0.0f, MakeDefaultEarthAtmosphereParameters().planetRadiusKm + heightAboveGroundKm, 0.0f);
+    uniforms.cameraPositionAtmosphere = Vec3(0.0f, settings.planetRadiusKm + heightAboveGroundKm, 0.0f);
 
     const ResolvedDirectionalLight sun = ResolveActiveDirectionalLight(scene);
     uniforms.sunDirection = sun.directionTowardSun;
@@ -92,6 +94,9 @@ void AtmosphereFeature::Setup(fx::FeatureSetup& s)
         fx::Gate{ "AtmosphereTransmittanceLutPass", "AtmosphereMultiScatteringLutPass" });
     s.PreOpaque("AtmosphereViewLut", kViewLutPriority, [this](fx::PreOpaqueFrame& f) { ViewLuts(f); },
         fx::Gate{ "AtmosphereSkyViewLutPass", "AtmosphereAerialPerspectiveVolumePass" });
+    // Not a render pass: Always() keeps a toggle from silencing the sun light record.
+    s.PreOpaque("Atmosphere.SunLight", kSunLightModulationPriority,
+        [this](fx::PreOpaqueFrame& f) { PublishSunLight(f); }, fx::Gate::Always());
     s.PostOpaque("DrawSkyBackground", kSkyBackgroundPriority, [this](fx::PostOpaqueFrame& f) { SkyBackground(f); });
     s.PostComposite("AtmosphereComposite", kCompositePriority, fx::Blend::AlphaOver,
         [this](fx::CompositeFrame& f) { Composite(f); },
@@ -182,6 +187,18 @@ void AtmosphereFeature::ViewLuts(fx::PreOpaqueFrame& f)
         }
     }
     m_viewLuts.Publish(f, luts);
+}
+
+void AtmosphereFeature::PublishSunLight(fx::PreOpaqueFrame& f)
+{
+    SunLightModulation light;
+    if (m_settings.sceneLightFollowsAtmosphere) {
+        const ResolvedDirectionalLight sun = ResolveActiveDirectionalLight(f.Scene());
+        const float heightKm = std::max(WorldPositionToAtmosphereSpaceKm(f.View().eye).y, 0.0f);
+        light = ComputeAtmosphereSunLight(MakeParameters(m_settings), heightKm, sun.directionTowardSun.y);
+    }
+    m_sunLight.Publish(f, light);
+    m_views.For(f.Scope()).sunLight = SunLightModulationSnapshot{ light, f.FrameIndex() };
 }
 
 void AtmosphereFeature::SkyBackground(fx::PostOpaqueFrame& f)

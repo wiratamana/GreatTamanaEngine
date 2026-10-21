@@ -320,5 +320,105 @@ TEST(SceneLightingDebugEndpointTest, ResetDefaultsClearsTheDebugView)
     EXPECT_EQ(settings.materialDebugView, MaterialDebugView::Off);
 }
 
+SceneLightingUniformData PackWithRecord(const SunLightModulation& record)
+{
+    ResolvedDirectionalLight sun{};
+    sun.sunIlluminance = Vec3(2.0f, 2.0f, 2.0f);
+    SceneLightingSettings s;
+    s.ambientIntensity = 1.0f;
+    return PackSceneLightingUniformData(sun, s, kEye, nullptr, &record);
+}
+
+TEST(SceneLightingSettingsTest, PackScalesTheSunAndAmbientByTheRecord)
+{
+    const SceneLightingUniformData data = PackWithRecord({ true, Vec3(0.5f, 0.25f, 0.0f), 0.4f });
+    EXPECT_FLOAT_EQ(data.sunIlluminance[0], 1.0f);
+    EXPECT_FLOAT_EQ(data.sunIlluminance[1], 0.5f);
+    EXPECT_FLOAT_EQ(data.sunIlluminance[2], 0.0f);
+    EXPECT_FLOAT_EQ(data.skyAmbientAndIntensity[3], 0.4f);
+    const SceneLightingSettings d;
+    EXPECT_FLOAT_EQ(data.skyAmbientAndIntensity[0], d.skyAmbientR);
+    EXPECT_FLOAT_EQ(data.skyAmbientAndIntensity[2], d.skyAmbientB);
+    EXPECT_FLOAT_EQ(data.groundAmbientAndMaterialDebugView[1], d.groundAmbientG);
+    EXPECT_FLOAT_EQ(data.groundAmbientAndMaterialDebugView[3], 0.0f);
+    EXPECT_EQ(sizeof(data), 448u);
+}
+
+TEST(SceneLightingSettingsTest, PackIgnoresAnInactiveRecord)
+{
+    const SceneLightingUniformData data = PackWithRecord({ false, Vec3(0.5f, 0.25f, 0.0f), 0.4f });
+    EXPECT_FLOAT_EQ(data.sunIlluminance[0], 2.0f);
+    EXPECT_FLOAT_EQ(data.sunIlluminance[1], 2.0f);
+    EXPECT_FLOAT_EQ(data.sunIlluminance[2], 2.0f);
+    EXPECT_FLOAT_EQ(data.skyAmbientAndIntensity[3], 1.0f);
+}
+
+TEST(SceneLightingSettingsTest, PackWritesBlackWhenTheSunIsBelowTheHorizon)
+{
+    const SceneLightingUniformData data = PackWithRecord({ true, Vec3::Zero(), 0.0f });
+    EXPECT_FLOAT_EQ(data.sunIlluminance[0], 0.0f);
+    EXPECT_FLOAT_EQ(data.sunIlluminance[1], 0.0f);
+    EXPECT_FLOAT_EQ(data.sunIlluminance[2], 0.0f);
+    EXPECT_FLOAT_EQ(data.skyAmbientAndIntensity[3], 0.0f);
+}
+
+TEST(SceneLightingSettingsTest, PackIgnoresANonFiniteRecord)
+{
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const SceneLightingUniformData data = PackWithRecord({ true, Vec3(nan, 0.5f, 0.5f), 0.4f });
+    EXPECT_FLOAT_EQ(data.sunIlluminance[0], 2.0f);
+    EXPECT_FLOAT_EQ(data.sunIlluminance[1], 2.0f);
+    EXPECT_FLOAT_EQ(data.skyAmbientAndIntensity[3], 1.0f);
+}
+
+TEST(SceneLightingSettingsTest, PackClampsAnOutOfRangeRecord)
+{
+    const SceneLightingUniformData data = PackWithRecord({ true, Vec3(3.0f, 3.0f, 3.0f), 5.0f });
+    EXPECT_FLOAT_EQ(data.sunIlluminance[0], 2.0f);
+    EXPECT_FLOAT_EQ(data.sunIlluminance[2], 2.0f);
+    EXPECT_FLOAT_EQ(data.skyAmbientAndIntensity[3], 1.0f);
+}
+
+TEST(SceneLightingDebugEndpointTest, EndpointReportsTheAppliedRecord)
+{
+    SceneLightingSettings settings;
+    fx::PerView<SunLightModulationSnapshot> applied;
+    applied.For(rg::ViewScope::GameView) = { { true, Vec3(0.5f, 0.25f, 0.125f), 0.4f }, 42 };
+    SceneLightingDebugEndpoint endpoint(settings, &applied);
+
+    const FeatureDebugResult state = endpoint.GetState();
+    EXPECT_DOUBLE_EQ(FieldValue(state, "game.sunTintR"), 0.5);
+    EXPECT_DOUBLE_EQ(FieldValue(state, "game.sunTintG"), 0.25);
+    EXPECT_DOUBLE_EQ(FieldValue(state, "game.sunTintB"), 0.125);
+    EXPECT_NEAR(FieldValue(state, "game.ambientScale"), 0.4, 1e-6);
+    EXPECT_DOUBLE_EQ(FieldValue(state, "scene.sunTintR"), 1.0);
+    bool found = false;
+    for (const fx::FeatureDebugField& field : state.fields) {
+        if (field.key == "game.atmosphereLight") {
+            EXPECT_TRUE(std::get<bool>(field.value));
+            found = true;
+        } else if (field.key == "game.frameIndex") {
+            EXPECT_EQ(std::get<std::int64_t>(field.value), 42);
+        }
+    }
+    EXPECT_TRUE(found);
+
+    const std::vector<FeatureDebugArg> args{ { "game.ambientScale", "1" } };
+    EXPECT_FALSE(endpoint.Set(args).ok);
+}
+
+TEST(SceneLightingDebugEndpointTest, EndpointWithoutTheRecordHasNoSuchKeys)
+{
+    SceneLightingSettings settings;
+    SceneLightingDebugEndpoint endpoint(settings);
+    for (const fx::FeatureDebugField& field : endpoint.GetState().fields) {
+        EXPECT_FALSE(field.key.starts_with("game.") || field.key.starts_with("scene.")) << field.key;
+    }
+    const std::vector<FeatureDebugArg> args{ { "game.ambientScale", "1" } };
+    const FeatureDebugResult result = endpoint.Set(args);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.message, "unknown key");
+}
+
 } // namespace
 } // namespace gte

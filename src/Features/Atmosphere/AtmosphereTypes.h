@@ -98,6 +98,9 @@ struct AtmosphereSettings {
     float aerialPerspectiveDepthExponent = 2.0f;
     int aerialPerspectiveSamplesPerSlice = 8;
     float aerialPerspectiveScatteringExaggeration = 8.0f;
+
+    // Sun and sky light of materials and light shafts follow the atmosphere.
+    bool sceneLightFollowsAtmosphere = true;
 };
 
 } // namespace gte

@@ -495,12 +495,12 @@ TEST(VolumetricLightMathTest, LightingKeyChangesWithLitSettingsOnly)
     const VolumetricLightSettings base = SanitizeVolumetricLightSettings(VolumetricLightSettings{});
     VolumetricLightSettings denser = base;
     denser.density *= 2.0f;
-    EXPECT_NE(VolumetricLightLightingKey(base), VolumetricLightLightingKey(denser));
+    EXPECT_NE(VolumetricLightLightingKey(base, false), VolumetricLightLightingKey(denser, false));
 
     VolumetricLightSettings composite = base;
     composite.strength = 0.5f;
     composite.historyBlend = 0.5f;
-    EXPECT_EQ(VolumetricLightLightingKey(base), VolumetricLightLightingKey(composite));
+    EXPECT_EQ(VolumetricLightLightingKey(base, false), VolumetricLightLightingKey(composite, false));
 }
 
 TEST(VolumetricLightMathTest, AmbientShadowedFractionDefaultIsLowAndIsClamped)
@@ -529,7 +529,7 @@ TEST(VolumetricLightMathTest, SkyDistanceFractionIsClampedAndExcludedFromTheLigh
     const VolumetricLightSettings base = SanitizeVolumetricLightSettings(VolumetricLightSettings{});
     VolumetricLightSettings sky = base;
     sky.skyDistanceFraction = 0.9f;
-    EXPECT_EQ(VolumetricLightLightingKey(base), VolumetricLightLightingKey(sky));
+    EXPECT_EQ(VolumetricLightLightingKey(base, false), VolumetricLightLightingKey(sky, false));
 }
 
 TEST(VolumetricLightMathTest, LightingKeyChangesWithTheAmbientShadowedFraction)
@@ -537,7 +537,13 @@ TEST(VolumetricLightMathTest, LightingKeyChangesWithTheAmbientShadowedFraction)
     const VolumetricLightSettings base = SanitizeVolumetricLightSettings(VolumetricLightSettings{});
     VolumetricLightSettings masked = base;
     masked.ambientShadowedFraction = 0.2f;
-    EXPECT_NE(VolumetricLightLightingKey(base), VolumetricLightLightingKey(masked));
+    EXPECT_NE(VolumetricLightLightingKey(base, false), VolumetricLightLightingKey(masked, false));
+}
+
+TEST(VolumetricLightMathTest, LightingKeyChangesWithTheLightMode)
+{
+    const VolumetricLightSettings base = SanitizeVolumetricLightSettings(VolumetricLightSettings{});
+    EXPECT_NE(VolumetricLightLightingKey(base, true), VolumetricLightLightingKey(base, false));
 }
 
 } // namespace

@@ -65,6 +65,8 @@ reference and tests: `src/Math/PbrBrdf.h`.
 - Ambient = `diffuseColor * HemisphereAmbient(N) * occlusion + HemisphereAmbient(reflect(-V, N)) * EnvBrdfApprox * SpecularOcclusion`.
   Shadows remove only the sun term. Occlusion multiplies ambient only.
 - V comes from the eye position in the scene uniform block. `SceneLighting` writes it for every view, with or without shadow data.
+- The scene block holds the sun and ambient intensity already multiplied by the atmosphere record when
+  `AtmosphereSettings::sceneLightFollowsAtmosphere` is on. The shader does not know about the atmosphere.
 - The radiance is clamped to `kMaxSceneRadiance` = 8192, because scene color is RGBA16F and a smooth highlight would
   otherwise become +inf and then a black pixel.
 

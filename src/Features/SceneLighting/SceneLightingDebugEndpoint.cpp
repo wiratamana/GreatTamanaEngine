@@ -1,8 +1,10 @@
 #include "SceneLightingDebugEndpoint.h"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <string>
 
@@ -27,6 +29,15 @@ constexpr std::array kSettingKeys{
 
 // Integer key; every key in the table above is a float.
 constexpr std::string_view kMaterialDebugViewKey = "materialDebugView";
+
+struct ScopeName {
+    rg::ViewScope scope;
+    std::string_view prefix;
+};
+constexpr std::array kScopes{
+    ScopeName{ rg::ViewScope::GameView, "game." },
+    ScopeName{ rg::ViewScope::SceneView, "scene." },
+};
 
 // A float shown with 6 significant digits, so 0.6f reads 0.6 and not 0.6000000238.
 double Shown(float value) noexcept
@@ -59,6 +70,20 @@ fx::FeatureDebugResult SceneLightingDebugEndpoint::GetState() const
     }
     out.fields.push_back({ std::string(kMaterialDebugViewKey),
         static_cast<std::int64_t>(static_cast<std::int32_t>(m_settings.materialDebugView)) });
+    if (m_applied != nullptr) {
+        for (const ScopeName& scope : kScopes) {
+            const SunLightModulationSnapshot& snapshot = m_applied->For(scope.scope);
+            const auto key = [&](std::string_view name) { return std::string(scope.prefix).append(name); };
+            out.fields.push_back({ key("atmosphereLight"), snapshot.light.active });
+            out.fields.push_back({ key("sunTintR"), static_cast<double>(snapshot.light.sunTint.x) });
+            out.fields.push_back({ key("sunTintG"), static_cast<double>(snapshot.light.sunTint.y) });
+            out.fields.push_back({ key("sunTintB"), static_cast<double>(snapshot.light.sunTint.z) });
+            out.fields.push_back({ key("ambientScale"), static_cast<double>(snapshot.light.ambientScale) });
+            out.fields.push_back({ key("frameIndex"),
+                static_cast<std::int64_t>(
+                    std::min<std::uint64_t>(snapshot.frameIndex, std::numeric_limits<std::int64_t>::max())) });
+        }
+    }
     return out;
 }
 
@@ -82,7 +107,8 @@ fx::FeatureDebugResult SceneLightingDebugEndpoint::Set(std::span<const fx::Featu
             }
         }
         if (found == nullptr) {
-            return Fail(arg.key, "unknown key");
+            const bool readOnly = m_applied != nullptr && (arg.key.starts_with("game.") || arg.key.starts_with("scene."));
+            return Fail(arg.key, readOnly ? "key is read-only" : "unknown key");
         }
         const auto parsed = fx::ParseDebugFloat(arg.value);
         if (!parsed || std::abs(*parsed) > std::numeric_limits<float>::max()) {

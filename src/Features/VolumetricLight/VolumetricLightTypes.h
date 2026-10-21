@@ -122,6 +122,9 @@ struct VolumetricLightFrameFacts {
     Vec3 forward;
     Vec3 sunDirection = Vec3::Up();
     Vec3 sunIlluminance = Vec3::One();
+    Vec3 sunTint = Vec3::One();      // Sun light factor from the atmosphere record.
+    float ambientScale = 1.0f;       // Ambient light factor from the atmosphere record.
+    bool atmosphereLight = false;    // True: no sun fade and no night ambient floor.
     Vec3 jitter = Vec3{ 0.5f, 0.5f, 0.5f };
     std::array<double, 3> windOffset{}; // World units, wrapped.
     float maxDistance = 0.0f;           // Effective max distance of this frame.
@@ -145,6 +148,9 @@ struct VolumetricLightViewSnapshot {
     bool historyUsed = false;
     std::uint32_t jitterIndex = 0;
     std::uint64_t textureBytes = 0;
+    bool atmosphereLight = false;
+    Vec3 sunTint = Vec3::One();
+    float ambientScale = 1.0f;
 };
 
 // std430 block of VolumetricLightInject.comp; member order matches the shader.
