@@ -2458,6 +2458,7 @@ set(GTE_TEST_SOURCES
     ECS/Reflection/BuiltinComponentReflectionTests.cpp
     Game/RenderSystemTests.cpp
     Game/Lighting/DirectionalLightResolverTests.cpp
+    Game/Lighting/SunShadowReceiverTests.cpp
     Game/SceneQueryTests.cpp
     # Tier-2 (real, headless GPU, tests/Fakes/HeadlessRenderGraphFixture.h)
     # tests for RenderSystem::Draw()'s optional pipelineOverrideSet
@@ -2726,7 +2727,6 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_SSGI_RESOLVE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SsgiResolve.comp.spv"
     GTE_TEST_SSGI_COMPOSITE_VERT_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SsgiComposite.vert.spv"
     GTE_TEST_SSGI_COMPOSITE_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SsgiComposite.frag.spv"
-    GTE_TEST_SCREEN_SPACE_COMMON_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/ScreenSpaceCommon.glsl"
     GTE_TEST_SSGI_COMMON_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Features/Ssgi/Shaders/SsgiCommon.glsl"
     GTE_TEST_SSGI_COMPOSITE_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Features/Ssgi/Shaders/SsgiComposite.frag"
 )
@@ -2775,6 +2775,10 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_PBR_BRDF_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/PbrBrdf.glsl"
     GTE_TEST_PBR_MATERIAL_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/PbrMaterial.glsl"
     GTE_TEST_SHADOW_SHADER_DIR="${CMAKE_SOURCE_DIR}/src/Features/Shadow/Shaders"
+    GTE_TEST_ATMOSPHERE_SHADER_DIR="${CMAKE_SOURCE_DIR}/src/Features/Atmosphere/Shaders"
+    GTE_TEST_VOLUMETRIC_SHADER_DIR="${CMAKE_SOURCE_DIR}/src/Features/VolumetricLight/Shaders"
+    GTE_TEST_SCENE_DEPTH_CONSTANTS_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/SceneDepthConstants.glsl"
+    GTE_TEST_SHADERS_DIR="${CMAKE_SOURCE_DIR}/src/Shaders"
 )
 
 # Engine-owned reflection fixtures with abstract names (not shipped).

@@ -125,9 +125,9 @@ TEST(SsgiShaderNamesTest, ShaderTextMatchesOracleConstants)
     ExpectContains(common, "vec2(5.3, 17.1)", "SsgiCommon.glsl");
     ExpectContains(common, "vec2(3.1, 5.7)", "SsgiCommon.glsl");
 
-    const std::string shared = ReadText(GTE_TEST_SCREEN_SPACE_COMMON_GLSL_PATH);
-    ExpectContains(shared, "52.9829189", "ScreenSpaceCommon.glsl");
-    ExpectContains(shared, "vec2(0.06711056, 0.00583715)", "ScreenSpaceCommon.glsl");
+    const std::string noise = ReadText((std::string(GTE_TEST_SHADERS_DIR) + "/InterleavedGradientNoise.glsl").c_str());
+    ExpectContains(noise, "52.9829189", "InterleavedGradientNoise.glsl");
+    ExpectContains(noise, "vec2(0.06711056, 0.00583715)", "InterleavedGradientNoise.glsl");
 
     const std::string composite = ReadText(GTE_TEST_SSGI_COMPOSITE_GLSL_PATH);
     ExpectContains(composite, "vec3(0.25), vec3(4.0)", "SsgiComposite.frag");

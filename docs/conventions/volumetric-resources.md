@@ -73,7 +73,7 @@ the Atmosphere aerial perspective volume
 
 ```cpp
 f.Compute(m_aerialVolumeShader, "AtmosphereAerialPerspectiveVolumePass")
-    .Params(m_sharedParams, shared->parameters)
+    .Params(view.aerialAtmosphereParams, shared->parameters)
     .Bind("destinationVolume", volume)
     .Dispatch(kAerialDispatchSize);
 ```
@@ -111,12 +111,13 @@ feature registers an `Image3D` slot today.
 
 ### (b) A channel plus a later pass
 
-Publish the volume with a `fx::Channel<T>` (for example
-`AtmosphereViewLuts` in `AtmosphereFeature.h`) and read it in a later callback
+Publish the volume with a `fx::Channel<T>` (for example the `AerialVolume` channel, whose
+`AtmosphereAerialResult` in `AtmosphereFeature.h` carries the volume) and read it in a later callback
 (`PostOpaque` or `PostComposite`) as a normal `Bind(...)` of a fullscreen or
-compute pass. Use it when the feature needs its own sampling or compositing step
-against scene depth. Atmosphere does this: `Composite()` binds
-`aerialPerspectiveVolume` in `AtmosphereAerialPerspectiveCompositePass`.
+compute pass. Publish only after the dispatch was declared, with the volume in the keep list. Use it when the feature
+needs its own sampling or compositing step against scene depth. Atmosphere does this: the `PostOpaque` callback
+`AerialVolume()` publishes the volume and `Composite()` binds `aerialPerspectiveVolume` in
+`AtmosphereAerialPerspectiveCompositePass`.
 For engine-level publishing without the kit, see
 [`scene-resource-publishing.md`](scene-resource-publishing.md).
 

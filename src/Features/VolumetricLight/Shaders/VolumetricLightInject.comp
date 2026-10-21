@@ -32,7 +32,7 @@ layout(binding = 3) uniform sampler2D shadowDepth2;
 layout(binding = 4) uniform sampler2D shadowDepth3;
 layout(binding = 5, rgba16f) uniform writeonly image3D injectOutput;
 
-float ShadowDepthAt(int k, vec2 uv)
+float OrthoMapDepthAt(int k, vec2 uv)
 {
     switch (k) {
     case 0: return textureLod(shadowDepth0, uv, 0.0).r;
@@ -42,68 +42,20 @@ float ShadowDepthAt(int k, vec2 uv)
     }
 }
 
-// Lit fraction in [0,1], or -1 when the point lies outside cascade k.
-float SampleCascadeLit(int k, vec3 world, float rotation)
-{
-    vec4 clip = params.cascadeViewProjection[k] * vec4(world, 1.0);
-    if (!(clip.w > 1e-6)) {
-        return -1.0;
-    }
-    vec3 ndc = clip.xyz / clip.w;
-    vec2 uv = ndc.xy * 0.5 + 0.5;
-    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || ndc.z < 0.0 || ndc.z > 1.0) {
-        return -1.0;
-    }
-    float bias = params.cascadeTexelWorld[k] * params.shadowParams.x / max(params.cascadeDepthRange[k], 1e-6);
-    int samples = clamp(int(params.counts.y), 1, 8);
-    float radiusUv = params.shadowParams.y * params.shadowParams.z;
-    float lit = 0.0;
-    for (int i = 0; i < samples; ++i) {
-        vec2 offset = vec2(0.0);
-        if (samples > 1) {
-            float r = sqrt((float(i) + 0.5) / float(samples));
-            float theta = float(i) * 2.39996323 + rotation;
-            offset = r * vec2(cos(theta), sin(theta)) * radiusUv;
-        }
-        lit += (ndc.z - bias > ShadowDepthAt(k, uv + offset)) ? 0.0 : 1.0;
-    }
-    return lit / float(samples);
-}
+#define ORTHO_VIEW_PROJECTION(k) params.cascadeViewProjection[k]
+#define ORTHO_SPLIT_FAR(k) params.cascadeSplitFar[k]
+#define ORTHO_BLEND_WIDTH(k) params.cascadeBlendWidth[k]
+#define ORTHO_TEXEL_WORLD(k) params.cascadeTexelWorld[k]
+#define ORTHO_DEPTH_RANGE(k) params.cascadeDepthRange[k]
+#define ORTHO_EYE params.eyeAndMaxDistance.xyz
+#define ORTHO_FORWARD params.forwardAndExponent.xyz
+#define ORTHO_COUNT params.counts.x
+#define ORTHO_TAPS params.counts.y
+#define ORTHO_BIAS_TEXELS params.shadowParams.x
+#define ORTHO_FILTER_TEXELS params.shadowParams.y
+#define ORTHO_INV_MAP_SIZE params.shadowParams.z
 
-// Sun visibility in [0,1]. Without cascades, or outside all of them, the point is lit.
-float SunVisibility(vec3 world, float rotation)
-{
-    int count = clamp(int(params.counts.x), 0, 4);
-    if (count == 0) {
-        return 1.0;
-    }
-    float planar = dot(world - params.eyeAndMaxDistance.xyz, params.forwardAndExponent.xyz);
-    int c = count - 1;
-    for (int i = 0; i < count; ++i) {
-        if (planar < params.cascadeSplitFar[i]) {
-            c = i;
-            break;
-        }
-    }
-    float lit = SampleCascadeLit(c, world, rotation);
-    if (lit < 0.0) {
-        lit = c + 1 < count ? SampleCascadeLit(c + 1, world, rotation) : -1.0;
-        if (lit < 0.0) {
-            return 1.0;
-        }
-    }
-    if (c + 1 < count) {
-        float width = params.cascadeBlendWidth[c];
-        float start = params.cascadeSplitFar[c] - width;
-        if (width > 0.0 && planar > start) {
-            float next = SampleCascadeLit(c + 1, world, rotation);
-            if (next >= 0.0) {
-                lit = mix(lit, next, clamp((planar - start) / width, 0.0, 1.0));
-            }
-        }
-    }
-    return lit;
-}
+#include "OrthoMapSetVisibility.glsl"
 
 void main()
 {
@@ -136,7 +88,7 @@ void main()
 
     float rotation = 6.2831853
         * InterleavedGradientNoise(vec2(cell.xy) + vec2(float(cell.z) * 7.0, float(cell.z) * 13.0), params.counts.z);
-    float visibility = SunVisibility(world, rotation);
+    float visibility = OrthoMapSetVisibility(world, rotation);
     float phase = HenyeyGreenstein(dot(dir, params.sunDirectionAndG.xyz), params.sunDirectionAndG.w);
     // Ambient follows the sun shadow: 1 keeps it everywhere, 0 leaves it only in sunlit air.
     float ambientMask = mix(params.shadowParams.w, 1.0, visibility);

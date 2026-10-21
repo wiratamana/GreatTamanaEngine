@@ -1,151 +1,110 @@
-// Unit tests for the Aerial Perspective Composite pass's CPU oracle
-// (src/Features/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.h/.cpp).
-// No Vulkan/Renderer/live GPU device involved at all - every function under
-// test is pure, taking/returning only plain float/Vec3 values.
+// CPU oracle of the aerial perspective composite pass. Every function under test is pure.
 
 #include "Features/Atmosphere/AtmosphereAerialPerspectiveCompositeMath.h"
 
 #include <gtest/gtest.h>
 
+#include <fstream>
+#include <sstream>
+#include <string>
+
 namespace gte {
 namespace {
 
-// --- ShouldBypassAerialPerspectiveComposite() -------------------------------
+const Vec3 kNoShaft = Vec3::Zero();
 
-TEST(ShouldBypassAerialPerspectiveCompositeTest, TrueExactlyAtClearDepthValue)
+Vec3 Color(float depth, const Vec3& scene, const Vec3& aerialRgb, float aerialA, const Vec3& shaft, float strength,
+    float skyIntensity = 1.0f)
 {
-    EXPECT_TRUE(ShouldBypassAerialPerspectiveComposite(1.0f));
+    return ComputeAerialPerspectiveCompositeColor(depth, scene, aerialRgb, aerialA, shaft, strength, skyIntensity);
 }
 
-TEST(ShouldBypassAerialPerspectiveCompositeTest, TrueAtTheDocumentedThresholdItself)
+void ExpectEqual(const Vec3& a, const Vec3& b)
 {
-    EXPECT_TRUE(ShouldBypassAerialPerspectiveComposite(0.999999f));
+    EXPECT_FLOAT_EQ(a.x, b.x);
+    EXPECT_FLOAT_EQ(a.y, b.y);
+    EXPECT_FLOAT_EQ(a.z, b.z);
 }
 
-TEST(ShouldBypassAerialPerspectiveCompositeTest, FalseJustBelowTheThreshold)
+TEST(AerialCompositeMathTest, ClearDepthBoundary)
 {
-    EXPECT_FALSE(ShouldBypassAerialPerspectiveComposite(0.9999989f));
+    for (const float depth : { 0.999999f, 0.9999995f, 1.0f, 1.5f }) {
+        EXPECT_TRUE(IsClearDepth(depth)) << depth;
+    }
+    for (const float depth : { 0.0f, 0.5f, 0.9f, 0.9999989f }) {
+        EXPECT_FALSE(IsClearDepth(depth)) << depth;
+    }
 }
 
-TEST(ShouldBypassAerialPerspectiveCompositeTest, FalseForOrdinaryOpaqueGeometryDepth)
+TEST(AerialCompositeMathTest, SkyWithZeroDeltaIsTheExactSceneColor)
 {
-    EXPECT_FALSE(ShouldBypassAerialPerspectiveComposite(0.5f));
+    const Vec3 scene(0.2f, 0.4f, 0.6f);
+    ExpectEqual(Color(1.0f, scene, Vec3(9.0f, 9.0f, 9.0f), 0.0f, kNoShaft, 1.0f, 6.0f), scene);
 }
 
-// --- ComputeAerialPerspectiveCompositeColor() -------------------------------
-
-TEST(ComputeAerialPerspectiveCompositeColorTest, BypassReturnsSceneColorUnchangedRegardlessOfAerialInputs)
+TEST(AerialCompositeMathTest, SkyWithNegativeDeltaIsDarkerAndNeverNegative)
 {
-    const Vec3 sceneColorRgb(0.2f, 0.4f, 0.6f);
-    const Vec3 extremeAerialRgb(9.0f, 9.0f, 9.0f);
-    const Vec3 result = ComputeAerialPerspectiveCompositeColor(
-        1.0f, sceneColorRgb, extremeAerialRgb, 0.0f, 2.0f);
-
-    EXPECT_FLOAT_EQ(result.x, sceneColorRgb.x);
-    EXPECT_FLOAT_EQ(result.y, sceneColorRgb.y);
-    EXPECT_FLOAT_EQ(result.z, sceneColorRgb.z);
+    const Vec3 scene(1.0f, 1.0f, 1.0f);
+    const Vec3 shaft(-0.1f, -0.2f, -5.0f);
+    const Vec3 result = Color(1.0f, scene, Vec3::Zero(), 1.0f, shaft, 1.0f, 2.0f);
+    EXPECT_NEAR(result.x, 0.8f, 1e-6f);
+    EXPECT_NEAR(result.y, 0.6f, 1e-6f);
+    EXPECT_FLOAT_EQ(result.z, 0.0f);
+    EXPECT_LE(result.x, scene.x);
+    EXPECT_LE(result.y, scene.y);
 }
 
-TEST(ComputeAerialPerspectiveCompositeColorTest, ZeroStrengthIsAPureSceneColorPassThroughEvenWithGeometry)
+TEST(AerialCompositeMathTest, SkyIgnoresTheVolumeSample)
 {
-    const Vec3 sceneColorRgb(0.3f, 0.5f, 0.7f);
-    const Vec3 result = ComputeAerialPerspectiveCompositeColor(
-        0.3f, sceneColorRgb, Vec3(1.0f, 1.0f, 1.0f), 1.0f, 0.0f);
-
-    EXPECT_FLOAT_EQ(result.x, sceneColorRgb.x);
-    EXPECT_FLOAT_EQ(result.y, sceneColorRgb.y);
-    EXPECT_FLOAT_EQ(result.z, sceneColorRgb.z);
+    const Vec3 scene(0.5f, 0.5f, 0.5f);
+    const Vec3 shaft(-0.1f, -0.1f, -0.1f);
+    const Vec3 a = Color(1.0f, scene, Vec3(0.0f, 0.0f, 0.0f), 1.0f, shaft, 1.0f);
+    const Vec3 b = Color(1.0f, scene, Vec3(7.0f, 7.0f, 7.0f), 0.0f, shaft, 1.0f);
+    ExpectEqual(a, b);
 }
 
-TEST(ComputeAerialPerspectiveCompositeColorTest, FullStrengthMatchesHandComputedBlend)
+TEST(AerialCompositeMathTest, ZeroStrengthPassesSkyAndGeometryThrough)
 {
-    const Vec3 sceneColorRgb(1.0f, 1.0f, 1.0f);
-    const Vec3 sampledAerialRgb(0.2f, 0.1f, 0.05f);
-    const float sampledAerialA = 0.5f;
-    const float strength = 1.0f;
+    const Vec3 scene(0.3f, 0.5f, 0.7f);
+    const Vec3 shaft(-1.0f, -1.0f, -1.0f);
+    ExpectEqual(Color(1.0f, scene, Vec3(1.0f, 1.0f, 1.0f), 0.2f, shaft, 0.0f, 6.0f), scene);
+    ExpectEqual(Color(0.3f, scene, Vec3(1.0f, 1.0f, 1.0f), 1.0f, shaft, 0.0f, 6.0f), scene);
+}
 
-    const Vec3 result = ComputeAerialPerspectiveCompositeColor(
-        0.3f, sceneColorRgb, sampledAerialRgb, sampledAerialA, strength);
-
-    // transmittance = mix(1.0, 0.5, 1.0) = 0.5, inScattering = (0.2,0.1,0.05)
-    // sceneColor*0.5 + inScattering = (0.7, 0.6, 0.55)
+TEST(AerialCompositeMathTest, GeometryFullStrengthMatchesHandComputedBlend)
+{
+    // transmittance = 0.5, inScattering = (0.2, 0.1, 0.05).
+    const Vec3 result = Color(0.3f, Vec3(1.0f, 1.0f, 1.0f), Vec3(0.2f, 0.1f, 0.05f), 0.5f, kNoShaft, 1.0f);
     EXPECT_NEAR(result.x, 0.7f, 1e-5f);
     EXPECT_NEAR(result.y, 0.6f, 1e-5f);
     EXPECT_NEAR(result.z, 0.55f, 1e-5f);
 }
 
-TEST(ComputeAerialPerspectiveCompositeColorTest, PartialStrengthInterpolatesLinearly)
+TEST(AerialCompositeMathTest, GeometryPartialStrengthInterpolatesLinearly)
 {
-    const Vec3 sceneColorRgb(1.0f, 1.0f, 1.0f);
-    const Vec3 sampledAerialRgb(0.2f, 0.1f, 0.05f);
-    const float sampledAerialA = 0.5f;
-    const float strength = 0.5f;
-
-    const Vec3 result = ComputeAerialPerspectiveCompositeColor(
-        0.3f, sceneColorRgb, sampledAerialRgb, sampledAerialA, strength);
-
-    // transmittance = mix(1.0, 0.5, 0.5) = 0.75, inScattering = (0.1, 0.05, 0.025)
-    // sceneColor*0.75 + inScattering = (0.85, 0.8, 0.775)
+    // transmittance = 0.75, inScattering = (0.1, 0.05, 0.025).
+    const Vec3 result = Color(0.3f, Vec3(1.0f, 1.0f, 1.0f), Vec3(0.2f, 0.1f, 0.05f), 0.5f, kNoShaft, 0.5f);
     EXPECT_NEAR(result.x, 0.85f, 1e-5f);
     EXPECT_NEAR(result.y, 0.8f, 1e-5f);
     EXPECT_NEAR(result.z, 0.775f, 1e-5f);
 }
 
-// --- Widened regression coverage -------------------------------------------
-// Locks in that the real-opaque-geometry side of the branch stays
-// depth-independent and correctly blended, and broadens the bypass-threshold
-// boundary sweep.
-
-TEST(ComputeAerialPerspectiveCompositeColorTest, NeverBypassesForAnyDepthStrictlyBelowThreshold)
+TEST(AerialCompositeMathTest, GeometryIgnoresTheShaftDelta)
 {
-    const Vec3 sceneColorRgb(1.0f, 1.0f, 1.0f);
-    const Vec3 sampledAerialRgb(0.2f, 0.1f, 0.05f);
-    const float sampledAerialA = 0.5f;
-    const float strength = 1.0f;
-
-    const float depthsBelowThreshold[] = {0.0f, 0.001f, 0.5f, 0.9f, 0.99f, 0.9999988f};
-    for (const float depth : depthsBelowThreshold) {
-        EXPECT_FALSE(ShouldBypassAerialPerspectiveComposite(depth)) << "depth=" << depth;
-
-        // transmittance = mix(1.0, 0.5, 1.0) = 0.5, inScattering = (0.2,0.1,0.05)
-        // sceneColor*0.5 + inScattering = (0.7, 0.6, 0.55) - identical for every
-        // depth below the threshold, since the blend formula itself never
-        // reads rawDepth once past the bypass check.
-        const Vec3 result = ComputeAerialPerspectiveCompositeColor(
-            depth, sceneColorRgb, sampledAerialRgb, sampledAerialA, strength);
-        EXPECT_NEAR(result.x, 0.7f, 1e-5f) << "depth=" << depth;
-        EXPECT_NEAR(result.y, 0.6f, 1e-5f) << "depth=" << depth;
-        EXPECT_NEAR(result.z, 0.55f, 1e-5f) << "depth=" << depth;
-    }
+    const Vec3 scene(0.4f, 0.35f, 0.9f);
+    ExpectEqual(Color(0.5f, scene, Vec3::Zero(), 1.0f, Vec3(-3.0f, -3.0f, -3.0f), 1.0f), scene);
 }
 
-TEST(ComputeAerialPerspectiveCompositeColorTest, BlackAerialContributionWithFullTransmittanceIsANoOpEvenWithGeometry)
+TEST(AerialCompositeMathTest, ShaderDepthLiteralEqualsTheCpuConstant)
 {
-    const Vec3 sceneColorRgb(0.4f, 0.35f, 0.9f);
-    const Vec3 result = ComputeAerialPerspectiveCompositeColor(
-        0.5f, sceneColorRgb, Vec3::Zero(), 1.0f, 1.0f);
+    std::ifstream file(GTE_TEST_SCENE_DEPTH_CONSTANTS_GLSL_PATH);
+    ASSERT_TRUE(file.is_open());
+    std::stringstream text;
+    text << file.rdbuf();
 
-    // Real opaque geometry (rawDepth = 0.5, well below the bypass threshold),
-    // but a sampled aerial texel of zero in-scattering + full (1.0)
-    // transmittance is the physically-meaningful "no atmosphere between the
-    // camera and this point" case - must still be an EXACT no-op, not merely
-    // "close", even though this path never takes the explicit bypass branch.
-    EXPECT_FLOAT_EQ(result.x, sceneColorRgb.x);
-    EXPECT_FLOAT_EQ(result.y, sceneColorRgb.y);
-    EXPECT_FLOAT_EQ(result.z, sceneColorRgb.z);
-}
-
-TEST(ShouldBypassAerialPerspectiveCompositeTest, MonotonicBoundaryNeverFlickers)
-{
-    const float bypassDepths[] = {0.999999f, 0.9999995f, 1.0f, 1.5f};
-    for (const float depth : bypassDepths) {
-        EXPECT_TRUE(ShouldBypassAerialPerspectiveComposite(depth)) << "depth=" << depth;
-    }
-
-    const float nonBypassDepths[] = {0.0f, 0.5f, 0.9f, 0.999998f};
-    for (const float depth : nonBypassDepths) {
-        EXPECT_FALSE(ShouldBypassAerialPerspectiveComposite(depth)) << "depth=" << depth;
-    }
+    std::ostringstream expected;
+    expected << "kClearDepthThreshold = " << kAerialPerspectiveFarPlaneDepthThreshold << ";";
+    EXPECT_NE(text.str().find(expected.str()), std::string::npos) << expected.str();
 }
 
 } // namespace

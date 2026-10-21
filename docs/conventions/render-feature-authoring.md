@@ -135,17 +135,19 @@ sun, the ambient and the cascade shadow data (read from the Shadow `Receiver` ch
 scene uniform block (`SetSceneUniforms`) for every view. It also reads the `Atmosphere.SunLight` channel and scales the sun
 and ambient with it. It declares no pass.
 
-`src/Features/Atmosphere/AtmosphereFeature.cpp`: five registrations.
+`src/Features/Atmosphere/AtmosphereFeature.cpp`: six registrations.
 
 - `AtmosphereSharedLut` (`PreOpaqueShared`): transmittance and multi-scattering LUTs as shared `PersistentTarget`s,
   published through a `Channel` that every view reads.
-- `AtmosphereViewLut` (`PreOpaque`): per view a sky-view LUT (`PersistentTarget`) and an aerial perspective
-  `PersistentVolume` (128x128x32, RGBA16F), written by `Compute`.
+- `AtmosphereViewLut` (`PreOpaque`): per view a sky-view LUT (`PersistentTarget`), written by `Compute`.
 - `Atmosphere.SunLight` (`PreOpaque`, `Gate::Always`): publishes the `SunLightModulation` channel for the scene lighting
   and the light shafts.
+- `AtmosphereAerialVolume` (`PostOpaque`, priority 20): reads the shared LUTs and the Shadow `Receiver` channel
+  (`fx::ChannelReader`), writes a per-view aerial perspective `PersistentVolume` (128x128x32, RGBA16F) and a shaft delta
+  `PersistentTarget` with one `Compute`, and publishes both on the `AerialVolume` channel with a keep list.
 - `DrawSkyBackground` (`PostOpaque`): `ViewBackground` into the view color where depth is untouched.
-- `AtmosphereComposite` (`PostComposite`): a `Compute` into a `ViewOutput`, `ExposeAsViewOutput`, then a `Blit` to the
-  private target.
+- `AtmosphereComposite` (`PostComposite`): a `Compute` into a `ViewOutput` that reads the `AerialVolume` channel,
+  `ExposeAsViewOutput`, then a `Blit` to the private target.
 
 `src/Features/ToneMapping/ToneMappingFeature.cpp`: the final `PostComposite` feature (priority +1000, `fx::Blend::Replace`),
 the display transform of the frame. `Setup()` registers a `PreOpaque` frame stamp (`Gate::Always()`) and the composite.

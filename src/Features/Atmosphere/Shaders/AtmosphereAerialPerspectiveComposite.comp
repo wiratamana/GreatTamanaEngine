@@ -1,11 +1,12 @@
 #version 450
 
-// Aerial perspective composite (linear): finalColor = sceneColor * transmittance + inScattering,
-// using the aerial perspective volume sampled at the pixel's screen position and depth slice.
+// Aerial perspective composite (linear). Geometry: sceneColor * transmittance + inScattering from the volume.
+// Sky: only loses the sunlight mountains shadow in the air (the shaft delta); it never gains light.
 // 16x16 threads per group; the dispatch is rounded up, so out-of-range threads return early.
 layout(local_size_x = 16, local_size_y = 16) in;
 
 #include "AtmosphereCommon.glsl"
+#include "SceneDepthConstants.glsl"
 
 layout(push_constant) uniform PushConstants {
     mat4 invViewProjection;
@@ -13,12 +14,15 @@ layout(push_constant) uniform PushConstants {
     vec4 cameraWorldPositionAndScale;
     // x = strength (1 = physical, 0 = pass-through), y = max distance (km), z = depth exponent, w = unused.
     vec4 aerialPerspectiveStrengthAndPad;
+    // x = sky intensity (the sky background's scale), yzw = unused.
+    vec4 skyIntensityAndPad;
 } pc;
 
 layout(binding = 0) uniform sampler2D sourceColor;
 layout(binding = 1) uniform sampler2D sourceDepth;
 layout(binding = 2) uniform sampler3D aerialPerspectiveVolume;
-layout(binding = 3, rgba16f) uniform writeonly image2D destinationImage;
+layout(binding = 3) uniform sampler2D aerialShaftDelta;
+layout(binding = 4, rgba16f) uniform writeonly image2D destinationImage;
 
 void main()
 {
@@ -32,9 +36,11 @@ void main()
     float rawDepth = texture(sourceDepth, uv).r;
     vec3 sceneColor = texture(sourceColor, uv).rgb;
 
-    // No geometry here: the sky background already wrote the final color, so pass it through.
-    if (rawDepth >= 0.999999) {
-        imageStore(destinationImage, texel, vec4(sceneColor, 1.0));
+    // No geometry here: the sky background is final except for the light the mountains shadow in the air.
+    if (rawDepth >= kClearDepthThreshold) {
+        vec3 shaft = texture(aerialShaftDelta, uv).rgb * (pc.aerialPerspectiveStrengthAndPad.x * pc.skyIntensityAndPad.x);
+        vec3 skyColor = all(equal(shaft, vec3(0.0))) ? sceneColor : max(sceneColor + shaft, vec3(0.0));
+        imageStore(destinationImage, texel, vec4(skyColor, 1.0));
         return;
     }
 

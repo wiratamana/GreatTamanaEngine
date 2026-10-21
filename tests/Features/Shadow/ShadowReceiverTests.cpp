@@ -113,6 +113,14 @@ TEST(ShadowReceiverTest, MaterialStrengthIsZeroWhenMaterialsDoNotApplyShadows)
     EXPECT_FLOAT_EQ(MakeSunShadowReceiver(MakeMap(2), SanitizeShadowSettings(settings)).materialStrength, 0.0f);
 }
 
+TEST(ShadowReceiverTest, DepthFittedFollowsSdsmActive)
+{
+    ShadowMapData map = MakeMap(2);
+    EXPECT_FALSE(MakeSunShadowReceiver(map).depthFitted);
+    map.cascades.sdsmActive = true;
+    EXPECT_TRUE(MakeSunShadowReceiver(map).depthFitted);
+}
+
 TEST(ShadowReceiverTest, OwnerAndChannelMatchTheShadowFeatureKey)
 {
     EXPECT_STREQ(kSunShadowReceiverOwner, kShadowFeatureName);

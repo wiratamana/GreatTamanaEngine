@@ -78,7 +78,7 @@ ShadowSettings SanitizeShadowSettings(const ShadowSettings& settings) noexcept
     s.splitLambda = SanitizeFloat(settings.splitLambda, 0.0f, 1.0f, d.splitLambda);
     s.cascadeBlendFraction = SanitizeFloat(settings.cascadeBlendFraction, 0.0f, 0.5f, d.cascadeBlendFraction);
     s.distanceFadeFraction = SanitizeFloat(settings.distanceFadeFraction, 0.0f, 0.5f, d.distanceFadeFraction);
-    s.casterRange = SanitizeFloat(settings.casterRange, 1.0f, 10000.0f, d.casterRange);
+    s.casterRange = SanitizeFloat(settings.casterRange, 1.0f, kMaxCasterRange, d.casterRange);
     s.casterCullPaddingFraction =
         SanitizeFloat(settings.casterCullPaddingFraction, 0.0f, 2.0f, d.casterCullPaddingFraction);
     s.constBiasTexels = SanitizeFloat(settings.constBiasTexels, 0.0f, 16.0f, d.constBiasTexels);
@@ -217,8 +217,8 @@ ShadowCascadeSet BuildShadowCascades(const ShadowViewFrustum& frustum, const Vec
             ly = static_cast<double>(cascade.gridY) * texel;
         }
 
-        // The near plane sits at zMin (caster range toward the sun); xy is centered on the snapped center.
-        const double zMin = lz - safe.casterRange;
+        // The near plane sits casterRange beyond the sphere toward the sun; xy is centered on the snapped center.
+        const double zMin = lz - static_cast<double>(radius) - safe.casterRange;
         const double zMax = lz + radius;
         const Mat4 view = Mat4::Translation(
                               Vec3(static_cast<float>(-lx), static_cast<float>(-ly), static_cast<float>(-zMin)))
@@ -322,6 +322,7 @@ SunShadowReceiver MakeSunShadowReceiver(const ShadowMapData& map, const ShadowSe
     r.normalOffsetTexels = safe.normalOffsetTexels;
     r.slopeBiasTexels = std::max(safe.slopeBiasTexels, safe.filterRadiusTexels);
     r.filterSamples = safe.filterSamples;
+    r.depthFitted = set.sdsmActive;
     return r;
 }
 

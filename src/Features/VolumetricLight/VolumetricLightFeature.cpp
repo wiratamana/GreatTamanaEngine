@@ -183,7 +183,7 @@ void VolumetricLightFeature::VolumePass(fx::PostOpaqueFrame& f)
         return;
     }
 
-    const bool hasReceiver = published.has_value() && VolumetricLightReceiverUsable(*published);
+    const bool hasReceiver = published.has_value() && SunShadowReceiverUsable(*published);
     const SunShadowReceiver* receiver = hasReceiver ? &*published : nullptr;
     snap.receiver = hasReceiver ? VolumetricLightReceiverState::Used
         : published.has_value() ? VolumetricLightReceiverState::Rejected

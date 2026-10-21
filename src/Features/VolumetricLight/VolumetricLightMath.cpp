@@ -23,17 +23,9 @@ constexpr float kSunMoveResetDegrees = 1.0f;
 constexpr float kFadeStartDegrees = -2.0f;
 constexpr float kFadeEndDegrees = 5.0f;
 
-constexpr float kReceiverForwardTolerance = 0.01f;
-
 bool IsFinite(const Vec3& v) noexcept
 {
     return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
-}
-
-bool IsFinite(const Mat4& m) noexcept
-{
-    const float* data = m.Data();
-    return std::all_of(data, data + 16, [](float f) { return std::isfinite(f); });
 }
 
 float SanitizeFloat(float value, float lo, float hi, float fallback) noexcept
@@ -288,29 +280,6 @@ float VolumetricLightSunFade(const Vec3& directionTowardSun) noexcept
     const Vec3 d = SafeDirection(directionTowardSun);
     const float elevation = RadToDeg(std::asin(std::clamp(d.y, -1.0f, 1.0f)));
     return SmoothStep(kFadeStartDegrees, kFadeEndDegrees, elevation);
-}
-
-bool VolumetricLightReceiverUsable(const SunShadowReceiver& r) noexcept
-{
-    if (r.cascadeCount < 1 || r.cascadeCount > kSunShadowReceiverMaxCascades || r.resolution == 0) {
-        return false;
-    }
-    if (!IsFinite(r.cameraPosition) || !IsFinite(r.cameraForward)
-        || std::abs(Length(r.cameraForward) - 1.0f) > kReceiverForwardTolerance) {
-        return false;
-    }
-    float previousSplit = 0.0f;
-    for (std::uint32_t c = 0; c < r.cascadeCount; ++c) {
-        const bool good = r.maps[c].IsValid() && IsFinite(r.viewProjection[c]) && std::isfinite(r.splitFar[c])
-            && r.splitFar[c] > 0.0f && r.splitFar[c] >= previousSplit && std::isfinite(r.blendWidth[c])
-            && std::isfinite(r.texelWorld[c]) && r.texelWorld[c] > 0.0f && std::isfinite(r.depthRange[c])
-            && r.depthRange[c] > 0.0f;
-        if (!good) {
-            return false;
-        }
-        previousSplit = r.splitFar[c];
-    }
-    return true;
 }
 
 VolumetricLightCascadePick VolumetricLightPickCascade(float planarDepth, const SunShadowReceiver& receiver) noexcept

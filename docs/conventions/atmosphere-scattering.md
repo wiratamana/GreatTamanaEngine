@@ -16,15 +16,21 @@ editor panel reaches it with `fx::FeatureOf<AtmosphereFeature>`. FeaturePurityCh
 
 | Registration | Stage | Work |
 |---|---|---|
-| `AtmosphereSharedLut` | `PreOpaqueShared` | Transmittance LUT (256x256 RGBA8) and multi-scattering LUT (64x64 RGBA16F) as shared `PersistentTarget`s. Published through a `Channel` that every view reads. |
-| `AtmosphereViewLut` | `PreOpaque` | Per view: sky-view LUT (200x100 RGBA16F, `PersistentTarget`) and aerial perspective volume (128x128x32 RGBA16F, `PersistentVolume`). |
-| `Atmosphere.SunLight` | `PreOpaque` (`Gate::Always`) | Sun transmittance and sky light factors for materials and light shafts, published as `SunLightModulation` (`src/Game/Lighting/SunLightModulation.h`). |
-| `DrawSkyBackground` | `PostOpaque` | `ViewBackground`: a fullscreen draw into the view color where depth is still the clear value. Counted in the per-view draw statistics. |
-| `AtmosphereComposite` | `PostComposite` (alpha over) | Aerial perspective composite compute into a `ViewOutput`, exposed as `GameViewComposited` / `SceneViewComposited`, then a blit to the private target. |
+| `AtmosphereSharedLut` | `PreOpaqueShared` (priority -10) | Transmittance LUT (256x256 RGBA8) and multi-scattering LUT (64x64 RGBA16F) as shared `PersistentTarget`s. Published through the `SharedLuts` channel that every view reads. |
+| `AtmosphereViewLut` | `PreOpaque` (priority 0) | Per view: sky-view LUT (200x100 RGBA16F, `PersistentTarget`). Published through the `ViewLuts` channel (sky-view LUT and frame values). Gate: `AtmosphereSkyViewLutPass`. |
+| `Atmosphere.SunLight` | `PreOpaque` (priority 5, `Gate::Always`) | Sun transmittance and sky light factors for materials and light shafts, published as `SunLightModulation` (`src/Game/Lighting/SunLightModulation.h`). |
+| `AtmosphereAerialVolume` | `PostOpaque` (priority 20) | Per view: aerial perspective volume (128x128x32 RGBA16F, `PersistentVolume`) and shaft delta image (128x128 RGBA16F, `PersistentTarget`), shadowed by the Shadow `Receiver`. Published through the `AerialVolume` channel. Gate: `AtmosphereAerialPerspectiveVolumePass`. |
+| `DrawSkyBackground` | `PostOpaque` (priority 100) | `ViewBackground`: a fullscreen draw into the view color where depth is still the clear value. Counted in the per-view draw statistics. |
+| `AtmosphereComposite` | `PostComposite` (priority -1000, alpha over) | Aerial perspective composite compute into a `ViewOutput`, exposed as `GameViewComposited` / `SceneViewComposited`, then a blit to the private target. Reads the `AerialVolume` channel. |
+
+Data flow per view: `SharedLuts` (shared) -> `ViewLuts` (sky background) and, with the Shadow `Receiver` (published in
+`PreOpaque`), `AerialVolume` -> composite. A reader always sits in a later stage or at a larger priority than its
+publisher. The aerial volume pass appears in the Frame Debugger under "Compute Dispatches (Post-GameView)".
 
 Toggle names (Render Graph panel and `/render_graph/set_pass_enabled`): `AtmosphereTransmittanceLutPass`,
 `AtmosphereMultiScatteringLutPass`, `AtmosphereSkyViewLutPass`, `AtmosphereAerialPerspectiveVolumePass`,
 `DrawSkyBackground`, `AtmosphereAerialPerspectiveCompositePass`, `AtmosphereComposite.CopyToPrivateTarget`.
+With the volume pass off nothing is published, so the composite is not declared and the view holds the plain scene color.
 
 Sky background replay: the Frame Debugger replays the Game view sky background through `rg::FullscreenReplay` (see
 [frame-debugger.md](frame-debugger.md)). Composite output: the Frame Debugger shows the exposed
@@ -39,10 +45,11 @@ When the composite pass is off, the view still holds the scene color of the earl
   transcription of it. If a shader and the oracle disagree, the oracle is right and the shader is fixed. Add the CPU
   math first when adding a LUT.
 - **Shader binding names are the C++ contract.** The compute shaders name their storage blocks `params`
-  (`AtmosphereParametersGpu`, one shared `GpuParams`) and `frame` (`AtmosphereFrameUniforms`, per view). Images and
-  samplers keep their GLSL names: `transmittanceLutImage`, `multiScatteringLutImage`, `destinationImage`,
-  `destinationVolume`, `transmittanceLut`, `multiScatteringLut`, `skyViewLut`, `sourceColor`, `sourceDepth`,
-  `aerialPerspectiveVolume`. Rename a variable and the chain logs the valid names.
+  (`AtmosphereParametersGpu`), `frame` (`AtmosphereFrameUniforms`, per view) and, in the aerial volume shader, `shadow`
+  (`AerialShadowParamsGpu`, 384 bytes). Images and samplers keep their GLSL names: `transmittanceLutImage`,
+  `multiScatteringLutImage`, `destinationImage`, `destinationVolume`, `destinationShaftDelta`, `transmittanceLut`,
+  `multiScatteringLut`, `shadowDepth0..3`, `sceneDepth`, `skyViewLut`, `sourceColor`, `sourceDepth`,
+  `aerialPerspectiveVolume`, `aerialShaftDelta`. Rename a variable and the chain logs the valid names.
 - **`AtmosphereParametersGpu` and `AtmosphereFrameUniforms` are read-only storage buffers** (`layout(std430, ...)
   readonly buffer`), never a uniform block. Scene Services binding 8 (`src/Shaders/DirectionalLighting.glsl`)
   is the engine's one uniform-buffer exception.
@@ -82,19 +89,64 @@ When the composite pass is off, the view still holds the scene color of the earl
   It applies no curve. The composite output (`m_composited`) is RGBA16F and computes `scene * transmittance + inScattering`
   in linear space. The ToneMapping feature runs after it and owns exposure, the curve and the sRGB encode. The transmittance
   LUT stays RGBA8_UNorm.
-- **The composite is a pass-through on pixels with no geometry** (`rawDepth >= 0.999999`, the clear depth). The sky
-  background already finished those pixels. The decision is a CPU oracle in
-  `AtmosphereAerialPerspectiveCompositeMath.h/.cpp` (`ShouldBypassAerialPerspectiveComposite`,
-  `ComputeAerialPerspectiveCompositeColor`) and is covered by Tier-1 tests. The threshold constant must equal the shader
-  literal.
+- **Sky pixels only lose shaft light in the composite.** A pixel with no geometry (`rawDepth >= kClearDepthThreshold`, 0.999999,
+  defined once in `src/Shaders/SceneDepthConstants.glsl`) becomes `sceneColor + shaftDelta * strength * skyIntensity`,
+  clamped at 0. A zero delta returns the scene color exactly, the result is never brighter than the scene color, and the
+  volume is ignored for sky. Geometry pixels use the volume: `scene * transmittance + inScattering`. The decision is a CPU
+  oracle in `AtmosphereAerialPerspectiveCompositeMath.h/.cpp` (`IsClearDepth`, `ComputeAerialPerspectiveCompositeColor`)
+  covered by Tier-1 tests; a test pins the CPU constant to the GLSL file. The composite push block is 112 bytes.
+- **The aerial volume pass runs in `PostOpaque`, after the sun cascades exist.** `AtmosphereAerialVolume` (priority 20)
+  fetches `SharedLuts` and the Shadow `Receiver` channel and tests the cascades per march sample through the shared
+  `src/Shaders/OrthoMapSetVisibility.glsl` (one copy shared with `VolumetricLightInject.comp`; the includer defines the
+  `ORTHO_*` macros first). In-scattering is shadowed by mountains. The multi-scattering LUT already holds sun shadowing and
+  is not shadowed again. Air outside all cascades counts as lit. With no usable receiver the cascade count is 0 and no
+  shadow tap runs.
+- **The receiver is used only when it is safe.** `SunShadowReceiverUsable()` (`Game/Lighting/SunShadowReceiver.h`) must be
+  true and `Dot(receiver.directionTowardSun, this frame's sun) >= 0.9999`. The state is `Used`, `Missing`, `Rejected` or
+  `Mismatch` (`NotChecked` when the pass did not run). `Rejected` and `Mismatch` are reported once with `ReportOnce`.
+- **Shaft delta.** The same pass writes a 128x128 RGBA16F image (`PersistentTarget`) with the physical, unexaggerated sun
+  light that shadows remove along each column. It is always zero or negative and stops at the aerial max distance. The
+  composite applies it to sky pixels. The dispatch always writes it, so it is valid whenever the volume is.
+- **The pass publishes one record.** `AtmosphereAerialResult` (`AtmosphereFeature.h`: volume, shaft delta, max distance,
+  depth exponent) goes out on the `AerialVolume` channel with a keep list, only after the dispatch was declared. The
+  composite takes max distance and depth exponent from it, never from `AtmosphereSettings`. The pass binds the scene depth
+  (`sceneDepth`) only so the `PostOpaque` callback declares a read of it. Each pass owns its own `GpuParams` object
+  (`skyFrameParams`, `aerialAtmosphereParams`, `aerialFrameParams`, `aerialShadowParams` per view).
+- **Auto scale picks the haze range.** `AtmosphereSettings::autoScale` (default true) feeds `ComputeAerialScale`
+  (`AtmosphereAerialPerspectiveMath.h`) with `visibleFarKm`, the last cascade split divided by 1000 from a receiver whose
+  `depthFitted` is true. With `x = visibleFarKm * 1.25`: `maxDistanceKm = clamp(0.5 * exp2(ceil(log2(x / 0.5) * 4 - 1e-4) / 4),
+  0.5, 30)`, `exaggeration = clamp(4 / maxDistanceKm, 1, 8)`, `shadowBlend = smoothstep(0.5, 4.0, maxDistanceKm)`. Bad
+  input gives 0.5 km, 8x, blend 0. The grid has 4 steps per octave, so values inside one cell never flicker. The state
+  updates only with a fitted receiver; otherwise the last scale is held for up to 120 frames, then the settings values
+  apply with blend 0. With no state yet the settings values apply with blend 0. A small scene (far about 0.04 km) gets
+  0.5 km, 8x, blend 0, and the volume pass does zero shadow taps.
+- **Manual mode.** With `autoScale` off the sliders apply and `shadowBlend` is 1. With it on, the max distance and
+  exaggeration sliders are fallbacks only; the panel shows them disabled with the effective values. Depth exponent,
+  samples and strength always apply.
 - **The froxel tunables are `AtmosphereSettings` fields**, not shader constants: `aerialPerspectiveMaxDistanceKm`,
-  `aerialPerspectiveDepthExponent`, `aerialPerspectiveSamplesPerSlice`, `aerialPerspectiveScatteringExaggeration`.
-  They reach the volume shader through `AtmosphereFrameUniforms` and the composite shader through push constants. They are
-  live sliders in the "Atmosphere" panel (`Editor/AtmospherePanel.cpp`). Shipped defaults: 0.5 km max distance, depth
-  exponent 2.0, 8 samples per slice, scattering exaggeration 8.0 (real-Earth scale values are too faint at the
-  distances the test content uses). The exaggeration multiplies only the extinction and scattering inside the volume
-  shader; the shared oracle functions used by the LUTs are never scaled.
+  `aerialPerspectiveDepthExponent`, `aerialPerspectiveSamplesPerSlice` (1..16), `aerialPerspectiveScatteringExaggeration`.
+  The per-frame values reach the volume shader through `AtmosphereFrameUniforms`. They are live sliders in the "Atmosphere"
+  panel (`Editor/AtmospherePanel.cpp`). The defaults (0.5 km, depth exponent 2.0, 8 samples, exaggeration 8.0) are the
+  small-scene values; larger scenes rely on auto scale. The exaggeration multiplies only the extinction and scattering
+  inside the volume shader; the shared oracle functions and the shaft delta are never scaled.
+- **Settings are stored only through `SanitizeAtmosphereSettings()`** (`AtmosphereParameters.h`). `Settings()` is const and
+  `ApplySettings(candidate)` sanitizes. A non-finite value becomes the field default. Ranges: planet radius 1..50000 km,
+  atmosphere thickness 1..500 km, multi-scattering 0..10, Rayleigh and Mie scale height 0.01..100 km, Mie g -0.99..0.99,
+  ozone center and half width 0..100 km, scattering and absorption colors and ground albedo 0..1, aerial strength 0..2, sky
+  intensity 0..50, aerial max distance 0.01..50 km, depth exponent 1..4, samples 1..16, exaggeration 0.1..50. The panel
+  edits a copy and calls `ApplySettings` when a value changed.
+- **HTTP: `/feature_debug/state?name=Atmosphere` and `/feature_debug/set?name=Atmosphere&key=value`.** Writable keys:
+  `sceneLightFollowsAtmosphere`, `autoScale`, `aerialPerspectiveStrength`, `aerialPerspectiveMaxDistanceKm`,
+  `aerialPerspectiveDepthExponent`, `aerialPerspectiveSamplesPerSlice`, `aerialPerspectiveScatteringExaggeration`. One bad key
+  (non-finite, text, negative integer, huge) voids the whole request with HTTP 400 naming the key; finite out-of-range floats
+  are clamped by the sanitizer. Read-only keys per view (prefix `game.` or `scene.`): `active`, `sunTintR/G/B`,
+  `ambientScale`, `frameIndex`, `aerial.maxDistanceKm`, `aerial.exaggeration`, `aerial.shadowBlend`, `aerial.cascadeCount`,
+  `aerial.receiver` (`Used`, `Missing`, `Rejected`, `Mismatch`, `NotChecked`), `aerial.scaleHeld`, `aerial.frameIndex`.
+  Writing a read-only key fails with `key is read-only`.
+- **Limits.** Air outside all cascades is lit, so with depth-fitted cascades shadows of mountains beyond the farthest visible
+  pixel do not reach sky rays. The shaft delta stops at the aerial max distance. World coordinates beyond about 100000 m from
+  the origin lose shadow-lookup precision. The first frames after a start or a Shadow toggle use the settings values.
 - **`AtmosphereSettings` and `DirectionalLight` are not serialized.** `Scene/SceneTextFormat.h` stores only primitive and
-  mesh-asset sources. Settings live for the running session.
+  mesh-asset sources. Settings live for the running session; apply them again after every scene load.
 - **Per-pass GPU timing for these passes reads `Absent`** when the synchronous timing-slot budget is exhausted. Do not add
   `GpuTimingSlot` enumerators per atmosphere pass.

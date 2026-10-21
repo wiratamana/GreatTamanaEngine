@@ -1,6 +1,8 @@
 #version 450
 layout(local_size_x = 16, local_size_y = 16) in;
 
+#include "SceneDepthConstants.glsl"
+
 layout(push_constant) uniform Push {
     mat4 invViewProjection;
     vec4 eyeAndPad;
@@ -28,7 +30,7 @@ void main()
     uint invFarBits = 0xFFFFFFFFu;
     if (p.x < size.x && p.y < size.y) {
         float depth = texelFetch(sceneDepth, p, 0).r;
-        if (depth < 0.999999) {
+        if (depth < kClearDepthThreshold) {
             vec2 uv = (vec2(p) + 0.5) / vec2(size);
             vec4 world = pc.invViewProjection * vec4(uv * 2.0 - 1.0, depth, 1.0);
             float z = dot(world.xyz / world.w - pc.eyeAndPad.xyz, pc.forwardAndPad.xyz);

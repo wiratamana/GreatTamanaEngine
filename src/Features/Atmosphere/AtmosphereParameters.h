@@ -19,4 +19,8 @@ float AtmosphereRadiusKm(const AtmosphereParametersGpu& params) noexcept;
 // the planet radius. A non-positive worldUnitsPerKm returns Vec3::Zero().
 Vec3 WorldPositionToAtmosphereSpaceKm(Vec3 worldPosition, float worldUnitsPerKm = kWorldUnitsPerKilometer) noexcept;
 
+// Clamps every field into its valid range. A non-finite value becomes that field's default.
+// Settings are stored only through this function. Idempotent.
+AtmosphereSettings SanitizeAtmosphereSettings(const AtmosphereSettings& settings) noexcept;
+
 } // namespace gte

@@ -152,6 +152,8 @@ TEST(FrameDebuggerSideChannelCheckerTest, ChannelRulesUseTheKitsOwnKeyFunction)
             rules, fx::ChannelKey("VolumetricLight", "Result", id), "VolumetricLight.Inject.Dispatch")) << view;
         EXPECT_TRUE(HasRuleWithKey(
             rules, fx::ChannelKey("VolumetricLight", "Result", id), "VolumetricLight.Integrate.Dispatch")) << view;
+        EXPECT_TRUE(HasRuleWithKey(
+            rules, fx::ChannelKey("Atmosphere", "AerialVolume", id), "AtmosphereAerialPerspectiveVolumePass")) << view;
     }
 }
 

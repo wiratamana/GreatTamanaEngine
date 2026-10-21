@@ -12,9 +12,9 @@ around both widgets and shows "Programmer error: N visible items with conflictin
 ID!" on hover. It looks like a rendering bug and is slow to diagnose.
 
 Pass names are not unique per view. The Atmosphere feature declares
-`"AtmosphereSkyViewLutPass"` and `"AtmosphereAerialPerspectiveVolumePass"` once
+`"AtmosphereSkyViewLutPass"` (in `ViewLuts()`) and `"AtmosphereAerialPerspectiveVolumePass"` (in `AerialVolume()`) once
 for the Game view and once for the Scene view, under the same literal names
-(`src/Features/Atmosphere/AtmosphereFeature.cpp`, `ViewLuts()`). The toggle
+(`src/Features/Atmosphere/AtmosphereFeature.cpp`). The toggle
 registry is keyed by pass name, so one checkbox controls both. Any UI list that
 builds an ID from a pass name alone can therefore see the same name twice in one
 frame. Never assume a data string is unique.
