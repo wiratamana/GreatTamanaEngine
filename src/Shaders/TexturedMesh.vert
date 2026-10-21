@@ -1,6 +1,6 @@
 #version 450
 
-// Textured mesh vertex shader: position + normal + uv vertices, world-space normal output.
+// Textured mesh vertex shader: position + normal + uv vertices, world-space normal and position outputs.
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
@@ -13,10 +13,13 @@ layout(location = 2) in vec2 inUv;
 
 layout(location = 0) out vec3 outWorldNormal;
 layout(location = 1) out vec2 outUv;
+layout(location = 2) out vec3 outWorldPos;
 
 void main()
 {
-    gl_Position = pc.viewProj * (pc.model * vec4(inPosition, 1.0));
+    vec4 world = pc.model * vec4(inPosition, 1.0);
+    gl_Position = pc.viewProj * world;
+    outWorldPos = world.xyz;
     // mat3(model) is exact only for rotation and uniform scale; no inverse-transpose.
     outWorldNormal = mat3(pc.model) * inNormal;
     outUv = inUv;

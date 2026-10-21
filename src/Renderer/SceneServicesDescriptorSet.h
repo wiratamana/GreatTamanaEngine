@@ -55,9 +55,8 @@ rg::RenderPassId SceneServiceBlackboardKey(std::uint32_t slotIndex, rg::RenderVi
 
 class Renderer;
 
-// Fixed ceiling for binding 8's packed per-frame lighting UBO (std140-safe). The feature's own
-// settings struct must fit inside this many bytes.
-inline constexpr uint64_t kSceneGlobalUniformBlockSize = 128;
+// Fixed ceiling in bytes for binding 8's per-frame lighting uniform block (std140).
+inline constexpr uint64_t kSceneGlobalUniformBlockSize = 512;
 
 // Owns the scene-services descriptor-set layout (set 1 at the Pipeline level) and one VkDescriptorSet per active view;
 // a shared set would be unsafe with same-frame Game and Scene views.

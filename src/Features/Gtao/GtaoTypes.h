@@ -1,9 +1,9 @@
 #pragma once
 
 #include "../../Core/Extent.h"
+#include "../../Core/FeatureKit/ScreenSpaceView.h"
 #include "../../Core/FeatureKit/Texture.h"
 #include "../../Math/Mat4.h"
-#include "../../Math/Vec3.h"
 
 #include <cstdint>
 #include <type_traits>
@@ -45,37 +45,14 @@ struct GtaoSettings {
     bool temporal = true;
     float historyWeight = 0.9f;            // 0..0.98
     float depthSigma = 0.03f;              // Relative depth tolerance of the bilateral filters, 0.001..0.5.
-    bool applyInLinearSpace = true;        // false multiplies the encoded color directly.
     GtaoDebugView debugView = GtaoDebugView::Off;
-};
-
-// Camera data derived from invViewProjection once per view and frame. Perspective cameras only.
-struct GtaoCameraBasis {
-    bool valid = false;
-    Vec3 eye;
-    Vec3 right;              // Unit, world direction of increasing pixel x.
-    Vec3 down;               // Unit, world direction of increasing pixel y.
-    Vec3 forward;            // Unit, optical axis toward the scene.
-    float pixelScale = 0.0f; // World size of one pixel at view depth 1.
-};
-
-// Previous-frame data the temporal filter reprojects with. Valid only if the resolve pass wrote it.
-struct GtaoHistory {
-    bool valid = false;
-    std::uint64_t frame = 0;
-    Extent2D extent{};
-    std::uint32_t divisor = 0;
-    std::uint32_t stableFrames = 0; // Frames in a row the AO extent and divisor did not change.
-    Mat4 viewProjection = Mat4::Identity();
-    Vec3 eye;
-    Vec3 forward;
 };
 
 // Channel "Result": occlusion pass to composite pass.
 struct GtaoResult {
     fx::Texture ao; // x visibility, y view depth (0 = sky) per texel.
     std::uint32_t divisor = 1;
-    GtaoCameraBasis basis;
+    fx::CameraBasis basis;
 };
 
 // What the panel and the endpoint read, one per view scope.
@@ -104,26 +81,12 @@ struct GtaoMainParamsGpu {
 static_assert(sizeof(GtaoMainParamsGpu) == 192);
 static_assert(std::is_trivially_copyable_v<GtaoMainParamsGpu>);
 
-// std430 block of GtaoResolve.comp; member order matches the shader.
-struct GtaoResolveParamsGpu {
-    Mat4 invViewProjection;
-    Mat4 prevViewProjection;
-    float eye[4] = {};
-    float forward[4] = {};
-    float prevEye[4] = {};
-    float prevForward[4] = {};
-    float filter[4] = {};         // x depth sigma, y history weight, z history depth tolerance, w spatial on.
-    std::uint32_t counts[4] = {}; // x divisor, y history valid, z depth width, w depth height.
-};
-static_assert(sizeof(GtaoResolveParamsGpu) == 224);
-static_assert(std::is_trivially_copyable_v<GtaoResolveParamsGpu>);
-
 // Push block of GtaoComposite.frag; the full 128 bytes a device guarantees.
 struct GtaoCompositePush {
     Mat4 invViewProjection;
     float eye[4] = {};
     float forward[4] = {};
-    float strengthLinearSigma[4] = {}; // x strength, y 1 = linear-space apply, z depth sigma.
+    float strengthReservedSigma[4] = {}; // x strength, y reserved, z depth sigma.
     std::uint32_t divisorDebug[4] = {}; // x divisor, y debug mode (0 off, 1 AO only).
 };
 static_assert(sizeof(GtaoCompositePush) == 128);

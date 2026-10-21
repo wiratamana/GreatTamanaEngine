@@ -271,6 +271,11 @@ endif()
 include(FetchCgltf)
 fetch_cgltf()
 
+# Fetches mikktspace.h/.c (tangent generator, zlib) into third_party/mikktspace and
+# defines the STATIC `mikktspace` target. See cmake/FetchMikkTSpace.cmake.
+include(FetchMikkTSpace)
+fetch_mikktspace()
+
 # Dear ImGui itself is always fetched/built - the Editor module is always
 # configured in this repo (editor-core-separation-1 campaign, PHASE8 -
 # GTE_ENABLE_EDITOR no longer exists anywhere in this codebase; PHASE9 does
@@ -453,7 +458,11 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/GpuParams.h
     src/Core/FeatureKit/GpuReadback.h
     src/Core/FeatureKit/GpuReadback.cpp
-    src/Core/FeatureKit/ReadbackVerbs.cpp
+    src/Core/FeatureKit/BufferVerbs.cpp
+    src/Core/FeatureKit/GpuBufferRef.h
+    src/Core/FeatureKit/PersistentBuffer.h
+    src/Core/FeatureKit/PersistentBuffer.cpp
+    src/Core/FeatureKit/PersistentBufferPolicy.h
     src/Core/FeatureKit/PerView.h
     src/Core/FeatureKit/PersistentTarget.h
     src/Core/FeatureKit/PersistentTarget.cpp
@@ -480,6 +489,8 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/SceneVerbs.cpp
     src/Core/FeatureKit/Texture.h
     src/Core/FeatureKit/VerbSupport.h
+    src/Core/FeatureKit/ScreenSpaceView.h
+    src/Core/FeatureKit/ScreenSpaceView.cpp
     src/Core/FeatureKit/View.h
     # editor-core-separation-6 campaign, PHASE4
     # (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the third
@@ -561,6 +572,7 @@ add_library(gte_core STATIC
     src/Math/Mat4.h
     src/Math/Quat.cpp
     src/Math/Quat.h
+    src/Math/PbrBrdf.h
     src/ECS/Entity.h
     src/ECS/EntityManager.cpp
     src/ECS/EntityManager.h
@@ -667,6 +679,8 @@ add_library(gte_core STATIC
     src/Assets/StlLoader.cpp
     src/Assets/MeshNormalRecompute.h
     src/Assets/MeshNormalRecompute.cpp
+    src/Assets/MeshTangents.h
+    src/Assets/MeshTangents.cpp
     src/Assets/MeshNormalRecomputePersistence.h
     src/Assets/MeshNormalRecomputePersistence.cpp
     src/Assets/MaterialData.h
@@ -754,6 +768,10 @@ add_library(gte_core STATIC
     src/Renderer/SwapchainCaptureService.h
     src/Renderer/GpuResourceFactory.cpp
     src/Renderer/GpuResourceFactory.h
+    src/Renderer/MaterialSetPool.cpp
+    src/Renderer/MaterialSetPool.h
+    src/Renderer/MaterialImageRole.h
+    src/Renderer/UploadChunker.h
     src/Renderer/Buffer.cpp
     src/Renderer/Buffer.h
     src/Renderer/Texture2D.h
@@ -945,6 +963,10 @@ add_library(gte_core STATIC
     src/Game/Instantiation/PrimitiveGpuCatalog.h
     src/Game/Instantiation/MaterialTextureGpuCache.cpp
     src/Game/Instantiation/MaterialTextureGpuCache.h
+    src/Game/Instantiation/MaterialCacheKeys.h
+    src/Game/Instantiation/MaterialLifetimeRules.cpp
+    src/Game/Instantiation/MaterialLifetimeRules.h
+    src/Game/Instantiation/MeshAssetPipelineKind.h
     src/Game/Instantiation/MeshAssetGpuCatalog.cpp
     src/Game/Instantiation/MeshAssetGpuCatalog.h
     src/Game/Instantiation/MeshAssetPartGrouping.cpp
@@ -1541,6 +1563,9 @@ target_link_libraries(gte_core PRIVATE saba_pmx)
 # cgltf is an implementation detail of src/Assets/GltfLoader.cpp.
 target_link_libraries(gte_core PRIVATE cgltf)
 
+# MikkTSpace is used by src/Assets/MeshTangents.cpp only.
+target_link_libraries(gte_core PRIVATE mikktspace)
+
 # editor-core-separation-2 campaign, PHASE4 - the REAL, mechanical proof
 # that gte_core.a links standalone (design doc Section 1.3, Rule 3) - a
 # genuinely separate concern from GTE_CORE_STANDALONE_PROBE_ONLY's own
@@ -1710,6 +1735,15 @@ gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMesh.frag
 gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMeshAlphaTest.frag
     EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/MaterialParams.glsl)
 
+# PBR half of the imported-mesh draw path (VertexLayout::PositionNormalUvTangent).
+gte_add_shader(GreatTamanaEditor src/Shaders/PbrMesh.vert)
+gte_add_shader(GreatTamanaEditor src/Shaders/PbrMesh.frag
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/MaterialParams.glsl
+                  src/Shaders/PbrBrdf.glsl src/Shaders/PbrMaterial.glsl)
+gte_add_shader(GreatTamanaEditor src/Shaders/PbrMeshAlphaTest.frag
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/MaterialParams.glsl
+                  src/Shaders/PbrBrdf.glsl src/Shaders/PbrMaterial.glsl)
+
 # GPU Vertex Skinning, Phase 2 (compute kernels) -
 # task_manager/gpu_skinning/GPU_SKINNING_PHASE2_COMPUTE_KERNEL_STRATEGY_v1.md.
 # Unconditional (NOT gated behind GTE_ENABLE_EDITOR/GTE_ENABLE_PROJECT_PANEL,
@@ -1720,6 +1754,10 @@ gte_add_shader(GreatTamanaEditor src/Shaders/TexturedMeshAlphaTest.frag
 # tool - it must work in a non-Editor, release build too.
 gte_add_shader(GreatTamanaEditor src/Shaders/SkinVerticesPositionNormal.comp)
 gte_add_shader(GreatTamanaEditor src/Shaders/SkinVerticesPositionNormalUv.comp)
+
+# Copies the engine-owned Game target into the swapchain when no view panel is shown.
+gte_add_shader(GreatTamanaEditor src/Shaders/PresentBlit.vert)
+gte_add_shader(GreatTamanaEditor src/Shaders/PresentBlit.frag)
 
 # The Inspector's Mesh Asset 3D preview viewer (src/Editor/AssetPreviewMesh.h)
 # needs its own small shader pair, compiled/staged the exact same way as

@@ -89,7 +89,7 @@ public:
     void EndOffscreenRenderGraphRecording();
 
     // Executes swapchain presentation passes using the render graph.
-    std::optional<DrawStats> PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwapchainDepth,
+    std::optional<DrawStats> PresentViaRenderGraph(rg::RenderGraph& graph,
         const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build);
 
     // Formats used by the current swapchain and depth buffer.
@@ -97,6 +97,9 @@ public:
     VkFormat DepthFormat() const noexcept;
     PixelFormat ColorPixelFormat() const noexcept;
     PixelFormat DepthPixelFormat() const noexcept;
+
+    // Format of scene color: view targets and the pipelines that draw scene geometry into them.
+    PixelFormat ScenePixelFormat() const noexcept;
 
     // Creates an offscreen render target. transferSrc/transferDst add the image usage bits copy, clear and blit need.
     RenderTexture CreateRenderTexture(int width, int height, PixelFormat format = PixelFormat::Undefined,
@@ -132,6 +135,9 @@ public:
     // code (a project assembly) whose callbacks, pipelines or buffers the GPU may still use.
     void DrainGpuForCodeUnload() const;
 
+    // Same wait, named as the sanctioned barrier before destroying textures, buffers or sets the GPU may still read.
+    void DrainGpuForResourceRelease() const;
+
     // The device reference rg::GpuBuffer is created from.
     rg::DeviceRef Device() noexcept { return rg::DeviceRef(this); }
 
@@ -164,7 +170,7 @@ public:
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
         const Mat4& viewProjMatrix = Mat4::Identity());
 
-    // Graphics pipeline factories.
+    // Scene geometry pipeline. Builds against ScenePixelFormat().
     Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
         VertexLayout vertexLayout = VertexLayout::PositionColor, bool useMaterialTexture = false,
         const char* debugName = nullptr, bool useInstanceBuffer = false,
@@ -210,12 +216,15 @@ public:
     // Texture creation factories.
     Texture2D CreateTexture2D(const Texture2DUploadDesc& desc) const;
 
-    // Uploads `pixelsRgba8` as an sRGB base-color image with a mip chain and wraps it in a material.
-    MaterialTexture CreateMaterialTexture2D(const void* pixelsRgba8, int width, int height,
-        const MaterialParams& params = {}, const char* debugName = nullptr) const;
+    // Batched upload with mip chains (sRGB for base color, UNORM otherwise); index-aligned with `uploads`,
+    // a null entry for an invalid upload. Throws on a GPU failure.
+    std::vector<std::shared_ptr<Texture2D>> CreateMaterialImages(std::span<const MaterialImageUpload> uploads) const;
 
-    // A new material (own params block and descriptor set) over an image that already exists.
-    MaterialTexture CreateMaterialVariant(std::shared_ptr<Texture2D> image, const MaterialParams& params) const;
+    // Finished texture uploads since creation (submits, images, staging bytes).
+    GpuUploadStats GetUploadStats() const noexcept;
+
+    // A new material (own params block and set) over `images`; null entries use the default image of the slot.
+    MaterialTexture CreateMaterialVariant(const MaterialImages& images, const MaterialParams& params) const;
 
     VolumeTexture CreateVolumeTexture(
         int width, int height, int depth, PixelFormat format, const char* debugName = nullptr) const;

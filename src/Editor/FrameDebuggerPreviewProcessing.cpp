@@ -1,5 +1,6 @@
 #include "FrameDebuggerPreviewProcessing.h"
 
+#include "../Math/ToneMapCurves.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/ComputePass.h"
 #include "../Renderer/RenderGraph/OneShot.h"
@@ -24,13 +25,23 @@ struct PushConstants {
     std::int32_t channel = 0;
     float levelsBlack = 0.0f;
     float levelsWhite = 1.0f;
+    std::int32_t sceneReferred = 0;
 };
+static_assert(sizeof(PushConstants) == 16);
 
 } // namespace
 
-std::array<float, 4> ApplyFrameDebuggerPreviewTransform(
-    std::array<float, 4> srcRgba, FrameDebuggerPreviewChannel channel, float levelsBlack, float levelsWhite) noexcept
+std::array<float, 4> ApplyFrameDebuggerPreviewTransform(std::array<float, 4> srcRgba, FrameDebuggerPreviewChannel channel,
+    float levelsBlack, float levelsWhite, bool sceneReferred) noexcept
 {
+    if (sceneReferred) {
+        const Vec3 display = tonemap::ToneMapLinearToDisplay(Vec3{ srcRgba[0], srcRgba[1], srcRgba[2] },
+            tonemap::kDefaultExposure, tonemap::kDefaultMode, tonemap::kDefaultSaturation);
+        srcRgba[0] = display.x;
+        srcRgba[1] = display.y;
+        srcRgba[2] = display.z;
+    }
+
     const std::array<float, 4> leveled{
         RemapLevels(srcRgba[0], levelsBlack, levelsWhite),
         RemapLevels(srcRgba[1], levelsBlack, levelsWhite),
@@ -55,7 +66,7 @@ std::array<float, 4> ApplyFrameDebuggerPreviewTransform(
 }
 
 const Texture2D& FrameDebuggerPreviewRenderer::RenderPreview(Renderer& renderer, const RenderTexture& source,
-    FrameDebuggerPreviewChannel channel, float levelsBlack, float levelsWhite)
+    FrameDebuggerPreviewChannel channel, float levelsBlack, float levelsWhite, bool sceneReferred)
 {
     const Extent2D extent = source.Extent();
     const int width = static_cast<int>(extent.width);
@@ -76,7 +87,7 @@ const Texture2D& FrameDebuggerPreviewRenderer::RenderPreview(Renderer& renderer,
     rg::ComputePass(oneShot.Builder(), m_shader, "FrameDebuggerPreview", rg::ViewScope::Shared, rg::RenderPassEvent::Opaques)
         .Bind("sourceTex", src)
         .Bind("outputImage", dst)
-        .Push(PushConstants{ static_cast<std::int32_t>(channel), levelsBlack, levelsWhite })
+        .Push(PushConstants{ static_cast<std::int32_t>(channel), levelsBlack, levelsWhite, sceneReferred ? 1 : 0 })
         .Dispatch(extent);
     oneShot.Run();
     return *m_outputTexture;

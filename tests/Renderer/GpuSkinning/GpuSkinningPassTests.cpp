@@ -21,6 +21,13 @@ bool HasBinding(const ShaderReflectionResult& result, const char* name, std::uin
         [&](const ReflectedDescriptorBinding& b) { return b.name == name && b.set == 0 && b.binding == binding; });
 }
 
+// A write-only block declares no read: no extra dependency and no extra barrier.
+bool IsWriteOnly(const ShaderReflectionResult& result, const char* name)
+{
+    return std::any_of(result.descriptorBindings.begin(), result.descriptorBindings.end(),
+        [&](const ReflectedDescriptorBinding& b) { return b.name == name && b.access == ReflectedAccess::WriteOnly; });
+}
+
 ShaderReflectionResult Reflect(const char* path)
 {
     const ShaderStageFile stages[] = { { VK_SHADER_STAGE_COMPUTE_BIT, path } };
@@ -34,6 +41,7 @@ TEST(GpuSkinningShaderNamesTest, UntexturedShaderExposesTheBoundNames)
     EXPECT_TRUE(HasBinding(result, "skinWeights", 1));
     EXPECT_TRUE(HasBinding(result, "boneMatrices", 2));
     EXPECT_TRUE(HasBinding(result, "outputBuffer", 3));
+    EXPECT_TRUE(IsWriteOnly(result, "outputBuffer"));
     EXPECT_EQ(result.descriptorBindings.size(), 4u);
     ASSERT_TRUE(result.hasPushConstantRange);
     EXPECT_EQ(result.pushConstantRange.size, 4u);
@@ -44,6 +52,7 @@ TEST(GpuSkinningShaderNamesTest, TexturedShaderAddsTheUvInput)
     const ShaderReflectionResult result = Reflect(GTE_TEST_SKIN_UV_SPV_PATH);
     EXPECT_TRUE(HasBinding(result, "bindPose", 0));
     EXPECT_TRUE(HasBinding(result, "outputBuffer", 3));
+    EXPECT_TRUE(IsWriteOnly(result, "outputBuffer"));
     EXPECT_TRUE(HasBinding(result, "bindPoseUv", 4));
     EXPECT_EQ(result.descriptorBindings.size(), 5u);
     ASSERT_TRUE(result.hasPushConstantRange);

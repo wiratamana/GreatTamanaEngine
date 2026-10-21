@@ -6,6 +6,7 @@
 #include "ECS/Components/Name.h"
 #include "ECS/Components/Transform.h"
 #include "ECS/EntityQuery.h"
+#include "Instantiation/MaterialLifetimeRules.h"
 #include "ECS/TransformHierarchy.h"
 #include "Profiling/ScopeTimer.h"
 
@@ -307,6 +308,13 @@ void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* v
         // Capture pointer and `cmd` are only forwarded, never dereferenced here.
         m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight, frameDebuggerCapture, maxDrawCount,
             batchedEntities, sceneServicesSet, cmd);
+    }
+}
+
+void Game::ReleaseUnusedGpuMaterials(Renderer& renderer)
+{
+    if (ShouldRunMaterialSweep(m_meshInstantiationSystem.MaterialReleasePending(), ++m_materialSweepFrame)) {
+        m_meshInstantiationSystem.ReleaseUnusedMaterials(m_registry, renderer);
     }
 }
 

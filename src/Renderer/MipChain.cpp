@@ -38,6 +38,22 @@ const SrgbTables& Tables()
 
 } // namespace
 
+std::uint64_t MipChainByteSize(std::uint32_t width, std::uint32_t height, std::uint32_t maxLevels) noexcept
+{
+    if (width == 0 || height == 0 || maxLevels == 0) {
+        return 0;
+    }
+    std::uint64_t total = 0;
+    std::uint32_t levels = 0;
+    for (std::uint32_t w = width, h = height;; w = std::max(w / 2, 1u), h = std::max(h / 2, 1u)) {
+        total += static_cast<std::uint64_t>(w) * h * 4;
+        if ((w == 1 && h == 1) || ++levels >= maxLevels) {
+            break;
+        }
+    }
+    return total;
+}
+
 MipChainRgba8 BuildMipChainRgba8(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
     std::uint32_t maxLevels, MipColorSpace colorSpace)
 {

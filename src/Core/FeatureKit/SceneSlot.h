@@ -10,7 +10,7 @@ namespace gte::fx {
 inline constexpr std::uint32_t kSceneSlotCount = 8;
 
 // Size limit of the scene uniform block in bytes.
-inline constexpr std::size_t kMaxSceneUniformBytes = 128;
+inline constexpr std::size_t kMaxSceneUniformBytes = 512;
 
 // What a slot holds; picks the resource type and, for Depth2D, the sampling layout.
 enum class SceneSlotKind : std::uint8_t { Image2D, Depth2D, Image3D };

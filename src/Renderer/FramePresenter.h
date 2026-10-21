@@ -1,6 +1,5 @@
 #pragma once
 
-#include "DepthBuffer.h"
 #include "FrameRecorder.h"
 #include "GpuTimingService.h"
 #include "Memory/GpuMemoryTracker.h"
@@ -29,9 +28,8 @@ namespace gte {
 
 class VulkanDevice;
 
-
-// Owns the swapchain, frame-sync objects, command buffers and per-swapchain-image depth buffers; it talks to
-// acquire, submit and present. Does not own the device, surface, queues or allocator.
+// Owns the swapchain, frame-sync objects and command buffers; it talks to acquire, submit and present.
+// Does not own the device, surface, queues or allocator.
 // It points into the Renderer's VulkanDevice, so it is not movable.
 class FramePresenter {
 public:
@@ -75,7 +73,7 @@ public:
     // See Renderer::PresentViaRenderGraph(). Returns false without touching `graph` when no swapchain frame can
     // be recorded (minimized window, pending resize, just-recreated swapchain); otherwise runs a full
     // acquire, record, submit and present cycle.
-    bool PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwapchainDepth,
+    bool PresentViaRenderGraph(rg::RenderGraph& graph,
         const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build);
 
     // Requests a one-shot capture of the swapchain image, fulfilled two frames later with no added GPU stall.
@@ -91,9 +89,6 @@ private:
     static constexpr std::uint32_t kFramesInFlight = 2;
 
     void CreateCommandObjects();
-    void CreateDepthBuffers();
-    // Creates m_depthBuffers on first need; no-op once they exist.
-    void EnsureDepthBuffersForSwapchain();
     void RecreateSwapchain();
     void Destroy() noexcept;
 
@@ -105,8 +100,6 @@ private:
     // The one choke point for graphics-queue submits; not owned.
     VulkanDevice* m_vulkanDevice = nullptr;
 
-    // Needed to rebuild m_depthBuffers when the swapchain is recreated; not owned.
-    VmaAllocator m_allocator = VK_NULL_HANDLE;
     VkFormat m_depthFormat = VK_FORMAT_UNDEFINED;
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker;
 
@@ -117,12 +110,6 @@ private:
     // Per-frame and per-image sync objects plus the offscreen fence; render-finished semaphores are rebuilt on
     // swapchain recreation.
     VulkanFrameSync m_frameSync;
-
-    // One DepthBuffer per swapchain image, empty until EnsureDepthBuffersForSwapchain() needs them: the
-    // swapchain pass usually only draws UI, which is never depth-tested. Once created they are kept and rebuilt
-    // with the swapchain, but a recreation never creates them from scratch.
-    std::vector<DepthBuffer> m_depthBuffers;
-
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
     std::array<VkCommandBuffer, kFramesInFlight> m_commandBuffers{};
 

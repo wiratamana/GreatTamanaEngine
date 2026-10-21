@@ -10,7 +10,7 @@ struct Texture2DUploadDesc {
     const void* pixelsRgba8 = nullptr;
     int width = 0;
     int height = 0;
-    const char* debugName = nullptr; // Stored by pointer - must outlive the texture.
+    const char* debugName = nullptr; // Copied by the constructor.
     PixelFormat format = PixelFormat::RGBA8_UNorm;
     TextureAddressMode addressMode = TextureAddressMode::ClampToEdge;
     bool generateMips = false;           // Uploads a full box-filtered mip chain.

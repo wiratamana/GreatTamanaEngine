@@ -87,7 +87,7 @@ TEST(ShaderReflectionTests, FramePreviewShaderExposesItsBoundNamesAndPushSize)
     EXPECT_EQ(source->type, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     EXPECT_EQ(output->type, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
     ASSERT_TRUE(result.hasPushConstantRange);
-    EXPECT_EQ(result.pushConstantRange.size, 12u);
+    EXPECT_EQ(result.pushConstantRange.size, 16u);
 }
 
 TEST(ShaderReflectionTests, ReflectsBoxBlurBindingsPushConstantsAndLocalSize)
@@ -178,6 +178,28 @@ TEST(ShaderReflectionTests, UniformBufferIsReflectedByInstanceNameAndIsReadOnly)
     EXPECT_EQ(output->type, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
     EXPECT_EQ(output->access, ReflectedAccess::WriteOnly);
     EXPECT_EQ(result.localSize.x, 8u);
+}
+
+TEST(ShaderReflectionTests, BufferFixtureReportsBufferAccessFromQualifiers)
+{
+    const gte::ShaderStageFile stage{ VK_SHADER_STAGE_COMPUTE_BIT, GTE_TEST_BUFFER_FIXTURE_SPV_PATH };
+    const gte::ShaderReflectionResult result = gte::ReflectShader(std::span<const gte::ShaderStageFile>(&stage, 1));
+
+    ASSERT_EQ(result.descriptorBindings.size(), 3u);
+    const ReflectedDescriptorBinding* input = FindByName(result, "inputData");
+    const ReflectedDescriptorBinding* output = FindByName(result, "outputData");
+    const ReflectedDescriptorBinding* counter = FindByName(result, "counter");
+    ASSERT_NE(input, nullptr);
+    ASSERT_NE(output, nullptr);
+    ASSERT_NE(counter, nullptr);
+    EXPECT_EQ(input->type, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    EXPECT_EQ(input->access, ReflectedAccess::ReadOnly);
+    EXPECT_EQ(output->access, ReflectedAccess::WriteOnly);
+    EXPECT_EQ(counter->access, ReflectedAccess::ReadWrite);
+    EXPECT_EQ(counter->binding, 2u);
+    ASSERT_TRUE(result.hasPushConstantRange);
+    EXPECT_EQ(result.pushConstantRange.size, 4u);
+    EXPECT_EQ(result.localSize.x, 64u);
 }
 
 TEST(ShaderReflectionTests, GraphicsFixtureMergesStagesAndPushBlock)

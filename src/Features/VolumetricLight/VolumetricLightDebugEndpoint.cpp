@@ -55,8 +55,7 @@ constexpr std::array kSettingKeys{
     SettingKey{ "jitter", &VolumetricLightSettings::jitter },
     SettingKey{ "historyBlend", &VolumetricLightSettings::historyBlend },
     SettingKey{ "strength", &VolumetricLightSettings::strength },
-    SettingKey{ "blendInLinearSpace", &VolumetricLightSettings::blendInLinearSpace },
-    SettingKey{ "dither", &VolumetricLightSettings::dither },
+    SettingKey{ "skyDistanceFraction", &VolumetricLightSettings::skyDistanceFraction },
 };
 
 constexpr std::string_view kDebugViewKey = "debugView";
@@ -175,6 +174,11 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const Volumet
     Add(out, key("historyUsed"), v.historyUsed);
     Add(out, key("jitterIndex"), static_cast<std::int64_t>(v.jitterIndex));
     Add(out, key("textureBytes"), Count(v.textureBytes));
+    Add(out, key("atmosphereLight"), v.atmosphereLight);
+    Add(out, key("sunTintR"), static_cast<double>(v.sunTint.x));
+    Add(out, key("sunTintG"), static_cast<double>(v.sunTint.y));
+    Add(out, key("sunTintB"), static_cast<double>(v.sunTint.z));
+    Add(out, key("ambientScale"), static_cast<double>(v.ambientScale));
     Add(out, key("grid"),
         std::to_string(kVolumetricLightGridWidth) + "x" + std::to_string(kVolumetricLightGridHeight) + "x"
             + std::to_string(kVolumetricLightGridDepth));

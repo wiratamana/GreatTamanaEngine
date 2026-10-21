@@ -495,18 +495,17 @@ TEST(VolumetricLightMathTest, LightingKeyChangesWithLitSettingsOnly)
     const VolumetricLightSettings base = SanitizeVolumetricLightSettings(VolumetricLightSettings{});
     VolumetricLightSettings denser = base;
     denser.density *= 2.0f;
-    EXPECT_NE(VolumetricLightLightingKey(base), VolumetricLightLightingKey(denser));
+    EXPECT_NE(VolumetricLightLightingKey(base, false), VolumetricLightLightingKey(denser, false));
 
     VolumetricLightSettings composite = base;
     composite.strength = 0.5f;
-    composite.dither = 0.0f;
     composite.historyBlend = 0.5f;
-    EXPECT_EQ(VolumetricLightLightingKey(base), VolumetricLightLightingKey(composite));
+    EXPECT_EQ(VolumetricLightLightingKey(base, false), VolumetricLightLightingKey(composite, false));
 }
 
-TEST(VolumetricLightMathTest, AmbientShadowedFractionDefaultsToTheOldBehaviourAndIsClamped)
+TEST(VolumetricLightMathTest, AmbientShadowedFractionDefaultIsLowAndIsClamped)
 {
-    EXPECT_FLOAT_EQ(VolumetricLightSettings{}.ambientShadowedFraction, 1.0f);
+    EXPECT_FLOAT_EQ(VolumetricLightSettings{}.ambientShadowedFraction, 0.15f);
 
     VolumetricLightSettings s;
     s.ambientShadowedFraction = 5.0f;
@@ -514,7 +513,23 @@ TEST(VolumetricLightMathTest, AmbientShadowedFractionDefaultsToTheOldBehaviourAn
     s.ambientShadowedFraction = -2.0f;
     EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).ambientShadowedFraction, 0.0f);
     s.ambientShadowedFraction = kNaN;
-    EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).ambientShadowedFraction, 1.0f);
+    EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).ambientShadowedFraction, 0.15f);
+}
+
+TEST(VolumetricLightMathTest, SkyDistanceFractionIsClampedAndExcludedFromTheLightingKey)
+{
+    VolumetricLightSettings s;
+    s.skyDistanceFraction = 5.0f;
+    EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).skyDistanceFraction, 1.0f);
+    s.skyDistanceFraction = -1.0f;
+    EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).skyDistanceFraction, 0.0f);
+    s.skyDistanceFraction = kNaN;
+    EXPECT_FLOAT_EQ(SanitizeVolumetricLightSettings(s).skyDistanceFraction, 0.3f);
+
+    const VolumetricLightSettings base = SanitizeVolumetricLightSettings(VolumetricLightSettings{});
+    VolumetricLightSettings sky = base;
+    sky.skyDistanceFraction = 0.9f;
+    EXPECT_EQ(VolumetricLightLightingKey(base, false), VolumetricLightLightingKey(sky, false));
 }
 
 TEST(VolumetricLightMathTest, LightingKeyChangesWithTheAmbientShadowedFraction)
@@ -522,7 +537,13 @@ TEST(VolumetricLightMathTest, LightingKeyChangesWithTheAmbientShadowedFraction)
     const VolumetricLightSettings base = SanitizeVolumetricLightSettings(VolumetricLightSettings{});
     VolumetricLightSettings masked = base;
     masked.ambientShadowedFraction = 0.2f;
-    EXPECT_NE(VolumetricLightLightingKey(base), VolumetricLightLightingKey(masked));
+    EXPECT_NE(VolumetricLightLightingKey(base, false), VolumetricLightLightingKey(masked, false));
+}
+
+TEST(VolumetricLightMathTest, LightingKeyChangesWithTheLightMode)
+{
+    const VolumetricLightSettings base = SanitizeVolumetricLightSettings(VolumetricLightSettings{});
+    EXPECT_NE(VolumetricLightLightingKey(base, true), VolumetricLightLightingKey(base, false));
 }
 
 } // namespace

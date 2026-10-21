@@ -16,6 +16,7 @@
 #include "../Renderer/RenderGraph/BoundedOnceSet.h"
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/RenderGraph/RenderPipeline.h"
+#include "../Renderer/RenderGraph/Shader.h"
 #include "FrameDebuggerCaptureRecorder.h"
 #include "Plugins/ProjectAssemblyHost.h"
 #include "../Assets/AssetDatabase.h"
@@ -152,7 +153,7 @@ public:
     bool AddPostTransparentPass(const char* debugName, ProjectScenePassCallback callback, std::int32_t priority = 0);
     void RemovePostTransparentPass(const char* debugName);
 
-    // Creates or gets a persistent named render view; colorFormat Undefined matches the renderer's color format.
+    // Creates or gets a persistent named render view; colorFormat Undefined == the scene pixel format.
     rg::RenderViewId CreateRenderView(const char* name, std::uint32_t width, std::uint32_t height,
         bool depthOnly = false, bool allowDepthSampledAccess = false, PixelFormat colorFormat = PixelFormat::Undefined);
     RenderTexture* FindRenderViewTarget(rg::RenderViewId view) const noexcept;
@@ -200,8 +201,8 @@ public:
         return FindViewData(view);
     }
 
-    // Marks `texture` as the `scope` view's output for this frame; the editor panel and HTTP endpoints show it
-    // instead of the raw view. `name` is the graph texture name it was imported under.
+    // Marks `texture` as the `scope` view's output for this frame; the editor and HTTP endpoints show it instead
+    // of the raw view. `name` is its graph texture name; a later exposure replaces an earlier one.
     void ExposeViewOutput(rg::ViewScope scope, RenderTexture& texture, std::string_view name);
 
     // Registers a pass name to be counted in per-view GPU draw stats.
@@ -238,6 +239,7 @@ private:
     void RegisterBuiltinCapabilityOrchestrators();
     void RegisterOffscreenRenderPipelineProviders();
     void RegisterPresentRenderPipelineProvider();
+    RenderTexture* AcquireDirectGameTarget();
     const RenderPassViewData* FindViewData(rg::RenderViewId view) const noexcept;
     const ExposedViewOutput* FindExposedViewOutput(rg::ViewScope scope) const noexcept;
 
@@ -286,11 +288,14 @@ private:
     rg::BoundedOnceSet<64> m_frameFailureOnce;
 
     // Present pass state.
-    bool m_needsDirectGameRenderThisFrame = false;
-    std::optional<float> m_directGameRenderAspectThisFrame;
     rg::TextureHandle m_swapchainImageThisFrame;
     std::function<void(const rg::RecordingContext&)> m_recordImGuiThisFrame;
     std::function<void(const rg::RecordingContext&)> m_presentImGuiRecorder;
+
+    // Game target used when no view panel provides one; copied to the swapchain by the present graph.
+    std::optional<RenderTexture> m_directGameTarget;
+    bool m_directGameTargetUsedThisFrame = false;
+    rg::Shader m_presentGameViewShader{ "PresentBlit", rg::ShaderKind::Graphics };
 
     ProjectAssemblyHost m_projectAssemblyHost;
     AssetDatabase m_assetDatabase;
@@ -299,7 +304,6 @@ private:
     RenderFeatureCompositor* m_renderFeatureCompositorPtr = nullptr;
 
     RenderTexture* m_gameTargetThisFrame = nullptr;
-    RenderTexture* m_sceneTargetThisFrame = nullptr;
 };
 
 } // namespace gte

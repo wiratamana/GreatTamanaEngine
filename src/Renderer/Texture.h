@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace gte {
@@ -39,7 +40,7 @@ struct TextureCreateInfo {
     TextureFilter filter = TextureFilter::Linear;
     TextureAddressMode addressMode = TextureAddressMode::ClampToEdge;
     float maxAnisotropy = 1.0f; // > 1 enables anisotropic filtering; the device feature must be enabled.
-    const char* debugName = nullptr; // Stored by pointer - must outlive the Texture.
+    const char* debugName = nullptr; // Copied by the constructor.
 };
 
 // The one RAII owner of a Vulkan image: image + VMA allocation + views + sampler + memory tracking.
@@ -96,6 +97,7 @@ private:
     GpuResourceHandle m_handle = kInvalidGpuResourceHandle;
     VkDevice m_device = VK_NULL_HANDLE;
     TextureCreateInfo m_info;
+    std::string m_debugName;
 
     VkFormat m_format = VK_FORMAT_UNDEFINED;
     int m_width = 0;

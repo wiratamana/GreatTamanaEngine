@@ -17,8 +17,8 @@ namespace gte {
 // Clamps every field into its valid range. A non-finite float becomes that field's default.
 VolumetricLightSettings SanitizeVolumetricLightSettings(const VolumetricLightSettings& settings) noexcept;
 
-// Hash of the settings that change the lit result. `safe` must be sanitized.
-std::uint64_t VolumetricLightLightingKey(const VolumetricLightSettings& safe) noexcept;
+// Hash of the settings and the light mode that change the lit result. `safe` must be sanitized.
+std::uint64_t VolumetricLightLightingKey(const VolumetricLightSettings& safe, bool atmosphereLight) noexcept;
 
 // Slice boundary (0..sliceCount) to ray distance: maxDistance * (slice / sliceCount) ^ exponent.
 float VolumetricLightSliceToDistance(float slice, float sliceCount, float maxDistance, float exponent) noexcept;

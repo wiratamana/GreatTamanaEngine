@@ -1,12 +1,11 @@
-// Unit tests for src/Assets/RigFile.h - EncodeRigDataToBytes()/
-// DecodeRigDataFromBytes() round-tripping skin weights/bones/morphs/physics
-// binary layout (the *.gta AssetType::Mesh METADATA section - see
-// GtaFile.h). No GPU/SDL/ImGui involved - "Tier 1" per tests/CMakeLists.txt's
-// own taxonomy.
+// Tests for RigFile encode/decode: round trips, optional trailing sections and corrupt blobs.
 
 #include "Assets/RigFile.h"
 
 #include <gtest/gtest.h>
+
+#include <algorithm>
+#include <cstring>
 
 namespace gte {
 namespace {
@@ -296,6 +295,12 @@ std::size_t MaterialColorFlagsByteSize(const RigFileData& rig)
     return 4 + rig.materials.materials.size();
 }
 
+// Bytes of the trailing PBR factor section: count + 4 f32 per material.
+std::size_t MaterialPbrFactorsByteSize(const RigFileData& rig)
+{
+    return 4 + rig.materials.materials.size() * (4 * 4);
+}
+
 // Bytes of the trailing joint-override section: count + (i32 + 3 f32) per override.
 std::size_t JointOverrideByteSize(const RigFileData& rig)
 {
@@ -308,8 +313,8 @@ TEST(RigFileTest, DecodeSucceedsOnABlobWithNoTrailingSections)
     RigFileData rig = BuildSampleRigData();
     rig.jointPhysicsOverrides.clear();
     std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
-    const std::size_t trailing =
-        JointOverrideByteSize(rig) + MaterialExtrasByteSize(rig) + MaterialColorFlagsByteSize(rig);
+    const std::size_t trailing = JointOverrideByteSize(rig) + MaterialExtrasByteSize(rig)
+        + MaterialColorFlagsByteSize(rig) + MaterialPbrFactorsByteSize(rig);
     ASSERT_GE(encoded.size(), trailing);
     encoded.resize(encoded.size() - trailing);
 
@@ -325,7 +330,8 @@ TEST(RigFileTest, DecodeSucceedsOnABlobWithoutMaterialExtras)
     RigFileData rig = BuildSampleRigData();
     rig.jointPhysicsOverrides.assign(1, JointPhysicsOverride{ 2, 0.1f, 0.2f, 0.3f });
     std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
-    encoded.resize(encoded.size() - MaterialExtrasByteSize(rig) - MaterialColorFlagsByteSize(rig));
+    encoded.resize(encoded.size() - MaterialExtrasByteSize(rig) - MaterialColorFlagsByteSize(rig)
+        - MaterialPbrFactorsByteSize(rig));
 
     const std::optional<RigFileData> decoded = DecodeRigDataFromBytes(encoded);
     ASSERT_TRUE(decoded.has_value());
@@ -342,7 +348,8 @@ TEST(RigFileTest, DecodeFailsWhenJointOverrideSectionIsPresentButTruncated)
     RigFileData rig = BuildSampleRigData();
     rig.jointPhysicsOverrides.push_back(JointPhysicsOverride{ 0, 0.1f, 0.2f, 0.3f });
     std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
-    encoded.resize(encoded.size() - MaterialExtrasByteSize(rig) - MaterialColorFlagsByteSize(rig)); // Cut lands in the overrides.
+    encoded.resize(encoded.size() - MaterialExtrasByteSize(rig) - MaterialColorFlagsByteSize(rig)
+        - MaterialPbrFactorsByteSize(rig)); // Cut lands in the overrides.
     encoded.resize(encoded.size() - 2);                           // Mid-way through the last float.
 
     EXPECT_FALSE(DecodeRigDataFromBytes(encoded).has_value());
@@ -353,7 +360,7 @@ TEST(RigFileTest, DecodeFailsWhenMaterialExtrasAreTruncated)
     RigFileData rig = BuildSampleRigData();
     ASSERT_FALSE(rig.materials.materials.empty());
     std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
-    encoded.resize(encoded.size() - MaterialColorFlagsByteSize(rig) - 2); // Cut lands inside the extras.
+    encoded.resize(encoded.size() - MaterialColorFlagsByteSize(rig) - MaterialPbrFactorsByteSize(rig) - 2); // Cut lands inside the extras.
 
     EXPECT_FALSE(DecodeRigDataFromBytes(encoded).has_value());
 }
@@ -401,13 +408,107 @@ TEST(RigFileTest, DecodeSucceedsOnABlobWithoutColorFlags)
     RigFileData rig = BuildSampleRigData();
     rig.materials.materials[0].useBaseColorFactor = true;
     std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
-    encoded.resize(encoded.size() - MaterialColorFlagsByteSize(rig));
+    encoded.resize(encoded.size() - MaterialColorFlagsByteSize(rig) - MaterialPbrFactorsByteSize(rig));
 
     const std::optional<RigFileData> decoded = DecodeRigDataFromBytes(encoded);
     ASSERT_TRUE(decoded.has_value());
     for (const Material& m : decoded->materials.materials) {
         EXPECT_FALSE(m.useBaseColorFactor);
     }
+}
+
+TEST(RigFileTest, MaterialPbrFactorsSurviveEncodeThenDecode)
+{
+    RigFileData rig = BuildSampleRigData();
+    Material& m = rig.materials.materials[0];
+    m.metallicFactor = 0.25f;
+    m.roughnessFactor = 0.75f;
+    m.normalScale = 2.0f;
+    m.occlusionStrength = 0.5f;
+
+    const std::optional<RigFileData> decoded = DecodeRigDataFromBytes(EncodeRigDataToBytes(rig));
+    ASSERT_TRUE(decoded.has_value());
+    const Material& d = decoded->materials.materials[0];
+    EXPECT_FLOAT_EQ(d.metallicFactor, 0.25f);
+    EXPECT_FLOAT_EQ(d.roughnessFactor, 0.75f);
+    EXPECT_FLOAT_EQ(d.normalScale, 2.0f);
+    EXPECT_FLOAT_EQ(d.occlusionStrength, 0.5f);
+}
+
+// A blob that ends after the color flags keeps all four factors at 1.
+TEST(RigFileTest, DecodeSucceedsOnABlobWithoutPbrFactors)
+{
+    RigFileData rig = BuildSampleRigData();
+    rig.materials.materials[0].metallicFactor = 0.0f;
+    rig.materials.materials[0].roughnessFactor = 0.0f;
+    std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
+    encoded.resize(encoded.size() - MaterialPbrFactorsByteSize(rig));
+
+    const std::optional<RigFileData> decoded = DecodeRigDataFromBytes(encoded);
+    ASSERT_TRUE(decoded.has_value());
+    for (const Material& m : decoded->materials.materials) {
+        EXPECT_FLOAT_EQ(m.metallicFactor, 1.0f);
+        EXPECT_FLOAT_EQ(m.roughnessFactor, 1.0f);
+        EXPECT_FLOAT_EQ(m.normalScale, 1.0f);
+        EXPECT_FLOAT_EQ(m.occlusionStrength, 1.0f);
+    }
+}
+
+TEST(RigFileTest, DecodeFailsWhenPbrFactorSectionIsTruncated)
+{
+    const RigFileData rig = BuildSampleRigData();
+    std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
+    encoded.resize(encoded.size() - 2); // Mid-way through the last float.
+
+    EXPECT_FALSE(DecodeRigDataFromBytes(encoded).has_value());
+}
+
+// Magic followed by u32 values: zero counts for the sections before the one under test, then a huge count.
+std::vector<std::uint8_t> BlobWithHugeCountAfter(std::size_t emptySections)
+{
+    std::vector<std::uint8_t> bytes(sizeof(kRigFileMagic) + (emptySections + 1) * 4, std::uint8_t{ 0 });
+    std::memcpy(bytes.data(), kRigFileMagic, sizeof(kRigFileMagic));
+    std::fill(bytes.end() - 4, bytes.end(), std::uint8_t{ 0xFF });
+    return bytes;
+}
+
+// Sections in file order: skin weights, bones, morphs, rigid bodies, joints, textures, materials, joint overrides.
+TEST(RigFileTest, DecodeRejectsAHugeCountInEveryReaderWithoutThrowing)
+{
+    for (std::size_t section = 0; section < 8; ++section) {
+        const std::vector<std::uint8_t> blob = BlobWithHugeCountAfter(section);
+        std::optional<RigFileData> decoded;
+        EXPECT_NO_THROW(decoded = DecodeRigDataFromBytes(blob)) << "section " << section;
+        EXPECT_FALSE(decoded.has_value()) << "section " << section;
+    }
+}
+
+TEST(RigFileTest, DecodeRejectsAHugeIkLinkCount)
+{
+    RigFileData rig;
+    rig.skeleton.bones.emplace_back();
+    std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
+    // Tail after the bone record: 9 empty sections of 4 bytes; the IK link count is the 4 bytes before them.
+    ASSERT_GT(encoded.size(), 40u);
+    std::fill(encoded.end() - 40, encoded.end() - 36, std::uint8_t{ 0xFF });
+
+    std::optional<RigFileData> decoded;
+    EXPECT_NO_THROW(decoded = DecodeRigDataFromBytes(encoded));
+    EXPECT_FALSE(decoded.has_value());
+}
+
+TEST(RigFileTest, DecodeRejectsAHugeMorphOffsetCount)
+{
+    RigFileData rig;
+    rig.morphs.morphs.emplace_back();
+    std::vector<std::uint8_t> encoded = EncodeRigDataToBytes(rig);
+    // Tail after the morph record: 8 empty sections of 4 bytes. The record ends with 7 offset counts.
+    ASSERT_GT(encoded.size(), 32u + 28u);
+    std::fill(encoded.end() - 32 - 28, encoded.end() - 32 - 24, std::uint8_t{ 0xFF });
+
+    std::optional<RigFileData> decoded;
+    EXPECT_NO_THROW(decoded = DecodeRigDataFromBytes(encoded));
+    EXPECT_FALSE(decoded.has_value());
 }
 
 } // namespace

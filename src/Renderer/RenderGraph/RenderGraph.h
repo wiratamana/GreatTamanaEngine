@@ -152,8 +152,10 @@ private:
     struct PhysicalBuffer {
         bool resolved = false;
         VkBuffer buffer = VK_NULL_HANDLE;
+        BufferObjectHandle object = BufferObjectHandle::Invalid; // Generational identity of `buffer`.
         uint64_t size = 0;
         ResourceState state;
+        ResourceState lastWrite; // State of the last write usage; empty until the buffer is written.
     };
 
     struct NamedStats {
@@ -219,7 +221,7 @@ private:
 
     GpuTimingSample ResolveAndConvertTiming(const RenderGraphTimestampPool::RawTicks& raw) const;
 
-    static constexpr std::uint32_t kSynchronousTimingSlotBudget = 16;
+    static constexpr std::uint32_t kSynchronousTimingSlotBudget = 64;
     static constexpr std::uint32_t kPipelinedTimingSlotBudget = 8;
 
     RenderGraphResourcePool m_resourcePool;

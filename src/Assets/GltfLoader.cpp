@@ -2,6 +2,7 @@
 
 #include "../Encoding/Utf8Path.h"
 #include "MeshNormalRecompute.h"
+#include "MeshTangents.h"
 
 #include <cgltf.h>
 
@@ -116,6 +117,15 @@ Vec3 TransformNormal(const NodeTransform& t, const Vec3& n)
     return t.mirrored ? Vec3(-r.x, -r.y, -r.z) : r;
 }
 
+// Direction transform with the node's 3x3 (no translation).
+Vec3 TransformDirection(const NodeTransform& t, const Vec3& d)
+{
+    const float* m = t.world;
+    return Vec3(m[0] * d.x + m[4] * d.y + m[8] * d.z,
+        m[1] * d.x + m[5] * d.y + m[9] * d.z,
+        m[2] * d.x + m[6] * d.y + m[10] * d.z);
+}
+
 // glTF is right-handed, the engine is left-handed: mirror Z.
 Vec3 ToEngineSpace(const Vec3& v)
 {
@@ -158,8 +168,14 @@ std::optional<std::vector<std::uint32_t>> ReadIndices(const cgltf_primitive& pri
     return indices;
 }
 
+struct BuiltPrimitive {
+    MeshData mesh;
+    bool tangentsGenerated = false;      // True when the primitive had no usable TANGENT attribute.
+    std::uint32_t splitVertexCount = 0;  // Vertices appended by the tangent generator.
+};
+
 // One primitive as engine-space MeshData with 0-based local indices; nullopt if unsupported or malformed.
-std::optional<MeshData> BuildPrimitiveMesh(const cgltf_primitive& primitive, const NodeTransform& transform)
+std::optional<BuiltPrimitive> BuildPrimitiveMesh(const cgltf_primitive& primitive, const NodeTransform& transform)
 {
     if (primitive.type != cgltf_primitive_type_triangles) {
         return std::nullopt;
@@ -175,9 +191,13 @@ std::optional<MeshData> BuildPrimitiveMesh(const cgltf_primitive& primitive, con
     std::vector<float> uvFloats;
     const bool hasUvs = ReadFloats(
         cgltf_find_accessor(&primitive, cgltf_attribute_type_texcoord, 0), cgltf_type_vec2, &uvFloats);
+    std::vector<float> tangentFloats;
+    const bool hasTangents = ReadFloats(
+        cgltf_find_accessor(&primitive, cgltf_attribute_type_tangent, 0), cgltf_type_vec4, &tangentFloats);
 
     const std::size_t vertexCount = positionFloats.size() / 3;
-    if ((hasNormals && normalFloats.size() != vertexCount * 3) || (hasUvs && uvFloats.size() != vertexCount * 2)) {
+    if ((hasNormals && normalFloats.size() != vertexCount * 3) || (hasUvs && uvFloats.size() != vertexCount * 2)
+        || (hasTangents && tangentFloats.size() != vertexCount * 4)) {
         return std::nullopt;
     }
 
@@ -186,7 +206,8 @@ std::optional<MeshData> BuildPrimitiveMesh(const cgltf_primitive& primitive, con
         return std::nullopt;
     }
 
-    MeshData mesh;
+    BuiltPrimitive built;
+    MeshData& mesh = built.mesh;
     mesh.positions.reserve(vertexCount);
     mesh.normals.reserve(vertexCount);
     mesh.uvs.reserve(vertexCount);
@@ -215,7 +236,24 @@ std::optional<MeshData> BuildPrimitiveMesh(const cgltf_primitive& primitive, con
     if (!hasNormals) {
         RecomputeMeshNormalsFromGeometry(mesh);
     }
-    return mesh;
+
+    // Normals are final here. Handedness flips once for the Z mirror and once more for a mirrored node.
+    if (hasTangents) {
+        const float handednessFlip = transform.mirrored ? 1.0f : -1.0f;
+        mesh.tangents.resize(vertexCount);
+        for (std::size_t i = 0; i < vertexCount; ++i) {
+            const Vec3 t = ToEngineSpace(TransformDirection(transform,
+                Vec3(tangentFloats[i * 4], tangentFloats[i * 4 + 1], tangentFloats[i * 4 + 2])));
+            const float w = tangentFloats[i * 4 + 3] * handednessFlip;
+            mesh.tangents[i] = Vec4(t.x, t.y, t.z, w < 0.0f ? -1.0f : 1.0f);
+        }
+        OrthonormalizeMeshTangents(mesh);
+    } else {
+        const TangentGenerationResult generated = GenerateMeshTangents(mesh);
+        built.tangentsGenerated = true;
+        built.splitVertexCount = generated.splitVertexCount;
+    }
+    return built;
 }
 
 void CollectMeshNodes(const cgltf_node* node, std::vector<const cgltf_node*>* out)
@@ -286,6 +324,9 @@ Material ConvertMaterial(const cgltf_material& source, std::size_t index, Textur
     m.name = source.name != nullptr ? source.name : "Material_" + std::to_string(index);
     m.useBaseColorFactor = true;
 
+    // cgltf fills the glTF defaults (1, 1) before parsing, so this is valid without the pbr object.
+    m.metallicFactor = source.pbr_metallic_roughness.metallic_factor;
+    m.roughnessFactor = source.pbr_metallic_roughness.roughness_factor;
     if (source.has_pbr_metallic_roughness) {
         const cgltf_pbr_metallic_roughness& pbr = source.pbr_metallic_roughness;
         m.diffuse = Vec4(pbr.base_color_factor[0], pbr.base_color_factor[1], pbr.base_color_factor[2],
@@ -296,6 +337,13 @@ Material ConvertMaterial(const cgltf_material& source, std::size_t index, Textur
     m.normalTextureIndex = textures.Resolve(source.normal_texture);
     m.occlusionTextureIndex = textures.Resolve(source.occlusion_texture);
     m.emissiveTextureIndex = textures.Resolve(source.emissive_texture);
+    // cgltf leaves `scale` at 0 for a texture view that is not in the file; cgltf stores occlusion strength there too.
+    if (source.normal_texture.texture != nullptr) {
+        m.normalScale = source.normal_texture.scale;
+    }
+    if (source.occlusion_texture.texture != nullptr) {
+        m.occlusionStrength = source.occlusion_texture.scale;
+    }
 
     m.bothFacesVisible = source.double_sided != 0;
     m.alphaCutoff = source.alpha_cutoff;
@@ -305,6 +353,17 @@ Material ConvertMaterial(const cgltf_material& source, std::size_t index, Textur
     default: m.alphaMode = AlphaMode::Opaque; break;
     }
     return m;
+}
+
+// Number of used texture slots of one material that read a UV set other than TEXCOORD_0.
+std::size_t CountUnsupportedTexcoordSlots(const cgltf_material& m)
+{
+    const auto count = [](const cgltf_texture_view& v) { return v.texture != nullptr && v.texcoord != 0 ? 1u : 0u; };
+    std::size_t n = count(m.normal_texture) + count(m.occlusion_texture) + count(m.emissive_texture);
+    if (m.has_pbr_metallic_roughness) {
+        n += count(m.pbr_metallic_roughness.base_color_texture) + count(m.pbr_metallic_roughness.metallic_roughness_texture);
+    }
+    return n;
 }
 
 } // namespace
@@ -350,26 +409,32 @@ GltfLoadResult LoadGltfModel(const std::string& filePath)
     buckets.back().material.useBaseColorFactor = true;
 
     std::size_t skippedPrimitives = 0;
+    std::size_t generatedPrimitives = 0;
+    std::size_t splitVertices = 0;
     for (const cgltf_node* node : CollectSceneMeshNodes(*data)) {
         const NodeTransform transform = BuildNodeTransform(*node);
         for (cgltf_size p = 0; p < node->mesh->primitives_count; ++p) {
             const cgltf_primitive& primitive = node->mesh->primitives[p];
-            const std::optional<MeshData> built = BuildPrimitiveMesh(primitive, transform);
+            std::optional<BuiltPrimitive> built = BuildPrimitiveMesh(primitive, transform);
             if (!built.has_value()) {
                 ++skippedPrimitives;
                 continue;
             }
+            const MeshData& primitiveMesh = built->mesh;
+            generatedPrimitives += built->tangentsGenerated ? 1 : 0;
+            splitVertices += built->splitVertexCount;
 
             const auto baseVertex = static_cast<std::uint32_t>(result.mesh.positions.size());
-            result.mesh.positions.insert(result.mesh.positions.end(), built->positions.begin(), built->positions.end());
-            result.mesh.normals.insert(result.mesh.normals.end(), built->normals.begin(), built->normals.end());
-            result.mesh.uvs.insert(result.mesh.uvs.end(), built->uvs.begin(), built->uvs.end());
+            result.mesh.positions.insert(result.mesh.positions.end(), primitiveMesh.positions.begin(), primitiveMesh.positions.end());
+            result.mesh.normals.insert(result.mesh.normals.end(), primitiveMesh.normals.begin(), primitiveMesh.normals.end());
+            result.mesh.uvs.insert(result.mesh.uvs.end(), primitiveMesh.uvs.begin(), primitiveMesh.uvs.end());
+            result.mesh.tangents.insert(result.mesh.tangents.end(), primitiveMesh.tangents.begin(), primitiveMesh.tangents.end());
 
             std::vector<std::uint32_t>& target = primitive.material != nullptr
                 ? buckets[cgltf_material_index(data.get(), primitive.material)].indices
                 : buckets.back().indices;
-            target.reserve(target.size() + built->indices.size());
-            for (const std::uint32_t index : built->indices) {
+            target.reserve(target.size() + primitiveMesh.indices.size());
+            for (const std::uint32_t index : primitiveMesh.indices) {
                 target.push_back(baseVertex + index);
             }
         }
@@ -406,7 +471,25 @@ GltfLoadResult LoadGltfModel(const std::string& filePath)
         + std::to_string(result.materials.textures.size()) + " textures, "
         + std::to_string(skippedPrimitives) + " skipped primitives, UV range ["
         + std::to_string(uvMin.x) + "," + std::to_string(uvMin.y) + "]-["
-        + std::to_string(uvMax.x) + "," + std::to_string(uvMax.y) + "].";
+        + std::to_string(uvMax.x) + "," + std::to_string(uvMax.y) + "], "
+        + std::to_string(result.mesh.tangents.size()) + " tangents ("
+        + std::to_string(generatedPrimitives) + " primitives generated, "
+        + std::to_string(splitVertices) + " vertices split).";
+
+    std::size_t unsupportedTexcoordSlots = 0;
+    std::size_t unsupportedShadingMaterials = 0;
+    for (std::size_t i = 0; i < data->materials_count; ++i) {
+        unsupportedTexcoordSlots += CountUnsupportedTexcoordSlots(data->materials[i]);
+        if (data->materials[i].has_pbr_specular_glossiness || data->materials[i].unlit) {
+            ++unsupportedShadingMaterials;
+        }
+    }
+    if (unsupportedTexcoordSlots > 0) {
+        result.message += " " + std::to_string(unsupportedTexcoordSlots) + " texture slots use TEXCOORD_1+ (unsupported).";
+    }
+    if (unsupportedShadingMaterials > 0) {
+        result.message += " " + std::to_string(unsupportedShadingMaterials) + " materials use an unsupported shading model.";
+    }
     return result;
 }
 

@@ -20,7 +20,7 @@ inline constexpr std::size_t kPipelineMaxColorAttachments = 8;
 class Pipeline {
 public:
     // Single-format form; forwards to the span constructor. SPIR-V paths are compiled "<exe dir>/shaders/*.spv".
-    // Set 0: `materialSetLayout` (PositionNormalUv) or `instanceBufferSetLayout` (PositionNormalInstanced), never both.
+    // Set 0: `materialSetLayout` (PositionNormalUv, PositionNormalUvTangent) or `instanceBufferSetLayout` (PositionNormalInstanced).
     // Set 1: `sceneServicesSetLayout`. An empty set 0 with a set 1 gets a zero-binding filler (no gaps allowed).
     Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,

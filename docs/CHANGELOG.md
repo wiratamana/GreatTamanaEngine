@@ -4,6 +4,66 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## Atmosphere sun and sky light (branch `feature/hdr-tonemap-impl`)
+
+- Sun colour, sun brightness and sky ambient of materials and light shafts follow the Atmosphere. A sun below the horizon is
+  black. New setting `sceneLightFollowsAtmosphere` (default on); off restores the old lighting.
+- New channel `Atmosphere.SunLight` (`SunLightModulation`, `src/Game/Lighting/SunLightModulation.h`) read by SceneLighting and
+  VolumetricLight. `/feature_debug/state` of Atmosphere, SceneLighting and VolumetricLight shows the record per view.
+- VolumetricLight keeps its sun fade and night ambient floor as the fallback. Its lighting key now includes the light mode.
+- Sky camera height uses the live planet radius.
+
+## PBR material textures and GGX specular (branch `feature/hdr-tonemap-impl`)
+
+- Imported glTF meshes sample the normal, metallic-roughness and occlusion maps (new `PbrMesh` shaders, set 0 now has 5
+  bindings, `MaterialParams` is 48 bytes) and shade the sun with GGX plus a hemisphere ambient specular. PMX models and
+  primitives keep the old shaders. See [pbr-materials.md](conventions/pbr-materials.md).
+- Importer v4: material factors and tangents. A `TANGENT` is converted to engine space; a missing one is generated with
+  MikkTSpace (`MeshTangents`, vertex split where frames differ). The mesh payload and the rig blob have optional trailing
+  sections; corrupt counts return `nullopt` instead of throwing.
+- New `VertexLayout::PositionNormalUvTangent` with a depth-only shadow shader; `BuildVertexInputState` has no default case.
+- Batched material image upload (few submits, checked fence wait), default 1x1 images, `MaterialSetLease` with a freeable set pool,
+  and a release sweep that frees materials and images that no entity or cached asset uses.
+- SceneLighting: eye position in the scene block for every view, `materialDebugView` 0..8 (endpoint key and editor panel).
+- Frame Debugger: one row per material slot (`Base Color`, `Normal`, `Metallic-Roughness`, `Occlusion Texture`).
+
+## Lighting retune (branch `feature/hdr-tonemap-impl`)
+
+- Defaults: SceneLighting `ambientIntensity` 0.35, ToneMapping exposure 0.8 / ACES / saturation 1.1 / dither 1.0, Shadow
+  `strength` 1.0 with `applyInMaterials`, VolumetricLight density 0.010 / ambient 0.03 / `ambientShadowedFraction` 0.15 /
+  `skyDistanceFraction` 0.3, Atmosphere `skyIntensity` 6.0 and aerial perspective exaggeration 8.0.
+- Sponza scene opener: warm white sun (1.0, 0.92, 0.78) at pitch 50 degrees.
+
+## Material shadows (branch `feature/hdr-tonemap-impl`)
+
+- Material shaders sample the four cascade depth maps (scene slots 0..3, set 1 bindings 0..3) and remove only the sun term in
+  shadow; ambient stays. First production user of `DeclareSceneSlot`. See [shadow-mapping.md](conventions/shadow-mapping.md).
+- `ShadowSettings::applyInMaterials` (default true); `Shadow.Composite` then draws debug views only. `strength` default 1.0.
+- The mask and composite passes run only for debug views or when `applyInMaterials` is off.
+- Scene uniform block limit 128 -> 512 bytes; `SceneLightingUniformData` is 448 bytes and carries the cascade data from the
+  `SunShadowReceiver`. Vertex shaders output the world position. Double-sided materials flip the normal on back faces.
+- `MeshPreview.frag` compiles without cascade samplers (`DIRECTIONAL_LIGHTING_NO_SHADOWS`).
+
+## HDR scene pipeline and ToneMapping (branch `feature/hdr-tonemap-impl`)
+
+- Scene color is RGBA16F (`Renderer::ScenePixelFormat()`): view targets, scene pipelines, the scene grid and the compositor
+  targets. Material shaders, sky, aerial perspective, volumetric composite and AO work in linear HDR.
+- New ToneMapping feature (PostComposite, last): exposure, saturation, Clamp / ACES / PBR Neutral, sRGB encode, dither. Math in
+  `src/Math/ToneMapCurves.h`. Removed: SceneLighting `exposure`, Atmosphere `skyExposure` (now `skyIntensity`), VolumetricLight
+  `blendInLinearSpace` and `dither`, Gtao `applyInLinearSpace`.
+- With no Game or Scene panel target, `Core` renders into its own `DirectGameView` target and a `PresentGameView` pass copies it
+  to the swapchain, so post features and `/get_game_view` work with hidden panels. `AddPresentPass` no longer draws the scene;
+  `AddGpuSkinningPasses` is removed.
+- The last view-output exposure of a view wins (no error log for a second exposure).
+- Captures: `HdrVisualization` (`DebugScaled`, `DisplayReferred`, `SceneReferred`) picks the 8-bit conversion of RGBA16F images
+  for `/get_game_view`, `/get_texture` and the Frame Debugger; step previews are tone mapped by `FrameDebuggerPreview.comp`.
+  See [rendering.md](architecture/rendering.md).
+
+## Fog fix (branch `feature/hdr-tonemap-impl`)
+
+- VolumetricLight defaults: density 0.010, ambient intensity 0.03, `ambientShadowedFraction` 0.15 (ambient fog follows the sun).
+- New setting `skyDistanceFraction` (default 0.3): sky pixels use a fraction of `maxDistance`, so fog no longer dims the sky.
+
 ## Ambient occlusion (branch `feature/volumetric-light-impl`)
 
 - Gtao: screen-space ground-truth AO from the scene depth only, in a PostOpaque compute pair (sample, denoise with temporal

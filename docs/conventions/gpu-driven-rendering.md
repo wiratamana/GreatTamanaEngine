@@ -27,18 +27,16 @@ feature:
   parallel batching mechanism for any of these excluded cases without first
   reading `PHASE0_MASTER_STRATEGY.md`'s own Locked Design Decisions 6-8.
 - **This entire cutover is GAME VIEW ONLY, permanently.** Scene View
-  (`RenderViewId::Named("Scene")`) and the rare direct-render-to-swapchain
-  fallback (`AddPresentPass()`'s own fallback branch) both keep rendering
+  (`RenderViewId::Named("Scene")`) keeps rendering
   EVERY entity — including every batch-eligible one — through the fully
-  unmodified per-entity path. This was confirmed via `ask_questions` during
-  this campaign's own dedicated PHASE5 pre-implementation review (see
-  `PHASE5_STRATEGY_DOUBLE_CHECK_REPORT.md`) specifically because the
-  per-batch GPU resource cache (`GpuDrivenBatchCache`) is keyed by
+  unmodified per-entity path. The Game view rendered without Editor panels
+  (the engine-owned `DirectGameView` target) is still the Game view and uses the batched path.
+  This is because the per-batch GPU resource cache (`GpuDrivenBatchCache`) is keyed by
   `(MeshHandle, PipelineHandle)` alone, with NO view dimension — it cannot
   safely serve two different cameras' worth of culling results for the same
-  batch at once. Do not thread the new `RenderSystem::Draw()`/`Game::Render()`
-  `batchedEntities` exclusion parameter into any Scene View or fallback call
-  site without first re-deriving (or adding) a view dimension to the cache.
+  batch at once. Do not thread the `RenderSystem::Draw()`/`Game::Render()`
+  `batchedEntities` exclusion parameter into any Scene View
+  call site without first re-deriving (or adding) a view dimension to the cache.
 - **The atomic visible-count buffer must be reset to `0` by a real
   `vkCmdFillBuffer` (`ResourceAccess::TransferDst`) EVERY FRAME, ordered
   before the culling compute pass — the culling shader itself can never

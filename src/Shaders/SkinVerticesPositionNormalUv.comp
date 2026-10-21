@@ -25,7 +25,7 @@ layout(std430, binding = 2) readonly buffer BoneMatricesBuffer {
 } boneMatrices;
 
 // Tightly packed floats, 8 per vertex (position.xyz, normal.xyz, uv.xy), no std430 vec padding.
-layout(std430, binding = 3) buffer OutputBuffer {
+layout(std430, binding = 3) writeonly buffer OutputBuffer {
     float values[];
 } outputBuffer;
 

@@ -67,9 +67,9 @@ namespace {
 class ImGuiEditorLayer final : public IEditorLayer {
 public:
     ImGuiEditorLayer(Window& window, Renderer& renderer)
-        : m_gameView(renderer.CreateRenderTexture(window.Width(), window.Height(), PixelFormat::Undefined, "GameView",
+        : m_gameView(renderer.CreateRenderTexture(window.Width(), window.Height(), renderer.ScenePixelFormat(), "GameView",
               "GameViewDepth", /*allowStorageImageAccess=*/true, /*allowDepthSampledAccess=*/true))
-        , m_sceneView(renderer.CreateRenderTexture(window.Width(), window.Height(), PixelFormat::Undefined, "SceneView",
+        , m_sceneView(renderer.CreateRenderTexture(window.Width(), window.Height(), renderer.ScenePixelFormat(), "SceneView",
               "SceneViewDepth", /*allowStorageImageAccess=*/true, /*allowDepthSampledAccess=*/true))
         , m_sceneGrid(renderer)
     {

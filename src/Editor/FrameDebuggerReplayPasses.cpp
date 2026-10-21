@@ -114,7 +114,7 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
             rg::RenderPassCategory::FrameDebuggerInternal,
             [destHandle, gpuSkinningOutputBuffers, isBackgroundStep, backgroundReplay](
                 rg::RenderGraphBuilder::PassBuilder& pass) {
-                pass.WriteColorAttachment(destHandle, kGameClearColor);
+                pass.WriteColorAttachment(destHandle, kSceneClearColor);
                 pass.WriteDepthStencilAttachment(destHandle, kGameClearDepth);
                 DeclareGpuSkinningReads(pass, gpuSkinningOutputBuffers);
                 if (isBackgroundStep) {

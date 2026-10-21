@@ -2,6 +2,8 @@
 
 #include "../Core/ViewBackgroundReplayKey.h"
 #include "../Core/FeatureKit/ChannelKey.h"
+#include "../Core/FeatureKit/SceneSlotKey.h"
+#include "../Game/Lighting/SunShadowReceiver.h"
 
 namespace gte {
 
@@ -29,6 +31,16 @@ void AddSharedChannelRule(std::vector<KnownRiskBlackboardKeyRule>& rules, const 
         std::string(feature) + "." + channel + " (Shared)", gatingToggle });
 }
 
+// A texture published to a scene slot, once per view.
+void AddSceneSlotRules(std::vector<KnownRiskBlackboardKeyRule>& rules, const std::string& slotName,
+    std::uint32_t slotIndex, const char* gatingToggle)
+{
+    for (const char* view : { "Game", "Scene" }) {
+        rules.push_back(KnownRiskBlackboardKeyRule{ fx::SceneSlotKey(slotIndex, rg::RenderViewId::Named(view)),
+            slotName + " (" + view + ")", gatingToggle });
+    }
+}
+
 } // namespace
 
 const std::vector<KnownRiskBlackboardKeyRule>& KnownRiskBlackboardKeyRules()
@@ -41,6 +53,9 @@ const std::vector<KnownRiskBlackboardKeyRule>& KnownRiskBlackboardKeyRules()
         AddChannelRules(rules, "Shadow", "Map", "Shadow.Cascade0.Draw");
         AddChannelRules(rules, "Shadow", "Receiver", "Shadow.Cascade0.Draw");
         AddChannelRules(rules, "Shadow", "Mask", "Shadow.Mask.Dispatch");
+        for (std::uint32_t slot = 0; slot < kSunShadowReceiverMaxCascades; ++slot) {
+            AddSceneSlotRules(rules, "Shadow.Cascade" + std::to_string(slot) + ".Slot", slot, "Shadow.Cascade0.Draw");
+        }
         // Published only when both passes ran, so either toggle gates it.
         AddChannelRules(rules, "VolumetricLight", "Result", "VolumetricLight.Inject.Dispatch");
         AddChannelRules(rules, "VolumetricLight", "Result", "VolumetricLight.Integrate.Dispatch");

@@ -166,10 +166,10 @@ void Renderer::EndOffscreenRenderGraphRecording()
     m_presenter.EndOffscreenRecording();
 }
 
-std::optional<DrawStats> Renderer::PresentViaRenderGraph(rg::RenderGraph& graph, bool needsSwapchainDepth,
+std::optional<DrawStats> Renderer::PresentViaRenderGraph(rg::RenderGraph& graph,
     const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build)
 {
-    const bool ran = m_presenter.PresentViaRenderGraph(graph, needsSwapchainDepth, build);
+    const bool ran = m_presenter.PresentViaRenderGraph(graph, build);
     if (!ran) {
         return std::nullopt;
     }
@@ -207,6 +207,11 @@ PixelFormat Renderer::ColorPixelFormat() const noexcept
 PixelFormat Renderer::DepthPixelFormat() const noexcept
 {
     return FromVkFormat(DepthFormat());
+}
+
+PixelFormat Renderer::ScenePixelFormat() const noexcept
+{
+    return PixelFormat::RGBA16_Float;
 }
 
 RenderTexture Renderer::CreateRenderTexture(int width, int height, PixelFormat format, const char* debugName,
@@ -311,6 +316,11 @@ void Renderer::WaitForGpuIdle() const
 }
 
 void Renderer::DrainGpuForCodeUnload() const
+{
+    WaitForGpuIdle();
+}
+
+void Renderer::DrainGpuForResourceRelease() const
 {
     WaitForGpuIdle();
 }
@@ -491,8 +501,8 @@ Pipeline Renderer::CreatePipeline(const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
     const char* debugName, bool useInstanceBuffer, DescriptorSetLayoutHandle sceneServicesSetLayout) const
 {
-    return m_resources.CreatePipeline(ColorFormat(), vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
-        useMaterialTexture, debugName, useInstanceBuffer, Native(sceneServicesSetLayout));
+    return m_resources.CreatePipeline(ToVkFormat(ScenePixelFormat()), vertexShaderSpirvPath, fragmentShaderSpirvPath,
+        vertexLayout, useMaterialTexture, debugName, useInstanceBuffer, Native(sceneServicesSetLayout));
 }
 
 Pipeline Renderer::CreatePipeline(std::span<const PixelFormat> colorFormats, const std::string& vertexShaderSpirvPath,
@@ -638,15 +648,20 @@ Texture2D Renderer::CreateTexture2D(const Texture2DUploadDesc& desc) const
     return m_resources.CreateTexture2D(desc);
 }
 
-MaterialTexture Renderer::CreateMaterialTexture2D(const void* pixelsRgba8, int width, int height,
-    const MaterialParams& params, const char* debugName) const
+std::vector<std::shared_ptr<Texture2D>> Renderer::CreateMaterialImages(
+    std::span<const MaterialImageUpload> uploads) const
 {
-    return m_resources.CreateMaterialTexture2D(pixelsRgba8, width, height, params, debugName);
+    return m_resources.CreateMaterialImages(uploads);
 }
 
-MaterialTexture Renderer::CreateMaterialVariant(std::shared_ptr<Texture2D> image, const MaterialParams& params) const
+GpuUploadStats Renderer::GetUploadStats() const noexcept
 {
-    return m_resources.CreateMaterialVariant(std::move(image), params);
+    return m_resources.UploadStats();
+}
+
+MaterialTexture Renderer::CreateMaterialVariant(const MaterialImages& images, const MaterialParams& params) const
+{
+    return m_resources.CreateMaterialVariant(images, params);
 }
 
 VolumeTexture Renderer::CreateVolumeTexture(

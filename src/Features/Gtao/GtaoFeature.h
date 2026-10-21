@@ -17,8 +17,8 @@ struct GtaoViewState {
         fx::PersistentTarget{ "Gtao.History1" },
     };
     fx::GpuParams<GtaoMainParamsGpu> mainParams;
-    fx::GpuParams<GtaoResolveParamsGpu> resolveParams;
-    GtaoHistory previous;
+    fx::GpuParams<fx::TemporalResolveParamsGpu> resolveParams;
+    fx::TemporalHistory previous;
     GtaoViewSnapshot snapshot;
 };
 

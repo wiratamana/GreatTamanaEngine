@@ -1,16 +1,8 @@
-// Unit tests for the Frame Debugger's Channels + Levels preview-compositing
-// pure CPU oracle (src/Editor/FrameDebuggerPreviewProcessing.h) -
-// ApplyFrameDebuggerPreviewTransform() only. FrameDebuggerPreviewRenderer
-// itself is inherently Tier 2 (a live VkDevice-owning GPU dispatcher, exactly
-// like VolumeTexturePreviewRenderer - see AGENTS.md, "Testability &
-// Regression Safety") and is NOT exercised here. Only built when
-// GTE_ENABLE_EDITOR is ON, since FrameDebuggerPreviewProcessing.h/.cpp are
-// only compiled into gte_core then.
-//
-// task_manager/frame-debugger-3 campaign, PHASE6
-// (PHASE6_CHANNELS_AND_LEVELS_REAL_PREVIEW.md).
+// Tests for the CPU reference of the Frame Debugger channels/levels preview
+// (ApplyFrameDebuggerPreviewTransform). The GPU dispatcher is not exercised here.
 
 #include "Editor/FrameDebuggerPreviewProcessing.h"
+#include "Math/ToneMapCurves.h"
 
 #include <gtest/gtest.h>
 
@@ -126,6 +118,44 @@ TEST(FrameDebuggerPreviewProcessingTest, LevelsAndChannelIsolationCombineInDocum
     EXPECT_FLOAT_EQ(result[1], 0.5f);
     EXPECT_FLOAT_EQ(result[2], 0.5f);
     EXPECT_FLOAT_EQ(result[3], 1.0f);
+}
+
+TEST(FrameDebuggerPreviewProcessingTest, SceneReferredToneMapsRgbAndLeavesAlpha)
+{
+    const std::array<float, 4> src{ 1.0f, 1.0f, 1.0f, 0.5f };
+    const std::array<float, 4> result =
+        ApplyFrameDebuggerPreviewTransform(src, FrameDebuggerPreviewChannel::All, 0.0f, 1.0f, true);
+
+    const Vec3 expected = tonemap::ToneMapLinearToDisplay(
+        Vec3{ 1.0f, 1.0f, 1.0f }, tonemap::kDefaultExposure, tonemap::kDefaultMode, tonemap::kDefaultSaturation);
+    EXPECT_FLOAT_EQ(result[0], expected.x);
+    EXPECT_FLOAT_EQ(result[1], expected.y);
+    EXPECT_FLOAT_EQ(result[2], expected.z);
+    EXPECT_NEAR(result[0], 0.88f, 0.01f);
+    EXPECT_FLOAT_EQ(result[3], 0.5f);
+}
+
+TEST(FrameDebuggerPreviewProcessingTest, SceneReferredMapsBlackToBlackAndIsMonotonic)
+{
+    const auto lum = [](float v) {
+        return ApplyFrameDebuggerPreviewTransform({ v, v, v, 1.0f }, FrameDebuggerPreviewChannel::R, 0.0f, 1.0f, true)[0];
+    };
+    EXPECT_FLOAT_EQ(lum(0.0f), 0.0f);
+    EXPECT_LT(lum(0.05f), lum(0.2f));
+    EXPECT_LT(lum(0.2f), lum(1.0f));
+    EXPECT_LE(lum(1.0f), lum(50.0f));
+    EXPECT_LE(lum(50.0f), 1.0f);
+}
+
+TEST(FrameDebuggerPreviewProcessingTest, WithoutSceneReferredOnlyLevelsApply)
+{
+    const std::array<float, 4> src{ 0.25f, 0.5f, 2.0f, 1.0f };
+    const std::array<float, 4> result =
+        ApplyFrameDebuggerPreviewTransform(src, FrameDebuggerPreviewChannel::All, 0.0f, 1.0f, false);
+
+    EXPECT_FLOAT_EQ(result[0], 0.25f);
+    EXPECT_FLOAT_EQ(result[1], 0.5f);
+    EXPECT_FLOAT_EQ(result[2], 1.0f); // Levels clamp only.
 }
 
 } // namespace

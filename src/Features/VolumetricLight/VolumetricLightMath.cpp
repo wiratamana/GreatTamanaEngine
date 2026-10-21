@@ -1,5 +1,7 @@
 #include "VolumetricLightMath.h"
 
+#include "../../Game/Lighting/SunLightModulation.h"
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -146,14 +148,14 @@ VolumetricLightSettings SanitizeVolumetricLightSettings(const VolumetricLightSet
     s.shadowBiasTexels = SanitizeFloat(settings.shadowBiasTexels, 0.0f, 16.0f, d.shadowBiasTexels);
     s.historyBlend = SanitizeFloat(settings.historyBlend, 0.0f, 0.98f, d.historyBlend);
     s.strength = SanitizeFloat(settings.strength, 0.0f, 1.0f, d.strength);
-    s.dither = SanitizeFloat(settings.dither, 0.0f, 2.0f, d.dither);
+    s.skyDistanceFraction = SanitizeFloat(settings.skyDistanceFraction, 0.0f, 1.0f, d.skyDistanceFraction);
     s.debugView = static_cast<std::uint8_t>(settings.debugView) <= static_cast<std::uint8_t>(VolumetricLightDebugView::Transmittance)
         ? settings.debugView
         : VolumetricLightDebugView::Off;
     return s;
 }
 
-std::uint64_t VolumetricLightLightingKey(const VolumetricLightSettings& safe) noexcept
+std::uint64_t VolumetricLightLightingKey(const VolumetricLightSettings& safe, bool atmosphereLight) noexcept
 {
     std::uint64_t hash = 14695981039346656037ull;
     for (const float value : { safe.density, safe.albedo, safe.anisotropyG, safe.heightDensity, safe.heightBase,
@@ -162,6 +164,7 @@ std::uint64_t VolumetricLightLightingKey(const VolumetricLightSettings& safe) no
              safe.shadowFilterTexels, safe.shadowBiasTexels, static_cast<float>(safe.shadowSamples) }) {
         hash = HashFloat(hash, value);
     }
+    hash = HashFloat(hash, atmosphereLight ? 1.0f : 0.0f);
     return hash;
 }
 
@@ -431,15 +434,25 @@ VolumetricLightInjectParamsGpu MakeVolumetricLightInjectParams(const VolumetricL
     }
 
     const Vec3 sunDirection = SafeDirection(facts.sunDirection);
-    const float fade = VolumetricLightSunFade(sunDirection);
-    const float sunScale = kVolumetricLightSunDirectScale * safe.sunIntensity * fade;
-    const float ambientScale =
-        safe.ambientIntensity * (kVolumetricLightNightAmbientFraction + (1.0f - kVolumetricLightNightAmbientFraction) * fade);
+    const SunLightModulation light =
+        SanitizeSunLightModulation(SunLightModulation{ facts.atmosphereLight, facts.sunTint, facts.ambientScale });
+    const float directScale = kVolumetricLightSunDirectScale * safe.sunIntensity;
+    Vec3 sunRadiance;
+    float ambientScale;
+    if (light.active) {
+        sunRadiance = facts.sunIlluminance * light.sunTint * directScale;
+        ambientScale = safe.ambientIntensity * light.ambientScale;
+    } else {
+        const float fade = VolumetricLightSunFade(sunDirection);
+        sunRadiance = facts.sunIlluminance * (directScale * fade);
+        ambientScale = safe.ambientIntensity
+            * (kVolumetricLightNightAmbientFraction + (1.0f - kVolumetricLightNightAmbientFraction) * fade);
+    }
 
     Store(p.eyeAndMaxDistance, facts.eye, facts.maxDistance);
     Store(p.forwardAndExponent, facts.forward, safe.depthExponent);
     Store(p.sunDirectionAndG, sunDirection, safe.anisotropyG);
-    Store(p.sunRadiance, facts.sunIlluminance * sunScale);
+    Store(p.sunRadiance, sunRadiance);
     Store(p.ambientRadiance, Vec3{ safe.ambientR, safe.ambientG, safe.ambientB } * ambientScale);
 
     p.densityParams[0] = safe.density;
@@ -487,12 +500,13 @@ VolumetricLightCompositePush MakeVolumetricLightCompositePush(const VolumetricLi
     VolumetricLightCompositePush p;
     p.invViewProjection = invViewProjection;
     Store(p.eyeAndMaxDistance, eye, result.maxDistance);
-    p.strengthExponentLinearDither[0] = safe.strength;
-    p.strengthExponentLinearDither[1] = result.depthExponent;
-    p.strengthExponentLinearDither[2] = safe.blendInLinearSpace ? 1.0f : 0.0f;
-    p.strengthExponentLinearDither[3] = safe.dither;
+    p.strengthExponentReserved[0] = safe.strength;
+    p.strengthExponentReserved[1] = result.depthExponent;
+    p.strengthExponentReserved[2] = 0.0f;
+    p.strengthExponentReserved[3] = 0.0f;
     p.frameAndDebug[0] = static_cast<std::uint32_t>(frameIndex);
     p.frameAndDebug[1] = static_cast<std::uint32_t>(safe.debugView);
+    p.frameAndDebug[2] = std::bit_cast<std::uint32_t>(safe.skyDistanceFraction);
     return p;
 }
 

@@ -87,5 +87,79 @@ TEST(MeshFileTest, DecodeFailsWhenMagicIsWrongEvenIfSizeWouldOtherwiseFit)
     EXPECT_FALSE(DecodeMeshDataFromBytes(encoded).has_value());
 }
 
+MeshData BuildTriangleWithTangents()
+{
+    MeshData mesh = BuildTriangleMeshData();
+    mesh.tangents = { Vec4(1, 0, 0, 1), Vec4(0, 1, 0, -1), Vec4(0, 0, 1, 1) };
+    return mesh;
+}
+
+constexpr std::size_t kHeaderBytes = 8 + 4 + 4;
+constexpr std::size_t kTriangleBytesWithoutTangents = kHeaderBytes + 3 * 12 + 3 * 12 + 3 * 8 + 3 * 4;
+
+TEST(MeshFileTest, TangentsRoundTrip)
+{
+    const MeshData original = BuildTriangleWithTangents();
+    const std::vector<std::uint8_t> encoded = EncodeMeshDataToBytes(original);
+    EXPECT_EQ(encoded.size(), kTriangleBytesWithoutTangents + 4 + 3 * 16);
+
+    const std::optional<MeshData> decoded = DecodeMeshDataFromBytes(encoded);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(decoded->tangents, original.tangents);
+    EXPECT_EQ(decoded->indices, original.indices);
+}
+
+TEST(MeshFileTest, MeshWithoutTangentsKeepsTheOriginalByteSize)
+{
+    const std::vector<std::uint8_t> encoded = EncodeMeshDataToBytes(BuildTriangleMeshData());
+    EXPECT_EQ(encoded.size(), kTriangleBytesWithoutTangents);
+
+    const std::optional<MeshData> decoded = DecodeMeshDataFromBytes(encoded);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_TRUE(decoded->tangents.empty());
+}
+
+TEST(MeshFileTest, TangentArrayOfTheWrongSizeIsNotWritten)
+{
+    MeshData mesh = BuildTriangleMeshData();
+    mesh.tangents = { Vec4(1, 0, 0, 1) };
+    const std::vector<std::uint8_t> encoded = EncodeMeshDataToBytes(mesh);
+    EXPECT_EQ(encoded.size(), kTriangleBytesWithoutTangents);
+    const std::optional<MeshData> decoded = DecodeMeshDataFromBytes(encoded);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_TRUE(decoded->tangents.empty());
+}
+
+TEST(MeshFileTest, DecodeRejectsATangentCountThatDiffersFromTheVertexCount)
+{
+    std::vector<std::uint8_t> encoded = EncodeMeshDataToBytes(BuildTriangleWithTangents());
+    const std::uint32_t wrongCount = 2;
+    std::memcpy(encoded.data() + kTriangleBytesWithoutTangents, &wrongCount, sizeof(wrongCount));
+    EXPECT_FALSE(DecodeMeshDataFromBytes(encoded).has_value());
+}
+
+TEST(MeshFileTest, DecodeRejectsATruncatedTangentBlock)
+{
+    std::vector<std::uint8_t> encoded = EncodeMeshDataToBytes(BuildTriangleWithTangents());
+    encoded.resize(encoded.size() - 1);
+    EXPECT_FALSE(DecodeMeshDataFromBytes(encoded).has_value());
+}
+
+TEST(MeshFileTest, DecodeRejectsExtraBytesAfterTheTangentBlock)
+{
+    std::vector<std::uint8_t> encoded = EncodeMeshDataToBytes(BuildTriangleWithTangents());
+    encoded.push_back(0);
+    EXPECT_FALSE(DecodeMeshDataFromBytes(encoded).has_value());
+}
+
+TEST(MeshFileTest, DecodeRejectsOneToThreeExtraBytesAfterTheIndices)
+{
+    for (std::size_t extra = 1; extra <= 3; ++extra) {
+        std::vector<std::uint8_t> encoded = EncodeMeshDataToBytes(BuildTriangleMeshData());
+        encoded.resize(encoded.size() + extra, 0);
+        EXPECT_FALSE(DecodeMeshDataFromBytes(encoded).has_value()) << extra;
+    }
+}
+
 } // namespace
 } // namespace gte

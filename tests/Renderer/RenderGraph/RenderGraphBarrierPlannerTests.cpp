@@ -5,6 +5,8 @@
 
 #include <gtest/gtest.h>
 
+#include <iterator>
+
 namespace gte::rg {
 namespace {
 
@@ -494,6 +496,106 @@ TEST(RenderGraphShortLayoutLabelTest, FallsBackToOtherForAnyUnlistedLayout)
 {
     EXPECT_STREQ(ShortLayoutLabel(VK_IMAGE_LAYOUT_PREINITIALIZED), "Other");
     EXPECT_STREQ(ShortLayoutLabel(VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL), "Other");
+}
+
+// --- Buffer barriers ---
+
+TEST(RenderGraphBarrierPlannerTest, BufferWriteAfterWriteRequiresABarrier)
+{
+    const ResourceState write = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+    EXPECT_FALSE(RequiresBarrier(write, write)); // The texture rule is unchanged.
+    EXPECT_TRUE(RequiresBufferBarrier(write, write));
+}
+
+TEST(RenderGraphBarrierPlannerTest, BufferTransferWriteAfterTransferWriteRequiresABarrier)
+{
+    const ResourceState write = RequiredStateFor(ResourceAccess::TransferDst, false);
+    EXPECT_TRUE(RequiresBufferBarrier(write, write));
+}
+
+TEST(RenderGraphBarrierPlannerTest, BufferReadAfterReadDoesNotRequireABarrier)
+{
+    const ResourceState read = RequiredStateFor(ResourceAccess::ComputeShaderRead, false);
+    EXPECT_FALSE(RequiresBufferBarrier(read, read));
+}
+
+TEST(RenderGraphBarrierPlannerTest, BufferReadAfterWriteRequiresABarrier)
+{
+    const ResourceState write = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+    const ResourceState read = RequiredStateFor(ResourceAccess::ComputeShaderRead, false);
+    EXPECT_TRUE(RequiresBufferBarrier(write, read));
+}
+
+TEST(RenderGraphBarrierPlannerTest, BufferWriteAfterReadRequiresABarrier)
+{
+    const ResourceState write = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+    const ResourceState read = RequiredStateFor(ResourceAccess::ComputeShaderRead, false);
+    EXPECT_TRUE(RequiresBufferBarrier(read, write));
+}
+
+TEST(RenderGraphBarrierPlannerTest, FirstBufferUseRequiresABarrierFromTheInitialState)
+{
+    EXPECT_TRUE(RequiresBufferBarrier(ResourceState{}, RequiredStateFor(ResourceAccess::ComputeShaderRead, false)));
+}
+
+TEST(RenderGraphBarrierPlannerTest, BufferBarrierSourceKeepsTheLastWriteInScopeAfterARead)
+{
+    const ResourceState write = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+    const ResourceState read = RequiredStateFor(ResourceAccess::IndirectCommandRead, false);
+    const ResourceState source = BufferBarrierSource(read, write);
+    EXPECT_EQ(source.stageMask, read.stageMask | write.stageMask);
+    EXPECT_EQ(source.accessMask, read.accessMask | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+}
+
+TEST(RenderGraphBarrierPlannerTest, BufferBarrierSourceIsThePreviousStateWhenItIsTheWrite)
+{
+    const ResourceState write = RequiredStateFor(ResourceAccess::ComputeShaderWrite, false);
+    EXPECT_EQ(BufferBarrierSource(write, write), write);
+}
+
+TEST(RenderGraphBarrierPlannerTest, BufferBarrierSourceIsThePreviousStateWhenNothingWasWritten)
+{
+    const ResourceState read = RequiredStateFor(ResourceAccess::ComputeShaderRead, false);
+    EXPECT_EQ(BufferBarrierSource(read, ResourceState{}), read);
+}
+
+TEST(RenderGraphBarrierPlannerTest, EveryBufferWriteAccessIsAWriteState)
+{
+    for (const ResourceAccess access : { ResourceAccess::TransferDst, ResourceAccess::ComputeShaderWrite }) {
+        EXPECT_TRUE(IsBufferWriteState(RequiredStateFor(access, false)));
+    }
+    for (const ResourceAccess access : { ResourceAccess::ShaderRead, ResourceAccess::TransferSrc,
+             ResourceAccess::ComputeShaderRead, ResourceAccess::IndirectCommandRead, ResourceAccess::VertexBufferRead,
+             ResourceAccess::VertexShaderStorageRead }) {
+        EXPECT_FALSE(IsBufferWriteState(RequiredStateFor(access, false)));
+    }
+}
+
+// Mirrors the executor: fill -> compute write -> indirect read -> transfer read.
+TEST(RenderGraphBarrierPlannerTest, CountBufferSequenceKeepsTheComputeWriteInTheSourceScope)
+{
+    ResourceState state;
+    ResourceState lastWrite;
+    int barriersAfterTheFill = 0;
+    ResourceState lastSource;
+
+    const ResourceAccess sequence[] = { ResourceAccess::TransferDst, ResourceAccess::ComputeShaderWrite,
+        ResourceAccess::IndirectCommandRead, ResourceAccess::TransferSrc };
+    for (std::size_t i = 0; i < std::size(sequence); ++i) {
+        const ResourceState next = RequiredStateFor(sequence[i], false);
+        if (RequiresBufferBarrier(state, next)) {
+            lastSource = BufferBarrierSource(state, lastWrite);
+            barriersAfterTheFill += i > 0 ? 1 : 0;
+        }
+        state = next;
+        if (IsBufferWriteState(next)) {
+            lastWrite = next;
+        }
+    }
+
+    EXPECT_EQ(barriersAfterTheFill, 3);
+    EXPECT_NE(lastSource.stageMask & VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0u);
+    EXPECT_NE(lastSource.accessMask & VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, 0u);
 }
 
 TEST(RenderGraphBarrierTransitionLabelTest, ConcatenatesOldAndNewShortLayoutLabelsWithArrow)

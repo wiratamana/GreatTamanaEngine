@@ -43,13 +43,20 @@ struct FrameDebuggerStandardPipelineState {
     std::string stencilZFail;
 };
 
+// One bound material image of one draw.
+struct FrameDebuggerMaterialSlot {
+    std::string slot;      // MaterialImageRoleLabel(), for example "Normal".
+    std::string imageName; // Debug name of the bound image; empty when unknown.
+    friend bool operator==(const FrameDebuggerMaterialSlot&, const FrameDebuggerMaterialSlot&) = default;
+};
+
 // One real draw call's attribution facts, in draw order. Never deduplicated: one entry per draw.
 struct FrameDebuggerDrawRecord {
     std::uint32_t entityIndex = 0;
     std::uint32_t entityGeneration = 0;
     std::string displayName; // e.g. "terrain", or the "Entity <index>" fallback.
     std::string pipelineDebugName;
-    std::string materialTextureDebugName; // empty for an untextured draw.
+    std::vector<FrameDebuggerMaterialSlot> materialSlots; // Empty for an untextured draw.
     std::uint32_t triangleCount = 0;
 };
 
@@ -63,15 +70,15 @@ FrameDebuggerStandardPipelineState DescribeSkyBackgroundPipelineState();
 // is told; the caller decides when it is armed. A caller that passes nullptr pays only one null check per draw.
 class FrameDebuggerCaptureContext : public IFrameDebuggerCaptureRecorder, public FrameDebuggerEventSink {
 public:
-    // Records one resolved draw. Both names are deduplicated in first-seen order; empty names are never added.
-    // `viewProjection` is the column-major matrix the whole Game-View pass used.
-    void RecordDraw(
-        const std::string& pipelineDebugName, const std::string& materialTextureDebugName, const Mat4& viewProjection);
+    // Records one resolved draw. Pipeline names and (slot, image) pairs are deduplicated in first-seen order;
+    // empty names are never added. `viewProjection` is the column-major matrix the whole Game-View pass used.
+    void RecordDraw(const std::string& pipelineDebugName, const std::vector<FrameDebuggerMaterialSlot>& slots,
+        const Mat4& viewProjection);
 
     // Records one draw's attribution facts in addition to RecordDraw(). `triangleCount` follows
     // DrawStats.h::AccumulateDrawStats().
     void RecordEntityDraw(std::uint32_t entityIndex, std::uint32_t entityGeneration, const std::string& displayName,
-        const std::string& pipelineDebugName, const std::string& materialTextureDebugName,
+        const std::string& pipelineDebugName, const std::vector<FrameDebuggerMaterialSlot>& slots,
         std::uint32_t triangleCount);
 
     // IFrameDebuggerCaptureRecorder overrides; bodies live in FrameDebuggerDrawRecording.cpp and
@@ -122,8 +129,8 @@ public:
     // Distinct, non-empty pipeline debug names recorded via RecordDraw() since the last Reset(), first-seen order.
     const std::vector<std::string>& PipelineDebugNames() const noexcept { return m_pipelineDebugNames; }
 
-    // Distinct, non-empty material texture debug names recorded via RecordDraw() since the last Reset().
-    const std::vector<std::string>& MaterialTextureDebugNames() const noexcept { return m_materialTextureDebugNames; }
+    // Distinct material slots recorded since the last Reset(), first-seen order; a slot with no image name is skipped.
+    const std::vector<FrameDebuggerMaterialSlot>& MaterialSlotRows() const noexcept { return m_materialSlotRows; }
 
     // RecordDraw() calls since the last Reset(): this frame's Game-View draw-call count.
     int DrawCallCount() const noexcept { return m_drawCallCount; }
@@ -147,7 +154,7 @@ public:
 
 private:
     std::vector<std::string> m_pipelineDebugNames;
-    std::vector<std::string> m_materialTextureDebugNames;
+    std::vector<FrameDebuggerMaterialSlot> m_materialSlotRows;
     int m_drawCallCount = 0;
     Mat4 m_lastViewProjection = Mat4::Identity();
     std::vector<FrameDebuggerDrawRecord> m_drawRecords;

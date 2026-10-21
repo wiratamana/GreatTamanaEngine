@@ -16,6 +16,16 @@ struct DescriptorWrite {
     uint64_t bufferOffset = 0;
     uint64_t bufferRange = VK_WHOLE_SIZE;
 
+    // Generational engine handle of the buffer behind `buffer`; 0 for every other write. Two writes with
+    // the same VkBuffer value and a different identity are different resources.
+    std::uint64_t identity = 0;
+
+    DescriptorWrite& WithIdentity(std::uint64_t value) noexcept
+    {
+        identity = value;
+        return *this;
+    }
+
     // Image descriptor fields
     VkImageView imageView = VK_NULL_HANDLE;
     VkImageLayout imageLayout = VK_IMAGE_LAYOUT_UNDEFINED;

@@ -1000,6 +1000,29 @@ TEST(RenderGraphBuilderTest, ImportedAndTransientBuffersShareOneContiguousHandle
     EXPECT_EQ(input.buffers.size(), 3u);
 }
 
+TEST(RenderGraphBuilderTest, DescOfBufferReportsCreatedAndImportedSizes)
+{
+    RenderGraphBuilder builder;
+    const BufferHandle created = builder.CreateBuffer("B", BufferDesc{ 64, BufferUsage::None });
+    const VkBuffer fakeBuffer = reinterpret_cast<VkBuffer>(static_cast<std::uintptr_t>(0xCCCC));
+    const BufferHandle imported = builder.ImportBuffer("I", RegisterBufferObject(fakeBuffer), 128);
+
+    ASSERT_TRUE(builder.DescOfBuffer(created).has_value());
+    EXPECT_EQ(builder.DescOfBuffer(created)->size, 64u);
+    ASSERT_TRUE(builder.DescOfBuffer(imported).has_value());
+    EXPECT_EQ(builder.DescOfBuffer(imported)->size, 128u);
+}
+
+TEST(RenderGraphBuilderTest, DescOfBufferRejectsInvalidAndUnknownHandles)
+{
+    RenderGraphBuilder builder;
+    builder.CreateBuffer("B", BufferDesc{ 64, BufferUsage::None });
+
+    EXPECT_FALSE(builder.DescOfBuffer(BufferHandle{}).has_value());
+    EXPECT_FALSE(builder.DescOfBuffer(BufferHandle{ 99, 1 }).has_value());
+}
+
+
 // --- Name validation guard -------------------------------------------------
 //
 // A pass/resource name that is nullptr or empty is rejected via an

@@ -206,3 +206,18 @@ registry that tracks every one of them:
   hand-built binary fixture covering every track. Still import/data-
   extraction only — no interpolation evaluation/keyframe playback happens
   anywhere in this engine yet; see `TODO.md` for that remaining runtime work.
+- **glTF import** (`Assets/GltfLoader.h/.cpp`, external-file `.gltf` only) — produces the same `MeshData` and `MaterialData`
+  as the PMX path, in engine space (Z mirrored). It also carries the material factors (`metallicFactor`, `roughnessFactor`,
+  `normalScale`, `occlusionStrength`) and the texture indices of the normal, metallic-roughness and occlusion slots. Every
+  referenced image becomes one `Texture` `*.gta` (RGBA8, no color-space tag; the GPU upload picks sRGB for base color and
+  linear for the data images). `kGltfImporterVersion` is 4; a project import stamp with an older version is re-imported.
+  The success message lists tangent counts and warns about unsupported texcoord sets and shading models.
+- **Tangents** (`Assets/MeshTangents.h/.cpp`) — an authored `TANGENT` is converted to engine space; a primitive without one
+  gets MikkTSpace tangents (third_party `mikktspace`, fetched at configure by `cmake/FetchMikkTSpace.cmake` at a pinned
+  commit, linked PRIVATE to `gte_core`). The handedness sign comes from the triangle's uv gradient, and a vertex that needs two
+  frames is split (positions, normals, uvs and skin weights follow). The mesh payload (`GTEMESH1`) has an optional trailing
+  section, `uint32 tangentCount` (== vertex count) plus 16 bytes per tangent; a file without it is byte-identical to the older
+  format, and the decoder rejects any other trailing bytes. The rig blob (`GTERIG03`) has an optional last section, a count
+  plus four floats per material (the factors above); an older blob keeps the defaults. Every counted reader checks the count
+  against the remaining bytes before it allocates, so a corrupt blob returns `nullopt` and never throws.
+  See [PBR Materials](../conventions/pbr-materials.md).

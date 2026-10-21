@@ -54,12 +54,14 @@ Texture::Texture(VmaAllocator allocator, std::shared_ptr<GpuMemoryTracker> track
     , m_tracker(std::move(tracker))
     , m_device(device)
     , m_info(info)
+    , m_debugName(info.debugName != nullptr ? info.debugName : "")
     , m_format(ToVkFormat(info.format))
     , m_depth(std::max(info.depth, 1))
     , m_layers(static_cast<std::uint32_t>(std::max(info.layers, 1)))
     , m_isDepth(IsDepthFormat(info.format))
     , m_hasStencil(FormatHasStencil(info.format))
 {
+    m_info.debugName = nullptr;
     m_width = std::max(info.width, 1);
     m_height = std::max(info.height, 1);
     Create();
@@ -76,6 +78,7 @@ Texture::Texture(Texture&& other) noexcept
     , m_handle(std::exchange(other.m_handle, kInvalidGpuResourceHandle))
     , m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
     , m_info(other.m_info)
+    , m_debugName(std::move(other.m_debugName))
     , m_format(std::exchange(other.m_format, VK_FORMAT_UNDEFINED))
     , m_width(std::exchange(other.m_width, 0))
     , m_height(std::exchange(other.m_height, 0))
@@ -101,6 +104,7 @@ Texture& Texture::operator=(Texture&& other) noexcept
         m_handle = std::exchange(other.m_handle, kInvalidGpuResourceHandle);
         m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
         m_info = other.m_info;
+        m_debugName = std::move(other.m_debugName);
         m_format = std::exchange(other.m_format, VK_FORMAT_UNDEFINED);
         m_width = std::exchange(other.m_width, 0);
         m_height = std::exchange(other.m_height, 0);
@@ -177,8 +181,8 @@ void Texture::Create()
         // Re-tracked on every (re)create so the tracker always reflects the current allocation.
         m_handle = m_tracker->Track(GpuResourceType::Texture, ClassifyGpuMemoryLocation(m_allocator, m_allocation),
             allocationInfo.size, m_format);
-        if (m_info.debugName != nullptr) {
-            m_tracker->SetDebugName(m_handle, m_info.debugName);
+        if (!m_debugName.empty()) {
+            m_tracker->SetDebugName(m_handle, m_debugName.c_str());
         }
 
         // A sampled view must expose a single aspect, so stencil is only included when not sampled.

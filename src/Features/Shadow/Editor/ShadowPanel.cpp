@@ -154,6 +154,7 @@ bool BuildShadowPanel(EditorContext& /*ctx*/, ShadowSettings& edit, const Shadow
     changed |= ComboValue("Filter samples", edit.filterSamples, kFilterSamples);
     changed |= ImGui::DragFloat("Filter radius (texels)", &edit.filterRadiusTexels, 0.05f, 0.0f, 8.0f);
     changed |= ImGui::SliderFloat("Strength", &edit.strength, 0.0f, 1.0f);
+    changed |= ImGui::Checkbox("Apply in materials", &edit.applyInMaterials);
 
     ImGui::SeparatorText("Culling");
     changed |= ImGui::Checkbox("Cull casters per cascade", &edit.cullCasters);

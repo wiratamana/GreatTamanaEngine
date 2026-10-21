@@ -44,8 +44,9 @@ struct ShadowSettings {
     float slopeBiasTexels = 1.0f;
     float normalOffsetTexels = 1.0f;
     float filterRadiusTexels = 1.5f;
-    std::uint32_t filterSamples = 8; // 1, 4, 8 or 16.
-    float strength = 0.6f;           // 0 = no darkening, 1 = black in shadow.
+    std::uint32_t filterSamples = 4; // 1, 4, 8 or 16.
+    float strength = 1.0f;           // Fraction of the sun term removed in shadow, 0..1.
+    bool applyInMaterials = true;    // Material shaders apply the shadow; the composite only draws debug views.
     bool stabilizeCascades = true;   // Snap cascade centers to whole texels.
     ShadowDebugView debugView = ShadowDebugView::Off;
 

@@ -279,15 +279,6 @@ Scattering" section for the full feature writeup.
   meaningfully large, engine-wide follow-up, not something to bolt onto this
   campaign's own passes individually (e.g. do NOT add new `GpuTimingSlot`
   enumerators one atmosphere pass at a time).
-- **The release-build/both-Editor-panels-hidden direct-to-swapchain path does
-  not get the atmosphere effect.** `AddPresentPass()`'s own
-  `directGameRenderAspect` branch (used only when both "Game" and "Scene" are
-  simultaneously hidden, or in a genuinely headless `-DGTE_ENABLE_EDITOR=OFF`
-  release build) does not go through `AddRenderOpaquePass()`/
-  `AddAtmosphereCompositePass()` at all - flagged as an open question across
-  Phases 7-9's own completion reports, never resolved. A future session should
-  explicitly decide whether this is acceptable long-term scope or whether that
-  direct-render branch needs its own Sky Background + Composite treatment.
 - **`ValidateAerialPerspectiveSkyPurity()` only checks the "Game" view's pair
   of textures (`"GameView"`/`"GameViewComposited"`) today.** (Added by the
   `atmosphere-scattering-4` campaign — see `AGENTS.md`'s "Atmosphere

@@ -4,6 +4,11 @@
 
 namespace gte::rg {
 
+namespace {
+// Every buffer access that writes carries one of these bits.
+constexpr VkAccessFlags2 kBufferWriteAccess = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
+} // namespace
+
 ResourceState RequiredStateFor(ResourceAccess access, bool isDepthResource) noexcept
 {
     // No `default:` on purpose: a new ResourceAccess must fail to compile here.
@@ -95,6 +100,27 @@ bool TargetsDepthState(ResourceAccess access) noexcept
 bool RequiresBarrier(const ResourceState& previous, const ResourceState& next) noexcept
 {
     return !(previous == next);
+}
+
+bool RequiresBufferBarrier(const ResourceState& previous, const ResourceState& next) noexcept
+{
+    return RequiresBarrier(previous, next) || IsBufferWriteState(previous);
+}
+
+bool IsBufferWriteState(const ResourceState& state) noexcept
+{
+    return (state.accessMask & kBufferWriteAccess) != 0;
+}
+
+ResourceState BufferBarrierSource(const ResourceState& previous, const ResourceState& lastWrite) noexcept
+{
+    if (!IsBufferWriteState(lastWrite) || IsBufferWriteState(previous)) {
+        return previous;
+    }
+    ResourceState source = previous;
+    source.stageMask |= lastWrite.stageMask;
+    source.accessMask |= lastWrite.accessMask & kBufferWriteAccess;
+    return source;
 }
 
 TextureArraySubresourceDecision DecideTextureArrayLayerTransition(

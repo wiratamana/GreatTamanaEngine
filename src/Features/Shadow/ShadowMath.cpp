@@ -287,7 +287,7 @@ ShadowMaskParamsGpu MakeShadowMaskParams(
     return p;
 }
 
-SunShadowReceiver MakeSunShadowReceiver(const ShadowMapData& map) noexcept
+SunShadowReceiver MakeSunShadowReceiver(const ShadowMapData& map, const ShadowSettings& safe) noexcept
 {
     static_assert(kSunShadowReceiverMaxCascades == kMaxShadowCascades);
     const ShadowCascadeSet& set = map.cascades;
@@ -314,6 +314,14 @@ SunShadowReceiver MakeSunShadowReceiver(const ShadowMapData& map) noexcept
     r.cameraForward = set.cameraForward;
     r.directionTowardSun = set.directionTowardSun;
     r.shadowDistance = set.shadowDistance;
+
+    r.fadeStart = set.fadeStart;
+    r.materialStrength = safe.applyInMaterials ? safe.strength : 0.0f;
+    r.filterRadiusTexels = safe.filterRadiusTexels;
+    r.constBiasTexels = safe.constBiasTexels;
+    r.normalOffsetTexels = safe.normalOffsetTexels;
+    r.slopeBiasTexels = std::max(safe.slopeBiasTexels, safe.filterRadiusTexels);
+    r.filterSamples = safe.filterSamples;
     return r;
 }
 

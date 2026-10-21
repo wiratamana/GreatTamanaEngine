@@ -1,7 +1,9 @@
 #pragma once
 
+#include "AtmosphereDebugEndpoint.h"
 #include "AtmosphereTypes.h"
 #include "../../Core/FeatureKit/FeatureKit.h"
+#include "../../Game/Lighting/SunLightModulation.h"
 
 namespace gte {
 
@@ -29,6 +31,7 @@ struct AtmosphereViewState {
     fx::PersistentTarget skyView{ "SkyViewLut" };
     fx::PersistentVolume aerialVolume{ "AerialPerspectiveVolume", kAerialVolumeSize, PixelFormat::RGBA16_Float };
     fx::GpuParams<AtmosphereFrameUniforms> frameParams;
+    SunLightModulationSnapshot sunLight;
 };
 
 // Physically based sky: shared transmittance and multi-scattering LUTs, per-view sky-view LUT and aerial
@@ -42,9 +45,15 @@ public:
 
     AtmosphereSettings& Settings() noexcept { return m_settings; }
 
+    fx::IFeatureDebugEndpoint* DebugEndpoint() noexcept override { return &m_debugEndpoint; }
+
+    // The record published to `scope`'s view in its last rendered frame.
+    SunLightModulationSnapshot SunLightSnapshot(rg::ViewScope scope) const { return m_views.For(scope).sunLight; }
+
 private:
     void SharedLuts(fx::SharedFrame& f);
     void ViewLuts(fx::PreOpaqueFrame& f);
+    void PublishSunLight(fx::PreOpaqueFrame& f);
     void SkyBackground(fx::PostOpaqueFrame& f);
     void Composite(fx::CompositeFrame& f);
 
@@ -65,6 +74,8 @@ private:
 
     fx::Channel<AtmosphereSharedLuts> m_sharedLuts{ "SharedLuts" };
     fx::Channel<AtmosphereViewLuts> m_viewLuts{ "ViewLuts" };
+    fx::Channel<SunLightModulation> m_sunLight{ kSunLightModulationChannel };
+    AtmosphereDebugEndpoint m_debugEndpoint{ *this };
 };
 
 } // namespace gte

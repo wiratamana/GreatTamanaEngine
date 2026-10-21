@@ -18,11 +18,15 @@ shadow maps. It fits the cascades to the camera every frame. No box has to be tu
   with no sample for 120 frames, the cascades use fixed splits over `[camera near, maxDistance]`.
 - **Caster culling.** Each cascade pass uses `CullToFrustum(casterCullPaddingFraction)`: an object is drawn only when its
   padded world box touches the cascade box. Meshes without bounds are never culled. Skinned meshes use rest-pose bounds, so
-  raise the padding or set `cullCasters=false` for large animations.
-- **One receive path.** `ShadowMask.comp` does cascade selection, normal offset, texel-scaled bias, Vogel-disk PCF,
-  cascade blending and the distance fade. Material shaders only do Lambert lighting. `ShadowComposite.frag` darkens by
-  `strength * mask` and draws the debug views.
-- **Sun uniforms.** The `SceneLighting` feature writes the sun into scene uniform binding 8 (32 bytes, with a valid flag)
+  raise the padding or set `cullCasters=false` for large animations. The cascade draw uses one depth-only pipeline per vertex
+  layout (`ShadowDepth<Layout>.vert`, listed in `SceneShaderSet`), including `PositionNormalUvTangent` for imported PBR meshes.
+  A layout without a depth-only shader casts no shadow; `DepthOnlyLayoutTests` and `ShadowDepthShaderCoverageTests` guard this.
+- **Two receive paths, one algorithm.** Material shaders sample the cascade maps (scene slots 0..3) and remove only the sun
+  term, so ambient light stays. `ShadowMask.comp` runs the same algorithm (cascade selection, normal offset, texel-scaled bias,
+  Vogel-disk PCF, cascade blending, distance fade) for the screen-space mask. The mask and cascade-id textures are produced only
+  when `debugView` is not `Off` or `applyInMaterials` is false. `ShadowComposite.frag` draws the debug views, and the gray
+  multiply of the final color when `applyInMaterials` is off.
+- **Sun uniforms.** The `SceneLighting` feature writes the sun, the ambient and the shadow data into scene uniform binding 8
   for every view. `DirectionalLighting.glsl` falls back to a default sun when the block was never written. Turning
   Shadow off never turns lit materials black.
 - **Resolution.** `mapResolution` (512, 1024, 2048, 4096) applies at once: `OffscreenTarget::Acquire` resizes each
@@ -35,12 +39,22 @@ shadow maps. It fits the cascades to the camera every frame. No box has to be tu
 |---|---|---|
 | `Shadow.Cascade0.Draw` .. `Shadow.Cascade3.Draw` | PreOpaque | One depth draw per cascade |
 | `Shadow.DepthRange.Clear`, `.Reduce`, `.Readback` | PostOpaque | Depth-range measurement (one unit) |
-| `Shadow.Mask.Dispatch` | PostOpaque | Screen-space shadow mask and cascade id |
-| `Shadow.Composite.Draw` | PostComposite | Darkening and debug views |
+| `Shadow.Mask.Dispatch` | PostOpaque | Screen-space shadow mask and cascade id; runs only when `debugView` is not `Off` or `applyInMaterials` is false |
+| `Shadow.Composite.Draw` | PostComposite | Debug views; with `applyInMaterials` off also the darkening |
 
-Textures per view (`<Name>.GameView`, `<Name>.SceneView`): `Shadow.Cascade0` .. `Shadow.Cascade3` (depth),
-`Shadow.Mask` and `Shadow.CascadeId` (R8). The `Map` channel is published only when every active cascade pass was
+Textures per view (`<Name>.GameView`, `<Name>.SceneView`): `Shadow.Cascade0` .. `Shadow.Cascade3` (depth). `Shadow.Mask` and
+`Shadow.CascadeId` (R8) exist only while the mask pass runs (`debugView` not `Off`, or `applyInMaterials` false). The `Map`
+channel, the `Receiver` channel and the four cascade scene slots are published only when every active cascade pass was
 recorded, so a disabled cascade pass switches the mask and composite off.
+
+## Material slot contract
+
+The cascade depth maps are scene slots (`DeclareSceneSlot`, kind `Depth2D`, names `Shadow.Cascade0.Slot` .. `Shadow.Cascade3.Slot`).
+The preferred index is the cascade index, a durable contract: material shaders read `layout(set = 1, binding = c)` for cascade
+`c`. Bindings 4..7 stay free. An unpublished slot is a 1x1 dummy; the shader never reads a cascade at or above the count.
+The `SceneLighting` feature reads the `Receiver` channel (`SunShadowReceiver`) and packs the cascade matrices, splits, bias and
+filter values into the 448-byte scene uniform block (limit 512 bytes). `ShadowMask.comp` and `SunShadowAmount()` in
+`DirectionalLighting.glsl` use the same algorithm.
 
 ## Settings
 
@@ -56,8 +70,9 @@ Edited in the dockable **Shadow** window or over HTTP. They are sanitized on wri
 | `casterRange` | 200 | 1..10000 |
 | `cullCasters` / `casterCullPaddingFraction` | true / 0.25 | padding 0..2 |
 | `constBiasTexels` / `slopeBiasTexels` / `normalOffsetTexels` | 1.5 / 1.0 / 1.0 | 0..16 |
-| `filterRadiusTexels` / `filterSamples` | 1.5 / 8 | radius 0..8, samples 1, 4, 8 or 16 |
-| `strength` | 0.6 | 0..1 |
+| `filterRadiusTexels` / `filterSamples` | 1.5 / 4 | radius 0..8, samples 1, 4, 8 or 16 |
+| `strength` | 1.0 | 0..1, fraction of the sun term removed in shadow (ambient stays) |
+| `applyInMaterials` | true | material shaders apply the shadow; false = `Shadow.Composite` darkens the final color by `strength * mask` |
 | `stabilizeCascades` | true | texel snapping |
 | `debugView` | Off | `Off`, `CascadeColors`, `Mask` |
 | `useSdsm` | true | off = fixed splits |
@@ -75,10 +90,11 @@ POST /load_scene {}
 GET  /activate_tab?name=Game
 GET  /feature_debug/state?name=Shadow
 GET  /feature_debug/set?name=Shadow&debugView=CascadeColors      then GET /get_game_view
+GET  /feature_debug/set?name=Shadow&debugView=Mask               set first, the mask only exists with a debug view
+GET  /get_texture?texture_name=Shadow::Shadow.Mask.GameView
 GET  /feature_debug/set?name=Shadow&debugView=Off&mapResolution=1024
 GET  /list_textures                                               cascade maps now 1024
 GET  /get_texture?texture_name=Shadow.Cascade3.GameView&channel=depth
-GET  /get_texture?texture_name=Shadow::Shadow.Mask.GameView
 GET  /render_graph                                                draw_call_count per cascade pass
 GET  /render_graph/set_pass_enabled?name=Shadow.DepthRange.Reduce&enabled=false
 GET  /feature_debug/invoke?name=Shadow&action=reset_defaults
@@ -97,6 +113,9 @@ A status reads `NotRendered` when its view has not rendered for a few frames, or
 
 - Directional light only. Transparent receivers get no shadow. Alpha-tested casters are drawn opaque.
 - A surface that faces away from the sun counts as shadowed.
+- Material shadows use the interpolated vertex normal, not the depth-derived normal of the mask pass. Tune
+  `normalOffsetTexels` and `slopeBiasTexels` when acne or peter-panning shows on curved surfaces.
+- A lit fragment takes up to 2 cascades x `filterSamples` depth taps. Overdraw multiplies the cost.
 - A caster further than `casterRange` from a cascade toward the sun is clipped. Raise `casterRange` for tall geometry.
 - A low sun gives very long shadows and needs a large slope bias on coarse cascades.
 - The depth range lags the camera by 2 frames. Padding and instant growth limit the effect.

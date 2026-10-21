@@ -61,13 +61,17 @@ struct Material {
     std::int32_t toonTextureIndex = -1;
     std::uint8_t sharedToonIndex = 0;
 
-    // glTF slots: index into MaterialData::textures, or -1 for none. Imported, not yet sampled.
+    // glTF slots: index into MaterialData::textures, or -1 for none. Emissive is imported but not sampled.
     std::int32_t normalTextureIndex = -1;
     std::int32_t metallicRoughnessTextureIndex = -1;
     std::int32_t occlusionTextureIndex = -1;
     std::int32_t emissiveTextureIndex = -1;
     AlphaMode alphaMode = AlphaMode::Opaque;
     float alphaCutoff = 0.5f;
+    float metallicFactor = 1.0f;
+    float roughnessFactor = 1.0f;
+    float normalScale = 1.0f;        // Scales x and y of the tangent-space normal.
+    float occlusionStrength = 1.0f;  // 0 = ignore the occlusion texture.
 
     // True for glTF materials: `diffuse` is a base color factor, and a material without a texture draws as flat color.
     // False (PMX, STL): `diffuse` is not applied to rendering.
@@ -76,6 +80,9 @@ struct Material {
     // Number of consecutive MeshData::indices this material draws, in materials order starting at 0.
     std::uint32_t indexCount = 0;
 };
+
+// True for glTF materials: they use the PBR shaders and apply `diffuse` as a base color factor.
+inline bool UsesPbrShading(const Material& m) noexcept { return m.useBaseColorFactor; }
 
 struct MaterialData {
     // May hold entries with guid == Guid::Invalid() (source missing or undecodable).

@@ -66,12 +66,27 @@ ComputeChain& ComputeChain::Bind(std::string_view name, DepthRef depth)
     return *this;
 }
 
+ComputeChain& ComputeChain::BindBuffer(std::string_view name, GpuBufferRef buffer)
+{
+    if (m_impl && m_impl->pass) {
+        if (!detail::CheckOwned(*m_impl->frame, buffer, m_impl->name, name)) {
+            m_impl->pass->Abandon();
+        } else if (!rg::HasUse(buffer.use, BufferUse::Storage)) {
+            m_impl->frame->ReportOnce(std::string("Pass '") + m_impl->name.value + "': '" + std::string(name)
+                + "' was not created with BufferUse::Storage");
+            m_impl->pass->Abandon();
+        } else {
+            m_impl->pass->Bind(name, buffer.handle);
+        }
+    }
+    return *this;
+}
+
 ComputeChain& ComputeChain::BindReadback(std::string_view name, detail::ReadbackCore& readback)
 {
     if (m_impl && m_impl->pass) {
         if (const auto binding = readback.Acquire(*m_impl->frame)) {
-            m_impl->pass->Bind(name, binding->deviceObject);
-            m_impl->pass->Writes(binding->device);
+            m_impl->pass->Bind(name, binding->device);
         } else {
             m_impl->pass->Abandon();
         }

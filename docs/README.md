@@ -81,7 +81,8 @@ than subsystem-specific):
   ID scope for any widget built inside a loop over runtime data, plus the
   proactive `ImGuiIdConflictTracker`/`ImGuiIdConflictGuard` detection layer.
 - **[Render Target Format Matching](conventions/render-target-format-matching.md)**
-  — always read `Renderer::ColorFormat()`/`DepthFormat()` rather than
+  — read `Renderer::ScenePixelFormat()` for scene color and
+  `Renderer::ColorFormat()`/`DepthFormat()` for the swapchain and depth rather than
   hardcoding a `VkFormat` literal.
 - **[Skeletal Animation Pose Resolution](conventions/skeletal-animation-pose-resolution.md)**
   — the per-frame MMD pose evaluation pipeline under `src/Animation/`
@@ -101,6 +102,11 @@ than subsystem-specific):
 - **[Ambient Occlusion](conventions/ambient-occlusion.md)** — screen-space GTAO from the
   scene depth only, the denoise and history passes, the linear-space composite, and the
   `/feature_debug/*` HTTP recipe.
+- **[Screen-Space GI](conventions/screen-space-gi.md)** — one-bounce screen-space diffuse
+  light (Ssgi): pass layout, settings, `/feature_debug/*` HTTP recipe and limits.
+- **[PBR Materials](conventions/pbr-materials.md)** — material image roles and color spaces, the
+  tangent convention, the GGX shading model, the material debug views, failure policy and the
+  lifetime of material sets and images.
 - **[Entity-Component-System (ECS)](conventions/ecs.md)** — the `AGENTS.md`-
   side coding conventions for entities/components (distinct from, and
   cross-linked with, [`architecture/ecs.md`](architecture/ecs.md)'s engine

@@ -1,0 +1,115 @@
+#version 450
+
+// Per GI texel: traces cosine-weighted rays through the Prepare output and averages the hit radiance.
+#include "SsgiCommon.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// Member names and order match SsgiTraceParamsGpu.
+layout(std430, binding = 0) readonly buffer SsgiTraceParams {
+    vec4 rightAndMaxDistance; // xyz right, w max ray distance.
+    vec4 downAndThickness;    // xyz down, w thickness.
+    vec4 forwardAndBias;      // xyz forward, w depth bias.
+    vec4 viewAndFade;         // xy full-res size, z fade start, w fade end.
+    vec4 tuning;              // x distribution power, y end fade fraction, z pixel scale.
+    uvec4 counts;             // x rays, y steps, z noise frame, w divisor.
+} params;
+
+layout(binding = 1) uniform sampler2D ssgiColor;  // rgb radiance, a view depth.
+layout(binding = 2) uniform sampler2D ssgiNormal; // xyz world normal.
+layout(binding = 3, rgba16f) uniform writeonly image2D ssgiRaw; // rgb mean radiance, a view depth (0 = no surface).
+
+// Radiance of the surface one ray hits, or 0.
+vec3 TraceRay(vec3 origin, vec3 dir, float jitter, float bias)
+{
+    vec3 right = params.rightAndMaxDistance.xyz;
+    vec3 down = params.downAndThickness.xyz;
+    vec3 forward = params.forwardAndBias.xyz;
+    vec2 viewSize = params.viewAndFade.xy;
+    float pixelScale = params.tuning.z;
+    float maxDist = params.rightAndMaxDistance.w;
+    float thickness = params.downAndThickness.w;
+    float div = float(max(params.counts.w, 1u));
+    int steps = int(params.counts.y);
+    float fadeStart = maxDist * min(1.0 - params.tuning.y, 0.999); // Distinct smoothstep edges.
+    ivec2 texSize = textureSize(ssgiColor, 0);
+
+    float prevZ = dot(origin, forward);
+    bool wasInFront = true;
+    for (int i = 0; i < steps; ++i) {
+        float t = pow((float(i) + jitter) / float(steps), params.tuning.x) * maxDist; // More steps near the pixel.
+        vec3 s = origin + dir * t;
+
+        vec2 pixel;
+        float z;
+        if (!ProjectToPixel(s, viewSize, right, down, forward, pixelScale, pixel, z)) {
+            break;
+        }
+        ivec2 q = ivec2(floor(pixel / div + 0.5)); // Nearest GI texel.
+        if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, texSize))) {
+            break; // Left the screen.
+        }
+
+        float advance = max(z - prevZ, 0.0);
+        prevZ = z;
+        vec4 surface = texelFetch(ssgiColor, q, 0);
+        if (surface.a <= 0.0) {
+            wasInFront = true;
+            continue;
+        }
+        float diff = z - surface.a; // Positive: the ray point is behind the surface.
+        float reach = thickness + (wasInFront ? advance : 0.0);
+        wasInFront = diff <= bias;
+        if (diff > bias && diff < reach) {
+            vec3 surfaceNormal = texelFetch(ssgiNormal, q, 0).xyz;
+            if (dot(surfaceNormal, dir) >= 0.0) {
+                return vec3(0.0); // Back face blocks the ray.
+            }
+            return surface.rgb * (1.0 - smoothstep(fadeStart, maxDist, t));
+        }
+    }
+    return vec3(0.0);
+}
+
+void main()
+{
+    ivec2 size = imageSize(ssgiRaw);
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= size.x || p.y >= size.y) {
+        return;
+    }
+
+    ivec2 source = min(p, textureSize(ssgiColor, 0) - ivec2(1));
+    float viewZ = texelFetch(ssgiColor, source, 0).a;
+    vec3 stored = texelFetch(ssgiNormal, source, 0).xyz;
+    if (viewZ <= 0.0 || dot(stored, stored) < 0.25) {
+        imageStore(ssgiRaw, p, vec4(0.0));
+        return;
+    }
+
+    float div = float(max(params.counts.w, 1u));
+    float pixelScale = params.tuning.z;
+    vec3 right = params.rightAndMaxDistance.xyz;
+    vec3 down = params.downAndThickness.xyz;
+    vec3 forward = params.forwardAndBias.xyz;
+    vec3 P = EyeRelativePoint(vec2(p) * div, viewZ, params.viewAndFade.xy, right, down, forward, pixelScale);
+    vec3 N = normalize(stored);
+    float bias = max(params.forwardAndBias.w, kFootprintBiasScale * viewZ * pixelScale * div);
+    vec3 origin = P + N * bias; // Off the surface: no self hits.
+
+    vec3 T;
+    vec3 B;
+    BuildBasis(N, T, B);
+    uint rays = max(params.counts.x, 1u);
+
+    vec3 sum = vec3(0.0);
+    for (uint r = 0u; r < rays; ++r) {
+        vec3 noise = RayNoise(p, params.counts.z, rays, r);
+        sum += TraceRay(origin, CosineHemisphere(noise.xy, N, T, B), noise.z, bias);
+    }
+    vec3 gi = sum / float(rays);
+    gi *= 1.0 - smoothstep(params.viewAndFade.z, params.viewAndFade.w, viewZ);
+    if (IsBad(gi)) {
+        gi = vec3(0.0);
+    }
+    imageStore(ssgiRaw, p, vec4(gi, viewZ));
+}

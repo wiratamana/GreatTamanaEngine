@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Buffer.h"
+#include "MaterialImageRole.h"
 #include "MaterialTexture.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
@@ -8,11 +9,14 @@
 #include "RenderTexture.h"
 #include "Texture2D.h"
 #include "TextureArray2D.h"
+#include "UploadChunker.h"
 #include "VolumeTexture.h"
 #include "Vulkan/BoundedKeySet.h"
 #include "Vulkan/DescriptorPoolGrowth.h"
 #include "Vulkan/VulkanAllocator.h"
 
+#include <array>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -100,6 +104,14 @@ public:
     // Textures
     Texture2D CreateTexture2D(const Texture2DUploadDesc& desc) const;
 
+    // Uploads every image with a mip chain (sRGB for base color, UNORM otherwise). Images share staging buffers,
+    // command buffers and submits. Index-aligned with `uploads`; an entry is null when that upload is invalid.
+    // Throws on a GPU failure; none of the images of the failed chunk are returned.
+    std::vector<std::shared_ptr<Texture2D>> CreateMaterialImages(std::span<const MaterialImageUpload> uploads) const;
+
+    // Finished texture uploads since creation.
+    GpuUploadStats UploadStats() const noexcept;
+
     VolumeTexture CreateVolumeTexture(
         int width, int height, int depth, PixelFormat format, const char* debugName = nullptr) const;
 
@@ -109,12 +121,8 @@ public:
     // Descriptors and Materials
     VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept { return m_instanceBufferSetLayout; }
 
-    // Uploads `pixelsRgba8` as an sRGB base-color image with a mip chain and wraps it in a material.
-    MaterialTexture CreateMaterialTexture2D(const void* pixelsRgba8, int width, int height,
-        const MaterialParams& params = {}, const char* debugName = nullptr) const;
-
-    // A new material (own params block and descriptor set) over an image that already exists.
-    MaterialTexture CreateMaterialVariant(std::shared_ptr<Texture2D> image, const MaterialParams& params) const;
+    // A new material (own params block and set) over `images`; null entries use the default image of the slot.
+    MaterialTexture CreateMaterialVariant(const MaterialImages& images, const MaterialParams& params) const;
 
     // Allocates from the compute descriptor pool set; adds at most one pool per call. Throws when no pool fits.
     // Failures log once per failing layout (and once per exhaustion), never on every call.
@@ -143,7 +151,15 @@ private:
     // Creates one compute descriptor pool; VK_NULL_HANDLE on failure.
     VkDescriptorPool CreateComputeDescriptorPool(const PoolCapacity& capacity) const noexcept;
 
+    // Records, submits and waits on one command buffer. Logs and throws when the wait fails.
     void ImmediateSubmitInternal(const std::function<void(VkCommandBuffer)>& recordFn) const;
+
+    // Uploads one chunk with one staging buffer, one submit and one wait. Throws; nothing leaks on failure.
+    std::vector<Texture2D> UploadTexture2DChunk(std::span<const Texture2DUploadDesc> descs) const;
+
+    mutable std::atomic<std::uint64_t> m_uploadSubmitCount{ 0 };
+    mutable std::atomic<std::uint64_t> m_uploadImageCount{ 0 };
+    mutable std::atomic<std::uint64_t> m_uploadStagingBytes{ 0 };
 
     VkDevice m_device = VK_NULL_HANDLE;
     VmaAllocator m_allocator = VK_NULL_HANDLE;
@@ -155,8 +171,14 @@ private:
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
 
+    // Material set layout: 0 = base color, 1 = MaterialParams, 2 = normal, 3 = metallic-roughness, 4 = occlusion.
     VkDescriptorSetLayout m_materialSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool m_materialDescriptorPool = VK_NULL_HANDLE;
+    std::shared_ptr<MaterialSetPool> m_materialSets;
+
+    // 1x1 image per MaterialImageRole for empty material slots; created on first use.
+    std::shared_ptr<Texture2D> DefaultMaterialImage(MaterialImageRole role) const;
+    mutable std::mutex m_defaultMaterialImageMutex;
+    mutable std::array<std::shared_ptr<Texture2D>, kMaterialImageRoleCount> m_defaultMaterialImages;
 
     VkDescriptorSetLayout m_instanceBufferSetLayout = VK_NULL_HANDLE;
 

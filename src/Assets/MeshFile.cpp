@@ -1,8 +1,11 @@
 #include "MeshFile.h"
 
 #include <cstring>
+#include <type_traits>
 
 namespace gte {
+
+static_assert(sizeof(Vec4) == 16 && std::is_trivially_copyable_v<Vec4>);
 
 namespace {
 
@@ -25,10 +28,7 @@ void AppendArray(std::vector<std::uint8_t>& bytes, const std::vector<T>& values)
     std::memcpy(bytes.data() + offset, values.data(), byteSize);
 }
 
-// Reads `count` T's out of `bytes` starting at `*cursor`, advancing `*cursor`
-// past them - returns false (leaving `*cursor`/`out` untouched) if that
-// range would run past `bytes.size()`, so a truncated/corrupt blob is caught
-// at the exact array that doesn't fit rather than reading past the buffer.
+// Reads `count` T's at `*cursor` and advances it; false (nothing touched) when the range does not fit.
 template <typename T>
 bool ReadArray(const std::vector<std::uint8_t>& bytes, std::size_t* cursor, std::size_t count, std::vector<T>* out)
 {
@@ -48,10 +48,13 @@ bool ReadArray(const std::vector<std::uint8_t>& bytes, std::size_t* cursor, std:
 
 std::vector<std::uint8_t> EncodeMeshDataToBytes(const MeshData& mesh)
 {
+    const bool writeTangents = !mesh.tangents.empty() && mesh.tangents.size() == mesh.positions.size();
+
     std::vector<std::uint8_t> bytes;
     bytes.reserve(sizeof(kMeshFileMagic) + sizeof(std::uint32_t) * 2
         + mesh.positions.size() * sizeof(Vec3) + mesh.normals.size() * sizeof(Vec3)
-        + mesh.uvs.size() * sizeof(Vec2) + mesh.indices.size() * sizeof(std::uint32_t));
+        + mesh.uvs.size() * sizeof(Vec2) + mesh.indices.size() * sizeof(std::uint32_t)
+        + (writeTangents ? mesh.tangents.size() * sizeof(Vec4) + sizeof(std::uint32_t) : 0));
 
     bytes.insert(bytes.end(), kMeshFileMagic, kMeshFileMagic + sizeof(kMeshFileMagic));
     AppendU32(bytes, static_cast<std::uint32_t>(mesh.positions.size()));
@@ -61,6 +64,10 @@ std::vector<std::uint8_t> EncodeMeshDataToBytes(const MeshData& mesh)
     AppendArray(bytes, mesh.normals);
     AppendArray(bytes, mesh.uvs);
     AppendArray(bytes, mesh.indices);
+    if (writeTangents) {
+        AppendU32(bytes, static_cast<std::uint32_t>(mesh.tangents.size()));
+        AppendArray(bytes, mesh.tangents);
+    }
 
     return bytes;
 }
@@ -93,6 +100,24 @@ std::optional<MeshData> DecodeMeshDataFromBytes(const std::vector<std::uint8_t>&
     }
     if (!ReadArray(bytes, &cursor, indexCount, &mesh.indices)) {
         return std::nullopt;
+    }
+
+    if (cursor != bytes.size()) {
+        if (bytes.size() - cursor < sizeof(std::uint32_t)) {
+            return std::nullopt;
+        }
+        std::uint32_t tangentCount = 0;
+        std::memcpy(&tangentCount, bytes.data() + cursor, sizeof(tangentCount));
+        cursor += sizeof(tangentCount);
+        if (tangentCount != vertexCount || tangentCount == 0) {
+            return std::nullopt;
+        }
+        if (!ReadArray(bytes, &cursor, tangentCount, &mesh.tangents)) {
+            return std::nullopt;
+        }
+        if (cursor != bytes.size()) {
+            return std::nullopt;
+        }
     }
 
     return mesh;

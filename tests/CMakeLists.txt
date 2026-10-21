@@ -2237,6 +2237,7 @@ set(GTE_TEST_SOURCES
     Encoding/PixelConversionTests.cpp
     Encoding/DepthVisualizationTests.cpp
     Encoding/PngEncoderTests.cpp
+    Encoding/HdrColorVisualizationTests.cpp
     # Tier-2 (real, headless GPU) round-trip test for
     # Convert1ChannelToGrayscaleRgba8() - single-channel (VK_FORMAT_R8_UNORM)
     # capture -> grayscale RGBA8 -> PNG encode -> PNG decode.
@@ -2257,6 +2258,7 @@ set(GTE_TEST_SOURCES
     Assets/RigFileTests.cpp
     Assets/MeshNormalRecomputeTests.cpp
     Assets/MeshNormalRecomputePersistenceTests.cpp
+    Assets/MeshTangentsTests.cpp
     Scene/SceneJsonFormatTests.cpp
     Scene/SceneBuilderTests.cpp
     Scene/SceneRoundTripIntegrationTests.cpp
@@ -2297,6 +2299,8 @@ set(GTE_TEST_SOURCES
     Application/ProjectAssemblyHotReloadCommandBridgeTests.cpp
     Renderer/VertexTests.cpp
     Renderer/MipChainTests.cpp
+    Renderer/UploadChunkerTests.cpp
+    Renderer/MaterialImageRoleTests.cpp
     Renderer/MaterialParamsTests.cpp
     Renderer/PrimitiveMeshGeneratorTests.cpp
     Renderer/ResourcePoolTests.cpp
@@ -2332,10 +2336,12 @@ set(GTE_TEST_SOURCES
     Core/FeatureKit/KitChainTests.cpp
     Core/FeatureKit/KitDataFlowTests.cpp
     Core/FeatureKit/KitSharedVolumeTests.cpp
+    Core/FeatureKit/KitBufferTests.cpp
     Core/FeatureKit/KitTransientTargetTests.cpp
     Renderer/RenderGraph/ResourcePoolEvictionTests.cpp
     Core/FeatureKit/KitModuleTests.cpp
     Core/FeatureKit/KitSceneTests.cpp
+    Core/FeatureKit/ScreenSpaceViewTests.cpp
     Game/SceneDrawPassTests.cpp
     Core/Plugins/RenderFeatureBlendTests.cpp
     Renderer/Vulkan/ShaderStageMaskTests.cpp
@@ -2345,6 +2351,8 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/ShaderBindingsTests.cpp
     Renderer/RenderGraph/StaticNameTests.cpp
     Renderer/RenderGraph/ComputePassTests.cpp
+    Renderer/RenderGraph/DescriptorWriteIdentityTests.cpp
+    Renderer/RenderGraph/TrackedBufferGpuTests.cpp
     Renderer/RenderGraph/FullscreenPassTests.cpp
     Renderer/RenderGraph/RealTargetBindingTests.cpp
     Renderer/RenderGraph/OneShotTests.cpp
@@ -2438,6 +2446,8 @@ set(GTE_TEST_SOURCES
     Math/Vec3Tests.cpp
     Math/Mat4Tests.cpp
     Math/QuatTests.cpp
+    Math/ToneMapCurvesTests.cpp
+    Math/PbrBrdfTests.cpp
     ECS/EntityManagerTests.cpp
     ECS/ComponentStorageTests.cpp
     ECS/RegistryTests.cpp
@@ -2461,7 +2471,11 @@ set(GTE_TEST_SOURCES
     Game/GameUpdateFreezeGatingTests.cpp
     Game/EntityInstantiatorTests.cpp
     Game/Instantiation/MeshAssetGpuCatalogJointOverrideRefreshTests.cpp
+    Game/Instantiation/MaterialLifetimeRulesTests.cpp
+    Game/Instantiation/MaterialCacheKeysTests.cpp
+    Game/Instantiation/MeshAssetPipelineKindTests.cpp
     Game/MeshVertexPackingTests.cpp
+    Core/FeatureKit/DepthOnlyLayoutTests.cpp
     Game/MeshMaterialPartitionerTests.cpp
     Game/SkeletalRigCacheTests.cpp
     Game/AnimationClipCacheTests.cpp
@@ -2698,6 +2712,25 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_GTAO_COMPOSITE_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/GtaoComposite.frag.spv"
 )
 
+# The Ssgi shaders come from the feature shader auto-discovery; the self-check reflects the real binaries.
+target_sources(GreatTamanaEngineTests PRIVATE
+    "${CMAKE_BINARY_DIR}/shaders/SsgiPrepare.comp.spv"
+    "${CMAKE_BINARY_DIR}/shaders/SsgiTrace.comp.spv"
+    "${CMAKE_BINARY_DIR}/shaders/SsgiResolve.comp.spv"
+    "${CMAKE_BINARY_DIR}/shaders/SsgiComposite.vert.spv"
+    "${CMAKE_BINARY_DIR}/shaders/SsgiComposite.frag.spv"
+)
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_TEST_SSGI_PREPARE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SsgiPrepare.comp.spv"
+    GTE_TEST_SSGI_TRACE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SsgiTrace.comp.spv"
+    GTE_TEST_SSGI_RESOLVE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SsgiResolve.comp.spv"
+    GTE_TEST_SSGI_COMPOSITE_VERT_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SsgiComposite.vert.spv"
+    GTE_TEST_SSGI_COMPOSITE_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SsgiComposite.frag.spv"
+    GTE_TEST_SCREEN_SPACE_COMMON_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/ScreenSpaceCommon.glsl"
+    GTE_TEST_SSGI_COMMON_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Features/Ssgi/Shaders/SsgiCommon.glsl"
+    GTE_TEST_SSGI_COMPOSITE_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Features/Ssgi/Shaders/SsgiComposite.frag"
+)
+
 # The VolumetricLight shaders come from the feature shader auto-discovery; the self-check reflects the real binaries.
 target_sources(GreatTamanaEngineTests PRIVATE
     "${CMAKE_BINARY_DIR}/shaders/VolumetricLightInject.comp.spv"
@@ -2710,6 +2743,13 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_VOLUMETRIC_TEMPORAL_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/VolumetricLightTemporal.comp.spv"
     GTE_TEST_VOLUMETRIC_INTEGRATE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/VolumetricLightIntegrate.comp.spv"
     GTE_TEST_VOLUMETRIC_COMPOSITE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/VolumetricLightComposite.comp.spv"
+)
+
+# The ToneMapping shader comes from the feature shader auto-discovery; the self-check reflects the real binary.
+target_sources(GreatTamanaEngineTests PRIVATE "${CMAKE_BINARY_DIR}/shaders/ToneMapping.comp.spv")
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_TEST_TONEMAPPING_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ToneMapping.comp.spv"
+    GTE_TEST_TONEMAPPING_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Features/ToneMapping/Shaders/ToneMapping.comp"
 )
 
 # The compositor blend shader is declared by the root gte_add_shader() calls; its test reflects the real binary.
@@ -2728,9 +2768,13 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_SKIN_UV_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SkinVerticesPositionNormalUv.comp.spv"
 )
 
-# The lighting layout test reads the shared GLSL include straight from the source tree.
+# The layout tests read the shared GLSL includes straight from the source tree.
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_LIGHTING_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/DirectionalLighting.glsl"
+    GTE_TEST_MATERIAL_PARAMS_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/MaterialParams.glsl"
+    GTE_TEST_PBR_BRDF_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/PbrBrdf.glsl"
+    GTE_TEST_PBR_MATERIAL_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/PbrMaterial.glsl"
+    GTE_TEST_SHADOW_SHADER_DIR="${CMAKE_SOURCE_DIR}/src/Features/Shadow/Shaders"
 )
 
 # Engine-owned reflection fixtures with abstract names (not shipped).
@@ -2738,11 +2782,13 @@ gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.comp
 gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.vert)
 gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.frag)
 gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixtureUniform.comp)
+gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/BufferFixture.comp)
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_REFLECT_COMP_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixture.comp.spv"
     GTE_TEST_REFLECT_VERT_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixture.vert.spv"
     GTE_TEST_REFLECT_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixture.frag.spv"
     GTE_TEST_REFLECT_UNIFORM_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixtureUniform.comp.spv"
+    GTE_TEST_BUFFER_FIXTURE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/BufferFixture.comp.spv"
 )
 
 # Compiled by the root target; the tests only depend on the output and take its absolute path.
@@ -2867,8 +2913,9 @@ add_test(NAME EngineVocabularyCheck
 # comment blocks longer than 3 lines, in C++ sources and GLSL shaders. The scope is an explicit directory/file list;
 # there is no allowlist.
 set(GTE_COMMENT_RULE_SRC
-    Renderer/ Core/FeatureKit/ Features/Shadow/ Features/Gtao/ Features/VolumetricLight/ Shaders/
-    Game/Lighting/SunShadowReceiver.h
+    Renderer/ Core/FeatureKit/ Features/Shadow/ Features/Gtao/ Features/Ssgi/ Features/VolumetricLight/ Features/ToneMapping/ Shaders/
+    Math/ToneMapCurves.h
+    Game/Lighting/SunShadowReceiver.h Game/Lighting/SunLightModulation.h
     Application/RenderPasses.cpp Application/RenderPasses.h Core/Core.cpp Core/Core.h Core/CapturedPixels.h
     Encoding/CapturedPixelConversion.cpp Encoding/CapturedPixelConversion.h Encoding/DepthVisualization.cpp
     Encoding/DepthVisualization.h Encoding/HdrColorVisualization.cpp Encoding/HdrColorVisualization.h
@@ -2900,13 +2947,20 @@ set(GTE_COMMENT_RULE_SRC
     Editor/AssetPreviewMesh.cpp Editor/AssetPreviewMesh.h Editor/BoneViewerWindow.cpp Editor/BoneViewerWindow.h
     Editor/EditorHost.h Editor/RenderGraphTexturePreview.cpp Editor/RenderGraphTexturePreview.h
     Core/Plugins/ProjectAssemblyHost.cpp
-    Features/Atmosphere/)
+    Features/Atmosphere/ Assets/MeshTangents.h Assets/MeshTangents.cpp
+    Game/Instantiation/MaterialTextureGpuCache.h Game/Instantiation/MaterialTextureGpuCache.cpp
+    Game/Instantiation/MaterialCacheKeys.h Game/Instantiation/MaterialLifetimeRules.h
+    Game/Instantiation/MaterialLifetimeRules.cpp Game/Instantiation/MeshAssetPipelineKind.h
+    Game/Instantiation/MeshVertexPacking.h Game/Instantiation/MeshVertexPacking.cpp Math/PbrBrdf.h
+    Features/SceneLighting/)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
     Features/Shadow/ShadowMathTests.cpp Game/SceneDrawPassTests.cpp
     Features/Gtao/GtaoMathTests.cpp Features/Gtao/GtaoParamsTests.cpp Features/Gtao/GtaoShaderNamesTests.cpp
-    Features/VolumetricLight/ Features/Shadow/ShadowReceiverTests.cpp
+    Features/Ssgi/
+    Features/VolumetricLight/ Features/ToneMapping/ Math/ToneMapCurvesTests.cpp Features/Shadow/ShadowReceiverTests.cpp
+    Encoding/HdrColorVisualizationTests.cpp Editor/FrameDebuggerPreviewProcessingTests.cpp
     Renderer/RenderGraph/CommandBufferTests.cpp Renderer/RenderGraph/FullscreenPassTests.cpp
     Renderer/RenderGraph/FullscreenRecordTests.cpp Renderer/RenderGraph/GpuBufferTests.cpp
     Renderer/RenderGraph/OneShotTests.cpp Renderer/RenderGraph/PassKindRecordTests.cpp
@@ -2914,8 +2968,15 @@ set(GTE_COMMENT_RULE_TESTS
     Renderer/RenderGraph/RenderPassToggleRegistryTests.cpp Renderer/RenderGraph/ShaderBindingsTests.cpp
     Renderer/RenderGraph/TransferReadbackGpuTests.cpp Renderer/Vulkan/ShaderReflectionTests.cpp
 Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderPurityProbe.cpp
+    Renderer/MaterialParamsTests.cpp Support/Std140Block.h
     Renderer/GpuSkinning/GpuSkinningPassTests.cpp Renderer/RenderGraph/RenderGraphComputeBindingKeyTests.cpp
-    Renderer/RenderGraph/PassIdentityTests.cpp Renderer/RenderGraph/ResourcePoolEvictionTests.cpp)
+    Renderer/RenderGraph/PassIdentityTests.cpp Renderer/RenderGraph/ResourcePoolEvictionTests.cpp
+    Assets/MeshTangentsTests.cpp Renderer/UploadChunkerTests.cpp Renderer/MaterialImageRoleTests.cpp
+    Game/Instantiation/MaterialLifetimeRulesTests.cpp Game/Instantiation/MaterialCacheKeysTests.cpp
+    Game/Instantiation/MeshAssetPipelineKindTests.cpp Game/MeshVertexPackingTests.cpp
+    Core/FeatureKit/DepthOnlyLayoutTests.cpp Features/Shadow/ShadowDepthShaderCoverageTests.cpp
+    Math/PbrBrdfTests.cpp Features/SceneLighting/
+    Renderer/RenderGraph/DescriptorWriteIdentityTests.cpp Renderer/RenderGraph/TrackedBufferGpuTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

@@ -53,21 +53,8 @@ struct FrameDebuggerTextureProperty {
     // WriteRowLabelForKind() precedent deliberately avoids elsewhere too.
     rg::ResourceKind kind = rg::ResourceKind::Texture;
 
-    // task_manager/frame-debugger-9 campaign, PHASE3 - true ONLY for a row
-    // built from a real, name-addressable RenderGraphBuilder resource this
-    // frame's render graph actually declared (a compute pass's own Read/Write
-    // Texture or Read/Write Volume Texture row) - i.e. a row whose
-    // `valueLabel` is guaranteed resolvable via
-    // RenderGraph::DebugTextureSnapshotFor()/DebugVolumeTextureSnapshotFor().
-    // FALSE for a "Material Texture" row (BuildGameViewLeaf()/
-    // BuildGameViewDrawRecordLeaf() - an asset-based mesh texture with no
-    // render-graph registry entry at all - Locked Design Decision #1,
-    // PHASE0_MASTER_STRATEGY.md: explicitly out of scope for the new
-    // Panels/FrameDebuggerPanel.cpp "View" button this campaign adds) and for
-    // a "Read Buffer"/"Write Buffer" row (kind == rg::ResourceKind::Buffer -
-    // never an image at all, Locked Design Decision #8). Defaults to false so
-    // every EXISTING construction site this phase does not touch (Material
-    // Texture rows) is correct with zero code changes there.
+    // True only for a row backed by a render-graph resource (compute Read/Write Texture rows), so `valueLabel`
+    // resolves through the graph. False for material slot rows (asset images) and buffer rows.
     bool isRenderGraphResource = false;
 };
 

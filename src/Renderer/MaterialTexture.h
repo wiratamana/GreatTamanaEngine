@@ -1,23 +1,25 @@
 #pragma once
 
 #include "Buffer.h"
+#include "MaterialImageRole.h"
 #include "MaterialParams.h"
+#include "MaterialSetPool.h"
 #include "Texture2D.h"
 
-#include "../Core/GraphicsHandles.h" // DescriptorSetHandle
-
-#include <volk.h>
-
+#include <array>
 #include <memory>
 
 namespace gte {
 
-// Textured-shader material: set 0 with the base-color image (binding 0) and MaterialParams (binding 1).
-// The image is shared between materials; the set lives in a persistent pool. Move-only.
+// Images of one material, indexed by MaterialImageRole. A null entry means "use the default image of that slot".
+using MaterialImages = std::array<std::shared_ptr<Texture2D>, kMaterialImageRoleCount>;
+
+// One material: set 0 binding 0 base color, 1 params, 2 normal, 3 metallic-roughness, 4 occlusion.
+// Owns its set (freed on destruction) and shares its images. Move-only.
 struct MaterialTexture {
-    std::shared_ptr<Texture2D> texture;
+    MaterialImages images; // All non-null once created (defaults substituted).
     Buffer params;
-    DescriptorSetHandle descriptorSet = DescriptorSetHandle::Invalid;
+    MaterialSetLease set;
 };
 
 } // namespace gte

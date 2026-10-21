@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 
 namespace gte {
 
@@ -24,3 +26,10 @@ struct MaterialTextureHandle {
 inline constexpr MaterialTextureHandle kInvalidMaterialTextureHandle{};
 
 } // namespace gte
+
+template <> struct std::hash<gte::MaterialTextureHandle> {
+    std::size_t operator()(const gte::MaterialTextureHandle& handle) const noexcept
+    {
+        return std::hash<std::uint64_t>{}((static_cast<std::uint64_t>(handle.index) << 32) | handle.generation);
+    }
+};

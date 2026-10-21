@@ -60,7 +60,7 @@ struct VolumetricLightSettings {
     bool applyInSceneView = true;     // false skips the editor Scene view.
 
     // Medium.
-    float density = 0.015f;           // Extinction per world unit, 0..1.
+    float density = 0.010f;           // Extinction per world unit, 0..1.
     float albedo = 0.9f;              // Scattering over extinction, 0..1.
     float anisotropyG = 0.7f;         // Henyey-Greenstein g, -0.95..0.95.
     float heightDensity = 0.0f;       // Extra extinction at heightBase, 0..1.
@@ -81,8 +81,8 @@ struct VolumetricLightSettings {
     float ambientR = 0.35f;           // Fog ambient color, 0..4.
     float ambientG = 0.40f;
     float ambientB = 0.50f;
-    float ambientIntensity = 0.3f;    // 0..16.
-    float ambientShadowedFraction = 1.0f; // 0..1. Ambient kept in sun-shadowed air: 1 ignores shadows, 0 lights only sunlit air.
+    float ambientIntensity = 0.03f;   // 0..16.
+    float ambientShadowedFraction = 0.15f; // 0..1. Ambient kept in sun-shadowed air: 1 ignores shadows, 0 lights only sunlit air.
 
     // Shadow sampling.
     std::uint32_t shadowSamples = 4;  // 1, 2, 4 or 8.
@@ -96,8 +96,7 @@ struct VolumetricLightSettings {
 
     // Composite.
     float strength = 1.0f;            // 0..1.
-    bool blendInLinearSpace = true;
-    float dither = 1.0f;              // In 8-bit steps, 0..2.
+    float skyDistanceFraction = 0.3f; // 0..1. Share of maxDistance fog that sky pixels see.
     VolumetricLightDebugView debugView = VolumetricLightDebugView::Off;
 };
 
@@ -123,6 +122,9 @@ struct VolumetricLightFrameFacts {
     Vec3 forward;
     Vec3 sunDirection = Vec3::Up();
     Vec3 sunIlluminance = Vec3::One();
+    Vec3 sunTint = Vec3::One();      // Sun light factor from the atmosphere record.
+    float ambientScale = 1.0f;       // Ambient light factor from the atmosphere record.
+    bool atmosphereLight = false;    // True: no sun fade and no night ambient floor.
     Vec3 jitter = Vec3{ 0.5f, 0.5f, 0.5f };
     std::array<double, 3> windOffset{}; // World units, wrapped.
     float maxDistance = 0.0f;           // Effective max distance of this frame.
@@ -146,6 +148,9 @@ struct VolumetricLightViewSnapshot {
     bool historyUsed = false;
     std::uint32_t jitterIndex = 0;
     std::uint64_t textureBytes = 0;
+    bool atmosphereLight = false;
+    Vec3 sunTint = Vec3::One();
+    float ambientScale = 1.0f;
 };
 
 // std430 block of VolumetricLightInject.comp; member order matches the shader.
@@ -195,8 +200,8 @@ static_assert(std::is_trivially_copyable_v<VolumetricLightIntegratePush>);
 struct VolumetricLightCompositePush {
     Mat4 invViewProjection;
     float eyeAndMaxDistance[4] = {};
-    float strengthExponentLinearDither[4] = {}; // x strength, y exponent, z linear flag, w dither.
-    std::uint32_t frameAndDebug[4] = {};        // x frame index, y debug view.
+    float strengthExponentReserved[4] = {};     // x strength, y exponent, z and w reserved.
+    std::uint32_t frameAndDebug[4] = {};        // x frame index, y debug view, z sky distance fraction as float bits.
 };
 static_assert(sizeof(VolumetricLightCompositePush) == 112);
 static_assert(std::is_trivially_copyable_v<VolumetricLightCompositePush>);

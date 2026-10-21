@@ -1,9 +1,4 @@
-// Unit tests for RecomputeAndSaveMeshNormalsToGtaFile()
-// (src/Assets/MeshNormalRecomputePersistence.h) - task_manager/stl-parser-1,
-// PHASE3. Real-temp-file round-trip tests, following
-// tests/Assets/AssetImporterTests.cpp's/
-// tests/Game/Physics/DynamicChainPhysicsPersistenceTests.cpp's own
-// temp-directory convention.
+// Tests for RecomputeAndSaveMeshNormalsToGtaFile(): real temp-file round trips.
 
 #include "Assets/MeshNormalRecomputePersistence.h"
 
@@ -75,6 +70,33 @@ TEST(MeshNormalRecomputePersistenceTest, RecomputesAndOverwritesNormalsInAnExist
         Cross(meshAfter->positions[1] - meshAfter->positions[0], meshAfter->positions[2] - meshAfter->positions[0]));
     for (int i = 0; i < 3; ++i) {
         EXPECT_TRUE(ApproximatelyEqual(meshAfter->normals[i], expected)) << "vertex " << i;
+    }
+}
+
+TEST(MeshNormalRecomputePersistenceTest, TangentsSurviveAndStayPerpendicularToTheNewNormals)
+{
+    const std::filesystem::path path = TempGtaPath("MeshNormalRecomputePersistenceTest_Tangents.gta");
+    MeshData mesh;
+    mesh.positions = { Vec3(0.0f, 0.0f, 0.0f), Vec3(1.0f, 0.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f) };
+    mesh.normals = { Vec3(1.0f, 0.0f, 0.0f), Vec3(1.0f, 0.0f, 0.0f), Vec3(1.0f, 0.0f, 0.0f) };
+    mesh.uvs = { Vec2(0.0f, 0.0f), Vec2(1.0f, 0.0f), Vec2(0.0f, 1.0f) };
+    mesh.tangents = { Vec4(0.6f, 0.0f, 0.8f, -1.0f), Vec4(0.6f, 0.0f, 0.8f, -1.0f), Vec4(0.6f, 0.0f, 0.8f, -1.0f) };
+    mesh.indices = { 0, 1, 2 };
+    ASSERT_TRUE(WriteGtaFile(path, AssetType::Mesh, Guid::Generate(), AssetFlags::None, {}, EncodeMeshDataToBytes(mesh)));
+
+    std::string error;
+    ASSERT_TRUE(RecomputeAndSaveMeshNormalsToGtaFile(path.string(), &error)) << error;
+
+    const std::optional<GtaFileData> after = ReadGtaFile(path);
+    ASSERT_TRUE(after.has_value());
+    const std::optional<MeshData> meshAfter = DecodeMeshDataFromBytes(after->payload);
+    ASSERT_TRUE(meshAfter.has_value());
+    ASSERT_EQ(meshAfter->tangents.size(), 3u);
+    for (std::size_t i = 0; i < 3; ++i) {
+        const Vec3 t = meshAfter->tangents[i].XYZ();
+        EXPECT_NEAR(Length(t), 1.0f, 1e-5f);
+        EXPECT_NEAR(Dot(t, meshAfter->normals[i]), 0.0f, 1e-5f);
+        EXPECT_EQ(meshAfter->tangents[i].w, -1.0f);
     }
 }
 

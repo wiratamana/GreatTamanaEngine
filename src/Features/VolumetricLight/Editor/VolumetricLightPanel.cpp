@@ -53,6 +53,7 @@ void DrawStatus(const VolumetricLightViewSnapshot& game)
         ImGui::Text("Effective max distance: %.1f", game.effectiveMaxDistance);
         ImGui::Text("Temporal history: %s", game.historyUsed ? "in use" : "not used");
         ImGui::Text("Jitter index: %u", game.jitterIndex);
+        ImGui::Text("Atmosphere light: %s", game.atmosphereLight ? "used" : "not used");
     }
 }
 
@@ -122,8 +123,7 @@ bool BuildVolumetricLightPanel(
     changed |= ImGui::SliderFloat("History blend", &edit.historyBlend, 0.0f, 0.98f);
 
     ImGui::SeparatorText("Composite");
-    changed |= ImGui::Checkbox("Blend in linear space", &edit.blendInLinearSpace);
-    changed |= ImGui::SliderFloat("Dither (8-bit steps)", &edit.dither, 0.0f, 2.0f);
+    changed |= ImGui::SliderFloat("Sky distance", &edit.skyDistanceFraction, 0.0f, 1.0f);
 
     ImGui::SeparatorText("Debug");
     int view = static_cast<int>(edit.debugView);

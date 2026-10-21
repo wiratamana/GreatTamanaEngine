@@ -39,10 +39,12 @@ constexpr std::string_view kSponzaDirectory;
 constexpr const char* kLogCategory = "SponzaScene";
 constexpr const char* kRootName = "Sponza";
 
-// Default start pose for a freshly opened Sponza scene. Rotations are editor Euler degrees (pitchX, yawY, rollZ).
+// Start pose of a freshly opened scene. Rotations are editor Euler degrees (pitchX, yawY, rollZ).
 constexpr Vec3 kCameraStartPosition{ -8.0f, 4.5f, 0.0f };
 constexpr Vec3 kCameraStartRotationEulerDegrees{ 15.0f, 90.0f, 0.0f };
-constexpr Vec3 kLightRotationEulerDegrees{ 70.0f, 0.0f, 0.0f };
+constexpr Vec3 kLightRotationEulerDegrees{ 50.0f, 0.0f, 0.0f };
+// Warm white sun, linear.
+constexpr Vec3 kSunColor{ 1.0f, 0.92f, 0.78f };
 
 OpenSponzaSceneResult Fail(std::string message)
 {
@@ -113,7 +115,8 @@ try
         }
         GTE_LOG_INFO(kLogCategory, imported.message);
         if (hadOldImport) {
-            GTE_LOG_INFO(kLogCategory, "Re-imported a stale Sponza; GPU textures of the old import stay until exit.");
+            GTE_LOG_INFO(kLogCategory,
+                "Re-imported a stale Sponza; the GPU textures of the old import are released a few frames after the old scene is gone.");
         }
         result.importedThisCall = true;
         game.GetMeshInstantiationSystem().InvalidateCachedMeshAsset(result.gtaPath);
@@ -140,6 +143,9 @@ try
         if (Transform* lightTransform = registry.TryGetComponent<Transform>(light)) {
             lightTransform->rotation = Quat::FromEulerDegrees(
                 kLightRotationEulerDegrees.x, kLightRotationEulerDegrees.y, kLightRotationEulerDegrees.z);
+        }
+        if (DirectionalLight* sun = registry.TryGetComponent<DirectionalLight>(light)) {
+            sun->color = kSunColor;
         }
     }
 

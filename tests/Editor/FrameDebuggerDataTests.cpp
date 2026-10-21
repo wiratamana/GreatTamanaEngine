@@ -337,7 +337,7 @@ TEST(FrameDebuggerDataTest, EntityLeafShapeIsCorrect)
     graphSnapshot.passesInExecutionOrder.push_back(renderOpaque);
 
     FrameDebuggerCaptureContext capture;
-    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
+    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", {}, 1045458);
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 

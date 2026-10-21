@@ -502,5 +502,164 @@ TEST(ShaderBindingsTest, FullscreenReflectionAcceptsUniformBuffersButNotStorageB
     EXPECT_TRUE(ValidateFullscreenReflection(reflection).has_value());
 }
 
+// --- Graph (tracked) buffers -------------------------------------------------
+
+const BufferHandle kItems{ 1, 1 };
+const BufferHandle kResults{ 2, 1 };
+const BufferHandle kCounter{ 3, 1 };
+
+BindingArgument Tracked(std::string_view name, BufferHandle handle)
+{
+    BindingArgument arg;
+    arg.name = name;
+    arg.kind = BindingResourceKind::TrackedBuffer;
+    arg.trackedBuffer = handle;
+    return arg;
+}
+
+std::vector<ReflectedDescriptorBinding> BufferBindings()
+{
+    return { Slot(0, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, "items", ReflectedAccess::ReadOnly),
+        Slot(0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, "results", ReflectedAccess::WriteOnly),
+        Slot(0, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, "counter", ReflectedAccess::ReadWrite) };
+}
+
+std::optional<BufferDesc> KnownBuffers(BufferHandle handle)
+{
+    if (handle.index >= 1 && handle.index <= 3) {
+        return BufferDesc{ 64, BufferUsage::None };
+    }
+    return std::nullopt;
+}
+
+BindingPlanResult PlanBuffers(const std::vector<BindingArgument>& args)
+{
+    return PlanBindings(BufferBindings(), args, DescribeTextureFn{}, KnownBuffers);
+}
+
+std::vector<BindingArgument> TrackedArgs()
+{
+    return { Tracked("items", kItems), Tracked("results", kResults), Tracked("counter", kCounter) };
+}
+
+TEST(ShaderBindingsTest, TrackedBuffersPlanWithTheirHandles)
+{
+    const BindingPlanResult result = PlanBuffers(TrackedArgs());
+    ASSERT_TRUE(result.Ok()) << result.error;
+    ASSERT_EQ(result.plan.bindings.size(), 3u);
+
+    const BufferHandle expected[] = { kItems, kResults, kCounter };
+    const ReflectedAccess access[] = { ReflectedAccess::ReadOnly, ReflectedAccess::WriteOnly, ReflectedAccess::ReadWrite };
+    for (std::size_t i = 0; i < 3; ++i) {
+        EXPECT_EQ(result.plan.bindings[i].kind, BindingResourceKind::TrackedBuffer);
+        EXPECT_EQ(result.plan.bindings[i].trackedBuffer, expected[i]);
+        EXPECT_EQ(result.plan.bindings[i].buffer, BufferObjectHandle::Invalid);
+        EXPECT_EQ(result.plan.bindings[i].access, access[i]);
+    }
+}
+
+TEST(ShaderBindingsTest, UnknownTrackedBufferIsAnError)
+{
+    const BindingPlanResult result =
+        PlanBuffers({ Tracked("items", BufferHandle{ 9, 1 }), Tracked("results", kResults), Tracked("counter", kCounter) });
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'items' was given a buffer the graph does not know"));
+}
+
+TEST(ShaderBindingsTest, InvalidTrackedBufferIsAnError)
+{
+    const BindingPlanResult result =
+        PlanBuffers({ Tracked("items", BufferHandle{}), Tracked("results", kResults), Tracked("counter", kCounter) });
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'items' was given an invalid resource handle"));
+}
+
+TEST(ShaderBindingsTest, TrackedBufferOnASamplerSlotIsAnError)
+{
+    const std::vector<ReflectedDescriptorBinding> reflected{ Slot(0, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, "tex") };
+    const BindingPlanResult result = PlanBindings(reflected, std::vector{ Tracked("tex", kItems) }, DescribeTextureFn{}, KnownBuffers);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'tex' is a sampler"));
+}
+
+TEST(ShaderBindingsTest, TrackedBufferOnAStorageImageSlotIsAnError)
+{
+    const std::vector<ReflectedDescriptorBinding> reflected{
+        Slot(0, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, "image", ReflectedAccess::WriteOnly)
+    };
+    const BindingPlanResult result = PlanBindings(reflected, std::vector{ Tracked("image", kItems) }, DescribeTextureFn{}, KnownBuffers);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "'image' is a storage image"));
+}
+
+TEST(ShaderBindingsTest, TrackedBufferOnAUniformSlotIsAnError)
+{
+    const BindingPlanResult result = PlanBindings(
+        UniformBindings(), std::vector{ Tracked("tint", kItems), Tex("outputImage", kMask) }, DescribeTextureFn{}, KnownBuffers);
+    ASSERT_FALSE(result.Ok());
+    EXPECT_TRUE(Contains(result.error, "a graph buffer binds storage buffers only"));
+}
+
+TEST(ShaderBindingsTest, TrackedAndExternalBuffersMixInOnePlan)
+{
+    const std::vector<ReflectedDescriptorBinding> reflected{
+        Slot(0, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, "params", ReflectedAccess::ReadOnly),
+        Slot(0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, "items", ReflectedAccess::ReadOnly)
+    };
+    const BindingPlanResult result = PlanBindings(
+        reflected, std::vector{ Buf("params", kParams), Tracked("items", kItems) }, DescribeTextureFn{}, KnownBuffers);
+    ASSERT_TRUE(result.Ok()) << result.error;
+    ASSERT_EQ(result.plan.bindings.size(), 2u);
+    EXPECT_EQ(result.plan.bindings[0].kind, BindingResourceKind::Buffer);
+    EXPECT_EQ(result.plan.bindings[0].buffer, kParams);
+    EXPECT_EQ(result.plan.bindings[1].kind, BindingResourceKind::TrackedBuffer);
+    EXPECT_EQ(result.plan.bindings[1].trackedBuffer, kItems);
+}
+
+TEST(ShaderBindingsTest, DeclareTrackedBuffersFollowTheReflectedAccess)
+{
+    const BindingPlanResult result = PlanBuffers(TrackedArgs());
+    ASSERT_TRUE(result.Ok()) << result.error;
+
+    PassRecord record;
+    RenderGraphBuilder::PassBuilder pass(record);
+    DeclareBindings(pass, result.plan, kLayout);
+
+    ASSERT_EQ(record.reads.size(), 2u);
+    EXPECT_EQ(record.reads[0].buffer, kItems);
+    EXPECT_EQ(record.reads[0].access, ResourceAccess::ComputeShaderRead);
+    EXPECT_EQ(record.reads[1].buffer, kCounter);
+    ASSERT_EQ(record.writes.size(), 2u);
+    EXPECT_EQ(record.writes[0].buffer, kResults);
+    EXPECT_EQ(record.writes[0].access, ResourceAccess::ComputeShaderWrite);
+    EXPECT_EQ(record.writes[1].buffer, kCounter);
+
+    ASSERT_EQ(record.bindings.size(), 3u);
+    for (const PendingBinding& binding : record.bindings) {
+        EXPECT_TRUE(binding.bufferHandle.IsValid());
+        EXPECT_EQ(binding.bufferObjectHandle, BufferObjectHandle::Invalid);
+    }
+}
+
+TEST(ShaderBindingsTest, TrackedBufferWithoutStorageUsageIsAnError)
+{
+    const auto withUsage = [](BufferUsage usage) {
+        return [usage](BufferHandle handle) -> std::optional<BufferDesc> {
+            if (handle.index >= 1 && handle.index <= 3) {
+                return BufferDesc{ 64, usage };
+            }
+            return std::nullopt;
+        };
+    };
+
+    const BindingPlanResult uniformOnly =
+        PlanBindings(BufferBindings(), TrackedArgs(), DescribeTextureFn{}, withUsage(BufferUsage::UniformBuffer));
+    ASSERT_FALSE(uniformOnly.Ok());
+    EXPECT_TRUE(Contains(uniformOnly.error, "'items' was given a buffer without storage usage"));
+
+    EXPECT_TRUE(PlanBindings(BufferBindings(), TrackedArgs(), DescribeTextureFn{}, withUsage(BufferUsage::StorageBuffer)).Ok());
+    EXPECT_TRUE(PlanBindings(BufferBindings(), TrackedArgs(), DescribeTextureFn{}, withUsage(BufferUsage::None)).Ok());
+}
+
 } // namespace
 } // namespace gte::rg

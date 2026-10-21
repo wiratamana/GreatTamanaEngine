@@ -2,10 +2,13 @@
 
 #include "../../Core/GraphicsHandles.h"
 
+#include "../../ECS/Registry.h"
 #include "EntityBlueprint.h"
 #include "MaterialTextureGpuCache.h"
+#include "MeshAssetPipelineKind.h"
 #include "../Animation/SkeletalRigCache.h"
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -19,15 +22,15 @@ class RenderSystem;
 // One child entity spawned for a *.gta asset.
 struct MeshAssetPart {
     MeshHandle mesh;
-    // kInvalidMaterialTextureHandle = untextured (Mesh pipeline); otherwise the TexturedMesh pipeline binds it.
+    // kInvalidMaterialTextureHandle = untextured; otherwise the material bound by the part's pipeline.
     MaterialTextureHandle texture;
     // Originating material name; empty for the merged untextured submesh or an unnamed material.
     std::string name;
     // CPU copy of `mesh`'s triangle indices, so a GPU-skinned counterpart can own a private index buffer.
     // Empty for a boneless model.
     std::vector<std::uint32_t> indices;
-    // True for an alpha-masked material: drawn with the alpha-test pipeline.
-    bool alphaTested = false;
+    // The draw pipeline of this part.
+    MeshAssetPipelineKind kind = MeshAssetPipelineKind::Untextured;
 };
 
 // Decodes an imported mesh asset once per distinct absolute *.gta path, uploads it as MeshAssetParts and
@@ -54,23 +57,27 @@ public:
     // Needed after in-place vertex edits (e.g. normals); already-spawned entities keep their current GPU mesh.
     void InvalidateCachedMeshAsset(const std::string& absoluteGtaPath);
 
+    // Frees the materials (then the images) that no MeshRenderer in `registry` and no cached part uses.
+    // Main thread, outside pass recording.
+    MaterialReleaseResult ReleaseUnusedMaterials(Registry& registry, RenderSystem& renderSystem, Renderer& renderer);
+
+    // True while some material may be unused and a sweep should run.
+    bool ReleasePending() const noexcept { return m_releasePending; }
+
 private:
-    PipelineHandle EnsureMeshPipeline(RenderSystem& renderSystem, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout);
-    PipelineHandle EnsureTexturedMeshPipeline(
-        RenderSystem& renderSystem, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout);
-    PipelineHandle EnsureTexturedAlphaTestPipeline(
-        RenderSystem& renderSystem, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout);
+    PipelineHandle EnsurePipeline(MeshAssetPipelineKind kind, RenderSystem& renderSystem, Renderer& renderer,
+        DescriptorSetLayoutHandle sceneServicesSetLayout);
 
     const std::vector<MeshAssetPart>& EnsureMeshAsset(
         RenderSystem& renderSystem, Renderer& renderer, const std::string& absoluteGtaPath);
 
-    PipelineHandle m_meshPipeline;
-    PipelineHandle m_texturedMeshPipeline;
-    PipelineHandle m_texturedAlphaTestPipeline;
+    std::array<PipelineHandle, 5> m_pipelines; // Index = MeshAssetPipelineKind.
     MaterialTextureGpuCache m_materialTextureCache;
 
     std::unordered_map<std::string, std::vector<MeshAssetPart>> m_meshAssetCache;
     std::unordered_map<std::string, SkinnedMeshData> m_skinnedMeshCache;
+
+    bool m_releasePending = false;
 };
 
 } // namespace gte

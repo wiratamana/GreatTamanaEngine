@@ -73,7 +73,6 @@ bool BuildGtaoPanel(GtaoSettings& edit, const GtaoViewSnapshot& game, const Gtao
     changed |= ImGui::SliderFloat("Min visibility", &edit.minVisibility, 0.0f, 0.5f);
     changed |= ImGui::DragFloat("Max distance", &edit.maxDistance, 1.0f, 1.0f, 100000.0f);
     changed |= ImGui::SliderFloat("Fade fraction", &edit.distanceFadeFraction, 0.0f, 0.9f);
-    changed |= ImGui::Checkbox("Apply in linear space", &edit.applyInLinearSpace);
 
     ImGui::SeparatorText("Quality");
     int resolution = static_cast<int>(edit.resolutionDivisor) - 1;

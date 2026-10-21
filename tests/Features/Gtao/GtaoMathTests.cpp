@@ -1,4 +1,4 @@
-// CPU checks of the Gtao math: camera basis, falloff, slice integral against brute force, settings, history.
+// CPU checks of the Gtao math: falloff, slice integral against brute force, settings.
 
 #include "Features/Gtao/GtaoMath.h"
 #include "Features/Gtao/GtaoTypes.h"
@@ -12,53 +12,6 @@
 
 namespace gte {
 namespace {
-
-struct TestCamera {
-    Mat4 viewProjection;
-    Mat4 inverse;
-    Vec3 eye;
-};
-
-TestCamera MakeCamera(bool flipY, bool orthographic = false)
-{
-    TestCamera c;
-    c.eye = Vec3{ 3.0f, 1.7f, -4.0f };
-    const Mat4 view = Mat4::LookAtLH(c.eye, Vec3{ 1.0f, 1.0f, 2.0f }, Vec3::Up());
-    const Mat4 proj = orthographic ? Mat4::OrthographicLH_ZO(-8.0f, 8.0f, -4.5f, 4.5f, 0.1f, 100.0f, flipY)
-                                   : Mat4::PerspectiveFovLH_ZO(1.0f, 16.0f / 9.0f, 0.1f, 200.0f, flipY);
-    c.viewProjection = proj * view;
-    EXPECT_TRUE(c.viewProjection.TryInverse(c.inverse));
-    return c;
-}
-
-TEST(GtaoMathTest, BasisMatchesPerspectiveForBothYConventions)
-{
-    for (const bool flipY : { false, true }) {
-        const TestCamera cam = MakeCamera(flipY);
-        const GtaoCameraBasis basis = DeriveGtaoCameraBasis(cam.eye, cam.inverse, Extent2D{ 1280, 720 });
-        ASSERT_TRUE(basis.valid) << "flipY " << flipY;
-
-        EXPECT_NEAR(Dot(basis.right, basis.forward), 0.0f, 1e-4f);
-        EXPECT_NEAR(Dot(basis.down, basis.forward), 0.0f, 1e-4f);
-        const Vec3 toTarget = Normalize(Vec3{ 1.0f, 1.0f, 2.0f } - cam.eye);
-        EXPECT_NEAR(Dot(basis.forward, toTarget), 1.0f, 1e-4f);
-
-        const float expected = 2.0f * std::tan(0.5f) * (16.0f / 9.0f) / 1280.0f;
-        EXPECT_NEAR(basis.pixelScale, expected, expected * 1e-3f) << "flipY " << flipY;
-    }
-}
-
-TEST(GtaoMathTest, BasisRejectsOrthographicCamera)
-{
-    const TestCamera cam = MakeCamera(false, true);
-    EXPECT_FALSE(DeriveGtaoCameraBasis(cam.eye, cam.inverse, Extent2D{ 1280, 720 }).valid);
-}
-
-TEST(GtaoMathTest, BasisRejectsEmptyExtent)
-{
-    const TestCamera cam = MakeCamera(false);
-    EXPECT_FALSE(DeriveGtaoCameraBasis(cam.eye, cam.inverse, Extent2D{ 0, 720 }).valid);
-}
 
 TEST(GtaoMathTest, FalloffWeightIsZeroAtRadiusAndOneInsideTheFadeStart)
 {
@@ -228,61 +181,6 @@ TEST(GtaoMathTest, SanitizeSnapsDivisorToOneOrTwo)
         s.resolutionDivisor = in;
         EXPECT_EQ(SanitizeGtaoSettings(s).resolutionDivisor, out) << in;
     }
-}
-
-TEST(GtaoMathTest, AoExtentRoundsUpAndNeverReachesZero)
-{
-    const Extent2D odd = AoExtentFor(Extent2D{ 1919, 1079 }, 2);
-    EXPECT_EQ(odd.width, 960u);
-    EXPECT_EQ(odd.height, 540u);
-    const Extent2D tiny = AoExtentFor(Extent2D{ 1, 1 }, 2);
-    EXPECT_EQ(tiny.width, 1u);
-    EXPECT_EQ(tiny.height, 1u);
-    EXPECT_EQ(AoExtentFor(Extent2D{ 0, 0 }, 2).width, 1u);
-}
-
-TEST(GtaoMathTest, HistoryRulesRejectEveryUnsafeCase)
-{
-    GtaoCameraBasis basis;
-    basis.valid = true;
-    basis.forward = Vec3::Forward();
-    const Extent2D extent{ 640, 360 };
-    GtaoHistory good = MakeHistory(basis, Mat4::Identity(), 10, extent, 2, GtaoHistory{});
-    good.stableFrames = 2;
-
-    EXPECT_TRUE(HistoryUsable(good, basis, 11, extent, 2));
-    EXPECT_FALSE(HistoryUsable(GtaoHistory{}, basis, 11, extent, 2));
-    EXPECT_FALSE(HistoryUsable(good, basis, 12, extent, 2)); // Frame gap.
-    EXPECT_FALSE(HistoryUsable(good, basis, 11, Extent2D{ 641, 360 }, 2));
-    EXPECT_FALSE(HistoryUsable(good, basis, 11, extent, 1));
-
-    GtaoHistory young = good;
-    young.stableFrames = 1;
-    EXPECT_FALSE(HistoryUsable(young, basis, 11, extent, 2));
-
-    GtaoCameraBasis jumped = basis;
-    jumped.eye = Vec3{ 50.0f, 0.0f, 0.0f };
-    EXPECT_FALSE(HistoryUsable(good, jumped, 11, extent, 2));
-
-    GtaoCameraBasis turned = basis;
-    turned.forward = Vec3::Back();
-    EXPECT_FALSE(HistoryUsable(good, turned, 11, extent, 2));
-}
-
-TEST(GtaoMathTest, MakeHistoryCountsOnlyUninterruptedStableFrames)
-{
-    GtaoCameraBasis basis;
-    basis.valid = true;
-    const Extent2D extent{ 640, 360 };
-
-    const GtaoHistory first = MakeHistory(basis, Mat4::Identity(), 5, extent, 2, GtaoHistory{});
-    EXPECT_EQ(first.stableFrames, 0u);
-    const GtaoHistory second = MakeHistory(basis, Mat4::Identity(), 6, extent, 2, first);
-    EXPECT_EQ(second.stableFrames, 1u);
-    const GtaoHistory afterGap = MakeHistory(basis, Mat4::Identity(), 9, extent, 2, second);
-    EXPECT_EQ(afterGap.stableFrames, 0u);
-    const GtaoHistory resized = MakeHistory(basis, Mat4::Identity(), 10, Extent2D{ 320, 180 }, 2, afterGap);
-    EXPECT_EQ(resized.stableFrames, 0u);
 }
 
 } // namespace

@@ -24,6 +24,12 @@ const float kMinorLineMaxAlpha = 0.55;
 const float kMajorLineMaxAlpha = 0.85;
 const float kAxisLineMaxAlpha = 0.95;
 
+// Grid colors are authored as display values; the scene target is linear.
+vec3 SrgbToLinear(vec3 c)
+{
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+
 // Grid-line coverage, 0 = no line, 1 = on a line; the line width follows the screen-space derivative.
 float GridLineCoverage(vec2 worldXZ, float cellSize)
 {
@@ -119,5 +125,5 @@ void main()
     }
 
     gl_FragDepth = ndcDepth;
-    outColor = vec4(finalColor, finalAlpha);
+    outColor = vec4(SrgbToLinear(finalColor), finalAlpha);
 }

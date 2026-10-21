@@ -18,7 +18,7 @@ struct RenderViewDesc {
     std::uint32_t height = 0;
     bool hasColor = true; // false => a genuinely colorless render target, not a bookkeeping-only flag.
     bool hasDepth = true;
-    // Undefined == match Renderer::ColorFormat(). Meaningless when hasColor is false.
+    // Undefined == the scene pixel format. Meaningless when hasColor is false.
     PixelFormat colorFormat = PixelFormat::Undefined;
     // Opts the depth image into a real sampler, so a later pass can read
     // this view's depth back as a texture. Meaningless when hasDepth is false.

@@ -132,15 +132,18 @@ void RenderGraph::EnsureBufferResolved(
     if (importInfo.isImported) {
         // Resolve externally owned buffer.
         buf.buffer = Native(importInfo.externalBuffer);
+        buf.object = importInfo.externalBuffer;
         buf.size = importInfo.size;
         buf.state = ResourceState{};
     } else {
         // Acquire transient buffer from the resource pool.
         Buffer& buffer = m_resourcePool.AcquireBuffer(input.buffers[index].desc, input.buffers[index].name);
         buf.buffer = buffer.Native();
+        buf.object = buffer.ObjectHandle();
         buf.size = buffer.Size();
         buf.state = ResourceState{};
     }
+    buf.lastWrite = ResourceState{};
     buf.resolved = true;
 }
 
@@ -248,10 +251,13 @@ void RenderGraph::ApplyUsageBarrierIfNeeded(VkCommandBuffer cmd, const ResourceU
             EnsureBufferResolved(bufferHandle.index, input, physicalBuffers);
             PhysicalBuffer& buf = physicalBuffers[bufferHandle.index];
             const ResourceState next = RequiredStateFor(usage.access, false);
-            if (RequiresBarrier(buf.state, next)) {
-                EmitBufferBarrier(cmd, buf.buffer, 0, buf.size, buf.state, next);
+            if (RequiresBufferBarrier(buf.state, next)) {
+                EmitBufferBarrier(cmd, buf.buffer, 0, buf.size, BufferBarrierSource(buf.state, buf.lastWrite), next);
             }
             buf.state = next;
+            if (IsBufferWriteState(next)) {
+                buf.lastWrite = next;
+            }
         });
 }
 
@@ -298,18 +304,22 @@ bool RenderGraph::BuildDescriptorWrites(const PassRecord& pass, const std::vecto
         switch (binding.kind) {
         case BindingKind::StorageBuffer: {
             VkBuffer buffer = VK_NULL_HANDLE;
+            std::uint64_t identity = 0;
             if (binding.bufferHandle.IsValid() && binding.bufferHandle.index < physicalBuffers.size()
                 && physicalBuffers[binding.bufferHandle.index].resolved) {
-                buffer = physicalBuffers[binding.bufferHandle.index].buffer;
+                const PhysicalBuffer& physical = physicalBuffers[binding.bufferHandle.index];
+                buffer = physical.buffer;
+                identity = static_cast<std::uint64_t>(physical.object);
             } else if (binding.bufferObjectHandle != BufferObjectHandle::Invalid) {
                 buffer = Native(binding.bufferObjectHandle);
+                identity = static_cast<std::uint64_t>(binding.bufferObjectHandle);
             }
             if (buffer == VK_NULL_HANDLE) {
                 skip(binding, "storage buffer handle is invalid or unresolved.");
                 break;
             }
-            writes.push_back(
-                DescriptorWrite::StorageBuffer(binding.binding, buffer, binding.bufferOffset, binding.bufferRange));
+            writes.push_back(DescriptorWrite::StorageBuffer(binding.binding, buffer, binding.bufferOffset,
+                binding.bufferRange).WithIdentity(identity));
             break;
         }
         case BindingKind::UniformBuffer: {
@@ -320,8 +330,8 @@ bool RenderGraph::BuildDescriptorWrites(const PassRecord& pass, const std::vecto
                 skip(binding, "uniform buffer handle is invalid.");
                 break;
             }
-            writes.push_back(
-                DescriptorWrite::UniformBuffer(binding.binding, buffer, binding.bufferOffset, binding.bufferRange));
+            writes.push_back(DescriptorWrite::UniformBuffer(binding.binding, buffer, binding.bufferOffset,
+                binding.bufferRange).WithIdentity(static_cast<std::uint64_t>(binding.bufferObjectHandle)));
             break;
         }
         case BindingKind::CombinedImageSampler: {
@@ -1011,7 +1021,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     }
 
     // Build the debug snapshot for the editor frame inspector.
-    const bool timingSlotBudgetExhausted = timingSlots.AssignedCount() >= timingSlots.SlotBudget();
+    const bool timingSlotBudgetExhausted = timingSlots.EverOverflowed();
 
     std::function<bool(std::size_t, PassDebugMetadata&)> metadataLookup;
     if (m_debugMetadataProvider != nullptr) {

@@ -117,7 +117,7 @@ std::optional<ReadbackCore::Binding> ReadbackCore::Acquire(const Frame& frame)
     }
 
     const Impl::Cell& cell = slot.cells[frame.FrameIndex() % kCells];
-    slot.binding = Binding{ builder.Import(cell.device), builder.Import(cell.host), cell.device.Handle(), m_impl->size };
+    slot.binding = Binding{ builder.Import(cell.device), builder.Import(cell.host), m_impl->size };
     slot.importedSerial = frame.Serial();
     return slot.binding;
 }

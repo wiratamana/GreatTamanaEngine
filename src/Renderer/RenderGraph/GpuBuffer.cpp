@@ -178,7 +178,12 @@ bool GpuBuffer::Upload(const void* data, std::size_t size, std::size_t offset)
                 + " does not fit in " + std::to_string(Size()) + " bytes");
         return false;
     }
-    m_impl->buffer->Upload(data, size, offset);
+    try {
+        m_impl->buffer->Upload(data, size, offset);
+    } catch (const std::exception& e) {
+        RefuseOnce(*m_impl, std::string("Upload failed: ") + e.what());
+        return false;
+    }
     return true;
 }
 

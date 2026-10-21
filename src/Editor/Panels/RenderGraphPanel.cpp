@@ -695,7 +695,8 @@ void RenderGraphPanel::RequestTexturePreview(
         return;
     }
 
-    const std::vector<std::uint8_t> rgba8 = Encoding::ConvertCapturedPixelsToRgba8(raw);
+    const std::vector<std::uint8_t> rgba8 =
+        Encoding::ConvertCapturedPixelsToRgba8(raw, Encoding::HdrVisualizationForTextureName(resourceName));
     if (rgba8.empty()) {
         m_texturePreview.Release(); // Unrecognized format.
         return;

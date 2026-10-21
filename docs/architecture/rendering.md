@@ -66,7 +66,7 @@ an index buffer. This is what lets a real imported mesh (see
 path as everything else — a `*.gta` `AssetType::Mesh` payload's
 positions/normals/triangle indices are uploaded as-is (no per-triangle
 vertex duplication) and rendered via a small, always-compiled "grey clay"
-shader pair (`Shaders/Mesh.vert/.frag` — fixed-direction lambert + ambient,
+shader pair (`Shaders/Mesh.vert/.frag` — sun light + hemisphere ambient + cascade shadows from `DirectionalLighting.glsl`,
 no textures yet, since a Mesh asset carries no material data — see
 [Asset Pipeline](asset-pipeline.md)), through `Game::CreateMeshEntityFromGtaFile()`
 (`src/Game/Game.h/.cpp` — mirrors `CreatePrimitiveEntity()` below).
@@ -87,3 +87,65 @@ shapes below — render correctly occluded instead of drawing in whatever
 order it happened to be submitted in; the engine's original hardcoded
 triangle demo never exposed this gap since its geometry was always flat and
 non-overlapping in screen space.
+
+## Scene color and the display image
+
+Scene color is linear HDR in one engine-wide format, `Renderer::ScenePixelFormat()` (RGBA16_Float). Material shaders
+(`DirectionalLighting.glsl`) and the sky background write linear radiance; they know nothing about exposure, curves or sRGB.
+The swapchain format (`Renderer::ColorFormat()`) is used only by what draws into the swapchain (ImGui, the final blit) and
+by the mesh preview.
+
+Per view (Game and Scene), the frame is:
+
+1. Scene draw into the view target (RGBA16F), cleared with the linear `kSceneClearColor`.
+2. PostOpaque features (shadow mask, GTAO occlusion, SSGI trace, volumetric volume, atmosphere LUTs).
+3. PostComposite chain in priority order, all in linear HDR: `Ssgi.Composite` (-1600), `Gtao.Composite` (-1500),
+   `AtmosphereComposite` (-1000), `Shadow.Composite` (-500, debug views only while shadows are applied in materials),
+   `VolumetricLight.Composite` (-250), `ToneMapping` (+1000, last).
+4. `ToneMapping` is the display transform: exposure, saturation, curve (Clamp, ACES, PBR Neutral), sRGB encode and dither.
+   After the chain the view target holds display values in 0..1. The Editor panel, `/get_game_view` and the swapchain blit
+   copy it unchanged. With ToneMapping off, the view shows raw linear color.
+
+The compositor's seed, accumulators and private targets are RGBA16F too, so no feature clamps or quantizes the scene before
+tone mapping.
+
+### Rendering without view panels
+
+When the Editor gives no Game or Scene target (no Editor, or both panels hidden), `Core` renders the Game view into its own
+`DirectGameView` target (scene format, resized with the window) through the same offscreen graph, so post features run and
+`/get_game_view` works. The `PresentGameView` pass (`PresentBlit.vert/.frag`) then copies it to the swapchain before the
+Present pass records ImGui. `AddPresentPass()` only clears the swapchain (when no direct target was blitted) and records the UI.
+GPU skinning runs once, in the offscreen graph.
+
+### Captures
+
+`Encoding::HdrVisualization` picks how an RGBA16F image becomes 8 bit: `DisplayReferred` (clamp, no curve) for `GameView` and
+`SceneView`, `SceneReferred` (the default tone map) for scene-referred previews such as `GameViewComposited` and Frame Debugger
+steps, and `DebugScaled` (fixed exposure, for tiny-valued LUTs) for everything else. `/get_game_view` always uses
+`DisplayReferred`; `/get_texture` classifies by texture name.
+
+## Materials
+
+Details and conventions: [PBR Materials](../conventions/pbr-materials.md).
+
+- **Material set (set 0, 5 bindings).** 0 base color, 1 `MaterialParams` (48 bytes), 2 normal, 3 metallic-roughness,
+  4 occlusion. A missing image is replaced by a 1x1 default image, so every set is complete and the old shaders that read
+  only bindings 0 and 1 stay valid. `MaterialTexture` holds the four images (`MaterialImages`, indexed by
+  `MaterialImageRole`), the params buffer and a `MaterialSetLease`.
+- **Set lease.** `MaterialSetPool` (`FREE_DESCRIPTOR_SET`, 4096 sets, 75% warning) allocates under a mutex. The lease frees
+  the set and unregisters the handle when the material is destroyed.
+- **Vertex layouts.** `PositionNormalUvTangent` (`MeshVertexTangent`, 48 bytes) joins the old layouts. `BuildVertexInputState`
+  has no `default:` label, so a new layout cannot silently get the wrong vertex input. Depth-only pipelines exist for every
+  layout in `fx::SceneShaderSet` (`DepthOnlyLayouts()`).
+- **Pipeline kinds.** `MeshAssetPipelineKind` (`Untextured`, `Textured`, `TexturedAlphaTest`, `Pbr`, `PbrAlphaTest`) is
+  chosen once per mesh part; `MeshAssetGpuCatalog::EnsurePipeline` builds the pipeline from one table.
+- **Scene block.** `SceneLightingUniformData` carries the eye position for every view (shadow data or not) and the material
+  debug view in `groundAmbientAndMaterialDebugView.w`.
+- **Batched texture upload.** `GpuResourceFactory::CreateMaterialImages` uploads images in chunks (64 MiB staging budget, at
+  most 256 images): one staging buffer, one command buffer, one submit and one fence wait per chunk. `CreateTexture2D` is the
+  one-image case of the same path. A failed fence wait is logged, the device is drained once and the call throws.
+  `Renderer::GetUploadStats()` returns the submit, image and staging byte counters.
+- **Draw guard.** `RenderSystem::Draw` skips a draw whose pipeline needs a material set that does not resolve (one warning per
+  handle), so a stale handle never binds an empty set 0.
+- **Release sweep.** `Core::BuildFrame()` calls `Game::ReleaseUnusedGpuMaterials()` before any pass is recorded. Unused
+  materials are destroyed through `RenderSystem::UnregisterTexture` after one `Renderer::DrainGpuForResourceRelease()`.

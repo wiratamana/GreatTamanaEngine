@@ -22,6 +22,14 @@
 namespace gte {
 namespace {
 
+// Four slots in role order; empty names mean "no image name".
+std::vector<FrameDebuggerMaterialSlot> MaterialSlotsOf(const std::string& baseColor, const std::string& normal = {},
+    const std::string& metallicRoughness = {}, const std::string& occlusion = {})
+{
+    return { { "Base Color", baseColor }, { "Normal", normal }, { "Metallic-Roughness", metallicRoughness },
+        { "Occlusion", occlusion } };
+}
+
 rg::RenderGraphPassSnapshot MakePass(const std::string& name)
 {
     rg::RenderGraphPassSnapshot pass;
@@ -154,7 +162,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueWithNoComputePassesProducesEx
     graphSnapshot.passesInExecutionOrder.push_back(renderOpaque);
 
     FrameDebuggerCaptureContext capture;
-    capture.RecordDraw("Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", Mat4::Identity());
+    capture.RecordDraw("Mesh.vert/Mesh.frag (PositionNormal)", MaterialSlotsOf("MaterialTexture abc123"), Mat4::Identity());
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
@@ -343,9 +351,9 @@ TEST(FrameDebuggerSnapshotBuilderTest, DistinctPipelineAndTextureNamesProduceDis
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     FrameDebuggerCaptureContext capture;
-    capture.RecordDraw("PipelineA", "TextureA", Mat4::Identity());
-    capture.RecordDraw("PipelineB", "TextureB", Mat4::Identity());
-    capture.RecordDraw("PipelineA", "TextureA", Mat4::Identity()); // Repeat - must not duplicate.
+    capture.RecordDraw("PipelineA", MaterialSlotsOf("TextureA"), Mat4::Identity());
+    capture.RecordDraw("PipelineB", MaterialSlotsOf("TextureB"), Mat4::Identity());
+    capture.RecordDraw("PipelineA", MaterialSlotsOf("TextureA"), Mat4::Identity()); // Repeat - must not duplicate.
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
@@ -374,7 +382,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, ViewProjectionMatrixRoundTripsWithoutTran
         Vec4(13.0f, 14.0f, 15.0f, 16.0f));
 
     FrameDebuggerCaptureContext capture;
-    capture.RecordDraw("Pipeline", "", matrix);
+    capture.RecordDraw("Pipeline", {}, matrix);
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
@@ -697,8 +705,8 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueNodeGetsOneChildLeafPerDrawRe
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     FrameDebuggerCaptureContext capture;
-    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
-    capture.RecordEntityDraw(3, 0, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", 12);
+    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", {}, 1045458);
+    capture.RecordEntityDraw(3, 0, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", MaterialSlotsOf("MaterialTexture abc123"), 12);
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
@@ -718,7 +726,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueNodeGetsOneChildLeafPerDrawRe
     EXPECT_EQ(terrainLeaf.eventIndex, 1);
     ASSERT_TRUE(terrainLeaf.details.has_value());
     EXPECT_EQ(terrainLeaf.details->shaderName, "Mesh.vert/Mesh.frag (PositionNormal)");
-    EXPECT_TRUE(terrainLeaf.details->textures.empty()); // Untextured draw - no Material Texture row.
+    EXPECT_TRUE(terrainLeaf.details->textures.empty()); // Untextured draw - no material rows.
     bool foundTerrainTriangleCount = false;
     for (const FrameDebuggerVectorProperty& vec : terrainLeaf.details->vectors) {
         if (vec.name == "Triangle Count") {
@@ -732,9 +740,10 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueNodeGetsOneChildLeafPerDrawRe
     EXPECT_EQ(cubeLeaf.name, "SmokeTestCube (Entity 3)");
     EXPECT_EQ(cubeLeaf.eventIndex, 2);
     ASSERT_TRUE(cubeLeaf.details.has_value());
-    ASSERT_EQ(cubeLeaf.details->textures.size(), 1u);
-    EXPECT_EQ(cubeLeaf.details->textures[0].name, "Material Texture");
+    ASSERT_EQ(cubeLeaf.details->textures.size(), 4u); // One row per material slot.
+    EXPECT_EQ(cubeLeaf.details->textures[0].name, "Base Color Texture");
     EXPECT_EQ(cubeLeaf.details->textures[0].valueLabel, "MaterialTexture abc123");
+    EXPECT_EQ(cubeLeaf.details->textures[1].valueLabel, "None");
 
     // (c) eventIndex stays strictly monotonic increasing: RenderOpaque(0) < terrain(1) < cube(2).
     EXPECT_LT(renderOpaqueLeaf.eventIndex, terrainLeaf.eventIndex);
@@ -760,8 +769,8 @@ TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewRen
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("PostA"));
 
     FrameDebuggerCaptureContext capture;
-    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
-    capture.RecordEntityDraw(3, 0, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", "", 12);
+    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", {}, 1045458);
+    capture.RecordEntityDraw(3, 0, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", {}, 12);
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
@@ -828,7 +837,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueDrawRecordLeafPassNameIsNever
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     FrameDebuggerCaptureContext capture;
-    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
+    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", {}, 1045458);
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
@@ -1065,8 +1074,8 @@ TEST(FrameDebuggerSnapshotBuilderTest, PerObjectDrawRecordChildrenGetPerObjectSt
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     FrameDebuggerCaptureContext capture;
-    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
-    capture.RecordEntityDraw(3, 0, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", 12);
+    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", {}, 1045458);
+    capture.RecordEntityDraw(3, 0, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", MaterialSlotsOf("MaterialTexture abc123"), 12);
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
@@ -1195,7 +1204,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, DrawSkyBackgroundLeafSurvivesAlongsideCom
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("PostA"));
 
     FrameDebuggerCaptureContext capture;
-    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", "", 1045458);
+    capture.RecordEntityDraw(2, 0, "terrain", "Mesh.vert/Mesh.frag (PositionNormal)", {}, 1045458);
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
@@ -1412,23 +1421,15 @@ TEST(FrameDebuggerSnapshotBuilderTest, FrameDebuggerInternalCategoryGraphicsPass
     EXPECT_EQ(snapshot.totalEventCount, 5);
 }
 
-// task_manager/frame-debugger-9 campaign, PHASE3 (Step 3.8) - a
-// "Material Texture" row (BuildRenderOpaqueDrawRecordLeaf()'s per-entity draw
-// leaf) must have `isRenderGraphResource == false` - it has no render-graph
-// registry entry at all (Locked Design Decision #1, PHASE0_MASTER_STRATEGY.md),
-// so Panels/FrameDebuggerPanel.cpp's ShaderProperties tab must never draw a
-// "View" button next to it.
-//
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: about a "Material
-// Texture" row on "RenderOpaque"'s own per-entity children, unrelated to
-// this campaign.
-TEST(FrameDebuggerSnapshotBuilderTest, MaterialTextureRowIsNeverARenderGraphResource)
+// A material slot row has no render-graph entry, so the panel must never draw a "View" button for it.
+TEST(FrameDebuggerSnapshotBuilderTest, MaterialSlotRowIsNeverARenderGraphResource)
 {
     rg::RenderGraphSnapshot graphSnapshot;
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     FrameDebuggerCaptureContext capture;
-    capture.RecordEntityDraw(3, 0, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)", "MaterialTexture abc123", 12);
+    capture.RecordEntityDraw(3, 0, "SmokeTestCube", "Mesh.vert/Mesh.frag (PositionNormal)",
+        MaterialSlotsOf("MaterialTexture abc123"), 12);
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 
@@ -1436,9 +1437,65 @@ TEST(FrameDebuggerSnapshotBuilderTest, MaterialTextureRowIsNeverARenderGraphReso
     const FrameDebuggerEventNode& renderOpaqueLeaf = snapshot.rootNodes[0].children[0];
     ASSERT_EQ(renderOpaqueLeaf.children.size(), 1u);
     ASSERT_TRUE(renderOpaqueLeaf.children[0].details.has_value());
-    ASSERT_EQ(renderOpaqueLeaf.children[0].details->textures.size(), 1u);
-    EXPECT_EQ(renderOpaqueLeaf.children[0].details->textures[0].name, "Material Texture");
-    EXPECT_FALSE(renderOpaqueLeaf.children[0].details->textures[0].isRenderGraphResource);
+    const auto& textures = renderOpaqueLeaf.children[0].details->textures;
+    ASSERT_EQ(textures.size(), 4u);
+    EXPECT_EQ(textures[0].name, "Base Color Texture");
+    for (const FrameDebuggerTextureProperty& texture : textures) {
+        EXPECT_FALSE(texture.isRenderGraphResource);
+    }
+}
+
+// Four named slots become four rows in role order; an unnamed slot reads "None".
+TEST(FrameDebuggerSnapshotBuilderTest, EntityDrawListsOneRowPerMaterialSlotInRoleOrder)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
+
+    FrameDebuggerCaptureContext capture;
+    capture.RecordEntityDraw(1, 0, "wall", "PbrMesh", MaterialSlotsOf("Base A", "Normal A", "MR A", ""), 10);
+
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+    const auto& textures = snapshot.rootNodes[0].children[0].children[0].details->textures;
+
+    ASSERT_EQ(textures.size(), 4u);
+    EXPECT_EQ(textures[0].name, "Base Color Texture");
+    EXPECT_EQ(textures[0].valueLabel, "Base A");
+    EXPECT_EQ(textures[1].name, "Normal Texture");
+    EXPECT_EQ(textures[1].valueLabel, "Normal A");
+    EXPECT_EQ(textures[2].name, "Metallic-Roughness Texture");
+    EXPECT_EQ(textures[2].valueLabel, "MR A");
+    EXPECT_EQ(textures[3].name, "Occlusion Texture");
+    EXPECT_EQ(textures[3].valueLabel, "None");
+}
+
+// Two draws sharing a normal image list it once in the RenderOpaque leaf and in both entity leaves.
+TEST(FrameDebuggerSnapshotBuilderTest, SharedSlotImageIsListedOnceInTheRenderOpaqueLeafAndInEachEntityLeaf)
+{
+    rg::RenderGraphSnapshot graphSnapshot;
+    graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
+
+    FrameDebuggerCaptureContext capture;
+    const auto first = MaterialSlotsOf("Base A", "Normal Shared");
+    const auto second = MaterialSlotsOf("Base B", "Normal Shared");
+    capture.RecordDraw("PbrMesh", first, Mat4::Identity());
+    capture.RecordDraw("PbrMesh", second, Mat4::Identity());
+    capture.RecordEntityDraw(1, 0, "a", "PbrMesh", first, 10);
+    capture.RecordEntityDraw(2, 0, "b", "PbrMesh", second, 10);
+
+    const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
+    const FrameDebuggerEventNode& renderOpaqueLeaf = snapshot.rootNodes[0].children[0];
+
+    int sharedRows = 0;
+    for (const FrameDebuggerTextureProperty& texture : renderOpaqueLeaf.details->textures) {
+        sharedRows += texture.valueLabel == "Normal Shared" ? 1 : 0;
+    }
+    EXPECT_EQ(sharedRows, 1);
+    EXPECT_EQ(renderOpaqueLeaf.details->textures.size(), 3u); // Base A, Normal Shared, Base B.
+
+    ASSERT_EQ(renderOpaqueLeaf.children.size(), 2u);
+    for (const FrameDebuggerEventNode& entityLeaf : renderOpaqueLeaf.children) {
+        EXPECT_EQ(entityLeaf.details->textures[1].valueLabel, "Normal Shared");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1643,7 +1700,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, ViewRegionPivotIsFoundStructurallyEvenWhe
     graphSnapshot.passesInExecutionOrder.push_back(renamedOpaquePass);
 
     FrameDebuggerCaptureContext capture;
-    capture.RecordEntityDraw(5, 0, "renamed-pivot-proof", "Mesh.vert/Mesh.frag (PositionNormal)", "", 42);
+    capture.RecordEntityDraw(5, 0, "renamed-pivot-proof", "Mesh.vert/Mesh.frag (PositionNormal)", {}, 42);
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture);
 

@@ -1,0 +1,109 @@
+#version 450
+
+// Spatial bilateral filter and temporal accumulation of the raw GI.
+#include "SsgiCommon.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// Member names and order match fx::TemporalResolveParamsGpu.
+layout(std430, binding = 0) readonly buffer SsgiResolveParams {
+    mat4 invViewProjection;
+    mat4 prevViewProjection;
+    vec4 eye;
+    vec4 forward;
+    vec4 prevEye;
+    vec4 prevForward;
+    vec4 filterParams; // x depth sigma, y history weight, z history depth tolerance, w spatial on.
+    uvec4 counts;      // x divisor, y history valid, z depth width, w depth height.
+} params;
+
+layout(binding = 1) uniform sampler2D ssgiRaw;     // rgb GI, a view depth (0 = no surface).
+layout(binding = 2) uniform sampler2D ssgiHistory; // Previous result, same layout.
+layout(binding = 3, rgba16f) uniform writeonly image2D ssgiOutput;
+
+// Previous-frame GI at the world point this texel sees: rgb = filtered, a = bilinear coverage.
+vec4 ReprojectHistory(ivec2 p, float viewZ, float tolerance)
+{
+    vec2 texel;
+    float prevZ;
+    if (!ReprojectToHistory(params.invViewProjection, params.prevViewProjection, params.eye.xyz, params.forward.xyz,
+            params.prevEye.xyz, params.prevForward.xyz, p, float(max(params.counts.x, 1u)), vec2(params.counts.zw),
+            viewZ, texel, prevZ)) {
+        return vec4(0.0);
+    }
+    ivec2 base = ivec2(floor(texel));
+    vec2 f = fract(texel);
+    ivec2 histSize = textureSize(ssgiHistory, 0);
+    vec3 sum = vec3(0.0);
+    float weightSum = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        ivec2 o = ivec2(i & 1, i >> 1);
+        ivec2 q = base + o;
+        if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, histSize))) {
+            continue;
+        }
+        vec4 h = texelFetch(ssgiHistory, q, 0);
+        if (IsBad(h.rgb)) {
+            continue;
+        }
+        float bilinear = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+        float relative = abs(h.a - prevZ) / prevZ;
+        float valid = h.a > 0.0 ? 1.0 - smoothstep(0.5 * tolerance, tolerance, relative) : 0.0;
+        sum += h.rgb * bilinear * valid;
+        weightSum += bilinear * valid;
+    }
+    return weightSum > 0.0 ? vec4(sum / weightSum, weightSum) : vec4(0.0);
+}
+
+void main()
+{
+    ivec2 size = imageSize(ssgiOutput);
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= size.x || p.y >= size.y) {
+        return;
+    }
+
+    ivec2 rawSize = textureSize(ssgiRaw, 0);
+    vec4 center = texelFetch(ssgiRaw, min(p, rawSize - ivec2(1)), 0);
+    if (center.a <= 0.0) {
+        imageStore(ssgiOutput, p, vec4(0.0));
+        return;
+    }
+
+    // 3x3 cross-bilateral filter; the min and max of the footprint also bound the history.
+    float depthTolerance = max(center.a * params.filterParams.x, 1e-4);
+    bool spatial = params.filterParams.w > 0.5;
+    vec3 sum = vec3(0.0);
+    float weightSum = 0.0;
+    vec3 lo = center.rgb;
+    vec3 hi = center.rgb;
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            vec4 s = texelFetch(ssgiRaw, clamp(p + ivec2(dx, dy), ivec2(0), rawSize - ivec2(1)), 0);
+            if (s.a <= 0.0) {
+                continue;
+            }
+            lo = min(lo, s.rgb);
+            hi = max(hi, s.rgb);
+            bool isCenter = dx == 0 && dy == 0;
+            float kernel = isCenter ? 4.0 : ((dx == 0 || dy == 0) ? 2.0 : 1.0);
+            if (!spatial && !isCenter) {
+                kernel = 0.0;
+            }
+            float w = kernel * exp(-abs(s.a - center.a) / depthTolerance);
+            sum += s.rgb * w;
+            weightSum += w;
+        }
+    }
+    vec3 result = sum / max(weightSum, 1e-5);
+
+    if (params.counts.y != 0u && params.filterParams.y > 0.0) {
+        vec4 history = ReprojectHistory(p, center.a, params.filterParams.z);
+        if (history.a > 0.25) {
+            result = mix(result, clamp(history.rgb, lo, hi), params.filterParams.y * min(history.a, 1.0));
+        }
+    }
+    if (IsBad(result)) {
+        result = vec3(0.0);
+    }
+    imageStore(ssgiOutput, p, vec4(result, center.a));
+}

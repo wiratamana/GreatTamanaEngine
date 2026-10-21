@@ -90,15 +90,17 @@ struct AtmosphereSettings {
     // Strength of the aerial perspective composite: 1.0 is the physical result, 0.0 passes the scene color through.
     float aerialPerspectiveStrength = 1.0f;
 
-    // Exposure of the sky background's exponential tonemap.
-    float skyExposure = 12.0f;
+    // Linear multiplier on the sky background radiance.
+    float skyIntensity = 6.0f;
 
-    // Aerial perspective volume ray-march tunables. The 0.5km range and 30x exaggeration are tuned for scenes
-    // with content tens to a few hundred meters from the camera.
+    // Aerial perspective volume ray-march tunables, tuned for content tens to a few hundred meters from the camera.
     float aerialPerspectiveMaxDistanceKm = 0.5f;
     float aerialPerspectiveDepthExponent = 2.0f;
     int aerialPerspectiveSamplesPerSlice = 8;
-    float aerialPerspectiveScatteringExaggeration = 30.0f;
+    float aerialPerspectiveScatteringExaggeration = 8.0f;
+
+    // Sun and sky light of materials and light shafts follow the atmosphere.
+    bool sceneLightFollowsAtmosphere = true;
 };
 
 } // namespace gte

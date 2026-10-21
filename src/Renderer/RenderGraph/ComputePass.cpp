@@ -5,8 +5,10 @@
 #include "RenderGraphBuilder.h"
 #include "Shader.h"
 #include "ShaderBindings.h"
+#include "../Compute/ComputeDispatch.h"
 #include "../Compute/ComputePipeline.h"
 
+#include <cassert>
 #include <utility>
 
 namespace gte::rg {
@@ -63,6 +65,13 @@ bool ComputePass::Dispatch(Extent2D requested, std::uint32_t depth)
     }
 
     const ComputePipeline* pipeline = m_state.shader.Compute();
+    assert(pipeline != nullptr && "a chain that passed Begin() has a built shader");
+    const Extent3D groups = ComputeGroupCount3D(Extent3D{ size.width, size.height, depth }, pipeline->LocalGroupSize());
+    if (ExceedsGuaranteedGroupCount(groups)) {
+        m_state.Report("dispatch needs more than 65535 work groups on one axis: split the work over two axes");
+        return false;
+    }
+
     const DescriptorSetLayoutHandle layout = m_state.shader.Layout();
 
     builder.AddRenderPass(
@@ -70,9 +79,6 @@ bool ComputePass::Dispatch(Extent2D requested, std::uint32_t depth)
         [&](RenderGraphBuilder::PassBuilder& pass) {
             DeclareBindings(pass, *planned, layout);
             pass.SetBindingInstance(m_instance);
-            for (const BufferHandle handle : m_bufferWrites) {
-                pass.WriteBuffer(handle, ResourceAccess::ComputeShaderWrite);
-            }
         },
         [pipeline, push = std::move(m_state.push), size, depth](PassContext& ctx) {
             const DescriptorSetHandle set = ctx.BoundDescriptorSet();
