@@ -7,7 +7,7 @@ per stage. The CPU oracle is `GtaoMath.h/.cpp`; the shaders mirror it.
 ## Design
 
 - **Eye-relative world space.** The feature needs no view or projection matrix. Every pixel is unprojected with
-  `invViewProjection` into the eye-relative world space of the frame. `DeriveGtaoCameraBasis` reads the camera axes and the
+  `invViewProjection` into the eye-relative world space of the frame. `fx::DeriveCameraBasis` (`ScreenSpaceView.h`) reads the camera axes and the
   pixel scale from that one matrix. A camera that is not a square-pixel perspective camera gives no AO
   (`NoValidCamera`, one log line).
 - **AO texel mapping.** AO texel `i` reads depth pixel `i * divisor`. With divisor 2 the AO texture is half size, rounded up.

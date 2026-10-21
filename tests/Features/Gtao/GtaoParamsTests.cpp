@@ -11,9 +11,9 @@
 namespace gte {
 namespace {
 
-GtaoCameraBasis MakeBasis()
+fx::CameraBasis MakeBasis()
 {
-    GtaoCameraBasis b;
+    fx::CameraBasis b;
     b.valid = true;
     b.eye = Vec3{ 1.0f, 2.0f, 3.0f };
     b.right = Vec3{ 1.0f, 0.0f, 0.0f };
@@ -37,14 +37,8 @@ TEST(GtaoParamsTest, MainBlockLayoutMatchesStd430)
     EXPECT_EQ(sizeof(GtaoMainParamsGpu), 192u);
 }
 
-TEST(GtaoParamsTest, ResolveAndCompositeBlockLayout)
+TEST(GtaoParamsTest, CompositePushLayout)
 {
-    EXPECT_EQ(offsetof(GtaoResolveParamsGpu, prevViewProjection), 64u);
-    EXPECT_EQ(offsetof(GtaoResolveParamsGpu, eye), 128u);
-    EXPECT_EQ(offsetof(GtaoResolveParamsGpu, filter), 192u);
-    EXPECT_EQ(offsetof(GtaoResolveParamsGpu, counts), 208u);
-    EXPECT_EQ(sizeof(GtaoResolveParamsGpu), 224u);
-
     EXPECT_EQ(offsetof(GtaoCompositePush, eye), 64u);
     EXPECT_EQ(offsetof(GtaoCompositePush, strengthReservedSigma), 96u);
     EXPECT_EQ(offsetof(GtaoCompositePush, divisorDebug), 112u);
@@ -85,30 +79,6 @@ TEST(GtaoParamsTest, DistanceFadeKeepsDistinctEdgesForZeroFraction)
     cfg.distanceFadeFraction = 0.0f;
     const GtaoMainParamsGpu p = MakeGtaoMainParams(MakeBasis(), SanitizeGtaoSettings(cfg), Mat4::Identity(), 0);
     EXPECT_LT(p.distanceFade[0], p.distanceFade[1]);
-}
-
-TEST(GtaoParamsTest, ResolveParamsCarryHistoryAndExtent)
-{
-    GtaoHistory previous;
-    previous.viewProjection = Mat4::Translation(Vec3{ 1.0f, 0.0f, 0.0f });
-    previous.eye = Vec3{ 9.0f, 8.0f, 7.0f };
-    previous.forward = Vec3{ 0.0f, 1.0f, 0.0f };
-    GtaoSettings cfg;
-    cfg.spatialDenoise = false;
-    cfg.historyWeight = 0.5f;
-
-    const GtaoResolveParamsGpu p = MakeGtaoResolveParams(
-        MakeBasis(), previous, SanitizeGtaoSettings(cfg), Extent2D{ 1280, 720 }, Mat4::Identity(), true);
-
-    EXPECT_TRUE(ApproximatelyEqual(p.prevViewProjection, previous.viewProjection));
-    EXPECT_FLOAT_EQ(p.eye[2], 3.0f);
-    EXPECT_FLOAT_EQ(p.prevEye[0], 9.0f);
-    EXPECT_FLOAT_EQ(p.prevForward[1], 1.0f);
-    EXPECT_FLOAT_EQ(p.filter[1], 0.5f);
-    EXPECT_FLOAT_EQ(p.filter[3], 0.0f);
-    EXPECT_EQ(p.counts[1], 1u);
-    EXPECT_EQ(p.counts[2], 1280u);
-    EXPECT_EQ(p.counts[3], 720u);
 }
 
 TEST(GtaoParamsTest, CompositePushCarriesStrengthModeAndDivisor)

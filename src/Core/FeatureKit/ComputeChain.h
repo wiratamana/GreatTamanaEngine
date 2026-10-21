@@ -17,9 +17,8 @@ namespace gte::fx {
 class ComputeShader;
 
 // One compute dispatch, bound by shader variable name. Made by Frame::Compute(), ended by Dispatch().
-// Bound names must be literals (they are read at Dispatch()). A refused call makes Dispatch() declare nothing.
-//   f.Compute(shader, "Blur.Dispatch").Params(params, p).Bind("src", tex).Bind("dst", out).Dispatch(extent);
-//   f.Compute(shader, "Cull.Dispatch").BindBuffer("items", items).BindBuffer("counter", counter).Dispatch(Extent2D{ n, 1 });
+// Bound names must be literals. A refused call makes Dispatch() declare nothing.
+// Example: f.Compute(shader, "Blur.Dispatch").Params(params, p).Bind("src", tex).Bind("dst", out).Dispatch(extent);
 class ComputeChain {
 public:
     ~ComputeChain();

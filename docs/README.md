@@ -102,6 +102,8 @@ than subsystem-specific):
 - **[Ambient Occlusion](conventions/ambient-occlusion.md)** — screen-space GTAO from the
   scene depth only, the denoise and history passes, the linear-space composite, and the
   `/feature_debug/*` HTTP recipe.
+- **[Screen-Space GI](conventions/screen-space-gi.md)** — one-bounce screen-space diffuse
+  light (Ssgi): pass layout, settings, `/feature_debug/*` HTTP recipe and limits.
 - **[PBR Materials](conventions/pbr-materials.md)** — material image roles and color spaces, the
   tangent convention, the GGX shading model, the material debug views, failure policy and the
   lifetime of material sets and images.

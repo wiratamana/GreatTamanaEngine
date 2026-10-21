@@ -27,6 +27,7 @@
 #include "SceneDrawChain.h"
 #include "SceneShaderSet.h"
 #include "SceneSlot.h"
+#include "ScreenSpaceView.h"
 #include "SharedOncePerFrame.h"
 #include "Texture.h"
 #include "TransientTarget.h"

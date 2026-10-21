@@ -17,63 +17,16 @@ layout(std430, binding = 0) readonly buffer GtaoMainParams {
 layout(binding = 1) uniform sampler2D sceneDepth;
 layout(binding = 2, rgba16f) uniform writeonly image2D aoOutput; // x visibility, y view depth (0 = sky).
 
-const float kSkyDepth = 0.999999;
-const float kPi = 3.14159265359;
+#include "ScreenSpaceCommon.glsl"
+
 const float kHalfPi = 1.57079632679;
 const float kMinScreenRadius = 1.3; // Pixels; a smaller radius shows no occlusion.
 
 ivec2 gDepthSize;
 
-float FetchDepth(ivec2 p)
-{
-    return texelFetch(sceneDepth, clamp(p, ivec2(0), gDepthSize - ivec2(1)), 0).r;
-}
-
-vec3 WorldAt(ivec2 p, float depth)
-{
-    vec2 uv = (vec2(p) + 0.5) / vec2(gDepthSize);
-    vec4 world = params.invViewProjection * vec4(uv * 2.0 - 1.0, depth, 1.0);
-    return world.xyz / world.w;
-}
-
 bool OnScreen(ivec2 p)
 {
     return all(greaterThanEqual(p, ivec2(0))) && all(lessThan(p, gDepthSize));
-}
-
-// Geometric normal from depth, using the neighbour with the smaller depth step on each axis.
-// A sky neighbour is never chosen; with no usable neighbour the view direction is returned.
-vec3 NormalFromDepth(ivec2 p, float depth, vec3 position, vec3 eye)
-{
-    vec3 toEye = normalize(eye - position);
-    float dxp = FetchDepth(p + ivec2(1, 0));
-    float dxn = FetchDepth(p - ivec2(1, 0));
-    float dyp = FetchDepth(p + ivec2(0, 1));
-    float dyn = FetchDepth(p - ivec2(0, 1));
-    float errXp = dxp >= kSkyDepth ? 1e6 : abs(dxp - depth);
-    float errXn = dxn >= kSkyDepth ? 1e6 : abs(depth - dxn);
-    float errYp = dyp >= kSkyDepth ? 1e6 : abs(dyp - depth);
-    float errYn = dyn >= kSkyDepth ? 1e6 : abs(depth - dyn);
-    if (min(errXp, errXn) > 1e5 || min(errYp, errYn) > 1e5) {
-        return toEye;
-    }
-
-    vec3 dx = errXp < errXn ? WorldAt(p + ivec2(1, 0), dxp) - position : position - WorldAt(p - ivec2(1, 0), dxn);
-    vec3 dy = errYp < errYn ? WorldAt(p + ivec2(0, 1), dyp) - position : position - WorldAt(p - ivec2(0, 1), dyn);
-
-    // Normalize before the cross product: two tiny vectors must not hit a fixed epsilon.
-    float lx = length(dx);
-    float ly = length(dy);
-    if (lx < 1e-7 || ly < 1e-7) {
-        return toEye;
-    }
-    vec3 n = cross(dx / lx, dy / ly);
-    float len = length(n);
-    if (len < 1e-3) {
-        return toEye;
-    }
-    n /= len;
-    return dot(n, toEye) < 0.0 ? -n : n;
 }
 
 // Input is clamped, so rounding can not push the sqrt argument below zero.
@@ -84,22 +37,17 @@ float FastAcos(float x)
     return x >= 0.0 ? res : kPi - res;
 }
 
-float InterleavedGradientNoise(vec2 pixel)
-{
-    return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
-}
-
 // Updates the horizon cosine of one side from the occluder at depth pixel `p`.
 float UpdateHorizon(float horizonCos, float lowCos, ivec2 p, vec3 P, vec3 V)
 {
     if (!OnScreen(p)) {
         return horizonCos;
     }
-    float d = FetchDepth(p);
-    if (d >= kSkyDepth) {
+    float d = FetchDepth(sceneDepth, p);
+    if (d >= kEmptyDepth) {
         return horizonCos;
     }
-    vec3 delta = WorldAt(p, d) - params.eyeAndPixelScale.xyz - P;
+    vec3 delta = UnprojectDepth(params.invViewProjection, p, d, gDepthSize) - params.eyeAndPixelScale.xyz - P;
     float dist = max(length(delta), 1e-5);
     float w = clamp(dist * params.downAndFalloffMul.w + params.forwardAndFalloffAdd.w, 0.0, 1.0);
     if (w <= 0.0) {
@@ -120,8 +68,8 @@ void main()
     // AO texel i reads depth pixel i * divisor.
     gDepthSize = textureSize(sceneDepth, 0);
     ivec2 pixel = min(aoPixel * int(params.counts.w), gDepthSize - ivec2(1));
-    float depth = FetchDepth(pixel);
-    if (depth >= kSkyDepth) {
+    float depth = FetchDepth(sceneDepth, pixel);
+    if (depth >= kEmptyDepth) {
         imageStore(aoOutput, aoPixel, vec4(1.0, 0.0, 0.0, 0.0));
         return;
     }
@@ -132,11 +80,11 @@ void main()
     vec3 forward = params.forwardAndFalloffAdd.xyz;
     float radius = params.rightAndRadius.w;
 
-    vec3 worldPos = WorldAt(pixel, depth);
+    vec3 worldPos = UnprojectDepth(params.invViewProjection, pixel, depth, gDepthSize);
     vec3 P = worldPos - eye;
     float viewZ = dot(P, forward);
     vec3 V = normalize(-P);
-    vec3 N = NormalFromDepth(pixel, depth, worldPos, eye);
+    vec3 N = NormalFromDepth(sceneDepth, params.invViewProjection, pixel, depth, worldPos, eye);
 
     float screenRadius = min(radius / max(viewZ * params.eyeAndPixelScale.w, 1e-6), params.distanceFade.z);
     float fadeSmall = clamp((screenRadius - kMinScreenRadius) / 4.0, 0.0, 1.0);

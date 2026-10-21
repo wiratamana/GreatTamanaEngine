@@ -199,5 +199,20 @@ TEST(RenderGraphNameSlotTableTests, JustOverflowedIsTrueOnEverySubsequentOverBud
     EXPECT_TRUE(table.JustOverflowed());
 }
 
+TEST(RenderGraphNameSlotTableTests, EverOverflowedIsStickyAndExact)
+{
+    RenderGraphNameSlotTable table(2);
+    EXPECT_FALSE(table.EverOverflowed());
+    EXPECT_EQ(table.AssignOrGetSlot("A"), 0);
+    EXPECT_EQ(table.AssignOrGetSlot("B"), 1);
+    EXPECT_FALSE(table.EverOverflowed()); // Full, but nothing was refused.
+    EXPECT_EQ(table.AssignOrGetSlot("B"), 1);
+    EXPECT_FALSE(table.EverOverflowed());
+    EXPECT_EQ(table.AssignOrGetSlot("C"), kNoNameSlot);
+    EXPECT_TRUE(table.EverOverflowed());
+    EXPECT_EQ(table.AssignOrGetSlot("A"), 0);
+    EXPECT_TRUE(table.EverOverflowed());
+}
+
 } // namespace
 } // namespace gte::rg

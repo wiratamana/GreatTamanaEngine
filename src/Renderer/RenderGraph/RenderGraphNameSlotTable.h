@@ -37,6 +37,7 @@ public:
         }
         if (m_names.size() >= static_cast<std::size_t>(m_slotBudget)) {
             m_lastCallOverflowed = true;
+            m_everOverflowed = true;
             return kNoNameSlot;
         }
         m_lastCallOverflowed = false;
@@ -47,6 +48,9 @@ public:
     // True only if the most recent AssignOrGetSlot() returned kNoNameSlot because a new name found the
     // budget exhausted (not for nullptr or an already-assigned name).
     bool JustOverflowed() const noexcept { return m_lastCallOverflowed; }
+
+    // True once any new name was refused because the budget was full. Never resets.
+    bool EverOverflowed() const noexcept { return m_everOverflowed; }
 
     // The name assigned to `slot`, or nullptr when out of range or unassigned. The pointer is owned by
     // this table and valid for its lifetime.
@@ -65,6 +69,7 @@ private:
     std::uint32_t m_slotBudget;
     std::vector<std::string> m_names; // index == assigned slot; owned copies
     bool m_lastCallOverflowed = false;
+    bool m_everOverflowed = false;
 };
 
 } // namespace gte::rg

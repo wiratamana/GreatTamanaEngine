@@ -2,145 +2,32 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 
 namespace gte {
-
-namespace {
-
-// A frame has a camera cut when the eye jumps or the view turns past these limits.
-constexpr float kCutDistance = 20.0f;
-constexpr float kCutMinForwardDot = 0.5f;
-
-constexpr float kMinSpan = 1e-4f;        // Smallest usable image-plane span, world units.
-constexpr float kMaxSkew = 1e-3f;        // |dot(right, down)| limit.
-constexpr float kPerspectiveTol = 0.005f; // Relative change of the frustum width over depth.
-constexpr float kSquarePixelTol = 0.01f;
-
-bool IsFinite(const Vec3& v) noexcept
-{
-    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
-}
-
-float SanitizeFloat(float value, float lo, float hi, float fallback) noexcept
-{
-    return std::isfinite(value) ? std::clamp(value, lo, hi) : fallback;
-}
-
-bool SameExtent(Extent2D a, Extent2D b) noexcept
-{
-    return a.width == b.width && a.height == b.height;
-}
-
-void Store(float (&dst)[4], const Vec3& v, float w = 0.0f) noexcept
-{
-    dst[0] = v.x;
-    dst[1] = v.y;
-    dst[2] = v.z;
-    dst[3] = w;
-}
-
-} // namespace
-
-Vec3 UnprojectGtaoDepth(const Mat4& invViewProjection, float ndcX, float ndcY, float depthZeroToOne) noexcept
-{
-    const Vec4 world = invViewProjection * Vec4(ndcX, ndcY, depthZeroToOne, 1.0f);
-    return world.w != 0.0f ? world.XYZ() / world.w : Vec3::Zero();
-}
 
 GtaoSettings SanitizeGtaoSettings(const GtaoSettings& settings) noexcept
 {
     constexpr GtaoSettings d{};
     GtaoSettings s = settings;
 
-    s.radius = SanitizeFloat(settings.radius, 0.05f, 10.0f, d.radius);
-    s.falloffFraction = SanitizeFloat(settings.falloffFraction, 0.05f, 1.0f, d.falloffFraction);
+    s.radius = fx::SanitizeFinite(settings.radius, 0.05f, 10.0f, d.radius);
+    s.falloffFraction = fx::SanitizeFinite(settings.falloffFraction, 0.05f, 1.0f, d.falloffFraction);
     s.sliceCount = std::clamp<std::uint32_t>(settings.sliceCount, 1u, 8u);
     s.stepCount = std::clamp<std::uint32_t>(settings.stepCount, 1u, 12u);
-    s.sampleDistributionPower = SanitizeFloat(settings.sampleDistributionPower, 1.0f, 4.0f, d.sampleDistributionPower);
-    s.thinOccluderCompensation = SanitizeFloat(settings.thinOccluderCompensation, 0.0f, 0.7f, d.thinOccluderCompensation);
-    s.finalPower = SanitizeFloat(settings.finalPower, 0.5f, 4.0f, d.finalPower);
-    s.minVisibility = SanitizeFloat(settings.minVisibility, 0.0f, 0.5f, d.minVisibility);
-    s.strength = SanitizeFloat(settings.strength, 0.0f, 1.0f, d.strength);
-    s.maxDistance = SanitizeFloat(settings.maxDistance, 1.0f, 100000.0f, d.maxDistance);
-    s.distanceFadeFraction = SanitizeFloat(settings.distanceFadeFraction, 0.0f, 0.9f, d.distanceFadeFraction);
+    s.sampleDistributionPower = fx::SanitizeFinite(settings.sampleDistributionPower, 1.0f, 4.0f, d.sampleDistributionPower);
+    s.thinOccluderCompensation = fx::SanitizeFinite(settings.thinOccluderCompensation, 0.0f, 0.7f, d.thinOccluderCompensation);
+    s.finalPower = fx::SanitizeFinite(settings.finalPower, 0.5f, 4.0f, d.finalPower);
+    s.minVisibility = fx::SanitizeFinite(settings.minVisibility, 0.0f, 0.5f, d.minVisibility);
+    s.strength = fx::SanitizeFinite(settings.strength, 0.0f, 1.0f, d.strength);
+    s.maxDistance = fx::SanitizeFinite(settings.maxDistance, 1.0f, 100000.0f, d.maxDistance);
+    s.distanceFadeFraction = fx::SanitizeFinite(settings.distanceFadeFraction, 0.0f, 0.9f, d.distanceFadeFraction);
     s.resolutionDivisor = settings.resolutionDivisor <= 1u ? 1u : 2u;
-    s.historyWeight = SanitizeFloat(settings.historyWeight, 0.0f, 0.98f, d.historyWeight);
-    s.depthSigma = SanitizeFloat(settings.depthSigma, 0.001f, 0.5f, d.depthSigma);
+    s.historyWeight = fx::SanitizeFinite(settings.historyWeight, 0.0f, 0.98f, d.historyWeight);
+    s.depthSigma = fx::SanitizeFinite(settings.depthSigma, 0.001f, 0.5f, d.depthSigma);
     s.debugView = static_cast<std::uint8_t>(settings.debugView) <= static_cast<std::uint8_t>(GtaoDebugView::AoOnly)
         ? settings.debugView
         : GtaoDebugView::Off;
     return s;
-}
-
-Extent2D AoExtentFor(Extent2D viewExtent, std::uint32_t divisor) noexcept
-{
-    const std::uint32_t d = std::max(divisor, 1u);
-    const auto scaled = [d](std::uint32_t size) { return std::max(1u, (size + d - 1u) / d); };
-    return Extent2D{ scaled(viewExtent.width), scaled(viewExtent.height) };
-}
-
-GtaoCameraBasis DeriveGtaoCameraBasis(const Vec3& eye, const Mat4& invViewProjection, Extent2D extent) noexcept
-{
-    GtaoCameraBasis basis;
-    if (extent.width == 0 || extent.height == 0 || !IsFinite(eye)) {
-        return basis;
-    }
-
-    // Points of one NDC depth lie in one view-depth plane, so pairs across the image give the camera axes.
-    const auto at = [&](float x, float y, float depth) { return UnprojectGtaoDepth(invViewProjection, x, y, depth); };
-    constexpr float kMid = 0.5f;
-    const Vec3 spanH = at(1.0f, 0.0f, kMid) - at(-1.0f, 0.0f, kMid);
-    const Vec3 spanV = at(0.0f, 1.0f, kMid) - at(0.0f, -1.0f, kMid);
-    const float lenH = Length(spanH);
-    const float lenV = Length(spanV);
-    if (!(lenH > kMinSpan) || !(lenV > kMinSpan)) {
-        return basis;
-    }
-    const Vec3 right = spanH / lenH;
-    const Vec3 down = spanV / lenV;
-    if (!(std::abs(Dot(right, down)) < kMaxSkew)) {
-        return basis;
-    }
-
-    // The sign of the cross product depends on the matrix, so orient the axis toward the scene.
-    Vec3 forward = Normalize(Cross(right, down));
-    if (Dot(forward, at(0.0f, 0.0f, kMid) - eye) < 0.0f) {
-        forward = -forward;
-    }
-    if (!IsFinite(forward) || LengthSquared(forward) < 0.5f) {
-        return basis;
-    }
-
-    // Image-plane size over view depth at one NDC depth. Constant over depth only for a perspective matrix.
-    const auto planeRatio = [&](float depth, bool horizontal) {
-        const Vec3 a = horizontal ? at(-1.0f, 0.0f, depth) : at(0.0f, -1.0f, depth);
-        const Vec3 b = horizontal ? at(1.0f, 0.0f, depth) : at(0.0f, 1.0f, depth);
-        const float z = Dot(b - eye, forward);
-        return z > 1e-4f ? Length(b - a) / z : std::numeric_limits<float>::quiet_NaN();
-    };
-    const float tanH = planeRatio(kMid, true);
-    const float tanHNear = planeRatio(0.25f, true);
-    const float tanHFar = planeRatio(0.75f, true);
-    const float tanV = planeRatio(kMid, false);
-    if (!std::isfinite(tanH) || !std::isfinite(tanHNear) || !std::isfinite(tanHFar) || !std::isfinite(tanV)) {
-        return basis;
-    }
-    if (std::abs(tanHNear - tanHFar) > kPerspectiveTol * std::max(tanHNear, tanHFar)) {
-        return basis;
-    }
-    const float aspect = static_cast<float>(extent.height) / static_cast<float>(extent.width);
-    if (std::abs(tanV - tanH * aspect) > kSquarePixelTol * tanV) {
-        return basis;
-    }
-
-    basis.valid = true;
-    basis.eye = eye;
-    basis.right = right;
-    basis.down = down;
-    basis.forward = forward;
-    basis.pixelScale = tanH / static_cast<float>(extent.width);
-    return basis;
 }
 
 GtaoFalloff MakeGtaoFalloff(float radius, float falloffFraction) noexcept
@@ -184,17 +71,17 @@ float GtaoSliceVisibility(const GtaoSliceFrame& slice, float horizonCos0, float 
     return slice.projLen * (GtaoArcIntegral(slice.n, slice.cosNorm, h0) + GtaoArcIntegral(slice.n, slice.cosNorm, h1));
 }
 
-GtaoMainParamsGpu MakeGtaoMainParams(
-    const GtaoCameraBasis& basis, const GtaoSettings& safe, const Mat4& invViewProjection, std::uint32_t noiseFrame) noexcept
+GtaoMainParamsGpu MakeGtaoMainParams(const fx::CameraBasis& basis, const GtaoSettings& safe,
+    const Mat4& invViewProjection, std::uint32_t noiseFrame) noexcept
 {
     GtaoMainParamsGpu p;
     p.invViewProjection = invViewProjection;
     const GtaoFalloff falloff = MakeGtaoFalloff(safe.radius, safe.falloffFraction);
 
-    Store(p.eyeAndPixelScale, basis.eye, basis.pixelScale);
-    Store(p.rightAndRadius, basis.right, safe.radius);
-    Store(p.downAndFalloffMul, basis.down, falloff.mul);
-    Store(p.forwardAndFalloffAdd, basis.forward, falloff.add);
+    fx::PackVec3(p.eyeAndPixelScale, basis.eye, basis.pixelScale);
+    fx::PackVec3(p.rightAndRadius, basis.right, safe.radius);
+    fx::PackVec3(p.downAndFalloffMul, basis.down, falloff.mul);
+    fx::PackVec3(p.forwardAndFalloffAdd, basis.forward, falloff.add);
 
     p.tuning[0] = safe.finalPower;
     p.tuning[1] = safe.thinOccluderCompensation;
@@ -214,73 +101,19 @@ GtaoMainParamsGpu MakeGtaoMainParams(
     return p;
 }
 
-GtaoResolveParamsGpu MakeGtaoResolveParams(const GtaoCameraBasis& basis, const GtaoHistory& previous,
-    const GtaoSettings& safe, Extent2D viewExtent, const Mat4& invViewProjection, bool historyValid) noexcept
-{
-    GtaoResolveParamsGpu p;
-    p.invViewProjection = invViewProjection;
-    p.prevViewProjection = previous.viewProjection;
-    Store(p.eye, basis.eye);
-    Store(p.forward, basis.forward);
-    Store(p.prevEye, previous.eye);
-    Store(p.prevForward, previous.forward);
-
-    // The history depth tolerance reuses the bilateral sigma; the filters then reject the same depth gaps.
-    p.filter[0] = safe.depthSigma;
-    p.filter[1] = safe.historyWeight;
-    p.filter[2] = safe.depthSigma;
-    p.filter[3] = safe.spatialDenoise ? 1.0f : 0.0f;
-
-    p.counts[0] = safe.resolutionDivisor;
-    p.counts[1] = historyValid ? 1u : 0u;
-    p.counts[2] = viewExtent.width;
-    p.counts[3] = viewExtent.height;
-    return p;
-}
-
-GtaoCompositePush MakeGtaoCompositePush(const GtaoCameraBasis& basis, const GtaoSettings& safe,
+GtaoCompositePush MakeGtaoCompositePush(const fx::CameraBasis& basis, const GtaoSettings& safe,
     const Mat4& invViewProjection, std::uint32_t divisor) noexcept
 {
     GtaoCompositePush p;
     p.invViewProjection = invViewProjection;
-    Store(p.eye, basis.eye);
-    Store(p.forward, basis.forward);
+    fx::PackVec3(p.eye, basis.eye);
+    fx::PackVec3(p.forward, basis.forward);
     p.strengthReservedSigma[0] = safe.strength;
     p.strengthReservedSigma[1] = 0.0f;
     p.strengthReservedSigma[2] = safe.depthSigma;
     p.divisorDebug[0] = divisor;
     p.divisorDebug[1] = static_cast<std::uint32_t>(safe.debugView);
     return p;
-}
-
-bool HistoryUsable(const GtaoHistory& previous, const GtaoCameraBasis& basis, std::uint64_t frame, Extent2D aoExtent,
-    std::uint32_t divisor) noexcept
-{
-    if (!previous.valid || previous.frame + 1 != frame || !SameExtent(previous.extent, aoExtent)
-        || previous.divisor != divisor || previous.stableFrames < 2) {
-        return false;
-    }
-    const bool jumped = Length(basis.eye - previous.eye) > kCutDistance;
-    const bool turned = Dot(basis.forward, previous.forward) < kCutMinForwardDot;
-    return !jumped && !turned;
-}
-
-GtaoHistory MakeHistory(const GtaoCameraBasis& basis, const Mat4& viewProjection, std::uint64_t frame,
-    Extent2D aoExtent, std::uint32_t divisor, const GtaoHistory& previous) noexcept
-{
-    const bool continuous = previous.valid && previous.frame + 1 == frame && SameExtent(previous.extent, aoExtent)
-        && previous.divisor == divisor;
-
-    GtaoHistory h;
-    h.valid = true;
-    h.frame = frame;
-    h.extent = aoExtent;
-    h.divisor = divisor;
-    h.stableFrames = continuous ? previous.stableFrames + 1 : 0;
-    h.viewProjection = viewProjection;
-    h.eye = basis.eye;
-    h.forward = basis.forward;
-    return h;
 }
 
 } // namespace gte

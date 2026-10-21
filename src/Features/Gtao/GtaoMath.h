@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GtaoTypes.h"
+#include "../../Core/FeatureKit/ScreenSpaceView.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
 
@@ -8,17 +9,8 @@
 
 namespace gte {
 
-// World position of one depth sample through a camera's inverse view-projection.
-Vec3 UnprojectGtaoDepth(const Mat4& invViewProjection, float ndcX, float ndcY, float depthZeroToOne) noexcept;
-
 // Clamps every field into its valid range. A non-finite float becomes that field's default.
 GtaoSettings SanitizeGtaoSettings(const GtaoSettings& settings) noexcept;
-
-// AO texture size for a view: ceil(size / divisor), at least 1 per axis.
-Extent2D AoExtentFor(Extent2D viewExtent, std::uint32_t divisor) noexcept;
-
-// Camera axes and pixel scale from the inverse view-projection alone. Invalid for non-perspective or skewed cameras.
-GtaoCameraBasis DeriveGtaoCameraBasis(const Vec3& eye, const Mat4& invViewProjection, Extent2D extent) noexcept;
 
 // Occluder weight = clamp(distance * mul + add, 0, 1): 1 up to the fade start, 0 at the radius.
 struct GtaoFalloff {
@@ -47,22 +39,10 @@ float GtaoArcIntegral(float n, float cosNorm, float h) noexcept;
 float GtaoSliceVisibility(const GtaoSliceFrame& slice, float horizonCos0, float horizonCos1) noexcept;
 
 // GPU parameter blocks. `safe` must be sanitized.
-GtaoMainParamsGpu MakeGtaoMainParams(
-    const GtaoCameraBasis& basis, const GtaoSettings& safe, const Mat4& invViewProjection, std::uint32_t noiseFrame) noexcept;
+GtaoMainParamsGpu MakeGtaoMainParams(const fx::CameraBasis& basis, const GtaoSettings& safe,
+    const Mat4& invViewProjection, std::uint32_t noiseFrame) noexcept;
 
-GtaoResolveParamsGpu MakeGtaoResolveParams(const GtaoCameraBasis& basis, const GtaoHistory& previous,
-    const GtaoSettings& safe, Extent2D viewExtent, const Mat4& invViewProjection, bool historyValid) noexcept;
-
-GtaoCompositePush MakeGtaoCompositePush(const GtaoCameraBasis& basis, const GtaoSettings& safe,
+GtaoCompositePush MakeGtaoCompositePush(const fx::CameraBasis& basis, const GtaoSettings& safe,
     const Mat4& invViewProjection, std::uint32_t divisor) noexcept;
-
-// True when `previous` may be reprojected into this frame: written last frame, same AO size and divisor,
-// stable for two frames, and no camera cut.
-bool HistoryUsable(const GtaoHistory& previous, const GtaoCameraBasis& basis, std::uint64_t frame, Extent2D aoExtent,
-    std::uint32_t divisor) noexcept;
-
-// History record of a frame whose resolve pass ran.
-GtaoHistory MakeHistory(const GtaoCameraBasis& basis, const Mat4& viewProjection, std::uint64_t frame,
-    Extent2D aoExtent, std::uint32_t divisor, const GtaoHistory& previous) noexcept;
 
 } // namespace gte

@@ -62,7 +62,7 @@ void GtaoFeature::OcclusionPass(fx::PostOpaqueFrame& f)
 
     // Every early exit drops the history: it was not written this frame, so the next frame must not read it.
     const auto bail = [&](GtaoFrameStatus status) {
-        view.previous = GtaoHistory{};
+        view.previous = fx::TemporalHistory{};
         snap.status = status;
         view.snapshot = snap;
     };
@@ -71,7 +71,7 @@ void GtaoFeature::OcclusionPass(fx::PostOpaqueFrame& f)
         bail(GtaoFrameStatus::NoValidCamera);
         return;
     }
-    const GtaoCameraBasis basis = DeriveGtaoCameraBasis(v.eye, v.invViewProjection, v.extent);
+    const fx::CameraBasis basis = fx::DeriveCameraBasis(v.eye, v.invViewProjection, v.extent);
     if (!basis.valid) {
         f.ReportOnce("Gtao: camera is not a square-pixel perspective camera, AO is off");
         bail(GtaoFrameStatus::NoValidCamera);
@@ -86,7 +86,7 @@ void GtaoFeature::OcclusionPass(fx::PostOpaqueFrame& f)
         return;
     }
 
-    const Extent2D aoExtent = AoExtentFor(v.extent, cfg.resolutionDivisor);
+    const Extent2D aoExtent = fx::ScaledExtent(v.extent, cfg.resolutionDivisor);
     const fx::Texture raw = view.raw.Acquire(f, aoExtent, PixelFormat::RGBA16_Float);
     if (!raw.IsValid()) {
         bail(GtaoFrameStatus::TargetFailed);
@@ -115,10 +115,12 @@ void GtaoFeature::OcclusionPass(fx::PostOpaqueFrame& f)
         const fx::Texture current = view.history[slot].Acquire(f, aoExtent, PixelFormat::RGBA16_Float);
         const fx::Texture previous = view.history[slot ^ 1u].Acquire(f, aoExtent, PixelFormat::RGBA16_Float);
         if (current.IsValid() && previous.IsValid()) {
-            const bool useHistory =
-                cfg.temporal && HistoryUsable(view.previous, basis, f.FrameIndex(), aoExtent, cfg.resolutionDivisor);
-            const GtaoResolveParamsGpu params =
-                MakeGtaoResolveParams(basis, view.previous, cfg, v.extent, v.invViewProjection, useHistory);
+            const bool useHistory = cfg.temporal
+                && fx::HistoryUsable(view.previous, basis, f.FrameIndex(), aoExtent, cfg.resolutionDivisor);
+            const fx::TemporalResolveSettings filter{
+                cfg.depthSigma, cfg.historyWeight, cfg.spatialDenoise, cfg.resolutionDivisor };
+            const fx::TemporalResolveParamsGpu params =
+                fx::MakeTemporalResolveParams(basis, view.previous, filter, v.extent, v.invViewProjection, useHistory);
             resolved = f.Compute(m_resolveShader, "Gtao.Resolve.Dispatch")
                            .Params(view.resolveParams, params)
                            .Bind("aoRaw", raw)
@@ -135,9 +137,9 @@ void GtaoFeature::OcclusionPass(fx::PostOpaqueFrame& f)
     }
 
     // Only a frame whose resolve pass ran becomes history.
-    view.previous = resolved ? MakeHistory(basis, v.viewProjection, f.FrameIndex(), aoExtent, cfg.resolutionDivisor,
-                                   view.previous)
-                             : GtaoHistory{};
+    view.previous = resolved ? fx::MakeHistory(basis, v.viewProjection, f.FrameIndex(), aoExtent,
+                                   cfg.resolutionDivisor, view.previous)
+                             : fx::TemporalHistory{};
     m_result.Publish(f, GtaoResult{ shown, cfg.resolutionDivisor, basis }, { shown });
 
     snap.aoExtent = aoExtent;

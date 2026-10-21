@@ -2341,6 +2341,7 @@ set(GTE_TEST_SOURCES
     Renderer/RenderGraph/ResourcePoolEvictionTests.cpp
     Core/FeatureKit/KitModuleTests.cpp
     Core/FeatureKit/KitSceneTests.cpp
+    Core/FeatureKit/ScreenSpaceViewTests.cpp
     Game/SceneDrawPassTests.cpp
     Core/Plugins/RenderFeatureBlendTests.cpp
     Renderer/Vulkan/ShaderStageMaskTests.cpp
@@ -2711,6 +2712,25 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_GTAO_COMPOSITE_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/GtaoComposite.frag.spv"
 )
 
+# The Ssgi shaders come from the feature shader auto-discovery; the self-check reflects the real binaries.
+target_sources(GreatTamanaEngineTests PRIVATE
+    "${CMAKE_BINARY_DIR}/shaders/SsgiPrepare.comp.spv"
+    "${CMAKE_BINARY_DIR}/shaders/SsgiTrace.comp.spv"
+    "${CMAKE_BINARY_DIR}/shaders/SsgiResolve.comp.spv"
+    "${CMAKE_BINARY_DIR}/shaders/SsgiComposite.vert.spv"
+    "${CMAKE_BINARY_DIR}/shaders/SsgiComposite.frag.spv"
+)
+target_compile_definitions(GreatTamanaEngineTests PRIVATE
+    GTE_TEST_SSGI_PREPARE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SsgiPrepare.comp.spv"
+    GTE_TEST_SSGI_TRACE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SsgiTrace.comp.spv"
+    GTE_TEST_SSGI_RESOLVE_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SsgiResolve.comp.spv"
+    GTE_TEST_SSGI_COMPOSITE_VERT_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SsgiComposite.vert.spv"
+    GTE_TEST_SSGI_COMPOSITE_FRAG_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/SsgiComposite.frag.spv"
+    GTE_TEST_SCREEN_SPACE_COMMON_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/ScreenSpaceCommon.glsl"
+    GTE_TEST_SSGI_COMMON_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Features/Ssgi/Shaders/SsgiCommon.glsl"
+    GTE_TEST_SSGI_COMPOSITE_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Features/Ssgi/Shaders/SsgiComposite.frag"
+)
+
 # The VolumetricLight shaders come from the feature shader auto-discovery; the self-check reflects the real binaries.
 target_sources(GreatTamanaEngineTests PRIVATE
     "${CMAKE_BINARY_DIR}/shaders/VolumetricLightInject.comp.spv"
@@ -2893,7 +2913,7 @@ add_test(NAME EngineVocabularyCheck
 # comment blocks longer than 3 lines, in C++ sources and GLSL shaders. The scope is an explicit directory/file list;
 # there is no allowlist.
 set(GTE_COMMENT_RULE_SRC
-    Renderer/ Core/FeatureKit/ Features/Shadow/ Features/Gtao/ Features/VolumetricLight/ Features/ToneMapping/ Shaders/
+    Renderer/ Core/FeatureKit/ Features/Shadow/ Features/Gtao/ Features/Ssgi/ Features/VolumetricLight/ Features/ToneMapping/ Shaders/
     Math/ToneMapCurves.h
     Game/Lighting/SunShadowReceiver.h Game/Lighting/SunLightModulation.h
     Application/RenderPasses.cpp Application/RenderPasses.h Core/Core.cpp Core/Core.h Core/CapturedPixels.h
@@ -2938,6 +2958,7 @@ set(GTE_COMMENT_RULE_TESTS
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
     Features/Shadow/ShadowMathTests.cpp Game/SceneDrawPassTests.cpp
     Features/Gtao/GtaoMathTests.cpp Features/Gtao/GtaoParamsTests.cpp Features/Gtao/GtaoShaderNamesTests.cpp
+    Features/Ssgi/
     Features/VolumetricLight/ Features/ToneMapping/ Math/ToneMapCurvesTests.cpp Features/Shadow/ShadowReceiverTests.cpp
     Encoding/HdrColorVisualizationTests.cpp Editor/FrameDebuggerPreviewProcessingTests.cpp
     Renderer/RenderGraph/CommandBufferTests.cpp Renderer/RenderGraph/FullscreenPassTests.cpp

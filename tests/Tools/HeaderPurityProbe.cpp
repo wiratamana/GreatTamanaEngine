@@ -6,6 +6,7 @@
 #include "Core/GraphicsHandles.h"
 #include "Core/PixelFormat.h"
 #include "Features/Gtao/GtaoTypes.h"
+#include "Features/Ssgi/SsgiTypes.h"
 #include "Features/Shadow/ShadowTypes.h"
 #include "Features/VolumetricLight/VolumetricLightTypes.h"
 #include "Game/Lighting/SunLightModulation.h"

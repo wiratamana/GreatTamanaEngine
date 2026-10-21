@@ -15,7 +15,7 @@ layout(push_constant) uniform PushConstants {
     uvec4 divisorDebug;         // x divisor, y debug mode (0 off, 1 AO only).
 } pc;
 
-const float kSkyDepth = 0.999999;
+#include "ScreenSpaceCommon.glsl"
 
 // Depth-aware bilinear upsample. AO texel i sits at depth pixel i * divisor.
 float UpsampleAo(ivec2 q, float viewZ)
@@ -47,7 +47,7 @@ void main()
     ivec2 depthSize = textureSize(sceneDepth, 0);
     ivec2 q = clamp(ivec2(inUv * vec2(depthSize)), ivec2(0), depthSize - ivec2(1));
     float depth = texelFetch(sceneDepth, q, 0).r;
-    if (depth >= kSkyDepth) {
+    if (depth >= kEmptyDepth) {
         outColor = vec4(0.0);
         return;
     }

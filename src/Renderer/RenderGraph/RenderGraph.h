@@ -221,7 +221,7 @@ private:
 
     GpuTimingSample ResolveAndConvertTiming(const RenderGraphTimestampPool::RawTicks& raw) const;
 
-    static constexpr std::uint32_t kSynchronousTimingSlotBudget = 16;
+    static constexpr std::uint32_t kSynchronousTimingSlotBudget = 64;
     static constexpr std::uint32_t kPipelinedTimingSlotBudget = 8;
 
     RenderGraphResourcePool m_resourcePool;

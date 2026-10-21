@@ -98,10 +98,10 @@ by the mesh preview.
 Per view (Game and Scene), the frame is:
 
 1. Scene draw into the view target (RGBA16F), cleared with the linear `kSceneClearColor`.
-2. PostOpaque features (shadow mask, GTAO occlusion, volumetric volume, atmosphere LUTs).
-3. PostComposite chain in priority order, all in linear HDR: `Gtao.Composite` (-1500), `AtmosphereComposite` (-1000),
-   `Shadow.Composite` (-500, debug views only while shadows are applied in materials), `VolumetricLight.Composite` (-250),
-   `ToneMapping` (+1000, last).
+2. PostOpaque features (shadow mask, GTAO occlusion, SSGI trace, volumetric volume, atmosphere LUTs).
+3. PostComposite chain in priority order, all in linear HDR: `Ssgi.Composite` (-1600), `Gtao.Composite` (-1500),
+   `AtmosphereComposite` (-1000), `Shadow.Composite` (-500, debug views only while shadows are applied in materials),
+   `VolumetricLight.Composite` (-250), `ToneMapping` (+1000, last).
 4. `ToneMapping` is the display transform: exposure, saturation, curve (Clamp, ACES, PBR Neutral), sRGB encode and dither.
    After the chain the view target holds display values in 0..1. The Editor panel, `/get_game_view` and the swapchain blit
    copy it unchanged. With ToneMapping off, the view shows raw linear color.

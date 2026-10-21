@@ -489,6 +489,8 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/SceneVerbs.cpp
     src/Core/FeatureKit/Texture.h
     src/Core/FeatureKit/VerbSupport.h
+    src/Core/FeatureKit/ScreenSpaceView.h
+    src/Core/FeatureKit/ScreenSpaceView.cpp
     src/Core/FeatureKit/View.h
     # editor-core-separation-6 campaign, PHASE4
     # (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the third

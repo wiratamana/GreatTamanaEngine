@@ -1021,7 +1021,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     }
 
     // Build the debug snapshot for the editor frame inspector.
-    const bool timingSlotBudgetExhausted = timingSlots.AssignedCount() >= timingSlots.SlotBudget();
+    const bool timingSlotBudgetExhausted = timingSlots.EverOverflowed();
 
     std::function<bool(std::size_t, PassDebugMetadata&)> metadataLookup;
     if (m_debugMetadataProvider != nullptr) {
