@@ -27,15 +27,15 @@ the shaders mirror it.
 |---|---|---|
 | `Ssgi.Trace` (group `Ssgi.Prepare.Dispatch`, `Ssgi.Trace.Dispatch`, `Ssgi.Resolve.Dispatch`) | PostOpaque, priority 55 | Prepare, trace, resolve |
 | `Ssgi.Composite` (`Ssgi.Composite.Draw`) | PostComposite, priority -1600, `ScreenSpaceMask` | Add and debug views |
-| `Ssgi.FrameStamp` | PreOpaque, priority 45, always on | Frame clock for the snapshot age |
+| `Ssgi.FrameStamp` | PreOpaque, priority 35, always on | Frame clock for the snapshot age |
 
 Textures per view (`<Name>.GameView`, `<Name>.SceneView`): `Ssgi.Color`, `Ssgi.Normal`, `Ssgi.Raw`, `Ssgi.History0`,
 `Ssgi.History1`, all RGBA16F at GI size. `Ssgi.Color` holds radiance in `rgb` and view depth in `a` (0 = no surface).
 Channel `Result` carries the texture shown, the normals, the divisor and the camera basis to the composite pass.
 
 The composite is first in the PostComposite chain, so Gtao and the distance attenuation act on the lit image.
-Every compositor entry costs two full-size RGBA16F targets per view and one blend pass (`Ssgi.Composite_Game_Blend`,
-`Ssgi.Composite_Scene_Blend`).
+Every compositor entry costs two full-size RGBA16F targets per view and one blend pass. The compositor names that pass
+`ProjectFeatureSlot<N>_Game_Blend` or `ProjectFeatureSlot<N>_Scene_Blend`; it carries no feature name.
 
 ## Toggle behaviour
 

@@ -9,7 +9,7 @@ namespace gte {
 
 namespace {
 
-constexpr std::int32_t kFrameStampPriority = 45;
+constexpr std::int32_t kFrameStampPriority = 35;
 constexpr std::int32_t kTracePriority = 55;
 constexpr std::int32_t kCompositePriority = -1600;
 
