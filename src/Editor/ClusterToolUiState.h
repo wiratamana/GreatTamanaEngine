@@ -25,6 +25,7 @@ struct ClusterToolUiState {
     int maxTriangles = 124;
     float coneWeight = 0.5f;
     ClusterEligibilityCache eligibility;
+    bool startRefusedBusy = false; // The last "Build Clusters" click found another build running.
     bool lastNormalsSucceeded = false;
     std::string lastNormalsError;
 };

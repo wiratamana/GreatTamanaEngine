@@ -1019,7 +1019,11 @@ void BuildClusterToolSection(EditorContext& ctx, const std::string& absolutePath
     const bool busy = runner != nullptr && runner->Busy();
     ImGui::BeginDisabled(unavailable || busy);
     if (ImGui::Button("Build Clusters") && runner != nullptr) {
-        runner->Start(path, MakeClusterOptions(ui), 0);
+        ui.startRefusedBusy =
+            runner->Start(path, MakeClusterOptions(ui), 0) == MeshClusterBuildRunner::StartResult::Busy;
+    }
+    if (runner == nullptr || !runner->Busy()) {
+        ui.startRefusedBusy = false;
     }
     ImGui::EndDisabled();
     if ((unavailable || busy) && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -1029,6 +1033,8 @@ void BuildClusterToolSection(EditorContext& ctx, const std::string& absolutePath
 
     if (runner != nullptr && runner->IsBuildingPath(path)) {
         ImGui::TextDisabled("Building clusters...");
+    } else if (ui.startRefusedBusy) {
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "Busy: another cluster build is running.");
     } else if (runner != nullptr && runner->LastFinished().has_value()
         && WriterRegistryKey(runner->LastFinished()->path) == WriterRegistryKey(path)) {
         const MeshClusterBuildOutcome& outcome = runner->LastFinished()->outcome;

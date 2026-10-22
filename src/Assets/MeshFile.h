@@ -10,8 +10,8 @@
 
 namespace gte {
 
-// Mesh payload of a *.gta mesh asset: little-endian, one contiguous block per array.
-// Byte layout: docs/conventions/gpu-driven-clusters.md. Nothing may follow the last block.
+// Mesh payload of a *.gta mesh asset, little-endian: magic, counts, positions, normals, uvs, indices,
+// then an optional tangent tail and an optional "GCL1" cluster tail. Nothing may follow the last block.
 inline constexpr char kMeshFileMagic[8] = { 'G', 'T', 'E', 'M', 'E', 'S', 'H', '1' };
 inline constexpr char kMeshClusterTailMagic[4] = { 'G', 'C', 'L', '1' };
 
