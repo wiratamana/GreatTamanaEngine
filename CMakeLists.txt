@@ -1768,6 +1768,7 @@ gte_add_shader(GreatTamanaEditor src/Shaders/FrustumCull.comp)
 
 # Cluster cull compute and the cluster draw vertex/fragment shaders (Mesh.frag is the lit fragment shader).
 gte_add_shader(GreatTamanaEditor src/Shaders/ClusterCull.comp)
+gte_add_shader(GreatTamanaEditor src/Shaders/ClusterCullStats.comp)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshCluster.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.frag)

@@ -42,4 +42,18 @@ ClusterSlotAssignment AssignClusterPartSlots(std::span<const ClusterPartSize> pa
     return result;
 }
 
+ClusterVisibleCount SumClusterCounts(std::span<const ClusterCountSample> samples) noexcept
+{
+    ClusterVisibleCount total;
+    for (const ClusterCountSample& sample : samples) {
+        if (!sample.valid) {
+            continue;
+        }
+        total.value += sample.value;
+        total.frame = total.valid ? std::min(total.frame, sample.frame) : sample.frame;
+        total.valid = true;
+    }
+    return total;
+}
+
 } // namespace gte::fx

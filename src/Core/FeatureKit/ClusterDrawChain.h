@@ -43,6 +43,10 @@ public:
     // Colors each cluster by its id (debug view).
     ClusterDrawChain& IdTint(bool enabled);
 
+    // Reads the survivor count back (colour target, first lane only). See ClusterDrawState::VisibleClusters().
+    // A refused stats pass never takes a claim away.
+    ClusterDrawChain& Stats(bool enabled);
+
     // Resolves and reserves everything and declares nothing. Idempotent.
     ClusterPlan Plan();
 

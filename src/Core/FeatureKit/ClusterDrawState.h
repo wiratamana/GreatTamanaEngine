@@ -100,6 +100,15 @@ public:
 
     // The cull compute shader shared by every chain of this state.
     ComputeShader& CullShader() noexcept { return *m_cullShader; }
+    // Copies the survivor count into the readback of a part slot.
+    ComputeShader& StatsShader() noexcept { return *m_statsShader; }
+
+    // Interned names of the clear and copy passes around the stats dispatch of a chain.
+    const char* StatsClearName(std::uint32_t lane, std::uint32_t slot) const noexcept;
+    const char* StatsCopyName(std::uint32_t lane, std::uint32_t slot) const noexcept;
+
+    // Survivor count of the frame's view, summed over part slots. Two frames old.
+    ClusterVisibleCount VisibleClusters(const Frame& frame) const;
 
     // The first lane of a frame fixes the candidate span of its scope; a later lane with another span is refused.
     bool AcceptCandidateSpan(const Frame& frame, std::uint32_t lane, const void* data, std::size_t count) noexcept;
@@ -152,6 +161,9 @@ private:
     std::vector<const char*> m_paramsNames; // [scope][lane][slot]
     std::vector<const char*> m_tableNames;  // [scope][lane][slot]
     std::unique_ptr<ComputeShader> m_cullShader;
+    std::unique_ptr<ComputeShader> m_statsShader;
+    std::vector<const char*> m_statsClearNames; // [lane][slot]
+    std::vector<const char*> m_statsCopyNames;  // [lane][slot]
     struct SpanKey {
         std::uint64_t serial = 0;
         const void* data = nullptr;

@@ -63,6 +63,42 @@ ClusterChainProgress RecordClusterChain(Declarer& declarer)
     return ClusterChainProgress::Draw;
 }
 
+// Stats run only for a colour target on the first lane, when the caller asked for them.
+constexpr bool ClusterStatsWanted(bool requested, bool depthOnly, std::uint32_t lane) noexcept
+{
+    return requested && !depthOnly && lane == 0;
+}
+
+// Declares clear, dispatch and host copy together or not at all. `declarer` provides bool StatsClear(),
+// StatsCompute() and StatsCopy(). A refusal after the clear leaves only a harmless clear behind.
+template <typename Declarer>
+bool RecordClusterStats(Declarer& declarer)
+{
+    return declarer.StatsClear() && declarer.StatsCompute() && declarer.StatsCopy();
+}
+
+// Chain plus optional stats. The stats are declared only after the draw, and their refusal never changes
+// the returned progress, so it cannot revoke a claim.
+template <typename Declarer>
+ClusterChainProgress RecordClusterPart(Declarer& declarer, bool statsWanted)
+{
+    const ClusterChainProgress progress = RecordClusterChain(declarer);
+    if (progress == ClusterChainProgress::Draw && statsWanted) {
+        RecordClusterStats(declarer);
+    }
+    return progress;
+}
+
+// One readback cell of a part slot.
+struct ClusterCountSample {
+    bool valid = false;
+    std::uint32_t value = 0;
+    std::uint64_t frame = 0;
+};
+
+// Sums the valid cells. Invalid when none is valid; `frame` is the oldest frame used.
+ClusterVisibleCount SumClusterCounts(std::span<const ClusterCountSample> samples) noexcept;
+
 struct ClusterRecordOutcome {
     std::vector<ClusterChainProgress> progress; // One entry per part.
     std::vector<Entity> claimed;                // Entities of the parts whose chain was fully declared.

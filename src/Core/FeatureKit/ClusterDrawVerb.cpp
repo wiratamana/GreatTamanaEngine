@@ -62,6 +62,7 @@ struct ClusterDrawChain::Impl {
     Texture target;
     bool depthOnly = false;
     bool idTint = false;
+    bool stats = false;
 
     // Filled by Plan().
     bool planned = false;
@@ -132,6 +133,12 @@ ClusterDrawChain& ClusterDrawChain::DepthOnlyTarget(Texture depth)
 ClusterDrawChain& ClusterDrawChain::IdTint(bool enabled)
 {
     m_impl->idTint = enabled;
+    return *this;
+}
+
+ClusterDrawChain& ClusterDrawChain::Stats(bool enabled)
+{
+    m_impl->stats = enabled;
     return *this;
 }
 
@@ -340,6 +347,7 @@ ClusterChainProgress DeclarePart(ClusterDrawChain::Impl& s, const PlannedPart& p
         detail::FrameContext& context;
         GpuBufferRef instances, visible, commands, count, clusters;
         rg::StaticName resetName, cullName, drawName;
+        GpuReadback<std::uint32_t>* readback = nullptr;
 
         bool Reset() { return s.frame->FillBuffer(resetName, count, 0); }
 
@@ -403,12 +411,47 @@ ClusterChainProgress DeclarePart(ClusterDrawChain::Impl& s, const PlannedPart& p
                 rg::DefaultDrawKind(rg::DeclarativePassType::IndirectDraw), context.event);
             return true;
         }
+
+        // Stats are optional and declared as one unit: clear, dispatch, host copy.
+        bool StatsClear()
+        {
+            ClusterDrawState& state = *s.state;
+            const std::uint32_t lane = s.lane;
+            readback = state.Stats(part.slot);
+            if (readback == nullptr || !s.frame->ShaderReady(state.StatsShader())
+                || !s.frame->PassEnabled(PassNameOf(state, lane, part.slot, ClusterPassKind::Stats))
+                || !s.frame->PassEnabled(rg::StaticName::Interned(state.StatsClearName(lane, part.slot)))
+                || !s.frame->PassEnabled(rg::StaticName::Interned(state.StatsCopyName(lane, part.slot)))) {
+                return false;
+            }
+            return s.frame->ClearReadback(rg::StaticName::Interned(state.StatsClearName(lane, part.slot)), *readback, 0u);
+        }
+
+        bool StatsCompute()
+        {
+            ClusterDrawState& state = *s.state;
+            const bool dispatched =
+                s.frame->Compute(state.StatsShader(), PassNameOf(state, s.lane, part.slot, ClusterPassKind::Stats))
+                    .BindBuffer("count", count)
+                    .BindOutput("outCount", *readback)
+                    .Dispatch(Extent2D{ 1, 1 });
+            if (!dispatched) {
+                s.frame->ReportOnce("ClusterDraw(): the stats dispatch was refused; the visible count is not updated");
+            }
+            return dispatched;
+        }
+
+        bool StatsCopy()
+        {
+            ClusterDrawState& state = *s.state;
+            return s.frame->CopyReadbackToHost(rg::StaticName::Interned(state.StatsCopyName(s.lane, part.slot)), *readback);
+        }
     };
 
     Declarer declarer{ s, part, context, instances, visible, commands, count, clusters,
         PassNameOf(state, lane, slot, ClusterPassKind::Reset), PassNameOf(state, lane, slot, ClusterPassKind::Cull),
         PassNameOf(state, lane, slot, ClusterPassKind::Draw) };
-    const ClusterChainProgress progress = RecordClusterChain(declarer);
+    const ClusterChainProgress progress = RecordClusterPart(declarer, ClusterStatsWanted(s.stats, s.depthOnly, lane));
     if (progress != ClusterChainProgress::Draw) {
         frame.ReportOnce(std::string("Pass '") + declarer.drawName.value
             + "': the chain stopped before the draw; the CPU draw is used for this mesh");

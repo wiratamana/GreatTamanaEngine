@@ -1,6 +1,7 @@
 #include "ClusterDrawState.h"
 
 #include "ClusterNamePool.h"
+#include "ClusterPartPlanning.h"
 #include "FrameContext.h"
 #include "../Core.h"
 #include "../Logging.h"
@@ -108,6 +109,27 @@ ClusterDrawState::ClusterDrawState(std::string_view baseName, ClusterDrawShape s
         }
     }
     m_cullShader = std::make_unique<ComputeShader>("ClusterCull");
+    m_statsShader = std::make_unique<ComputeShader>("ClusterCullStats");
+    m_statsClearNames.reserve(chains);
+    m_statsCopyNames.reserve(chains);
+    for (std::uint32_t lane = 0; lane < m_shape.lanes; ++lane) {
+        for (std::uint32_t slot = 0; slot < m_shape.partSlots; ++slot) {
+            const std::string stats = ClusterPassNameText(m_base, lane, slot, ClusterPassKind::Stats);
+            const char* clear = InternClusterName(stats + ".Clear");
+            const char* copy = InternClusterName(stats + ".Copy");
+            if (clear == nullptr || copy == nullptr) {
+                m_error = "ClusterDrawState '" + m_base + "': the pass name table is full";
+                m_passNames.clear();
+                m_paramsNames.clear();
+                m_tableNames.clear();
+                m_statsClearNames.clear();
+                m_statsCopyNames.clear();
+                return;
+            }
+            m_statsClearNames.push_back(clear);
+            m_statsCopyNames.push_back(copy);
+        }
+    }
     m_instanceUploadSerial.assign(rg::kViewScopeCount * m_shape.partSlots, 0);
 
     constexpr BufferUse kInstanceUse = BufferUse::Storage | BufferUse::HostWrite;
@@ -199,6 +221,31 @@ const char* ClusterDrawState::ParamsName(rg::ViewScope scope, std::uint32_t lane
 const char* ClusterDrawState::TableName(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) const noexcept
 {
     return InRange(lane, slot) ? m_tableNames[ChainIndex(rg::ViewScopeIndex(scope), lane, slot)] : nullptr;
+}
+
+const char* ClusterDrawState::StatsClearName(std::uint32_t lane, std::uint32_t slot) const noexcept
+{
+    return InRange(lane, slot) ? m_statsClearNames[ChainIndex(0, lane, slot)] : nullptr;
+}
+
+const char* ClusterDrawState::StatsCopyName(std::uint32_t lane, std::uint32_t slot) const noexcept
+{
+    return InRange(lane, slot) ? m_statsCopyNames[ChainIndex(0, lane, slot)] : nullptr;
+}
+
+ClusterVisibleCount ClusterDrawState::VisibleClusters(const Frame& frame) const
+{
+    if (!Valid()) {
+        return ClusterVisibleCount{};
+    }
+    std::vector<ClusterCountSample> samples;
+    samples.reserve(m_stats.size());
+    for (const auto& readback : m_stats) {
+        if (const auto latest = readback->Latest(frame)) {
+            samples.push_back(ClusterCountSample{ true, latest->value, latest->frame });
+        }
+    }
+    return SumClusterCounts(samples);
 }
 
 bool ClusterDrawState::AcceptCandidateSpan(

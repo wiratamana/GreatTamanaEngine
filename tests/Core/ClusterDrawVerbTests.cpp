@@ -190,5 +190,93 @@ TEST(ClusterPartPlanningTest, APartThatIsNotReadyIsNeverDeclared)
     EXPECT_TRUE(outcome.claimed.empty());
 }
 
+// A declarer that also has the stats steps; each step can be refused.
+struct StatsFakeDeclarer : FakeDeclarer {
+    enum class RefuseStats { Nothing, Clear, Compute, Copy };
+    RefuseStats refuseStats = RefuseStats::Nothing;
+    int statsCalls = 0;
+
+    bool StatsClear()
+    {
+        ++statsCalls;
+        return refuseStats != RefuseStats::Clear;
+    }
+    bool StatsCompute()
+    {
+        ++statsCalls;
+        return refuseStats != RefuseStats::Compute;
+    }
+    bool StatsCopy()
+    {
+        ++statsCalls;
+        return refuseStats != RefuseStats::Copy;
+    }
+};
+
+TEST(ClusterPartPlanningTest, AStatsRefusalDoesNotRemoveTheClaim)
+{
+    for (const StatsFakeDeclarer::RefuseStats refuse :
+        { StatsFakeDeclarer::RefuseStats::Clear, StatsFakeDeclarer::RefuseStats::Compute,
+            StatsFakeDeclarer::RefuseStats::Copy }) {
+        const std::array<ClusterPartPlan, 2> parts = { ClusterPartPlan{ kPartA }, ClusterPartPlan{ kPartB } };
+        const ClusterRecordOutcome outcome = RecordClusterParts(parts, GameContext(), [&](std::size_t) {
+            StatsFakeDeclarer declarer;
+            declarer.refuseStats = refuse;
+            return RecordClusterPart(declarer, true);
+        });
+        EXPECT_EQ(outcome.claimed.size(), 3u);
+        EXPECT_EQ(outcome.progress[0], ClusterChainProgress::Draw);
+    }
+}
+
+TEST(ClusterPartPlanningTest, StatsRunOnlyAfterADeclaredDrawAndOnlyWhenWanted)
+{
+    StatsFakeDeclarer wanted;
+    EXPECT_EQ(RecordClusterPart(wanted, true), ClusterChainProgress::Draw);
+    EXPECT_EQ(wanted.statsCalls, 3);
+
+    StatsFakeDeclarer notWanted;
+    EXPECT_EQ(RecordClusterPart(notWanted, false), ClusterChainProgress::Draw);
+    EXPECT_EQ(notWanted.statsCalls, 0);
+
+    StatsFakeDeclarer drawRefused;
+    drawRefused.refuse = FakeDeclarer::Refuse::Draw;
+    EXPECT_EQ(RecordClusterPart(drawRefused, true), ClusterChainProgress::Cull);
+    EXPECT_EQ(drawRefused.statsCalls, 0);
+}
+
+TEST(ClusterPartPlanningTest, StatsStopAtTheFirstRefusedStep)
+{
+    StatsFakeDeclarer declarer;
+    declarer.refuseStats = StatsFakeDeclarer::RefuseStats::Clear;
+    EXPECT_FALSE(RecordClusterStats(declarer));
+    EXPECT_EQ(declarer.statsCalls, 1);
+}
+
+TEST(ClusterPartPlanningTest, StatsAreNeverWantedForADepthOnlyTargetOrALaterLane)
+{
+    EXPECT_TRUE(ClusterStatsWanted(true, false, 0));
+    EXPECT_FALSE(ClusterStatsWanted(true, true, 0));
+    EXPECT_FALSE(ClusterStatsWanted(true, false, 1));
+    EXPECT_FALSE(ClusterStatsWanted(false, false, 0));
+}
+
+TEST(ClusterPartPlanningTest, VisibleCountsSumTheValidCellsAndKeepTheOldestFrame)
+{
+    const std::array<ClusterCountSample, 3> samples = { ClusterCountSample{ true, 10, 7 },
+        ClusterCountSample{ false, 999, 1 }, ClusterCountSample{ true, 5, 6 } };
+    const ClusterVisibleCount total = SumClusterCounts(samples);
+    EXPECT_TRUE(total.valid);
+    EXPECT_EQ(total.value, 15u);
+    EXPECT_EQ(total.frame, 6u);
+}
+
+TEST(ClusterPartPlanningTest, VisibleCountsAreInvalidWithoutAValidCell)
+{
+    const std::array<ClusterCountSample, 2> none = { ClusterCountSample{}, ClusterCountSample{} };
+    EXPECT_FALSE(SumClusterCounts(none).valid);
+    EXPECT_FALSE(SumClusterCounts({}).valid);
+}
+
 } // namespace
 } // namespace gte::fx

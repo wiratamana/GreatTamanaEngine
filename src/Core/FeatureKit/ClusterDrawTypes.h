@@ -71,4 +71,11 @@ struct ClusterStats {
     std::uint32_t parts = 0;
 };
 
+// Survivor count read back from the GPU. `frame` is the oldest frame among the cells that were summed.
+struct ClusterVisibleCount {
+    std::uint32_t value = 0;
+    std::uint64_t frame = 0;
+    bool valid = false;
+};
+
 } // namespace gte::fx
