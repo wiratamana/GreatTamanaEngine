@@ -1106,6 +1106,117 @@ std::string BuildSpawnGpuDrivenTestBatchResponseJson(
     body["instance_count"] = instanceCount;
     return body.dump();
 }
+
+namespace {
+
+// Reads an optional numeric field. Missing or null leaves `out` empty. A non-number sets `error`.
+bool ReadOptionalNumber(const nlohmann::json& body, const char* field, std::optional<double>& out, std::string& error)
+{
+    out.reset();
+    const auto it = body.find(field);
+    if (it == body.end() || it->is_null()) {
+        return true;
+    }
+    if (!it->is_number()) {
+        error = std::string(field) + " must be a number";
+        return false;
+    }
+    out = it->get<double>();
+    return true;
+}
+
+} // namespace
+
+ParsedBuildClustersRequest ParseBuildClustersRequest(const std::string& jsonBody)
+{
+    ParsedBuildClustersRequest result;
+
+    const nlohmann::json parsed = ParseJsonNoThrow(jsonBody);
+    if (parsed.is_discarded()) {
+        result.errorMessage = "malformed JSON body";
+        return result;
+    }
+    if (!parsed.is_object()) {
+        result.errorMessage = "request body must be a JSON object";
+        return result;
+    }
+
+    if (!parsed.contains("gta_path") || !parsed["gta_path"].is_string()
+        || parsed["gta_path"].get<std::string>().empty()) {
+        result.errorMessage = "missing or invalid required field: gta_path";
+        return result;
+    }
+    result.gtaPath = parsed["gta_path"].get<std::string>();
+
+    if (parsed.contains("weld") && !parsed["weld"].is_null()) {
+        if (!parsed["weld"].is_string()) {
+            result.errorMessage = "weld must be a string";
+            return result;
+        }
+        const std::string weld = parsed["weld"].get<std::string>();
+        if (weld != "exact" && weld != "position_only") {
+            result.errorMessage = "weld must be \"exact\" or \"position_only\"";
+            return result;
+        }
+        result.weld = weld;
+    }
+
+    std::optional<double> number;
+    if (!ReadOptionalNumber(parsed, "max_vertices", number, result.errorMessage)) {
+        return result;
+    }
+    if (number.has_value()) {
+        const std::optional<std::uint32_t> value = ExactUint32InRange(*number, 3u, 255u);
+        if (!value.has_value()) {
+            result.errorMessage = "max_vertices must be an integer from 3 to 255";
+            return result;
+        }
+        result.maxVertices = *value;
+    }
+
+    if (!ReadOptionalNumber(parsed, "max_triangles", number, result.errorMessage)) {
+        return result;
+    }
+    if (number.has_value()) {
+        const std::optional<std::uint32_t> value = ExactUint32InRange(*number, 4u, 512u);
+        if (!value.has_value() || (*value % 4u) != 0u) {
+            result.errorMessage = "max_triangles must be a multiple of 4 from 4 to 512";
+            return result;
+        }
+        result.maxTriangles = *value;
+    }
+
+    if (!ReadOptionalNumber(parsed, "cone_weight", number, result.errorMessage)) {
+        return result;
+    }
+    if (number.has_value()) {
+        if (!std::isfinite(*number) || *number < 0.0 || *number > 1.0) {
+            result.errorMessage = "cone_weight must be a number from 0 to 1";
+            return result;
+        }
+        result.coneWeight = static_cast<float>(*number);
+    }
+
+    result.valid = true;
+    return result;
+}
+
+std::string BuildClustersResponseJson(const ClusterReportResponseView& view)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["weld"] = view.weld;
+    body["vertex_count_before"] = view.vertexCountBefore;
+    body["vertex_count_after"] = view.vertexCountAfter;
+    body["triangle_count"] = view.triangleCount;
+    body["cluster_count"] = view.clusterCount;
+    body["avg_triangles_per_cluster"] = view.avgTrianglesPerCluster;
+    body["avg_vertices_per_cluster"] = view.avgVerticesPerCluster;
+    body["poor_fill"] = view.poorFill;
+    body["milliseconds"] = view.milliseconds;
+    return body.dump();
+}
+
 // --- editor-core-separation-8 campaign, PHASE5
 // (PHASE5_CROSS_THREAD_BRIDGE_AND_HTTP_ENDPOINTS.md) - see NetworkRoutes.h's
 // own doc comments above each declaration for the exact, locked validation/

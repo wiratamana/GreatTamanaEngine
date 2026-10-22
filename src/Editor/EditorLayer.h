@@ -41,6 +41,7 @@ class IEngineFeatureModule;
 class IProjectLifecycleCapability;
 class IAssetScaffoldingCapability;
 class IHotReloadDebugCapability;
+class MeshClusterBuildRunner;
 
 // Result of ActivateTab(). Kept separate from Application's own outcome type so this header
 // never depends on src/Application/; Application::Run() converts between them.
@@ -261,6 +262,14 @@ public:
     // Sets the Render Graph panel's regime: true = "Present", false = "Offscreen (Game/Scene View)".
     // Returns true if the panel was open when applied. Always false for NullEditorLayer.
     virtual bool SetRenderGraphDisplayedRegime(bool present) = 0;
+
+    // The editor's single cluster build runner, polled once per frame by EditorHost.
+    // nullptr for NullEditorLayer.
+    virtual MeshClusterBuildRunner* ClusterBuildRunner() = 0;
+
+    // Re-reads the tracked record (file size, header) of one *.gta asset in the Project database.
+    // A no-op when the path is not tracked or the build has no Project panel.
+    virtual void RefreshProjectAssetRecord(const std::string& absoluteGtaPath) = 0;
 };
 
 // Creates the real ImGui-backed editor layer (defined in src/Editor/ImGuiEditorLayer.cpp).

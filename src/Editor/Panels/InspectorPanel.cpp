@@ -22,6 +22,7 @@
 #include "../AssetPreviewTexture.h"
 #include "../BoneViewerWindow.h"
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the asset size field below.
+#include "../MeshClusterBuildRunner.h"
 #include "../ModelRigCache.h" // ModelRigCache::GetOrLoad() - shared bones/rigid-bodies/joints cache, Model Part section.
 #include "../../Encoding/Utf8Path.h"
 #include "../../Assets/AssetTypes.h" // AssetType, AssetFlags, Guid
@@ -982,11 +983,15 @@ void BuildGtaMeshMetadata(
 // intentional and correct: only one of the two branches ever actually
 // executes for a given selection/frame, so there is never any ambiguity
 // about which one the button's own status line refers to.
-void BuildRecomputeNormalsFromGeometryButton(const std::string& absolutePath, MeshInstantiationSystem& meshInstantiationSystem)
+void BuildRecomputeNormalsFromGeometryButton(const std::string& absolutePath, MeshInstantiationSystem& meshInstantiationSystem,
+    const MeshClusterBuildRunner* clusterRunner)
 {
     static bool s_lastNormalRecomputeSucceeded = false;
     static std::string s_lastNormalRecomputeError;
 
+    // The file is being rewritten by a cluster build: a second writer would lose one of the two results.
+    const bool clusterBuildRunning = clusterRunner != nullptr && clusterRunner->IsBuildingPath(PathFromUtf8(absolutePath));
+    ImGui::BeginDisabled(clusterBuildRunning);
     if (ImGui::Button("Recompute Normals from Geometry")) {
         std::string errorMessage;
         s_lastNormalRecomputeSucceeded = RecomputeAndSaveMeshNormalsToGtaFile(absolutePath, &errorMessage);
@@ -995,6 +1000,7 @@ void BuildRecomputeNormalsFromGeometryButton(const std::string& absolutePath, Me
             meshInstantiationSystem.InvalidateCachedMeshAsset(absolutePath);
         }
     }
+    ImGui::EndDisabled();
     if (!s_lastNormalRecomputeError.empty() || s_lastNormalRecomputeSucceeded) {
         if (s_lastNormalRecomputeSucceeded) {
             ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Recomputed normals and saved to asset.");
@@ -1359,7 +1365,7 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
         } else if (isGtaMesh && gtaHeader.has_value()) {
             BuildGtaMeshMetadata(*gtaHeader, metadata.sizeBytes, meshPreview);
             ImGui::Separator();
-            BuildRecomputeNormalsFromGeometryButton(absolutePath, meshInstantiationSystem);
+            BuildRecomputeNormalsFromGeometryButton(absolutePath, meshInstantiationSystem, ctx.clusterBuildRunner);
         }
         BuildPlainFileMetadata(metadata, absolutePath);
         ImGui::EndChild();
@@ -1408,7 +1414,7 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
     } else if (isGtaMesh && gtaHeader.has_value()) {
         BuildGtaMeshMetadata(*gtaHeader, metadata.sizeBytes, std::nullopt);
         ImGui::Separator();
-        BuildRecomputeNormalsFromGeometryButton(absolutePath, meshInstantiationSystem);
+        BuildRecomputeNormalsFromGeometryButton(absolutePath, meshInstantiationSystem, ctx.clusterBuildRunner);
     } else if (isGtaAnimation && gtaHeader.has_value()) {
         BuildGtaAnimationMetadata(*gtaHeader, metadata.sizeBytes, motionData);
         ImGui::Separator();

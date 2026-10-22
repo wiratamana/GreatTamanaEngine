@@ -22,6 +22,11 @@
 #include "../Application/EngineCommandDispatch.h"
 #include "../Application/MemorySnapshotBuilder.h"
 #include "../Assets/AtomicFile.h" // SweepStaleTempFiles().
+#include "../Assets/AssetTypes.h"
+#include "../Assets/GtaFile.h"
+#include "../Assets/ImportStamp.h" // IsPathStrictlyInsideDirectory().
+#include "../Encoding/Utf8Path.h"
+#include "MeshClusterBuildRunner.h"
 #include "../Encoding/CapturedPixelConversion.h" // gte::Encoding::IsBgraFormat() - the one canonical copy.
 #include "../Encoding/DepthVisualization.h"
 #include "../Encoding/HdrColorVisualization.h"
@@ -38,10 +43,13 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cassert>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <optional>
 #include <stdexcept>
 
 namespace gte {
@@ -75,6 +83,72 @@ void FulfillOrLogDrop(Bridge& bridge, std::uint64_t id, Result&& result, const c
     if (!bridge.FulfillCommand(id, std::forward<Result>(result))) {
         GTE_LOG_WARNING("EditorHost", std::string("Dropped a late result for a timed-out command (kind=") + kind + ")");
     }
+}
+
+BuildMeshClustersOutcome MakeClusterRefusal(BuildMeshClustersStatus status, std::string message)
+{
+    BuildMeshClustersOutcome outcome;
+    outcome.status = status;
+    outcome.message = std::move(message);
+    return outcome;
+}
+
+BuildMeshClustersOutcome ToBridgeOutcome(const MeshClusterFinishedBuild& finished)
+{
+    const MeshClusterReport& report = finished.outcome.report;
+    BuildMeshClustersOutcome outcome;
+    outcome.success = finished.outcome.success;
+    outcome.status = outcome.success ? BuildMeshClustersStatus::Ok : BuildMeshClustersStatus::BadRequest;
+    outcome.message = finished.outcome.message;
+    outcome.weld = report.weld == ClusterWeldMode::PositionOnly ? "position_only" : "exact";
+    outcome.vertexCountBefore = report.vertexCountBefore;
+    outcome.vertexCountAfter = report.vertexCountAfter;
+    outcome.triangleCount = report.triangleCount;
+    outcome.clusterCount = report.clusterCount;
+    outcome.avgTrianglesPerCluster = report.avgTrianglesPerCluster;
+    outcome.avgVerticesPerCluster = report.avgVerticesPerCluster;
+    outcome.poorFill = report.poorFill;
+    outcome.milliseconds = report.milliseconds;
+    return outcome;
+}
+
+// Checks a requested path: a mesh *.gta strictly inside the project root. Returns the reason when refused.
+std::optional<std::string> ValidateClusterBuildPath(const std::string& gtaPathUtf8, std::filesystem::path& outPath)
+{
+    outPath = PathFromUtf8(gtaPathUtf8);
+    std::string extension = PathToUtf8(outPath.extension());
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (extension != ".gta") {
+        return "gta_path must end in .gta";
+    }
+    if (!IsPathStrictlyInsideDirectory(ResolveProjectRootDirectory(), outPath)) {
+        return "gta_path must be inside the project root";
+    }
+    const std::optional<GtaHeader> header = ReadGtaHeader(outPath);
+    if (!header.has_value() || header->Type() != AssetType::Mesh) {
+        return "gta_path is not a readable mesh asset";
+    }
+    return std::nullopt;
+}
+
+// Runs once per finished build, whichever door started it: drops the cached GPU mesh, refreshes the
+// asset record (the file size changed) and logs the report.
+void RunClusterBuildFollowUp(const MeshClusterFinishedBuild& finished, Game& game, IEditorLayer& editorLayer)
+{
+    const std::string pathUtf8 = PathToUtf8(finished.path);
+    if (!finished.outcome.success) {
+        GTE_LOG_WARNING("MeshClustering", "Cluster build failed for " + pathUtf8 + ": " + finished.outcome.message);
+        return;
+    }
+    MeshInstantiationSystem& meshes = game.GetMeshInstantiationSystem();
+    meshes.InvalidateCachedMeshAsset(pathUtf8);
+    const std::string normalized = PathToUtf8(finished.path.lexically_normal().make_preferred());
+    if (normalized != pathUtf8) {
+        meshes.InvalidateCachedMeshAsset(normalized);
+    }
+    editorLayer.RefreshProjectAssetRecord(pathUtf8);
+    GTE_LOG_INFO("MeshClustering", "Cluster build finished for " + pathUtf8 + ": " + finished.outcome.message);
 }
 
 } // namespace
@@ -518,29 +592,83 @@ int EditorHost::Run()
             FulfillOrLogDrop(m_renderGraphControlCommandBridge, rgcPending->id, rgcResult, "RenderGraphControl");
         }
 
-        // Drains at most one pending /import_asset request per frame.
+        // Cluster builds: the one poll site. A finished build runs the follow-up once, then answers its caller.
+        MeshClusterBuildRunner* const clusterRunner = m_editorLayer->ClusterBuildRunner();
+        if (clusterRunner != nullptr) {
+            if (const std::optional<MeshClusterFinishedBuild> finished = clusterRunner->Poll()) {
+                RunClusterBuildFollowUp(*finished, m_game, *m_editorLayer);
+                if (finished->requestId != 0) {
+                    AssetImportCommandResult clusterResult;
+                    clusterResult.kind = AssetImportCommandKind::BuildMeshClusters;
+                    clusterResult.buildMeshClusters = ToBridgeOutcome(*finished);
+                    FulfillOrLogDrop(m_assetImportCommandBridge, finished->requestId, clusterResult, "BuildMeshClusters");
+                }
+            }
+        }
+
+        // Drains at most one pending asset command (/import_asset or /build_clusters) per frame.
         if (const auto importPending = m_assetImportCommandBridge.TryPeekPendingCommand()) {
             GTE_PROFILE_SCOPE("EditorHost::ExecuteAssetImportCommand");
             const AssetImportCommandRequest& importRequest = importPending->request;
             AssetImportCommandResult importResult;
             importResult.kind = importRequest.kind;
-            const ProjectAssetImportResult layerResult = m_editorLayer->ImportExternalAssetIntoProject(
-                importRequest.importExternalFile.sourceAbsolutePath,
-                importRequest.importExternalFile.destinationRelativeFolder);
-            ImportExternalFileOutcome& outcome = importResult.importExternalFile;
-            outcome.projectAvailable = layerResult.projectAvailable;
-            outcome.success = layerResult.success;
-            outcome.message = layerResult.message;
-            outcome.finalRelativePath = layerResult.finalRelativePath;
-            outcome.finalAbsolutePath = layerResult.finalAbsolutePath;
-            outcome.guid = layerResult.guid;
-            outcome.convertedToMeshAsset = layerResult.convertedToMeshAsset;
-            outcome.meshSourceFormat = layerResult.meshSourceFormat;
-            outcome.convertedToKtx2 = layerResult.convertedToKtx2;
-            outcome.convertedToMotionAsset = layerResult.convertedToMotionAsset;
-            outcome.meshVertexCount = layerResult.meshVertexCount;
-            outcome.meshTriangleCount = layerResult.meshTriangleCount;
-            FulfillOrLogDrop(m_assetImportCommandBridge, importPending->id, importResult, "AssetImport");
+            switch (importRequest.kind) {
+            case AssetImportCommandKind::ImportExternalFile: {
+                ImportExternalFileOutcome& outcome = importResult.importExternalFile;
+                if (clusterRunner != nullptr
+                    && clusterRunner->IsBuildingPath(PathFromUtf8(importRequest.importExternalFile.sourceAbsolutePath))) {
+                    outcome.success = false;
+                    outcome.message = "the file is being rebuilt by a cluster build";
+                    FulfillOrLogDrop(m_assetImportCommandBridge, importPending->id, importResult, "AssetImport");
+                    break;
+                }
+                const ProjectAssetImportResult layerResult = m_editorLayer->ImportExternalAssetIntoProject(
+                    importRequest.importExternalFile.sourceAbsolutePath,
+                    importRequest.importExternalFile.destinationRelativeFolder);
+                outcome.projectAvailable = layerResult.projectAvailable;
+                outcome.success = layerResult.success;
+                outcome.message = layerResult.message;
+                outcome.finalRelativePath = layerResult.finalRelativePath;
+                outcome.finalAbsolutePath = layerResult.finalAbsolutePath;
+                outcome.guid = layerResult.guid;
+                outcome.convertedToMeshAsset = layerResult.convertedToMeshAsset;
+                outcome.meshSourceFormat = layerResult.meshSourceFormat;
+                outcome.convertedToKtx2 = layerResult.convertedToKtx2;
+                outcome.convertedToMotionAsset = layerResult.convertedToMotionAsset;
+                outcome.meshVertexCount = layerResult.meshVertexCount;
+                outcome.meshTriangleCount = layerResult.meshTriangleCount;
+                FulfillOrLogDrop(m_assetImportCommandBridge, importPending->id, importResult, "AssetImport");
+                break;
+            }
+            case AssetImportCommandKind::BuildMeshClusters: {
+                // The request stays pending while its own build runs; the poll above answers it.
+                if (clusterRunner != nullptr && clusterRunner->ActiveRequestId() == importPending->id) {
+                    break;
+                }
+                BuildMeshClustersOutcome& outcome = importResult.buildMeshClusters;
+                std::filesystem::path gtaPath;
+                if (clusterRunner == nullptr) {
+                    outcome = MakeClusterRefusal(BuildMeshClustersStatus::Unavailable,
+                        "cluster build is not available in this build");
+                } else if (clusterRunner->Busy()) {
+                    outcome = MakeClusterRefusal(BuildMeshClustersStatus::Busy, "another cluster build is already running");
+                } else if (const std::optional<std::string> invalid =
+                               ValidateClusterBuildPath(importRequest.buildMeshClusters.gtaPath, gtaPath)) {
+                    outcome = MakeClusterRefusal(BuildMeshClustersStatus::BadRequest, *invalid);
+                } else {
+                    const BuildMeshClustersCommand& command = importRequest.buildMeshClusters;
+                    MeshClusterOptions options;
+                    options.weld = command.weld == "position_only" ? ClusterWeldMode::PositionOnly : ClusterWeldMode::Exact;
+                    options.maxVerticesPerCluster = command.maxVertices;
+                    options.maxTrianglesPerCluster = command.maxTriangles;
+                    options.coneWeight = command.coneWeight;
+                    clusterRunner->Start(gtaPath, options, importPending->id);
+                    break; // Answered by the poll when the build finishes.
+                }
+                FulfillOrLogDrop(m_assetImportCommandBridge, importPending->id, importResult, "BuildMeshClusters");
+                break;
+            }
+            }
         }
 
         // Drains at most one pending "Open Project" load request per frame (submitted from the network thread).

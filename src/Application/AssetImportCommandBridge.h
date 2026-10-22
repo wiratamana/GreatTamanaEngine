@@ -1,8 +1,9 @@
 #pragma once
 
-// Cross-thread bridge for a network-driven external-asset import into the
-// Editor's "Project" folder, via the same AssetDatabase instance the
-// Project panel owns. See SyncCommandBridge.h for the handoff mechanism.
+// Cross-thread bridge for asset commands served by the Editor on the main thread:
+// importing an external file into the Project folder and rebuilding a mesh's cluster table.
+// See SyncCommandBridge.h for the handoff mechanism. Plain scalars and strings only,
+// so this header stays free of any src/Assets dependency.
 
 #include "SyncCommandBridge.h"
 
@@ -13,6 +14,7 @@ namespace gte {
 
 enum class AssetImportCommandKind {
     ImportExternalFile,
+    BuildMeshClusters,
 };
 
 // Plain request payload for one ImportExternalFile command.
@@ -22,19 +24,24 @@ struct ImportExternalFileCommand {
     std::string destinationRelativeFolder;
 };
 
+// Request payload for one BuildMeshClusters command. `weld` is "exact" or "position_only".
+struct BuildMeshClustersCommand {
+    std::string gtaPath;
+    std::string weld = "exact";
+    std::uint32_t maxVertices = 64;
+    std::uint32_t maxTriangles = 124;
+    float coneWeight = 0.5f;
+};
+
 struct AssetImportCommandRequest {
     AssetImportCommandKind kind = AssetImportCommandKind::ImportExternalFile;
     ImportExternalFileCommand importExternalFile;
+    BuildMeshClustersCommand buildMeshClusters;
 };
 
-// Outcome of one ImportExternalFile command - plain scalars only, no
-// std::filesystem::path/Guid type, so this header stays free of any
-// src/Assets/ dependency.
-//
-// - projectAvailable == false: the Editor's Project panel does not exist in
-//   this build - every other field is meaningless.
-// - projectAvailable == true, success == false: the import itself failed -
-//   `message` explains why.
+// Outcome of one ImportExternalFile command.
+// - projectAvailable == false: the Editor's Project panel does not exist in this build.
+// - projectAvailable == true, success == false: the import failed, `message` says why.
 // - success == true: every field below is meaningful.
 struct ImportExternalFileOutcome {
     bool projectAvailable = true;
@@ -54,15 +61,35 @@ struct ImportExternalFileOutcome {
     std::uint64_t meshTriangleCount = 0; // meaningful only when convertedToMeshAsset
 };
 
+// Maps to the HTTP status of the route: Ok 200, BadRequest 400, Busy 503 (another build or import
+// runs), Unavailable 503 (no editor runner in this build).
+enum class BuildMeshClustersStatus : std::uint8_t { Ok, BadRequest, Busy, Unavailable };
+
+// Outcome of one BuildMeshClusters command. The report fields are meaningful when success is true.
+struct BuildMeshClustersOutcome {
+    BuildMeshClustersStatus status = BuildMeshClustersStatus::Unavailable;
+    bool success = false;
+    std::string message;
+
+    std::string weld;
+    std::uint64_t vertexCountBefore = 0;
+    std::uint64_t vertexCountAfter = 0;
+    std::uint64_t triangleCount = 0;
+    std::uint64_t clusterCount = 0;
+    double avgTrianglesPerCluster = 0.0;
+    double avgVerticesPerCluster = 0.0;
+    bool poorFill = false;
+    double milliseconds = 0.0;
+};
+
 struct AssetImportCommandResult {
     AssetImportCommandKind kind = AssetImportCommandKind::ImportExternalFile;
     ImportExternalFileOutcome importExternalFile;
+    BuildMeshClustersOutcome buildMeshClusters;
 };
 
-// A real import can legitimately take a long time (large mesh parse) - this
-// bridge needs headroom the shared template's 3000ms default does not give
-// it. Thin forwarding override restores the correct default; the mechanism
-// itself is fully inherited.
+// A real import or cluster build can take a long time, so this bridge waits longer than the
+// shared template's 3000ms default.
 class AssetImportCommandBridge : public SyncCommandBridge<AssetImportCommandRequest, AssetImportCommandResult> {
 public:
     SubmitResult SubmitAndWait(AssetImportCommandRequest request, int timeoutMilliseconds = 120000)

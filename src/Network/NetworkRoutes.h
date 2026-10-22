@@ -999,6 +999,40 @@ ParsedSpawnGpuDrivenTestBatchRequest ParseSpawnGpuDrivenTestBatchRequest(const s
 std::string BuildSpawnGpuDrivenTestBatchResponseJson(bool success, const std::string& errorMessage,
     std::uint32_t instanceCount);
 
+// Parsed POST /build_clusters body:
+// {"gta_path": "...", "weld": "exact"|"position_only", "max_vertices": 3..255,
+//  "max_triangles": 4..512 (multiple of 4), "cone_weight": 0..1}.
+// Only gta_path is required. A missing or null field takes its default. Unknown fields are ignored.
+// Every number must be a finite JSON number (an exact integer where an integer is meant).
+struct ParsedBuildClustersRequest {
+    bool valid = false;
+    std::string errorMessage;
+    std::string gtaPath;
+    std::string weld = "exact";
+    std::uint32_t maxVertices = 64;
+    std::uint32_t maxTriangles = 124;
+    float coneWeight = 0.5f;
+};
+ParsedBuildClustersRequest ParseBuildClustersRequest(const std::string& jsonBody);
+
+// Network-side copy of one successful cluster build report.
+struct ClusterReportResponseView {
+    std::string weld;
+    std::uint64_t vertexCountBefore = 0;
+    std::uint64_t vertexCountAfter = 0;
+    std::uint64_t triangleCount = 0;
+    std::uint64_t clusterCount = 0;
+    double avgTrianglesPerCluster = 0.0;
+    double avgVerticesPerCluster = 0.0;
+    bool poorFill = false;
+    double milliseconds = 0.0;
+};
+
+// Success shape: {"success":true,"weld":...,"vertex_count_before":...,"vertex_count_after":...,
+// "triangle_count":...,"cluster_count":...,"avg_triangles_per_cluster":...,
+// "avg_vertices_per_cluster":...,"poor_fill":...,"milliseconds":...}
+std::string BuildClustersResponseJson(const ClusterReportResponseView& view);
+
 // GET /render_graph/set_pass_enabled, /passes, /set_feature_enabled,
 // /set_feature_priority query parsing and response building.
 // Every function below stays pure: no httplib/socket/thread/Core/Editor

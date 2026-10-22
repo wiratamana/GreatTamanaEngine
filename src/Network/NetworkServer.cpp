@@ -1081,11 +1081,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             outcome.parentRequestedButNotFound, outcome.requestedParentName), "application/json");
     });
 
-    // task_manager/stl-parser-2 campaign, PHASE2 - POST /import_asset. See
-    // PHASE0_MASTER_STRATEGY.md's own locked endpoint contract for the exact
-    // status-code mapping implemented below, and AGENTS.md's "Networking" for
-    // why this handler still never touches AssetDatabase/ProjectPanel
-    // directly - only AssetImportCommandBridge::SubmitAndWait().
+    // POST /import_asset: never touches the asset database directly, only the import bridge.
     server.Post("/import_asset", [assetImportCommandBridge](const httplib::Request& req, httplib::Response& res) {
         const ParsedImportAssetRequest parsed = ParseImportAssetRequest(req.body);
         if (!parsed.valid) {
@@ -1104,10 +1100,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         request.importExternalFile.sourceAbsolutePath = parsed.sourcePath;
         request.importExternalFile.destinationRelativeFolder = parsed.destinationFolder;
 
-        // PHASE0's Locked Design Decision #6 - this bridge's own 120000ms
-        // default (see AssetImportCommandBridge.h) is used here EXPLICITLY
-        // (pass no second argument to SubmitAndWait()) - do not shorten it to
-        // match the other bridges' 3000ms default.
+        // The bridge's own 120000 ms default is used on purpose: a real import can be slow.
         const AssetImportCommandBridge::SubmitResult submit = assetImportCommandBridge->SubmitAndWait(request);
         if (submit.alreadyPending) {
             res.status = 503;
@@ -1129,10 +1122,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             return;
         }
 
-        // NetworkRoutes.h's own "must never depend on src/Application/" rule
-        // means BuildImportAssetResponseJson() takes an ImportedAssetResponseView
-        // (this file's OWN type), never the Application-layer
-        // ImportExternalFileOutcome directly - copy field-by-field first.
+        // Network code must not depend on src/Application: copy the outcome into the network-side view.
         ImportedAssetResponseView view;
         view.message = outcome.message;
         view.finalRelativePath = outcome.finalRelativePath;
@@ -1147,6 +1137,67 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.status = outcome.success ? 200 : 400;
         res.set_content(outcome.success ? BuildImportAssetResponseJson(view) : BuildGenericErrorResponseJson(outcome.message),
             "application/json");
+    });
+
+    // POST /build_clusters: rebuilds the cluster table of a mesh asset on the editor's build runner.
+    // Handled through the same bridge as /import_asset, so only one of the two runs at a time.
+    server.Post("/build_clusters", [assetImportCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedBuildClustersRequest parsed = ParseBuildClustersRequest(req.body);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (assetImportCommandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("asset import command bridge not available"), "application/json");
+            return;
+        }
+
+        AssetImportCommandRequest request;
+        request.kind = AssetImportCommandKind::BuildMeshClusters;
+        request.buildMeshClusters.gtaPath = parsed.gtaPath;
+        request.buildMeshClusters.weld = parsed.weld;
+        request.buildMeshClusters.maxVertices = parsed.maxVertices;
+        request.buildMeshClusters.maxTriangles = parsed.maxTriangles;
+        request.buildMeshClusters.coneWeight = parsed.coneWeight;
+
+        const AssetImportCommandBridge::SubmitResult submit = assetImportCommandBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(
+                BuildGenericErrorResponseJson("another asset import or cluster build is already in progress"),
+                "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("cluster build timed out; the build keeps running and "
+                                                          "replaces the file when it finishes"),
+                "application/json");
+            return;
+        }
+
+        const BuildMeshClustersOutcome& outcome = submit.result->buildMeshClusters;
+        if (outcome.success) {
+            ClusterReportResponseView view;
+            view.weld = outcome.weld;
+            view.vertexCountBefore = outcome.vertexCountBefore;
+            view.vertexCountAfter = outcome.vertexCountAfter;
+            view.triangleCount = outcome.triangleCount;
+            view.clusterCount = outcome.clusterCount;
+            view.avgTrianglesPerCluster = outcome.avgTrianglesPerCluster;
+            view.avgVerticesPerCluster = outcome.avgVerticesPerCluster;
+            view.poorFill = outcome.poorFill;
+            view.milliseconds = outcome.milliseconds;
+            res.status = 200;
+            res.set_content(BuildClustersResponseJson(view), "application/json");
+            return;
+        }
+        const bool unavailable = outcome.status == BuildMeshClustersStatus::Busy
+            || outcome.status == BuildMeshClustersStatus::Unavailable;
+        res.status = unavailable ? 503 : 400;
+        res.set_content(BuildGenericErrorResponseJson(outcome.message), "application/json");
     });
 
     // task_manager/stl-parser-2 campaign, PHASE4 - POST /instantiate_asset.

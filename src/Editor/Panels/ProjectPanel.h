@@ -153,6 +153,9 @@ public:
     // rescan.
     const AssetDatabase& GetAssetDatabase() const noexcept { return m_assetDatabase; }
 
+    // Re-reads the record of one tracked asset after its file was rewritten. No-op for an untracked path.
+    void RefreshAssetRecord(const std::filesystem::path& gtaPath) { m_assetDatabase.RefreshRecordFromFile(gtaPath); }
+
     // task_manager/stl-parser-2, PHASE1 - the Project root's own absolute
     // path, needed by ImGuiEditorLayer::ImportExternalAssetIntoProject() to
     // turn ImportExternalFile()'s own AssetImportResult::finalPath (always an

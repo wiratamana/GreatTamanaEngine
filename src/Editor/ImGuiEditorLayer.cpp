@@ -12,6 +12,7 @@
 #include "GpuDrivenBatchTestSpawner.h"
 #include "ImGuiIdConflictGuard.h"
 #include "ImGuiMemoryTracker.h"
+#include "MeshClusterBuildRunner.h"
 #include "NewProjectWindow.h"
 #include "OpenProjectWindow.h"
 #include "CreateAssetWindow.h"
@@ -77,6 +78,7 @@ public:
         m_ctx.desiredExtent =
             Extent2D{ static_cast<std::uint32_t>(window.Width()), static_cast<std::uint32_t>(window.Height()) };
         m_ctx.desiredSceneExtent = m_ctx.desiredExtent;
+        m_ctx.clusterBuildRunner = &m_clusterBuildRunner;
 
         m_renderer = &renderer; // Non-owning - needed by Release*Descriptor() below, which take no renderer parameter.
 
@@ -521,6 +523,17 @@ public:
         return result;
     }
 
+    MeshClusterBuildRunner* ClusterBuildRunner() override { return &m_clusterBuildRunner; }
+
+    void RefreshProjectAssetRecord(const std::string& absoluteGtaPath) override
+    {
+#if GTE_ENABLE_PROJECT_PANEL
+        m_projectPanel.RefreshAssetRecord(PathFromUtf8(absoluteGtaPath));
+#else
+        (void)absoluteGtaPath;
+#endif
+    }
+
 
     // Frame Debugger capture hooks; both forward into m_frameDebuggerPanel, which owns the capture state.
     IFrameDebuggerCaptureRecorder* PrepareFrameDebuggerCaptureContext() override
@@ -704,6 +717,9 @@ private:
 
     // Shared state read and written by the dock layout and every panel builder; see EditorContext.h.
     EditorContext m_ctx;
+
+    // The one cluster build runner of this editor. EditorHost polls it; the Inspector starts builds on it.
+    MeshClusterBuildRunner m_clusterBuildRunner;
 
     // Owns every built-in feature's Editor panel module; lives for the rest of the process.
     std::vector<std::unique_ptr<IEditorPanelModule_v1>> m_builtinFeaturePanelModules;

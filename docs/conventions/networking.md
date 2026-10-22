@@ -302,6 +302,21 @@ module or adding a new endpoint:
   drain block. See `task_manager/stl-parser-2/PHASE0_MASTER_STRATEGY.md` for
   the full five-phase campaign writeup.
 
+
+- **`POST /build_clusters`** rebuilds the cluster table of a mesh `*.gta` inside the
+  project root. It shares `AssetImportCommandBridge` with `/import_asset` (new kind
+  `BuildMeshClusters`), so only one of the two is pending at a time. Body:
+  `{"gta_path", "weld": "exact"|"position_only", "max_vertices" 3..255,
+  "max_triangles" 4..512 (multiple of 4), "cone_weight" 0..1}`; only `gta_path`
+  is required. `ParseBuildClustersRequest()` is pure and range-checks every number
+  before any cast. The editor's single `MeshClusterBuildRunner` runs the build as a job;
+  `EditorHost` polls it once per frame and runs the follow-up (cache invalidation,
+  asset record refresh, one log line) once per finished build, even when the caller
+  already timed out. Replies `200` with the report, `400` for bad input or a failed
+  build, `503` when busy or no editor is available, `504` after the 120 s wait
+  (the build still finishes and writes the file atomically).
+
+
 - **`POST /instantiate_asset`** (`task_manager/stl-parser-2` campaign,
   `task_manager/stl-parser-2/PHASE0_MASTER_STRATEGY.md`) spawns an already-
   imported Mesh `*.gta` asset into the live ECS Scene - the network-

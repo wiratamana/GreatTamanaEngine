@@ -106,6 +106,29 @@ TEST_F(AssetDatabaseTest, DeduplicatesAssetsSharingTheSameGuid)
     EXPECT_EQ(m_db.RefreshFromDirectory(m_root), 1u);
 }
 
+// --- RefreshRecordFromFile() ------------------------------------------------
+
+TEST_F(AssetDatabaseTest, RefreshRecordFromFileUpdatesTheFileSizeOfOneRecord)
+{
+    const std::filesystem::path gtaPath = m_root / "mesh.gta";
+    const Guid guid = Guid::Generate();
+    ASSERT_TRUE(WriteGtaFile(gtaPath, AssetType::Mesh, guid, AssetFlags::None, {}, { 1, 2 }));
+    ASSERT_EQ(m_db.RefreshFromDirectory(m_root), 1u);
+    const std::uintmax_t sizeBefore = m_db.FindByGuid(guid)->fileSizeBytes;
+
+    ASSERT_TRUE(WriteGtaFile(gtaPath, AssetType::Mesh, guid, AssetFlags::None, {}, std::vector<std::uint8_t>(200, 7)));
+    EXPECT_TRUE(m_db.RefreshRecordFromFile(gtaPath));
+    EXPECT_GT(m_db.FindByGuid(guid)->fileSizeBytes, sizeBefore);
+    EXPECT_EQ(m_db.Count(), 1u);
+}
+
+TEST_F(AssetDatabaseTest, RefreshRecordFromFileIgnoresAnUntrackedPath)
+{
+    ASSERT_TRUE(WriteGtaFile(m_root / "loose.gta", AssetType::Mesh, Guid::Generate(), AssetFlags::None, {}, { 1 }));
+    EXPECT_FALSE(m_db.RefreshRecordFromFile(m_root / "loose.gta"));
+    EXPECT_EQ(m_db.Count(), 0u);
+}
+
 // --- ImportAsset() / ImportRawFile() ----------------------------------------
 
 TEST_F(AssetDatabaseTest, ImportAssetWritesFileAndRegistersItImmediately)

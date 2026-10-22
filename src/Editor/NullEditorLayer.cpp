@@ -93,6 +93,10 @@ public:
     }
 
     bool SetRenderGraphDisplayedRegime(bool /*present*/) override { return false; }
+
+    // No editor build runner or Project database in a release build.
+    MeshClusterBuildRunner* ClusterBuildRunner() override { return nullptr; }
+    void RefreshProjectAssetRecord(const std::string& /*absoluteGtaPath*/) override { }
 };
 
 } // namespace

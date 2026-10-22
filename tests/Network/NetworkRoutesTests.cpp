@@ -1686,4 +1686,84 @@ TEST(SpawnBatchRequestTests, ExactUint32InRangeRejectsNonFiniteAndFractions)
     EXPECT_EQ(ExactUint32InRange(10.0, 0, 10), std::optional<std::uint32_t>(10u));
 }
 
+TEST(BuildClustersRequestTests, OnlyGtaPathIsRequiredAndDefaultsApply)
+{
+    const auto parsed = gte::Network::ParseBuildClustersRequest(R"({"gta_path": "a.gta"})");
+    ASSERT_TRUE(parsed.valid) << parsed.errorMessage;
+    EXPECT_EQ(parsed.gtaPath, "a.gta");
+    EXPECT_EQ(parsed.weld, "exact");
+    EXPECT_EQ(parsed.maxVertices, 64u);
+    EXPECT_EQ(parsed.maxTriangles, 124u);
+    EXPECT_FLOAT_EQ(parsed.coneWeight, 0.5f);
+}
+
+TEST(BuildClustersRequestTests, NullCountsAsMissingAndUnknownFieldsAreIgnored)
+{
+    const auto parsed = gte::Network::ParseBuildClustersRequest(
+        R"({"gta_path": "a.gta", "max_vertices": null, "weld": null, "cone_weight": null, "extra": 1})");
+    ASSERT_TRUE(parsed.valid) << parsed.errorMessage;
+    EXPECT_EQ(parsed.maxVertices, 64u);
+    EXPECT_EQ(parsed.weld, "exact");
+}
+
+TEST(BuildClustersRequestTests, AcceptsEveryFieldInRange)
+{
+    const auto parsed = gte::Network::ParseBuildClustersRequest(
+        R"({"gta_path": "a.gta", "weld": "position_only", "max_vertices": 255, "max_triangles": 512, "cone_weight": 1})");
+    ASSERT_TRUE(parsed.valid) << parsed.errorMessage;
+    EXPECT_EQ(parsed.weld, "position_only");
+    EXPECT_EQ(parsed.maxVertices, 255u);
+    EXPECT_EQ(parsed.maxTriangles, 512u);
+    EXPECT_FLOAT_EQ(parsed.coneWeight, 1.0f);
+}
+
+TEST(BuildClustersRequestTests, RejectsBadBodiesAndBadFields)
+{
+    for (const char* body : { "", "not json", "[]", R"({})", R"({"gta_path": ""})", R"({"gta_path": 5})",
+             R"({"gta_path": "a.gta", "weld": "smooth"})", R"({"gta_path": "a.gta", "weld": 3})",
+             R"({"gta_path": "a.gta", "max_vertices": 2})", R"({"gta_path": "a.gta", "max_vertices": 256})",
+             R"({"gta_path": "a.gta", "max_vertices": -1})", R"({"gta_path": "a.gta", "max_vertices": 1e300})",
+             R"({"gta_path": "a.gta", "max_vertices": 64.5})", R"({"gta_path": "a.gta", "max_vertices": 99999999999})",
+             R"({"gta_path": "a.gta", "max_vertices": NaN})", R"({"gta_path": "a.gta", "max_vertices": "64"})",
+             R"({"gta_path": "a.gta", "max_vertices": true})", R"({"gta_path": "a.gta", "max_triangles": 126})",
+             R"({"gta_path": "a.gta", "max_triangles": 0})", R"({"gta_path": "a.gta", "max_triangles": 516})",
+             R"({"gta_path": "a.gta", "cone_weight": 1.5})", R"({"gta_path": "a.gta", "cone_weight": -0.1})",
+             R"({"gta_path": "a.gta", "cone_weight": 1e300})", R"({"gta_path": "a.gta", "cone_weight": "0.5"})" }) {
+        const auto parsed = gte::Network::ParseBuildClustersRequest(body);
+        EXPECT_FALSE(parsed.valid) << body;
+        EXPECT_FALSE(parsed.errorMessage.empty()) << body;
+    }
+}
+
+TEST(BuildClustersRequestTests, ErrorNamesTheOffendingField)
+{
+    const auto parsed = gte::Network::ParseBuildClustersRequest(R"({"gta_path": "a.gta", "max_vertices": true})");
+    EXPECT_NE(parsed.errorMessage.find("max_vertices"), std::string::npos);
+}
+
+TEST(BuildClustersResponseTests, JsonShape)
+{
+    gte::Network::ClusterReportResponseView view;
+    view.weld = "position_only";
+    view.vertexCountBefore = 30;
+    view.vertexCountAfter = 10;
+    view.triangleCount = 12;
+    view.clusterCount = 3;
+    view.avgTrianglesPerCluster = 4.0;
+    view.avgVerticesPerCluster = 3.5;
+    view.poorFill = true;
+    view.milliseconds = 1.5;
+    const nlohmann::json parsed = nlohmann::json::parse(gte::Network::BuildClustersResponseJson(view));
+    EXPECT_EQ(parsed["success"], true);
+    EXPECT_EQ(parsed["weld"], "position_only");
+    EXPECT_EQ(parsed["vertex_count_before"], 30);
+    EXPECT_EQ(parsed["vertex_count_after"], 10);
+    EXPECT_EQ(parsed["triangle_count"], 12);
+    EXPECT_EQ(parsed["cluster_count"], 3);
+    EXPECT_DOUBLE_EQ(parsed["avg_triangles_per_cluster"].get<double>(), 4.0);
+    EXPECT_DOUBLE_EQ(parsed["avg_vertices_per_cluster"].get<double>(), 3.5);
+    EXPECT_EQ(parsed["poor_fill"], true);
+    EXPECT_DOUBLE_EQ(parsed["milliseconds"].get<double>(), 1.5);
+}
+
 } // namespace

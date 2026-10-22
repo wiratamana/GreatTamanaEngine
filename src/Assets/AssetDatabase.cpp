@@ -171,6 +171,36 @@ const AssetRecord* AssetDatabase::FindByPath(const std::filesystem::path& gtaPat
     return &m_assets[it->second];
 }
 
+bool AssetDatabase::RefreshRecordFromFile(const std::filesystem::path& gtaPath)
+{
+    std::error_code absEc;
+    const std::string key = PathToUtf8(std::filesystem::absolute(gtaPath, absEc));
+    const auto it = m_pathToIndex.find(key);
+    if (it == m_pathToIndex.end()) {
+        return false;
+    }
+
+    const std::optional<GtaHeader> header = ReadGtaHeader(gtaPath);
+    if (!header.has_value()) {
+        return false;
+    }
+
+    AssetRecord& record = m_assets[it->second];
+    if (record.guid != header->Id()) {
+        m_guidToIndex.erase(record.guid);
+        record.guid = header->Id();
+        m_guidToIndex[record.guid] = it->second;
+    }
+    record.type = header->Type();
+    record.flags = header->Flags();
+    record.version = header->version;
+
+    std::error_code sizeEc;
+    const std::uintmax_t size = std::filesystem::file_size(gtaPath, sizeEc);
+    record.fileSizeBytes = sizeEc ? 0 : size;
+    return true;
+}
+
 std::vector<AssetRecord> AssetDatabase::GetAssetsOfType(AssetType type) const
 {
     std::vector<AssetRecord> result;

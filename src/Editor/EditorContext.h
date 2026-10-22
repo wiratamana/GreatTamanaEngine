@@ -13,6 +13,8 @@ namespace gte {
 // Forward declaration only: the full definition lives in Core/EditorCapabilities.h and is heavy.
 enum class AssetScaffoldKind;
 
+class MeshClusterBuildRunner;
+
 // ImGui drag-and-drop payload type for a file path dragged out of the Project panel (UTF-8, NUL-terminated).
 inline constexpr const char* kProjectAssetDragDropPayloadType = "GTE_PROJECT_ASSET_PATH";
 
@@ -212,6 +214,9 @@ struct EditorContext {
     std::string projectWorkflowStatusMessage;
     bool projectWorkflowStatusIsError = false;
     std::chrono::steady_clock::time_point projectWorkflowStatusSetTime;
+
+    // The editor's cluster build runner. Owned by the editor layer; never null in the ImGui editor.
+    MeshClusterBuildRunner* clusterBuildRunner = nullptr;
 };
 
 } // namespace gte
