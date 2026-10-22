@@ -237,6 +237,9 @@ public:
     // Fills a set reserved this frame. Ignores an empty or foreign handle.
     void FillExclusion(fx::EntityExclusion exclusion, std::span<const Entity> entities);
 
+    // Changes whenever BuildFrame() clears the exclusion sets. A pass compares it at execute time to catch a stale set.
+    const std::uint64_t* ExclusionEpoch() const noexcept { return &m_exclusionEpoch; }
+
     // Asks BuildFrame() of the next frame to track entity movement (kClusterFlagMoved). Kit verbs only; call every
     // frame the occlusion pyramid is built.
     void RequestOcclusionTracking() noexcept { m_occlusionRequested = true; }
@@ -300,9 +303,10 @@ private:
     std::array<std::unordered_set<Entity>, rg::kViewScopeCount> m_claimedEntities;
 
     // Cluster-ready instances and entity exclusion sets of this frame. Both are cleared at the start of
-    // BuildFrame(); a deque keeps every reserved set at a stable address.
+    // BuildFrame(); a deque keeps every reserved set at a stable address. The epoch grows with each clear.
     std::vector<fx::ClusterInstance> m_clusterCandidates;
     std::deque<std::unordered_set<Entity>> m_exclusionSets;
+    std::uint64_t m_exclusionEpoch = 0;
 
     // Failed one-cluster syntheses per mesh; entries die with their mesh.
     std::unordered_map<fx::MeshToken, SynthesisBackoff, fx::MeshTokenHash> m_synthesisBackoff;

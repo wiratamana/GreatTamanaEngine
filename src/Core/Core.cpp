@@ -31,6 +31,7 @@
 #include "Plugins/ProjectAssemblyRegistrationLedger.h"
 #include "ViewBackgroundReplayKey.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -522,9 +523,17 @@ void Core::BuildClusterCandidates()
     if (!ClusterPathSupported(m_renderer.IndirectDrawCaps()) || m_renderFeatureCompositorPtr == nullptr) {
         return;
     }
-    // Only stages that can declare a cluster chain read the list.
-    if (m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::Opaque>().empty()
-        && m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::PreOpaque>().empty()) {
+    // Only enabled features of the stages that can declare a cluster chain read the list.
+    const auto& opaqueFeatures = m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::Opaque>();
+    const auto& preOpaqueFeatures = m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::PreOpaque>();
+    const bool anyReader =
+        std::any_of(opaqueFeatures.begin(), opaqueFeatures.end(),
+            [this](const SceneStageEntry& entry) {
+                return entry.enabledOverride && !m_faultedOpaqueFeatures.contains(entry.name);
+            })
+        || std::any_of(preOpaqueFeatures.begin(), preOpaqueFeatures.end(),
+            [](const PreOpaqueEntry& entry) { return entry.enabledOverride; });
+    if (!anyReader) {
         return;
     }
 
@@ -771,8 +780,14 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 }
             };
 
-            for (const SceneStageEntry& entry :
-                m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::Opaque>()) {
+            const auto& opaqueEntries = m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::Opaque>();
+            // A feature that was unregistered is forgiven, so a re-registered one runs again.
+            std::erase_if(m_faultedOpaqueFeatures, [&](const std::string& name) {
+                return std::none_of(opaqueEntries.begin(), opaqueEntries.end(),
+                    [&](const SceneStageEntry& entry) { return entry.name == name; });
+            });
+
+            for (const SceneStageEntry& entry : opaqueEntries) {
                 if (!entry.enabledOverride || m_faultedOpaqueFeatures.contains(entry.name)) {
                     continue;
                 }
@@ -1003,6 +1018,7 @@ void Core::BuildFrame()
     }
     m_clusterCandidates.clear();
     m_exclusionSets.clear();
+    ++m_exclusionEpoch;
     m_captureArmedThisFrame = false;
 
     for (const MeshHandle released : m_game.ReleaseUnusedGpuResources(m_renderer)) {

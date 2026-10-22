@@ -1,5 +1,6 @@
 #include "SceneDrawPass.h"
 
+#include <cassert>
 #include <utility>
 
 namespace gte {
@@ -51,9 +52,11 @@ SceneDrawPass& SceneDrawPass::CullToFrustum(float paddingFraction)
     return *this;
 }
 
-SceneDrawPass& SceneDrawPass::ExcludeEntities(const std::unordered_set<Entity>* entities)
+SceneDrawPass& SceneDrawPass::ExcludeEntities(const std::unordered_set<Entity>* entities, const std::uint64_t* liveEpoch)
 {
     m_excluded = entities;
+    m_liveEpoch = liveEpoch;
+    m_epochAtDeclare = liveEpoch != nullptr ? *liveEpoch : 0;
     return *this;
 }
 
@@ -64,8 +67,18 @@ bool SceneDrawPass::Draw()
     if (m_cullPadding.has_value()) {
         request.cull = SceneCullRequest{ m_viewProjection, *m_cullPadding };
     }
-    return m_mesh.Draw([system = m_system, registry = m_registry, renderer = m_renderer,
-                           request = std::move(request)]() { DrawScene(*system, *registry, *renderer, request); });
+    return m_mesh.Draw([system = m_system, registry = m_registry, renderer = m_renderer, liveEpoch = m_liveEpoch,
+                           epochAtDeclare = m_epochAtDeclare, request = std::move(request)]() {
+        // A set from an older frame may be gone: draw everything on the CPU path instead.
+        if (liveEpoch != nullptr && *liveEpoch != epochAtDeclare && request.batchedEntities != nullptr) {
+            assert(false && "exclusion set read after its frame ended");
+            SceneDrawRequest safe = request;
+            safe.batchedEntities = nullptr;
+            DrawScene(*system, *registry, *renderer, safe);
+            return;
+        }
+        DrawScene(*system, *registry, *renderer, request);
+    });
 }
 
 } // namespace gte

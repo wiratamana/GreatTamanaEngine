@@ -150,7 +150,7 @@ bool SceneDrawChain::Record()
         pass.CullToFrustum(*impl.cullPadding);
     }
     if (impl.excluded != nullptr) {
-        pass.ExcludeEntities(impl.excluded);
+        pass.ExcludeEntities(impl.excluded, core.ExclusionEpoch());
     }
     return pass.Draw();
 }
