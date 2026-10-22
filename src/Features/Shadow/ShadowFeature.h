@@ -7,8 +7,20 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace gte {
+
+// Cluster lanes of the cascade draws: one lane per cascade.
+inline constexpr std::uint32_t kShadowClusterLanes = kMaxShadowCascades;
+inline constexpr std::uint32_t kShadowClusterPartSlots = kDepthOnlyPartSlots;
+inline constexpr std::string_view kShadowClusterBaseName = "Shadow.Cluster";
+static_assert(kShadowClusterLanes <= kDepthOnlyLanes, "one cluster lane per cascade");
+
+// The passes of `names` that a cluster chain declares for a depth-only target (the stats pass is never used there).
+std::vector<std::string> ShadowClusterDeclaredPasses(const std::vector<std::string>& names);
 
 // Per-view resources.
 struct ShadowViewState {
@@ -61,6 +73,8 @@ private:
     fx::ComputeShader m_depthReduceShader{ "ShadowDepthReduce" };
     fx::FullscreenShader m_compositeShader{ "ShadowComposite" };
     fx::SceneShaderSet m_depthShaders = fx::SceneShaderSet::DepthOnly("ShadowDepth");
+    fx::ClusterDrawState m_clusterState{ kShadowClusterBaseName,
+        fx::ClusterDrawShape{ kShadowClusterLanes, kShadowClusterPartSlots } };
     fx::Channel<ShadowMapData> m_mapData{ "Map" };
     fx::Channel<SunShadowReceiver> m_receiverData{ kSunShadowReceiverChannel };
     fx::Channel<fx::Texture> m_maskData{ "Mask" };

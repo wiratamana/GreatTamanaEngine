@@ -61,15 +61,40 @@ std::uint64_t MapBytes(const ShadowViewState& view, const fx::Frame& f) noexcept
 
 ShadowFeature::ShadowFeature(fx::FeatureHost&) { }
 
+std::vector<std::string> ShadowClusterDeclaredPasses(const std::vector<std::string>& names)
+{
+    constexpr std::string_view kStatsSuffix = ".Stats";
+    std::vector<std::string> declared;
+    declared.reserve(names.size());
+    for (const std::string& name : names) {
+        const bool isStats = name.size() >= kStatsSuffix.size()
+            && std::string_view{ name }.substr(name.size() - kStatsSuffix.size()) == kStatsSuffix;
+        if (!isStats) {
+            declared.push_back(name);
+        }
+    }
+    return declared;
+}
+
 void ShadowFeature::Setup(fx::FeatureSetup& s)
 {
+    if (!m_clusterState.Valid()) {
+        s.Fail("the cascade cluster draw state is invalid: " + m_clusterState.Error());
+        return;
+    }
+
     // Not a render pass: Always() keeps a toggle from freezing the frame clock the snapshots age against.
     s.PreOpaque("Shadow.FrameStamp", kFrameStampPriority,
         [this](fx::PreOpaqueFrame& f) { m_newestFrame = f.FrameIndex(); }, fx::Gate::Always());
 
     // Each gate lists the pass names shown in the Render Graph panel; a callback runs while any of them is enabled.
-    s.PreOpaque("Shadow.Cascades", kCascadesPriority, [this](fx::PreOpaqueFrame& f) { CascadesPass(f); },
-        fx::Gate{ "Shadow.Cascade0.Draw", "Shadow.Cascade1.Draw", "Shadow.Cascade2.Draw", "Shadow.Cascade3.Draw" });
+    fx::Gate cascadeGate{ "Shadow.Cascade0.Draw", "Shadow.Cascade1.Draw", "Shadow.Cascade2.Draw", "Shadow.Cascade3.Draw" };
+    const std::vector<std::string> clusterPasses = ShadowClusterDeclaredPasses(m_clusterState.AllPassNames());
+    cascadeGate.passNames.insert(cascadeGate.passNames.end(), clusterPasses.begin(), clusterPasses.end());
+    s.PreOpaque("Shadow.Cascades", kCascadesPriority, [this](fx::PreOpaqueFrame& f) { CascadesPass(f); }, cascadeGate);
+    for (const std::string& name : clusterPasses) {
+        s.CountInViewStats(name);
+    }
     s.PostOpaque("Shadow.DepthRange", kDepthRangePriority, [this](fx::PostOpaqueFrame& f) { DepthRangePass(f); },
         fx::Gate{ "Shadow.DepthRange.Reduce" });
     s.PostOpaque("Shadow.Mask", kMaskPriority, [this](fx::PostOpaqueFrame& f) { MaskPass(f); },
@@ -179,13 +204,31 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
         }
         data.maps[c] = map;
 
+        // The cluster chain plans first so the CPU draw skips what it takes over; it loads the map the CPU draw clears.
+        // A plan that is not ready leaves the CPU draw complete.
+        const fx::ClusterCamera cascadeCamera = fx::MakeClusterCamera(set.cascades[c].viewProjection, Vec3{});
+        fx::ClusterDrawChain clusterChain = f.ClusterDraw(m_clusterState, c);
+        clusterChain.Instances(f.ClusterCandidates())
+            .Camera(cascadeCamera)
+            .CullCamera(cascadeCamera)
+            .Culling(cfg.cullCasters ? ClusterCullFlags::Frustum : ClusterCullFlags::None)
+            .DepthOnlyTarget(map);
+        const fx::ClusterPlan clusterPlan = clusterChain.Plan();
+
         fx::SceneDrawChain chain = f.SceneDraw(kCascadeDrawNames[c]);
         chain.Shaders(m_depthShaders).Camera(set.cascades[c].viewProjection).ClearDepthTarget(map, 1.0f);
         if (cfg.cullCasters) {
             chain.CullToFrustum(cfg.casterCullPaddingFraction);
         }
+        if (clusterPlan.ready) {
+            chain.Exclude(clusterPlan.exclusion);
+        }
         if (!chain.Record()) {
             fail(ShadowFrameStatus::ShadersNotReady);
+            continue;
+        }
+        if (clusterPlan.ready) {
+            clusterChain.Record();
         }
     }
 

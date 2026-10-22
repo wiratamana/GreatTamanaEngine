@@ -2992,7 +2992,7 @@ set(GTE_COMMENT_RULE_SRC
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
-    Features/Shadow/ShadowMathTests.cpp Game/SceneDrawPassTests.cpp
+    Features/Shadow/ShadowMathTests.cpp Features/Shadow/ShadowClusterLaneTests.cpp Game/SceneDrawPassTests.cpp
     Features/Gtao/GtaoMathTests.cpp Features/Gtao/GtaoParamsTests.cpp Features/Gtao/GtaoShaderNamesTests.cpp
     Features/Ssgi/
     Features/VolumetricLight/ Features/ToneMapping/ Math/ToneMapCurvesTests.cpp Features/Shadow/ShadowReceiverTests.cpp

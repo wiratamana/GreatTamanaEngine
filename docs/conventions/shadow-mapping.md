@@ -38,6 +38,7 @@ shadow maps. It fits the cascades to the camera every frame. No box has to be tu
 | Pass (toggle name) | Stage | Purpose |
 |---|---|---|
 | `Shadow.Cascade0.Draw` .. `Shadow.Cascade3.Draw` | PreOpaque | One depth draw per cascade |
+| `Shadow.Cluster.L<c>.P<s>.Reset`, `.Cull`, `.Draw` | PreOpaque | GPU-culled depth draw of cluster-ready meshes per cascade |
 | `Shadow.DepthRange.Clear`, `.Reduce`, `.Readback` | PostOpaque | Depth-range measurement (one unit) |
 | `Shadow.Mask.Dispatch` | PostOpaque | Screen-space shadow mask and cascade id; runs only when `debugView` is not `Off` or `applyInMaterials` is false |
 | `Shadow.Composite.Draw` | PostComposite | Debug views; with `applyInMaterials` off also the darkening |
@@ -46,6 +47,15 @@ Textures per view (`<Name>.GameView`, `<Name>.SceneView`): `Shadow.Cascade0` .. 
 `Shadow.CascadeId` (R8) exist only while the mask pass runs (`debugView` not `Off`, or `applyInMaterials` false). The `Map`
 channel, the `Receiver` channel and the four cascade scene slots are published only when every active cascade pass was
 recorded, so a disabled cascade pass switches the mask and composite off.
+
+### Cluster lanes
+
+Each cascade has one lane of the kit cluster draw (`Shadow.Cluster.L<cascade>.P<slot>.Reset|Cull|Draw`, 4 lanes x 4 part slots).
+Per cascade the order is: `Plan()`, the CPU depth draw with `Exclude(plan.exclusion)` (it clears the map), then `Record()`
+(it loads the map). When the plan is not ready or any pass of the chain is toggled off, the CPU draw stays complete.
+The lanes use the frustum test with the cascade matrix, never the back-face cone test, and no padding. With `cullCasters` off no
+cluster is culled. A frame with the Frame Debugger capture armed uses the CPU draw only. The CPU and cluster depth vertex
+shaders declare `invariant gl_Position` with the same expression order, so both paths write the same depth.
 
 ## Material slot contract
 

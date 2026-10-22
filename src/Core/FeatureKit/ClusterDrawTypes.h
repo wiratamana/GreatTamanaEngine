@@ -54,6 +54,9 @@ struct ClusterCamera {
 // Camera data of `view`. Orthographic when the last matrix row is (0, 0, 0, 1).
 ClusterCamera ClusterCameraOf(const View& view);
 
+// Camera from a bare view-projection. `eye` is used only for a perspective matrix.
+ClusterCamera MakeClusterCamera(const Mat4& viewProjection, const Vec3& eye);
+
 // Opaque handle to a per-frame set of entities that the CPU scene draw skips. Valid until the next frame.
 struct EntityExclusion {
     const void* handle = nullptr;
