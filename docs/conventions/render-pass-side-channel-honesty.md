@@ -110,13 +110,14 @@ It covers only the keys in `KnownRiskBlackboardKeyRules()`
 | Shadow `Map` channel, Game and Scene view | `Shadow.Cascade0.Draw` |
 | Shadow `Mask` channel, Game and Scene view | `Shadow.Mask.Dispatch` |
 | Atmosphere `SharedLuts` shared channel | `AtmosphereTransmittanceLutPass` and `AtmosphereMultiScatteringLutPass` (published only when both ran) |
+| Atmosphere `AerialVolume` channel, Game and Scene view | `AtmosphereAerialPerspectiveVolumePass` (published only when the pass ran) |
 
 Feature channel keys are built with `fx::ChannelKey(feature, channel, view)`, so
 the rule list never repeats a string literal for them. Whoever adds a new
 blackboard key with this risk shape (a value another, independently toggled pass
 reads back to reproduce an effect) MUST add a rule here. Do not add a rule for a
 channel that is published with invalid textures when its pass is off (for
-example the Atmosphere per-view `ViewLuts`). It would report false leaks.
+example the Atmosphere per-view `ViewLuts`, which is deliberately excluded). It would report false leaks.
 
 The detector does not catch leaks that bypass the blackboard, such as a plain
 member variable read by another system.

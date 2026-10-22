@@ -45,6 +45,14 @@ Vec3 ComputeSunTransmittance(
 SunLightModulation ComputeAtmosphereSunLight(
     const AtmosphereParametersGpu& params, float heightKm, float sunUpDot) noexcept;
 
+// Moves a sample below the planet surface onto the surface; keeps its direction.
+// A zero-length or non-finite input gives (0, planetRadiusKm, 0).
+Vec3 ClampSampleToSurfaceKm(Vec3 positionKm, float planetRadiusKm) noexcept;
+
+// 1.0 when the sun is visible from the point, 0.0 when the planet blocks it.
+// `directionToSun` is normalized. A non-finite input gives 1.0 (no blocking).
+float PlanetVisibility(Vec3 positionKm, Vec3 directionToSun, float planetRadiusKm) noexcept;
+
 // Rayleigh phase function, normalized over the sphere. `cosTheta` is the cosine of the scattering angle.
 float RayleighPhaseFunction(float cosTheta) noexcept;
 

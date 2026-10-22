@@ -48,6 +48,11 @@ Pass names are literals (`rg::StaticName`); a runtime string does not compile. S
 the access (read or write) comes from the SPIR-V. A chain that ends without its terminal call asserts in debug. A refused
 chain declares nothing and logs once.
 
+Scene reads: every sample goes through a named binding, so the kit declares it. A post-stage feature never needs a fake
+read of the scene color or depth, and a pass that does not sample them must not bind them. The compositor's "did not declare
+ReadTexture()" check (`PostOpaque`, `PostTransparent`, `PostComposite` depth) runs only for raw project callbacks, never for
+kit features. The `RenderFeatureCompositor` log category must stay empty in Debug and Release.
+
 ## Resources and data flow
 
 | Type | Notes |
@@ -80,8 +85,8 @@ chain declares nothing and logs once.
    same callback returns the same buffer and refuses a larger size.
 6. Never read a buffer early and write it later in one frame. Use two `PersistentBuffer` objects and alternate them
    by `f.FrameIndex() & 1` (like the history textures of the AO feature).
-7. A buffer written in a later stage cannot be read in an earlier stage of the same frame. A buffer-only compute belongs
-   in `PreOpaque`; the post stages also need a pass that reads the scene color or depth.
+7. A buffer written in a later stage cannot be read in an earlier stage of the same frame. A post-stage feature needs no
+   scene color or depth read for its own passes (see "Scene reads" above).
 8. `FillBuffer` of a host-visible buffer needs `BufferUse::TransferDst` in its flags.
 9. GPU-written, GPU-read buffers should be device-local (no `HostWrite` / `HostRead`). Use `HostWrite` only for small
    CPU-written tables; the GPU reads host-visible memory more slowly.
@@ -135,17 +140,19 @@ sun, the ambient and the cascade shadow data (read from the Shadow `Receiver` ch
 scene uniform block (`SetSceneUniforms`) for every view. It also reads the `Atmosphere.SunLight` channel and scales the sun
 and ambient with it. It declares no pass.
 
-`src/Features/Atmosphere/AtmosphereFeature.cpp`: five registrations.
+`src/Features/Atmosphere/AtmosphereFeature.cpp`: six registrations.
 
 - `AtmosphereSharedLut` (`PreOpaqueShared`): transmittance and multi-scattering LUTs as shared `PersistentTarget`s,
   published through a `Channel` that every view reads.
-- `AtmosphereViewLut` (`PreOpaque`): per view a sky-view LUT (`PersistentTarget`) and an aerial perspective
-  `PersistentVolume` (128x128x32, RGBA16F), written by `Compute`.
+- `AtmosphereViewLut` (`PreOpaque`): per view a sky-view LUT (`PersistentTarget`), written by `Compute`.
 - `Atmosphere.SunLight` (`PreOpaque`, `Gate::Always`): publishes the `SunLightModulation` channel for the scene lighting
   and the light shafts.
+- `AtmosphereAerialVolume` (`PostOpaque`, priority 20): reads the shared LUTs and the Shadow `Receiver` channel
+  (`fx::ChannelReader`), writes a per-view aerial perspective `PersistentVolume` (128x128x32, RGBA16F) and a shaft delta
+  `PersistentTarget` with one `Compute`, and publishes both on the `AerialVolume` channel with a keep list.
 - `DrawSkyBackground` (`PostOpaque`): `ViewBackground` into the view color where depth is untouched.
-- `AtmosphereComposite` (`PostComposite`): a `Compute` into a `ViewOutput`, `ExposeAsViewOutput`, then a `Blit` to the
-  private target.
+- `AtmosphereComposite` (`PostComposite`): a `Compute` into a `ViewOutput` that reads the `AerialVolume` channel,
+  `ExposeAsViewOutput`, then a `Blit` to the private target.
 
 `src/Features/ToneMapping/ToneMappingFeature.cpp`: the final `PostComposite` feature (priority +1000, `fx::Blend::Replace`),
 the display transform of the frame. `Setup()` registers a `PreOpaque` frame stamp (`Gate::Always()`) and the composite.

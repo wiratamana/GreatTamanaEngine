@@ -9,7 +9,7 @@ shadow maps. It fits the cascades to the camera every frame. No box has to be tu
 - **Cascades.** The visible depth range is split with the "practical" scheme (`splitLambda`: 0 uniform, 1 logarithmic).
   Each cascade is the bounding sphere of its frustum slice, computed relative to the eye and rounded up to 1/16 unit.
   The light-space center snaps to whole texels in double precision (`stabilizeCascades`), so edges do not shimmer.
-  The near plane is pulled back toward the sun by `casterRange`. There is no depth clamp and no hardware depth bias.
+  The near plane is `casterRange` beyond the sphere toward the sun. There is no depth clamp and no hardware depth bias.
 - **Depth-range fitting (SDSM).** A compute pass finds the nearest and furthest visible pixel of the view's scene depth.
   The value is copied to the CPU with `fx::GpuReadback` and used two frames later (the cascades are drawn before the
   scene depth of the same frame exists). The range is padded (`sdsmPaddingFraction`), grows at once, shrinks with the
@@ -56,6 +56,13 @@ The `SceneLighting` feature reads the `Receiver` channel (`SunShadowReceiver`) a
 filter values into the 448-byte scene uniform block (limit 512 bytes). `ShadowMask.comp` and `SunShadowAmount()` in
 `DirectionalLighting.glsl` use the same algorithm.
 
+## Air shadows
+
+The Atmosphere aerial perspective volume and VolumetricLight both read the `Receiver` channel and shade the air with the same
+shared GLSL, `src/Shaders/OrthoMapSetVisibility.glsl`. Air outside all cascades counts as lit. `SunShadowReceiver` carries
+`depthFitted` (the splits were fitted to a measured range, set from `sdsmActive`), and `SunShadowReceiverUsable()` is the one
+validity check for every reader. `DirectionalLighting.glsl` and `ShadowMask.comp` keep their own surface lookups, which use normals.
+
 ## Settings
 
 Edited in the dockable **Shadow** window or over HTTP. They are sanitized on write and not saved in the scene file.
@@ -64,10 +71,10 @@ Edited in the dockable **Shadow** window or over HTTP. They are sanitized on wri
 |---|---|---|
 | `cascadeCount` | 4 | 1..4 |
 | `mapResolution` | 2048 | snaps to 512, 1024, 2048 or 4096 |
-| `maxDistance` | 150 | 1..100000, clamped to the camera far plane |
+| `maxDistance` | 20000 | 1..100000, clamped to the camera far plane |
 | `splitLambda` | 0.85 | 0..1 |
 | `cascadeBlendFraction` / `distanceFadeFraction` | 0.10 / 0.10 | 0..0.5 |
-| `casterRange` | 200 | 1..10000 |
+| `casterRange` | 200 | 1..100000, extra distance beyond the cascade sphere |
 | `cullCasters` / `casterCullPaddingFraction` | true / 0.25 | padding 0..2 |
 | `constBiasTexels` / `slopeBiasTexels` / `normalOffsetTexels` | 1.5 / 1.0 / 1.0 | 0..16 |
 | `filterRadiusTexels` / `filterSamples` | 1.5 / 4 | radius 0..8, samples 1, 4, 8 or 16 |
@@ -79,7 +86,22 @@ Edited in the dockable **Shadow** window or over HTTP. They are sanitized on wri
 | `sdsmPaddingFraction` / `sdsmShrinkSeconds` / `sdsmQuantizeSteps` | 0.15 / 0.3 / 4 | 0..1 / 0..10 / 0..16 |
 
 A NaN or infinite value is replaced by the default. The slope bias used by the shader is
-`max(slopeBiasTexels, filterRadiusTexels)`.
+`max(slopeBiasTexels, filterRadiusTexels)`. The panel slider of `casterRange` uses the sanitizer range.
+
+### Caster range and distance
+
+- `casterRange` is the extra distance toward the sun beyond a cascade's bounding sphere. The ortho depth range of every
+  cascade is `2 * radius + casterRange` (state key `game.cascade<i>.depthRange`). The world-space bias does not change with it:
+  receivers compute the bias as `texelWorld * texels / depthRange`.
+- Needed value: `casterRange >= relief / sin(sunElevation)`, at most 100000. The sine is not floored. 1000 m of relief at 3
+  degrees needs about 19 km, at 1 degree about 57 km. Below about 0.6 degrees the cap is reached and shadows of farther relief
+  are missing.
+- The default stays 200: a larger default costs depth precision in small cascades (24 km of range in a 1 m cascade leaves about
+  1.5 mm of depth step against a bias of about 1.5 mm).
+- `maxDistance` (default 20000) is clamped to the camera far plane. SDSM fits the cascades to the visible depth range, so small
+  scenes keep small cascades once a depth sample exists (2 frames after start or after a sky-only view). Fixed splits (SDSM off,
+  or no sample yet) are coarse at 20000: cascade 0 covers about 750 m.
+- Memory: 4 cascades x 2048^2 x 4 B = 64 MB per view, 2 views in the editor. 4096 is 4x that.
 
 ## HTTP recipe
 

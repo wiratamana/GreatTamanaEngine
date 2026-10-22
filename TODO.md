@@ -279,15 +279,6 @@ Scattering" section for the full feature writeup.
   meaningfully large, engine-wide follow-up, not something to bolt onto this
   campaign's own passes individually (e.g. do NOT add new `GpuTimingSlot`
   enumerators one atmosphere pass at a time).
-- **`ValidateAerialPerspectiveSkyPurity()` only checks the "Game" view's pair
-  of textures (`"GameView"`/`"GameViewComposited"`) today.** (Added by the
-  `atmosphere-scattering-4` campaign — see `AGENTS.md`'s "Atmosphere
-  Scattering" section.) Extending it to also validate the "Scene" view's own
-  `"SceneView"`/`"SceneViewComposited"` pair (an independent, second call from
-  the same Editor button, or a second button) would close the one remaining
-  gap in this diagnostic's own coverage — not attempted in that campaign
-  since the "Game" view alone was already enough to prove the fix and confirm
-  the regression guard works end to end.
 
 ## Time and Playback Pause
 

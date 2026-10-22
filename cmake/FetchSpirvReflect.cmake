@@ -63,24 +63,21 @@
 # Tunable cache variables:
 #   SPIRV_REFLECT_RELEASE_TAG      - Git ref to fetch spirv_reflect.h/.c/spirv.h
 #                                     from KhronosGroup/SPIRV-Reflect at: a
-#                                     branch, tag, or commit SHA. Deliberately
-#                                     NOT defaulted to "latest" (SPIRV-Reflect
-#                                     does not publish GitHub Releases as
-#                                     consistently as nlohmann/json - see the
-#                                     PHASE1 task doc). Defaults to
+#                                     branch, tag, or commit SHA. Defaults to
 #                                     "local-vendored-from-SPIRV-Reflect-main.zip"
-#                                     - a marker (not a real git ref) recording
-#                                     that the currently-staged copy was vendored
-#                                     by hand from a locally-downloaded
-#                                     SPIRV-Reflect-main.zip (offline setup -
-#                                     no network access used), rather than
-#                                     resolved/fetched through this module's own
-#                                     _spirv_reflect_download_and_stage()
-#                                     codepath. Override with a real git ref
-#                                     (e.g. a pinned commit SHA) + set
-#                                     SPIRV_REFLECT_FORCE_REDOWNLOAD ON to
-#                                     deliberately move to a real, network-fetched
-#                                     upstream copy later.
+#                                     - a marker (not a real git ref) meaning
+#                                     "use whatever is already staged in
+#                                     third_party/spirv_reflect/". If NOTHING is
+#                                     staged (e.g. fresh clone), this module
+#                                     falls back to downloading
+#                                     SPIRV_REFLECT_FALLBACK_REF from GitHub
+#                                     (needs internet). Override with a real git
+#                                     ref + SPIRV_REFLECT_FORCE_REDOWNLOAD ON to
+#                                     deliberately move to another upstream copy.
+#   SPIRV_REFLECT_FALLBACK_REF      - Git ref downloaded when no local copy
+#                                     exists and the tag above is still the
+#                                     marker. Default: the pinned release tag
+#                                     "vulkan-sdk-1.4.363.0".
 #   SPIRV_REFLECT_FORCE_REDOWNLOAD  - Set to ON to force re-fetching even if
 #                                     already present and already matching
 #                                     SPIRV_REFLECT_RELEASE_TAG.
@@ -94,6 +91,8 @@ set(SPIRV_REFLECT_RELEASE_TAG "local-vendored-from-SPIRV-Reflect-main.zip" CACHE
 option(SPIRV_REFLECT_FORCE_REDOWNLOAD
     "Force re-downloading/re-fetching SPIRV-Reflect even if it already appears to be present and matching SPIRV_REFLECT_RELEASE_TAG."
     OFF)
+set(SPIRV_REFLECT_FALLBACK_REF "vulkan-sdk-1.4.363.0" CACHE STRING
+    "Git ref (branch, tag, or commit SHA) downloaded from GitHub when no local SPIRV-Reflect copy exists and SPIRV_REFLECT_RELEASE_TAG is still the offline-vendoring marker. Default is the pinned release tag vulkan-sdk-1.4.363.0.")
 
 # _spirv_reflect_download_file(<url> <dest_file> <content_marker>)
 #
@@ -179,22 +178,35 @@ function(fetch_spirv_reflect)
     set(_spv_marker "${CMAKE_SOURCE_DIR}/third_party/spirv_reflect/include/spirv/unified1/spirv.h")
     set(_ref_marker "${CMAKE_SOURCE_DIR}/third_party/spirv_reflect/.gte_fetched_ref")
 
+    set(_offline_marker "local-vendored-from-SPIRV-Reflect-main.zip")
+
     set(_already_staged FALSE)
-    if(EXISTS "${_h_marker}" AND EXISTS "${_c_marker}" AND EXISTS "${_spv_marker}" AND EXISTS "${_ref_marker}")
-        file(READ "${_ref_marker}" _staged_ref)
-        string(STRIP "${_staged_ref}" _staged_ref)
-        if(_staged_ref STREQUAL SPIRV_REFLECT_RELEASE_TAG)
+    if(EXISTS "${_h_marker}" AND EXISTS "${_c_marker}" AND EXISTS "${_spv_marker}")
+        if(SPIRV_REFLECT_RELEASE_TAG STREQUAL _offline_marker)
+            # Offline-vendoring marker (the default): any complete set of staged
+            # files is accepted, whatever ref they came from (hand-vendored copy,
+            # or a copy this module itself fetched via the fallback below).
             set(_already_staged TRUE)
+        elseif(EXISTS "${_ref_marker}")
+            file(READ "${_ref_marker}" _staged_ref)
+            string(STRIP "${_staged_ref}" _staged_ref)
+            if(_staged_ref STREQUAL SPIRV_REFLECT_RELEASE_TAG)
+                set(_already_staged TRUE)
+            endif()
         endif()
     endif()
 
     if(NOT SPIRV_REFLECT_FORCE_REDOWNLOAD AND _already_staged)
-        message(STATUS "SPIRV-Reflect: already present and matching ref '${SPIRV_REFLECT_RELEASE_TAG}' - skipping download.")
+        message(STATUS "SPIRV-Reflect: already present (ref '${SPIRV_REFLECT_RELEASE_TAG}') - skipping download.")
     else()
-        if(SPIRV_REFLECT_RELEASE_TAG STREQUAL "local-vendored-from-SPIRV-Reflect-main.zip")
-            message(FATAL_ERROR "SPIRV-Reflect: staged files are missing/stale and SPIRV_REFLECT_RELEASE_TAG is still the offline-vendoring marker - set -DSPIRV_REFLECT_RELEASE_TAG=<a real git ref, e.g. a pinned commit SHA> to fetch a real copy from GitHub (this requires internet access).")
+        set(_ref_to_fetch "${SPIRV_REFLECT_RELEASE_TAG}")
+        if(SPIRV_REFLECT_RELEASE_TAG STREQUAL _offline_marker)
+            # Last resort: nothing staged locally, so fetch from GitHub instead
+            # of failing. Requires internet access.
+            message(STATUS "SPIRV-Reflect: no local copy found and no real ref set - falling back to downloading '${SPIRV_REFLECT_FALLBACK_REF}' from GitHub.")
+            set(_ref_to_fetch "${SPIRV_REFLECT_FALLBACK_REF}")
         endif()
-        _spirv_reflect_download_and_stage("${SPIRV_REFLECT_RELEASE_TAG}")
+        _spirv_reflect_download_and_stage("${_ref_to_fetch}")
     endif()
 
     if(NOT TARGET spirv_reflect)

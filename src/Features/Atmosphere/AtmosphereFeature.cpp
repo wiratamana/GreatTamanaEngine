@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 namespace gte {
@@ -16,6 +17,7 @@ namespace {
 
 constexpr std::int32_t kSharedLutPriority = -10;
 constexpr std::int32_t kViewLutPriority = 0;
+constexpr std::int32_t kAerialVolumePriority = 20;
 constexpr std::int32_t kSkyBackgroundPriority = 100;
 constexpr std::int32_t kCompositePriority = -1000;
 
@@ -30,8 +32,9 @@ struct CompositePush {
     Mat4 invViewProjection;
     Vec4 cameraWorldPositionAndScale; // xyz = camera world position, w = world units per km.
     Vec4 strengthMaxDistanceExponent; // x = strength, y = max distance (km), z = depth exponent, w = unused.
+    Vec4 skyIntensityAndPad;          // x = sky intensity.
 };
-static_assert(sizeof(CompositePush) == 96, "layout differs from AtmosphereAerialPerspectiveComposite.comp");
+static_assert(sizeof(CompositePush) == 112, "layout differs from AtmosphereAerialPerspectiveComposite.comp");
 
 // Push constants of AtmosphereSkyBackground.frag.
 struct SkyBackgroundPush {
@@ -88,15 +91,23 @@ AtmosphereFrameUniforms MakeFrameUniforms(Registry& scene, const fx::View& view,
 
 AtmosphereFeature::AtmosphereFeature(fx::FeatureHost&) { }
 
+void AtmosphereFeature::ApplySettings(const AtmosphereSettings& candidate)
+{
+    m_settings = SanitizeAtmosphereSettings(candidate);
+}
+
 void AtmosphereFeature::Setup(fx::FeatureSetup& s)
 {
     s.PreOpaqueShared("AtmosphereSharedLut", kSharedLutPriority, [this](fx::SharedFrame& f) { SharedLuts(f); },
         fx::Gate{ "AtmosphereTransmittanceLutPass", "AtmosphereMultiScatteringLutPass" });
     s.PreOpaque("AtmosphereViewLut", kViewLutPriority, [this](fx::PreOpaqueFrame& f) { ViewLuts(f); },
-        fx::Gate{ "AtmosphereSkyViewLutPass", "AtmosphereAerialPerspectiveVolumePass" });
+        fx::Gate{ "AtmosphereSkyViewLutPass" });
     // Not a render pass: Always() keeps a toggle from silencing the sun light record.
     s.PreOpaque("Atmosphere.SunLight", kSunLightModulationPriority,
         [this](fx::PreOpaqueFrame& f) { PublishSunLight(f); }, fx::Gate::Always());
+    // After the sun cascades exist (PreOpaque), before the composite reads the volume.
+    s.PostOpaque("AtmosphereAerialVolume", kAerialVolumePriority, [this](fx::PostOpaqueFrame& f) { AerialVolume(f); },
+        fx::Gate{ "AtmosphereAerialPerspectiveVolumePass" });
     s.PostOpaque("DrawSkyBackground", kSkyBackgroundPriority, [this](fx::PostOpaqueFrame& f) { SkyBackground(f); });
     s.PostComposite("AtmosphereComposite", kCompositePriority, fx::Blend::AlphaOver,
         [this](fx::CompositeFrame& f) { Composite(f); },
@@ -159,7 +170,7 @@ void AtmosphereFeature::ViewLuts(fx::PreOpaqueFrame& f)
         if (skyView.IsValid()) {
             const bool done = f.Compute(m_skyViewShader, "AtmosphereSkyViewLutPass")
                                   .Params(m_sharedParams, shared->parameters)
-                                  .Params("frame", view.frameParams, luts.frameUniforms)
+                                  .Params("frame", view.skyFrameParams, luts.frameUniforms)
                                   .Bind("transmittanceLut", shared->transmittance)
                                   .Bind("multiScatteringLut", shared->multiScattering)
                                   .Bind("destinationImage", skyView)
@@ -170,23 +181,100 @@ void AtmosphereFeature::ViewLuts(fx::PreOpaqueFrame& f)
             }
         }
     }
-
-    if (f.PassEnabled("AtmosphereAerialPerspectiveVolumePass")) {
-        const fx::Texture volume = view.aerialVolume.Acquire(f);
-        if (volume.IsValid()) {
-            const bool done = f.Compute(m_aerialVolumeShader, "AtmosphereAerialPerspectiveVolumePass")
-                                  .Params(m_sharedParams, shared->parameters)
-                                  .Params("frame", view.frameParams, luts.frameUniforms)
-                                  .Bind("transmittanceLut", shared->transmittance)
-                                  .Bind("multiScatteringLut", shared->multiScattering)
-                                  .Bind("destinationVolume", volume)
-                                  .Dispatch(kAerialDispatchSize);
-            if (done) {
-                luts.aerialVolume = volume;
-            }
-        }
-    }
     m_viewLuts.Publish(f, luts);
+}
+
+void AtmosphereFeature::AerialVolume(fx::PostOpaqueFrame& f)
+{
+    const fx::View& v = f.View();
+    AtmosphereViewState& view = m_views.For(f.Scope());
+    view.aerialSnapshot = AtmosphereAerialSnapshot{};
+    view.aerialSnapshot.frameIndex = f.FrameIndex();
+
+    if (v.extent.width == 0 || v.extent.height == 0 || !v.invViewProjectionValid
+        || !f.PassEnabled("AtmosphereAerialPerspectiveVolumePass")) {
+        return;
+    }
+    const std::optional<AtmosphereSharedLuts> shared = m_sharedLuts.Fetch(f);
+    if (!shared) {
+        return;
+    }
+
+    AtmosphereFrameUniforms frame = MakeFrameUniforms(f.Scene(), v, m_settings);
+    AtmosphereAerialSnapshot snap = view.aerialSnapshot;
+
+    // Sun cascades of this view; air stays unshadowed when they are missing, rejected or from another sun.
+    const std::optional<SunShadowReceiver> published = m_receiver.Fetch(f);
+    snap.receiver = ClassifyAerialReceiver(published ? &*published : nullptr, frame.sunDirection);
+    if (snap.receiver == AerialReceiverState::Rejected) {
+        f.ReportOnce("Atmosphere: the sun shadow receiver data was rejected");
+    } else if (snap.receiver == AerialReceiverState::Mismatch) {
+        f.ReportOnce("Atmosphere: the sun shadow receiver does not match this frame's sun");
+    }
+    const SunShadowReceiver* receiver = snap.receiver == AerialReceiverState::Used ? &*published : nullptr;
+
+    const AerialScaleResult resolved = ResolveAerialScale(view.scaleState, receiver, m_settings, f.FrameIndex());
+    frame.aerialPerspectiveMaxDistanceKm = resolved.scale.maxDistanceKm;
+    frame.aerialPerspectiveScatteringExaggeration = resolved.scale.exaggeration;
+    const AerialShadowParamsGpu shadowParams = MakeAerialShadowParams(receiver, resolved.scale.shadowBlend);
+    const bool sampled = shadowParams.counts[0] > 0;
+
+    snap.maxDistanceKm = resolved.scale.maxDistanceKm;
+    snap.exaggeration = resolved.scale.exaggeration;
+    snap.shadowBlend = resolved.scale.shadowBlend;
+    snap.cascadeCount = shadowParams.counts[0];
+    snap.scaleHeld = resolved.held;
+    view.aerialSnapshot = snap;
+
+    const fx::Texture volume = view.aerialVolume.Acquire(f);
+    if (!volume.IsValid()) {
+        return;
+    }
+
+    // No cascades: the lean variant runs with 2 samplers and writes no shaft delta.
+    fx::Texture shaftDelta;
+    bool done = false;
+    if (sampled) {
+        shaftDelta = view.shaftDelta.Acquire(
+            f, Extent2D{ kAerialVolumeSize.width, kAerialVolumeSize.height }, PixelFormat::RGBA16_Float);
+        if (!shaftDelta.IsValid()) {
+            return;
+        }
+        const auto map = [&](std::uint32_t i) { return receiver->maps[std::min(i, receiver->cascadeCount - 1)]; };
+        done = f.Compute(m_aerialVolumeShader, "AtmosphereAerialPerspectiveVolumePass")
+                   .Params(view.aerialAtmosphereParams, shared->parameters)
+                   .Params("frame", view.aerialFrameParams, frame)
+                   .Params("shadow", view.aerialShadowParams, shadowParams)
+                   .Bind("transmittanceLut", shared->transmittance)
+                   .Bind("multiScatteringLut", shared->multiScattering)
+                   .Bind("shadowDepth0", fx::Depth(map(0)))
+                   .Bind("shadowDepth1", fx::Depth(map(1)))
+                   .Bind("shadowDepth2", fx::Depth(map(2)))
+                   .Bind("shadowDepth3", fx::Depth(map(3)))
+                   .Bind("destinationVolume", volume)
+                   .Bind("destinationShaftDelta", shaftDelta)
+                   .Dispatch(kAerialDispatchSize);
+    } else {
+        done = f.Compute(m_aerialVolumeUnshadowedShader, "AtmosphereAerialPerspectiveVolumePass")
+                   .Params(view.aerialAtmosphereParams, shared->parameters)
+                   .Params("frame", view.aerialFrameParams, frame)
+                   .Bind("transmittanceLut", shared->transmittance)
+                   .Bind("multiScatteringLut", shared->multiScattering)
+                   .Bind("destinationVolume", volume)
+                   .Dispatch(kAerialDispatchSize);
+    }
+    if (!done) {
+        f.ReportOnce("AtmosphereAerialPerspectiveVolumePass was refused");
+        return;
+    }
+    // The keep list stops the graph from culling a pass whose outputs nothing reads this frame.
+    const AtmosphereAerialResult result{ volume, shaftDelta, frame.aerialPerspectiveMaxDistanceKm,
+        frame.aerialPerspectiveDepthExponent };
+    if (sampled) {
+        m_aerial.Publish(f, result, { volume, shaftDelta });
+    } else {
+        m_aerial.Publish(f, result, { volume });
+    }
 }
 
 void AtmosphereFeature::PublishSunLight(fx::PreOpaqueFrame& f)
@@ -225,8 +313,8 @@ void AtmosphereFeature::Composite(fx::CompositeFrame& f)
     if (!f.View().invViewProjectionValid || !f.PassEnabled("AtmosphereAerialPerspectiveCompositePass")) {
         return;
     }
-    const std::optional<AtmosphereViewLuts> luts = m_viewLuts.Fetch(f);
-    if (!luts || !luts->aerialVolume.IsValid()) {
+    const std::optional<AtmosphereAerialResult> aerial = m_aerial.Fetch(f);
+    if (!aerial || !aerial->volume.IsValid()) {
         return;
     }
     const fx::Texture output = m_composited.Acquire(f, f.Extent(), PixelFormat::RGBA16_Float);
@@ -238,16 +326,30 @@ void AtmosphereFeature::Composite(fx::CompositeFrame& f)
     CompositePush push{};
     push.invViewProjection = view.invViewProjection;
     push.cameraWorldPositionAndScale = Vec4(view.eye, kWorldUnitsPerKilometer);
-    push.strengthMaxDistanceExponent = Vec4(m_settings.aerialPerspectiveStrength, m_settings.aerialPerspectiveMaxDistanceKm,
-        m_settings.aerialPerspectiveDepthExponent, 0.0f);
+    push.strengthMaxDistanceExponent =
+        Vec4(m_settings.aerialPerspectiveStrength, aerial->maxDistanceKm, aerial->depthExponent, 0.0f);
+    push.skyIntensityAndPad = Vec4(m_settings.skyIntensity, 0.0f, 0.0f, 0.0f);
 
-    const bool dispatched = f.Compute(m_compositeShader, "AtmosphereAerialPerspectiveCompositePass")
-                                .Push(push)
-                                .Bind("sourceColor", f.SceneColor())
-                                .Bind("sourceDepth", fx::Depth(f.SceneDepth()))
-                                .Bind("aerialPerspectiveVolume", luts->aerialVolume)
-                                .Bind("destinationImage", output)
-                                .Dispatch(f.Extent());
+    // An invalid shaft delta means the volume was made without shadows, so sky pixels pass through.
+    bool dispatched = false;
+    if (aerial->shaftDelta.IsValid()) {
+        dispatched = f.Compute(m_compositeShader, "AtmosphereAerialPerspectiveCompositePass")
+                         .Push(push)
+                         .Bind("sourceColor", f.SceneColor())
+                         .Bind("sourceDepth", fx::Depth(f.SceneDepth()))
+                         .Bind("aerialPerspectiveVolume", aerial->volume)
+                         .Bind("aerialShaftDelta", aerial->shaftDelta)
+                         .Bind("destinationImage", output)
+                         .Dispatch(f.Extent());
+    } else {
+        dispatched = f.Compute(m_compositeUnshadowedShader, "AtmosphereAerialPerspectiveCompositePass")
+                         .Push(push)
+                         .Bind("sourceColor", f.SceneColor())
+                         .Bind("sourceDepth", fx::Depth(f.SceneDepth()))
+                         .Bind("aerialPerspectiveVolume", aerial->volume)
+                         .Bind("destinationImage", output)
+                         .Dispatch(f.Extent());
+    }
     if (!dispatched) {
         return;
     }

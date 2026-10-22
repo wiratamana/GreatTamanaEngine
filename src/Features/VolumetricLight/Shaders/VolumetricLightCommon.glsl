@@ -3,9 +3,10 @@
 
 // Shared helpers of the VolumetricLight shaders. Distances are ray distances from the eye, in world units.
 #include "VolumetricFroxelMath.glsl"
+#include "InterleavedGradientNoise.glsl"
+#include "SceneDepthConstants.glsl"
 
 const float kPi = 3.14159265359;
-const float kSkyDepth = 0.999999;
 
 bool HasNonFinite(vec4 v)
 {
@@ -37,13 +38,6 @@ vec3 LinearToSrgb(vec3 c)
 {
     c = clamp(c, vec3(0.0), vec3(1.0));
     return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
-}
-
-// Cheap per-pixel, per-frame noise in [0,1).
-float InterleavedGradientNoise(vec2 p, uint frame)
-{
-    p += 5.588238 * float(frame & 63u);
-    return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
 }
 
 float Hash13(vec3 p)

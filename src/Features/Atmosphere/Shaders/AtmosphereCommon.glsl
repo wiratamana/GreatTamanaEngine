@@ -226,17 +226,30 @@ struct AtmosphereFrameUniforms {
     float aerialPerspectiveScatteringExaggeration;
 };
 
-// 1.0 when the sun is visible from the point, 0.0 when the planet blocks it (biased off the surface).
+// Moves a sample below the planet surface onto the surface; keeps its direction.
+vec3 ClampSampleToSurfaceKm(vec3 positionKm, float planetRadiusKm)
+{
+    float radialLengthKm = length(positionKm);
+    if (radialLengthKm <= 1e-20) {
+        return vec3(0.0, planetRadiusKm, 0.0);
+    }
+    if (radialLengthKm >= planetRadiusKm) {
+        return positionKm;
+    }
+    return positionKm * (planetRadiusKm / radialLengthKm);
+}
+
+// 1.0 when the sun is visible from the point, 0.0 when the planet blocks it.
 float PlanetVisibility(vec3 positionKm, vec3 directionToSun, float planetRadiusKm)
 {
     float radialLengthKm = length(positionKm);
-    vec3 upAtPosition = positionKm / max(radialLengthKm, 1e-20);
-
-    float surfaceEpsilonKm = max(planetRadiusKm * 1e-7, 1e-6);
-    vec3 biasedPositionKm = positionKm + upAtPosition * surfaceEpsilonKm;
-
-    float groundHitDistanceKm = RayIntersectsSphereNearest(biasedPositionKm, directionToSun, planetRadiusKm);
-    return (groundHitDistanceKm >= 0.0) ? 0.0 : 1.0;
+    float sunUpDot = dot(positionKm, directionToSun) / max(radialLengthKm, 1e-20);
+    if (sunUpDot >= 0.0) {
+        return 1.0;
+    }
+    // A ray going down hits the planet when its closest approach lies inside it.
+    float closestApproachKm = radialLengthKm * sqrt(max(1.0 - sunUpDot * sunUpDot, 0.0));
+    return closestApproachKm < planetRadiusKm ? 0.0 : 1.0;
 }
 
 // Keeps a bilinear sample inside the LUT's texel centers so it never blends with the far edge.

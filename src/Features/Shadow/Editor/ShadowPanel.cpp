@@ -139,7 +139,7 @@ bool BuildShadowPanel(EditorContext& /*ctx*/, ShadowSettings& edit, const Shadow
     changed |= ImGui::SliderFloat("Split lambda", &edit.splitLambda, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Blend fraction", &edit.cascadeBlendFraction, 0.0f, 0.5f);
     changed |= ImGui::SliderFloat("Fade fraction", &edit.distanceFadeFraction, 0.0f, 0.5f);
-    changed |= ImGui::DragFloat("Caster range", &edit.casterRange, 1.0f, 1.0f, 10000.0f);
+    changed |= ImGui::DragFloat("Caster range", &edit.casterRange, 1.0f, 1.0f, kMaxCasterRange);
     changed |= ImGui::Checkbox("Stabilize cascades", &edit.stabilizeCascades);
 
     ImGui::SeparatorText("SDSM");

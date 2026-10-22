@@ -1,10 +1,12 @@
 #version 450
 
-// Aerial perspective froxel volume: per (x, y, z) in-scattered light (RGB) and transmittance (A) from the camera.
-// One invocation per (x, y) column; it walks the Z slices in order because each slice builds on the previous total.
+// Aerial perspective froxel volume: in-scattered light (RGB) and transmittance (A), one invocation per (x, y) column.
+// Sun cascades shadow the in-scattering; the light they remove from the unshadowed sky goes to a delta image.
+// Dispatched only with at least one cascade; the no-shadow variant is AtmosphereAerialPerspectiveVolumeUnshadowed.comp.
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 #include "AtmosphereCommon.glsl"
+#include "InterleavedGradientNoise.glsl"
 
 layout(std430, binding = 0) readonly buffer AtmosphereParametersBlock {
     AtmosphereParametersGpu atmosphereParameters;
@@ -24,6 +26,65 @@ layout(binding = 3) uniform sampler2D multiScatteringLut;
 // RGB = accumulated in-scattered luminance (HDR), A = scalar transmittance.
 layout(binding = 4, rgba16f) uniform writeonly image3D destinationVolume;
 
+// Member names and order match AerialShadowParamsGpu.
+layout(std430, binding = 5) readonly buffer AerialShadowBlock {
+    mat4 cascadeViewProjection[4];
+    float cascadeSplitFar[4];
+    float cascadeBlendWidth[4];
+    float cascadeTexelWorld[4];
+    float cascadeDepthRange[4];
+    vec4 eyeAndUnitsPerKm;  // xyz world eye, w world units per km.
+    vec4 forwardAndBias;    // xyz camera forward, w bias in texels.
+    vec4 shadowParams;      // x filter texels, y 1 / map size, z shadow blend.
+    uvec4 counts;           // x cascade count, y taps per sample.
+} shadow;
+
+layout(binding = 6) uniform sampler2D shadowDepth0;
+layout(binding = 7) uniform sampler2D shadowDepth1;
+layout(binding = 8) uniform sampler2D shadowDepth2;
+layout(binding = 9) uniform sampler2D shadowDepth3;
+
+// RGB = light the shadows remove from the unshadowed sky along the column (never positive).
+layout(binding = 10, rgba16f) uniform writeonly image2D destinationShaftDelta;
+
+float OrthoMapDepthAt(int k, vec2 uv)
+{
+    switch (k) {
+    case 0: return textureLod(shadowDepth0, uv, 0.0).r;
+    case 1: return textureLod(shadowDepth1, uv, 0.0).r;
+    case 2: return textureLod(shadowDepth2, uv, 0.0).r;
+    default: return textureLod(shadowDepth3, uv, 0.0).r;
+    }
+}
+
+#define ORTHO_VIEW_PROJECTION(k) shadow.cascadeViewProjection[k]
+#define ORTHO_SPLIT_FAR(k) shadow.cascadeSplitFar[k]
+#define ORTHO_BLEND_WIDTH(k) shadow.cascadeBlendWidth[k]
+#define ORTHO_TEXEL_WORLD(k) shadow.cascadeTexelWorld[k]
+#define ORTHO_DEPTH_RANGE(k) shadow.cascadeDepthRange[k]
+#define ORTHO_EYE shadow.eyeAndUnitsPerKm.xyz
+#define ORTHO_FORWARD shadow.forwardAndBias.xyz
+#define ORTHO_COUNT shadow.counts.x
+#define ORTHO_TAPS shadow.counts.y
+#define ORTHO_BIAS_TEXELS shadow.forwardAndBias.w
+#define ORTHO_FILTER_TEXELS shadow.shadowParams.x
+#define ORTHO_INV_MAP_SIZE shadow.shadowParams.y
+
+#include "OrthoMapSetVisibility.glsl"
+
+// Below this ray transmittance a sample cannot change the image.
+const float kMinRayTransmittance = 1e-3;
+
+float maxComponent(vec3 v)
+{
+    return max(v.x, max(v.y, v.z));
+}
+
+bool IsFiniteVec3(vec3 v)
+{
+    return !(any(isnan(v)) || any(isinf(v)));
+}
+
 void main()
 {
     ivec3 volumeSize = imageSize(destinationVolume);
@@ -35,16 +96,14 @@ void main()
 
     float maxDistanceKm = frameUniforms.aerialPerspectiveMaxDistanceKm;
     float depthExponent = frameUniforms.aerialPerspectiveDepthExponent;
-    int samplesPerSlice = clamp(int(frameUniforms.aerialPerspectiveSamplesPerSliceAsFloat + 0.5), 1, 8);
+    int samplesPerSlice = clamp(int(frameUniforms.aerialPerspectiveSamplesPerSliceAsFloat + 0.5), 1, 16);
 
     // Artistic fog density multiplier, applied only here; never negative so scattering keeps its sign.
     float scatteringExaggeration = max(frameUniforms.aerialPerspectiveScatteringExaggeration, 0.0);
 
     float planetRadiusKm = atmosphereParameters.planetRadiusKm;
 
-    // Tiny offset keeps a camera exactly at ground level from giving a degenerate ray/sphere hit.
-    float surfaceOffsetKm = max(planetRadiusKm * 1e-7, 1e-6);
-    float viewHeightKm = max(frameUniforms.cameraPositionAtmosphere.y, planetRadiusKm) + surfaceOffsetKm;
+    float viewHeightKm = max(frameUniforms.cameraPositionAtmosphere.y, planetRadiusKm);
 
     vec3 rayOrigin = vec3(0.0, viewHeightKm, 0.0);
     vec3 viewDirection = FroxelColumnToViewRayDirection(froxelXY, volumeSize.xy, frameUniforms.invViewProjection);
@@ -57,11 +116,27 @@ void main()
     float miePhaseValue = CornetteShanksMiePhaseFunction(atmosphereParameters.miePhaseG, viewDotLight);
     vec3 sunRadiance = frameUniforms.sunIlluminance;
 
+    vec3 eyeWorld = shadow.eyeAndUnitsPerKm.xyz;
+    float worldUnitsPerKm = max(shadow.eyeAndUnitsPerKm.w, 1e-6);
+    vec3 worldStepPerKm = viewDirection * worldUnitsPerKm;
+    float shadowBlend = clamp(shadow.shadowParams.z, 0.0, 1.0);
+    float lastSplitFar = ORTHO_SPLIT_FAR(clamp(int(ORTHO_COUNT), 1, 4) - 1);
+
+    // Without exaggeration the shaft ray and the haze ray are the same ray.
+    bool unexaggerated = scatteringExaggeration == 1.0;
+    float invSamplesPerSlice = 1.0 / float(samplesPerSlice);
+    // With enough samples the cascade lookup runs on every second sample and the result is reused.
+    bool lookupEverySecondSample = samplesPerSlice >= 4;
+
     ivec2 transmittanceLutSize = textureSize(transmittanceLut, 0);
     ivec2 multiScatteringLutSize = textureSize(multiScatteringLut, 0);
 
     vec3 accumulatedLuminance = vec3(0.0);
     vec3 accumulatedTransmittance = vec3(1.0);
+    vec3 shaftDelta = vec3(0.0);
+    vec3 shaftTransmittance = vec3(1.0);
+    float sunVisibility = 1.0;
+    bool tapped = false;
 
     for (int slice = 0; slice < volumeSize.z; ++slice) {
         float distance0Km =
@@ -69,22 +144,18 @@ void main()
         float distance1Km =
             FroxelSliceToViewDepth(float(slice + 1), float(volumeSize.z), maxDistanceKm, depthExponent);
         float sliceLengthKm = max(distance1Km - distance0Km, 0.0);
+        float segmentLengthKm = sliceLengthKm * invSamplesPerSlice;
 
         for (int sampleIndex = 0; sampleIndex < samplesPerSlice; ++sampleIndex) {
-            float sampleU = (float(sampleIndex) + 0.5) / float(samplesPerSlice);
-            float sampleDistanceKm = mix(distance0Km, distance1Km, sampleU);
-            float segmentLengthKm = sliceLengthKm / float(samplesPerSlice);
+            float sampleDistanceKm = mix(distance0Km, distance1Km, (float(sampleIndex) + 0.5) * invSamplesPerSlice);
 
-            vec3 currentPositionKm = rayOrigin + viewDirection * sampleDistanceKm;
+            vec3 rawPositionKm = rayOrigin + viewDirection * sampleDistanceKm;
+            // Below sea level the air keeps its sea-level density and sun view.
+            vec3 currentPositionKm = ClampSampleToSurfaceKm(rawPositionKm, planetRadiusKm);
             float radialLengthKm = length(currentPositionKm);
             vec3 upAtSample = currentPositionKm / max(radialLengthKm, 1e-20);
-            float currentHeightKm = radialLengthKm - planetRadiusKm;
-
-            // Below the surface nothing more accumulates; later slices store the frozen total.
-            if (currentHeightKm < 0.0) {
-                break;
-            }
-            currentHeightKm = clamp(currentHeightKm, 0.0, atmosphereParameters.atmosphereThicknessKm);
+            float currentHeightKm =
+                clamp(radialLengthKm - planetRadiusKm, 0.0, atmosphereParameters.atmosphereThicknessKm);
 
             vec2 lutUv = HeightZenithToTransmittanceLutUv(
                 atmosphereParameters, currentHeightKm, dot(upAtSample, directionToSun));
@@ -92,33 +163,80 @@ void main()
             vec3 multipleScatteredLuminance =
                 texture(multiScatteringLut, ClampLutUvHalfTexelInset(lutUv, multiScatteringLutSize)).rgb;
 
-            // The exaggeration scales extinction and scattering together, so the haze color stays plausible.
-            vec3 extinctionCoefficient =
-                ComputeExtinctionCoefficientAtHeight(atmosphereParameters, currentHeightKm) * scatteringExaggeration;
-            vec3 scatterRayleigh =
-                atmosphereParameters.rayleighScattering * RayleighDensityAtHeight(atmosphereParameters, currentHeightKm)
-                * scatteringExaggeration;
-            vec3 scatterMie = atmosphereParameters.mieScattering * MieDensityAtHeight(atmosphereParameters, currentHeightKm)
-                * scatteringExaggeration;
+            // Physical coefficients; the exaggeration scales extinction and scattering together so the haze
+            // color stays plausible.
+            vec3 extinctionPhysical = ComputeExtinctionCoefficientAtHeight(atmosphereParameters, currentHeightKm);
+            vec3 scatterRayleighPhysical =
+                atmosphereParameters.rayleighScattering * RayleighDensityAtHeight(atmosphereParameters, currentHeightKm);
+            vec3 scatterMiePhysical =
+                atmosphereParameters.mieScattering * MieDensityAtHeight(atmosphereParameters, currentHeightKm);
+            vec3 extinctionCoefficient = extinctionPhysical * scatteringExaggeration;
+            vec3 scatterRayleigh = scatterRayleighPhysical * scatteringExaggeration;
+            vec3 scatterMie = scatterMiePhysical * scatteringExaggeration;
             vec3 totalScattering = scatterRayleigh + scatterMie;
 
             float planetVisibility = PlanetVisibility(currentPositionKm, directionToSun, planetRadiusKm);
+            vec3 shaftBefore = unexaggerated ? accumulatedTransmittance : shaftTransmittance;
+
+            // Mountain shadow on the sun path. The pattern is fixed per column, so nothing flickers.
+            // No taps where the sun is blocked by the planet, the ray is opaque, or beyond the last cascade.
+            if (!lookupEverySecondSample || (sampleIndex & 1) == 0) {
+                sunVisibility = 1.0;
+                tapped = false;
+                if (planetVisibility > 0.0
+                    && maxComponent(max(accumulatedTransmittance, shaftBefore)) > kMinRayTransmittance) {
+                    vec3 worldSample = eyeWorld + worldStepPerKm * sampleDistanceKm;
+                    if (dot(worldSample - ORTHO_EYE, ORTHO_FORWARD) < lastSplitFar) {
+                        float rotation = 6.2831853
+                            * InterleavedGradientNoise(vec2(froxelXY)
+                                    + vec2(float(slice) * 7.0 + float(sampleIndex) * 3.0, float(slice) * 13.0), 0u);
+                        sunVisibility = mix(1.0, OrthoMapSetVisibility(worldSample, rotation), shadowBlend);
+                        tapped = true;
+                    }
+                }
+            }
 
             vec3 phaseTimesScattering = scatterRayleigh * rayleighPhaseValue + scatterMie * miePhaseValue;
-            vec3 directSource = planetVisibility * transmittanceToSun * phaseTimesScattering;
+            vec3 sunTerm = planetVisibility * transmittanceToSun * phaseTimesScattering;
 
             // The multi-scattering LUT already holds the sun shadowing, so only local scattering is applied.
             vec3 multipleScatteringSource = multipleScatteredLuminance * totalScattering;
 
-            vec3 source = sunRadiance * (directSource + multipleScatteringSource);
-            vec3 segmentLuminance = IntegrateInscattering(source, extinctionCoefficient, segmentLengthKm);
+            vec3 source = sunRadiance * (sunVisibility * sunTerm + multipleScatteringSource);
 
-            accumulatedLuminance += accumulatedTransmittance * segmentLuminance;
-            accumulatedTransmittance *= exp(-extinctionCoefficient * segmentLengthKm);
+            // Closed-form in-scattering over the segment: source * (1 - T) / extinction.
+            vec3 segmentTransmittance = exp(-extinctionCoefficient * segmentLengthKm);
+            vec3 inscatterFactor = (vec3(1.0) - segmentTransmittance) / max(extinctionCoefficient, vec3(1e-5));
+
+            accumulatedLuminance += accumulatedTransmittance * (source * inscatterFactor);
+
+            if (unexaggerated) {
+                if (tapped) {
+                    shaftDelta += shaftBefore * (sunRadiance * ((sunVisibility - 1.0) * sunTerm) * inscatterFactor);
+                }
+            } else {
+                vec3 shaftSegmentTransmittance = exp(-extinctionPhysical * segmentLengthKm);
+                if (tapped) {
+                    // Light the shadows remove from the sky background, which is unexaggerated.
+                    vec3 phasePhysical = scatterRayleighPhysical * rayleighPhaseValue + scatterMiePhysical * miePhaseValue;
+                    vec3 removedSource = (sunVisibility - 1.0) * planetVisibility * transmittanceToSun * phasePhysical;
+                    vec3 shaftFactor = (vec3(1.0) - shaftSegmentTransmittance) / max(extinctionPhysical, vec3(1e-5));
+                    shaftDelta += shaftTransmittance * (sunRadiance * removedSource * shaftFactor);
+                }
+                shaftTransmittance *= shaftSegmentTransmittance;
+            }
+            accumulatedTransmittance *= segmentTransmittance;
         }
 
         // Scalar transmittance is the plain average of the R/G/B channels.
         float scalarTransmittance = (accumulatedTransmittance.r + accumulatedTransmittance.g + accumulatedTransmittance.b) / 3.0;
-        imageStore(destinationVolume, ivec3(froxelXY, slice), vec4(accumulatedLuminance, scalarTransmittance));
+        vec4 slab = vec4(accumulatedLuminance, scalarTransmittance);
+        if (!IsFiniteVec3(accumulatedLuminance) || isnan(scalarTransmittance) || isinf(scalarTransmittance)) {
+            slab = vec4(0.0, 0.0, 0.0, 1.0);
+        }
+        imageStore(destinationVolume, ivec3(froxelXY, slice), slab);
     }
+
+    vec3 delta = IsFiniteVec3(shaftDelta) ? min(shaftDelta, vec3(0.0)) : vec3(0.0);
+    imageStore(destinationShaftDelta, froxelXY, vec4(delta, 0.0));
 }

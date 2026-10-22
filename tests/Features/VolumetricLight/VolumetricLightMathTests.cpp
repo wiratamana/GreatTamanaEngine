@@ -268,42 +268,6 @@ SunShadowReceiver MakeReceiver(std::uint32_t count)
     return r;
 }
 
-TEST(VolumetricLightMathTest, ReceiverValidityRules)
-{
-    EXPECT_TRUE(VolumetricLightReceiverUsable(MakeReceiver(1)));
-    EXPECT_TRUE(VolumetricLightReceiverUsable(MakeReceiver(4)));
-    EXPECT_FALSE(VolumetricLightReceiverUsable(MakeReceiver(0)));
-    EXPECT_FALSE(VolumetricLightReceiverUsable(MakeReceiver(5)));
-
-    SunShadowReceiver r = MakeReceiver(3);
-    r.resolution = 0;
-    EXPECT_FALSE(VolumetricLightReceiverUsable(r));
-
-    r = MakeReceiver(3);
-    r.maps[1] = fx::Texture{};
-    EXPECT_FALSE(VolumetricLightReceiverUsable(r));
-
-    r = MakeReceiver(3);
-    r.viewProjection[2](1, 1) = kNaN;
-    EXPECT_FALSE(VolumetricLightReceiverUsable(r));
-
-    r = MakeReceiver(3);
-    r.splitFar[1] = 0.0f;
-    EXPECT_FALSE(VolumetricLightReceiverUsable(r));
-
-    r = MakeReceiver(3);
-    r.splitFar[2] = 5.0f; // Decreasing.
-    EXPECT_FALSE(VolumetricLightReceiverUsable(r));
-
-    r = MakeReceiver(3);
-    r.texelWorld[0] = 0.0f;
-    EXPECT_FALSE(VolumetricLightReceiverUsable(r));
-
-    r = MakeReceiver(3);
-    r.cameraForward = Vec3{ 0.0f, 0.0f, 2.0f };
-    EXPECT_FALSE(VolumetricLightReceiverUsable(r));
-}
-
 TEST(VolumetricLightMathTest, CascadePickSelectsBySplitAndBlendsNearTheEnd)
 {
     SunShadowReceiver r = MakeReceiver(4);

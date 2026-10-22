@@ -1,0 +1,123 @@
+#version 450
+
+// Aerial perspective froxel volume without sun shadows: in-scattered light (RGB) and transmittance (A) per column.
+// Kept free of any cascade code so register use stays low; the shadowed variant is AtmosphereAerialPerspectiveVolume.comp.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#include "AtmosphereCommon.glsl"
+
+layout(std430, binding = 0) readonly buffer AtmosphereParametersBlock {
+    AtmosphereParametersGpu atmosphereParameters;
+} params;
+// Alias so the code below can use the plain name of the block member.
+#define atmosphereParameters params.atmosphereParameters
+
+layout(std430, binding = 1) readonly buffer AtmosphereFrameUniformsBlock {
+    AtmosphereFrameUniforms frameUniforms;
+} frame;
+// Alias so the code below can use the plain name of the block member.
+#define frameUniforms frame.frameUniforms
+
+layout(binding = 2) uniform sampler2D transmittanceLut;
+layout(binding = 3) uniform sampler2D multiScatteringLut;
+
+// RGB = accumulated in-scattered luminance (HDR), A = scalar transmittance.
+layout(binding = 4, rgba16f) uniform writeonly image3D destinationVolume;
+
+void main()
+{
+    ivec3 volumeSize = imageSize(destinationVolume);
+    ivec2 froxelXY = ivec2(gl_GlobalInvocationID.xy);
+    if (froxelXY.x >= volumeSize.x || froxelXY.y >= volumeSize.y) {
+        // The dispatch is rounded up to whole groups; extra threads do nothing.
+        return;
+    }
+
+    float maxDistanceKm = frameUniforms.aerialPerspectiveMaxDistanceKm;
+    float depthExponent = frameUniforms.aerialPerspectiveDepthExponent;
+    int samplesPerSlice = clamp(int(frameUniforms.aerialPerspectiveSamplesPerSliceAsFloat + 0.5), 1, 16);
+
+    // Artistic fog density multiplier, applied only here; never negative so scattering keeps its sign.
+    float scatteringExaggeration = max(frameUniforms.aerialPerspectiveScatteringExaggeration, 0.0);
+
+    float planetRadiusKm = atmosphereParameters.planetRadiusKm;
+
+    float viewHeightKm = max(frameUniforms.cameraPositionAtmosphere.y, planetRadiusKm);
+
+    vec3 rayOrigin = vec3(0.0, viewHeightKm, 0.0);
+    vec3 viewDirection = FroxelColumnToViewRayDirection(froxelXY, volumeSize.xy, frameUniforms.invViewProjection);
+
+    // Already the direction from the scene toward the sun.
+    vec3 directionToSun = normalize(frameUniforms.sunDirection);
+
+    float viewDotLight = clamp(dot(viewDirection, directionToSun), -1.0, 1.0);
+    float rayleighPhaseValue = RayleighPhaseFunction(viewDotLight);
+    float miePhaseValue = CornetteShanksMiePhaseFunction(atmosphereParameters.miePhaseG, viewDotLight);
+    vec3 sunRadiance = frameUniforms.sunIlluminance;
+
+    ivec2 transmittanceLutSize = textureSize(transmittanceLut, 0);
+    ivec2 multiScatteringLutSize = textureSize(multiScatteringLut, 0);
+
+    vec3 accumulatedLuminance = vec3(0.0);
+    vec3 accumulatedTransmittance = vec3(1.0);
+
+    for (int slice = 0; slice < volumeSize.z; ++slice) {
+        float distance0Km =
+            FroxelSliceToViewDepth(float(slice), float(volumeSize.z), maxDistanceKm, depthExponent);
+        float distance1Km =
+            FroxelSliceToViewDepth(float(slice + 1), float(volumeSize.z), maxDistanceKm, depthExponent);
+        float sliceLengthKm = max(distance1Km - distance0Km, 0.0);
+        float segmentLengthKm = sliceLengthKm / float(samplesPerSlice);
+
+        for (int sampleIndex = 0; sampleIndex < samplesPerSlice; ++sampleIndex) {
+            float sampleU = (float(sampleIndex) + 0.5) / float(samplesPerSlice);
+            float sampleDistanceKm = mix(distance0Km, distance1Km, sampleU);
+
+            vec3 rawPositionKm = rayOrigin + viewDirection * sampleDistanceKm;
+            // Below sea level the air keeps its sea-level density and sun view.
+            vec3 currentPositionKm = ClampSampleToSurfaceKm(rawPositionKm, planetRadiusKm);
+            float radialLengthKm = length(currentPositionKm);
+            vec3 upAtSample = currentPositionKm / max(radialLengthKm, 1e-20);
+            float currentHeightKm =
+                clamp(radialLengthKm - planetRadiusKm, 0.0, atmosphereParameters.atmosphereThicknessKm);
+
+            vec2 lutUv = HeightZenithToTransmittanceLutUv(
+                atmosphereParameters, currentHeightKm, dot(upAtSample, directionToSun));
+            vec3 transmittanceToSun = texture(transmittanceLut, ClampLutUvHalfTexelInset(lutUv, transmittanceLutSize)).rgb;
+            vec3 multipleScatteredLuminance =
+                texture(multiScatteringLut, ClampLutUvHalfTexelInset(lutUv, multiScatteringLutSize)).rgb;
+
+            // The exaggeration scales extinction and scattering together, so the haze color stays plausible.
+            vec3 extinctionCoefficient =
+                ComputeExtinctionCoefficientAtHeight(atmosphereParameters, currentHeightKm) * scatteringExaggeration;
+            vec3 scatterRayleigh =
+                atmosphereParameters.rayleighScattering * RayleighDensityAtHeight(atmosphereParameters, currentHeightKm)
+                * scatteringExaggeration;
+            vec3 scatterMie = atmosphereParameters.mieScattering * MieDensityAtHeight(atmosphereParameters, currentHeightKm)
+                * scatteringExaggeration;
+            vec3 totalScattering = scatterRayleigh + scatterMie;
+
+            float planetVisibility = PlanetVisibility(currentPositionKm, directionToSun, planetRadiusKm);
+
+            vec3 phaseTimesScattering = scatterRayleigh * rayleighPhaseValue + scatterMie * miePhaseValue;
+            vec3 directSource = planetVisibility * transmittanceToSun * phaseTimesScattering;
+
+            // The multi-scattering LUT already holds the sun shadowing, so only local scattering is applied.
+            vec3 multipleScatteringSource = multipleScatteredLuminance * totalScattering;
+
+            vec3 source = sunRadiance * (directSource + multipleScatteringSource);
+            vec3 segmentLuminance = IntegrateInscattering(source, extinctionCoefficient, segmentLengthKm);
+
+            accumulatedLuminance += accumulatedTransmittance * segmentLuminance;
+            accumulatedTransmittance *= exp(-extinctionCoefficient * segmentLengthKm);
+        }
+
+        // Scalar transmittance is the plain average of the R/G/B channels.
+        float scalarTransmittance = (accumulatedTransmittance.r + accumulatedTransmittance.g + accumulatedTransmittance.b) / 3.0;
+        vec4 slab = vec4(accumulatedLuminance, scalarTransmittance);
+        if (any(isnan(slab)) || any(isinf(slab))) {
+            slab = vec4(0.0, 0.0, 0.0, 1.0);
+        }
+        imageStore(destinationVolume, ivec3(froxelXY, slice), slab);
+    }
+}

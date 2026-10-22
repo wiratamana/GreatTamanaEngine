@@ -47,7 +47,7 @@ void main()
     ivec2 depthSize = textureSize(sceneDepth, 0);
     ivec2 q = clamp(ivec2(inUv * vec2(depthSize)), ivec2(0), depthSize - ivec2(1));
     float depth = texelFetch(sceneDepth, q, 0).r;
-    if (depth >= kEmptyDepth) {
+    if (depth >= kClearDepthThreshold) {
         outColor = vec4(0.0);
         return;
     }

@@ -82,9 +82,6 @@ VolumetricLightSliceIntegral VolumetricLightIntegrateSlice(
 // smoothstep(-2 deg, 5 deg, sun elevation). A non-finite direction counts as straight up.
 float VolumetricLightSunFade(const Vec3& directionTowardSun) noexcept;
 
-// Whether the receiver can be sampled: counts, maps and every used cascade are valid and finite.
-bool VolumetricLightReceiverUsable(const SunShadowReceiver& receiver) noexcept;
-
 // Cascade a planar view depth falls in; `blendToNext` 0 means only `index`.
 struct VolumetricLightCascadePick {
     std::uint32_t index = 0;

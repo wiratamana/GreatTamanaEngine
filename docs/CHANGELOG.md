@@ -4,6 +4,35 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## Sun occlusion, aerial perspective and light shafts for large and small scenes (branch `feature/hdr-tonemap-impl`)
+
+- The aerial volume march no longer stops at world y = 0: samples below sea level are clamped onto the surface (sea-level
+  density, sun view of the surface point), so valleys and low terrain get haze. `PlanetVisibility` uses a stable
+  closest-approach test; the CPU oracle gained `ClampSampleToSurfaceKm` and `PlanetVisibility`.
+- Aerial Perspective Strength has no practical upper limit (ceiling 1e30). The composite clamps transmittance to 0..1 and the output to 0..65504.
+- Shadow `casterRange` is the extra distance toward the sun beyond a cascade's bounding sphere (cascade depth range =
+  `2 * radius + casterRange`). Range 1..100000, default 200. `maxDistance` default is 20000. See
+  [shadow-mapping.md](conventions/shadow-mapping.md).
+- `SunShadowReceiver` has `depthFitted` (splits fitted to a measured range) and one shared `SunShadowReceiverUsable()` check used
+  by VolumetricLight and Atmosphere.
+- The aerial perspective volume runs in PostOpaque (priority 20) and reads the sun cascades, so mountains shadow the air. Air
+  outside all cascades counts as lit. The cascade lookup is shared GLSL (`OrthoMapSetVisibility.glsl`).
+- The volume pass also writes a shaft delta image: the sunlight the shadows remove from the sky. The composite changes sky pixels
+  only by this delta, so sky never gains light and strength 0 leaves it untouched.
+- Auto scale (`autoScale`, default on) derives the max distance, exaggeration and air shadow blend from the visible depth range:
+  small scenes get 0.5 km, 8x, blend 0; large scenes up to 30 km, 1x, blend 1.
+- Atmosphere settings are stored only through a sanitizer. New HTTP keys: `autoScale`, `aerialPerspectiveStrength`,
+  `aerialPerspectiveMaxDistanceKm`, `aerialPerspectiveDepthExponent`, `aerialPerspectiveSamplesPerSlice`,
+  `aerialPerspectiveScatteringExaggeration`. New read-only keys per view: `aerial.maxDistanceKm`, `aerial.exaggeration`,
+  `aerial.shadowBlend`, `aerial.cascadeCount`, `aerial.receiver`, `aerial.scaleHeld`, `aerial.frameIndex`.
+- Shared GLSL: `SceneDepthConstants.glsl` (one clear-depth threshold), `InterleavedGradientNoise.glsl` (one noise definition) and
+  `OrthoMapSetVisibility.glsl`.
+- The Atmosphere panel edits a copy and applies it through the sanitizer. Samples per slice go up to 16.
+- The volume pass takes no shadow taps for samples where the planet blocks the sun, the ray transmittance is below 1e-3 or the
+  sample lies beyond the last cascade split; `kAerialShadowTaps` is 2 (rotated per sample).
+- The compositor's "did not declare ReadTexture()" checks run only for raw project callbacks. Kit features declare every sample
+  through named bindings, so `VolumetricLight.Volume` and `ToneMapping` no longer warn or assert in Debug.
+
 ## Atmosphere sun and sky light (branch `feature/hdr-tonemap-impl`)
 
 - Sun colour, sun brightness and sky ambient of materials and light shafts follow the Atmosphere. A sun below the horizon is

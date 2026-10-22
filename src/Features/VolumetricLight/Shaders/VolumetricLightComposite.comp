@@ -31,7 +31,7 @@ void main()
     // Sky pixels see a fraction of the fog column.
     float maxDistance = pc.eyeAndMaxDistance.w;
     float distance = maxDistance * uintBitsToFloat(pc.frameAndDebug.z);
-    if (depth < kSkyDepth) {
+    if (depth < kClearDepthThreshold) {
         vec4 w = pc.invViewProjection * vec4(uv * 2.0 - 1.0, depth, 1.0);
         distance = min(length(w.xyz / w.w - pc.eyeAndMaxDistance.xyz), maxDistance);
     }

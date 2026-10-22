@@ -15,6 +15,9 @@ inline constexpr const char* kShadowFeatureName = "Shadow";
 
 inline constexpr std::uint32_t kMaxShadowCascades = 4;
 
+// Upper bound of ShadowSettings::casterRange, world units. Needed range is relief / sin(sun elevation).
+inline constexpr float kMaxCasterRange = 100000.0f;
+
 // Frames a depth-range sample stays usable without a newer one.
 inline constexpr std::uint64_t kSdsmMaxHoldFrames = 120;
 
@@ -33,11 +36,11 @@ enum class ShadowFrameStatus : std::uint8_t {
 struct ShadowSettings {
     std::uint32_t cascadeCount = 4;     // 1..4
     std::uint32_t mapResolution = 2048; // Per cascade: 512, 1024, 2048 or 4096.
-    float maxDistance = 150.0f;         // World units, clamped to the camera far plane.
+    float maxDistance = 20000.0f;       // World units, clamped to the camera far plane.
     float splitLambda = 0.85f;          // 0 = uniform splits, 1 = logarithmic.
     float cascadeBlendFraction = 0.10f; // Of each cascade length, 0..0.5.
     float distanceFadeFraction = 0.10f; // Of maxDistance, 0..0.5.
-    float casterRange = 200.0f;         // How far toward the sun a cascade still catches casters.
+    float casterRange = 200.0f;         // Extra distance toward the sun beyond a cascade's bounding sphere.
     bool cullCasters = true;
     float casterCullPaddingFraction = 0.25f; // Caster box padding, fraction of its largest extent.
     float constBiasTexels = 1.5f;

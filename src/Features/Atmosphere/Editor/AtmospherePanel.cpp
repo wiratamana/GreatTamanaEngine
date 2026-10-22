@@ -1,52 +1,66 @@
 #include "AtmospherePanel.h"
 
 #include "../../../Editor/EditorContext.h"
+#include "../AtmosphereParameters.h"
 #include "../AtmosphereTypes.h"
 
 #include <imgui.h>
 
 namespace gte {
 
-void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings)
+bool BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& edit, const AtmosphereAerialSnapshot& effective)
 {
+    bool changed = false;
     ImGui::Begin("Atmosphere");
 
-    ImGui::TextDisabled("Physical Sky Atmosphere controls (see AGENTS.md).");
+    ImGui::TextDisabled("Physical sky atmosphere controls.");
 
-    // Mirrors Unreal Engine's Sky Atmosphere component layout.
     ImGui::SeparatorText("Planet");
-    ImGui::ColorEdit3("Ground Albedo", &settings.groundAlbedo.x);
-    ImGui::DragFloat("Ground Radius (km)", &settings.planetRadiusKm, 1.0f, 1.0f, 50000.0f);
+    changed |= ImGui::ColorEdit3("Ground Albedo", &edit.groundAlbedo.x);
+    changed |= ImGui::DragFloat("Ground Radius (km)", &edit.planetRadiusKm, 1.0f, 1.0f, 50000.0f);
 
     ImGui::SeparatorText("Atmosphere");
-    ImGui::DragFloat("Atmosphere Height (km)", &settings.atmosphereThicknessKm, 0.5f, 1.0f, 500.0f);
-    ImGui::DragFloat("Multi-Scattering", &settings.multiScatteringStrength, 0.01f, 0.0f, 10.0f);
+    changed |= ImGui::DragFloat("Atmosphere Height (km)", &edit.atmosphereThicknessKm, 0.5f, 1.0f, 500.0f);
+    changed |= ImGui::DragFloat("Multi-Scattering", &edit.multiScatteringStrength, 0.01f, 0.0f, 10.0f);
 
     ImGui::SeparatorText("Rayleigh");
-    ImGui::ColorEdit3("Scattering##Rayleigh", &settings.rayleighScattering.x);
-    ImGui::DragFloat("Exponential Distribution (km)##Rayleigh", &settings.rayleighScaleHeightKm, 0.05f, 0.01f, 100.0f);
+    changed |= ImGui::ColorEdit3("Scattering##Rayleigh", &edit.rayleighScattering.x);
+    changed |= ImGui::DragFloat("Exponential Distribution (km)##Rayleigh", &edit.rayleighScaleHeightKm, 0.05f, 0.01f, 100.0f);
 
     ImGui::SeparatorText("Mie");
-    ImGui::ColorEdit3("Scattering##Mie", &settings.mieScattering.x);
-    ImGui::ColorEdit3("Absorption##Mie", &settings.mieAbsorption.x);
-    ImGui::SliderFloat("Anisotropy##Mie", &settings.miePhaseG, -0.99f, 0.99f);
-    ImGui::DragFloat("Exponential Distribution (km)##Mie", &settings.mieScaleHeightKm, 0.05f, 0.01f, 100.0f);
+    changed |= ImGui::ColorEdit3("Scattering##Mie", &edit.mieScattering.x);
+    changed |= ImGui::ColorEdit3("Absorption##Mie", &edit.mieAbsorption.x);
+    changed |= ImGui::SliderFloat("Anisotropy##Mie", &edit.miePhaseG, -0.99f, 0.99f);
+    changed |= ImGui::DragFloat("Exponential Distribution (km)##Mie", &edit.mieScaleHeightKm, 0.05f, 0.01f, 100.0f);
 
     ImGui::SeparatorText("Absorption");
-    ImGui::ColorEdit3("Absorption##Ozone", &settings.ozoneAbsorption.x);
-    ImGui::DragFloat("Tent Distribution Center (km)", &settings.ozoneTentCenterKm, 0.5f, 0.0f, 100.0f);
-    ImGui::DragFloat("Tent Distribution Half-Width (km)", &settings.ozoneTentHalfWidthKm, 0.5f, 0.0f, 100.0f);
+    changed |= ImGui::ColorEdit3("Absorption##Ozone", &edit.ozoneAbsorption.x);
+    changed |= ImGui::DragFloat("Tent Distribution Center (km)", &edit.ozoneTentCenterKm, 0.5f, 0.0f, 100.0f);
+    changed |= ImGui::DragFloat("Tent Distribution Half-Width (km)", &edit.ozoneTentHalfWidthKm, 0.5f, 0.0f, 100.0f);
 
     ImGui::SeparatorText("Art Direction");
 
-    ImGui::DragFloat("Aerial Perspective Strength", &settings.aerialPerspectiveStrength, 0.01f, 0.0f, 2.0f);
-    ImGui::DragFloat("Aerial Max Distance (km)", &settings.aerialPerspectiveMaxDistanceKm, 0.01f, 0.01f, 50.0f);
-    ImGui::DragFloat("Aerial Depth Exponent", &settings.aerialPerspectiveDepthExponent, 0.05f, 1.0f, 4.0f);
-    ImGui::SliderInt("Aerial Samples Per Slice", &settings.aerialPerspectiveSamplesPerSlice, 1, 8);
-    ImGui::DragFloat(
-        "Aerial Scattering Exaggeration", &settings.aerialPerspectiveScatteringExaggeration, 0.1f, 0.1f, 50.0f);
-    ImGui::DragFloat("Sky Intensity", &settings.skyIntensity, 0.1f, 0.0f, 50.0f);
-    ImGui::Checkbox("Scene Light Follows Atmosphere", &settings.sceneLightFollowsAtmosphere);
+    changed |= ImGui::DragFloat("Aerial Perspective Strength", &edit.aerialPerspectiveStrength, 0.05f, 0.0f,
+        kMaxAerialPerspectiveStrength, "%.2f");
+    ImGui::TextDisabled("Strength 1 is physical, 0 is off, there is no practical upper limit.");
+    changed |= ImGui::Checkbox("Aerial Auto Scale", &edit.autoScale);
+    ImGui::TextDisabled("Auto scale fits the haze range and exaggeration to the visible depth.");
+
+    // With auto scale on, the two sliders are fallbacks; show what the Game view really uses.
+    ImGui::BeginDisabled(edit.autoScale);
+    changed |= ImGui::DragFloat("Aerial Max Distance (km)", &edit.aerialPerspectiveMaxDistanceKm, 0.01f, 0.01f, 50.0f);
+    changed |= ImGui::DragFloat(
+        "Aerial Scattering Exaggeration", &edit.aerialPerspectiveScatteringExaggeration, 0.1f, 0.1f, 50.0f);
+    ImGui::EndDisabled();
+    if (edit.autoScale) {
+        ImGui::TextDisabled("In use: %.2f km, %.2fx, air shadows %.0f%%", effective.maxDistanceKm,
+            effective.exaggeration, effective.shadowBlend * 100.0f);
+    }
+
+    changed |= ImGui::DragFloat("Aerial Depth Exponent", &edit.aerialPerspectiveDepthExponent, 0.05f, 1.0f, 4.0f);
+    changed |= ImGui::SliderInt("Aerial Samples Per Slice", &edit.aerialPerspectiveSamplesPerSlice, 1, 16);
+    changed |= ImGui::DragFloat("Sky Intensity", &edit.skyIntensity, 0.1f, 0.0f, 50.0f);
+    changed |= ImGui::Checkbox("Scene Light Follows Atmosphere", &edit.sceneLightFollowsAtmosphere);
     ImGui::TextDisabled("Sun and sky light of surfaces and light shafts fade and redden with the sun height.");
 
     ImGui::TextDisabled(
@@ -55,6 +69,7 @@ void BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& settings)
         "Color and illuminance describe the sun straight overhead.");
 
     ImGui::End();
+    return changed;
 }
 
 } // namespace gte

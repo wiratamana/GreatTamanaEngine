@@ -1,12 +1,9 @@
 // Helpers shared by screen-space compute and fragment shaders. Depth 1.0 means "no surface".
 // Include once per shader, directly or through another include.
-const float kEmptyDepth = 0.999999;
-const float kPi = 3.14159265359;
+#include "InterleavedGradientNoise.glsl"
+#include "SceneDepthConstants.glsl"
 
-float InterleavedGradientNoise(vec2 pixel)
-{
-    return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
-}
+const float kPi = 3.14159265359;
 
 float FetchDepth(sampler2D depthTex, ivec2 p)
 {
@@ -31,10 +28,10 @@ vec3 NormalFromDepth(sampler2D depthTex, mat4 invViewProjection, ivec2 p, float 
     float dxn = FetchDepth(depthTex, p - ivec2(1, 0));
     float dyp = FetchDepth(depthTex, p + ivec2(0, 1));
     float dyn = FetchDepth(depthTex, p - ivec2(0, 1));
-    float errXp = dxp >= kEmptyDepth ? 1e6 : abs(dxp - depth);
-    float errXn = dxn >= kEmptyDepth ? 1e6 : abs(depth - dxn);
-    float errYp = dyp >= kEmptyDepth ? 1e6 : abs(dyp - depth);
-    float errYn = dyn >= kEmptyDepth ? 1e6 : abs(depth - dyn);
+    float errXp = dxp >= kClearDepthThreshold ? 1e6 : abs(dxp - depth);
+    float errXn = dxn >= kClearDepthThreshold ? 1e6 : abs(depth - dxn);
+    float errYp = dyp >= kClearDepthThreshold ? 1e6 : abs(dyp - depth);
+    float errYn = dyn >= kClearDepthThreshold ? 1e6 : abs(depth - dyn);
     if (min(errXp, errXn) > 1e5 || min(errYp, errYn) > 1e5) {
         return toEye;
     }

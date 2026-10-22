@@ -27,7 +27,7 @@ layout(binding = 5) uniform sampler2D sceneDepth;
 layout(binding = 6, r8) uniform writeonly image2D maskOutput;    // 0 = lit, 1 = shadowed.
 layout(binding = 7, r8) uniform writeonly image2D cascadeOutput; // (cascade index + 1) / 8, 0 = none.
 
-const float kSkyDepth = 0.999999;
+#include "SceneDepthConstants.glsl"
 
 ivec2 gDepthSize;
 
@@ -120,7 +120,7 @@ void main()
     vec2 uv = (vec2(texel) + 0.5) / vec2(maskSize);
     ivec2 depthTexel = clamp(ivec2(uv * vec2(gDepthSize)), ivec2(0), gDepthSize - ivec2(1));
     float depth = FetchDepth(depthTexel);
-    if (depth >= kSkyDepth) {
+    if (depth >= kClearDepthThreshold) {
         imageStore(maskOutput, texel, vec4(0.0));
         imageStore(cascadeOutput, texel, vec4(0.0));
         return;

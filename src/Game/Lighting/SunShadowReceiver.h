@@ -4,7 +4,9 @@
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 
 namespace gte {
@@ -38,6 +40,38 @@ struct SunShadowReceiver {
     float normalOffsetTexels = 0.0f;
     float slopeBiasTexels = 0.0f;    // Already max(slope, filter radius).
     std::uint32_t filterSamples = 1;
+    bool depthFitted = false;        // Splits were fitted to a measured visible depth range.
 };
+
+// True when every cascade the receiver claims is complete and finite, so a shader can sample it.
+inline bool SunShadowReceiverUsable(const SunShadowReceiver& r) noexcept
+{
+    constexpr float kForwardTolerance = 0.01f;
+    const auto finite = [](const Vec3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); };
+    const auto finiteMat = [](const Mat4& m) {
+        const float* data = m.Data();
+        return std::all_of(data, data + 16, [](float f) { return std::isfinite(f); });
+    };
+
+    if (r.cascadeCount < 1 || r.cascadeCount > kSunShadowReceiverMaxCascades || r.resolution == 0) {
+        return false;
+    }
+    if (!finite(r.cameraPosition) || !finite(r.cameraForward)
+        || std::abs(Length(r.cameraForward) - 1.0f) > kForwardTolerance) {
+        return false;
+    }
+    float previousSplit = 0.0f;
+    for (std::uint32_t c = 0; c < r.cascadeCount; ++c) {
+        const bool good = r.maps[c].IsValid() && finiteMat(r.viewProjection[c]) && std::isfinite(r.splitFar[c])
+            && r.splitFar[c] > 0.0f && r.splitFar[c] >= previousSplit && std::isfinite(r.blendWidth[c])
+            && std::isfinite(r.texelWorld[c]) && r.texelWorld[c] > 0.0f && std::isfinite(r.depthRange[c])
+            && r.depthRange[c] > 0.0f;
+        if (!good) {
+            return false;
+        }
+        previousSplit = r.splitFar[c];
+    }
+    return true;
+}
 
 } // namespace gte

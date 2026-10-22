@@ -32,7 +32,7 @@ void main()
     int div = int(max(params.counts.x, 1u));
     ivec2 pixel = min(p * div, depthSize - ivec2(1));
     float depth = FetchDepth(sceneDepth, pixel);
-    if (depth >= kEmptyDepth) {
+    if (depth >= kClearDepthThreshold) {
         imageStore(ssgiColorOut, p, vec4(0.0));
         imageStore(ssgiNormalOut, p, vec4(0.0));
         return;
@@ -49,7 +49,7 @@ void main()
     for (int y = 0; y < div; ++y) {
         for (int x = 0; x < div; ++x) {
             ivec2 q = min(pixel + ivec2(x, y), depthSize - ivec2(1));
-            if (FetchDepth(sceneDepth, q) >= kEmptyDepth) {
+            if (FetchDepth(sceneDepth, q) >= kClearDepthThreshold) {
                 continue;
             }
             sum += texelFetch(sceneColor, min(q, colorSize - ivec2(1)), 0).rgb;

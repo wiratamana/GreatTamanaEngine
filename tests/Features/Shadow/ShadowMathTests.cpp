@@ -400,6 +400,61 @@ TEST(ShadowMathTest, BuildShadowCascadesEveryCascadeContainsTheViewAxisPointsOfI
     }
 }
 
+TEST(ShadowMathTest, CasterRangeSurvivesSanitizeUpToTheCap)
+{
+    ShadowSettings settings;
+    settings.casterRange = 50000.0f;
+    EXPECT_FLOAT_EQ(SanitizeShadowSettings(settings).casterRange, 50000.0f);
+    settings.casterRange = 200000.0f;
+    EXPECT_FLOAT_EQ(SanitizeShadowSettings(settings).casterRange, kMaxCasterRange);
+}
+
+TEST(ShadowMathTest, CascadeDepthRangeIsTwiceTheRadiusPlusTheCasterRange)
+{
+    const ShadowViewFrustum frustum = MakeCameraFrustum(Vec3(0.0f, 2.0f, -10.0f), Vec3::Zero());
+    ASSERT_TRUE(frustum.valid);
+    ShadowSettings settings;
+    settings.casterRange = 321.0f;
+    const ShadowSettings safe = SanitizeShadowSettings(settings);
+
+    const ShadowCascadeSet set = BuildShadowCascades(frustum, Normalize(Vec3(0.4f, 0.7f, 0.3f)), safe, 2048);
+    ASSERT_TRUE(set.valid);
+    for (std::uint32_t c = 0; c < set.count; ++c) {
+        const ShadowCascade& cascade = set.cascades[c];
+        EXPECT_NEAR(cascade.depthRange, 2.0f * cascade.radius + 321.0f, 1e-2f * (1.0f + cascade.radius)) << c;
+    }
+}
+
+TEST(ShadowMathTest, CasterRangeBoundsTheNearPlaneBeyondTheSphere)
+{
+    const Vec3 eye(0.0f, 2.0f, -10.0f);
+    const ShadowViewFrustum frustum = MakeCameraFrustum(eye, Vec3::Zero());
+    ASSERT_TRUE(frustum.valid);
+    ShadowSettings settings;
+    settings.casterRange = 25000.0f;
+    const ShadowSettings safe = SanitizeShadowSettings(settings);
+    const Vec3 sun = Normalize(Vec3(0.4f, 0.7f, 0.3f));
+
+    const ShadowCascadeSet set = BuildShadowCascades(frustum, sun, safe, 2048);
+    ASSERT_TRUE(set.valid);
+    for (std::uint32_t c = 0; c < set.count; ++c) {
+        const ShadowCascade& cascade = set.cascades[c];
+        Vec3 center = Vec3::Zero();
+        for (const Vec3& ray : frustum.rays) {
+            center += ray * cascade.sliceStart + ray * cascade.sliceEnd;
+        }
+        center = eye + center * 0.125f;
+
+        const auto ndcZ = [&](float distanceTowardSun) {
+            const Vec4 clip = cascade.viewProjection * Vec4(center + sun * distanceTowardSun, 1.0f);
+            return clip.z / clip.w;
+        };
+        EXPECT_GE(ndcZ(cascade.radius + 0.99f * safe.casterRange), 0.0f) << c;
+        EXPECT_LE(ndcZ(cascade.radius + 0.99f * safe.casterRange), 1.0f) << c;
+        EXPECT_LT(ndcZ(cascade.radius + 1.01f * safe.casterRange), 0.0f) << c;
+    }
+}
+
 TEST(ShadowMathTest, BuildShadowCascadesStabilizationOnlySetsGridIndicesWhenEnabled)
 {
     const Vec3 eye(123.4f, 5.0f, -77.7f);

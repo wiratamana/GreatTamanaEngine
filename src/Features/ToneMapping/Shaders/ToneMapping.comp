@@ -4,6 +4,8 @@
 // writes display values into an 8-bit image.
 layout(local_size_x = 16, local_size_y = 16) in;
 
+#include "InterleavedGradientNoise.glsl"
+
 layout(push_constant) uniform PushConstants {
     vec4 exposureModeSaturationDither; // x exposure, y mode (0 Clamp, 1 Aces, 2 PbrNeutral), z saturation, w dither (8-bit steps)
     uvec4 frame;                       // x frame index
@@ -40,12 +42,6 @@ vec3 PbrNeutral(vec3 color)
     color *= newPeak / peak;
     float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
     return mix(color, newPeak * vec3(1.0), g);
-}
-
-float InterleavedGradientNoise(vec2 p, uint frame)
-{
-    p += 5.588238 * float(frame & 63u);
-    return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
 }
 
 void main()

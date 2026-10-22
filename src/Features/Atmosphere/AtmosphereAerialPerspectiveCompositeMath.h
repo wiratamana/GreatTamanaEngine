@@ -5,21 +5,24 @@
 namespace gte {
 
 // CPU reference for the per-pixel branch and final blend of AtmosphereAerialPerspectiveComposite.comp; the shader
-// mirrors it. Pure functions. The volume sampling stays in the shader:
-// `sampledAerialRgb`/`sampledAerialA` are the already-sampled, already-faded texel values.
+// mirrors it. Pure functions. The volume and shaft delta sampling stay in the shader: the sampled values passed in
+// are already filtered.
 
-// Depth at or beyond this means nothing was drawn at the pixel. Must equal the literal `0.999999` in the shader
-// (GLSL cannot include this header); change both together.
+// Depth at or beyond this means nothing was drawn at the pixel. Must equal kClearDepthThreshold in
+// src/Shaders/SceneDepthConstants.glsl.
 constexpr float kAerialPerspectiveFarPlaneDepthThreshold = 0.999999f;
 
-// True when no opaque geometry was drawn at the pixel (rawDepth at or beyond the threshold above). The sky
-// background already produced its final color, so the composite must pass it through unchanged.
-bool ShouldBypassAerialPerspectiveComposite(float rawDepth) noexcept;
+// Largest finite 16-bit float; the composite target is RGBA16F.
+// Must equal kMaxOutputLuminance in AtmosphereAerialPerspectiveCompositeBody.glsl.
+constexpr float kAerialPerspectiveMaxOutput = 65504.0f;
 
-// The shader's final per-pixel color: sceneColorRgb unchanged when the pixel is bypassed, otherwise
-// sceneColorRgb * transmittance + inScattering, with inScattering = sampledAerialRgb * strength and
-// transmittance = mix(1.0, sampledAerialA, strength).
-Vec3 ComputeAerialPerspectiveCompositeColor(float rawDepth, const Vec3& sceneColorRgb,
-    const Vec3& sampledAerialRgb, float sampledAerialA, float strength) noexcept;
+// True when no opaque geometry was drawn at the pixel.
+bool IsClearDepth(float rawDepth) noexcept;
+
+// Final per-pixel color. Sky: sceneColor plus shaftDeltaRgb * strength * skyIntensity, never negative, exact
+// sceneColor for a zero delta, volume ignored. Geometry: sceneColor * clamp(mix(1, a, strength), 0, 1) +
+// rgb * strength, clamped to 0..kAerialPerspectiveMaxOutput.
+Vec3 ComputeAerialPerspectiveCompositeColor(float rawDepth, const Vec3& sceneColorRgb, const Vec3& sampledAerialRgb,
+    float sampledAerialA, const Vec3& shaftDeltaRgb, float strength, float skyIntensity) noexcept;
 
 } // namespace gte

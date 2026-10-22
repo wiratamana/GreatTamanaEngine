@@ -62,6 +62,8 @@ const std::vector<KnownRiskBlackboardKeyRule>& KnownRiskBlackboardKeyRules()
         // Published only when both LUT passes ran, so either toggle gates it.
         AddSharedChannelRule(rules, "Atmosphere", "SharedLuts", "AtmosphereTransmittanceLutPass");
         AddSharedChannelRule(rules, "Atmosphere", "SharedLuts", "AtmosphereMultiScatteringLutPass");
+        // Published only when the volume pass ran.
+        AddChannelRules(rules, "Atmosphere", "AerialVolume", "AtmosphereAerialPerspectiveVolumePass");
         return rules;
     }();
     return kRules;
