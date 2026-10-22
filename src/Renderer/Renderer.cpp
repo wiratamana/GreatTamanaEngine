@@ -568,7 +568,29 @@ VkDescriptorSetLayout Renderer::InstanceBufferDescriptorSetLayout() const noexce
 
 bool Renderer::SupportsDrawIndirectCount() const noexcept
 {
-    return m_device.SupportsDrawIndirectCount();
+    return m_device.IndirectDraw().drawIndirectCount;
+}
+
+bool Renderer::SupportsMultiDrawIndirect() const noexcept
+{
+    return m_device.IndirectDraw().multiDrawIndirect;
+}
+
+bool Renderer::SupportsDrawIndirectFirstInstance() const noexcept
+{
+    return m_device.IndirectDraw().drawIndirectFirstInstance;
+}
+
+std::uint32_t Renderer::MaxDrawIndirectCount() const noexcept
+{
+    return m_device.IndirectDraw().maxDrawIndirectCount;
+}
+
+IndirectDrawCapsView Renderer::IndirectDrawCaps() const noexcept
+{
+    const auto& caps = m_device.IndirectDraw();
+    return { caps.drawIndirectCount, caps.multiDrawIndirect, caps.drawIndirectFirstInstance,
+        caps.maxDrawIndirectCount };
 }
 
 bool Renderer::SupportsDepthBlit() const noexcept
@@ -694,7 +716,10 @@ Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const
     info.imageCount = m_presenter.ImageCount();
     info.minImageCount = m_presenter.FramesInFlight();
     info.timestampCapability = m_device.TimestampCapability();
-    info.supportsDrawIndirectCount = m_device.SupportsDrawIndirectCount();
+    info.supportsDrawIndirectCount = m_device.IndirectDraw().drawIndirectCount;
+    info.supportsMultiDrawIndirect = m_device.IndirectDraw().multiDrawIndirect;
+    info.supportsDrawIndirectFirstInstance = m_device.IndirectDraw().drawIndirectFirstInstance;
+    info.maxDrawIndirectCount = m_device.IndirectDraw().maxDrawIndirectCount;
     return info;
 }
 

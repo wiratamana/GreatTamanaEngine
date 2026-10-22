@@ -517,12 +517,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(BuildActivateTabResponseJson(outcome.success, outcome.tabExists, parsed.tabName), "application/json");
     });
 
-    // GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-    // PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
-    // - POST /spawn_gpu_driven_test_batch. Reuses the SAME uiCommandBridge
-    // (EditorUiCommandBridge) /activate_tab already uses, mirroring its own
-    // exact "parse -> bridge unavailable check -> build request -> SubmitAndWait
-    // -> map alreadyPending/timedOut/outcome" shape.
+    // POST /spawn_gpu_driven_test_batch: parse, check the UI command bridge, submit, map the outcome.
     server.Post("/spawn_gpu_driven_test_batch", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
         const ParsedSpawnGpuDrivenTestBatchRequest parsed = ParseSpawnGpuDrivenTestBatchRequest(req.body);
         if (!parsed.valid) {
@@ -553,15 +548,8 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         }
 
         const SpawnGpuDrivenTestBatchOutcome& outcome = submit.result->spawnGpuDrivenTestBatch;
-        // A release build (NullEditorLayer) reports editorAvailable == false
-        // as 503 - "structurally unavailable in this build", not a caller
-        // mistake - mirrors /save_scene's own "editorAvailable" -> 503
-        // convention. A real, dedicated bool field (editor-core-separation-1
-        // campaign, PHASE8) - never a substring search against
-        // outcome.errorMessage's own TEXT (the previous, fragile shape this
-        // replaces). Every other failure (should be unreachable -
-        // ParseSpawnGpuDrivenTestBatchRequest() above already rejects
-        // count < 1) would be a 400.
+        // NullEditorLayer reports editorAvailable == false: structurally unavailable, so 503.
+        // Any other failure is a 400.
         if (!outcome.success) {
             res.status = outcome.editorAvailable ? 400 : 503;
             res.set_content(BuildGenericErrorResponseJson(outcome.errorMessage), "application/json");

@@ -77,8 +77,7 @@ bool SupportsDynamicRendering(VkPhysicalDevice device)
     return features13.dynamicRendering == VK_TRUE;
 }
 
-// Queries drawIndirectCount in a separate call before vkCreateDevice(); the feature is only requested
-// at device creation when this reports it available.
+// Probes drawIndirectCount (a Vulkan 1.2 feature) on the physical device.
 bool QueryDrawIndirectCountSupport(VkPhysicalDevice device)
 {
     VkPhysicalDeviceVulkan12Features features12{};
@@ -151,7 +150,7 @@ VulkanDevice::VulkanDevice(VulkanDevice&& other) noexcept
     , m_graphicsFamily(other.m_graphicsFamily)
     , m_presentFamily(other.m_presentFamily)
     , m_timestampCapability(other.m_timestampCapability)
-    , m_supportsDrawIndirectCount(other.m_supportsDrawIndirectCount)
+    , m_indirectDrawCaps(other.m_indirectDrawCaps)
     , m_supportsDepthBlit(other.m_supportsDepthBlit)
     , m_materialAnisotropy(other.m_materialAnisotropy)
 {
@@ -168,7 +167,7 @@ VulkanDevice& VulkanDevice::operator=(VulkanDevice&& other) noexcept
         m_graphicsFamily = other.m_graphicsFamily;
         m_presentFamily = other.m_presentFamily;
         m_timestampCapability = other.m_timestampCapability;
-        m_supportsDrawIndirectCount = other.m_supportsDrawIndirectCount;
+        m_indirectDrawCaps = other.m_indirectDrawCaps;
         m_supportsDepthBlit = other.m_supportsDepthBlit;
         m_materialAnisotropy = other.m_materialAnisotropy;
     }
@@ -231,27 +230,32 @@ void VulkanDevice::CreateLogicalDevice()
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
 
-    // Probe drawIndirectCount first and request it only when available: enabling an unsupported
-    // feature makes vkCreateDevice() fail.
-    m_supportsDrawIndirectCount = QueryDrawIndirectCountSupport(m_physicalDevice);
-
-    VkPhysicalDeviceVulkan12Features features12{};
-    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    features12.drawIndirectCount = m_supportsDrawIndirectCount ? VK_TRUE : VK_FALSE;
-    features13.pNext = &features12;
-
-    const char* extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-
-    // Enable samplerAnisotropy only when the device reports it; an unsupported feature fails vkCreateDevice().
+    // Request optional features only when the device reports them; an unsupported feature fails vkCreateDevice().
     VkPhysicalDeviceFeatures supportedFeatures{};
     vkGetPhysicalDeviceFeatures(m_physicalDevice, &supportedFeatures);
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
+
+    m_indirectDrawCaps.drawIndirectCount = QueryDrawIndirectCountSupport(m_physicalDevice);
+    m_indirectDrawCaps.multiDrawIndirect = supportedFeatures.multiDrawIndirect == VK_TRUE;
+    m_indirectDrawCaps.drawIndirectFirstInstance = supportedFeatures.drawIndirectFirstInstance == VK_TRUE;
+    m_indirectDrawCaps.maxDrawIndirectCount =
+        m_indirectDrawCaps.multiDrawIndirect ? properties.limits.maxDrawIndirectCount : 0;
+
+    VkPhysicalDeviceVulkan12Features features12{};
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    features12.drawIndirectCount = m_indirectDrawCaps.drawIndirectCount ? VK_TRUE : VK_FALSE;
+    features13.pNext = &features12;
+
+    const char* extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+
     const bool anisotropySupported = supportedFeatures.samplerAnisotropy == VK_TRUE;
     m_materialAnisotropy = ChooseMaterialAnisotropy(anisotropySupported, properties.limits.maxSamplerAnisotropy);
 
     VkPhysicalDeviceFeatures enabledFeatures{};
     enabledFeatures.samplerAnisotropy = anisotropySupported ? VK_TRUE : VK_FALSE;
+    enabledFeatures.multiDrawIndirect = m_indirectDrawCaps.multiDrawIndirect ? VK_TRUE : VK_FALSE;
+    enabledFeatures.drawIndirectFirstInstance = m_indirectDrawCaps.drawIndirectFirstInstance ? VK_TRUE : VK_FALSE;
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;

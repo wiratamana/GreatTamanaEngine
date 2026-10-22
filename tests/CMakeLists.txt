@@ -2306,6 +2306,7 @@ set(GTE_TEST_SOURCES
     Renderer/ResourcePoolTests.cpp
     Renderer/PipelineHandleTests.cpp
     Renderer/DrawStatsTests.cpp
+    Renderer/Culling/ClusterCullMathTests.cpp
     Renderer/GpuTimingTests.cpp
     Renderer/ComputeDispatchTests.cpp
     Renderer/VolumeTexturePreviewMathTests.cpp
@@ -2980,7 +2981,8 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Game/Instantiation/MeshAssetPipelineKindTests.cpp Game/MeshVertexPackingTests.cpp
     Core/FeatureKit/DepthOnlyLayoutTests.cpp Features/Shadow/ShadowDepthShaderCoverageTests.cpp
     Math/PbrBrdfTests.cpp Features/SceneLighting/
-    Renderer/RenderGraph/DescriptorWriteIdentityTests.cpp Renderer/RenderGraph/TrackedBufferGpuTests.cpp)
+    Renderer/RenderGraph/DescriptorWriteIdentityTests.cpp Renderer/RenderGraph/TrackedBufferGpuTests.cpp
+    Renderer/Culling/ClusterCullMathTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

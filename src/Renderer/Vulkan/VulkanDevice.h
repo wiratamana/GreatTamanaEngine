@@ -6,8 +6,18 @@
 
 #include <cstdint>
 #include <mutex>
+#include <type_traits>
 
 namespace gte {
+
+// Indirect draw features enabled on the device.
+struct IndirectDrawCaps {
+    bool drawIndirectCount = false;
+    bool multiDrawIndirect = false;
+    bool drawIndirectFirstInstance = false;
+    std::uint32_t maxDrawIndirectCount = 0;
+};
+static_assert(std::is_trivially_copyable_v<IndirectDrawCaps>);
 
 // RAII wrapper around a VkPhysicalDevice and the VkDevice created for it, plus its graphics and present
 // queues. Does not own the VkInstance or VkSurfaceKHR; both must outlive it. Selection takes the first
@@ -40,10 +50,10 @@ public:
     // See GpuTiming.h for the type and its decision logic.
     const GpuTimestampCapability& TimestampCapability() const noexcept { return m_timestampCapability; }
 
-    // Whether the device supports drawIndirectCount (vkCmdDrawIndexedIndirectCount), probed once before
-    // vkCreateDevice(). Both the real and the fixed-count fallback paths must compile; only this probe
-    // chooses between them.
-    bool SupportsDrawIndirectCount() const noexcept { return m_supportsDrawIndirectCount; }
+    // Indirect draw capabilities, probed once before vkCreateDevice(). maxDrawIndirectCount is 0 unless
+    // multiDrawIndirect is enabled.
+    const IndirectDrawCaps& IndirectDraw() const noexcept { return m_indirectDrawCaps; }
+    bool SupportsDrawIndirectCount() const noexcept { return m_indirectDrawCaps.drawIndirectCount; }
 
     // Whether the device supports BLIT_SRC and BLIT_DST for the engine's depth format, probed once.
     // Depth blit support is not guaranteed and is often missing; any pass that sets
@@ -80,7 +90,7 @@ private:
 
     GpuTimestampCapability m_timestampCapability;
 
-    bool m_supportsDrawIndirectCount = false;
+    IndirectDrawCaps m_indirectDrawCaps{};
     bool m_supportsDepthBlit = false;
     float m_materialAnisotropy = 1.0f;
 

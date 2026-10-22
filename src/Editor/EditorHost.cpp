@@ -593,10 +593,12 @@ int EditorHost::Run()
                 m_core.GetSceneServicesDescriptorSet().LayoutHandle());
 
             // GET /render_graph data: reuses renderFeatureEntries and ignores the panel's Pause checkbox (always the latest frame).
-            m_captureBridge.PublishRenderGraphMetadata(rg::BuildRenderGraphMetadata(
+            rg::RenderGraphMetadata renderGraphMetadata = rg::BuildRenderGraphMetadata(
                 m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback),
                 m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback),
-                m_core.GetGpuDrivenBatchDebugInfo(), renderFeatureEntries));
+                m_core.GetGpuDrivenBatchDebugInfo(), renderFeatureEntries);
+            renderGraphMetadata.indirectDraw = m_renderer.IndirectDrawCaps();
+            m_captureBridge.PublishRenderGraphMetadata(std::move(renderGraphMetadata));
         }
 
         // File > Exit and other programmatic close actions end the loop like a Quit event.

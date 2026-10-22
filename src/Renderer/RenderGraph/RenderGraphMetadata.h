@@ -6,6 +6,7 @@
 
 #include "RenderGraphSnapshot.h"
 #include "RenderGraphTypes.h"
+#include "../Culling/ClusterCullMath.h"
 #include "../Culling/GpuDrivenBatchDebugInfo.h"
 #include "../../Core/Plugins/RenderFeatureDebugEntry.h"
 
@@ -72,6 +73,7 @@ struct RenderGraphMetadata {
     RenderGraphRegimeMetadata presentRegime;   // ExecuteTimingMode::PipelinedDeferredReadback
     std::vector<GpuDrivenBatchDebugInfo> gpuDrivenBatches;   // Reused directly, never re-wrapped.
     std::vector<RenderFeatureDebugEntry> renderFeatures;     // Reused directly, never re-wrapped.
+    IndirectDrawCapsView indirectDraw;                       // Device indirect draw capabilities.
 };
 
 // Pure: builds from already-resolved snapshots, never a live graph or Core.

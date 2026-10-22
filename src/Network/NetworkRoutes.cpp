@@ -1054,20 +1054,20 @@ std::string BuildClearLogsResponseJson(std::size_t clearedCount)
     return body.dump();
 }
 
-// --- GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-// PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
-// - POST /spawn_gpu_driven_test_batch. See NetworkRoutes.h's own doc comment
-// above ParseSpawnGpuDrivenTestBatchRequest() for the exact, locked
-// validation rules implemented below.
+std::optional<std::uint32_t> ExactUint32InRange(double value, std::uint32_t minValue, std::uint32_t maxValue)
+{
+    if (!std::isfinite(value) || value != std::floor(value) || value < static_cast<double>(minValue)
+        || value > static_cast<double>(maxValue)) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint32_t>(value);
+}
 
 ParsedSpawnGpuDrivenTestBatchRequest ParseSpawnGpuDrivenTestBatchRequest(const std::string& jsonBody)
 {
     ParsedSpawnGpuDrivenTestBatchRequest result;
 
-    // Same DELIBERATE EXCEPTION ParseScenePathRequest() above documents -
-    // this endpoint's own single-optional-field shape makes "no body at
-    // all" a completely reasonable, common request ("spawn the
-    // default-sized batch"), not a malformed one.
+    // A missing or non-object body means "use the default count".
     const nlohmann::json parsed = ParseJsonNoThrow(jsonBody);
     if (parsed.is_discarded() || !parsed.is_object()) {
         result.valid = true;
@@ -1075,16 +1075,19 @@ ParsedSpawnGpuDrivenTestBatchRequest ParseSpawnGpuDrivenTestBatchRequest(const s
     }
 
     if (parsed.contains("count") && !parsed["count"].is_null()) {
+        const std::string rangeMessage =
+            "count must be an integer from 1 to " + std::to_string(kMaxSpawnGridInstances);
         if (!parsed["count"].is_number()) {
-            result.errorMessage = "count must be a positive integer";
+            result.errorMessage = rangeMessage;
             return result;
         }
-        const double asDouble = parsed["count"].get<double>();
-        if (asDouble < 1.0 || asDouble != std::floor(asDouble)) {
-            result.errorMessage = "count must be a positive integer";
+        const std::optional<std::uint32_t> count =
+            ExactUint32InRange(parsed["count"].get<double>(), 1u, kMaxSpawnGridInstances);
+        if (!count.has_value()) {
+            result.errorMessage = rangeMessage;
             return result;
         }
-        result.instanceCount = static_cast<std::uint32_t>(asDouble);
+        result.instanceCount = *count;
     }
 
     result.valid = true;

@@ -977,28 +977,16 @@ std::string BuildGetLogsResponseJson(
 //   {"success": true, "cleared_count": N}
 std::string BuildClearLogsResponseJson(std::size_t clearedCount);
 
-// --- GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-// PHASE6 (task_manager/render-pass-5/PHASE6_EDITOR_TOOLING_AND_LIVE_VALIDATION.md)
-// - POST /spawn_gpu_driven_test_batch. Every function below stays PURE,
-// same discipline as everything else in this file - NetworkServer.cpp is
-// the one place that converts a parsed request into a real
-// EditorUiCommandRequest and calls EditorUiCommandBridge::SubmitAndWait().
+// Upper bound of the "count" field of POST /spawn_gpu_driven_test_batch.
+inline constexpr std::uint32_t kMaxSpawnGridInstances = 100000;
 
-// Parsed, VALIDATED result of a POST /spawn_gpu_driven_test_batch request
-// body: {"count": <uint>} (optional, defaults to 6 - see
-// SpawnGpuDrivenTestBatchCommand's own doc comment,
-// Application/EditorUiCommandBridge.h). `valid == false` means
-// `errorMessage` explains exactly why. Same "an entirely empty/non-JSON
-// body is NOT an error, treated as if 'count' were simply omitted"
-// exception ParseScenePathRequest() above documents (this endpoint's own
-// single-optional-field shape makes "no body at all" a completely
-// reasonable, common request too - "spawn the default-sized batch").
-// "count" (when present) must be a JSON NUMBER that is a positive integer
-// (>= 1) - zero, negative, non-integer, or non-numeric all fail with
-// "count must be a positive integer" - GpuDrivenBatchTestSpawner::Spawn()'s
-// own instanceCount == 0 rejection is defense in depth for its OTHER
-// caller (the Hierarchy panel's menu item), not something this route can
-// actually trigger.
+// Returns `value` as an integer when it is finite, an exact integer and inside [minValue, maxValue].
+// The range is checked before any cast, so no out-of-range conversion happens.
+std::optional<std::uint32_t> ExactUint32InRange(double value, std::uint32_t minValue, std::uint32_t maxValue);
+
+// Parsed POST /spawn_gpu_driven_test_batch body: {"count": <uint>}, optional (default 6).
+// An empty or non-JSON body is not an error: the count stays at its default.
+// "count" must be a JSON number holding an integer in [1, kMaxSpawnGridInstances].
 struct ParsedSpawnGpuDrivenTestBatchRequest {
     bool valid = false;
     std::string errorMessage;

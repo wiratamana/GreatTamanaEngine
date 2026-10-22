@@ -324,6 +324,13 @@ void to_json(nlohmann::json& j, const RenderGraphMetadata& metadata)
         { "present_regime", metadata.presentRegime },
         { "gpu_driven_batches", metadata.gpuDrivenBatches },
         { "render_features", metadata.renderFeatures },
+        { "indirect_draw",
+            {
+                { "draw_indirect_count", metadata.indirectDraw.drawIndirectCount },
+                { "multi_draw_indirect", metadata.indirectDraw.multiDrawIndirect },
+                { "draw_indirect_first_instance", metadata.indirectDraw.drawIndirectFirstInstance },
+                { "max_draw_indirect_count", metadata.indirectDraw.maxDrawIndirectCount },
+            } },
     };
 }
 

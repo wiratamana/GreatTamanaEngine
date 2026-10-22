@@ -283,6 +283,7 @@ private:
     std::unordered_set<Entity> m_gpuDrivenBatchedEntitiesThisFrame;
     Mat4 m_gpuDrivenGameViewProjectionThisFrame;
     std::vector<GpuDrivenBatchDebugInfo> m_gpuDrivenBatchDebugInfoLastFrame;
+    bool m_batchPathCapsWarned = false; // Logs the missing-capability refusal once.
 
     // De-duplicates frame-build failure logs (a failing frame repeats every frame).
     rg::BoundedOnceSet<64> m_frameFailureOnce;

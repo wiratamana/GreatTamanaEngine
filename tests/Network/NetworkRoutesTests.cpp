@@ -11,6 +11,10 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <limits>
+#include <optional>
+#include <string>
+
 namespace {
 
 using gte::Network::CaptureResponseFormat;
@@ -1625,6 +1629,61 @@ TEST(BuildOpenSponzaSceneResponseJsonTests, EscapesBackslashAndQuote)
     const nlohmann::json parsed = nlohmann::json::parse(BuildOpenSponzaSceneResponseJson(false, "C:\\x\\Sponza.gta", message));
     EXPECT_EQ(parsed["gta_path"], "C:\\x\\Sponza.gta");
     EXPECT_EQ(parsed["message"], message);
+}
+
+} // namespace
+
+namespace {
+
+using gte::Network::ExactUint32InRange;
+using gte::Network::kMaxSpawnGridInstances;
+using gte::Network::ParseSpawnGpuDrivenTestBatchRequest;
+
+TEST(SpawnBatchRequestTests, MissingBodyOrCountUsesDefault)
+{
+    EXPECT_TRUE(ParseSpawnGpuDrivenTestBatchRequest("").valid);
+    const auto parsed = ParseSpawnGpuDrivenTestBatchRequest("{}");
+    EXPECT_TRUE(parsed.valid);
+    EXPECT_EQ(parsed.instanceCount, 6u);
+}
+
+TEST(SpawnBatchRequestTests, AcceptsCountInRange)
+{
+    const auto parsed = ParseSpawnGpuDrivenTestBatchRequest(R"({"count": 12})");
+    ASSERT_TRUE(parsed.valid);
+    EXPECT_EQ(parsed.instanceCount, 12u);
+
+    const auto atLimit = ParseSpawnGpuDrivenTestBatchRequest(
+        "{\"count\": " + std::to_string(kMaxSpawnGridInstances) + "}");
+    ASSERT_TRUE(atLimit.valid);
+    EXPECT_EQ(atLimit.instanceCount, kMaxSpawnGridInstances);
+}
+
+TEST(SpawnBatchRequestTests, RejectsBadCounts)
+{
+    for (const char* body : { R"({"count": 0})", R"({"count": -5})", R"({"count": 2.5})", R"({"count": 1e300})",
+             R"({"count": 4294967296})", R"({"count": 99999999999})", R"({"count": "7"})", R"({"count": true})" }) {
+        const auto parsed = ParseSpawnGpuDrivenTestBatchRequest(body);
+        EXPECT_FALSE(parsed.valid) << body;
+        EXPECT_FALSE(parsed.errorMessage.empty()) << body;
+    }
+    const auto overLimit = ParseSpawnGpuDrivenTestBatchRequest(
+        "{\"count\": " + std::to_string(kMaxSpawnGridInstances + 1) + "}");
+    EXPECT_FALSE(overLimit.valid);
+}
+
+TEST(SpawnBatchRequestTests, ExactUint32InRangeRejectsNonFiniteAndFractions)
+{
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    EXPECT_FALSE(ExactUint32InRange(nan, 0, 10).has_value());
+    EXPECT_FALSE(ExactUint32InRange(inf, 0, 10).has_value());
+    EXPECT_FALSE(ExactUint32InRange(-inf, 0, 10).has_value());
+    EXPECT_FALSE(ExactUint32InRange(1.5, 0, 10).has_value());
+    EXPECT_FALSE(ExactUint32InRange(11.0, 0, 10).has_value());
+    EXPECT_FALSE(ExactUint32InRange(-1.0, 0, 10).has_value());
+    EXPECT_EQ(ExactUint32InRange(0.0, 0, 10), std::optional<std::uint32_t>(0u));
+    EXPECT_EQ(ExactUint32InRange(10.0, 0, 10), std::optional<std::uint32_t>(10u));
 }
 
 } // namespace

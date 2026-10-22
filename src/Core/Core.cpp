@@ -1144,7 +1144,14 @@ void Core::BuildFrame()
                         gameAspectForReplay = aspect;
 
                         m_gpuDrivenGameViewProjectionThisFrame = gameViewProjection;
-                        {
+                        // Without multi-draw and first-instance support the batch commands are invalid usage.
+                        const bool batchPathSupported = OldBatchPathSupported(m_renderer.IndirectDrawCaps());
+                        if (!batchPathSupported && !m_batchPathCapsWarned) {
+                            m_batchPathCapsWarned = true;
+                            GTE_LOG_WARNING("Core", "GpuDrivenBatches disabled: device lacks drawIndirectCount, "
+                                                    "multiDrawIndirect or drawIndirectFirstInstance. Using the CPU path.");
+                        }
+                        if (batchPathSupported) {
                             std::unordered_set<BufferObjectHandle> gpuSkinnedOutputBuffers;
                             gpuSkinnedOutputBuffers.reserve(m_gpuSkinningRequestsThisFrame.size());
                             for (const AnimationSystem::GpuSkinningDispatchRequest& request :

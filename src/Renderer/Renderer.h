@@ -2,6 +2,7 @@
 
 #include "../Math/Mat4.h"
 #include "Buffer.h"
+#include "Culling/ClusterCullMath.h"
 #include "FramePresenter.h"
 #include "FrameRecorder.h"
 #include "GpuResourceFactory.h"
@@ -182,8 +183,12 @@ public:
         bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false,
         DescriptorSetLayoutHandle sceneServicesSetLayout = DescriptorSetLayoutHandle::Invalid) const;
 
-    // Hardware capability check.
+    // Hardware capability checks.
     bool SupportsDrawIndirectCount() const noexcept;
+    bool SupportsMultiDrawIndirect() const noexcept;
+    bool SupportsDrawIndirectFirstInstance() const noexcept;
+    std::uint32_t MaxDrawIndirectCount() const noexcept; // 0 unless multi draw is enabled.
+    IndirectDrawCapsView IndirectDrawCaps() const noexcept;
 
     // Mesh creation helpers.
     Mesh CreateMesh(const void* vertexData, uint64_t vertexDataSize, std::uint32_t vertexCount,
@@ -271,6 +276,9 @@ public:
         std::uint32_t minImageCount = 0;
         GpuTimestampCapability timestampCapability;
         bool supportsDrawIndirectCount = false;
+        bool supportsMultiDrawIndirect = false;
+        bool supportsDrawIndirectFirstInstance = false;
+        std::uint32_t maxDrawIndirectCount = 0;
     };
 
     // Resizes swapchain on window resize events.
