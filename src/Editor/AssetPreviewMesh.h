@@ -30,6 +30,7 @@ public:
         int height = 0;
         std::size_t vertexCount = 0;
         std::size_t triangleCount = 0;
+        std::size_t clusterCount = 0; // 0 = the mesh has no cluster table.
     };
 
     // Renders one fresh frame of `absolutePath`'s mesh into an internal off-screen texture of the given size
@@ -51,6 +52,7 @@ private:
 
     std::size_t m_vertexCount = 0;
     std::size_t m_indexCount = 0;
+    std::size_t m_clusterCount = 0;
 
     // Bounding sphere of the uploaded mesh (object space): frames the camera and centers the spin.
     Vec3 m_boundsCenter = Vec3::Zero();

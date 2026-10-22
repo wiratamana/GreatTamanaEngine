@@ -2636,6 +2636,7 @@ if(TRUE)
         # specifically so this test file can call it directly.
         Editor/ScreenPassPriorityAssignmentTests.cpp
         Editor/MeshClusterBuildRunnerTests.cpp
+        Editor/ClusterToolUiStateTests.cpp
     )
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only
@@ -2969,6 +2970,7 @@ set(GTE_COMMENT_RULE_SRC
     Assets/MeshClusterPersistence.h Assets/MeshClusterPersistence.cpp
     Assets/MeshMaterialPartitioner.h Assets/MeshMaterialPartitioner.cpp
     Editor/MeshClusterBuildRunner.h Editor/MeshClusterBuildRunner.cpp
+    Editor/ClusterToolUiState.h Editor/ClusterToolUiState.cpp
     Game/Instantiation/MaterialTextureGpuCache.h Game/Instantiation/MaterialTextureGpuCache.cpp
     Game/Instantiation/MaterialCacheKeys.h Game/Instantiation/MaterialLifetimeRules.h
     Game/Instantiation/MaterialLifetimeRules.cpp Game/Instantiation/MeshAssetPipelineKind.h
@@ -3000,7 +3002,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Renderer/RenderGraph/DescriptorWriteIdentityTests.cpp Renderer/RenderGraph/TrackedBufferGpuTests.cpp
     Renderer/Culling/ClusterCullMathTests.cpp Assets/AtomicFileTests.cpp
     Assets/MeshClusterTests.cpp Assets/MeshClusteringTests.cpp Assets/MeshMaterialPartitionerTests.cpp
-    Assets/MeshClusterImportTests.cpp Editor/MeshClusterBuildRunnerTests.cpp)
+    Assets/MeshClusterImportTests.cpp Editor/MeshClusterBuildRunnerTests.cpp Editor/ClusterToolUiStateTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

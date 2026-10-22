@@ -28,6 +28,7 @@ void AssetPreviewMesh::Reset()
     m_cachedIsValid = false;
     m_vertexCount = 0;
     m_indexCount = 0;
+    m_clusterCount = 0;
 }
 
 bool AssetPreviewMesh::EnsureMeshUploaded(Renderer& renderer, const std::string& absolutePath)
@@ -52,6 +53,7 @@ bool AssetPreviewMesh::EnsureMeshUploaded(Renderer& renderer, const std::string&
     m_cachedIsValid = false;
     m_vertexCount = 0;
     m_indexCount = 0;
+    m_clusterCount = 0;
     if (!timeEc) {
         m_cachedWriteTime = writeTime;
     }
@@ -76,6 +78,7 @@ bool AssetPreviewMesh::EnsureMeshUploaded(Renderer& renderer, const std::string&
     }
     m_vertexCount = previewData.vertices.size();
     m_indexCount = mesh->indices.size();
+    m_clusterCount = mesh->clusters.size();
     m_cachedIsValid = true;
     return true;
 }
@@ -118,6 +121,7 @@ std::optional<AssetPreviewMesh::Preview> AssetPreviewMesh::Render(
     preview.height = m_preview->Height();
     preview.vertexCount = m_vertexCount;
     preview.triangleCount = m_indexCount / 3;
+    preview.clusterCount = m_clusterCount;
     return preview;
 }
 

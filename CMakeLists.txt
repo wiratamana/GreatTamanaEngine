@@ -1188,6 +1188,8 @@ add_library(gte_editor STATIC
     src/Editor/EditorHost.cpp
     src/Editor/MeshClusterBuildRunner.h
     src/Editor/MeshClusterBuildRunner.cpp
+    src/Editor/ClusterToolUiState.h
+    src/Editor/ClusterToolUiState.cpp
     src/Editor/BuiltinFeatureEditorPanelRegistry.h
     src/Editor/BuiltinFeatureEditorPanelRegistry.cpp
     src/Editor/EditorContext.h

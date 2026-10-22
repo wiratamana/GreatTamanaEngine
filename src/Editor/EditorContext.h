@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ClusterToolUiState.h"
 #include "Selection.h"
 #include "../Core/Extent.h"
 #include "../Core/UiTextureHandle.h"
@@ -217,6 +218,12 @@ struct EditorContext {
 
     // The editor's cluster build runner. Owned by the editor layer; never null in the ImGui editor.
     MeshClusterBuildRunner* clusterBuildRunner = nullptr;
+
+    // Persistent Inspector state of the cluster and normals tools.
+    ClusterToolUiState clusterTool;
+
+    // Asset path (UTF-8) whose project record must be refreshed; set by a panel, consumed by the editor layer.
+    std::string pendingAssetRecordRefresh;
 };
 
 } // namespace gte

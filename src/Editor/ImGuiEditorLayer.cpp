@@ -357,6 +357,10 @@ public:
 #else
         BuildInspectorPanel(registry, m_ctx, game.GetPhysicsSystem(), game.GetMeshInstantiationSystem());
 #endif
+        if (!m_ctx.pendingAssetRecordRefresh.empty()) {
+            RefreshProjectAssetRecord(m_ctx.pendingAssetRecordRefresh);
+            m_ctx.pendingAssetRecordRefresh.clear();
+        }
         BuildScenePanel(game, renderer, m_ctx, m_sceneCamera, sceneServicesSetLayout);
         BuildGamePanel(m_ctx);
         BuildMemoryPanel(m_ctx, renderer);

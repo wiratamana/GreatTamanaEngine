@@ -26,6 +26,7 @@
 #include "../ModelRigCache.h" // ModelRigCache::GetOrLoad() - shared bones/rigid-bodies/joints cache, Model Part section.
 #include "../../Encoding/Utf8Path.h"
 #include "../../Assets/AssetTypes.h" // AssetType, AssetFlags, Guid
+#include "../../Assets/AtomicFile.h" // WriterRegistryKey()
 #include "../../Assets/GtaFile.h" // ReadGtaHeader()/ReadGtaFile()
 #include "../../Assets/MotionFile.h" // DecodeMotionDataFromBytes()
 #include "../../Assets/MeshNormalRecomputePersistence.h" // RecomputeAndSaveMeshNormalsToGtaFile()
@@ -37,8 +38,11 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -934,12 +938,8 @@ void BuildGtaTextureMetadata(
     ImGui::Text("On-disk Size (.gta): %s", FormatBytes(fileSizeBytes).c_str());
 }
 
-// The Mesh-asset equivalent of BuildGtaTextureMetadata() above - shown when
-// the selected *.gta wraps AssetType::Mesh (the result of importing a .pmx
-// model - see src/Assets/AssetImporter.h). `preview` (AssetPreviewMesh's own
-// result) supplies the vertex/triangle counts; std::nullopt when the live
-// 3D preview itself failed to render (a corrupt/truncated payload despite a
-// valid header), in which case every OTHER field here is still shown.
+// Metadata of a mesh *.gta. `preview` supplies the counts; nullopt when the preview failed,
+// in which case the header-derived fields are still shown.
 void BuildGtaMeshMetadata(
     const GtaHeader& header, std::uintmax_t fileSizeBytes, const std::optional<AssetPreviewMesh::Preview>& preview)
 {
@@ -957,10 +957,13 @@ void BuildGtaMeshMetadata(
     if (preview.has_value()) {
         ImGui::Text("Vertices: %llu", static_cast<unsigned long long>(preview->vertexCount));
         ImGui::Text("Triangles: %llu", static_cast<unsigned long long>(preview->triangleCount));
+        if (preview->clusterCount > 0) {
+            ImGui::Text("Clusters: %llu", static_cast<unsigned long long>(preview->clusterCount));
+        } else {
+            ImGui::Text("Clusters: none");
+        }
     }
-    // Every *.gta AssetType::Mesh payload today is the exact same layout
-    // MeshFile.h's EncodeMeshDataToBytes() produces (see that file) - plain
-    // positions/normals/UVs/indices, no materials/bones/morphs yet.
+    // Payload layout: see MeshFile.h (optional tangents and cluster table follow the indices).
     ImGui::Text("Mesh Format: Positions + Normals + UVs + Indices (GTEMESH1)");
     ImGui::Text("Payload Size: %s", FormatBytes(payloadSize).c_str());
     if (metadataSize > 0) {
@@ -969,50 +972,120 @@ void BuildGtaMeshMetadata(
     ImGui::Text("On-disk Size (.gta): %s", FormatBytes(fileSizeBytes).c_str());
 }
 
-// task_manager/stl-parser-1, PHASE3 - the "Recompute Normals from Geometry"
-// button + its own persistent status line + explanatory disabled text,
-// factored into ONE shared helper (rather than duplicated inline) because
-// BuildAssetInspector() below has TWO separate call sites that each render
-// mesh metadata for the same isGtaMesh && gtaHeader.has_value() condition -
-// one when the live mesh preview render succeeds, one in the fallback
-// branch reached when it fails (e.g. a zero-vertex/corrupt mesh) - and this
-// button must be reachable from BOTH, not just the first, since a mesh
-// whose live preview fails to render is arguably exactly the kind of asset
-// a user is most likely to want to fix via this very button. A single
-// static pair of "last attempt" locals shared by both call sites is
-// intentional and correct: only one of the two branches ever actually
-// executes for a given selection/frame, so there is never any ambiguity
-// about which one the button's own status line refers to.
-void BuildRecomputeNormalsFromGeometryButton(const std::string& absolutePath, MeshInstantiationSystem& meshInstantiationSystem,
-    const MeshClusterBuildRunner* clusterRunner)
-{
-    static bool s_lastNormalRecomputeSucceeded = false;
-    static std::string s_lastNormalRecomputeError;
+constexpr const char* kClusterWeldLabels[] = { "Exact", "Position only" };
 
-    // The file is being rewritten by a cluster build: a second writer would lose one of the two results.
-    const bool clusterBuildRunning = clusterRunner != nullptr && clusterRunner->IsBuildingPath(PathFromUtf8(absolutePath));
+MeshClusterOptions MakeClusterOptions(const ClusterToolUiState& ui)
+{
+    MeshClusterOptions options;
+    options.weld = ui.weldIndex == 1 ? ClusterWeldMode::PositionOnly : ClusterWeldMode::Exact;
+    options.maxVerticesPerCluster = static_cast<std::uint32_t>(ClampClusterMaxVertices(ui.maxVertices));
+    options.maxTrianglesPerCluster = static_cast<std::uint32_t>(ClampClusterMaxTriangles(ui.maxTriangles));
+    options.coneWeight = ClampClusterConeWeight(ui.coneWeight);
+    return options;
+}
+
+// Weld and limit controls, the "Build Clusters" button and the status of the last build of this asset.
+void BuildClusterToolSection(EditorContext& ctx, const std::string& absolutePath)
+{
+    ClusterToolUiState& ui = ctx.clusterTool;
+    MeshClusterBuildRunner* const runner = ctx.clusterBuildRunner;
+    const std::filesystem::path path = PathFromUtf8(absolutePath);
+
+    ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "Mesh Clusters");
+
+    const ClusterEligibilityCache& eligibility = RefreshClusterEligibility(ui, absolutePath, std::chrono::steady_clock::now());
+    const bool refused = !eligibility.refusalReason.empty();
+    if (refused) {
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "Not available: %s", eligibility.refusalReason.c_str());
+    }
+
+    ImGui::BeginDisabled(refused);
+    ui.weldIndex = std::clamp(ui.weldIndex, 0, 1);
+    ImGui::Combo("Weld", &ui.weldIndex, kClusterWeldLabels, 2);
+    ImGui::TextDisabled(ui.weldIndex == 1
+            ? "Merges by position and recomputes smooth normals. Refused for textured meshes."
+            : "Merges identical vertices only. The shape and normals stay the same.");
+    if (ImGui::TreeNode("Advanced")) {
+        ImGui::SliderInt("Max vertices", &ui.maxVertices, 3, 255);
+        ImGui::SliderInt("Max triangles", &ui.maxTriangles, 4, 512);
+        ImGui::SliderFloat("Cone weight", &ui.coneWeight, 0.0f, 1.0f);
+        ImGui::TreePop();
+    }
+    ui.maxVertices = ClampClusterMaxVertices(ui.maxVertices);
+    ui.maxTriangles = ClampClusterMaxTriangles(ui.maxTriangles);
+    ui.coneWeight = ClampClusterConeWeight(ui.coneWeight);
+
+    const bool unavailable = runner == nullptr;
+    const bool busy = runner != nullptr && runner->Busy();
+    ImGui::BeginDisabled(unavailable || busy);
+    if (ImGui::Button("Build Clusters") && runner != nullptr) {
+        runner->Start(path, MakeClusterOptions(ui), 0);
+    }
+    ImGui::EndDisabled();
+    if ((unavailable || busy) && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("%s", unavailable ? "The cluster builder is not available." : "A cluster build is already running.");
+    }
+    ImGui::EndDisabled();
+
+    if (runner != nullptr && runner->IsBuildingPath(path)) {
+        ImGui::TextDisabled("Building clusters...");
+    } else if (runner != nullptr && runner->LastFinished().has_value()
+        && WriterRegistryKey(runner->LastFinished()->path) == WriterRegistryKey(path)) {
+        const MeshClusterBuildOutcome& outcome = runner->LastFinished()->outcome;
+        const MeshClusterReport& report = outcome.report;
+        if (outcome.success) {
+            const std::string line = FormatClusterStatusLine(report.clusterCount, report.avgTrianglesPerCluster,
+                report.vertexCountBefore, report.vertexCountAfter, report.milliseconds);
+            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "%s", line.c_str());
+            if (report.poorFill) {
+                ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s",
+                    report.weld == ClusterWeldMode::Exact ? "Low cluster fill. Try the Position only weld."
+                                                          : "Low cluster fill.");
+            }
+        } else {
+            ImGui::TextColored(ImVec4(0.95f, 0.4f, 0.4f, 1.0f), "Cluster build failed: %s", outcome.message.c_str());
+        }
+    }
+    ImGui::TextDisabled("Only instances spawned after this use the new data.");
+}
+
+// Rewrites every stored normal from the mesh geometry; disabled while a cluster build writes the same file.
+void BuildRecomputeNormalsFromGeometryButton(
+    EditorContext& ctx, const std::string& absolutePath, MeshInstantiationSystem& meshInstantiationSystem)
+{
+    ClusterToolUiState& ui = ctx.clusterTool;
+    const MeshClusterBuildRunner* const runner = ctx.clusterBuildRunner;
+
+    const bool clusterBuildRunning = runner != nullptr && runner->IsBuildingPath(PathFromUtf8(absolutePath));
     ImGui::BeginDisabled(clusterBuildRunning);
     if (ImGui::Button("Recompute Normals from Geometry")) {
         std::string errorMessage;
-        s_lastNormalRecomputeSucceeded = RecomputeAndSaveMeshNormalsToGtaFile(absolutePath, &errorMessage);
-        s_lastNormalRecomputeError = errorMessage;
-        if (s_lastNormalRecomputeSucceeded) {
+        ui.lastNormalsSucceeded = RecomputeAndSaveMeshNormalsToGtaFile(absolutePath, &errorMessage);
+        ui.lastNormalsError = errorMessage;
+        if (ui.lastNormalsSucceeded) {
             meshInstantiationSystem.InvalidateCachedMeshAsset(absolutePath);
+            ctx.pendingAssetRecordRefresh = absolutePath;
         }
     }
     ImGui::EndDisabled();
-    if (!s_lastNormalRecomputeError.empty() || s_lastNormalRecomputeSucceeded) {
-        if (s_lastNormalRecomputeSucceeded) {
-            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Recomputed normals and saved to asset.");
-        } else {
-            ImGui::TextColored(ImVec4(0.95f, 0.4f, 0.4f, 1.0f), "Recompute failed: %s", s_lastNormalRecomputeError.c_str());
-        }
+    if (ui.lastNormalsSucceeded) {
+        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Recomputed normals and saved to asset.");
+    } else if (!ui.lastNormalsError.empty()) {
+        ImGui::TextColored(ImVec4(0.95f, 0.4f, 0.4f, 1.0f), "Recompute failed: %s", ui.lastNormalsError.c_str());
     }
     ImGui::TextDisabled(
-        "Overwrites every stored normal with a fresh, area-weighted average computed directly from this "
-        "mesh's own vertex positions - useful when a source file's original normals are missing/incorrect "
-        "(common for some exported STL files). Only affects instances spawned AFTER this; any copies of this "
-        "model already placed in the current Scene keep their current normals until deleted and re-spawned.");
+        "Overwrites every stored normal with an area-weighted average of the face normals. Only instances "
+        "spawned after this use the new normals.");
+}
+
+// Mesh asset tools shown under the metadata. `siteId` keeps the widget IDs of the two call sites apart.
+void BuildMeshAssetTools(
+    EditorContext& ctx, const std::string& absolutePath, MeshInstantiationSystem& meshInstantiationSystem, int siteId)
+{
+    ScopedUniqueId idScope(siteId, "InspectorPanel::MeshAssetTools");
+    BuildClusterToolSection(ctx, absolutePath);
+    ImGui::Separator();
+    BuildRecomputeNormalsFromGeometryButton(ctx, absolutePath, meshInstantiationSystem);
 }
 
 // The Animation-asset equivalent of BuildGtaTextureMetadata()/
@@ -1365,7 +1438,7 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
         } else if (isGtaMesh && gtaHeader.has_value()) {
             BuildGtaMeshMetadata(*gtaHeader, metadata.sizeBytes, meshPreview);
             ImGui::Separator();
-            BuildRecomputeNormalsFromGeometryButton(absolutePath, meshInstantiationSystem, ctx.clusterBuildRunner);
+            BuildMeshAssetTools(ctx, absolutePath, meshInstantiationSystem, 0);
         }
         BuildPlainFileMetadata(metadata, absolutePath);
         ImGui::EndChild();
@@ -1414,7 +1487,7 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
     } else if (isGtaMesh && gtaHeader.has_value()) {
         BuildGtaMeshMetadata(*gtaHeader, metadata.sizeBytes, std::nullopt);
         ImGui::Separator();
-        BuildRecomputeNormalsFromGeometryButton(absolutePath, meshInstantiationSystem, ctx.clusterBuildRunner);
+        BuildMeshAssetTools(ctx, absolutePath, meshInstantiationSystem, 1);
     } else if (isGtaAnimation && gtaHeader.has_value()) {
         BuildGtaAnimationMetadata(*gtaHeader, metadata.sizeBytes, motionData);
         ImGui::Separator();
