@@ -732,8 +732,7 @@ int EditorHost::Run()
             const std::vector<RenderFeatureDebugEntry> renderFeatureEntries =
                 renderFeatureCompositor != nullptr ? renderFeatureCompositor->DebugSnapshot()
                                                     : std::vector<RenderFeatureDebugEntry>{};
-            m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph,
-                m_core.GetGpuDrivenBatchDebugInfo(), renderFeatureEntries,
+            m_editorLayer->BuildUI(m_game, m_renderer, m_renderGraph, renderFeatureEntries,
                 // The mutable compositor is fetched again: the const local above does not fit BuildUI()'s parameter.
                 m_core.GetRenderPassToggleRegistryMutable(), m_core.GetRenderFeatureCompositor(),
                 m_core.GetOffscreenBlackboardForFrameDebugger(),
@@ -743,8 +742,7 @@ int EditorHost::Run()
             // GET /render_graph data: reuses renderFeatureEntries and ignores the panel's Pause checkbox (always the latest frame).
             rg::RenderGraphMetadata renderGraphMetadata = rg::BuildRenderGraphMetadata(
                 m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback),
-                m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback),
-                m_core.GetGpuDrivenBatchDebugInfo(), renderFeatureEntries);
+                m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback), renderFeatureEntries);
             renderGraphMetadata.indirectDraw = m_renderer.IndirectDrawCaps();
             renderGraphMetadata.gpuMemory =
                 rg::BuildGpuMemoryMetadata(CollectGpuAllocationSamples(m_renderer), m_game.GetRenderSystem().MeshCount());

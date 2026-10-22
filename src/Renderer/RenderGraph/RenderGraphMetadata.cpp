@@ -201,14 +201,12 @@ std::vector<std::string> CombineResourceRefNames(const std::vector<RenderGraphPa
 } // namespace
 
 RenderGraphMetadata BuildRenderGraphMetadata(const RenderGraphSnapshot& offscreen, const RenderGraphSnapshot& present,
-    const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatches,
     const std::vector<RenderFeatureDebugEntry>& renderFeatures)
 {
     RenderGraphMetadata metadata;
     metadata.schemaVersion = 1;
     metadata.offscreenRegime = BuildRegimeMetadata("SynchronousImmediateReadback", offscreen);
     metadata.presentRegime = BuildRegimeMetadata("PipelinedDeferredReadback", present);
-    metadata.gpuDrivenBatches = gpuDrivenBatches;
     metadata.renderFeatures = renderFeatures;
     return metadata;
 }
@@ -335,7 +333,6 @@ void to_json(nlohmann::json& j, const RenderGraphMetadata& metadata)
         { "schema_version", metadata.schemaVersion },
         { "offscreen_regime", metadata.offscreenRegime },
         { "present_regime", metadata.presentRegime },
-        { "gpu_driven_batches", metadata.gpuDrivenBatches },
         { "render_features", metadata.renderFeatures },
         { "indirect_draw",
             {
@@ -357,17 +354,7 @@ void to_json(nlohmann::json& j, const RenderGraphMetadata& metadata)
 
 namespace gte {
 
-// Defined here so GpuDrivenBatchDebugInfo.h and RenderFeatureDebugEntry.h need no json include.
-
-void to_json(nlohmann::json& j, const GpuDrivenBatchDebugInfo& info)
-{
-    j = nlohmann::json{
-        { "batch_name", info.batchName },
-        { "instance_count", info.instanceCount },
-        { "visible_count", info.visibleCount.has_value() ? nlohmann::json(*info.visibleCount) : nlohmann::json(nullptr) },
-    };
-}
-
+// Defined here so RenderFeatureDebugEntry.h needs no json include.
 void to_json(nlohmann::json& j, const RenderFeatureDebugEntry& entry)
 {
     j = nlohmann::json{

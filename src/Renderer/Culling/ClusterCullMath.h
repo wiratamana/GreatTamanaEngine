@@ -38,12 +38,6 @@ constexpr bool ClusterPathSupported(const IndirectDrawCapsView& caps) noexcept
         && caps.maxDrawIndirectCount > 0;
 }
 
-// The instanced batch path writes firstInstance per command and uses a counted multi draw.
-constexpr bool OldBatchPathSupported(const IndirectDrawCapsView& caps) noexcept
-{
-    return caps.drawIndirectCount && caps.multiDrawIndirect && caps.drawIndirectFirstInstance;
-}
-
 // ---------------------------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------------------------

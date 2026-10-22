@@ -1,7 +1,6 @@
 #pragma once
 
 #include "DrawCommand.h"
-#include "RenderBatching.h"
 #include "../Core/GraphicsHandles.h" // DescriptorSetHandle
 #include "ECS/Components/Camera.h"
 #include "ECS/Components/MeshRenderer.h"
@@ -9,7 +8,6 @@
 #include "ECS/Registry.h"
 #include "Math/Mat4.h"
 #include "Math/Vec3.h"
-#include "Renderer/Culling/GpuDrivenBatchCache.h"
 #include "Renderer/MaterialTexture.h"
 #include "Renderer/Mesh.h"
 #include "Renderer/Pipeline.h"
@@ -33,14 +31,6 @@ class CommandBuffer;
 namespace gte {
 
 class Renderer;
-
-// One GPU-driven batch for this frame: which (mesh, pipeline), how many instances now, and the draws it replaces.
-struct GpuDrivenBatchFrameEntry {
-    MeshHandle mesh;
-    PipelineHandle pipeline;
-    std::size_t instanceCount = 0;
-    std::vector<DrawCommand> commands;
-};
 
 // The only layer that knows both the ECS (Registry, Transform, MeshRenderer) and the Renderer (Mesh, Pipeline).
 // It owns the Mesh/Pipeline/MaterialTexture objects; components hold their handles.
@@ -95,12 +85,6 @@ public:
         std::optional<PipelineOverrideSet> pipelineOverrideSet = std::nullopt,
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid, rg::CommandBuffer* cmd = nullptr,
         std::optional<SceneCullRequest> cull = std::nullopt);
-
-    // Groups this frame's draws by (mesh, pipeline) and packs the eligible groups' instances into `cache`.
-    // Meshes skinned on the GPU this frame (`gpuSkinnedOutputBuffersThisFrame`) never join a batch. Builds no passes.
-    std::vector<GpuDrivenBatchFrameEntry> CollectGpuDrivenBatches(Registry& registry, Renderer& renderer,
-        GpuDrivenBatchCache& cache, const std::unordered_set<BufferObjectHandle>& gpuSkinnedOutputBuffersThisFrame = {},
-        std::size_t minInstancesForGpuDrivenBatch = kMinInstancesForGpuDrivenBatch);
 
 private:
     ResourcePool<Mesh, MeshHandle> m_meshes;

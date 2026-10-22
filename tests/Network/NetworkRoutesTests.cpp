@@ -529,7 +529,6 @@ TEST(BuildRenderGraphMetadataResponseJsonTests, DefaultConstructedMetadataProduc
     EXPECT_TRUE(parsed["offscreen_regime"]["resources"].empty());
     ASSERT_TRUE(parsed.contains("present_regime"));
     EXPECT_EQ(parsed["present_regime"]["regime_name"].get<std::string>(), "");
-    EXPECT_TRUE(parsed["gpu_driven_batches"].empty());
     EXPECT_TRUE(parsed["render_features"].empty());
 }
 
@@ -556,11 +555,6 @@ TEST(BuildRenderGraphMetadataResponseJsonTests, PopulatedMetadataRoundTripsEvery
 
     metadata.presentRegime.regimeName = "PipelinedDeferredReadback";
 
-    gte::GpuDrivenBatchDebugInfo batch;
-    batch.batchName = "Batch0";
-    batch.instanceCount = 4;
-    metadata.gpuDrivenBatches.push_back(batch);
-
     gte::RenderFeatureDebugEntry feature;
     feature.name = "Vignette";
     feature.stage = "PreUI";
@@ -581,11 +575,6 @@ TEST(BuildRenderGraphMetadataResponseJsonTests, PopulatedMetadataRoundTripsEvery
     ASSERT_EQ(jsonPass["reads"].size(), 1u);
     EXPECT_EQ(jsonPass["reads"][0]["name"].get<std::string>(), "Depth");
     EXPECT_EQ(jsonPass["reads"][0]["kind"].get<std::string>(), "Texture");
-
-    ASSERT_EQ(parsed["gpu_driven_batches"].size(), 1u);
-    EXPECT_EQ(parsed["gpu_driven_batches"][0]["batch_name"].get<std::string>(), "Batch0");
-    EXPECT_EQ(parsed["gpu_driven_batches"][0]["instance_count"].get<std::uint32_t>(), 4u);
-    EXPECT_TRUE(parsed["gpu_driven_batches"][0]["visible_count"].is_null());
 
     ASSERT_EQ(parsed["render_features"].size(), 1u);
     EXPECT_EQ(parsed["render_features"][0]["name"].get<std::string>(), "Vignette");

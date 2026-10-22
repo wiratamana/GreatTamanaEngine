@@ -14,36 +14,8 @@ namespace gte {
 
 namespace {
 
-// One line per GPU-driven-eligible batch: "<batch>: N / M instances
-// visible" - N is the GPU-computed, culling-survived count, M is the
-// CPU-known real instance count. "pending" (never a fabricated 0) for a
-// frame visibleCount hasn't been read back yet at all.
-void BuildGpuDrivenBatchesSection(const std::vector<GpuDrivenBatchDebugInfo>& batches)
-{
-    ImGui::SeparatorText("GPU-Driven Batches (instances culled this frame)");
-    if (batches.empty()) {
-        ImGui::TextDisabled("No GPU-driven-eligible batch is live this frame (Game View only).");
-        return;
-    }
-
-    for (const GpuDrivenBatchDebugInfo& batch : batches) {
-        const std::string name = batch.batchName.empty() ? "(unnamed)" : batch.batchName;
-        if (batch.visibleCount.has_value()) {
-            const std::uint32_t culled =
-                (batch.instanceCount > *batch.visibleCount) ? (batch.instanceCount - *batch.visibleCount) : 0u;
-            ImGui::Text("%s: %u / %u instances visible (%u culled)", name.c_str(), *batch.visibleCount,
-                batch.instanceCount, culled);
-        } else {
-            ImGui::Text("%s: pending / %u instances (GPU readback not yet available)", name.c_str(),
-                batch.instanceCount);
-        }
-    }
-}
-
-// One row per registered render-feature entry - an "Enabled" checkbox and
-// an editable priority field, both live-mutating `renderFeatureCompositor`
-// directly. `renderFeatureCompositor == nullptr` (a degraded build) means
-// the widgets still render but any edit is silently a no-op.
+// One row per registered render-feature entry: an "Enabled" checkbox and an editable priority field.
+// Both edit `renderFeatureCompositor` directly; with a null compositor the widgets render but edits are no-ops.
 void BuildRenderFeaturesSection(
     const std::vector<RenderFeatureDebugEntry>& entries, RenderFeatureCompositor* renderFeatureCompositor)
 {
@@ -82,8 +54,8 @@ void BuildRenderFeaturesSection(
 
 } // namespace
 
-void RenderFeaturesPanel::Build(EditorContext& ctx, const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
-    const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries, RenderFeatureCompositor* renderFeatureCompositor)
+void RenderFeaturesPanel::Build(EditorContext& ctx, const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
+    RenderFeatureCompositor* renderFeatureCompositor)
 {
     if (!ctx.renderFeaturesWindowOpen) {
         return;
@@ -95,8 +67,6 @@ void RenderFeaturesPanel::Build(EditorContext& ctx, const std::vector<GpuDrivenB
         return;
     }
 
-    BuildGpuDrivenBatchesSection(gpuDrivenBatchDebugInfo);
-    ImGui::Spacing();
     BuildRenderFeaturesSection(renderFeatureEntries, renderFeatureCompositor);
 
     ImGui::End();

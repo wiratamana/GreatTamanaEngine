@@ -509,16 +509,7 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/ScreenSpaceView.h
     src/Core/FeatureKit/ScreenSpaceView.cpp
     src/Core/FeatureKit/View.h
-    # editor-core-separation-6 campaign, PHASE4
-    # (PHASE4_RENDER_FEATURE_COMPOSITOR_CORE_AND_ORDERING.md) - the third
-    # real IPluginCapabilityOrchestrator implementation, the real `_v2`
-    # render-feature compositing pipeline: RenderFeatureCompositor (the
-    # per-plugin private-target/blend/ordering engine) and RenderFeatureNamePool
-    # (header-only - stable interned pass/resource names, mirroring
-    # Core.cpp's own GpuDrivenBatchNamePool precedent). better-render-pass-2
-    # campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) - deleted
-    # PluginRenderPassBuilderAdapter_v2.h/.cpp outright (ABI-only, the `_v2`
-    # uber-shader adapter).
+    # Render feature compositor name pool (header-only, stable interned pass/resource names).
     src/Core/Plugins/RenderFeatureNamePool.h
     # editor-core-separation-23 campaign, PHASE1
     # (PHASE1_PROJECT_RENDER_FEATURE_CALLBACK_HEADER_AND_ENTRY_THIRD_KIND.md) -
@@ -841,11 +832,6 @@ add_library(gte_core STATIC
     src/Renderer/Culling/CullingTypes.cpp
     src/Renderer/Culling/ClusterCullMath.h
     src/Renderer/Culling/ClusterCullMath.cpp
-    src/Renderer/Culling/CullingPipelines.h
-    src/Renderer/Culling/CullingPipelines.cpp
-    src/Renderer/Culling/GpuDrivenBatchCache.h
-    src/Renderer/Culling/GpuDrivenBatchCache.cpp
-    src/Renderer/Culling/GpuDrivenBatchDebugInfo.h
     src/Renderer/IndirectDrawTypes.h
     src/Renderer/Primitives/PrimitiveMeshGenerator.cpp
     src/Renderer/Primitives/PrimitiveMeshGenerator.h
@@ -1025,8 +1011,6 @@ add_library(gte_core STATIC
     src/Game/Game.h
     src/Game/EngineCommandResults.h
     src/Game/DrawCommand.h
-    src/Game/RenderBatching.h
-    src/Game/RenderBatching.cpp
     src/Game/RenderSystem.cpp
     src/Game/SceneDrawPass.h
     src/Game/SceneDrawPass.cpp
@@ -1748,25 +1732,6 @@ gte_add_shader(GreatTamanaEditor src/Shaders/Triangle.frag
 gte_add_shader(GreatTamanaEditor src/Shaders/Mesh.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/Mesh.frag
     EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl)
-
-# GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-# PHASE2 (task_manager/render-pass-5/
-# PHASE2_INSTANCED_DRAW_PRIMITIVE_AND_INDIRECT_SUBMIT.md) - the new
-# instanced-draw vertex shader (src/Renderer/Pipeline.h's
-# VertexLayout::PositionNormalInstanced), reusing Mesh.frag above UNCHANGED
-# as its fragment shader. Unconditional, for the same reason as Mesh.vert/
-# frag above - GpuResourceFactory.cpp (which loads this) is always
-# compiled into gte_core.
-gte_add_shader(GreatTamanaEditor src/Shaders/MeshInstanced.vert)
-
-# GPU-Driven Frustum Culling + Indirect Draw campaign (render-pass-5),
-# PHASE3 (task_manager/render-pass-5/
-# PHASE3_FRUSTUM_CULL_COMPUTE_SHADER_AND_PIPELINE.md) - the real culling
-# compute shader (src/Renderer/Culling/CullingPipelines.h/.cpp). Unconditional
-# for the same reason as SkinVerticesPositionNormal.comp below - this is a
-# genuine gameplay/runtime feature (batched-entity frustum culling), not a
-# debug/Editor-only tool, so it must work in a non-Editor, release build too.
-gte_add_shader(GreatTamanaEditor src/Shaders/FrustumCull.comp)
 
 # Cluster cull compute and the cluster draw vertex/fragment shaders (Mesh.frag is the lit fragment shader).
 gte_add_shader(GreatTamanaEditor src/Shaders/ClusterCull.comp)

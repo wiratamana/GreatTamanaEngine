@@ -1,13 +1,12 @@
 #pragma once
 
-// Everything the Render Graph panel shows, as one engine-free, JSON-able object: both regimes, GPU-driven
-// batches, features, device indirect-draw caps and tracked GPU memory. One object backs the panel tables,
-// GET /render_graph and the DOT export. BuildRenderGraphMetadata() is a pure function of plain data.
+// Everything the Render Graph panel shows, as one engine-free, JSON-able object: both regimes, features,
+// device indirect-draw caps and tracked GPU memory. One object backs the panel tables, GET /render_graph
+// and the DOT export. BuildRenderGraphMetadata() is a pure function of plain data.
 
 #include "RenderGraphSnapshot.h"
 #include "RenderGraphTypes.h"
 #include "../Culling/ClusterCullMath.h"
-#include "../Culling/GpuDrivenBatchDebugInfo.h"
 #include "../../Core/Plugins/RenderFeatureDebugEntry.h"
 
 #include <nlohmann/json.hpp>
@@ -86,13 +85,11 @@ inline constexpr const char* kUnnamedGpuAllocation = "(unnamed)";
 // Pure: sums `samples` per name and in total.
 RenderGraphGpuMemoryMetadata BuildGpuMemoryMetadata(std::span<const GpuAllocationSample> samples, std::uint64_t meshCount);
 
-// The top-level JSON-able object. Two named regimes, plus batches and features so one response
-// carries everything the panel needs.
+// The top-level JSON-able object: two named regimes plus features, caps and memory in one response.
 struct RenderGraphMetadata {
     std::uint32_t schemaVersion = 1; // Bump on any future breaking JSON shape change.
     RenderGraphRegimeMetadata offscreenRegime; // ExecuteTimingMode::SynchronousImmediateReadback
     RenderGraphRegimeMetadata presentRegime;   // ExecuteTimingMode::PipelinedDeferredReadback
-    std::vector<GpuDrivenBatchDebugInfo> gpuDrivenBatches;   // Reused directly, never re-wrapped.
     std::vector<RenderFeatureDebugEntry> renderFeatures;     // Reused directly, never re-wrapped.
     IndirectDrawCapsView indirectDraw;                       // Device indirect draw capabilities.
     RenderGraphGpuMemoryMetadata gpuMemory;                  // Read on the main thread when published.
@@ -100,7 +97,6 @@ struct RenderGraphMetadata {
 
 // Pure: builds from already-resolved snapshots, never a live graph or Core.
 RenderGraphMetadata BuildRenderGraphMetadata(const RenderGraphSnapshot& offscreen, const RenderGraphSnapshot& present,
-    const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatches,
     const std::vector<RenderFeatureDebugEntry>& renderFeatures);
 
 // All RenderGraphPassMetadata sharing one `name` (e.g. a per-view pass declared once per view), as one row.
@@ -132,8 +128,7 @@ void to_json(nlohmann::json& j, const RenderGraphMetadata& metadata);
 
 namespace gte {
 
-// to_json() for these live in RenderGraphMetadata.cpp so their headers need no json include.
-void to_json(nlohmann::json& j, const GpuDrivenBatchDebugInfo& info);
+// to_json() for this lives in RenderGraphMetadata.cpp so its header needs no json include.
 void to_json(nlohmann::json& j, const RenderFeatureDebugEntry& entry);
 
 } // namespace gte

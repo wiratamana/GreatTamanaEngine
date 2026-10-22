@@ -94,11 +94,7 @@ TEST(CoreHeadlessConstructionTest, ConstructsWithoutCrashingAndExposesUsableAcce
     InputFrame input;
     core->Update(input, 1.0f / 60.0f);
 
-    // GetGpuDrivenBatchDebugInfo()/GetGameViewTargetThisFrame() are small,
-    // additive accessors - neither should crash or dereference a null
-    // m_editorLayer even though BuildFrame() was never called (they simply
-    // report the appropriate empty state that frame).
-    EXPECT_TRUE(core->GetGpuDrivenBatchDebugInfo().empty());
+    // GetGameViewTargetThisFrame() must not dereference a null editor layer before BuildFrame() ran.
     EXPECT_EQ(core->GetGameViewTargetThisFrame(), nullptr);
 }
 

@@ -3,6 +3,7 @@
 #include "../Core/Logging.h"
 #include "ECS/TransformHierarchy.h"
 #include "Instantiation/MaterialLifetimeRules.h"
+#include "Renderer/Culling/CullingTypes.h"
 #include "Profiling/ScopeTimer.h"
 #include "Renderer/Renderer.h"
 #include "Renderer/RenderGraph/BoundedOnceSet.h"
@@ -190,64 +191,6 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
             }
         }
     }
-}
-
-std::vector<GpuDrivenBatchFrameEntry> RenderSystem::CollectGpuDrivenBatches(Registry& registry, Renderer& renderer,
-    GpuDrivenBatchCache& cache, const std::unordered_set<BufferObjectHandle>& gpuSkinnedOutputBuffersThisFrame,
-    std::size_t minInstancesForGpuDrivenBatch)
-{
-    GTE_PROFILE_SCOPE("RenderSystem::CollectGpuDrivenBatches");
-
-    std::vector<GpuDrivenBatchFrameEntry> result;
-
-    const std::vector<DrawCommand> commands = CollectRenderables(registry);
-    const std::vector<RenderBatchGroup> groups = GroupDrawCommandsByMeshAndPipeline(commands);
-
-    for (const RenderBatchGroup& group : groups) {
-        const Mesh* mesh = m_meshes.TryGet(group.mesh);
-        const Pipeline* pipeline = m_pipelines.TryGet(group.pipeline);
-        if (mesh == nullptr || pipeline == nullptr) {
-            continue; // Unresolvable handle - never eligible, mirrors Draw()'s own "skip, never crash" convention.
-        }
-
-        // A GPU-skinned mesh draws from a skinning output buffer and never joins a GPU-driven batch.
-        const bool isGpuSkinned = gpuSkinnedOutputBuffersThisFrame.contains(mesh->VertexBufferHandle());
-
-        if (!IsGpuDrivenEligible(group, mesh->HasIndexBuffer(), pipeline->VertexLayoutKind(), isGpuSkinned,
-                minInstancesForGpuDrivenBatch, mesh->HasClusters())) {
-            continue;
-        }
-
-        const GpuDrivenBatchKey key{ group.mesh, group.pipeline };
-        const std::size_t instanceCount = group.commands.size();
-
-        cache.EnsureCapacity(renderer, key, instanceCount);
-
-        // The batch shares one mesh, so its local bounds are computed once and transformed per instance.
-        const AABB localBounds = mesh->LocalBounds().value_or(AABB{});
-
-        std::vector<GpuCullingInstanceInput> instances;
-        instances.reserve(instanceCount);
-        for (const DrawCommand& command : group.commands) {
-            const AABB worldBounds = TransformAABB(localBounds, command.model);
-            instances.push_back(PackCullingInstanceInput(
-                command.model, worldBounds, /*firstIndex=*/0, mesh->IndexCount(), /*vertexOffset=*/0));
-        }
-
-        cache.PackThisFrame(key, instances);
-
-        // Points the batch's descriptor sets at the cache's current buffers; cheap when nothing was reallocated.
-        cache.EnsureDescriptorSetsWritten(renderer, key);
-
-        GpuDrivenBatchFrameEntry entry;
-        entry.mesh = group.mesh;
-        entry.pipeline = group.pipeline;
-        entry.instanceCount = instanceCount;
-        entry.commands = group.commands;
-        result.push_back(std::move(entry));
-    }
-
-    return result;
 }
 
 } // namespace gte

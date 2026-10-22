@@ -91,10 +91,10 @@ Consumers (R = rewritten on the pass verbs, M = moved into `src/Renderer` behind
 
 | Consumer | Choice | Why |
 | --- | --- | --- |
-| GPU-driven batch buffers (`GpuDrivenBatchCache`) | M | Stays in `src/Renderer`; `Core.cpp` imports its `GpuBuffer` entries and holds no `VkBuffer`. |
+| Cluster draw descriptor sets (`rg::ClusterDrawBindings`) | M | Allocated and freed only in `src/Renderer`; the kit calls `Prepare()` and nothing else. |
 | GPU skinning buffers (`GpuSkinningRigCache`) | M | Buffers are `GpuBuffer`; the raw descriptor writes moved to `GpuSkinningPipelines::BindBuffers`. |
 | GPU skinning dispatch (`GpuSkinning` provider, `GpuSkinningPipelines::Declare`) | R | A `ComputePass`. Its output is bound as a graph buffer (write-only block), the input buffers stay external. |
-| Mesh vertex buffers | M | Meshes share vertex buffers; `Mesh::VertexBufferHandle()` replaces the raw handle for batch eligibility. |
+| Mesh vertex buffers | M | Meshes share vertex buffers; `Mesh::VertexBufferHandle()` replaces the raw handle (used to detect GPU-skinned meshes). |
 | `GpuParams` | R | Built on `GpuBuffer`. |
 | Editor mesh preview (`AssetPreviewMesh`, `BoneViewerWindow`) | M | `MeshPreviewRenderer` in `src/Renderer` owns the pipeline, dummy set, buffers and target behind a Vulkan-free interface. |
 | Scene grid overlay | M | `SceneGridRenderer` lives in `src/Renderer`; the editor layer passes a `RecordingContext` and the matrix. |

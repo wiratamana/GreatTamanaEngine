@@ -6,7 +6,6 @@
 #include "../Math/Mat4.h"
 #include "../Math/Vec3.h"
 #include "../Renderer/RenderTexture.h"
-#include "../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
 #include "../Core/Plugins/RenderFeatureDebugEntry.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
 // Included at file scope: including it inside `namespace gte` below would create `gte::gte`.
@@ -141,10 +140,8 @@ public:
     virtual void RenderSceneGrid(const rg::RecordingContext& cmd, const Mat4& sceneViewProjection) = 0;
 
     // Builds every editor panel for this frame in a full-viewport dock space. Call after Game rendered.
-    // `gpuDrivenBatchDebugInfo` has one entry per GPU-driven batch (Game view).
     // `renderFeatureEntries` is the resolved order of loaded render-feature plugins; empty when none.
     virtual void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
-        const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
         const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
         // Never null. The Render Graph panel reads and edits pass toggles through it (main thread only).
         rg::RenderPassToggleRegistry& renderPassToggleRegistry,

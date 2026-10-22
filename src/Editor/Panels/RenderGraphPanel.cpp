@@ -116,8 +116,7 @@ void RenderGraphPanel::Build(
     if (!m_paused || m_forceSingleCapture) {
         m_frozenMetadata = rg::BuildRenderGraphMetadata(
             renderGraph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback),
-            renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback), {}, {});
-
+            renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback), {});
         m_frozenResourceResolutionText.clear();
         CollectResourceResolutionText(m_frozenMetadata.offscreenRegime, renderGraph, m_frozenResourceResolutionText);
         CollectResourceResolutionText(m_frozenMetadata.presentRegime, renderGraph, m_frozenResourceResolutionText);

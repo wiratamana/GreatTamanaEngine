@@ -30,7 +30,7 @@ TEST(RenderGraphMetadataTest, EmptySnapshotsProduceEmptyMetadata)
     const RenderGraphSnapshot offscreen;
     const RenderGraphSnapshot present;
 
-    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
     EXPECT_EQ(metadata.schemaVersion, 1u);
     EXPECT_EQ(metadata.offscreenRegime.regimeName, "SynchronousImmediateReadback");
@@ -43,7 +43,6 @@ TEST(RenderGraphMetadataTest, EmptySnapshotsProduceEmptyMetadata)
     EXPECT_TRUE(metadata.presentRegime.resources.empty());
     EXPECT_FALSE(metadata.presentRegime.timingSlotBudgetExhausted);
 
-    EXPECT_TRUE(metadata.gpuDrivenBatches.empty());
     EXPECT_TRUE(metadata.renderFeatures.empty());
 }
 
@@ -64,7 +63,7 @@ TEST(RenderGraphMetadataTest, SurvivingPassOwningFeatureNameIsCopiedThrough)
     offscreen.passesInExecutionOrder.push_back(pass);
     const RenderGraphSnapshot present;
 
-    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
     ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
     const RenderGraphPassMetadata& built = metadata.offscreenRegime.passes[0];
@@ -105,7 +104,7 @@ TEST(RenderGraphMetadataTest, WriteWithNonEmptyBarrierLabelPopulatesBarrierTrans
     offscreen.passesInExecutionOrder.push_back(pass);
     const RenderGraphSnapshot present;
 
-    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
     ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
     const RenderGraphPassMetadata& built = metadata.offscreenRegime.passes[0];
@@ -134,7 +133,7 @@ TEST(RenderGraphMetadataTest, WriteWithEmptyBarrierLabelStaysNullopt)
     offscreen.passesInExecutionOrder.push_back(pass);
     const RenderGraphSnapshot present;
 
-    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
     ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
     const RenderGraphPassMetadata& built = metadata.offscreenRegime.passes[0];
@@ -153,7 +152,7 @@ TEST(RenderGraphMetadataTest, PassWithNoOwningFeatureNameStaysEmptyString)
     offscreen.passesInExecutionOrder.push_back(pass);
     const RenderGraphSnapshot present;
 
-    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
     ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
     EXPECT_TRUE(metadata.offscreenRegime.passes[0].owningFeatureName.empty());
@@ -168,7 +167,7 @@ TEST(RenderGraphMetadataTest, PassWithEngineUnownedSentinelIsCopiedThroughVerbat
     offscreen.passesInExecutionOrder.push_back(pass);
     const RenderGraphSnapshot present;
 
-    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
     ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
     EXPECT_EQ(metadata.offscreenRegime.passes[0].owningFeatureName, "ENGINE_UNOWNED");
@@ -201,7 +200,7 @@ TEST(RenderGraphMetadataTest, CulledPassIsStillFullyDescribedWithZeroedStatsAndN
     offscreen.passesInExecutionOrder.push_back(pass);
     const RenderGraphSnapshot present;
 
-    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
     ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
     const RenderGraphPassMetadata& built = metadata.offscreenRegime.passes[0];
@@ -245,7 +244,7 @@ TEST(RenderGraphMetadataTest, ResourceWithValidUseIndicesResolvesBothPassNames)
 
     const RenderGraphSnapshot present;
 
-    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
     ASSERT_EQ(metadata.offscreenRegime.resources.size(), 1u);
     const RenderGraphResourceMetadata& built = metadata.offscreenRegime.resources[0];
@@ -274,7 +273,7 @@ TEST(RenderGraphMetadataTest, NeverUsedResourceHasNulloptPassNamesForNegativeInd
 
     const RenderGraphSnapshot present;
 
-    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
     ASSERT_EQ(metadata.offscreenRegime.resources.size(), 1u);
     const RenderGraphResourceMetadata& built = metadata.offscreenRegime.resources[0];
@@ -301,7 +300,7 @@ TEST(RenderGraphMetadataTest, PresentGpuTimingProducesMatchingTextAndNumericMill
     offscreen.passesInExecutionOrder.push_back(pass);
     const RenderGraphSnapshot present;
 
-    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
     ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
     const RenderGraphPassMetadata& built = metadata.offscreenRegime.passes[0];
@@ -322,42 +321,27 @@ TEST(RenderGraphMetadataTest, TimingSlotBudgetExhaustedIsCopiedThroughPerRegime)
     RenderGraphSnapshot present;
     present.timingSlotBudgetExhausted = false;
 
-    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {}, {});
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
     EXPECT_TRUE(metadata.offscreenRegime.timingSlotBudgetExhausted);
     EXPECT_FALSE(metadata.presentRegime.timingSlotBudgetExhausted);
 }
 
-// --- GpuDrivenBatchDebugInfo / RenderFeatureDebugEntry are reused directly --
+// --- RenderFeatureDebugEntry is reused directly -------------------------------
 
-TEST(RenderGraphMetadataTest, GpuDrivenBatchesAndRenderFeaturesAreCopiedThroughUnchanged)
+TEST(RenderGraphMetadataTest, RenderFeaturesAreCopiedThroughUnchanged)
 {
-
-    GpuDrivenBatchDebugInfo batch;
-    batch.batchName = "GpuDrivenBatch0";
-    batch.instanceCount = 10;
-    batch.visibleCount = 6u;
-
     RenderFeatureDebugEntry feature;
     feature.name = "Bloom";
     feature.stage = "PostComposite";
     feature.priority = 5;
     feature.blendMode = "AlphaOver";
-    // editor-core-separation-8 campaign, PHASE2 - the new host-side
-    // enable/disable override field, defaults true.
     feature.enabled = false;
 
     const RenderGraphSnapshot offscreen;
     const RenderGraphSnapshot present;
 
-    const RenderGraphMetadata metadata =
-        BuildRenderGraphMetadata(offscreen, present, { batch }, { feature });
-
-    ASSERT_EQ(metadata.gpuDrivenBatches.size(), 1u);
-    EXPECT_EQ(metadata.gpuDrivenBatches[0].batchName, "GpuDrivenBatch0");
-    EXPECT_EQ(metadata.gpuDrivenBatches[0].instanceCount, 10u);
-    ASSERT_TRUE(metadata.gpuDrivenBatches[0].visibleCount.has_value());
-    EXPECT_EQ(*metadata.gpuDrivenBatches[0].visibleCount, 6u);
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, { feature });
 
     ASSERT_EQ(metadata.renderFeatures.size(), 1u);
     EXPECT_EQ(metadata.renderFeatures[0].name, "Bloom");
@@ -388,23 +372,13 @@ TEST(RenderGraphMetadataTest, ToJsonProducesExpectedTopLevelShapeAndNullHandling
     offscreen.passesInExecutionOrder.push_back(pass);
     const RenderGraphSnapshot present;
 
-    GpuDrivenBatchDebugInfo batch;
-    batch.batchName = "Batch0";
-    batch.instanceCount = 4;
-    // visibleCount left at std::nullopt -> JSON null.
-
     RenderFeatureDebugEntry feature;
     feature.name = "Vignette";
     feature.stage = "PreUI";
     feature.priority = 1;
     feature.blendMode = "Replace";
-    // editor-core-separation-8 campaign, PHASE2 - explicit true here (the
-    // struct's own default), so this test also proves the "enabled" key
-    // round-trips through to_json() for the true case too (the sibling test
-    // above already covers the false case).
-    feature.enabled = true;
 
-    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, { batch }, { feature });
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, { feature });
 
     nlohmann::json j = metadata;
 
@@ -429,11 +403,6 @@ TEST(RenderGraphMetadataTest, ToJsonProducesExpectedTopLevelShapeAndNullHandling
 
     EXPECT_EQ(j["present_regime"]["regime_name"].get<std::string>(), "PipelinedDeferredReadback");
     EXPECT_TRUE(j["present_regime"]["passes"].empty());
-
-    ASSERT_EQ(j["gpu_driven_batches"].size(), 1u);
-    EXPECT_EQ(j["gpu_driven_batches"][0]["batch_name"].get<std::string>(), "Batch0");
-    EXPECT_EQ(j["gpu_driven_batches"][0]["instance_count"].get<std::uint32_t>(), 4u);
-    EXPECT_TRUE(j["gpu_driven_batches"][0]["visible_count"].is_null());
 
     ASSERT_EQ(j["render_features"].size(), 1u);
     EXPECT_EQ(j["render_features"][0]["name"].get<std::string>(), "Vignette");
@@ -658,7 +627,7 @@ TEST(RenderGraphGpuMemoryMetadataTest, JsonCarriesGpuMemoryObjectAndPassIndirect
     RenderGraphSnapshot offscreen;
     offscreen.passesInExecutionOrder.push_back(pass);
 
-    RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, RenderGraphSnapshot{}, {}, {});
+    RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, RenderGraphSnapshot{}, {});
     const std::vector<GpuAllocationSample> samples{ { "MeshClusterTable", 64 } };
     metadata.gpuMemory = BuildGpuMemoryMetadata(samples, 2);
 

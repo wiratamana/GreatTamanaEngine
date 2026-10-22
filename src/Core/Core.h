@@ -8,8 +8,6 @@
 #include "../ECS/Entity.h"
 #include "../Game/Game.h"
 #include "../Renderer/Culling/ClusterCullMath.h"
-#include "../Renderer/Culling/GpuDrivenBatchCache.h"
-#include "../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
 #include "../Renderer/MeshHandle.h"
 #include "../Renderer/PipelineHandle.h"
 #include "../Renderer/Renderer.h"
@@ -89,12 +87,6 @@ public:
     EngineContext& GetEngineContext() noexcept { return m_engineContext; }
     Time& GetTime() noexcept { return m_engineContext.time; }
     const FrameStats& GetFrameStats() const noexcept { return m_frameStats; }
-
-    // Culling debug statistics from the previous frame.
-    const std::vector<GpuDrivenBatchDebugInfo>& GetGpuDrivenBatchDebugInfo() const noexcept
-    {
-        return m_gpuDrivenBatchDebugInfoLastFrame;
-    }
 
     // Registry for toggling render passes at runtime.
     rg::RenderPassToggleRegistry& GetRenderPassToggleRegistryMutable() noexcept
@@ -253,25 +245,6 @@ public:
     static constexpr std::size_t kMaxExclusionSetsPerFrame = 16;
 
 private:
-    // Render data for a GPU-driven indirect draw batch.
-    struct GpuDrivenBatchRenderData {
-        MeshHandle mesh;
-        PipelineHandle originalPipeline;
-        std::size_t instanceCount = 0;
-        rg::BufferHandle inputHandle;
-        rg::BufferHandle indirectHandle;
-        rg::BufferHandle countHandle;
-        rg::BufferHandle readbackHandle;
-        DescriptorSetHandle cullingDescriptorSet = DescriptorSetHandle::Invalid;
-        DescriptorSetHandle instanceBufferDescriptorSet = DescriptorSetHandle::Invalid;
-        const char* resetPassName = nullptr;
-        const char* cullingPassName = nullptr;
-        const char* indirectDrawPassName = nullptr;
-        const char* readbackPassName = nullptr;
-        const char* displayName = nullptr;
-        std::vector<Entity> entities; // Entities included in this indirect batch.
-    };
-
     // A view output a feature exposed this frame (see ExposeViewOutput()). `name` points into the exposing
     // feature's own storage and is valid for the frame.
     struct ExposedViewOutput {
@@ -340,13 +313,6 @@ private:
 
     // Opaque features that broke the pass tag rule; their callbacks no longer run.
     std::unordered_set<std::string> m_faultedOpaqueFeatures;
-
-    // GPU-driven culling cache and frame batch data.
-    GpuDrivenBatchCache m_gpuDrivenBatchCache;
-    std::vector<GpuDrivenBatchRenderData> m_gpuDrivenBatchesThisFrame;
-    Mat4 m_gpuDrivenGameViewProjectionThisFrame;
-    std::vector<GpuDrivenBatchDebugInfo> m_gpuDrivenBatchDebugInfoLastFrame;
-    bool m_batchPathCapsWarned = false; // Logs the missing-capability refusal once.
 
     // De-duplicates frame-build failure logs (a failing frame repeats every frame).
     rg::BoundedOnceSet<64> m_frameFailureOnce;

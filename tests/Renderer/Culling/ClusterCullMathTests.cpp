@@ -76,32 +76,10 @@ TEST(ClusterCullMath, ClusterPathNeedsEveryCapability)
     EXPECT_FALSE(ClusterPathSupported(caps));
 }
 
-TEST(ClusterCullMath, OldBatchPathNeedsThreeFeaturesButNoLimit)
-{
-    EXPECT_TRUE(OldBatchPathSupported(kAllCaps));
-
-    IndirectDrawCapsView caps = kAllCaps;
-    caps.drawIndirectCount = false;
-    EXPECT_FALSE(OldBatchPathSupported(caps));
-
-    caps = kAllCaps;
-    caps.multiDrawIndirect = false;
-    EXPECT_FALSE(OldBatchPathSupported(caps));
-
-    caps = kAllCaps;
-    caps.drawIndirectFirstInstance = false;
-    EXPECT_FALSE(OldBatchPathSupported(caps));
-
-    caps = kAllCaps;
-    caps.maxDrawIndirectCount = 0;
-    EXPECT_TRUE(OldBatchPathSupported(caps));
-}
-
 TEST(ClusterCullMath, DefaultCapsSupportNothing)
 {
     constexpr IndirectDrawCapsView none{};
     EXPECT_FALSE(ClusterPathSupported(none));
-    EXPECT_FALSE(OldBatchPathSupported(none));
 }
 
 // ---- layouts and constants ----

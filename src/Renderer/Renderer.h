@@ -58,9 +58,7 @@ class RenderGraphTimestampPool;
 namespace gte {
 
 class ComputePipeline;
-class CullingPipelines;
 class DescriptorSet;
-class GpuDrivenBatchCache;
 class HeadlessRenderGraphFixture;
 class ISurfaceProvider;
 class MeshPreviewRenderer;
@@ -344,7 +342,6 @@ private:
     friend class rg::SceneRecording;
     friend class rg::Shader;
     friend class rg::RenderGraphTimestampPool;
-    friend class CullingPipelines;
     friend class MeshPreviewRenderer;
 
     friend class rg::RenderGraph;
@@ -352,7 +349,6 @@ private:
     friend class rg::RenderGraphComputeBindingCache;
     friend class rg::OneShot;
     friend class SceneServicesDescriptorSet;
-    friend class GpuDrivenBatchCache;
     friend class VolumeTexturePreviewRenderer;
     friend class RenderFeatureCompositor;
     friend class HeadlessRenderGraphFixture;

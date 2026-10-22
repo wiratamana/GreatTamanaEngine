@@ -7,7 +7,6 @@
 #include "../Profiling/FrameProfiler.h"
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
-#include "../Renderer/Culling/CullingPipelines.h"
 #include "../Renderer/Culling/ClusterCullMath.h"
 #include "../Renderer/RenderGraph/FullscreenPass.h"
 #include "../Renderer/RenderGraph/IndirectDrawPass.h"
@@ -25,7 +24,6 @@
 #include "../Renderer/GraphicsHandleRegistry.h"
 #include "../Renderer/VulkanFormatInfo.h"
 #include "ClusterCandidates.h"
-#include "GpuDrivenBatchEntityExclusionLogic.h"
 #include "Logging.h"
 #include "ScreenPostProcessPassPriorityAssignment.h"
 #include "Plugins/IPluginCapabilityOrchestrator.h"
@@ -70,70 +68,6 @@ Profiling::GpuSampleStatus ToProfilingGpuSampleStatus(GpuTimingSample::Status st
     default:
         return Profiling::GpuSampleStatus::Absent;
     }
-}
-
-// Cached pass and resource names for a GPU-driven batch.
-struct GpuDrivenBatchNames {
-    const char* resetPassName = nullptr;
-    const char* cullingPassName = nullptr;
-    const char* indirectDrawPassName = nullptr;
-    const char* readbackPassName = nullptr;
-    const char* inputBufferName = nullptr;
-    const char* indirectBufferName = nullptr;
-    const char* countBufferName = nullptr;
-    const char* readbackBufferName = nullptr;
-    const char* displayName = nullptr;
-};
-
-// String pool for stable GPU-driven batch names.
-class GpuDrivenBatchNamePool {
-public:
-    const GpuDrivenBatchNames& NamesFor(const GpuDrivenBatchKey& key)
-    {
-        for (const Entry& entry : m_entries) {
-            if (entry.key == key) {
-                return entry.names;
-            }
-        }
-
-        const std::size_t index = m_entries.size();
-        const std::string base = "GpuDrivenBatch" + std::to_string(index);
-        Entry entry;
-        entry.key = key;
-        entry.names.resetPassName = Intern(base + " ResetCount");
-        entry.names.cullingPassName = Intern(base + " Culling");
-        entry.names.indirectDrawPassName = Intern(base + " IndirectDraw");
-        entry.names.readbackPassName = Intern(base + " CountReadback");
-        entry.names.inputBufferName = Intern(base + ".Input");
-        entry.names.indirectBufferName = Intern(base + ".IndirectCommands");
-        entry.names.countBufferName = Intern(base + ".VisibleCount");
-        entry.names.readbackBufferName = Intern(base + ".VisibleCountReadback");
-        entry.names.displayName = Intern(base);
-        m_entries.push_back(std::move(entry));
-        return m_entries.back().names;
-    }
-
-private:
-    const char* Intern(std::string s)
-    {
-        m_storage.push_back(std::move(s));
-        return m_storage.back().c_str();
-    }
-
-    struct Entry {
-        GpuDrivenBatchKey key;
-        GpuDrivenBatchNames names;
-    };
-
-    std::deque<std::string> m_storage;
-    std::vector<Entry> m_entries;
-};
-
-// Global pool of batch names.
-GpuDrivenBatchNamePool& BatchNamePool()
-{
-    static GpuDrivenBatchNamePool pool;
-    return pool;
 }
 
 // Resolves color and depth texture handles for post-opaque and post-transparent passes.
@@ -816,146 +750,6 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             out.push_back(std::move(desc));
         });
 
-    // GPU-driven culling and indirect drawing passes.
-    m_offscreenRenderPipeline.Register("GpuDrivenBatches", rg::ProviderScope::PerActiveView,
-        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out) {
-            if (frame.currentView != rg::RenderViewId::Named("Game")) {
-                return;
-            }
-
-            const RenderPassViewData* viewData = FindViewData(frame.currentView);
-            if (viewData == nullptr) {
-                return;
-            }
-            const rg::TextureHandle viewTarget = viewData->colorTarget;
-
-            const std::array<Plane, 6> frustumPlanes = ExtractFrustumPlanes(m_gpuDrivenGameViewProjectionThisFrame);
-            const bool useCompaction = m_renderer.SupportsDrawIndirectCount();
-            const Mat4 viewProjection = m_gpuDrivenGameViewProjectionThisFrame;
-            const rg::RenderViewId currentViewForServices = frame.currentView;
-
-            for (const GpuDrivenBatchRenderData& batch : m_gpuDrivenBatchesThisFrame) {
-                const rg::BufferHandle inputHandle = batch.inputHandle;
-                const rg::BufferHandle indirectHandle = batch.indirectHandle;
-                const rg::BufferHandle countHandle = batch.countHandle;
-                const DescriptorSetHandle cullingDescriptorSet = batch.cullingDescriptorSet;
-                const DescriptorSetHandle instanceBufferDescriptorSet = batch.instanceBufferDescriptorSet;
-                const std::size_t instanceCount = batch.instanceCount;
-                const MeshHandle meshHandle = batch.mesh;
-                const PipelineHandle originalPipelineHandle = batch.originalPipeline;
-
-                // Only exclude batched entities from normal drawing if the indirect pass is enabled.
-                const bool indirectDrawEnabledThisFrame = rg::ShouldDeclareBuiltInPassThisFrame(
-                    &m_renderPassToggleRegistry, batch.indirectDrawPassName);
-                AppendGpuDrivenBatchEntityExclusionsIfIndirectDrawEnabled(
-                    indirectDrawEnabledThisFrame, batch.entities, m_claimedEntities[rg::ViewScopeIndex(rg::ViewScope::GameView)]);
-
-                // --- Reset instance count buffer ---
-                if (auto body = rg::MakeTransferBody(frame.builder, batch.resetPassName,
-                        rg::TransferRecord::Fill(countHandle, 0, 0, sizeof(std::uint32_t)))) {
-                    rg::RenderPassDesc desc;
-                    desc.debugName = batch.resetPassName;
-                    desc.kind = rg::DefaultPassKind(rg::DeclarativePassType::Transfer);
-                    desc.order = rg::RenderPassEvent::Opaques;
-                    desc.view = frame.currentView;
-                    desc.owningFeatureName = "GPU Driven Batches";
-                    desc.setup = std::move(body->setup);
-                    desc.execute = std::move(body->execute);
-                    out.push_back(std::move(desc));
-                }
-
-                // --- Frustum culling compute pass ---
-                {
-                    rg::RenderPassDesc desc;
-                    desc.debugName = batch.cullingPassName;
-                    desc.kind = rg::PassKind::Compute;
-                    desc.order = rg::RenderPassEvent::Opaques;
-                    desc.view = frame.currentView;
-                    desc.owningFeatureName = "GPU Driven Batches";
-                    desc.setup = [inputHandle, indirectHandle, countHandle](rg::RenderGraphBuilder::PassBuilder& pass) {
-                        pass.ReadBuffer(inputHandle, rg::ResourceAccess::ComputeShaderRead);
-                        pass.WriteBuffer(indirectHandle, rg::ResourceAccess::ComputeShaderWrite);
-                        pass.WriteBuffer(countHandle, rg::ResourceAccess::ComputeShaderWrite);
-                    };
-                    desc.execute = [this, cullingDescriptorSet, instanceCount, frustumPlanes, useCompaction](
-                                        rg::PassContext& ctx) {
-                        CullingPushConstants pc{};
-                        for (std::size_t i = 0; i < 6; ++i) {
-                            pc.planes[i] = frustumPlanes[i];
-                        }
-                        pc.instanceCount = static_cast<std::uint32_t>(instanceCount);
-                        pc.useCompaction = useCompaction ? 1u : 0u;
-
-                        rg::CommandBuffer cmd = ctx.Cmd();
-                        m_gpuDrivenBatchCache.RecordCulling(cmd, cullingDescriptorSet, pc);
-                    };
-                    out.push_back(std::move(desc));
-                }
-
-                // --- Indirect draw pass ---
-                {
-                    rg::IndirectDrawRecord record;
-                    record.target = viewTarget;
-                    record.indirect = indirectHandle;
-                    record.count = countHandle;
-                    record.instances = inputHandle;
-                    record.maxDrawCount = static_cast<std::uint32_t>(instanceCount);
-                    record.useCount = useCompaction;
-
-                    auto resolveInputs = [this, meshHandle, originalPipelineHandle, instanceBufferDescriptorSet,
-                                             viewProjection, currentViewForServices]() {
-                        rg::IndirectDrawInputs inputs;
-                        inputs.mesh = m_game.GetRenderSystem().TryGetMesh(meshHandle);
-                        try {
-                            inputs.pipeline = &m_gpuDrivenBatchCache.ResolveInstancedPipeline(
-                                m_renderer, originalPipelineHandle, m_sceneServicesDescriptorSet.LayoutHandle());
-                        } catch (const std::exception& e) {
-                            const std::string failure =
-                                std::string("GpuDrivenBatches: failed to resolve instanced pipeline: ") + e.what();
-                            if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
-                                GTE_LOG_ERROR("Core", failure);
-                            }
-                        }
-                        inputs.instanceSet = instanceBufferDescriptorSet;
-                        inputs.sceneSet = m_sceneServicesDescriptorSet.DescriptorSetFor(currentViewForServices);
-                        inputs.viewProjection = viewProjection;
-                        return inputs;
-                    };
-
-                    if (auto body = rg::MakeIndirectDrawBody(
-                            frame.builder, batch.indirectDrawPassName, record, std::move(resolveInputs))) {
-                        rg::RenderPassDesc desc;
-                        desc.debugName = batch.indirectDrawPassName;
-                        desc.kind = rg::DefaultPassKind(rg::DeclarativePassType::IndirectDraw);
-                        desc.order = rg::RenderPassEvent::Opaques;
-                        desc.view = frame.currentView;
-                        desc.legacyCategory = rg::RenderPassCategory::General;
-                        desc.owningFeatureName = "GPU Driven Batches";
-                        desc.setup = std::move(body->setup);
-                        desc.execute = std::move(body->execute);
-                        out.push_back(std::move(desc));
-                    }
-                }
-
-                // --- Visible count readback for the debug panel ---
-                {
-                    frame.builder.KeepBufferOutput(batch.readbackHandle);
-                    if (auto body = rg::MakeTransferBody(frame.builder, batch.readbackPassName,
-                            rg::TransferRecord::Readback(countHandle, batch.readbackHandle, sizeof(std::uint32_t)))) {
-                        rg::RenderPassDesc desc;
-                        desc.debugName = batch.readbackPassName;
-                        desc.kind = rg::DefaultPassKind(rg::DeclarativePassType::Transfer);
-                        desc.order = rg::RenderPassEvent::Opaques;
-                        desc.view = frame.currentView;
-                        desc.owningFeatureName = "GPU Driven Batches";
-                        desc.setup = std::move(body->setup);
-                        desc.execute = std::move(body->execute);
-                        out.push_back(std::move(desc));
-                    }
-                }
-            }
-        });
-
     // Feature passes that draw into the view's color and depth right after the opaque geometry.
     m_offscreenRenderPipeline.Register("OpaqueFeatures", rg::ProviderScope::PerActiveView,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
@@ -1212,7 +1006,6 @@ void Core::BuildFrame()
     m_captureArmedThisFrame = false;
 
     for (const MeshHandle released : m_game.ReleaseUnusedGpuResources(m_renderer)) {
-        m_gpuDrivenBatchCache.EraseMesh(m_renderer, released);
         ForgetClusterSynthesis(released);
     }
 
@@ -1263,8 +1056,6 @@ void Core::BuildFrame()
 
                     m_currentViewDataThisFrame.clear();
                     m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
-                    m_gpuDrivenBatchesThisFrame.clear();
-                    m_gpuDrivenBatchDebugInfoLastFrame.clear();
 
                     // One candidate list for every view of this frame. A failure leaves the list empty (CPU path).
                     try {
@@ -1303,79 +1094,6 @@ void Core::BuildFrame()
                         frame.activeViews.push_back(rg::RenderViewId::Named("Game"));
                         m_currentFrameDebuggerCaptureForOffscreenPipeline = frameDebuggerCapture;
                         gameAspectForReplay = aspect;
-
-                        m_gpuDrivenGameViewProjectionThisFrame = gameViewProjection;
-                        // Without multi-draw and first-instance support the batch commands are invalid usage.
-                        const bool batchPathSupported = OldBatchPathSupported(m_renderer.IndirectDrawCaps());
-                        if (!batchPathSupported && !m_batchPathCapsWarned) {
-                            m_batchPathCapsWarned = true;
-                            GTE_LOG_WARNING("Core", "GpuDrivenBatches disabled: device lacks drawIndirectCount, "
-                                                    "multiDrawIndirect or drawIndirectFirstInstance. Using the CPU path.");
-                        }
-                        if (batchPathSupported) {
-                            std::unordered_set<BufferObjectHandle> gpuSkinnedOutputBuffers;
-                            gpuSkinnedOutputBuffers.reserve(m_gpuSkinningRequestsThisFrame.size());
-                            for (const AnimationSystem::GpuSkinningDispatchRequest& request :
-                                m_gpuSkinningRequestsThisFrame) {
-                                gpuSkinnedOutputBuffers.insert(request.dispatch.output->Handle());
-                            }
-
-                            RenderSystem& renderSystem = m_game.GetRenderSystem();
-                            const std::vector<GpuDrivenBatchFrameEntry> entries =
-                                renderSystem.CollectGpuDrivenBatches(m_game.GetRegistry(), m_renderer,
-                                    m_gpuDrivenBatchCache, gpuSkinnedOutputBuffers);
-
-                            for (const GpuDrivenBatchFrameEntry& frameEntry : entries) {
-                                const GpuDrivenBatchKey key{ frameEntry.mesh, frameEntry.pipeline };
-                                const GpuDrivenBatchCache::Entry* cacheEntry = m_gpuDrivenBatchCache.TryGet(key);
-                                const Mesh* meshPtr = renderSystem.TryGetMesh(frameEntry.mesh);
-                                if (cacheEntry == nullptr || meshPtr == nullptr) {
-                                    continue;
-                                }
-
-                                bool instancedPipelineResolved = true;
-                                try {
-                                    m_gpuDrivenBatchCache.ResolveInstancedPipeline(
-                                        m_renderer, frameEntry.pipeline, m_sceneServicesDescriptorSet.LayoutHandle());
-                                } catch (const std::exception& e) {
-                                    const std::string failure =
-                                        std::string("GpuDrivenBatches: failed to resolve instanced pipeline for a batch: ")
-                                        + e.what();
-                                    if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
-                                        GTE_LOG_ERROR("Core", failure);
-                                    }
-                                    instancedPipelineResolved = false;
-                                }
-                                if (!instancedPipelineResolved) {
-                                    continue;
-                                }
-
-                                const GpuDrivenBatchNames& names = BatchNamePool().NamesFor(key);
-
-                                GpuDrivenBatchRenderData data;
-                                data.mesh = frameEntry.mesh;
-                                data.originalPipeline = frameEntry.pipeline;
-                                data.instanceCount = frameEntry.instanceCount;
-                                data.inputHandle = b.Import(cacheEntry->inputBuffer, names.inputBufferName);
-                                data.indirectHandle =
-                                    b.Import(cacheEntry->indirectCommandBuffer, names.indirectBufferName);
-                                data.countHandle = b.Import(cacheEntry->countBuffer, names.countBufferName);
-                                data.readbackHandle =
-                                    b.Import(cacheEntry->countReadbackBuffer, names.readbackBufferName);
-                                data.cullingDescriptorSet = cacheEntry->cullingDescriptorSet;
-                                data.instanceBufferDescriptorSet = cacheEntry->instanceBufferDescriptorSet;
-                                data.resetPassName = names.resetPassName;
-                                data.cullingPassName = names.cullingPassName;
-                                data.indirectDrawPassName = names.indirectDrawPassName;
-                                data.readbackPassName = names.readbackPassName;
-                                data.displayName = names.displayName;
-                                data.entities.reserve(frameEntry.commands.size());
-                                for (const DrawCommand& command : frameEntry.commands) {
-                                    data.entities.push_back(command.entity);
-                                }
-                                m_gpuDrivenBatchesThisFrame.push_back(std::move(data));
-                            }
-                        }
                     }
 
                     // Set up Scene View rendering.
@@ -1468,16 +1186,6 @@ void Core::BuildFrame()
                 }
             }
             m_renderer.EndOffscreenRenderGraphRecording();
-
-            // Read back culled instance counts for debugging.
-            for (const GpuDrivenBatchRenderData& batch : m_gpuDrivenBatchesThisFrame) {
-                const GpuDrivenBatchKey key{ batch.mesh, batch.originalPipeline };
-                GpuDrivenBatchDebugInfo info;
-                info.batchName = (batch.displayName != nullptr) ? batch.displayName : "(unnamed batch)";
-                info.instanceCount = static_cast<std::uint32_t>(batch.instanceCount);
-                info.visibleCount = m_gpuDrivenBatchCache.ReadLastKnownVisibleCount(key);
-                m_gpuDrivenBatchDebugInfoLastFrame.push_back(info);
-            }
 
             m_renderGraph.FinalizeSynchronousGpuTiming();
         } catch (const std::exception& e) {

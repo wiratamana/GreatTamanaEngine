@@ -120,29 +120,6 @@ AABB PadAABB(const AABB& box, float fractionOfLargestExtent) noexcept
     return result;
 }
 
-GpuCullingInstanceInput PackCullingInstanceInput(const Mat4& worldMatrix, const AABB& worldAABB,
-    std::uint32_t firstIndex, std::uint32_t indexCount, std::int32_t vertexOffset)
-{
-    GpuCullingInstanceInput input{};
-
-    // Mat4 is column-major, bit-identical to a std430 mat4: copy without transposing.
-    static_assert(sizeof(input.worldMatrix) == sizeof(float) * 16, "worldMatrix must be exactly 16 floats");
-    std::memcpy(input.worldMatrix, worldMatrix.Data(), sizeof(input.worldMatrix));
-
-    input.aabbMinX = worldAABB.min.x;
-    input.aabbMinY = worldAABB.min.y;
-    input.aabbMinZ = worldAABB.min.z;
-    input.aabbMaxX = worldAABB.max.x;
-    input.aabbMaxY = worldAABB.max.y;
-    input.aabbMaxZ = worldAABB.max.z;
-
-    input.firstIndex = firstIndex;
-    input.indexCount = indexCount;
-    input.vertexOffset = vertexOffset;
-
-    return input;
-}
-
 AABB TransformAABB(const AABB& localAABB, const Mat4& worldMatrix)
 {
     const Vec3 corners[8] = {

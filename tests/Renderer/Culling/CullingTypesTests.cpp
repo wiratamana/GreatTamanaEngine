@@ -1,5 +1,5 @@
 // Tier-1 tests for the Vulkan-free culling math in src/Renderer/Culling/CullingTypes.h:
-// ComputeLocalAABB(), TransformAABB(), ExtractFrustumPlanes(), PackCullingInstanceInput(), plus
+// ComputeLocalAABB(), TransformAABB(), ExtractFrustumPlanes(), plus
 // IndirectDrawCommand's byte size.
 
 #include "Renderer/Culling/CullingTypes.h"
@@ -131,40 +131,6 @@ TEST(CullingTypes, ExtractFrustumPlanesFromOrthographicProjectionMatchesHandComp
     // [5] Far: z <= 10
     EXPECT_TRUE(ApproximatelyEqual(planes[5].normal, Vec3(0.0f, 0.0f, -1.0f), 1e-4f));
     EXPECT_NEAR(planes[5].distance, 10.0f, 1e-4f);
-}
-
-// --- PackCullingInstanceInput() / static_assert sizes -----------------------
-
-TEST(CullingTypes, PackCullingInstanceInputPacksWorldMatrixAabbAndMeshOffsets)
-{
-    const Mat4 worldMatrix = Mat4::Translation(Vec3(1.0f, 2.0f, 3.0f));
-    const AABB worldAABB{ Vec3(-1.0f, -2.0f, -3.0f), Vec3(4.0f, 5.0f, 6.0f) };
-
-    const GpuCullingInstanceInput packed = PackCullingInstanceInput(worldMatrix, worldAABB, 10u, 36u, 100);
-
-    // Mat4 is column-major storage and Data() already matches GLSL's std430
-    // mat4 layout exactly (see Mat4.h's own class comment / CullingTypes.h's
-    // own header comment) - a straight memcpy, confirmed field-for-field
-    // here rather than merely assumed.
-    for (int i = 0; i < 16; ++i) {
-        EXPECT_FLOAT_EQ(packed.worldMatrix[i], worldMatrix.Data()[i]) << "element " << i;
-    }
-
-    EXPECT_FLOAT_EQ(packed.aabbMinX, -1.0f);
-    EXPECT_FLOAT_EQ(packed.aabbMinY, -2.0f);
-    EXPECT_FLOAT_EQ(packed.aabbMinZ, -3.0f);
-    EXPECT_FLOAT_EQ(packed.aabbMaxX, 4.0f);
-    EXPECT_FLOAT_EQ(packed.aabbMaxY, 5.0f);
-    EXPECT_FLOAT_EQ(packed.aabbMaxZ, 6.0f);
-
-    EXPECT_EQ(packed.firstIndex, 10u);
-    EXPECT_EQ(packed.indexCount, 36u);
-    EXPECT_EQ(packed.vertexOffset, 100);
-}
-
-TEST(CullingTypes, GpuCullingInstanceInputMatchesDocumentedByteSize)
-{
-    EXPECT_EQ(sizeof(GpuCullingInstanceInput), 112u);
 }
 
 // --- IndirectDrawCommand (src/Renderer/IndirectDrawTypes.h) -----------------

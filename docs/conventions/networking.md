@@ -615,8 +615,7 @@ registering a new named texture:
   `rg::RenderFeatureScope` - and every resource carrying both its raw
   `first_use_pass_index`/`last_use_pass_index` AND the already-resolved
   `first_use_pass_name`/`last_use_pass_name`, `null` when never used),
-  `gpu_driven_batches` (the same "instances culled this frame" readout the
-  panel's own GPU-Driven Batches section shows), and `render_features` (the
+  and `render_features` (the
   same loaded `_v2` plugin ordering/blend-mode readout the panel's own Plugin
   Render Features section shows). Each pass also has `indirect_draw_count`. Two read-only
   objects report device and memory state: `indirect_draw` (`draw_indirect_count`,

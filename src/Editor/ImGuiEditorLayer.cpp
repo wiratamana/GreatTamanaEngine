@@ -312,7 +312,6 @@ public:
     }
 
     void BuildUI(Game& game, Renderer& renderer, const rg::RenderGraph& renderGraph,
-        const std::vector<GpuDrivenBatchDebugInfo>& gpuDrivenBatchDebugInfo,
         const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
         rg::RenderPassToggleRegistry& renderPassToggleRegistry,
         RenderFeatureCompositor* renderFeatureCompositor,
@@ -366,7 +365,7 @@ public:
         BuildMemoryPanel(m_ctx, renderer);
         m_profilerPanel.Build(m_ctx);
         m_renderGraphPanel.Build(m_ctx, renderer, renderGraph, renderPassToggleRegistry);
-        m_renderFeaturesPanel.Build(m_ctx, gpuDrivenBatchDebugInfo, renderFeatureEntries, renderFeatureCompositor);
+        m_renderFeaturesPanel.Build(m_ctx, renderFeatureEntries, renderFeatureCompositor);
         // Jobs panel; also hosts the CPU/GPU skinning toggle, hence `game`.
         m_jobsPanel.Build(m_ctx, game);
         // Log panel; depends only on EditorContext and the thread-safe logger.

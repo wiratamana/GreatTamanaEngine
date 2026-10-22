@@ -175,7 +175,7 @@
 #                                            case, verified against Math/Mat4.h's
 #                                            actual column-major storage
 #                                            convention rather than assumed), and
-#                                            PackCullingInstanceInput()/every
+#                                            every
 #                                            struct's documented byte size
 #                                            (including IndirectDrawCommand's
 #                                            own byte-for-byte
@@ -490,30 +490,6 @@
 #                                            per-VertexLayout resolve/nullopt
 #                                            decision (src/Game/SceneQuery.h) -
 #                                            no Renderer/Pipeline pool involved.
-#   - Game/RenderBatchingTests.cpp           - GPU-Driven Frustum Culling +
-#                                            Indirect Draw campaign
-#                                            (render-pass-5), PHASE4
-#                                            (task_manager/render-pass-5/
-#                                            PHASE4_PER_BATCH_RESOURCE_MANAGEMENT_AND_BATCHING.md)
-#                                            - RenderSystem's pure batching/
-#                                            grouping logic (src/Game/
-#                                            RenderBatching.h/.cpp):
-#                                            GroupDrawCommandsByMeshAndPipeline()
-#                                            (empty input, all-same-group
-#                                            input, several interleaved
-#                                            groups with first-seen order
-#                                            preservation, a same-index-
-#                                            different-generation handle
-#                                            treated as a genuinely
-#                                            different group) and
-#                                            IsGpuDrivenEligible() (every
-#                                            true/false combination of its 4
-#                                            boolean-ish inputs, including the
-#                                            exact boundary at
-#                                            kMinInstancesForGpuDrivenBatch).
-#                                            No Renderer/live GPU involved at
-#                                            all - fed entirely with
-#                                            hand-built DrawCommand values.
 #   - Editor/EditorCameraTests.cpp           - EditorCamera's pure pan/
 #                                            rotate/dolly math (see
 #                                            src/Editor/EditorCamera.h) -
@@ -2065,12 +2041,6 @@ set(GTE_TEST_SOURCES
     # null surface is NOT safe here, and why VK_EXT_headless_surface is used
     # instead.
     Core/CoreHeadlessConstructionTests.cpp
-    # editor-core-separation-22 campaign, PHASE3
-    # (PHASE3_FIX_AUDIT_FINDINGS_SIDE_CHANNEL_LEAKS.md) - Tier-1 tests for the
-    # pure fix to PHASE2_COMPLETION_REPORT.md's own finding #19
-    # (src/Core/GpuDrivenBatchEntityExclusionLogic.h). No Vulkan/Core instance
-    # involved.
-Core/GpuDrivenBatchEntityExclusionLogicTests.cpp
 Core/ClusterClaimTests.cpp
 Core/ClusterCandidatesTests.cpp
 Core/ClusterDrawStateTests.cpp
@@ -2481,7 +2451,6 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     # entry skips those entities and logs once per layout, and a stale
     # per-layout handle skips those entities and logs once per handle.
     Game/RenderSystemDrawPipelineOverrideSetTests.cpp
-    Game/RenderBatchingTests.cpp
     Game/GameEntityCommandsTests.cpp
     Game/GameUpdateFreezeGatingTests.cpp
     Game/EntityInstantiatorTests.cpp

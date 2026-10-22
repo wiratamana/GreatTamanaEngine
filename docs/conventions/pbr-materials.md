@@ -135,7 +135,7 @@ Nothing here throws out of a render or load call.
   cached asset part uses are unregistered (`RenderSystem::UnregisterTexture`), then images only the cache still holds are freed.
   The GPU is drained once (`Renderer::DrainGpuForResourceRelease()`) and only when something is freed. Log line:
   "Released N materials and M images (K images, L materials stay)".
-- Vertex and index buffers of a replaced mesh asset, and `GpuDrivenBatchCache` entries, are not released by the sweep.
+- Vertex and index buffers of a replaced mesh asset are released by the mesh sweep once no entity or cached part uses them.
 
 ## Not supported
 

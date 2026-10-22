@@ -39,25 +39,6 @@ bool IsAABBOutsideFrustum(const std::array<Plane, 6>& planes, const AABB& worldB
 // A negative or non-finite fraction counts as 0.
 AABB PadAABB(const AABB& box, float fractionOfLargestExtent) noexcept;
 
-// Per-instance input read by the culling compute shader and the instanced vertex shader.
-// std430, 16-byte aligned blocks.
-struct GpuCullingInstanceInput {
-    float worldMatrix[16] = { 0.0f };
-    float aabbMinX = 0.0f, aabbMinY = 0.0f, aabbMinZ = 0.0f, _padMin = 0.0f;
-    float aabbMaxX = 0.0f, aabbMaxY = 0.0f, aabbMaxZ = 0.0f, _padMax = 0.0f;
-    // The three mesh offsets are the same for every instance of a batch; kept per instance for simplicity.
-    std::uint32_t firstIndex = 0;
-    std::uint32_t indexCount = 0;
-    std::int32_t vertexOffset = 0;
-    std::uint32_t _pad = 0;
-};
-static_assert(sizeof(GpuCullingInstanceInput) == 112,
-    "GpuCullingInstanceInput must match a std430 mat4 + vec4 + vec4 + uvec4 layout exactly");
-
-// Packs a world matrix, an already world-space AABB and the batch's mesh offsets into the GPU layout.
-GpuCullingInstanceInput PackCullingInstanceInput(const Mat4& worldMatrix, const AABB& worldAABB,
-    std::uint32_t firstIndex, std::uint32_t indexCount, std::int32_t vertexOffset);
-
 // World-space AABB of a local AABB: transforms all 8 corners and takes the min/max.
 AABB TransformAABB(const AABB& localAABB, const Mat4& worldMatrix);
 
