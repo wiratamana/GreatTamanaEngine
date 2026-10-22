@@ -91,7 +91,7 @@ TEST(AtmosphereSettingsTest, OutOfRangeValuesClampToTheirRanges)
     high.atmosphereThicknessKm = 1e30f;
     high.multiScatteringStrength = 1e30f;
     high.miePhaseG = 5.0f;
-    high.aerialPerspectiveStrength = 9.0f;
+    high.aerialPerspectiveStrength = 1e30f;
     high.skyIntensity = 1e9f;
     high.aerialPerspectiveMaxDistanceKm = 1e9f;
     high.aerialPerspectiveDepthExponent = 99.0f;
@@ -102,12 +102,24 @@ TEST(AtmosphereSettingsTest, OutOfRangeValuesClampToTheirRanges)
     EXPECT_FLOAT_EQ(b.atmosphereThicknessKm, 500.0f);
     EXPECT_FLOAT_EQ(b.multiScatteringStrength, 10.0f);
     EXPECT_FLOAT_EQ(b.miePhaseG, 0.99f);
-    EXPECT_FLOAT_EQ(b.aerialPerspectiveStrength, 2.0f);
+    EXPECT_FLOAT_EQ(b.aerialPerspectiveStrength, 1e30f);
     EXPECT_FLOAT_EQ(b.skyIntensity, 50.0f);
     EXPECT_FLOAT_EQ(b.aerialPerspectiveMaxDistanceKm, 50.0f);
     EXPECT_FLOAT_EQ(b.aerialPerspectiveDepthExponent, 4.0f);
     EXPECT_EQ(b.aerialPerspectiveSamplesPerSlice, 16);
     EXPECT_FLOAT_EQ(b.aerialPerspectiveScatteringExaggeration, 50.0f);
+}
+
+TEST(AtmosphereSettingsTest, LargeStrengthIsKept)
+{
+    const AtmosphereSettings d;
+    AtmosphereSettings s;
+    s.aerialPerspectiveStrength = 250.0f;
+    EXPECT_FLOAT_EQ(SanitizeAtmosphereSettings(s).aerialPerspectiveStrength, 250.0f);
+    s.aerialPerspectiveStrength = kInf;
+    EXPECT_FLOAT_EQ(SanitizeAtmosphereSettings(s).aerialPerspectiveStrength, d.aerialPerspectiveStrength);
+    s.aerialPerspectiveStrength = kNaN;
+    EXPECT_FLOAT_EQ(SanitizeAtmosphereSettings(s).aerialPerspectiveStrength, d.aerialPerspectiveStrength);
 }
 
 TEST(AtmosphereSettingsTest, SanitizeIsIdempotent)

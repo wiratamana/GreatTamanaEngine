@@ -95,6 +95,55 @@ TEST(AerialCompositeMathTest, GeometryIgnoresTheShaftDelta)
     ExpectEqual(Color(0.5f, scene, Vec3::Zero(), 1.0f, Vec3(-3.0f, -3.0f, -3.0f), 1.0f), scene);
 }
 
+TEST(AerialCompositeMathTest, StrengthAboveOneClampsTransmittanceAtZero)
+{
+    // mix(1, 0.5, 4) = -1 clamps to 0, so only the in-scattering stays.
+    const Vec3 result = Color(0.3f, Vec3(1.0f, 1.0f, 1.0f), Vec3(0.2f, 0.1f, 0.05f), 0.5f, kNoShaft, 4.0f);
+    EXPECT_NEAR(result.x, 0.8f, 1e-5f);
+    EXPECT_NEAR(result.y, 0.4f, 1e-5f);
+    EXPECT_NEAR(result.z, 0.2f, 1e-5f);
+}
+
+TEST(AerialCompositeMathTest, StrengthAboveOneWithoutClampKeepsTheBlend)
+{
+    // transmittance = 1 + (0.9 - 1) * 1.5 = 0.85.
+    const Vec3 result = Color(0.3f, Vec3(1.0f, 1.0f, 1.0f), Vec3::Zero(), 0.9f, kNoShaft, 1.5f);
+    EXPECT_NEAR(result.x, 0.85f, 1e-5f);
+}
+
+TEST(AerialCompositeMathTest, HugeStrengthSaturatesAtTheHalfFloatMaximum)
+{
+    const Vec3 result = Color(0.3f, Vec3(1.0f, 1.0f, 1.0f), Vec3(1.0f, 1.0f, 1.0f), 0.5f, kNoShaft, 1e30f);
+    EXPECT_FLOAT_EQ(result.x, kAerialPerspectiveMaxOutput);
+    EXPECT_FLOAT_EQ(result.y, kAerialPerspectiveMaxOutput);
+    EXPECT_FLOAT_EQ(result.z, kAerialPerspectiveMaxOutput);
+}
+
+TEST(AerialCompositeMathTest, GeometryIsAlwaysFiniteAndInRange)
+{
+    for (const float strength : { 0.0f, 0.5f, 1.0f, 2.0f, 10.0f, 1000.0f, 1e30f }) {
+        for (const float a : { 0.0f, 0.3f, 1.0f }) {
+            const Vec3 r = Color(0.3f, Vec3(1.0f, 0.5f, 0.0f), Vec3(0.3f, 0.2f, 0.1f), a, kNoShaft, strength);
+            for (const float c : { r.x, r.y, r.z }) {
+                EXPECT_GE(c, 0.0f) << strength << " " << a;
+                EXPECT_LE(c, kAerialPerspectiveMaxOutput) << strength << " " << a;
+            }
+        }
+    }
+}
+
+TEST(AerialCompositeMathTest, ShaderMaxOutputLiteralEqualsTheCpuConstant)
+{
+    std::ifstream file(std::string(GTE_TEST_ATMOSPHERE_SHADER_DIR) + "/AtmosphereAerialPerspectiveCompositeBody.glsl");
+    ASSERT_TRUE(file.is_open());
+    std::stringstream text;
+    text << file.rdbuf();
+
+    std::ostringstream expected;
+    expected << "kMaxOutputLuminance = " << kAerialPerspectiveMaxOutput;
+    EXPECT_NE(text.str().find(expected.str()), std::string::npos) << expected.str();
+}
+
 TEST(AerialCompositeMathTest, ShaderDepthLiteralEqualsTheCpuConstant)
 {
     std::ifstream file(GTE_TEST_SCENE_DEPTH_CONSTANTS_GLSL_PATH);

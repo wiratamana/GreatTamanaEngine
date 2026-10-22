@@ -128,6 +128,9 @@ TEST_F(AtmosphereEndpointTest, EveryWritableKeyReadsBackAfterClamping)
     ASSERT_TRUE(Set({ { "aerialPerspectiveMaxDistanceKm", "999" }, { "aerialPerspectiveSamplesPerSlice", "500" } }).ok);
     EXPECT_FLOAT_EQ(feature->Settings().aerialPerspectiveMaxDistanceKm, 50.0f);
     EXPECT_EQ(feature->Settings().aerialPerspectiveSamplesPerSlice, 16);
+
+    ASSERT_TRUE(Set({ { "aerialPerspectiveStrength", "250" } }).ok);
+    EXPECT_FLOAT_EQ(feature->Settings().aerialPerspectiveStrength, 250.0f);
 }
 
 TEST_F(AtmosphereEndpointTest, BadFloatTextIsRejectedOrClamped)

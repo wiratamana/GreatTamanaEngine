@@ -149,5 +149,56 @@ TEST(ShaderContractTest, InterleavedGradientNoiseHasOneDefinitionFile)
     }
 }
 
+// Samples below sea level are clamped onto the surface; the march never stops at the ground.
+TEST(ShaderContractTest, AerialVolumesClampSamplesOntoTheSurface)
+{
+    const std::filesystem::path dir(GTE_TEST_ATMOSPHERE_SHADER_DIR);
+    for (const char* name :
+        { "AtmosphereAerialPerspectiveVolume.comp", "AtmosphereAerialPerspectiveVolumeUnshadowed.comp" }) {
+        const std::string text = ReadText(dir / name);
+        ASSERT_FALSE(text.empty()) << name;
+        EXPECT_NE(text.find("ClampSampleToSurfaceKm(rawPositionKm, planetRadiusKm)"), std::string::npos) << name;
+        EXPECT_NE(text.find("PlanetVisibility(currentPositionKm"), std::string::npos) << name;
+        for (const std::string_view banned : { "currentHeightKm < 0.0", "Below the surface", "surfaceOffsetKm" }) {
+            EXPECT_EQ(text.find(banned), std::string::npos) << name << " " << banned;
+        }
+    }
+}
+
+// The shadow lookup keeps the real world position; only the atmosphere-space position is clamped.
+TEST(ShaderContractTest, ShadowLookupKeepsTheRealWorldPosition)
+{
+    const std::string text =
+        ReadText(std::filesystem::path(GTE_TEST_ATMOSPHERE_SHADER_DIR) / "AtmosphereAerialPerspectiveVolume.comp");
+    ASSERT_FALSE(text.empty());
+    EXPECT_NE(text.find("worldSample = eyeWorld + worldStepPerKm * sampleDistanceKm"), std::string::npos);
+    EXPECT_EQ(text.find("ClampSampleToSurfaceKm(worldSample"), std::string::npos);
+}
+
+// The GLSL copies carry the same names as the CPU oracle.
+TEST(ShaderContractTest, SurfaceClampAndPlanetVisibilityHaveOracleNameParity)
+{
+    const std::filesystem::path dir(GTE_TEST_ATMOSPHERE_SHADER_DIR);
+    const std::string common = ReadText(dir / "AtmosphereCommon.glsl");
+    ASSERT_FALSE(common.empty());
+    EXPECT_NE(common.find("vec3 ClampSampleToSurfaceKm("), std::string::npos);
+    EXPECT_NE(common.find("float PlanetVisibility("), std::string::npos);
+    EXPECT_EQ(common.find("biasedPositionKm"), std::string::npos);
+
+    const std::string oracle = ReadText(dir / ".." / "AtmosphereMath.h");
+    ASSERT_FALSE(oracle.empty());
+    EXPECT_NE(oracle.find("Vec3 ClampSampleToSurfaceKm("), std::string::npos);
+    EXPECT_NE(oracle.find("float PlanetVisibility("), std::string::npos);
+}
+
+TEST(ShaderContractTest, CompositeClampsTransmittanceAndOutput)
+{
+    const std::string text = ReadText(
+        std::filesystem::path(GTE_TEST_ATMOSPHERE_SHADER_DIR) / "AtmosphereAerialPerspectiveCompositeBody.glsl");
+    ASSERT_FALSE(text.empty());
+    EXPECT_NE(text.find("clamp(mix(1.0, aerial.a, strength), 0.0, 1.0)"), std::string::npos);
+    EXPECT_NE(text.find("kMaxOutputLuminance"), std::string::npos);
+}
+
 } // namespace
 } // namespace gte

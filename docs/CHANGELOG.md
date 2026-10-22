@@ -6,6 +6,10 @@ engine. For the short, current-state summary, see the main
 
 ## Sun occlusion, aerial perspective and light shafts for large and small scenes (branch `feature/hdr-tonemap-impl`)
 
+- The aerial volume march no longer stops at world y = 0: samples below sea level are clamped onto the surface (sea-level
+  density, sun view of the surface point), so valleys and low terrain get haze. `PlanetVisibility` uses a stable
+  closest-approach test; the CPU oracle gained `ClampSampleToSurfaceKm` and `PlanetVisibility`.
+- Aerial Perspective Strength has no upper limit. The composite clamps transmittance to 0..1 and the output to 0..65504.
 - Shadow `casterRange` is the extra distance toward the sun beyond a cascade's bounding sphere (cascade depth range =
   `2 * radius + casterRange`). Range 1..100000, default 200. `maxDistance` default is 20000. See
   [shadow-mapping.md](conventions/shadow-mapping.md).

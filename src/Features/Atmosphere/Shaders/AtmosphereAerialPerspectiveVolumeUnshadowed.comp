@@ -42,9 +42,7 @@ void main()
 
     float planetRadiusKm = atmosphereParameters.planetRadiusKm;
 
-    // Tiny offset keeps a camera exactly at ground level from giving a degenerate ray/sphere hit.
-    float surfaceOffsetKm = max(planetRadiusKm * 1e-7, 1e-6);
-    float viewHeightKm = max(frameUniforms.cameraPositionAtmosphere.y, planetRadiusKm) + surfaceOffsetKm;
+    float viewHeightKm = max(frameUniforms.cameraPositionAtmosphere.y, planetRadiusKm);
 
     vec3 rayOrigin = vec3(0.0, viewHeightKm, 0.0);
     vec3 viewDirection = FroxelColumnToViewRayDirection(froxelXY, volumeSize.xy, frameUniforms.invViewProjection);
@@ -75,16 +73,13 @@ void main()
             float sampleU = (float(sampleIndex) + 0.5) / float(samplesPerSlice);
             float sampleDistanceKm = mix(distance0Km, distance1Km, sampleU);
 
-            vec3 currentPositionKm = rayOrigin + viewDirection * sampleDistanceKm;
+            vec3 rawPositionKm = rayOrigin + viewDirection * sampleDistanceKm;
+            // Below sea level the air keeps its sea-level density and sun view.
+            vec3 currentPositionKm = ClampSampleToSurfaceKm(rawPositionKm, planetRadiusKm);
             float radialLengthKm = length(currentPositionKm);
             vec3 upAtSample = currentPositionKm / max(radialLengthKm, 1e-20);
-            float currentHeightKm = radialLengthKm - planetRadiusKm;
-
-            // Below the surface nothing more accumulates; later slices store the frozen total.
-            if (currentHeightKm < 0.0) {
-                break;
-            }
-            currentHeightKm = clamp(currentHeightKm, 0.0, atmosphereParameters.atmosphereThicknessKm);
+            float currentHeightKm =
+                clamp(radialLengthKm - planetRadiusKm, 0.0, atmosphereParameters.atmosphereThicknessKm);
 
             vec2 lutUv = HeightZenithToTransmittanceLutUv(
                 atmosphereParameters, currentHeightKm, dot(upAtSample, directionToSun));

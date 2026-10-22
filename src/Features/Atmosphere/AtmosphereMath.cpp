@@ -182,6 +182,30 @@ Vec3 ComputeSunTransmittance(
     return Vec3(std::exp(-opticalDepth.x), std::exp(-opticalDepth.y), std::exp(-opticalDepth.z));
 }
 
+Vec3 ClampSampleToSurfaceKm(Vec3 positionKm, float planetRadiusKm) noexcept
+{
+    const float radialLengthKm = Length(positionKm);
+    if (!std::isfinite(radialLengthKm) || radialLengthKm <= 1e-20f) {
+        return Vec3(0.0f, planetRadiusKm, 0.0f);
+    }
+    if (radialLengthKm >= planetRadiusKm) {
+        return positionKm;
+    }
+    return positionKm * (planetRadiusKm / radialLengthKm);
+}
+
+float PlanetVisibility(Vec3 positionKm, Vec3 directionToSun, float planetRadiusKm) noexcept
+{
+    const float radialLengthKm = Length(positionKm);
+    const float sunUpDot = Dot(positionKm, directionToSun) / std::max(radialLengthKm, 1e-20f);
+    if (!std::isfinite(sunUpDot) || sunUpDot >= 0.0f) {
+        return 1.0f;
+    }
+    // A ray going down hits the planet when its closest approach lies inside it.
+    const float closestApproachKm = radialLengthKm * std::sqrt(std::max(1.0f - sunUpDot * sunUpDot, 0.0f));
+    return closestApproachKm < planetRadiusKm ? 0.0f : 1.0f;
+}
+
 SunLightModulation ComputeAtmosphereSunLight(
     const AtmosphereParametersGpu& params, float heightKm, float sunUpDot) noexcept
 {

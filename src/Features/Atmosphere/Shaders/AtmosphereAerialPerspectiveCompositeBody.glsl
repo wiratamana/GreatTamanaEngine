@@ -5,6 +5,8 @@ layout(local_size_x = 16, local_size_y = 16) in;
 
 #include "AtmosphereCommon.glsl"
 #include "SceneDepthConstants.glsl"
+// Largest finite 16-bit float; the output target is RGBA16F.
+const float kMaxOutputLuminance = 65504.0;
 
 layout(push_constant) uniform PushConstants {
     mat4 invViewProjection;
@@ -74,12 +76,12 @@ void main()
     float firstSliceBlend = clamp(boundaryU * sliceCount, 0.0, 1.0);
     vec4 aerial = mix(vec4(0.0, 0.0, 0.0, 1.0), sampledAerial, firstSliceBlend);
 
-    // Strength scales the effect: 0 gives transmittance 1 and no in-scattering.
+    // Strength scales the effect: 0 gives transmittance 1 and no in-scattering; there is no upper limit.
     float strength = pc.aerialPerspectiveStrengthAndPad.x;
     vec3 inScattering = aerial.rgb * strength;
-    float transmittance = mix(1.0, aerial.a, strength);
+    float transmittance = clamp(mix(1.0, aerial.a, strength), 0.0, 1.0);
 
-    vec3 finalColor = max(sceneColor * transmittance + inScattering, vec3(0.0));
+    vec3 finalColor = clamp(sceneColor * transmittance + inScattering, vec3(0.0), vec3(kMaxOutputLuminance));
 
     imageStore(destinationImage, texel, vec4(finalColor, 1.0));
 }

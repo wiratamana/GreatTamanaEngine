@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace gte {
 
@@ -57,7 +58,8 @@ AtmosphereSettings SanitizeAtmosphereSettings(const AtmosphereSettings& settings
     s.planetRadiusKm = Sanitize(settings.planetRadiusKm, 1.0f, 50000.0f, d.planetRadiusKm);
     s.atmosphereThicknessKm = Sanitize(settings.atmosphereThicknessKm, 1.0f, 500.0f, d.atmosphereThicknessKm);
     s.multiScatteringStrength = Sanitize(settings.multiScatteringStrength, 0.0f, 10.0f, d.multiScatteringStrength);
-    s.aerialPerspectiveStrength = Sanitize(settings.aerialPerspectiveStrength, 0.0f, 2.0f, d.aerialPerspectiveStrength);
+    s.aerialPerspectiveStrength = Sanitize(
+        settings.aerialPerspectiveStrength, 0.0f, std::numeric_limits<float>::max(), d.aerialPerspectiveStrength);
     s.skyIntensity = Sanitize(settings.skyIntensity, 0.0f, 50.0f, d.skyIntensity);
     s.aerialPerspectiveMaxDistanceKm =
         Sanitize(settings.aerialPerspectiveMaxDistanceKm, 0.01f, 50.0f, d.aerialPerspectiveMaxDistanceKm);

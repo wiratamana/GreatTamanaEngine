@@ -41,7 +41,7 @@ When the composite pass is off, the view still holds the scene color of the earl
 ## Rules
 
 - **`AtmosphereMath.h/.cpp` is the CPU oracle** for the density profile, optical depth, transmittance and phase
-  functions. Every shader under `src/Features/Atmosphere/Shaders/` (through the shared `AtmosphereCommon.glsl`) is a GLSL
+  functions. It also holds `ClampSampleToSurfaceKm` and `PlanetVisibility`. Every shader under `src/Features/Atmosphere/Shaders/` (through the shared `AtmosphereCommon.glsl`) is a GLSL
   transcription of it. If a shader and the oracle disagree, the oracle is right and the shader is fixed. Add the CPU
   math first when adding a LUT.
 - **Shader binding names are the C++ contract.** The compute shaders name their storage blocks `params`
@@ -95,6 +95,8 @@ When the composite pass is off, the view still holds the scene color of the earl
   volume is ignored for sky. Geometry pixels use the volume: `scene * transmittance + inScattering`. The decision is a CPU
   oracle in `AtmosphereAerialPerspectiveCompositeMath.h/.cpp` (`IsClearDepth`, `ComputeAerialPerspectiveCompositeColor`)
   covered by Tier-1 tests; a test pins the CPU constant to the GLSL file. The composite push block is 112 bytes.
+  The composite clamps the transmittance to 0..1 and the output to 0..65504 (largest finite 16-bit float), so a large
+  strength cannot give negative or infinite pixels.
 - **The aerial volume pass runs in `PostOpaque`, after the sun cascades exist.** `AtmosphereAerialVolume` (priority 20)
   fetches `SharedLuts` and the Shadow `Receiver` channel and tests the cascades per march sample through the shared
   `src/Shaders/OrthoMapSetVisibility.glsl` (one copy shared with `VolumetricLightInject.comp`; the includer defines the
@@ -106,6 +108,8 @@ When the composite pass is off, the view still holds the scene color of the earl
   runs on every second sample and the odd sample reuses its sun visibility (shaft math still runs every sample). The
   tap pattern (spiral directions, one sin/cos per lookup) is built once and shared by both maps of a blend. At
   exaggeration exactly 1 the shaft ray equals the haze ray, so the pass reuses its transmittance, phase and in-scatter factor.
+  Samples below sea level are moved onto the surface and keep sea-level density and the sun view of that surface point;
+  the march never stops at the ground. The shadow lookup keeps the real world position.
 - **The receiver is used only when it is safe.** `SunShadowReceiverUsable()` (`Game/Lighting/SunShadowReceiver.h`) must be
   true and `Dot(receiver.directionTowardSun, this frame's sun) >= 0.9999`. The state is `Used`, `Missing`, `Rejected` or
   `Mismatch` (`NotChecked` when the pass did not run). `Rejected` and `Mismatch` are reported once with `ReportOnce`.
@@ -147,7 +151,8 @@ When the composite pass is off, the view still holds the scene color of the earl
 - **Settings are stored only through `SanitizeAtmosphereSettings()`** (`AtmosphereParameters.h`). `Settings()` is const and
   `ApplySettings(candidate)` sanitizes. A non-finite value becomes the field default. Ranges: planet radius 1..50000 km,
   atmosphere thickness 1..500 km, multi-scattering 0..10, Rayleigh and Mie scale height 0.01..100 km, Mie g -0.99..0.99,
-  ozone center and half width 0..100 km, scattering and absorption colors and ground albedo 0..1, aerial strength 0..2, sky
+  ozone center and half width 0..100 km, scattering and absorption colors and ground albedo 0..1, aerial strength 0 and up
+  (no upper limit), sky
   intensity 0..50, aerial max distance 0.01..50 km, depth exponent 1..4, samples 1..16, exaggeration 0.1..50. The panel
   edits a copy and calls `ApplySettings` when a value changed.
 - **HTTP: `/feature_debug/state?name=Atmosphere` and `/feature_debug/set?name=Atmosphere&key=value`.** Writable keys:
