@@ -490,6 +490,8 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/ClusterDrawVerb.cpp
     src/Core/FeatureKit/ClusterPartPlanning.h
     src/Core/FeatureKit/ClusterPartPlanning.cpp
+    src/Core/FeatureKit/HizPyramid.h
+    src/Core/FeatureKit/HizPyramid.cpp
     src/Core/FeatureKit/ChannelNames.h
     src/Core/FeatureKit/GatedBuild.h
     src/Core/FeatureKit/OffscreenTarget.h
@@ -1769,6 +1771,7 @@ gte_add_shader(GreatTamanaEditor src/Shaders/FrustumCull.comp)
 # Cluster cull compute and the cluster draw vertex/fragment shaders (Mesh.frag is the lit fragment shader).
 gte_add_shader(GreatTamanaEditor src/Shaders/ClusterCull.comp)
 gte_add_shader(GreatTamanaEditor src/Shaders/ClusterCullStats.comp)
+gte_add_shader(GreatTamanaEditor src/Shaders/HizBuild.comp)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshCluster.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.frag)

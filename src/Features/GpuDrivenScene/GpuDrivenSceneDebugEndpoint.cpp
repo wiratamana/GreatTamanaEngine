@@ -37,6 +37,7 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDriv
     Add(out, key("rendered"), v.rendered);
     Add(out, key("frameIndex"), Count(v.frameIndex));
     Add(out, key("frozen"), v.frozen);
+    Add(out, key("occlusionUsable"), v.occlusionUsable);
     Add(out, key("inertReason"), std::string(ClusterInertReasonName(v.inertReason)));
     Add(out, key("lastRefusalReason"), v.refusal);
     Add(out, key("claimedEntities"), Count(v.claimedEntities));
@@ -66,7 +67,7 @@ fx::FeatureDebugResult GpuDrivenSceneDebugEndpoint::GetState() const
     Add(out, "enabled", s.enabled);
     Add(out, "frustum", s.frustum);
     Add(out, "cone", s.cone);
-    Add(out, "occlusion", false);
+    Add(out, "occlusion", s.occlusion);
     Add(out, "freezeCulling", s.freezeCulling);
     Add(out, "debugView", std::string(GpuDrivenSceneDebugViewName(s.debugView)));
     Add(out, "supported", m_feature.Supported());
@@ -82,7 +83,6 @@ fx::FeatureDebugResult GpuDrivenSceneDebugEndpoint::Set(std::span<const fx::Feat
     for (const fx::FeatureDebugArg& arg : args) {
         switch (ApplyGpuDrivenSceneSetting(candidate, arg.key, arg.value)) {
         case GpuDrivenSceneSetResult::Applied: break;
-        case GpuDrivenSceneSetResult::NotAvailable: return Fail(arg.key, "not available");
         case GpuDrivenSceneSetResult::BadValue:
             return Fail(arg.key, arg.key == "debugView" ? "debugView must be Off or ClusterId" : "value must be true or false");
         case GpuDrivenSceneSetResult::UnknownKey: {

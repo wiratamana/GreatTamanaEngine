@@ -534,6 +534,15 @@ void Core::FillExclusion(fx::EntityExclusion exclusion, std::span<const Entity> 
 void Core::BuildClusterCandidates()
 {
     m_clusterCandidates.clear();
+
+    // Movement is tracked only while a pyramid build asked for it in the previous frame.
+    const bool tracking = m_occlusionRequested;
+    m_occlusionRequested = false;
+    if (tracking) {
+        m_clusterMoved.BeginFrame();
+    } else {
+        m_clusterMoved.Clear();
+    }
     if (!ClusterPathSupported(m_renderer.IndirectDrawCaps()) || m_renderFeatureCompositorPtr == nullptr) {
         return;
     }
@@ -569,7 +578,7 @@ void Core::BuildClusterCandidates()
         input.gpuSkinned = gpuSkinnedOutputs.contains(mesh->VertexBufferHandle());
         inputs.push_back(input);
     }
-    m_clusterCandidates = SelectClusterCandidates(inputs, true);
+    m_clusterCandidates = SelectClusterCandidates(inputs, true, tracking ? &m_clusterMoved : nullptr);
 }
 
 const Core::ExposedViewOutput* Core::FindExposedViewOutput(rg::ViewScope scope) const noexcept

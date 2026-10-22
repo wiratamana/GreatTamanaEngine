@@ -31,6 +31,9 @@ void DrawViewInfo(const char* label, const GpuDrivenSceneViewSnapshot& v)
         ImGui::TextDisabled("Clusters visible: no data yet");
     }
     ImGui::Text("Buffer memory: %.1f MB", static_cast<double>(v.ledgerBytes) / (1024.0 * 1024.0));
+    if (v.occlusionUsable) {
+        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Occlusion culling active");
+    }
     if (v.frozen) {
         ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Culling camera is frozen");
     }
@@ -62,6 +65,10 @@ bool BuildGpuDrivenScenePanel(EditorContext& /*ctx*/, GpuDrivenSceneSettings& ed
         ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.2f, 1.0f), "Only correct for closed meshes. Open surfaces lose their back faces.");
     }
     changed |= ImGui::Checkbox("Freeze culling camera", &edit.freezeCulling);
+    changed |= ImGui::Checkbox("Occlusion culling (Hi-Z)", &edit.occlusion);
+    if (edit.occlusion) {
+        ImGui::TextDisabled("Uses last frame's depth. Off after cuts and resizes; moved instances are never culled.");
+    }
 
     ImGui::SeparatorText("Debug");
     int view = static_cast<int>(edit.debugView);

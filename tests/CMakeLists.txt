@@ -2797,6 +2797,7 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_SCENE_DEPTH_CONSTANTS_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/SceneDepthConstants.glsl"
     GTE_TEST_SHADERS_DIR="${CMAKE_SOURCE_DIR}/src/Shaders"
     GTE_TEST_CLUSTER_CULL_SHADER_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/ClusterCull.comp"
+    GTE_TEST_HIZ_BUILD_SHADER_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/HizBuild.comp"
 )
 
 # Engine-owned reflection fixtures with abstract names (not shipped).

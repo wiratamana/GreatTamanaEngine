@@ -5,6 +5,7 @@
 #include "GpuParams.h"
 #include "GpuReadback.h"
 #include "PersistentBuffer.h"
+#include "PersistentTarget.h"
 #include "../../Renderer/Culling/ClusterCullMath.h"
 #include "../../Renderer/RenderGraph/BuildRetryGate.h"
 #include "../../Renderer/RenderGraph/RenderGraphHandles.h"
@@ -107,6 +108,9 @@ public:
     const char* StatsClearName(std::uint32_t lane, std::uint32_t slot) const noexcept;
     const char* StatsCopyName(std::uint32_t lane, std::uint32_t slot) const noexcept;
 
+    // A 1x1 texture of the lane for the pyramid binding while occlusion culling is off. Once per frame and lane.
+    Texture HizDummy(Frame& frame, std::uint32_t lane);
+
     // Survivor count of the frame's view, summed over part slots. Two frames old.
     ClusterVisibleCount VisibleClusters(const Frame& frame) const;
 
@@ -177,6 +181,7 @@ private:
     std::vector<std::unique_ptr<PersistentBuffer>> m_count;
     std::vector<std::unique_ptr<GpuReadback<std::uint32_t>>> m_stats;
     std::vector<std::unique_ptr<GpuParams<ClusterCullParams>>> m_params;
+    std::vector<std::unique_ptr<PersistentTarget>> m_hizDummy; // [lane]
 
     std::array<const Pipeline*, kClusterPipelineKeyCount> m_pipelines{};
     std::array<rg::BuildRetryGate, kClusterPipelineKeyCount> m_pipelineGates;

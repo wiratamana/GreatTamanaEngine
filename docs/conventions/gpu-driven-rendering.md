@@ -82,7 +82,7 @@ rules whenever touching it:
   `AddFrameDebuggerReplayPasses()` — that would change what the replay
   preview itself renders, which is explicitly out of scope.
 
-Open items: hierarchical/two-phase occlusion culling, LOD selection, textured/bindless
+Open items: two-phase occlusion culling (a one-frame-old Hi-Z exists in the cluster path), LOD selection, textured/bindless
 batching, primitive-shape batching, GPU-skinned-mesh batching and async compute. The
 cluster-based path with per-view buffers is documented in
 [gpu-driven-clusters.md](gpu-driven-clusters.md).

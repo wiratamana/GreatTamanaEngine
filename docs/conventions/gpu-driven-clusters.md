@@ -171,4 +171,25 @@ Both vertex shaders declare `invariant gl_Position` with the same expression ord
 - With one job worker or no job system, a build runs inline and stalls the editor.
 - The rename of the atomic write fails when another handle holds the target open. It is atomic
   against a crash, not durable against a power cut.
-- Occlusion culling is not implemented. The `occlusion` debug key is refused.
+- Hi-Z occlusion uses last frame's depth. It tests only boxes that were fully on screen last frame.
+  Boxes with a corner behind the eye, or a rect above level 5 (64 depth texels), are kept.
+- Two-phase occlusion (draw last frame's survivors, rebuild the pyramid, test the rest) is not implemented.
+  Fast camera motion can pop a cluster in for one frame.
+
+## Hi-Z occlusion
+
+- `fx::HizPyramid` builds one `R32_Float` atlas per view in a PostOpaque callback: level 0 is half the scene
+  depth size and levels 1..5 are packed to its right. Each level is one dispatch (`HizBuild.comp`) that reads
+  only the scene depth (farthest value of a block) and writes only its own region. Two atlases swap by frame
+  parity, so the cull of frame N reads the atlas built in frame N-1.
+- `ClusterCull.comp` runs the test after frustum and cone: the box is projected with last frame's
+  view-projection, the rect picks a level, four texels give the farthest depth, and the box is culled
+  when its nearest depth is farther. `ClusterOccluded` in `ClusterCullMath.h` is the CPU oracle.
+- The pyramid is unusable (occlusion off) for the first frame, a resize, a camera cut, a missed build and
+  two builds after each of those. The persistent target resizes one frame late, so a resize also holds the
+  next build back. `HizValidity` in `ClusterCullMath.h` is the pure state machine.
+- A moved instance is never occlusion-culled. Core tracks last frame's world matrices only while a pyramid
+  is being built (`Core::RequestOcclusionTracking`); a new entity counts as moved.
+- Depth-only lanes never use the pyramid.
+- Debug: `/feature_debug/set?name=GpuDrivenScene&occlusion=true`; read `game.occlusionUsable`.
+  Combine with `freezeCulling` and `/get_game_view` to see the effect.

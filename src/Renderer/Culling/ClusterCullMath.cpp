@@ -290,6 +290,211 @@ bool CameraIsFinite(const Mat4& viewProjection, const Vec3& eyeOrDirection) noex
     return IsFiniteMat(viewProjection) && IsFiniteVec(eyeOrDirection);
 }
 
+HizLayout HizLayoutFor(std::uint32_t sceneWidth, std::uint32_t sceneHeight) noexcept
+{
+    HizLayout layout;
+    if (sceneWidth == 0 || sceneHeight == 0) {
+        return layout;
+    }
+    const auto halfUp = [](std::uint32_t v) { return std::max(1u, (v >> 1) + (v & 1u)); };
+    const auto shiftUp = [](std::uint32_t v, std::uint32_t k) {
+        return std::max(1u, (v >> k) + ((v & ((1u << k) - 1u)) != 0 ? 1u : 0u));
+    };
+    layout.baseWidth = halfUp(sceneWidth);
+    layout.baseHeight = halfUp(sceneHeight);
+
+    std::uint32_t columnHeight = 0;
+    for (std::uint32_t k = 0; k < kHizLevelCount; ++k) {
+        HizLevel& level = layout.levels[k];
+        level.blockSize = 2u << k;
+        level.width = shiftUp(layout.baseWidth, k);
+        level.height = shiftUp(layout.baseHeight, k);
+        if (k == 0) {
+            continue;
+        }
+        level.originX = layout.baseWidth;
+        level.originY = columnHeight;
+        columnHeight += level.height;
+    }
+    layout.atlasWidth = layout.baseWidth + layout.levels[1].width;
+    layout.atlasHeight = std::max(layout.baseHeight, columnHeight);
+    return layout;
+}
+
+HizRect HizChooseRect(float minX, float minY, float maxX, float maxY, const HizLayout& layout) noexcept
+{
+    HizRect rect;
+    if (!layout.IsValid() || !std::isfinite(minX) || !std::isfinite(minY) || !std::isfinite(maxX)
+        || !std::isfinite(maxY)) {
+        return rect;
+    }
+    const float width = static_cast<float>(layout.baseWidth);
+    const float height = static_cast<float>(layout.baseHeight);
+    minX = std::clamp(minX - kHizRectMarginTexels, 0.0f, width);
+    minY = std::clamp(minY - kHizRectMarginTexels, 0.0f, height);
+    maxX = std::clamp(maxX + kHizRectMarginTexels, 0.0f, width);
+    maxY = std::clamp(maxY + kHizRectMarginTexels, 0.0f, height);
+    if (maxX < minX || maxY < minY) {
+        return rect;
+    }
+
+    const float extent = std::max(maxX - minX, maxY - minY);
+    std::uint32_t level = 0;
+    while (level <= kHizMaxLevel && static_cast<float>(1u << level) < extent) {
+        ++level;
+    }
+    if (level > kHizMaxLevel) {
+        return rect;
+    }
+
+    const HizLevel& info = layout.levels[level];
+    const float scale = 1.0f / static_cast<float>(1u << level);
+    const auto texel = [](float v, std::uint32_t size) {
+        return std::min(static_cast<std::uint32_t>(std::max(v, 0.0f)), size - 1u);
+    };
+    rect.usable = true;
+    rect.level = level;
+    rect.x0 = texel(std::floor(minX * scale), info.width);
+    rect.y0 = texel(std::floor(minY * scale), info.height);
+    rect.x1 = texel(std::floor(maxX * scale), info.width);
+    rect.y1 = texel(std::floor(maxY * scale), info.height);
+    return rect;
+}
+
+float HizFarthestDepth(std::span<const float> atlas, const HizLayout& layout, const HizRect& rect) noexcept
+{
+    if (!rect.usable || atlas.size() < std::uint64_t{ layout.atlasWidth } * layout.atlasHeight) {
+        return 1.0f;
+    }
+    const HizLevel& level = layout.levels[rect.level];
+    float farthest = 0.0f;
+    for (const std::uint32_t y : { rect.y0, rect.y1 }) {
+        for (const std::uint32_t x : { rect.x0, rect.x1 }) {
+            const std::size_t index = std::size_t{ level.originY + y } * layout.atlasWidth + level.originX + x;
+            farthest = std::max(farthest, atlas[index]);
+        }
+    }
+    return farthest;
+}
+
+bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& prevViewProjection,
+    const HizLayout& layout, std::span<const float> atlas) noexcept
+{
+    if (!layout.IsValid()) {
+        return false;
+    }
+    float minX = 0.0f;
+    float minY = 0.0f;
+    float maxX = 0.0f;
+    float maxY = 0.0f;
+    float nearest = 0.0f;
+    for (int i = 0; i < 8; ++i) {
+        const Vec3 local((i & 1) != 0 ? cluster.aabbMax[0] : cluster.aabbMin[0],
+            (i & 2) != 0 ? cluster.aabbMax[1] : cluster.aabbMin[1],
+            (i & 4) != 0 ? cluster.aabbMax[2] : cluster.aabbMin[2]);
+        const Vec3 p = world.TransformPoint(local);
+        float clip[4];
+        for (int row = 0; row < 4; ++row) {
+            clip[row] = prevViewProjection(row, 0) * p.x + prevViewProjection(row, 1) * p.y
+                + prevViewProjection(row, 2) * p.z + prevViewProjection(row, 3);
+        }
+        if (!(clip[3] > 1e-6f)) {
+            return false; // Behind the eye: no usable projection.
+        }
+        const float x = clip[0] / clip[3];
+        const float y = clip[1] / clip[3];
+        const float z = clip[2] / clip[3];
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+            return false;
+        }
+        minX = i == 0 ? x : std::min(minX, x);
+        maxX = i == 0 ? x : std::max(maxX, x);
+        minY = i == 0 ? y : std::min(minY, y);
+        maxY = i == 0 ? y : std::max(maxY, y);
+        nearest = i == 0 ? z : std::min(nearest, z);
+    }
+    // Depth outside the rect is unknown, so a box that leaves the screen is kept.
+    if (minX < -1.0f || maxX > 1.0f || minY < -1.0f || maxY > 1.0f) {
+        return false;
+    }
+    const float width = static_cast<float>(layout.baseWidth);
+    const float height = static_cast<float>(layout.baseHeight);
+    const HizRect rect = HizChooseRect((minX * 0.5f + 0.5f) * width, (minY * 0.5f + 0.5f) * height,
+        (maxX * 0.5f + 0.5f) * width, (maxY * 0.5f + 0.5f) * height, layout);
+    if (!rect.usable) {
+        return false;
+    }
+    return nearest > HizFarthestDepth(atlas, layout, rect) + kHizDepthBias;
+}
+
+void SetClusterCullHiz(ClusterCullParams& params, const Mat4& prevViewProjection, const HizLayout& layout) noexcept
+{
+    std::memcpy(params.prevViewProjection, prevViewProjection.Data(), sizeof(params.prevViewProjection));
+    params.hiz[0] = static_cast<float>(layout.atlasWidth);
+    params.hiz[1] = static_cast<float>(layout.atlasHeight);
+    params.hiz[2] = static_cast<float>(layout.baseWidth);
+    params.hiz[3] = static_cast<float>(layout.baseHeight);
+}
+
+bool HizCameraCut(const Mat4& prevViewProjection, const Vec3& prevEye, const Mat4& viewProjection,
+    const Vec3& eye) noexcept
+{
+    if (!CameraIsFinite(prevViewProjection, prevEye) || !CameraIsFinite(viewProjection, eye)) {
+        return true;
+    }
+    if (Length(eye - prevEye) > kHizCutEyeDistance) {
+        return true;
+    }
+    // The third row of a view-projection points along the view direction for both projection kinds.
+    const Vec3 prevForward(prevViewProjection(2, 0), prevViewProjection(2, 1), prevViewProjection(2, 2));
+    const Vec3 forward(viewProjection(2, 0), viewProjection(2, 1), viewProjection(2, 2));
+    const float lengths = Length(prevForward) * Length(forward);
+    if (!(lengths > 0.0f)) {
+        return true;
+    }
+    return Dot(prevForward, forward) / lengths < kHizCutCosAngle;
+}
+
+HizValidity AdvanceHizValidity(
+    HizValidity state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height, bool cameraCut) noexcept
+{
+    const bool first = !state.hasBuilt;
+    const bool missedFrame = state.hasBuilt && frameIndex != state.lastFrame + 1;
+    const bool resized = state.hasBuilt && (width != state.width || height != state.height);
+
+    bool resizeEvent = resized;
+    if (resized) {
+        state.resizeHold = kHizResizeHoldBuilds;
+    } else if (state.resizeHold > 0) {
+        resizeEvent = true;
+        --state.resizeHold;
+    }
+    state.framesSinceValid = NextFramesSinceValid(state.framesSinceValid, resizeEvent, first, !missedFrame, cameraCut);
+    state.hasBuilt = true;
+    state.lastFrame = frameIndex;
+    state.width = width;
+    state.height = height;
+    return state;
+}
+
+bool HizUsableAt(const HizValidity& state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height) noexcept
+{
+    return state.hasBuilt && state.lastFrame + 1 == frameIndex && state.width == width && state.height == height
+        && OcclusionAllowed(state.framesSinceValid, false, false, true, false);
+}
+
+bool InstanceMoved(const Mat4& previous, const Mat4& current) noexcept
+{
+    const float* a = previous.Data();
+    const float* b = current.Data();
+    for (int i = 0; i < 16; ++i) {
+        if (!(a[i] == b[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool MeshHasCoincidentTriangles(std::span<const Vec3> positions, std::span<const std::uint32_t> indices)
 {
     using Point = std::array<float, 3>;

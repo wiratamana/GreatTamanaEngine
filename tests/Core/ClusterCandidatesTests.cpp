@@ -190,5 +190,75 @@ TEST(ClusterCandidatesTests, MeshTokenEqualityOrderAndHash)
     EXPECT_EQ(set.size(), 2u);
 }
 
+TEST(ClusterMovedTrackerTests, NewEntityCountsAsMovedAndSameMatrixDoesNot)
+{
+    ClusterMovedTracker tracker;
+    const Mat4 world = Mat4::Translation(Vec3(1.0f, 2.0f, 3.0f));
+
+    tracker.BeginFrame();
+    EXPECT_TRUE(tracker.Observe(MakeEntity(4), world)); // No previous frame.
+
+    tracker.BeginFrame();
+    EXPECT_FALSE(tracker.Observe(MakeEntity(4), world));
+    EXPECT_TRUE(tracker.Observe(MakeEntity(5), world)); // New this frame.
+
+    tracker.BeginFrame();
+    EXPECT_TRUE(tracker.Observe(MakeEntity(4), Mat4::Translation(Vec3(1.0f, 2.0f, 4.0f))));
+    EXPECT_FALSE(tracker.Observe(MakeEntity(5), world));
+}
+
+TEST(ClusterMovedTrackerTests, ReusedSlotWithAnotherGenerationIsNew)
+{
+    ClusterMovedTracker tracker;
+    const Mat4 world = Mat4::Identity();
+    tracker.BeginFrame();
+    tracker.Observe(MakeEntity(2), world);
+    tracker.BeginFrame();
+
+    Entity reused = MakeEntity(2);
+    reused.generation = 2;
+    EXPECT_TRUE(tracker.Observe(reused, world));
+}
+
+TEST(ClusterMovedTrackerTests, EntityThatSkippedAFrameIsNewAgain)
+{
+    ClusterMovedTracker tracker;
+    const Mat4 world = Mat4::Identity();
+    tracker.BeginFrame();
+    tracker.Observe(MakeEntity(3), world);
+    tracker.BeginFrame(); // Not seen this frame.
+    tracker.BeginFrame();
+    EXPECT_TRUE(tracker.Observe(MakeEntity(3), world));
+}
+
+TEST(ClusterMovedTrackerTests, ClearForgetsEverythingAndHugeIndicesAreAlwaysMoved)
+{
+    ClusterMovedTracker tracker;
+    const Mat4 world = Mat4::Identity();
+    tracker.BeginFrame();
+    tracker.Observe(MakeEntity(1), world);
+    tracker.BeginFrame();
+    tracker.Clear();
+    EXPECT_TRUE(tracker.Observe(MakeEntity(1), world));
+
+    tracker.BeginFrame();
+    tracker.Observe(MakeEntity(0x7FFFFFFF), world);
+    tracker.BeginFrame();
+    EXPECT_TRUE(tracker.Observe(MakeEntity(0x7FFFFFFF), world)); // Too large to track.
+    EXPECT_TRUE(tracker.Observe(kInvalidEntity, world));
+}
+
+TEST(ClusterMovedTrackerTests, SelectionFlagsMovedInstancesOnlyWhileTracking)
+{
+    const std::vector<ClusterCandidateInput> inputs{ Eligible(1) };
+    EXPECT_EQ(SelectClusterCandidates(inputs, true)[0].flags & kClusterFlagMoved, 0u);
+
+    ClusterMovedTracker tracker;
+    tracker.BeginFrame();
+    EXPECT_NE(SelectClusterCandidates(inputs, true, &tracker)[0].flags & kClusterFlagMoved, 0u);
+    tracker.BeginFrame();
+    EXPECT_EQ(SelectClusterCandidates(inputs, true, &tracker)[0].flags & kClusterFlagMoved, 0u);
+}
+
 } // namespace
 } // namespace gte

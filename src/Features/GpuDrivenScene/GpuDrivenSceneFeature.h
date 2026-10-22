@@ -36,6 +36,7 @@ public:
 
 private:
     void OpaquePass(fx::OpaqueFrame& f);
+    void HizPass(fx::PostOpaqueFrame& f);
 
     GpuDrivenSceneSettings m_settings;
     std::uint64_t m_newestFrame = 0;
@@ -44,6 +45,7 @@ private:
 
     fx::PerView<GpuDrivenSceneViewState> m_views;
     fx::ClusterDrawState m_state{ kGpuDrivenSceneFeatureName, fx::ClusterDrawShape{ kMainViewLanes, kMainViewPartSlots } };
+    fx::HizPyramid m_hiz{ "GpuDrivenScene.Hiz" };
 };
 
 } // namespace gte

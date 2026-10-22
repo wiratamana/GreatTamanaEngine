@@ -2,9 +2,11 @@
 
 #include "Core/FeatureKit/ClusterDrawState.h"
 #include "Core/FeatureKit/ClusterNamePool.h"
+#include "Core/FeatureKit/HizPyramid.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <limits>
 #include <set>
 #include <string>
@@ -255,6 +257,37 @@ TEST(ClusterDrawStateTests, StateBudgetThenProcessCeiling)
     // Destroying a state returns its bytes to the ledger.
     ClusterDrawState c("TestBudgetC", { 1, kMainViewPartSlots });
     EXPECT_EQ(c.TryReserveChainBytes(kGame, 0, 0, kInstances, kWork), ClusterReserveResult::Ok);
+}
+
+TEST(HizPyramidTests, OneUniquePassNamePerLevelAndStableAcrossRebuilds)
+{
+    const HizPyramid pyramid("Test.Hiz");
+    ASSERT_TRUE(pyramid.Valid());
+    const std::vector<std::string> names = pyramid.AllPassNames();
+    ASSERT_EQ(names.size(), static_cast<std::size_t>(kHizLevelCount));
+    EXPECT_EQ(std::set<std::string>(names.begin(), names.end()).size(), names.size());
+    EXPECT_EQ(names.front(), "Test.Hiz.Level0");
+
+    const std::size_t poolSize = [] {
+        const HizPyramid again("Test.Hiz");
+        return again.AllPassNames().size();
+    }();
+    EXPECT_EQ(poolSize, names.size());
+    // The same base interns to the same pointers: a rebuilt pyramid does not grow the table.
+    EXPECT_EQ(InternClusterName("Test.Hiz.Level0"), InternClusterName("Test.Hiz.Level0"));
+
+    const HizPyramid other("Test.HizOther");
+    for (const std::string& name : other.AllPassNames()) {
+        EXPECT_EQ(std::count(names.begin(), names.end(), name), 0);
+    }
+}
+
+TEST(HizPyramidTests, EmptyBaseNameIsRefused)
+{
+    const HizPyramid pyramid("");
+    EXPECT_FALSE(pyramid.Valid());
+    EXPECT_FALSE(pyramid.Error().empty());
+    EXPECT_TRUE(pyramid.AllPassNames().empty());
 }
 
 } // namespace

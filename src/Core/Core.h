@@ -17,6 +17,7 @@
 #include "../Renderer/RenderGraph/RenderGraph.h"
 #include "../Renderer/RenderGraph/RenderPipeline.h"
 #include "../Renderer/RenderGraph/Shader.h"
+#include "ClusterCandidates.h"
 #include "FrameDebuggerCaptureRecorder.h"
 #include "FeatureKit/ClusterDrawTypes.h"
 #include "Plugins/ProjectAssemblyHost.h"
@@ -234,6 +235,10 @@ public:
     // Fills a set reserved this frame. Ignores an empty or foreign handle.
     void FillExclusion(fx::EntityExclusion exclusion, std::span<const Entity> entities);
 
+    // Asks BuildFrame() of the next frame to track entity movement (kClusterFlagMoved). Kit verbs only; call every
+    // frame the occlusion pyramid is built.
+    void RequestOcclusionTracking() noexcept { m_occlusionRequested = true; }
+
     // Most exclusion sets one frame can reserve.
     static constexpr std::size_t kMaxExclusionSetsPerFrame = 16;
 
@@ -315,6 +320,10 @@ private:
     // BuildFrame(); a deque keeps every reserved set at a stable address.
     std::vector<fx::ClusterInstance> m_clusterCandidates;
     std::deque<std::unordered_set<Entity>> m_exclusionSets;
+
+    // Last-frame world matrices for the moved flag. Filled only while a pyramid build asked for it last frame.
+    ClusterMovedTracker m_clusterMoved;
+    bool m_occlusionRequested = false;
 
     // Opaque features that broke the pass tag rule; their callbacks no longer run.
     std::unordered_set<std::string> m_faultedOpaqueFeatures;

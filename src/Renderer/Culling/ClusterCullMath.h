@@ -78,7 +78,7 @@ inline constexpr std::uint32_t kDepthOnlyPartSlots = 4;
 inline constexpr std::uint64_t kClusterCommandBytes = 20;
 inline constexpr std::uint64_t kClusterVisibleBytes = 8;
 
-// Which clusters are tested. Occlusion is reserved for the Hi-Z test.
+// Which clusters are tested.
 enum class ClusterCullFlags : std::uint32_t {
     None = 0,
     Frustum = kClusterCullFlagFrustum,
@@ -114,7 +114,7 @@ struct ClusterCullParams {
     float eyeOrDirection[4]; // xyz = eye point, or view direction when orthographic.
     float prevViewProjection[16];
     std::uint32_t counts[4];
-    float hiz[4]; // x = size, y = mip count.
+    float hiz[4]; // x,y = atlas size, z,w = level 0 size (Hi-Z occlusion only).
 };
 static_assert(sizeof(ClusterCullParams) == 208);
 static_assert(sizeof(ClusterCullParams) % 16 == 0);
@@ -126,7 +126,7 @@ static_assert(offsetof(ClusterCullParams, hiz) == 192);
 // Packs a world matrix and its flags into the GPU record.
 ClusterInstanceGpu MakeClusterInstanceGpu(const Mat4& world, std::uint32_t flags, float maxScale) noexcept;
 
-// Fills the parameter block. Planes come from `cullViewProjection`; the Hi-Z fields stay zero.
+// Fills the parameter block. Planes come from `cullViewProjection`; the Hi-Z fields stay zero until SetClusterCullHiz.
 ClusterCullParams MakeClusterCullParams(const Mat4& cullViewProjection, const Vec3& eyeOrDirection,
     bool orthographic, std::uint32_t instanceCount, std::uint32_t clusterCount, ClusterCullFlags flags) noexcept;
 
@@ -230,6 +230,118 @@ Vec3 OrthographicViewDirection(const Mat4& viewProjection) noexcept;
 
 // False when the matrix or the eye/direction holds a non-finite value.
 bool CameraIsFinite(const Mat4& viewProjection, const Vec3& eyeOrDirection) noexcept;
+
+// ---------------------------------------------------------------------------------------------
+// Hi-Z occlusion
+// ---------------------------------------------------------------------------------------------
+
+// The pyramid is one R32_Float atlas of farthest-depth levels. Level 0 is half the scene depth size;
+// level k reduces blocks of 2^(k+1) depth texels. Every level reads the scene depth only.
+inline constexpr std::uint32_t kHizMaxLevel = 5;
+inline constexpr std::uint32_t kHizLevelCount = kHizMaxLevel + 1;
+
+// Clean builds in a row needed before the pyramid may cull (first frame, resize, cut and a missed build reset it).
+inline constexpr std::uint32_t kHizValidFramesRequired = 2;
+
+// Standard Z: a box is occluded only when its nearest depth is farther than the pyramid by this much.
+inline constexpr float kHizDepthBias = 1e-4f;
+// The projected rect grows by this many level-0 texels on every side.
+inline constexpr float kHizRectMarginTexels = 1.0f;
+
+// A view that jumps farther than this, or turns more than acos(kHizCutCosAngle), is a camera cut.
+inline constexpr float kHizCutEyeDistance = 50.0f;
+inline constexpr float kHizCutCosAngle = 0.9f;
+
+struct HizLevel {
+    std::uint32_t originX = 0;
+    std::uint32_t originY = 0;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::uint32_t blockSize = 0; // Scene depth texels per level texel and axis.
+};
+
+struct HizLayout {
+    std::uint32_t baseWidth = 0; // Level 0 size.
+    std::uint32_t baseHeight = 0;
+    std::uint32_t atlasWidth = 0;
+    std::uint32_t atlasHeight = 0;
+    std::array<HizLevel, kHizLevelCount> levels{};
+
+    bool IsValid() const noexcept { return atlasWidth != 0 && atlasHeight != 0; }
+};
+
+// Level 0 at the origin, levels 1.. stacked in the column to its right. A zero scene size gives an invalid layout.
+HizLayout HizLayoutFor(std::uint32_t sceneWidth, std::uint32_t sceneHeight) noexcept;
+
+// Chosen level and inclusive texel rectangle of a screen rect.
+struct HizRect {
+    bool usable = false; // False when the rect is too large for the pyramid: the cluster is kept.
+    std::uint32_t level = 0;
+    std::uint32_t x0 = 0;
+    std::uint32_t y0 = 0;
+    std::uint32_t x1 = 0;
+    std::uint32_t y1 = 0;
+};
+
+// The rect is given in level-0 texels. The margin is added here. The level is the smallest one where
+// the rect spans at most two texels per axis.
+HizRect HizChooseRect(float minX, float minY, float maxX, float maxY, const HizLayout& layout) noexcept;
+
+// Farthest depth of the four texels of `rect`. `atlas` is row major, atlasWidth * atlasHeight floats.
+float HizFarthestDepth(std::span<const float> atlas, const HizLayout& layout, const HizRect& rect) noexcept;
+
+// CPU oracle of the occlusion test in ClusterCull.comp. The box is projected with last frame's matrix.
+// Kept (false) when any corner is behind the eye, the rect leaves the screen, or the rect is too large.
+bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& prevViewProjection,
+    const HizLayout& layout, std::span<const float> atlas) noexcept;
+
+// Writes the previous view-projection and the pyramid size into the parameter block.
+void SetClusterCullHiz(ClusterCullParams& params, const Mat4& prevViewProjection, const HizLayout& layout) noexcept;
+
+// Occlusion may cull only after enough clean builds and never on a frame with a reset event.
+constexpr bool OcclusionAllowed(std::uint32_t framesSinceValid, bool resized, bool firstFrame, bool buildPassEnabled,
+    bool cameraCut) noexcept
+{
+    return buildPassEnabled && !resized && !firstFrame && !cameraCut && framesSinceValid >= kHizValidFramesRequired;
+}
+
+// Clean-build counter after one pyramid build. Any reset event restarts it at zero.
+constexpr std::uint32_t NextFramesSinceValid(std::uint32_t framesSinceValid, bool resized, bool firstFrame,
+    bool buildPassEnabled, bool cameraCut) noexcept
+{
+    if (!buildPassEnabled || resized || firstFrame || cameraCut) {
+        return 0;
+    }
+    return framesSinceValid < 0xFFFFFFFFu ? framesSinceValid + 1 : framesSinceValid;
+}
+
+// A persistent target resizes one frame after the request, so the build after a resize is held back as well.
+inline constexpr std::uint32_t kHizResizeHoldBuilds = 1;
+
+// Per-view bookkeeping of the pyramid builds. Plain data, advanced once per build.
+struct HizValidity {
+    bool hasBuilt = false;
+    std::uint64_t lastFrame = 0; // Frame index of the last build.
+    std::uint32_t width = 0;     // Scene depth size of the last build.
+    std::uint32_t height = 0;
+    std::uint32_t framesSinceValid = 0;
+    std::uint32_t resizeHold = 0;
+};
+
+// State after a build at `frameIndex` for a scene depth of `width` x `height`. The first build, a resize, a
+// camera cut and a missed frame between two builds all restart the clean count.
+HizValidity AdvanceHizValidity(
+    HizValidity state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height, bool cameraCut) noexcept;
+
+// True when the pyramid of the last build may cull in `frameIndex` for a view of `width` x `height`.
+bool HizUsableAt(const HizValidity& state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height) noexcept;
+
+// True when the view moved or turned too far for last frame's depth to say anything about this frame.
+bool HizCameraCut(const Mat4& prevViewProjection, const Vec3& prevEye, const Mat4& viewProjection,
+    const Vec3& eye) noexcept;
+
+// True when any entry of the two world matrices differs (a NaN entry counts as different).
+bool InstanceMoved(const Mat4& previous, const Mat4& current) noexcept;
 
 // ---------------------------------------------------------------------------------------------
 // Pipeline key

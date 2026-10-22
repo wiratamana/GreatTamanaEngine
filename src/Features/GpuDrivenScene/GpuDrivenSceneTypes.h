@@ -22,6 +22,8 @@ struct GpuDrivenSceneSettings {
     bool frustum = true;
     // Back-face cone test. Only correct for closed meshes; never applied to depth-only lanes.
     bool cone = false;
+    // Hi-Z occlusion test against last frame's depth. Guarded against cuts, resizes and moved instances.
+    bool occlusion = false;
     // Keeps the cull camera of the first frozen frame while the draw camera moves.
     bool freezeCulling = false;
     GpuDrivenSceneDebugView debugView = GpuDrivenSceneDebugView::Off;
@@ -55,7 +57,7 @@ inline std::optional<GpuDrivenSceneDebugView> ParseGpuDrivenSceneDebugView(std::
     return std::nullopt;
 }
 
-enum class GpuDrivenSceneSetResult : std::uint8_t { Applied, UnknownKey, NotAvailable, BadValue };
+enum class GpuDrivenSceneSetResult : std::uint8_t { Applied, UnknownKey, BadValue };
 
 // Applies one key=value pair of a debug request to `settings`. `settings` is unchanged unless Applied.
 inline GpuDrivenSceneSetResult ApplyGpuDrivenSceneSetting(
@@ -90,7 +92,7 @@ inline GpuDrivenSceneSetResult ApplyGpuDrivenSceneSetting(
         return GpuDrivenSceneSetResult::Applied;
     }
     if (key == "occlusion") {
-        return GpuDrivenSceneSetResult::NotAvailable;
+        return assignBool(settings.occlusion);
     }
     return GpuDrivenSceneSetResult::UnknownKey;
 }
@@ -150,6 +152,7 @@ struct GpuDrivenSceneViewSnapshot {
     bool frozen = false;
     std::uint32_t claimedEntities = 0;
     std::uint32_t parts = 0;
+    bool occlusionUsable = false; // The pyramid of the last frame was valid and bound to the cull this frame.
     std::uint64_t testedClusters = 0;
     std::uint32_t visibleClusters = 0;
     std::uint64_t visibleFrame = 0;

@@ -9,6 +9,7 @@ namespace gte {
 namespace {
 
 constexpr std::int32_t kOpaquePriority = 0;
+constexpr std::int32_t kHizBuildPriority = 100;
 
 // A report older than this many frames (against the newest frame of any view) counts as not rendered.
 constexpr std::uint64_t kSnapshotStaleFrames = 2;
@@ -40,12 +41,24 @@ void GpuDrivenSceneFeature::Setup(fx::FeatureSetup& s)
         s.Fail("the cluster draw state is invalid: " + m_state.Error());
         return;
     }
+    if (!m_hiz.Valid()) {
+        s.Fail("the occlusion pyramid is invalid: " + m_hiz.Error());
+        return;
+    }
 
     // Every pass name of the draw state is a toggle; the callback runs while any of them is enabled.
     fx::Gate gate;
     gate.passNames = m_state.AllPassNames();
     s.Opaque("GpuDrivenScene.Opaque", kOpaquePriority, [this](fx::OpaqueFrame& f) { OpaquePass(f); }, gate);
     for (const std::string& name : gate.passNames) {
+        s.CountInViewStats(name);
+    }
+
+    // The pyramid is built from the depth the opaque stage left behind and read by the next frame's cull.
+    fx::Gate hizGate;
+    hizGate.passNames = m_hiz.AllPassNames();
+    s.PostOpaque("GpuDrivenScene.HizBuild", kHizBuildPriority, [this](fx::PostOpaqueFrame& f) { HizPass(f); }, hizGate);
+    for (const std::string& name : hizGate.passNames) {
         s.CountInViewStats(name);
     }
 }
@@ -97,11 +110,21 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     }
 
     const std::span<const fx::ClusterInstance> candidates = f.ClusterCandidates();
+    ClusterCullFlags flags = CullFlagsOf(cfg);
     fx::ClusterDrawChain chain = f.ClusterDraw(m_state, 0);
+    if (cfg.occlusion) {
+        // Last frame's pyramid, only while its guards hold (first frame, resize, cut, missed build).
+        const fx::HizPrevious hiz = m_hiz.Previous(f);
+        snap.occlusionUsable = hiz.usable;
+        if (hiz.usable) {
+            flags = flags | ClusterCullFlags::Occlusion;
+            chain.Occlusion(hiz.atlas, hiz.viewProjection, hiz.baseWidth, hiz.baseHeight);
+        }
+    }
     chain.Instances(candidates)
         .Camera(live)
         .CullCamera(cullCamera)
-        .Culling(CullFlagsOf(cfg))
+        .Culling(flags)
         .Target(f.SceneTarget())
         .IdTint(cfg.debugView == GpuDrivenSceneDebugView::ClusterId)
         .Stats(true);
@@ -117,6 +140,16 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     snap.visibleClusters = visible.value;
     snap.visibleFrame = visible.frame;
     finish();
+}
+
+void GpuDrivenSceneFeature::HizPass(fx::PostOpaqueFrame& f)
+{
+    const GpuDrivenSceneSettings cfg = m_settings;
+    if (!cfg.enabled || !cfg.occlusion) {
+        m_hiz.Reset(f);
+        return;
+    }
+    m_hiz.Build(f);
 }
 
 GTE_REGISTER_RENDER_FEATURE("GpuDrivenScene", GpuDrivenSceneFeature);

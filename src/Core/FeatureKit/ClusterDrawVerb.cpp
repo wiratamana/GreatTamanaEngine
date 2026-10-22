@@ -64,6 +64,18 @@ struct ClusterDrawChain::Impl {
     bool idTint = false;
     bool stats = false;
 
+    // Hi-Z input of Occlusion().
+    Texture hiz;
+    Mat4 prevViewProjection = Mat4::Identity();
+    std::uint32_t hizBaseWidth = 0;
+    std::uint32_t hizBaseHeight = 0;
+    bool hasOcclusion = false;
+
+    // Hi-Z decisions made by Plan().
+    HizLayout hizLayout;
+    Texture hizBinding; // The pyramid, or a 1x1 stand-in while occlusion is off.
+    bool occlusionActive = false;
+
     // Filled by Plan().
     bool planned = false;
     ClusterPlan plan;
@@ -120,6 +132,17 @@ ClusterDrawChain& ClusterDrawChain::CullCamera(const ClusterCamera& camera)
 ClusterDrawChain& ClusterDrawChain::Culling(ClusterCullFlags flags)
 {
     m_impl->flags = flags;
+    return *this;
+}
+
+ClusterDrawChain& ClusterDrawChain::Occlusion(
+    Texture hizAtlas, const Mat4& prevViewProjection, std::uint32_t baseWidth, std::uint32_t baseHeight)
+{
+    m_impl->hiz = hizAtlas;
+    m_impl->prevViewProjection = prevViewProjection;
+    m_impl->hizBaseWidth = baseWidth;
+    m_impl->hizBaseHeight = baseHeight;
+    m_impl->hasOcclusion = true;
     return *this;
 }
 
@@ -211,11 +234,33 @@ void PlanChain(ClusterDrawChain::Impl& s)
     }
 
     const ClusterCamera& cullCamera = s.hasCullCamera ? s.cullCamera : s.camera;
-    const ClusterCullFlags flags = EffectiveClusterCullFlags(s.flags, s.depthOnly);
+    ClusterCullFlags flags = EffectiveClusterCullFlags(s.flags, s.depthOnly);
     if (!ClusterCullParamsAreFinite(MakeClusterCullParams(
             cullCamera.viewProjection, cullCamera.eyeOrDirection, cullCamera.orthographic, 1, 1, flags))) {
         frame.ReportOnce(std::string("Pass '") + anchorName.value + "': the cull camera is not finite");
         return;
+    }
+
+    // The Occlusion test needs a pyramid of this view; without a usable one only that test is dropped.
+    if (HasClusterCullFlag(flags, ClusterCullFlags::Occlusion)) {
+        s.hizLayout = HizLayoutFor(s.hizBaseWidth * 2u, s.hizBaseHeight * 2u);
+        const bool usable = !s.depthOnly && s.hasOcclusion && s.hizLayout.IsValid() && s.hiz.IsValid()
+            && CameraIsFinite(s.prevViewProjection, Vec3(0.0f, 0.0f, 0.0f));
+        if (!usable) {
+            flags = static_cast<ClusterCullFlags>(
+                static_cast<std::uint32_t>(flags) & ~static_cast<std::uint32_t>(ClusterCullFlags::Occlusion));
+        } else if (!detail::CheckOwned(frame, s.hiz, anchorName, "the occlusion pyramid")) {
+            return;
+        } else {
+            s.hizBinding = s.hiz;
+            s.occlusionActive = true;
+        }
+    }
+    if (!s.hizBinding.IsValid()) {
+        s.hizBinding = state.HizDummy(frame, s.lane);
+        if (!s.hizBinding.IsValid()) {
+            return;
+        }
     }
 
     s.pipeline = state.ResolvePipeline(*context, ClusterPipelineKeyFor(flags, s.depthOnly, s.idTint));
@@ -295,6 +340,9 @@ void PlanChain(ClusterDrawChain::Impl& s)
         }
         part.params = MakeClusterCullParams(cullCamera.viewProjection, cullCamera.eyeOrDirection,
             cullCamera.orthographic, static_cast<std::uint32_t>(instanceCount), part.clusterCount, flags);
+        if (s.occlusionActive) {
+            SetClusterCullHiz(part.params, s.prevViewProjection, s.hizLayout);
+        }
         s.parts.push_back(std::move(part));
     }
     if (s.parts.empty()) {
@@ -377,6 +425,7 @@ ClusterChainProgress DeclarePart(ClusterDrawChain::Impl& s, const PlannedPart& p
                 .BindBuffer("visible", visible)
                 .BindBuffer("commands", commands)
                 .BindBuffer("count", count)
+                .Bind("hizAtlas", s.hizBinding)
                 .Dispatch(Extent2D{ static_cast<std::uint32_t>(part.workItems), 1 });
         }
 

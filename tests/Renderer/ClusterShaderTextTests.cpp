@@ -107,5 +107,33 @@ TEST(ClusterShaderText, CommandsAreAFlatUintArrayOfFivePerSlot)
     EXPECT_EQ(kClusterCommandBytes, 5u * sizeof(std::uint32_t));
 }
 
+TEST(ClusterShaderText, HizConstantsAndBindingMatchTheCppOracle)
+{
+    const std::string text = ReadShader();
+    EXPECT_TRUE(Contains(text, "layout(binding = 6) uniform sampler2D hizAtlas;"));
+    EXPECT_TRUE(Contains(text, UintConstant("kHizMaxLevel", kHizMaxLevel)));
+    EXPECT_TRUE(Contains(text, "const float kHizDepthBias = 0.0001;"));
+    EXPECT_TRUE(Contains(text, "const float kHizRectMarginTexels = 1.0;"));
+    EXPECT_FLOAT_EQ(kHizDepthBias, 0.0001f);
+    EXPECT_FLOAT_EQ(kHizRectMarginTexels, 1.0f);
+}
+
+TEST(ClusterShaderText, OcclusionSkipsMovedInstances)
+{
+    EXPECT_TRUE(Contains(ReadShader(), "(instance.info.x & kClusterFlagMoved) == 0u"));
+}
+
+TEST(ClusterShaderText, HizBuildShaderPushBlockAndBindings)
+{
+    std::ifstream file(GTE_TEST_HIZ_BUILD_SHADER_PATH, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    ASSERT_FALSE(text.empty());
+    EXPECT_TRUE(Contains(text, "layout(local_size_x = 8, local_size_y = 8) in;"));
+    EXPECT_TRUE(Contains(text, "layout(binding = 0) uniform sampler2D sceneDepth;"));
+    EXPECT_TRUE(Contains(text, "layout(binding = 1, r32f) uniform writeonly image2D hizOutput;"));
+    EXPECT_TRUE(Contains(text, "uvec4 levelInfo;"));
+    EXPECT_TRUE(Contains(text, "uvec4 sizes;"));
+}
+
 } // namespace
 } // namespace gte

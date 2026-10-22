@@ -153,6 +153,9 @@ ClusterDrawState::ClusterDrawState(std::string_view baseName, ClusterDrawShape s
     for (std::size_t i = 0; i < chains * rg::kViewScopeCount; ++i) {
         m_params.push_back(std::make_unique<GpuParams<ClusterCullParams>>());
     }
+    for (std::uint32_t lane = 0; lane < m_shape.lanes; ++lane) {
+        m_hizDummy.push_back(std::make_unique<PersistentTarget>(m_base + ".HizDummy.L" + std::to_string(lane)));
+    }
     m_chainBytes.assign(chains * rg::kViewScopeCount, 0);
 }
 
@@ -231,6 +234,14 @@ const char* ClusterDrawState::StatsClearName(std::uint32_t lane, std::uint32_t s
 const char* ClusterDrawState::StatsCopyName(std::uint32_t lane, std::uint32_t slot) const noexcept
 {
     return InRange(lane, slot) ? m_statsCopyNames[ChainIndex(0, lane, slot)] : nullptr;
+}
+
+Texture ClusterDrawState::HizDummy(Frame& frame, std::uint32_t lane)
+{
+    if (!InRange(lane, 0)) {
+        return Texture{};
+    }
+    return m_hizDummy[lane]->Acquire(frame, Extent2D{ 1, 1 }, PixelFormat::R32_Float);
 }
 
 ClusterVisibleCount ClusterDrawState::VisibleClusters(const Frame& frame) const

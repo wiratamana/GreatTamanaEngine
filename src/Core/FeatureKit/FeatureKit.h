@@ -22,6 +22,7 @@
 #include "GpuBufferRef.h"
 #include "GpuParams.h"
 #include "GpuReadback.h"
+#include "HizPyramid.h"
 #include "OffscreenTarget.h"
 #include "PerView.h"
 #include "PersistentBuffer.h"

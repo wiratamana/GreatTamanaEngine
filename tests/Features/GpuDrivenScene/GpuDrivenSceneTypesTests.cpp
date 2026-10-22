@@ -97,7 +97,11 @@ TEST(GpuDrivenSceneTypesTest, SettingKeysApplyOrReject)
     const GpuDrivenSceneSettings before = s;
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "cone", "maybe"), GpuDrivenSceneSetResult::BadValue);
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "debugView", "Nope"), GpuDrivenSceneSetResult::BadValue);
-    EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "occlusion", "true"), GpuDrivenSceneSetResult::NotAvailable);
+    EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "occlusion", "maybe"), GpuDrivenSceneSetResult::BadValue);
+    EXPECT_FALSE(s.occlusion);
+    EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "occlusion", "true"), GpuDrivenSceneSetResult::Applied);
+    EXPECT_TRUE(s.occlusion);
+    s.occlusion = false;
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "bogus", "true"), GpuDrivenSceneSetResult::UnknownKey);
     EXPECT_EQ(s.cone, before.cone);
     EXPECT_EQ(s.debugView, before.debugView);

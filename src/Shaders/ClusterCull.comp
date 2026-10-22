@@ -62,6 +62,13 @@ layout(std430, binding = 5) buffer CountBlock {
     uint value;
 } count;
 
+// Farthest-depth pyramid of last frame (one atlas); read only when the occlusion flag is set.
+layout(binding = 6) uniform sampler2D hizAtlas;
+
+const uint kHizMaxLevel = 5u;
+const float kHizDepthBias = 0.0001;
+const float kHizRectMarginTexels = 1.0;
+
 // Conservative: only a box fully behind one plane is rejected; a non-finite box is kept.
 bool OutsideFrustum(Cluster cluster, mat4 world)
 {
@@ -110,6 +117,77 @@ bool BackfaceConeCulled(Cluster cluster, mat4 world, uint instanceFlags, float m
     return dot(toCluster, axisWorld) >= cutoff * length(toCluster) + cluster.sphere.w * maxScale;
 }
 
+// Level size and atlas origin; mirrors HizLayoutFor.
+void HizLevelInfo(uint level, uvec2 base, out uvec2 origin, out uvec2 size)
+{
+    size = max(uvec2(1u), (base + ((1u << level) - 1u)) >> level);
+    origin = uvec2(0u);
+    if (level > 0u) {
+        uint y = 0u;
+        for (uint k = 1u; k < level; ++k) {
+            y += max(1u, (base.y + ((1u << k) - 1u)) >> k);
+        }
+        origin = uvec2(base.x, y);
+    }
+}
+
+// Hi-Z test against last frame's depth. Kept when any corner is behind the eye, the box leaves the
+// screen, or its rect is too large for the pyramid. Mirrors ClusterOccluded.
+bool Occluded(Cluster cluster, mat4 world)
+{
+    uvec2 base = uvec2(params.value.hiz.zw);
+    if (base.x == 0u || base.y == 0u) {
+        return false;
+    }
+    vec2 ndcMin = vec2(0.0);
+    vec2 ndcMax = vec2(0.0);
+    float nearest = 0.0;
+    for (int i = 0; i < 8; ++i) {
+        vec3 corner = vec3(
+            (i & 1) != 0 ? cluster.aabbMax.x : cluster.aabbMin.x,
+            (i & 2) != 0 ? cluster.aabbMax.y : cluster.aabbMin.y,
+            (i & 4) != 0 ? cluster.aabbMax.z : cluster.aabbMin.z);
+        vec4 clip = params.value.prevViewProjection * (world * vec4(corner, 1.0));
+        if (!(clip.w > 1e-6)) {
+            return false;
+        }
+        vec3 ndc = clip.xyz / clip.w;
+        if (any(isnan(ndc)) || any(isinf(ndc))) {
+            return false;
+        }
+        ndcMin = i == 0 ? ndc.xy : min(ndcMin, ndc.xy);
+        ndcMax = i == 0 ? ndc.xy : max(ndcMax, ndc.xy);
+        nearest = i == 0 ? ndc.z : min(nearest, ndc.z);
+    }
+    if (any(lessThan(ndcMin, vec2(-1.0))) || any(greaterThan(ndcMax, vec2(1.0)))) {
+        return false;
+    }
+
+    vec2 baseSize = vec2(base);
+    vec2 rectMin = clamp((ndcMin * 0.5 + 0.5) * baseSize - kHizRectMarginTexels, vec2(0.0), baseSize);
+    vec2 rectMax = clamp((ndcMax * 0.5 + 0.5) * baseSize + kHizRectMarginTexels, vec2(0.0), baseSize);
+    float extent = max(rectMax.x - rectMin.x, rectMax.y - rectMin.y);
+    uint level = 0u;
+    while (level <= kHizMaxLevel && float(1u << level) < extent) {
+        ++level;
+    }
+    if (level > kHizMaxLevel) {
+        return false;
+    }
+
+    uvec2 origin;
+    uvec2 size;
+    HizLevelInfo(level, base, origin, size);
+    float scale = 1.0 / float(1u << level);
+    uvec2 lo = min(uvec2(floor(rectMin * scale)), size - 1u);
+    uvec2 hi = min(uvec2(floor(rectMax * scale)), size - 1u);
+    float farthest = texelFetch(hizAtlas, ivec2(origin + lo), 0).r;
+    farthest = max(farthest, texelFetch(hizAtlas, ivec2(origin + uvec2(hi.x, lo.y)), 0).r);
+    farthest = max(farthest, texelFetch(hizAtlas, ivec2(origin + uvec2(lo.x, hi.y)), 0).r);
+    farthest = max(farthest, texelFetch(hizAtlas, ivec2(origin + hi), 0).r);
+    return nearest > farthest + kHizDepthBias;
+}
+
 void main()
 {
     uint id = gl_GlobalInvocationID.x;
@@ -130,6 +208,11 @@ void main()
     }
     if ((cullFlags & kClusterCullFlagBackfaceCone) != 0u
         && BackfaceConeCulled(cluster, instance.world, instance.info.x, uintBitsToFloat(instance.info.y))) {
+        return;
+    }
+    // A moved instance is never occlusion-culled: the pyramid holds last frame's depth.
+    if ((cullFlags & kClusterCullFlagOcclusion) != 0u && (instance.info.x & kClusterFlagMoved) == 0u
+        && Occluded(cluster, instance.world)) {
         return;
     }
 
