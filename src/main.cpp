@@ -1,21 +1,5 @@
-// Entry point. Kept intentionally minimal - only knows how to construct and
-// run EditorHost; all SDL/Window/Renderer/Core/Editor-UI details live inside
-// EditorHost/Window/Renderer/Core/Game.
-//
-// editor-core-separation-1 campaign, PHASE15
-// (PHASE15_EDITORHOST_COMPOSITION_ROOT_CORE_CONSTRUCTION.md) - constructs
-// EditorHost (src/Editor/EditorHost.h) instead of Application. PHASE17
-// (PHASE17_APPLICATION_RETIREMENT_AND_EXECUTABLE_RENAME.md) deleted
-// Application.h/.cpp outright once EditorHost fully covered every one of
-// its former responsibilities, and renamed the built executable target
-// away from GreatTamanaEngine to GreatTamanaEditor (see the root
-// CMakeLists.txt's own add_executable() call).
-//
-// Note: this uses a plain int main(argc, argv). SDL3's <SDL3/SDL_main.h>
-// convention (which lets SDL provide its own WinMain on Windows, needed for
-// some platforms/consoles) is not used yet - it can be added later if/when
-// it's actually needed (e.g. to build as a GUI subsystem app with no console
-// window).
+// Entry point: constructs and runs EditorHost. All SDL, window, renderer and
+// editor details live behind it. Plain int main (no SDL_main).
 
 #include "Editor/EditorHost.h"
 
@@ -29,23 +13,17 @@
 
 namespace {
 
-// A tiny, headless "--reimport <source-file> <destination-.gta-path>" CLI
-// mode - runs AssetImporter.h's ImportAssetFile() (the exact same PMX/VMD/
-// image -> *.gta pipeline the Editor's "Project" panel drag-and-drop uses)
-// with NO Window/Renderer/GPU device created at all, and prints its
-// message. Exists purely as an ops/automation escape hatch for re-running
-// an import from a script/CI/AI-agent context where driving the real ImGui
-// Editor UI isn't practical - e.g. regenerating an existing *.gta after a
-// PmxLoader.cpp change (like adding material/texture import support) picks
-// up data an earlier import predates. Returns the process exit code (0 on
-// success, 1 on failure) - main() below returns this directly instead of
-// falling through to the normal Application/Window/Renderer startup path.
+// Headless "--reimport <source-file> <destination-.gta-path>" mode: runs ImportAssetFile()
+// with no window or GPU device and prints its messages. Returns the exit code (0 = success).
 int RunReimportCli(const std::string& sourcePath, const std::string& destinationGtaPath)
 {
-    gte::AssetDatabase database; // Only used for its ImportAsset()/Guid bookkeeping - no directory scan needed here.
-    const gte::AssetImportResult result =
-        gte::ImportAssetFile(database, std::filesystem::path(sourcePath), std::filesystem::path(destinationGtaPath));
+    gte::AssetDatabase database; // Only used for ImportAsset() bookkeeping; no directory scan needed.
+    const gte::AssetImportResult result = gte::ImportAssetFile(
+        database, std::filesystem::path(sourcePath), std::filesystem::path(destinationGtaPath), gte::MeshImportOptions{});
     std::fprintf(stdout, "%s\n", result.message.c_str());
+    if (!result.clusterMessage.empty()) {
+        std::fprintf(stdout, "%s\n", result.clusterMessage.c_str());
+    }
     return result.success ? 0 : 1;
 }
 

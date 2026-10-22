@@ -12,6 +12,8 @@
 namespace gte {
 namespace {
 
+const MeshImportOptions kNoClusters{ ClusterBuildMode::Off };
+
 // Same minimal-BMP builder as Ktx2EncoderTests.cpp - duplicated rather than
 // shared across test files, matching this test suite's existing convention
 // of small, self-contained fixtures.
@@ -278,7 +280,7 @@ TEST_F(AssetImporterTest, ConvertsAValidImageToKtx2WrappedGta)
     const std::filesystem::path source = m_root / "photo.bmp";
     WriteBinaryFile(source, BuildMinimal2x2Bmp());
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "photo.bmp");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "photo.bmp", kNoClusters);
 
     ASSERT_TRUE(result.success);
     EXPECT_TRUE(result.convertedToKtx2);
@@ -295,7 +297,7 @@ TEST_F(AssetImporterTest, ConvertedAssetIsImmediatelyTrackedByTheDatabase)
     const std::filesystem::path source = m_root / "photo.bmp";
     WriteBinaryFile(source, BuildMinimal2x2Bmp());
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "photo.bmp");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "photo.bmp", kNoClusters);
     ASSERT_TRUE(result.success);
 
     const AssetRecord* record = m_db.FindByGuid(result.guid);
@@ -308,7 +310,7 @@ TEST_F(AssetImporterTest, NonImageExtensionIsCopiedAsIsWithNoGtaWrapping)
     const std::filesystem::path source = m_root / "notes.txt";
     WriteFile(source, "plain text content");
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "notes.txt");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "notes.txt", kNoClusters);
 
     ASSERT_TRUE(result.success);
     EXPECT_FALSE(result.convertedToKtx2);
@@ -327,7 +329,7 @@ TEST_F(AssetImporterTest, CorruptImageExtensionFallsBackToPlainCopy)
     WriteFile(source, "this is not a real PNG file");
 
     const std::filesystem::path destination = m_root / "Imported" / "fake.png";
-    const AssetImportResult result = ImportAssetFile(m_db, source, destination);
+    const AssetImportResult result = ImportAssetFile(m_db, source, destination, kNoClusters);
 
     ASSERT_TRUE(result.success);
     EXPECT_FALSE(result.convertedToKtx2);
@@ -341,7 +343,7 @@ TEST_F(AssetImporterTest, GltfWithAMissingImageStillImportsAndCountsTheMissingTe
 {
     const std::filesystem::path source = test::WriteGltfTriangle(m_root, test::kMaskedTexturedMaterialJson, true);
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Out" / "tri.gltf");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Out" / "tri.gltf", kNoClusters);
 
     ASSERT_TRUE(result.success) << result.message;
     EXPECT_TRUE(result.convertedToMeshAsset);
@@ -353,7 +355,7 @@ TEST_F(AssetImporterTest, GltfWithoutTexturesReportsNoMissingTexture)
 {
     const std::filesystem::path source = test::WriteGltfTriangle(m_root);
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Out" / "tri.gltf");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Out" / "tri.gltf", kNoClusters);
 
     ASSERT_TRUE(result.success) << result.message;
     EXPECT_EQ(result.missingTextureCount, 0u);
@@ -361,7 +363,7 @@ TEST_F(AssetImporterTest, GltfWithoutTexturesReportsNoMissingTexture)
 
 TEST_F(AssetImporterTest, FailsGracefullyWhenSourceDoesNotExist)
 {
-    const AssetImportResult result = ImportAssetFile(m_db, m_root / "DoesNotExist.txt", m_root / "dest.txt");
+    const AssetImportResult result = ImportAssetFile(m_db, m_root / "DoesNotExist.txt", m_root / "dest.txt", kNoClusters);
     EXPECT_FALSE(result.success);
     EXPECT_FALSE(result.message.empty());
 }
@@ -371,7 +373,7 @@ TEST_F(AssetImporterTest, CreatesMissingDestinationDirectoriesForAPlainCopy)
     const std::filesystem::path source = m_root / "notes.txt";
     WriteFile(source, "x");
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Nested" / "Deeper" / "notes.txt");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Nested" / "Deeper" / "notes.txt", kNoClusters);
     ASSERT_TRUE(result.success);
 
     std::error_code ec;
@@ -383,7 +385,7 @@ TEST_F(AssetImporterTest, ConvertsAValidPmxToMeshWrappedGta)
     const std::filesystem::path source = m_root / "model.pmx";
     WriteBinaryFile(source, BuildMinimalTrianglePmx());
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "model.pmx");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "model.pmx", kNoClusters);
 
     ASSERT_TRUE(result.success) << result.message;
     EXPECT_TRUE(result.convertedToMeshAsset);
@@ -415,7 +417,7 @@ TEST_F(AssetImporterTest, PmxImportStillReportsMeshSourceFormatPmx)
     const std::filesystem::path source = m_root / "model.pmx";
     WriteBinaryFile(source, BuildMinimalTrianglePmx());
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "model.pmx");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "model.pmx", kNoClusters);
 
     ASSERT_TRUE(result.success) << result.message;
     EXPECT_EQ(result.meshSourceFormat, MeshSourceFormat::Pmx);
@@ -426,7 +428,7 @@ TEST_F(AssetImporterTest, ConvertedMeshAssetsMetadataDecodesBackToItsRigData)
     const std::filesystem::path source = m_root / "model.pmx";
     WriteBinaryFile(source, BuildMinimalTrianglePmx());
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.pmx");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.pmx", kNoClusters);
     ASSERT_TRUE(result.success) << result.message;
 
     const std::optional<GtaFileData> gta = ReadGtaFile(result.finalPath);
@@ -451,7 +453,7 @@ TEST_F(AssetImporterTest, ReimportingAPmxPreservesAnAlreadySavedJointPhysicsOver
     const std::filesystem::path destination = m_root / "model.pmx"; // Same path both imports below target.
 
     // --- First import: establishes the *.gta with NO saved overrides yet. ---
-    const AssetImportResult firstResult = ImportAssetFile(m_db, source, destination);
+    const AssetImportResult firstResult = ImportAssetFile(m_db, source, destination, kNoClusters);
     ASSERT_TRUE(firstResult.success) << firstResult.message;
 
     // --- Simulate a user having saved joint physics via the Editor (PHASE4)
@@ -470,7 +472,7 @@ TEST_F(AssetImporterTest, ReimportingAPmxPreservesAnAlreadySavedJointPhysicsOver
 
     // --- Re-import the SAME source .pmx onto the SAME destination path -
     // this must NOT wipe out the override just written above. ---
-    const AssetImportResult secondResult = ImportAssetFile(m_db, source, destination);
+    const AssetImportResult secondResult = ImportAssetFile(m_db, source, destination, kNoClusters);
     ASSERT_TRUE(secondResult.success) << secondResult.message;
     EXPECT_EQ(secondResult.finalPath, firstResult.finalPath);
 
@@ -489,7 +491,7 @@ TEST_F(AssetImporterTest, FirstTimeImportOfAPmxHasNoJointPhysicsOverridesToPrese
     const std::filesystem::path source = m_root / "model.pmx";
     WriteBinaryFile(source, BuildMinimalTrianglePmx());
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.pmx");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.pmx", kNoClusters);
     ASSERT_TRUE(result.success) << result.message;
 
     const std::optional<GtaFileData> gta = ReadGtaFile(result.finalPath);
@@ -505,7 +507,7 @@ TEST_F(AssetImporterTest, ConvertedMeshAssetIsImmediatelyTrackedByTheDatabase)
     const std::filesystem::path source = m_root / "model.pmx";
     WriteBinaryFile(source, BuildMinimalTrianglePmx());
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.pmx");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.pmx", kNoClusters);
     ASSERT_TRUE(result.success) << result.message;
 
     const AssetRecord* record = m_db.FindByGuid(result.guid);
@@ -519,7 +521,7 @@ TEST_F(AssetImporterTest, CorruptPmxExtensionFallsBackToPlainCopy)
     WriteFile(source, "this is not a real PMX file");
 
     const std::filesystem::path destination = m_root / "Imported" / "fake.pmx";
-    const AssetImportResult result = ImportAssetFile(m_db, source, destination);
+    const AssetImportResult result = ImportAssetFile(m_db, source, destination, kNoClusters);
 
     ASSERT_TRUE(result.success);
     EXPECT_FALSE(result.convertedToMeshAsset);
@@ -536,7 +538,7 @@ TEST_F(AssetImporterTest, ConvertsAValidStlToMeshWrappedGta)
     const std::filesystem::path source = m_root / "model.stl";
     WriteBinaryFile(source, BuildMinimalOneTriangleBinaryStl());
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "model.stl");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "model.stl", kNoClusters);
 
     ASSERT_TRUE(result.success) << result.message;
     EXPECT_TRUE(result.convertedToMeshAsset);
@@ -567,7 +569,7 @@ TEST_F(AssetImporterTest, ConvertedStlMeshAssetsMetadataDecodesBackToAnEmptyRig)
     const std::filesystem::path source = m_root / "model.stl";
     WriteBinaryFile(source, BuildMinimalOneTriangleBinaryStl());
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.stl");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.stl", kNoClusters);
     ASSERT_TRUE(result.success) << result.message;
 
     const std::optional<GtaFileData> gta = ReadGtaFile(result.finalPath);
@@ -588,7 +590,7 @@ TEST_F(AssetImporterTest, ConvertedStlMeshAssetIsImmediatelyTrackedByTheDatabase
     const std::filesystem::path source = m_root / "model.stl";
     WriteBinaryFile(source, BuildMinimalOneTriangleBinaryStl());
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.stl");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "model.stl", kNoClusters);
     ASSERT_TRUE(result.success) << result.message;
 
     const AssetRecord* record = m_db.FindByGuid(result.guid);
@@ -602,7 +604,7 @@ TEST_F(AssetImporterTest, CorruptStlExtensionFallsBackToPlainCopy)
     WriteFile(source, "this is not a real STL file");
 
     const std::filesystem::path destination = m_root / "Imported" / "fake.stl";
-    const AssetImportResult result = ImportAssetFile(m_db, source, destination);
+    const AssetImportResult result = ImportAssetFile(m_db, source, destination, kNoClusters);
 
     ASSERT_TRUE(result.success);
     EXPECT_FALSE(result.convertedToMeshAsset);
@@ -617,7 +619,7 @@ TEST_F(AssetImporterTest, ConvertsAValidVmdToMotionWrappedGta)
     const std::filesystem::path source = m_root / "motion.vmd";
     WriteBinaryFile(source, BuildMinimalOneBoneKeyframeVmd());
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "motion.vmd");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "Imported" / "motion.vmd", kNoClusters);
 
     ASSERT_TRUE(result.success) << result.message;
     EXPECT_TRUE(result.convertedToMotionAsset);
@@ -642,7 +644,7 @@ TEST_F(AssetImporterTest, ConvertedMotionAssetsPayloadDecodesBackToItsMotionData
     const std::filesystem::path source = m_root / "motion.vmd";
     WriteBinaryFile(source, BuildMinimalOneBoneKeyframeVmd());
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "motion.vmd");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "motion.vmd", kNoClusters);
     ASSERT_TRUE(result.success) << result.message;
 
     const std::optional<GtaFileData> gta = ReadGtaFile(result.finalPath);
@@ -661,7 +663,7 @@ TEST_F(AssetImporterTest, ConvertedMotionAssetIsImmediatelyTrackedByTheDatabase)
     const std::filesystem::path source = m_root / "motion.vmd";
     WriteBinaryFile(source, BuildMinimalOneBoneKeyframeVmd());
 
-    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "motion.vmd");
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "motion.vmd", kNoClusters);
     ASSERT_TRUE(result.success) << result.message;
 
     const AssetRecord* record = m_db.FindByGuid(result.guid);
@@ -675,7 +677,7 @@ TEST_F(AssetImporterTest, CorruptVmdExtensionFallsBackToPlainCopy)
     WriteFile(source, "this is not a real VMD file");
 
     const std::filesystem::path destination = m_root / "Imported" / "fake.vmd";
-    const AssetImportResult result = ImportAssetFile(m_db, source, destination);
+    const AssetImportResult result = ImportAssetFile(m_db, source, destination, kNoClusters);
 
     ASSERT_TRUE(result.success);
     EXPECT_FALSE(result.convertedToMotionAsset);

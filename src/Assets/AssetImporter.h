@@ -1,6 +1,9 @@
 #pragma once
 
 #include "AssetDatabase.h"
+#include "MeshClustering.h"
+
+#include <cstdint>
 
 #include <filesystem>
 #include <string>
@@ -14,6 +17,15 @@ enum class MeshSourceFormat {
     Pmx = 1,
     Stl = 2,
     Gltf = 3,
+};
+
+// When an import writes a cluster table. Auto only clusters large, static, untextured meshes.
+enum class ClusterBuildMode : std::uint8_t { Off, Auto, Always };
+
+struct MeshImportOptions {
+    ClusterBuildMode clusters = ClusterBuildMode::Auto;
+    MeshClusterOptions cluster;
+    std::uint32_t autoTriangleThreshold = 100000; // Auto: minimum triangle count.
 };
 
 // Outcome of one ImportAssetFile() call. Always fully populated; `message` is always set.
@@ -59,6 +71,12 @@ struct AssetImportResult {
     std::size_t motionModeKeyframeCount = 0;
     std::size_t motionIkKeyframeCount = 0;
 
+    // Mesh imports only: cluster table written to the *.gta (zero = none) and a status line when the
+    // cluster step ran or was refused. Callers log the message.
+    std::size_t clusterCount = 0;
+    std::string clusterMessage;
+    double clusterMilliseconds = 0.0;
+
     std::string message; // Human-readable status, success or failure.
 };
 
@@ -77,12 +95,12 @@ bool IsImportableAsMotionAsset(const std::string& extensionLowercaseWithDot);
 //   1. Mesh formats: parsed into a MeshData, written as a Mesh *.gta at `preferredDestinationPath`
 //      (extension replaced by ".gta"); rig data and materials go into the *.gta metadata section.
 //      A mesh that fails to parse falls back to a plain copy, except ".gltf" which fails (a lone
-//      .gltf copy is useless).
+//      .gltf copy is useless). `options` decides whether a cluster table is written.
 //   2. Motion formats: written as an Animation *.gta.
 //   3. Image formats: re-encoded as KTX2 and written as a Texture *.gta.
 // Every other extension is copied unchanged. The result is queryable through `database` on return.
 // Never throws.
 AssetImportResult ImportAssetFile(AssetDatabase& database, const std::filesystem::path& sourcePath,
-    const std::filesystem::path& preferredDestinationPath);
+    const std::filesystem::path& preferredDestinationPath, const MeshImportOptions& options);
 
 } // namespace gte

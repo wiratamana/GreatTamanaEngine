@@ -3,6 +3,7 @@
 #include "../EditorContext.h"
 #include "../ProjectRootPath.h"
 #include "../../Assets/AssetImporter.h"
+#include "../../Core/Logging.h"
 #include "../../Encoding/Utf8Path.h"
 #include "../ImGuiUniqueId.h"
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the file-size tooltip below.
@@ -32,6 +33,18 @@ constexpr std::chrono::milliseconds kStatusMessageLifetime{ 4000 };
 constexpr float kSplitterWidth = 6.0f;
 constexpr float kMinPaneWidth = 100.0f;
 constexpr float kFooterReserve = 26.0f; // Space always left below both panes for the status line.
+
+void LogClusterMessage(const AssetImportResult& result)
+{
+    if (result.clusterMessage.empty()) {
+        return;
+    }
+    if (result.clusterMessage.find("Warning:") != std::string::npos) {
+        GTE_LOG_WARNING("MeshClustering", result.clusterMessage);
+    } else {
+        GTE_LOG_INFO("MeshClustering", result.clusterMessage);
+    }
+}
 
 bool HasSubfolders(const ProjectEntry& entry)
 {
@@ -631,7 +644,8 @@ void ProjectPanel::HandleExternalFileDrop(float screenX, float screenY, const st
         } else {
             // Files are gated through AssetImporter - see
             // HandleExternalFileDrop()'s own doc comment (ProjectPanel.h).
-            const AssetImportResult result = ImportAssetFile(m_assetDatabase, source, destination);
+            const AssetImportResult result = ImportAssetFile(m_assetDatabase, source, destination, MeshImportOptions{});
+            LogClusterMessage(result);
             SetStatus(result.message, !result.success);
             if (result.success) {
                 m_needsRescan = true;
@@ -726,7 +740,8 @@ AssetImportResult ProjectPanel::ImportExternalFile(
     }
     const std::filesystem::path destination = MakeUniqueDestinationPath(targetDir, desiredName);
 
-    result = ImportAssetFile(m_assetDatabase, sourceAbsolutePath, destination);
+    result = ImportAssetFile(m_assetDatabase, sourceAbsolutePath, destination, MeshImportOptions{});
+    LogClusterMessage(result);
     if (result.success) {
         m_needsRescan = true;
     }

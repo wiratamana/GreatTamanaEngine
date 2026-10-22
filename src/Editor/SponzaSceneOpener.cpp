@@ -98,7 +98,8 @@ try
         }
 
         AssetDatabase database;
-        const AssetImportResult imported = ImportAssetFile(database, sponzaGltf, sponzaDirectory / "Sponza.gltf");
+        const AssetImportResult imported = ImportAssetFile(
+            database, sponzaGltf, sponzaDirectory / "Sponza.gltf", MeshImportOptions{ .clusters = ClusterBuildMode::Off });
         if (!imported.success || !imported.convertedToMeshAsset) {
             return Fail("Sponza import failed: " + imported.message);
         }

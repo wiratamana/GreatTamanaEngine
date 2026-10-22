@@ -2257,6 +2257,7 @@ set(GTE_TEST_SOURCES
     Assets/MeshFileTests.cpp
     Assets/MeshClusterTests.cpp
     Assets/MeshClusteringTests.cpp
+    Assets/MeshClusterImportTests.cpp
     Assets/MeshMaterialPartitionerTests.cpp
     Assets/MotionFileTests.cpp
     Assets/RigFileTests.cpp
@@ -2996,7 +2997,8 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Math/PbrBrdfTests.cpp Features/SceneLighting/
     Renderer/RenderGraph/DescriptorWriteIdentityTests.cpp Renderer/RenderGraph/TrackedBufferGpuTests.cpp
     Renderer/Culling/ClusterCullMathTests.cpp Assets/AtomicFileTests.cpp
-    Assets/MeshClusterTests.cpp Assets/MeshClusteringTests.cpp Assets/MeshMaterialPartitionerTests.cpp)
+    Assets/MeshClusterTests.cpp Assets/MeshClusteringTests.cpp Assets/MeshMaterialPartitionerTests.cpp
+    Assets/MeshClusterImportTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

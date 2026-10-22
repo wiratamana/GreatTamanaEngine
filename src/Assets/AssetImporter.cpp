@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
 
 namespace gte {
 
@@ -70,15 +71,106 @@ std::size_t ImportMaterialTextures(
     return missingCount;
 }
 
-// Shared tail of a successful mesh parse: keeps the destination *.gta's saved joint
+struct ClusterImportOutcome {
+    std::size_t clusterCount = 0;
+    double milliseconds = 0.0;
+    std::string message; // Empty when the step did not apply.
+};
+
+// Names why a rig blocks clustering (welding reorders vertices that rig data indexes), or nullptr.
+const char* RigClusterBlocker(const MeshData& mesh, const RigFileData& rig) noexcept
+{
+    if (!mesh.skinWeights.empty() || !rig.skinWeights.empty()) {
+        return "mesh has skin weights";
+    }
+    if (!rig.skeleton.bones.empty()) {
+        return "mesh has a skeleton";
+    }
+    if (!rig.morphs.morphs.empty()) {
+        return "mesh has morphs";
+    }
+    if (!rig.physics.rigidBodies.empty() || !rig.physics.joints.empty()) {
+        return "mesh has physics data";
+    }
+    return nullptr;
+}
+
+bool AnyMaterialHasTexture(const std::vector<Material>& materials) noexcept
+{
+    return std::any_of(materials.begin(), materials.end(), [](const Material& m) {
+        return m.textureIndex >= 0 || m.normalTextureIndex >= 0 || m.metallicRoughnessTextureIndex >= 0
+            || m.occlusionTextureIndex >= 0 || m.emissiveTextureIndex >= 0;
+    });
+}
+
+std::string FormatMilliseconds(double milliseconds)
+{
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "%.0f ms", milliseconds);
+    return buffer;
+}
+
+// Runs the optional cluster step. Never fails the import: on any problem `mesh` is left valid and unclustered.
+ClusterImportOutcome RunClusterStep(MeshData& mesh, const RigFileData& rig, const MeshImportOptions& options)
+{
+    ClusterImportOutcome outcome;
+    if (options.clusters == ClusterBuildMode::Off) {
+        return outcome;
+    }
+    const bool automatic = options.clusters == ClusterBuildMode::Auto;
+
+    if (const char* blocker = RigClusterBlocker(mesh, rig); blocker != nullptr) {
+        if (!automatic) {
+            outcome.message = std::string("Clusters skipped: ") + blocker + ".";
+        }
+        return outcome;
+    }
+    if (automatic
+        && (mesh.indices.size() / 3 < options.autoTriangleThreshold || AnyMaterialHasTexture(rig.materials.materials))) {
+        return outcome;
+    }
+
+    const MeshClusterReport report
+        = BuildMeshClusters(mesh, rig.materials.materials, options.cluster, nullptr, automatic);
+    outcome.milliseconds = report.milliseconds;
+
+    if (!report.success) {
+        // A poor-fill early out is a normal Auto outcome, not an error worth a warning.
+        outcome.message = "Clusters skipped: " + report.message + " (" + FormatMilliseconds(report.milliseconds) + ").";
+        return outcome;
+    }
+    if (automatic && report.poorFill) {
+        mesh.clusters.clear(); // Keep the welded mesh, drop the table that is worse than none.
+        outcome.message = "Clusters skipped: poor cluster fill (" + FormatMilliseconds(report.milliseconds) + ").";
+        return outcome;
+    }
+
+    char stats[96];
+    std::snprintf(stats, sizeof(stats), "avg %.1f tris, vertices %zu -> %zu", report.avgTrianglesPerCluster,
+        report.vertexCountBefore, report.vertexCountAfter);
+    outcome.clusterCount = report.clusterCount;
+    outcome.message = "Clusters: " + std::to_string(report.clusterCount) + ", " + stats + ", "
+        + FormatMilliseconds(report.milliseconds) + ".";
+    if (report.milliseconds > 10000.0) {
+        outcome.message += " Warning: clustering took more than 10 s.";
+    }
+    if (report.poorFill) {
+        outcome.message += " Warning: poor cluster fill, try the position-only weld.";
+    }
+    return outcome;
+}
+
+// Shared tail of a successful mesh parse: runs the cluster step, keeps the destination *.gta's saved joint
 // physics overrides across a re-import, imports the material textures, writes the
 // Mesh *.gta and builds the result. `mesh` and `rig` are consumed.
 AssetImportResult FinalizeMeshAssetImport(AssetDatabase& database, MeshData mesh, RigFileData rig,
     const std::filesystem::path& sourcePath, const std::filesystem::path& preferredDestinationPath,
-    MeshSourceFormat sourceFormat, const std::string& sourceFormatLabel)
+    MeshSourceFormat sourceFormat, const std::string& sourceFormatLabel, const MeshImportOptions& options)
 {
     std::filesystem::path gtaPath = preferredDestinationPath;
     gtaPath.replace_extension(".gta");
+
+    const ClusterImportOutcome clusterOutcome = RunClusterStep(mesh, rig, options);
 
     // Keep the saved joint physics overrides of an existing *.gta (metadata only, no payload read).
     std::vector<JointPhysicsOverride> preservedJointPhysicsOverrides;
@@ -92,7 +184,16 @@ AssetImportResult FinalizeMeshAssetImport(AssetDatabase& database, MeshData mesh
     rig.jointPhysicsOverrides = std::move(preservedJointPhysicsOverrides);
 
     // Encode first so an inconsistent mesh imports nothing, not even textures.
-    const std::vector<std::uint8_t> payload = EncodeMeshDataToBytes(mesh);
+    std::vector<std::uint8_t> payload = EncodeMeshDataToBytes(mesh);
+    std::size_t writtenClusterCount = clusterOutcome.clusterCount;
+    std::string clusterMessage = clusterOutcome.message;
+    if (payload.empty() && !mesh.clusters.empty()) {
+        // Clustering must never fail an import: retry without the table.
+        mesh.clusters.clear();
+        writtenClusterCount = 0;
+        clusterMessage = "Clusters skipped: the cluster table could not be encoded.";
+        payload = EncodeMeshDataToBytes(mesh);
+    }
     if (payload.empty()) {
         AssetImportResult failed;
         failed.success = false;
@@ -124,6 +225,9 @@ AssetImportResult FinalizeMeshAssetImport(AssetDatabase& database, MeshData mesh
         result.materialCount = rig.materials.materials.size();
         result.textureCount = rig.materials.textures.size();
         result.missingTextureCount = missingTextureCount;
+        result.clusterCount = writtenClusterCount;
+        result.clusterMessage = std::move(clusterMessage);
+        result.clusterMilliseconds = clusterOutcome.milliseconds;
         result.message = "Imported \"" + PathToUtf8(sourcePath.filename()) + "\" as a " + sourceFormatLabel + " mesh ("
             + std::to_string(result.meshVertexCount) + " vertices, " + std::to_string(result.meshTriangleCount)
             + " triangles, " + std::to_string(result.boneCount) + " bones, " + std::to_string(result.morphCount)
@@ -197,8 +301,8 @@ bool IsImportableAsMotionAsset(const std::string& extensionLowercaseWithDot)
     return extensionLowercaseWithDot == ".vmd";
 }
 
-AssetImportResult ImportAssetFile(
-    AssetDatabase& database, const std::filesystem::path& sourcePath, const std::filesystem::path& preferredDestinationPath)
+AssetImportResult ImportAssetFile(AssetDatabase& database, const std::filesystem::path& sourcePath,
+    const std::filesystem::path& preferredDestinationPath, const MeshImportOptions& options)
 {
     const std::string extension = ToLowerAscii(PathToUtf8(sourcePath.extension()));
 
@@ -213,7 +317,7 @@ AssetImportResult ImportAssetFile(
                 rig.physics = loaded.physics;
                 rig.materials = loaded.materials;
                 return FinalizeMeshAssetImport(database, std::move(loaded.mesh), std::move(rig), sourcePath,
-                    preferredDestinationPath, MeshSourceFormat::Pmx, "PMX");
+                    preferredDestinationPath, MeshSourceFormat::Pmx, "PMX", options);
             }
             return ImportAsPlainCopy(
                 sourcePath, preferredDestinationPath, "Could not parse as a mesh, imported as-is instead. ");
@@ -224,7 +328,7 @@ AssetImportResult ImportAssetFile(
             if (loaded.success) {
                 RigFileData rig; // An STL has no skeleton, morphs, physics or materials.
                 return FinalizeMeshAssetImport(database, std::move(loaded.mesh), std::move(rig), sourcePath,
-                    preferredDestinationPath, MeshSourceFormat::Stl, "STL");
+                    preferredDestinationPath, MeshSourceFormat::Stl, "STL", options);
             }
             return ImportAsPlainCopy(
                 sourcePath, preferredDestinationPath, "Could not parse as a mesh, imported as-is instead. ");
@@ -236,7 +340,7 @@ AssetImportResult ImportAssetFile(
                 RigFileData rig; // No skeleton, morphs or physics.
                 rig.materials = std::move(loaded.materials);
                 AssetImportResult imported = FinalizeMeshAssetImport(database, std::move(loaded.mesh), std::move(rig),
-                    sourcePath, preferredDestinationPath, MeshSourceFormat::Gltf, "glTF");
+                    sourcePath, preferredDestinationPath, MeshSourceFormat::Gltf, "glTF", options);
                 if (imported.success) {
                     imported.message += " " + loaded.message; // Adds the UV range and skipped-primitive count.
                 }
