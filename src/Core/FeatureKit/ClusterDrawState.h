@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ClusterDrawTypes.h"
+#include "ComputeShader.h"
 #include "GpuParams.h"
 #include "GpuReadback.h"
 #include "PersistentBuffer.h"
@@ -94,6 +95,18 @@ public:
     GpuParams<ClusterCullParams>* Params(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) noexcept;
     // Static-storage debug name of that block.
     const char* ParamsName(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) const noexcept;
+    // Static-storage graph name of the mesh cluster table import of that chain.
+    const char* TableName(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) const noexcept;
+
+    // The cull compute shader shared by every chain of this state.
+    ComputeShader& CullShader() noexcept { return *m_cullShader; }
+
+    // The first lane of a frame fixes the candidate span of its scope; a later lane with another span is refused.
+    bool AcceptCandidateSpan(const Frame& frame, std::uint32_t lane, const void* data, std::size_t count) noexcept;
+
+    // The first lane of a frame uploads the instance records of a slot; the other lanes reuse them.
+    bool NeedsInstanceUpload(const Frame& frame, std::uint32_t slot) const noexcept;
+    void NoteInstanceUploaded(const Frame& frame, std::uint32_t slot) noexcept;
 
     // The cached pipeline of `key`. Null while it is missing or backing off after a failed build.
     const Pipeline* ResolvePipeline(detail::FrameContext& context, const ClusterPipelineKey& key);
@@ -137,6 +150,15 @@ private:
 
     std::vector<const char*> m_passNames;   // [(lane * slots + slot) * kClusterPassKindCount + kind]
     std::vector<const char*> m_paramsNames; // [scope][lane][slot]
+    std::vector<const char*> m_tableNames;  // [scope][lane][slot]
+    std::unique_ptr<ComputeShader> m_cullShader;
+    struct SpanKey {
+        std::uint64_t serial = 0;
+        const void* data = nullptr;
+        std::size_t count = 0;
+    };
+    std::array<SpanKey, rg::kViewScopeCount> m_candidateSpans;
+    std::vector<std::uint64_t> m_instanceUploadSerial; // [scope][slot]
     std::vector<std::unique_ptr<PersistentBuffer>> m_instances;
     std::vector<std::unique_ptr<PersistentBuffer>> m_visible;
     std::vector<std::unique_ptr<PersistentBuffer>> m_commands;

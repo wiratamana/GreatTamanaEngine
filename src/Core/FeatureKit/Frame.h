@@ -21,6 +21,8 @@ class Registry;
 
 namespace gte::fx {
 
+class ClusterDrawChain;
+class ClusterDrawState;
 class ComputeChain;
 class ComputeShader;
 class FullscreenChain;
@@ -136,6 +138,10 @@ public:
     // Instances of cluster-ready meshes in this frame, in stable order. Empty without an engine context, in a
     // shared frame, or when the device cannot run the cluster path. Valid for this frame only.
     std::span<const ClusterInstance> ClusterCandidates() const noexcept;
+
+    // A GPU-culled draw of cluster-ready meshes on lane `lane` of `state`. Inert in a shared frame, while a
+    // capture is armed for the Game view, and while the state is invalid.
+    ClusterDrawChain ClusterDraw(ClusterDrawState& state, std::uint32_t lane);
 
     // Makes `texture` the content of `slot` for the scene's material shaders. A logged no-op for a bad slot or texture.
     void PublishToScene(SceneSlot slot, Texture texture);

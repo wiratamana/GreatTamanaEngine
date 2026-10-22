@@ -88,21 +88,27 @@ ClusterDrawState::ClusterDrawState(std::string_view baseName, ClusterDrawShape s
         }
     }
     m_paramsNames.reserve(chains * rg::kViewScopeCount);
+    m_tableNames.reserve(chains * rg::kViewScopeCount);
     for (std::size_t scope = 0; scope < rg::kViewScopeCount; ++scope) {
         for (std::uint32_t lane = 0; lane < m_shape.lanes; ++lane) {
             for (std::uint32_t slot = 0; slot < m_shape.partSlots; ++slot) {
-                const char* name = InternClusterName(m_base + ".Params" + ScopeTag(scope) + ".L" + std::to_string(lane)
-                    + ".P" + std::to_string(slot));
-                if (name == nullptr) {
+                const std::string tail = ScopeTag(scope) + ".L" + std::to_string(lane) + ".P" + std::to_string(slot);
+                const char* params = InternClusterName(m_base + ".Params" + tail);
+                const char* table = InternClusterName(m_base + ".Clusters" + tail);
+                if (params == nullptr || table == nullptr) {
                     m_error = "ClusterDrawState '" + m_base + "': the pass name table is full";
                     m_passNames.clear();
                     m_paramsNames.clear();
+                    m_tableNames.clear();
                     return;
                 }
-                m_paramsNames.push_back(name);
+                m_paramsNames.push_back(params);
+                m_tableNames.push_back(table);
             }
         }
     }
+    m_cullShader = std::make_unique<ComputeShader>("ClusterCull");
+    m_instanceUploadSerial.assign(rg::kViewScopeCount * m_shape.partSlots, 0);
 
     constexpr BufferUse kInstanceUse = BufferUse::Storage | BufferUse::HostWrite;
     constexpr BufferUse kVisibleUse = BufferUse::Storage;
@@ -188,6 +194,35 @@ GpuParams<ClusterCullParams>* ClusterDrawState::Params(rg::ViewScope scope, std:
 const char* ClusterDrawState::ParamsName(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) const noexcept
 {
     return InRange(lane, slot) ? m_paramsNames[ChainIndex(rg::ViewScopeIndex(scope), lane, slot)] : nullptr;
+}
+
+const char* ClusterDrawState::TableName(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) const noexcept
+{
+    return InRange(lane, slot) ? m_tableNames[ChainIndex(rg::ViewScopeIndex(scope), lane, slot)] : nullptr;
+}
+
+bool ClusterDrawState::AcceptCandidateSpan(
+    const Frame& frame, std::uint32_t lane, const void* data, std::size_t count) noexcept
+{
+    SpanKey& key = m_candidateSpans[rg::ViewScopeIndex(frame.Scope())];
+    if (lane == 0 || key.serial != frame.Serial()) {
+        key = SpanKey{ frame.Serial(), data, count };
+        return true;
+    }
+    return key.data == data && key.count == count;
+}
+
+bool ClusterDrawState::NeedsInstanceUpload(const Frame& frame, std::uint32_t slot) const noexcept
+{
+    return InRange(0, slot)
+        && m_instanceUploadSerial[rg::ViewScopeIndex(frame.Scope()) * m_shape.partSlots + slot] != frame.Serial();
+}
+
+void ClusterDrawState::NoteInstanceUploaded(const Frame& frame, std::uint32_t slot) noexcept
+{
+    if (InRange(0, slot)) {
+        m_instanceUploadSerial[rg::ViewScopeIndex(frame.Scope()) * m_shape.partSlots + slot] = frame.Serial();
+    }
 }
 
 const Pipeline* ClusterDrawState::ResolvePipeline(detail::FrameContext& context, const ClusterPipelineKey& key)

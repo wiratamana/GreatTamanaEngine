@@ -2074,6 +2074,7 @@ Core/GpuDrivenBatchEntityExclusionLogicTests.cpp
 Core/ClusterClaimTests.cpp
 Core/ClusterCandidatesTests.cpp
 Core/ClusterDrawStateTests.cpp
+Core/ClusterDrawVerbTests.cpp
     # editor-core-separation-1 campaign, PHASE3
     # (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - unconditional, since
     # src/Core/LogSink.h/.cpp is unconditionally in gte_core's own source
@@ -3017,7 +3018,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Assets/MeshClusterTests.cpp Assets/MeshClusteringTests.cpp Assets/MeshMaterialPartitionerTests.cpp
     Assets/MeshClusterImportTests.cpp Editor/MeshClusterBuildRunnerTests.cpp Editor/ClusterToolUiStateTests.cpp
     Core/ClusterClaimTests.cpp Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp Core/ClusterCandidatesTests.cpp
-    Core/ClusterDrawStateTests.cpp
+    Core/ClusterDrawStateTests.cpp Core/ClusterDrawVerbTests.cpp
     Renderer/ClusterShaderTextTests.cpp Renderer/RenderGraph/IndirectDrawRecordTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
