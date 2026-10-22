@@ -30,6 +30,21 @@ the CPU path. The older per-batch path is described in
 - `EncodeMeshDataToBytes()` returns an empty result (and nothing is written) for mismatched
   array lengths, counts above 32 bits, out-of-range indices or an invalid cluster table.
 
+Mesh payload byte layout (little-endian, IEEE 754 floats, each array one contiguous block):
+
+| Block | Size |
+|---|---|
+| magic `GTEMESH1` | 8 bytes |
+| `vertexCount`, `indexCount` | 4 + 4 bytes |
+| positions (xyz) | `vertexCount * 12` |
+| normals (xyz) | `vertexCount * 12` |
+| uvs (xy) | `vertexCount * 8` |
+| indices (uint32) | `indexCount * 4` |
+| optional tangent tail | 4 bytes `tangentCount` (== `vertexCount`), then `tangentCount * 16` (xyzw) |
+| optional cluster tail | `GCL1`, 4 bytes `clusterCount` (>= 1), `clusterCount * 64` records, 4 bytes CRC-32 of count + table |
+
+Nothing may follow the last block.
+
 ## Building clusters
 
 `BuildMeshClusters()` (`Assets/MeshClustering.h`) validates, welds, clusters per material

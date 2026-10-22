@@ -59,9 +59,8 @@ private:
 };
 
 // Writes `parts` back to back into "<target>.<id>.<n>.tmp", then renames it over `target`.
-// The old file stays byte-identical on any failure. With `expected`, a target that changed
-// since that identity was read is not replaced. Never throws; `error` gets the reason.
-// The rename is atomic against a crash, but the data is not forced to disk.
+// The old file stays byte-identical on failure. With `expected`, a target changed since that
+// identity was read is not replaced. Atomic against a crash, not forced to disk. Never throws.
 bool WriteFileAtomically(const std::filesystem::path& target, std::span<const ConstByteSpan> parts,
     const FileIdentity* expected, std::string* error);
 

@@ -13,11 +13,8 @@
 namespace gte::fx {
 
 // GPU-culled draw of cluster-ready meshes. Made by Frame::ClusterDraw(), ended by Record().
-//   auto chain = f.ClusterDraw(state, 0).Instances(f.ClusterCandidates()).Camera(cam).Target(f.SceneTarget());
-//   chain.Plan();   // optional: lets a CPU draw skip the entities this chain will take over
-//   chain.Record();
-// Declares nothing and takes nothing over when any pass of a part is toggled off, the device lacks the needed
-// features, a limit is exceeded, or a pass refuses. Those entities stay on the CPU draw.
+// Declares nothing and claims nothing when a pass is toggled off, a device feature is missing,
+// a limit is exceeded or a pass refuses; those entities stay on the CPU draw.
 class ClusterDrawChain {
 public:
     ~ClusterDrawChain();
