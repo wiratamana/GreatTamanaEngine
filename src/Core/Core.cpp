@@ -223,17 +223,26 @@ RenderTexture* Core::FindRenderViewTarget(rg::RenderViewId view) const noexcept
 }
 
 namespace {
-// Validates descriptor name length (max 63 characters) and constructs descriptor.
-std::optional<GtePluginRenderFeatureDescriptor> BuildValidatedRenderFeatureDescriptor(const char* callerName,
-    const char* debugName, RenderFeatureStage stage, RenderFeatureBlendMode blendMode, std::int32_t priority)
+// False (logged) when `debugName` is null or longer than 63 bytes.
+bool ValidateBuiltInPassName(const char* callerName, const char* debugName)
 {
     if (debugName == nullptr) {
         GTE_LOG_WARNING("Core", std::string(callerName) + "() failed - debugName is null.");
-        return std::nullopt;
+        return false;
     }
     if (std::strlen(debugName) > 63) {
         GTE_LOG_WARNING("Core", std::string(callerName) + "('" + debugName
             + "') failed - name exceeds the 63-byte limit; shorten it.");
+        return false;
+    }
+    return true;
+}
+
+// Validates the descriptor name and constructs the descriptor.
+std::optional<GtePluginRenderFeatureDescriptor> BuildValidatedRenderFeatureDescriptor(const char* callerName,
+    const char* debugName, RenderFeatureStage stage, RenderFeatureBlendMode blendMode, std::int32_t priority)
+{
+    if (!ValidateBuiltInPassName(callerName, debugName)) {
         return std::nullopt;
     }
     return MakeRenderFeatureDescriptor(debugName, stage, priority, blendMode);
@@ -279,18 +288,12 @@ bool Core::AddPreOpaquePass(const char* debugName, ProjectPreOpaqueCallback call
             + "') failed - no RenderFeatureCompositor registered.");
         return false;
     }
-    if (debugName == nullptr) {
-        GTE_LOG_WARNING("Core", "AddPreOpaquePass() failed - debugName is null.");
-        return false;
-    }
-    if (std::strlen(debugName) > 63) {
-        GTE_LOG_WARNING("Core", "AddPreOpaquePass('" + std::string(debugName)
-            + "') failed - name exceeds the 63-byte limit; shorten it.");
+    if (!ValidateBuiltInPassName("AddPreOpaquePass", debugName)) {
         return false;
     }
 
-    const bool registered =
-        m_renderFeatureCompositorPtr->RegisterPreOpaqueFeature(debugName, priority, std::move(callback));
+    const bool registered = m_renderFeatureCompositorPtr->RegisterStageFeature(
+        CompositorStage::PreOpaque, debugName, priority, std::move(callback), RenderFeatureOwner::Project);
     if (registered) {
         ProjectAssemblyRegistrationLedger::Instance().RecordPreOpaqueFeature(debugName);
     }
@@ -303,7 +306,7 @@ void Core::RemovePreOpaquePass(const char* debugName)
     if (m_renderFeatureCompositorPtr == nullptr || debugName == nullptr) {
         return;
     }
-    m_renderFeatureCompositorPtr->UnregisterPreOpaqueFeature(debugName);
+    m_renderFeatureCompositorPtr->UnregisterStageFeature(CompositorStage::PreOpaque, debugName);
 }
 
 // Registers a custom pass executed after opaque geometry.
@@ -314,18 +317,12 @@ bool Core::AddPostOpaquePass(const char* debugName, ProjectScenePassCallback cal
             + "') failed - no RenderFeatureCompositor registered.");
         return false;
     }
-    if (debugName == nullptr) {
-        GTE_LOG_WARNING("Core", "AddPostOpaquePass() failed - debugName is null.");
-        return false;
-    }
-    if (std::strlen(debugName) > 63) {
-        GTE_LOG_WARNING("Core", "AddPostOpaquePass('" + std::string(debugName)
-            + "') failed - name exceeds the 63-byte limit; shorten it.");
+    if (!ValidateBuiltInPassName("AddPostOpaquePass", debugName)) {
         return false;
     }
 
-    const bool registered =
-        m_renderFeatureCompositorPtr->RegisterPostOpaqueFeature(debugName, priority, std::move(callback));
+    const bool registered = m_renderFeatureCompositorPtr->RegisterStageFeature(
+        CompositorStage::PostOpaque, debugName, priority, std::move(callback), RenderFeatureOwner::Project);
     if (registered) {
         ProjectAssemblyRegistrationLedger::Instance().RecordPostOpaqueFeature(debugName);
     }
@@ -338,7 +335,7 @@ void Core::RemovePostOpaquePass(const char* debugName)
     if (m_renderFeatureCompositorPtr == nullptr || debugName == nullptr) {
         return;
     }
-    m_renderFeatureCompositorPtr->UnregisterPostOpaqueFeature(debugName);
+    m_renderFeatureCompositorPtr->UnregisterStageFeature(CompositorStage::PostOpaque, debugName);
 }
 
 // Registers a custom pass executed after transparent geometry.
@@ -349,18 +346,12 @@ bool Core::AddPostTransparentPass(const char* debugName, ProjectScenePassCallbac
             + "') failed - no RenderFeatureCompositor registered.");
         return false;
     }
-    if (debugName == nullptr) {
-        GTE_LOG_WARNING("Core", "AddPostTransparentPass() failed - debugName is null.");
-        return false;
-    }
-    if (std::strlen(debugName) > 63) {
-        GTE_LOG_WARNING("Core", "AddPostTransparentPass('" + std::string(debugName)
-            + "') failed - name exceeds the 63-byte limit; shorten it.");
+    if (!ValidateBuiltInPassName("AddPostTransparentPass", debugName)) {
         return false;
     }
 
-    const bool registered =
-        m_renderFeatureCompositorPtr->RegisterPostTransparentFeature(debugName, priority, std::move(callback));
+    const bool registered = m_renderFeatureCompositorPtr->RegisterStageFeature(
+        CompositorStage::PostTransparent, debugName, priority, std::move(callback), RenderFeatureOwner::Project);
     if (registered) {
         ProjectAssemblyRegistrationLedger::Instance().RecordPostTransparentFeature(debugName);
     }
@@ -373,7 +364,7 @@ void Core::RemovePostTransparentPass(const char* debugName)
     if (m_renderFeatureCompositorPtr == nullptr || debugName == nullptr) {
         return;
     }
-    m_renderFeatureCompositorPtr->UnregisterPostTransparentFeature(debugName);
+    m_renderFeatureCompositorPtr->UnregisterStageFeature(CompositorStage::PostTransparent, debugName);
 }
 
 // Registers a post-composite screen pass with an auto-incremented priority if none is specified.
@@ -392,82 +383,43 @@ bool Core::AddScreenPostProcessPass(const char* debugName, ProjectRenderFeatureC
 bool Core::RegisterRenderPass(FrameEvent event, const char* debugName, std::int32_t priority,
     UniversalRenderPassAction action, RenderFeatureBlendMode blendMode)
 {
+    if (m_renderFeatureCompositorPtr == nullptr) {
+        GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName != nullptr ? debugName : "<null>")
+            + "') failed - no RenderFeatureCompositor registered.");
+        return false;
+    }
+
     switch (event) {
-    case FrameEvent::PreOpaque: {
-        if (m_renderFeatureCompositorPtr == nullptr) {
-            GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName != nullptr ? debugName : "<null>")
-                + "') failed - no RenderFeatureCompositor registered.");
+    case FrameEvent::PreOpaque:
+        if (!ValidateBuiltInPassName("RegisterRenderPass", debugName)) {
             return false;
         }
-        if (debugName == nullptr) {
-            GTE_LOG_WARNING("Core", "RegisterRenderPass() failed - debugName is null.");
-            return false;
-        }
-        if (std::strlen(debugName) > 63) {
-            GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName)
-                + "') failed - name exceeds the 63-byte limit; shorten it.");
-            return false;
-        }
-        return m_renderFeatureCompositorPtr->RegisterBuiltInPreOpaqueFeature(debugName, priority,
-            [action](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId view) {
-                action(builder, blackboard, view, rg::TextureHandle{}, Extent2D{}, ScenePassReadHandles{},
-                    RenderFeatureCameraData{});
-            });
-    }
+        return m_renderFeatureCompositorPtr->RegisterStageFeature(CompositorStage::PreOpaque, debugName, priority,
+            ProjectPreOpaqueCallback(
+                [action](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId view) {
+                    action(builder, blackboard, view, rg::TextureHandle{}, Extent2D{}, ScenePassReadHandles{},
+                        RenderFeatureCameraData{});
+                }),
+            RenderFeatureOwner::Engine);
 
-    case FrameEvent::PostOpaque: {
-        if (m_renderFeatureCompositorPtr == nullptr) {
-            GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName != nullptr ? debugName : "<null>")
-                + "') failed - no RenderFeatureCompositor registered.");
-            return false;
-        }
-        if (debugName == nullptr) {
-            GTE_LOG_WARNING("Core", "RegisterRenderPass() failed - debugName is null.");
-            return false;
-        }
-        if (std::strlen(debugName) > 63) {
-            GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName)
-                + "') failed - name exceeds the 63-byte limit; shorten it.");
-            return false;
-        }
-        return m_renderFeatureCompositorPtr->RegisterBuiltInPostOpaqueFeature(debugName, priority,
-            [action](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId view,
-                const ScenePassReadHandles& currentViewHandles) {
-                action(builder, blackboard, view, rg::TextureHandle{}, Extent2D{}, currentViewHandles,
-                    RenderFeatureCameraData{});
-            });
-    }
-
+    case FrameEvent::PostOpaque:
     case FrameEvent::PostTransparent: {
-        if (m_renderFeatureCompositorPtr == nullptr) {
-            GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName != nullptr ? debugName : "<null>")
-                + "') failed - no RenderFeatureCompositor registered.");
+        if (!ValidateBuiltInPassName("RegisterRenderPass", debugName)) {
             return false;
         }
-        if (debugName == nullptr) {
-            GTE_LOG_WARNING("Core", "RegisterRenderPass() failed - debugName is null.");
-            return false;
-        }
-        if (std::strlen(debugName) > 63) {
-            GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName)
-                + "') failed - name exceeds the 63-byte limit; shorten it.");
-            return false;
-        }
-        return m_renderFeatureCompositorPtr->RegisterBuiltInPostTransparentFeature(debugName, priority,
-            [action](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard, rg::RenderViewId view,
-                const ScenePassReadHandles& currentViewHandles) {
+        const CompositorStage stage = (event == FrameEvent::PostOpaque) ? CompositorStage::PostOpaque
+                                                                        : CompositorStage::PostTransparent;
+        return m_renderFeatureCompositorPtr->RegisterStageFeature(stage, debugName, priority,
+            ProjectScenePassCallback([action](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard,
+                                          rg::RenderViewId view, const ScenePassReadHandles& currentViewHandles) {
                 action(builder, blackboard, view, rg::TextureHandle{}, Extent2D{}, currentViewHandles,
                     RenderFeatureCameraData{});
-            });
+            }),
+            RenderFeatureOwner::Engine);
     }
 
     case FrameEvent::PostComposite:
     case FrameEvent::PreUI: {
-        if (m_renderFeatureCompositorPtr == nullptr) {
-            GTE_LOG_WARNING("Core", "RegisterRenderPass('" + std::string(debugName != nullptr ? debugName : "<null>")
-                + "') failed - no RenderFeatureCompositor registered.");
-            return false;
-        }
         const RenderFeatureStage stage =
             (event == FrameEvent::PostComposite) ? RenderFeatureStage::PostComposite : RenderFeatureStage::PreUI;
         const std::optional<GtePluginRenderFeatureDescriptor> descriptor =
@@ -628,8 +580,8 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 return;
             }
 
-            for (const RenderFeatureCompositor::PreOpaqueEntry& entry :
-                m_renderFeatureCompositorPtr->PreOpaqueFeaturesInPriorityOrder()) {
+            for (const PreOpaqueEntry& entry :
+                m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::PreOpaque>()) {
                 if (!entry.enabledOverride) {
                     continue;
                 }
@@ -917,8 +869,8 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 return;
             }
 
-            for (const RenderFeatureCompositor::PostOpaqueEntry& entry :
-                m_renderFeatureCompositorPtr->PostOpaqueFeaturesInPriorityOrder()) {
+            for (const SceneStageEntry& entry :
+                m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::PostOpaque>()) {
                 if (!entry.enabledOverride) {
                     continue;
                 }
@@ -963,8 +915,8 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 return;
             }
 
-            for (const RenderFeatureCompositor::PostTransparentEntry& entry :
-                m_renderFeatureCompositorPtr->PostTransparentFeaturesInPriorityOrder()) {
+            for (const SceneStageEntry& entry :
+                m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::PostTransparent>()) {
                 if (!entry.enabledOverride) {
                     continue;
                 }

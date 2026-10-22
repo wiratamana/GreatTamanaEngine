@@ -50,55 +50,40 @@ bool RenderFeatureCompositor::UnregisterProjectFeature(const char* name)
     return m_impl->UnregisterProjectFeature(name);
 }
 
-bool RenderFeatureCompositor::RegisterPreOpaqueFeatureInternal(
-    const std::string& name, std::int32_t priority, ProjectPreOpaqueCallback callback, RenderFeatureOwner owner)
+bool RenderFeatureCompositor::RegisterStageFeature(CompositorStage stage, const std::string& name,
+    std::int32_t priority, ProjectPreOpaqueCallback callback, RenderFeatureOwner owner)
 {
-    return m_impl->RegisterPreOpaqueFeatureInternal(name, priority, std::move(callback), owner);
+    return m_impl->RegisterStageFeature(stage, name, priority, std::move(callback), owner);
 }
 
-bool RenderFeatureCompositor::UnregisterPreOpaqueFeature(const char* name)
+bool RenderFeatureCompositor::RegisterStageFeature(CompositorStage stage, const std::string& name,
+    std::int32_t priority, ProjectScenePassCallback callback, RenderFeatureOwner owner)
 {
-    return m_impl->UnregisterPreOpaqueFeature(name);
+    return m_impl->RegisterStageFeature(stage, name, priority, std::move(callback), owner);
 }
 
-const std::vector<RenderFeatureCompositor::PreOpaqueEntry>& RenderFeatureCompositor::PreOpaqueFeaturesInPriorityOrder()
-    const noexcept
+bool RenderFeatureCompositor::UnregisterStageFeature(CompositorStage stage, const char* name)
 {
-    return m_impl->preOpaque;
+    return m_impl->UnregisterStageFeature(stage, name);
 }
 
-bool RenderFeatureCompositor::RegisterPostOpaqueFeatureInternal(
-    const std::string& name, std::int32_t priority, ProjectScenePassCallback callback, RenderFeatureOwner owner)
+template <CompositorStage S>
+const std::vector<StageEntry<StageCallback<S>>>& RenderFeatureCompositor::StageFeaturesInPriorityOrder() const noexcept
 {
-    return m_impl->RegisterPostOpaqueFeatureInternal(name, priority, std::move(callback), owner);
+    if constexpr (S == CompositorStage::PreOpaque) {
+        return m_impl->preOpaque.entries;
+    } else if constexpr (S == CompositorStage::PostOpaque) {
+        return m_impl->postOpaque.entries;
+    } else {
+        return m_impl->postTransparent.entries;
+    }
 }
 
-bool RenderFeatureCompositor::UnregisterPostOpaqueFeature(const char* name)
-{
-    return m_impl->UnregisterPostOpaqueFeature(name);
-}
-
-const std::vector<RenderFeatureCompositor::PostOpaqueEntry>& RenderFeatureCompositor::PostOpaqueFeaturesInPriorityOrder()
-    const noexcept
-{
-    return m_impl->postOpaque;
-}
-
-bool RenderFeatureCompositor::RegisterPostTransparentFeatureInternal(
-    const std::string& name, std::int32_t priority, ProjectScenePassCallback callback, RenderFeatureOwner owner)
-{
-    return m_impl->RegisterPostTransparentFeatureInternal(name, priority, std::move(callback), owner);
-}
-
-bool RenderFeatureCompositor::UnregisterPostTransparentFeature(const char* name)
-{
-    return m_impl->UnregisterPostTransparentFeature(name);
-}
-
-const std::vector<RenderFeatureCompositor::PostTransparentEntry>&
-RenderFeatureCompositor::PostTransparentFeaturesInPriorityOrder() const noexcept
-{
-    return m_impl->postTransparent;
-}
+template const std::vector<PreOpaqueEntry>&
+RenderFeatureCompositor::StageFeaturesInPriorityOrder<CompositorStage::PreOpaque>() const noexcept;
+template const std::vector<SceneStageEntry>&
+RenderFeatureCompositor::StageFeaturesInPriorityOrder<CompositorStage::PostOpaque>() const noexcept;
+template const std::vector<SceneStageEntry>&
+RenderFeatureCompositor::StageFeaturesInPriorityOrder<CompositorStage::PostTransparent>() const noexcept;
 
 } // namespace gte

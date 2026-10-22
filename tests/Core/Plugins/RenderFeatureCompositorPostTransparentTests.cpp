@@ -1,5 +1,5 @@
-// Tier-1 tests for RenderFeatureCompositor::RegisterPostTransparentFeature()/
-// UnregisterPostTransparentFeature().
+// Tier-1 tests for RenderFeatureCompositor::RegisterStageFeature()/
+// UnregisterStageFeature().
 //
 // Mirrors RenderFeatureCompositorPostOpaqueTests.cpp's own exact shape,
 // substituting the AfterTransparents stage's own entry points.
@@ -62,7 +62,7 @@ TEST(RenderFeatureCompositorPostTransparentTest, RegisterPostTransparentFeatureS
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    const bool registered = compositor->RegisterPostTransparentFeature("PTr_Test_FreshUniqueName", 0,
+    const bool registered = compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_FreshUniqueName", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { });
     EXPECT_TRUE(registered);
 
@@ -81,9 +81,9 @@ TEST(RenderFeatureCompositorPostTransparentTest, RegisteringADuplicateNameFails)
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPostTransparentFeature("PTr_Test_DuplicateOriginal", 0,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_DuplicateOriginal", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
-    EXPECT_FALSE(compositor->RegisterPostTransparentFeature("PTr_Test_DuplicateOriginal", 0,
+    EXPECT_FALSE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_DuplicateOriginal", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 }
 
@@ -99,7 +99,7 @@ TEST(RenderFeatureCompositorPostTransparentTest, NameAlreadyUsedByAPostComposite
     ASSERT_TRUE(compositor->RegisterProjectFeature(
         postCompositeDescriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, Extent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
-    EXPECT_FALSE(compositor->RegisterPostTransparentFeature("PTr_Test_CrossNamespaceCollision", 0,
+    EXPECT_FALSE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_CrossNamespaceCollision", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 }
 
@@ -111,7 +111,7 @@ TEST(RenderFeatureCompositorPostTransparentTest, RegisterProjectFeatureRefusesAN
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPostTransparentFeature("PTr_Test_ReverseCrossNamespaceCollision", 0,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_ReverseCrossNamespaceCollision", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 
     const GtePluginRenderFeatureDescriptor postCompositeDescriptor = MakeRenderFeatureDescriptor(
@@ -127,7 +127,7 @@ TEST(RenderFeatureCompositorPostTransparentTest, UnregisterOnAnUnknownNameFailsH
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    EXPECT_FALSE(compositor->UnregisterPostTransparentFeature("PTr_Test_ThisNameWasNeverRegistered"));
+    EXPECT_FALSE(compositor->UnregisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_ThisNameWasNeverRegistered"));
 }
 
 TEST(RenderFeatureCompositorPostTransparentTest, RegisterUnregisterReRegisterRoundTripSucceeds)
@@ -137,11 +137,11 @@ TEST(RenderFeatureCompositorPostTransparentTest, RegisterUnregisterReRegisterRou
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPostTransparentFeature("PTr_Test_RoundTrip", 0,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_RoundTrip", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
-    EXPECT_TRUE(compositor->UnregisterPostTransparentFeature("PTr_Test_RoundTrip"));
+    EXPECT_TRUE(compositor->UnregisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_RoundTrip"));
     EXPECT_EQ(FindByName(compositor->DebugSnapshot(), "PTr_Test_RoundTrip"), nullptr);
-    EXPECT_TRUE(compositor->RegisterPostTransparentFeature("PTr_Test_RoundTrip", 0,
+    EXPECT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_RoundTrip", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
     EXPECT_NE(FindByName(compositor->DebugSnapshot(), "PTr_Test_RoundTrip"), nullptr);
 }
@@ -153,7 +153,7 @@ TEST(RenderFeatureCompositorPostTransparentTest, SetFeatureEnabledAndSetFeatureP
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPostTransparentFeature("PTr_Test_EnabledAndPriority", 5,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_EnabledAndPriority", 5,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 
     EXPECT_TRUE(compositor->SetFeatureEnabled("PTr_Test_EnabledAndPriority", false));
@@ -171,7 +171,7 @@ TEST(RenderFeatureCompositorPostTransparentTest, SetFeatureEnabledAndSetFeatureP
 
 // A same-priority collision between two PostTransparent entries falls back
 // to the documented, stable lexical tie-break
-// (SortAndDetectCollisionsInPostTransparentList()), never crashing.
+// (the stage list sort), never crashing.
 TEST(RenderFeatureCompositorPostTransparentTest, SamePriorityCollisionFallsBackToLexicalTieBreakWithoutCrashing)
 {
     GTE_SKIP_IF_NO_HEADLESS_CORE(core);
@@ -179,9 +179,9 @@ TEST(RenderFeatureCompositorPostTransparentTest, SamePriorityCollisionFallsBackT
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPostTransparentFeature("PTr_Test_CollisionB", 7,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_CollisionB", 7,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
-    ASSERT_TRUE(compositor->RegisterPostTransparentFeature("PTr_Test_CollisionA", 7,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_CollisionA", 7,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 
     const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();
@@ -189,7 +189,7 @@ TEST(RenderFeatureCompositorPostTransparentTest, SamePriorityCollisionFallsBackT
     EXPECT_NE(FindByName(snapshot, "PTr_Test_CollisionB"), nullptr);
 }
 
-// Priority ordering - PostTransparentFeaturesInPriorityOrder() must return
+// Priority ordering - StageFeaturesInPriorityOrder<PostTransparent>() must return
 // entries ascending by priority regardless of registration order.
 TEST(RenderFeatureCompositorPostTransparentTest, PostTransparentFeaturesInPriorityOrderReturnsAscendingByPriority)
 {
@@ -198,19 +198,19 @@ TEST(RenderFeatureCompositorPostTransparentTest, PostTransparentFeaturesInPriori
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPostTransparentFeature("PTr_Test_OrderC", 30,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_OrderC", 30,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
-    ASSERT_TRUE(compositor->RegisterPostTransparentFeature("PTr_Test_OrderA", 10,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_OrderA", 10,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
-    ASSERT_TRUE(compositor->RegisterPostTransparentFeature("PTr_Test_OrderB", 20,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_OrderB", 20,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 
-    const std::vector<RenderFeatureCompositor::PostTransparentEntry>& ordered =
-        compositor->PostTransparentFeaturesInPriorityOrder();
+    const std::vector<SceneStageEntry>& ordered =
+        compositor->StageFeaturesInPriorityOrder<CompositorStage::PostTransparent>();
     ASSERT_GE(ordered.size(), 3u);
 
     int lastPriority = -1000000;
-    for (const RenderFeatureCompositor::PostTransparentEntry& entry : ordered) {
+    for (const SceneStageEntry& entry : ordered) {
         if (entry.name == "PTr_Test_OrderA" || entry.name == "PTr_Test_OrderB" || entry.name == "PTr_Test_OrderC") {
             EXPECT_GE(entry.priority, lastPriority);
             lastPriority = entry.priority;
@@ -218,12 +218,8 @@ TEST(RenderFeatureCompositorPostTransparentTest, PostTransparentFeaturesInPriori
     }
 }
 
-// Debug fix D1 (RENDER_GRAPH_BUG_REPORT.txt) - a built-in engine
-// PostTransparent feature (RegisterBuiltInPostTransparentFeature()) must
-// report isProjectFeature == false in DebugSnapshot() - a Project-owned
-// PostTransparent feature registered right alongside it must still report
-// true. No real built-in PostTransparent caller exists today - added for
-// symmetry/coverage with the PreOpaque/PostOpaque siblings.
+// A built-in (engine-owned) PostTransparent feature reports isProjectFeature == false in DebugSnapshot();
+// a project-owned one registered beside it reports true.
 TEST(RenderFeatureCompositorPostTransparentTest, BuiltInFeatureReportsIsProjectFeatureFalse)
 {
     GTE_SKIP_IF_NO_HEADLESS_CORE(core);
@@ -231,9 +227,10 @@ TEST(RenderFeatureCompositorPostTransparentTest, BuiltInFeatureReportsIsProjectF
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterBuiltInPostTransparentFeature("PTr_Test_EngineProbe", 0,
-        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
-    ASSERT_TRUE(compositor->RegisterPostTransparentFeature("PTr_Test_ProjectProbe", 1,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_EngineProbe", 0,
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { },
+        RenderFeatureOwner::Engine));
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "PTr_Test_ProjectProbe", 1,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 
     const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();

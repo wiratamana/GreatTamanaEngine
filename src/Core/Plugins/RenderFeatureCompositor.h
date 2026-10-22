@@ -10,12 +10,36 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace gte {
 
 class Core;
 class Renderer;
+
+// Scene stages whose features draw into their own view.
+enum class CompositorStage : std::uint8_t {
+    PreOpaque,       // Before the view's opaque pass.
+    PostOpaque,      // After the opaque pass, before the transparent pass.
+    PostTransparent, // After the transparent pass.
+};
+
+// Callback type of each scene stage.
+template <CompositorStage S>
+using StageCallback =
+    std::conditional_t<S == CompositorStage::PreOpaque, ProjectPreOpaqueCallback, ProjectScenePassCallback>;
+
+template <class Callback>
+struct StageEntry {
+    std::string name;
+    std::int32_t priority = 0;
+    bool enabledOverride = true;
+    Callback callback;
+    RenderFeatureOwner owner = RenderFeatureOwner::Project;
+};
+using PreOpaqueEntry = StageEntry<ProjectPreOpaqueCallback>;
+using SceneStageEntry = StageEntry<ProjectScenePassCallback>;
 
 // Owns the PostComposite/PreUI blend chain and the PreOpaque/PostOpaque/PostTransparent registration lists.
 // Its state lives in a private Impl (RenderFeatureCompositorImpl.h).
@@ -56,82 +80,21 @@ public:
     // Removes a project feature and frees its GPU-state slot. False when absent or not a project feature.
     bool UnregisterProjectFeature(const char* name);
 
-    // A PreOpaque feature: no slot, no blend mode, no private target; it draws into its own view.
-    struct PreOpaqueEntry {
-        std::string name;
-        std::int32_t priority = 0;
-        bool enabledOverride = true;
-        ProjectPreOpaqueCallback callback;
-        RenderFeatureOwner owner = RenderFeatureOwner::Project;
-    };
+    // Scene-stage lists: no GPU-state slot, no blend mode, no private target; they draw into their own view.
+    // False (logged) when `name` exists in any stage, or when `callback` does not match `stage`.
+    bool RegisterStageFeature(CompositorStage stage, const std::string& name, std::int32_t priority,
+        ProjectPreOpaqueCallback callback, RenderFeatureOwner owner = RenderFeatureOwner::Project);
+    bool RegisterStageFeature(CompositorStage stage, const std::string& name, std::int32_t priority,
+        ProjectScenePassCallback callback, RenderFeatureOwner owner = RenderFeatureOwner::Project);
 
-    // False (logged) when `name` exists in any stage: feature names share one namespace.
-    bool RegisterPreOpaqueFeature(const std::string& name, std::int32_t priority, ProjectPreOpaqueCallback callback)
-    {
-        return RegisterPreOpaqueFeatureInternal(name, priority, std::move(callback), RenderFeatureOwner::Project);
-    }
-    bool RegisterBuiltInPreOpaqueFeature(
-        const std::string& name, std::int32_t priority, ProjectPreOpaqueCallback callback)
-    {
-        return RegisterPreOpaqueFeatureInternal(name, priority, std::move(callback), RenderFeatureOwner::Engine);
-    }
-    bool UnregisterPreOpaqueFeature(const char* name);
+    // False (logged) when `name` is not registered in `stage`.
+    bool UnregisterStageFeature(CompositorStage stage, const char* name);
 
-    // Sorted by priority ascending; the PreOpaque provider skips entries whose override is off.
-    const std::vector<PreOpaqueEntry>& PreOpaqueFeaturesInPriorityOrder() const noexcept;
-
-    // Runs after the view's opaque pass and before its transparent pass.
-    struct PostOpaqueEntry {
-        std::string name;
-        std::int32_t priority = 0;
-        bool enabledOverride = true;
-        ProjectScenePassCallback callback;
-        RenderFeatureOwner owner = RenderFeatureOwner::Project;
-    };
-
-    bool RegisterPostOpaqueFeature(const std::string& name, std::int32_t priority, ProjectScenePassCallback callback)
-    {
-        return RegisterPostOpaqueFeatureInternal(name, priority, std::move(callback), RenderFeatureOwner::Project);
-    }
-    bool RegisterBuiltInPostOpaqueFeature(
-        const std::string& name, std::int32_t priority, ProjectScenePassCallback callback)
-    {
-        return RegisterPostOpaqueFeatureInternal(name, priority, std::move(callback), RenderFeatureOwner::Engine);
-    }
-    bool UnregisterPostOpaqueFeature(const char* name);
-    const std::vector<PostOpaqueEntry>& PostOpaqueFeaturesInPriorityOrder() const noexcept;
-
-    // Runs after the view's transparent pass.
-    struct PostTransparentEntry {
-        std::string name;
-        std::int32_t priority = 0;
-        bool enabledOverride = true;
-        ProjectScenePassCallback callback;
-        RenderFeatureOwner owner = RenderFeatureOwner::Project;
-    };
-
-    bool RegisterPostTransparentFeature(
-        const std::string& name, std::int32_t priority, ProjectScenePassCallback callback)
-    {
-        return RegisterPostTransparentFeatureInternal(name, priority, std::move(callback), RenderFeatureOwner::Project);
-    }
-    bool RegisterBuiltInPostTransparentFeature(
-        const std::string& name, std::int32_t priority, ProjectScenePassCallback callback)
-    {
-        return RegisterPostTransparentFeatureInternal(name, priority, std::move(callback), RenderFeatureOwner::Engine);
-    }
-    bool UnregisterPostTransparentFeature(const char* name);
-    const std::vector<PostTransparentEntry>& PostTransparentFeaturesInPriorityOrder() const noexcept;
+    // Sorted by priority ascending; the stage provider skips entries whose override is off.
+    template <CompositorStage S>
+    const std::vector<StageEntry<StageCallback<S>>>& StageFeaturesInPriorityOrder() const noexcept;
 
 private:
-    // The registration bodies; the public wrappers above fix the owner.
-    bool RegisterPreOpaqueFeatureInternal(
-        const std::string& name, std::int32_t priority, ProjectPreOpaqueCallback callback, RenderFeatureOwner owner);
-    bool RegisterPostOpaqueFeatureInternal(
-        const std::string& name, std::int32_t priority, ProjectScenePassCallback callback, RenderFeatureOwner owner);
-    bool RegisterPostTransparentFeatureInternal(
-        const std::string& name, std::int32_t priority, ProjectScenePassCallback callback, RenderFeatureOwner owner);
-
     // An on-screen feature (PostComposite or PreUI).
     struct Entry {
         GtePluginRenderFeatureDescriptor descriptor{};
@@ -140,12 +103,6 @@ private:
         int projectFeatureSlot = -1;
         RenderFeatureOwner owner = RenderFeatureOwner::Project;
     };
-
-    // Stable sort by priority; a collision logs a warning and falls back to a name tie-break.
-    static void SortAndDetectCollisionsInStage(std::vector<Entry>& entries, const char* stageName);
-    static void SortAndDetectCollisionsInPreOpaqueList(std::vector<PreOpaqueEntry>& entries);
-    static void SortAndDetectCollisionsInPostOpaqueList(std::vector<PostOpaqueEntry>& entries);
-    static void SortAndDetectCollisionsInPostTransparentList(std::vector<PostTransparentEntry>& entries);
 
     struct Impl;
     std::unique_ptr<Impl> m_impl;

@@ -1,5 +1,5 @@
-// Tier-1 tests for RenderFeatureCompositor::RegisterPostOpaqueFeature()/
-// UnregisterPostOpaqueFeature().
+// Tier-1 tests for RenderFeatureCompositor::RegisterStageFeature()/
+// UnregisterStageFeature().
 //
 // Mirrors RenderFeatureCompositorPreOpaqueTests.cpp's own exact
 // HeadlessSurfaceProvider + NoopHostServices + real Core fixture pattern,
@@ -64,7 +64,7 @@ TEST(RenderFeatureCompositorPostOpaqueTest, RegisterPostOpaqueFeatureSucceedsFor
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    const bool registered = compositor->RegisterPostOpaqueFeature("POp_Test_FreshUniqueName", 0,
+    const bool registered = compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_FreshUniqueName", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { });
     EXPECT_TRUE(registered);
 
@@ -83,9 +83,9 @@ TEST(RenderFeatureCompositorPostOpaqueTest, RegisteringADuplicateNameFails)
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPostOpaqueFeature("POp_Test_DuplicateOriginal", 0,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_DuplicateOriginal", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
-    EXPECT_FALSE(compositor->RegisterPostOpaqueFeature("POp_Test_DuplicateOriginal", 0,
+    EXPECT_FALSE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_DuplicateOriginal", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 }
 
@@ -101,7 +101,7 @@ TEST(RenderFeatureCompositorPostOpaqueTest, NameAlreadyUsedByAPostCompositeEntry
     ASSERT_TRUE(compositor->RegisterProjectFeature(
         postCompositeDescriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, Extent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
-    EXPECT_FALSE(compositor->RegisterPostOpaqueFeature("POp_Test_CrossNamespaceCollision", 0,
+    EXPECT_FALSE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_CrossNamespaceCollision", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 }
 
@@ -113,7 +113,7 @@ TEST(RenderFeatureCompositorPostOpaqueTest, RegisterProjectFeatureRefusesANameAl
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPostOpaqueFeature("POp_Test_ReverseCrossNamespaceCollision", 0,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_ReverseCrossNamespaceCollision", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 
     const GtePluginRenderFeatureDescriptor postCompositeDescriptor = MakeRenderFeatureDescriptor(
@@ -129,7 +129,7 @@ TEST(RenderFeatureCompositorPostOpaqueTest, UnregisterOnAnUnknownNameFailsHarmle
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    EXPECT_FALSE(compositor->UnregisterPostOpaqueFeature("POp_Test_ThisNameWasNeverRegistered"));
+    EXPECT_FALSE(compositor->UnregisterStageFeature(CompositorStage::PostOpaque, "POp_Test_ThisNameWasNeverRegistered"));
 }
 
 TEST(RenderFeatureCompositorPostOpaqueTest, RegisterUnregisterReRegisterRoundTripSucceeds)
@@ -139,11 +139,11 @@ TEST(RenderFeatureCompositorPostOpaqueTest, RegisterUnregisterReRegisterRoundTri
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPostOpaqueFeature("POp_Test_RoundTrip", 0,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_RoundTrip", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
-    EXPECT_TRUE(compositor->UnregisterPostOpaqueFeature("POp_Test_RoundTrip"));
+    EXPECT_TRUE(compositor->UnregisterStageFeature(CompositorStage::PostOpaque, "POp_Test_RoundTrip"));
     EXPECT_EQ(FindByName(compositor->DebugSnapshot(), "POp_Test_RoundTrip"), nullptr);
-    EXPECT_TRUE(compositor->RegisterPostOpaqueFeature("POp_Test_RoundTrip", 0,
+    EXPECT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_RoundTrip", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
     EXPECT_NE(FindByName(compositor->DebugSnapshot(), "POp_Test_RoundTrip"), nullptr);
 }
@@ -155,7 +155,7 @@ TEST(RenderFeatureCompositorPostOpaqueTest, SetFeatureEnabledAndSetFeaturePriori
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPostOpaqueFeature("POp_Test_EnabledAndPriority", 5,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_EnabledAndPriority", 5,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 
     EXPECT_TRUE(compositor->SetFeatureEnabled("POp_Test_EnabledAndPriority", false));
@@ -172,7 +172,7 @@ TEST(RenderFeatureCompositorPostOpaqueTest, SetFeatureEnabledAndSetFeaturePriori
 }
 
 // A same-priority collision between two PostOpaque entries falls back to the
-// documented, stable lexical tie-break (SortAndDetectCollisionsInPostOpaqueList()),
+// documented, stable lexical tie-break (the stage list sort),
 // never crashing.
 TEST(RenderFeatureCompositorPostOpaqueTest, SamePriorityCollisionFallsBackToLexicalTieBreakWithoutCrashing)
 {
@@ -181,9 +181,9 @@ TEST(RenderFeatureCompositorPostOpaqueTest, SamePriorityCollisionFallsBackToLexi
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPostOpaqueFeature("POp_Test_CollisionB", 7,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_CollisionB", 7,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
-    ASSERT_TRUE(compositor->RegisterPostOpaqueFeature("POp_Test_CollisionA", 7,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_CollisionA", 7,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 
     const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();
@@ -191,7 +191,7 @@ TEST(RenderFeatureCompositorPostOpaqueTest, SamePriorityCollisionFallsBackToLexi
     EXPECT_NE(FindByName(snapshot, "POp_Test_CollisionB"), nullptr);
 }
 
-// Priority ordering - PostOpaqueFeaturesInPriorityOrder() must return entries
+// Priority ordering - StageFeaturesInPriorityOrder<PostOpaque>() must return entries
 // ascending by priority regardless of registration order.
 TEST(RenderFeatureCompositorPostOpaqueTest, PostOpaqueFeaturesInPriorityOrderReturnsAscendingByPriority)
 {
@@ -200,19 +200,19 @@ TEST(RenderFeatureCompositorPostOpaqueTest, PostOpaqueFeaturesInPriorityOrderRet
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPostOpaqueFeature("POp_Test_OrderC", 30,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_OrderC", 30,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
-    ASSERT_TRUE(compositor->RegisterPostOpaqueFeature("POp_Test_OrderA", 10,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_OrderA", 10,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
-    ASSERT_TRUE(compositor->RegisterPostOpaqueFeature("POp_Test_OrderB", 20,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_OrderB", 20,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 
-    const std::vector<RenderFeatureCompositor::PostOpaqueEntry>& ordered =
-        compositor->PostOpaqueFeaturesInPriorityOrder();
+    const std::vector<SceneStageEntry>& ordered =
+        compositor->StageFeaturesInPriorityOrder<CompositorStage::PostOpaque>();
     ASSERT_GE(ordered.size(), 3u);
 
     int lastPriority = -1000000;
-    for (const RenderFeatureCompositor::PostOpaqueEntry& entry : ordered) {
+    for (const SceneStageEntry& entry : ordered) {
         if (entry.name == "POp_Test_OrderA" || entry.name == "POp_Test_OrderB" || entry.name == "POp_Test_OrderC") {
             EXPECT_GE(entry.priority, lastPriority);
             lastPriority = entry.priority;
@@ -220,13 +220,8 @@ TEST(RenderFeatureCompositorPostOpaqueTest, PostOpaqueFeaturesInPriorityOrderRet
     }
 }
 
-// Debug fix D1 (RENDER_GRAPH_BUG_REPORT.txt) - a built-in engine PostOpaque
-// feature (RegisterBuiltInPostOpaqueFeature(), the real-world shape of
-// ShadowFeature.cpp's "Shadow.Mask") must report isProjectFeature == false
-// in DebugSnapshot() - a Project-owned PostOpaque feature registered right
-// alongside it must still report true. Mirrors
-// RenderFeatureCompositorPreOpaqueTests.cpp's own identical test for the
-// PreOpaque stage.
+// A built-in (engine-owned) PostOpaque feature reports isProjectFeature == false in DebugSnapshot();
+// a project-owned one registered beside it reports true.
 TEST(RenderFeatureCompositorPostOpaqueTest, BuiltInFeatureReportsIsProjectFeatureFalse)
 {
     GTE_SKIP_IF_NO_HEADLESS_CORE(core);
@@ -234,9 +229,10 @@ TEST(RenderFeatureCompositorPostOpaqueTest, BuiltInFeatureReportsIsProjectFeatur
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterBuiltInPostOpaqueFeature("POp_Test_EngineProbe", 0,
-        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
-    ASSERT_TRUE(compositor->RegisterPostOpaqueFeature("POp_Test_ProjectProbe", 1,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_EngineProbe", 0,
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { },
+        RenderFeatureOwner::Engine));
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_ProjectProbe", 1,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 
     const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();

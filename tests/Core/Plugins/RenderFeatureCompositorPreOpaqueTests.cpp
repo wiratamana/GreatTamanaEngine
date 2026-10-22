@@ -1,5 +1,5 @@
-// Tier-1 tests for RenderFeatureCompositor::RegisterPreOpaqueFeature()/
-// UnregisterPreOpaqueFeature() (better-render-pass-5 effort, BLOCK 3,
+// Tier-1 tests for RenderFeatureCompositor::RegisterStageFeature()/
+// UnregisterStageFeature() (better-render-pass-5 effort, BLOCK 3,
 // PHASE2/PHASE6 -
 // task_manager/better-render-pass-5/PHASE6_TIER1_TEST_COVERAGE.md).
 //
@@ -66,7 +66,7 @@ TEST(RenderFeatureCompositorPreOpaqueTest, RegisterPreOpaqueFeatureSucceedsForAF
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    const bool registered = compositor->RegisterPreOpaqueFeature(
+    const bool registered = compositor->RegisterStageFeature(CompositorStage::PreOpaque, 
         "PO_Test_FreshUniqueName", 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { });
     EXPECT_TRUE(registered);
 
@@ -85,9 +85,9 @@ TEST(RenderFeatureCompositorPreOpaqueTest, RegisteringADuplicateNameFails)
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPreOpaqueFeature(
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PreOpaque, 
         "PO_Test_DuplicateOriginal", 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { }));
-    EXPECT_FALSE(compositor->RegisterPreOpaqueFeature(
+    EXPECT_FALSE(compositor->RegisterStageFeature(CompositorStage::PreOpaque, 
         "PO_Test_DuplicateOriginal", 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { }));
 }
 
@@ -105,7 +105,7 @@ TEST(RenderFeatureCompositorPreOpaqueTest, NameAlreadyUsedByAPostCompositeEntryI
     ASSERT_TRUE(compositor->RegisterProjectFeature(
         postCompositeDescriptor, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, Extent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { }));
 
-    EXPECT_FALSE(compositor->RegisterPreOpaqueFeature("PO_Test_CrossNamespaceCollision", 0,
+    EXPECT_FALSE(compositor->RegisterStageFeature(CompositorStage::PreOpaque, "PO_Test_CrossNamespaceCollision", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { }));
 }
 
@@ -117,7 +117,7 @@ TEST(RenderFeatureCompositorPreOpaqueTest, RegisterProjectFeatureRefusesANameAlr
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPreOpaqueFeature("PO_Test_ReverseCrossNamespaceCollision", 0,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PreOpaque, "PO_Test_ReverseCrossNamespaceCollision", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { }));
 
     const GtePluginRenderFeatureDescriptor postCompositeDescriptor = MakeRenderFeatureDescriptor(
@@ -133,7 +133,7 @@ TEST(RenderFeatureCompositorPreOpaqueTest, UnregisterOnAnUnknownNameFailsHarmles
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    EXPECT_FALSE(compositor->UnregisterPreOpaqueFeature("PO_Test_ThisNameWasNeverRegistered"));
+    EXPECT_FALSE(compositor->UnregisterStageFeature(CompositorStage::PreOpaque, "PO_Test_ThisNameWasNeverRegistered"));
 }
 
 TEST(RenderFeatureCompositorPreOpaqueTest, RegisterUnregisterReRegisterRoundTripSucceeds)
@@ -143,18 +143,18 @@ TEST(RenderFeatureCompositorPreOpaqueTest, RegisterUnregisterReRegisterRoundTrip
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPreOpaqueFeature(
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PreOpaque, 
         "PO_Test_RoundTrip", 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { }));
-    EXPECT_TRUE(compositor->UnregisterPreOpaqueFeature("PO_Test_RoundTrip"));
+    EXPECT_TRUE(compositor->UnregisterStageFeature(CompositorStage::PreOpaque, "PO_Test_RoundTrip"));
     EXPECT_EQ(FindByName(compositor->DebugSnapshot(), "PO_Test_RoundTrip"), nullptr);
-    EXPECT_TRUE(compositor->RegisterPreOpaqueFeature(
+    EXPECT_TRUE(compositor->RegisterStageFeature(CompositorStage::PreOpaque, 
         "PO_Test_RoundTrip", 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { }));
     EXPECT_NE(FindByName(compositor->DebugSnapshot(), "PO_Test_RoundTrip"), nullptr);
 }
 
 // Confirms SetFeatureEnabled()/SetFeaturePriority() (RenderFeatureCompositor,
 // PHASE2's own extension) correctly reach a PreOpaque entry via the new
-// FindPreOpaqueEntryByName() fallback path.
+// stage list fallback path.
 TEST(RenderFeatureCompositorPreOpaqueTest, SetFeatureEnabledAndSetFeaturePriorityApplyToAPreOpaqueEntry)
 {
     GTE_SKIP_IF_NO_HEADLESS_CORE(core);
@@ -162,7 +162,7 @@ TEST(RenderFeatureCompositorPreOpaqueTest, SetFeatureEnabledAndSetFeaturePriorit
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPreOpaqueFeature(
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PreOpaque, 
         "PO_Test_EnabledAndPriority", 5, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { }));
 
     EXPECT_TRUE(compositor->SetFeatureEnabled("PO_Test_EnabledAndPriority", false));
@@ -179,7 +179,7 @@ TEST(RenderFeatureCompositorPreOpaqueTest, SetFeatureEnabledAndSetFeaturePriorit
 }
 
 // A same-priority collision between two PreOpaque entries falls back to
-// the documented, stable lexical tie-break (SortAndDetectCollisionsInPreOpaqueList()),
+// the documented, stable lexical tie-break (the stage list sort),
 // never crashing - mirrors this engine's own established collision
 // policy for every other stage's priority sort.
 TEST(RenderFeatureCompositorPreOpaqueTest, SamePriorityCollisionFallsBackToLexicalTieBreakWithoutCrashing)
@@ -189,9 +189,9 @@ TEST(RenderFeatureCompositorPreOpaqueTest, SamePriorityCollisionFallsBackToLexic
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPreOpaqueFeature(
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PreOpaque, 
         "PO_Test_CollisionB", 7, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { }));
-    ASSERT_TRUE(compositor->RegisterPreOpaqueFeature(
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PreOpaque, 
         "PO_Test_CollisionA", 7, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { }));
 
     const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();
@@ -199,15 +199,8 @@ TEST(RenderFeatureCompositorPreOpaqueTest, SamePriorityCollisionFallsBackToLexic
     EXPECT_NE(FindByName(snapshot, "PO_Test_CollisionB"), nullptr);
 }
 
-// Debug fix D1 (RENDER_GRAPH_BUG_REPORT.txt) - a built-in engine PreOpaque
-// feature (RegisterBuiltInPreOpaqueFeature(), the real-world shape of
-// ShadowFeature.cpp's "Shadow.DepthPass"/AtmosphereFeature.cpp's
-// "AtmosphereViewLut") must report isProjectFeature == false in
-// DebugSnapshot() - a Project-owned PreOpaque feature registered right
-// alongside it must still report true. Mirrors
-// RenderFeatureCompositorProjectFeatureTests.cpp's own
-// BuiltInFeatureReportsIsProjectFeatureFalse for the PostComposite/PreUI
-// stage.
+// A built-in (engine-owned) PreOpaque feature reports isProjectFeature == false in DebugSnapshot();
+// a project-owned one registered beside it reports true.
 TEST(RenderFeatureCompositorPreOpaqueTest, BuiltInFeatureReportsIsProjectFeatureFalse)
 {
     GTE_SKIP_IF_NO_HEADLESS_CORE(core);
@@ -215,9 +208,10 @@ TEST(RenderFeatureCompositorPreOpaqueTest, BuiltInFeatureReportsIsProjectFeature
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterBuiltInPreOpaqueFeature("PO_Test_EngineProbe", 0,
-        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { }));
-    ASSERT_TRUE(compositor->RegisterPreOpaqueFeature("PO_Test_ProjectProbe", 1,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PreOpaque, "PO_Test_EngineProbe", 0,
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { },
+        RenderFeatureOwner::Engine));
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PreOpaque, "PO_Test_ProjectProbe", 1,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { }));
 
     const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();

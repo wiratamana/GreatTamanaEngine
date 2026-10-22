@@ -5,7 +5,7 @@
 // Core.cpp's own real "PostOpaqueFeatures"/"PostTransparentFeatures"
 // providers are private lambdas with no public accessor - this file proves
 // the real, shared mechanism they both depend on
-// (PostOpaqueFeaturesInPriorityOrder()/PostTransparentFeaturesInPriorityOrder()
+// (StageFeaturesInPriorityOrder<PostOpaque>()/StageFeaturesInPriorityOrder<PostTransparent>()
 // plus each entry's own enabledOverride flag) by replicating their documented
 // loop shape exactly (walk the ordered list, `continue` on a disabled
 // entry) against a real, headless Core/RenderFeatureCompositor - mirroring
@@ -73,9 +73,9 @@ TEST(RenderFeatureCompositorPostStageRuntimeToggleTest, BothPostOpaqueAndPostTra
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    ASSERT_TRUE(compositor->RegisterPostOpaqueFeature("RuntimeToggle_PostOpaque", 0,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "RuntimeToggle_PostOpaque", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
-    ASSERT_TRUE(compositor->RegisterPostTransparentFeature("RuntimeToggle_PostTransparent", 0,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "RuntimeToggle_PostTransparent", 0,
         [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
 
     const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();
@@ -111,7 +111,7 @@ TEST(RenderFeatureCompositorPostStageRuntimeToggleTest, DisablingAPostOpaqueFeat
     ASSERT_NE(compositor, nullptr);
 
     int callCount = 0;
-    ASSERT_TRUE(compositor->RegisterPostOpaqueFeature("RuntimeToggle_PostOpaque_Counter", 0,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "RuntimeToggle_PostOpaque_Counter", 0,
         [&callCount](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId,
             const ScenePassReadHandles&) { ++callCount; }));
 
@@ -120,7 +120,7 @@ TEST(RenderFeatureCompositorPostStageRuntimeToggleTest, DisablingAPostOpaqueFeat
     const ScenePassReadHandles dummyHandles{};
 
     auto runProviderLoopOnce = [&]() {
-        for (const RenderFeatureCompositor::PostOpaqueEntry& entry : compositor->PostOpaqueFeaturesInPriorityOrder()) {
+        for (const SceneStageEntry& entry : compositor->StageFeaturesInPriorityOrder<CompositorStage::PostOpaque>()) {
             if (!entry.enabledOverride) {
                 continue;
             }
@@ -145,7 +145,7 @@ TEST(RenderFeatureCompositorPostStageRuntimeToggleTest, DisablingAPostTransparen
     ASSERT_NE(compositor, nullptr);
 
     int callCount = 0;
-    ASSERT_TRUE(compositor->RegisterPostTransparentFeature("RuntimeToggle_PostTransparent_Counter", 0,
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostTransparent, "RuntimeToggle_PostTransparent_Counter", 0,
         [&callCount](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId,
             const ScenePassReadHandles&) { ++callCount; }));
 
@@ -154,8 +154,8 @@ TEST(RenderFeatureCompositorPostStageRuntimeToggleTest, DisablingAPostTransparen
     const ScenePassReadHandles dummyHandles{};
 
     auto runProviderLoopOnce = [&]() {
-        for (const RenderFeatureCompositor::PostTransparentEntry& entry :
-            compositor->PostTransparentFeaturesInPriorityOrder()) {
+        for (const SceneStageEntry& entry :
+            compositor->StageFeaturesInPriorityOrder<CompositorStage::PostTransparent>()) {
             if (!entry.enabledOverride) {
                 continue;
             }

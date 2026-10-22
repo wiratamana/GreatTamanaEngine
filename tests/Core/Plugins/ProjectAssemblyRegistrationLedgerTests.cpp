@@ -315,7 +315,7 @@ TEST(ProjectAssemblyRegistrationLedgerTest, FullRoundTripThroughARealRenderFeatu
 // RenderFeatureCompositor::DebugSnapshot(), (b) be recorded by the
 // ledger under preOpaqueFeatureNames, and then UnregisterEverythingFor()
 // must remove it from BOTH places - proving PHASE4's own teardown
-// wiring genuinely reaches RenderFeatureCompositor::UnregisterPreOpaqueFeature(),
+// wiring genuinely reaches RenderFeatureCompositor::UnregisterStageFeature(),
 // not merely clears the ledger's own bookkeeping. This is the source
 // spec's (BLOCK3_WIRE_PRE_POST_OPAQUE_STAGES.txt, Section 7) own Test 5.
 TEST(ProjectAssemblyRegistrationLedgerTest, FullRoundTripThroughARealPreOpaqueFeatureRegistrationProvesTheWholeWiring)
@@ -482,8 +482,8 @@ TEST(ProjectAssemblyRegistrationLedgerTest, PeekEntryReportsEmptyPostOpaqueAndPo
 // AddPostTransparentPass() registration, mirroring
 // FullRoundTripThroughARealPreOpaqueFeatureRegistrationProvesTheWholeWiring's
 // own shape - proves UnregisterEverythingFor() genuinely reaches
-// RenderFeatureCompositor::UnregisterPostOpaqueFeature()/
-// UnregisterPostTransparentFeature(), not merely clears the ledger's own
+// RenderFeatureCompositor::UnregisterStageFeature()/
+// UnregisterStageFeature(), not merely clears the ledger's own
 // bookkeeping.
 TEST(ProjectAssemblyRegistrationLedgerTest, FullRoundTripThroughARealPostOpaqueAndPostTransparentFeatureRegistrationProvesTheWholeWiring)
 {
@@ -542,7 +542,7 @@ TEST(ProjectAssemblyRegistrationLedgerTest, FullRoundTripThroughARealPostOpaqueA
 // confirms UnregisterEverythingFor() removes all three cleanly. Directly
 // observing "PostOpaque torn down strictly after renderFeatureNames and
 // strictly before renderPassNames" from outside this class is impractical
-// (none of UnregisterProjectFeature()/UnregisterPostOpaqueFeature()/
+// (none of UnregisterProjectFeature()/UnregisterStageFeature()/
 // UnregisterProjectRenderPassProvider() invoke their own owning
 // callback/provider on teardown, so there is no externally-observable side
 // effect to hook) - mirrors

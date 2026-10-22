@@ -51,15 +51,15 @@ bool RegisterUnderStage(RenderFeatureCompositor& compositor, const std::string& 
             [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, rg::TextureHandle, Extent2D, const ScenePassReadHandles&, const RenderFeatureCameraData&) { });
     }
     if (stageLabel == "PreOpaque") {
-        return compositor.RegisterPreOpaqueFeature(
+        return compositor.RegisterStageFeature(CompositorStage::PreOpaque,
             name, 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { });
     }
     if (stageLabel == "PostOpaque") {
-        return compositor.RegisterPostOpaqueFeature(name, 0,
+        return compositor.RegisterStageFeature(CompositorStage::PostOpaque, name, 0,
             [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { });
     }
     if (stageLabel == "PostTransparent") {
-        return compositor.RegisterPostTransparentFeature(name, 0,
+        return compositor.RegisterStageFeature(CompositorStage::PostTransparent, name, 0,
             [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { });
     }
     return false;

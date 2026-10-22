@@ -254,7 +254,7 @@ TEST(KitModuleCoreTest, AFeatureRegistersItsPassesAndAnInertCallbackSurvivesTheM
         EXPECT_TRUE(HasEntry(snapshot, "KitModuleTest.Post"));
         EXPECT_TRUE(HasEntry(snapshot, "KitModuleTest.Composite"));
 
-        for (const auto& entry : compositor->PreOpaqueFeaturesInPriorityOrder()) {
+        for (const auto& entry : compositor->StageFeaturesInPriorityOrder<CompositorStage::PreOpaque>()) {
             if (entry.name == "KitModuleTest.Pre") {
                 preOpaque = entry.callback;
             }

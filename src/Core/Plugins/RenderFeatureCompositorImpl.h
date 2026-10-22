@@ -4,6 +4,7 @@
 
 #include "RenderFeatureCompositor.h"
 #include "RenderFeatureNamePool.h"
+#include "RenderFeatureStageList.h"
 #include "../../Renderer/RenderGraph/PersistentTarget.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../../Renderer/RenderGraph/RenderPipeline.h"
@@ -31,11 +32,13 @@ struct RenderFeatureCompositor::Impl {
     // One persistent target per interned name: a feature's private target, a blend accumulator or a view seed.
     std::unordered_map<std::string, rg::PersistentTarget> targets;
 
-    std::vector<Entry> postComposite;                  // Sorted by priority ascending.
-    std::vector<Entry> preUi;                          // Sorted by priority ascending.
-    std::vector<PreOpaqueEntry> preOpaque;             // Sorted by priority ascending.
-    std::vector<PostOpaqueEntry> postOpaque;           // Sorted by priority ascending.
-    std::vector<PostTransparentEntry> postTransparent; // Sorted by priority ascending.
+    std::vector<Entry> postComposite; // Sorted by priority ascending.
+    std::vector<Entry> preUi;         // Sorted by priority ascending.
+
+    // One list per scene stage; a new stage is one member, one CompositorStage value and one case in VisitStage().
+    StageList<ProjectPreOpaqueCallback> preOpaque;
+    StageList<ProjectScenePassCallback> postOpaque;
+    StageList<ProjectScenePassCallback> postTransparent;
     RenderFeatureNamePool namePool;
 
     static constexpr int kMaxConcurrentProjectRenderFeatures = 16;
@@ -50,21 +53,50 @@ struct RenderFeatureCompositor::Impl {
     bool RegisterFeature(
         const GtePluginRenderFeatureDescriptor& descriptor, ProjectRenderFeatureCallback callback, RenderFeatureOwner owner);
     bool UnregisterProjectFeature(const char* name);
-    bool RegisterPreOpaqueFeatureInternal(
-        const std::string& name, std::int32_t priority, ProjectPreOpaqueCallback callback, RenderFeatureOwner owner);
-    bool UnregisterPreOpaqueFeature(const char* name);
-    bool RegisterPostOpaqueFeatureInternal(
-        const std::string& name, std::int32_t priority, ProjectScenePassCallback callback, RenderFeatureOwner owner);
-    bool UnregisterPostOpaqueFeature(const char* name);
-    bool RegisterPostTransparentFeatureInternal(
-        const std::string& name, std::int32_t priority, ProjectScenePassCallback callback, RenderFeatureOwner owner);
-    bool UnregisterPostTransparentFeature(const char* name);
+    bool RegisterStageFeature(CompositorStage stage, const std::string& name, std::int32_t priority,
+        ProjectPreOpaqueCallback callback, RenderFeatureOwner owner);
+    bool RegisterStageFeature(CompositorStage stage, const std::string& name, std::int32_t priority,
+        ProjectScenePassCallback callback, RenderFeatureOwner owner);
+    bool UnregisterStageFeature(CompositorStage stage, const char* name);
 
-    // Searches postComposite, then preUi.
+    // Calls fn(list, stageName) for the list of `stage`.
+    template <class Fn>
+    auto VisitStage(CompositorStage stage, Fn&& fn)
+    {
+        switch (stage) {
+        case CompositorStage::PreOpaque:
+            return fn(preOpaque, "PreOpaque");
+        case CompositorStage::PostOpaque:
+            return fn(postOpaque, "PostOpaque");
+        case CompositorStage::PostTransparent:
+            break;
+        }
+        return fn(postTransparent, "PostTransparent");
+    }
+
+    // Calls fn(list, stageName) for every scene stage in order.
+    template <class Fn>
+    void ForEachStage(Fn&& fn)
+    {
+        fn(preOpaque, "PreOpaque");
+        fn(postOpaque, "PostOpaque");
+        fn(postTransparent, "PostTransparent");
+    }
+    template <class Fn>
+    void ForEachStage(Fn&& fn) const
+    {
+        fn(preOpaque, "PreOpaque");
+        fn(postOpaque, "PostOpaque");
+        fn(postTransparent, "PostTransparent");
+    }
+
+    // Stage label of the feature called `name` in any list, or nullptr. Feature names share one namespace.
+    const char* StageOfName(const std::string& name);
+    bool IsNameTaken(const std::string& name) { return StageOfName(name) != nullptr; }
+
+    // The on-screen list (postComposite or preUi) that holds `name`, or nullptr.
+    std::vector<Entry>* EntryListOf(const std::string& name);
     Entry* FindEntryByName(const std::string& name);
-    PreOpaqueEntry* FindPreOpaqueEntryByName(const std::string& name);
-    PostOpaqueEntry* FindPostOpaqueEntryByName(const std::string& name);
-    PostTransparentEntry* FindPostTransparentEntryByName(const std::string& name);
 
     // The override flag AND, when `name` is a toggle-registry entry, that entry's flag.
     bool IsEffectivelyEnabled(const std::string& name, bool enabledOverride) const;
