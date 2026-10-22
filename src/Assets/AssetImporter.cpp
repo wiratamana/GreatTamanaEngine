@@ -80,9 +80,9 @@ AssetImportResult FinalizeMeshAssetImport(AssetDatabase& database, MeshData mesh
     std::filesystem::path gtaPath = preferredDestinationPath;
     gtaPath.replace_extension(".gta");
 
-    // Read the existing *.gta before ImportAsset() overwrites it.
+    // Keep the saved joint physics overrides of an existing *.gta (metadata only, no payload read).
     std::vector<JointPhysicsOverride> preservedJointPhysicsOverrides;
-    if (const std::optional<GtaFileData> existingGta = ReadGtaFile(gtaPath);
+    if (const std::optional<GtaMetadataData> existingGta = ReadGtaMetadataOnly(gtaPath);
         existingGta.has_value() && existingGta->header.Type() == AssetType::Mesh) {
         if (const std::optional<RigFileData> existingRig = DecodeRigDataFromBytes(existingGta->metadata);
             existingRig.has_value()) {

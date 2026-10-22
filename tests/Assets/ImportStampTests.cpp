@@ -58,7 +58,9 @@ TEST_F(ImportStampTest, WriteReplacesAnExistingStampAndLeavesNoTempFile)
 
     EXPECT_EQ(ReadImportStamp(m_root / "a.stamp")->importerVersion, 2);
     std::error_code ec;
-    EXPECT_FALSE(std::filesystem::exists(m_root / "a.stamp.tmp", ec));
+    for (const auto& entry : std::filesystem::directory_iterator(m_root, ec)) {
+        EXPECT_NE(entry.path().extension(), ".tmp") << entry.path();
+    }
 }
 
 TEST_F(ImportStampTest, MissingFileGivesNullopt)

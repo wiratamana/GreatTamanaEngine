@@ -663,6 +663,8 @@ add_library(gte_core STATIC
     src/Scene/SceneBuilder.cpp
     src/Assets/AssetTypes.h
     src/Assets/AssetTypes.cpp
+    src/Assets/AtomicFile.h
+    src/Assets/AtomicFile.cpp
     src/Assets/GtaFile.h
     src/Assets/GtaFile.cpp
     src/Assets/AssetDatabase.h

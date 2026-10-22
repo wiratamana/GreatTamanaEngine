@@ -1,7 +1,11 @@
 #include "ImportStamp.h"
 
+#include "AtomicFile.h"
+
+#include <array>
 #include <charconv>
 #include <fstream>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -21,31 +25,11 @@ bool ParseNumber(std::string_view text, T& out)
 
 bool WriteImportStamp(const std::filesystem::path& stampPath, const ImportStamp& stamp)
 {
-    std::filesystem::path tempPath = stampPath;
-    tempPath += ".tmp";
-    {
-        std::ofstream out(tempPath, std::ios::binary | std::ios::trunc);
-        if (!out) {
-            return false;
-        }
-        out << "importerVersion=" << stamp.importerVersion << '\n'
-            << "sourceBytes=" << stamp.sourceBytes << '\n'
-            << "materialCount=" << stamp.materialCount << '\n'
-            << "textureCount=" << stamp.textureCount << '\n';
-        out.flush();
-        if (!out) {
-            std::error_code ignored;
-            std::filesystem::remove(tempPath, ignored);
-            return false;
-        }
-    }
-    std::error_code ec;
-    std::filesystem::rename(tempPath, stampPath, ec);
-    if (ec) {
-        std::filesystem::remove(tempPath, ec);
-        return false;
-    }
-    return true;
+    const std::string text = "importerVersion=" + std::to_string(stamp.importerVersion) + "\nsourceBytes="
+        + std::to_string(stamp.sourceBytes) + "\nmaterialCount=" + std::to_string(stamp.materialCount)
+        + "\ntextureCount=" + std::to_string(stamp.textureCount) + "\n";
+    const std::array<ConstByteSpan, 1> parts = { std::as_bytes(std::span<const char>(text)) };
+    return WriteFileAtomically(stampPath, parts, nullptr, nullptr);
 }
 
 std::optional<ImportStamp> ReadImportStamp(const std::filesystem::path& stampPath)

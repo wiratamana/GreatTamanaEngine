@@ -21,6 +21,7 @@
 #include "../Application/EventTranslator.h"
 #include "../Application/EngineCommandDispatch.h"
 #include "../Application/MemorySnapshotBuilder.h"
+#include "../Assets/AtomicFile.h" // SweepStaleTempFiles().
 #include "../Encoding/CapturedPixelConversion.h" // gte::Encoding::IsBgraFormat() - the one canonical copy.
 #include "../Encoding/DepthVisualization.h"
 #include "../Encoding/HdrColorVisualization.h"
@@ -115,6 +116,11 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
 {
     // Installs the real log sink first: everything below, including the network server start, may log.
     gte::InstallLogSink(&gte::LoggerLogSink::Instance());
+
+    // Removes orphaned temp files of crashed writes before any job or import can run.
+    if (const std::size_t sweptTempFiles = SweepStaleTempFiles(ResolveProjectRootDirectory()); sweptTempFiles > 0) {
+        GTE_LOG_INFO("EditorHost", "Removed " + std::to_string(sweptTempFiles) + " stale temp file(s) from the project folder.");
+    }
 
     // Installs the pass-debug metadata sink and provider here: CreateEditorLayer() has no RenderGraph.
     // Order is irrelevant: Execute() only runs later, from Core::BuildFrame().
