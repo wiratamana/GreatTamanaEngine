@@ -29,6 +29,13 @@ public:
     // Copies into a HostWrite buffer already acquired in this callback. False when refused.
     bool Upload(Frame& frame, const void* data, std::uint64_t size, std::uint64_t offset = 0);
 
+    // Frees the buffer of this frame's view. False (kept) while frames overlap or after it was acquired
+    // this frame. True when freed or when there was nothing to free.
+    bool Release(Frame& frame);
+
+    // Allocated bytes of this frame's view; 0 when none.
+    std::uint64_t Capacity(Frame& frame) const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;

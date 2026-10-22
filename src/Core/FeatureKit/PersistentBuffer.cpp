@@ -145,4 +145,35 @@ bool PersistentBuffer::Upload(Frame& frame, const void* data, std::uint64_t size
     }
 }
 
+bool PersistentBuffer::Release(Frame& frame)
+{
+    detail::FrameContext* context = frame.Context();
+    if (context == nullptr || context->builder == nullptr) {
+        return false;
+    }
+    Impl::Slot& slot = m_impl->slots[rg::ViewScopeIndex(context->scope)];
+    if (slot.capacity == 0) {
+        return true;
+    }
+    if (context->builder->IsPersistentRegimePipelined()
+        || (slot.importedSerial == frame.Serial() && slot.importedBuilder == context->builder)) {
+        return false;
+    }
+    slot.buffer = rg::GpuBuffer{};
+    slot.capacity = 0;
+    slot.importedSerial = 0;
+    slot.importedBuilder = nullptr;
+    slot.imported = rg::BufferHandle{};
+    return true;
+}
+
+std::uint64_t PersistentBuffer::Capacity(Frame& frame) const
+{
+    detail::FrameContext* context = frame.Context();
+    if (context == nullptr) {
+        return 0;
+    }
+    return m_impl->slots[rg::ViewScopeIndex(context->scope)].capacity;
+}
+
 } // namespace gte::fx

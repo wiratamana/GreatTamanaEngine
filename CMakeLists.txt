@@ -482,6 +482,10 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/ChannelKey.cpp
     src/Core/FeatureKit/ClusterDrawTypes.h
     src/Core/FeatureKit/ClusterDrawTypes.cpp
+    src/Core/FeatureKit/ClusterNamePool.h
+    src/Core/FeatureKit/ClusterNamePool.cpp
+    src/Core/FeatureKit/ClusterDrawState.h
+    src/Core/FeatureKit/ClusterDrawState.cpp
     src/Core/FeatureKit/ChannelNames.h
     src/Core/FeatureKit/GatedBuild.h
     src/Core/FeatureKit/OffscreenTarget.h
