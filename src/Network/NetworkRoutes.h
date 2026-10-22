@@ -11,6 +11,7 @@
 #include "../Core/EditorCapabilities.h" // IHotReloadDebugCapability::Status/LedgerEntry.
 #include "../Core/FeatureKit/FeatureDebug.h"
 #include "../Core/Logging.h"
+#include "../Core/InstanceGridLimits.h"
 // editor-core-separation-7 campaign, PHASE4 - GET /render_graph's response
 // body needs rg::RenderGraphMetadata's own to_json() (see
 // BuildRenderGraphMetadataResponseJson() below).
@@ -977,26 +978,25 @@ std::string BuildGetLogsResponseJson(
 //   {"success": true, "cleared_count": N}
 std::string BuildClearLogsResponseJson(std::size_t clearedCount);
 
-// Upper bound of the "count" field of POST /spawn_gpu_driven_test_batch.
-inline constexpr std::uint32_t kMaxSpawnGridInstances = 100000;
-
 // Returns `value` as an integer when it is finite, an exact integer and inside [minValue, maxValue].
 // The range is checked before any cast, so no out-of-range conversion happens.
 std::optional<std::uint32_t> ExactUint32InRange(double value, std::uint32_t minValue, std::uint32_t maxValue);
 
-// Parsed POST /spawn_gpu_driven_test_batch body: {"count": <uint>}, optional (default 6).
-// An empty or non-JSON body is not an error: the count stays at its default.
-// "count" must be a JSON number holding an integer in [1, kMaxSpawnGridInstances].
-struct ParsedSpawnGpuDrivenTestBatchRequest {
+// Parsed POST /spawn_instance_grid body: {"count": <uint>, "spacing": <number>}, both optional.
+// An empty or non-JSON body is not an error: the defaults stay.
+// "count" is an integer in [1, kMaxSpawnGridInstances]; "spacing" is a finite number inside
+// [kMinSpawnGridSpacing, kMaxSpawnGridSpacing]. A wrong type or an out-of-range value is an error.
+struct ParsedSpawnInstanceGridRequest {
     bool valid = false;
     std::string errorMessage;
-    std::uint32_t instanceCount = 6;
+    std::uint32_t instanceCount = kDefaultSpawnGridInstances;
+    float spacing = kDefaultSpawnGridSpacing;
 };
-ParsedSpawnGpuDrivenTestBatchRequest ParseSpawnGpuDrivenTestBatchRequest(const std::string& jsonBody);
+ParsedSpawnInstanceGridRequest ParseSpawnInstanceGridRequest(const std::string& jsonBody);
 
 // Success shape: {"success":true,"instance_count":<uint>}
 // Failure shape: identical to BuildGenericErrorResponseJson() below.
-std::string BuildSpawnGpuDrivenTestBatchResponseJson(bool success, const std::string& errorMessage,
+std::string BuildSpawnInstanceGridResponseJson(bool success, const std::string& errorMessage,
     std::uint32_t instanceCount);
 
 // Parsed POST /build_clusters body:

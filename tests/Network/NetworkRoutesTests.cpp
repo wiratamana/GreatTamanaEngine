@@ -1635,44 +1635,65 @@ TEST(BuildOpenSponzaSceneResponseJsonTests, EscapesBackslashAndQuote)
 
 namespace {
 
+using gte::kDefaultSpawnGridSpacing;
+using gte::kMaxSpawnGridInstances;
+using gte::kMaxSpawnGridSpacing;
+using gte::kMinSpawnGridSpacing;
 using gte::Network::ExactUint32InRange;
-using gte::Network::kMaxSpawnGridInstances;
-using gte::Network::ParseSpawnGpuDrivenTestBatchRequest;
+using gte::Network::ParseSpawnInstanceGridRequest;
 
-TEST(SpawnBatchRequestTests, MissingBodyOrCountUsesDefault)
+TEST(SpawnInstanceGridRequestTests, MissingBodyOrFieldsUseDefaults)
 {
-    EXPECT_TRUE(ParseSpawnGpuDrivenTestBatchRequest("").valid);
-    const auto parsed = ParseSpawnGpuDrivenTestBatchRequest("{}");
+    EXPECT_TRUE(ParseSpawnInstanceGridRequest("").valid);
+    const auto parsed = ParseSpawnInstanceGridRequest("{}");
     EXPECT_TRUE(parsed.valid);
     EXPECT_EQ(parsed.instanceCount, 6u);
+    EXPECT_FLOAT_EQ(parsed.spacing, kDefaultSpawnGridSpacing);
 }
 
-TEST(SpawnBatchRequestTests, AcceptsCountInRange)
+TEST(SpawnInstanceGridRequestTests, AcceptsCountAndSpacingInRange)
 {
-    const auto parsed = ParseSpawnGpuDrivenTestBatchRequest(R"({"count": 12})");
+    const auto parsed = ParseSpawnInstanceGridRequest(R"({"count": 12, "spacing": 2.5})");
     ASSERT_TRUE(parsed.valid);
     EXPECT_EQ(parsed.instanceCount, 12u);
+    EXPECT_FLOAT_EQ(parsed.spacing, 2.5f);
 
-    const auto atLimit = ParseSpawnGpuDrivenTestBatchRequest(
+    const auto atLimit = ParseSpawnInstanceGridRequest(
         "{\"count\": " + std::to_string(kMaxSpawnGridInstances) + "}");
     ASSERT_TRUE(atLimit.valid);
     EXPECT_EQ(atLimit.instanceCount, kMaxSpawnGridInstances);
+
+    const auto nullFields = ParseSpawnInstanceGridRequest(R"({"count": null, "spacing": null})");
+    ASSERT_TRUE(nullFields.valid);
+    EXPECT_EQ(nullFields.instanceCount, 6u);
 }
 
-TEST(SpawnBatchRequestTests, RejectsBadCounts)
+TEST(SpawnInstanceGridRequestTests, RejectsBadCounts)
 {
     for (const char* body : { R"({"count": 0})", R"({"count": -5})", R"({"count": 2.5})", R"({"count": 1e300})",
              R"({"count": 4294967296})", R"({"count": 99999999999})", R"({"count": "7"})", R"({"count": true})" }) {
-        const auto parsed = ParseSpawnGpuDrivenTestBatchRequest(body);
+        const auto parsed = ParseSpawnInstanceGridRequest(body);
         EXPECT_FALSE(parsed.valid) << body;
         EXPECT_FALSE(parsed.errorMessage.empty()) << body;
     }
-    const auto overLimit = ParseSpawnGpuDrivenTestBatchRequest(
+    const auto overLimit = ParseSpawnInstanceGridRequest(
         "{\"count\": " + std::to_string(kMaxSpawnGridInstances + 1) + "}");
     EXPECT_FALSE(overLimit.valid);
 }
 
-TEST(SpawnBatchRequestTests, ExactUint32InRangeRejectsNonFiniteAndFractions)
+TEST(SpawnInstanceGridRequestTests, RejectsBadSpacing)
+{
+    for (const char* body : { R"({"spacing": 0})", R"({"spacing": -1})", R"({"spacing": 1e300})",
+             R"({"spacing": 0.05})", R"({"spacing": 1000.5})", R"({"spacing": "2"})", R"({"spacing": false})" }) {
+        const auto parsed = ParseSpawnInstanceGridRequest(body);
+        EXPECT_FALSE(parsed.valid) << body;
+        EXPECT_NE(parsed.errorMessage.find("spacing"), std::string::npos) << body;
+    }
+    EXPECT_TRUE(ParseSpawnInstanceGridRequest("{\"spacing\": " + std::to_string(kMinSpawnGridSpacing * 2.0f) + "}").valid);
+    EXPECT_TRUE(ParseSpawnInstanceGridRequest("{\"spacing\": " + std::to_string(kMaxSpawnGridSpacing) + "}").valid);
+}
+
+TEST(SpawnInstanceGridRequestTests, ExactUint32InRangeRejectsNonFiniteAndFractions)
 {
     const double nan = std::numeric_limits<double>::quiet_NaN();
     const double inf = std::numeric_limits<double>::infinity();

@@ -1283,8 +1283,8 @@ add_library(gte_editor STATIC
     src/Editor/EditorCamera.cpp
     src/Editor/SceneGridMath.h
     src/Editor/SceneGridMath.cpp
-    src/Editor/GpuDrivenBatchTestSpawner.h
-    src/Editor/GpuDrivenBatchTestSpawner.cpp
+    src/Editor/InstanceGridTestSpawner.h
+    src/Editor/InstanceGridTestSpawner.cpp
     src/Editor/TransformGizmo.h
     src/Editor/TransformGizmo.cpp
     src/Editor/DockLayout.h

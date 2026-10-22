@@ -173,7 +173,7 @@ chronological project history from the very first triangle demo onward.
   GPU-skinned model, every group below the threshold — keeps drawing through
   the byte-for-byte-unchanged per-entity path. A new "instances culled this
   frame" readout in the Editor's "Render Graph" panel, plus a new
-  `POST /spawn_gpu_driven_test_batch` HTTP endpoint/Editor menu action for
+  `POST /spawn_instance_grid` HTTP endpoint/Editor menu action for
   on-demand validation content, make the whole feature directly observable
   and testable without a mouse. Verified with a full clean build, a full
   `ctest` regression pass, and a live, HTTP-driven, screenshot-verified smoke

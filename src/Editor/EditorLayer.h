@@ -90,9 +90,9 @@ struct FrameDebuggerEventTextureResult {
     std::uint32_t height = 0;
 };
 
-// Result of SpawnGpuDrivenTestBatch(). `editorAvailable` is false when the build has no Editor,
+// Result of SpawnInstanceGrid(). `editorAvailable` is false when the build has no Editor,
 // so callers need not match on `errorMessage` text.
-struct GpuDrivenTestBatchSpawnResult {
+struct InstanceGridSpawnLayerResult {
     bool success = false;
     bool editorAvailable = true;
     std::string errorMessage;
@@ -248,11 +248,11 @@ public:
     // Poll until `found`; always not found for NullEditorLayer.
     virtual FrameDebuggerEventTextureResult FrameDebuggerGetEventTexture(int eventIndex) = 0;
 
-    // Spawns `instanceCount` entities sharing one indexed mesh and pipeline, forming a GPU-driven batch.
+    // Spawns `instanceCount` entities on a square grid sharing one clustered mesh and pipeline.
     // Always unavailable (success == false) for NullEditorLayer.
     // `sceneServicesSetLayout` is the layout of Core's scene-services descriptor set.
-    virtual GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(
-        Game& game, Renderer& renderer, std::uint32_t instanceCount, DescriptorSetLayoutHandle sceneServicesSetLayout) = 0;
+    virtual InstanceGridSpawnLayerResult SpawnInstanceGrid(Game& game, Renderer& renderer, std::uint32_t instanceCount,
+        float spacing, DescriptorSetLayoutHandle sceneServicesSetLayout) = 0;
 
     // Hands every built-in feature module to the Editor once; modules with a registered
     // Editor panel factory get their panel built.

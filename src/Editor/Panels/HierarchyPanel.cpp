@@ -1,8 +1,9 @@
 #include "HierarchyPanel.h"
 
 #include "../EditorContext.h"
-#include "../GpuDrivenBatchTestSpawner.h"
+#include "../InstanceGridTestSpawner.h"
 #include "../ImGuiUniqueId.h"
+#include "../../Core/InstanceGridLimits.h"
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/Name.h"
 #include "../../ECS/Components/Transform.h"
@@ -205,9 +206,10 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, Des
         if (ImGui::MenuItem("Create Directional Light")) {
             ctx.selection.SelectEntity(game.CreateDirectionalLightEntity());
         }
-        // Spawns 6 instances of one shared indexed mesh, enough to form a GPU-driven batch.
-        if (ImGui::MenuItem("Create GPU-Driven Test Batch")) {
-            GpuDrivenBatchTestSpawner::Spawn(game, renderer, /*instanceCount=*/6, sceneServicesSetLayout);
+        // Spawns a grid of instances sharing one clustered mesh.
+        if (ImGui::MenuItem("Create Instance Grid")) {
+            InstanceGridTestSpawner::Spawn(game, renderer, ctx.instanceGrid, kDefaultSpawnGridInstances,
+                kDefaultSpawnGridSpacing, sceneServicesSetLayout);
         }
         ImGui::EndPopup();
     }

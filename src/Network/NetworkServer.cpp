@@ -517,9 +517,9 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(BuildActivateTabResponseJson(outcome.success, outcome.tabExists, parsed.tabName), "application/json");
     });
 
-    // POST /spawn_gpu_driven_test_batch: parse, check the UI command bridge, submit, map the outcome.
-    server.Post("/spawn_gpu_driven_test_batch", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
-        const ParsedSpawnGpuDrivenTestBatchRequest parsed = ParseSpawnGpuDrivenTestBatchRequest(req.body);
+    // POST /spawn_instance_grid: parse, check the UI command bridge, submit, map the outcome.
+    server.Post("/spawn_instance_grid", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedSpawnInstanceGridRequest parsed = ParseSpawnInstanceGridRequest(req.body);
         if (!parsed.valid) {
             res.status = 400;
             res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
@@ -532,8 +532,9 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         }
 
         EditorUiCommandRequest request;
-        request.kind = EditorUiCommandKind::SpawnGpuDrivenTestBatch;
-        request.spawnGpuDrivenTestBatch.instanceCount = parsed.instanceCount;
+        request.kind = EditorUiCommandKind::SpawnInstanceGrid;
+        request.spawnInstanceGrid.instanceCount = parsed.instanceCount;
+        request.spawnInstanceGrid.spacing = parsed.spacing;
 
         const EditorUiCommandBridge::SubmitResult submit = uiCommandBridge->SubmitAndWait(request);
         if (submit.alreadyPending) {
@@ -547,7 +548,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             return;
         }
 
-        const SpawnGpuDrivenTestBatchOutcome& outcome = submit.result->spawnGpuDrivenTestBatch;
+        const SpawnInstanceGridOutcome& outcome = submit.result->spawnInstanceGrid;
         // NullEditorLayer reports editorAvailable == false: structurally unavailable, so 503.
         // Any other failure is a 400.
         if (!outcome.success) {
@@ -556,20 +557,10 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             return;
         }
         res.status = 200;
-        res.set_content(
-            BuildSpawnGpuDrivenTestBatchResponseJson(true, "", outcome.instanceCount), "application/json");
+        res.set_content(BuildSpawnInstanceGridResponseJson(true, "", outcome.instanceCount), "application/json");
     });
 
-    // task_manager/frame-debugger-3 campaign, PHASE7
-    // (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) -
-    // GET /frame_debugger/open, /enable, /capture, /select_event,
-    // /set_channel, /set_levels, /state. Every route below
-    // shares the SAME shape: parse (NetworkRoutes.h) -> bridge-unavailable
-    // (503) check -> build a FrameDebuggerCommandRequest ->
-    // FrameDebuggerCommandBridge::SubmitAndWait() ->
-    // RespondWithFrameDebuggerCommandResult() maps alreadyPending/timedOut/
-    // outcome to a status code + response body - mirroring every other
-    // bridge-backed route in this file exactly.
+    // /frame_debugger/*: parse -> bridge check (503) -> submit -> map alreadyPending/timedOut/outcome.
     server.Get("/frame_debugger/open", [frameDebuggerCommandBridge](const httplib::Request&, httplib::Response& res) {
         if (frameDebuggerCommandBridge == nullptr) {
             res.status = 503;

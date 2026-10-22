@@ -457,14 +457,15 @@ int EditorHost::Run()
             GTE_PROFILE_SCOPE("EditorHost::ExecuteEditorUiCommand");
             EditorUiCommandResult uiResult;
             uiResult.kind = uiRequest->kind;
-            // Two command kinds: spawn a GPU-driven test batch, or activate a tab.
-            if (uiRequest->kind == EditorUiCommandKind::SpawnGpuDrivenTestBatch) {
-                const GpuDrivenTestBatchSpawnResult spawned = m_editorLayer->SpawnGpuDrivenTestBatch(m_game, m_renderer,
-                    uiRequest->spawnGpuDrivenTestBatch.instanceCount, m_core.GetSceneServicesDescriptorSet().LayoutHandle());
-                uiResult.spawnGpuDrivenTestBatch.success = spawned.success;
-                uiResult.spawnGpuDrivenTestBatch.editorAvailable = spawned.editorAvailable;
-                uiResult.spawnGpuDrivenTestBatch.errorMessage = spawned.errorMessage;
-                uiResult.spawnGpuDrivenTestBatch.instanceCount = spawned.instanceCount;
+            // Two command kinds: spawn an instance grid, or activate a tab.
+            if (uiRequest->kind == EditorUiCommandKind::SpawnInstanceGrid) {
+                const InstanceGridSpawnLayerResult spawned = m_editorLayer->SpawnInstanceGrid(m_game, m_renderer,
+                    uiRequest->spawnInstanceGrid.instanceCount, uiRequest->spawnInstanceGrid.spacing,
+                    m_core.GetSceneServicesDescriptorSet().LayoutHandle());
+                uiResult.spawnInstanceGrid.success = spawned.success;
+                uiResult.spawnInstanceGrid.editorAvailable = spawned.editorAvailable;
+                uiResult.spawnInstanceGrid.errorMessage = spawned.errorMessage;
+                uiResult.spawnInstanceGrid.instanceCount = spawned.instanceCount;
             } else {
                 const TabActivationResult activation = m_editorLayer->ActivateTab(uiRequest->activateTab.tabName);
                 uiResult.activateTab.tabExists = activation.tabExists;

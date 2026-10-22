@@ -1063,11 +1063,11 @@ std::optional<std::uint32_t> ExactUint32InRange(double value, std::uint32_t minV
     return static_cast<std::uint32_t>(value);
 }
 
-ParsedSpawnGpuDrivenTestBatchRequest ParseSpawnGpuDrivenTestBatchRequest(const std::string& jsonBody)
+ParsedSpawnInstanceGridRequest ParseSpawnInstanceGridRequest(const std::string& jsonBody)
 {
-    ParsedSpawnGpuDrivenTestBatchRequest result;
+    ParsedSpawnInstanceGridRequest result;
 
-    // A missing or non-object body means "use the default count".
+    // A missing or non-object body means "use the defaults".
     const nlohmann::json parsed = ParseJsonNoThrow(jsonBody);
     if (parsed.is_discarded() || !parsed.is_object()) {
         result.valid = true;
@@ -1090,11 +1090,27 @@ ParsedSpawnGpuDrivenTestBatchRequest ParseSpawnGpuDrivenTestBatchRequest(const s
         result.instanceCount = *count;
     }
 
+    if (parsed.contains("spacing") && !parsed["spacing"].is_null()) {
+        const std::string rangeMessage = "spacing must be a number from " + std::to_string(kMinSpawnGridSpacing)
+            + " to " + std::to_string(kMaxSpawnGridSpacing);
+        if (!parsed["spacing"].is_number()) {
+            result.errorMessage = rangeMessage;
+            return result;
+        }
+        const double spacing = parsed["spacing"].get<double>();
+        if (!std::isfinite(spacing) || spacing < static_cast<double>(kMinSpawnGridSpacing)
+            || spacing > static_cast<double>(kMaxSpawnGridSpacing)) {
+            result.errorMessage = rangeMessage;
+            return result;
+        }
+        result.spacing = static_cast<float>(spacing);
+    }
+
     result.valid = true;
     return result;
 }
 
-std::string BuildSpawnGpuDrivenTestBatchResponseJson(
+std::string BuildSpawnInstanceGridResponseJson(
     bool success, const std::string& errorMessage, std::uint32_t instanceCount)
 {
     if (!success) {

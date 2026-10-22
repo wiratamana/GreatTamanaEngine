@@ -86,9 +86,7 @@ public:
     ~ScopedLogSinkInstall() { InstallLogSink(&LoggerLogSink::Instance()); }
 };
 
-// Builds a small, indexed, VertexLayout::PositionNormal quad Mesh - mirrors
-// src/Editor/GpuDrivenBatchTestSpawner.cpp's own validation-content quad
-// exactly (real, proven, in-tree precedent for hand-built test geometry).
+// Builds a small indexed PositionNormal quad Mesh for draw tests.
 Mesh MakeQuadMesh(Renderer& renderer, const char* debugName)
 {
     const MeshVertex vertices[4] = {

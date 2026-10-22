@@ -9,7 +9,7 @@
 #include "EditorCamera.h"
 #include "EditorContext.h"
 #include "EditorGpuMemoryNameOverlay.h"
-#include "GpuDrivenBatchTestSpawner.h"
+#include "InstanceGridTestSpawner.h"
 #include "ImGuiIdConflictGuard.h"
 #include "ImGuiMemoryTracker.h"
 #include "MeshClusterBuildRunner.h"
@@ -480,13 +480,13 @@ public:
         return result;
     }
 
-    // Thin forward into GpuDrivenBatchTestSpawner::Spawn(), which holds the real spawn logic.
-    GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(Game& game, Renderer& renderer, std::uint32_t instanceCount,
-        DescriptorSetLayoutHandle sceneServicesSetLayout) override
+    // Forwards into InstanceGridTestSpawner::Spawn() with the grid resources this layer owns.
+    InstanceGridSpawnLayerResult SpawnInstanceGrid(Game& game, Renderer& renderer, std::uint32_t instanceCount,
+        float spacing, DescriptorSetLayoutHandle sceneServicesSetLayout) override
     {
-        const GpuDrivenBatchTestSpawnResult spawned =
-            GpuDrivenBatchTestSpawner::Spawn(game, renderer, instanceCount, sceneServicesSetLayout);
-        GpuDrivenTestBatchSpawnResult result;
+        const InstanceGridSpawnResult spawned = InstanceGridTestSpawner::Spawn(
+            game, renderer, m_ctx.instanceGrid, instanceCount, spacing, sceneServicesSetLayout);
+        InstanceGridSpawnLayerResult result;
         result.success = spawned.success;
         result.errorMessage = spawned.errorMessage;
         result.instanceCount = spawned.instanceCount;

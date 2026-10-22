@@ -316,6 +316,15 @@ module or adding a new endpoint:
   build, `503` when busy or no editor is available, `504` after the 120 s wait
   (the build still finishes and writes the file atomically).
 
+- **`POST /spawn_instance_grid`** spawns a square grid of instances that share one clustered
+  mesh (built from a procedural grid) through the Editor UI command bridge. Body:
+  `{"count": 1..100000, "spacing": 0.1..1000}`, both optional (defaults 6 and 1.5).
+  `ParseSpawnInstanceGridRequest()` is pure and range-checks every number before any cast.
+  A grid above the cluster draw limits is refused, never truncated. Replies `200` with
+  `{"success":true,"instance_count":N}`, `400` for bad input or a refused grid, `503` when
+  no editor is available or another UI command is pending, `504` on a bridge timeout.
+  The shared mesh and pipeline live in `InstanceGridResources`, owned by the editor layer.
+
 
 - **`POST /instantiate_asset`** (`task_manager/stl-parser-2` campaign,
   `task_manager/stl-parser-2/PHASE0_MASTER_STRATEGY.md`) spawns an already-

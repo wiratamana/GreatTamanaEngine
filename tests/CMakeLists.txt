@@ -2961,7 +2961,7 @@ set(GTE_COMMENT_RULE_SRC
     Application/EngineCommandDispatch.cpp Application/EngineCommandDispatch.h Core/EditorCapabilities.h
     Core/Plugins/ProjectAssemblyHotReload.cpp
     Editor/DockLayout.cpp Editor/DockLayout.h Editor/EditorLayer.h Editor/EditorSceneIOCapability.cpp
-    Editor/EditorSceneIOCapability.h Editor/GpuDrivenBatchTestSpawner.cpp Editor/GpuDrivenBatchTestSpawner.h
+    Editor/EditorSceneIOCapability.h Editor/InstanceGridTestSpawner.cpp Editor/InstanceGridTestSpawner.h
     Editor/ImGuiEditorLayer.cpp Editor/NullEditorLayer.cpp Editor/Panels/HierarchyPanel.cpp
     Editor/Panels/HierarchyPanel.h Editor/Panels/ScenePanel.cpp Editor/Panels/ScenePanel.h
     Editor/SceneIO.cpp Editor/SceneIO.h

@@ -75,14 +75,13 @@ public:
     }
 
     // No Editor-only spawn tooling in a release build.
-    GpuDrivenTestBatchSpawnResult SpawnGpuDrivenTestBatch(
-        Game& /*game*/, Renderer& /*renderer*/, std::uint32_t /*instanceCount*/,
-        DescriptorSetLayoutHandle /*sceneServicesSetLayout*/) override
+    InstanceGridSpawnLayerResult SpawnInstanceGrid(Game& /*game*/, Renderer& /*renderer*/,
+        std::uint32_t /*instanceCount*/, float /*spacing*/, DescriptorSetLayoutHandle /*sceneServicesSetLayout*/) override
     {
-        GpuDrivenTestBatchSpawnResult result;
+        InstanceGridSpawnLayerResult result;
         result.success = false;
         result.editorAvailable = false;
-        result.errorMessage = "GPU-driven test batch spawning is not available in this build (the Editor module is not compiled in)";
+        result.errorMessage = "instance grid spawning is not available in this build (the Editor module is not compiled in)";
         return result;
     }
 

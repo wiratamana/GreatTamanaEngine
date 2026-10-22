@@ -1,10 +1,11 @@
 #pragma once
 
 // Cross-thread bridge for network-driven Editor UI commands: focusing a
-// docked tab, or spawning a GPU-driven test batch. See SyncCommandBridge.h
+// docked tab, or spawning an instance grid. See SyncCommandBridge.h
 // for the handoff mechanism.
 
 #include "SyncCommandBridge.h"
+#include "../Core/InstanceGridLimits.h"
 
 #include <cstdint>
 #include <string>
@@ -13,7 +14,7 @@ namespace gte {
 
 enum class EditorUiCommandKind {
     ActivateTab,
-    SpawnGpuDrivenTestBatch,
+    SpawnInstanceGrid,
 };
 
 // Plain request payload for one ActivateTab command.
@@ -21,10 +22,10 @@ struct ActivateTabCommand {
     std::string tabName;
 };
 
-// Plain request payload for one SpawnGpuDrivenTestBatch command.
-struct SpawnGpuDrivenTestBatchCommand {
-    // Must be >= 1 for a real batch to actually be spawned.
-    std::uint32_t instanceCount = 6;
+// Plain request payload for one SpawnInstanceGrid command.
+struct SpawnInstanceGridCommand {
+    std::uint32_t instanceCount = kDefaultSpawnGridInstances; // 1..kMaxSpawnGridInstances.
+    float spacing = kDefaultSpawnGridSpacing;                 // Centre distance between instances.
 };
 
 // One pending Editor UI command, tagged by `kind` - only the field matching
@@ -32,7 +33,7 @@ struct SpawnGpuDrivenTestBatchCommand {
 struct EditorUiCommandRequest {
     EditorUiCommandKind kind = EditorUiCommandKind::ActivateTab;
     ActivateTabCommand activateTab;
-    SpawnGpuDrivenTestBatchCommand spawnGpuDrivenTestBatch;
+    SpawnInstanceGridCommand spawnInstanceGrid;
 };
 
 // Outcome of one ActivateTab command.
@@ -47,11 +48,10 @@ struct ActivateTabOutcome {
     bool tabExists = false;
 };
 
-// Outcome of one SpawnGpuDrivenTestBatch command. `success == false` covers
-// both "instanceCount was 0" and "the Editor module is unavailable in this
-// build" - `errorMessage` explains which, `editorAvailable` distinguishes
-// the two without sniffing error text.
-struct SpawnGpuDrivenTestBatchOutcome {
+// Outcome of one SpawnInstanceGrid command. `success == false` covers a refused grid
+// and an Editor module that is unavailable in this build; `errorMessage` explains which,
+// `editorAvailable` distinguishes the two without sniffing error text.
+struct SpawnInstanceGridOutcome {
     bool success = false;
     bool editorAvailable = true;
     std::string errorMessage;
@@ -63,7 +63,7 @@ struct SpawnGpuDrivenTestBatchOutcome {
 struct EditorUiCommandResult {
     EditorUiCommandKind kind = EditorUiCommandKind::ActivateTab;
     ActivateTabOutcome activateTab;
-    SpawnGpuDrivenTestBatchOutcome spawnGpuDrivenTestBatch;
+    SpawnInstanceGridOutcome spawnInstanceGrid;
 };
 
 class EditorUiCommandBridge : public SyncCommandBridge<EditorUiCommandRequest, EditorUiCommandResult> {

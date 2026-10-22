@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ClusterToolUiState.h"
+#include "InstanceGridTestSpawner.h"
 #include "Selection.h"
 #include "../Core/Extent.h"
 #include "../Core/UiTextureHandle.h"
@@ -221,6 +222,9 @@ struct EditorContext {
 
     // Persistent Inspector state of the cluster and normals tools.
     ClusterToolUiState clusterTool;
+
+    // Mesh and pipeline shared by spawned instance grids; releases them with the editor layer.
+    InstanceGridResources instanceGrid;
 
     // Asset path (UTF-8) whose project record must be refreshed; set by a panel, consumed by the editor layer.
     std::string pendingAssetRecordRefresh;
