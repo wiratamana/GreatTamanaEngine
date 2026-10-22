@@ -1,6 +1,7 @@
 #include "Renderer.h"
 
 #include "../Core/ISurfaceProvider.h"
+#include "../Core/Logging.h"
 #include "Compute/ComputeDispatch.h"
 #include "Compute/ComputePipeline.h"
 #include "DescriptorSet.h"
@@ -133,6 +134,7 @@ Renderer::Renderer(ISurfaceProvider& surfaceProvider)
     , m_resources(m_device.Physical(), m_device.Native(), m_allocator.Native(), m_device.GraphicsQueue(),
           m_device.GraphicsQueueFamily(), m_depthFormat, m_memoryTracker, m_device)
 {
+    m_clusterSetLayoutHandle = RegisterDescriptorSetLayout(m_resources.ClusterBufferDescriptorSetLayout());
 }
 
 Renderer::~Renderer()
@@ -143,6 +145,7 @@ Renderer::~Renderer()
             vkDestroyFence(m_device.Native(), fence, nullptr);
         }
     }
+    UnregisterDescriptorSetLayout(m_clusterSetLayoutHandle);
 }
 
 void Renderer::OnResize(int width, int height)
@@ -564,6 +567,60 @@ std::vector<VkDescriptorSetLayout> Renderer::TakeQueuedBindingReleases() noexcep
 VkDescriptorSetLayout Renderer::InstanceBufferDescriptorSetLayout() const noexcept
 {
     return m_resources.InstanceBufferDescriptorSetLayout();
+}
+
+DescriptorSetLayoutHandle Renderer::ClusterBufferSetLayout() const noexcept
+{
+    return m_clusterSetLayoutHandle;
+}
+
+const Pipeline* Renderer::CreateClusterPipeline(
+    const ClusterPipelineKey& key, DescriptorSetLayoutHandle sceneServicesSetLayout)
+{
+    ClusterPipelineSlot& slot = m_clusterPipelines[ClusterPipelineCacheIndex(key)];
+    if (slot.pipeline != nullptr) {
+        assert(slot.sceneServicesSetLayout == sceneServicesSetLayout
+            && "Renderer::CreateClusterPipeline: one scene services layout per renderer");
+        return slot.sceneServicesSetLayout == sceneServicesSetLayout ? slot.pipeline.get() : nullptr;
+    }
+
+    const bool depthOnly = key.variant == ClusterPipelineVariant::DepthOnly;
+    if (!depthOnly && sceneServicesSetLayout == DescriptorSetLayoutHandle::Invalid) {
+        return nullptr;
+    }
+
+    const char* vertexPath = "shaders/MeshCluster.vert.spv";
+    const char* fragmentPath = "shaders/Mesh.frag.spv";
+    const char* debugName = "MeshCluster.vert/Mesh.frag";
+    switch (key.variant) {
+    case ClusterPipelineVariant::Lit:
+        break;
+    case ClusterPipelineVariant::IdTint:
+        fragmentPath = "shaders/MeshClusterTint.frag.spv";
+        debugName = "MeshCluster.vert/MeshClusterTint.frag";
+        break;
+    case ClusterPipelineVariant::DepthOnly:
+        vertexPath = "shaders/MeshClusterDepth.vert.spv";
+        fragmentPath = "shaders/MeshClusterDepth.frag.spv";
+        debugName = "MeshClusterDepth.vert/MeshClusterDepth.frag";
+        break;
+    }
+
+    try {
+        const VkFormat colorFormat = ToVkFormat(ScenePixelFormat());
+        const std::span<const VkFormat> colorFormats =
+            depthOnly ? std::span<const VkFormat>() : std::span<const VkFormat>(&colorFormat, 1);
+        slot.pipeline = std::make_unique<Pipeline>(m_resources.CreateClusterPipeline(colorFormats, vertexPath,
+            fragmentPath, key.cullBackFaces, debugName, depthOnly ? VK_NULL_HANDLE : Native(sceneServicesSetLayout)));
+        slot.sceneServicesSetLayout = sceneServicesSetLayout;
+    } catch (const std::exception& e) {
+        if (!slot.failureLogged) {
+            slot.failureLogged = true;
+            GTE_LOG_ERROR("Renderer", std::string("cluster pipeline '") + debugName + "' failed: " + e.what());
+        }
+        return nullptr;
+    }
+    return slot.pipeline.get();
 }
 
 bool Renderer::SupportsDrawIndirectCount() const noexcept

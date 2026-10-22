@@ -112,6 +112,23 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
         throw;
     }
     m_layoutCosts.emplace(m_instanceBufferSetLayout, PoolCapacity{ .sets = 1, .storageBuffers = 1 });
+
+    // Cluster draw layout: visible list at binding 0, instances at binding 1, both vertex-stage storage buffers.
+    try {
+        DescriptorSetLayoutBuilder clusterBufferLayoutBuilder(m_device);
+        m_clusterBufferSetLayout = clusterBufferLayoutBuilder.AddStorageBuffer(/*binding=*/0, VK_SHADER_STAGE_VERTEX_BIT)
+                                       .AddStorageBuffer(/*binding=*/1, VK_SHADER_STAGE_VERTEX_BIT)
+                                       .Build();
+    } catch (...) {
+        vkDestroyDescriptorSetLayout(m_device, m_instanceBufferSetLayout, nullptr);
+        vkDestroyDescriptorPool(m_device, firstComputePool, nullptr);
+        m_computePools.clear();
+        m_materialSets.reset();
+        vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
+        vkDestroyCommandPool(m_device, m_commandPool, nullptr);
+        throw;
+    }
+    m_layoutCosts.emplace(m_clusterBufferSetLayout, PoolCapacity{ .sets = 1, .storageBuffers = 2 });
 }
 
 GpuResourceFactory::~GpuResourceFactory()
@@ -135,6 +152,10 @@ void GpuResourceFactory::Destroy() noexcept
     if (m_instanceBufferSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(m_device, m_instanceBufferSetLayout, nullptr);
         m_instanceBufferSetLayout = VK_NULL_HANDLE;
+    }
+    if (m_clusterBufferSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_device, m_clusterBufferSetLayout, nullptr);
+        m_clusterBufferSetLayout = VK_NULL_HANDLE;
     }
     if (m_commandPool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
@@ -288,6 +309,15 @@ Pipeline GpuResourceFactory::CreatePipeline(std::span<const VkFormat> colorForma
     const VkDescriptorSetLayout instanceBufferSetLayout = useInstanceBuffer ? m_instanceBufferSetLayout : VK_NULL_HANDLE;
     return Pipeline(m_device, colorFormats, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath,
         vertexLayout, materialSetLayout, debugName, instanceBufferSetLayout, sceneServicesSetLayout);
+}
+
+Pipeline GpuResourceFactory::CreateClusterPipeline(std::span<const VkFormat> colorFormats,
+    const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, bool cullBackFaces,
+    const char* debugName, VkDescriptorSetLayout sceneServicesSetLayout) const
+{
+    return Pipeline(m_device, colorFormats, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath,
+        VertexLayout::PositionNormal, VK_NULL_HANDLE, debugName, m_clusterBufferSetLayout, sceneServicesSetLayout,
+        cullBackFaces ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE);
 }
 
 ComputePipeline GpuResourceFactory::CreateComputePipeline(const std::string& shaderSpirvPath,

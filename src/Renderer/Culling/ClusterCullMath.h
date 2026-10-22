@@ -244,6 +244,15 @@ struct ClusterPipelineKey {
     friend constexpr bool operator==(const ClusterPipelineKey&, const ClusterPipelineKey&) noexcept = default;
 };
 
+// Number of distinct pipeline keys (3 variants x 2 cull modes).
+inline constexpr std::size_t kClusterPipelineKeyCount = 6;
+
+// Dense index of a key in [0, kClusterPipelineKeyCount), for a fixed-size pipeline cache.
+constexpr std::size_t ClusterPipelineCacheIndex(const ClusterPipelineKey& key) noexcept
+{
+    return static_cast<std::size_t>(key.variant) * 2 + (key.cullBackFaces ? 1 : 0);
+}
+
 // The cone test is dropped for a depth-only lane, which draws both sides.
 constexpr ClusterCullFlags EffectiveClusterCullFlags(ClusterCullFlags flags, bool depthOnly) noexcept
 {

@@ -41,6 +41,7 @@
 #include <vector>
 
 namespace gte::rg {
+class ClusterDrawBindings;
 class CommandBuffer;
 class RenderGraph;
 class RenderGraphBuilder;
@@ -182,6 +183,14 @@ public:
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
         bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false,
         DescriptorSetLayoutHandle sceneServicesSetLayout = DescriptorSetLayoutHandle::Invalid) const;
+
+    // Layout of the cluster buffer set: binding 0 = visible list, binding 1 = instances.
+    DescriptorSetLayoutHandle ClusterBufferSetLayout() const noexcept;
+
+    // Cached cluster draw pipeline of `key` (PositionNormal vertices, set 0 = cluster buffer set). The lit and
+    // tint variants need `sceneServicesSetLayout` as set 1; depth-only ignores it. Null when the pipeline cannot
+    // be built (logged once per key). The pointer stays valid for the renderer's life. Main thread only.
+    const Pipeline* CreateClusterPipeline(const ClusterPipelineKey& key, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
     // Hardware capability checks.
     bool SupportsDrawIndirectCount() const noexcept;
@@ -330,6 +339,7 @@ private:
     ReflectedSetLayouts CreateReflectedSetLayouts(
         const std::vector<ReflectedDescriptorBinding>& bindings, const std::string& label) const;
 
+    friend class rg::ClusterDrawBindings;
     friend class rg::CommandBuffer;
     friend class rg::SceneRecording;
     friend class rg::Shader;
@@ -375,6 +385,15 @@ private:
     void ReleaseFence(VkFence fence) const noexcept;
     mutable std::mutex m_fencePoolMutex;
     mutable std::vector<VkFence> m_fencePool;
+
+    // Cluster draw pipelines by ClusterPipelineCacheIndex(); built on first use.
+    struct ClusterPipelineSlot {
+        std::unique_ptr<Pipeline> pipeline;
+        DescriptorSetLayoutHandle sceneServicesSetLayout = DescriptorSetLayoutHandle::Invalid;
+        bool failureLogged = false;
+    };
+    std::array<ClusterPipelineSlot, kClusterPipelineKeyCount> m_clusterPipelines;
+    DescriptorSetLayoutHandle m_clusterSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
 
     // Runs one-shot graphs; created on first use. Declared last so it is destroyed first.
     rg::RenderGraph& OneShotGraph();

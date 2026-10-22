@@ -75,6 +75,12 @@ public:
         bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE) const;
 
+    // Cluster draw pipeline: PositionNormal vertices, set 0 = cluster buffer set, set 1 = `sceneServicesSetLayout`
+    // when non-null. Empty `colorFormats` builds a depth-only pipeline.
+    Pipeline CreateClusterPipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
+        const std::string& fragmentShaderSpirvPath, bool cullBackFaces, const char* debugName,
+        VkDescriptorSetLayout sceneServicesSetLayout) const;
+
     ComputePipeline CreateComputePipeline(const std::string& shaderSpirvPath,
         const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts = {},
         std::optional<VkPushConstantRange> pushConstantRange = std::nullopt) const;
@@ -120,6 +126,7 @@ public:
 
     // Descriptors and Materials
     VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept { return m_instanceBufferSetLayout; }
+    VkDescriptorSetLayout ClusterBufferDescriptorSetLayout() const noexcept { return m_clusterBufferSetLayout; }
 
     // A new material (own params block and set) over `images`; null entries use the default image of the slot.
     MaterialTexture CreateMaterialVariant(const MaterialImages& images, const MaterialParams& params) const;
@@ -181,6 +188,7 @@ private:
     mutable std::array<std::shared_ptr<Texture2D>, kMaterialImageRoleCount> m_defaultMaterialImages;
 
     VkDescriptorSetLayout m_instanceBufferSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_clusterBufferSetLayout = VK_NULL_HANDLE; // 0 = visible list, 1 = instances.
 
     // Compute descriptor pools (newest last), their accounting and the live sets; guarded by the mutex.
     struct ComputeSetInfo {

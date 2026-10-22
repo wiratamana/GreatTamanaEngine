@@ -75,7 +75,7 @@ Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, 
 Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
     const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout,
     VkDescriptorSetLayout materialSetLayout, const char* debugName, VkDescriptorSetLayout instanceBufferSetLayout,
-    VkDescriptorSetLayout sceneServicesSetLayout)
+    VkDescriptorSetLayout sceneServicesSetLayout, VkCullModeFlags cullMode)
     : m_device(device)
     , m_debugName(debugName != nullptr ? debugName : std::string())
     , m_vertexLayout(vertexLayout)
@@ -130,8 +130,7 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         VkPipelineRasterizationStateCreateInfo rasterizer{};
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-        // No backface culling.
-        rasterizer.cullMode = VK_CULL_MODE_NONE;
+        rasterizer.cullMode = cullMode;
         rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
         rasterizer.lineWidth = 1.0f;
 

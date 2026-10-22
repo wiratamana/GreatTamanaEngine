@@ -925,6 +925,8 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/TransferPass.cpp
     src/Renderer/RenderGraph/MeshPass.h
     src/Renderer/RenderGraph/MeshPass.cpp
+    src/Renderer/RenderGraph/ClusterDrawBindings.h
+    src/Renderer/RenderGraph/ClusterDrawBindings.cpp
     src/Renderer/RenderGraph/IndirectDrawPass.h
     src/Renderer/RenderGraph/IndirectDrawPass.cpp
     src/Renderer/RenderGraph/RecordedPass.h

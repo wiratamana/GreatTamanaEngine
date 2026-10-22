@@ -20,7 +20,7 @@ inline constexpr std::size_t kPipelineMaxColorAttachments = 8;
 class Pipeline {
 public:
     // Single-format form; forwards to the span constructor. SPIR-V paths are compiled "<exe dir>/shaders/*.spv".
-    // Set 0: `materialSetLayout` (PositionNormalUv, PositionNormalUvTangent) or `instanceBufferSetLayout` (PositionNormalInstanced).
+    // Set 0: `materialSetLayout` (PositionNormalUv, PositionNormalUvTangent) or `instanceBufferSetLayout` (a buffer set).
     // Set 1: `sceneServicesSetLayout`. An empty set 0 with a set 1 gets a zero-binding filler (no gaps allowed).
     Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
@@ -28,14 +28,15 @@ public:
         VkDescriptorSetLayout instanceBufferSetLayout = VK_NULL_HANDLE,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE);
 
-    // Multi-render-target form: one opaque, full-write blend state per entry. `colorFormats` must be non-empty
-    // and at most kPipelineMaxColorAttachments. Other parameters behave as above.
+    // Multi-render-target form: one opaque, full-write blend state per entry. `colorFormats` may be empty (depth-only)
+    // and at most kPipelineMaxColorAttachments. `cullMode` defaults to none. Other parameters behave as above.
     Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
         const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
         VertexLayout vertexLayout = VertexLayout::PositionColor,
         VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr,
         VkDescriptorSetLayout instanceBufferSetLayout = VK_NULL_HANDLE,
-        VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE);
+        VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE,
+        VkCullModeFlags cullMode = VK_CULL_MODE_NONE);
 
     // Configurable form built from in-memory SPIR-V with caller-resolved blend, cull, compare, topology, extra
     // set layouts and an optional push-constant range. HasSceneServicesSet()/HasMaterialSet() stay false: the

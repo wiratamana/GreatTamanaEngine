@@ -1,8 +1,11 @@
 #include "IndirectDrawPass.h"
 
+#include "ClusterDrawBindings.h"
 #include "MeshPass.h"
 #include "RenderGraph.h"
 #include "../Renderer.h"
+
+#include <cassert>
 
 namespace gte::rg {
 
@@ -25,13 +28,18 @@ std::optional<std::string> ValidateIndirectDrawRecord(const IndirectDrawRecord& 
 
 void DeclareIndirectDraw(RenderGraphBuilder::PassBuilder& pass, const IndirectDrawRecord& record)
 {
-    pass.WriteColorAttachment(record.target);
+    if (!record.depthOnly) {
+        pass.WriteColorAttachment(record.target);
+    }
     pass.WriteDepthStencilAttachment(record.target);
     pass.ReadBuffer(record.indirect, ResourceAccess::IndirectCommandRead);
     if (record.count.IsValid()) {
         pass.ReadBuffer(record.count, ResourceAccess::IndirectCommandRead);
     }
     pass.ReadBuffer(record.instances, ResourceAccess::VertexShaderStorageRead);
+    if (record.visible.IsValid()) {
+        pass.ReadBuffer(record.visible, ResourceAccess::VertexShaderStorageRead);
+    }
 }
 
 void ExecuteIndirectDraw(PassContext& ctx, const IndirectDrawRecord& record, const IndirectDrawInputs& inputs)
@@ -39,6 +47,7 @@ void ExecuteIndirectDraw(PassContext& ctx, const IndirectDrawRecord& record, con
     constexpr const char* kCategory = "IndirectDrawPass";
     if (inputs.pipeline == nullptr || inputs.mesh == nullptr || ctx.renderer == nullptr) {
         ctx.ReportOnce(kCategory, "draw skipped: the pipeline, mesh or renderer is missing");
+        assert(!record.visible.IsValid() && "a visible-list draw must resolve its pipeline and mesh when declared");
         return;
     }
     const VkBuffer indirect = ctx.resolveBuffer(record.indirect);
@@ -47,10 +56,19 @@ void ExecuteIndirectDraw(PassContext& ctx, const IndirectDrawRecord& record, con
         ctx.ReportOnce(kCategory, "draw skipped: the indirect or count buffer did not resolve");
         return;
     }
+    DescriptorSetHandle instanceSet = inputs.instanceSet;
+    if (inputs.clusterBindings != nullptr) {
+        if (!inputs.clusterBindings->Rewrite(ctx, inputs.clusterBindingIndex, record.visible, record.instances)) {
+            ctx.ReportOnce(kCategory, "draw skipped: the cluster descriptor set could not be written");
+            assert(false && "a cluster draw must have a prepared set and resolvable buffers");
+            return;
+        }
+        instanceSet = inputs.clusterBindings->Set(inputs.clusterBindingIndex);
+    }
 
     const SceneRecording recording(ctx);
     ctx.renderer->SubmitIndirect(*inputs.pipeline, *inputs.mesh, indirect, /*indirectOffset=*/0, record.maxDrawCount,
-        count, /*countBufferOffset=*/0, inputs.instanceSet, inputs.sceneSet, inputs.viewProjection);
+        count, /*countBufferOffset=*/0, instanceSet, inputs.sceneSet, inputs.viewProjection);
     if (ctx.recordIndirectDraw) {
         ctx.recordIndirectDraw();
     }

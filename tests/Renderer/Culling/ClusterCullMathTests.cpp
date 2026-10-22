@@ -468,5 +468,22 @@ TEST(ClusterCullMath, CoincidentTriangleHelperIgnoresBadIndicesAndEmptyInput)
     EXPECT_FALSE(MeshHasCoincidentTriangles({}, {}));
 }
 
+// ---- pipeline cache index ----
+
+TEST(ClusterCullMath, PipelineCacheIndexIsDenseAndUnique)
+{
+    std::array<bool, kClusterPipelineKeyCount> seen{};
+    for (const ClusterPipelineVariant variant :
+        { ClusterPipelineVariant::Lit, ClusterPipelineVariant::IdTint, ClusterPipelineVariant::DepthOnly }) {
+        for (const bool cullBackFaces : { false, true }) {
+            const std::size_t index = ClusterPipelineCacheIndex(ClusterPipelineKey{ variant, cullBackFaces });
+            ASSERT_LT(index, kClusterPipelineKeyCount);
+            EXPECT_FALSE(seen[index]);
+            seen[index] = true;
+        }
+    }
+    EXPECT_TRUE(std::all_of(seen.begin(), seen.end(), [](bool b) { return b; }));
+}
+
 } // namespace
 } // namespace gte
