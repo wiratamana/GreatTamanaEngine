@@ -96,6 +96,9 @@
 # MikkTSpace sources fetched by cmake/FetchMikkTSpace.cmake
 /third_party/mikktspace/
 
+# meshoptimizer sources fetched by cmake/FetchMeshOptimizer.cmake
+/third_party/meshoptimizer/
+
 # GoogleTest artifacts fetched by cmake/FetchGTest.cmake (regenerated
 # automatically on configure when GTE_BUILD_TESTS is ON — see
 # CMakeLists.txt / cmake/FetchGTest.cmake / tests/CMakeLists.txt)

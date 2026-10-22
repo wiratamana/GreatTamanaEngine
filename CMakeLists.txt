@@ -276,6 +276,11 @@ fetch_cgltf()
 include(FetchMikkTSpace)
 fetch_mikktspace()
 
+# Fetches meshoptimizer (mesh clustering, MIT) into third_party/meshoptimizer and
+# defines the STATIC `meshoptimizer` target. See cmake/FetchMeshOptimizer.cmake.
+include(FetchMeshOptimizer)
+fetch_meshoptimizer()
+
 # Dear ImGui itself is always fetched/built - the Editor module is always
 # configured in this repo (editor-core-separation-1 campaign, PHASE8 -
 # GTE_ENABLE_EDITOR no longer exists anywhere in this codebase; PHASE9 does
@@ -1565,6 +1570,9 @@ target_link_libraries(gte_core PRIVATE cgltf)
 
 # MikkTSpace is used by src/Assets/MeshTangents.cpp only.
 target_link_libraries(gte_core PRIVATE mikktspace)
+
+# meshoptimizer is used by src/Assets/MeshClustering.cpp only.
+target_link_libraries(gte_core PRIVATE meshoptimizer)
 
 # editor-core-separation-2 campaign, PHASE4 - the REAL, mechanical proof
 # that gte_core.a links standalone (design doc Section 1.3, Rule 3) - a
