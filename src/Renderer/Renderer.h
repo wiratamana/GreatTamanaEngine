@@ -365,6 +365,10 @@ private:
     GpuResourceFactory m_resources;
     FrameRecorder m_frameRecorder;
 
+    // Zero-binding layout and its set; bound at set 0 of pipelines that have only a scene-services set.
+    OwnedDescriptorSetLayout m_emptySetLayout;
+    VkDescriptorSet m_emptySet = VK_NULL_HANDLE; // Freed in ~Renderer() before the pool goes away.
+
     VkCommandBuffer m_currentGraphPassCmd = VK_NULL_HANDLE;
     std::function<void(bool, std::uint32_t, std::uint32_t)> m_currentGraphPassRecordDrawStats;
 

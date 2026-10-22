@@ -547,8 +547,12 @@ public:
             result.message = *invalid;
             return result;
         }
-        // Same strings a click in the Project panel stores.
+        // Rebuilt from root + relative text so the strings equal what a Project panel click stores.
         const std::string relativePath = ProjectRelativeSlashPath(path, root);
+        if (relativePath.empty()) {
+            result.message = "the path has no project-relative form";
+            return result;
+        }
         m_ctx.selection.SelectAsset(PathToUtf8(root / PathFromUtf8(relativePath)), relativePath, false);
         result.success = true;
 #else

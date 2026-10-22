@@ -182,6 +182,7 @@ EditorUiCommandResult RunEditorUiCommand(const EditorUiCommandRequest& request, 
         case ClusterBuildStart::Busy: out.status = InspectorBuildClustersStatus::Busy; break;
         case ClusterBuildStart::Unavailable: out.status = InspectorBuildClustersStatus::Unavailable; break;
         case ClusterBuildStart::Refused: out.status = InspectorBuildClustersStatus::Refused; break;
+        case ClusterBuildStart::Ready: out.status = InspectorBuildClustersStatus::Unavailable; break; // Gate-only value.
         }
         out.message = std::move(started.message);
         break;

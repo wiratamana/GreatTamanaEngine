@@ -41,8 +41,9 @@ struct ClusterToolUiState {
     InspectorShownState shown;
 };
 
-// Outcome of asking the cluster tool to start a build.
+// Outcome of asking the cluster tool to start a build. Ready is only the gate result, never a start outcome.
 enum class ClusterBuildStart {
+    Ready,
     Started,
     Busy,
     Unavailable,
@@ -75,7 +76,8 @@ const ClusterEligibilityCache& RefreshClusterEligibility(
 std::optional<std::string> ValidateMeshAssetPath(
     const std::string& utf8Path, const std::filesystem::path& projectRoot, std::filesystem::path& outPath);
 
-// Project-root relative form of `absolute` with '/' separators; empty when it is not inside `projectRoot`.
+// Project-root relative form of `absolute` with '/' separators; empty on failure.
+// `absolute` must already be inside `projectRoot` (see ValidateMeshAssetPath()).
 std::string ProjectRelativeSlashPath(const std::filesystem::path& absolute, const std::filesystem::path& projectRoot);
 
 } // namespace gte

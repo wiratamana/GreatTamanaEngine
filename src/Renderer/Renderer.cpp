@@ -133,7 +133,9 @@ Renderer::Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation)
           surfaceProvider.Height(), m_allocator.Native(), m_depthFormat, m_memoryTracker, m_gpuTiming, m_device)
     , m_resources(m_device.Physical(), m_device.Native(), m_allocator.Native(), m_device.GraphicsQueue(),
           m_device.GraphicsQueueFamily(), m_depthFormat, m_memoryTracker, m_device)
+    , m_emptySetLayout(m_device.Native(), DescriptorSetLayoutBuilder(m_device.Native()).Build())
 {
+    m_emptySet = m_resources.AllocateDescriptorSet(m_emptySetLayout.Native()).Native();
     m_bufferSetLayoutHandle = RegisterDescriptorSetLayout(m_resources.BufferDescriptorSetLayout());
 }
 
@@ -141,6 +143,7 @@ Renderer::~Renderer()
 {
     if (m_device.Native() != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(m_device.Native());
+        m_resources.FreeDescriptorSet(m_emptySet);
         for (const VkFence fence : m_fencePool) {
             vkDestroyFence(m_device.Native(), fence, nullptr);
         }
@@ -476,9 +479,14 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
     const VkDescriptorSet effectiveSceneServicesSet =
         pipeline.HasSceneServicesSet() ? Native(sceneServicesSet) : VK_NULL_HANDLE;
 
-    // Bind material set only if the pipeline has a material layout.
-    const VkDescriptorSet effectiveMaterialDescriptorSet =
-        pipeline.HasMaterialSet() ? Native(materialDescriptorSet) : VK_NULL_HANDLE;
+    // Set 0: the material set, or the empty set when the pipeline only has a filler there.
+    // Either way set 0 matches the layout before set 1 is bound.
+    VkDescriptorSet effectiveMaterialDescriptorSet = VK_NULL_HANDLE;
+    if (pipeline.HasMaterialSet()) {
+        effectiveMaterialDescriptorSet = Native(materialDescriptorSet);
+    } else if (pipeline.HasSyntheticSetZero()) {
+        effectiveMaterialDescriptorSet = m_emptySet;
+    }
 
     // If a render graph pass is active, record directly to its command buffer.
     if (m_currentGraphPassCmd != VK_NULL_HANDLE) {

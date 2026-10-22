@@ -51,6 +51,9 @@ per vertex and every textured slice is a glTF material (`CanUseTangentLayout`). 
 them. A mesh `*.gta` without tangents still renders through the old path. Sun shadows need a depth-only pipeline per layout
 (see `shadow-mapping.md`).
 
+Set 0 is the material set; set 1 is the scene-services set. A pipeline without a material set but with a scene-services set
+gets an empty set-0 layout, and the draw binds the renderer's empty set at set 0 (`Renderer::Submit`).
+
 ## Shading model
 
 Sun plus hemisphere ambient; there is no environment map. Code: `src/Shaders/PbrBrdf.glsl`, `PbrMaterial.glsl`; CPU

@@ -95,7 +95,7 @@ std::string ProjectRelativeSlashPath(const std::filesystem::path& absolute, cons
 {
     std::error_code ec;
     const std::filesystem::path relative = std::filesystem::relative(absolute, projectRoot, ec);
-    if (ec || relative.empty() || *relative.begin() == "..") {
+    if (ec || relative.empty()) {
         return {};
     }
     std::string text = PathToUtf8(relative);

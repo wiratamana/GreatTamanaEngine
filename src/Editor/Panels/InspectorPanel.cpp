@@ -983,7 +983,7 @@ MeshClusterOptions MakeClusterOptions(const ClusterToolUiState& ui)
     return options;
 }
 
-// Started = the build button is usable now; any other status carries the reason it is not.
+// Ready = the build button is usable now; any other status carries the reason it is not.
 ClusterBuildStartResult CheckClusterBuildGate(
     ClusterToolUiState& ui, const MeshClusterBuildRunner* runner, const std::string& absolutePath)
 {
@@ -999,7 +999,7 @@ ClusterBuildStartResult CheckClusterBuildGate(
         gate.status = ClusterBuildStart::Busy;
         gate.message = "A cluster build is already running.";
     } else {
-        gate.status = ClusterBuildStart::Started;
+        gate.status = ClusterBuildStart::Ready;
     }
     return gate;
 }
@@ -1073,7 +1073,7 @@ void BuildClusterToolSection(EditorContext& ctx, const std::string& absolutePath
     ui.maxTriangles = ClampClusterMaxTriangles(ui.maxTriangles);
     ui.coneWeight = ClampClusterConeWeight(ui.coneWeight);
 
-    const bool buildBlocked = gate.status != ClusterBuildStart::Started;
+    const bool buildBlocked = gate.status != ClusterBuildStart::Ready;
     ImGui::BeginDisabled(buildBlocked);
     if (ImGui::Button("Build Clusters")) {
         StartInspectorClusterBuild(ctx, absolutePath);
@@ -1600,7 +1600,7 @@ ClusterBuildStartResult StartInspectorClusterBuild(EditorContext& ctx, const std
     if (result.status == ClusterBuildStart::Busy) {
         ui.startRefusedBusy = true;
     }
-    if (result.status != ClusterBuildStart::Started) {
+    if (result.status != ClusterBuildStart::Ready) {
         return result;
     }
     if (runner->Start(PathFromUtf8(absolutePath), MakeClusterOptions(ui), 0) == MeshClusterBuildRunner::StartResult::Busy) {
@@ -1609,6 +1609,7 @@ ClusterBuildStartResult StartInspectorClusterBuild(EditorContext& ctx, const std
         result.message = "A cluster build is already running.";
     } else {
         ui.startRefusedBusy = false;
+        result.status = ClusterBuildStart::Started;
     }
     return result;
 #else

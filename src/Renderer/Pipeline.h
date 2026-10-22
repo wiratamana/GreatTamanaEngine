@@ -72,6 +72,9 @@ public:
     // can drop a material set instead of binding it against a layout without set 0.
     bool HasMaterialSet() const noexcept { return m_hasMaterialSet; }
 
+    // True when set 0 is a zero-binding filler; draws must bind the renderer's empty set there.
+    bool HasSyntheticSetZero() const noexcept { return m_syntheticSetZeroLayout != VK_NULL_HANDLE; }
+
 private:
     void Destroy() noexcept;
 
