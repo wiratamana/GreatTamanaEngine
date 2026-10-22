@@ -3,7 +3,6 @@
 #include "../../Core/Logging.h"
 
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 #include <utility>
@@ -148,8 +147,8 @@ void VulkanInstance::CreateDebugMessenger()
     createInfo.pfnUserCallback = DebugMessengerCallback;
 
     if (vkCreateDebugUtilsMessengerEXT(m_instance, &createInfo, nullptr, &m_debugMessenger) != VK_SUCCESS) {
-        std::fprintf(stderr, "[Vulkan] Failed to create debug utils messenger - continuing without it.\n");
         m_debugMessenger = VK_NULL_HANDLE;
+        m_validation = ValidationState::MessengerFailed;
     }
 }
 

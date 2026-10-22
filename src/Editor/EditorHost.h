@@ -34,7 +34,7 @@ namespace gte {
 class EditorHost {
 public:
     // `forceGpuValidation` turns the GPU API validation on in any build type.
-    EditorHost(const std::string& title, int width, int height, bool forceGpuValidation = false);
+    EditorHost(const std::string& title, int width, int height, bool forceGpuValidation);
     ~EditorHost() = default;
 
     EditorHost(const EditorHost&) = delete;

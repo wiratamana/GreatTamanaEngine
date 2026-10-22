@@ -70,7 +70,7 @@ class VolumeTexturePreviewRenderer;
 class Renderer {
 public:
     // `forceValidation` turns API validation on in any build type (it is on by default in debug builds only).
-    explicit Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation = false);
+    explicit Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation);
     ~Renderer();
 
     // Logs once whether API validation is on, off, or was requested but is not installed.

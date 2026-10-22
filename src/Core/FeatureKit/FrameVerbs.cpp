@@ -21,28 +21,34 @@ rg::BlitFilter ToRgFilter(BlitFilter filter) noexcept
 
 } // namespace
 
-void Frame::ReportOnce(std::string_view text) const
+void Frame::ReportImpl(std::string_view text, bool warning) const
 {
     if (m_context != nullptr && m_context->builder != nullptr) {
-        m_context->builder->ReportOnce(kLogCategory, text);
+        if (warning) {
+            m_context->builder->ReportWarningOnce(kLogCategory, text);
+        } else {
+            m_context->builder->ReportOnce(kLogCategory, text);
+        }
         return;
     }
     if (!m_noContextLogged) {
         m_noContextLogged = true;
-        GTE_LOG_ERROR(kLogCategory, std::string(text));
+        if (warning) {
+            GTE_LOG_WARNING(kLogCategory, std::string(text));
+        } else {
+            GTE_LOG_ERROR(kLogCategory, std::string(text));
+        }
     }
+}
+
+void Frame::ReportOnce(std::string_view text) const
+{
+    ReportImpl(text, false);
 }
 
 void Frame::ReportWarningOnce(std::string_view text) const
 {
-    if (m_context != nullptr && m_context->builder != nullptr) {
-        m_context->builder->ReportWarningOnce(kLogCategory, text);
-        return;
-    }
-    if (!m_noContextLogged) {
-        m_noContextLogged = true;
-        GTE_LOG_WARNING(kLogCategory, std::string(text));
-    }
+    ReportImpl(text, true);
 }
 
 float Frame::DeltaSeconds() const noexcept

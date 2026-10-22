@@ -6,6 +6,7 @@
 #include "../../Assets/MeshCluster.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
+#include "ClusterPassCounts.h"
 #include "CullingTypes.h"
 
 #include <array>
@@ -64,17 +65,7 @@ inline constexpr std::uint64_t kClusterDrawBudgetBytes = std::uint64_t{ 256 } <<
 inline constexpr std::uint64_t kClusterDrawProcessBudgetBytes = std::uint64_t{ 512 } << 20;
 inline constexpr std::uint32_t kClusterIdleReleaseFrames = 600;
 
-inline constexpr std::uint32_t kMainViewLanes = 1;
-inline constexpr std::uint32_t kMainViewPartSlots = 8;
-inline constexpr std::uint32_t kDepthOnlyLanes = 4;
-inline constexpr std::uint32_t kDepthOnlyPartSlots = 4;
-
-// Pass names per part: reset, cull, draw, stats, stats clear, stats copy. Depth-only chains have no stats.
-inline constexpr std::uint32_t kMainViewPassNamesPerPart = 6;
-inline constexpr std::uint32_t kDepthOnlyPassNamesPerPart = 3;
-inline constexpr std::uint32_t kClusterPassNameCount = kMainViewLanes * kMainViewPartSlots * kMainViewPassNamesPerPart
-    + kDepthOnlyLanes * kDepthOnlyPartSlots * kDepthOnlyPassNamesPerPart;
-
+// Lane, slot and pass-name counts live in ClusterPassCounts.h.
 // Bytes per work item: one indirect command (5 uints) and one visible record (uvec2).
 inline constexpr std::uint64_t kClusterCommandBytes = 20;
 inline constexpr std::uint64_t kClusterVisibleBytes = 8;
@@ -238,8 +229,7 @@ bool CameraIsFinite(const Mat4& viewProjection, const Vec3& eyeOrDirection) noex
 
 // The pyramid is one R32_Float atlas of farthest-depth levels. Level 0 is half the scene depth size;
 // level k reduces blocks of 2^(k+1) depth texels. Every level reads the scene depth only.
-inline constexpr std::uint32_t kHizMaxLevel = 5;
-inline constexpr std::uint32_t kHizLevelCount = kHizMaxLevel + 1;
+// kHizMaxLevel and kHizLevelCount live in ClusterPassCounts.h.
 
 // Clean builds in a row needed before the pyramid may cull (first frame, resize, cut and a missed build reset it).
 inline constexpr std::uint32_t kHizValidFramesRequired = 2;

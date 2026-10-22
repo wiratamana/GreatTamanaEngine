@@ -10,9 +10,10 @@ namespace gte {
 
 // Outcome of the validation request made at instance creation.
 enum class ValidationState : std::uint8_t {
-    Off,          // Not requested.
-    On,           // Layer and debug messenger active.
-    LayerMissing, // Requested, but the layer is not installed.
+    Off,             // Not requested.
+    On,              // Layer loaded and debug messenger active.
+    LayerMissing,    // Requested, but the layer is not installed.
+    MessengerFailed, // Layer loaded, but the debug messenger could not be created.
 };
 
 // RAII wrapper around a VkInstance and its debug messenger (when validation is on). Also does the

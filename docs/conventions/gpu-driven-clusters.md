@@ -139,7 +139,7 @@ logs once, and the CPU path draws. There is no padded fallback.
 
 ## Limits and budgets
 
-All math is 64-bit. Constants live in `Renderer/Culling/ClusterCullMath.h`.
+All math is 64-bit. Constants live in `Renderer/Culling/ClusterCullMath.h`; lane, slot and pass-name counts in `ClusterPassCounts.h`.
 
 | Limit | Value |
 |---|---|
@@ -195,11 +195,14 @@ Both vertex shaders declare `invariant gl_Position` with the same expression ord
 - `POST /build_clusters` rebuilds a table. Read `GET /get_logs` for the `MeshClustering` lines.
 - Pass stats are keyed by pass name, not by view. Measure with only the Game view active.
 - **Validation.** Start the exe with `--vulkan-validation` to turn the Vulkan validation layer on in any
-  build type (default: on in Debug, off in Release). Read `GET /get_logs?category=Vulkan`. The first line
-  says `validation enabled`, `validation disabled` or `validation requested but layer not available`.
+  build type (default: on in Debug, off in Release). Read `GET /get_logs?category=Vulkan`. The log sink is
+  installed first in `main()`, so init-time validation messages are kept. The state line says
+  `validation enabled`, `validation disabled` (Info), `validation requested but layer not available` or
+  `validation layer loaded but debug messenger failed` (Warning).
 - **Move the Game camera.** `POST /set_entity_trs {"name":"Camera","translation":{"x":..,"y":..,"z":..}}`.
-- Every cluster pass, pyramid level and replay step has a GPU timing slot in `/render_graph`
-  (`RenderGraph::kSynchronousTimingSlotBudget` is the worst-case sum).
+- Every cluster pass and pyramid level has a GPU timing slot in `/render_graph`
+  (`RenderGraph::kSynchronousTimingSlotBudget` is the worst-case sum). Capture replay steps get a slot only up
+  to `kReplayTimingNames` (64); the rest log once and read as absent.
 
 ## Known limits
 

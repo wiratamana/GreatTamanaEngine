@@ -155,7 +155,10 @@ void Renderer::LogValidationState() const
         GTE_LOG_INFO("Vulkan", "validation enabled");
         break;
     case ValidationState::LayerMissing:
-        GTE_LOG_INFO("Vulkan", "validation requested but layer not available");
+        GTE_LOG_WARNING("Vulkan", "validation requested but layer not available");
+        break;
+    case ValidationState::MessengerFailed:
+        GTE_LOG_WARNING("Vulkan", "validation layer loaded but debug messenger failed");
         break;
     case ValidationState::Off:
         GTE_LOG_INFO("Vulkan", "validation disabled");

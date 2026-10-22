@@ -5,6 +5,8 @@
 
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetImporter.h"
+#include "Core/LogSink.h"
+#include "Editor/Logger.h"
 
 #include <cstdio>
 #include <exception>
@@ -42,6 +44,9 @@ bool HasFlag(int argc, char* argv[], const char* flag)
 
 int main(int argc, char* argv[])
 {
+    // First thing: every later log line, including Vulkan validation output during init, reaches the log.
+    gte::InstallLogSink(&gte::LoggerLogSink::Instance());
+
     if (argc >= 4 && std::string(argv[1]) == "--reimport") {
         return RunReimportCli(argv[2], argv[3]);
     }

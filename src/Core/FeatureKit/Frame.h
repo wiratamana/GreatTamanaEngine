@@ -173,6 +173,7 @@ protected:
 
 private:
     void SetSceneUniformBytes(std::span<const std::byte> bytes);
+    void ReportImpl(std::string_view text, bool warning) const;
     bool ClearReadbackCore(rg::StaticName passName, detail::ReadbackCore& core, std::uint32_t fillValue);
     bool CopyReadbackCore(rg::StaticName passName, detail::ReadbackCore& core);
 

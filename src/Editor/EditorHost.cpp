@@ -1,6 +1,6 @@
 #include "EditorHost.h"
 
-#include "Logger.h" // LoggerLogSink::Instance().
+#include "Logger.h"
 #include "EditorSceneIOCapability.h"
 #include "EditorLogQueryCapability.h"
 #include "EditorHotReloadDebugCapability.h"
@@ -165,7 +165,8 @@ void RunClusterBuildFollowUp(const MeshClusterFinishedBuild& finished, Game& gam
     GTE_LOG_INFO("MeshClustering",
         "Cluster build finished for " + pathUtf8 + ": " + std::to_string(report.clusterCount) + " clusters, vertices "
             + std::to_string(report.vertexCountBefore) + " -> " + std::to_string(report.vertexCountAfter) + ", "
-            + std::to_string(static_cast<std::int64_t>(report.milliseconds + 0.5)) + " ms");
+            + std::to_string(static_cast<std::int64_t>(report.milliseconds + 0.5)) + " ms"
+            + (report.poorFill ? ", poor fill" : ""));
 }
 
 } // namespace
@@ -205,8 +206,6 @@ EditorHost::EditorHost(const std::string& title, int width, int height, bool for
           &s_editorHotReloadDebugCapability, &s_editorProjectLifecycleCapability, &s_editorProjectLifecycleCapability,
           &m_featureDebugCommandBridge)
 {
-    // Installs the real log sink first: everything below, including the network server start, may log.
-    gte::InstallLogSink(&gte::LoggerLogSink::Instance());
     m_renderer.LogValidationState();
 
     // Removes orphaned temp files of crashed writes before any job or import can run.
