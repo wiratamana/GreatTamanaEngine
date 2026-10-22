@@ -19,7 +19,7 @@ enum class MeshSourceFormat {
     Gltf = 3,
 };
 
-// When an import writes a cluster table. Auto only clusters large, static, untextured meshes.
+// When an import writes a cluster table. Auto only clusters large, static meshes with no textured or PBR material.
 enum class ClusterBuildMode : std::uint8_t { Off, Auto, Always };
 
 struct MeshImportOptions {

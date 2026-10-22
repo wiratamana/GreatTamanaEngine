@@ -95,12 +95,9 @@ const char* RigClusterBlocker(const MeshData& mesh, const RigFileData& rig) noex
     return nullptr;
 }
 
-bool AnyMaterialHasTexture(const std::vector<Material>& materials) noexcept
+bool AnyMaterialDrawsTextured(const std::vector<Material>& materials) noexcept
 {
-    return std::any_of(materials.begin(), materials.end(), [](const Material& m) {
-        return m.textureIndex >= 0 || m.normalTextureIndex >= 0 || m.metallicRoughnessTextureIndex >= 0
-            || m.occlusionTextureIndex >= 0 || m.emissiveTextureIndex >= 0;
-    });
+    return std::any_of(materials.begin(), materials.end(), MaterialDrawsTextured);
 }
 
 std::string FormatMilliseconds(double milliseconds)
@@ -125,9 +122,14 @@ ClusterImportOutcome RunClusterStep(MeshData& mesh, const RigFileData& rig, cons
         }
         return outcome;
     }
-    if (automatic
-        && (mesh.indices.size() / 3 < options.autoTriangleThreshold || AnyMaterialHasTexture(rig.materials.materials))) {
-        return outcome;
+    if (automatic) {
+        if (mesh.indices.size() / 3 < options.autoTriangleThreshold) {
+            return outcome;
+        }
+        if (AnyMaterialDrawsTextured(rig.materials.materials)) {
+            outcome.message = "Clusters skipped: a material is textured or uses PBR shading (use mode Always).";
+            return outcome;
+        }
     }
 
     const MeshClusterReport report

@@ -84,6 +84,17 @@ struct Material {
 // True for glTF materials: they use the PBR shaders and apply `diffuse` as a base color factor.
 inline bool UsesPbrShading(const Material& m) noexcept { return m.useBaseColorFactor; }
 
+// True when any texture slot of the material is set.
+inline bool HasAnyTextureIndex(const Material& m) noexcept
+{
+    return m.textureIndex >= 0 || m.normalTextureIndex >= 0 || m.metallicRoughnessTextureIndex >= 0
+        || m.occlusionTextureIndex >= 0 || m.emissiveTextureIndex >= 0;
+}
+
+// True when a mesh slice with this material takes the textured draw path (never the cluster path).
+// Every PBR material does, even without a texture index: it draws with a flat factor color.
+inline bool MaterialDrawsTextured(const Material& m) noexcept { return UsesPbrShading(m) || HasAnyTextureIndex(m); }
+
 struct MaterialData {
     // May hold entries with guid == Guid::Invalid() (source missing or undecodable).
     std::vector<MaterialTextureRef> textures;

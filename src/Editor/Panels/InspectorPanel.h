@@ -1,5 +1,9 @@
 #pragma once
 
+#include "../ClusterToolUiState.h"
+
+#include <string>
+
 namespace gte {
 
 class Registry;
@@ -82,5 +86,9 @@ void BuildInspectorPanel(Registry& registry, EditorContext& ctx, Renderer& rende
 void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& physicsSystem,
     MeshInstantiationSystem& meshInstantiationSystem);
 #endif
+
+// Starts a cluster build of the mesh asset at `absolutePath` with the options in ctx.clusterTool.
+// Used by the "Build Clusters" button and by the HTTP route, so both take the same path.
+ClusterBuildStartResult StartInspectorClusterBuild(EditorContext& ctx, const std::string& absolutePath);
 
 } // namespace gte

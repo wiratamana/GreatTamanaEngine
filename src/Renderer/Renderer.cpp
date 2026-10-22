@@ -155,7 +155,8 @@ void Renderer::LogValidationState() const
         GTE_LOG_INFO("Vulkan", "validation enabled");
         break;
     case ValidationState::LayerMissing:
-        GTE_LOG_WARNING("Vulkan", "validation requested but layer not available");
+        GTE_LOG_WARNING("Vulkan",
+            "validation requested but layer not available; set VK_LAYER_PATH to the folder of VkLayer_khronos_validation.json");
         break;
     case ValidationState::MessengerFailed:
         GTE_LOG_WARNING("Vulkan", "validation layer loaded but debug messenger failed");

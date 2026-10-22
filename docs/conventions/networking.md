@@ -326,6 +326,29 @@ module or adding a new endpoint:
   no editor is available or another UI command is pending, `504` on a bridge timeout.
   The shared mesh and pipeline live in `InstanceGridResources`, owned by the editor layer.
 
+- **Inspector debug routes** (`GET /select_asset`, `GET /inspector_state`,
+  `POST /inspector/build_clusters`) and **`GET /split_views`** use the same
+  `EditorUiCommandBridge` as `/activate_tab`: new `EditorUiCommandKind` values `SelectAsset`,
+  `InspectorState`, `InspectorBuildClusters` and `SplitViews`, drained by `EditorHost` between
+  `NewFrame()` and `BuildUI()`. Parsing is pure (`NetworkRoutes.h`) and Tier-1 tested.
+  - `GET /select_asset?path=<absolute .gta>` selects that mesh asset as the Inspector target, like a
+    click in the Project panel. The path must be inside the project root. `400` for a bad path or a
+    file that is not a mesh asset, `503` without an editor.
+  - `GET /inspector_state` returns `{"selection_kind","selected_path","shown_path","clusters_text",
+    "cluster_status","build_button_enabled","build_button_disabled_reason","build_running"}`. The
+    strings are what the Inspector drew on its last frame (`clusters_text` is the `Clusters: N` line,
+    `cluster_status` the cluster tool status line); they are empty when nothing was drawn for that field.
+  - `POST /inspector/build_clusters` presses "Build Clusters" for the selected asset. Body: the optional
+    fields of `POST /build_clusters` without `gta_path`, with the same checks. It calls
+    `StartInspectorClusterBuild()`, the function the button calls, so the weld and limits land in the
+    Inspector controls. `200` = started (read the report from `/inspector_state` once
+    `build_running` is false), `400` = refused (nothing selected, not eligible), `503` = a build is
+    running or no builder. The route never polls the runner; `EditorHost` is the only poller.
+  - `GET /split_views?enabled=true|false` docks `Game` beside `Scene` (`true`) or back as a tab of
+    `Scene` (`false`) with ImGui DockBuilder (`SetSceneGameSplit()` in `DockLayout.cpp`). Both windows
+    then have a real dock id, so the default-layout rebuild (`DefaultDockLayoutIsNeeded()`) never
+    fires. Replies `409` until the dock layout is built. Both views render from the next frame on.
+
 
 - **`POST /instantiate_asset`** (`task_manager/stl-parser-2` campaign,
   `task_manager/stl-parser-2/PHASE0_MASTER_STRATEGY.md`) spawns an already-

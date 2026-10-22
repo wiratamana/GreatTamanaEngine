@@ -1033,6 +1033,53 @@ struct ClusterReportResponseView {
 // "avg_vertices_per_cluster":...,"poor_fill":...,"milliseconds":...}
 std::string BuildClustersResponseJson(const ClusterReportResponseView& view);
 
+// Parsed POST /inspector/build_clusters body: the optional fields of POST /build_clusters, without
+// gta_path (the Inspector's selected asset is the target). A blank body keeps every default. The same
+// range checks apply. `gtaPath` stays empty.
+ParsedBuildClustersRequest ParseInspectorBuildClustersRequest(const std::string& jsonBody);
+
+// Success shape: {"success":true,"started":true}
+std::string BuildInspectorBuildStartedResponseJson();
+
+// Parsed GET /select_asset query: "path" is required, absolute, and ends in ".gta" (any case).
+// The editor checks that it is a mesh asset inside the project root.
+struct ParsedSelectAssetQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::string path;
+};
+ParsedSelectAssetQuery ParseSelectAssetQuery(const std::string& pathParam);
+
+// Success shape: {"success":true,"selected_path":"..."}
+std::string BuildSelectAssetResponseJson(const std::string& selectedPath);
+
+// Network-side copy of what the Inspector showed on its last draw.
+struct InspectorStateResponseView {
+    std::string selectionKind;
+    std::string selectedPath;
+    std::string shownPath;
+    std::string clustersText;
+    std::string clusterStatus;
+    bool buildEnabled = false;
+    std::string buildDisabledReason;
+    bool buildRunning = false;
+};
+
+// {"selection_kind","selected_path","shown_path","clusters_text","cluster_status",
+//  "build_button_enabled","build_button_disabled_reason","build_running"}
+std::string BuildInspectorStateResponseJson(const InspectorStateResponseView& view);
+
+// Parsed GET /split_views query: "enabled" must be exactly "true" or "false".
+struct ParsedSplitViewsQuery {
+    bool valid = false;
+    std::string errorMessage;
+    bool enabled = false;
+};
+ParsedSplitViewsQuery ParseSplitViewsQuery(const std::string& enabledParam);
+
+// Success shape: {"success":true,"split":<bool>}
+std::string BuildSplitViewsResponseJson(bool split);
+
 // GET /render_graph/set_pass_enabled, /passes, /set_feature_enabled,
 // /set_feature_priority query parsing and response building.
 // Every function below stays pure: no httplib/socket/thread/Core/Editor

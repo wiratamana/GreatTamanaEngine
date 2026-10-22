@@ -63,8 +63,11 @@ Three doors give the same bytes for the same input and options:
 
 1. **Import hook.** `ImportAssetFile()` takes a required `MeshImportOptions`. `Off` never
    clusters. `Always` clusters rigless meshes. `Auto` (default) needs at least
-   `autoTriangleThreshold` (100000) triangles, no texture index on any material, and skips
-   the tail when the fill is poor. The cheap pre-check stops right after the weld.
+   `autoTriangleThreshold` (100000) triangles, no material that counts as textured, and skips
+   the tail when the fill is poor. A material counts as textured when it has any texture index or
+   uses PBR shading (`MaterialDrawsTextured()`): the runtime draws every PBR slice on the textured
+   path, which never reads clusters. So `Auto` skips glTF meshes; use `Always` for them. `Always`
+   ignores this rule. The cheap pre-check stops right after the weld.
    Clustering never fails an import: `clusterMessage` carries the reason.
 2. **Inspector.** "Build Clusters" in the mesh asset tools starts the editor's single
    `MeshClusterBuildRunner`. `EditorHost` polls it once per frame.

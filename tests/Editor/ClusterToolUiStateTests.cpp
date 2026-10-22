@@ -3,7 +3,10 @@
 #include "Editor/ClusterToolUiState.h"
 
 #include <cmath>
+#include <filesystem>
 #include <limits>
+#include <optional>
+#include <string>
 
 #include <gtest/gtest.h>
 
@@ -52,6 +55,32 @@ TEST(ClusterToolUiStateTest, MissingFileIsRefusedAndCachedWithinTheRecheckInterv
     // Inside the interval nothing is re-read, so lastCheck stays.
     RefreshClusterEligibility(state, "this/path/does/not/exist.gta", t0 + std::chrono::milliseconds(100));
     EXPECT_EQ(state.eligibility.lastCheck, t0);
+}
+
+TEST(ClusterToolUiStateTest, MeshAssetPathMustBeAGtaInsideTheRoot)
+{
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "GteClusterToolRoot";
+    std::filesystem::path out;
+
+    const std::optional<std::string> wrongExtension = ValidateMeshAssetPath((root / "a.stl").string(), root, out);
+    ASSERT_TRUE(wrongExtension.has_value());
+    EXPECT_NE(wrongExtension->find(".gta"), std::string::npos);
+
+    const std::filesystem::path outside = root.parent_path() / "GteClusterToolOther" / "a.gta";
+    EXPECT_TRUE(ValidateMeshAssetPath(outside.string(), root, out).has_value());
+    EXPECT_TRUE(ValidateMeshAssetPath("a.gta", root, out).has_value());
+
+    // Inside the root but missing on disk: refused as unreadable.
+    const std::optional<std::string> missing = ValidateMeshAssetPath((root / "none.gta").string(), root, out);
+    ASSERT_TRUE(missing.has_value());
+    EXPECT_NE(missing->find("readable"), std::string::npos);
+}
+
+TEST(ClusterToolUiStateTest, RelativePathUsesSlashesAndRejectsOutsidePaths)
+{
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "GteClusterToolRoot";
+    EXPECT_EQ(ProjectRelativeSlashPath(root / "Meshes" / "rock.gta", root), "Meshes/rock.gta");
+    EXPECT_TRUE(ProjectRelativeSlashPath(root.parent_path() / "Elsewhere" / "rock.gta", root).empty());
 }
 
 } // namespace

@@ -537,6 +537,79 @@ public:
 #endif
     }
 
+    AssetSelectionResult SelectProjectAsset(const std::string& absolutePath) override
+    {
+        AssetSelectionResult result;
+#if GTE_ENABLE_PROJECT_PANEL
+        const std::filesystem::path& root = m_projectPanel.GetRootPath();
+        std::filesystem::path path;
+        if (const std::optional<std::string> invalid = ValidateMeshAssetPath(absolutePath, root, path)) {
+            result.message = *invalid;
+            return result;
+        }
+        // Same strings a click in the Project panel stores.
+        const std::string relativePath = ProjectRelativeSlashPath(path, root);
+        m_ctx.selection.SelectAsset(PathToUtf8(root / PathFromUtf8(relativePath)), relativePath, false);
+        result.success = true;
+#else
+        (void)absolutePath;
+        result.editorAvailable = false;
+        result.message = "the Project panel is not compiled in";
+#endif
+        return result;
+    }
+
+    InspectorStateView InspectorState() const override
+    {
+        InspectorStateView view;
+        const Selection& selection = m_ctx.selection;
+        switch (selection.Kind()) {
+        case InspectorSelectionKind::None: view.selectionKind = "none"; break;
+        case InspectorSelectionKind::Entity: view.selectionKind = "entity"; break;
+        case InspectorSelectionKind::Asset:
+            view.selectionKind = "asset";
+            view.selectedPath = selection.SelectedAssetAbsolutePath();
+            break;
+        case InspectorSelectionKind::ModelPart: view.selectionKind = "model_part"; break;
+        }
+        const InspectorShownState& shown = m_ctx.clusterTool.shown;
+        view.shownPath = shown.assetPath;
+        view.clustersText = shown.clustersText;
+        view.clusterStatus = shown.clusterStatus;
+        view.buildEnabled = shown.buildEnabled;
+        view.buildDisabledReason = shown.buildDisabledReason;
+        view.buildRunning = m_clusterBuildRunner.Busy();
+        return view;
+    }
+
+    ClusterBuildStartResult InspectorBuildClusters(const InspectorClusterOptions& options) override
+    {
+        const Selection& selection = m_ctx.selection;
+        if (selection.Kind() != InspectorSelectionKind::Asset || selection.SelectedAssetAbsolutePath().empty()) {
+            ClusterBuildStartResult refused;
+            refused.status = ClusterBuildStart::Refused;
+            refused.message = "no mesh asset is selected in the Inspector";
+            return refused;
+        }
+        ClusterToolUiState& ui = m_ctx.clusterTool;
+        ui.weldIndex = options.positionOnlyWeld ? 1 : 0;
+        ui.maxVertices = static_cast<int>(options.maxVertices);
+        ui.maxTriangles = static_cast<int>(options.maxTriangles);
+        ui.coneWeight = options.coneWeight;
+        return StartInspectorClusterBuild(m_ctx, selection.SelectedAssetAbsolutePath());
+    }
+
+    SplitViewsLayerResult SetSceneGameSplit(bool enabled) override
+    {
+        ImGui::SetCurrentContext(m_context);
+        const SceneGameSplitResult applied = gte::SetSceneGameSplit(m_ctx, enabled);
+        SplitViewsLayerResult result;
+        result.success = applied.applied;
+        result.split = applied.split;
+        result.message = applied.error;
+        return result;
+    }
+
 
     // Frame Debugger capture hooks; both forward into m_frameDebuggerPanel, which owns the capture state.
     IFrameDebuggerCaptureRecorder* PrepareFrameDebuggerCaptureContext() override

@@ -24,7 +24,7 @@
 #include "../Assets/AtomicFile.h" // SweepStaleTempFiles().
 #include "../Assets/AssetTypes.h"
 #include "../Assets/GtaFile.h"
-#include "../Assets/ImportStamp.h" // IsPathStrictlyInsideDirectory().
+#include "ClusterToolUiState.h" // ValidateMeshAssetPath().
 #include "../Encoding/Utf8Path.h"
 #include "MeshClusterBuildRunner.h"
 #include "EditorGpuMemoryNameOverlay.h"
@@ -125,24 +125,76 @@ BuildMeshClustersOutcome ToBridgeOutcome(const MeshClusterFinishedBuild& finishe
     return outcome;
 }
 
-// Checks a requested path: a mesh *.gta strictly inside the project root. Returns the reason when refused.
-std::optional<std::string> ValidateClusterBuildPath(const std::string& gtaPathUtf8, std::filesystem::path& outPath)
+// Runs one editor UI command on the layer; main thread only.
+EditorUiCommandResult RunEditorUiCommand(const EditorUiCommandRequest& request, IEditorLayer& layer, Game& game,
+    Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
-    outPath = PathFromUtf8(gtaPathUtf8);
-    std::string extension = PathToUtf8(outPath.extension());
-    std::transform(extension.begin(), extension.end(), extension.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (extension != ".gta") {
-        return "gta_path must end in .gta";
+    EditorUiCommandResult result;
+    result.kind = request.kind;
+    switch (request.kind) {
+    case EditorUiCommandKind::ActivateTab: {
+        const TabActivationResult activation = layer.ActivateTab(request.activateTab.tabName);
+        result.activateTab.tabExists = activation.tabExists;
+        result.activateTab.success = activation.tabExists;
+        break;
     }
-    if (!IsPathStrictlyInsideDirectory(ResolveProjectRootDirectory(), outPath)) {
-        return "gta_path must be inside the project root";
+    case EditorUiCommandKind::SpawnInstanceGrid: {
+        const InstanceGridSpawnLayerResult spawned = layer.SpawnInstanceGrid(game, renderer,
+            request.spawnInstanceGrid.instanceCount, request.spawnInstanceGrid.spacing, sceneServicesSetLayout);
+        result.spawnInstanceGrid.success = spawned.success;
+        result.spawnInstanceGrid.editorAvailable = spawned.editorAvailable;
+        result.spawnInstanceGrid.errorMessage = spawned.errorMessage;
+        result.spawnInstanceGrid.instanceCount = spawned.instanceCount;
+        break;
     }
-    const std::optional<GtaHeader> header = ReadGtaHeader(outPath);
-    if (!header.has_value() || header->Type() != AssetType::Mesh) {
-        return "gta_path is not a readable mesh asset";
+    case EditorUiCommandKind::SelectAsset: {
+        const AssetSelectionResult selected = layer.SelectProjectAsset(request.selectAsset.absolutePath);
+        result.selectAsset.success = selected.success;
+        result.selectAsset.editorAvailable = selected.editorAvailable;
+        result.selectAsset.message = selected.message;
+        break;
     }
-    return std::nullopt;
+    case EditorUiCommandKind::InspectorState: {
+        InspectorStateView view = layer.InspectorState();
+        InspectorStateOutcome& out = result.inspectorState;
+        out.editorAvailable = view.editorAvailable;
+        out.selectionKind = std::move(view.selectionKind);
+        out.selectedPath = std::move(view.selectedPath);
+        out.shownPath = std::move(view.shownPath);
+        out.clustersText = std::move(view.clustersText);
+        out.clusterStatus = std::move(view.clusterStatus);
+        out.buildEnabled = view.buildEnabled;
+        out.buildDisabledReason = std::move(view.buildDisabledReason);
+        out.buildRunning = view.buildRunning;
+        break;
+    }
+    case EditorUiCommandKind::InspectorBuildClusters: {
+        const InspectorBuildClustersCommand& command = request.inspectorBuildClusters;
+        InspectorClusterOptions options;
+        options.positionOnlyWeld = command.weld == "position_only";
+        options.maxVertices = command.maxVertices;
+        options.maxTriangles = command.maxTriangles;
+        options.coneWeight = command.coneWeight;
+        ClusterBuildStartResult started = layer.InspectorBuildClusters(options);
+        InspectorBuildClustersOutcome& out = result.inspectorBuildClusters;
+        switch (started.status) {
+        case ClusterBuildStart::Started: out.status = InspectorBuildClustersStatus::Started; break;
+        case ClusterBuildStart::Busy: out.status = InspectorBuildClustersStatus::Busy; break;
+        case ClusterBuildStart::Unavailable: out.status = InspectorBuildClustersStatus::Unavailable; break;
+        case ClusterBuildStart::Refused: out.status = InspectorBuildClustersStatus::Refused; break;
+        }
+        out.message = std::move(started.message);
+        break;
+    }
+    case EditorUiCommandKind::SplitViews: {
+        const SplitViewsLayerResult split = layer.SetSceneGameSplit(request.splitViews.enabled);
+        result.splitViews.success = split.success;
+        result.splitViews.split = split.split;
+        result.splitViews.message = split.message;
+        break;
+    }
+    }
+    return result;
 }
 
 // Runs once per finished build, whichever door started it: drops the cached GPU mesh, refreshes the
@@ -459,26 +511,11 @@ int EditorHost::Run()
 
         m_editorLayer->NewFrame();
 
-        // Drains at most one pending GET /activate_tab request per frame, after NewFrame() and before BuildUI().
+        // Drains at most one pending editor UI command per frame, after NewFrame() and before BuildUI().
         if (const auto uiPending = m_uiCommandBridge.TryPeekPendingCommand()) {
-            const EditorUiCommandRequest* const uiRequest = &uiPending->request;
             GTE_PROFILE_SCOPE("EditorHost::ExecuteEditorUiCommand");
-            EditorUiCommandResult uiResult;
-            uiResult.kind = uiRequest->kind;
-            // Two command kinds: spawn an instance grid, or activate a tab.
-            if (uiRequest->kind == EditorUiCommandKind::SpawnInstanceGrid) {
-                const InstanceGridSpawnLayerResult spawned = m_editorLayer->SpawnInstanceGrid(m_game, m_renderer,
-                    uiRequest->spawnInstanceGrid.instanceCount, uiRequest->spawnInstanceGrid.spacing,
-                    m_core.GetSceneServicesDescriptorSet().LayoutHandle());
-                uiResult.spawnInstanceGrid.success = spawned.success;
-                uiResult.spawnInstanceGrid.editorAvailable = spawned.editorAvailable;
-                uiResult.spawnInstanceGrid.errorMessage = spawned.errorMessage;
-                uiResult.spawnInstanceGrid.instanceCount = spawned.instanceCount;
-            } else {
-                const TabActivationResult activation = m_editorLayer->ActivateTab(uiRequest->activateTab.tabName);
-                uiResult.activateTab.tabExists = activation.tabExists;
-                uiResult.activateTab.success = activation.tabExists;
-            }
+            const EditorUiCommandResult uiResult = RunEditorUiCommand(uiPending->request, *m_editorLayer, m_game,
+                m_renderer, m_core.GetSceneServicesDescriptorSet().LayoutHandle());
             FulfillOrLogDrop(m_uiCommandBridge, uiPending->id, uiResult, "EditorUi");
         }
 
@@ -667,8 +704,8 @@ int EditorHost::Run()
                         "cluster build is not available in this build");
                 } else if (clusterRunner->Busy()) {
                     outcome = MakeClusterRefusal(BuildMeshClustersStatus::Busy, "another cluster build is already running");
-                } else if (const std::optional<std::string> invalid =
-                               ValidateClusterBuildPath(importRequest.buildMeshClusters.gtaPath, gtaPath)) {
+                } else if (const std::optional<std::string> invalid = ValidateMeshAssetPath(
+                               importRequest.buildMeshClusters.gtaPath, ResolveProjectRootDirectory(), gtaPath)) {
                     outcome = MakeClusterRefusal(BuildMeshClustersStatus::BadRequest, *invalid);
                 } else {
                     const BuildMeshClustersCommand& command = importRequest.buildMeshClusters;

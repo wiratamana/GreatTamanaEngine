@@ -89,12 +89,6 @@ std::vector<T> RemapVertices(const std::vector<T>& source, std::size_t newCount,
     return result;
 }
 
-bool HasAnyTexture(const Material& m) noexcept
-{
-    return m.textureIndex >= 0 || m.normalTextureIndex >= 0 || m.metallicRoughnessTextureIndex >= 0
-        || m.occlusionTextureIndex >= 0 || m.emissiveTextureIndex >= 0;
-}
-
 bool ValidateInput(const MeshData& mesh, const std::vector<Material>& materials, const MeshClusterOptions& options,
     std::string& why)
 {
@@ -143,7 +137,7 @@ bool ValidateInput(const MeshData& mesh, const std::vector<Material>& materials,
 bool ValidatePositionOnlyWeld(const MeshData& mesh, const std::vector<Material>& materials, std::string& why)
 {
     for (const Material& m : materials) {
-        if (HasAnyTexture(m)) {
+        if (HasAnyTextureIndex(m)) {
             return Fail(&why, "position-only weld refused: a material uses a texture");
         }
     }

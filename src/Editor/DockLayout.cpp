@@ -247,4 +247,36 @@ bool FindAndFocusEditorWindow(const char* panelName)
     return true;
 }
 
+SceneGameSplitResult SetSceneGameSplit(const EditorContext& ctx, bool enabled)
+{
+    SceneGameSplitResult result;
+    if (!ctx.dockLayoutEnsured) {
+        result.error = "the dock layout is not built yet";
+        return result;
+    }
+    const ImGuiWindow* scene = ImGui::FindWindowByName("Scene");
+    const ImGuiWindow* game = ImGui::FindWindowByName("Game");
+    if (scene == nullptr || game == nullptr) {
+        result.error = "the Scene or Game window does not exist yet";
+        return result;
+    }
+    if (scene->DockId == 0 || game->DockId == 0) {
+        result.error = "the Scene and Game windows must both be docked";
+        return result;
+    }
+
+    // Game always gets a real dock node, so the default-layout rebuild never sees it as undocked.
+    const ImGuiID sceneNode = scene->DockId;
+    if (enabled && game->DockId == sceneNode) {
+        ImGuiID gameNode = 0;
+        ImGui::DockBuilderSplitNode(sceneNode, ImGuiDir_Right, 0.5f, &gameNode, nullptr);
+        ImGui::DockBuilderDockWindow("Game", gameNode);
+    } else if (!enabled && game->DockId != sceneNode) {
+        ImGui::DockBuilderDockWindow("Game", sceneNode);
+    }
+    result.applied = true;
+    result.split = enabled;
+    return result;
+}
+
 } // namespace gte

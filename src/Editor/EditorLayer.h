@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ClusterToolUiState.h"
+
 #include "../Core/CapturedPixels.h"
 #include "../Core/GraphicsHandles.h"
 
@@ -96,6 +98,41 @@ struct InstanceGridSpawnLayerResult {
     bool editorAvailable = true;
     std::string errorMessage;
     std::uint32_t instanceCount = 0;
+};
+
+// Result of SelectProjectAsset(). `editorAvailable` is false when the build has no Project panel.
+struct AssetSelectionResult {
+    bool success = false;
+    bool editorAvailable = true;
+    std::string message;
+};
+
+// Snapshot of the Inspector for GET /inspector_state. Strings are empty when nothing of that kind was shown.
+struct InspectorStateView {
+    bool editorAvailable = true;
+    std::string selectionKind; // "none", "entity", "asset" or "model_part".
+    std::string selectedPath;
+    std::string shownPath;
+    std::string clustersText;
+    std::string clusterStatus;
+    bool buildEnabled = false;
+    std::string buildDisabledReason;
+    bool buildRunning = false;
+};
+
+// Cluster options handed to InspectorBuildClusters(); the Inspector's own controls take these values.
+struct InspectorClusterOptions {
+    bool positionOnlyWeld = false;
+    std::uint32_t maxVertices = 64;
+    std::uint32_t maxTriangles = 124;
+    float coneWeight = 0.5f;
+};
+
+// Result of SetSceneGameSplit(). `split` is true when Game and Scene sit in separate dock nodes.
+struct SplitViewsLayerResult {
+    bool success = false;
+    bool split = false;
+    std::string message;
 };
 
 // Boundary between engine core and the optional Editor UI; only src/Editor/ ever includes ImGui.
@@ -263,6 +300,18 @@ public:
     // The editor's single cluster build runner, polled once per frame by EditorHost.
     // nullptr for NullEditorLayer.
     virtual MeshClusterBuildRunner* ClusterBuildRunner() = 0;
+
+    // Selects a mesh asset as the Inspector target, like a click in the Project panel.
+    virtual AssetSelectionResult SelectProjectAsset(const std::string& absolutePath) = 0;
+
+    // What the Inspector showed on its last draw. Default-valued for NullEditorLayer.
+    virtual InspectorStateView InspectorState() const = 0;
+
+    // Starts a cluster build for the selected asset through the same function as the "Build Clusters" button.
+    virtual ClusterBuildStartResult InspectorBuildClusters(const InspectorClusterOptions& options) = 0;
+
+    // Docks "Game" beside "Scene" (true) or back as a tab of "Scene" (false). Call between NewFrame() and BuildUI().
+    virtual SplitViewsLayerResult SetSceneGameSplit(bool enabled) = 0;
 
     // Re-reads the tracked record (file size, header) of one *.gta asset in the Project database.
     // A no-op when the path is not tracked or the build has no Project panel.

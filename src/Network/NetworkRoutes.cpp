@@ -14,6 +14,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <mutex>
 #include <type_traits>
@@ -1141,6 +1143,60 @@ bool ReadOptionalNumber(const nlohmann::json& body, const char* field, std::opti
     return true;
 }
 
+// Reads weld and the numeric limits shared by both cluster build routes. False with errorMessage set on a bad value.
+bool ReadClusterOptionFields(const nlohmann::json& parsed, ParsedBuildClustersRequest& result)
+{
+    if (parsed.contains("weld") && !parsed["weld"].is_null()) {
+        if (!parsed["weld"].is_string()) {
+            result.errorMessage = "weld must be a string";
+            return false;
+        }
+        const std::string weld = parsed["weld"].get<std::string>();
+        if (weld != "exact" && weld != "position_only") {
+            result.errorMessage = "weld must be \"exact\" or \"position_only\"";
+            return false;
+        }
+        result.weld = weld;
+    }
+
+    std::optional<double> number;
+    if (!ReadOptionalNumber(parsed, "max_vertices", number, result.errorMessage)) {
+        return false;
+    }
+    if (number.has_value()) {
+        const std::optional<std::uint32_t> value = ExactUint32InRange(*number, 3u, 255u);
+        if (!value.has_value()) {
+            result.errorMessage = "max_vertices must be an integer from 3 to 255";
+            return false;
+        }
+        result.maxVertices = *value;
+    }
+
+    if (!ReadOptionalNumber(parsed, "max_triangles", number, result.errorMessage)) {
+        return false;
+    }
+    if (number.has_value()) {
+        const std::optional<std::uint32_t> value = ExactUint32InRange(*number, 4u, 512u);
+        if (!value.has_value() || (*value % 4u) != 0u) {
+            result.errorMessage = "max_triangles must be a multiple of 4 from 4 to 512";
+            return false;
+        }
+        result.maxTriangles = *value;
+    }
+
+    if (!ReadOptionalNumber(parsed, "cone_weight", number, result.errorMessage)) {
+        return false;
+    }
+    if (number.has_value()) {
+        if (!std::isfinite(*number) || *number < 0.0 || *number > 1.0) {
+            result.errorMessage = "cone_weight must be a number from 0 to 1";
+            return false;
+        }
+        result.coneWeight = static_cast<float>(*number);
+    }
+    return true;
+}
+
 } // namespace
 
 ParsedBuildClustersRequest ParseBuildClustersRequest(const std::string& jsonBody)
@@ -1164,57 +1220,106 @@ ParsedBuildClustersRequest ParseBuildClustersRequest(const std::string& jsonBody
     }
     result.gtaPath = parsed["gta_path"].get<std::string>();
 
-    if (parsed.contains("weld") && !parsed["weld"].is_null()) {
-        if (!parsed["weld"].is_string()) {
-            result.errorMessage = "weld must be a string";
-            return result;
-        }
-        const std::string weld = parsed["weld"].get<std::string>();
-        if (weld != "exact" && weld != "position_only") {
-            result.errorMessage = "weld must be \"exact\" or \"position_only\"";
-            return result;
-        }
-        result.weld = weld;
-    }
+    result.valid = ReadClusterOptionFields(parsed, result);
+    return result;
+}
 
-    std::optional<double> number;
-    if (!ReadOptionalNumber(parsed, "max_vertices", number, result.errorMessage)) {
+ParsedBuildClustersRequest ParseInspectorBuildClustersRequest(const std::string& jsonBody)
+{
+    ParsedBuildClustersRequest result;
+
+    const bool blank = std::all_of(jsonBody.begin(), jsonBody.end(), [](unsigned char c) { return std::isspace(c) != 0; });
+    if (blank) {
+        result.valid = true;
         return result;
     }
-    if (number.has_value()) {
-        const std::optional<std::uint32_t> value = ExactUint32InRange(*number, 3u, 255u);
-        if (!value.has_value()) {
-            result.errorMessage = "max_vertices must be an integer from 3 to 255";
-            return result;
-        }
-        result.maxVertices = *value;
-    }
-
-    if (!ReadOptionalNumber(parsed, "max_triangles", number, result.errorMessage)) {
+    const nlohmann::json parsed = ParseJsonNoThrow(jsonBody);
+    if (parsed.is_discarded()) {
+        result.errorMessage = "malformed JSON body";
         return result;
     }
-    if (number.has_value()) {
-        const std::optional<std::uint32_t> value = ExactUint32InRange(*number, 4u, 512u);
-        if (!value.has_value() || (*value % 4u) != 0u) {
-            result.errorMessage = "max_triangles must be a multiple of 4 from 4 to 512";
-            return result;
-        }
-        result.maxTriangles = *value;
-    }
-
-    if (!ReadOptionalNumber(parsed, "cone_weight", number, result.errorMessage)) {
+    if (!parsed.is_object()) {
+        result.errorMessage = "request body must be a JSON object";
         return result;
     }
-    if (number.has_value()) {
-        if (!std::isfinite(*number) || *number < 0.0 || *number > 1.0) {
-            result.errorMessage = "cone_weight must be a number from 0 to 1";
-            return result;
-        }
-        result.coneWeight = static_cast<float>(*number);
-    }
+    result.valid = ReadClusterOptionFields(parsed, result);
+    return result;
+}
 
+ParsedSelectAssetQuery ParseSelectAssetQuery(const std::string& pathParam)
+{
+    ParsedSelectAssetQuery result;
+    if (pathParam.empty()) {
+        result.errorMessage = "missing required query parameter: path";
+        return result;
+    }
+    const std::size_t dot = pathParam.rfind('.');
+    std::string extension = dot == std::string::npos ? std::string() : pathParam.substr(dot);
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const bool driveAbsolute = pathParam.size() >= 3 && std::isalpha(static_cast<unsigned char>(pathParam[0])) != 0
+        && pathParam[1] == ':' && (pathParam[2] == '\\' || pathParam[2] == '/');
+    const bool rootAbsolute = pathParam[0] == '\\' || pathParam[0] == '/';
+    if (extension != ".gta" || !(driveAbsolute || rootAbsolute)) {
+        result.errorMessage = "path must be an absolute path to a *.gta file";
+        return result;
+    }
+    result.path = pathParam;
     result.valid = true;
     return result;
+}
+
+std::string BuildSelectAssetResponseJson(const std::string& selectedPath)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["selected_path"] = selectedPath;
+    return body.dump();
+}
+
+ParsedSplitViewsQuery ParseSplitViewsQuery(const std::string& enabledParam)
+{
+    ParsedSplitViewsQuery result;
+    if (enabledParam == "true") {
+        result.enabled = true;
+    } else if (enabledParam == "false") {
+        result.enabled = false;
+    } else {
+        result.errorMessage = "missing or invalid required query parameter: enabled - must be \"true\" or \"false\"";
+        return result;
+    }
+    result.valid = true;
+    return result;
+}
+
+std::string BuildSplitViewsResponseJson(bool split)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["split"] = split;
+    return body.dump();
+}
+
+std::string BuildInspectorStateResponseJson(const InspectorStateResponseView& view)
+{
+    nlohmann::json body;
+    body["selection_kind"] = view.selectionKind;
+    body["selected_path"] = view.selectedPath;
+    body["shown_path"] = view.shownPath;
+    body["clusters_text"] = view.clustersText;
+    body["cluster_status"] = view.clusterStatus;
+    body["build_button_enabled"] = view.buildEnabled;
+    body["build_button_disabled_reason"] = view.buildDisabledReason;
+    body["build_running"] = view.buildRunning;
+    return body.dump();
+}
+
+std::string BuildInspectorBuildStartedResponseJson()
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["started"] = true;
+    return body.dump();
 }
 
 std::string BuildClustersResponseJson(const ClusterReportResponseView& view)

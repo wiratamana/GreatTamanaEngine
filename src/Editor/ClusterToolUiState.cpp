@@ -1,10 +1,12 @@
 #include "ClusterToolUiState.h"
 
 #include "../Assets/GtaFile.h"
+#include "../Assets/ImportStamp.h"
 #include "../Assets/MeshClusterPersistence.h"
 #include "../Encoding/Utf8Path.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <system_error>
@@ -67,6 +69,38 @@ const ClusterEligibilityCache& RefreshClusterEligibility(
         cache.refusalReason = "The asset metadata cannot be read.";
     }
     return cache;
+}
+
+std::optional<std::string> ValidateMeshAssetPath(
+    const std::string& utf8Path, const std::filesystem::path& projectRoot, std::filesystem::path& outPath)
+{
+    outPath = PathFromUtf8(utf8Path);
+    std::string extension = PathToUtf8(outPath.extension());
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (extension != ".gta") {
+        return "the path must end in .gta";
+    }
+    if (!outPath.is_absolute() || !IsPathStrictlyInsideDirectory(projectRoot, outPath)) {
+        return "the path must be absolute and inside the project root";
+    }
+    const std::optional<GtaHeader> header = ReadGtaHeader(outPath);
+    if (!header.has_value() || header->Type() != AssetType::Mesh) {
+        return "the path is not a readable mesh asset";
+    }
+    return std::nullopt;
+}
+
+std::string ProjectRelativeSlashPath(const std::filesystem::path& absolute, const std::filesystem::path& projectRoot)
+{
+    std::error_code ec;
+    const std::filesystem::path relative = std::filesystem::relative(absolute, projectRoot, ec);
+    if (ec || relative.empty() || *relative.begin() == "..") {
+        return {};
+    }
+    std::string text = PathToUtf8(relative);
+    std::replace(text.begin(), text.end(), '\\', '/');
+    return text;
 }
 
 } // namespace gte

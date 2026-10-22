@@ -27,7 +27,7 @@ public:
     HeadlessRenderGraphFixture()
     {
         try {
-            m_renderer = std::make_unique<Renderer>(m_surfaceProvider);
+            m_renderer = std::make_unique<Renderer>(m_surfaceProvider, false);
             m_renderGraph = std::make_unique<rg::RenderGraph>(*m_renderer);
         } catch (const std::exception& e) {
             m_skipReason = std::string("HeadlessRenderGraphFixture: construction failed - this machine's "

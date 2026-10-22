@@ -95,6 +95,37 @@ public:
     // No editor build runner or Project database in a release build.
     MeshClusterBuildRunner* ClusterBuildRunner() override { return nullptr; }
     void RefreshProjectAssetRecord(const std::string& /*absoluteGtaPath*/) override { }
+
+    // No Inspector or dock layout in a release build.
+    AssetSelectionResult SelectProjectAsset(const std::string& /*absolutePath*/) override
+    {
+        AssetSelectionResult result;
+        result.editorAvailable = false;
+        result.message = "the Editor module is not compiled in";
+        return result;
+    }
+
+    InspectorStateView InspectorState() const override
+    {
+        InspectorStateView view;
+        view.editorAvailable = false;
+        return view;
+    }
+
+    ClusterBuildStartResult InspectorBuildClusters(const InspectorClusterOptions& /*options*/) override
+    {
+        ClusterBuildStartResult result;
+        result.status = ClusterBuildStart::Unavailable;
+        result.message = "the Editor module is not compiled in";
+        return result;
+    }
+
+    SplitViewsLayerResult SetSceneGameSplit(bool /*enabled*/) override
+    {
+        SplitViewsLayerResult result;
+        result.message = "the Editor module is not compiled in";
+        return result;
+    }
 };
 
 } // namespace

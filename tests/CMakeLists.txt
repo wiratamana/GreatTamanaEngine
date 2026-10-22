@@ -2257,6 +2257,7 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Jobs/JobContinuationTests.cpp
     Jobs/JobSystemSdlClockThreadSafetyTests.cpp
     Network/NetworkRoutesTests.cpp
+    Network/NetworkRoutesInspectorTests.cpp
     Network/NetworkServerTests.cpp
     Network/CaptureEndpointsEndToEndTests.cpp
     Network/EngineCommandEndpointsEndToEndTests.cpp
@@ -2988,6 +2989,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Renderer/Culling/ClusterCullMathTests.cpp Assets/AtomicFileTests.cpp Encoding/R32FloatFormatTests.cpp
     Assets/MeshClusterTests.cpp Assets/MeshClusteringTests.cpp Assets/MeshMaterialPartitionerTests.cpp
     Assets/MeshClusterImportTests.cpp Editor/MeshClusterBuildRunnerTests.cpp Editor/ClusterToolUiStateTests.cpp
+    Network/NetworkRoutesInspectorTests.cpp
     Core/ClusterClaimTests.cpp Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp Core/ClusterCandidatesTests.cpp
     Core/ClusterDrawStateTests.cpp Core/ClusterDrawVerbTests.cpp
     Renderer/ClusterShaderTextTests.cpp Renderer/RenderGraph/IndirectDrawRecordTests.cpp)

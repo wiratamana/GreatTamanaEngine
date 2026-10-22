@@ -1,5 +1,8 @@
+#include "GltfTestFixture.h"
+
 #include "Assets/AssetImporter.h"
 #include "Assets/GtaFile.h"
+#include "Assets/MaterialData.h"
 #include "Assets/MeshClusterPersistence.h"
 #include "Assets/MeshFile.h"
 
@@ -177,6 +180,58 @@ TEST_F(MeshClusterImportTest, AutoSkipsASoupAfterTheCheapPreCheck)
     const std::optional<MeshData> mesh = DecodeImported(result);
     ASSERT_TRUE(mesh.has_value());
     EXPECT_TRUE(mesh->clusters.empty());
+}
+
+// glTF materials are PBR: the runtime draws them on the textured path, so Auto must not write clusters.
+TEST_F(MeshClusterImportTest, AutoSkipsAPbrMaterialWithoutTexturesAndNamesTheReason)
+{
+    const std::filesystem::path sourceDir = m_root / "src";
+    std::filesystem::create_directories(sourceDir);
+    const std::filesystem::path source = test::WriteGltfQuad(sourceDir);
+
+    const AssetImportResult result
+        = ImportAssetFile(m_db, source, m_root / "quad.gltf", Options(ClusterBuildMode::Auto, 1));
+    ASSERT_TRUE(result.success) << result.message;
+    EXPECT_EQ(result.clusterCount, 0u);
+    EXPECT_NE(result.clusterMessage.find("PBR"), std::string::npos) << result.clusterMessage;
+
+    const std::optional<MeshData> mesh = DecodeImported(result);
+    ASSERT_TRUE(mesh.has_value());
+    EXPECT_TRUE(mesh->clusters.empty());
+}
+
+TEST_F(MeshClusterImportTest, AlwaysClustersAPbrMaterial)
+{
+    const std::filesystem::path sourceDir = m_root / "src";
+    std::filesystem::create_directories(sourceDir);
+    const std::filesystem::path source = test::WriteGltfQuad(sourceDir);
+
+    const AssetImportResult result
+        = ImportAssetFile(m_db, source, m_root / "quad.gltf", Options(ClusterBuildMode::Always));
+    ASSERT_TRUE(result.success) << result.message;
+    EXPECT_GT(result.clusterCount, 0u) << result.clusterMessage;
+}
+
+// STL materials are not PBR: with the same threshold Auto clusters them.
+TEST_F(MeshClusterImportTest, AutoClustersANonPbrMaterial)
+{
+    const AssetImportResult result = Import("grid", BuildGrid(40), Options(ClusterBuildMode::Auto, 1));
+    ASSERT_TRUE(result.success) << result.message;
+    EXPECT_GT(result.clusterCount, 0u) << result.clusterMessage;
+}
+
+TEST(MaterialDrawsTexturedTest, PbrOrAnyTextureIndexCountsAsTextured)
+{
+    Material plain;
+    EXPECT_FALSE(MaterialDrawsTextured(plain));
+
+    Material pbr;
+    pbr.useBaseColorFactor = true;
+    EXPECT_TRUE(MaterialDrawsTextured(pbr));
+
+    Material emissiveOnly;
+    emissiveOnly.emissiveTextureIndex = 0;
+    EXPECT_TRUE(MaterialDrawsTextured(emissiveOnly));
 }
 
 TEST_F(MeshClusterImportTest, ImportWithAlwaysAndOffThenPersistenceWriteTheSamePayload)

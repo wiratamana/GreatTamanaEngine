@@ -268,6 +268,29 @@ FrameDebuggerStateResponseView ToFrameDebuggerStateResponseView(const FrameDebug
     return view;
 }
 
+// Submits one editor UI command. Writes the 503/504 answer itself and returns nullopt when there is no result.
+std::optional<EditorUiCommandResult> SubmitEditorUiCommand(
+    EditorUiCommandBridge* bridge, const EditorUiCommandRequest& request, httplib::Response& res)
+{
+    if (bridge == nullptr) {
+        res.status = 503;
+        res.set_content(BuildGenericErrorResponseJson("editor UI command bridge not available"), "application/json");
+        return std::nullopt;
+    }
+    EditorUiCommandBridge::SubmitResult submit = bridge->SubmitAndWait(request);
+    if (submit.alreadyPending) {
+        res.status = 503;
+        res.set_content(BuildGenericErrorResponseJson("another editor UI command is already in progress"), "application/json");
+        return std::nullopt;
+    }
+    if (submit.timedOut) {
+        res.status = 504;
+        res.set_content(BuildGenericErrorResponseJson("editor UI command timed out"), "application/json");
+        return std::nullopt;
+    }
+    return std::move(submit.result);
+}
+
 // Shared tail for every /frame_debugger/* route EXCEPT /state (which needs
 // its own, slightly different 200-only-on-success-read shape - see that
 // route's own lambda below): maps alreadyPending/timedOut/outcome.success
@@ -558,6 +581,112 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         }
         res.status = 200;
         res.set_content(BuildSpawnInstanceGridResponseJson(true, "", outcome.instanceCount), "application/json");
+    });
+
+    // GET /select_asset?path=<absolute .gta>: selects that mesh asset as the Inspector target.
+    server.Get("/select_asset", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedSelectAssetQuery parsed = ParseSelectAssetQuery(req.get_param_value("path"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        EditorUiCommandRequest request;
+        request.kind = EditorUiCommandKind::SelectAsset;
+        request.selectAsset.absolutePath = parsed.path;
+        const std::optional<EditorUiCommandResult> result = SubmitEditorUiCommand(uiCommandBridge, request, res);
+        if (!result.has_value()) {
+            return;
+        }
+        const SelectAssetOutcome& outcome = result->selectAsset;
+        if (!outcome.success) {
+            res.status = outcome.editorAvailable ? 400 : 503;
+            res.set_content(BuildGenericErrorResponseJson(outcome.message), "application/json");
+            return;
+        }
+        res.status = 200;
+        res.set_content(BuildSelectAssetResponseJson(parsed.path), "application/json");
+    });
+
+    // GET /inspector_state: what the Inspector showed on its last draw.
+    server.Get("/inspector_state", [uiCommandBridge](const httplib::Request&, httplib::Response& res) {
+        EditorUiCommandRequest request;
+        request.kind = EditorUiCommandKind::InspectorState;
+        const std::optional<EditorUiCommandResult> result = SubmitEditorUiCommand(uiCommandBridge, request, res);
+        if (!result.has_value()) {
+            return;
+        }
+        const InspectorStateOutcome& outcome = result->inspectorState;
+        if (!outcome.editorAvailable) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("the Editor module is not compiled in"), "application/json");
+            return;
+        }
+        InspectorStateResponseView view;
+        view.selectionKind = outcome.selectionKind;
+        view.selectedPath = outcome.selectedPath;
+        view.shownPath = outcome.shownPath;
+        view.clustersText = outcome.clustersText;
+        view.clusterStatus = outcome.clusterStatus;
+        view.buildEnabled = outcome.buildEnabled;
+        view.buildDisabledReason = outcome.buildDisabledReason;
+        view.buildRunning = outcome.buildRunning;
+        res.status = 200;
+        res.set_content(BuildInspectorStateResponseJson(view), "application/json");
+    });
+
+    // POST /inspector/build_clusters: presses "Build Clusters" for the Inspector's selected asset.
+    // The report shows up in /inspector_state once EditorHost has polled the finished build.
+    server.Post("/inspector/build_clusters", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedBuildClustersRequest parsed = ParseInspectorBuildClustersRequest(req.body);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        EditorUiCommandRequest request;
+        request.kind = EditorUiCommandKind::InspectorBuildClusters;
+        request.inspectorBuildClusters.weld = parsed.weld;
+        request.inspectorBuildClusters.maxVertices = parsed.maxVertices;
+        request.inspectorBuildClusters.maxTriangles = parsed.maxTriangles;
+        request.inspectorBuildClusters.coneWeight = parsed.coneWeight;
+        const std::optional<EditorUiCommandResult> result = SubmitEditorUiCommand(uiCommandBridge, request, res);
+        if (!result.has_value()) {
+            return;
+        }
+        const InspectorBuildClustersOutcome& outcome = result->inspectorBuildClusters;
+        if (outcome.status == InspectorBuildClustersStatus::Started) {
+            res.status = 200;
+            res.set_content(BuildInspectorBuildStartedResponseJson(), "application/json");
+            return;
+        }
+        res.status = outcome.status == InspectorBuildClustersStatus::Refused ? 400 : 503;
+        res.set_content(BuildGenericErrorResponseJson(outcome.message), "application/json");
+    });
+
+    // GET /split_views?enabled=true|false: Game beside Scene, or Game back as a tab of Scene.
+    server.Get("/split_views", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedSplitViewsQuery parsed = ParseSplitViewsQuery(req.get_param_value("enabled"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        EditorUiCommandRequest request;
+        request.kind = EditorUiCommandKind::SplitViews;
+        request.splitViews.enabled = parsed.enabled;
+        const std::optional<EditorUiCommandResult> result = SubmitEditorUiCommand(uiCommandBridge, request, res);
+        if (!result.has_value()) {
+            return;
+        }
+        const SplitViewsOutcome& outcome = result->splitViews;
+        if (!outcome.success) {
+            res.status = 409;
+            res.set_content(BuildGenericErrorResponseJson(outcome.message), "application/json");
+            return;
+        }
+        res.status = 200;
+        res.set_content(BuildSplitViewsResponseJson(outcome.split), "application/json");
     });
 
     // /frame_debugger/*: parse -> bridge check (503) -> submit -> map alreadyPending/timedOut/outcome.

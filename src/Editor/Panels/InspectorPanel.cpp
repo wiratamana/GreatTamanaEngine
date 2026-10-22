@@ -939,9 +939,9 @@ void BuildGtaTextureMetadata(
 }
 
 // Metadata of a mesh *.gta. `preview` supplies the counts; nullopt when the preview failed,
-// in which case the header-derived fields are still shown.
-void BuildGtaMeshMetadata(
-    const GtaHeader& header, std::uintmax_t fileSizeBytes, const std::optional<AssetPreviewMesh::Preview>& preview)
+// in which case the header-derived fields are still shown. `shown` records the cluster line.
+void BuildGtaMeshMetadata(const GtaHeader& header, std::uintmax_t fileSizeBytes,
+    const std::optional<AssetPreviewMesh::Preview>& preview, InspectorShownState& shown)
 {
     ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "GTA Asset Metadata");
     ImGui::Text("Asset Type: %s", AssetTypeLabel(header.Type()));
@@ -957,11 +957,10 @@ void BuildGtaMeshMetadata(
     if (preview.has_value()) {
         ImGui::Text("Vertices: %llu", static_cast<unsigned long long>(preview->vertexCount));
         ImGui::Text("Triangles: %llu", static_cast<unsigned long long>(preview->triangleCount));
-        if (preview->clusterCount > 0) {
-            ImGui::Text("Clusters: %llu", static_cast<unsigned long long>(preview->clusterCount));
-        } else {
-            ImGui::Text("Clusters: none");
-        }
+        shown.clustersText = preview->clusterCount > 0
+            ? "Clusters: " + std::to_string(preview->clusterCount)
+            : std::string("Clusters: none");
+        ImGui::TextUnformatted(shown.clustersText.c_str());
     }
     // Payload layout: see MeshFile.h (optional tangents and cluster table follow the indices).
     ImGui::Text("Mesh Format: Positions + Normals + UVs + Indices (GTEMESH1)");
@@ -984,6 +983,65 @@ MeshClusterOptions MakeClusterOptions(const ClusterToolUiState& ui)
     return options;
 }
 
+// Started = the build button is usable now; any other status carries the reason it is not.
+ClusterBuildStartResult CheckClusterBuildGate(
+    ClusterToolUiState& ui, const MeshClusterBuildRunner* runner, const std::string& absolutePath)
+{
+    ClusterBuildStartResult gate;
+    const ClusterEligibilityCache& eligibility = RefreshClusterEligibility(ui, absolutePath, std::chrono::steady_clock::now());
+    if (!eligibility.refusalReason.empty()) {
+        gate.status = ClusterBuildStart::Refused;
+        gate.message = "Not available: " + eligibility.refusalReason;
+    } else if (runner == nullptr) {
+        gate.status = ClusterBuildStart::Unavailable;
+        gate.message = "The cluster builder is not available.";
+    } else if (runner->Busy()) {
+        gate.status = ClusterBuildStart::Busy;
+        gate.message = "A cluster build is already running.";
+    } else {
+        gate.status = ClusterBuildStart::Started;
+    }
+    return gate;
+}
+
+enum class ClusterStatusTone { Quiet, Warn, Good, Bad };
+
+struct ClusterStatus {
+    ClusterStatusTone tone = ClusterStatusTone::Quiet;
+    std::string text; // Empty when there is nothing to report.
+    std::string note; // Optional second line, always a warning.
+};
+
+// Status of the last build of `path`, as the tool shows it.
+ClusterStatus DescribeClusterStatus(
+    const ClusterToolUiState& ui, const MeshClusterBuildRunner* runner, const std::filesystem::path& path)
+{
+    ClusterStatus status;
+    if (runner != nullptr && runner->IsBuildingPath(path)) {
+        status.text = "Building clusters...";
+    } else if (ui.startRefusedBusy) {
+        status.tone = ClusterStatusTone::Warn;
+        status.text = "Busy: another cluster build is running.";
+    } else if (runner != nullptr && runner->LastFinished().has_value()
+        && WriterRegistryKey(runner->LastFinished()->path) == WriterRegistryKey(path)) {
+        const MeshClusterBuildOutcome& outcome = runner->LastFinished()->outcome;
+        const MeshClusterReport& report = outcome.report;
+        if (outcome.success) {
+            status.tone = ClusterStatusTone::Good;
+            status.text = FormatClusterStatusLine(report.clusterCount, report.avgTrianglesPerCluster,
+                report.vertexCountBefore, report.vertexCountAfter, report.milliseconds);
+            if (report.poorFill) {
+                status.note = report.weld == ClusterWeldMode::Exact ? "Low cluster fill. Try the Position only weld."
+                                                                    : "Low cluster fill.";
+            }
+        } else {
+            status.tone = ClusterStatusTone::Bad;
+            status.text = "Cluster build failed: " + outcome.message;
+        }
+    }
+    return status;
+}
+
 // Weld and limit controls, the "Build Clusters" button and the status of the last build of this asset.
 void BuildClusterToolSection(EditorContext& ctx, const std::string& absolutePath)
 {
@@ -993,10 +1051,10 @@ void BuildClusterToolSection(EditorContext& ctx, const std::string& absolutePath
 
     ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "Mesh Clusters");
 
-    const ClusterEligibilityCache& eligibility = RefreshClusterEligibility(ui, absolutePath, std::chrono::steady_clock::now());
-    const bool refused = !eligibility.refusalReason.empty();
+    const ClusterBuildStartResult gate = CheckClusterBuildGate(ui, runner, absolutePath);
+    const bool refused = gate.status == ClusterBuildStart::Refused;
     if (refused) {
-        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "Not available: %s", eligibility.refusalReason.c_str());
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s", gate.message.c_str());
     }
 
     ImGui::BeginDisabled(refused);
@@ -1015,44 +1073,39 @@ void BuildClusterToolSection(EditorContext& ctx, const std::string& absolutePath
     ui.maxTriangles = ClampClusterMaxTriangles(ui.maxTriangles);
     ui.coneWeight = ClampClusterConeWeight(ui.coneWeight);
 
-    const bool unavailable = runner == nullptr;
-    const bool busy = runner != nullptr && runner->Busy();
-    ImGui::BeginDisabled(unavailable || busy);
-    if (ImGui::Button("Build Clusters") && runner != nullptr) {
-        ui.startRefusedBusy =
-            runner->Start(path, MakeClusterOptions(ui), 0) == MeshClusterBuildRunner::StartResult::Busy;
+    const bool buildBlocked = gate.status != ClusterBuildStart::Started;
+    ImGui::BeginDisabled(buildBlocked);
+    if (ImGui::Button("Build Clusters")) {
+        StartInspectorClusterBuild(ctx, absolutePath);
     }
     if (runner == nullptr || !runner->Busy()) {
         ui.startRefusedBusy = false;
     }
     ImGui::EndDisabled();
-    if ((unavailable || busy) && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("%s", unavailable ? "The cluster builder is not available." : "A cluster build is already running.");
+    if (buildBlocked && !refused && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("%s", gate.message.c_str());
     }
     ImGui::EndDisabled();
 
-    if (runner != nullptr && runner->IsBuildingPath(path)) {
-        ImGui::TextDisabled("Building clusters...");
-    } else if (ui.startRefusedBusy) {
-        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "Busy: another cluster build is running.");
-    } else if (runner != nullptr && runner->LastFinished().has_value()
-        && WriterRegistryKey(runner->LastFinished()->path) == WriterRegistryKey(path)) {
-        const MeshClusterBuildOutcome& outcome = runner->LastFinished()->outcome;
-        const MeshClusterReport& report = outcome.report;
-        if (outcome.success) {
-            const std::string line = FormatClusterStatusLine(report.clusterCount, report.avgTrianglesPerCluster,
-                report.vertexCountBefore, report.vertexCountAfter, report.milliseconds);
-            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "%s", line.c_str());
-            if (report.poorFill) {
-                ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s",
-                    report.weld == ClusterWeldMode::Exact ? "Low cluster fill. Try the Position only weld."
-                                                          : "Low cluster fill.");
-            }
-        } else {
-            ImGui::TextColored(ImVec4(0.95f, 0.4f, 0.4f, 1.0f), "Cluster build failed: %s", outcome.message.c_str());
+    const ClusterStatus status = DescribeClusterStatus(ui, runner, path);
+    if (!status.text.empty()) {
+        switch (status.tone) {
+        case ClusterStatusTone::Quiet: ImGui::TextDisabled("%s", status.text.c_str()); break;
+        case ClusterStatusTone::Warn: ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s", status.text.c_str()); break;
+        case ClusterStatusTone::Good: ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "%s", status.text.c_str()); break;
+        case ClusterStatusTone::Bad: ImGui::TextColored(ImVec4(0.95f, 0.4f, 0.4f, 1.0f), "%s", status.text.c_str()); break;
         }
     }
+    if (!status.note.empty()) {
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s", status.note.c_str());
+    }
     ImGui::TextDisabled("Only instances spawned after this use the new data.");
+
+    InspectorShownState& shown = ui.shown;
+    shown.assetPath = absolutePath;
+    shown.clusterStatus = status.note.empty() ? status.text : status.text + " " + status.note;
+    shown.buildEnabled = !buildBlocked;
+    shown.buildDisabledReason = gate.message;
 }
 
 // Rewrites every stored normal from the mesh geometry; disabled while a cluster build writes the same file.
@@ -1442,7 +1495,7 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
             BuildGtaTextureMetadata(*gtaHeader, metadata.sizeBytes, preview);
             ImGui::Separator();
         } else if (isGtaMesh && gtaHeader.has_value()) {
-            BuildGtaMeshMetadata(*gtaHeader, metadata.sizeBytes, meshPreview);
+            BuildGtaMeshMetadata(*gtaHeader, metadata.sizeBytes, meshPreview, ctx.clusterTool.shown);
             ImGui::Separator();
             BuildMeshAssetTools(ctx, absolutePath, meshInstantiationSystem, 0);
         }
@@ -1491,7 +1544,7 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
         BuildGtaTextureMetadata(*gtaHeader, metadata.sizeBytes, std::nullopt);
         ImGui::Separator();
     } else if (isGtaMesh && gtaHeader.has_value()) {
-        BuildGtaMeshMetadata(*gtaHeader, metadata.sizeBytes, std::nullopt);
+        BuildGtaMeshMetadata(*gtaHeader, metadata.sizeBytes, std::nullopt, ctx.clusterTool.shown);
         ImGui::Separator();
         BuildMeshAssetTools(ctx, absolutePath, meshInstantiationSystem, 1);
     } else if (isGtaAnimation && gtaHeader.has_value()) {
@@ -1513,6 +1566,7 @@ void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& 
     MeshInstantiationSystem& meshInstantiationSystem)
 #endif
 {
+    ctx.clusterTool.shown = InspectorShownState{};
     ImGui::Begin("Inspector");
 
 #if GTE_ENABLE_PROJECT_PANEL
@@ -1535,6 +1589,35 @@ void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& 
 #endif
 
     ImGui::End();
+}
+
+ClusterBuildStartResult StartInspectorClusterBuild(EditorContext& ctx, const std::string& absolutePath)
+{
+#if GTE_ENABLE_PROJECT_PANEL
+    ClusterToolUiState& ui = ctx.clusterTool;
+    MeshClusterBuildRunner* const runner = ctx.clusterBuildRunner;
+    ClusterBuildStartResult result = CheckClusterBuildGate(ui, runner, absolutePath);
+    if (result.status == ClusterBuildStart::Busy) {
+        ui.startRefusedBusy = true;
+    }
+    if (result.status != ClusterBuildStart::Started) {
+        return result;
+    }
+    if (runner->Start(PathFromUtf8(absolutePath), MakeClusterOptions(ui), 0) == MeshClusterBuildRunner::StartResult::Busy) {
+        ui.startRefusedBusy = true;
+        result.status = ClusterBuildStart::Busy;
+        result.message = "A cluster build is already running.";
+    } else {
+        ui.startRefusedBusy = false;
+    }
+    return result;
+#else
+    (void)ctx;
+    (void)absolutePath;
+    ClusterBuildStartResult result;
+    result.message = "The cluster builder is not available.";
+    return result;
+#endif
 }
 
 } // namespace gte
