@@ -91,6 +91,9 @@ public:
     // Called instead of SkinAndUpload() on a frozen frame, so no stale dispatch list is reported.
     void ClearGpuSkinningDispatchThisFrame() noexcept { m_gpuModelsNeedingDispatchThisFrame.clear(); }
 
+    // Appends every mesh handle the GPU skinning rig cache can swap a renderer to.
+    void AppendGpuSkinningMeshHandles(std::vector<MeshHandle>& out) const { m_gpuRigCache.AppendBoundMeshHandles(out); }
+
 private:
     // Skins and uploads one entity's model. `mode` is the mode captured once at the start of SkinAndUpload().
     void SkinAndUploadOneEntity(Registry& registry, Entity entity, const std::string& meshGtaPath, SkinningMode mode);

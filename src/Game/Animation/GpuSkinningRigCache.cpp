@@ -49,6 +49,18 @@ MeshHandle GpuSkinningRigCache::GpuModelEntry::TryGetCpuMeshHandle(MeshHandle gp
     return kInvalidMeshHandle;
 }
 
+void GpuSkinningRigCache::AppendBoundMeshHandles(std::vector<MeshHandle>& out) const
+{
+    for (const auto& [path, model] : m_models) {
+        for (const OutputGroup& group : model.outputGroups) {
+            for (const OutputGroup::PartMeshBinding& binding : group.partMeshBindings) {
+                out.push_back(binding.cpuMeshHandle);
+                out.push_back(binding.gpuMeshHandle);
+            }
+        }
+    }
+}
+
 void GpuSkinningRigCache::Register(Renderer& renderer, RenderSystem& renderSystem, const std::string& absoluteGtaPath,
     const SkinnedMeshData& data, const std::vector<MeshAssetPart>& parts)
 {

@@ -311,11 +311,14 @@ void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* v
     }
 }
 
-void Game::ReleaseUnusedGpuMaterials(Renderer& renderer)
+std::vector<MeshHandle> Game::ReleaseUnusedGpuResources(Renderer& renderer)
 {
-    if (ShouldRunMaterialSweep(m_meshInstantiationSystem.MaterialReleasePending(), ++m_materialSweepFrame)) {
-        m_meshInstantiationSystem.ReleaseUnusedMaterials(m_registry, renderer);
+    if (!ShouldRunMaterialSweep(m_meshInstantiationSystem.ReleasePending(), ++m_gpuSweepFrame)) {
+        return {};
     }
+    std::vector<MeshHandle> skinningBindings;
+    m_animationSystem.AppendGpuSkinningMeshHandles(skinningBindings);
+    return m_meshInstantiationSystem.ReleaseUnusedGpuResources(m_registry, renderer, skinningBindings);
 }
 
 } // namespace gte

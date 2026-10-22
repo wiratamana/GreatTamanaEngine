@@ -70,6 +70,9 @@ public:
 
     const GpuModelEntry* TryGet(const std::string& absoluteGtaPath) const;
 
+    // Appends the CPU and GPU mesh handle of every part binding of every model.
+    void AppendBoundMeshHandles(std::vector<MeshHandle>& out) const;
+
 private:
     std::unordered_map<std::string, GpuModelEntry> m_models;
     std::uint64_t m_nextInstanceKey = 1;

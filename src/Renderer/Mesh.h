@@ -2,6 +2,7 @@
 
 #include "Buffer.h"
 #include "Culling/CullingTypes.h" // AABB
+#include "RenderGraph/GpuBuffer.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -68,6 +69,16 @@ public:
     void SetLocalBounds(const AABB& bounds) noexcept { m_localBounds = bounds; }
     const std::optional<AABB>& LocalBounds() const noexcept { return m_localBounds; }
 
+    // Cluster table over this mesh's index buffer (read-only storage buffer). Owned by the mesh.
+    bool HasClusters() const noexcept { return m_clusterTable.has_value() && m_clusterCount > 0; }
+    std::uint32_t ClusterCount() const noexcept { return m_clusterCount; }
+    const rg::GpuBuffer* ClusterTable() const noexcept { return m_clusterTable ? &*m_clusterTable : nullptr; }
+    void SetClusterTable(rg::GpuBuffer table, std::uint32_t count) noexcept
+    {
+        m_clusterTable.emplace(std::move(table));
+        m_clusterCount = count;
+    }
+
 private:
     std::shared_ptr<Buffer> m_vertexBuffer;
     std::uint32_t m_vertexCount = 0;
@@ -77,6 +88,9 @@ private:
     std::uint32_t m_indexCount = 0;
 
     std::optional<AABB> m_localBounds;
+
+    std::optional<rg::GpuBuffer> m_clusterTable;
+    std::uint32_t m_clusterCount = 0;
 };
 
 } // namespace gte

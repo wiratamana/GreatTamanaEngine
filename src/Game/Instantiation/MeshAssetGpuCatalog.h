@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -18,6 +19,7 @@ namespace gte {
 
 class Renderer;
 class RenderSystem;
+class Mesh;
 
 // One child entity spawned for a *.gta asset.
 struct MeshAssetPart {
@@ -61,8 +63,14 @@ public:
     // Main thread, outside pass recording.
     MaterialReleaseResult ReleaseUnusedMaterials(Registry& registry, RenderSystem& renderSystem, Renderer& renderer);
 
-    // True while some material may be unused and a sweep should run.
-    bool ReleasePending() const noexcept { return m_releasePending; }
+    // Frees the meshes this catalog registered that no cached part, MeshRenderer or skinning binding uses.
+    // `skinningBindings` are the mesh handles the skinning rig cache can swap to. Returns the freed handles.
+    // Main thread, outside pass recording.
+    std::vector<MeshHandle> ReleaseUnusedMeshes(Registry& registry, RenderSystem& renderSystem, Renderer& renderer,
+        std::span<const MeshHandle> skinningBindings);
+
+    // True while some material or mesh may be unused and a sweep should run.
+    bool ReleasePending() const noexcept { return m_releasePending || m_meshReleasePending; }
 
 private:
     PipelineHandle EnsurePipeline(MeshAssetPipelineKind kind, RenderSystem& renderSystem, Renderer& renderer,
@@ -71,13 +79,19 @@ private:
     const std::vector<MeshAssetPart>& EnsureMeshAsset(
         RenderSystem& renderSystem, Renderer& renderer, const std::string& absoluteGtaPath);
 
+    // Registers the mesh and remembers the handle as catalog-owned.
+    MeshHandle RegisterOwnedMesh(RenderSystem& renderSystem, Mesh&& mesh);
+
     std::array<PipelineHandle, 5> m_pipelines; // Index = MeshAssetPipelineKind.
     MaterialTextureGpuCache m_materialTextureCache;
 
     std::unordered_map<std::string, std::vector<MeshAssetPart>> m_meshAssetCache;
     std::unordered_map<std::string, SkinnedMeshData> m_skinnedMeshCache;
 
+    std::vector<MeshHandle> m_ownedMeshes; // Every mesh this catalog registered and has not released.
+
     bool m_releasePending = false;
+    bool m_meshReleasePending = false;
 };
 
 } // namespace gte

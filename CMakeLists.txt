@@ -983,6 +983,10 @@ add_library(gte_core STATIC
     src/Game/Instantiation/MaterialCacheKeys.h
     src/Game/Instantiation/MaterialLifetimeRules.cpp
     src/Game/Instantiation/MaterialLifetimeRules.h
+    src/Game/Instantiation/MeshClusterTableSelection.cpp
+    src/Game/Instantiation/MeshClusterTableSelection.h
+    src/Game/Instantiation/MeshLifetimeRules.cpp
+    src/Game/Instantiation/MeshLifetimeRules.h
     src/Game/Instantiation/MeshAssetPipelineKind.h
     src/Game/Instantiation/MeshAssetGpuCatalog.cpp
     src/Game/Instantiation/MeshAssetGpuCatalog.h

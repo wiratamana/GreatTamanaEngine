@@ -154,6 +154,13 @@ TEST(RenderBatchingTest, IneligibleForPositionColorVertexLayout)
         /*isGpuSkinned=*/false, /*minInstancesForGpuDrivenBatch=*/4));
 }
 
+TEST(RenderBatchingTest, IneligibleWhenMeshHasClusters)
+{
+    const RenderBatchGroup group = MakeGroupWithNCommands(4);
+    EXPECT_FALSE(IsGpuDrivenEligible(group, /*hasIndexBuffer=*/true, VertexLayout::PositionNormal,
+        /*isGpuSkinned=*/false, /*minInstancesForGpuDrivenBatch=*/4, /*hasClusters=*/true));
+}
+
 TEST(RenderBatchingTest, IneligibleForPositionNormalUvVertexLayout)
 {
     const RenderBatchGroup group = MakeGroupWithNCommands(4);

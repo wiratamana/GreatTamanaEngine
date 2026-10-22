@@ -214,7 +214,7 @@ std::vector<GpuDrivenBatchFrameEntry> RenderSystem::CollectGpuDrivenBatches(Regi
         const bool isGpuSkinned = gpuSkinnedOutputBuffersThisFrame.contains(mesh->VertexBufferHandle());
 
         if (!IsGpuDrivenEligible(group, mesh->HasIndexBuffer(), pipeline->VertexLayoutKind(), isGpuSkinned,
-                minInstancesForGpuDrivenBatch)) {
+                minInstancesForGpuDrivenBatch, mesh->HasClusters())) {
             continue;
         }
 

@@ -8,7 +8,9 @@
 #include "PrimitiveGpuCatalog.h"
 
 #include <cstddef>
+#include <span>
 #include <string>
+#include <vector>
 
 namespace gte {
 
@@ -54,14 +56,16 @@ public:
         m_meshAssetCatalog.InvalidateCachedMeshAsset(absoluteGtaPath);
     }
 
-    // True while the catalog has materials that may be unused.
-    bool MaterialReleasePending() const noexcept { return m_meshAssetCatalog.ReleasePending(); }
+    // True while the catalog has materials or meshes that may be unused.
+    bool ReleasePending() const noexcept { return m_meshAssetCatalog.ReleasePending(); }
 
-    // Frees materials and images that no entity and no cached asset uses; returns the material count freed.
-    std::size_t ReleaseUnusedMaterials(Registry& registry, Renderer& renderer)
+    // Frees materials, images and meshes that no entity and no cached asset uses.
+    // `skinningBindings` are the mesh handles the skinning rig cache can swap to. Returns the freed meshes.
+    std::vector<MeshHandle> ReleaseUnusedGpuResources(
+        Registry& registry, Renderer& renderer, std::span<const MeshHandle> skinningBindings)
     {
-        const MaterialReleaseResult result = m_meshAssetCatalog.ReleaseUnusedMaterials(registry, m_renderSystem, renderer);
-        return result.materialsFreed;
+        m_meshAssetCatalog.ReleaseUnusedMaterials(registry, m_renderSystem, renderer);
+        return m_meshAssetCatalog.ReleaseUnusedMeshes(registry, m_renderSystem, renderer, skinningBindings);
     }
 
 private:

@@ -1064,7 +1064,9 @@ RenderTexture* Core::AcquireDirectGameTarget()
 
 void Core::BuildFrame()
 {
-    m_game.ReleaseUnusedGpuMaterials(m_renderer);
+    for (const MeshHandle released : m_game.ReleaseUnusedGpuResources(m_renderer)) {
+        m_gpuDrivenBatchCache.EraseMesh(m_renderer, released);
+    }
 
     m_renderGraph.BeginPersistentResourceFrame();
 

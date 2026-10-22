@@ -69,6 +69,26 @@ const GpuDrivenBatchCache::Entry* GpuDrivenBatchCache::TryGet(const GpuDrivenBat
     return found != m_entries.end() ? &found->second : nullptr;
 }
 
+void GpuDrivenBatchCache::EraseMesh(Renderer& renderer, MeshHandle mesh)
+{
+    const auto release = [&renderer](DescriptorSetHandle& handle) {
+        if (handle != DescriptorSetHandle::Invalid) {
+            renderer.FreeDescriptorSet(Native(handle));
+            UnregisterDescriptorSet(handle);
+            handle = DescriptorSetHandle::Invalid;
+        }
+    };
+    for (auto it = m_entries.begin(); it != m_entries.end();) {
+        if (it->first.mesh == mesh) {
+            release(it->second.cullingDescriptorSet);
+            release(it->second.instanceBufferDescriptorSet);
+            it = m_entries.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 std::optional<std::uint32_t> GpuDrivenBatchCache::ReadLastKnownVisibleCount(const GpuDrivenBatchKey& key) const
 {
     const auto found = m_entries.find(key);

@@ -85,6 +85,9 @@ public:
 
     const Entry* TryGet(const GpuDrivenBatchKey& key) const;
 
+    // Destroys every batch of `mesh`, including its descriptor sets. The GPU must be idle.
+    void EraseMesh(Renderer& renderer, MeshHandle mesh);
+
     // Reads the readback buffer without waiting. Call only after the frame's fence wait. Nullopt for an unknown key.
     std::optional<std::uint32_t> ReadLastKnownVisibleCount(const GpuDrivenBatchKey& key) const;
 

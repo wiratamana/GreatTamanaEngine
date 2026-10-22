@@ -68,21 +68,10 @@ std::vector<RenderBatchGroup> GroupDrawCommandsByMeshAndPipeline(const std::vect
 }
 
 bool IsGpuDrivenEligible(const RenderBatchGroup& group, bool hasIndexBuffer, VertexLayout vertexLayout,
-    bool isGpuSkinned, std::size_t minInstancesForGpuDrivenBatch)
+    bool isGpuSkinned, std::size_t minInstancesForGpuDrivenBatch, bool hasClusters)
 {
-    if (group.commands.size() < minInstancesForGpuDrivenBatch) {
-        return false;
-    }
-    if (!hasIndexBuffer) {
-        return false;
-    }
-    if (vertexLayout != VertexLayout::PositionNormal) {
-        return false;
-    }
-    if (isGpuSkinned) {
-        return false;
-    }
-    return true;
+    return group.commands.size() >= minInstancesForGpuDrivenBatch && hasIndexBuffer
+        && vertexLayout == VertexLayout::PositionNormal && !isGpuSkinned && !hasClusters;
 }
 
 } // namespace gte

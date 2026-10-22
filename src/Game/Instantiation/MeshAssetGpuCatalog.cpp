@@ -13,12 +13,16 @@
 #include "../../Renderer/Renderer.h"
 #include "MaterialLifetimeRules.h"
 #include "../../Assets/MeshMaterialPartitioner.h"
+#include "MeshClusterTableSelection.h"
+#include "MeshLifetimeRules.h"
 #include "MeshVertexPacking.h"
 #include "../RenderSystem.h"
 
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_set>
 
@@ -85,6 +89,27 @@ MaterialTextureSet TextureSetOf(const Material& m, const MaterialData& data, boo
     return set;
 }
 
+// Uploads the part's cluster table. Any refusal or upload failure leaves the mesh without clusters (CPU draw).
+void AttachClusterTable(Mesh& gpuMesh, Renderer& renderer, const std::string& path,
+    std::span<const MeshCluster> clusters, std::span<const ClusterSliceRange> slices, std::size_t keptIndexCount)
+{
+    std::string why;
+    const std::optional<std::vector<MeshCluster>> table =
+        SelectClusterTableForKeptSlices(clusters, slices, keptIndexCount, kMaxMeshClusters, &why);
+    if (!table.has_value()) {
+        GTE_LOG_WARNING(kLogCategory, path + ": no cluster table (" + why + "); the mesh draws on the CPU path.");
+        return;
+    }
+    try {
+        gpuMesh.SetClusterTable(rg::GpuBuffer::CreateWithData(renderer.Device(), table->data(),
+                                    table->size() * sizeof(MeshCluster), "MeshClusterTable", rg::GpuBufferUse::Storage),
+            static_cast<std::uint32_t>(table->size()));
+    } catch (const std::exception& error) {
+        GTE_LOG_WARNING(kLogCategory,
+            path + ": cluster table upload failed (" + error.what() + "); the mesh draws on the CPU path.");
+    }
+}
+
 } // namespace
 
 PipelineHandle MeshAssetGpuCatalog::EnsurePipeline(MeshAssetPipelineKind kind, RenderSystem& renderSystem,
@@ -114,13 +139,19 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
         return kEmpty; // Missing file, bad magic, or not a Mesh asset.
     }
 
-    const std::optional<MeshData> mesh = DecodeMeshDataFromBytes(gta->payload);
+    std::string clusterTailRejection;
+    const std::optional<MeshData> mesh = DecodeMeshDataFromBytes(gta->payload, &clusterTailRejection);
     if (!mesh.has_value() || mesh->positions.empty() || mesh->indices.size() < 3) {
         return kEmpty; // Corrupt/truncated payload, or an empty mesh.
     }
+    if (!clusterTailRejection.empty()) {
+        GTE_LOG_WARNING(kLogCategory,
+            absoluteGtaPath + ": cluster data dropped (" + clusterTailRejection + "); the mesh draws on the CPU path.");
+    }
 
-    // A call that fails half way can leave unused materials behind; the next sweep frees them.
+    // A call that fails half way can leave unused materials and meshes behind; the next sweep frees them.
     m_releasePending = true;
+    m_meshReleasePending = true;
 
     // Materials/textures and rig are optional metadata (absent for materialless/boneless models).
     MaterialData materials;
@@ -177,6 +208,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
         bool alphaTested = false;
     };
     std::vector<TexturedSlice> texturedSlices;
+    std::vector<ClusterSliceRange> clusterSlices; // keep = the slice joins the untextured part.
 
     for (const MeshMaterialSlice& slice : slices) {
         MaterialTextureHandle texture = kInvalidMaterialTextureHandle;
@@ -200,6 +232,8 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
             }
         }
 
+        clusterSlices.push_back(ClusterSliceRange{ static_cast<std::uint32_t>(slice.start),
+            static_cast<std::uint32_t>(slice.count), !texture.IsValid() });
         if (texture.IsValid()) {
             texturedSlices.push_back(TexturedSlice{ slice.start, slice.count, texture, slice.name, alphaTested });
         } else {
@@ -226,7 +260,11 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
                   static_cast<std::uint32_t>(untexturedIndices.size()), "ImportedMesh");
         // Tight local-space bounds, computed once at load; used by GPU-driven culling.
         gpuMesh.SetLocalBounds(ComputeSubsetLocalAABB(mesh->positions, untexturedIndices));
-        const MeshHandle handle = renderSystem.RegisterMesh(std::move(gpuMesh));
+        // Skinned vertices change every frame, so only static parts get a cluster table.
+        if (!skinned && !mesh->clusters.empty()) {
+            AttachClusterTable(gpuMesh, renderer, absoluteGtaPath, mesh->clusters, clusterSlices, untexturedIndices.size());
+        }
+        const MeshHandle handle = RegisterOwnedMesh(renderSystem, std::move(gpuMesh));
         // Index copy is kept only for skinned models (needed to build a GPU-skinned counterpart).
         MeshAssetPart part{ handle, kInvalidMaterialTextureHandle, std::string() };
         if (skinned) {
@@ -265,7 +303,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
                 static_cast<std::uint32_t>(sliceIndices.size()), "ImportedTexturedMesh");
             // Tight local-space bounds for this submesh; textured batches are not GPU-driven yet.
             gpuMesh.SetLocalBounds(ComputeSubsetLocalAABB(mesh->positions, sliceIndices));
-            const MeshHandle handle = renderSystem.RegisterMesh(std::move(gpuMesh));
+            const MeshHandle handle = RegisterOwnedMesh(renderSystem, std::move(gpuMesh));
             MeshAssetPart part{ handle, slice.texture, slice.name };
             part.kind = ChooseMeshAssetPipelineKind(part.texture.IsValid(), tangentLayout, slice.alphaTested);
             if (skinned) {
@@ -376,6 +414,7 @@ void MeshAssetGpuCatalog::InvalidateCachedMeshAsset(const std::string& absoluteG
     m_skinnedMeshCache.erase(absoluteGtaPath);
     m_materialTextureCache.ForgetFailedImages();
     m_releasePending = true;
+    m_meshReleasePending = true;
 }
 
 MaterialReleaseResult MeshAssetGpuCatalog::ReleaseUnusedMaterials(
@@ -406,6 +445,51 @@ MaterialReleaseResult MeshAssetGpuCatalog::ReleaseUnusedMaterials(
                 + " materials stay)");
     }
     return result;
+}
+
+MeshHandle MeshAssetGpuCatalog::RegisterOwnedMesh(RenderSystem& renderSystem, Mesh&& mesh)
+{
+    const MeshHandle handle = renderSystem.RegisterMesh(std::move(mesh));
+    m_ownedMeshes.push_back(handle);
+    return handle;
+}
+
+std::vector<MeshHandle> MeshAssetGpuCatalog::ReleaseUnusedMeshes(Registry& registry, RenderSystem& renderSystem,
+    Renderer& renderer, std::span<const MeshHandle> skinningBindings)
+{
+    std::vector<MeshHandle> cachedParts;
+    for (const auto& [path, parts] : m_meshAssetCache) {
+        for (const MeshAssetPart& part : parts) {
+            cachedParts.push_back(part.mesh);
+        }
+    }
+
+    const MeshSweepPlan plan = PlanMeshSweep(m_ownedMeshes, cachedParts, CollectMeshesInUse(registry), skinningBindings);
+    m_meshReleasePending = plan.stillPending;
+    if (plan.release.empty()) {
+        return {};
+    }
+
+    // Nothing may be destroyed while a submitted command buffer can still read it.
+    try {
+        renderer.DrainGpuForResourceRelease();
+    } catch (const std::exception& error) {
+        GTE_LOG_ERROR(kLogCategory, std::string("Mesh release skipped, GPU wait failed: ") + error.what());
+        m_meshReleasePending = true;
+        return {};
+    }
+
+    std::vector<MeshHandle> released;
+    released.reserve(plan.release.size());
+    for (const MeshHandle handle : plan.release) {
+        if (renderSystem.ReleaseMesh(handle)) {
+            released.push_back(handle);
+        }
+        std::erase(m_ownedMeshes, handle);
+    }
+    GTE_LOG_INFO(kLogCategory,
+        "Released " + std::to_string(released.size()) + " meshes (" + std::to_string(m_ownedMeshes.size()) + " stay)");
+    return released;
 }
 
 } // namespace gte
