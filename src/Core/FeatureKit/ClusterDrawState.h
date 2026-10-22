@@ -144,6 +144,9 @@ public:
     // to the ledger. True when memory was released. A refused buffer keeps the accounting for a retry.
     bool ReleaseIdleScope(Frame& frame);
 
+    // NoteFrame + ReleaseIdleScope for a view scope. A feature that skips its chain calls this so idle buffers go back.
+    void TickIdle(Frame& frame, bool declaredChain);
+
 private:
     static constexpr std::uint64_t kNever = ~std::uint64_t{ 0 };
 

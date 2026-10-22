@@ -389,6 +389,15 @@ void ClusterDrawState::NoteFrame(const Frame& frame, bool declaredChain) noexcep
     }
 }
 
+void ClusterDrawState::TickIdle(Frame& frame, bool declaredChain)
+{
+    if (!Valid() || frame.Scope() == rg::ViewScope::Shared) {
+        return;
+    }
+    NoteFrame(frame, declaredChain);
+    ReleaseIdleScope(frame);
+}
+
 bool ClusterDrawState::ReleaseIdleScope(Frame& frame)
 {
     if (!Valid()) {

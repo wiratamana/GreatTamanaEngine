@@ -103,8 +103,7 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     if (!cfg.enabled || HasNoPixels(viewData) || !live.valid) {
         snap.refusal = !cfg.enabled ? "disabled" : (HasNoPixels(viewData) ? "view has no pixels" : "camera is not valid");
         // An idle scope still gives its buffers back.
-        m_state.NoteFrame(f, false);
-        m_state.ReleaseIdleScope(f);
+        m_state.TickIdle(f, false);
         finish();
         return;
     }

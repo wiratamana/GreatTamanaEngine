@@ -602,11 +602,7 @@ ClusterStats ClusterDrawChain::Record()
     s.result.inertReason = s.plan.inertReason;
 
     // Idle bookkeeping of the frame's scope; release only runs in the synchronous regime.
-    const detail::FrameContext* context = s.frame->Context();
-    if (context != nullptr && context->scope != rg::ViewScope::Shared && s.state->Valid()) {
-        s.state->NoteFrame(*s.frame, s.result.declared);
-        s.state->ReleaseIdleScope(*s.frame);
-    }
+    s.state->TickIdle(*s.frame, s.result.declared);
     return s.result;
 }
 

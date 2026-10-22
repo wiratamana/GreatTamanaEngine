@@ -133,10 +133,15 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
     const std::uint32_t resolution = cfg.mapResolution;
     ShadowViewState& view = m_views.For(f.Scope());
 
+    // A pass that records no cluster chain still advances the idle count so held buffers are released.
+    bool clusterRecorded = false;
     ShadowViewSnapshot snap;
     snap.frameIndex = f.FrameIndex();
     snap.deltaSeconds = f.DeltaSeconds();
     const auto finish = [&](ShadowFrameStatus status) {
+        if (!clusterRecorded) {
+            m_clusterState.TickIdle(f, false);
+        }
         snap.status = status;
         snap.cascadeBytes = MapBytes(view, f);
         snap.sdsm = view.sdsm;
@@ -227,9 +232,9 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
             fail(ShadowFrameStatus::ShadersNotReady);
             continue;
         }
-        if (clusterPlan.ready) {
-            clusterChain.Record();
-        }
+        // A plan that is not ready declares nothing and only advances the idle count.
+        clusterChain.Record();
+        clusterRecorded = true;
     }
 
     // Unused cascades give their memory back.
