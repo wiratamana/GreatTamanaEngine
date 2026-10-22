@@ -39,13 +39,6 @@ struct ClusterSlotAssignment {
 // Slots go to the parts with the most work items first. Ties are broken by mesh token.
 ClusterSlotAssignment AssignClusterPartSlots(std::span<const ClusterPartSize> parts, std::uint32_t slotCount);
 
-// One part of a chain, as far as the claim rule needs to know.
-struct ClusterPartPlan {
-    std::span<const Entity> entities;
-    bool planReady = true;
-    ClusterChainToggles toggles;
-};
-
 // Declares reset, cull and draw in that order and stops at the first refusal.
 // `declarer` provides bool Reset(), bool Cull(), bool Draw().
 template <typename Declarer>
@@ -104,21 +97,19 @@ struct ClusterRecordOutcome {
     std::vector<Entity> claimed;                // Entities of the parts whose chain was fully declared.
 };
 
-// Runs `declarePart(index)` (returns the progress of that part) for every ready part, then builds the claim
-// from what was really declared. Nothing is claimed before every call of a part has reported "declared".
+// Runs `declarePart(index)` (returns the progress of that part) for every part, then builds the claim
+// from what was really declared. `parts` holds the entities of each part.
 template <typename DeclarePart>
 ClusterRecordOutcome RecordClusterParts(
-    std::span<const ClusterPartPlan> parts, const ClusterClaimContext& context, DeclarePart&& declarePart)
+    std::span<const std::span<const Entity>> parts, const ClusterClaimContext& context, DeclarePart&& declarePart)
 {
     ClusterRecordOutcome outcome;
     outcome.progress.assign(parts.size(), ClusterChainProgress::None);
     std::vector<ClusterPartClaim> claims;
     claims.reserve(parts.size());
     for (std::size_t i = 0; i < parts.size(); ++i) {
-        if (parts[i].planReady) {
-            outcome.progress[i] = declarePart(i);
-        }
-        claims.push_back(ClusterPartClaim{ parts[i].entities, parts[i].planReady, outcome.progress[i], parts[i].toggles });
+        outcome.progress[i] = declarePart(i);
+        claims.push_back(ClusterPartClaim{ parts[i], outcome.progress[i] });
     }
     outcome.claimed = ClaimedEntitiesOf(claims, context);
     return outcome;

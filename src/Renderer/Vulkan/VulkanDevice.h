@@ -2,6 +2,7 @@
 
 #include <volk.h>
 
+#include "../Culling/ClusterCullMath.h"
 #include "../GpuTiming.h"
 
 #include <cstdint>
@@ -10,14 +11,7 @@
 
 namespace gte {
 
-// Indirect draw features enabled on the device.
-struct IndirectDrawCaps {
-    bool drawIndirectCount = false;
-    bool multiDrawIndirect = false;
-    bool drawIndirectFirstInstance = false;
-    std::uint32_t maxDrawIndirectCount = 0;
-};
-static_assert(std::is_trivially_copyable_v<IndirectDrawCaps>);
+static_assert(std::is_trivially_copyable_v<IndirectDrawCapsView>);
 
 // RAII wrapper around a VkPhysicalDevice and the VkDevice created for it, plus its graphics and present
 // queues. Does not own the VkInstance or VkSurfaceKHR; both must outlive it. Selection takes the first
@@ -52,8 +46,7 @@ public:
 
     // Indirect draw capabilities, probed once before vkCreateDevice(). maxDrawIndirectCount is 0 unless
     // multiDrawIndirect is enabled.
-    const IndirectDrawCaps& IndirectDraw() const noexcept { return m_indirectDrawCaps; }
-    bool SupportsDrawIndirectCount() const noexcept { return m_indirectDrawCaps.drawIndirectCount; }
+    const IndirectDrawCapsView& IndirectDraw() const noexcept { return m_indirectDrawCaps; }
 
     // Whether the device supports BLIT_SRC and BLIT_DST for the engine's depth format, probed once.
     // Depth blit support is not guaranteed and is often missing; any pass that sets
@@ -90,7 +83,7 @@ private:
 
     GpuTimestampCapability m_timestampCapability;
 
-    IndirectDrawCaps m_indirectDrawCaps{};
+    IndirectDrawCapsView m_indirectDrawCaps{};
     bool m_supportsDepthBlit = false;
     float m_materialAnisotropy = 1.0f;
 

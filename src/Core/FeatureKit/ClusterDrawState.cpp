@@ -88,22 +88,18 @@ ClusterDrawState::ClusterDrawState(std::string_view baseName, ClusterDrawShape s
             }
         }
     }
-    m_paramsNames.reserve(chains * rg::kViewScopeCount);
     m_tableNames.reserve(chains * rg::kViewScopeCount);
     for (std::size_t scope = 0; scope < rg::kViewScopeCount; ++scope) {
         for (std::uint32_t lane = 0; lane < m_shape.lanes; ++lane) {
             for (std::uint32_t slot = 0; slot < m_shape.partSlots; ++slot) {
                 const std::string tail = ScopeTag(scope) + ".L" + std::to_string(lane) + ".P" + std::to_string(slot);
-                const char* params = InternClusterName(m_base + ".Params" + tail);
                 const char* table = InternClusterName(m_base + ".Clusters" + tail);
-                if (params == nullptr || table == nullptr) {
+                if (table == nullptr) {
                     m_error = "ClusterDrawState '" + m_base + "': the pass name table is full";
                     m_passNames.clear();
-                    m_paramsNames.clear();
                     m_tableNames.clear();
                     return;
                 }
-                m_paramsNames.push_back(params);
                 m_tableNames.push_back(table);
             }
         }
@@ -120,7 +116,6 @@ ClusterDrawState::ClusterDrawState(std::string_view baseName, ClusterDrawShape s
             if (clear == nullptr || copy == nullptr) {
                 m_error = "ClusterDrawState '" + m_base + "': the pass name table is full";
                 m_passNames.clear();
-                m_paramsNames.clear();
                 m_tableNames.clear();
                 m_statsClearNames.clear();
                 m_statsCopyNames.clear();
@@ -214,11 +209,6 @@ GpuReadback<std::uint32_t>* ClusterDrawState::Stats(std::uint32_t slot) noexcept
 GpuParams<ClusterCullParams>* ClusterDrawState::Params(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) noexcept
 {
     return InRange(lane, slot) ? m_params[ChainIndex(rg::ViewScopeIndex(scope), lane, slot)].get() : nullptr;
-}
-
-const char* ClusterDrawState::ParamsName(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) const noexcept
-{
-    return InRange(lane, slot) ? m_paramsNames[ChainIndex(rg::ViewScopeIndex(scope), lane, slot)] : nullptr;
 }
 
 const char* ClusterDrawState::TableName(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) const noexcept

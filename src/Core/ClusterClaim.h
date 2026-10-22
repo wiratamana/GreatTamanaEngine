@@ -15,19 +15,10 @@ namespace gte {
 // Last pass of the (reset, cull, draw) chain that was declared, in that order.
 enum class ClusterChainProgress : std::uint8_t { None, Reset, Cull, Draw };
 
-// Enabled state of the three chain passes of one part.
-struct ClusterChainToggles {
-    bool reset = true;
-    bool cull = true;
-    bool draw = true;
-};
-
 // Outcome of one part's chain.
 struct ClusterPartClaim {
     std::span<const Entity> entities;
-    bool planReady = false;
     ClusterChainProgress progress = ClusterChainProgress::None;
-    ClusterChainToggles toggles;
 };
 
 // Frame-level conditions shared by every part.
@@ -45,11 +36,10 @@ constexpr bool ClusterClaimAllowed(const ClusterClaimContext& context) noexcept
     return !(context.captureArmed && context.scope == rg::ViewScope::GameView);
 }
 
-// True when the part's chain is complete and fully enabled.
+// True when every pass of the part's chain was declared.
 constexpr bool ClusterPartClaimable(const ClusterPartClaim& part) noexcept
 {
-    return part.planReady && part.progress == ClusterChainProgress::Draw && part.toggles.reset && part.toggles.cull
-        && part.toggles.draw;
+    return part.progress == ClusterChainProgress::Draw;
 }
 
 // Entities of every claimable part, in part order. Empty when the context disallows claims.

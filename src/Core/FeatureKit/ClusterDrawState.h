@@ -94,8 +94,6 @@ public:
 
     // One parameter block per (view scope, lane, slot): no two chains ever share one.
     GpuParams<ClusterCullParams>* Params(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) noexcept;
-    // Static-storage debug name of that block.
-    const char* ParamsName(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) const noexcept;
     // Static-storage graph name of the mesh cluster table import of that chain.
     const char* TableName(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) const noexcept;
 
@@ -165,7 +163,6 @@ private:
     std::uint64_t m_owner = 0;
 
     std::vector<const char*> m_passNames;   // [(lane * slots + slot) * kClusterPassKindCount + kind]
-    std::vector<const char*> m_paramsNames; // [scope][lane][slot]
     std::vector<const char*> m_tableNames;  // [scope][lane][slot]
     std::unique_ptr<ComputeShader> m_cullShader;
     std::unique_ptr<ComputeShader> m_statsShader;

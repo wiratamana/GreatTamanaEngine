@@ -129,7 +129,7 @@ TEST(ClusterPartPlanningTest, ARefusalAtAnyPositionLeavesThatPartUnclaimed)
 {
     for (const FakeDeclarer::Refuse refuse :
         { FakeDeclarer::Refuse::Reset, FakeDeclarer::Refuse::Cull, FakeDeclarer::Refuse::Draw }) {
-        const std::array<ClusterPartPlan, 2> parts = { ClusterPartPlan{ kPartA }, ClusterPartPlan{ kPartB } };
+        const std::array<std::span<const Entity>, 2> parts = { std::span<const Entity>(kPartA), std::span<const Entity>(kPartB) };
         const ClusterRecordOutcome outcome = RecordClusterParts(parts, GameContext(), [&](std::size_t index) {
             FakeDeclarer declarer;
             declarer.refuse = index == 0 ? refuse : FakeDeclarer::Refuse::Nothing;
@@ -144,7 +144,7 @@ TEST(ClusterPartPlanningTest, ARefusalAtAnyPositionLeavesThatPartUnclaimed)
 
 TEST(ClusterPartPlanningTest, AnAcceptingDeclarerClaimsEveryPart)
 {
-    const std::array<ClusterPartPlan, 2> parts = { ClusterPartPlan{ kPartA }, ClusterPartPlan{ kPartB } };
+    const std::array<std::span<const Entity>, 2> parts = { std::span<const Entity>(kPartA), std::span<const Entity>(kPartB) };
     const ClusterRecordOutcome outcome = RecordClusterParts(parts, GameContext(), [](std::size_t) {
         FakeDeclarer declarer;
         return RecordClusterChain(declarer);
@@ -156,7 +156,7 @@ TEST(ClusterPartPlanningTest, ASharedScopeFrameClaimsNothing)
 {
     ClusterClaimContext context;
     context.scope = rg::ViewScope::Shared;
-    const std::array<ClusterPartPlan, 1> parts = { ClusterPartPlan{ kPartA } };
+    const std::array<std::span<const Entity>, 1> parts = { std::span<const Entity>(kPartA) };
     const ClusterRecordOutcome outcome = RecordClusterParts(parts, context, [](std::size_t) {
         FakeDeclarer declarer;
         return RecordClusterChain(declarer);
@@ -168,25 +168,11 @@ TEST(ClusterPartPlanningTest, AFrameWithACaptureArmedClaimsNothing)
 {
     ClusterClaimContext context = GameContext();
     context.captureArmed = true;
-    const std::array<ClusterPartPlan, 1> parts = { ClusterPartPlan{ kPartA } };
+    const std::array<std::span<const Entity>, 1> parts = { std::span<const Entity>(kPartA) };
     const ClusterRecordOutcome outcome = RecordClusterParts(parts, context, [](std::size_t) {
         FakeDeclarer declarer;
         return RecordClusterChain(declarer);
     });
-    EXPECT_TRUE(outcome.claimed.empty());
-}
-
-TEST(ClusterPartPlanningTest, APartThatIsNotReadyIsNeverDeclared)
-{
-    ClusterPartPlan notReady{ kPartA };
-    notReady.planReady = false;
-    const std::array<ClusterPartPlan, 1> parts = { notReady };
-    int declared = 0;
-    const ClusterRecordOutcome outcome = RecordClusterParts(parts, GameContext(), [&](std::size_t) {
-        ++declared;
-        return ClusterChainProgress::Draw;
-    });
-    EXPECT_EQ(declared, 0);
     EXPECT_TRUE(outcome.claimed.empty());
 }
 
@@ -218,7 +204,7 @@ TEST(ClusterPartPlanningTest, AStatsRefusalDoesNotRemoveTheClaim)
     for (const StatsFakeDeclarer::RefuseStats refuse :
         { StatsFakeDeclarer::RefuseStats::Clear, StatsFakeDeclarer::RefuseStats::Compute,
             StatsFakeDeclarer::RefuseStats::Copy }) {
-        const std::array<ClusterPartPlan, 2> parts = { ClusterPartPlan{ kPartA }, ClusterPartPlan{ kPartB } };
+        const std::array<std::span<const Entity>, 2> parts = { std::span<const Entity>(kPartA), std::span<const Entity>(kPartB) };
         const ClusterRecordOutcome outcome = RecordClusterParts(parts, GameContext(), [&](std::size_t) {
             StatsFakeDeclarer declarer;
             declarer.refuseStats = refuse;

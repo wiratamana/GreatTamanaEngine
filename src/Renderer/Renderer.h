@@ -191,11 +191,7 @@ public:
     // be built (logged once per key). The pointer stays valid for the renderer's life. Main thread only.
     const Pipeline* CreateClusterPipeline(const ClusterPipelineKey& key, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
-    // Hardware capability checks.
-    bool SupportsDrawIndirectCount() const noexcept;
-    bool SupportsMultiDrawIndirect() const noexcept;
-    bool SupportsDrawIndirectFirstInstance() const noexcept;
-    std::uint32_t MaxDrawIndirectCount() const noexcept; // 0 unless multi draw is enabled.
+    // Device indirect draw capabilities. maxDrawIndirectCount is 0 unless multi draw is enabled.
     IndirectDrawCapsView IndirectDrawCaps() const noexcept;
 
     // Mesh creation helpers.
@@ -283,10 +279,6 @@ public:
         std::uint32_t imageCount = 0;
         std::uint32_t minImageCount = 0;
         GpuTimestampCapability timestampCapability;
-        bool supportsDrawIndirectCount = false;
-        bool supportsMultiDrawIndirect = false;
-        bool supportsDrawIndirectFirstInstance = false;
-        std::uint32_t maxDrawIndirectCount = 0;
     };
 
     // Resizes swapchain on window resize events.

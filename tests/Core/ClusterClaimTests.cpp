@@ -24,7 +24,6 @@ ClusterPartClaim CompletePart(std::span<const Entity> entities)
 {
     ClusterPartClaim part;
     part.entities = entities;
-    part.planReady = true;
     part.progress = ClusterChainProgress::Draw;
     return part;
 }
@@ -45,34 +44,16 @@ TEST(ClusterClaimTest, ACompleteChainClaimsEveryEntityOfEveryPart)
     EXPECT_EQ(claimed[2], MakeEntity(3));
 }
 
-TEST(ClusterClaimTest, AToggledOffPassClaimsNothingForThatPart)
-{
-    for (int which = 0; which < 3; ++which) {
-        ClusterPartClaim part = CompletePart(kPartA);
-        (which == 0 ? part.toggles.reset : which == 1 ? part.toggles.cull : part.toggles.draw) = false;
-        const std::array<ClusterPartClaim, 2> parts = { part, CompletePart(kPartB) };
-        const std::vector<Entity> claimed = ClaimedEntitiesOf(parts, GameContext());
-        ASSERT_EQ(claimed.size(), 1u) << "toggle " << which;
-        EXPECT_EQ(claimed[0], MakeEntity(3));
-    }
-}
-
-TEST(ClusterClaimTest, APlanThatIsNotReadyClaimsNothing)
-{
-    ClusterPartClaim part = CompletePart(kPartA);
-    part.planReady = false;
-    const std::array<ClusterPartClaim, 1> parts = { part };
-    EXPECT_TRUE(ClaimedEntitiesOf(parts, GameContext()).empty());
-}
-
 TEST(ClusterClaimTest, AChainThatStoppedBeforeTheDrawClaimsNothing)
 {
     for (const ClusterChainProgress progress :
         { ClusterChainProgress::None, ClusterChainProgress::Reset, ClusterChainProgress::Cull }) {
         ClusterPartClaim part = CompletePart(kPartA);
         part.progress = progress;
-        const std::array<ClusterPartClaim, 1> parts = { part };
-        EXPECT_TRUE(ClaimedEntitiesOf(parts, GameContext()).empty());
+        const std::array<ClusterPartClaim, 2> parts = { part, CompletePart(kPartB) };
+        const std::vector<Entity> claimed = ClaimedEntitiesOf(parts, GameContext());
+        ASSERT_EQ(claimed.size(), 1u);
+        EXPECT_EQ(claimed[0], MakeEntity(3));
     }
 }
 

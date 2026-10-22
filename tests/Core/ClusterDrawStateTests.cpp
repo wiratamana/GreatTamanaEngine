@@ -141,7 +141,7 @@ TEST(ClusterDrawStateTests, DifferentBasesNeverShareNames)
     for (const std::string& n : b.AllPassNames()) {
         EXPECT_TRUE(all.insert(n).second);
     }
-    EXPECT_NE(a.ParamsName(kGame, 0, 0), b.ParamsName(kGame, 0, 0));
+    EXPECT_NE(a.TableName(kGame, 0, 0), b.TableName(kGame, 0, 0));
 }
 
 TEST(ClusterDrawStateTests, NoTwoChainsShareAParameterBlock)
@@ -150,7 +150,6 @@ TEST(ClusterDrawStateTests, NoTwoChainsShareAParameterBlock)
     ASSERT_TRUE(state.Valid());
     ClusterDrawState other("TestParamsOther", { 4, 4 });
     std::set<const void*> blocks;
-    std::set<const char*> names;
     std::size_t count = 0;
     for (ClusterDrawState* s : { &state, &other }) {
         for (const rg::ViewScope scope : { kGame, kScene }) {
@@ -158,14 +157,12 @@ TEST(ClusterDrawStateTests, NoTwoChainsShareAParameterBlock)
                 for (std::uint32_t slot = 0; slot < 4; ++slot) {
                     ASSERT_NE(s->Params(scope, lane, slot), nullptr);
                     blocks.insert(s->Params(scope, lane, slot));
-                    names.insert(s->ParamsName(scope, lane, slot));
                     ++count;
                 }
             }
         }
     }
     EXPECT_EQ(blocks.size(), count);
-    EXPECT_EQ(names.size(), count);
 }
 
 TEST(ClusterDrawStateTests, BuffersAreDistinctPerLaneAndSlot)

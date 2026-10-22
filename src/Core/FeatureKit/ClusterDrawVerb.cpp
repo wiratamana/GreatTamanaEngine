@@ -530,13 +530,13 @@ ClusterChainProgress DeclarePart(ClusterDrawChain::Impl& s, const PlannedPart& p
 void RecordChain(ClusterDrawChain::Impl& s)
 {
     Core& core = *s.frame->Context()->core;
-    std::vector<ClusterPartPlan> plans;
-    plans.reserve(s.parts.size());
+    std::vector<std::span<const Entity>> partEntities;
+    partEntities.reserve(s.parts.size());
     for (const PlannedPart& part : s.parts) {
-        plans.push_back(ClusterPartPlan{ part.entities, true, ClusterChainToggles{} });
+        partEntities.push_back(part.entities);
     }
     const ClusterRecordOutcome outcome = RecordClusterParts(
-        plans, s.claimContext, [&](std::size_t index) { return DeclarePart(s, s.parts[index]); });
+        partEntities, s.claimContext, [&](std::size_t index) { return DeclarePart(s, s.parts[index]); });
 
     // The takeover is the last step, after every pass of a part was declared.
     if (!outcome.claimed.empty()) {
