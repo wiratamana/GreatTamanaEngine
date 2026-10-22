@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ClusterDrawTypes.h"
 #include "GpuBufferRef.h"
 #include "GpuReadback.h"
 #include "SceneSlot.h"
@@ -131,6 +132,10 @@ public:
 
     // A scene redraw (depth pre-pass, outline, ...). Declares nothing while its pass is toggled off.
     SceneDrawChain SceneDraw(rg::StaticName passName);
+
+    // Instances of cluster-ready meshes in this frame, in stable order. Empty without an engine context, in a
+    // shared frame, or when the device cannot run the cluster path. Valid for this frame only.
+    std::span<const ClusterInstance> ClusterCandidates() const noexcept;
 
     // Makes `texture` the content of `slot` for the scene's material shaders. A logged no-op for a bad slot or texture.
     void PublishToScene(SceneSlot slot, Texture texture);

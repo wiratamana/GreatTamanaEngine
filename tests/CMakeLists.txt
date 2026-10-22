@@ -2072,6 +2072,7 @@ set(GTE_TEST_SOURCES
     # involved.
 Core/GpuDrivenBatchEntityExclusionLogicTests.cpp
 Core/ClusterClaimTests.cpp
+Core/ClusterCandidatesTests.cpp
     # editor-core-separation-1 campaign, PHASE3
     # (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - unconditional, since
     # src/Core/LogSink.h/.cpp is unconditionally in gte_core's own source
@@ -2938,7 +2939,7 @@ set(GTE_COMMENT_RULE_SRC
     Math/ToneMapCurves.h
     Game/Lighting/SunShadowReceiver.h Game/Lighting/SunLightModulation.h
     Application/RenderPasses.cpp Application/RenderPasses.h Core/Core.cpp Core/Core.h Core/CapturedPixels.h
-    Core/ClusterClaim.h Core/ClusterClaim.cpp
+    Core/ClusterClaim.h Core/ClusterClaim.cpp Core/ClusterCandidates.h Core/ClusterCandidates.cpp
     Encoding/CapturedPixelConversion.cpp Encoding/CapturedPixelConversion.h Encoding/DepthVisualization.cpp
     Encoding/DepthVisualization.h Encoding/HdrColorVisualization.cpp Encoding/HdrColorVisualization.h
     Encoding/SingleChannelVisualization.cpp Encoding/SingleChannelVisualization.h Editor/EditorHost.cpp
@@ -3014,7 +3015,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Renderer/Culling/ClusterCullMathTests.cpp Assets/AtomicFileTests.cpp
     Assets/MeshClusterTests.cpp Assets/MeshClusteringTests.cpp Assets/MeshMaterialPartitionerTests.cpp
     Assets/MeshClusterImportTests.cpp Editor/MeshClusterBuildRunnerTests.cpp Editor/ClusterToolUiStateTests.cpp
-    Core/ClusterClaimTests.cpp Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
+    Core/ClusterClaimTests.cpp Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp Core/ClusterCandidatesTests.cpp
     Renderer/ClusterShaderTextTests.cpp Renderer/RenderGraph/IndirectDrawRecordTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)

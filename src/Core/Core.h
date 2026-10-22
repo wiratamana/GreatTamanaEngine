@@ -18,6 +18,7 @@
 #include "../Renderer/RenderGraph/RenderPipeline.h"
 #include "../Renderer/RenderGraph/Shader.h"
 #include "FrameDebuggerCaptureRecorder.h"
+#include "FeatureKit/ClusterDrawTypes.h"
 #include "Plugins/ProjectAssemblyHost.h"
 #include "../Assets/AssetDatabase.h"
 #include "Plugins/ProjectRenderFeatureCallback.h"
@@ -28,6 +29,8 @@
 #include "Plugins/RenderViewRegistry.h"
 
 #include <array>
+#include <cstddef>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -44,6 +47,7 @@ class IEditorLayer;
 class EditorHost;
 class IPluginCapabilityOrchestrator;
 class RenderFeatureCompositor;
+class Mesh;
 
 // Frame timing and draw statistics placeholder.
 struct FrameStats {
@@ -217,6 +221,22 @@ public:
     // True while a frame capture records this frame's CPU draw list.
     bool CaptureArmedThisFrame() const noexcept { return m_captureArmedThisFrame; }
 
+    // Instances of cluster-ready meshes this frame, rebuilt by BuildFrame(). Valid until the next BuildFrame().
+    std::span<const fx::ClusterInstance> ClusterCandidates() const noexcept { return m_clusterCandidates; }
+
+    // The mesh behind `token`; null when it is stale or unknown.
+    const Mesh* ResolveClusterMesh(fx::MeshToken token);
+
+    // Reserves an empty per-frame entity set that the CPU scene draw can skip, and returns its handle.
+    // An empty handle means no set is left this frame.
+    fx::EntityExclusion ReserveExclusion();
+
+    // Fills a set reserved this frame. Ignores an empty or foreign handle.
+    void FillExclusion(fx::EntityExclusion exclusion, std::span<const Entity> entities);
+
+    // Most exclusion sets one frame can reserve.
+    static constexpr std::size_t kMaxExclusionSetsPerFrame = 16;
+
 private:
     // Render data for a GPU-driven indirect draw batch.
     struct GpuDrivenBatchRenderData {
@@ -251,6 +271,7 @@ private:
     RenderTexture* AcquireDirectGameTarget();
     const RenderPassViewData* FindViewData(rg::RenderViewId view) const noexcept;
     const ExposedViewOutput* FindExposedViewOutput(rg::ViewScope scope) const noexcept;
+    void BuildClusterCandidates();
 
     IEditorLayer* m_editorLayer = nullptr; // Optional editor hook.
 
@@ -289,6 +310,11 @@ private:
 
     // Entities drawn by a pass chain instead of the CPU scene draw, per view scope. Cleared at the start of BuildFrame().
     std::array<std::unordered_set<Entity>, rg::kViewScopeCount> m_claimedEntities;
+
+    // Cluster-ready instances and entity exclusion sets of this frame. Both are cleared at the start of
+    // BuildFrame(); a deque keeps every reserved set at a stable address.
+    std::vector<fx::ClusterInstance> m_clusterCandidates;
+    std::deque<std::unordered_set<Entity>> m_exclusionSets;
 
     // Opaque features that broke the pass tag rule; their callbacks no longer run.
     std::unordered_set<std::string> m_faultedOpaqueFeatures;

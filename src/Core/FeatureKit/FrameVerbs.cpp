@@ -2,6 +2,7 @@
 
 #include "ComputeShader.h"
 #include "VerbSupport.h"
+#include "../Core.h"
 #include "../../Renderer/RenderGraph/Shader.h"
 #include "../Logging.h"
 
@@ -35,6 +36,14 @@ void Frame::ReportOnce(std::string_view text) const
 float Frame::DeltaSeconds() const noexcept
 {
     return m_context != nullptr ? m_context->deltaSeconds : 0.0f;
+}
+
+std::span<const ClusterInstance> Frame::ClusterCandidates() const noexcept
+{
+    if (m_context == nullptr || m_context->core == nullptr || m_view.scope == rg::ViewScope::Shared) {
+        return {};
+    }
+    return m_context->core->ClusterCandidates();
 }
 
 bool Frame::ShaderReady(ComputeShader& shader)

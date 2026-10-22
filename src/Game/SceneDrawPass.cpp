@@ -51,9 +51,16 @@ SceneDrawPass& SceneDrawPass::CullToFrustum(float paddingFraction)
     return *this;
 }
 
+SceneDrawPass& SceneDrawPass::ExcludeEntities(const std::unordered_set<Entity>* entities)
+{
+    m_excluded = entities;
+    return *this;
+}
+
 bool SceneDrawPass::Draw()
 {
     SceneDrawRequest request = MakeSceneDrawRequest(m_viewProjection, m_overrides);
+    request.batchedEntities = m_excluded;
     if (m_cullPadding.has_value()) {
         request.cull = SceneCullRequest{ m_viewProjection, *m_cullPadding };
     }

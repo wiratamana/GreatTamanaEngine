@@ -8,6 +8,7 @@
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/Culling/CullingPipelines.h"
+#include "../Renderer/Culling/ClusterCullMath.h"
 #include "../Renderer/RenderGraph/FullscreenPass.h"
 #include "../Renderer/RenderGraph/IndirectDrawPass.h"
 #include "../Renderer/RenderGraph/MeshPass.h"
@@ -23,6 +24,7 @@
 #include "../Renderer/RenderGraph/ViewScopeUtil.h"
 #include "../Renderer/GraphicsHandleRegistry.h"
 #include "../Renderer/VulkanFormatInfo.h"
+#include "ClusterCandidates.h"
 #include "GpuDrivenBatchEntityExclusionLogic.h"
 #include "Logging.h"
 #include "ScreenPostProcessPassPriorityAssignment.h"
@@ -503,6 +505,71 @@ void Core::ClaimEntities(rg::ViewScope scope, std::span<const Entity> entities)
         return;
     }
     m_claimedEntities[rg::ViewScopeIndex(scope)].insert(entities.begin(), entities.end());
+}
+
+const Mesh* Core::ResolveClusterMesh(fx::MeshToken token)
+{
+    return m_game.GetRenderSystem().TryGetMesh(MeshHandle{ token.index, token.generation });
+}
+
+fx::EntityExclusion Core::ReserveExclusion()
+{
+    if (m_exclusionSets.size() >= kMaxExclusionSetsPerFrame) {
+        return {};
+    }
+    m_exclusionSets.emplace_back();
+    return fx::EntityExclusion{ &m_exclusionSets.back() };
+}
+
+void Core::FillExclusion(fx::EntityExclusion exclusion, std::span<const Entity> entities)
+{
+    for (std::unordered_set<Entity>& set : m_exclusionSets) {
+        if (exclusion.handle == &set) {
+            set.insert(entities.begin(), entities.end());
+            return;
+        }
+    }
+}
+
+void Core::BuildClusterCandidates()
+{
+    m_clusterCandidates.clear();
+    if (!ClusterPathSupported(m_renderer.IndirectDrawCaps()) || m_renderFeatureCompositorPtr == nullptr) {
+        return;
+    }
+    // Only stages that can declare a cluster chain read the list.
+    if (m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::Opaque>().empty()
+        && m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::PreOpaque>().empty()) {
+        return;
+    }
+
+    std::unordered_set<BufferObjectHandle> gpuSkinnedOutputs;
+    gpuSkinnedOutputs.reserve(m_gpuSkinningRequestsThisFrame.size());
+    for (const AnimationSystem::GpuSkinningDispatchRequest& request : m_gpuSkinningRequestsThisFrame) {
+        gpuSkinnedOutputs.insert(request.dispatch.output->Handle());
+    }
+
+    RenderSystem& renderSystem = m_game.GetRenderSystem();
+    const std::vector<DrawCommand> commands = RenderSystem::CollectRenderables(m_game.GetRegistry());
+    std::vector<ClusterCandidateInput> inputs;
+    inputs.reserve(commands.size());
+    for (const DrawCommand& command : commands) {
+        const Mesh* mesh = renderSystem.TryGetMesh(command.mesh);
+        const Pipeline* pipeline = renderSystem.TryGetPipeline(command.pipeline);
+        if (mesh == nullptr || pipeline == nullptr) {
+            continue;
+        }
+        ClusterCandidateInput input;
+        input.entity = command.entity;
+        input.mesh = fx::MeshToken{ command.mesh.index, command.mesh.generation };
+        input.world = command.model;
+        input.meshHasClusters = mesh->HasClusters();
+        input.meshHasIndexBuffer = mesh->HasIndexBuffer();
+        input.pipelineUntextured = pipeline->VertexLayoutKind() == VertexLayout::PositionNormal;
+        input.gpuSkinned = gpuSkinnedOutputs.contains(mesh->VertexBufferHandle());
+        inputs.push_back(input);
+    }
+    m_clusterCandidates = SelectClusterCandidates(inputs, true);
 }
 
 const Core::ExposedViewOutput* Core::FindExposedViewOutput(rg::ViewScope scope) const noexcept
@@ -1083,10 +1150,12 @@ RenderTexture* Core::AcquireDirectGameTarget()
 
 void Core::BuildFrame()
 {
-    // Claims are cleared first so a frame that ends early leaves none behind.
+    // Per-frame claims, candidates and exclusions are cleared first so a frame that ends early leaves none behind.
     for (std::unordered_set<Entity>& claimed : m_claimedEntities) {
         claimed.clear();
     }
+    m_clusterCandidates.clear();
+    m_exclusionSets.clear();
     m_captureArmedThisFrame = false;
 
     for (const MeshHandle released : m_game.ReleaseUnusedGpuResources(m_renderer)) {
@@ -1142,6 +1211,17 @@ void Core::BuildFrame()
                     m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
                     m_gpuDrivenBatchesThisFrame.clear();
                     m_gpuDrivenBatchDebugInfoLastFrame.clear();
+
+                    // One candidate list for every view of this frame. A failure leaves the list empty (CPU path).
+                    try {
+                        BuildClusterCandidates();
+                    } catch (const std::exception& e) {
+                        m_clusterCandidates.clear();
+                        const std::string failure = std::string("Core: cluster candidate list failed: ") + e.what();
+                        if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
+                            GTE_LOG_ERROR("Core", failure);
+                        }
+                    }
                     float gameAspectForReplay = 1.0f;
 
                     // Set up Game View rendering.

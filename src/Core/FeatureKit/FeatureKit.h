@@ -5,6 +5,7 @@
 
 #include "Channel.h"
 #include "ChannelKey.h"
+#include "ClusterDrawTypes.h"
 #include "ComputeChain.h"
 #include "ComputeShader.h"
 #include "Feature.h"

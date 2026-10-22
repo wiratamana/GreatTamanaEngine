@@ -30,6 +30,10 @@ public:
     // Meshes without bounds are always drawn.
     SceneDrawChain& CullToFrustum(float paddingFraction = 0.0f);
 
+    // Skips the entities of `exclusion` (read when the pass executes). An empty handle changes nothing.
+    // The pass is declared even when every entity is skipped, so a depth clear still happens.
+    SceneDrawChain& Exclude(const EntityExclusion& exclusion);
+
     // False when nothing was declared.
     bool Record();
 
