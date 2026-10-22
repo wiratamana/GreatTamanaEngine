@@ -14,6 +14,9 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 0) out vec3 outWorldNormal;
 layout(location = 1) out vec3 outWorldPos;
 
+// Same position as the cluster vertex shaders, bit for bit.
+invariant gl_Position;
+
 void main()
 {
     vec4 world = pc.model * vec4(inPosition, 1.0);

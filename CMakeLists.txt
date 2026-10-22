@@ -825,6 +825,8 @@ add_library(gte_core STATIC
     src/Renderer/GpuSkinning/GpuSkinningPipelines.cpp
     src/Renderer/Culling/CullingTypes.h
     src/Renderer/Culling/CullingTypes.cpp
+    src/Renderer/Culling/ClusterCullMath.h
+    src/Renderer/Culling/ClusterCullMath.cpp
     src/Renderer/Culling/CullingPipelines.h
     src/Renderer/Culling/CullingPipelines.cpp
     src/Renderer/Culling/GpuDrivenBatchCache.h
@@ -1749,6 +1751,14 @@ gte_add_shader(GreatTamanaEditor src/Shaders/MeshInstanced.vert)
 # genuine gameplay/runtime feature (batched-entity frustum culling), not a
 # debug/Editor-only tool, so it must work in a non-Editor, release build too.
 gte_add_shader(GreatTamanaEditor src/Shaders/FrustumCull.comp)
+
+# Cluster cull compute and the cluster draw vertex/fragment shaders (Mesh.frag is the lit fragment shader).
+gte_add_shader(GreatTamanaEditor src/Shaders/ClusterCull.comp)
+gte_add_shader(GreatTamanaEditor src/Shaders/MeshCluster.vert)
+gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.vert)
+gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.frag)
+gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterTint.frag
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl)
 
 # Textured half of the imported-mesh draw path (VertexLayout::PositionNormalUv): a material with a
 # texture uses this pair instead of Mesh.vert/.frag. The AlphaTest fragment shader serves alpha-masked

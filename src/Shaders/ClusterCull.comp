@@ -1,0 +1,148 @@
+#version 450
+
+// Cluster culling: one thread per (instance, cluster) pair of one mesh part.
+// Survivors append a visible record and an indirect draw command; the count buffer must be zero before dispatch.
+// Layouts must match ClusterCullMath.h (ClusterInstanceGpu, ClusterCullParams, MeshCluster) and the CPU oracle there.
+layout(local_size_x = 64) in;
+
+// Bits of ClusterInstanceGpu.info.x.
+const uint kClusterFlagUniformScale = 1u;
+const uint kClusterFlagPositiveHand = 2u;
+const uint kClusterFlagMoved = 4u;
+
+// Bits of ClusterCullParams.counts.w.
+const uint kClusterCullFlagFrustum = 1u;
+const uint kClusterCullFlagBackfaceCone = 2u;
+const uint kClusterCullFlagOcclusion = 4u;
+const uint kClusterCullFlagOrthographic = 8u;
+
+struct ClusterCullParams {
+    vec4 planes[6]; // xyz = normal, w = distance; inside when dot + w >= 0.
+    vec4 eyeOrDirection; // xyz = eye point, or view direction when orthographic.
+    mat4 prevViewProjection;
+    uvec4 counts; // x = instanceCount, y = clusterCount, z = workItems, w = cull flags.
+    vec4 hiz;
+};
+layout(std430, binding = 0) readonly buffer ParamsBlock {
+    ClusterCullParams value;
+} params;
+
+struct ClusterInstance {
+    mat4 world;
+    uvec4 info; // x = flags, y = float bits of the largest axis scale.
+};
+layout(std430, binding = 1) readonly buffer InstancesBlock {
+    ClusterInstance items[];
+} instances;
+
+// Same 64 bytes as MeshCluster.
+struct Cluster {
+    vec4 sphere; // xyz = center, w = radius.
+    vec4 cone; // xyz = axis, w = cutoff (sine of the half angle); 1 = no cone.
+    vec3 aabbMin;
+    uint firstIndex;
+    vec3 aabbMax;
+    uint indexCount;
+};
+layout(std430, binding = 2) readonly buffer ClustersBlock {
+    Cluster items[];
+} clusters;
+
+layout(std430, binding = 3) writeonly buffer VisibleBlock {
+    uvec2 items[]; // x = instance index, y = cluster index.
+} visible;
+
+// Flat uint array, 5 uints per command: indexCount, instanceCount, firstIndex, vertexOffset, firstInstance.
+layout(std430, binding = 4) writeonly buffer CommandsBlock {
+    uint values[];
+} commands;
+
+// Atomic counter: the host zeroes it before the dispatch.
+layout(std430, binding = 5) buffer CountBlock {
+    uint value;
+} count;
+
+// Conservative: only a box fully behind one plane is rejected; a non-finite box is kept.
+bool OutsideFrustum(Cluster cluster, mat4 world)
+{
+    vec3 worldMin = vec3(0.0);
+    vec3 worldMax = vec3(0.0);
+    for (int i = 0; i < 8; ++i) {
+        vec3 corner = vec3(
+            (i & 1) != 0 ? cluster.aabbMax.x : cluster.aabbMin.x,
+            (i & 2) != 0 ? cluster.aabbMax.y : cluster.aabbMin.y,
+            (i & 4) != 0 ? cluster.aabbMax.z : cluster.aabbMin.z);
+        vec3 p = (world * vec4(corner, 1.0)).xyz;
+        worldMin = i == 0 ? p : min(worldMin, p);
+        worldMax = i == 0 ? p : max(worldMax, p);
+    }
+    if (any(isnan(worldMin)) || any(isnan(worldMax)) || any(isinf(worldMin)) || any(isinf(worldMax))) {
+        return false;
+    }
+    for (int plane = 0; plane < 6; ++plane) {
+        vec3 normal = params.value.planes[plane].xyz;
+        vec3 farthest = vec3(
+            normal.x >= 0.0 ? worldMax.x : worldMin.x,
+            normal.y >= 0.0 ? worldMax.y : worldMin.y,
+            normal.z >= 0.0 ? worldMax.z : worldMin.z);
+        if (dot(normal, farthest) + params.value.planes[plane].w < 0.0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Back-face cone test; only for uniformly scaled, right-handed instances and clusters that have a cone.
+bool BackfaceConeCulled(Cluster cluster, mat4 world, uint instanceFlags, float maxScale)
+{
+    const uint needed = kClusterFlagUniformScale | kClusterFlagPositiveHand;
+    float cutoff = cluster.cone.w;
+    if ((instanceFlags & needed) != needed || !(cutoff < 1.0)) {
+        return false;
+    }
+    vec3 axisWorld = normalize(mat3(world) * cluster.cone.xyz);
+    vec3 eyeOrDirection = params.value.eyeOrDirection.xyz;
+    if ((params.value.counts.w & kClusterCullFlagOrthographic) != 0u) {
+        return dot(eyeOrDirection, axisWorld) >= cutoff;
+    }
+    vec3 centerWorld = (world * vec4(cluster.sphere.xyz, 1.0)).xyz;
+    vec3 toCluster = centerWorld - eyeOrDirection;
+    return dot(toCluster, axisWorld) >= cutoff * length(toCluster) + cluster.sphere.w * maxScale;
+}
+
+void main()
+{
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= params.value.counts.z) {
+        return;
+    }
+
+    uint clusterCount = params.value.counts.y;
+    uint instanceIndex = id / clusterCount;
+    uint clusterIndex = id - instanceIndex * clusterCount;
+
+    ClusterInstance instance = instances.items[instanceIndex];
+    Cluster cluster = clusters.items[clusterIndex];
+    uint cullFlags = params.value.counts.w;
+
+    if ((cullFlags & kClusterCullFlagFrustum) != 0u && OutsideFrustum(cluster, instance.world)) {
+        return;
+    }
+    if ((cullFlags & kClusterCullFlagBackfaceCone) != 0u
+        && BackfaceConeCulled(cluster, instance.world, instance.info.x, uintBitsToFloat(instance.info.y))) {
+        return;
+    }
+
+    uint slot = atomicAdd(count.value, 1u);
+    if (slot >= params.value.counts.z) {
+        return;
+    }
+    visible.items[slot] = uvec2(instanceIndex, clusterIndex);
+
+    uint base = slot * 5u;
+    commands.values[base + 0u] = cluster.indexCount;
+    commands.values[base + 1u] = 1u;
+    commands.values[base + 2u] = cluster.firstIndex;
+    commands.values[base + 3u] = 0u;
+    commands.values[base + 4u] = slot; // firstInstance: the vertex shader reads visible[gl_InstanceIndex].
+}

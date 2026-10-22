@@ -2314,6 +2314,7 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Renderer/PipelineHandleTests.cpp
     Renderer/DrawStatsTests.cpp
     Renderer/Culling/ClusterCullMathTests.cpp
+    Renderer/ClusterShaderTextTests.cpp
     Renderer/GpuTimingTests.cpp
     Renderer/ComputeDispatchTests.cpp
     Renderer/VolumeTexturePreviewMathTests.cpp
@@ -2790,6 +2791,7 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_VOLUMETRIC_SHADER_DIR="${CMAKE_SOURCE_DIR}/src/Features/VolumetricLight/Shaders"
     GTE_TEST_SCENE_DEPTH_CONSTANTS_GLSL_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/SceneDepthConstants.glsl"
     GTE_TEST_SHADERS_DIR="${CMAKE_SOURCE_DIR}/src/Shaders"
+    GTE_TEST_CLUSTER_CULL_SHADER_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/ClusterCull.comp"
 )
 
 # Engine-owned reflection fixtures with abstract names (not shipped).
@@ -3011,7 +3013,8 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Renderer/Culling/ClusterCullMathTests.cpp Assets/AtomicFileTests.cpp
     Assets/MeshClusterTests.cpp Assets/MeshClusteringTests.cpp Assets/MeshMaterialPartitionerTests.cpp
     Assets/MeshClusterImportTests.cpp Editor/MeshClusterBuildRunnerTests.cpp Editor/ClusterToolUiStateTests.cpp
-    Core/ClusterClaimTests.cpp Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp)
+    Core/ClusterClaimTests.cpp Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
+    Renderer/ClusterShaderTextTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")
