@@ -177,7 +177,8 @@ module or adding a new endpoint:
   query. Responds `200` on success (including the no-op case), `404` if no
   live entity has that name, `409` if the entity exists but has no
   `Transform` component, or `400` for malformed JSON/an incomplete
-  translation-rotation-scale group. **`POST /instantiate_light`** spawns a
+  translation-rotation-scale group. The default Game camera entity is named `"Camera"`, so
+  `/set_entity_trs` can move it by that name. **`POST /instantiate_light`** spawns a
   new light entity (today: the engine's only implemented kind,
   `DirectionalLight`) - `Game::InstantiateLight()` - mirroring
   `/instantiate_primitive`'s own `name`/`world_position`/`parent` contract,

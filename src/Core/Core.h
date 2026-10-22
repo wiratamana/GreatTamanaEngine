@@ -57,7 +57,8 @@ struct FrameStats {
 // Main engine facade. Coordinates game updates, offscreen rendering, and frame presentation.
 class Core {
 public:
-    Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices);
+    // `forceGpuValidation` turns the GPU API validation on in any build type.
+    Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices, bool forceGpuValidation = false);
 
     // Defined out-of-line in Core.cpp to support incomplete types in unique_ptr.
     ~Core();

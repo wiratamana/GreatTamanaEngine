@@ -161,7 +161,11 @@ void RunClusterBuildFollowUp(const MeshClusterFinishedBuild& finished, Game& gam
         meshes.InvalidateCachedMeshAsset(normalized);
     }
     editorLayer.RefreshProjectAssetRecord(pathUtf8);
-    GTE_LOG_INFO("MeshClustering", "Cluster build finished for " + pathUtf8 + ": " + finished.outcome.message);
+    const MeshClusterReport& report = finished.outcome.report;
+    GTE_LOG_INFO("MeshClustering",
+        "Cluster build finished for " + pathUtf8 + ": " + std::to_string(report.clusterCount) + " clusters, vertices "
+            + std::to_string(report.vertexCountBefore) + " -> " + std::to_string(report.vertexCountAfter) + ", "
+            + std::to_string(static_cast<std::int64_t>(report.milliseconds + 0.5)) + " ms");
 }
 
 } // namespace
@@ -181,12 +185,12 @@ EditorHost::SdlContext::~SdlContext()
     SDL_Quit();
 }
 
-EditorHost::EditorHost(const std::string& title, int width, int height)
+EditorHost::EditorHost(const std::string& title, int width, int height, bool forceGpuValidation)
     : m_sdlContext()
     , m_window(title, width, height)
     // m_core is built from m_window (ISurfaceProvider) and m_hostServices (IHostServices); both exist by now.
     , m_hostServices()
-    , m_core(m_window, m_hostServices)
+    , m_core(m_window, m_hostServices, forceGpuValidation)
     // References bound to m_core's own instances.
     , m_renderer(m_core.GetRenderer())
     , m_renderGraph(m_core.GetRenderGraph())
@@ -203,6 +207,7 @@ EditorHost::EditorHost(const std::string& title, int width, int height)
 {
     // Installs the real log sink first: everything below, including the network server start, may log.
     gte::InstallLogSink(&gte::LoggerLogSink::Instance());
+    m_renderer.LogValidationState();
 
     // Removes orphaned temp files of crashed writes before any job or import can run.
     if (const std::size_t sweptTempFiles = SweepStaleTempFiles(ResolveProjectRootDirectory()); sweptTempFiles > 0) {

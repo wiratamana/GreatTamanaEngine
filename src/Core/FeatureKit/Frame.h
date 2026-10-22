@@ -164,6 +164,9 @@ public:
     // Logs `text` as an error once per distinct text (once per frame object without a context).
     void ReportOnce(std::string_view text) const;
 
+    // Same as ReportOnce(), logged as a warning.
+    void ReportWarningOnce(std::string_view text) const;
+
 protected:
     // The depth a fullscreen draw acknowledges by default (invalid for frames without scene depth).
     void SetAcknowledgedDepth(rg::TextureHandle depth) noexcept { m_acknowledgedDepth = depth; }

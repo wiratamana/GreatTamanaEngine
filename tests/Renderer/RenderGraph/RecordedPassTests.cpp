@@ -62,6 +62,20 @@ TEST(OnceErrorLogTest, FloodOfDistinctTextsEndsWithOneSuppressedNotice)
     EXPECT_EQ(CountByCategory(sink, "Flood"), 129);
 }
 
+TEST(OnceErrorLogTest, WarningLogsOnceAtWarningLevelAndIsSeparateFromError)
+{
+    RecordingLogSink sink;
+    const ScopedLogSinkInstall guard(&sink);
+    OnceErrorLog log;
+
+    log.Warning("Cat", "text");
+    log.Warning("Cat", "text");
+    log.Error("Cat", "text");
+    ASSERT_EQ(sink.entries.size(), 2u);
+    EXPECT_EQ(sink.entries[0].level, LogLevel::Warning);
+    EXPECT_EQ(sink.entries[1].level, LogLevel::Error);
+}
+
 TEST(BuilderReportOnceTest, BareBuilderDedupesThroughItsOwnLog)
 {
     RecordingLogSink sink;

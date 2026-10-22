@@ -10,6 +10,7 @@
 #include <exception>
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -27,6 +28,16 @@ int RunReimportCli(const std::string& sourcePath, const std::string& destination
     return result.success ? 0 : 1;
 }
 
+bool HasFlag(int argc, char* argv[], const char* flag)
+{
+    for (int i = 1; i < argc; ++i) {
+        if (std::string_view(argv[i]) == flag) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -35,8 +46,11 @@ int main(int argc, char* argv[])
         return RunReimportCli(argv[2], argv[3]);
     }
 
+    // "--vulkan-validation" turns the GPU API validation on in any build type.
+    const bool forceValidation = HasFlag(argc, argv, "--vulkan-validation");
+
     try {
-        gte::EditorHost host("Great Tamana Engine", 1280, 720);
+        gte::EditorHost host("Great Tamana Engine", 1280, 720, forceValidation);
         return host.Run();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "Fatal error: %s\n", e.what());

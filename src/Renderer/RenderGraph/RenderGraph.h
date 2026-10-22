@@ -21,6 +21,7 @@
 #include "RenderGraphTimestampPool.h"
 #include "RenderGraphSnapshot.h"
 #include "RenderGraphTypes.h"
+#include "../Culling/ClusterCullMath.h"
 #include "../DrawStats.h"
 #include "../GpuTiming.h"
 
@@ -221,7 +222,14 @@ private:
 
     GpuTimingSample ResolveAndConvertTiming(const RenderGraphTimestampPool::RawTicks& raw) const;
 
-    static constexpr std::uint32_t kSynchronousTimingSlotBudget = 64;
+    // Synchronous-regime timing names, sized for the worst case: every named pass of the regime at once.
+    // Other passes, all cluster chains, the pyramid levels plus its build, and the capture replay steps.
+    // The query pool takes this same constant.
+    static constexpr std::uint32_t kBaseTimingNames = 64;
+    static constexpr std::uint32_t kPyramidTimingNames = kHizLevelCount + 1;
+    static constexpr std::uint32_t kReplayTimingNames = 64;
+    static constexpr std::uint32_t kSynchronousTimingSlotBudget =
+        kBaseTimingNames + kClusterPassNameCount + kPyramidTimingNames + kReplayTimingNames;
     static constexpr std::uint32_t kPipelinedTimingSlotBudget = 8;
 
     RenderGraphResourcePool m_resourcePool;

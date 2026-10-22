@@ -69,8 +69,12 @@ class VolumeTexturePreviewRenderer;
 // High-level Vulkan renderer façade managing device lifecycle, frames, and resources.
 class Renderer {
 public:
-    explicit Renderer(ISurfaceProvider& surfaceProvider);
+    // `forceValidation` turns API validation on in any build type (it is on by default in debug builds only).
+    explicit Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation = false);
     ~Renderer();
+
+    // Logs once whether API validation is on, off, or was requested but is not installed.
+    void LogValidationState() const;
 
     // Non-copyable and non-movable.
     Renderer(const Renderer&) = delete;

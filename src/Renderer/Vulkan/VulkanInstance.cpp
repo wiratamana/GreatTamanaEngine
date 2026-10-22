@@ -59,7 +59,7 @@ VulkanInstance::VulkanInstance(const std::string& applicationName,
     CreateInstance(applicationName, requiredExtensions, enableValidation);
     volkLoadInstance(m_instance);
 
-    if (m_validationEnabled) {
+    if (m_validation == ValidationState::On) {
         CreateDebugMessenger();
     }
 }
@@ -72,7 +72,7 @@ VulkanInstance::~VulkanInstance()
 VulkanInstance::VulkanInstance(VulkanInstance&& other) noexcept
     : m_instance(std::exchange(other.m_instance, VK_NULL_HANDLE))
     , m_debugMessenger(std::exchange(other.m_debugMessenger, VK_NULL_HANDLE))
-    , m_validationEnabled(other.m_validationEnabled)
+    , m_validation(other.m_validation)
 {
 }
 
@@ -82,7 +82,7 @@ VulkanInstance& VulkanInstance::operator=(VulkanInstance&& other) noexcept
         Destroy();
         m_instance = std::exchange(other.m_instance, VK_NULL_HANDLE);
         m_debugMessenger = std::exchange(other.m_debugMessenger, VK_NULL_HANDLE);
-        m_validationEnabled = other.m_validationEnabled;
+        m_validation = other.m_validation;
     }
     return *this;
 }
@@ -91,24 +91,24 @@ void VulkanInstance::CreateInstance(const std::string& applicationName,
                                      const std::vector<std::string>& requiredExtensions,
                                      bool wantValidation)
 {
-    m_validationEnabled = wantValidation && IsLayerAvailable(kValidationLayerName);
-    if (wantValidation && !m_validationEnabled) {
-        std::fprintf(stderr,
-            "[Vulkan] Validation was requested but %s is not available on this system - continuing without it.\n",
-            kValidationLayerName);
+    if (!wantValidation) {
+        m_validation = ValidationState::Off;
+    } else {
+        m_validation = IsLayerAvailable(kValidationLayerName) ? ValidationState::On : ValidationState::LayerMissing;
     }
+    const bool validationOn = m_validation == ValidationState::On;
 
     std::vector<const char*> extensions;
     extensions.reserve(requiredExtensions.size() + 1);
     for (const auto& ext : requiredExtensions) {
         extensions.push_back(ext.c_str());
     }
-    if (m_validationEnabled) {
+    if (validationOn) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
 
     std::vector<const char*> layers;
-    if (m_validationEnabled) {
+    if (validationOn) {
         layers.push_back(kValidationLayerName);
     }
 

@@ -305,7 +305,8 @@ void PlanChain(ClusterDrawChain::Impl& s)
 
     const ClusterSlotAssignment assignment = AssignClusterPartSlots(sizes, state.Shape().partSlots);
     if (!assignment.dropped.empty()) {
-        frame.ReportOnce(std::string("Pass '") + anchorName.value + "': more meshes than part slots; the rest use the CPU draw");
+        frame.ReportWarningOnce(
+            std::string("Pass '") + anchorName.value + "': more meshes than part slots; the rest use the CPU draw");
     }
 
     std::uint32_t slot = 0;

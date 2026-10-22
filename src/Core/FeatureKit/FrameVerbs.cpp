@@ -33,6 +33,18 @@ void Frame::ReportOnce(std::string_view text) const
     }
 }
 
+void Frame::ReportWarningOnce(std::string_view text) const
+{
+    if (m_context != nullptr && m_context->builder != nullptr) {
+        m_context->builder->ReportWarningOnce(kLogCategory, text);
+        return;
+    }
+    if (!m_noContextLogged) {
+        m_noContextLogged = true;
+        GTE_LOG_WARNING(kLogCategory, std::string(text));
+    }
+}
+
 float Frame::DeltaSeconds() const noexcept
 {
     return m_context != nullptr ? m_context->deltaSeconds : 0.0f;

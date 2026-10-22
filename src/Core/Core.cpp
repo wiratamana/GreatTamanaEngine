@@ -90,8 +90,8 @@ std::optional<ScenePassReadHandles> ResolveScenePassReadHandles(
 
 } // namespace
 
-Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices)
-    : m_renderer(surfaceProvider)
+Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices, bool forceGpuValidation)
+    : m_renderer(surfaceProvider, forceGpuValidation)
     , m_sceneServicesDescriptorSet(m_renderer)
     , m_renderViewRegistry(m_renderer)
     , m_renderGraph(m_renderer)

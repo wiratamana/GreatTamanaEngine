@@ -9,7 +9,7 @@ namespace gte {
 namespace {
 
 constexpr std::int32_t kOpaquePriority = 0;
-constexpr std::int32_t kHizBuildPriority = 100;
+constexpr std::int32_t kHizBuildPriority = -100; // Unique in PostOpaque; runs first, right after the opaque depth is final.
 
 // A report older than this many frames (against the newest frame of any view) counts as not rendered.
 constexpr std::uint64_t kSnapshotStaleFrames = 2;

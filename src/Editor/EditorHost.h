@@ -33,7 +33,8 @@ namespace gte {
 // and the embedded HTTP server. Run() is the main loop.
 class EditorHost {
 public:
-    EditorHost(const std::string& title, int width, int height);
+    // `forceGpuValidation` turns the GPU API validation on in any build type.
+    EditorHost(const std::string& title, int width, int height, bool forceGpuValidation = false);
     ~EditorHost() = default;
 
     EditorHost(const EditorHost&) = delete;

@@ -388,6 +388,10 @@ public:
     {
         (m_onceLog != nullptr ? *m_onceLog : m_ownOnceErrorLog).Error(category, text);
     }
+    void ReportWarningOnce(std::string_view category, std::string_view text)
+    {
+        (m_onceLog != nullptr ? *m_onceLog : m_ownOnceErrorLog).Warning(category, text);
+    }
 
 private:
     TextureHandle MintPersistentHandle(const RenderGraphPersistentResourceCache::ResolvedTexture& resolved);

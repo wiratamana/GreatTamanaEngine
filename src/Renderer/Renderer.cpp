@@ -121,8 +121,8 @@ std::unordered_set<VkDescriptorSet> g_liveUiTextures;
 
 } // namespace
 
-Renderer::Renderer(ISurfaceProvider& surfaceProvider)
-    : m_instance("GreatTamanaEngine", surfaceProvider.VulkanInstanceExtensions(), kEnableValidation)
+Renderer::Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation)
+    : m_instance("GreatTamanaEngine", surfaceProvider.VulkanInstanceExtensions(), kEnableValidation || forceValidation)
     , m_surface(m_instance.Native(), surfaceProvider)
     , m_device(m_instance.Native(), m_surface.Native())
     , m_depthFormat(m_device.PickDepthFormat())
@@ -146,6 +146,21 @@ Renderer::~Renderer()
         }
     }
     UnregisterDescriptorSetLayout(m_bufferSetLayoutHandle);
+}
+
+void Renderer::LogValidationState() const
+{
+    switch (m_instance.Validation()) {
+    case ValidationState::On:
+        GTE_LOG_INFO("Vulkan", "validation enabled");
+        break;
+    case ValidationState::LayerMissing:
+        GTE_LOG_INFO("Vulkan", "validation requested but layer not available");
+        break;
+    case ValidationState::Off:
+        GTE_LOG_INFO("Vulkan", "validation disabled");
+        break;
+    }
 }
 
 void Renderer::OnResize(int width, int height)

@@ -25,6 +25,10 @@ constexpr std::uint32_t kMaxSlots = std::max(kMainViewPartSlots, kDepthOnlyPartS
 
 constexpr std::array<const char*, kClusterPassKindCount> kPassKindNames{ "Reset", "Cull", "Draw", "Stats" };
 
+// The pass kinds plus the stats clear and copy passes are exactly what the render graph reserves timing slots for.
+static_assert(kClusterPassKindCount + 2 == kMainViewPassNamesPerPart);
+static_assert(kClusterPassKindCount - 1 == kDepthOnlyPassNamesPerPart);
+
 std::uint64_t NextOwnerId() noexcept
 {
     static std::atomic<std::uint64_t> counter{ 1 };

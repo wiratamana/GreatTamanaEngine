@@ -69,6 +69,12 @@ inline constexpr std::uint32_t kMainViewPartSlots = 8;
 inline constexpr std::uint32_t kDepthOnlyLanes = 4;
 inline constexpr std::uint32_t kDepthOnlyPartSlots = 4;
 
+// Pass names per part: reset, cull, draw, stats, stats clear, stats copy. Depth-only chains have no stats.
+inline constexpr std::uint32_t kMainViewPassNamesPerPart = 6;
+inline constexpr std::uint32_t kDepthOnlyPassNamesPerPart = 3;
+inline constexpr std::uint32_t kClusterPassNameCount = kMainViewLanes * kMainViewPartSlots * kMainViewPassNamesPerPart
+    + kDepthOnlyLanes * kDepthOnlyPartSlots * kDepthOnlyPassNamesPerPart;
+
 // Bytes per work item: one indirect command (5 uints) and one visible record (uvec2).
 inline constexpr std::uint64_t kClusterCommandBytes = 20;
 inline constexpr std::uint64_t kClusterVisibleBytes = 8;

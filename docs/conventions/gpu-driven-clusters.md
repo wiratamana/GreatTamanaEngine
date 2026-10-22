@@ -194,6 +194,12 @@ Both vertex shaders declare `invariant gl_Position` with the same expression ord
   one second after a change before reading it.
 - `POST /build_clusters` rebuilds a table. Read `GET /get_logs` for the `MeshClustering` lines.
 - Pass stats are keyed by pass name, not by view. Measure with only the Game view active.
+- **Validation.** Start the exe with `--vulkan-validation` to turn the Vulkan validation layer on in any
+  build type (default: on in Debug, off in Release). Read `GET /get_logs?category=Vulkan`. The first line
+  says `validation enabled`, `validation disabled` or `validation requested but layer not available`.
+- **Move the Game camera.** `POST /set_entity_trs {"name":"Camera","translation":{"x":..,"y":..,"z":..}}`.
+- Every cluster pass, pyramid level and replay step has a GPU timing slot in `/render_graph`
+  (`RenderGraph::kSynchronousTimingSlotBudget` is the worst-case sum).
 
 ## Known limits
 

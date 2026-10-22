@@ -291,6 +291,8 @@ void Game::EnsureDefaultCameraExists()
     Transform& cameraTransform = m_registry.AddComponent<Transform>(cameraEntity);
     cameraTransform.position = Vec3{ 0.0f, 0.0f, -5.0f };
     m_registry.AddComponent<Camera>(cameraEntity);
+    // Named so /set_entity_trs can move it.
+    m_registry.AddComponent<Name>(cameraEntity, Name{ MakeUniqueEntityName(m_registry, "Camera") });
 }
 
 void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride,
