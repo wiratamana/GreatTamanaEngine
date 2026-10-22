@@ -122,6 +122,17 @@ TEST(AtmosphereSettingsTest, LargeStrengthIsKept)
     EXPECT_FLOAT_EQ(SanitizeAtmosphereSettings(s).aerialPerspectiveStrength, d.aerialPerspectiveStrength);
 }
 
+TEST(AtmosphereSettingsTest, HugeStrengthClampsToCeiling)
+{
+    AtmosphereSettings s;
+    s.aerialPerspectiveStrength = 1e30f;
+    EXPECT_FLOAT_EQ(SanitizeAtmosphereSettings(s).aerialPerspectiveStrength, 1e30f);
+    s.aerialPerspectiveStrength = 1e38f;
+    EXPECT_FLOAT_EQ(SanitizeAtmosphereSettings(s).aerialPerspectiveStrength, kMaxAerialPerspectiveStrength);
+    s.aerialPerspectiveStrength = std::numeric_limits<float>::max();
+    EXPECT_FLOAT_EQ(SanitizeAtmosphereSettings(s).aerialPerspectiveStrength, kMaxAerialPerspectiveStrength);
+}
+
 TEST(AtmosphereSettingsTest, SanitizeIsIdempotent)
 {
     AtmosphereSettings bad;

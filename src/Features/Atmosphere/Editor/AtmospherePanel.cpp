@@ -1,11 +1,10 @@
 #include "AtmospherePanel.h"
 
 #include "../../../Editor/EditorContext.h"
+#include "../AtmosphereParameters.h"
 #include "../AtmosphereTypes.h"
 
 #include <imgui.h>
-
-#include <limits>
 
 namespace gte {
 
@@ -42,8 +41,8 @@ bool BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& edit, cons
     ImGui::SeparatorText("Art Direction");
 
     changed |= ImGui::DragFloat("Aerial Perspective Strength", &edit.aerialPerspectiveStrength, 0.05f, 0.0f,
-        std::numeric_limits<float>::max(), "%.2f");
-    ImGui::TextDisabled("Strength 1 is physical, 0 is off, there is no upper limit.");
+        kMaxAerialPerspectiveStrength, "%.2f");
+    ImGui::TextDisabled("Strength 1 is physical, 0 is off, there is no practical upper limit.");
     changed |= ImGui::Checkbox("Aerial Auto Scale", &edit.autoScale);
     ImGui::TextDisabled("Auto scale fits the haze range and exaggeration to the visible depth.");
 

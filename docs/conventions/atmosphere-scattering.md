@@ -41,9 +41,9 @@ When the composite pass is off, the view still holds the scene color of the earl
 ## Rules
 
 - **`AtmosphereMath.h/.cpp` is the CPU oracle** for the density profile, optical depth, transmittance and phase
-  functions. It also holds `ClampSampleToSurfaceKm` and `PlanetVisibility`. Every shader under `src/Features/Atmosphere/Shaders/` (through the shared `AtmosphereCommon.glsl`) is a GLSL
-  transcription of it. If a shader and the oracle disagree, the oracle is right and the shader is fixed. Add the CPU
-  math first when adding a LUT.
+  functions. It also holds `ClampSampleToSurfaceKm` and `PlanetVisibility`. Every shader under
+  `src/Features/Atmosphere/Shaders/` (through the shared `AtmosphereCommon.glsl`) is a GLSL transcription of it. If a
+  shader and the oracle disagree, the oracle is right and the shader is fixed. Add the CPU math first when adding a LUT.
 - **Shader binding names are the C++ contract.** The compute shaders name their storage blocks `params`
   (`AtmosphereParametersGpu`), `frame` (`AtmosphereFrameUniforms`, per view) and, in the aerial volume shader, `shadow`
   (`AerialShadowParamsGpu`, 384 bytes). Images and samplers keep their GLSL names: `transmittanceLutImage`,
@@ -151,10 +151,9 @@ When the composite pass is off, the view still holds the scene color of the earl
 - **Settings are stored only through `SanitizeAtmosphereSettings()`** (`AtmosphereParameters.h`). `Settings()` is const and
   `ApplySettings(candidate)` sanitizes. A non-finite value becomes the field default. Ranges: planet radius 1..50000 km,
   atmosphere thickness 1..500 km, multi-scattering 0..10, Rayleigh and Mie scale height 0.01..100 km, Mie g -0.99..0.99,
-  ozone center and half width 0..100 km, scattering and absorption colors and ground albedo 0..1, aerial strength 0 and up
-  (no upper limit), sky
-  intensity 0..50, aerial max distance 0.01..50 km, depth exponent 1..4, samples 1..16, exaggeration 0.1..50. The panel
-  edits a copy and calls `ApplySettings` when a value changed.
+  ozone center and half width 0..100 km, scattering and absorption colors and ground albedo 0..1, aerial strength 0..1e30,
+  sky intensity 0..50, aerial max distance 0.01..50 km, depth exponent 1..4, samples 1..16, exaggeration 0.1..50. The
+  panel edits a copy and calls `ApplySettings` when a value changed.
 - **HTTP: `/feature_debug/state?name=Atmosphere` and `/feature_debug/set?name=Atmosphere&key=value`.** Writable keys:
   `sceneLightFollowsAtmosphere`, `autoScale`, `aerialPerspectiveStrength`, `aerialPerspectiveMaxDistanceKm`,
   `aerialPerspectiveDepthExponent`, `aerialPerspectiveSamplesPerSlice`, `aerialPerspectiveScatteringExaggeration`. One bad key

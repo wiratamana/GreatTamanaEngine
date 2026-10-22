@@ -9,6 +9,9 @@ namespace gte {
 // atmosphere quantity is expressed in.
 inline constexpr float kWorldUnitsPerKilometer = 1000.0f;
 
+// Aerial perspective strength ceiling. Keeps strength * skyIntensity and rgb * strength finite in float.
+inline constexpr float kMaxAerialPerspectiveStrength = 1.0e30f;
+
 // Earth-like atmosphere parameters (the struct's default member values).
 AtmosphereParametersGpu MakeDefaultEarthAtmosphereParameters();
 
