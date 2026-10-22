@@ -280,6 +280,10 @@ void PlanChain(ClusterDrawChain::Impl& s)
     std::vector<ClusterPartSize> sizes;
     std::vector<std::uint32_t> clusterCounts;
     for (ClusterMeshGroup& group : groups) {
+        // A mesh without a table gets a one-cluster table here, once; a failure backs off inside Core.
+        if (!core.EnsureClusterTable(group.mesh, frame.FrameIndex())) {
+            continue;
+        }
         const Mesh* mesh = core.ResolveClusterMesh(group.mesh);
         if (mesh == nullptr || !mesh->HasClusters() || !mesh->HasIndexBuffer() || mesh->ClusterTable() == nullptr) {
             continue;

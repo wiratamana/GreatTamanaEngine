@@ -67,6 +67,11 @@ buffer into the `Mesh` (`Mesh::HasClusters()`). Textured parts and GPU-skinned m
 table. A table above `kMaxMeshClusters` is dropped before upload. A failed upload drops the
 table. Each case logs once and the mesh draws on the CPU path.
 
+A mesh without a table still joins the cluster path when a frame holds at least
+`kMinInstancesForSynthesizedClusters` (4) instances of it. `Core::EnsureClusterTable()` builds
+one cluster over the whole index range from the mesh bounds (no cone), uploads it once and keeps
+it in the `Mesh`. A failed synthesis backs off 120 frames, doubling, and the mesh draws on the CPU path.
+
 Respawn to apply new data: `InvalidateCachedMeshAsset()` only affects new spawns. The mesh
 sweep (`ReleaseUnusedGpuResources`, same throttle as the material sweep) frees catalog-owned
 meshes that nothing uses, including meshes held only by the GPU-skinning rig cache.
@@ -74,7 +79,8 @@ meshes that nothing uses, including meshes held only by the GPU-skinning rig cac
 ## Frame flow
 
 1. `Core::BuildFrame` builds the candidate list once with one `CollectRenderables()` call:
-   a candidate has clusters, an index buffer, the untextured pipeline, is not GPU-skinned,
+   a candidate has clusters (or is synthesizable with enough instances), an index buffer, the
+   untextured pipeline, is not GPU-skinned,
    has a finite world matrix, and the device caps are present. Flags (uniform scale,
    positive handedness) and max scale are computed per instance.
 2. Render features read `Frame::ClusterCandidates()`. They never walk the ECS.

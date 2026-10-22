@@ -512,6 +512,48 @@ const Mesh* Core::ResolveClusterMesh(fx::MeshToken token)
     return m_game.GetRenderSystem().TryGetMesh(MeshHandle{ token.index, token.generation });
 }
 
+bool Core::EnsureClusterTable(fx::MeshToken token, std::uint64_t frameIndex)
+{
+    Mesh* mesh = m_game.GetRenderSystem().TryGetMesh(MeshHandle{ token.index, token.generation });
+    if (mesh == nullptr) {
+        return false;
+    }
+    if (mesh->HasClusters()) {
+        return true;
+    }
+    const auto known = m_synthesisBackoff.find(token);
+    if (known != m_synthesisBackoff.end() && !SynthesisDue(known->second, frameIndex)) {
+        return false;
+    }
+
+    std::string why;
+    try {
+        LocalBoundsView bounds;
+        if (mesh->LocalBounds().has_value()) {
+            const AABB& box = *mesh->LocalBounds();
+            bounds = LocalBoundsView{ true, { box.min.x, box.min.y, box.min.z }, { box.max.x, box.max.y, box.max.z } };
+        }
+        const std::size_t indexCount = mesh->HasIndexBuffer() ? mesh->IndexCount() : 0;
+        const std::optional<MeshCluster> cluster = SynthesizeSingleCluster(bounds, indexCount, &why);
+        if (cluster.has_value()) {
+            // The upload waits for the GPU; declaring happens outside any pass execution, so that is legal.
+            mesh->SetClusterTable(rg::GpuBuffer::CreateWithData(m_renderer.Device(), &*cluster, sizeof(MeshCluster),
+                                      "MeshClusterTable", rg::GpuBufferUse::Storage),
+                1);
+            m_synthesisBackoff.erase(token);
+            return true;
+        }
+    } catch (const std::exception& error) {
+        why = error.what();
+    }
+
+    SynthesisBackoff backoff = known != m_synthesisBackoff.end() ? known->second : SynthesisBackoff{};
+    backoff = NoteSynthesisFailure(backoff, frameIndex);
+    m_synthesisBackoff.insert_or_assign(token, backoff);
+    GTE_LOG_WARNING("Core", "Cluster table synthesis failed (" + why + "); the mesh draws on the CPU path.");
+    return false;
+}
+
 fx::EntityExclusion Core::ReserveExclusion()
 {
     if (m_exclusionSets.size() >= kMaxExclusionSetsPerFrame) {
@@ -573,6 +615,8 @@ void Core::BuildClusterCandidates()
         input.mesh = fx::MeshToken{ command.mesh.index, command.mesh.generation };
         input.world = command.model;
         input.meshHasClusters = mesh->HasClusters();
+        input.meshSynthesizable = mesh->HasIndexBuffer() && mesh->IndexCount() > 0 && mesh->IndexCount() % 3 == 0
+            && mesh->LocalBounds().has_value();
         input.meshHasIndexBuffer = mesh->HasIndexBuffer();
         input.pipelineUntextured = pipeline->VertexLayoutKind() == VertexLayout::PositionNormal;
         input.gpuSkinned = gpuSkinnedOutputs.contains(mesh->VertexBufferHandle());
@@ -1169,6 +1213,7 @@ void Core::BuildFrame()
 
     for (const MeshHandle released : m_game.ReleaseUnusedGpuResources(m_renderer)) {
         m_gpuDrivenBatchCache.EraseMesh(m_renderer, released);
+        ForgetClusterSynthesis(released);
     }
 
     m_renderGraph.BeginPersistentResourceFrame();

@@ -519,4 +519,60 @@ bool MeshHasCoincidentTriangles(std::span<const Vec3> positions, std::span<const
     return std::adjacent_find(triples.begin(), triples.end()) != triples.end();
 }
 
+std::optional<MeshCluster> SynthesizeSingleCluster(
+    const LocalBoundsView& bounds, std::size_t indexCount, std::string* why)
+{
+    const auto refuse = [why](const char* reason) -> std::optional<MeshCluster> {
+        if (why != nullptr) {
+            *why = reason;
+        }
+        return std::nullopt;
+    };
+    if (indexCount == 0 || indexCount % 3 != 0) {
+        return refuse("index count is zero or not a multiple of 3");
+    }
+    if (indexCount > 0xFFFFFFFFull) {
+        return refuse("index count does not fit 32 bits");
+    }
+    if (!bounds.valid) {
+        return refuse("mesh has no local bounds");
+    }
+    for (int axis = 0; axis < 3; ++axis) {
+        if (!std::isfinite(bounds.min[axis]) || !std::isfinite(bounds.max[axis]) || bounds.min[axis] > bounds.max[axis]) {
+            return refuse("local bounds are not finite or inverted");
+        }
+    }
+
+    MeshCluster cluster{};
+    float radiusSquared = 0.0f;
+    for (int axis = 0; axis < 3; ++axis) {
+        cluster.aabbMin[axis] = bounds.min[axis];
+        cluster.aabbMax[axis] = bounds.max[axis];
+        const float centre = 0.5f * (bounds.min[axis] + bounds.max[axis]);
+        const float half = 0.5f * (bounds.max[axis] - bounds.min[axis]);
+        cluster.sphere[axis] = centre;
+        radiusSquared += half * half;
+    }
+    // A touch above the half diagonal so rounding never leaves a corner outside the sphere.
+    cluster.sphere[3] = std::sqrt(radiusSquared) * (1.0f + 1e-6f);
+    cluster.cone[3] = 1.0f; // Axis stays zero: no cone.
+    cluster.firstIndex = 0;
+    cluster.indexCount = static_cast<std::uint32_t>(indexCount);
+    if (!std::isfinite(cluster.sphere[3])) {
+        return refuse("local bounds are too large");
+    }
+    return cluster;
+}
+
+SynthesisBackoff NoteSynthesisFailure(SynthesisBackoff state, std::uint64_t frame) noexcept
+{
+    const std::uint32_t shift = std::min<std::uint32_t>(state.failures, 6);
+    const std::uint32_t wait = std::min(kSynthesisRetryBaseFrames << shift, kSynthesisRetryMaxFrames);
+    if (state.failures < 0xFFFFFFFFu) {
+        ++state.failures;
+    }
+    state.retryAtFrame = frame + wait;
+    return state;
+}
+
 } // namespace gte

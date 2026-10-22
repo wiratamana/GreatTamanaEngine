@@ -1,5 +1,6 @@
 // Tier-1 tests for src/Renderer/Culling/ClusterCullMath.h: capabilities, layouts, limits, ledger and the CPU cull oracle.
 
+#include "Assets/MeshClusterValidation.h"
 #include "Core/FeatureKit/PersistentBufferPolicy.h"
 #include "Renderer/Culling/ClusterCullMath.h"
 
@@ -8,6 +9,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
+#include <span>
+#include <string>
 #include <vector>
 
 namespace gte {
@@ -705,6 +709,73 @@ TEST(ClusterCullMath, InstanceMovedSeesAnyChangedEntry)
     Mat4 nan = a;
     nan.columns[1].y = std::numeric_limits<float>::quiet_NaN();
     EXPECT_TRUE(InstanceMoved(nan, nan)); // A NaN entry never counts as unchanged.
+}
+
+LocalBoundsView UnitBounds()
+{
+    LocalBoundsView bounds;
+    bounds.valid = true;
+    bounds.min[0] = -1.0f;
+    bounds.min[1] = -2.0f;
+    bounds.min[2] = -3.0f;
+    bounds.max[0] = 1.0f;
+    bounds.max[1] = 2.0f;
+    bounds.max[2] = 3.0f;
+    return bounds;
+}
+
+TEST(ClusterSynthesisTests, SingleClusterCoversTheWholeMeshAndValidates)
+{
+    std::string why;
+    const std::optional<MeshCluster> cluster = SynthesizeSingleCluster(UnitBounds(), 36, &why);
+    ASSERT_TRUE(cluster.has_value()) << why;
+    EXPECT_EQ(cluster->firstIndex, 0u);
+    EXPECT_EQ(cluster->indexCount, 36u);
+    EXPECT_FLOAT_EQ(cluster->cone[3], 1.0f);
+    EXPECT_FLOAT_EQ(cluster->cone[0], 0.0f);
+    EXPECT_FLOAT_EQ(cluster->aabbMin[2], -3.0f);
+    EXPECT_FLOAT_EQ(cluster->aabbMax[1], 2.0f);
+    // The sphere holds every corner of the box.
+    EXPECT_GE(cluster->sphere[3], std::sqrt(1.0f + 4.0f + 9.0f));
+    EXPECT_TRUE(ValidateClusterTable(std::span<const MeshCluster>(&*cluster, 1), 36, &why)) << why;
+}
+
+TEST(ClusterSynthesisTests, RefusesEachBadInput)
+{
+    std::string why;
+    EXPECT_FALSE(SynthesizeSingleCluster(UnitBounds(), 0, &why).has_value());
+    EXPECT_FALSE(SynthesizeSingleCluster(UnitBounds(), 4, &why).has_value());
+    EXPECT_FALSE(SynthesizeSingleCluster(UnitBounds(), std::size_t{ 0xFFFFFFFFull } + 3, &why).has_value());
+    EXPECT_FALSE(SynthesizeSingleCluster(LocalBoundsView{}, 3, &why).has_value());
+
+    LocalBoundsView nan = UnitBounds();
+    nan.max[0] = std::numeric_limits<float>::quiet_NaN();
+    EXPECT_FALSE(SynthesizeSingleCluster(nan, 3, &why).has_value());
+    LocalBoundsView inverted = UnitBounds();
+    inverted.min[1] = 5.0f;
+    EXPECT_FALSE(SynthesizeSingleCluster(inverted, 3, &why).has_value());
+    EXPECT_FALSE(why.empty());
+    EXPECT_TRUE(SynthesizeSingleCluster(UnitBounds(), 3, nullptr).has_value()); // A null reason pointer is fine.
+}
+
+TEST(ClusterSynthesisTests, RetryBackoffDoublesAndIsNotDueEarly)
+{
+    SynthesisBackoff state;
+    EXPECT_TRUE(SynthesisDue(state, 0));
+
+    state = NoteSynthesisFailure(state, 1000);
+    EXPECT_EQ(state.failures, 1u);
+    EXPECT_FALSE(SynthesisDue(state, 1000 + kSynthesisRetryBaseFrames - 1));
+    EXPECT_TRUE(SynthesisDue(state, 1000 + kSynthesisRetryBaseFrames));
+
+    state = NoteSynthesisFailure(state, 2000);
+    EXPECT_FALSE(SynthesisDue(state, 2000 + 2 * kSynthesisRetryBaseFrames - 1));
+    EXPECT_TRUE(SynthesisDue(state, 2000 + 2 * kSynthesisRetryBaseFrames));
+
+    for (int i = 0; i < 40; ++i) {
+        state = NoteSynthesisFailure(state, 0);
+    }
+    EXPECT_EQ(state.retryAtFrame, kSynthesisRetryMaxFrames);
 }
 
 } // namespace

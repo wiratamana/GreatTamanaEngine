@@ -3,6 +3,7 @@
 #include "../Renderer/Culling/ClusterCullMath.h"
 
 #include <cmath>
+#include <unordered_map>
 
 namespace gte {
 
@@ -55,11 +56,28 @@ std::vector<fx::ClusterInstance> SelectClusterCandidates(
     if (!capsPresent) {
         return result;
     }
+
+    const auto baseEligible = [](const ClusterCandidateInput& in) {
+        return in.meshHasIndexBuffer && in.pipelineUntextured && !in.gpuSkinned && IsFiniteMatrix(in.world);
+    };
+
+    // A mesh that needs a synthesized table is worth a chain only with enough instances.
+    std::unordered_map<fx::MeshToken, std::size_t, fx::MeshTokenHash> synthesizedCounts;
+    for (const ClusterCandidateInput& in : inputs) {
+        if (!in.meshHasClusters && in.meshSynthesizable && baseEligible(in)) {
+            ++synthesizedCounts[in.mesh];
+        }
+    }
+
     result.reserve(inputs.size());
     for (const ClusterCandidateInput& in : inputs) {
-        if (!in.meshHasClusters || !in.meshHasIndexBuffer || !in.pipelineUntextured || in.gpuSkinned
-            || !IsFiniteMatrix(in.world)) {
+        if (!baseEligible(in)) {
             continue;
+        }
+        if (!in.meshHasClusters) {
+            if (!in.meshSynthesizable || synthesizedCounts[in.mesh] < kMinInstancesForSynthesizedClusters) {
+                continue;
+            }
         }
         fx::ClusterInstance instance;
         instance.entity = in.entity;

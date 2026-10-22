@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace gte {
@@ -389,5 +390,43 @@ constexpr ClusterPipelineKey ClusterPipelineKeyFor(ClusterCullFlags flags, bool 
 // True when two triangles have the same three positions (any order). Such triangles can swap winners
 // between frames in the cluster path. Triangles with an out-of-range index are ignored.
 bool MeshHasCoincidentTriangles(std::span<const Vec3> positions, std::span<const std::uint32_t> indices);
+
+// ---------------------------------------------------------------------------------------------
+// Single-cluster tables for meshes without clusters
+// ---------------------------------------------------------------------------------------------
+
+// A mesh without a cluster table joins the cluster path only with at least this many instances in a frame.
+inline constexpr std::size_t kMinInstancesForSynthesizedClusters = 4;
+
+// Local-space box of a mesh as plain data.
+struct LocalBoundsView {
+    bool valid = false;
+    float min[3] = {};
+    float max[3] = {};
+};
+
+// One cluster that covers the whole index range: sphere around the box, no cone. Empty (with `why`) when the
+// index count is zero, not a multiple of 3 or above 32 bits, or the box is missing or non-finite.
+std::optional<MeshCluster> SynthesizeSingleCluster(
+    const LocalBoundsView& bounds, std::size_t indexCount, std::string* why);
+
+// Back-off before a failed synthesis is tried again: 120 frames, doubling per failure up to a cap.
+inline constexpr std::uint32_t kSynthesisRetryBaseFrames = 120;
+inline constexpr std::uint32_t kSynthesisRetryMaxFrames = 120u << 6;
+
+// Failure bookkeeping of one mesh's synthesis.
+struct SynthesisBackoff {
+    std::uint32_t failures = 0;
+    std::uint64_t retryAtFrame = 0;
+};
+
+// True when a synthesis may run in `frame` (never failed, or the back-off has elapsed).
+constexpr bool SynthesisDue(const SynthesisBackoff& state, std::uint64_t frame) noexcept
+{
+    return state.failures == 0 || frame >= state.retryAtFrame;
+}
+
+// State after one more failure at `frame`.
+SynthesisBackoff NoteSynthesisFailure(SynthesisBackoff state, std::uint64_t frame) noexcept;
 
 } // namespace gte

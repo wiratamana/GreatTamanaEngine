@@ -260,5 +260,63 @@ TEST(ClusterMovedTrackerTests, SelectionFlagsMovedInstancesOnlyWhileTracking)
     EXPECT_EQ(SelectClusterCandidates(inputs, true, &tracker)[0].flags & kClusterFlagMoved, 0u);
 }
 
+// A mesh without a table: same token for every instance, so the per-mesh count decides.
+std::vector<ClusterCandidateInput> SynthesizableInstances(std::uint32_t mesh, std::uint32_t firstEntity, std::uint32_t count)
+{
+    std::vector<ClusterCandidateInput> result;
+    for (std::uint32_t i = 0; i < count; ++i) {
+        ClusterCandidateInput in = Eligible(firstEntity + i);
+        in.mesh = fx::MeshToken{ mesh, 1 };
+        in.meshHasClusters = false;
+        in.meshSynthesizable = true;
+        result.push_back(in);
+    }
+    return result;
+}
+
+TEST(ClusterSynthesisSelectionTests, ThresholdBoundaryIsFourInstances)
+{
+    EXPECT_TRUE(Select(SynthesizableInstances(7, 1, kMinInstancesForSynthesizedClusters - 1)).empty());
+    EXPECT_EQ(Select(SynthesizableInstances(7, 1, kMinInstancesForSynthesizedClusters)).size(),
+        kMinInstancesForSynthesizedClusters);
+}
+
+TEST(ClusterSynthesisSelectionTests, NotSynthesizableIsNeverACandidate)
+{
+    std::vector<ClusterCandidateInput> inputs = SynthesizableInstances(7, 1, 6);
+    for (ClusterCandidateInput& in : inputs) {
+        in.meshSynthesizable = false;
+    }
+    EXPECT_TRUE(Select(inputs).empty());
+}
+
+TEST(ClusterSynthesisSelectionTests, IneligibleInstancesDoNotCountTowardTheThreshold)
+{
+    std::vector<ClusterCandidateInput> inputs = SynthesizableInstances(7, 1, 4);
+    inputs[0].gpuSkinned = true;
+    EXPECT_TRUE(Select(inputs).empty());
+
+    inputs = SynthesizableInstances(7, 1, 4);
+    inputs[1].world(0, 3) = std::numeric_limits<float>::quiet_NaN();
+    EXPECT_TRUE(Select(inputs).empty());
+}
+
+TEST(ClusterSynthesisSelectionTests, MeshWithATableIsAlwaysEligibleAndOrderIsStable)
+{
+    std::vector<ClusterCandidateInput> inputs = SynthesizableInstances(7, 10, 4); // Enough: kept.
+    const std::vector<ClusterCandidateInput> few = SynthesizableInstances(8, 20, 2); // Too few: dropped.
+    inputs.insert(inputs.begin() + 2, few.begin(), few.end());
+    ClusterCandidateInput own = Eligible(30); // Own table, a single instance.
+    inputs.push_back(own);
+
+    const auto result = Select(inputs);
+    ASSERT_EQ(result.size(), 5u);
+    EXPECT_EQ(result[0].entity, MakeEntity(10));
+    EXPECT_EQ(result[1].entity, MakeEntity(11));
+    EXPECT_EQ(result[2].entity, MakeEntity(12));
+    EXPECT_EQ(result[3].entity, MakeEntity(13));
+    EXPECT_EQ(result[4].entity, MakeEntity(30));
+}
+
 } // namespace
 } // namespace gte

@@ -7,6 +7,7 @@
 #include "../Application/RenderPassViewData.h"
 #include "../ECS/Entity.h"
 #include "../Game/Game.h"
+#include "../Renderer/Culling/ClusterCullMath.h"
 #include "../Renderer/Culling/GpuDrivenBatchCache.h"
 #include "../Renderer/Culling/GpuDrivenBatchDebugInfo.h"
 #include "../Renderer/MeshHandle.h"
@@ -38,6 +39,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -228,6 +230,14 @@ public:
     // The mesh behind `token`; null when it is stale or unknown.
     const Mesh* ResolveClusterMesh(fx::MeshToken token);
 
+    // True when the mesh has a cluster table to draw with. A mesh without one gets a one-cluster table built
+    // and uploaded once; a failure is remembered and retried only after a growing number of frames.
+    // Kit verbs only, while declaring (the upload waits for the GPU).
+    bool EnsureClusterTable(fx::MeshToken token, std::uint64_t frameIndex);
+
+    // Forgets the synthesis bookkeeping of a released mesh.
+    void ForgetClusterSynthesis(MeshHandle mesh) { m_synthesisBackoff.erase(fx::MeshToken{ mesh.index, mesh.generation }); }
+
     // Reserves an empty per-frame entity set that the CPU scene draw can skip, and returns its handle.
     // An empty handle means no set is left this frame.
     fx::EntityExclusion ReserveExclusion();
@@ -320,6 +330,9 @@ private:
     // BuildFrame(); a deque keeps every reserved set at a stable address.
     std::vector<fx::ClusterInstance> m_clusterCandidates;
     std::deque<std::unordered_set<Entity>> m_exclusionSets;
+
+    // Failed one-cluster syntheses per mesh; entries die with their mesh.
+    std::unordered_map<fx::MeshToken, SynthesisBackoff, fx::MeshTokenHash> m_synthesisBackoff;
 
     // Last-frame world matrices for the moved flag. Filled only while a pyramid build asked for it last frame.
     ClusterMovedTracker m_clusterMoved;
