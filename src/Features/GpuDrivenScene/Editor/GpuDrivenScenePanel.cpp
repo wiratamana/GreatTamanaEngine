@@ -27,6 +27,8 @@ void DrawViewInfo(const char* label, const GpuDrivenSceneViewSnapshot& v)
     ImGui::Text("Clusters tested: %llu", static_cast<unsigned long long>(v.testedClusters));
     if (v.visibleValid) {
         ImGui::Text("Clusters visible: %u (frame %llu)", v.visibleClusters, static_cast<unsigned long long>(v.visibleFrame));
+    } else if (!v.statsCollected) {
+        ImGui::TextDisabled("Clusters visible: stats are off");
     } else {
         ImGui::TextDisabled("Clusters visible: no data yet");
     }
@@ -71,6 +73,7 @@ bool BuildGpuDrivenScenePanel(EditorContext& /*ctx*/, GpuDrivenSceneSettings& ed
     }
 
     ImGui::SeparatorText("Debug");
+    changed |= ImGui::Checkbox("Count visible clusters (extra passes)", &edit.collectStats);
     int view = static_cast<int>(edit.debugView);
     if (ImGui::Combo("View", &view, kDebugViews.data(), static_cast<int>(kDebugViews.size()))) {
         edit.debugView = static_cast<GpuDrivenSceneDebugView>(std::clamp(view, 0, static_cast<int>(kDebugViews.size()) - 1));

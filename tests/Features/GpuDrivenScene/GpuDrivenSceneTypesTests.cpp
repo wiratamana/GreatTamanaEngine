@@ -31,6 +31,11 @@ TEST(GpuDrivenSceneTypesTest, DefaultsKeepConeOffAndFrustumOn)
     EXPECT_TRUE(s.frustum);
     EXPECT_FALSE(s.cone);
     EXPECT_FALSE(s.freezeCulling);
+    EXPECT_FALSE(s.collectStats);
+
+    GpuDrivenSceneSettings edited;
+    EXPECT_EQ(ApplyGpuDrivenSceneSetting(edited, "collectStats", "true"), GpuDrivenSceneSetResult::Applied);
+    EXPECT_TRUE(edited.collectStats);
 }
 
 TEST(GpuDrivenSceneTypesTest, FreezeStoresFirstCameraAndKeepsIt)

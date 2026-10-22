@@ -42,9 +42,10 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDriv
     Add(out, key("lastRefusalReason"), v.refusal);
     Add(out, key("claimedEntities"), Count(v.claimedEntities));
     Add(out, key("parts"), Count(v.parts));
-    Add(out, key("totalClusters"), Count(v.testedClusters));
+    Add(out, key("testedClusters"), Count(v.testedClusters));
     Add(out, key("visibleClusters"), Count(v.visibleClusters));
     Add(out, key("visibleFrame"), Count(v.visibleFrame));
+    Add(out, key("statsCollected"), v.statsCollected);
     Add(out, key("visibleValid"), v.visibleValid);
     Add(out, key("ledgerBytes"), Count(v.ledgerBytes));
 }
@@ -69,6 +70,7 @@ fx::FeatureDebugResult GpuDrivenSceneDebugEndpoint::GetState() const
     Add(out, "cone", s.cone);
     Add(out, "occlusion", s.occlusion);
     Add(out, "freezeCulling", s.freezeCulling);
+    Add(out, "collectStats", s.collectStats);
     Add(out, "debugView", std::string(GpuDrivenSceneDebugViewName(s.debugView)));
     Add(out, "supported", m_feature.Supported());
     for (const ScopeName& scope : kScopes) {

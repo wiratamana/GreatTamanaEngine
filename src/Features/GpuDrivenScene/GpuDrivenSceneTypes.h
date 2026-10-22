@@ -26,6 +26,8 @@ struct GpuDrivenSceneSettings {
     bool occlusion = false;
     // Keeps the cull camera of the first frozen frame while the draw camera moves.
     bool freezeCulling = false;
+    // Reads the visible-cluster count back. Costs three extra passes per part slot.
+    bool collectStats = false;
     GpuDrivenSceneDebugView debugView = GpuDrivenSceneDebugView::Off;
 };
 
@@ -90,6 +92,9 @@ inline GpuDrivenSceneSetResult ApplyGpuDrivenSceneSetting(
         }
         settings.debugView = *parsed;
         return GpuDrivenSceneSetResult::Applied;
+    }
+    if (key == "collectStats") {
+        return assignBool(settings.collectStats);
     }
     if (key == "occlusion") {
         return assignBool(settings.occlusion);
@@ -156,6 +161,7 @@ struct GpuDrivenSceneViewSnapshot {
     std::uint64_t testedClusters = 0;
     std::uint32_t visibleClusters = 0;
     std::uint64_t visibleFrame = 0;
+    bool statsCollected = false; // The count readback was on this frame; visibleValid is false otherwise.
     bool visibleValid = false;
     fx::ClusterInertReason inertReason = fx::ClusterInertReason::None;
     std::string refusal;

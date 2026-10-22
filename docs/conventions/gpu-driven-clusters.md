@@ -174,10 +174,13 @@ Both vertex shaders declare `invariant gl_Position` with the same expression ord
 ## Debug workflow (HTTP)
 
 - `GET /feature_debug/state?name=GpuDrivenScene`: per view (`game.` / `scene.` prefix)
-  `claimedEntities`, `parts`, `visibleClusters` (2 frames old, with its frame), `inertReason`
-  (none, device caps, shared scope, capture armed, toggled off), `lastRefusalReason`,
-  `ledgerBytes`.
-- `GET /feature_debug/set?name=GpuDrivenScene&frustum=...&cone=...&freezeCulling=true&debugView=ClusterId`.
+  `claimedEntities`, `parts`, `testedClusters` (instances x clusters given to the cull, not the
+  survivors), `inertReason` (none, device caps, shared scope, capture armed, toggled off),
+  `lastRefusalReason`, `ledgerBytes`.
+- **Visible count.** `visibleClusters` (survivors, 2 frames old, with `visibleFrame`) needs
+  `collectStats=true`, which adds three passes per part slot. With stats off, or when the readback
+  is older than 8 frames, `visibleValid` is false and `statsCollected` says why. Stats are off by default.
+- `GET /feature_debug/set?name=GpuDrivenScene&frustum=...&cone=...&freezeCulling=true&collectStats=true&debugView=ClusterId`.
 - **Freeze culling** keeps the cull camera of the last live frame while the view camera moves.
   Move the camera, then fetch `GET /get_game_view` to see what was culled. A resize or a
   disabled feature clears it.

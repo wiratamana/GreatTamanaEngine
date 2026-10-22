@@ -659,8 +659,9 @@ registering a new named texture:
   state before you repeat a `set`. Limits: `name` is required, a duplicate key is a 400, at most 64 arguments, a key
   up to 64 bytes, a value up to 256 bytes. A non-finite number is written as `null`. The Shadow endpoint is
   described in `shadow-mapping.md`. The `GpuDrivenScene` endpoint settable keys are `enabled`, `frustum`, `cone`,
-  `occlusion`, `freezeCulling` and `debugView` (`Off` or `ClusterId`). Its state is
-  prefixed `game.` and `scene.` per view (`visibleClusters`, `claimedEntities`, `occlusionUsable`, `inertReason`,
+  `occlusion`, `freezeCulling`, `collectStats` and `debugView` (`Off` or `ClusterId`). Its state is
+  prefixed `game.` and `scene.` per view (`testedClusters`, `visibleClusters` and `visibleValid` (needs `collectStats`),
+  `claimedEntities`, `occlusionUsable`, `inertReason`,
   `ledgerBytes`, ...).
 
 - **`GET /render_graph/set_pass_enabled`, `GET /render_graph/passes`,

@@ -14,6 +14,9 @@ constexpr std::int32_t kHizBuildPriority = 100;
 // A report older than this many frames (against the newest frame of any view) counts as not rendered.
 constexpr std::uint64_t kSnapshotStaleFrames = 2;
 
+// A visible-cluster count older than this many frames is not reported.
+constexpr std::uint64_t kVisibleCountFreshFrames = 8;
+
 bool HasNoPixels(const fx::View& view) noexcept
 {
     return view.extent.width == 0 || view.extent.height == 0;
@@ -126,7 +129,7 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
         .Culling(flags)
         .Target(f.SceneTarget())
         .IdTint(cfg.debugView == GpuDrivenSceneDebugView::ClusterId)
-        .Stats(true);
+        .Stats(cfg.collectStats);
     const fx::ClusterStats stats = chain.Record();
 
     snap.claimedEntities = stats.instances;
@@ -134,10 +137,15 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     snap.testedClusters = stats.workItems;
     snap.inertReason = stats.inertReason;
     snap.refusal = DescribeClusterOutcome(candidates.size(), stats);
+    snap.statsCollected = cfg.collectStats;
+    // A count from before stats were switched on, or from a stalled readback, is never reported.
     const fx::ClusterVisibleCount visible = m_state.VisibleClusters(f);
-    snap.visibleValid = visible.valid;
-    snap.visibleClusters = visible.value;
-    snap.visibleFrame = visible.frame;
+    snap.visibleValid = cfg.collectStats && visible.valid && visible.frame <= f.FrameIndex()
+        && f.FrameIndex() - visible.frame <= kVisibleCountFreshFrames;
+    if (snap.visibleValid) {
+        snap.visibleClusters = visible.value;
+        snap.visibleFrame = visible.frame;
+    }
     finish();
 }
 
