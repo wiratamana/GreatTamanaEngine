@@ -91,6 +91,8 @@ std::string FormatColumnLabel(GpuResourceType type, PixelFormat format)
         return "Texture (RGBA16 Float)";
     case PixelFormat::R8_UNorm:
         return "Texture (R8 UNORM)";
+    case PixelFormat::R32_Float:
+        return "Texture (R32 Float)";
     case PixelFormat::D32_Float:
         return "Depth Texture (D32 Float, no stencil)";
     case PixelFormat::D32_Float_S8_UInt:

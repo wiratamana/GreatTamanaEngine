@@ -21,7 +21,7 @@ std::vector<std::uint8_t> ConvertCapturedPixelsToRgba8(const CapturedPixels& raw
         }
         return rgba8;
     }
-    if (raw.format == PixelFormat::R8_UNorm) {
+    if (raw.format == PixelFormat::R8_UNorm || raw.format == PixelFormat::R32_Float) {
         if (!Convert1ChannelToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, rgba8.data())) {
             return {};
         }

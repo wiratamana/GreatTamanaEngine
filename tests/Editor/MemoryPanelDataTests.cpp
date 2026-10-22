@@ -149,6 +149,7 @@ TEST(MemoryPanelDataTest, FormatColumnLabel_KnownColorAndDepthFormatsAreHumanRea
     const std::vector<std::string> labels{
         FormatColumnLabel(GpuResourceType::Texture, PixelFormat::BGRA8_UNorm),
         FormatColumnLabel(GpuResourceType::Texture, PixelFormat::RGBA8_UNorm),
+        FormatColumnLabel(GpuResourceType::Texture, PixelFormat::R32_Float),
         FormatColumnLabel(GpuResourceType::Texture, PixelFormat::D32_Float),
         FormatColumnLabel(GpuResourceType::Texture, PixelFormat::D32_Float_S8_UInt),
         FormatColumnLabel(GpuResourceType::Texture, PixelFormat::D24_UNorm_S8_UInt),

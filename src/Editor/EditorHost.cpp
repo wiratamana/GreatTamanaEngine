@@ -827,7 +827,7 @@ int EditorHost::Run()
                             ok = Encoding::ConvertRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height,
                                 converted.data(), Encoding::HdrVisualizationForTextureName(requestedName));
                             encodePixels = converted.data();
-                        } else if (raw.format == PixelFormat::R8_UNorm) {
+                        } else if (raw.format == PixelFormat::R8_UNorm || raw.format == PixelFormat::R32_Float) {
                             converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
                             ok = Encoding::Convert1ChannelToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data());
                             encodePixels = converted.data();

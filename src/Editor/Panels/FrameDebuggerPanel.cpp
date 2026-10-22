@@ -130,7 +130,7 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
             ok = Encoding::ConvertRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height,
                 converted.data(), Encoding::HdrVisualizationForTextureName(textureName));
             rgba8Pixels = converted.data();
-        } else if (raw.format == PixelFormat::R8_UNorm) {
+        } else if (raw.format == PixelFormat::R8_UNorm || raw.format == PixelFormat::R32_Float) {
             converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
             ok = Encoding::Convert1ChannelToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data());
             rgba8Pixels = converted.data();
@@ -982,6 +982,12 @@ FrameDebuggerEventTextureResult FrameDebuggerPanel::GetEventTextureFromCommand(i
         // Event images hold scene color as drawn at that event.
         if (!Encoding::ConvertRgba16fToRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data(),
                 Encoding::HdrVisualization::SceneReferred)) {
+            return result;
+        }
+        encodePixels = converted.data();
+    } else if (raw.format == PixelFormat::R8_UNorm || raw.format == PixelFormat::R32_Float) {
+        converted.resize(static_cast<std::size_t>(raw.width) * static_cast<std::size_t>(raw.height) * 4);
+        if (!Encoding::Convert1ChannelToGrayscaleRgba8(raw.pixels.data(), raw.format, raw.width, raw.height, converted.data())) {
             return result;
         }
         encodePixels = converted.data();

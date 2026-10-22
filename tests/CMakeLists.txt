@@ -2247,6 +2247,7 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     # Convert1ChannelToGrayscaleRgba8() - single-channel (VK_FORMAT_R8_UNORM)
     # capture -> grayscale RGBA8 -> PNG encode -> PNG decode.
     Encoding/SingleChannelVisualizationTests.cpp
+    Encoding/R32FloatFormatTests.cpp
     Assets/AssetTypesTests.cpp
     Assets/GtaFileTests.cpp
     Assets/AtomicFileTests.cpp
@@ -3014,7 +3015,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Core/FeatureKit/DepthOnlyLayoutTests.cpp Features/Shadow/ShadowDepthShaderCoverageTests.cpp
     Math/PbrBrdfTests.cpp Features/SceneLighting/ Features/GpuDrivenScene/
     Renderer/RenderGraph/DescriptorWriteIdentityTests.cpp Renderer/RenderGraph/TrackedBufferGpuTests.cpp
-    Renderer/Culling/ClusterCullMathTests.cpp Assets/AtomicFileTests.cpp
+    Renderer/Culling/ClusterCullMathTests.cpp Assets/AtomicFileTests.cpp Encoding/R32FloatFormatTests.cpp
     Assets/MeshClusterTests.cpp Assets/MeshClusteringTests.cpp Assets/MeshMaterialPartitionerTests.cpp
     Assets/MeshClusterImportTests.cpp Editor/MeshClusterBuildRunnerTests.cpp Editor/ClusterToolUiStateTests.cpp
     Core/ClusterClaimTests.cpp Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp Core/ClusterCandidatesTests.cpp

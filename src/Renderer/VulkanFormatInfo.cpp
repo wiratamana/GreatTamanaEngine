@@ -14,6 +14,7 @@ int BytesPerTexelForFormat(VkFormat format) noexcept
         case VK_FORMAT_D32_SFLOAT:
         case VK_FORMAT_D32_SFLOAT_S8_UINT:
         case VK_FORMAT_D24_UNORM_S8_UINT:
+        case VK_FORMAT_R32_SFLOAT:
             return 4;
         case VK_FORMAT_R16G16B16A16_SFLOAT:
             return 8;
@@ -35,6 +36,8 @@ VkFormat ToVkFormat(PixelFormat format) noexcept
             return VK_FORMAT_R16G16B16A16_SFLOAT;
         case PixelFormat::R8_UNorm:
             return VK_FORMAT_R8_UNORM;
+        case PixelFormat::R32_Float:
+            return VK_FORMAT_R32_SFLOAT;
         case PixelFormat::D32_Float:
             return VK_FORMAT_D32_SFLOAT;
         case PixelFormat::D32_Float_S8_UInt:
@@ -60,6 +63,8 @@ PixelFormat FromVkFormat(VkFormat format) noexcept
             return PixelFormat::RGBA16_Float;
         case VK_FORMAT_R8_UNORM:
             return PixelFormat::R8_UNorm;
+        case VK_FORMAT_R32_SFLOAT:
+            return PixelFormat::R32_Float;
         case VK_FORMAT_D32_SFLOAT:
             return PixelFormat::D32_Float;
         case VK_FORMAT_D32_SFLOAT_S8_UINT:

@@ -16,6 +16,7 @@ enum class PixelFormat : std::uint8_t {
     D32_Float_S8_UInt,
     D24_UNorm_S8_UInt,
     RGBA8_SRGB, // Sampling decodes sRGB to linear in hardware.
+    R32_Float,  // Single-channel 32-bit float colour; storage and sampled use.
 };
 
 // Human-readable label of a PixelFormat; "Unknown" for a value outside the enum.
@@ -31,6 +32,7 @@ inline const char* ToString(PixelFormat format) noexcept
     case PixelFormat::D32_Float_S8_UInt: return "D32_Float_S8_UInt";
     case PixelFormat::D24_UNorm_S8_UInt: return "D24_UNorm_S8_UInt";
     case PixelFormat::RGBA8_SRGB: return "RGBA8_SRGB";
+    case PixelFormat::R32_Float: return "R32_Float";
     }
     return "Unknown";
 }
