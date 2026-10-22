@@ -700,6 +700,14 @@ add_library(gte_core STATIC
     src/Assets/MotionData.h
     src/Assets/MeshFile.h
     src/Assets/MeshFile.cpp
+    src/Assets/MeshCluster.h
+    src/Assets/Crc32.h
+    src/Assets/MeshClusterValidation.h
+    src/Assets/MeshClusterValidation.cpp
+    src/Assets/MeshClusterRebase.h
+    src/Assets/MeshClusterRebase.cpp
+    src/Assets/MeshMaterialPartitioner.h
+    src/Assets/MeshMaterialPartitioner.cpp
     src/Assets/MotionFile.h
     src/Assets/MotionFile.cpp
     src/Assets/RigFile.h
@@ -964,8 +972,6 @@ add_library(gte_core STATIC
     src/Game/Instantiation/EntityInstantiator.h
     src/Game/Instantiation/MeshVertexPacking.cpp
     src/Game/Instantiation/MeshVertexPacking.h
-    src/Game/Instantiation/MeshMaterialPartitioner.cpp
-    src/Game/Instantiation/MeshMaterialPartitioner.h
     src/Game/Instantiation/PrimitiveGpuCatalog.cpp
     src/Game/Instantiation/PrimitiveGpuCatalog.h
     src/Game/Instantiation/MaterialTextureGpuCache.cpp

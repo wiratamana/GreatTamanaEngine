@@ -12,7 +12,7 @@
 #include "../../Renderer/Culling/CullingTypes.h" // ComputeLocalAABB()
 #include "../../Renderer/Renderer.h"
 #include "MaterialLifetimeRules.h"
-#include "MeshMaterialPartitioner.h"
+#include "../../Assets/MeshMaterialPartitioner.h"
 #include "MeshVertexPacking.h"
 #include "../RenderSystem.h"
 

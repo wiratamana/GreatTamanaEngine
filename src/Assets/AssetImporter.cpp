@@ -91,10 +91,18 @@ AssetImportResult FinalizeMeshAssetImport(AssetDatabase& database, MeshData mesh
     }
     rig.jointPhysicsOverrides = std::move(preservedJointPhysicsOverrides);
 
+    // Encode first so an inconsistent mesh imports nothing, not even textures.
+    const std::vector<std::uint8_t> payload = EncodeMeshDataToBytes(mesh);
+    if (payload.empty()) {
+        AssetImportResult failed;
+        failed.success = false;
+        failed.message = "Parsed \"" + PathToUtf8(sourcePath.filename()) + "\" but its mesh arrays are inconsistent; nothing was written.";
+        return failed;
+    }
+
     // Must run before the rig is encoded so the metadata carries Guids, not source paths.
     const std::size_t missingTextureCount = ImportMaterialTextures(database, rig.materials, gtaPath);
 
-    const std::vector<std::uint8_t> payload = EncodeMeshDataToBytes(mesh);
     const std::vector<std::uint8_t> metadata = EncodeRigDataToBytes(rig);
 
     const std::optional<Guid> guid = database.ImportAsset(gtaPath, AssetType::Mesh, metadata, payload);

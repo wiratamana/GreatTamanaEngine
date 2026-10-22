@@ -3,6 +3,7 @@
 #include "../Math/Vec2.h"
 #include "../Math/Vec3.h"
 #include "../Math/Vec4.h"
+#include "MeshCluster.h"
 
 #include <cstdint>
 #include <vector>
@@ -52,6 +53,10 @@ struct MeshData {
 
     // Optional; empty when the mesh is not skinned, else skinWeights.size() == positions.size().
     std::vector<VertexSkinWeights> skinWeights;
+
+    // Optional cluster table over `indices`; empty when not clustered.
+    // Any edit of positions or indices must clear it.
+    std::vector<MeshCluster> clusters;
 };
 
 } // namespace gte

@@ -2,8 +2,10 @@
 
 #include "MeshData.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace gte {
@@ -15,14 +17,24 @@ namespace gte {
 //   vertexCount * 12  normals (xyz)
 //   vertexCount * 8   uvs (xy)
 //   indexCount  * 4   indices (uint32)
-//   optional tail: 4 bytes tangentCount (== vertexCount), tangentCount * 16 tangents (xyzw)
+//   optional tangent tail: 4 bytes tangentCount (== vertexCount), tangentCount * 16 tangents (xyzw)
+//   optional cluster tail: "GCL1", 4 bytes clusterCount (>= 1), clusterCount * 64 MeshCluster,
+//                          4 bytes CRC-32 of clusterCount + table
 // Nothing may follow the last block.
 inline constexpr char kMeshFileMagic[8] = { 'G', 'T', 'E', 'M', 'E', 'S', 'H', '1' };
+inline constexpr char kMeshClusterTailMagic[4] = { 'G', 'C', 'L', '1' };
 
-// Encodes `mesh`. The tangent block is written only when tangents.size() == positions.size() and not 0.
+// True when the counts fit the 32-bit fields of the payload.
+bool MeshCountsFitUint32(std::size_t vertexCount, std::size_t indexCount, std::size_t clusterCount);
+
+// Encodes `mesh`. Returns an EMPTY vector (nothing may be written) when the counts do not fit 32 bits,
+// normals or uvs differ in length from positions, tangents are non-empty and differ from positions,
+// an index is out of range, or the cluster table is non-empty and invalid.
 std::vector<std::uint8_t> EncodeMeshDataToBytes(const MeshData& mesh);
 
-// Decodes a payload; nullopt on a bad magic, truncation, a bad tangent block or trailing bytes. Never throws.
-std::optional<MeshData> DecodeMeshDataFromBytes(const std::vector<std::uint8_t>& bytes);
+// Decodes a payload; nullopt when the mesh itself is damaged (bad magic, truncation, bad tangent block,
+// stray trailing bytes). A damaged cluster tail keeps the mesh with `clusters` empty and the reason in
+// `clusterTailRejection` (when non-null). Never throws.
+std::optional<MeshData> DecodeMeshDataFromBytes(const std::vector<std::uint8_t>& bytes, std::string* clusterTailRejection = nullptr);
 
 } // namespace gte

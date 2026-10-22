@@ -47,6 +47,10 @@ bool RecomputeAndSaveMeshNormalsToGtaFile(const std::string& absoluteGtaPath, st
     }
 
     const std::vector<std::uint8_t> newPayload = EncodeMeshDataToBytes(*mesh);
+    if (newPayload.empty()) {
+        SetError(outErrorMessage, "The mesh could not be re-encoded (inconsistent arrays) - refusing to overwrite the file.");
+        return false;
+    }
     const bool wrote = WriteGtaFile(PathFromUtf8(absoluteGtaPath), gta->header.Type(), gta->header.Id(),
         gta->header.Flags(), gta->metadata, newPayload, gta->header.version);
     if (!wrote) {

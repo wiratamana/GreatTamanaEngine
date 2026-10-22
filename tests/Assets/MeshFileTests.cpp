@@ -119,15 +119,11 @@ TEST(MeshFileTest, MeshWithoutTangentsKeepsTheOriginalByteSize)
     EXPECT_TRUE(decoded->tangents.empty());
 }
 
-TEST(MeshFileTest, TangentArrayOfTheWrongSizeIsNotWritten)
+TEST(MeshFileTest, TangentArrayOfTheWrongSizeIsRefused)
 {
     MeshData mesh = BuildTriangleMeshData();
     mesh.tangents = { Vec4(1, 0, 0, 1) };
-    const std::vector<std::uint8_t> encoded = EncodeMeshDataToBytes(mesh);
-    EXPECT_EQ(encoded.size(), kTriangleBytesWithoutTangents);
-    const std::optional<MeshData> decoded = DecodeMeshDataFromBytes(encoded);
-    ASSERT_TRUE(decoded.has_value());
-    EXPECT_TRUE(decoded->tangents.empty());
+    EXPECT_TRUE(EncodeMeshDataToBytes(mesh).empty());
 }
 
 TEST(MeshFileTest, DecodeRejectsATangentCountThatDiffersFromTheVertexCount)

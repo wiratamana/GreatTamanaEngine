@@ -185,8 +185,8 @@ safe on any machine/CI runner, GPU or not:
   correctness, plus the missing-normals/missing-uvs fallback behavior - the
   two pure functions that replaced four hand-copied vertex-packing loops
   across `Game.cpp`.
-- `Game/MeshMaterialPartitionerTests.cpp` - `PartitionMeshMaterials()`
-  (`src/Game/Instantiation/MeshMaterialPartitioner.h`): materials summing
+- `Assets/MeshMaterialPartitionerTests.cpp` - `PartitionMeshMaterials()`
+  (`src/Assets/MeshMaterialPartitioner.h`): materials summing
   exactly to the mesh's index count, materials summing to LESS (leftover
   bucket), a corrupt file whose materials over-claim past the index count
   (clamping), and zero materials at all (everything falls into one leftover

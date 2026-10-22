@@ -1,8 +1,6 @@
-// Unit tests for MeshMaterialPartitioner.h's PartitionMeshMaterials() - the
-// pure index-range math extracted out of Game::EnsureMeshAsset() (see
-// GameInstantiationRefactorProposal.txt, Step 3.2).
+// Unit tests for PartitionMeshMaterials() (pure index-range math).
 
-#include "Game/Instantiation/MeshMaterialPartitioner.h"
+#include "Assets/MeshMaterialPartitioner.h"
 
 #include <gtest/gtest.h>
 
