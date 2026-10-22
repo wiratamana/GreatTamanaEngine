@@ -67,6 +67,9 @@ public:
     // Counts the draws of the pass named `passName` in the per-view draw statistics shown by the profiler.
     void CountInViewStats(std::string passName);
 
+    // Records a setup error: the whole Setup() then fails and nothing is registered.
+    void Fail(std::string message);
+
     const std::vector<Registration>& Registrations() const noexcept { return m_registrations; }
     const std::vector<std::string>& ViewStatsPasses() const noexcept { return m_viewStatsPasses; }
     const std::vector<std::string>& Errors() const noexcept { return m_errors; }

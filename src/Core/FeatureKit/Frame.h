@@ -139,6 +139,9 @@ public:
     // shared frame, or when the device cannot run the cluster path. Valid for this frame only.
     std::span<const ClusterInstance> ClusterCandidates() const noexcept;
 
+    // True when the device can run the cluster draw (indirect count, multi draw and first instance).
+    bool ClusterPathSupported() const noexcept;
+
     // A GPU-culled draw of cluster-ready meshes on lane `lane` of `state`. Inert in a shared frame, while a
     // capture is armed for the Game view, and while the state is invalid.
     ClusterDrawChain ClusterDraw(ClusterDrawState& state, std::uint32_t lane);

@@ -59,16 +59,22 @@ struct EntityExclusion {
     const void* handle = nullptr;
 };
 
+// Why a chain declared nothing on purpose (not a refusal). None when it ran or was refused.
+enum class ClusterInertReason : std::uint8_t { None, DeviceCaps, SharedScope, CaptureArmed, ToggledOff, InvalidState };
+
 struct ClusterPlan {
     bool ready = false; // Record() is expected to declare the whole chain.
     EntityExclusion exclusion;
     std::uint32_t parts = 0;
+    ClusterInertReason inertReason = ClusterInertReason::None;
 };
 
 struct ClusterStats {
     bool declared = false;
     std::uint32_t instances = 0;
     std::uint32_t parts = 0;
+    std::uint64_t workItems = 0; // Sum over declared parts of instances * clusters: what the cull tested.
+    ClusterInertReason inertReason = ClusterInertReason::None;
 };
 
 // Survivor count read back from the GPU. `frame` is the oldest frame among the cells that were summed.

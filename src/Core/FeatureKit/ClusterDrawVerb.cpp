@@ -81,6 +81,13 @@ ClusterDrawChain Frame::ClusterDraw(ClusterDrawState& state, std::uint32_t lane)
     return ClusterDrawChain(std::make_unique<ClusterDrawChain::Impl>(*this, state, lane));
 }
 
+bool Frame::ClusterPathSupported() const noexcept
+{
+    const detail::FrameContext* context = Context();
+    return context != nullptr && context->core != nullptr
+        && gte::ClusterPathSupported(context->core->GetRenderer().IndirectDrawCaps());
+}
+
 ClusterDrawChain::ClusterDrawChain(std::unique_ptr<Impl> impl) noexcept
     : m_impl(std::move(impl))
 {
@@ -160,15 +167,18 @@ void PlanChain(ClusterDrawChain::Impl& s)
         return;
     }
     if (context->scope == rg::ViewScope::Shared) {
+        s.plan.inertReason = ClusterInertReason::SharedScope;
         frame.ReportOnce("ClusterDraw() needs a view frame; a shared frame has no camera and no target");
         return;
     }
     Core& core = *context->core;
     s.claimContext = ClusterClaimContext{ context->scope, core.CaptureArmedThisFrame() };
     if (!ClusterClaimAllowed(s.claimContext)) {
+        s.plan.inertReason = ClusterInertReason::CaptureArmed;
         return; // A capture is armed: every entity stays on the CPU draw by design.
     }
     if (!state.Valid()) {
+        s.plan.inertReason = ClusterInertReason::InvalidState;
         frame.ReportOnce("ClusterDraw(): the draw state is invalid: " + state.Error());
         return;
     }
@@ -184,6 +194,7 @@ void PlanChain(ClusterDrawChain::Impl& s)
 
     const IndirectDrawCapsView caps = core.GetRenderer().IndirectDrawCaps();
     if (!ClusterPathSupported(caps)) {
+        s.plan.inertReason = ClusterInertReason::DeviceCaps;
         frame.ReportOnce("ClusterDraw(): the device lacks multi draw indirect, indirect count or first instance; "
                          "the CPU draw is used");
         return;
@@ -249,6 +260,7 @@ void PlanChain(ClusterDrawChain::Impl& s)
     }
 
     std::uint32_t slot = 0;
+    std::uint32_t toggledOffParts = 0;
     for (const std::uint32_t index : assignment.assigned) {
         const std::uint32_t thisSlot = slot++;
         const ClusterMeshGroup& group = eligible[index];
@@ -259,6 +271,7 @@ void PlanChain(ClusterDrawChain::Impl& s)
         if (!frame.PassEnabled(PassNameOf(state, s.lane, thisSlot, ClusterPassKind::Reset))
             || !frame.PassEnabled(PassNameOf(state, s.lane, thisSlot, ClusterPassKind::Cull))
             || !frame.PassEnabled(PassNameOf(state, s.lane, thisSlot, ClusterPassKind::Draw))) {
+            ++toggledOffParts;
             continue;
         }
         if (state.TryReserveChainBytes(context->scope, s.lane, thisSlot, instanceCount, workItems)
@@ -285,6 +298,9 @@ void PlanChain(ClusterDrawChain::Impl& s)
         s.parts.push_back(std::move(part));
     }
     if (s.parts.empty()) {
+        if (toggledOffParts > 0) {
+            s.plan.inertReason = ClusterInertReason::ToggledOff;
+        }
         return;
     }
 
@@ -483,6 +499,7 @@ void RecordChain(ClusterDrawChain::Impl& s)
             s.result.declared = true;
             s.result.instances += static_cast<std::uint32_t>(s.parts[i].instances.size());
             ++s.result.parts;
+            s.result.workItems += s.parts[i].workItems;
         }
     }
 }
@@ -530,6 +547,7 @@ ClusterStats ClusterDrawChain::Record()
             s.frame->ReportOnce("ClusterDraw() could not record: unknown error");
         }
     }
+    s.result.inertReason = s.plan.inertReason;
 
     // Idle bookkeeping of the frame's scope; release only runs in the synchronous regime.
     const detail::FrameContext* context = s.frame->Context();

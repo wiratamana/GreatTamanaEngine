@@ -29,6 +29,11 @@ void FeatureSetup::CountInViewStats(std::string passName)
     m_viewStatsPasses.push_back(std::move(passName));
 }
 
+void FeatureSetup::Fail(std::string message)
+{
+    m_errors.push_back(std::move(message));
+}
+
 void FeatureSetup::Add(Registration registration)
 {
     if (registration.name.empty()) {

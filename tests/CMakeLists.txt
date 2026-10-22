@@ -2988,7 +2988,7 @@ set(GTE_COMMENT_RULE_SRC
     Game/Instantiation/MeshClusterTableSelection.h Game/Instantiation/MeshClusterTableSelection.cpp
     Game/Instantiation/MeshLifetimeRules.h Game/Instantiation/MeshLifetimeRules.cpp
     Game/Instantiation/MeshVertexPacking.h Game/Instantiation/MeshVertexPacking.cpp Math/PbrBrdf.h
-    Features/SceneLighting/)
+    Features/SceneLighting/ Features/GpuDrivenScene/)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
@@ -3012,7 +3012,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Game/Instantiation/MeshClusterTableSelectionTests.cpp Game/Instantiation/MeshLifetimeRulesTests.cpp
     Game/Instantiation/MeshAssetPipelineKindTests.cpp Game/MeshVertexPackingTests.cpp
     Core/FeatureKit/DepthOnlyLayoutTests.cpp Features/Shadow/ShadowDepthShaderCoverageTests.cpp
-    Math/PbrBrdfTests.cpp Features/SceneLighting/
+    Math/PbrBrdfTests.cpp Features/SceneLighting/ Features/GpuDrivenScene/
     Renderer/RenderGraph/DescriptorWriteIdentityTests.cpp Renderer/RenderGraph/TrackedBufferGpuTests.cpp
     Renderer/Culling/ClusterCullMathTests.cpp Assets/AtomicFileTests.cpp
     Assets/MeshClusterTests.cpp Assets/MeshClusteringTests.cpp Assets/MeshMaterialPartitionerTests.cpp
