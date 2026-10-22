@@ -72,6 +72,8 @@ const std::vector<StageEntry<StageCallback<S>>>& RenderFeatureCompositor::StageF
 {
     if constexpr (S == CompositorStage::PreOpaque) {
         return m_impl->preOpaque.entries;
+    } else if constexpr (S == CompositorStage::Opaque) {
+        return m_impl->opaque.entries;
     } else if constexpr (S == CompositorStage::PostOpaque) {
         return m_impl->postOpaque.entries;
     } else {
@@ -81,6 +83,8 @@ const std::vector<StageEntry<StageCallback<S>>>& RenderFeatureCompositor::StageF
 
 template const std::vector<PreOpaqueEntry>&
 RenderFeatureCompositor::StageFeaturesInPriorityOrder<CompositorStage::PreOpaque>() const noexcept;
+template const std::vector<SceneStageEntry>&
+RenderFeatureCompositor::StageFeaturesInPriorityOrder<CompositorStage::Opaque>() const noexcept;
 template const std::vector<SceneStageEntry>&
 RenderFeatureCompositor::StageFeaturesInPriorityOrder<CompositorStage::PostOpaque>() const noexcept;
 template const std::vector<SceneStageEntry>&

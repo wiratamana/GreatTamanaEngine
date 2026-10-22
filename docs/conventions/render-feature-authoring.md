@@ -11,9 +11,9 @@ FeaturePurityCheck lists every file that shrinks and is empty. Shadow, SceneLigh
 | Piece | Purpose |
 |---|---|
 | `fx::Feature`, `fx::FeatureHost` | Base class and narrow engine facade (`Scene()`). |
-| `fx::FeatureSetup` | `PreOpaque`, `PostOpaque`, `PostTransparent`, `PostComposite`, `PreUI`, `PreOpaqueShared`, `DeclareSceneSlot`, `CountInViewStats(passName)` (counts that pass in the per-view draw statistics). Registrations are only collected. |
+| `fx::FeatureSetup` | `PreOpaque`, `Opaque`, `PostOpaque`, `PostTransparent`, `PostComposite`, `PreUI`, `PreOpaqueShared`, `DeclareSceneSlot`, `CountInViewStats(passName)` (counts that pass in the per-view draw statistics). Registrations are only collected. |
 | `fx::Gate` | Pass names a registration answers to in the toggle panel (default: the registered name). `Gate::Always()` is for work that is not a render pass (a uniform write) and must never be silenced by a toggle. |
-| `fx::View`, `fx::Frame` and typed frames | `PreOpaqueFrame`, `PostOpaqueFrame` (scene color and depth), `CompositeFrame` (private target, extent), `SharedFrame`. |
+| `fx::View`, `fx::Frame` and typed frames | `PreOpaqueFrame`, `OpaqueFrame` (`SceneTarget()` writes color and depth), `PostOpaqueFrame` (scene color and depth), `CompositeFrame` (private target, extent), `SharedFrame`. |
 | `fx::Texture` | Graph handle stamped with `FrameSerial(frame, view)`. Valid in every callback of that view in that frame, never later. A frame also accepts textures made by the Shared callback of the same frame. |
 | `GTE_REGISTER_RENDER_FEATURE("Name", Class)` | Registers a built-in feature module. `fx::FeatureOf<T>(module)` reaches it from editor code and throws `std::logic_error` for a wrong type; `fx::FindFeature(module)` returns the `fx::Feature*` of any module (null if it is not a kit feature). |
 | `Feature::DebugEndpoint()` | Optional `fx::IFeatureDebugEndpoint*`. It makes the feature readable and settable through `/feature_debug/*` (see `networking.md`). `FeatureDebug.h` has the pure value parsers `ParseDebugBool`, `ParseDebugUnsigned`, `ParseDebugFloat` (whole value, no trailing text, no `nan`/`inf`). `Set()` returns the new state in `fields`. Everything runs on the main thread. |
@@ -26,6 +26,11 @@ a built-in pass.
 The gate runs before the callback, so a disabled pass runs no side effect. Per-view callbacks are skipped for a view
 the engine has no data for. `PreOpaqueShared` runs once per frame; a throwing callback is logged once and not retried
 in that frame. Every verb also checks its own pass name and declares nothing while it is toggled off.
+
+`Opaque` runs per view right after `RenderOpaque`, with an `OpaqueFrame`. `SceneTarget()` is the view's color and depth;
+passes declared there write both (load, never clear) and carry the `Opaques` tag. A pass that moves draw work off the CPU
+scene draw may take an entity from it only after every pass of its chain was declared (the claim is the last step, and a
+chain that stops part way claims nothing). A frame that records a capture, and the shared scope, never claim.
 
 ## Verbs (on `fx::Frame`)
 

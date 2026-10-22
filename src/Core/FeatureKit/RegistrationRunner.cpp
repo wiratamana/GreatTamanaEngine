@@ -23,6 +23,11 @@ void Invoke(const RunInput& in)
         std::get<PreOpaqueCallback>(registration.callback)(frame);
         break;
     }
+    case Stage::Opaque: {
+        OpaqueFrame frame(view, *in.scene, in.serial, in.sceneColor, in.context);
+        std::get<OpaqueCallback>(registration.callback)(frame);
+        break;
+    }
     case Stage::PostOpaque:
     case Stage::PostTransparent: {
         PostOpaqueFrame frame(view, *in.scene, in.serial, in.sceneColor, in.sceneDepth, in.context);

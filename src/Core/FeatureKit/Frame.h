@@ -173,6 +173,23 @@ public:
     using Frame::Frame;
 };
 
+// During opaque geometry: passes declared here write the view's own color and depth (load, never clear).
+class OpaqueFrame : public Frame {
+public:
+    OpaqueFrame(const fx::View& view, Registry& scene, std::uint64_t serial, rg::TextureHandle target,
+        detail::FrameContext* context = nullptr) noexcept
+        : Frame(view, scene, serial, context)
+        , m_target(target)
+    {
+    }
+
+    // The view's color + depth target.
+    Texture SceneTarget() const noexcept { return Stamp(m_target); }
+
+private:
+    rg::TextureHandle m_target;
+};
+
 // After opaque (or transparent) geometry: the view's own color and depth can be read.
 class PostOpaqueFrame : public Frame {
 public:

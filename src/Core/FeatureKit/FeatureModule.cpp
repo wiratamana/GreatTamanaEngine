@@ -35,6 +35,8 @@ FrameEvent ToFrameEvent(Stage stage) noexcept
     case Stage::PreOpaque:
     case Stage::PreOpaqueShared:
         return FrameEvent::PreOpaque;
+    case Stage::Opaque:
+        return FrameEvent::Opaque;
     case Stage::PostOpaque:
         return FrameEvent::PostOpaque;
     case Stage::PostTransparent:
@@ -54,6 +56,8 @@ rg::RenderPassEvent ToPassEvent(Stage stage) noexcept
     case Stage::PreOpaque:
     case Stage::PreOpaqueShared:
         return rg::RenderPassEvent::PreOpaques;
+    case Stage::Opaque:
+        return rg::RenderPassEvent::Opaques;
     case Stage::PostOpaque:
         return rg::RenderPassEvent::AfterOpaques;
     case Stage::PostTransparent:

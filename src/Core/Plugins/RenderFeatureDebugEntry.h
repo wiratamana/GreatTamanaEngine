@@ -10,7 +10,7 @@ namespace gte {
 
 struct RenderFeatureDebugEntry {
     std::string name;      // Copied from descriptor.name (bounded char[64]).
-    std::string stage;     // "PreOpaque"/"PostOpaque"/"PostTransparent"/"PostComposite"/"PreUI".
+    std::string stage;     // "PreOpaque"/"Opaque"/"PostOpaque"/"PostTransparent"/"PostComposite"/"PreUI".
     std::int32_t priority = 0;
     std::string blendMode; // "Replace"/"AlphaOver"/"Additive"/"Multiply"/"ScreenSpaceMask"/"None".
 

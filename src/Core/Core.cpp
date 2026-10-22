@@ -20,6 +20,7 @@
 #include "../Renderer/RenderGraph/RenderFeatureScope.h"
 #include "../Renderer/RenderGraph/RenderPassToggleGuard.h"
 #include "../Renderer/RenderGraph/RenderPassTagValidation.h"
+#include "../Renderer/RenderGraph/ViewScopeUtil.h"
 #include "../Renderer/GraphicsHandleRegistry.h"
 #include "../Renderer/VulkanFormatInfo.h"
 #include "GpuDrivenBatchEntityExclusionLogic.h"
@@ -402,12 +403,14 @@ bool Core::RegisterRenderPass(FrameEvent event, const char* debugName, std::int3
                 }),
             RenderFeatureOwner::Engine);
 
+    case FrameEvent::Opaque:
     case FrameEvent::PostOpaque:
     case FrameEvent::PostTransparent: {
         if (!ValidateBuiltInPassName("RegisterRenderPass", debugName)) {
             return false;
         }
-        const CompositorStage stage = (event == FrameEvent::PostOpaque) ? CompositorStage::PostOpaque
+        const CompositorStage stage = (event == FrameEvent::Opaque)     ? CompositorStage::Opaque
+            : (event == FrameEvent::PostOpaque)                         ? CompositorStage::PostOpaque
                                                                         : CompositorStage::PostTransparent;
         return m_renderFeatureCompositorPtr->RegisterStageFeature(stage, debugName, priority,
             ProjectScenePassCallback([action](rg::RenderGraphBuilder& builder, rg::RenderPassBlackboard& blackboard,
@@ -491,6 +494,15 @@ bool Core::RegisterViewContentPassName(const char* name)
     }
     m_viewContentPassNames.emplace_back(name);
     return true;
+}
+
+void Core::ClaimEntities(rg::ViewScope scope, std::span<const Entity> entities)
+{
+    assert(scope != rg::ViewScope::Shared && "ClaimEntities needs a per-view scope.");
+    if (scope == rg::ViewScope::Shared) {
+        return;
+    }
+    m_claimedEntities[rg::ViewScopeIndex(scope)].insert(entities.begin(), entities.end());
 }
 
 const Core::ExposedViewOutput* Core::FindExposedViewOutput(rg::ViewScope scope) const noexcept
@@ -648,8 +660,9 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     }
                 }
             };
+            const std::size_t claimScope = rg::ViewScopeIndex(TranslateLegacyViewScope(frame.currentView));
             desc.execute = [this, aspectWidthOverHeight, isGameView, viewProjectionOverride, frameDebuggerCapture,
-                                publishedServiceSlots, currentViewForServices](rg::PassContext& ctx) {
+                                publishedServiceSlots, currentViewForServices, claimScope](rg::PassContext& ctx) {
                 std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolvedServiceSlots{};
                 for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
                     if (publishedServiceSlots[slotIndex].has_value()) {
@@ -668,14 +681,16 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 }
                 const DescriptorSetHandle sceneServicesSet =
                     m_sceneServicesDescriptorSet.Rewrite(currentViewForServices, resolvedServiceSlots);
+                // Read at execute time: chains declared after this pass fill the set during declaration.
+                const std::unordered_set<Entity>& claimed = m_claimedEntities[claimScope];
                 if (isGameView) {
                     rg::CommandBuffer cmd = ctx.Cmd();
                     m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture, std::nullopt,
-                        m_gpuDrivenBatchedEntitiesThisFrame, sceneServicesSet, &cmd);
+                        claimed, sceneServicesSet, &cmd);
                 } else {
                     const rg::SceneRecording recording(ctx);
-                    m_game.Render(m_renderer, aspectWidthOverHeight, &viewProjectionOverride, nullptr, std::nullopt, {},
-                        sceneServicesSet);
+                    m_game.Render(m_renderer, aspectWidthOverHeight, &viewProjectionOverride, nullptr, std::nullopt,
+                        claimed, sceneServicesSet);
                 }
             };
             out.push_back(std::move(desc));
@@ -713,7 +728,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 const bool indirectDrawEnabledThisFrame = rg::ShouldDeclareBuiltInPassThisFrame(
                     &m_renderPassToggleRegistry, batch.indirectDrawPassName);
                 AppendGpuDrivenBatchEntityExclusionsIfIndirectDrawEnabled(
-                    indirectDrawEnabledThisFrame, batch.entities, m_gpuDrivenBatchedEntitiesThisFrame);
+                    indirectDrawEnabledThisFrame, batch.entities, m_claimedEntities[rg::ViewScopeIndex(rg::ViewScope::GameView)]);
 
                 // --- Reset instance count buffer ---
                 if (auto body = rg::MakeTransferBody(frame.builder, batch.resetPassName,
@@ -820,6 +835,58 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 }
             }
         });
+
+    // Feature passes that draw into the view's color and depth right after the opaque geometry.
+    m_offscreenRenderPipeline.Register("OpaqueFeatures", rg::ProviderScope::PerActiveView,
+        [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
+            if (m_renderFeatureCompositorPtr == nullptr) {
+                return;
+            }
+            // Passes here write the target, so no sampleable depth is needed.
+            const RenderPassViewData* viewData = FindViewData(frame.currentView);
+            if (viewData == nullptr || viewData->renderTexture == nullptr) {
+                return;
+            }
+            ScenePassReadHandles handles;
+            handles.colorHandle = viewData->colorTarget;
+            handles.depthHandle = viewData->colorTarget;
+
+            const auto logOnce = [this](const std::string& message) {
+                if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(message))) {
+                    GTE_LOG_ERROR("RenderFeatureCompositor", message);
+                }
+            };
+
+            for (const SceneStageEntry& entry :
+                m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::Opaque>()) {
+                if (!entry.enabledOverride || m_faultedOpaqueFeatures.contains(entry.name)) {
+                    continue;
+                }
+
+                const std::size_t before = frame.builder.DeclaredPassCount();
+                try {
+                    const rg::RenderFeatureScope scope(frame.builder, entry.name);
+                    entry.callback(frame.builder, frame.blackboard, frame.currentView, handles);
+                } catch (const std::exception& e) {
+                    logOnce("Opaque feature '" + entry.name + "' threw: " + e.what());
+                } catch (...) {
+                    logOnce("Opaque feature '" + entry.name + "' threw an unknown exception.");
+                }
+                const std::size_t after = frame.builder.DeclaredPassCount();
+
+                // Passes already declared stay; the feature just stops running.
+                const std::vector<std::size_t> tagViolations =
+                    FindPassesNotTaggedScenePass(frame.builder, before, after, rg::RenderPassEvent::Opaques);
+                if (!tagViolations.empty()) {
+                    const rg::RenderPassEvent actual = frame.builder.PassEventAt(tagViolations.front());
+                    m_faultedOpaqueFeatures.insert(entry.name);
+                    GTE_LOG_WARNING("RenderFeatureCompositor",
+                        "Opaque feature '" + entry.name + "' declared a pass tagged RenderPassEvent::"
+                        + rg::ToString(actual) + " instead of REQUIRED RenderPassEvent::Opaques; it is disabled.");
+                }
+            }
+        },
+        rg::ProviderTiming::AfterDeferredPasses);
 
     // Transparent geometry and scene overlays.
     m_offscreenRenderPipeline.Register("RenderTransparent", rg::ProviderScope::PerActiveView,
@@ -1016,6 +1083,12 @@ RenderTexture* Core::AcquireDirectGameTarget()
 
 void Core::BuildFrame()
 {
+    // Claims are cleared first so a frame that ends early leaves none behind.
+    for (std::unordered_set<Entity>& claimed : m_claimedEntities) {
+        claimed.clear();
+    }
+    m_captureArmedThisFrame = false;
+
     for (const MeshHandle released : m_game.ReleaseUnusedGpuResources(m_renderer)) {
         m_gpuDrivenBatchCache.EraseMesh(m_renderer, released);
     }
@@ -1044,6 +1117,7 @@ void Core::BuildFrame()
 
     IFrameDebuggerCaptureRecorder* frameDebuggerCapture =
         (m_editorLayer != nullptr) ? m_editorLayer->PrepareFrameDebuggerCaptureContext() : nullptr;
+    m_captureArmedThisFrame = (frameDebuggerCapture != nullptr);
 
     // Execute offscreen rendering for Game and Scene views.
     if (gameTarget != nullptr || sceneTarget != nullptr) {
@@ -1067,7 +1141,6 @@ void Core::BuildFrame()
                     m_currentViewDataThisFrame.clear();
                     m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
                     m_gpuDrivenBatchesThisFrame.clear();
-                    m_gpuDrivenBatchedEntitiesThisFrame.clear();
                     m_gpuDrivenBatchDebugInfoLastFrame.clear();
                     float gameAspectForReplay = 1.0f;
 

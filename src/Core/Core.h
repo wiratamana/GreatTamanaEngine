@@ -27,9 +27,11 @@
 #include "Plugins/UniversalRenderPassCallback.h"
 #include "Plugins/RenderViewRegistry.h"
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -208,6 +210,13 @@ public:
     // Registers a pass name to be counted in per-view GPU draw stats.
     bool RegisterViewContentPassName(const char* name);
 
+    // Marks `entities` as drawn by a pass chain in `scope`, so this frame's CPU scene draw of that view skips them.
+    // For kit verbs only, and only after every pass of the chain was declared (see ClusterClaim.h).
+    void ClaimEntities(rg::ViewScope scope, std::span<const Entity> entities);
+
+    // True while a frame capture records this frame's CPU draw list.
+    bool CaptureArmedThisFrame() const noexcept { return m_captureArmedThisFrame; }
+
 private:
     // Render data for a GPU-driven indirect draw batch.
     struct GpuDrivenBatchRenderData {
@@ -276,11 +285,17 @@ private:
     std::vector<RenderPassViewData> m_currentViewDataThisFrame;
 
     IFrameDebuggerCaptureRecorder* m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
+    bool m_captureArmedThisFrame = false;
+
+    // Entities drawn by a pass chain instead of the CPU scene draw, per view scope. Cleared at the start of BuildFrame().
+    std::array<std::unordered_set<Entity>, rg::kViewScopeCount> m_claimedEntities;
+
+    // Opaque features that broke the pass tag rule; their callbacks no longer run.
+    std::unordered_set<std::string> m_faultedOpaqueFeatures;
 
     // GPU-driven culling cache and frame batch data.
     GpuDrivenBatchCache m_gpuDrivenBatchCache;
     std::vector<GpuDrivenBatchRenderData> m_gpuDrivenBatchesThisFrame;
-    std::unordered_set<Entity> m_gpuDrivenBatchedEntitiesThisFrame;
     Mat4 m_gpuDrivenGameViewProjectionThisFrame;
     std::vector<GpuDrivenBatchDebugInfo> m_gpuDrivenBatchDebugInfoLastFrame;
     bool m_batchPathCapsWarned = false; // Logs the missing-capability refusal once.

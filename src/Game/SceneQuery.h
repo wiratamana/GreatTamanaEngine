@@ -58,6 +58,9 @@ struct SceneDrawRequest {
     std::optional<SceneCullRequest> cull = std::nullopt;
 };
 
+// The request's excluded set by reference (the caller's own set, or one shared empty set). Never a copy.
+const std::unordered_set<Entity>& ExcludedEntitiesOf(const SceneDrawRequest& request) noexcept;
+
 // The single scene-drawing entry point for built-in and project passes; forwards to RenderSystem::Draw().
 void DrawScene(RenderSystem& renderSystem, Registry& registry, Renderer& renderer,
     const SceneDrawRequest& request);

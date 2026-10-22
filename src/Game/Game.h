@@ -39,8 +39,8 @@ public:
     void Update(const EngineContext& engineContext, const InputState& input);
 
     // Queues this frame's draws for entities with a MeshRenderer. `viewProjectionOverride` null = active ECS
-    // Camera (Game view); else that matrix (Scene view). `frameDebuggerCapture`, `maxDrawCount`, `batchedEntities`
-    // and `cmd` apply to the Game view only; `sceneServicesSet` to both. Does not present.
+    // Camera (Game view); else that matrix (Scene view). `frameDebuggerCapture`, `maxDrawCount` and `cmd` apply to
+    // the Game view only; `batchedEntities` (drawn elsewhere) and `sceneServicesSet` to both. Does not present.
     void Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride = nullptr,
         IFrameDebuggerCaptureRecorder* frameDebuggerCapture = nullptr,
         std::optional<std::size_t> maxDrawCount = std::nullopt,

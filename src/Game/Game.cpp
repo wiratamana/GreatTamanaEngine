@@ -300,10 +300,9 @@ void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* v
     EnsureDefaultCameraExists();
 
     if (viewProjectionOverride != nullptr) {
-        // Scene view: capture/maxDrawCount/batchedEntities/cmd are not forwarded; the defaulted
-        // parameters are spelled out so sceneServicesSet lands in its trailing slot.
-        m_renderSystem.Draw(m_registry, renderer, *viewProjectionOverride, nullptr, std::nullopt, {}, std::nullopt,
-            sceneServicesSet);
+        // Scene view: no capture, draw cap or command buffer; claimed entities are skipped like in the Game view.
+        m_renderSystem.Draw(m_registry, renderer, *viewProjectionOverride, nullptr, std::nullopt, batchedEntities,
+            std::nullopt, sceneServicesSet);
     } else {
         // Capture pointer and `cmd` are only forwarded, never dereferenced here.
         m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight, frameDebuggerCapture, maxDrawCount,

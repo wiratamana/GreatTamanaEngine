@@ -14,6 +14,7 @@ namespace gte::fx {
 
 enum class Stage : std::uint8_t {
     PreOpaque,       // Before opaque geometry, per view.
+    Opaque,          // During opaque geometry, per view.
     PostOpaque,      // After opaque geometry, per view.
     PostTransparent, // After transparent geometry, per view.
     PostComposite,   // Near the end of the frame, with a private target, per view.
@@ -28,6 +29,7 @@ enum class Blend : std::uint8_t { Replace, AlphaOver, Additive, Multiply, Screen
 inline constexpr std::size_t kMaxRegistrationNameBytes = 63;
 
 using PreOpaqueCallback = std::function<void(PreOpaqueFrame&)>;
+using OpaqueCallback = std::function<void(OpaqueFrame&)>;
 using PostOpaqueCallback = std::function<void(PostOpaqueFrame&)>;
 using CompositeCallback = std::function<void(CompositeFrame&)>;
 using SharedCallback = std::function<void(SharedFrame&)>;
@@ -39,7 +41,7 @@ struct Registration {
     std::int32_t priority = 0;
     Blend blend = Blend::AlphaOver; // PostComposite and PreUI only.
     Gate gate;
-    std::variant<PreOpaqueCallback, PostOpaqueCallback, CompositeCallback, SharedCallback> callback;
+    std::variant<PreOpaqueCallback, PostOpaqueCallback, CompositeCallback, SharedCallback, OpaqueCallback> callback;
 };
 
 // Registration verbs offered to Feature::Setup(). They only collect; mistakes are recorded and make the
@@ -52,6 +54,7 @@ public:
     }
 
     void PreOpaque(std::string name, std::int32_t priority, PreOpaqueCallback callback, Gate gate = {});
+    void Opaque(std::string name, std::int32_t priority, OpaqueCallback callback, Gate gate = {});
     void PostOpaque(std::string name, std::int32_t priority, PostOpaqueCallback callback, Gate gate = {});
     void PostTransparent(std::string name, std::int32_t priority, PostOpaqueCallback callback, Gate gate = {});
     void PostComposite(std::string name, std::int32_t priority, Blend blend, CompositeCallback callback, Gate gate = {});

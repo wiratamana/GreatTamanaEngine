@@ -39,5 +39,27 @@ TEST(ResolveOverridePipelineTest, DifferentLayoutsResolveIndependently)
     EXPECT_FALSE(ResolveOverridePipeline(overrides, VertexLayout::PositionNormalInstanced).has_value());
 }
 
+TEST(ExcludedEntitiesOfTest, ReturnsTheCallersOwnSetByAddress)
+{
+    std::unordered_set<Entity> own;
+    Entity entity;
+    entity.index = 5;
+    entity.generation = 1;
+    own.insert(entity);
+    SceneDrawRequest request;
+    request.batchedEntities = &own;
+
+    EXPECT_EQ(&ExcludedEntitiesOf(request), &own);
+}
+
+TEST(ExcludedEntitiesOfTest, ReturnsOneSharedEmptySetWhenThereIsNone)
+{
+    const SceneDrawRequest first;
+    const SceneDrawRequest second;
+
+    EXPECT_TRUE(ExcludedEntitiesOf(first).empty());
+    EXPECT_EQ(&ExcludedEntitiesOf(first), &ExcludedEntitiesOf(second));
+}
+
 } // namespace
 } // namespace gte

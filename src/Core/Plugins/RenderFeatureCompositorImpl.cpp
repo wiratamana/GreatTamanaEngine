@@ -278,6 +278,8 @@ bool RenderFeatureCompositor::Impl::RegisterStageFeature(CompositorStage stage, 
 {
     AssertCalledFromMainThread();
     switch (stage) {
+    case CompositorStage::Opaque:
+        return AddToStage(*this, opaque, "Opaque", name, priority, std::move(callback), owner);
     case CompositorStage::PostOpaque:
         return AddToStage(*this, postOpaque, "PostOpaque", name, priority, std::move(callback), owner);
     case CompositorStage::PostTransparent:
@@ -318,8 +320,8 @@ void RenderFeatureCompositor::Impl::OnPluginsLoaded(const std::vector<IPluginMod
 std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::Impl::DebugSnapshot() const
 {
     std::vector<RenderFeatureDebugEntry> snapshot;
-    snapshot.reserve(postComposite.size() + preUi.size() + preOpaque.entries.size() + postOpaque.entries.size()
-        + postTransparent.entries.size());
+    snapshot.reserve(postComposite.size() + preUi.size() + preOpaque.entries.size() + opaque.entries.size()
+        + postOpaque.entries.size() + postTransparent.entries.size());
 
     auto appendStage = [&snapshot, this](const std::vector<Entry>& entries) {
         for (const Entry& entry : entries) {

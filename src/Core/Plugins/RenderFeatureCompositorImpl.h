@@ -37,6 +37,7 @@ struct RenderFeatureCompositor::Impl {
 
     // One list per scene stage; a new stage is one member, one CompositorStage value and one case in VisitStage().
     StageList<ProjectPreOpaqueCallback> preOpaque;
+    StageList<ProjectScenePassCallback> opaque;
     StageList<ProjectScenePassCallback> postOpaque;
     StageList<ProjectScenePassCallback> postTransparent;
     RenderFeatureNamePool namePool;
@@ -66,6 +67,8 @@ struct RenderFeatureCompositor::Impl {
         switch (stage) {
         case CompositorStage::PreOpaque:
             return fn(preOpaque, "PreOpaque");
+        case CompositorStage::Opaque:
+            return fn(opaque, "Opaque");
         case CompositorStage::PostOpaque:
             return fn(postOpaque, "PostOpaque");
         case CompositorStage::PostTransparent:
@@ -79,6 +82,7 @@ struct RenderFeatureCompositor::Impl {
     void ForEachStage(Fn&& fn)
     {
         fn(preOpaque, "PreOpaque");
+        fn(opaque, "Opaque");
         fn(postOpaque, "PostOpaque");
         fn(postTransparent, "PostTransparent");
     }
@@ -86,6 +90,7 @@ struct RenderFeatureCompositor::Impl {
     void ForEachStage(Fn&& fn) const
     {
         fn(preOpaque, "PreOpaque");
+        fn(opaque, "Opaque");
         fn(postOpaque, "PostOpaque");
         fn(postTransparent, "PostTransparent");
     }

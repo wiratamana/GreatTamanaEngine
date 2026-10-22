@@ -59,6 +59,11 @@ void FeatureSetup::PreOpaque(std::string name, std::int32_t priority, PreOpaqueC
     Add(Registration{ Stage::PreOpaque, std::move(name), priority, Blend::AlphaOver, std::move(gate), std::move(callback) });
 }
 
+void FeatureSetup::Opaque(std::string name, std::int32_t priority, OpaqueCallback callback, Gate gate)
+{
+    Add(Registration{ Stage::Opaque, std::move(name), priority, Blend::AlphaOver, std::move(gate), std::move(callback) });
+}
+
 void FeatureSetup::PostOpaque(std::string name, std::int32_t priority, PostOpaqueCallback callback, Gate gate)
 {
     Add(Registration{ Stage::PostOpaque, std::move(name), priority, Blend::AlphaOver, std::move(gate), std::move(callback) });

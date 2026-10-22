@@ -60,10 +60,8 @@ TEST(GpuDrivenBatchEntityExclusionLogicTest, DisabledBatchEntitiesAreNeverAddedT
 
 TEST(GpuDrivenBatchEntityExclusionLogicTest, MultipleBatchesAccumulateIntoTheSameSet)
 {
-    // Mirrors the real call site's own shape (Core.cpp's "GpuDrivenBatches"
-    // provider): called once per batch, into the SAME m_gpuDrivenBatchedEntitiesThisFrame
-    // set - an enabled batch's entities must not be lost/overwritten by a
-    // later, disabled batch's own (empty) contribution.
+    // Mirrors the real call site (the "GpuDrivenBatches" provider): called once per batch, into the SAME
+    // Game-view claimed set. An enabled batch's entities must not be lost by a later disabled batch.
     std::unordered_set<Entity> excluded;
 
     AppendGpuDrivenBatchEntityExclusionsIfIndirectDrawEnabled(

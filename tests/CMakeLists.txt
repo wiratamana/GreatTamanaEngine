@@ -2070,7 +2070,8 @@ set(GTE_TEST_SOURCES
     # pure fix to PHASE2_COMPLETION_REPORT.md's own finding #19
     # (src/Core/GpuDrivenBatchEntityExclusionLogic.h). No Vulkan/Core instance
     # involved.
-    Core/GpuDrivenBatchEntityExclusionLogicTests.cpp
+Core/GpuDrivenBatchEntityExclusionLogicTests.cpp
+Core/ClusterClaimTests.cpp
     # editor-core-separation-1 campaign, PHASE3
     # (PHASE3_LOGGING_GLOBAL_LOGSINK_EXTRACTION.md) - unconditional, since
     # src/Core/LogSink.h/.cpp is unconditionally in gte_core's own source
@@ -2177,7 +2178,8 @@ set(GTE_TEST_SOURCES
     # RenderFeatureCompositorPreOpaqueTests.cpp's own shape. Unconditional,
     # since src/Core/Plugins/RenderFeatureCompositor.h/.cpp is
     # unconditionally in gte_core's own source list.
-    Core/Plugins/RenderFeatureCompositorPostOpaqueTests.cpp
+Core/Plugins/RenderFeatureCompositorPostOpaqueTests.cpp
+Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Core/Plugins/RenderFeatureCompositorPostTransparentTests.cpp
     # A dedicated Tier-1 test proving all five RenderFeatureCompositor
     # registration stages genuinely share one global feature-name namespace,
@@ -2933,6 +2935,7 @@ set(GTE_COMMENT_RULE_SRC
     Math/ToneMapCurves.h
     Game/Lighting/SunShadowReceiver.h Game/Lighting/SunLightModulation.h
     Application/RenderPasses.cpp Application/RenderPasses.h Core/Core.cpp Core/Core.h Core/CapturedPixels.h
+    Core/ClusterClaim.h Core/ClusterClaim.cpp
     Encoding/CapturedPixelConversion.cpp Encoding/CapturedPixelConversion.h Encoding/DepthVisualization.cpp
     Encoding/DepthVisualization.h Encoding/HdrColorVisualization.cpp Encoding/HdrColorVisualization.h
     Encoding/SingleChannelVisualization.cpp Encoding/SingleChannelVisualization.h Editor/EditorHost.cpp
@@ -3007,7 +3010,8 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Renderer/RenderGraph/DescriptorWriteIdentityTests.cpp Renderer/RenderGraph/TrackedBufferGpuTests.cpp
     Renderer/Culling/ClusterCullMathTests.cpp Assets/AtomicFileTests.cpp
     Assets/MeshClusterTests.cpp Assets/MeshClusteringTests.cpp Assets/MeshMaterialPartitionerTests.cpp
-    Assets/MeshClusterImportTests.cpp Editor/MeshClusterBuildRunnerTests.cpp Editor/ClusterToolUiStateTests.cpp)
+    Assets/MeshClusterImportTests.cpp Editor/MeshClusterBuildRunnerTests.cpp Editor/ClusterToolUiStateTests.cpp
+    Core/ClusterClaimTests.cpp Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

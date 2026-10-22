@@ -1,10 +1,6 @@
-// Tier-1 test proving ALL FIVE RenderFeatureCompositor registration stages -
-// PostComposite, PreUI, PreOpaque, PostOpaque, PostTransparent - genuinely
-// share ONE global feature-name namespace, in EVERY ordered direction (20
-// ordered pairs total). Mirrors RenderFeatureCompositorPreOpaqueTests.cpp's
-// own HeadlessSurfaceProvider + NoopHostServices + real Core fixture
-// pattern, GTEST_SKIP()-ing identically if this machine's Vulkan
-// driver/loader doesn't support VK_EXT_headless_surface.
+// Tier-1 test proving every RenderFeatureCompositor registration stage - PostComposite, PreUI, PreOpaque,
+// Opaque, PostOpaque, PostTransparent - shares ONE global feature-name namespace, in every ordered direction.
+// Uses a headless Core and skips when this machine has no headless surface support.
 
 #include "Core/Plugins/RenderFeatureCompositor.h"
 #include "Core/Core.h"
@@ -54,6 +50,10 @@ bool RegisterUnderStage(RenderFeatureCompositor& compositor, const std::string& 
         return compositor.RegisterStageFeature(CompositorStage::PreOpaque,
             name, 0, [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId) { });
     }
+    if (stageLabel == "Opaque") {
+        return compositor.RegisterStageFeature(CompositorStage::Opaque, name, 0,
+            [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { });
+    }
     if (stageLabel == "PostOpaque") {
         return compositor.RegisterStageFeature(CompositorStage::PostOpaque, name, 0,
             [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { });
@@ -81,8 +81,8 @@ TEST(RenderFeatureCompositorFiveStageNamespaceTest, EveryOrderedPairOfStagesRefu
     RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
     ASSERT_NE(compositor, nullptr);
 
-    static constexpr std::array<const char*, 5> kStages = { "PostComposite", "PreUI", "PreOpaque", "PostOpaque",
-        "PostTransparent" };
+    static constexpr std::array<const char*, 6> kStages = { "PostComposite", "PreUI", "PreOpaque", "Opaque",
+        "PostOpaque", "PostTransparent" };
 
     for (const char* firstStage : kStages) {
         for (const char* secondStage : kStages) {

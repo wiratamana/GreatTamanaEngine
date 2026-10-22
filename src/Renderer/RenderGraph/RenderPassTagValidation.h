@@ -29,7 +29,7 @@ inline std::vector<std::size_t> FindPassesNotTaggedAfterEverything(
     return violations;
 }
 
-// Every pass in [before, after) must be tagged exactly `expected` (AfterOpaques or AfterTransparents).
+// Every pass in [before, after) must be tagged exactly `expected` (Opaques, AfterOpaques or AfterTransparents).
 // Returns the indices of every violator.
 inline std::vector<std::size_t> FindPassesNotTaggedScenePass(
     const rg::RenderGraphBuilder& builder, std::size_t before, std::size_t after, rg::RenderPassEvent expected)

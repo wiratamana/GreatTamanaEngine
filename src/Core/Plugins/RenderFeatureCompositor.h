@@ -21,6 +21,7 @@ class Renderer;
 // Scene stages whose features draw into their own view.
 enum class CompositorStage : std::uint8_t {
     PreOpaque,       // Before the view's opaque pass.
+    Opaque,          // After the view's opaque pass, same view target.
     PostOpaque,      // After the opaque pass, before the transparent pass.
     PostTransparent, // After the transparent pass.
 };
@@ -41,7 +42,7 @@ struct StageEntry {
 using PreOpaqueEntry = StageEntry<ProjectPreOpaqueCallback>;
 using SceneStageEntry = StageEntry<ProjectScenePassCallback>;
 
-// Owns the PostComposite/PreUI blend chain and the PreOpaque/PostOpaque/PostTransparent registration lists.
+// Owns the PostComposite/PreUI blend chain and the PreOpaque/Opaque/PostOpaque/PostTransparent lists.
 // Its state lives in a private Impl (RenderFeatureCompositorImpl.h).
 class RenderFeatureCompositor final : public IPluginCapabilityOrchestrator {
 public:

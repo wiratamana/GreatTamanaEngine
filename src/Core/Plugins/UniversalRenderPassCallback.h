@@ -8,10 +8,11 @@
 
 namespace gte {
 
-// Mirrors RenderFeatureStage. BeforeEverything (Core's internal clear pass) and AfterEverything
-// (required on PostComposite/PreUI passes) are deliberately not choosable here.
+// Mirrors the scene stages of RenderFeatureStage, plus Opaque (built-in only, plugins cannot reach it).
+// BeforeEverything (Core's internal clear pass) and AfterEverything are deliberately not choosable here.
 enum class FrameEvent {
     PreOpaque,       // Before any opaque geometry is drawn.
+    Opaque,          // After the opaque pass, drawing into the view's own color + depth target.
     PostOpaque,      // Immediately after opaque geometry is drawn.
     PostTransparent, // Immediately after transparent geometry is drawn.
     PostComposite,   // Near the end of the frame - gets a private target, auto-blended onto the screen.

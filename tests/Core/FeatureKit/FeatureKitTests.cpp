@@ -70,6 +70,13 @@ TEST(FxFrameTest, AnInvalidHandleIsNeverAValidTexture)
     EXPECT_FALSE(frame.SceneColor().IsValid());
 }
 
+TEST(FxFrameTest, OpaqueFrameExposesTheViewTargetStampedWithItsSerial)
+{
+    const OpaqueFrame frame(View{}, FakeScene(), 6, rg::TextureHandle{ 9, 1 });
+    EXPECT_EQ(frame.SceneTarget().handle, (rg::TextureHandle{ 9, 1 }));
+    EXPECT_TRUE(frame.Owns(frame.SceneTarget()));
+}
+
 TEST(FxFrameTest, CompositeFrameAddsThePrivateTargetAndExtent)
 {
     const CompositeFrame frame(View{}, FakeScene(), 4, rg::TextureHandle{ 1, 1 }, rg::TextureHandle{ 2, 1 },
@@ -224,6 +231,21 @@ TEST(FxFeatureSetupTest, ANameOfExactlyTheLimitIsAccepted)
     FeatureSetup setup;
     setup.PreOpaque(std::string(kMaxRegistrationNameBytes, 'x'), 0, [](PreOpaqueFrame&) {});
     EXPECT_TRUE(setup.Errors().empty());
+}
+
+TEST(FxFeatureSetupTest, OpaqueRegistrationIsAcceptedAndKeepsItsStage)
+{
+    FeatureSetup setup;
+    setup.Opaque("Effect.Opaque", 5, [](OpaqueFrame&) {});
+    setup.Opaque("", 0, [](OpaqueFrame&) {});
+    setup.Opaque("Effect.Opaque", 1, [](OpaqueFrame&) {});
+    setup.Opaque("NoCallback", 0, OpaqueCallback{});
+
+    EXPECT_EQ(setup.Errors().size(), 3u);
+    ASSERT_EQ(setup.Registrations().size(), 1u);
+    EXPECT_EQ(setup.Registrations()[0].stage, Stage::Opaque);
+    EXPECT_EQ(setup.Registrations()[0].priority, 5);
+    EXPECT_TRUE(std::holds_alternative<OpaqueCallback>(setup.Registrations()[0].callback));
 }
 
 // --- SetupAndCommit ------------------------------------------------------------
