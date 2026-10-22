@@ -19,7 +19,7 @@ PipelineHandle PrimitiveGpuCatalog::EnsureDefaultPipeline(
         // Shaders are compiled at build time into "<exe dir>/shaders/*.spv".
         m_defaultPipeline = renderSystem.RegisterPipeline(renderer.CreatePipeline("shaders/Triangle.vert.spv",
             "shaders/Triangle.frag.spv", VertexLayout::PositionColor, false,
-            "Triangle.vert/Triangle.frag (PositionColor)", /*useInstanceBuffer=*/false, sceneServicesSetLayout));
+            "Triangle.vert/Triangle.frag (PositionColor)", sceneServicesSetLayout));
     }
     return m_defaultPipeline;
 }

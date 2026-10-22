@@ -134,7 +134,7 @@ Renderer::Renderer(ISurfaceProvider& surfaceProvider)
     , m_resources(m_device.Physical(), m_device.Native(), m_allocator.Native(), m_device.GraphicsQueue(),
           m_device.GraphicsQueueFamily(), m_depthFormat, m_memoryTracker, m_device)
 {
-    m_clusterSetLayoutHandle = RegisterDescriptorSetLayout(m_resources.ClusterBufferDescriptorSetLayout());
+    m_bufferSetLayoutHandle = RegisterDescriptorSetLayout(m_resources.BufferDescriptorSetLayout());
 }
 
 Renderer::~Renderer()
@@ -145,7 +145,7 @@ Renderer::~Renderer()
             vkDestroyFence(m_device.Native(), fence, nullptr);
         }
     }
-    UnregisterDescriptorSetLayout(m_clusterSetLayoutHandle);
+    UnregisterDescriptorSetLayout(m_bufferSetLayoutHandle);
 }
 
 void Renderer::OnResize(int width, int height)
@@ -480,7 +480,7 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
 
 void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
     uint64_t indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset,
-    DescriptorSetHandle instanceBufferDescriptorSet, DescriptorSetHandle sceneServicesSet, const Mat4& viewProjMatrix)
+    DescriptorSetHandle bufferDescriptorSet, DescriptorSetHandle sceneServicesSet, const Mat4& viewProjMatrix)
 {
     assert(m_currentGraphPassCmd != VK_NULL_HANDLE
         && "Renderer::SubmitIndirect() called outside of a render-graph pass recording.");
@@ -490,27 +490,28 @@ void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuff
 
     assert(mesh.HasIndexBuffer()
         && "Renderer::SubmitIndirect(): indexed mesh required for indirect draw.");
+    assert(ClusterPathSupported(IndirectDrawCaps())
+        && "Renderer::SubmitIndirect(): the device lacks the indirect-draw features.");
 
     const VkDescriptorSet effectiveSceneServicesSet =
         pipeline.HasSceneServicesSet() ? Native(sceneServicesSet) : VK_NULL_HANDLE;
 
     FrameRecorder::IssueIndirectDrawCommand(m_currentGraphPassCmd, pipeline.Native(), pipeline.Layout(),
-        mesh.VertexBuffer(), mesh.IndexBuffer(), Native(instanceBufferDescriptorSet), effectiveSceneServicesSet,
-        viewProjMatrix, indirectBuffer, indirectOffset, maxDrawCount, countBuffer, countBufferOffset,
-        m_device.SupportsDrawIndirectCount());
+        mesh.VertexBuffer(), mesh.IndexBuffer(), Native(bufferDescriptorSet), effectiveSceneServicesSet,
+        viewProjMatrix, indirectBuffer, indirectOffset, maxDrawCount, countBuffer, countBufferOffset);
 }
 
 Pipeline Renderer::CreatePipeline(const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
-    const char* debugName, bool useInstanceBuffer, DescriptorSetLayoutHandle sceneServicesSetLayout) const
+    const char* debugName, DescriptorSetLayoutHandle sceneServicesSetLayout) const
 {
     return m_resources.CreatePipeline(ToVkFormat(ScenePixelFormat()), vertexShaderSpirvPath, fragmentShaderSpirvPath,
-        vertexLayout, useMaterialTexture, debugName, useInstanceBuffer, Native(sceneServicesSetLayout));
+        vertexLayout, useMaterialTexture, debugName, Native(sceneServicesSetLayout));
 }
 
 Pipeline Renderer::CreatePipeline(std::span<const PixelFormat> colorFormats, const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
-    const char* debugName, bool useInstanceBuffer, DescriptorSetLayoutHandle sceneServicesSetLayout) const
+    const char* debugName, DescriptorSetLayoutHandle sceneServicesSetLayout) const
 {
     std::vector<VkFormat> vkColorFormats;
     vkColorFormats.reserve(colorFormats.size());
@@ -518,7 +519,7 @@ Pipeline Renderer::CreatePipeline(std::span<const PixelFormat> colorFormats, con
         vkColorFormats.push_back(ToVkFormat(format));
     }
     return m_resources.CreatePipeline(vkColorFormats, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
-        useMaterialTexture, debugName, useInstanceBuffer, Native(sceneServicesSetLayout));
+        useMaterialTexture, debugName, Native(sceneServicesSetLayout));
 }
 
 ComputePipeline Renderer::CreateComputePipeline(const std::string& shaderSpirvPath,
@@ -564,14 +565,9 @@ std::vector<VkDescriptorSetLayout> Renderer::TakeQueuedBindingReleases() noexcep
     }
 }
 
-VkDescriptorSetLayout Renderer::InstanceBufferDescriptorSetLayout() const noexcept
+DescriptorSetLayoutHandle Renderer::BufferSetLayout() const noexcept
 {
-    return m_resources.InstanceBufferDescriptorSetLayout();
-}
-
-DescriptorSetLayoutHandle Renderer::ClusterBufferSetLayout() const noexcept
-{
-    return m_clusterSetLayoutHandle;
+    return m_bufferSetLayoutHandle;
 }
 
 const Pipeline* Renderer::CreateClusterPipeline(

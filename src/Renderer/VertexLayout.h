@@ -21,16 +21,12 @@ enum class VertexLayout {
     // Same material set as PositionNormalUv.
     PositionNormalUvTangent,
 
-    // Same vertex inputs as PositionNormal, but the model matrix comes from a per-instance storage buffer
-    // (set 0, binding 0, vertex stage) indexed by gl_InstanceIndex, for indirect instanced draws.
-    PositionNormalInstanced,
-
     // No vertex input; the vertex shader builds a fullscreen triangle from gl_VertexIndex.
     None,
 };
 
 // Number of VertexLayout enumerators. Keep in sync with the enum above.
-inline constexpr std::size_t kVertexLayoutCount = 6;
+inline constexpr std::size_t kVertexLayoutCount = 5;
 
 static_assert(kVertexLayoutCount == static_cast<std::size_t>(VertexLayout::None) + 1,
     "kVertexLayoutCount must equal the enum's last entry + 1 - add a new case and bump this constant together.");

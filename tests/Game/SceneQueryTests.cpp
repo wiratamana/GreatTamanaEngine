@@ -36,7 +36,7 @@ TEST(ResolveOverridePipelineTest, DifferentLayoutsResolveIndependently)
     EXPECT_EQ(ResolveOverridePipeline(overrides, VertexLayout::PositionColor), colorHandle);
     EXPECT_EQ(ResolveOverridePipeline(overrides, VertexLayout::PositionNormal), normalHandle);
     EXPECT_FALSE(ResolveOverridePipeline(overrides, VertexLayout::PositionNormalUv).has_value());
-    EXPECT_FALSE(ResolveOverridePipeline(overrides, VertexLayout::PositionNormalInstanced).has_value());
+    EXPECT_FALSE(ResolveOverridePipeline(overrides, VertexLayout::None).has_value());
 }
 
 TEST(ExcludedEntitiesOfTest, ReturnsTheCallersOwnSetByAddress)

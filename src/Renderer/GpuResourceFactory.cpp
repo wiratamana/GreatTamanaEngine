@@ -99,10 +99,12 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
     m_lastComputePoolCapacity = kInitialComputePool;
     m_computeBudget.AddCapacity(kInitialComputePool);
 
-    // Shared instance-buffer layout: one readonly storage buffer, vertex stage, set 0 binding 0.
+    // Buffer set: visible list at binding 0, instances at binding 1, both vertex-stage storage buffers.
     try {
-        DescriptorSetLayoutBuilder instanceBufferLayoutBuilder(m_device);
-        m_instanceBufferSetLayout = instanceBufferLayoutBuilder.AddStorageBuffer(/*binding=*/0, VK_SHADER_STAGE_VERTEX_BIT).Build();
+        DescriptorSetLayoutBuilder bufferLayoutBuilder(m_device);
+        m_bufferSetLayout = bufferLayoutBuilder.AddStorageBuffer(/*binding=*/0, VK_SHADER_STAGE_VERTEX_BIT)
+                                .AddStorageBuffer(/*binding=*/1, VK_SHADER_STAGE_VERTEX_BIT)
+                                .Build();
     } catch (...) {
         vkDestroyDescriptorPool(m_device, firstComputePool, nullptr);
         m_computePools.clear();
@@ -111,24 +113,7 @@ GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
         throw;
     }
-    m_layoutCosts.emplace(m_instanceBufferSetLayout, PoolCapacity{ .sets = 1, .storageBuffers = 1 });
-
-    // Cluster draw layout: visible list at binding 0, instances at binding 1, both vertex-stage storage buffers.
-    try {
-        DescriptorSetLayoutBuilder clusterBufferLayoutBuilder(m_device);
-        m_clusterBufferSetLayout = clusterBufferLayoutBuilder.AddStorageBuffer(/*binding=*/0, VK_SHADER_STAGE_VERTEX_BIT)
-                                       .AddStorageBuffer(/*binding=*/1, VK_SHADER_STAGE_VERTEX_BIT)
-                                       .Build();
-    } catch (...) {
-        vkDestroyDescriptorSetLayout(m_device, m_instanceBufferSetLayout, nullptr);
-        vkDestroyDescriptorPool(m_device, firstComputePool, nullptr);
-        m_computePools.clear();
-        m_materialSets.reset();
-        vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
-        vkDestroyCommandPool(m_device, m_commandPool, nullptr);
-        throw;
-    }
-    m_layoutCosts.emplace(m_clusterBufferSetLayout, PoolCapacity{ .sets = 1, .storageBuffers = 2 });
+    m_layoutCosts.emplace(m_bufferSetLayout, PoolCapacity{ .sets = 1, .storageBuffers = 2 });
 }
 
 GpuResourceFactory::~GpuResourceFactory()
@@ -149,13 +134,9 @@ void GpuResourceFactory::Destroy() noexcept
         vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
         m_materialSetLayout = VK_NULL_HANDLE;
     }
-    if (m_instanceBufferSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_instanceBufferSetLayout, nullptr);
-        m_instanceBufferSetLayout = VK_NULL_HANDLE;
-    }
-    if (m_clusterBufferSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_clusterBufferSetLayout, nullptr);
-        m_clusterBufferSetLayout = VK_NULL_HANDLE;
+    if (m_bufferSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_device, m_bufferSetLayout, nullptr);
+        m_bufferSetLayout = VK_NULL_HANDLE;
     }
     if (m_commandPool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
@@ -292,23 +273,20 @@ void GpuResourceFactory::ImmediateSubmitInternal(const std::function<void(VkComm
 
 Pipeline GpuResourceFactory::CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialTexture,
-    const char* debugName, bool useInstanceBuffer, VkDescriptorSetLayout sceneServicesSetLayout) const
+    const char* debugName, VkDescriptorSetLayout sceneServicesSetLayout) const
 {
     const VkDescriptorSetLayout materialSetLayout = useMaterialTexture ? m_materialSetLayout : VK_NULL_HANDLE;
-    const VkDescriptorSetLayout instanceBufferSetLayout = useInstanceBuffer ? m_instanceBufferSetLayout : VK_NULL_HANDLE;
     return Pipeline(m_device, colorFormat, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath, vertexLayout,
-        materialSetLayout, debugName, instanceBufferSetLayout, sceneServicesSetLayout);
+        materialSetLayout, debugName, VK_NULL_HANDLE, sceneServicesSetLayout);
 }
 
 Pipeline GpuResourceFactory::CreatePipeline(std::span<const VkFormat> colorFormats,
     const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout,
-    bool useMaterialTexture, const char* debugName, bool useInstanceBuffer,
-    VkDescriptorSetLayout sceneServicesSetLayout) const
+    bool useMaterialTexture, const char* debugName, VkDescriptorSetLayout sceneServicesSetLayout) const
 {
     const VkDescriptorSetLayout materialSetLayout = useMaterialTexture ? m_materialSetLayout : VK_NULL_HANDLE;
-    const VkDescriptorSetLayout instanceBufferSetLayout = useInstanceBuffer ? m_instanceBufferSetLayout : VK_NULL_HANDLE;
     return Pipeline(m_device, colorFormats, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath,
-        vertexLayout, materialSetLayout, debugName, instanceBufferSetLayout, sceneServicesSetLayout);
+        vertexLayout, materialSetLayout, debugName, VK_NULL_HANDLE, sceneServicesSetLayout);
 }
 
 Pipeline GpuResourceFactory::CreateClusterPipeline(std::span<const VkFormat> colorFormats,
@@ -316,7 +294,7 @@ Pipeline GpuResourceFactory::CreateClusterPipeline(std::span<const VkFormat> col
     const char* debugName, VkDescriptorSetLayout sceneServicesSetLayout) const
 {
     return Pipeline(m_device, colorFormats, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath,
-        VertexLayout::PositionNormal, VK_NULL_HANDLE, debugName, m_clusterBufferSetLayout, sceneServicesSetLayout,
+        VertexLayout::PositionNormal, VK_NULL_HANDLE, debugName, m_bufferSetLayout, sceneServicesSetLayout,
         cullBackFaces ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE);
 }
 

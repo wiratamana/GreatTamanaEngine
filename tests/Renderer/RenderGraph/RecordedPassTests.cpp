@@ -121,6 +121,8 @@ TEST(RecordedPassTest, IndirectDrawNeedsAValidRecordAndAResolver)
     record.target = TextureHandle{ 1, 1 };
     record.indirect = kBufferA;
     record.instances = kBufferB;
+    record.visible = BufferHandle{ 3, 1 };
+    record.count = BufferHandle{ 4, 1 };
     record.maxDrawCount = 4;
     EXPECT_FALSE(MakeIndirectDrawBody(builder, "Test.Draw", record, nullptr).has_value());
     EXPECT_TRUE(MakeIndirectDrawBody(builder, "Test.Draw", record, resolver).has_value());

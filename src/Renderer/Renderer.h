@@ -163,27 +163,28 @@ public:
         DescriptorSetHandle materialDescriptorSet = DescriptorSetHandle::Invalid,
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid);
 
-    // Issues an indirect draw call from GPU-side command and count buffers.
+    // Issues a counted indexed indirect draw (count taken from `countBuffer`, capped at `maxDrawCount`). Needs the
+    // indirect-draw device features. Set 0 = `bufferDescriptorSet`, set 1 = scene services when the pipeline has it.
     void SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
         uint64_t indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset,
-        DescriptorSetHandle instanceBufferDescriptorSet,
+        DescriptorSetHandle bufferDescriptorSet,
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
         const Mat4& viewProjMatrix = Mat4::Identity());
 
     // Scene geometry pipeline. Builds against ScenePixelFormat().
     Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
         VertexLayout vertexLayout = VertexLayout::PositionColor, bool useMaterialTexture = false,
-        const char* debugName = nullptr, bool useInstanceBuffer = false,
+        const char* debugName = nullptr,
         DescriptorSetLayoutHandle sceneServicesSetLayout = DescriptorSetLayoutHandle::Invalid) const;
 
     // Vulkan-free overload taking PixelFormat. An empty span builds a depth-only pipeline.
     Pipeline CreatePipeline(std::span<const PixelFormat> colorFormats, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
-        bool useMaterialTexture = false, const char* debugName = nullptr, bool useInstanceBuffer = false,
+        bool useMaterialTexture = false, const char* debugName = nullptr,
         DescriptorSetLayoutHandle sceneServicesSetLayout = DescriptorSetLayoutHandle::Invalid) const;
 
-    // Layout of the cluster buffer set: binding 0 = visible list, binding 1 = instances.
-    DescriptorSetLayoutHandle ClusterBufferSetLayout() const noexcept;
+    // Layout of the buffer set: binding 0 = visible list, binding 1 = instances.
+    DescriptorSetLayoutHandle BufferSetLayout() const noexcept;
 
     // Cached cluster draw pipeline of `key` (PositionNormal vertices, set 0 = cluster buffer set). The lit and
     // tint variants need `sceneServicesSetLayout` as set 1; depth-only ignores it. Null when the pipeline cannot
@@ -324,8 +325,6 @@ private:
     void QueueBindingRelease(VkDescriptorSetLayout layout) noexcept;
     std::vector<VkDescriptorSetLayout> TakeQueuedBindingReleases() noexcept;
 
-    // Layout shared by instanced indirect draw buffers.
-    VkDescriptorSetLayout InstanceBufferDescriptorSetLayout() const noexcept;
     bool SupportsDepthBlit() const noexcept;
 
     // Dispatches a compute pipeline within an active graph pass.
@@ -389,7 +388,7 @@ private:
         bool failureLogged = false;
     };
     std::array<ClusterPipelineSlot, kClusterPipelineKeyCount> m_clusterPipelines;
-    DescriptorSetLayoutHandle m_clusterSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
+    DescriptorSetLayoutHandle m_bufferSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
 
     // Runs one-shot graphs; created on first use. Declared last so it is destroyed first.
     rg::RenderGraph& OneShotGraph();

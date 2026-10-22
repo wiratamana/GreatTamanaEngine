@@ -20,29 +20,28 @@ IndirectDrawRecord ValidRecord()
     record.indirect = kIndirect;
     record.count = kCount;
     record.instances = kInstances;
+    record.visible = kVisible;
     record.maxDrawCount = 16;
-    record.useCount = true;
     return record;
 }
 
-TEST(IndirectDrawRecord, ValidRecordWithoutVisibleListPasses)
+TEST(IndirectDrawRecord, ValidRecordPasses)
 {
     EXPECT_FALSE(ValidateIndirectDrawRecord(ValidRecord()).has_value());
-}
-
-TEST(IndirectDrawRecord, VisibleListIsOptionalAndAccepted)
-{
-    IndirectDrawRecord record = ValidRecord();
-    record.visible = kVisible;
-    EXPECT_FALSE(ValidateIndirectDrawRecord(record).has_value());
 }
 
 TEST(IndirectDrawRecord, DepthOnlyRecordIsAccepted)
 {
     IndirectDrawRecord record = ValidRecord();
-    record.visible = kVisible;
     record.depthOnly = true;
     EXPECT_FALSE(ValidateIndirectDrawRecord(record).has_value());
+}
+
+TEST(IndirectDrawRecord, MissingVisibleListIsRefused)
+{
+    IndirectDrawRecord record = ValidRecord();
+    record.visible = {};
+    EXPECT_TRUE(ValidateIndirectDrawRecord(record).has_value());
 }
 
 TEST(IndirectDrawRecord, MissingTargetBuffersCountOrDrawCountAreRefused)

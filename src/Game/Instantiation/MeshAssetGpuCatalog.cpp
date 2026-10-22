@@ -120,7 +120,7 @@ PipelineHandle MeshAssetGpuCatalog::EnsurePipeline(MeshAssetPipelineKind kind, R
     if (!slot.IsValid()) {
         const PipelineRow& row = kPipelineRows[index];
         slot = renderSystem.RegisterPipeline(renderer.CreatePipeline(row.vertexShader, row.fragmentShader, row.layout,
-            row.useMaterialTexture, row.debugName, /*useInstanceBuffer=*/false, sceneServicesSetLayout));
+            row.useMaterialTexture, row.debugName, sceneServicesSetLayout));
     }
     return slot;
 }

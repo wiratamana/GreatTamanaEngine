@@ -53,14 +53,12 @@ TEST(PipelineTest, SceneServicesSetLayoutProducesHasSceneServicesSetTrueWithSynt
         DescriptorSetLayoutBuilder(device).AddCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT).Build();
 
     {
-        // VertexLayout::PositionColor, no materialSetLayout/
-        // instanceBufferSetLayout - set = 0 has no real content, so Pipeline
-        // must synthesize its own zero-binding filler layout to keep set = 1
-        // contiguous.
+        // VertexLayout::PositionColor, no materialSetLayout/bufferSetLayout: set 0 has no real content, so
+        // Pipeline must synthesize a zero-binding filler layout to keep set 1 contiguous.
         Pipeline pipeline(device, renderer.ColorFormat(), renderer.DepthFormat(), "shaders/Triangle.vert.spv",
             "shaders/Triangle.frag.spv", VertexLayout::PositionColor,
             /*materialSetLayout=*/VK_NULL_HANDLE, /*debugName=*/"PipelineTest.SceneServicesSetLayout",
-            /*instanceBufferSetLayout=*/VK_NULL_HANDLE, throwawaySceneServicesLayout);
+            /*bufferSetLayout=*/VK_NULL_HANDLE, throwawaySceneServicesLayout);
 
         EXPECT_TRUE(pipeline.HasSceneServicesSet());
         EXPECT_NE(pipeline.Native(), static_cast<VkPipeline>(VK_NULL_HANDLE));
@@ -162,75 +160,6 @@ TEST(PipelineTest, UnchangedConstructionWithNoMaterialSetLayoutReportsHasMateria
 
     EXPECT_FALSE(pipeline.HasMaterialSet());
     EXPECT_NE(pipeline.Native(), static_cast<VkPipeline>(VK_NULL_HANDLE));
-}
-
-// Replaces the old EXPECT_DEATH-based test: SubmitIndirect() no longer
-// forbids a Pipeline with a real sceneServicesSetLayout - it now binds
-// set = 1 on an indirect draw too, same as any other draw. This proves the
-// pipeline survives the indirect draw cleanly - no crash, no assert.
-void SubmitIndirectAgainstPipelineWithSceneServicesSetBindsSetOne()
-{
-    HeadlessRenderGraphFixture fixture;
-    Renderer& renderer = fixture.GetRenderer();
-    const VkDevice device = fixture.Device();
-
-    const VkDescriptorSetLayout throwawaySceneServicesLayout =
-        DescriptorSetLayoutBuilder(device).AddCombinedImageSampler(0, VK_SHADER_STAGE_FRAGMENT_BIT).Build();
-
-    const DescriptorSetLayoutHandle throwawaySceneServicesLayoutHandle = RegisterDescriptorSetLayout(throwawaySceneServicesLayout);
-    Pipeline pipeline = renderer.CreatePipeline("shaders/MeshInstanced.vert.spv", "shaders/Mesh.frag.spv",
-        VertexLayout::PositionNormalInstanced, /*useMaterialTexture=*/false,
-        "RendererSubmitIndirectTest.Pipeline", /*useInstanceBuffer=*/true, throwawaySceneServicesLayoutHandle);
-
-    MeshVertex vertices[3]{};
-    vertices[0].position[0] = 0.0f;
-    vertices[0].position[1] = 0.0f;
-    vertices[0].position[2] = 0.0f;
-    vertices[1].position[0] = 1.0f;
-    vertices[1].position[1] = 0.0f;
-    vertices[1].position[2] = 0.0f;
-    vertices[2].position[0] = 0.0f;
-    vertices[2].position[1] = 1.0f;
-    vertices[2].position[2] = 0.0f;
-    for (MeshVertex& v : vertices) {
-        v.normal[0] = 0.0f;
-        v.normal[1] = 0.0f;
-        v.normal[2] = 1.0f;
-    }
-    std::uint32_t indices[3]{ 0, 1, 2 };
-    Mesh mesh = renderer.CreateMesh(
-        vertices, sizeof(vertices), 3, indices, sizeof(indices), 3, "RendererSubmitIndirectTest.Mesh");
-
-    const DescriptorSetHandle instanceBufferDescriptorSet =
-        fixture.AllocateInstanceBufferDescriptorSet();
-
-    const rg::RecordingContext recording = renderer.BeginOffscreenRenderGraphRecording();
-    fixture.BeginGraphPassRecording(recording);
-
-    // New `sceneServicesSet` parameter sits right before viewProjMatrix in
-    // SubmitIndirect()'s signature - VK_NULL_HANDLE is enough here, this
-    // test only proves the call no longer asserts/crashes, not what ends
-    // up bound to it.
-    renderer.SubmitIndirect(pipeline, mesh, /*indirectBuffer=*/VK_NULL_HANDLE, /*indirectOffset=*/0,
-        /*maxDrawCount=*/1, /*countBuffer=*/VK_NULL_HANDLE, /*countBufferOffset=*/0, instanceBufferDescriptorSet,
-        /*sceneServicesSet=*/DescriptorSetHandle::Invalid);
-
-    fixture.EndGraphPassRecording();
-
-    UnregisterDescriptorSetLayout(throwawaySceneServicesLayoutHandle);
-    vkDestroyDescriptorSetLayout(device, throwawaySceneServicesLayout, nullptr);
-}
-
-TEST(RendererSubmitIndirectTest, PipelineWithSceneServicesSetBindsSetOneInsteadOfAsserting)
-{
-    HeadlessRenderGraphFixture probe;
-    if (!probe.IsUsable()) {
-        GTEST_SKIP() << probe.SkipReason();
-    }
-    // A Pipeline with a real sceneServicesSetLayout now survives an
-    // indirect draw and reaches FrameRecorder::IssueIndirectDrawCommand()
-    // cleanly - no crash, no assert, set = 1 is bound like any other draw.
-    SubmitIndirectAgainstPipelineWithSceneServicesSetBindsSetOne();
 }
 
 } // namespace

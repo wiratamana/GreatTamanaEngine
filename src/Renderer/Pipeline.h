@@ -20,12 +20,12 @@ inline constexpr std::size_t kPipelineMaxColorAttachments = 8;
 class Pipeline {
 public:
     // Single-format form; forwards to the span constructor. SPIR-V paths are compiled "<exe dir>/shaders/*.spv".
-    // Set 0: `materialSetLayout` (PositionNormalUv, PositionNormalUvTangent) or `instanceBufferSetLayout` (a buffer set).
+    // Set 0: `materialSetLayout` (PositionNormalUv, PositionNormalUvTangent) or `bufferSetLayout` (storage buffers).
     // Set 1: `sceneServicesSetLayout`. An empty set 0 with a set 1 gets a zero-binding filler (no gaps allowed).
     Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
         VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr,
-        VkDescriptorSetLayout instanceBufferSetLayout = VK_NULL_HANDLE,
+        VkDescriptorSetLayout bufferSetLayout = VK_NULL_HANDLE,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE);
 
     // Multi-render-target form: one opaque, full-write blend state per entry. `colorFormats` may be empty (depth-only)
@@ -34,7 +34,7 @@ public:
         const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
         VertexLayout vertexLayout = VertexLayout::PositionColor,
         VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr,
-        VkDescriptorSetLayout instanceBufferSetLayout = VK_NULL_HANDLE,
+        VkDescriptorSetLayout bufferSetLayout = VK_NULL_HANDLE,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE,
         VkCullModeFlags cullMode = VK_CULL_MODE_NONE);
 

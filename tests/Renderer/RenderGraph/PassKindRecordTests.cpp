@@ -18,6 +18,7 @@ namespace {
 const BufferHandle kBufferA{ 1, 1 };
 const BufferHandle kBufferB{ 2, 1 };
 const BufferHandle kBufferC{ 3, 1 };
+const BufferHandle kBufferD{ 4, 1 };
 const TextureHandle kTexA{ 1, 1 };
 const TextureHandle kTexB{ 2, 1 };
 
@@ -196,12 +197,12 @@ IndirectDrawRecord ValidIndirect()
     record.indirect = kBufferA;
     record.count = kBufferB;
     record.instances = kBufferC;
+    record.visible = kBufferD;
     record.maxDrawCount = 8;
-    record.useCount = true;
     return record;
 }
 
-TEST(IndirectDrawRecordTest, ValidRecordDeclaresTargetsAndTheThreeBufferReads)
+TEST(IndirectDrawRecordTest, ValidRecordDeclaresTargetsAndTheFourBufferReads)
 {
     const IndirectDrawRecord record = ValidIndirect();
     EXPECT_FALSE(ValidateIndirectDrawRecord(record).has_value());
@@ -214,13 +215,15 @@ TEST(IndirectDrawRecordTest, ValidRecordDeclaresTargetsAndTheThreeBufferReads)
     EXPECT_EQ(pass.colorAttachments[0].handle, kTexA);
     ASSERT_EQ(pass.writes.size(), 2u);
     EXPECT_EQ(pass.writes[1].access, ResourceAccess::DepthStencilAttachmentReadWrite);
-    ASSERT_EQ(pass.reads.size(), 3u);
+    ASSERT_EQ(pass.reads.size(), 4u);
     EXPECT_EQ(pass.reads[0].access, ResourceAccess::IndirectCommandRead);
     EXPECT_EQ(pass.reads[0].buffer, kBufferA);
     EXPECT_EQ(pass.reads[1].access, ResourceAccess::IndirectCommandRead);
     EXPECT_EQ(pass.reads[1].buffer, kBufferB);
     EXPECT_EQ(pass.reads[2].access, ResourceAccess::VertexShaderStorageRead);
     EXPECT_EQ(pass.reads[2].buffer, kBufferC);
+    EXPECT_EQ(pass.reads[3].access, ResourceAccess::VertexShaderStorageRead);
+    EXPECT_EQ(pass.reads[3].buffer, kBufferD);
 }
 
 TEST(IndirectDrawRecordTest, EveryMissingPartIsNamed)
@@ -238,11 +241,12 @@ TEST(IndirectDrawRecordTest, EveryMissingPartIsNamed)
     EXPECT_TRUE(Contains(ValidateIndirectDrawRecord(record), "instance"));
 
     record = ValidIndirect();
+    record.visible = BufferHandle{};
+    EXPECT_TRUE(Contains(ValidateIndirectDrawRecord(record), "visible"));
+
+    record = ValidIndirect();
     record.count = BufferHandle{};
     EXPECT_TRUE(Contains(ValidateIndirectDrawRecord(record), "count"));
-
-    record.useCount = false; // Without the count read the count buffer is optional.
-    EXPECT_FALSE(ValidateIndirectDrawRecord(record).has_value());
 
     record = ValidIndirect();
     record.maxDrawCount = 0;

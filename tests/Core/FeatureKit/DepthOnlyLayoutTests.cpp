@@ -13,7 +13,7 @@ namespace {
 
 bool IsExcluded(VertexLayout layout)
 {
-    return layout == VertexLayout::None || layout == VertexLayout::PositionNormalInstanced;
+    return layout == VertexLayout::None;
 }
 
 TEST(DepthOnlyLayoutTest, EveryLayoutIsCoveredOrExcluded)

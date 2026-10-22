@@ -31,9 +31,7 @@ std::uint32_t BuildVertexInputState(
     case VertexLayout::None:
         attributes.clear();
         return 0;
-    case VertexLayout::PositionNormal:
-    case VertexLayout::PositionNormalInstanced: {
-        // Instanced shares PositionNormal's vertex input attributes; only the model matrix source differs.
+    case VertexLayout::PositionNormal: {
         binding = MeshVertex::BindingDescription();
         const auto layoutAttributes = MeshVertex::AttributeDescriptions();
         attributes.assign(layoutAttributes.begin(), layoutAttributes.end());
@@ -65,16 +63,16 @@ std::uint32_t BuildVertexInputState(
 
 Pipeline::Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
     const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, VkDescriptorSetLayout materialSetLayout,
-    const char* debugName, VkDescriptorSetLayout instanceBufferSetLayout, VkDescriptorSetLayout sceneServicesSetLayout)
+    const char* debugName, VkDescriptorSetLayout bufferSetLayout, VkDescriptorSetLayout sceneServicesSetLayout)
     : Pipeline(device, std::span<const VkFormat>(&colorFormat, 1), depthFormat, vertexShaderSpirvPath,
-          fragmentShaderSpirvPath, vertexLayout, materialSetLayout, debugName, instanceBufferSetLayout,
+          fragmentShaderSpirvPath, vertexLayout, materialSetLayout, debugName, bufferSetLayout,
           sceneServicesSetLayout)
 {
 }
 
 Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFormat depthFormat,
     const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout,
-    VkDescriptorSetLayout materialSetLayout, const char* debugName, VkDescriptorSetLayout instanceBufferSetLayout,
+    VkDescriptorSetLayout materialSetLayout, const char* debugName, VkDescriptorSetLayout bufferSetLayout,
     VkDescriptorSetLayout sceneServicesSetLayout, VkCullModeFlags cullMode)
     : m_device(device)
     , m_debugName(debugName != nullptr ? debugName : std::string())
@@ -178,16 +176,15 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         layoutInfo.pushConstantRangeCount = 1;
         layoutInfo.pPushConstantRanges = &pushConstantRange;
 
-        // materialSetLayout and instanceBufferSetLayout both occupy set 0 and are never used together.
+        // materialSetLayout and bufferSetLayout both occupy set 0 and are never used together.
         m_hasSceneServicesSet = (sceneServicesSetLayout != VK_NULL_HANDLE);
         m_hasMaterialSet = (materialSetLayout != VK_NULL_HANDLE);
 
-        assert(!(materialSetLayout != VK_NULL_HANDLE && instanceBufferSetLayout != VK_NULL_HANDLE)
-            && "Pipeline: materialSetLayout and instanceBufferSetLayout are mutually exclusive - no Pipeline needs "
-               "both at once.");
+        assert(!(materialSetLayout != VK_NULL_HANDLE && bufferSetLayout != VK_NULL_HANDLE)
+            && "Pipeline: materialSetLayout and bufferSetLayout are mutually exclusive.");
 
         const VkDescriptorSetLayout setZeroLayout =
-            materialSetLayout != VK_NULL_HANDLE ? materialSetLayout : instanceBufferSetLayout;
+            materialSetLayout != VK_NULL_HANDLE ? materialSetLayout : bufferSetLayout;
 
         // Set layouts must be contiguous: with a scene-services set 1 and nothing at set 0, a zero-binding
         // filler layout owns set 0. `setLayouts` must outlive vkCreatePipelineLayout() below.

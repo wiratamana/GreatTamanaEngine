@@ -445,7 +445,6 @@ ClusterChainProgress DeclarePart(ClusterDrawChain::Impl& s, const PlannedPart& p
             record.instances = instances.handle;
             record.visible = visible.handle;
             record.maxDrawCount = static_cast<std::uint32_t>(part.workItems);
-            record.useCount = true;
             record.depthOnly = s.depthOnly;
 
             Core* core = context.core;

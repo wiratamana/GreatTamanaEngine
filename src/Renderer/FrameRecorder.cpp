@@ -48,13 +48,14 @@ void FrameRecorder::IssueDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, V
 }
 
 void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
-    VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet instanceBufferDescriptorSet,
+    VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet bufferDescriptorSet,
     VkDescriptorSet sceneServicesSet, const Mat4& viewProj, VkBuffer indirectBuffer, uint64_t indirectOffset,
-    std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset, bool supportsDrawIndirectCount)
+    std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset)
 {
+    assert(countBuffer != VK_NULL_HANDLE && "IssueIndirectDrawCommand: a count buffer is required.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
-    // Same push-constant shape as every pipeline; the `model` half stays zero (unused by the instanced shader).
+    // Same push-constant shape as every pipeline; the `model` half stays zero (unused by the cluster shaders).
     struct PushConstants {
         float model[16];
         float viewProj[16];
@@ -62,9 +63,9 @@ void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pip
     std::memcpy(pushConstants.viewProj, viewProj.Data(), sizeof(pushConstants.viewProj));
     vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
 
-    // Never optional: every indirect draw uses the instanced pipeline, which always declares set 0.
+    // Set 0 is always the buffer set of the cluster pipelines.
     vkCmdBindDescriptorSets(
-        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &instanceBufferDescriptorSet, 0, nullptr);
+        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &bufferDescriptorSet, 0, nullptr);
 
     // Set 1, bound only when a scene-services set was resolved (SubmitIndirect() gates it).
     if (sceneServicesSet != VK_NULL_HANDLE) {
@@ -74,26 +75,11 @@ void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pip
 
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
-    // Indirect draws are always indexed.
     vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-    constexpr std::uint32_t stride = sizeof(IndirectDrawCommand);
-    if (countBuffer != VK_NULL_HANDLE) {
-        assert(supportsDrawIndirectCount
-            && "IssueIndirectDrawCommand: a countBuffer was supplied but this device has no drawIndirectCount; "
-               "the caller must decide this once per batch.");
-        if (supportsDrawIndirectCount) {
-            // Counted path: the surviving instance count comes from `countBuffer`, capped at `maxDrawCount`.
-            vkCmdDrawIndexedIndirectCount(cmd, indirectBuffer, static_cast<VkDeviceSize>(indirectOffset), countBuffer,
-                static_cast<VkDeviceSize>(countBufferOffset), maxDrawCount, stride);
-            return;
-        }
-        // Release fallback for a caller-side logic error (asserted above): use the fixed-count path below.
-    }
-
-    // Fallback: a fixed CPU-known `maxDrawCount`. Culling pads non-surviving instances with degenerate
-    // (indexCount == 0) commands, so exactly the survivors still draw.
-    vkCmdDrawIndexedIndirect(cmd, indirectBuffer, static_cast<VkDeviceSize>(indirectOffset), maxDrawCount, stride);
+    // The surviving draw count comes from `countBuffer`, capped at `maxDrawCount`.
+    vkCmdDrawIndexedIndirectCount(cmd, indirectBuffer, static_cast<VkDeviceSize>(indirectOffset), countBuffer,
+        static_cast<VkDeviceSize>(countBufferOffset), maxDrawCount, sizeof(IndirectDrawCommand));
 }
 
 void FrameRecorder::BeginFrame()

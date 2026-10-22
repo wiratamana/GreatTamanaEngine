@@ -131,8 +131,7 @@ bool InstanceGridResources::Build(
 
         Pipeline pipeline = renderer.CreatePipeline("shaders/Mesh.vert.spv", "shaders/Mesh.frag.spv",
             VertexLayout::PositionNormal, /*useMaterialTexture=*/false,
-            "InstanceGridTestSpawner (Mesh.vert/Mesh.frag PositionNormal)", /*useInstanceBuffer=*/false,
-            sceneServicesSetLayout);
+            "InstanceGridTestSpawner (Mesh.vert/Mesh.frag PositionNormal)", sceneServicesSetLayout);
 
         RenderSystem& renderSystem = game.GetRenderSystem();
         m_owner = &renderSystem;

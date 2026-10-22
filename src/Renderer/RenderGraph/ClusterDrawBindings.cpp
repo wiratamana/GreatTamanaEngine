@@ -60,7 +60,7 @@ bool ClusterDrawBindings::Prepare(std::size_t setCount)
     try {
         m_sets.reserve(setCount);
         while (m_sets.size() < setCount) {
-            const DescriptorSet set = m_renderer->AllocateDescriptorSet(m_renderer->ClusterBufferSetLayout());
+            const DescriptorSet set = m_renderer->AllocateDescriptorSet(m_renderer->BufferSetLayout());
             m_sets.push_back(RegisterDescriptorSet(set.Native()));
         }
     } catch (const std::exception&) {

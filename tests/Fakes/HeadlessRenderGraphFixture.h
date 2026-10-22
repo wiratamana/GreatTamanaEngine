@@ -49,11 +49,6 @@ public:
     // Raw Renderer entry points the tests need; only friends may call them.
     ComputePipeline CreateComputePipeline(const std::string& spirvPath) const { return m_renderer->CreateComputePipeline(spirvPath); }
     DescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout layout) const { return m_renderer->AllocateDescriptorSet(layout); }
-    DescriptorSetHandle AllocateInstanceBufferDescriptorSet() const
-    {
-        return RegisterDescriptorSet(
-            m_renderer->AllocateDescriptorSet(m_renderer->InstanceBufferDescriptorSetLayout()).Native());
-    }
     void BeginGraphPassRecording(const rg::RecordingContext& recording)
     {
         m_renderer->BeginGraphPassRecording(rg::RecordingAccess::Native(recording), {});
