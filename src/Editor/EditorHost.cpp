@@ -629,13 +629,6 @@ int EditorHost::Run()
             switch (importRequest.kind) {
             case AssetImportCommandKind::ImportExternalFile: {
                 ImportExternalFileOutcome& outcome = importResult.importExternalFile;
-                if (clusterRunner != nullptr
-                    && clusterRunner->IsBuildingPath(PathFromUtf8(importRequest.importExternalFile.sourceAbsolutePath))) {
-                    outcome.success = false;
-                    outcome.message = "the file is being rebuilt by a cluster build";
-                    FulfillOrLogDrop(m_assetImportCommandBridge, importPending->id, importResult, "AssetImport");
-                    break;
-                }
                 const ProjectAssetImportResult layerResult = m_editorLayer->ImportExternalAssetIntoProject(
                     importRequest.importExternalFile.sourceAbsolutePath,
                     importRequest.importExternalFile.destinationRelativeFolder);

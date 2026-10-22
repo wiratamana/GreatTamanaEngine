@@ -72,7 +72,17 @@ Three doors give the same bytes for the same input and options:
 
 The write is atomic (`AtomicFile.h`): a temp file next to the target, an identity check
 (size + last write time) before the rename, and one writer per target. A failed or
-cancelled build leaves the old file byte-identical. Stale temp files are swept at startup.
+cancelled build leaves the old file byte-identical.
+
+Stale temp files are swept once at startup. The project root is the executable directory plus
+`Project` (`ResolveProjectRootDirectory()`) and never changes while the editor runs, so opening a
+project assembly needs no second sweep.
+
+An import (Project panel or `POST /import_asset`) and a cluster build of the same `*.gta` have
+no separate guard. The atomic-write rules are the guard. A build records the file identity when
+it starts, so an import that replaced the file meanwhile makes the build fail with
+"changed on disk". Two writers at the same moment: the second fails with "busy". Neither side
+ever leaves a half-written file.
 
 ## Runtime table
 
