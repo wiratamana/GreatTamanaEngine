@@ -3,40 +3,30 @@
 _Part of [GreatTamanaEngine](../../AGENTS.md)'s contributor conventions. See
 [docs/README.md](../README.md) for the full documentation index._
 
-A seven-phase campaign (`task_manager/render-pass-5/`,
-`PHASE0_MASTER_STRATEGY.md`) gave the engine a real, always-on, PRODUCTION
-GPU-driven culling + indirect-draw path for the common case where several
-entities share the exact same `(MeshHandle, PipelineHandle)` pair (a
-"batch") — replacing the old "walk every `MeshRenderer`, issue one
-`vkCmdDrawIndexed` per entity, unconditionally, no culling of any kind"
-behavior for exactly that case. Follow these rules whenever touching this
-feature:
+The engine has a production GPU-driven culling + indirect-draw path for the case where
+several entities share the exact same `(MeshHandle, PipelineHandle)` pair (a "batch").
+It replaces "one `vkCmdDrawIndexed` per entity, no culling" for that case. Follow these
+rules whenever touching it:
 
-- **Batching eligibility is a fixed, four-condition rule
-  (`RenderBatching.h`'s `IsGpuDrivenEligible()`) — do not loosen it without a
-  new, dedicated design pass.** A `(MeshHandle, PipelineHandle)` group is
-  eligible if and only if: (a) its instance count is
-  `>= kMinInstancesForGpuDrivenBatch` (4); (b) `Mesh::HasIndexBuffer()` is
-  true; (c) its `Pipeline::VertexLayoutKind()` is EXACTLY
-  `VertexLayout::PositionNormal` (untextured, non-instanced); (d) the mesh is
-  NOT part of this frame's GPU-skinning output-buffer set. Every other
-  `MeshRenderer` — every `VertexLayout::PositionColor` primitive, every
-  textured (`PositionNormalUv`) submesh, every GPU-skinned model, every group
-  below the threshold — keeps drawing through the byte-for-byte-unchanged
-  per-entity `Renderer::Submit()` path, forever. Do not add a second,
-  parallel batching mechanism for any of these excluded cases without first
-  reading `PHASE0_MASTER_STRATEGY.md`'s own Locked Design Decisions 6-8.
-- **This entire cutover is GAME VIEW ONLY, permanently.** Scene View
-  (`RenderViewId::Named("Scene")`) keeps rendering
-  EVERY entity — including every batch-eligible one — through the fully
-  unmodified per-entity path. The Game view rendered without Editor panels
-  (the engine-owned `DirectGameView` target) is still the Game view and uses the batched path.
-  This is because the per-batch GPU resource cache (`GpuDrivenBatchCache`) is keyed by
-  `(MeshHandle, PipelineHandle)` alone, with NO view dimension — it cannot
-  safely serve two different cameras' worth of culling results for the same
-  batch at once. Do not thread the `RenderSystem::Draw()`/`Game::Render()`
-  `batchedEntities` exclusion parameter into any Scene View
-  call site without first re-deriving (or adding) a view dimension to the cache.
+- **Batching eligibility is a fixed rule (`RenderBatching.h`'s `IsGpuDrivenEligible()`).**
+  Do not loosen it without a new design pass. A `(MeshHandle, PipelineHandle)` group is
+  eligible if and only if: (a) its instance count is `>= kMinInstancesForGpuDrivenBatch`
+  (4); (b) `Mesh::HasIndexBuffer()` is true; (c) its `Pipeline::VertexLayoutKind()` is
+  exactly `VertexLayout::PositionNormal` (untextured, non-instanced); (d) the mesh is not
+  part of this frame's GPU-skinning output-buffer set; (e) the mesh has no cluster table
+  (`Mesh::HasClusters()`), because the cluster path draws it. Every other `MeshRenderer`
+  keeps drawing through the per-entity `Renderer::Submit()` path. Do not add a second,
+  parallel batching mechanism for the excluded cases.
+- **The batch path is Game view only.** Scene View keeps rendering every entity through
+  the per-entity path. The per-batch cache (`GpuDrivenBatchCache`) is keyed by
+  `(MeshHandle, PipelineHandle)` with no view dimension, so it cannot serve two cameras
+  at once. Do not pass `batchedEntities` to a Scene View batch call without adding a
+  view dimension to the cache. The cluster path does not have this limit: every buffer,
+  parameter block and claimed-entity set there is per view scope.
+- **The batch path needs `drawIndirectCount`, `multiDrawIndirect` and
+  `drawIndirectFirstInstance`.** Core declares no batch when one is missing
+  (`OldBatchPathSupported()`), so the CPU path draws. The commands write
+  `firstInstance = i`, which is invalid without the last two features.
 - **The atomic visible-count buffer must be reset to `0` by a real
   `vkCmdFillBuffer` (`ResourceAccess::TransferDst`) EVERY FRAME, ordered
   before the culling compute pass — the culling shader itself can never
@@ -68,22 +58,11 @@ feature:
   after the first — mirrors `GpuSkinningTypes.h`/
   `SkinVerticesPositionNormal.comp`'s own identical flat-array treatment for
   its own tightly-packed output buffer.
-- **The "instances culled this frame" readback is a raw command issued
-  directly against `offscreenCmd`, NOT a fourth render-graph pass.** A pass
-  whose only write is a `Buffer` is never treated as a graph-culling "root"
-  (`RenderGraphCompiler::Compile()`'s reachability step: `isRoot = false`
-  unconditionally for `ResourceKind::Buffer`), so a dedicated
-  `"<batch> CopyCountForReadback"` render-graph pass with no downstream
-  reader is silently culled every frame and its `execute` callback never
-  runs — a real bug this campaign hit and fixed during PHASE6 (see
-  `PHASE6_COMPLETION_REPORT.md`'s "A real bug found and fixed" section). The
-  count-buffer copy back into `GpuDrivenBatchCache::countReadbackBuffer` is
-  therefore issued as a plain `vkCmdCopyBuffer` (with its own explicit
-  `ComputeShaderWrite -> TransferRead` barrier) directly against the
-  offscreen command buffer, immediately after `m_renderGraph.Execute(...)`
-  returns and before `Renderer::EndOffscreenRenderGraphRecording()` (which
-  already fence-waits) — reusing that already-happening wait, never adding a
-  new one, per `AGENTS.md`'s "Profiling" section.
+- **The "instances culled this frame" readback is a Transfer pass, not a raw command.**
+  Core declares `"<batch> CopyCountForReadback"` as a `rg::TransferRecord::Readback` pass
+  and calls `KeepBufferOutput(readbackHandle)` first. Without that call the graph culls
+  the pass: a pass whose only write is a `Buffer` is never a graph root. The copy reuses
+  the offscreen fence wait that already happens, so it adds no new wait.
 - **Both the real (`vkCmdDrawIndexedIndirectCount`) and fallback
   (`vkCmdDrawIndexedIndirect` against a fixed, degenerate-padded array) code
   paths are genuinely implemented and reviewed, selected EXCLUSIVELY by a
@@ -103,10 +82,7 @@ feature:
   `AddFrameDebuggerReplayPasses()` — that would change what the replay
   preview itself renders, which is explicitly out of scope.
 
-Full campaign detail (phase-by-phase writeup, every Locked Design Decision,
-every dedicated double-check finding, and an honest "what remains genuinely
-open" section restating every Non-Goal — occlusion culling, hierarchical/
-two-phase culling, LOD selection, textured/bindless batching, primitive-shape
-batching, GPU-skinned-mesh batching, async compute):
-`task_manager/render-pass-5/PHASE0_MASTER_STRATEGY.md` and
-`task_manager/render-pass-5/CAMPAIGN_COMPLETION_REPORT.md`.
+Open items: hierarchical/two-phase occlusion culling, LOD selection, textured/bindless
+batching, primitive-shape batching, GPU-skinned-mesh batching and async compute. The
+cluster-based path with per-view buffers is documented in
+[gpu-driven-clusters.md](gpu-driven-clusters.md).

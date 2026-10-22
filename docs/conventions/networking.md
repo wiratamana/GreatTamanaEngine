@@ -609,7 +609,11 @@ registering a new named texture:
   `gpu_driven_batches` (the same "instances culled this frame" readout the
   panel's own GPU-Driven Batches section shows), and `render_features` (the
   same loaded `_v2` plugin ordering/blend-mode readout the panel's own Plugin
-  Render Features section shows). ALWAYS reflects the truly latest real
+  Render Features section shows). Each pass also has `indirect_draw_count`. Two read-only
+  objects report device and memory state: `indirect_draw` (`draw_indirect_count`,
+  `multi_draw_indirect`, `draw_indirect_first_instance`, `max_draw_indirect_count`) and
+  `gpu_memory` (`total_bytes`, `mesh_count`, and `by_name` bytes per GPU debug name; unnamed
+  allocations sum under `"(unnamed)"`). ALWAYS reflects the truly latest real
   engine frame, completely independent of whether a human has the Editor
   panel's own "Pause" checkbox ticked (that checkbox only freezes what ONE
   ImGui window displays - see that campaign's PHASE0 Locked Design Decision

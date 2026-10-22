@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -71,6 +72,9 @@ public:
     {
         return IsValid(handle) ? &(*m_slots[handle.index].value) : nullptr;
     }
+
+    // Number of live (inserted and not removed) resources.
+    std::size_t LiveCount() const noexcept { return m_slots.size() - m_freeList.size(); }
 
 private:
     struct Slot {

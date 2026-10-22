@@ -628,5 +628,47 @@ TEST(RenderGraphGroupedPassMetadataTest, ReadsAndWritesAreCombinedAndDeduplicate
     EXPECT_EQ(group.writes[1], "ColorScene");
 }
 
+// --- gpu_memory and indirect draw counts ---
+
+TEST(RenderGraphGpuMemoryMetadataTest, SumsBytesPerNameAndGroupsUnnamedAllocations)
+{
+    const std::vector<GpuAllocationSample> samples{
+        { "MeshClusterTable", 64 }, { "", 10 }, { "MeshClusterTable", 128 }, { "Scene.Color", 1000 }, { "", 5 } };
+
+    const RenderGraphGpuMemoryMetadata memory = BuildGpuMemoryMetadata(samples, 3);
+
+    EXPECT_EQ(memory.totalBytes, 1207u);
+    EXPECT_EQ(memory.meshCount, 3u);
+    ASSERT_EQ(memory.byName.size(), 3u);
+    EXPECT_EQ(memory.byName.at("MeshClusterTable"), 192u);
+    EXPECT_EQ(memory.byName.at("Scene.Color"), 1000u);
+    EXPECT_EQ(memory.byName.at(kUnnamedGpuAllocation), 15u);
+}
+
+TEST(RenderGraphGpuMemoryMetadataTest, TotalsDoNotOverflowThirtyTwoBits)
+{
+    const std::vector<GpuAllocationSample> samples{ { "A", 3'000'000'000ull }, { "A", 3'000'000'000ull } };
+    EXPECT_EQ(BuildGpuMemoryMetadata(samples, 0).totalBytes, 6'000'000'000ull);
+}
+
+TEST(RenderGraphGpuMemoryMetadataTest, JsonCarriesGpuMemoryObjectAndPassIndirectDrawCount)
+{
+    RenderGraphPassSnapshot pass = MakeSurvivingPass("ClusterDraw");
+    pass.stats.drawStats.indirectDrawCount = 4;
+    RenderGraphSnapshot offscreen;
+    offscreen.passesInExecutionOrder.push_back(pass);
+
+    RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, RenderGraphSnapshot{}, {}, {});
+    const std::vector<GpuAllocationSample> samples{ { "MeshClusterTable", 64 } };
+    metadata.gpuMemory = BuildGpuMemoryMetadata(samples, 2);
+
+    const nlohmann::json j = metadata;
+
+    EXPECT_EQ(j["gpu_memory"]["total_bytes"].get<std::uint64_t>(), 64u);
+    EXPECT_EQ(j["gpu_memory"]["mesh_count"].get<std::uint64_t>(), 2u);
+    EXPECT_EQ(j["gpu_memory"]["by_name"]["MeshClusterTable"].get<std::uint64_t>(), 64u);
+    EXPECT_EQ(j["offscreen_regime"]["passes"][0]["indirect_draw_count"].get<std::uint32_t>(), 4u);
+}
+
 } // namespace
 } // namespace gte::rg

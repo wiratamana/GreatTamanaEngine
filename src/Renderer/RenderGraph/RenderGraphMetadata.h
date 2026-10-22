@@ -1,8 +1,8 @@
 #pragma once
 
 // Everything the Render Graph panel shows, as one engine-free, JSON-able object: both regimes, GPU-driven
-// batches and features. One object backs the panel tables, GET /render_graph and the DOT export.
-// BuildRenderGraphMetadata() is a pure function of plain data.
+// batches, features, device indirect-draw caps and tracked GPU memory. One object backs the panel tables,
+// GET /render_graph and the DOT export. BuildRenderGraphMetadata() is a pure function of plain data.
 
 #include "RenderGraphSnapshot.h"
 #include "RenderGraphTypes.h"
@@ -13,7 +13,9 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -43,6 +45,7 @@ struct RenderGraphPassMetadata {
     std::vector<RenderGraphResourceRefMetadata> writes;
     std::uint32_t drawCallCount = 0;   // 0 for a culled pass.
     std::uint32_t triangleCount = 0;   // same rule.
+    std::uint32_t indirectDrawCount = 0; // Indirect draws issued; their triangles are GPU-side and not counted above.
     std::string gpuTimingText;        // Formatted GPU timing text - "N/A" for a culled pass too.
     std::optional<double> gpuTimingMilliseconds; // Same value as a number, nullopt unless actually present.
 };
@@ -65,6 +68,24 @@ struct RenderGraphRegimeMetadata {
     bool timingSlotBudgetExhausted = false;
 };
 
+// One live GPU allocation: its debug name (empty when unnamed) and size.
+struct GpuAllocationSample {
+    std::string name;
+    std::uint64_t bytes = 0;
+};
+
+// Tracked GPU memory: grand total, bytes per debug name and the live Mesh object count.
+struct RenderGraphGpuMemoryMetadata {
+    std::uint64_t totalBytes = 0;
+    std::uint64_t meshCount = 0;
+    std::map<std::string, std::uint64_t> byName; // Unnamed allocations are summed under kUnnamedGpuAllocation.
+};
+
+inline constexpr const char* kUnnamedGpuAllocation = "(unnamed)";
+
+// Pure: sums `samples` per name and in total.
+RenderGraphGpuMemoryMetadata BuildGpuMemoryMetadata(std::span<const GpuAllocationSample> samples, std::uint64_t meshCount);
+
 // The top-level JSON-able object. Two named regimes, plus batches and features so one response
 // carries everything the panel needs.
 struct RenderGraphMetadata {
@@ -74,6 +95,7 @@ struct RenderGraphMetadata {
     std::vector<GpuDrivenBatchDebugInfo> gpuDrivenBatches;   // Reused directly, never re-wrapped.
     std::vector<RenderFeatureDebugEntry> renderFeatures;     // Reused directly, never re-wrapped.
     IndirectDrawCapsView indirectDraw;                       // Device indirect draw capabilities.
+    RenderGraphGpuMemoryMetadata gpuMemory;                  // Read on the main thread when published.
 };
 
 // Pure: builds from already-resolved snapshots, never a live graph or Core.

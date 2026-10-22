@@ -93,6 +93,10 @@ than subsystem-specific):
 - **[GPU-Driven Rendering](conventions/gpu-driven-rendering.md)** — the
   compute-shader frustum-culling + indirect-draw path for batches of entities
   sharing one `(MeshHandle, PipelineHandle)` pair, Game View only.
+- **[GPU-Driven Clusters](conventions/gpu-driven-clusters.md)** — mesh clustering
+  (import hook, Inspector button, `POST /build_clusters`), the `GCL1` file tail, the
+  per-view cluster cull + indirect draw verb, claim rules, capability matrix, limits
+  and the `/feature_debug` + `/render_graph` debug workflow.
 - **[Atmosphere Scattering](conventions/atmosphere-scattering.md)** — the
   physically-based real-time atmosphere-scattering + aerial-perspective
   system and its permanent CPU oracle, `AtmosphereMath.h/.cpp`.

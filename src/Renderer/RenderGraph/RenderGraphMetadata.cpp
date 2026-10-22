@@ -52,6 +52,7 @@ RenderGraphPassMetadata BuildPassMetadata(const RenderGraphPassSnapshot& pass)
     // A culled pass has default stats, so no special case is needed.
     metadata.drawCallCount = pass.stats.drawStats.drawCallCount;
     metadata.triangleCount = pass.stats.drawStats.triangleCount;
+    metadata.indirectDrawCount = pass.stats.drawStats.indirectDrawCount;
     metadata.gpuTimingText = FormatGpuTiming(pass.stats.timing);
     metadata.gpuTimingMilliseconds = (pass.stats.timing.status == GpuTimingSample::Status::Present)
         ? std::optional<double>(pass.stats.timing.milliseconds)
@@ -212,6 +213,17 @@ RenderGraphMetadata BuildRenderGraphMetadata(const RenderGraphSnapshot& offscree
     return metadata;
 }
 
+RenderGraphGpuMemoryMetadata BuildGpuMemoryMetadata(std::span<const GpuAllocationSample> samples, std::uint64_t meshCount)
+{
+    RenderGraphGpuMemoryMetadata memory;
+    memory.meshCount = meshCount;
+    for (const GpuAllocationSample& sample : samples) {
+        memory.totalBytes += sample.bytes;
+        memory.byName[sample.name.empty() ? std::string(kUnnamedGpuAllocation) : sample.name] += sample.bytes;
+    }
+    return memory;
+}
+
 // std::map iteration is sorted by name, so row order does not depend on input order.
 std::vector<RenderGraphGroupedPassMetadata> GroupPassMetadataByName(const std::vector<RenderGraphPassMetadata>& ungrouped)
 {
@@ -283,6 +295,7 @@ void to_json(nlohmann::json& j, const RenderGraphPassMetadata& pass)
         { "writes", pass.writes },
         { "draw_call_count", pass.drawCallCount },
         { "triangle_count", pass.triangleCount },
+        { "indirect_draw_count", pass.indirectDrawCount },
         { "gpu_timing_text", pass.gpuTimingText },
         { "gpu_timing_milliseconds",
             pass.gpuTimingMilliseconds.has_value() ? nlohmann::json(*pass.gpuTimingMilliseconds)
@@ -330,6 +343,12 @@ void to_json(nlohmann::json& j, const RenderGraphMetadata& metadata)
                 { "multi_draw_indirect", metadata.indirectDraw.multiDrawIndirect },
                 { "draw_indirect_first_instance", metadata.indirectDraw.drawIndirectFirstInstance },
                 { "max_draw_indirect_count", metadata.indirectDraw.maxDrawIndirectCount },
+            } },
+        { "gpu_memory",
+            {
+                { "total_bytes", metadata.gpuMemory.totalBytes },
+                { "mesh_count", metadata.gpuMemory.meshCount },
+                { "by_name", metadata.gpuMemory.byName },
             } },
     };
 }

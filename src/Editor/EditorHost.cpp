@@ -27,6 +27,7 @@
 #include "../Assets/ImportStamp.h" // IsPathStrictlyInsideDirectory().
 #include "../Encoding/Utf8Path.h"
 #include "MeshClusterBuildRunner.h"
+#include "EditorGpuMemoryNameOverlay.h"
 #include "../Encoding/CapturedPixelConversion.h" // gte::Encoding::IsBgraFormat() - the one canonical copy.
 #include "../Encoding/DepthVisualization.h"
 #include "../Encoding/HdrColorVisualization.h"
@@ -55,6 +56,18 @@
 namespace gte {
 
 namespace {
+
+// One sample per live GPU allocation, named through the editor's debug-name overlay (empty when unnamed).
+std::vector<rg::GpuAllocationSample> CollectGpuAllocationSamples(const Renderer& renderer)
+{
+    const std::vector<GpuMemoryTracker::Entry> entries = renderer.GetMemoryResources();
+    std::vector<rg::GpuAllocationSample> samples;
+    samples.reserve(entries.size());
+    for (const GpuMemoryTracker::Entry& entry : entries) {
+        samples.push_back({ EditorGpuMemoryNameOverlay::GetDebugName(entry.handle), entry.record.sizeBytes });
+    }
+    return samples;
+}
 
 // GET /list_textures label for an execution regime; an unrecognized one falls back to a safe string.
 const char* ToDebugTextureRegimeString(rg::ExecuteTimingMode mode)
@@ -732,6 +745,8 @@ int EditorHost::Run()
                 m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback),
                 m_core.GetGpuDrivenBatchDebugInfo(), renderFeatureEntries);
             renderGraphMetadata.indirectDraw = m_renderer.IndirectDrawCaps();
+            renderGraphMetadata.gpuMemory =
+                rg::BuildGpuMemoryMetadata(CollectGpuAllocationSamples(m_renderer), m_game.GetRenderSystem().MeshCount());
             m_captureBridge.PublishRenderGraphMetadata(std::move(renderGraphMetadata));
         }
 

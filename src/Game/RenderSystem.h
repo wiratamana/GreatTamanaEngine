@@ -59,6 +59,9 @@ public:
     // Destroys the mesh; the handle goes stale. Only safe when no entity uses it and the GPU is done with it.
     bool ReleaseMesh(MeshHandle handle) { return m_meshes.Remove(handle); }
 
+    // Number of live Mesh objects in the pool.
+    std::size_t MeshCount() const noexcept { return m_meshes.LiveCount(); }
+
     // Frees a pipeline slot. Only safe for a handle no MeshRenderer references: the pool keeps no back-references,
     // and entities holding a removed handle silently stop drawing. For rollback and owner teardown.
     bool UnregisterPipeline(PipelineHandle handle) { return m_pipelines.Remove(handle); }
