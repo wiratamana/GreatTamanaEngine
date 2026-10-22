@@ -629,7 +629,7 @@ TEST_F(AssetImporterTest, ConvertsAValidVmdToMotionWrappedGta)
     EXPECT_EQ(result.motionMorphKeyframeCount, 0u);
     EXPECT_EQ(result.motionCameraKeyframeCount, 0u);
     EXPECT_EQ(result.motionLightKeyframeCount, 0u);
-    EXPECT_EQ(result.motionShadowKeyframeCount, 0u);
+    EXPECT_EQ(result.motionModeKeyframeCount, 0u);
     EXPECT_EQ(result.motionIkKeyframeCount, 0u);
 
     std::error_code ec;

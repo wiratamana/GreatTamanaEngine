@@ -706,6 +706,10 @@ add_library(gte_core STATIC
     src/Assets/MeshClusterValidation.cpp
     src/Assets/MeshClusterRebase.h
     src/Assets/MeshClusterRebase.cpp
+    src/Assets/MeshClustering.h
+    src/Assets/MeshClustering.cpp
+    src/Assets/MeshClusterPersistence.h
+    src/Assets/MeshClusterPersistence.cpp
     src/Assets/MeshMaterialPartitioner.h
     src/Assets/MeshMaterialPartitioner.cpp
     src/Assets/MotionFile.h

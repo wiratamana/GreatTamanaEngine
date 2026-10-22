@@ -90,21 +90,15 @@ struct StlLoadResult {
 // different length than mesh.positions/mesh.normals - MeshFile.h's
 // EncodeMeshDataToBytes() assumes all three arrays share one vertexCount).
 //
-// No axis/winding/scale remapping of any kind is performed - see
-// PHASE0_MASTER_STRATEGY.md's Locked Design Decision 5 (mirrors
-// PmxLoader.h's own precedent exactly).
+// No axis/winding/scale remapping of any kind is performed.
 //
 // Never throws. Returns success == false with a descriptive message and an
 // otherwise-default-constructed (empty) result for: a missing/unreadable
-// file; a file too short to even contain a valid 80-byte header; a binary
-// file whose declared triangle count does NOT actually match its own real
-// file size (see this .cpp's own doc comment - this is the hardening this
-// engine's own reference terrain.stl fixture's real 1,045,458-triangle,
-// 52,272,984-byte size specifically exercises, and is what protects this
-// engine from ever attempting to pre-allocate memory for a triangle count a
-// corrupt/hostile file merely CLAIMS to have); or a file that is neither a
-// recognizable binary STL by size formula NOR ASCII text starting with
-// "solid".
+// file; a file too short to contain a valid 80-byte header; a binary file
+// whose declared triangle count does not match its real file size (this
+// protects against pre-allocating memory for a count a corrupt file merely
+// claims); or a file that is neither a recognizable binary STL by size
+// formula nor ASCII text starting with "solid".
 StlLoadResult LoadStlModel(const std::string& filePath);
 
 } // namespace gte

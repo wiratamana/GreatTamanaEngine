@@ -151,6 +151,9 @@ struct MotionData {
     std::vector<LightKeyframe> lightKeyframes;
     std::vector<ShadowKeyframe> shadowKeyframes;
     std::vector<IkKeyframe> ikKeyframes;
+
+    // Number of keyframes of the render-mode track (the ground-shadow toggle track of VMD).
+    std::size_t ModeKeyframeCount() const noexcept { return shadowKeyframes.size(); }
 };
 
 } // namespace gte

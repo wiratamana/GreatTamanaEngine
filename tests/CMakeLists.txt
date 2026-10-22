@@ -2256,6 +2256,7 @@ set(GTE_TEST_SOURCES
     Assets/GltfLoaderTests.cpp
     Assets/MeshFileTests.cpp
     Assets/MeshClusterTests.cpp
+    Assets/MeshClusteringTests.cpp
     Assets/MeshMaterialPartitionerTests.cpp
     Assets/MotionFileTests.cpp
     Assets/RigFileTests.cpp
@@ -2911,6 +2912,9 @@ add_test(NAME FeaturePurityCheck
 # See tools/ci/engine_vocabulary_check/README.md.
 add_test(NAME EngineVocabularyCheck
     COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src" --only Renderer/ --only Core/
+            --only Assets/MeshData.h --only Assets/MeshFile. --only Assets/MeshCluster --only Assets/AtomicFile.
+            --only Assets/GtaFile. --only Assets/MeshMaterialPartitioner. --only Assets/MeshNormalRecompute
+            --only Assets/Stl --only Assets/AssetImporter. --only Assets/Crc32.h --only Assets/MeshClustering
             --tokens "${CMAKE_SOURCE_DIR}/tools/ci/engine_vocabulary_check/tokens.txt"
             --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/engine_vocabulary_check/allowlist.txt"
             --comments scan --strings scan --ignore-case
@@ -2959,6 +2963,8 @@ set(GTE_COMMENT_RULE_SRC
     Assets/MeshFile.h Assets/MeshFile.cpp Assets/MeshCluster.h Assets/Crc32.h
     Assets/MeshClusterValidation.h Assets/MeshClusterValidation.cpp
     Assets/MeshClusterRebase.h Assets/MeshClusterRebase.cpp
+    Assets/MeshClustering.h Assets/MeshClustering.cpp
+    Assets/MeshClusterPersistence.h Assets/MeshClusterPersistence.cpp
     Assets/MeshMaterialPartitioner.h Assets/MeshMaterialPartitioner.cpp
     Game/Instantiation/MaterialTextureGpuCache.h Game/Instantiation/MaterialTextureGpuCache.cpp
     Game/Instantiation/MaterialCacheKeys.h Game/Instantiation/MaterialLifetimeRules.h
@@ -2990,7 +2996,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Math/PbrBrdfTests.cpp Features/SceneLighting/
     Renderer/RenderGraph/DescriptorWriteIdentityTests.cpp Renderer/RenderGraph/TrackedBufferGpuTests.cpp
     Renderer/Culling/ClusterCullMathTests.cpp Assets/AtomicFileTests.cpp
-    Assets/MeshClusterTests.cpp Assets/MeshMaterialPartitionerTests.cpp)
+    Assets/MeshClusterTests.cpp Assets/MeshClusteringTests.cpp Assets/MeshMaterialPartitionerTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

@@ -56,7 +56,7 @@ struct AssetImportResult {
     std::size_t motionMorphKeyframeCount = 0;
     std::size_t motionCameraKeyframeCount = 0;
     std::size_t motionLightKeyframeCount = 0;
-    std::size_t motionShadowKeyframeCount = 0;
+    std::size_t motionModeKeyframeCount = 0;
     std::size_t motionIkKeyframeCount = 0;
 
     std::string message; // Human-readable status, success or failure.

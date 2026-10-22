@@ -270,14 +270,14 @@ AssetImportResult ImportAssetFile(
                 result.motionMorphKeyframeCount = loaded.motion.morphKeyframes.size();
                 result.motionCameraKeyframeCount = loaded.motion.cameraKeyframes.size();
                 result.motionLightKeyframeCount = loaded.motion.lightKeyframes.size();
-                result.motionShadowKeyframeCount = loaded.motion.shadowKeyframes.size();
+                result.motionModeKeyframeCount = loaded.motion.ModeKeyframeCount();
                 result.motionIkKeyframeCount = loaded.motion.ikKeyframes.size();
                 result.message = "Imported \"" + PathToUtf8(sourcePath.filename()) + "\" as a motion ("
                     + std::to_string(result.motionBoneKeyframeCount) + " bone keyframes, "
                     + std::to_string(result.motionMorphKeyframeCount) + " morph keyframes, "
                     + std::to_string(result.motionCameraKeyframeCount) + " camera keyframes, "
                     + std::to_string(result.motionLightKeyframeCount) + " light keyframes, "
-                    + std::to_string(result.motionShadowKeyframeCount) + " shadow keyframes, "
+                    + std::to_string(result.motionModeKeyframeCount) + " mode keyframes, "
                     + std::to_string(result.motionIkKeyframeCount) + " IK keyframes) -> \""
                     + PathToUtf8(gtaPath.filename()) + "\".";
             } else {
