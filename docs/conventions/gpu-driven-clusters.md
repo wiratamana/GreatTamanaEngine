@@ -187,7 +187,8 @@ Both vertex shaders declare `invariant gl_Position` with the same expression ord
   `indirect_draw_count`, plus `indirect_draw` (device caps) and `gpu_memory`
   (`total_bytes`, `mesh_count`, `by_name`). Indirect draws never add to `triangle_count`.
   Read `gpu_memory` before and after a series of cluster rebuilds: totals and `mesh_count` must
-  return to base once the mesh sweep ran.
+  return to base once the mesh sweep ran. `gpu_memory` is rebuilt every 30 frames, so wait about
+  one second after a change before reading it.
 - `POST /build_clusters` rebuilds a table. Read `GET /get_logs` for the `MeshClustering` lines.
 - Pass stats are keyed by pass name, not by view. Measure with only the Game view active.
 

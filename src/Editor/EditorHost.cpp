@@ -347,6 +347,10 @@ void EditorHost::ServiceFeatureDebugCommand()
 int EditorHost::Run()
 {
     bool running = true;
+    // The memory summary copies every tracked allocation, so it is rebuilt every few frames only.
+    constexpr std::uint32_t kGpuMemoryRefreshFrames = 30;
+    rg::RenderGraphGpuMemoryMetadata gpuMemory;
+    std::uint32_t gpuMemoryAgeFrames = kGpuMemoryRefreshFrames;
     // Identifies this host's window among the SDL windows ImGui multi-viewport may create; an SDL window ID never changes.
     const Uint32 mainWindowId = m_window.Id();
     Uint64 lastTicksNs = SDL_GetTicksNS();
@@ -737,8 +741,13 @@ int EditorHost::Run()
                 m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback),
                 m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback), renderFeatureEntries);
             renderGraphMetadata.indirectDraw = m_renderer.IndirectDrawCaps();
-            renderGraphMetadata.gpuMemory =
-                rg::BuildGpuMemoryMetadata(CollectGpuAllocationSamples(m_renderer), m_game.GetRenderSystem().MeshCount());
+            if (gpuMemoryAgeFrames >= kGpuMemoryRefreshFrames) {
+                gpuMemory = rg::BuildGpuMemoryMetadata(
+                    CollectGpuAllocationSamples(m_renderer), m_game.GetRenderSystem().MeshCount());
+                gpuMemoryAgeFrames = 0;
+            }
+            ++gpuMemoryAgeFrames;
+            renderGraphMetadata.gpuMemory = gpuMemory;
             m_captureBridge.PublishRenderGraphMetadata(std::move(renderGraphMetadata));
         }
 
