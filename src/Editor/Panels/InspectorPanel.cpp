@@ -974,16 +974,6 @@ void BuildGtaMeshMetadata(const GtaHeader& header, std::uintmax_t fileSizeBytes,
 
 constexpr const char* kClusterWeldLabels[] = { "Exact", "Position only" };
 
-MeshClusterOptions MakeClusterOptions(const ClusterToolUiState& ui)
-{
-    MeshClusterOptions options;
-    options.weld = ui.weldIndex == 1 ? ClusterWeldMode::PositionOnly : ClusterWeldMode::Exact;
-    options.maxVerticesPerCluster = static_cast<std::uint32_t>(ClampClusterMaxVertices(ui.maxVertices));
-    options.maxTrianglesPerCluster = static_cast<std::uint32_t>(ClampClusterMaxTriangles(ui.maxTriangles));
-    options.coneWeight = ClampClusterConeWeight(ui.coneWeight);
-    return options;
-}
-
 // Ready = the build button is usable now; any other status carries the reason it is not.
 ClusterBuildStartResult CheckClusterBuildGate(
     ClusterToolUiState& ui, const MeshClusterBuildRunner* runner, const std::string& absolutePath)
@@ -1073,15 +1063,6 @@ void BuildClusterToolSection(EditorContext& ctx, const std::string& absolutePath
 
 constexpr const char* kCloneWeldLabels[] = { "Exact", "Position only", "Auto" };
 constexpr const char* kCloneWeldNames[] = { "exact", "position_only", "auto" };
-
-MeshClusterCloneOptions MakeCloneOptions(const ClusterToolUiState& ui)
-{
-    MeshClusterCloneOptions options;
-    options.cluster = MakeClusterOptions(ui);
-    options.cluster.weld = ui.cloneWeldIndex == 1 ? ClusterWeldMode::PositionOnly : ClusterWeldMode::Exact;
-    options.autoWeld = ui.cloneWeldIndex == 2;
-    return options;
-}
 
 // Next free copy name. Searched again only when the source changed, a job finished or the recheck interval passed.
 const std::filesystem::path& RefreshCloneDestination(

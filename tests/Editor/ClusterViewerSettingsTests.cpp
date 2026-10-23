@@ -50,7 +50,7 @@ TEST(ClusterViewerSettingsTest, OutOfRangeValueIsRejectedWithKeyAndRange)
     DebugCameraState c;
     const auto r = Apply({ { "camFov", "171" } }, s, c);
     EXPECT_EQ(r.status, ClusterViewerSetStatus::BadValue);
-    EXPECT_EQ(r.badKey, "camFov");
+    EXPECT_NE(r.error.find("camFov"), std::string::npos);
     EXPECT_NE(r.error.find("1..170"), std::string::npos);
     EXPECT_FLOAT_EQ(c.fovYDegrees, 60.0f);
 
@@ -66,7 +66,7 @@ TEST(ClusterViewerSettingsTest, UnknownKeyListsTheValidKeys)
     DebugCameraState c;
     const auto r = Apply({ { "bogus", "1" } }, s, c);
     EXPECT_EQ(r.status, ClusterViewerSetStatus::UnknownKey);
-    EXPECT_EQ(r.badKey, "bogus");
+    EXPECT_NE(r.error.find("'bogus'"), std::string::npos);
     EXPECT_NE(r.error.find("drawMode"), std::string::npos);
 }
 
@@ -86,7 +86,7 @@ TEST(ClusterViewerSettingsTest, NearAboveFarIsRejectedAsAWhole)
     DebugCameraState c; // far 2000
     const auto bad = Apply({ { "camNear", "3000" } }, s, c);
     EXPECT_EQ(bad.status, ClusterViewerSetStatus::BadValue);
-    EXPECT_EQ(bad.badKey, "camNear");
+    EXPECT_NE(bad.error.find("camFar"), std::string::npos);
     EXPECT_FLOAT_EQ(c.nearZ, 1.0f);
 
     EXPECT_TRUE(Apply({ { "camNear", "3000" }, { "camFar", "9000" } }, s, c).Ok());

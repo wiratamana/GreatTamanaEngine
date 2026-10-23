@@ -1,11 +1,10 @@
 #pragma once
 
-// Cross-thread bridge for network-driven Editor UI commands: tab focus, instance grid spawn,
-// Inspector asset selection, Inspector state, Inspector cluster build, the Game/Scene split,
-// the cluster viewer and the Scene cameras.
+// Cross-thread bridge for network-driven Editor UI commands (tabs, inspector, views, cameras).
 // See SyncCommandBridge.h for the handoff mechanism.
 
 #include "SyncCommandBridge.h"
+#include "../Assets/MeshClusterOptions.h"
 #include "../Core/InstanceGridLimits.h"
 #include "../Editor/SceneCameraControl.h"
 
@@ -46,9 +45,9 @@ struct SelectAssetCommand {
 // Cluster options of one InspectorBuildClusters command; same fields as the Inspector's own controls.
 struct InspectorBuildClustersCommand {
     std::string weld = "exact"; // "exact" or "position_only".
-    std::uint32_t maxVertices = 64;
-    std::uint32_t maxTriangles = 124;
-    float coneWeight = 0.5f;
+    std::uint32_t maxVertices = MeshClusterOptions{}.maxVerticesPerCluster;
+    std::uint32_t maxTriangles = MeshClusterOptions{}.maxTrianglesPerCluster;
+    float coneWeight = MeshClusterOptions{}.coneWeight;
 };
 
 // Plain request payload for one SplitViews command.

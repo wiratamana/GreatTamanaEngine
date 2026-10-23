@@ -58,11 +58,8 @@ private:
     std::string m_key;
 };
 
-// Writes `parts` back to back into "<target>.<id>.<n>.tmp", then renames it over `target`.
-// The old file stays byte-identical on failure. With `expected`, a target changed since that
-// identity was read is not replaced. With `createOnly`, an existing target is never replaced
-// ("destination exists"); the check runs inside the writer claim, right before the rename.
-// Atomic against a crash, not forced to disk. Never throws.
+// Writes `parts` to a temp file, then renames it over `target`; the old file survives a failure.
+// Honors `expected` (changed target is kept) and `createOnly` (existing target is kept). Never throws.
 bool WriteFileAtomically(const std::filesystem::path& target, std::span<const ConstByteSpan> parts,
     const FileIdentity* expected, std::string* error, bool createOnly = false);
 

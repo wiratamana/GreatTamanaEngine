@@ -37,6 +37,8 @@ namespace {
 constexpr const char* kLog = "ClusterViewer";
 constexpr int kSizeStep = 32;
 constexpr int kMaxImageSize = 8192;
+// Frame key mode of the debug camera preview; follows the ClusterViewerDrawMode values.
+constexpr std::uint32_t kPreviewKeyMode = static_cast<std::uint32_t>(ClusterViewerDrawMode::Cull) + 1;
 constexpr int kPreviewWidth = 320;
 constexpr int kDefaultWidth = 960;
 constexpr int kDefaultHeight = 544;
@@ -119,13 +121,19 @@ void ClusterViewerWindow::Reset()
     m_registry = nullptr;
 }
 
+void ClusterViewerWindow::CancelGizmo()
+{
+    if (!m_gizmoDrawn) {
+        return;
+    }
+    GizmoIdScope scope("ClusterViewerDebugCamera");
+    CancelGizmoInteraction();
+    m_gizmoDrawn = false;
+}
+
 void ClusterViewerWindow::Close()
 {
-    if (m_gizmoDrawn) {
-        GizmoIdScope scope("ClusterViewerDebugCamera");
-        CancelGizmoInteraction();
-        m_gizmoDrawn = false;
-    }
+    CancelGizmo();
     m_open = false;
     m_orbiting = false;
     m_panning = false;
@@ -268,7 +276,7 @@ void ClusterViewerWindow::LoadMesh(Renderer& renderer, const std::string& path)
     if (m_load.showMesh && !uploaded) {
         m_load.showMesh = false;
         m_load.clusterModes = false;
-        m_load.banner = ClusterViewerBanner::BadIndices;
+        m_load.banner = ClusterViewerBanner::DecodeFailed;
         m_load.text = meshResult.note.empty() ? std::string("The mesh could not be uploaded.") : meshResult.note;
     } else if (m_load.clusterModes && !meshResult.clustersUsable) {
         m_load.clusterModes = false;
@@ -545,7 +553,7 @@ void ClusterViewerWindow::RenderPreview()
     frame.cull.viewProjection = viewProjection;
     frame.cull.eye = m_debug.transform.position;
 
-    const FrameKey key = MakeKey(frame, 3);
+    const FrameKey key = MakeKey(frame, kPreviewKeyMode);
     if (m_previewKeyValid && key == m_previewKey) {
         return;
     }
@@ -725,13 +733,8 @@ void ClusterViewerWindow::StartCloneFromViewer()
         ui.lastCloneStatus = "No free file name for the copy.";
         return;
     }
-    MeshClusterCloneOptions options;
-    options.cluster.maxVerticesPerCluster = static_cast<std::uint32_t>(ClampClusterMaxVertices(ui.maxVertices));
-    options.cluster.maxTrianglesPerCluster = static_cast<std::uint32_t>(ClampClusterMaxTriangles(ui.maxTriangles));
-    options.cluster.coneWeight = ClampClusterConeWeight(ui.coneWeight);
-    options.autoWeld = true;
     ui.lastCloneStatus.clear();
-    ui.startRefusedBusy = runner->StartClone(m_absolutePath, destination, options, true, 0)
+    ui.startRefusedBusy = runner->StartClone(m_absolutePath, destination, MakeCloneOptions(ui), ui.openViewerAfterClone, 0)
         == MeshClusterBuildRunner::StartResult::Busy;
 }
 
@@ -1304,6 +1307,7 @@ void ClusterViewerWindow::DrawViewport()
     ScopedUniqueId idScope(8, "ClusterViewerWindow::Viewport");
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     if (avail.x < 1.0f || avail.y < 1.0f || !m_renderer) {
+        CancelGizmo();
         return;
     }
     // The size is frozen while a mouse button is down, so a splitter or edge drag does not resize the target.
@@ -1314,6 +1318,7 @@ void ClusterViewerWindow::DrawViewport()
     RenderMain(m_requestWidth, m_requestHeight);
     RenderPreview();
     if (m_mainTexture == UiTextureHandle::Invalid) {
+        CancelGizmo();
         ImGui::TextDisabled("The view is not available.");
         if (!m_runError.empty()) {
             ImGui::TextColored(kRed, "%s", m_runError.c_str());
@@ -1424,9 +1429,7 @@ void ClusterViewerWindow::HandleViewportInput(const Mat4& viewProjection, Vec2 i
             m_debug = ClampDebugCamera(m_debug);
         }
     } else if (m_gizmoDrawn) {
-        GizmoIdScope scope("ClusterViewerDebugCamera");
-        CancelGizmoInteraction();
-        m_gizmoDrawn = false;
+        CancelGizmo();
     }
 }
 

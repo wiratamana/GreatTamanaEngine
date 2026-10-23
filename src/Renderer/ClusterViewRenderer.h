@@ -67,10 +67,8 @@ struct ClusterViewRender {
 
 struct ClusterViewCullResult {
     bool ok = false;
-    ClusterViewCounts counts;
     std::vector<std::uint32_t> survivors; // cluster ids that passed every applied test
     bool occlusionApplied = false;
-    bool hizCut = false;
     std::string note;
 };
 
@@ -125,10 +123,8 @@ public:
     std::optional<ClusterViewHizInfo> HizCapture() const noexcept;
     void ReleaseHiz();
 
-    bool ClusterModesAvailable() const noexcept;
     std::uint32_t ClusterCount() const noexcept;  // real clusters, 0 when only the synthesized one exists
     std::uint32_t MaxClusters() const noexcept;   // min(kViewerMaxClusters, device limits)
-    std::uint32_t TriangleCount() const noexcept;
 
     // Frees the Preview slot and the id target (GPU idle first).
     void ReleaseTargets();

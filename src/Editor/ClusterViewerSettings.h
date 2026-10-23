@@ -81,18 +81,12 @@ struct ClusterViewerOrbitRequest {
     std::optional<float> targetX;
     std::optional<float> targetY;
     std::optional<float> targetZ;
-
-    bool Any() const noexcept
-    {
-        return yawDeg || pitchDeg || distance || targetX || targetY || targetZ;
-    }
 };
 
 enum class ClusterViewerSetStatus : std::uint8_t { Applied, UnknownKey, BadValue };
 
 struct ClusterViewerSetResult {
     ClusterViewerSetStatus status = ClusterViewerSetStatus::Applied;
-    std::string badKey;                 // key that made the request fail
     std::string error;                  // full text, with the valid keys or the valid range
     bool copySceneCamera = false;       // one-time action: copy the selected Scene camera
     ClusterViewerOrbitRequest orbit;    // orbit values to hand to the window's orbit camera
@@ -106,12 +100,8 @@ using ClusterViewerKeyValue = std::pair<std::string, std::string>;
 ClusterViewerSetResult ParseClusterViewerSet(
     std::span<const ClusterViewerKeyValue> pairs, ClusterViewerSettings& settings, DebugCameraState& camera);
 
-// Comma separated list of every valid set key.
-std::string_view ClusterViewerSetKeys() noexcept;
-
 // Lower case names used by the set keys and the state JSON.
 std::string_view ClusterViewerDrawModeName(ClusterViewerDrawMode mode) noexcept;
 std::string_view ClusterViewerCulledStyleName(ClusterViewerCulledStyle style) noexcept;
-std::string_view ClusterViewerGizmoOperationName(ClusterViewerGizmoOperation operation) noexcept;
 
 } // namespace gte

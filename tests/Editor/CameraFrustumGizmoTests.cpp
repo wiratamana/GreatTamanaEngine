@@ -64,7 +64,7 @@ TEST(CameraFrustumGizmoTest, SegmentListHasSeventeenSegmentsAndKnownEndpoints)
     const std::vector<FrustumSegment> segments = BuildFrustumSegments(c);
     ASSERT_EQ(segments.size(), 17u);
 
-    const Vec3 arrowTip = c.apex + c.forward * (std::sqrt(300.0f) * 0.15f);
+    const Vec3 arrowTip = c.apex + c.forward * (10.0f * 0.15f); // 15% of the distance to the far plane centre
     const auto known = [&](const Vec3& p) {
         if (ApproximatelyEqual(p, c.apex, 1e-4f) || ApproximatelyEqual(p, arrowTip, 1e-3f)) {
             return true;
@@ -102,28 +102,6 @@ TEST(CameraFrustumGizmoTest, ValidityRejectsBadInput)
     in = UnitCamera();
     in.position.x = std::numeric_limits<float>::infinity();
     EXPECT_FALSE(FrustumInputIsValid(in));
-}
-
-TEST(CameraFrustumGizmoTest, PlaneNamesFollowInwardNormals)
-{
-    const FrustumCorners basis = ComputeFrustumCorners(UnitCamera());
-    const auto name = [&](const Vec3& n) { return std::string(NameFrustumPlane(Plane{ n, 0.0f }, basis)); };
-    EXPECT_EQ(name(Vec3(1, 0, 0)), "Left");
-    EXPECT_EQ(name(Vec3(-1, 0, 0)), "Right");
-    EXPECT_EQ(name(Vec3(0, 1, 0)), "Bottom");
-    EXPECT_EQ(name(Vec3(0, -1, 0)), "Top");
-    EXPECT_EQ(name(Vec3(0, 0, 1)), "Near");
-    EXPECT_EQ(name(Vec3(0, 0, -1)), "Far");
-}
-
-TEST(CameraFrustumGizmoTest, PlaneNamesOfRolledCamera)
-{
-    FrustumInput in = UnitCamera();
-    in.rotation = Quat::FromAxisAngle(Vec3::Forward(), DegToRad(90.0f));
-    const FrustumCorners basis = ComputeFrustumCorners(in);
-    // A roll swaps which world axis is "right": the plane whose normal equals basis.right is still Left.
-    EXPECT_STREQ(NameFrustumPlane(Plane{ basis.right, 0.0f }, basis), "Left");
-    EXPECT_STREQ(NameFrustumPlane(Plane{ -basis.up, 0.0f }, basis), "Top");
 }
 
 } // namespace

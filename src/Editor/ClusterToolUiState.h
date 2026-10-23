@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../Assets/MeshClusterClone.h"
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -44,9 +46,9 @@ struct InspectorShownState {
 // Persistent Inspector state of the cluster tool and the normals tool.
 struct ClusterToolUiState {
     int weldIndex = 0; // 0 = Exact, 1 = PositionOnly.
-    int maxVertices = 64;
-    int maxTriangles = 124;
-    float coneWeight = 0.5f;
+    int maxVertices = static_cast<int>(MeshClusterOptions{}.maxVerticesPerCluster);
+    int maxTriangles = static_cast<int>(MeshClusterOptions{}.maxTrianglesPerCluster);
+    float coneWeight = MeshClusterOptions{}.coneWeight;
     int cloneWeldIndex = 2;              // 0 = Exact, 1 = PositionOnly, 2 = Auto.
     bool openViewerAfterClone = true;
     std::string lastCloneStatus;
@@ -79,6 +81,12 @@ int ClampClusterMaxVertices(int value) noexcept;      // 3..255
 int ClampClusterMaxTriangles(int value) noexcept;     // 4..512, rounded to a multiple of 4
 float ClampClusterConeWeight(float value) noexcept;   // 0..1, non-finite -> default
 int ClampCloneWeldIndex(int value) noexcept;          // 0..2
+
+// Clamped options of the "Build Clusters" tool; the weld comes from `weldIndex`.
+MeshClusterOptions MakeClusterOptions(const ClusterToolUiState& ui);
+
+// Clamped options of "Create Clustered Copy"; weld index 2 means auto. Used by every clone entry point.
+MeshClusterCloneOptions MakeCloneOptions(const ClusterToolUiState& ui);
 
 // "N clusters, avg T tris, vertices A -> B, X ms".
 std::string FormatClusterStatusLine(std::size_t clusterCount, float avgTrianglesPerCluster, std::size_t verticesBefore,

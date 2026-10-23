@@ -27,9 +27,6 @@ struct ClusterStatusInput {
     const MeshClusterFinishedBuild* last = nullptr; // Last finished job of this path, if any.
 };
 
-// "Created <file>: N clusters, avg T tris, weld X, M ms".
-std::string FormatCloneStatusLine(const MeshClusterFinishedBuild& finished);
-
 // A finished clone shows the clone text on its source path, never the in-place text or its weld note.
 ClusterStatus DescribeClusterStatus(const ClusterStatusInput& input);
 

@@ -3,10 +3,10 @@
 // Cross-thread bridge for asset commands served by the Editor on the main thread:
 // importing an external file into the Project folder, rebuilding a mesh's cluster table and
 // cloning a mesh into a clustered copy.
-// See SyncCommandBridge.h for the handoff mechanism. Plain scalars and strings only,
-// so this header stays free of any src/Assets dependency.
+// See SyncCommandBridge.h for the handoff mechanism. Plain scalars and strings only.
 
 #include "SyncCommandBridge.h"
+#include "../Assets/MeshClusterOptions.h"
 
 #include <cstdint>
 #include <string>
@@ -30,9 +30,9 @@ struct ImportExternalFileCommand {
 struct BuildMeshClustersCommand {
     std::string gtaPath;
     std::string weld = "exact";
-    std::uint32_t maxVertices = 64;
-    std::uint32_t maxTriangles = 124;
-    float coneWeight = 0.5f;
+    std::uint32_t maxVertices = MeshClusterOptions{}.maxVerticesPerCluster;
+    std::uint32_t maxTriangles = MeshClusterOptions{}.maxTrianglesPerCluster;
+    float coneWeight = MeshClusterOptions{}.coneWeight;
 };
 
 // Request payload for one CloneMeshClusters command. `weld` is "auto", "exact" or "position_only".
@@ -41,9 +41,9 @@ struct CloneMeshClustersCommand {
     std::string gtaPath;
     std::string weld = "auto";
     bool openViewer = false;
-    std::uint32_t maxVertices = 64;
-    std::uint32_t maxTriangles = 124;
-    float coneWeight = 0.5f;
+    std::uint32_t maxVertices = MeshClusterOptions{}.maxVerticesPerCluster;
+    std::uint32_t maxTriangles = MeshClusterOptions{}.maxTrianglesPerCluster;
+    float coneWeight = MeshClusterOptions{}.coneWeight;
 };
 
 struct AssetImportCommandRequest {

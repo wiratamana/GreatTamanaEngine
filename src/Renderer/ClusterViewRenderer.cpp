@@ -93,8 +93,12 @@ void ClusterViewRenderer::Impl::Build()
     maxClusters = static_cast<std::uint32_t>(
         std::min<std::uint64_t>({ kViewerMaxClusters, limits.maxWorkItems, limits.maxClusters }));
 
+    const VkPhysicalDevice physicalDevice = renderer.GetImGuiVulkanBackendInfo().physicalDevice;
+    if (physicalDevice == VK_NULL_HANDLE) {
+        throw std::runtime_error("no physical device");
+    }
     VkPhysicalDeviceProperties properties{};
-    vkGetPhysicalDeviceProperties(renderer.GetImGuiVulkanBackendInfo().physicalDevice, &properties);
+    vkGetPhysicalDeviceProperties(physicalDevice, &properties);
     maxImageDimension = properties.limits.maxImageDimension2D;
 
     vertexSpirv = ReadShaderFileBytes("shaders/MeshCluster.vert.spv");
@@ -165,8 +169,6 @@ void ClusterViewRenderer::Impl::ReleaseMesh()
     mesh.reset();
     tableClusters = 0;
     realClusters = 0;
-    triangles = 0;
-    clustersUsable = false;
 }
 
 bool ClusterViewRenderer::Impl::EnsureTarget(
@@ -723,8 +725,6 @@ ClusterViewMeshResult ClusterViewRenderer::SetMesh(std::span<const MeshPreviewVe
 
         s.tableClusters = static_cast<std::uint32_t>(table.size());
         s.realClusters = usable ? s.tableClusters : 0;
-        s.triangles = static_cast<std::uint32_t>(indices.size() / 3);
-        s.clustersUsable = usable;
         result.meshSet = true;
         result.clustersUsable = usable;
         if (!usable) {
@@ -815,21 +815,14 @@ ClusterViewCullResult ClusterViewRenderer::RunCull(const ClusterViewCull& cull)
         Impl::RunResult run = s.RunPlan(Impl::SetId::Main, cull, applied, nullptr, true);
         out.ok = run.ok;
         out.note = std::move(run.note);
-        out.counts = run.counts;
         out.survivors = std::move(run.survivors);
         out.occlusionApplied = run.occlusionApplied;
-        out.hizCut = run.hizCut;
     } catch (const std::exception& e) {
         out = ClusterViewCullResult{};
         out.note = std::string("the cull run failed: ") + e.what();
         s.LogOnce(out.note);
     }
     return out;
-}
-
-bool ClusterViewRenderer::ClusterModesAvailable() const noexcept
-{
-    return m_impl->clustersUsable;
 }
 
 std::uint32_t ClusterViewRenderer::ClusterCount() const noexcept
@@ -840,11 +833,6 @@ std::uint32_t ClusterViewRenderer::ClusterCount() const noexcept
 std::uint32_t ClusterViewRenderer::MaxClusters() const noexcept
 {
     return m_impl->maxClusters;
-}
-
-std::uint32_t ClusterViewRenderer::TriangleCount() const noexcept
-{
-    return m_impl->triangles;
 }
 
 void ClusterViewRenderer::ReleaseTargets()

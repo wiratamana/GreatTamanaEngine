@@ -36,7 +36,6 @@ TEST(ClusterViewerTruthTest, DecodeCountsPixelsPerClusterAndInvalidIds)
     EXPECT_EQ(d.pixelCount[1], 2u);
     EXPECT_EQ(d.pixelCount[2], 1u);
     EXPECT_EQ(d.invalidIds, 1u);
-    EXPECT_EQ(d.backgroundPixels, 2u);
     EXPECT_EQ(d.pixelsChecked, 8u);
 }
 
@@ -72,7 +71,6 @@ TEST(ClusterViewerTruthTest, CompareSplitsFalseCullsAndConservative)
     const std::array<std::uint32_t, 5> pixels{ 5, 0, 3, 0, 7 };
     const ClusterTruthResult r = CompareClusterTruth(survivors, pixels);
     ASSERT_TRUE(r.ok) << r.error;
-    EXPECT_EQ(r.kept, 3u);
     EXPECT_EQ(r.seen, 3u);
     EXPECT_EQ(r.falseCulls, 1u);
     EXPECT_EQ(r.conservative, 1u);

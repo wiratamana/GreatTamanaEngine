@@ -26,12 +26,31 @@ int ClampClusterMaxTriangles(int value) noexcept
 
 float ClampClusterConeWeight(float value) noexcept
 {
-    return std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : 0.5f;
+    return std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : MeshClusterOptions{}.coneWeight;
 }
 
 int ClampCloneWeldIndex(int value) noexcept
 {
     return std::clamp(value, 0, 2);
+}
+
+MeshClusterOptions MakeClusterOptions(const ClusterToolUiState& ui)
+{
+    MeshClusterOptions options;
+    options.weld = ui.weldIndex == 1 ? ClusterWeldMode::PositionOnly : ClusterWeldMode::Exact;
+    options.maxVerticesPerCluster = static_cast<std::uint32_t>(ClampClusterMaxVertices(ui.maxVertices));
+    options.maxTrianglesPerCluster = static_cast<std::uint32_t>(ClampClusterMaxTriangles(ui.maxTriangles));
+    options.coneWeight = ClampClusterConeWeight(ui.coneWeight);
+    return options;
+}
+
+MeshClusterCloneOptions MakeCloneOptions(const ClusterToolUiState& ui)
+{
+    MeshClusterCloneOptions options;
+    options.cluster = MakeClusterOptions(ui);
+    options.cluster.weld = ui.cloneWeldIndex == 1 ? ClusterWeldMode::PositionOnly : ClusterWeldMode::Exact;
+    options.autoWeld = ui.cloneWeldIndex == 2;
+    return options;
 }
 
 std::string FormatClusterStatusLine(std::size_t clusterCount, float avgTrianglesPerCluster, std::size_t verticesBefore,

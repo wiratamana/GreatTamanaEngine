@@ -2,6 +2,7 @@
 
 #include "ClusterToolUiState.h"
 
+#include "../Assets/MeshClusterOptions.h"
 #include "../Core/CapturedPixels.h"
 #include "../Core/GraphicsHandles.h"
 
@@ -129,9 +130,9 @@ struct InspectorStateView {
 // Cluster options handed to InspectorBuildClusters(); the Inspector's own controls take these values.
 struct InspectorClusterOptions {
     bool positionOnlyWeld = false;
-    std::uint32_t maxVertices = 64;
-    std::uint32_t maxTriangles = 124;
-    float coneWeight = 0.5f;
+    std::uint32_t maxVertices = MeshClusterOptions{}.maxVerticesPerCluster;
+    std::uint32_t maxTriangles = MeshClusterOptions{}.maxTrianglesPerCluster;
+    float coneWeight = MeshClusterOptions{}.coneWeight;
 };
 
 // Result of SetSceneGameSplit(). `split` is true when Game and Scene sit in separate dock nodes.

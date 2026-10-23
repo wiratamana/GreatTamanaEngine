@@ -22,7 +22,6 @@ struct ClusterIdDecode {
     std::string error;
     std::vector<std::uint32_t> pixelCount; // pixels per cluster id
     std::uint64_t invalidIds = 0;          // pixels whose id is past the cluster count
-    std::uint64_t backgroundPixels = 0;
     std::uint64_t pixelsChecked = 0;
 };
 
@@ -36,7 +35,6 @@ struct ClusterTruthResult {
     bool ok = false;
     std::string error;
     std::uint32_t clusterCount = 0;
-    std::uint32_t kept = 0;           // clusters in the survivor set
     std::uint32_t seen = 0;           // clusters with at least one pixel
     std::uint32_t falseCulls = 0;     // not kept but seen
     std::uint32_t conservative = 0;   // kept but not seen (wasted work only)

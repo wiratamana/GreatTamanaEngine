@@ -112,6 +112,8 @@ private:
     // Why a request cannot run now; nullopt when it can.
     std::optional<ClusterViewerResult> NotReady(bool needClusterModes) const;
     void StartCloneFromViewer();
+    // Ends a running ImGuizmo interaction of the debug camera, if one was drawn.
+    void CancelGizmo();
     void DrawCloneStatus();
     FrameKey MakeKey(const ClusterViewFrame& frame, std::uint32_t drawMode) const;
 

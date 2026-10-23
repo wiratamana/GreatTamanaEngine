@@ -22,9 +22,8 @@ inline constexpr OverlayColor kSceneCameraBodyColor{ 230, 230, 230, 255 };
 inline constexpr OverlayColor kSceneCameraSelectedColor{ 255, 120, 40, 255 };
 inline constexpr std::uint8_t kFarFillAlpha = 40;
 
-// Projects the camera into [rectMin, rectMax) and appends its lines to `out`.
-// `fullFrustum` false keeps only the body (apex lines and the direction arrow).
-// A non-null `farFill` also receives the translucent far-plane quad (full frustum only).
+// Projects the camera into [rectMin, rectMax) and appends its lines to `out`; `fullFrustum` false = body only.
+// A non-null `farFill` also gets the far-plane quad (full frustum only).
 void AppendCameraOverlay(const FrustumInput& camera, bool fullFrustum, const Mat4& viewProjection, Vec2 rectMin,
     Vec2 rectMax, OverlayColor color, float width, std::vector<OverlaySegment2D>& out,
     std::vector<OverlayQuad2D>* farFill = nullptr);

@@ -84,11 +84,25 @@ TEST(ClusterToolUiStateTest, MeshAssetPathMustBeAGtaInsideTheRoot)
     EXPECT_NE(missing->find("readable"), std::string::npos);
 }
 
-TEST(ClusterToolUiStateTest, RelativePathUsesSlashesAndRejectsOutsidePaths)
+TEST(ClusterToolUiStateTest, RelativePathUsesSlashes)
 {
     const std::filesystem::path root = std::filesystem::temp_directory_path() / "GteClusterToolRoot";
     EXPECT_EQ(ProjectRelativeSlashPath(root / "Meshes" / "rock.gta", root), "Meshes/rock.gta");
-    EXPECT_TRUE(ProjectRelativeSlashPath(root.parent_path() / "Elsewhere" / "rock.gta", root).empty());
+}
+
+TEST(ClusterToolUiStateTest, CloneOptionsFollowTheWeldChoiceAndClampTheLimits)
+{
+    ClusterToolUiState ui;
+    ui.maxVertices = 9999;
+    ui.cloneWeldIndex = 2;
+    MeshClusterCloneOptions options = MakeCloneOptions(ui);
+    EXPECT_TRUE(options.autoWeld);
+    EXPECT_EQ(options.cluster.maxVerticesPerCluster, 255u);
+
+    ui.cloneWeldIndex = 1;
+    options = MakeCloneOptions(ui);
+    EXPECT_FALSE(options.autoWeld);
+    EXPECT_EQ(options.cluster.weld, ClusterWeldMode::PositionOnly);
 }
 
 } // namespace

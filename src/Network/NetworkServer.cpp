@@ -469,6 +469,11 @@ void WriteImageResponse(const httplib::Request& req, httplib::Response& res, con
         RasterizeSegments(rgba, width, height, image.overlay);
     }
     const std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(rgba.data(), width, height);
+    if (png.empty()) {
+        res.status = 500;
+        res.set_content(BuildGenericErrorResponseJson("the image could not be encoded"), "application/json");
+        return;
+    }
     const CaptureResponseFormat format =
         ResolveCaptureResponseFormat(req.get_param_value("format"), req.get_header_value("Accept"));
     if (format == CaptureResponseFormat::RawPng) {

@@ -48,8 +48,9 @@ ClusterIdDecode DecodeIdImage(const CapturedPixels& image, std::size_t clusterCo
         const std::uint32_t id = static_cast<std::uint32_t>(p[redOffset])
             | (static_cast<std::uint32_t>(p[1]) << 8) | (static_cast<std::uint32_t>(p[blueOffset]) << 16);
         if (id == 0) {
-            ++out.backgroundPixels;
-        } else if (id - 1 < clusterCount) {
+            continue; // background
+        }
+        if (id - 1 < clusterCount) {
             ++out.pixelCount[id - 1];
         } else {
             ++out.invalidIds;
@@ -78,7 +79,6 @@ ClusterTruthResult CompareClusterTruth(std::span<const std::uint32_t> survivors,
     for (std::size_t i = 0; i < count; ++i) {
         const bool isKept = kept[i] != 0;
         const bool isSeen = pixelCount[i] > 0;
-        out.kept += isKept ? 1u : 0u;
         out.seen += isSeen ? 1u : 0u;
         if (!isKept && isSeen) {
             ++out.falseCulls;

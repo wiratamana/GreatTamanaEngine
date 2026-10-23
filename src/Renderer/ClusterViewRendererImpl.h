@@ -196,8 +196,6 @@ struct ClusterViewRenderer::Impl {
     std::optional<rg::GpuBuffer> instance;
     std::uint32_t tableClusters = 0; // clusters of `table`
     std::uint32_t realClusters = 0;  // 0 when `table` is the synthesized single cluster
-    std::uint32_t triangles = 0;
-    bool clustersUsable = false;
 
     // ---- Cull sets ----
     std::array<CullSet, kSetCount> sets;

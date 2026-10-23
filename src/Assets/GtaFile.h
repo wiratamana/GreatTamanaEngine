@@ -60,9 +60,8 @@ struct GtaMetadataData {
     std::vector<std::uint8_t> metadata;
 };
 
-// Writes header + metadata + payload atomically (temp file, then rename), creating missing
-// parent directories. With `createOnly`, an existing file is never replaced.
-// Never throws. On failure the old file is untouched and `error` gets the reason.
+// Atomically writes header + metadata + payload, creating parent directories. Never throws.
+// `createOnly` refuses to replace an existing file; on failure `error` gets the reason.
 bool WriteGtaFile(const std::filesystem::path& path, AssetType type, const Guid& guid, AssetFlags flags,
     const std::vector<std::uint8_t>& metadata, const std::vector<std::uint8_t>& payload,
     std::uint64_t version = kGtaCurrentVersion, std::string* error = nullptr, bool createOnly = false);

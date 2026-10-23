@@ -14,15 +14,13 @@ struct MeshClusterBuildRunner::Payload {
     enum class Kind : std::uint8_t { InPlace, Clone };
 
     Kind kind = Kind::InPlace;
-    std::filesystem::path path; // The source asset.
+    std::filesystem::path path;        // The source asset.
     std::filesystem::path destination; // Clone only.
-    MeshClusterOptions options;
-    MeshClusterCloneOptions cloneOptions;
+    MeshClusterCloneOptions options;   // InPlace uses options.cluster only.
     bool openViewerAfterClone = false;
     std::atomic<bool> cancel{ false };
     std::uint64_t requestId = 0;
-    MeshClusterBuildOutcome outcome;
-    MeshClusterCloneOutcome cloneOutcome;
+    MeshClusterFinishedBuild result;   // Written by the job; path and request fields are set by Poll().
 };
 
 namespace {
@@ -34,28 +32,32 @@ void RunBuildJob(void* raw)
     GTE_PROFILE_JOB_SCOPE("MeshClusterBuild");
     const bool clone = payload.kind == MeshClusterBuildRunner::Payload::Kind::Clone;
     try {
+        MeshClusterFinishedBuild& result = payload.result;
         if (clone) {
-            payload.cloneOutcome = CloneMeshAssetWithClusters(
-                payload.path, payload.destination, payload.cloneOptions, &payload.cancel);
-            payload.outcome.success = payload.cloneOutcome.success;
-            payload.outcome.message = payload.cloneOutcome.message;
-            payload.outcome.report = payload.cloneOutcome.report;
+            MeshClusterCloneOutcome made = CloneMeshAssetWithClusters(
+                payload.path, payload.destination, payload.options, &payload.cancel);
+            result.outcome.success = made.success;
+            result.outcome.message = std::move(made.message);
+            result.outcome.report = made.report;
+            result.createdPath = std::move(made.createdPath);
+            result.guid = made.guid;
+            result.weldUsed = made.weldUsed;
+            result.weldFellBack = made.weldFellBack;
         } else {
-            payload.outcome = BuildClustersInGtaFile(payload.path, payload.options, &payload.cancel);
+            result.outcome = BuildClustersInGtaFile(payload.path, payload.options.cluster, &payload.cancel);
         }
     } catch (const std::exception& e) {
-        payload.cloneOutcome = MeshClusterCloneOutcome{};
-        payload.outcome = MeshClusterBuildOutcome{};
-        payload.outcome.message = std::string(clone ? "cluster clone failed: " : "cluster build failed: ") + e.what();
+        payload.result = MeshClusterFinishedBuild{};
+        payload.result.outcome.message =
+            std::string(clone ? "cluster clone failed: " : "cluster build failed: ") + e.what();
     } catch (...) {
-        payload.cloneOutcome = MeshClusterCloneOutcome{};
-        payload.outcome = MeshClusterBuildOutcome{};
-        payload.outcome.message = clone ? "cluster clone failed: unknown error" : "cluster build failed: unknown error";
+        payload.result = MeshClusterFinishedBuild{};
+        payload.result.outcome.message =
+            clone ? "cluster clone failed: unknown error" : "cluster build failed: unknown error";
     }
 }
 
 } // namespace
-
 
 MeshClusterBuildRunner::MeshClusterBuildRunner() = default;
 
@@ -96,7 +98,7 @@ MeshClusterBuildRunner::StartResult MeshClusterBuildRunner::Start(
 
     auto payload = std::make_unique<Payload>();
     payload->path = gtaPath;
-    payload->options = options;
+    payload->options.cluster = options;
     payload->requestId = requestId;
     m_readKey.clear();
     return Launch(std::move(payload), WriterRegistryKey(gtaPath));
@@ -114,7 +116,7 @@ MeshClusterBuildRunner::StartResult MeshClusterBuildRunner::StartClone(const std
     payload->kind = Payload::Kind::Clone;
     payload->path = source;
     payload->destination = destination;
-    payload->cloneOptions = options;
+    payload->options = options;
     payload->openViewerAfterClone = openViewerAfterClone;
     payload->requestId = requestId;
     m_readKey = WriterRegistryKey(source);
@@ -127,19 +129,11 @@ std::optional<MeshClusterFinishedBuild> MeshClusterBuildRunner::Poll()
         return std::nullopt;
     }
 
-    MeshClusterFinishedBuild finished;
+    MeshClusterFinishedBuild finished = std::move(m_payload->result);
     finished.path = std::move(m_payload->path);
     finished.requestId = m_payload->requestId;
-    finished.outcome = std::move(m_payload->outcome);
-    if (m_payload->kind == Payload::Kind::Clone) {
-        MeshClusterCloneOutcome& clone = m_payload->cloneOutcome;
-        finished.wasClone = true;
-        finished.openViewerAfterClone = m_payload->openViewerAfterClone;
-        finished.createdPath = std::move(clone.createdPath);
-        finished.guid = clone.guid;
-        finished.weldUsed = clone.weldUsed;
-        finished.weldFellBack = clone.weldFellBack;
-    }
+    finished.wasClone = m_payload->kind == Payload::Kind::Clone;
+    finished.openViewerAfterClone = finished.wasClone && m_payload->openViewerAfterClone;
 
     m_payload.reset();
     m_activeKey.clear();

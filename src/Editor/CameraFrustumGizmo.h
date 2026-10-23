@@ -52,7 +52,4 @@ FrustumCorners ComputeFrustumCorners(const FrustumInput& input);
 // 4 near + 4 far + 4 side + 4 apex lines + 1 arrow (17 segments).
 std::vector<FrustumSegment> BuildFrustumSegments(const FrustumCorners& corners);
 
-// "Left", "Right", "Bottom", "Top", "Near" or "Far", chosen by the basis axis closest to the inward normal.
-const char* NameFrustumPlane(const Plane& plane, const FrustumCorners& basis) noexcept;
-
 } // namespace gte

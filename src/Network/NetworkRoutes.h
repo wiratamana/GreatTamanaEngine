@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "../Assets/MeshClusterOptions.h"
 #include "../Core/EditorPanelRegistry.h"
 #include "../Core/EditorCapabilities.h" // IHotReloadDebugCapability::Status/LedgerEntry.
 #include "../Core/FeatureKit/FeatureDebug.h"
@@ -1010,9 +1011,9 @@ struct ParsedBuildClustersRequest {
     std::string errorMessage;
     std::string gtaPath;
     std::string weld = "exact";
-    std::uint32_t maxVertices = 64;
-    std::uint32_t maxTriangles = 124;
-    float coneWeight = 0.5f;
+    std::uint32_t maxVertices = MeshClusterOptions{}.maxVerticesPerCluster;
+    std::uint32_t maxTriangles = MeshClusterOptions{}.maxTrianglesPerCluster;
+    float coneWeight = MeshClusterOptions{}.coneWeight;
 };
 ParsedBuildClustersRequest ParseBuildClustersRequest(const std::string& jsonBody);
 
@@ -1331,9 +1332,9 @@ struct ParsedCloneClustersRequest {
     std::string gtaPath;
     std::string weld = "auto";
     bool openViewer = false;
-    std::uint32_t maxVertices = 64;
-    std::uint32_t maxTriangles = 124;
-    float coneWeight = 0.5f;
+    std::uint32_t maxVertices = MeshClusterOptions{}.maxVerticesPerCluster;
+    std::uint32_t maxTriangles = MeshClusterOptions{}.maxTrianglesPerCluster;
+    float coneWeight = MeshClusterOptions{}.coneWeight;
 };
 ParsedCloneClustersRequest ParseCloneClustersRequest(const std::string& jsonBody);
 

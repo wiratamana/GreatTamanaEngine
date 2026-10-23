@@ -85,22 +85,4 @@ std::vector<FrustumSegment> BuildFrustumSegments(const FrustumCorners& c)
     return segments;
 }
 
-const char* NameFrustumPlane(const Plane& plane, const FrustumCorners& basis) noexcept
-{
-    const float dRight = Dot(plane.normal, basis.right);
-    const float dUp = Dot(plane.normal, basis.up);
-    const float dForward = Dot(plane.normal, basis.forward);
-    const float aRight = std::fabs(dRight);
-    const float aUp = std::fabs(dUp);
-    const float aForward = std::fabs(dForward);
-
-    if (aRight >= aUp && aRight >= aForward) {
-        return dRight >= 0.0f ? "Left" : "Right";
-    }
-    if (aUp >= aForward) {
-        return dUp >= 0.0f ? "Bottom" : "Top";
-    }
-    return dForward >= 0.0f ? "Near" : "Far";
-}
-
 } // namespace gte

@@ -38,7 +38,6 @@ struct Pending {
     std::optional<float> pitch;
     std::optional<float> yaw;
     std::optional<float> roll;
-    std::string lensKey; // last near or far key of the request
 };
 
 using Status = ClusterViewerSetStatus;
@@ -109,11 +108,9 @@ Status ApplyPair(std::string_view key, std::string_view value, Pending& p, std::
         return SetFloat(value, kDebugCameraMinFov, kDebugCameraMaxFov, "1..170", cam.fovYDegrees, range);
     }
     if (key == "camNear") {
-        p.lensKey = key;
         return SetFloat(value, kDebugCameraMinNear, kDebugCameraMaxNear, "1e-4..1e6", cam.nearZ, range);
     }
     if (key == "camFar") {
-        p.lensKey = key;
         return SetFloat(value, kDebugCameraMinNear * kDebugCameraFarOverNear, kDebugCameraMaxFar,
             "1.01e-4..1e7", cam.farZ, range);
     }
@@ -142,11 +139,10 @@ Status ApplyPair(std::string_view key, std::string_view value, Pending& p, std::
     return Status::UnknownKey;
 }
 
-ClusterViewerSetResult Reject(Status status, std::string_view key, std::string text)
+ClusterViewerSetResult Reject(Status status, std::string text)
 {
     ClusterViewerSetResult result;
     result.status = status;
-    result.badKey = std::string(key);
     result.error = std::move(text);
     return result;
 }
@@ -252,11 +248,10 @@ ClusterViewerSetResult ParseClusterViewerSet(
         range.clear();
         const Status status = ApplyPair(pair.first, pair.second, pending, range);
         if (status == Status::UnknownKey) {
-            return Reject(status, pair.first, "unknown key '" + pair.first + "'. Valid keys: " + std::string(kSetKeys));
+            return Reject(status, "unknown key '" + pair.first + "'. Valid keys: " + std::string(kSetKeys));
         }
         if (status == Status::BadValue) {
-            return Reject(status, pair.first,
-                "bad value '" + pair.second + "' for '" + pair.first + "': expected " + range);
+            return Reject(status, "bad value '" + pair.second + "' for '" + pair.first + "': expected " + range);
         }
     }
 
@@ -268,8 +263,7 @@ ClusterViewerSetResult ParseClusterViewerSet(
     pending.camera.transform.scale = Vec3::One();
 
     if (!(pending.camera.farZ > pending.camera.nearZ * kDebugCameraFarOverNear)) {
-        const std::string key = pending.lensKey.empty() ? "camFar" : pending.lensKey;
-        return Reject(Status::BadValue, key, "camFar must be above camNear * 1.01 (near " +
+        return Reject(Status::BadValue, "camFar must be above camNear * 1.01 (near " +
             std::to_string(pending.camera.nearZ) + ", far " + std::to_string(pending.camera.farZ) + ")");
     }
 
@@ -279,11 +273,6 @@ ClusterViewerSetResult ParseClusterViewerSet(
     result.copySceneCamera = pending.copySceneCamera;
     result.orbit = pending.orbit;
     return result;
-}
-
-std::string_view ClusterViewerSetKeys() noexcept
-{
-    return kSetKeys;
 }
 
 std::string_view ClusterViewerDrawModeName(ClusterViewerDrawMode mode) noexcept
@@ -303,15 +292,6 @@ std::string_view ClusterViewerCulledStyleName(ClusterViewerCulledStyle style) no
     case ClusterViewerCulledStyle::Dim: return "dim";
     }
     return "dim";
-}
-
-std::string_view ClusterViewerGizmoOperationName(ClusterViewerGizmoOperation operation) noexcept
-{
-    switch (operation) {
-    case ClusterViewerGizmoOperation::Translate: return "translate";
-    case ClusterViewerGizmoOperation::Rotate: return "rotate";
-    }
-    return "translate";
 }
 
 } // namespace gte

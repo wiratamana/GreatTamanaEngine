@@ -18,8 +18,7 @@ const char* WeldText(const MeshClusterFinishedBuild& finished)
     return finished.weldUsed == ClusterWeldMode::PositionOnly ? "Position only" : "Exact";
 }
 
-} // namespace
-
+// "Created <file>: N clusters, avg T tris, weld X, M ms".
 std::string FormatCloneStatusLine(const MeshClusterFinishedBuild& finished)
 {
     const MeshClusterReport& report = finished.outcome.report;
@@ -28,6 +27,8 @@ std::string FormatCloneStatusLine(const MeshClusterFinishedBuild& finished)
         static_cast<double>(report.avgTrianglesPerCluster), WeldText(finished), report.milliseconds);
     return "Created " + PathToUtf8(finished.createdPath.filename()) + ": " + buffer;
 }
+
+} // namespace
 
 ClusterStatus DescribeClusterStatus(const ClusterStatusInput& input)
 {
