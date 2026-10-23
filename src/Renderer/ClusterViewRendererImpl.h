@@ -45,8 +45,11 @@ public:
             m_handle = UiTextureHandle::Invalid;
         }
     }
-    // Call Reset() first: a handle that is replaced would leak.
-    void Set(UiTextureHandle handle) noexcept { m_handle = handle; }
+    void Set(UiTextureHandle handle) noexcept
+    {
+        Reset();
+        m_handle = handle;
+    }
     UiTextureHandle Get() const noexcept { return m_handle; }
 
 private:

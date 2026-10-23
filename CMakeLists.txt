@@ -712,6 +712,7 @@ add_library(gte_core STATIC
     src/Assets/MeshClusterPersistence.h
     src/Assets/MeshClusterPersistence.cpp
     src/Assets/MeshClusterClone.h
+    src/Assets/MeshClusterOptions.h
     src/Assets/MeshClusterClone.cpp
     src/Assets/MeshMaterialPartitioner.h
     src/Assets/MeshMaterialPartitioner.cpp

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../Assets/MeshClusterClone.h"
+#include "../Assets/MeshClusterOptions.h"
 
 #include <chrono>
 #include <cstddef>
@@ -10,6 +10,8 @@
 #include <string>
 
 namespace gte {
+
+struct MeshClusterCloneOptions;
 
 // Cached "may this mesh asset be clustered" answer; the file identity guards against stale data.
 struct ClusterEligibilityCache {

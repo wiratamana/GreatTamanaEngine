@@ -29,6 +29,7 @@
 #include "../../Assets/AssetTypes.h" // AssetType, AssetFlags, Guid
 #include "../../Assets/AtomicFile.h" // WriterRegistryKey()
 #include "../../Assets/GtaFile.h" // ReadGtaHeader()/ReadGtaFile()
+#include "../../Assets/MeshClusterClone.h" // MeshClusterCloneOptions, ChooseClusteredCloneDestination()
 #include "../../Assets/MotionFile.h" // DecodeMotionDataFromBytes()
 #include "../../Assets/MeshNormalRecomputePersistence.h" // RecomputeAndSaveMeshNormalsToGtaFile()
 #include "../../Assets/PhysicsData.h" // RigidBody, Joint, RigidBodyShape, RigidBodyMotionType, JointType

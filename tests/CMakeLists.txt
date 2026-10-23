@@ -2969,7 +2969,7 @@ set(GTE_COMMENT_RULE_SRC
     Assets/MeshMaterialPartitioner.h Assets/MeshMaterialPartitioner.cpp
     Editor/MeshClusterBuildRunner.h Editor/MeshClusterBuildRunner.cpp
     Editor/ClusterToolUiState.h Editor/ClusterToolUiState.cpp
-    Assets/MeshClusterClone.h Assets/MeshClusterClone.cpp
+    Assets/MeshClusterClone.h Assets/MeshClusterClone.cpp Assets/MeshClusterOptions.h
     Editor/ViewportProjection.h Editor/ViewportProjection.cpp Editor/CameraFrustumGizmo.h Editor/CameraFrustumGizmo.cpp
     Editor/CameraPick.h Editor/CameraPick.cpp Editor/OverlayRaster.h Editor/OverlayRaster.cpp
     Editor/OrbitCamera.h Editor/OrbitCamera.cpp Editor/ClusterViewerSettings.h Editor/ClusterViewerSettings.cpp

@@ -1,10 +1,9 @@
 #pragma once
 
-// Pure geometry of a perspective camera frustum: corners, line list and plane names.
+// Pure geometry of a perspective camera frustum: corners and line list.
 
 #include "../Math/Quat.h"
 #include "../Math/Vec3.h"
-#include "../Renderer/Culling/CullingTypes.h"
 
 #include <cstdint>
 #include <vector>

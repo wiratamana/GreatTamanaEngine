@@ -176,6 +176,7 @@ private:
     bool m_previewKeyValid = false;
     bool m_previewActive = false;
     UiTextureHandle m_previewTexture = UiTextureHandle::Invalid;
+    std::string m_previewError;
     int m_previewWidth = 0;
     int m_previewHeight = 0;
 

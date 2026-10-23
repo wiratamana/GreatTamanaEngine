@@ -2,6 +2,7 @@
 
 #include "../Assets/GtaFile.h"
 #include "../Assets/ImportStamp.h"
+#include "../Assets/MeshClusterClone.h"
 #include "../Assets/MeshClusterPersistence.h"
 #include "../Encoding/Utf8Path.h"
 

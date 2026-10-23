@@ -39,9 +39,7 @@ struct SetNames {
     const char* readVisible;
 };
 
-constexpr std::size_t kSetCount = 5;
-
-constexpr SetNames kSetNames[kSetCount] = {
+constexpr SetNames kSetNames[] = {
     { "ClusterViewMainVisible", "ClusterViewMainCommands", "ClusterViewMainCount", "ClusterViewMainCountHost",
         "ClusterViewMainCommandsHost", "ClusterViewMainVisibleHost", "ClusterView.Main.Reset", "ClusterView.Main.Cull",
         "ClusterView.Main.ReadCount", "ClusterView.Main.ReadCommands", "ClusterView.Main.ReadVisible" },
@@ -184,7 +182,6 @@ bool ClusterViewRenderer::Impl::EnsureTarget(
             // Resize idles the GPU first; only then is the old UI descriptor safe to free.
             renderer.ResizeRenderTexture(*slot.texture, width, height);
         }
-        slot.ui.Reset();
         slot.width = width;
         slot.height = height;
         slot.ui.Set(renderer.GetUiTextureHandle(*slot.texture));

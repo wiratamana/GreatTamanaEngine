@@ -20,6 +20,7 @@
 #include "../ECS/Registry.h"
 #include "../ECS/TransformHierarchy.h"
 #include "../Encoding/Utf8Path.h"
+#include "../Math/MathTypes.h"
 #include "../Renderer/Culling/ClusterCullMath.h"
 
 #include <imgui.h>
@@ -45,7 +46,6 @@ constexpr int kDefaultHeight = 544;
 constexpr float kSplitterThickness = 6.0f;
 constexpr float kMinPaneWidth = 220.0f;
 constexpr auto kStatInterval = std::chrono::milliseconds(500);
-constexpr float kRadToDeg = 57.29578f;
 
 const ImVec4 kRed(0.95f, 0.4f, 0.4f, 1.0f);
 const ImVec4 kOrange(0.95f, 0.7f, 0.3f, 1.0f);
@@ -138,6 +138,7 @@ void ClusterViewerWindow::Close()
     m_orbiting = false;
     m_panning = false;
     m_valid = false;
+    m_load = ClusterViewerLoadDecision{};
     m_rendererFailed = false;
     ClearDerived();
     m_renderer.reset(); // idles the GPU, then frees every buffer, target and UI handle
@@ -154,6 +155,7 @@ void ClusterViewerWindow::ClearDerived()
     m_run = ClusterViewRender{};
     m_stats = ClusterViewerStats{};
     m_runError.clear();
+    m_previewError.clear();
     m_truthValid = false;
     m_truth = ClusterTruthResult{};
     m_truthError.clear();
@@ -214,6 +216,7 @@ void ClusterViewerWindow::LoadMesh(Renderer& renderer, const std::string& path)
         m_identity = StatFile(absolute);
         m_load.banner = ClusterViewerBanner::DecodeFailed;
         m_load.text = *invalid;
+        CancelGizmo();
         m_renderer.reset();
         GTE_LOG_WARNING(kLog, "open refused: " + *invalid);
         return;
@@ -224,6 +227,7 @@ void ClusterViewerWindow::LoadMesh(Renderer& renderer, const std::string& path)
     ClusterViewerLoadInput input;
     input.pathSupported = EnsureRenderer(renderer);
     if (!input.pathSupported) {
+        CancelGizmo();
         m_load = DecideClusterViewerLoad(input);
         if (!m_rendererWhyNot.empty()) {
             m_load.text = m_rendererWhyNot;
@@ -286,6 +290,7 @@ void ClusterViewerWindow::LoadMesh(Renderer& renderer, const std::string& path)
 
     m_valid = m_load.showMesh;
     if (!m_valid) {
+        CancelGizmo();
         GTE_LOG_WARNING(kLog, "mesh not shown: " + m_load.text);
         m_renderer.reset(); // nothing stays on the GPU for a mesh that is not shown
         return;
@@ -534,6 +539,7 @@ void ClusterViewerWindow::RenderPreview()
     }
     const bool wanted = m_settings.cameraPreview && m_debug.show && m_load.clusterModes && DebugCameraIsValid(m_debug);
     if (!wanted) {
+        m_previewError.clear();
         if (m_previewActive) {
             m_renderer->ReleaseTargets();
             m_previewActive = false;
@@ -564,9 +570,10 @@ void ClusterViewerWindow::RenderPreview()
     const ClusterViewRender run = m_renderer->Render(ClusterViewSlot::Preview, frame);
     if (!run.ok) {
         m_previewTexture = UiTextureHandle::Invalid;
-        m_runError = "camera preview: " + run.note;
+        m_previewError = "camera preview: " + run.note;
         return;
     }
+    m_previewError.clear();
     m_previewTexture = run.texture;
     m_previewWidth = frame.width;
     m_previewHeight = frame.height;
@@ -693,7 +700,7 @@ bool ClusterViewerWindow::HizIsStale(float* moved, float* turnedDegrees, bool* s
     const Vec3 forward = m_debug.transform.rotation.RotateVector(Vec3::Forward());
     const float movedDistance = Length(m_debug.transform.position - m_hiz->eye);
     const float cosine = std::clamp(Dot(forward, m_hizForward), -1.0f, 1.0f);
-    const float turned = std::acos(cosine) * kRadToDeg;
+    const float turned = RadToDeg(std::acos(cosine));
     const auto [width, height] = VerifySize();
     const bool differs = width != m_hiz->width || height != m_hiz->height;
     if (moved) {
@@ -752,7 +759,7 @@ void ClusterViewerWindow::DrawCloneStatus()
     switch (status.tone) {
     case ClusterStatusTone::Quiet: ImGui::TextDisabled("%s", status.text.c_str()); break;
     case ClusterStatusTone::Warn: ImGui::TextColored(kOrange, "%s", status.text.c_str()); break;
-    case ClusterStatusTone::Good: ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "%s", status.text.c_str()); break;
+    case ClusterStatusTone::Good: ImGui::TextColored(kGreen, "%s", status.text.c_str()); break;
     case ClusterStatusTone::Bad: ImGui::TextColored(kRed, "%s", status.text.c_str()); break;
     }
 }
@@ -1035,6 +1042,9 @@ void ClusterViewerWindow::Build(Renderer& renderer, EditorContext& ctx, Registry
             ImGui::EndChild();
         }
     }
+    if (!visible || !m_valid) {
+        CancelGizmo();
+    }
     ImGui::End();
     if (!m_open) {
         m_closeRequested = true; // this frame's draw data still references the view textures
@@ -1279,6 +1289,9 @@ void ClusterViewerWindow::DrawStats()
     }
     if (!m_runError.empty()) {
         ImGui::TextColored(kRed, "%s", m_runError.c_str());
+    }
+    if (!m_previewError.empty()) {
+        ImGui::TextColored(kRed, "%s", m_previewError.c_str());
     }
     if (!m_hasRun) {
         ImGui::TextDisabled("no run yet");

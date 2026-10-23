@@ -1,5 +1,6 @@
 // Unit tests for the pure helpers of the Inspector cluster tool.
 
+#include "Assets/MeshClusterClone.h"
 #include "Editor/ClusterToolUiState.h"
 
 #include <cmath>
