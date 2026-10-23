@@ -12,11 +12,12 @@
 #include "../Assets/MeshFile.h"
 #include "../Core/Logging.h"
 #include "../ECS/Registry.h"
-#include "../Encoding/Utf8Path.h"
 #include "../Math/MathTypes.h"
 #include "../Renderer/Culling/ClusterCullMath.h"
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <system_error>
@@ -25,6 +26,23 @@
 namespace gte {
 
 using namespace viewer_detail;
+
+namespace {
+
+constexpr const char* kLog = "ClusterViewer";
+constexpr int kPreviewWidth = 320;
+constexpr int kDefaultWidth = 960;
+constexpr int kDefaultHeight = 544;
+constexpr auto kStatInterval = std::chrono::milliseconds(500);
+
+std::array<float, 16> ToArray(const Mat4& m) noexcept
+{
+    std::array<float, 16> a{};
+    std::copy_n(m.Data(), 16, a.begin());
+    return a;
+}
+
+} // namespace
 
 ClusterViewerWindow::ClusterViewerWindow() = default;
 
@@ -402,11 +420,9 @@ void ClusterViewerWindow::AppendOverlay(const Mat4& viewProjection, Vec2 rectMin
     }
 }
 
-ClusterViewerWindow::FrameKey ClusterViewerWindow::MakeKey(
-    ClusterViewSlot slot, const ClusterViewFrame& frame, std::uint32_t drawMode) const
+ClusterViewerWindow::FrameKey ClusterViewerWindow::MakeKey(const ClusterViewFrame& frame, std::uint32_t drawMode) const
 {
     FrameKey key;
-    key.slot = slot;
     key.viewProjection = ToArray(frame.viewProjection);
     key.cullViewProjection = ToArray(frame.cull.viewProjection);
     key.eye = { frame.cull.eye.x, frame.cull.eye.y, frame.cull.eye.z };
@@ -445,7 +461,7 @@ void ClusterViewerWindow::RenderMain(int width, int height)
     }
     m_cameraError.clear();
 
-    const FrameKey key = MakeKey(ClusterViewSlot::Main, frame, static_cast<std::uint32_t>(mode));
+    const FrameKey key = MakeKey(frame, static_cast<std::uint32_t>(mode));
     if (m_mainKeyValid && key == m_mainKey) {
         return;
     }
@@ -492,7 +508,7 @@ void ClusterViewerWindow::RenderPreview()
     frame.cull.viewProjection = viewProjection;
     frame.cull.eye = m_debug.transform.position;
 
-    const FrameKey key = MakeKey(ClusterViewSlot::Preview, frame, static_cast<std::uint32_t>(ClusterViewerDrawMode::Cull));
+    const FrameKey key = MakeKey(frame, static_cast<std::uint32_t>(ClusterViewerDrawMode::Cull));
     if (m_previewKeyValid && key == m_previewKey) {
         return;
     }

@@ -12,6 +12,15 @@ namespace gte {
 
 using namespace viewer_detail;
 
+namespace {
+
+ClusterViewSlot ToSlot(ClusterViewerImageTarget target) noexcept
+{
+    return target == ClusterViewerImageTarget::DebugPreview ? ClusterViewSlot::Preview : ClusterViewSlot::Main;
+}
+
+} // namespace
+
 ClusterViewerResult ClusterViewerWindow::Open(Renderer& renderer, const std::string& absolutePath)
 {
     m_open = true;
@@ -83,7 +92,7 @@ ClusterViewerReport ClusterViewerWindow::Report() const
     cull.occlusionApplied = m_run.occlusionApplied;
     cull.hizCut = m_run.hizCut;
     cull.nested = m_stats.valid;
-    cull.error = m_stats.valid ? ActiveRunError() : m_stats.error;
+    cull.error = ActiveRunError().empty() ? m_stats.error : ActiveRunError();
     if (m_stats.valid) {
         cull.byFrustum = m_stats.byFrustum;
         cull.byCone = m_stats.byCone;

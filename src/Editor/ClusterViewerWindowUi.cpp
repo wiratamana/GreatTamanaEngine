@@ -9,19 +9,50 @@
 #include "MeshClusterBuildRunner.h"
 #include "TransformGizmo.h"
 #include "../Assets/MeshClusterClone.h"
-#include "../ECS/Registry.h"
 #include "../Math/MathTypes.h"
-#include "../Renderer/Culling/ClusterCullMath.h"
 
 #include <imgui.h>
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
+#include <cstdint>
 
 namespace gte {
 
 using namespace viewer_detail;
+
+namespace {
+
+constexpr int kSizeStep = 32;
+constexpr float kSplitterThickness = 6.0f;
+constexpr float kMinPaneWidth = 220.0f;
+
+const ImVec4 kRed(0.95f, 0.4f, 0.4f, 1.0f);
+const ImVec4 kOrange(0.95f, 0.7f, 0.3f, 1.0f);
+const ImVec4 kGreen(0.4f, 0.9f, 0.4f, 1.0f);
+const ImVec4 kMagenta(1.0f, 0.3f, 0.85f, 1.0f);
+const ImVec4 kGrey(0.6f, 0.6f, 0.6f, 1.0f);
+const ImVec4 kBlue(0.55f, 0.75f, 1.0f, 1.0f);
+
+// Rounds up to a multiple of kSizeStep so a window resize does not re-make the target every frame.
+int Quantize(float value) noexcept
+{
+    const int steps = static_cast<int>(std::ceil(value / static_cast<float>(kSizeStep)));
+    return std::clamp(steps * kSizeStep, kSizeStep, kMaxImageSize);
+}
+
+ImTextureID ToImTexture(UiTextureHandle handle) noexcept
+{
+    return static_cast<ImTextureID>(static_cast<std::uint64_t>(handle));
+}
+
+bool IsHardFailure(ClusterViewerBanner banner) noexcept
+{
+    return banner == ClusterViewerBanner::NoDeviceSupport || banner == ClusterViewerBanner::DecodeFailed
+        || banner == ClusterViewerBanner::EmptyMesh || banner == ClusterViewerBanner::BadIndices;
+}
+
+} // namespace
 
 void ClusterViewerWindow::StartCloneFromViewer()
 {
@@ -275,6 +306,10 @@ void ClusterViewerWindow::DrawHizControls()
         CaptureHizNow();
     }
     ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Capture, do not move, Verify: expect 0 false culls. Any false cull is a real bug.\n"
+                          "Capture, move a little, Verify: false culls are the known one-frame pop-in of Hi-Z.");
+    }
     ImGui::TextWrapped("%s", HizStatusText().c_str());
     if (m_hiz) {
         float moved = 0.0f;

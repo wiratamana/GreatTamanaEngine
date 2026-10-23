@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -55,7 +56,6 @@ public:
 private:
     // Everything one slot render depends on; the slot re-renders only when it changes.
     struct FrameKey {
-        ClusterViewSlot slot = ClusterViewSlot::Main;
         std::array<float, 16> viewProjection{};
         std::array<float, 16> cullViewProjection{};
         std::array<float, 3> eye{};
@@ -115,7 +115,7 @@ private:
     // Ends a running ImGuizmo interaction of the debug camera, if one was drawn.
     void CancelGizmo();
     void DrawCloneStatus();
-    FrameKey MakeKey(ClusterViewSlot slot, const ClusterViewFrame& frame, std::uint32_t drawMode) const;
+    FrameKey MakeKey(const ClusterViewFrame& frame, std::uint32_t drawMode) const;
     // Image size for HTTP requests: the last UI size, or the default before the first draw.
     std::pair<int, int> RequestSize() const;
     void EnsureRequestSize();
