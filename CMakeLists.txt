@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.19)
+﻿cmake_minimum_required(VERSION 3.19)
 
 # --- Platform gate -----------------------------------------------------
 # This build currently only supports Windows. Everything else is a quick,
@@ -483,6 +483,7 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/ClusterDrawTypes.h
     src/Core/FeatureKit/ClusterDrawTypes.cpp
     src/Core/FeatureKit/ClusterNamePool.h
+    src/Core/FeatureKit/ViewCullLink.h
     src/Core/FeatureKit/ClusterNamePool.cpp
     src/Core/FeatureKit/ClusterDrawState.h
     src/Core/FeatureKit/ClusterDrawState.cpp
@@ -1231,6 +1232,10 @@ add_library(gte_editor STATIC
     src/Editor/CameraFrustumOverlay.cpp
     src/Editor/SceneCameraAdapter.h
     src/Editor/SceneCameraAdapter.cpp
+    src/Editor/ViewCullHud.h
+    src/Editor/ViewCullHud.cpp
+    src/Editor/ViewCullOverlay.h
+    src/Editor/ViewCullOverlay.cpp
     src/Editor/SceneCameraFrustum.h
     src/Editor/SceneCameraFrustum.cpp
     src/Editor/BuiltinFeatureEditorPanelRegistry.h
@@ -1401,6 +1406,8 @@ add_library(gte_editor STATIC
     src/Editor/Panels/InspectorPanel.cpp
     src/Editor/Panels/ScenePanel.h
     src/Editor/Panels/ScenePanel.cpp
+    src/Editor/Panels/ScenePanelCullView.h
+    src/Editor/Panels/ScenePanelCullView.cpp
     src/Editor/Panels/GamePanel.h
     src/Editor/Panels/GamePanel.cpp
     src/Editor/Panels/MemoryPanel.h

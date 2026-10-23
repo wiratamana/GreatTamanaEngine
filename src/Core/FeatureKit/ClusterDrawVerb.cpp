@@ -601,6 +601,7 @@ ClusterStats ClusterDrawChain::Record()
         }
     }
     s.result.inertReason = s.plan.inertReason;
+    s.result.occlusionApplied = s.result.declared && s.occlusionActive;
 
     // Idle bookkeeping of the frame's scope; release only runs in the synchronous regime.
     s.state->TickIdle(*s.frame, s.result.declared);

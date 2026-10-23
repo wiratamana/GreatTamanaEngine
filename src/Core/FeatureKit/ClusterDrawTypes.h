@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <string_view>
 
 namespace gte::fx {
 
@@ -65,6 +66,19 @@ struct EntityExclusion {
 // Why a chain declared nothing on purpose (not a refusal). None when it ran or was refused.
 enum class ClusterInertReason : std::uint8_t { None, DeviceCaps, SharedScope, CaptureArmed, ToggledOff, InvalidState };
 
+constexpr std::string_view ClusterInertReasonName(ClusterInertReason reason) noexcept
+{
+    switch (reason) {
+    case ClusterInertReason::None: return "none";
+    case ClusterInertReason::DeviceCaps: return "device caps";
+    case ClusterInertReason::SharedScope: return "shared scope";
+    case ClusterInertReason::CaptureArmed: return "capture armed";
+    case ClusterInertReason::ToggledOff: return "toggled off";
+    case ClusterInertReason::InvalidState: return "invalid state";
+    }
+    return "none";
+}
+
 struct ClusterPlan {
     bool ready = false; // Record() is expected to declare the whole chain.
     EntityExclusion exclusion;
@@ -74,6 +88,7 @@ struct ClusterPlan {
 
 struct ClusterStats {
     bool declared = false;
+    bool occlusionApplied = false; // The Hi-Z test ran in this chain's cull.
     std::uint32_t instances = 0;
     std::uint32_t parts = 0;
     std::uint64_t workItems = 0; // Sum over declared parts of instances * clusters: what the cull tested.

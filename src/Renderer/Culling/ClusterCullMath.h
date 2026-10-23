@@ -324,6 +324,13 @@ struct HizValidity {
 HizValidity AdvanceHizValidity(
     HizValidity state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height, bool cameraCut) noexcept;
 
+// Why last frame's pyramid may not cull. None means usable.
+enum class HizReason : std::uint8_t { None, NoHistory, Resized, CameraCut, WarmingUp, BuildOff, Unavailable };
+
+// Reason the build history cannot cull in `frameIndex` for a view of `width` x `height`; None when it can.
+// A missing build in the previous frame reports BuildOff. Camera cuts are judged by the caller (HizCameraCut).
+HizReason HizUnusableReason(const HizValidity& state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height) noexcept;
+
 // True when the pyramid of the last build may cull in `frameIndex` for a view of `width` x `height`.
 bool HizUsableAt(const HizValidity& state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height) noexcept;
 

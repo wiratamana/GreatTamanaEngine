@@ -386,11 +386,14 @@ module or adding a new endpoint:
 - **Scene camera routes** (`/scene_camera/*`) use `ISceneCameraControl` (`SceneCameraControl.h`).
   - `GET /scene_camera/state` lists the cameras of the Scene (entity, name, pose, lens, selected, apex screen
     position as fractions of the Scene image) and the segments of the selected camera frustum in image pixels.
+    `cull_view` holds the numbers of the Scene cull view (`valid`, `mode`, `source`, `visible`, `hidden`,
+    `tested_at_visible_frame`, `counts_valid`, `occlusion`, `hiz_reason`, `frozen`, `frozen_frame`, ...); it is
+    only `{"valid":false}` while no feature is linked.
   - `GET /scene_camera/pick?x=<0..1>&y=<0..1>` does the same pick as a mouse click on the Scene image and selects
     the camera it hits. Replies `{"success":true,"hit":bool,"entity"}`.
   - `GET /scene_camera/select?name=<entity name>` selects a Camera entity by name. `404` for an unknown name.
   - `GET /scene_camera/image[?overlay=true][&format=json]` returns a PNG of the Scene view only, with the camera
-    overlay drawn in (default on). `409` when the Scene view was not rendered.
+    overlay drawn in (default on), plus the cyan outline of a frozen cull camera. `409` when the Scene view was not rendered.
 
 
 - **`POST /instantiate_asset`** (`task_manager/stl-parser-2` campaign,
@@ -726,10 +729,13 @@ registering a new named texture:
   state before you repeat a `set`. Limits: `name` is required, a duplicate key is a 400, at most 64 arguments, a key
   up to 64 bytes, a value up to 256 bytes. A non-finite number is written as `null`. The Shadow endpoint is
   described in `shadow-mapping.md`. The `GpuDrivenScene` endpoint settable keys are `enabled`, `frustum`, `cone`,
-  `occlusion`, `freezeCulling`, `collectStats` and `debugView` (`Off` or `ClusterId`). Its state is
+  `occlusion`, `freezeCulling`, `collectStats`, `debugView` (`Off` or `ClusterId`) and the Scene-only keys `sceneCull`
+  (`FollowSettings`, `Off`, `Frustum`, `FrustumHiz`), `sceneCone`, `sceneSource` (`SceneCamera`, `Frozen`) and `ghost`
+  (`NotDrawn`). A bad value answers `<key> must be <allowed values>`. Actions: `reset_defaults` and `freeze_here`
+  (captures the Scene cull camera again). Its state is
   prefixed `game.` and `scene.` per view (`testedClusters`, `visibleClusters` and `visibleValid` (needs `collectStats`),
-  `claimedEntities`, `occlusionUsable`, `inertReason`,
-  `ledgerBytes`, ...).
+  `testedAtVisibleFrame`, `hidden`, `hiddenValid`, `claimedEntities`, `occlusion`, `hizReason`, `note`,
+  `cullFrozenFrame`, `inertReason`, `ledgerBytes`, ...) plus `sceneCullMode` and the read-only `freezeSerial`.
 
 - **`GET /render_graph/set_pass_enabled`, `GET /render_graph/passes`,
   `GET /render_graph/set_feature_enabled`, `GET /render_graph/set_feature_priority`,

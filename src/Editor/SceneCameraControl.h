@@ -41,6 +41,30 @@ struct SceneCameraInfo {
     bool apexVisible = false;
 };
 
+// Cull view numbers of GET /scene_camera/state. Enum values are carried as their names.
+struct SceneCameraCullView {
+    bool valid = false; // A feature is linked and has reported.
+    bool rendered = false;
+    bool featureEnabled = false;
+    std::uint64_t frame = 0;
+    std::string choice;
+    std::string mode;
+    std::string source;
+    bool cone = false;
+    std::uint64_t testedAtVisibleFrame = 0;
+    std::uint32_t visible = 0;
+    std::uint64_t hidden = 0;
+    bool visibleValid = false; // False: no count yet, or the counts are settling.
+    std::uint64_t claimedInstances = 0;
+    std::string occlusion;
+    std::string hizReason;
+    bool frozen = false;
+    std::uint64_t frozenFrame = 0;
+    std::string inertReason;
+    bool refused = false;
+    std::string note;
+};
+
 // Everything GET /scene_camera/state shows.
 struct SceneCameraReport {
     bool rendered = false; // the Scene view was drawn last frame
@@ -49,6 +73,7 @@ struct SceneCameraReport {
     std::vector<SceneCameraInfo> cameras;
     std::uint64_t selectedEntity = 0; // 0 when no camera is selected
     std::vector<OverlaySegment2D> selectedFrustum; // image pixels
+    SceneCameraCullView cullView;
 };
 
 class ISceneCameraControl {

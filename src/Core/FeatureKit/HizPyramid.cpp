@@ -125,8 +125,13 @@ HizPrevious HizPyramid::Previous(Frame& frame)
     }
     HizViewState& view = m_views.For(frame.Scope());
     const fx::View& v = frame.View();
-    if (!HizUsableAt(view.validity, frame.FrameIndex(), v.extent.width, v.extent.height)
-        || HizCameraCut(view.viewProjection, view.eye, v.viewProjection, v.eye)) {
+    if (const HizReason reason = HizUnusableReason(view.validity, frame.FrameIndex(), v.extent.width, v.extent.height);
+        reason != HizReason::None) {
+        result.reason = reason;
+        return result;
+    }
+    if (HizCameraCut(view.viewProjection, view.eye, v.viewProjection, v.eye)) {
+        result.reason = HizReason::CameraCut;
         return result;
     }
 
@@ -137,6 +142,7 @@ HizPrevious HizPyramid::Previous(Frame& frame)
         return result;
     }
     result.usable = true;
+    result.reason = HizReason::None;
     result.atlas = atlas;
     result.viewProjection = view.viewProjection;
     result.baseWidth = view.layout.baseWidth;

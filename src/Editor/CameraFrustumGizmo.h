@@ -2,11 +2,13 @@
 
 // Pure geometry of a perspective camera frustum: corners, line list and plane normals.
 
+#include "../Math/Mat4.h"
 #include "../Math/Quat.h"
 #include "../Math/Vec3.h"
 #include "../Renderer/Culling/CullingTypes.h"
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -49,6 +51,10 @@ bool FrustumInputIsValid(const FrustumInput& input) noexcept;
 
 // Built from the camera basis, so it does not depend on the projection's Y flip.
 FrustumCorners ComputeFrustumCorners(const FrustumInput& input);
+
+// Corners of the NDC box x,y in [-1,1], z in [0,1] of a view-projection. Empty for a singular or non-finite
+// matrix. `apex` is the near-plane centre; `forward`, `up` and `right` come from the near ring.
+std::optional<FrustumCorners> FrustumCornersFromViewProjection(const Mat4& viewProjection);
 
 // 4 near + 4 far + 4 side + 4 apex lines + 1 arrow (17 segments).
 std::vector<FrustumSegment> BuildFrustumSegments(const FrustumCorners& corners);

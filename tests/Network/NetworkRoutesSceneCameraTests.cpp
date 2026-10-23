@@ -94,4 +94,36 @@ TEST(SceneCameraSelectResponseTests, EchoesTheName)
     EXPECT_EQ(json["selected"].get<std::string>(), "Camera");
 }
 
+TEST(SceneCameraStateJsonTests, CullViewIsMarkedInvalidWithoutAReport)
+{
+    const nlohmann::json json = nlohmann::json::parse(BuildSceneCameraStateJson({}));
+    ASSERT_TRUE(json.contains("cull_view"));
+    EXPECT_FALSE(json["cull_view"]["valid"].get<bool>());
+    EXPECT_FALSE(json["cull_view"].contains("visible"));
+}
+
+TEST(SceneCameraStateJsonTests, CullViewCarriesTheHudNumbers)
+{
+    SceneCameraReport report;
+    report.cullView.valid = true;
+    report.cullView.rendered = true;
+    report.cullView.mode = "Frustum";
+    report.cullView.testedAtVisibleFrame = 100;
+    report.cullView.visible = 60;
+    report.cullView.hidden = 40;
+    report.cullView.visibleValid = true;
+    report.cullView.frozen = true;
+    report.cullView.frozenFrame = 12;
+
+    const nlohmann::json json = nlohmann::json::parse(BuildSceneCameraStateJson(report));
+    const nlohmann::json& cull = json["cull_view"];
+    EXPECT_TRUE(cull["valid"].get<bool>());
+    EXPECT_EQ(cull["mode"].get<std::string>(), "Frustum");
+    EXPECT_EQ(cull["visible"].get<int>(), 60);
+    EXPECT_EQ(cull["hidden"].get<int>(), 40);
+    EXPECT_EQ(cull["tested_at_visible_frame"].get<int>(), 100);
+    EXPECT_TRUE(cull["counts_valid"].get<bool>());
+    EXPECT_EQ(cull["frozen_frame"].get<int>(), 12);
+}
+
 } // namespace

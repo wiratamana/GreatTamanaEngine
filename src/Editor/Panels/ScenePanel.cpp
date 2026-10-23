@@ -5,10 +5,13 @@
 #include "../EditorContext.h"
 #include "../SceneCameraFrustum.h"
 #include "../TransformGizmo.h"
+#include "../ViewCullOverlay.h"
+#include "ScenePanelCullView.h"
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
 #include "../../ECS/TransformHierarchy.h"
+#include "../../Core/FeatureKit/ViewCullLink.h"
 #include "../../Game/Game.h"
 
 #include <imgui.h>
@@ -24,9 +27,6 @@ namespace gte {
 namespace {
 
 constexpr std::size_t kMaxSceneCameras = 256;
-constexpr float kCameraBodyWidth = 1.5f;
-constexpr float kCameraHoverWidth = 2.5f;
-constexpr OverlayColor kCameraHoverColor{ 255, 255, 255, 255 };
 
 // Valid Camera entities as pick candidates, with the lens aspect of the Game view.
 void GatherCameraCandidates(Registry& registry, float aspect, std::vector<CameraPickCandidate>& out)
@@ -78,15 +78,18 @@ void BuildCameraOverlay(
         }
     }
 
+    SceneOverlayInput overlay;
+    overlay.candidates = frame.candidates;
+    overlay.selectedId = frame.selectedId;
+    if (hover) {
+        overlay.hoverId = hover->id;
+    }
+    overlay.viewProjection = frame.viewProjection;
+    overlay.cull = ctx.viewCull ? &ctx.viewCull->report : nullptr;
+
     std::vector<OverlaySegment2D> segments;
     std::vector<OverlayQuad2D> quads;
-    for (const CameraPickCandidate& candidate : frame.candidates) {
-        const bool isSelected = candidate.id == frame.selectedId;
-        const bool isHover = hover && hover->id == candidate.id;
-        const OverlayColor color = isSelected ? kSceneCameraSelectedColor : (isHover ? kCameraHoverColor : kSceneCameraBodyColor);
-        AppendCameraOverlay(candidate.frustum, isSelected, frame.viewProjection, frame.rectMin, frame.rectMax, color,
-            isHover ? kCameraHoverWidth : kCameraBodyWidth, segments, isSelected ? &quads : nullptr);
-    }
+    AppendSceneOverlay(overlay, frame.rectMin, frame.rectMax, segments, quads);
     ImDrawList* drawList = ImGui::GetWindowDrawList();
     DrawOverlayQuads(drawList, quads, frame.rectMin, frame.rectMax);
     DrawOverlaySegments(drawList, segments, frame.rectMin, frame.rectMax);
@@ -166,7 +169,9 @@ void BuildScenePanel(
             DrawGizmoOperationSwitcher(ctx.gizmoOperation);
 
             // Camera bodies, the selected frustum and left-click picking; before the gizmo so the gizmo paints on top.
-            BuildCameraOverlay(registry, ctx, camera, imageMin, imageSize, hovered);
+            // Cull view widgets come first so they block camera picking under them.
+            const bool overCullView = BuildScenePanelCullView(ctx, imageMin, imageSize);
+            BuildCameraOverlay(registry, ctx, camera, imageMin, imageSize, hovered && !overCullView);
 
             // Gizmo for the selected entity; needs a live entity with a Transform.
             // Uses this Scene camera's view/projection, not the gameplay camera's.

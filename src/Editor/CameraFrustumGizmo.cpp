@@ -104,6 +104,38 @@ FrustumCorners ComputeFrustumCorners(const FrustumInput& in)
     return out;
 }
 
+std::optional<FrustumCorners> FrustumCornersFromViewProjection(const Mat4& viewProjection)
+{
+    Mat4 inverse;
+    if (!viewProjection.TryInverse(inverse)) {
+        return std::nullopt;
+    }
+    constexpr float kMinW = 1.0e-12f;
+    constexpr float ndcX[4] = { -1.0f, 1.0f, 1.0f, -1.0f };
+    constexpr float ndcY[4] = { -1.0f, -1.0f, 1.0f, 1.0f };
+
+    FrustumCorners out;
+    Vec3* rings[2] = { out.nearC, out.farC };
+    for (int r = 0; r < 2; ++r) {
+        for (int i = 0; i < 4; ++i) {
+            const Vec4 p = inverse * Vec4(ndcX[i], ndcY[i], static_cast<float>(r), 1.0f);
+            if (!std::isfinite(p.w) || std::fabs(p.w) < kMinW) {
+                return std::nullopt;
+            }
+            const Vec3 world(p.x / p.w, p.y / p.w, p.z / p.w);
+            if (!IsFinite(world)) {
+                return std::nullopt;
+            }
+            rings[r][i] = world;
+        }
+    }
+    out.apex = (out.nearC[0] + out.nearC[2]) * 0.5f;
+    out.forward = Normalize(((out.farC[0] + out.farC[2]) * 0.5f) - out.apex);
+    out.right = Normalize(out.nearC[1] - out.nearC[0]);
+    out.up = Normalize(out.nearC[3] - out.nearC[0]);
+    return out;
+}
+
 std::vector<FrustumSegment> BuildFrustumSegments(const FrustumCorners& c)
 {
     std::vector<FrustumSegment> segments;

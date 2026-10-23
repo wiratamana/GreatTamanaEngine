@@ -19,7 +19,8 @@ namespace gte::fx {
 
 // Last frame's pyramid of one view, ready to bind to ClusterDrawChain::Occlusion().
 struct HizPrevious {
-    bool usable = false; // False on the first frame, after a resize or camera cut, or while the build is off.
+    bool usable = false;                    // False on the first frame, after a resize or camera cut, or while the build is off.
+    HizReason reason = HizReason::Unavailable; // None when usable.
     Texture atlas;
     Mat4 viewProjection = Mat4::Identity(); // The view-projection the pyramid was built under.
     std::uint32_t baseWidth = 0;            // Level 0 size.

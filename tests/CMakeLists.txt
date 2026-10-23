@@ -2632,6 +2632,9 @@ if(TRUE)
         Editor/ClusterViewerLoadTests.cpp
         Editor/ClusterViewerSettingsTests.cpp
         Editor/ClusterStatusTextTests.cpp
+        Editor/ViewCullHudTests.cpp
+        Editor/ViewCullOverlayTests.cpp
+        Editor/FrustumFromViewProjectionTests.cpp
     )
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only
@@ -2980,6 +2983,8 @@ set(GTE_COMMENT_RULE_SRC
     Editor/ClusterViewerWindowUi.cpp Editor/ClusterViewerWindowControl.cpp
     Editor/CameraFrustumOverlay.h Editor/CameraFrustumOverlay.cpp
     Editor/SceneCameraAdapter.h Editor/SceneCameraAdapter.cpp Editor/SceneCameraFrustum.h Editor/SceneCameraFrustum.cpp
+    Editor/ViewCullHud.h Editor/ViewCullHud.cpp Editor/ViewCullOverlay.h Editor/ViewCullOverlay.cpp
+    Editor/Panels/ScenePanelCullView.h Editor/Panels/ScenePanelCullView.cpp
     Game/Instantiation/MaterialTextureGpuCache.h Game/Instantiation/MaterialTextureGpuCache.cpp
     Game/Instantiation/MaterialCacheKeys.h Game/Instantiation/MaterialLifetimeRules.h
     Game/Instantiation/MaterialLifetimeRules.cpp Game/Instantiation/MeshAssetPipelineKind.h
@@ -3024,7 +3029,8 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Editor/CameraFrustumGizmoTests.cpp Editor/CameraPickTests.cpp Editor/OverlayRasterTests.cpp
     Editor/ViewportProjectionTests.cpp Editor/OrbitCameraTests.cpp Editor/ClusterViewerStatsTests.cpp
     Editor/ClusterViewerTruthTests.cpp Editor/ClusterViewerLoadTests.cpp Editor/ClusterViewerSettingsTests.cpp
-    Editor/ClusterStatusTextTests.cpp)
+    Editor/ClusterStatusTextTests.cpp Editor/ViewCullHudTests.cpp Editor/ViewCullOverlayTests.cpp
+    Editor/FrustumFromViewProjectionTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

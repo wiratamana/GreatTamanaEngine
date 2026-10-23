@@ -192,14 +192,14 @@ Both vertex shaders declare `invariant gl_Position` with the same expression ord
   survivors), `inertReason` (none, device caps, shared scope, capture armed, toggled off),
   `lastRefusalReason`, `ledgerBytes`.
 - **Visible count.** `visibleClusters` (survivors, 2 frames old, with `visibleFrame`) needs
-  `collectStats=true`, which adds three passes per part slot. With stats off, or when the readback
-  is older than 8 frames, `visibleValid` is false and `statsCollected` says why. Stats are off by default.
+  `collectStats=true`, which adds three passes per part slot. With stats off, or when the tested value of the
+  count's frame is gone, `visibleValid` is false and `statsCollected` says why. Stats are off by default.
 - `GET /feature_debug/set?name=GpuDrivenScene&frustum=...&cone=...&freezeCulling=true&collectStats=true&debugView=ClusterId`.
-- **Freeze culling** keeps the cull camera of the last live frame while the view camera moves.
-  Move the camera, then fetch `GET /get_game_view` to see what was culled. A resize or a
-  disabled feature clears it.
+- **Freeze culling** keeps the cull camera of the last live frame while the view camera moves (both views).
+  Move the camera, then fetch `GET /get_game_view` to see what was culled. A disabled feature clears it;
+  a resize keeps it. For the Scene view alone use `sceneSource=Frozen` (see "Scene cull view").
 - **`debugView=ClusterId`** colours each cluster by a hash of its id (`MeshClusterTint.frag`).
-  Culled clusters are not visible by design: combine it with freeze culling.
+  Culled clusters are not visible by design: look at the Scene view with a frozen cull camera.
 - `GET /render_graph`: per-pass `gpu_timing_milliseconds`, `draw_call_count`,
   `indirect_draw_count`, plus `indirect_draw` (device caps) and `gpu_memory`
   (`total_bytes`, `mesh_count`, `by_name`). Indirect draws never add to `triangle_count`.
@@ -249,8 +249,41 @@ Both vertex shaders declare `invariant gl_Position` with the same expression ord
 - A moved instance is never occlusion-culled. Core tracks last frame's world matrices only while a pyramid
   is being built (`Core::RequestOcclusionTracking`); a new entity counts as moved.
 - Depth-only lanes never use the pyramid.
-- Debug: `/feature_debug/set?name=GpuDrivenScene&occlusion=true`; read `game.occlusionUsable`.
-  Combine with `freezeCulling` and `/get_game_view` to see the effect.
+- Debug: `/feature_debug/set?name=GpuDrivenScene&occlusion=true`; read `game.occlusion` (`Applied`, `Unusable`,
+  `CameraNotLive`, `NotRequested`) and `game.hizReason`. A frozen cull camera never uses the pyramid
+  (see "Scene cull view"). To look at the Hi-Z result use `sceneCull=FrustumHiz` and the Scene view.
+
+## Scene cull view
+
+The Scene panel has a "Cull view" box. It picks the cull tests of the **Scene view only** and shows how many
+clusters are visible and hidden. The Game view never reads these fields.
+
+- **Settings.** The first group (`frustum`, `cone`, `occlusion`, `freezeCulling`) drives the Game view, and the Scene view
+  while `sceneCull=FollowSettings`. Scene-only fields: `sceneCull` (`FollowSettings`, `Off`, `Frustum`, `FrustumHiz`),
+  `sceneCone`, `sceneSource` (`SceneCamera`, `Frozen`), `freezeSerial` (read-only) and `ghost` (`NotDrawn`). `Off` keeps
+  the cluster draw path with no culling flags, so it is the baseline. `freezeCulling` freezes both views.
+- **Link.** `fx::ViewCullLink` (`Core/FeatureKit/ViewCullLink.h`) is plain data: the Scene panel writes `request`, the
+  feature writes `report`. The feature owns it as `std::shared_ptr`; the editor keeps a copy in `EditorContext::viewCull`
+  (empty without the feature). The feature flushes a pending request at the first view callback of a frame, and the
+  debug endpoint flushes it before every write, so the last writer wins in event order. Main thread only.
+- **Frozen camera.** `sceneSource=Frozen` captures the Scene camera once. A new `freezeSerial` (the "Freeze here" button
+  or `invoke action=freeze_here`) captures again. A resize keeps the frozen camera: the frustum is world geometry.
+  The outline of the frozen cull frustum is drawn in the Scene panel and in `GET /scene_camera/image`.
+- **Hi-Z honesty.** The pyramid is built from the Scene camera depth. The feature drops the Hi-Z test whenever the cull
+  camera is not the live camera of that view (`occlusion=CameraNotLive`), also when `occlusion=true` and
+  `freezeCulling=true` are set through HTTP. A view that does not need the pyramid does not build it. A Scene-only
+  `Frustum` choice requests no movement tracking.
+- **Counts.** `tested` is from the current frame, `visible` is two frames old. The feature keeps the tested value of the
+  last 4 frames and pairs each visible count with the tested value of its own frame (`testedAtVisibleFrame`).
+  `hidden = testedAtVisibleFrame - visible`, and it is empty (`hiddenValid=false`) when visible is larger.
+- **Stats gate.** The Scene view reads the count while `collectStats` is on or the HUD was drawn in the last 3 frames.
+  The user setting `collectStats` is never changed. With the tool off, no stats pass of the Scene view runs.
+- **State.** `/feature_debug/state?name=GpuDrivenScene` adds `sceneCull`, `sceneCullMode` (`Off`, `Frustum`,
+  `FrustumHiz`, `Custom`), `sceneCone`, `sceneSource`, `freezeSerial`, `ghost` and per view `occlusion`, `hizReason`,
+  `note`, `cullFrozenFrame`, `testedAtVisibleFrame`, `hidden`, `hiddenValid`. `GET /scene_camera/state` has the same HUD
+  numbers in `cull_view`. The HUD is ImGui and is not in the PNG: every HUD number is in JSON.
+- **Limits.** Only cluster-path meshes are counted. CPU-drawn meshes are never culled by this system and are not shown.
+  Hidden clusters are not drawn. Hi-Z of a frozen cull camera is not available.
 
 ## Cluster Viewer
 

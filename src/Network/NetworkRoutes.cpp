@@ -1720,6 +1720,34 @@ nlohmann::json SegmentsToJson(const std::vector<OverlaySegment2D>& segments)
     return arr;
 }
 
+nlohmann::json CullViewToJson(const SceneCameraCullView& v)
+{
+    nlohmann::json out = nlohmann::json::object({ { "valid", v.valid } });
+    if (!v.valid) {
+        return out;
+    }
+    out["rendered"] = v.rendered;
+    out["feature_enabled"] = v.featureEnabled;
+    out["frame"] = v.frame;
+    out["choice"] = v.choice;
+    out["mode"] = v.mode;
+    out["source"] = v.source;
+    out["cone"] = v.cone;
+    out["tested_at_visible_frame"] = v.testedAtVisibleFrame;
+    out["visible"] = v.visible;
+    out["hidden"] = v.hidden;
+    out["counts_valid"] = v.visibleValid;
+    out["claimed_instances"] = v.claimedInstances;
+    out["occlusion"] = v.occlusion;
+    out["hiz_reason"] = v.hizReason;
+    out["frozen"] = v.frozen;
+    out["frozen_frame"] = v.frozenFrame;
+    out["inert_reason"] = v.inertReason;
+    out["refused"] = v.refused;
+    out["note"] = v.note;
+    return out;
+}
+
 nlohmann::json ClusterViewerReportToJson(const ClusterViewerReport& r)
 {
     nlohmann::json settings = nlohmann::json::object();
@@ -2016,6 +2044,7 @@ std::string BuildSceneCameraStateJson(const SceneCameraReport& report)
     body["selected_entity"] = report.selectedEntity;
     body["cameras"] = std::move(cameras);
     body["selected_frustum"] = SegmentsToJson(report.selectedFrustum);
+    body["cull_view"] = CullViewToJson(report.cullView);
     return body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 

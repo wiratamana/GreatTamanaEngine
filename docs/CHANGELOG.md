@@ -4,6 +4,27 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## Scene cull view (branch `feature/gpu-cull-impl`, 2026-10-24)
+
+- **Scene panel.** A "Cull view" box picks the cull tests of the Scene view only (`Follow settings`, `Off`, `Frustum`,
+  `Frustum + Hi-Z`), the cull source (`Scene camera`, `Frozen`, "Freeze here") and the cone test. The HUD shows tested,
+  visible and hidden clusters of one frame, the Hi-Z state and the age of the frozen camera. The Game view never reads
+  these settings.
+- **Counts.** The visible count (2 frames old) is paired with the tested value of its own frame, so a scene change never
+  gives a wrapped number. `ClusterStats::occlusionApplied` says whether the Hi-Z test really ran; `HizPrevious::reason`
+  says why not.
+- **Frozen camera.** A resize no longer re-freezes it. A new `freezeSerial` captures again. Hi-Z is dropped while the
+  cull camera is not the live camera, also through HTTP.
+- **Clean-ups.** `kVisibleCountFreshFrames` and its dead check are gone. The inner `Begin`/`End` of the GPU Driven Scene
+  panel is gone. Debug keys come from one table with the allowed values; enum names come from one template. The camera
+  overlay lines of the Scene panel and the HTTP image come from one builder.
+- **HTTP.** `sceneCull`, `sceneCone`, `sceneSource`, `ghost`, `freeze_here`, per-view `occlusion`, `hizReason`, `hidden`,
+  `testedAtVisibleFrame`; `cull_view` in `/scene_camera/state` (see [networking.md](conventions/networking.md)).
+- **Cost record.** Stats hold: while the HUD is drawn the Scene view runs three stats passes per part slot, for 3 frames
+  after the HUD stops. GPU ms with the HUD on and off: to be measured on the reference machine.
+- **Not done.** Hidden-cluster ghost draw, the Active camera as cull source, Hi-Z for another camera and the Scene camera
+  pose route.
+
 ## Cluster Viewer and Create Clustered Copy (branch `feature/gpu-cull-impl`, 2026-10-23)
 
 - **Clone.** `CloneMeshAssetWithClusters()` (`Assets/MeshClusterClone.h`) writes `<stem>_clustered.gta` next to a mesh asset with a new

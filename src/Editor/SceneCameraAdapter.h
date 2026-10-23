@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // Scene camera control for the HTTP bridge, backed by the Scene panel's last camera overlay frame.
 
@@ -6,10 +6,17 @@
 
 namespace gte {
 
+namespace fx {
+struct ViewCullReport;
+}
+
 class Registry;
 class Renderer;
 class RenderTexture;
 struct EditorContext;
+
+// The HTTP view of a cull report. Counts that cannot be paired in time are reported invalid.
+SceneCameraCullView MakeSceneCameraCullView(const fx::ViewCullReport& report);
 
 class SceneCameraAdapter final : public ISceneCameraControl {
 public:

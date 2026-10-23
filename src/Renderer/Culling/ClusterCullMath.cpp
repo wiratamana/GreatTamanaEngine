@@ -477,10 +477,26 @@ HizValidity AdvanceHizValidity(
     return state;
 }
 
+HizReason HizUnusableReason(const HizValidity& state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height) noexcept
+{
+    if (!state.hasBuilt) {
+        return HizReason::NoHistory;
+    }
+    if (state.lastFrame + 1 != frameIndex) {
+        return HizReason::BuildOff;
+    }
+    if (state.width != width || state.height != height) {
+        return HizReason::Resized;
+    }
+    if (!OcclusionAllowed(state.framesSinceValid, false, false, true, false)) {
+        return HizReason::WarmingUp;
+    }
+    return HizReason::None;
+}
+
 bool HizUsableAt(const HizValidity& state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height) noexcept
 {
-    return state.hasBuilt && state.lastFrame + 1 == frameIndex && state.width == width && state.height == height
-        && OcclusionAllowed(state.framesSinceValid, false, false, true, false);
+    return HizUnusableReason(state, frameIndex, width, height) == HizReason::None;
 }
 
 bool InstanceMoved(const Mat4& previous, const Mat4& current) noexcept
