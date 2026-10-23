@@ -2,6 +2,7 @@
 
 #include "CameraFrustumOverlay.h"
 #include "CameraPick.h"
+#include "ClusterStatusText.h"
 #include "ClusterToolUiState.h"
 #include "EditorContext.h"
 #include "ImGuiUniqueId.h"
@@ -100,10 +101,6 @@ ClusterViewerWindow::~ClusterViewerWindow()
 {
     Reset();
 }
-
-// ---------------------------------------------------------------------------------------------
-// Lifetime and loading
-// ---------------------------------------------------------------------------------------------
 
 void ClusterViewerWindow::Open(const std::string& absoluteGtaPath)
 {
@@ -314,10 +311,6 @@ void ClusterViewerWindow::PollFile(Renderer& renderer)
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Cameras and flags
-// ---------------------------------------------------------------------------------------------
-
 ClusterCullFlags ClusterViewerWindow::CurrentFlags() const noexcept
 {
     ClusterCullFlags flags = ClusterCullFlags::None;
@@ -448,23 +441,20 @@ std::pair<int, int> ClusterViewerWindow::VerifySize() const
 }
 
 void ClusterViewerWindow::AppendOverlay(const Mat4& viewProjection, Vec2 rectMin, Vec2 rectMax, bool debugHovered,
-    std::vector<OverlaySegment2D>& out) const
+    std::vector<OverlaySegment2D>& out, std::vector<OverlayQuad2D>& quads) const
 {
     if (m_settings.showSceneCamera) {
         if (const std::optional<FrustumInput> sceneCamera = SelectedSceneCamera()) {
-            AppendCameraOverlay(*sceneCamera, true, viewProjection, rectMin, rectMax, kSceneCameraViewerColor, 1.0f, out);
+            AppendCameraOverlay(*sceneCamera, true, viewProjection, rectMin, rectMax, kSceneCameraViewerColor, 1.0f, out, &quads);
         }
     }
     if (m_debug.show && DebugCameraIsValid(m_debug)) {
         const bool strong = m_debug.selected || debugHovered;
         AppendCameraOverlay(DebugFrustum(), true, viewProjection, rectMin, rectMax,
-            m_debug.selected ? kDebugCameraSelectedColor : kDebugCameraColor, strong ? 2.5f : 1.5f, out);
+            m_debug.selected ? kDebugCameraSelectedColor : kDebugCameraColor, strong ? 2.5f : 1.5f, out,
+            m_debug.selected ? &quads : nullptr);
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// GPU work
-// ---------------------------------------------------------------------------------------------
 
 ClusterViewerWindow::FrameKey ClusterViewerWindow::MakeKey(const ClusterViewFrame& frame, std::uint32_t drawMode) const
 {
@@ -586,7 +576,7 @@ std::optional<ClusterViewerResult> ClusterViewerWindow::NotReady(bool needCluste
         return MakeError(ClusterViewerError::NoValidMesh, m_load.text.empty() ? std::string("no valid mesh is loaded") : m_load.text);
     }
     if (needClusterModes && !m_load.clusterModes) {
-        return MakeError(ClusterViewerError::Unavailable, m_load.text.empty() ? std::string("cluster modes are unavailable") : m_load.text);
+        return MakeError(ClusterViewerError::Conflict, m_load.text.empty() ? std::string("cluster modes are unavailable") : m_load.text);
     }
     return std::nullopt;
 }
@@ -603,12 +593,15 @@ ClusterViewerResult ClusterViewerWindow::CaptureHizNow()
     const auto [width, height] = VerifySize();
     const std::optional<ClusterViewHizInfo> info = m_renderer->CaptureHiz(
         DebugCameraViewProjection(m_debug), m_debug.transform.position, width, height);
-    if (!info) {
+    // The renderer owns the capture; a failed capture may have dropped the old one.
+    m_hiz = m_renderer->HizCapture();
+    m_mainKeyValid = false;
+    m_previewKeyValid = false;
+    if (!info || !m_hiz) {
         m_hizError = "the Hi-Z capture failed (see the ClusterView log)";
-        return MakeError(ClusterViewerError::Unavailable, m_hizError);
+        return MakeError(ClusterViewerError::Conflict, m_hizError);
     }
     m_hizError.clear();
-    m_hiz = info;
     m_hizForward = m_debug.transform.rotation.RotateVector(Vec3::Forward());
     m_hizTime = std::chrono::steady_clock::now();
     return MakeOk("Hi-Z captured " + std::to_string(width) + "x" + std::to_string(height));
@@ -634,7 +627,7 @@ ClusterViewerResult ClusterViewerWindow::VerifyNow()
     const ClusterViewCullResult cull = m_renderer->RunCull({ flags, viewProjection, eye });
     if (!cull.ok) {
         m_truthError = "verify: " + cull.note;
-        return MakeError(ClusterViewerError::Unavailable, m_truthError);
+        return MakeError(ClusterViewerError::Conflict, m_truthError);
     }
     const std::optional<ClusterViewHizInfo> hiz = m_renderer->HizCapture();
 
@@ -650,18 +643,18 @@ ClusterViewerResult ClusterViewerWindow::VerifyNow()
         m_renderer->ReleaseTargets();
         if (!pixels) {
             m_truthError = "verify: the id pass failed (see the ClusterView log)";
-            return MakeError(ClusterViewerError::Unavailable, m_truthError);
+            return MakeError(ClusterViewerError::Conflict, m_truthError);
         }
         decode = DecodeIdImage(*pixels, m_renderer->ClusterCount());
     }
     if (!decode.ok) {
         m_truthError = "verify: " + decode.error;
-        return MakeError(ClusterViewerError::Unavailable, m_truthError);
+        return MakeError(ClusterViewerError::Conflict, m_truthError);
     }
     const ClusterTruthResult truth = CompareClusterTruth(cull.survivors, decode.pixelCount);
     if (!truth.ok) {
         m_truthError = "verify: " + truth.error;
-        return MakeError(ClusterViewerError::Unavailable, m_truthError);
+        return MakeError(ClusterViewerError::Conflict, m_truthError);
     }
 
     m_truth = truth;
@@ -721,30 +714,45 @@ std::string ClusterViewerWindow::HizStatusText() const
 
 void ClusterViewerWindow::StartCloneFromViewer()
 {
-    MeshClusterBuildRunner* const runner = m_ctx != nullptr ? m_ctx->clusterBuildRunner : nullptr;
+    ClusterToolUiState& ui = m_ctx->clusterTool;
+    MeshClusterBuildRunner* const runner = m_ctx->clusterBuildRunner;
     if (runner == nullptr) {
-        m_cloneStatus = "The cluster build runner is not available.";
+        ui.lastCloneStatus = "The cluster build runner is not available.";
         return;
     }
     const std::filesystem::path destination = ChooseClusteredCloneDestination(m_absolutePath);
     if (destination.empty()) {
-        m_cloneStatus = "No free file name for the copy.";
+        ui.lastCloneStatus = "No free file name for the copy.";
         return;
     }
-    const ClusterToolUiState& ui = m_ctx->clusterTool;
     MeshClusterCloneOptions options;
     options.cluster.maxVerticesPerCluster = static_cast<std::uint32_t>(ClampClusterMaxVertices(ui.maxVertices));
     options.cluster.maxTrianglesPerCluster = static_cast<std::uint32_t>(ClampClusterMaxTriangles(ui.maxTriangles));
     options.cluster.coneWeight = ClampClusterConeWeight(ui.coneWeight);
     options.autoWeld = true;
-    const bool busy = runner->StartClone(m_absolutePath, destination, options, true, 0)
+    ui.lastCloneStatus.clear();
+    ui.startRefusedBusy = runner->StartClone(m_absolutePath, destination, options, true, 0)
         == MeshClusterBuildRunner::StartResult::Busy;
-    m_cloneStatus = busy ? "A cluster build is already running." : "Creating the clustered copy...";
 }
 
-// ---------------------------------------------------------------------------------------------
-// IClusterViewerControl
-// ---------------------------------------------------------------------------------------------
+void ClusterViewerWindow::DrawCloneStatus()
+{
+    const ClusterToolUiState& ui = m_ctx->clusterTool;
+    const MeshClusterBuildRunner* const runner = m_ctx->clusterBuildRunner;
+    if (!ui.lastCloneStatus.empty()) {
+        ImGui::TextColored(kOrange, "%s", ui.lastCloneStatus.c_str());
+    }
+    const ClusterStatus status = DescribeClusterStatus(MakeClusterStatusInput(ui, runner, m_absolutePath));
+    if (status.text.empty()) {
+        return;
+    }
+    switch (status.tone) {
+    case ClusterStatusTone::Quiet: ImGui::TextDisabled("%s", status.text.c_str()); break;
+    case ClusterStatusTone::Warn: ImGui::TextColored(kOrange, "%s", status.text.c_str()); break;
+    case ClusterStatusTone::Good: ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "%s", status.text.c_str()); break;
+    case ClusterStatusTone::Bad: ImGui::TextColored(kRed, "%s", status.text.c_str()); break;
+    }
+}
 
 ClusterViewerResult ClusterViewerWindow::Open(Renderer& renderer, const std::string& absolutePath)
 {
@@ -783,7 +791,6 @@ ClusterViewerReport ClusterViewerWindow::Report() const
     add("cone", boolean(m_settings.cone));
     add("occlusion", boolean(m_settings.occlusion));
     add("culledStyle", std::string(ClusterViewerCulledStyleName(m_settings.culledStyle)));
-    add("gizmo", std::string(ClusterViewerGizmoOperationName(m_settings.gizmoOperation)));
     add("debugCamera", boolean(m_debug.show));
     add("cameraPreview", boolean(m_settings.cameraPreview));
     add("cameraSelected", boolean(m_debug.selected));
@@ -868,7 +875,7 @@ ClusterViewerResult ClusterViewerWindow::Set(std::span<const KeyValue> pairs)
     if (result.copySceneCamera && !CopySceneCamera()) {
         m_settings = savedSettings;
         m_debug = savedDebug;
-        return MakeError(ClusterViewerError::Unavailable, "no Camera entity is selected in the Scene");
+        return MakeError(ClusterViewerError::Conflict, "no Camera entity is selected in the Scene");
     }
     ApplyOrbitRequest(result.orbit);
     if (!m_debug.show) {
@@ -953,14 +960,11 @@ std::optional<ClusterViewerImage> ClusterViewerWindow::CaptureImage(ClusterViewS
     image.pixels = std::move(*pixels);
     if (overlay && slot == ClusterViewSlot::Main && image.pixels.width > 0 && image.pixels.height > 0) {
         AppendOverlay(OrbitViewProjection(ViewAspect()), Vec2(0.0f, 0.0f),
-            Vec2(static_cast<float>(image.pixels.width), static_cast<float>(image.pixels.height)), false, image.overlay);
+            Vec2(static_cast<float>(image.pixels.width), static_cast<float>(image.pixels.height)), false, image.overlay,
+            image.overlayQuads);
     }
     return image;
 }
-
-// ---------------------------------------------------------------------------------------------
-// UI
-// ---------------------------------------------------------------------------------------------
 
 void ClusterViewerWindow::Build(Renderer& renderer, EditorContext& ctx, Registry& registry)
 {
@@ -994,9 +998,7 @@ void ClusterViewerWindow::Build(Renderer& renderer, EditorContext& ctx, Registry
                     StartCloneFromViewer();
                 }
             }
-            if (!m_cloneStatus.empty()) {
-                ImGui::TextDisabled("%s", m_cloneStatus.c_str());
-            }
+            DrawCloneStatus();
         }
         if (m_valid) {
             DrawToolbar();
@@ -1334,8 +1336,10 @@ void ClusterViewerWindow::DrawViewport()
     HandleViewportInput(viewProjection, imageMin, imageMax, hovered);
 
     std::vector<OverlaySegment2D> overlay;
-    AppendOverlay(viewProjection, imageMin, imageMax, m_debugHovered, overlay);
+    std::vector<OverlayQuad2D> quads;
+    AppendOverlay(viewProjection, imageMin, imageMax, m_debugHovered, overlay, quads);
     ImDrawList* drawList = ImGui::GetWindowDrawList();
+    DrawOverlayQuads(drawList, quads, imageMin, imageMax);
     DrawOverlaySegments(drawList, overlay, imageMin, imageMax);
 
     if (m_previewTexture != UiTextureHandle::Invalid && m_previewWidth > 0 && m_previewHeight > 0) {

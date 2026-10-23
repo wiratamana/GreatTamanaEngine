@@ -602,6 +602,10 @@ public:
         view.buildEnabled = shown.buildEnabled;
         view.buildDisabledReason = shown.buildDisabledReason;
         view.buildRunning = m_clusterBuildRunner.Busy();
+        view.cloneButtonDisabledReason = shown.cloneButtonDisabledReason;
+        view.cloneDestination = shown.cloneDestination;
+        view.cloneWeld = shown.cloneWeld;
+        view.openViewerAfterClone = shown.openViewerAfterClone;
         return view;
     }
 

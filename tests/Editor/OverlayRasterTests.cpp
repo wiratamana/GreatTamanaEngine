@@ -98,5 +98,25 @@ TEST(OverlayRasterTest, ZeroSizeAndSmallSpanDoNothing)
     RasterizeSegments(empty, 0, 0, segments);
 }
 
+TEST(OverlayRasterTest, QuadFillsItsAreaAndZeroSizeIsNoOp)
+{
+    OverlayQuad2D quad;
+    quad.p[0] = Vec2(2.0f, 2.0f);
+    quad.p[1] = Vec2(8.0f, 2.0f);
+    quad.p[2] = Vec2(8.0f, 8.0f);
+    quad.p[3] = Vec2(2.0f, 8.0f);
+    quad.rgba = { 255, 0, 0, 255 };
+    const std::array<OverlayQuad2D, 1> quads{ quad };
+
+    std::vector<std::uint8_t> image(kSize * kSize * 4, 0);
+    RasterizeQuads(image, kSize, kSize, quads);
+    EXPECT_TRUE(IsRed(image, 5, 5));
+    EXPECT_FALSE(IsRed(image, 0, 0));
+    EXPECT_EQ(CountRed(image), 36);
+
+    std::vector<std::uint8_t> untouched(kSize * kSize * 4, 0);
+    RasterizeQuads(untouched, 0, kSize, quads);
+    EXPECT_EQ(CountRed(untouched), 0);
+}
 } // namespace
 } // namespace gte

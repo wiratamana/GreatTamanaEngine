@@ -1311,6 +1311,10 @@ std::string BuildInspectorStateResponseJson(const InspectorStateResponseView& vi
     body["build_button_enabled"] = view.buildEnabled;
     body["build_button_disabled_reason"] = view.buildDisabledReason;
     body["build_running"] = view.buildRunning;
+    body["clone_button_disabled_reason"] = view.cloneButtonDisabledReason;
+    body["clone_destination"] = view.cloneDestination;
+    body["clone_weld"] = view.cloneWeld;
+    body["open_viewer_after_clone"] = view.openViewerAfterClone;
     return body.dump();
 }
 
@@ -1862,7 +1866,8 @@ int HttpStatusForError(ClusterViewerError error)
     case ClusterViewerError::Unavailable: return 503;
     case ClusterViewerError::NotOpen:
     case ClusterViewerError::NoValidMesh:
-    case ClusterViewerError::Unsupported: return 409;
+    case ClusterViewerError::Unsupported:
+    case ClusterViewerError::Conflict: return 409;
     }
     return 409;
 }

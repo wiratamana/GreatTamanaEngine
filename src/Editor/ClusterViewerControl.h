@@ -18,7 +18,8 @@ namespace gte {
 
 class Renderer;
 
-enum class ClusterViewerError : std::uint8_t { None, NotOpen, NoValidMesh, Unsupported, BadInput, Unavailable };
+// Conflict = state conflict (409). Unavailable = no editor or viewer in this build (503).
+enum class ClusterViewerError : std::uint8_t { None, NotOpen, NoValidMesh, Unsupported, BadInput, Conflict, Unavailable };
 
 struct ClusterViewerResult {
     bool ok = false;
@@ -39,10 +40,11 @@ struct KeyValue {
     std::string value;
 };
 
-// A captured image and the 2D overlay segments (image pixels) drawn over it.
+// A captured image and the 2D overlay (image pixels) drawn over it: translucent quads, then lines.
 struct ClusterViewerImage {
     CapturedPixels pixels;
     std::vector<OverlaySegment2D> overlay;
+    std::vector<OverlayQuad2D> overlayQuads;
 };
 
 struct ClusterViewerMeshReport {

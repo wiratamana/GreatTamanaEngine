@@ -99,4 +99,59 @@ void RasterizeSegments(std::span<std::uint8_t> rgba, int width, int height, std:
     }
 }
 
+void RasterizeQuads(std::span<std::uint8_t> rgba, int width, int height, std::span<const OverlayQuad2D> quads)
+{
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    const std::size_t needed = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u;
+    if (rgba.size() < needed) {
+        return;
+    }
+
+    for (const OverlayQuad2D& quad : quads) {
+        bool finite = true;
+        double minX = quad.p[0].x;
+        double maxX = minX;
+        double minY = quad.p[0].y;
+        double maxY = minY;
+        for (const Vec2& p : quad.p) {
+            finite = finite && std::isfinite(p.x) && std::isfinite(p.y);
+            minX = std::min(minX, static_cast<double>(p.x));
+            maxX = std::max(maxX, static_cast<double>(p.x));
+            minY = std::min(minY, static_cast<double>(p.y));
+            maxY = std::max(maxY, static_cast<double>(p.y));
+        }
+        if (!finite) {
+            continue;
+        }
+        // Clamp in double first so a huge coordinate cannot overflow the int conversion.
+        const int x0 = static_cast<int>(std::clamp(std::floor(minX), 0.0, width - 1.0));
+        const int x1 = static_cast<int>(std::clamp(std::ceil(maxX), 0.0, width - 1.0));
+        const int y0 = static_cast<int>(std::clamp(std::floor(minY), 0.0, height - 1.0));
+        const int y1 = static_cast<int>(std::clamp(std::ceil(maxY), 0.0, height - 1.0));
+
+        // A convex quad contains a pixel centre when it is on the same side of all four edges.
+        for (int y = y0; y <= y1; ++y) {
+            for (int x = x0; x <= x1; ++x) {
+                const double cx = x + 0.5;
+                const double cy = y + 0.5;
+                bool allPositive = true;
+                bool allNegative = true;
+                for (int i = 0; i < 4; ++i) {
+                    const Vec2& a = quad.p[i];
+                    const Vec2& b = quad.p[(i + 1) % 4];
+                    const double cross = (static_cast<double>(b.x) - a.x) * (cy - a.y) - (static_cast<double>(b.y) - a.y) * (cx - a.x);
+                    allPositive = allPositive && cross >= 0.0;
+                    allNegative = allNegative && cross <= 0.0;
+                }
+                if (allPositive || allNegative) {
+                    BlendPixel(&rgba[(static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)) * 4u],
+                        quad.rgba);
+                }
+            }
+        }
+    }
+}
+
 } // namespace gte

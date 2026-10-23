@@ -9,7 +9,6 @@ namespace gte {
 
 namespace {
 
-constexpr float kMaxFar = 1.0e7f;
 constexpr float kMaxArrowFar = 1.0e6f;
 constexpr float kArrowFraction = 0.15f;
 
@@ -31,8 +30,8 @@ bool FrustumInputIsValid(const FrustumInput& in) noexcept
     if (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w < 1.0e-6f) {
         return false;
     }
-    return in.fovYDegrees >= 1.0f && in.fovYDegrees <= 170.0f && in.nearZ > 0.0f && in.farZ > in.nearZ
-        && in.farZ <= kMaxFar && in.aspect > 0.0f;
+    return in.fovYDegrees >= kFrustumMinFovDegrees && in.fovYDegrees <= kFrustumMaxFovDegrees && in.nearZ > 0.0f
+        && in.farZ > in.nearZ && in.farZ <= kFrustumMaxFar && in.aspect > 0.0f;
 }
 
 FrustumCorners ComputeFrustumCorners(const FrustumInput& in)

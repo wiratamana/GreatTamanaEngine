@@ -98,7 +98,7 @@ private:
     void ApplyOrbitRequest(const ClusterViewerOrbitRequest& request);
     std::pair<int, int> VerifySize() const;
     void AppendOverlay(const Mat4& viewProjection, Vec2 rectMin, Vec2 rectMax, bool debugHovered,
-        std::vector<OverlaySegment2D>& out) const;
+        std::vector<OverlaySegment2D>& out, std::vector<OverlayQuad2D>& quads) const;
 
     // GPU work. Every call is synchronous and runs only when its frame key changed.
     void RenderMain(int width, int height);
@@ -112,6 +112,7 @@ private:
     // Why a request cannot run now; nullopt when it can.
     std::optional<ClusterViewerResult> NotReady(bool needClusterModes) const;
     void StartCloneFromViewer();
+    void DrawCloneStatus();
     FrameKey MakeKey(const ClusterViewFrame& frame, std::uint32_t drawMode) const;
 
     // UI.
@@ -148,7 +149,6 @@ private:
     std::uint64_t m_vertexCount = 0;
     std::uint64_t m_triangleCount = 0;
     std::uint32_t m_clusterCount = 0;
-    std::string m_meshNote;
     Vec3 m_center = Vec3::Zero();
     float m_radius = 1.0f;
     std::uint64_t m_dataGeneration = 0;
@@ -198,7 +198,6 @@ private:
     bool m_panning = false;
     bool m_gizmoDrawn = false;
     bool m_debugHovered = false;
-    std::string m_cloneStatus;
 };
 
 } // namespace gte

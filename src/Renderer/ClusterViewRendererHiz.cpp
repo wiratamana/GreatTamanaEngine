@@ -69,7 +69,7 @@ std::optional<CapturedPixels> ClusterViewRenderer::RenderIdPass(
             return std::nullopt;
         }
         const Pipeline* pipeline = s.ViewPipeline(ClusterViewFragment::Id, cullBackFaces);
-        if (pipeline == nullptr || !s.EnsureSet(Impl::SetId::Ghost, false)) {
+        if (pipeline == nullptr || !s.EnsureSet(Impl::SetId::Ghost, false, false)) {
             s.LogOnce("the id pass could not prepare its pipeline or buffers");
             return std::nullopt;
         }
@@ -153,7 +153,7 @@ std::optional<ClusterViewHizInfo> ClusterViewRenderer::CaptureHiz(
         // Depth-only cluster pipeline of the engine: draws both sides, needs no scene set.
         const Pipeline* depthPipeline = s.renderer.CreateClusterPipeline(
             ClusterPipelineKeyFor(ClusterCullFlags::None, true, false), DescriptorSetLayoutHandle::Invalid);
-        if (depthPipeline == nullptr || !s.EnsureSet(Impl::SetId::Ghost, false)) {
+        if (depthPipeline == nullptr || !s.EnsureSet(Impl::SetId::Ghost, false, false)) {
             s.LogOnce("the Hi-Z capture could not prepare its pipeline or buffers");
             return std::nullopt;
         }

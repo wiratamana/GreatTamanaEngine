@@ -1064,10 +1064,15 @@ struct InspectorStateResponseView {
     bool buildEnabled = false;
     std::string buildDisabledReason;
     bool buildRunning = false;
+    std::string cloneButtonDisabledReason;
+    std::string cloneDestination; // File name only.
+    std::string cloneWeld;        // "auto" | "exact" | "position_only"
+    bool openViewerAfterClone = false;
 };
 
 // {"selection_kind","selected_path","shown_path","clusters_text","cluster_status",
-//  "build_button_enabled","build_button_disabled_reason","build_running"}
+//  "build_button_enabled","build_button_disabled_reason","build_running",
+//  "clone_button_disabled_reason","clone_destination","clone_weld","open_viewer_after_clone"}
 std::string BuildInspectorStateResponseJson(const InspectorStateResponseView& view);
 
 // Parsed GET /split_views query: "enabled" must be exactly "true" or "false".

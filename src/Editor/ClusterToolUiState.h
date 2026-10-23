@@ -19,6 +19,15 @@ struct ClusterEligibilityCache {
     bool valid = false;
 };
 
+// Cached name of the next clustered copy; the name search touches the disk, so it is not redone every frame.
+struct CloneDestinationCache {
+    std::string source;
+    std::filesystem::path destination; // Empty = no free name.
+    std::uint64_t finishedCount = 0;   // Runner FinishedCount() at the time of the search.
+    std::chrono::steady_clock::time_point lastCheck{};
+    bool valid = false;
+};
+
 // What the Inspector drew for the selected mesh asset on its last frame. Cleared at the start of each draw.
 struct InspectorShownState {
     std::string assetPath;
@@ -26,6 +35,10 @@ struct InspectorShownState {
     std::string clusterStatus; // Status line of the cluster tool.
     bool buildEnabled = false;
     std::string buildDisabledReason;
+    std::string cloneButtonDisabledReason; // Empty = the clone button is enabled.
+    std::string cloneDestination;          // File name only; empty when none.
+    std::string cloneWeld;                 // "auto" | "exact" | "position_only"; empty when not drawn.
+    bool openViewerAfterClone = false;
 };
 
 // Persistent Inspector state of the cluster tool and the normals tool.
@@ -38,6 +51,7 @@ struct ClusterToolUiState {
     bool openViewerAfterClone = true;
     std::string lastCloneStatus;
     ClusterEligibilityCache eligibility;
+    CloneDestinationCache cloneDestination;
     bool startRefusedBusy = false; // The last "Build Clusters" click found another build running.
     bool lastNormalsSucceeded = false;
     std::string lastNormalsError;

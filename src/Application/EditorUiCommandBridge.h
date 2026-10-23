@@ -133,6 +133,10 @@ struct InspectorStateOutcome {
     bool buildEnabled = false;
     std::string buildDisabledReason;
     bool buildRunning = false;
+    std::string cloneButtonDisabledReason; // Empty = "Create Clustered Copy" is enabled.
+    std::string cloneDestination;          // File name only.
+    std::string cloneWeld;                 // "auto" | "exact" | "position_only"
+    bool openViewerAfterClone = false;
 };
 
 enum class InspectorBuildClustersStatus {

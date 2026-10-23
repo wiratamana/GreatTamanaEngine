@@ -1,6 +1,8 @@
 #include "ViewportProjection.h"
 
 #include <cmath>
+#include <cstddef>
+#include <utility>
 
 namespace gte {
 
@@ -96,6 +98,28 @@ void ProjectSegments(std::span<const FrustumSegment> segments, const Mat4& viewP
         line.width = width;
         out.push_back(line);
     }
+}
+
+void ProjectQuad(std::span<const Vec3, 4> corners, const Mat4& viewProj, Vec2 rectMin, Vec2 rectMax,
+    std::array<std::uint8_t, 4> rgba, std::vector<OverlayQuad2D>& out)
+{
+    OverlayQuad2D quad;
+    quad.rgba = rgba;
+    for (std::size_t i = 0; i < 4; ++i) {
+        if (!ProjectToScreen(corners[i], viewProj, rectMin, rectMax, quad.p[i])) {
+            return;
+        }
+    }
+    float area = 0.0f;
+    for (std::size_t i = 0; i < 4; ++i) {
+        const Vec2& a = quad.p[i];
+        const Vec2& b = quad.p[(i + 1) % 4];
+        area += a.x * b.y - b.x * a.y;
+    }
+    if (area < 0.0f) {
+        std::swap(quad.p[1], quad.p[3]);
+    }
+    out.push_back(quad);
 }
 
 } // namespace gte

@@ -335,9 +335,12 @@ module or adding a new endpoint:
     click in the Project panel. The path must be inside the project root. `400` for a bad path or a
     file that is not a mesh asset, `503` without an editor.
   - `GET /inspector_state` returns `{"selection_kind","selected_path","shown_path","clusters_text",
-    "cluster_status","build_button_enabled","build_button_disabled_reason","build_running"}`. The
+    "cluster_status","build_button_enabled","build_button_disabled_reason","build_running",
+    "clone_button_disabled_reason","clone_destination","clone_weld","open_viewer_after_clone"}`. The
     strings are what the Inspector drew on its last frame (`clusters_text` is the `Clusters: N` line,
     `cluster_status` the cluster tool status line); they are empty when nothing was drawn for that field.
+    `clone_button_disabled_reason` is empty when "Create Clustered Copy" is enabled, `clone_destination` is the
+    file name only, `clone_weld` is `auto|exact|position_only`.
   - `POST /inspector/build_clusters` presses "Build Clusters" for the selected asset. Body: the optional
     fields of `POST /build_clusters` without `gta_path`, with the same checks. It calls
     `StartInspectorClusterBuild()`, the function the button calls, so the weld and limits land in the
@@ -355,7 +358,8 @@ module or adding a new endpoint:
   (`ClusterViewerControl.h`). GPU work (render, verify, Hi-Z capture) runs on the main thread inside the
   editor frame. PNG encoding and the overlay raster run on the network thread. Every number comes from a
   GPU read-back. Status codes: `400` bad input, `409` viewer not open / no valid mesh / device unsupported /
-  no image, `503` no editor or another UI command pending, `504` bridge timeout.
+  cluster modes unavailable / no selected Camera / Hi-Z or ID pass failed / no image, `503` no editor (no viewer
+  in this build) or another UI command pending, `504` bridge timeout.
   - `GET /cluster_viewer/open?path=<absolute .gta>` opens or re-targets the window and loads the mesh before
     it answers. The path must be a mesh inside the project root. Replies `{"success":true,"message","state":{...}}`.
   - `GET /cluster_viewer/state` returns `{"open","path","valid","mesh","settings","cull","hiz","truth",

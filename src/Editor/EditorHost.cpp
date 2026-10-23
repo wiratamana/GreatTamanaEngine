@@ -283,6 +283,10 @@ EditorUiCommandResult RunEditorUiCommand(const EditorUiCommandRequest& request, 
         out.buildEnabled = view.buildEnabled;
         out.buildDisabledReason = std::move(view.buildDisabledReason);
         out.buildRunning = view.buildRunning;
+        out.cloneButtonDisabledReason = std::move(view.cloneButtonDisabledReason);
+        out.cloneDestination = std::move(view.cloneDestination);
+        out.cloneWeld = std::move(view.cloneWeld);
+        out.openViewerAfterClone = view.openViewerAfterClone;
         break;
     }
     case EditorUiCommandKind::InspectorBuildClusters: {

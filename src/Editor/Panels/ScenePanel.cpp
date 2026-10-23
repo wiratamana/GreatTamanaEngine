@@ -88,14 +88,17 @@ void BuildCameraOverlay(
     }
 
     std::vector<OverlaySegment2D> segments;
+    std::vector<OverlayQuad2D> quads;
     for (const CameraPickCandidate& candidate : frame.candidates) {
         const bool isSelected = candidate.id == frame.selectedId;
         const bool isHover = hover && hover->id == candidate.id;
         const OverlayColor color = isSelected ? kSceneCameraSelectedColor : (isHover ? kCameraHoverColor : kSceneCameraBodyColor);
         AppendCameraOverlay(candidate.frustum, isSelected, frame.viewProjection, frame.rectMin, frame.rectMax, color,
-            isHover ? kCameraHoverWidth : kCameraBodyWidth, segments);
+            isHover ? kCameraHoverWidth : kCameraBodyWidth, segments, isSelected ? &quads : nullptr);
     }
-    DrawOverlaySegments(ImGui::GetWindowDrawList(), segments, frame.rectMin, frame.rectMax);
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    DrawOverlayQuads(drawList, quads, frame.rectMin, frame.rectMax);
+    DrawOverlaySegments(drawList, segments, frame.rectMin, frame.rectMax);
 }
 
 } // namespace

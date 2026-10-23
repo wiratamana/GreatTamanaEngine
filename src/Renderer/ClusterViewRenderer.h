@@ -102,9 +102,8 @@ public:
     ClusterViewRenderer(const ClusterViewRenderer&) = delete;
     ClusterViewRenderer& operator=(const ClusterViewRenderer&) = delete;
 
-    // Uploads vertices, indices and the cluster table; waits for GPU idle when a mesh exists.
-    // A bad index list gives meshSet = false. A bad, empty or oversized table gives meshSet = true,
-    // clustersUsable = false and a synthesized one-cluster table. Keeps no CPU copy of the arguments.
+    // Uploads the mesh (GPU idle first) and keeps no CPU copy. A bad index list: meshSet = false.
+    // A bad table: meshSet = true, clustersUsable = false, one synthesized cluster.
     ClusterViewMeshResult SetMesh(std::span<const MeshPreviewVertex> vertices,
         std::span<const std::uint32_t> indices, std::span<const MeshCluster> clusters);
 

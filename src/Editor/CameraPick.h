@@ -27,8 +27,7 @@ struct CameraPickHit {
     bool onApex = false;
 };
 
-// Candidate whose apex (< 14 px) or frustum edge (< 6 px) is nearest to `cursor`.
-// An apex hit beats an edge hit; equal distances prefer the nearer apex in view depth.
+// Nearest candidate by apex (< 14 px, beats edges; ties go to the nearer apex) or frustum edge (< 6 px).
 // Invalid frustums are skipped; an empty rect or list gives nullopt.
 std::optional<CameraPickHit> PickCamera(std::span<const CameraPickCandidate> candidates, const Mat4& viewProjection,
     Vec2 rectMin, Vec2 rectMax, Vec2 cursor);

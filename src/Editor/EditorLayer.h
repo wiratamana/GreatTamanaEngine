@@ -120,6 +120,10 @@ struct InspectorStateView {
     bool buildEnabled = false;
     std::string buildDisabledReason;
     bool buildRunning = false;
+    std::string cloneButtonDisabledReason;
+    std::string cloneDestination; // File name only.
+    std::string cloneWeld;        // "auto" | "exact" | "position_only"
+    bool openViewerAfterClone = false;
 };
 
 // Cluster options handed to InspectorBuildClusters(); the Inspector's own controls take these values.

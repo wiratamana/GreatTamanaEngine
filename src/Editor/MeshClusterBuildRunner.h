@@ -66,6 +66,9 @@ public:
     // Last finished job, kept for the UI status line until the next one replaces it.
     const std::optional<MeshClusterFinishedBuild>& LastFinished() const noexcept { return m_last; }
 
+    // Number of jobs finished so far; changes whenever LastFinished() is replaced.
+    std::uint64_t FinishedCount() const noexcept { return m_finishedCount; }
+
 private:
     StartResult Launch(std::unique_ptr<Payload> payload, std::string activeKey);
 
@@ -75,6 +78,7 @@ private:
     std::string m_readKey;
     std::uint64_t m_activeRequestId = 0;
     std::optional<MeshClusterFinishedBuild> m_last;
+    std::uint64_t m_finishedCount = 0;
     bool m_inlineWarned = false;
 };
 

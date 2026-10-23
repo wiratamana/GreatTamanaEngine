@@ -66,7 +66,7 @@ struct ClusterViewRenderer::Impl {
         rg::GpuBuffer visible;      // uvec2 (instance, cluster) per survivor
         rg::GpuBuffer commands;     // 5 uints per survivor
         rg::GpuBuffer count;        // survivor count
-        rg::GpuBuffer countHost;    // HostRead mirror of `count`
+        rg::GpuBuffer countHost;    // HostRead mirror of `count` (only sets whose count is read back)
         rg::GpuBuffer commandsHost; // HostRead mirror of `commands` (Main and Preview only)
         rg::GpuBuffer visibleHost;  // HostRead mirror of `visible` (Main and Preview only)
         rg::GpuParams<ClusterCullParams> params;
@@ -140,7 +140,8 @@ struct ClusterViewRenderer::Impl {
 
     // ---- Cull sets ----
     CullSet& Set(SetId id) noexcept { return sets[static_cast<std::size_t>(id)]; }
-    bool EnsureSet(SetId id, bool mirrors);
+    // `mirrors`: host copies of commands and survivors. `countRead`: host copy of the count.
+    bool EnsureSet(SetId id, bool mirrors, bool countRead);
     GraphSet ImportSet(rg::RenderGraphBuilder& builder, SetId id);
 
     // ---- Hi-Z decision, the one place that decides ----
@@ -172,7 +173,8 @@ struct ClusterViewRenderer::Impl {
     const Pipeline* ViewPipeline(ClusterViewFragment fragment, bool cullBackFaces);
 
     // Cull (stage runs + final run), optional draw and read-back; fills counts and survivors.
-    RunResult RunPlan(SetId finalSet, const ClusterViewCull& cull, const DrawPlan* draw, bool readSurvivors);
+    RunResult RunPlan(
+        SetId finalSet, const ClusterViewCull& cull, const AppliedCull& applied, const DrawPlan* draw, bool readSurvivors);
 
     Renderer& renderer;
 

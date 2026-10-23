@@ -43,4 +43,14 @@ struct OverlaySegment2D {
 void ProjectSegments(std::span<const FrustumSegment> segments, const Mat4& viewProj, Vec2 rectMin, Vec2 rectMax,
     std::array<std::uint8_t, 4> rgba, float width, std::vector<OverlaySegment2D>& out);
 
+// Filled convex screen-space quad. Points always have the same winding (positive signed area).
+struct OverlayQuad2D {
+    Vec2 p[4];
+    std::array<std::uint8_t, 4> rgba{ 255, 255, 255, 255 };
+};
+
+// Projects 4 world corners into [rectMin, rectMax). Appends nothing if any corner is behind the camera or non-finite.
+void ProjectQuad(std::span<const Vec3, 4> corners, const Mat4& viewProj, Vec2 rectMin, Vec2 rectMax,
+    std::array<std::uint8_t, 4> rgba, std::vector<OverlayQuad2D>& out);
+
 } // namespace gte

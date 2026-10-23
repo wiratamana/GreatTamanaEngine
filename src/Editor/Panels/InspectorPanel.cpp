@@ -1072,6 +1072,7 @@ void BuildClusterToolSection(EditorContext& ctx, const std::string& absolutePath
 }
 
 constexpr const char* kCloneWeldLabels[] = { "Exact", "Position only", "Auto" };
+constexpr const char* kCloneWeldNames[] = { "exact", "position_only", "auto" };
 
 MeshClusterCloneOptions MakeCloneOptions(const ClusterToolUiState& ui)
 {
@@ -1080,6 +1081,24 @@ MeshClusterCloneOptions MakeCloneOptions(const ClusterToolUiState& ui)
     options.cluster.weld = ui.cloneWeldIndex == 1 ? ClusterWeldMode::PositionOnly : ClusterWeldMode::Exact;
     options.autoWeld = ui.cloneWeldIndex == 2;
     return options;
+}
+
+// Next free copy name. Searched again only when the source changed, a job finished or the recheck interval passed.
+const std::filesystem::path& RefreshCloneDestination(
+    ClusterToolUiState& ui, const MeshClusterBuildRunner* runner, const std::string& absolutePath)
+{
+    CloneDestinationCache& cache = ui.cloneDestination;
+    const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+    const std::uint64_t finishedCount = runner != nullptr ? runner->FinishedCount() : 0;
+    if (!cache.valid || cache.source != absolutePath || cache.finishedCount != finishedCount
+        || now - cache.lastCheck >= kClusterEligibilityRecheckInterval) {
+        cache.source = absolutePath;
+        cache.destination = ChooseClusteredCloneDestination(PathFromUtf8(absolutePath));
+        cache.finishedCount = finishedCount;
+        cache.lastCheck = now;
+        cache.valid = true;
+    }
+    return cache.destination;
 }
 
 // "Create Clustered Copy": weld, target name, viewer checkbox and the button. The source file is never written.
@@ -1094,7 +1113,7 @@ void BuildClusterCloneSection(EditorContext& ctx, const std::string& absolutePat
     ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "Clustered Copy");
 
     const ClusterBuildStartResult gate = CheckClusterBuildGate(ui, runner, absolutePath);
-    const std::filesystem::path destination = ChooseClusteredCloneDestination(source);
+    const std::filesystem::path destination = RefreshCloneDestination(ui, runner, absolutePath);
     std::string blockedReason = gate.message;
     if (gate.status == ClusterBuildStart::Ready && destination.empty()) {
         blockedReason = "No free file name for the copy.";
@@ -1123,6 +1142,12 @@ void BuildClusterCloneSection(EditorContext& ctx, const std::string& absolutePat
         ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s", ui.lastCloneStatus.c_str());
     }
     ImGui::TextDisabled("The original is not changed. A re-import of it never touches the copy.");
+
+    InspectorShownState& shown = ui.shown;
+    shown.cloneButtonDisabledReason = blockedReason;
+    shown.cloneDestination = destination.empty() ? std::string() : PathToUtf8(destination.filename());
+    shown.cloneWeld = kCloneWeldNames[ui.cloneWeldIndex];
+    shown.openViewerAfterClone = ui.openViewerAfterClone;
 }
 
 // Opens the cluster viewer window on this mesh.

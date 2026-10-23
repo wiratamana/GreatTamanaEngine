@@ -465,6 +465,7 @@ void WriteImageResponse(const httplib::Request& req, httplib::Response& res, con
         return;
     }
     if (overlay) {
+        RasterizeQuads(rgba, width, height, image.overlayQuads);
         RasterizeSegments(rgba, width, height, image.overlay);
     }
     const std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(rgba.data(), width, height);
@@ -919,6 +920,10 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         view.buildEnabled = outcome.buildEnabled;
         view.buildDisabledReason = outcome.buildDisabledReason;
         view.buildRunning = outcome.buildRunning;
+        view.cloneButtonDisabledReason = outcome.cloneButtonDisabledReason;
+        view.cloneDestination = outcome.cloneDestination;
+        view.cloneWeld = outcome.cloneWeld;
+        view.openViewerAfterClone = outcome.openViewerAfterClone;
         res.status = 200;
         res.set_content(BuildInspectorStateResponseJson(view), "application/json");
     });

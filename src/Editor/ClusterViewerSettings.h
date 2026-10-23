@@ -2,6 +2,7 @@
 
 // Cluster viewer settings, debug camera data and the text parser of the set keys. Pure: no ImGui, no GPU.
 
+#include "CameraFrustumGizmo.h"
 #include "../ECS/Components/Transform.h"
 #include "../Math/Mat4.h"
 #include "../Math/Quat.h"
@@ -33,11 +34,11 @@ struct ClusterViewerSettings {
 };
 
 // Ranges shared by the parser, the UI clamp and the validators.
-inline constexpr float kDebugCameraMinFov = 1.0f;
-inline constexpr float kDebugCameraMaxFov = 170.0f;
+inline constexpr float kDebugCameraMinFov = kFrustumMinFovDegrees;
+inline constexpr float kDebugCameraMaxFov = kFrustumMaxFovDegrees;
 inline constexpr float kDebugCameraMinNear = 1.0e-4f;
 inline constexpr float kDebugCameraMaxNear = 1.0e6f;
-inline constexpr float kDebugCameraMaxFar = 1.0e7f;
+inline constexpr float kDebugCameraMaxFar = kFrustumMaxFar;
 inline constexpr float kDebugCameraFarOverNear = 1.01f; // far must exceed near by this factor
 inline constexpr float kDebugCameraMinAspect = 0.1f;
 inline constexpr float kDebugCameraMaxAspect = 10.0f;

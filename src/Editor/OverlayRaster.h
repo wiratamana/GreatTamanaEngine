@@ -1,6 +1,6 @@
 #pragma once
 
-// CPU line rasterizer: draws 2D overlay segments into an RGBA8 image.
+// CPU rasterizer: draws 2D overlay quads and segments into an RGBA8 image.
 
 #include "ViewportProjection.h"
 
@@ -8,6 +8,10 @@
 #include <span>
 
 namespace gte {
+
+// Fills convex quads with alpha-over blending at pixel centres, clipped to the image.
+// Same image contract as RasterizeSegments; draw quads first so lines stay on top.
+void RasterizeQuads(std::span<std::uint8_t> rgba, int width, int height, std::span<const OverlayQuad2D> quads);
 
 // Draws clipped 1 px lines with alpha-over blending. `rgba` holds width * height * 4 bytes, row 0 on top.
 // An empty image, a too small span or a non-finite segment changes nothing.

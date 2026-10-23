@@ -159,7 +159,8 @@ std::optional<ClusterViewerImage> SceneCameraAdapter::CaptureImage(bool overlay)
         for (const CameraPickCandidate& candidate : frame.candidates) {
             const bool isSelected = candidate.id == frame.selectedId;
             AppendCameraOverlay(candidate.frustum, isSelected, frame.viewProjection, Vec2::Zero(), imageMax,
-                isSelected ? kSceneCameraSelectedColor : kSceneCameraBodyColor, kOverlayLineWidth, image.overlay);
+                isSelected ? kSceneCameraSelectedColor : kSceneCameraBodyColor, kOverlayLineWidth, image.overlay,
+                isSelected ? &image.overlayQuads : nullptr);
         }
     }
     return image;

@@ -146,6 +146,7 @@ std::optional<MeshClusterFinishedBuild> MeshClusterBuildRunner::Poll()
     m_readKey.clear();
     m_activeRequestId = 0;
     m_last = finished;
+    ++m_finishedCount;
     return finished;
 }
 

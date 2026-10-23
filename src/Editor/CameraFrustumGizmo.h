@@ -11,6 +11,11 @@
 
 namespace gte {
 
+// Lens limits a valid frustum must respect.
+inline constexpr float kFrustumMinFovDegrees = 1.0f;
+inline constexpr float kFrustumMaxFovDegrees = 170.0f;
+inline constexpr float kFrustumMaxFar = 1.0e7f;
+
 struct FrustumInput {
     Vec3 position = Vec3::Zero();
     Quat rotation = Quat::Identity();

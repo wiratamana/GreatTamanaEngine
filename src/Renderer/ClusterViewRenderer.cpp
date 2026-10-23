@@ -53,8 +53,8 @@ constexpr SetNames kSetNames[kSetCount] = {
         "", "", "ClusterView.StageA.Reset", "ClusterView.StageA.Cull", "ClusterView.StageA.ReadCount", "", "" },
     { "ClusterViewStageBVisible", "ClusterViewStageBCommands", "ClusterViewStageBCount", "ClusterViewStageBCountHost",
         "", "", "ClusterView.StageB.Reset", "ClusterView.StageB.Cull", "ClusterView.StageB.ReadCount", "", "" },
-    { "ClusterViewGhostVisible", "ClusterViewGhostCommands", "ClusterViewGhostCount", "ClusterViewGhostCountHost",
-        "", "", "ClusterView.Ghost.Reset", "ClusterView.Ghost.Cull", "ClusterView.Ghost.ReadCount", "", "" },
+    { "ClusterViewGhostVisible", "ClusterViewGhostCommands", "ClusterViewGhostCount", "", "", "",
+        "ClusterView.Ghost.Reset", "ClusterView.Ghost.Cull", "", "", "" },
 };
 
 constexpr const char* kDrawNames[2] = { "ClusterView.Main.Draw", "ClusterView.Preview.Draw" };
@@ -74,10 +74,6 @@ std::array<float, 4> ToClearColor(const std::array<std::uint8_t, 4>& rgba) noexc
 }
 
 } // namespace
-
-// ---------------------------------------------------------------------------------------------
-// Impl
-// ---------------------------------------------------------------------------------------------
 
 ClusterViewRenderer::Impl::Impl(Renderer& owner)
     : renderer(owner)
@@ -213,10 +209,11 @@ void ClusterViewRenderer::Impl::ReleaseSlot(SlotTarget& slot)
     slot.height = 0;
 }
 
-bool ClusterViewRenderer::Impl::EnsureSet(SetId id, bool wantMirrors)
+bool ClusterViewRenderer::Impl::EnsureSet(SetId id, bool wantMirrors, bool wantCount)
 {
     CullSet& current = Set(id);
-    if (current.visible.IsValid() && current.capacity == tableClusters && (current.mirrors || !wantMirrors)) {
+    if (current.visible.IsValid() && current.capacity == tableClusters && (current.mirrors || !wantMirrors)
+        && (current.countHost.IsValid() || !wantCount)) {
         return true;
     }
     const SetNames& names = kSetNames[static_cast<std::size_t>(id)];
@@ -233,7 +230,9 @@ bool ClusterViewRenderer::Impl::EnsureSet(SetId id, bool wantMirrors)
             rg::GpuBufferUse::Storage | rg::GpuBufferUse::Indirect | rg::GpuBufferUse::TransferSrc);
         fresh.count = rg::GpuBuffer(device, kClusterMinBufferBytes, names.count,
             rg::GpuBufferUse::Storage | rg::GpuBufferUse::Indirect | rg::GpuBufferUse::TransferSrc);
-        fresh.countHost = rg::GpuBuffer(device, kClusterMinBufferBytes, names.countHost, kHostRead);
+        if (wantCount) {
+            fresh.countHost = rg::GpuBuffer(device, kClusterMinBufferBytes, names.countHost, kHostRead);
+        }
         if (wantMirrors) {
             fresh.commandsHost = rg::GpuBuffer(device, commandBytes, names.commandsHost, kHostRead);
             fresh.visibleHost = rg::GpuBuffer(device, visibleBytes, names.visibleHost, kHostRead);
@@ -258,7 +257,9 @@ ClusterViewRenderer::Impl::GraphSet ClusterViewRenderer::Impl::ImportSet(rg::Ren
     graphSet.visible = builder.Import(set.visible);
     graphSet.commands = builder.Import(set.commands);
     graphSet.count = builder.Import(set.count);
-    graphSet.countHost = builder.Import(set.countHost);
+    if (set.countHost.IsValid()) {
+        graphSet.countHost = builder.Import(set.countHost);
+    }
     if (set.mirrors) {
         graphSet.commandsHost = builder.Import(set.commandsHost);
         graphSet.visibleHost = builder.Import(set.visibleHost);
@@ -420,7 +421,7 @@ const Pipeline* ClusterViewRenderer::Impl::ViewPipeline(ClusterViewFragment frag
 }
 
 ClusterViewRenderer::Impl::RunResult ClusterViewRenderer::Impl::RunPlan(
-    SetId finalSet, const ClusterViewCull& cull, const DrawPlan* draw, bool readSurvivors)
+    SetId finalSet, const ClusterViewCull& cull, const AppliedCull& applied, const DrawPlan* draw, bool readSurvivors)
 {
     RunResult result;
     const auto start = std::chrono::steady_clock::now();
@@ -429,7 +430,6 @@ ClusterViewRenderer::Impl::RunResult ClusterViewRenderer::Impl::RunPlan(
         return result;
     }
 
-    const AppliedCull applied = ResolveFlags(cull);
     result.occlusionApplied = applied.occlusionApplied;
     result.hizCut = applied.hizCut;
 
@@ -447,8 +447,8 @@ ClusterViewRenderer::Impl::RunResult ClusterViewRenderer::Impl::RunPlan(
     const bool ghost = draw != nullptr && draw->ghost != nullptr;
     const std::uint32_t total = tableClusters;
 
-    if (!EnsureSet(finalSet, true) || (orderedCount >= 2 && !EnsureSet(SetId::StageA, false))
-        || (orderedCount >= 3 && !EnsureSet(SetId::StageB, false)) || (ghost && !EnsureSet(SetId::Ghost, false))) {
+    if (!EnsureSet(finalSet, true, true) || (orderedCount >= 2 && !EnsureSet(SetId::StageA, false, true))
+        || (orderedCount >= 3 && !EnsureSet(SetId::StageB, false, true)) || (ghost && !EnsureSet(SetId::Ghost, false, false))) {
         result.note = "the cull buffers could not be allocated";
         return result;
     }
@@ -487,11 +487,11 @@ ClusterViewRenderer::Impl::RunResult ClusterViewRenderer::Impl::RunPlan(
         }
 
         // Stage run k applies the first k flags; the final run applies all of them.
+        // Occlusion is the last flag in shader order, so a stage prefix never holds it.
         ClusterCullFlags prefix = ClusterCullFlags::None;
         for (std::size_t k = 0; k < stageCount; ++k) {
             prefix = prefix | ordered[k];
-            ok = DeclareCull(builder, stages[k], instanceHandle, tableHandle, hizHandle,
-                     MakeParams(cull, prefix, applied.occlusionApplied && HasClusterCullFlag(prefix, ClusterCullFlags::Occlusion)))
+            ok = DeclareCull(builder, stages[k], instanceHandle, tableHandle, hizHandle, MakeParams(cull, prefix, false))
                 && ok;
         }
         ok = DeclareCull(builder, fin, instanceHandle, tableHandle, hizHandle,
@@ -618,10 +618,6 @@ ClusterViewRenderer::Impl::RunResult ClusterViewRenderer::Impl::RunPlan(
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     return result;
 }
-
-// ---------------------------------------------------------------------------------------------
-// ClusterViewRenderer
-// ---------------------------------------------------------------------------------------------
 
 std::unique_ptr<ClusterViewRenderer> ClusterViewRenderer::TryCreate(Renderer& renderer, std::string* whyNot)
 {
@@ -783,7 +779,8 @@ ClusterViewRender ClusterViewRenderer::Render(ClusterViewSlot slot, const Cluste
         }
 
         const Impl::DrawPlan draw{ &target, &frame, survivors, ghost };
-        const Impl::RunResult run = s.RunPlan(isMain ? Impl::SetId::Main : Impl::SetId::Preview, frame.cull, &draw, false);
+        const Impl::RunResult run =
+            s.RunPlan(isMain ? Impl::SetId::Main : Impl::SetId::Preview, frame.cull, applied, &draw, false);
         out.ok = run.ok;
         out.note = run.note;
         out.counts = run.counts;
@@ -814,7 +811,8 @@ ClusterViewCullResult ClusterViewRenderer::RunCull(const ClusterViewCull& cull)
             s.LogOnce(out.note);
             return out;
         }
-        Impl::RunResult run = s.RunPlan(Impl::SetId::Main, cull, nullptr, true);
+        const Impl::AppliedCull applied = s.ResolveFlags(cull);
+        Impl::RunResult run = s.RunPlan(Impl::SetId::Main, cull, applied, nullptr, true);
         out.ok = run.ok;
         out.note = std::move(run.note);
         out.counts = run.counts;
