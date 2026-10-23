@@ -22,6 +22,7 @@
 #include "../AssetPreviewTexture.h"
 #include "../BoneViewerWindow.h"
 #include "../MemoryPanelData.h" // FormatBytes() - reused for the asset size field below.
+#include "../ClusterStatusText.h"
 #include "../MeshClusterBuildRunner.h"
 #include "../ModelRigCache.h" // ModelRigCache::GetOrLoad() - shared bones/rigid-bodies/joints cache, Model Part section.
 #include "../../Encoding/Utf8Path.h"
@@ -1004,44 +1005,6 @@ ClusterBuildStartResult CheckClusterBuildGate(
     return gate;
 }
 
-enum class ClusterStatusTone { Quiet, Warn, Good, Bad };
-
-struct ClusterStatus {
-    ClusterStatusTone tone = ClusterStatusTone::Quiet;
-    std::string text; // Empty when there is nothing to report.
-    std::string note; // Optional second line, always a warning.
-};
-
-// Status of the last build of `path`, as the tool shows it.
-ClusterStatus DescribeClusterStatus(
-    const ClusterToolUiState& ui, const MeshClusterBuildRunner* runner, const std::filesystem::path& path)
-{
-    ClusterStatus status;
-    if (runner != nullptr && runner->IsBuildingPath(path)) {
-        status.text = "Building clusters...";
-    } else if (ui.startRefusedBusy) {
-        status.tone = ClusterStatusTone::Warn;
-        status.text = "Busy: another cluster build is running.";
-    } else if (runner != nullptr && runner->LastFinished().has_value()
-        && WriterRegistryKey(runner->LastFinished()->path) == WriterRegistryKey(path)) {
-        const MeshClusterBuildOutcome& outcome = runner->LastFinished()->outcome;
-        const MeshClusterReport& report = outcome.report;
-        if (outcome.success) {
-            status.tone = ClusterStatusTone::Good;
-            status.text = FormatClusterStatusLine(report.clusterCount, report.avgTrianglesPerCluster,
-                report.vertexCountBefore, report.vertexCountAfter, report.milliseconds);
-            if (report.poorFill) {
-                status.note = report.weld == ClusterWeldMode::Exact ? "Low cluster fill. Try the Position only weld."
-                                                                    : "Low cluster fill.";
-            }
-        } else {
-            status.tone = ClusterStatusTone::Bad;
-            status.text = "Cluster build failed: " + outcome.message;
-        }
-    }
-    return status;
-}
-
 // Weld and limit controls, the "Build Clusters" button and the status of the last build of this asset.
 void BuildClusterToolSection(EditorContext& ctx, const std::string& absolutePath)
 {
@@ -1087,7 +1050,7 @@ void BuildClusterToolSection(EditorContext& ctx, const std::string& absolutePath
     }
     ImGui::EndDisabled();
 
-    const ClusterStatus status = DescribeClusterStatus(ui, runner, path);
+    const ClusterStatus status = DescribeClusterStatus(MakeClusterStatusInput(ui, runner, path));
     if (!status.text.empty()) {
         switch (status.tone) {
         case ClusterStatusTone::Quiet: ImGui::TextDisabled("%s", status.text.c_str()); break;
@@ -1106,6 +1069,72 @@ void BuildClusterToolSection(EditorContext& ctx, const std::string& absolutePath
     shown.clusterStatus = status.note.empty() ? status.text : status.text + " " + status.note;
     shown.buildEnabled = !buildBlocked;
     shown.buildDisabledReason = gate.message;
+}
+
+constexpr const char* kCloneWeldLabels[] = { "Exact", "Position only", "Auto" };
+
+MeshClusterCloneOptions MakeCloneOptions(const ClusterToolUiState& ui)
+{
+    MeshClusterCloneOptions options;
+    options.cluster = MakeClusterOptions(ui);
+    options.cluster.weld = ui.cloneWeldIndex == 1 ? ClusterWeldMode::PositionOnly : ClusterWeldMode::Exact;
+    options.autoWeld = ui.cloneWeldIndex == 2;
+    return options;
+}
+
+// "Create Clustered Copy": weld, target name, viewer checkbox and the button. The source file is never written.
+void BuildClusterCloneSection(EditorContext& ctx, const std::string& absolutePath)
+{
+    ScopedUniqueId idScope(0, "InspectorPanel::ClusterClone");
+    ClusterToolUiState& ui = ctx.clusterTool;
+    MeshClusterBuildRunner* const runner = ctx.clusterBuildRunner;
+    const std::filesystem::path source = PathFromUtf8(absolutePath);
+
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "Clustered Copy");
+
+    const ClusterBuildStartResult gate = CheckClusterBuildGate(ui, runner, absolutePath);
+    const std::filesystem::path destination = ChooseClusteredCloneDestination(source);
+    std::string blockedReason = gate.message;
+    if (gate.status == ClusterBuildStart::Ready && destination.empty()) {
+        blockedReason = "No free file name for the copy.";
+    }
+    const bool blocked = !blockedReason.empty();
+
+    ui.cloneWeldIndex = ClampCloneWeldIndex(ui.cloneWeldIndex);
+    ImGui::Combo("Weld", &ui.cloneWeldIndex, kCloneWeldLabels, 3);
+    ImGui::TextDisabled("Auto tries Exact and falls back to Position only. Position only recomputes smooth normals.");
+    if (!destination.empty()) {
+        ImGui::TextDisabled("Will create: %s", PathToUtf8(destination.filename()).c_str());
+    }
+    ImGui::Checkbox("Open in Cluster Viewer when done", &ui.openViewerAfterClone);
+
+    ImGui::BeginDisabled(blocked);
+    if (ImGui::Button("Create Clustered Copy")) {
+        const bool busy = runner->StartClone(source, destination, MakeCloneOptions(ui), ui.openViewerAfterClone, 0)
+            == MeshClusterBuildRunner::StartResult::Busy;
+        ui.lastCloneStatus = busy ? "A cluster build is already running." : std::string();
+    }
+    ImGui::EndDisabled();
+    if (blocked && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("%s", blockedReason.c_str());
+    }
+    if (!ui.lastCloneStatus.empty()) {
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s", ui.lastCloneStatus.c_str());
+    }
+    ImGui::TextDisabled("The original is not changed. A re-import of it never touches the copy.");
+}
+
+// Opens the cluster viewer window on this mesh.
+void BuildClusterViewerSection(EditorContext& ctx, const std::string& absolutePath)
+{
+    ScopedUniqueId idScope(1, "InspectorPanel::ClusterViewer");
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "Cluster Viewer");
+    if (ImGui::Button("Open Cluster Viewer")) {
+        ctx.pendingClusterViewerPath = absolutePath;
+    }
+    ImGui::TextDisabled("Shows clusters and simulates culling with a debug camera.");
 }
 
 // Rewrites every stored normal from the mesh geometry; disabled while a cluster build writes the same file.
@@ -1143,6 +1172,8 @@ void BuildMeshAssetTools(
 {
     ScopedUniqueId idScope(siteId, "InspectorPanel::MeshAssetTools");
     BuildClusterToolSection(ctx, absolutePath);
+    BuildClusterCloneSection(ctx, absolutePath);
+    BuildClusterViewerSection(ctx, absolutePath);
     ImGui::Separator();
     BuildRecomputeNormalsFromGeometryButton(ctx, absolutePath, meshInstantiationSystem);
 }

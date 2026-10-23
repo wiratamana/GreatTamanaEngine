@@ -12,6 +12,7 @@
 #include "../Core/FeatureKit/FeatureDebug.h"
 #include "../Core/Logging.h"
 #include "../Core/InstanceGridLimits.h"
+#include "../Editor/SceneCameraControl.h" // Report structs of the viewer and Scene camera routes.
 // editor-core-separation-7 campaign, PHASE4 - GET /render_graph's response
 // body needs rg::RenderGraphMetadata's own to_json() (see
 // BuildRenderGraphMetadataResponseJson() below).
@@ -1264,5 +1265,96 @@ FeatureDebugReply BuildFeatureDebugListReply(
 // {"feature":"X","fields":{...}}. A non-finite number is written as null.
 FeatureDebugReply BuildFeatureDebugReply(bool alreadyPending, bool timedOut, bool found,
     const std::string& featureName, const fx::FeatureDebugResult& result);
+
+// --- /cluster_viewer/*, POST /clone_clusters and /scene_camera/*: pure parsing and JSON building.
+
+// Query pairs of GET /cluster_viewer/set. At least one pair, at most 64, unique non-empty keys.
+// Key names and value ranges are checked by the viewer, which applies all pairs or none.
+struct ParsedClusterViewerSetQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::vector<KeyValue> pairs;
+};
+ParsedClusterViewerSetQuery ParseClusterViewerSetQuery(const std::vector<std::pair<std::string, std::string>>& params);
+
+// Query of the pick routes: x and y are finite numbers in 0..1 (fractions of the image size).
+struct ParsedPickQuery {
+    bool valid = false;
+    std::string errorMessage;
+    float x = 0.0f;
+    float y = 0.0f;
+};
+ParsedPickQuery ParsePickQuery(const std::string& xParam, const std::string& yParam);
+
+// Query of GET /cluster_viewer/image: target "view" (default) or "debug"; overlay "true"/"false" (default false).
+struct ParsedClusterViewerImageQuery {
+    bool valid = false;
+    std::string errorMessage;
+    bool debugCamera = false;
+    bool overlay = false;
+};
+ParsedClusterViewerImageQuery ParseClusterViewerImageQuery(const std::string& targetParam, const std::string& overlayParam);
+
+// Query of GET /scene_camera/image: overlay "true" (default) or "false".
+struct ParsedSceneCameraImageQuery {
+    bool valid = false;
+    std::string errorMessage;
+    bool overlay = true;
+};
+ParsedSceneCameraImageQuery ParseSceneCameraImageQuery(const std::string& overlayParam);
+
+// HTTP status of a failed viewer or Scene camera command: 400 bad input, 404 unknown camera name,
+// 503 no editor, 409 for every state conflict (not open, no valid mesh, unsupported, not rendered, no camera).
+int HttpStatusForError(ClusterViewerError error);
+int HttpStatusForError(SceneCameraError error);
+
+// {"open","path","valid","mesh":{...},"settings":{key:value},"cull":{...},"hiz":{...},"truth":{...},
+//  "debugCamera":{...},"clusterPathSupported"}
+std::string BuildClusterViewerStateJson(const ClusterViewerReport& report);
+
+// {"success":true,"message":"...","state":{...}} for open/set/verify/capture_hiz; failures use the generic error shape.
+std::string BuildClusterViewerCommandResponseJson(const ClusterViewerResult& result, const ClusterViewerReport& report);
+
+// {"success":true,"hit":<bool>,"entity":"<name>"} ("entity" only when a name is given).
+std::string BuildPickResponseJson(bool hit, const std::string& entityName);
+
+// Parsed POST /clone_clusters body: {"gta_path","weld":"auto"|"exact"|"position_only","open_viewer",
+// "max_vertices","max_triangles","cone_weight"}. Only gta_path is required. Ranges are those of POST /build_clusters.
+struct ParsedCloneClustersRequest {
+    bool valid = false;
+    std::string errorMessage;
+    std::string gtaPath;
+    std::string weld = "auto";
+    bool openViewer = false;
+    std::uint32_t maxVertices = 64;
+    std::uint32_t maxTriangles = 124;
+    float coneWeight = 0.5f;
+};
+ParsedCloneClustersRequest ParseCloneClustersRequest(const std::string& jsonBody);
+
+// Network-side copy of one successful clone.
+struct CloneClustersResponseView {
+    std::string createdPath;
+    std::string guid;
+    std::string weldUsed;
+    bool weldFellBack = false;
+    std::uint64_t vertexCountBefore = 0;
+    std::uint64_t vertexCountAfter = 0;
+    std::uint64_t triangleCount = 0;
+    std::uint64_t clusterCount = 0;
+    double avgTrianglesPerCluster = 0.0;
+    double milliseconds = 0.0;
+    std::string message;
+};
+
+// {"success":true,"created_path","guid","weld_used","weld_fell_back","vertex_count_before","vertex_count_after",
+//  "triangle_count","cluster_count","avg_triangles_per_cluster","milliseconds","message"}
+std::string BuildCloneClustersResponseJson(const CloneClustersResponseView& view);
+
+// {"rendered","image":{"width","height"},"selected_entity","cameras":[{...}],"selected_frustum":[{"a":{"x","y"},"b":{"x","y"}}]}
+std::string BuildSceneCameraStateJson(const SceneCameraReport& report);
+
+// {"success":true,"selected":"<entity name>"}
+std::string BuildSceneCameraSelectResponseJson(const std::string& entityName);
 
 } // namespace gte::Network

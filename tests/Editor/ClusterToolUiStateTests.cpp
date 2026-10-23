@@ -37,6 +37,14 @@ TEST(ClusterToolUiStateTest, ConeWeightIsClampedAndFinite)
     EXPECT_FLOAT_EQ(ClampClusterConeWeight(std::numeric_limits<float>::quiet_NaN()), 0.5f);
 }
 
+TEST(ClusterToolUiStateTest, CloneWeldIndexIsClamped)
+{
+    EXPECT_EQ(ClampCloneWeldIndex(-1), 0);
+    EXPECT_EQ(ClampCloneWeldIndex(1), 1);
+    EXPECT_EQ(ClampCloneWeldIndex(9), 2);
+    EXPECT_EQ(ClusterToolUiState{}.cloneWeldIndex, 2);
+}
+
 TEST(ClusterToolUiStateTest, StatusLineShowsCountsAndTime)
 {
     EXPECT_EQ(FormatClusterStatusLine(8100, 123.5f, 3136374, 524000, 4200.0),

@@ -150,7 +150,7 @@ void WriterClaim::Release() noexcept
 }
 
 bool WriteFileAtomically(const std::filesystem::path& target, std::span<const ConstByteSpan> parts,
-    const FileIdentity* expected, std::string* error)
+    const FileIdentity* expected, std::string* error, bool createOnly)
 {
     const auto fail = [error](std::string message) {
         if (error != nullptr) {
@@ -205,7 +205,12 @@ bool WriteFileAtomically(const std::filesystem::path& target, std::span<const Co
             return fail("temp file size mismatch");
         }
 
-        if (expected != nullptr) {
+        if (createOnly) {
+            std::error_code existsEc;
+            if (std::filesystem::exists(target, existsEc) || existsEc) {
+                return fail("destination exists");
+            }
+        } else if (expected != nullptr) {
             const std::optional<FileIdentity> current = ReadFileIdentity(target);
             if (!current.has_value() || !(*current == *expected)) {
                 return fail("changed on disk");

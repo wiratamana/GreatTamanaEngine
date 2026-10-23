@@ -9,13 +9,20 @@
 
 namespace gte {
 
-// Owned until the finished build was polled, so the job never outlives its data.
+// Owned until the finished job was polled, so the job never outlives its data.
 struct MeshClusterBuildRunner::Payload {
-    std::filesystem::path path;
+    enum class Kind : std::uint8_t { InPlace, Clone };
+
+    Kind kind = Kind::InPlace;
+    std::filesystem::path path; // The source asset.
+    std::filesystem::path destination; // Clone only.
     MeshClusterOptions options;
+    MeshClusterCloneOptions cloneOptions;
+    bool openViewerAfterClone = false;
     std::atomic<bool> cancel{ false };
     std::uint64_t requestId = 0;
     MeshClusterBuildOutcome outcome;
+    MeshClusterCloneOutcome cloneOutcome;
 };
 
 namespace {
@@ -25,14 +32,25 @@ void RunBuildJob(void* raw)
 {
     auto& payload = *static_cast<MeshClusterBuildRunner::Payload*>(raw);
     GTE_PROFILE_JOB_SCOPE("MeshClusterBuild");
+    const bool clone = payload.kind == MeshClusterBuildRunner::Payload::Kind::Clone;
     try {
-        payload.outcome = BuildClustersInGtaFile(payload.path, payload.options, &payload.cancel);
+        if (clone) {
+            payload.cloneOutcome = CloneMeshAssetWithClusters(
+                payload.path, payload.destination, payload.cloneOptions, &payload.cancel);
+            payload.outcome.success = payload.cloneOutcome.success;
+            payload.outcome.message = payload.cloneOutcome.message;
+            payload.outcome.report = payload.cloneOutcome.report;
+        } else {
+            payload.outcome = BuildClustersInGtaFile(payload.path, payload.options, &payload.cancel);
+        }
     } catch (const std::exception& e) {
+        payload.cloneOutcome = MeshClusterCloneOutcome{};
         payload.outcome = MeshClusterBuildOutcome{};
-        payload.outcome.message = std::string("cluster build failed: ") + e.what();
+        payload.outcome.message = std::string(clone ? "cluster clone failed: " : "cluster build failed: ") + e.what();
     } catch (...) {
+        payload.cloneOutcome = MeshClusterCloneOutcome{};
         payload.outcome = MeshClusterBuildOutcome{};
-        payload.outcome.message = "cluster build failed: unknown error";
+        payload.outcome.message = clone ? "cluster clone failed: unknown error" : "cluster build failed: unknown error";
     }
 }
 
@@ -49,6 +67,26 @@ MeshClusterBuildRunner::~MeshClusterBuildRunner()
     }
 }
 
+MeshClusterBuildRunner::StartResult MeshClusterBuildRunner::Launch(std::unique_ptr<Payload> payload, std::string activeKey)
+{
+    m_payload = std::move(payload);
+    m_activeKey = std::move(activeKey);
+    m_activeRequestId = m_payload->requestId;
+    m_handle = Jobs::JobHandle{};
+
+    Jobs::JobSystem& jobs = Jobs::JobSystem::Instance();
+    if (jobs.WorkerCount() < 2) {
+        if (!m_inlineWarned) {
+            m_inlineWarned = true;
+            GTE_LOG_WARNING("MeshClustering", "Fewer than two job workers: the cluster job runs on the calling thread.");
+        }
+        RunBuildJob(m_payload.get());
+    } else {
+        jobs.Schedule(&RunBuildJob, m_payload.get(), m_handle);
+    }
+    return StartResult::Started;
+}
+
 MeshClusterBuildRunner::StartResult MeshClusterBuildRunner::Start(
     const std::filesystem::path& gtaPath, const MeshClusterOptions& options, std::uint64_t requestId)
 {
@@ -56,25 +94,31 @@ MeshClusterBuildRunner::StartResult MeshClusterBuildRunner::Start(
         return StartResult::Busy;
     }
 
-    m_payload = std::make_unique<Payload>();
-    m_payload->path = gtaPath;
-    m_payload->options = options;
-    m_payload->requestId = requestId;
-    m_activeKey = WriterRegistryKey(gtaPath);
-    m_activeRequestId = requestId;
-    m_handle = Jobs::JobHandle{};
+    auto payload = std::make_unique<Payload>();
+    payload->path = gtaPath;
+    payload->options = options;
+    payload->requestId = requestId;
+    m_readKey.clear();
+    return Launch(std::move(payload), WriterRegistryKey(gtaPath));
+}
 
-    Jobs::JobSystem& jobs = Jobs::JobSystem::Instance();
-    if (jobs.WorkerCount() < 2) {
-        if (!m_inlineWarned) {
-            m_inlineWarned = true;
-            GTE_LOG_WARNING("MeshClustering", "Fewer than two job workers: the cluster build runs on the calling thread.");
-        }
-        RunBuildJob(m_payload.get());
-    } else {
-        jobs.Schedule(&RunBuildJob, m_payload.get(), m_handle);
+MeshClusterBuildRunner::StartResult MeshClusterBuildRunner::StartClone(const std::filesystem::path& source,
+    const std::filesystem::path& destination, const MeshClusterCloneOptions& options, bool openViewerAfterClone,
+    std::uint64_t requestId)
+{
+    if (m_payload) {
+        return StartResult::Busy;
     }
-    return StartResult::Started;
+
+    auto payload = std::make_unique<Payload>();
+    payload->kind = Payload::Kind::Clone;
+    payload->path = source;
+    payload->destination = destination;
+    payload->cloneOptions = options;
+    payload->openViewerAfterClone = openViewerAfterClone;
+    payload->requestId = requestId;
+    m_readKey = WriterRegistryKey(source);
+    return Launch(std::move(payload), WriterRegistryKey(destination));
 }
 
 std::optional<MeshClusterFinishedBuild> MeshClusterBuildRunner::Poll()
@@ -87,9 +131,19 @@ std::optional<MeshClusterFinishedBuild> MeshClusterBuildRunner::Poll()
     finished.path = std::move(m_payload->path);
     finished.requestId = m_payload->requestId;
     finished.outcome = std::move(m_payload->outcome);
+    if (m_payload->kind == Payload::Kind::Clone) {
+        MeshClusterCloneOutcome& clone = m_payload->cloneOutcome;
+        finished.wasClone = true;
+        finished.openViewerAfterClone = m_payload->openViewerAfterClone;
+        finished.createdPath = std::move(clone.createdPath);
+        finished.guid = clone.guid;
+        finished.weldUsed = clone.weldUsed;
+        finished.weldFellBack = clone.weldFellBack;
+    }
 
     m_payload.reset();
     m_activeKey.clear();
+    m_readKey.clear();
     m_activeRequestId = 0;
     m_last = finished;
     return finished;
@@ -98,6 +152,11 @@ std::optional<MeshClusterFinishedBuild> MeshClusterBuildRunner::Poll()
 bool MeshClusterBuildRunner::IsBuildingPath(const std::filesystem::path& gtaPath) const
 {
     return m_payload != nullptr && WriterRegistryKey(gtaPath) == m_activeKey;
+}
+
+bool MeshClusterBuildRunner::IsReadingPath(const std::filesystem::path& gtaPath) const
+{
+    return m_payload != nullptr && !m_readKey.empty() && WriterRegistryKey(gtaPath) == m_readKey;
 }
 
 } // namespace gte

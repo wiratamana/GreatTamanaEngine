@@ -1,7 +1,8 @@
 #pragma once
 
 // Cross-thread bridge for asset commands served by the Editor on the main thread:
-// importing an external file into the Project folder and rebuilding a mesh's cluster table.
+// importing an external file into the Project folder, rebuilding a mesh's cluster table and
+// cloning a mesh into a clustered copy.
 // See SyncCommandBridge.h for the handoff mechanism. Plain scalars and strings only,
 // so this header stays free of any src/Assets dependency.
 
@@ -15,6 +16,7 @@ namespace gte {
 enum class AssetImportCommandKind {
     ImportExternalFile,
     BuildMeshClusters,
+    CloneMeshClusters,
 };
 
 // Plain request payload for one ImportExternalFile command.
@@ -33,10 +35,22 @@ struct BuildMeshClustersCommand {
     float coneWeight = 0.5f;
 };
 
+// Request payload for one CloneMeshClusters command. `weld` is "auto", "exact" or "position_only".
+// The destination is always chosen by the editor, never by the caller.
+struct CloneMeshClustersCommand {
+    std::string gtaPath;
+    std::string weld = "auto";
+    bool openViewer = false;
+    std::uint32_t maxVertices = 64;
+    std::uint32_t maxTriangles = 124;
+    float coneWeight = 0.5f;
+};
+
 struct AssetImportCommandRequest {
     AssetImportCommandKind kind = AssetImportCommandKind::ImportExternalFile;
     ImportExternalFileCommand importExternalFile;
     BuildMeshClustersCommand buildMeshClusters;
+    CloneMeshClustersCommand cloneMeshClusters;
 };
 
 // Outcome of one ImportExternalFile command.
@@ -82,10 +96,30 @@ struct BuildMeshClustersOutcome {
     double milliseconds = 0.0;
 };
 
+// Outcome of one CloneMeshClusters command; status uses the same HTTP mapping as BuildMeshClustersStatus.
+// The other fields are meaningful when success is true.
+struct CloneMeshClustersOutcome {
+    BuildMeshClustersStatus status = BuildMeshClustersStatus::Unavailable;
+    bool success = false;
+    std::string message;
+
+    std::string createdPath;
+    std::string guid; // Guid::ToString() format
+    std::string weldUsed; // "exact" or "position_only"
+    bool weldFellBack = false;
+    std::uint64_t vertexCountBefore = 0;
+    std::uint64_t vertexCountAfter = 0;
+    std::uint64_t triangleCount = 0;
+    std::uint64_t clusterCount = 0;
+    double avgTrianglesPerCluster = 0.0;
+    double milliseconds = 0.0;
+};
+
 struct AssetImportCommandResult {
     AssetImportCommandKind kind = AssetImportCommandKind::ImportExternalFile;
     ImportExternalFileOutcome importExternalFile;
     BuildMeshClustersOutcome buildMeshClusters;
+    CloneMeshClustersOutcome cloneMeshClusters;
 };
 
 // A real import or cluster build can take a long time, so this bridge waits longer than the

@@ -34,6 +34,9 @@ struct ClusterToolUiState {
     int maxVertices = 64;
     int maxTriangles = 124;
     float coneWeight = 0.5f;
+    int cloneWeldIndex = 2;              // 0 = Exact, 1 = PositionOnly, 2 = Auto.
+    bool openViewerAfterClone = true;
+    std::string lastCloneStatus;
     ClusterEligibilityCache eligibility;
     bool startRefusedBusy = false; // The last "Build Clusters" click found another build running.
     bool lastNormalsSucceeded = false;
@@ -61,6 +64,7 @@ inline constexpr std::chrono::milliseconds kClusterEligibilityRecheckInterval{ 5
 int ClampClusterMaxVertices(int value) noexcept;      // 3..255
 int ClampClusterMaxTriangles(int value) noexcept;     // 4..512, rounded to a multiple of 4
 float ClampClusterConeWeight(float value) noexcept;   // 0..1, non-finite -> default
+int ClampCloneWeldIndex(int value) noexcept;          // 0..2
 
 // "N clusters, avg T tris, vertices A -> B, X ms".
 std::string FormatClusterStatusLine(std::size_t clusterCount, float avgTrianglesPerCluster, std::size_t verticesBefore,

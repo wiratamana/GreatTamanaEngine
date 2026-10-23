@@ -1,8 +1,10 @@
 #include "ScenePanel.h"
 
+#include "../CameraFrustumOverlay.h"
 #include "../EditorCamera.h"
 #include "../EditorContext.h"
 #include "../TransformGizmo.h"
+#include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
 #include "../../ECS/TransformHierarchy.h"
@@ -10,10 +12,93 @@
 
 #include <imgui.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace gte {
+
+namespace {
+
+constexpr std::size_t kMaxSceneCameras = 256;
+constexpr float kCameraBodyWidth = 1.5f;
+constexpr float kCameraHoverWidth = 2.5f;
+constexpr OverlayColor kCameraHoverColor{ 255, 255, 255, 255 };
+
+// Valid Camera entities as pick candidates, with the lens aspect of the Game view.
+void GatherCameraCandidates(Registry& registry, float aspect, std::vector<CameraPickCandidate>& out)
+{
+    ComponentStorage<Camera>& cameras = registry.Storage<Camera>();
+    for (std::size_t i = 0; i < cameras.Size() && out.size() < kMaxSceneCameras; ++i) {
+        const Entity entity = cameras.EntityAt(i);
+        const Camera& lens = cameras.ComponentAt(i);
+        const Transform world = registry.HasComponent<Transform>(entity) ? ComputeWorldTransform(registry, entity) : Transform{};
+        FrustumInput input;
+        input.position = world.position;
+        input.rotation = world.rotation;
+        input.fovYDegrees = lens.fovYDegrees;
+        input.nearZ = lens.nearZ;
+        input.farZ = lens.farZ;
+        input.aspect = aspect;
+        if (FrustumInputIsValid(input)) {
+            out.push_back({ SceneCameraEntityId(entity), input });
+        }
+    }
+}
+
+// Picks a camera with the left button and draws every camera body plus the selected frustum over the Scene image.
+void BuildCameraOverlay(
+    Registry& registry, EditorContext& ctx, const EditorCamera& camera, ImVec2 imageMin, ImVec2 imageSize, bool hovered)
+{
+    SceneCameraFrame& frame = ctx.sceneCamera;
+    frame.rendered = false;
+    if (imageSize.x < 1.0f || imageSize.y < 1.0f) {
+        return;
+    }
+
+    const float gameAspect = (ctx.desiredExtent.width > 0 && ctx.desiredExtent.height > 0)
+        ? static_cast<float>(ctx.desiredExtent.width) / static_cast<float>(ctx.desiredExtent.height)
+        : 16.0f / 9.0f;
+    frame.rectMin = Vec2(imageMin.x, imageMin.y);
+    frame.rectMax = Vec2(imageMin.x + imageSize.x, imageMin.y + imageSize.y);
+    frame.viewProjection = camera.ViewProjection(imageSize.x / imageSize.y);
+    frame.candidates.clear();
+    GatherCameraCandidates(registry, gameAspect, frame.candidates);
+
+    const Entity selected = ctx.selection.SelectedEntity();
+    const bool cameraSelected = ctx.selection.Kind() == InspectorSelectionKind::Entity && registry.IsAlive(selected)
+        && registry.HasComponent<Camera>(selected);
+    frame.selectedId = cameraSelected ? SceneCameraEntityId(selected) : 0;
+    frame.rendered = true;
+
+    // Hover and click need a free cursor: no widget under it and no gizmo hot.
+    std::optional<CameraPickHit> hover;
+    if (hovered && !ImGui::IsAnyItemHovered() && !IsGizmoOver() && !IsGizmoUsing()) {
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        hover = PickCamera(frame.candidates, frame.viewProjection, frame.rectMin, frame.rectMax, Vec2(mouse.x, mouse.y));
+        if (hover && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            const Entity picked = SceneCameraEntityFromId(hover->id);
+            if (registry.IsAlive(picked)) {
+                ctx.selection.SelectEntity(picked);
+                frame.selectedId = hover->id;
+            }
+        }
+    }
+
+    std::vector<OverlaySegment2D> segments;
+    for (const CameraPickCandidate& candidate : frame.candidates) {
+        const bool isSelected = candidate.id == frame.selectedId;
+        const bool isHover = hover && hover->id == candidate.id;
+        const OverlayColor color = isSelected ? kSceneCameraSelectedColor : (isHover ? kCameraHoverColor : kSceneCameraBodyColor);
+        AppendCameraOverlay(candidate.frustum, isSelected, frame.viewProjection, frame.rectMin, frame.rectMax, color,
+            isHover ? kCameraHoverWidth : kCameraBodyWidth, segments);
+    }
+    DrawOverlaySegments(ImGui::GetWindowDrawList(), segments, frame.rectMin, frame.rectMax);
+}
+
+} // namespace
 
 void BuildScenePanel(
     Game& game, Renderer& renderer, EditorContext& ctx, EditorCamera& camera, DescriptorSetLayoutHandle sceneServicesSetLayout)
@@ -24,6 +109,7 @@ void BuildScenePanel(
     const bool isVisible =
         ImGui::Begin("Scene", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     ctx.sceneViewVisible = isVisible;
+    ctx.sceneCamera.rendered = false;
 
     if (isVisible) {
         const ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -84,6 +170,9 @@ void BuildScenePanel(
             // to the image) and before the gizmo (so the gizmo paints on top).
             ImGui::SetCursorScreenPos(ImVec2(imageMin.x + 8.0f, imageMin.y + 8.0f));
             DrawGizmoOperationSwitcher(ctx.gizmoOperation);
+
+            // Camera bodies, the selected frustum and left-click picking; before the gizmo so the gizmo paints on top.
+            BuildCameraOverlay(registry, ctx, camera, imageMin, imageSize, hovered);
 
             // Gizmo for the selected entity; needs a live entity with a Transform.
             // Uses this Scene camera's view/projection, not the gameplay camera's.

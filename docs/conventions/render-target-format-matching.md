@@ -58,3 +58,5 @@ whenever adding a real graphics pipeline or a new render target:
   It is always read via `CurrentState()` and written back via
   `SetCurrentState()` - see `RenderTexture::FinalizeForExternalSampling()`
   and `RenderGraphBuilder::ImportTexture()`'s `trackedOwner` parameter.
+- **The cluster viewer (`ClusterViewRenderer`) uses explicit RGBA8_UNorm.** Its slot and ID targets and all of its colour
+  pipelines are built for `RGBA8_UNorm`, never for `ColorFormat()`, so the swapchain format does not matter to it.

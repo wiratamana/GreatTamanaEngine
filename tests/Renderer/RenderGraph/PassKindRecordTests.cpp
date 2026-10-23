@@ -226,6 +226,29 @@ TEST(IndirectDrawRecordTest, ValidRecordDeclaresTargetsAndTheFourBufferReads)
     EXPECT_EQ(pass.reads[3].buffer, kBufferD);
 }
 
+TEST(IndirectDrawRecordTest, ClearValuesDefaultToNoneAndAreDeclaredWhenSet)
+{
+    IndirectDrawRecord record = ValidIndirect();
+    EXPECT_FALSE(record.clearColor.has_value());
+    EXPECT_FALSE(record.clearDepth.has_value());
+
+    PassRecord plain;
+    RenderGraphBuilder::PassBuilder plainBuilder(plain);
+    DeclareIndirectDraw(plainBuilder, record);
+    EXPECT_FALSE(plain.colorClearValue.has_value());
+    EXPECT_FALSE(plain.depthClearValue.has_value());
+
+    record.clearColor = std::array<float, 4>{ 0.1f, 0.2f, 0.3f, 1.0f };
+    record.clearDepth = 1.0f;
+    PassRecord cleared;
+    RenderGraphBuilder::PassBuilder clearedBuilder(cleared);
+    DeclareIndirectDraw(clearedBuilder, record);
+    ASSERT_TRUE(cleared.colorClearValue.has_value());
+    EXPECT_FLOAT_EQ((*cleared.colorClearValue)[2], 0.3f);
+    ASSERT_TRUE(cleared.depthClearValue.has_value());
+    EXPECT_FLOAT_EQ(*cleared.depthClearValue, 1.0f);
+}
+
 TEST(IndirectDrawRecordTest, EveryMissingPartIsNamed)
 {
     IndirectDrawRecord record = ValidIndirect();

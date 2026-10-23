@@ -43,6 +43,8 @@ class IProjectLifecycleCapability;
 class IAssetScaffoldingCapability;
 class IHotReloadDebugCapability;
 class MeshClusterBuildRunner;
+class IClusterViewerControl;
+class ISceneCameraControl;
 
 // Result of ActivateTab(). Kept separate from Application's own outcome type so this header
 // never depends on src/Application/; Application::Run() converts between them.
@@ -316,6 +318,15 @@ public:
     // Re-reads the tracked record (file size, header) of one *.gta asset in the Project database.
     // A no-op when the path is not tracked or the build has no Project panel.
     virtual void RefreshProjectAssetRecord(const std::string& absoluteGtaPath) = 0;
+
+    // Called once when a clustered copy was written to `createdPathUtf8`. Opens the viewer on it when `openViewer`.
+    virtual void OnMeshCloneFinished(const std::string& createdPathUtf8, bool openViewer) = 0;
+
+    // The cluster viewer's HTTP surface. nullptr for NullEditorLayer.
+    virtual IClusterViewerControl* ClusterViewerControl() = 0;
+
+    // The Scene cameras' HTTP surface. nullptr for NullEditorLayer.
+    virtual ISceneCameraControl* SceneCameraControl() = 0;
 };
 
 // Creates the real ImGui-backed editor layer (defined in src/Editor/ImGuiEditorLayer.cpp).

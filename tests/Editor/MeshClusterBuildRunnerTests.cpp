@@ -114,5 +114,24 @@ TEST_F(MeshClusterBuildRunnerTest, MissingFileReportsFailureWithoutThrowing)
     EXPECT_FALSE(finished->outcome.message.empty());
 }
 
+TEST_F(MeshClusterBuildRunnerTest, CloneWritesANewFileAndLeavesTheSourceAlone)
+{
+    const std::filesystem::path destination = m_root / "grid_clustered.gta";
+    MeshClusterBuildRunner runner;
+    ASSERT_EQ(runner.StartClone(m_path, destination, MeshClusterCloneOptions{}, true, 0),
+        MeshClusterBuildRunner::StartResult::Started);
+    EXPECT_EQ(runner.Start(m_path, MeshClusterOptions{}, 1), MeshClusterBuildRunner::StartResult::Busy);
+
+    const std::optional<MeshClusterFinishedBuild> finished = WaitForBuild(runner);
+    ASSERT_TRUE(finished.has_value());
+    EXPECT_TRUE(finished->outcome.success) << finished->outcome.message;
+    EXPECT_TRUE(finished->wasClone);
+    EXPECT_TRUE(finished->openViewerAfterClone);
+    EXPECT_EQ(finished->path, m_path);
+    EXPECT_EQ(finished->createdPath, destination);
+    EXPECT_TRUE(std::filesystem::exists(destination));
+    EXPECT_FALSE(runner.IsReadingPath(m_path));
+}
+
 } // namespace
 } // namespace gte

@@ -1,14 +1,18 @@
 #pragma once
 
 // Cross-thread bridge for network-driven Editor UI commands: tab focus, instance grid spawn,
-// Inspector asset selection, Inspector state, Inspector cluster build and the Game/Scene split.
+// Inspector asset selection, Inspector state, Inspector cluster build, the Game/Scene split,
+// the cluster viewer and the Scene cameras.
 // See SyncCommandBridge.h for the handoff mechanism.
 
 #include "SyncCommandBridge.h"
 #include "../Core/InstanceGridLimits.h"
+#include "../Editor/SceneCameraControl.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace gte {
 
@@ -19,6 +23,8 @@ enum class EditorUiCommandKind {
     InspectorState,
     InspectorBuildClusters,
     SplitViews,
+    ClusterViewer,
+    SceneCamera,
 };
 
 // Plain request payload for one ActivateTab command.
@@ -50,6 +56,30 @@ struct SplitViewsCommand {
     bool enabled = false; // true = Game beside Scene, false = Game as a tab of Scene.
 };
 
+enum class ClusterViewerOperation : std::uint8_t { Open, State, Set, Pick, Verify, CaptureHiz, Image };
+
+// Request payload for one ClusterViewer command; only the fields of `operation` are read.
+struct ClusterViewerCommand {
+    ClusterViewerOperation operation = ClusterViewerOperation::State;
+    std::string path;            // Open
+    std::vector<KeyValue> pairs; // Set
+    float x = 0.0f;              // Pick, 0..1 of the viewer image
+    float y = 0.0f;
+    ClusterViewSlot slot = ClusterViewSlot::Main; // Image
+    bool overlay = false;                         // Image
+};
+
+enum class SceneCameraOperation : std::uint8_t { State, Select, Pick, Image };
+
+// Request payload for one SceneCamera command; only the fields of `operation` are read.
+struct SceneCameraCommand {
+    SceneCameraOperation operation = SceneCameraOperation::State;
+    std::string name;       // Select
+    float x = 0.0f;         // Pick, 0..1 of the Scene image
+    float y = 0.0f;
+    bool overlay = true;    // Image
+};
+
 // One pending Editor UI command, tagged by `kind` - only the field matching
 // `kind` is meaningful. InspectorState carries no payload.
 struct EditorUiCommandRequest {
@@ -59,6 +89,8 @@ struct EditorUiCommandRequest {
     SelectAssetCommand selectAsset;
     InspectorBuildClustersCommand inspectorBuildClusters;
     SplitViewsCommand splitViews;
+    ClusterViewerCommand clusterViewer;
+    SceneCameraCommand sceneCamera;
 };
 
 // Outcome of one ActivateTab command.
@@ -123,6 +155,26 @@ struct SplitViewsOutcome {
     std::string message;
 };
 
+// Outcome of one ClusterViewer command. `available` is false when the editor has no viewer.
+// `report` is filled for every operation except Image.
+struct ClusterViewerOutcome {
+    bool available = true;
+    ClusterViewerResult result;
+    bool hit = false; // Pick
+    ClusterViewerReport report;
+    std::optional<ClusterViewerImage> image; // Image
+};
+
+// Outcome of one SceneCamera command. `available` is false when the editor has no Scene view.
+struct SceneCameraOutcome {
+    bool available = true;
+    SceneCameraResult result;
+    bool hit = false;        // Pick
+    std::string entityName;  // Pick
+    SceneCameraReport report;
+    std::optional<ClusterViewerImage> image; // Image
+};
+
 // The completed result of one EditorUiCommandRequest - `kind` mirrors the
 // request's own `kind`.
 struct EditorUiCommandResult {
@@ -133,6 +185,8 @@ struct EditorUiCommandResult {
     InspectorStateOutcome inspectorState;
     InspectorBuildClustersOutcome inspectorBuildClusters;
     SplitViewsOutcome splitViews;
+    ClusterViewerOutcome clusterViewer;
+    SceneCameraOutcome sceneCamera;
 };
 
 class EditorUiCommandBridge : public SyncCommandBridge<EditorUiCommandRequest, EditorUiCommandResult> {

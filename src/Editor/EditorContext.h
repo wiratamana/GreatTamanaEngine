@@ -1,14 +1,19 @@
 #pragma once
 
+#include "CameraPick.h"
 #include "ClusterToolUiState.h"
 #include "InstanceGridTestSpawner.h"
 #include "Selection.h"
 #include "../Core/Extent.h"
 #include "../Core/UiTextureHandle.h"
 #include "TransformGizmo.h"
+#include "../Math/Mat4.h"
+#include "../Math/Vec2.h"
 #include "RenderGraphRegimeChoice.h"
 #include <chrono>
+#include <cstdint>
 #include <string>
+#include <vector>
 
 namespace gte {
 
@@ -22,6 +27,26 @@ inline constexpr const char* kProjectAssetDragDropPayloadType = "GTE_PROJECT_ASS
 
 // ImGui drag-and-drop payload type for an entity row dragged within the Hierarchy panel (a plain Entity value).
 inline constexpr const char* kHierarchyEntityDragDropPayloadType = "GTE_HIERARCHY_ENTITY";
+
+// Scene camera entity <-> 64-bit id used by the pick candidates and the HTTP report.
+inline std::uint64_t SceneCameraEntityId(Entity entity) noexcept
+{
+    return (static_cast<std::uint64_t>(entity.index) << 32) | entity.generation;
+}
+inline Entity SceneCameraEntityFromId(std::uint64_t id) noexcept
+{
+    return Entity{ static_cast<std::uint32_t>(id >> 32), static_cast<std::uint32_t>(id & 0xFFFFFFFFu) };
+}
+
+// What the Scene panel drew for cameras last frame. Valid while `rendered` is true.
+struct SceneCameraFrame {
+    bool rendered = false;
+    Vec2 rectMin;                // screen rect of the Scene image
+    Vec2 rectMax;
+    Mat4 viewProjection = Mat4::Identity(); // flipY = true, the matrix the Scene view renders with
+    std::vector<CameraPickCandidate> candidates;
+    std::uint64_t selectedId = 0; // selected Camera entity, 0 when none
+};
 
 // Plain shared state passed by reference into every Editor panel and dock-layout function.
 // Only ImGuiEditorLayer and the panel functions it calls touch it, in a fixed order every frame.
@@ -228,6 +253,12 @@ struct EditorContext {
 
     // Asset path (UTF-8) whose project record must be refreshed; set by a panel, consumed by the editor layer.
     std::string pendingAssetRecordRefresh;
+
+    // Mesh asset path (UTF-8) the cluster viewer should open; set by a panel, consumed by the editor layer.
+    std::string pendingClusterViewerPath;
+
+    // Camera overlay state of the Scene panel's last frame.
+    SceneCameraFrame sceneCamera;
 };
 
 } // namespace gte

@@ -96,6 +96,11 @@ public:
     MeshClusterBuildRunner* ClusterBuildRunner() override { return nullptr; }
     void RefreshProjectAssetRecord(const std::string& /*absoluteGtaPath*/) override { }
 
+    // No cluster viewer or Scene camera tools in a release build.
+    void OnMeshCloneFinished(const std::string& /*createdPathUtf8*/, bool /*openViewer*/) override { }
+    IClusterViewerControl* ClusterViewerControl() override { return nullptr; }
+    ISceneCameraControl* SceneCameraControl() override { return nullptr; }
+
     // No Inspector or dock layout in a release build.
     AssetSelectionResult SelectProjectAsset(const std::string& /*absolutePath*/) override
     {

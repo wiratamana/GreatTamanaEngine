@@ -711,6 +711,8 @@ add_library(gte_core STATIC
     src/Assets/MeshClustering.cpp
     src/Assets/MeshClusterPersistence.h
     src/Assets/MeshClusterPersistence.cpp
+    src/Assets/MeshClusterClone.h
+    src/Assets/MeshClusterClone.cpp
     src/Assets/MeshMaterialPartitioner.h
     src/Assets/MeshMaterialPartitioner.cpp
     src/Assets/MotionFile.h
@@ -871,6 +873,11 @@ add_library(gte_core STATIC
     src/Renderer/DeviceIdleGuard.h
     src/Renderer/MeshPreviewRenderer.cpp
     src/Renderer/MeshPreviewRenderer.h
+    src/Renderer/ClusterViewRenderer.cpp
+    src/Renderer/ClusterViewRendererHiz.cpp
+    src/Renderer/ClusterViewRendererCapture.cpp
+    src/Renderer/ClusterViewRendererImpl.h
+    src/Renderer/ClusterViewRenderer.h
     src/Renderer/SceneGridRenderer.cpp
     src/Renderer/SceneGridRenderer.h
     src/Renderer/Vulkan/DescriptorSetLayoutBuilder.cpp
@@ -1051,6 +1058,8 @@ add_library(gte_core STATIC
     src/Encoding/CapturedPixelConversion.cpp
     src/Encoding/PngEncoder.h
     src/Encoding/PngEncoder.cpp
+    src/Editor/OverlayRaster.h
+    src/Editor/OverlayRaster.cpp
     src/Encoding/DepthVisualization.h
     src/Encoding/DepthVisualization.cpp
     src/Encoding/HdrColorVisualization.h
@@ -1192,6 +1201,32 @@ add_library(gte_editor STATIC
     src/Editor/MeshClusterBuildRunner.cpp
     src/Editor/ClusterToolUiState.h
     src/Editor/ClusterToolUiState.cpp
+    src/Editor/ClusterStatusText.h
+    src/Editor/ClusterStatusText.cpp
+    src/Editor/ViewportProjection.h
+    src/Editor/ViewportProjection.cpp
+    src/Editor/CameraFrustumGizmo.h
+    src/Editor/CameraFrustumGizmo.cpp
+    src/Editor/CameraPick.h
+    src/Editor/CameraPick.cpp
+    src/Editor/OrbitCamera.h
+    src/Editor/OrbitCamera.cpp
+    src/Editor/ClusterViewerSettings.h
+    src/Editor/ClusterViewerSettings.cpp
+    src/Editor/ClusterViewerLoad.h
+    src/Editor/ClusterViewerLoad.cpp
+    src/Editor/ClusterViewerStats.h
+    src/Editor/ClusterViewerStats.cpp
+    src/Editor/ClusterViewerTruth.h
+    src/Editor/ClusterViewerTruth.cpp
+    src/Editor/ClusterViewerControl.h
+    src/Editor/SceneCameraControl.h
+    src/Editor/ClusterViewerWindow.h
+    src/Editor/ClusterViewerWindow.cpp
+    src/Editor/CameraFrustumOverlay.h
+    src/Editor/CameraFrustumOverlay.cpp
+    src/Editor/SceneCameraAdapter.h
+    src/Editor/SceneCameraAdapter.cpp
     src/Editor/BuiltinFeatureEditorPanelRegistry.h
     src/Editor/BuiltinFeatureEditorPanelRegistry.cpp
     src/Editor/EditorContext.h
@@ -1741,7 +1776,16 @@ gte_add_shader(GreatTamanaEditor src/Shaders/MeshCluster.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.frag)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterTint.frag
-    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl)
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/ClusterTint.glsl)
+
+# Cluster viewer fragment shaders (render to explicit RGBA8 targets); staged in every build.
+gte_add_shader(GreatTamanaEditor src/Shaders/ClusterViewClay.frag
+    EXTRA_DEPENDS src/Shaders/ClusterViewShading.glsl src/Shaders/ClusterTint.glsl)
+gte_add_shader(GreatTamanaEditor src/Shaders/ClusterViewTint.frag
+    EXTRA_DEPENDS src/Shaders/ClusterViewShading.glsl src/Shaders/ClusterTint.glsl)
+gte_add_shader(GreatTamanaEditor src/Shaders/ClusterViewDim.frag
+    EXTRA_DEPENDS src/Shaders/ClusterViewShading.glsl src/Shaders/ClusterTint.glsl)
+gte_add_shader(GreatTamanaEditor src/Shaders/ClusterViewId.frag)
 
 # Textured half of the imported-mesh draw path (VertexLayout::PositionNormalUv): a material with a
 # texture uses this pair instead of Mesh.vert/.frag. The AlphaTest fragment shader serves alpha-masked

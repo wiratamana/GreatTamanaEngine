@@ -5,6 +5,7 @@
 #include "../../Core/GraphicsHandles.h"
 #include "../../Math/Mat4.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -29,6 +30,8 @@ struct IndirectDrawRecord {
     BufferHandle visible;   // Visible-cluster list read by the vertex shader.
     std::uint32_t maxDrawCount = 0;
     bool depthOnly = false; // true: write only the depth attachment of `target`; no color attachment.
+    std::optional<std::array<float, 4>> clearColor; // Clears the color attachment when set (loads otherwise).
+    std::optional<float> clearDepth;                // Clears the depth attachment when set (loads otherwise).
 };
 
 // What the execute side needs besides the record; resolved by the caller each frame.

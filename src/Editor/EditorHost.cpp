@@ -125,6 +125,123 @@ BuildMeshClustersOutcome ToBridgeOutcome(const MeshClusterFinishedBuild& finishe
     return outcome;
 }
 
+CloneMeshClustersOutcome MakeCloneRefusal(BuildMeshClustersStatus status, std::string message)
+{
+    CloneMeshClustersOutcome outcome;
+    outcome.status = status;
+    outcome.message = std::move(message);
+    return outcome;
+}
+
+CloneMeshClustersOutcome ToCloneBridgeOutcome(const MeshClusterFinishedBuild& finished)
+{
+    const MeshClusterReport& report = finished.outcome.report;
+    CloneMeshClustersOutcome outcome;
+    outcome.success = finished.outcome.success;
+    outcome.status = outcome.success ? BuildMeshClustersStatus::Ok : BuildMeshClustersStatus::BadRequest;
+    outcome.message = finished.outcome.message;
+    outcome.createdPath = PathToUtf8(finished.createdPath);
+    outcome.guid = finished.guid.ToString();
+    outcome.weldUsed = finished.weldUsed == ClusterWeldMode::PositionOnly ? "position_only" : "exact";
+    outcome.weldFellBack = finished.weldFellBack;
+    outcome.vertexCountBefore = report.vertexCountBefore;
+    outcome.vertexCountAfter = report.vertexCountAfter;
+    outcome.triangleCount = report.triangleCount;
+    outcome.clusterCount = report.clusterCount;
+    outcome.avgTrianglesPerCluster = report.avgTrianglesPerCluster;
+    outcome.milliseconds = report.milliseconds;
+    return outcome;
+}
+
+// Runs one viewer operation. The path of Open goes through the project-root check first.
+ClusterViewerOutcome RunClusterViewerCommand(
+    const ClusterViewerCommand& command, IClusterViewerControl* control, Renderer& renderer)
+{
+    ClusterViewerOutcome out;
+    if (control == nullptr) {
+        out.available = false;
+        out.result = { false, ClusterViewerError::Unavailable, "the cluster viewer is not available in this build" };
+        return out;
+    }
+    switch (command.operation) {
+    case ClusterViewerOperation::Open: {
+        std::filesystem::path validated;
+        if (const std::optional<std::string> invalid =
+                ValidateMeshAssetPath(command.path, ResolveProjectRootDirectory(), validated)) {
+            out.result = { false, ClusterViewerError::BadInput, *invalid };
+        } else {
+            out.result = control->Open(renderer, PathToUtf8(validated));
+        }
+        break;
+    }
+    case ClusterViewerOperation::State:
+        out.result.ok = true;
+        break;
+    case ClusterViewerOperation::Set:
+        out.result = control->Set(command.pairs);
+        break;
+    case ClusterViewerOperation::Pick: {
+        const ClusterViewerPickResult pick = control->Pick(command.x, command.y);
+        out.result = { pick.ok, pick.error, pick.message };
+        out.hit = pick.hit;
+        break;
+    }
+    case ClusterViewerOperation::Verify:
+        out.result = control->Verify();
+        break;
+    case ClusterViewerOperation::CaptureHiz:
+        out.result = control->CaptureHiz();
+        break;
+    case ClusterViewerOperation::Image:
+        out.image = control->CaptureImage(command.slot, command.overlay);
+        if (out.image.has_value()) {
+            out.result.ok = true;
+        } else {
+            out.result = { false, ClusterViewerError::NotOpen,
+                "no image: the viewer is not open, has no valid mesh, or the camera preview is off" };
+        }
+        return out;
+    }
+    out.report = control->Report();
+    return out;
+}
+
+// Runs one Scene camera operation.
+SceneCameraOutcome RunSceneCameraCommand(const SceneCameraCommand& command, ISceneCameraControl* control)
+{
+    SceneCameraOutcome out;
+    if (control == nullptr) {
+        out.available = false;
+        out.result = { false, SceneCameraError::Unavailable, "the Scene cameras are not available in this build" };
+        return out;
+    }
+    switch (command.operation) {
+    case SceneCameraOperation::State:
+        out.result.ok = true;
+        break;
+    case SceneCameraOperation::Select:
+        out.result = control->Select(command.name);
+        break;
+    case SceneCameraOperation::Pick: {
+        const SceneCameraPickResult pick = control->Pick(command.x, command.y);
+        out.result = { pick.ok, pick.error, pick.message };
+        out.hit = pick.hit;
+        out.entityName = pick.entityName;
+        break;
+    }
+    case SceneCameraOperation::Image:
+        out.image = control->CaptureImage(command.overlay);
+        if (out.image.has_value()) {
+            out.result.ok = true;
+        } else {
+            out.result = { false, SceneCameraError::NotRendered, "the Scene view was not rendered" };
+        }
+        return out;
+    }
+    out.report = control->Report();
+    return out;
+}
+
 // Runs one editor UI command on the layer; main thread only.
 EditorUiCommandResult RunEditorUiCommand(const EditorUiCommandRequest& request, IEditorLayer& layer, Game& game,
     Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout)
@@ -194,17 +311,35 @@ EditorUiCommandResult RunEditorUiCommand(const EditorUiCommandRequest& request, 
         result.splitViews.message = split.message;
         break;
     }
+    case EditorUiCommandKind::ClusterViewer:
+        result.clusterViewer = RunClusterViewerCommand(request.clusterViewer, layer.ClusterViewerControl(), renderer);
+        break;
+    case EditorUiCommandKind::SceneCamera:
+        result.sceneCamera = RunSceneCameraCommand(request.sceneCamera, layer.SceneCameraControl());
+        break;
     }
     return result;
 }
 
-// Runs once per finished build, whichever door started it: drops the cached GPU mesh, refreshes the
-// asset record (the file size changed) and logs the report.
+// Runs once per finished job, whichever door started it. A build drops the cached GPU mesh and refreshes the
+// asset record; a clone leaves the source alone and hands the new file to the editor layer.
 void RunClusterBuildFollowUp(const MeshClusterFinishedBuild& finished, Game& game, IEditorLayer& editorLayer)
 {
     const std::string pathUtf8 = PathToUtf8(finished.path);
     if (!finished.outcome.success) {
-        GTE_LOG_WARNING("MeshClustering", "Cluster build failed for " + pathUtf8 + ": " + finished.outcome.message);
+        GTE_LOG_WARNING("MeshClustering",
+            std::string(finished.wasClone ? "Cluster clone failed for " : "Cluster build failed for ") + pathUtf8 + ": "
+                + finished.outcome.message);
+        return;
+    }
+    const MeshClusterReport& report = finished.outcome.report;
+    if (finished.wasClone) {
+        const std::string createdUtf8 = PathToUtf8(finished.createdPath);
+        const char* weld = finished.weldUsed == ClusterWeldMode::PositionOnly ? "position only" : "exact";
+        GTE_LOG_INFO("MeshClustering",
+            "ClusterClone: " + pathUtf8 + " -> " + createdUtf8 + ", " + std::to_string(report.clusterCount)
+                + " clusters, weld " + weld);
+        editorLayer.OnMeshCloneFinished(createdUtf8, finished.openViewerAfterClone);
         return;
     }
     MeshInstantiationSystem& meshes = game.GetMeshInstantiationSystem();
@@ -214,7 +349,6 @@ void RunClusterBuildFollowUp(const MeshClusterFinishedBuild& finished, Game& gam
         meshes.InvalidateCachedMeshAsset(normalized);
     }
     editorLayer.RefreshProjectAssetRecord(pathUtf8);
-    const MeshClusterReport& report = finished.outcome.report;
     GTE_LOG_INFO("MeshClustering",
         "Cluster build finished for " + pathUtf8 + ": " + std::to_string(report.clusterCount) + " clusters, vertices "
             + std::to_string(report.vertexCountBefore) + " -> " + std::to_string(report.vertexCountAfter) + ", "
@@ -659,9 +793,15 @@ int EditorHost::Run()
                 RunClusterBuildFollowUp(*finished, m_game, *m_editorLayer);
                 if (finished->requestId != 0) {
                     AssetImportCommandResult clusterResult;
-                    clusterResult.kind = AssetImportCommandKind::BuildMeshClusters;
-                    clusterResult.buildMeshClusters = ToBridgeOutcome(*finished);
-                    FulfillOrLogDrop(m_assetImportCommandBridge, finished->requestId, clusterResult, "BuildMeshClusters");
+                    if (finished->wasClone) {
+                        clusterResult.kind = AssetImportCommandKind::CloneMeshClusters;
+                        clusterResult.cloneMeshClusters = ToCloneBridgeOutcome(*finished);
+                    } else {
+                        clusterResult.kind = AssetImportCommandKind::BuildMeshClusters;
+                        clusterResult.buildMeshClusters = ToBridgeOutcome(*finished);
+                    }
+                    FulfillOrLogDrop(m_assetImportCommandBridge, finished->requestId, clusterResult,
+                        finished->wasClone ? "CloneMeshClusters" : "BuildMeshClusters");
                 }
             }
         }
@@ -719,6 +859,38 @@ int EditorHost::Run()
                     break; // Answered by the poll when the build finishes.
                 }
                 FulfillOrLogDrop(m_assetImportCommandBridge, importPending->id, importResult, "BuildMeshClusters");
+                break;
+            }
+            case AssetImportCommandKind::CloneMeshClusters: {
+                // The request stays pending while its own clone runs; the poll above answers it.
+                if (clusterRunner != nullptr && clusterRunner->ActiveRequestId() == importPending->id) {
+                    break;
+                }
+                CloneMeshClustersOutcome& outcome = importResult.cloneMeshClusters;
+                std::filesystem::path gtaPath;
+                if (clusterRunner == nullptr) {
+                    outcome = MakeCloneRefusal(BuildMeshClustersStatus::Unavailable,
+                        "cluster clone is not available in this build");
+                } else if (clusterRunner->Busy()) {
+                    outcome = MakeCloneRefusal(BuildMeshClustersStatus::Busy, "another cluster build is already running");
+                } else if (const std::optional<std::string> invalid = ValidateMeshAssetPath(
+                               importRequest.cloneMeshClusters.gtaPath, ResolveProjectRootDirectory(), gtaPath)) {
+                    outcome = MakeCloneRefusal(BuildMeshClustersStatus::BadRequest, *invalid);
+                } else if (const std::filesystem::path destination = ChooseClusteredCloneDestination(gtaPath);
+                           destination.empty()) {
+                    outcome = MakeCloneRefusal(BuildMeshClustersStatus::BadRequest, "no free name for the clustered copy");
+                } else {
+                    const CloneMeshClustersCommand& command = importRequest.cloneMeshClusters;
+                    MeshClusterCloneOptions options;
+                    options.autoWeld = command.weld == "auto";
+                    options.cluster.weld = command.weld == "position_only" ? ClusterWeldMode::PositionOnly : ClusterWeldMode::Exact;
+                    options.cluster.maxVerticesPerCluster = command.maxVertices;
+                    options.cluster.maxTrianglesPerCluster = command.maxTriangles;
+                    options.cluster.coneWeight = command.coneWeight;
+                    clusterRunner->StartClone(gtaPath, destination, options, command.openViewer, importPending->id);
+                    break; // Answered by the poll when the clone finishes.
+                }
+                FulfillOrLogDrop(m_assetImportCommandBridge, importPending->id, importResult, "CloneMeshClusters");
                 break;
             }
             }

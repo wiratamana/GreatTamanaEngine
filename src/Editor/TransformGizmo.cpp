@@ -152,4 +152,30 @@ bool ManipulateTransformGizmo(GizmoOperation operation, const Mat4& view, const 
     return manipulated;
 }
 
+GizmoIdScope::GizmoIdScope(const char* id)
+{
+    ImGuizmo::PushID(id);
+}
+
+GizmoIdScope::~GizmoIdScope()
+{
+    ImGuizmo::PopID();
+}
+
+bool IsGizmoOver()
+{
+    return ImGuizmo::IsOver();
+}
+
+bool IsGizmoUsing()
+{
+    return ImGuizmo::IsUsing();
+}
+
+void CancelGizmoInteraction()
+{
+    ImGuizmo::Enable(false);
+    ImGuizmo::Enable(true);
+}
+
 } // namespace gte

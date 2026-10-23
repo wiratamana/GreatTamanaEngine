@@ -4,6 +4,7 @@
 #include "ModelRigCache.h"
 #include "ImGuiUniqueId.h"
 #include "../Encoding/Utf8Path.h"
+#include "ViewportProjection.h"
 #include "RigidBodyWireframe.h"
 #include "../Assets/AssetTypes.h" // AssetType
 #include "../Assets/GtaFile.h" // ReadGtaFile()
@@ -30,20 +31,14 @@ namespace gte {
 
 namespace {
 
-// Projects a model-space point into [rectMin, rectMax) pixels.
-// Returns false (outScreen untouched) for points behind the camera.
+// ImVec2 adapter of the shared projection. False (outScreen untouched) for points behind the camera.
 bool ProjectToScreen(const Vec3& modelPos, const Mat4& viewProj, ImVec2 rectMin, ImVec2 rectMax, ImVec2& outScreen)
 {
-    const Vec4 clip = viewProj * Vec4(modelPos, 1.0f);
-    if (clip.w <= 0.0001f) {
+    Vec2 screen;
+    if (!gte::ProjectToScreen(modelPos, viewProj, Vec2(rectMin.x, rectMin.y), Vec2(rectMax.x, rectMax.y), screen)) {
         return false;
     }
-    const float ndcX = clip.x / clip.w;
-    const float ndcY = clip.y / clip.w;
-    const float width = rectMax.x - rectMin.x;
-    const float height = rectMax.y - rectMin.y;
-    outScreen.x = rectMin.x + (ndcX * 0.5f + 0.5f) * width;
-    outScreen.y = rectMin.y + (ndcY * 0.5f + 0.5f) * height;
+    outScreen = ImVec2(screen.x, screen.y);
     return true;
 }
 

@@ -35,9 +35,9 @@ std::optional<std::string> ValidateIndirectDrawRecord(const IndirectDrawRecord& 
 void DeclareIndirectDraw(RenderGraphBuilder::PassBuilder& pass, const IndirectDrawRecord& record)
 {
     if (!record.depthOnly) {
-        pass.WriteColorAttachment(record.target);
+        pass.WriteColorAttachment(record.target, record.clearColor);
     }
-    pass.WriteDepthStencilAttachment(record.target);
+    pass.WriteDepthStencilAttachment(record.target, record.clearDepth);
     pass.ReadBuffer(record.indirect, ResourceAccess::IndirectCommandRead);
     pass.ReadBuffer(record.count, ResourceAccess::IndirectCommandRead);
     pass.ReadBuffer(record.instances, ResourceAccess::VertexShaderStorageRead);

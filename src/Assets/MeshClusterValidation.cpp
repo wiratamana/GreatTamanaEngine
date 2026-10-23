@@ -80,6 +80,22 @@ bool ValidateClusterTable(std::span<const MeshCluster> clusters, std::size_t ind
     return true;
 }
 
+bool ValidateMeshIndices(std::size_t vertexCount, std::span<const std::uint32_t> indices, std::string* why)
+{
+    if (indices.empty()) {
+        return Fail(why, "no indices");
+    }
+    if (indices.size() % 3 != 0) {
+        return Fail(why, "index count is not a multiple of 3");
+    }
+    for (const std::uint32_t index : indices) {
+        if (index >= vertexCount) {
+            return Fail(why, "an index points outside the vertex array");
+        }
+    }
+    return true;
+}
+
 bool ValidateMeshClusters(const MeshData& mesh, std::string* why)
 {
     if (mesh.clusters.empty()) {

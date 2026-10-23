@@ -47,7 +47,7 @@ std::optional<std::uint64_t> ReadHeaderAndMetadata(
 
 bool WriteGtaFile(const std::filesystem::path& path, AssetType type, const Guid& guid, AssetFlags flags,
     const std::vector<std::uint8_t>& metadata, const std::vector<std::uint8_t>& payload, std::uint64_t version,
-    std::string* error)
+    std::string* error, bool createOnly)
 {
     std::error_code dirEc;
     const std::filesystem::path parent = path.parent_path();
@@ -69,7 +69,7 @@ bool WriteGtaFile(const std::filesystem::path& path, AssetType type, const Guid&
         std::as_bytes(std::span<const std::uint8_t>(metadata)),
         std::as_bytes(std::span<const std::uint8_t>(payload)),
     };
-    return WriteFileAtomically(path, parts, nullptr, error);
+    return WriteFileAtomically(path, parts, nullptr, error, createOnly);
 }
 
 std::optional<GtaHeader> ReadGtaHeader(const std::filesystem::path& path)

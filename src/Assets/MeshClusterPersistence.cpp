@@ -41,12 +41,11 @@ std::optional<std::string> DecodeRigForClustering(const std::vector<std::uint8_t
     return std::nullopt;
 }
 
-MeshClusterBuildOutcome Failure(std::string message)
+ClusteredPayload PayloadFailure(std::string message)
 {
-    MeshClusterBuildOutcome outcome;
-    outcome.success = false;
-    outcome.message = std::move(message);
-    return outcome;
+    ClusteredPayload result;
+    result.message = std::move(message);
+    return result;
 }
 
 bool IsCancelled(const std::atomic<bool>* cancel) noexcept
@@ -58,6 +57,108 @@ void Release(std::vector<std::uint8_t>& bytes)
 {
     std::vector<std::uint8_t>().swap(bytes);
 }
+
+MeshClusterBuildOutcome Failure(std::string message)
+{
+    MeshClusterBuildOutcome outcome;
+    outcome.message = std::move(message);
+    return outcome;
+}
+
+// Builds with Exact first and falls back to PositionOnly when the Exact fill is poor.
+// On failure `result` carries the report and the message.
+bool BuildWithAutoWeld(MeshData& mesh, const std::vector<Material>& materials, MeshClusterOptions options,
+    const std::atomic<bool>* cancel, ClusteredPayload& result)
+{
+    options.weld = ClusterWeldMode::Exact;
+    result.report = BuildMeshClusters(mesh, materials, options, cancel, true);
+    result.weldUsed = ClusterWeldMode::Exact;
+    if (result.report.success) {
+        return true;
+    }
+    if (!result.report.poorFill) {
+        result.message = result.report.message;
+        return false;
+    }
+
+    const std::string exactMessage = result.report.message;
+    options.weld = ClusterWeldMode::PositionOnly;
+    result.report = BuildMeshClusters(mesh, materials, options, cancel);
+    result.weldUsed = ClusterWeldMode::PositionOnly;
+    result.weldFellBack = true;
+    if (!result.report.success) {
+        result.message = "Exact weld: " + exactMessage + "; Position only weld: " + result.report.message;
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
+ClusteredPayload BuildClusteredPayload(
+    GtaFileData& gta, const MeshClusterOptions& options, bool autoWeld, const std::atomic<bool>* cancel)
+{
+    if (gta.header.Type() != AssetType::Mesh) {
+        return PayloadFailure("not a mesh asset");
+    }
+
+    RigFileData rig;
+    if (const std::optional<std::string> refusal = DecodeRigForClustering(gta.metadata, rig); refusal.has_value()) {
+        return PayloadFailure("refused: " + *refusal);
+    }
+
+    std::optional<MeshData> mesh = DecodeMeshDataFromBytes(gta.payload);
+    Release(gta.payload); // Decoded arrays replace the raw bytes before the build starts.
+    if (!mesh.has_value()) {
+        return PayloadFailure("the mesh payload could not be decoded");
+    }
+    mesh->clusters.clear();
+
+    if (IsCancelled(cancel)) {
+        return PayloadFailure("cancelled");
+    }
+
+    ClusteredPayload result;
+    if (autoWeld) {
+        if (!BuildWithAutoWeld(*mesh, rig.materials.materials, options, cancel, result)) {
+            return result;
+        }
+    } else {
+        result.report = BuildMeshClusters(*mesh, rig.materials.materials, options, cancel);
+        result.weldUsed = options.weld;
+        if (!result.report.success) {
+            result.message = result.report.message;
+            return result;
+        }
+    }
+    if (IsCancelled(cancel)) {
+        return PayloadFailure("cancelled");
+    }
+
+    result.payload = EncodeMeshDataToBytes(*mesh);
+    mesh.reset();
+    if (result.payload.empty()) {
+        return PayloadFailure("the clustered mesh could not be encoded");
+    }
+    if (IsCancelled(cancel)) {
+        return PayloadFailure("cancelled");
+    }
+
+    result.success = true;
+    result.message = result.report.message;
+    return result;
+}
+
+std::optional<std::string> ClusterBuildRefusalReason(const GtaMetadataData& gta)
+{
+    if (gta.header.Type() != AssetType::Mesh) {
+        return std::string("not a mesh asset");
+    }
+    RigFileData rig;
+    return DecodeRigForClustering(gta.metadata, rig);
+}
+
+namespace {
 
 MeshClusterBuildOutcome BuildImpl(
     const std::filesystem::path& gtaPath, const MeshClusterOptions& options, const std::atomic<bool>* cancel)
@@ -71,50 +172,20 @@ MeshClusterBuildOutcome BuildImpl(
     if (!gta.has_value()) {
         return Failure("could not read the *.gta file");
     }
-    if (gta->header.Type() != AssetType::Mesh) {
-        return Failure("not a mesh asset");
-    }
 
-    RigFileData rig;
-    if (const std::optional<std::string> refusal = DecodeRigForClustering(gta->metadata, rig); refusal.has_value()) {
-        return Failure("refused: " + *refusal);
-    }
-
-    std::optional<MeshData> mesh = DecodeMeshDataFromBytes(gta->payload);
-    Release(gta->payload); // Decoded arrays replace the raw bytes before the build starts.
-    if (!mesh.has_value()) {
-        return Failure("the mesh payload could not be decoded");
-    }
-    mesh->clusters.clear();
-
-    if (IsCancelled(cancel)) {
-        return Failure("cancelled");
-    }
-
+    ClusteredPayload built = BuildClusteredPayload(*gta, options, false, cancel);
     MeshClusterBuildOutcome outcome;
-    outcome.report = BuildMeshClusters(*mesh, rig.materials.materials, options, cancel);
-    if (!outcome.report.success) {
-        outcome.message = outcome.report.message;
+    outcome.report = std::move(built.report);
+    outcome.message = std::move(built.message);
+    if (!built.success) {
         return outcome;
-    }
-    if (IsCancelled(cancel)) {
-        return Failure("cancelled");
-    }
-
-    std::vector<std::uint8_t> payload = EncodeMeshDataToBytes(*mesh);
-    mesh.reset();
-    if (payload.empty()) {
-        return Failure("the clustered mesh could not be encoded");
-    }
-    if (IsCancelled(cancel)) {
-        return Failure("cancelled");
     }
 
     // Header and metadata are written back unchanged.
     const std::array<ConstByteSpan, 3> parts = {
         std::as_bytes(std::span<const GtaHeader, 1>(&gta->header, 1)),
         std::as_bytes(std::span<const std::uint8_t>(gta->metadata)),
-        std::as_bytes(std::span<const std::uint8_t>(payload)),
+        std::as_bytes(std::span<const std::uint8_t>(built.payload)),
     };
     std::string error;
     if (!WriteFileAtomically(gtaPath, parts, &*identity, &error)) {
@@ -124,20 +195,10 @@ MeshClusterBuildOutcome BuildImpl(
     }
 
     outcome.success = true;
-    outcome.message = outcome.report.message;
     return outcome;
 }
 
 } // namespace
-
-std::optional<std::string> ClusterBuildRefusalReason(const GtaMetadataData& gta)
-{
-    if (gta.header.Type() != AssetType::Mesh) {
-        return std::string("not a mesh asset");
-    }
-    RigFileData rig;
-    return DecodeRigForClustering(gta.metadata, rig);
-}
 
 MeshClusterBuildOutcome BuildClustersInGtaFile(
     const std::filesystem::path& gtaPath, const MeshClusterOptions& options, const std::atomic<bool>* cancel)

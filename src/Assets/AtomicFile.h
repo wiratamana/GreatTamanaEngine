@@ -60,9 +60,11 @@ private:
 
 // Writes `parts` back to back into "<target>.<id>.<n>.tmp", then renames it over `target`.
 // The old file stays byte-identical on failure. With `expected`, a target changed since that
-// identity was read is not replaced. Atomic against a crash, not forced to disk. Never throws.
+// identity was read is not replaced. With `createOnly`, an existing target is never replaced
+// ("destination exists"); the check runs inside the writer claim, right before the rename.
+// Atomic against a crash, not forced to disk. Never throws.
 bool WriteFileAtomically(const std::filesystem::path& target, std::span<const ConstByteSpan> parts,
-    const FileIdentity* expected, std::string* error);
+    const FileIdentity* expected, std::string* error, bool createOnly = false);
 
 // Removes our own orphaned temp files under `root` that are older than `minAge` and whose
 // target is not being written. Returns the number removed. Call at startup, never in a scan.

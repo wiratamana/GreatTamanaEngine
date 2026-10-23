@@ -94,6 +94,20 @@ TEST_F(AtomicFileTest, IdentityMismatchKeepsOldBytesAndLeavesNoTemp)
     EXPECT_EQ(Read(m_root / "a.gta"), "ok");
 }
 
+TEST_F(AtomicFileTest, CreateOnlyNeverReplacesAnExistingFile)
+{
+    const std::array<ConstByteSpan, 1> parts = { std::as_bytes(std::span<const char>("new", 3)) };
+    std::string error;
+    ASSERT_TRUE(WriteFileAtomically(m_root / "a.gta", parts, nullptr, &error, true)) << error;
+    EXPECT_EQ(Read(m_root / "a.gta"), "new");
+
+    ASSERT_TRUE(Write(m_root / "a.gta", "old"));
+    EXPECT_FALSE(WriteFileAtomically(m_root / "a.gta", parts, nullptr, &error, true));
+    EXPECT_EQ(error, "destination exists");
+    EXPECT_EQ(Read(m_root / "a.gta"), "old");
+    EXPECT_EQ(FileCount(), 1u);
+}
+
 TEST_F(AtomicFileTest, ClaimedTargetIsBusyAlsoWhenCaseDiffers)
 {
     EXPECT_EQ(WriterRegistryKey(m_root / "A.gta"), WriterRegistryKey(m_root / "a.GTA"));

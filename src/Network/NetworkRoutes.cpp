@@ -1667,4 +1667,351 @@ FeatureDebugReply BuildFeatureDebugReply(bool alreadyPending, bool timedOut, boo
     return { 200, DumpFeatureDebugJson(body) };
 }
 
+namespace {
+
+constexpr std::size_t kMaxViewerSetPairs = 64;
+
+// True for a finite number in 0..1.
+bool TryParseUnitFraction(const std::string& text, float& out)
+{
+    float value = 0.0f;
+    if (!TryParseWholeFloat(text, value) || !std::isfinite(value) || value < 0.0f || value > 1.0f) {
+        return false;
+    }
+    out = value;
+    return true;
+}
+
+// Parses an optional "true"/"false" query value; empty keeps `out`.
+bool TryParseOptionalBool(const std::string& text, bool& out)
+{
+    if (text.empty()) {
+        return true;
+    }
+    if (text == "true") {
+        out = true;
+        return true;
+    }
+    if (text == "false") {
+        out = false;
+        return true;
+    }
+    return false;
+}
+
+nlohmann::json Xyz(const float (&v)[3])
+{
+    return nlohmann::json::object({ { "x", v[0] }, { "y", v[1] }, { "z", v[2] } });
+}
+
+nlohmann::json SegmentsToJson(const std::vector<OverlaySegment2D>& segments)
+{
+    nlohmann::json arr = nlohmann::json::array();
+    for (const OverlaySegment2D& s : segments) {
+        arr.push_back(nlohmann::json::object({
+            { "a", nlohmann::json::object({ { "x", s.a.x }, { "y", s.a.y } }) },
+            { "b", nlohmann::json::object({ { "x", s.b.x }, { "y", s.b.y } }) },
+        }));
+    }
+    return arr;
+}
+
+nlohmann::json ClusterViewerReportToJson(const ClusterViewerReport& r)
+{
+    nlohmann::json settings = nlohmann::json::object();
+    for (const KeyValue& kv : r.settings) {
+        settings[kv.key] = kv.value;
+    }
+
+    nlohmann::json body;
+    body["open"] = r.open;
+    body["path"] = r.path;
+    body["valid"] = r.valid;
+    body["mesh"] = nlohmann::json::object({
+        { "vertices", r.mesh.vertices },
+        { "triangles", r.mesh.triangles },
+        { "clusters", r.mesh.clusters },
+        { "clusterModes", r.mesh.clusterModes },
+        { "note", r.mesh.note },
+    });
+    body["settings"] = std::move(settings);
+    body["cull"] = nlohmann::json::object({
+        { "ok", r.cull.ok },
+        { "total", r.cull.total },
+        { "passedFrustum", r.cull.passedFrustum },
+        { "passedCone", r.cull.passedCone },
+        { "visible", r.cull.visible },
+        { "byFrustum", r.cull.byFrustum },
+        { "byCone", r.cull.byCone },
+        { "byOcclusion", r.cull.byOcclusion },
+        { "visibleTriangles", r.cull.visibleTriangles },
+        { "runMilliseconds", r.cull.runMilliseconds },
+        { "occlusionApplied", r.cull.occlusionApplied },
+        { "hizCut", r.cull.hizCut },
+        { "nested", r.cull.nested },
+        { "error", r.cull.error },
+    });
+    body["hiz"] = nlohmann::json::object({
+        { "captured", r.hiz.captured },
+        { "stale", r.hiz.stale },
+        { "width", r.hiz.width },
+        { "height", r.hiz.height },
+    });
+    body["truth"] = nlohmann::json::object({
+        { "valid", r.truth.valid },
+        { "stale", r.truth.stale },
+        { "seen", r.truth.seen },
+        { "falseCulls", r.truth.falseCulls },
+        { "conservative", r.truth.conservative },
+        { "invalidIds", r.truth.invalidIds },
+        { "pixelsChecked", r.truth.pixelsChecked },
+    });
+    body["debugCamera"] = nlohmann::json::object({
+        { "show", r.debugCamera.show },
+        { "selected", r.debugCamera.selected },
+        { "screen", nlohmann::json::object({ { "apexX", r.debugCamera.apexX }, { "apexY", r.debugCamera.apexY },
+                                               { "visible", r.debugCamera.screenVisible } }) },
+    });
+    body["clusterPathSupported"] = r.clusterPathSupported;
+    return body;
+}
+
+} // namespace
+
+ParsedClusterViewerSetQuery ParseClusterViewerSetQuery(const std::vector<std::pair<std::string, std::string>>& params)
+{
+    ParsedClusterViewerSetQuery result;
+    if (params.empty()) {
+        result.errorMessage = "no setting given - pass at least one key=value query pair";
+        return result;
+    }
+    if (params.size() > kMaxViewerSetPairs) {
+        result.errorMessage = "more than " + std::to_string(kMaxViewerSetPairs) + " settings in one request";
+        return result;
+    }
+    std::unordered_set<std::string> seen;
+    for (const auto& [key, value] : params) {
+        if (key.empty() || key.size() > kMaxFeatureDebugKeyBytes) {
+            result.errorMessage = "query key '" + key.substr(0, kMaxFeatureDebugKeyBytes) + "' is empty or too long";
+            return result;
+        }
+        if (value.size() > kMaxFeatureDebugValueBytes) {
+            result.errorMessage = "value of query key '" + key + "' is too long";
+            return result;
+        }
+        if (!seen.insert(key).second) {
+            result.errorMessage = "query key '" + key + "' appears more than once";
+            return result;
+        }
+        result.pairs.push_back({ key, value });
+    }
+    result.valid = true;
+    return result;
+}
+
+ParsedPickQuery ParsePickQuery(const std::string& xParam, const std::string& yParam)
+{
+    ParsedPickQuery result;
+    if (!TryParseUnitFraction(xParam, result.x)) {
+        result.errorMessage = "missing or invalid required query parameter: x - must be a number from 0 to 1";
+        return result;
+    }
+    if (!TryParseUnitFraction(yParam, result.y)) {
+        result.errorMessage = "missing or invalid required query parameter: y - must be a number from 0 to 1";
+        return result;
+    }
+    result.valid = true;
+    return result;
+}
+
+ParsedClusterViewerImageQuery ParseClusterViewerImageQuery(const std::string& targetParam, const std::string& overlayParam)
+{
+    ParsedClusterViewerImageQuery result;
+    if (targetParam.empty() || targetParam == "view") {
+        result.debugCamera = false;
+    } else if (targetParam == "debug") {
+        result.debugCamera = true;
+    } else {
+        result.errorMessage = "invalid query parameter: target - must be \"view\" or \"debug\"";
+        return result;
+    }
+    if (!TryParseOptionalBool(overlayParam, result.overlay)) {
+        result.errorMessage = "invalid query parameter: overlay - must be \"true\" or \"false\"";
+        return result;
+    }
+    result.valid = true;
+    return result;
+}
+
+ParsedSceneCameraImageQuery ParseSceneCameraImageQuery(const std::string& overlayParam)
+{
+    ParsedSceneCameraImageQuery result;
+    if (!TryParseOptionalBool(overlayParam, result.overlay)) {
+        result.errorMessage = "invalid query parameter: overlay - must be \"true\" or \"false\"";
+        return result;
+    }
+    result.valid = true;
+    return result;
+}
+
+int HttpStatusForError(ClusterViewerError error)
+{
+    switch (error) {
+    case ClusterViewerError::None: return 200;
+    case ClusterViewerError::BadInput: return 400;
+    case ClusterViewerError::Unavailable: return 503;
+    case ClusterViewerError::NotOpen:
+    case ClusterViewerError::NoValidMesh:
+    case ClusterViewerError::Unsupported: return 409;
+    }
+    return 409;
+}
+
+int HttpStatusForError(SceneCameraError error)
+{
+    switch (error) {
+    case SceneCameraError::None: return 200;
+    case SceneCameraError::BadInput: return 400;
+    case SceneCameraError::NotFound: return 404;
+    case SceneCameraError::Unavailable: return 503;
+    case SceneCameraError::NotRendered:
+    case SceneCameraError::NoCamera: return 409;
+    }
+    return 409;
+}
+
+std::string BuildClusterViewerStateJson(const ClusterViewerReport& report)
+{
+    return ClusterViewerReportToJson(report).dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+std::string BuildClusterViewerCommandResponseJson(const ClusterViewerResult& result, const ClusterViewerReport& report)
+{
+    if (!result.ok) {
+        return BuildGenericErrorResponseJson(result.message);
+    }
+    nlohmann::json body;
+    body["success"] = true;
+    body["message"] = result.message;
+    body["state"] = ClusterViewerReportToJson(report);
+    return body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+std::string BuildPickResponseJson(bool hit, const std::string& entityName)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["hit"] = hit;
+    if (!entityName.empty()) {
+        body["entity"] = entityName;
+    }
+    return body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+ParsedCloneClustersRequest ParseCloneClustersRequest(const std::string& jsonBody)
+{
+    ParsedCloneClustersRequest result;
+
+    nlohmann::json parsed = ParseJsonNoThrow(jsonBody);
+    if (parsed.is_discarded()) {
+        result.errorMessage = "malformed JSON body";
+        return result;
+    }
+    if (!parsed.is_object()) {
+        result.errorMessage = "request body must be a JSON object";
+        return result;
+    }
+    if (!parsed.contains("gta_path") || !parsed["gta_path"].is_string()
+        || parsed["gta_path"].get<std::string>().empty()) {
+        result.errorMessage = "missing or invalid required field: gta_path";
+        return result;
+    }
+    result.gtaPath = parsed["gta_path"].get<std::string>();
+
+    if (parsed.contains("weld") && !parsed["weld"].is_null()) {
+        if (!parsed["weld"].is_string()) {
+            result.errorMessage = "weld must be a string";
+            return result;
+        }
+        const std::string weld = parsed["weld"].get<std::string>();
+        if (weld != "auto" && weld != "exact" && weld != "position_only") {
+            result.errorMessage = "weld must be \"auto\", \"exact\" or \"position_only\"";
+            return result;
+        }
+        result.weld = weld;
+    }
+    parsed.erase("weld");
+
+    if (parsed.contains("open_viewer") && !parsed["open_viewer"].is_null()) {
+        if (!parsed["open_viewer"].is_boolean()) {
+            result.errorMessage = "open_viewer must be a boolean";
+            return result;
+        }
+        result.openViewer = parsed["open_viewer"].get<bool>();
+    }
+
+    ParsedBuildClustersRequest options;
+    if (!ReadClusterOptionFields(parsed, options)) {
+        result.errorMessage = options.errorMessage;
+        return result;
+    }
+    result.maxVertices = options.maxVertices;
+    result.maxTriangles = options.maxTriangles;
+    result.coneWeight = options.coneWeight;
+    result.valid = true;
+    return result;
+}
+
+std::string BuildCloneClustersResponseJson(const CloneClustersResponseView& view)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["created_path"] = view.createdPath;
+    body["guid"] = view.guid;
+    body["weld_used"] = view.weldUsed;
+    body["weld_fell_back"] = view.weldFellBack;
+    body["vertex_count_before"] = view.vertexCountBefore;
+    body["vertex_count_after"] = view.vertexCountAfter;
+    body["triangle_count"] = view.triangleCount;
+    body["cluster_count"] = view.clusterCount;
+    body["avg_triangles_per_cluster"] = view.avgTrianglesPerCluster;
+    body["milliseconds"] = view.milliseconds;
+    body["message"] = view.message;
+    return body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+std::string BuildSceneCameraSelectResponseJson(const std::string& entityName)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["selected"] = entityName;
+    return body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+std::string BuildSceneCameraStateJson(const SceneCameraReport& report)
+{
+    nlohmann::json cameras = nlohmann::json::array();
+    for (const SceneCameraInfo& c : report.cameras) {
+        cameras.push_back(nlohmann::json::object({
+            { "entity", c.entityId },
+            { "name", c.name },
+            { "position", Xyz(c.position) },
+            { "rotation_euler_degrees", Xyz(c.rotationEuler) },
+            { "fov_y_degrees", c.fovYDegrees },
+            { "near", c.nearZ },
+            { "far", c.farZ },
+            { "selected", c.selected },
+            { "screen", nlohmann::json::object({ { "apex_x", c.apexScreenX }, { "apex_y", c.apexScreenY },
+                                                   { "visible", c.apexVisible } }) },
+        }));
+    }
+    nlohmann::json body;
+    body["rendered"] = report.rendered;
+    body["image"] = nlohmann::json::object({ { "width", report.imageWidth }, { "height", report.imageHeight } });
+    body["selected_entity"] = report.selectedEntity;
+    body["cameras"] = std::move(cameras);
+    body["selected_frustum"] = SegmentsToJson(report.selectedFrustum);
+    return body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
 } // namespace gte::Network

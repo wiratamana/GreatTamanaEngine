@@ -61,10 +61,11 @@ struct GtaMetadataData {
 };
 
 // Writes header + metadata + payload atomically (temp file, then rename), creating missing
-// parent directories. Never throws. On failure the old file is untouched and `error` gets the reason.
+// parent directories. With `createOnly`, an existing file is never replaced.
+// Never throws. On failure the old file is untouched and `error` gets the reason.
 bool WriteGtaFile(const std::filesystem::path& path, AssetType type, const Guid& guid, AssetFlags flags,
     const std::vector<std::uint8_t>& metadata, const std::vector<std::uint8_t>& payload,
-    std::uint64_t version = kGtaCurrentVersion, std::string* error = nullptr);
+    std::uint64_t version = kGtaCurrentVersion, std::string* error = nullptr, bool createOnly = false);
 
 // Reads only the 64-byte header (cheap enough for directory scans). Nullopt when the file is
 // missing, shorter than 64 bytes or has a bad magic. Never throws.

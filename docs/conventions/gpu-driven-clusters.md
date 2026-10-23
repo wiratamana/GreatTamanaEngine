@@ -59,7 +59,7 @@ leaves the mesh unchanged on failure.
 Meshes with skin weights, bones, morphs or physics are refused: welding reorders vertices.
 `report.poorFill` is set when the average fill is below 50% of the triangle limit.
 
-Three doors give the same bytes for the same input and options:
+Four doors create a cluster table:
 
 1. **Import hook.** `ImportAssetFile()` takes a required `MeshImportOptions`. `Off` never
    clusters. `Always` clusters rigless meshes. `Auto` (default) needs at least
@@ -72,6 +72,16 @@ Three doors give the same bytes for the same input and options:
 2. **Inspector.** "Build Clusters" in the mesh asset tools starts the editor's single
    `MeshClusterBuildRunner`. `EditorHost` polls it once per frame.
 3. **HTTP.** `POST /build_clusters` (see [networking.md](networking.md)).
+4. **Clone.** "Create Clustered Copy" in the Inspector or `POST /clone_clusters` writes `<stem>_clustered.gta` next to the
+   source with a new GUID and never changes the source. Weld `Auto` (default) tries `Exact`, then `PositionOnly` when the fill
+   is poor. `AtomicFile` has a create-only mode, so an existing file is never replaced.
+
+Doors 1 to 3 rewrite or create the asset in place and give the same bytes for the same input and options.
+
+A mesh only joins the GPU path when it **has a cluster table** (or a frame holds at least 4 instances of it, see
+"Runtime table"). A big mesh without a table stays on the CPU path. `Auto` import skips meshes of unshared triangles
+(typical for STL: "Clusters skipped: expected cluster fill is poor"). Use "Create Clustered Copy" (Auto weld) or the
+`PositionOnly` weld for them. `PositionOnly` recomputes smooth normals, which is why the clone leaves the original untouched.
 
 The write is atomic (`AtomicFile.h`): a temp file next to the target, an identity check
 (size + last write time) before the rename, and one writer per target. A failed or
@@ -161,7 +171,8 @@ Instance counts are never truncated.
 ## Cull math and cone test
 
 `ClusterCullMath.h` is the CPU oracle for `ClusterCull.comp`. If the two disagree, the oracle
-is right. A text test keeps shader constants and block names equal to the C++ values.
+is right. A text test keeps shader constants and block names equal to the C++ values. The Cluster Viewer does not use
+the CPU copy of the tests; it reads the GPU result instead.
 
 The frustum test transforms the cluster AABB to world space (NaN boxes are kept). The cone
 test is **off by default** and is valid only together with the back-face-culling pipeline
@@ -240,3 +251,42 @@ Both vertex shaders declare `invariant gl_Position` with the same expression ord
 - Depth-only lanes never use the pyramid.
 - Debug: `/feature_debug/set?name=GpuDrivenScene&occlusion=true`; read `game.occlusionUsable`.
   Combine with `freezeCulling` and `/get_game_view` to see the effect.
+
+## Cluster Viewer
+
+A floating editor window that shows the clusters of one mesh asset and checks frustum, back-face cone and Hi-Z culling.
+The viewer reads **every number and image back from the GPU**. The real `ClusterCull.comp`, one indirect-count draw
+and the real `HizBuild.comp` do the work. The viewer has no CPU copy of the cull tests, classifies no cluster on the CPU and
+keeps no CPU copy of the mesh after upload. The CPU only adds, subtracts and prints. The GPU code is `ClusterViewRenderer`
+(`src/Renderer/`, uses only public `Renderer` entry points and kit types); the window is `Editor/ClusterViewerWindow`.
+
+- **Open.** Inspector "Open Cluster Viewer" on a mesh asset, the banner button after a clone, or `GET /cluster_viewer/open`.
+  A mesh without a usable table opens in Normal mode with a banner. Closing the window frees all GPU memory and UI handles.
+- **Draw modes.** `Normal` (clay shading), `Clusters` (one hue per cluster, the same hash as `debugView=ClusterId`, not the
+  same brightness) and `Cull result` (survivors of the debug camera). Culled clusters are drawn `Hidden` or `Dim`.
+  There is no wireframe.
+- **Debug camera.** A camera with a frustum gizmo, picked and moved with the mouse (move or rotate) or set by number. It
+  uses the engine camera math. The viewer image is always the orbit camera; the debug camera only decides what is culled.
+  "Camera preview" shows what the debug camera itself draws: a wrongly culled cluster is a hole in it.
+- **Reason split.** The shader runs with the enabled flags added one by one (frustum, cone, Hi-Z) and only the survivor counts
+  are read back. A cluster that fails two tests counts under the first, so
+  `visible + byFrustum + byCone + byOcclusion == total`. Counts that are not nested show a red banner and no per-reason numbers.
+- **Verify (ID pass).** Draws every cluster from the debug camera with a flat id colour and reads the pixels back.
+  `falseCull` = not kept by the GPU cull but seen in the image. `conservative` = kept but not seen (only wasted work).
+  With the cone flag on, the ID pass uses back-face culling like the engine. A Hi-Z result at another pose or size shows as
+  "Hi-Z stale", not as a bug. The result goes stale when the pose, flags, capture, size or mesh changes.
+- **Hi-Z capture.** "Capture Hi-Z" draws a depth-only pass of every cluster from the debug camera and builds the pyramid with
+  `HizBuild.comp`. It stays on the GPU. Without a capture, or after a camera cut (`HizCameraCut`), the occlusion flag is
+  dropped for that run and the panel says so. One capture counts as valid; the engine needs two clean builds. The viewer
+  depth holds the whole mesh, the engine depth holds last frame's survivors.
+- **Limits.** `MaxClusters()` = min(200000, device limits): above it the cluster modes are off. The device needs
+  `ClusterPathSupported()`, else a banner and no GPU work. One identity instance: the moved-instance rule and the work-id mapping
+  of several instances are not exercised. The cone test is correct for closed meshes only, so open meshes can show false culls.
+  Ground truth sees only what is at least one pixel big. Every run blocks the CPU, so runs happen only when the frame key changes
+  or on a button. Targets use explicit RGBA8_UNorm, never the swapchain format.
+- **HTTP.** `/cluster_viewer/open|state|set|pick|verify|capture_hiz|image`, `POST /clone_clusters`, see
+  [networking.md](networking.md). `GET /cluster_viewer/image` returns only the viewer image (`target=view|debug`,
+  optional `overlay=true`), never a full screenshot.
+- **Scene camera picking.** In the Scene panel every Camera entity shows a body, and a left click within 14 px of an apex or
+  6 px of an edge selects that entity. The selected camera shows its frustum in the Scene panel and, read-only, in the viewer.
+  A pick never starts while a gizmo is hot. `GET /scene_camera/state|pick|select|image` give the same to HTTP.

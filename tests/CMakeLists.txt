@@ -2233,6 +2233,7 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Assets/MeshFileTests.cpp
     Assets/MeshClusterTests.cpp
     Assets/MeshClusteringTests.cpp
+    Assets/MeshClusterCloneTests.cpp
     Assets/MeshClusterImportTests.cpp
     Assets/MeshMaterialPartitionerTests.cpp
     Assets/MotionFileTests.cpp
@@ -2258,6 +2259,8 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Jobs/JobSystemSdlClockThreadSafetyTests.cpp
     Network/NetworkRoutesTests.cpp
     Network/NetworkRoutesInspectorTests.cpp
+    Network/NetworkRoutesClusterViewerTests.cpp
+    Network/NetworkRoutesSceneCameraTests.cpp
     Network/NetworkServerTests.cpp
     Network/CaptureEndpointsEndToEndTests.cpp
     Network/EngineCommandEndpointsEndToEndTests.cpp
@@ -2290,6 +2293,8 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Renderer/DrawStatsTests.cpp
     Renderer/Culling/ClusterCullMathTests.cpp
     Renderer/ClusterShaderTextTests.cpp
+    Renderer/ClusterTintTests.cpp
+    Renderer/ClusterViewShaderTextTests.cpp
     Renderer/RenderGraph/IndirectDrawRecordTests.cpp
     Renderer/GpuTimingTests.cpp
     Renderer/ComputeDispatchTests.cpp
@@ -2617,6 +2622,16 @@ if(TRUE)
         Editor/ScreenPassPriorityAssignmentTests.cpp
         Editor/MeshClusterBuildRunnerTests.cpp
         Editor/ClusterToolUiStateTests.cpp
+        Editor/CameraFrustumGizmoTests.cpp
+        Editor/CameraPickTests.cpp
+        Editor/OverlayRasterTests.cpp
+        Editor/ViewportProjectionTests.cpp
+        Editor/OrbitCameraTests.cpp
+        Editor/ClusterViewerStatsTests.cpp
+        Editor/ClusterViewerTruthTests.cpp
+        Editor/ClusterViewerLoadTests.cpp
+        Editor/ClusterViewerSettingsTests.cpp
+        Editor/ClusterStatusTextTests.cpp
     )
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only
@@ -2954,6 +2969,15 @@ set(GTE_COMMENT_RULE_SRC
     Assets/MeshMaterialPartitioner.h Assets/MeshMaterialPartitioner.cpp
     Editor/MeshClusterBuildRunner.h Editor/MeshClusterBuildRunner.cpp
     Editor/ClusterToolUiState.h Editor/ClusterToolUiState.cpp
+    Assets/MeshClusterClone.h Assets/MeshClusterClone.cpp
+    Editor/ViewportProjection.h Editor/ViewportProjection.cpp Editor/CameraFrustumGizmo.h Editor/CameraFrustumGizmo.cpp
+    Editor/CameraPick.h Editor/CameraPick.cpp Editor/OverlayRaster.h Editor/OverlayRaster.cpp
+    Editor/OrbitCamera.h Editor/OrbitCamera.cpp Editor/ClusterViewerSettings.h Editor/ClusterViewerSettings.cpp
+    Editor/ClusterViewerLoad.h Editor/ClusterViewerLoad.cpp Editor/ClusterViewerStats.h Editor/ClusterViewerStats.cpp
+    Editor/ClusterViewerTruth.h Editor/ClusterViewerTruth.cpp Editor/ClusterStatusText.h Editor/ClusterStatusText.cpp
+    Editor/ClusterViewerControl.h Editor/SceneCameraControl.h
+    Editor/ClusterViewerWindow.h Editor/ClusterViewerWindow.cpp Editor/CameraFrustumOverlay.h Editor/CameraFrustumOverlay.cpp
+    Editor/SceneCameraAdapter.h Editor/SceneCameraAdapter.cpp
     Game/Instantiation/MaterialTextureGpuCache.h Game/Instantiation/MaterialTextureGpuCache.cpp
     Game/Instantiation/MaterialCacheKeys.h Game/Instantiation/MaterialLifetimeRules.h
     Game/Instantiation/MaterialLifetimeRules.cpp Game/Instantiation/MeshAssetPipelineKind.h
@@ -2989,10 +3013,16 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Renderer/Culling/ClusterCullMathTests.cpp Assets/AtomicFileTests.cpp Encoding/R32FloatFormatTests.cpp
     Assets/MeshClusterTests.cpp Assets/MeshClusteringTests.cpp Assets/MeshMaterialPartitionerTests.cpp
     Assets/MeshClusterImportTests.cpp Editor/MeshClusterBuildRunnerTests.cpp Editor/ClusterToolUiStateTests.cpp
-    Network/NetworkRoutesInspectorTests.cpp
+    Network/NetworkRoutesInspectorTests.cpp Network/NetworkRoutesClusterViewerTests.cpp
+    Network/NetworkRoutesSceneCameraTests.cpp
     Core/ClusterClaimTests.cpp Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp Core/ClusterCandidatesTests.cpp
     Core/ClusterDrawStateTests.cpp Core/ClusterDrawVerbTests.cpp
-    Renderer/ClusterShaderTextTests.cpp Renderer/RenderGraph/IndirectDrawRecordTests.cpp)
+    Renderer/ClusterShaderTextTests.cpp Renderer/RenderGraph/IndirectDrawRecordTests.cpp
+    Assets/MeshClusterCloneTests.cpp Renderer/ClusterTintTests.cpp Renderer/ClusterViewShaderTextTests.cpp
+    Editor/CameraFrustumGizmoTests.cpp Editor/CameraPickTests.cpp Editor/OverlayRasterTests.cpp
+    Editor/ViewportProjectionTests.cpp Editor/OrbitCameraTests.cpp Editor/ClusterViewerStatsTests.cpp
+    Editor/ClusterViewerTruthTests.cpp Editor/ClusterViewerLoadTests.cpp Editor/ClusterViewerSettingsTests.cpp
+    Editor/ClusterStatusTextTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

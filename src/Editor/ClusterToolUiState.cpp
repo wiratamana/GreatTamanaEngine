@@ -29,6 +29,11 @@ float ClampClusterConeWeight(float value) noexcept
     return std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : 0.5f;
 }
 
+int ClampCloneWeldIndex(int value) noexcept
+{
+    return std::clamp(value, 0, 2);
+}
+
 std::string FormatClusterStatusLine(std::size_t clusterCount, float avgTrianglesPerCluster, std::size_t verticesBefore,
     std::size_t verticesAfter, double milliseconds)
 {

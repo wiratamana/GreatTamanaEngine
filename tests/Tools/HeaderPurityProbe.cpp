@@ -11,6 +11,7 @@
 #include "Features/VolumetricLight/VolumetricLightTypes.h"
 #include "Game/Lighting/SunLightModulation.h"
 #include "Game/Lighting/SunShadowReceiver.h"
+#include "Renderer/ClusterViewRenderer.h"
 #include "Renderer/RenderGraph/ComputePass.h"
 #include "Renderer/RenderGraph/FullscreenPass.h"
 #include "Renderer/RenderGraph/GpuBuffer.h"

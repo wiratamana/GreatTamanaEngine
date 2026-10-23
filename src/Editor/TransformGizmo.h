@@ -78,4 +78,23 @@ void DrawGizmoOperationSwitcher(GizmoOperation& operation);
 bool ManipulateTransformGizmo(GizmoOperation operation, const Mat4& view, const Mat4& projection, float rectX,
     float rectY, float rectWidth, float rectHeight, Transform& transform, const Mat4& parentWorld = Mat4::Identity());
 
+// Gives the gizmo calls made inside its lifetime their own interaction id (the default id is -1).
+class GizmoIdScope {
+public:
+    explicit GizmoIdScope(const char* id);
+    ~GizmoIdScope();
+
+    GizmoIdScope(const GizmoIdScope&) = delete;
+    GizmoIdScope& operator=(const GizmoIdScope&) = delete;
+};
+
+// True while the cursor is over any gizmo or one is in use. Global, and reports the previous frame.
+bool IsGizmoOver();
+
+// True while the gizmo of the current GizmoIdScope is being dragged.
+bool IsGizmoUsing();
+
+// Ends a drag of the current GizmoIdScope. Call when its gizmo stops being drawn.
+void CancelGizmoInteraction();
+
 } // namespace gte

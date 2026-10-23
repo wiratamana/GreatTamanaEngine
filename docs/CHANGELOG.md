@@ -4,6 +4,26 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## Cluster Viewer and Create Clustered Copy (branch `feature/gpu-cull-impl`, 2026-10-23)
+
+- **Clone.** `CloneMeshAssetWithClusters()` (`Assets/MeshClusterClone.h`) writes `<stem>_clustered.gta` next to a mesh asset with a new
+  GUID. The source is never touched and an existing name is never replaced (`AtomicFile` has a create-only flag). Auto weld tries
+  `Exact`, then `PositionOnly` when the fill is poor. `BuildClusteredPayload()` is the one core shared with "Build Clusters".
+  Inspector: "Create Clustered Copy", "Open Cluster Viewer". `POST /clone_clusters`. The source asset keeps "Clusters: none".
+- **Viewer renderer.** `ClusterViewRenderer` (`src/Renderer/`) runs the real `ClusterCull.comp`, draws the survivors with one
+  indirect-count draw and reads counts and images back from the GPU. Targets and pipelines are RGBA8_UNorm. It also does the
+  ID pass, the Hi-Z capture (`HizBuild.comp`) and the per-reason counts. `IndirectDrawRecord` has optional clear values.
+  Shared tint hash: `ClusterTint.glsl`.
+- **Viewer window.** "Cluster Viewer" draws Normal, Clusters and Cull result modes, culled clusters Hidden or Dim, a camera preview,
+  stats, "Verify with ID pass" (false-cull check) and "Capture Hi-Z". The window keeps no CPU copy of the mesh.
+- **Debug camera and Scene cameras.** The debug camera has a frustum gizmo that is picked and moved with the mouse
+  (`GizmoIdScope`, `IsGizmoOver`, `IsGizmoUsing`, `CancelGizmoInteraction` in `TransformGizmo.h`). The Scene panel shows camera
+  bodies, draws the frustum of the selected camera and selects a camera with a left click (`PickCamera`).
+- **HTTP.** `/cluster_viewer/*`, `/scene_camera/*` and `/clone_clusters` (see [networking.md](conventions/networking.md)).
+  Image routes return the viewer or Scene image only, with an optional camera overlay.
+- **Cost record.** Wall time of one viewer run and one Verify on the reference clone at 1280x720: to be measured on the
+  reference machine.
+
 ## Sun occlusion, aerial perspective and light shafts for large and small scenes (branch `feature/hdr-tonemap-impl`)
 
 - The aerial volume march no longer stops at world y = 0: samples below sea level are clamped onto the surface (sea-level

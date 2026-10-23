@@ -349,6 +349,45 @@ module or adding a new endpoint:
     then have a real dock id, so the default-layout rebuild (`DefaultDockLayoutIsNeeded()`) never
     fires. Replies `409` until the dock layout is built. Both views render from the next frame on.
 
+- **Cluster viewer routes** (`/cluster_viewer/*`, `POST /clone_clusters`) use two more
+  `EditorUiCommandKind` values, `ClusterViewer` and `SceneCamera`, and the `CloneMeshClusters` kind of
+  `AssetImportCommandBridge`. The editor reaches the viewer only through `IClusterViewerControl`
+  (`ClusterViewerControl.h`). GPU work (render, verify, Hi-Z capture) runs on the main thread inside the
+  editor frame. PNG encoding and the overlay raster run on the network thread. Every number comes from a
+  GPU read-back. Status codes: `400` bad input, `409` viewer not open / no valid mesh / device unsupported /
+  no image, `503` no editor or another UI command pending, `504` bridge timeout.
+  - `GET /cluster_viewer/open?path=<absolute .gta>` opens or re-targets the window and loads the mesh before
+    it answers. The path must be a mesh inside the project root. Replies `{"success":true,"message","state":{...}}`.
+  - `GET /cluster_viewer/state` returns `{"open","path","valid","mesh","settings","cull","hiz","truth",
+    "debugCamera","clusterPathSupported"}`. `cull` holds `total`, `passedFrustum`, `passedCone`, `visible`,
+    `byFrustum`, `byCone`, `byOcclusion`, `visibleTriangles`, `runMilliseconds` and the `nested` check.
+  - `GET /cluster_viewer/set?key=value&key=value` changes settings, all or none. Keys: `drawMode`
+    (`normal|clusters|cull`), `frustum`, `cone`, `occlusion`, `culledStyle` (`hidden|dim`), `debugCamera`,
+    `cameraPreview`, `cameraSelected`, `showSceneCamera`, `camX/camY/camZ`, `camYaw/camPitch/camRoll`,
+    `camFov/camNear/camFar/camAspect`, `copySceneCamera`, `orbitYaw/orbitPitch/orbitDistance/orbitTargetX/Y/Z`,
+    `encodeWidth` (`640|1280|1920`). An unknown key or a bad value is a `400` that names the key; nothing is applied.
+  - `GET /cluster_viewer/pick?x=<0..1>&y=<0..1>` is a camera pick at that point of the viewer image. Replies
+    `{"success":true,"hit":bool}`. `x` and `y` outside 0..1 are a `400`.
+  - `POST /cluster_viewer/verify` runs the ID-pass truth check. `POST /cluster_viewer/capture_hiz` captures Hi-Z
+    at the debug camera. Both reply with the new `state`.
+  - `GET /cluster_viewer/image?target=view|debug[&overlay=true][&format=json]` returns a PNG of the viewer image
+    only, never a full screenshot. `target=debug` is the camera preview (`409` when it is off). `overlay=true`
+    draws the debug camera frustum and the selected Scene camera in.
+  - `POST /clone_clusters` `{ "gta_path", "weld": "auto"|"exact"|"position_only", "open_viewer", "max_vertices",
+    "max_triangles", "cone_weight" }` is "Create Clustered Copy", the twin of `POST /build_clusters`. The
+    destination is chosen by the editor (`<stem>_clustered.gta`, then `_clustered_2`); it is never a parameter and
+    never overwritten. The request stays pending until the job finishes and replies `{ "success", "created_path",
+    "guid", "weld_used", "weld_fell_back", "vertex_count_before", "vertex_count_after", "triangle_count",
+    "cluster_count", "avg_triangles_per_cluster", "milliseconds", "message" }`. `503` while another build runs.
+- **Scene camera routes** (`/scene_camera/*`) use `ISceneCameraControl` (`SceneCameraControl.h`).
+  - `GET /scene_camera/state` lists the cameras of the Scene (entity, name, pose, lens, selected, apex screen
+    position as fractions of the Scene image) and the segments of the selected camera frustum in image pixels.
+  - `GET /scene_camera/pick?x=<0..1>&y=<0..1>` does the same pick as a mouse click on the Scene image and selects
+    the camera it hits. Replies `{"success":true,"hit":bool,"entity"}`.
+  - `GET /scene_camera/select?name=<entity name>` selects a Camera entity by name. `404` for an unknown name.
+  - `GET /scene_camera/image[?overlay=true][&format=json]` returns a PNG of the Scene view only, with the camera
+    overlay drawn in (default on). `409` when the Scene view was not rendered.
+
 
 - **`POST /instantiate_asset`** (`task_manager/stl-parser-2` campaign,
   `task_manager/stl-parser-2/PHASE0_MASTER_STRATEGY.md`) spawns an already-

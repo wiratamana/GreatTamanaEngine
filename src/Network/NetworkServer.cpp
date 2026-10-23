@@ -11,7 +11,10 @@
 #include "../Application/RenderGraphControlCommandBridge.h"
 #include "../Core/EditorCapabilities.h" // ILogQueryCapability.
 #include "../Core/Logging.h"
+#include "../Editor/OverlayRaster.h"
 #include "../Encoding/Base64.h"
+#include "../Encoding/CapturedPixelConversion.h"
+#include "../Encoding/PngEncoder.h"
 #include "../Math/Quat.h"
 #include "../Math/Vec3.h"
 
@@ -437,6 +440,291 @@ void RegisterFeatureDebugRoutes(httplib::Server& server, FeatureDebugCommandBrid
     registerCommand("/feature_debug/state", FeatureDebugRoute::State, FeatureDebugCommandKind::GetState);
     registerCommand("/feature_debug/set", FeatureDebugRoute::Set, FeatureDebugCommandKind::Set);
     registerCommand("/feature_debug/invoke", FeatureDebugRoute::Invoke, FeatureDebugCommandKind::Invoke);
+}
+
+// Writes the answer of a failed viewer or Scene camera command.
+template <typename Error>
+void RespondWithCommandError(httplib::Response& res, Error error, const std::string& message)
+{
+    const int status = HttpStatusForError(error);
+    res.status = status == 200 ? 409 : status;
+    res.set_content(BuildGenericErrorResponseJson(message), "application/json");
+}
+
+// Composes the overlay, encodes the PNG and answers raw PNG or JSON base64, like the capture routes.
+// Runs on the network thread, never inside the editor frame.
+void WriteImageResponse(const httplib::Request& req, httplib::Response& res, const ClusterViewerImage& image, bool overlay)
+{
+    const int width = static_cast<int>(image.pixels.width);
+    const int height = static_cast<int>(image.pixels.height);
+    std::vector<std::uint8_t> rgba =
+        Encoding::ConvertCapturedPixelsToRgba8(image.pixels, Encoding::HdrVisualization::DisplayReferred);
+    if (rgba.empty() || width <= 0 || height <= 0) {
+        res.status = 409;
+        res.set_content(BuildGenericErrorResponseJson("the image format cannot be converted"), "application/json");
+        return;
+    }
+    if (overlay) {
+        RasterizeSegments(rgba, width, height, image.overlay);
+    }
+    const std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(rgba.data(), width, height);
+    const CaptureResponseFormat format =
+        ResolveCaptureResponseFormat(req.get_param_value("format"), req.get_header_value("Accept"));
+    if (format == CaptureResponseFormat::RawPng) {
+        res.set_content(reinterpret_cast<const char*>(png.data()), png.size(), "image/png");
+    } else {
+        res.set_content(BuildCaptureJsonBody(width, height, Encoding::EncodeBase64(png)), "application/json");
+    }
+}
+
+// Registers /cluster_viewer/*, POST /clone_clusters and /scene_camera/*. Every route forwards to the main thread
+// through a bridge; none touches the GPU or the UI here.
+void RegisterClusterViewerRoutes(
+    httplib::Server& server, EditorUiCommandBridge* uiBridge, AssetImportCommandBridge* assetBridge)
+{
+    // Submits one viewer command. Answers the error itself and returns nullopt when the command failed.
+    const auto runViewer = [uiBridge](httplib::Response& res, ClusterViewerCommand command)
+        -> std::optional<ClusterViewerOutcome> {
+        EditorUiCommandRequest request;
+        request.kind = EditorUiCommandKind::ClusterViewer;
+        request.clusterViewer = std::move(command);
+        std::optional<EditorUiCommandResult> result = SubmitEditorUiCommand(uiBridge, request, res);
+        if (!result.has_value()) {
+            return std::nullopt;
+        }
+        if (!result->clusterViewer.result.ok) {
+            RespondWithCommandError(res, result->clusterViewer.result.error, result->clusterViewer.result.message);
+            return std::nullopt;
+        }
+        return std::move(result->clusterViewer);
+    };
+    const auto runSceneCamera = [uiBridge](httplib::Response& res, SceneCameraCommand command)
+        -> std::optional<SceneCameraOutcome> {
+        EditorUiCommandRequest request;
+        request.kind = EditorUiCommandKind::SceneCamera;
+        request.sceneCamera = std::move(command);
+        std::optional<EditorUiCommandResult> result = SubmitEditorUiCommand(uiBridge, request, res);
+        if (!result.has_value()) {
+            return std::nullopt;
+        }
+        if (!result->sceneCamera.result.ok) {
+            RespondWithCommandError(res, result->sceneCamera.result.error, result->sceneCamera.result.message);
+            return std::nullopt;
+        }
+        return std::move(result->sceneCamera);
+    };
+    const auto answerCommand = [](httplib::Response& res, const ClusterViewerOutcome& out) {
+        res.status = 200;
+        res.set_content(BuildClusterViewerCommandResponseJson(out.result, out.report), "application/json");
+    };
+
+    server.Get("/cluster_viewer/open", [runViewer, answerCommand](const httplib::Request& req, httplib::Response& res) {
+        const ParsedSelectAssetQuery parsed = ParseSelectAssetQuery(req.get_param_value("path"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        ClusterViewerCommand command;
+        command.operation = ClusterViewerOperation::Open;
+        command.path = parsed.path;
+        if (const std::optional<ClusterViewerOutcome> out = runViewer(res, std::move(command))) {
+            answerCommand(res, *out);
+        }
+    });
+
+    server.Get("/cluster_viewer/state", [runViewer](const httplib::Request&, httplib::Response& res) {
+        ClusterViewerCommand command;
+        command.operation = ClusterViewerOperation::State;
+        if (const std::optional<ClusterViewerOutcome> out = runViewer(res, std::move(command))) {
+            res.status = 200;
+            res.set_content(BuildClusterViewerStateJson(out->report), "application/json");
+        }
+    });
+
+    server.Get("/cluster_viewer/set", [runViewer, answerCommand](const httplib::Request& req, httplib::Response& res) {
+        const std::vector<std::pair<std::string, std::string>> params(req.params.begin(), req.params.end());
+        ParsedClusterViewerSetQuery parsed = ParseClusterViewerSetQuery(params);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        ClusterViewerCommand command;
+        command.operation = ClusterViewerOperation::Set;
+        command.pairs = std::move(parsed.pairs);
+        if (const std::optional<ClusterViewerOutcome> out = runViewer(res, std::move(command))) {
+            answerCommand(res, *out);
+        }
+    });
+
+    server.Get("/cluster_viewer/pick", [runViewer](const httplib::Request& req, httplib::Response& res) {
+        const ParsedPickQuery parsed = ParsePickQuery(req.get_param_value("x"), req.get_param_value("y"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        ClusterViewerCommand command;
+        command.operation = ClusterViewerOperation::Pick;
+        command.x = parsed.x;
+        command.y = parsed.y;
+        if (const std::optional<ClusterViewerOutcome> out = runViewer(res, std::move(command))) {
+            res.status = 200;
+            res.set_content(BuildPickResponseJson(out->hit, ""), "application/json");
+        }
+    });
+
+    server.Post("/cluster_viewer/verify", [runViewer, answerCommand](const httplib::Request&, httplib::Response& res) {
+        ClusterViewerCommand command;
+        command.operation = ClusterViewerOperation::Verify;
+        if (const std::optional<ClusterViewerOutcome> out = runViewer(res, std::move(command))) {
+            answerCommand(res, *out);
+        }
+    });
+
+    server.Post("/cluster_viewer/capture_hiz", [runViewer, answerCommand](const httplib::Request&, httplib::Response& res) {
+        ClusterViewerCommand command;
+        command.operation = ClusterViewerOperation::CaptureHiz;
+        if (const std::optional<ClusterViewerOutcome> out = runViewer(res, std::move(command))) {
+            answerCommand(res, *out);
+        }
+    });
+
+    server.Get("/cluster_viewer/image", [runViewer](const httplib::Request& req, httplib::Response& res) {
+        const ParsedClusterViewerImageQuery parsed =
+            ParseClusterViewerImageQuery(req.get_param_value("target"), req.get_param_value("overlay"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        ClusterViewerCommand command;
+        command.operation = ClusterViewerOperation::Image;
+        command.slot = parsed.debugCamera ? ClusterViewSlot::Preview : ClusterViewSlot::Main;
+        command.overlay = parsed.overlay;
+        if (const std::optional<ClusterViewerOutcome> out = runViewer(res, std::move(command))) {
+            WriteImageResponse(req, res, *out->image, parsed.overlay);
+        }
+    });
+
+    // POST /clone_clusters: "Create Clustered Copy". Answered when the clone job finishes.
+    server.Post("/clone_clusters", [assetBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedCloneClustersRequest parsed = ParseCloneClustersRequest(req.body);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        if (assetBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("asset import command bridge not available"), "application/json");
+            return;
+        }
+        AssetImportCommandRequest request;
+        request.kind = AssetImportCommandKind::CloneMeshClusters;
+        request.cloneMeshClusters.gtaPath = parsed.gtaPath;
+        request.cloneMeshClusters.weld = parsed.weld;
+        request.cloneMeshClusters.openViewer = parsed.openViewer;
+        request.cloneMeshClusters.maxVertices = parsed.maxVertices;
+        request.cloneMeshClusters.maxTriangles = parsed.maxTriangles;
+        request.cloneMeshClusters.coneWeight = parsed.coneWeight;
+
+        const AssetImportCommandBridge::SubmitResult submit = assetBridge->SubmitAndWait(request);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(
+                BuildGenericErrorResponseJson("another asset import or cluster build is already in progress"),
+                "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("cluster clone timed out; the job keeps running and "
+                                                          "creates the file when it finishes"),
+                "application/json");
+            return;
+        }
+        const CloneMeshClustersOutcome& outcome = submit.result->cloneMeshClusters;
+        if (outcome.success) {
+            CloneClustersResponseView view;
+            view.createdPath = outcome.createdPath;
+            view.guid = outcome.guid;
+            view.weldUsed = outcome.weldUsed;
+            view.weldFellBack = outcome.weldFellBack;
+            view.vertexCountBefore = outcome.vertexCountBefore;
+            view.vertexCountAfter = outcome.vertexCountAfter;
+            view.triangleCount = outcome.triangleCount;
+            view.clusterCount = outcome.clusterCount;
+            view.avgTrianglesPerCluster = outcome.avgTrianglesPerCluster;
+            view.milliseconds = outcome.milliseconds;
+            view.message = outcome.message;
+            res.status = 200;
+            res.set_content(BuildCloneClustersResponseJson(view), "application/json");
+            return;
+        }
+        const bool unavailable = outcome.status == BuildMeshClustersStatus::Busy
+            || outcome.status == BuildMeshClustersStatus::Unavailable;
+        res.status = unavailable ? 503 : 400;
+        res.set_content(BuildGenericErrorResponseJson(outcome.message), "application/json");
+    });
+
+    server.Get("/scene_camera/state", [runSceneCamera](const httplib::Request&, httplib::Response& res) {
+        SceneCameraCommand command;
+        command.operation = SceneCameraOperation::State;
+        if (const std::optional<SceneCameraOutcome> out = runSceneCamera(res, std::move(command))) {
+            res.status = 200;
+            res.set_content(BuildSceneCameraStateJson(out->report), "application/json");
+        }
+    });
+
+    server.Get("/scene_camera/pick", [runSceneCamera](const httplib::Request& req, httplib::Response& res) {
+        const ParsedPickQuery parsed = ParsePickQuery(req.get_param_value("x"), req.get_param_value("y"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        SceneCameraCommand command;
+        command.operation = SceneCameraOperation::Pick;
+        command.x = parsed.x;
+        command.y = parsed.y;
+        if (const std::optional<SceneCameraOutcome> out = runSceneCamera(res, std::move(command))) {
+            res.status = 200;
+            res.set_content(BuildPickResponseJson(out->hit, out->entityName), "application/json");
+        }
+    });
+
+    server.Get("/scene_camera/select", [runSceneCamera](const httplib::Request& req, httplib::Response& res) {
+        const std::string name = req.get_param_value("name");
+        if (name.empty()) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson("missing required query parameter: name"), "application/json");
+            return;
+        }
+        SceneCameraCommand command;
+        command.operation = SceneCameraOperation::Select;
+        command.name = name;
+        if (const std::optional<SceneCameraOutcome> out = runSceneCamera(res, std::move(command))) {
+            res.status = 200;
+            res.set_content(BuildSceneCameraSelectResponseJson(name), "application/json");
+        }
+    });
+
+    server.Get("/scene_camera/image", [runSceneCamera](const httplib::Request& req, httplib::Response& res) {
+        const ParsedSceneCameraImageQuery parsed = ParseSceneCameraImageQuery(req.get_param_value("overlay"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        SceneCameraCommand command;
+        command.operation = SceneCameraOperation::Image;
+        command.overlay = parsed.overlay;
+        if (const std::optional<SceneCameraOutcome> out = runSceneCamera(res, std::move(command))) {
+            WriteImageResponse(req, res, *out->image, parsed.overlay);
+        }
+    });
 }
 
 // The one, hand-written route table. A new endpoint is one more server.Get/Post line that forwards to its own
@@ -1887,6 +2175,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     });
 
     RegisterFeatureDebugRoutes(server, featureDebugCommandBridge);
+    RegisterClusterViewerRoutes(server, uiCommandBridge, assetImportCommandBridge);
 }
 
 } // namespace

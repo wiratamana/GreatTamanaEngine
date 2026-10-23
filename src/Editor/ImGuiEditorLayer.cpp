@@ -3,6 +3,7 @@
 #include <cassert>
 
 #include "../Core/Logging.h"
+#include "ClusterViewerWindow.h"
 #include "../Encoding/Utf8Path.h"
 #include "BuiltinFeatureEditorPanelRegistry.h"
 #include "DockLayout.h"
@@ -38,6 +39,7 @@
 #include "Panels/ProjectPanel.h"
 #endif
 #include "Panels/ScenePanel.h"
+#include "SceneCameraAdapter.h"
 #include "TransformGizmo.h"
 #include "../Game/Game.h"
 #include "../Renderer/RenderGraph/RenderPassToggleRegistry.h"
@@ -192,6 +194,7 @@ public:
         m_assetPreviewMesh.Reset();
         m_boneViewer.Reset();
 #endif
+        m_clusterViewer.Reset();
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext(m_context);
@@ -360,6 +363,10 @@ public:
             RefreshProjectAssetRecord(m_ctx.pendingAssetRecordRefresh);
             m_ctx.pendingAssetRecordRefresh.clear();
         }
+        if (!m_ctx.pendingClusterViewerPath.empty()) {
+            m_clusterViewer.Open(m_ctx.pendingClusterViewerPath);
+            m_ctx.pendingClusterViewerPath.clear();
+        }
         BuildScenePanel(game, renderer, m_ctx, m_sceneCamera, sceneServicesSetLayout);
         BuildGamePanel(m_ctx);
         BuildMemoryPanel(m_ctx, renderer);
@@ -379,6 +386,9 @@ public:
         // Bone Viewer floating window; Build() is a no-op while it is closed.
         m_boneViewer.Build(registry, renderer, m_ctx, m_modelRigCache, game.GetPhysicsSystem());
 #endif
+        // Cluster Viewer floating window; Build() is a no-op while it is closed.
+        m_clusterViewer.Build(renderer, m_ctx, registry);
+        m_sceneCameraAdapter.BeginFrame(renderer, m_ctx, registry, m_sceneView);
 
         // Draw every registered plugin panel; the content goes through PluginPanelDrawContextAdapter.
         for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
@@ -527,6 +537,15 @@ public:
     }
 
     MeshClusterBuildRunner* ClusterBuildRunner() override { return &m_clusterBuildRunner; }
+
+    void OnMeshCloneFinished(const std::string& createdPathUtf8, bool openViewer) override
+    {
+        if (openViewer) {
+            m_ctx.pendingClusterViewerPath = createdPathUtf8;
+        }
+    }
+    IClusterViewerControl* ClusterViewerControl() override { return &m_clusterViewer; }
+    ISceneCameraControl* SceneCameraControl() override { return &m_sceneCameraAdapter; }
 
     void RefreshProjectAssetRecord(const std::string& absoluteGtaPath) override
     {
@@ -778,6 +797,12 @@ private:
     // Mtime-cached rig data shared by BoneViewerWindow and InspectorPanel, so both read one copy.
     ModelRigCache m_modelRigCache;
 #endif
+
+    // Cluster Viewer floating window, opened from the Inspector. Reset() in the destructor, like m_assetPreview.
+    ClusterViewerWindow m_clusterViewer;
+
+    // HTTP access to the Scene panel's cameras; refreshed every BuildUI().
+    SceneCameraAdapter m_sceneCameraAdapter;
 
     // "Create New Project" floating window (Project > New Project...). No GPU resources, so no Reset() needed.
     // Outside GTE_ENABLE_PROJECT_PANEL: it must exist in every build.
