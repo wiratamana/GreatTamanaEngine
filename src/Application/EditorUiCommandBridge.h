@@ -64,8 +64,8 @@ struct ClusterViewerCommand {
     std::vector<KeyValue> pairs; // Set
     float x = 0.0f;              // Pick, 0..1 of the viewer image
     float y = 0.0f;
-    ClusterViewSlot slot = ClusterViewSlot::Main; // Image
-    bool overlay = false;                         // Image
+    ClusterViewerImageTarget target = ClusterViewerImageTarget::View; // Image
+    bool overlay = false;                                             // Image
 };
 
 enum class SceneCameraOperation : std::uint8_t { State, Select, Pick, Image };

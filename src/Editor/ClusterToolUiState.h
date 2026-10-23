@@ -11,6 +11,7 @@
 
 namespace gte {
 
+class MeshClusterBuildRunner;
 struct MeshClusterCloneOptions;
 
 // Cached "may this mesh asset be clustered" answer; the file identity guards against stale data.
@@ -107,5 +108,9 @@ std::optional<std::string> ValidateMeshAssetPath(
 // Project-root relative form of `absolute` with '/' separators; empty on failure.
 // `absolute` must already be inside `projectRoot` (see ValidateMeshAssetPath()).
 std::string ProjectRelativeSlashPath(const std::filesystem::path& absolute, const std::filesystem::path& projectRoot);
+
+// Starts a clone from a UI button and sets `ui.lastCloneStatus` (empty = started, else why not).
+void StartCloneFromUi(ClusterToolUiState& ui, MeshClusterBuildRunner* runner, const std::filesystem::path& source,
+    const std::filesystem::path& destination);
 
 } // namespace gte

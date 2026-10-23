@@ -193,7 +193,7 @@ ClusterViewerOutcome RunClusterViewerCommand(
         out.result = control->CaptureHiz();
         break;
     case ClusterViewerOperation::Image:
-        out.image = control->CaptureImage(command.slot, command.overlay);
+        out.image = control->CaptureImage(command.target, command.overlay);
         if (out.image.has_value()) {
             out.result.ok = true;
         } else {

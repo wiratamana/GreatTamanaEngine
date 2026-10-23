@@ -607,7 +607,7 @@ void RegisterClusterViewerRoutes(
         }
         ClusterViewerCommand command;
         command.operation = ClusterViewerOperation::Image;
-        command.slot = parsed.debugCamera ? ClusterViewSlot::Preview : ClusterViewSlot::Main;
+        command.target = parsed.debugCamera ? ClusterViewerImageTarget::DebugPreview : ClusterViewerImageTarget::View;
         command.overlay = parsed.overlay;
         if (const std::optional<ClusterViewerOutcome> out = runViewer(res, std::move(command))) {
             WriteImageResponse(req, res, *out->image, parsed.overlay);

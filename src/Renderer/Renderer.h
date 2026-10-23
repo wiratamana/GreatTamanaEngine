@@ -121,6 +121,9 @@ public:
     // Synchronously reads back color pixels from a RenderTexture.
     CapturedRawPixels CaptureRenderTexturePixels(RenderTexture& texture) const;
 
+    // Waits for the GPU, then reads back color pixels from a RenderTexture that a frame may still be writing.
+    CapturedRawPixels CaptureRenderTexturePixelsAfterIdle(RenderTexture& texture) const;
+
     // Waits for the GPU, then reads back a debug texture snapshot (its depth image when `depthAspect`).
     // Empty pixels when the image is missing or its format is unsupported.
     CapturedRawPixels CaptureDebugTexturePixels(const rg::DebugTextureSnapshot& snapshot, bool depthAspect) const;
@@ -290,6 +293,9 @@ public:
 
     // Returns context information required by ImGui's Vulkan backend.
     VulkanContextInfo GetImGuiVulkanBackendInfo() const;
+
+    // Device limit maxImageDimension2D.
+    std::uint32_t MaxImageDimension2D() const noexcept;
 
 private:
     VulkanContextInfo GetVulkanContextInfo() const;

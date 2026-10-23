@@ -1223,7 +1223,10 @@ add_library(gte_editor STATIC
     src/Editor/ClusterViewerControl.h
     src/Editor/SceneCameraControl.h
     src/Editor/ClusterViewerWindow.h
+    src/Editor/ClusterViewerWindowInternal.h
     src/Editor/ClusterViewerWindow.cpp
+    src/Editor/ClusterViewerWindowUi.cpp
+    src/Editor/ClusterViewerWindowControl.cpp
     src/Editor/CameraFrustumOverlay.h
     src/Editor/CameraFrustumOverlay.cpp
     src/Editor/SceneCameraAdapter.h
@@ -1784,8 +1787,7 @@ gte_add_shader(GreatTamanaEditor src/Shaders/ClusterViewClay.frag
     EXTRA_DEPENDS src/Shaders/ClusterViewShading.glsl src/Shaders/ClusterTint.glsl)
 gte_add_shader(GreatTamanaEditor src/Shaders/ClusterViewTint.frag
     EXTRA_DEPENDS src/Shaders/ClusterViewShading.glsl src/Shaders/ClusterTint.glsl)
-gte_add_shader(GreatTamanaEditor src/Shaders/ClusterViewDim.frag
-    EXTRA_DEPENDS src/Shaders/ClusterViewShading.glsl src/Shaders/ClusterTint.glsl)
+gte_add_shader(GreatTamanaEditor src/Shaders/ClusterViewDim.frag)
 gte_add_shader(GreatTamanaEditor src/Shaders/ClusterViewId.frag)
 
 # Textured half of the imported-mesh draw path (VertexLayout::PositionNormalUv): a material with a

@@ -2976,7 +2976,9 @@ set(GTE_COMMENT_RULE_SRC
     Editor/ClusterViewerLoad.h Editor/ClusterViewerLoad.cpp Editor/ClusterViewerStats.h Editor/ClusterViewerStats.cpp
     Editor/ClusterViewerTruth.h Editor/ClusterViewerTruth.cpp Editor/ClusterStatusText.h Editor/ClusterStatusText.cpp
     Editor/ClusterViewerControl.h Editor/SceneCameraControl.h
-    Editor/ClusterViewerWindow.h Editor/ClusterViewerWindow.cpp Editor/CameraFrustumOverlay.h Editor/CameraFrustumOverlay.cpp
+    Editor/ClusterViewerWindow.h Editor/ClusterViewerWindow.cpp Editor/ClusterViewerWindowInternal.h
+    Editor/ClusterViewerWindowUi.cpp Editor/ClusterViewerWindowControl.cpp
+    Editor/CameraFrustumOverlay.h Editor/CameraFrustumOverlay.cpp
     Editor/SceneCameraAdapter.h Editor/SceneCameraAdapter.cpp
     Game/Instantiation/MaterialTextureGpuCache.h Game/Instantiation/MaterialTextureGpuCache.cpp
     Game/Instantiation/MaterialCacheKeys.h Game/Instantiation/MaterialLifetimeRules.h

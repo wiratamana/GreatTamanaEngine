@@ -10,8 +10,6 @@
 #include "../Assets/MeshClusterValidation.h"
 #include "../Core/Logging.h"
 
-#include <volk.h>
-
 #include <algorithm>
 #include <chrono>
 #include <iterator>
@@ -91,13 +89,7 @@ void ClusterViewRenderer::Impl::Build()
     maxClusters = static_cast<std::uint32_t>(
         std::min<std::uint64_t>({ kViewerMaxClusters, limits.maxWorkItems, limits.maxClusters }));
 
-    const VkPhysicalDevice physicalDevice = renderer.GetImGuiVulkanBackendInfo().physicalDevice;
-    if (physicalDevice == VK_NULL_HANDLE) {
-        throw std::runtime_error("no physical device");
-    }
-    VkPhysicalDeviceProperties properties{};
-    vkGetPhysicalDeviceProperties(physicalDevice, &properties);
-    maxImageDimension = properties.limits.maxImageDimension2D;
+    maxImageDimension = renderer.MaxImageDimension2D();
 
     vertexSpirv = ReadShaderFileBytes("shaders/MeshCluster.vert.spv");
     fragmentSpirv[static_cast<std::size_t>(ClusterViewFragment::Clay)] = ReadShaderFileBytes("shaders/ClusterViewClay.frag.spv");

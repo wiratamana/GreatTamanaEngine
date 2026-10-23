@@ -5,7 +5,6 @@
 #include "ViewportProjection.h"
 
 #include "../Core/CapturedPixels.h"
-#include "../Renderer/ClusterViewRenderer.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -20,6 +19,9 @@ class Renderer;
 
 // Conflict = state conflict (409). Unavailable = no editor or viewer in this build (503).
 enum class ClusterViewerError : std::uint8_t { None, NotOpen, NoValidMesh, Unsupported, BadInput, Conflict, Unavailable };
+
+// Which image a capture returns: the main view or the debug-camera preview.
+enum class ClusterViewerImageTarget : std::uint8_t { View, DebugPreview };
 
 struct ClusterViewerResult {
     bool ok = false;
@@ -126,7 +128,7 @@ public:
 
     // Camera pick at a point (x, y in 0..1) of the viewer image.
     virtual ClusterViewerPickResult Pick(float x, float y) = 0;
-    virtual std::optional<ClusterViewerImage> CaptureImage(ClusterViewSlot slot, bool overlay) = 0;
+    virtual std::optional<ClusterViewerImage> CaptureImage(ClusterViewerImageTarget target, bool overlay) = 0;
 };
 
 } // namespace gte

@@ -364,7 +364,7 @@ public:
             m_ctx.pendingAssetRecordRefresh.clear();
         }
         if (!m_ctx.pendingClusterViewerPath.empty()) {
-            m_clusterViewer.Open(m_ctx.pendingClusterViewerPath);
+            m_clusterViewer.RequestOpen(m_ctx.pendingClusterViewerPath);
             m_ctx.pendingClusterViewerPath.clear();
         }
         BuildScenePanel(game, renderer, m_ctx, m_sceneCamera, sceneServicesSetLayout);

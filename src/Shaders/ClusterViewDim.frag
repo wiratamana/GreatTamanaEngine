@@ -2,8 +2,6 @@
 
 // Viewer fragment shader: flat dim color for culled clusters.
 
-#include "ClusterViewShading.glsl"
-
 layout(location = 0) in vec3 inWorldNormal;
 layout(location = 1) in vec3 inWorldPos;
 layout(location = 2) flat in uint inClusterId;

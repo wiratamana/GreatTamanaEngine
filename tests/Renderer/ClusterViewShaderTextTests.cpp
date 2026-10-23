@@ -30,9 +30,9 @@ TEST(ClusterViewShaderText, NoViewerFragmentShaderDeclaresAPushBlock)
     }
 }
 
-TEST(ClusterViewShaderText, ColorShadersIncludeTheSharedShading)
+TEST(ClusterViewShaderText, LitShadersIncludeTheSharedShading)
 {
-    for (const char* name : { "ClusterViewClay.frag", "ClusterViewTint.frag", "ClusterViewDim.frag" }) {
+    for (const char* name : { "ClusterViewClay.frag", "ClusterViewTint.frag" }) {
         EXPECT_TRUE(Contains(ReadShaderFile(name), "#include \"ClusterViewShading.glsl\"")) << name;
     }
 }

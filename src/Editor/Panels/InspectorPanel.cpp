@@ -1112,9 +1112,7 @@ void BuildClusterCloneSection(EditorContext& ctx, const std::string& absolutePat
 
     ImGui::BeginDisabled(blocked);
     if (ImGui::Button("Create Clustered Copy")) {
-        const bool busy = runner->StartClone(source, destination, MakeCloneOptions(ui), ui.openViewerAfterClone, 0)
-            == MeshClusterBuildRunner::StartResult::Busy;
-        ui.lastCloneStatus = busy ? "A cluster build is already running." : std::string();
+        StartCloneFromUi(ui, runner, source, destination);
     }
     ImGui::EndDisabled();
     if (blocked && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {

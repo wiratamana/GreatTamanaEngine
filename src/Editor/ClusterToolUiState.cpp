@@ -5,6 +5,7 @@
 #include "../Assets/MeshClusterClone.h"
 #include "../Assets/MeshClusterPersistence.h"
 #include "../Encoding/Utf8Path.h"
+#include "MeshClusterBuildRunner.h"
 
 #include <algorithm>
 #include <cctype>
@@ -126,6 +127,18 @@ std::string ProjectRelativeSlashPath(const std::filesystem::path& absolute, cons
     std::string text = PathToUtf8(relative);
     std::replace(text.begin(), text.end(), '\\', '/');
     return text;
+}
+
+void StartCloneFromUi(ClusterToolUiState& ui, MeshClusterBuildRunner* runner, const std::filesystem::path& source,
+    const std::filesystem::path& destination)
+{
+    if (runner == nullptr) {
+        ui.lastCloneStatus = "The cluster build runner is not available.";
+        return;
+    }
+    const bool busy = runner->StartClone(source, destination, MakeCloneOptions(ui), ui.openViewerAfterClone, 0)
+        == MeshClusterBuildRunner::StartResult::Busy;
+    ui.lastCloneStatus = busy ? "A cluster build is already running." : std::string();
 }
 
 } // namespace gte

@@ -20,6 +20,31 @@
 
 namespace gte {
 
+float GameViewAspect(const EditorContext& ctx)
+{
+    const Extent2D extent = ctx.desiredExtent;
+    return (extent.width > 0 && extent.height > 0) ? static_cast<float>(extent.width) / static_cast<float>(extent.height)
+                                                    : 16.0f / 9.0f;
+}
+
+FrustumInput MakeSceneCameraFrustum(Registry& registry, Entity entity, float aspect)
+{
+    FrustumInput input;
+    const Camera* const lens = registry.TryGetComponent<Camera>(entity);
+    if (lens == nullptr) {
+        input.fovYDegrees = 0.0f; // fails FrustumInputIsValid
+        return input;
+    }
+    const Transform world = registry.HasComponent<Transform>(entity) ? ComputeWorldTransform(registry, entity) : Transform{};
+    input.position = world.position;
+    input.rotation = world.rotation;
+    input.fovYDegrees = lens->fovYDegrees;
+    input.nearZ = lens->nearZ;
+    input.farZ = lens->farZ;
+    input.aspect = aspect;
+    return input;
+}
+
 namespace {
 
 constexpr std::size_t kMaxSceneCameras = 256;
@@ -33,15 +58,7 @@ void GatherCameraCandidates(Registry& registry, float aspect, std::vector<Camera
     ComponentStorage<Camera>& cameras = registry.Storage<Camera>();
     for (std::size_t i = 0; i < cameras.Size() && out.size() < kMaxSceneCameras; ++i) {
         const Entity entity = cameras.EntityAt(i);
-        const Camera& lens = cameras.ComponentAt(i);
-        const Transform world = registry.HasComponent<Transform>(entity) ? ComputeWorldTransform(registry, entity) : Transform{};
-        FrustumInput input;
-        input.position = world.position;
-        input.rotation = world.rotation;
-        input.fovYDegrees = lens.fovYDegrees;
-        input.nearZ = lens.nearZ;
-        input.farZ = lens.farZ;
-        input.aspect = aspect;
+        const FrustumInput input = MakeSceneCameraFrustum(registry, entity, aspect);
         if (FrustumInputIsValid(input)) {
             out.push_back({ SceneCameraEntityId(entity), input });
         }
@@ -58,9 +75,7 @@ void BuildCameraOverlay(
         return;
     }
 
-    const float gameAspect = (ctx.desiredExtent.width > 0 && ctx.desiredExtent.height > 0)
-        ? static_cast<float>(ctx.desiredExtent.width) / static_cast<float>(ctx.desiredExtent.height)
-        : 16.0f / 9.0f;
+    const float gameAspect = GameViewAspect(ctx);
     frame.rectMin = Vec2(imageMin.x, imageMin.y);
     frame.rectMax = Vec2(imageMin.x + imageSize.x, imageMin.y + imageSize.y);
     frame.viewProjection = camera.ViewProjection(imageSize.x / imageSize.y);

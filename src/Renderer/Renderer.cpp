@@ -307,6 +307,12 @@ Renderer::CapturedRawPixels Renderer::CaptureRenderTexturePixels(RenderTexture& 
         texture.Image(), VK_IMAGE_ASPECT_COLOR_BIT, texture.NativeFormat(), texture.Extent(), shaderReadState);
 }
 
+Renderer::CapturedRawPixels Renderer::CaptureRenderTexturePixelsAfterIdle(RenderTexture& texture) const
+{
+    WaitForGpuIdle();
+    return CaptureRenderTexturePixels(texture);
+}
+
 Renderer::CapturedRawPixels Renderer::CaptureDebugTexturePixels(
     const rg::DebugTextureSnapshot& snapshot, bool depthAspect) const
 {
@@ -780,6 +786,13 @@ Renderer::VulkanContextInfo Renderer::GetVulkanContextInfo() const
 Renderer::VulkanContextInfo Renderer::GetImGuiVulkanBackendInfo() const
 {
     return GetVulkanContextInfo();
+}
+
+std::uint32_t Renderer::MaxImageDimension2D() const noexcept
+{
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(m_device.Physical(), &properties);
+    return properties.limits.maxImageDimension2D;
 }
 
 GpuMemoryTracker::Totals Renderer::GetMemoryTotals() const

@@ -36,7 +36,7 @@ public:
     ClusterViewerWindow& operator=(const ClusterViewerWindow&) = delete;
 
     // Opens or re-targets the window; the mesh loads in the next Build().
-    void Open(const std::string& absoluteGtaPath);
+    void RequestOpen(const std::string& absoluteGtaPath);
 
     // Per frame; a no-op while closed.
     void Build(Renderer& renderer, EditorContext& ctx, Registry& registry);
@@ -50,11 +50,12 @@ public:
     ClusterViewerResult Verify() override;
     ClusterViewerResult CaptureHiz() override;
     ClusterViewerPickResult Pick(float x, float y) override;
-    std::optional<ClusterViewerImage> CaptureImage(ClusterViewSlot slot, bool overlay) override;
+    std::optional<ClusterViewerImage> CaptureImage(ClusterViewerImageTarget target, bool overlay) override;
 
 private:
     // Everything one slot render depends on; the slot re-renders only when it changes.
     struct FrameKey {
+        ClusterViewSlot slot = ClusterViewSlot::Main;
         std::array<float, 16> viewProjection{};
         std::array<float, 16> cullViewProjection{};
         std::array<float, 3> eye{};
@@ -103,7 +104,6 @@ private:
     // GPU work. Every call is synchronous and runs only when its frame key changed.
     void RenderMain(int width, int height);
     void RenderPreview();
-    ClusterViewerResult VerifyNow();
     ClusterViewerResult CaptureHizNow();
     bool TruthIsStale() const;
     std::string HizStatusText() const;
@@ -115,7 +115,12 @@ private:
     // Ends a running ImGuizmo interaction of the debug camera, if one was drawn.
     void CancelGizmo();
     void DrawCloneStatus();
-    FrameKey MakeKey(const ClusterViewFrame& frame, std::uint32_t drawMode) const;
+    FrameKey MakeKey(ClusterViewSlot slot, const ClusterViewFrame& frame, std::uint32_t drawMode) const;
+    // Image size for HTTP requests: the last UI size, or the default before the first draw.
+    std::pair<int, int> RequestSize() const;
+    void EnsureRequestSize();
+    // The error to show for the main view: the debug camera one first, else the last run error.
+    const std::string& ActiveRunError() const noexcept;
 
     // UI.
     void DrawToolbar();
@@ -168,6 +173,7 @@ private:
     ClusterViewRender m_run;
     ClusterViewerStats m_stats;
     std::string m_runError;
+    std::string m_cameraError; // debug camera invalid in Cull mode; empty otherwise
     int m_requestWidth = 0;
     int m_requestHeight = 0;
 
