@@ -62,6 +62,7 @@ ClusterViewerReport ClusterViewerWindow::Report() const
     add("cameraPreview", boolean(m_settings.cameraPreview));
     add("cameraSelected", boolean(m_debug.selected));
     add("showSceneCamera", boolean(m_settings.showSceneCamera));
+    add("planes", boolean(m_settings.showPlanes));
     const Vec3 euler = m_debug.transform.rotation.ToEulerDegrees();
     add("camX", number(m_debug.transform.position.x));
     add("camY", number(m_debug.transform.position.y));
@@ -82,7 +83,7 @@ ClusterViewerReport ClusterViewerWindow::Report() const
     add("encodeWidth", std::to_string(m_settings.encodeWidth));
 
     ClusterViewerCullReport& cull = report.cull;
-    cull.ok = m_hasRun && m_run.ok;
+    cull.ok = m_hasRun && ActiveRunError().empty() && m_stats.valid;
     cull.total = m_run.counts.total;
     cull.passedFrustum = m_run.counts.passedFrustum;
     cull.passedCone = m_run.counts.passedCone;
@@ -219,7 +220,7 @@ std::optional<ClusterViewerImage> ClusterViewerWindow::CaptureImage(ClusterViewe
     if (overlay && slot == ClusterViewSlot::Main && image.pixels.width > 0 && image.pixels.height > 0) {
         AppendOverlay(OrbitViewProjection(ViewAspect()), Vec2(0.0f, 0.0f),
             Vec2(static_cast<float>(image.pixels.width), static_cast<float>(image.pixels.height)), false, image.overlay,
-            image.overlayQuads);
+            image.overlayQuads, nullptr);
     }
     return image;
 }

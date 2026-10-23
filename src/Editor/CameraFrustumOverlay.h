@@ -28,10 +28,25 @@ void AppendCameraOverlay(const FrustumInput& camera, bool fullFrustum, const Mat
     Vec2 rectMax, OverlayColor color, float width, std::vector<OverlaySegment2D>& out,
     std::vector<OverlayQuad2D>* farFill = nullptr);
 
+// Text anchored at a screen position.
+struct OverlayLabel2D {
+    Vec2 pos;
+    const char* text = "";
+    OverlayColor rgba{ 255, 255, 255, 255 };
+};
+
+// One arrow (shaft and two barbs) per plane of `camera`; `labels`, when set, gets each plane name at the tip.
+void AppendPlaneArrowOverlay(const FrustumInput& camera, std::span<const Plane> planes, const Mat4& viewProjection,
+    Vec2 rectMin, Vec2 rectMax, OverlayColor color, float width, std::vector<OverlaySegment2D>& out,
+    std::vector<OverlayLabel2D>* labels = nullptr);
+
 // Draws filled screen-space quads clipped to [clipMin, clipMax). Call before the lines.
 void DrawOverlayQuads(ImDrawList* drawList, std::span<const OverlayQuad2D> quads, Vec2 clipMin, Vec2 clipMax);
 
 // Draws screen-space segments clipped to [clipMin, clipMax).
 void DrawOverlaySegments(ImDrawList* drawList, std::span<const OverlaySegment2D> segments, Vec2 clipMin, Vec2 clipMax);
+
+// Draws text labels clipped to [clipMin, clipMax).
+void DrawOverlayLabels(ImDrawList* drawList, std::span<const OverlayLabel2D> labels, Vec2 clipMin, Vec2 clipMax);
 
 } // namespace gte

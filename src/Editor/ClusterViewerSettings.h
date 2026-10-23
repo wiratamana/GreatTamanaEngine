@@ -30,6 +30,7 @@ struct ClusterViewerSettings {
     ClusterViewerGizmoOperation gizmoOperation = ClusterViewerGizmoOperation::Translate;
     bool cameraPreview = false;
     bool showSceneCamera = true;
+    bool showPlanes = false; // debug camera: one inward-normal arrow per frustum plane
     std::uint32_t encodeWidth = 1280; // 640, 1280 or 1920: size of Verify and Hi-Z capture
 };
 
@@ -43,9 +44,6 @@ inline constexpr float kDebugCameraFarOverNear = 1.01f; // far must exceed near 
 inline constexpr float kDebugCameraMinAspect = 0.1f;
 inline constexpr float kDebugCameraMaxAspect = 10.0f;
 inline constexpr float kDebugCameraMaxPosition = 1.0e7f;
-inline constexpr float kOrbitMinPitchDeg = -85.0f;
-inline constexpr float kOrbitMaxPitchDeg = 85.0f;
-inline constexpr float kOrbitMaxDistance = 1.0e7f;
 
 // Perspective debug camera. Position and rotation come from `transform`; scale stays 1.
 struct DebugCameraState {

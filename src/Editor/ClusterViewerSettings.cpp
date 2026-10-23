@@ -1,17 +1,19 @@
 #include "ClusterViewerSettings.h"
 
+#include "OrbitCamera.h"
 #include "../Core/FeatureKit/FeatureDebug.h"
 #include "../ECS/Components/Camera.h"
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace gte {
 namespace {
 
 constexpr std::string_view kSetKeys =
     "drawMode, frustum, cone, occlusion, culledStyle, debugCamera, cameraPreview, cameraSelected, "
-    "showSceneCamera, camX, camY, camZ, camYaw, camPitch, camRoll, camFov, camNear, camFar, camAspect, "
+    "showSceneCamera, planes, camX, camY, camZ, camYaw, camPitch, camRoll, camFov, camNear, camFar, camAspect, "
     "copySceneCamera, orbitYaw, orbitPitch, orbitDistance, orbitTargetX, orbitTargetY, orbitTargetZ, encodeWidth";
 
 bool Finite(const Vec3& v) noexcept
@@ -92,6 +94,7 @@ Status ApplyPair(std::string_view key, std::string_view value, Pending& p, std::
     if (key == "cameraPreview") { return SetBool(value, s.cameraPreview, range); }
     if (key == "cameraSelected") { return SetBool(value, cam.selected, range); }
     if (key == "showSceneCamera") { return SetBool(value, s.showSceneCamera, range); }
+    if (key == "planes") { return SetBool(value, s.showPlanes, range); }
     if (key == "copySceneCamera") {
         bool wanted = false;
         const Status status = SetBool(value, wanted, range);
@@ -119,10 +122,13 @@ Status ApplyPair(std::string_view key, std::string_view value, Pending& p, std::
     }
     if (key == "orbitYaw") { return SetFloat(value, -1.0e6f, 1.0e6f, "-1e6..1e6 degrees", p.orbit.yawDeg, range); }
     if (key == "orbitPitch") {
-        return SetFloat(value, kOrbitMinPitchDeg, kOrbitMaxPitchDeg, "-85..85 degrees", p.orbit.pitchDeg, range);
+        return SetFloat(value, -OrbitCamera::kMaxPitchDegrees, OrbitCamera::kMaxPitchDegrees, "-85..85 degrees",
+            p.orbit.pitchDeg, range);
     }
     if (key == "orbitDistance") {
-        return SetFloat(value, 1.0e-4f, kOrbitMaxDistance, "1e-4..1e7", p.orbit.distance, range);
+        // Upper and lower limits depend on the mesh radius; the window clamps the value.
+        return SetFloat(value, std::numeric_limits<float>::min(), std::numeric_limits<float>::max(), "a positive number",
+            p.orbit.distance, range);
     }
     if (key == "orbitTargetX") { return SetFloat(value, -kPos, kPos, "-1e7..1e7", p.orbit.targetX, range); }
     if (key == "orbitTargetY") { return SetFloat(value, -kPos, kPos, "-1e7..1e7", p.orbit.targetY, range); }

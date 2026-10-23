@@ -3,6 +3,7 @@
 #include "../Math/MathTypes.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace gte {
@@ -11,10 +12,53 @@ namespace {
 
 constexpr float kMaxArrowFar = 1.0e6f;
 constexpr float kArrowFraction = 0.15f;
+constexpr float kPlaneArrowFraction = 0.10f;
 
 bool IsFinite(const Vec3& v) noexcept
 {
     return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
+// One face of the frustum: its name, centre and inward unit normal.
+struct Face {
+    const char* name;
+    Vec3 centre;
+    Vec3 normal;
+};
+
+// Inward normal of the plane through `apex`, `a` and `b`; `inside` fixes the sign.
+Vec3 SideNormal(const Vec3& apex, const Vec3& a, const Vec3& b, const Vec3& inside)
+{
+    const Vec3 n = Normalize(Cross(a - apex, b - apex));
+    return Dot(n, inside - apex) >= 0.0f ? n : n * -1.0f;
+}
+
+std::array<Face, 6> MakeFaces(const FrustumCorners& c)
+{
+    const Vec3 nearCenter = (c.nearC[0] + c.nearC[2]) * 0.5f;
+    const Vec3 farCenter = (c.farC[0] + c.farC[2]) * 0.5f;
+    const Vec3 inside = (nearCenter + farCenter) * 0.5f;
+    const auto side = [&](const char* name, int i, int j) {
+        return Face{ name, (c.nearC[i] + c.nearC[j] + c.farC[i] + c.farC[j]) * 0.25f,
+            SideNormal(c.apex, c.nearC[i], c.nearC[j], inside) };
+    };
+    return { side("Left", 0, 3), side("Right", 1, 2), side("Bottom", 0, 1), side("Top", 2, 3),
+        Face{ "Near", nearCenter, c.forward }, Face{ "Far", farCenter, c.forward * -1.0f } };
+}
+
+// The face whose inward normal is closest to the plane's.
+const Face& BestFace(const Plane& plane, const std::array<Face, 6>& faces)
+{
+    const Face* best = &faces[0];
+    float bestDot = Dot(plane.normal, best->normal);
+    for (const Face& face : faces) {
+        const float d = Dot(plane.normal, face.normal);
+        if (d > bestDot) {
+            best = &face;
+            bestDot = d;
+        }
+    }
+    return *best;
 }
 
 } // namespace
@@ -83,6 +127,26 @@ std::vector<FrustumSegment> BuildFrustumSegments(const FrustumCorners& c)
     const float farDistance = std::min(Length(farCenter - c.apex), kMaxArrowFar);
     segments.push_back({ c.apex, c.apex + c.forward * (farDistance * kArrowFraction), FrustumEdgeKind::Arrow });
     return segments;
+}
+
+const char* NameFrustumPlane(const Plane& plane, const FrustumCorners& basis)
+{
+    return BestFace(plane, MakeFaces(basis)).name;
+}
+
+std::vector<FrustumPlaneArrow> BuildFrustumPlaneArrows(std::span<const Plane> planes, const FrustumCorners& c)
+{
+    const Vec3 farCenter = (c.farC[0] + c.farC[2]) * 0.5f;
+    const float length = std::min(Length(farCenter - c.apex), kMaxArrowFar) * kPlaneArrowFraction;
+    const std::array<Face, 6> faces = MakeFaces(c);
+
+    std::vector<FrustumPlaneArrow> arrows;
+    arrows.reserve(planes.size());
+    for (const Plane& plane : planes) {
+        const Face& face = BestFace(plane, faces);
+        arrows.push_back({ face.centre, face.centre + plane.normal * length, face.name });
+    }
+    return arrows;
 }
 
 } // namespace gte

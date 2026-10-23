@@ -1,10 +1,12 @@
 #include "Editor/CameraFrustumGizmo.h"
 
 #include "ECS/Components/Camera.h"
+#include "Math/MathTypes.h"
 #include "Renderer/Culling/CullingTypes.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -102,6 +104,76 @@ TEST(CameraFrustumGizmoTest, ValidityRejectsBadInput)
     in = UnitCamera();
     in.position.x = std::numeric_limits<float>::infinity();
     EXPECT_FALSE(FrustumInputIsValid(in));
+}
+
+Plane MakePlane(const Vec3& normal)
+{
+    Plane p;
+    p.normal = Normalize(normal);
+    return p;
+}
+
+TEST(CameraFrustumGizmoTest, HandBuiltPlanesAreNamedByTheirFace)
+{
+    const FrustumCorners basis = ComputeFrustumCorners(UnitCamera());
+    EXPECT_STREQ(NameFrustumPlane(MakePlane({ 1, 0, 1 }), basis), "Left");
+    EXPECT_STREQ(NameFrustumPlane(MakePlane({ -1, 0, 1 }), basis), "Right");
+    EXPECT_STREQ(NameFrustumPlane(MakePlane({ 0, 1, 1 }), basis), "Bottom");
+    EXPECT_STREQ(NameFrustumPlane(MakePlane({ 0, -1, 1 }), basis), "Top");
+    EXPECT_STREQ(NameFrustumPlane(MakePlane({ 0, 0, 1 }), basis), "Near");
+    EXPECT_STREQ(NameFrustumPlane(MakePlane({ 0, 0, -1 }), basis), "Far");
+}
+
+TEST(CameraFrustumGizmoTest, SidePlanesOfAWideLensAreNotTakenForNearOrFar)
+{
+    FrustumInput in = UnitCamera();
+    in.fovYDegrees = 60.0f;
+    in.aspect = 16.0f / 9.0f; // the side normals lean further towards forward than towards right
+    const FrustumCorners basis = ComputeFrustumCorners(in);
+    const float halfX = std::tan(DegToRad(30.0f)) * in.aspect;
+    EXPECT_STREQ(NameFrustumPlane(MakePlane({ 1, 0, halfX }), basis), "Left");
+    EXPECT_STREQ(NameFrustumPlane(MakePlane({ -1, 0, halfX }), basis), "Right");
+}
+
+TEST(CameraFrustumGizmoTest, RolledCameraPlanesGetDistinctNamesAndArrowsStartOnThem)
+{
+    FrustumInput in;
+    in.position = Vec3(3.0f, -2.0f, 5.0f);
+    in.rotation = Quat::FromEulerDegrees(10.0f, 35.0f, 40.0f);
+    in.fovYDegrees = 60.0f;
+    in.nearZ = 0.5f;
+    in.farZ = 50.0f;
+    in.aspect = 16.0f / 9.0f;
+
+    const Camera camera{ in.fovYDegrees, in.nearZ, in.farZ, true };
+    Transform transform;
+    transform.position = in.position;
+    transform.rotation = in.rotation;
+    const std::array<Plane, 6> planes = ExtractFrustumPlanes(camera.ProjectionMatrix(in.aspect) * Camera::ViewMatrix(transform));
+    const FrustumCorners basis = ComputeFrustumCorners(in);
+    const std::vector<FrustumPlaneArrow> arrows = BuildFrustumPlaneArrows(planes, basis);
+    ASSERT_EQ(arrows.size(), 6u);
+
+    const float expectedLength = Length((basis.farC[0] + basis.farC[2]) * 0.5f - basis.apex) * 0.1f;
+    std::array<std::string, 6> names;
+    for (std::size_t i = 0; i < 6; ++i) {
+        const Plane& plane = planes[i];
+        const FrustumPlaneArrow& arrow = arrows[i];
+        names[i] = NameFrustumPlane(plane, basis);
+        EXPECT_EQ(names[i], arrow.name);
+        EXPECT_NEAR(Dot(plane.normal, arrow.from) + plane.distance, 0.0f, 1e-2f) << names[i];
+        EXPECT_NEAR(Length(arrow.to - arrow.from), expectedLength, 1e-3f) << names[i];
+        EXPECT_TRUE(ApproximatelyEqual(arrow.to - arrow.from, plane.normal * expectedLength, 1e-3f)) << names[i];
+
+        if (names[i] == "Left") { EXPECT_GT(Dot(plane.normal, basis.right), 0.3f); }
+        if (names[i] == "Right") { EXPECT_LT(Dot(plane.normal, basis.right), -0.3f); }
+        if (names[i] == "Bottom") { EXPECT_GT(Dot(plane.normal, basis.up), 0.3f); }
+        if (names[i] == "Top") { EXPECT_LT(Dot(plane.normal, basis.up), -0.3f); }
+        if (names[i] == "Near") { EXPECT_GT(Dot(plane.normal, basis.forward), 0.99f); }
+        if (names[i] == "Far") { EXPECT_LT(Dot(plane.normal, basis.forward), -0.99f); }
+    }
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(std::adjacent_find(names.begin(), names.end()), names.end()) << "two planes share a name";
 }
 
 } // namespace

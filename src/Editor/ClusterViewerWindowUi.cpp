@@ -286,6 +286,7 @@ void ClusterViewerWindow::DrawDebugCameraControls()
     ImGui::Checkbox("Camera preview", &m_settings.cameraPreview);
     ImGui::EndDisabled();
     ImGui::Checkbox("Show selected scene camera", &m_settings.showSceneCamera);
+    ImGui::Checkbox("Planes", &m_settings.showPlanes);
     const bool hasSceneCamera = SelectedSceneCamera().has_value();
     ImGui::BeginDisabled(!hasSceneCamera);
     if (ImGui::Button("Copy from selected scene camera")) {
@@ -442,6 +443,8 @@ void ClusterViewerWindow::DrawViewport()
     RenderMain(m_requestWidth, m_requestHeight);
     RenderPreview();
     if (m_mainTexture == UiTextureHandle::Invalid) {
+        m_orbiting = false;
+        m_panning = false;
         CancelGizmo();
         ImGui::TextDisabled("The view is not available.");
         if (!ActiveRunError().empty()) {
@@ -466,10 +469,12 @@ void ClusterViewerWindow::DrawViewport()
 
     std::vector<OverlaySegment2D> overlay;
     std::vector<OverlayQuad2D> quads;
-    AppendOverlay(viewProjection, imageMin, imageMax, m_debugHovered, overlay, quads);
+    std::vector<OverlayLabel2D> labels;
+    AppendOverlay(viewProjection, imageMin, imageMax, m_debugHovered, overlay, quads, &labels);
     ImDrawList* drawList = ImGui::GetWindowDrawList();
     DrawOverlayQuads(drawList, quads, imageMin, imageMax);
     DrawOverlaySegments(drawList, overlay, imageMin, imageMax);
+    DrawOverlayLabels(drawList, labels, imageMin, imageMax);
 
     if (m_previewTexture != UiTextureHandle::Invalid && m_previewWidth > 0 && m_previewHeight > 0) {
         const float width = std::min(static_cast<float>(m_previewWidth), avail.x * 0.4f);

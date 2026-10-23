@@ -3,6 +3,7 @@
 // Floating window that shows the clusters of one mesh and simulates cluster culling with a debug camera.
 // Every number and image comes from the GPU through ClusterViewRenderer. Call Reset() before the UI backend shuts down.
 
+#include "CameraFrustumOverlay.h"
 #include "ClusterViewerControl.h"
 #include "ClusterViewerLoad.h"
 #include "ClusterViewerSettings.h"
@@ -98,8 +99,9 @@ private:
     void SnapDebugCameraToView();
     void ApplyOrbitRequest(const ClusterViewerOrbitRequest& request);
     std::pair<int, int> VerifySize() const;
+    // `labels` may be null (image routes skip the text).
     void AppendOverlay(const Mat4& viewProjection, Vec2 rectMin, Vec2 rectMax, bool debugHovered,
-        std::vector<OverlaySegment2D>& out, std::vector<OverlayQuad2D>& quads) const;
+        std::vector<OverlaySegment2D>& out, std::vector<OverlayQuad2D>& quads, std::vector<OverlayLabel2D>* labels) const;
 
     // GPU work. Every call is synchronous and runs only when its frame key changed.
     void RenderMain(int width, int height);

@@ -1,11 +1,13 @@
 #pragma once
 
-// Pure geometry of a perspective camera frustum: corners and line list.
+// Pure geometry of a perspective camera frustum: corners, line list and plane normals.
 
 #include "../Math/Quat.h"
 #include "../Math/Vec3.h"
+#include "../Renderer/Culling/CullingTypes.h"
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace gte {
@@ -50,5 +52,19 @@ FrustumCorners ComputeFrustumCorners(const FrustumInput& input);
 
 // 4 near + 4 far + 4 side + 4 apex lines + 1 arrow (17 segments).
 std::vector<FrustumSegment> BuildFrustumSegments(const FrustumCorners& corners);
+
+// Face of the frustum a clip plane bounds: "Left", "Right", "Bottom", "Top", "Near" or "Far".
+// The inward normal is matched against the six face normals of `basis`, so the plane's array index does not matter.
+const char* NameFrustumPlane(const Plane& plane, const FrustumCorners& basis);
+
+// Arrow along a plane's inward normal, starting at the centre of the face it bounds.
+struct FrustumPlaneArrow {
+    Vec3 from;
+    Vec3 to;
+    const char* name = "";
+};
+
+// One arrow per plane, 10% of the far distance long.
+std::vector<FrustumPlaneArrow> BuildFrustumPlaneArrows(std::span<const Plane> planes, const FrustumCorners& corners);
 
 } // namespace gte

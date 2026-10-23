@@ -19,8 +19,10 @@ TEST(ClusterViewerSettingsTest, ValidKeysAreApplied)
 {
     ClusterViewerSettings s;
     DebugCameraState c;
+    EXPECT_FALSE(s.showPlanes);
     const auto r = Apply({ { "drawMode", "cull" }, { "frustum", "false" }, { "cone", "1" }, { "culledStyle", "hidden" },
-                             { "debugCamera", "true" }, { "camX", "5" }, { "camFov", "90" }, { "encodeWidth", "1920" } },
+                             { "debugCamera", "true" }, { "planes", "true" }, { "camX", "5" }, { "camFov", "90" },
+                             { "encodeWidth", "1920" } },
         s, c);
     ASSERT_TRUE(r.Ok()) << r.error;
     EXPECT_EQ(s.drawMode, ClusterViewerDrawMode::Cull);
@@ -28,6 +30,7 @@ TEST(ClusterViewerSettingsTest, ValidKeysAreApplied)
     EXPECT_TRUE(s.cone);
     EXPECT_EQ(s.culledStyle, ClusterViewerCulledStyle::Hidden);
     EXPECT_TRUE(c.show);
+    EXPECT_TRUE(s.showPlanes);
     EXPECT_FLOAT_EQ(c.transform.position.x, 5.0f);
     EXPECT_FLOAT_EQ(c.fovYDegrees, 90.0f);
     EXPECT_EQ(s.encodeWidth, 1920u);

@@ -517,9 +517,11 @@ ClusterViewRenderer::Impl::RunResult ClusterViewRenderer::Impl::RunPlan(
             const SetNames& names = kSetNames[static_cast<std::size_t>(stages[k].id)];
             ok = DeclareReadback(builder, names.readCount, stages[k].count, stages[k].countHost, kCountBytes) && ok;
         }
-        ok = DeclareReadback(builder, finalNames.readCommands, fin.commands, fin.commandsHost,
-                 BufferBytes(kClusterCommandBytes, total))
-            && ok;
+        if (draw != nullptr) {
+            ok = DeclareReadback(builder, finalNames.readCommands, fin.commands, fin.commandsHost,
+                     BufferBytes(kClusterCommandBytes, total))
+                && ok;
+        }
         if (readSurvivors) {
             ok = DeclareReadback(builder, finalNames.readVisible, fin.visible, fin.visibleHost,
                      BufferBytes(kClusterVisibleBytes, total))
@@ -580,16 +582,18 @@ ClusterViewRenderer::Impl::RunResult ClusterViewRenderer::Impl::RunPlan(
 
     CullSet& finalCullSet = Set(finalSet);
     if (visible > 0) {
-        std::vector<std::uint32_t> commandWords(static_cast<std::size_t>(visible) * 5);
-        if (!finalCullSet.commandsHost.Download(commandWords.data(), commandWords.size() * sizeof(std::uint32_t))) {
-            result.note = "the draw commands could not be read back";
-            return result;
+        if (draw != nullptr) {
+            std::vector<std::uint32_t> commandWords(static_cast<std::size_t>(visible) * 5);
+            if (!finalCullSet.commandsHost.Download(commandWords.data(), commandWords.size() * sizeof(std::uint32_t))) {
+                result.note = "the draw commands could not be read back";
+                return result;
+            }
+            std::uint64_t indexTotal = 0;
+            for (std::size_t i = 0; i < visible; ++i) {
+                indexTotal += commandWords[i * 5];
+            }
+            result.counts.visibleTriangles = indexTotal / 3;
         }
-        std::uint64_t indexTotal = 0;
-        for (std::size_t i = 0; i < visible; ++i) {
-            indexTotal += commandWords[i * 5];
-        }
-        result.counts.visibleTriangles = indexTotal / 3;
 
         if (readSurvivors) {
             std::vector<std::uint32_t> records(static_cast<std::size_t>(visible) * 2);

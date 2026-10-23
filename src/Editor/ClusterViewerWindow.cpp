@@ -4,8 +4,8 @@
 #include "ClusterToolUiState.h"
 #include "EditorContext.h"
 #include "ProjectRootPath.h"
+#include "SceneCameraFrustum.h"
 #include "TransformGizmo.h"
-#include "Panels/ScenePanel.h"
 #include "../Assets/AssetTypes.h"
 #include "../Assets/GtaFile.h"
 #include "../Assets/MeshClusterValidation.h"
@@ -380,7 +380,7 @@ void ClusterViewerWindow::ApplyOrbitRequest(const ClusterViewerOrbitRequest& req
         m_orbit.yawDeg = *request.yawDeg;
     }
     if (request.pitchDeg) {
-        m_orbit.pitchDeg = std::clamp(*request.pitchDeg, kOrbitMinPitchDeg, kOrbitMaxPitchDeg);
+        m_orbit.pitchDeg = std::clamp(*request.pitchDeg, -OrbitCamera::kMaxPitchDegrees, OrbitCamera::kMaxPitchDegrees);
     }
     if (request.distance) {
         m_orbit.distance = std::clamp(*request.distance, m_orbit.MinDistance(), m_orbit.MaxDistance());
@@ -405,7 +405,7 @@ std::pair<int, int> ClusterViewerWindow::VerifySize() const
 }
 
 void ClusterViewerWindow::AppendOverlay(const Mat4& viewProjection, Vec2 rectMin, Vec2 rectMax, bool debugHovered,
-    std::vector<OverlaySegment2D>& out, std::vector<OverlayQuad2D>& quads) const
+    std::vector<OverlaySegment2D>& out, std::vector<OverlayQuad2D>& quads, std::vector<OverlayLabel2D>* labels) const
 {
     if (m_settings.showSceneCamera) {
         if (const std::optional<FrustumInput> sceneCamera = SelectedSceneCamera()) {
@@ -414,9 +414,13 @@ void ClusterViewerWindow::AppendOverlay(const Mat4& viewProjection, Vec2 rectMin
     }
     if (m_debug.show && DebugCameraIsValid(m_debug)) {
         const bool strong = m_debug.selected || debugHovered;
-        AppendCameraOverlay(DebugFrustum(), true, viewProjection, rectMin, rectMax,
-            m_debug.selected ? kDebugCameraSelectedColor : kDebugCameraColor, strong ? 2.5f : 1.5f, out,
+        const OverlayColor color = m_debug.selected ? kDebugCameraSelectedColor : kDebugCameraColor;
+        AppendCameraOverlay(DebugFrustum(), true, viewProjection, rectMin, rectMax, color, strong ? 2.5f : 1.5f, out,
             m_debug.selected ? &quads : nullptr);
+        if (m_settings.showPlanes) {
+            const std::array<Plane, 6> planes = ExtractFrustumPlanes(DebugCameraViewProjection(m_debug));
+            AppendPlaneArrowOverlay(DebugFrustum(), planes, viewProjection, rectMin, rectMax, color, 1.5f, out, labels);
+        }
     }
 }
 

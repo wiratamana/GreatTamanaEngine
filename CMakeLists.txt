@@ -1231,6 +1231,8 @@ add_library(gte_editor STATIC
     src/Editor/CameraFrustumOverlay.cpp
     src/Editor/SceneCameraAdapter.h
     src/Editor/SceneCameraAdapter.cpp
+    src/Editor/SceneCameraFrustum.h
+    src/Editor/SceneCameraFrustum.cpp
     src/Editor/BuiltinFeatureEditorPanelRegistry.h
     src/Editor/BuiltinFeatureEditorPanelRegistry.cpp
     src/Editor/EditorContext.h
