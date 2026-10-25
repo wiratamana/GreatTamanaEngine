@@ -1,17 +1,4 @@
-// Unit tests for Phase 4A's pure GPU-timestamp capability interpretation +
-// tick-delta/slot-indexing math, PLUS Phase 4B's pure tri-state priority
-// resolution (src/Renderer/GpuTiming.h) - see
-// PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md, "Phase 4A"/"Phase 4B". No
-// Vulkan/Renderer/live GPU device involved at all: no VkQueryPool is
-// created anywhere in Phase 4A, so VulkanDevice::TimestampCapability()'s
-// actual VALUE against a real device is Tier 2 (verified manually - see
-// that document's own "Testing (Phase 4A)" section) while
-// InterpretTimestampCapability() - the pure DECISION logic VulkanDevice's
-// constructor calls with real, device-queried arguments - is exercised
-// here directly with hand-fabricated inputs instead. Phase 4B's
-// GpuTimingService itself is Tier 2 (needs a real VkDevice/VkQueue), but
-// the tri-state PRIORITY decision it builds on (ResolveGpuTimingStatus())
-// is pulled out as pure logic the exact same way, and tested below too.
+// Pure GPU timestamp math and status resolution (src/Renderer/GpuTiming.h). No device involved.
 
 #include "Renderer/GpuTiming.h"
 
@@ -65,21 +52,10 @@ TEST(GpuTimingTest, ConvertTimestampDeltaToMillisecondsNonPositivePeriodReturnsZ
     EXPECT_DOUBLE_EQ(ConvertTimestampDeltaToMilliseconds(0, 1'000'000, -1.0f, 64), 0.0);
 }
 
-// --- Fixed enum/constant layout ---------------------------------------------
+// --- Constants ---------------------------------------------------------------
 
-TEST(GpuTimingTest, GpuTimingSlotValuesAndCountAreExactlyAsDocumented)
+TEST(GpuTimingTest, GpuTimingFramesInFlightIsTwo)
 {
-    EXPECT_EQ(static_cast<std::uint32_t>(GpuTimingSlot::Offscreen0), 0u);
-    EXPECT_EQ(static_cast<std::uint32_t>(GpuTimingSlot::Offscreen1), 1u);
-    EXPECT_EQ(kGpuTimingSlotCount, 2u);
-}
-
-TEST(GpuTimingTest, KGpuTimingFramesInFlightMatchesFramePresenterConvention)
-{
-    // Must always agree in VALUE with FramePresenter::kFramesInFlight (kept
-    // as two separate named constants on purpose - see GpuTiming.h's own
-    // doc comment and PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md's design
-    // decision log).
     EXPECT_EQ(kGpuTimingFramesInFlight, 2u);
 }
 

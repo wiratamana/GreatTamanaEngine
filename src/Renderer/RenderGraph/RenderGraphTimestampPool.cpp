@@ -1,14 +1,12 @@
 #include "RenderGraphTimestampPool.h"
 
 #include "../Renderer.h"
-
-#include <limits>
-#include <stdexcept>
+#include "RecordingAccess.h"
 
 namespace gte::rg {
 
 RenderGraphTimestampPool::RenderGraphTimestampPool(VkDevice device, Renderer& renderer,
-    std::uint32_t graphicsQueueFamily, const GpuTimestampCapability& capability, std::uint32_t synchronousSlotBudget,
+    const GpuTimestampCapability& capability, std::uint32_t synchronousSlotBudget,
     std::uint32_t pipelinedSlotBudget, std::uint32_t pipelinedFramesInFlight)
     : m_device(device)
     , m_capability(capability)
@@ -29,80 +27,18 @@ RenderGraphTimestampPool::RenderGraphTimestampPool(VkDevice device, Renderer& re
     m_pipelinedPool.emplace(m_device, pipelinedSlotBudget * pipelinedFramesInFlight * 2);
 
     // One-time reset of every slot in both pools, so first use is clean for the validation layer.
-    WarmUpResetPool(*m_synchronousPool, renderer, graphicsQueueFamily);
-    WarmUpResetPool(*m_pipelinedPool, renderer, graphicsQueueFamily);
+    WarmUpResetPool(*m_synchronousPool, renderer);
+    WarmUpResetPool(*m_pipelinedPool, renderer);
 }
 
-void RenderGraphTimestampPool::WarmUpResetPool(
-    VulkanQueryPool& pool, Renderer& renderer, std::uint32_t graphicsQueueFamily)
+void RenderGraphTimestampPool::WarmUpResetPool(VulkanQueryPool& pool, Renderer& renderer)
 {
-    VkCommandPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    poolInfo.queueFamilyIndex = graphicsQueueFamily;
-
-    VkCommandPool commandPool = VK_NULL_HANDLE;
-    if (vkCreateCommandPool(m_device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
-        throw std::runtime_error("RenderGraphTimestampPool: vkCreateCommandPool failed (warm-up reset)");
-    }
-
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool = commandPool;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    if (vkAllocateCommandBuffers(m_device, &allocInfo, &cmd) != VK_SUCCESS) {
-        vkDestroyCommandPool(m_device, commandPool, nullptr);
-        throw std::runtime_error("RenderGraphTimestampPool: vkAllocateCommandBuffers failed (warm-up reset)");
-    }
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
-        vkDestroyCommandPool(m_device, commandPool, nullptr);
-        throw std::runtime_error("RenderGraphTimestampPool: vkBeginCommandBuffer failed (warm-up reset)");
-    }
-
-    // vkCmdResetQueryPool must be recorded OUTSIDE a dynamic rendering
-    // instance - trivially true here, this throwaway command buffer never
-    // begins one at all.
-    vkCmdResetQueryPool(cmd, pool.Native(), 0, pool.SlotCount());
-
-    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
-        vkDestroyCommandPool(m_device, commandPool, nullptr);
-        throw std::runtime_error("RenderGraphTimestampPool: vkEndCommandBuffer failed (warm-up reset)");
-    }
-
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkFence fence = VK_NULL_HANDLE;
-    if (vkCreateFence(m_device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
-        vkDestroyCommandPool(m_device, commandPool, nullptr);
-        throw std::runtime_error("RenderGraphTimestampPool: vkCreateFence failed (warm-up reset)");
-    }
-
-    VkCommandBufferSubmitInfo cmdSubmitInfo{};
-    cmdSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-    cmdSubmitInfo.commandBuffer = cmd;
-
-    VkSubmitInfo2 submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
-    submitInfo.commandBufferInfoCount = 1;
-    submitInfo.pCommandBufferInfos = &cmdSubmitInfo;
-
-    if (renderer.SubmitToGraphicsQueue(submitInfo, fence) != VK_SUCCESS) {
-        vkDestroyFence(m_device, fence, nullptr);
-        vkDestroyCommandPool(m_device, commandPool, nullptr);
-        throw std::runtime_error("RenderGraphTimestampPool: vkQueueSubmit2 failed (warm-up reset)");
-    }
-
-    vkWaitForFences(m_device, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
-
-    vkDestroyFence(m_device, fence, nullptr);
-    vkDestroyCommandPool(m_device, commandPool, nullptr); // also frees `cmd`.
+    // vkCmdResetQueryPool must be recorded outside a rendering instance; a one-shot never begins one.
+    renderer.ImmediateSubmit(
+        [&pool](CommandBuffer& cmd) {
+            vkCmdResetQueryPool(RecordingAccess::Native(cmd), pool.Native(), 0, pool.SlotCount());
+        },
+        BlockSite::WarmUp);
 }
 
 std::uint32_t RenderGraphTimestampPool::QueryBase(bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) const noexcept

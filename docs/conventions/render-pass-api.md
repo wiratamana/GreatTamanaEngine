@@ -98,7 +98,7 @@ Consumers (R = rewritten on the pass verbs, M = moved into `src/Renderer` behind
 | `GpuParams` | R | Built on `GpuBuffer`. |
 | Editor mesh preview (`AssetPreviewMesh`, `BoneViewerWindow`) | M | `MeshPreviewRenderer` in `src/Renderer` owns the pipeline, dummy set, buffers and target behind a Vulkan-free interface. |
 | Scene grid overlay | M | `SceneGridRenderer` lives in `src/Renderer`; the editor layer passes a `RecordingContext` and the matrix. |
-| GPU idle outside `src/Renderer` | M | `DeviceIdleGuard` (RAII before teardown), `Renderer::RetireUiTexture`, `Renderer::DrainGpuForCodeUnload`; `WaitForGpuIdle` is only left in `ImGuiEditorLayer.cpp`. |
+| GPU idle outside `src/Renderer` | M | `DeviceIdleGuard` (RAII before teardown), `Renderer::RetireUiTexture`, `Renderer::DrainGpuForCodeUnload`, `Renderer::DrainGpuForResourceRelease(detail)`. Each returns a `[[nodiscard]] BlockOutcome`: anything but `Completed` means the GPU may still use the resource, so do not free it. `WaitForGpuIdle(site, detail)` is only left in `ImGuiEditorLayer.cpp`. Every CPU wait on the GPU goes through `GpuWaitService` (bounded, named by `BlockSite`); `BlockingCallCheck` enforces it. |
 
 ## Recording context
 

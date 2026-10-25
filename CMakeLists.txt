@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.19)
 
 # --- Platform gate -----------------------------------------------------
 # This build currently only supports Windows. Everything else is a quick,
@@ -786,8 +786,9 @@ add_library(gte_core STATIC
     src/Renderer/DrawStats.h
     src/Renderer/GpuTiming.cpp
     src/Renderer/GpuTiming.h
-    src/Renderer/GpuTimingService.cpp
-    src/Renderer/GpuTimingService.h
+    src/Renderer/GpuWaitPolicy.cpp
+    src/Renderer/GpuWaitPolicy.h
+    src/Renderer/RenderTimingObserver.h
     src/Renderer/SwapchainCaptureService.cpp
     src/Renderer/SwapchainCaptureService.h
     src/Renderer/GpuResourceFactory.cpp
@@ -855,6 +856,8 @@ add_library(gte_core STATIC
     src/Renderer/Vulkan/VulkanInstance.h
     src/Renderer/Vulkan/VulkanSurface.cpp
     src/Renderer/Vulkan/VulkanSurface.h
+    src/Renderer/Vulkan/GpuWaitService.cpp
+    src/Renderer/Vulkan/GpuWaitService.h
     src/Renderer/Vulkan/VulkanDevice.cpp
     src/Renderer/Vulkan/VulkanDevice.h
     src/Renderer/Vulkan/VulkanSwapchain.cpp

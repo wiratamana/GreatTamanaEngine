@@ -7,7 +7,7 @@
 namespace gte {
 
 // RAII wrapper around one VK_QUERY_TYPE_TIMESTAMP pool with a fixed slot count. A thin shell: what a
-// slot index means is decided one layer up (GpuTimingService); callers use Native() directly.
+// slot index means is decided one layer up (RenderGraphTimestampPool); callers use Native() directly.
 // Does not own the VkDevice, which must outlive it.
 class VulkanQueryPool {
 public:

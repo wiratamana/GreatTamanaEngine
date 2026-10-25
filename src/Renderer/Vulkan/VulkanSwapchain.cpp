@@ -97,7 +97,7 @@ VulkanSwapchain& VulkanSwapchain::operator=(VulkanSwapchain&& other) noexcept
 
 void VulkanSwapchain::Recreate(int width, int height)
 {
-    vkDeviceWaitIdle(m_device);
+    // The caller has drained the device: no frame may still use the old images.
     Destroy();
     Create(width, height);
 }

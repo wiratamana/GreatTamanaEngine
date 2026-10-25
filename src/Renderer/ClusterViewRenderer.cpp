@@ -146,7 +146,9 @@ bool ClusterViewRenderer::Impl::CheckCullCamera(const ClusterViewCull& cull, std
 
 void ClusterViewRenderer::Impl::ReleaseMesh()
 {
-    renderer.WaitForGpuIdle();
+    if (!DrainGpu("cluster viewer mesh release")) {
+        return; // The GPU may still read them; the destructor frees them with the device.
+    }
     for (CullSet& set : sets) {
         set = CullSet{};
     }
@@ -193,7 +195,9 @@ void ClusterViewRenderer::Impl::ReleaseSlot(SlotTarget& slot)
     if (!slot.texture.has_value()) {
         return;
     }
-    renderer.WaitForGpuIdle();
+    if (!DrainGpu("cluster viewer target release")) {
+        return; // The GPU may still sample it; the destructor frees it with the device.
+    }
     slot.ui.Reset();
     slot.texture.reset();
     slot.width = 0;
@@ -231,7 +235,10 @@ bool ClusterViewRenderer::Impl::EnsureSet(SetId id, bool wantMirrors, bool wantC
         fresh.capacity = tableClusters;
         fresh.mirrors = wantMirrors;
         fresh.params = std::move(current.params);
-        renderer.WaitForGpuIdle(); // The old buffers may still be bound by the last run.
+        if (!DrainGpu("cluster viewer cull buffers")) { // The old buffers may still be bound by the last run.
+            LogOnce("the cull buffers need an idle GPU");
+            return false;
+        }
         current = std::move(fresh);
         return true;
     } catch (const std::exception& e) {

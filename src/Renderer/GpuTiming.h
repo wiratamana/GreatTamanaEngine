@@ -20,14 +20,6 @@ struct GpuTimestampCapability {
 GpuTimestampCapability InterpretTimestampCapability(
     bool timestampComputeAndGraphics, float timestampPeriod, std::uint32_t validBits) noexcept;
 
-// The logical GPU passes the renderer can time. Names are generic; the editor-facing mapping lives in Application.
-enum class GpuTimingSlot : std::uint32_t {
-    Offscreen0 = 0,
-    Offscreen1 = 1,
-};
-
-inline constexpr std::uint32_t kGpuTimingSlotCount = 2;
-
 // One resolved timing measurement; a Renderer-local tri-state so Renderer needs no Profiling header.
 struct GpuTimingSample {
     enum class Status : std::uint8_t {

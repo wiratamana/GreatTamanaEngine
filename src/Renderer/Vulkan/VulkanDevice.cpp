@@ -132,6 +132,12 @@ VulkanDevice::VulkanDevice(VkInstance instance, VkSurfaceKHR surface)
 {
     PickPhysicalDevice(instance, surface);
     CreateLogicalDevice();
+    try {
+        m_waits.emplace(m_device, m_graphicsQueue, m_graphicsQueueSubmitMutex);
+    } catch (...) {
+        Destroy();
+        throw;
+    }
     QueryTimestampCapability();
     // Needs only the physical device, so it is safe to call here.
     m_supportsDepthBlit = SupportsBlitSrcDst(m_physicalDevice, PickDepthFormat());
@@ -140,38 +146,6 @@ VulkanDevice::VulkanDevice(VkInstance instance, VkSurfaceKHR surface)
 VulkanDevice::~VulkanDevice()
 {
     Destroy();
-}
-
-VulkanDevice::VulkanDevice(VulkanDevice&& other) noexcept
-    : m_physicalDevice(std::exchange(other.m_physicalDevice, VK_NULL_HANDLE))
-    , m_device(std::exchange(other.m_device, VK_NULL_HANDLE))
-    , m_graphicsQueue(std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE))
-    , m_presentQueue(std::exchange(other.m_presentQueue, VK_NULL_HANDLE))
-    , m_graphicsFamily(other.m_graphicsFamily)
-    , m_presentFamily(other.m_presentFamily)
-    , m_timestampCapability(other.m_timestampCapability)
-    , m_indirectDrawCaps(other.m_indirectDrawCaps)
-    , m_supportsDepthBlit(other.m_supportsDepthBlit)
-    , m_materialAnisotropy(other.m_materialAnisotropy)
-{
-}
-
-VulkanDevice& VulkanDevice::operator=(VulkanDevice&& other) noexcept
-{
-    if (this != &other) {
-        Destroy();
-        m_physicalDevice = std::exchange(other.m_physicalDevice, VK_NULL_HANDLE);
-        m_device = std::exchange(other.m_device, VK_NULL_HANDLE);
-        m_graphicsQueue = std::exchange(other.m_graphicsQueue, VK_NULL_HANDLE);
-        m_presentQueue = std::exchange(other.m_presentQueue, VK_NULL_HANDLE);
-        m_graphicsFamily = other.m_graphicsFamily;
-        m_presentFamily = other.m_presentFamily;
-        m_timestampCapability = other.m_timestampCapability;
-        m_indirectDrawCaps = other.m_indirectDrawCaps;
-        m_supportsDepthBlit = other.m_supportsDepthBlit;
-        m_materialAnisotropy = other.m_materialAnisotropy;
-    }
-    return *this;
 }
 
 void VulkanDevice::PickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface)
@@ -324,6 +298,7 @@ void VulkanDevice::QueryTimestampCapability()
 
 void VulkanDevice::Destroy() noexcept
 {
+    m_waits.reset(); // Drains the device and destroys its fences while the device is still alive.
     if (m_device != VK_NULL_HANDLE) {
         vkDestroyDevice(m_device, nullptr);
         m_device = VK_NULL_HANDLE;

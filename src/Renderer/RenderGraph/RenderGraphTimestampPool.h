@@ -28,12 +28,12 @@ public:
         std::uint64_t end = 0;
     };
 
-    // `capability` is the device's timestamp support (profiling compiled out forces it off). The device
-    // and queue family are used only for a one-time warm-up reset through `renderer`. Slot budgets must
-    // match RenderGraph's name-slot tables; frames in flight must equal kGpuTimingFramesInFlight.
-    RenderGraphTimestampPool(VkDevice device, Renderer& renderer, std::uint32_t graphicsQueueFamily,
-        const GpuTimestampCapability& capability, std::uint32_t synchronousSlotBudget,
-        std::uint32_t pipelinedSlotBudget, std::uint32_t pipelinedFramesInFlight);
+    // `capability` is the device's timestamp support (profiling compiled out forces it off). `renderer` runs
+    // a one-time warm-up reset. Slot budgets must match RenderGraph's name-slot tables; frames in flight must
+    // equal kGpuTimingFramesInFlight.
+    RenderGraphTimestampPool(VkDevice device, Renderer& renderer, const GpuTimestampCapability& capability,
+        std::uint32_t synchronousSlotBudget, std::uint32_t pipelinedSlotBudget,
+        std::uint32_t pipelinedFramesInFlight);
     ~RenderGraphTimestampPool() = default;
 
     RenderGraphTimestampPool(const RenderGraphTimestampPool&) = delete;
@@ -64,7 +64,7 @@ public:
 
 private:
     std::uint32_t QueryBase(bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) const noexcept;
-    void WarmUpResetPool(VulkanQueryPool& pool, Renderer& renderer, std::uint32_t graphicsQueueFamily);
+    void WarmUpResetPool(VulkanQueryPool& pool, Renderer& renderer);
 
     VkDevice m_device = VK_NULL_HANDLE;
     GpuTimestampCapability m_capability;

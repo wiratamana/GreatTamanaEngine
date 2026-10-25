@@ -26,9 +26,8 @@ public:
     VulkanSwapchain(VulkanSwapchain&& other) noexcept;
     VulkanSwapchain& operator=(VulkanSwapchain&& other) noexcept;
 
-    // Tears down and rebuilds the swapchain (and image views) for a new
-    // window size. Call this on resize, and whenever acquire/present report
-    // the swapchain is out of date or suboptimal.
+    // Tears down and rebuilds the swapchain (and image views) for a new window size.
+    // The caller must have drained the device first (see GpuWaitService::WaitIdle).
     void Recreate(int width, int height);
 
     VkSwapchainKHR Native() const noexcept { return m_swapchain; }

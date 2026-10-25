@@ -1,7 +1,6 @@
 #pragma once
 
 #include "FrameRecorder.h"
-#include "GpuTimingService.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "RenderGraph/RenderGraphTypes.h"
 #include "RenderTarget.h"
@@ -37,8 +36,7 @@ public:
     FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
         std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue graphicsQueue,
         VkQueue presentQueue, int width, int height, VmaAllocator allocator, VkFormat depthFormat,
-        std::shared_ptr<GpuMemoryTracker> memoryTracker, std::shared_ptr<GpuTimingService> gpuTiming,
-        VulkanDevice& vulkanDevice);
+        std::shared_ptr<GpuMemoryTracker> memoryTracker, VulkanDevice& vulkanDevice);
     ~FramePresenter();
 
     FramePresenter(const FramePresenter&) = delete;
@@ -57,17 +55,17 @@ public:
 
     void OnResize(int width, int height);
 
-    // See Renderer::RenderOffscreen(). `timingSlot` brackets frameRecorder.RecordFrame() with GPU timestamps;
-    // nullopt leaves the query slots untouched.
+    // See Renderer::RenderOffscreen(). Throws when a GPU wait fails; the fence is then left as it was.
     DrawStats RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
-        std::optional<GpuTimingSlot> timingSlot, const std::array<float, 4>& clearColor,
-        const std::function<void(rg::CommandBuffer&)>& recordExtra);
+        const std::array<float, 4>& clearColor, const std::function<void(rg::CommandBuffer&)>& recordExtra);
 
-    // Waits on the offscreen command buffer's fence, resets and begins it, and returns it for the caller to
-    // record render graph passes into. Pair with EndOffscreenRecording().
+    // Waits (bounded) for the offscreen command buffer's previous use, then resets and begins it and returns it
+    // for the caller to record render graph passes into. Throws when the wait fails. Pair with
+    // EndOffscreenRecording().
     VkCommandBuffer BeginOffscreenRecording();
 
-    // Ends and submits the offscreen command buffer and blocks until the GPU finishes.
+    // Ends and submits the offscreen command buffer and blocks (bounded) until the GPU finishes. The fence is
+    // reset right before the submit, so a recording that never reaches this call leaves it signaled.
     void EndOffscreenRecording();
 
     // See Renderer::PresentViaRenderGraph(). Returns false without touching `graph` when no swapchain frame can
@@ -89,6 +87,8 @@ private:
     static constexpr std::uint32_t kFramesInFlight = 2;
 
     void CreateCommandObjects();
+    // Resets `offscreenFence`, submits the offscreen command buffer and waits (bounded) for it. Throws on failure.
+    void SubmitOffscreenAndWait(VkFence offscreenFence, const char* what);
     void RecreateSwapchain();
     void Destroy() noexcept;
 
@@ -102,9 +102,6 @@ private:
 
     VkFormat m_depthFormat = VK_FORMAT_UNDEFINED;
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker;
-
-    // The same service the Renderer owns; RenderOffscreen() brackets passes with it.
-    std::shared_ptr<GpuTimingService> m_gpuTiming;
 
     VulkanSwapchain m_swapchain;
     // Per-frame and per-image sync objects plus the offscreen fence; render-finished semaphores are rebuilt on

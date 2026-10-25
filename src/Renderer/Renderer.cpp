@@ -126,11 +126,10 @@ Renderer::Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation)
     , m_surface(m_instance.Native(), surfaceProvider)
     , m_device(m_instance.Native(), m_surface.Native())
     , m_depthFormat(m_device.PickDepthFormat())
-    , m_gpuTiming(std::make_shared<GpuTimingService>(m_device, m_device.TimestampCapability()))
     , m_allocator(m_instance.Native(), m_device.Physical(), m_device.Native(), VK_API_VERSION_1_3)
     , m_presenter(m_device.Physical(), m_device.Native(), m_surface.Native(), m_device.GraphicsQueueFamily(),
           m_device.PresentQueueFamily(), m_device.GraphicsQueue(), m_device.PresentQueue(), surfaceProvider.Width(),
-          surfaceProvider.Height(), m_allocator.Native(), m_depthFormat, m_memoryTracker, m_gpuTiming, m_device)
+          surfaceProvider.Height(), m_allocator.Native(), m_depthFormat, m_memoryTracker, m_device)
     , m_resources(m_device.Physical(), m_device.Native(), m_allocator.Native(), m_device.GraphicsQueue(),
           m_device.GraphicsQueueFamily(), m_depthFormat, m_memoryTracker, m_device)
     , m_emptySetLayout(m_device.Native(), DescriptorSetLayoutBuilder(m_device.Native()).Build())
@@ -142,8 +141,10 @@ Renderer::Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation)
 Renderer::~Renderer()
 {
     if (m_device.Native() != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(m_device.Native());
-        m_resources.FreeDescriptorSet(m_emptySet);
+        // On a lost device the set may still be in use and is abandoned. Pooled fences are never pending.
+        if (WaitForGpuIdle(BlockSite::Shutdown, "~Renderer") == BlockOutcome::Completed) {
+            m_resources.FreeDescriptorSet(m_emptySet);
+        }
         for (const VkFence fence : m_fencePool) {
             vkDestroyFence(m_device.Native(), fence, nullptr);
         }
@@ -175,10 +176,10 @@ void Renderer::OnResize(int width, int height)
     m_presenter.OnResize(width, height);
 }
 
-DrawStats Renderer::RenderOffscreen(RenderTexture& target, std::optional<GpuTimingSlot> timingSlot,
-    const std::array<float, 4>& clearColor, const std::function<void(rg::CommandBuffer&)>& recordExtra)
+DrawStats Renderer::RenderOffscreen(
+    RenderTexture& target, const std::array<float, 4>& clearColor, const std::function<void(rg::CommandBuffer&)>& recordExtra)
 {
-    return m_presenter.RenderOffscreen(m_frameRecorder, target, timingSlot, clearColor, recordExtra);
+    return m_presenter.RenderOffscreen(m_frameRecorder, target, clearColor, recordExtra);
 }
 
 rg::RecordingContext Renderer::BeginOffscreenRenderGraphRecording()
@@ -252,7 +253,9 @@ RenderTexture Renderer::CreateRenderTexture(int width, int height, PixelFormat f
 
 void Renderer::ResizeRenderTexture(RenderTexture& texture, int width, int height) const
 {
-    WaitForGpuIdle();
+    if (WaitForGpuIdle(BlockSite::TargetResize, "render texture resize") != BlockOutcome::Completed) {
+        throw std::runtime_error("Renderer::ResizeRenderTexture: the GPU did not go idle");
+    }
     texture.Resize(width, height);
 }
 
@@ -309,7 +312,9 @@ Renderer::CapturedRawPixels Renderer::CaptureRenderTexturePixels(RenderTexture& 
 
 Renderer::CapturedRawPixels Renderer::CaptureRenderTexturePixelsAfterIdle(RenderTexture& texture) const
 {
-    WaitForGpuIdle();
+    if (WaitForGpuIdle(BlockSite::CaptureReadback, "render texture capture") != BlockOutcome::Completed) {
+        return CapturedRawPixels{};
+    }
     return CaptureRenderTexturePixels(texture);
 }
 
@@ -323,7 +328,9 @@ Renderer::CapturedRawPixels Renderer::CaptureDebugTexturePixels(
     const VkImageAspectFlags aspect = depthAspect ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     const VkFormat format = depthAspect ? snapshot.target.depthFormat : snapshot.target.format;
     const rg::ResourceState& state = depthAspect ? snapshot.depthState : snapshot.colorState;
-    WaitForGpuIdle();
+    if (WaitForGpuIdle(BlockSite::CaptureReadback, "debug texture capture") != BlockOutcome::Completed) {
+        return CapturedRawPixels{};
+    }
     return CaptureImagePixels(image, aspect, format, snapshot.ColorExtent(), state);
 }
 
@@ -337,23 +344,25 @@ Renderer::CapturedRawPixels Renderer::CaptureEventSnapshotPixels(
     const VkImageAspectFlags aspect = depthAspect ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     const rg::ResourceState shaderRead{ VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
         VK_ACCESS_2_SHADER_READ_BIT };
-    WaitForGpuIdle();
+    if (WaitForGpuIdle(BlockSite::CaptureReadback, "event snapshot capture") != BlockOutcome::Completed) {
+        return CapturedRawPixels{};
+    }
     return CaptureImagePixels(snapshot->Image(), aspect, snapshot->Format(), FromVkExtent2D(snapshot->Extent()), shaderRead);
 }
 
-void Renderer::WaitForGpuIdle() const
+BlockOutcome Renderer::WaitForGpuIdle(BlockSite site, const char* detail) const noexcept
 {
-    vkDeviceWaitIdle(m_device.Native());
+    return m_device.Waits().WaitIdle(kIdleWaitTimeout, site, detail);
 }
 
-void Renderer::DrainGpuForCodeUnload() const
+BlockOutcome Renderer::DrainGpuForCodeUnload() const noexcept
 {
-    WaitForGpuIdle();
+    return WaitForGpuIdle(BlockSite::CodeUnload, "code unload");
 }
 
-void Renderer::DrainGpuForResourceRelease() const
+BlockOutcome Renderer::DrainGpuForResourceRelease(const char* detail) const noexcept
 {
-    WaitForGpuIdle();
+    return WaitForGpuIdle(BlockSite::ResourceRelease, detail);
 }
 
 void Renderer::RequestSwapchainCapture()
@@ -378,8 +387,8 @@ Buffer Renderer::CreateDeviceLocalBuffer(
     return m_resources.CreateDeviceLocalBuffer(data, size, usage, debugName);
 }
 
-// Executes a command buffer immediately on the graphics queue and waits for completion.
-void Renderer::ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& recordFn) const
+// Executes a command buffer immediately on the graphics queue and waits (bounded) for completion.
+void Renderer::ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& recordFn, BlockSite site) const
 {
     assert(m_currentGraphPassCmd == VK_NULL_HANDLE
         && "ImmediateSubmit() called while a graph pass is already being recorded");
@@ -428,7 +437,13 @@ void Renderer::ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& re
         throw std::runtime_error("Renderer::ImmediateSubmit: vkQueueSubmit2 failed.");
     }
 
-    vkWaitForFences(m_device.Native(), 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+    const BlockOutcome outcome =
+        m_device.Waits().WaitFence(fence, kUploadWaitTimeout, WaitClass::Upload, site, "one-shot submit");
+    if (outcome != BlockOutcome::Completed) {
+        // The GPU may still run this work: the fence is quarantined and the command buffer stays with its pool.
+        m_device.Waits().Quarantine(fence);
+        throw std::runtime_error(std::string("Renderer::ImmediateSubmit: GPU wait ") + ToString(outcome));
+    }
     ReleaseFence(fence);
     m_resources.FreeTransientCommandBuffer(vkCmd);
 }
@@ -810,11 +825,6 @@ std::vector<VmaBudget> Renderer::GetVmaHeapBudgets() const
     return m_allocator.GetHeapBudgets();
 }
 
-void Renderer::SetGpuTimingCaptureEnabled(bool enabled) noexcept
-{
-    m_gpuTiming->SetCaptureEnabled(enabled);
-}
-
 DescriptorSetLayoutHandle Renderer::CreateDescriptorSetLayout(std::span<const DescriptorBindingDesc> bindings) const
 {
     DescriptorSetLayoutBuilder builder(m_device.Native());
@@ -945,7 +955,11 @@ void Renderer::ReleaseUiTextureHandle(UiTextureHandle handle) noexcept
 
 void Renderer::RetireUiTexture(UiTextureHandle handle, std::unique_ptr<Texture2D> texture) noexcept
 {
-    WaitForGpuIdle();
+    if (WaitForGpuIdle(BlockSite::ResourceRelease, "retire UI texture") != BlockOutcome::Completed) {
+        // The GPU may still sample this texture and the device is lost: leaking is safer than freeing it.
+        static_cast<void>(texture.release());
+        return;
+    }
     ReleaseUiTextureHandle(handle);
     texture.reset();
 }

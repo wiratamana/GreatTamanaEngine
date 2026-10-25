@@ -27,7 +27,6 @@ RenderGraph::RenderGraph(Renderer& renderer)
     , m_persistentResourceCache(renderer)
     , m_computeBindingCache(renderer)
     , m_timestampPool(QueryVulkanContextInfoForRenderGraph(renderer).device, renderer,
-          QueryVulkanContextInfoForRenderGraph(renderer).graphicsQueueFamily,
           QueryVulkanContextInfoForRenderGraph(renderer).timestampCapability, kSynchronousTimingSlotBudget,
           kPipelinedTimingSlotBudget, kGpuTimingFramesInFlight)
 {

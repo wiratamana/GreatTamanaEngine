@@ -175,11 +175,10 @@ public:
     {
         ImGui::SetCurrentContext(m_context);
 
-        // Make sure the GPU is done with anything ImGui's Vulkan backend
-        // (or our own AddTexture() descriptors) might still be referencing
-        // before tearing any of it down.
+        // The GPU must be done with anything ImGui's Vulkan backend (or our own AddTexture() descriptors)
+        // references before teardown. A failed wait means a lost device; teardown continues regardless.
         if (m_renderer != nullptr) {
-            m_renderer->WaitForGpuIdle();
+            static_cast<void>(m_renderer->WaitForGpuIdle(BlockSite::ImGuiBackend, "ImGui layer shutdown"));
         }
 
         ReleaseGameViewDescriptor();
@@ -264,7 +263,9 @@ public:
             const Extent2D current = m_gameView.Extent();
             if (current.width != m_ctx.desiredExtent.width || current.height != m_ctx.desiredExtent.height) {
                 // Resizes are rare and user-driven, so a full GPU stall is acceptable.
-                m_renderer->WaitForGpuIdle();
+                if (m_renderer->WaitForGpuIdle(BlockSite::TargetResize, "game view resize") != BlockOutcome::Completed) {
+                    return nullptr; // Cannot resize safely; skip rendering this view.
+                }
                 ReleaseGameViewDescriptor();
                 m_gameView.Resize(
                     static_cast<int>(m_ctx.desiredExtent.width), static_cast<int>(m_ctx.desiredExtent.height));
@@ -285,7 +286,9 @@ public:
         if (m_ctx.desiredSceneExtent.width > 0 && m_ctx.desiredSceneExtent.height > 0) {
             const Extent2D current = m_sceneView.Extent();
             if (current.width != m_ctx.desiredSceneExtent.width || current.height != m_ctx.desiredSceneExtent.height) {
-                m_renderer->WaitForGpuIdle();
+                if (m_renderer->WaitForGpuIdle(BlockSite::TargetResize, "scene view resize") != BlockOutcome::Completed) {
+                    return nullptr; // Cannot resize safely; skip rendering this view.
+                }
                 ReleaseSceneViewDescriptor();
                 m_sceneView.Resize(static_cast<int>(m_ctx.desiredSceneExtent.width),
                     static_cast<int>(m_ctx.desiredSceneExtent.height));
@@ -447,7 +450,9 @@ public:
             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_NONE };
 
         // The backbuffer is only queued and untracked by the barrier planner, so a full device stall is the only safe readback.
-        renderer.WaitForGpuIdle();
+        if (renderer.WaitForGpuIdle(BlockSite::CaptureReadback, "platform window capture") != BlockOutcome::Completed) {
+            return {};
+        }
         return renderer.CaptureImagePixels(
             frame.Backbuffer, VK_IMAGE_ASPECT_COLOR_BIT, platformWindow->SurfaceFormat.format, extent, presentState);
     }

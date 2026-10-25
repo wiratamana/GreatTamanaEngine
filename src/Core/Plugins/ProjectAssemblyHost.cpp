@@ -162,7 +162,11 @@ void ProjectAssemblyHost::UnloadProjectAssembly(const std::string& projectName, 
     }
 
     // Step 1: no in-flight GPU work may still use project code or objects. Must precede FreeLibrary().
-    renderer.DrainGpuForCodeUnload();
+    // If the GPU cannot be drained, the project stays loaded: freeing its code could crash the GPU callbacks.
+    if (renderer.DrainGpuForCodeUnload() != BlockOutcome::Completed) {
+        GTE_LOG_ERROR("ProjectAssembly", "UnloadProjectAssembly('" + projectName + "') skipped: the GPU did not go idle.");
+        return;
+    }
 
     // Step 2: drop every registration the project made. Must precede FreeLibrary().
     ProjectAssemblyRegistrationLedger::Instance().UnregisterEverythingFor(projectName, core);

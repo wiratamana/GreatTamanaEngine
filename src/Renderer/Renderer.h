@@ -7,7 +7,7 @@
 #include "FrameRecorder.h"
 #include "GpuResourceFactory.h"
 #include "GpuTiming.h"
-#include "GpuTimingService.h"
+#include "GpuWaitPolicy.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
 #include "Pipeline.h"
@@ -83,8 +83,8 @@ public:
     Renderer& operator=(Renderer&&) = delete;
 
     // Synchronously renders into an offscreen render target, cleared to `clearColor` (linear RGBA).
-    DrawStats RenderOffscreen(RenderTexture& target, std::optional<GpuTimingSlot> timingSlot,
-        const std::array<float, 4>& clearColor, const std::function<void(rg::CommandBuffer&)>& recordExtra = {});
+    DrawStats RenderOffscreen(RenderTexture& target, const std::array<float, 4>& clearColor,
+        const std::function<void(rg::CommandBuffer&)>& recordExtra = {});
 
     // Begins recording into the dedicated offscreen command buffer.
     rg::RecordingContext BeginOffscreenRenderGraphRecording();
@@ -112,7 +112,7 @@ public:
         bool createDepthCompanion = true, bool createColorImage = true, bool transferSrc = false,
         bool transferDst = false) const;
 
-    // Resizes `texture` once the GPU no longer uses it. Its contents become undefined.
+    // Resizes `texture` once the GPU no longer uses it. Its contents become undefined. Throws if the GPU does not go idle.
     void ResizeRenderTexture(RenderTexture& texture, int width, int height) const;
 
     // Raw image pixels read back from the GPU.
@@ -135,15 +135,17 @@ public:
     CapturedRawPixels CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format, Extent2D extent,
         const rg::ResourceState& previousState, std::uint32_t zOffset = 0, std::uint32_t depth = 1) const;
 
-    // Blocks until all GPU execution finishes. Call only during teardown or manual captures.
-    void WaitForGpuIdle() const;
+    // Blocks (bounded) until all GPU execution finishes. Anything other than Completed means the GPU may still use
+    // its resources: the caller must not free them. Never throws.
+    [[nodiscard]] BlockOutcome WaitForGpuIdle(BlockSite site, const char* detail) const noexcept;
 
-    // Same wait as WaitForGpuIdle(), named as the one sanctioned barrier outside src/Renderer before unloading
-    // code (a project assembly) whose callbacks, pipelines or buffers the GPU may still use.
-    void DrainGpuForCodeUnload() const;
+    // The sanctioned barrier before unloading code (a project assembly) whose callbacks, pipelines or buffers the
+    // GPU may still use.
+    [[nodiscard]] BlockOutcome DrainGpuForCodeUnload() const noexcept;
 
-    // Same wait, named as the sanctioned barrier before destroying textures, buffers or sets the GPU may still read.
-    void DrainGpuForResourceRelease() const;
+    // The sanctioned barrier before destroying textures, buffers or sets the GPU may still read.
+    // `detail` is a string literal naming what is released.
+    [[nodiscard]] BlockOutcome DrainGpuForResourceRelease(const char* detail) const noexcept;
 
     // The device reference rg::GpuBuffer is created from.
     rg::DeviceRef Device() noexcept { return rg::DeviceRef(this); }
@@ -256,9 +258,6 @@ public:
     std::vector<VmaBudget> GetVmaHeapBudgets() const;
     DescriptorPoolStats GetDescriptorPoolStats() const; // Sets and descriptors in use per type.
 
-    // GPU timing capture.
-    void SetGpuTimingCaptureEnabled(bool enabled) noexcept;
-
     // Builds a dynamic graphics pipeline from a descriptive configuration.
     Pipeline CreatePipeline(const PipelineDesc& desc, std::span<const std::byte> vertexSpirv,
         std::span<const std::byte> fragmentSpirv) const;
@@ -306,8 +305,10 @@ private:
         VkCommandBuffer cmd, std::function<void(bool, std::uint32_t, std::uint32_t)> recordDrawStats);
     void EndGraphPassRecording() noexcept;
 
-    // Runs a one-shot command buffer on the graphics queue and waits for it.
-    void ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& recordFn) const;
+    // Runs a one-shot command buffer on the graphics queue and waits (bounded) for it. Throws when the wait
+    // fails; the GPU may then still run it, so the device is treated as lost.
+    void ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& recordFn,
+        BlockSite site = BlockSite::ImmediateSubmit) const;
     VkResult SubmitToGraphicsQueue(const VkSubmitInfo2& submit, VkFence fence) const;
 
     ComputePipeline CreateComputePipeline(const std::string& shaderSpirvPath,
@@ -364,7 +365,6 @@ private:
     VkFormat m_depthFormat = VK_FORMAT_UNDEFINED;
 
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker = std::make_shared<GpuMemoryTracker>();
-    std::shared_ptr<GpuTimingService> m_gpuTiming;
 
     VulkanAllocator m_allocator;
     FramePresenter m_presenter;

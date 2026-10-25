@@ -79,11 +79,13 @@ bool InstanceGridResources::Resolves(RenderSystem& renderSystem) const
 void InstanceGridResources::Reset()
 {
     if (m_owner != nullptr && (m_mesh.IsValid() || m_pipeline.IsValid())) {
-        if (m_renderer != nullptr) {
-            m_renderer->DrainGpuForResourceRelease();
+        // The GPU may still draw the grid. If it cannot be drained, the grid stays registered.
+        const bool drained =
+            m_renderer == nullptr || m_renderer->DrainGpuForResourceRelease("instance grid") == BlockOutcome::Completed;
+        if (drained) {
+            m_owner->ReleaseMesh(m_mesh);
+            m_owner->UnregisterPipeline(m_pipeline);
         }
-        m_owner->ReleaseMesh(m_mesh);
-        m_owner->UnregisterPipeline(m_pipeline);
     }
     m_owner = nullptr;
     m_renderer = nullptr;

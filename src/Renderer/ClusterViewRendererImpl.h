@@ -122,8 +122,14 @@ struct ClusterViewRenderer::Impl {
 
     explicit Impl(Renderer& owner);
 
-    // Idles the GPU, then members release in reverse declaration order.
-    ~Impl() { renderer.WaitForGpuIdle(); }
+    // Idles the GPU (best effort), then members release in reverse declaration order.
+    ~Impl() { static_cast<void>(renderer.WaitForGpuIdle(BlockSite::Shutdown, "cluster viewer")); }
+
+    // True once the GPU is idle. Anything the GPU may read must stay alive when this is false.
+    bool DrainGpu(const char* detail) const noexcept
+    {
+        return renderer.WaitForGpuIdle(BlockSite::ResourceRelease, detail) == BlockOutcome::Completed;
+    }
 
     // Reads the shader files, queries limits and makes the stand-in atlas. Throws on failure.
     void Build();

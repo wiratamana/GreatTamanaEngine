@@ -162,7 +162,10 @@ std::optional<ClusterViewHizInfo> ClusterViewRenderer::CaptureHiz(
         const bool reusable = s.hizDepth.has_value() && s.hizAtlas.has_value() && s.hizSceneWidth == width
             && s.hizSceneHeight == height;
         if (!reusable) {
-            s.renderer.WaitForGpuIdle();
+            if (!s.DrainGpu("cluster viewer Hi-Z targets")) {
+                s.LogOnce("the Hi-Z capture needs an idle GPU");
+                return std::nullopt;
+            }
             s.hizInfo.reset();
             s.hizAtlas.reset();
             s.hizDepth.reset();
@@ -251,7 +254,9 @@ void ClusterViewRenderer::ReleaseHiz()
     if (!s.hizAtlas.has_value() && !s.hizDepth.has_value() && !s.hizInfo.has_value()) {
         return;
     }
-    s.renderer.WaitForGpuIdle();
+    if (!s.DrainGpu("cluster viewer Hi-Z release")) {
+        return; // The GPU may still read them; the destructor frees them with the device.
+    }
     s.hizInfo.reset();
     s.hizAtlas.reset();
     s.hizDepth.reset();

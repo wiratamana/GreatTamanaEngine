@@ -1,5 +1,7 @@
 #include "FramePresenter.h"
 
+#include "GpuTiming.h"
+#include "GpuWaitPolicy.h"
 #include "RenderGraph/CommandBuffer.h"
 #include "RenderGraph/RenderGraph.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
@@ -7,18 +9,31 @@
 #include "Vulkan/VulkanDevice.h"
 
 #include <cstddef>
-#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
 namespace gte {
 
+static_assert(kGpuTimingFramesInFlight == FramePresenter::FramesInFlight(),
+    "timestamp buffers cycle with the presenter's frame slots");
+
+namespace {
+
+// A frame wait that did not complete means the GPU is busy or lost: the frame must not be recorded.
+void ThrowIfNotCompleted(const char* what, BlockOutcome outcome)
+{
+    if (outcome != BlockOutcome::Completed) {
+        throw std::runtime_error(std::string(what) + ": GPU wait " + ToString(outcome));
+    }
+}
+
+} // namespace
+
 FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
     std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue graphicsQueue,
     VkQueue presentQueue, int width, int height, VmaAllocator allocator, VkFormat depthFormat,
-    std::shared_ptr<GpuMemoryTracker> memoryTracker, std::shared_ptr<GpuTimingService> gpuTiming,
-    VulkanDevice& vulkanDevice)
+    std::shared_ptr<GpuMemoryTracker> memoryTracker, VulkanDevice& vulkanDevice)
     : m_device(device)
     , m_graphicsQueue(graphicsQueue)
     , m_presentQueue(presentQueue)
@@ -26,7 +41,6 @@ FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device,
     , m_vulkanDevice(&vulkanDevice)
     , m_depthFormat(depthFormat)
     , m_memoryTracker(std::move(memoryTracker))
-    , m_gpuTiming(std::move(gpuTiming))
     , m_swapchain(physicalDevice, device, surface, graphicsQueueFamily, presentQueueFamily, width, height)
     , m_frameSync(device, kFramesInFlight, m_swapchain.ImageCount())
     , m_swapchainCapture(allocator, m_memoryTracker, kFramesInFlight)
@@ -98,7 +112,11 @@ void FramePresenter::RecreateSwapchain()
         return;
     }
 
-    vkDeviceWaitIdle(m_device);
+    // The old swapchain images may still be in flight. Without a drain, keep it and retry next frame.
+    if (m_vulkanDevice->Waits().WaitIdle(kIdleWaitTimeout, BlockSite::SwapchainRecreate, "swapchain")
+        != BlockOutcome::Completed) {
+        return;
+    }
 
     m_swapchain.Recreate(m_pendingWidth, m_pendingHeight);
 
@@ -113,12 +131,13 @@ void FramePresenter::RecreateSwapchain()
 }
 
 DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
-    std::optional<GpuTimingSlot> timingSlot, const std::array<float, 4>& clearColor,
-    const std::function<void(rg::CommandBuffer&)>& recordExtra)
+    const std::array<float, 4>& clearColor, const std::function<void(rg::CommandBuffer&)>& recordExtra)
 {
+    GpuWaitService& waits = m_vulkanDevice->Waits();
     const VkFence offscreenFence = m_frameSync.OffscreenFence();
-    vkWaitForFences(m_device, 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
-    vkResetFences(m_device, 1, &offscreenFence);
+    ThrowIfNotCompleted("RenderOffscreen",
+        waits.WaitFence(offscreenFence, kFrameWaitTimeout, WaitClass::Frame, BlockSite::PreviousOffscreen,
+            "offscreen preview fence"));
 
     vkResetCommandBuffer(m_offscreenCommandBuffer, 0);
 
@@ -126,13 +145,6 @@ DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTe
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     if (vkBeginCommandBuffer(m_offscreenCommandBuffer, &beginInfo) != VK_SUCCESS) {
         throw std::runtime_error("vkBeginCommandBuffer failed (offscreen)");
-    }
-
-    // The query reset and start timestamp are recorded before RecordFrame() because a reset must not happen
-    // inside a rendering instance. The fence wait above proves this slot pair's last use is complete.
-    // Nothing is recorded when timingSlot is nullopt.
-    if (timingSlot.has_value()) {
-        m_gpuTiming->RecordOffscreenPassStart(m_offscreenCommandBuffer, *timingSlot);
     }
 
     // RecordFrame() speaks raw VkCommandBuffer; wrap `recordExtra` so callers never need a raw handle.
@@ -146,44 +158,19 @@ DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTe
     const DrawStats drawStats = frameRecorder.RecordFrame(m_offscreenCommandBuffer, target.Target(), ColorFormat(),
         m_depthFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, clearColor, rawRecordExtra);
 
-    // The end timestamp brackets the whole pass including recordExtra, never inside RecordFrame().
-    if (timingSlot.has_value()) {
-        m_gpuTiming->RecordOffscreenPassEnd(m_offscreenCommandBuffer, *timingSlot);
-    }
-
     if (vkEndCommandBuffer(m_offscreenCommandBuffer) != VK_SUCCESS) {
         throw std::runtime_error("vkEndCommandBuffer failed (offscreen)");
     }
 
-    VkCommandBufferSubmitInfo cmdSubmitInfo{};
-    cmdSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-    cmdSubmitInfo.commandBuffer = m_offscreenCommandBuffer;
-
-    VkSubmitInfo2 submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
-    submitInfo.commandBufferInfoCount = 1;
-    submitInfo.pCommandBufferInfos = &cmdSubmitInfo;
-
-    if (m_vulkanDevice->SubmitToGraphicsQueue(submitInfo, offscreenFence) != VK_SUCCESS) {
-        throw std::runtime_error("vkQueueSubmit2 failed (offscreen)");
-    }
-
-    // Synchronous for now.
-    vkWaitForFences(m_device, 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
-
-    // The fence wait proves the submission (and its timestamp writes) completed, so reading back is safe.
-    if (timingSlot.has_value()) {
-        m_gpuTiming->ReadOffscreenResultNow(*timingSlot);
-    }
-
+    SubmitOffscreenAndWait(offscreenFence, "RenderOffscreen");
     return drawStats;
 }
 
 VkCommandBuffer FramePresenter::BeginOffscreenRecording()
 {
-    const VkFence offscreenFence = m_frameSync.OffscreenFence();
-    vkWaitForFences(m_device, 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
-    vkResetFences(m_device, 1, &offscreenFence);
+    ThrowIfNotCompleted("BeginOffscreenRecording",
+        m_vulkanDevice->Waits().WaitFence(m_frameSync.OffscreenFence(), kFrameWaitTimeout, WaitClass::Frame,
+            BlockSite::PreviousOffscreen, "offscreen fence"));
 
     vkResetCommandBuffer(m_offscreenCommandBuffer, 0);
 
@@ -192,8 +179,6 @@ VkCommandBuffer FramePresenter::BeginOffscreenRecording()
     if (vkBeginCommandBuffer(m_offscreenCommandBuffer, &beginInfo) != VK_SUCCESS) {
         throw std::runtime_error("vkBeginCommandBuffer failed (offscreen render graph)");
     }
-
-    // GPU timestamps are not wired into the render-graph offscreen and present paths; pass timing reads Absent.
     return m_offscreenCommandBuffer;
 }
 
@@ -202,7 +187,11 @@ void FramePresenter::EndOffscreenRecording()
     if (vkEndCommandBuffer(m_offscreenCommandBuffer) != VK_SUCCESS) {
         throw std::runtime_error("vkEndCommandBuffer failed (offscreen render graph)");
     }
+    SubmitOffscreenAndWait(m_frameSync.OffscreenFence(), "EndOffscreenRecording");
+}
 
+void FramePresenter::SubmitOffscreenAndWait(VkFence offscreenFence, const char* what)
+{
     VkCommandBufferSubmitInfo cmdSubmitInfo{};
     cmdSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
     cmdSubmitInfo.commandBuffer = m_offscreenCommandBuffer;
@@ -212,13 +201,17 @@ void FramePresenter::EndOffscreenRecording()
     submitInfo.commandBufferInfoCount = 1;
     submitInfo.pCommandBufferInfos = &cmdSubmitInfo;
 
-    const VkFence offscreenFence = m_frameSync.OffscreenFence();
+    // Reset only now: a failure before this point leaves the fence signaled for the next frame.
+    vkResetFences(m_device, 1, &offscreenFence);
     if (m_vulkanDevice->SubmitToGraphicsQueue(submitInfo, offscreenFence) != VK_SUCCESS) {
-        throw std::runtime_error("vkQueueSubmit2 failed (offscreen render graph)");
+        // The fence is unsignaled and nothing will signal it: stop all further waits and submits.
+        m_vulkanDevice->Waits().MarkDeviceLost();
+        throw std::runtime_error(std::string("vkQueueSubmit2 failed (") + what + ")");
     }
 
-    // Synchronous, like RenderOffscreen().
-    vkWaitForFences(m_device, 1, &offscreenFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+    ThrowIfNotCompleted(what,
+        m_vulkanDevice->Waits().WaitFence(
+            offscreenFence, kFrameWaitTimeout, WaitClass::Frame, BlockSite::Offscreen, "offscreen submit"));
 }
 
 bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph,
@@ -235,27 +228,28 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph,
         }
     }
 
+    GpuWaitService& waits = m_vulkanDevice->Waits();
     const VkFence fence = m_frameSync.InFlightFence(m_currentFrame);
-    vkWaitForFences(m_device, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+    ThrowIfNotCompleted("PresentViaRenderGraph",
+        waits.WaitFence(fence, kFrameWaitTimeout, WaitClass::Frame, BlockSite::PresentInFlight, "in-flight fence"));
 
     // The fence wait proved the GPU work from this slot's previous use is done, including any capture copy, so
     // the earlier capture can be read now with no extra wait. Read before any swapchain recreation clears slots.
     m_lastCompletedCapture = m_swapchainCapture.TryTakeCompletedCapture(m_currentFrame);
 
-    std::uint32_t imageIndex = 0;
-    const VkResult acquireResult = vkAcquireNextImageKHR(
-        m_device, m_swapchain.Native(), std::numeric_limits<std::uint64_t>::max(),
-        m_frameSync.ImageAvailableSemaphore(m_currentFrame), VK_NULL_HANDLE, &imageIndex);
+    const GpuWaitService::Acquired acquired = waits.AcquireImage(m_swapchain.Native(),
+        m_frameSync.ImageAvailableSemaphore(m_currentFrame), kAcquireTimeout, BlockSite::AcquireImage,
+        "swapchain image");
+    ThrowIfNotCompleted("PresentViaRenderGraph", acquired.outcome);
 
-    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
+    if (acquired.result == VK_ERROR_OUT_OF_DATE_KHR) {
         RecreateSwapchain();
         return false;
     }
-    if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR) {
-        throw std::runtime_error("vkAcquireNextImageKHR failed (VkResult=" + std::to_string(acquireResult) + ")");
+    if (acquired.result != VK_SUCCESS && acquired.result != VK_SUBOPTIMAL_KHR) {
+        throw std::runtime_error("swapchain image acquire failed (VkResult=" + std::to_string(acquired.result) + ")");
     }
-
-    vkResetFences(m_device, 1, &fence);
+    const std::uint32_t imageIndex = acquired.imageIndex;
 
     const VkCommandBuffer cmd = m_commandBuffers[m_currentFrame];
     vkResetCommandBuffer(cmd, 0);
@@ -334,7 +328,11 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph,
     submitInfo.signalSemaphoreInfoCount = 1;
     submitInfo.pSignalSemaphoreInfos = &signalSemaphoreInfo;
 
+    // Reset only now: a throw before this point leaves the fence signaled for the next frame.
+    vkResetFences(m_device, 1, &fence);
     if (m_vulkanDevice->SubmitToGraphicsQueue(submitInfo, fence) != VK_SUCCESS) {
+        // The fence is unsignaled and nothing will signal it: stop all further waits and submits.
+        m_vulkanDevice->Waits().MarkDeviceLost();
         throw std::runtime_error("vkQueueSubmit2 failed (render graph present)");
     }
 

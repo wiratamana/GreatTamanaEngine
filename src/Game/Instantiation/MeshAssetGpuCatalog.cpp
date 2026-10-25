@@ -471,10 +471,8 @@ std::vector<MeshHandle> MeshAssetGpuCatalog::ReleaseUnusedMeshes(Registry& regis
     }
 
     // Nothing may be destroyed while a submitted command buffer can still read it.
-    try {
-        renderer.DrainGpuForResourceRelease();
-    } catch (const std::exception& error) {
-        GTE_LOG_ERROR(kLogCategory, std::string("Mesh release skipped, GPU wait failed: ") + error.what());
+    if (renderer.DrainGpuForResourceRelease("mesh release sweep") != BlockOutcome::Completed) {
+        GTE_LOG_ERROR(kLogCategory, "Mesh release skipped, the GPU did not go idle.");
         m_meshReleasePending = true;
         return {};
     }

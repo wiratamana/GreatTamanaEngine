@@ -254,21 +254,17 @@ void GpuResourceFactory::ImmediateSubmitInternal(const std::function<void(VkComm
         throw std::runtime_error("GpuResourceFactory::ImmediateSubmitInternal: vkQueueSubmit2 failed.");
     }
 
-    const VkResult waitResult =
-        vkWaitForFences(m_device, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
-    if (waitResult != VK_SUCCESS) {
-        // The GPU may still touch the command buffer and the caller's resources: drain it once before cleanup.
-        GTE_LOG_ERROR("GpuResourceFactory",
-            "vkWaitForFences failed in an immediate submit (VkResult " + std::to_string(static_cast<int>(waitResult))
-                + "); waiting for the device.");
-        vkDeviceWaitIdle(m_device);
+    GpuWaitService& waits = m_vulkanDevice->Waits();
+    const BlockOutcome outcome =
+        waits.WaitFence(fence, kUploadWaitTimeout, WaitClass::Upload, BlockSite::ImmediateSubmit, "resource upload");
+    if (outcome != BlockOutcome::Completed) {
+        // The GPU may still run this work, so its fence and command buffer must outlive the throw.
+        waits.Quarantine(fence);
+        throw std::runtime_error(std::string("GpuResourceFactory::ImmediateSubmitInternal: GPU wait ") + ToString(outcome));
     }
 
     vkDestroyFence(m_device, fence, nullptr);
     FreeTransientCommandBuffer(cmd);
-    if (waitResult != VK_SUCCESS) {
-        throw std::runtime_error("GpuResourceFactory::ImmediateSubmitInternal: vkWaitForFences failed.");
-    }
 }
 
 Pipeline GpuResourceFactory::CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,

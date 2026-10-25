@@ -1,0 +1,6 @@
+# Raw blocking GPU calls. Only the wait service (src/Renderer/Vulkan/GpuWaitService.cpp) may name them.
+vkWaitForFences
+vkDeviceWaitIdle
+vkQueueWaitIdle
+vkWaitSemaphores
+vkAcquireNextImageKHR

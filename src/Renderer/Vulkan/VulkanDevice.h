@@ -4,9 +4,11 @@
 
 #include "../Culling/ClusterCullMath.h"
 #include "../GpuTiming.h"
+#include "GpuWaitService.h"
 
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <type_traits>
 
 namespace gte {
@@ -16,6 +18,7 @@ static_assert(std::is_trivially_copyable_v<IndirectDrawCapsView>);
 // RAII wrapper around a VkPhysicalDevice and the VkDevice created for it, plus its graphics and present
 // queues. Does not own the VkInstance or VkSurfaceKHR; both must outlive it. Selection takes the first
 // suitable discrete GPU (else any suitable one) with graphics, present, VK_KHR_swapchain and dynamicRendering.
+// Not movable: the wait service points at this object's submit mutex.
 class VulkanDevice {
 public:
     VulkanDevice(VkInstance instance, VkSurfaceKHR surface);
@@ -23,9 +26,8 @@ public:
 
     VulkanDevice(const VulkanDevice&) = delete;
     VulkanDevice& operator=(const VulkanDevice&) = delete;
-
-    VulkanDevice(VulkanDevice&& other) noexcept;
-    VulkanDevice& operator=(VulkanDevice&& other) noexcept;
+    VulkanDevice(VulkanDevice&&) = delete;
+    VulkanDevice& operator=(VulkanDevice&&) = delete;
 
     VkPhysicalDevice Physical() const noexcept { return m_physicalDevice; }
     VkDevice Native() const noexcept { return m_device; }
@@ -57,10 +59,17 @@ public:
     // enabled on the device), else min(8, device limit). Probed once before vkCreateDevice().
     float MaterialAnisotropy() const noexcept { return m_materialAnisotropy; }
 
+    // The one place that blocks on the GPU. Thread-safe, so it is reachable from const callers.
+    GpuWaitService& Waits() const noexcept { return *m_waits; }
+
     // The one choke point for submits to the graphics queue: VkQueue access must be externally
     // synchronized and several systems submit to it. Nothing else may call vkQueueSubmit on it.
+    // Refuses to submit once the device is lost.
     VkResult SubmitToGraphicsQueue(const VkSubmitInfo2& submit, VkFence fence) const
     {
+        if (m_waits->DeviceLost()) {
+            return VK_ERROR_DEVICE_LOST;
+        }
         std::lock_guard lock(m_graphicsQueueSubmitMutex);
         return vkQueueSubmit2(m_graphicsQueue, 1, &submit, fence);
     }
@@ -87,8 +96,11 @@ private:
     bool m_supportsDepthBlit = false;
     float m_materialAnisotropy = 1.0f;
 
-    // Guards SubmitToGraphicsQueue(); mutable so that method can stay const.
+    // Guards SubmitToGraphicsQueue() and the wait service's drain submit; mutable so submit can stay const.
     mutable std::mutex m_graphicsQueueSubmitMutex;
+
+    // Declared after the mutex it uses; destroyed before the device.
+    mutable std::optional<GpuWaitService> m_waits;
 };
 
 } // namespace gte

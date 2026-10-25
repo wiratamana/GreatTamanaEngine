@@ -95,22 +95,13 @@
 #                                            src/Renderer/DrawStats.h) - no
 #                                            Vulkan/Renderer/live GPU
 #                                            involved at all.
-#   - Renderer/GpuTimingTests.cpp            - Phase 4A's pure GPU-timestamp
-#                                            capability interpretation
-#                                            (InterpretTimestampCapability())
-#                                            and tick-delta -> millisecond/
-#                                            slot-indexing math
-#                                            (ConvertTimestampDeltaToMilliseconds() -
-#                                            src/Renderer/GpuTiming.h), PLUS
-#                                            Phase 4B's pure tri-state
-#                                            priority resolution
-#                                            (ResolveGpuTimingStatus()) - no
-#                                            Vulkan/Renderer/live GPU device
-#                                            involved at all (no VkQueryPool
-#                                            is created anywhere in Phase 4A;
-#                                            Phase 4B's own GpuTimingService/
-#                                            VulkanQueryPool are Tier 2, see
-#                                            the note below).
+#   - Renderer/GpuTimingTests.cpp            - pure GPU timestamp math and status
+#                                            resolution (src/Renderer/GpuTiming.h);
+#                                            no device involved.
+#   - Renderer/GpuWaitPolicyTests.cpp        - timeout and device-lost policy of
+#                                            blocking GPU waits
+#                                            (src/Renderer/GpuWaitPolicy.h); no
+#                                            device involved.
 #   - Renderer/ComputeDispatchTests.cpp      - the compute-shader campaign's
 #                                            Phase 4 pure dispatch math
 #                                            (ComputeGroupCount()/
@@ -2297,6 +2288,7 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Renderer/ClusterViewShaderTextTests.cpp
     Renderer/RenderGraph/IndirectDrawRecordTests.cpp
     Renderer/GpuTimingTests.cpp
+    Renderer/GpuWaitPolicyTests.cpp
     Renderer/ComputeDispatchTests.cpp
     Renderer/VolumeTexturePreviewMathTests.cpp
     # Headless-GPU test for RenderTexture's colorless constructor option.
@@ -2889,6 +2881,15 @@ add_test(NAME VolkLeakCheck
     COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src" --skip Renderer/
             --tokens "${CMAKE_SOURCE_DIR}/tools/ci/volk_leak_check/tokens.txt"
             --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/volk_leak_check/allowlist.txt"
+            --comments skip --strings scan
+)
+
+# Fails if any file under src except the wait service calls a raw blocking GPU function.
+# See tools/ci/blocking_call_check/README.md.
+add_test(NAME BlockingCallCheck
+    COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src" --skip Renderer/Vulkan/GpuWaitService.cpp
+            --tokens "${CMAKE_SOURCE_DIR}/tools/ci/blocking_call_check/tokens.txt"
+            --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/blocking_call_check/allowlist.txt"
             --comments skip --strings scan
 )
 

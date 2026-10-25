@@ -137,8 +137,8 @@ struct MeshPreviewRenderer::Impl {
     {
     }
 
-    // Idles the GPU, then members release whatever was built (also for a half-built instance).
-    ~Impl() { renderer.WaitForGpuIdle(); }
+    // Idles the GPU (best effort), then members release whatever was built (also for a half-built instance).
+    ~Impl() { static_cast<void>(renderer.WaitForGpuIdle(BlockSite::Shutdown, "mesh preview")); }
 
     // Set 1 holds only the lighting block; one layout serves the set and the pipeline.
     void Build()
@@ -246,7 +246,10 @@ bool MeshPreviewRenderer::SetMesh(std::span<const MeshPreviewVertex> vertices, s
 {
     Impl& impl = *m_impl;
     if (impl.vertexBuffer.has_value() || impl.indexBuffer.has_value()) {
-        impl.renderer.WaitForGpuIdle(); // The previous frame may still read the old buffers.
+        // The previous frame may still read the old buffers; keep them if the GPU cannot be drained.
+        if (impl.renderer.WaitForGpuIdle(BlockSite::ResourceRelease, "mesh preview buffers") != BlockOutcome::Completed) {
+            return false;
+        }
     }
     impl.vertexBuffer.reset();
     impl.indexBuffer.reset();
@@ -291,8 +294,7 @@ UiTextureHandle MeshPreviewRenderer::Render(const Mat4& model, const Mat4& viewP
     const std::uint32_t indexCount = impl.indexCount;
     const Extent2D extent = impl.target->Extent();
 
-    // No GPU timing slot: this preview must not overwrite the Profiler's Game/Scene View timings.
-    impl.renderer.RenderOffscreen(*impl.target, std::nullopt, clearColor, [&](rg::CommandBuffer& cmd) {
+    impl.renderer.RenderOffscreen(*impl.target, clearColor, [&](rg::CommandBuffer& cmd) {
         cmd.SetViewportAndScissor(extent.width, extent.height);
         cmd.BindPipeline(pipeline);
         cmd.BindDescriptorSet(/*setIndex=*/1, setOneHandle);

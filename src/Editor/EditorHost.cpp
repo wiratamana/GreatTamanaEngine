@@ -556,8 +556,7 @@ int EditorHost::Run()
         // Brackets the whole frame for the profiler; a no-op while profiling is disabled.
         Profiling::FrameProfiler::Instance().BeginFrame();
 
-        // GPU timing follows the editor's "Capture" checkbox, for the renderer and for the graph's own timestamp pool.
-        m_renderer.SetGpuTimingCaptureEnabled(Profiling::FrameProfiler::Instance().IsCaptureEnabled());
+        // GPU timing follows the editor's "Capture" checkbox.
         m_renderGraph.SetGpuTimingCaptureEnabled(Profiling::FrameProfiler::Instance().IsCaptureEnabled());
 
         // Clear last frame's transient "just pressed/released" flags and

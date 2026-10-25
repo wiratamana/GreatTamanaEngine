@@ -228,10 +228,8 @@ MaterialReleaseResult MaterialTextureGpuCache::ReleaseUnused(
     }
 
     // Nothing may be destroyed while a submitted command buffer can still read it.
-    try {
-        renderer.DrainGpuForResourceRelease();
-    } catch (const std::exception& error) {
-        GTE_LOG_ERROR(kLogCategory, std::string("Release skipped, GPU wait failed: ") + error.what());
+    if (renderer.DrainGpuForResourceRelease("material release sweep") != BlockOutcome::Completed) {
+        GTE_LOG_ERROR(kLogCategory, "Release skipped, the GPU did not go idle.");
         return result;
     }
 
