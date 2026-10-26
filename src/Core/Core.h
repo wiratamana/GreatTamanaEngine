@@ -19,6 +19,7 @@
 #include "ClusterCandidates.h"
 #include "FrameDebuggerCaptureRecorder.h"
 #include "FeatureKit/ClusterDrawTypes.h"
+#include "RenderTimingAdapter.h"
 #include "Plugins/ProjectAssemblyHost.h"
 #include "../Assets/AssetDatabase.h"
 #include "Plugins/ProjectRenderFeatureCallback.h"
@@ -279,6 +280,9 @@ private:
     rg::RenderPipeline m_offscreenRenderPipeline;
     rg::RenderPipeline m_presentRenderPipeline;
     rg::RenderPassToggleRegistry m_renderPassToggleRegistry;
+
+    // Detached from the renderer and the graphs in ~Core, before any member is destroyed.
+    RenderTimingAdapter m_timingAdapter;
 
     std::vector<ExposedViewOutput> m_exposedViewOutputsThisFrame; // Cleared at the start of each BuildFrame().
 

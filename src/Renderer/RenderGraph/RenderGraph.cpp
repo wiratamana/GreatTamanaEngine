@@ -743,7 +743,9 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         timedNames.clear();
     }
 
+    PhaseScope compileScope(m_timingObserver, RenderPhase::Compile);
     const CompiledGraph compiled = Compile(input, std::span<const TextureHandle>(finalOutputs));
+    compileScope.End();
 
     std::vector<PhysicalTexture> physicalTextures(input.textures.size());
     std::vector<PhysicalBuffer> physicalBuffers(input.buffers.size());
@@ -753,8 +755,10 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     bool timingSlotBudgetExhausted = false;
     std::vector<PassGpuStats> passStats(input.passes.size());
 
+    PhaseScope recordScope(m_timingObserver, RenderPhase::Record);
     for (const PassHandle& passHandle : compiled.executionOrder) {
         PassRecord& pass = input.passes[passHandle.index];
+        const PassRecordScope passScope(m_timingObserver, pass.name);
 
         // Apply resource barriers for reads before writes.
         for (const ResourceUsage& usage : pass.reads) {
@@ -959,6 +963,8 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         passStats[passHandle.index].drawStats = passDrawStats;
     }
 
+    recordScope.End();
+    const PhaseScope finishScope(m_timingObserver, RenderPhase::Finish);
     if (!isPipelined) {
         m_synchronousTimedPasses = std::min(ordinal, timingSlotBudget);
     } else {

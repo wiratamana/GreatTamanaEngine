@@ -2219,6 +2219,8 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Profiling/ProfilingEventModelTests.cpp
     Profiling/ProfilingAllocationTests.cpp
     Profiling/WorkerRingTests.cpp
+    Profiling/FrameChecksTests.cpp
+    Profiling/RenderTimingAdapterTests.cpp
     Jobs/JobQueueTests.cpp
     Jobs/JobSystemTests.cpp
     Jobs/JobDispatchMathTests.cpp
@@ -2997,6 +2999,7 @@ set(GTE_COMMENT_RULE_SRC
     Network/NetworkRequestGuard.h Network/NetworkRequestGuard.cpp
     Network/NetworkSceneCameraPose.h Network/NetworkSceneCameraPose.cpp Network/NetworkCaptureFailure.h
     Editor/CaptureFailureReason.h Core/FaultInjection.h Core/FaultInjection.cpp
+    Core/RenderTimingAdapter.h Core/RenderTimingAdapter.cpp
     Network/NetworkFaultRoutes.h Network/NetworkFaultRoutes.cpp
     Profiling/
     Features/SceneLighting/ Features/GpuDrivenScene/)

@@ -19,6 +19,7 @@
 #include "RenderGraphResourcePool.h"
 #include "RenderGraphTimestampPool.h"
 #include "RenderGraphSnapshot.h"
+#include "../RenderTimingObserver.h"
 #include "RenderGraphTypes.h"
 #include "../Culling/ClusterPassCounts.h"
 #include "../DrawStats.h"
@@ -109,6 +110,9 @@ public:
     {
         m_renderPassToggleRegistry = registry;
     }
+
+    // Optional. Sees the compile, record and finish stages and every pass recording.
+    void SetTimingObserver(IRenderTimingObserver* observer) noexcept { m_timingObserver = observer; }
 
     // The state a texture must be left in after RunOneShot; no state keeps whatever the passes left.
     struct OneShotFinal {
@@ -235,6 +239,7 @@ private:
     IPassDebugMetadataProvider* m_debugMetadataProvider = nullptr;
     FrameDebuggerEventSink* m_frameDebuggerEventSink = nullptr;
     RenderPassToggleRegistry* m_renderPassToggleRegistry = nullptr;
+    IRenderTimingObserver* m_timingObserver = nullptr;
 
     RenderGraphTimestampPool m_timestampPool;
 

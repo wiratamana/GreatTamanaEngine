@@ -36,6 +36,10 @@ struct FrameSummary {
     std::uint32_t lateScopes = 0;    // scopes that ended after their frame closed
     std::uint32_t foreignScopes = 0; // scopes finished off the main thread and dropped
     std::uint32_t lostWorkerEvents = 0;
+
+    std::uint64_t topLevelTicks = 0;     // summed top-level scopes
+    std::uint64_t blockedTicks = 0;      // summed Blocked scopes
+    std::uint64_t blockedOtherTicks = 0; // Blocked scopes that are not a named GPU or worker wait
 };
 
 // The full event detail of one finished frame.

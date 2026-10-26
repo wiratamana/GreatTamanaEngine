@@ -19,11 +19,11 @@ public:
 private:
     // Display pause state as of the last Build() call.
     bool m_wasPaused = false;
+    bool m_groupByName = false;
 
     // Copy taken when Pause turned on.
     std::vector<Profiling::FrameGraphPoint> m_frozenPoints;
-    std::vector<CpuScopeRow> m_frozenRows;
-    Profiling::FrameSummary m_frozenSummary{};
+    ProfilerFrameView m_frozenView{};
 
     // Scratch for the two plots.
     std::vector<float> m_cpuGraphScratch;

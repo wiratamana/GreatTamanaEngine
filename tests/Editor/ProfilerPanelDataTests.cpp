@@ -125,5 +125,70 @@ TEST(ProfilerPanelDataTest, CpuScopeTableEmptyMessageMatchesCompileTimeFlag)
     }
 }
 
+TEST(ProfilerPanelDataTest, TreeRowsListParentsBeforeChildrenAndEndWithUntracked)
+{
+    // Post-order input: children first. The frame is 20 ms; top-level scopes cover 10 ms.
+    Profiling::FrameRecord frame;
+    frame.summary.startTicks = 0;
+    frame.summary.endTicks = 20'000'000;
+    AddScope(frame, "PanelTreeChildA", 1'000'000, 4'000'000, 1);
+    AddScope(frame, "PanelTreeChildB", 5'000'000, 7'000'000, 1);
+    AddScope(frame, "PanelTreeParent", 0, 10'000'000, 0);
+
+    const Profiling::FrameTotals totals = Profiling::ComputeFrameTotals(frame);
+    const std::vector<CpuTreeRow> rows = BuildCpuTreeRows(frame, totals);
+
+    ASSERT_EQ(rows.size(), 4u);
+    EXPECT_STREQ(rows[0].name, "PanelTreeParent");
+    EXPECT_EQ(rows[0].depth, 0u);
+    EXPECT_DOUBLE_EQ(rows[0].selfMilliseconds, 5.0);
+    EXPECT_DOUBLE_EQ(rows[0].percentOfFrame, 50.0);
+    EXPECT_STREQ(rows[1].name, "PanelTreeChildA");
+    EXPECT_EQ(rows[1].depth, 1u);
+    EXPECT_STREQ(rows[2].name, "PanelTreeChildB");
+    EXPECT_TRUE(rows[3].untracked);
+    EXPECT_DOUBLE_EQ(rows[3].totalMilliseconds, 10.0);
+}
+
+TEST(ProfilerPanelDataTest, TreeRowsOfAnEmptyFrameHaveNoUntrackedRow)
+{
+    const Profiling::FrameRecord frame{};
+    const std::vector<CpuTreeRow> rows = BuildCpuTreeRows(frame, Profiling::ComputeFrameTotals(frame));
+    EXPECT_TRUE(rows.empty());
+}
+
+TEST(ProfilerPanelDataTest, FrameViewCarriesChecksAndRows)
+{
+    Profiling::FrameRecord frame;
+    frame.summary.endTicks = 10'000'000;
+    AddScope(frame, "PanelViewBody", 0, 10'000'000, 0);
+
+    const ProfilerFrameView view = BuildProfilerFrameView(frame, false);
+    EXPECT_EQ(view.rows.size(), 1u);
+    EXPECT_EQ(view.tree.size(), 2u); // the body and the untracked row
+    EXPECT_EQ(view.checks.items[static_cast<std::size_t>(Profiling::CheckId::CaptureOn)].status,
+        Profiling::CheckStatus::Warn);
+}
+
+TEST(ProfilerPanelDataTest, CheckAndBlockedLinesNameTheirStatusAndNumbers)
+{
+    Profiling::FrameCheck warn;
+    warn.status = Profiling::CheckStatus::Warn;
+    warn.value = 12;
+    warn.text = "something";
+    EXPECT_EQ(FormatCheckLine(warn), "[WARN] something (12)");
+
+    Profiling::FrameCheck ok;
+    ok.text = "fine";
+    EXPECT_EQ(FormatCheckLine(ok), "[OK] fine");
+
+    Profiling::FrameTotals totals;
+    totals.blockedTicks = 3'200'000;
+    totals.blockedGpuTicks = 2'900'000;
+    totals.blockedWorkerTicks = 100'000;
+    totals.blockedOtherTicks = 200'000;
+    EXPECT_EQ(FormatBlockedLine(totals), "Blocked 3.20 ms (GPU 2.90, workers 0.10, other 0.20)");
+}
+
 } // namespace
 } // namespace gte

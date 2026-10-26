@@ -443,10 +443,8 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
             Jobs::JobHandle chainHandle;
             Jobs::Dispatch(&RunDynamicChainBatchJob, static_cast<std::uint32_t>(model->chains.size()), &context,
                 chainHandle, /*minItemsPerBatch=*/1);
-            // Exactly ONE wait, for THIS ONE entity's entire chain dispatch,
-            // before the next entity's own processing begins - see this
-            // method's own header comment on why the outer loop must stay
-            // sequential.
+            // One wait per entity: the next entity's processing must not begin before this chain dispatch ends.
+            GTE_PROFILE_BLOCKED("Wait.Workers");
             Jobs::JobSystem::Instance().WaitForJobs(chainHandle);
         } else {
             StepDynamicChainRange(0, static_cast<std::uint32_t>(model->chains.size()), context);

@@ -392,6 +392,11 @@ std::uint32_t Renderer::GpuWaitConsecutiveFrameTimeouts() const noexcept
     return m_device.Waits().ConsecutiveFrameTimeouts();
 }
 
+void Renderer::SetTimingObserver(IRenderTimingObserver* observer) noexcept
+{
+    m_device.Waits().SetObserver(observer);
+}
+
 void Renderer::RequestSwapchainCapture()
 {
     m_presenter.RequestSwapchainCapture();

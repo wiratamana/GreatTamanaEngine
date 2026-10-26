@@ -44,6 +44,95 @@ std::vector<CpuScopeRow> BuildSortedCpuScopeRows(const Profiling::FrameRecord& f
     return rows;
 }
 
+std::vector<CpuTreeRow> BuildCpuTreeRows(const Profiling::FrameRecord& frame, const Profiling::FrameTotals& totals)
+{
+    const auto events = frame.scopes.Events();
+
+    std::vector<Profiling::ScopeTimes> times(events.size());
+    Profiling::ComputeScopeTimes(events, times);
+
+    // Events arrive children first. A parent starts no later than its children, so sorting by start time and then
+    // by depth restores tree order.
+    std::vector<std::size_t> order;
+    order.reserve(events.size());
+    for (std::size_t i = 0; i < events.size(); ++i) {
+        if (events[i].kind != Profiling::ScopeKind::Marker) {
+            order.push_back(i);
+        }
+    }
+    std::stable_sort(order.begin(), order.end(), [&events](std::size_t a, std::size_t b) {
+        if (events[a].startTicks != events[b].startTicks) {
+            return events[a].startTicks < events[b].startTicks;
+        }
+        return events[a].depth < events[b].depth;
+    });
+
+    const double frameMilliseconds = Profiling::TicksToMilliseconds(totals.frameTicks);
+    const auto percentOf = [frameMilliseconds](double milliseconds) {
+        return frameMilliseconds > 0.0 ? milliseconds / frameMilliseconds * 100.0 : 0.0;
+    };
+
+    std::vector<CpuTreeRow> rows;
+    rows.reserve(order.size() + 1);
+    for (const std::size_t i : order) {
+        CpuTreeRow row;
+        row.name = Profiling::ResolveName(events[i].name);
+        row.kind = events[i].kind;
+        row.depth = events[i].depth;
+        row.totalMilliseconds = Profiling::TicksToMilliseconds(times[i].totalTicks);
+        row.selfMilliseconds = Profiling::TicksToMilliseconds(times[i].selfTicks);
+        row.percentOfFrame = percentOf(row.totalMilliseconds);
+        rows.push_back(row);
+    }
+
+    if (totals.frameTicks > 0) {
+        CpuTreeRow untracked;
+        untracked.name = "(untracked)";
+        untracked.untracked = true;
+        untracked.totalMilliseconds = Profiling::TicksToMilliseconds(totals.untrackedTicks);
+        untracked.selfMilliseconds = untracked.totalMilliseconds;
+        untracked.percentOfFrame = percentOf(untracked.totalMilliseconds);
+        rows.push_back(untracked);
+    }
+    return rows;
+}
+
+ProfilerFrameView BuildProfilerFrameView(const Profiling::FrameRecord& frame, bool captureEnabled)
+{
+    ProfilerFrameView view;
+    view.summary = frame.summary;
+    view.totals = Profiling::ComputeFrameTotals(frame);
+    view.checks = Profiling::EvaluateChecks(frame, view.totals, captureEnabled);
+    view.rows = BuildSortedCpuScopeRows(frame);
+    view.tree = BuildCpuTreeRows(frame, view.totals);
+    return view;
+}
+
+std::string FormatCheckLine(const Profiling::FrameCheck& check)
+{
+    const char* tag = check.status == Profiling::CheckStatus::Ok ? "OK"
+        : check.status == Profiling::CheckStatus::Warn          ? "WARN"
+                                                                : "FAIL";
+    char buffer[192];
+    if (check.value != 0) {
+        std::snprintf(buffer, sizeof(buffer), "[%s] %s (%llu)", tag, check.text,
+            static_cast<unsigned long long>(check.value));
+    } else {
+        std::snprintf(buffer, sizeof(buffer), "[%s] %s", tag, check.text);
+    }
+    return std::string(buffer);
+}
+
+std::string FormatBlockedLine(const Profiling::FrameTotals& totals)
+{
+    char buffer[160];
+    std::snprintf(buffer, sizeof(buffer), "Blocked %.2f ms (GPU %.2f, workers %.2f, other %.2f)",
+        Profiling::TicksToMilliseconds(totals.blockedTicks), Profiling::TicksToMilliseconds(totals.blockedGpuTicks),
+        Profiling::TicksToMilliseconds(totals.blockedWorkerTicks),
+        Profiling::TicksToMilliseconds(totals.blockedOtherTicks));
+    return std::string(buffer);
+}
+
 std::string FormatDuration(double milliseconds)
 {
     char buffer[64];

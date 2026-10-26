@@ -285,6 +285,7 @@ void AnimationSystem::SkinAndUploadOneEntity(
         Jobs::Dispatch(&RunSkinningBatch, static_cast<std::uint32_t>(vertexCount), &context, skinningHandle,
             kMinVerticesPerBatch);
         // One wait per model: the next model's dispatch must not start before this one finishes.
+        GTE_PROFILE_BLOCKED("Wait.Workers");
         Jobs::JobSystem::Instance().WaitForJobs(skinningHandle);
     }
 
@@ -311,6 +312,7 @@ void AnimationSystem::SkinAndUploadOneEntity(
                 Jobs::JobHandle packHandle;
                 Jobs::Dispatch(&RunPackTexturedBatch, static_cast<std::uint32_t>(vertexCount), &context,
                     packHandle, kMinVerticesPerBatch);
+                GTE_PROFILE_BLOCKED("Wait.Workers");
                 Jobs::JobSystem::Instance().WaitForJobs(packHandle);
             }
 
@@ -327,6 +329,7 @@ void AnimationSystem::SkinAndUploadOneEntity(
                 Jobs::JobHandle packHandle;
                 Jobs::Dispatch(&RunPackUntexturedBatch, static_cast<std::uint32_t>(vertexCount), &context,
                     packHandle, kMinVerticesPerBatch);
+                GTE_PROFILE_BLOCKED("Wait.Workers");
                 Jobs::JobSystem::Instance().WaitForJobs(packHandle);
             }
 

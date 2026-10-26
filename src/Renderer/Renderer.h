@@ -162,6 +162,9 @@ public:
     // Consecutive frame waits that timed out; resets after a completed wait.
     std::uint32_t GpuWaitConsecutiveFrameTimeouts() const noexcept;
 
+    // Installs the observer of every blocking wait. Pass nullptr to remove it.
+    void SetTimingObserver(IRenderTimingObserver* observer) noexcept;
+
     // Objects parked because the GPU may still use them after a failed wait.
     std::uint32_t AbandonedObjectCount() const noexcept { return m_abandoned.Count(); }
 

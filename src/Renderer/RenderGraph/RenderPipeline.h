@@ -8,6 +8,7 @@
 #include "RenderGraphBuilder.h"
 #include "RenderGraphTypes.h"
 #include "RenderPassToggleRegistry.h"
+#include "../RenderTimingObserver.h"
 
 #include <algorithm>
 #include <any>
@@ -200,6 +201,9 @@ public:
         m_passToggleRegistry = registry;
     }
 
+    // Optional. Sees the declaration time of each provider.
+    void SetTimingObserver(IRenderTimingObserver* observer) noexcept { m_timingObserver = observer; }
+
     // Removes providers by debugName (pointer or content match).
     void Unregister(const char* debugName)
     {
@@ -241,11 +245,13 @@ private:
 
         for (const Entry& entry : m_providers) {
             if (entry.timing == timing && entry.scope == ProviderScope::Once) {
+                const DeclareScope observed(m_timingObserver, entry.debugName);
                 entry.provider(frame, m_scratchCollected);
             }
         }
         for (const Entry& entry : m_providers) {
             if (entry.timing == timing && entry.scope == ProviderScope::PerActiveView) {
+                const DeclareScope observed(m_timingObserver, entry.debugName);
                 for (const RenderViewId& view : frame.activeViews) {
                     frame.currentView = view;
                     entry.provider(frame, m_scratchCollected);
@@ -274,6 +280,7 @@ private:
     std::vector<Entry> m_providers;
     std::function<ViewScope(RenderViewId)> m_legacyViewScopeTranslator;
     RenderPassToggleRegistry* m_passToggleRegistry = nullptr;
+    IRenderTimingObserver* m_timingObserver = nullptr;
 
     // Cleared, not reconstructed, each DeclareInto() so its capacity survives across frames.
     std::vector<RenderPassDesc> m_scratchCollected;

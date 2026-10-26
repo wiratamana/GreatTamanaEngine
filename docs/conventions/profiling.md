@@ -25,6 +25,22 @@ snapshot just before `EndFrame()`. Follow these rules when you touch profiling o
 - Every other `FrameProfiler` method is main thread only. The first `BeginFrame()` marks the calling thread as main.
 - Nothing on the hot path allocates. All buffers are fixed arrays.
 
+## Frame tree and waits
+
+- `Core::BuildFrame` and `Core::Present` bracket their stages with scopes: `Render.Prepare`, `Offscreen` (children
+  `Offscreen.Begin`, `Offscreen.Declare` with `Offscreen.Collect` inside, `Offscreen.Compile`, `Offscreen.Record`,
+  `Offscreen.Finish`, `Offscreen.FinalizeViews`, `Offscreen.Submit`, `Offscreen.Finalize`) and `Present` with
+  `Present.Declare`, `Present.Compile`, `Present.Record`, `Present.Finish`.
+- `IRenderTimingObserver` (`Renderer/RenderTimingObserver.h`) reports waits, graph phases, provider declarations and
+  pass recording. `Core/RenderTimingAdapter` turns them into scopes: `GpuWait(Site:detail)` (Blocked), `Declare.<provider>`,
+  `Pass.<name>` and `<label>.<phase>`. Only the main thread records; other threads are ignored.
+- `Wait.Workers` (Blocked) brackets every wait on worker jobs.
+- `FrameTotals` (`FrameChecks.h`) sums top-level, blocked (GPU, workers, other) and untracked time of one frame.
+  `FrameSummary` keeps `topLevelTicks`, `blockedTicks` and `blockedOtherTicks`.
+- `EvaluateChecks()` returns one `FrameCheck` per `CheckId` with `Ok`, `Warn` or `Fail`: capture off, dropped scopes,
+  late scopes, off-thread scopes, lost worker events, reconciliation (untracked above 5% warns, overrun above 2% fails)
+  and scope nesting. The Profiler panel lists every non-Ok check and shows untracked time as its own tree row.
+
 ## Frame history
 
 - `FrameProfiler` keeps a ring of 300 `FrameSummary` rows (index, ticks, CPU ms, memory, drop counters) and the full

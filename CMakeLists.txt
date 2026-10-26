@@ -567,6 +567,8 @@ add_library(gte_core STATIC
     src/Core/Core.cpp
     src/Core/FaultInjection.h
     src/Core/FaultInjection.cpp
+    src/Core/RenderTimingAdapter.h
+    src/Core/RenderTimingAdapter.cpp
     src/Core/ScreenPostProcessPassPriorityAssignment.h
     src/Core/ScreenPostProcessPassPriorityAssignment.cpp
     src/Core/ClusterCandidates.h
@@ -1061,6 +1063,8 @@ add_library(gte_core STATIC
     src/Profiling/ManualClock.h
     src/Profiling/WorkerRing.h
     src/Profiling/WorkerRing.cpp
+    src/Profiling/FrameChecks.h
+    src/Profiling/FrameChecks.cpp
     src/Jobs/JobTypes.h
     src/Jobs/JobQueue.h
     src/Jobs/JobQueue.cpp

@@ -120,6 +120,71 @@ void BuildCpuScopeTable(const std::vector<CpuScopeRow>& rows)
     }
 }
 
+void BuildChecksSection(const ProfilerFrameView& view)
+{
+    ImGui::SeparatorText("Checks");
+
+    const std::size_t issues = view.checks.IssueCount();
+    if (issues == 0) {
+        ImGui::TextDisabled("All %zu checks pass.", view.checks.items.size());
+    }
+    for (const Profiling::FrameCheck& check : view.checks.items) {
+        if (check.status == Profiling::CheckStatus::Ok) {
+            continue;
+        }
+        const ImVec4 color = check.status == Profiling::CheckStatus::Fail ? ImVec4(1.0f, 0.35f, 0.3f, 1.0f)
+                                                                           : ImVec4(1.0f, 0.75f, 0.2f, 1.0f);
+        ImGui::TextColored(color, "%s", FormatCheckLine(check).c_str());
+    }
+    ImGui::TextDisabled("%s", FormatBlockedLine(view.totals).c_str());
+}
+
+void BuildCpuTreeTable(const ProfilerFrameView& view)
+{
+    ImGui::SeparatorText("CPU Scopes");
+
+    if (view.tree.empty()) {
+        ImGui::TextDisabled("%s", CpuScopeTableEmptyMessage());
+        return;
+    }
+
+    constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable
+        | ImGuiTableFlags_ScrollY;
+    if (ImGui::BeginTable("CpuTreeTable", 4, tableFlags, ImVec2(0.0f, 220.0f))) {
+        ImGui::TableSetupColumn("Scope");
+        ImGui::TableSetupColumn("Total", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+        ImGui::TableSetupColumn("Self", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+        ImGui::TableSetupColumn("% frame", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+        ImGui::TableHeadersRow();
+
+        for (const CpuTreeRow& row : view.tree) {
+            ImGui::TableNextRow();
+
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Indent(static_cast<float>(row.depth) * 12.0f);
+            if (row.untracked) {
+                ImGui::TextDisabled("%s", row.name);
+            } else if (row.kind == Profiling::ScopeKind::Blocked) {
+                ImGui::TextDisabled("%s (blocked)", row.name);
+            } else {
+                ImGui::TextUnformatted(row.name);
+            }
+            ImGui::Unindent(static_cast<float>(row.depth) * 12.0f);
+
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(FormatDuration(row.totalMilliseconds).c_str());
+
+            ImGui::TableSetColumnIndex(2);
+            ImGui::TextUnformatted(FormatDuration(row.selfMilliseconds).c_str());
+
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%.1f%%", row.percentOfFrame);
+        }
+
+        ImGui::EndTable();
+    }
+}
+
 void BuildGpuMemorySection(std::span<const Profiling::FrameGraphPoint> windowed, const Profiling::FrameSummary& latest,
     std::vector<float>& scratch)
 {
@@ -181,29 +246,32 @@ void ProfilerPanel::Build(EditorContext& /*ctx*/)
     const bool paused = profiler.IsDisplayPaused();
     if (paused && !m_wasPaused) {
         m_frozenPoints = Profiling::BuildFrameGraphPoints(profiler);
-        m_frozenRows = BuildSortedCpuScopeRows(profiler.LastCompletedFrame());
-        m_frozenSummary = profiler.LastCompletedFrame().summary;
+        m_frozenView = BuildProfilerFrameView(profiler.LastCompletedFrame(), profiler.IsCaptureEnabled());
     }
     m_wasPaused = paused;
 
     std::vector<Profiling::FrameGraphPoint> livePoints;
-    std::vector<CpuScopeRow> liveRows;
+    ProfilerFrameView liveView;
     const std::vector<Profiling::FrameGraphPoint>* points = &m_frozenPoints;
-    const std::vector<CpuScopeRow>* rows = &m_frozenRows;
-    const Profiling::FrameSummary* summary = &m_frozenSummary;
+    const ProfilerFrameView* view = &m_frozenView;
     if (!paused) {
         livePoints = Profiling::BuildFrameGraphPoints(profiler);
-        liveRows = BuildSortedCpuScopeRows(profiler.LastCompletedFrame());
+        liveView = BuildProfilerFrameView(profiler.LastCompletedFrame(), profiler.IsCaptureEnabled());
         points = &livePoints;
-        rows = &liveRows;
-        summary = &profiler.LastCompletedFrame().summary;
+        view = &liveView;
     }
 
     const std::span<const Profiling::FrameGraphPoint> windowed = WindowedTail(*points);
 
-    BuildCpuFrameTimeGraph(windowed, *summary, m_cpuGraphScratch);
-    BuildCpuScopeTable(*rows);
-    BuildGpuMemorySection(windowed, *summary, m_memoryGraphScratch);
+    BuildCpuFrameTimeGraph(windowed, view->summary, m_cpuGraphScratch);
+    BuildChecksSection(*view);
+    ImGui::Checkbox("Group by name", &m_groupByName);
+    if (m_groupByName) {
+        BuildCpuScopeTable(view->rows);
+    } else {
+        BuildCpuTreeTable(*view);
+    }
+    BuildGpuMemorySection(windowed, view->summary, m_memoryGraphScratch);
     BuildGpuTimingSection();
 
     ImGui::End();

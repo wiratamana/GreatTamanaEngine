@@ -1,5 +1,6 @@
 #include "FrameProfiler.h"
 
+#include "FrameChecks.h"
 #include "ProfilingClock.h"
 
 #include <limits>
@@ -60,6 +61,11 @@ void FrameProfiler::EndFrame() noexcept
     summary.lateScopes = gate.lateScopes;
     summary.foreignScopes = gate.foreignScopes;
     summary.lostWorkerEvents = drain.lost;
+
+    const FrameTotals totals = ComputeFrameTotals(record);
+    summary.topLevelTicks = totals.topLevelTicks;
+    summary.blockedTicks = totals.blockedTicks;
+    summary.blockedOtherTicks = totals.blockedOtherTicks;
 
     m_history[m_historyHead] = summary;
     m_historyHead = (m_historyHead + 1) % kMaxFrameHistory;

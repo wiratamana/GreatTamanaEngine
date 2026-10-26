@@ -93,9 +93,19 @@ Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices, bool 
     RegisterBuiltinCapabilityOrchestrators();
     RegisterOffscreenRenderPipelineProviders();
     RegisterPresentRenderPipelineProvider();
+
+#if GTE_ENABLE_PROFILER
+    m_renderer.SetTimingObserver(&m_timingAdapter);
+    m_renderGraph.SetTimingObserver(&m_timingAdapter);
+    m_offscreenRenderPipeline.SetTimingObserver(&m_timingAdapter);
+    m_presentRenderPipeline.SetTimingObserver(&m_timingAdapter);
+#endif
 }
 
-Core::~Core() = default;
+Core::~Core()
+{
+    m_renderer.SetTimingObserver(nullptr);
+}
 
 // Initializes built-in capability orchestrators.
 void Core::RegisterBuiltinCapabilityOrchestrators()
@@ -1002,55 +1012,79 @@ void Core::BuildFrame()
         return;
     }
 
-    for (const MeshHandle released : m_game.ReleaseUnusedGpuResources(m_renderer)) {
-        ForgetClusterSynthesis(released);
-    }
-
-    m_renderGraph.BeginPersistentResourceFrame();
-
-    m_exposedViewOutputsThisFrame.clear();
-
-    // Query active editor render targets; without any, the Game view renders into an engine-owned target.
-    RenderTexture* gameTarget = (m_editorLayer != nullptr) ? m_editorLayer->GameViewTarget() : nullptr;
-    RenderTexture* sceneTarget = (m_editorLayer != nullptr) ? m_editorLayer->SceneViewTarget() : nullptr;
-    m_directGameTargetUsedThisFrame = false;
-    if (gameTarget == nullptr && sceneTarget == nullptr) {
-        try {
-            gameTarget = AcquireDirectGameTarget();
-        } catch (const std::exception& e) {
-            const std::string failure = std::string("Core: failed to acquire the direct Game target: ") + e.what();
-            if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
-                GTE_LOG_ERROR("Core", failure);
-            }
-            gameTarget = nullptr;
+    RenderTexture* gameTarget = nullptr;
+    RenderTexture* sceneTarget = nullptr;
+    IFrameDebuggerCaptureRecorder* frameDebuggerCapture = nullptr;
+    {
+        GTE_PROFILE_SCOPE("Render.Prepare");
+        for (const MeshHandle released : m_game.ReleaseUnusedGpuResources(m_renderer)) {
+            ForgetClusterSynthesis(released);
         }
-        m_directGameTargetUsedThisFrame = (gameTarget != nullptr);
-    }
-    m_gameTargetThisFrame = gameTarget;
 
-    IFrameDebuggerCaptureRecorder* frameDebuggerCapture =
-        (m_editorLayer != nullptr) ? m_editorLayer->PrepareFrameDebuggerCaptureContext() : nullptr;
-    m_captureArmedThisFrame = (frameDebuggerCapture != nullptr);
+        m_renderGraph.BeginPersistentResourceFrame();
+
+        m_exposedViewOutputsThisFrame.clear();
+
+        // Query active editor render targets; without any, the Game view renders into an engine-owned target.
+        gameTarget = (m_editorLayer != nullptr) ? m_editorLayer->GameViewTarget() : nullptr;
+        sceneTarget = (m_editorLayer != nullptr) ? m_editorLayer->SceneViewTarget() : nullptr;
+        m_directGameTargetUsedThisFrame = false;
+        if (gameTarget == nullptr && sceneTarget == nullptr) {
+            try {
+                gameTarget = AcquireDirectGameTarget();
+            } catch (const std::exception& e) {
+                const std::string failure = std::string("Core: failed to acquire the direct Game target: ") + e.what();
+                if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
+                    GTE_LOG_ERROR("Core", failure);
+                }
+                gameTarget = nullptr;
+            }
+            m_directGameTargetUsedThisFrame = (gameTarget != nullptr);
+        }
+        m_gameTargetThisFrame = gameTarget;
+
+        frameDebuggerCapture =
+            (m_editorLayer != nullptr) ? m_editorLayer->PrepareFrameDebuggerCaptureContext() : nullptr;
+        m_captureArmedThisFrame = (frameDebuggerCapture != nullptr);
+    }
 
     // Execute offscreen rendering for Game and Scene views.
     if (gameTarget != nullptr || sceneTarget != nullptr) {
         try {
-            GTE_PROFILE_SCOPE("RenderGraph::Execute(Offscreen)");
-            OffscreenRecording recording = m_renderer.BeginOffscreenRecording();
+            GTE_PROFILE_SCOPE("Offscreen");
+            m_timingAdapter.SetGraphLabel("Offscreen");
+            OffscreenRecording recording = [this]() -> OffscreenRecording {
+                GTE_PROFILE_SCOPE("Offscreen.Begin");
+                return m_renderer.BeginOffscreenRecording();
+            }();
             if (FaultFires(FaultKind::OffscreenThrow)) {
                 throw std::runtime_error("injected offscreen fault");
             }
             const rg::RecordingContext offscreenCmd = recording.Context();
             m_renderGraph.Execute(offscreenCmd, rg::ExecuteTimingMode::SynchronousImmediateReadback,
                 [&](rg::RenderGraphBuilder& b) {
-                    m_gpuSkinningRequestsThisFrame = m_game.CollectGpuSkinningDispatchRequests();
-                    m_gpuSkinningHandlesThisFrame.clear();
-                    m_gpuSkinningHandlesThisFrame.reserve(m_gpuSkinningRequestsThisFrame.size());
-                    for (const AnimationSystem::GpuSkinningDispatchRequest& request :
-                        m_gpuSkinningRequestsThisFrame) {
-                        m_gpuSkinningHandlesThisFrame.push_back(b.Import(*request.dispatch.output, request.name));
-                    }
+                    GTE_PROFILE_SCOPE("Offscreen.Declare");
+                    {
+                        GTE_PROFILE_SCOPE("Offscreen.Collect");
+                        m_gpuSkinningRequestsThisFrame = m_game.CollectGpuSkinningDispatchRequests();
+                        m_gpuSkinningHandlesThisFrame.clear();
+                        m_gpuSkinningHandlesThisFrame.reserve(m_gpuSkinningRequestsThisFrame.size());
+                        for (const AnimationSystem::GpuSkinningDispatchRequest& request :
+                            m_gpuSkinningRequestsThisFrame) {
+                            m_gpuSkinningHandlesThisFrame.push_back(b.Import(*request.dispatch.output, request.name));
+                        }
 
+                        // One candidate list for every view of this frame. A failure leaves the list empty (CPU path).
+                        try {
+                            BuildClusterCandidates();
+                        } catch (const std::exception& e) {
+                            m_clusterCandidates.clear();
+                            const std::string failure = std::string("Core: cluster candidate list failed: ") + e.what();
+                            if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
+                                GTE_LOG_ERROR("Core", failure);
+                            }
+                        }
+                    }
                     m_offscreenBlackboardThisFrame.BeginFrame();
                     rg::RenderPassFrameContext frame{
                         {}, rg::RenderViewId::Shared(), m_offscreenBlackboardThisFrame, b, {} };
@@ -1058,16 +1092,6 @@ void Core::BuildFrame()
                     m_currentViewDataThisFrame.clear();
                     m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
 
-                    // One candidate list for every view of this frame. A failure leaves the list empty (CPU path).
-                    try {
-                        BuildClusterCandidates();
-                    } catch (const std::exception& e) {
-                        m_clusterCandidates.clear();
-                        const std::string failure = std::string("Core: cluster candidate list failed: ") + e.what();
-                        if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
-                            GTE_LOG_ERROR("Core", failure);
-                        }
-                    }
                     float gameAspectForReplay = 1.0f;
 
                     // Set up Game View rendering.
@@ -1159,36 +1183,44 @@ void Core::BuildFrame()
                     return outputs;
                 });
 
-            // Finalize textures for external sampling (e.g. editor UI viewport panels). A view output a feature
-            // exposed this frame is finalized too and replaces the raw view in the editor.
-            const rg::ResourceState shaderReadState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
-            const auto finalizeView = [&](RenderTexture& target, const char* viewName, rg::ViewScope scope) {
-                target.FinalizeForExternalSampling(offscreenCmd);
-                m_renderGraph.NotifyDebugTextureStateOverride(viewName, shaderReadState);
+            {
+                GTE_PROFILE_SCOPE("Offscreen.FinalizeViews");
+                // Finalize textures for external sampling (e.g. editor UI viewport panels). A view output a feature
+                // exposed this frame is finalized too and replaces the raw view in the editor.
+                const rg::ResourceState shaderReadState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
+                const auto finalizeView = [&](RenderTexture& target, const char* viewName, rg::ViewScope scope) {
+                    target.FinalizeForExternalSampling(offscreenCmd);
+                    m_renderGraph.NotifyDebugTextureStateOverride(viewName, shaderReadState);
 
-                const ExposedViewOutput* exposed = FindExposedViewOutput(scope);
-                if (exposed == nullptr) {
-                    return static_cast<RenderTexture*>(nullptr);
+                    const ExposedViewOutput* exposed = FindExposedViewOutput(scope);
+                    if (exposed == nullptr) {
+                        return static_cast<RenderTexture*>(nullptr);
+                    }
+                    exposed->texture->FinalizeForExternalSampling(offscreenCmd);
+                    m_renderGraph.NotifyDebugTextureStateOverride(exposed->name, shaderReadState);
+                    return exposed->texture;
+                };
+                if (gameTarget != nullptr) {
+                    RenderTexture* exposed = finalizeView(*gameTarget, "GameView", rg::ViewScope::GameView);
+                    if (m_editorLayer != nullptr) {
+                        m_editorLayer->SetGameViewCompositedTexture(exposed);
+                    }
                 }
-                exposed->texture->FinalizeForExternalSampling(offscreenCmd);
-                m_renderGraph.NotifyDebugTextureStateOverride(exposed->name, shaderReadState);
-                return exposed->texture;
-            };
-            if (gameTarget != nullptr) {
-                RenderTexture* exposed = finalizeView(*gameTarget, "GameView", rg::ViewScope::GameView);
-                if (m_editorLayer != nullptr) {
-                    m_editorLayer->SetGameViewCompositedTexture(exposed);
+                if (sceneTarget != nullptr) {
+                    RenderTexture* exposed = finalizeView(*sceneTarget, "SceneView", rg::ViewScope::SceneView);
+                    if (m_editorLayer != nullptr) {
+                        m_editorLayer->SetSceneViewCompositedTexture(exposed);
+                    }
                 }
             }
-            if (sceneTarget != nullptr) {
-                RenderTexture* exposed = finalizeView(*sceneTarget, "SceneView", rg::ViewScope::SceneView);
-                if (m_editorLayer != nullptr) {
-                    m_editorLayer->SetSceneViewCompositedTexture(exposed);
-                }
+            {
+                GTE_PROFILE_SCOPE("Offscreen.Submit");
+                recording.Submit();
             }
-            recording.Submit();
-
-            m_renderGraph.FinalizeSynchronousGpuTiming();
+            {
+                GTE_PROFILE_SCOPE("Offscreen.Finalize");
+                m_renderGraph.FinalizeSynchronousGpuTiming();
+            }
         } catch (const std::exception& e) {
             // A failure that repeats every frame is logged once per distinct message.
             const std::string failure = std::string("RenderGraph offscreen Execute() failed: ") + e.what();
@@ -1224,11 +1256,13 @@ void Core::Present()
     if (StopIfDeviceLost()) {
         return;
     }
-    GTE_PROFILE_SCOPE("Renderer::PresentViaRenderGraph");
+    GTE_PROFILE_SCOPE("Present");
+    m_timingAdapter.SetGraphLabel("Present");
 
     try {
         static_cast<void>(m_renderer.PresentViaRenderGraph(m_renderGraph,
             [&](rg::RenderGraphBuilder& b, rg::TextureHandle swapchainImage) {
+                GTE_PROFILE_SCOPE("Present.Declare");
                 m_swapchainImageThisFrame = swapchainImage;
                 m_recordImGuiThisFrame = m_presentImGuiRecorder;
 
