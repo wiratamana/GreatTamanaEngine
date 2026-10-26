@@ -2221,6 +2221,11 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Profiling/WorkerRingTests.cpp
     Profiling/FrameChecksTests.cpp
     Profiling/RenderTimingAdapterTests.cpp
+    Profiling/MetricTests.cpp
+    Profiling/LiveBlockTests.cpp
+    Profiling/ProfilerSnapshotBuilderTests.cpp
+    Network/NetworkProfilerRoutesTests.cpp
+    Core/GpuViewMetricsTests.cpp
     Jobs/JobQueueTests.cpp
     Jobs/JobSystemTests.cpp
     Jobs/JobDispatchMathTests.cpp
@@ -3001,12 +3006,14 @@ set(GTE_COMMENT_RULE_SRC
     Network/NetworkRequestGuard.h Network/NetworkRequestGuard.cpp
     Network/NetworkSceneCameraPose.h Network/NetworkSceneCameraPose.cpp Network/NetworkCaptureFailure.h
     Editor/CaptureFailureReason.h Core/FaultInjection.h Core/FaultInjection.cpp
-    Core/RenderTimingAdapter.h Core/RenderTimingAdapter.cpp
+    Core/RenderTimingAdapter.h Core/RenderTimingAdapter.cpp Core/GpuViewMetrics.h Core/GpuViewMetrics.cpp
     Network/NetworkFaultRoutes.h Network/NetworkFaultRoutes.cpp
+    Network/NetworkProfilerRoutes.h Network/NetworkProfilerRoutes.cpp
+    Application/ProfilerSnapshotBridge.h Application/ProfilerSnapshotBridge.cpp
     Profiling/
     Features/SceneLighting/ Features/GpuDrivenScene/)
 set(GTE_COMMENT_RULE_TESTS
-    Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
+    Core/FeatureKit/ Core/GpuViewMetricsTests.cpp Editor/FrameDebuggerSideChannelCheckerTests.cpp
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
     Features/Shadow/ShadowMathTests.cpp Features/Shadow/ShadowClusterLaneTests.cpp Game/SceneDrawPassTests.cpp
     Features/Gtao/GtaoMathTests.cpp Features/Gtao/GtaoParamsTests.cpp Features/Gtao/GtaoShaderNamesTests.cpp
@@ -3047,7 +3054,8 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Editor/EditorCameraTests.cpp Editor/ExitGateTests.cpp Network/NetworkRequestGuardTests.cpp
     Renderer/AbandonedWorkTests.cpp Renderer/CaptureStatusTests.cpp Network/NetworkCaptureFailureTests.cpp
     Renderer/PresentRecoveryPlanTests.cpp Renderer/RenderGraph/OffscreenRecordingFaultTests.cpp Renderer/GpuStampPlanTests.cpp
-    Renderer/GpuWaitServiceTests.cpp Network/NetworkFaultRoutesTests.cpp Renderer/GpuFrameRingTests.cpp Profiling/)
+    Renderer/GpuWaitServiceTests.cpp Network/NetworkFaultRoutesTests.cpp Renderer/GpuFrameRingTests.cpp Profiling/
+    Network/NetworkProfilerRoutesTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

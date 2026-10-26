@@ -224,13 +224,31 @@ void BuildGpuMemorySection(std::span<const Profiling::FrameGraphPoint> windowed,
         static_cast<float>(range.minBytes), static_cast<float>(range.maxBytes), ImVec2(0.0f, 60.0f));
 }
 
-void BuildGpuTimingSection()
+void BuildGpuTimingSection(const Profiling::GpuFrameMetrics& gpu)
 {
     ImGui::SeparatorText("GPU Timing");
 
-    // No GPU timing source feeds the profiler yet, so every row states that.
-    for (const char* label : { "Game View", "Scene View", "Present" }) {
-        ImGui::Text("%s: %s", label, FormatGpuTimingLine(Profiling::SampleStatus::Absent, 0.0).c_str());
+    // Labels live here; the profiler module only knows primary and secondary.
+    struct Row {
+        const char* label;
+        const Profiling::GpuViewMetric* metric;
+    };
+    const Row rows[] = {
+        { "Game View", &gpu.views[static_cast<std::size_t>(Profiling::ViewSlot::Primary)] },
+        { "Scene View", &gpu.views[static_cast<std::size_t>(Profiling::ViewSlot::Secondary)] },
+        { "Shared passes", &gpu.views[static_cast<std::size_t>(Profiling::ViewSlot::Shared)] },
+        { "Frame span", &gpu.span },
+    };
+    for (const Row& row : rows) {
+        ImGui::Text("%s: %s", row.label, FormatGpuMetric(*row.metric).c_str());
+    }
+
+    const std::uint32_t primaryIndirect = gpu.indirectDraws[static_cast<std::size_t>(Profiling::ViewSlot::Primary)];
+    const std::uint32_t secondaryIndirect = gpu.indirectDraws[static_cast<std::size_t>(Profiling::ViewSlot::Secondary)];
+    ImGui::TextDisabled("Indirect draws: Game %u, Scene %u", primaryIndirect, secondaryIndirect);
+    ImGui::TextDisabled("%s", FormatGpuCoverage(gpu).c_str());
+    if (gpu.droppedFrames != 0) {
+        ImGui::TextDisabled("GPU frames dropped: %u", gpu.droppedFrames);
     }
 }
 
@@ -272,7 +290,7 @@ void ProfilerPanel::Build(EditorContext& /*ctx*/)
         BuildCpuTreeTable(*view);
     }
     BuildGpuMemorySection(windowed, view->summary, m_memoryGraphScratch);
-    BuildGpuTimingSection();
+    BuildGpuTimingSection(view->summary.gpu);
 
     ImGui::End();
 }

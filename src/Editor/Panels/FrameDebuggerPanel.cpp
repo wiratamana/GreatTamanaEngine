@@ -700,6 +700,13 @@ void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebug
                     }
                 }
             }
+            if (!d.gpuTimingText.empty()) {
+                ImGui::SeparatorText("GPU");
+                BuildPropertyRow("GPU Time", d.gpuTimingText);
+                if (d.indirectDraws != 0) {
+                    BuildPropertyRow("Indirect Draws", std::to_string(d.indirectDraws));
+                }
+            }
             if (!d.vectors.empty()) {
                 ImGui::SeparatorText("Vectors");
                 for (const FrameDebuggerVectorProperty& vector : d.vectors) {

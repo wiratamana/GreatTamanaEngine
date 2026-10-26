@@ -76,11 +76,35 @@ snapshot just before `EndFrame()`. Follow these rules when you touch profiling o
     A frame that was never submitted, or left the slot ring, is counted in `dropped_gpu_frames`.
   - A graph made with `TimingMode::Disabled` (one-shot and cluster viewer graphs) writes no stamps; its records read
     `Inactive`. Capture off reads `Absent`.
-- The profiler panel's own GPU rows still read "not measured" until they take these records.
+- Per-view GPU numbers live in `FrameSummary::gpu` (`GpuFrameMetrics`), indexed by `ViewSlot`:
+  - `Core::PublishGpuMetrics()` sums barrier and work time of the newest synchronous snapshot's records per view
+    (`BuildGpuFrameMetrics()` in `Core/GpuViewMetrics.h`, the one mapper from `GpuReadState` and `rg::ViewScope`).
+  - A view is `Present` only when every record of it was measured and none was folded; a mix is `Partial`. A view
+    without a render target is `Inactive`. Capture off reads `Absent`.
+  - `indirectDraws` is its own count per view and is never shown as triangles. `declaredPasses`, `executedPasses`,
+    `recordedPasses` and `disabledByToggle` feed the coverage text "executed E of declared D, recorded R, disabled by
+    toggle K". A pass toggled off is never declared, so it is absent from the tables.
+  - The panels print every GPU number through `FormatGpuMetric()`. The Frame Debugger reads the selected pass's own
+    record, never a pass found by name.
 - `Application/MemorySnapshotBuilder.h` turns `Renderer::GetMemoryTotals()` into a `Profiling::MemorySnapshot`.
   It is always `Present`.
 - `Renderer/DrawStats.h` counts draw calls and triangles inside the `FrameRecorder` record loop, on the same path that
   issues the draw. Triangle counts assume triangle lists and one instance per draw.
+
+## Metrics and HTTP
+
+- A `Profiling::Metric` is `{value, unit, kind, status, ageFrames, reason}`. `FormatMetric()` prints it: a value for
+  `Present`, a value plus the reason for `Partial` and `Stale`, only the status word otherwise. A missing value is never
+  printed as a number.
+- `BuildProfilerSnapshot()` copies the newest finished frame into a plain `ProfilerSnapshot` (CPU numbers, scope rows,
+  per-view GPU metrics, coverage counts, checks, drops, device state, 120 frame rows). The main thread builds it only
+  while a reader asked in the last 2 s, and publishes it through `ProfilerSnapshotBridge`.
+- Waits in progress are not part of the published copy. `LiveBlockTable` keeps one record per thread (8 threads, one
+  seqlock slot each, microseconds); readers fetch it at request time. Waits report from any thread through the timing
+  observer.
+- `GET /profiler`, `/profiler/frames` and `/profiler/spikes` read only the snapshot and the live table, so they answer while
+  the main thread is blocked. `snapshot_age` tells how old the copy is. `POST /profiler/set` switches capture and the display
+  pause. See [Networking](networking.md).
 
 ## Reading the data
 

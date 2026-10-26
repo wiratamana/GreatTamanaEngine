@@ -38,6 +38,7 @@
 #include "../Encoding/SingleChannelVisualization.h"
 #include "../Memory/SdlMemoryTracker.h"
 #include "../Profiling/FrameProfiler.h"
+#include "../Profiling/ProfilerSnapshotBuilder.h"
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
@@ -409,7 +410,7 @@ EditorHost::EditorHost(const std::string& title, int width, int height, bool for
     , m_networkServer(&m_captureBridge, &m_commandBridge, &m_uiCommandBridge, &m_frameDebuggerCommandBridge,
           &m_assetImportCommandBridge, &s_editorLogQueryCapability, &m_renderGraphControlCommandBridge,
           &s_editorHotReloadDebugCapability, &s_editorProjectLifecycleCapability, &s_editorProjectLifecycleCapability,
-          &m_featureDebugCommandBridge)
+          &m_featureDebugCommandBridge, &m_profilerBridge)
 {
     m_renderer.LogValidationState();
 
@@ -1171,6 +1172,15 @@ int EditorHost::Run()
         Profiling::FrameProfiler::Instance().SetMemorySnapshot(BuildMemorySnapshot(m_renderer.GetMemoryTotals()));
 
         Profiling::FrameProfiler::Instance().EndFrame();
+
+        // Built only while a GET /profiler reader asked in the last 2 s.
+        if (m_profilerBridge.WantsSnapshot()) {
+            Profiling::SnapshotInputs profilerInputs;
+            profilerInputs.deviceLost = m_renderer.DeviceLost();
+            profilerInputs.consecutiveFrameTimeouts = m_renderer.GpuWaitConsecutiveFrameTimeouts();
+            profilerInputs.abandonedObjects = m_renderer.AbandonedObjectCount();
+            m_profilerBridge.Publish(Profiling::BuildProfilerSnapshot(Profiling::FrameProfiler::Instance(), profilerInputs));
+        }
     }
 
     return 0;

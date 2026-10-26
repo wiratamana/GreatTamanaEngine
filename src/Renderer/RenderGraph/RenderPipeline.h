@@ -225,9 +225,13 @@ public:
     // Called once per graph-build callback: runs the BeforeDeferredPasses phase, then AfterDeferredPasses.
     void DeclareInto(RenderGraphBuilder& builder, RenderPassFrameContext& frame)
     {
+        m_disabledByToggle = 0;
         DeclareOnePhase(builder, frame, ProviderTiming::BeforeDeferredPasses);
         DeclareOnePhase(builder, frame, ProviderTiming::AfterDeferredPasses);
     }
+
+    // Pass descriptions the last DeclareInto() skipped because their toggle was off.
+    std::uint32_t DisabledByToggleLastFrame() const noexcept { return m_disabledByToggle; }
 
 private:
     struct Entry {
@@ -268,6 +272,7 @@ private:
             // The one choke point where a disabled pass is skipped, as if never declared.
             if (m_passToggleRegistry != nullptr && desc.debugName != nullptr
                 && !m_passToggleRegistry->IsEnabled(desc.debugName)) {
+                ++m_disabledByToggle;
                 continue;
             }
             // Opens a feature scope around each desc from the name captured by the provider.
@@ -281,6 +286,7 @@ private:
     std::function<ViewScope(RenderViewId)> m_legacyViewScopeTranslator;
     RenderPassToggleRegistry* m_passToggleRegistry = nullptr;
     IRenderTimingObserver* m_timingObserver = nullptr;
+    std::uint32_t m_disabledByToggle = 0;
 
     // Cleared, not reconstructed, each DeclareInto() so its capacity survives across frames.
     std::vector<RenderPassDesc> m_scratchCollected;

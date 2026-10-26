@@ -419,6 +419,27 @@ module or adding a new endpoint:
   refused with `403` when the request looks like it came from a web page (browser guard); listing is not. It answers
   while the main thread is stalled because it
   only touches atomics. The route exists only when the engine is built with `GTE_ENABLE_NETWORK`.
+- **Profiler routes** read the latest profiler snapshot and never wait for the main thread longer than 0.5 s, so they answer
+  while the main thread is blocked. Every number sits inside a metric object
+  `{"value","unit","kind","status","age_frames","reason"}`; `value` is `null` unless the status is `Present`, `Partial` or
+  `Stale`. Statuses: `Present`, `Partial`, `Stale`, `Absent`, `Unsupported`, `Error`, `Inactive`. The only plain numbers are
+  `schema_version`, `frame_index` and `thread_slot`. The snapshot is built only after a request asked for it in the last 2 s,
+  so the first answer after a pause may take one frame. `503` before the first snapshot and when the bridge is missing. With
+  `GTE_ENABLE_PROFILER=OFF` every route answers `{"success":true,"schema_version":1,"state":"compiled_out"}`.
+  - **`GET /profiler`**: `success`, `schema_version`, `frame_index`, `state`, `has_frame`, `snapshot_age`, `capture`,
+    `display_paused`, `cpu_frame`, `untracked`, `blocked{gpu,workers,other}`,
+    `gpu{views{shared,primary,secondary},span,indirect_draws{...},coverage{declared,executed,recorded,disabled_by_toggle}}`,
+    `memory{total}`, `scopes[{name,total,self,calls}]` (top-level scopes, largest first), `scope_rows_dropped`,
+    `checks[{id,status,count,text}]`, `drops{late_scopes,foreign_scopes,lost_worker_events,dropped_scopes,dropped_gpu_frames}`,
+    `device_state{device_lost,consecutive_frame_timeouts,abandoned_objects}`, `live_block[{thread_slot,site,detail,elapsed}]`
+    (waits in progress now), `verdict{text}`, `spikes_available`. A view without a target reads `Inactive`; capture off reads
+    `Absent` with reason `capture_off`.
+  - **`GET /profiler/frames[?count=N]`**: the newest `N` frames (default 30, clamped to 1..120), oldest first, each
+    `{frame_index,cpu,gpu_span,gpu_primary,gpu_secondary}`. A count that is not a whole number is a `400`.
+  - **`GET /profiler/spikes`**: `spikes_available` and `spikes[{frame_index,cpu,classification}]`.
+  - **`POST /profiler/set`** with `capture` and/or `display_pause` as query values (`true`, `false`, `1`, `0`) or a JSON body
+    `{"capture":bool,"display_pause":bool}`. Reply `{"success":true,"capture":bool,"display_paused":bool}`. It passes the
+    browser guard. Neither value given is a `400`.
 
 
 - **`POST /instantiate_asset`** (`task_manager/stl-parser-2` campaign,

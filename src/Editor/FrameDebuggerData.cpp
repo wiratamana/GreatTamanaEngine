@@ -1,5 +1,7 @@
 #include "FrameDebuggerData.h"
 
+#include "../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
@@ -203,23 +205,13 @@ const rg::RenderGraphPassSnapshot* FindPassByName(
     return nullptr;
 }
 
-// render-pass-3 campaign, PHASE4 - REPLACES the old literal
-// FindPassByName(..., "RenderOpaque") pivot search with a structural,
-// name-free lookup: the first pass, in true execution order, whose
-// rg::RenderPassEvent sort hint is >= RenderPassEvent::Opaques (see
-// RenderGraphTypes.h's own doc comment on that enum - "a principled way
-// to answer 'where does the view region start' ... instead of searching
-// for a specific pass by name"). Deliberately does NOT filter by
-// isCulled/kind/viewScope/category here - this mirrors the OLD
-// FindPassByName() call's own behavior exactly (it never filtered on
-// those either), preserving this function's existing "return nullptr,
-// treated as 'no frame captured yet'" behavior for the one genuinely
-// reachable failure case (an empty/degenerate graph snapshot).
+// The first pass of the Game view region, in execution order, whose event is Opaques or later. Matched by event
+// and view, never by pass name; a Scene view pass never becomes the pivot.
 const rg::RenderGraphPassSnapshot* FindViewRegionPivot(
     const std::vector<rg::RenderGraphPassSnapshot>& passesInExecutionOrder)
 {
     for (const rg::RenderGraphPassSnapshot& pass : passesInExecutionOrder) {
-        if (pass.renderPassEvent >= rg::RenderPassEvent::Opaques) {
+        if (pass.renderPassEvent >= rg::RenderPassEvent::Opaques && pass.viewScope != rg::ViewScope::SceneView) {
             return &pass;
         }
     }
@@ -451,6 +443,7 @@ FrameDebuggerEventNode BuildComputeDispatchLeaf(
         timing.x = gpu.barrierMs + gpu.workMs;
         details.vectors.push_back(timing);
     }
+    details.gpuTimingText = rg::FormatGpuTiming(gpu);
 
     // No matrices: a compute dispatch uses no camera matrix.
 
@@ -525,6 +518,9 @@ FrameDebuggerEventNode BuildRenderOpaqueLeaf(
         drawStats.x = static_cast<float>(renderOpaquePass.stats.drawStats.drawCallCount);
         drawStats.y = static_cast<float>(renderOpaquePass.stats.drawStats.triangleCount);
         details.vectors.push_back(drawStats);
+
+        details.gpuTimingText = rg::FormatGpuTiming(renderOpaquePass.stats.gpu);
+        details.indirectDraws = renderOpaquePass.stats.gpu.indirectDraws;
     }
 
     // matrices - the real view-projection matrix this pass actually
@@ -697,6 +693,8 @@ FrameDebuggerEventNode BuildGraphicsPassLeaf(
     drawStats.x = static_cast<float>(pass.stats.drawStats.drawCallCount);
     drawStats.y = static_cast<float>(pass.stats.drawStats.triangleCount);
     details.vectors.push_back(drawStats);
+    details.gpuTimingText = rg::FormatGpuTiming(pass.stats.gpu);
+    details.indirectDraws = pass.stats.gpu.indirectDraws;
 
     leaf.details = std::move(details);
     return leaf;

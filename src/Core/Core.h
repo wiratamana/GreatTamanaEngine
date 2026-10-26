@@ -284,6 +284,12 @@ private:
     // Detached from the renderer and the graphs in ~Core, before any member is destroyed.
     RenderTimingAdapter m_timingAdapter;
 
+    // Reused every frame to gather the executed passes' GPU records.
+    std::vector<GpuPassRecord> m_gpuRecordScratch;
+
+    // Publishes the per-view GPU numbers of the newest synchronous snapshot to the profiler.
+    void PublishGpuMetrics(bool primaryActive, bool secondaryActive);
+
     std::vector<ExposedViewOutput> m_exposedViewOutputsThisFrame; // Cleared at the start of each BuildFrame().
 
     // Offscreen blackboard kept alive across the frame for debugger inspection.

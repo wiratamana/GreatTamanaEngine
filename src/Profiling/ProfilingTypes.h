@@ -25,6 +25,25 @@ struct MemorySnapshot {
     std::uint64_t textureCount = 0;
 };
 
+// One GPU time with its status. `milliseconds` means something only when the status is Present.
+struct GpuViewMetric {
+    float milliseconds = 0.0f;
+    SampleStatus status = SampleStatus::Absent;
+    std::uint32_t foldedPasses = 0; // passes merged into an overflow record and not timed one by one
+};
+
+// GPU numbers of the newest frame whose timestamps were read back. Views are indexed by ViewSlot.
+struct GpuFrameMetrics {
+    GpuViewMetric views[kViewSlotCount]{};
+    GpuViewMetric span{};                           // first pass start to the final stamp
+    std::uint32_t indirectDraws[kViewSlotCount]{};  // indirect draws are never counted as triangles
+    std::uint32_t declaredPasses = 0;               // executed plus culled
+    std::uint32_t executedPasses = 0;
+    std::uint32_t recordedPasses = 0;               // GPU records the frame carried
+    std::uint32_t disabledByToggle = 0;             // never declared because a toggle switched them off
+    std::uint32_t droppedFrames = 0;                // frames whose GPU data was lost since start
+};
+
 // One finished frame, small enough to keep hundreds of them.
 struct FrameSummary {
     std::uint64_t frameIndex = 0;
@@ -32,6 +51,7 @@ struct FrameSummary {
     std::uint64_t endTicks = 0;
     double cpuMilliseconds = 0.0;
     MemorySnapshot memory{};
+    GpuFrameMetrics gpu{};
 
     std::uint32_t lateScopes = 0;    // scopes that ended after their frame closed
     std::uint32_t foreignScopes = 0; // scopes finished off the main thread and dropped

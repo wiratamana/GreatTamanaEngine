@@ -4,6 +4,7 @@
 #include "../Profiling/FrameGraphData.h"
 #include "../Profiling/ProfilingTypes.h"
 #include "../Profiling/ScopeEvent.h"
+#include "../Renderer/RenderGraph/RenderGraphMetadata.h"
 
 #include <cstdint>
 #include <string>
@@ -67,6 +68,22 @@ std::string FormatCount(std::uint64_t value);
 
 // GPU timing text. Only a Present status shows a number; every other status shows its own word.
 std::string FormatGpuTimingLine(Profiling::SampleStatus status, double milliseconds);
+
+// One GPU number as text: "2.35 ms", "1.20 ms partial (9 passes folded)" or the status word. Every GPU number
+// the panel prints goes through this. Never "N/A", and a status other than Present or Partial never shows a number.
+std::string FormatGpuMetric(const Profiling::GpuViewMetric& metric);
+
+// "executed 20 of declared 24, recorded 20, disabled by toggle 3"
+std::string FormatGpuCoverage(const Profiling::GpuFrameMetrics& gpu);
+
+// GPU time of one render graph regime's executed passes, summed per view. A view that had no executed pass is
+// Inactive. A view is Present only when every one of its passes was measured and none was folded.
+struct RegimeGpuByView {
+    Profiling::GpuViewMetric game;
+    Profiling::GpuViewMetric scene;
+    Profiling::GpuViewMetric shared;
+};
+RegimeGpuByView SumRegimeGpuByView(const std::vector<rg::RenderGraphPassMetadata>& passes);
 
 // True when GTE_ENABLE_PROFILER was on for this build.
 inline constexpr bool kCpuScopeInstrumentationCompiledIn =

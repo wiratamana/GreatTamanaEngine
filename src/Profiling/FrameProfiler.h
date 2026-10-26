@@ -1,5 +1,6 @@
 #pragma once
 
+#include "LiveBlockTable.h"
 #include "ProfilingTypes.h"
 #include "ScopeLog.h"
 #include "WorkerRing.h"
@@ -29,6 +30,10 @@ public:
     ProfilerControl& Control() noexcept { return m_control; }
     const ProfilerControl& Control() const noexcept { return m_control; }
 
+    // Waits in progress on every thread. Safe to use from any thread.
+    LiveBlockTable& LiveBlocks() noexcept { return m_liveBlocks; }
+    const LiveBlockTable& LiveBlocks() const noexcept { return m_liveBlocks; }
+
     // Turning capture off also stops worker threads from pushing events.
     void SetCaptureEnabled(bool enabled) noexcept;
     bool IsCaptureEnabled() const noexcept { return m_control.capture.load(std::memory_order_relaxed); }
@@ -53,6 +58,9 @@ public:
     // Memory snapshot of the open frame.
     void SetMemorySnapshot(const MemorySnapshot& snapshot) noexcept;
 
+    // GPU numbers of the open frame. A frame that never sets them keeps every GPU number Absent.
+    void SetGpuMetrics(const GpuFrameMetrics& metrics) noexcept;
+
     // Frames closed so far.
     std::uint64_t CompletedFrameCount() const noexcept { return m_frameIndex; }
 
@@ -70,10 +78,12 @@ private:
     FrameProfiler() = default;
 
     ProfilerControl m_control;
+    LiveBlockTable m_liveBlocks;
     bool m_frameInProgress = false;
     std::uint64_t m_frameIndex = 0;
     std::uint64_t m_frameStartTicks = 0;
     MemorySnapshot m_openMemory{};
+    GpuFrameMetrics m_openGpu{};
 
     ScopeLog m_log;
     WorkerRing m_ring;

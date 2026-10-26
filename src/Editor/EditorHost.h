@@ -25,6 +25,7 @@
 #include "../Application/RenderGraphControlCommandBridge.h"
 #include "../Application/ProjectAssemblyHotReloadCommandBridge.h"
 #include "../Application/ProjectLifecycleLoadCommandBridge.h"
+#include "../Application/ProfilerSnapshotBridge.h"
 #include "FrameDebuggerPassMetadataRecorder.h"
 
 namespace gte {
@@ -92,6 +93,8 @@ private:
     RenderGraphControlCommandBridge m_renderGraphControlCommandBridge;
     // Backs the GET /feature_debug/* routes.
     FeatureDebugCommandBridge m_featureDebugCommandBridge;
+    // Backs the GET /profiler routes.
+    ProfilerSnapshotBridge m_profilerBridge;
     // Cross-thread hand-off for project assembly hot reload; not passed to NetworkServer's constructor.
     ProjectAssemblyHotReloadCommandBridge m_hotReloadCommandBridge;
 

@@ -3,6 +3,9 @@
 #include "Editor/ProfilerPanelData.h"
 
 #include "Profiling/NameTable.h"
+#include "Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
+
+#include <optional>
 
 #include <gtest/gtest.h>
 
@@ -107,12 +110,108 @@ TEST(ProfilerPanelDataTest, GpuTimingLineShowsANumberOnlyForPresent)
 {
     using Profiling::SampleStatus;
     EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Present, 3.5), "3.50 ms");
-    EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Absent, 42.0), "not measured");
+    EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Absent, 42.0), "absent");
     EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Unsupported, 42.0), "unsupported");
     EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Partial, 42.0), "partial");
     EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Error, 42.0), "error");
     EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Inactive, 42.0), "inactive");
     EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Stale, 42.0), "stale");
+}
+
+TEST(ProfilerPanelDataTest, GpuMetricNeverPrintsNotAvailableOrAFakeNumber)
+{
+    using Profiling::GpuViewMetric;
+    using Profiling::SampleStatus;
+    const SampleStatus all[] = { SampleStatus::Present, SampleStatus::Stale, SampleStatus::Absent,
+        SampleStatus::Unsupported, SampleStatus::Partial, SampleStatus::Error, SampleStatus::Inactive };
+    for (const SampleStatus status : all) {
+        GpuViewMetric metric;
+        metric.status = status;
+        metric.milliseconds = 0.0f;
+        const std::string text = FormatGpuMetric(metric);
+        EXPECT_EQ(text.find("N/A"), std::string::npos) << text;
+        if (status != SampleStatus::Present) {
+            EXPECT_EQ(text.find("0.00"), std::string::npos) << text;
+        }
+    }
+}
+
+TEST(ProfilerPanelDataTest, GpuMetricInactiveAndAbsentIgnoreTheirValue)
+{
+    Profiling::GpuViewMetric metric;
+    metric.milliseconds = 7.0f;
+    metric.status = Profiling::SampleStatus::Inactive;
+    EXPECT_EQ(FormatGpuMetric(metric), "inactive");
+    metric.status = Profiling::SampleStatus::Absent;
+    EXPECT_EQ(FormatGpuMetric(metric), "absent");
+}
+
+TEST(ProfilerPanelDataTest, GpuMetricPartialSaysWhyItIsPartial)
+{
+    Profiling::GpuViewMetric metric;
+    metric.status = Profiling::SampleStatus::Partial;
+    metric.milliseconds = 1.5f;
+    metric.foldedPasses = 9;
+    EXPECT_EQ(FormatGpuMetric(metric), "1.50 ms partial (9 passes folded)");
+    metric.foldedPasses = 0;
+    EXPECT_EQ(FormatGpuMetric(metric), "1.50 ms partial (some passes not measured)");
+}
+
+TEST(ProfilerPanelDataTest, GpuCoverageTextNamesEveryCount)
+{
+    Profiling::GpuFrameMetrics gpu;
+    gpu.executedPasses = 20;
+    gpu.declaredPasses = 24;
+    gpu.recordedPasses = 18;
+    gpu.disabledByToggle = 3;
+    EXPECT_EQ(FormatGpuCoverage(gpu), "executed 20 of declared 24, recorded 18, disabled by toggle 3");
+}
+
+rg::RenderGraphPassMetadata MakeTimedPass(rg::ViewScope view, std::optional<double> milliseconds, const char* status)
+{
+    rg::RenderGraphPassMetadata pass;
+    pass.viewScope = rg::ToString(view);
+    pass.gpuTimingMilliseconds = milliseconds;
+    pass.gpuTimingStatus = status;
+    return pass;
+}
+
+TEST(ProfilerPanelDataTest, RegimeGpuIsSummedPerViewAndNeverAcrossViews)
+{
+    std::vector<rg::RenderGraphPassMetadata> passes;
+    passes.push_back(MakeTimedPass(rg::ViewScope::GameView, 1.0, "Present"));
+    passes.push_back(MakeTimedPass(rg::ViewScope::GameView, 0.5, "Present"));
+    passes.push_back(MakeTimedPass(rg::ViewScope::SceneView, 4.0, "Present"));
+
+    const RegimeGpuByView byView = SumRegimeGpuByView(passes);
+    EXPECT_EQ(byView.game.status, Profiling::SampleStatus::Present);
+    EXPECT_NEAR(byView.game.milliseconds, 1.5f, 1e-4f);
+    EXPECT_EQ(byView.scene.status, Profiling::SampleStatus::Present);
+    EXPECT_NEAR(byView.scene.milliseconds, 4.0f, 1e-4f);
+    EXPECT_EQ(byView.shared.status, Profiling::SampleStatus::Inactive);
+}
+
+TEST(ProfilerPanelDataTest, RegimeGpuViewWithoutPassesIsInactiveAndUnmeasuredIsNotZero)
+{
+    std::vector<rg::RenderGraphPassMetadata> passes;
+    passes.push_back(MakeTimedPass(rg::ViewScope::GameView, std::nullopt, "Absent"));
+    rg::RenderGraphPassMetadata culled = MakeTimedPass(rg::ViewScope::SceneView, 9.0, "Present");
+    culled.isCulled = true;
+    passes.push_back(culled);
+
+    const RegimeGpuByView byView = SumRegimeGpuByView(passes);
+    EXPECT_EQ(byView.game.status, Profiling::SampleStatus::Absent);
+    EXPECT_EQ(byView.scene.status, Profiling::SampleStatus::Inactive);
+    EXPECT_EQ(FormatGpuMetric(byView.scene).find("N/A"), std::string::npos);
+}
+
+TEST(ProfilerPanelDataTest, RegimeGpuFoldedPassesMakeAViewPartial)
+{
+    rg::RenderGraphPassMetadata bucket = MakeTimedPass(rg::ViewScope::GameView, 2.0, "Present");
+    bucket.gpuFoldedPasses = 5;
+    const RegimeGpuByView byView = SumRegimeGpuByView({ bucket });
+    EXPECT_EQ(byView.game.status, Profiling::SampleStatus::Partial);
+    EXPECT_EQ(byView.game.foldedPasses, 5u);
 }
 
 TEST(ProfilerPanelDataTest, CpuScopeTableEmptyMessageMatchesCompileTimeFlag)

@@ -5,6 +5,7 @@
 
 #include "../Application/RenderPasses.h"
 #include "../Profiling/FrameProfiler.h"
+#include "GpuViewMetrics.h"
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/Culling/ClusterCullMath.h"
@@ -1220,6 +1221,7 @@ void Core::BuildFrame()
             {
                 GTE_PROFILE_SCOPE("Offscreen.Finalize");
                 m_renderGraph.FinalizeSynchronousGpuTiming();
+                PublishGpuMetrics(gameTarget != nullptr, sceneTarget != nullptr);
             }
         } catch (const std::exception& e) {
             // A failure that repeats every frame is logged once per distinct message.
@@ -1236,7 +1238,34 @@ void Core::BuildFrame()
             }
             m_directGameTargetUsedThisFrame = false;
         }
+    } else {
+        PublishGpuMetrics(false, false);
     }
+}
+
+void Core::PublishGpuMetrics(bool primaryActive, bool secondaryActive)
+{
+    const rg::RenderGraphSnapshot& snapshot = m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback);
+
+    m_gpuRecordScratch.clear();
+    std::uint32_t executed = 0;
+    for (const rg::RenderGraphPassSnapshot& pass : snapshot.passesInExecutionOrder) {
+        if (!pass.isCulled) {
+            ++executed;
+            m_gpuRecordScratch.push_back(pass.stats.gpu);
+        }
+    }
+
+    GpuMetricsInput input;
+    input.captureEnabled = Profiling::FrameProfiler::Instance().IsCaptureEnabled();
+    input.viewActive[static_cast<std::size_t>(Profiling::ViewSlot::Primary)] = primaryActive;
+    input.viewActive[static_cast<std::size_t>(Profiling::ViewSlot::Secondary)] = secondaryActive;
+    input.declaredPasses = static_cast<std::uint32_t>(snapshot.passesInExecutionOrder.size());
+    input.executedPasses = executed;
+    input.disabledByToggle = m_offscreenRenderPipeline.DisabledByToggleLastFrame();
+    input.droppedFrames = snapshot.droppedGpuFrames;
+
+    Profiling::FrameProfiler::Instance().SetGpuMetrics(BuildGpuFrameMetrics(m_gpuRecordScratch, snapshot.gpuReport, input));
 }
 
 bool Core::StopIfDeviceLost()

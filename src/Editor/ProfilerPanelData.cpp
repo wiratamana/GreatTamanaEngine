@@ -1,6 +1,7 @@
 #include "ProfilerPanelData.h"
 
 #include "../Profiling/NameTable.h"
+#include "../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
 #include "../Profiling/ProfilingClock.h"
 #include "../Profiling/ScopeTree.h"
 
@@ -192,7 +193,111 @@ std::string FormatGpuTimingLine(Profiling::SampleStatus status, double milliseco
     case Profiling::SampleStatus::Absent:
         break;
     }
-    return "not measured";
+    return "absent";
+}
+
+std::string FormatGpuMetric(const Profiling::GpuViewMetric& metric)
+{
+    if (metric.status != Profiling::SampleStatus::Partial) {
+        return FormatGpuTimingLine(metric.status, metric.milliseconds);
+    }
+
+    // A partial value is what was measured; it is a lower bound, so it always says so.
+    char buffer[96];
+    if (metric.foldedPasses != 0) {
+        std::snprintf(buffer, sizeof(buffer), "%.2f ms partial (%u passes folded)",
+            static_cast<double>(metric.milliseconds), metric.foldedPasses);
+    } else if (metric.milliseconds > 0.0f) {
+        std::snprintf(buffer, sizeof(buffer), "%.2f ms partial (some passes not measured)",
+            static_cast<double>(metric.milliseconds));
+    } else {
+        return "partial";
+    }
+    return std::string(buffer);
+}
+
+std::string FormatGpuCoverage(const Profiling::GpuFrameMetrics& gpu)
+{
+    char buffer[128];
+    std::snprintf(buffer, sizeof(buffer), "executed %u of declared %u, recorded %u, disabled by toggle %u",
+        gpu.executedPasses, gpu.declaredPasses, gpu.recordedPasses, gpu.disabledByToggle);
+    return std::string(buffer);
+}
+
+namespace {
+
+struct ViewSum {
+    double milliseconds = 0.0;
+    std::uint32_t passes = 0;
+    std::uint32_t measured = 0;
+    std::uint32_t folded = 0;
+    std::uint32_t errors = 0;
+    std::uint32_t unsupported = 0;
+    std::uint32_t inactive = 0;
+};
+
+Profiling::GpuViewMetric ToMetric(const ViewSum& sum)
+{
+    using Profiling::SampleStatus;
+    Profiling::GpuViewMetric metric;
+    if (sum.passes == 0) {
+        metric.status = SampleStatus::Inactive;
+        return metric;
+    }
+
+    metric.foldedPasses = sum.folded;
+    if (sum.measured == sum.passes && sum.folded == 0) {
+        metric.status = SampleStatus::Present;
+    } else if (sum.measured != 0) {
+        metric.status = SampleStatus::Partial;
+    } else if (sum.errors == sum.passes) {
+        metric.status = SampleStatus::Error;
+    } else if (sum.unsupported == sum.passes) {
+        metric.status = SampleStatus::Unsupported;
+    } else if (sum.inactive == sum.passes) {
+        metric.status = SampleStatus::Inactive;
+    } else {
+        metric.status = SampleStatus::Absent;
+    }
+    if (metric.status == SampleStatus::Present || metric.status == SampleStatus::Partial) {
+        metric.milliseconds = static_cast<float>(sum.milliseconds);
+    }
+    return metric;
+}
+
+} // namespace
+
+RegimeGpuByView SumRegimeGpuByView(const std::vector<rg::RenderGraphPassMetadata>& passes)
+{
+    ViewSum game;
+    ViewSum scene;
+    ViewSum shared;
+    for (const rg::RenderGraphPassMetadata& pass : passes) {
+        if (pass.isCulled) {
+            continue;
+        }
+        ViewSum& sum = pass.viewScope == rg::ToString(rg::ViewScope::GameView)    ? game
+            : pass.viewScope == rg::ToString(rg::ViewScope::SceneView) ? scene
+                                                                         : shared;
+        ++sum.passes;
+        sum.folded += pass.gpuFoldedPasses;
+        if (pass.gpuTimingMilliseconds.has_value()) {
+            ++sum.measured;
+            sum.milliseconds += *pass.gpuTimingMilliseconds;
+        } else if (pass.gpuTimingStatus == rg::ToString(GpuReadState::Error)) {
+            ++sum.errors;
+        } else if (pass.gpuTimingStatus == rg::ToString(GpuReadState::Unsupported)) {
+            ++sum.unsupported;
+        } else if (pass.gpuTimingStatus == rg::ToString(GpuReadState::Inactive)) {
+            ++sum.inactive;
+        }
+    }
+
+    RegimeGpuByView result;
+    result.game = ToMetric(game);
+    result.scene = ToMetric(scene);
+    result.shared = ToMetric(shared);
+    return result;
 }
 
 const char* CpuScopeTableEmptyMessage()

@@ -76,12 +76,15 @@ void RenderTimingAdapter::CloseScope() noexcept
 
 void RenderTimingAdapter::OnBlockBegin(BlockSite site, const char* detail) noexcept
 {
+    // Every thread publishes its wait; only the main thread also records a scope.
+    Profiling::FrameProfiler::Instance().LiveBlocks().Begin(ToString(site), detail, Profiling::NowMicroseconds());
     std::array<char, 96> text{};
     OpenScope(FormatWaitName(text, site, detail), Profiling::ScopeKind::Blocked);
 }
 
 void RenderTimingAdapter::OnBlockEnd(BlockSite, BlockOutcome) noexcept
 {
+    Profiling::FrameProfiler::Instance().LiveBlocks().End();
     CloseScope();
 }
 

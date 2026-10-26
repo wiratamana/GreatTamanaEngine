@@ -19,6 +19,7 @@ class IHotReloadDebugCapability;
 class IProjectLifecycleCapability;
 class IAssetScaffoldingCapability;
 class FeatureDebugCommandBridge;
+class ProfilerSnapshotBridge;
 } // namespace gte
 
 namespace gte::Network {
@@ -41,7 +42,8 @@ public:
         IHotReloadDebugCapability* hotReloadDebugCapability = nullptr,
         IProjectLifecycleCapability* projectLifecycleCapability = nullptr,
         IAssetScaffoldingCapability* assetScaffoldingCapability = nullptr,
-        FeatureDebugCommandBridge* featureDebugCommandBridge = nullptr);
+        FeatureDebugCommandBridge* featureDebugCommandBridge = nullptr,
+        ProfilerSnapshotBridge* profilerSnapshotBridge = nullptr);
     ~NetworkServer();
 
     NetworkServer(const NetworkServer&) = delete;
@@ -83,6 +85,7 @@ private:
     IProjectLifecycleCapability* m_projectLifecycleCapability = nullptr;
     IAssetScaffoldingCapability* m_assetScaffoldingCapability = nullptr;
     FeatureDebugCommandBridge* m_featureDebugCommandBridge = nullptr;
+    ProfilerSnapshotBridge* m_profilerSnapshotBridge = nullptr;
 };
 
 } // namespace gte::Network

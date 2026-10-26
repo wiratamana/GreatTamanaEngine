@@ -227,6 +227,31 @@ TEST_F(FrameProfilerTest, MemorySnapshotBelongsToTheOpenFrameOnly)
     EXPECT_EQ(profiler.HistoryAt(1).memory.totalBytes, 4096u);
 }
 
+TEST_F(FrameProfilerTest, GpuMetricsBelongToTheOpenFrameAndDefaultToAbsent)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    GpuFrameMetrics metrics;
+    metrics.views[static_cast<std::size_t>(ViewSlot::Primary)].status = SampleStatus::Present;
+    metrics.views[static_cast<std::size_t>(ViewSlot::Primary)].milliseconds = 2.5f;
+    metrics.indirectDraws[static_cast<std::size_t>(ViewSlot::Primary)] = 6;
+
+    profiler.SetGpuMetrics(metrics); // no frame is open
+    profiler.BeginFrame();
+    profiler.EndFrame();
+    EXPECT_EQ(profiler.HistoryAt(0).gpu.views[static_cast<std::size_t>(ViewSlot::Primary)].status, SampleStatus::Absent);
+
+    profiler.BeginFrame();
+    profiler.SetGpuMetrics(metrics);
+    profiler.EndFrame();
+    const GpuFrameMetrics& stored = profiler.HistoryAt(1).gpu;
+    EXPECT_EQ(stored.views[static_cast<std::size_t>(ViewSlot::Primary)].status, SampleStatus::Present);
+    EXPECT_EQ(stored.indirectDraws[static_cast<std::size_t>(ViewSlot::Primary)], 6u);
+
+    profiler.BeginFrame();
+    profiler.EndFrame();
+    EXPECT_EQ(profiler.HistoryAt(2).gpu.views[static_cast<std::size_t>(ViewSlot::Primary)].status, SampleStatus::Absent);
+}
+
 TEST_F(FrameProfilerTest, DisplayPauseIsIndependentOfCapture)
 {
     FrameProfiler& profiler = FrameProfiler::Instance();

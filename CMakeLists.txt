@@ -569,6 +569,8 @@ add_library(gte_core STATIC
     src/Core/FaultInjection.cpp
     src/Core/RenderTimingAdapter.h
     src/Core/RenderTimingAdapter.cpp
+    src/Core/GpuViewMetrics.h
+    src/Core/GpuViewMetrics.cpp
     src/Core/ScreenPostProcessPassPriorityAssignment.h
     src/Core/ScreenPostProcessPassPriorityAssignment.cpp
     src/Core/ClusterCandidates.h
@@ -742,6 +744,8 @@ add_library(gte_core STATIC
     src/Application/MemorySnapshotBuilder.h
     src/Application/FrameCaptureBridge.h
     src/Application/FrameCaptureBridge.cpp
+    src/Application/ProfilerSnapshotBridge.h
+    src/Application/ProfilerSnapshotBridge.cpp
     src/Application/EngineCommandBridge.h
     src/Application/EditorUiCommandBridge.h
     src/Application/FeatureDebugCommandBridge.h
@@ -1069,6 +1073,13 @@ add_library(gte_core STATIC
     src/Profiling/WorkerRing.cpp
     src/Profiling/FrameChecks.h
     src/Profiling/FrameChecks.cpp
+    src/Profiling/Metric.h
+    src/Profiling/Metric.cpp
+    src/Profiling/LiveBlockTable.h
+    src/Profiling/LiveBlockTable.cpp
+    src/Profiling/ProfilerSnapshot.h
+    src/Profiling/ProfilerSnapshotBuilder.h
+    src/Profiling/ProfilerSnapshotBuilder.cpp
     src/Jobs/JobTypes.h
     src/Jobs/JobQueue.h
     src/Jobs/JobQueue.cpp
@@ -1086,6 +1097,8 @@ add_library(gte_core STATIC
     src/Network/NetworkSceneCameraPose.cpp
     src/Network/NetworkFaultRoutes.h
     src/Network/NetworkFaultRoutes.cpp
+    src/Network/NetworkProfilerRoutes.h
+    src/Network/NetworkProfilerRoutes.cpp
     src/Network/NetworkServer.h
     src/Network/NetworkServer.cpp
     src/Encoding/Base64.h

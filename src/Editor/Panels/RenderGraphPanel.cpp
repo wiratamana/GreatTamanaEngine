@@ -3,6 +3,7 @@
 #include "../EditorContext.h"
 #include "../EditorGpuMemoryNameOverlay.h"
 #include "../MemoryPanelData.h"
+#include "../ProfilerPanelData.h"
 #include "../RenderGraphDotExport.h"
 #include "../../Core/Logging.h"
 #include "../../Encoding/CapturedPixelConversion.h"
@@ -239,13 +240,9 @@ void RenderGraphPanel::BuildToolbar(EditorContext& ctx, const rg::RenderGraphReg
     ImGui::SliderFloat("Zoom", &m_zoom, 0.5f, 2.0f, "%.1fx");
     ImGui::SameLine();
 
-    double totalGpuMs = 0.0;
-    for (const rg::RenderGraphPassMetadata& pass : regime.passes) {
-        if (pass.gpuTimingMilliseconds.has_value()) {
-            totalGpuMs += *pass.gpuTimingMilliseconds;
-        }
-    }
-    ImGui::Text("Total: %.1f ms", totalGpuMs);
+    const RegimeGpuByView byView = SumRegimeGpuByView(regime.passes);
+    ImGui::Text("Game: %s | Scene: %s | Shared: %s", FormatGpuMetric(byView.game).c_str(),
+        FormatGpuMetric(byView.scene).c_str(), FormatGpuMetric(byView.shared).c_str());
 
     ImGui::SameLine();
     if (ImGui::Button("Export DOT")) {

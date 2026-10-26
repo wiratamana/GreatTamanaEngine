@@ -33,6 +33,7 @@ void FrameProfiler::BeginFrame() noexcept
     m_frameInProgress = true;
     m_frameStartTicks = GetProfilingPerformanceCounter();
     m_openMemory = MemorySnapshot{};
+    m_openGpu = GpuFrameMetrics{};
 }
 
 void FrameProfiler::EndFrame() noexcept
@@ -58,6 +59,7 @@ void FrameProfiler::EndFrame() noexcept
     summary.endTicks = endTicks;
     summary.cpuMilliseconds = TicksToMilliseconds(endTicks - m_frameStartTicks);
     summary.memory = m_openMemory;
+    summary.gpu = m_openGpu;
     summary.lateScopes = gate.lateScopes;
     summary.foreignScopes = gate.foreignScopes;
     summary.lostWorkerEvents = drain.lost;
@@ -113,6 +115,13 @@ void FrameProfiler::SetMemorySnapshot(const MemorySnapshot& snapshot) noexcept
     }
 }
 
+void FrameProfiler::SetGpuMetrics(const GpuFrameMetrics& metrics) noexcept
+{
+    if (m_frameInProgress) {
+        m_openGpu = metrics;
+    }
+}
+
 const FrameSummary& FrameProfiler::HistoryAt(std::size_t indexFromOldest) const noexcept
 {
     const std::size_t oldest = (m_historyHead + kMaxFrameHistory - m_historyCount) % kMaxFrameHistory;
@@ -131,6 +140,7 @@ void FrameProfiler::ResetForTesting() noexcept
     m_frameIndex = 0;
     m_frameStartTicks = 0;
     m_openMemory = MemorySnapshot{};
+    m_openGpu = GpuFrameMetrics{};
     m_last = FrameRecord{};
     m_history = {};
     m_historyHead = 0;

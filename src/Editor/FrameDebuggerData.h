@@ -166,6 +166,12 @@ struct FrameDebuggerEventDetails {
     // unchanged - see BuildRealFrameDebuggerSnapshot()'s own module-local
     // kGameViewResourceName constant for the exact exclusion rule.
     std::optional<std::string> privateWriteTextureName;
+
+    // The pass's own GPU time as text: a measured time, or the status word when it was not measured.
+    std::string gpuTimingText;
+
+    // Indirect draws of the pass; never counted as triangles. Zero when the pass has none.
+    std::uint32_t indirectDraws = 0;
 };
 
 // One row of the left-hand event tree (see the reference screenshot's
