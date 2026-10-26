@@ -501,23 +501,30 @@ void RenderGraphPanel::BuildPassTable(const std::vector<RenderGraphGroupedPass>&
     if (ImGuiTableSortSpecs* specs = ImGui::TableGetSortSpecs(); specs != nullptr && specs->SpecsCount > 0) {
         const bool descending = specs->Specs[0].SortDirection == ImGuiSortDirection_Descending;
         const int column = specs->Specs[0].ColumnIndex;
-        const auto largestGpuMs = [](const RenderGraphGroupedPass& row) {
-            double largest = 0.0;
-            for (const rg::RenderGraphPassMetadata& instance : row.instances) {
-                if (instance.gpuTimingMilliseconds.has_value()) {
-                    largest = std::max(largest, *instance.gpuTimingMilliseconds);
+        if (column == 2) {
+            // Sort key computed once per row, not per comparison.
+            std::vector<std::pair<double, const RenderGraphGroupedPass*>> keyed;
+            keyed.reserve(rows.size());
+            for (const RenderGraphGroupedPass* row : rows) {
+                double largest = 0.0;
+                for (const rg::RenderGraphPassMetadata& instance : row->instances) {
+                    if (instance.gpuTimingMilliseconds.has_value()) {
+                        largest = std::max(largest, *instance.gpuTimingMilliseconds);
+                    }
                 }
+                keyed.emplace_back(largest, row);
             }
-            return largest;
-        };
-        std::sort(rows.begin(), rows.end(), [&](const auto* a, const auto* b) {
-            if (column == 2) {
-                const double av = largestGpuMs(*a);
-                const double bv = largestGpuMs(*b);
-                return descending ? av > bv : av < bv;
+            std::sort(keyed.begin(), keyed.end(), [descending](const auto& a, const auto& b) {
+                return descending ? a.first > b.first : a.first < b.first;
+            });
+            for (std::size_t i = 0; i < keyed.size(); ++i) {
+                rows[i] = keyed[i].second;
             }
-            return descending ? a->name > b->name : a->name < b->name;
-        });
+        } else {
+            std::sort(rows.begin(), rows.end(), [descending](const auto* a, const auto* b) {
+                return descending ? a->name > b->name : a->name < b->name;
+            });
+        }
     }
 
     for (const RenderGraphGroupedPass* row : rows) {

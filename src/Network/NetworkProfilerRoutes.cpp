@@ -70,7 +70,7 @@ bool HasValue(SampleStatus status) noexcept
 nlohmann::json PerView(const std::array<Metric, Profiling::kViewSlotCount>& metrics)
 {
     nlohmann::json out = nlohmann::json::object();
-    for (const rg::ViewScope scope : { rg::ViewScope::Shared, rg::ViewScope::Primary, rg::ViewScope::Secondary }) {
+    for (const rg::ViewScope scope : kAllViewScopes) {
         out[ViewWireName(scope)] = MetricToJson(metrics[static_cast<std::size_t>(ToViewSlot(scope))]);
     }
     return out;
@@ -501,7 +501,7 @@ nlohmann::json ProfilerSpikeDetailToJson(const Profiling::SpikeDetail& detail)
     out["gpu_span"] = MetricToJson(Profiling::MetricFromGpuView(detail.gpu.span));
 
     nlohmann::json views = nlohmann::json::object();
-    for (const rg::ViewScope scope : { rg::ViewScope::Shared, rg::ViewScope::Primary, rg::ViewScope::Secondary }) {
+    for (const rg::ViewScope scope : kAllViewScopes) {
         views[ViewWireName(scope)] = MetricToJson(Profiling::MetricFromGpuView(detail.gpu.views[static_cast<std::size_t>(ToViewSlot(scope))]));
     }
     out["gpu_views"] = std::move(views);

@@ -22,7 +22,4 @@ const char* ResolvePassNameAtSurvivingIndex(const RenderGraphSnapshot& snapshot,
 // Plain switches without a default, so a new enumerator fails to compile until handled.
 const char* ToString(ResourceKind kind) noexcept;
 
-// "Shared" / "Primary" / "Secondary".
-const char* ToString(ViewScope scope) noexcept;
-
 } // namespace gte::rg

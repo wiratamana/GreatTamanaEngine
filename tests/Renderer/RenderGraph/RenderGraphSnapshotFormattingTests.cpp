@@ -99,15 +99,5 @@ TEST(RenderGraphSnapshotFormattingTest, ToStringResourceKindReturnsDistinctNonEm
     EXPECT_STRNE(bufferStr, volumeTextureStr);
 }
 
-// --- ToString(ViewScope) -------------------------------------------------------
-// One assertion per enumerator; the renderer only knows the neutral names.
-
-TEST(RenderGraphSnapshotFormattingTest, ToStringViewScopeReturnsNeutralNamesForEveryEnumerator)
-{
-    EXPECT_STREQ(ToString(ViewScope::Shared), "Shared");
-    EXPECT_STREQ(ToString(ViewScope::Primary), "Primary");
-    EXPECT_STREQ(ToString(ViewScope::Secondary), "Secondary");
-}
-
 } // namespace
 } // namespace gte::rg

@@ -4,6 +4,8 @@
 
 #include "../Renderer/RenderGraph/RenderGraphHandles.h"
 
+#include <array>
+
 namespace gte::Network {
 
 inline const char* ViewWireName(rg::ViewScope scope) noexcept
@@ -15,5 +17,10 @@ inline const char* ViewWireName(rg::ViewScope scope) noexcept
     }
     return "shared";
 }
+
+// Every view scope, in wire order.
+inline constexpr std::array<rg::ViewScope, rg::kViewScopeCount> kAllViewScopes = {
+    rg::ViewScope::Shared, rg::ViewScope::Primary, rg::ViewScope::Secondary};
+static_assert(kAllViewScopes.size() == rg::kViewScopeCount);
 
 } // namespace gte::Network

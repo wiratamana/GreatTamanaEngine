@@ -49,18 +49,4 @@ const char* ToString(ResourceKind kind) noexcept
     return "Unknown";
 }
 
-// No default case, so a new enumerator warns here.
-const char* ToString(ViewScope scope) noexcept
-{
-    switch (scope) {
-    case ViewScope::Shared:
-        return "Shared";
-    case ViewScope::Primary:
-        return "Primary";
-    case ViewScope::Secondary:
-        return "Secondary";
-    }
-    return "Unknown";
-}
-
 } // namespace gte::rg
