@@ -4,6 +4,8 @@
 // main thread longer than its own bound, so the routes still answer while the main thread is blocked.
 
 #include "../Profiling/ProfilerSnapshot.h"
+#include "../Profiling/SpikeDetail.h"
+#include "../Profiling/SpikeStore.h"
 
 #include <atomic>
 #include <chrono>
@@ -38,6 +40,14 @@ public:
     void SetDisplayPaused(bool paused) noexcept;
     bool CaptureEnabled() const noexcept;
     bool DisplayPaused() const noexcept;
+
+    // Any thread. Spike store access: pin limits are enforced by the store.
+    Profiling::PinResult PinSpike(std::uint64_t frameIndex) noexcept;
+    bool UnpinSpike(std::uint64_t frameIndex) noexcept;
+    std::size_t PinnedSpikes() const noexcept;
+    void SetSpikeThresholdMs(float milliseconds) noexcept;
+    float SpikeThresholdMs() const noexcept;
+    std::optional<Profiling::SpikeDetail> SpikeFrame(std::uint64_t frameIndex) const;
 
     static std::uint64_t NowNanoseconds() noexcept;
 

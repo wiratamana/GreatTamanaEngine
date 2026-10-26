@@ -30,10 +30,10 @@ struct RenderPassViewData {
 inline rg::ViewScope TranslateLegacyViewScope(rg::RenderViewId view) noexcept
 {
     if (view == rg::RenderViewId::Named("Game")) {
-        return rg::ViewScope::GameView;
+        return rg::ViewScope::Primary;
     }
     if (view == rg::RenderViewId::Named("Scene")) {
-        return rg::ViewScope::SceneView;
+        return rg::ViewScope::Secondary;
     }
     return rg::ViewScope::Shared; // Shared() itself, or any named view with no scope.
 }

@@ -184,7 +184,7 @@ TEST(RenderGraphMetadataTest, CulledPassIsStillFullyDescribedWithZeroedStatsAndN
     pass.kind = PassKind::Compute;
     pass.category = RenderPassCategory::Debug;
     pass.drawKind = RenderPassDrawKind::Blit;
-    pass.viewScope = ViewScope::SceneView;
+    pass.viewScope = ViewScope::Secondary;
     pass.renderPassEvent = RenderPassEvent::AfterTransparents;
     pass.readNames = { "SomeInput" };
     pass.readKinds = { ResourceKind::Buffer };

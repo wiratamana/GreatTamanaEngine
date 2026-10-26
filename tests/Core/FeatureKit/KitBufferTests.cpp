@@ -1,4 +1,4 @@
-﻿// Tests: graph buffer refs, persistent buffers and the kit buffer verbs.
+// Tests: graph buffer refs, persistent buffers and the kit buffer verbs.
 
 #include "Core/FeatureKit/FeatureKit.h"
 #include "Core/FeatureKit/FrameContext.h"
@@ -25,7 +25,7 @@ using test::CountErrorsByCategory;
 using test::RecordingLogSink;
 using test::ScopedLogSinkInstall;
 
-constexpr rg::ViewScope kGame = rg::ViewScope::GameView;
+constexpr rg::ViewScope kGame = rg::ViewScope::Primary;
 
 Registry& FakeScene()
 {
@@ -256,7 +256,7 @@ TEST(FxPersistentBufferGpuTest, GrowsInPowersOfTwoAndImportsOncePerFrame)
     ASSERT_TRUE(e.IsValid());
     EXPECT_EQ(SizeOf(f2, e), 512u);
 
-    TestFrame f3(fixture, 1, rg::ViewScope::SceneView); // The scene view has its own slot.
+    TestFrame f3(fixture, 1, rg::ViewScope::Secondary); // The scene view has its own slot.
     const GpuBufferRef g = buffer.Acquire(f3.frame, 100);
     ASSERT_TRUE(g.IsValid());
     EXPECT_EQ(SizeOf(f3, g), 256u);

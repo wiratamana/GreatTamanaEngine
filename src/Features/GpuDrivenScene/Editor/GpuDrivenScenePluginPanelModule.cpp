@@ -19,8 +19,8 @@ GpuDrivenScenePluginPanelModule::GpuDrivenScenePluginPanelModule(EditorContext& 
 void GpuDrivenScenePluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/)
 {
     GpuDrivenSceneSettings edit = m_feature.EditableSettings();
-    if (BuildGpuDrivenScenePanel(edit, m_feature.Supported(), m_feature.Snapshot(rg::ViewScope::GameView),
-            m_feature.Snapshot(rg::ViewScope::SceneView))) {
+    if (BuildGpuDrivenScenePanel(edit, m_feature.Supported(), m_feature.Snapshot(rg::ViewScope::Primary),
+            m_feature.Snapshot(rg::ViewScope::Secondary))) {
         m_feature.ApplySettings(edit);
     }
 }

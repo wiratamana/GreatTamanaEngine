@@ -33,7 +33,7 @@ constexpr bool ClusterClaimAllowed(const ClusterClaimContext& context) noexcept
     if (context.scope == rg::ViewScope::Shared) {
         return false;
     }
-    return !(context.captureArmed && context.scope == rg::ViewScope::GameView);
+    return !(context.captureArmed && context.scope == rg::ViewScope::Primary);
 }
 
 // True when every pass of the part's chain was declared.

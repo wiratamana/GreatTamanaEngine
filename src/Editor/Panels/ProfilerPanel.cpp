@@ -8,6 +8,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -252,6 +253,99 @@ void BuildGpuTimingSection(const Profiling::GpuFrameMetrics& gpu)
     }
 }
 
+ImVec4 VerdictColor(Profiling::VerdictKind kind)
+{
+    switch (kind) {
+    case Profiling::VerdictKind::Unreliable:
+    case Profiling::VerdictKind::Stalled: return ImVec4(1.0f, 0.35f, 0.3f, 1.0f);
+    case Profiling::VerdictKind::PresentLimited: return ImVec4(1.0f, 0.75f, 0.2f, 1.0f);
+    case Profiling::VerdictKind::Unknown: return ImVec4(0.6f, 0.6f, 0.6f, 1.0f);
+    case Profiling::VerdictKind::GpuLimited:
+    case Profiling::VerdictKind::CpuLimited:
+    case Profiling::VerdictKind::Serial: return ImVec4(0.45f, 0.85f, 0.45f, 1.0f);
+    }
+    return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+}
+
+void BuildVerdictBar(const ProfilerFrameView& view, Profiling::FrameProfiler& profiler)
+{
+    const ProfilerVerdictLine verdict = BuildVerdictLine(profiler, view.checks);
+    ImGui::TextColored(VerdictColor(verdict.kind), "%s", verdict.text.c_str());
+
+    const Profiling::OverheadEstimate overhead =
+        Profiling::EstimateOverhead(profiler.EventCostNs(), view.totals.scopeCount, view.summary.cpuMilliseconds);
+    const std::string overheadLine = FormatOverheadLine(overhead);
+    if (overhead.warn) {
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "%s", overheadLine.c_str());
+    } else {
+        ImGui::TextDisabled("%s", overheadLine.c_str());
+    }
+}
+
+void BuildSpikeSection(Profiling::FrameProfiler& profiler, std::string& pinMessage)
+{
+    ImGui::SeparatorText("Spikes");
+
+    Profiling::SpikeStore& store = profiler.Spikes();
+    std::array<Profiling::SpikeStore::Row, Profiling::SpikeStore::kSlots> spikes{};
+    const std::size_t count = store.Rows(spikes);
+    ImGui::TextDisabled("%s", FormatSpikeSummary(count, store.PinnedCount()).c_str());
+    if (!pinMessage.empty()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "%s", pinMessage.c_str());
+    }
+    if (count == 0) {
+        ImGui::TextDisabled("No frame was slower than twice the recent median.");
+        return;
+    }
+
+    const std::vector<SpikeListRow> rows = BuildSpikeListRows(std::span<const Profiling::SpikeStore::Row>(spikes.data(), count));
+    constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable;
+    if (!ImGui::BeginTable("SpikeTable", 6, tableFlags)) {
+        return;
+    }
+    ImGui::TableSetupColumn("Frame", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+    ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+    ImGui::TableSetupColumn("Over median");
+    ImGui::TableSetupColumn("Class", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+    ImGui::TableSetupColumn("Cause");
+    ImGui::TableSetupColumn("Pin", ImGuiTableColumnFlags_WidthFixed, 56.0f);
+    ImGui::TableHeadersRow();
+
+    for (const SpikeListRow& row : rows) {
+        ImGui::TableNextRow();
+        ImGui::PushID(static_cast<int>(row.frameIndex & 0x7fffffff));
+
+        ImGui::TableSetColumnIndex(0);
+        ImGui::Text("%llu", static_cast<unsigned long long>(row.frameIndex));
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextUnformatted(row.frameTime.c_str());
+        ImGui::TableSetColumnIndex(2);
+        ImGui::TextUnformatted(row.overMedian.c_str());
+        ImGui::TableSetColumnIndex(3);
+        if (row.explained) {
+            ImGui::TextUnformatted(row.classification.c_str());
+        } else {
+            ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "%s", row.classification.c_str());
+        }
+        ImGui::TableSetColumnIndex(4);
+        ImGui::TextUnformatted(row.cause.c_str());
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("GPU span: %s", row.gpu.c_str());
+        }
+        ImGui::TableSetColumnIndex(5);
+        if (ImGui::SmallButton(row.pinned ? "Unpin" : "Pin")) {
+            pinMessage.clear();
+            if (row.pinned) {
+                store.Unpin(row.frameIndex);
+            } else if (store.Pin(row.frameIndex) == Profiling::PinResult::LimitReached) {
+                pinMessage = "Pin refused: the pin limit is reached, unpin a spike first.";
+            }
+        }
+        ImGui::PopID();
+    }
+    ImGui::EndTable();
+}
+
 } // namespace
 
 void ProfilerPanel::Build(EditorContext& /*ctx*/)
@@ -281,6 +375,7 @@ void ProfilerPanel::Build(EditorContext& /*ctx*/)
 
     const std::span<const Profiling::FrameGraphPoint> windowed = WindowedTail(*points);
 
+    BuildVerdictBar(*view, profiler);
     BuildCpuFrameTimeGraph(windowed, view->summary, m_cpuGraphScratch);
     BuildChecksSection(*view);
     ImGui::Checkbox("Group by name", &m_groupByName);
@@ -289,6 +384,7 @@ void ProfilerPanel::Build(EditorContext& /*ctx*/)
     } else {
         BuildCpuTreeTable(*view);
     }
+    BuildSpikeSection(profiler, m_pinMessage);
     BuildGpuMemorySection(windowed, view->summary, m_memoryGraphScratch);
     BuildGpuTimingSection(view->summary.gpu);
 

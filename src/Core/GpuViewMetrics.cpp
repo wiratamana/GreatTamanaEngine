@@ -31,9 +31,9 @@ Profiling::ViewSlot ToViewSlot(rg::ViewScope scope) noexcept
     switch (scope) {
     case rg::ViewScope::Shared:
         return Profiling::ViewSlot::Shared;
-    case rg::ViewScope::GameView:
+    case rg::ViewScope::Primary:
         return Profiling::ViewSlot::Primary;
-    case rg::ViewScope::SceneView:
+    case rg::ViewScope::Secondary:
         return Profiling::ViewSlot::Secondary;
     }
     return Profiling::ViewSlot::Shared;

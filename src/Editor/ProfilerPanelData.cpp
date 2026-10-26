@@ -1,11 +1,14 @@
 #include "ProfilerPanelData.h"
 
+#include "../Profiling/Metric.h"
 #include "../Profiling/NameTable.h"
 #include "../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
+#include "../Profiling/ProfilerSnapshotBuilder.h"
 #include "../Profiling/ProfilingClock.h"
 #include "../Profiling/ScopeTree.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 
 namespace gte {
@@ -276,8 +279,8 @@ RegimeGpuByView SumRegimeGpuByView(const std::vector<rg::RenderGraphPassMetadata
         if (pass.isCulled) {
             continue;
         }
-        ViewSum& sum = pass.viewScope == rg::ToString(rg::ViewScope::GameView)    ? game
-            : pass.viewScope == rg::ToString(rg::ViewScope::SceneView) ? scene
+        ViewSum& sum = pass.viewScope == rg::ToString(rg::ViewScope::Primary)    ? game
+            : pass.viewScope == rg::ToString(rg::ViewScope::Secondary) ? scene
                                                                          : shared;
         ++sum.passes;
         sum.folded += pass.gpuFoldedPasses;
@@ -307,6 +310,74 @@ const char* CpuScopeTableEmptyMessage()
                "no scope data will ever appear here in this build.";
     }
     return "No CPU scopes recorded yet.";
+}
+
+ProfilerVerdictLine BuildVerdictLine(const Profiling::FrameProfiler& profiler, const Profiling::ProfilerChecks& checks)
+{
+    bool checkFails = false;
+    for (const Profiling::FrameCheck& check : checks.items) {
+        checkFails = checkFails || check.status == Profiling::CheckStatus::Fail;
+    }
+    const Profiling::Verdict verdict = Profiling::VerdictFromHistory(profiler, profiler.IsCaptureEnabled(), checkFails);
+
+    std::array<char, 192> text{};
+    const std::size_t length = Profiling::FormatVerdict(verdict, text);
+    return ProfilerVerdictLine{ std::string(text.data(), length), verdict.kind };
+}
+
+std::string FormatOverheadLine(const Profiling::OverheadEstimate& overhead)
+{
+    if (!overhead.known) {
+        return "Profiler overhead: not measured";
+    }
+    const std::string estimate = Profiling::FormatMetric(
+        Profiling::PresentMetric(overhead.estimatedMs, Profiling::Unit::Milliseconds, Profiling::MetricKind::Estimated));
+    const std::string share = Profiling::FormatMetric(
+        Profiling::PresentMetric(overhead.frameShare * 100.0, Profiling::Unit::Percent, Profiling::MetricKind::Estimated));
+    std::string line = overhead.warn ? "[WARN] " : "";
+    line += "Profiler overhead: estimated " + estimate + " (" + share + " of the frame)";
+    if (overhead.warn) {
+        line += ", above the " + Profiling::FormatMetric(Profiling::PresentMetric(
+                                     Profiling::kOverheadWarnShare * 100.0, Profiling::Unit::Percent))
+            + " limit";
+    }
+    return line;
+}
+
+std::vector<SpikeListRow> BuildSpikeListRows(std::span<const Profiling::SpikeStore::Row> spikes)
+{
+    std::vector<SpikeListRow> rows;
+    rows.reserve(spikes.size());
+    for (const Profiling::SpikeStore::Row& spike : spikes) {
+        SpikeListRow row;
+        row.frameIndex = spike.frameIndex;
+        row.frameTime = Profiling::FormatMetric(Profiling::PresentMetric(spike.frameMs, Profiling::Unit::Milliseconds));
+        row.overMedian = Profiling::FormatMetric(Profiling::PresentMetric(
+                             spike.classification.excessMs, Profiling::Unit::Milliseconds, Profiling::MetricKind::Derived))
+            + " over the "
+            + Profiling::FormatMetric(Profiling::PresentMetric(
+                spike.medianMs, Profiling::Unit::Milliseconds, Profiling::MetricKind::Derived))
+            + " median";
+        row.explained = spike.classification.kind == Profiling::SpikeClass::Explained;
+        row.classification = Profiling::ToString(spike.classification.kind);
+        if (spike.classification.dominant != Profiling::kInvalidNameId) {
+            row.cause = Profiling::ResolveName(spike.classification.dominant);
+        } else {
+            row.cause = spike.classification.markerPresent ? "marker" : "-";
+        }
+        row.gpu = FormatGpuMetric(spike.gpu.span);
+        row.pinned = spike.pinned;
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
+std::string FormatSpikeSummary(std::size_t frozen, std::size_t pinned)
+{
+    const auto count = [](std::size_t value) {
+        return Profiling::FormatMetric(Profiling::PresentMetric(static_cast<double>(value), Profiling::Unit::Count));
+    };
+    return "Spikes: " + count(frozen) + " frozen, " + count(pinned) + " of " + count(Profiling::kMaxPinnedSpikes) + " pinned";
 }
 
 } // namespace gte

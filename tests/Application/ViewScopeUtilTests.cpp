@@ -9,12 +9,12 @@ namespace {
 
 TEST(TranslateLegacyViewScopeTest, GameMapsToGameView)
 {
-    EXPECT_EQ(TranslateLegacyViewScope(rg::RenderViewId::Named("Game")), rg::ViewScope::GameView);
+    EXPECT_EQ(TranslateLegacyViewScope(rg::RenderViewId::Named("Game")), rg::ViewScope::Primary);
 }
 
 TEST(TranslateLegacyViewScopeTest, SceneMapsToSceneView)
 {
-    EXPECT_EQ(TranslateLegacyViewScope(rg::RenderViewId::Named("Scene")), rg::ViewScope::SceneView);
+    EXPECT_EQ(TranslateLegacyViewScope(rg::RenderViewId::Named("Scene")), rg::ViewScope::Secondary);
 }
 
 TEST(TranslateLegacyViewScopeTest, SharedViewMapsToShared)

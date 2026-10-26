@@ -31,7 +31,7 @@ ClusterPartClaim CompletePart(std::span<const Entity> entities)
 ClusterClaimContext GameContext()
 {
     ClusterClaimContext context;
-    context.scope = rg::ViewScope::GameView;
+    context.scope = rg::ViewScope::Primary;
     return context;
 }
 
@@ -68,7 +68,7 @@ TEST(ClusterClaimTest, ACapturedGameViewFrameClaimsNothing)
 TEST(ClusterClaimTest, ACaptureOfTheGameViewDoesNotBlockTheSceneView)
 {
     ClusterClaimContext context;
-    context.scope = rg::ViewScope::SceneView;
+    context.scope = rg::ViewScope::Secondary;
     context.captureArmed = true;
     const std::array<ClusterPartClaim, 1> parts = { CompletePart(kPartA) };
     EXPECT_EQ(ClaimedEntitiesOf(parts, context).size(), 2u);
@@ -87,7 +87,7 @@ TEST(ClusterClaimTest, AClaimIsAPureFunctionOfItsScope)
     const std::array<ClusterPartClaim, 1> gameParts = { CompletePart(kPartA) };
     const std::array<ClusterPartClaim, 1> sceneParts = { CompletePart(kPartB) };
     ClusterClaimContext sceneContext;
-    sceneContext.scope = rg::ViewScope::SceneView;
+    sceneContext.scope = rg::ViewScope::Secondary;
 
     const std::vector<Entity> game = ClaimedEntitiesOf(gameParts, GameContext());
     const std::vector<Entity> scene = ClaimedEntitiesOf(sceneParts, sceneContext);

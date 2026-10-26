@@ -10,8 +10,8 @@ namespace {
 TEST(ViewScopeUtilTest, ScopeIndicesAreDistinctAndInRange)
 {
     EXPECT_EQ(ViewScopeIndex(ViewScope::Shared), 0u);
-    EXPECT_EQ(ViewScopeIndex(ViewScope::GameView), 1u);
-    EXPECT_EQ(ViewScopeIndex(ViewScope::SceneView), 2u);
+    EXPECT_EQ(ViewScopeIndex(ViewScope::Primary), 1u);
+    EXPECT_EQ(ViewScopeIndex(ViewScope::Secondary), 2u);
     EXPECT_EQ(kViewScopeCount, 3u);
 }
 

@@ -50,7 +50,7 @@ struct Scene {
         context.view = rg::RenderViewId::Named("Game");
         context.featureName = "Feature";
         context.event = rg::RenderPassEvent::PreOpaques;
-        context.scope = rg::ViewScope::GameView;
+        context.scope = rg::ViewScope::Primary;
         context.serial = 1;
     }
 

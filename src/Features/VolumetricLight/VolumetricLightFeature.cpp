@@ -166,7 +166,7 @@ void VolumetricLightFeature::VolumePass(fx::PostOpaqueFrame& f)
         view.snapshot = snap;
     };
 
-    if (!cfg.enabled || (f.Scope() == rg::ViewScope::SceneView && !cfg.applyInSceneView)) {
+    if (!cfg.enabled || (f.Scope() == rg::ViewScope::Secondary && !cfg.applyInSceneView)) {
         bail(VolumetricLightFrameStatus::Disabled);
         return;
     }

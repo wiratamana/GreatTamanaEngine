@@ -2,11 +2,17 @@
 
 #include "../Profiling/FrameChecks.h"
 #include "../Profiling/FrameGraphData.h"
+#include "../Profiling/FrameProfiler.h"
+#include "../Profiling/Overhead.h"
 #include "../Profiling/ProfilingTypes.h"
 #include "../Profiling/ScopeEvent.h"
+#include "../Profiling/SpikeStore.h"
+#include "../Profiling/Verdict.h"
 #include "../Renderer/RenderGraph/RenderGraphMetadata.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -95,5 +101,35 @@ inline constexpr bool kCpuScopeInstrumentationCompiledIn =
 
 // Empty-table text. Says whether scope data can ever appear in this build.
 const char* CpuScopeTableEmptyMessage();
+
+// The verdict line of the top bar. The text carries its own numbers.
+struct ProfilerVerdictLine {
+    std::string text;
+    Profiling::VerdictKind kind = Profiling::VerdictKind::Unknown;
+};
+
+// Verdict over the newest frames of the history; `checks` taints it when a self-check fails.
+ProfilerVerdictLine BuildVerdictLine(const Profiling::FrameProfiler& profiler, const Profiling::ProfilerChecks& checks);
+
+// "Profiler overhead: estimated 0.04 ms (0.2 %)", with a [WARN] prefix above the warning share, or "not measured".
+std::string FormatOverheadLine(const Profiling::OverheadEstimate& overhead);
+
+// One frozen spike as the panel shows it. Every number is already text, made through FormatMetric.
+struct SpikeListRow {
+    std::uint64_t frameIndex = 0;
+    std::string frameTime;      // "50.00 ms"
+    std::string overMedian;     // "34.00 ms over the 16.00 ms median"
+    std::string classification; // "explained" or "unexplained"
+    std::string cause;          // dominant scope, or "marker"; "-" when nothing is known
+    std::string gpu;            // GPU frame span with its status
+    bool pinned = false;
+    bool explained = false;
+};
+
+// Newest first, in the order of `spikes`.
+std::vector<SpikeListRow> BuildSpikeListRows(std::span<const Profiling::SpikeStore::Row> spikes);
+
+// "Spikes: 3 frozen, 1 of 8 pinned"
+std::string FormatSpikeSummary(std::size_t frozen, std::size_t pinned);
 
 } // namespace gte

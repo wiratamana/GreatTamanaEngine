@@ -65,7 +65,7 @@ std::unordered_set<std::string> CollectPassNamesPresentInFrameDebuggerTree(const
 //       scaffolding exception - RenderGraphTypes.h's own updated doc
 //       comment, editor-core-separation-22 campaign PHASE4 - never a real
 //       tree citizen, by design, not a contradiction),
-//   (c) NOT rg::ViewScope::SceneView (mirrors
+//   (c) NOT rg::ViewScope::Secondary (mirrors
 //       BuildRealFrameDebuggerSnapshot()'s own documented, honest SceneView
 //       exclusion throughout that function - the Frame Debugger tree is
 //       Game-View-only, by design, not a contradiction),

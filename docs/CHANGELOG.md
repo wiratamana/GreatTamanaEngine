@@ -4,6 +4,19 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## Frame verdict, spikes, markers and overhead (branch `feature/gpu-cull-impl`, 2026-10-26)
+
+- **Verdict.** One pure function reads the median of the newest 30 frames and says which resource limits the frame
+  (`unreliable`, `stalled`, `present_limited`, `gpu_limited`, `cpu_limited`, `serial`). It always prints its numbers. It is in
+  `GET /profiler` as `verdict{...}` and in the Profiler panel's top bar.
+- **Spikes.** A frame above twice the median of the previous 60 frames is frozen with its full scope tree (16 slots, 8 can be
+  pinned). Each spike is `explained` or `unexplained`. New: `GET /profiler/spike?index=F`, `pin`, `unpin` and
+  `spike_threshold_ms` on `POST /profiler/set`, a spike list in the panel.
+- **Markers** at the periodic sites: GPU memory summary, mesh and material release sweeps, cluster table synthesis, swapchain
+  recreation, host captures, project hot reload and code unload.
+- **Overhead.** The cost of one recorded scope is measured once at startup. The panel and `GET /profiler` show the estimate
+  and warn above 3% of the frame.
+
 ## GPU records with honest statuses (branch `feature/gpu-cull-impl`, 2026-10-26)
 
 - **One record per executed pass.** The graph plans its timestamp queries once per frame (`GpuStampPlan`): one reset, a start

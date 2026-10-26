@@ -65,17 +65,16 @@ enum class ResourceKind : std::uint8_t {
     TextureArray,
 };
 
-// Which real view (if any) a pass belongs to. Shared means "not duplicated
-// per view" - stamped once by whichever call site already knows the answer.
+// Which view (if any) a pass belongs to. Shared means "not duplicated per view".
 enum class ViewScope : std::uint8_t {
     Shared,
-    GameView,
-    SceneView,
+    Primary,
+    Secondary,
 };
 
-// Number of ViewScope enumerators. Enumerators are contiguous from 0, so a scope is also its array index.
+// Number of ViewScope enumerators. A scope is also its array index.
 inline constexpr std::size_t kViewScopeCount = 3;
-static_assert(kViewScopeCount == static_cast<std::size_t>(ViewScope::SceneView) + 1,
+static_assert(kViewScopeCount == static_cast<std::size_t>(ViewScope::Secondary) + 1,
     "kViewScopeCount must track the ViewScope enumerators");
 
 // Graphics (dynamic-rendering draw bracket), Compute (vkCmdDispatch), or

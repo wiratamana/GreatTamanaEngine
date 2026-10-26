@@ -16,8 +16,8 @@
 namespace gte::fx {
 namespace {
 
-constexpr rg::ViewScope kGame = rg::ViewScope::GameView;
-constexpr rg::ViewScope kScene = rg::ViewScope::SceneView;
+constexpr rg::ViewScope kGame = rg::ViewScope::Primary;
+constexpr rg::ViewScope kScene = rg::ViewScope::Secondary;
 
 TEST(ClusterNamePoolTests, SameTextGivesSamePointer)
 {

@@ -41,6 +41,14 @@ public:
     // Pass nullptr to remove it.
     void SetObserver(IRenderTimingObserver* observer) noexcept { m_observer.store(observer, std::memory_order_release); }
 
+    // Tells the observer about periodic work that is not a wait. `name` is a string literal.
+    void ReportMarker(const char* name) noexcept
+    {
+        if (IRenderTimingObserver* observer = m_observer.load(std::memory_order_acquire)) {
+            observer->OnMarker(name);
+        }
+    }
+
     [[nodiscard]] BlockOutcome WaitFence(VkFence fence, std::chrono::nanoseconds timeout, WaitClass waitClass,
         BlockSite site, const char* detail) noexcept;
 

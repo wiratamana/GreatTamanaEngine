@@ -97,7 +97,7 @@ TEST(RealTargetBindingTest, ShadowStyleBindingsOnRealTexturesAreAccepted)
     GpuParams<std::array<float, 16>> params;
 
     const bool dispatched =
-        ComputePass(t.builder, compute, "Test.Mask", ViewScope::GameView, RenderPassEvent::AfterOpaques)
+        ComputePass(t.builder, compute, "Test.Mask", ViewScope::Primary, RenderPassEvent::AfterOpaques)
             .Params(params, std::array<float, 16>{})
             .Bind("inputDepthA", Depth(t.shadow))
             .Bind("inputDepthB", Depth(t.view))
@@ -105,7 +105,7 @@ TEST(RealTargetBindingTest, ShadowStyleBindingsOnRealTexturesAreAccepted)
             .Dispatch(Extent2D{ 64, 64 });
     EXPECT_TRUE(dispatched);
 
-    const bool colorAndDepthView = FullscreenPass(t.builder, graphics, "Test.CompositeA", ViewScope::GameView)
+    const bool colorAndDepthView = FullscreenPass(t.builder, graphics, "Test.CompositeA", ViewScope::Primary)
                                        .Bind("sourceColor", t.view)
                                        .Bind("sourceMask", Depth(t.view))
                                        .Push(0.5f)
@@ -113,7 +113,7 @@ TEST(RealTargetBindingTest, ShadowStyleBindingsOnRealTexturesAreAccepted)
                                        .Draw();
     EXPECT_TRUE(colorAndDepthView);
 
-    const bool depthOnlyMap = FullscreenPass(t.builder, graphics, "Test.CompositeB", ViewScope::GameView)
+    const bool depthOnlyMap = FullscreenPass(t.builder, graphics, "Test.CompositeB", ViewScope::Primary)
                                   .Bind("sourceColor", Depth(t.shadow))
                                   .Bind("sourceMask", t.mask)
                                   .Push(0.5f)
@@ -134,7 +134,7 @@ TEST(RealTargetBindingTest, DepthOnlyTextureBoundWithoutDepthIsRefused)
     RealTargets t(fixture);
     Shader graphics("ReflectFixture", ShaderKind::Graphics);
 
-    const bool drawn = FullscreenPass(t.builder, graphics, "Test.Composite", ViewScope::GameView)
+    const bool drawn = FullscreenPass(t.builder, graphics, "Test.Composite", ViewScope::Primary)
                            .Bind("sourceColor", t.shadow)
                            .Bind("sourceMask", t.mask)
                            .Push(0.5f)
@@ -153,7 +153,7 @@ TEST(RealTargetBindingTest, DepthOnlyTextureAsColorTargetIsRefused)
     RealTargets t(fixture);
     Shader graphics("ReflectFixture", ShaderKind::Graphics);
 
-    const bool drawn = FullscreenPass(t.builder, graphics, "Test.Composite", ViewScope::GameView)
+    const bool drawn = FullscreenPass(t.builder, graphics, "Test.Composite", ViewScope::Primary)
                            .Bind("sourceColor", t.view)
                            .Bind("sourceMask", t.mask)
                            .Push(0.5f)
@@ -174,7 +174,7 @@ TEST(RealTargetBindingTest, DepthOnlyTextureAsStorageImageIsRefused)
     GpuParams<std::array<float, 16>> params;
 
     const bool dispatched =
-        ComputePass(t.builder, compute, "Test.Mask", ViewScope::GameView, RenderPassEvent::AfterOpaques)
+        ComputePass(t.builder, compute, "Test.Mask", ViewScope::Primary, RenderPassEvent::AfterOpaques)
             .Params(params, std::array<float, 16>{})
             .Bind("inputDepthA", Depth(t.shadow))
             .Bind("inputDepthB", Depth(t.view))
@@ -192,7 +192,7 @@ TEST(RealTargetBindingTest, DepthViewOfAColorOnlyTextureIsRefused)
     RealTargets t(fixture);
     Shader graphics("ReflectFixture", ShaderKind::Graphics);
 
-    const bool drawn = FullscreenPass(t.builder, graphics, "Test.Composite", ViewScope::GameView)
+    const bool drawn = FullscreenPass(t.builder, graphics, "Test.Composite", ViewScope::Primary)
                            .Bind("sourceColor", Depth(t.mask))
                            .Bind("sourceMask", t.mask)
                            .Push(0.5f)

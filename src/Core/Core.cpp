@@ -454,6 +454,7 @@ bool Core::EnsureClusterTable(fx::MeshToken token, std::uint64_t frameIndex)
         const std::optional<MeshCluster> cluster = SynthesizeSingleCluster(bounds, indexCount, &why);
         if (cluster.has_value()) {
             // The upload waits for the GPU; declaring happens outside any pass execution, so that is legal.
+            GTE_PROFILE_MARKER("Periodic.ClusterTableSynthesis");
             mesh->SetClusterTable(rg::GpuBuffer::CreateWithData(m_renderer.Device(), &*cluster, sizeof(MeshCluster),
                                       "MeshClusterTable", rg::GpuBufferUse::Storage),
                 1);
@@ -1018,7 +1019,11 @@ void Core::BuildFrame()
     IFrameDebuggerCaptureRecorder* frameDebuggerCapture = nullptr;
     {
         GTE_PROFILE_SCOPE("Render.Prepare");
-        for (const MeshHandle released : m_game.ReleaseUnusedGpuResources(m_renderer)) {
+        const std::vector<MeshHandle> releasedMeshes = m_game.ReleaseUnusedGpuResources(m_renderer);
+        if (!releasedMeshes.empty()) {
+            GTE_PROFILE_MARKER("Periodic.MeshGpuRelease");
+        }
+        for (const MeshHandle released : releasedMeshes) {
             ForgetClusterSynthesis(released);
         }
 
@@ -1202,13 +1207,13 @@ void Core::BuildFrame()
                     return exposed->texture;
                 };
                 if (gameTarget != nullptr) {
-                    RenderTexture* exposed = finalizeView(*gameTarget, "GameView", rg::ViewScope::GameView);
+                    RenderTexture* exposed = finalizeView(*gameTarget, "GameView", rg::ViewScope::Primary);
                     if (m_editorLayer != nullptr) {
                         m_editorLayer->SetGameViewCompositedTexture(exposed);
                     }
                 }
                 if (sceneTarget != nullptr) {
-                    RenderTexture* exposed = finalizeView(*sceneTarget, "SceneView", rg::ViewScope::SceneView);
+                    RenderTexture* exposed = finalizeView(*sceneTarget, "SceneView", rg::ViewScope::Secondary);
                     if (m_editorLayer != nullptr) {
                         m_editorLayer->SetSceneViewCompositedTexture(exposed);
                     }

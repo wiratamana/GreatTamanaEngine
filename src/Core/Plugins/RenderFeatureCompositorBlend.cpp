@@ -63,8 +63,8 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
     }
 
     // Views other than the game view share the scene view's identity.
-    const bool isGameView = TranslateLegacyViewScope(frame.currentView) == rg::ViewScope::GameView;
-    const rg::ViewScope scope = isGameView ? rg::ViewScope::GameView : rg::ViewScope::SceneView;
+    const bool isGameView = TranslateLegacyViewScope(frame.currentView) == rg::ViewScope::Primary;
+    const rg::ViewScope scope = isGameView ? rg::ViewScope::Primary : rg::ViewScope::Secondary;
     const std::string viewName = isGameView ? "Game" : "Scene";
     const Extent2D extent{ resolved->extent.width, resolved->extent.height };
     frame.finalTextureOutputs.push_back(resolved->target);

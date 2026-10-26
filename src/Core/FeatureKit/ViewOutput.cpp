@@ -24,10 +24,10 @@ std::string ViewOutputName(std::string_view suffix, rg::ViewScope scope)
 {
     std::string name;
     switch (scope) {
-    case rg::ViewScope::GameView:
+    case rg::ViewScope::Primary:
         name = "GameView";
         break;
-    case rg::ViewScope::SceneView:
+    case rg::ViewScope::Secondary:
         name = "SceneView";
         break;
     case rg::ViewScope::Shared:

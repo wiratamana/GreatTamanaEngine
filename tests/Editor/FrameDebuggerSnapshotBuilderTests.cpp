@@ -144,9 +144,9 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueWithNoComputePassesProducesEx
     // comment above for why this is now required - MakePass()'s own default
     // renderPassEvent IS Opaques, same as "RenderOpaque" itself).
     // editor-core-separation-22 campaign, PHASE4 - ALSO now explicitly
-    // tagged `viewScope = ViewScope::SceneView` (MakePass()'s own default is
+    // tagged `viewScope = ViewScope::Secondary` (MakePass()'s own default is
     // Shared, not SceneView) - this pass's own exclusion must be an HONEST,
-    // already-documented reason (ViewScope::SceneView, matching this pass's
+    // already-documented reason (ViewScope::Secondary, matching this pass's
     // own name/intent) rather than an accidental artifact of the pre-view
     // loop only ever inspecting Compute-kind passes; without this, the new
     // "Other Render Passes" sweep would (correctly, per Clause B) surface it
@@ -154,7 +154,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueWithNoComputePassesProducesEx
     // Graphics-kind survivor.
     rg::RenderGraphPassSnapshot sceneView = MakePass("SceneView");
     sceneView.renderPassEvent = rg::RenderPassEvent::BeforeEverything;
-    sceneView.viewScope = rg::ViewScope::SceneView;
+    sceneView.viewScope = rg::ViewScope::Secondary;
     graphSnapshot.passesInExecutionOrder.push_back(sceneView);
     rg::RenderGraphPassSnapshot renderOpaque = MakePass("RenderOpaque");
     renderOpaque.stats.drawStats.drawCallCount = 7;
@@ -597,11 +597,11 @@ TEST(FrameDebuggerSnapshotBuilderTest, SceneViewScopedPreGameViewPassIsExcludedE
     rg::RenderGraphSnapshot graphSnapshot;
 
     rg::RenderGraphPassSnapshot gameViewScoped = MakeComputePass("AtmosphereSkyViewLutPass");
-    gameViewScoped.viewScope = rg::ViewScope::GameView;
+    gameViewScoped.viewScope = rg::ViewScope::Primary;
     graphSnapshot.passesInExecutionOrder.push_back(gameViewScoped);
 
     rg::RenderGraphPassSnapshot sceneViewScoped = MakeComputePass("AtmosphereSkyViewLutPass");
-    sceneViewScoped.viewScope = rg::ViewScope::SceneView;
+    sceneViewScoped.viewScope = rg::ViewScope::Secondary;
     graphSnapshot.passesInExecutionOrder.push_back(sceneViewScoped);
 
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
@@ -635,11 +635,11 @@ TEST(FrameDebuggerSnapshotBuilderTest, SceneViewScopedPostGameViewPassIsExcluded
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
     rg::RenderGraphPassSnapshot gameViewScoped = MakeComputePass("AtmosphereAerialPerspectiveCompositePass");
-    gameViewScoped.viewScope = rg::ViewScope::GameView;
+    gameViewScoped.viewScope = rg::ViewScope::Primary;
     graphSnapshot.passesInExecutionOrder.push_back(gameViewScoped);
 
     rg::RenderGraphPassSnapshot sceneViewScoped = MakeComputePass("AtmosphereAerialPerspectiveCompositePass");
-    sceneViewScoped.viewScope = rg::ViewScope::SceneView;
+    sceneViewScoped.viewScope = rg::ViewScope::Secondary;
     graphSnapshot.passesInExecutionOrder.push_back(sceneViewScoped);
 
     const FrameDebuggerCaptureContext capture;
@@ -1344,7 +1344,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, ViewRegionHasExactlyRenderOpaqueAndDrawSk
 }
 
 // NEW, REQUIRED by this phase's own 3.3/3.3b fix - Render Pass campaign,
-// PHASE4 - a Graphics-kind, ViewScope::GameView,
+// PHASE4 - a Graphics-kind, ViewScope::Primary,
 // RenderPassCategory::FrameDebuggerInternal pass positioned in
 // passesInExecutionOrder BETWEEN "DrawSkyBackground" and the eventual
 // Post-GameView compute pass (mirroring AddFrameDebuggerReplayPasses()'s own

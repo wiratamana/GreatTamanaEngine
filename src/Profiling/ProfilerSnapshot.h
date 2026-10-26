@@ -6,6 +6,7 @@
 #include "LiveBlockTable.h"
 #include "Metric.h"
 #include "ProfilingTypes.h"
+#include "Verdict.h"
 
 #include <array>
 #include <cstddef>
@@ -21,7 +22,7 @@ inline constexpr std::size_t kSnapshotFrameRows = 120;
 inline constexpr std::size_t kSnapshotSpikeRows = 16;
 inline constexpr std::size_t kSnapshotSiteBytes = 24;
 inline constexpr std::size_t kSnapshotDetailBytes = 48;
-inline constexpr std::size_t kSnapshotVerdictBytes = 64;
+inline constexpr std::size_t kSnapshotVerdictBytes = 192;
 
 // One top-level CPU scope, summed over its calls in the frame.
 struct SnapshotScopeRow {
@@ -50,8 +51,38 @@ struct SnapshotLiveBlock {
 // A frame frozen because it was much slower than its neighbours.
 struct SnapshotSpikeRow {
     std::uint64_t frameIndex = 0;
-    Metric cpu{};
-    std::array<char, 24> classification{};
+    Metric cpu{};    // frame time
+    Metric median{}; // recent median it was compared with
+    Metric excess{}; // cpu - median
+    Metric dominantSelf{}; // self time of the dominant scope
+    Metric gpuSpan{};
+    std::array<char, 24> classification{}; // "explained" or "unexplained"
+    std::array<char, kSnapshotNameBytes> cause{}; // dominant scope name
+    bool markerPresent = false;
+    bool pinned = false;
+    bool gpuAttached = false; // GPU numbers came from a late report
+};
+
+// The numbers the verdict was decided from, medians over the verdict window.
+struct SnapshotVerdictDetail {
+    VerdictKind kind = VerdictKind::Unknown;
+    Metric frames{}; // frames the medians cover
+    Metric frame{};
+    Metric cpuWork{};
+    Metric gpuWait{};
+    Metric presentWait{};
+    Metric otherWait{};
+    Metric untracked{};
+    Metric stallShare{}; // otherWait share of the frame, percent
+    std::array<char, kSnapshotNameBytes> stallSite{};
+};
+
+// Estimated cost of the profiler itself.
+struct SnapshotOverhead {
+    Metric costPerEvent{}; // ns per recorded scope, measured once
+    Metric estimated{};    // ms per frame
+    Metric share{};        // percent of the frame
+    bool warn = false;     // above the warning share
 };
 
 struct SnapshotCheck {
@@ -110,7 +141,9 @@ struct ProfilerSnapshot {
     std::array<SnapshotLiveBlock, kMaxLiveBlockThreads> liveBlocks{};
     std::uint32_t liveBlockCount = 0;
 
-    std::array<char, kSnapshotVerdictBytes> verdict{};
+    std::array<char, kSnapshotVerdictBytes> verdict{}; // one line, numbers included
+    SnapshotVerdictDetail verdictDetail{};
+    SnapshotOverhead overhead{};
 
     std::array<SnapshotScopeRow, kSnapshotScopeRows> scopes{};
     std::uint32_t scopeCount = 0;
@@ -120,8 +153,10 @@ struct ProfilerSnapshot {
     std::uint32_t frameCount = 0;
 
     bool spikesAvailable = false;
-    std::array<SnapshotSpikeRow, kSnapshotSpikeRows> spikes{};
+    std::array<SnapshotSpikeRow, kSnapshotSpikeRows> spikes{}; // newest first
     std::uint32_t spikeCount = 0;
+    std::uint32_t spikePinned = 0;
+    std::uint64_t spikeTotal = 0; // frozen since start, evicted ones included
 };
 
 } // namespace gte::Profiling

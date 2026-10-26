@@ -1080,6 +1080,14 @@ add_library(gte_core STATIC
     src/Profiling/ProfilerSnapshot.h
     src/Profiling/ProfilerSnapshotBuilder.h
     src/Profiling/ProfilerSnapshotBuilder.cpp
+    src/Profiling/Verdict.h
+    src/Profiling/Verdict.cpp
+    src/Profiling/SpikeStore.h
+    src/Profiling/SpikeStore.cpp
+    src/Profiling/SpikeDetail.h
+    src/Profiling/SpikeDetail.cpp
+    src/Profiling/Overhead.h
+    src/Profiling/Overhead.cpp
     src/Jobs/JobTypes.h
     src/Jobs/JobQueue.h
     src/Jobs/JobQueue.cpp

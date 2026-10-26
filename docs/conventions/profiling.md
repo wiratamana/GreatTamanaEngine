@@ -106,6 +106,28 @@ snapshot just before `EndFrame()`. Follow these rules when you touch profiling o
   the main thread is blocked. `snapshot_age` tells how old the copy is. `POST /profiler/set` switches capture and the display
   pause. See [Networking](networking.md).
 
+## Verdict, spikes, markers and overhead
+
+- `ComputeVerdict()` (`Verdict.h`) is one pure function with one constants block (`VerdictConstants`). It takes the median
+  of the newest 30 frames (CPU work, GPU waits, present waits, other waits, untracked) and applies the rules in order:
+  untracked above 10% is `Unreliable`, other waits above 20% is `Stalled`, present above 30% or GPU from 40% is
+  `PresentLimited` or `GpuLimited` (larger share wins), CPU from 60% is `CpuLimited`, else `Serial`. A failing self-check on
+  most frames of the window makes it `Unreliable`. `FormatVerdict()` always prints the numbers it used.
+- A frame is a spike when it takes more than twice the median of the previous 60 frames, or more than
+  `ProfilerControl::spikeThresholdMs` when that is set. `FrameProfiler::EndFrame()` freezes it into `SpikeStore`: 16 slots of
+  full frames, the oldest unpinned slot is evicted, at most 8 are pinned (the ninth pin is refused with `LimitReached`). Slots
+  are preallocated. The store locks only to copy a frame, so network readers can pin and read while the main thread runs.
+- `ClassifySpike()` finds the scope or wait with the largest self time. The spike is `Explained` when a marker sits on the
+  frame or that scope covers at least half of the excess, otherwise `Unexplained`.
+- `FrameProfiler::AttachLateGpuReport()` puts a GPU report that arrives up to 2 frames late into the frozen copy and the
+  summary history.
+- `GTE_PROFILE_MARKER` writes an instant event where periodic or request-driven work happens: the GPU memory summary rebuild,
+  mesh and material release sweeps, cluster table synthesis, swapchain recreation (reported by the renderer through
+  `IRenderTimingObserver::OnMarker`), host captures, project hot reload and code unload. Every GPU wait is a Blocked scope
+  already. A marker is written only where the work really runs, never every frame.
+- `MeasureScopeEventCostNs()` times a private scope log once at startup. `EstimateOverhead()` multiplies it by the events of the
+  frame and warns above 3% of the frame. The result is an `Estimated` metric, never a reading.
+
 ## Reading the data
 
 - The Editor Profiler and Jobs panels only format this data. See [Editor Module Structure](editor-module-structure.md).

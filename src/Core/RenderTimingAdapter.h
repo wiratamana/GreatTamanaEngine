@@ -32,6 +32,7 @@ public:
     void OnDeclareEnd() noexcept override;
     void OnPassRecordBegin(const char* pass) noexcept override;
     void OnPassRecordEnd() noexcept override;
+    void OnMarker(const char* name) noexcept override;
 
 private:
     struct Open {

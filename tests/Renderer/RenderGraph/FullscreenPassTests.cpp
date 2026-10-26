@@ -58,7 +58,7 @@ bool DrawValid(HeadlessRenderGraphFixture& fixture, Shader& shader, std::uint64_
     PixelFormat format = PixelFormat::RGBA8_UNorm, BlendMode blend = BlendMode::Opaque)
 {
     DeclareScene scene(fixture, frame, format);
-    return FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::GameView)
+    return FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::Primary)
         .Bind("sourceColor", scene.source)
         .Bind("sourceMask", scene.mask)
         .Push(0.5f)
@@ -76,7 +76,7 @@ TEST(FullscreenPassTest, ValidChainDeclaresOnePassWithItsAttachmentAndReads)
     Shader shader("ReflectFixture", ShaderKind::Graphics);
 
     DeclareScene scene(fixture, 1, PixelFormat::RGBA8_UNorm);
-    const bool drawn = FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::GameView)
+    const bool drawn = FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::Primary)
                            .Bind("sourceColor", scene.source)
                            .Bind("sourceMask", scene.mask)
                            .Push(0.5f)
@@ -119,7 +119,7 @@ TEST(FullscreenPassTest, UnknownBindingNameDeclaresNothingAndIsLoggedOnce)
 
     for (std::uint64_t frame = 1; frame <= 2; ++frame) {
         DeclareScene scene(fixture, frame, PixelFormat::RGBA8_UNorm, &onceLog);
-        const bool drawn = FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::GameView)
+        const bool drawn = FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::Primary)
                                .Bind("nope", scene.source)
                                .Bind("sourceMask", scene.mask)
                                .Push(0.5f)
@@ -140,7 +140,7 @@ TEST(FullscreenPassTest, WrongPushSizeDeclaresNothing)
     Shader shader("ReflectFixture", ShaderKind::Graphics);
 
     DeclareScene scene(fixture, 1, PixelFormat::RGBA8_UNorm);
-    const bool drawn = FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::GameView)
+    const bool drawn = FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::Primary)
                            .Bind("sourceColor", scene.source)
                            .Bind("sourceMask", scene.mask)
                            .Push(std::uint64_t{ 1 })
@@ -160,7 +160,7 @@ TEST(FullscreenPassTest, MissingTargetDeclaresNothing)
     Shader shader("ReflectFixture", ShaderKind::Graphics);
 
     DeclareScene scene(fixture, 1, PixelFormat::RGBA8_UNorm);
-    const bool drawn = FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::GameView)
+    const bool drawn = FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::Primary)
                            .Bind("sourceColor", scene.source)
                            .Bind("sourceMask", scene.mask)
                            .Push(0.5f)
@@ -206,7 +206,7 @@ TEST(ComputePassKindTest, GraphicsShaderCannotBackAComputePass)
 
     DeclareScene scene(fixture, 1, PixelFormat::RGBA8_UNorm);
     const bool dispatched =
-        ComputePass(scene.builder, shader, "Test.Compute", ViewScope::GameView, RenderPassEvent::AfterOpaques)
+        ComputePass(scene.builder, shader, "Test.Compute", ViewScope::Primary, RenderPassEvent::AfterOpaques)
             .Dispatch(Extent2D{ 8, 8 });
 
     EXPECT_FALSE(dispatched);
@@ -229,7 +229,7 @@ TEST(FullscreenPassTest, ErrorsPastTheOnceCapAreCoveredByOneHonestSuppressedNoti
     for (int i = 0; i < kAttempts; ++i) {
         const std::string badName = "nope" + std::to_string(i);
         DeclareScene scene(fixture, static_cast<std::uint64_t>(i + 1), PixelFormat::RGBA8_UNorm, &onceLog);
-        EXPECT_FALSE(FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::GameView)
+        EXPECT_FALSE(FullscreenPass(scene.builder, shader, "Test.Fullscreen", ViewScope::Primary)
                          .Bind(badName, scene.source)
                          .Bind("sourceMask", scene.mask)
                          .Push(0.5f)

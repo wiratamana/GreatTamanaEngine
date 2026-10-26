@@ -42,7 +42,7 @@ std::vector<std::string> DetectPassesMissingFromFrameDebuggerTree(
             // comment) - not a contradiction.
             continue;
         }
-        if (pass.viewScope == rg::ViewScope::SceneView) {
+        if (pass.viewScope == rg::ViewScope::Secondary) {
             // The Frame Debugger tree is Game-View-only, by design
             // (BuildRealFrameDebuggerSnapshot()'s own documented exclusion
             // throughout) - not a contradiction.

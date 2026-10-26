@@ -3,7 +3,10 @@
 #include "FrameChecks.h"
 #include "ProfilingClock.h"
 
+#include <algorithm>
+#include <array>
 #include <limits>
+#include <span>
 
 namespace gte::Profiling {
 
@@ -68,6 +71,14 @@ void FrameProfiler::EndFrame() noexcept
     summary.topLevelTicks = totals.topLevelTicks;
     summary.blockedTicks = totals.blockedTicks;
     summary.blockedOtherTicks = totals.blockedOtherTicks;
+    summary.untrackedTicks = totals.untrackedTicks;
+    summary.blockedGpuTicks = totals.blockedGpuTicks;
+    summary.blockedPresentTicks = totals.blockedPresentTicks;
+    summary.blockedWorkerTicks = totals.blockedWorkerTicks;
+    summary.largestBlockedName = totals.largestBlockedName;
+    summary.largestBlockedTicks = totals.largestBlockedTicks;
+
+    FreezeIfSpike(record);
 
     m_history[m_historyHead] = summary;
     m_historyHead = (m_historyHead + 1) % kMaxFrameHistory;
@@ -75,6 +86,41 @@ void FrameProfiler::EndFrame() noexcept
         ++m_historyCount;
     }
     ++m_frameIndex;
+}
+
+void FrameProfiler::FreezeIfSpike(const FrameRecord& record) noexcept
+{
+    // Median of the frames before this one, so a spike never raises its own baseline.
+    std::array<double, kSpikeMedianWindow> recent{};
+    const std::size_t count = std::min(m_historyCount, recent.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        recent[i] = HistoryAt(m_historyCount - count + i).cpuMilliseconds;
+    }
+    const float threshold = SpikeThresholdMs();
+    const bool haveBaseline = count >= kSpikeMinHistory;
+    if (!haveBaseline && threshold <= 0.0f) {
+        return;
+    }
+    const double median = MedianOf(std::span<const double>(recent.data(), count));
+    if (!IsSpikeFrame(record.summary.cpuMilliseconds, median, threshold)) {
+        return;
+    }
+    m_spikes.Freeze(record, median, ClassifySpike(record, median));
+}
+
+void FrameProfiler::AttachLateGpuReport(std::uint64_t frameIndex, const GpuFrameMetrics& gpu) noexcept
+{
+    m_spikes.AttachGpu(frameIndex, gpu, m_frameIndex);
+
+    // The summary ring keeps the late numbers too; only the newest few frames can still be waiting for them.
+    const std::size_t scan = std::min<std::size_t>(m_historyCount, kSpikeLateGpuFrames + 1);
+    for (std::size_t back = 1; back <= scan; ++back) {
+        FrameSummary& entry = m_history[(m_historyHead + kMaxFrameHistory - back) % kMaxFrameHistory];
+        if (entry.frameIndex == frameIndex) {
+            entry.gpu = gpu;
+            return;
+        }
+    }
 }
 
 ScopeStart FrameProfiler::BeginScope() noexcept
@@ -143,6 +189,7 @@ void FrameProfiler::ResetForTesting() noexcept
     m_openGpu = GpuFrameMetrics{};
     m_last = FrameRecord{};
     m_history = {};
+    m_spikes.Clear();
     m_historyHead = 0;
     m_historyCount = 0;
 

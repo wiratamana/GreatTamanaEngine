@@ -110,7 +110,7 @@ std::vector<rg::TextureHandle> FrameDebuggerCaptureContext::AddReplayPasses(rg::
 
         // Tagged FrameDebuggerInternal so the snapshot builder's view-region walk skips these debug-only
         // passes instead of listing them as extra leaves.
-        builder.AddRenderPass(passName, rg::PassKind::Graphics, rg::ViewScope::GameView,
+        builder.AddRenderPass(passName, rg::PassKind::Graphics, rg::ViewScope::Primary,
             rg::RenderPassCategory::FrameDebuggerInternal,
             [destHandle, gpuSkinningOutputBuffers, isBackgroundStep, backgroundReplay](
                 rg::RenderGraphBuilder::PassBuilder& pass) {

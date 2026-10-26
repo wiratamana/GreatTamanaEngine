@@ -5,6 +5,7 @@
 #include "ProjectAssemblyRegistrationLedger.h"
 #include "HotReloadEngineStateMutex.h"
 #include "../../ECS/Reflection/ComponentTypeRegistry.h"
+#include "../../Profiling/ScopeTimer.h"
 #include "../../Renderer/Renderer.h"
 
 #include <algorithm>
@@ -158,6 +159,7 @@ bool ProjectAssemblyHost::UnloadProjectAssembly(const std::string& projectName, 
     }
 
     // The GPU must be idle before any project code is freed; otherwise the project stays loaded.
+    GTE_PROFILE_MARKER("Periodic.ProjectCodeUnload");
     if (renderer.DrainGpuForCodeUnload() != BlockOutcome::Completed) {
         GTE_LOG_ERROR("ProjectAssembly", "UnloadProjectAssembly('" + projectName + "') skipped: the GPU did not go idle.");
         return false;

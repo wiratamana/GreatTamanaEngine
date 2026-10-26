@@ -39,6 +39,7 @@
 #include "../Memory/SdlMemoryTracker.h"
 #include "../Profiling/FrameProfiler.h"
 #include "../Profiling/ProfilerSnapshotBuilder.h"
+#include "../Profiling/Overhead.h"
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
@@ -558,6 +559,10 @@ int EditorHost::Run()
 {
     bool running = true;
     ExitGate exitGate;
+
+    // One micro-benchmark on the main thread; the profiler shows it as an estimated cost per event.
+    Profiling::FrameProfiler::Instance().SetEventCostNs(Profiling::MeasureScopeEventCostNs());
+
     // The memory summary copies every tracked allocation, so it is rebuilt every few frames only.
     constexpr std::uint32_t kGpuMemoryRefreshFrames = 30;
     rg::RenderGraphGpuMemoryMetadata gpuMemory;
@@ -944,6 +949,7 @@ int EditorHost::Run()
             m_captureBridge.FailPendingRequest(FrameCaptureKind::GameView, FrameCaptureFailureReason::TargetNotAvailable);
         }
         if (gameTargetThisFrame != nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
+            GTE_PROFILE_MARKER("Capture.GameView");
             // The Game View target holds the final display image after the PostComposite chain.
             const CaptureResult captured = m_renderer.CaptureRenderTexturePixels(*gameTargetThisFrame);
             const CapturedPixels& raw = captured.pixels;
@@ -983,6 +989,7 @@ int EditorHost::Run()
             renderGraphMetadata.gpuWait.deviceLost = m_renderer.DeviceLost();
             renderGraphMetadata.gpuWait.consecutiveFrameTimeouts = m_renderer.GpuWaitConsecutiveFrameTimeouts();
             if (gpuMemoryAgeFrames >= kGpuMemoryRefreshFrames) {
+                GTE_PROFILE_MARKER("Periodic.GpuMemorySummary");
                 gpuMemory = rg::BuildGpuMemoryMetadata(
                     CollectGpuAllocationSamples(m_renderer), m_game.GetRenderSystem().MeshCount());
                 gpuMemoryAgeFrames = 0;
@@ -1004,6 +1011,7 @@ int EditorHost::Run()
 
         // Must run before Present() so the swapchain service sees the capture request this frame.
         if (m_captureBridge.IsCaptureRequested(FrameCaptureKind::Swapchain)) {
+            GTE_PROFILE_MARKER("Capture.Swapchain");
             m_renderer.RequestSwapchainCapture();
         }
 
@@ -1025,6 +1033,7 @@ int EditorHost::Run()
 
         // GET /get_window: floating (undocked) windows only. Must follow RenderPlatformWindows(), which presents them.
         if (m_captureBridge.IsCaptureRequested(FrameCaptureKind::NamedWindow)) {
+            GTE_PROFILE_MARKER("Capture.NamedWindow");
             CaptureResult captured = m_editorLayer->CapturePlatformWindow(m_renderer, m_captureBridge.RequestedWindowTitle());
             CapturedPixels& raw = captured.pixels;
             if (captured.status != CaptureStatus::Ok || raw.pixels.empty()) {
@@ -1043,6 +1052,7 @@ int EditorHost::Run()
 
         // GET /get_texture capture: runs after every graph Execute() so the texture snapshot is the freshest.
         if (m_captureBridge.IsCaptureRequested(FrameCaptureKind::NamedTexture)) {
+            GTE_PROFILE_MARKER("Capture.NamedTexture");
             const std::string requestedName = m_captureBridge.RequestedTextureName();
             const DebugTextureChannel requestedChannel = m_captureBridge.RequestedTextureChannel();
 

@@ -122,4 +122,12 @@ void RenderTimingAdapter::OnPassRecordEnd() noexcept
     CloseScope();
 }
 
+void RenderTimingAdapter::OnMarker(const char* name) noexcept
+{
+    if (name == nullptr || !Profiling::FrameGate::IsMainThread()) {
+        return;
+    }
+    Profiling::FrameProfiler::Instance().RecordMarker(Profiling::GlobalNameTable().Intern(std::string_view(name)));
+}
+
 } // namespace gte

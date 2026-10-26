@@ -34,7 +34,7 @@ struct Scene {
         privHandle = Import("Private", priv);
         maskHandle = Import("Mask", mask);
         context.builder = &builder;
-        context.scope = rg::ViewScope::GameView;
+        context.scope = rg::ViewScope::Primary;
         context.event = rg::RenderPassEvent::AfterEverything;
         context.serial = 1;
     }
@@ -88,7 +88,7 @@ TEST(KitChainTest, ComputeAndFullscreenDeclareOnePassEachWithTheFramesScopeAndEv
     const rg::CompiledGraphInput input = scene.builder.Finish();
     ASSERT_EQ(input.passes.size(), 2u);
     for (const rg::PassRecord& pass : input.passes) {
-        EXPECT_EQ(pass.viewScope, rg::ViewScope::GameView);
+        EXPECT_EQ(pass.viewScope, rg::ViewScope::Primary);
         EXPECT_EQ(pass.renderPassEvent, rg::RenderPassEvent::AfterEverything);
     }
 }

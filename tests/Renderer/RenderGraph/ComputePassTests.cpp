@@ -37,7 +37,7 @@ TEST(ComputePassTest, ChainOnABareBuilderIsInert)
     GpuParams<int> params;
     TextureHandle texture;
 
-    ComputePass(builder, shader, "Test.Pass", ViewScope::GameView, RenderPassEvent::AfterOpaques)
+    ComputePass(builder, shader, "Test.Pass", ViewScope::Primary, RenderPassEvent::AfterOpaques)
         .Params(params, 5)
         .Bind("source", Depth(texture))
         .Bind("output", texture)
@@ -53,7 +53,7 @@ TEST(ComputePassTest, InertChainWithoutDispatchDoesNotAssert)
     RenderGraphBuilder builder;
     Shader shader("DoesNotExist");
     {
-        ComputePass pass(builder, shader, "Test.Pass", ViewScope::SceneView, RenderPassEvent::Opaques);
+        ComputePass pass(builder, shader, "Test.Pass", ViewScope::Secondary, RenderPassEvent::Opaques);
         pass.Bind("output", TextureHandle{});
     }
     EXPECT_EQ(builder.DeclaredPassCount(), 0u);
@@ -63,7 +63,7 @@ TEST(ComputePassTest, GraphBufferBindOnAnInertChainDeclaresNothing)
 {
     RenderGraphBuilder builder;
     Shader shader("DoesNotExist");
-    ComputePass(builder, shader, "Test.Pass", ViewScope::GameView, RenderPassEvent::PreOpaques)
+    ComputePass(builder, shader, "Test.Pass", ViewScope::Primary, RenderPassEvent::PreOpaques)
         .Bind("items", BufferHandle{ 1, 1 })
         .Bind("results", BufferHandle{ 2, 1 })
         .Dispatch(Extent2D{ 8, 1 });

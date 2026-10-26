@@ -4,6 +4,7 @@
 #include "../../Profiling/FrameGraphData.h"
 #include "../../Profiling/ProfilingTypes.h"
 
+#include <string>
 #include <vector>
 
 namespace gte {
@@ -28,6 +29,9 @@ private:
     // Scratch for the two plots.
     std::vector<float> m_cpuGraphScratch;
     std::vector<float> m_memoryGraphScratch;
+
+    // Why the last pin request was refused; empty when it was not.
+    std::string m_pinMessage;
 };
 
 } // namespace gte

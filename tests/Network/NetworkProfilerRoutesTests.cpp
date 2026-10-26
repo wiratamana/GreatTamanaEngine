@@ -93,6 +93,9 @@ ProfilerSnapshot FullSnapshot()
     s.spikes[0].frameIndex = 41;
     s.spikes[0].cpu = Ms(50.0);
     Profiling::CopySnapshotText(s.spikes[0].classification, "unexplained");
+    Profiling::CopySnapshotText(s.spikes[0].cause, "Present");
+    s.spikePinned = 1;
+    s.spikeTotal = 3;
     return s;
 }
 
@@ -196,7 +199,7 @@ TEST(ProfilerRoutesJsonTest, TheOverviewKeysArePinned)
     const std::set<std::string> expected{
         "success", "schema_version", "frame_index", "state", "has_frame", "snapshot_age", "capture", "display_paused",
         "cpu_frame", "untracked", "blocked", "gpu", "memory", "scopes", "scope_rows_dropped", "checks", "drops",
-        "device_state", "live_block", "verdict", "spikes_available",
+        "device_state", "live_block", "verdict", "overhead", "spikes_available",
     };
     EXPECT_EQ(KeysOf(document), expected);
     EXPECT_EQ(KeysOf(document["gpu"]), (std::set<std::string>{ "views", "span", "indirect_draws", "coverage" }));
@@ -312,6 +315,128 @@ TEST(ProfilerRoutesParseTest, SetReadsQueryValuesAndABody)
     ASSERT_TRUE(mixed.valid);
     EXPECT_EQ(mixed.capture, std::optional<bool>(false));
     EXPECT_FALSE(mixed.displayPause.has_value());
+}
+
+TEST(ProfilerRoutesParseTest, PinUnpinAndThresholdAreParsedStrictly)
+{
+    const ParsedProfilerSet pin = ParseProfilerSet("", "", "", "41", "7", "12.5");
+    ASSERT_TRUE(pin.valid);
+    EXPECT_EQ(pin.pin, std::optional<std::uint64_t>(41));
+    EXPECT_EQ(pin.unpin, std::optional<std::uint64_t>(7));
+    ASSERT_TRUE(pin.spikeThresholdMs.has_value());
+    EXPECT_FLOAT_EQ(*pin.spikeThresholdMs, 12.5f);
+
+    EXPECT_FALSE(ParseProfilerSet("", "", "", "-1").valid);
+    EXPECT_FALSE(ParseProfilerSet("", "", "", "4x").valid);
+    EXPECT_FALSE(ParseProfilerSet("", "", "", "", "", "nan").valid);
+    EXPECT_FALSE(ParseProfilerSet("", "", "", "", "", "inf").valid);
+    EXPECT_FALSE(ParseProfilerSet("", "", "", "", "", "-2").valid);
+    EXPECT_FALSE(ParseProfilerSet("", "", "", "", "", "20000").valid);
+    EXPECT_FALSE(ParseProfilerSet("", "", "", "", "", " 5").valid);
+
+    const ParsedProfilerSet body = ParseProfilerSet("", "", R"({"pin":9,"spike_threshold_ms":0})");
+    ASSERT_TRUE(body.valid);
+    EXPECT_EQ(body.pin, std::optional<std::uint64_t>(9));
+    EXPECT_FLOAT_EQ(*body.spikeThresholdMs, 0.0f);
+    EXPECT_FALSE(ParseProfilerSet("", "", R"({"pin":"9"})").valid);
+    EXPECT_FALSE(ParseProfilerSet("", "", R"({"pin":-3})").valid);
+}
+
+TEST(ProfilerRoutesParseTest, ASpikeIndexIsAWholeFrameNumber)
+{
+    EXPECT_EQ(ParseSpikeFrameIndex("0"), std::optional<std::uint64_t>(0));
+    EXPECT_EQ(ParseSpikeFrameIndex("123456789012"), std::optional<std::uint64_t>(123456789012ull));
+    EXPECT_FALSE(ParseSpikeFrameIndex(""));
+    EXPECT_FALSE(ParseSpikeFrameIndex("abc"));
+    EXPECT_FALSE(ParseSpikeFrameIndex("1.5"));
+    EXPECT_FALSE(ParseSpikeFrameIndex("-1"));
+}
+
+Profiling::SpikeDetail FullSpikeDetail()
+{
+    Profiling::SpikeDetail detail;
+    detail.frameIndex = 41;
+    detail.frameMs = 50.0;
+    detail.medianMs = 16.0;
+    detail.pinned = true;
+    detail.classification.kind = Profiling::SpikeClass::Explained;
+    detail.classification.excessMs = 34.0;
+    detail.classification.dominantSelfMs = 30.0;
+    detail.cause = "GpuWait(Offscreen:fence)";
+    detail.gpu.span = { 9.0f, Profiling::SampleStatus::Present, 0 };
+    detail.droppedScopes = 2;
+    detail.scopes.push_back({ "Present", 0.0, 50.0, 20.0, 0, Profiling::ScopeKind::Work });
+    detail.scopes.push_back({ "GpuWait(Offscreen:fence)", 1.0, 30.0, 30.0, 1, Profiling::ScopeKind::Blocked });
+    return detail;
+}
+
+TEST(ProfilerRoutesJsonTest, ASpikeDetailKeepsEveryNumberInsideAMetric)
+{
+    const json document = ProfilerSpikeDetailToJson(FullSpikeDetail());
+    std::vector<std::string> stray;
+    FindStrayNumbers(document, "", stray);
+    EXPECT_TRUE(stray.empty()) << (stray.empty() ? "" : stray.front());
+
+    EXPECT_EQ(KeysOf(document),
+        (std::set<std::string>{ "success", "schema_version", "frame_index", "state", "pinned", "gpu_attached", "classification",
+            "cause", "marker_present", "frame", "median", "excess", "dominant_self", "gpu_span", "gpu_views", "dropped_scopes",
+            "scopes" }));
+    ASSERT_EQ(document["scopes"].size(), 2u);
+    EXPECT_EQ(KeysOf(document["scopes"][0]), (std::set<std::string>{ "name", "kind", "depth", "start", "duration", "self" }));
+    EXPECT_EQ(document["scopes"][1]["kind"], "blocked");
+    EXPECT_EQ(document["classification"], "explained");
+}
+
+TEST(ProfilerRoutesJsonTest, TheSpikeListKeysArePinned)
+{
+    const json document = ProfilerSpikesToJson(FullSnapshot());
+    EXPECT_EQ(KeysOf(document["spikes"][0]),
+        (std::set<std::string>{ "frame_index", "cpu", "median", "excess", "dominant_self", "gpu_span", "classification", "cause",
+            "marker_present", "pinned", "gpu_attached" }));
+    EXPECT_TRUE(IsMetricObject(document["pin_limit"]));
+    EXPECT_EQ(document["pin_limit"]["value"], 8);
+}
+
+TEST(ProfilerRoutesJsonTest, TheVerdictAndOverheadKeysArePinned)
+{
+    const json document = ProfilerSnapshotToJson(FullSnapshot());
+    EXPECT_EQ(KeysOf(document["verdict"]),
+        (std::set<std::string>{ "text", "kind", "frames", "frame", "cpu_work", "gpu_wait", "present_wait", "other_wait", "untracked",
+            "stall_share", "stall_site" }));
+    EXPECT_EQ(KeysOf(document["overhead"]), (std::set<std::string>{ "cost_per_event", "estimated", "share", "warn" }));
+    EXPECT_EQ(document["verdict"]["kind"], "unknown");
+}
+
+TEST(ProfilerRoutesReplyTest, ASpikeThatIsGoneAnswers404AndAFrozenOneAnswers200)
+{
+    EXPECT_EQ(BuildProfilerSpikeReply(std::nullopt, 5).status, 404);
+    const ProfilerReply found = BuildProfilerSpikeReply(FullSpikeDetail(), 41);
+    EXPECT_EQ(found.status, 200);
+    EXPECT_EQ(json::parse(found.body)["frame_index"], 41);
+}
+
+TEST(ProfilerRoutesReplyTest, ARefusedPinNamesTheLimitOrTheMissingFrame)
+{
+    const ProfilerReply limit = BuildProfilerPinErrorReply(true, 3, 8);
+    EXPECT_EQ(limit.status, 409);
+    EXPECT_NE(limit.body.find("pin limit"), std::string::npos);
+
+    const ProfilerReply missing = BuildProfilerPinErrorReply(false, 3, 1);
+    EXPECT_EQ(missing.status, 404);
+    EXPECT_NE(missing.body.find("frame 3"), std::string::npos);
+}
+
+TEST(ProfilerRoutesReplyTest, TheSetReplyCarriesSpikeStateAsMetrics)
+{
+    ProfilerSetState state;
+    state.pinnedSpikes = 2;
+    state.spikeThresholdMs = 7.5f;
+    const json reply = json::parse(BuildProfilerSetReplyJson(state));
+    EXPECT_EQ(reply["pinned_spikes"]["value"], 2);
+    EXPECT_DOUBLE_EQ(reply["spike_threshold"]["value"].get<double>(), 7.5);
+    std::vector<std::string> stray;
+    FindStrayNumbers(reply, "", stray);
+    EXPECT_TRUE(stray.empty());
 }
 
 TEST(ProfilerRoutesReplyTest, NoSnapshotAnswers503)

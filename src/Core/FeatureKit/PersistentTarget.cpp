@@ -12,10 +12,10 @@ std::string PersistentName(std::string_view base, rg::ViewScope scope)
 {
     std::string name(base);
     switch (scope) {
-    case rg::ViewScope::GameView:
+    case rg::ViewScope::Primary:
         name += ".GameView";
         break;
-    case rg::ViewScope::SceneView:
+    case rg::ViewScope::Secondary:
         name += ".SceneView";
         break;
     case rg::ViewScope::Shared:

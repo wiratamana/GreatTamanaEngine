@@ -364,7 +364,7 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 //
 // frame-debugger-6 campaign, PHASE2
 // (PHASE2_FRAME_DEBUGGER_VIEWSCOPE_FILTERED_DISCOVERY.md) - BOTH groups
-// above also now REQUIRE `pass.viewScope != rg::ViewScope::SceneView` (a
+// above also now REQUIRE `pass.viewScope != rg::ViewScope::Secondary` (a
 // real, PHASE1-stamped, structural field - never a pass-name/resource-suffix
 // string comparison) in addition to `kind == rg::PassKind::Compute`/`!isCulled`/execution-
 // order position. This engine genuinely runs a SEPARATE per-view copy of
@@ -376,7 +376,7 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix);
 // Scene-View-only debug tool ("ComputeBlurValidation") into a tree that is
 // documented as Game-View ONLY. `ViewScope::Shared` (e.g. the
 // Transmittance/Multi-Scattering LUT passes, genuinely computed once per
-// frame, not once per view) and `ViewScope::GameView` both still pass
+// frame, not once per view) and `ViewScope::Primary` both still pass
 // through unchanged.
 //
 // frame-debugger-6 campaign, PHASE4

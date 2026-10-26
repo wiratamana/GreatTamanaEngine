@@ -8,6 +8,7 @@
 #include "../../Assets/RigFile.h"
 #include "../../Core/Logging.h"
 #include "../../Encoding/Utf8Path.h"
+#include "../../Profiling/ScopeTimer.h"
 #include "../../Renderer/MeshVertex.h"
 #include "../../Renderer/Culling/CullingTypes.h" // ComputeLocalAABB()
 #include "../../Renderer/Renderer.h"
@@ -438,6 +439,7 @@ MaterialReleaseResult MeshAssetGpuCatalog::ReleaseUnusedMaterials(
     keep.insert(inUse.begin(), inUse.end());
     const MaterialReleaseResult result = m_materialTextureCache.ReleaseUnused(renderSystem, renderer, keep);
     if (result.materialsFreed > 0 || result.imagesFreed > 0) {
+        GTE_PROFILE_MARKER("Periodic.MaterialReleaseSweep");
         const MaterialCacheStats stats = m_materialTextureCache.GetStats();
         GTE_LOG_INFO(kLogCategory,
             "Released " + std::to_string(result.materialsFreed) + " materials and " + std::to_string(result.imagesFreed)
@@ -471,6 +473,7 @@ std::vector<MeshHandle> MeshAssetGpuCatalog::ReleaseUnusedMeshes(Registry& regis
     }
 
     // Nothing may be destroyed while a submitted command buffer can still read it.
+    GTE_PROFILE_MARKER("Periodic.MeshReleaseSweep");
     if (renderer.DrainGpuForResourceRelease("mesh release sweep") != BlockOutcome::Completed) {
         GTE_LOG_ERROR(kLogCategory, "Mesh release skipped, the GPU did not go idle.");
         m_meshReleasePending = true;

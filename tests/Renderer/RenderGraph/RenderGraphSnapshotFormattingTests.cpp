@@ -132,8 +132,8 @@ TEST(RenderGraphSnapshotFormattingTest, ToStringResourceKindReturnsDistinctNonEm
 TEST(RenderGraphSnapshotFormattingTest, ToStringViewScopeReturnsDistinctNonEmptyStringsForEveryEnumerator)
 {
     const char* sharedStr = ToString(ViewScope::Shared);
-    const char* gameViewStr = ToString(ViewScope::GameView);
-    const char* sceneViewStr = ToString(ViewScope::SceneView);
+    const char* gameViewStr = ToString(ViewScope::Primary);
+    const char* sceneViewStr = ToString(ViewScope::Secondary);
 
     ASSERT_NE(sharedStr, nullptr);
     ASSERT_NE(gameViewStr, nullptr);

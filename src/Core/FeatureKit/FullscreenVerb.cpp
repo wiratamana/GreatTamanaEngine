@@ -174,7 +174,7 @@ bool FullscreenChain::Draw()
 
     detail::FrameContext* context = m_impl->frame->Context();
     if (declared && replay && context != nullptr && context->blackboard != nullptr
-        && context->scope == rg::ViewScope::GameView) {
+        && context->scope == rg::ViewScope::Primary) {
         context->blackboard->Publish<rg::FullscreenReplay>(kViewBackgroundReplayCallbackKey, std::move(replay));
     }
     return declared;

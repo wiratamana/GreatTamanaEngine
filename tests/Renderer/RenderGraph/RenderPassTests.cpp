@@ -113,7 +113,7 @@ TEST(RenderPassTest, AddRenderPassFourArgumentOverloadStampsViewScopeCategoryAnd
 
     const RenderFeatureScope scope(builder, "AtmosphereLut");
     builder.AddRenderPass(
-        "AtmosphereSkyViewLutPass", PassKind::Compute, ViewScope::GameView, RenderPassCategory::General,
+        "AtmosphereSkyViewLutPass", PassKind::Compute, ViewScope::Primary, RenderPassCategory::General,
         [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::DrawMesh,
         RenderPassEvent::Opaques);
 
@@ -121,7 +121,7 @@ TEST(RenderPassTest, AddRenderPassFourArgumentOverloadStampsViewScopeCategoryAnd
     ASSERT_EQ(input.passes.size(), 1u);
     EXPECT_STREQ(input.passes[0].name, "AtmosphereSkyViewLutPass");
     EXPECT_EQ(input.passes[0].kind, PassKind::Compute);
-    EXPECT_EQ(input.passes[0].viewScope, ViewScope::GameView);
+    EXPECT_EQ(input.passes[0].viewScope, ViewScope::Primary);
 
     PassDebugMetadata metadata;
     ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
@@ -136,13 +136,13 @@ TEST(RenderPassTest, AddRenderPassFourArgumentOverloadWorksForGraphicsKindToo)
     builder.SetDebugMetadataSink(&sink);
 
     builder.AddRenderPass(
-        "DrawSkyBackground", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+        "DrawSkyBackground", PassKind::Graphics, ViewScope::Primary, RenderPassCategory::General,
         [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
     EXPECT_EQ(input.passes[0].kind, PassKind::Graphics);
-    EXPECT_EQ(input.passes[0].viewScope, ViewScope::GameView);
+    EXPECT_EQ(input.passes[0].viewScope, ViewScope::Primary);
 
     PassDebugMetadata metadata;
     ASSERT_TRUE(sink.QueryPassDebugMetadata(0, metadata));
@@ -182,7 +182,7 @@ TEST(RenderPassTest, AddRenderPassSixArgumentOverloadDefaultsDrawKindToDrawMeshW
     builder.SetDebugMetadataSink(&sink);
 
     builder.AddRenderPass(
-        "RenderOpaque", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+        "RenderOpaque", PassKind::Graphics, ViewScope::Primary, RenderPassCategory::General,
         [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
 
     const CompiledGraphInput input = builder.Finish();
@@ -203,7 +203,7 @@ TEST(RenderPassTest, AddRenderPassSixArgumentOverloadStoresExplicitDrawKind)
     builder.SetDebugMetadataSink(&sink);
 
     builder.AddRenderPass(
-        "DrawSkyBackground", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+        "DrawSkyBackground", PassKind::Graphics, ViewScope::Primary, RenderPassCategory::General,
         [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::DrawQuad);
 
     const CompiledGraphInput input = builder.Finish();
@@ -267,13 +267,13 @@ TEST(RenderPassTest, AddRenderPassEightArgumentOverloadStampsOwnerFromOpenScope)
 
     const RenderFeatureScope scope(builder, "Shadow");
     builder.AddRenderPass(
-        "AtmosphereSkyViewLutPass", PassKind::Compute, ViewScope::GameView, RenderPassCategory::General,
+        "AtmosphereSkyViewLutPass", PassKind::Compute, ViewScope::Primary, RenderPassCategory::General,
         [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::DrawQuad,
         RenderPassEvent::PreOpaques);
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
-    EXPECT_EQ(input.passes[0].viewScope, ViewScope::GameView);
+    EXPECT_EQ(input.passes[0].viewScope, ViewScope::Primary);
     EXPECT_EQ(input.passes[0].renderPassEvent, RenderPassEvent::PreOpaques);
 
     PassDebugMetadata metadata;
@@ -292,7 +292,7 @@ TEST(RenderPassTest, AddRenderPassEightArgumentOverloadDefaultsToEngineUnownedWh
     builder.SetDebugMetadataSink(&sink);
 
     builder.AddRenderPass(
-        "RenderOpaque", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+        "RenderOpaque", PassKind::Graphics, ViewScope::Primary, RenderPassCategory::General,
         [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
 
     const CompiledGraphInput input = builder.Finish();

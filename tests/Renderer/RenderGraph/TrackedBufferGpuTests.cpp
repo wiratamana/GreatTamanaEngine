@@ -24,7 +24,7 @@ bool AddTransferPass(RenderGraphBuilder& builder, const char* name, const Transf
     if (!body.has_value()) {
         return false;
     }
-    builder.AddRenderPass(name, DefaultPassKind(DeclarativePassType::Transfer), ViewScope::GameView,
+    builder.AddRenderPass(name, DefaultPassKind(DeclarativePassType::Transfer), ViewScope::Primary,
         RenderPassCategory::General, body->setup, body->execute, DefaultDrawKind(DeclarativePassType::Transfer),
         RenderPassEvent::Opaques);
     return true;
@@ -64,7 +64,7 @@ TEST(TrackedBufferGpuTest, ComputeOverGraphBuffersIsOrderedAfterFillAndBeforeRea
         const BufferHandle cntHost = builder.Import(counterHost);
 
         AddTransferPass(builder, "Test.Fill", TransferRecord::Fill(cnt, 7u));
-        dispatched = ComputePass(builder, shader, "Test.Compute", ViewScope::GameView, RenderPassEvent::Opaques)
+        dispatched = ComputePass(builder, shader, "Test.Compute", ViewScope::Primary, RenderPassEvent::Opaques)
                          .Bind("inputData", in)
                          .Bind("outputData", out)
                          .Bind("counter", cnt)
@@ -135,14 +135,14 @@ TEST(TrackedBufferGpuTest, ADispatchOverThePerAxisGroupLimitIsRefused)
         const BufferHandle out = builder.Import(output);
         const BufferHandle cnt = builder.Import(counter);
         constexpr std::uint32_t kLocal = 64;
-        refused = ComputePass(builder, shader, "Test.TooBig", ViewScope::GameView, RenderPassEvent::Opaques)
+        refused = ComputePass(builder, shader, "Test.TooBig", ViewScope::Primary, RenderPassEvent::Opaques)
                       .Bind("inputData", in)
                       .Bind("outputData", out)
                       .Bind("counter", cnt)
                       .Push(1u)
                       .Dispatch(Extent2D{ kLocal * 65535u + 1u, 1 });
         passesAfterRefusal = builder.DeclaredPassCount();
-        accepted = ComputePass(builder, shader, "Test.AtLimit", ViewScope::GameView, RenderPassEvent::Opaques)
+        accepted = ComputePass(builder, shader, "Test.AtLimit", ViewScope::Primary, RenderPassEvent::Opaques)
                        .Bind("inputData", in)
                        .Bind("outputData", out)
                        .Bind("counter", cnt)

@@ -65,7 +65,7 @@ void SsgiFeature::TracePass(fx::PostOpaqueFrame& f)
         view.snapshot = snap;
     };
 
-    const bool sceneViewOff = f.Scope() == rg::ViewScope::SceneView && !cfg.applyInSceneView;
+    const bool sceneViewOff = f.Scope() == rg::ViewScope::Secondary && !cfg.applyInSceneView;
     if (sceneViewOff || cfg.intensity <= 0.0f) {
         bail(SsgiFrameStatus::PassDisabled);
         return;

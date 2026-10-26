@@ -36,7 +36,7 @@ TEST(FxSharedResourceTest, ASharedFrameNamesItsTargetsWithoutAViewSuffix)
     const SharedFrame frame(FakeScene(), 3);
     EXPECT_EQ(frame.Scope(), rg::ViewScope::Shared);
     EXPECT_EQ(PersistentName("Lut.Transmittance", frame.Scope()), "Lut.Transmittance");
-    EXPECT_EQ(PersistentName("Lut.Transmittance", rg::ViewScope::GameView), "Lut.Transmittance.GameView");
+    EXPECT_EQ(PersistentName("Lut.Transmittance", rg::ViewScope::Primary), "Lut.Transmittance.GameView");
 }
 
 TEST(FxSharedResourceTest, ResourcesOfASharedFrameWithoutAContextAreInertAndLogOnce)
@@ -69,7 +69,7 @@ TEST(FxBlitTest, TheKitFilterReachesTheBlitRecord)
         const rg::TextureHandle dst = builder.CreateTexture("BlitDst", rg::TextureDesc{ 32, 32, PixelFormat::RGBA8_UNorm });
         detail::FrameContext context;
         context.builder = &builder;
-        context.scope = rg::ViewScope::GameView;
+        context.scope = rg::ViewScope::Primary;
         context.event = rg::RenderPassEvent::AfterOpaques;
         context.serial = 1;
         PreOpaqueFrame frame(View{}, FakeScene(), 1, &context);
@@ -80,7 +80,7 @@ TEST(FxBlitTest, TheKitFilterReachesTheBlitRecord)
         ASSERT_TRUE(input.passes[0].blitCommand.has_value());
         EXPECT_EQ(input.passes[0].blitCommand->filter,
             filter == BlitFilter::Nearest ? rg::BlitFilter::Nearest : rg::BlitFilter::Linear);
-        EXPECT_EQ(input.passes[0].viewScope, rg::ViewScope::GameView);
+        EXPECT_EQ(input.passes[0].viewScope, rg::ViewScope::Primary);
     }
 }
 

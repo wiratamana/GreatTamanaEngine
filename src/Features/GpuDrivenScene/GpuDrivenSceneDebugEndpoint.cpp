@@ -17,8 +17,8 @@ struct ScopeName {
     std::string_view prefix;
 };
 constexpr std::array kScopes{
-    ScopeName{ rg::ViewScope::GameView, "game." },
-    ScopeName{ rg::ViewScope::SceneView, "scene." },
+    ScopeName{ rg::ViewScope::Primary, "game." },
+    ScopeName{ rg::ViewScope::Secondary, "scene." },
 };
 
 // State keys that cannot be set.

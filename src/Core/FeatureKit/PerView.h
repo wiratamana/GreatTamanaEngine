@@ -4,7 +4,7 @@
 
 namespace gte::fx {
 
-// One T per view scope (Shared, GameView, SceneView).
+// One T per view scope (Shared, Primary, Secondary).
 template <typename T>
 using PerView = rg::PerView<T>;
 

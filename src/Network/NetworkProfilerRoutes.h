@@ -1,9 +1,10 @@
 #pragma once
 
-// HTTP face of the profiler: GET /profiler, /profiler/frames, /profiler/spikes and POST /profiler/set.
+// HTTP face of the profiler: GET /profiler, /profiler/frames, /profiler/spikes, /profiler/spike and POST /profiler/set.
 // Every number in a reply sits inside a metric object, except the keys in kProfilerFixedNumberKeys.
 
 #include "../Profiling/ProfilerSnapshot.h"
+#include "../Profiling/SpikeDetail.h"
 
 #include <nlohmann/json.hpp>
 
@@ -27,10 +28,11 @@ class ProfilerSnapshotBridge;
 namespace gte::Network {
 
 // Plain numbers allowed outside a metric object.
-inline constexpr std::array<std::string_view, 3> kProfilerFixedNumberKeys{
+inline constexpr std::array<std::string_view, 4> kProfilerFixedNumberKeys{
     "schema_version",
     "frame_index",
     "thread_slot",
+    "depth",
 };
 
 // Keys every metric object carries.
@@ -70,24 +72,51 @@ ProfilerReply BuildProfilerReply(
 // Reply for a route whose bridge is missing (503) or whose profiler is compiled out (status object).
 ProfilerReply BuildProfilerUnavailableReply(bool bridgePresent);
 
-// Parsed POST /profiler/set. Either switch may be left out.
+// Parsed POST /profiler/set. Every field may be left out, but at least one must be given.
 struct ParsedProfilerSet {
     bool valid = false;
     std::string errorMessage;
     std::optional<bool> capture;
     std::optional<bool> displayPause;
+    std::optional<std::uint64_t> pin;   // frame index of a frozen spike
+    std::optional<std::uint64_t> unpin; // frame index of a frozen spike
+    std::optional<float> spikeThresholdMs; // 0 selects the median rule
 };
 
-// Query/form values come first; a JSON body {"capture":bool,"display_pause":bool} fills what they leave out.
-ParsedProfilerSet ParseProfilerSet(const std::string& captureText, const std::string& displayPauseText, const std::string& body);
+// Query/form values come first; a JSON body {"capture","display_pause","pin","unpin","spike_threshold_ms"} fills what
+// they leave out.
+ParsedProfilerSet ParseProfilerSet(const std::string& captureText, const std::string& displayPauseText,
+    const std::string& body, const std::string& pinText = {}, const std::string& unpinText = {},
+    const std::string& spikeThresholdText = {});
+
+// State after a set request.
+struct ProfilerSetState {
+    bool capture = true;
+    bool displayPaused = false;
+    std::size_t pinnedSpikes = 0;
+    float spikeThresholdMs = 0.0f;
+};
 
 // Body of POST /profiler/set: the switch state after the change.
+std::string BuildProfilerSetReplyJson(const ProfilerSetState& state);
 std::string BuildProfilerSetReplyJson(bool capture, bool displayPaused);
+
+// Whole-number frame index of a frozen spike (query `index`).
+std::optional<std::uint64_t> ParseSpikeFrameIndex(const std::string& text);
+
+// Body of GET /profiler/spike: one frozen frame with its scope tree.
+nlohmann::json ProfilerSpikeDetailToJson(const Profiling::SpikeDetail& detail);
+
+// 200 with the frame, 404 when it is not frozen (never was, or evicted).
+ProfilerReply BuildProfilerSpikeReply(const std::optional<Profiling::SpikeDetail>& detail, std::uint64_t frameIndex);
+
+// Outcome text of a failed pin or unpin: status 404 for an unknown frame, 409 for the pin limit.
+ProfilerReply BuildProfilerPinErrorReply(bool limitReached, std::uint64_t frameIndex, std::size_t pinned);
 
 // Refuses a browser request with 403 and returns true.
 using BrowserRefusal = bool (*)(const httplib::Request&, httplib::Response&);
 
-// Registers the four routes. A null bridge makes them answer 503.
+// Registers the five routes. A null bridge makes them answer 503.
 void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bridge, BrowserRefusal refuseBrowser);
 
 } // namespace gte::Network

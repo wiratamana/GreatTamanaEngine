@@ -121,7 +121,7 @@ const std::array<Entity, 1> kPartB = { MakeEntity(3) };
 ClusterClaimContext GameContext()
 {
     ClusterClaimContext context;
-    context.scope = rg::ViewScope::GameView;
+    context.scope = rg::ViewScope::Primary;
     return context;
 }
 

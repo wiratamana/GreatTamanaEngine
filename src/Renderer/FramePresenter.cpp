@@ -117,6 +117,7 @@ void FramePresenter::RecreateSwapchain()
         return;
     }
 
+    m_vulkanDevice->Waits().ReportMarker("Periodic.SwapchainRecreate");
     m_swapchain.Recreate(m_pendingWidth, m_pendingHeight);
 
     // The image count can change, so the per-image semaphores are rebuilt too.

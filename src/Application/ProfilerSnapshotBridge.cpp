@@ -84,4 +84,34 @@ bool ProfilerSnapshotBridge::DisplayPaused() const noexcept
     return Profiling::FrameProfiler::Instance().IsDisplayPaused();
 }
 
+Profiling::PinResult ProfilerSnapshotBridge::PinSpike(std::uint64_t frameIndex) noexcept
+{
+    return Profiling::FrameProfiler::Instance().Spikes().Pin(frameIndex);
+}
+
+bool ProfilerSnapshotBridge::UnpinSpike(std::uint64_t frameIndex) noexcept
+{
+    return Profiling::FrameProfiler::Instance().Spikes().Unpin(frameIndex);
+}
+
+std::size_t ProfilerSnapshotBridge::PinnedSpikes() const noexcept
+{
+    return Profiling::FrameProfiler::Instance().Spikes().PinnedCount();
+}
+
+void ProfilerSnapshotBridge::SetSpikeThresholdMs(float milliseconds) noexcept
+{
+    Profiling::FrameProfiler::Instance().SetSpikeThresholdMs(milliseconds);
+}
+
+float ProfilerSnapshotBridge::SpikeThresholdMs() const noexcept
+{
+    return Profiling::FrameProfiler::Instance().SpikeThresholdMs();
+}
+
+std::optional<Profiling::SpikeDetail> ProfilerSnapshotBridge::SpikeFrame(std::uint64_t frameIndex) const
+{
+    return Profiling::BuildSpikeDetail(Profiling::FrameProfiler::Instance().Spikes(), frameIndex);
+}
+
 } // namespace gte

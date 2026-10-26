@@ -86,11 +86,11 @@ TEST(BoundedRetryGatesTest, BindingKeyViewFindsTheOwningKey)
 {
     BindingGates gates;
     const auto layout = reinterpret_cast<VkDescriptorSetLayout>(static_cast<std::uintptr_t>(0x10));
-    gates.OnFailure(ComputeBindingKey{ std::string("Pass.A"), ViewScope::GameView, layout }, 5);
+    gates.OnFailure(ComputeBindingKey{ std::string("Pass.A"), ViewScope::Primary, layout }, 5);
 
-    const ComputeBindingKeyView same{ "Pass.A", ViewScope::GameView, layout };
-    const ComputeBindingKeyView otherScope{ "Pass.A", ViewScope::SceneView, layout };
-    const ComputeBindingKeyView otherLayout{ "Pass.A", ViewScope::GameView, reinterpret_cast<VkDescriptorSetLayout>(static_cast<std::uintptr_t>(0x20)) };
+    const ComputeBindingKeyView same{ "Pass.A", ViewScope::Primary, layout };
+    const ComputeBindingKeyView otherScope{ "Pass.A", ViewScope::Secondary, layout };
+    const ComputeBindingKeyView otherLayout{ "Pass.A", ViewScope::Primary, reinterpret_cast<VkDescriptorSetLayout>(static_cast<std::uintptr_t>(0x20)) };
     EXPECT_FALSE(gates.ShouldAttempt(same, 6));
     EXPECT_TRUE(gates.ShouldAttempt(otherScope, 6));
     EXPECT_TRUE(gates.ShouldAttempt(otherLayout, 6));
@@ -101,15 +101,15 @@ TEST(BoundedRetryGatesTest, EraseIfByLayoutForgetsEveryPassOnThatLayout)
     BindingGates gates;
     const auto layoutA = reinterpret_cast<VkDescriptorSetLayout>(static_cast<std::uintptr_t>(0x10));
     const auto layoutB = reinterpret_cast<VkDescriptorSetLayout>(static_cast<std::uintptr_t>(0x20));
-    gates.OnFailure(ComputeBindingKey{ "P1", ViewScope::GameView, layoutA }, 0);
-    gates.OnFailure(ComputeBindingKey{ "P2", ViewScope::SceneView, layoutA }, 0);
-    gates.OnFailure(ComputeBindingKey{ "P3", ViewScope::GameView, layoutB }, 0);
+    gates.OnFailure(ComputeBindingKey{ "P1", ViewScope::Primary, layoutA }, 0);
+    gates.OnFailure(ComputeBindingKey{ "P2", ViewScope::Secondary, layoutA }, 0);
+    gates.OnFailure(ComputeBindingKey{ "P3", ViewScope::Primary, layoutB }, 0);
 
     gates.EraseIf([layoutA](const ComputeBindingKey& key) { return key.layout == layoutA; });
 
-    EXPECT_TRUE(gates.ShouldAttempt(ComputeBindingKeyView{ "P1", ViewScope::GameView, layoutA }, 1));
-    EXPECT_TRUE(gates.ShouldAttempt(ComputeBindingKeyView{ "P2", ViewScope::SceneView, layoutA }, 1));
-    EXPECT_FALSE(gates.ShouldAttempt(ComputeBindingKeyView{ "P3", ViewScope::GameView, layoutB }, 1));
+    EXPECT_TRUE(gates.ShouldAttempt(ComputeBindingKeyView{ "P1", ViewScope::Primary, layoutA }, 1));
+    EXPECT_TRUE(gates.ShouldAttempt(ComputeBindingKeyView{ "P2", ViewScope::Secondary, layoutA }, 1));
+    EXPECT_FALSE(gates.ShouldAttempt(ComputeBindingKeyView{ "P3", ViewScope::Primary, layoutB }, 1));
 }
 
 } // namespace

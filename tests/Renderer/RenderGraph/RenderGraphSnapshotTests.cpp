@@ -442,7 +442,7 @@ TEST(RenderGraphSnapshotTest, ViewScopeIsCopiedThroughForSurvivingAndCulledPasse
     // A surviving compute pass explicitly tagged GameView via the new
     // 4-argument AddComputePass() overload.
     builder.AddComputePass(
-        "AtmosphereSkyViewLutPass", ViewScope::GameView,
+        "AtmosphereSkyViewLutPass", ViewScope::Primary,
         [&](RenderGraphBuilder::PassBuilder& pass) {
             skyView = builder.CreateTexture("SkyView", MakeTextureDesc());
             pass.WriteTexture(skyView);
@@ -452,7 +452,7 @@ TEST(RenderGraphSnapshotTest, ViewScopeIsCopiedThroughForSurvivingAndCulledPasse
     // A CULLED compute pass explicitly tagged SceneView - must still
     // truthfully report its own viewScope even though it never survives.
     builder.AddComputePass(
-        "ComputeBlurValidation", ViewScope::SceneView,
+        "ComputeBlurValidation", ViewScope::Secondary,
         [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteTexture(deadEnd); }, NoOpExecute);
 
     CompiledGraphInput input = builder.Finish();
@@ -470,12 +470,12 @@ TEST(RenderGraphSnapshotTest, ViewScopeIsCopiedThroughForSurvivingAndCulledPasse
     const RenderGraphPassSnapshot& skyViewPass = snapshot.passesInExecutionOrder[1];
     EXPECT_EQ(skyViewPass.name, "AtmosphereSkyViewLutPass");
     EXPECT_FALSE(skyViewPass.isCulled);
-    EXPECT_EQ(skyViewPass.viewScope, ViewScope::GameView);
+    EXPECT_EQ(skyViewPass.viewScope, ViewScope::Primary);
 
     const RenderGraphPassSnapshot& culledPass = snapshot.passesInExecutionOrder[2];
     EXPECT_EQ(culledPass.name, "ComputeBlurValidation");
     EXPECT_TRUE(culledPass.isCulled);
-    EXPECT_EQ(culledPass.viewScope, ViewScope::SceneView);
+    EXPECT_EQ(culledPass.viewScope, ViewScope::Secondary);
 }
 
 // --- Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2), --
@@ -493,7 +493,7 @@ TEST(RenderGraphSnapshotTest, DrawKindIsCopiedThroughForSurvivingPass)
     const TextureHandle output = builder.CreateTexture("Output", MakeTextureDesc());
 
     builder.AddRenderPass(
-        "DrawSkyBackground", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+        "DrawSkyBackground", PassKind::Graphics, ViewScope::Primary, RenderPassCategory::General,
         [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute,
         RenderPassDrawKind::DrawQuad);
 
@@ -539,7 +539,7 @@ TEST(RenderGraphSnapshotTest, DrawKindIsCopiedThroughForCulledPass)
         [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute);
 
     builder.AddRenderPass(
-        "CulledDrawQuadPass", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+        "CulledDrawQuadPass", PassKind::Graphics, ViewScope::Primary, RenderPassCategory::General,
         [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(deadEnd); }, NoOpExecute,
         RenderPassDrawKind::DrawQuad);
 
@@ -570,7 +570,7 @@ TEST(RenderGraphSnapshotTest, TagsIsCopiedThroughForSurvivingPass)
     {
         const rg::RenderFeatureScope scope(builder, "SkyFeature");
         builder.AddRenderPass(
-            "DrawSkyBackground", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+            "DrawSkyBackground", PassKind::Graphics, ViewScope::Primary, RenderPassCategory::General,
             [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute,
             RenderPassDrawKind::DrawQuad, RenderPassEvent::Opaques);
     }
@@ -606,7 +606,7 @@ TEST(RenderGraphSnapshotTest, TagsIsCopiedThroughForCulledPass)
     {
         const rg::RenderFeatureScope scope(builder, "CulledFeature");
         builder.AddRenderPass(
-            "CulledTaggedPass", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+            "CulledTaggedPass", PassKind::Graphics, ViewScope::Primary, RenderPassCategory::General,
             [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(deadEnd); }, NoOpExecute,
             RenderPassDrawKind::DrawQuad, RenderPassEvent::Opaques);
     }
@@ -640,7 +640,7 @@ TEST(RenderGraphSnapshotTest, SharedSinkAcrossTwoDeclarationCyclesNeverLeaksStal
         {
             const rg::RenderFeatureScope scope(builder, "CycleOneFeature");
             builder.AddRenderPass(
-                "CycleOnePass", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+                "CycleOnePass", PassKind::Graphics, ViewScope::Primary, RenderPassCategory::General,
                 [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute,
                 RenderPassDrawKind::DrawQuad, RenderPassEvent::Opaques);
         }
@@ -666,7 +666,7 @@ TEST(RenderGraphSnapshotTest, SharedSinkAcrossTwoDeclarationCyclesNeverLeaksStal
         {
             const rg::RenderFeatureScope scope(builder, "CycleTwoFeature");
             builder.AddRenderPass(
-                "CycleTwoPass", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+                "CycleTwoPass", PassKind::Graphics, ViewScope::Primary, RenderPassCategory::General,
                 [&](RenderGraphBuilder::PassBuilder& pass) { pass.WriteColorAttachment(output); }, NoOpExecute,
                 RenderPassDrawKind::DrawMesh, RenderPassEvent::Opaques);
         }

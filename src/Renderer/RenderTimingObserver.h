@@ -98,6 +98,9 @@ public:
     virtual void OnPassRecordBegin(const char* pass) noexcept = 0;
     virtual void OnPassRecordEnd() noexcept = 0;
 
+    // Instant event for periodic or request-driven work. Ignored unless overridden.
+    virtual void OnMarker(const char* name) noexcept { static_cast<void>(name); }
+
 protected:
     ~IRenderTimingObserver() = default;
 };

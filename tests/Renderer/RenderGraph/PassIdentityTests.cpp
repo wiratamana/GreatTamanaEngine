@@ -27,7 +27,7 @@ void DeclareBound(RenderGraphBuilder& builder, const char* name, ViewScope scope
 TEST(PassIdentityTest, FirstDeclarationKeepsItsLayoutAndRuns)
 {
     RenderGraphBuilder builder;
-    DeclareBound(builder, "Pass", ViewScope::GameView);
+    DeclareBound(builder, "Pass", ViewScope::Primary);
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
@@ -39,8 +39,8 @@ TEST(PassIdentityTest, FirstDeclarationKeepsItsLayoutAndRuns)
 TEST(PassIdentityTest, SameNameAndScopeTwiceRefusesTheSecond)
 {
     RenderGraphBuilder builder;
-    DeclareBound(builder, "Pass", ViewScope::GameView);
-    DeclareBound(builder, "Pass", ViewScope::GameView);
+    DeclareBound(builder, "Pass", ViewScope::Primary);
+    DeclareBound(builder, "Pass", ViewScope::Primary);
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 2u);
@@ -55,8 +55,8 @@ TEST(PassIdentityTest, SameNameAndScopeTwiceRefusesTheSecond)
 TEST(PassIdentityTest, SameNameInDifferentViewsIsAllowed)
 {
     RenderGraphBuilder builder;
-    DeclareBound(builder, "Pass", ViewScope::GameView);
-    DeclareBound(builder, "Pass", ViewScope::SceneView);
+    DeclareBound(builder, "Pass", ViewScope::Primary);
+    DeclareBound(builder, "Pass", ViewScope::Secondary);
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 2u);
@@ -67,8 +67,8 @@ TEST(PassIdentityTest, SameNameInDifferentViewsIsAllowed)
 TEST(PassIdentityTest, DifferentNamesInOneViewAreAllowed)
 {
     RenderGraphBuilder builder;
-    DeclareBound(builder, "PassA", ViewScope::GameView);
-    DeclareBound(builder, "PassB", ViewScope::GameView);
+    DeclareBound(builder, "PassA", ViewScope::Primary);
+    DeclareBound(builder, "PassB", ViewScope::Primary);
 
     const CompiledGraphInput input = builder.Finish();
     EXPECT_FALSE(input.passes[0].skipExecute);
@@ -93,9 +93,9 @@ TEST(PassIdentityTest, NamesComparedByContentNotPointer)
 TEST(PassIdentityTest, PassesWithoutBindingLayoutNeverClaimAnIdentity)
 {
     RenderGraphBuilder builder;
-    builder.AddPass("Plain", ViewScope::GameView, [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
-    builder.AddPass("Plain", ViewScope::GameView, [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
-    DeclareBound(builder, "Plain", ViewScope::GameView);
+    builder.AddPass("Plain", ViewScope::Primary, [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
+    builder.AddPass("Plain", ViewScope::Primary, [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute);
+    DeclareBound(builder, "Plain", ViewScope::Primary);
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 3u);
@@ -110,7 +110,7 @@ TEST(PassIdentityTest, RefusedPassKeepsItsResourceDeclarationsForBarriers)
     const TextureHandle texture = builder.CreateTexture("Tex", TextureDesc{ 8, 8, PixelFormat::RGBA8_UNorm, false });
     for (int i = 0; i < 2; ++i) {
         builder.AddComputePass(
-            "Pass", ViewScope::GameView,
+            "Pass", ViewScope::Primary,
             [&](RenderGraphBuilder::PassBuilder& pass) {
                 pass.BindDescriptorSetLayout(kLayout);
                 pass.WriteStorageImage(0, texture);
@@ -166,8 +166,8 @@ TEST(PassIdentityTest, SameNameScopeAndInstanceTwiceRefusesTheSecond)
 TEST(PassIdentityTest, InstanceZeroKeepsTheOldIdentityRule)
 {
     RenderGraphBuilder builder;
-    DeclareBound(builder, "Pass", ViewScope::GameView);
-    DeclareBoundInstance(builder, "Pass", ViewScope::GameView, 0);
+    DeclareBound(builder, "Pass", ViewScope::Primary);
+    DeclareBoundInstance(builder, "Pass", ViewScope::Primary, 0);
 
     const CompiledGraphInput input = builder.Finish();
     EXPECT_TRUE(input.passes[1].skipExecute);

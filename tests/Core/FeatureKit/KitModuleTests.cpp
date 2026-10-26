@@ -29,7 +29,7 @@ using test::ScopedLogSinkInstall;
 View GameView()
 {
     View view;
-    view.scope = rg::ViewScope::GameView;
+    view.scope = rg::ViewScope::Primary;
     view.extent = Extent2D{ 64, 32 };
     view.eye = Vec3(1.0f, 2.0f, 3.0f);
     return view;
@@ -86,11 +86,11 @@ TEST(KitModuleRunTest, TheCallbackRunsWithAFilledViewAndTheFrameSerial)
     });
 
     EXPECT_TRUE(runner.Run(registration, GameView(), 4));
-    EXPECT_EQ(seen.scope, rg::ViewScope::GameView);
+    EXPECT_EQ(seen.scope, rg::ViewScope::Primary);
     EXPECT_EQ(seen.extent.width, 64u);
     EXPECT_EQ(seen.extent.height, 32u);
     EXPECT_FLOAT_EQ(seen.eye.y, 2.0f);
-    EXPECT_EQ(serial, FrameSerial(4, rg::ViewScope::GameView));
+    EXPECT_EQ(serial, FrameSerial(4, rg::ViewScope::Primary));
 }
 
 TEST(KitModuleRunTest, ADisabledGateSkipsTheCallback)
@@ -151,7 +151,7 @@ TEST(KitModuleRunTest, ASharedCallbackRunsOncePerFrameForTwoViews)
     SharedOncePerFrame latch;
 
     View sceneView = GameView();
-    sceneView.scope = rg::ViewScope::SceneView;
+    sceneView.scope = rg::ViewScope::Secondary;
     EXPECT_TRUE(runner.Run(registration, GameView(), 7, &latch));
     EXPECT_FALSE(runner.Run(registration, sceneView, 7, &latch));
     EXPECT_EQ(calls, 1);
@@ -181,9 +181,9 @@ TEST(KitModuleRunTest, AThrowingSharedCallbackIsNotRetriedInTheSameFrame)
 TEST(KitModuleRunTest, FrameSerialsAreNonZeroAndDifferPerFrameAndView)
 {
     EXPECT_NE(FrameSerial(0, rg::ViewScope::Shared), 0u);
-    EXPECT_NE(FrameSerial(5, rg::ViewScope::GameView), FrameSerial(5, rg::ViewScope::SceneView));
-    EXPECT_NE(FrameSerial(5, rg::ViewScope::GameView), FrameSerial(6, rg::ViewScope::GameView));
-    EXPECT_NE(FrameSerial(5, rg::ViewScope::Shared), FrameSerial(5, rg::ViewScope::GameView));
+    EXPECT_NE(FrameSerial(5, rg::ViewScope::Primary), FrameSerial(5, rg::ViewScope::Secondary));
+    EXPECT_NE(FrameSerial(5, rg::ViewScope::Primary), FrameSerial(6, rg::ViewScope::Primary));
+    EXPECT_NE(FrameSerial(5, rg::ViewScope::Shared), FrameSerial(5, rg::ViewScope::Primary));
 }
 
 // --- Headless Core: the real registration path --------------------------------------------------

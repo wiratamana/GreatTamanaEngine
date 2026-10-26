@@ -423,7 +423,7 @@ module or adding a new endpoint:
   while the main thread is blocked. Every number sits inside a metric object
   `{"value","unit","kind","status","age_frames","reason"}`; `value` is `null` unless the status is `Present`, `Partial` or
   `Stale`. Statuses: `Present`, `Partial`, `Stale`, `Absent`, `Unsupported`, `Error`, `Inactive`. The only plain numbers are
-  `schema_version`, `frame_index` and `thread_slot`. The snapshot is built only after a request asked for it in the last 2 s,
+  `schema_version`, `frame_index`, `thread_slot` and `depth`. The snapshot is built only after a request asked for it in the last 2 s,
   so the first answer after a pause may take one frame. `503` before the first snapshot and when the bridge is missing. With
   `GTE_ENABLE_PROFILER=OFF` every route answers `{"success":true,"schema_version":1,"state":"compiled_out"}`.
   - **`GET /profiler`**: `success`, `schema_version`, `frame_index`, `state`, `has_frame`, `snapshot_age`, `capture`,
@@ -432,14 +432,33 @@ module or adding a new endpoint:
     `memory{total}`, `scopes[{name,total,self,calls}]` (top-level scopes, largest first), `scope_rows_dropped`,
     `checks[{id,status,count,text}]`, `drops{late_scopes,foreign_scopes,lost_worker_events,dropped_scopes,dropped_gpu_frames}`,
     `device_state{device_lost,consecutive_frame_timeouts,abandoned_objects}`, `live_block[{thread_slot,site,detail,elapsed}]`
-    (waits in progress now), `verdict{text}`, `spikes_available`. A view without a target reads `Inactive`; capture off reads
-    `Absent` with reason `capture_off`.
+    (waits in progress now), `spikes_available`, and:
+    - `verdict{text,kind,frames,frame,cpu_work,gpu_wait,present_wait,other_wait,untracked,stall_share,stall_site}`. `kind` is
+      `unknown`, `unreliable`, `stalled`, `present_limited`, `gpu_limited`, `cpu_limited` or `serial`. Every number is a median
+      over the newest 30 frames and the `text` prints them. Rules, in order: untracked above 10% is `unreliable`, other waits
+      above 20% is `stalled` (`stall_site` names the longest wait), present waits above 30% or GPU waits from 40% is
+      `present_limited` or `gpu_limited` (the larger share wins), CPU work from 60% is `cpu_limited`, anything else `serial`.
+    - `overhead{cost_per_event,estimated,share,warn}`: an `estimated` metric (events recorded times the cost of one event, which
+      is measured once at startup). `warn` is true above 3% of the frame.
+
+    A view without a target reads `Inactive`; capture off reads `Absent` with reason `capture_off`.
   - **`GET /profiler/frames[?count=N]`**: the newest `N` frames (default 30, clamped to 1..120), oldest first, each
     `{frame_index,cpu,gpu_span,gpu_primary,gpu_secondary}`. A count that is not a whole number is a `400`.
-  - **`GET /profiler/spikes`**: `spikes_available` and `spikes[{frame_index,cpu,classification}]`.
-  - **`POST /profiler/set`** with `capture` and/or `display_pause` as query values (`true`, `false`, `1`, `0`) or a JSON body
-    `{"capture":bool,"display_pause":bool}`. Reply `{"success":true,"capture":bool,"display_paused":bool}`. It passes the
-    browser guard. Neither value given is a `400`.
+  - **`GET /profiler/spikes`**: `spikes_available`, `frozen_total`, `pinned`, `pin_limit` (metrics) and `spikes[...]`, newest
+    first, each `{frame_index,cpu,median,excess,dominant_self,gpu_span,classification,cause,marker_present,pinned,gpu_attached}`.
+    A frame is frozen when it takes more than twice the median of the previous 60 frames (or more than the
+    `spike_threshold_ms` when that is set). `classification` is `explained` when a marker sits on the frame or the dominant
+    scope covers at least half of the excess, otherwise `unexplained`. 16 frames are kept; the oldest unpinned one is evicted.
+    A late GPU report (up to 2 frames) fills `gpu_span` and sets `gpu_attached`.
+  - **`GET /profiler/spike?index=F`**: one frozen frame by its `frame_index` `F` with `scopes[{name,kind,depth,start,duration,self}]`
+    in time order (`start` counts from the frame start), `gpu_views`, `dropped_scopes`. A bad index is a `400`, a frame that was
+    never frozen or was evicted is a `404`.
+  - **`POST /profiler/set`** with `capture`, `display_pause`, `pin`, `unpin` (a spike `frame_index`) and/or `spike_threshold_ms`
+    (0 to 10000, 0 selects the median rule) as query values or a JSON body
+    `{"capture":bool,"display_pause":bool,"pin":N,"unpin":N,"spike_threshold_ms":x}`. Reply
+    `{"success":true,"capture":bool,"display_paused":bool,"pinned_spikes":metric,"spike_threshold":metric}`. At most 8 spikes
+    can be pinned: a ninth pin is a `409`, an unknown frame a `404`. A refused pin or unpin changes nothing. It passes the
+    browser guard. No value given is a `400`.
 
 
 - **`POST /instantiate_asset`** (`task_manager/stl-parser-2` campaign,

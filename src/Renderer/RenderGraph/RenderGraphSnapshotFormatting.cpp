@@ -76,9 +76,9 @@ const char* ToString(ViewScope scope) noexcept
     switch (scope) {
     case ViewScope::Shared:
         return "Shared";
-    case ViewScope::GameView:
+    case ViewScope::Primary:
         return "GameView";
-    case ViewScope::SceneView:
+    case ViewScope::Secondary:
         return "SceneView";
     }
     return "Unknown";

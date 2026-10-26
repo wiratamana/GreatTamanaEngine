@@ -39,7 +39,7 @@ struct Harness {
 
 TEST(FxTransientTargetTest, AcquireCreatesAKeptPoolTextureNamedPerView)
 {
-    for (const rg::ViewScope scope : { rg::ViewScope::GameView, rg::ViewScope::SceneView, rg::ViewScope::Shared }) {
+    for (const rg::ViewScope scope : { rg::ViewScope::Primary, rg::ViewScope::Secondary, rg::ViewScope::Shared }) {
         Harness h(scope);
         PostOpaqueFrame frame(View{}, Scene(), 1, rg::TextureHandle{}, rg::TextureHandle{}, &h.context);
         TransientTarget target("Scratch");
@@ -63,7 +63,7 @@ TEST(FxTransientTargetTest, AcquireCreatesAKeptPoolTextureNamedPerView)
 
 TEST(FxTransientTargetTest, StorageCanBeSwitchedOffAndAZeroExtentIsClamped)
 {
-    Harness h(rg::ViewScope::GameView);
+    Harness h(rg::ViewScope::Primary);
     PostOpaqueFrame frame(View{}, Scene(), 1, rg::TextureHandle{}, rg::TextureHandle{}, &h.context);
     TransientTarget target("Scratch");
 
@@ -77,7 +77,7 @@ TEST(FxTransientTargetTest, AnUndefinedFormatIsRefusedAndLoggedOnce)
 {
     RecordingLogSink sink;
     const ScopedLogSinkInstall guard(&sink);
-    Harness h(rg::ViewScope::GameView);
+    Harness h(rg::ViewScope::Primary);
     PostOpaqueFrame frame(View{}, Scene(), 1, rg::TextureHandle{}, rg::TextureHandle{}, &h.context);
     TransientTarget target("Scratch");
 

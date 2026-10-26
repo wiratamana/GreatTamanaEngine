@@ -118,7 +118,7 @@ TEST(FrameDebuggerCoverageCheckerTest, CulledPassOmittedFromTreeIsNeverReported)
     EXPECT_TRUE(missing.empty());
 }
 
-// (d) - a ViewScope::SceneView pass omitted -> NOT reported (the Frame
+// (d) - a ViewScope::Secondary pass omitted -> NOT reported (the Frame
 // Debugger tree is Game-View-only, by design - BuildRealFrameDebuggerSnapshot()'s
 // own documented, honest SceneView exclusion, not a contradiction).
 TEST(FrameDebuggerCoverageCheckerTest, SceneViewPassOmittedFromTreeIsNeverReported)
@@ -126,7 +126,7 @@ TEST(FrameDebuggerCoverageCheckerTest, SceneViewPassOmittedFromTreeIsNeverReport
     std::vector<rg::RenderGraphPassSnapshot> passes;
     passes.push_back(MakePass("RenderOpaque"));
     passes.push_back(MakePass("AtmosphereAerialPerspectiveCompositePass", /*isCulled=*/false,
-        rg::RenderPassCategory::General, rg::ViewScope::SceneView));
+        rg::RenderPassCategory::General, rg::ViewScope::Secondary));
 
     const FrameDebuggerSnapshot tree = MakeTree({ MakeRealPassLeaf("RenderOpaque") });
 

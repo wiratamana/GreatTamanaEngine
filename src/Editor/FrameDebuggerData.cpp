@@ -211,7 +211,7 @@ const rg::RenderGraphPassSnapshot* FindViewRegionPivot(
     const std::vector<rg::RenderGraphPassSnapshot>& passesInExecutionOrder)
 {
     for (const rg::RenderGraphPassSnapshot& pass : passesInExecutionOrder) {
-        if (pass.renderPassEvent >= rg::RenderPassEvent::Opaques && pass.viewScope != rg::ViewScope::SceneView) {
+        if (pass.renderPassEvent >= rg::RenderPassEvent::Opaques && pass.viewScope != rg::ViewScope::Secondary) {
             return &pass;
         }
     }
@@ -233,7 +233,7 @@ int FindPostGameViewCompositePassExecutionIndex(const rg::RenderGraphSnapshot& g
         // is valid for any `PassKind`. Not one of the 3 sites the source
         // document names for conversion - see PHASE0_MASTER_STRATEGY.md's
         // Locked Decision 2.
-        if (pass.kind != rg::PassKind::Compute || pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
+        if (pass.kind != rg::PassKind::Compute || pass.isCulled || pass.viewScope == rg::ViewScope::Secondary) {
             continue;
         }
         for (const std::string& writeName : pass.writeNames) {
@@ -741,7 +741,7 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     // Step 3.2) - tracks, by INDEX into graphSnapshot.passesInExecutionOrder,
     // every pass this function has already either (a) turned into a real
     // leaf somewhere, or (b) deliberately, honestly excluded for an
-    // already-documented reason (culled, ViewScope::SceneView,
+    // already-documented reason (culled, ViewScope::Secondary,
     // RenderPassCategory::FrameDebuggerInternal). Anything left `false` once
     // every existing bucket/walk below has run is a genuine coverage gap -
     // the final "Other Render Passes" sweep at the bottom of this function
@@ -794,7 +794,7 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
         if (!isComputeKind) {
             continue; // Not this loop's concern - see this loop's own header comment above.
         }
-        if (pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
+        if (pass.isCulled || pass.viewScope == rg::ViewScope::Secondary) {
             claimed[static_cast<std::size_t>(i)] = true; // Honest, already-documented exclusion.
             continue;
         }
@@ -846,7 +846,7 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     // deliberately name-free). This is what makes "DrawSkyBackground" a real,
     // separate, individually selectable leaf (no more isSkyBackgroundDraw
     // hack), and is exactly what lets AddFrameDebuggerReplayPasses()'s own N
-    // debug-only replay passes (real Graphics-kind, real ViewScope::GameView
+    // debug-only replay passes (real Graphics-kind, real ViewScope::Primary
     // passes sitting structurally inside this exact index range) be skipped
     // instead of leaking into the tree as spurious extra leaves - they are
     // tagged RenderPassCategory::FrameDebuggerInternal (editor-core-
@@ -893,7 +893,7 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
         // must never be treated as, or silently displace, "RenderOpaque" -
         // see the `isRenderOpaqueLeaf && pass.kind == rg::PassKind::Graphics`
         // guard below).
-        if (pass.isCulled || pass.viewScope == rg::ViewScope::SceneView
+        if (pass.isCulled || pass.viewScope == rg::ViewScope::Secondary
             || pass.category == rg::RenderPassCategory::FrameDebuggerInternal) {
             claimed[static_cast<std::size_t>(i)] = true;
             continue;
@@ -975,7 +975,7 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
         if (pass.kind != rg::PassKind::Compute) {
             continue;
         }
-        if (pass.isCulled || pass.viewScope == rg::ViewScope::SceneView) {
+        if (pass.isCulled || pass.viewScope == rg::ViewScope::Secondary) {
             claimed[static_cast<std::size_t>(i)] = true;
             continue;
         }
@@ -1023,7 +1023,7 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
             continue;
         }
         const rg::RenderGraphPassSnapshot& pass = graphSnapshot.passesInExecutionOrder[i];
-        if (pass.isCulled || pass.viewScope == rg::ViewScope::SceneView
+        if (pass.isCulled || pass.viewScope == rg::ViewScope::Secondary
             || pass.category == rg::RenderPassCategory::FrameDebuggerInternal) {
             continue; // Defensive only - every real case is already caught by `claimed` above.
         }

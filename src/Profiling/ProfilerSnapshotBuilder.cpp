@@ -2,6 +2,7 @@
 
 #include "FrameChecks.h"
 #include "NameTable.h"
+#include "Overhead.h"
 #include "ProfilingClock.h"
 #include "ScopeTree.h"
 
@@ -131,7 +132,93 @@ void FillFrameRows(ProfilerSnapshot& snapshot, const FrameProfiler& profiler)
     snapshot.frameCount = static_cast<std::uint32_t>(count);
 }
 
+// The overrun rule of the reconciliation check, applied to a stored summary.
+bool SummaryChecksFail(const FrameSummary& summary) noexcept
+{
+    const std::uint64_t frame = summary.endTicks >= summary.startTicks ? summary.endTicks - summary.startTicks : 0;
+    return frame > 0 && static_cast<double>(summary.topLevelTicks) > static_cast<double>(frame) * (1.0 + kOverrunFailShare);
+}
+
+const char* NameText(NameId id) noexcept
+{
+    return id == kInvalidNameId ? "" : ResolveName(id);
+}
+
+// Verdict over the newest frames. `newestChecksFail` carries the full self-check of the newest frame.
+void FillVerdict(ProfilerSnapshot& snapshot, const FrameProfiler& profiler, bool capture, bool newestChecksFail)
+{
+    const Verdict verdict = VerdictFromHistory(profiler, capture, newestChecksFail);
+    FormatVerdict(verdict, snapshot.verdict);
+
+    SnapshotVerdictDetail& detail = snapshot.verdictDetail;
+    detail.kind = verdict.kind;
+    detail.frames = Count(verdict.frames);
+    if (verdict.kind == VerdictKind::Unknown) {
+        const Reason why = capture ? Reason::NotReady : Reason::CaptureOff;
+        const Metric none = MissingMetric(Unit::Milliseconds, SampleStatus::Absent, why);
+        detail.frame = none;
+        detail.cpuWork = none;
+        detail.gpuWait = none;
+        detail.presentWait = none;
+        detail.otherWait = none;
+        detail.untracked = none;
+        detail.stallShare = MissingMetric(Unit::Percent, SampleStatus::Absent, why);
+        return;
+    }
+    const VerdictFrame& m = verdict.median;
+    detail.frame = Milliseconds(m.frameMs, MetricKind::Derived);
+    detail.cpuWork = Milliseconds(m.cpuWorkMs, MetricKind::Derived);
+    detail.gpuWait = Milliseconds(m.blockedGpuMs, MetricKind::Derived);
+    detail.presentWait = Milliseconds(m.blockedPresentMs, MetricKind::Derived);
+    detail.otherWait = Milliseconds(m.blockedOtherMs, MetricKind::Derived);
+    detail.untracked = Milliseconds(m.untrackedMs, MetricKind::Derived);
+    detail.stallShare = PresentMetric(verdict.stallShare * 100.0, Unit::Percent, MetricKind::Derived);
+    CopySnapshotText(detail.stallSite, NameText(verdict.stallSite));
+}
+
+static_assert(kSnapshotSpikeRows == SpikeStore::kSlots, "snapshot rows must hold every frozen spike");
+
+void FillSpikes(ProfilerSnapshot& snapshot, const FrameProfiler& profiler)
+{
+    snapshot.spikesAvailable = true;
+    std::array<SpikeStore::Row, kSnapshotSpikeRows> rows{};
+    const std::size_t count = profiler.Spikes().Rows(rows);
+    for (std::size_t i = 0; i < count; ++i) {
+        const SpikeStore::Row& source = rows[i];
+        SnapshotSpikeRow& row = snapshot.spikes[i];
+        row.frameIndex = source.frameIndex;
+        row.cpu = Milliseconds(source.frameMs);
+        row.median = Milliseconds(source.medianMs, MetricKind::Derived);
+        row.excess = Milliseconds(std::max(0.0, source.frameMs - source.medianMs), MetricKind::Derived);
+        row.dominantSelf = Milliseconds(source.classification.dominantSelfMs, MetricKind::Derived);
+        row.gpuSpan = MetricFromGpuView(source.gpu.span);
+        CopySnapshotText(row.classification, ToString(source.classification.kind));
+        CopySnapshotText(row.cause, NameText(source.classification.dominant));
+        row.markerPresent = source.classification.markerPresent;
+        row.pinned = source.pinned;
+        row.gpuAttached = source.gpuAttached;
+    }
+    snapshot.spikeCount = static_cast<std::uint32_t>(count);
+    snapshot.spikePinned = static_cast<std::uint32_t>(profiler.Spikes().PinnedCount());
+    snapshot.spikeTotal = profiler.Spikes().TotalFrozen();
+}
+
 } // namespace
+
+Verdict VerdictFromHistory(const FrameProfiler& profiler, bool capture, bool newestChecksFail)
+{
+    std::array<VerdictFrame, VerdictConstants::kWindowFrames> window{};
+    std::size_t count = 0;
+    if (capture) {
+        const std::size_t total = profiler.HistoryCount();
+        count = std::min(total, window.size());
+        for (std::size_t i = 0; i < count; ++i) {
+            const FrameSummary& summary = profiler.HistoryAt(total - count + i);
+            window[i] = MakeVerdictFrame(summary, SummaryChecksFail(summary) || (i + 1 == count && newestChecksFail));
+        }
+    }
+    return ComputeVerdict(std::span<const VerdictFrame>(window.data(), count));
+}
 
 std::size_t CopySnapshotText(std::span<char> out, std::string_view text) noexcept
 {
@@ -177,7 +264,10 @@ ProfilerSnapshot BuildProfilerSnapshot(const FrameProfiler& profiler, const Snap
     snapshot.captureOn = capture;
     snapshot.displayPaused = profiler.IsDisplayPaused();
     snapshot.hasFrame = haveFrame;
-    CopySnapshotText(snapshot.verdict, "unavailable");
+    FillSpikes(snapshot, profiler);
+    snapshot.overhead = SnapshotOverhead{ MissingMetric(Unit::Count, SampleStatus::Absent, Reason::NotReady),
+        MissingMetric(Unit::Milliseconds, SampleStatus::Absent, Reason::NotReady),
+        MissingMetric(Unit::Percent, SampleStatus::Absent, Reason::NotReady), false };
 
     snapshot.device.deviceLost = inputs.deviceLost;
     snapshot.device.consecutiveFrameTimeouts = Count(inputs.consecutiveFrameTimeouts);
@@ -186,10 +276,13 @@ ProfilerSnapshot BuildProfilerSnapshot(const FrameProfiler& profiler, const Snap
     const FrameRecord& record = profiler.LastCompletedFrame();
     const FrameTotals totals = ComputeFrameTotals(record);
     const ProfilerChecks checks = EvaluateChecks(record, totals, capture);
+    bool newestChecksFail = false;
     for (std::size_t i = 0; i < kCheckCount; ++i) {
         const FrameCheck& check = checks.items[i];
         snapshot.checks[i] = SnapshotCheck{ check.id, check.status, Count(check.value), check.text };
+        newestChecksFail = newestChecksFail || check.status == CheckStatus::Fail;
     }
+    FillVerdict(snapshot, profiler, capture, newestChecksFail);
 
     FillFrameRows(snapshot, profiler);
 
@@ -249,6 +342,15 @@ ProfilerSnapshot BuildProfilerSnapshot(const FrameProfiler& profiler, const Snap
     snapshot.drops.droppedGpuFrames = CountOf(gpu.droppedFrames, coverageStatus);
 
     FillScopeRows(snapshot, record);
+
+    // An estimate, not a reading: events recorded times the cost of one event measured at startup.
+    const OverheadEstimate overhead = EstimateOverhead(profiler.EventCostNs(), record.scopes.Size(), summary.cpuMilliseconds);
+    if (overhead.known) {
+        snapshot.overhead.costPerEvent = PresentMetric(overhead.costPerEventNs, Unit::Count, MetricKind::Estimated);
+        snapshot.overhead.estimated = PresentMetric(overhead.estimatedMs, Unit::Milliseconds, MetricKind::Estimated);
+        snapshot.overhead.share = PresentMetric(overhead.frameShare * 100.0, Unit::Percent, MetricKind::Estimated);
+        snapshot.overhead.warn = overhead.warn;
+    }
     return snapshot;
 }
 

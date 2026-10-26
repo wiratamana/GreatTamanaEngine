@@ -564,10 +564,10 @@ TEST(RenderPipelineTest, InjectedLegacyViewScopeTranslatorIsAppliedPerDesc)
     RenderPipeline pipeline;
     pipeline.SetLegacyViewScopeTranslator([](RenderViewId view) {
         if (view == RenderViewId::Named("GameView")) {
-            return ViewScope::GameView;
+            return ViewScope::Primary;
         }
         if (view == RenderViewId::Named("SceneView")) {
-            return ViewScope::SceneView;
+            return ViewScope::Secondary;
         }
         return ViewScope::Shared;
     });
@@ -590,8 +590,8 @@ TEST(RenderPipelineTest, InjectedLegacyViewScopeTranslatorIsAppliedPerDesc)
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 2u);
-    EXPECT_EQ(input.passes[0].viewScope, ViewScope::GameView);
-    EXPECT_EQ(input.passes[1].viewScope, ViewScope::SceneView);
+    EXPECT_EQ(input.passes[0].viewScope, ViewScope::Primary);
+    EXPECT_EQ(input.passes[1].viewScope, ViewScope::Secondary);
 }
 
 // Step 3.3b - RenderPassFrameContext::builder lets a provider declare its OWN

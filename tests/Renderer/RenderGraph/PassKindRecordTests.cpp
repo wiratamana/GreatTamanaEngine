@@ -175,13 +175,13 @@ TEST(MeshPassRecordTest, DepthOnlyDeclaresNoColorAttachment)
 TEST(MeshPassTest, DrawDeclaresAGraphicsPassOnlyWithAnAttachmentAndADrawFunction)
 {
     RenderGraphBuilder builder;
-    EXPECT_FALSE(MeshPass(builder, "Test.NoTarget", ViewScope::GameView, RenderPassEvent::PreOpaques).Draw([] {}));
-    EXPECT_FALSE(MeshPass(builder, "Test.NoDraw", ViewScope::GameView, RenderPassEvent::PreOpaques)
+    EXPECT_FALSE(MeshPass(builder, "Test.NoTarget", ViewScope::Primary, RenderPassEvent::PreOpaques).Draw([] {}));
+    EXPECT_FALSE(MeshPass(builder, "Test.NoDraw", ViewScope::Primary, RenderPassEvent::PreOpaques)
                      .Depth(kTexA, 1.0f)
                      .Draw(nullptr));
     EXPECT_EQ(builder.DeclaredPassCount(), 0u);
 
-    EXPECT_TRUE(MeshPass(builder, "Test.Mesh", ViewScope::GameView, RenderPassEvent::PreOpaques)
+    EXPECT_TRUE(MeshPass(builder, "Test.Mesh", ViewScope::Primary, RenderPassEvent::PreOpaques)
                     .Depth(kTexA, 1.0f)
                     .Draw([] {}));
     EXPECT_EQ(builder.DeclaredPassCount(), 1u);

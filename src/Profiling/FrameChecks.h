@@ -22,9 +22,12 @@ struct FrameTotals {
     std::uint64_t topLevelTicks = 0;   // summed top-level work and blocked scopes
     std::uint64_t untrackedTicks = 0;  // frame time outside every top-level scope
     std::uint64_t blockedTicks = 0;    // every Blocked scope
-    std::uint64_t blockedGpuTicks = 0; // Blocked scopes that are a named GPU wait
+    std::uint64_t blockedGpuTicks = 0; // Blocked scopes that are a named GPU wait (includes the present waits)
+    std::uint64_t blockedPresentTicks = 0; // the part of blockedGpuTicks spent on acquire and present waits
     std::uint64_t blockedWorkerTicks = 0;
     std::uint64_t blockedOtherTicks = 0; // Blocked scopes that are neither of the above
+    NameId largestBlockedName = kInvalidNameId; // the single longest Blocked scope
+    std::uint64_t largestBlockedTicks = 0;
     std::uint32_t scopeCount = 0;
     ScopeTreeReport tree;
 };

@@ -13,7 +13,7 @@ void ToneMappingPluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/)
 {
     ToneMappingSettings edit = m_feature.Settings();
     if (BuildToneMappingPanel(
-            edit, m_feature.Snapshot(rg::ViewScope::GameView), m_feature.Snapshot(rg::ViewScope::SceneView))) {
+            edit, m_feature.Snapshot(rg::ViewScope::Primary), m_feature.Snapshot(rg::ViewScope::Secondary))) {
         m_feature.ApplySettings(edit);
     }
 }

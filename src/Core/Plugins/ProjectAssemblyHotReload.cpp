@@ -4,6 +4,7 @@
 #include "../Logging.h"
 #include "ProjectAssemblyBuildRunner.h"
 #include "ProjectAssemblyHotReloadDebugStatus.h"
+#include "../../Profiling/ScopeTimer.h"
 #include "../../Renderer/Renderer.h"
 #include "../../Scene/SceneBuilder.h"
 // NOTE: Core-tier file: must not include Editor/ProjectRootPath.h or call ExecutableDirectory();
@@ -60,6 +61,7 @@ void PerformProjectAssemblyHotReload(const std::string& projectName, Core& core,
     EditorHost* editorHost, const std::filesystem::path& outputDirectory, const std::filesystem::path& buildDirectory,
     const std::filesystem::path& projectRootDirectory)
 {
+    GTE_PROFILE_MARKER("Periodic.ProjectHotReload");
     GTE_LOG_INFO("ProjectAssemblyHotReload", "Hot reload requested for '" + projectName + "' - freezing engine.");
     ProjectAssemblyHotReloadDebugStatus::Instance().Set("CapturingState", projectName);
 

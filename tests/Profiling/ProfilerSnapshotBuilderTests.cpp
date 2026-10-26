@@ -5,7 +5,10 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <string>
+#include <string_view>
+#include <thread>
 
 namespace gte::Profiling {
 namespace {
@@ -53,7 +56,8 @@ TEST_F(ProfilerSnapshotBuilderTest, NoFrameYetMeansEveryMeasuredNumberIsAbsent)
     EXPECT_EQ(snapshot.gpuSpan.status, SampleStatus::Absent);
     EXPECT_EQ(snapshot.scopeCount, 0u);
     EXPECT_EQ(snapshot.frameCount, 0u);
-    EXPECT_EQ(SnapshotText(snapshot.verdict), "unavailable");
+    EXPECT_EQ(snapshot.verdictDetail.kind, VerdictKind::Unknown);
+    EXPECT_EQ(SnapshotText(snapshot.verdict), "No verdict yet: 0 frames measured");
     EXPECT_EQ(snapshot.checks.size(), kCheckCount);
 }
 
@@ -199,6 +203,66 @@ TEST_F(ProfilerSnapshotBuilderTest, LiveBlocksComeFromTheTableAtReadTime)
     table.End();
     FillLiveBlocks(snapshot, table, 5000);
     EXPECT_EQ(snapshot.liveBlockCount, 0u);
+}
+
+TEST_F(ProfilerSnapshotBuilderTest, ASlowFrameIsFrozenAndExplainedByItsDominantScope)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.SetSpikeThresholdMs(5.0f);
+
+    profiler.BeginFrame();
+    RunScope("SpikeTestFast");
+    profiler.EndFrame();
+    EXPECT_EQ(profiler.Spikes().Count(), 0u);
+
+    profiler.BeginFrame();
+    const ScopeStart start = profiler.BeginScope();
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    profiler.EndScope(start, InternName("SpikeTestSleep"), ScopeKind::Work, ViewSlot::Shared);
+    profiler.EndFrame();
+    profiler.SetSpikeThresholdMs(0.0f);
+
+    const ProfilerSnapshot snapshot = BuildProfilerSnapshot(profiler, SnapshotInputs{});
+    EXPECT_TRUE(snapshot.spikesAvailable);
+    ASSERT_GE(snapshot.spikeCount, 1u);
+    const SnapshotSpikeRow& row = snapshot.spikes[0];
+    EXPECT_EQ(SnapshotText(row.classification), "explained");
+    EXPECT_EQ(SnapshotText(row.cause), "SpikeTestSleep");
+    EXPECT_GE(row.cpu.value, 19.0);
+    EXPECT_FALSE(row.pinned);
+    EXPECT_EQ(snapshot.spikeTotal, 1u);
+}
+
+TEST_F(ProfilerSnapshotBuilderTest, TheVerdictNeedsSomeFramesAndPrintsItsNumbers)
+{
+    OneFrame();
+    ProfilerSnapshot early = BuildProfilerSnapshot(FrameProfiler::Instance(), SnapshotInputs{});
+    EXPECT_EQ(early.verdictDetail.kind, VerdictKind::Unknown);
+
+    for (int i = 0; i < 5; ++i) {
+        OneFrame();
+    }
+    const ProfilerSnapshot snapshot = BuildProfilerSnapshot(FrameProfiler::Instance(), SnapshotInputs{});
+    EXPECT_NE(snapshot.verdictDetail.kind, VerdictKind::Unknown);
+    EXPECT_EQ(snapshot.verdictDetail.frames.status, SampleStatus::Present);
+    EXPECT_EQ(snapshot.verdictDetail.frame.status, SampleStatus::Present);
+    EXPECT_NE(SnapshotText(snapshot.verdict).find(" ms"), std::string_view::npos);
+}
+
+TEST_F(ProfilerSnapshotBuilderTest, OverheadIsAnEstimateOnlyAfterTheCostWasMeasured)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.SetEventCostNs(0.0);
+    OneFrame();
+    ProfilerSnapshot unmeasured = BuildProfilerSnapshot(profiler, SnapshotInputs{});
+    EXPECT_EQ(unmeasured.overhead.estimated.status, SampleStatus::Absent);
+
+    profiler.SetEventCostNs(50.0);
+    const ProfilerSnapshot measured = BuildProfilerSnapshot(profiler, SnapshotInputs{});
+    profiler.SetEventCostNs(0.0);
+    EXPECT_EQ(measured.overhead.estimated.status, SampleStatus::Present);
+    EXPECT_EQ(measured.overhead.estimated.kind, MetricKind::Estimated);
+    EXPECT_EQ(measured.overhead.costPerEvent.kind, MetricKind::Estimated);
 }
 
 TEST(SnapshotTextTest, CopyIsCutToFitAndTerminated)

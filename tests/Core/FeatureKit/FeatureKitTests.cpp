@@ -43,7 +43,7 @@ TEST(FxViewTest, DefaultsAreASharedViewWithNoCamera)
 TEST(FxFrameTest, TexturesCarryTheSerialOfTheFrameThatMadeThem)
 {
     View view;
-    view.scope = rg::ViewScope::GameView;
+    view.scope = rg::ViewScope::Primary;
     const PostOpaqueFrame frame(view, FakeScene(), 7, rg::TextureHandle{ 1, 1 }, rg::TextureHandle{ 2, 1 });
 
     const Texture color = frame.SceneColor();
@@ -52,7 +52,7 @@ TEST(FxFrameTest, TexturesCarryTheSerialOfTheFrameThatMadeThem)
     EXPECT_EQ(depth.handle, (rg::TextureHandle{ 2, 1 }));
     EXPECT_EQ(color.frameSerial, 7u);
     EXPECT_TRUE(frame.Owns(color));
-    EXPECT_EQ(frame.Scope(), rg::ViewScope::GameView);
+    EXPECT_EQ(frame.Scope(), rg::ViewScope::Primary);
 }
 
 TEST(FxFrameTest, ATextureFromAnotherFrameIsNotOwned)
@@ -165,7 +165,7 @@ TEST(FxSharedOncePerFrameTest, NothingIsMarkedUntilTheCallbackFinished)
 TEST(FxCallbackPolicyTest, PerViewCallbacksNeedAKnownNonSharedView)
 {
     View game;
-    game.scope = rg::ViewScope::GameView;
+    game.scope = rg::ViewScope::Primary;
     View shared;
     shared.scope = rg::ViewScope::Shared;
 
@@ -377,8 +377,8 @@ TEST(FxVerbTest, DepthWrapsTheSameTexture)
 
 TEST(FxVerbTest, PersistentNameAddsTheViewSuffix)
 {
-    EXPECT_EQ(PersistentName("Mask", rg::ViewScope::GameView), "Mask.GameView");
-    EXPECT_EQ(PersistentName("Mask", rg::ViewScope::SceneView), "Mask.SceneView");
+    EXPECT_EQ(PersistentName("Mask", rg::ViewScope::Primary), "Mask.GameView");
+    EXPECT_EQ(PersistentName("Mask", rg::ViewScope::Secondary), "Mask.SceneView");
     EXPECT_EQ(PersistentName("Mask", rg::ViewScope::Shared), "Mask");
 }
 
@@ -403,7 +403,7 @@ struct BareContext {
     BareContext()
     {
         context.builder = &builder;
-        context.scope = rg::ViewScope::GameView;
+        context.scope = rg::ViewScope::Primary;
         context.event = rg::RenderPassEvent::AfterOpaques;
         context.serial = 1;
     }

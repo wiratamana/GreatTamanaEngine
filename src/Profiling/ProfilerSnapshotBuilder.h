@@ -21,6 +21,10 @@ struct SnapshotInputs {
 
 ProfilerSnapshot BuildProfilerSnapshot(const FrameProfiler& profiler, const SnapshotInputs& inputs);
 
+// Verdict over the newest frames of the history. Unknown while capture is off or too few frames exist.
+// `newestChecksFail` marks the newest frame as failing a self-check.
+Verdict VerdictFromHistory(const FrameProfiler& profiler, bool capture, bool newestChecksFail);
+
 // Copies `text` into `out`, cut to fit, always NUL terminated. Returns the stored length.
 std::size_t CopySnapshotText(std::span<char> out, std::string_view text) noexcept;
 

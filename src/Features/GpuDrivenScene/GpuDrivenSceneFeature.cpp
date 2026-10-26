@@ -118,7 +118,7 @@ void GpuDrivenSceneFeature::BeginFrame(std::uint64_t frameIndex)
 void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
 {
     const rg::ViewScope scope = f.Scope();
-    const bool sceneView = scope == rg::ViewScope::SceneView;
+    const bool sceneView = scope == rg::ViewScope::Secondary;
     GpuDrivenSceneViewState& view = m_views.For(scope);
     const std::uint64_t frameIndex = f.FrameIndex();
     BeginFrame(frameIndex);
@@ -219,7 +219,7 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
 void GpuDrivenSceneFeature::HizPass(fx::PostOpaqueFrame& f)
 {
     GpuDrivenSceneViewState& view = m_views.For(f.Scope());
-    const bool wants = ViewWantsHiz(m_settings, f.Scope() == rg::ViewScope::SceneView);
+    const bool wants = ViewWantsHiz(m_settings, f.Scope() == rg::ViewScope::Secondary);
     // Build() asks for movement tracking before any guard, so "asked" equals "will build".
     view.hizBuildAsked = wants;
     view.hizBuildFrame = f.FrameIndex();

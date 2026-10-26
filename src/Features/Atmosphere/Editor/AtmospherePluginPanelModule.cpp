@@ -9,7 +9,7 @@ namespace gte {
 void AtmospherePluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/)
 {
     AtmosphereSettings edit = m_feature.Settings();
-    if (BuildAtmospherePanel(m_ctx, edit, m_feature.AerialSnapshot(rg::ViewScope::GameView))) {
+    if (BuildAtmospherePanel(m_ctx, edit, m_feature.AerialSnapshot(rg::ViewScope::Primary))) {
         m_feature.ApplySettings(edit);
     }
 }

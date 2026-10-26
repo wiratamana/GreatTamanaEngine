@@ -11,18 +11,35 @@ namespace {
 constexpr const char* kGpuWaitPrefix = "GpuWait(";
 constexpr const char* kWorkerWaitName = "Wait.Workers";
 
+// Waits for a swapchain image or for the presentation engine, not for rendering work.
+constexpr const char* kPresentWaitPrefixes[] = { "GpuWait(AcquireImage", "GpuWait(PresentInFlight", "GpuWait(PresentQueue" };
+
 enum class BlockedClass : std::uint8_t { Gpu, Worker, Other };
 
-BlockedClass Classify(NameId name) noexcept
+bool StartsWith(const char* text, const char* prefix) noexcept
 {
-    const char* text = ResolveName(name);
-    if (std::strncmp(text, kGpuWaitPrefix, std::strlen(kGpuWaitPrefix)) == 0) {
+    return std::strncmp(text, prefix, std::strlen(prefix)) == 0;
+}
+
+BlockedClass Classify(const char* text) noexcept
+{
+    if (StartsWith(text, kGpuWaitPrefix)) {
         return BlockedClass::Gpu;
     }
     if (std::strcmp(text, kWorkerWaitName) == 0) {
         return BlockedClass::Worker;
     }
     return BlockedClass::Other;
+}
+
+bool IsPresentWait(const char* text) noexcept
+{
+    for (const char* prefix : kPresentWaitPrefixes) {
+        if (StartsWith(text, prefix)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 FrameCheck Make(CheckId id, CheckStatus status, std::uint64_t value, const char* text) noexcept
@@ -52,8 +69,16 @@ FrameTotals ComputeFrameTotals(const FrameRecord& record) noexcept
         }
         if (e.kind == ScopeKind::Blocked) {
             totals.blockedTicks += ticks;
-            switch (Classify(e.name)) {
-            case BlockedClass::Gpu: totals.blockedGpuTicks += ticks; break;
+            if (ticks > totals.largestBlockedTicks) {
+                totals.largestBlockedTicks = ticks;
+                totals.largestBlockedName = e.name;
+            }
+            const char* const text = ResolveName(e.name);
+            switch (Classify(text)) {
+            case BlockedClass::Gpu:
+                totals.blockedGpuTicks += ticks;
+                totals.blockedPresentTicks += IsPresentWait(text) ? ticks : 0;
+                break;
             case BlockedClass::Worker: totals.blockedWorkerTicks += ticks; break;
             case BlockedClass::Other: totals.blockedOtherTicks += ticks; break;
             }

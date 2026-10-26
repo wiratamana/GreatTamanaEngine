@@ -2224,6 +2224,9 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Profiling/MetricTests.cpp
     Profiling/LiveBlockTests.cpp
     Profiling/ProfilerSnapshotBuilderTests.cpp
+    Profiling/VerdictTests.cpp
+    Profiling/SpikeStoreTests.cpp
+    Profiling/OverheadTests.cpp
     Network/NetworkProfilerRoutesTests.cpp
     Core/GpuViewMetricsTests.cpp
     Jobs/JobQueueTests.cpp

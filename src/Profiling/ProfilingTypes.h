@@ -60,6 +60,13 @@ struct FrameSummary {
     std::uint64_t topLevelTicks = 0;     // summed top-level scopes
     std::uint64_t blockedTicks = 0;      // summed Blocked scopes
     std::uint64_t blockedOtherTicks = 0; // Blocked scopes that are not a named GPU or worker wait
+
+    std::uint64_t untrackedTicks = 0;      // frame time outside every top-level scope
+    std::uint64_t blockedGpuTicks = 0;     // named GPU waits, present waits included
+    std::uint64_t blockedPresentTicks = 0; // the acquire and present part of blockedGpuTicks
+    std::uint64_t blockedWorkerTicks = 0;
+    NameId largestBlockedName = kInvalidNameId; // the single longest Blocked scope
+    std::uint64_t largestBlockedTicks = 0;
 };
 
 // The full event detail of one finished frame.

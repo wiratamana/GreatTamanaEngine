@@ -46,16 +46,16 @@ TEST(GpuViewMetricsTest, StatesMapOneToOne)
 TEST(GpuViewMetricsTest, ScopesMapToSlots)
 {
     EXPECT_EQ(ToViewSlot(rg::ViewScope::Shared), ViewSlot::Shared);
-    EXPECT_EQ(ToViewSlot(rg::ViewScope::GameView), ViewSlot::Primary);
-    EXPECT_EQ(ToViewSlot(rg::ViewScope::SceneView), ViewSlot::Secondary);
+    EXPECT_EQ(ToViewSlot(rg::ViewScope::Primary), ViewSlot::Primary);
+    EXPECT_EQ(ToViewSlot(rg::ViewScope::Secondary), ViewSlot::Secondary);
 }
 
 TEST(GpuViewMetricsTest, TwoViewsReadTwoDifferentNumbers)
 {
     const std::vector<GpuPassRecord> records = {
-        Record(rg::ViewScope::GameView, 0.1f, 1.4f),
-        Record(rg::ViewScope::GameView, 0.0f, 0.5f),
-        Record(rg::ViewScope::SceneView, 0.2f, 3.0f),
+        Record(rg::ViewScope::Primary, 0.1f, 1.4f),
+        Record(rg::ViewScope::Primary, 0.0f, 0.5f),
+        Record(rg::ViewScope::Secondary, 0.2f, 3.0f),
     };
     const Profiling::GpuFrameMetrics metrics = BuildGpuFrameMetrics(records, PresentReport(6.0), GpuMetricsInput{});
 
@@ -70,7 +70,7 @@ TEST(GpuViewMetricsTest, TwoViewsReadTwoDifferentNumbers)
 
 TEST(GpuViewMetricsTest, ClosedViewIsInactiveNotZero)
 {
-    const std::vector<GpuPassRecord> records = { Record(rg::ViewScope::GameView, 0.0f, 1.0f) };
+    const std::vector<GpuPassRecord> records = { Record(rg::ViewScope::Primary, 0.0f, 1.0f) };
     GpuMetricsInput input;
     input.viewActive[kSecondary] = false;
     const Profiling::GpuFrameMetrics metrics = BuildGpuFrameMetrics(records, PresentReport(1.0), input);
@@ -92,7 +92,7 @@ TEST(GpuViewMetricsTest, NoActiveViewMakesTheSpanInactive)
 
 TEST(GpuViewMetricsTest, CaptureOffReadsAbsentEverywhere)
 {
-    const std::vector<GpuPassRecord> records = { Record(rg::ViewScope::GameView, 0.0f, 1.0f) };
+    const std::vector<GpuPassRecord> records = { Record(rg::ViewScope::Primary, 0.0f, 1.0f) };
     GpuMetricsInput input;
     input.captureEnabled = false;
     const Profiling::GpuFrameMetrics metrics = BuildGpuFrameMetrics(records, PresentReport(1.0), input);
@@ -105,8 +105,8 @@ TEST(GpuViewMetricsTest, CaptureOffReadsAbsentEverywhere)
 TEST(GpuViewMetricsTest, UnmeasuredRecordMakesTheViewPartial)
 {
     const std::vector<GpuPassRecord> records = {
-        Record(rg::ViewScope::GameView, 0.0f, 1.0f),
-        Record(rg::ViewScope::GameView, 0.0f, 0.0f, GpuReadState::Absent),
+        Record(rg::ViewScope::Primary, 0.0f, 1.0f),
+        Record(rg::ViewScope::Primary, 0.0f, 0.0f, GpuReadState::Absent),
     };
     const Profiling::GpuFrameMetrics metrics = BuildGpuFrameMetrics(records, PresentReport(1.0), GpuMetricsInput{});
 
@@ -116,7 +116,7 @@ TEST(GpuViewMetricsTest, UnmeasuredRecordMakesTheViewPartial)
 
 TEST(GpuViewMetricsTest, FoldedPassesMakeTheViewPartial)
 {
-    GpuPassRecord bucket = Record(rg::ViewScope::SceneView, 0.0f, 2.0f);
+    GpuPassRecord bucket = Record(rg::ViewScope::Secondary, 0.0f, 2.0f);
     bucket.foldedPasses = 9;
     const std::vector<GpuPassRecord> records = { bucket };
     const Profiling::GpuFrameMetrics metrics = BuildGpuFrameMetrics(records, PresentReport(2.0), GpuMetricsInput{});
@@ -127,7 +127,7 @@ TEST(GpuViewMetricsTest, FoldedPassesMakeTheViewPartial)
 
 TEST(GpuViewMetricsTest, ErrorRecordsOnlyReadError)
 {
-    const std::vector<GpuPassRecord> records = { Record(rg::ViewScope::GameView, 0.0f, 0.0f, GpuReadState::Error) };
+    const std::vector<GpuPassRecord> records = { Record(rg::ViewScope::Primary, 0.0f, 0.0f, GpuReadState::Error) };
     const Profiling::GpuFrameMetrics metrics = BuildGpuFrameMetrics(records, GpuFrameReport{}, GpuMetricsInput{});
 
     EXPECT_EQ(metrics.views[kPrimary].status, SampleStatus::Error);
@@ -146,9 +146,9 @@ TEST(GpuViewMetricsTest, UnsupportedDeviceWithoutRecordsReadsUnsupported)
 
 TEST(GpuViewMetricsTest, IndirectDrawsAreCountedSeparatelyPerView)
 {
-    GpuPassRecord a = Record(rg::ViewScope::GameView, 0.0f, 1.0f);
+    GpuPassRecord a = Record(rg::ViewScope::Primary, 0.0f, 1.0f);
     a.indirectDraws = 4;
-    GpuPassRecord b = Record(rg::ViewScope::SceneView, 0.0f, 1.0f);
+    GpuPassRecord b = Record(rg::ViewScope::Secondary, 0.0f, 1.0f);
     b.indirectDraws = 7;
     const std::vector<GpuPassRecord> records = { a, b };
     const Profiling::GpuFrameMetrics metrics = BuildGpuFrameMetrics(records, PresentReport(2.0), GpuMetricsInput{});

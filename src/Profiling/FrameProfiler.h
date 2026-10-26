@@ -3,6 +3,7 @@
 #include "LiveBlockTable.h"
 #include "ProfilingTypes.h"
 #include "ScopeLog.h"
+#include "SpikeStore.h"
 #include "WorkerRing.h"
 
 #include <array>
@@ -12,10 +13,14 @@
 
 namespace gte::Profiling {
 
+// Frames whose time is compared to find a spike.
+inline constexpr std::size_t kSpikeMedianWindow = 60;
+
 // Runtime switches. Safe to read and write from any thread.
 struct ProfilerControl {
     std::atomic<bool> capture{ true };       // record events
     std::atomic<bool> displayPaused{ false }; // UI freezes its view; recording continues
+    std::atomic<float> spikeThresholdMs{ 0.0f }; // > 0 replaces the median rule for freezing spikes
 };
 
 // Owns the open frame's event log and the history of finished frames. Frame and scope calls are
@@ -71,11 +76,29 @@ public:
     // Event detail of the newest finished frame. An empty record before the first frame.
     const FrameRecord& LastCompletedFrame() const noexcept;
 
-    // Forgets all history and pending worker events. Keeps the runtime switches.
+    // Frames frozen because they were much slower than the recent median. Any thread may read and pin.
+    SpikeStore& Spikes() noexcept { return m_spikes; }
+    const SpikeStore& Spikes() const noexcept { return m_spikes; }
+
+    // Main thread. A GPU report that arrived after its frame closed; kept only for a frozen spike.
+    void AttachLateGpuReport(std::uint64_t frameIndex, const GpuFrameMetrics& gpu) noexcept;
+
+    // Spike threshold in ms; 0 selects the median rule.
+    void SetSpikeThresholdMs(float milliseconds) noexcept { m_control.spikeThresholdMs.store(milliseconds, std::memory_order_relaxed); }
+    float SpikeThresholdMs() const noexcept { return m_control.spikeThresholdMs.load(std::memory_order_relaxed); }
+
+    // Measured cost of one recorded scope in ns; 0 until measured. Set once from the main thread at startup.
+    void SetEventCostNs(double nanoseconds) noexcept { m_eventCostNs = nanoseconds; }
+    double EventCostNs() const noexcept { return m_eventCostNs; }
+
+    // Forgets all history, frozen spikes and pending worker events. Keeps the runtime switches.
     void ResetForTesting() noexcept;
 
 private:
     FrameProfiler() = default;
+
+    // Freezes the closing frame into the spike store when it is much slower than the recent median.
+    void FreezeIfSpike(const FrameRecord& record) noexcept;
 
     ProfilerControl m_control;
     LiveBlockTable m_liveBlocks;
@@ -92,6 +115,9 @@ private:
     std::array<FrameSummary, kMaxFrameHistory> m_history{};
     std::size_t m_historyHead = 0; // next slot to write
     std::size_t m_historyCount = 0;
+
+    SpikeStore m_spikes;
+    double m_eventCostNs = 0.0;
 };
 
 } // namespace gte::Profiling

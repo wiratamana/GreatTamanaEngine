@@ -698,7 +698,7 @@ TEST(RenderGraphBuilderTest, AddPassFourArgumentOverloadStampsViewScope)
 
     builder.AddPass(
         "GameView",
-        ViewScope::GameView,
+        ViewScope::Primary,
         [&](RenderGraphBuilder::PassBuilder&) { ++setupCallCount; },
         NoOpExecute);
 
@@ -707,7 +707,7 @@ TEST(RenderGraphBuilderTest, AddPassFourArgumentOverloadStampsViewScope)
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
     EXPECT_STREQ(input.passes[0].name, "GameView");
-    EXPECT_EQ(input.passes[0].viewScope, ViewScope::GameView);
+    EXPECT_EQ(input.passes[0].viewScope, ViewScope::Primary);
     EXPECT_EQ(input.passes[0].kind, PassKind::Graphics);
 }
 
@@ -719,13 +719,13 @@ TEST(RenderGraphBuilderTest, AddComputePassFourArgumentOverloadStampsViewScopeAn
     RenderGraphBuilder builder;
     builder.AddComputePass(
         "AtmosphereSkyViewLutPass",
-        ViewScope::SceneView,
+        ViewScope::Secondary,
         [](RenderGraphBuilder::PassBuilder&) { },
         NoOpExecute);
 
     const CompiledGraphInput input = builder.Finish();
     ASSERT_EQ(input.passes.size(), 1u);
-    EXPECT_EQ(input.passes[0].viewScope, ViewScope::SceneView);
+    EXPECT_EQ(input.passes[0].viewScope, ViewScope::Secondary);
     EXPECT_EQ(input.passes[0].kind, PassKind::Compute);
 }
 
@@ -1153,14 +1153,14 @@ TEST(RenderGraphBuilderTest, AddRenderPassCallsSinkExactlyOnceWithCorrectDeclara
     {
         const RenderFeatureScope scope(builder, "FeatureA");
         builder.AddRenderPass(
-            "PassZero", PassKind::Graphics, ViewScope::GameView, RenderPassCategory::General,
+            "PassZero", PassKind::Graphics, ViewScope::Primary, RenderPassCategory::General,
             [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::DrawQuad,
             RenderPassEvent::Opaques);
     }
     {
         const RenderFeatureScope scope(builder, "FeatureB");
         builder.AddRenderPass(
-            "PassOne", PassKind::Compute, ViewScope::SceneView, RenderPassCategory::Debug,
+            "PassOne", PassKind::Compute, ViewScope::Secondary, RenderPassCategory::Debug,
             [](RenderGraphBuilder::PassBuilder&) { }, NoOpExecute, RenderPassDrawKind::Blit,
             RenderPassEvent::PreOpaques);
     }

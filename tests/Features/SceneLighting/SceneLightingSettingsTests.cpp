@@ -383,7 +383,7 @@ TEST(SceneLightingDebugEndpointTest, EndpointReportsTheAppliedRecord)
 {
     SceneLightingSettings settings;
     fx::PerView<SunLightModulationSnapshot> applied;
-    applied.For(rg::ViewScope::GameView) = { { true, Vec3(0.5f, 0.25f, 0.125f), 0.4f }, 42 };
+    applied.For(rg::ViewScope::Primary) = { { true, Vec3(0.5f, 0.25f, 0.125f), 0.4f }, 42 };
     SceneLightingDebugEndpoint endpoint(settings, &applied);
 
     const FeatureDebugResult state = endpoint.GetState();

@@ -155,7 +155,7 @@ bool DeclareTransfer(RenderGraphBuilder& builder, const char* name, const Transf
     if (!body.has_value()) {
         return false;
     }
-    builder.AddRenderPass(name, DefaultPassKind(DeclarativePassType::Transfer), ViewScope::GameView,
+    builder.AddRenderPass(name, DefaultPassKind(DeclarativePassType::Transfer), ViewScope::Primary,
         RenderPassCategory::General, body->setup, body->execute, DefaultDrawKind(DeclarativePassType::Transfer),
         RenderPassEvent::Opaques);
     return true;
