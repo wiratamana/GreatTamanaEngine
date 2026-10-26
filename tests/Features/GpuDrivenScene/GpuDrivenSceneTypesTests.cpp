@@ -405,6 +405,15 @@ TEST(GpuDrivenSceneTypesTest, StatsHoldRunsThreeFramesAfterTheLastRequest)
     EXPECT_TRUE(hold.Step(true)); // Asking again restarts the hold.
 }
 
+TEST(GpuDrivenSceneTypesTest, ClusterCountAgeIsFramesSinceReadbackAndSaturates)
+{
+    EXPECT_EQ(ClusterCountAgeFrames(100, 97), 3u);
+    EXPECT_EQ(ClusterCountAgeFrames(100, 100), 0u);
+    EXPECT_EQ(ClusterCountAgeFrames(100, 101), 0u); // Count from a later frame.
+    EXPECT_EQ(ClusterCountAgeFrames(100, 0), 0u);   // No count yet.
+    EXPECT_EQ(ClusterCountAgeFrames(0, 0), 0u);
+}
+
 TEST(GpuDrivenSceneTypesTest, ReportIsAPureFunctionOfSettingsAndSnapshot)
 {
     GpuDrivenSceneSettings s;

@@ -1034,11 +1034,7 @@ FrameDebuggerSnapshot BuildRealFrameDebuggerSnapshot(const rg::RenderGraphSnapsh
     snapshot.rootNodes.push_back(std::move(root));
     snapshot.totalEventCount = nextEventIndex;
     snapshot.renderTarget = gameViewRenderTargetInfo;
-    // "GameView" here is the RenderTexture/resource name
-    // (Application.cpp's own `b.ImportTexture("GameView", ...)` call) -
-    // completely unrelated to, and unaffected by, this campaign's pass-name
-    // changes (PHASE0's own Step 2 point 4 draws this exact distinction).
-    snapshot.renderTarget.name = "GameView";
+    snapshot.renderTarget.name = kGameViewResourceName;
     return snapshot;
 }
 

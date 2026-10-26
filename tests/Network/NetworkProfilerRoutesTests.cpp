@@ -512,7 +512,10 @@ TEST(ProfilerRoutesReplyTest, MissingBridgeOrCompiledOutProfilerIsNotACrash)
 
 TEST(ProfilerRoutesReplyTest, SetReplyShowsTheStateAfterTheChange)
 {
-    const json reply = json::parse(BuildProfilerSetReplyJson(false, true));
+    ProfilerSetState state;
+    state.capture = false;
+    state.displayPaused = true;
+    const json reply = json::parse(BuildProfilerSetReplyJson(state));
     EXPECT_EQ(reply["success"], true);
     EXPECT_EQ(reply["capture"], false);
     EXPECT_EQ(reply["display_paused"], true);

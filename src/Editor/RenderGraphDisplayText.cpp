@@ -1,8 +1,8 @@
 #include "RenderGraphDisplayText.h"
 
 #include "../Application/GpuTimingText.h"
-#include "../Application/ViewScopeLabel.h"
 #include "../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
+#include "EditorViewNames.h"
 
 #include <algorithm>
 #include <map>
@@ -124,6 +124,7 @@ std::vector<RenderGraphGroupedPass> GroupPassMetadataByName(const std::vector<rg
         for (const rg::RenderGraphPassMetadata& instance : instances) {
             group.drawCallCount += instance.drawCallCount;
             group.triangleCount += instance.triangleCount;
+            group.indirectDrawCount += instance.indirectDrawCount;
             if (!instance.isCulled) {
                 allCulled = false;
                 nonCulled.push_back(&instance);

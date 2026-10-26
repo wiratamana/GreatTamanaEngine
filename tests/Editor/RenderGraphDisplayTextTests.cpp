@@ -1,6 +1,6 @@
 // Tier 1 tests of the Render Graph panel display text: GPU timing text, view labels and pass grouping.
 
-#include "Application/ViewScopeLabel.h"
+#include "Editor/EditorViewNames.h"
 #include "Editor/RenderGraphDisplayText.h"
 
 #include "Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
@@ -99,6 +99,22 @@ TEST(RenderGraphGroupedPassTest, TwoNonCulledInstancesGroupIntoOneRowWithSummedS
     EXPECT_EQ(group.triangleCount, 150u);
     EXPECT_EQ(group.gpuTimingText, "Game: 0.12 ms, Scene: 0.08 ms");
     ASSERT_EQ(group.instances.size(), 2u);
+}
+
+TEST(RenderGraphGroupedPassTest, IndirectDrawsAreSummedAndNeverAddedToTriangles)
+{
+    rg::RenderGraphPassMetadata primary = MakePass("ClusterDraw", rg::ViewScope::Primary);
+    primary.triangleCount = 100;
+    primary.indirectDrawCount = 3;
+    rg::RenderGraphPassMetadata secondary = MakePass("ClusterDraw", rg::ViewScope::Secondary);
+    secondary.triangleCount = 50;
+    secondary.indirectDrawCount = 4;
+
+    const std::vector<RenderGraphGroupedPass> grouped = GroupPassMetadataByName({ primary, secondary });
+
+    ASSERT_EQ(grouped.size(), 1u);
+    EXPECT_EQ(grouped[0].indirectDrawCount, 7u);
+    EXPECT_EQ(grouped[0].triangleCount, 150u);
 }
 
 TEST(RenderGraphGroupedPassTest, OneCulledOneSurvivingInstanceGroupsToNonCulledWithSurvivingViewLabel)

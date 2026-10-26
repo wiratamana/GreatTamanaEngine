@@ -27,7 +27,7 @@ using Profiling::Metric;
 using Profiling::ProfilerSnapshot;
 using Profiling::SampleStatus;
 
-constexpr std::chrono::milliseconds kSnapshotWait{ 500 };
+[[maybe_unused]] constexpr std::chrono::milliseconds kSnapshotWait{ 500 };
 
 const char* ToString(Profiling::CheckId id) noexcept
 {
@@ -470,14 +470,6 @@ std::string BuildProfilerSetReplyJson(const ProfilerSetState& state)
     out["pinned_spikes"] = MetricToJson(Profiling::PresentMetric(static_cast<double>(state.pinnedSpikes), Profiling::Unit::Count));
     out["spike_threshold"] = MetricToJson(Profiling::PresentMetric(state.spikeThresholdMs, Profiling::Unit::Milliseconds));
     return out.dump();
-}
-
-std::string BuildProfilerSetReplyJson(bool capture, bool displayPaused)
-{
-    ProfilerSetState state;
-    state.capture = capture;
-    state.displayPaused = displayPaused;
-    return BuildProfilerSetReplyJson(state);
 }
 
 std::optional<std::uint64_t> ParseSpikeFrameIndex(const std::string& text)

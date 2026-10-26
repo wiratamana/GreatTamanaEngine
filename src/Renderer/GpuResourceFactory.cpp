@@ -177,6 +177,7 @@ namespace {
 struct OneShotLease {
     VkDevice device = VK_NULL_HANDLE;
     VkCommandPool pool = VK_NULL_HANDLE;
+    std::mutex* poolMutex = nullptr; // Guards 'pool'.
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
     std::vector<std::shared_ptr<void>> resources;
@@ -190,6 +191,7 @@ struct OneShotLease {
             vkDestroyFence(device, fence, nullptr);
         }
         if (cmd != VK_NULL_HANDLE) {
+            const std::lock_guard lock(*poolMutex);
             vkFreeCommandBuffers(device, pool, 1, &cmd);
         }
     }
@@ -229,6 +231,7 @@ VkCommandBuffer GpuResourceFactory::AllocateTransientCommandBuffer() const
     allocInfo.commandBufferCount = 1;
 
     VkCommandBuffer cmd = VK_NULL_HANDLE;
+    const std::lock_guard lock(m_commandPoolMutex);
     if (vkAllocateCommandBuffers(m_device, &allocInfo, &cmd) != VK_SUCCESS) {
         throw std::runtime_error("GpuResourceFactory::AllocateTransientCommandBuffer: vkAllocateCommandBuffers failed.");
     }
@@ -274,6 +277,7 @@ void GpuResourceFactory::SubmitOneShot(BlockSite site, const char* detail,
     const auto lease = std::make_shared<OneShotLease>();
     lease->device = m_device;
     lease->pool = m_commandPool;
+    lease->poolMutex = &m_commandPoolMutex;
     lease->resources.assign(inFlight.begin(), inFlight.end());
     lease->cmd = AllocateTransientCommandBuffer();
 

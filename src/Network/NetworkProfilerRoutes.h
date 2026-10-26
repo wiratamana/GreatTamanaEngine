@@ -102,7 +102,6 @@ struct ProfilerSetState {
 
 // Body of POST /profiler/set: the switch state after the change.
 std::string BuildProfilerSetReplyJson(const ProfilerSetState& state);
-std::string BuildProfilerSetReplyJson(bool capture, bool displayPaused);
 
 // Whole-number frame index of a frozen spike (query `index`).
 std::optional<std::uint64_t> ParseSpikeFrameIndex(const std::string& text);
@@ -134,7 +133,8 @@ ProfilerImageReply BuildProfilerTimelineReply(
 // Refuses a browser request with 403 and returns true.
 using BrowserRefusal = bool (*)(const httplib::Request&, httplib::Response&);
 
-// Registers the profiler routes. A null bridge makes them answer 503.
+// Registers the profiler routes. A null bridge answers 503 when the profiler is on, and a compiled_out status
+// object (200) when it is off.
 void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bridge, BrowserRefusal refuseBrowser);
 
 } // namespace gte::Network

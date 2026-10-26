@@ -24,7 +24,8 @@ struct RenderGraphGroupedPass {
     std::string viewLabel;
     bool isCulled = false; // True only if every instance was culled.
     std::uint32_t drawCallCount = 0; // Summed over the instances.
-    std::uint32_t triangleCount = 0;
+    std::uint32_t triangleCount = 0; // Summed; excludes indirect draws.
+    std::uint32_t indirectDrawCount = 0; // Summed; GPU-side triangles are not counted.
     std::string gpuTimingText; // Per-view text, e.g. "Game: 0.12 ms, Scene: 0.08 ms"; one instance shows its own.
     std::vector<std::string> reads;  // Resource names over all instances, first-seen order, no duplicates.
     std::vector<std::string> writes;

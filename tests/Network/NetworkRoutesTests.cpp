@@ -601,6 +601,10 @@ TEST(BuildRenderGraphMetadataResponseJsonTests, ViewScopeLabelsAndTimingTextAreM
     const nlohmann::json& passes = parsed["offscreen_regime"]["passes"];
 
     ASSERT_EQ(passes.size(), 3u);
+    EXPECT_EQ(passes[0]["view"].get<std::string>(), "primary");
+    EXPECT_EQ(passes[1]["view"].get<std::string>(), "secondary");
+    EXPECT_EQ(passes[2]["view"].get<std::string>(), "shared");
+    EXPECT_EQ(parsed["offscreen_regime"]["gpu_frame_status"].get<std::string>(), "Absent");
     EXPECT_EQ(passes[0]["view_scope"].get<std::string>(), "Game");
     EXPECT_EQ(passes[0]["gpu_timing_text"].get<std::string>(), "3.50 ms");
     EXPECT_DOUBLE_EQ(passes[0]["gpu_timing_milliseconds"].get<double>(), 3.5);

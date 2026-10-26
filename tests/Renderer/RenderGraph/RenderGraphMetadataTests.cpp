@@ -33,12 +33,12 @@ TEST(RenderGraphMetadataTest, EmptySnapshotsProduceEmptyMetadata)
     EXPECT_EQ(metadata.presentRegime.regimeName, "PipelinedDeferredReadback");
     EXPECT_TRUE(metadata.presentRegime.passes.empty());
     EXPECT_TRUE(metadata.presentRegime.resources.empty());
-    EXPECT_EQ(metadata.presentRegime.gpuFrameStatus, "Absent");
+    EXPECT_EQ(metadata.presentRegime.gpuFrameStatus, GpuReadState::Absent);
 
     EXPECT_TRUE(metadata.renderFeatures.empty());
 }
 
-TEST(RenderGraphMetadataTest, PassesCarryNeutralViewLabelsAndHexInstanceIds)
+TEST(RenderGraphMetadataTest, PassesCarryViewScopeAndHexInstanceIds)
 {
     RenderGraphPassSnapshot primary = MakeSurvivingPass("Draw");
     primary.viewScope = ViewScope::Primary;
@@ -51,9 +51,9 @@ TEST(RenderGraphMetadataTest, PassesCarryNeutralViewLabelsAndHexInstanceIds)
     const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, RenderGraphSnapshot{}, {});
 
     ASSERT_EQ(metadata.offscreenRegime.passes.size(), 2u);
-    EXPECT_EQ(metadata.offscreenRegime.passes[0].view, "primary");
+    EXPECT_EQ(metadata.offscreenRegime.passes[0].viewScope, ViewScope::Primary);
     EXPECT_EQ(metadata.offscreenRegime.passes[0].instance, "0xabcd");
-    EXPECT_EQ(metadata.offscreenRegime.passes[1].view, "secondary");
+    EXPECT_EQ(metadata.offscreenRegime.passes[1].viewScope, ViewScope::Secondary);
     EXPECT_EQ(metadata.offscreenRegime.passes[1].instance, "");
 }
 
@@ -335,12 +335,12 @@ TEST(RenderGraphMetadataTest, GpuFrameFieldsAreCopiedThroughPerRegime)
 
     const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
-    EXPECT_EQ(metadata.offscreenRegime.gpuFrameStatus, "Partial");
+    EXPECT_EQ(metadata.offscreenRegime.gpuFrameStatus, GpuReadState::Partial);
     ASSERT_TRUE(metadata.offscreenRegime.gpuSpanMilliseconds.has_value());
     EXPECT_DOUBLE_EQ(*metadata.offscreenRegime.gpuSpanMilliseconds, 4.5);
     EXPECT_EQ(metadata.offscreenRegime.gpuFoldedPasses, 3u);
     EXPECT_EQ(metadata.offscreenRegime.droppedGpuFrames, 2u);
-    EXPECT_EQ(metadata.presentRegime.gpuFrameStatus, "Absent");
+    EXPECT_EQ(metadata.presentRegime.gpuFrameStatus, GpuReadState::Absent);
     EXPECT_FALSE(metadata.presentRegime.gpuSpanMilliseconds.has_value());
 }
 

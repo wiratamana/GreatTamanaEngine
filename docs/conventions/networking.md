@@ -832,7 +832,8 @@ registering a new named texture:
   `testedAtVisibleFrame`, `hidden`, `hiddenValid`, `cameraValid`, `claimedEntities`, `occlusion`, `hizReason`,
   `hizTrackingRequested` (this view asked for movement tracking last frame), `cullFrozenFrame`, `inertReason`,
   `ledgerBytes`, ...) plus `sceneCullMode` and the read-only `freezeSerial`. `cameraValid` is the live camera of the
-  view. `hidden` is 0 while `hiddenValid` is false.
+  view. `hidden` is 0 while `hiddenValid` is false. `visibleAge` is `frameIndex - visibleFrame`, the frames since the
+  visible count was read back; it is 0 when there is no count yet (`visibleFrame` 0).
 
 - **`GET /render_graph/set_pass_enabled`, `GET /render_graph/passes`,
   `GET /render_graph/set_feature_enabled`, `GET /render_graph/set_feature_priority`,

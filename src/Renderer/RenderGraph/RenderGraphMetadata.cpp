@@ -11,16 +11,6 @@ namespace gte::rg {
 
 namespace {
 
-const char* ViewLabel(ViewScope scope) noexcept
-{
-    switch (scope) {
-    case ViewScope::Shared: return "shared";
-    case ViewScope::Primary: return "primary";
-    case ViewScope::Secondary: return "secondary";
-    }
-    return "shared";
-}
-
 // "0x..." hex text of a binding instance id; empty for 0 (the pass never executed).
 std::string InstanceText(std::uint64_t instance)
 {
@@ -63,7 +53,6 @@ RenderGraphPassMetadata BuildPassMetadata(const RenderGraphPassSnapshot& pass)
     metadata.category = ToString(pass.category);
     metadata.drawKind = ToString(pass.drawKind);
     metadata.viewScope = pass.viewScope;
-    metadata.view = ViewLabel(pass.viewScope);
     metadata.instance = InstanceText(pass.stats.gpu.bindingInstance);
     metadata.renderPassEvent = ToString(pass.renderPassEvent);
     metadata.renderPassEventOrder = static_cast<std::uint32_t>(pass.renderPassEvent);
@@ -120,7 +109,7 @@ RenderGraphRegimeMetadata BuildRegimeMetadata(const char* regimeName, const Rend
         regime.resources.push_back(BuildResourceMetadata(resource, snapshot));
     }
 
-    regime.gpuFrameStatus = ToString(snapshot.gpuReport.state);
+    regime.gpuFrameStatus = snapshot.gpuReport.state;
     if (snapshot.gpuReport.spanValid) {
         regime.gpuSpanMilliseconds = snapshot.gpuReport.spanMs;
     }

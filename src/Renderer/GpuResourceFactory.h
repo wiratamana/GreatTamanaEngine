@@ -184,6 +184,7 @@ private:
 
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
+    mutable std::mutex m_commandPoolMutex; // Command pool is externally synchronized; never held across a wait.
 
     mutable std::mutex m_fencePoolMutex;
     mutable std::vector<VkFence> m_fencePool;

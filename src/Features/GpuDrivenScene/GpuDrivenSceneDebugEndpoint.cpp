@@ -52,6 +52,7 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDriv
     Add(out, key("testedAtVisibleFrame"), Count(v.testedAtVisibleFrame));
     Add(out, key("visibleClusters"), Count(v.visibleClusters));
     Add(out, key("visibleFrame"), Count(v.visibleFrame));
+    Add(out, key("visibleAge"), Count(ClusterCountAgeFrames(v.frameIndex, v.visibleFrame)));
     Add(out, key("hidden"), Count(v.hidden));
     Add(out, key("hiddenValid"), v.hiddenValid);
     Add(out, key("statsCollected"), v.statsCollected);

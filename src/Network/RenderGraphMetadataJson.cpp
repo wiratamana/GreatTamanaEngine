@@ -1,12 +1,23 @@
 #include "RenderGraphMetadataJson.h"
 
 #include "../Application/GpuTimingText.h"
-#include "../Application/ViewScopeLabel.h"
+#include "../Editor/EditorViewNames.h"
 #include "../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
 
 namespace gte::Network {
 
 namespace {
+
+// Stable wire value of a pass's view scope.
+const char* ViewJsonValue(rg::ViewScope scope) noexcept
+{
+    switch (scope) {
+    case rg::ViewScope::Primary: return "primary";
+    case rg::ViewScope::Secondary: return "secondary";
+    case rg::ViewScope::Shared: break;
+    }
+    return "shared";
+}
 
 template <typename T>
 nlohmann::json OptionalToJson(const std::optional<T>& value)
@@ -41,7 +52,7 @@ nlohmann::json PassToJson(const rg::RenderGraphPassMetadata& pass)
         { "category", pass.category },
         { "draw_kind", pass.drawKind },
         { "view_scope", ViewScopeLabel(pass.viewScope) },
-        { "view", pass.view },
+        { "view", ViewJsonValue(pass.viewScope) },
         { "instance", pass.instance },
         { "render_pass_event", pass.renderPassEvent },
         { "render_pass_event_order", pass.renderPassEventOrder },
@@ -84,7 +95,7 @@ nlohmann::json RegimeToJson(const rg::RenderGraphRegimeMetadata& regime)
         { "regime_name", regime.regimeName },
         { "passes", std::move(passes) },
         { "resources", std::move(resources) },
-        { "gpu_frame_status", regime.gpuFrameStatus },
+        { "gpu_frame_status", rg::ToString(regime.gpuFrameStatus) },
         { "gpu_span_milliseconds", OptionalToJson(regime.gpuSpanMilliseconds) },
         { "gpu_folded_passes", regime.gpuFoldedPasses },
         { "dropped_gpu_frames", regime.droppedGpuFrames },

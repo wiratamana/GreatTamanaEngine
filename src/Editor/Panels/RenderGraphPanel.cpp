@@ -8,6 +8,7 @@
 #include "../../Core/Logging.h"
 #include "../../Encoding/CapturedPixelConversion.h"
 #include "../../Renderer/RenderGraph/RenderGraph.h"
+#include "../../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleChangeDetectionLogic.h"
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/VulkanFormatInfo.h"
@@ -254,7 +255,7 @@ void RenderGraphPanel::BuildToolbar(EditorContext& ctx, const rg::RenderGraphReg
         }
     }
 
-    ImGui::Text("GPU frame: %s", regime.gpuFrameStatus.c_str());
+    ImGui::Text("GPU frame: %s", rg::ToString(regime.gpuFrameStatus));
     if (regime.gpuFoldedPasses > 0) {
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.1f, 1.0f),
             "Warning: %u passes share one overflow timing record.", regime.gpuFoldedPasses);
@@ -478,13 +479,16 @@ void RenderGraphPanel::BuildPassTable(const std::vector<RenderGraphGroupedPass>&
 {
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_Sortable | ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg
         | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_ScrollY;
-    if (!ImGui::BeginTable("PassTable", 4, flags)) {
+    if (!ImGui::BeginTable("PassTable", 7, flags)) {
         return;
     }
     ImGui::TableSetupColumn("Name");
     ImGui::TableSetupColumn("Kind");
     ImGui::TableSetupColumn("GPU ms", ImGuiTableColumnFlags_PreferSortDescending);
     ImGui::TableSetupColumn("Culled");
+    ImGui::TableSetupColumn("Draws");
+    ImGui::TableSetupColumn("Tris");
+    ImGui::TableSetupColumn("Indirect");
     ImGui::TableHeadersRow();
 
     std::vector<const RenderGraphGroupedPass*> rows;
@@ -520,6 +524,12 @@ void RenderGraphPanel::BuildPassTable(const std::vector<RenderGraphGroupedPass>&
         ImGui::TextUnformatted(row->gpuTimingText.c_str());
         ImGui::TableNextColumn();
         ImGui::TextUnformatted(row->isCulled ? "CULLED" : "-");
+        ImGui::TableNextColumn();
+        ImGui::Text("%u", row->drawCallCount);
+        ImGui::TableNextColumn();
+        ImGui::Text("%u", row->triangleCount);
+        ImGui::TableNextColumn();
+        ImGui::Text("%u", row->indirectDrawCount);
     }
     ImGui::EndTable();
 }

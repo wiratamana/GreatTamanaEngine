@@ -1,6 +1,7 @@
 #pragma once
 
-// Plain data behind the Render Graph panel, GET /render_graph and the DOT export. No labels, no JSON.
+// Plain data behind the Render Graph panel, GET /render_graph and the DOT export.
+// View scope and GPU state are typed enums; Editor and Network turn them into text. No JSON here.
 // BuildRenderGraphMetadata() is a pure function of plain data.
 
 #include "RenderGraphSnapshot.h"
@@ -35,7 +36,6 @@ struct RenderGraphPassMetadata {
     std::string category;          // rg::ToString(RenderPassCategory)
     std::string drawKind;          // rg::ToString(RenderPassDrawKind)
     ViewScope viewScope = ViewScope::Shared;
-    std::string view = "shared";   // "shared" | "primary" | "secondary"
     std::string instance;          // Hex id of the pass's binding instance; empty when it never executed.
     std::string renderPassEvent;   // rg::ToString(RenderPassEvent)
     std::uint32_t renderPassEventOrder = 0; // static_cast<std::uint32_t>(RenderPassEvent) - sortable, unlike the text above.
@@ -67,7 +67,7 @@ struct RenderGraphRegimeMetadata {
     std::vector<RenderGraphPassMetadata> passes; // Survivors first, then culled - matches RenderGraphSnapshot order exactly.
     std::vector<RenderGraphResourceMetadata> resources;
     // GPU timing of the frame the passes' records come from.
-    std::string gpuFrameStatus = "Absent";          // rg::ToString(GpuReadState) of the whole frame.
+    GpuReadState gpuFrameStatus = GpuReadState::Absent; // State of the whole frame's GPU timing.
     std::optional<double> gpuSpanMilliseconds;      // Frame span; nullopt unless it was measured.
     std::uint32_t gpuFoldedPasses = 0;              // Passes folded into the overflow bucket.
     std::uint32_t droppedGpuFrames = 0;             // Frames whose GPU data was lost or never read.

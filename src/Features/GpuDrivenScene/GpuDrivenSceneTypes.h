@@ -345,6 +345,12 @@ inline std::string DescribeClusterOutcome(std::size_t candidateCount, const fx::
     return {};
 }
 
+// Frames since the visible count was read back. 0 when no count exists (visibleFrame 0) or it is from the future.
+constexpr std::uint64_t ClusterCountAgeFrames(std::uint64_t frame, std::uint64_t visibleFrame) noexcept
+{
+    return visibleFrame == 0 || visibleFrame > frame ? 0 : frame - visibleFrame;
+}
+
 // What a view reported at its last callback.
 struct GpuDrivenSceneViewSnapshot {
     std::uint64_t frameIndex = 0;
