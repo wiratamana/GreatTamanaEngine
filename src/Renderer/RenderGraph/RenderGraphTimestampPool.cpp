@@ -1,20 +1,17 @@
 #include "RenderGraphTimestampPool.h"
 
-#include "../Renderer.h"
-#include "RecordingAccess.h"
+#include <algorithm>
 
 namespace gte::rg {
 
-RenderGraphTimestampPool::RenderGraphTimestampPool(VkDevice device, Renderer& renderer,
-    const GpuTimestampCapability& capability, std::uint32_t synchronousSlotBudget,
-    std::uint32_t pipelinedSlotBudget, std::uint32_t pipelinedFramesInFlight)
+RenderGraphTimestampPool::RenderGraphTimestampPool(VkDevice device, const GpuTimestampCapability& capability,
+    std::uint32_t synchronousRecordBudget, std::uint32_t pipelinedRecordBudget, std::uint32_t framesInFlight)
     : m_device(device)
     , m_capability(capability)
-    , m_pipelinedSlotBudget(pipelinedSlotBudget)
+    , m_framesInFlight(framesInFlight)
 {
 #if !GTE_ENABLE_PROFILER
     // The only place that reads GTE_ENABLE_PROFILER: a profiler-off build creates no query pool.
-    // Every other method is inert whenever IsSupported() is false.
     m_capability.supported = false;
 #endif
 
@@ -22,73 +19,72 @@ RenderGraphTimestampPool::RenderGraphTimestampPool(VkDevice device, Renderer& re
         return;
     }
 
-    // Two independent fixed-size pools, one per regime; never resized.
-    m_synchronousPool.emplace(m_device, synchronousSlotBudget * 2);
-    m_pipelinedPool.emplace(m_device, pipelinedSlotBudget * pipelinedFramesInFlight * 2);
-
-    // One-time reset of every slot in both pools, so first use is clean for the validation layer.
-    WarmUpResetPool(*m_synchronousPool, renderer);
-    WarmUpResetPool(*m_pipelinedPool, renderer);
+    m_synchronousQueryCount = GpuQueryCount(synchronousRecordBudget);
+    m_pipelinedQueryCount = GpuQueryCount(pipelinedRecordBudget);
+    m_synchronousPool.emplace(m_device, m_synchronousQueryCount);
+    m_pipelinedPool.emplace(m_device, m_pipelinedQueryCount * m_framesInFlight);
+    m_scratch.resize(2 * static_cast<std::size_t>(std::max(m_synchronousQueryCount, m_pipelinedQueryCount)));
 }
 
-void RenderGraphTimestampPool::WarmUpResetPool(VulkanQueryPool& pool, Renderer& renderer)
+std::uint32_t RenderGraphTimestampPool::QueryCount(bool pipelined) const noexcept
 {
-    // vkCmdResetQueryPool must be recorded outside a rendering instance; a one-shot never begins one.
-    renderer.ImmediateSubmit(
-        [&pool](CommandBuffer& cmd) {
-            vkCmdResetQueryPool(RecordingAccess::Native(cmd), pool.Native(), 0, pool.SlotCount());
-        },
-        BlockSite::WarmUp, "timestamp warm-up");
+    return pipelined ? m_pipelinedQueryCount : m_synchronousQueryCount;
 }
 
-std::uint32_t RenderGraphTimestampPool::QueryBase(bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) const noexcept
+std::uint32_t RenderGraphTimestampPool::RegionBase(bool pipelined, std::uint32_t bufferIndex) const noexcept
 {
-    if (!pipelined) {
-        // Single-buffered - see this class's own header comment for why
-        // no frame-in-flight multiplying is needed for the synchronous
-        // regime (`bufferIndex` is always 0 there, ignored here).
-        return static_cast<std::uint32_t>(slot) * 2;
-    }
-    return (bufferIndex * m_pipelinedSlotBudget + static_cast<std::uint32_t>(slot)) * 2;
+    return pipelined ? bufferIndex * m_pipelinedQueryCount : 0;
 }
 
-void RenderGraphTimestampPool::WriteBegin(
-    VkCommandBuffer cmd, bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) noexcept
+void RenderGraphTimestampPool::ResetRegion(VkCommandBuffer cmd, bool pipelined, std::uint32_t bufferIndex) noexcept
 {
-    if (!IsSupported() || !m_captureEnabled || slot == kNoTimingSlot) {
+    if (!IsSupported() || (pipelined && bufferIndex >= m_framesInFlight)) {
         return;
     }
     const VkQueryPool pool = pipelined ? m_pipelinedPool->Native() : m_synchronousPool->Native();
-    const std::uint32_t base = QueryBase(pipelined, bufferIndex, slot);
-    vkCmdResetQueryPool(cmd, pool, base, 2);
-    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, pool, base);
+    vkCmdResetQueryPool(cmd, pool, RegionBase(pipelined, bufferIndex), QueryCount(pipelined));
 }
 
-void RenderGraphTimestampPool::WriteEnd(
-    VkCommandBuffer cmd, bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) noexcept
+void RenderGraphTimestampPool::WriteStamp(
+    VkCommandBuffer cmd, bool pipelined, std::uint32_t bufferIndex, std::int32_t query) noexcept
 {
-    if (!IsSupported() || !m_captureEnabled || slot == kNoTimingSlot) {
+    if (!IsSupported() || query < 0 || static_cast<std::uint32_t>(query) >= QueryCount(pipelined)
+        || (pipelined && bufferIndex >= m_framesInFlight)) {
         return;
     }
     const VkQueryPool pool = pipelined ? m_pipelinedPool->Native() : m_synchronousPool->Native();
-    const std::uint32_t base = QueryBase(pipelined, bufferIndex, slot);
-    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, pool, base + 1);
+    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, pool,
+        RegionBase(pipelined, bufferIndex) + static_cast<std::uint32_t>(query));
 }
 
-RenderGraphTimestampPool::RawTicks RenderGraphTimestampPool::ReadBack(
-    bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) noexcept
+GpuReadCall RenderGraphTimestampPool::Read(bool pipelined, std::uint32_t bufferIndex,
+    std::span<std::uint64_t> values, std::span<std::uint8_t> available) noexcept
 {
-    if (!IsSupported() || slot == kNoTimingSlot) {
-        return RawTicks{};
+    std::fill(available.begin(), available.end(), std::uint8_t{ 0 });
+    if (!IsSupported()) {
+        return GpuReadCall::Ok;
     }
-    const VkQueryPool pool = pipelined ? m_pipelinedPool->Native() : m_synchronousPool->Native();
-    const std::uint32_t base = QueryBase(pipelined, bufferIndex, slot);
+    if (pipelined && bufferIndex >= m_framesInFlight) {
+        return GpuReadCall::Failed;
+    }
 
-    std::uint64_t ticks[2] = { 0, 0 };
-    // No WAIT bit: the caller has already confirmed this submission is complete.
-    vkGetQueryPoolResults(
-        m_device, pool, base, 2, sizeof(ticks), ticks, sizeof(std::uint64_t), VK_QUERY_RESULT_64_BIT);
-    return RawTicks{ ticks[0], ticks[1] };
+    const std::uint32_t count = QueryCount(pipelined);
+    const VkQueryPool pool = pipelined ? m_pipelinedPool->Native() : m_synchronousPool->Native();
+
+    // No WAIT bit: the caller has already confirmed this submission is complete. A pair is value, availability.
+    const VkResult result = vkGetQueryPoolResults(m_device, pool, RegionBase(pipelined, bufferIndex), count,
+        static_cast<std::size_t>(count) * 2 * sizeof(std::uint64_t), m_scratch.data(), 2 * sizeof(std::uint64_t),
+        VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+    if (result != VK_SUCCESS && result != VK_NOT_READY) {
+        return GpuReadCall::Failed;
+    }
+
+    const std::size_t usable = std::min<std::size_t>({ count, values.size(), available.size() });
+    for (std::size_t i = 0; i < usable; ++i) {
+        values[i] = m_scratch[2 * i];
+        available[i] = m_scratch[2 * i + 1] != 0 ? 1 : 0;
+    }
+    return result == VK_SUCCESS ? GpuReadCall::Ok : GpuReadCall::NotReady;
 }
 
 } // namespace gte::rg

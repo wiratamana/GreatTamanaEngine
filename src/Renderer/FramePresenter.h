@@ -1,6 +1,8 @@
 #pragma once
 
 #include "FrameRecorder.h"
+#include "GpuFrameRing.h"
+#include "GpuTiming.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "RenderGraph/RenderGraphTypes.h"
 #include "RenderTarget.h"
@@ -78,7 +80,7 @@ public:
 private:
     friend class OffscreenRecording;
 
-    static constexpr std::uint32_t kFramesInFlight = 2;
+    static constexpr std::uint32_t kFramesInFlight = kGpuFramesInFlight;
 
     void CreateCommandObjects();
     // Waits (bounded) for the previous offscreen submit, then opens the offscreen command buffer. Throws on failure
@@ -117,6 +119,10 @@ private:
     bool m_offscreenOpen = false; // True from BeginOffscreenRecording() until it ends or is discarded.
 
     std::uint32_t m_currentFrame = 0;
+
+    // Frames that really reached the queue, and which of them each slot holds (for the GPU timing read-back).
+    std::uint64_t m_submittedFrames = 0;
+    GpuFrameRing m_gpuFrames;
 
     bool m_resizeRequested = false;
     int m_pendingWidth = 0;

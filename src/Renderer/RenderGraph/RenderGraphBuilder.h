@@ -8,6 +8,7 @@
 #include "RenderGraphDebugMetadataSink.h"
 #include "RenderGraphPersistentResourceCache.h"
 #include "RenderPassToggleRegistry.h"
+#include "../NameHash.h"
 #include "../RenderTarget.h"
 #include "../VolumeTarget.h"
 #include "../TextureArrayTarget.h"
@@ -380,6 +381,12 @@ public:
         return m_owningFeatureScope.empty() ? kEngineUnowned : std::string_view(m_owningFeatureScope.back());
     }
 
+    // Hash of the open feature scope's name; 0 when no scope is open.
+    std::uint32_t CurrentFeatureId() const noexcept
+    {
+        return m_owningFeatureScope.empty() ? 0u : NameHash32(m_owningFeatureScope.back());
+    }
+
     void SetPassToggleRegistry(RenderPassToggleRegistry* registry) noexcept { m_passToggleRegistry = registry; }
 
     // Installs the graph's once-log, so an error repeated every frame is logged once for the graph's lifetime.
@@ -408,6 +415,7 @@ private:
         pass.name = name;
         pass.viewScope = viewScope;
         pass.kind = kind;
+        pass.featureId = CurrentFeatureId();
 
         PassBuilder passBuilder(pass);
         setup(passBuilder);

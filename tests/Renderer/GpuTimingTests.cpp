@@ -1,4 +1,4 @@
-// Pure GPU timestamp math and status resolution (src/Renderer/GpuTiming.h). No device involved.
+// Pure GPU timestamp math and capability interpretation. No device involved.
 
 #include "Renderer/GpuTiming.h"
 
@@ -7,20 +7,16 @@
 namespace gte {
 namespace {
 
-// --- ConvertTimestampDeltaToMilliseconds() ---------------------------------
-
 TEST(GpuTimingTest, ConvertTimestampDeltaToMillisecondsHandlesARoundPeriod)
 {
-    // 2.0 ns/tick, 1000-tick delta -> 1000 * 2.0 ns == 2000 ns == 0.002 ms.
+    // 2.0 ns/tick, 1000-tick delta -> 2000 ns == 0.002 ms.
     const double ms = ConvertTimestampDeltaToMilliseconds(100, 1100, 2.0f, 64);
     EXPECT_NEAR(ms, 0.002, 1e-9);
 }
 
 TEST(GpuTimingTest, ConvertTimestampDeltaToMillisecondsHandlesARealisticNonRoundPeriod)
 {
-    // 0.641291 ns/tick is a realistic, non-round value actually reported by
-    // real hardware (see PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md's own
-    // Phase 4A testing section) - 1,000,000-tick delta -> ~0.641291 ms.
+    // 0.641291 ns/tick is a period real hardware reports.
     const double ms = ConvertTimestampDeltaToMilliseconds(0, 1'000'000, 0.641291f, 64);
     EXPECT_NEAR(ms, 0.641291, 1e-4);
 }
@@ -32,17 +28,9 @@ TEST(GpuTimingTest, ConvertTimestampDeltaToMillisecondsZeroDeltaIsZero)
 
 TEST(GpuTimingTest, ConvertTimestampDeltaToMillisecondsWrapsAroundWithinValidBits)
 {
-    // validBits == 32: a counter that goes from 0xFFFFFFF0 to 0x00000010
-    // has genuinely advanced by 32 ticks (a forward wrap), NOT underflowed
-    // to some enormous unsigned value - the single most important
-    // regression case in this whole file (see this file's own header
-    // comment and GpuTiming.h's own doc comment on masking).
+    // With 32 valid bits a counter going from 0xFFFFFFF0 to 0x10 advanced by 32 ticks.
     constexpr std::uint32_t validBits = 32;
-    const std::uint64_t start = 0xFFFFFFF0ULL;
-    const std::uint64_t end = 0x00000010ULL; // wrapped past 2^32
-    const double ms = ConvertTimestampDeltaToMilliseconds(start, end, 1.0f, validBits);
-
-    // 32 ticks * 1.0 ns/tick == 32 ns == 0.000032 ms.
+    const double ms = ConvertTimestampDeltaToMilliseconds(0xFFFFFFF0ULL, 0x00000010ULL, 1.0f, validBits);
     EXPECT_NEAR(ms, 0.000032, 1e-9);
 }
 
@@ -52,14 +40,10 @@ TEST(GpuTimingTest, ConvertTimestampDeltaToMillisecondsNonPositivePeriodReturnsZ
     EXPECT_DOUBLE_EQ(ConvertTimestampDeltaToMilliseconds(0, 1'000'000, -1.0f, 64), 0.0);
 }
 
-// --- Constants ---------------------------------------------------------------
-
-TEST(GpuTimingTest, GpuTimingFramesInFlightIsTwo)
+TEST(GpuTimingTest, GpuFramesInFlightIsTwo)
 {
-    EXPECT_EQ(kGpuTimingFramesInFlight, 2u);
+    EXPECT_EQ(kGpuFramesInFlight, 2u);
 }
-
-// --- InterpretTimestampCapability() -----------------------------------------
 
 TEST(GpuTimingTest, InterpretTimestampCapabilitySupportedWhenAllInputsAreValid)
 {
@@ -72,72 +56,27 @@ TEST(GpuTimingTest, InterpretTimestampCapabilitySupportedWhenAllInputsAreValid)
 
 TEST(GpuTimingTest, InterpretTimestampCapabilityUnsupportedWhenComputeAndGraphicsFlagIsFalse)
 {
-    const GpuTimestampCapability capability = InterpretTimestampCapability(false, 1.0f, 64);
-    EXPECT_FALSE(capability.supported);
+    EXPECT_FALSE(InterpretTimestampCapability(false, 1.0f, 64).supported);
 }
 
 TEST(GpuTimingTest, InterpretTimestampCapabilityUnsupportedWhenPeriodIsZero)
 {
-    // A timestampPeriod of exactly 0 is itself a valid "not supported"
-    // signal per the Vulkan spec - never assumed positive.
-    const GpuTimestampCapability capability = InterpretTimestampCapability(true, 0.0f, 64);
-    EXPECT_FALSE(capability.supported);
+    // A zero period is the device's way of saying timestamps are not supported.
+    EXPECT_FALSE(InterpretTimestampCapability(true, 0.0f, 64).supported);
 }
 
 TEST(GpuTimingTest, InterpretTimestampCapabilityUnsupportedWhenValidBitsIsZero)
 {
-    // timestampValidBits == 0 is itself a valid "this family can't do it"
-    // signal per the Vulkan spec - never assumed non-zero.
-    const GpuTimestampCapability capability = InterpretTimestampCapability(true, 1.0f, 0);
-    EXPECT_FALSE(capability.supported);
+    EXPECT_FALSE(InterpretTimestampCapability(true, 1.0f, 0).supported);
 }
 
 TEST(GpuTimingTest, InterpretTimestampCapabilityStoresRawValuesEvenWhenUnsupported)
 {
-    // The raw period/validBits are still recorded verbatim even when the
-    // overall result is unsupported - useful for diagnostics, and simpler
-    // than special-casing them to 0 on the unsupported path.
     const GpuTimestampCapability capability = InterpretTimestampCapability(false, 3.5f, 12);
 
     EXPECT_FALSE(capability.supported);
     EXPECT_FLOAT_EQ(capability.timestampPeriodNs, 3.5f);
     EXPECT_EQ(capability.validBits, 12u);
-}
-
-// --- ResolveGpuTimingStatus() -----------------------------------------------
-// Pure tri-state priority decision; all 8 combinations of its 3 boolean inputs, no device involved.
-TEST(GpuTimingTest, ResolveGpuTimingStatusPresentWhenSupportedCapturingAndWritten)
-{
-    EXPECT_EQ(ResolveGpuTimingStatus(true, true, true), GpuTimingSample::Status::Present);
-}
-
-TEST(GpuTimingTest, ResolveGpuTimingStatusAbsentWhenCaptureDisabled)
-{
-    // Capture being off is a TEMPORARY condition - must resolve to Absent,
-    // never Unsupported, even though the device/build itself is capable.
-    EXPECT_EQ(ResolveGpuTimingStatus(true, false, true), GpuTimingSample::Status::Absent);
-}
-
-TEST(GpuTimingTest, ResolveGpuTimingStatusAbsentWhenNotYetWritten)
-{
-    // A slot with no data yet is a TEMPORARY condition: Absent, never Unsupported.
-    EXPECT_EQ(ResolveGpuTimingStatus(true, true, false), GpuTimingSample::Status::Absent);
-}
-
-TEST(GpuTimingTest, ResolveGpuTimingStatusAbsentWhenBothCaptureDisabledAndNotWritten)
-{
-    EXPECT_EQ(ResolveGpuTimingStatus(true, false, false), GpuTimingSample::Status::Absent);
-}
-
-TEST(GpuTimingTest, ResolveGpuTimingStatusUnsupportedWinsRegardlessOfTheOtherTwoInputs)
-{
-    // Unsupported (a PERMANENT condition - this device/build can NEVER
-    // produce this measurement) always wins, no matter what
-    // captureEnabled/hasWrittenData say.
-    EXPECT_EQ(ResolveGpuTimingStatus(false, true, true), GpuTimingSample::Status::Unsupported);
-    EXPECT_EQ(ResolveGpuTimingStatus(false, true, false), GpuTimingSample::Status::Unsupported);
-    EXPECT_EQ(ResolveGpuTimingStatus(false, false, true), GpuTimingSample::Status::Unsupported);
-    EXPECT_EQ(ResolveGpuTimingStatus(false, false, false), GpuTimingSample::Status::Unsupported);
 }
 
 } // namespace

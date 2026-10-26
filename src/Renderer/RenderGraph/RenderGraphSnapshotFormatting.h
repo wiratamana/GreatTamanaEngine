@@ -5,7 +5,7 @@
 
 #include "RenderGraphSnapshot.h"
 #include "RenderGraphTypes.h"
-#include "../GpuTiming.h"
+#include "../GpuStampPlan.h"
 
 #include <cstdint>
 #include <string>
@@ -13,8 +13,12 @@
 
 namespace gte::rg {
 
-// Present -> "%.2f ms", Unsupported -> "Unsupported", Absent -> "N/A" (never a fabricated "0.00 ms").
-std::string FormatGpuTiming(const GpuTimingSample& timing);
+// Status word of a GPU read: "Present", "Partial", "Absent", "Error", "Unsupported" or "Inactive".
+const char* ToString(GpuReadState state) noexcept;
+
+// Present -> "%.2f ms" (barriers + work), Partial -> "~%.2f ms (partial)", any other state -> its status word.
+// Never a fabricated "0.00 ms" for a pass that was not measured.
+std::string FormatGpuTiming(const GpuPassRecord& record);
 
 // Name of the pass at `index`; out of range -> "?", empty name -> "(unnamed)".
 const char* ResolvePassNameAtSurvivingIndex(const RenderGraphSnapshot& snapshot, std::int32_t index);

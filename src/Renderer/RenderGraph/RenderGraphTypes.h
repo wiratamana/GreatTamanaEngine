@@ -278,6 +278,9 @@ struct PassRecord {
 
     // Set by the builder when the pass was refused (duplicate binding identity): barriers stay, execute is skipped.
     bool skipExecute = false;
+
+    // Hash of the owning feature's name (NameHash32); 0 for a pass declared outside any feature scope.
+    std::uint32_t featureId = 0;
 };
 
 } // namespace gte::rg

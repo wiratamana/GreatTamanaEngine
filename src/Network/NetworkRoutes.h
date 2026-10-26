@@ -41,21 +41,9 @@ std::string HandleHelloWorld();
 // /get_swapchain.
 enum class CaptureResponseFormat { RawPng, JsonBase64 };
 
-// Resolves which shape a capture endpoint's response should take, given the
-// request's own `?format=` query parameter value (empty string if absent)
-// and `Accept` header value (empty string if absent) - see
-// PHASE0_MASTER_STRATEGY.md's Locked Design Decision #3 for the exact,
-// locked precedence rules this implements:
-//   - queryFormat == "png"            -> RawPng
-//   - queryFormat == "base64"/"json"  -> JsonBase64
-//   - queryFormat is anything else non-empty -> RawPng (an unrecognized
-//     value is NOT an error - falls back to the default, same spirit as
-//     this engine's other "unknown-value falls back to a safe default"
-//     precedents, e.g. GpuTimingSample's own tri-state resolution)
-//   - queryFormat is empty AND acceptHeader contains "application/json"
-//     (a simple substring check - real Accept headers can have multiple,
-//     weighted values; this engine only ever needs the simple case) -> JsonBase64
-//   - otherwise (queryFormat empty, Accept doesn't ask for JSON) -> RawPng
+// Picks the capture response shape from the `?format=` value and the `Accept` header (both empty when absent).
+// "png" gives RawPng; "base64" or "json" gives JsonBase64; any other non-empty value falls back to RawPng.
+// With no format, an Accept header containing "application/json" gives JsonBase64, otherwise RawPng.
 CaptureResponseFormat ResolveCaptureResponseFormat(const std::string& queryFormat, const std::string& acceptHeader);
 
 // Builds the JSON body for the JsonBase64 response shape - a small, fixed,

@@ -36,12 +36,12 @@ TEST(RenderGraphMetadataTest, EmptySnapshotsProduceEmptyMetadata)
     EXPECT_EQ(metadata.offscreenRegime.regimeName, "SynchronousImmediateReadback");
     EXPECT_TRUE(metadata.offscreenRegime.passes.empty());
     EXPECT_TRUE(metadata.offscreenRegime.resources.empty());
-    EXPECT_FALSE(metadata.offscreenRegime.timingSlotBudgetExhausted);
+    EXPECT_EQ(metadata.offscreenRegime.droppedGpuFrames, 0u);
 
     EXPECT_EQ(metadata.presentRegime.regimeName, "PipelinedDeferredReadback");
     EXPECT_TRUE(metadata.presentRegime.passes.empty());
     EXPECT_TRUE(metadata.presentRegime.resources.empty());
-    EXPECT_FALSE(metadata.presentRegime.timingSlotBudgetExhausted);
+    EXPECT_EQ(metadata.presentRegime.gpuFrameStatus, "Absent");
 
     EXPECT_TRUE(metadata.renderFeatures.empty());
 }
@@ -192,9 +192,7 @@ TEST(RenderGraphMetadataTest, CulledPassIsStillFullyDescribedWithZeroedStatsAndN
     pass.writeNames = { "DeadEnd" };
     pass.writeKinds = { ResourceKind::VolumeTexture };
     pass.writeAccess = { ResourceAccess::ComputeShaderWrite };
-    // pass.stats left at its default (empty DrawStats, Absent GpuTimingSample)
-    // - exactly what BuildRenderGraphSnapshot() itself always leaves a culled
-    // pass with.
+    // pass.stats stays at its default (empty DrawStats, Absent GPU record), as for any culled pass.
 
     RenderGraphSnapshot offscreen;
     offscreen.passesInExecutionOrder.push_back(pass);
@@ -222,7 +220,7 @@ TEST(RenderGraphMetadataTest, CulledPassIsStillFullyDescribedWithZeroedStatsAndN
 
     EXPECT_EQ(built.drawCallCount, 0u);
     EXPECT_EQ(built.triangleCount, 0u);
-    EXPECT_EQ(built.gpuTimingText, "N/A");
+    EXPECT_EQ(built.gpuTimingText, "Absent");
     EXPECT_FALSE(built.gpuTimingMilliseconds.has_value());
 }
 
@@ -285,14 +283,14 @@ TEST(RenderGraphMetadataTest, NeverUsedResourceHasNulloptPassNamesForNegativeInd
     EXPECT_FALSE(built.lastUsePassName.has_value());
 }
 
-// --- GpuTimingSample::Status::Present carries a real numeric value too -----
+// --- A measured pass carries a real numeric value too ------------------------
 
 TEST(RenderGraphMetadataTest, PresentGpuTimingProducesMatchingTextAndNumericMilliseconds)
 {
-
     RenderGraphPassSnapshot pass = MakeSurvivingPass("TimedPass");
-    pass.stats.timing.status = GpuTimingSample::Status::Present;
-    pass.stats.timing.milliseconds = 3.14;
+    pass.stats.gpu.state = GpuReadState::Present;
+    pass.stats.gpu.barrierMs = 0.5f;
+    pass.stats.gpu.workMs = 3.0f;
     pass.stats.drawStats.drawCallCount = 7;
     pass.stats.drawStats.triangleCount = 42;
 
@@ -306,25 +304,50 @@ TEST(RenderGraphMetadataTest, PresentGpuTimingProducesMatchingTextAndNumericMill
     const RenderGraphPassMetadata& built = metadata.offscreenRegime.passes[0];
     EXPECT_EQ(built.drawCallCount, 7u);
     EXPECT_EQ(built.triangleCount, 42u);
-    EXPECT_EQ(built.gpuTimingText, "3.14 ms");
+    EXPECT_EQ(built.gpuTimingText, "3.50 ms");
+    EXPECT_EQ(built.gpuTimingStatus, "Present");
     ASSERT_TRUE(built.gpuTimingMilliseconds.has_value());
-    EXPECT_DOUBLE_EQ(*built.gpuTimingMilliseconds, 3.14);
+    EXPECT_DOUBLE_EQ(*built.gpuTimingMilliseconds, 3.5);
 }
 
-// --- timingSlotBudgetExhausted passes straight through ----------------------
+// --- Frame-level GPU timing passes straight through -------------------------
 
-TEST(RenderGraphMetadataTest, TimingSlotBudgetExhaustedIsCopiedThroughPerRegime)
+TEST(RenderGraphMetadataTest, GpuFrameFieldsAreCopiedThroughPerRegime)
 {
-
     RenderGraphSnapshot offscreen;
-    offscreen.timingSlotBudgetExhausted = true;
-    RenderGraphSnapshot present;
-    present.timingSlotBudgetExhausted = false;
+    offscreen.gpuReport.state = GpuReadState::Partial;
+    offscreen.gpuReport.spanValid = true;
+    offscreen.gpuReport.spanMs = 4.5;
+    offscreen.gpuReport.foldedPasses = 3;
+    offscreen.droppedGpuFrames = 2;
+    const RenderGraphSnapshot present;
 
     const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
-    EXPECT_TRUE(metadata.offscreenRegime.timingSlotBudgetExhausted);
-    EXPECT_FALSE(metadata.presentRegime.timingSlotBudgetExhausted);
+    EXPECT_EQ(metadata.offscreenRegime.gpuFrameStatus, "Partial");
+    ASSERT_TRUE(metadata.offscreenRegime.gpuSpanMilliseconds.has_value());
+    EXPECT_DOUBLE_EQ(*metadata.offscreenRegime.gpuSpanMilliseconds, 4.5);
+    EXPECT_EQ(metadata.offscreenRegime.gpuFoldedPasses, 3u);
+    EXPECT_EQ(metadata.offscreenRegime.droppedGpuFrames, 2u);
+    EXPECT_EQ(metadata.presentRegime.gpuFrameStatus, "Absent");
+    EXPECT_FALSE(metadata.presentRegime.gpuSpanMilliseconds.has_value());
+}
+
+TEST(RenderGraphMetadataTest, UnmeasuredPassCarriesItsStatusWordAndNoNumber)
+{
+    RenderGraphPassSnapshot pass = MakeSurvivingPass("Idle");
+    pass.stats.gpu.state = GpuReadState::Inactive;
+
+    RenderGraphSnapshot offscreen;
+    offscreen.passesInExecutionOrder.push_back(pass);
+    const RenderGraphSnapshot present;
+
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
+
+    ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
+    EXPECT_EQ(metadata.offscreenRegime.passes[0].gpuTimingText, "Inactive");
+    EXPECT_EQ(metadata.offscreenRegime.passes[0].gpuTimingStatus, "Inactive");
+    EXPECT_FALSE(metadata.offscreenRegime.passes[0].gpuTimingMilliseconds.has_value());
 }
 
 // --- RenderFeatureDebugEntry is reused directly -------------------------------
@@ -366,7 +389,7 @@ TEST(RenderGraphMetadataTest, ToJsonProducesExpectedTopLevelShapeAndNullHandling
     pass.stats.drawStats.drawCallCount = 2;
     pass.stats.drawStats.triangleCount = 20;
     // owningFeatureName never set -> stays empty -> JSON "".
-    // stats.timing stays at its default (Absent) -> gpu_timing_milliseconds JSON null.
+    // The GPU record stays at its default (Absent) -> gpu_timing_milliseconds JSON null.
 
     RenderGraphSnapshot offscreen;
     offscreen.passesInExecutionOrder.push_back(pass);
@@ -392,7 +415,7 @@ TEST(RenderGraphMetadataTest, ToJsonProducesExpectedTopLevelShapeAndNullHandling
     EXPECT_FALSE(jsonPass["is_culled"].get<bool>());
     EXPECT_EQ(jsonPass["owning_feature_name"].get<std::string>(), "");
     EXPECT_TRUE(jsonPass["gpu_timing_milliseconds"].is_null());
-    EXPECT_EQ(jsonPass["gpu_timing_text"].get<std::string>(), "N/A");
+    EXPECT_EQ(jsonPass["gpu_timing_text"].get<std::string>(), "Absent");
     EXPECT_EQ(jsonPass["draw_call_count"].get<std::uint32_t>(), 2u);
     EXPECT_EQ(jsonPass["triangle_count"].get<std::uint32_t>(), 20u);
     ASSERT_EQ(jsonPass["reads"].size(), 1u);

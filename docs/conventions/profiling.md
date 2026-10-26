@@ -67,7 +67,16 @@ snapshot just before `EndFrame()`. Follow these rules when you touch profiling o
 
 - A value that was not measured carries a `SampleStatus` (`Present`, `Stale`, `Absent`, `Unsupported`, `Partial`,
   `Error`, `Inactive`). It is never a bare `0`. `FormatGpuTimingLine()` prints a number only for `Present`.
-- No GPU timing feeds the profiler panel yet, so its GPU rows read "not measured".
+- GPU time is measured by timestamp queries in `src/Renderer` (`GpuStampPlan.h`, `RenderGraphTimestampPool`):
+  - One reset of the frame's query region, then a start stamp before each pass's barriers, a stamp after them, and an
+    end and a final stamp. Passes past the record budget fold into one overflow record.
+  - The region is read back in one `vkGetQueryPoolResults` call with availability. A missing stamp reads `Absent` or
+    `Partial`, a backwards or huge delta reads `Error`, and a device without timestamps reads `Unsupported`.
+  - The offscreen regime reads after its own wait. The present regime reads the slot the presenter just waited on.
+    A frame that was never submitted, or left the slot ring, is counted in `dropped_gpu_frames`.
+  - A graph made with `TimingMode::Disabled` (one-shot and cluster viewer graphs) writes no stamps; its records read
+    `Inactive`. Capture off reads `Absent`.
+- The profiler panel's own GPU rows still read "not measured" until they take these records.
 - `Application/MemorySnapshotBuilder.h` turns `Renderer::GetMemoryTotals()` into a `Profiling::MemorySnapshot`.
   It is always `Present`.
 - `Renderer/DrawStats.h` counts draw calls and triangles inside the `FrameRecorder` record loop, on the same path that

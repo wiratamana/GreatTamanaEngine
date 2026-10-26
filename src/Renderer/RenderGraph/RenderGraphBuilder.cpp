@@ -404,6 +404,7 @@ void RenderGraphBuilder::AddBlitPass(
     PassRecord& pass = m_passes.back();
     pass.name = name;
     pass.kind = PassKind::Blit;
+    pass.featureId = CurrentFeatureId();
     pass.viewScope = viewScope;
     pass.renderPassEvent = renderPassEvent;
     pass.blitCommand = spec;

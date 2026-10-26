@@ -103,12 +103,11 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t de
 } // namespace
 
 RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, const CompiledGraphInput& input,
-    const std::function<PassGpuStats(std::size_t)>& statsLookup, bool timingSlotBudgetExhausted,
+    const std::function<PassGpuStats(std::size_t)>& statsLookup,
     const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup,
     const std::function<bool(std::size_t, const std::string&, std::string&)>& barrierLabelLookup)
 {
     RenderGraphSnapshot snapshot;
-    snapshot.timingSlotBudgetExhausted = timingSlotBudgetExhausted;
     snapshot.passesInExecutionOrder.reserve(compiled.executionOrder.size() + input.passes.size());
 
     // Surviving passes first, in execution order; handle.index is the declaration index.

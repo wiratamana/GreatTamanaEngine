@@ -454,8 +454,8 @@ TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewComputePassProducesLeafUnderP
     composite.readKinds.push_back(rg::ResourceKind::Texture);
     composite.writeNames.push_back("GameViewComposited");
     composite.writeKinds.push_back(rg::ResourceKind::Texture);
-    composite.stats.timing.status = GpuTimingSample::Status::Present;
-    composite.stats.timing.milliseconds = 0.25;
+    composite.stats.gpu.state = GpuReadState::Present;
+    composite.stats.gpu.workMs = 0.25f;
     graphSnapshot.passesInExecutionOrder.push_back(composite);
 
     const FrameDebuggerCaptureContext capture;

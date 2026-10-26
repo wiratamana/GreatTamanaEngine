@@ -257,9 +257,13 @@ void RenderGraphPanel::BuildToolbar(EditorContext& ctx, const rg::RenderGraphReg
         }
     }
 
-    if (regime.timingSlotBudgetExhausted) {
+    ImGui::Text("GPU frame: %s", regime.gpuFrameStatus.c_str());
+    if (regime.gpuFoldedPasses > 0) {
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.1f, 1.0f),
-            "Warning: GPU timing slot budget exhausted - some pass timings are stale.");
+            "Warning: %u passes share one overflow timing record.", regime.gpuFoldedPasses);
+    }
+    if (regime.droppedGpuFrames > 0) {
+        ImGui::TextDisabled("Dropped GPU frames: %u", regime.droppedGpuFrames);
     }
 }
 

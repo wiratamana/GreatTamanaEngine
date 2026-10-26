@@ -4,6 +4,20 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## GPU records with honest statuses (branch `feature/gpu-cull-impl`, 2026-10-26)
+
+- **One record per executed pass.** The graph plans its timestamp queries once per frame (`GpuStampPlan`): one reset, a start
+  stamp before each pass's barriers, a stamp after them, and an end and a final stamp. Each pass gets a `GpuPassRecord` with
+  feature id, view, kind, binding instance, draws and a status. The same pass name in two views no longer shares a slot.
+- **Read-back with availability.** One `vkGetQueryPoolResults` call per frame. A missing stamp reads `Absent` or `Partial`, an
+  out-of-order stamp reads `Error`, a device without timestamps reads `Unsupported`, capture off reads `Absent`.
+- **The presenter owns the frame slot and frame index.** A frame that was never submitted, or left the slot ring, is dropped and
+  counted (`dropped_gpu_frames`). The one-shot and cluster viewer graphs use `TimingMode::Disabled` and read `Inactive`.
+- **`/render_graph`** loses `timing_slot_budget_exhausted` and gains `gpu_frame_status`, `gpu_span_milliseconds`,
+  `gpu_folded_passes` and `dropped_gpu_frames` per regime, and `gpu_timing_status` and `gpu_folded_passes` per pass. A pass that
+  was not measured prints its status word, never `N/A` or `0.00`.
+- **Removed:** the name keyed slot ordinals, the two warm-up one-shot submits, and the old three-state timing sample.
+
 ## Profiler event log (branch `feature/gpu-cull-impl`, 2026-10-26)
 
 - **CPU scopes are events, not a flat table.** `GTE_PROFILE_SCOPE` records a 24 byte `ScopeEvent` with an interned name,

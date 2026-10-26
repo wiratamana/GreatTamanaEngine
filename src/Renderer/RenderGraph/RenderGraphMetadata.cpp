@@ -53,10 +53,13 @@ RenderGraphPassMetadata BuildPassMetadata(const RenderGraphPassSnapshot& pass)
     metadata.drawCallCount = pass.stats.drawStats.drawCallCount;
     metadata.triangleCount = pass.stats.drawStats.triangleCount;
     metadata.indirectDrawCount = pass.stats.drawStats.indirectDrawCount;
-    metadata.gpuTimingText = FormatGpuTiming(pass.stats.timing);
-    metadata.gpuTimingMilliseconds = (pass.stats.timing.status == GpuTimingSample::Status::Present)
-        ? std::optional<double>(pass.stats.timing.milliseconds)
-        : std::nullopt;
+    metadata.gpuTimingText = FormatGpuTiming(pass.stats.gpu);
+    metadata.gpuTimingStatus = ToString(pass.stats.gpu.state);
+    metadata.gpuFoldedPasses = pass.stats.gpu.foldedPasses;
+    if (pass.stats.gpu.state == GpuReadState::Present) {
+        metadata.gpuTimingMilliseconds =
+            static_cast<double>(pass.stats.gpu.barrierMs) + static_cast<double>(pass.stats.gpu.workMs);
+    }
 
     return metadata;
 }
@@ -93,7 +96,12 @@ RenderGraphRegimeMetadata BuildRegimeMetadata(const char* regimeName, const Rend
         regime.resources.push_back(BuildResourceMetadata(resource, snapshot));
     }
 
-    regime.timingSlotBudgetExhausted = snapshot.timingSlotBudgetExhausted;
+    regime.gpuFrameStatus = ToString(snapshot.gpuReport.state);
+    if (snapshot.gpuReport.spanValid) {
+        regime.gpuSpanMilliseconds = snapshot.gpuReport.spanMs;
+    }
+    regime.gpuFoldedPasses = snapshot.gpuReport.foldedPasses;
+    regime.droppedGpuFrames = snapshot.droppedGpuFrames;
     return regime;
 }
 
@@ -295,6 +303,8 @@ void to_json(nlohmann::json& j, const RenderGraphPassMetadata& pass)
         { "triangle_count", pass.triangleCount },
         { "indirect_draw_count", pass.indirectDrawCount },
         { "gpu_timing_text", pass.gpuTimingText },
+        { "gpu_timing_status", pass.gpuTimingStatus },
+        { "gpu_folded_passes", pass.gpuFoldedPasses },
         { "gpu_timing_milliseconds",
             pass.gpuTimingMilliseconds.has_value() ? nlohmann::json(*pass.gpuTimingMilliseconds)
                                                     : nlohmann::json(nullptr) },
@@ -323,7 +333,12 @@ void to_json(nlohmann::json& j, const RenderGraphRegimeMetadata& regime)
         { "regime_name", regime.regimeName },
         { "passes", regime.passes },
         { "resources", regime.resources },
-        { "timing_slot_budget_exhausted", regime.timingSlotBudgetExhausted },
+        { "gpu_frame_status", regime.gpuFrameStatus },
+        { "gpu_span_milliseconds",
+            regime.gpuSpanMilliseconds.has_value() ? nlohmann::json(*regime.gpuSpanMilliseconds)
+                                                    : nlohmann::json(nullptr) },
+        { "gpu_folded_passes", regime.gpuFoldedPasses },
+        { "dropped_gpu_frames", regime.droppedGpuFrames },
     };
 }
 

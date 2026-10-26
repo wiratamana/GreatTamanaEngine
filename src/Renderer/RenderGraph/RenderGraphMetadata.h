@@ -45,8 +45,10 @@ struct RenderGraphPassMetadata {
     std::uint32_t drawCallCount = 0;   // 0 for a culled pass.
     std::uint32_t triangleCount = 0;   // same rule.
     std::uint32_t indirectDrawCount = 0; // Indirect draws issued; their triangles are GPU-side and not counted above.
-    std::string gpuTimingText;        // Formatted GPU timing text - "N/A" for a culled pass too.
-    std::optional<double> gpuTimingMilliseconds; // Same value as a number, nullopt unless actually present.
+    std::string gpuTimingText;        // Formatted GPU timing text; the status word when not measured.
+    std::string gpuTimingStatus = "Absent"; // rg::ToString(GpuReadState) of this pass's record.
+    std::optional<double> gpuTimingMilliseconds; // Barrier + work as a number, nullopt unless the status is Present.
+    std::uint32_t gpuFoldedPasses = 0; // Passes this record stands for when it is the overflow bucket.
 };
 
 // One resource, presentation-ready. Raw pass indices are kept and the pass names are resolved too.
@@ -64,7 +66,11 @@ struct RenderGraphRegimeMetadata {
     std::string regimeName; // Exact gte::rg::ExecuteTimingMode enumerator name, so callers can round-trip it.
     std::vector<RenderGraphPassMetadata> passes; // Survivors first, then culled - matches RenderGraphSnapshot order exactly.
     std::vector<RenderGraphResourceMetadata> resources;
-    bool timingSlotBudgetExhausted = false;
+    // GPU timing of the frame the passes' records come from.
+    std::string gpuFrameStatus = "Absent";          // rg::ToString(GpuReadState) of the whole frame.
+    std::optional<double> gpuSpanMilliseconds;      // Frame span; nullopt unless it was measured.
+    std::uint32_t gpuFoldedPasses = 0;              // Passes folded into the overflow bucket.
+    std::uint32_t droppedGpuFrames = 0;             // Frames whose GPU data was lost or never read.
 };
 
 // One live GPU allocation: its debug name (empty when unnamed) and size.

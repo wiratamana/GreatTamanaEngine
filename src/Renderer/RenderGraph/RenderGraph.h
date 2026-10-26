@@ -48,10 +48,14 @@ enum class ExecuteTimingMode : std::uint8_t {
     PipelinedDeferredReadback,
 };
 
+// Whether a graph measures GPU time.
+enum class TimingMode : std::uint8_t { Enabled, Disabled };
+
 // Manages and executes the frame's render passes and resources.
 class RenderGraph {
 public:
-    explicit RenderGraph(Renderer& renderer);
+    // A Disabled graph creates no query pool and writes no stamps; its GPU records read Inactive.
+    explicit RenderGraph(Renderer& renderer, TimingMode timingMode = TimingMode::Enabled);
 
     // Builds and executes passes using the provided build callback.
     template <typename BuildFn>
@@ -92,11 +96,28 @@ public:
     // Advances the persistent resource cache frame counter.
     void BeginPersistentResourceFrame() noexcept;
 
-    // Reads back and resolves GPU timestamps for synchronous execution.
+    // Synchronous regime: reads the stamps of the last Execute() once its submission completed, resolves them and
+    // fills the synchronous snapshot's GPU fields.
     void FinalizeSynchronousGpuTiming();
+
+    // Pipelined regime: the presenter picks the frame slot the next Execute() records its stamps into.
+    void SetPipelinedGpuSlot(std::uint32_t slot) noexcept { m_pipelinedGpuSlot = slot % kGpuFramesInFlight; }
+
+    // Reads the stamps of the frame that was submitted into `slot` as number `frameIndex` and applies them to the
+    // pipelined snapshot. Call after the wait that proves the slot's submission finished.
+    void ResolvePipelinedGpuFrame(std::uint32_t slot, std::uint64_t frameIndex);
+
+    // The frame recorded into `slot` was never submitted or its data left the ring: it is counted and forgotten.
+    void DropPipelinedGpuFrame(std::uint32_t slot) noexcept;
+
+    // Frames whose GPU data was lost or never read, since the graph was made.
+    std::uint32_t DroppedGpuFrames() const noexcept { return m_droppedGpuFrames; }
 
     // Enables or disables GPU timestamp capture.
     void SetGpuTimingCaptureEnabled(bool enabled) noexcept { m_timestampPool.SetCaptureEnabled(enabled); }
+
+    // Fine stamps barriers and work apart; coarse writes one shared stamp per pass.
+    void SetGpuStampMode(GpuStampMode mode) noexcept { m_gpuStampMode = mode; }
 
     // Sets optional sinks/providers for debug inspection.
     void SetDebugMetadataSink(IPassDebugMetadataSink* sink) noexcept { m_debugMetadataSink = sink; }
@@ -212,24 +233,6 @@ private:
     void RegisterDebugVolumeTextureSnapshots(ExecuteTimingMode timingMode, const CompiledGraphInput& input,
         const std::vector<PhysicalTexture>& physicalTextures);
 
-    GpuTimingSample ResolveAndConvertTiming(const RenderGraphTimestampPool::RawTicks& raw) const;
-
-    // Timing of the last pipelined buffer read back; names[i] is the pass that ran at ordinal i.
-    struct PipelinedTimingRecord {
-        std::vector<std::string> names;
-        std::vector<GpuTimingSample> samples;
-    };
-
-    // Timing slots per regime, sized for the worst case: every pass of one execution, with both views
-    // running every cluster chain, the pyramid levels and the capture replay steps.
-    // The query pool takes these same constants.
-    static constexpr std::uint32_t kBaseTimingPasses = 64;
-    static constexpr std::uint32_t kPyramidTimingPasses = kHizLevelCount;
-    static constexpr std::uint32_t kReplayTimingPasses = 64;
-    static constexpr std::uint32_t kSynchronousTimingSlotBudget =
-        kBaseTimingPasses + 2 * kClusterPassNameCount + kPyramidTimingPasses + kReplayTimingPasses;
-    static constexpr std::uint32_t kPipelinedTimingSlotBudget = 8;
-
     RenderGraphResourcePool m_resourcePool;
     RenderGraphPersistentResourceCache m_persistentResourceCache;
     RenderGraphComputeBindingCache m_computeBindingCache;
@@ -241,24 +244,50 @@ private:
     RenderPassToggleRegistry* m_renderPassToggleRegistry = nullptr;
     IRenderTimingObserver* m_timingObserver = nullptr;
 
+    TimingMode m_timingMode = TimingMode::Enabled;
     RenderGraphTimestampPool m_timestampPool;
+    GpuStampMode m_gpuStampMode = GpuStampMode::Fine;
 
-    // Timing slots are assigned by execution ordinal. A regime that runs more passes than slots reads
-    // Absent for the extra passes and logs once.
-    bool m_synchronousOverflowLogged = false;
-    bool m_pipelinedOverflowLogged = false;
-    std::uint32_t m_synchronousTimedPasses = 0;
+    // Stamps recorded by one Execute() and not yet read: the plan, one assignment per executed pass, the records
+    // with their identity filled in, and each pass's name hash. The pipelined regime holds one per frame slot.
+    struct GpuFrameData {
+        bool pending = false;
+        bool captured = false; // Capture was on when the stamps were recorded.
+        GpuStampPlan plan;
+        std::vector<GpuStampAssignment> assignments;
+        std::vector<GpuPassRecord> records;
+        std::vector<std::uint32_t> nameHashes;
+        std::vector<std::uint8_t> dynamicallySkipped; // The pass was refused at record time (no descriptor set).
+    };
 
-    // Pipelined regime: names of the passes that wrote timestamps into each buffer, by ordinal, and the
-    // timing of the most recent buffer read back. Samples apply to a pass only when ordinal and name match.
-    std::vector<std::string> m_pipelinedTimedNames[kGpuTimingFramesInFlight];
-    PipelinedTimingRecord m_pipelinedTiming;
+    // One frame's resolved GPU timing, expanded to one record per executed pass (folded passes share a record).
+    struct ResolvedGpuFrame {
+        bool valid = false;
+        std::uint64_t frameIndex = 0;
+        GpuFrameReport report;
+        std::vector<std::uint32_t> nameHashes;
+        std::vector<GpuPassRecord> perPass;
+    };
+
+    // Reads the pool region of `data` once and resolves it. Clears `data.pending`.
+    ResolvedGpuFrame ResolveGpuFrame(GpuFrameData& data, bool pipelined, std::uint32_t bufferIndex,
+        std::uint64_t frameIndex);
+
+    // Copies `resolved` into `snapshot`; a pass takes its record only when its position and name hash match.
+    static void ApplyResolvedGpu(const ResolvedGpuFrame& resolved, RenderGraphSnapshot& snapshot);
+
+    GpuFrameData m_synchronousGpu;
+    GpuFrameData m_pipelinedGpu[kGpuFramesInFlight];
+    ResolvedGpuFrame m_pipelinedResolved; // The newest pipelined frame whose stamps were read back.
+    std::uint32_t m_pipelinedGpuSlot = 0;
+    std::uint32_t m_droppedGpuFrames = 0;
+    std::vector<GpuStampPassInput> m_gpuPlanInputs;
+    std::vector<std::uint64_t> m_gpuValues; // Scratch for one pool read.
+    std::vector<std::uint8_t> m_gpuAvailable;
 
     static constexpr std::size_t kMaxReportedSkippedBindings = 256;
     BoundedOnceSet<kMaxReportedSkippedBindings> m_reportedSkippedBindings;
     OnceErrorLog m_onceLog;
-
-    std::uint32_t m_pipelinedFrameCounter = 0;
 
     RenderGraphSnapshot m_synchronousSnapshot;
     RenderGraphSnapshot m_pipelinedSnapshot;

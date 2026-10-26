@@ -214,9 +214,8 @@ Both vertex shaders declare `invariant gl_Position` with the same expression ord
   `validation enabled`, `validation disabled` (Info), `validation requested but layer not available` or
   `validation layer loaded but debug messenger failed` (Warning).
 - **Move the Game camera.** `POST /set_entity_trs {"name":"Camera","translation":{"x":..,"y":..,"z":..}}`.
-- Every executed pass gets a GPU timing slot in `/render_graph`, by execution order
-  (`RenderGraph::kSynchronousTimingSlotBudget` is the worst-case sum). Passes past the budget log once and
-  read as absent.
+- Every executed pass gets a GPU record in `/render_graph`, by execution order, with a status word. Passes past
+  the record budget fold into one overflow record, counted by `gpu_folded_passes`.
 
 ## Known limits
 

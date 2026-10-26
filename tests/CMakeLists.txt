@@ -2274,6 +2274,8 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Renderer/AbandonedWorkTests.cpp
     Renderer/GpuWaitServiceTests.cpp
     Renderer/PresentRecoveryPlanTests.cpp
+    Renderer/GpuStampPlanTests.cpp
+    Renderer/GpuFrameRingTests.cpp
     Renderer/CaptureStatusTests.cpp
     Renderer/ComputeDispatchTests.cpp
     Renderer/VolumeTexturePreviewMathTests.cpp
@@ -3044,8 +3046,8 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Editor/FrustumFromViewProjectionTests.cpp Editor/ViewCullLayoutTests.cpp
     Editor/EditorCameraTests.cpp Editor/ExitGateTests.cpp Network/NetworkRequestGuardTests.cpp
     Renderer/AbandonedWorkTests.cpp Renderer/CaptureStatusTests.cpp Network/NetworkCaptureFailureTests.cpp
-    Renderer/PresentRecoveryPlanTests.cpp Renderer/RenderGraph/OffscreenRecordingFaultTests.cpp
-    Renderer/GpuWaitServiceTests.cpp Network/NetworkFaultRoutesTests.cpp Profiling/)
+    Renderer/PresentRecoveryPlanTests.cpp Renderer/RenderGraph/OffscreenRecordingFaultTests.cpp Renderer/GpuStampPlanTests.cpp
+    Renderer/GpuWaitServiceTests.cpp Network/NetworkFaultRoutesTests.cpp Renderer/GpuFrameRingTests.cpp Profiling/)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

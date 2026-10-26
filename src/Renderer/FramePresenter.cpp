@@ -18,9 +18,6 @@
 
 namespace gte {
 
-static_assert(kGpuTimingFramesInFlight == FramePresenter::FramesInFlight(),
-    "timestamp buffers cycle with the presenter's frame slots");
-
 namespace {
 
 // A frame wait that did not complete means the GPU is busy or lost: the frame must not be recorded.
@@ -341,6 +338,14 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph,
     // the earlier capture can be read now with no extra wait. Read before any swapchain recreation clears slots.
     m_lastCompletedCapture = m_swapchainCapture.TryTakeCompletedCapture(m_currentFrame);
 
+    // The same wait proves this slot's previous stamps are written. A frame that left the ring is dropped, not read.
+    const GpuFrameRing::Taken previousGpuFrame = m_gpuFrames.Take(m_currentFrame, m_submittedFrames);
+    if (previousGpuFrame.status == GpuFrameRing::Status::Ready) {
+        graph.ResolvePipelinedGpuFrame(m_currentFrame, previousGpuFrame.frameIndex);
+    } else if (previousGpuFrame.status == GpuFrameRing::Status::Dropped) {
+        graph.DropPipelinedGpuFrame(m_currentFrame);
+    }
+
     const GpuWaitService::Acquired acquired = waits.AcquireImage(m_swapchain.Native(),
         m_frameSync.ImageAvailableSemaphore(m_currentFrame), kAcquireTimeout, BlockSite::AcquireImage,
         "swapchain image");
@@ -378,6 +383,7 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph,
         target.extent = m_swapchain.Extent();
         target.format = m_swapchain.ImageFormat();
 
+        graph.SetPipelinedGpuSlot(m_currentFrame);
         graph.Execute(rg::RecordingAccess::Wrap(cmd), rg::ExecuteTimingMode::PipelinedDeferredReadback,
             [&](rg::RenderGraphBuilder& builder) -> std::vector<rg::TextureHandle> {
                 // The swapchain image is never sampled, only presented - no sampler exists for it.
@@ -448,7 +454,12 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph,
             m_vulkanDevice->Waits().MarkDeviceLost();
             throw std::runtime_error("vkQueueSubmit2 failed (render graph present)");
         }
+        // Only a frame that really reaches the queue owns stamps worth reading back.
+        ++m_submittedFrames;
+        m_gpuFrames.Submitted(m_currentFrame, m_submittedFrames);
     } catch (...) {
+        // A recovery submit stamps nothing: the frame recorded into this slot is counted as dropped.
+        graph.DropPipelinedGpuFrame(m_currentFrame);
         RecoverAcquiredImage(imageIndex, fenceReset, captureRecorded);
         throw;
     }

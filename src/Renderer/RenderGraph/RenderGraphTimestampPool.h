@@ -1,8 +1,10 @@
 #pragma once
 
-// GPU timestamp source for the render graph: one query pool per ExecuteTimingMode regime, indexed by a
-// caller-chosen slot. Gated by GTE_ENABLE_PROFILER and SetCaptureEnabled(). Needs a real device.
+// GPU timestamp source for the render graph: one query pool per regime, one region per frame in flight.
+// A frame resets its whole region once, writes its stamps by planned index and reads them back in one call.
+// Gated by GTE_ENABLE_PROFILER and SetCaptureEnabled(). Needs a real device.
 
+#include "../GpuStampPlan.h"
 #include "../GpuTiming.h"
 #include "../Vulkan/VulkanQueryPool.h"
 
@@ -10,30 +12,17 @@
 
 #include <cstdint>
 #include <optional>
-
-namespace gte {
-class Renderer;
-} // namespace gte
+#include <span>
+#include <vector>
 
 namespace gte::rg {
 
-// No slot is available: the pool's budget is fully used.
-inline constexpr std::int32_t kNoTimingSlot = -1;
-
 class RenderGraphTimestampPool {
 public:
-    // Raw [begin, end) timestamp counters of one slot. Converting to milliseconds and deciding the
-    // sample status is the caller's job.
-    struct RawTicks {
-        std::uint64_t begin = 0;
-        std::uint64_t end = 0;
-    };
-
-    // `capability` is the device's timestamp support (profiling compiled out forces it off). `renderer` runs
-    // a one-time warm-up reset. Frames in flight must equal kGpuTimingFramesInFlight.
-    RenderGraphTimestampPool(VkDevice device, Renderer& renderer, const GpuTimestampCapability& capability,
-        std::uint32_t synchronousSlotBudget, std::uint32_t pipelinedSlotBudget,
-        std::uint32_t pipelinedFramesInFlight);
+    // `capability` is the device's timestamp support (profiling compiled out forces it off). The record budgets
+    // size one frame's region of each regime.
+    RenderGraphTimestampPool(VkDevice device, const GpuTimestampCapability& capability,
+        std::uint32_t synchronousRecordBudget, std::uint32_t pipelinedRecordBudget, std::uint32_t framesInFlight);
     ~RenderGraphTimestampPool() = default;
 
     RenderGraphTimestampPool(const RenderGraphTimestampPool&) = delete;
@@ -41,40 +30,44 @@ public:
     RenderGraphTimestampPool(RenderGraphTimestampPool&&) = delete;
     RenderGraphTimestampPool& operator=(RenderGraphTimestampPool&&) = delete;
 
-    // Whether this pool can ever produce timings: false when the device lacks support or profiling is
-    // compiled out. Independent of IsCaptureEnabled().
+    // False when the device lacks support or profiling is compiled out. Independent of IsCaptureEnabled().
     bool IsSupported() const noexcept { return m_capability.supported; }
     const GpuTimestampCapability& Capability() const noexcept { return m_capability; }
 
-    // Runtime on/off switch, driven once per frame by RenderGraph.
     void SetCaptureEnabled(bool enabled) noexcept { m_captureEnabled = enabled; }
     bool IsCaptureEnabled() const noexcept { return m_captureEnabled; }
 
-    // Resets the slot's two queries and writes a TOP_OF_PIPE timestamp into the first. No-op when
-    // unsupported, capture is off, or slot == kNoTimingSlot. Resetting here is safe because the caller
-    // has already waited for the slot's previous use to finish.
-    void WriteBegin(VkCommandBuffer cmd, bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) noexcept;
+    // Queries in one frame's region of a regime; 0 when unsupported.
+    std::uint32_t QueryCount(bool pipelined) const noexcept;
 
-    // Writes a BOTTOM_OF_PIPE timestamp into the slot's second query; same guard as WriteBegin().
-    void WriteEnd(VkCommandBuffer cmd, bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) noexcept;
+    // Resets one frame's whole region. Record it before any stamp of that frame, outside a rendering instance.
+    void ResetRegion(VkCommandBuffer cmd, bool pipelined, std::uint32_t bufferIndex) noexcept;
 
-    // Reads the slot's most recent [begin, end) ticks. The caller must know the submission is complete.
-    // Returns zeros for kNoTimingSlot or when unsupported.
-    RawTicks ReadBack(bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) noexcept;
+    // Writes one stamp after all earlier commands. No-op for a negative query or an unsupported pool.
+    void WriteStamp(VkCommandBuffer cmd, bool pipelined, std::uint32_t bufferIndex, std::int32_t query) noexcept;
+
+    // Reads the region with availability in ONE call. `values` and `available` get one entry per query.
+    // The caller must know the submission is complete.
+    GpuReadCall Read(bool pipelined, std::uint32_t bufferIndex, std::span<std::uint64_t> values,
+        std::span<std::uint8_t> available) noexcept;
 
 private:
-    std::uint32_t QueryBase(bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) const noexcept;
-    void WarmUpResetPool(VulkanQueryPool& pool, Renderer& renderer);
+    std::uint32_t RegionBase(bool pipelined, std::uint32_t bufferIndex) const noexcept;
 
     VkDevice m_device = VK_NULL_HANDLE;
     GpuTimestampCapability m_capability;
     bool m_captureEnabled = true;
 
-    std::uint32_t m_pipelinedSlotBudget = 0;
+    std::uint32_t m_synchronousQueryCount = 0;
+    std::uint32_t m_pipelinedQueryCount = 0;
+    std::uint32_t m_framesInFlight = 0;
 
     // Empty when !m_capability.supported.
     std::optional<VulkanQueryPool> m_synchronousPool;
     std::optional<VulkanQueryPool> m_pipelinedPool;
+
+    // Value and availability pairs of one read; sized for the largest region.
+    std::vector<std::uint64_t> m_scratch;
 };
 
 } // namespace gte::rg

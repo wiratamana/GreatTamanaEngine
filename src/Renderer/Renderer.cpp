@@ -437,7 +437,7 @@ void Renderer::ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& re
 rg::RenderGraph& Renderer::OneShotGraph()
 {
     if (!m_oneShotGraph) {
-        m_oneShotGraph = std::make_unique<rg::RenderGraph>(*this);
+        m_oneShotGraph = std::make_unique<rg::RenderGraph>(*this, rg::TimingMode::Disabled);
     }
     return *m_oneShotGraph;
 }

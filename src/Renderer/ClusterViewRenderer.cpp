@@ -77,7 +77,7 @@ ClusterViewRenderer::Impl::Impl(Renderer& owner)
     , previewSlot(owner)
     , idSlot(owner)
     , bindings(owner)
-    , graph(owner)
+    , graph(owner, rg::TimingMode::Disabled)
 {
 }
 

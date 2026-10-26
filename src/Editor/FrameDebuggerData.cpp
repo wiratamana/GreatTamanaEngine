@@ -443,11 +443,14 @@ FrameDebuggerEventNode BuildComputeDispatchLeaf(
         details.textures.push_back(std::move(texture));
     }
 
-    // GPU time only: a compute dispatch reports no draw stats.
-    FrameDebuggerVectorProperty timing;
-    timing.name = "GPU Time (ms)";
-    timing.x = static_cast<float>(pass.stats.timing.milliseconds);
-    details.vectors.push_back(timing);
+    // GPU time only: a compute dispatch reports no draw stats. A pass that was not measured shows no number.
+    const GpuPassRecord& gpu = pass.stats.gpu;
+    if (gpu.state == GpuReadState::Present) {
+        FrameDebuggerVectorProperty timing;
+        timing.name = "GPU Time (ms)";
+        timing.x = gpu.barrierMs + gpu.workMs;
+        details.vectors.push_back(timing);
+    }
 
     // No matrices: a compute dispatch uses no camera matrix.
 

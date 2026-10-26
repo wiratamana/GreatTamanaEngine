@@ -14,29 +14,37 @@ namespace {
 
 // --- FormatGpuTiming() -------------------------------------------------------
 
-TEST(RenderGraphSnapshotFormattingTest, FormatGpuTimingPresentFormatsMillisecondsToTwoDecimalPlaces)
+TEST(RenderGraphSnapshotFormattingTest, FormatGpuTimingPresentSumsBarrierAndWorkToTwoDecimalPlaces)
 {
-    GpuTimingSample timing;
-    timing.status = GpuTimingSample::Status::Present;
-    timing.milliseconds = 3.14159;
+    GpuPassRecord record;
+    record.state = GpuReadState::Present;
+    record.barrierMs = 0.14159f;
+    record.workMs = 3.0f;
 
-    EXPECT_EQ(FormatGpuTiming(timing), "3.14 ms");
+    EXPECT_EQ(FormatGpuTiming(record), "3.14 ms");
 }
 
-TEST(RenderGraphSnapshotFormattingTest, FormatGpuTimingUnsupportedReportsUnsupported)
+TEST(RenderGraphSnapshotFormattingTest, FormatGpuTimingPartialIsMarkedAsPartial)
 {
-    GpuTimingSample timing;
-    timing.status = GpuTimingSample::Status::Unsupported;
+    GpuPassRecord record;
+    record.state = GpuReadState::Partial;
+    record.workMs = 1.5f;
 
-    EXPECT_EQ(FormatGpuTiming(timing), "Unsupported");
+    EXPECT_EQ(FormatGpuTiming(record), "~1.50 ms (partial)");
 }
 
-TEST(RenderGraphSnapshotFormattingTest, FormatGpuTimingAbsentReportsNA)
+TEST(RenderGraphSnapshotFormattingTest, FormatGpuTimingNeverPrintsANumberForAnUnmeasuredPass)
 {
-    GpuTimingSample timing;
-    timing.status = GpuTimingSample::Status::Absent;
-
-    EXPECT_EQ(FormatGpuTiming(timing), "N/A");
+    GpuPassRecord record;
+    record.workMs = 9.0f;
+    const GpuReadState states[] = { GpuReadState::Absent, GpuReadState::Error, GpuReadState::Unsupported,
+        GpuReadState::Inactive };
+    const char* words[] = { "Absent", "Error", "Unsupported", "Inactive" };
+    for (std::size_t i = 0; i < 4; ++i) {
+        record.state = states[i];
+        EXPECT_EQ(FormatGpuTiming(record), words[i]);
+        EXPECT_STREQ(ToString(states[i]), words[i]);
+    }
 }
 
 // --- ResolvePassNameAtSurvivingIndex() ---------------------------------------

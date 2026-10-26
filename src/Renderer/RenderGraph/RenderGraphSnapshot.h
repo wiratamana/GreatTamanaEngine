@@ -7,7 +7,7 @@
 #include "RenderGraphDebugMetadataSink.h"
 #include "RenderGraphCompiler.h"
 #include "../DrawStats.h"
-#include "../GpuTiming.h"
+#include "../GpuStampPlan.h"
 
 #include <cstdint>
 #include <functional>
@@ -16,10 +16,10 @@
 
 namespace gte::rg {
 
-// One executed pass's draw and GPU timing stats.
+// One executed pass's draw stats and measured GPU record (Absent until a read-back resolved it).
 struct PassGpuStats {
     DrawStats drawStats;
-    GpuTimingSample timing;
+    GpuPassRecord gpu;
 };
 
 // One pass, ready to display. Names are owned strings, not pointers into PassRecord tables, so a
@@ -49,7 +49,7 @@ struct RenderGraphPassSnapshot {
     // or no sink is installed. Resolved once at snapshot-build time.
     std::vector<std::string> writeBarrierLabels;
 
-    // Default (empty draw stats, Absent timing) for a culled pass.
+    // Default (empty draw stats, Absent GPU record) for a culled pass.
     PassGpuStats stats;
 
     // The owning feature; "ENGINE_UNOWNED" when declared outside any RenderFeatureScope.
@@ -72,16 +72,17 @@ struct RenderGraphSnapshot {
     std::vector<RenderGraphPassSnapshot> passesInExecutionOrder;
     std::vector<RenderGraphResourceSnapshot> resources;
 
-    // True if at least one pass found the regime's fixed timing-slot budget exhausted. Such a pass reads
-    // Status::Absent for as long as this stays true.
-    bool timingSlotBudgetExhausted = false;
+    // Frame-level GPU timing of the frame whose records the passes carry; Absent until one was read back.
+    GpuFrameReport gpuReport;
+    std::uint64_t gpuFrameIndex = 0; // Presenter frame number of that frame (0 in the synchronous regime).
+    std::uint32_t droppedGpuFrames = 0; // Frames whose GPU data was lost or never read, since the graph was made.
 };
 
 // Reshapes one Execute() call into a snapshot. `statsLookup` maps a declaration index to that pass's stats
 // (never called for a culled pass). `metadataLookup` and `barrierLabelLookup` resolve per-pass metadata
 // and write barrier labels by declaration index; an empty function or false leaves the defaults.
 RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, const CompiledGraphInput& input,
-    const std::function<PassGpuStats(std::size_t)>& statsLookup, bool timingSlotBudgetExhausted = false,
+    const std::function<PassGpuStats(std::size_t)>& statsLookup,
     const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup = {},
     const std::function<bool(std::size_t, const std::string&, std::string&)>& barrierLabelLookup = {});
 

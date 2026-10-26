@@ -54,7 +54,6 @@ struct DebugTextureSnapshot;
 class RetainedEventSnapshot;
 class SceneRecording;
 class Shader;
-class RenderGraphTimestampPool;
 } // namespace gte::rg
 
 namespace gte {
@@ -364,7 +363,6 @@ private:
     friend class rg::CommandBuffer;
     friend class rg::SceneRecording;
     friend class rg::Shader;
-    friend class rg::RenderGraphTimestampPool;
     friend class MeshPreviewRenderer;
 
     friend class rg::RenderGraph;

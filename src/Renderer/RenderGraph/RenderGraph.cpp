@@ -22,13 +22,15 @@ Renderer::VulkanContextInfo QueryVulkanContextInfoForRenderGraph(Renderer& rende
 
 namespace gte::rg {
 
-RenderGraph::RenderGraph(Renderer& renderer)
+RenderGraph::RenderGraph(Renderer& renderer, TimingMode timingMode)
     : m_resourcePool(renderer)
     , m_persistentResourceCache(renderer)
     , m_computeBindingCache(renderer)
-    , m_timestampPool(QueryVulkanContextInfoForRenderGraph(renderer).device, renderer,
-          QueryVulkanContextInfoForRenderGraph(renderer).timestampCapability, kSynchronousTimingSlotBudget,
-          kPipelinedTimingSlotBudget, kGpuTimingFramesInFlight)
+    , m_timingMode(timingMode)
+    , m_timestampPool(QueryVulkanContextInfoForRenderGraph(renderer).device,
+          timingMode == TimingMode::Enabled ? QueryVulkanContextInfoForRenderGraph(renderer).timestampCapability
+                                            : GpuTimestampCapability{},
+          kGpuRecordBudgetSynchronous, kGpuRecordBudgetPipelined, kGpuFramesInFlight)
 {
     m_renderer = &renderer;
 }
@@ -725,23 +727,8 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         ++m_debugTextureFrameCounter;
     }
 
-    // Read back the timing of the frame that last used this buffer; it is complete by now.
-    std::uint32_t pipelinedBufferIndex = 0;
-    if (isPipelined) {
-        pipelinedBufferIndex = m_pipelinedFrameCounter % kGpuTimingFramesInFlight;
-        std::vector<std::string>& timedNames = m_pipelinedTimedNames[pipelinedBufferIndex];
-        if (!timedNames.empty()) {
-            m_pipelinedTiming.names = std::move(timedNames);
-            m_pipelinedTiming.samples.clear();
-            m_pipelinedTiming.samples.reserve(m_pipelinedTiming.names.size());
-            for (std::size_t i = 0; i < m_pipelinedTiming.names.size(); ++i) {
-                const RenderGraphTimestampPool::RawTicks raw =
-                    m_timestampPool.ReadBack(/*pipelined=*/true, pipelinedBufferIndex, static_cast<std::int32_t>(i));
-                m_pipelinedTiming.samples.push_back(ResolveAndConvertTiming(raw));
-            }
-        }
-        timedNames.clear();
-    }
+    // The pipelined stamps go into the region of the frame slot the presenter picked.
+    const std::uint32_t pipelinedBufferIndex = isPipelined ? m_pipelinedGpuSlot : 0;
 
     PhaseScope compileScope(m_timingObserver, RenderPhase::Compile);
     const CompiledGraph compiled = Compile(input, std::span<const TextureHandle>(finalOutputs));
@@ -750,15 +737,56 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     std::vector<PhysicalTexture> physicalTextures(input.textures.size());
     std::vector<PhysicalBuffer> physicalBuffers(input.buffers.size());
 
-    const std::uint32_t timingSlotBudget = isPipelined ? kPipelinedTimingSlotBudget : kSynchronousTimingSlotBudget;
     std::uint32_t ordinal = 0;
-    bool timingSlotBudgetExhausted = false;
     std::vector<PassGpuStats> passStats(input.passes.size());
+
+    // Plan the stamps of this execution: one reset of the frame's region, then a start stamp per executed pass.
+    GpuFrameData& gpuData = isPipelined ? m_pipelinedGpu[pipelinedBufferIndex] : m_synchronousGpu;
+    if (gpuData.pending) {
+        ++m_droppedGpuFrames; // The previous frame in this slot was never read.
+        gpuData.pending = false;
+    }
+    const bool gpuActive = m_timingMode == TimingMode::Enabled && m_timestampPool.IsSupported()
+        && m_timestampPool.IsCaptureEnabled();
+    GpuReadState initialGpuState = GpuReadState::Absent;
+    if (m_timingMode == TimingMode::Disabled) {
+        initialGpuState = GpuReadState::Inactive;
+    } else if (!m_timestampPool.IsSupported()) {
+        initialGpuState = GpuReadState::Unsupported;
+    }
+    for (PassGpuStats& stats : passStats) {
+        stats.gpu.state = initialGpuState;
+    }
+    if (isPipelined && !gpuActive) {
+        m_pipelinedResolved = ResolvedGpuFrame{}; // Never show an old number while capture is off.
+    }
+    if (gpuActive) {
+        const std::size_t executedCount = compiled.executionOrder.size();
+        m_gpuPlanInputs.resize(executedCount);
+        gpuData.nameHashes.resize(executedCount);
+        gpuData.dynamicallySkipped.assign(executedCount, 0);
+        for (std::size_t i = 0; i < executedCount; ++i) {
+            const PassRecord& planned = input.passes[compiled.executionOrder[i].index];
+            m_gpuPlanInputs[i].skipped = planned.skipExecute;
+            gpuData.nameHashes[i] = NameHash32(planned.name != nullptr ? planned.name : "");
+        }
+        gpuData.assignments.assign(executedCount, GpuStampAssignment{});
+        gpuData.plan = PlanGpuStamps(m_gpuPlanInputs, gpuData.assignments, m_gpuStampMode,
+            isPipelined ? kGpuRecordBudgetPipelined : kGpuRecordBudgetSynchronous);
+        gpuData.records.assign(gpuData.plan.recordCount, GpuPassRecord{});
+        gpuData.captured = true;
+        m_timestampPool.ResetRegion(cmd, isPipelined, pipelinedBufferIndex);
+    }
 
     PhaseScope recordScope(m_timingObserver, RenderPhase::Record);
     for (const PassHandle& passHandle : compiled.executionOrder) {
         PassRecord& pass = input.passes[passHandle.index];
         const PassRecordScope passScope(m_timingObserver, pass.name);
+
+        // The start stamp comes before the pass's barriers so a barrier's cost is measured, not hidden.
+        if (gpuActive) {
+            m_timestampPool.WriteStamp(cmd, isPipelined, pipelinedBufferIndex, gpuData.assignments[ordinal].startQuery);
+        }
 
         // Apply resource barriers for reads before writes.
         for (const ResourceUsage& usage : pass.reads) {
@@ -773,24 +801,10 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             }
         }
 
-        // The slot is the pass's execution ordinal; passes past the budget are not timed.
-        const std::int32_t timingSlot = ordinal < timingSlotBudget ? static_cast<std::int32_t>(ordinal) : kNoTimingSlot;
-        ++ordinal;
-        if (timingSlot == kNoTimingSlot) {
-            timingSlotBudgetExhausted = true;
-            bool& logged = isPipelined ? m_pipelinedOverflowLogged : m_synchronousOverflowLogged;
-            if (!logged) {
-                logged = true;
-                GTE_LOG_WARNING("RenderGraph",
-                    std::string("The ") + (isPipelined ? "pipelined" : "synchronous") + " regime ran more than "
-                        + std::to_string(timingSlotBudget) + " passes in one execution. The extra passes read GPU timing as Absent.");
-            }
-        } else if (isPipelined) {
-            m_pipelinedTimedNames[pipelinedBufferIndex].emplace_back(pass.name != nullptr ? pass.name : "");
+        // Fine mode stamps again once the barriers are recorded; coarse mode keeps one stamp per pass.
+        if (gpuActive) {
+            m_timestampPool.WriteStamp(cmd, isPipelined, pipelinedBufferIndex, gpuData.assignments[ordinal].workQuery);
         }
-
-        // Record start timestamp after barriers execute.
-        m_timestampPool.WriteBegin(cmd, isPipelined, pipelinedBufferIndex, timingSlot);
 
         // Find depth write texture handle, if any. Per-layer array writes and non-2D textures are attached
         // through pass.arrayLayerAttachment instead.
@@ -953,32 +967,39 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             vkCmdEndRendering(cmd);
         }
 
-        // Record end timestamp.
-        m_timestampPool.WriteEnd(cmd, isPipelined, pipelinedBufferIndex, timingSlot);
-
         if (m_frameDebuggerEventSink != nullptr) {
             m_frameDebuggerEventSink->FlushPendingCapture(RecordingAccess::Wrap(cmd, m_renderer));
         }
 
         passStats[passHandle.index].drawStats = passDrawStats;
+
+        if (gpuActive) {
+            // The record's identity comes from the first pass of the record; folded passes add their draws.
+            const GpuStampAssignment& assignment = gpuData.assignments[ordinal];
+            GpuPassRecord& record = gpuData.records[assignment.record];
+            if (assignment.leader) {
+                record.bindingInstance = pass.bindingInstance;
+                record.passNameId = gpuData.nameHashes[ordinal];
+                record.featureId = pass.featureId;
+                record.view = static_cast<std::uint8_t>(pass.viewScope);
+                record.kind = static_cast<std::uint8_t>(pass.kind);
+            }
+            record.drawCalls += passDrawStats.drawCallCount;
+            record.indirectDraws += passDrawStats.indirectDrawCount;
+            record.directTriangles += passDrawStats.triangleCount;
+            gpuData.dynamicallySkipped[ordinal] = skipExecute ? 1 : 0;
+        }
+        ++ordinal;
+    }
+
+    if (gpuActive) {
+        m_timestampPool.WriteStamp(cmd, isPipelined, pipelinedBufferIndex, gpuData.plan.endQuery);
+        m_timestampPool.WriteStamp(cmd, isPipelined, pipelinedBufferIndex, gpuData.plan.finalQuery);
+        gpuData.pending = true;
     }
 
     recordScope.End();
     const PhaseScope finishScope(m_timingObserver, RenderPhase::Finish);
-    if (!isPipelined) {
-        m_synchronousTimedPasses = std::min(ordinal, timingSlotBudget);
-    } else {
-        // The latest read-back timing belongs to a pass only when its ordinal and name both match.
-        std::uint32_t timedOrdinal = 0;
-        for (const PassHandle& passHandle : compiled.executionOrder) {
-            const char* name = input.passes[passHandle.index].name;
-            if (timedOrdinal < m_pipelinedTiming.names.size() && m_pipelinedTiming.names[timedOrdinal] == (name != nullptr ? name : "")) {
-                passStats[passHandle.index].timing = m_pipelinedTiming.samples[timedOrdinal];
-            }
-            ++timedOrdinal;
-        }
-        ++m_pipelinedFrameCounter;
-    }
 
     RegisterDebugTextureSnapshots(timingMode, input, physicalTextures);
     RegisterDebugVolumeTextureSnapshots(timingMode, input, physicalTextures);
@@ -1044,42 +1065,102 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     }
 
     RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input,
-        [&passStats](std::size_t declarationIndex) { return passStats[declarationIndex]; }, timingSlotBudgetExhausted,
-        metadataLookup, barrierLabelLookup);
-    if (!isPipelined) {
-        m_synchronousSnapshot = std::move(snapshot);
-    } else {
+        [&passStats](std::size_t declarationIndex) { return passStats[declarationIndex]; }, metadataLookup,
+        barrierLabelLookup);
+    snapshot.gpuReport.state = initialGpuState;
+    snapshot.droppedGpuFrames = m_droppedGpuFrames;
+    if (isPipelined) {
+        // The newest read-back frame's records apply by position and name; this frame's own arrive later.
+        if (m_pipelinedResolved.valid) {
+            ApplyResolvedGpu(m_pipelinedResolved, snapshot);
+        }
         m_pipelinedSnapshot = std::move(snapshot);
+    } else {
+        m_synchronousSnapshot = std::move(snapshot);
+    }
+}
+
+RenderGraph::ResolvedGpuFrame RenderGraph::ResolveGpuFrame(
+    GpuFrameData& data, bool pipelined, std::uint32_t bufferIndex, std::uint64_t frameIndex)
+{
+    data.pending = false;
+
+    const std::uint32_t queryCount = m_timestampPool.QueryCount(pipelined);
+    m_gpuValues.assign(queryCount, 0);
+    m_gpuAvailable.assign(queryCount, 0);
+
+    GpuReadInput readInput;
+    readInput.values = m_gpuValues;
+    readInput.available = m_gpuAvailable;
+    readInput.capability = m_timestampPool.Capability();
+    readInput.captureEnabled = data.captured;
+    readInput.call = m_timestampPool.Read(pipelined, bufferIndex, m_gpuValues, m_gpuAvailable);
+
+    ResolvedGpuFrame resolved;
+    resolved.valid = true;
+    resolved.frameIndex = frameIndex;
+    resolved.report = ResolveGpuStamps(data.plan, data.assignments, readInput, data.records);
+
+    // A pass refused at record time still had barriers; its record says it did not run.
+    const std::size_t passCount = data.assignments.size();
+    resolved.nameHashes = data.nameHashes;
+    resolved.perPass.resize(passCount);
+    for (std::size_t i = 0; i < passCount; ++i) {
+        const GpuStampAssignment& assignment = data.assignments[i];
+        if (assignment.record >= data.records.size()) {
+            continue;
+        }
+        GpuPassRecord& record = data.records[assignment.record];
+        const bool ownRecord = (assignment.flags & kGpuRecordOverflowBucket) == 0;
+        if (ownRecord && i < data.dynamicallySkipped.size() && data.dynamicallySkipped[i] != 0) {
+            record.flags |= kGpuRecordSkipped;
+        }
+        resolved.perPass[i] = record;
+    }
+    return resolved;
+}
+
+void RenderGraph::ApplyResolvedGpu(const ResolvedGpuFrame& resolved, RenderGraphSnapshot& snapshot)
+{
+    snapshot.gpuReport = resolved.report;
+    snapshot.gpuFrameIndex = resolved.frameIndex;
+
+    std::vector<RenderGraphPassSnapshot>& passes = snapshot.passesInExecutionOrder;
+    const std::size_t count = std::min(resolved.perPass.size(), passes.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        if (passes[i].isCulled) {
+            break;
+        }
+        if (NameHash32(passes[i].name) != resolved.nameHashes[i]) {
+            continue;
+        }
+        passes[i].stats.gpu = resolved.perPass[i];
     }
 }
 
 void RenderGraph::FinalizeSynchronousGpuTiming()
 {
-    // Executed passes lead the snapshot in execution order, so ordinal i is snapshot entry i.
-    std::vector<RenderGraphPassSnapshot>& passes = m_synchronousSnapshot.passesInExecutionOrder;
-    const std::uint32_t timed = std::min<std::uint32_t>(m_synchronousTimedPasses, static_cast<std::uint32_t>(passes.size()));
-    for (std::uint32_t i = 0; i < timed; ++i) {
-        if (passes[i].isCulled) {
-            break;
-        }
-        const RenderGraphTimestampPool::RawTicks raw =
-            m_timestampPool.ReadBack(/*pipelined=*/false, /*bufferIndex=*/0, static_cast<std::int32_t>(i));
-        passes[i].stats.timing = ResolveAndConvertTiming(raw);
+    if (!m_synchronousGpu.pending) {
+        return;
     }
-    m_synchronousTimedPasses = 0;
+    const ResolvedGpuFrame resolved = ResolveGpuFrame(m_synchronousGpu, /*pipelined=*/false, /*bufferIndex=*/0, 0);
+    ApplyResolvedGpu(resolved, m_synchronousSnapshot);
 }
 
-GpuTimingSample RenderGraph::ResolveAndConvertTiming(const RenderGraphTimestampPool::RawTicks& raw) const
+void RenderGraph::ResolvePipelinedGpuFrame(std::uint32_t slot, std::uint64_t frameIndex)
 {
-    const GpuTimingSample::Status status =
-        ResolveGpuTimingStatus(m_timestampPool.IsSupported(), m_timestampPool.IsCaptureEnabled(), /*hasWrittenData=*/true);
-    if (status != GpuTimingSample::Status::Present) {
-        return GpuTimingSample{ status, 0.0 };
+    if (slot >= kGpuFramesInFlight || !m_pipelinedGpu[slot].pending) {
+        return;
     }
-    const GpuTimestampCapability& capability = m_timestampPool.Capability();
-    const double milliseconds =
-        ConvertTimestampDeltaToMilliseconds(raw.begin, raw.end, capability.timestampPeriodNs, capability.validBits);
-    return GpuTimingSample{ GpuTimingSample::Status::Present, milliseconds };
+    m_pipelinedResolved = ResolveGpuFrame(m_pipelinedGpu[slot], /*pipelined=*/true, slot, frameIndex);
+}
+
+void RenderGraph::DropPipelinedGpuFrame(std::uint32_t slot) noexcept
+{
+    if (slot < kGpuFramesInFlight) {
+        m_pipelinedGpu[slot].pending = false;
+    }
+    ++m_droppedGpuFrames;
 }
 
 const RenderGraphSnapshot& RenderGraph::LastSnapshot(ExecuteTimingMode mode) const noexcept

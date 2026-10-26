@@ -705,12 +705,15 @@ registering a new named texture:
   body is `gte::rg::RenderGraphMetadata::to_json()` verbatim: `schema_version`
   (an integer, bumped only on a future breaking shape change - currently
   `1`), `offscreen_regime`/`present_regime` (each one `ExecuteTimingMode`
-  regime's own `regime_name`/`passes`/`resources`/
-  `timing_slot_budget_exhausted` - every enum already resolved to a human
+  regime's own `regime_name`/`passes`/`resources`/`gpu_frame_status`/
+  `gpu_span_milliseconds`/`gpu_folded_passes`/`dropped_gpu_frames` - every enum
+  already resolved to a human
   string - `kind`, `category`, `draw_kind`, `view_scope`,
-  `render_pass_event` - every GPU timing value already resolved to BOTH a
+  `render_pass_event` - every GPU timing value already resolved to a status
+  word (`gpu_timing_status`: `Present`, `Partial`, `Absent`, `Error`, `Unsupported` or `Inactive`), a
   display string (`gpu_timing_text`) AND a raw nullable number
-  (`gpu_timing_milliseconds`), every pass carrying a plain `owning_feature_name`
+  (`gpu_timing_milliseconds`, set only when the status is `Present`; `gpu_folded_passes` counts the passes
+  one overflow record stands for), every pass carrying a plain `owning_feature_name`
   string field - always populated, never a lookup/registry resolution, set
   automatically the moment that pass is declared under an open
   `rg::RenderFeatureScope` - and every resource carrying both its raw

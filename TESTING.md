@@ -88,10 +88,11 @@ safe on any machine/CI runner, GPU or not:
   timestamp queries (`src/Renderer/GpuTiming.h`):
   `ConvertTimestampDeltaToMilliseconds()` (round and non-round periods, a zero
   delta, a `timestampPeriodNs <= 0` floor, and a counter WRAPAROUND within
-  `validBits` giving a small positive delta), `kGpuTimingFramesInFlight`,
+  `validBits` giving a small positive delta), `kGpuFramesInFlight`, and
   `InterpretTimestampCapability()` (unsupported through any of its three
-  signals, raw values still recorded) and `ResolveGpuTimingStatus()` (the
-  tri-state priority decision, all 8 input combinations). No live
+  signals, raw values still recorded). The stamp planner and its read-back
+  resolver live in `Renderer/GpuStampPlanTests.cpp`, the slot and frame-index
+  rules in `Renderer/GpuFrameRingTests.cpp`. No live
   `VkDevice`/`VkQueryPool` involved.
 - `Profiling/FrameProfilerTests.cpp` - `FrameProfiler`'s BeginFrame()/
   EndFrame()/RecordCpuScope()/SetGpuPassTiming()/SetGpuPassDrawStats()/

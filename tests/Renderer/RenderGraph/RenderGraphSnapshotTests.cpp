@@ -28,8 +28,8 @@ PassGpuStats MakeStats(std::uint32_t drawCalls, std::uint32_t triangles)
     PassGpuStats stats;
     stats.drawStats.drawCallCount = drawCalls;
     stats.drawStats.triangleCount = triangles;
-    stats.timing.status = GpuTimingSample::Status::Present;
-    stats.timing.milliseconds = 1.5;
+    stats.gpu.state = GpuReadState::Present;
+    stats.gpu.workMs = 1.5f;
     return stats;
 }
 
@@ -205,7 +205,7 @@ TEST(RenderGraphSnapshotTest, CulledPassesAreAppendedAfterSurvivorsWithDefaultSt
     EXPECT_TRUE(culled.isCulled);
     EXPECT_EQ(culled.stats.drawStats.drawCallCount, 0u);
     EXPECT_EQ(culled.stats.drawStats.triangleCount, 0u);
-    EXPECT_EQ(culled.stats.timing.status, GpuTimingSample::Status::Absent);
+    EXPECT_EQ(culled.stats.gpu.state, GpuReadState::Absent);
 
     // The culled pass (declaration index 2) must never have been passed to statsLookup.
     for (const std::size_t calledIndex : lookup.calledWith) {
@@ -344,7 +344,7 @@ TEST(RenderGraphSnapshotTest, EmptyStatsLookupLeavesEveryPassAtDefaultStats)
 
     ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 1u);
     EXPECT_EQ(snapshot.passesInExecutionOrder[0].stats.drawStats.drawCallCount, 0u);
-    EXPECT_EQ(snapshot.passesInExecutionOrder[0].stats.timing.status, GpuTimingSample::Status::Absent);
+    EXPECT_EQ(snapshot.passesInExecutionOrder[0].stats.gpu.state, GpuReadState::Absent);
 }
 
 // --- frame-debugger-5 campaign, PHASE1 - isComputePass (RENAMED to `kind` -----
@@ -415,7 +415,7 @@ TEST(RenderGraphSnapshotTest, CulledComputePassStillReportsComputeKindAndCorrect
     EXPECT_EQ(culled.writeKinds[0], ResourceKind::Texture);
     // stats still default for a culled pass - unchanged pre-existing rule.
     EXPECT_EQ(culled.stats.drawStats.drawCallCount, 0u);
-    EXPECT_EQ(culled.stats.timing.status, GpuTimingSample::Status::Absent);
+    EXPECT_EQ(culled.stats.gpu.state, GpuReadState::Absent);
 }
 
 // --- frame-debugger-6 campaign, PHASE1 - viewScope --------------------------
@@ -501,7 +501,7 @@ TEST(RenderGraphSnapshotTest, DrawKindIsCopiedThroughForSurvivingPass)
     const TextureHandle finalOutputs[] = { output };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, false, sink.AsLookup());
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, sink.AsLookup());
     ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 1u);
 
     const RenderGraphPassSnapshot& pass = snapshot.passesInExecutionOrder[0];
@@ -547,7 +547,7 @@ TEST(RenderGraphSnapshotTest, DrawKindIsCopiedThroughForCulledPass)
     const TextureHandle finalOutputs[] = { output };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, false, sink.AsLookup());
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, sink.AsLookup());
     ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 2u);
 
     const RenderGraphPassSnapshot& culledPass = snapshot.passesInExecutionOrder[1];
@@ -579,7 +579,7 @@ TEST(RenderGraphSnapshotTest, TagsIsCopiedThroughForSurvivingPass)
     const TextureHandle finalOutputs[] = { output };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, false, sink.AsLookup());
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, sink.AsLookup());
     ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 1u);
 
     const RenderGraphPassSnapshot& pass = snapshot.passesInExecutionOrder[0];
@@ -615,7 +615,7 @@ TEST(RenderGraphSnapshotTest, TagsIsCopiedThroughForCulledPass)
     const TextureHandle finalOutputs[] = { output };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, false, sink.AsLookup());
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, sink.AsLookup());
     ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 2u);
 
     const RenderGraphPassSnapshot& culledPass = snapshot.passesInExecutionOrder[1];
@@ -648,7 +648,7 @@ TEST(RenderGraphSnapshotTest, SharedSinkAcrossTwoDeclarationCyclesNeverLeaksStal
         CompiledGraphInput input = builder.Finish();
         const TextureHandle finalOutputs[] = { output };
         const CompiledGraph compiled = Compile(input, finalOutputs);
-        const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, false, sink.AsLookup());
+        const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, sink.AsLookup());
 
         ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 1u);
         EXPECT_EQ(snapshot.passesInExecutionOrder[0].drawKind, RenderPassDrawKind::DrawQuad);
@@ -674,7 +674,7 @@ TEST(RenderGraphSnapshotTest, SharedSinkAcrossTwoDeclarationCyclesNeverLeaksStal
         CompiledGraphInput input = builder.Finish();
         const TextureHandle finalOutputs[] = { output };
         const CompiledGraph compiled = Compile(input, finalOutputs);
-        const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, false, sink.AsLookup());
+        const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {}, sink.AsLookup());
 
         ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 1u);
         EXPECT_EQ(snapshot.passesInExecutionOrder[0].drawKind, RenderPassDrawKind::DrawMesh);
@@ -843,14 +843,9 @@ TEST(RenderGraphSnapshotTest, SnapshotOfThreeColorWritePassListsAllThreeWriteNam
     EXPECT_EQ(gbufferPass.writeKinds[2], ResourceKind::Texture);
 }
 
-// --- PHASE1 (render-pass-6 campaign, item 2.4) - timingSlotBudgetExhausted ---
+// --- GPU fields -------------------------------------------------------------
 
-// The new, trailing, DEFAULTED `timingSlotBudgetExhausted` parameter passes
-// straight through to RenderGraphSnapshot::timingSlotBudgetExhausted
-// unchanged, for both true and false inputs - and every pre-existing
-// 3-argument call site above (there are 15 of them in this file) keeps
-// compiling and defaulting to false, unmodified.
-TEST(RenderGraphSnapshotTest, TimingSlotBudgetExhaustedDefaultsToFalseWhenOmitted)
+TEST(RenderGraphSnapshotTest, GpuFieldsDefaultToAbsentAndDropsToZero)
 {
     RenderGraphBuilder builder;
     const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
@@ -862,10 +857,12 @@ TEST(RenderGraphSnapshotTest, TimingSlotBudgetExhaustedDefaultsToFalseWhenOmitte
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
     const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, {});
-    EXPECT_FALSE(snapshot.timingSlotBudgetExhausted);
+    EXPECT_EQ(snapshot.gpuReport.state, GpuReadState::Absent);
+    EXPECT_EQ(snapshot.droppedGpuFrames, 0u);
+    EXPECT_EQ(snapshot.gpuFrameIndex, 0u);
 }
 
-TEST(RenderGraphSnapshotTest, TimingSlotBudgetExhaustedPassesThroughExplicitTrueAndFalse)
+TEST(RenderGraphSnapshotTest, PassStatsCarryTheGpuRecordFromTheLookup)
 {
     RenderGraphBuilder builder;
     const TextureHandle t0 = builder.CreateTexture("T0", MakeTextureDesc());
@@ -876,13 +873,12 @@ TEST(RenderGraphSnapshotTest, TimingSlotBudgetExhaustedPassesThroughExplicitTrue
     const TextureHandle finalOutputs[] = { t0 };
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
-    const RenderGraphSnapshot exhaustedSnapshot =
-        BuildRenderGraphSnapshot(compiled, input, {}, /*timingSlotBudgetExhausted=*/true);
-    EXPECT_TRUE(exhaustedSnapshot.timingSlotBudgetExhausted);
-
-    const RenderGraphSnapshot notExhaustedSnapshot =
-        BuildRenderGraphSnapshot(compiled, input, {}, /*timingSlotBudgetExhausted=*/false);
-    EXPECT_FALSE(notExhaustedSnapshot.timingSlotBudgetExhausted);
+    RecordingStatsLookup lookup;
+    lookup.canned[0] = MakeStats(3, 30);
+    const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, std::ref(lookup));
+    ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 1u);
+    EXPECT_EQ(snapshot.passesInExecutionOrder[0].stats.gpu.state, GpuReadState::Present);
+    EXPECT_FLOAT_EQ(snapshot.passesInExecutionOrder[0].stats.gpu.workMs, 1.5f);
 }
 
 } // namespace
