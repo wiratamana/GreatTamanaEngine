@@ -1,18 +1,15 @@
+// Tier 1: history to plottable points, and the range helpers.
 #include "Profiling/FrameGraphData.h"
 #include "Profiling/FrameProfiler.h"
 
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <vector>
 
 namespace gte::Profiling {
 namespace {
 
-// FrameProfiler::Instance() is a process-wide singleton (see its own class
-// comment) - every test here resets it to a known baseline before AND after
-// running, mirroring tests/Profiling/FrameProfilerTests.cpp's own
-// convention exactly (see AGENTS.md, "Profiling").
+// FrameProfiler is a process-wide singleton, so each test starts from a clean state.
 class FrameGraphDataTest : public ::testing::Test {
 protected:
     void SetUp() override
@@ -28,412 +25,130 @@ protected:
     }
 };
 
-// Records one BeginFrame()/EndFrame() pair and then overrides its
-// cpuFrameMilliseconds to an exact, caller-chosen literal via
-// FrameProfiler::OverrideLastFrameCpuMillisecondsForTesting() - this is what
-// lets this test file seed fully deterministic, bit-exact "known" CPU
-// values (as PHASE2_FRAME_GRAPH_DATA_STRATEGY_v3.md's Step 3.3 cases 2/6
-// call for) instead of depending on real, inherently-jittery wall-clock
-// timing from SDL_GetPerformanceCounter().
-void RecordFrameWithCpuMilliseconds(FrameProfiler& profiler, double cpuMilliseconds)
+FrameGraphPoint MakeCpuPoint(std::uint64_t frameIndex, double cpuMilliseconds)
 {
-    profiler.BeginFrame();
-    profiler.EndFrame();
-    profiler.OverrideLastFrameCpuMillisecondsForTesting(cpuMilliseconds);
+    FrameGraphPoint point;
+    point.frameIndex = frameIndex;
+    point.cpuMilliseconds = cpuMilliseconds;
+    return point;
 }
 
-// --- Case 1: empty history -> empty output --------------------------------
-
-TEST_F(FrameGraphDataTest, EmptyHistoryProducesEmptyOutputAndNoRangeData)
+FrameGraphPoint MakeMemoryPoint(SampleStatus status, std::uint64_t totalBytes)
 {
-    FrameProfiler& profiler = FrameProfiler::Instance();
+    FrameGraphPoint point;
+    point.memory.status = status;
+    point.memory.totalBytes = totalBytes;
+    return point;
+}
 
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
+TEST_F(FrameGraphDataTest, EmptyHistoryProducesNoPointsAndNoRange)
+{
+    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(FrameProfiler::Instance());
     EXPECT_TRUE(points.empty());
-
     EXPECT_FALSE(ComputeCpuMillisecondsRange(points).hasData);
-    EXPECT_FALSE(ComputeGpuMillisecondsRange(points, GpuPass::GameView).hasData);
+    EXPECT_FALSE(ComputeMemoryBytesRange(points).hasData);
 }
 
-// --- Case 2: a single completed frame round-trips exactly -----------------
-
-TEST_F(FrameGraphDataTest, SingleFrameRoundTripsExactly)
+TEST_F(FrameGraphDataTest, PointsFollowTheHistoryOldestFirst)
 {
     FrameProfiler& profiler = FrameProfiler::Instance();
-    RecordFrameWithCpuMilliseconds(profiler, 12.5);
+    MemorySnapshot snapshot;
+    snapshot.status = SampleStatus::Present;
+    snapshot.totalBytes = 777;
 
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-
-    ASSERT_EQ(points.size(), 1u);
-    EXPECT_EQ(points[0].frameIndex, 0u);
-    EXPECT_DOUBLE_EQ(points[0].cpuMilliseconds, 12.5);
-
-    for (const GpuPassSample& sample : points[0].gpuPasses) {
-        EXPECT_EQ(sample.timingStatus, GpuSampleStatus::Absent);
-        EXPECT_EQ(sample.countStatus, GpuSampleStatus::Absent);
-    }
-}
-
-// --- Case 3: multiple frames preserve oldest-to-newest order, exactly -----
-
-TEST_F(FrameGraphDataTest, MultipleFramesPreserveExactFrameIndexOrder)
-{
-    FrameProfiler& profiler = FrameProfiler::Instance();
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 3; ++i) {
         profiler.BeginFrame();
+        profiler.SetMemorySnapshot(snapshot);
         profiler.EndFrame();
     }
 
     const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    ASSERT_EQ(points.size(), 4u);
+    ASSERT_EQ(points.size(), 3u);
     for (std::size_t i = 0; i < points.size(); ++i) {
-        EXPECT_EQ(points[i].frameIndex, static_cast<std::uint64_t>(i));
+        EXPECT_EQ(points[i].frameIndex, i);
+        EXPECT_GE(points[i].cpuMilliseconds, 0.0);
+        EXPECT_EQ(points[i].memory.status, SampleStatus::Present);
+        EXPECT_EQ(points[i].memory.totalBytes, 777u);
     }
 }
 
-// --- Case 4: all three named GPU passes, all three tri-state values -------
-
-TEST_F(FrameGraphDataTest, AllThreeGpuPassesAndTriStatesRoundTripToExactlyTheRightIndex)
+TEST_F(FrameGraphDataTest, CaptureOffLeavesNoGapInFrameIndices)
 {
     FrameProfiler& profiler = FrameProfiler::Instance();
     profiler.BeginFrame();
-    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Present, 3.5);
-    profiler.SetGpuPassDrawStats(GpuPass::GameView, GpuSampleStatus::Present, 12, 400);
-    profiler.SetGpuPassTiming(GpuPass::SceneView, GpuSampleStatus::Unsupported);
-    // GpuPass::Present (the pass identifier) is deliberately left untouched,
-    // i.e. still its default GpuSampleStatus::Absent (the status value) -
-    // this is a small, deliberate proof that this codebase's two
-    // same-named-but-unrelated "Present" identifiers are never confused
-    // with each other anywhere in the implementation (see
-    // PHASE2_FRAME_GRAPH_DATA_STRATEGY_v3.md, Step 3.3 case 4).
+    profiler.EndFrame();
+
+    profiler.SetCaptureEnabled(false);
+    profiler.BeginFrame();
+    profiler.EndFrame();
+    profiler.SetCaptureEnabled(true);
+
+    profiler.BeginFrame();
     profiler.EndFrame();
 
     const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    ASSERT_EQ(points.size(), 1u);
-    const FrameGraphPoint& point = points[0];
-
-    const GpuPassSample& gameView = point.gpuPasses[static_cast<std::size_t>(GpuPass::GameView)];
-    EXPECT_EQ(gameView.timingStatus, GpuSampleStatus::Present);
-    EXPECT_DOUBLE_EQ(gameView.milliseconds, 3.5);
-    EXPECT_EQ(gameView.countStatus, GpuSampleStatus::Present);
-    EXPECT_EQ(gameView.drawCallCount, 12u);
-    EXPECT_EQ(gameView.triangleCount, 400u);
-
-    const GpuPassSample& sceneView = point.gpuPasses[static_cast<std::size_t>(GpuPass::SceneView)];
-    EXPECT_EQ(sceneView.timingStatus, GpuSampleStatus::Unsupported);
-
-    const GpuPassSample& presentPass = point.gpuPasses[static_cast<std::size_t>(GpuPass::Present)];
-    EXPECT_EQ(presentPass.timingStatus, GpuSampleStatus::Absent);
-    EXPECT_EQ(presentPass.countStatus, GpuSampleStatus::Absent);
+    ASSERT_EQ(points.size(), 2u);
+    EXPECT_EQ(points[0].frameIndex, 0u);
+    EXPECT_EQ(points[1].frameIndex, 1u);
 }
 
-// --- Case 5: ring buffer wraparound is transparently handled --------------
-
-TEST_F(FrameGraphDataTest, RingBufferWraparoundKeepsExactBoundaryFrameIndices)
+TEST_F(FrameGraphDataTest, OpenFrameIsNeverInThePoints)
 {
     FrameProfiler& profiler = FrameProfiler::Instance();
-    const std::uint64_t totalFrames = static_cast<std::uint64_t>(kMaxFrameHistory) + 5;
+    profiler.BeginFrame();
+    profiler.EndFrame();
+    profiler.BeginFrame(); // still open
 
-    for (std::uint64_t i = 0; i < totalFrames; ++i) {
-        profiler.BeginFrame();
-        profiler.EndFrame();
-    }
-
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    ASSERT_EQ(points.size(), kMaxFrameHistory);
-    EXPECT_EQ(points.front().frameIndex, totalFrames - kMaxFrameHistory);
-    EXPECT_EQ(points.back().frameIndex, totalFrames - 1);
+    EXPECT_EQ(BuildFrameGraphPoints(profiler).size(), 1u);
+    profiler.EndFrame();
 }
 
-// --- Case 6: ComputeCpuMillisecondsRange ignores nothing (CPU is always
-//     real data), with the actual min/max landing in the middle of the
-//     sequence rather than at either boundary, using known literal values -
-
-TEST_F(FrameGraphDataTest, ComputeCpuMillisecondsRangeMatchesKnownMinAndMaxInTheMiddle)
+TEST(FrameGraphRangeTest, CpuRangeFindsMinAndMax)
 {
-    FrameProfiler& profiler = FrameProfiler::Instance();
-
-    RecordFrameWithCpuMilliseconds(profiler, 2.0);
-    RecordFrameWithCpuMilliseconds(profiler, 25.0); // Middle - the known max.
-    RecordFrameWithCpuMilliseconds(profiler, 8.0);
-    RecordFrameWithCpuMilliseconds(profiler, 0.5); // Middle - the known min.
-    RecordFrameWithCpuMilliseconds(profiler, 12.0);
-
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    ASSERT_EQ(points.size(), 5u);
+    const std::vector<FrameGraphPoint> points = { MakeCpuPoint(0, 8.0), MakeCpuPoint(1, 2.5), MakeCpuPoint(2, 30.0),
+        MakeCpuPoint(3, 11.0) };
 
     const FrameGraphRange range = ComputeCpuMillisecondsRange(points);
     ASSERT_TRUE(range.hasData);
-    EXPECT_DOUBLE_EQ(range.minMilliseconds, 0.5);
-    EXPECT_DOUBLE_EQ(range.maxMilliseconds, 25.0);
+    EXPECT_DOUBLE_EQ(range.minMilliseconds, 2.5);
+    EXPECT_DOUBLE_EQ(range.maxMilliseconds, 30.0);
 }
 
-// --- Case 7: ComputeGpuMillisecondsRange correctly ignores Absent frames,
-//     and a never-Present pass reports no data even when a SIBLING pass
-//     does have valid data --------------------------------------------
-
-TEST_F(FrameGraphDataTest, ComputeGpuMillisecondsRangeIgnoresAbsentFramesForThatPassOnly)
+TEST(FrameGraphRangeTest, CpuRangeOfOnePointIsThatPoint)
 {
-    FrameProfiler& profiler = FrameProfiler::Instance();
+    const std::vector<FrameGraphPoint> points = { MakeCpuPoint(0, 4.0) };
 
-    profiler.BeginFrame(); // Frame 0: GameView absent (default).
-    profiler.EndFrame();
-
-    profiler.BeginFrame(); // Frame 1: GameView present.
-    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Present, 2.0);
-    profiler.EndFrame();
-
-    profiler.BeginFrame(); // Frame 2: GameView absent again.
-    profiler.EndFrame();
-
-    profiler.BeginFrame(); // Frame 3: GameView present, the max.
-    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Present, 9.0);
-    profiler.EndFrame();
-
-    profiler.BeginFrame(); // Frame 4: GameView present, the min.
-    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Present, 0.5);
-    profiler.EndFrame();
-
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    ASSERT_EQ(points.size(), 5u);
-
-    const FrameGraphRange gameViewRange = ComputeGpuMillisecondsRange(points, GpuPass::GameView);
-    ASSERT_TRUE(gameViewRange.hasData);
-    EXPECT_DOUBLE_EQ(gameViewRange.minMilliseconds, 0.5);
-    EXPECT_DOUBLE_EQ(gameViewRange.maxMilliseconds, 9.0);
-
-    // SceneView was never set Present anywhere in this history - must report
-    // no data, even though GameView's own range is valid. This is the direct
-    // regression test for this whole phase's most important correctness
-    // property (see PHASE2_FRAME_GRAPH_DATA_STRATEGY_v3.md, Step 1.2).
-    const FrameGraphRange sceneViewRange = ComputeGpuMillisecondsRange(points, GpuPass::SceneView);
-    EXPECT_FALSE(sceneViewRange.hasData);
+    const FrameGraphRange range = ComputeCpuMillisecondsRange(points);
+    ASSERT_TRUE(range.hasData);
+    EXPECT_DOUBLE_EQ(range.minMilliseconds, 4.0);
+    EXPECT_DOUBLE_EQ(range.maxMilliseconds, 4.0);
 }
 
-// --- Case 8: an all-Unsupported series also reports no data ---------------
-
-TEST_F(FrameGraphDataTest, AllUnsupportedSeriesReportsNoData)
+TEST(FrameGraphRangeTest, CpuRangeAcceptsASubSpan)
 {
-    FrameProfiler& profiler = FrameProfiler::Instance();
-    profiler.BeginFrame();
-    profiler.SetGpuPassTiming(GpuPass::SceneView, GpuSampleStatus::Unsupported);
-    profiler.EndFrame();
+    const std::vector<FrameGraphPoint> points = { MakeCpuPoint(0, 100.0), MakeCpuPoint(1, 3.0), MakeCpuPoint(2, 5.0) };
 
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    const FrameGraphRange range = ComputeGpuMillisecondsRange(points, GpuPass::SceneView);
-    EXPECT_FALSE(range.hasData);
+    const FrameGraphRange range = ComputeCpuMillisecondsRange(std::span<const FrameGraphPoint>(points).subspan(1));
+    ASSERT_TRUE(range.hasData);
+    EXPECT_DOUBLE_EQ(range.maxMilliseconds, 5.0);
 }
 
-// --- Case 9 (new in v3): an Absent/Unsupported sample carrying a
-//     non-zero, "stale-looking" value is STILL correctly excluded --------
-
-TEST_F(FrameGraphDataTest, AbsentSampleWithStaleNonZeroValueIsStillExcluded)
+TEST(FrameGraphRangeTest, MemoryRangeSkipsPointsThatAreNotPresent)
 {
-    FrameProfiler& profiler = FrameProfiler::Instance();
-    profiler.BeginFrame();
-    // SetGpuPassTiming()'s own signature permits a non-default milliseconds
-    // alongside GpuSampleStatus::Absent - fully constructible today, not a
-    // hypothetical. This positively rules out an implementation that
-    // accidentally branches on "is the value zero" instead of on the
-    // actual status tag.
-    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Absent, 42.0);
-    profiler.EndFrame();
-
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    const FrameGraphRange range = ComputeGpuMillisecondsRange(points, GpuPass::GameView);
-    EXPECT_FALSE(range.hasData);
-}
-
-TEST_F(FrameGraphDataTest, UnsupportedSampleWithStaleNonZeroValueIsStillExcluded)
-{
-    FrameProfiler& profiler = FrameProfiler::Instance();
-    profiler.BeginFrame();
-    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Unsupported, 42.0);
-    profiler.EndFrame();
-
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    const FrameGraphRange range = ComputeGpuMillisecondsRange(points, GpuPass::GameView);
-    EXPECT_FALSE(range.hasData);
-}
-
-// --- New (Phase 3): a pass whose ONLY data this session is a draw-stats
-//     call (never SetGpuPassTiming()) must report NO timing data - proves
-//     ComputeGpuMillisecondsRange() genuinely branches on timingStatus
-//     only, never accidentally treats a real countStatus as implying real
-//     timing (see PHASE3_DRAW_CALL_TRIANGLE_COUNT_STRATEGY_v2.md, Step 3.6).
-
-TEST_F(FrameGraphDataTest, DrawStatsOnlyPassReportsNoTimingData)
-{
-    FrameProfiler& profiler = FrameProfiler::Instance();
-    profiler.BeginFrame();
-    profiler.SetGpuPassDrawStats(GpuPass::GameView, GpuSampleStatus::Present, 7, 250);
-    profiler.EndFrame();
-
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    const FrameGraphRange range = ComputeGpuMillisecondsRange(points, GpuPass::GameView);
-    EXPECT_FALSE(range.hasData);
-
-    // The count data itself is still genuinely present in the raw point.
-    const GpuPassSample& gameView = points[0].gpuPasses[static_cast<std::size_t>(GpuPass::GameView)];
-    EXPECT_EQ(gameView.countStatus, GpuSampleStatus::Present);
-    EXPECT_EQ(gameView.drawCallCount, 7u);
-    EXPECT_EQ(gameView.triangleCount, 250u);
-}
-
-// --- Bounds-check requirement (Step 3.2/checklist): an out-of-range
-//     GpuPass value must report no data, unconditionally, never crash ----
-
-TEST_F(FrameGraphDataTest, OutOfRangeGpuPassReportsNoDataInsteadOfReadingOutOfBounds)
-{
-    FrameProfiler& profiler = FrameProfiler::Instance();
-    profiler.BeginFrame();
-    profiler.SetGpuPassTiming(GpuPass::GameView, GpuSampleStatus::Present, 5.0);
-    profiler.EndFrame();
-
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    const FrameGraphRange range = ComputeGpuMillisecondsRange(points, static_cast<GpuPass>(99));
-    EXPECT_FALSE(range.hasData);
-}
-
-// --- Case 10 (new in v3): BuildFrameGraphPoints() never observes an
-//     in-progress (BeginFrame()'d but not yet EndFrame()'d) frame --------
-
-TEST_F(FrameGraphDataTest, BuildFrameGraphPointsNeverObservesAnInProgressFrame)
-{
-    FrameProfiler& profiler = FrameProfiler::Instance();
-    profiler.BeginFrame();
-    profiler.EndFrame();
-    profiler.BeginFrame();
-    profiler.EndFrame();
-
-    profiler.BeginFrame(); // Deliberately no matching EndFrame() before reading.
-
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    EXPECT_EQ(points.size(), 2u);
-}
-
-// --- Phase 7 (PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md, Step 3.1):
-//     FrameGraphPoint::memory + ComputeMemoryBytesRange() --------------------
-
-// --- Case 11: FrameSample::memory is copied verbatim, field-for-field ----
-
-TEST_F(FrameGraphDataTest, BuildFrameGraphPointsCopiesMemorySnapshotVerbatim)
-{
-    FrameProfiler& profiler = FrameProfiler::Instance();
-
-    MemorySnapshot snapshot;
-    snapshot.status = GpuSampleStatus::Present;
-    snapshot.totalBytes = 1000;
-    snapshot.bufferBytes = 200;
-    snapshot.textureBytes = 800;
-    snapshot.gpuOnlyBytes = 600;
-    snapshot.cpuOnlyBytes = 300;
-    snapshot.sharedBytes = 100;
-    snapshot.bufferCount = 3;
-    snapshot.textureCount = 5;
-
-    profiler.BeginFrame();
-    profiler.SetMemorySnapshot(snapshot);
-    profiler.EndFrame();
-
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    ASSERT_EQ(points.size(), 1u);
-
-    const MemorySnapshot& copied = points[0].memory;
-    EXPECT_EQ(copied.status, GpuSampleStatus::Present);
-    EXPECT_EQ(copied.totalBytes, 1000u);
-    EXPECT_EQ(copied.bufferBytes, 200u);
-    EXPECT_EQ(copied.textureBytes, 800u);
-    EXPECT_EQ(copied.gpuOnlyBytes, 600u);
-    EXPECT_EQ(copied.cpuOnlyBytes, 300u);
-    EXPECT_EQ(copied.sharedBytes, 100u);
-    EXPECT_EQ(copied.bufferCount, 3u);
-    EXPECT_EQ(copied.textureCount, 5u);
-}
-
-// --- Case 12: ComputeMemoryBytesRange() ignores Absent entries, min/max
-//     land in the middle of the sequence rather than at either boundary ----
-
-TEST_F(FrameGraphDataTest, ComputeMemoryBytesRangeIgnoresAbsentEntries)
-{
-    FrameProfiler& profiler = FrameProfiler::Instance();
-
-    profiler.BeginFrame(); // Frame 0: absent (default).
-    profiler.EndFrame();
-
-    MemorySnapshot present1;
-    present1.status = GpuSampleStatus::Present;
-    present1.totalBytes = 500;
-    profiler.BeginFrame(); // Frame 1: present.
-    profiler.SetMemorySnapshot(present1);
-    profiler.EndFrame();
-
-    profiler.BeginFrame(); // Frame 2: absent again.
-    profiler.EndFrame();
-
-    MemorySnapshot present2;
-    present2.status = GpuSampleStatus::Present;
-    present2.totalBytes = 9000; // The known max.
-    profiler.BeginFrame(); // Frame 3: present, the max.
-    profiler.SetMemorySnapshot(present2);
-    profiler.EndFrame();
-
-    MemorySnapshot present3;
-    present3.status = GpuSampleStatus::Present;
-    present3.totalBytes = 50; // The known min.
-    profiler.BeginFrame(); // Frame 4: present, the min.
-    profiler.SetMemorySnapshot(present3);
-    profiler.EndFrame();
-
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    ASSERT_EQ(points.size(), 5u);
+    const std::vector<FrameGraphPoint> points = { MakeMemoryPoint(SampleStatus::Present, 500),
+        MakeMemoryPoint(SampleStatus::Absent, 999999), MakeMemoryPoint(SampleStatus::Present, 200),
+        MakeMemoryPoint(SampleStatus::Error, 1) };
 
     const MemoryBytesRange range = ComputeMemoryBytesRange(points);
     ASSERT_TRUE(range.hasData);
-    EXPECT_EQ(range.minBytes, 50u);
-    EXPECT_EQ(range.maxBytes, 9000u);
+    EXPECT_EQ(range.minBytes, 200u);
+    EXPECT_EQ(range.maxBytes, 500u);
 }
 
-// --- Case 13: an all-Absent series reports no data ------------------------
-
-TEST_F(FrameGraphDataTest, ComputeMemoryBytesRangeOnAllAbsentReportsNoData)
+TEST(FrameGraphRangeTest, MemoryRangeWithoutPresentPointsHasNoData)
 {
-    FrameProfiler& profiler = FrameProfiler::Instance();
-    profiler.BeginFrame(); // Default MemorySnapshot - status stays Absent.
-    profiler.EndFrame();
-
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    const MemoryBytesRange range = ComputeMemoryBytesRange(points);
-    EXPECT_FALSE(range.hasData);
-}
-
-// --- Case 14: an empty points span reports no data ------------------------
-
-TEST_F(FrameGraphDataTest, ComputeMemoryBytesRangeOnEmptyPointsReportsNoData)
-{
-    const std::vector<FrameGraphPoint> points;
-    const MemoryBytesRange range = ComputeMemoryBytesRange(points);
-    EXPECT_FALSE(range.hasData);
-}
-
-// --- Case 15: an Absent sample carrying a non-zero, "stale-looking" value
-//     is STILL correctly excluded - rules out branching on totalBytes == 0
-//     instead of on the actual status tag -----------------------------------
-
-TEST_F(FrameGraphDataTest, AbsentMemorySampleWithStaleNonZeroValueIsStillExcluded)
-{
-    FrameProfiler& profiler = FrameProfiler::Instance();
-
-    MemorySnapshot stale;
-    stale.status = GpuSampleStatus::Absent;
-    stale.totalBytes = 123456; // Non-zero despite being Absent.
-    profiler.BeginFrame();
-    profiler.SetMemorySnapshot(stale);
-    profiler.EndFrame();
-
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
-    const MemoryBytesRange range = ComputeMemoryBytesRange(points);
-    EXPECT_FALSE(range.hasData);
+    const std::vector<FrameGraphPoint> points = { MakeMemoryPoint(SampleStatus::Absent, 42) };
+    EXPECT_FALSE(ComputeMemoryBytesRange(points).hasData);
 }
 
 } // namespace

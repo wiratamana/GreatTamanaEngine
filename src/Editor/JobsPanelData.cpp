@@ -9,11 +9,7 @@ namespace gte {
 
 namespace {
 
-// A small, deterministic FNV-1a-style hash over `name`'s own bytes - not
-// cryptographic, not needed to be; only needed to spread distinct job names
-// across a fixed palette below in a way that's stable across runs/machines
-// (unlike, say, hashing the pointer VALUE itself, which would vary run to
-// run and defeat the whole "same name -> same color, always" goal).
+// FNV-1a over the name's bytes. Stable across runs, unlike a pointer value.
 std::uint32_t HashJobName(const char* name)
 {
     std::uint32_t hash = 2166136261u;
@@ -26,15 +22,7 @@ std::uint32_t HashJobName(const char* name)
     return hash;
 }
 
-// A small, fixed palette of visually-distinct, reasonably saturated colors
-// - a job name's hash picks one of these deterministically (below) rather
-// than deriving an arbitrary RGB triple directly from the hash, which tends
-// to produce muddy/indistinguishable colors for hash values that happen to
-// land close together. A handful of entries is plenty: this engine's own
-// Job System has only ever had a single named job kind in production as of
-// Phase 7 ("SkinVertices" - see JOBSYSTEM_PHASE6_COMPLETION_REPORT.md), and
-// even a future engine with a dozen distinct job kinds would still cycle
-// through this palette perfectly reasonably.
+// Picks a palette entry from the name's hash, so the same name always gets the same color.
 constexpr JobColor kPalette[] = {
     JobColor{ 0.90f, 0.45f, 0.45f }, // red
     JobColor{ 0.45f, 0.75f, 0.90f }, // blue
@@ -64,21 +52,8 @@ WorkerUtilizationSummary ComputeWorkerUtilizationSummary(
     WorkerUtilizationSummary summary;
     summary.totalWorkerCount = totalWorkerCount;
 
-    // Reuses the exact same "distinct worker indices present" logic Phase 5
-    // already established (Profiling::ComputeDistinctWorkerCount()) rather
-    // than re-deriving it here - this function's own value-add is purely
-    // pairing that count against the ENGINE's total worker count, which
-    // ComputeDistinctWorkerCount() deliberately has no knowledge of (see
-    // that function's own header comment).
-    const std::size_t distinctWorkersWithData = Profiling::ComputeDistinctWorkerCount(points);
-
-    // Never report more "workers with a job" than the engine actually has -
-    // a defensive clamp, not expected to ever trigger in practice (a
-    // WorkerTimelinePoint's workerIndex should never exceed
-    // JobSystem::WorkerCount() - 1), but keeps this function total/safe
-    // even against a caller-supplied totalWorkerCount that happens to be
-    // stale/smaller than what actually produced `points`.
-    summary.workersWithAtLeastOneJob = std::min(distinctWorkersWithData, totalWorkerCount);
+    // Never report more busy workers than exist, even with a stale total.
+    summary.workersWithAtLeastOneJob = std::min(Profiling::ComputeDistinctWorkerCount(points), totalWorkerCount);
     return summary;
 }
 
@@ -116,9 +91,6 @@ const char* JobsTimelineEmptyMessage()
     }
     return "No job samples recorded yet this frame.";
 }
-
-// GPU Vertex Skinning campaign, Phase 7 - see JobsPanelData.h's own doc
-// comments for both functions below for the full rationale.
 
 const char* SkinningModeDisplayName(bool isGpuMode)
 {

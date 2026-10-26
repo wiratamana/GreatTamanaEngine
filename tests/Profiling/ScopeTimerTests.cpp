@@ -1,4 +1,6 @@
+// Tier 1: the scope macros and ScopeTimer against the real FrameProfiler.
 #include "Profiling/FrameProfiler.h"
+#include "Profiling/NameTable.h"
 #include "Profiling/ScopeTimer.h"
 
 #include <gtest/gtest.h>
@@ -10,9 +12,7 @@
 namespace gte::Profiling {
 namespace {
 
-// See tests/Profiling/FrameProfilerTests.cpp's own class comment for why
-// every test resets the shared FrameProfiler::Instance() singleton before
-// AND after running.
+// FrameProfiler is a process-wide singleton, so each test starts from a clean state.
 class ScopeTimerTest : public ::testing::Test {
 protected:
     void SetUp() override
@@ -30,24 +30,27 @@ protected:
 
 #if GTE_ENABLE_PROFILER
 
-TEST_F(ScopeTimerTest, ScopeTimerRecordsAPositiveDurationIntoTheCurrentFrame)
+TEST_F(ScopeTimerTest, ScopeMeasuresTheTimeItCovers)
 {
     FrameProfiler& profiler = FrameProfiler::Instance();
     profiler.BeginFrame();
     {
         GTE_PROFILE_SCOPE("UnitTestScope");
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     profiler.EndFrame();
 
-    const FrameSample& frame = profiler.HistoryAt(0);
-    ASSERT_EQ(frame.cpuScopeCount, 1u);
-    EXPECT_STREQ(frame.cpuScopes[0].name, "UnitTestScope");
-    EXPECT_GT(frame.cpuScopes[0].totalMilliseconds, 0.0);
-    EXPECT_EQ(frame.cpuScopes[0].callCount, 1u);
+    const auto events = profiler.LastCompletedFrame().scopes.Events();
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_STREQ(ResolveName(events[0].name), "UnitTestScope");
+    EXPECT_EQ(events[0].kind, ScopeKind::Work);
+
+    const double milliseconds = static_cast<double>(DurationTicks(events[0])) / 1.0e6;
+    EXPECT_GE(milliseconds, 9.5);
+    EXPECT_LT(milliseconds, 200.0);
 }
 
-TEST_F(ScopeTimerTest, NestedScopesEachGetTheirOwnFlatEntry)
+TEST_F(ScopeTimerTest, NestedScopesKeepTheirDepth)
 {
     FrameProfiler& profiler = FrameProfiler::Instance();
     profiler.BeginFrame();
@@ -59,53 +62,91 @@ TEST_F(ScopeTimerTest, NestedScopesEachGetTheirOwnFlatEntry)
     }
     profiler.EndFrame();
 
-    const FrameSample& frame = profiler.HistoryAt(0);
-    ASSERT_EQ(frame.cpuScopeCount, 2u);
-
-    bool foundOuter = false;
-    bool foundInner = false;
-    for (std::size_t i = 0; i < frame.cpuScopeCount; ++i) {
-        if (std::string(frame.cpuScopes[i].name) == "Outer") {
-            foundOuter = true;
-        } else if (std::string(frame.cpuScopes[i].name) == "Inner") {
-            foundInner = true;
-        }
-    }
-    EXPECT_TRUE(foundOuter);
-    EXPECT_TRUE(foundInner);
+    const auto events = profiler.LastCompletedFrame().scopes.Events();
+    ASSERT_EQ(events.size(), 2u); // children first
+    EXPECT_STREQ(ResolveName(events[0].name), "Inner");
+    EXPECT_EQ(events[0].depth, 1u);
+    EXPECT_STREQ(ResolveName(events[1].name), "Outer");
+    EXPECT_EQ(events[1].depth, 0u);
 }
 
-TEST_F(ScopeTimerTest, ScopeTimerRecordsNothingWhenCaptureIsDisabled)
+TEST_F(ScopeTimerTest, SameCallSiteUsesOneInternedName)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.BeginFrame();
+    for (int i = 0; i < 3; ++i) {
+        GTE_PROFILE_SCOPE("LoopScope");
+    }
+    profiler.EndFrame();
+
+    const auto events = profiler.LastCompletedFrame().scopes.Events();
+    ASSERT_EQ(events.size(), 3u);
+    EXPECT_EQ(events[0].name, events[1].name);
+    EXPECT_EQ(events[1].name, events[2].name);
+}
+
+TEST_F(ScopeTimerTest, BlockedScopeAndMarkerKeepTheirKind)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.BeginFrame();
+    {
+        GTE_PROFILE_BLOCKED("WaitScope");
+    }
+    GTE_PROFILE_MARKER("MarkerPoint");
+    profiler.EndFrame();
+
+    const auto events = profiler.LastCompletedFrame().scopes.Events();
+    ASSERT_EQ(events.size(), 2u);
+    EXPECT_EQ(events[0].kind, ScopeKind::Blocked);
+    EXPECT_EQ(events[1].kind, ScopeKind::Marker);
+}
+
+TEST_F(ScopeTimerTest, DynamicNamesUseTheirInternedId)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    const NameId id = InternName(std::string("Dynamic").append("Name").c_str());
+
+    profiler.BeginFrame();
+    {
+        GTE_PROFILE_SCOPE_ID(id);
+    }
+    profiler.EndFrame();
+
+    const auto events = profiler.LastCompletedFrame().scopes.Events();
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_STREQ(ResolveName(events[0].name), "DynamicName");
+}
+
+TEST_F(ScopeTimerTest, ScopeRecordsNothingWhenCaptureIsOff)
 {
     FrameProfiler& profiler = FrameProfiler::Instance();
     profiler.SetCaptureEnabled(false);
-    profiler.BeginFrame(); // No-op while disabled.
+    profiler.BeginFrame();
     {
         GTE_PROFILE_SCOPE("ShouldNotBeRecorded");
     }
-    profiler.EndFrame(); // Also a no-op - nothing pushed to history.
+    profiler.EndFrame();
     EXPECT_EQ(profiler.HistoryCount(), 0u);
 
     profiler.SetCaptureEnabled(true);
     profiler.BeginFrame();
     profiler.EndFrame();
-    ASSERT_EQ(profiler.HistoryCount(), 1u);
-    EXPECT_EQ(profiler.HistoryAt(0).cpuScopeCount, 0u);
+    EXPECT_EQ(profiler.LastCompletedFrame().scopes.Size(), 0u);
 }
 
 #else
 
-TEST_F(ScopeTimerTest, CompiledOutScopeTimerConstructsWithoutRecordingAnything)
+TEST_F(ScopeTimerTest, CompiledOutScopeRecordsNothing)
 {
     FrameProfiler& profiler = FrameProfiler::Instance();
     profiler.BeginFrame();
     {
-        ScopeTimer timer("Whatever");
-        (void)timer;
+        GTE_PROFILE_SCOPE("Whatever");
+        GTE_PROFILE_MARKER("Whatever");
     }
     profiler.EndFrame();
 
-    EXPECT_EQ(profiler.HistoryAt(0).cpuScopeCount, 0u);
+    EXPECT_EQ(profiler.LastCompletedFrame().scopes.Size(), 0u);
 }
 
 #endif

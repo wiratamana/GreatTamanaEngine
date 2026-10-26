@@ -19,24 +19,10 @@ struct JobEntry {
     std::shared_ptr<JobHandleState> state;
 };
 
-// A fixed-capacity (an array of `capacity` slots, chosen once at
-// construction - never a growable std::deque/std::queue), mutex +
-// condition_variable-guarded MPMC ring buffer: JobSystem::Schedule() (any
-// thread, typically the main thread) pushes; every worker thread pops.
-//
-// Fixed capacity is a deliberate choice, mirroring this engine's existing
-// "small, fixed, generously-sized capacity, not a growable container"
-// convention (see AGENTS.md's own kMaxCpuScopesPerFrame/kMaxFrameHistory
-// precedent in src/Profiling/) - a full queue is handled by the CALLER
-// (JobSystem::Schedule(), see JobSystem.cpp) falling back to running the
-// job immediately, inline, never by Push() blocking, growing the buffer, or
-// dropping the job silently.
-//
-// This class always compiles, regardless of GTE_ENABLE_JOB_SYSTEM - the
-// same "the class stays available/testable even when its production call
-// site is gated off" precedent SdlMemoryTracker/FrameProfiler already
-// established (see AGENTS.md) - only JobSystem's own decision to actually
-// construct/use one is gated by that switch.
+// Fixed-capacity MPMC ring buffer guarded by a mutex and condition variable. Capacity is set once.
+// Schedule() pushes from any thread; every worker pops. A full queue is the caller's problem:
+// it runs the job inline, so Push() never blocks, grows or drops silently.
+// Always compiled, whatever GTE_ENABLE_JOB_SYSTEM says; only JobSystem's use of it is gated.
 class JobQueue {
 public:
     // `capacity` must be at least 1. Every slot is allocated once, up

@@ -10,16 +10,9 @@ std::vector<FrameGraphPoint> BuildFrameGraphPoints(const FrameProfiler& profiler
     points.reserve(profiler.HistoryCount());
 
     for (std::size_t i = 0; i < profiler.HistoryCount(); ++i) {
-        const FrameSample& frame = profiler.HistoryAt(i);
-
-        FrameGraphPoint point;
-        point.frameIndex = frame.frameIndex;
-        point.cpuMilliseconds = frame.cpuFrameMilliseconds;
-        point.gpuPasses = frame.gpuPasses;
-        point.memory = frame.memory;
-        points.push_back(point);
+        const FrameSummary& frame = profiler.HistoryAt(i);
+        points.push_back({ frame.frameIndex, frame.cpuMilliseconds, frame.memory });
     }
-
     return points;
 }
 
@@ -27,98 +20,35 @@ FrameGraphRange ComputeCpuMillisecondsRange(std::span<const FrameGraphPoint> poi
 {
     FrameGraphRange range;
     if (points.empty()) {
-        return range; // hasData stays false.
-    }
-
-    double minMilliseconds = points[0].cpuMilliseconds;
-    double maxMilliseconds = points[0].cpuMilliseconds;
-    for (std::size_t i = 1; i < points.size(); ++i) {
-        minMilliseconds = std::min(minMilliseconds, points[i].cpuMilliseconds);
-        maxMilliseconds = std::max(maxMilliseconds, points[i].cpuMilliseconds);
+        return range;
     }
 
     range.hasData = true;
-    range.minMilliseconds = minMilliseconds;
-    range.maxMilliseconds = maxMilliseconds;
-    return range;
-}
-
-FrameGraphRange ComputeGpuMillisecondsRange(std::span<const FrameGraphPoint> points, GpuPass pass)
-{
-    FrameGraphRange range;
-
-    // Unconditional bounds check (active in Debug AND Release) - mirrors
-    // FrameProfiler::SetGpuPassSample()'s own already-shipped handling of
-    // exactly this same kind of invalid input (see FrameProfiler.cpp) rather
-    // than a debug-only assert, which would leave a Release build's
-    // out-of-range read exactly as unsafe as having no check at all. See
-    // PHASE2_FRAME_GRAPH_DATA_STRATEGY_v3.md, Step 3.2.
-    const std::size_t index = static_cast<std::size_t>(pass);
-    if (index >= kGpuPassCount) {
-        return range; // hasData stays false.
+    range.minMilliseconds = points[0].cpuMilliseconds;
+    range.maxMilliseconds = points[0].cpuMilliseconds;
+    for (const FrameGraphPoint& point : points.subspan(1)) {
+        range.minMilliseconds = std::min(range.minMilliseconds, point.cpuMilliseconds);
+        range.maxMilliseconds = std::max(range.maxMilliseconds, point.cpuMilliseconds);
     }
-
-    bool found = false;
-    double minMilliseconds = 0.0;
-    double maxMilliseconds = 0.0;
-
-    for (const FrameGraphPoint& point : points) {
-        const GpuPassSample& sample = point.gpuPasses[index];
-        // Only ever branch on `timingStatus` - never on whether
-        // `milliseconds` happens to look like zero. An Absent/Unsupported
-        // sample is excluded regardless of whatever numeric value is
-        // sitting in its own milliseconds field (see this function's own
-        // header comment).
-        if (sample.timingStatus != GpuSampleStatus::Present) {
-            continue;
-        }
-
-        if (!found) {
-            minMilliseconds = sample.milliseconds;
-            maxMilliseconds = sample.milliseconds;
-            found = true;
-        } else {
-            minMilliseconds = std::min(minMilliseconds, sample.milliseconds);
-            maxMilliseconds = std::max(maxMilliseconds, sample.milliseconds);
-        }
-    }
-
-    range.hasData = found;
-    range.minMilliseconds = minMilliseconds;
-    range.maxMilliseconds = maxMilliseconds;
     return range;
 }
 
 MemoryBytesRange ComputeMemoryBytesRange(std::span<const FrameGraphPoint> points)
 {
     MemoryBytesRange range;
-
-    bool found = false;
-    std::uint64_t minBytes = 0;
-    std::uint64_t maxBytes = 0;
-
     for (const FrameGraphPoint& point : points) {
-        // Only ever branch on `status` - never on whether `totalBytes`
-        // happens to look like zero (see this function's own header
-        // comment, mirroring ComputeGpuMillisecondsRange()'s identical
-        // rule).
-        if (point.memory.status != GpuSampleStatus::Present) {
+        if (point.memory.status != SampleStatus::Present) {
             continue;
         }
-
-        if (!found) {
-            minBytes = point.memory.totalBytes;
-            maxBytes = point.memory.totalBytes;
-            found = true;
+        if (!range.hasData) {
+            range.hasData = true;
+            range.minBytes = point.memory.totalBytes;
+            range.maxBytes = point.memory.totalBytes;
         } else {
-            minBytes = std::min(minBytes, point.memory.totalBytes);
-            maxBytes = std::max(maxBytes, point.memory.totalBytes);
+            range.minBytes = std::min(range.minBytes, point.memory.totalBytes);
+            range.maxBytes = std::max(range.maxBytes, point.memory.totalBytes);
         }
     }
-
-    range.hasData = found;
-    range.minBytes = minBytes;
-    range.maxBytes = maxBytes;
     return range;
 }
 

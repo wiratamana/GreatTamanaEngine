@@ -1,6 +1,8 @@
 #pragma once
 
 #include "ProfilingTypes.h"
+#include "ScopeLog.h"
+#include "WorkerRing.h"
 
 #include <array>
 #include <atomic>
@@ -9,211 +11,76 @@
 
 namespace gte::Profiling {
 
-// The single, always-compiled (regardless of GTE_ENABLE_PROFILER - see
-// AGENTS.md, "Profiling") owner of the in-progress frame's sample plus a
-// fixed-capacity ring buffer of completed ones - the Profiling module's
-// whole data model (PROFILER_STRATEGY_v2.md, Phase 0).
-//
-// A Meyers singleton (Instance()) rather than an object threaded by
-// reference through every layer (Application -> Game -> RenderSystem ->
-// ...): profiling data is inherently process-wide/per-frame, exactly like
-// Unity's own static Profiler.BeginSample()/EndSample() API, and this
-// engine is explicitly single-threaded (see GpuMemoryTracker's own class
-// comment) so there is no thread-safety concern a singleton would
-// otherwise raise - see PROFILER_STRATEGY_v2.md's own "no multi-threaded/
-// job-system-aware profiling infrastructure" scope refusal.
-//
-// Compiling this class in UNCONDITIONALLY (unlike ScopeTimer's own body,
-// which IS gated behind GTE_ENABLE_PROFILER - see ScopeTimer.h) keeps it
-// available/testable even in a build configured with
-// GTE_ENABLE_PROFILER=OFF - the same "the class stays available/testable
-// even when its production call site is gated off" precedent
-// SdlMemoryTracker already established (see AGENTS.md, "CPU Dependency
-// Memory Tracking", and src/Memory/SdlMemoryTracker.h).
-//
-// Not thread-safe (matches the rest of this single-threaded engine, same
-// as GpuMemoryTracker).
+// Runtime switches. Safe to read and write from any thread.
+struct ProfilerControl {
+    std::atomic<bool> capture{ true };       // record events
+    std::atomic<bool> displayPaused{ false }; // UI freezes its view; recording continues
+};
+
+// Owns the open frame's event log and the history of finished frames. Frame and scope calls are
+// main thread only; worker threads report through RecordWorkerScope().
 class FrameProfiler {
 public:
     static FrameProfiler& Instance() noexcept;
 
     FrameProfiler(const FrameProfiler&) = delete;
     FrameProfiler& operator=(const FrameProfiler&) = delete;
-    FrameProfiler(FrameProfiler&&) = delete;
-    FrameProfiler& operator=(FrameProfiler&&) = delete;
 
-    // The runtime half of the two-layer on/off switch (see
-    // PROFILER_STRATEGY_v2.md, Phase 0b) - defaults to true. While false,
-    // BeginFrame()/EndFrame()/RecordCpuScope()/SetGpuPassSample()/
-    // SetMemorySnapshot()/RecordWorkerJobSample() all become true no-ops (no
-    // clock read, no ring buffer write at all) - this is what a future
-    // "Profiler" panel's pause toggle and a future benchmark-mode CLI flag
-    // both drive. Backed by std::atomic<bool> (Phase 5 - Profiler
-    // Integration/Worker Timeline), NOT a plain bool like every other
-    // member below: RecordWorkerJobSample() (see that method's own comment)
-    // is the one place this flag is genuinely read from a Job System worker
-    // thread, possibly at the exact same instant SetCaptureEnabled() is
-    // called from the main thread (e.g. a user toggling the Editor's
-    // "Capture" checkbox while jobs are in flight) - every other read of
-    // this flag remains main-thread-only, same as before.
-    void SetCaptureEnabled(bool enabled) noexcept { m_captureEnabled = enabled; }
-    bool IsCaptureEnabled() const noexcept { return m_captureEnabled; }
+    ProfilerControl& Control() noexcept { return m_control; }
+    const ProfilerControl& Control() const noexcept { return m_control; }
 
-    // Call once per frame, bracketing the WHOLE frame (see
-    // Application::Run()) - starts a fresh in-progress FrameSample and
-    // records the wall-clock start time. A no-op (frame count does not
-    // advance) while capture is disabled.
+    // Turning capture off also stops worker threads from pushing events.
+    void SetCaptureEnabled(bool enabled) noexcept;
+    bool IsCaptureEnabled() const noexcept { return m_control.capture.load(std::memory_order_relaxed); }
+
+    void SetDisplayPaused(bool paused) noexcept { m_control.displayPaused.store(paused, std::memory_order_relaxed); }
+    bool IsDisplayPaused() const noexcept { return m_control.displayPaused.load(std::memory_order_relaxed); }
+
+    // Opens a frame. The calling thread becomes the main thread. No frame is recorded while capture is off.
     void BeginFrame() noexcept;
 
-    // Finishes the in-progress frame: records its total CPU wall-clock
-    // duration, pushes it into the ring buffer (overwriting the oldest
-    // entry once full), and advances the completed-frame count. A no-op
-    // (nothing pushed, count does not advance) while capture is disabled,
-    // or if BeginFrame() was never called for this frame.
+    // Closes the frame and stores its record. Does nothing when BeginFrame recorded nothing.
     void EndFrame() noexcept;
 
-    // Adds one CPU scope sample's duration to the CURRENT in-progress
-    // frame's flat, name-keyed aggregation table (see CpuScopeSample) -
-    // called from ScopeTimer's destructor; not meant to be called directly
-    // by ordinary engine code (use GTE_PROFILE_SCOPE(name) instead - see
-    // ScopeTimer.h). `name` MUST be a string literal/static-storage-
-    // duration pointer. A no-op while capture is disabled or outside a
-    // BeginFrame()/EndFrame() bracket. Silently drops the sample (rather
-    // than allocating) if this frame already has kMaxCpuScopesPerFrame
-    // distinct scope names.
-    void RecordCpuScope(const char* name, double milliseconds) noexcept;
+    // Scope bracket. Cheap no-op outside a captured frame.
+    ScopeStart BeginScope() noexcept;
+    void EndScope(const ScopeStart& start, NameId name, ScopeKind kind, ViewSlot view) noexcept;
+    void RecordMarker(NameId name, ViewSlot view = ViewSlot::Shared) noexcept;
 
-    // Records one named GPU pass's TIMING measurement for the current
-    // in-progress frame - governs GpuPassSample::timingStatus/milliseconds
-    // ONLY (see ProfilingTypes.h's own comment on the timingStatus/
-    // countStatus split). Not wired to anything real yet - a future Phase 4
-    // (GPU timestamp queries) is what actually calls this every frame with a
-    // real measurement. `status` must be GpuSampleStatus::Present for
-    // `milliseconds` to be meaningful.
-    void SetGpuPassTiming(GpuPass pass, GpuSampleStatus status, double milliseconds = 0.0) noexcept;
+    // Any thread. Reports one finished job scope.
+    void RecordWorkerScope(std::size_t workerIndex, NameId name, std::uint64_t startTicks, std::uint64_t endTicks) noexcept;
 
-    // Records one named GPU pass's DRAW-CALL/TRIANGLE-COUNT measurement for
-    // the current in-progress frame - governs GpuPassSample::countStatus/
-    // drawCallCount/triangleCount ONLY, entirely independent of
-    // SetGpuPassTiming() above (see ProfilingTypes.h's own comment on the
-    // timingStatus/countStatus split - this is exactly the split that lets
-    // Phase 3 report real counts without falsely implying Phase 4's GPU
-    // timing was also measured this frame). `status` must be
-    // GpuSampleStatus::Present for drawCallCount/triangleCount to be
-    // meaningful.
-    void SetGpuPassDrawStats(GpuPass pass, GpuSampleStatus status, std::uint32_t drawCallCount = 0,
-        std::uint32_t triangleCount = 0) noexcept;
-
-    // Records this frame's GPU memory snapshot. Not wired to anything real
-    // yet as of Phase 0/1 - a future Phase 5 (GPU memory usage over time)
-    // is what actually calls this every frame with
-    // Renderer::GetMemoryTotals() reshaped into a MemorySnapshot.
+    // Memory snapshot of the open frame.
     void SetMemorySnapshot(const MemorySnapshot& snapshot) noexcept;
 
-    // Phase 5 (Profiler Integration - Worker Timeline): the ONE thread-safe
-    // write path into this module's data model - safe to call CONCURRENTLY,
-    // from any number of Job System worker threads at once, unlike EVERY
-    // other method on this class (RecordCpuScope()/BeginFrame()/EndFrame()/
-    // SetGpuPassTiming()/SetGpuPassDrawStats()/SetMemorySnapshot() remain
-    // main-thread-only - see AGENTS.md's Job System Phase 4 thread-safety
-    // table: "Profiling::FrameProfiler ... NEVER (until Phase 5)"). Called
-    // from Profiling::JobScopeTimer's destructor (src/Profiling/
-    // JobScopeTimer.h) - not meant to be called directly by ordinary job
-    // code (use GTE_PROFILE_JOB_SCOPE(name) instead). `name` MUST be a
-    // string literal/static-storage-duration pointer, same convention as
-    // RecordCpuScope(). A no-op while capture is disabled or outside a
-    // BeginFrame()/EndFrame() bracket - reads IsCaptureEnabled() (now backed
-    // by std::atomic<bool>, see below, since - unlike every other read in
-    // this class - it can genuinely be read from a worker thread at the
-    // same moment SetCaptureEnabled() is called from the main thread, e.g.
-    // an Editor "Capture" checkbox toggled while jobs are in flight) and
-    // m_frameInProgress (still a plain bool - safe to read from a worker
-    // thread ONLY because of the Job System's own caller obligation that
-    // every Dispatch()/WaitForJobs() bracket completes in full before the
-    // frame it belongs to ends, which is what establishes a real
-    // happens-before edge from BeginFrame()/EndFrame()'s own writes through
-    // to a job body's read, via the Job System's internal mutex/condition-
-    // variable synchronization - see AGENTS.md, "Job System"). Reserves its
-    // own slot in the current frame's fixed-capacity worker-job log via a
-    // single atomic fetch-and-increment - never a lock, never an allocation
-    // - and silently drops the sample (rather than allocating or blocking)
-    // once kMaxWorkerJobSamplesPerFrame is reached, mirroring
-    // RecordCpuScope()'s own overflow behavior.
-    void RecordWorkerJobSample(
-        std::size_t workerIndex, const char* name, double milliseconds, std::uint64_t startTicks) noexcept;
-
-    // How many frames EndFrame() has fully completed so far (i.e. the
-    // frame index BeginFrame() will assign to the NEXT frame it starts).
+    // Frames closed so far.
     std::uint64_t CompletedFrameCount() const noexcept { return m_frameIndex; }
 
-    // Ring buffer read access, oldest-to-newest: HistoryAt(0) is the oldest
-    // still-retained frame, HistoryAt(HistoryCount() - 1) is the most
-    // recently completed one. Precondition: indexFromOldest < HistoryCount()
-    // - same "caller's responsibility, no bounds-checking" contract as
-    // std::array::operator[] elsewhere in this codebase.
+    // Summary history, oldest first. indexFromOldest must be < HistoryCount().
     std::size_t HistoryCount() const noexcept { return m_historyCount; }
-    const FrameSample& HistoryAt(std::size_t indexFromOldest) const noexcept;
+    const FrameSummary& HistoryAt(std::size_t indexFromOldest) const noexcept;
 
-    // The most recently completed frame, or a default-constructed
-    // (all-absent/all-zero) FrameSample if none has completed yet -
-    // convenience for a live "current" display (a future Editor Profiler
-    // panel) that doesn't want to special-case an empty history itself.
-    const FrameSample& LastCompletedFrame() const noexcept;
+    // Event detail of the newest finished frame. An empty record before the first frame.
+    const FrameRecord& LastCompletedFrame() const noexcept;
 
-    // Test-only: discards all history and resets the frame index/in-
-    // progress state back to how a freshly-constructed FrameProfiler would
-    // look, WITHOUT touching the runtime capture-enabled flag. Since
-    // Instance() is a process-wide singleton, tests must not assume a
-    // pristine state - this exists purely so
-    // tests/Profiling/FrameProfilerTests.cpp/ScopeTimerTests.cpp can start
-    // each test case from a known baseline, mirroring the "capture
-    // LiveBytes()/LiveAllocationCount() BEFORE each test's own calls and
-    // assert on the DELTA" convention AGENTS.md documents for
-    // SdlMemoryTracker/ImGuiMemoryTracker - resetting outright is simpler
-    // and just as safe here, since nothing else in the engine depends on
-    // FrameProfiler's history surviving across test cases.
+    // Forgets all history and pending worker events. Keeps the runtime switches.
     void ResetForTesting() noexcept;
-
-    // Test-only: overwrites the MOST RECENTLY COMPLETED history entry's
-    // cpuFrameMilliseconds with an exact, caller-chosen value - a no-op if
-    // history is empty. EndFrame() always computes this field from real
-    // elapsed wall-clock time (see FrameProfiler.cpp's ElapsedMilliseconds())
-    // with no way for a caller to inject a literal value beforehand, which
-    // makes writing a genuinely deterministic, bit-exact regression test
-    // against a KNOWN cpu time impossible without this hook (see
-    // tests/Profiling/FrameGraphDataTests.cpp, which needs exactly that to
-    // test ComputeCpuMillisecondsRange()'s min/max scan against known
-    // values rather than real, inherently-jittery timing). Only ever
-    // touches the already-pushed history entry - never the in-progress
-    // frame, never any other retained entry, and never any of
-    // BeginFrame()/EndFrame()/RecordCpuScope()/SetGpuPassSample()/
-    // SetMemorySnapshot()'s own real-time behavior - so every other test
-    // already written against this class remains completely unaffected.
-    void OverrideLastFrameCpuMillisecondsForTesting(double milliseconds) noexcept;
 
 private:
     FrameProfiler() = default;
 
-    std::atomic<bool> m_captureEnabled{ true };
+    ProfilerControl m_control;
     bool m_frameInProgress = false;
     std::uint64_t m_frameIndex = 0;
     std::uint64_t m_frameStartTicks = 0;
+    MemorySnapshot m_openMemory{};
 
-    FrameSample m_current{};
+    ScopeLog m_log;
+    WorkerRing m_ring;
+    FrameRecord m_last{};
 
-    // Phase 5 (Profiler Integration - Worker Timeline): the thread-safe
-    // reservation counter behind RecordWorkerJobSample() - deliberately
-    // separate from m_current.workerJobCount itself (which stays a plain,
-    // copyable std::size_t, since FrameSample as a whole must remain a
-    // plain, copyable POD to be pushed into m_history below - std::atomic is
-    // neither copyable nor assignable, so it can never live INSIDE
-    // FrameSample). Reset to 0 by BeginFrame(); snapshotted (clamped to
-    // kMaxWorkerJobSamplesPerFrame) into m_current.workerJobCount by
-    // EndFrame(), right before m_current is copied into history.
-    std::atomic<std::size_t> m_currentWorkerJobCount{ 0 };
-
-    std::array<FrameSample, kMaxFrameHistory> m_history{};
-    std::size_t m_historyHead = 0; // Next slot EndFrame() will write to.
+    std::array<FrameSummary, kMaxFrameHistory> m_history{};
+    std::size_t m_historyHead = 0; // next slot to write
     std::size_t m_historyCount = 0;
 };
 

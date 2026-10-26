@@ -1,23 +1,46 @@
 #include "ProfilerPanelData.h"
 
+#include "../Profiling/NameTable.h"
+#include "../Profiling/ProfilingClock.h"
+#include "../Profiling/ScopeTree.h"
+
 #include <algorithm>
 #include <cstdio>
 
 namespace gte {
 
-std::vector<Profiling::CpuScopeSample> BuildSortedCpuScopeRows(const Profiling::FrameSample& frame)
+std::vector<CpuScopeRow> BuildSortedCpuScopeRows(const Profiling::FrameRecord& frame)
 {
-    std::vector<Profiling::CpuScopeSample> rows;
-    rows.reserve(frame.cpuScopeCount);
-    for (std::size_t i = 0; i < frame.cpuScopeCount; ++i) {
-        rows.push_back(frame.cpuScopes[i]);
+    const auto events = frame.scopes.Events();
+
+    std::vector<Profiling::ScopeTimes> times(events.size());
+    Profiling::ComputeScopeTimes(events, times);
+
+    std::vector<CpuScopeRow> rows;
+    std::vector<Profiling::NameId> ids;
+    for (std::size_t i = 0; i < events.size(); ++i) {
+        const Profiling::ScopeEvent& event = events[i];
+        if (event.kind == Profiling::ScopeKind::Marker) {
+            continue;
+        }
+
+        const auto found = std::find(ids.begin(), ids.end(), event.name);
+        const std::size_t row = static_cast<std::size_t>(found - ids.begin());
+        if (found == ids.end()) {
+            ids.push_back(event.name);
+            CpuScopeRow fresh;
+            fresh.name = Profiling::ResolveName(event.name);
+            fresh.kind = event.kind;
+            rows.push_back(fresh);
+        }
+
+        rows[row].totalMilliseconds += Profiling::TicksToMilliseconds(times[i].totalTicks);
+        rows[row].selfMilliseconds += Profiling::TicksToMilliseconds(times[i].selfTicks);
+        ++rows[row].callCount;
     }
 
-    std::sort(rows.begin(), rows.end(),
-        [](const Profiling::CpuScopeSample& a, const Profiling::CpuScopeSample& b) {
-            return a.totalMilliseconds > b.totalMilliseconds;
-        });
-
+    std::stable_sort(rows.begin(), rows.end(),
+        [](const CpuScopeRow& a, const CpuScopeRow& b) { return a.totalMilliseconds > b.totalMilliseconds; });
     return rows;
 }
 
@@ -62,50 +85,24 @@ std::string FormatCount(std::uint64_t value)
     return result;
 }
 
-GpuPassCountDisplay ResolveGpuPassCounts(const Profiling::FrameSample& frame, Profiling::GpuPass pass)
+std::string FormatGpuTimingLine(Profiling::SampleStatus status, double milliseconds)
 {
-    GpuPassCountDisplay display;
-
-    const std::size_t index = static_cast<std::size_t>(pass);
-    if (index >= Profiling::kGpuPassCount) {
-        return display; // available stays false.
-    }
-
-    const Profiling::GpuPassSample& sample = frame.gpuPasses[index];
-    if (sample.countStatus != Profiling::GpuSampleStatus::Present) {
-        return display; // available stays false - never collapse Absent into a fake zero.
-    }
-
-    display.available = true;
-    display.drawCallCount = sample.drawCallCount;
-    display.triangleCount = sample.triangleCount;
-    return display;
-}
-
-const char* ToString(Profiling::GpuPass pass)
-{
-    switch (pass) {
-    case Profiling::GpuPass::GameView:
-        return "Game View";
-    case Profiling::GpuPass::SceneView:
-        return "Scene View";
-    case Profiling::GpuPass::Present:
-        return "Present";
-    }
-    return "Unknown Pass";
-}
-
-std::string FormatGpuTimingLine(const Profiling::GpuPassSample& pass)
-{
-    switch (pass.timingStatus) {
-    case Profiling::GpuSampleStatus::Present:
-        return FormatDuration(pass.milliseconds);
-    case Profiling::GpuSampleStatus::Unsupported:
+    switch (status) {
+    case Profiling::SampleStatus::Present:
+        return FormatDuration(milliseconds);
+    case Profiling::SampleStatus::Stale:
+        return "stale";
+    case Profiling::SampleStatus::Unsupported:
         return "unsupported";
-    case Profiling::GpuSampleStatus::Absent:
+    case Profiling::SampleStatus::Partial:
+        return "partial";
+    case Profiling::SampleStatus::Error:
+        return "error";
+    case Profiling::SampleStatus::Inactive:
+        return "inactive";
+    case Profiling::SampleStatus::Absent:
         break;
     }
-    // Never a fabricated "0.00 ms" for a value that was not measured.
     return "not measured";
 }
 

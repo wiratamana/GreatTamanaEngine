@@ -1,12 +1,4 @@
-// Unit tests for the Editor's "Jobs" panel data-shaping logic
-// (src/Editor/JobsPanelData.h) - deliberately pure (no ImGui/Renderer/live-
-// Vulkan-device/real JobSystem/FrameProfiler singleton involved at all), so
-// it's Tier-1-testable exactly like ProfilerPanelData.h/MemoryPanelData.h
-// despite living under src/Editor/ - see AGENTS.md, "Testability &
-// Regression Safety". Only built when GTE_ENABLE_EDITOR is ON, since
-// JobsPanelData.h/.cpp are only compiled into gte_core then (see the root
-// CMakeLists.txt's "Editor Module Structure") - the same "zero-touch when
-// off" rule already applied to tests/Editor/ProfilerPanelDataTests.cpp.
+// Tier 1: pure data shaping and formatting of the Jobs panel (src/Editor/JobsPanelData.h).
 
 #include "Editor/JobsPanelData.h"
 

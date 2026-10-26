@@ -4,6 +4,17 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## Profiler event log (branch `feature/gpu-cull-impl`, 2026-10-26)
+
+- **CPU scopes are events, not a flat table.** `GTE_PROFILE_SCOPE` records a 24 byte `ScopeEvent` with an interned name,
+  depth, kind (work, blocked, marker) and view slot. The Profiler panel shows total and self time per scope. New macros:
+  `GTE_PROFILE_SCOPE_ID`, `GTE_PROFILE_BLOCKED`, `GTE_PROFILE_MARKER`.
+- **Worker scopes** go through a lock-free ring and are drained once per frame. Late, off-thread and lost events are
+  counted in each frame summary.
+- **Capture and Pause are separate switches** (`ProfilerControl`). Pause only freezes the panels.
+- **Removed:** the flat scope table, the three entry GPU pass enum, `GetProfilingPerformanceFrequency()` and the
+  frame sample type. GPU timing rows read "not measured" until a GPU timing source feeds them.
+
 ## GPU wait safety (branch `feature/gpu-cull-impl`, 2026-10-26)
 
 - **One owner for abandoned GPU work.** `AbandonedWork` parks fences, command buffers and staging buffers of a failed

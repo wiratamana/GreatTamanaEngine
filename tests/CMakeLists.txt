@@ -2998,9 +2998,7 @@ set(GTE_COMMENT_RULE_SRC
     Network/NetworkSceneCameraPose.h Network/NetworkSceneCameraPose.cpp Network/NetworkCaptureFailure.h
     Editor/CaptureFailureReason.h Core/FaultInjection.h Core/FaultInjection.cpp
     Network/NetworkFaultRoutes.h Network/NetworkFaultRoutes.cpp
-    Profiling/ScopeEvent.h Profiling/ProfilingBudget.h Profiling/EventBuffer.h Profiling/NameTable.h
-    Profiling/NameTable.cpp Profiling/ScopeTree.h Profiling/ScopeTree.cpp Profiling/FrameGate.h
-    Profiling/ScopeLog.h Profiling/ManualClock.h Profiling/WorkerRing.h Profiling/WorkerRing.cpp
+    Profiling/
     Features/SceneLighting/ Features/GpuDrivenScene/)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
@@ -3044,8 +3042,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Editor/EditorCameraTests.cpp Editor/ExitGateTests.cpp Network/NetworkRequestGuardTests.cpp
     Renderer/AbandonedWorkTests.cpp Renderer/CaptureStatusTests.cpp Network/NetworkCaptureFailureTests.cpp
     Renderer/PresentRecoveryPlanTests.cpp Renderer/RenderGraph/OffscreenRecordingFaultTests.cpp
-    Renderer/GpuWaitServiceTests.cpp Network/NetworkFaultRoutesTests.cpp
-    Profiling/ProfilingEventModelTests.cpp Profiling/ProfilingAllocationTests.cpp Profiling/WorkerRingTests.cpp)
+    Renderer/GpuWaitServiceTests.cpp Network/NetworkFaultRoutesTests.cpp Profiling/)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

@@ -19,3 +19,12 @@ NamedStats
 UpdateDrawStatsFor
 UpdateTimingFor
 m_pipelinedHasWritten
+GpuPass
+GpuPassSample
+GpuSampleStatus
+CpuScopeSample
+WorkerJobSample
+GetProfilingPerformanceFrequency
+OverrideLastFrameCpuMillisecondsForTesting
+RecordCpuScope
+RecordWorkerJobSample

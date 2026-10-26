@@ -1,66 +1,77 @@
-// Unit tests for the Editor's "Profiler" panel data-shaping logic
-// (src/Editor/ProfilerPanelData.h) - deliberately pure (no ImGui/Renderer/
-// live-Vulkan-device knowledge at all), so it's Tier-1-testable exactly like
-// MemoryPanelData.h despite living under src/Editor/ - see AGENTS.md,
-// "Testability & Regression Safety". Only built when GTE_ENABLE_EDITOR is
-// ON, since ProfilerPanelData.h/.cpp are only compiled into gte_core then
-// (see the root CMakeLists.txt's "Editor Module Structure") - the same
-// "zero-touch when off" rule already applied to
-// tests/Editor/MemoryPanelDataTests.cpp.
+// Tier 1: pure data shaping and formatting of the Profiler panel (src/Editor/ProfilerPanelData.h).
 
 #include "Editor/ProfilerPanelData.h"
+
+#include "Profiling/NameTable.h"
 
 #include <gtest/gtest.h>
 
 namespace gte {
 namespace {
 
-Profiling::CpuScopeSample MakeScope(const char* name, double totalMilliseconds, std::uint32_t callCount)
+// Appends one finished scope with explicit tick times (1 tick = 1 ns).
+void AddScope(Profiling::FrameRecord& frame, const char* name, std::uint64_t start, std::uint64_t end,
+    std::uint16_t depth, Profiling::ScopeKind kind = Profiling::ScopeKind::Work)
 {
-    Profiling::CpuScopeSample sample;
-    sample.name = name;
-    sample.totalMilliseconds = totalMilliseconds;
-    sample.callCount = callCount;
-    return sample;
+    frame.scopes.Append(Profiling::ScopeEvent{
+        start, end, Profiling::InternName(name), depth, kind, Profiling::ViewSlot::Shared });
 }
 
-TEST(ProfilerPanelDataTest, BuildSortedCpuScopeRowsSortsBiggestFirst)
+TEST(ProfilerPanelDataTest, RowsAreSortedBiggestFirst)
 {
-    Profiling::FrameSample frame;
-    frame.cpuScopes[0] = MakeScope("Small", 1.0, 1);
-    frame.cpuScopes[1] = MakeScope("Big", 10.0, 1);
-    frame.cpuScopes[2] = MakeScope("Medium", 5.0, 1);
-    frame.cpuScopeCount = 3;
+    Profiling::FrameRecord frame;
+    AddScope(frame, "PanelTestSmall", 0, 1'000'000, 0);
+    AddScope(frame, "PanelTestBig", 0, 10'000'000, 0);
+    AddScope(frame, "PanelTestMedium", 0, 5'000'000, 0);
 
-    const std::vector<Profiling::CpuScopeSample> rows = BuildSortedCpuScopeRows(frame);
+    const std::vector<CpuScopeRow> rows = BuildSortedCpuScopeRows(frame);
 
     ASSERT_EQ(rows.size(), 3u);
-    EXPECT_STREQ(rows[0].name, "Big");
-    EXPECT_STREQ(rows[1].name, "Medium");
-    EXPECT_STREQ(rows[2].name, "Small");
+    EXPECT_STREQ(rows[0].name, "PanelTestBig");
+    EXPECT_STREQ(rows[1].name, "PanelTestMedium");
+    EXPECT_STREQ(rows[2].name, "PanelTestSmall");
 }
 
-TEST(ProfilerPanelDataTest, BuildSortedCpuScopeRowsRespectsCpuScopeCountNotArrayCapacity)
+TEST(ProfilerPanelDataTest, SelfTimeExcludesDirectChildren)
 {
-    Profiling::FrameSample frame;
-    frame.cpuScopes[0] = MakeScope("OnlyOne", 3.0, 2);
-    // Leave every other array slot at its default-constructed value (as if
-    // stale from a differently-shaped prior frame) - cpuScopeCount is what
-    // must gate iteration, never the array's fixed capacity.
-    frame.cpuScopeCount = 1;
+    // Post-order: the child ends before its parent.
+    Profiling::FrameRecord frame;
+    AddScope(frame, "PanelTestChild", 1'000'000, 4'000'000, 1);
+    AddScope(frame, "PanelTestParent", 0, 10'000'000, 0);
 
-    const std::vector<Profiling::CpuScopeSample> rows = BuildSortedCpuScopeRows(frame);
+    const std::vector<CpuScopeRow> rows = BuildSortedCpuScopeRows(frame);
+
+    ASSERT_EQ(rows.size(), 2u);
+    EXPECT_STREQ(rows[0].name, "PanelTestParent");
+    EXPECT_DOUBLE_EQ(rows[0].totalMilliseconds, 10.0);
+    EXPECT_DOUBLE_EQ(rows[0].selfMilliseconds, 7.0);
+    EXPECT_DOUBLE_EQ(rows[1].selfMilliseconds, 3.0);
+}
+
+TEST(ProfilerPanelDataTest, SameNameIsSummedAndCounted)
+{
+    Profiling::FrameRecord frame;
+    AddScope(frame, "PanelTestRepeat", 0, 2'000'000, 0);
+    AddScope(frame, "PanelTestRepeat", 3'000'000, 4'000'000, 0);
+
+    const std::vector<CpuScopeRow> rows = BuildSortedCpuScopeRows(frame);
 
     ASSERT_EQ(rows.size(), 1u);
-    EXPECT_STREQ(rows[0].name, "OnlyOne");
+    EXPECT_EQ(rows[0].callCount, 2u);
+    EXPECT_DOUBLE_EQ(rows[0].totalMilliseconds, 3.0);
 }
 
-TEST(ProfilerPanelDataTest, BuildSortedCpuScopeRowsOnEmptyFrameReturnsEmpty)
+TEST(ProfilerPanelDataTest, MarkersAreNotRows)
 {
-    const Profiling::FrameSample frame; // cpuScopeCount == 0 by default.
+    Profiling::FrameRecord frame;
+    AddScope(frame, "PanelTestMarker", 5, 5, 0, Profiling::ScopeKind::Marker);
+    EXPECT_TRUE(BuildSortedCpuScopeRows(frame).empty());
+}
 
-    const std::vector<Profiling::CpuScopeSample> rows = BuildSortedCpuScopeRows(frame);
-    EXPECT_TRUE(rows.empty());
+TEST(ProfilerPanelDataTest, EmptyFrameHasNoRows)
+{
+    const Profiling::FrameRecord frame{};
+    EXPECT_TRUE(BuildSortedCpuScopeRows(frame).empty());
 }
 
 TEST(ProfilerPanelDataTest, FormatDurationProducesExpectedText)
@@ -72,7 +83,6 @@ TEST(ProfilerPanelDataTest, FormatDurationProducesExpectedText)
 
 TEST(ProfilerPanelDataTest, FormatFrameTimeSummaryComputesFpsCorrectly)
 {
-    // 1000.0 / 16.666... ~= 60.0
     EXPECT_EQ(FormatFrameTimeSummary(1000.0 / 60.0), "16.67 ms / 60 FPS");
     EXPECT_EQ(FormatFrameTimeSummary(1000.0 / 30.0), "33.33 ms / 30 FPS");
 }
@@ -93,74 +103,20 @@ TEST(ProfilerPanelDataTest, FormatCountGroupsThousandsCorrectly)
     EXPECT_EQ(FormatCount(1234567), "1,234,567");
 }
 
-TEST(ProfilerPanelDataTest, ResolveGpuPassCountsReportsAvailableForPresentStatus)
+TEST(ProfilerPanelDataTest, GpuTimingLineShowsANumberOnlyForPresent)
 {
-    Profiling::FrameSample frame;
-    frame.gpuPasses[static_cast<std::size_t>(Profiling::GpuPass::GameView)].countStatus
-        = Profiling::GpuSampleStatus::Present;
-    frame.gpuPasses[static_cast<std::size_t>(Profiling::GpuPass::GameView)].drawCallCount = 42;
-    frame.gpuPasses[static_cast<std::size_t>(Profiling::GpuPass::GameView)].triangleCount = 128400;
-
-    const GpuPassCountDisplay display = ResolveGpuPassCounts(frame, Profiling::GpuPass::GameView);
-    EXPECT_TRUE(display.available);
-    EXPECT_EQ(display.drawCallCount, 42u);
-    EXPECT_EQ(display.triangleCount, 128400u);
-}
-
-TEST(ProfilerPanelDataTest, ResolveGpuPassCountsReportsUnavailableForAbsentStatusEvenWithStaleNonZeroValues)
-{
-    Profiling::FrameSample frame;
-    Profiling::GpuPassSample& sample = frame.gpuPasses[static_cast<std::size_t>(Profiling::GpuPass::SceneView)];
-    sample.countStatus = Profiling::GpuSampleStatus::Absent;
-    sample.drawCallCount = 99; // Stale/non-zero despite being Absent.
-    sample.triangleCount = 12345;
-
-    const GpuPassCountDisplay display = ResolveGpuPassCounts(frame, Profiling::GpuPass::SceneView);
-    EXPECT_FALSE(display.available);
-}
-
-TEST(ProfilerPanelDataTest, ResolveGpuPassCountsBoundsChecksOutOfRangePass)
-{
-    const Profiling::FrameSample frame;
-    const GpuPassCountDisplay display = ResolveGpuPassCounts(frame, static_cast<Profiling::GpuPass>(99));
-    EXPECT_FALSE(display.available);
-}
-
-TEST(ProfilerPanelDataTest, ToStringGpuPassCoversAllThreeValues)
-{
-    EXPECT_STREQ(ToString(Profiling::GpuPass::GameView), "Game View");
-    EXPECT_STREQ(ToString(Profiling::GpuPass::SceneView), "Scene View");
-    EXPECT_STREQ(ToString(Profiling::GpuPass::Present), "Present");
-    EXPECT_STREQ(ToString(static_cast<Profiling::GpuPass>(99)), "Unknown Pass");
-}
-
-TEST(ProfilerPanelDataTest, FormatGpuTimingLineReportsStatusWordForAbsentAndUnsupported)
-{
-    Profiling::GpuPassSample absentSample;
-    absentSample.timingStatus = Profiling::GpuSampleStatus::Absent;
-    absentSample.milliseconds = 42.0; // Stale/non-zero - must still say "not measured".
-    EXPECT_EQ(FormatGpuTimingLine(absentSample), "not measured");
-
-    Profiling::GpuPassSample unsupportedSample;
-    unsupportedSample.timingStatus = Profiling::GpuSampleStatus::Unsupported;
-    EXPECT_EQ(FormatGpuTimingLine(unsupportedSample), "unsupported");
-}
-
-TEST(ProfilerPanelDataTest, FormatGpuTimingLineReportsRealValueForPresent)
-{
-    Profiling::GpuPassSample sample;
-    sample.timingStatus = Profiling::GpuSampleStatus::Present;
-    sample.milliseconds = 3.5;
-    EXPECT_EQ(FormatGpuTimingLine(sample), "3.50 ms");
+    using Profiling::SampleStatus;
+    EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Present, 3.5), "3.50 ms");
+    EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Absent, 42.0), "not measured");
+    EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Unsupported, 42.0), "unsupported");
+    EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Partial, 42.0), "partial");
+    EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Error, 42.0), "error");
+    EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Inactive, 42.0), "inactive");
+    EXPECT_EQ(FormatGpuTimingLine(SampleStatus::Stale, 42.0), "stale");
 }
 
 TEST(ProfilerPanelDataTest, CpuScopeTableEmptyMessageMatchesCompileTimeFlag)
 {
-    // This test can't meaningfully flip GTE_ENABLE_PROFILER at runtime, but
-    // it does prove CpuScopeTableEmptyMessage() and
-    // kCpuScopeInstrumentationCompiledIn never disagree with each other
-    // within one build - a real, if narrow, regression it can actually
-    // catch (see PHASE7_EDITOR_PROFILER_PANEL_STRATEGY_v2.md, Changelog #1).
     const std::string message = CpuScopeTableEmptyMessage();
     if (kCpuScopeInstrumentationCompiledIn) {
         EXPECT_EQ(message, "No CPU scopes recorded yet.");
