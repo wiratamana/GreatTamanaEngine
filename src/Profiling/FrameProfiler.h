@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace gte::Profiling {
 
@@ -68,6 +69,12 @@ public:
 
     // Frames closed so far.
     std::uint64_t CompletedFrameCount() const noexcept { return m_frameIndex; }
+
+    // Index the open frame will get when it closes; nullopt while no frame is open.
+    std::optional<std::uint64_t> OpenFrameIndex() const noexcept
+    {
+        return m_frameInProgress ? std::optional<std::uint64_t>(m_frameIndex) : std::nullopt;
+    }
 
     // Summary history, oldest first. indexFromOldest must be < HistoryCount().
     std::size_t HistoryCount() const noexcept { return m_historyCount; }

@@ -1,6 +1,7 @@
 #include "RenderGraphMetadataJson.h"
 
 #include "../Application/GpuTimingText.h"
+#include "../Application/ViewScopeLabel.h"
 #include "../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
 
 namespace gte::Network {
@@ -39,7 +40,7 @@ nlohmann::json PassToJson(const rg::RenderGraphPassMetadata& pass)
         { "kind", pass.kind },
         { "category", pass.category },
         { "draw_kind", pass.drawKind },
-        { "view_scope", RenderGraphViewScopeLabel(pass.viewScope) },
+        { "view_scope", ViewScopeLabel(pass.viewScope) },
         { "view", pass.view },
         { "instance", pass.instance },
         { "render_pass_event", pass.renderPassEvent },
@@ -50,8 +51,8 @@ nlohmann::json PassToJson(const rg::RenderGraphPassMetadata& pass)
         { "draw_call_count", pass.drawCallCount },
         { "triangle_count", pass.triangleCount },
         { "indirect_draw_count", pass.indirectDrawCount },
-        { "gpu_timing_text", FormatGpuTimingText(pass.gpuTimingStatus, pass.gpuRecordedMilliseconds) },
-        { "gpu_timing_status", pass.gpuTimingStatus },
+        { "gpu_timing_text", FormatGpuTimingText(pass.gpuTimingState, pass.gpuRecordedMilliseconds) },
+        { "gpu_timing_status", rg::ToString(pass.gpuTimingState) },
         { "gpu_folded_passes", pass.gpuFoldedPasses },
         { "gpu_timing_milliseconds", OptionalToJson(pass.gpuTimingMilliseconds) },
     };
@@ -103,17 +104,6 @@ nlohmann::json FeatureToJson(const RenderFeatureDebugEntry& entry)
 }
 
 } // namespace
-
-const char* RenderGraphViewScopeLabel(const std::string& viewScope)
-{
-    if (viewScope == rg::ToString(rg::ViewScope::Primary)) {
-        return "Game";
-    }
-    if (viewScope == rg::ToString(rg::ViewScope::Secondary)) {
-        return "Scene";
-    }
-    return "Shared";
-}
 
 nlohmann::json RenderGraphMetadataToJson(const rg::RenderGraphMetadata& metadata)
 {

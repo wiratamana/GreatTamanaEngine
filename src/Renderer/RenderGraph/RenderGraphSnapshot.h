@@ -78,9 +78,8 @@ struct RenderGraphSnapshot {
     std::uint32_t droppedGpuFrames = 0; // Frames whose GPU data was lost or never read, since the graph was made.
 };
 
-// Reshapes one Execute() call into a snapshot. `statsLookup` maps a declaration index to that pass's stats
-// (never called for a culled pass). `metadataLookup` and `barrierLabelLookup` resolve per-pass metadata
-// and write barrier labels by declaration index; an empty function or false leaves the defaults.
+// Reshapes one Execute() call into a snapshot. The lookups resolve per-pass stats, metadata and barrier
+// labels by declaration index; an empty function (or false) keeps the defaults.
 RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, const CompiledGraphInput& input,
     const std::function<PassGpuStats(std::size_t)>& statsLookup,
     const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup = {},

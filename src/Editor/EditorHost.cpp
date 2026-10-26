@@ -989,6 +989,7 @@ int EditorHost::Run()
             renderGraphMetadata.indirectDraw = m_renderer.IndirectDrawCaps();
             renderGraphMetadata.gpuWait.deviceLost = m_renderer.DeviceLost();
             renderGraphMetadata.gpuWait.consecutiveFrameTimeouts = m_renderer.GpuWaitConsecutiveFrameTimeouts();
+            renderGraphMetadata.gpuWait.abandonedObjects = m_renderer.AbandonedObjectCount();
             if (gpuMemoryAgeFrames >= kGpuMemoryRefreshFrames) {
                 GTE_PROFILE_MARKER("Periodic.GpuMemorySummary");
                 gpuMemory = rg::BuildGpuMemoryMetadata(

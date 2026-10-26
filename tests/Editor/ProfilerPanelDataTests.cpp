@@ -170,21 +170,21 @@ TEST(ProfilerPanelDataTest, GpuCoverageTextNamesEveryCount)
     EXPECT_EQ(FormatGpuCoverage(gpu), "executed 20 of declared 24, recorded 18, disabled by toggle 3");
 }
 
-rg::RenderGraphPassMetadata MakeTimedPass(rg::ViewScope view, std::optional<double> milliseconds, const char* status)
+rg::RenderGraphPassMetadata MakeTimedPass(rg::ViewScope view, std::optional<double> milliseconds, GpuReadState state)
 {
     rg::RenderGraphPassMetadata pass;
-    pass.viewScope = rg::ToString(view);
+    pass.viewScope = view;
     pass.gpuTimingMilliseconds = milliseconds;
-    pass.gpuTimingStatus = status;
+    pass.gpuTimingState = state;
     return pass;
 }
 
 TEST(ProfilerPanelDataTest, RegimeGpuIsSummedPerViewAndNeverAcrossViews)
 {
     std::vector<rg::RenderGraphPassMetadata> passes;
-    passes.push_back(MakeTimedPass(rg::ViewScope::Primary, 1.0, "Present"));
-    passes.push_back(MakeTimedPass(rg::ViewScope::Primary, 0.5, "Present"));
-    passes.push_back(MakeTimedPass(rg::ViewScope::Secondary, 4.0, "Present"));
+    passes.push_back(MakeTimedPass(rg::ViewScope::Primary, 1.0, GpuReadState::Present));
+    passes.push_back(MakeTimedPass(rg::ViewScope::Primary, 0.5, GpuReadState::Present));
+    passes.push_back(MakeTimedPass(rg::ViewScope::Secondary, 4.0, GpuReadState::Present));
 
     const RegimeGpuByView byView = SumRegimeGpuByView(passes);
     EXPECT_EQ(byView.game.status, Profiling::SampleStatus::Present);
@@ -197,8 +197,8 @@ TEST(ProfilerPanelDataTest, RegimeGpuIsSummedPerViewAndNeverAcrossViews)
 TEST(ProfilerPanelDataTest, RegimeGpuViewWithoutPassesIsInactiveAndUnmeasuredIsNotZero)
 {
     std::vector<rg::RenderGraphPassMetadata> passes;
-    passes.push_back(MakeTimedPass(rg::ViewScope::Primary, std::nullopt, "Absent"));
-    rg::RenderGraphPassMetadata culled = MakeTimedPass(rg::ViewScope::Secondary, 9.0, "Present");
+    passes.push_back(MakeTimedPass(rg::ViewScope::Primary, std::nullopt, GpuReadState::Absent));
+    rg::RenderGraphPassMetadata culled = MakeTimedPass(rg::ViewScope::Secondary, 9.0, GpuReadState::Present);
     culled.isCulled = true;
     passes.push_back(culled);
 
@@ -210,7 +210,7 @@ TEST(ProfilerPanelDataTest, RegimeGpuViewWithoutPassesIsInactiveAndUnmeasuredIsN
 
 TEST(ProfilerPanelDataTest, RegimeGpuFoldedPassesMakeAViewPartial)
 {
-    rg::RenderGraphPassMetadata bucket = MakeTimedPass(rg::ViewScope::Primary, 2.0, "Present");
+    rg::RenderGraphPassMetadata bucket = MakeTimedPass(rg::ViewScope::Primary, 2.0, GpuReadState::Present);
     bucket.gpuFoldedPasses = 5;
     const RegimeGpuByView byView = SumRegimeGpuByView({ bucket });
     EXPECT_EQ(byView.game.status, Profiling::SampleStatus::Partial);

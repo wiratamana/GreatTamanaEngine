@@ -1,5 +1,6 @@
 // Tier 1 tests of the Render Graph panel display text: GPU timing text, view labels and pass grouping.
 
+#include "Application/ViewScopeLabel.h"
 #include "Editor/RenderGraphDisplayText.h"
 
 #include "Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
@@ -46,11 +47,11 @@ TEST(RenderGraphDisplayTextTest, FormatGpuTimingNeverPrintsANumberForAnUnmeasure
     }
 }
 
-TEST(RenderGraphDisplayTextTest, ViewScopeLabelMapsScopeTextToPanelLabels)
+TEST(RenderGraphDisplayTextTest, ViewScopeLabelMapsScopeToPanelLabels)
 {
-    EXPECT_STREQ(ViewScopeLabel(rg::ToString(rg::ViewScope::Primary)), "Game");
-    EXPECT_STREQ(ViewScopeLabel(rg::ToString(rg::ViewScope::Secondary)), "Scene");
-    EXPECT_STREQ(ViewScopeLabel(rg::ToString(rg::ViewScope::Shared)), "Shared");
+    EXPECT_STREQ(ViewScopeLabel(rg::ViewScope::Primary), "Game");
+    EXPECT_STREQ(ViewScopeLabel(rg::ViewScope::Secondary), "Scene");
+    EXPECT_STREQ(ViewScopeLabel(rg::ViewScope::Shared), "Shared");
 }
 
 // --- GroupPassMetadataByName() -----------------------------------------------
@@ -59,14 +60,14 @@ rg::RenderGraphPassMetadata MakePass(const std::string& name, rg::ViewScope scop
 {
     rg::RenderGraphPassMetadata pass;
     pass.name = name;
-    pass.viewScope = rg::ToString(scope);
+    pass.viewScope = scope;
     pass.isCulled = isCulled;
     return pass;
 }
 
 void SetPresentTiming(rg::RenderGraphPassMetadata& pass, double milliseconds)
 {
-    pass.gpuTimingStatus = "Present";
+    pass.gpuTimingState = GpuReadState::Present;
     pass.gpuRecordedMilliseconds = milliseconds;
     pass.gpuTimingMilliseconds = milliseconds;
 }

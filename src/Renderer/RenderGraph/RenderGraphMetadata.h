@@ -6,6 +6,7 @@
 #include "RenderGraphSnapshot.h"
 #include "RenderGraphTypes.h"
 #include "../Culling/ClusterCullMath.h"
+#include "../GpuStampPlan.h"
 #include "../../Core/Plugins/RenderFeatureDebugEntry.h"
 
 #include <cstdint>
@@ -26,14 +27,14 @@ struct RenderGraphResourceRefMetadata {
     std::optional<std::string> barrierTransitionLabel;
 };
 
-// One pass as plain data: enums as ToString() text, numbers as numbers. No display text.
+// One pass as plain data: text enums as ToString() text, view scope and GPU state as enums, numbers as numbers.
 struct RenderGraphPassMetadata {
     std::string name;
     bool isCulled = false;
     std::string kind;              // rg::ToString(PassKind)
     std::string category;          // rg::ToString(RenderPassCategory)
     std::string drawKind;          // rg::ToString(RenderPassDrawKind)
-    std::string viewScope = "Shared"; // rg::ToString(ViewScope): "Shared" | "Primary" | "Secondary"
+    ViewScope viewScope = ViewScope::Shared;
     std::string view = "shared";   // "shared" | "primary" | "secondary"
     std::string instance;          // Hex id of the pass's binding instance; empty when it never executed.
     std::string renderPassEvent;   // rg::ToString(RenderPassEvent)
@@ -44,7 +45,7 @@ struct RenderGraphPassMetadata {
     std::uint32_t drawCallCount = 0;   // 0 for a culled pass.
     std::uint32_t triangleCount = 0;   // same rule.
     std::uint32_t indirectDrawCount = 0; // Indirect draws issued; their triangles are GPU-side and not counted above.
-    std::string gpuTimingStatus = "Absent"; // rg::ToString(GpuReadState) of this pass's record.
+    GpuReadState gpuTimingState = GpuReadState::Absent; // State of this pass's GPU record.
     std::optional<double> gpuTimingMilliseconds; // Barrier + work as a number, nullopt unless the status is Present.
     double gpuRecordedMilliseconds = 0.0; // Barrier + work of the record whatever its status; meaningful for Present/Partial only.
     std::uint32_t gpuFoldedPasses = 0; // Passes this record stands for when it is the overflow bucket.

@@ -500,7 +500,7 @@ TEST(ProfilerRoutesReplyTest, EachRouteAnswersItsOwnDocument)
 
 TEST(ProfilerRoutesReplyTest, MissingBridgeOrCompiledOutProfilerIsNotACrash)
 {
-    const ProfilerReply reply = BuildProfilerUnavailableReply(false);
+    const ProfilerReply reply = BuildProfilerUnavailableReply();
 #if GTE_ENABLE_PROFILER
     EXPECT_EQ(reply.status, 503);
 #else

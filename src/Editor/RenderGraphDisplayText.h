@@ -1,7 +1,6 @@
 #pragma once
 
-// Display text for the Render Graph panels: view labels, GPU timing text and the per-name pass grouping.
-// The view labels live here (and in the HTTP mapper); the renderer only knows Shared/Primary/Secondary.
+// Display text for the Render Graph panels: GPU timing text and the per-name pass grouping.
 
 #include "../Renderer/GpuStampPlan.h"
 #include "../Renderer/RenderGraph/RenderGraphMetadata.h"
@@ -11,9 +10,6 @@
 #include <vector>
 
 namespace gte {
-
-// "Shared" / "Game" / "Scene" for the scope text produced by rg::ToString(ViewScope).
-const char* ViewScopeLabel(const std::string& viewScope);
 
 // GPU timing text of one pass record: measured value, or its status word.
 std::string FormatGpuTiming(const GpuPassRecord& record);

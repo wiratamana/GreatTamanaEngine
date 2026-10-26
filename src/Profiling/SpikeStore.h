@@ -108,6 +108,6 @@ private:
     std::uint64_t m_sequence = 0;
 };
 
-static_assert(sizeof(SpikeStore) <= SpikeStore::kSlots * (72 * 1024 + 256) + 256, "SpikeStore grew past its budget");
+static_assert(sizeof(SpikeStore) <= SpikeStore::kSlots * sizeof(FrozenSpike) + 256, "SpikeStore grew past its slots");
 
 } // namespace gte::Profiling

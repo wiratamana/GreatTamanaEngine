@@ -219,7 +219,7 @@ TEST(RenderGraphMetadataTest, CulledPassIsStillFullyDescribedWithZeroedStatsAndN
     EXPECT_EQ(built.kind, "Compute");
     EXPECT_EQ(built.category, "Debug");
     EXPECT_EQ(built.drawKind, "Blit");
-    EXPECT_EQ(built.viewScope, "Secondary");
+    EXPECT_EQ(built.viewScope, ViewScope::Secondary);
     EXPECT_EQ(built.renderPassEvent, "AfterTransparents");
 
     ASSERT_EQ(built.reads.size(), 1u);
@@ -231,7 +231,7 @@ TEST(RenderGraphMetadataTest, CulledPassIsStillFullyDescribedWithZeroedStatsAndN
 
     EXPECT_EQ(built.drawCallCount, 0u);
     EXPECT_EQ(built.triangleCount, 0u);
-    EXPECT_EQ(built.gpuTimingStatus, "Absent");
+    EXPECT_EQ(built.gpuTimingState, GpuReadState::Absent);
     EXPECT_FALSE(built.gpuTimingMilliseconds.has_value());
 }
 
@@ -315,7 +315,7 @@ TEST(RenderGraphMetadataTest, PresentGpuTimingProducesMatchingTextAndNumericMill
     const RenderGraphPassMetadata& built = metadata.offscreenRegime.passes[0];
     EXPECT_EQ(built.drawCallCount, 7u);
     EXPECT_EQ(built.triangleCount, 42u);
-    EXPECT_EQ(built.gpuTimingStatus, "Present");
+    EXPECT_EQ(built.gpuTimingState, GpuReadState::Present);
     EXPECT_DOUBLE_EQ(built.gpuRecordedMilliseconds, 3.5);
     ASSERT_TRUE(built.gpuTimingMilliseconds.has_value());
     EXPECT_DOUBLE_EQ(*built.gpuTimingMilliseconds, 3.5);
@@ -356,7 +356,7 @@ TEST(RenderGraphMetadataTest, UnmeasuredPassCarriesItsStatusWordAndNoNumber)
     const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
     ASSERT_EQ(metadata.offscreenRegime.passes.size(), 1u);
-    EXPECT_EQ(metadata.offscreenRegime.passes[0].gpuTimingStatus, "Inactive");
+    EXPECT_EQ(metadata.offscreenRegime.passes[0].gpuTimingState, GpuReadState::Inactive);
     EXPECT_FALSE(metadata.offscreenRegime.passes[0].gpuTimingMilliseconds.has_value());
 }
 

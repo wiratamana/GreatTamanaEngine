@@ -60,9 +60,8 @@ public:
     // The one place that blocks on the GPU. Thread-safe, so it is reachable from const callers.
     GpuWaitService& Waits() const noexcept { return *m_waits; }
 
-    // The one choke point for submits to the graphics queue (VkQueue access is externally synchronized).
-    // The only other submit is GpuWaitService::DrainGraphicsQueue, an empty batch under the same mutex.
-    // Refuses to submit once the device is lost.
+    // The one choke point for graphics-queue submits (VkQueue is externally synchronized); refused once the device is lost.
+    // The only other submit is GpuWaitService::DrainGraphicsQueue, under the same mutex.
     VkResult SubmitToGraphicsQueue(const VkSubmitInfo2& submit, VkFence fence) const
     {
         if (m_waits->DeviceLost()) {

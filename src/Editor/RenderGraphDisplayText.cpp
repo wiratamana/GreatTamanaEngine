@@ -1,6 +1,7 @@
 #include "RenderGraphDisplayText.h"
 
 #include "../Application/GpuTimingText.h"
+#include "../Application/ViewScopeLabel.h"
 #include "../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
 
 #include <algorithm>
@@ -11,50 +12,42 @@ namespace gte {
 
 namespace {
 
-constexpr const char* kSharedLabel = "Shared";
-constexpr const char* kPrimaryLabel = "Game";
-constexpr const char* kSecondaryLabel = "Scene";
-
-// Fixed order when combining view labels, so the output is deterministic.
-int LabelPriority(const std::string& label)
+// Fixed order when combining views, so the output is deterministic: Game, Scene, Shared.
+int ViewPriority(rg::ViewScope scope) noexcept
 {
-    if (label == kPrimaryLabel) {
-        return 0;
-    }
-    if (label == kSecondaryLabel) {
-        return 1;
-    }
-    if (label == kSharedLabel) {
-        return 2;
+    switch (scope) {
+    case rg::ViewScope::Primary: return 0;
+    case rg::ViewScope::Secondary: return 1;
+    case rg::ViewScope::Shared: return 2;
     }
     return 3;
 }
 
-// View badge from the contributing instances: distinct labels by priority joined with "+"; a lone Game or Scene gets " only".
+// View badge from the contributing instances: distinct views by priority joined with "+"; a lone Game or Scene gets " only".
 std::string BuildViewLabel(const std::vector<const rg::RenderGraphPassMetadata*>& contributors)
 {
-    std::vector<std::string> distinct;
+    std::vector<rg::ViewScope> distinct;
     for (const rg::RenderGraphPassMetadata* instance : contributors) {
-        const std::string label = ViewScopeLabel(instance->viewScope);
-        if (std::find(distinct.begin(), distinct.end(), label) == distinct.end()) {
-            distinct.push_back(label);
+        if (std::find(distinct.begin(), distinct.end(), instance->viewScope) == distinct.end()) {
+            distinct.push_back(instance->viewScope);
         }
     }
     std::sort(distinct.begin(), distinct.end(),
-        [](const std::string& a, const std::string& b) { return LabelPriority(a) < LabelPriority(b); });
+        [](rg::ViewScope a, rg::ViewScope b) { return ViewPriority(a) < ViewPriority(b); });
 
     if (distinct.empty()) {
         return "(no instance)";
     }
     if (distinct.size() == 1) {
-        return (distinct[0] == kPrimaryLabel || distinct[0] == kSecondaryLabel) ? (distinct[0] + " only") : distinct[0];
+        const std::string label = ViewScopeLabel(distinct[0]);
+        return distinct[0] == rg::ViewScope::Shared ? label : label + " only";
     }
     std::string joined;
-    for (const std::string& label : distinct) {
+    for (const rg::ViewScope scope : distinct) {
         if (!joined.empty()) {
             joined += "+";
         }
-        joined += label;
+        joined += ViewScopeLabel(scope);
     }
     return joined;
 }
@@ -71,7 +64,7 @@ std::string BuildGroupedGpuTimingText(const std::vector<rg::RenderGraphPassMetad
         sorted.push_back(&instance);
     }
     std::stable_sort(sorted.begin(), sorted.end(), [](const rg::RenderGraphPassMetadata* a, const rg::RenderGraphPassMetadata* b) {
-        return LabelPriority(ViewScopeLabel(a->viewScope)) < LabelPriority(ViewScopeLabel(b->viewScope));
+        return ViewPriority(a->viewScope) < ViewPriority(b->viewScope);
     });
     std::string joined;
     for (const rg::RenderGraphPassMetadata* instance : sorted) {
@@ -100,26 +93,15 @@ std::vector<std::string> CombineResourceRefNames(const std::vector<rg::RenderGra
 
 } // namespace
 
-const char* ViewScopeLabel(const std::string& viewScope)
-{
-    if (viewScope == rg::ToString(rg::ViewScope::Primary)) {
-        return kPrimaryLabel;
-    }
-    if (viewScope == rg::ToString(rg::ViewScope::Secondary)) {
-        return kSecondaryLabel;
-    }
-    return kSharedLabel;
-}
-
 std::string FormatGpuTiming(const GpuPassRecord& record)
 {
     const double milliseconds = static_cast<double>(record.barrierMs) + static_cast<double>(record.workMs);
-    return FormatGpuTimingText(rg::ToString(record.state), milliseconds);
+    return FormatGpuTimingText(record.state, milliseconds);
 }
 
 std::string FormatGpuTiming(const rg::RenderGraphPassMetadata& pass)
 {
-    return FormatGpuTimingText(pass.gpuTimingStatus, pass.gpuRecordedMilliseconds);
+    return FormatGpuTimingText(pass.gpuTimingState, pass.gpuRecordedMilliseconds);
 }
 
 // std::map iteration is sorted by name, so row order does not depend on input order.

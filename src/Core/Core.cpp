@@ -39,6 +39,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
@@ -1339,11 +1340,13 @@ void Core::TrackPresentedFrame()
 {
     Profiling::FrameProfiler& profiler = Profiling::FrameProfiler::Instance();
 
-    // The open profiler frame owns the frame that was just submitted.
+    // Link only while a profiler frame is open; otherwise the slot is cleared so no late span attaches to the wrong frame.
     const std::uint64_t presented = m_renderer.PresentedFrameCount();
     if (presented != m_lastPresentedFrame) {
         m_lastPresentedFrame = presented;
-        m_presentedFrameLinks[presented % m_presentedFrameLinks.size()] = { presented, profiler.CompletedFrameCount() };
+        const std::optional<std::uint64_t> openFrame = profiler.OpenFrameIndex();
+        m_presentedFrameLinks[presented % m_presentedFrameLinks.size()] =
+            openFrame.has_value() ? PresentedFrameLink{ presented, *openFrame } : PresentedFrameLink{};
     }
 
     // A present frame read back now belongs to an earlier profiler frame; only its GPU span is added there.

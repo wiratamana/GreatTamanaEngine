@@ -72,8 +72,8 @@ ProfilerReply BuildProfilerReply(ProfilerRoute route, const Profiling::ProfilerS
 // 200 with state "no_snapshot" and the waits in progress, for a main thread that never published (e.g. it is stalled).
 ProfilerReply BuildProfilerNoSnapshotReply(const Profiling::ProfilerSnapshot& liveOnly);
 
-// Reply for a route whose bridge is missing (503) or whose profiler is compiled out (status object).
-ProfilerReply BuildProfilerUnavailableReply(bool bridgePresent);
+// Reply when the bridge is missing (503), or a status object (200) when the profiler is compiled out.
+ProfilerReply BuildProfilerUnavailableReply();
 
 // Parsed POST /profiler/set. Every field may be left out, but at least one must be given.
 struct ParsedProfilerSet {

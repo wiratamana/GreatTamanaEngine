@@ -1,5 +1,6 @@
 #include "FrameDebuggerData.h"
 
+#include "EditorViewNames.h"
 #include "RenderGraphDisplayText.h"
 
 #include <algorithm>
@@ -165,31 +166,8 @@ std::string FormatMatrixProperty(const FrameDebuggerMatrixProperty& matrix)
 
 namespace {
 
-// PHASE2 - duplicated, real, hardcoded clear-color constant. Mirrors
-// src/Application/RenderPasses.cpp's own kGameClearColor VALUE exactly
-// (20/255, 20/255, 30/255, 1.0f - see that file's own top-of-file comment,
-// which already establishes "duplicate a hardcoded engine constant with a
-// comment documenting the value it must be kept in sync with" as an
-// accepted pattern in this codebase, rather than a workaround). NOT
-// re-exported/re-used directly from RenderPasses.cpp/.h here on purpose:
-// RenderPasses.cpp's own copy is an anonymous-namespace, internal-linkage
-// local, and src/Editor/ must never #include src/Application/ headers (see
-// AGENTS.md's "Clean Architecture" - Application is the composition root
-// that depends on Editor, never the reverse; exposing it via a NEW shared
-// header was considered and rejected as unnecessary churn for one constant
-// this campaign's own PHASE0 already established a "just duplicate it with
-// a comment" precedent for). If RenderPasses.cpp's own kGameClearColor ever
-// changes, update this constant to match.
+// Must match the clear color in Application/RenderPasses.cpp (Editor cannot include Application headers).
 constexpr float kFrameDebuggerGameClearColor[4] = { 20.0f / 255.0f, 20.0f / 255.0f, 30.0f / 255.0f, 1.0f };
-
-// The shared Game View/Scene View color buffer's resource name - see
-// Core.cpp's `b.ImportTexture("GameView", ...)`. A leaf whose pass writes
-// this exact resource keeps using stepPreviewKind/stepPreviewIndex (that
-// buffer gets rewritten by many passes in one frame, so only the capture's
-// own retained preview textures know "as of THIS step"); any OTHER written
-// resource is pass-private, so its own current RenderGraphDebugTextureRegistry
-// entry already IS "as of this step" (nothing else writes it afterward).
-constexpr std::string_view kGameViewResourceName = "GameView";
 
 // Finds the first pass in `passes` whose name exactly matches `name`, or
 // nullptr if none does - a plain linear scan, exactly as cheap/simple as
@@ -387,10 +365,7 @@ FrameDebuggerEventNode BuildComputeDispatchLeaf(
     // never fabricated.
     details.shaderName = pass.name;
 
-    // Private-resource fast path - see kGameViewResourceName's own doc
-    // comment above. A compute pass always writes a private resource (no
-    // compute pass ever writes "GameView" directly), so this is almost
-    // always populated here.
+    // Pass-private writes use the live debug texture; the shared view buffer uses the step preview.
     if (!pass.writeNames.empty() && pass.writeNames.front() != kGameViewResourceName) {
         details.privateWriteTextureName = pass.writeNames.front();
     }
@@ -665,10 +640,7 @@ FrameDebuggerEventNode BuildGraphicsPassLeaf(
     details.passName = pass.name;
     details.shaderName = pass.name;
 
-    // Private-resource fast path - see kGameViewResourceName's own doc
-    // comment above. Empty for "DrawSkyBackground"/any other pass that
-    // writes the shared "GameView" buffer - those keep using
-    // stepPreviewKind/stepPreviewIndex above unchanged.
+    // Pass-private writes use the live debug texture; the shared view buffer uses the step preview.
     if (!pass.writeNames.empty() && pass.writeNames.front() != kGameViewResourceName) {
         details.privateWriteTextureName = pass.writeNames.front();
     }

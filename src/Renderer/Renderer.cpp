@@ -926,12 +926,8 @@ void Renderer::ReleaseUiTextureHandle(UiTextureHandle handle) noexcept
 void Renderer::RetireUiTexture(UiTextureHandle handle, std::unique_ptr<Texture2D> texture) noexcept
 {
     if (WaitForGpuIdle(BlockSite::ResourceRelease, "retire UI texture") != BlockOutcome::Completed) {
-        // The GPU may still sample the texture through the descriptor: keep both alive.
-        try {
-            m_abandoned.Park(std::shared_ptr<Texture2D>(std::move(texture)));
-        } catch (...) {
-            static_cast<void>(texture.release()); // Out of memory: leaking is safer than freeing.
-        }
+        // The GPU may still sample the texture through the descriptor, so keep it alive.
+        m_abandoned.Park(std::shared_ptr<Texture2D>(std::move(texture)));
         return;
     }
     ReleaseUiTextureHandle(handle);

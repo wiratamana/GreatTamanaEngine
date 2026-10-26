@@ -543,13 +543,13 @@ TEST(BuildRenderGraphMetadataResponseJsonTests, PopulatedMetadataRoundTripsEvery
     pass.kind = "Graphics";
     pass.category = "General";
     pass.drawKind = "DrawMesh";
-    pass.viewScope = "Shared";
+    pass.viewScope = gte::rg::ViewScope::Shared;
     pass.renderPassEvent = "Opaques";
     pass.reads.push_back(gte::rg::RenderGraphResourceRefMetadata{ "Depth", "Texture" });
     pass.writes.push_back(gte::rg::RenderGraphResourceRefMetadata{ "Color", "Texture" });
     pass.drawCallCount = 2;
     pass.triangleCount = 20;
-    pass.gpuTimingStatus = "Absent";
+    pass.gpuTimingState = gte::GpuReadState::Absent;
     metadata.offscreenRegime.regimeName = "SynchronousImmediateReadback";
     metadata.offscreenRegime.passes.push_back(pass);
 
@@ -586,13 +586,13 @@ TEST(BuildRenderGraphMetadataResponseJsonTests, ViewScopeLabelsAndTimingTextAreM
 {
     gte::rg::RenderGraphMetadata metadata;
     gte::rg::RenderGraphPassMetadata primary;
-    primary.viewScope = "Primary";
-    primary.gpuTimingStatus = "Present";
+    primary.viewScope = gte::rg::ViewScope::Primary;
+    primary.gpuTimingState = gte::GpuReadState::Present;
     primary.gpuRecordedMilliseconds = 3.5;
     primary.gpuTimingMilliseconds = 3.5;
     gte::rg::RenderGraphPassMetadata secondary;
-    secondary.viewScope = "Secondary";
-    secondary.gpuTimingStatus = "Partial";
+    secondary.viewScope = gte::rg::ViewScope::Secondary;
+    secondary.gpuTimingState = gte::GpuReadState::Partial;
     secondary.gpuRecordedMilliseconds = 1.5;
     gte::rg::RenderGraphPassMetadata shared;
     metadata.offscreenRegime.passes = { primary, secondary, shared };
@@ -616,6 +616,7 @@ TEST(BuildRenderGraphMetadataResponseJsonTests, CarriesGpuWaitAndGpuMemoryObject
     gte::rg::RenderGraphMetadata metadata;
     metadata.gpuWait.deviceLost = true;
     metadata.gpuWait.consecutiveFrameTimeouts = 2;
+    metadata.gpuWait.abandonedObjects = 3;
     metadata.gpuMemory.totalBytes = 64;
     metadata.gpuMemory.meshCount = 2;
     metadata.gpuMemory.byName["MeshClusterTable"] = 64;
@@ -624,7 +625,7 @@ TEST(BuildRenderGraphMetadataResponseJsonTests, CarriesGpuWaitAndGpuMemoryObject
 
     EXPECT_TRUE(parsed["gpu_wait"]["device_lost"].get<bool>());
     EXPECT_EQ(parsed["gpu_wait"]["consecutive_frame_timeouts"].get<std::uint32_t>(), 2u);
-    EXPECT_EQ(parsed["gpu_wait"]["abandoned_objects"].get<std::uint32_t>(), 0u);
+    EXPECT_EQ(parsed["gpu_wait"]["abandoned_objects"].get<std::uint32_t>(), 3u);
     EXPECT_EQ(parsed["gpu_memory"]["total_bytes"].get<std::uint64_t>(), 64u);
     EXPECT_EQ(parsed["gpu_memory"]["mesh_count"].get<std::uint64_t>(), 2u);
     EXPECT_EQ(parsed["gpu_memory"]["by_name"]["MeshClusterTable"].get<std::uint64_t>(), 64u);

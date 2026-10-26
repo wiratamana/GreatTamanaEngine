@@ -279,19 +279,19 @@ RegimeGpuByView SumRegimeGpuByView(const std::vector<rg::RenderGraphPassMetadata
         if (pass.isCulled) {
             continue;
         }
-        ViewSum& sum = pass.viewScope == rg::ToString(rg::ViewScope::Primary)    ? game
-            : pass.viewScope == rg::ToString(rg::ViewScope::Secondary) ? scene
-                                                                         : shared;
+        ViewSum& sum = pass.viewScope == rg::ViewScope::Primary    ? game
+            : pass.viewScope == rg::ViewScope::Secondary ? scene
+                                                         : shared;
         ++sum.passes;
         sum.folded += pass.gpuFoldedPasses;
         if (pass.gpuTimingMilliseconds.has_value()) {
             ++sum.measured;
             sum.milliseconds += *pass.gpuTimingMilliseconds;
-        } else if (pass.gpuTimingStatus == rg::ToString(GpuReadState::Error)) {
+        } else if (pass.gpuTimingState == GpuReadState::Error) {
             ++sum.errors;
-        } else if (pass.gpuTimingStatus == rg::ToString(GpuReadState::Unsupported)) {
+        } else if (pass.gpuTimingState == GpuReadState::Unsupported) {
             ++sum.unsupported;
-        } else if (pass.gpuTimingStatus == rg::ToString(GpuReadState::Inactive)) {
+        } else if (pass.gpuTimingState == GpuReadState::Inactive) {
             ++sum.inactive;
         }
     }

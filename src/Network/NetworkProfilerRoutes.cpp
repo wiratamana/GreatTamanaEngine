@@ -345,15 +345,11 @@ ProfilerReply BuildProfilerNoSnapshotReply(const ProfilerSnapshot& liveOnly)
     return { 200, out.dump() };
 }
 
-ProfilerReply BuildProfilerUnavailableReply(bool bridgePresent)
+ProfilerReply BuildProfilerUnavailableReply()
 {
 #if GTE_ENABLE_PROFILER
-    if (!bridgePresent) {
-        return { 503, BuildGenericErrorResponseJson("profiler bridge not available") };
-    }
-    return { 500, BuildGenericErrorResponseJson("profiler is available") };
+    return { 503, BuildGenericErrorResponseJson("profiler bridge not available") };
 #else
-    static_cast<void>(bridgePresent);
     nlohmann::json out = nlohmann::json::object();
     out["success"] = true;
     out["schema_version"] = Profiling::kProfilerSchemaVersion;
@@ -611,7 +607,7 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
                 frameCount = *parsed;
             }
             if (bridge == nullptr) {
-                reply = BuildProfilerUnavailableReply(false);
+                reply = BuildProfilerUnavailableReply();
             } else {
                 const std::optional<ProfilerSnapshot> latest = bridge->Latest(kSnapshotWait);
                 reply = latest ? BuildProfilerReply(route, *latest, frameCount)
@@ -620,7 +616,8 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
 #else
             static_cast<void>(req);
             static_cast<void>(route);
-            reply = BuildProfilerUnavailableReply(bridge != nullptr);
+            static_cast<void>(bridge);
+            reply = BuildProfilerUnavailableReply();
 #endif
             res.status = reply.status;
             res.set_content(reply.body, "application/json");
@@ -635,7 +632,7 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
         ProfilerReply reply;
 #if GTE_ENABLE_PROFILER
         if (bridge == nullptr) {
-            reply = BuildProfilerUnavailableReply(false);
+            reply = BuildProfilerUnavailableReply();
         } else {
             const std::optional<std::uint64_t> index = ParseSpikeFrameIndex(req.get_param_value("index"));
             if (!index) {
@@ -646,7 +643,8 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
         }
 #else
         static_cast<void>(req);
-        reply = BuildProfilerUnavailableReply(bridge != nullptr);
+        static_cast<void>(bridge);
+        reply = BuildProfilerUnavailableReply();
 #endif
         res.status = reply.status;
         res.set_content(reply.body, "application/json");
@@ -658,7 +656,7 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
         }
 #if GTE_ENABLE_PROFILER
         if (bridge == nullptr) {
-            const ProfilerReply reply = BuildProfilerUnavailableReply(false);
+            const ProfilerReply reply = BuildProfilerUnavailableReply();
             res.status = reply.status;
             res.set_content(reply.body, "application/json");
             return;
@@ -705,7 +703,8 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
         state.spikeThresholdMs = bridge->SpikeThresholdMs();
         res.set_content(BuildProfilerSetReplyJson(state), "application/json");
 #else
-        const ProfilerReply reply = BuildProfilerUnavailableReply(bridge != nullptr);
+        static_cast<void>(bridge);
+        const ProfilerReply reply = BuildProfilerUnavailableReply();
         res.status = reply.status;
         res.set_content(reply.body, "application/json");
 #endif
@@ -714,7 +713,7 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
     server.Get("/profiler/timeline_image", [bridge](const httplib::Request& req, httplib::Response& res) {
 #if GTE_ENABLE_PROFILER
         if (bridge == nullptr) {
-            const ProfilerReply reply = BuildProfilerUnavailableReply(false);
+            const ProfilerReply reply = BuildProfilerUnavailableReply();
             res.status = reply.status;
             res.set_content(reply.body, "application/json");
             return;
@@ -752,7 +751,8 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
         }
 #else
         static_cast<void>(req);
-        const ProfilerReply reply = BuildProfilerUnavailableReply(bridge != nullptr);
+        static_cast<void>(bridge);
+        const ProfilerReply reply = BuildProfilerUnavailableReply();
         res.status = reply.status;
         res.set_content(reply.body, "application/json");
 #endif
@@ -764,7 +764,7 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
         }
 #if GTE_ENABLE_PROFILER
         if (bridge == nullptr) {
-            const ProfilerReply reply = BuildProfilerUnavailableReply(false);
+            const ProfilerReply reply = BuildProfilerUnavailableReply();
             res.status = reply.status;
             res.set_content(reply.body, "application/json");
             return;
@@ -793,7 +793,8 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
         res.status = reply.status;
         res.set_content(reply.body, "application/json");
 #else
-        const ProfilerReply reply = BuildProfilerUnavailableReply(bridge != nullptr);
+        static_cast<void>(bridge);
+        const ProfilerReply reply = BuildProfilerUnavailableReply();
         res.status = reply.status;
         res.set_content(reply.body, "application/json");
 #endif

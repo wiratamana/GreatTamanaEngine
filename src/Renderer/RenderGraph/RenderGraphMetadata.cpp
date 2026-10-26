@@ -62,7 +62,7 @@ RenderGraphPassMetadata BuildPassMetadata(const RenderGraphPassSnapshot& pass)
     metadata.kind = ToString(pass.kind);
     metadata.category = ToString(pass.category);
     metadata.drawKind = ToString(pass.drawKind);
-    metadata.viewScope = ToString(pass.viewScope);
+    metadata.viewScope = pass.viewScope;
     metadata.view = ViewLabel(pass.viewScope);
     metadata.instance = InstanceText(pass.stats.gpu.bindingInstance);
     metadata.renderPassEvent = ToString(pass.renderPassEvent);
@@ -77,7 +77,7 @@ RenderGraphPassMetadata BuildPassMetadata(const RenderGraphPassSnapshot& pass)
     metadata.drawCallCount = pass.stats.drawStats.drawCallCount;
     metadata.triangleCount = pass.stats.drawStats.triangleCount;
     metadata.indirectDrawCount = pass.stats.drawStats.indirectDrawCount;
-    metadata.gpuTimingStatus = ToString(pass.stats.gpu.state);
+    metadata.gpuTimingState = pass.stats.gpu.state;
     metadata.gpuFoldedPasses = pass.stats.gpu.foldedPasses;
     metadata.gpuRecordedMilliseconds =
         static_cast<double>(pass.stats.gpu.barrierMs) + static_cast<double>(pass.stats.gpu.workMs);

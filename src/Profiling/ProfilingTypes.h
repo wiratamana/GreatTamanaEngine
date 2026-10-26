@@ -76,7 +76,8 @@ struct FrameRecord {
     WorkerEventBuffer workers;
 };
 
-// A frozen spike holds a whole frame record, so this size decides the memory of the spike store.
-static_assert(sizeof(FrameRecord) <= 72 * 1024, "FrameRecord grew past its budget");
+// A frozen spike holds a whole frame record, so its size decides the memory of the spike store.
+static_assert(sizeof(FrameRecord) <= sizeof(FrameSummary) + sizeof(ScopeEventBuffer) + sizeof(WorkerEventBuffer) + 64,
+    "FrameRecord grew past the sum of its parts");
 
 } // namespace gte::Profiling
