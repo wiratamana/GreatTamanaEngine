@@ -79,9 +79,9 @@ public:
     void RunSynchronousFrame(
         const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&)>& build)
     {
-        const rg::RecordingContext cmd = m_renderer->BeginOffscreenRenderGraphRecording();
-        m_renderGraph->Execute(cmd, rg::ExecuteTimingMode::SynchronousImmediateReadback, build);
-        m_renderer->EndOffscreenRenderGraphRecording();
+        OffscreenRecording recording = m_renderer->BeginOffscreenRecording();
+        m_renderGraph->Execute(recording.Context(), rg::ExecuteTimingMode::SynchronousImmediateReadback, build);
+        recording.Submit();
     }
 
 private:

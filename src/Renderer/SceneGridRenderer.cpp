@@ -27,7 +27,7 @@ static_assert(sizeof(GridPush) == 128, "layout differs from SceneGrid.frag");
 SceneGridRenderer::~SceneGridRenderer()
 {
     if (m_pipeline) {
-        static_cast<void>(m_renderer.WaitForGpuIdle(BlockSite::Shutdown, "scene grid"));
+        m_renderer.IdleForTeardown("scene grid");
     }
 }
 

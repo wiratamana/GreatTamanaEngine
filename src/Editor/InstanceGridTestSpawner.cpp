@@ -64,7 +64,8 @@ MeshData MakeGridMeshData()
 
 InstanceGridResources::~InstanceGridResources()
 {
-    Reset();
+    // No retry is possible here: a busy GPU leaves the handles registered with the render system.
+    static_cast<void>(Reset());
 }
 
 bool InstanceGridResources::Resolves(RenderSystem& renderSystem) const
@@ -76,34 +77,38 @@ bool InstanceGridResources::Resolves(RenderSystem& renderSystem) const
     return mesh != nullptr && mesh->HasClusters() && renderSystem.TryGetPipeline(m_pipeline) != nullptr;
 }
 
-void InstanceGridResources::Reset()
+bool InstanceGridResources::Reset()
 {
     if (m_owner != nullptr && (m_mesh.IsValid() || m_pipeline.IsValid())) {
-        // The GPU may still draw the grid. If it cannot be drained, the grid stays registered.
+        // The GPU may still draw the grid; if it cannot be drained, the handles stay owned.
         const bool drained =
             m_renderer == nullptr || m_renderer->DrainGpuForResourceRelease("instance grid") == BlockOutcome::Completed;
-        if (drained) {
-            m_owner->ReleaseMesh(m_mesh);
-            m_owner->UnregisterPipeline(m_pipeline);
+        if (!drained) {
+            return false;
         }
+        m_owner->ReleaseMesh(m_mesh);
+        m_owner->UnregisterPipeline(m_pipeline);
     }
     m_owner = nullptr;
     m_renderer = nullptr;
     m_mesh = MeshHandle{};
     m_pipeline = PipelineHandle{};
     m_clusterCount = 0;
+    return true;
 }
 
 bool InstanceGridResources::Build(
     Game& game, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout, std::string* error)
 {
-    Reset();
     const auto fail = [error](const std::string& message) {
         if (error != nullptr) {
             *error = message;
         }
         return false;
     };
+    if (!Reset()) {
+        return fail("the GPU did not go idle");
+    }
 
     try {
         MeshData data = MakeGridMeshData();

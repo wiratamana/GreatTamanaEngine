@@ -137,8 +137,7 @@ struct MeshPreviewRenderer::Impl {
     {
     }
 
-    // Idles the GPU (best effort), then members release whatever was built (also for a half-built instance).
-    ~Impl() { static_cast<void>(renderer.WaitForGpuIdle(BlockSite::Shutdown, "mesh preview")); }
+    ~Impl() { renderer.IdleForTeardown("mesh preview"); }
 
     // Set 1 holds only the lighting block; one layout serves the set and the pipeline.
     void Build()

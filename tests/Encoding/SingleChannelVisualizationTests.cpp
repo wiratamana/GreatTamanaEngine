@@ -1,4 +1,4 @@
-﻿// Tier-2 (real, headless GPU, tests/Fakes/HeadlessRenderGraphFixture.h)
+// Tier-2 (real, headless GPU, tests/Fakes/HeadlessRenderGraphFixture.h)
 // round-trip test for Convert1ChannelToGrayscaleRgba8() (src/Encoding/
 // SingleChannelVisualization.h): a real VK_FORMAT_R8_UNORM RenderTexture is
 // cleared to a known value via a real render graph pass, captured back via
@@ -50,8 +50,10 @@ TEST(SingleChannelVisualizationTest, RealR8UnormCaptureRoundTripsThroughPng)
         fixture.GetRenderGraph().DebugTextureSnapshotFor("SingleChannelVisualizationTarget");
     ASSERT_TRUE(snapshot.has_value());
 
-    const Renderer::CapturedRawPixels raw = fixture.GetRenderer().CaptureImagePixels(
+    const CaptureResult captureResult = fixture.GetRenderer().CaptureImagePixels(
         tex.Image(), VK_IMAGE_ASPECT_COLOR_BIT, tex.NativeFormat(), tex.Extent(), snapshot->colorState);
+    ASSERT_EQ(captureResult.status, CaptureStatus::Ok);
+    const Renderer::CapturedRawPixels& raw = captureResult.pixels;
     ASSERT_FALSE(raw.pixels.empty());
     ASSERT_EQ(raw.pixels.size(), static_cast<std::size_t>(kWidth) * kHeight);
 

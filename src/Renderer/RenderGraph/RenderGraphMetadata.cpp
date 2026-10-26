@@ -341,6 +341,12 @@ void to_json(nlohmann::json& j, const RenderGraphMetadata& metadata)
                 { "draw_indirect_first_instance", metadata.indirectDraw.drawIndirectFirstInstance },
                 { "max_draw_indirect_count", metadata.indirectDraw.maxDrawIndirectCount },
             } },
+        { "gpu_wait",
+            {
+                { "device_lost", metadata.gpuWait.deviceLost },
+                { "consecutive_frame_timeouts", metadata.gpuWait.consecutiveFrameTimeouts },
+                { "abandoned_objects", metadata.gpuWait.abandonedObjects },
+            } },
         { "gpu_memory",
             {
                 { "total_bytes", metadata.gpuMemory.totalBytes },

@@ -987,9 +987,11 @@ TEST(RenderGraphPersistentResourceCacheTest, ContentWrittenOnFrameNSurvivesReada
 
     const std::optional<DebugTextureSnapshot> afterFrame1 = fixture.GetRenderGraph().DebugTextureSnapshotFor(combinedKey);
     ASSERT_TRUE(afterFrame1.has_value());
-    const Renderer::CapturedRawPixels pixelsAfterFrame1 = fixture.GetRenderer().CaptureImagePixels(
+    const CaptureResult captureAfterFrame1 = fixture.GetRenderer().CaptureImagePixels(
         afterFrame1->target.image, VK_IMAGE_ASPECT_COLOR_BIT, afterFrame1->target.format,
         FromVkExtent2D(afterFrame1->target.extent), afterFrame1->colorState);
+    ASSERT_EQ(captureAfterFrame1.status, CaptureStatus::Ok);
+    const Renderer::CapturedRawPixels& pixelsAfterFrame1 = captureAfterFrame1.pixels;
     ASSERT_EQ(pixelsAfterFrame1.pixels.size(), static_cast<std::size_t>(16 * 16 * 4));
     // VK_FORMAT_R8G8B8A8_UNORM: each channel is round(component * 255).
     EXPECT_NEAR(pixelsAfterFrame1.pixels[0], 64, 2);
@@ -1010,9 +1012,11 @@ TEST(RenderGraphPersistentResourceCacheTest, ContentWrittenOnFrameNSurvivesReada
     const std::optional<DebugTextureSnapshot> afterFrame2 = fixture.GetRenderGraph().DebugTextureSnapshotFor(combinedKey);
     ASSERT_TRUE(afterFrame2.has_value());
     EXPECT_EQ(afterFrame2->target.image, afterFrame1->target.image); // Same VkImage: no discard or recreate.
-    const Renderer::CapturedRawPixels pixelsAfterFrame2 = fixture.GetRenderer().CaptureImagePixels(
+    const CaptureResult captureAfterFrame2 = fixture.GetRenderer().CaptureImagePixels(
         afterFrame2->target.image, VK_IMAGE_ASPECT_COLOR_BIT, afterFrame2->target.format,
         FromVkExtent2D(afterFrame2->target.extent), afterFrame2->colorState);
+    ASSERT_EQ(captureAfterFrame2.status, CaptureStatus::Ok);
+    const Renderer::CapturedRawPixels& pixelsAfterFrame2 = captureAfterFrame2.pixels;
     ASSERT_EQ(pixelsAfterFrame2.pixels.size(), pixelsAfterFrame1.pixels.size());
     EXPECT_NEAR(pixelsAfterFrame2.pixels[0], 64, 2);
     EXPECT_NEAR(pixelsAfterFrame2.pixels[1], 128, 2);

@@ -1,5 +1,6 @@
 #include "NetworkServer.h"
 
+#include "NetworkCaptureFailure.h"
 #include "NetworkRoutes.h"
 #include "NetworkRequestGuard.h"
 #include "NetworkSceneCameraPose.h"
@@ -69,8 +70,9 @@ void RegisterCaptureRoute(httplib::Server& server, const char* path, FrameCaptur
             return;
         }
         if (result.failure.has_value()) {
-            res.status = (*result.failure == FrameCaptureFailureReason::TimedOut) ? 504 : 409;
-            res.set_content("capture failed", "text/plain; charset=utf-8");
+            res.status = HttpStatusForCaptureFailure(*result.failure);
+            const std::string gpuText = GpuFailureText(*result.failure);
+            res.set_content(gpuText.empty() ? std::string("capture failed") : gpuText, "text/plain; charset=utf-8");
             return;
         }
         const CapturedPngImage& image = *result.image;
@@ -120,21 +122,16 @@ void RegisterGetTextureRoute(httplib::Server& server, FrameCaptureBridge* captur
             return;
         }
         if (result.failure.has_value()) {
-            // TimedOut -> this exact texture_name never registered (or
-            // never rendered again) within the timeout -> 504.
-            // TargetNotAvailable -> a positively-known "no depth buffer on
-            // this texture" (Phase 4's own fast-fail) or an unrecognized
-            // depth format (Phase 3's own accepted narrow risk) -> 409. Each
-            // gets its OWN, distinct, actionable message - never one shared
-            // ambiguous sentence for both.
-            if (*result.failure == FrameCaptureFailureReason::TimedOut) {
-                res.status = 504;
+            res.status = HttpStatusForCaptureFailure(*result.failure);
+            if (const std::string gpuText = GpuFailureText(*result.failure); !gpuText.empty()) {
+                res.set_content(BuildGenericErrorResponseJson(gpuText), "application/json");
+            } else if (*result.failure == FrameCaptureFailureReason::TimedOut) {
+                // The name never registered, or never rendered again, within the timeout.
                 res.set_content(BuildGenericErrorResponseJson(
                     "texture_name '" + parsed.textureName + "' was never registered (or never rendered again) "
                     "within the timeout - see GET /list_textures for the currently known names"),
                     "application/json");
             } else {
-                res.status = 409;
                 res.set_content(BuildGenericErrorResponseJson(
                     "requested channel is not available for texture_name '" + parsed.textureName +
                     "' - it either has no depth buffer, or its depth format could not be visualized"),
@@ -183,7 +180,11 @@ void RegisterGetWindowRoute(httplib::Server& server, FrameCaptureBridge* capture
             return;
         }
         if (result.failure.has_value()) {
-            res.status = (*result.failure == FrameCaptureFailureReason::TimedOut) ? 504 : 409;
+            res.status = HttpStatusForCaptureFailure(*result.failure);
+            if (const std::string gpuText = GpuFailureText(*result.failure); !gpuText.empty()) {
+                res.set_content(BuildGenericErrorResponseJson(gpuText), "application/json");
+                return;
+            }
             res.set_content(BuildGenericErrorResponseJson(
                 "window '" + title + "' is not currently a separate floating OS window - drag it out of the "
                 "main viewport at least once this session, or call /get_swapchain if it is still docked"),

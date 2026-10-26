@@ -2,6 +2,7 @@
 
 #include "../Math/Mat4.h"
 #include "Buffer.h"
+#include "CaptureResult.h"
 #include "Culling/ClusterCullMath.h"
 #include "FramePresenter.h"
 #include "FrameRecorder.h"
@@ -10,6 +11,7 @@
 #include "GpuWaitPolicy.h"
 #include "Memory/GpuMemoryTracker.h"
 #include "Mesh.h"
+#include "OffscreenRecording.h"
 #include "Pipeline.h"
 #include "RenderGraph/GpuBuffer.h"
 #include "RenderGraph/RecordingContext.h"
@@ -86,11 +88,9 @@ public:
     DrawStats RenderOffscreen(RenderTexture& target, const std::array<float, 4>& clearColor,
         const std::function<void(rg::CommandBuffer&)>& recordExtra = {});
 
-    // Begins recording into the dedicated offscreen command buffer.
-    rg::RecordingContext BeginOffscreenRenderGraphRecording();
-
-    // Ends recording and submits the offscreen command buffer, blocking until complete.
-    void EndOffscreenRenderGraphRecording();
+    // Opens a recording of the dedicated offscreen command buffer. Throws when the GPU wait fails.
+    // Dropping it unsubmitted discards the recording; Submit() runs it and blocks (bounded) until done.
+    [[nodiscard]] OffscreenRecording BeginOffscreenRecording();
 
     // Executes swapchain presentation passes using the render graph.
     std::optional<DrawStats> PresentViaRenderGraph(rg::RenderGraph& graph,
@@ -118,22 +118,25 @@ public:
     // Raw image pixels read back from the GPU.
     using CapturedRawPixels = CapturedPixels;
 
+    // The Capture* functions never throw. A failed GPU wait is reported in CaptureResult::status.
+
     // Synchronously reads back color pixels from a RenderTexture.
-    CapturedRawPixels CaptureRenderTexturePixels(RenderTexture& texture) const;
+    [[nodiscard]] CaptureResult CaptureRenderTexturePixels(RenderTexture& texture) const;
 
     // Waits for the GPU, then reads back color pixels from a RenderTexture that a frame may still be writing.
-    CapturedRawPixels CaptureRenderTexturePixelsAfterIdle(RenderTexture& texture) const;
+    [[nodiscard]] CaptureResult CaptureRenderTexturePixelsAfterIdle(RenderTexture& texture) const;
 
     // Waits for the GPU, then reads back a debug texture snapshot (its depth image when `depthAspect`).
-    // Empty pixels when the image is missing or its format is unsupported.
-    CapturedRawPixels CaptureDebugTexturePixels(const rg::DebugTextureSnapshot& snapshot, bool depthAspect) const;
+    // NothingToCapture when the image is missing or its format is unsupported.
+    [[nodiscard]] CaptureResult CaptureDebugTexturePixels(const rg::DebugTextureSnapshot& snapshot, bool depthAspect) const;
 
     // Waits for the GPU, then reads back a retained per-event snapshot (a shader-read color or depth image).
-    CapturedRawPixels CaptureEventSnapshotPixels(const rg::RetainedEventSnapshot& snapshot, bool depthAspect) const;
+    [[nodiscard]] CaptureResult CaptureEventSnapshotPixels(const rg::RetainedEventSnapshot& snapshot, bool depthAspect) const;
 
     // Synchronously reads back raw pixel data from any GPU image.
-    CapturedRawPixels CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format, Extent2D extent,
-        const rg::ResourceState& previousState, std::uint32_t zOffset = 0, std::uint32_t depth = 1) const;
+    [[nodiscard]] CaptureResult CaptureImagePixels(VkImage image, VkImageAspectFlags aspect, VkFormat format,
+        Extent2D extent, const rg::ResourceState& previousState, std::uint32_t zOffset = 0,
+        std::uint32_t depth = 1) const;
 
     // Blocks (bounded) until all GPU execution finishes. Anything other than Completed means the GPU may still use
     // its resources: the caller must not free them. Never throws.
@@ -146,6 +149,18 @@ public:
     // The sanctioned barrier before destroying textures, buffers or sets the GPU may still read.
     // `detail` is a string literal naming what is released.
     [[nodiscard]] BlockOutcome DrainGpuForResourceRelease(const char* detail) const noexcept;
+
+    // Best-effort idle wait before an owner of GPU objects is destroyed. The result is ignored on purpose.
+    void IdleForTeardown(const char* what) const noexcept;
+
+    // True once a GPU wait failed in a way that lost the device. Final: nothing is submitted afterwards.
+    bool DeviceLost() const noexcept;
+
+    // Consecutive frame waits that timed out; resets after a completed wait.
+    std::uint32_t GpuWaitConsecutiveFrameTimeouts() const noexcept;
+
+    // Objects parked because the GPU may still use them after a failed wait.
+    std::uint32_t AbandonedObjectCount() const noexcept { return m_abandoned.Count(); }
 
     // The device reference rg::GpuBuffer is created from.
     rg::DeviceRef Device() noexcept { return rg::DeviceRef(this); }
@@ -305,10 +320,10 @@ private:
         VkCommandBuffer cmd, std::function<void(bool, std::uint32_t, std::uint32_t)> recordDrawStats);
     void EndGraphPassRecording() noexcept;
 
-    // Runs a one-shot command buffer on the graphics queue and waits (bounded) for it. Throws when the wait
-    // fails; the GPU may then still run it, so the device is treated as lost.
-    void ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& recordFn,
-        BlockSite site = BlockSite::ImmediateSubmit) const;
+    // Runs one-shot recording on the graphics queue and waits (bounded) for it. Throws when the wait fails; the
+    // device is then lost and the GPU may still run it, so `inFlight` is parked. `detail` is a string literal.
+    void ImmediateSubmit(const std::function<void(rg::CommandBuffer&)>& recordFn, BlockSite site, const char* detail,
+        std::span<const std::shared_ptr<void>> inFlight = {}) const;
     VkResult SubmitToGraphicsQueue(const VkSubmitInfo2& submit, VkFence fence) const;
 
     ComputePipeline CreateComputePipeline(const std::string& shaderSpirvPath,
@@ -366,6 +381,9 @@ private:
 
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker = std::make_shared<GpuMemoryTracker>();
 
+    // Work the GPU may still touch after a failed wait; emptied in ~Renderer().
+    AbandonedWork m_abandoned;
+
     VulkanAllocator m_allocator;
     FramePresenter m_presenter;
     GpuResourceFactory m_resources;
@@ -380,12 +398,6 @@ private:
 
     mutable std::mutex m_bindingReleaseMutex;
     std::vector<VkDescriptorSetLayout> m_bindingReleaseQueue;
-
-    // Reusable fences for blocking submits.
-    VkFence AcquireFence() const;
-    void ReleaseFence(VkFence fence) const noexcept;
-    mutable std::mutex m_fencePoolMutex;
-    mutable std::vector<VkFence> m_fencePool;
 
     // Cluster draw pipelines by ClusterPipelineCacheIndex(); built on first use.
     struct ClusterPipelineSlot {

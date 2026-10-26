@@ -105,8 +105,7 @@ TEST(GpuTimingTest, InterpretTimestampCapabilityStoresRawValuesEvenWhenUnsupport
 }
 
 // --- ResolveGpuTimingStatus() -----------------------------------------------
-// The pure tri-state priority decision GpuTimingService::ReadOffscreenResultNow() builds on. All 8 combinations
-// of its 3 boolean inputs are exercised, with no VkDevice/VkQueryPool involved.
+// Pure tri-state priority decision; all 8 combinations of its 3 boolean inputs, no device involved.
 TEST(GpuTimingTest, ResolveGpuTimingStatusPresentWhenSupportedCapturingAndWritten)
 {
     EXPECT_EQ(ResolveGpuTimingStatus(true, true, true), GpuTimingSample::Status::Present);

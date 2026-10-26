@@ -198,11 +198,9 @@ CMake adds:
   memory totals plus a sparkline over the same window (`FrameGraphPoint`
   gained a `memory` field and `Profiling::FrameGraphData.h` gained
   `ComputeMemoryBytesRange()` for exactly this, in the Phase 7 session);
-  and, as of Phase 4 (`PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md`,
-  sub-phases 4A-4D - see `PHASE4A_COMPLETION_REPORT.md` through
-  `PHASE4D_COMPLETION_REPORT.md`), a real **GPU Timing** line for all three
-  named passes, showing genuine driver-measured milliseconds via real
-  Vulkan timestamp queries (`src/Renderer/GpuTiming.h`/`GpuTimingService.h`,
+  and a **GPU Timing** line for all three
+  named passes, showing driver-measured milliseconds from Vulkan timestamp
+  queries (`src/Renderer/GpuTiming.h`, `RenderGraph/RenderGraphTimestampPool.h`,
   `Vulkan/VulkanQueryPool.h`) whenever that pass ran this frame, an honest
   "N/A" for a hidden/not-yet-warmed-up pass, and a permanent "Unsupported"
   on a device/build that can never produce this measurement - never a

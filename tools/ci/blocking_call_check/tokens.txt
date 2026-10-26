@@ -4,3 +4,4 @@ vkDeviceWaitIdle
 vkQueueWaitIdle
 vkWaitSemaphores
 vkAcquireNextImageKHR
+vkQueuePresentKHR

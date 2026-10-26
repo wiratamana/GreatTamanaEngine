@@ -25,6 +25,7 @@ class RenderGraphBuilder;
 
 namespace gte {
 
+class OffscreenRecording;
 class VulkanDevice;
 
 // Owns the swapchain, frame-sync objects and command buffers; it talks to acquire, submit and present.
@@ -34,9 +35,9 @@ class FramePresenter {
 public:
     // `vulkanDevice` must outlive this object; all graphics-queue submits go through it.
     FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
-        std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue graphicsQueue,
-        VkQueue presentQueue, int width, int height, VmaAllocator allocator, VkFormat depthFormat,
-        std::shared_ptr<GpuMemoryTracker> memoryTracker, VulkanDevice& vulkanDevice);
+        std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue presentQueue, int width,
+        int height, VmaAllocator allocator, VkFormat depthFormat, std::shared_ptr<GpuMemoryTracker> memoryTracker,
+        VulkanDevice& vulkanDevice);
     ~FramePresenter();
 
     FramePresenter(const FramePresenter&) = delete;
@@ -59,15 +60,6 @@ public:
     DrawStats RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
         const std::array<float, 4>& clearColor, const std::function<void(rg::CommandBuffer&)>& recordExtra);
 
-    // Waits (bounded) for the offscreen command buffer's previous use, then resets and begins it and returns it
-    // for the caller to record render graph passes into. Throws when the wait fails. Pair with
-    // EndOffscreenRecording().
-    VkCommandBuffer BeginOffscreenRecording();
-
-    // Ends and submits the offscreen command buffer and blocks (bounded) until the GPU finishes. The fence is
-    // reset right before the submit, so a recording that never reaches this call leaves it signaled.
-    void EndOffscreenRecording();
-
     // See Renderer::PresentViaRenderGraph(). Returns false without touching `graph` when no swapchain frame can
     // be recorded (minimized window, pending resize, just-recreated swapchain); otherwise runs a full
     // acquire, record, submit and present cycle.
@@ -84,16 +76,26 @@ public:
     std::optional<CapturedSwapchainPixels> TakeLastCompletedSwapchainCapture();
 
 private:
+    friend class OffscreenRecording;
+
     static constexpr std::uint32_t kFramesInFlight = 2;
 
     void CreateCommandObjects();
+    // Waits (bounded) for the previous offscreen submit, then opens the offscreen command buffer. Throws on failure
+    // or when a recording is already open.
+    VkCommandBuffer BeginOffscreenRecording();
+    // Ends and submits the offscreen command buffer, then waits (bounded). The fence is reset right before the submit.
+    void EndOffscreenRecording();
+    // Drops the open recording without submitting it. Never call after a submit.
+    void DiscardOffscreen() noexcept;
     // Resets `offscreenFence`, submits the offscreen command buffer and waits (bounded) for it. Throws on failure.
     void SubmitOffscreenAndWait(VkFence offscreenFence, const char* what);
     void RecreateSwapchain();
+    // Returns an acquired but unsubmitted swapchain image (and its semaphore) after a failed frame.
+    void RecoverAcquiredImage(std::uint32_t imageIndex, bool fenceReset, bool capturePending) noexcept;
     void Destroy() noexcept;
 
     VkDevice m_device = VK_NULL_HANDLE;
-    VkQueue m_graphicsQueue = VK_NULL_HANDLE;
     VkQueue m_presentQueue = VK_NULL_HANDLE;
     std::uint32_t m_graphicsQueueFamily = 0;
 
@@ -112,6 +114,7 @@ private:
 
     // Separate from the per-frame buffers so offscreen rendering never contends with the swapchain's.
     VkCommandBuffer m_offscreenCommandBuffer = VK_NULL_HANDLE;
+    bool m_offscreenOpen = false; // True from BeginOffscreenRecording() until it ends or is discarded.
 
     std::uint32_t m_currentFrame = 0;
 

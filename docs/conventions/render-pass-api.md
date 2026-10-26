@@ -103,7 +103,7 @@ Consumers (R = rewritten on the pass verbs, M = moved into `src/Renderer` behind
 ## Recording context
 
 Code outside `src/Renderer` carries `rg::RecordingContext`, a Vulkan-free handle to the command buffer being recorded.
-`PassContext::Recording()` and `Renderer::BeginOffscreenRenderGraphRecording()` make one. `Commands()` returns a
+`PassContext::Recording()` and `Renderer::BeginOffscreenRecording().Context()` make one. `Commands()` returns a
 `CommandBuffer`; `PlatformHandle()` is for the ImGui Vulkan backend glue only. `src/Renderer` reaches the raw handle only
 through `rg::RecordingAccess`. See [recording-context.md](../architecture/recording-context.md).
 

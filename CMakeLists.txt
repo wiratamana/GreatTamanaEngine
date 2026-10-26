@@ -786,6 +786,12 @@ add_library(gte_core STATIC
     src/Renderer/DrawStats.h
     src/Renderer/GpuTiming.cpp
     src/Renderer/GpuTiming.h
+    src/Renderer/AbandonedWork.cpp
+    src/Renderer/AbandonedWork.h
+    src/Renderer/OffscreenRecording.cpp
+    src/Renderer/OffscreenRecording.h
+    src/Renderer/PresentRecoveryPlan.cpp
+    src/Renderer/PresentRecoveryPlan.h
     src/Renderer/GpuWaitPolicy.cpp
     src/Renderer/GpuWaitPolicy.h
     src/Renderer/RenderTimingObserver.h

@@ -11,7 +11,13 @@
 #include "Features/VolumetricLight/VolumetricLightTypes.h"
 #include "Game/Lighting/SunLightModulation.h"
 #include "Game/Lighting/SunShadowReceiver.h"
+#include "Renderer/AbandonedWork.h"
+#include "Renderer/CaptureResult.h"
 #include "Renderer/ClusterViewRenderer.h"
+#include "Renderer/GpuWaitFailure.h"
+#include "Renderer/GpuWaitPolicy.h"
+#include "Renderer/OffscreenRecording.h"
+#include "Renderer/PresentRecoveryPlan.h"
 #include "Renderer/RenderGraph/ComputePass.h"
 #include "Renderer/RenderGraph/FullscreenPass.h"
 #include "Renderer/RenderGraph/GpuBuffer.h"
@@ -22,6 +28,7 @@
 #include "Renderer/RenderGraph/Shader.h"
 #include "Renderer/RenderGraph/StaticName.h"
 #include "Renderer/RenderGraph/ViewScopeUtil.h"
+#include "Renderer/RenderTimingObserver.h"
 
 #if defined(VOLK_HEADER_VERSION) || defined(VK_HEADER_VERSION)
 #error "A header meant to be Vulkan-free pulls in Vulkan"

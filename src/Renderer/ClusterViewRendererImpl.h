@@ -123,7 +123,7 @@ struct ClusterViewRenderer::Impl {
     explicit Impl(Renderer& owner);
 
     // Idles the GPU (best effort), then members release in reverse declaration order.
-    ~Impl() { static_cast<void>(renderer.WaitForGpuIdle(BlockSite::Shutdown, "cluster viewer")); }
+    ~Impl() { renderer.IdleForTeardown("cluster viewer"); }
 
     // True once the GPU is idle. Anything the GPU may read must stay alive when this is false.
     bool DrainGpu(const char* detail) const noexcept
@@ -141,7 +141,8 @@ struct ClusterViewRenderer::Impl {
     void LogOnce(const std::string& message);
 
     // ---- Mesh ----
-    void ReleaseMesh();
+    // False (nothing freed) when the GPU did not go idle.
+    [[nodiscard]] bool ReleaseMesh();
 
     // ---- Targets ----
     bool EnsureTarget(SlotTarget& slot, const char* name, const char* depthName, int width, int height);
@@ -233,44 +234,15 @@ struct ClusterViewRenderer::Impl {
 template <typename BuildFn>
 bool ClusterViewRenderer::Impl::Execute(BuildFn&& build, std::span<RenderTexture* const> finalize, std::string& note)
 {
-    // Ends the offscreen recording on every exit path.
-    struct Recording {
-        explicit Recording(Renderer& owner)
-            : renderer(owner)
-            , context(owner.BeginOffscreenRenderGraphRecording())
-        {
-        }
-        ~Recording()
-        {
-            if (open) {
-                try {
-                    renderer.EndOffscreenRenderGraphRecording();
-                } catch (...) {
-                }
-            }
-        }
-        Recording(const Recording&) = delete;
-        Recording& operator=(const Recording&) = delete;
-
-        void End()
-        {
-            open = false;
-            renderer.EndOffscreenRenderGraphRecording();
-        }
-
-        Renderer& renderer;
-        rg::RecordingContext context;
-        bool open = true;
-    };
-
     try {
         graph.BeginPersistentResourceFrame();
-        Recording recording(renderer);
-        graph.Execute(recording.context, rg::ExecuteTimingMode::SynchronousImmediateReadback, std::forward<BuildFn>(build));
+        OffscreenRecording recording = renderer.BeginOffscreenRecording();
+        const rg::RecordingContext context = recording.Context();
+        graph.Execute(context, rg::ExecuteTimingMode::SynchronousImmediateReadback, std::forward<BuildFn>(build));
         for (RenderTexture* texture : finalize) {
-            texture->FinalizeForExternalSampling(recording.context);
+            texture->FinalizeForExternalSampling(context);
         }
-        recording.End();
+        recording.Submit();
         return true;
     } catch (const std::exception& e) {
         note = std::string("the graph run failed: ") + e.what();

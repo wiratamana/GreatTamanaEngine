@@ -30,7 +30,10 @@ public:
     }
     void Render(const rg::RecordingContext& /*cmd*/) override { }
     void RenderPlatformWindows() override { }
-    CapturedPixels CapturePlatformWindow(Renderer& /*renderer*/, const std::string& /*title*/) override { return {}; }
+    CaptureResult CapturePlatformWindow(Renderer& /*renderer*/, const std::string& /*title*/) override
+    {
+        return { {}, CaptureStatus::NothingToCapture };
+    }
     bool WantsExit() const override { return false; }
     bool WantsCaptureMouse() const override { return false; }
     bool WantsCaptureKeyboard() const override { return false; }

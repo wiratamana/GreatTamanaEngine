@@ -114,7 +114,7 @@ bool RenderGraph::RunOneShot(CompiledGraphInput input, std::span<const TextureHa
                 }
                 tex.colorState = *final.state;
             }
-        });
+        }, BlockSite::ImmediateSubmit, "one-shot graph");
     } catch (const std::exception& e) {
         m_onceLog.Error("OneShot", std::string("run failed, texture states unchanged: ") + e.what());
         return false;

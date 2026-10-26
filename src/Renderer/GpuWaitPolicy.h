@@ -17,7 +17,6 @@ enum class WaitClass : std::uint8_t { Frame, Upload };
 inline constexpr std::chrono::nanoseconds kFrameWaitTimeout = std::chrono::seconds(2);
 inline constexpr std::chrono::nanoseconds kAcquireTimeout = std::chrono::seconds(2);
 inline constexpr std::chrono::nanoseconds kUploadWaitTimeout = std::chrono::seconds(10);
-inline constexpr std::chrono::nanoseconds kWarmUpTimeout = std::chrono::seconds(10);
 inline constexpr std::chrono::nanoseconds kIdleWaitTimeout = std::chrono::seconds(10);
 
 // Consecutive frame-wait timeouts that are tolerated; the next one marks the device lost.

@@ -132,11 +132,12 @@ struct PublishedTextureListEntry {
     std::uint32_t depth = 0;
 };
 
-// Why a capture request did NOT produce an image - surfaced to the network
-// route as a specific HTTP status (see Phase 3/5's own route handlers).
+// Why a capture request did not produce an image. The network routes map each to an HTTP status.
 enum class FrameCaptureFailureReason {
-    TargetNotAvailable, // e.g. no Game view exists/visible this session, or the window is minimized.
-    TimedOut,           // the main thread never serviced the request within the fixed timeout.
+    TargetNotAvailable, // No such view or texture this session, or its format cannot be read back.
+    TimedOut,           // The main thread never serviced the request within the fixed timeout.
+    GpuBusy,            // The bounded GPU wait timed out.
+    DeviceLost,         // The GPU device is lost; rendering has stopped.
 };
 
 // See file header comment above for the full design rationale. Every method

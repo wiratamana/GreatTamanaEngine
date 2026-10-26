@@ -44,8 +44,8 @@ public:
     // Builds the shared mesh (with its cluster table) and pipeline. Replaces any earlier pair.
     bool Build(Game& game, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout, std::string* error);
 
-    // Releases both resources after the GPU is idle.
-    void Reset();
+    // Releases both resources after the GPU is idle. False when it was not: the handles are kept.
+    bool Reset();
 
 private:
     RenderSystem* m_owner = nullptr;

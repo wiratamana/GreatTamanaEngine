@@ -688,8 +688,9 @@ void RenderGraphPanel::RequestTexturePreview(
         return;
     }
 
-    const Renderer::CapturedRawPixels raw = renderer.CaptureDebugTexturePixels(*snapshot, /*depthAspect=*/false);
-    if (raw.pixels.empty()) {
+    const CaptureResult captured = renderer.CaptureDebugTexturePixels(*snapshot, /*depthAspect=*/false);
+    const CapturedPixels& raw = captured.pixels;
+    if (captured.status != CaptureStatus::Ok || raw.pixels.empty()) {
         m_texturePreview.Release();
         return;
     }

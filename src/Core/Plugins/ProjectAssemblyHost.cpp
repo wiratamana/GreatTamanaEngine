@@ -141,15 +141,11 @@ bool ProjectAssemblyHost::LoadOneProjectAssemblyFromExactPathIfExists(
     return LoadOneProjectAssemblyFromExactPath(dllPath, core, editorHost);
 }
 
-// Unloads every assembly of `projectName` in three ordered steps (see the declaration): drain the GPU, unregister
-// everything the project registered, then FreeLibrary().
-void ProjectAssemblyHost::UnloadProjectAssembly(const std::string& projectName, Core& core, Renderer& renderer)
+bool ProjectAssemblyHost::UnloadProjectAssembly(const std::string& projectName, Core& core, Renderer& renderer)
 {
-    // Held for the whole call, including the early return, so readers of the loaded list and the ledger never
-    // see a half-finished unload.
+    // Held for the whole call so readers of the loaded list and the ledger never see a half-finished unload.
     std::lock_guard<std::mutex> lock(GetHotReloadEngineStateMutex());
 
-    // Collect the matching entries before touching anything, so an unknown project is a clean no-op.
     std::vector<std::size_t> matchingIndices;
     for (std::size_t i = 0; i < m_loadedAssemblies.size(); ++i) {
         if (DeriveProjectNameFromDllFileName(m_loadedAssemblies[i].dllFileName) == projectName) {
@@ -158,35 +154,34 @@ void ProjectAssemblyHost::UnloadProjectAssembly(const std::string& projectName, 
     }
     if (matchingIndices.empty()) {
         GTE_LOG_INFO("ProjectAssembly", "UnloadProjectAssembly('" + projectName + "') - nothing currently loaded for this project, no-op.");
-        return;
+        return true;
     }
 
-    // Step 1: no in-flight GPU work may still use project code or objects. Must precede FreeLibrary().
-    // If the GPU cannot be drained, the project stays loaded: freeing its code could crash the GPU callbacks.
+    // The GPU must be idle before any project code is freed; otherwise the project stays loaded.
     if (renderer.DrainGpuForCodeUnload() != BlockOutcome::Completed) {
         GTE_LOG_ERROR("ProjectAssembly", "UnloadProjectAssembly('" + projectName + "') skipped: the GPU did not go idle.");
-        return;
+        return false;
     }
 
-    // Step 2: drop every registration the project made. Must precede FreeLibrary().
     ProjectAssemblyRegistrationLedger::Instance().UnregisterEverythingFor(projectName, core);
 
-    // Step 3: FreeLibrary() with "_Editor.dll" entries first, then Game (reverse of load order).
+    // Editor assemblies are freed first (reverse of load order).
     std::sort(matchingIndices.begin(), matchingIndices.end(), [this](std::size_t a, std::size_t b) {
         const bool aIsEditor = m_loadedAssemblies[a].dllFileName.ends_with("_Editor.dll");
         const bool bIsEditor = m_loadedAssemblies[b].dllFileName.ends_with("_Editor.dll");
-        return aIsEditor && !bIsEditor; // Editor entries sort first.
+        return aIsEditor && !bIsEditor;
     });
     for (const std::size_t index : matchingIndices) {
         GTE_LOG_INFO("ProjectAssembly", "Unloading '" + m_loadedAssemblies[index].dllFileName + "'.");
         FreeLibrary(static_cast<HMODULE>(m_loadedAssemblies[index].moduleHandle));
     }
-    // Erase in DESCENDING index order so earlier indices remain valid while erasing.
+    // Erase in descending index order so earlier indices stay valid.
     std::sort(matchingIndices.begin(), matchingIndices.end(), std::greater<std::size_t>());
     for (const std::size_t index : matchingIndices) {
         m_loadedAssemblies.erase(m_loadedAssemblies.begin() + static_cast<std::ptrdiff_t>(index));
     }
     GTE_LOG_INFO("ProjectAssembly", "UnloadProjectAssembly('" + projectName + "') complete.");
+    return true;
 }
 
 std::vector<std::string> ProjectAssemblyHost::GetLoadedAssemblyFileNames() const

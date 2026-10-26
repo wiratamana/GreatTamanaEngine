@@ -144,10 +144,10 @@ bool ClusterViewRenderer::Impl::CheckCullCamera(const ClusterViewCull& cull, std
     return true;
 }
 
-void ClusterViewRenderer::Impl::ReleaseMesh()
+bool ClusterViewRenderer::Impl::ReleaseMesh()
 {
     if (!DrainGpu("cluster viewer mesh release")) {
-        return; // The GPU may still read them; the destructor frees them with the device.
+        return false; // The GPU may still read them; they stay alive.
     }
     for (CullSet& set : sets) {
         set = CullSet{};
@@ -161,6 +161,7 @@ void ClusterViewRenderer::Impl::ReleaseMesh()
     mesh.reset();
     tableClusters = 0;
     realClusters = 0;
+    return true;
 }
 
 bool ClusterViewRenderer::Impl::EnsureTarget(
@@ -169,23 +170,36 @@ bool ClusterViewRenderer::Impl::EnsureTarget(
     if (slot.texture.has_value() && slot.width == width && slot.height == height) {
         return true;
     }
-    try {
-        if (!slot.texture.has_value()) {
+    if (!slot.texture.has_value()) {
+        // A fresh target was never used by the GPU, so a failed creation may reset the slot.
+        try {
             slot.texture.emplace(renderer.CreateRenderTexture(width, height, PixelFormat::RGBA8_UNorm, name, depthName));
-        } else {
-            // Resize idles the GPU first; only then is the old UI descriptor safe to free.
-            renderer.ResizeRenderTexture(*slot.texture, width, height);
+            slot.width = width;
+            slot.height = height;
+            slot.ui.Set(renderer.GetUiTextureHandle(*slot.texture));
+            return true;
+        } catch (const std::exception& e) {
+            slot.ui.Reset();
+            slot.texture.reset();
+            slot.width = 0;
+            slot.height = 0;
+            LogOnce(std::string("the image target could not be made: ") + e.what());
+            return false;
         }
+    }
+    // A used target may still be sampled: resize only on an idle GPU and never destroy it on failure.
+    if (!DrainGpu("cluster viewer target resize")) {
+        LogOnce("the image target needs an idle GPU to resize");
+        return false;
+    }
+    try {
+        renderer.ResizeRenderTexture(*slot.texture, width, height);
         slot.width = width;
         slot.height = height;
         slot.ui.Set(renderer.GetUiTextureHandle(*slot.texture));
         return true;
     } catch (const std::exception& e) {
-        slot.ui.Reset();
-        slot.texture.reset();
-        slot.width = 0;
-        slot.height = 0;
-        LogOnce(std::string("the image target could not be made: ") + e.what());
+        LogOnce(std::string("the image target could not be resized: ") + e.what());
         return false;
     }
 }
@@ -655,7 +669,12 @@ ClusterViewMeshResult ClusterViewRenderer::SetMesh(std::span<const MeshPreviewVe
     Impl& s = *m_impl;
     ClusterViewMeshResult result;
     try {
-        s.ReleaseMesh();
+        if (!s.ReleaseMesh()) {
+            result.note = "the GPU did not go idle; the old mesh is kept";
+            result.retryable = true;
+            s.LogOnce(result.note);
+            return result;
+        }
 
         constexpr std::size_t kMaxCount = std::numeric_limits<std::uint32_t>::max();
         std::string why;
@@ -732,7 +751,7 @@ ClusterViewMeshResult ClusterViewRenderer::SetMesh(std::span<const MeshPreviewVe
         }
         return result;
     } catch (const std::exception& e) {
-        s.ReleaseMesh();
+        static_cast<void>(s.ReleaseMesh()); // best effort: a busy GPU keeps the partial mesh alive
         result = ClusterViewMeshResult{};
         result.note = std::string("the mesh could not be uploaded: ") + e.what();
         s.LogOnce(result.note);

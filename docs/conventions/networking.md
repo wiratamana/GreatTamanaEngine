@@ -69,8 +69,7 @@ module or adding a new endpoint:
   `Renderer::CaptureRenderTexturePixels()` (a synchronous readback,
   piggybacking on the already-synchronous offscreen Game-view regime) and
   `SwapchainCaptureService` (`src/Renderer/SwapchainCaptureService.h/.cpp`, a
-  pipelined, frame-in-flight-aware swapchain readback mirroring
-  `GpuTimingService`'s own Present-timing pattern, with zero added GPU
+  pipelined, frame-in-flight-aware swapchain readback with zero added GPU
   stall) are the two capture mechanisms feeding it. Both routes accept an
   optional `?format=` query parameter (`png` - the default, raw bytes,
   `Content-Type: image/png` - or `base64`/`json`, a
@@ -539,19 +538,25 @@ registering a new named texture:
   texture must always check the literal string passed to
   `CreateTexture()`/`ImportTexture()` for that texture, never the name of the
   `AddPass()` call it happens to sit near.
-- **`Renderer::WaitForGpuIdle()` (a full `vkDeviceWaitIdle()`) is a
-  deliberate, NARROW, bounded exception to `network-impl-2`'s own "zero added
-  GPU stall" swapchain-capture design principle - `GET /get_texture`, and
-  ONLY that endpoint, calls it once per request, before reading pixels back.**
-  This is acceptable here specifically because this endpoint is rare and
-  human/LLM-triggered debugging traffic, never part of any per-frame path -
-  unlike `/get_swapchain`'s pipelined, zero-stall
-  `SwapchainCaptureService`/`GpuTimingService`-style design. **No other
-  endpoint, and no per-frame engine code anywhere else, may ever call
-  `Renderer::WaitForGpuIdle()`** - this is a warning for future contributors,
-  not just a historical note; if a future endpoint needs to read back a
-  texture without stalling, it must build its own pipelined capture path
-  (mirroring `SwapchainCaptureService`) rather than reaching for this method.
+- **`Renderer::WaitForGpuIdle()` (drains the graphics queue with a bound, then
+  idles the device) is a deliberate, NARROW exception to the "zero added GPU
+  stall" swapchain-capture design - `GET /get_texture`, and ONLY that endpoint,
+  calls it once per request, before reading pixels back.** This is acceptable
+  because the endpoint is rare, human/LLM-triggered debugging traffic, never
+  part of a per-frame path - unlike `/get_swapchain`'s pipelined, zero-stall
+  `SwapchainCaptureService`. A failed wait never throws out of the capture: the
+  route answers `503` with the real reason (see "Capture failures" below).
+  **No other endpoint, and no per-frame engine code, may call
+  `Renderer::WaitForGpuIdle()`.** A future endpoint that must read back a
+  texture without stalling builds its own pipelined capture path (mirroring
+  `SwapchainCaptureService`).
+- **Capture failures.** The `Renderer::Capture*` functions never throw. They return a `CaptureResult` whose status is
+  `Ok`, `NothingToCapture`, `GpuBusy` (a bounded GPU wait timed out), `DeviceLost` or `Failed`. The capture routes
+  (`/get_swapchain`, `/get_game_view`, `/get_texture`, `/get_window`) answer `503` with the real reason text for the two
+  GPU failures: `the GPU did not finish in time; try again` and `GPU device lost, rendering stopped`. A request that
+  the main thread did not answer in time is `504`. Any other failure to find a target keeps its `409` answer.
+  After a lost device, a capture that needs a GPU wait answers `503`, and `GET /render_graph` shows
+  `gpu_wait.device_lost` as `true`.
 - **`RenderGraph::NotifyDebugTextureStateOverride()` exists because a
   graph-external manual Vulkan barrier is otherwise invisible to the render
   graph's own internal resource-state tracking** - a pass that hands a
@@ -704,11 +709,14 @@ registering a new named texture:
   `first_use_pass_name`/`last_use_pass_name`, `null` when never used),
   and `render_features` (the
   same loaded `_v2` plugin ordering/blend-mode readout the panel's own Plugin
-  Render Features section shows). Each pass also has `indirect_draw_count`. Two read-only
+  Render Features section shows). Each pass also has `indirect_draw_count`. Three read-only
   objects report device and memory state: `indirect_draw` (`draw_indirect_count`,
-  `multi_draw_indirect`, `draw_indirect_first_instance`, `max_draw_indirect_count`) and
+  `multi_draw_indirect`, `draw_indirect_first_instance`, `max_draw_indirect_count`),
   `gpu_memory` (`total_bytes`, `mesh_count`, and `by_name` bytes per GPU debug name; unnamed
-  allocations sum under `"(unnamed)"`). ALWAYS reflects the truly latest real
+  allocations sum under `"(unnamed)"`) and `gpu_wait` (`device_lost`: true once a GPU wait failed
+  for good and rendering stopped; `consecutive_frame_timeouts`: frame waits that timed out in a
+  row, the device is lost after the fourth; `abandoned_objects`: GPU objects parked because
+  the GPU may still use them). ALWAYS reflects the truly latest real
   engine frame, completely independent of whether a human has the Editor
   panel's own "Pause" checkbox ticked (that checkbox only freezes what ONE
   ImGui window displays - see that campaign's PHASE0 Locked Design Decision

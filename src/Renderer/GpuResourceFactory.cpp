@@ -2,6 +2,7 @@
 
 #include "../Core/Logging.h"
 #include "Compute/ComputePipeline.h"
+#include "GpuWaitFailure.h"
 #include "DescriptorSet.h"
 #include "MipChain.h"
 #include "GraphicsHandleRegistry.h" // RegisterDescriptorSet() - sets leave this file as engine handles.
@@ -23,12 +24,12 @@
 namespace gte {
 
 GpuResourceFactory::GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice device, VmaAllocator allocator,
-    VkQueue graphicsQueue, std::uint32_t graphicsQueueFamily, VkFormat depthFormat,
-    std::shared_ptr<GpuMemoryTracker> memoryTracker, VulkanDevice& vulkanDevice)
+    std::uint32_t graphicsQueueFamily, VkFormat depthFormat, std::shared_ptr<GpuMemoryTracker> memoryTracker,
+    VulkanDevice& vulkanDevice, AbandonedWork& abandoned)
     : m_device(device)
     , m_allocator(allocator)
-    , m_graphicsQueue(graphicsQueue)
     , m_vulkanDevice(&vulkanDevice)
+    , m_abandoned(abandoned)
     , m_physicalDevice(physicalDevice)
     , m_depthFormat(depthFormat)
     , m_memoryTracker(std::move(memoryTracker))
@@ -138,6 +139,10 @@ void GpuResourceFactory::Destroy() noexcept
         vkDestroyDescriptorSetLayout(m_device, m_bufferSetLayout, nullptr);
         m_bufferSetLayout = VK_NULL_HANDLE;
     }
+    for (const VkFence fence : m_fencePool) {
+        vkDestroyFence(m_device, fence, nullptr); // Pooled fences are never pending.
+    }
+    m_fencePool.clear();
     if (m_commandPool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
         m_commandPool = VK_NULL_HANDLE;
@@ -165,24 +170,54 @@ Buffer GpuResourceFactory::CreateBuffer(
     return Buffer(m_allocator, m_memoryTracker, size, usage, memoryUsage, debugName);
 }
 
+namespace {
+
+// One-shot command buffer and fence, plus everything the GPU touches while it runs.
+// Destroying it before the GPU finished is only safe on a successful wait; a failed wait parks it instead.
+struct OneShotLease {
+    VkDevice device = VK_NULL_HANDLE;
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    std::vector<std::shared_ptr<void>> resources;
+
+    OneShotLease() = default;
+    OneShotLease(const OneShotLease&) = delete;
+    OneShotLease& operator=(const OneShotLease&) = delete;
+    ~OneShotLease()
+    {
+        if (fence != VK_NULL_HANDLE) {
+            vkDestroyFence(device, fence, nullptr);
+        }
+        if (cmd != VK_NULL_HANDLE) {
+            vkFreeCommandBuffers(device, pool, 1, &cmd);
+        }
+    }
+};
+
+} // namespace
+
 Buffer GpuResourceFactory::CreateDeviceLocalBuffer(
     const void* data, uint64_t size, BufferUsage usage, const char* debugName) const
 {
-    // Unnamed throwaway staging buffer.
-    Buffer staging = CreateBuffer(size, BufferUsage::TransferSrc, BufferMemoryUsage::CpuToGpu);
-    staging.Upload(data, static_cast<std::size_t>(size));
+    // Unnamed throwaway staging buffer. Both buffers are parked if the copy's wait fails.
+    const auto staging = std::make_shared<Buffer>(CreateBuffer(size, BufferUsage::TransferSrc, BufferMemoryUsage::CpuToGpu));
+    staging->Upload(data, static_cast<std::size_t>(size));
 
-    Buffer deviceLocal =
-        CreateBuffer(size, usage | BufferUsage::TransferDst, BufferMemoryUsage::GpuOnly, debugName);
+    const auto deviceLocal = std::make_shared<Buffer>(
+        CreateBuffer(size, usage | BufferUsage::TransferDst, BufferMemoryUsage::GpuOnly, debugName));
 
-    ImmediateSubmitInternal([&](VkCommandBuffer cmd) {
-        VkBufferCopy copyRegion{};
-        copyRegion.size = static_cast<VkDeviceSize>(size);
-        vkCmdCopyBuffer(cmd, staging.Native(), deviceLocal.Native(), 1, &copyRegion);
-    });
-    // staging is destroyed here; ImmediateSubmitInternal already waited for the copy.
+    const std::array<std::shared_ptr<void>, 2> inFlight{ staging, deviceLocal };
+    SubmitOneShot(
+        BlockSite::ImmediateSubmit, "buffer upload",
+        [&](VkCommandBuffer cmd) {
+            VkBufferCopy copyRegion{};
+            copyRegion.size = static_cast<VkDeviceSize>(size);
+            vkCmdCopyBuffer(cmd, staging->Native(), deviceLocal->Native(), 1, &copyRegion);
+        },
+        inFlight);
 
-    return deviceLocal;
+    return std::move(*deviceLocal);
 }
 
 VkCommandBuffer GpuResourceFactory::AllocateTransientCommandBuffer() const
@@ -200,71 +235,91 @@ VkCommandBuffer GpuResourceFactory::AllocateTransientCommandBuffer() const
     return cmd;
 }
 
-void GpuResourceFactory::FreeTransientCommandBuffer(VkCommandBuffer cmd) const noexcept
+VkFence GpuResourceFactory::AcquireFence() const
 {
-    if (cmd != VK_NULL_HANDLE) {
-        vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmd);
+    {
+        const std::lock_guard lock(m_fencePoolMutex);
+        if (!m_fencePool.empty()) {
+            const VkFence fence = m_fencePool.back();
+            m_fencePool.pop_back();
+            return fence;
+        }
+    }
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence = VK_NULL_HANDLE;
+    return vkCreateFence(m_device, &fenceInfo, nullptr, &fence) == VK_SUCCESS ? fence : VK_NULL_HANDLE;
+}
+
+void GpuResourceFactory::ReleaseFence(VkFence fence) const noexcept
+{
+    vkResetFences(m_device, 1, &fence);
+    try {
+        const std::lock_guard lock(m_fencePoolMutex);
+        m_fencePool.push_back(fence);
+    } catch (...) {
+        vkDestroyFence(m_device, fence, nullptr);
     }
 }
 
-void GpuResourceFactory::ImmediateSubmitInternal(const std::function<void(VkCommandBuffer)>& recordFn) const
+void GpuResourceFactory::SubmitOneShot(BlockSite site, const char* detail,
+    const std::function<void(VkCommandBuffer)>& recordFn, std::span<const std::shared_ptr<void>> inFlight) const
 {
-    VkCommandBuffer cmd = AllocateTransientCommandBuffer();
+    GpuWaitService& waits = m_vulkanDevice->Waits();
+    if (waits.DeviceLost()) {
+        throw GpuWaitFailure(
+            std::string("GpuResourceFactory::SubmitOneShot(") + detail + "): device lost", BlockOutcome::DeviceLost);
+    }
+
+    const auto lease = std::make_shared<OneShotLease>();
+    lease->device = m_device;
+    lease->pool = m_commandPool;
+    lease->resources.assign(inFlight.begin(), inFlight.end());
+    lease->cmd = AllocateTransientCommandBuffer();
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
-        FreeTransientCommandBuffer(cmd);
-        throw std::runtime_error("GpuResourceFactory::ImmediateSubmitInternal: vkBeginCommandBuffer failed.");
+    if (vkBeginCommandBuffer(lease->cmd, &beginInfo) != VK_SUCCESS) {
+        throw std::runtime_error("GpuResourceFactory::SubmitOneShot: vkBeginCommandBuffer failed.");
     }
 
-    try {
-        recordFn(cmd);
-    } catch (...) {
-        FreeTransientCommandBuffer(cmd);
-        throw;
+    recordFn(lease->cmd);
+
+    if (vkEndCommandBuffer(lease->cmd) != VK_SUCCESS) {
+        throw std::runtime_error("GpuResourceFactory::SubmitOneShot: vkEndCommandBuffer failed.");
     }
 
-    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
-        FreeTransientCommandBuffer(cmd);
-        throw std::runtime_error("GpuResourceFactory::ImmediateSubmitInternal: vkEndCommandBuffer failed.");
+    lease->fence = AcquireFence();
+    if (lease->fence == VK_NULL_HANDLE) {
+        throw std::runtime_error("GpuResourceFactory::SubmitOneShot: vkCreateFence failed.");
     }
 
     VkCommandBufferSubmitInfo cmdSubmitInfo{};
     cmdSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-    cmdSubmitInfo.commandBuffer = cmd;
+    cmdSubmitInfo.commandBuffer = lease->cmd;
 
     VkSubmitInfo2 submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
     submitInfo.commandBufferInfoCount = 1;
     submitInfo.pCommandBufferInfos = &cmdSubmitInfo;
 
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkFence fence = VK_NULL_HANDLE;
-    if (vkCreateFence(m_device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
-        FreeTransientCommandBuffer(cmd);
-        throw std::runtime_error("GpuResourceFactory::ImmediateSubmitInternal: vkCreateFence failed.");
+    if (const VkResult submitted = m_vulkanDevice->SubmitToGraphicsQueue(submitInfo, lease->fence);
+        submitted != VK_SUCCESS) {
+        if (submitted == VK_ERROR_DEVICE_LOST) {
+            waits.MarkDeviceLost();
+        }
+        throw std::runtime_error("GpuResourceFactory::SubmitOneShot: vkQueueSubmit2 failed.");
     }
 
-    if (m_vulkanDevice->SubmitToGraphicsQueue(submitInfo, fence) != VK_SUCCESS) {
-        vkDestroyFence(m_device, fence, nullptr);
-        FreeTransientCommandBuffer(cmd);
-        throw std::runtime_error("GpuResourceFactory::ImmediateSubmitInternal: vkQueueSubmit2 failed.");
-    }
-
-    GpuWaitService& waits = m_vulkanDevice->Waits();
-    const BlockOutcome outcome =
-        waits.WaitFence(fence, kUploadWaitTimeout, WaitClass::Upload, BlockSite::ImmediateSubmit, "resource upload");
+    const BlockOutcome outcome = waits.WaitFence(lease->fence, kUploadWaitTimeout, WaitClass::Upload, site, detail);
     if (outcome != BlockOutcome::Completed) {
-        // The GPU may still run this work, so its fence and command buffer must outlive the throw.
-        waits.Quarantine(fence);
-        throw std::runtime_error(std::string("GpuResourceFactory::ImmediateSubmitInternal: GPU wait ") + ToString(outcome));
+        m_abandoned.Park(lease);
+        throw GpuWaitFailure(
+            std::string("GpuResourceFactory::SubmitOneShot(") + detail + "): GPU wait " + ToString(outcome), outcome);
     }
 
-    vkDestroyFence(m_device, fence, nullptr);
-    FreeTransientCommandBuffer(cmd);
+    ReleaseFence(std::exchange(lease->fence, VK_NULL_HANDLE));
 }
 
 Pipeline GpuResourceFactory::CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
@@ -435,17 +490,18 @@ std::vector<Texture2D> GpuResourceFactory::UploadTexture2DChunk(std::span<const 
         textures.emplace_back(m_allocator, m_memoryTracker, m_device, descs[i], chains[i].levelCount);
     }
 
-    // Unnamed throwaway staging buffer.
-    Buffer staging = CreateBuffer(stagingSize, BufferUsage::TransferSrc, BufferMemoryUsage::CpuToGpu);
+    // Unnamed throwaway staging buffer; parked if the upload's wait fails.
+    const auto staging =
+        std::make_shared<Buffer>(CreateBuffer(stagingSize, BufferUsage::TransferSrc, BufferMemoryUsage::CpuToGpu));
     for (std::size_t i = 0; i < chains.size(); ++i) {
-        staging.Upload(chains[i].pixels.data(), chains[i].pixels.size(), static_cast<std::size_t>(stagingOffsets[i]));
+        staging->Upload(chains[i].pixels.data(), chains[i].pixels.size(), static_cast<std::size_t>(stagingOffsets[i]));
     }
 
     const rg::ResourceState undefinedState{ VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE };
     const rg::ResourceState transferDst = rg::RequiredStateFor(rg::ResourceAccess::TransferDst, false);
     const rg::ResourceState shaderRead = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
 
-    ImmediateSubmitInternal([&](VkCommandBuffer cmd) {
+    const auto record = [&](VkCommandBuffer cmd) {
         std::vector<VkImageMemoryBarrier2> barriers(textures.size());
         const auto emitBarriers = [&](const rg::ResourceState& from, const rg::ResourceState& to) {
             for (std::size_t i = 0; i < textures.size(); ++i) {
@@ -472,13 +528,27 @@ std::vector<Texture2D> GpuResourceFactory::UploadTexture2DChunk(std::span<const 
                 region.imageExtent = { chain.levelWidths[level], chain.levelHeights[level], 1 };
                 regions.push_back(region);
             }
-            vkCmdCopyBufferToImage(cmd, staging.Native(), textures[i].Image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            vkCmdCopyBufferToImage(cmd, staging->Native(), textures[i].Image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 static_cast<std::uint32_t>(regions.size()), regions.data());
         }
 
         emitBarriers(transferDst, shaderRead);
-    });
-    // staging is destroyed on return; the copies have already completed.
+    };
+
+    try {
+        const std::array<std::shared_ptr<void>, 1> inFlight{ staging };
+        SubmitOneShot(BlockSite::ImmediateSubmit, "texture upload", record, inFlight);
+    } catch (...) {
+        // The GPU may still write the images: park them instead of freeing them under it.
+        if (m_vulkanDevice->Waits().DeviceLost()) {
+            try {
+                m_abandoned.Park(std::make_shared<std::vector<Texture2D>>(std::move(textures)));
+            } catch (...) {
+                // Out of memory: the images are freed with the vector.
+            }
+        }
+        throw;
+    }
 
     for (Texture2D& texture : textures) {
         texture.SetCurrentState(shaderRead);

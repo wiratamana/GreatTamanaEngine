@@ -8,6 +8,7 @@
 
 #include "../Math/Mat4.h"
 #include "../Math/Vec3.h"
+#include "../Renderer/CaptureResult.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Core/Plugins/RenderFeatureDebugEntry.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
@@ -204,9 +205,9 @@ public:
     // Call after Renderer::Present(); a no-op on frames where Render() did not run.
     virtual void RenderPlatformWindows() = 0;
 
-    // GET /get_window: reads back the floating (undocked) OS window titled `title`.
-    // Empty pixels when no such floating window exists. Call after RenderPlatformWindows(), which presents it.
-    virtual CapturedPixels CapturePlatformWindow(Renderer& renderer, const std::string& title) = 0;
+    // GET /get_window: reads back the floating (undocked) OS window titled `title`. Call after
+    // RenderPlatformWindows(), which presents it. NothingToCapture when no such floating window exists.
+    virtual CaptureResult CapturePlatformWindow(Renderer& renderer, const std::string& title) = 0;
 
     // True once the user picked File > Exit. Checked each frame to end the main loop.
     virtual bool WantsExit() const = 0;

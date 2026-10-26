@@ -1,6 +1,8 @@
 #pragma once
 
+#include "AbandonedWork.h"
 #include "Buffer.h"
+#include "GpuWaitPolicy.h"
 #include "MaterialImageRole.h"
 #include "MaterialTexture.h"
 #include "Memory/GpuMemoryTracker.h"
@@ -36,9 +38,10 @@ class VulkanDevice;
 // Factory for creating and managing GPU resources (buffers, textures, pipelines, meshes).
 class GpuResourceFactory {
 public:
-    GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice device, VmaAllocator allocator, VkQueue graphicsQueue,
+    // `vulkanDevice` and `abandoned` must outlive this object.
+    GpuResourceFactory(VkPhysicalDevice physicalDevice, VkDevice device, VmaAllocator allocator,
         std::uint32_t graphicsQueueFamily, VkFormat depthFormat, std::shared_ptr<GpuMemoryTracker> memoryTracker,
-        VulkanDevice& vulkanDevice);
+        VulkanDevice& vulkanDevice, AbandonedWork& abandoned);
     ~GpuResourceFactory();
 
     GpuResourceFactory(const GpuResourceFactory&) = delete;
@@ -60,9 +63,10 @@ public:
     Buffer CreateDeviceLocalBuffer(
         const void* data, uint64_t size, BufferUsage usage, const char* debugName = nullptr) const;
 
-    // Transient command buffer helpers
-    VkCommandBuffer AllocateTransientCommandBuffer() const;
-    void FreeTransientCommandBuffer(VkCommandBuffer cmd) const noexcept;
+    // Records, submits and waits (bounded) for one command buffer. Throws on failure. When the wait fails the GPU
+    // may still run it: the command buffer, its fence and `inFlight` are parked in the abandoned work.
+    void SubmitOneShot(BlockSite site, const char* detail, const std::function<void(VkCommandBuffer)>& recordFn,
+        std::span<const std::shared_ptr<void>> inFlight = {}) const;
 
     // Pipelines
     Pipeline CreatePipeline(VkFormat colorFormat, const std::string& vertexShaderSpirvPath,
@@ -154,11 +158,15 @@ public:
 private:
     void Destroy() noexcept;
 
+    // Transient command buffer for SubmitOneShot().
+    VkCommandBuffer AllocateTransientCommandBuffer() const;
+
+    // Reusable fences for one-shot submits; null when a fence cannot be created.
+    VkFence AcquireFence() const;
+    void ReleaseFence(VkFence fence) const noexcept;
+
     // Creates one compute descriptor pool; VK_NULL_HANDLE on failure.
     VkDescriptorPool CreateComputeDescriptorPool(const PoolCapacity& capacity) const noexcept;
-
-    // Records, submits and waits on one command buffer. Logs and throws when the wait fails.
-    void ImmediateSubmitInternal(const std::function<void(VkCommandBuffer)>& recordFn) const;
 
     // Uploads one chunk with one staging buffer, one submit and one wait. Throws; nothing leaks on failure.
     std::vector<Texture2D> UploadTexture2DChunk(std::span<const Texture2DUploadDesc> descs) const;
@@ -169,13 +177,16 @@ private:
 
     VkDevice m_device = VK_NULL_HANDLE;
     VmaAllocator m_allocator = VK_NULL_HANDLE;
-    VkQueue m_graphicsQueue = VK_NULL_HANDLE;
     VulkanDevice* m_vulkanDevice = nullptr;
+    AbandonedWork& m_abandoned;
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
     VkFormat m_depthFormat = VK_FORMAT_UNDEFINED;
 
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
+
+    mutable std::mutex m_fencePoolMutex;
+    mutable std::vector<VkFence> m_fencePool;
 
     // Material set layout: 0 = base color, 1 = MaterialParams, 2 = normal, 3 = metallic-roughness, 4 = occlusion.
     VkDescriptorSetLayout m_materialSetLayout = VK_NULL_HANDLE;

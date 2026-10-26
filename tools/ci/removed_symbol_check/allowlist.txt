@@ -1,0 +1,2 @@
+# Files allowed to name a removed symbol. Empty: keep it that way.
+# Format: path relative to the scanned root, then '# one-line reason'. A line whose file is gone or clean fails the check.

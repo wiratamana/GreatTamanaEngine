@@ -1,7 +1,7 @@
 #include "ClusterViewRenderer.h"
 #include "ClusterViewRendererImpl.h"
 
-#include <exception>
+#include <utility>
 
 namespace gte {
 
@@ -12,16 +12,14 @@ std::optional<CapturedPixels> ClusterViewRenderer::CaptureSlot(ClusterViewSlot s
     if (!target.texture.has_value()) {
         return std::nullopt;
     }
-    try {
-        CapturedPixels pixels = s.renderer.CaptureRenderTexturePixels(*target.texture);
-        if (pixels.pixels.empty()) {
-            return std::nullopt;
+    CaptureResult captured = s.renderer.CaptureRenderTexturePixels(*target.texture);
+    if (captured.status != CaptureStatus::Ok || captured.pixels.pixels.empty()) {
+        if (captured.status != CaptureStatus::NothingToCapture) {
+            s.LogOnce("the slot capture failed");
         }
-        return pixels;
-    } catch (const std::exception& e) {
-        s.LogOnce(std::string("the slot capture failed: ") + e.what());
         return std::nullopt;
     }
+    return std::move(captured.pixels);
 }
 
 } // namespace gte

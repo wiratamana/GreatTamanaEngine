@@ -1021,6 +1021,10 @@ void Core::BuildFrame()
     ++m_exclusionEpoch;
     m_captureArmedThisFrame = false;
 
+    if (StopIfDeviceLost()) {
+        return;
+    }
+
     for (const MeshHandle released : m_game.ReleaseUnusedGpuResources(m_renderer)) {
         ForgetClusterSynthesis(released);
     }
@@ -1055,7 +1059,8 @@ void Core::BuildFrame()
     if (gameTarget != nullptr || sceneTarget != nullptr) {
         try {
             GTE_PROFILE_SCOPE("RenderGraph::Execute(Offscreen)");
-            const rg::RecordingContext offscreenCmd = m_renderer.BeginOffscreenRenderGraphRecording();
+            OffscreenRecording recording = m_renderer.BeginOffscreenRecording();
+            const rg::RecordingContext offscreenCmd = recording.Context();
             m_renderGraph.Execute(offscreenCmd, rg::ExecuteTimingMode::SynchronousImmediateReadback,
                 [&](rg::RenderGraphBuilder& b) {
                     m_gpuSkinningRequestsThisFrame = m_game.CollectGpuSkinningDispatchRequests();
@@ -1201,7 +1206,7 @@ void Core::BuildFrame()
                     m_editorLayer->SetSceneViewCompositedTexture(exposed);
                 }
             }
-            m_renderer.EndOffscreenRenderGraphRecording();
+            recording.Submit();
 
             m_renderGraph.FinalizeSynchronousGpuTiming();
         } catch (const std::exception& e) {
@@ -1212,7 +1217,12 @@ void Core::BuildFrame()
             }
             // The target's contents are undefined; present clears the swapchain instead of copying it.
             m_directGameTargetUsedThisFrame = false;
-            assert(false && "RenderGraph offscreen Execute() threw - see the engine log");
+        } catch (...) {
+            const std::string failure = "RenderGraph offscreen Execute() failed: unknown exception";
+            if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
+                GTE_LOG_ERROR("Core", failure);
+            }
+            m_directGameTargetUsedThisFrame = false;
         }
     }
 
@@ -1241,8 +1251,23 @@ void Core::BuildFrame()
     }
 }
 
+bool Core::StopIfDeviceLost()
+{
+    if (!m_renderer.DeviceLost()) {
+        return false;
+    }
+    if (!m_lostLogged) {
+        m_lostLogged = true;
+        GTE_LOG_ERROR("Core", "GPU device lost, rendering stopped");
+    }
+    return true;
+}
+
 void Core::Present()
 {
+    if (StopIfDeviceLost()) {
+        return;
+    }
     GTE_PROFILE_SCOPE("Renderer::PresentViaRenderGraph");
 
     std::optional<DrawStats> presentStats;
@@ -1268,7 +1293,11 @@ void Core::Present()
         if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
             GTE_LOG_ERROR("Core", failure);
         }
-        assert(false && "RenderGraph Present Execute() threw - see the engine log");
+    } catch (...) {
+        const std::string failure = "RenderGraph Present Execute() failed: unknown exception";
+        if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
+            GTE_LOG_ERROR("Core", failure);
+        }
     }
 
     if (presentStats.has_value()) {

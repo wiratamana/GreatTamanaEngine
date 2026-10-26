@@ -81,12 +81,35 @@ TEST(GpuWaitPolicyTest, ALostDeviceShortCircuitsEveryLaterWait)
     }
 }
 
+TEST(GpuWaitPolicyTest, AFailedUploadWhileAlreadyLostStaysDeviceLost)
+{
+    GpuWaitPolicy policy;
+    policy.MarkLost();
+    EXPECT_EQ(policy.Judge(WaitClass::Upload, BlockOutcome::Failed), BlockOutcome::DeviceLost);
+    EXPECT_TRUE(policy.Lost());
+}
+
+TEST(GpuWaitPolicyTest, ConsecutiveFrameTimeoutsCountUpAndResetOnACompletedFrameWait)
+{
+    GpuWaitPolicy policy;
+    EXPECT_EQ(policy.ConsecutiveFrameTimeouts(), 0u);
+    static_cast<void>(policy.Judge(WaitClass::Frame, BlockOutcome::TimedOut));
+    static_cast<void>(policy.Judge(WaitClass::Frame, BlockOutcome::TimedOut));
+    EXPECT_EQ(policy.ConsecutiveFrameTimeouts(), 2u);
+
+    // An upload wait says nothing about frame pacing.
+    static_cast<void>(policy.Judge(WaitClass::Upload, BlockOutcome::Completed));
+    EXPECT_EQ(policy.ConsecutiveFrameTimeouts(), 2u);
+
+    static_cast<void>(policy.Judge(WaitClass::Frame, BlockOutcome::Completed));
+    EXPECT_EQ(policy.ConsecutiveFrameTimeouts(), 0u);
+}
+
 TEST(GpuWaitPolicyTest, DefaultTimeoutsAreBounded)
 {
     EXPECT_GT(kFrameWaitTimeout.count(), 0);
     EXPECT_GT(kAcquireTimeout.count(), 0);
     EXPECT_GT(kUploadWaitTimeout.count(), 0);
-    EXPECT_GT(kWarmUpTimeout.count(), 0);
     EXPECT_GT(kIdleWaitTimeout.count(), 0);
     EXPECT_LE(kIdleWaitTimeout, std::chrono::seconds(60));
 }

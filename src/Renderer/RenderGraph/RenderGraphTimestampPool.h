@@ -29,8 +29,7 @@ public:
     };
 
     // `capability` is the device's timestamp support (profiling compiled out forces it off). `renderer` runs
-    // a one-time warm-up reset. Slot budgets must match RenderGraph's name-slot tables; frames in flight must
-    // equal kGpuTimingFramesInFlight.
+    // a one-time warm-up reset. Frames in flight must equal kGpuTimingFramesInFlight.
     RenderGraphTimestampPool(VkDevice device, Renderer& renderer, const GpuTimestampCapability& capability,
         std::uint32_t synchronousSlotBudget, std::uint32_t pipelinedSlotBudget,
         std::uint32_t pipelinedFramesInFlight);

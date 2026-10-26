@@ -113,9 +113,10 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
         }
 
         // Non-const: the BGRA and single-channel branches below convert raw.pixels in place.
-        Renderer::CapturedRawPixels raw = m_frameRenderer->CaptureDebugTexturePixels(*snapshot, /*depthAspect=*/false);
+        CaptureResult captured = m_frameRenderer->CaptureDebugTexturePixels(*snapshot, /*depthAspect=*/false);
+        CapturedPixels& raw = captured.pixels;
 
-        if (raw.pixels.empty()) {
+        if (captured.status != CaptureStatus::Ok || raw.pixels.empty()) {
             // The image is missing or its format is not supported.
             m_shaderPropertyPreviewName = textureName;
             m_shaderPropertyPreviewLookupFailed = true;
@@ -159,10 +160,16 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
         }
 
         const VolumeTexturePreviewInterpretation interpretation = SelectVolumeTexturePreviewInterpretation(textureName);
-        const VolumeTexturePreviewRenderer::CapturedRawPixels raw =
+        const CaptureResult preview =
             m_shaderPropertyVolumeRenderer.RenderPreview(*m_frameRenderer, snapshot->target, snapshot->state, interpretation);
+        const CapturedPixels& raw = preview.pixels;
 
-        if (!uploadOrFail(raw.pixels.data(), raw.width, raw.height, "FrameDebuggerShaderPropertyVolumePreview")) {
+        if (preview.status != CaptureStatus::Ok
+            || !uploadOrFail(raw.pixels.data(), raw.width, raw.height, "FrameDebuggerShaderPropertyVolumePreview")) {
+            if (preview.status != CaptureStatus::Ok) {
+                m_shaderPropertyPreviewName = textureName;
+                m_shaderPropertyPreviewLookupFailed = true;
+            }
             return;
         }
         m_shaderPropertyPreviewExtent = Extent2D{ static_cast<std::uint32_t>(raw.width), static_cast<std::uint32_t>(raw.height) };
@@ -965,8 +972,9 @@ FrameDebuggerEventTextureResult FrameDebuggerPanel::GetEventTextureFromCommand(i
     const bool isDepth = m_captureContext.RetainedEventIsDepth();
 
     // Rare, explicit capture: the renderer waits for the GPU first.
-    Renderer::CapturedRawPixels raw = m_frameRenderer->CaptureEventSnapshotPixels(retained, isDepth);
-    if (raw.pixels.empty()) {
+    CaptureResult captured = m_frameRenderer->CaptureEventSnapshotPixels(retained, isDepth);
+    CapturedPixels& raw = captured.pixels;
+    if (captured.status != CaptureStatus::Ok || raw.pixels.empty()) {
         return result;
     }
 

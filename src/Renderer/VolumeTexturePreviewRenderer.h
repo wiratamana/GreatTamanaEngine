@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CaptureResult.h"
 #include "GraphicsHandleRegistry.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h" // gte::rg::ResourceState
 #include "RenderGraph/Shader.h"
@@ -33,16 +34,11 @@ public:
 
     ~VolumeTexturePreviewRenderer();
 
-    struct CapturedRawPixels {
-        std::vector<std::uint8_t> pixels; // Tightly packed width*height*4 RGBA8 bytes.
-        int width = 0;
-        int height = 0;
-    };
-
     // Renders one blocking raymarch thumbnail of `volume` (at `previousState`) and reads it back; at most once per
     // request. The layout is restored; `interpretation` picks texel decoding, framing and proxy shape.
-    // Empty pixels when the run failed.
-    CapturedRawPixels RenderPreview(Renderer& renderer, const VolumeTarget& volume, const rg::ResourceState& previousState,
+    // Never throws: a failed run is reported in CaptureResult::status.
+    [[nodiscard]] CaptureResult RenderPreview(Renderer& renderer, const VolumeTarget& volume,
+        const rg::ResourceState& previousState,
         VolumeTexturePreviewInterpretation interpretation = VolumeTexturePreviewInterpretation::GenericDensityInAlpha);
 
 private:

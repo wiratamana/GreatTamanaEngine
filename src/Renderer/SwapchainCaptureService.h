@@ -48,6 +48,9 @@ public:
     // out of the mapped buffer (clearing its pending flag), or nullopt when nothing was pending.
     std::optional<CapturedSwapchainPixels> TryTakeCompletedCapture(std::uint32_t frameInFlightIndex);
 
+    // Drops the slot's pending capture whose copy was recorded but never submitted. The request is not re-armed.
+    void AbandonPendingCapture(std::uint32_t frameInFlightIndex) noexcept;
+
     // Called from FramePresenter::RecreateSwapchain() on a real recreation: destroys every readback buffer (wrong
     // size now) and discards any pending capture; the bridge request then times out and the caller can retry.
     void NotifySwapchainRecreated();

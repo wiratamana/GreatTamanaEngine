@@ -178,7 +178,7 @@ public:
         // The GPU must be done with anything ImGui's Vulkan backend (or our own AddTexture() descriptors)
         // references before teardown. A failed wait means a lost device; teardown continues regardless.
         if (m_renderer != nullptr) {
-            static_cast<void>(m_renderer->WaitForGpuIdle(BlockSite::ImGuiBackend, "ImGui layer shutdown"));
+            m_renderer->IdleForTeardown("ImGui layer shutdown");
         }
 
         ReleaseGameViewDescriptor();
@@ -432,7 +432,7 @@ public:
         }
     }
 
-    CapturedPixels CapturePlatformWindow(Renderer& renderer, const std::string& title) override
+    CaptureResult CapturePlatformWindow(Renderer& renderer, const std::string& title) override
     {
         ImGui::SetCurrentContext(m_context);
         ImGuiWindow* window = ImGui::FindWindowByName(title.c_str());
@@ -440,7 +440,7 @@ public:
             ? ImGui_ImplVulkanH_GetWindowDataFromViewport(window->Viewport)
             : nullptr;
         if (platformWindow == nullptr || platformWindow->Swapchain == VK_NULL_HANDLE) {
-            return {}; // Wrong title or still docked.
+            return { {}, CaptureStatus::NothingToCapture }; // Wrong title or still docked.
         }
 
         const ImGui_ImplVulkanH_Frame& frame = platformWindow->Frames[platformWindow->FrameIndex];
@@ -450,8 +450,9 @@ public:
             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_NONE };
 
         // The backbuffer is only queued and untracked by the barrier planner, so a full device stall is the only safe readback.
-        if (renderer.WaitForGpuIdle(BlockSite::CaptureReadback, "platform window capture") != BlockOutcome::Completed) {
-            return {};
+        if (const BlockOutcome idle = renderer.WaitForGpuIdle(BlockSite::CaptureReadback, "platform window capture");
+            idle != BlockOutcome::Completed) {
+            return { {}, CaptureStatusFromBlockOutcome(idle) };
         }
         return renderer.CaptureImagePixels(
             frame.Backbuffer, VK_IMAGE_ASPECT_COLOR_BIT, platformWindow->SurfaceFormat.format, extent, presentState);

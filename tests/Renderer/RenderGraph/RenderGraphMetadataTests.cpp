@@ -639,5 +639,17 @@ TEST(RenderGraphGpuMemoryMetadataTest, JsonCarriesGpuMemoryObjectAndPassIndirect
     EXPECT_EQ(j["offscreen_regime"]["passes"][0]["indirect_draw_count"].get<std::uint32_t>(), 4u);
 }
 
+TEST(RenderGraphGpuWaitMetadataTest, JsonCarriesGpuWaitObject)
+{
+    RenderGraphMetadata metadata = BuildRenderGraphMetadata(RenderGraphSnapshot{}, RenderGraphSnapshot{}, {});
+    metadata.gpuWait.deviceLost = true;
+    metadata.gpuWait.consecutiveFrameTimeouts = 2;
+
+    const nlohmann::json j = metadata;
+
+    EXPECT_TRUE(j["gpu_wait"]["device_lost"].get<bool>());
+    EXPECT_EQ(j["gpu_wait"]["consecutive_frame_timeouts"].get<std::uint32_t>(), 2u);
+    EXPECT_EQ(j["gpu_wait"]["abandoned_objects"].get<std::uint32_t>(), 0u);
+}
 } // namespace
 } // namespace gte::rg

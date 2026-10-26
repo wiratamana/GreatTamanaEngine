@@ -11,7 +11,7 @@ FeaturePurityCheck lists every file that shrinks and is empty. Shadow, SceneLigh
 | Piece | Purpose |
 |---|---|
 | `fx::Feature`, `fx::FeatureHost` | Base class and narrow engine facade (`Scene()`). |
-| `fx::FeatureSetup` | `PreOpaque`, `Opaque`, `PostOpaque`, `PostTransparent`, `PostComposite`, `PreUI`, `PreOpaqueShared`, `DeclareSceneSlot`, `CountInViewStats(passName)` (counts that pass in the per-view draw statistics). Registrations are only collected. |
+| `fx::FeatureSetup` | `PreOpaque`, `Opaque`, `PostOpaque`, `PostTransparent`, `PostComposite`, `PreUI`, `PreOpaqueShared`, `DeclareSceneSlot`. Registrations are only collected. |
 | `fx::Gate` | Pass names a registration answers to in the toggle panel (default: the registered name). `Gate::Always()` is for work that is not a render pass (a uniform write) and must never be silenced by a toggle. |
 | `fx::View`, `fx::Frame` and typed frames | `PreOpaqueFrame`, `OpaqueFrame` (`SceneTarget()` writes color and depth), `PostOpaqueFrame` (scene color and depth), `CompositeFrame` (private target, extent), `SharedFrame`. |
 | `fx::Texture` | Graph handle stamped with `FrameSerial(frame, view)`. Valid in every callback of that view in that frame, never later. A frame also accepts textures made by the Shared callback of the same frame. |

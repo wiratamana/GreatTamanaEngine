@@ -29,9 +29,9 @@ public:
 
     std::size_t LoadedAssemblyCount() const noexcept { return m_loadedAssemblies.size(); }
 
-    // Unloads a project's _Game.dll and _Editor.dll in a fixed order: idle the GPU, unregister every pass/panel/
-    // component it registered, then FreeLibrary (Editor first). A no-op for an unknown project.
-    void UnloadProjectAssembly(const std::string& projectName, Core& core, Renderer& renderer);
+    // Idles the GPU, unregisters everything the project registered, then FreeLibrary (Editor first).
+    // True when unloaded or nothing was loaded; false when the GPU did not go idle (nothing changed).
+    [[nodiscard]] bool UnloadProjectAssembly(const std::string& projectName, Core& core, Renderer& renderer);
 
     // File names of the currently loaded .dlls (never the raw HMODULE).
     std::vector<std::string> GetLoadedAssemblyFileNames() const;

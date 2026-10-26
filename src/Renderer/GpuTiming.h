@@ -50,7 +50,7 @@ inline GpuTimingSample::Status ResolveGpuTimingStatus(
 double ConvertTimestampDeltaToMilliseconds(
     std::uint64_t startTicks, std::uint64_t endTicks, float timestampPeriodNs, std::uint32_t validBits) noexcept;
 
-// Frames in flight the pipelined pass timers cycle through; must equal FramePresenter::kFramesInFlight.
+// Frames in flight the pipelined pass timers cycle through; FramePresenter static_asserts it matches its own.
 inline constexpr std::uint32_t kGpuTimingFramesInFlight = 2;
 
 } // namespace gte

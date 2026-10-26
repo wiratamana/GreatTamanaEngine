@@ -322,6 +322,10 @@ private:
     // De-duplicates frame-build failure logs (a failing frame repeats every frame).
     rg::BoundedOnceSet<64> m_frameFailureOnce;
 
+    // True once the lost-device line was logged. Frames stop for good after a device loss.
+    bool m_lostLogged = false;
+    bool StopIfDeviceLost();
+
     // Present pass state.
     rg::TextureHandle m_swapchainImageThisFrame;
     std::function<void(const rg::RecordingContext&)> m_recordImGuiThisFrame;

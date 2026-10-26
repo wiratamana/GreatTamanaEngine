@@ -154,6 +154,8 @@ private:
     std::chrono::steady_clock::time_point m_lastStat{};
     bool m_hasLoaded = false;
     bool m_valid = false;
+    bool m_meshRetryPending = false; // the upload found the GPU busy; LoadMesh repeats after m_meshRetryFrames
+    std::uint32_t m_meshRetryFrames = 0;
     ClusterViewerLoadDecision m_load;
     std::uint64_t m_vertexCount = 0;
     std::uint64_t m_triangleCount = 0;

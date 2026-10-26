@@ -75,6 +75,7 @@ struct ClusterViewCullResult {
 struct ClusterViewMeshResult {
     bool meshSet = false;        // vertices and indices are on the GPU
     bool clustersUsable = false; // the cluster table passed every check
+    bool retryable = false;      // the GPU was busy; the old mesh is kept and the call may be repeated
     std::string note;            // why the mesh or the table was refused, empty when fine
 };
 

@@ -15,10 +15,8 @@ namespace gte {
 
 static_assert(std::is_trivially_copyable_v<IndirectDrawCapsView>);
 
-// RAII wrapper around a VkPhysicalDevice and the VkDevice created for it, plus its graphics and present
-// queues. Does not own the VkInstance or VkSurfaceKHR; both must outlive it. Selection takes the first
-// suitable discrete GPU (else any suitable one) with graphics, present, VK_KHR_swapchain and dynamicRendering.
-// Not movable: the wait service points at this object's submit mutex.
+// RAII wrapper around a VkPhysicalDevice, its VkDevice and its graphics and present queues. The instance and
+// surface must outlive it. Not movable: the wait service points at this object's submit mutex.
 class VulkanDevice {
 public:
     VulkanDevice(VkInstance instance, VkSurfaceKHR surface);
@@ -62,8 +60,8 @@ public:
     // The one place that blocks on the GPU. Thread-safe, so it is reachable from const callers.
     GpuWaitService& Waits() const noexcept { return *m_waits; }
 
-    // The one choke point for submits to the graphics queue: VkQueue access must be externally
-    // synchronized and several systems submit to it. Nothing else may call vkQueueSubmit on it.
+    // The one choke point for submits to the graphics queue (VkQueue access is externally synchronized).
+    // The only other submit is GpuWaitService::DrainGraphicsQueue, an empty batch under the same mutex.
     // Refuses to submit once the device is lost.
     VkResult SubmitToGraphicsQueue(const VkSubmitInfo2& submit, VkFence fence) const
     {

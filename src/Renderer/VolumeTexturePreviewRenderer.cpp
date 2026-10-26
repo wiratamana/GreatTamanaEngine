@@ -1,5 +1,6 @@
 #include "VolumeTexturePreviewRenderer.h"
 
+#include "GpuWaitFailure.h"
 #include "Renderer.h"
 #include "RenderGraph/ComputePass.h"
 #include "RenderGraph/OneShot.h"
@@ -81,69 +82,70 @@ void VolumeTexturePreviewRenderer::EnsureInitialized(Renderer& renderer)
     m_initialized = true;
 }
 
-VolumeTexturePreviewRenderer::CapturedRawPixels VolumeTexturePreviewRenderer::RenderPreview(
+CaptureResult VolumeTexturePreviewRenderer::RenderPreview(
     Renderer& renderer, const VolumeTarget& volume, const rg::ResourceState& previousState,
     VolumeTexturePreviewInterpretation interpretation)
 {
-    EnsureInitialized(renderer);
-    // The volume may still be in use by the last frame.
-    if (renderer.WaitForGpuIdle(BlockSite::CaptureReadback, "volume preview") != BlockOutcome::Completed) {
-        return CapturedRawPixels{};
-    }
-
-    const bool aerial = interpretation == VolumeTexturePreviewInterpretation::AerialPerspectiveFrustum;
-    const VolumeCameraSetup setup = aerial
-        ? ComputeAerialPerspectivePreviewCameraSetup(static_cast<int>(volume.extent.width),
-              static_cast<int>(volume.extent.height), static_cast<int>(volume.extent.depth))
-        : ComputeVolumeCameraSetup(static_cast<int>(volume.extent.width), static_cast<int>(volume.extent.height),
-              static_cast<int>(volume.extent.depth));
-
-    PushConstants pushConstants{};
-    pushConstants.eyePosition = setup.eyePosition;
-    pushConstants.tanHalfFovY = setup.tanHalfFovY;
-    pushConstants.forward = setup.forward;
-    pushConstants.densityScale = kDensityScale;
-    pushConstants.right = setup.right;
-    pushConstants.stepCount = kStepCount;
-    pushConstants.up = setup.up;
-    pushConstants.boxHalfExtents = setup.boxHalfExtents;
-    pushConstants.interpretationMode = static_cast<std::int32_t>(interpretation);
-    pushConstants.aerialPreviewExposure = aerial ? kAerialPreviewExposure : 0.0f;
-
-    // The aerial perspective preview raymarches a frustum: boxHalfExtents carries its far size and half depth.
-    if (aerial) {
-        pushConstants.shapeMode = 1;
-        const FrustumProxy frustum = ComputeAerialPerspectivePreviewFrustum();
-        pushConstants.boxHalfExtents = Vec3(frustum.farHalfWidth, frustum.farHalfHeight, frustum.halfDepth);
-    }
-
-    {
-        rg::OneShot oneShot(renderer);
-        const rg::TextureHandle source =
-            oneShot.Import(volume, previousState, m_volumeSamplerHandle.Resolve(m_volumeSampler));
-        const rg::TextureHandle output = oneShot.Import(*m_outputTexture, rg::FinalState::Keep);
-        rg::ComputePass(oneShot.Builder(), m_shader, "VolumeTexturePreview", rg::ViewScope::Shared,
-            rg::RenderPassEvent::Opaques)
-            .Bind("volumeTex", source)
-            .Bind("outputImage", output)
-            .Push(pushConstants)
-            .Dispatch(Extent2D{ static_cast<std::uint32_t>(kOutputWidth), static_cast<std::uint32_t>(kOutputHeight) });
-        if (!oneShot.Run()) {
-            return {};
+    try {
+        EnsureInitialized(renderer);
+        // The volume may still be in use by the last frame.
+        if (const BlockOutcome idle = renderer.WaitForGpuIdle(BlockSite::CaptureReadback, "volume preview");
+            idle != BlockOutcome::Completed) {
+            return { {}, CaptureStatusFromBlockOutcome(idle) };
         }
+
+        const bool aerial = interpretation == VolumeTexturePreviewInterpretation::AerialPerspectiveFrustum;
+        const VolumeCameraSetup setup = aerial
+            ? ComputeAerialPerspectivePreviewCameraSetup(static_cast<int>(volume.extent.width),
+                  static_cast<int>(volume.extent.height), static_cast<int>(volume.extent.depth))
+            : ComputeVolumeCameraSetup(static_cast<int>(volume.extent.width), static_cast<int>(volume.extent.height),
+                  static_cast<int>(volume.extent.depth));
+
+        PushConstants pushConstants{};
+        pushConstants.eyePosition = setup.eyePosition;
+        pushConstants.tanHalfFovY = setup.tanHalfFovY;
+        pushConstants.forward = setup.forward;
+        pushConstants.densityScale = kDensityScale;
+        pushConstants.right = setup.right;
+        pushConstants.stepCount = kStepCount;
+        pushConstants.up = setup.up;
+        pushConstants.boxHalfExtents = setup.boxHalfExtents;
+        pushConstants.interpretationMode = static_cast<std::int32_t>(interpretation);
+        pushConstants.aerialPreviewExposure = aerial ? kAerialPreviewExposure : 0.0f;
+
+        // The aerial perspective preview raymarches a frustum: boxHalfExtents carries its far size and half depth.
+        if (aerial) {
+            pushConstants.shapeMode = 1;
+            const FrustumProxy frustum = ComputeAerialPerspectivePreviewFrustum();
+            pushConstants.boxHalfExtents = Vec3(frustum.farHalfWidth, frustum.farHalfHeight, frustum.halfDepth);
+        }
+
+        {
+            rg::OneShot oneShot(renderer);
+            const rg::TextureHandle source =
+                oneShot.Import(volume, previousState, m_volumeSamplerHandle.Resolve(m_volumeSampler));
+            const rg::TextureHandle output = oneShot.Import(*m_outputTexture, rg::FinalState::Keep);
+            rg::ComputePass(oneShot.Builder(), m_shader, "VolumeTexturePreview", rg::ViewScope::Shared,
+                rg::RenderPassEvent::Opaques)
+                .Bind("volumeTex", source)
+                .Bind("outputImage", output)
+                .Push(pushConstants)
+                .Dispatch(Extent2D{ static_cast<std::uint32_t>(kOutputWidth), static_cast<std::uint32_t>(kOutputHeight) });
+            if (!oneShot.Run()) {
+                return { {}, renderer.DeviceLost() ? CaptureStatus::DeviceLost : CaptureStatus::Failed };
+            }
+        }
+
+        // The output is R8G8B8A8, never BGRA, so no channel swizzle is needed. It stays in the compute-write state.
+        return renderer.CaptureImagePixels(m_outputTexture->Image(), VK_IMAGE_ASPECT_COLOR_BIT,
+            VK_FORMAT_R8G8B8A8_UNORM,
+            Extent2D{ static_cast<std::uint32_t>(kOutputWidth), static_cast<std::uint32_t>(kOutputHeight) },
+            m_outputTexture->CurrentState());
+    } catch (const GpuWaitFailure& failure) {
+        return { {}, CaptureStatusFromBlockOutcome(failure.Outcome()) };
+    } catch (...) {
+        return { {}, renderer.DeviceLost() ? CaptureStatus::DeviceLost : CaptureStatus::Failed };
     }
-
-    // The output is R8G8B8A8, never BGRA, so no channel swizzle is needed. It stays in the compute-write state.
-    const Renderer::CapturedRawPixels raw = renderer.CaptureImagePixels(m_outputTexture->Image(),
-        VK_IMAGE_ASPECT_COLOR_BIT, VK_FORMAT_R8G8B8A8_UNORM,
-        Extent2D{ static_cast<std::uint32_t>(kOutputWidth), static_cast<std::uint32_t>(kOutputHeight) },
-        m_outputTexture->CurrentState());
-
-    CapturedRawPixels result;
-    result.pixels = raw.pixels;
-    result.width = raw.width;
-    result.height = raw.height;
-    return result;
 }
 
 } // namespace gte

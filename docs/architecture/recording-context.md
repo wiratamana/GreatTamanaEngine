@@ -16,7 +16,7 @@ an opaque native pointer, the `Renderer*`, and an optional `const PassContext*` 
 ## Who makes one
 
 - `PassContext::Recording()`: draws feed the pass stats and the frame debugger.
-- `Renderer::BeginOffscreenRenderGraphRecording()`: the offscreen command buffer, outside any pass.
+- `Renderer::BeginOffscreenRecording()`: an `OffscreenRecording` guard; `Context()` is the offscreen command buffer, outside any pass. `Submit()` runs it; dropping it unsubmitted discards it.
 
 ## Who opens one
 

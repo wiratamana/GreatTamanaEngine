@@ -31,12 +31,6 @@ std::uint64_t ToTicks(std::chrono::nanoseconds timeout) noexcept
     return static_cast<std::uint64_t>(std::max<std::int64_t>(0, timeout.count()));
 }
 
-std::uint64_t NowMicros() noexcept
-{
-    const auto now = std::chrono::steady_clock::now().time_since_epoch();
-    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(now).count());
-}
-
 } // namespace
 
 GpuWaitService::GpuWaitService(VkDevice device, VkQueue graphicsQueue, std::mutex& queueMutex)
@@ -53,11 +47,10 @@ GpuWaitService::GpuWaitService(VkDevice device, VkQueue graphicsQueue, std::mute
 
 GpuWaitService::~GpuWaitService()
 {
-    // On a lost device the drain fence may still be pending and quarantined fences are left alone.
-    static_cast<void>(WaitIdle(kIdleWaitTimeout, BlockSite::Shutdown, "GpuWaitService"));
-    if (m_drainFence != VK_NULL_HANDLE) {
+    if (WaitIdle(kIdleWaitTimeout, BlockSite::Shutdown, "GpuWaitService") == BlockOutcome::Completed) {
         vkDestroyFence(m_device, m_drainFence, nullptr);
     }
+    // Otherwise: device lost, the pending drain fence is abandoned.
 }
 
 BlockOutcome GpuWaitService::WaitFence(VkFence fence, std::chrono::nanoseconds timeout, WaitClass waitClass,
@@ -66,9 +59,9 @@ BlockOutcome GpuWaitService::WaitFence(VkFence fence, std::chrono::nanoseconds t
     if (m_policy.Lost()) {
         return BlockOutcome::DeviceLost;
     }
-    const std::uint64_t token = BeginBlock(site, detail);
+    BeginBlock(site, detail);
     const VkResult result = vkWaitForFences(m_device, 1, &fence, VK_TRUE, ToTicks(timeout));
-    return EndBlock(token, waitClass, site, detail, FromVkResult(result));
+    return EndBlock(waitClass, site, detail, FromVkResult(result));
 }
 
 BlockOutcome GpuWaitService::WaitIdle(std::chrono::nanoseconds timeout, BlockSite site, const char* detail) noexcept
@@ -76,19 +69,15 @@ BlockOutcome GpuWaitService::WaitIdle(std::chrono::nanoseconds timeout, BlockSit
     if (m_policy.Lost()) {
         return BlockOutcome::DeviceLost;
     }
-    const std::uint64_t token = BeginBlock(site, detail);
+    BeginBlock(site, detail);
 
     BlockOutcome raw = DrainGraphicsQueue(timeout);
     if (raw == BlockOutcome::Completed) {
-        // The graphics queue is empty, so this waits for the other queues only.
+        // The graphics queue is empty, so this waits for the other queues only. Queues are externally synchronized.
+        const std::lock_guard queueLock(m_queueMutex);
         raw = FromVkResult(vkDeviceWaitIdle(m_device));
     }
-
-    const BlockOutcome outcome = EndBlock(token, WaitClass::Upload, site, detail, raw);
-    if (outcome == BlockOutcome::Completed) {
-        ReleaseQuarantine();
-    }
-    return outcome;
+    return EndBlock(WaitClass::Upload, site, detail, raw);
 }
 
 GpuWaitService::Acquired GpuWaitService::AcquireImage(VkSwapchainKHR swapchain, VkSemaphore imageAvailable,
@@ -101,59 +90,51 @@ GpuWaitService::Acquired GpuWaitService::AcquireImage(VkSwapchainKHR swapchain, 
         return acquired;
     }
 
-    const std::uint64_t token = BeginBlock(site, detail);
+    BeginBlock(site, detail);
     acquired.result = vkAcquireNextImageKHR(
         m_device, swapchain, ToTicks(timeout), imageAvailable, VK_NULL_HANDLE, &acquired.imageIndex);
 
     // Out-of-date and suboptimal are answers, not wait failures; the caller reads `result`.
     const bool answered = acquired.result == VK_ERROR_OUT_OF_DATE_KHR || acquired.result == VK_SUBOPTIMAL_KHR;
     const BlockOutcome raw = answered ? BlockOutcome::Completed : FromVkResult(acquired.result);
-    acquired.outcome = EndBlock(token, WaitClass::Frame, site, detail, raw);
+    acquired.outcome = EndBlock(WaitClass::Frame, site, detail, raw);
     return acquired;
 }
 
-void GpuWaitService::Quarantine(VkFence fence) noexcept
+GpuWaitService::Presented GpuWaitService::Present(VkQueue queue, const VkPresentInfoKHR& info) noexcept
 {
-    if (fence == VK_NULL_HANDLE) {
-        return;
+    Presented presented;
+    if (m_policy.Lost()) {
+        presented.outcome = BlockOutcome::DeviceLost;
+        presented.result = VK_ERROR_DEVICE_LOST;
+        return presented;
     }
-    {
-        const std::lock_guard lock(m_quarantineMutex);
-        if (m_quarantineCount < m_quarantine.size()) {
-            m_quarantine[m_quarantineCount++] = fence;
-            return;
-        }
+
+    constexpr const char* kDetail = "present";
+    BeginBlock(BlockSite::PresentQueue, kDetail);
+    if (queue == m_queue) {
+        const std::lock_guard queueLock(m_queueMutex);
+        presented.result = vkQueuePresentKHR(queue, &info);
+    } else {
+        presented.result = vkQueuePresentKHR(queue, &info);
     }
-    // Full: the device is lost by now, so the handle is abandoned rather than destroyed under the GPU.
-    LogOnce(BlockSite::ImmediateSubmit, BlockOutcome::Failed, "quarantine full");
+
+    const bool answered = presented.result == VK_ERROR_OUT_OF_DATE_KHR || presented.result == VK_SUBOPTIMAL_KHR;
+    const BlockOutcome raw = answered ? BlockOutcome::Completed : FromVkResult(presented.result);
+    presented.outcome = EndBlock(WaitClass::Frame, BlockSite::PresentQueue, kDetail, raw);
+    return presented;
 }
 
-GpuWaitService::LiveBlock GpuWaitService::CurrentBlock() const noexcept
+void GpuWaitService::BeginBlock(BlockSite site, const char* detail) noexcept
 {
-    const std::uint64_t live = m_live.load(std::memory_order_acquire);
-    if (live == 0) {
-        return {};
-    }
-    return LiveBlock{ true, static_cast<BlockSite>((live & 0xFFu) - 1), (live >> 8) * 1000u };
-}
-
-std::uint64_t GpuWaitService::BeginBlock(BlockSite site, const char* detail) noexcept
-{
-    const std::uint64_t token = (NowMicros() << 8) | (static_cast<std::uint64_t>(site) + 1);
-    m_live.store(token, std::memory_order_release);
     if (IRenderTimingObserver* observer = m_observer.load(std::memory_order_acquire)) {
         observer->OnBlockBegin(site, detail);
     }
-    return token;
 }
 
-BlockOutcome GpuWaitService::EndBlock(
-    std::uint64_t token, WaitClass waitClass, BlockSite site, const char* detail, BlockOutcome raw) noexcept
+BlockOutcome GpuWaitService::EndBlock(WaitClass waitClass, BlockSite site, const char* detail, BlockOutcome raw) noexcept
 {
     const BlockOutcome outcome = m_policy.Judge(waitClass, raw);
-
-    std::uint64_t expected = token;
-    m_live.compare_exchange_strong(expected, 0, std::memory_order_acq_rel);
     if (IRenderTimingObserver* observer = m_observer.load(std::memory_order_acquire)) {
         observer->OnBlockEnd(site, outcome);
     }
@@ -198,21 +179,11 @@ void GpuWaitService::LogOnce(BlockSite site, BlockOutcome outcome, const char* d
     }
     try {
         GTE_LOG_ERROR("GpuWait",
-            std::string("GpuWait(") + ToString(site) + ") " + ToString(outcome)
-                + (detail != nullptr && detail[0] != '\0' ? std::string(": ") + detail : std::string()));
+            std::string("GpuWait(") + ToString(site) + (detail != nullptr && detail[0] != '\0' ? std::string(":") + detail : std::string())
+                + ") " + ToString(outcome));
     } catch (...) {
         // Logging must never throw out of a wait.
     }
-}
-
-void GpuWaitService::ReleaseQuarantine() noexcept
-{
-    const std::lock_guard lock(m_quarantineMutex);
-    for (std::size_t i = 0; i < m_quarantineCount; ++i) {
-        vkDestroyFence(m_device, m_quarantine[i], nullptr);
-        m_quarantine[i] = VK_NULL_HANDLE;
-    }
-    m_quarantineCount = 0;
 }
 
 } // namespace gte

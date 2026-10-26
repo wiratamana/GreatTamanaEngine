@@ -21,9 +21,9 @@ TEST(RenderTextureTest, FinalizeForExternalSamplingReadsTrackedStateNotAGuess)
     tex.SetCurrentState(computeWriteState);
     EXPECT_EQ(tex.CurrentState(), computeWriteState);
 
-    const rg::RecordingContext cmd = fixture.GetRenderer().BeginOffscreenRenderGraphRecording();
-    tex.FinalizeForExternalSampling(cmd);
-    fixture.GetRenderer().EndOffscreenRenderGraphRecording();
+    OffscreenRecording recording = fixture.GetRenderer().BeginOffscreenRecording();
+    tex.FinalizeForExternalSampling(recording.Context());
+    recording.Submit();
 
     const rg::ResourceState shaderReadState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
     EXPECT_EQ(tex.CurrentState(), shaderReadState);

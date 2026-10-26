@@ -65,11 +65,8 @@ TEST(ProjectAssemblyHostTest, UnloadProjectAssemblyOnANeverLoadedHostIsASafeNoOp
     ASSERT_NE(core, nullptr);
 
     ProjectAssemblyHost host;
-    // Never loaded, never recorded anywhere - must not crash, must not
-    // throw, only logs at INFO level (see UnloadProjectAssembly()'s own doc
-    // comment) - this is the no-matching-entries early-return path, which
-    // never even needs to call renderer.WaitForGpuIdle().
-    host.UnloadProjectAssembly("NeverLoaded", *core, core->GetRenderer());
+    // Nothing loaded: a no-op that reports success without touching the GPU.
+    EXPECT_TRUE(host.UnloadProjectAssembly("NeverLoaded", *core, core->GetRenderer()));
 
     EXPECT_TRUE(host.GetLoadedAssemblyFileNames().empty());
 }

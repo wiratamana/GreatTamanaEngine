@@ -2,6 +2,8 @@
 
 #include "GpuTiming.h"
 #include "GpuWaitPolicy.h"
+#include "OffscreenRecording.h"
+#include "PresentRecoveryPlan.h"
 #include "RenderGraph/CommandBuffer.h"
 #include "RenderGraph/RenderGraph.h"
 #include "RenderGraph/RenderGraphBarrierPlanner.h"
@@ -31,11 +33,10 @@ void ThrowIfNotCompleted(const char* what, BlockOutcome outcome)
 } // namespace
 
 FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
-    std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue graphicsQueue,
-    VkQueue presentQueue, int width, int height, VmaAllocator allocator, VkFormat depthFormat,
-    std::shared_ptr<GpuMemoryTracker> memoryTracker, VulkanDevice& vulkanDevice)
+    std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue presentQueue, int width, int height,
+    VmaAllocator allocator, VkFormat depthFormat, std::shared_ptr<GpuMemoryTracker> memoryTracker,
+    VulkanDevice& vulkanDevice)
     : m_device(device)
-    , m_graphicsQueue(graphicsQueue)
     , m_presentQueue(presentQueue)
     , m_graphicsQueueFamily(graphicsQueueFamily)
     , m_vulkanDevice(&vulkanDevice)
@@ -133,19 +134,7 @@ void FramePresenter::RecreateSwapchain()
 DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTexture& target,
     const std::array<float, 4>& clearColor, const std::function<void(rg::CommandBuffer&)>& recordExtra)
 {
-    GpuWaitService& waits = m_vulkanDevice->Waits();
-    const VkFence offscreenFence = m_frameSync.OffscreenFence();
-    ThrowIfNotCompleted("RenderOffscreen",
-        waits.WaitFence(offscreenFence, kFrameWaitTimeout, WaitClass::Frame, BlockSite::PreviousOffscreen,
-            "offscreen preview fence"));
-
-    vkResetCommandBuffer(m_offscreenCommandBuffer, 0);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    if (vkBeginCommandBuffer(m_offscreenCommandBuffer, &beginInfo) != VK_SUCCESS) {
-        throw std::runtime_error("vkBeginCommandBuffer failed (offscreen)");
-    }
+    OffscreenRecording recording(*this, nullptr);
 
     // RecordFrame() speaks raw VkCommandBuffer; wrap `recordExtra` so callers never need a raw handle.
     // recordExtra callbacks only use the raw escape hatch, never Draw()/Dispatch(), which need a Renderer.
@@ -158,16 +147,15 @@ DrawStats FramePresenter::RenderOffscreen(FrameRecorder& frameRecorder, RenderTe
     const DrawStats drawStats = frameRecorder.RecordFrame(m_offscreenCommandBuffer, target.Target(), ColorFormat(),
         m_depthFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, clearColor, rawRecordExtra);
 
-    if (vkEndCommandBuffer(m_offscreenCommandBuffer) != VK_SUCCESS) {
-        throw std::runtime_error("vkEndCommandBuffer failed (offscreen)");
-    }
-
-    SubmitOffscreenAndWait(offscreenFence, "RenderOffscreen");
+    recording.Submit();
     return drawStats;
 }
 
 VkCommandBuffer FramePresenter::BeginOffscreenRecording()
 {
+    if (m_offscreenOpen) {
+        throw std::logic_error("offscreen recording is already open");
+    }
     ThrowIfNotCompleted("BeginOffscreenRecording",
         m_vulkanDevice->Waits().WaitFence(m_frameSync.OffscreenFence(), kFrameWaitTimeout, WaitClass::Frame,
             BlockSite::PreviousOffscreen, "offscreen fence"));
@@ -177,17 +165,26 @@ VkCommandBuffer FramePresenter::BeginOffscreenRecording()
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     if (vkBeginCommandBuffer(m_offscreenCommandBuffer, &beginInfo) != VK_SUCCESS) {
-        throw std::runtime_error("vkBeginCommandBuffer failed (offscreen render graph)");
+        throw std::runtime_error("vkBeginCommandBuffer failed (offscreen)");
     }
+    m_offscreenOpen = true;
     return m_offscreenCommandBuffer;
 }
 
 void FramePresenter::EndOffscreenRecording()
 {
+    m_offscreenOpen = false;
     if (vkEndCommandBuffer(m_offscreenCommandBuffer) != VK_SUCCESS) {
-        throw std::runtime_error("vkEndCommandBuffer failed (offscreen render graph)");
+        throw std::runtime_error("vkEndCommandBuffer failed (offscreen)");
     }
     SubmitOffscreenAndWait(m_frameSync.OffscreenFence(), "EndOffscreenRecording");
+}
+
+void FramePresenter::DiscardOffscreen() noexcept
+{
+    // Legal while recording, also inside an open rendering instance; the buffer was never submitted.
+    vkResetCommandBuffer(m_offscreenCommandBuffer, 0);
+    m_offscreenOpen = false;
 }
 
 void FramePresenter::SubmitOffscreenAndWait(VkFence offscreenFence, const char* what)
@@ -212,6 +209,112 @@ void FramePresenter::SubmitOffscreenAndWait(VkFence offscreenFence, const char* 
     ThrowIfNotCompleted(what,
         m_vulkanDevice->Waits().WaitFence(
             offscreenFence, kFrameWaitTimeout, WaitClass::Frame, BlockSite::Offscreen, "offscreen submit"));
+}
+
+void FramePresenter::RecoverAcquiredImage(std::uint32_t imageIndex, bool fenceReset, bool capturePending) noexcept
+{
+    GpuWaitService& waits = m_vulkanDevice->Waits();
+    const PresentRecoveryPlan plan = PlanPresentRecovery({ waits.DeviceLost(), true, fenceReset, capturePending });
+
+    const std::uint32_t frame = m_currentFrame;
+    const VkCommandBuffer cmd = m_commandBuffers[frame];
+    const VkFence fence = m_frameSync.InFlightFence(frame);
+    const VkSemaphore waitSemaphore = m_frameSync.ImageAvailableSemaphore(frame);
+    const VkSemaphore signalSemaphore = m_frameSync.RenderFinishedSemaphore(imageIndex);
+
+    try {
+        for (const PresentRecoveryStep step : plan) {
+            switch (step) {
+            case PresentRecoveryStep::AbandonCapture:
+                m_swapchainCapture.AbandonPendingCapture(frame);
+                break;
+            case PresentRecoveryStep::ResetCommandBuffer:
+                if (vkResetCommandBuffer(cmd, 0) != VK_SUCCESS) {
+                    waits.MarkDeviceLost();
+                    return;
+                }
+                break;
+            case PresentRecoveryStep::TransitionToPresent: {
+                // The image shows undefined contents for one frame; the swapchain keeps every image in rotation.
+                VkCommandBufferBeginInfo beginInfo{};
+                beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+                if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
+                    waits.MarkDeviceLost();
+                    return;
+                }
+                const rg::ResourceState previous{
+                    VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE
+                };
+                const rg::ResourceState next{
+                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_NONE
+                };
+                const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+                rg::EmitImageBarrier(cmd, m_swapchain.Image(imageIndex), range, previous, next);
+                if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+                    waits.MarkDeviceLost();
+                    return;
+                }
+                break;
+            }
+            case PresentRecoveryStep::ResetFence:
+                vkResetFences(m_device, 1, &fence);
+                break;
+            case PresentRecoveryStep::SubmitAndSignal: {
+                VkSemaphoreSubmitInfo waitInfo{};
+                waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+                waitInfo.semaphore = waitSemaphore;
+                waitInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+                VkSemaphoreSubmitInfo signalInfo{};
+                signalInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+                signalInfo.semaphore = signalSemaphore;
+                signalInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+                VkCommandBufferSubmitInfo cmdInfo{};
+                cmdInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+                cmdInfo.commandBuffer = cmd;
+
+                VkSubmitInfo2 submitInfo{};
+                submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+                submitInfo.waitSemaphoreInfoCount = 1;
+                submitInfo.pWaitSemaphoreInfos = &waitInfo;
+                submitInfo.commandBufferInfoCount = 1;
+                submitInfo.pCommandBufferInfos = &cmdInfo;
+                submitInfo.signalSemaphoreInfoCount = 1;
+                submitInfo.pSignalSemaphoreInfos = &signalInfo;
+                if (m_vulkanDevice->SubmitToGraphicsQueue(submitInfo, fence) != VK_SUCCESS) {
+                    waits.MarkDeviceLost();
+                    return;
+                }
+                break;
+            }
+            case PresentRecoveryStep::Present: {
+                VkPresentInfoKHR presentInfo{};
+                presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+                presentInfo.waitSemaphoreCount = 1;
+                presentInfo.pWaitSemaphores = &signalSemaphore;
+                const VkSwapchainKHR swapchain = m_swapchain.Native();
+                presentInfo.swapchainCount = 1;
+                presentInfo.pSwapchains = &swapchain;
+                presentInfo.pImageIndices = &imageIndex;
+
+                const GpuWaitService::Presented presented = waits.Present(m_presentQueue, presentInfo);
+                if (presented.result == VK_ERROR_OUT_OF_DATE_KHR || presented.result == VK_SUBOPTIMAL_KHR) {
+                    m_resizeRequested = true;
+                } else if (presented.result != VK_SUCCESS) {
+                    waits.MarkDeviceLost();
+                    return;
+                }
+                break;
+            }
+            case PresentRecoveryStep::AdvanceFrame:
+                m_currentFrame = (m_currentFrame + 1) % kFramesInFlight;
+                break;
+            }
+        }
+    } catch (...) {
+        waits.MarkDeviceLost();
+    }
 }
 
 bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph,
@@ -250,91 +353,103 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph,
         throw std::runtime_error("swapchain image acquire failed (VkResult=" + std::to_string(acquired.result) + ")");
     }
     const std::uint32_t imageIndex = acquired.imageIndex;
-
     const VkCommandBuffer cmd = m_commandBuffers[m_currentFrame];
-    vkResetCommandBuffer(cmd, 0);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
-        throw std::runtime_error("vkBeginCommandBuffer failed (render graph present)");
+    // From here the image and the image-available semaphore belong to this frame until it is submitted.
+    // A throw in between must still hand the image back, or the swapchain loses one image per throw.
+    bool captureRecorded = false;
+    bool fenceReset = false;
+    try {
+        vkResetCommandBuffer(cmd, 0);
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
+            throw std::runtime_error("vkBeginCommandBuffer failed (render graph present)");
+        }
+
+        RenderTarget target;
+        target.image = m_swapchain.Image(imageIndex);
+        target.imageView = m_swapchain.ImageView(imageIndex);
+        target.extent = m_swapchain.Extent();
+        target.format = m_swapchain.ImageFormat();
+
+        graph.Execute(rg::RecordingAccess::Wrap(cmd), rg::ExecuteTimingMode::PipelinedDeferredReadback,
+            [&](rg::RenderGraphBuilder& builder) -> std::vector<rg::TextureHandle> {
+                // The swapchain image is never sampled, only presented - no sampler exists for it.
+                const rg::TextureHandle swapchainHandle =
+                    builder.ImportTexture("Swapchain", target, ImageLayout::Undefined);
+                return build(builder, swapchainHandle);
+            });
+
+        // A requested capture records its copy and barriers here, before the manual finalize below.
+        // That finalize then starts from TransferSrcOptimal for this call.
+        const bool capturedThisFrame = m_swapchainCapture.RecordCaptureIfRequested(
+            cmd, target.image, target.extent, target.format, m_currentFrame);
+        captureRecorded = capturedThisFrame;
+
+        // The graph never learns this image goes to present, so the final transition to PRESENT_SRC_KHR is done by
+        // hand with the graph's own helpers; safe because Execute() has closed its rendering bracket.
+        {
+            // After a capture copy the image is in TransferSrcOptimal instead of ColorAttachmentWrite.
+            const rg::ResourceState previous = capturedThisFrame
+                ? rg::ResourceState{ VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                      VK_ACCESS_2_TRANSFER_READ_BIT }
+                : rg::RequiredStateFor(rg::ResourceAccess::ColorAttachmentWrite, false);
+            const rg::ResourceState next{
+                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_NONE
+            };
+            const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+            rg::EmitImageBarrier(cmd, target.image, range, previous, next);
+
+            // Runs on every present, and reuses `next` so the debug state cannot drift from the real transition.
+            graph.NotifyDebugTextureStateOverride("Swapchain", next);
+        }
+
+        if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+            throw std::runtime_error("vkEndCommandBuffer failed (render graph present)");
+        }
+
+        const VkSemaphore waitSemaphore = m_frameSync.ImageAvailableSemaphore(m_currentFrame);
+        const VkSemaphore signalSemaphore = m_frameSync.RenderFinishedSemaphore(imageIndex);
+
+        VkSemaphoreSubmitInfo waitSemaphoreInfo{};
+        waitSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        waitSemaphoreInfo.semaphore = waitSemaphore;
+        waitSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+        VkSemaphoreSubmitInfo signalSemaphoreInfo{};
+        signalSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        signalSemaphoreInfo.semaphore = signalSemaphore;
+        signalSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+        VkCommandBufferSubmitInfo cmdSubmitInfo{};
+        cmdSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+        cmdSubmitInfo.commandBuffer = cmd;
+
+        VkSubmitInfo2 submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+        submitInfo.waitSemaphoreInfoCount = 1;
+        submitInfo.pWaitSemaphoreInfos = &waitSemaphoreInfo;
+        submitInfo.commandBufferInfoCount = 1;
+        submitInfo.pCommandBufferInfos = &cmdSubmitInfo;
+        submitInfo.signalSemaphoreInfoCount = 1;
+        submitInfo.pSignalSemaphoreInfos = &signalSemaphoreInfo;
+
+        // Reset only now: a throw before this point leaves the fence signaled for the next frame.
+        vkResetFences(m_device, 1, &fence);
+        fenceReset = true;
+        if (m_vulkanDevice->SubmitToGraphicsQueue(submitInfo, fence) != VK_SUCCESS) {
+            // The fence is unsignaled and nothing will signal it: stop all further waits and submits.
+            m_vulkanDevice->Waits().MarkDeviceLost();
+            throw std::runtime_error("vkQueueSubmit2 failed (render graph present)");
+        }
+    } catch (...) {
+        RecoverAcquiredImage(imageIndex, fenceReset, captureRecorded);
+        throw;
     }
 
-    RenderTarget target;
-    target.image = m_swapchain.Image(imageIndex);
-    target.imageView = m_swapchain.ImageView(imageIndex);
-    target.extent = m_swapchain.Extent();
-    target.format = m_swapchain.ImageFormat();
-
-    // A dependency cycle in Compile() would throw; it is not caught here, the caller handles it.
-    graph.Execute(rg::RecordingAccess::Wrap(cmd), rg::ExecuteTimingMode::PipelinedDeferredReadback,
-        [&](rg::RenderGraphBuilder& builder) -> std::vector<rg::TextureHandle> {
-            // The swapchain image is never sampled, only presented - no sampler exists for it.
-            const rg::TextureHandle swapchainHandle =
-                builder.ImportTexture("Swapchain", target, ImageLayout::Undefined);
-            return build(builder, swapchainHandle);
-        });
-
-    // A requested capture records its copy and barriers here, before the manual finalize below.
-    // That finalize then starts from TransferSrcOptimal for this call.
-    const bool capturedThisFrame =
-        m_swapchainCapture.RecordCaptureIfRequested(cmd, target.image, target.extent, target.format, m_currentFrame);
-
-    // The graph never learns this image goes to present, so the final transition to PRESENT_SRC_KHR is done by
-    // hand with the graph's own helpers; safe because Execute() has closed its rendering bracket.
-    {
-        // After a capture copy the image is in TransferSrcOptimal instead of ColorAttachmentWrite.
-        const rg::ResourceState previous = capturedThisFrame
-            ? rg::ResourceState{ VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                  VK_ACCESS_2_TRANSFER_READ_BIT }
-            : rg::RequiredStateFor(rg::ResourceAccess::ColorAttachmentWrite, false);
-        const rg::ResourceState next{
-            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_2_NONE
-        };
-        const VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        rg::EmitImageBarrier(cmd, target.image, range, previous, next);
-
-        // Runs on every present, and reuses `next` so the debug state cannot drift from the real transition.
-        graph.NotifyDebugTextureStateOverride("Swapchain", next);
-    }
-
-    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
-        throw std::runtime_error("vkEndCommandBuffer failed (render graph present)");
-    }
-
-    const VkSemaphore waitSemaphore = m_frameSync.ImageAvailableSemaphore(m_currentFrame);
     const VkSemaphore signalSemaphore = m_frameSync.RenderFinishedSemaphore(imageIndex);
-
-    VkSemaphoreSubmitInfo waitSemaphoreInfo{};
-    waitSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-    waitSemaphoreInfo.semaphore = waitSemaphore;
-    waitSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-
-    VkSemaphoreSubmitInfo signalSemaphoreInfo{};
-    signalSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-    signalSemaphoreInfo.semaphore = signalSemaphore;
-    signalSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-
-    VkCommandBufferSubmitInfo cmdSubmitInfo{};
-    cmdSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-    cmdSubmitInfo.commandBuffer = cmd;
-
-    VkSubmitInfo2 submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
-    submitInfo.waitSemaphoreInfoCount = 1;
-    submitInfo.pWaitSemaphoreInfos = &waitSemaphoreInfo;
-    submitInfo.commandBufferInfoCount = 1;
-    submitInfo.pCommandBufferInfos = &cmdSubmitInfo;
-    submitInfo.signalSemaphoreInfoCount = 1;
-    submitInfo.pSignalSemaphoreInfos = &signalSemaphoreInfo;
-
-    // Reset only now: a throw before this point leaves the fence signaled for the next frame.
-    vkResetFences(m_device, 1, &fence);
-    if (m_vulkanDevice->SubmitToGraphicsQueue(submitInfo, fence) != VK_SUCCESS) {
-        // The fence is unsignaled and nothing will signal it: stop all further waits and submits.
-        m_vulkanDevice->Waits().MarkDeviceLost();
-        throw std::runtime_error("vkQueueSubmit2 failed (render graph present)");
-    }
 
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -345,11 +460,11 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph,
     presentInfo.pSwapchains = &swapchain;
     presentInfo.pImageIndices = &imageIndex;
 
-    const VkResult presentResult = vkQueuePresentKHR(m_presentQueue, &presentInfo);
-    if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
+    const GpuWaitService::Presented presented = waits.Present(m_presentQueue, presentInfo);
+    if (presented.result == VK_ERROR_OUT_OF_DATE_KHR || presented.result == VK_SUBOPTIMAL_KHR) {
         m_resizeRequested = true;
-    } else if (presentResult != VK_SUCCESS) {
-        throw std::runtime_error("vkQueuePresentKHR failed (VkResult=" + std::to_string(presentResult) + ")");
+    } else if (presented.result != VK_SUCCESS) {
+        throw std::runtime_error("present failed (VkResult=" + std::to_string(presented.result) + ")");
     }
 
     m_currentFrame = (m_currentFrame + 1) % kFramesInFlight;

@@ -203,7 +203,11 @@ std::optional<ClusterViewerImage> SceneCameraAdapter::CaptureImage(bool overlay)
     }
     // The previous frame may still be in flight; a debug capture can afford the stall.
     ClusterViewerImage image;
-    image.pixels = m_renderer->CaptureRenderTexturePixelsAfterIdle(*m_sceneView);
+    CaptureResult captured = m_renderer->CaptureRenderTexturePixelsAfterIdle(*m_sceneView);
+    if (captured.status != CaptureStatus::Ok) {
+        return std::nullopt;
+    }
+    image.pixels = std::move(captured.pixels);
     if (image.pixels.pixels.empty() || image.pixels.width < 1 || image.pixels.height < 1) {
         return std::nullopt;
     }

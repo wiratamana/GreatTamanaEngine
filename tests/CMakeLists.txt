@@ -2253,6 +2253,7 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Network/NetworkRoutesClusterViewerTests.cpp
     Network/NetworkRoutesSceneCameraTests.cpp
     Network/NetworkRequestGuardTests.cpp
+    Network/NetworkCaptureFailureTests.cpp
     Network/NetworkServerTests.cpp
     Network/CaptureEndpointsEndToEndTests.cpp
     Network/EngineCommandEndpointsEndToEndTests.cpp
@@ -2290,6 +2291,10 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Renderer/RenderGraph/IndirectDrawRecordTests.cpp
     Renderer/GpuTimingTests.cpp
     Renderer/GpuWaitPolicyTests.cpp
+    Renderer/AbandonedWorkTests.cpp
+    Renderer/GpuWaitServiceTests.cpp
+    Renderer/PresentRecoveryPlanTests.cpp
+    Renderer/CaptureStatusTests.cpp
     Renderer/ComputeDispatchTests.cpp
     Renderer/VolumeTexturePreviewMathTests.cpp
     # Headless-GPU test for RenderTexture's colorless constructor option.
@@ -2341,6 +2346,7 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Renderer/RenderGraph/OneShotTests.cpp
     Renderer/RenderGraph/RecordedPassTests.cpp
     Renderer/RenderGraph/TransferReadbackGpuTests.cpp
+    Renderer/RenderGraph/OffscreenRecordingFaultTests.cpp
     Renderer/RenderGraph/RenderGraphBuilderTests.cpp
     Renderer/RenderGraph/RenderPassTests.cpp
     Renderer/RenderGraph/RenderGraphCompilerTests.cpp
@@ -2896,6 +2902,20 @@ add_test(NAME BlockingCallCheck
             --comments skip --strings scan
 )
 
+# Fails if src or tests name a deleted symbol, in code or comments. See tools/ci/removed_symbol_check/README.md.
+add_test(NAME RemovedSymbolCheckSrc
+    COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src"
+            --tokens "${CMAKE_SOURCE_DIR}/tools/ci/removed_symbol_check/tokens.txt"
+            --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/removed_symbol_check/allowlist.txt"
+            --comments scan --strings scan
+)
+add_test(NAME RemovedSymbolCheckTests
+    COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/tests"
+            --tokens "${CMAKE_SOURCE_DIR}/tools/ci/removed_symbol_check/tokens.txt"
+            --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/removed_symbol_check/allowlist.txt"
+            --comments scan --strings scan
+)
+
 # Fails on raw engine wrappers and hand-rolled GPU calls outside src/Renderer. See tools/ci/native_leak_check/README.md.
 add_test(NAME NativeLeakCheck
     COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src" --skip Renderer/
@@ -2998,7 +3018,8 @@ set(GTE_COMMENT_RULE_SRC
     Game/Instantiation/MeshVertexPacking.h Game/Instantiation/MeshVertexPacking.cpp Math/PbrBrdf.h
     Editor/EditorCamera.h Editor/EditorCamera.cpp Editor/ExitGate.h
     Network/NetworkRequestGuard.h Network/NetworkRequestGuard.cpp
-    Network/NetworkSceneCameraPose.h Network/NetworkSceneCameraPose.cpp
+    Network/NetworkSceneCameraPose.h Network/NetworkSceneCameraPose.cpp Network/NetworkCaptureFailure.h
+    Editor/CaptureFailureReason.h
     Features/SceneLighting/ Features/GpuDrivenScene/)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
@@ -3039,7 +3060,10 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Editor/ClusterViewerTruthTests.cpp Editor/ClusterViewerLoadTests.cpp Editor/ClusterViewerSettingsTests.cpp
     Editor/ClusterStatusTextTests.cpp Editor/ViewCullHudTests.cpp Editor/ViewCullOverlayTests.cpp
     Editor/FrustumFromViewProjectionTests.cpp Editor/ViewCullLayoutTests.cpp
-    Editor/EditorCameraTests.cpp Editor/ExitGateTests.cpp Network/NetworkRequestGuardTests.cpp)
+    Editor/EditorCameraTests.cpp Editor/ExitGateTests.cpp Network/NetworkRequestGuardTests.cpp
+    Renderer/AbandonedWorkTests.cpp Renderer/CaptureStatusTests.cpp Network/NetworkCaptureFailureTests.cpp
+    Renderer/PresentRecoveryPlanTests.cpp Renderer/RenderGraph/OffscreenRecordingFaultTests.cpp
+    Renderer/GpuWaitServiceTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

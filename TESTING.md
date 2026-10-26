@@ -84,26 +84,15 @@ safe on any machine/CI runner, GPU or not:
   accumulator `AccumulateDrawStats()` (`src/Renderer/DrawStats.h`, what
   `FrameRecorder::RecordFrame()` calls) - empty/single/mixed/truncating-division/
   degenerate-zero-vertex cases. No Vulkan/Renderer/live GPU device involved at all.
-- `Renderer/GpuTimingTests.cpp` - Phase 4's (`PHASE4_GPU_TIMESTAMP_QUERIES_STRATEGY_v2.md`)
-  Vulkan-header-free pure math/decision logic behind real GPU timestamp
-  queries (`src/Renderer/GpuTiming.h`):
-  `ConvertTimestampDeltaToMilliseconds()` (a round period, a realistic
-  non-round period, a zero delta, a `timestampPeriodNs <= 0` defensive
-  floor, and - the most important regression case - a counter WRAPAROUND
-  within `validBits` producing the correct small positive delta instead of
-  a garbage value), the fixed `GpuTimingSlot`/
-  `kGpuTimingSlotCount`/`kGpuTimingFramesInFlight` layout,
-  `InterpretTimestampCapability()` (a device reporting unsupported via any
-  of its three independent signals - `timestampComputeAndGraphics ==
-  false`, a zero `timestampPeriod`, or zero `validBits` - correctly
-  reports unsupported, while still recording the raw values for
-  diagnostics), and `ResolveGpuTimingStatus()` (the tri-state PRIORITY
-  decision `GpuTimingService`'s `Read*` methods build on - all 8
-  combinations of supported/capture-enabled/has-written-data, with
-  `Unsupported` always winning regardless of the other two). No live
-  `VkDevice`/`VkQueryPool` involved at all - `VulkanQueryPool`/
-  `GpuTimingService`'s own Vulkan-call-shaped bodies remain Tier 2,
-  verified manually (see `AGENTS.md`, "Profiling").
+- `Renderer/GpuTimingTests.cpp` - Vulkan-header-free pure math/decision logic behind GPU
+  timestamp queries (`src/Renderer/GpuTiming.h`):
+  `ConvertTimestampDeltaToMilliseconds()` (round and non-round periods, a zero
+  delta, a `timestampPeriodNs <= 0` floor, and a counter WRAPAROUND within
+  `validBits` giving a small positive delta), `kGpuTimingFramesInFlight`,
+  `InterpretTimestampCapability()` (unsupported through any of its three
+  signals, raw values still recorded) and `ResolveGpuTimingStatus()` (the
+  tri-state priority decision, all 8 input combinations). No live
+  `VkDevice`/`VkQueryPool` involved.
 - `Profiling/FrameProfilerTests.cpp` - `FrameProfiler`'s BeginFrame()/
   EndFrame()/RecordCpuScope()/SetGpuPassTiming()/SetGpuPassDrawStats()/
   SetMemorySnapshot() ring-buffer and flat-aggregation bookkeeping
@@ -326,14 +315,13 @@ implemented yet. `src/Editor/AssetPreviewMesh.cpp`/`AssetPreviewTexture.cpp`
 untested-for-now Tier 2 bucket, for the same reason - both need a real
 `VkDevice`/`ImGuiContext` to render anything at all, so they're presently
 only verified manually (see `README.md`, "Editor / Debug UI").
-`Renderer/Vulkan/VulkanQueryPool.h/.cpp` and `Renderer/GpuTimingService.h/.cpp`
-(Phase 4's real Vulkan timestamp-query infrastructure - see `AGENTS.md`,
-"Profiling") fall into this same Tier 2 bucket too - only the pure
-decision/conversion logic they build on (`GpuTiming.h`, above) is
-Tier-1-tested; the actual query-pool creation/reset/write/read-back
-correctness is verified manually against a real Vulkan device with
-validation layers enabled (see each `PHASE4*_COMPLETION_REPORT.md`'s own
-"Verification performed" section).
+`Renderer/Vulkan/VulkanQueryPool.h/.cpp` and the timestamp pool in
+`Renderer/RenderGraph/RenderGraphTimestampPool.*` fall into this same Tier 2
+bucket - only the pure decision/conversion logic (`GpuTiming.h`, above) is
+Tier-1-tested. The query-pool calls are checked against a real Vulkan device
+with validation layers enabled. `Renderer/GpuWaitServiceTests.cpp` is a Tier-2
+test (headless GPU, `GTEST_SKIP()` when unusable) that waits on a real
+unsignaled fence.
 
 See `README.md` for the overall architecture and `BUILDING.md` for how to
 build the engine itself.

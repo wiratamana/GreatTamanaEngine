@@ -14,6 +14,7 @@
 #include "../ECS/Registry.h"
 #include "../Math/MathTypes.h"
 #include "../Renderer/Culling/ClusterCullMath.h"
+#include "../Renderer/Renderer.h"
 
 #include <algorithm>
 #include <array>
@@ -34,6 +35,7 @@ constexpr int kPreviewWidth = 320;
 constexpr int kDefaultWidth = 960;
 constexpr int kDefaultHeight = 544;
 constexpr auto kStatInterval = std::chrono::milliseconds(500);
+constexpr std::uint32_t kMeshRetryUiFrames = 60; // UI frames between two upload retries
 
 std::array<float, 16> ToArray(const Mat4& m) noexcept
 {
@@ -154,6 +156,7 @@ void ClusterViewerWindow::LoadMesh(Renderer& renderer, const std::string& path)
     ++m_dataGeneration;
     m_valid = false;
     m_load = ClusterViewerLoadDecision{};
+    m_meshRetryPending = false;
     m_vertexCount = 0;
     m_triangleCount = 0;
     m_clusterCount = 0;
@@ -240,7 +243,12 @@ void ClusterViewerWindow::LoadMesh(Renderer& renderer, const std::string& path)
     if (!m_valid) {
         CancelGizmo();
         GTE_LOG_WARNING(kLog, "mesh not shown: " + m_load.text);
-        m_renderer.reset(); // nothing stays on the GPU for a mesh that is not shown
+        if (meshResult.retryable) {
+            m_meshRetryPending = true; // the renderer stays: the GPU may still read the old mesh
+            m_meshRetryFrames = kMeshRetryUiFrames;
+        } else {
+            m_renderer.reset(); // nothing stays on the GPU for a mesh that is not shown
+        }
         return;
     }
     m_clusterCount = m_renderer->ClusterCount();
@@ -261,6 +269,17 @@ void ClusterViewerWindow::PollFile(Renderer& renderer)
 {
     if (!m_hasLoaded || m_absolutePath.empty()) {
         return;
+    }
+    if (m_meshRetryPending) {
+        if (renderer.DeviceLost()) {
+            m_meshRetryPending = false;
+            m_load.text = "The GPU device is lost; the mesh cannot be uploaded.";
+        } else if (m_meshRetryFrames > 0) {
+            --m_meshRetryFrames;
+        } else {
+            LoadMesh(renderer, m_assetPath);
+            return;
+        }
     }
     const auto now = std::chrono::steady_clock::now();
     if (now - m_lastStat < kStatInterval) {

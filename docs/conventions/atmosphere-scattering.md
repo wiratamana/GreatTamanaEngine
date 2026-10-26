@@ -167,5 +167,4 @@ When the composite pass is off, the view still holds the scene color of the earl
   the origin lose shadow-lookup precision. The first frames after a start or a Shadow toggle use the settings values.
 - **`AtmosphereSettings` and `DirectionalLight` are not serialized.** `Scene/SceneTextFormat.h` stores only primitive and
   mesh-asset sources. Settings live for the running session; apply them again after every scene load.
-- **Per-pass GPU timing for these passes reads `Absent`** when the synchronous timing-slot budget is exhausted. Do not add
-  `GpuTimingSlot` enumerators per atmosphere pass.
+- **Per-pass GPU timing for these passes reads `Absent`** when the synchronous timing-slot budget is exhausted.

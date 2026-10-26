@@ -85,13 +85,21 @@ inline constexpr const char* kUnnamedGpuAllocation = "(unnamed)";
 // Pure: sums `samples` per name and in total.
 RenderGraphGpuMemoryMetadata BuildGpuMemoryMetadata(std::span<const GpuAllocationSample> samples, std::uint64_t meshCount);
 
-// The top-level JSON-able object: two named regimes plus features, caps and memory in one response.
+// State of the bounded GPU waits: a lost device is final.
+struct RenderGraphGpuWaitMetadata {
+    bool deviceLost = false;
+    std::uint32_t consecutiveFrameTimeouts = 0;
+    std::uint32_t abandonedObjects = 0; // GPU objects parked after a failed wait
+};
+
+// The top-level JSON-able object: two named regimes plus features, caps, waits and memory in one response.
 struct RenderGraphMetadata {
     std::uint32_t schemaVersion = 1; // Bump on any future breaking JSON shape change.
     RenderGraphRegimeMetadata offscreenRegime; // ExecuteTimingMode::SynchronousImmediateReadback
     RenderGraphRegimeMetadata presentRegime;   // ExecuteTimingMode::PipelinedDeferredReadback
     std::vector<RenderFeatureDebugEntry> renderFeatures;     // Reused directly, never re-wrapped.
     IndirectDrawCapsView indirectDraw;                       // Device indirect draw capabilities.
+    RenderGraphGpuWaitMetadata gpuWait;                      // Read on the main thread when published.
     RenderGraphGpuMemoryMetadata gpuMemory;                  // Read on the main thread when published.
 };
 

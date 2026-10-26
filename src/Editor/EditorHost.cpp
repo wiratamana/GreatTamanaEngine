@@ -14,6 +14,7 @@
 #include "../Core/Plugins/BuiltinFeatureModuleRegistry.h"
 #include "../Core/FeatureKit/FeatureRegistration.h"
 #include "ProjectRootPath.h" // ExecutableDirectory().
+#include "CaptureFailureReason.h"
 #include "ExitGate.h"
 #include "VolumeTexturePreviewSelection.h"
 #include "../Core/EditorPanelRegistry.h"
@@ -943,11 +944,14 @@ int EditorHost::Run()
         }
         if (gameTargetThisFrame != nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
             // The Game View target holds the final display image after the PostComposite chain.
-            const Renderer::CapturedRawPixels raw = m_renderer.CaptureRenderTexturePixels(*gameTargetThisFrame);
-            const std::vector<std::uint8_t> rgba8 =
-                Encoding::ConvertCapturedPixelsToRgba8(raw, Encoding::HdrVisualization::DisplayReferred);
+            const CaptureResult captured = m_renderer.CaptureRenderTexturePixels(*gameTargetThisFrame);
+            const CapturedPixels& raw = captured.pixels;
+            const std::vector<std::uint8_t> rgba8 = captured.status == CaptureStatus::Ok
+                ? Encoding::ConvertCapturedPixelsToRgba8(raw, Encoding::HdrVisualization::DisplayReferred)
+                : std::vector<std::uint8_t>{};
             if (rgba8.empty()) {
-                m_captureBridge.FailPendingRequest(FrameCaptureKind::GameView, FrameCaptureFailureReason::TargetNotAvailable);
+                m_captureBridge.FailPendingRequest(
+                    FrameCaptureKind::GameView, FailureReasonForCapture(captured.status));
             } else {
                 std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(rgba8.data(), raw.width, raw.height);
                 m_captureBridge.FulfillPendingRequest(FrameCaptureKind::GameView,
@@ -975,6 +979,8 @@ int EditorHost::Run()
                 m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback),
                 m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback), renderFeatureEntries);
             renderGraphMetadata.indirectDraw = m_renderer.IndirectDrawCaps();
+            renderGraphMetadata.gpuWait.deviceLost = m_renderer.DeviceLost();
+            renderGraphMetadata.gpuWait.consecutiveFrameTimeouts = m_renderer.GpuWaitConsecutiveFrameTimeouts();
             if (gpuMemoryAgeFrames >= kGpuMemoryRefreshFrames) {
                 gpuMemory = rg::BuildGpuMemoryMetadata(
                     CollectGpuAllocationSamples(m_renderer), m_game.GetRenderSystem().MeshCount());
@@ -1018,10 +1024,12 @@ int EditorHost::Run()
 
         // GET /get_window: floating (undocked) windows only. Must follow RenderPlatformWindows(), which presents them.
         if (m_captureBridge.IsCaptureRequested(FrameCaptureKind::NamedWindow)) {
-            CapturedPixels raw = m_editorLayer->CapturePlatformWindow(m_renderer, m_captureBridge.RequestedWindowTitle());
-            if (raw.pixels.empty()) {
+            CaptureResult captured = m_editorLayer->CapturePlatformWindow(m_renderer, m_captureBridge.RequestedWindowTitle());
+            CapturedPixels& raw = captured.pixels;
+            if (captured.status != CaptureStatus::Ok || raw.pixels.empty()) {
                 // Wrong title or still docked: fail fast; the caller should use /get_swapchain.
-                m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedWindow, FrameCaptureFailureReason::TargetNotAvailable);
+                m_captureBridge.FailPendingRequest(
+                    FrameCaptureKind::NamedWindow, FailureReasonForCapture(captured.status));
             } else {
                 if (Encoding::IsBgraFormat(raw.format)) {
                     Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
@@ -1050,11 +1058,13 @@ int EditorHost::Run()
                     const std::uint64_t framesSinceUpdate =
                         m_renderGraph.CurrentDebugTextureFrameCounter() - snapshot->lastUpdatedFrameCounter;
 
-                    Renderer::CapturedRawPixels raw = m_renderer.CaptureDebugTexturePixels(*snapshot, wantsDepth);
+                    CaptureResult captured = m_renderer.CaptureDebugTexturePixels(*snapshot, wantsDepth);
+                    CapturedPixels& raw = captured.pixels;
 
-                    if (raw.pixels.empty()) {
-                        // Unrecognized format: fail cleanly instead of encoding garbage.
-                        m_captureBridge.FailPendingRequest(FrameCaptureKind::NamedTexture, FrameCaptureFailureReason::TargetNotAvailable);
+                    if (captured.status != CaptureStatus::Ok) {
+                        // Busy or lost GPU reports its real cause; an unreadable format is "not available".
+                        m_captureBridge.FailPendingRequest(
+                            FrameCaptureKind::NamedTexture, FailureReasonForCapture(captured.status));
                     } else {
                         std::vector<std::uint8_t> converted;
                         const std::uint8_t* encodePixels = raw.pixels.data();
@@ -1101,13 +1111,19 @@ int EditorHost::Run()
                     const VolumeTexturePreviewInterpretation interpretation =
                         SelectVolumeTexturePreviewInterpretation(requestedName);
 
-                    const VolumeTexturePreviewRenderer::CapturedRawPixels raw = m_volumeTexturePreviewRenderer.RenderPreview(
+                    const CaptureResult preview = m_volumeTexturePreviewRenderer.RenderPreview(
                         m_renderer, volumeSnapshot->target, volumeSnapshot->state, interpretation);
 
-                    // raw.pixels is already tightly packed RGBA8: no conversion needed.
-                    std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw.pixels.data(), raw.width, raw.height);
-                    m_captureBridge.FulfillPendingRequest(FrameCaptureKind::NamedTexture,
-                        CapturedPngImage{ std::move(png), raw.width, raw.height, framesSinceUpdate });
+                    if (preview.status != CaptureStatus::Ok) {
+                        m_captureBridge.FailPendingRequest(
+                            FrameCaptureKind::NamedTexture, FailureReasonForCapture(preview.status));
+                    } else {
+                        // The preview pixels are already tightly packed RGBA8: no conversion needed.
+                        const CapturedPixels& raw = preview.pixels;
+                        std::vector<std::uint8_t> png = Encoding::EncodeRgba8ToPng(raw.pixels.data(), raw.width, raw.height);
+                        m_captureBridge.FulfillPendingRequest(FrameCaptureKind::NamedTexture,
+                            CapturedPngImage{ std::move(png), raw.width, raw.height, framesSinceUpdate });
+                    }
                 }
             }
             // else: name not registered yet; leave the request pending until it appears or the bridge times out (504).

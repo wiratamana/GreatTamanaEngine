@@ -4,6 +4,27 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## GPU wait safety (branch `feature/gpu-cull-impl`, 2026-10-26)
+
+- **One owner for abandoned GPU work.** `AbandonedWork` parks fences, command buffers and staging buffers of a failed
+  one-shot wait, and textures retired while the GPU was not idle. They are destroyed only after a completed idle wait.
+  The wait service no longer stores handles.
+- **Wait service.** Every raw blocking call is inside `GpuWaitService`, now including `vkQueuePresentKHR`
+  (`BlockingCallCheck`). `ImmediateSubmit` has no default site: each call names a `BlockSite` and a detail. The device idle
+  runs under the queue lock. There is one one-shot submit body, owned by the resource factory.
+- **Capture results.** `Renderer::Capture*` never throws and returns a `CaptureResult`. A busy or lost GPU answers `503` with
+  the real reason instead of "target not available".
+- **Device lost stops the frame.** `Core` logs one line and stops building and presenting. `GET /render_graph` has a
+  `gpu_wait` object (`device_lost`, `consecutive_frame_timeouts`, `abandoned_objects`). The runtime `assert(false)` calls on
+  the frame failure path are gone, and an unknown exception is caught too.
+- **Present recovery.** A throw after the swapchain acquire presents the image once (undefined contents for one frame) so the
+  swapchain does not lose an image. `PresentRecoveryPlan` decides the steps.
+- **Cluster viewer, project reload, instance grid.** None of them frees memory the GPU may still read when the GPU did not
+  go idle. Unloading a project assembly reports whether it unloaded.
+- **CI.** `RemovedSymbolCheck` fails when deleted symbols come back in `src` or `tests`. `GpuWaitServiceTests` waits on a
+  real unsignaled fence (headless GPU).
+- **Docs.** `profiling.md` is rewritten to match the code; stale mentions of deleted timing code are removed.
+
 ## Scene cull view fixes, pose and exit routes (branch `feature/gpu-cull-impl`, 2026-10-26)
 
 - **Honest HUD.** `hidden` and `hiddenValid` are computed once, in the feature. The report now carries `cameraValid`, so an

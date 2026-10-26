@@ -6,8 +6,7 @@ namespace gte {
 
 DeviceIdleGuard::~DeviceIdleGuard()
 {
-    // Teardown continues whatever the outcome: a failed wait means the device is lost.
-    static_cast<void>(m_renderer->WaitForGpuIdle(BlockSite::Shutdown, "DeviceIdleGuard"));
+    m_renderer->IdleForTeardown("DeviceIdleGuard");
 }
 
 } // namespace gte

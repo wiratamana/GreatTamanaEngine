@@ -114,12 +114,12 @@ std::optional<CapturedPixels> ClusterViewRenderer::RenderIdPass(
             s.LogOnce(buildError);
             return std::nullopt;
         }
-        CapturedPixels pixels = s.renderer.CaptureRenderTexturePixels(*id.texture);
-        if (pixels.pixels.empty()) {
+        CaptureResult captured = s.renderer.CaptureRenderTexturePixels(*id.texture);
+        if (captured.status != CaptureStatus::Ok || captured.pixels.pixels.empty()) {
             s.LogOnce("the id image could not be read back");
             return std::nullopt;
         }
-        return pixels;
+        return std::move(captured.pixels);
     } catch (const std::exception& e) {
         s.LogOnce(std::string("the id pass failed: ") + e.what());
         s.ReleaseSlot(s.idSlot);

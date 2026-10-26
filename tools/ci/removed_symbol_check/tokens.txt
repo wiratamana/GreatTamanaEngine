@@ -1,0 +1,8 @@
+# Names of deleted code. They must not come back in src or tests, in code or in comments.
+GpuTimingService
+GpuTimingSlot
+kGpuTimingSlotCount
+Quarantine
+ReleaseQuarantine
+CurrentBlock
+LiveBlock

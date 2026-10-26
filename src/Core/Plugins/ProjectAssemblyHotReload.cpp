@@ -80,7 +80,11 @@ void PerformProjectAssemblyHotReload(const std::string& projectName, Core& core,
 
     ProjectAssemblyHotReloadDebugStatus::Instance().Set("Unloading", projectName);
     // Locks GetHotReloadEngineStateMutex() internally; do not wrap in an outer lock (non-recursive).
-    core.GetProjectAssemblyHost().UnloadProjectAssembly(projectName, core, renderer);
+    if (!core.GetProjectAssemblyHost().UnloadProjectAssembly(projectName, core, renderer)) {
+        GTE_LOG_ERROR("ProjectAssemblyHotReload", "Aborting - the GPU did not go idle, '" + projectName + "' stays loaded.");
+        ProjectAssemblyHotReloadDebugStatus::Instance().Finish("CriticalFailure", "GPU did not go idle - nothing changed");
+        return;
+    }
 
     ProjectAssemblyHotReloadDebugStatus::Instance().Set("Compiling", projectName);
     BuildOutcome outcome;

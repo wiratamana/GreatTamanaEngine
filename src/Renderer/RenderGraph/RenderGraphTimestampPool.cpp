@@ -38,7 +38,7 @@ void RenderGraphTimestampPool::WarmUpResetPool(VulkanQueryPool& pool, Renderer& 
         [&pool](CommandBuffer& cmd) {
             vkCmdResetQueryPool(RecordingAccess::Native(cmd), pool.Native(), 0, pool.SlotCount());
         },
-        BlockSite::WarmUp);
+        BlockSite::WarmUp, "timestamp warm-up");
 }
 
 std::uint32_t RenderGraphTimestampPool::QueryBase(bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) const noexcept

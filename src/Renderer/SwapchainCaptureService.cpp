@@ -93,6 +93,11 @@ std::optional<CapturedSwapchainPixels> SwapchainCaptureService::TryTakeCompleted
     return result;
 }
 
+void SwapchainCaptureService::AbandonPendingCapture(std::uint32_t frameInFlightIndex) noexcept
+{
+    m_slots[frameInFlightIndex].pendingCapture = false;
+}
+
 void SwapchainCaptureService::NotifySwapchainRecreated()
 {
     for (Slot& slot : m_slots) {
