@@ -1049,6 +1049,18 @@ add_library(gte_core STATIC
     src/Profiling/FrameGraphData.cpp
     src/Profiling/WorkerTimelineData.h
     src/Profiling/WorkerTimelineData.cpp
+    src/Profiling/ScopeEvent.h
+    src/Profiling/ProfilingBudget.h
+    src/Profiling/EventBuffer.h
+    src/Profiling/NameTable.h
+    src/Profiling/NameTable.cpp
+    src/Profiling/ScopeTree.h
+    src/Profiling/ScopeTree.cpp
+    src/Profiling/FrameGate.h
+    src/Profiling/ScopeLog.h
+    src/Profiling/ManualClock.h
+    src/Profiling/WorkerRing.h
+    src/Profiling/WorkerRing.cpp
     src/Jobs/JobTypes.h
     src/Jobs/JobQueue.h
     src/Jobs/JobQueue.cpp

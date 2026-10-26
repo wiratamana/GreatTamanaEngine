@@ -2216,6 +2216,9 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Profiling/FrameGraphDataTests.cpp
     Profiling/JobScopeTimerTests.cpp
     Profiling/WorkerTimelineDataTests.cpp
+    Profiling/ProfilingEventModelTests.cpp
+    Profiling/ProfilingAllocationTests.cpp
+    Profiling/WorkerRingTests.cpp
     Jobs/JobQueueTests.cpp
     Jobs/JobSystemTests.cpp
     Jobs/JobDispatchMathTests.cpp
@@ -2912,7 +2915,7 @@ add_test(NAME FeaturePurityCheck
 # Fails when the engine layer (src/Renderer, src/Core) names a feature or gameplay word, comments included.
 # See tools/ci/engine_vocabulary_check/README.md.
 add_test(NAME EngineVocabularyCheck
-    COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src" --only Renderer/ --only Core/
+    COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src" --only Renderer/ --only Core/ --only Profiling/
             --only Assets/MeshData.h --only Assets/MeshFile. --only Assets/MeshCluster --only Assets/AtomicFile.
             --only Assets/GtaFile. --only Assets/MeshMaterialPartitioner. --only Assets/MeshNormalRecompute
             --only Assets/Stl --only Assets/AssetImporter. --only Assets/Crc32.h --only Assets/MeshClustering
@@ -2995,6 +2998,9 @@ set(GTE_COMMENT_RULE_SRC
     Network/NetworkSceneCameraPose.h Network/NetworkSceneCameraPose.cpp Network/NetworkCaptureFailure.h
     Editor/CaptureFailureReason.h Core/FaultInjection.h Core/FaultInjection.cpp
     Network/NetworkFaultRoutes.h Network/NetworkFaultRoutes.cpp
+    Profiling/ScopeEvent.h Profiling/ProfilingBudget.h Profiling/EventBuffer.h Profiling/NameTable.h
+    Profiling/NameTable.cpp Profiling/ScopeTree.h Profiling/ScopeTree.cpp Profiling/FrameGate.h
+    Profiling/ScopeLog.h Profiling/ManualClock.h Profiling/WorkerRing.h Profiling/WorkerRing.cpp
     Features/SceneLighting/ Features/GpuDrivenScene/)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
@@ -3038,7 +3044,8 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Editor/EditorCameraTests.cpp Editor/ExitGateTests.cpp Network/NetworkRequestGuardTests.cpp
     Renderer/AbandonedWorkTests.cpp Renderer/CaptureStatusTests.cpp Network/NetworkCaptureFailureTests.cpp
     Renderer/PresentRecoveryPlanTests.cpp Renderer/RenderGraph/OffscreenRecordingFaultTests.cpp
-    Renderer/GpuWaitServiceTests.cpp Network/NetworkFaultRoutesTests.cpp)
+    Renderer/GpuWaitServiceTests.cpp Network/NetworkFaultRoutesTests.cpp
+    Profiling/ProfilingEventModelTests.cpp Profiling/ProfilingAllocationTests.cpp Profiling/WorkerRingTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")
