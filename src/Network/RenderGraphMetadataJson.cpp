@@ -1,5 +1,6 @@
 #include "RenderGraphMetadataJson.h"
 
+#include "ViewWireName.h"
 #include "../Application/GpuTimingText.h"
 #include "../Editor/EditorViewNames.h"
 #include "../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
@@ -7,17 +8,6 @@
 namespace gte::Network {
 
 namespace {
-
-// Stable wire value of a pass's view scope.
-const char* ViewJsonValue(rg::ViewScope scope) noexcept
-{
-    switch (scope) {
-    case rg::ViewScope::Primary: return "primary";
-    case rg::ViewScope::Secondary: return "secondary";
-    case rg::ViewScope::Shared: break;
-    }
-    return "shared";
-}
 
 template <typename T>
 nlohmann::json OptionalToJson(const std::optional<T>& value)
@@ -52,7 +42,7 @@ nlohmann::json PassToJson(const rg::RenderGraphPassMetadata& pass)
         { "category", pass.category },
         { "draw_kind", pass.drawKind },
         { "view_scope", ViewScopeLabel(pass.viewScope) },
-        { "view", ViewJsonValue(pass.viewScope) },
+        { "view", ViewWireName(pass.viewScope) },
         { "instance", pass.instance },
         { "render_pass_event", pass.renderPassEvent },
         { "render_pass_event_order", pass.renderPassEventOrder },

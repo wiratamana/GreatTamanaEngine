@@ -27,7 +27,7 @@ struct ClusterClaimContext {
     bool captureArmed = false; // A frame capture is recording this frame.
 };
 
-// False in the shared scope (no camera, no target) and in a Game view frame that is being captured.
+// False in the shared scope (no camera, no target) and in a primary view frame that is being captured.
 constexpr bool ClusterClaimAllowed(const ClusterClaimContext& context) noexcept
 {
     if (context.scope == rg::ViewScope::Shared) {

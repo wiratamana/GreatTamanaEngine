@@ -2,8 +2,10 @@
 
 #include "NetworkProfilerTimeline.h"
 #include "NetworkRoutes.h"
+#include "ViewWireName.h"
 
 #include "../Application/ProfilerSnapshotBridge.h"
+#include "../Core/GpuViewMetrics.h"
 #include "../Profiling/ProfilerSnapshotBuilder.h"
 
 #include <httplib.h>
@@ -27,7 +29,9 @@ using Profiling::Metric;
 using Profiling::ProfilerSnapshot;
 using Profiling::SampleStatus;
 
-[[maybe_unused]] constexpr std::chrono::milliseconds kSnapshotWait{ 500 };
+#if GTE_ENABLE_PROFILER
+constexpr std::chrono::milliseconds kSnapshotWait{ 500 };
+#endif
 
 const char* ToString(Profiling::CheckId id) noexcept
 {
@@ -53,16 +57,6 @@ const char* ToString(Profiling::CheckStatus status) noexcept
     return "unknown";
 }
 
-const char* ViewLabel(std::size_t slot) noexcept
-{
-    switch (static_cast<Profiling::ViewSlot>(slot)) {
-    case Profiling::ViewSlot::Shared: return "shared";
-    case Profiling::ViewSlot::Primary: return "primary";
-    case Profiling::ViewSlot::Secondary: return "secondary";
-    }
-    return "unknown";
-}
-
 std::string Text(std::span<const char> text)
 {
     return std::string(Profiling::SnapshotText(text));
@@ -76,8 +70,8 @@ bool HasValue(SampleStatus status) noexcept
 nlohmann::json PerView(const std::array<Metric, Profiling::kViewSlotCount>& metrics)
 {
     nlohmann::json out = nlohmann::json::object();
-    for (std::size_t i = 0; i < metrics.size(); ++i) {
-        out[ViewLabel(i)] = MetricToJson(metrics[i]);
+    for (const rg::ViewScope scope : { rg::ViewScope::Shared, rg::ViewScope::Primary, rg::ViewScope::Secondary }) {
+        out[ViewWireName(scope)] = MetricToJson(metrics[static_cast<std::size_t>(ToViewSlot(scope))]);
     }
     return out;
 }
@@ -507,8 +501,8 @@ nlohmann::json ProfilerSpikeDetailToJson(const Profiling::SpikeDetail& detail)
     out["gpu_span"] = MetricToJson(Profiling::MetricFromGpuView(detail.gpu.span));
 
     nlohmann::json views = nlohmann::json::object();
-    for (std::size_t i = 0; i < Profiling::kViewSlotCount; ++i) {
-        views[ViewLabel(i)] = MetricToJson(Profiling::MetricFromGpuView(detail.gpu.views[i]));
+    for (const rg::ViewScope scope : { rg::ViewScope::Shared, rg::ViewScope::Primary, rg::ViewScope::Secondary }) {
+        views[ViewWireName(scope)] = MetricToJson(Profiling::MetricFromGpuView(detail.gpu.views[static_cast<std::size_t>(ToViewSlot(scope))]));
     }
     out["gpu_views"] = std::move(views);
     out["dropped_scopes"] = MetricToJson(Profiling::PresentMetric(static_cast<double>(detail.droppedScopes), Profiling::Unit::Count));

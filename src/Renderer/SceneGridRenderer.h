@@ -11,7 +11,7 @@ class Pipeline;
 class Renderer;
 
 // Draws the Scene panel's infinite ground grid: one full-screen-triangle draw using its own pipeline.
-// It is recorded inside the already-open Scene view pass, so it is depth-tested but never depth-written.
+// It is recorded inside the already-open secondary view pass, so it is depth-tested but never depth-written.
 class SceneGridRenderer {
 public:
     // The Renderer must outlive this object; the destructor idles the GPU before the pipeline is freed.

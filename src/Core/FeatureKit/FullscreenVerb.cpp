@@ -56,7 +56,7 @@ struct FullscreenChain::Impl {
     rg::StaticName name;
     rg::TextureHandle defaultDepth; // Acknowledged at Draw() unless the author covered it.
     bool depthCovered = false;
-    bool publishReplay = false; // A successful Draw() publishes the replay for the Frame Debugger (Game view only).
+    bool publishReplay = false; // A successful Draw() publishes the replay for the Frame Debugger (primary view only).
     std::optional<rg::FullscreenPass> pass;
 };
 

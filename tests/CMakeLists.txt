@@ -3033,7 +3033,9 @@ set(GTE_COMMENT_RULE_SRC
     Network/NetworkFaultRoutes.h Network/NetworkFaultRoutes.cpp
     Network/NetworkProfilerRoutes.h Network/NetworkProfilerRoutes.cpp
     Network/NetworkProfilerTimeline.h Network/NetworkProfilerTimeline.cpp
-    Application/ProfilerSnapshotBridge.h Application/ProfilerSnapshotBridge.cpp
+    Application/ProfilerSnapshotBridge.h Application/ProfilerSnapshotBridge.cpp Application/GpuTimingText.h
+    Editor/EditorViewNames.h Editor/RenderGraphDisplayText.h Editor/RenderGraphDisplayText.cpp
+    Network/RenderGraphMetadataJson.h Network/RenderGraphMetadataJson.cpp Network/ViewWireName.h
     Profiling/
     Features/SceneLighting/ Features/GpuDrivenScene/)
 set(GTE_COMMENT_RULE_TESTS
@@ -3079,6 +3081,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Renderer/AbandonedWorkTests.cpp Renderer/CaptureStatusTests.cpp Network/NetworkCaptureFailureTests.cpp
     Renderer/PresentRecoveryPlanTests.cpp Renderer/RenderGraph/OffscreenRecordingFaultTests.cpp Renderer/GpuStampPlanTests.cpp
     Renderer/GpuWaitServiceTests.cpp Network/NetworkFaultRoutesTests.cpp Renderer/GpuFrameRingTests.cpp Profiling/
+    Editor/RenderGraphDisplayTextTests.cpp
     Network/NetworkProfilerRoutesTests.cpp Renderer/GpuClockCalibrationTests.cpp Network/NetworkProfilerTimelineTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)

@@ -21,7 +21,7 @@ constexpr bool ShouldAbandonAllocator(bool idleCompleted, std::size_t parkedCoun
 // Thread-safe.
 class AbandonedWork {
 public:
-    // Keeps `owner` alive. Never throws; an owner that cannot be stored is leaked.
+    // Keeps `owner` alive. Out-of-memory terminates.
     void Park(std::shared_ptr<void> owner) noexcept;
 
     std::uint32_t Count() const noexcept { return m_count.load(std::memory_order_relaxed); }

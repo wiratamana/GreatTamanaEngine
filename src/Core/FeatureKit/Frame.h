@@ -143,7 +143,7 @@ public:
     bool ClusterPathSupported() const noexcept;
 
     // A GPU-culled draw of cluster-ready meshes on lane `lane` of `state`. Inert in a shared frame, while a
-    // capture is armed for the Game view, and while the state is invalid.
+    // capture is armed for the primary view, and while the state is invalid.
     ClusterDrawChain ClusterDraw(ClusterDrawState& state, std::uint32_t lane);
 
     // Makes `texture` the content of `slot` for the scene's material shaders. A logged no-op for a bad slot or texture.

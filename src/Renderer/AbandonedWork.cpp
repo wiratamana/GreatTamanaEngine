@@ -4,19 +4,15 @@
 
 namespace gte {
 
+// Out-of-memory in Park or Release terminates: the process is already dying.
 void AbandonedWork::Park(std::shared_ptr<void> owner) noexcept
 {
     if (!owner) {
         return;
     }
-    try {
-        const std::lock_guard lock(m_mutex);
-        m_items.push_back(owner);
-        m_count.fetch_add(1, std::memory_order_relaxed);
-    } catch (...) {
-        // Out of memory with a lost device: std::terminate in make_unique below is accepted.
-        static_cast<void>(std::make_unique<std::shared_ptr<void>>(std::move(owner)).release());
-    }
+    const std::lock_guard lock(m_mutex);
+    m_items.push_back(std::move(owner));
+    m_count.fetch_add(1, std::memory_order_relaxed);
 }
 
 void AbandonedWork::Release(bool idleCompleted) noexcept
@@ -31,19 +27,8 @@ void AbandonedWork::Release(bool idleCompleted) noexcept
     if (idleCompleted) {
         return; // `items` dies here and frees every owner.
     }
-    try {
-        // Device lost: parked objects are abandoned.
-        static_cast<void>(std::make_unique<std::vector<std::shared_ptr<void>>>(std::move(items)).release());
-    } catch (...) {
-        // Without the heap box the vector below would free them; pin each owner instead.
-        for (std::shared_ptr<void>& item : items) {
-            try {
-                static_cast<void>(std::make_unique<std::shared_ptr<void>>(item).release());
-            } catch (...) {
-                // Nothing left to try.
-            }
-        }
-    }
+    // Device lost: leak the whole vector on purpose.
+    static_cast<void>(std::make_unique<std::vector<std::shared_ptr<void>>>(std::move(items)).release());
 }
 
 } // namespace gte

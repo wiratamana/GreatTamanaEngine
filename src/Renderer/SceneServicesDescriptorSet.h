@@ -59,7 +59,7 @@ class Renderer;
 inline constexpr uint64_t kSceneGlobalUniformBlockSize = 512;
 
 // Owns the scene-services descriptor-set layout (set 1 at the Pipeline level) and one VkDescriptorSet per active view;
-// a shared set would be unsafe with same-frame Game and Scene views.
+// a shared set would be unsafe with same-frame primary and secondary views.
 class SceneServicesDescriptorSet {
 public:
     explicit SceneServicesDescriptorSet(Renderer& renderer);

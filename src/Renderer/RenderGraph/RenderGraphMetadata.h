@@ -1,8 +1,7 @@
 #pragma once
 
 // Plain data behind the Render Graph panel, GET /render_graph and the DOT export.
-// View scope and GPU state are typed enums; Editor and Network turn them into text. No JSON here.
-// BuildRenderGraphMetadata() is a pure function of plain data.
+// View scope and GPU state are typed enums; Editor and Network render the text.
 
 #include "RenderGraphSnapshot.h"
 #include "RenderGraphTypes.h"

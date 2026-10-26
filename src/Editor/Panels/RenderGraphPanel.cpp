@@ -483,12 +483,12 @@ void RenderGraphPanel::BuildPassTable(const std::vector<RenderGraphGroupedPass>&
         return;
     }
     ImGui::TableSetupColumn("Name");
-    ImGui::TableSetupColumn("Kind");
+    ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_NoSort);
     ImGui::TableSetupColumn("GPU ms", ImGuiTableColumnFlags_PreferSortDescending);
-    ImGui::TableSetupColumn("Culled");
-    ImGui::TableSetupColumn("Draws");
-    ImGui::TableSetupColumn("Tris");
-    ImGui::TableSetupColumn("Indirect");
+    ImGui::TableSetupColumn("Culled", ImGuiTableColumnFlags_NoSort);
+    ImGui::TableSetupColumn("Draws", ImGuiTableColumnFlags_NoSort);
+    ImGui::TableSetupColumn("Tris", ImGuiTableColumnFlags_NoSort);
+    ImGui::TableSetupColumn("Indirect", ImGuiTableColumnFlags_NoSort);
     ImGui::TableHeadersRow();
 
     std::vector<const RenderGraphGroupedPass*> rows;
@@ -501,10 +501,19 @@ void RenderGraphPanel::BuildPassTable(const std::vector<RenderGraphGroupedPass>&
     if (ImGuiTableSortSpecs* specs = ImGui::TableGetSortSpecs(); specs != nullptr && specs->SpecsCount > 0) {
         const bool descending = specs->Specs[0].SortDirection == ImGuiSortDirection_Descending;
         const int column = specs->Specs[0].ColumnIndex;
+        const auto largestGpuMs = [](const RenderGraphGroupedPass& row) {
+            double largest = 0.0;
+            for (const rg::RenderGraphPassMetadata& instance : row.instances) {
+                if (instance.gpuTimingMilliseconds.has_value()) {
+                    largest = std::max(largest, *instance.gpuTimingMilliseconds);
+                }
+            }
+            return largest;
+        };
         std::sort(rows.begin(), rows.end(), [&](const auto* a, const auto* b) {
             if (column == 2) {
-                const double av = a->instances.empty() ? 0.0 : a->instances.front().gpuTimingMilliseconds.value_or(0.0);
-                const double bv = b->instances.empty() ? 0.0 : b->instances.front().gpuTimingMilliseconds.value_or(0.0);
+                const double av = largestGpuMs(*a);
+                const double bv = largestGpuMs(*b);
                 return descending ? av > bv : av < bv;
             }
             return descending ? a->name > b->name : a->name < b->name;
@@ -524,12 +533,18 @@ void RenderGraphPanel::BuildPassTable(const std::vector<RenderGraphGroupedPass>&
         ImGui::TextUnformatted(row->gpuTimingText.c_str());
         ImGui::TableNextColumn();
         ImGui::TextUnformatted(row->isCulled ? "CULLED" : "-");
-        ImGui::TableNextColumn();
-        ImGui::Text("%u", row->drawCallCount);
-        ImGui::TableNextColumn();
-        ImGui::Text("%u", row->triangleCount);
-        ImGui::TableNextColumn();
-        ImGui::Text("%u", row->indirectDrawCount);
+        // A culled pass never ran: show no number instead of 0.
+        const auto countCell = [&](std::uint32_t count) {
+            ImGui::TableNextColumn();
+            if (row->isCulled) {
+                ImGui::TextUnformatted("-");
+            } else {
+                ImGui::Text("%u", count);
+            }
+        };
+        countCell(row->drawCallCount);
+        countCell(row->triangleCount);
+        countCell(row->indirectDrawCount);
     }
     ImGui::EndTable();
 }
