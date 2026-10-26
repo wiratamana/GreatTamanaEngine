@@ -4,6 +4,23 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## Scene cull view fixes, pose and exit routes (branch `feature/gpu-cull-impl`, 2026-10-26)
+
+- **Honest HUD.** `hidden` and `hiddenValid` are computed once, in the feature. The report now carries `cameraValid`, so an
+  invalid live camera says "GPU path inactive" instead of showing a cull that did not run. The cull camera line tells
+  "Frozen, waiting for a valid camera" when no frozen camera exists yet.
+- **One Hi-Z rule.** `HizMatchesCullCamera` is the only place that says Hi-Z needs the live camera. `HizUsableAt` is deleted
+  (`HizUnusableReason` is the predicate).
+- **Box.** It sits below the Move/Rotate/Scale switcher and never covers it. It opens by itself when HTTP changes a Scene
+  cull setting. A report that stands still for 4 UI frames is stale and draws nothing. A change after a pending reset is no
+  longer lost.
+- **Resets.** `reset_defaults` and the panel button keep `freezeSerial`, so a freeze after a reset still captures.
+- **Removed.** The `note` field is gone from the feature state and from `cull_view`. `sceneSource` is `Live` or `Frozen`
+  (was `SceneCamera`). `FlushRequest` is private; callers use `EditableSettings()`.
+- **HTTP.** `GET /scene_camera/pose`, `GET /scene_camera/set_pose?x&y&z&yaw&pitch`, `POST /exit` (normal shutdown, exit code 0,
+  `403` for browser cross-site requests). New keys: `cull_view.camera_valid|tested|stale`, `pose` in `/scene_camera/state`,
+  `game.|scene.cameraValid|hizTrackingRequested` (see [networking.md](conventions/networking.md)).
+
 ## Scene cull view (branch `feature/gpu-cull-impl`, 2026-10-24)
 
 - **Scene panel.** A "Cull view" box picks the cull tests of the Scene view only (`Follow settings`, `Off`, `Frustum`,

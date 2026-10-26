@@ -1,14 +1,6 @@
 #include "NetworkRoutes.h"
 
-// editor-core-separation-2 campaign, PHASE3
-// (PHASE3_LOG_QUERY_CAPABILITY_AND_NETWORKROUTES_CLEANUP.md) - this file no
-// longer #includes Editor/Logger.h. ParseGetLogsQuery() below now clamps
-// its `limit` field against `kLogCapacity` (Core/Logging.h, already
-// #included via NetworkRoutes.h) instead of `Logger::kCapacity` - same
-// value (2000), just relocated to a gte_core-owned home so this
-// gte_core-tier file never needs the gte_editor-only Logger CLASS just for
-// one compile-time constant (closes Defect C).
-
+#include "NetworkSceneCameraPose.h"
 #include "Core/Plugins/ProjectAssemblyNameValidation.h"
 #include "../Core/Plugins/HotReloadEngineStateMutex.h"
 
@@ -1727,12 +1719,15 @@ nlohmann::json CullViewToJson(const SceneCameraCullView& v)
         return out;
     }
     out["rendered"] = v.rendered;
+    out["stale"] = v.stale;
     out["feature_enabled"] = v.featureEnabled;
+    out["camera_valid"] = v.cameraValid;
     out["frame"] = v.frame;
     out["choice"] = v.choice;
     out["mode"] = v.mode;
     out["source"] = v.source;
     out["cone"] = v.cone;
+    out["tested"] = v.tested;
     out["tested_at_visible_frame"] = v.testedAtVisibleFrame;
     out["visible"] = v.visible;
     out["hidden"] = v.hidden;
@@ -1744,7 +1739,6 @@ nlohmann::json CullViewToJson(const SceneCameraCullView& v)
     out["frozen_frame"] = v.frozenFrame;
     out["inert_reason"] = v.inertReason;
     out["refused"] = v.refused;
-    out["note"] = v.note;
     return out;
 }
 
@@ -2045,6 +2039,7 @@ std::string BuildSceneCameraStateJson(const SceneCameraReport& report)
     body["cameras"] = std::move(cameras);
     body["selected_frustum"] = SegmentsToJson(report.selectedFrustum);
     body["cull_view"] = CullViewToJson(report.cullView);
+    body["pose"] = ScenePoseToJson(report.pose);
     return body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 

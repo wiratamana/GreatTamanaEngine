@@ -24,7 +24,7 @@ TEST(GpuDrivenSceneTypesTest, SanitizeResetsOutOfRangeEnums)
     const GpuDrivenSceneSettings clean = SanitizeGpuDrivenSceneSettings(s);
     EXPECT_EQ(clean.debugView, GpuDrivenSceneDebugView::Off);
     EXPECT_EQ(clean.sceneCull, fx::ViewCullChoice::FollowSettings);
-    EXPECT_EQ(clean.sceneSource, fx::ViewCullSource::SceneCamera);
+    EXPECT_EQ(clean.sceneSource, fx::ViewCullSource::Live);
     EXPECT_EQ(clean.ghost, fx::GhostStyle::NotDrawn);
 
     s = GpuDrivenSceneSettings{};
@@ -43,7 +43,7 @@ TEST(GpuDrivenSceneTypesTest, DefaultsKeepConeOffAndFrustumOn)
     EXPECT_FALSE(s.freezeCulling);
     EXPECT_FALSE(s.collectStats);
     EXPECT_EQ(s.sceneCull, fx::ViewCullChoice::FollowSettings);
-    EXPECT_EQ(s.sceneSource, fx::ViewCullSource::SceneCamera);
+    EXPECT_EQ(s.sceneSource, fx::ViewCullSource::Live);
     EXPECT_EQ(s.freezeSerial, 0u);
 
     GpuDrivenSceneSettings edited;
@@ -115,6 +115,11 @@ TEST(GpuDrivenSceneTypesTest, SettingKeysApplyOrReject)
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "debugView", "Nope"), GpuDrivenSceneSetResult::BadValue);
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "sceneCull", "frustum"), GpuDrivenSceneSetResult::BadValue);
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "sceneSource", ""), GpuDrivenSceneSetResult::BadValue);
+    EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "sceneSource", "SceneCamera"), GpuDrivenSceneSetResult::BadValue);
+    EXPECT_EQ(s.sceneSource, fx::ViewCullSource::Frozen);
+    EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "sceneSource", "Live"), GpuDrivenSceneSetResult::Applied);
+    EXPECT_EQ(s.sceneSource, fx::ViewCullSource::Live);
+    ApplyGpuDrivenSceneSetting(s, "sceneSource", "Frozen");
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "ghost", "Red"), GpuDrivenSceneSetResult::BadValue);
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "bogus", "true"), GpuDrivenSceneSetResult::UnknownKey);
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "freezeSerial", "3"), GpuDrivenSceneSetResult::UnknownKey);
@@ -184,7 +189,7 @@ TEST(GpuDrivenSceneTypesTest, FrozenViewNeverWantsHiz)
     EXPECT_TRUE(ViewFreezeRequested(s, true));
     EXPECT_FALSE(ViewWantsHiz(s, true));
 
-    s.sceneSource = fx::ViewCullSource::SceneCamera;
+    s.sceneSource = fx::ViewCullSource::Live;
     s.enabled = false;
     EXPECT_FALSE(ViewWantsHiz(s, true));
 }
@@ -198,6 +203,79 @@ TEST(GpuDrivenSceneTypesTest, OcclusionStateNeverAppliedForAnotherCamera)
     EXPECT_EQ(OcclusionStateOf(true, true, true), OcclusionState::Applied);
 }
 
+TEST(GpuDrivenSceneTypesTest, HizMatchesCullCameraNeedsRequestAndLiveCamera)
+{
+    EXPECT_FALSE(HizMatchesCullCamera(false, false));
+    EXPECT_FALSE(HizMatchesCullCamera(false, true));
+    EXPECT_FALSE(HizMatchesCullCamera(true, false));
+    EXPECT_TRUE(HizMatchesCullCamera(true, true));
+}
+
+// Calls `fn` for every combination of the settings that decide the cull plan of a view.
+template <class Fn>
+void ForEveryCullSetting(Fn&& fn)
+{
+    for (const bool enabled : { false, true }) {
+        for (const bool freezeCulling : { false, true }) {
+            for (const bool occlusion : { false, true }) {
+                for (const fx::ViewCullSource source : { fx::ViewCullSource::Live, fx::ViewCullSource::Frozen }) {
+                    for (const fx::ViewCullChoice choice : { fx::ViewCullChoice::FollowSettings, fx::ViewCullChoice::Off,
+                             fx::ViewCullChoice::Frustum, fx::ViewCullChoice::FrustumHiz }) {
+                        GpuDrivenSceneSettings s;
+                        s.enabled = enabled;
+                        s.freezeCulling = freezeCulling;
+                        s.occlusion = occlusion;
+                        s.sceneSource = source;
+                        s.sceneCull = choice;
+                        s.freezeSerial = 1;
+                        fn(s);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// What the draw pass reads: the resolved cull camera, not the request.
+bool HizWantedByResolvedState(const GpuDrivenSceneSettings& s, bool sceneView, const FrozenCullCamera& state)
+{
+    return s.enabled && HizMatchesCullCamera(ResolveViewCullTests(s, sceneView).occlusion, !state.frozen);
+}
+
+TEST(GpuDrivenSceneTypesTest, HizRequestAndResolvedCameraAgree)
+{
+    ForEveryCullSetting([](const GpuDrivenSceneSettings& s) {
+        for (const bool sceneView : { false, true }) {
+            FrozenCullCamera state;
+            const fx::ClusterCamera live = CameraAt(1.0f);
+            for (std::uint64_t frame = 0; frame < 3; ++frame) {
+                ResolveCullCamera(state, s.enabled && ViewFreezeRequested(s, sceneView), sceneView ? s.freezeSerial : 0u, live, frame);
+            }
+            EXPECT_EQ(ViewWantsHiz(s, sceneView), HizWantedByResolvedState(s, sceneView, state));
+        }
+    });
+}
+
+TEST(GpuDrivenSceneTypesTest, InvalidLiveCameraFirstThenValidAgrees)
+{
+    ForEveryCullSetting([](const GpuDrivenSceneSettings& s) {
+        for (const bool sceneView : { false, true }) {
+            FrozenCullCamera state;
+            fx::ClusterCamera bad = CameraAt(1.0f);
+            bad.valid = false;
+            const bool freeze = s.enabled && ViewFreezeRequested(s, sceneView);
+            const std::uint32_t serial = sceneView ? s.freezeSerial : 0u;
+
+            ResolveCullCamera(state, freeze, serial, bad, 0);
+            EXPECT_FALSE(state.frozen);
+
+            ResolveCullCamera(state, freeze, serial, CameraAt(2.0f), 1);
+            EXPECT_EQ(state.frozen, freeze);
+            EXPECT_EQ(ViewWantsHiz(s, sceneView), HizWantedByResolvedState(s, sceneView, state));
+        }
+    });
+}
+
 TEST(GpuDrivenSceneTypesTest, RequestAppliesOnceAndFreezeBumpsTheSerial)
 {
     GpuDrivenSceneSettings s;
@@ -205,7 +283,7 @@ TEST(GpuDrivenSceneTypesTest, RequestAppliesOnceAndFreezeBumpsTheSerial)
     request.pending = true;
     request.choice = fx::ViewCullChoice::Frustum;
     request.cone = true;
-    request.source = fx::ViewCullSource::SceneCamera;
+    request.source = fx::ViewCullSource::Live;
 
     s = ApplyViewCullRequest(s, request);
     EXPECT_EQ(s.sceneCull, fx::ViewCullChoice::Frustum);
@@ -222,8 +300,62 @@ TEST(GpuDrivenSceneTypesTest, RequestAppliesOnceAndFreezeBumpsTheSerial)
     request.resetAll = true;
     s = ApplyViewCullRequest(s, request);
     EXPECT_EQ(s.sceneCull, fx::ViewCullChoice::FollowSettings);
-    EXPECT_EQ(s.sceneSource, fx::ViewCullSource::SceneCamera);
+    EXPECT_EQ(s.sceneSource, fx::ViewCullSource::Live);
     EXPECT_FALSE(s.sceneCone);
+    EXPECT_EQ(s.freezeSerial, 2u); // A reset keeps the serial.
+}
+
+TEST(GpuDrivenSceneTypesTest, ResetSceneCullFieldsKeepsEverythingElse)
+{
+    GpuDrivenSceneSettings s;
+    s.enabled = false;
+    s.occlusion = true;
+    s.collectStats = true;
+    s.sceneCull = fx::ViewCullChoice::FrustumHiz;
+    s.sceneCone = true;
+    s.sceneSource = fx::ViewCullSource::Frozen;
+    s.freezeSerial = 5;
+
+    ResetSceneCullFields(s);
+    EXPECT_EQ(s.sceneCull, fx::ViewCullChoice::FollowSettings);
+    EXPECT_FALSE(s.sceneCone);
+    EXPECT_EQ(s.sceneSource, fx::ViewCullSource::Live);
+    EXPECT_EQ(s.ghost, fx::GhostStyle::NotDrawn);
+    EXPECT_FALSE(s.enabled);
+    EXPECT_TRUE(s.occlusion);
+    EXPECT_TRUE(s.collectStats);
+    EXPECT_EQ(s.freezeSerial, 5u);
+}
+
+TEST(GpuDrivenSceneTypesTest, DefaultsKeepingSerialResetsEveryOtherField)
+{
+    GpuDrivenSceneSettings s;
+    s.enabled = false;
+    s.frustum = false;
+    s.cone = true;
+    s.occlusion = true;
+    s.freezeCulling = true;
+    s.collectStats = true;
+    s.debugView = GpuDrivenSceneDebugView::ClusterId;
+    s.sceneCull = fx::ViewCullChoice::Frustum;
+    s.sceneCone = true;
+    s.sceneSource = fx::ViewCullSource::Frozen;
+    s.freezeSerial = 7;
+
+    const GpuDrivenSceneSettings d = DefaultsKeepingSerial(s);
+    const GpuDrivenSceneSettings fresh;
+    EXPECT_EQ(d.freezeSerial, 7u);
+    EXPECT_EQ(d.enabled, fresh.enabled);
+    EXPECT_EQ(d.frustum, fresh.frustum);
+    EXPECT_EQ(d.cone, fresh.cone);
+    EXPECT_EQ(d.occlusion, fresh.occlusion);
+    EXPECT_EQ(d.freezeCulling, fresh.freezeCulling);
+    EXPECT_EQ(d.collectStats, fresh.collectStats);
+    EXPECT_EQ(d.debugView, fresh.debugView);
+    EXPECT_EQ(d.sceneCull, fresh.sceneCull);
+    EXPECT_EQ(d.sceneCone, fresh.sceneCone);
+    EXPECT_EQ(d.sceneSource, fresh.sceneSource);
+    EXPECT_EQ(d.ghost, fresh.ghost);
 }
 
 TEST(GpuDrivenSceneTypesTest, RequestNeverTouchesGameViewSettings)
@@ -287,6 +419,9 @@ TEST(GpuDrivenSceneTypesTest, ReportIsAPureFunctionOfSettingsAndSnapshot)
     snap.testedAtVisibleFrame = 90;
     snap.visibleClusters = 30;
     snap.visibleValid = true;
+    snap.hidden = 60;
+    snap.hiddenValid = true;
+    snap.cameraValid = false;
     snap.occlusion = fx::OcclusionState::Applied;
     snap.frozen = true;
     snap.frozenFrame = 40;
@@ -300,9 +435,15 @@ TEST(GpuDrivenSceneTypesTest, ReportIsAPureFunctionOfSettingsAndSnapshot)
     EXPECT_EQ(r.tested, 100u);
     EXPECT_EQ(r.testedAtVisibleFrame, 90u);
     EXPECT_EQ(r.visible, 30u);
+    EXPECT_EQ(r.hidden, 60u);
+    EXPECT_TRUE(r.hiddenValid);
+    EXPECT_FALSE(r.cameraValid);
     EXPECT_EQ(r.claimedInstances, 5u);
     EXPECT_EQ(r.occlusion, fx::OcclusionState::Applied);
     EXPECT_EQ(r.frozenFrame, 40u);
+
+    snap.cameraValid = true;
+    EXPECT_TRUE(MakeViewCullReport(s, snap).cameraValid);
 
     snap.hasPixels = false;
     EXPECT_FALSE(MakeViewCullReport(s, snap).rendered);

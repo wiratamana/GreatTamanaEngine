@@ -391,7 +391,7 @@ public:
 #endif
         // Cluster Viewer floating window; Build() is a no-op while it is closed.
         m_clusterViewer.Build(renderer, m_ctx, registry);
-        m_sceneCameraAdapter.BeginFrame(renderer, m_ctx, registry, m_sceneView);
+        m_sceneCameraAdapter.BeginFrame(renderer, m_ctx, registry, m_sceneView, m_sceneCamera);
 
         // Draw every registered plugin panel; the content goes through PluginPanelDrawContextAdapter.
         for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {

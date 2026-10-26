@@ -1,6 +1,8 @@
 #include "NetworkServer.h"
 
 #include "NetworkRoutes.h"
+#include "NetworkRequestGuard.h"
+#include "NetworkSceneCameraPose.h"
 
 #include "../Application/AssetImportCommandBridge.h"
 #include "../Application/EditorUiCommandBridge.h"
@@ -292,6 +294,30 @@ std::optional<EditorUiCommandResult> SubmitEditorUiCommand(
         return std::nullopt;
     }
     return std::move(submit.result);
+}
+
+// Answers 403 and returns true when a destructive route was called from a web page.
+bool RefuseBrowserRequest(const httplib::Request& req, httplib::Response& res)
+{
+    const auto header = [&req](const char* name) -> std::optional<std::string> {
+        if (!req.has_header(name)) {
+            return std::nullopt;
+        }
+        return req.get_header_value(name);
+    };
+    const std::optional<std::string> site = header("Sec-Fetch-Site");
+    const std::optional<std::string> origin = header("Origin");
+    const std::optional<std::string> host = header("Host");
+    BrowserRequestHeaders headers;
+    if (site) { headers.secFetchSite = *site; }
+    if (origin) { headers.origin = *origin; }
+    if (host) { headers.host = *host; }
+    if (!RejectBrowserRequest(headers, req.local_port)) {
+        return false;
+    }
+    res.status = 403;
+    res.set_content(BuildGenericErrorResponseJson("browser requests are refused on this route"), "application/json");
+    return true;
 }
 
 // Shared tail for every /frame_debugger/* route EXCEPT /state (which needs
@@ -681,6 +707,48 @@ void RegisterClusterViewerRoutes(
         if (const std::optional<SceneCameraOutcome> out = runSceneCamera(res, std::move(command))) {
             res.status = 200;
             res.set_content(BuildSceneCameraStateJson(out->report), "application/json");
+        }
+    });
+
+    server.Get("/scene_camera/pose", [runSceneCamera](const httplib::Request&, httplib::Response& res) {
+        SceneCameraCommand command;
+        command.operation = SceneCameraOperation::State;
+        if (const std::optional<SceneCameraOutcome> out = runSceneCamera(res, std::move(command))) {
+            res.status = 200;
+            res.set_content(BuildSceneCameraPoseJson(out->report), "application/json");
+        }
+    });
+
+    server.Get("/scene_camera/set_pose", [runSceneCamera](const httplib::Request& req, httplib::Response& res) {
+        const ParsedSetPoseQuery parsed = ParseSetPoseQuery(req.get_param_value("x"), req.get_param_value("y"),
+            req.get_param_value("z"), req.get_param_value("yaw"), req.get_param_value("pitch"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        SceneCameraCommand command;
+        command.operation = SceneCameraOperation::SetPose;
+        command.poseX = parsed.x;
+        command.poseY = parsed.y;
+        command.poseZ = parsed.z;
+        command.yawDegrees = parsed.yaw;
+        command.pitchDegrees = parsed.pitch;
+        if (const std::optional<SceneCameraOutcome> out = runSceneCamera(res, std::move(command))) {
+            res.status = 200;
+            res.set_content(BuildSceneCameraPoseJson(out->report), "application/json");
+        }
+    });
+
+    server.Post("/exit", [uiBridge](const httplib::Request& req, httplib::Response& res) {
+        if (RefuseBrowserRequest(req, res)) {
+            return;
+        }
+        EditorUiCommandRequest request;
+        request.kind = EditorUiCommandKind::Exit;
+        if (SubmitEditorUiCommand(uiBridge, request, res).has_value()) {
+            res.status = 200;
+            res.set_content(BuildExitReplyJson(), "application/json");
         }
     });
 

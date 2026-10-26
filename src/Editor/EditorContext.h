@@ -10,6 +10,7 @@
 #include "../Math/Mat4.h"
 #include "../Math/Vec2.h"
 #include "RenderGraphRegimeChoice.h"
+#include "ViewCullFreshness.h"
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -268,8 +269,8 @@ struct EditorContext {
     // Link to the feature that culls the Scene view; empty until a feature attaches.
     std::shared_ptr<fx::ViewCullLink> viewCull;
 
-    // The Scene panel's cull view controls and HUD are shown.
-    bool sceneCullViewOn = false;
+    // UI-only state of the Scene panel cull box.
+    ScenePanelCullViewUi cullViewUi;
 };
 
 } // namespace gte

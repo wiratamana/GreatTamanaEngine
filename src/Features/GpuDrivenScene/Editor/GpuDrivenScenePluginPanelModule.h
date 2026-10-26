@@ -21,7 +21,6 @@ public:
     void BuildPanel(IPluginPanelDrawContext& ctx) override;
 
 private:
-    EditorContext& m_ctx;
     GpuDrivenSceneFeature& m_feature;
 };
 

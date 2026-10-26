@@ -106,6 +106,7 @@ void BuildScenePanel(
     const bool isVisible =
         ImGui::Begin("Scene", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     ctx.sceneViewVisible = isVisible;
+    ctx.cullViewUi.stale = false;
     ctx.sceneCamera.rendered = false;
 
     if (isVisible) {
@@ -163,14 +164,14 @@ void BuildScenePanel(
 
             camera.Update(mouseDelta, scrollDelta, ctx.sceneCameraPanning, ctx.sceneCameraRotating);
 
-            // Move/Rotate/Scale switcher overlay; drawn after the hover check (so IsItemHovered() still refers
-            // to the image) and before the gizmo (so the gizmo paints on top).
+            // Switcher is drawn after the hover check (IsItemHovered() still means the image), before the gizmo.
             ImGui::SetCursorScreenPos(ImVec2(imageMin.x + 8.0f, imageMin.y + 8.0f));
             DrawGizmoOperationSwitcher(ctx.gizmoOperation);
+            const float switcherBottom = ImGui::GetItemRectMax().y;
 
-            // Camera bodies, the selected frustum and left-click picking; before the gizmo so the gizmo paints on top.
-            // Cull view widgets come first so they block camera picking under them.
-            const bool overCullView = BuildScenePanelCullView(ctx, imageMin, imageSize);
+            // The cull box sits below the switcher row, right aligned, so Move/Rotate/Scale stay clickable at any width.
+            // It is drawn first so it blocks camera picking under it.
+            const bool overCullView = BuildScenePanelCullView(ctx, imageMin, imageSize, switcherBottom);
             BuildCameraOverlay(registry, ctx, camera, imageMin, imageSize, hovered && !overCullView);
 
             // Gizmo for the selected entity; needs a live entity with a Transform.

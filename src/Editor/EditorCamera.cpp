@@ -1,28 +1,35 @@
 #include "EditorCamera.h"
 
+#include <cmath>
+
 namespace gte {
+
+namespace {
+
+// Wraps an angle to [-180, 180).
+float WrapDegrees(float degrees) noexcept
+{
+    float wrapped = std::fmod(degrees + 180.0f, 360.0f);
+    if (wrapped < 0.0f) {
+        wrapped += 360.0f;
+    }
+    return wrapped - 180.0f;
+}
+
+bool IsWithin(float value, float limit) noexcept
+{
+    return std::isfinite(value) && std::fabs(value) <= limit;
+}
+
+} // namespace
 
 void EditorCamera::Update(Vec2 mouseDelta, float scrollDelta, bool middleMouseDown, bool rightMouseDown) noexcept
 {
-    // Rotate first, so a frame that (unusually) both rotates AND
-    // pans/dollies moves along the JUST-updated orientation, not last
-    // frame's - see the field comment on m_yawDegrees/m_pitchDegrees for why
-    // these accumulate independently rather than being decomposed back out
-    // of m_transform.rotation every frame.
+    // Look first, so pan and dolly in the same frame follow the new orientation.
     if (rightMouseDown) {
-        // Screen-space dx>0 (mouse moved right) turns the view right: this
-        // engine's yaw convention already rotates Forward() TOWARD Right()
-        // for a positive angle (see Quat.h), so this falls out directly
-        // with no sign flip needed.
+        // Positive yaw turns forward toward right; positive pitch tilts forward down.
         m_yawDegrees += mouseDelta.x * kDegreesPerPixel;
-
-        // Screen-space dy>0 (mouse moved down) tilts the view down: a
-        // positive pitch (rotation around local Right()) tilts Forward()'s
-        // Y component negative (see EditorCamera.h's derivation notes /
-        // tests/Editor/EditorCameraTests.cpp), i.e. downward - so this too
-        // falls out directly, no sign flip needed.
         m_pitchDegrees = Clamp(m_pitchDegrees + mouseDelta.y * kDegreesPerPixel, -kMaxPitchDegrees, kMaxPitchDegrees);
-
         m_transform.rotation = Quat::FromEulerDegrees(m_pitchDegrees, m_yawDegrees, 0.0f);
     }
 
@@ -31,18 +38,27 @@ void EditorCamera::Update(Vec2 mouseDelta, float scrollDelta, bool middleMouseDo
     const Vec3 forward = m_transform.rotation.RotateVector(Vec3::Forward());
 
     if (middleMouseDown) {
-        // "Grab and drag" feel (matches Unity): dragging right should make
-        // the SCENE appear to follow the cursor to the right, which means
-        // the CAMERA itself moves left (and vice versa for up/down) -
-        // hence the negated X term. Y is screen-space (down-positive), so
-        // it is negated again relative to world-space Up() to get the same
-        // "content follows the drag" feel vertically.
+        // Grab and drag: the scene follows the cursor, so the camera moves the opposite way.
         m_transform.position += right * (-mouseDelta.x * kPanUnitsPerPixel) + up * (mouseDelta.y * kPanUnitsPerPixel);
     }
 
     if (scrollDelta != 0.0f) {
         m_transform.position += forward * (scrollDelta * kZoomUnitsPerWheelNotch);
     }
+}
+
+bool EditorCamera::SetPose(Vec3 position, float yawDegrees, float pitchDegrees) noexcept
+{
+    if (!IsWithin(position.x, kMaxPoseUnits) || !IsWithin(position.y, kMaxPoseUnits)
+        || !IsWithin(position.z, kMaxPoseUnits) || !IsWithin(yawDegrees, kMaxPoseDegrees)
+        || !IsWithin(pitchDegrees, kMaxPoseDegrees)) {
+        return false;
+    }
+    m_yawDegrees = WrapDegrees(yawDegrees);
+    m_pitchDegrees = Clamp(pitchDegrees, -kMaxPitchDegrees, kMaxPitchDegrees);
+    m_transform.position = position;
+    m_transform.rotation = Quat::FromEulerDegrees(m_pitchDegrees, m_yawDegrees, 0.0f);
+    return true;
 }
 
 } // namespace gte

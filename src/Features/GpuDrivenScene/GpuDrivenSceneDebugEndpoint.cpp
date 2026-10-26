@@ -1,4 +1,4 @@
-﻿#include "GpuDrivenSceneDebugEndpoint.h"
+#include "GpuDrivenSceneDebugEndpoint.h"
 
 #include "GpuDrivenSceneFeature.h"
 
@@ -38,14 +38,12 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDriv
 {
     const auto key = [&](std::string_view name) { return std::string(prefix).append(name); };
     const auto text = [](std::string_view s) { return std::string(s); };
-    const std::optional<std::uint64_t> hidden = fx::HiddenClusterCount(v.testedAtVisibleFrame, v.visibleClusters);
     Add(out, key("rendered"), v.rendered);
     Add(out, key("frameIndex"), Count(v.frameIndex));
     Add(out, key("frozen"), v.frozen);
     Add(out, key("cullFrozenFrame"), Count(v.frozenFrame));
     Add(out, key("occlusion"), text(fx::EnumName(fx::kOcclusionStateTable, v.occlusion)));
     Add(out, key("hizReason"), text(fx::EnumName(fx::kHizReasonTable, v.hizReason)));
-    Add(out, key("note"), text(fx::EnumName(fx::kViewCullNoteTable, v.note)));
     Add(out, key("inertReason"), text(fx::ClusterInertReasonName(v.inertReason)));
     Add(out, key("lastRefusalReason"), v.refusal);
     Add(out, key("claimedEntities"), Count(v.claimedEntities));
@@ -54,10 +52,12 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDriv
     Add(out, key("testedAtVisibleFrame"), Count(v.testedAtVisibleFrame));
     Add(out, key("visibleClusters"), Count(v.visibleClusters));
     Add(out, key("visibleFrame"), Count(v.visibleFrame));
-    Add(out, key("hidden"), Count(v.visibleValid && hidden ? *hidden : 0));
-    Add(out, key("hiddenValid"), v.visibleValid && hidden.has_value());
+    Add(out, key("hidden"), Count(v.hidden));
+    Add(out, key("hiddenValid"), v.hiddenValid);
     Add(out, key("statsCollected"), v.statsCollected);
     Add(out, key("visibleValid"), v.visibleValid);
+    Add(out, key("cameraValid"), v.cameraValid);
+    Add(out, key("hizTrackingRequested"), v.hizTrackingRequested);
     Add(out, key("ledgerBytes"), Count(v.ledgerBytes));
 }
 
@@ -104,8 +104,7 @@ fx::FeatureDebugResult GpuDrivenSceneDebugEndpoint::GetState() const
 
 fx::FeatureDebugResult GpuDrivenSceneDebugEndpoint::Set(std::span<const fx::FeatureDebugArg> args)
 {
-    m_feature.FlushRequest();
-    GpuDrivenSceneSettings candidate = m_feature.Settings();
+    GpuDrivenSceneSettings candidate = m_feature.EditableSettings();
     for (const fx::FeatureDebugArg& arg : args) {
         switch (ApplyGpuDrivenSceneSetting(candidate, arg.key, arg.value)) {
         case GpuDrivenSceneSetResult::Applied: break;
@@ -133,14 +132,13 @@ fx::FeatureDebugResult GpuDrivenSceneDebugEndpoint::Invoke(std::string_view acti
     if (!args.empty()) {
         return Fail(args.front().key, std::string(action) + " takes no arguments");
     }
-    m_feature.FlushRequest();
+    GpuDrivenSceneSettings settings = m_feature.EditableSettings();
     if (reset) {
-        m_feature.ApplySettings(GpuDrivenSceneSettings{});
+        settings = DefaultsKeepingSerial(settings);
     } else {
-        GpuDrivenSceneSettings next = m_feature.Settings();
-        FreezeSceneCullHere(next);
-        m_feature.ApplySettings(next);
+        FreezeSceneCullHere(settings);
     }
+    m_feature.ApplySettings(settings);
     return GetState();
 }
 

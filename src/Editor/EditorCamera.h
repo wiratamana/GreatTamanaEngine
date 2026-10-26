@@ -7,95 +7,34 @@
 
 namespace gte {
 
-// Editor-only fly camera, exclusively for the "Scene" panel
-// (Panels/ScenePanel.cpp) - deliberately separate from anything in Game's
-// ECS world (never an Entity/Transform/Camera component Game owns), so
-// looking around the Scene view never touches - or is touched by -
-// gameplay state. This is what finally makes "Scene" genuinely different
-// from "Game" (see the "REMAINING LIMITATION" this used to be, noted in
-// ImGuiEditorLayer.cpp/README.md before this file existed): "Game" still
-// renders through whichever ECS entity has the active Camera component
-// (RenderSystem::ResolveActiveCameraViewProjection()), while "Scene" now
-// renders through THIS camera instead (see
-// IEditorLayer::SceneViewProjection()).
-//
-// Mirrors Unity's own Scene view controls:
-//   - Middle-mouse drag: pan (truck/pedestal) along the camera's own local
-//     right/up axes.
-//   - Mouse wheel:       dolly along the camera's own local forward axis.
-//   - Right-mouse drag:  look around - yaw around the WORLD up axis, pitch
-//     around the camera's own local right axis (clamped so it can never
-//     flip upside down), i.e. ordinary FPS-camera mouselook.
-//
-// Deliberately pure logic - no ImGui/SDL/Vulkan dependency at all, unlike
-// most of src/Editor/ - so it is Tier-1-testable exactly like the rest of
-// the engine (see AGENTS.md, "Testability & Regression Safety", and
-// tests/Editor/EditorCameraTests.cpp). Panels/ScenePanel.cpp is the one
-// place that actually reads ImGui's mouse state (hover, drag deltas, wheel,
-// button state) and calls Update() below with plain values - this class
-// itself never touches ImGui.
+// Fly camera of the Scene view. It is not an ECS entity, so moving it never touches game state.
+// Pure logic with no ImGui, SDL or Vulkan: the panel feeds it plain mouse values.
+//   Middle drag: pan. Wheel: dolly along forward. Right drag: mouse look (pitch is clamped).
 class EditorCamera {
 public:
-    // Starts positioned back along -Z looking toward the origin with an
-    // identity rotation, deliberately matching Game's own default Camera
-    // entity (see Game::EnsureDefaultCameraExists()) - purely so the very
-    // time a user opens "Scene" it already shows something, not a blank
-    // RenderTexture; there is no other link between the two cameras.
+    // Starts at (0, 0, -5) looking along +Z.
     EditorCamera() noexcept : m_transform{ Vec3{ 0.0f, 0.0f, -5.0f }, Quat::Identity(), Vec3::One() } { }
 
-    // Advances this camera by one frame's worth of Scene-panel mouse input,
-    // entirely in terms of plain values (see class comment for why this
-    // takes no ImGui type at all). `mouseDelta` is this frame's raw
-    // mouse-motion delta in pixels (X, Y - Y positive downward, matching
-    // screen-space convention); it is only actually applied while
-    // `middleMouseDown` (pan) or `rightMouseDown` (rotate) is true -
-    // ScenePanel.cpp is responsible for only ever passing true for either
-    // once the corresponding drag actually started while hovering the Scene
-    // panel itself (see its own comment for why, and for why both keep
-    // responding even if the cursor later drifts outside the panel mid-
-    // drag). `scrollDelta` is this frame's raw mouse-wheel delta (positive
-    // = scrolled away from the user, i.e. "zoom/dolly in").
+    // mouseDelta is in pixels (Y down). It only applies while middleMouseDown (pan) or
+    // rightMouseDown (look) is true. scrollDelta > 0 dollies forward.
     void Update(Vec2 mouseDelta, float scrollDelta, bool middleMouseDown, bool rightMouseDown) noexcept;
 
-    // View and projection matrices, kept SEPARATE (never pre-multiplied) -
-    // what Panels/ScenePanel.cpp hands to TransformGizmo.h's
-    // ManipulateTransformGizmo(), which needs them individually (ImGuizmo's
-    // own Manipulate() signature takes view/projection as two separate
-    // float[16]s, unlike RenderSystem::Draw()'s combined view-projection).
-    // NOTE: use GizmoProjection() below, NOT this Projection(), when
-    // feeding ImGuizmo - see its own comment for why the two must differ.
+    // Sets position and look direction at once. Pitch is clamped like Update(), yaw wraps to [-180, 180).
+    // Returns false and changes nothing when an input is not finite or absurdly large.
+    bool SetPose(Vec3 position, float yawDegrees, float pitchDegrees) noexcept;
+
+    // Separate view and projection, as the gizmo needs them individually.
     Mat4 View() const noexcept { return Camera::ViewMatrix(m_transform); }
     Mat4 Projection(float aspectWidthOverHeight) const noexcept { return m_camera.ProjectionMatrix(aspectWidthOverHeight); }
 
-    // Same field of view/near/far as Projection() above, but WITHOUT the
-    // Vulkan-clip-space Y flip Camera::ProjectionMatrix() always bakes in
-    // (see its own comment) - built directly via Mat4::PerspectiveFovLH_ZO()
-    // with flipY=false instead of reusing Camera::ProjectionMatrix(). This
-    // is the one ImGuizmo actually needs: ImGuizmo does its own NDC ->
-    // screen-space conversion internally assuming the OPENGL convention
-    // (NDC +Y maps to the TOP of its given rect - see ImGuizmo.cpp's
-    // worldToPos(), `trans.y = 1.f - trans.y`), which is the OPPOSITE of
-    // Vulkan's own raw clip-space convention (NDC +Y maps to the BOTTOM of
-    // the viewport) that Projection()'s flipY=true is specifically there to
-    // compensate for when Renderer/FrameRecorder actually rasterize with
-    // it. Feeding Projection()'s already-flipped matrix into ImGuizmo would
-    // flip Y a SECOND time on top of ImGuizmo's own conversion, mirroring
-    // the whole gizmo vertically relative to what's actually on screen -
-    // exactly the "gizmo position doesn't match the triangle, arrow points
-    // the wrong way" symptom this was added to fix. See
-    // Panels/ScenePanel.cpp's call to ManipulateTransformGizmo().
+    // Projection without the Vulkan clip-space Y flip; the gizmo library expects +Y up in NDC.
     Mat4 GizmoProjection(float aspectWidthOverHeight) const noexcept
     {
         return Mat4::PerspectiveFovLH_ZO(
             DegToRad(m_camera.fovYDegrees), aspectWidthOverHeight, m_camera.nearZ, m_camera.farZ, /*flipY=*/false);
     }
 
-    // Combined projection * view matrix for a render target of the given
-    // aspect ratio - what ImGuiEditorLayer::SceneViewProjection() hands
-    // straight to RenderSystem::Draw() for the Scene view, in place of
-    // RenderSystem::ResolveActiveCameraViewProjection() (which is what the
-    // Game view still uses). Reuses Camera's own pure-math helpers directly
-    // (see ECS/Components/Camera.h) rather than duplicating that math here.
+    // Projection * view for a render target of the given aspect ratio.
     Mat4 ViewProjection(float aspectWidthOverHeight) const noexcept
     {
         return Projection(aspectWidthOverHeight) * View();
@@ -105,39 +44,27 @@ public:
     float YawDegrees() const noexcept { return m_yawDegrees; }
     float PitchDegrees() const noexcept { return m_pitchDegrees; }
 
+    // Largest accepted SetPose magnitudes: world units and degrees.
+    static constexpr float kMaxPoseUnits = 1.0e6f;
+    static constexpr float kMaxPoseDegrees = 1.0e5f;
+
 private:
-    // Position/rotation this camera is currently at - edited in place by
-    // Update() above. Scale is always Vec3::One() (unused - see
-    // Camera::ViewMatrix()'s own comment on why a camera Transform's scale
-    // is never meaningful).
+    // Scale is always one; a camera transform never uses it.
     Transform m_transform;
 
-    // Only its ProjectionMatrix()/field-of-view/near-far are ever used
-    // here; `active` is meaningless for this camera (it is never a
-    // Registry entry RenderSystem could pick up - see class comment).
+    // Only the lens (fov, near, far) is used.
     Camera m_camera{};
 
-    // Yaw/pitch, in degrees, tracked independently of m_transform.rotation
-    // (which is only ever the QUAT rebuilt FROM these two each time they
-    // change) - see Update() - so repeatedly nudging them by a small
-    // per-frame delta never accumulates floating-point drift the way
-    // repeatedly re-deriving yaw/pitch back out of a quaternion each frame
-    // would.
+    // Kept apart from the quaternion so small per-frame deltas never accumulate drift.
     float m_yawDegrees = 0.0f;
     float m_pitchDegrees = 0.0f;
 
-    // Arbitrary, hand-tuned-to-feel-right constants - world units per pixel
-    // of drag (pan/zoom) or degrees per pixel of drag (rotate). Free to
-    // retune later; nothing else in the engine depends on their exact
-    // values.
+    // World units per pixel (pan), per wheel notch (dolly) and degrees per pixel (look).
     static constexpr float kPanUnitsPerPixel = 0.01f;
     static constexpr float kZoomUnitsPerWheelNotch = 0.5f;
     static constexpr float kDegreesPerPixel = 0.2f;
 
-    // Pitch is clamped to just short of +/-90 degrees so the camera can
-    // never rotate past looking straight up/down into looking upside-down
-    // (the same gimbal-adjacent flip every FPS-style mouselook camera
-    // avoids this way).
+    // Pitch stops short of +/-90 so the view never flips upside down.
     static constexpr float kMaxPitchDegrees = 89.0f;
 };
 

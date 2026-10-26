@@ -1,6 +1,7 @@
 // Tier 1 tests for the Scene camera routes: pure parsing and JSON building only.
 
 #include "Network/NetworkRoutes.h"
+#include "Network/NetworkSceneCameraPose.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -124,6 +125,102 @@ TEST(SceneCameraStateJsonTests, CullViewCarriesTheHudNumbers)
     EXPECT_EQ(cull["tested_at_visible_frame"].get<int>(), 100);
     EXPECT_TRUE(cull["counts_valid"].get<bool>());
     EXPECT_EQ(cull["frozen_frame"].get<int>(), 12);
+}
+
+TEST(SceneCameraStateJsonTests, CullViewHasCameraValidTestedAndStaleButNoNote)
+{
+    SceneCameraReport report;
+    report.cullView.valid = true;
+    report.cullView.stale = true;
+    report.cullView.cameraValid = false;
+    report.cullView.tested = 321;
+
+    const nlohmann::json json = nlohmann::json::parse(BuildSceneCameraStateJson(report));
+    const nlohmann::json& cull = json["cull_view"];
+    EXPECT_FALSE(cull.contains("note"));
+    EXPECT_TRUE(cull["stale"].get<bool>());
+    EXPECT_FALSE(cull["camera_valid"].get<bool>());
+    EXPECT_EQ(cull["tested"].get<int>(), 321);
+}
+
+TEST(SceneCameraPoseJsonTests, CarriesPositionYawAndPitch)
+{
+    SceneCameraReport report;
+    report.pose.position[0] = 1.5f;
+    report.pose.position[1] = 2.0f;
+    report.pose.position[2] = -12.0f;
+    report.pose.yawDegrees = 90.0f;
+    report.pose.pitchDegrees = 10.0f;
+
+    const nlohmann::json json = nlohmann::json::parse(BuildSceneCameraPoseJson(report));
+    EXPECT_TRUE(json["success"].get<bool>());
+    EXPECT_FLOAT_EQ(json["position"]["x"].get<float>(), 1.5f);
+    EXPECT_FLOAT_EQ(json["position"]["y"].get<float>(), 2.0f);
+    EXPECT_FLOAT_EQ(json["position"]["z"].get<float>(), -12.0f);
+    EXPECT_FLOAT_EQ(json["yaw_degrees"].get<float>(), 90.0f);
+    EXPECT_FLOAT_EQ(json["pitch_degrees"].get<float>(), 10.0f);
+}
+
+TEST(SceneCameraPoseJsonTests, EmbeddedObjectHasNoSuccessKey)
+{
+    const nlohmann::json json = ScenePoseToJson(SceneCameraPose{});
+    EXPECT_FALSE(json.contains("success"));
+    EXPECT_TRUE(json.contains("position"));
+    EXPECT_TRUE(json.contains("yaw_degrees"));
+    EXPECT_TRUE(json.contains("pitch_degrees"));
+}
+
+TEST(SceneCameraSetPoseQueryTests, ParsesFiveValidValues)
+{
+    const ParsedSetPoseQuery parsed = ParseSetPoseQuery("0", "2", "-12", "0", "10.5");
+    ASSERT_TRUE(parsed.valid);
+    EXPECT_FLOAT_EQ(parsed.y, 2.0f);
+    EXPECT_FLOAT_EQ(parsed.z, -12.0f);
+    EXPECT_FLOAT_EQ(parsed.pitch, 10.5f);
+}
+
+TEST(SceneCameraSetPoseQueryTests, MissingKeyNamesTheKey)
+{
+    const ParsedSetPoseQuery parsed = ParseSetPoseQuery("0", "2", "", "0", "0");
+    EXPECT_FALSE(parsed.valid);
+    EXPECT_NE(parsed.errorMessage.find(": z "), std::string::npos);
+}
+
+TEST(SceneCameraSetPoseQueryTests, RejectsNonFiniteAndHugeValues)
+{
+    EXPECT_FALSE(ParseSetPoseQuery("nan", "0", "0", "0", "0").valid);
+    EXPECT_FALSE(ParseSetPoseQuery("0", "inf", "0", "0", "0").valid);
+    EXPECT_FALSE(ParseSetPoseQuery("0", "0", "-inf", "0", "0").valid);
+    EXPECT_FALSE(ParseSetPoseQuery("1e9", "0", "0", "0", "0").valid);
+    EXPECT_FALSE(ParseSetPoseQuery("0", "0", "0", "1e9", "0").valid);
+}
+
+TEST(SceneCameraSetPoseQueryTests, RejectsTrailingTextAndNamesYaw)
+{
+    EXPECT_FALSE(ParseSetPoseQuery("1abc", "0", "0", "0", "0").valid);
+    EXPECT_FALSE(ParseSetPoseQuery(" 1", "0", "0", "0", "0").valid);
+
+    const ParsedSetPoseQuery parsed = ParseSetPoseQuery("0", "0", "0", "left", "0");
+    EXPECT_FALSE(parsed.valid);
+    EXPECT_NE(parsed.errorMessage.find(": yaw "), std::string::npos);
+}
+
+TEST(SceneCameraExitReplyTests, SaysExitRequested)
+{
+    const nlohmann::json body = nlohmann::json::parse(BuildExitReplyJson());
+    EXPECT_TRUE(body.at("success").get<bool>());
+    EXPECT_EQ(body.at("message").get<std::string>(), "exit requested");
+}
+
+TEST(SceneCameraStateJsonTests, CarriesThePose)
+{
+    SceneCameraReport report;
+    report.pose.position[2] = -12.0f;
+    report.pose.pitchDegrees = 10.0f;
+    const nlohmann::json body = nlohmann::json::parse(BuildSceneCameraStateJson(report));
+    EXPECT_FLOAT_EQ(body.at("pose").at("position").at("z").get<float>(), -12.0f);
+    EXPECT_FLOAT_EQ(body.at("pose").at("pitch_degrees").get<float>(), 10.0f);
+    EXPECT_FALSE(body.at("pose").contains("success"));
 }
 
 } // namespace

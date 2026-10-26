@@ -1,6 +1,7 @@
-﻿#pragma once
+#pragma once
 
 #include "../../Core/FeatureKit/ClusterDrawTypes.h"
+#include "../../Core/FeatureKit/EnumTable.h"
 #include "../../Core/FeatureKit/FeatureDebug.h"
 #include "../../Core/FeatureKit/ViewCullLink.h"
 
@@ -39,7 +40,7 @@ struct GpuDrivenSceneSettings {
 
     fx::ViewCullChoice sceneCull = fx::ViewCullChoice::FollowSettings;
     bool sceneCone = false; // Used only while sceneCull is not FollowSettings.
-    fx::ViewCullSource sceneSource = fx::ViewCullSource::SceneCamera;
+    fx::ViewCullSource sceneSource = fx::ViewCullSource::Live;
     std::uint32_t freezeSerial = 0; // A new value captures the frozen cull camera again.
     fx::GhostStyle ghost = fx::GhostStyle::NotDrawn;
 };
@@ -54,7 +55,7 @@ constexpr GpuDrivenSceneSettings SanitizeGpuDrivenSceneSettings(GpuDrivenSceneSe
         s.sceneCull = fx::ViewCullChoice::FollowSettings;
     }
     if (!fx::EnumKnown(fx::kViewCullSourceTable, s.sceneSource)) {
-        s.sceneSource = fx::ViewCullSource::SceneCamera;
+        s.sceneSource = fx::ViewCullSource::Live;
     }
     if (!fx::EnumKnown(fx::kGhostStyleTable, s.ghost)) {
         s.ghost = fx::GhostStyle::NotDrawn;
@@ -113,7 +114,7 @@ inline constexpr std::array kGpuDrivenSceneSettingKeys{
     GpuDrivenSceneSettingKey{ "sceneCull", "FollowSettings, Off, Frustum or FrustumHiz",
         &detail::SetEnum<&GpuDrivenSceneSettings::sceneCull, fx::kViewCullChoiceTable> },
     GpuDrivenSceneSettingKey{ "sceneCone", "true or false", &detail::SetBool<&GpuDrivenSceneSettings::sceneCone> },
-    GpuDrivenSceneSettingKey{ "sceneSource", "SceneCamera or Frozen",
+    GpuDrivenSceneSettingKey{ "sceneSource", "Live or Frozen",
         &detail::SetEnum<&GpuDrivenSceneSettings::sceneSource, fx::kViewCullSourceTable> },
     GpuDrivenSceneSettingKey{ "ghost", "NotDrawn", &detail::SetEnum<&GpuDrivenSceneSettings::ghost, fx::kGhostStyleTable> },
 };
@@ -184,10 +185,17 @@ constexpr bool ViewFreezeRequested(const GpuDrivenSceneSettings& s, bool sceneVi
     return s.freezeCulling || (sceneView && s.sceneSource == fx::ViewCullSource::Frozen);
 }
 
+// The pyramid is built from a view's live camera depth; no other cull camera may use it.
+constexpr bool HizMatchesCullCamera(bool hizRequested, bool cullIsLive) noexcept
+{
+    return hizRequested && cullIsLive;
+}
+
 // The pyramid is built from the live camera's depth, so a frozen view never needs it.
 constexpr bool ViewWantsHiz(const GpuDrivenSceneSettings& s, bool sceneView) noexcept
 {
-    return s.enabled && ResolveViewCullTests(s, sceneView).occlusion && !ViewFreezeRequested(s, sceneView);
+    return s.enabled
+        && HizMatchesCullCamera(ResolveViewCullTests(s, sceneView).occlusion, !ViewFreezeRequested(s, sceneView));
 }
 
 constexpr void FreezeSceneCullHere(GpuDrivenSceneSettings& s) noexcept
@@ -196,17 +204,29 @@ constexpr void FreezeSceneCullHere(GpuDrivenSceneSettings& s) noexcept
     ++s.freezeSerial;
 }
 
-// Settings after the Scene panel's request. A reset keeps the serial so a later freeze still captures anew.
+// Defaults for every field except freezeSerial, so a freeze after a reset still captures anew.
+constexpr GpuDrivenSceneSettings DefaultsKeepingSerial(const GpuDrivenSceneSettings& s) noexcept
+{
+    GpuDrivenSceneSettings d{};
+    d.freezeSerial = s.freezeSerial;
+    return d;
+}
+
+// Returns only the secondary-view fields to their defaults; every other field and the serial stay.
+constexpr void ResetSceneCullFields(GpuDrivenSceneSettings& s) noexcept
+{
+    const GpuDrivenSceneSettings defaults{};
+    s.sceneCull = defaults.sceneCull;
+    s.sceneCone = defaults.sceneCone;
+    s.sceneSource = defaults.sceneSource;
+    s.ghost = defaults.ghost;
+}
+
+// Settings after the panel's request.
 constexpr GpuDrivenSceneSettings ApplyViewCullRequest(GpuDrivenSceneSettings s, const fx::ViewCullRequest& r) noexcept
 {
     if (r.resetAll) {
-        const std::uint32_t serial = s.freezeSerial;
-        const GpuDrivenSceneSettings defaults{};
-        s.sceneCull = defaults.sceneCull;
-        s.sceneCone = defaults.sceneCone;
-        s.sceneSource = defaults.sceneSource;
-        s.ghost = defaults.ghost;
-        s.freezeSerial = serial;
+        ResetSceneCullFields(s);
     } else {
         ApplyViewCullChoice(s, r.choice, r.cone);
         s.sceneSource = r.source;
@@ -246,13 +266,13 @@ inline const fx::ClusterCamera& ResolveCullCamera(FrozenCullCamera& state, bool 
     return state.frozen ? state.camera : live;
 }
 
-// Hi-Z state of a view. The pyramid belongs to the live camera, so another cull camera never uses it.
+// Hi-Z state of a view; a cull camera other than the live one never uses the pyramid.
 constexpr fx::OcclusionState OcclusionStateOf(bool requested, bool cullIsLive, bool applied) noexcept
 {
     if (!requested) {
         return fx::OcclusionState::NotRequested;
     }
-    if (!cullIsLive) {
+    if (!HizMatchesCullCamera(true, cullIsLive)) {
         return fx::OcclusionState::CameraNotLive;
     }
     return applied ? fx::OcclusionState::Applied : fx::OcclusionState::Unusable;
@@ -340,20 +360,22 @@ struct GpuDrivenSceneViewSnapshot {
     std::uint32_t parts = 0;
     fx::OcclusionState occlusion = fx::OcclusionState::NotRequested;
     HizReason hizReason = HizReason::None;
-    fx::ViewCullNote note = fx::ViewCullNote::None;
     std::uint64_t testedClusters = 0;          // Current frame.
     std::uint64_t testedAtVisibleFrame = 0;    // Tested at the frame the visible count belongs to.
     std::uint32_t visibleClusters = 0;
     std::uint64_t visibleFrame = 0;
     bool statsCollected = false; // The count readback was on this frame; visibleValid is false otherwise.
     bool visibleValid = false;
+    std::uint64_t hidden = 0;
+    bool hiddenValid = false; // visibleValid and visible <= testedAtVisibleFrame.
+    bool hizTrackingRequested = false; // This view asked for movement tracking in a recent frame.
     fx::ClusterInertReason inertReason = fx::ClusterInertReason::None;
     bool refused = false;
     std::string refusal;
     std::uint64_t ledgerBytes = 0;
 };
 
-// The Scene panel's view of the Scene snapshot. A pure function of its inputs.
+// The panel's view of the secondary view snapshot. A pure function of its inputs.
 inline fx::ViewCullReport MakeViewCullReport(const GpuDrivenSceneSettings& s, const GpuDrivenSceneViewSnapshot& v) noexcept
 {
     fx::ViewCullReport r;
@@ -370,16 +392,18 @@ inline fx::ViewCullReport MakeViewCullReport(const GpuDrivenSceneSettings& s, co
     r.testedAtVisibleFrame = v.testedAtVisibleFrame;
     r.visible = v.visibleClusters;
     r.visibleValid = v.visibleValid;
+    r.hidden = v.hidden;
+    r.hiddenValid = v.hiddenValid;
     r.claimedInstances = v.claimedEntities;
     r.occlusion = v.occlusion;
     r.hizReason = v.hizReason;
     r.frozen = v.frozen;
     r.frozenFrame = v.frozenFrame;
+    r.cameraValid = v.cameraValid;
     r.cullCameraValid = v.cullCameraValid;
     r.cullViewProjection = v.cullViewProjection;
     r.inertReason = v.inertReason;
     r.refused = v.refused;
-    r.note = v.note;
     return r;
 }
 

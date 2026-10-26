@@ -1053,6 +1053,10 @@ add_library(gte_core STATIC
     src/Jobs/JobContinuation.cpp
     src/Network/NetworkRoutes.h
     src/Network/NetworkRoutes.cpp
+    src/Network/NetworkRequestGuard.h
+    src/Network/NetworkRequestGuard.cpp
+    src/Network/NetworkSceneCameraPose.h
+    src/Network/NetworkSceneCameraPose.cpp
     src/Network/NetworkServer.h
     src/Network/NetworkServer.cpp
     src/Encoding/Base64.h
@@ -1237,6 +1241,9 @@ add_library(gte_editor STATIC
     src/Editor/SceneCameraAdapter.cpp
     src/Editor/ViewCullHud.h
     src/Editor/ViewCullHud.cpp
+    src/Editor/ViewCullFreshness.h
+    src/Editor/ViewCullLayout.h
+    src/Editor/ViewCullLayout.cpp
     src/Editor/ViewCullOverlay.h
     src/Editor/ViewCullOverlay.cpp
     src/Editor/SceneCameraFrustum.h
@@ -1314,6 +1321,7 @@ add_library(gte_editor STATIC
     src/Editor/Selection.cpp
     src/Editor/EditorCamera.h
     src/Editor/EditorCamera.cpp
+    src/Editor/ExitGate.h
     src/Editor/SceneGridMath.h
     src/Editor/SceneGridMath.cpp
     src/Editor/InstanceGridTestSpawner.h

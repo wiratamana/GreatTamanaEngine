@@ -386,14 +386,31 @@ module or adding a new endpoint:
 - **Scene camera routes** (`/scene_camera/*`) use `ISceneCameraControl` (`SceneCameraControl.h`).
   - `GET /scene_camera/state` lists the cameras of the Scene (entity, name, pose, lens, selected, apex screen
     position as fractions of the Scene image) and the segments of the selected camera frustum in image pixels.
-    `cull_view` holds the numbers of the Scene cull view (`valid`, `mode`, `source`, `visible`, `hidden`,
-    `tested_at_visible_frame`, `counts_valid`, `occlusion`, `hiz_reason`, `frozen`, `frozen_frame`, ...); it is
-    only `{"valid":false}` while no feature is linked.
+    `pose` is the pose of the Scene fly camera (same shape as `/scene_camera/pose`, without `success`).
+    `cull_view` holds the numbers of the Scene cull view (`valid`, `rendered`, `stale`, `camera_valid`, `mode`,
+    `source`, `tested`, `visible`, `hidden`, `tested_at_visible_frame`, `counts_valid`, `occlusion`, `hiz_reason`,
+    `frozen`, `frozen_frame`, ...); it is only `{"valid":false}` while no feature is linked. `stale` is true when the
+    report did not move for 4 UI frames; `rendered` is then false.
+  - `GET /scene_camera/pose` replies `{"success":true,"position":{"x","y","z"},"yaw_degrees","pitch_degrees"}`.
+  - `GET /scene_camera/set_pose?x=&y=&z=&yaw=&pitch=` moves the Scene fly camera and replies the new pose. All five keys
+    are required. `x y z` are world units (not pixels), angles are degrees. Yaw 0 looks +Z. Pitch +89 looks straight
+    down; pitch is clamped to +-89 and yaw wraps to [-180, 180). A missing key, a non-number, `nan`, `inf` or a value
+    above 1e6 (angles 1e5) is a `400` that names the key. The pose applies before the same frame renders. A move over
+    50 units or a big turn is a camera cut for Hi-Z: wait about 2 s before reading Hi-Z numbers (Frustum and Off
+    numbers need only the 2 frame readback lag). Wait 2 frames before `/scene_camera/image` after a move.
   - `GET /scene_camera/pick?x=<0..1>&y=<0..1>` does the same pick as a mouse click on the Scene image and selects
     the camera it hits. Replies `{"success":true,"hit":bool,"entity"}`.
   - `GET /scene_camera/select?name=<entity name>` selects a Camera entity by name. `404` for an unknown name.
   - `GET /scene_camera/image[?overlay=true][&format=json]` returns a PNG of the Scene view only, with the camera
     overlay drawn in (default on), plus the cyan outline of a frozen cull camera. `409` when the Scene view was not rendered.
+  - `503` when there is no editor; `504` when the main thread did not answer in time.
+- **`POST /exit`** closes the editor through the normal shutdown path (the process ends with exit code 0, a few frames
+  after the reply). Reply `{"success":true,"message":"exit requested"}`. It is POST so a link prefetch cannot close the
+  editor. File > Exit does the same.
+- **Browser guard.** Destructive routes (`/exit`) refuse a request that looks like it came from a web page: `403` and
+  nothing changes. The rules: a `Sec-Fetch-Site` header other than `none` or `same-origin`; an `Origin` header whose host
+  is not `127.0.0.1` or `localhost`; a `Host` header that is not `127.0.0.1:<port>` or `localhost:<port>`. A client that
+  sends none of these headers (curl, the debug tools) passes.
 
 
 - **`POST /instantiate_asset`** (`task_manager/stl-parser-2` campaign,
@@ -730,12 +747,15 @@ registering a new named texture:
   up to 64 bytes, a value up to 256 bytes. A non-finite number is written as `null`. The Shadow endpoint is
   described in `shadow-mapping.md`. The `GpuDrivenScene` endpoint settable keys are `enabled`, `frustum`, `cone`,
   `occlusion`, `freezeCulling`, `collectStats`, `debugView` (`Off` or `ClusterId`) and the Scene-only keys `sceneCull`
-  (`FollowSettings`, `Off`, `Frustum`, `FrustumHiz`), `sceneCone`, `sceneSource` (`SceneCamera`, `Frozen`) and `ghost`
-  (`NotDrawn`). A bad value answers `<key> must be <allowed values>`. Actions: `reset_defaults` and `freeze_here`
+  (`FollowSettings`, `Off`, `Frustum`, `FrustumHiz`), `sceneCone`, `sceneSource` (`Live` or `Frozen`; `SceneCamera` is
+  a bad value) and `ghost` (`NotDrawn`). A bad value answers `<key> must be <allowed values>`. Actions: `reset_defaults`
+  (every setting back to its default except `freezeSerial`, so a later `freeze_here` still captures) and `freeze_here`
   (captures the Scene cull camera again). Its state is
   prefixed `game.` and `scene.` per view (`testedClusters`, `visibleClusters` and `visibleValid` (needs `collectStats`),
-  `testedAtVisibleFrame`, `hidden`, `hiddenValid`, `claimedEntities`, `occlusion`, `hizReason`, `note`,
-  `cullFrozenFrame`, `inertReason`, `ledgerBytes`, ...) plus `sceneCullMode` and the read-only `freezeSerial`.
+  `testedAtVisibleFrame`, `hidden`, `hiddenValid`, `cameraValid`, `claimedEntities`, `occlusion`, `hizReason`,
+  `hizTrackingRequested` (this view asked for movement tracking last frame), `cullFrozenFrame`, `inertReason`,
+  `ledgerBytes`, ...) plus `sceneCullMode` and the read-only `freezeSerial`. `cameraValid` is the live camera of the
+  view. `hidden` is 0 while `hiddenValid` is false.
 
 - **`GET /render_graph/set_pass_enabled`, `GET /render_graph/passes`,
   `GET /render_graph/set_feature_enabled`, `GET /render_graph/set_feature_priority`,

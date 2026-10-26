@@ -1,24 +1,14 @@
 #include "GpuDrivenScenePanel.h"
 
 #include "../GpuDrivenSceneTypes.h"
-#include "../../../Editor/EditorContext.h"
 
 #include <imgui.h>
 
-#include <algorithm>
-#include <array>
 #include <string>
 
 namespace gte {
 
 namespace {
-
-constexpr std::array<const char*, kGpuDrivenSceneDebugViewTable.size()> kDebugViews{ "Off", "Cluster Id" };
-
-std::string Name(std::string_view text)
-{
-    return std::string(text);
-}
 
 void DrawViewInfo(const char* label, const GpuDrivenSceneViewSnapshot& v)
 {
@@ -33,8 +23,8 @@ void DrawViewInfo(const char* label, const GpuDrivenSceneViewSnapshot& v)
     ImGui::Text("Clusters tested: %llu", static_cast<unsigned long long>(v.testedClusters));
     if (v.visibleValid) {
         ImGui::Text("Clusters visible: %u (frame %llu)", v.visibleClusters, static_cast<unsigned long long>(v.visibleFrame));
-        if (const auto hidden = fx::HiddenClusterCount(v.testedAtVisibleFrame, v.visibleClusters)) {
-            ImGui::Text("Clusters hidden: %llu", static_cast<unsigned long long>(*hidden));
+        if (v.hiddenValid) {
+            ImGui::Text("Clusters hidden: %llu", static_cast<unsigned long long>(v.hidden));
         } else {
             ImGui::TextDisabled("Clusters hidden: counts are settling");
         }
@@ -47,8 +37,9 @@ void DrawViewInfo(const char* label, const GpuDrivenSceneViewSnapshot& v)
     if (v.occlusion == fx::OcclusionState::Applied) {
         ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Occlusion culling active");
     } else if (v.occlusion != fx::OcclusionState::NotRequested) {
-        ImGui::TextDisabled("Occlusion: %s (%s)", Name(fx::EnumName(fx::kOcclusionStateTable, v.occlusion)).c_str(),
-            Name(fx::EnumName(fx::kHizReasonTable, v.hizReason)).c_str());
+        const std::string state(fx::EnumName(fx::kOcclusionStateTable, v.occlusion));
+        const std::string reason(fx::EnumName(fx::kHizReasonTable, v.hizReason));
+        ImGui::TextDisabled("Occlusion: %s (%s)", state.c_str(), reason.c_str());
     }
     if (v.frozen) {
         ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Culling camera is frozen (frame %llu)",
@@ -60,9 +51,27 @@ void DrawViewInfo(const char* label, const GpuDrivenSceneViewSnapshot& v)
     ImGui::PopID();
 }
 
+// Combo over the debug view table. Returns true when the selection changed.
+bool DrawDebugViewCombo(GpuDrivenSceneDebugView& current)
+{
+    bool changed = false;
+    const std::string currentName(fx::EnumName(kGpuDrivenSceneDebugViewTable, current));
+    if (ImGui::BeginCombo("View", currentName.c_str())) {
+        for (const auto& entry : kGpuDrivenSceneDebugViewTable) {
+            const std::string name(entry.name);
+            if (ImGui::Selectable(name.c_str(), entry.value == current)) {
+                current = entry.value;
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
+}
+
 } // namespace
 
-bool BuildGpuDrivenScenePanel(EditorContext& /*ctx*/, GpuDrivenSceneSettings& edit, bool supported,
+bool BuildGpuDrivenScenePanel(GpuDrivenSceneSettings& edit, bool supported,
     const GpuDrivenSceneViewSnapshot& game, const GpuDrivenSceneViewSnapshot& scene)
 {
     bool changed = false;
@@ -87,23 +96,22 @@ bool BuildGpuDrivenScenePanel(EditorContext& /*ctx*/, GpuDrivenSceneSettings& ed
     }
 
     ImGui::SeparatorText("Scene view (set in the Scene panel)");
-    ImGui::TextDisabled("Culling: %s, cone %s, source %s", Name(fx::EnumName(fx::kViewCullChoiceTable, edit.sceneCull)).c_str(),
-        edit.sceneCone ? "on" : "off", Name(fx::EnumName(fx::kViewCullSourceTable, edit.sceneSource)).c_str());
+    const std::string choice(fx::EnumName(fx::kViewCullChoiceTable, edit.sceneCull));
+    const std::string source(fx::EnumName(fx::kViewCullSourceTable, edit.sceneSource));
+    const std::string ghost(fx::EnumName(fx::kGhostStyleTable, edit.ghost));
+    ImGui::TextDisabled("Culling %s, cone %s, source %s, ghost %s, freeze serial %u", choice.c_str(),
+        edit.sceneCone ? "on" : "off", source.c_str(), ghost.c_str(), edit.freezeSerial);
 
     ImGui::SeparatorText("Debug");
     changed |= ImGui::Checkbox("Count visible clusters (extra passes)", &edit.collectStats);
-    int view = static_cast<int>(edit.debugView);
-    if (ImGui::Combo("View", &view, kDebugViews.data(), static_cast<int>(kDebugViews.size()))) {
-        edit.debugView = static_cast<GpuDrivenSceneDebugView>(std::clamp(view, 0, static_cast<int>(kDebugViews.size()) - 1));
-        changed = true;
-    }
+    changed |= DrawDebugViewCombo(edit.debugView);
 
     ImGui::SeparatorText("Live info");
     DrawViewInfo("Game view", game);
     DrawViewInfo("Scene view", scene);
 
     if (ImGui::Button("Reset to defaults")) {
-        edit = GpuDrivenSceneSettings{};
+        edit = DefaultsKeepingSerial(edit);
         changed = true;
     }
     return changed;

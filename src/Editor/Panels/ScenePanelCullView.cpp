@@ -3,19 +3,18 @@
 #include "../EditorContext.h"
 #include "../ImGuiUniqueId.h"
 #include "../ViewCullHud.h"
+#include "../ViewCullLayout.h"
 #include "../../Core/FeatureKit/ViewCullLink.h"
 
-#include <algorithm>
 #include <array>
-#include <string>
+#include <cfloat>
+#include <cstdint>
+#include <optional>
 
 namespace gte {
 
 namespace {
 
-constexpr float kMaxWidth = 300.0f;
-constexpr float kMinWidth = 160.0f;
-constexpr float kMargin = 8.0f;
 constexpr const char* kHizTooltip = "Hi-Z uses the Scene camera depth. It cannot represent another camera yet.";
 constexpr const char* kFollowTooltip =
     "Follows the tests of the GPU Driven Scene panel, which also drive the Game view.";
@@ -63,48 +62,31 @@ ImVec4 ToneColor(ViewCullHudTone tone) noexcept
     return ImVec4(0.92f, 0.92f, 0.92f, 1.0f);
 }
 
-// Starts a request from what is applied now, so one change never overwrites the other fields.
-fx::ViewCullRequest& StartRequest(fx::ViewCullLink& link)
-{
-    fx::ViewCullRequest& request = link.request;
-    if (!request.pending) {
-        const fx::ViewCullReport& report = link.report;
-        request.choice = report.choice;
-        request.cone = report.cone;
-        request.source = report.source;
-        request.ghost = report.ghost;
-    }
-    request.pending = true;
-    return request;
-}
-
 void DrawChoiceCombo(fx::ViewCullLink& link)
 {
     const fx::ViewCullReport& report = link.report;
-    const char* preview = report.choice == fx::ViewCullChoice::FollowSettings && report.mode == fx::ViewCullMode::Custom
-        ? ModeText(report.mode)
-        : ChoiceText(report.choice);
+    const bool custom = report.choice == fx::ViewCullChoice::FollowSettings && report.mode == fx::ViewCullMode::Custom;
     ImGui::SetNextItemWidth(-1.0f);
-    if (!ImGui::BeginCombo("##cullChoice", preview)) {
+    if (!ImGui::BeginCombo("##cullChoice", custom ? ModeText(report.mode) : ChoiceText(report.choice))) {
         return;
     }
-    for (std::size_t i = 0; i < kChoices.size(); ++i) {
-        const ChoiceLabel& entry = kChoices[i];
+    const std::array<ViewCullChoiceOption, 4> options = ViewCullChoiceOptions(report);
+    for (std::size_t i = 0; i < options.size(); ++i) {
+        const ViewCullChoiceOption& option = options[i];
         ScopedUniqueId idScope(static_cast<int>(i), "ScenePanelCullView::Choice");
-        const bool blocked = entry.choice == fx::ViewCullChoice::FrustumHiz && report.source == fx::ViewCullSource::Frozen;
-        ImGui::BeginDisabled(blocked);
-        const bool picked = ImGui::Selectable(entry.label, entry.choice == report.choice);
+        ImGui::BeginDisabled(!option.enabled);
+        const bool picked = ImGui::Selectable(ChoiceText(option.choice), option.choice == report.choice);
         ImGui::EndDisabled();
-        if (entry.choice == fx::ViewCullChoice::FollowSettings && ImGui::IsItemHovered()) {
+        if (option.choice == fx::ViewCullChoice::FollowSettings && ImGui::IsItemHovered()) {
             ImGui::SetTooltip("%s", kFollowTooltip);
-        } else if (blocked && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        } else if (!option.enabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             ImGui::SetTooltip("%s", kHizTooltip);
         }
-        if (picked && !blocked) {
-            StartRequest(link).choice = entry.choice;
+        if (picked && option.enabled) {
+            BeginViewCullChange(link).choice = option.choice;
         }
     }
-    if (report.choice == fx::ViewCullChoice::FollowSettings && report.mode == fx::ViewCullMode::Custom) {
+    if (custom) {
         ImGui::BeginDisabled();
         ImGui::Selectable(ModeText(fx::ViewCullMode::Custom), true);
         ImGui::EndDisabled();
@@ -121,8 +103,8 @@ void DrawSourceRow(fx::ViewCullLink& link)
     ImGui::SameLine();
     ImGui::SetNextItemWidth(110.0f);
     if (ImGui::BeginCombo("##cullSource", report.source == fx::ViewCullSource::Frozen ? "Frozen" : "Scene camera")) {
-        if (ImGui::Selectable("Scene camera", report.source == fx::ViewCullSource::SceneCamera)) {
-            StartRequest(link).source = fx::ViewCullSource::SceneCamera;
+        if (ImGui::Selectable("Scene camera", report.source == fx::ViewCullSource::Live)) {
+            BeginViewCullChange(link).source = fx::ViewCullSource::Live;
         }
         ImGui::BeginDisabled(hizChosen);
         const bool frozenPicked = ImGui::Selectable("Frozen", report.source == fx::ViewCullSource::Frozen);
@@ -131,14 +113,14 @@ void DrawSourceRow(fx::ViewCullLink& link)
             ImGui::SetTooltip("%s", kHizTooltip);
         }
         if (frozenPicked && !hizChosen) {
-            StartRequest(link).source = fx::ViewCullSource::Frozen;
+            BeginViewCullChange(link).source = fx::ViewCullSource::Frozen;
         }
         ImGui::EndCombo();
     }
     ImGui::SameLine();
     ImGui::BeginDisabled(hizChosen);
     if (ImGui::Button("Freeze here")) {
-        StartRequest(link).freezeHere = true;
+        BeginViewCullChange(link).freezeHere = true;
     }
     ImGui::EndDisabled();
     if (hizChosen && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -153,7 +135,7 @@ void DrawConeCheckbox(fx::ViewCullLink& link)
     bool cone = report.cone;
     ImGui::BeginDisabled(!used);
     if (ImGui::Checkbox("Back-face cone", &cone)) {
-        StartRequest(link).cone = cone;
+        BeginViewCullChange(link).cone = cone;
     }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -173,28 +155,37 @@ void DrawHud(fx::ViewCullLink& link)
 
 } // namespace
 
-bool BuildScenePanelCullView(EditorContext& ctx, ImVec2 imageMin, ImVec2 imageSize)
+bool BuildScenePanelCullView(EditorContext& ctx, ImVec2 imageMin, ImVec2 imageSize, float switcherBottom)
 {
-    if (!ctx.viewCull || !ctx.viewCull->report.valid || !ctx.viewCull->report.rendered) {
+    ScenePanelCullViewUi& ui = ctx.cullViewUi;
+    ui.stale = ctx.viewCull && ctx.viewCull->report.valid
+        && ui.freshness.Update(ctx.viewCull->report.frame, static_cast<std::uint64_t>(ImGui::GetFrameCount()));
+    if (ui.stale || !ctx.viewCull || !ctx.viewCull->report.valid || !ctx.viewCull->report.rendered) {
         return false;
     }
-    const float width = std::min(kMaxWidth, imageSize.x - 2.0f * kMargin);
-    if (width < kMinWidth) {
+    const std::optional<ViewCullBox> box =
+        PlaceViewCullBox(Vec2(imageMin.x, imageMin.y), Vec2(imageSize.x, imageSize.y), switcherBottom);
+    if (!box) {
         return false;
     }
     fx::ViewCullLink& link = *ctx.viewCull;
 
-    ImGui::SetCursorScreenPos(ImVec2(imageMin.x + imageSize.x - width - kMargin, imageMin.y + kMargin));
+    ImGui::SetCursorScreenPos(ImVec2(box->min.x, box->min.y));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, box->maxHeight));
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.07f, 0.07f, 0.09f, 0.78f));
     const ImGuiChildFlags childFlags = ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_Borders;
-    const ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
-    if (ImGui::BeginChild("##SceneCullView", ImVec2(width, 0.0f), childFlags, windowFlags)) {
+    if (ImGui::BeginChild("##SceneCullView", ImVec2(box->width, 0.0f), childFlags, ImGuiWindowFlags_NoScrollWithMouse)) {
         ScopedUniqueId idScope(0, "ScenePanelCullView::Build");
-        if (ImGui::Checkbox("Cull view", &ctx.sceneCullViewOn) && !ctx.sceneCullViewOn) {
-            link.request.pending = true;
-            link.request.resetAll = true;
+        const bool resetPending = link.request.pending && link.request.resetAll;
+        bool on = ui.open || (!ViewCullReportIsDefault(link.report) && !resetPending);
+        if (ImGui::Checkbox("Cull view", &on)) {
+            ui.open = on;
+            if (!on) {
+                link.request.pending = true;
+                link.request.resetAll = true;
+            }
         }
-        if (ctx.sceneCullViewOn) {
+        if (on) {
             DrawChoiceCombo(link);
             DrawSourceRow(link);
             DrawConeCheckbox(link);

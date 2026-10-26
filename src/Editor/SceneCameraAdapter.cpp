@@ -1,7 +1,8 @@
-﻿#include "SceneCameraAdapter.h"
+#include "SceneCameraAdapter.h"
 
 #include "CameraFrustumOverlay.h"
 #include "EditorContext.h"
+#include "EditorCamera.h"
 #include "ViewCullOverlay.h"
 #include "../Core/FeatureKit/ViewCullLink.h"
 #include "../ECS/Components/Camera.h"
@@ -36,30 +37,33 @@ bool InUnitRange(float v) noexcept
 } // namespace
 
 void SceneCameraAdapter::BeginFrame(
-    Renderer& renderer, EditorContext& ctx, Registry& registry, RenderTexture& sceneView) noexcept
+    Renderer& renderer, EditorContext& ctx, Registry& registry, RenderTexture& sceneView, EditorCamera& camera) noexcept
 {
     m_renderer = &renderer;
     m_ctx = &ctx;
     m_registry = &registry;
     m_sceneView = &sceneView;
+    m_camera = &camera;
 }
 
-SceneCameraCullView MakeSceneCameraCullView(const fx::ViewCullReport& r)
+SceneCameraCullView MakeSceneCameraCullView(const fx::ViewCullReport& r, bool stale)
 {
-    const std::optional<std::uint64_t> hidden = fx::HiddenClusterCount(r.testedAtVisibleFrame, r.visible);
     SceneCameraCullView v;
     v.valid = r.valid;
-    v.rendered = r.rendered;
+    v.rendered = r.rendered && !stale;
+    v.stale = stale;
     v.featureEnabled = r.featureEnabled;
+    v.cameraValid = r.cameraValid;
     v.frame = r.frame;
     v.choice = std::string(fx::EnumName(fx::kViewCullChoiceTable, r.choice));
     v.mode = std::string(fx::EnumName(fx::kViewCullModeTable, r.mode));
     v.source = std::string(fx::EnumName(fx::kViewCullSourceTable, r.source));
     v.cone = r.cone;
+    v.tested = r.tested;
     v.testedAtVisibleFrame = r.testedAtVisibleFrame;
     v.visible = r.visible;
-    v.hidden = (r.visibleValid && hidden) ? *hidden : 0;
-    v.visibleValid = r.visibleValid && hidden.has_value();
+    v.hidden = r.hidden;
+    v.visibleValid = r.visibleValid && r.hiddenValid;
     v.claimedInstances = r.claimedInstances;
     v.occlusion = std::string(fx::EnumName(fx::kOcclusionStateTable, r.occlusion));
     v.hizReason = std::string(fx::EnumName(fx::kHizReasonTable, r.hizReason));
@@ -67,7 +71,6 @@ SceneCameraCullView MakeSceneCameraCullView(const fx::ViewCullReport& r)
     v.frozenFrame = r.frozenFrame;
     v.inertReason = std::string(fx::ClusterInertReasonName(r.inertReason));
     v.refused = r.refused;
-    v.note = std::string(fx::EnumName(fx::kViewCullNoteTable, r.note));
     return v;
 }
 
@@ -75,7 +78,15 @@ SceneCameraReport SceneCameraAdapter::Report() const
 {
     SceneCameraReport report;
     if (m_ctx != nullptr && m_ctx->viewCull) {
-        report.cullView = MakeSceneCameraCullView(m_ctx->viewCull->report);
+        report.cullView = MakeSceneCameraCullView(m_ctx->viewCull->report, m_ctx->cullViewUi.stale);
+    }
+    if (m_camera != nullptr) {
+        const Vec3& position = m_camera->GetTransform().position;
+        report.pose.position[0] = position.x;
+        report.pose.position[1] = position.y;
+        report.pose.position[2] = position.z;
+        report.pose.yawDegrees = m_camera->YawDegrees();
+        report.pose.pitchDegrees = m_camera->PitchDegrees();
     }
     if (m_ctx == nullptr || m_registry == nullptr || !m_ctx->sceneCamera.rendered) {
         return report;
@@ -171,6 +182,18 @@ SceneCameraPickResult SceneCameraAdapter::Pick(float x, float y)
         }
     }
     return result;
+}
+
+SceneCameraResult SceneCameraAdapter::SetPose(const SceneCameraPose& pose)
+{
+    if (m_camera == nullptr) {
+        return { false, SceneCameraError::Unavailable, "the Scene camera is not linked yet" };
+    }
+    const Vec3 position(pose.position[0], pose.position[1], pose.position[2]);
+    if (!m_camera->SetPose(position, pose.yawDegrees, pose.pitchDegrees)) {
+        return { false, SceneCameraError::BadInput, "pose values must be finite and within the accepted range" };
+    }
+    return { true, SceneCameraError::None, "pose set" };
 }
 
 std::optional<ClusterViewerImage> SceneCameraAdapter::CaptureImage(bool overlay)

@@ -40,7 +40,7 @@ ViewCullHudLine CountsLine(const fx::ViewCullReport& r)
     if (!r.featureEnabled) {
         return { "GPU path inactive: feature disabled", ViewCullHudTone::Warn };
     }
-    if (!r.cullCameraValid) {
+    if (!r.cameraValid) {
         return { "GPU path inactive: camera is not valid", ViewCullHudTone::Warn };
     }
     if (r.inertReason != fx::ClusterInertReason::None) {
@@ -55,8 +55,7 @@ ViewCullHudLine CountsLine(const fx::ViewCullReport& r)
     if (!r.visibleValid) {
         return { "Clusters: no data yet", ViewCullHudTone::Dim };
     }
-    const std::optional<std::uint64_t> hidden = fx::HiddenClusterCount(r.testedAtVisibleFrame, r.visible);
-    if (!hidden) {
+    if (!r.hiddenValid) {
         return { "Counts are settling", ViewCullHudTone::Dim };
     }
     if (r.testedAtVisibleFrame == 0) {
@@ -64,7 +63,7 @@ ViewCullHudLine CountsLine(const fx::ViewCullReport& r)
     }
     const double percent = 100.0 * static_cast<double>(r.visible) / static_cast<double>(r.testedAtVisibleFrame);
     return { Format("Clusters: tested %llu, visible %u (%.1f%%), hidden %llu", U64(r.testedAtVisibleFrame), r.visible, percent,
-                 U64(*hidden)),
+                 U64(r.hidden)),
         ViewCullHudTone::Normal };
 }
 
@@ -92,6 +91,8 @@ std::vector<ViewCullHudLine> FormatViewCullHud(const fx::ViewCullReport& r)
     if (r.frozen) {
         const std::uint64_t age = r.frame >= r.frozenFrame ? r.frame - r.frozenFrame : 0;
         lines.push_back({ Format("Frozen at frame %llu (age %llu)", U64(r.frozenFrame), U64(age)), ViewCullHudTone::Normal });
+    } else if (r.source == fx::ViewCullSource::Frozen) {
+        lines.push_back({ "Cull camera: Frozen, waiting for a valid camera", ViewCullHudTone::Warn });
     } else {
         lines.push_back({ "Cull camera: Scene camera (live)", ViewCullHudTone::Normal });
     }
@@ -104,6 +105,34 @@ std::vector<ViewCullHudLine> FormatViewCullHud(const fx::ViewCullReport& r)
         lines.resize(kMaxHudLines);
     }
     return lines;
+}
+
+fx::ViewCullRequest& BeginViewCullChange(fx::ViewCullLink& link)
+{
+    fx::ViewCullRequest& request = link.request;
+    if (!request.pending || request.resetAll) {
+        const bool afterReset = request.pending && request.resetAll;
+        const fx::ViewCullReport& report = link.report;
+        request.choice = afterReset ? fx::ViewCullChoice::FollowSettings : report.choice;
+        request.cone = afterReset ? false : report.cone;
+        request.source = afterReset ? fx::ViewCullSource::Live : report.source;
+        request.ghost = afterReset ? fx::GhostStyle::NotDrawn : report.ghost;
+        request.resetAll = false;
+        request.freezeHere = false;
+    }
+    request.pending = true;
+    return request;
+}
+
+std::array<ViewCullChoiceOption, 4> ViewCullChoiceOptions(const fx::ViewCullReport& report)
+{
+    const bool hizBlocked = report.source == fx::ViewCullSource::Frozen;
+    return { {
+        { fx::ViewCullChoice::FollowSettings, true },
+        { fx::ViewCullChoice::Off, true },
+        { fx::ViewCullChoice::Frustum, true },
+        { fx::ViewCullChoice::FrustumHiz, !hizBlocked },
+    } };
 }
 
 } // namespace gte

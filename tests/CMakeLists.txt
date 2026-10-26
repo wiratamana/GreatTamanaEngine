@@ -2252,6 +2252,7 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Network/NetworkRoutesInspectorTests.cpp
     Network/NetworkRoutesClusterViewerTests.cpp
     Network/NetworkRoutesSceneCameraTests.cpp
+    Network/NetworkRequestGuardTests.cpp
     Network/NetworkServerTests.cpp
     Network/CaptureEndpointsEndToEndTests.cpp
     Network/EngineCommandEndpointsEndToEndTests.cpp
@@ -2512,6 +2513,7 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
 if(TRUE)
     list(APPEND GTE_TEST_SOURCES
         Editor/EditorCameraTests.cpp
+        Editor/ExitGateTests.cpp
         Editor/SceneGridMathTests.cpp
         Editor/SelectionTests.cpp
         Editor/ImGuiMemoryTrackerTests.cpp
@@ -2627,6 +2629,7 @@ if(TRUE)
         Editor/ViewCullHudTests.cpp
         Editor/ViewCullOverlayTests.cpp
         Editor/FrustumFromViewProjectionTests.cpp
+        Editor/ViewCullLayoutTests.cpp
     )
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only
@@ -2985,6 +2988,7 @@ set(GTE_COMMENT_RULE_SRC
     Editor/CameraFrustumOverlay.h Editor/CameraFrustumOverlay.cpp
     Editor/SceneCameraAdapter.h Editor/SceneCameraAdapter.cpp Editor/SceneCameraFrustum.h Editor/SceneCameraFrustum.cpp
     Editor/ViewCullHud.h Editor/ViewCullHud.cpp Editor/ViewCullOverlay.h Editor/ViewCullOverlay.cpp
+    Editor/ViewCullFreshness.h Editor/ViewCullLayout.h Editor/ViewCullLayout.cpp
     Editor/Panels/ScenePanelCullView.h Editor/Panels/ScenePanelCullView.cpp
     Game/Instantiation/MaterialTextureGpuCache.h Game/Instantiation/MaterialTextureGpuCache.cpp
     Game/Instantiation/MaterialCacheKeys.h Game/Instantiation/MaterialLifetimeRules.h
@@ -2992,6 +2996,9 @@ set(GTE_COMMENT_RULE_SRC
     Game/Instantiation/MeshClusterTableSelection.h Game/Instantiation/MeshClusterTableSelection.cpp
     Game/Instantiation/MeshLifetimeRules.h Game/Instantiation/MeshLifetimeRules.cpp
     Game/Instantiation/MeshVertexPacking.h Game/Instantiation/MeshVertexPacking.cpp Math/PbrBrdf.h
+    Editor/EditorCamera.h Editor/EditorCamera.cpp Editor/ExitGate.h
+    Network/NetworkRequestGuard.h Network/NetworkRequestGuard.cpp
+    Network/NetworkSceneCameraPose.h Network/NetworkSceneCameraPose.cpp
     Features/SceneLighting/ Features/GpuDrivenScene/)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
@@ -3031,7 +3038,8 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Editor/ViewportProjectionTests.cpp Editor/OrbitCameraTests.cpp Editor/ClusterViewerStatsTests.cpp
     Editor/ClusterViewerTruthTests.cpp Editor/ClusterViewerLoadTests.cpp Editor/ClusterViewerSettingsTests.cpp
     Editor/ClusterStatusTextTests.cpp Editor/ViewCullHudTests.cpp Editor/ViewCullOverlayTests.cpp
-    Editor/FrustumFromViewProjectionTests.cpp)
+    Editor/FrustumFromViewProjectionTests.cpp Editor/ViewCullLayoutTests.cpp
+    Editor/EditorCameraTests.cpp Editor/ExitGateTests.cpp Network/NetworkRequestGuardTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

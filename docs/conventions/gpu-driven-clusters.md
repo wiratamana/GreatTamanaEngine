@@ -260,28 +260,43 @@ clusters are visible and hidden. The Game view never reads these fields.
 
 - **Settings.** The first group (`frustum`, `cone`, `occlusion`, `freezeCulling`) drives the Game view, and the Scene view
   while `sceneCull=FollowSettings`. Scene-only fields: `sceneCull` (`FollowSettings`, `Off`, `Frustum`, `FrustumHiz`),
-  `sceneCone`, `sceneSource` (`SceneCamera`, `Frozen`), `freezeSerial` (read-only) and `ghost` (`NotDrawn`). `Off` keeps
+  `sceneCone`, `sceneSource` (`Live`, `Frozen`), `freezeSerial` (read-only) and `ghost` (`NotDrawn`). `Off` keeps
   the cluster draw path with no culling flags, so it is the baseline. `freezeCulling` freezes both views.
+  `reset_defaults` and the panel button reset everything except `freezeSerial`. Unchecking "Cull view" resets only the
+  Scene-only fields.
 - **Link.** `fx::ViewCullLink` (`Core/FeatureKit/ViewCullLink.h`) is plain data: the Scene panel writes `request`, the
   feature writes `report`. The feature owns it as `std::shared_ptr`; the editor keeps a copy in `EditorContext::viewCull`
-  (empty without the feature). The feature flushes a pending request at the first view callback of a frame, and the
-  debug endpoint flushes it before every write, so the last writer wins in event order. Main thread only.
+  (empty without the feature). The feature flushes a pending request at the first view callback of a frame. Every other
+  writer (debug endpoint, feature panel) goes through `EditableSettings()`, which flushes first, so the last writer wins
+  in event order. Main thread only.
+- **The box.** The box is open while the user ticked "Cull view" (one UI-only flag) or while the report differs from the
+  all-default state. An HTTP change therefore opens the box with no click. Unticking sends a reset and the box stays
+  closed until the feature flushes it. The box draws nothing while the report is stale.
+- **Stale rule.** The panel counts UI frames while `report.frame` stands still. After 4 UI frames the report is stale: no
+  HUD, and `cull_view.stale=true`, `rendered=false` in HTTP. A gap in UI frames (panel hidden) starts the count fresh.
+- **Layout.** The box sits below the Move/Rotate/Scale switcher row, right aligned, so the switcher stays clickable at any
+  panel width. It is skipped when the free space is too small, and it scrolls when the HUD is taller than the free height.
 - **Frozen camera.** `sceneSource=Frozen` captures the Scene camera once. A new `freezeSerial` (the "Freeze here" button
   or `invoke action=freeze_here`) captures again. A resize keeps the frozen camera: the frustum is world geometry.
-  The outline of the frozen cull frustum is drawn in the Scene panel and in `GET /scene_camera/image`.
-- **Hi-Z honesty.** The pyramid is built from the Scene camera depth. The feature drops the Hi-Z test whenever the cull
-  camera is not the live camera of that view (`occlusion=CameraNotLive`), also when `occlusion=true` and
-  `freezeCulling=true` are set through HTTP. A view that does not need the pyramid does not build it. A Scene-only
-  `Frustum` choice requests no movement tracking.
+  The outline of the frozen cull frustum is drawn in the Scene panel and in `GET /scene_camera/image`. While the source
+  is `Frozen` and no valid camera exists yet, the HUD says it waits for a valid camera.
+- **Hi-Z honesty.** The pyramid is built from the live camera depth of the view. One rule, `HizMatchesCullCamera`
+  (`GpuDrivenSceneTypes.h`), says a view uses Hi-Z only when it asked for it and its cull camera is live. The feature
+  drops the Hi-Z test otherwise (`occlusion=CameraNotLive`), also when `occlusion=true` and `freezeCulling=true` are set
+  through HTTP. A view that does not need the pyramid does not build it. A Scene-only `Frustum` choice requests no
+  movement tracking (`hizTrackingRequested=false`).
 - **Counts.** `tested` is from the current frame, `visible` is two frames old. The feature keeps the tested value of the
   last 4 frames and pairs each visible count with the tested value of its own frame (`testedAtVisibleFrame`).
-  `hidden = testedAtVisibleFrame - visible`, and it is empty (`hiddenValid=false`) when visible is larger.
+  `hidden = testedAtVisibleFrame - visible` is computed once, in the feature, and it is empty (`hiddenValid=false`) when
+  visible is larger. The HUD says "no data yet" without a visible count and "Counts are settling" while `hiddenValid` is
+  false.
 - **Stats gate.** The Scene view reads the count while `collectStats` is on or the HUD was drawn in the last 3 frames.
   The user setting `collectStats` is never changed. With the tool off, no stats pass of the Scene view runs.
 - **State.** `/feature_debug/state?name=GpuDrivenScene` adds `sceneCull`, `sceneCullMode` (`Off`, `Frustum`,
   `FrustumHiz`, `Custom`), `sceneCone`, `sceneSource`, `freezeSerial`, `ghost` and per view `occlusion`, `hizReason`,
-  `note`, `cullFrozenFrame`, `testedAtVisibleFrame`, `hidden`, `hiddenValid`. `GET /scene_camera/state` has the same HUD
-  numbers in `cull_view`. The HUD is ImGui and is not in the PNG: every HUD number is in JSON.
+  `cameraValid`, `hizTrackingRequested`, `cullFrozenFrame`, `testedAtVisibleFrame`, `hidden`, `hiddenValid`.
+  `GET /scene_camera/state` has the same HUD numbers in `cull_view` (`camera_valid`, `tested`, `stale`, ...). The HUD is
+  ImGui and is not in the PNG: every HUD number is in JSON. `GET /scene_camera/set_pose` moves the Scene camera by HTTP.
 - **Limits.** Only cluster-path meshes are counted. CPU-drawn meshes are never culled by this system and are not shown.
   Hidden clusters are not drawn. Hi-Z of a frozen cull camera is not available.
 

@@ -1,4 +1,4 @@
-// Enum tables, count pairing and link ownership of the Scene cull view.
+// Enum tables, count pairing and link ownership of the cull view link.
 
 #include "Core/FeatureKit/ViewCullLink.h"
 
@@ -31,7 +31,6 @@ TEST(ViewCullLinkTest, EveryEnumTableRoundTrips)
     ExpectRoundTrip(fx::kGhostStyleTable);
     ExpectRoundTrip(fx::kViewCullModeTable);
     ExpectRoundTrip(fx::kOcclusionStateTable);
-    ExpectRoundTrip(fx::kViewCullNoteTable);
     ExpectRoundTrip(fx::kHizReasonTable);
 }
 
@@ -68,24 +67,11 @@ TEST(ViewCullLinkTest, EitherSideMayOutliveTheOther)
     EXPECT_EQ(editor.use_count(), 1);
 }
 
-TEST(HizReasonTest, ReasonAgreesWithTheUsablePredicate)
+TEST(ViewCullLinkTest, SourceNamesAreLiveAndFrozen)
 {
-    for (const bool built : { false, true }) {
-        for (const std::uint64_t lastFrame : { std::uint64_t{ 4 }, std::uint64_t{ 5 } }) {
-            for (const std::uint32_t width : { 100u, 120u }) {
-                for (const std::uint32_t clean : { 0u, 1u, 2u, 3u }) {
-                    HizValidity state;
-                    state.hasBuilt = built;
-                    state.lastFrame = lastFrame;
-                    state.width = 100;
-                    state.height = 50;
-                    state.framesSinceValid = clean;
-                    const bool usable = HizUsableAt(state, 6, width, 50);
-                    EXPECT_EQ(usable, HizUnusableReason(state, 6, width, 50) == HizReason::None);
-                }
-            }
-        }
-    }
+    EXPECT_EQ(fx::EnumName(fx::kViewCullSourceTable, fx::ViewCullSource::Live), "Live");
+    EXPECT_EQ(fx::ParseEnum(fx::kViewCullSourceTable, "Frozen"), fx::ViewCullSource::Frozen);
+    EXPECT_FALSE(fx::ParseEnum(fx::kViewCullSourceTable, "SceneCamera").has_value());
 }
 
 TEST(HizReasonTest, NamesTheFirstFailedGuard)

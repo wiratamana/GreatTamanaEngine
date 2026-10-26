@@ -24,6 +24,7 @@ enum class EditorUiCommandKind {
     SplitViews,
     ClusterViewer,
     SceneCamera,
+    Exit, // No payload; the editor loop ends after the reply is sent.
 };
 
 // Plain request payload for one ActivateTab command.
@@ -68,7 +69,7 @@ struct ClusterViewerCommand {
     bool overlay = false;                                             // Image
 };
 
-enum class SceneCameraOperation : std::uint8_t { State, Select, Pick, Image };
+enum class SceneCameraOperation : std::uint8_t { State, Select, Pick, Image, SetPose };
 
 // Request payload for one SceneCamera command; only the fields of `operation` are read.
 struct SceneCameraCommand {
@@ -77,6 +78,11 @@ struct SceneCameraCommand {
     float x = 0.0f;         // Pick, 0..1 of the Scene image
     float y = 0.0f;
     bool overlay = true;    // Image
+    float poseX = 0.0f;     // SetPose, world units
+    float poseY = 0.0f;
+    float poseZ = 0.0f;
+    float yawDegrees = 0.0f;   // SetPose
+    float pitchDegrees = 0.0f;
 };
 
 // One pending Editor UI command, tagged by `kind` - only the field matching

@@ -8,11 +8,13 @@
 
 namespace gte {
 
-// Per-view state: the frozen cull camera, the tested history and the last report.
+// Per-view state: the frozen cull camera, the tested history, the last report and the last Hi-Z request.
 struct GpuDrivenSceneViewState {
     FrozenCullCamera frozenCamera;
     TestedHistory tested;
     GpuDrivenSceneViewSnapshot snapshot;
+    std::uint64_t hizBuildFrame = 0;
+    bool hizBuildAsked = false;
 };
 
 // GPU culling of cluster-ready meshes in the opaque stage of every view.
@@ -24,14 +26,14 @@ public:
     const char* Name() const override { return kGpuDrivenSceneFeatureName; }
     void Setup(fx::FeatureSetup& setup) override;
 
+    // Read only: a pending panel request shows up one frame later.
     const GpuDrivenSceneSettings& Settings() const noexcept { return m_settings; }
 
-    // Sanitizes `candidate` and stores it. Main thread only.
-    // Call FlushRequest() before reading Settings() for a read-modify-write.
-    void ApplySettings(const GpuDrivenSceneSettings& candidate);
+    // Applies a pending panel request, then returns a copy to edit. Main thread only.
+    GpuDrivenSceneSettings EditableSettings();
 
-    // Applies a pending Scene panel request to the settings. Main thread only.
-    void FlushRequest();
+    // Sanitizes `candidate` and stores it. Main thread only.
+    void ApplySettings(const GpuDrivenSceneSettings& candidate);
 
     // The link the Scene panel reads and writes. Shared, so either side may outlive the other.
     std::shared_ptr<fx::ViewCullLink> Link() const noexcept { return m_link; }
@@ -47,6 +49,9 @@ public:
 private:
     void OpaquePass(fx::OpaqueFrame& f);
     void HizPass(fx::PostOpaqueFrame& f);
+
+    // Applies a pending panel request to the settings.
+    void FlushRequest();
 
     // Once per frame, at the first view callback.
     void BeginFrame(std::uint64_t frameIndex);

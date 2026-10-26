@@ -331,9 +331,6 @@ enum class HizReason : std::uint8_t { None, NoHistory, Resized, CameraCut, Warmi
 // A missing build in the previous frame reports BuildOff. Camera cuts are judged by the caller (HizCameraCut).
 HizReason HizUnusableReason(const HizValidity& state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height) noexcept;
 
-// True when the pyramid of the last build may cull in `frameIndex` for a view of `width` x `height`.
-bool HizUsableAt(const HizValidity& state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height) noexcept;
-
 // True when the view moved or turned too far for last frame's depth to say anything about this frame.
 bool HizCameraCut(const Mat4& prevViewProjection, const Vec3& prevEye, const Mat4& viewProjection,
     const Vec3& eye) noexcept;

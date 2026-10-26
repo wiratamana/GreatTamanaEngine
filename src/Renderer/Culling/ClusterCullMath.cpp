@@ -494,11 +494,6 @@ HizReason HizUnusableReason(const HizValidity& state, std::uint64_t frameIndex, 
     return HizReason::None;
 }
 
-bool HizUsableAt(const HizValidity& state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height) noexcept
-{
-    return HizUnusableReason(state, frameIndex, width, height) == HizReason::None;
-}
-
 bool InstanceMoved(const Mat4& previous, const Mat4& current) noexcept
 {
     const float* a = previous.Data();

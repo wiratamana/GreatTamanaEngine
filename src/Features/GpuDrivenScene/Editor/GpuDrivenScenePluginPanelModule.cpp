@@ -11,17 +11,15 @@
 namespace gte {
 
 GpuDrivenScenePluginPanelModule::GpuDrivenScenePluginPanelModule(EditorContext& ctx, GpuDrivenSceneFeature& feature)
-    : m_ctx(ctx)
-    , m_feature(feature)
+    : m_feature(feature)
 {
-    m_ctx.viewCull = m_feature.Link();
+    ctx.viewCull = m_feature.Link();
 }
 
 void GpuDrivenScenePluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/)
 {
-    m_feature.FlushRequest();
-    GpuDrivenSceneSettings edit = m_feature.Settings();
-    if (BuildGpuDrivenScenePanel(m_ctx, edit, m_feature.Supported(), m_feature.Snapshot(rg::ViewScope::GameView),
+    GpuDrivenSceneSettings edit = m_feature.EditableSettings();
+    if (BuildGpuDrivenScenePanel(edit, m_feature.Supported(), m_feature.Snapshot(rg::ViewScope::GameView),
             m_feature.Snapshot(rg::ViewScope::SceneView))) {
         m_feature.ApplySettings(edit);
     }

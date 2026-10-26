@@ -63,6 +63,12 @@ void GpuDrivenSceneFeature::Setup(fx::FeatureSetup& s)
     }
 }
 
+GpuDrivenSceneSettings GpuDrivenSceneFeature::EditableSettings()
+{
+    FlushRequest();
+    return m_settings;
+}
+
 void GpuDrivenSceneFeature::ApplySettings(const GpuDrivenSceneSettings& candidate)
 {
     m_settings = SanitizeGpuDrivenSceneSettings(candidate);
@@ -82,11 +88,15 @@ void GpuDrivenSceneFeature::FlushRequest()
 
 GpuDrivenSceneViewSnapshot GpuDrivenSceneFeature::Snapshot(rg::ViewScope scope) const
 {
-    GpuDrivenSceneViewSnapshot snapshot = m_views.For(scope).snapshot;
-    const bool stale = snapshot.frameIndex > m_newestFrame || m_newestFrame - snapshot.frameIndex > kSnapshotStaleFrames;
-    if (stale) {
+    const GpuDrivenSceneViewState& view = m_views.For(scope);
+    GpuDrivenSceneViewSnapshot snapshot = view.snapshot;
+    const auto stale = [this](std::uint64_t frame) {
+        return frame > m_newestFrame || m_newestFrame - frame > kSnapshotStaleFrames;
+    };
+    if (stale(snapshot.frameIndex)) {
         snapshot.rendered = false;
     }
+    snapshot.hizTrackingRequested = view.hizBuildAsked && !stale(view.hizBuildFrame);
     return snapshot;
 }
 
@@ -139,7 +149,6 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     snap.frozenFrame = view.frozenCamera.frozen ? view.frozenCamera.frame : 0;
     snap.cullCameraValid = cullCamera.valid;
     snap.cullViewProjection = cullCamera.viewProjection;
-    snap.note = (tests.occlusion && !cullIsLive) ? fx::ViewCullNote::HizNeedsLiveCamera : fx::ViewCullNote::None;
 
     const auto finish = [&] {
         view.tested.Record(frameIndex, snap.testedClusters);
@@ -152,6 +161,9 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
 
     if (!cfg.enabled || !snap.hasPixels || !live.valid) {
         snap.refusal = !cfg.enabled ? "disabled" : (!snap.hasPixels ? "view has no pixels" : "camera is not valid");
+        // Nothing was culled: never report a cull camera or a stale matrix.
+        snap.cullCameraValid = false;
+        snap.cullViewProjection = Mat4::Identity();
         // An idle scope still gives its buffers back.
         m_state.TickIdle(f, false);
         finish();
@@ -162,7 +174,7 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     ClusterCullFlags flags = CullFlagsOf(tests);
     fx::ClusterDrawChain chain = f.ClusterDraw(m_state, 0);
     bool pyramidBound = false;
-    if (tests.occlusion && cullIsLive) {
+    if (HizMatchesCullCamera(tests.occlusion, cullIsLive)) {
         // Last frame's pyramid, only while its guards hold (first frame, resize, cut, missed build).
         const fx::HizPrevious hiz = m_hiz.Previous(f);
         snap.hizReason = hiz.reason;
@@ -201,6 +213,10 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
             snap.visibleClusters = visible.value;
             snap.visibleFrame = visible.frame;
             snap.testedAtVisibleFrame = *tested;
+            if (const std::optional<std::uint64_t> hidden = fx::HiddenClusterCount(*tested, visible.value)) {
+                snap.hidden = *hidden;
+                snap.hiddenValid = true;
+            }
         }
     }
     finish();
@@ -208,7 +224,12 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
 
 void GpuDrivenSceneFeature::HizPass(fx::PostOpaqueFrame& f)
 {
-    if (!ViewWantsHiz(m_settings, f.Scope() == rg::ViewScope::SceneView)) {
+    GpuDrivenSceneViewState& view = m_views.For(f.Scope());
+    const bool wants = ViewWantsHiz(m_settings, f.Scope() == rg::ViewScope::SceneView);
+    // Build() asks for movement tracking before any guard, so "asked" equals "will build".
+    view.hizBuildAsked = wants;
+    view.hizBuildFrame = f.FrameIndex();
+    if (!wants) {
         m_hiz.Reset(f);
         return;
     }

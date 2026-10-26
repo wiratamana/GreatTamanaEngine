@@ -45,12 +45,15 @@ struct SceneCameraInfo {
 struct SceneCameraCullView {
     bool valid = false; // A feature is linked and has reported.
     bool rendered = false;
+    bool stale = false; // The report stopped updating; it is not rendered either.
     bool featureEnabled = false;
+    bool cameraValid = true; // The live camera of the Scene view.
     std::uint64_t frame = 0;
     std::string choice;
     std::string mode;
     std::string source;
     bool cone = false;
+    std::uint64_t tested = 0; // Current frame.
     std::uint64_t testedAtVisibleFrame = 0;
     std::uint32_t visible = 0;
     std::uint64_t hidden = 0;
@@ -62,7 +65,13 @@ struct SceneCameraCullView {
     std::uint64_t frozenFrame = 0;
     std::string inertReason;
     bool refused = false;
-    std::string note;
+};
+
+// Position (world units) and look direction (degrees) of the Scene camera.
+struct SceneCameraPose {
+    float position[3]{};
+    float yawDegrees = 0.0f;
+    float pitchDegrees = 0.0f;
 };
 
 // Everything GET /scene_camera/state shows.
@@ -74,6 +83,7 @@ struct SceneCameraReport {
     std::uint64_t selectedEntity = 0; // 0 when no camera is selected
     std::vector<OverlaySegment2D> selectedFrustum; // image pixels
     SceneCameraCullView cullView;
+    SceneCameraPose pose; // the Scene camera; valid without a rendered Scene image
 };
 
 class ISceneCameraControl {
@@ -85,6 +95,9 @@ public:
 
     // Camera pick at a point (x, y in 0..1) of the Scene image.
     virtual SceneCameraPickResult Pick(float x, float y) = 0;
+
+    // Moves the Scene camera. Position in world units, angles in degrees.
+    virtual SceneCameraResult SetPose(const SceneCameraPose& pose) = 0;
     virtual std::optional<ClusterViewerImage> CaptureImage(bool overlay) = 0;
 };
 

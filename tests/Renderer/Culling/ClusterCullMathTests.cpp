@@ -620,21 +620,26 @@ TEST(ClusterCullMath, OcclusionGuardsEveryResetEvent)
     EXPECT_EQ(NextFramesSinceValid(0xFFFFFFFFu, false, false, true, false), 0xFFFFFFFFu);
 }
 
+static bool UsableAt(const HizValidity& s, std::uint64_t f, std::uint32_t w, std::uint32_t h)
+{
+    return HizUnusableReason(s, f, w, h) == HizReason::None;
+}
+
 TEST(ClusterCullMath, HizValidityCountsCleanBuildsAndRestartsOnEvents)
 {
     HizValidity state;
-    EXPECT_FALSE(HizUsableAt(state, 1, 640, 360));
+    EXPECT_FALSE(UsableAt(state, 1, 640, 360));
 
     state = AdvanceHizValidity(state, 10, 640, 360, false); // First build.
     EXPECT_EQ(state.framesSinceValid, 0u);
     state = AdvanceHizValidity(state, 11, 640, 360, false);
     EXPECT_EQ(state.framesSinceValid, 1u);
-    EXPECT_FALSE(HizUsableAt(state, 12, 640, 360));
+    EXPECT_FALSE(UsableAt(state, 12, 640, 360));
     state = AdvanceHizValidity(state, 12, 640, 360, false);
     EXPECT_EQ(state.framesSinceValid, 2u);
-    EXPECT_TRUE(HizUsableAt(state, 13, 640, 360));
-    EXPECT_FALSE(HizUsableAt(state, 14, 640, 360)); // A frame without a build in between.
-    EXPECT_FALSE(HizUsableAt(state, 13, 800, 360)); // The view resized since.
+    EXPECT_TRUE(UsableAt(state, 13, 640, 360));
+    EXPECT_FALSE(UsableAt(state, 14, 640, 360)); // A frame without a build in between.
+    EXPECT_FALSE(UsableAt(state, 13, 800, 360)); // The view resized since.
 
     HizValidity cut = AdvanceHizValidity(state, 13, 640, 360, true);
     EXPECT_EQ(cut.framesSinceValid, 0u);
@@ -658,7 +663,7 @@ TEST(ClusterCullMath, HizValidityHoldsTheBuildAfterAResize)
     state = AdvanceHizValidity(state, 6, 800, 450, false);
     EXPECT_EQ(state.framesSinceValid, 1u);
     state = AdvanceHizValidity(state, 7, 800, 450, false);
-    EXPECT_TRUE(HizUsableAt(state, 8, 800, 450));
+    EXPECT_TRUE(UsableAt(state, 8, 800, 450));
 }
 
 TEST(ClusterCullMath, CameraCutNeedsAJumpOrAHardTurn)

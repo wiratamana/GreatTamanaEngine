@@ -14,6 +14,7 @@
 #include "../Core/Plugins/BuiltinFeatureModuleRegistry.h"
 #include "../Core/FeatureKit/FeatureRegistration.h"
 #include "ProjectRootPath.h" // ExecutableDirectory().
+#include "ExitGate.h"
 #include "VolumeTexturePreviewSelection.h"
 #include "../Core/EditorPanelRegistry.h"
 // RenderFeatureCompositor::DebugSnapshot() needs the full type (Core.h only forward-declares it).
@@ -229,6 +230,16 @@ SceneCameraOutcome RunSceneCameraCommand(const SceneCameraCommand& command, ISce
         out.entityName = pick.entityName;
         break;
     }
+    case SceneCameraOperation::SetPose: {
+        SceneCameraPose pose;
+        pose.position[0] = command.poseX;
+        pose.position[1] = command.poseY;
+        pose.position[2] = command.poseZ;
+        pose.yawDegrees = command.yawDegrees;
+        pose.pitchDegrees = command.pitchDegrees;
+        out.result = control->SetPose(pose);
+        break;
+    }
     case SceneCameraOperation::Image:
         out.image = control->CaptureImage(command.overlay);
         if (out.image.has_value()) {
@@ -321,6 +332,8 @@ EditorUiCommandResult RunEditorUiCommand(const EditorUiCommandRequest& request, 
     case EditorUiCommandKind::SceneCamera:
         result.sceneCamera = RunSceneCameraCommand(request.sceneCamera, layer.SceneCameraControl());
         break;
+    case EditorUiCommandKind::Exit:
+        break; // The result kind is the answer; Run() ends the loop.
     }
     return result;
 }
@@ -542,6 +555,7 @@ void EditorHost::ServiceFeatureDebugCommand()
 int EditorHost::Run()
 {
     bool running = true;
+    ExitGate exitGate;
     // The memory summary copies every tracked allocation, so it is rebuilt every few frames only.
     constexpr std::uint32_t kGpuMemoryRefreshFrames = 30;
     rg::RenderGraphGpuMemoryMetadata gpuMemory;
@@ -655,6 +669,9 @@ int EditorHost::Run()
             const EditorUiCommandResult uiResult = RunEditorUiCommand(uiPending->request, *m_editorLayer, m_game,
                 m_renderer, m_core.GetSceneServicesDescriptorSet().LayoutHandle());
             FulfillOrLogDrop(m_uiCommandBridge, uiPending->id, uiResult, "EditorUi");
+            if (uiResult.kind == EditorUiCommandKind::Exit) {
+                exitGate.Arm(static_cast<std::uint64_t>(m_engineContext.time.FrameCount()), SDL_GetTicksNS());
+            }
         }
 
         ServiceFeatureDebugCommand();
@@ -970,6 +987,11 @@ int EditorHost::Run()
 
         // File > Exit and other programmatic close actions end the loop like a Quit event.
         if (m_editorLayer->WantsExit()) {
+            running = false;
+        }
+
+        // An exit command ends the loop once its reply has had time to leave the process.
+        if (exitGate.Due(static_cast<std::uint64_t>(m_engineContext.time.FrameCount()), SDL_GetTicksNS())) {
             running = false;
         }
 
