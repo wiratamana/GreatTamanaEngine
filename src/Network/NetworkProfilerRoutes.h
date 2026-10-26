@@ -1,6 +1,7 @@
 #pragma once
 
-// HTTP face of the profiler: GET /profiler, /profiler/frames, /profiler/spikes, /profiler/spike and POST /profiler/set.
+// HTTP face of the profiler: GET /profiler, /profiler/frames, /profiler/spikes, /profiler/spike, /profiler/timeline_image
+// and POST /profiler/set, /profiler/export.
 // Every number in a reply sits inside a metric object, except the keys in kProfilerFixedNumberKeys.
 
 #include "../Profiling/ProfilerSnapshot.h"
@@ -12,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -113,10 +115,25 @@ ProfilerReply BuildProfilerSpikeReply(const std::optional<Profiling::SpikeDetail
 // Outcome text of a failed pin or unpin: status 404 for an unknown frame, 409 for the pin limit.
 ProfilerReply BuildProfilerPinErrorReply(bool limitReached, std::uint64_t frameIndex, std::size_t pinned);
 
+// Body of POST /profiler/export: the overview, the newest `count` frames and the frozen frames that are pinned.
+nlohmann::json ProfilerExportToJson(
+    const Profiling::ProfilerSnapshot& snapshot, std::size_t count, std::span<const Profiling::SpikeDetail> pinned);
+
+// A reply that carries bytes, e.g. an image. `contentType` is empty for a JSON error body.
+struct ProfilerImageReply {
+    int status = 200;
+    std::string contentType;
+    std::string body;
+};
+
+// PNG of one frame's timeline. A frame that does not exist answers 503 (newest) or 404 (a named frame).
+ProfilerImageReply BuildProfilerTimelineReply(
+    const std::optional<Profiling::SpikeDetail>& frame, bool namedFrame, std::uint64_t frameIndex, int width);
+
 // Refuses a browser request with 403 and returns true.
 using BrowserRefusal = bool (*)(const httplib::Request&, httplib::Response&);
 
-// Registers the five routes. A null bridge makes them answer 503.
+// Registers the profiler routes. A null bridge makes them answer 503.
 void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bridge, BrowserRefusal refuseBrowser);
 
 } // namespace gte::Network

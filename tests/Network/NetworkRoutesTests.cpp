@@ -512,11 +512,11 @@ using gte::Network::BuildRenderGraphMetadataResponseJson;
 
 TEST(BuildRenderGraphMetadataResponseJsonTests, DefaultConstructedMetadataProducesExpectedEmptyShape)
 {
-    const gte::rg::RenderGraphMetadata metadata; // schemaVersion == 1, everything else empty/default.
+    const gte::rg::RenderGraphMetadata metadata; // schemaVersion == 2, everything else empty/default.
     const std::string body = BuildRenderGraphMetadataResponseJson(metadata);
     const nlohmann::json parsed = nlohmann::json::parse(body);
 
-    EXPECT_EQ(parsed["schema_version"].get<std::uint32_t>(), 1u);
+    EXPECT_EQ(parsed["schema_version"].get<std::uint32_t>(), 2u);
     ASSERT_TRUE(parsed.contains("offscreen_regime"));
     // Note: regimeName is only populated by BuildRenderGraphMetadata() itself
     // (Renderer/RenderGraph/RenderGraphMetadataTests.cpp already covers

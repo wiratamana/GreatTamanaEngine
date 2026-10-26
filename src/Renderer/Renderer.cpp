@@ -392,6 +392,11 @@ std::uint32_t Renderer::GpuWaitConsecutiveFrameTimeouts() const noexcept
     return m_device.Waits().ConsecutiveFrameTimeouts();
 }
 
+bool Renderer::GpuClockCalibrationAvailable() const noexcept
+{
+    return false;
+}
+
 void Renderer::SetTimingObserver(IRenderTimingObserver* observer) noexcept
 {
     m_device.Waits().SetObserver(observer);

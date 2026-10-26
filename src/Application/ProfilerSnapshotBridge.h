@@ -31,6 +31,12 @@ public:
     // Main thread, after the frame closed.
     void Publish(const Profiling::ProfilerSnapshot& snapshot);
 
+    // Main thread, with Publish: the scope tree of the same frame, for the timeline image.
+    void PublishFrameDetail(Profiling::SpikeDetail detail);
+
+    // Any thread. The newest published frame's scope tree; empty before the first publish.
+    std::optional<Profiling::SpikeDetail> LatestFrameDetail() const;
+
     // Any thread. Marks the bridge as asked, waits up to `maxWait` for a fresh snapshot when the stored one is
     // old, then returns a copy with its age and the waits in progress filled in. Empty before the first publish.
     std::optional<Profiling::ProfilerSnapshot> Latest(std::chrono::milliseconds maxWait);
@@ -61,6 +67,7 @@ private:
     Profiling::ProfilerSnapshot m_latest{};
     std::uint64_t m_publishedAtNanoseconds = 0; // 0 = nothing published
     std::uint64_t m_generation = 0;
+    std::optional<Profiling::SpikeDetail> m_latestDetail;
 };
 
 } // namespace gte

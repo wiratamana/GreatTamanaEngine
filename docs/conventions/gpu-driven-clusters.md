@@ -194,6 +194,8 @@ Both vertex shaders declare `invariant gl_Position` with the same expression ord
 - **Visible count.** `visibleClusters` (survivors, 2 frames old, with `visibleFrame`) needs
   `collectStats=true`, which adds three passes per part slot. With stats off, or when the tested value of the
   count's frame is gone, `visibleValid` is false and `statsCollected` says why. Stats are off by default.
+  The age of a visible count is exactly `frame - visibleFrame`. The profiler does not carry cluster counts: read them from
+  here, never as triangles, and take timing from a run with stats off (see [Profiling](profiling.md)).
 - `GET /feature_debug/set?name=GpuDrivenScene&frustum=...&cone=...&freezeCulling=true&collectStats=true&debugView=ClusterId`.
 - **Freeze culling** keeps the cull camera of the last live frame while the view camera moves (both views).
   Move the camera, then fetch `GET /get_game_view` to see what was culled. A disabled feature clears it;

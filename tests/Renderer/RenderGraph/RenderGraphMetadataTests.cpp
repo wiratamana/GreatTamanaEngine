@@ -32,7 +32,7 @@ TEST(RenderGraphMetadataTest, EmptySnapshotsProduceEmptyMetadata)
 
     const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, present, {});
 
-    EXPECT_EQ(metadata.schemaVersion, 1u);
+    EXPECT_EQ(metadata.schemaVersion, 2u);
     EXPECT_EQ(metadata.offscreenRegime.regimeName, "SynchronousImmediateReadback");
     EXPECT_TRUE(metadata.offscreenRegime.passes.empty());
     EXPECT_TRUE(metadata.offscreenRegime.resources.empty());
@@ -44,6 +44,25 @@ TEST(RenderGraphMetadataTest, EmptySnapshotsProduceEmptyMetadata)
     EXPECT_EQ(metadata.presentRegime.gpuFrameStatus, "Absent");
 
     EXPECT_TRUE(metadata.renderFeatures.empty());
+}
+
+TEST(RenderGraphMetadataTest, PassesCarryNeutralViewLabelsAndHexInstanceIds)
+{
+    RenderGraphPassSnapshot primary = MakeSurvivingPass("Draw");
+    primary.viewScope = ViewScope::Primary;
+    primary.stats.gpu.bindingInstance = 0xABCDu;
+    RenderGraphPassSnapshot secondary = MakeSurvivingPass("Draw");
+    secondary.viewScope = ViewScope::Secondary;
+
+    RenderGraphSnapshot offscreen;
+    offscreen.passesInExecutionOrder = { primary, secondary };
+    const RenderGraphMetadata metadata = BuildRenderGraphMetadata(offscreen, RenderGraphSnapshot{}, {});
+
+    ASSERT_EQ(metadata.offscreenRegime.passes.size(), 2u);
+    EXPECT_EQ(metadata.offscreenRegime.passes[0].view, "primary");
+    EXPECT_EQ(metadata.offscreenRegime.passes[0].instance, "0xabcd");
+    EXPECT_EQ(metadata.offscreenRegime.passes[1].view, "secondary");
+    EXPECT_EQ(metadata.offscreenRegime.passes[1].instance, "");
 }
 
 // --- owningFeatureName resolution ------------------------------------------
@@ -405,7 +424,7 @@ TEST(RenderGraphMetadataTest, ToJsonProducesExpectedTopLevelShapeAndNullHandling
 
     nlohmann::json j = metadata;
 
-    EXPECT_EQ(j["schema_version"].get<std::uint32_t>(), 1u);
+    EXPECT_EQ(j["schema_version"].get<std::uint32_t>(), 2u);
 
     ASSERT_TRUE(j.contains("offscreen_regime"));
     EXPECT_EQ(j["offscreen_regime"]["regime_name"].get<std::string>(), "SynchronousImmediateReadback");
@@ -415,6 +434,8 @@ TEST(RenderGraphMetadataTest, ToJsonProducesExpectedTopLevelShapeAndNullHandling
     EXPECT_FALSE(jsonPass["is_culled"].get<bool>());
     EXPECT_EQ(jsonPass["owning_feature_name"].get<std::string>(), "");
     EXPECT_TRUE(jsonPass["gpu_timing_milliseconds"].is_null());
+    EXPECT_EQ(jsonPass["view"].get<std::string>(), "shared");
+    EXPECT_EQ(jsonPass["instance"].get<std::string>(), "");
     EXPECT_EQ(jsonPass["gpu_timing_text"].get<std::string>(), "Absent");
     EXPECT_EQ(jsonPass["draw_call_count"].get<std::uint32_t>(), 2u);
     EXPECT_EQ(jsonPass["triangle_count"].get<std::uint32_t>(), 20u);

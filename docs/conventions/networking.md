@@ -440,6 +440,8 @@ module or adding a new endpoint:
       `present_limited` or `gpu_limited` (the larger share wins), CPU work from 60% is `cpu_limited`, anything else `serial`.
     - `overhead{cost_per_event,estimated,share,warn}`: an `estimated` metric (events recorded times the cost of one event, which
       is measured once at startup). `warn` is true above 3% of the frame.
+    - `timeline{aligned,reason}`: `aligned` is true only when GPU time can be placed on the CPU axis (needs a calibrated
+      timestamp extension). Otherwise `reason` says why, for example `calibrated timestamp extension not enabled`.
 
     A view without a target reads `Inactive`; capture off reads `Absent` with reason `capture_off`.
   - **`GET /profiler/frames[?count=N]`**: the newest `N` frames (default 30, clamped to 1..120), oldest first, each
@@ -459,6 +461,15 @@ module or adding a new endpoint:
     `{"success":true,"capture":bool,"display_paused":bool,"pinned_spikes":metric,"spike_threshold":metric}`. At most 8 spikes
     can be pinned: a ninth pin is a `409`, an unknown frame a `404`. A refused pin or unpin changes nothing. It passes the
     browser guard. No value given is a `400`.
+  - **`GET /profiler/timeline_image[?frame=F][&width=W]`**: a PNG of one frame's timeline, drawn on the CPU from frame data (it
+    never reads GPU pixels). Without `frame` it draws the newest published frame; with `frame` it draws a frozen spike. `width`
+    is 200 to 2400 (default 1200). Lanes from the top: CPU main (one row per nesting depth), waits, worker jobs, and GPU per
+    view (shared, primary, secondary). The GPU lane is not aligned to the CPU lanes: its bars start at the left edge (see
+    `timeline` in `GET /profiler`). Bad `width` or `frame` is a `400`, a frozen frame that is gone is a `404`, no published
+    frame yet is a `503`.
+  - **`POST /profiler/export[?frames=N]`**: one JSON document with the `GET /profiler/frames` fields (`N` newest frames, 1 to
+    120, default 30), `overview` (the `GET /profiler` body) and `pinned_spikes[...]` (each as in `GET /profiler/spike`). It
+    writes no file. It passes the browser guard.
 
 
 - **`POST /instantiate_asset`** (`task_manager/stl-parser-2` campaign,
@@ -744,11 +755,12 @@ registering a new named texture:
   see that campaign's PHASE0 Locked Design Decision #4 for why). The response
   body is `gte::rg::RenderGraphMetadata::to_json()` verbatim: `schema_version`
   (an integer, bumped only on a future breaking shape change - currently
-  `1`), `offscreen_regime`/`present_regime` (each one `ExecuteTimingMode`
+  `2`), `offscreen_regime`/`present_regime` (each one `ExecuteTimingMode`
   regime's own `regime_name`/`passes`/`resources`/`gpu_frame_status`/
   `gpu_span_milliseconds`/`gpu_folded_passes`/`dropped_gpu_frames` - every enum
   already resolved to a human
-  string - `kind`, `category`, `draw_kind`, `view_scope`,
+  string - `kind`, `category`, `draw_kind`, `view_scope`, `view` (`shared`, `primary` or `secondary`),
+  `instance` (hex id of the pass's binding instance, empty when the pass never executed),
   `render_pass_event` - every GPU timing value already resolved to a status
   word (`gpu_timing_status`: `Present`, `Partial`, `Absent`, `Error`, `Unsupported` or `Inactive`), a
   display string (`gpu_timing_text`) AND a raw nullable number

@@ -41,6 +41,7 @@
 #include "../Profiling/ProfilerSnapshotBuilder.h"
 #include "../Profiling/Overhead.h"
 #include "../Profiling/ScopeTimer.h"
+#include "../Renderer/GpuClockCalibration.h"
 #include "../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../Renderer/RenderGraph/RenderGraphDebugTextureRegistry.h"
 // BuildRenderGraphMetadata() for GET /render_graph.
@@ -1189,6 +1190,13 @@ int EditorHost::Run()
             profilerInputs.deviceLost = m_renderer.DeviceLost();
             profilerInputs.consecutiveFrameTimeouts = m_renderer.GpuWaitConsecutiveFrameTimeouts();
             profilerInputs.abandonedObjects = m_renderer.AbandonedObjectCount();
+            profilerInputs.gpuClockAligned = m_renderer.GpuClockCalibrationAvailable();
+            profilerInputs.timelineReason = ToString(ClockCalibrationReason::ExtensionNotEnabled);
+            // The frame detail goes first so a reader woken by the snapshot already finds it.
+            if (Profiling::FrameProfiler::Instance().HistoryCount() > 0) {
+                m_profilerBridge.PublishFrameDetail(
+                    Profiling::BuildFrameDetail(Profiling::FrameProfiler::Instance().LastCompletedFrame()));
+            }
             m_profilerBridge.Publish(Profiling::BuildProfilerSnapshot(Profiling::FrameProfiler::Instance(), profilerInputs));
         }
     }

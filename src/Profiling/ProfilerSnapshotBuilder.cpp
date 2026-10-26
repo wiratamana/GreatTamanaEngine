@@ -272,6 +272,8 @@ ProfilerSnapshot BuildProfilerSnapshot(const FrameProfiler& profiler, const Snap
     snapshot.device.deviceLost = inputs.deviceLost;
     snapshot.device.consecutiveFrameTimeouts = Count(inputs.consecutiveFrameTimeouts);
     snapshot.device.abandonedObjects = Count(inputs.abandonedObjects);
+    snapshot.timeline.aligned = inputs.gpuClockAligned;
+    CopySnapshotText(snapshot.timeline.reason, inputs.gpuClockAligned ? std::string_view("aligned") : inputs.timelineReason);
 
     const FrameRecord& record = profiler.LastCompletedFrame();
     const FrameTotals totals = ComputeFrameTotals(record);

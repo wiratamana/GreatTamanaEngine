@@ -17,6 +17,8 @@ struct SnapshotInputs {
     bool deviceLost = false;
     std::uint32_t consecutiveFrameTimeouts = 0;
     std::uint32_t abandonedObjects = 0;
+    bool gpuClockAligned = false; // GPU time can be placed on the CPU axis
+    std::string_view timelineReason = "GPU clock calibration unavailable";
 };
 
 ProfilerSnapshot BuildProfilerSnapshot(const FrameProfiler& profiler, const SnapshotInputs& inputs);

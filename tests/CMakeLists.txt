@@ -2228,6 +2228,8 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Profiling/SpikeStoreTests.cpp
     Profiling/OverheadTests.cpp
     Network/NetworkProfilerRoutesTests.cpp
+    Network/NetworkProfilerTimelineTests.cpp
+    Profiling/TimelineLayoutTests.cpp
     Core/GpuViewMetricsTests.cpp
     Jobs/JobQueueTests.cpp
     Jobs/JobSystemTests.cpp
@@ -2283,6 +2285,7 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Renderer/GpuWaitServiceTests.cpp
     Renderer/PresentRecoveryPlanTests.cpp
     Renderer/GpuStampPlanTests.cpp
+    Renderer/GpuClockCalibrationTests.cpp
     Renderer/GpuFrameRingTests.cpp
     Renderer/CaptureStatusTests.cpp
     Renderer/ComputeDispatchTests.cpp
@@ -3012,6 +3015,7 @@ set(GTE_COMMENT_RULE_SRC
     Core/RenderTimingAdapter.h Core/RenderTimingAdapter.cpp Core/GpuViewMetrics.h Core/GpuViewMetrics.cpp
     Network/NetworkFaultRoutes.h Network/NetworkFaultRoutes.cpp
     Network/NetworkProfilerRoutes.h Network/NetworkProfilerRoutes.cpp
+    Network/NetworkProfilerTimeline.h Network/NetworkProfilerTimeline.cpp
     Application/ProfilerSnapshotBridge.h Application/ProfilerSnapshotBridge.cpp
     Profiling/
     Features/SceneLighting/ Features/GpuDrivenScene/)
@@ -3058,7 +3062,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Renderer/AbandonedWorkTests.cpp Renderer/CaptureStatusTests.cpp Network/NetworkCaptureFailureTests.cpp
     Renderer/PresentRecoveryPlanTests.cpp Renderer/RenderGraph/OffscreenRecordingFaultTests.cpp Renderer/GpuStampPlanTests.cpp
     Renderer/GpuWaitServiceTests.cpp Network/NetworkFaultRoutesTests.cpp Renderer/GpuFrameRingTests.cpp Profiling/
-    Network/NetworkProfilerRoutesTests.cpp)
+    Network/NetworkProfilerRoutesTests.cpp Renderer/GpuClockCalibrationTests.cpp Network/NetworkProfilerTimelineTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

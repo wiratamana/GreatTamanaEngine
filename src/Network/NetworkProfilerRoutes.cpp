@@ -1,5 +1,6 @@
 #include "NetworkProfilerRoutes.h"
 
+#include "NetworkProfilerTimeline.h"
 #include "NetworkRoutes.h"
 
 #include "../Application/ProfilerSnapshotBridge.h"
@@ -13,7 +14,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <exception>
 #include <system_error>
+#include <vector>
 
 namespace gte::Network {
 
@@ -244,6 +247,11 @@ nlohmann::json ProfilerSnapshotToJson(const ProfilerSnapshot& snapshot)
     overhead["share"] = MetricToJson(snapshot.overhead.share);
     overhead["warn"] = snapshot.overhead.warn;
     out["overhead"] = std::move(overhead);
+
+    nlohmann::json timeline = nlohmann::json::object();
+    timeline["aligned"] = snapshot.timeline.aligned;
+    timeline["reason"] = Text(snapshot.timeline.reason);
+    out["timeline"] = std::move(timeline);
 
     out["spikes_available"] = snapshot.spikesAvailable;
     return out;
@@ -544,6 +552,38 @@ ProfilerReply BuildProfilerPinErrorReply(bool limitReached, std::uint64_t frameI
                       + " - it was never frozen or it was evicted") };
 }
 
+nlohmann::json ProfilerExportToJson(
+    const ProfilerSnapshot& snapshot, std::size_t count, std::span<const Profiling::SpikeDetail> pinned)
+{
+    nlohmann::json out = ProfilerFramesToJson(snapshot, count);
+    out["overview"] = ProfilerSnapshotToJson(snapshot);
+    nlohmann::json spikes = nlohmann::json::array();
+    for (const Profiling::SpikeDetail& detail : pinned) {
+        spikes.push_back(ProfilerSpikeDetailToJson(detail));
+    }
+    out["pinned_spikes"] = std::move(spikes);
+    return out;
+}
+
+ProfilerImageReply BuildProfilerTimelineReply(
+    const std::optional<Profiling::SpikeDetail>& frame, bool namedFrame, std::uint64_t frameIndex, int width)
+{
+    if (!frame) {
+        if (namedFrame) {
+            return { 404, {}, BuildGenericErrorResponseJson("no frozen spike for frame " + std::to_string(frameIndex)
+                                  + " - it was never frozen or it was evicted") };
+        }
+        return { 503, {}, BuildGenericErrorResponseJson("no profiler frame published yet - the main thread has not published one, try again") };
+    }
+    try {
+        const Profiling::TimelineLayout layout = Profiling::BuildTimelineLayout(*frame);
+        const std::vector<std::uint8_t> png = RenderTimelinePng(PlanTimelinePixels(layout, width));
+        return { 200, "image/png", std::string(reinterpret_cast<const char*>(png.data()), png.size()) };
+    } catch (const std::exception& error) {
+        return { 500, {}, BuildGenericErrorResponseJson(std::string("timeline image failed: ") + error.what()) };
+    }
+}
+
 void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bridge, BrowserRefusal refuseBrowser)
 {
     const auto serve = [bridge](ProfilerRoute route) {
@@ -653,6 +693,94 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
         state.pinnedSpikes = bridge->PinnedSpikes();
         state.spikeThresholdMs = bridge->SpikeThresholdMs();
         res.set_content(BuildProfilerSetReplyJson(state), "application/json");
+#else
+        const ProfilerReply reply = BuildProfilerUnavailableReply(bridge != nullptr);
+        res.status = reply.status;
+        res.set_content(reply.body, "application/json");
+#endif
+    });
+
+    server.Get("/profiler/timeline_image", [bridge](const httplib::Request& req, httplib::Response& res) {
+#if GTE_ENABLE_PROFILER
+        if (bridge == nullptr) {
+            const ProfilerReply reply = BuildProfilerUnavailableReply(false);
+            res.status = reply.status;
+            res.set_content(reply.body, "application/json");
+            return;
+        }
+        const std::optional<int> width = ParseTimelineWidth(req.get_param_value("width"));
+        if (!width) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson("invalid query parameter: width - a whole number from "
+                                + std::to_string(kTimelineWidthMin) + " to " + std::to_string(kTimelineWidthMax)),
+                "application/json");
+            return;
+        }
+
+        ProfilerImageReply reply;
+        const std::string frameText = req.get_param_value("frame");
+        if (frameText.empty()) {
+            // Asking also tells the main thread to keep publishing frames.
+            static_cast<void>(bridge->Latest(kSnapshotWait));
+            reply = BuildProfilerTimelineReply(bridge->LatestFrameDetail(), false, 0, *width);
+        } else {
+            const std::optional<std::uint64_t> index = ParseSpikeFrameIndex(frameText);
+            if (!index) {
+                res.status = 400;
+                res.set_content(BuildGenericErrorResponseJson("invalid query parameter: frame - the frame_index of a frozen spike"),
+                    "application/json");
+                return;
+            }
+            reply = BuildProfilerTimelineReply(bridge->SpikeFrame(*index), true, *index, *width);
+        }
+        res.status = reply.status;
+        if (reply.contentType.empty()) {
+            res.set_content(reply.body, "application/json");
+        } else {
+            res.set_content(reply.body.data(), reply.body.size(), reply.contentType);
+        }
+#else
+        static_cast<void>(req);
+        const ProfilerReply reply = BuildProfilerUnavailableReply(bridge != nullptr);
+        res.status = reply.status;
+        res.set_content(reply.body, "application/json");
+#endif
+    });
+
+    server.Post("/profiler/export", [bridge, refuseBrowser](const httplib::Request& req, httplib::Response& res) {
+        if (refuseBrowser != nullptr && refuseBrowser(req, res)) {
+            return;
+        }
+#if GTE_ENABLE_PROFILER
+        if (bridge == nullptr) {
+            const ProfilerReply reply = BuildProfilerUnavailableReply(false);
+            res.status = reply.status;
+            res.set_content(reply.body, "application/json");
+            return;
+        }
+        const std::optional<std::size_t> count = ParseProfilerFrameCount(req.get_param_value("frames"));
+        if (!count) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson("invalid query parameter: frames - must be a whole number"), "application/json");
+            return;
+        }
+        const std::optional<ProfilerSnapshot> snapshot = bridge->Latest(kSnapshotWait);
+        ProfilerReply reply;
+        if (!snapshot) {
+            reply = BuildProfilerReply(ProfilerRoute::Overview, std::nullopt, 0);
+        } else {
+            std::vector<Profiling::SpikeDetail> pinned;
+            for (std::uint32_t i = 0; i < snapshot->spikeCount && i < snapshot->spikes.size(); ++i) {
+                if (snapshot->spikes[i].pinned) {
+                    if (std::optional<Profiling::SpikeDetail> detail = bridge->SpikeFrame(snapshot->spikes[i].frameIndex)) {
+                        pinned.push_back(std::move(*detail));
+                    }
+                }
+            }
+            reply = { 200, ProfilerExportToJson(*snapshot, *count, pinned).dump() };
+        }
+        res.status = reply.status;
+        res.set_content(reply.body, "application/json");
 #else
         const ProfilerReply reply = BuildProfilerUnavailableReply(bridge != nullptr);
         res.status = reply.status;

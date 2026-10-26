@@ -3,12 +3,35 @@
 #include "RenderGraphSnapshotFormatting.h"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cstddef>
 #include <map>
 
 namespace gte::rg {
 
 namespace {
+
+const char* ViewLabel(ViewScope scope) noexcept
+{
+    switch (scope) {
+    case ViewScope::Shared: return "shared";
+    case ViewScope::Primary: return "primary";
+    case ViewScope::Secondary: return "secondary";
+    }
+    return "shared";
+}
+
+// "0x..." hex text of a binding instance id; empty for 0 (the pass never executed).
+std::string InstanceText(std::uint64_t instance)
+{
+    if (instance == 0) {
+        return {};
+    }
+    std::array<char, 18> digits{};
+    const std::to_chars_result result = std::to_chars(digits.data(), digits.data() + digits.size(), instance, 16);
+    return "0x" + std::string(digits.data(), result.ptr);
+}
 
 // Zips the parallel name/kind/access arrays into one array of ref structs, clamped to the shortest.
 // `barrierLabels` is the write-barrier label list, or null for reads.
@@ -41,6 +64,8 @@ RenderGraphPassMetadata BuildPassMetadata(const RenderGraphPassSnapshot& pass)
     metadata.category = ToString(pass.category);
     metadata.drawKind = ToString(pass.drawKind);
     metadata.viewScope = ToString(pass.viewScope);
+    metadata.view = ViewLabel(pass.viewScope);
+    metadata.instance = InstanceText(pass.stats.gpu.bindingInstance);
     metadata.renderPassEvent = ToString(pass.renderPassEvent);
     metadata.renderPassEventOrder = static_cast<std::uint32_t>(pass.renderPassEvent);
 
@@ -212,7 +237,7 @@ RenderGraphMetadata BuildRenderGraphMetadata(const RenderGraphSnapshot& offscree
     const std::vector<RenderFeatureDebugEntry>& renderFeatures)
 {
     RenderGraphMetadata metadata;
-    metadata.schemaVersion = 1;
+    metadata.schemaVersion = 2;
     metadata.offscreenRegime = BuildRegimeMetadata("SynchronousImmediateReadback", offscreen);
     metadata.presentRegime = BuildRegimeMetadata("PipelinedDeferredReadback", present);
     metadata.renderFeatures = renderFeatures;
@@ -294,6 +319,8 @@ void to_json(nlohmann::json& j, const RenderGraphPassMetadata& pass)
         { "category", pass.category },
         { "draw_kind", pass.drawKind },
         { "view_scope", pass.viewScope },
+        { "view", pass.view },
+        { "instance", pass.instance },
         { "render_pass_event", pass.renderPassEvent },
         { "render_pass_event_order", pass.renderPassEventOrder },
         { "owning_feature_name", pass.owningFeatureName },

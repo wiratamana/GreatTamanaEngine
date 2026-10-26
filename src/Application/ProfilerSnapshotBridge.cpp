@@ -35,6 +35,18 @@ void ProfilerSnapshotBridge::Publish(const Profiling::ProfilerSnapshot& snapshot
     m_published.notify_all();
 }
 
+void ProfilerSnapshotBridge::PublishFrameDetail(Profiling::SpikeDetail detail)
+{
+    std::lock_guard lock(m_mutex);
+    m_latestDetail = std::move(detail);
+}
+
+std::optional<Profiling::SpikeDetail> ProfilerSnapshotBridge::LatestFrameDetail() const
+{
+    std::lock_guard lock(m_mutex);
+    return m_latestDetail;
+}
+
 std::optional<Profiling::ProfilerSnapshot> ProfilerSnapshotBridge::Latest(std::chrono::milliseconds maxWait)
 {
     const std::uint64_t asked = NowNanoseconds();

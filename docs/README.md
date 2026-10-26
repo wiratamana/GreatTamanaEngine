@@ -52,9 +52,9 @@ than subsystem-specific):
 - **[CPU Dependency Memory Tracking](conventions/cpu-dependency-memory-tracking.md)**
   — `SdlMemoryTracker`/`ImGuiMemoryTracker` track third-party CPU memory
   usage, surfaced by the Editor's "Memory" panel.
-- **[Profiling](conventions/profiling.md)** — `src/Profiling/`'s always-
-  compiled CPU scope-timer instrumentation (`GTE_PROFILE_SCOPE`), draw-call/
-  GPU-memory/GPU-timestamp data feeding the "Profiler" panel.
+- **[Profiling](conventions/profiling.md)** — `src/Profiling/`'s CPU event log
+  (`GTE_PROFILE_SCOPE`), per-view GPU timestamp records with statuses, verdict,
+  spikes, `/profiler` HTTP routes and the timeline image.
 - **[Time and Playback Pause](conventions/time-and-playback-pause.md)** —
   the dedicated, explicit `gte::Time`/`gte::EngineContext` per-frame
   time-keeping objects, and the Unity-style Pause/Resume/Step toolbar built

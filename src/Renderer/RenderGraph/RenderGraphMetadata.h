@@ -37,6 +37,8 @@ struct RenderGraphPassMetadata {
     std::string category;          // rg::ToString(RenderPassCategory)
     std::string drawKind;          // rg::ToString(RenderPassDrawKind)
     std::string viewScope;         // rg::ToString(ViewScope)
+    std::string view = "shared";   // "shared" | "primary" | "secondary"
+    std::string instance;          // Hex id of the pass's binding instance; empty when it never executed.
     std::string renderPassEvent;   // rg::ToString(RenderPassEvent)
     std::uint32_t renderPassEventOrder = 0; // static_cast<std::uint32_t>(RenderPassEvent) - sortable, unlike the text above.
     std::string owningFeatureName; // Which feature owns this pass - always real, never optional.
@@ -100,7 +102,7 @@ struct RenderGraphGpuWaitMetadata {
 
 // The top-level JSON-able object: two named regimes plus features, caps, waits and memory in one response.
 struct RenderGraphMetadata {
-    std::uint32_t schemaVersion = 1; // Bump on any future breaking JSON shape change.
+    std::uint32_t schemaVersion = 2; // Bump on any future breaking JSON shape change.
     RenderGraphRegimeMetadata offscreenRegime; // ExecuteTimingMode::SynchronousImmediateReadback
     RenderGraphRegimeMetadata presentRegime;   // ExecuteTimingMode::PipelinedDeferredReadback
     std::vector<RenderFeatureDebugEntry> renderFeatures;     // Reused directly, never re-wrapped.

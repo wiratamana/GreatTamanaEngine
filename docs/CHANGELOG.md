@@ -4,6 +4,18 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## Timeline image, export and GPU clock calibration (branch `feature/gpu-cull-impl`, 2026-10-26)
+
+- **Timeline image.** `GET /profiler/timeline_image[?frame=F][&width=W]` returns a PNG of one frame drawn on the CPU from frame
+  data: CPU main, waits, worker jobs and GPU per view. It never reads GPU pixels.
+- **Export.** `POST /profiler/export[?frames=N]` returns the overview, the newest frames and the pinned spikes as one JSON
+  document.
+- **Clock calibration.** `GpuClockCalibration` fits CPU time against GPU ticks and reports its uncertainty. The device enables no
+  calibrated timestamp extension, so `GET /profiler` says `timeline{aligned:false,reason}`.
+- **`GET /render_graph`** is schema 2: each pass has `view` (`shared`, `primary`, `secondary`) and `instance`.
+- **A/B tool.** `tools/profiler_ab/run_ab.ps1` runs a timing run and a count run over HTTP and writes one markdown table.
+- **Docs.** `docs/conventions/profiling.md` describes the final system in one place.
+
 ## Frame verdict, spikes, markers and overhead (branch `feature/gpu-cull-impl`, 2026-10-26)
 
 - **Verdict.** One pure function reads the median of the newest 30 frames and says which resource limits the frame

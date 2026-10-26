@@ -181,6 +181,34 @@ TEST(ProfilerRoutesJsonTest, EveryNumberOfEveryRouteSitsInsideAMetric)
     }
 }
 
+TEST(ProfilerRoutesJsonTest, TheExportDocumentKeepsEveryNumberInsideAMetric)
+{
+    Profiling::SpikeDetail pinned;
+    pinned.frameIndex = 41;
+    pinned.frameMs = 50.0;
+    Profiling::SpikeScopeRow scope;
+    scope.name = "Present";
+    scope.durationMs = 30.0;
+    pinned.scopes = { scope };
+
+    const std::vector<Profiling::SpikeDetail> frozen{ pinned };
+    const json document = ProfilerExportToJson(FullSnapshot(), 3, frozen);
+    std::vector<std::string> stray;
+    FindStrayNumbers(document, "", stray);
+    EXPECT_TRUE(stray.empty()) << (stray.empty() ? "" : stray.front());
+    EXPECT_EQ(document["frames"].size(), 3u);
+    EXPECT_EQ(document["pinned_spikes"].size(), 1u);
+}
+
+TEST(ProfilerRoutesJsonTest, TheOverviewNamesWhyTheTimelineIsUnaligned)
+{
+    ProfilerSnapshot snapshot = FullSnapshot();
+    Profiling::CopySnapshotText(snapshot.timeline.reason, "calibrated timestamp extension not enabled");
+    const json document = ProfilerSnapshotToJson(snapshot);
+    EXPECT_FALSE(document["timeline"]["aligned"].get<bool>());
+    EXPECT_EQ(document["timeline"]["reason"], "calibrated timestamp extension not enabled");
+}
+
 TEST(ProfilerRoutesJsonTest, TheWalkerCatchesAStrayNumber)
 {
     json document = ProfilerSnapshotToJson(FullSnapshot());
@@ -199,8 +227,9 @@ TEST(ProfilerRoutesJsonTest, TheOverviewKeysArePinned)
     const std::set<std::string> expected{
         "success", "schema_version", "frame_index", "state", "has_frame", "snapshot_age", "capture", "display_paused",
         "cpu_frame", "untracked", "blocked", "gpu", "memory", "scopes", "scope_rows_dropped", "checks", "drops",
-        "device_state", "live_block", "verdict", "overhead", "spikes_available",
+        "device_state", "live_block", "verdict", "overhead", "timeline", "spikes_available",
     };
+    EXPECT_EQ(KeysOf(document["timeline"]), (std::set<std::string>{ "aligned", "reason" }));
     EXPECT_EQ(KeysOf(document), expected);
     EXPECT_EQ(KeysOf(document["gpu"]), (std::set<std::string>{ "views", "span", "indirect_draws", "coverage" }));
     EXPECT_EQ(KeysOf(document["gpu"]["views"]), (std::set<std::string>{ "shared", "primary", "secondary" }));

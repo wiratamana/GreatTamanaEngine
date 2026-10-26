@@ -161,6 +161,9 @@ public:
     // Consecutive frame waits that timed out; resets after a completed wait.
     std::uint32_t GpuWaitConsecutiveFrameTimeouts() const noexcept;
 
+    // True when the device can sample CPU and GPU clocks together. The device setup enables no such extension.
+    bool GpuClockCalibrationAvailable() const noexcept;
+
     // Installs the observer of every blocking wait. Pass nullptr to remove it.
     void SetTimingObserver(IRenderTimingObserver* observer) noexcept;
 

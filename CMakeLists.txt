@@ -802,6 +802,8 @@ add_library(gte_core STATIC
     src/Renderer/PresentRecoveryPlan.h
     src/Renderer/GpuStampPlan.cpp
     src/Renderer/GpuStampPlan.h
+    src/Renderer/GpuClockCalibration.cpp
+    src/Renderer/GpuClockCalibration.h
     src/Renderer/GpuFrameRing.h
     src/Renderer/NameHash.h
     src/Renderer/GpuWaitPolicy.cpp
@@ -1086,6 +1088,8 @@ add_library(gte_core STATIC
     src/Profiling/SpikeStore.cpp
     src/Profiling/SpikeDetail.h
     src/Profiling/SpikeDetail.cpp
+    src/Profiling/TimelineLayout.h
+    src/Profiling/TimelineLayout.cpp
     src/Profiling/Overhead.h
     src/Profiling/Overhead.cpp
     src/Jobs/JobTypes.h
@@ -1107,6 +1111,8 @@ add_library(gte_core STATIC
     src/Network/NetworkFaultRoutes.cpp
     src/Network/NetworkProfilerRoutes.h
     src/Network/NetworkProfilerRoutes.cpp
+    src/Network/NetworkProfilerTimeline.h
+    src/Network/NetworkProfilerTimeline.cpp
     src/Network/NetworkServer.h
     src/Network/NetworkServer.cpp
     src/Encoding/Base64.h

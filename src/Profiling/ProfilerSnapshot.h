@@ -113,6 +113,12 @@ struct SnapshotGpuCoverage {
     Metric disabledByToggle{};
 };
 
+// Whether GPU bars can be placed on the CPU time axis. When not, `reason` says why.
+struct SnapshotTimeline {
+    bool aligned = false;
+    std::array<char, kSnapshotNameBytes> reason{};
+};
+
 struct ProfilerSnapshot {
     std::uint32_t schemaVersion = kProfilerSchemaVersion;
     std::uint64_t frameIndex = 0;
@@ -144,6 +150,7 @@ struct ProfilerSnapshot {
     std::array<char, kSnapshotVerdictBytes> verdict{}; // one line, numbers included
     SnapshotVerdictDetail verdictDetail{};
     SnapshotOverhead overhead{};
+    SnapshotTimeline timeline{};
 
     std::array<SnapshotScopeRow, kSnapshotScopeRows> scopes{};
     std::uint32_t scopeCount = 0;
