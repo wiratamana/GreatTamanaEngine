@@ -1,6 +1,7 @@
 #include "NetworkServer.h"
 
 #include "NetworkCaptureFailure.h"
+#include "NetworkFaultRoutes.h"
 #include "NetworkRoutes.h"
 #include "NetworkRequestGuard.h"
 #include "NetworkSceneCameraPose.h"
@@ -319,6 +320,22 @@ bool RefuseBrowserRequest(const httplib::Request& req, httplib::Response& res)
     res.status = 403;
     res.set_content(BuildGenericErrorResponseJson("browser requests are refused on this route"), "application/json");
     return true;
+}
+
+// GET /debug/fault: arms or lists test faults. Arming is refused for browser requests. No bridge: it only touches atomics.
+void RegisterFaultRoutes([[maybe_unused]] httplib::Server& server)
+{
+#if GTE_ENABLE_NETWORK
+    server.Get("/debug/fault", [](const httplib::Request& req, httplib::Response& res) {
+        const bool arming = req.has_param("kind") || req.has_param("count");
+        if (arming && RefuseBrowserRequest(req, res)) {
+            return;
+        }
+        const FaultReply reply = HandleFaultRequest(req.get_param_value("kind"), req.get_param_value("count"));
+        res.status = reply.status;
+        res.set_content(reply.body, "application/json");
+    });
+#endif
 }
 
 // Shared tail for every /frame_debugger/* route EXCEPT /state (which needs
@@ -2253,6 +2270,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(body.dump(), "application/json");
     });
 
+    RegisterFaultRoutes(server);
     RegisterFeatureDebugRoutes(server, featureDebugCommandBridge);
     RegisterClusterViewerRoutes(server, uiCommandBridge, assetImportCommandBridge);
 }

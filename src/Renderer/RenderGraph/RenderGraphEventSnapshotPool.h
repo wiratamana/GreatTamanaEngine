@@ -5,7 +5,6 @@
 #include "RecordingContext.h"
 #include "RetainedEventSnapshot.h"
 #include "RenderGraphBarrierPlanner.h"
-#include "RenderGraphNameSlotTable.h"
 #include "../../Core/FrameDebuggerEventSink.h"
 #include "../Memory/GpuMemoryTracker.h"
 #include "../Vulkan/VulkanAllocator.h"

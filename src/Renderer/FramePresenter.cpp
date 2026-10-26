@@ -1,5 +1,6 @@
 #include "FramePresenter.h"
 
+#include "../Core/FaultInjection.h"
 #include "GpuTiming.h"
 #include "GpuWaitPolicy.h"
 #include "OffscreenRecording.h"
@@ -360,6 +361,9 @@ bool FramePresenter::PresentViaRenderGraph(rg::RenderGraph& graph,
     bool captureRecorded = false;
     bool fenceReset = false;
     try {
+        if (FaultFires(FaultKind::PresentThrow)) {
+            throw std::runtime_error("injected present fault");
+        }
         vkResetCommandBuffer(cmd, 0);
 
         VkCommandBufferBeginInfo beginInfo{};

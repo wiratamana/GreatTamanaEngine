@@ -1,10 +1,8 @@
 #pragma once
 
-// GPU timestamp source for the render graph: one query pool per ExecuteTimingMode regime, indexed by
-// the slot a RenderGraphNameSlotTable assigns to a pass name. Gated by GTE_ENABLE_PROFILER and
-// SetCaptureEnabled(). Needs a real device.
+// GPU timestamp source for the render graph: one query pool per ExecuteTimingMode regime, indexed by a
+// caller-chosen slot. Gated by GTE_ENABLE_PROFILER and SetCaptureEnabled(). Needs a real device.
 
-#include "RenderGraphNameSlotTable.h"
 #include "../GpuTiming.h"
 #include "../Vulkan/VulkanQueryPool.h"
 
@@ -18,6 +16,9 @@ class Renderer;
 } // namespace gte
 
 namespace gte::rg {
+
+// No slot is available: the pool's budget is fully used.
+inline constexpr std::int32_t kNoTimingSlot = -1;
 
 class RenderGraphTimestampPool {
 public:
@@ -50,7 +51,7 @@ public:
     bool IsCaptureEnabled() const noexcept { return m_captureEnabled; }
 
     // Resets the slot's two queries and writes a TOP_OF_PIPE timestamp into the first. No-op when
-    // unsupported, capture is off, or slot == kNoNameSlot. Resetting here is safe because the caller
+    // unsupported, capture is off, or slot == kNoTimingSlot. Resetting here is safe because the caller
     // has already waited for the slot's previous use to finish.
     void WriteBegin(VkCommandBuffer cmd, bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) noexcept;
 
@@ -58,7 +59,7 @@ public:
     void WriteEnd(VkCommandBuffer cmd, bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) noexcept;
 
     // Reads the slot's most recent [begin, end) ticks. The caller must know the submission is complete.
-    // Returns zeros for kNoNameSlot or when unsupported.
+    // Returns zeros for kNoTimingSlot or when unsupported.
     RawTicks ReadBack(bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) noexcept;
 
 private:

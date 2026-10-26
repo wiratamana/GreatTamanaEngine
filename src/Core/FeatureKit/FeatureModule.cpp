@@ -149,13 +149,6 @@ private:
         }
     }
 
-    void CommitViewStatsPass(const std::string& passName) override
-    {
-        if (!m_core.RegisterViewContentPassName(passName.c_str())) {
-            throw std::runtime_error("Core refused the view stats pass '" + passName + "'");
-        }
-    }
-
     void Run(const Registration& registration, SharedOncePerFrame* sharedLatch, rg::RenderGraphBuilder& builder,
         rg::RenderPassBlackboard& blackboard, rg::RenderViewId currentView, rg::TextureHandle privateTarget, Extent2D extent,
         const ScenePassReadHandles& handles)

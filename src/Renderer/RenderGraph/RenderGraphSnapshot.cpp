@@ -2,38 +2,6 @@
 
 namespace gte::rg {
 
-// See the declaration in RenderGraphSnapshot.h.
-PassGpuStats CombinePassGpuStats(const std::vector<PassGpuStats>& stats)
-{
-    PassGpuStats combined;
-
-    bool anyPresent = false;
-    bool anyUnsupported = false;
-    double summedPresentMilliseconds = 0.0;
-
-    for (const PassGpuStats& entry : stats) {
-        combined.drawStats.drawCallCount += entry.drawStats.drawCallCount;
-        combined.drawStats.triangleCount += entry.drawStats.triangleCount;
-
-        if (entry.timing.status == GpuTimingSample::Status::Present) {
-            anyPresent = true;
-            summedPresentMilliseconds += entry.timing.milliseconds;
-        } else if (entry.timing.status == GpuTimingSample::Status::Unsupported) {
-            anyUnsupported = true;
-        }
-    }
-
-    if (anyPresent) {
-        combined.timing.status = GpuTimingSample::Status::Present;
-        combined.timing.milliseconds = summedPresentMilliseconds;
-    } else if (anyUnsupported) {
-        combined.timing.status = GpuTimingSample::Status::Unsupported;
-    }
-    // else: leave combined.timing at its default (Status::Absent, 0.0).
-
-    return combined;
-}
-
 // Resolves one declared read/write's resource name from the texture or buffer table. Never reads out of
 // bounds (a stale index degrades to an empty string). Exported so RenderGraph.cpp's barrier-applied sink
 // resolves a usage's name through this exact same function.
@@ -75,7 +43,7 @@ static ResourceKind DisplayKindOf(const ResourceUsage& usage, const CompiledGrap
 namespace {
 
 RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t declarationIndex,
-    const CompiledGraphInput& input, bool isCulled, const std::function<PassGpuStats(const char*)>& statsLookup,
+    const CompiledGraphInput& input, bool isCulled, const std::function<PassGpuStats(std::size_t)>& statsLookup,
     const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup,
     const std::function<bool(std::size_t, const std::string&, std::string&)>& barrierLabelLookup)
 {
@@ -126,7 +94,7 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t de
 
     // A culled pass keeps default stats; it did not run this call.
     if (!isCulled && statsLookup) {
-        snapshot.stats = statsLookup(pass.name);
+        snapshot.stats = statsLookup(declarationIndex);
     }
 
     return snapshot;
@@ -135,7 +103,7 @@ RenderGraphPassSnapshot BuildPassSnapshot(const PassRecord& pass, std::size_t de
 } // namespace
 
 RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, const CompiledGraphInput& input,
-    const std::function<PassGpuStats(const char*)>& statsLookup, bool timingSlotBudgetExhausted,
+    const std::function<PassGpuStats(std::size_t)>& statsLookup, bool timingSlotBudgetExhausted,
     const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup,
     const std::function<bool(std::size_t, const std::string&, std::string&)>& barrierLabelLookup)
 {

@@ -20,15 +20,6 @@ SceneSlot FeatureSetup::DeclareSceneSlot(std::string_view name, SceneSlotKind ki
     return m_slots->Declare(name, kind, preferredIndex);
 }
 
-void FeatureSetup::CountInViewStats(std::string passName)
-{
-    if (passName.empty()) {
-        m_errors.emplace_back("CountInViewStats was given an empty pass name");
-        return;
-    }
-    m_viewStatsPasses.push_back(std::move(passName));
-}
-
 void FeatureSetup::Fail(std::string message)
 {
     m_errors.push_back(std::move(message));
@@ -119,9 +110,6 @@ std::optional<std::string> SetupAndCommit(Feature& feature, IRegistrationSink& s
     try {
         for (const Registration& registration : setup.Registrations()) {
             sink.Commit(registration);
-        }
-        for (const std::string& passName : setup.ViewStatsPasses()) {
-            sink.CommitViewStatsPass(passName);
         }
     } catch (const std::exception& e) {
         return std::string(e.what());

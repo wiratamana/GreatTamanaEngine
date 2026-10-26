@@ -725,22 +725,22 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
         ++m_debugTextureFrameCounter;
     }
 
-    // Read back pipelined GPU timing data from completed frames.
+    // Read back the timing of the frame that last used this buffer; it is complete by now.
     std::uint32_t pipelinedBufferIndex = 0;
     if (isPipelined) {
         pipelinedBufferIndex = m_pipelinedFrameCounter % kGpuTimingFramesInFlight;
-        for (std::uint32_t s = 0; s < m_pipelinedTimingSlots.AssignedCount(); ++s) {
-            if (!m_pipelinedHasWritten[s][pipelinedBufferIndex]) {
-                continue;
+        std::vector<std::string>& timedNames = m_pipelinedTimedNames[pipelinedBufferIndex];
+        if (!timedNames.empty()) {
+            m_pipelinedTiming.names = std::move(timedNames);
+            m_pipelinedTiming.samples.clear();
+            m_pipelinedTiming.samples.reserve(m_pipelinedTiming.names.size());
+            for (std::size_t i = 0; i < m_pipelinedTiming.names.size(); ++i) {
+                const RenderGraphTimestampPool::RawTicks raw =
+                    m_timestampPool.ReadBack(/*pipelined=*/true, pipelinedBufferIndex, static_cast<std::int32_t>(i));
+                m_pipelinedTiming.samples.push_back(ResolveAndConvertTiming(raw));
             }
-            const char* name = m_pipelinedTimingSlots.NameAtSlot(static_cast<std::int32_t>(s));
-            if (name == nullptr) {
-                continue;
-            }
-            const RenderGraphTimestampPool::RawTicks raw =
-                m_timestampPool.ReadBack(/*pipelined=*/true, pipelinedBufferIndex, static_cast<std::int32_t>(s));
-            UpdateTimingFor(name, ResolveAndConvertTiming(raw));
         }
+        timedNames.clear();
     }
 
     const CompiledGraph compiled = Compile(input, std::span<const TextureHandle>(finalOutputs));
@@ -748,7 +748,10 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     std::vector<PhysicalTexture> physicalTextures(input.textures.size());
     std::vector<PhysicalBuffer> physicalBuffers(input.buffers.size());
 
-    RenderGraphNameSlotTable& timingSlots = isPipelined ? m_pipelinedTimingSlots : m_synchronousTimingSlots;
+    const std::uint32_t timingSlotBudget = isPipelined ? kPipelinedTimingSlotBudget : kSynchronousTimingSlotBudget;
+    std::uint32_t ordinal = 0;
+    bool timingSlotBudgetExhausted = false;
+    std::vector<PassGpuStats> passStats(input.passes.size());
 
     for (const PassHandle& passHandle : compiled.executionOrder) {
         PassRecord& pass = input.passes[passHandle.index];
@@ -766,31 +769,20 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
             }
         }
 
-        const std::int32_t timingSlot = timingSlots.AssignOrGetSlot(pass.name);
-
-        // Warn once if the fixed timing slot budget is exhausted.
-        if (timingSlot == kNoNameSlot && timingSlots.JustOverflowed()) {
-            std::vector<std::string>& reported =
-                isPipelined ? m_reportedPipelinedOverflows : m_reportedSynchronousOverflows;
-            bool alreadyReported = false;
-            if (pass.name != nullptr) {
-                for (const std::string& n : reported) {
-                    if (n == pass.name) {
-                        alreadyReported = true;
-                        break;
-                    }
-                }
-            }
-            if (!alreadyReported) {
-                reported.emplace_back(pass.name != nullptr ? pass.name : "<unnamed>");
+        // The slot is the pass's execution ordinal; passes past the budget are not timed.
+        const std::int32_t timingSlot = ordinal < timingSlotBudget ? static_cast<std::int32_t>(ordinal) : kNoTimingSlot;
+        ++ordinal;
+        if (timingSlot == kNoTimingSlot) {
+            timingSlotBudgetExhausted = true;
+            bool& logged = isPipelined ? m_pipelinedOverflowLogged : m_synchronousOverflowLogged;
+            if (!logged) {
+                logged = true;
                 GTE_LOG_WARNING("RenderGraph",
-                    "Pass \"" + std::string(pass.name != nullptr ? pass.name : "<unnamed>")
-                        + "\" could not be assigned a GPU-timing slot - the "
-                        + std::string(isPipelined ? "pipelined" : "synchronous")
-                        + " regime's fixed timing-slot budget (" + std::to_string(timingSlots.SlotBudget())
-                        + ") is already fully assigned to other pass names. This pass's GPU timing will read as "
-                          "Absent until this budget is increased.");
+                    std::string("The ") + (isPipelined ? "pipelined" : "synchronous") + " regime ran more than "
+                        + std::to_string(timingSlotBudget) + " passes in one execution. The extra passes read GPU timing as Absent.");
             }
+        } else if (isPipelined) {
+            m_pipelinedTimedNames[pipelinedBufferIndex].emplace_back(pass.name != nullptr ? pass.name : "");
         }
 
         // Record start timestamp after barriers execute.
@@ -959,19 +951,26 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 
         // Record end timestamp.
         m_timestampPool.WriteEnd(cmd, isPipelined, pipelinedBufferIndex, timingSlot);
-        if (isPipelined && timingSlot != kNoNameSlot) {
-            m_pipelinedHasWritten[static_cast<std::size_t>(timingSlot)][pipelinedBufferIndex] = true;
-        }
-
 
         if (m_frameDebuggerEventSink != nullptr) {
             m_frameDebuggerEventSink->FlushPendingCapture(RecordingAccess::Wrap(cmd, m_renderer));
         }
 
-        UpdateDrawStatsFor(pass.name, passDrawStats);
+        passStats[passHandle.index].drawStats = passDrawStats;
     }
 
-    if (isPipelined) {
+    if (!isPipelined) {
+        m_synchronousTimedPasses = std::min(ordinal, timingSlotBudget);
+    } else {
+        // The latest read-back timing belongs to a pass only when its ordinal and name both match.
+        std::uint32_t timedOrdinal = 0;
+        for (const PassHandle& passHandle : compiled.executionOrder) {
+            const char* name = input.passes[passHandle.index].name;
+            if (timedOrdinal < m_pipelinedTiming.names.size() && m_pipelinedTiming.names[timedOrdinal] == (name != nullptr ? name : "")) {
+                passStats[passHandle.index].timing = m_pipelinedTiming.samples[timedOrdinal];
+            }
+            ++timedOrdinal;
+        }
         ++m_pipelinedFrameCounter;
     }
 
@@ -1020,7 +1019,6 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     }
 
     // Build the debug snapshot for the editor frame inspector.
-    const bool timingSlotBudgetExhausted = timingSlots.EverOverflowed();
 
     std::function<bool(std::size_t, PassDebugMetadata&)> metadataLookup;
     if (m_debugMetadataProvider != nullptr) {
@@ -1040,8 +1038,8 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     }
 
     RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input,
-        [this](const char* name) { return LastKnownStatsFor(name); }, timingSlotBudgetExhausted, metadataLookup,
-        barrierLabelLookup);
+        [&passStats](std::size_t declarationIndex) { return passStats[declarationIndex]; }, timingSlotBudgetExhausted,
+        metadataLookup, barrierLabelLookup);
     if (!isPipelined) {
         m_synchronousSnapshot = std::move(snapshot);
     } else {
@@ -1051,15 +1049,18 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
 
 void RenderGraph::FinalizeSynchronousGpuTiming()
 {
-    for (std::uint32_t s = 0; s < m_synchronousTimingSlots.AssignedCount(); ++s) {
-        const char* name = m_synchronousTimingSlots.NameAtSlot(static_cast<std::int32_t>(s));
-        if (name == nullptr) {
-            continue;
+    // Executed passes lead the snapshot in execution order, so ordinal i is snapshot entry i.
+    std::vector<RenderGraphPassSnapshot>& passes = m_synchronousSnapshot.passesInExecutionOrder;
+    const std::uint32_t timed = std::min<std::uint32_t>(m_synchronousTimedPasses, static_cast<std::uint32_t>(passes.size()));
+    for (std::uint32_t i = 0; i < timed; ++i) {
+        if (passes[i].isCulled) {
+            break;
         }
         const RenderGraphTimestampPool::RawTicks raw =
-            m_timestampPool.ReadBack(/*pipelined=*/false, /*bufferIndex=*/0, static_cast<std::int32_t>(s));
-        UpdateTimingFor(name, ResolveAndConvertTiming(raw));
+            m_timestampPool.ReadBack(/*pipelined=*/false, /*bufferIndex=*/0, static_cast<std::int32_t>(i));
+        passes[i].stats.timing = ResolveAndConvertTiming(raw);
     }
+    m_synchronousTimedPasses = 0;
 }
 
 GpuTimingSample RenderGraph::ResolveAndConvertTiming(const RenderGraphTimestampPool::RawTicks& raw) const
@@ -1073,50 +1074,6 @@ GpuTimingSample RenderGraph::ResolveAndConvertTiming(const RenderGraphTimestampP
     const double milliseconds =
         ConvertTimestampDeltaToMilliseconds(raw.begin, raw.end, capability.timestampPeriodNs, capability.validBits);
     return GpuTimingSample{ GpuTimingSample::Status::Present, milliseconds };
-}
-
-void RenderGraph::UpdateDrawStatsFor(const char* name, const DrawStats& drawStats)
-{
-    if (name == nullptr) {
-        return;
-    }
-    for (NamedStats& entry : m_lastKnownStats) {
-        if (entry.name == name) {
-            entry.stats.drawStats = drawStats;
-            return;
-        }
-    }
-    PassGpuStats stats;
-    stats.drawStats = drawStats;
-    m_lastKnownStats.push_back(NamedStats{ name, stats });
-}
-
-void RenderGraph::UpdateTimingFor(const char* name, const GpuTimingSample& timing)
-{
-    if (name == nullptr) {
-        return;
-    }
-    for (NamedStats& entry : m_lastKnownStats) {
-        if (entry.name == name) {
-            entry.stats.timing = timing;
-            return;
-        }
-    }
-    PassGpuStats stats;
-    stats.timing = timing;
-    m_lastKnownStats.push_back(NamedStats{ name, stats });
-}
-
-PassGpuStats RenderGraph::LastKnownStatsFor(const char* passName) const
-{
-    if (passName != nullptr) {
-        for (const NamedStats& entry : m_lastKnownStats) {
-            if (entry.name == passName) {
-                return entry.stats;
-            }
-        }
-    }
-    return PassGpuStats{};
 }
 
 const RenderGraphSnapshot& RenderGraph::LastSnapshot(ExecuteTimingMode mode) const noexcept

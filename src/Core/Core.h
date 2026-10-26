@@ -207,9 +207,6 @@ public:
     // of the raw view. `name` is its graph texture name; a later exposure replaces an earlier one.
     void ExposeViewOutput(rg::ViewScope scope, RenderTexture& texture, std::string_view name);
 
-    // Registers a pass name to be counted in per-view GPU draw stats.
-    bool RegisterViewContentPassName(const char* name);
-
     // Marks `entities` as drawn by a pass chain in `scope`, so this frame's CPU scene draw of that view skips them.
     // For kit verbs only, and only after every pass of the chain was declared (see ClusterClaim.h).
     void ClaimEntities(rg::ViewScope scope, std::span<const Entity> entities);
@@ -284,8 +281,6 @@ private:
     rg::RenderPassToggleRegistry m_renderPassToggleRegistry;
 
     std::vector<ExposedViewOutput> m_exposedViewOutputsThisFrame; // Cleared at the start of each BuildFrame().
-
-    std::vector<std::string> m_viewContentPassNames{ "RenderOpaque", "RenderTransparent" };
 
     // Offscreen blackboard kept alive across the frame for debugger inspection.
     rg::RenderPassBlackboard m_offscreenBlackboardThisFrame;

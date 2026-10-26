@@ -410,6 +410,15 @@ module or adding a new endpoint:
   nothing changes. The rules: a `Sec-Fetch-Site` header other than `none` or `same-origin`; an `Origin` header whose host
   is not `127.0.0.1` or `localhost`; a `Host` header that is not `127.0.0.1:<port>` or `localhost:<port>`. A client that
   sends none of these headers (curl, the debug tools) passes.
+- **`GET /debug/fault[?kind=<kind>&count=<N>]`** is a loopback test tool that arms a one-shot fault so the failure paths
+  can be proven live. Kinds: `offscreen_throw` (the offscreen frame throws), `present_throw` (the present path throws after
+  the swapchain image was acquired), `device_lost` (marks the GPU device lost, final, it cannot be undone),
+  `main_thread_stall` (the main thread sleeps 3 s once per count at the start of a frame). `count` is a whole number in
+  1..1000 and defaults to 1; each count fires once. Reply `{"success":true,"armed":"<kind>","count":N}`. With no query it
+  lists the armed counters as `{"success":true,"armed":{"<kind>":N,...}}`. Bad kind or count is a `400`. Arming is
+  refused with `403` when the request looks like it came from a web page (browser guard); listing is not. It answers
+  while the main thread is stalled because it
+  only touches atomics. The route exists only when the engine is built with `GTE_ENABLE_NETWORK`.
 
 
 - **`POST /instantiate_asset`** (`task_manager/stl-parser-2` campaign,

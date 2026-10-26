@@ -97,14 +97,16 @@ const char* ToString(Profiling::GpuPass pass)
 
 std::string FormatGpuTimingLine(const Profiling::GpuPassSample& pass)
 {
-    if (pass.timingStatus == Profiling::GpuSampleStatus::Present) {
+    switch (pass.timingStatus) {
+    case Profiling::GpuSampleStatus::Present:
         return FormatDuration(pass.milliseconds);
+    case Profiling::GpuSampleStatus::Unsupported:
+        return "unsupported";
+    case Profiling::GpuSampleStatus::Absent:
+        break;
     }
-    // Absent AND Unsupported both honestly report "N/A" - never a fabricated
-    // "0.00 ms" (see ProfilingTypes.h's own tri-state rule). Absent means
-    // this pass simply didn't run this frame (or Capture is off); Unsupported
-    // means this device/build can never produce this measurement at all.
-    return "N/A";
+    // Never a fabricated "0.00 ms" for a value that was not measured.
+    return "not measured";
 }
 
 const char* CpuScopeTableEmptyMessage()

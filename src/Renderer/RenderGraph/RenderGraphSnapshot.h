@@ -16,16 +16,11 @@
 
 namespace gte::rg {
 
-// One pass's last-known stats, from the most recent Execute() that ran it.
+// One executed pass's draw and GPU timing stats.
 struct PassGpuStats {
     DrawStats drawStats;
     GpuTimingSample timing;
 };
-
-// Combines several passes' stats into one aggregate for a group treated as one thing. Draw stats are
-// summed. Timing sums `milliseconds` over the entries that are Present; with none Present the result is
-// Unsupported if any entry is, else Absent. An empty input gives a default PassGpuStats.
-PassGpuStats CombinePassGpuStats(const std::vector<PassGpuStats>& stats);
 
 // One pass, ready to display. Names are owned strings, not pointers into PassRecord tables, so a
 // snapshot stays valid indefinitely.
@@ -82,11 +77,11 @@ struct RenderGraphSnapshot {
     bool timingSlotBudgetExhausted = false;
 };
 
-// Reshapes one Execute() call into a snapshot. `statsLookup` maps a pass name to its last-known stats
+// Reshapes one Execute() call into a snapshot. `statsLookup` maps a declaration index to that pass's stats
 // (never called for a culled pass). `metadataLookup` and `barrierLabelLookup` resolve per-pass metadata
 // and write barrier labels by declaration index; an empty function or false leaves the defaults.
 RenderGraphSnapshot BuildRenderGraphSnapshot(const CompiledGraph& compiled, const CompiledGraphInput& input,
-    const std::function<PassGpuStats(const char*)>& statsLookup, bool timingSlotBudgetExhausted = false,
+    const std::function<PassGpuStats(std::size_t)>& statsLookup, bool timingSlotBudgetExhausted = false,
     const std::function<bool(std::size_t, PassDebugMetadata&)>& metadataLookup = {},
     const std::function<bool(std::size_t, const std::string&, std::string&)>& barrierLabelLookup = {});
 

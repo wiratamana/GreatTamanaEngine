@@ -92,9 +92,6 @@ void ShadowFeature::Setup(fx::FeatureSetup& s)
     const std::vector<std::string> clusterPasses = ShadowClusterDeclaredPasses(m_clusterState.AllPassNames());
     cascadeGate.passNames.insert(cascadeGate.passNames.end(), clusterPasses.begin(), clusterPasses.end());
     s.PreOpaque("Shadow.Cascades", kCascadesPriority, [this](fx::PreOpaqueFrame& f) { CascadesPass(f); }, cascadeGate);
-    for (const std::string& name : clusterPasses) {
-        s.CountInViewStats(name);
-    }
     s.PostOpaque("Shadow.DepthRange", kDepthRangePriority, [this](fx::PostOpaqueFrame& f) { DepthRangePass(f); },
         fx::Gate{ "Shadow.DepthRange.Reduce" });
     s.PostOpaque("Shadow.Mask", kMaskPriority, [this](fx::PostOpaqueFrame& f) { MaskPass(f); },

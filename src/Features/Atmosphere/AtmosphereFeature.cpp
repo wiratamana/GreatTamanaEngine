@@ -112,7 +112,6 @@ void AtmosphereFeature::Setup(fx::FeatureSetup& s)
     s.PostComposite("AtmosphereComposite", kCompositePriority, fx::Blend::AlphaOver,
         [this](fx::CompositeFrame& f) { Composite(f); },
         fx::Gate{ "AtmosphereAerialPerspectiveCompositePass", "AtmosphereComposite.CopyToPrivateTarget" });
-    s.CountInViewStats("DrawSkyBackground");
 }
 
 void AtmosphereFeature::SharedLuts(fx::SharedFrame& f)

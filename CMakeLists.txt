@@ -565,6 +565,8 @@ add_library(gte_core STATIC
     src/Core/IHostServices.h
     src/Core/Core.h
     src/Core/Core.cpp
+    src/Core/FaultInjection.h
+    src/Core/FaultInjection.cpp
     src/Core/ScreenPostProcessPassPriorityAssignment.h
     src/Core/ScreenPostProcessPassPriorityAssignment.cpp
     src/Core/ClusterCandidates.h
@@ -959,7 +961,6 @@ add_library(gte_core STATIC
     src/Renderer/RenderGraph/RenderGraphComputeBindingCache.cpp
     src/Renderer/RenderGraph/RenderGraphBarrierPlanner.h
     src/Renderer/RenderGraph/RenderGraphBarrierPlanner.cpp
-    src/Renderer/RenderGraph/RenderGraphNameSlotTable.h
     src/Renderer/RenderGraph/RenderGraphTimestampPool.h
     src/Renderer/RenderGraph/RenderGraphTimestampPool.cpp
     src/Renderer/RenderGraph/RenderGraphEventSnapshotPool.h
@@ -1063,6 +1064,8 @@ add_library(gte_core STATIC
     src/Network/NetworkRequestGuard.cpp
     src/Network/NetworkSceneCameraPose.h
     src/Network/NetworkSceneCameraPose.cpp
+    src/Network/NetworkFaultRoutes.h
+    src/Network/NetworkFaultRoutes.cpp
     src/Network/NetworkServer.h
     src/Network/NetworkServer.cpp
     src/Encoding/Base64.h

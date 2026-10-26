@@ -134,16 +134,16 @@ TEST(ProfilerPanelDataTest, ToStringGpuPassCoversAllThreeValues)
     EXPECT_STREQ(ToString(static_cast<Profiling::GpuPass>(99)), "Unknown Pass");
 }
 
-TEST(ProfilerPanelDataTest, FormatGpuTimingLineReportsPlaceholderForAbsentAndUnsupported)
+TEST(ProfilerPanelDataTest, FormatGpuTimingLineReportsStatusWordForAbsentAndUnsupported)
 {
     Profiling::GpuPassSample absentSample;
     absentSample.timingStatus = Profiling::GpuSampleStatus::Absent;
-    absentSample.milliseconds = 42.0; // Stale/non-zero - must still say N/A.
-    EXPECT_EQ(FormatGpuTimingLine(absentSample), "N/A");
+    absentSample.milliseconds = 42.0; // Stale/non-zero - must still say "not measured".
+    EXPECT_EQ(FormatGpuTimingLine(absentSample), "not measured");
 
     Profiling::GpuPassSample unsupportedSample;
     unsupportedSample.timingStatus = Profiling::GpuSampleStatus::Unsupported;
-    EXPECT_EQ(FormatGpuTimingLine(unsupportedSample), "N/A");
+    EXPECT_EQ(FormatGpuTimingLine(unsupportedSample), "unsupported");
 }
 
 TEST(ProfilerPanelDataTest, FormatGpuTimingLineReportsRealValueForPresent)

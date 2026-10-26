@@ -186,14 +186,10 @@ OffscreenRecording Renderer::BeginOffscreenRecording()
     return OffscreenRecording(m_presenter, this);
 }
 
-std::optional<DrawStats> Renderer::PresentViaRenderGraph(rg::RenderGraph& graph,
+bool Renderer::PresentViaRenderGraph(rg::RenderGraph& graph,
     const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build)
 {
-    const bool ran = m_presenter.PresentViaRenderGraph(graph, build);
-    if (!ran) {
-        return std::nullopt;
-    }
-    return graph.LastKnownStatsFor("Present").drawStats;
+    return m_presenter.PresentViaRenderGraph(graph, build);
 }
 
 void Renderer::BeginGraphPassRecording(
@@ -384,6 +380,11 @@ void Renderer::IdleForTeardown(const char* what) const noexcept
 bool Renderer::DeviceLost() const noexcept
 {
     return m_device.Waits().DeviceLost();
+}
+
+void Renderer::InjectDeviceLost() noexcept
+{
+    m_device.Waits().MarkDeviceLost();
 }
 
 std::uint32_t Renderer::GpuWaitConsecutiveFrameTimeouts() const noexcept

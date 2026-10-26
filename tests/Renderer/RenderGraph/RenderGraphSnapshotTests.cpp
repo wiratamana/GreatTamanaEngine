@@ -1,12 +1,6 @@
-// Unit tests for Phase 8's pure "flatten a compiled graph into something
-// displayable" reshape (src/Renderer/RenderGraph/RenderGraphSnapshot.h). No
-// live VkDevice/Renderer/RenderGraph involved at all - every fixture below is
-// built through a real RenderGraphBuilder/RenderGraphCompiler::Compile()
-// (mirroring RenderGraphCompilerTests.cpp's own convention), with
-// `statsLookup` supplied as a plain, hand-fabricated lambda rather than a
-// real RenderGraph::LastKnownStatsFor() - exactly what keeps
-// BuildRenderGraphSnapshot() itself Tier-1-testable despite living
-// alongside RenderGraph.h/.cpp (which are Tier 2 - see TESTING.md).
+// Unit tests for the pure "flatten a compiled graph into something displayable" reshape
+// (src/Renderer/RenderGraph/RenderGraphSnapshot.h). No live device or RenderGraph is involved: every fixture is
+// built through a real RenderGraphBuilder and Compile(), with `statsLookup` supplied as a hand-made lambda.
 
 #include "Renderer/RenderGraph/RenderGraphSnapshot.h"
 #include "Renderer/RenderGraph/RenderFeatureScope.h"
@@ -39,21 +33,19 @@ PassGpuStats MakeStats(std::uint32_t drawCalls, std::uint32_t triangles)
     return stats;
 }
 
-// A statsLookup stand-in that returns a canned, name-keyed value AND
-// records every name it was actually called with - so a test can assert
-// BuildRenderGraphSnapshot() never calls it for a culled pass (see
-// RenderGraphSnapshot.h's own doc comment on why).
+// A statsLookup stand-in that returns a canned value per declaration index and records every
+// index it was called with, so a test can assert a culled pass is never looked up.
 class RecordingStatsLookup {
 public:
-    PassGpuStats operator()(const char* name)
+    PassGpuStats operator()(std::size_t declarationIndex)
     {
-        calledWith.push_back(name != nullptr ? name : "");
-        auto it = canned.find(name != nullptr ? name : "");
+        calledWith.push_back(declarationIndex);
+        auto it = canned.find(declarationIndex);
         return it != canned.end() ? it->second : PassGpuStats{};
     }
 
-    std::map<std::string, PassGpuStats> canned;
-    std::vector<std::string> calledWith;
+    std::map<std::size_t, PassGpuStats> canned;
+    std::vector<std::size_t> calledWith;
 };
 
 // editor-core-separation-25 campaign - a minimal, test-local, dual-
@@ -142,8 +134,8 @@ TEST(RenderGraphSnapshotTest, SurvivingPassesAppearInExecutionOrderWithResolvedN
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
     RecordingStatsLookup lookup;
-    lookup.canned["A"] = MakeStats(3, 100);
-    lookup.canned["B"] = MakeStats(5, 250);
+    lookup.canned[0] = MakeStats(3, 100);
+    lookup.canned[1] = MakeStats(5, 250);
 
     const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, std::ref(lookup));
     ASSERT_EQ(snapshot.passesInExecutionOrder.size(), 2u);
@@ -167,10 +159,10 @@ TEST(RenderGraphSnapshotTest, SurvivingPassesAppearInExecutionOrderWithResolvedN
     EXPECT_EQ(passB.stats.drawStats.drawCallCount, 5u);
     EXPECT_EQ(passB.stats.drawStats.triangleCount, 250u);
 
-    // statsLookup was called exactly once per surviving pass, by name.
-    EXPECT_EQ(lookup.calledWith.size(), 2u);
-    EXPECT_EQ(lookup.calledWith[0], "A");
-    EXPECT_EQ(lookup.calledWith[1], "B");
+    // statsLookup was called exactly once per surviving pass, by declaration index.
+    ASSERT_EQ(lookup.calledWith.size(), 2u);
+    EXPECT_EQ(lookup.calledWith[0], 0u);
+    EXPECT_EQ(lookup.calledWith[1], 1u);
 }
 
 // --- Culled passes: still visible, appended after, stats never resolved ------
@@ -200,7 +192,7 @@ TEST(RenderGraphSnapshotTest, CulledPassesAreAppendedAfterSurvivorsWithDefaultSt
     const CompiledGraph compiled = Compile(input, finalOutputs);
 
     RecordingStatsLookup lookup;
-    lookup.canned["Unused"] = MakeStats(99, 999); // Must never be reflected in the snapshot.
+    lookup.canned[2] = MakeStats(99, 999); // The culled pass; must never be reflected in the snapshot.
 
     const RenderGraphSnapshot snapshot = BuildRenderGraphSnapshot(compiled, input, std::ref(lookup));
 
@@ -215,9 +207,9 @@ TEST(RenderGraphSnapshotTest, CulledPassesAreAppendedAfterSurvivorsWithDefaultSt
     EXPECT_EQ(culled.stats.drawStats.triangleCount, 0u);
     EXPECT_EQ(culled.stats.timing.status, GpuTimingSample::Status::Absent);
 
-    // "Unused" must never have been passed to statsLookup at all.
-    for (const std::string& calledName : lookup.calledWith) {
-        EXPECT_NE(calledName, "Unused");
+    // The culled pass (declaration index 2) must never have been passed to statsLookup.
+    for (const std::size_t calledIndex : lookup.calledWith) {
+        EXPECT_NE(calledIndex, 2u);
     }
 }
 
@@ -797,100 +789,6 @@ TEST(RenderGraphSnapshotTest, WriteVolumeTextureAndReadVolumeTextureProduceNonEm
     EXPECT_EQ(readPass.readKinds[0], ResourceKind::VolumeTexture);
     EXPECT_EQ(readPass.readNames[0], "AtmosphereAerialPerspectiveVolume");
     EXPECT_FALSE(readPass.readNames[0].empty());
-}
-
-// --- Render Pass campaign, PHASE2 - CombinePassGpuStats() --------------------
-
-TEST(RenderGraphSnapshotTest, CombinePassGpuStatsOfEmptyListReturnsDefault)
-{
-    const PassGpuStats combined = CombinePassGpuStats({});
-
-    EXPECT_EQ(combined.drawStats.drawCallCount, 0u);
-    EXPECT_EQ(combined.drawStats.triangleCount, 0u);
-    EXPECT_EQ(combined.timing.status, GpuTimingSample::Status::Absent);
-}
-
-TEST(RenderGraphSnapshotTest, CombinePassGpuStatsSumsDrawStatsAcrossEntries)
-{
-    PassGpuStats opaque;
-    opaque.drawStats.drawCallCount = 3;
-    opaque.drawStats.triangleCount = 100;
-
-    PassGpuStats sky;
-    sky.drawStats.drawCallCount = 1;
-    sky.drawStats.triangleCount = 2; // The sky's own full-screen-triangle draw.
-
-    PassGpuStats transparent; // Genuine no-op today - all-default.
-
-    const PassGpuStats combined = CombinePassGpuStats({ opaque, sky, transparent });
-
-    EXPECT_EQ(combined.drawStats.drawCallCount, 4u);
-    EXPECT_EQ(combined.drawStats.triangleCount, 102u);
-}
-
-TEST(RenderGraphSnapshotTest, CombinePassGpuStatsSumsMillisecondsWhenAllPresent)
-{
-    PassGpuStats a;
-    a.timing.status = GpuTimingSample::Status::Present;
-    a.timing.milliseconds = 1.25;
-
-    PassGpuStats b;
-    b.timing.status = GpuTimingSample::Status::Present;
-    b.timing.milliseconds = 2.75;
-
-    const PassGpuStats combined = CombinePassGpuStats({ a, b });
-
-    EXPECT_EQ(combined.timing.status, GpuTimingSample::Status::Present);
-    EXPECT_DOUBLE_EQ(combined.timing.milliseconds, 4.0);
-}
-
-TEST(RenderGraphSnapshotTest, CombinePassGpuStatsTreatsAbsentEntriesAsZeroWhenAtLeastOneIsPresent)
-{
-    PassGpuStats present;
-    present.timing.status = GpuTimingSample::Status::Present;
-    present.timing.milliseconds = 5.0;
-
-    PassGpuStats absent; // status defaults to Absent, milliseconds 0.0.
-
-    const PassGpuStats combined = CombinePassGpuStats({ present, absent });
-
-    EXPECT_EQ(combined.timing.status, GpuTimingSample::Status::Present);
-    EXPECT_DOUBLE_EQ(combined.timing.milliseconds, 5.0);
-}
-
-TEST(RenderGraphSnapshotTest, CombinePassGpuStatsIsAbsentWhenEveryEntryIsAbsent)
-{
-    const PassGpuStats combined = CombinePassGpuStats({ PassGpuStats{}, PassGpuStats{} });
-
-    EXPECT_EQ(combined.timing.status, GpuTimingSample::Status::Absent);
-    EXPECT_DOUBLE_EQ(combined.timing.milliseconds, 0.0);
-}
-
-TEST(RenderGraphSnapshotTest, CombinePassGpuStatsIsUnsupportedWhenNonePresentButOneUnsupported)
-{
-    PassGpuStats unsupported;
-    unsupported.timing.status = GpuTimingSample::Status::Unsupported;
-
-    PassGpuStats absent;
-
-    const PassGpuStats combined = CombinePassGpuStats({ unsupported, absent });
-
-    EXPECT_EQ(combined.timing.status, GpuTimingSample::Status::Unsupported);
-}
-
-TEST(RenderGraphSnapshotTest, CombinePassGpuStatsPrefersPresentOverUnsupported)
-{
-    PassGpuStats unsupported;
-    unsupported.timing.status = GpuTimingSample::Status::Unsupported;
-
-    PassGpuStats present;
-    present.timing.status = GpuTimingSample::Status::Present;
-    present.timing.milliseconds = 1.0;
-
-    const PassGpuStats combined = CombinePassGpuStats({ unsupported, present });
-
-    EXPECT_EQ(combined.timing.status, GpuTimingSample::Status::Present);
-    EXPECT_DOUBLE_EQ(combined.timing.milliseconds, 1.0);
 }
 
 // --- Multi-Render-Target (MRT) campaign (task_manager/mrt-1), PHASE1 -------

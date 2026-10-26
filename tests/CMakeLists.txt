@@ -335,30 +335,6 @@
 #                                            deliberately Tier 2 and not
 #                                            exercised here. No live VkDevice/
 #                                            VkCommandBuffer involved at all.
-#   - Renderer/RenderGraph/RenderGraphNameSlotTableTests.cpp - Render Graph
-#                                            Phase 6's pure name -> slot
-#                                            assignment/reuse/overflow-
-#                                            degradation logic (see
-#                                            src/Renderer/RenderGraph/
-#                                            RenderGraphNameSlotTable.h) -
-#                                            first-call assignment, distinct
-#                                            names get increasing slots,
-#                                            reuse by identical pointer AND
-#                                            by equal-content-different-
-#                                            pointer (strcmp fallback), a
-#                                            null name returning the
-#                                            sentinel, budget overflow
-#                                            degrading gracefully for a
-#                                            brand-new name while an
-#                                            already-assigned name keeps
-#                                            resolving correctly, and two
-#                                            independent tables (simulating
-#                                            RenderGraph's own two
-#                                            ExecuteTimingMode regimes) never
-#                                            colliding on the same name. No
-#                                            Vulkan device involved at all -
-#                                            this class has no VkQueryPool of
-#                                            its own.
 #   - Renderer/RenderGraph/RenderGraphSnapshotTests.cpp - Render Graph Phase
 #                                            8's pure "flatten a compiled
 #                                            graph into something
@@ -2017,9 +1993,7 @@
 # phase's own strategy document, Step 3.4/5) is manual: a throwaway,
 # multi-pass test scene run against a real device with validation layers
 # enabled, exercised in BOTH ExecuteTimingMode regimes, once a real
-# Application-level call site exists to drive it (Phase 7). Only this
-# file's own pure, name-keyed slot-assignment helper
-# (RenderGraphNameSlotTable, see above) is pulled out as Tier-1-testable.
+# Application-level call site exists to drive it (Phase 7).
 set(GTE_TEST_SOURCES
     Build/SdlLinkageRegressionTests.cpp
     Core/TimeTests.cpp
@@ -2253,6 +2227,7 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Network/NetworkRoutesClusterViewerTests.cpp
     Network/NetworkRoutesSceneCameraTests.cpp
     Network/NetworkRequestGuardTests.cpp
+    Network/NetworkFaultRoutesTests.cpp
     Network/NetworkCaptureFailureTests.cpp
     Network/NetworkServerTests.cpp
     Network/CaptureEndpointsEndToEndTests.cpp
@@ -2375,7 +2350,6 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Renderer/RenderGraph/PostOpaqueStageOrderingTests.cpp
     Renderer/RenderGraph/PostTransparentStageOrderingTests.cpp
     Renderer/RenderGraph/RenderGraphBarrierPlannerTests.cpp
-    Renderer/RenderGraph/RenderGraphNameSlotTableTests.cpp
     # Pure SPIR-V reflection tests against compiled fixture shaders (no Vulkan device).
     Renderer/Vulkan/ShaderReflectionTests.cpp
     Renderer/ShaderFileTests.cpp
@@ -3019,7 +2993,8 @@ set(GTE_COMMENT_RULE_SRC
     Editor/EditorCamera.h Editor/EditorCamera.cpp Editor/ExitGate.h
     Network/NetworkRequestGuard.h Network/NetworkRequestGuard.cpp
     Network/NetworkSceneCameraPose.h Network/NetworkSceneCameraPose.cpp Network/NetworkCaptureFailure.h
-    Editor/CaptureFailureReason.h
+    Editor/CaptureFailureReason.h Core/FaultInjection.h Core/FaultInjection.cpp
+    Network/NetworkFaultRoutes.h Network/NetworkFaultRoutes.cpp
     Features/SceneLighting/ Features/GpuDrivenScene/)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Editor/FrameDebuggerSideChannelCheckerTests.cpp
@@ -3063,7 +3038,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Editor/EditorCameraTests.cpp Editor/ExitGateTests.cpp Network/NetworkRequestGuardTests.cpp
     Renderer/AbandonedWorkTests.cpp Renderer/CaptureStatusTests.cpp Network/NetworkCaptureFailureTests.cpp
     Renderer/PresentRecoveryPlanTests.cpp Renderer/RenderGraph/OffscreenRecordingFaultTests.cpp
-    Renderer/GpuWaitServiceTests.cpp)
+    Renderer/GpuWaitServiceTests.cpp Network/NetworkFaultRoutesTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")

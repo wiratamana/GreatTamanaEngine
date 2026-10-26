@@ -156,11 +156,8 @@ void BuildDrawStatsLine(const Profiling::FrameSample& latestFrame, Profiling::Gp
         line = std::string(ToString(pass)) + ": " + FormatCount(display.drawCallCount) + " draw calls, "
             + FormatCount(display.triangleCount) + " triangles";
     } else {
-        // Absent means the pass simply didn't run this frame (e.g. a
-        // hidden Editor panel, or a minimized OS window) - never a
-        // misleading "0 draw calls, 0 triangles" (see ProfilingTypes.h's
-        // own tri-state rule).
-        line = std::string(ToString(pass)) + ": N/A";
+        // Absent: not measured; never a misleading "0 draw calls, 0 triangles".
+        line = std::string(ToString(pass)) + ": not measured";
     }
 
     if (primary) {

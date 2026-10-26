@@ -92,8 +92,8 @@ public:
     // Dropping it unsubmitted discards the recording; Submit() runs it and blocks (bounded) until done.
     [[nodiscard]] OffscreenRecording BeginOffscreenRecording();
 
-    // Executes swapchain presentation passes using the render graph.
-    std::optional<DrawStats> PresentViaRenderGraph(rg::RenderGraph& graph,
+    // Executes swapchain presentation passes using the render graph. False when no swapchain frame was available.
+    bool PresentViaRenderGraph(rg::RenderGraph& graph,
         const std::function<std::vector<rg::TextureHandle>(rg::RenderGraphBuilder&, rg::TextureHandle)>& build);
 
     // Formats used by the current swapchain and depth buffer.
@@ -155,6 +155,9 @@ public:
 
     // True once a GPU wait failed in a way that lost the device. Final: nothing is submitted afterwards.
     bool DeviceLost() const noexcept;
+
+    // Marks the device lost without a failed wait. Test tool for the lost-device path.
+    void InjectDeviceLost() noexcept;
 
     // Consecutive frame waits that timed out; resets after a completed wait.
     std::uint32_t GpuWaitConsecutiveFrameTimeouts() const noexcept;

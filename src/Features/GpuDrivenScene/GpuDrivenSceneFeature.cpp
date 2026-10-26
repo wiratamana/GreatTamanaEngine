@@ -50,17 +50,11 @@ void GpuDrivenSceneFeature::Setup(fx::FeatureSetup& s)
     fx::Gate gate;
     gate.passNames = m_state.AllPassNames();
     s.Opaque("GpuDrivenScene.Opaque", kOpaquePriority, [this](fx::OpaqueFrame& f) { OpaquePass(f); }, gate);
-    for (const std::string& name : gate.passNames) {
-        s.CountInViewStats(name);
-    }
 
     // The pyramid is built from the depth the opaque stage left behind and read by the next frame's cull.
     fx::Gate hizGate;
     hizGate.passNames = m_hiz.AllPassNames();
     s.PostOpaque("GpuDrivenScene.HizBuild", kHizBuildPriority, [this](fx::PostOpaqueFrame& f) { HizPass(f); }, hizGate);
-    for (const std::string& name : hizGate.passNames) {
-        s.CountInViewStats(name);
-    }
 }
 
 GpuDrivenSceneSettings GpuDrivenSceneFeature::EditableSettings()

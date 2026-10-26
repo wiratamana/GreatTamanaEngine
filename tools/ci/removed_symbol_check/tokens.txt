@@ -6,3 +6,16 @@ Quarantine
 ReleaseQuarantine
 CurrentBlock
 LiveBlock
+CountInViewStats
+CommitViewStatsPass
+ViewStatsPasses
+RegisterViewContentPassName
+m_viewContentPassNames
+CombinePassGpuStats
+RenderGraphNameSlotTable
+AssignOrGetSlot
+LastKnownStatsFor
+NamedStats
+UpdateDrawStatsFor
+UpdateTimingFor
+m_pipelinedHasWritten

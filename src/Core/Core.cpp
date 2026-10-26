@@ -24,6 +24,7 @@
 #include "../Renderer/GraphicsHandleRegistry.h"
 #include "../Renderer/VulkanFormatInfo.h"
 #include "ClusterCandidates.h"
+#include "FaultInjection.h"
 #include "Logging.h"
 #include "ScreenPostProcessPassPriorityAssignment.h"
 #include "Plugins/IPluginCapabilityOrchestrator.h"
@@ -38,6 +39,7 @@
 #include <cstring>
 #include <deque>
 #include <stdexcept>
+#include <thread>
 #include <unordered_map>
 
 namespace gte {
@@ -56,20 +58,6 @@ constexpr double kFixedStepSeconds = 1.0 / 60.0;
 // Blackboard key for GPU skinning output buffers.
 using rg::operator""_passId;
 constexpr rg::RenderPassId kGpuSkinningOutputsKey = "GpuSkinning.OutputBuffers"_passId;
-
-// Maps renderer GPU timing status to profiling sample status.
-Profiling::GpuSampleStatus ToProfilingGpuSampleStatus(GpuTimingSample::Status status) noexcept
-{
-    switch (status) {
-    case GpuTimingSample::Status::Present:
-        return Profiling::GpuSampleStatus::Present;
-    case GpuTimingSample::Status::Unsupported:
-        return Profiling::GpuSampleStatus::Unsupported;
-    case GpuTimingSample::Status::Absent:
-    default:
-        return Profiling::GpuSampleStatus::Absent;
-    }
-}
 
 // Resolves color and depth texture handles for post-opaque and post-transparent passes.
 // Returns nullopt when the view has no sampleable depth.
@@ -414,23 +402,6 @@ void Core::ExposeViewOutput(rg::ViewScope scope, RenderTexture& texture, std::st
         }
     }
     m_exposedViewOutputsThisFrame.push_back(ExposedViewOutput{ scope, &texture, name });
-}
-
-// Registers a pass name to be included in GPU content stats.
-bool Core::RegisterViewContentPassName(const char* name)
-{
-    if (name == nullptr) {
-        return false;
-    }
-    for (const std::string& existing : m_viewContentPassNames) {
-        if (existing == name) {
-            GTE_LOG_ERROR("Core", std::string("RegisterViewContentPassName: duplicate name '") + name + "' - refused.");
-            assert(false && "RegisterViewContentPassName: duplicate name.");
-            return false;
-        }
-    }
-    m_viewContentPassNames.emplace_back(name);
-    return true;
 }
 
 void Core::ClaimEntities(rg::ViewScope scope, std::span<const Entity> entities)
@@ -1021,6 +992,12 @@ void Core::BuildFrame()
     ++m_exclusionEpoch;
     m_captureArmedThisFrame = false;
 
+    if (FaultFires(FaultKind::MainThreadStall)) {
+        std::this_thread::sleep_for(kInjectedStallDuration);
+    }
+    if (FaultFires(FaultKind::DeviceLost)) {
+        m_renderer.InjectDeviceLost();
+    }
     if (StopIfDeviceLost()) {
         return;
     }
@@ -1060,6 +1037,9 @@ void Core::BuildFrame()
         try {
             GTE_PROFILE_SCOPE("RenderGraph::Execute(Offscreen)");
             OffscreenRecording recording = m_renderer.BeginOffscreenRecording();
+            if (FaultFires(FaultKind::OffscreenThrow)) {
+                throw std::runtime_error("injected offscreen fault");
+            }
             const rg::RecordingContext offscreenCmd = recording.Context();
             m_renderGraph.Execute(offscreenCmd, rg::ExecuteTimingMode::SynchronousImmediateReadback,
                 [&](rg::RenderGraphBuilder& b) {
@@ -1225,30 +1205,6 @@ void Core::BuildFrame()
             m_directGameTargetUsedThisFrame = false;
         }
     }
-
-    // Collect GPU pass stats for active views.
-    std::vector<rg::PassGpuStats> viewContentStats;
-    viewContentStats.reserve(m_viewContentPassNames.size());
-    for (const std::string& passName : m_viewContentPassNames) {
-        viewContentStats.push_back(m_renderGraph.LastKnownStatsFor(passName.c_str()));
-    }
-
-    if (gameTarget != nullptr) {
-        const rg::PassGpuStats gameViewStats = rg::CombinePassGpuStats(viewContentStats);
-        Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::GameView,
-            Profiling::GpuSampleStatus::Present, gameViewStats.drawStats.drawCallCount,
-            gameViewStats.drawStats.triangleCount);
-        Profiling::FrameProfiler::Instance().SetGpuPassTiming(Profiling::GpuPass::GameView,
-            ToProfilingGpuSampleStatus(gameViewStats.timing.status), gameViewStats.timing.milliseconds);
-    }
-    if (sceneTarget != nullptr) {
-        const rg::PassGpuStats sceneViewStats = rg::CombinePassGpuStats(viewContentStats);
-        Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::SceneView,
-            Profiling::GpuSampleStatus::Present, sceneViewStats.drawStats.drawCallCount,
-            sceneViewStats.drawStats.triangleCount);
-        Profiling::FrameProfiler::Instance().SetGpuPassTiming(Profiling::GpuPass::SceneView,
-            ToProfilingGpuSampleStatus(sceneViewStats.timing.status), sceneViewStats.timing.milliseconds);
-    }
 }
 
 bool Core::StopIfDeviceLost()
@@ -1270,9 +1226,8 @@ void Core::Present()
     }
     GTE_PROFILE_SCOPE("Renderer::PresentViaRenderGraph");
 
-    std::optional<DrawStats> presentStats;
     try {
-        presentStats = m_renderer.PresentViaRenderGraph(m_renderGraph,
+        static_cast<void>(m_renderer.PresentViaRenderGraph(m_renderGraph,
             [&](rg::RenderGraphBuilder& b, rg::TextureHandle swapchainImage) {
                 m_swapchainImageThisFrame = swapchainImage;
                 m_recordImGuiThisFrame = m_presentImGuiRecorder;
@@ -1287,7 +1242,7 @@ void Core::Present()
                 presentBlackboard.ReportUnusedPublishesIfAny();
 #endif
                 return std::vector<rg::TextureHandle>{ swapchainImage };
-            });
+            }));
     } catch (const std::exception& e) {
         const std::string failure = std::string("RenderGraph Present Execute() failed: ") + e.what();
         if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
@@ -1298,14 +1253,6 @@ void Core::Present()
         if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
             GTE_LOG_ERROR("Core", failure);
         }
-    }
-
-    if (presentStats.has_value()) {
-        Profiling::FrameProfiler::Instance().SetGpuPassDrawStats(Profiling::GpuPass::Present,
-            Profiling::GpuSampleStatus::Present, presentStats->drawCallCount, presentStats->triangleCount);
-        const GpuTimingSample presentTiming = m_renderGraph.LastKnownStatsFor("Present").timing;
-        Profiling::FrameProfiler::Instance().SetGpuPassTiming(Profiling::GpuPass::Present,
-            ToProfilingGpuSampleStatus(presentTiming.status), presentTiming.milliseconds);
     }
 }
 

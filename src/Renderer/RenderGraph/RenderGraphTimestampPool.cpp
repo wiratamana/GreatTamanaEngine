@@ -55,7 +55,7 @@ std::uint32_t RenderGraphTimestampPool::QueryBase(bool pipelined, std::uint32_t 
 void RenderGraphTimestampPool::WriteBegin(
     VkCommandBuffer cmd, bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) noexcept
 {
-    if (!IsSupported() || !m_captureEnabled || slot == kNoNameSlot) {
+    if (!IsSupported() || !m_captureEnabled || slot == kNoTimingSlot) {
         return;
     }
     const VkQueryPool pool = pipelined ? m_pipelinedPool->Native() : m_synchronousPool->Native();
@@ -67,7 +67,7 @@ void RenderGraphTimestampPool::WriteBegin(
 void RenderGraphTimestampPool::WriteEnd(
     VkCommandBuffer cmd, bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) noexcept
 {
-    if (!IsSupported() || !m_captureEnabled || slot == kNoNameSlot) {
+    if (!IsSupported() || !m_captureEnabled || slot == kNoTimingSlot) {
         return;
     }
     const VkQueryPool pool = pipelined ? m_pipelinedPool->Native() : m_synchronousPool->Native();
@@ -78,7 +78,7 @@ void RenderGraphTimestampPool::WriteEnd(
 RenderGraphTimestampPool::RawTicks RenderGraphTimestampPool::ReadBack(
     bool pipelined, std::uint32_t bufferIndex, std::int32_t slot) noexcept
 {
-    if (!IsSupported() || slot == kNoNameSlot) {
+    if (!IsSupported() || slot == kNoTimingSlot) {
         return RawTicks{};
     }
     const VkQueryPool pool = pipelined ? m_pipelinedPool->Native() : m_synchronousPool->Native();

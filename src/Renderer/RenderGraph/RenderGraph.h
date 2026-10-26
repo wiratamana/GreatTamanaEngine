@@ -15,7 +15,6 @@
 #include "RenderGraphDebugVolumeTextureRegistry.h"
 #include "RenderGraphEventSnapshotPool.h"
 #include "../../Core/FrameDebuggerEventSink.h"
-#include "RenderGraphNameSlotTable.h"
 #include "RenderGraphPersistentResourceCache.h"
 #include "RenderGraphResourcePool.h"
 #include "RenderGraphTimestampPool.h"
@@ -71,9 +70,6 @@ public:
         const std::vector<TextureHandle> finalOutputs = build(builder);
         ExecuteCompiledGraph(RecordingAccess::Native(cmd), timingMode, builder.Finish(), finalOutputs);
     }
-
-    // Returns the most recently recorded draw and GPU timing stats for a pass.
-    PassGpuStats LastKnownStatsFor(const char* passName) const;
 
     // Returns the debug snapshot for the specified execution mode.
     const RenderGraphSnapshot& LastSnapshot(ExecuteTimingMode mode) const noexcept;
@@ -159,11 +155,6 @@ private:
         ResourceState lastWrite; // State of the last write usage; empty until the buffer is written.
     };
 
-    struct NamedStats {
-        std::string name;
-        PassGpuStats stats;
-    };
-
     void ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode timingMode, CompiledGraphInput input,
         const std::vector<TextureHandle>& finalOutputs);
 
@@ -217,19 +208,22 @@ private:
     void RegisterDebugVolumeTextureSnapshots(ExecuteTimingMode timingMode, const CompiledGraphInput& input,
         const std::vector<PhysicalTexture>& physicalTextures);
 
-    void UpdateDrawStatsFor(const char* name, const DrawStats& drawStats);
-    void UpdateTimingFor(const char* name, const GpuTimingSample& timing);
-
     GpuTimingSample ResolveAndConvertTiming(const RenderGraphTimestampPool::RawTicks& raw) const;
 
-    // Synchronous-regime timing names, sized for the worst case: every named pass of the regime at once.
-    // Other passes, all cluster chains, the pyramid levels and the capture replay steps.
-    // The query pool takes this same constant.
-    static constexpr std::uint32_t kBaseTimingNames = 64;
-    static constexpr std::uint32_t kPyramidTimingNames = kHizLevelCount;
-    static constexpr std::uint32_t kReplayTimingNames = 64;
+    // Timing of the last pipelined buffer read back; names[i] is the pass that ran at ordinal i.
+    struct PipelinedTimingRecord {
+        std::vector<std::string> names;
+        std::vector<GpuTimingSample> samples;
+    };
+
+    // Timing slots per regime, sized for the worst case: every pass of one execution, with both views
+    // running every cluster chain, the pyramid levels and the capture replay steps.
+    // The query pool takes these same constants.
+    static constexpr std::uint32_t kBaseTimingPasses = 64;
+    static constexpr std::uint32_t kPyramidTimingPasses = kHizLevelCount;
+    static constexpr std::uint32_t kReplayTimingPasses = 64;
     static constexpr std::uint32_t kSynchronousTimingSlotBudget =
-        kBaseTimingNames + kClusterPassNameCount + kPyramidTimingNames + kReplayTimingNames;
+        kBaseTimingPasses + 2 * kClusterPassNameCount + kPyramidTimingPasses + kReplayTimingPasses;
     static constexpr std::uint32_t kPipelinedTimingSlotBudget = 8;
 
     RenderGraphResourcePool m_resourcePool;
@@ -243,20 +237,23 @@ private:
     RenderPassToggleRegistry* m_renderPassToggleRegistry = nullptr;
 
     RenderGraphTimestampPool m_timestampPool;
-    RenderGraphNameSlotTable m_synchronousTimingSlots{ kSynchronousTimingSlotBudget };
-    RenderGraphNameSlotTable m_pipelinedTimingSlots{ kPipelinedTimingSlotBudget };
 
-    std::vector<std::string> m_reportedSynchronousOverflows;
-    std::vector<std::string> m_reportedPipelinedOverflows;
+    // Timing slots are assigned by execution ordinal. A regime that runs more passes than slots reads
+    // Absent for the extra passes and logs once.
+    bool m_synchronousOverflowLogged = false;
+    bool m_pipelinedOverflowLogged = false;
+    std::uint32_t m_synchronousTimedPasses = 0;
+
+    // Pipelined regime: names of the passes that wrote timestamps into each buffer, by ordinal, and the
+    // timing of the most recent buffer read back. Samples apply to a pass only when ordinal and name match.
+    std::vector<std::string> m_pipelinedTimedNames[kGpuTimingFramesInFlight];
+    PipelinedTimingRecord m_pipelinedTiming;
 
     static constexpr std::size_t kMaxReportedSkippedBindings = 256;
     BoundedOnceSet<kMaxReportedSkippedBindings> m_reportedSkippedBindings;
     OnceErrorLog m_onceLog;
 
     std::uint32_t m_pipelinedFrameCounter = 0;
-    bool m_pipelinedHasWritten[kPipelinedTimingSlotBudget][kGpuTimingFramesInFlight]{};
-
-    std::vector<NamedStats> m_lastKnownStats;
 
     RenderGraphSnapshot m_synchronousSnapshot;
     RenderGraphSnapshot m_pipelinedSnapshot;
