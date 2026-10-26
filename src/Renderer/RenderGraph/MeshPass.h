@@ -18,7 +18,7 @@ namespace gte::rg {
 struct PassContext;
 
 // Opens the renderer's draw recording for one graph pass and closes it on scope exit.
-// Scene draws (DrawScene, SubmitIndirect, ...) are only legal while one is alive.
+// Mesh draws (DrawScene, SubmitIndirect, ...) are only legal while one is alive.
 class SceneRecording {
 public:
     explicit SceneRecording(PassContext& ctx);

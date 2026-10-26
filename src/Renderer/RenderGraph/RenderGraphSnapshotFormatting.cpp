@@ -1,6 +1,5 @@
 #include "RenderGraphSnapshotFormatting.h"
 
-#include <cstdio>
 #include <cstddef>
 
 namespace gte::rg {
@@ -22,26 +21,6 @@ const char* ToString(GpuReadState state) noexcept
         return "Inactive";
     }
     return "Unknown";
-}
-
-std::string FormatGpuTiming(const GpuPassRecord& record)
-{
-    const double milliseconds = static_cast<double>(record.barrierMs) + static_cast<double>(record.workMs);
-    char buffer[40];
-    switch (record.state) {
-    case GpuReadState::Present:
-        std::snprintf(buffer, sizeof(buffer), "%.2f ms", milliseconds);
-        return std::string(buffer);
-    case GpuReadState::Partial:
-        std::snprintf(buffer, sizeof(buffer), "~%.2f ms (partial)", milliseconds);
-        return std::string(buffer);
-    case GpuReadState::Absent:
-    case GpuReadState::Error:
-    case GpuReadState::Unsupported:
-    case GpuReadState::Inactive:
-        break;
-    }
-    return ToString(record.state);
 }
 
 // Name of the pass at a resource's first/last-use position (an index into the surviving prefix).
@@ -77,9 +56,9 @@ const char* ToString(ViewScope scope) noexcept
     case ViewScope::Shared:
         return "Shared";
     case ViewScope::Primary:
-        return "GameView";
+        return "Primary";
     case ViewScope::Secondary:
-        return "SceneView";
+        return "Secondary";
     }
     return "Unknown";
 }

@@ -12,9 +12,8 @@ struct BrowserRequestHeaders {
     std::optional<std::string_view> host;
 };
 
-// True when a destructive route must refuse the request because it may come from a web page:
-// a cross-site fetch, a foreign Origin, or a Host that is not this loopback server (DNS rebinding).
-// Plain clients send none of these headers (or a loopback Host) and pass.
+// True when a destructive route must refuse the request because it may come from a web page
+// (cross-site fetch, foreign Origin, or non-loopback Host). Plain clients pass.
 bool RejectBrowserRequest(const BrowserRequestHeaders& headers, int port);
 
 } // namespace gte::Network

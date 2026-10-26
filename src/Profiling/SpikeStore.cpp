@@ -117,15 +117,24 @@ bool SpikeStore::Freeze(const FrameRecord& record, double medianMs, const SpikeC
     return true;
 }
 
-bool SpikeStore::AttachGpu(std::uint64_t frameIndex, const GpuFrameMetrics& gpu, std::uint64_t newestFrame) noexcept
+bool SpikeStore::AttachGpuSpan(std::uint64_t frameIndex, const GpuViewMetric& span, std::uint64_t newestFrame) noexcept
 {
+    if (span.status != SampleStatus::Present) {
+        return false;
+    }
     std::lock_guard lock(m_mutex);
     const int index = FindLocked(frameIndex);
     if (index < 0 || newestFrame < frameIndex || newestFrame - frameIndex > kSpikeLateGpuFrames) {
         return false;
     }
     FrozenSpike& slot = m_slots[static_cast<std::size_t>(index)];
-    slot.record.summary.gpu = gpu;
+    GpuViewMetric& total = slot.record.summary.gpu.span;
+    if (total.status == SampleStatus::Present) {
+        total.milliseconds += span.milliseconds; // two submits of one frame run one after the other
+        total.foldedPasses += span.foldedPasses;
+    } else {
+        total = span;
+    }
     slot.gpuAttached = true;
     return true;
 }

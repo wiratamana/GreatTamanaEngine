@@ -102,9 +102,8 @@ public:
     GpuSkinningPipelines& GetGpuSkinningPipelines() noexcept { return m_animationSystem.GetGpuSkinningPipelines(); }
 
     // Number of entities with a MeshRenderer. Safe to call while declaring render graph passes (reads frozen ECS data).
-    // Equals capture.DrawRecords().size() only while every MeshRenderer's mesh/pipeline handle resolves;
-    // a skipped draw would shift the replay passes' maxDrawCount cutoffs out of line with the records.
-    std::size_t CountGameViewDrawCommandsThisFrame()
+    // Matches the replay's draw record count only while every mesh/pipeline handle resolves.
+    std::size_t CountRenderablesThisFrame()
     {
         return RenderSystem::CollectRenderables(m_registry).size();
     }

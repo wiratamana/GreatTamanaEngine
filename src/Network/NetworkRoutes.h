@@ -14,10 +14,7 @@
 #include "../Core/Logging.h"
 #include "../Core/InstanceGridLimits.h"
 #include "../Editor/SceneCameraControl.h" // Report structs of the viewer and Scene camera routes.
-// editor-core-separation-7 campaign, PHASE4 - GET /render_graph's response
-// body needs rg::RenderGraphMetadata's own to_json() (see
-// BuildRenderGraphMetadataResponseJson() below).
-#include "../Renderer/RenderGraph/RenderGraphMetadata.h"
+#include "../Renderer/RenderGraph/RenderGraphMetadata.h" // Type of the GET /render_graph body.
 
 namespace gte::Network {
 
@@ -41,9 +38,8 @@ std::string HandleHelloWorld();
 // /get_swapchain.
 enum class CaptureResponseFormat { RawPng, JsonBase64 };
 
-// Picks the capture response shape from the `?format=` value and the `Accept` header (both empty when absent).
-// "png" gives RawPng; "base64" or "json" gives JsonBase64; any other non-empty value falls back to RawPng.
-// With no format, an Accept header containing "application/json" gives JsonBase64, otherwise RawPng.
+// Picks the capture reply from `?format=` ("png", "base64", "json"), else from the Accept header.
+// Without a usable hint the reply is RawPng.
 CaptureResponseFormat ResolveCaptureResponseFormat(const std::string& queryFormat, const std::string& acceptHeader);
 
 // Builds the JSON body for the JsonBase64 response shape - a small, fixed,
@@ -542,18 +538,7 @@ struct TextureListEntryView {
 // immediately at startup, before the first frame) is a valid, normal state.
 std::string BuildListTexturesResponseJson(const std::vector<TextureListEntryView>& entries);
 
-// editor-core-separation-7 campaign, PHASE4 - GET /render_graph's response
-// body. Takes the EXACT rg::RenderGraphMetadata FrameCaptureBridge published
-// this session - unlike TextureListEntryView/PublishedTextureListEntry
-// above, this crosses the Application/Network layer boundary AS-IS (no
-// separate, nearly-identical Network-tier struct is introduced) because
-// rg::RenderGraphMetadata::to_json() is ALREADY the fully-resolved,
-// plain-scalars-and-strings JSON shape this route needs - there is no
-// "resolve enums/pointers into strings first" step left for NetworkServer.cpp
-// to do here, unlike TextureListEntryView's own reason for existing. If any
-// field ever needs Network-tier-specific reshaping later, introduce a
-// dedicated view struct then, mirroring TextureListEntryView, rather than
-// fighting this decision after the fact.
+// GET /render_graph body from the metadata the capture bridge published (labels are mapped by the JSON builder).
 std::string BuildRenderGraphMetadataResponseJson(const gte::rg::RenderGraphMetadata& metadata);
 
 // --- network-impl-7 campaign - GET /activate_tab and GET /list_tabs.

@@ -10,7 +10,7 @@
 
 namespace gte::fx {
 
-// One engine-owned, storage-capable texture per view scope ("GameView<suffix>" / "SceneView<suffix>"), shown by the
+// One engine-owned, storage-capable texture per view scope, named "<view resource name><suffix>" and shown by the
 // editor panel and HTTP endpoints. Resized on demand after a GPU wait; the format is fixed by the first request.
 class ViewOutput {
 public:

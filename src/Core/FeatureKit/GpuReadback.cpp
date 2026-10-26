@@ -41,19 +41,27 @@ struct ReadbackCore::Impl {
     };
 
     Impl(std::string_view baseName, std::size_t byteSize)
-        : size(byteSize)
+        : base(baseName)
+        , size(byteSize)
     {
-        for (std::size_t s = 0; s < rg::kViewScopeCount; ++s) {
-            const std::string base = PersistentName(baseName, static_cast<rg::ViewScope>(s));
-            for (std::size_t c = 0; c < kCells; ++c) {
-                slots[s].names[c * 2] = base + ".Device" + std::to_string(c);
-                slots[s].names[c * 2 + 1] = base + ".Host" + std::to_string(c);
-            }
+    }
+
+    // Names the slot's buffers for the frame's view on first use.
+    void NameSlot(Slot& slot, const FrameContext& context) const
+    {
+        if (!slot.names[0].empty()) {
+            return;
+        }
+        const std::string slotBase = PersistentName(base, context);
+        for (std::size_t c = 0; c < kCells; ++c) {
+            slot.names[c * 2] = slotBase + ".Device" + std::to_string(c);
+            slot.names[c * 2 + 1] = slotBase + ".Host" + std::to_string(c);
         }
     }
 
     bool Create(Slot& slot, const Frame& frame, rg::RenderGraphBuilder& builder);
 
+    std::string base;
     std::size_t size;
     std::array<Slot, rg::kViewScopeCount> slots;
 };
@@ -112,6 +120,7 @@ std::optional<ReadbackCore::Binding> ReadbackCore::Acquire(const Frame& frame)
     if (slot.importedSerial == frame.Serial()) {
         return slot.binding;
     }
+    m_impl->NameSlot(slot, *context);
     if (!slot.created && (!slot.gate.ShouldAttempt(frame.FrameIndex()) || !m_impl->Create(slot, frame, builder))) {
         return std::nullopt;
     }

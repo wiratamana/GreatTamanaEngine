@@ -172,22 +172,35 @@ TEST(SpikeStoreTest, UnpinFreesAPinSlotAndUnknownFramesAreRefused)
     EXPECT_FALSE(store->Unpin(99));
 }
 
-TEST(SpikeStoreTest, ALateGpuReportAttachesOnlyWithinTwoFrames)
+TEST(SpikeStoreTest, ALateGpuSpanAttachesOnlyWithinTwoFrames)
 {
     const auto store = MakeStore();
     ASSERT_TRUE(Freeze(*store, 10));
 
-    GpuFrameMetrics gpu;
-    gpu.span = { 9.0f, SampleStatus::Present, 0 };
-    EXPECT_TRUE(store->AttachGpu(10, gpu, 12));
-    EXPECT_FALSE(store->AttachGpu(10, gpu, 13)); // too late
-    EXPECT_FALSE(store->AttachGpu(77, gpu, 12)); // unknown frame
+    const GpuViewMetric span{ 9.0f, SampleStatus::Present, 0 };
+    EXPECT_TRUE(store->AttachGpuSpan(10, span, 12));
+    EXPECT_FALSE(store->AttachGpuSpan(10, span, 13)); // too late
+    EXPECT_FALSE(store->AttachGpuSpan(77, span, 12)); // unknown frame
+    EXPECT_FALSE(store->AttachGpuSpan(10, { 1.0f, SampleStatus::Absent, 0 }, 11)); // nothing measured
 
     const auto detail = BuildSpikeDetail(*store, 10);
     ASSERT_TRUE(detail.has_value());
     EXPECT_TRUE(detail->gpuAttached);
     EXPECT_EQ(detail->gpu.span.status, SampleStatus::Present);
     EXPECT_FLOAT_EQ(detail->gpu.span.milliseconds, 9.0f);
+}
+
+TEST(SpikeStoreTest, ALateGpuSpanAddsToTheSpanAFrameAlreadyHas)
+{
+    const auto store = MakeStore();
+    const auto record = MakeFrame(20, 50);
+    record->summary.gpu.span = { 4.0f, SampleStatus::Present, 0 };
+    ASSERT_TRUE(store->Freeze(*record, 10.0, SpikeClassification{}));
+
+    ASSERT_TRUE(store->AttachGpuSpan(20, { 3.0f, SampleStatus::Present, 0 }, 21));
+    const auto detail = BuildSpikeDetail(*store, 20);
+    ASSERT_TRUE(detail.has_value());
+    EXPECT_FLOAT_EQ(detail->gpu.span.milliseconds, 7.0f);
 }
 
 TEST(SpikeStoreTest, RowsComeNewestFirstWithTheirClassification)

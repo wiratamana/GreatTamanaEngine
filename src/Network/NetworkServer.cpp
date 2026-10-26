@@ -24,6 +24,7 @@
 #include "../Math/Vec3.h"
 
 #include <httplib.h>
+#include <nlohmann/json.hpp>
 
 #include <cstdio>
 #include <optional>

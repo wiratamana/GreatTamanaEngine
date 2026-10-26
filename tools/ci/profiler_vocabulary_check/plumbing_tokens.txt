@@ -1,0 +1,3 @@
+# View-plumbing files must use neutral view names; the editor owns its own labels.
+*GameView*
+*SceneView*

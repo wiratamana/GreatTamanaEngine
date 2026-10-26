@@ -47,7 +47,7 @@ TEST(PreOpaqueRenderPipelineBlackboardQualificationTest,
     // using the SAME dual-key idiom "AtmosphereViewLut" already ships.
     pipeline.Register("PreOpaqueFeatures_Stub", ProviderScope::PerActiveView,
         [](const RenderPassFrameContext& frame, std::vector<RenderPassDesc>&) {
-            const bool isGameView = (frame.currentView == RenderViewId::Named("Game"));
+            const bool isGameView = (frame.currentView == RenderViewId::Named("Primary"));
             const RenderPassId key = isGameView ? kMarkerGameKey : kMarkerSceneKey;
             frame.blackboard.Publish<int>(key, isGameView ? 1 : 2);
         });
@@ -58,7 +58,7 @@ TEST(PreOpaqueRenderPipelineBlackboardQualificationTest,
     // Core::RegisterProjectRenderPassProvider() for this role).
     pipeline.Register("RenderOpaque_Stub", ProviderScope::PerActiveView,
         [&fetchedByView](const RenderPassFrameContext& frame, std::vector<RenderPassDesc>&) {
-            const bool isGameView = (frame.currentView == RenderViewId::Named("Game"));
+            const bool isGameView = (frame.currentView == RenderViewId::Named("Primary"));
             const RenderPassId key = isGameView ? kMarkerGameKey : kMarkerSceneKey;
             const std::optional<int> fetched = frame.blackboard.Fetch<int>(key);
             // Store under a stable, test-local per-view integer key (1
@@ -72,7 +72,7 @@ TEST(PreOpaqueRenderPipelineBlackboardQualificationTest,
 
     RenderGraphBuilder builder;
     RenderPassFrameContext frame{
-        /*activeViews=*/{ RenderViewId::Named("Game"), RenderViewId::Named("Scene") },
+        /*activeViews=*/{ RenderViewId::Named("Primary"), RenderViewId::Named("Secondary") },
         /*currentView=*/RenderViewId::Shared(),
         /*blackboard=*/blackboard,
         /*builder=*/builder,
@@ -102,14 +102,14 @@ TEST(PreOpaqueRenderPipelineBlackboardQualificationTest,
 
     pipeline.Register("PreOpaqueFeatures_BuggyStub", ProviderScope::PerActiveView,
         [](const RenderPassFrameContext& frame, std::vector<RenderPassDesc>&) {
-            const bool isGameView = (frame.currentView == RenderViewId::Named("Game"));
+            const bool isGameView = (frame.currentView == RenderViewId::Named("Primary"));
             // BUG, DELIBERATE: ignores currentView - the exact mistake
             // Locked Design Decision #4 forbids.
             frame.blackboard.Publish<int>(kSharedKey, isGameView ? 1 : 2);
         });
     pipeline.Register("RenderOpaque_BuggyReaderStub", ProviderScope::PerActiveView,
         [&fetchedByView](const RenderPassFrameContext& frame, std::vector<RenderPassDesc>&) {
-            const bool isGameView = (frame.currentView == RenderViewId::Named("Game"));
+            const bool isGameView = (frame.currentView == RenderViewId::Named("Primary"));
             const std::optional<int> fetched = frame.blackboard.Fetch<int>(kSharedKey);
             fetchedByView[isGameView ? 1u : 2u] = fetched.value_or(-1);
         });
@@ -118,7 +118,7 @@ TEST(PreOpaqueRenderPipelineBlackboardQualificationTest,
     blackboard.BeginFrame();
     RenderGraphBuilder builder;
     RenderPassFrameContext frame{
-        { RenderViewId::Named("Game"), RenderViewId::Named("Scene") },
+        { RenderViewId::Named("Primary"), RenderViewId::Named("Secondary") },
         RenderViewId::Shared(), blackboard, builder,
     };
 

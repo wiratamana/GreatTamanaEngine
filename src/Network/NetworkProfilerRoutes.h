@@ -1,8 +1,7 @@
 #pragma once
 
-// HTTP face of the profiler: GET /profiler, /profiler/frames, /profiler/spikes, /profiler/spike, /profiler/timeline_image
-// and POST /profiler/set, /profiler/export.
-// Every number in a reply sits inside a metric object, except the keys in kProfilerFixedNumberKeys.
+// HTTP face of the profiler (/profiler routes). Every number sits inside a metric object,
+// except the keys in kProfilerFixedNumberKeys.
 
 #include "../Profiling/ProfilerSnapshot.h"
 #include "../Profiling/SpikeDetail.h"
@@ -67,9 +66,11 @@ std::optional<std::size_t> ParseProfilerFrameCount(const std::string& text);
 
 enum class ProfilerRoute : std::uint8_t { Overview, Frames, Spikes };
 
-// A snapshot that does not exist yet answers 503. A profiler that is compiled out answers a status object.
-ProfilerReply BuildProfilerReply(
-    ProfilerRoute route, const std::optional<Profiling::ProfilerSnapshot>& snapshot, std::size_t frameCount);
+// 200 with the document of `route`.
+ProfilerReply BuildProfilerReply(ProfilerRoute route, const Profiling::ProfilerSnapshot& snapshot, std::size_t frameCount);
+
+// 200 with state "no_snapshot" and the waits in progress, for a main thread that never published (e.g. it is stalled).
+ProfilerReply BuildProfilerNoSnapshotReply(const Profiling::ProfilerSnapshot& liveOnly);
 
 // Reply for a route whose bridge is missing (503) or whose profiler is compiled out (status object).
 ProfilerReply BuildProfilerUnavailableReply(bool bridgePresent);

@@ -23,19 +23,17 @@ constexpr const char* kLogCategory = "FeatureKit";
 
 struct PersistentVolume::Impl {
     struct Slot {
-        std::string name; // The import keeps this pointer for the frame, so it must not move.
+        std::string name; // Set on first use. The import keeps this pointer for the frame, so it must not move.
         std::optional<VolumeTexture> volume;
         CachedSamplerHandle sampler;
         rg::BuildRetryGate gate;
     };
 
-    Impl(std::string_view base, VolumeSize volumeSize, PixelFormat volumeFormat)
-        : size(volumeSize)
+    Impl(std::string_view baseName, VolumeSize volumeSize, PixelFormat volumeFormat)
+        : base(baseName)
+        , size(volumeSize)
         , format(volumeFormat)
     {
-        for (std::size_t i = 0; i < rg::kViewScopeCount; ++i) {
-            slots[i].name = PersistentName(base, static_cast<rg::ViewScope>(i));
-        }
     }
 
     ~Impl()
@@ -67,6 +65,7 @@ struct PersistentVolume::Impl {
         return true;
     }
 
+    std::string base;
     VolumeSize size;
     PixelFormat format;
     std::array<Slot, rg::kViewScopeCount> slots;
@@ -92,6 +91,9 @@ Texture PersistentVolume::Acquire(Frame& frame)
     }
 
     Impl::Slot& slot = m_impl->slots[rg::ViewScopeIndex(context->scope)];
+    if (slot.name.empty()) {
+        slot.name = PersistentName(m_impl->base, *context);
+    }
     if (!slot.volume.has_value() && !m_impl->Create(slot, *context)) {
         return Texture{};
     }

@@ -2,6 +2,8 @@
 
 #include "../Editor/EditorCamera.h"
 
+#include <nlohmann/json.hpp>
+
 #include <cctype>
 #include <cmath>
 #include <cstdlib>

@@ -9,9 +9,8 @@
 
 namespace gte::fx {
 
-// A GPU buffer that outlives the frame, one per view, created and grown by the kit.
-// Contents are undefined after a create or a grow. The name is the graph name ("<base>.GameView").
-// Destroy it only while the GPU is idle.
+// A GPU buffer that outlives the frame, one per view, created and grown by the kit; graph name "<base>.<view label>".
+// Contents are undefined after a create or a grow. Destroy it only while the GPU is idle.
 class PersistentBuffer {
 public:
     PersistentBuffer(std::string_view baseName, BufferUse use);

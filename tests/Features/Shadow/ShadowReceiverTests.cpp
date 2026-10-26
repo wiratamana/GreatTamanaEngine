@@ -124,7 +124,7 @@ TEST(ShadowReceiverTest, DepthFittedFollowsSdsmActive)
 TEST(ShadowReceiverTest, OwnerAndChannelMatchTheShadowFeatureKey)
 {
     EXPECT_STREQ(kSunShadowReceiverOwner, kShadowFeatureName);
-    for (const char* view : { "Game", "Scene" }) {
+    for (const char* view : { "Primary", "Secondary" }) {
         const rg::RenderViewId id = rg::RenderViewId::Named(view);
         EXPECT_EQ(fx::ChannelKey(kSunShadowReceiverOwner, kSunShadowReceiverChannel, id),
             fx::ChannelKey(kShadowFeatureName, "Receiver", id))

@@ -549,7 +549,7 @@ TEST(BuildRenderGraphMetadataResponseJsonTests, PopulatedMetadataRoundTripsEvery
     pass.writes.push_back(gte::rg::RenderGraphResourceRefMetadata{ "Color", "Texture" });
     pass.drawCallCount = 2;
     pass.triangleCount = 20;
-    pass.gpuTimingText = "N/A";
+    pass.gpuTimingStatus = "Absent";
     metadata.offscreenRegime.regimeName = "SynchronousImmediateReadback";
     metadata.offscreenRegime.passes.push_back(pass);
 
@@ -580,7 +580,54 @@ TEST(BuildRenderGraphMetadataResponseJsonTests, PopulatedMetadataRoundTripsEvery
     EXPECT_EQ(parsed["render_features"][0]["name"].get<std::string>(), "Vignette");
     EXPECT_EQ(parsed["render_features"][0]["stage"].get<std::string>(), "PreUI");
     EXPECT_EQ(parsed["render_features"][0]["priority"].get<std::int32_t>(), 1);
-    EXPECT_EQ(parsed["render_features"][0]["blend_mode"].get<std::string>(), "Replace");
+}
+
+TEST(BuildRenderGraphMetadataResponseJsonTests, ViewScopeLabelsAndTimingTextAreMappedForTheHttpContract)
+{
+    gte::rg::RenderGraphMetadata metadata;
+    gte::rg::RenderGraphPassMetadata primary;
+    primary.viewScope = "Primary";
+    primary.gpuTimingStatus = "Present";
+    primary.gpuRecordedMilliseconds = 3.5;
+    primary.gpuTimingMilliseconds = 3.5;
+    gte::rg::RenderGraphPassMetadata secondary;
+    secondary.viewScope = "Secondary";
+    secondary.gpuTimingStatus = "Partial";
+    secondary.gpuRecordedMilliseconds = 1.5;
+    gte::rg::RenderGraphPassMetadata shared;
+    metadata.offscreenRegime.passes = { primary, secondary, shared };
+
+    const nlohmann::json parsed = nlohmann::json::parse(BuildRenderGraphMetadataResponseJson(metadata));
+    const nlohmann::json& passes = parsed["offscreen_regime"]["passes"];
+
+    ASSERT_EQ(passes.size(), 3u);
+    EXPECT_EQ(passes[0]["view_scope"].get<std::string>(), "Game");
+    EXPECT_EQ(passes[0]["gpu_timing_text"].get<std::string>(), "3.50 ms");
+    EXPECT_DOUBLE_EQ(passes[0]["gpu_timing_milliseconds"].get<double>(), 3.5);
+    EXPECT_EQ(passes[1]["view_scope"].get<std::string>(), "Scene");
+    EXPECT_EQ(passes[1]["gpu_timing_text"].get<std::string>(), "~1.50 ms (partial)");
+    EXPECT_TRUE(passes[1]["gpu_timing_milliseconds"].is_null());
+    EXPECT_EQ(passes[2]["view_scope"].get<std::string>(), "Shared");
+    EXPECT_EQ(passes[2]["gpu_timing_text"].get<std::string>(), "Absent");
+}
+
+TEST(BuildRenderGraphMetadataResponseJsonTests, CarriesGpuWaitAndGpuMemoryObjects)
+{
+    gte::rg::RenderGraphMetadata metadata;
+    metadata.gpuWait.deviceLost = true;
+    metadata.gpuWait.consecutiveFrameTimeouts = 2;
+    metadata.gpuMemory.totalBytes = 64;
+    metadata.gpuMemory.meshCount = 2;
+    metadata.gpuMemory.byName["MeshClusterTable"] = 64;
+
+    const nlohmann::json parsed = nlohmann::json::parse(BuildRenderGraphMetadataResponseJson(metadata));
+
+    EXPECT_TRUE(parsed["gpu_wait"]["device_lost"].get<bool>());
+    EXPECT_EQ(parsed["gpu_wait"]["consecutive_frame_timeouts"].get<std::uint32_t>(), 2u);
+    EXPECT_EQ(parsed["gpu_wait"]["abandoned_objects"].get<std::uint32_t>(), 0u);
+    EXPECT_EQ(parsed["gpu_memory"]["total_bytes"].get<std::uint64_t>(), 64u);
+    EXPECT_EQ(parsed["gpu_memory"]["mesh_count"].get<std::uint64_t>(), 2u);
+    EXPECT_EQ(parsed["gpu_memory"]["by_name"]["MeshClusterTable"].get<std::uint64_t>(), 64u);
 }
 
 // --- network-impl-5 campaign

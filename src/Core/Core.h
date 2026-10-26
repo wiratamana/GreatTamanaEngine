@@ -72,7 +72,7 @@ public:
     // Advances engine time and updates game logic.
     void Update(const InputFrame& input, float deltaTime);
 
-    // Builds and executes offscreen passes (Game and Scene views).
+    // Builds and executes offscreen passes (primary and secondary views).
     void BuildFrame();
 
     // Builds and executes the presentation pass to the swapchain.
@@ -108,8 +108,11 @@ public:
         return m_offscreenBlackboardThisFrame;
     }
 
-    // Game view render target for this frame (nullptr if game view is inactive).
-    RenderTexture* GetGameViewTargetThisFrame() const noexcept { return m_gameTargetThisFrame; }
+    // Primary view render target for this frame (nullptr if the view is inactive).
+    RenderTexture* GetPrimaryViewTargetThisFrame() const noexcept { return m_primaryTargetThisFrame; }
+
+    // Texture name of a view's target, as shown to tools. Comes from the editor layer when one is attached.
+    const char* ViewResourceName(rg::ViewScope scope) const noexcept;
 
     // Sets the callback that records UI / ImGui commands during present.
     void SetPresentImGuiRecorder(std::function<void(const rg::RecordingContext&)> recorder)
@@ -258,7 +261,7 @@ private:
     void RegisterBuiltinCapabilityOrchestrators();
     void RegisterOffscreenRenderPipelineProviders();
     void RegisterPresentRenderPipelineProvider();
-    RenderTexture* AcquireDirectGameTarget();
+    RenderTexture* AcquireDirectPrimaryTarget();
     const RenderPassViewData* FindViewData(rg::RenderViewId view) const noexcept;
     const ExposedViewOutput* FindExposedViewOutput(rg::ViewScope scope) const noexcept;
     void BuildClusterCandidates();
@@ -290,6 +293,16 @@ private:
     // Publishes the per-view GPU numbers of the newest synchronous snapshot to the profiler.
     void PublishGpuMetrics(bool primaryActive, bool secondaryActive);
 
+    // Remembers which profiler frame each presented frame belongs to, and hands a late present GPU span to it.
+    void TrackPresentedFrame();
+    struct PresentedFrameLink {
+        std::uint64_t presentedFrame = 0; // 0 = empty
+        std::uint64_t profilerFrame = 0;
+    };
+    std::array<PresentedFrameLink, 4> m_presentedFrameLinks{};
+    std::uint64_t m_lastPresentedFrame = 0;
+    std::uint64_t m_lastLateGpuFrame = 0;
+
     std::vector<ExposedViewOutput> m_exposedViewOutputsThisFrame; // Cleared at the start of each BuildFrame().
 
     // Offscreen blackboard kept alive across the frame for debugger inspection.
@@ -299,7 +312,7 @@ private:
     std::vector<AnimationSystem::GpuSkinningDispatchRequest> m_gpuSkinningRequestsThisFrame;
     std::vector<rg::BufferHandle> m_gpuSkinningHandlesThisFrame;
 
-    // View data for this frame (Game and Scene views).
+    // View data for this frame (primary and secondary views).
     std::vector<RenderPassViewData> m_currentViewDataThisFrame;
 
     IFrameDebuggerCaptureRecorder* m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
@@ -336,10 +349,10 @@ private:
     std::function<void(const rg::RecordingContext&)> m_recordImGuiThisFrame;
     std::function<void(const rg::RecordingContext&)> m_presentImGuiRecorder;
 
-    // Game target used when no view panel provides one; copied to the swapchain by the present graph.
-    std::optional<RenderTexture> m_directGameTarget;
-    bool m_directGameTargetUsedThisFrame = false;
-    rg::Shader m_presentGameViewShader{ "PresentBlit", rg::ShaderKind::Graphics };
+    // Primary target used when no view panel provides one; copied to the swapchain by the present graph.
+    std::optional<RenderTexture> m_directPrimaryTarget;
+    bool m_directPrimaryTargetUsedThisFrame = false;
+    rg::Shader m_presentPrimaryViewShader{ "PresentBlit", rg::ShaderKind::Graphics };
 
     ProjectAssemblyHost m_projectAssemblyHost;
     AssetDatabase m_assetDatabase;
@@ -347,7 +360,7 @@ private:
     std::vector<std::unique_ptr<IPluginCapabilityOrchestrator>> m_capabilityOrchestrators;
     RenderFeatureCompositor* m_renderFeatureCompositorPtr = nullptr;
 
-    RenderTexture* m_gameTargetThisFrame = nullptr;
+    RenderTexture* m_primaryTargetThisFrame = nullptr;
 };
 
 } // namespace gte

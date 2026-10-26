@@ -945,7 +945,7 @@ int EditorHost::Run()
         m_core.BuildFrame();
 
         // Game View capture: host-level automation, safe after BuildFrame() because it already fence-waited.
-        RenderTexture* gameTargetThisFrame = m_core.GetGameViewTargetThisFrame();
+        RenderTexture* gameTargetThisFrame = m_core.GetPrimaryViewTargetThisFrame();
         if (gameTargetThisFrame == nullptr && m_captureBridge.IsCaptureRequested(FrameCaptureKind::GameView)) {
             m_captureBridge.FailPendingRequest(FrameCaptureKind::GameView, FrameCaptureFailureReason::TargetNotAvailable);
         }
@@ -1184,14 +1184,16 @@ int EditorHost::Run()
 
         Profiling::FrameProfiler::Instance().EndFrame();
 
-        // Built only while a GET /profiler reader asked in the last 2 s.
-        if (m_profilerBridge.WantsSnapshot()) {
+        // Built on demand, when a spike froze, and every few frames so a cold reader still finds one.
+        Profiling::FrameProfiler& profiler = Profiling::FrameProfiler::Instance();
+        if (m_profilerBridge.ShouldPublish(profiler.CompletedFrameCount(), profiler.Spikes().TotalFrozen())) {
+            const ClockCalibration clock = m_renderer.GpuClockCalibration();
             Profiling::SnapshotInputs profilerInputs;
             profilerInputs.deviceLost = m_renderer.DeviceLost();
             profilerInputs.consecutiveFrameTimeouts = m_renderer.GpuWaitConsecutiveFrameTimeouts();
             profilerInputs.abandonedObjects = m_renderer.AbandonedObjectCount();
-            profilerInputs.gpuClockAligned = m_renderer.GpuClockCalibrationAvailable();
-            profilerInputs.timelineReason = ToString(ClockCalibrationReason::ExtensionNotEnabled);
+            profilerInputs.gpuClockAligned = clock.state == ClockCalibrationState::Present;
+            profilerInputs.timelineReason = ToString(clock.reason);
             // The frame detail goes first so a reader woken by the snapshot already finds it.
             if (Profiling::FrameProfiler::Instance().HistoryCount() > 0) {
                 m_profilerBridge.PublishFrameDetail(

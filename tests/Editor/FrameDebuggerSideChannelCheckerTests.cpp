@@ -143,7 +143,7 @@ bool HasRuleWithKey(const std::vector<KnownRiskBlackboardKeyRule>& rules, std::u
 TEST(FrameDebuggerSideChannelCheckerTest, ChannelRulesUseTheKitsOwnKeyFunction)
 {
     const std::vector<KnownRiskBlackboardKeyRule>& rules = KnownRiskBlackboardKeyRules();
-    for (const char* view : { "Game", "Scene" }) {
+    for (const char* view : { "Primary", "Secondary" }) {
         const rg::RenderViewId id = rg::RenderViewId::Named(view);
         EXPECT_TRUE(HasRuleWithKey(rules, fx::ChannelKey("Shadow", "Map", id), "Shadow.Cascade0.Draw")) << view;
         EXPECT_TRUE(HasRuleWithKey(rules, fx::ChannelKey("Shadow", "Receiver", id), "Shadow.Cascade0.Draw")) << view;
@@ -160,7 +160,7 @@ TEST(FrameDebuggerSideChannelCheckerTest, ChannelRulesUseTheKitsOwnKeyFunction)
 TEST(FrameDebuggerSideChannelCheckerTest, APublishedChannelWithItsToggleOffIsReported)
 {
     const std::vector<KnownRiskBlackboardKeyRule>& rules = KnownRiskBlackboardKeyRules();
-    const rg::RenderPassId published{ fx::ChannelKey("Shadow", "Map", rg::RenderViewId::Named("Game")) };
+    const rg::RenderPassId published{ fx::ChannelKey("Shadow", "Map", rg::RenderViewId::Named("Primary")) };
 
     const std::vector<std::string> leaks = DetectDisabledPassBlackboardKeyLeaks(
         rules, [](const std::string& toggle) { return toggle != "Shadow.Cascade0.Draw"; },

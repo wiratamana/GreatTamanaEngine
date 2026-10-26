@@ -676,10 +676,10 @@ void Core::RegisterOffscreenRenderPipelineProviders()
 
             const rg::TextureHandle viewTarget = viewData->colorTarget;
             const float aspectWidthOverHeight = viewData->aspectWidthOverHeight;
-            const bool isGameView = (frame.currentView == rg::RenderViewId::Named("Game"));
+            const bool isPrimaryView = (frame.currentView == rg::RenderViewId::Named(kPrimaryViewName));
             const Mat4 viewProjectionOverride = viewData->viewProjection;
             IFrameDebuggerCaptureRecorder* frameDebuggerCapture =
-                isGameView ? m_currentFrameDebuggerCaptureForOffscreenPipeline : nullptr;
+                isPrimaryView ? m_currentFrameDebuggerCaptureForOffscreenPipeline : nullptr;
 
             std::array<std::optional<rg::TextureHandle>, kSceneServiceSlotCount> publishedServiceSlots{};
             for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
@@ -707,7 +707,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 }
             };
             const std::size_t claimScope = rg::ViewScopeIndex(TranslateLegacyViewScope(frame.currentView));
-            desc.execute = [this, aspectWidthOverHeight, isGameView, viewProjectionOverride, frameDebuggerCapture,
+            desc.execute = [this, aspectWidthOverHeight, isPrimaryView, viewProjectionOverride, frameDebuggerCapture,
                                 publishedServiceSlots, currentViewForServices, claimScope](rg::PassContext& ctx) {
                 std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolvedServiceSlots{};
                 for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
@@ -729,7 +729,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     m_sceneServicesDescriptorSet.Rewrite(currentViewForServices, resolvedServiceSlots);
                 // Read at execute time: chains declared after this pass fill the set during declaration.
                 const std::unordered_set<Entity>& claimed = m_claimedEntities[claimScope];
-                if (isGameView) {
+                if (isPrimaryView) {
                     rg::CommandBuffer cmd = ctx.Cmd();
                     m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture, std::nullopt,
                         claimed, sceneServicesSet, &cmd);
@@ -942,55 +942,63 @@ void Core::RegisterPresentRenderPipelineProvider()
     m_presentRenderPipeline.SetLegacyViewScopeTranslator(&TranslateLegacyViewScope);
     m_presentRenderPipeline.SetPassToggleRegistry(&m_renderPassToggleRegistry);
 
-    // Copies the engine-owned Game target into the swapchain (the offscreen graph left it sampleable).
-    m_presentRenderPipeline.Register("PresentGameView", rg::ProviderScope::Once,
+    // Copies the engine-owned primary target into the swapchain (the offscreen graph left it sampleable).
+    m_presentRenderPipeline.Register("PresentPrimaryView", rg::ProviderScope::Once,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
-            if (!m_directGameTargetUsedThisFrame || !m_directGameTarget.has_value()) {
+            if (!m_directPrimaryTargetUsedThisFrame || !m_directPrimaryTarget.has_value()) {
                 return;
             }
             const rg::RenderFeatureScope scope(frame.builder, "Present");
             bool copied = false;
-            if (rg::ShouldDeclareBuiltInPassThisFrame(&m_renderPassToggleRegistry, "PresentGameView")) {
-                RenderTexture& source = *m_directGameTarget;
-                const rg::TextureHandle sourceHandle = frame.builder.ImportTexture("PresentSourceGameView",
+            if (rg::ShouldDeclareBuiltInPassThisFrame(&m_renderPassToggleRegistry, "PresentPrimaryView")) {
+                RenderTexture& source = *m_directPrimaryTarget;
+                const rg::TextureHandle sourceHandle = frame.builder.ImportTexture("PresentSourcePrimaryView",
                     source.Target(), ImageLayout::ShaderReadOnlyOptimal, source.SamplerObjectHandle(),
                     SamplerHandle::Invalid, &source);
-                copied = rg::FullscreenPass(frame.builder, m_presentGameViewShader, "PresentGameView",
+                copied = rg::FullscreenPass(frame.builder, m_presentPrimaryViewShader, "PresentPrimaryView",
                     rg::ViewScope::Shared, rg::RenderPassEvent::BeforeEverything)
                              .Bind("sceneColor", sourceHandle)
                              .Target(m_swapchainImageThisFrame, kGameClearColor)
                              .Draw();
             }
             // Without the copy the Present pass must clear the swapchain itself.
-            m_directGameTargetUsedThisFrame = copied;
+            m_directPrimaryTargetUsedThisFrame = copied;
         });
 
     m_presentRenderPipeline.Register("Present", rg::ProviderScope::Once,
         [this](const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&) {
             const rg::RenderFeatureScope scope(frame.builder, "Present");
-            AddPresentPass(frame.builder, m_swapchainImageThisFrame, !m_directGameTargetUsedThisFrame,
+            AddPresentPass(frame.builder, m_swapchainImageThisFrame, !m_directPrimaryTargetUsedThisFrame,
                 m_recordImGuiThisFrame);
         });
 }
 
-// Returns the engine-owned Game target sized to the window, creating it on first use.
-RenderTexture* Core::AcquireDirectGameTarget()
+// Returns the engine-owned primary target sized to the window, creating it on first use.
+RenderTexture* Core::AcquireDirectPrimaryTarget()
 {
     if (m_windowWidth <= 0 || m_windowHeight <= 0) {
         return nullptr;
     }
-    if (!m_directGameTarget.has_value()) {
-        m_directGameTarget.emplace(m_renderer.CreateRenderTexture(m_windowWidth, m_windowHeight,
-            m_renderer.ScenePixelFormat(), "DirectGameView", "DirectGameViewDepth",
+    if (!m_directPrimaryTarget.has_value()) {
+        m_directPrimaryTarget.emplace(m_renderer.CreateRenderTexture(m_windowWidth, m_windowHeight,
+            m_renderer.ScenePixelFormat(), "DirectPrimaryView", "DirectPrimaryViewDepth",
             /*allowStorageImageAccess=*/true, /*allowDepthSampledAccess=*/true));
-        return &*m_directGameTarget;
+        return &*m_directPrimaryTarget;
     }
-    const Extent2D extent = m_directGameTarget->Extent();
+    const Extent2D extent = m_directPrimaryTarget->Extent();
     if (extent.width != static_cast<std::uint32_t>(m_windowWidth)
         || extent.height != static_cast<std::uint32_t>(m_windowHeight)) {
-        m_renderer.ResizeRenderTexture(*m_directGameTarget, m_windowWidth, m_windowHeight);
+        m_renderer.ResizeRenderTexture(*m_directPrimaryTarget, m_windowWidth, m_windowHeight);
     }
-    return &*m_directGameTarget;
+    return &*m_directPrimaryTarget;
+}
+
+const char* Core::ViewResourceName(rg::ViewScope scope) const noexcept
+{
+    if (m_editorLayer != nullptr) {
+        return m_editorLayer->ViewResourceName(scope);
+    }
+    return scope == rg::ViewScope::Secondary ? kSecondaryViewName : kPrimaryViewName;
 }
 
 void Core::BuildFrame()
@@ -1014,8 +1022,8 @@ void Core::BuildFrame()
         return;
     }
 
-    RenderTexture* gameTarget = nullptr;
-    RenderTexture* sceneTarget = nullptr;
+    RenderTexture* primaryTarget = nullptr;
+    RenderTexture* secondaryTarget = nullptr;
     IFrameDebuggerCaptureRecorder* frameDebuggerCapture = nullptr;
     {
         GTE_PROFILE_SCOPE("Render.Prepare");
@@ -1031,31 +1039,31 @@ void Core::BuildFrame()
 
         m_exposedViewOutputsThisFrame.clear();
 
-        // Query active editor render targets; without any, the Game view renders into an engine-owned target.
-        gameTarget = (m_editorLayer != nullptr) ? m_editorLayer->GameViewTarget() : nullptr;
-        sceneTarget = (m_editorLayer != nullptr) ? m_editorLayer->SceneViewTarget() : nullptr;
-        m_directGameTargetUsedThisFrame = false;
-        if (gameTarget == nullptr && sceneTarget == nullptr) {
+        // Query active editor render targets; without any, the primary view renders into an engine-owned target.
+        primaryTarget = (m_editorLayer != nullptr) ? m_editorLayer->PrimaryViewTarget() : nullptr;
+        secondaryTarget = (m_editorLayer != nullptr) ? m_editorLayer->SecondaryViewTarget() : nullptr;
+        m_directPrimaryTargetUsedThisFrame = false;
+        if (primaryTarget == nullptr && secondaryTarget == nullptr) {
             try {
-                gameTarget = AcquireDirectGameTarget();
+                primaryTarget = AcquireDirectPrimaryTarget();
             } catch (const std::exception& e) {
-                const std::string failure = std::string("Core: failed to acquire the direct Game target: ") + e.what();
+                const std::string failure = std::string("Core: failed to acquire the direct primary target: ") + e.what();
                 if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
                     GTE_LOG_ERROR("Core", failure);
                 }
-                gameTarget = nullptr;
+                primaryTarget = nullptr;
             }
-            m_directGameTargetUsedThisFrame = (gameTarget != nullptr);
+            m_directPrimaryTargetUsedThisFrame = (primaryTarget != nullptr);
         }
-        m_gameTargetThisFrame = gameTarget;
+        m_primaryTargetThisFrame = primaryTarget;
 
         frameDebuggerCapture =
             (m_editorLayer != nullptr) ? m_editorLayer->PrepareFrameDebuggerCaptureContext() : nullptr;
         m_captureArmedThisFrame = (frameDebuggerCapture != nullptr);
     }
 
-    // Execute offscreen rendering for Game and Scene views.
-    if (gameTarget != nullptr || sceneTarget != nullptr) {
+    // Execute offscreen rendering for the primary and secondary views.
+    if (primaryTarget != nullptr || secondaryTarget != nullptr) {
         try {
             GTE_PROFILE_SCOPE("Offscreen");
             m_timingAdapter.SetGraphLabel("Offscreen");
@@ -1098,61 +1106,63 @@ void Core::BuildFrame()
                     m_currentViewDataThisFrame.clear();
                     m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
 
-                    float gameAspectForReplay = 1.0f;
+                    float primaryAspectForReplay = 1.0f;
 
-                    // Set up Game View rendering.
-                    if (gameTarget != nullptr) {
-                        const Extent2D extent = gameTarget->Extent();
+                    // Set up the primary view.
+                    if (primaryTarget != nullptr) {
+                        const Extent2D extent = primaryTarget->Extent();
                         const float aspect =
                             AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
 
-                        const Vec3 gameEyeWorldPosition = RenderSystem::ResolveActiveCameraWorldPosition(m_game.GetRegistry());
-                        const Mat4 gameViewProjection =
+                        const Vec3 primaryEyeWorldPosition = RenderSystem::ResolveActiveCameraWorldPosition(m_game.GetRegistry());
+                        const Mat4 primaryViewProjection =
                             RenderSystem::ResolveActiveCameraViewProjection(m_game.GetRegistry(), aspect);
 
-                        const rg::TextureHandle h = b.ImportTexture("GameView", gameTarget->Target(),
-                            ImageLayout::Undefined, gameTarget->SamplerObjectHandle(), gameTarget->DepthSamplerObjectHandle(), gameTarget);
+                        const rg::TextureHandle h = b.ImportTexture(ViewResourceName(rg::ViewScope::Primary),
+                            primaryTarget->Target(), ImageLayout::Undefined, primaryTarget->SamplerObjectHandle(),
+                            primaryTarget->DepthSamplerObjectHandle(), primaryTarget);
 
-                        RenderPassViewData gameViewData;
-                        gameViewData.id = rg::RenderViewId::Named("Game");
-                        gameViewData.colorTarget = h;
-                        gameViewData.renderTexture = gameTarget;
-                        gameViewData.aspectWidthOverHeight = aspect;
-                        gameViewData.viewProjection = gameViewProjection;
-                        gameViewData.eyeWorldPosition = gameEyeWorldPosition;
-                        m_currentViewDataThisFrame.push_back(gameViewData);
+                        RenderPassViewData primaryViewData;
+                        primaryViewData.id = rg::RenderViewId::Named(kPrimaryViewName);
+                        primaryViewData.colorTarget = h;
+                        primaryViewData.renderTexture = primaryTarget;
+                        primaryViewData.aspectWidthOverHeight = aspect;
+                        primaryViewData.viewProjection = primaryViewProjection;
+                        primaryViewData.eyeWorldPosition = primaryEyeWorldPosition;
+                        m_currentViewDataThisFrame.push_back(primaryViewData);
 
-                        frame.activeViews.push_back(rg::RenderViewId::Named("Game"));
+                        frame.activeViews.push_back(rg::RenderViewId::Named(kPrimaryViewName));
                         m_currentFrameDebuggerCaptureForOffscreenPipeline = frameDebuggerCapture;
-                        gameAspectForReplay = aspect;
+                        primaryAspectForReplay = aspect;
                     }
 
-                    // Set up Scene View rendering.
-                    if (sceneTarget != nullptr) {
-                        const Extent2D extent = sceneTarget->Extent();
+                    // Set up the secondary view.
+                    if (secondaryTarget != nullptr) {
+                        const Extent2D extent = secondaryTarget->Extent();
                         const float aspect =
                             AspectRatioOf(static_cast<int>(extent.width), static_cast<int>(extent.height));
-                        const Mat4 sceneViewProjection = m_editorLayer->SceneViewProjection(aspect);
-                        const Vec3 sceneEyeWorldPosition = m_editorLayer->SceneViewCameraWorldPosition();
+                        const Mat4 secondaryViewProjection = m_editorLayer->SecondaryViewProjection(aspect);
+                        const Vec3 secondaryEyeWorldPosition = m_editorLayer->SecondaryViewCameraWorldPosition();
 
-                        const rg::TextureHandle h = b.ImportTexture("SceneView", sceneTarget->Target(),
-                            ImageLayout::Undefined, sceneTarget->SamplerObjectHandle(), sceneTarget->DepthSamplerObjectHandle(), sceneTarget);
+                        const rg::TextureHandle h = b.ImportTexture(ViewResourceName(rg::ViewScope::Secondary),
+                            secondaryTarget->Target(), ImageLayout::Undefined, secondaryTarget->SamplerObjectHandle(),
+                            secondaryTarget->DepthSamplerObjectHandle(), secondaryTarget);
 
-                        RenderPassViewData sceneViewData;
-                        sceneViewData.id = rg::RenderViewId::Named("Scene");
-                        sceneViewData.colorTarget = h;
-                        sceneViewData.renderTexture = sceneTarget;
-                        sceneViewData.aspectWidthOverHeight = aspect;
-                        sceneViewData.viewProjection = sceneViewProjection;
-                        sceneViewData.eyeWorldPosition = sceneEyeWorldPosition;
-                        sceneViewData.recordSceneOverlay = [this](const rg::RecordingContext& cmd, const Mat4& viewProj) {
+                        RenderPassViewData secondaryViewData;
+                        secondaryViewData.id = rg::RenderViewId::Named(kSecondaryViewName);
+                        secondaryViewData.colorTarget = h;
+                        secondaryViewData.renderTexture = secondaryTarget;
+                        secondaryViewData.aspectWidthOverHeight = aspect;
+                        secondaryViewData.viewProjection = secondaryViewProjection;
+                        secondaryViewData.eyeWorldPosition = secondaryEyeWorldPosition;
+                        secondaryViewData.recordSceneOverlay = [this](const rg::RecordingContext& cmd, const Mat4& viewProj) {
                             if (m_editorLayer != nullptr) {
                                 m_editorLayer->RenderSceneGrid(cmd, viewProj);
                             }
                         };
-                        m_currentViewDataThisFrame.push_back(sceneViewData);
+                        m_currentViewDataThisFrame.push_back(secondaryViewData);
 
-                        frame.activeViews.push_back(rg::RenderViewId::Named("Scene"));
+                        frame.activeViews.push_back(rg::RenderViewId::Named(kSecondaryViewName));
                     }
 
                     m_offscreenRenderPipeline.DeclareInto(b, frame);
@@ -1171,15 +1181,15 @@ void Core::BuildFrame()
                     std::vector<rg::TextureHandle> outputs = std::move(frame.finalTextureOutputs);
 
                     // Add frame replay passes for debugging if requested.
-                    if (gameTarget != nullptr && frameDebuggerCapture != nullptr && m_editorLayer != nullptr
+                    if (primaryTarget != nullptr && frameDebuggerCapture != nullptr && m_editorLayer != nullptr
                         && m_editorLayer->ConsumePendingFrameDebuggerReplayRequest()) {
                         const std::vector<rg::BufferHandle> gpuSkinningBuffersForReplay =
                             m_offscreenBlackboardThisFrame.Fetch<std::vector<rg::BufferHandle>>(kGpuSkinningOutputsKey)
                                 .value_or(std::vector<rg::BufferHandle>{});
-                        const std::size_t objectCount = m_game.CountGameViewDrawCommandsThisFrame();
+                        const std::size_t objectCount = m_game.CountRenderablesThisFrame();
                         const std::vector<rg::TextureHandle> replayStepHandles = frameDebuggerCapture->AddReplayPasses(
-                            b, m_game, m_renderer, gameAspectForReplay, objectCount, gpuSkinningBuffersForReplay,
-                            viewBackgroundForReplay.value_or(rg::FullscreenReplay{}), *gameTarget,
+                            b, m_game, m_renderer, primaryAspectForReplay, objectCount, gpuSkinningBuffersForReplay,
+                            viewBackgroundForReplay.value_or(rg::FullscreenReplay{}), *primaryTarget,
                             &m_renderPassToggleRegistry);
                         for (const rg::TextureHandle& replayHandle : replayStepHandles) {
                             outputs.push_back(replayHandle);
@@ -1194,9 +1204,9 @@ void Core::BuildFrame()
                 // Finalize textures for external sampling (e.g. editor UI viewport panels). A view output a feature
                 // exposed this frame is finalized too and replaces the raw view in the editor.
                 const rg::ResourceState shaderReadState = rg::RequiredStateFor(rg::ResourceAccess::ShaderRead, false);
-                const auto finalizeView = [&](RenderTexture& target, const char* viewName, rg::ViewScope scope) {
+                const auto finalizeView = [&](RenderTexture& target, rg::ViewScope scope) {
                     target.FinalizeForExternalSampling(offscreenCmd);
-                    m_renderGraph.NotifyDebugTextureStateOverride(viewName, shaderReadState);
+                    m_renderGraph.NotifyDebugTextureStateOverride(ViewResourceName(scope), shaderReadState);
 
                     const ExposedViewOutput* exposed = FindExposedViewOutput(scope);
                     if (exposed == nullptr) {
@@ -1206,16 +1216,16 @@ void Core::BuildFrame()
                     m_renderGraph.NotifyDebugTextureStateOverride(exposed->name, shaderReadState);
                     return exposed->texture;
                 };
-                if (gameTarget != nullptr) {
-                    RenderTexture* exposed = finalizeView(*gameTarget, "GameView", rg::ViewScope::Primary);
+                if (primaryTarget != nullptr) {
+                    RenderTexture* exposed = finalizeView(*primaryTarget, rg::ViewScope::Primary);
                     if (m_editorLayer != nullptr) {
-                        m_editorLayer->SetGameViewCompositedTexture(exposed);
+                        m_editorLayer->SetPrimaryViewCompositedTexture(exposed);
                     }
                 }
-                if (sceneTarget != nullptr) {
-                    RenderTexture* exposed = finalizeView(*sceneTarget, "SceneView", rg::ViewScope::Secondary);
+                if (secondaryTarget != nullptr) {
+                    RenderTexture* exposed = finalizeView(*secondaryTarget, rg::ViewScope::Secondary);
                     if (m_editorLayer != nullptr) {
-                        m_editorLayer->SetSceneViewCompositedTexture(exposed);
+                        m_editorLayer->SetSecondaryViewCompositedTexture(exposed);
                     }
                 }
             }
@@ -1226,7 +1236,7 @@ void Core::BuildFrame()
             {
                 GTE_PROFILE_SCOPE("Offscreen.Finalize");
                 m_renderGraph.FinalizeSynchronousGpuTiming();
-                PublishGpuMetrics(gameTarget != nullptr, sceneTarget != nullptr);
+                PublishGpuMetrics(primaryTarget != nullptr, secondaryTarget != nullptr);
             }
         } catch (const std::exception& e) {
             // A failure that repeats every frame is logged once per distinct message.
@@ -1235,13 +1245,13 @@ void Core::BuildFrame()
                 GTE_LOG_ERROR("Core", failure);
             }
             // The target's contents are undefined; present clears the swapchain instead of copying it.
-            m_directGameTargetUsedThisFrame = false;
+            m_directPrimaryTargetUsedThisFrame = false;
         } catch (...) {
             const std::string failure = "RenderGraph offscreen Execute() failed: unknown exception";
             if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
                 GTE_LOG_ERROR("Core", failure);
             }
-            m_directGameTargetUsedThisFrame = false;
+            m_directPrimaryTargetUsedThisFrame = false;
         }
     } else {
         PublishGpuMetrics(false, false);
@@ -1322,6 +1332,37 @@ void Core::Present()
             GTE_LOG_ERROR("Core", failure);
         }
     }
+    TrackPresentedFrame();
+}
+
+void Core::TrackPresentedFrame()
+{
+    Profiling::FrameProfiler& profiler = Profiling::FrameProfiler::Instance();
+
+    // The open profiler frame owns the frame that was just submitted.
+    const std::uint64_t presented = m_renderer.PresentedFrameCount();
+    if (presented != m_lastPresentedFrame) {
+        m_lastPresentedFrame = presented;
+        m_presentedFrameLinks[presented % m_presentedFrameLinks.size()] = { presented, profiler.CompletedFrameCount() };
+    }
+
+    // A present frame read back now belongs to an earlier profiler frame; only its GPU span is added there.
+    const rg::RenderGraphSnapshot& snapshot = m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::PipelinedDeferredReadback);
+    const std::uint64_t resolved = snapshot.gpuFrameIndex;
+    if (resolved == 0 || resolved == m_lastLateGpuFrame) {
+        return;
+    }
+    m_lastLateGpuFrame = resolved;
+
+    const PresentedFrameLink& link = m_presentedFrameLinks[resolved % m_presentedFrameLinks.size()];
+    if (link.presentedFrame != resolved || !snapshot.gpuReport.spanValid) {
+        return;
+    }
+    Profiling::GpuViewMetric span;
+    span.status = Profiling::SampleStatus::Present;
+    span.milliseconds = static_cast<float>(snapshot.gpuReport.spanMs);
+    span.foldedPasses = snapshot.gpuReport.foldedPasses;
+    profiler.AttachLateGpuReport(link.profilerFrame, span);
 }
 
 } // namespace gte

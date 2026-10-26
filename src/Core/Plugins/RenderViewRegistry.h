@@ -28,9 +28,10 @@ struct RenderViewDesc {
 // True when two descs match for one name. colorFormat is ignored while either side has no color.
 bool DescsMatchForSameName(const RenderViewDesc& a, const RenderViewDesc& b) noexcept;
 
-// Single source of truth for every view name this engine itself already
-// owns - CreateOrGetView() checks a caller-supplied name against this first.
-inline constexpr const char* kReservedViewNames[] = { "Game", "Scene" };
+// Names of the two views the engine owns. The host maps its own labels onto them.
+inline constexpr const char* kPrimaryViewName = "Primary";
+inline constexpr const char* kSecondaryViewName = "Secondary";
+inline constexpr const char* kReservedViewNames[] = { kPrimaryViewName, kSecondaryViewName };
 bool IsReservedViewName(const char* name) noexcept;
 
 class RenderViewRegistry {

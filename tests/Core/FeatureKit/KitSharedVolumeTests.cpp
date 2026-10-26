@@ -35,8 +35,8 @@ TEST(FxSharedResourceTest, ASharedFrameNamesItsTargetsWithoutAViewSuffix)
 {
     const SharedFrame frame(FakeScene(), 3);
     EXPECT_EQ(frame.Scope(), rg::ViewScope::Shared);
-    EXPECT_EQ(PersistentName("Lut.Transmittance", frame.Scope()), "Lut.Transmittance");
-    EXPECT_EQ(PersistentName("Lut.Transmittance", rg::ViewScope::Primary), "Lut.Transmittance.GameView");
+    EXPECT_EQ(PersistentName("Lut.Transmittance", frame.Scope(), "GameView"), "Lut.Transmittance");
+    EXPECT_EQ(PersistentName("Lut.Transmittance", rg::ViewScope::Primary, "GameView"), "Lut.Transmittance.GameView");
 }
 
 TEST(FxSharedResourceTest, ResourcesOfASharedFrameWithoutAContextAreInertAndLogOnce)

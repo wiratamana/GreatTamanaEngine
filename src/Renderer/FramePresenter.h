@@ -77,6 +77,9 @@ public:
     // a specific moment inside PresentViaRenderGraph().
     std::optional<CapturedSwapchainPixels> TakeLastCompletedSwapchainCapture();
 
+    // Frames that really reached the queue so far. The newest one carries this number.
+    std::uint64_t SubmittedFrameCount() const noexcept { return m_submittedFrames; }
+
 private:
     friend class OffscreenRecording;
 

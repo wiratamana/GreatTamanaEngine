@@ -1,0 +1,5 @@
+# View words the profiler and render graph must not contain. Bare words are whole-word, case sensitive.
+*GameView*
+*SceneView*
+Game
+Scene

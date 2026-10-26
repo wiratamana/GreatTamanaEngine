@@ -14,7 +14,7 @@ void AbandonedWork::Park(std::shared_ptr<void> owner) noexcept
         m_items.push_back(owner);
         m_count.fetch_add(1, std::memory_order_relaxed);
     } catch (...) {
-        // Out of memory: pin the owner forever with a reference that is never dropped.
+        // Out of memory with a lost device: std::terminate in make_unique below is accepted.
         static_cast<void>(std::make_unique<std::shared_ptr<void>>(std::move(owner)).release());
     }
 }

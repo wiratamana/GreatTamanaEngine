@@ -22,8 +22,8 @@ TEST(SceneServiceBlackboardKeyTest, Every824SlotViewPairProducesAPairwiseDistinc
 {
     const std::vector<rg::RenderViewId> views = {
         rg::RenderViewId::Shared(),
-        rg::RenderViewId::Named("Game"),
-        rg::RenderViewId::Named("Scene"),
+        rg::RenderViewId::Named("Primary"),
+        rg::RenderViewId::Named("Secondary"),
     };
 
     std::vector<std::uint64_t> keys;
@@ -46,15 +46,15 @@ TEST(SceneServiceBlackboardKeyTest, Every824SlotViewPairProducesAPairwiseDistinc
 
 TEST(SceneServiceBlackboardKeyTest, SameSlotDifferentViewsNeverAlias)
 {
-    const rg::RenderPassId gameKey = SceneServiceBlackboardKey(0u, rg::RenderViewId::Named("Game"));
-    const rg::RenderPassId sceneKey = SceneServiceBlackboardKey(0u, rg::RenderViewId::Named("Scene"));
+    const rg::RenderPassId gameKey = SceneServiceBlackboardKey(0u, rg::RenderViewId::Named("Primary"));
+    const rg::RenderPassId sceneKey = SceneServiceBlackboardKey(0u, rg::RenderViewId::Named("Secondary"));
 
     EXPECT_FALSE(gameKey == sceneKey);
 }
 
 TEST(SceneServiceBlackboardKeyTest, SameViewDifferentSlotsNeverAlias)
 {
-    const rg::RenderViewId gameView = rg::RenderViewId::Named("Game");
+    const rg::RenderViewId gameView = rg::RenderViewId::Named("Primary");
     const rg::RenderPassId firstKey = SceneServiceBlackboardKey(0u, gameView);
     const rg::RenderPassId secondKey = SceneServiceBlackboardKey(2u, gameView);
 
@@ -232,7 +232,7 @@ TEST_F(SceneServiceRegistryTest, RegistrationIsRefusedAfterARealRewriteHasRunOnc
 
     SceneServicesDescriptorSet sceneServices(fixture.GetRenderer());
     std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolved{};
-    (void)sceneServices.Rewrite(rg::RenderViewId::Named("Game"), resolved);
+    (void)sceneServices.Rewrite(rg::RenderViewId::Named("Primary"), resolved);
 
     const std::uint32_t result = RegisterSceneServiceSlot("PostSealName", SceneServiceResourceKind::Image2D);
     EXPECT_EQ(result, kInvalidSceneServiceSlotIndex);
@@ -248,7 +248,7 @@ TEST_F(SceneServiceRegistryTest, ResetReopensARegistrySealedByRewrite)
 
     SceneServicesDescriptorSet sceneServices(fixture.GetRenderer());
     std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolved{};
-    (void)sceneServices.Rewrite(rg::RenderViewId::Named("Game"), resolved);
+    (void)sceneServices.Rewrite(rg::RenderViewId::Named("Primary"), resolved);
 
     ResetSceneServiceRegistryForTesting();
     EXPECT_NE(RegisterSceneServiceSlot("AfterReset", SceneServiceResourceKind::Image2D), kInvalidSceneServiceSlotIndex);
@@ -265,7 +265,7 @@ TEST_F(SceneServiceRegistryTest, RewriteWithAllDefaultedSlotsReturnsAValidSetBac
     SceneServicesDescriptorSet sceneServices(fixture.GetRenderer());
 
     std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolved{};
-    const DescriptorSetHandle set = sceneServices.Rewrite(rg::RenderViewId::Named("Game"), resolved);
+    const DescriptorSetHandle set = sceneServices.Rewrite(rg::RenderViewId::Named("Primary"), resolved);
 
     EXPECT_NE(set, DescriptorSetHandle::Invalid);
 
@@ -287,8 +287,8 @@ TEST_F(SceneServiceRegistryTest, RewriteForTwoDifferentViewsProducesTwoDifferent
     std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolvedA{};
     std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolvedB{};
 
-    const rg::RenderViewId viewA = rg::RenderViewId::Named("Game");
-    const rg::RenderViewId viewB = rg::RenderViewId::Named("Scene");
+    const rg::RenderViewId viewA = rg::RenderViewId::Named("Primary");
+    const rg::RenderViewId viewB = rg::RenderViewId::Named("Secondary");
 
     const DescriptorSetHandle setA = sceneServices.Rewrite(viewA, resolvedA);
     const DescriptorSetHandle setB = sceneServices.Rewrite(viewB, resolvedB);

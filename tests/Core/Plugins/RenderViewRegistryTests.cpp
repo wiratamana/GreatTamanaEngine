@@ -166,7 +166,7 @@ TEST(RenderViewRegistryDeathTest, ReservedNameGameAsserts)
         {
             HeadlessRenderGraphFixture fixture;
             RenderViewRegistry registry(fixture.GetRenderer());
-            (void)registry.CreateOrGetView("Game", MakeColorDesc());
+            (void)registry.CreateOrGetView("Primary", MakeColorDesc());
         },
         "");
 }
@@ -181,7 +181,7 @@ TEST(RenderViewRegistryDeathTest, ReservedNameSceneAsserts)
         {
             HeadlessRenderGraphFixture fixture;
             RenderViewRegistry registry(fixture.GetRenderer());
-            (void)registry.CreateOrGetView("Scene", MakeColorDesc());
+            (void)registry.CreateOrGetView("Secondary", MakeColorDesc());
         },
         "");
 }

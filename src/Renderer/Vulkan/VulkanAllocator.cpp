@@ -34,6 +34,7 @@ VulkanAllocator::~VulkanAllocator()
 
 VulkanAllocator::VulkanAllocator(VulkanAllocator&& other) noexcept
     : m_allocator(std::exchange(other.m_allocator, VK_NULL_HANDLE))
+    , m_abandon(other.m_abandon)
 {
 }
 
@@ -42,6 +43,7 @@ VulkanAllocator& VulkanAllocator::operator=(VulkanAllocator&& other) noexcept
     if (this != &other) {
         Destroy();
         m_allocator = std::exchange(other.m_allocator, VK_NULL_HANDLE);
+        m_abandon = other.m_abandon;
     }
     return *this;
 }
@@ -49,7 +51,9 @@ VulkanAllocator& VulkanAllocator::operator=(VulkanAllocator&& other) noexcept
 void VulkanAllocator::Destroy() noexcept
 {
     if (m_allocator != VK_NULL_HANDLE) {
-        vmaDestroyAllocator(m_allocator);
+        if (!m_abandon) {
+            vmaDestroyAllocator(m_allocator);
+        }
         m_allocator = VK_NULL_HANDLE;
     }
 }

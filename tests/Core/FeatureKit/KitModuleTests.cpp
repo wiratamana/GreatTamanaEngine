@@ -264,14 +264,14 @@ TEST(KitModuleCoreTest, AFeatureRegistersItsPassesAndAnInertCallbackSurvivesTheM
         // The engine has no view data outside a frame build: a per-view callback must not run.
         rg::RenderGraphBuilder builder;
         rg::RenderPassBlackboard blackboard;
-        preOpaque(builder, blackboard, rg::RenderViewId::Named("Game"));
+        preOpaque(builder, blackboard, rg::RenderViewId::Named("Primary"));
         EXPECT_EQ(calls, 0);
     }
 
     // Core keeps the registered callback after the module is gone; it must do nothing.
     rg::RenderGraphBuilder builder;
     rg::RenderPassBlackboard blackboard;
-    preOpaque(builder, blackboard, rg::RenderViewId::Named("Game"));
+    preOpaque(builder, blackboard, rg::RenderViewId::Named("Primary"));
     EXPECT_EQ(calls, 0);
 }
 

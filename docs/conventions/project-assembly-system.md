@@ -636,7 +636,7 @@ core.AddPreOpaquePass(
     "MyProject.ShadowMap",
     [&core](gte::rg::RenderGraphBuilder& builder, gte::rg::RenderPassBlackboard& blackboard,
         gte::rg::RenderViewId currentView) {
-        const bool isGameView = (currentView == gte::rg::RenderViewId::Named("Game"));
+        const bool isGameView = (currentView == gte::rg::RenderViewId::Named("Primary"));
         const gte::rg::RenderViewId shadowView = core.CreateRenderView(
             isGameView ? "MyProject.ShadowMap.GameView" : "MyProject.ShadowMap.SceneView",
             /*width=*/1024, /*height=*/1024, /*depthOnly=*/true);
@@ -762,7 +762,7 @@ core.AddPostOpaquePass(
     "MyProject.DepthMarker",
     [](gte::rg::RenderGraphBuilder& builder, gte::rg::RenderPassBlackboard& blackboard,
         gte::rg::RenderViewId currentView, const gte::ScenePassReadHandles& handles) {
-        const bool isGameView = (currentView == gte::rg::RenderViewId::Named("Game"));
+        const bool isGameView = (currentView == gte::rg::RenderViewId::Named("Primary"));
         const gte::rg::TextureHandle output = builder.CreateTexture(
             isGameView ? "MyProject_DepthMarker_Game" : "MyProject_DepthMarker_Scene",
             gte::rg::TextureDesc{ /*width=*/64, /*height=*/64, VK_FORMAT_R8G8B8A8_UNORM, /*hasDepth=*/false,

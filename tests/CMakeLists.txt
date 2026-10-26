@@ -2542,7 +2542,8 @@ if(TRUE)
         # immediately above).
         Editor/FrameDebuggerCoverageCheckerTests.cpp
         Editor/FrameDebuggerSideChannelCheckerTests.cpp
-        Editor/ProfilerPanelDataTests.cpp
+Editor/ProfilerPanelDataTests.cpp
+Editor/RenderGraphDisplayTextTests.cpp
         Editor/JobsPanelDataTests.cpp
         Editor/LogPanelDataTests.cpp
         Editor/FrameDebuggerDataTests.cpp
@@ -2937,6 +2938,22 @@ add_test(NAME EngineVocabularyCheck
             --tokens "${CMAKE_SOURCE_DIR}/tools/ci/engine_vocabulary_check/tokens.txt"
             --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/engine_vocabulary_check/allowlist.txt"
             --comments scan --strings scan --ignore-case
+)
+
+# Fails when the profiler, render graph or view plumbing names the editor's view words. See tools/ci/profiler_vocabulary_check/README.md.
+add_test(NAME ProfilerVocabularyCheck
+    COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src" --only Profiling/ --only Renderer/RenderGraph/
+            --only Renderer/GpuTiming --only Renderer/FramePresenter
+            --tokens "${CMAKE_SOURCE_DIR}/tools/ci/profiler_vocabulary_check/tokens.txt"
+            --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/profiler_vocabulary_check/allowlist.txt"
+            --comments scan --strings scan
+)
+add_test(NAME ProfilerVocabularyCheckPlumbing
+    COMMAND gte_ci_scan --root "${CMAKE_SOURCE_DIR}/src" --only Core/ --only Renderer/ --only Profiling/
+            --only Application/RenderPassViewData.h --only Editor/EditorLayer.h --only Editor/NullEditorLayer.cpp
+            --tokens "${CMAKE_SOURCE_DIR}/tools/ci/profiler_vocabulary_check/plumbing_tokens.txt"
+            --allowlist "${CMAKE_SOURCE_DIR}/tools/ci/profiler_vocabulary_check/allowlist.txt"
+            --comments scan --strings scan
 )
 
 # Fails on comments that name history or a document (campaign, PHASE<n>, task_manager, Locked Design, *.md) and on

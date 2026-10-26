@@ -20,38 +20,19 @@ namespace {
 
 constexpr const char* kLogCategory = "FeatureKit";
 
-std::string ViewOutputName(std::string_view suffix, rg::ViewScope scope)
-{
-    std::string name;
-    switch (scope) {
-    case rg::ViewScope::Primary:
-        name = "GameView";
-        break;
-    case rg::ViewScope::Secondary:
-        name = "SceneView";
-        break;
-    case rg::ViewScope::Shared:
-        break;
-    }
-    name += suffix;
-    return name;
-}
-
 } // namespace
 
 struct ViewOutput::Impl {
     struct Slot {
-        std::string name; // The import keeps this pointer for the frame, so it must not move.
+        std::string name; // Set on first use; the import keeps this pointer for the frame, so it must not move.
         std::optional<RenderTexture> texture;
         rg::TextureHandle imported; // This frame's import of `texture`.
         rg::BuildRetryGate gate;
     };
 
-    explicit Impl(std::string_view suffix)
+    explicit Impl(std::string_view nameSuffix)
+        : suffix(nameSuffix)
     {
-        for (std::size_t i = 0; i < rg::kViewScopeCount; ++i) {
-            slots[i].name = ViewOutputName(suffix, static_cast<rg::ViewScope>(i));
-        }
     }
 
     bool Create(Slot& slot, detail::FrameContext& context, int width, int height, PixelFormat format)
@@ -92,6 +73,7 @@ struct ViewOutput::Impl {
         }
     }
 
+    std::string suffix;
     std::array<Slot, rg::kViewScopeCount> slots;
 };
 
@@ -119,6 +101,9 @@ Texture ViewOutput::Acquire(Frame& frame, Extent2D extent, PixelFormat format)
     }
 
     Impl::Slot& slot = m_impl->slots[rg::ViewScopeIndex(context->scope)];
+    if (slot.name.empty()) {
+        slot.name = std::string(context->core->ViewResourceName(context->scope)) + m_impl->suffix;
+    }
     const int width = static_cast<int>(extent.width);
     const int height = static_cast<int>(extent.height);
     if (!slot.texture.has_value()) {

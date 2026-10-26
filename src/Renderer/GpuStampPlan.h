@@ -76,7 +76,7 @@ struct GpuStampPlan {
     GpuStampMode mode = GpuStampMode::Fine;
     std::uint32_t queryCount = 0;
     std::int32_t endQuery = -1;   // E: right after the last pass work.
-    std::int32_t finalQuery = -1; // Z: the last command of the buffer.
+    std::int32_t finalQuery = -1; // Z: end of the graph's Execute, before the presenter's capture and present barriers.
     std::uint32_t passCount = 0;  // Input passes that were planned.
     std::uint32_t recordCount = 0;
     std::uint32_t stampedRecords = 0;

@@ -69,8 +69,9 @@ public:
     // Stores a copy of the frame. Evicts the oldest unpinned slot when full. Returns false when every slot is pinned.
     bool Freeze(const FrameRecord& record, double medianMs, const SpikeClassification& classification) noexcept;
 
-    // Replaces the GPU numbers of a frozen frame that is at most kSpikeLateGpuFrames behind `newestFrame`.
-    bool AttachGpu(std::uint64_t frameIndex, const GpuFrameMetrics& gpu, std::uint64_t newestFrame) noexcept;
+    // Adds a late GPU span to a frozen frame at most kSpikeLateGpuFrames behind `newestFrame`. A span that is not
+    // Present is refused.
+    bool AttachGpuSpan(std::uint64_t frameIndex, const GpuViewMetric& span, std::uint64_t newestFrame) noexcept;
 
     PinResult Pin(std::uint64_t frameIndex) noexcept;
     bool Unpin(std::uint64_t frameIndex) noexcept;
@@ -106,5 +107,7 @@ private:
     std::array<FrozenSpike, kSlots> m_slots{};
     std::uint64_t m_sequence = 0;
 };
+
+static_assert(sizeof(SpikeStore) <= SpikeStore::kSlots * (72 * 1024 + 256) + 256, "SpikeStore grew past its budget");
 
 } // namespace gte::Profiling

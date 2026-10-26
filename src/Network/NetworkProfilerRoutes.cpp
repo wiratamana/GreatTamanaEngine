@@ -7,6 +7,7 @@
 #include "../Profiling/ProfilerSnapshotBuilder.h"
 
 #include <httplib.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -81,16 +82,31 @@ nlohmann::json PerView(const std::array<Metric, Profiling::kViewSlotCount>& metr
     return out;
 }
 
-nlohmann::json Envelope(const ProfilerSnapshot& snapshot)
+nlohmann::json Envelope(const ProfilerSnapshot& snapshot, const char* state = "ok")
 {
     nlohmann::json out = nlohmann::json::object();
     out["success"] = true;
     out["schema_version"] = snapshot.schemaVersion;
     out["frame_index"] = snapshot.frameIndex;
-    out["state"] = "ok";
+    out["state"] = state;
     out["has_frame"] = snapshot.hasFrame;
     out["snapshot_age"] = MetricToJson(snapshot.snapshotAge);
     return out;
+}
+
+nlohmann::json LiveBlocksToJson(const ProfilerSnapshot& snapshot)
+{
+    nlohmann::json live = nlohmann::json::array();
+    for (std::uint32_t i = 0; i < snapshot.liveBlockCount && i < snapshot.liveBlocks.size(); ++i) {
+        const Profiling::SnapshotLiveBlock& block = snapshot.liveBlocks[i];
+        nlohmann::json item = nlohmann::json::object();
+        item["thread_slot"] = block.threadSlot;
+        item["site"] = Text(block.site);
+        item["detail"] = Text(block.detail);
+        item["elapsed"] = MetricToJson(block.elapsed);
+        live.push_back(std::move(item));
+    }
+    return live;
 }
 
 bool ParseBoolText(const std::string& text, bool& out)
@@ -214,17 +230,7 @@ nlohmann::json ProfilerSnapshotToJson(const ProfilerSnapshot& snapshot)
     device["abandoned_objects"] = MetricToJson(snapshot.device.abandonedObjects);
     out["device_state"] = std::move(device);
 
-    nlohmann::json live = nlohmann::json::array();
-    for (std::uint32_t i = 0; i < snapshot.liveBlockCount && i < snapshot.liveBlocks.size(); ++i) {
-        const Profiling::SnapshotLiveBlock& block = snapshot.liveBlocks[i];
-        nlohmann::json item = nlohmann::json::object();
-        item["thread_slot"] = block.threadSlot;
-        item["site"] = Text(block.site);
-        item["detail"] = Text(block.detail);
-        item["elapsed"] = MetricToJson(block.elapsed);
-        live.push_back(std::move(item));
-    }
-    out["live_block"] = std::move(live);
+    out["live_block"] = LiveBlocksToJson(snapshot);
 
     const Profiling::SnapshotVerdictDetail& detail = snapshot.verdictDetail;
     nlohmann::json verdict = nlohmann::json::object();
@@ -322,18 +328,21 @@ std::optional<std::size_t> ParseProfilerFrameCount(const std::string& text)
     return static_cast<std::size_t>(std::clamp<std::uint64_t>(value, 1, kProfilerFramesMax));
 }
 
-ProfilerReply BuildProfilerReply(
-    ProfilerRoute route, const std::optional<ProfilerSnapshot>& snapshot, std::size_t frameCount)
+ProfilerReply BuildProfilerReply(ProfilerRoute route, const ProfilerSnapshot& snapshot, std::size_t frameCount)
 {
-    if (!snapshot) {
-        return { 503, BuildGenericErrorResponseJson("no profiler snapshot yet - the main thread has not published one, try again") };
-    }
     switch (route) {
-    case ProfilerRoute::Overview: return { 200, ProfilerSnapshotToJson(*snapshot).dump() };
-    case ProfilerRoute::Frames: return { 200, ProfilerFramesToJson(*snapshot, frameCount).dump() };
-    case ProfilerRoute::Spikes: return { 200, ProfilerSpikesToJson(*snapshot).dump() };
+    case ProfilerRoute::Overview: return { 200, ProfilerSnapshotToJson(snapshot).dump() };
+    case ProfilerRoute::Frames: return { 200, ProfilerFramesToJson(snapshot, frameCount).dump() };
+    case ProfilerRoute::Spikes: return { 200, ProfilerSpikesToJson(snapshot).dump() };
     }
     return { 500, BuildGenericErrorResponseJson("unknown profiler route") };
+}
+
+ProfilerReply BuildProfilerNoSnapshotReply(const ProfilerSnapshot& liveOnly)
+{
+    nlohmann::json out = Envelope(liveOnly, "no_snapshot");
+    out["live_block"] = LiveBlocksToJson(liveOnly);
+    return { 200, out.dump() };
 }
 
 ProfilerReply BuildProfilerUnavailableReply(bool bridgePresent)
@@ -604,7 +613,9 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
             if (bridge == nullptr) {
                 reply = BuildProfilerUnavailableReply(false);
             } else {
-                reply = BuildProfilerReply(route, bridge->Latest(kSnapshotWait), frameCount);
+                const std::optional<ProfilerSnapshot> latest = bridge->Latest(kSnapshotWait);
+                reply = latest ? BuildProfilerReply(route, *latest, frameCount)
+                               : BuildProfilerNoSnapshotReply(bridge->LiveOnlySnapshot());
             }
 #else
             static_cast<void>(req);
@@ -767,7 +778,7 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
         const std::optional<ProfilerSnapshot> snapshot = bridge->Latest(kSnapshotWait);
         ProfilerReply reply;
         if (!snapshot) {
-            reply = BuildProfilerReply(ProfilerRoute::Overview, std::nullopt, 0);
+            reply = { 503, BuildGenericErrorResponseJson("no profiler snapshot yet - the main thread has not published one, try again") };
         } else {
             std::vector<Profiling::SpikeDetail> pinned;
             for (std::uint32_t i = 0; i < snapshot->spikeCount && i < snapshot->spikes.size(); ++i) {

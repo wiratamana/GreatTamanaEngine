@@ -4,12 +4,19 @@
 // A failed wait loses the device and later waits fail at once, so only a few items are ever parked.
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <vector>
 
 namespace gte {
+
+// True when parked objects will be leaked: their allocations stay live, so the allocator must not be destroyed.
+constexpr bool ShouldAbandonAllocator(bool idleCompleted, std::size_t parkedCount) noexcept
+{
+    return !idleCompleted && parkedCount > 0;
+}
 
 // Thread-safe.
 class AbandonedWork {

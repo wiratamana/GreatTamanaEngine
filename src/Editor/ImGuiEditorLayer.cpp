@@ -9,6 +9,7 @@
 #include "DockLayout.h"
 #include "EditorCamera.h"
 #include "EditorContext.h"
+#include "EditorViewNames.h"
 #include "EditorGpuMemoryNameOverlay.h"
 #include "InstanceGridTestSpawner.h"
 #include "ImGuiIdConflictGuard.h"
@@ -70,10 +71,10 @@ namespace {
 class ImGuiEditorLayer final : public IEditorLayer {
 public:
     ImGuiEditorLayer(Window& window, Renderer& renderer)
-        : m_gameView(renderer.CreateRenderTexture(window.Width(), window.Height(), renderer.ScenePixelFormat(), "GameView",
-              "GameViewDepth", /*allowStorageImageAccess=*/true, /*allowDepthSampledAccess=*/true))
-        , m_sceneView(renderer.CreateRenderTexture(window.Width(), window.Height(), renderer.ScenePixelFormat(), "SceneView",
-              "SceneViewDepth", /*allowStorageImageAccess=*/true, /*allowDepthSampledAccess=*/true))
+        : m_gameView(renderer.CreateRenderTexture(window.Width(), window.Height(), renderer.ScenePixelFormat(),
+              kGameViewResourceName, "GameViewDepth", /*allowStorageImageAccess=*/true, /*allowDepthSampledAccess=*/true))
+        , m_sceneView(renderer.CreateRenderTexture(window.Width(), window.Height(), renderer.ScenePixelFormat(),
+              kSceneViewResourceName, "SceneViewDepth", /*allowStorageImageAccess=*/true, /*allowDepthSampledAccess=*/true))
         , m_sceneGrid(renderer)
     {
         // Both views start at the OS window's size so the first frame sees no resize mismatch.
@@ -248,7 +249,7 @@ public:
         BeginGizmoFrame();
     }
 
-    RenderTexture* GameViewTarget() override
+    RenderTexture* PrimaryViewTarget() override
     {
         // Not visible last frame (inactive tab behind "Scene", or
         // collapsed) - see EditorContext::gameViewVisible - skip rendering
@@ -276,9 +277,9 @@ public:
         return &m_gameView;
     }
 
-    RenderTexture* SceneViewTarget() override
+    RenderTexture* SecondaryViewTarget() override
     {
-        // Same visibility gating and resize-on-demand as GameViewTarget(), for the Scene view.
+        // Same visibility gating and resize-on-demand as PrimaryViewTarget().
         if (!m_ctx.sceneViewVisible) {
             return nullptr;
         }
@@ -297,19 +298,21 @@ public:
         return &m_sceneView;
     }
 
+    const char* ViewResourceName(rg::ViewScope scope) const noexcept override { return EditorViewResourceName(scope); }
+
     // Reflects the Scene camera as of the last BuildUI() (up to one frame of lag).
-    Mat4 SceneViewProjection(float aspectWidthOverHeight) const override
+    Mat4 SecondaryViewProjection(float aspectWidthOverHeight) const override
     {
         return m_sceneCamera.ViewProjection(aspectWidthOverHeight);
     }
 
-    // See IEditorLayer::SceneViewCameraWorldPosition()'s own doc comment.
-    Vec3 SceneViewCameraWorldPosition() const override { return m_sceneCamera.GetTransform().position; }
+    // See IEditorLayer::SecondaryViewCameraWorldPosition()'s own doc comment.
+    Vec3 SecondaryViewCameraWorldPosition() const override { return m_sceneCamera.GetTransform().position; }
 
 
     // Remembers the pointer; BuildUI() creates the ImGui descriptor from it lazily.
-    void SetGameViewCompositedTexture(RenderTexture* texture) override { m_gameViewComposited = texture; }
-    void SetSceneViewCompositedTexture(RenderTexture* texture) override { m_sceneViewComposited = texture; }
+    void SetPrimaryViewCompositedTexture(RenderTexture* texture) override { m_gameViewComposited = texture; }
+    void SetSecondaryViewCompositedTexture(RenderTexture* texture) override { m_sceneViewComposited = texture; }
 
     // See IEditorLayer::RenderSceneGrid(). Called only when the Scene view rendered, so no visibility check is needed.
     void RenderSceneGrid(const rg::RecordingContext& cmd, const Mat4& sceneViewProjection) override

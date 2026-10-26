@@ -50,7 +50,7 @@ TEST(FxTransientTargetTest, AcquireCreatesAKeptPoolTextureNamedPerView)
 
         const rg::CompiledGraphInput input = h.builder.Finish();
         ASSERT_EQ(input.textures.size(), 1u);
-        EXPECT_EQ(std::string(input.textures[0].name), PersistentName("Scratch", scope));
+        EXPECT_EQ(std::string(input.textures[0].name), PersistentName("Scratch", h.context));
         EXPECT_FALSE(input.textures[0].importInfo.isImported);
         EXPECT_EQ(input.textures[0].desc.width, 40u);
         EXPECT_EQ(input.textures[0].desc.height, 30u);

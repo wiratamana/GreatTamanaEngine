@@ -25,7 +25,7 @@ TEST(RenderFeatureCameraDataTest, WellConditionedViewProjectionProducesValidChec
         * Mat4::LookAtLH(eye, Vec3(0.0f, 0.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f));
     RenderPassViewData viewData = MakeViewData(viewProjection, eye);
 
-    const RenderFeatureCameraData result = ResolveRenderFeatureCameraData(rg::RenderViewId::Named("Game"), &viewData);
+    const RenderFeatureCameraData result = ResolveRenderFeatureCameraData(rg::RenderViewId::Named("Primary"), &viewData);
 
     EXPECT_TRUE(result.invViewProjectionValid);
     EXPECT_EQ(result.eyeWorldPosition.x, eye.x);
@@ -43,7 +43,7 @@ TEST(RenderFeatureCameraDataTest, SingularViewProjectionProducesInvalidIdentityF
     // doc comment) - its determinant is 0, so TryInverse() must reject it.
     RenderPassViewData viewData = MakeViewData(Mat4{}, Vec3(0.0f, 0.0f, 0.0f));
 
-    const RenderFeatureCameraData result = ResolveRenderFeatureCameraData(rg::RenderViewId::Named("Game"), &viewData);
+    const RenderFeatureCameraData result = ResolveRenderFeatureCameraData(rg::RenderViewId::Named("Primary"), &viewData);
 
     EXPECT_FALSE(result.invViewProjectionValid);
     EXPECT_TRUE(ApproximatelyEqual(result.invViewProjection, Mat4::Identity()));
@@ -56,7 +56,7 @@ TEST(RenderFeatureCameraDataTest, SecondDifferentViewGoingSingularAfterwardStill
 {
     RenderPassViewData firstViewData = MakeViewData(Mat4{}, Vec3(0.0f, 0.0f, 0.0f));
     const RenderFeatureCameraData firstResult =
-        ResolveRenderFeatureCameraData(rg::RenderViewId::Named("Game"), &firstViewData);
+        ResolveRenderFeatureCameraData(rg::RenderViewId::Named("Primary"), &firstViewData);
     ASSERT_FALSE(firstResult.invViewProjectionValid);
 
     // A SECOND, DIFFERENT view going singular afterward must produce its own,
@@ -64,7 +64,7 @@ TEST(RenderFeatureCameraDataTest, SecondDifferentViewGoingSingularAfterwardStill
     // already-triggered warning.
     RenderPassViewData secondViewData = MakeViewData(Mat4{}, Vec3(0.0f, 0.0f, 0.0f));
     const RenderFeatureCameraData secondResult =
-        ResolveRenderFeatureCameraData(rg::RenderViewId::Named("Scene"), &secondViewData);
+        ResolveRenderFeatureCameraData(rg::RenderViewId::Named("Secondary"), &secondViewData);
 
     EXPECT_FALSE(secondResult.invViewProjectionValid);
     EXPECT_TRUE(ApproximatelyEqual(secondResult.invViewProjection, Mat4::Identity()));
@@ -72,7 +72,7 @@ TEST(RenderFeatureCameraDataTest, SecondDifferentViewGoingSingularAfterwardStill
 
 TEST(RenderFeatureCameraDataTest, NullViewDataProducesAQuietInvalidDefaultResult)
 {
-    const RenderFeatureCameraData result = ResolveRenderFeatureCameraData(rg::RenderViewId::Named("Game"), nullptr);
+    const RenderFeatureCameraData result = ResolveRenderFeatureCameraData(rg::RenderViewId::Named("Primary"), nullptr);
 
     EXPECT_FALSE(result.invViewProjectionValid);
 }
@@ -88,40 +88,40 @@ TEST(RenderFeatureCameraDataWarningTrackerTest, FirstCallForAFreshViewReturnsTru
 {
     RenderFeatureCameraDataWarningTracker tracker;
 
-    EXPECT_TRUE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Game")));
+    EXPECT_TRUE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Primary")));
 }
 
 TEST(RenderFeatureCameraDataWarningTrackerTest, SecondCallForTheSameViewReturnsFalse)
 {
     RenderFeatureCameraDataWarningTracker tracker;
 
-    EXPECT_TRUE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Game")));
-    EXPECT_FALSE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Game")));
+    EXPECT_TRUE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Primary")));
+    EXPECT_FALSE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Primary")));
 }
 
 TEST(RenderFeatureCameraDataWarningTrackerTest, ADifferentViewGoingSingularAfterwardsStillGetsItsOwnFreshWarning)
 {
     RenderFeatureCameraDataWarningTracker tracker;
 
-    EXPECT_TRUE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Game")));
-    EXPECT_FALSE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Game")));
+    EXPECT_TRUE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Primary")));
+    EXPECT_FALSE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Primary")));
 
     // A second, different RenderViewId must get its own fresh "first warning"
     // - never silently swallowed by the first view's already-fired warning.
-    EXPECT_TRUE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Scene")));
-    EXPECT_FALSE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Scene")));
+    EXPECT_TRUE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Secondary")));
+    EXPECT_FALSE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Secondary")));
 }
 
 TEST(RenderFeatureCameraDataWarningTrackerTest, ResetClearsSeenViewsSoAPreviouslyWarnedViewIsFreshAgain)
 {
     RenderFeatureCameraDataWarningTracker tracker;
 
-    EXPECT_TRUE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Game")));
-    EXPECT_FALSE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Game")));
+    EXPECT_TRUE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Primary")));
+    EXPECT_FALSE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Primary")));
 
     tracker.Reset();
 
-    EXPECT_TRUE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Game")));
+    EXPECT_TRUE(tracker.ShouldWarnOnce(rg::RenderViewId::Named("Primary")));
 }
 
 } // namespace

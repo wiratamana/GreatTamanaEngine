@@ -1,4 +1,5 @@
 #include "EditorLayer.h"
+#include "EditorViewNames.h"
 
 // No-op editor layer for hosts that link gte_core without the Editor module.
 // Its factory is CreateNullEditorLayer() so it never collides with CreateEditorLayer() in the same link.
@@ -7,18 +8,19 @@ namespace gte {
 
 namespace {
 
-// Inert stand-in: every call is a no-op and GameViewTarget() is null, so the game renders to the swapchain.
+// Inert stand-in: every call is a no-op and PrimaryViewTarget() is null, so the game renders to the swapchain.
 class NullEditorLayer final : public IEditorLayer {
 public:
     void ProcessEvent(const SDL_Event& /*event*/) override { }
     void OnWindowResized(int /*width*/, int /*height*/) override { }
     void NewFrame() override { }
-    RenderTexture* GameViewTarget() override { return nullptr; }
-    RenderTexture* SceneViewTarget() override { return nullptr; }
-    Mat4 SceneViewProjection(float /*aspectWidthOverHeight*/) const override { return Mat4::Identity(); }
-    Vec3 SceneViewCameraWorldPosition() const override { return Vec3::Zero(); }
-    void SetGameViewCompositedTexture(RenderTexture* /*texture*/) override { }
-    void SetSceneViewCompositedTexture(RenderTexture* /*texture*/) override { }
+    RenderTexture* PrimaryViewTarget() override { return nullptr; }
+    RenderTexture* SecondaryViewTarget() override { return nullptr; }
+    const char* ViewResourceName(rg::ViewScope scope) const noexcept override { return EditorViewResourceName(scope); }
+    Mat4 SecondaryViewProjection(float /*aspectWidthOverHeight*/) const override { return Mat4::Identity(); }
+    Vec3 SecondaryViewCameraWorldPosition() const override { return Vec3::Zero(); }
+    void SetPrimaryViewCompositedTexture(RenderTexture* /*texture*/) override { }
+    void SetSecondaryViewCompositedTexture(RenderTexture* /*texture*/) override { }
     void RenderSceneGrid(const rg::RecordingContext& /*cmd*/, const Mat4& /*sceneViewProjection*/) override { }
     void BuildUI(Game& /*game*/, Renderer& /*renderer*/, const rg::RenderGraph& /*renderGraph*/,
         const std::vector<RenderFeatureDebugEntry>& /*renderFeatureEntries*/,

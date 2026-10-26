@@ -1,6 +1,6 @@
 #include "FrameDebuggerData.h"
 
-#include "../Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
+#include "RenderGraphDisplayText.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -443,7 +443,7 @@ FrameDebuggerEventNode BuildComputeDispatchLeaf(
         timing.x = gpu.barrierMs + gpu.workMs;
         details.vectors.push_back(timing);
     }
-    details.gpuTimingText = rg::FormatGpuTiming(gpu);
+    details.gpuTimingText = FormatGpuTiming(gpu);
 
     // No matrices: a compute dispatch uses no camera matrix.
 
@@ -519,7 +519,7 @@ FrameDebuggerEventNode BuildRenderOpaqueLeaf(
         drawStats.y = static_cast<float>(renderOpaquePass.stats.drawStats.triangleCount);
         details.vectors.push_back(drawStats);
 
-        details.gpuTimingText = rg::FormatGpuTiming(renderOpaquePass.stats.gpu);
+        details.gpuTimingText = FormatGpuTiming(renderOpaquePass.stats.gpu);
         details.indirectDraws = renderOpaquePass.stats.gpu.indirectDraws;
     }
 
@@ -693,7 +693,7 @@ FrameDebuggerEventNode BuildGraphicsPassLeaf(
     drawStats.x = static_cast<float>(pass.stats.drawStats.drawCallCount);
     drawStats.y = static_cast<float>(pass.stats.drawStats.triangleCount);
     details.vectors.push_back(drawStats);
-    details.gpuTimingText = rg::FormatGpuTiming(pass.stats.gpu);
+    details.gpuTimingText = FormatGpuTiming(pass.stats.gpu);
     details.indirectDraws = pass.stats.gpu.indirectDraws;
 
     leaf.details = std::move(details);

@@ -94,8 +94,8 @@ TEST(CoreHeadlessConstructionTest, ConstructsWithoutCrashingAndExposesUsableAcce
     InputFrame input;
     core->Update(input, 1.0f / 60.0f);
 
-    // GetGameViewTargetThisFrame() must not dereference a null editor layer before BuildFrame() ran.
-    EXPECT_EQ(core->GetGameViewTargetThisFrame(), nullptr);
+    // GetPrimaryViewTargetThisFrame() must not dereference a null editor layer before BuildFrame() ran.
+    EXPECT_EQ(core->GetPrimaryViewTargetThisFrame(), nullptr);
 }
 
 } // namespace gte

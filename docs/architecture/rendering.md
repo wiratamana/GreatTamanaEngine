@@ -112,8 +112,8 @@ tone mapping.
 ### Rendering without view panels
 
 When the Editor gives no Game or Scene target (no Editor, or both panels hidden), `Core` renders the Game view into its own
-`DirectGameView` target (scene format, resized with the window) through the same offscreen graph, so post features run and
-`/get_game_view` works. The `PresentGameView` pass (`PresentBlit.vert/.frag`) then copies it to the swapchain before the
+`DirectPrimaryView` target (scene format, resized with the window) through the same offscreen graph, so post features run and
+`/get_game_view` works. The `PresentPrimaryView` pass (`PresentBlit.vert/.frag`) then copies it to the swapchain before the
 Present pass records ImGui. `AddPresentPass()` only clears the swapchain (when no direct target was blitted) and records the UI.
 GPU skinning runs once, in the offscreen graph.
 

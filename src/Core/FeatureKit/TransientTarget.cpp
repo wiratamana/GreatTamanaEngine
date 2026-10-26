@@ -1,6 +1,7 @@
 #include "TransientTarget.h"
 
 #include "FrameContext.h"
+#include "PersistentTarget.h"
 #include "../../Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "../../Renderer/RenderGraph/ViewScopeUtil.h"
 
@@ -11,14 +12,13 @@
 namespace gte::fx {
 
 struct TransientTarget::Impl {
-    explicit Impl(std::string_view base)
+    explicit Impl(std::string_view baseName)
+        : base(baseName)
     {
-        for (std::size_t i = 0; i < rg::kViewScopeCount; ++i) {
-            names[i] = PersistentName(base, static_cast<rg::ViewScope>(i));
-        }
     }
 
-    std::array<std::string, rg::kViewScopeCount> names; // The graph keeps the c_str() for the frame.
+    std::string base;
+    std::array<std::string, rg::kViewScopeCount> names; // Set on first use. The graph keeps the c_str() for the frame.
 };
 
 TransientTarget::TransientTarget(std::string_view baseName)
@@ -47,6 +47,9 @@ Texture TransientTarget::Acquire(Frame& frame, Extent2D extent, PixelFormat form
     desc.usage = storage ? rg::TextureUsage::Storage : rg::TextureUsage::Sampled;
 
     const std::size_t index = rg::ViewScopeIndex(ctx->scope);
+    if (m_impl->names[index].empty()) {
+        m_impl->names[index] = PersistentName(m_impl->base, *ctx);
+    }
     const rg::TextureHandle handle = ctx->builder->CreateTexture(m_impl->names[index].c_str(), desc);
     if (!handle.IsValid()) {
         return Texture{};

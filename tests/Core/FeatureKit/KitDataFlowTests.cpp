@@ -28,7 +28,7 @@ Registry& FakeScene()
 
 // A frame with a blackboard but no builder: enough for data flow, no GPU.
 struct Harness {
-    explicit Harness(rg::RenderViewId viewId = rg::RenderViewId::Named("Game"), std::uint64_t serial = 5)
+    explicit Harness(rg::RenderViewId viewId = rg::RenderViewId::Named("Primary"), std::uint64_t serial = 5)
     {
         context.blackboard = &blackboard;
         context.view = viewId;
@@ -46,8 +46,8 @@ struct Harness {
 
 TEST(KitChannelKeyTest, StablePerFeatureChannelAndView)
 {
-    const rg::RenderViewId game = rg::RenderViewId::Named("Game");
-    const rg::RenderViewId scene = rg::RenderViewId::Named("Scene");
+    const rg::RenderViewId game = rg::RenderViewId::Named("Primary");
+    const rg::RenderViewId scene = rg::RenderViewId::Named("Secondary");
     EXPECT_EQ(ChannelKey("Shadow", "Map", game), ChannelKey("Shadow", "Map", game));
     EXPECT_NE(ChannelKey("Shadow", "Map", game), ChannelKey("Shadow", "Map", scene));
     EXPECT_NE(ChannelKey("Shadow", "Map", game), ChannelKey("Shadow", "Mask", game));
@@ -56,7 +56,7 @@ TEST(KitChannelKeyTest, StablePerFeatureChannelAndView)
 
 TEST(KitChannelKeyTest, LongNamesHashLikeShortOnes)
 {
-    const rg::RenderViewId game = rg::RenderViewId::Named("Game");
+    const rg::RenderViewId game = rg::RenderViewId::Named("Primary");
     const std::string longName(200, 'x');
     EXPECT_EQ(ChannelKey("F", longName, game), ChannelKey("F", longName, game));
     EXPECT_NE(ChannelKey("F", longName, game), ChannelKey("F", longName + "y", game));
@@ -64,7 +64,7 @@ TEST(KitChannelKeyTest, LongNamesHashLikeShortOnes)
 
 TEST(KitChannelKeyTest, MatchesTheEngineKeyOfTheJoinedName)
 {
-    const rg::RenderViewId game = rg::RenderViewId::Named("Game");
+    const rg::RenderViewId game = rg::RenderViewId::Named("Primary");
     EXPECT_EQ(ChannelKey("Shadow", "Map", game), rg::SceneResourceKeyOf("Shadow.Map", game).hash);
 }
 
@@ -95,14 +95,14 @@ TEST(KitChannelTest, PublishedValueIsFetchedInTheSameView)
 
 TEST(KitChannelTest, AnotherViewDoesNotSeeTheValue)
 {
-    Harness game(rg::RenderViewId::Named("Game"));
+    Harness game(rg::RenderViewId::Named("Primary"));
     Channel<int> channel("Number");
     PreOpaqueFrame gameFrame = game.MakeFrame();
     channel.Publish(gameFrame, 7);
 
     // Same blackboard, other view.
     detail::FrameContext sceneContext = game.context;
-    sceneContext.view = rg::RenderViewId::Named("Scene");
+    sceneContext.view = rg::RenderViewId::Named("Secondary");
     const PreOpaqueFrame sceneFrame(View{}, FakeScene(), 5, &sceneContext);
     EXPECT_FALSE(channel.Fetch(sceneFrame).has_value());
     EXPECT_TRUE(channel.Fetch(gameFrame).has_value());
@@ -206,12 +206,12 @@ TEST(KitChannelReaderTest, EmptyOwnerOrNameIsLoggedOnceAndReturnsNothing)
 
 TEST(KitChannelReaderTest, AnotherViewDoesNotSeeTheValue)
 {
-    Harness game(rg::RenderViewId::Named("Game"));
+    Harness game(rg::RenderViewId::Named("Primary"));
     PreOpaqueFrame gameFrame = game.MakeFrame();
     Channel<int>("X").Publish(gameFrame, 5);
 
     detail::FrameContext sceneContext = game.context;
-    sceneContext.view = rg::RenderViewId::Named("Scene");
+    sceneContext.view = rg::RenderViewId::Named("Secondary");
     const PreOpaqueFrame sceneFrame(View{}, FakeScene(), 5, &sceneContext);
     const ChannelReader<int> reader("Feature", "X");
     EXPECT_FALSE(reader.Fetch(sceneFrame).has_value());
@@ -225,7 +225,7 @@ TEST(KitChannelReaderTest, ASharedValueIsVisibleToAViewReader)
     Channel<int>("X").Publish(sharedFrame, 9);
 
     detail::FrameContext gameContext = shared.context;
-    gameContext.view = rg::RenderViewId::Named("Game");
+    gameContext.view = rg::RenderViewId::Named("Primary");
     const PreOpaqueFrame gameFrame(View{}, FakeScene(), 5, &gameContext);
     const auto value = ChannelReader<int>("Feature", "X").Fetch(gameFrame);
     ASSERT_TRUE(value.has_value());

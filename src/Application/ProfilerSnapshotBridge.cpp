@@ -23,6 +23,19 @@ bool ProfilerSnapshotBridge::WantsSnapshotAt(std::uint64_t nowNanoseconds) const
     return asked != 0 && nowNanoseconds >= asked && nowNanoseconds - asked <= kAskWindowNanoseconds;
 }
 
+bool ProfilerSnapshotBridge::ShouldPublish(std::uint64_t completedFrames, std::uint64_t frozenSpikes) noexcept
+{
+    const bool spiked = frozenSpikes != m_seenFrozenSpikes;
+    m_seenFrozenSpikes = frozenSpikes;
+    const bool idleDue = completedFrames - m_lastPublishFrames >= kIdlePublishFrames;
+    if (!(spiked || idleDue || !m_publishedOnce || WantsSnapshot())) {
+        return false;
+    }
+    m_publishedOnce = true;
+    m_lastPublishFrames = completedFrames;
+    return true;
+}
+
 void ProfilerSnapshotBridge::Publish(const Profiling::ProfilerSnapshot& snapshot)
 {
     const std::uint64_t now = NowNanoseconds();
@@ -74,6 +87,13 @@ std::optional<Profiling::ProfilerSnapshot> ProfilerSnapshotBridge::Latest(std::c
     copy.snapshotAge = Profiling::PresentMetric(ageMilliseconds, Profiling::Unit::Milliseconds, Profiling::MetricKind::Derived);
     Profiling::FillLiveBlocks(copy, Profiling::FrameProfiler::Instance().LiveBlocks(), Profiling::NowMicroseconds());
     return copy;
+}
+
+Profiling::ProfilerSnapshot ProfilerSnapshotBridge::LiveOnlySnapshot() const
+{
+    Profiling::ProfilerSnapshot live;
+    Profiling::FillLiveBlocks(live, Profiling::FrameProfiler::Instance().LiveBlocks(), Profiling::NowMicroseconds());
+    return live;
 }
 
 void ProfilerSnapshotBridge::SetCapture(bool enabled) noexcept

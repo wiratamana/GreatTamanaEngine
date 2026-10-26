@@ -42,14 +42,14 @@ TEST(PostOpaqueRenderPipelineBlackboardQualificationTest,
 
     pipeline.Register("PostOpaqueFeatures_Stub", ProviderScope::PerActiveView,
         [](const RenderPassFrameContext& frame, std::vector<RenderPassDesc>&) {
-            const bool isGameView = (frame.currentView == RenderViewId::Named("Game"));
+            const bool isGameView = (frame.currentView == RenderViewId::Named("Primary"));
             const RenderPassId key = isGameView ? kPostOpaqueMarkerGameKey : kPostOpaqueMarkerSceneKey;
             frame.blackboard.Publish<int>(key, isGameView ? 1 : 2);
         });
 
     pipeline.Register("PostComposite_Stub", ProviderScope::PerActiveView,
         [&fetchedByView](const RenderPassFrameContext& frame, std::vector<RenderPassDesc>&) {
-            const bool isGameView = (frame.currentView == RenderViewId::Named("Game"));
+            const bool isGameView = (frame.currentView == RenderViewId::Named("Primary"));
             const RenderPassId key = isGameView ? kPostOpaqueMarkerGameKey : kPostOpaqueMarkerSceneKey;
             const std::optional<int> fetched = frame.blackboard.Fetch<int>(key);
             fetchedByView[isGameView ? 1u : 2u] = fetched.value_or(-1);
@@ -60,7 +60,7 @@ TEST(PostOpaqueRenderPipelineBlackboardQualificationTest,
 
     RenderGraphBuilder builder;
     RenderPassFrameContext frame{
-        /*activeViews=*/{ RenderViewId::Named("Game"), RenderViewId::Named("Scene") },
+        /*activeViews=*/{ RenderViewId::Named("Primary"), RenderViewId::Named("Secondary") },
         /*currentView=*/RenderViewId::Shared(),
         /*blackboard=*/blackboard,
         /*builder=*/builder,
@@ -81,14 +81,14 @@ TEST(PostTransparentRenderPipelineBlackboardQualificationTest,
 
     pipeline.Register("PostTransparentFeatures_Stub", ProviderScope::PerActiveView,
         [](const RenderPassFrameContext& frame, std::vector<RenderPassDesc>&) {
-            const bool isGameView = (frame.currentView == RenderViewId::Named("Game"));
+            const bool isGameView = (frame.currentView == RenderViewId::Named("Primary"));
             const RenderPassId key = isGameView ? kPostTransparentMarkerGameKey : kPostTransparentMarkerSceneKey;
             frame.blackboard.Publish<int>(key, isGameView ? 1 : 2);
         });
 
     pipeline.Register("PostComposite_Stub", ProviderScope::PerActiveView,
         [&fetchedByView](const RenderPassFrameContext& frame, std::vector<RenderPassDesc>&) {
-            const bool isGameView = (frame.currentView == RenderViewId::Named("Game"));
+            const bool isGameView = (frame.currentView == RenderViewId::Named("Primary"));
             const RenderPassId key = isGameView ? kPostTransparentMarkerGameKey : kPostTransparentMarkerSceneKey;
             const std::optional<int> fetched = frame.blackboard.Fetch<int>(key);
             fetchedByView[isGameView ? 1u : 2u] = fetched.value_or(-1);
@@ -99,7 +99,7 @@ TEST(PostTransparentRenderPipelineBlackboardQualificationTest,
 
     RenderGraphBuilder builder;
     RenderPassFrameContext frame{
-        /*activeViews=*/{ RenderViewId::Named("Game"), RenderViewId::Named("Scene") },
+        /*activeViews=*/{ RenderViewId::Named("Primary"), RenderViewId::Named("Secondary") },
         /*currentView=*/RenderViewId::Shared(),
         /*blackboard=*/blackboard,
         /*builder=*/builder,

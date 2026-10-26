@@ -6,6 +6,7 @@
 #include "Culling/ClusterCullMath.h"
 #include "FramePresenter.h"
 #include "FrameRecorder.h"
+#include "GpuClockCalibration.h"
 #include "GpuResourceFactory.h"
 #include "GpuTiming.h"
 #include "GpuWaitPolicy.h"
@@ -161,8 +162,11 @@ public:
     // Consecutive frame waits that timed out; resets after a completed wait.
     std::uint32_t GpuWaitConsecutiveFrameTimeouts() const noexcept;
 
-    // True when the device can sample CPU and GPU clocks together. The device setup enables no such extension.
-    bool GpuClockCalibrationAvailable() const noexcept;
+    // CPU to GPU clock mapping of the device. Not Present when the device cannot sample both clocks together.
+    ClockCalibration GpuClockCalibration() const noexcept;
+
+    // Frames that really reached the queue through PresentViaRenderGraph().
+    std::uint64_t PresentedFrameCount() const noexcept { return m_presenter.SubmittedFrameCount(); }
 
     // Installs the observer of every blocking wait. Pass nullptr to remove it.
     void SetTimingObserver(IRenderTimingObserver* observer) noexcept;

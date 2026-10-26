@@ -1,6 +1,7 @@
 #include "PersistentTarget.h"
 
 #include "FrameContext.h"
+#include "../Core.h"
 #include "../../Renderer/RenderGraph/PersistentTarget.h"
 #include "../../Renderer/RenderGraph/ViewScopeUtil.h"
 
@@ -8,31 +9,34 @@
 
 namespace gte::fx {
 
-std::string PersistentName(std::string_view base, rg::ViewScope scope)
+std::string PersistentName(std::string_view base, rg::ViewScope scope, std::string_view viewLabel)
 {
     std::string name(base);
-    switch (scope) {
-    case rg::ViewScope::Primary:
-        name += ".GameView";
-        break;
-    case rg::ViewScope::Secondary:
-        name += ".SceneView";
-        break;
-    case rg::ViewScope::Shared:
-        break;
+    if (scope != rg::ViewScope::Shared) {
+        name += '.';
+        name += viewLabel;
     }
     return name;
 }
 
+std::string PersistentName(std::string_view base, const detail::FrameContext& context)
+{
+    const char* label = "";
+    if (context.scope != rg::ViewScope::Shared) {
+        label = context.core != nullptr ? context.core->ViewResourceName(context.scope)
+                                        : (context.scope == rg::ViewScope::Secondary ? kSecondaryViewName : kPrimaryViewName);
+    }
+    return PersistentName(base, context.scope, label);
+}
+
 struct PersistentTarget::Impl {
-    explicit Impl(std::string_view base)
+    explicit Impl(std::string_view baseName)
+        : base(baseName)
     {
-        for (std::size_t i = 0; i < rg::kViewScopeCount; ++i) {
-            names[i] = PersistentName(base, static_cast<rg::ViewScope>(i));
-        }
     }
 
-    std::array<std::string, rg::kViewScopeCount> names; // Stable: the cache copies, but tokens key on them.
+    std::string base;
+    std::array<std::string, rg::kViewScopeCount> names; // Set on first use. Stable: the cache copies, but tokens key on them.
     std::array<rg::PersistentTarget, rg::kViewScopeCount> targets;
 };
 
@@ -51,6 +55,9 @@ Texture PersistentTarget::Acquire(Frame& frame, Extent2D extent, PixelFormat for
         return Texture{};
     }
     const std::size_t index = rg::ViewScopeIndex(ctx->scope);
+    if (m_impl->names[index].empty()) {
+        m_impl->names[index] = PersistentName(m_impl->base, *ctx);
+    }
     const rg::TextureHandle handle =
         m_impl->targets[index].Acquire(*ctx->builder, m_impl->names[index].c_str(), extent, format);
     return handle.IsValid() ? frame.Stamp(handle) : Texture{};

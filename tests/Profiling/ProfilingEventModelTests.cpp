@@ -3,6 +3,7 @@
 #include "Profiling/ManualClock.h"
 #include "Profiling/NameTable.h"
 #include "Profiling/ProfilingBudget.h"
+#include "Profiling/ProfilingTypes.h"
 #include "Profiling/ScopeEvent.h"
 #include "Profiling/ScopeLog.h"
 #include "Profiling/ScopeTree.h"
@@ -148,10 +149,10 @@ TEST(NameTableTest, GlobalTableInternsAndResolves)
 
 // ---- Budgets ----
 
-TEST(ProfilingBudgetTest, EventSizesAndTotalStayInBudget)
+TEST(ProfilingBudgetTest, EventSizesAndFrameRecordStayInBudget)
 {
     EXPECT_EQ(sizeof(ScopeEvent), 24u);
-    EXPECT_LE(kTotalBudgetBytes, 16u * 1024u * 1024u);
+    EXPECT_LE(sizeof(FrameRecord), 72u * 1024u);
     EXPECT_EQ(ScopeEventBuffer::kCapacity, kMaxScopeEventsPerFrame);
 }
 

@@ -19,10 +19,8 @@ struct JobEntry {
     std::shared_ptr<JobHandleState> state;
 };
 
-// Fixed-capacity MPMC ring buffer guarded by a mutex and condition variable. Capacity is set once.
-// Schedule() pushes from any thread; every worker pops. A full queue is the caller's problem:
-// it runs the job inline, so Push() never blocks, grows or drops silently.
-// Always compiled, whatever GTE_ENABLE_JOB_SYSTEM says; only JobSystem's use of it is gated.
+// Fixed-capacity MPMC ring, mutex + condvar. A full queue makes the caller run the job inline (Push never blocks).
+// Always compiled; only JobSystem's use of it is gated.
 class JobQueue {
 public:
     // `capacity` must be at least 1. Every slot is allocated once, up

@@ -377,9 +377,9 @@ TEST(FxVerbTest, DepthWrapsTheSameTexture)
 
 TEST(FxVerbTest, PersistentNameAddsTheViewSuffix)
 {
-    EXPECT_EQ(PersistentName("Mask", rg::ViewScope::Primary), "Mask.GameView");
-    EXPECT_EQ(PersistentName("Mask", rg::ViewScope::Secondary), "Mask.SceneView");
-    EXPECT_EQ(PersistentName("Mask", rg::ViewScope::Shared), "Mask");
+    EXPECT_EQ(PersistentName("Mask", rg::ViewScope::Primary, "GameView"), "Mask.GameView");
+    EXPECT_EQ(PersistentName("Mask", rg::ViewScope::Secondary, "SceneView"), "Mask.SceneView");
+    EXPECT_EQ(PersistentName("Mask", rg::ViewScope::Shared, "GameView"), "Mask");
 }
 
 TEST(FxVerbTest, VerbsOnAFrameWithoutContextAreInertAndLogOnce)

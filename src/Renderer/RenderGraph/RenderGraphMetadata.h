@@ -1,15 +1,12 @@
 #pragma once
 
-// Everything the Render Graph panel shows, as one engine-free, JSON-able object: both regimes, features,
-// device indirect-draw caps and tracked GPU memory. One object backs the panel tables, GET /render_graph
-// and the DOT export. BuildRenderGraphMetadata() is a pure function of plain data.
+// Plain data behind the Render Graph panel, GET /render_graph and the DOT export. No labels, no JSON.
+// BuildRenderGraphMetadata() is a pure function of plain data.
 
 #include "RenderGraphSnapshot.h"
 #include "RenderGraphTypes.h"
 #include "../Culling/ClusterCullMath.h"
 #include "../../Core/Plugins/RenderFeatureDebugEntry.h"
-
-#include <nlohmann/json.hpp>
 
 #include <cstdint>
 #include <map>
@@ -29,14 +26,14 @@ struct RenderGraphResourceRefMetadata {
     std::optional<std::string> barrierTransitionLabel;
 };
 
-// One pass, presentation-ready: enums as ToString() text, timing already formatted.
+// One pass as plain data: enums as ToString() text, numbers as numbers. No display text.
 struct RenderGraphPassMetadata {
     std::string name;
     bool isCulled = false;
     std::string kind;              // rg::ToString(PassKind)
     std::string category;          // rg::ToString(RenderPassCategory)
     std::string drawKind;          // rg::ToString(RenderPassDrawKind)
-    std::string viewScope;         // rg::ToString(ViewScope)
+    std::string viewScope = "Shared"; // rg::ToString(ViewScope): "Shared" | "Primary" | "Secondary"
     std::string view = "shared";   // "shared" | "primary" | "secondary"
     std::string instance;          // Hex id of the pass's binding instance; empty when it never executed.
     std::string renderPassEvent;   // rg::ToString(RenderPassEvent)
@@ -47,9 +44,9 @@ struct RenderGraphPassMetadata {
     std::uint32_t drawCallCount = 0;   // 0 for a culled pass.
     std::uint32_t triangleCount = 0;   // same rule.
     std::uint32_t indirectDrawCount = 0; // Indirect draws issued; their triangles are GPU-side and not counted above.
-    std::string gpuTimingText;        // Formatted GPU timing text; the status word when not measured.
     std::string gpuTimingStatus = "Absent"; // rg::ToString(GpuReadState) of this pass's record.
     std::optional<double> gpuTimingMilliseconds; // Barrier + work as a number, nullopt unless the status is Present.
+    double gpuRecordedMilliseconds = 0.0; // Barrier + work of the record whatever its status; meaningful for Present/Partial only.
     std::uint32_t gpuFoldedPasses = 0; // Passes this record stands for when it is the overflow bucket.
 };
 
@@ -115,36 +112,4 @@ struct RenderGraphMetadata {
 RenderGraphMetadata BuildRenderGraphMetadata(const RenderGraphSnapshot& offscreen, const RenderGraphSnapshot& present,
     const std::vector<RenderFeatureDebugEntry>& renderFeatures);
 
-// All RenderGraphPassMetadata sharing one `name` (e.g. a per-view pass declared once per view), as one row.
-// `instances` keeps the raw entries in original order for click-to-expand.
-struct RenderGraphGroupedPassMetadata {
-    std::string name;
-    // Which views contributed a non-culled instance ("Game+Scene", "Game only", "Shared"); lists every
-    // instance's view scope when all were culled.
-    std::string viewLabel;
-    // True only if every instance was culled.
-    bool isCulled = false;
-    std::uint32_t drawCallCount = 0; // Summed across every instance sharing this name.
-    std::uint32_t triangleCount = 0; // Same rule.
-    // Per-view timing, e.g. "Game: 0.12 ms, Scene: 0.08 ms" (not summed); a single instance shows its own text.
-    std::string gpuTimingText;
-    std::vector<std::string> reads;  // Combined, de-duplicated resource names across every instance (order-preserving, first-seen).
-    std::vector<std::string> writes; // Same rule.
-    std::vector<RenderGraphPassMetadata> instances; // Raw, ungrouped, original per-instance breakdown, original relative order.
-};
-
-// Groups `ungrouped` by `name` in sorted order, so row order never depends on input order.
-std::vector<RenderGraphGroupedPassMetadata> GroupPassMetadataByName(
-    const std::vector<RenderGraphPassMetadata>& ungrouped);
-
-// ADL to_json; the nested ones are file-local to RenderGraphMetadata.cpp.
-void to_json(nlohmann::json& j, const RenderGraphMetadata& metadata);
-
 } // namespace gte::rg
-
-namespace gte {
-
-// to_json() for this lives in RenderGraphMetadata.cpp so its header needs no json include.
-void to_json(nlohmann::json& j, const RenderFeatureDebugEntry& entry);
-
-} // namespace gte

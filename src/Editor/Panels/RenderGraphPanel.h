@@ -1,7 +1,8 @@
-﻿#pragma once
+#pragma once
 
 #include "../../Renderer/RenderGraph/RenderGraphMetadata.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
+#include "../RenderGraphDisplayText.h"
 #include "../RenderGraphLayout.h"
 #include "../RenderGraphTexturePreview.h"
 
@@ -50,15 +51,15 @@ private:
     enum class QueueKindFilter : std::uint8_t { All, Graphics, Compute };
 
     void BuildToolbar(EditorContext& ctx, const rg::RenderGraphRegimeMetadata& regime);
-    void BuildPassTree(const std::vector<rg::RenderGraphGroupedPassMetadata>& grouped,
+    void BuildPassTree(const std::vector<RenderGraphGroupedPass>& grouped,
         rg::RenderPassToggleRegistry& toggles);
     // One row for every known pass - no separate "disabled row" function.
     // `liveRow` is nullptr when this pass produced no snapshot row this
     // frame (still drawn, honestly labeled, never silently hidden).
     void DrawPassTreeRow(const rg::RenderPassToggleState& state,
-        const rg::RenderGraphGroupedPassMetadata* liveRow, rg::RenderPassToggleRegistry& toggles);
+        const RenderGraphGroupedPass* liveRow, rg::RenderPassToggleRegistry& toggles);
     void BuildGraphCanvas(const GraphLayout& layout, const rg::RenderGraphRegimeMetadata& regime);
-    void BuildPassTable(const std::vector<rg::RenderGraphGroupedPassMetadata>& grouped);
+    void BuildPassTable(const std::vector<RenderGraphGroupedPass>& grouped);
     void BuildInspector(const rg::RenderGraphRegimeMetadata& regime, rg::RenderPassToggleRegistry& toggles,
         Renderer& renderer, const rg::RenderGraph& renderGraph);
     void BuildTimeline(const rg::RenderGraphRegimeMetadata& regime);
@@ -69,7 +70,7 @@ private:
 
     // Shared search-text + queue-kind predicate for both the pass tree and
     // the pass table - one filter, never two independently-maintained ones.
-    bool PassMatchesFilters(const rg::RenderGraphGroupedPassMetadata& row) const;
+    bool PassMatchesFilters(const RenderGraphGroupedPass& row) const;
 
     bool m_paused = false;
     bool m_forceSingleCapture = false; // "Capture Frame" one-shot refresh-then-freeze.

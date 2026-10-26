@@ -746,6 +746,7 @@ add_library(gte_core STATIC
     src/Application/FrameCaptureBridge.cpp
     src/Application/ProfilerSnapshotBridge.h
     src/Application/ProfilerSnapshotBridge.cpp
+    src/Application/GpuTimingText.h
     src/Application/EngineCommandBridge.h
     src/Application/EditorUiCommandBridge.h
     src/Application/FeatureDebugCommandBridge.h
@@ -1113,6 +1114,8 @@ add_library(gte_core STATIC
     src/Network/NetworkProfilerRoutes.cpp
     src/Network/NetworkProfilerTimeline.h
     src/Network/NetworkProfilerTimeline.cpp
+    src/Network/RenderGraphMetadataJson.h
+    src/Network/RenderGraphMetadataJson.cpp
     src/Network/NetworkServer.h
     src/Network/NetworkServer.cpp
     src/Encoding/Base64.h
@@ -1462,6 +1465,9 @@ add_library(gte_editor STATIC
     # - not a gte_core sibling of RenderGraphMetadata.h/.cpp).
     src/Editor/RenderGraphDotExport.h
     src/Editor/RenderGraphDotExport.cpp
+    # Render Graph panel display text (view labels, GPU timing text, per-name pass grouping).
+    src/Editor/RenderGraphDisplayText.h
+    src/Editor/RenderGraphDisplayText.cpp
     # Render Graph panel's pure layout math and its RAII texture-preview slot.
     src/Editor/RenderGraphLayout.h
     src/Editor/RenderGraphLayout.cpp

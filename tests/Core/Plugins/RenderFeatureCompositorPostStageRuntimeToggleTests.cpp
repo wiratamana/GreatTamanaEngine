@@ -124,7 +124,7 @@ TEST(RenderFeatureCompositorPostStageRuntimeToggleTest, DisablingAPostOpaqueFeat
             if (!entry.enabledOverride) {
                 continue;
             }
-            entry.callback(builder, blackboard, rg::RenderViewId::Named("Game"), dummyHandles);
+            entry.callback(builder, blackboard, rg::RenderViewId::Named("Primary"), dummyHandles);
         }
     };
 
@@ -159,7 +159,7 @@ TEST(RenderFeatureCompositorPostStageRuntimeToggleTest, DisablingAPostTransparen
             if (!entry.enabledOverride) {
                 continue;
             }
-            entry.callback(builder, blackboard, rg::RenderViewId::Named("Game"), dummyHandles);
+            entry.callback(builder, blackboard, rg::RenderViewId::Named("Primary"), dummyHandles);
         }
     };
 

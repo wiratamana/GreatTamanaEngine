@@ -11,6 +11,7 @@
 #include "../Renderer/CaptureResult.h"
 #include "../Renderer/RenderTexture.h"
 #include "../Core/Plugins/RenderFeatureDebugEntry.h"
+#include "../Renderer/RenderGraph/RenderGraphHandles.h"
 #include "../Renderer/RenderGraph/RenderGraphTypes.h"
 // Included at file scope: including it inside `namespace gte` below would create `gte::gte`.
 #include "../Core/FrameDebuggerCaptureRecorder.h"
@@ -153,34 +154,37 @@ public:
     // Feeds one raw SDL event to the editor's input handling.
     virtual void ProcessEvent(const SDL_Event& event) = 0;
 
-    // OS window resized. The real implementation ignores it: the Game/Scene views track their panel size.
+    // OS window resized. The real implementation ignores it: the views track their panel size.
     virtual void OnWindowResized(int width, int height) = 0;
 
     // Starts a new UI frame. Call once per frame, before Game's Update()/Render().
     virtual void NewFrame() = 0;
 
-    // Render target for the "Game" panel this frame, or nullptr to render straight to the swapchain
+    // Render target of the primary view this frame, or nullptr to render straight to the swapchain
     // (no Editor) or skip the view (panel not visible). Resizes the texture to the panel size first.
-    virtual RenderTexture* GameViewTarget() = 0;
+    virtual RenderTexture* PrimaryViewTarget() = 0;
 
-    // Scene-view equivalent of GameViewTarget(), with its own separate RenderTexture.
-    virtual RenderTexture* SceneViewTarget() = 0;
+    // Same for the secondary view, with its own RenderTexture.
+    virtual RenderTexture* SecondaryViewTarget() = 0;
 
-    // Projection * view the Scene view renders with, for a target of the given aspect ratio.
+    // Resource name of the view's texture as shown to tools. The view output names derive from it.
+    virtual const char* ViewResourceName(rg::ViewScope scope) const noexcept = 0;
+
+    // Projection * view the secondary view renders with, for a target of the given aspect ratio.
     // Backed by the orbitable EditorCamera; Identity for NullEditorLayer.
-    virtual Mat4 SceneViewProjection(float aspectWidthOverHeight) const = 0;
+    virtual Mat4 SecondaryViewProjection(float aspectWidthOverHeight) const = 0;
 
-    // World-space eye position of the Scene view's EditorCamera. Zero for NullEditorLayer.
-    virtual Vec3 SceneViewCameraWorldPosition() const = 0;
+    // World-space eye position of the secondary view's EditorCamera. Zero for NullEditorLayer.
+    virtual Vec3 SecondaryViewCameraWorldPosition() const = 0;
 
-    // Texture the "Game" panel shows instead of its raw view once a feature publishes a composited output.
-    // nullptr on frames where the Game view was not rendered; the panel then falls back to its own view.
-    virtual void SetGameViewCompositedTexture(RenderTexture* texture) = 0;
+    // Texture the primary view's panel shows instead of its raw view once a feature publishes a composited output.
+    // nullptr on frames where the view was not rendered; the panel then falls back to its own view.
+    virtual void SetPrimaryViewCompositedTexture(RenderTexture* texture) = 0;
 
-    // Scene-view equivalent of SetGameViewCompositedTexture().
-    virtual void SetSceneViewCompositedTexture(RenderTexture* texture) = 0;
+    // Same for the secondary view.
+    virtual void SetSecondaryViewCompositedTexture(RenderTexture* texture) = 0;
 
-    // Records the Scene panel's ground grid into `cmd`, inside the open Scene view pass after the scene geometry.
+    // Records the secondary view's ground grid into `cmd`, inside the open view pass after the scene geometry.
     // `sceneViewProjection` is the matrix the scene was drawn with. A no-op for NullEditorLayer.
     virtual void RenderSceneGrid(const rg::RecordingContext& cmd, const Mat4& sceneViewProjection) = 0;
 
@@ -237,14 +241,14 @@ public:
         const std::string& sourceAbsolutePath, const std::string& destinationRelativeFolder) = 0;
 
     // Returns a freshly reset capture recorder if the Frame Debugger window is open and enabled, else nullptr.
-    // Call once per frame before the Game-view render. Reflects the previous frame's UI state.
+    // Call once per frame before the primary view renders. Reflects the previous frame's UI state.
     virtual IFrameDebuggerCaptureRecorder* PrepareFrameDebuggerCaptureContext() = 0;
 
     // Records that a Step happened this frame; the capture itself runs later this frame inside BuildUI().
     virtual void NotifyFrameDebuggerStepConsumed() = 0;
 
     // Read-and-clear: true for the one frame after a capture trigger, so that frame can declare replay passes.
-    // Call once per frame before the "GameView" pass is declared.
+    // Call once per frame before the primary view's passes are declared.
     virtual bool ConsumePendingFrameDebuggerReplayRequest() = 0;
 
     // Opens the Frame Debugger window (idempotent) and pins it to the main viewport for that opening,

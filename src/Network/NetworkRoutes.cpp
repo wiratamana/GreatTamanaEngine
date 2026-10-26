@@ -1,6 +1,7 @@
 #include "NetworkRoutes.h"
 
 #include "NetworkSceneCameraPose.h"
+#include "RenderGraphMetadataJson.h"
 #include "Core/Plugins/ProjectAssemblyNameValidation.h"
 #include "../Core/Plugins/HotReloadEngineStateMutex.h"
 
@@ -531,14 +532,10 @@ std::string BuildListTexturesResponseJson(const std::vector<TextureListEntryView
     return body.dump();
 }
 
-// editor-core-separation-7 campaign, PHASE4 - GET /render_graph. Uses
-// gte::rg::to_json(nlohmann::json&, const RenderGraphMetadata&) via ADL -
-// already the fully-resolved, plain-scalars-and-strings JSON shape (see
-// NetworkRoutes.h's own doc comment above this function's declaration).
+// GET /render_graph body: the JSON is built by RenderGraphMetadataToJson().
 std::string BuildRenderGraphMetadataResponseJson(const gte::rg::RenderGraphMetadata& metadata)
 {
-    nlohmann::json body = metadata;
-    return body.dump();
+    return RenderGraphMetadataToJson(metadata).dump();
 }
 
 // --- network-impl-7 campaign - GET /activate_tab and GET /list_tabs. See

@@ -468,16 +468,31 @@ TEST(ProfilerRoutesReplyTest, TheSetReplyCarriesSpikeStateAsMetrics)
     EXPECT_TRUE(stray.empty());
 }
 
-TEST(ProfilerRoutesReplyTest, NoSnapshotAnswers503)
+TEST(ProfilerRoutesReplyTest, NoSnapshotAnswers200WithTheLiveWaits)
 {
-    const ProfilerReply reply = BuildProfilerReply(ProfilerRoute::Overview, std::nullopt, 10);
-    EXPECT_EQ(reply.status, 503);
-    EXPECT_EQ(json::parse(reply.body)["success"], false);
+    ProfilerSnapshot liveOnly;
+    liveOnly.liveBlockCount = 1;
+    liveOnly.liveBlocks[0].threadSlot = 2;
+    liveOnly.liveBlocks[0].elapsed = Ms(120.0);
+
+    const ProfilerReply reply = BuildProfilerNoSnapshotReply(liveOnly);
+    EXPECT_EQ(reply.status, 200);
+    const json document = json::parse(reply.body);
+    EXPECT_EQ(document["success"], true);
+    EXPECT_EQ(document["state"], "no_snapshot");
+    EXPECT_EQ(document["has_frame"], false);
+    ASSERT_EQ(document["live_block"].size(), 1u);
+    EXPECT_EQ(document["live_block"][0]["thread_slot"], 2);
+    EXPECT_TRUE(IsMetricObject(document["live_block"][0]["elapsed"]));
+
+    std::vector<std::string> stray;
+    FindStrayNumbers(document, "", stray);
+    EXPECT_TRUE(stray.empty()) << (stray.empty() ? "" : stray.front());
 }
 
 TEST(ProfilerRoutesReplyTest, EachRouteAnswersItsOwnDocument)
 {
-    const std::optional<ProfilerSnapshot> snapshot = FullSnapshot();
+    const ProfilerSnapshot snapshot = FullSnapshot();
     EXPECT_TRUE(json::parse(BuildProfilerReply(ProfilerRoute::Overview, snapshot, 10).body).contains("cpu_frame"));
     EXPECT_TRUE(json::parse(BuildProfilerReply(ProfilerRoute::Frames, snapshot, 10).body).contains("frames"));
     EXPECT_TRUE(json::parse(BuildProfilerReply(ProfilerRoute::Spikes, snapshot, 10).body).contains("spikes"));
@@ -513,6 +528,31 @@ TEST(ProfilerBridgeTest, ASnapshotIsBuiltOnlyAfterSomeoneAsked)
 
     const std::uint64_t later = ProfilerSnapshotBridge::NowNanoseconds() + ProfilerSnapshotBridge::kAskWindowNanoseconds + 1;
     EXPECT_FALSE(bridge.WantsSnapshotAt(later));
+}
+
+TEST(ProfilerBridgeTest, ASnapshotIsPublishedFirstOnASpikeAndEveryFewFramesWithoutAReader)
+{
+    ProfilerSnapshotBridge bridge;
+    EXPECT_TRUE(bridge.ShouldPublish(1, 0)); // nothing was published yet
+    EXPECT_FALSE(bridge.ShouldPublish(2, 0));
+    EXPECT_FALSE(bridge.ShouldPublish(30, 0));
+    EXPECT_TRUE(bridge.ShouldPublish(31, 0)); // kIdlePublishFrames after the last publish
+    EXPECT_FALSE(bridge.ShouldPublish(32, 0));
+    EXPECT_TRUE(bridge.ShouldPublish(33, 1)); // a spike was frozen
+    EXPECT_FALSE(bridge.ShouldPublish(34, 1));
+}
+
+TEST(ProfilerBridgeTest, ALiveOnlySnapshotNeedsNoPublish)
+{
+    ProfilerSnapshotBridge bridge;
+    Profiling::LiveBlockTable& live = Profiling::FrameProfiler::Instance().LiveBlocks();
+    live.Begin("Shutdown", "test", Profiling::NowMicroseconds());
+    const ProfilerSnapshot snapshot = bridge.LiveOnlySnapshot();
+    live.End();
+
+    EXPECT_FALSE(snapshot.hasFrame);
+    ASSERT_EQ(snapshot.liveBlockCount, 1u);
+    EXPECT_EQ(Profiling::SnapshotText(snapshot.liveBlocks[0].site), "Shutdown");
 }
 
 TEST(ProfilerBridgeTest, LatestReturnsTheCopyWithItsAgeAndLiveWaits)

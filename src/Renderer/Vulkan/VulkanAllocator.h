@@ -33,6 +33,9 @@ public:
 
     VmaAllocator Native() const noexcept { return m_allocator; }
 
+    // Drops the allocator without destroying it. For a lost device with leaked allocations still live.
+    void AbandonOnDestroy() noexcept { m_abandon = true; }
+
     // One VmaBudget per memory heap: the driver-reported usage and budget (an estimate without
     // VK_EXT_memory_budget). Cheap enough to call every frame.
     std::vector<VmaBudget> GetHeapBudgets() const;
@@ -41,6 +44,7 @@ private:
     void Destroy() noexcept;
 
     VmaAllocator m_allocator = VK_NULL_HANDLE;
+    bool m_abandon = false;
 };
 
 } // namespace gte

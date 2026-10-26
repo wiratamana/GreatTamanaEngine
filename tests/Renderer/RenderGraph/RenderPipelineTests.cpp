@@ -201,12 +201,12 @@ TEST(SceneResourceKeyOfTest, AllNameViewPairsProduceDistinctKeys)
 TEST(SceneResourceKeyOfTest, PublishUnderOneViewIsNotVisibleUnderADifferentView)
 {
     RenderPassBlackboard blackboard;
-    blackboard.Publish<int>(SceneResourceKeyOf("Test.Foo", RenderViewId::Named("Game")), 42);
+    blackboard.Publish<int>(SceneResourceKeyOf("Test.Foo", RenderViewId::Named("Primary")), 42);
 
     const std::optional<int> sameViewFetch =
-        blackboard.Fetch<int>(SceneResourceKeyOf("Test.Foo", RenderViewId::Named("Game")));
+        blackboard.Fetch<int>(SceneResourceKeyOf("Test.Foo", RenderViewId::Named("Primary")));
     const std::optional<int> otherViewFetch =
-        blackboard.Fetch<int>(SceneResourceKeyOf("Test.Foo", RenderViewId::Named("Scene")));
+        blackboard.Fetch<int>(SceneResourceKeyOf("Test.Foo", RenderViewId::Named("Secondary")));
 
     ASSERT_TRUE(sameViewFetch.has_value());
     EXPECT_EQ(*sameViewFetch, 42);
@@ -246,8 +246,8 @@ TEST(RenderPassBlackboardDoublePublishDiagnosticTest, TwoPublishesUnderDifferent
 TEST(RenderPassBlackboardDoublePublishDiagnosticTest, SameNameUnderDifferentViewsNeverWarns)
 {
     RenderPassBlackboard blackboard;
-    const RenderPassId gameKey = SceneResourceKeyOf("Test.DoublePublishSharedName", RenderViewId::Named("Game"));
-    const RenderPassId sceneKey = SceneResourceKeyOf("Test.DoublePublishSharedName", RenderViewId::Named("Scene"));
+    const RenderPassId gameKey = SceneResourceKeyOf("Test.DoublePublishSharedName", RenderViewId::Named("Primary"));
+    const RenderPassId sceneKey = SceneResourceKeyOf("Test.DoublePublishSharedName", RenderViewId::Named("Secondary"));
 
     testing::internal::CaptureStderr();
     blackboard.Publish<int>(gameKey, 1);

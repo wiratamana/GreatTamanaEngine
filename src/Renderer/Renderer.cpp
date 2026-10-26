@@ -145,7 +145,12 @@ Renderer::~Renderer()
         if (idle) {
             m_resources.FreeDescriptorSet(m_emptySet);
         }
-        // On a lost device the set is abandoned too, and the parked objects are leaked.
+        // Leaked parked objects keep their allocations live; destroying the allocator would assert.
+        const std::uint32_t parked = m_abandoned.Count();
+        if (ShouldAbandonAllocator(idle, parked)) {
+            m_allocator.AbandonOnDestroy();
+            GTE_LOG_WARNING("Vulkan", "device lost: allocator abandoned, parked objects: " + std::to_string(parked));
+        }
         m_abandoned.Release(idle);
     }
     UnregisterDescriptorSetLayout(m_bufferSetLayoutHandle);
@@ -392,9 +397,10 @@ std::uint32_t Renderer::GpuWaitConsecutiveFrameTimeouts() const noexcept
     return m_device.Waits().ConsecutiveFrameTimeouts();
 }
 
-bool Renderer::GpuClockCalibrationAvailable() const noexcept
+ClockCalibration Renderer::GpuClockCalibration() const noexcept
 {
-    return false;
+    // The device setup enables no calibrated-timestamp extension, so there is nothing to fit.
+    return MissingClockCalibration(ClockCalibrationReason::ExtensionNotEnabled);
 }
 
 void Renderer::SetTimingObserver(IRenderTimingObserver* observer) noexcept

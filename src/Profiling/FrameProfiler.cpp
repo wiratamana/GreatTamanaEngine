@@ -108,19 +108,9 @@ void FrameProfiler::FreezeIfSpike(const FrameRecord& record) noexcept
     m_spikes.Freeze(record, median, ClassifySpike(record, median));
 }
 
-void FrameProfiler::AttachLateGpuReport(std::uint64_t frameIndex, const GpuFrameMetrics& gpu) noexcept
+void FrameProfiler::AttachLateGpuReport(std::uint64_t frameIndex, const GpuViewMetric& span) noexcept
 {
-    m_spikes.AttachGpu(frameIndex, gpu, m_frameIndex);
-
-    // The summary ring keeps the late numbers too; only the newest few frames can still be waiting for them.
-    const std::size_t scan = std::min<std::size_t>(m_historyCount, kSpikeLateGpuFrames + 1);
-    for (std::size_t back = 1; back <= scan; ++back) {
-        FrameSummary& entry = m_history[(m_historyHead + kMaxFrameHistory - back) % kMaxFrameHistory];
-        if (entry.frameIndex == frameIndex) {
-            entry.gpu = gpu;
-            return;
-        }
-    }
+    m_spikes.AttachGpuSpan(frameIndex, span, m_frameIndex);
 }
 
 ScopeStart FrameProfiler::BeginScope() noexcept

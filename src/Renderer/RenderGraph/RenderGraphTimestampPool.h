@@ -1,7 +1,6 @@
 #pragma once
 
-// GPU timestamp source for the render graph: one query pool per regime, one region per frame in flight.
-// A frame resets its whole region once, writes its stamps by planned index and reads them back in one call.
+// GPU timestamp source: one query pool per regime, one region per frame in flight, reset and read once per frame.
 // Gated by GTE_ENABLE_PROFILER and SetCaptureEnabled(). Needs a real device.
 
 #include "../GpuStampPlan.h"

@@ -11,8 +11,15 @@
 
 namespace gte::fx {
 
-// Cache name of a per-view persistent target: "<base>.GameView", "<base>.SceneView", "<base>" when shared.
-std::string PersistentName(std::string_view base, rg::ViewScope scope);
+namespace detail {
+struct FrameContext;
+} // namespace detail
+
+// Cache name of a per-view resource: "<base>.<viewLabel>", or "<base>" when shared.
+std::string PersistentName(std::string_view base, rg::ViewScope scope, std::string_view viewLabel);
+
+// Same, with the view label the engine shows for the frame's view scope.
+std::string PersistentName(std::string_view base, const detail::FrameContext& context);
 
 // A color texture that outlives the frame, one per view, created and resized by the kit.
 // The owner in the cache is the feature name; a resize applies one frame late.

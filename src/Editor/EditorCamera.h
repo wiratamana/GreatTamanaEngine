@@ -7,9 +7,8 @@
 
 namespace gte {
 
-// Fly camera of the Scene view. It is not an ECS entity, so moving it never touches game state.
-// Pure logic with no ImGui, SDL or Vulkan: the panel feeds it plain mouse values.
-//   Middle drag: pan. Wheel: dolly along forward. Right drag: mouse look (pitch is clamped).
+// Fly camera of the secondary view. Not an ECS entity, so it never touches game state; no ImGui/SDL/Vulkan.
+// Middle drag: pan. Wheel: dolly. Right drag: mouse look (pitch clamped).
 class EditorCamera {
 public:
     // Starts at (0, 0, -5) looking along +Z.

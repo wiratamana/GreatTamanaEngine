@@ -1,0 +1,2 @@
+# Files allowed to name a view word. Empty: keep it that way.
+# Format: path relative to src, then '# one-line reason'. A line whose file is gone or clean fails the check.

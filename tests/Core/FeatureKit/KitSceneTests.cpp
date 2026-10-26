@@ -47,7 +47,7 @@ struct Scene {
         context.builder = &builder;
         context.blackboard = &blackboard;
         context.core = &core;
-        context.view = rg::RenderViewId::Named("Game");
+        context.view = rg::RenderViewId::Named("Primary");
         context.featureName = "Feature";
         context.event = rg::RenderPassEvent::PreOpaques;
         context.scope = rg::ViewScope::Primary;

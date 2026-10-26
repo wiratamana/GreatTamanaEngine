@@ -80,8 +80,9 @@ public:
     SpikeStore& Spikes() noexcept { return m_spikes; }
     const SpikeStore& Spikes() const noexcept { return m_spikes; }
 
-    // Main thread. A GPU report that arrived after its frame closed; kept only for a frozen spike.
-    void AttachLateGpuReport(std::uint64_t frameIndex, const GpuFrameMetrics& gpu) noexcept;
+    // Main thread. The GPU span of a present frame that was read back after its profiler frame closed.
+    // Added to a frozen spike only; the summary history is never rewritten.
+    void AttachLateGpuReport(std::uint64_t frameIndex, const GpuViewMetric& span) noexcept;
 
     // Spike threshold in ms; 0 selects the median rule.
     void SetSpikeThresholdMs(float milliseconds) noexcept { m_control.spikeThresholdMs.store(milliseconds, std::memory_order_relaxed); }

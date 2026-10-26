@@ -130,7 +130,7 @@ void RenderGraphPanel::Build(
     const rg::RenderGraphRegimeMetadata& regime = (ctx.renderGraphDisplayedRegime == RenderGraphRegimeChoice::Offscreen)
         ? m_frozenMetadata.offscreenRegime
         : m_frozenMetadata.presentRegime;
-    const std::vector<rg::RenderGraphGroupedPassMetadata> grouped = rg::GroupPassMetadataByName(regime.passes);
+    const std::vector<RenderGraphGroupedPass> grouped = GroupPassMetadataByName(regime.passes);
     const GraphLayout layout = ComputeGraphLayout(regime);
 
     // Snapshotted BEFORE any checkbox-drawing section below runs this frame,
@@ -264,7 +264,7 @@ void RenderGraphPanel::BuildToolbar(EditorContext& ctx, const rg::RenderGraphReg
     }
 }
 
-bool RenderGraphPanel::PassMatchesFilters(const rg::RenderGraphGroupedPassMetadata& row) const
+bool RenderGraphPanel::PassMatchesFilters(const RenderGraphGroupedPass& row) const
 {
     if (m_searchFilter[0] != '\0' && row.name.find(m_searchFilter) == std::string::npos) {
         return false;
@@ -280,10 +280,10 @@ bool RenderGraphPanel::PassMatchesFilters(const rg::RenderGraphGroupedPassMetada
 }
 
 void RenderGraphPanel::BuildPassTree(
-    const std::vector<rg::RenderGraphGroupedPassMetadata>& grouped, rg::RenderPassToggleRegistry& toggles)
+    const std::vector<RenderGraphGroupedPass>& grouped, rg::RenderPassToggleRegistry& toggles)
 {
-    std::unordered_map<std::string, const rg::RenderGraphGroupedPassMetadata*> liveByName;
-    for (const rg::RenderGraphGroupedPassMetadata& row : grouped) {
+    std::unordered_map<std::string, const RenderGraphGroupedPass*> liveByName;
+    for (const RenderGraphGroupedPass& row : grouped) {
         liveByName[row.name] = &row;
     }
 
@@ -295,7 +295,7 @@ void RenderGraphPanel::BuildPassTree(
     std::unordered_map<std::string, std::vector<rg::RenderPassToggleState>> byGroup;
     for (const rg::RenderPassToggleState& state : toggles.ListAll()) {
         const auto liveIt = liveByName.find(state.name);
-        const rg::RenderGraphGroupedPassMetadata* live = (liveIt == liveByName.end()) ? nullptr : liveIt->second;
+        const RenderGraphGroupedPass* live = (liveIt == liveByName.end()) ? nullptr : liveIt->second;
 
         if (live != nullptr) {
             if (!PassMatchesFilters(*live)) {
@@ -337,7 +337,7 @@ void RenderGraphPanel::BuildPassTree(
 // One row for one pass, in every case - no parallel "disabled row"
 // function. Checkbox always reflects the registry's own real flag.
 void RenderGraphPanel::DrawPassTreeRow(const rg::RenderPassToggleState& state,
-    const rg::RenderGraphGroupedPassMetadata* liveRow, rg::RenderPassToggleRegistry& toggles)
+    const RenderGraphGroupedPass* liveRow, rg::RenderPassToggleRegistry& toggles)
 {
     ImGui::PushID(state.name.c_str());
     bool enabled = state.enabled;
@@ -474,7 +474,7 @@ void RenderGraphPanel::BuildGraphCanvas(const GraphLayout& layout, const rg::Ren
     ImGui::Dummy(ImVec2(canvasWidth, canvasHeight)); // Reserves scroll extent for ImGuiWindowFlags_HorizontalScrollbar.
 }
 
-void RenderGraphPanel::BuildPassTable(const std::vector<rg::RenderGraphGroupedPassMetadata>& grouped)
+void RenderGraphPanel::BuildPassTable(const std::vector<RenderGraphGroupedPass>& grouped)
 {
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_Sortable | ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg
         | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_ScrollY;
@@ -487,8 +487,8 @@ void RenderGraphPanel::BuildPassTable(const std::vector<rg::RenderGraphGroupedPa
     ImGui::TableSetupColumn("Culled");
     ImGui::TableHeadersRow();
 
-    std::vector<const rg::RenderGraphGroupedPassMetadata*> rows;
-    for (const rg::RenderGraphGroupedPassMetadata& row : grouped) {
+    std::vector<const RenderGraphGroupedPass*> rows;
+    for (const RenderGraphGroupedPass& row : grouped) {
         if (PassMatchesFilters(row)) {
             rows.push_back(&row);
         }
@@ -507,7 +507,7 @@ void RenderGraphPanel::BuildPassTable(const std::vector<rg::RenderGraphGroupedPa
         });
     }
 
-    for (const rg::RenderGraphGroupedPassMetadata* row : rows) {
+    for (const RenderGraphGroupedPass* row : rows) {
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
         const bool isSelected = m_selectedPassName.has_value() && *m_selectedPassName == row->name;
@@ -541,7 +541,7 @@ void RenderGraphPanel::BuildInspector(const rg::RenderGraphRegimeMetadata& regim
     ImGui::Separator();
     ImGui::Text("Pass Type : %s", pass->drawKind.c_str());
     ImGui::Text("Queue     : %s", pass->kind.c_str());
-    ImGui::Text("GPU Time  : %s", pass->gpuTimingText.c_str());
+    ImGui::Text("GPU Time  : %s", FormatGpuTiming(*pass).c_str());
     ImGui::Text("Status    : %s", pass->isCulled ? "Culled" : "Active (Not Culled)");
 
     ImGui::Separator();

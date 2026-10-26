@@ -2,6 +2,7 @@
 
 #include "../Core/ViewBackgroundReplayKey.h"
 #include "../Core/FeatureKit/ChannelKey.h"
+#include "../Core/Plugins/RenderViewRegistry.h"
 #include "../Core/FeatureKit/SceneSlotKey.h"
 #include "../Game/Lighting/SunShadowReceiver.h"
 
@@ -11,14 +12,21 @@ using rg::operator""_passId;
 
 namespace {
 
+// Engine view names with the editor's panel label for each.
+struct ViewLabel {
+    const char* viewName;
+    const char* label;
+};
+constexpr ViewLabel kViews[] = { { kPrimaryViewName, "Game" }, { kSecondaryViewName, "Scene" } };
+
 // A feature channel, published once per view under the key the kit builds for it.
 void AddChannelRules(std::vector<KnownRiskBlackboardKeyRule>& rules, const char* feature, const char* channel,
     const char* gatingToggle)
 {
-    for (const char* view : { "Game", "Scene" }) {
+    for (const ViewLabel& view : kViews) {
         rules.push_back(KnownRiskBlackboardKeyRule{
-            rg::RenderPassId{ fx::ChannelKey(feature, channel, rg::RenderViewId::Named(view)) },
-            std::string(feature) + "." + channel + " (" + view + ")", gatingToggle });
+            rg::RenderPassId{ fx::ChannelKey(feature, channel, rg::RenderViewId::Named(view.viewName)) },
+            std::string(feature) + "." + channel + " (" + view.label + ")", gatingToggle });
     }
 }
 
@@ -35,9 +43,9 @@ void AddSharedChannelRule(std::vector<KnownRiskBlackboardKeyRule>& rules, const 
 void AddSceneSlotRules(std::vector<KnownRiskBlackboardKeyRule>& rules, const std::string& slotName,
     std::uint32_t slotIndex, const char* gatingToggle)
 {
-    for (const char* view : { "Game", "Scene" }) {
-        rules.push_back(KnownRiskBlackboardKeyRule{ fx::SceneSlotKey(slotIndex, rg::RenderViewId::Named(view)),
-            slotName + " (" + view + ")", gatingToggle });
+    for (const ViewLabel& view : kViews) {
+        rules.push_back(KnownRiskBlackboardKeyRule{ fx::SceneSlotKey(slotIndex, rg::RenderViewId::Named(view.viewName)),
+            slotName + " (" + view.label + ")", gatingToggle });
     }
 }
 

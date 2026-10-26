@@ -18,8 +18,11 @@ namespace gte {
 
 class ProfilerSnapshotBridge {
 public:
-    // A snapshot is built only while a reader asked within this window.
+    // A snapshot is built on demand only while a reader asked within this window.
     static constexpr std::uint64_t kAskWindowNanoseconds = 2'000'000'000ull;
+
+    // Without a reader, a snapshot is still published this often so a cold reader finds one.
+    static constexpr std::uint64_t kIdlePublishFrames = 30;
 
     // A snapshot older than this triggers a short wait for a newer one.
     static constexpr std::uint64_t kFreshNanoseconds = 250'000'000ull;
@@ -27,6 +30,10 @@ public:
     // Main thread: true when someone asked recently, so building a snapshot is worth the cost.
     bool WantsSnapshot() const noexcept { return WantsSnapshotAt(NowNanoseconds()); }
     bool WantsSnapshotAt(std::uint64_t nowNanoseconds) const noexcept;
+
+    // Main thread, once per closed frame: true when a snapshot should be published now. Reasons: a reader asked,
+    // a spike was frozen since the last call, nothing was published yet, or kIdlePublishFrames passed.
+    bool ShouldPublish(std::uint64_t completedFrames, std::uint64_t frozenSpikes) noexcept;
 
     // Main thread, after the frame closed.
     void Publish(const Profiling::ProfilerSnapshot& snapshot);
@@ -40,6 +47,9 @@ public:
     // Any thread. Marks the bridge as asked, waits up to `maxWait` for a fresh snapshot when the stored one is
     // old, then returns a copy with its age and the waits in progress filled in. Empty before the first publish.
     std::optional<Profiling::ProfilerSnapshot> Latest(std::chrono::milliseconds maxWait);
+
+    // Any thread. A snapshot holding only the waits in progress, read without any lock.
+    Profiling::ProfilerSnapshot LiveOnlySnapshot() const;
 
     // Any thread. Runtime switches of the profiler.
     void SetCapture(bool enabled) noexcept;
@@ -61,6 +71,11 @@ private:
     void MarkAsked(std::uint64_t nowNanoseconds) noexcept;
 
     std::atomic<std::uint64_t> m_lastAskedNanoseconds{ 0 }; // 0 = never asked
+
+    // Main thread only: state of ShouldPublish().
+    bool m_publishedOnce = false;
+    std::uint64_t m_lastPublishFrames = 0;
+    std::uint64_t m_seenFrozenSpikes = 0;
 
     mutable std::mutex m_mutex;
     std::condition_variable m_published;

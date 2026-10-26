@@ -22,7 +22,7 @@ constexpr const char* kLogCategory = "FeatureKit";
 
 struct OffscreenTarget::Impl {
     struct Slot {
-        std::string name; // Imports keep this pointer for the frame, so it must not move.
+        std::string name; // Set on first use. Imports keep this pointer for the frame, so it must not move.
         rg::RenderViewId view;
         std::uint32_t width = 0;
         std::uint32_t height = 0;
@@ -33,11 +33,9 @@ struct OffscreenTarget::Impl {
         std::uint32_t failedHeight = 0;
     };
 
-    explicit Impl(std::string_view base)
+    explicit Impl(std::string_view baseName)
+        : base(baseName)
     {
-        for (std::size_t i = 0; i < rg::kViewScopeCount; ++i) {
-            slots[i].name = PersistentName(base, static_cast<rg::ViewScope>(i));
-        }
     }
 
     Texture Acquire(Frame& frame, std::uint32_t width, std::uint32_t height, bool depthOnly, PixelFormat format);
@@ -52,6 +50,7 @@ struct OffscreenTarget::Impl {
     static void NoteFailure(Slot& slot, const detail::FrameContext& context, const char* what, std::uint32_t width,
         std::uint32_t height, const char* reason);
 
+    std::string base;
     std::array<Slot, rg::kViewScopeCount> slots;
 };
 
@@ -134,6 +133,9 @@ Texture OffscreenTarget::Impl::Acquire(
     }
 
     Slot& slot = slots[rg::ViewScopeIndex(context->scope)];
+    if (slot.name.empty()) {
+        slot.name = PersistentName(base, *context);
+    }
     if (!slot.created) {
         if (!ShouldAttempt(slot, *context, width, height) || !Create(slot, *context, width, height, depthOnly, format)) {
             return Texture{};

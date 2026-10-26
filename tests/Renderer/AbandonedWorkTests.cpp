@@ -71,5 +71,13 @@ TEST(AbandonedWorkTest, ParkingNothingIsIgnored)
     EXPECT_EQ(work.Count(), 0u);
 }
 
+TEST(AbandonedWorkTest, AllocatorIsAbandonedOnlyWhenParkedObjectsAreLeaked)
+{
+    EXPECT_TRUE(ShouldAbandonAllocator(false, 1));
+    EXPECT_FALSE(ShouldAbandonAllocator(false, 0));
+    EXPECT_FALSE(ShouldAbandonAllocator(true, 1));
+    EXPECT_FALSE(ShouldAbandonAllocator(true, 0));
+}
+
 } // namespace
 } // namespace gte

@@ -423,8 +423,12 @@ module or adding a new endpoint:
   while the main thread is blocked. Every number sits inside a metric object
   `{"value","unit","kind","status","age_frames","reason"}`; `value` is `null` unless the status is `Present`, `Partial` or
   `Stale`. Statuses: `Present`, `Partial`, `Stale`, `Absent`, `Unsupported`, `Error`, `Inactive`. The only plain numbers are
-  `schema_version`, `frame_index`, `thread_slot` and `depth`. The snapshot is built only after a request asked for it in the last 2 s,
-  so the first answer after a pause may take one frame. `503` before the first snapshot and when the bridge is missing. With
+  `schema_version`, `frame_index`, `thread_slot` and `depth`. The main thread publishes a snapshot when a request asked in the
+  last 2 s, when a spike froze, and every 30 frames otherwise. Before the first publish (for example the main thread is stalled
+  right after start) `GET /profiler`, `/profiler/frames` and `/profiler/spikes` answer `200` with
+  `{"success":true,"schema_version":1,"frame_index":0,"state":"no_snapshot","has_frame":false,"snapshot_age":metric,"live_block":[...]}`;
+  `live_block` is read without any lock, so the waits in progress are still visible. `503` when the bridge is missing (and for
+  `POST /profiler/export` before the first snapshot). With
   `GTE_ENABLE_PROFILER=OFF` every route answers `{"success":true,"schema_version":1,"state":"compiled_out"}`.
   - **`GET /profiler`**: `success`, `schema_version`, `frame_index`, `state`, `has_frame`, `snapshot_age`, `capture`,
     `display_paused`, `cpu_frame`, `untracked`, `blocked{gpu,workers,other}`,
@@ -451,7 +455,8 @@ module or adding a new endpoint:
     A frame is frozen when it takes more than twice the median of the previous 60 frames (or more than the
     `spike_threshold_ms` when that is set). `classification` is `explained` when a marker sits on the frame or the dominant
     scope covers at least half of the excess, otherwise `unexplained`. 16 frames are kept; the oldest unpinned one is evicted.
-    A late GPU report (up to 2 frames) fills `gpu_span` and sets `gpu_attached`.
+    The GPU span of the present submit of that frame is read back up to 2 frames later. It is added to `gpu_span` and sets
+    `gpu_attached`.
   - **`GET /profiler/spike?index=F`**: one frozen frame by its `frame_index` `F` with `scopes[{name,kind,depth,start,duration,self}]`
     in time order (`start` counts from the frame start), `gpu_views`, `dropped_scopes`. A bad index is a `400`, a frame that was
     never frozen or was evicted is a `404`.
@@ -753,13 +758,13 @@ registering a new named texture:
   `PublishRenderGraphMetadata()`/`GetPublishedRenderGraphMetadata()`,
   alongside its existing texture-list pair - not a new, sixth bridge class;
   see that campaign's PHASE0 Locked Design Decision #4 for why). The response
-  body is `gte::rg::RenderGraphMetadata::to_json()` verbatim: `schema_version`
+  body is `Network::RenderGraphMetadataToJson()` (`src/Network/RenderGraphMetadataJson.cpp`): `schema_version`
   (an integer, bumped only on a future breaking shape change - currently
   `2`), `offscreen_regime`/`present_regime` (each one `ExecuteTimingMode`
   regime's own `regime_name`/`passes`/`resources`/`gpu_frame_status`/
   `gpu_span_milliseconds`/`gpu_folded_passes`/`dropped_gpu_frames` - every enum
   already resolved to a human
-  string - `kind`, `category`, `draw_kind`, `view_scope`, `view` (`shared`, `primary` or `secondary`),
+  string - `kind`, `category`, `draw_kind`, `view_scope` (`Shared`, `Game` or `Scene`), `view` (`shared`, `primary` or `secondary`),
   `instance` (hex id of the pass's binding instance, empty when the pass never executed),
   `render_pass_event` - every GPU timing value already resolved to a status
   word (`gpu_timing_status`: `Present`, `Partial`, `Absent`, `Error`, `Unsupported` or `Inactive`), a

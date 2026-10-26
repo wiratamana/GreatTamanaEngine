@@ -23,7 +23,7 @@ constexpr const char* kLogCategory = "FeatureKit";
 
 struct PersistentBuffer::Impl {
     struct Slot {
-        std::string name; // The graph import and the buffer keep this pointer: it must not move.
+        std::string name; // Set on first use. The graph import and the buffer keep this pointer: it must not move.
         rg::GpuBuffer buffer;
         std::uint64_t capacity = 0;
         rg::BuildRetryGate gate;
@@ -32,12 +32,10 @@ struct PersistentBuffer::Impl {
         rg::BufferHandle imported;
     };
 
-    Impl(std::string_view base, BufferUse bufferUse)
-        : use(bufferUse)
+    Impl(std::string_view baseName, BufferUse bufferUse)
+        : base(baseName)
+        , use(bufferUse)
     {
-        for (std::size_t i = 0; i < rg::kViewScopeCount; ++i) {
-            slots[i].name = PersistentName(base, static_cast<rg::ViewScope>(i));
-        }
     }
 
     // The new buffer is created before the old one is freed, so their handles can never be equal.
@@ -63,6 +61,7 @@ struct PersistentBuffer::Impl {
         return true;
     }
 
+    std::string base;
     BufferUse use;
     std::array<Slot, rg::kViewScopeCount> slots;
 };
@@ -83,6 +82,9 @@ GpuBufferRef PersistentBuffer::Acquire(Frame& frame, std::uint64_t byteSize)
     }
     rg::RenderGraphBuilder& builder = *context->builder;
     Impl::Slot& slot = m_impl->slots[rg::ViewScopeIndex(context->scope)];
+    if (slot.name.empty()) {
+        slot.name = PersistentName(m_impl->base, *context);
+    }
 
     // A second request in the same frame and graph returns the same import; it can never grow the buffer.
     if (slot.importedSerial == frame.Serial() && slot.importedBuilder == &builder) {
