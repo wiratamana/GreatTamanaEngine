@@ -70,6 +70,7 @@ ClusterCullParams MakeClusterCullParams(const Mat4& cullViewProjection, const Ve
         params.planes[i][2] = planes[i].normal.z;
         params.planes[i][3] = planes[i].distance;
     }
+    std::memcpy(params.viewProjection, cullViewProjection.Data(), sizeof(params.viewProjection));
     params.eyeOrDirection[0] = eyeOrDirection.x;
     params.eyeOrDirection[1] = eyeOrDirection.y;
     params.eyeOrDirection[2] = eyeOrDirection.z;
@@ -136,12 +137,21 @@ std::uint64_t ClusterBufferCapacity(std::uint64_t requestedBytes) noexcept
     return capacity;
 }
 
-std::uint64_t ClusterChainBytes(std::uint64_t instanceCount, std::uint64_t workItems) noexcept
+std::uint64_t ClusterHistoryCapacity(std::uint64_t workItems) noexcept
 {
+    return ClusterBufferCapacity(SaturatingMul(workItems, kClusterHistoryBytes));
+}
+
+std::uint64_t ClusterChainBytes(std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase) noexcept
+{
+    const std::uint64_t lanes = twoPhase ? 2 : 1;
+    std::uint64_t perLane = ClusterBufferCapacity(SaturatingMul(workItems, kClusterVisibleBytes));
+    perLane = SaturatingAdd(perLane, ClusterBufferCapacity(SaturatingMul(workItems, kClusterCommandBytes)));
+    perLane = SaturatingAdd(perLane, ClusterBufferCapacity(sizeof(std::uint32_t)));
+
     std::uint64_t total = ClusterBufferCapacity(SaturatingMul(instanceCount, sizeof(ClusterInstanceGpu)));
-    total = SaturatingAdd(total, ClusterBufferCapacity(SaturatingMul(workItems, kClusterVisibleBytes)));
-    total = SaturatingAdd(total, ClusterBufferCapacity(SaturatingMul(workItems, kClusterCommandBytes)));
-    return SaturatingAdd(total, ClusterBufferCapacity(sizeof(std::uint32_t)));
+    total = SaturatingAdd(total, SaturatingMul(perLane, lanes));
+    return twoPhase ? SaturatingAdd(total, ClusterHistoryCapacity(workItems)) : total;
 }
 
 bool ClusterDrawLedger::TryReserve(
@@ -288,6 +298,41 @@ Vec3 OrthographicViewDirection(const Mat4& m) noexcept
 bool CameraIsFinite(const Mat4& viewProjection, const Vec3& eyeOrDirection) noexcept
 {
     return IsFiniteMat(viewProjection) && IsFiniteVec(eyeOrDirection);
+}
+
+bool CameraPoseEqual(const Mat4& viewProjectionA, const Vec3& eyeA, const Mat4& viewProjectionB, const Vec3& eyeB) noexcept
+{
+    const float* a = viewProjectionA.Data();
+    const float* b = viewProjectionB.Data();
+    for (int i = 0; i < 16; ++i) {
+        if (!(a[i] == b[i])) {
+            return false; // A NaN entry never counts as equal.
+        }
+    }
+    return eyeA.x == eyeB.x && eyeA.y == eyeB.y && eyeA.z == eyeB.z;
+}
+
+std::uint64_t ClusterHistoryKey(std::uint64_t meshToken, std::uint32_t clusterCount,
+    std::span<const std::uint32_t> entityIds, std::uint64_t bufferGeneration) noexcept
+{
+    // FNV-1a over 64-bit words with a final avalanche; the order of the ids matters.
+    constexpr std::uint64_t kPrime = 0x100000001b3ull;
+    std::uint64_t hash = 0xcbf29ce484222325ull;
+    const auto mix = [&hash](std::uint64_t value) {
+        hash = (hash ^ value) * kPrime;
+        hash ^= hash >> 29;
+    };
+    mix(meshToken);
+    mix(clusterCount);
+    mix(bufferGeneration);
+    mix(entityIds.size());
+    for (const std::uint32_t id : entityIds) {
+        mix(id);
+    }
+    hash ^= hash >> 33;
+    hash *= 0xff51afd7ed558ccdull;
+    hash ^= hash >> 33;
+    return hash;
 }
 
 HizLayout HizLayoutFor(std::uint32_t sceneWidth, std::uint32_t sceneHeight) noexcept
@@ -480,7 +525,7 @@ bool HizBehind(const HizDepthMap& map, float nearestW, float nearestZ, float far
     return nearestW > farthestW * (1.0f + kHizRelMargin) + kHizAbsMargin;
 }
 
-bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& prevViewProjection,
+bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& viewProjection,
     const HizLayout& layout, std::span<const float> atlas) noexcept
 {
     if (!layout.IsValid()) {
@@ -499,8 +544,8 @@ bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& 
         const Vec3 p = world.TransformPoint(local);
         float clip[4];
         for (int row = 0; row < 4; ++row) {
-            clip[row] = prevViewProjection(row, 0) * p.x + prevViewProjection(row, 1) * p.y
-                + prevViewProjection(row, 2) * p.z + prevViewProjection(row, 3);
+            clip[row] = viewProjection(row, 0) * p.x + viewProjection(row, 1) * p.y + viewProjection(row, 2) * p.z
+                + viewProjection(row, 3);
         }
         if (!(clip[3] > 1e-6f)) {
             return false; // Behind the eye: no usable projection.
@@ -518,8 +563,12 @@ bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& 
         nearestZ = i == 0 ? z : std::min(nearestZ, z);
         nearestW = i == 0 ? clip[3] : std::min(nearestW, clip[3]);
     }
-    // Depth outside the rect is unknown, so a box that leaves the screen is kept.
-    if (minX < -1.0f || maxX > 1.0f || minY < -1.0f || maxY > 1.0f) {
+    // Only the on-screen part of the box matters. Depth itself is never clamped.
+    minX = std::max(minX, -1.0f);
+    minY = std::max(minY, -1.0f);
+    maxX = std::min(maxX, 1.0f);
+    maxY = std::min(maxY, 1.0f);
+    if (maxX < minX || maxY < minY) {
         return false;
     }
     const float width = static_cast<float>(layout.baseWidth);
@@ -529,93 +578,28 @@ bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& 
     if (!rect.has_value()) {
         return false;
     }
-    return HizBehind(HizDepthMapOf(prevViewProjection), nearestW, nearestZ, HizFarthestDepth(atlas, layout, *rect));
+    return HizBehind(HizDepthMapOf(viewProjection), nearestW, nearestZ, HizFarthestDepth(atlas, layout, *rect));
 }
 
-void SetClusterCullHiz(ClusterCullParams& params, const Mat4& prevViewProjection, const HizLayout& layout) noexcept
+void SetClusterCullHiz(ClusterCullParams& params, const HizLayout& layout) noexcept
 {
-    std::memcpy(params.prevViewProjection, prevViewProjection.Data(), sizeof(params.prevViewProjection));
+    Mat4 viewProjection;
+    for (int col = 0; col < 4; ++col) {
+        for (int row = 0; row < 4; ++row) {
+            viewProjection(row, col) = params.viewProjection[col * 4 + row];
+        }
+    }
     params.hiz[0] = static_cast<float>(layout.atlasWidth);
     params.hiz[1] = static_cast<float>(layout.atlasHeight);
     params.hiz[2] = static_cast<float>(layout.baseWidth);
     params.hiz[3] = static_cast<float>(layout.baseHeight);
 
-    const HizDepthMap map = HizDepthMapOf(prevViewProjection);
+    const HizDepthMap map = HizDepthMapOf(viewProjection);
     params.depthMap[0] = map.k;
     params.depthMap[1] = map.b;
     params.depthMap[2] = static_cast<float>(layout.levelCount);
     params.depthMap[3] = 0.0f;
     params.counts[3] = map.raw ? (params.counts[3] | kClusterCullFlagRawDepth) : (params.counts[3] & ~kClusterCullFlagRawDepth);
-}
-
-bool HizCameraCut(const Mat4& prevViewProjection, const Vec3& prevEye, const Mat4& viewProjection,
-    const Vec3& eye) noexcept
-{
-    if (!CameraIsFinite(prevViewProjection, prevEye) || !CameraIsFinite(viewProjection, eye)) {
-        return true;
-    }
-    if (Length(eye - prevEye) > kHizCutEyeDistance) {
-        return true;
-    }
-    // The third row of a view-projection points along the view direction for both projection kinds.
-    const Vec3 prevForward(prevViewProjection(2, 0), prevViewProjection(2, 1), prevViewProjection(2, 2));
-    const Vec3 forward(viewProjection(2, 0), viewProjection(2, 1), viewProjection(2, 2));
-    const float lengths = Length(prevForward) * Length(forward);
-    if (!(lengths > 0.0f)) {
-        return true;
-    }
-    return Dot(prevForward, forward) / lengths < kHizCutCosAngle;
-}
-
-HizValidity AdvanceHizValidity(
-    HizValidity state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height, bool cameraCut) noexcept
-{
-    const bool first = !state.hasBuilt;
-    const bool missedFrame = state.hasBuilt && frameIndex != state.lastFrame + 1;
-    const bool resized = state.hasBuilt && (width != state.width || height != state.height);
-
-    bool resizeEvent = resized;
-    if (resized) {
-        state.resizeHold = kHizResizeHoldBuilds;
-    } else if (state.resizeHold > 0) {
-        resizeEvent = true;
-        --state.resizeHold;
-    }
-    state.framesSinceValid = NextFramesSinceValid(state.framesSinceValid, resizeEvent, first, !missedFrame, cameraCut);
-    state.hasBuilt = true;
-    state.lastFrame = frameIndex;
-    state.width = width;
-    state.height = height;
-    return state;
-}
-
-HizReason HizUnusableReason(const HizValidity& state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height) noexcept
-{
-    if (!state.hasBuilt) {
-        return HizReason::NoHistory;
-    }
-    if (state.lastFrame + 1 != frameIndex) {
-        return HizReason::BuildOff;
-    }
-    if (state.width != width || state.height != height) {
-        return HizReason::Resized;
-    }
-    if (!OcclusionAllowed(state.framesSinceValid, false, false, true, false)) {
-        return HizReason::WarmingUp;
-    }
-    return HizReason::None;
-}
-
-bool InstanceMoved(const Mat4& previous, const Mat4& current) noexcept
-{
-    const float* a = previous.Data();
-    const float* b = current.Data();
-    for (int i = 0; i < 16; ++i) {
-        if (!(a[i] == b[i])) {
-            return true;
-        }
-    }
-    return false;
 }
 
 bool MeshHasCoincidentTriangles(std::span<const Vec3> positions, std::span<const std::uint32_t> indices)

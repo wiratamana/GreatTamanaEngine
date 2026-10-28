@@ -13,9 +13,6 @@ constexpr std::int32_t kFrameStampPriority = 35;
 constexpr std::int32_t kTracePriority = 55;
 constexpr std::int32_t kCompositePriority = -1600;
 
-// A snapshot older than this many frames (against the newest frame of any view) counts as not rendered.
-constexpr std::uint64_t kSnapshotStaleFrames = 2;
-
 constexpr std::uint64_t kBytesPerTexel = 8; // RGBA16 float.
 
 } // namespace
@@ -45,7 +42,7 @@ void SsgiFeature::ApplySettings(const SsgiSettings& candidate)
 SsgiViewSnapshot SsgiFeature::Snapshot(rg::ViewScope scope) const
 {
     SsgiViewSnapshot snapshot = m_views.For(scope).snapshot;
-    const bool stale = snapshot.frameIndex > m_newestFrame || m_newestFrame - snapshot.frameIndex > kSnapshotStaleFrames;
+    const bool stale = fx::SnapshotIsStale(snapshot.frameIndex, m_newestFrame);
     if (stale) {
         snapshot.status = SsgiFrameStatus::NotRendered;
     }

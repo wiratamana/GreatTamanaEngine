@@ -309,7 +309,7 @@ void ClusterViewerWindow::DrawHizControls()
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         ImGui::SetTooltip("Capture, do not move, Verify: expect 0 false culls. Any false cull is a real bug.\n"
-                          "Capture, move a little, Verify: false culls are the known one-frame pop-in of Hi-Z.");
+                          "Capture, move, Verify: occlusion is dropped until you capture again.");
     }
     ImGui::TextWrapped("%s", HizStatusText().c_str());
     if (m_hiz) {
@@ -324,13 +324,13 @@ void ClusterViewerWindow::DrawHizControls()
             }
         }
         if (m_run.hizCut) {
-            ImGui::TextColored(kOrange, "engine would discard this pyramid (camera cut)");
+            ImGui::TextColored(kOrange, "occlusion is off: the debug camera differs from the capture pose");
         }
     }
     if (!m_hizError.empty()) {
         ImGui::TextColored(kRed, "%s", m_hizError.c_str());
     }
-    ImGui::TextDisabled("Engine needs 2 clean builds; the viewer does not wait.");
+    ImGui::TextDisabled("The pyramid is used only at the pose it was captured at.");
 }
 
 void ClusterViewerWindow::DrawVerifyControls()
@@ -420,7 +420,7 @@ void ClusterViewerWindow::DrawStats()
         ImGui::Text("Visible triangles: %llu", static_cast<unsigned long long>(m_stats.visibleTriangles));
     }
     if (m_run.hizCut) {
-        ImGui::TextColored(kOrange, "engine would discard the pyramid (camera cut)");
+        ImGui::TextColored(kOrange, "occlusion is off: the debug camera differs from the capture pose");
     } else if (m_settings.occlusion && !m_run.occlusionApplied && m_settings.drawMode == ClusterViewerDrawMode::Cull) {
         ImGui::TextColored(kOrange, "no Hi-Z capture: occlusion is off");
     }

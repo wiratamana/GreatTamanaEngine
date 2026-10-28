@@ -35,6 +35,9 @@ public:
     // Allocated bytes of this frame's view; 0 when none.
     std::uint64_t Capacity(Frame& frame) const;
 
+    // Counts every create, grow and release of this frame's view. A changed value means the contents are undefined.
+    std::uint64_t Generation(Frame& frame) const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;

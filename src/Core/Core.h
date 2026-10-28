@@ -256,10 +256,6 @@ public:
     // Changes whenever BuildFrame() clears the exclusion sets. A pass compares it at execute time to catch a stale set.
     const std::uint64_t* ExclusionEpoch() const noexcept { return &m_exclusionEpoch; }
 
-    // Asks BuildFrame() of the next frame to track entity movement (kClusterFlagMoved). Kit verbs only; call every
-    // frame the occlusion pyramid is built.
-    void RequestOcclusionTracking() noexcept { m_occlusionRequested = true; }
-
     // Most exclusion sets one frame can reserve.
     static constexpr std::size_t kMaxExclusionSetsPerFrame = 16;
 
@@ -355,10 +351,6 @@ private:
 
     // Failed one-cluster syntheses per mesh; entries die with their mesh.
     std::unordered_map<fx::MeshToken, SynthesisBackoff, fx::MeshTokenHash> m_synthesisBackoff;
-
-    // Last-frame world matrices for the moved flag. Filled only while a pyramid build asked for it last frame.
-    ClusterMovedTracker m_clusterMoved;
-    bool m_occlusionRequested = false;
 
     // Opaque features that broke the pass tag rule; their callbacks no longer run.
     std::unordered_set<std::string> m_faultedOpaqueFeatures;

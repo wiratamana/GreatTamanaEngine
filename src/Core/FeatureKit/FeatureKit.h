@@ -33,6 +33,7 @@
 #include "SceneSlot.h"
 #include "ScreenSpaceView.h"
 #include "SharedOncePerFrame.h"
+#include "SnapshotAge.h"
 #include "Texture.h"
 #include "TransientTarget.h"
 #include "View.h"

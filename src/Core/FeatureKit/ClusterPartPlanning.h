@@ -1,6 +1,6 @@
 #pragma once
 
-// Pure parts of the cluster draw verb: grouping, slot assignment and the claim-after-proof flow.
+// Pure parts of the cluster draw verb: grouping, slot assignment, the round order and the claim-after-proof flow.
 // Vulkan-free so they run without a device.
 
 #include "ClusterDrawTypes.h"
@@ -39,21 +39,68 @@ struct ClusterSlotAssignment {
 // Slots go to the parts with the most work items first. Ties are broken by mesh token.
 ClusterSlotAssignment AssignClusterPartSlots(std::span<const ClusterPartSize> parts, std::uint32_t slotCount);
 
-// Declares reset, cull and draw in that order and stops at the first refusal.
-// `declarer` provides bool Reset(), bool Cull(), bool Draw().
-template <typename Declarer>
-ClusterChainProgress RecordClusterChain(Declarer& declarer)
+// Last step of a part's chain that was declared. Round 1 is Reset1..Draw1, round 2 is Reset2..Draw2.
+// A single-phase chain only has round 1.
+enum class ClusterStep : std::uint8_t { None, Reset1, Cull1, Draw1, Reset2, Cull2, Draw2 };
+
+// The claim rule's view of a step: Draw only when the last step of the part's chain was declared.
+constexpr ClusterChainProgress ClusterProgressOf(ClusterStep step, bool twoPhase) noexcept
 {
-    if (!declarer.Reset()) {
-        return ClusterChainProgress::None;
+    switch (step) {
+    case ClusterStep::None: return ClusterChainProgress::None;
+    case ClusterStep::Reset1: return ClusterChainProgress::Reset;
+    case ClusterStep::Cull1: return ClusterChainProgress::Cull;
+    case ClusterStep::Draw1: return twoPhase ? ClusterChainProgress::Cull : ClusterChainProgress::Draw;
+    case ClusterStep::Reset2:
+    case ClusterStep::Cull2: return ClusterChainProgress::Cull;
+    case ClusterStep::Draw2: return ClusterChainProgress::Draw;
     }
-    if (!declarer.Cull()) {
-        return ClusterChainProgress::Reset;
+    return ClusterChainProgress::None;
+}
+
+// Declares reset, cull and draw of one round of one part, in that order, and stops at the first refusal.
+// `declarer` provides bool Reset(part, round), Cull(part, round) and Draw(part, round); round is 0 or 1.
+template <typename Declarer>
+ClusterStep RecordClusterRound(Declarer& declarer, std::size_t part, std::uint32_t round)
+{
+    const bool second = round != 0;
+    if (!declarer.Reset(part, round)) {
+        return second ? ClusterStep::Draw1 : ClusterStep::None;
     }
-    if (!declarer.Draw()) {
-        return ClusterChainProgress::Cull;
+    if (!declarer.Cull(part, round)) {
+        return second ? ClusterStep::Reset2 : ClusterStep::Reset1;
     }
-    return ClusterChainProgress::Draw;
+    if (!declarer.Draw(part, round)) {
+        return second ? ClusterStep::Cull2 : ClusterStep::Cull1;
+    }
+    return second ? ClusterStep::Draw2 : ClusterStep::Draw1;
+}
+
+// Round 1 of every part, then one pyramid build, then round 2 of every part that finished round 1.
+// A single-phase chain stops after round 1. `declarer` also provides bool Begin(part) (acquire the part's
+// buffers) and bool Build() (declare the pyramid). A refused Begin leaves the part at None; a refused Build
+// leaves every part at Draw1, which never counts as claimable in a two-phase chain.
+template <typename Declarer>
+std::vector<ClusterStep> RecordClusterRounds(Declarer& declarer, std::size_t partCount, bool twoPhase)
+{
+    std::vector<ClusterStep> steps(partCount, ClusterStep::None);
+    std::size_t finishedFirst = 0;
+    for (std::size_t part = 0; part < partCount; ++part) {
+        if (!declarer.Begin(part)) {
+            continue;
+        }
+        steps[part] = RecordClusterRound(declarer, part, 0);
+        finishedFirst += steps[part] == ClusterStep::Draw1 ? 1 : 0;
+    }
+    if (!twoPhase || finishedFirst == 0 || !declarer.Build()) {
+        return steps;
+    }
+    for (std::size_t part = 0; part < partCount; ++part) {
+        if (steps[part] == ClusterStep::Draw1) {
+            steps[part] = RecordClusterRound(declarer, part, 1);
+        }
+    }
+    return steps;
 }
 
 // Stats run only for a colour target on the first lane, when the caller asked for them.
@@ -70,18 +117,6 @@ bool RecordClusterStats(Declarer& declarer)
     return declarer.StatsClear() && declarer.StatsCompute() && declarer.StatsCopy();
 }
 
-// Chain plus optional stats. The stats are declared only after the draw, and their refusal never changes
-// the returned progress, so it cannot revoke a claim.
-template <typename Declarer>
-ClusterChainProgress RecordClusterPart(Declarer& declarer, bool statsWanted)
-{
-    const ClusterChainProgress progress = RecordClusterChain(declarer);
-    if (progress == ClusterChainProgress::Draw && statsWanted) {
-        RecordClusterStats(declarer);
-    }
-    return progress;
-}
-
 // One readback cell of a part slot.
 struct ClusterCountSample {
     bool valid = false;
@@ -92,23 +127,34 @@ struct ClusterCountSample {
 // Sums the valid cells. Invalid when none is valid; `frame` is the oldest frame used.
 ClusterVisibleCount SumClusterCounts(std::span<const ClusterCountSample> samples) noexcept;
 
+// What a part slot's history buffer was last written for.
+struct ClusterHistoryRecord {
+    std::uint64_t key = 0;
+    std::uint64_t frame = 0;
+    bool written = false;
+};
+
+// The history is trusted only when the previous frame wrote it for the same contents (see ClusterHistoryKey).
+constexpr bool ClusterHistoryUsable(const ClusterHistoryRecord& record, std::uint64_t key, std::uint64_t frame) noexcept
+{
+    return record.written && record.key == key && record.frame + 1 == frame;
+}
+
 struct ClusterRecordOutcome {
     std::vector<ClusterChainProgress> progress; // One entry per part.
     std::vector<Entity> claimed;                // Entities of the parts whose chain was fully declared.
 };
 
-// Runs `declarePart(index)` (returns the progress of that part) for every part, then builds the claim
-// from what was really declared. `parts` holds the entities of each part.
-template <typename DeclarePart>
-ClusterRecordOutcome RecordClusterParts(
-    std::span<const std::span<const Entity>> parts, const ClusterClaimContext& context, DeclarePart&& declarePart)
+// Builds the claim from what was really declared. `parts` holds the entities of each part.
+inline ClusterRecordOutcome ClusterOutcomeOf(std::span<const std::span<const Entity>> parts,
+    const ClusterClaimContext& context, std::span<const ClusterStep> steps, bool twoPhase)
 {
     ClusterRecordOutcome outcome;
     outcome.progress.assign(parts.size(), ClusterChainProgress::None);
     std::vector<ClusterPartClaim> claims;
     claims.reserve(parts.size());
     for (std::size_t i = 0; i < parts.size(); ++i) {
-        outcome.progress[i] = declarePart(i);
+        outcome.progress[i] = i < steps.size() ? ClusterProgressOf(steps[i], twoPhase) : ClusterChainProgress::None;
         claims.push_back(ClusterPartClaim{ parts[i], outcome.progress[i] });
     }
     outcome.claimed = ClaimedEntitiesOf(claims, context);

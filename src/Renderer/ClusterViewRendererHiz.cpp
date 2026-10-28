@@ -1,4 +1,4 @@
-﻿#include "ClusterViewRenderer.h"
+#include "ClusterViewRenderer.h"
 #include "ClusterViewRendererImpl.h"
 
 #include "Culling/HizBuildPlan.h"
@@ -24,6 +24,7 @@ bool ClusterViewRenderer::Impl::DeclareCullAll(rg::RenderGraphBuilder& builder, 
     }
     instances = builder.Import(*instance);
     const rg::BufferHandle tableHandle = builder.Import(*table);
+    const rg::BufferHandle historyHandle = ImportHistoryStandIn(builder);
     const rg::TextureHandle standIn = ImportHizAtlas(builder, false);
     set = ImportSet(builder, SetId::Ghost);
 
@@ -31,8 +32,8 @@ bool ClusterViewRenderer::Impl::DeclareCullAll(rg::RenderGraphBuilder& builder, 
     cull.viewProjection = viewProjection;
     cull.eye = eye;
     const bool reset = DeclareFill(builder, resetName, set.count);
-    const bool culled =
-        DeclareCull(builder, set, instances, tableHandle, standIn, MakeParams(cull, ClusterCullFlags::None, false));
+    const bool culled = DeclareCull(
+        builder, set, instances, tableHandle, historyHandle, standIn, MakeParams(cull, ClusterCullFlags::None, false));
     return reset && culled;
 }
 

@@ -3,15 +3,27 @@
 #include "ClusterNamePool.h"
 #include "ComputeChain.h"
 #include "FrameContext.h"
-#include "../Core.h"
 #include "../PixelFormat.h"
 
 #include <string>
 
 namespace gte::fx {
 
+namespace {
+
+// The pool recycles targets by exact size; rounding keeps a window drag from creating a new one per pixel.
+constexpr std::uint32_t kAtlasSizeStep = 256;
+
+constexpr std::uint32_t RoundUpToStep(std::uint32_t value) noexcept
+{
+    return (value + kAtlasSizeStep - 1) / kAtlasSizeStep * kAtlasSizeStep;
+}
+
+} // namespace
+
 HizPyramid::HizPyramid(std::string_view baseName)
     : m_base(baseName)
+    , m_atlas(std::string(baseName) + ".Atlas")
 {
     if (m_base.empty()) {
         m_error = "HizPyramid needs a base name";
@@ -40,114 +52,67 @@ std::vector<std::string> HizPyramid::AllPassNames() const
     return names;
 }
 
-void HizPyramid::Reset(Frame& frame)
+HizPlan HizPyramid::Plan(Frame& frame, Texture sceneDepth)
 {
-    m_views.For(frame.Scope()).validity = HizValidity{};
-}
-
-bool HizPyramid::Build(PostOpaqueFrame& frame)
-{
-    HizViewState& view = m_views.For(frame.Scope());
-    const fx::View& v = frame.View();
-
-    // The next frame moves its movement tracking on only while a pyramid is being built.
-    if (detail::FrameContext* context = frame.Context(); context != nullptr && context->core != nullptr) {
-        context->core->RequestOcclusionTracking();
+    HizPlan plan;
+    if (!Valid() || frame.Scope() == rg::ViewScope::Shared || !frame.Owns(sceneDepth)) {
+        return plan;
     }
-
-    const auto restart = [&]() {
-        view.validity = HizValidity{};
-        return false;
-    };
-    if (!Valid() || frame.Scope() == rg::ViewScope::Shared) {
-        return restart();
+    const fx::View& view = frame.View();
+    plan.layout = HizLayoutFor(view.extent.width, view.extent.height);
+    if (!plan.layout.IsValid()) {
+        plan.reason = view.extent.width != 0 && view.extent.height != 0 ? HizReason::TooLarge : HizReason::Unavailable;
+        return plan;
     }
-    const HizLayout layout = HizLayoutFor(v.extent.width, v.extent.height);
-    if (!layout.IsValid() || !CameraIsFinite(v.viewProjection, v.eye)) {
-        return restart();
-    }
-    const HizBuildPlan plan = HizBuildPlanFor(layout);
+    plan.dispatches = HizBuildPlanFor(plan.layout);
 
-    // Ask every toggle before the first side effect.
+    // Ask every toggle and shader before the first side effect.
     for (const char* name : m_passNames) {
         if (!frame.PassEnabled(rg::StaticName::Interned(name))) {
-            return restart();
+            return plan;
         }
     }
-    if (!frame.ShaderReady(m_baseShader) || (plan.runTop && !frame.ShaderReady(m_topShader))) {
-        return restart();
+    if (!frame.ShaderReady(m_baseShader) || (plan.dispatches.runTop && !frame.ShaderReady(m_topShader))) {
+        return plan;
     }
+    plan.reason = HizReason::None;
+    return plan;
+}
 
-    const Texture atlas = view.atlas[frame.FrameIndex() & 1u].Acquire(
-        frame, Extent2D{ layout.atlasWidth, layout.atlasHeight }, PixelFormat::R32_Float);
+Texture HizPyramid::Build(Frame& frame, const HizPlan& plan, Texture sceneDepth)
+{
+    if (!Valid() || !plan.Usable() || !frame.Owns(sceneDepth)) {
+        return Texture{};
+    }
+    const fx::View& view = frame.View();
+    const Texture atlas = m_atlas.Acquire(frame,
+        Extent2D{ RoundUpToStep(plan.layout.atlasWidth), RoundUpToStep(plan.layout.atlasHeight) }, PixelFormat::R32_Float);
     if (!atlas.IsValid()) {
-        return restart();
+        return Texture{};
     }
 
     // The base pass reduces the depth into levels 0..4, the top pass finishes the remaining levels.
-    const HizBuildPush push = MakeHizBuildPush(v.extent.width, v.extent.height, layout);
+    const HizBuildPush push = MakeHizBuildPush(view.extent.width, view.extent.height, plan.layout);
     const bool baseDeclared = frame.Compute(m_baseShader, rg::StaticName::Interned(m_passNames[0]))
                                   .Push(push)
-                                  .Bind("sceneDepth", Depth(frame.SceneDepth()))
+                                  .Bind("sceneDepth", Depth(sceneDepth))
                                   .Bind("pyramid", atlas)
-                                  .Dispatch(Extent2D{ plan.baseThreadsX, plan.baseThreadsY });
+                                  .Dispatch(Extent2D{ plan.dispatches.baseThreadsX, plan.dispatches.baseThreadsY });
     if (!baseDeclared) {
         frame.ReportOnce(std::string("Pass '") + m_passNames[0] + "' was refused; occlusion culling is off");
-        return restart();
+        return Texture{};
     }
-    if (plan.runTop) {
+    if (plan.dispatches.runTop) {
         const bool topDeclared = frame.Compute(m_topShader, rg::StaticName::Interned(m_passNames[1]))
                                      .Push(push)
                                      .Bind("pyramid", atlas)
-                                     .Dispatch(Extent2D{ plan.topThreadsX, 1 });
+                                     .Dispatch(Extent2D{ plan.dispatches.topThreadsX, 1 });
         if (!topDeclared) {
             frame.ReportOnce(std::string("Pass '") + m_passNames[1] + "' was refused; occlusion culling is off");
-            return restart();
+            return Texture{};
         }
     }
-
-    const bool cut = view.validity.hasBuilt && HizCameraCut(view.viewProjection, view.eye, v.viewProjection, v.eye);
-    view.validity = AdvanceHizValidity(view.validity, frame.FrameIndex(), v.extent.width, v.extent.height, cut);
-    view.layout = layout;
-    view.viewProjection = v.viewProjection;
-    view.eye = v.eye;
-    return true;
-}
-
-HizPrevious HizPyramid::Previous(Frame& frame)
-{
-    HizPrevious result;
-    if (!Valid() || frame.Scope() == rg::ViewScope::Shared) {
-        return result;
-    }
-    HizViewState& view = m_views.For(frame.Scope());
-    const fx::View& v = frame.View();
-    if (v.extent.width != 0 && v.extent.height != 0 && !HizLayoutFor(v.extent.width, v.extent.height).IsValid()) {
-        result.reason = HizReason::TooLarge;
-        return result;
-    }
-    if (const HizReason reason = HizUnusableReason(view.validity, frame.FrameIndex(), v.extent.width, v.extent.height);
-        reason != HizReason::None) {
-        result.reason = reason;
-        return result;
-    }
-    if (HizCameraCut(view.viewProjection, view.eye, v.viewProjection, v.eye)) {
-        result.reason = HizReason::CameraCut;
-        return result;
-    }
-
-    // The atlas of the other parity was written last frame; this frame's build writes this parity.
-    const Texture atlas = view.atlas[(frame.FrameIndex() & 1u) ^ 1u].Acquire(
-        frame, Extent2D{ view.layout.atlasWidth, view.layout.atlasHeight }, PixelFormat::R32_Float);
-    if (!atlas.IsValid()) {
-        return result;
-    }
-    result.usable = true;
-    result.reason = HizReason::None;
-    result.atlas = atlas;
-    result.viewProjection = view.viewProjection;
-    result.layout = view.layout;
-    return result;
+    return atlas;
 }
 
 } // namespace gte::fx

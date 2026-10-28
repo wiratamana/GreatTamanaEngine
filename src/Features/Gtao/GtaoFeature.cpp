@@ -13,9 +13,6 @@ constexpr std::int32_t kFrameStampPriority = 40;
 constexpr std::int32_t kOcclusionPriority = 50;
 constexpr std::int32_t kCompositePriority = -1500;
 
-// A snapshot older than this many frames (against the newest frame of any view) counts as not rendered.
-constexpr std::uint64_t kSnapshotStaleFrames = 2;
-
 constexpr std::uint64_t kAoBytesPerTexel = 8; // RGBA16 float.
 
 constexpr float kTuningDepthMeters = 5.0f; // View depth the snapshot reports the screen radius at.
@@ -47,7 +44,7 @@ void GtaoFeature::ApplySettings(const GtaoSettings& candidate)
 GtaoViewSnapshot GtaoFeature::Snapshot(rg::ViewScope scope) const
 {
     GtaoViewSnapshot snapshot = m_views.For(scope).snapshot;
-    const bool stale = snapshot.frameIndex > m_newestFrame || m_newestFrame - snapshot.frameIndex > kSnapshotStaleFrames;
+    const bool stale = fx::SnapshotIsStale(snapshot.frameIndex, m_newestFrame);
     if (stale) {
         snapshot.status = GtaoFrameStatus::NotRendered;
     }

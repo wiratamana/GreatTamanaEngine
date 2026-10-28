@@ -46,14 +46,20 @@ constexpr bool ClusterPathSupported(const IndirectDrawCapsView& caps) noexcept
 // Bits of ClusterInstanceGpu::info[0]. Mirrored by name in ClusterCull.comp.
 inline constexpr std::uint32_t kClusterFlagUniformScale = 1u << 0;
 inline constexpr std::uint32_t kClusterFlagPositiveHand = 1u << 1;
-inline constexpr std::uint32_t kClusterFlagMoved = 1u << 2;
 
 // Bits of ClusterCullParams::counts[3]. Mirrored by name in ClusterCull.comp.
 inline constexpr std::uint32_t kClusterCullFlagFrustum = 1u << 0;
 inline constexpr std::uint32_t kClusterCullFlagBackfaceCone = 1u << 1;
-inline constexpr std::uint32_t kClusterCullFlagOcclusion = 1u << 2;
+inline constexpr std::uint32_t kClusterCullFlagOcclusion = 1u << 2; // Single-phase test against a same-pose pyramid.
 inline constexpr std::uint32_t kClusterCullFlagOrthographic = 1u << 3; // Set from the camera, never by a caller.
+inline constexpr std::uint32_t kClusterCullFlagPhaseFirst = 1u << 5; // Draws last frame's survivors.
+inline constexpr std::uint32_t kClusterCullFlagPhaseSecond = 1u << 6; // Tests every item against this frame's pyramid.
+inline constexpr std::uint32_t kClusterCullFlagHistoryValid = 1u << 7; // The history words are trustworthy.
 inline constexpr std::uint32_t kClusterCullFlagRawDepth = 1u << 8; // Set by SetClusterCullHiz when no depth map exists.
+
+// Bits of one history word. Mirrored in ClusterCull.comp.
+inline constexpr std::uint32_t kClusterHistoryVisible = 1u << 0; // Visible after the last second phase.
+inline constexpr std::uint32_t kClusterHistoryDrawnFirst = 1u << 1; // Drawn by the first phase of this frame.
 
 inline constexpr std::uint32_t kClusterCullGroupSize = 64;
 inline constexpr std::uint64_t kMaxClusterDispatchGroups = 65535;
@@ -67,16 +73,20 @@ inline constexpr std::uint64_t kClusterDrawProcessBudgetBytes = std::uint64_t{ 5
 inline constexpr std::uint32_t kClusterIdleReleaseFrames = 600;
 
 // Lane, slot and pass-name counts live in ClusterPassCounts.h.
-// Bytes per work item: one indirect command (5 uints) and one visible record (uvec2).
+// Bytes per work item: one indirect command (5 uints), one visible record (uvec2) and one history word.
 inline constexpr std::uint64_t kClusterCommandBytes = 20;
 inline constexpr std::uint64_t kClusterVisibleBytes = 8;
+inline constexpr std::uint64_t kClusterHistoryBytes = 4;
 
-// Which clusters are tested.
+// Which clusters are tested, and in which phase of a two-phase chain the dispatch runs.
 enum class ClusterCullFlags : std::uint32_t {
     None = 0,
     Frustum = kClusterCullFlagFrustum,
     BackfaceCone = kClusterCullFlagBackfaceCone,
     Occlusion = kClusterCullFlagOcclusion,
+    PhaseFirst = kClusterCullFlagPhaseFirst,
+    PhaseSecond = kClusterCullFlagPhaseSecond,
+    HistoryValid = kClusterCullFlagHistoryValid,
 };
 
 constexpr ClusterCullFlags operator|(ClusterCullFlags a, ClusterCullFlags b) noexcept
@@ -105,7 +115,7 @@ static_assert(offsetof(ClusterInstanceGpu, info) == 64);
 struct ClusterCullParams {
     float planes[6][4]; // xyz = normal, w = distance; inside when dot + w >= 0.
     float eyeOrDirection[4]; // xyz = eye point, or view direction when orthographic.
-    float prevViewProjection[16];
+    float viewProjection[16]; // The cull camera (occlusion test and depth map).
     std::uint32_t counts[4];
     float hiz[4]; // x,y = atlas size, z,w = level 0 size (Hi-Z occlusion only).
     float depthMap[4]; // x = k, y = b of d = k + b / w, z = pyramid level count (Hi-Z occlusion only).
@@ -113,7 +123,7 @@ struct ClusterCullParams {
 static_assert(sizeof(ClusterCullParams) == 224);
 static_assert(sizeof(ClusterCullParams) % 16 == 0);
 static_assert(offsetof(ClusterCullParams, eyeOrDirection) == 96);
-static_assert(offsetof(ClusterCullParams, prevViewProjection) == 112);
+static_assert(offsetof(ClusterCullParams, viewProjection) == 112);
 static_assert(offsetof(ClusterCullParams, counts) == 176);
 static_assert(offsetof(ClusterCullParams, hiz) == 192);
 static_assert(offsetof(ClusterCullParams, depthMap) == 208);
@@ -121,7 +131,8 @@ static_assert(offsetof(ClusterCullParams, depthMap) == 208);
 // Packs a world matrix and its flags into the GPU record.
 ClusterInstanceGpu MakeClusterInstanceGpu(const Mat4& world, std::uint32_t flags, float maxScale) noexcept;
 
-// Fills the parameter block. Planes come from `cullViewProjection`; the Hi-Z fields stay zero until SetClusterCullHiz.
+// Fills the parameter block. Planes and the view-projection come from `cullViewProjection`; the Hi-Z fields stay
+// zero until SetClusterCullHiz.
 ClusterCullParams MakeClusterCullParams(const Mat4& cullViewProjection, const Vec3& eyeOrDirection,
     bool orthographic, std::uint32_t instanceCount, std::uint32_t clusterCount, ClusterCullFlags flags) noexcept;
 
@@ -154,8 +165,12 @@ ClusterPartVerdict EvaluateClusterPart(
 // Buffer capacity for a request: next power of two, at least the minimum, at most the maximum.
 std::uint64_t ClusterBufferCapacity(std::uint64_t requestedBytes) noexcept;
 
-// Capacity bytes of one chain: instances, visible, commands and count buffers, each rounded up.
-std::uint64_t ClusterChainBytes(std::uint64_t instanceCount, std::uint64_t workItems) noexcept;
+// Capacity bytes of the history buffer of a two-phase chain, rounded up.
+std::uint64_t ClusterHistoryCapacity(std::uint64_t workItems) noexcept;
+
+// Capacity bytes of one chain, each buffer rounded up: instances once; visible, commands and count per lane;
+// the history buffer when `twoPhase` (two lanes, one per phase).
+std::uint64_t ClusterChainBytes(std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase) noexcept;
 
 // True when `held + add` stays within `ceiling`. Never overflows.
 constexpr bool FitsClusterBudget(std::uint64_t held, std::uint64_t add, std::uint64_t ceiling) noexcept
@@ -226,15 +241,47 @@ Vec3 OrthographicViewDirection(const Mat4& viewProjection) noexcept;
 // False when the matrix or the eye/direction holds a non-finite value.
 bool CameraIsFinite(const Mat4& viewProjection, const Vec3& eyeOrDirection) noexcept;
 
+// True when two cameras are bit-identical: the only case where a pyramid of one may serve the other.
+bool CameraPoseEqual(const Mat4& viewProjectionA, const Vec3& eyeA, const Mat4& viewProjectionB, const Vec3& eyeB) noexcept;
+
+// ---------------------------------------------------------------------------------------------
+// Two-phase occlusion: per-item history words
+// ---------------------------------------------------------------------------------------------
+
+// Outcome of one work item in one phase: whether it is emitted and the history word to store.
+struct ClusterPhaseResult {
+    bool emit = false;
+    std::uint32_t word = 0;
+};
+
+// First phase: an item is drawn when it was visible last frame and is still in view. Writes bit 1 for every item.
+// An invalid history reads as all zero, so nothing is drawn.
+constexpr ClusterPhaseResult ClusterPhaseFirst(std::uint32_t word, bool historyValid, bool inView) noexcept
+{
+    const std::uint32_t previous = historyValid ? word : 0u;
+    const bool drawn = (previous & kClusterHistoryVisible) != 0 && inView;
+    return { drawn, (previous & kClusterHistoryVisible) | (drawn ? kClusterHistoryDrawnFirst : 0u) };
+}
+
+// Second phase: an item is visible when it is in view and not occluded by the pyramid of this frame. It is
+// emitted unless the first phase drew it. Writes every word.
+constexpr ClusterPhaseResult ClusterPhaseSecond(std::uint32_t word, bool inView, bool occluded) noexcept
+{
+    const bool visible = inView && !occluded;
+    return { visible && (word & kClusterHistoryDrawnFirst) == 0, visible ? kClusterHistoryVisible : 0u };
+}
+
+// Identity of a history buffer's contents. Any change of mesh, cluster count, instance order or buffer
+// generation gives another key, so stale history is never trusted.
+std::uint64_t ClusterHistoryKey(std::uint64_t meshToken, std::uint32_t clusterCount,
+    std::span<const std::uint32_t> entityIds, std::uint64_t bufferGeneration) noexcept;
+
 // ---------------------------------------------------------------------------------------------
 // Hi-Z occlusion
 // ---------------------------------------------------------------------------------------------
 
 // The pyramid is one R32_Float atlas of farthest-depth levels. Level 0 is half the scene depth size and every
 // level halves the one below, down to a 1 x 1 top level. Texels outside the scene hold 0 (neutral for max).
-
-// Clean builds in a row needed before the pyramid may cull (first frame, resize, cut and a missed build reset it).
-inline constexpr std::uint32_t kHizValidFramesRequired = 2;
 
 // The projected rect grows by this many level-0 texels on every side.
 inline constexpr float kHizRectMarginTexels = 1.0f;
@@ -244,10 +291,6 @@ inline constexpr float kHizRelMargin = 0.002f;
 inline constexpr float kHizAbsMargin = 0.01f;
 inline constexpr float kHizDepthGuard = 4.8e-7f; // About eight depth steps near 1.0.
 inline constexpr float kHizRawBias = 0.001f;
-
-// A view that jumps farther than this, or turns more than acos(kHizCutCosAngle), is a camera cut.
-inline constexpr float kHizCutEyeDistance = 50.0f;
-inline constexpr float kHizCutCosAngle = 0.9f;
 
 // Largest pyramid: level 0 up to 8192 texels per side (scene depth up to 16384), levels 0..13.
 inline constexpr std::uint32_t kHizMaxLevels = 14;
@@ -314,62 +357,18 @@ HizDepthMap HizDepthMapOf(const Mat4& viewProjection) noexcept;
 // farthest depth `farthest`. Never true for clear depth (1.0), depth beyond the far plane or non-finite input.
 bool HizBehind(const HizDepthMap& map, float nearestW, float nearestZ, float farthest) noexcept;
 
-// CPU oracle of the occlusion test in ClusterCull.comp. The box is projected with last frame's matrix.
-// Kept (false) when any corner is behind the eye or the rect leaves the screen.
-bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& prevViewProjection,
+// CPU oracle of the occlusion test in ClusterCull.comp. The box is projected with `viewProjection`, the camera
+// the pyramid was built for. The screen rect is clamped: pixels outside the screen are never drawn.
+// Kept (false) when any corner is behind the eye or the clamped rect is empty.
+bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& viewProjection,
     const HizLayout& layout, std::span<const float> atlas) noexcept;
 
-// Writes the previous view-projection, the pyramid size, the depth map and the raw-depth flag into the block.
-void SetClusterCullHiz(ClusterCullParams& params, const Mat4& prevViewProjection, const HizLayout& layout) noexcept;
+// Writes the pyramid size, the level count, the depth map of the block's own view-projection and the raw-depth
+// flag into the block. Call after MakeClusterCullParams.
+void SetClusterCullHiz(ClusterCullParams& params, const HizLayout& layout) noexcept;
 
-// Occlusion may cull only after enough clean builds and never on a frame with a reset event.
-constexpr bool OcclusionAllowed(std::uint32_t framesSinceValid, bool resized, bool firstFrame, bool buildPassEnabled,
-    bool cameraCut) noexcept
-{
-    return buildPassEnabled && !resized && !firstFrame && !cameraCut && framesSinceValid >= kHizValidFramesRequired;
-}
-
-// Clean-build counter after one pyramid build. Any reset event restarts it at zero.
-constexpr std::uint32_t NextFramesSinceValid(std::uint32_t framesSinceValid, bool resized, bool firstFrame,
-    bool buildPassEnabled, bool cameraCut) noexcept
-{
-    if (!buildPassEnabled || resized || firstFrame || cameraCut) {
-        return 0;
-    }
-    return framesSinceValid < 0xFFFFFFFFu ? framesSinceValid + 1 : framesSinceValid;
-}
-
-// A persistent target resizes one frame after the request, so the build after a resize is held back as well.
-inline constexpr std::uint32_t kHizResizeHoldBuilds = 1;
-
-// Per-view bookkeeping of the pyramid builds. Plain data, advanced once per build.
-struct HizValidity {
-    bool hasBuilt = false;
-    std::uint64_t lastFrame = 0; // Frame index of the last build.
-    std::uint32_t width = 0;     // Scene depth size of the last build.
-    std::uint32_t height = 0;
-    std::uint32_t framesSinceValid = 0;
-    std::uint32_t resizeHold = 0;
-};
-
-// State after a build at `frameIndex` for a scene depth of `width` x `height`. The first build, a resize, a
-// camera cut and a missed frame between two builds all restart the clean count.
-HizValidity AdvanceHizValidity(
-    HizValidity state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height, bool cameraCut) noexcept;
-
-// Why last frame's pyramid may not cull. None means usable.
-enum class HizReason : std::uint8_t { None, NoHistory, Resized, CameraCut, WarmingUp, BuildOff, Unavailable, TooLarge };
-
-// Reason the build history cannot cull in `frameIndex` for a view of `width` x `height`; None when it can.
-// A missing build in the previous frame reports BuildOff. Camera cuts are judged by the caller (HizCameraCut).
-HizReason HizUnusableReason(const HizValidity& state, std::uint64_t frameIndex, std::uint32_t width, std::uint32_t height) noexcept;
-
-// True when the view moved or turned too far for last frame's depth to say anything about this frame.
-bool HizCameraCut(const Mat4& prevViewProjection, const Vec3& prevEye, const Mat4& viewProjection,
-    const Vec3& eye) noexcept;
-
-// True when any entry of the two world matrices differs (a NaN entry counts as different).
-bool InstanceMoved(const Mat4& previous, const Mat4& current) noexcept;
+// Why a pyramid cannot cull. None means usable.
+enum class HizReason : std::uint8_t { None, Unavailable, TooLarge };
 
 // ---------------------------------------------------------------------------------------------
 // Pipeline key

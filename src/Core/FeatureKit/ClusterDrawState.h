@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ClusterDrawTypes.h"
+#include "ClusterPartPlanning.h"
 #include "ComputeShader.h"
 #include "GpuParams.h"
 #include "GpuReadback.h"
@@ -33,7 +34,7 @@ struct FrameContext;
 } // namespace detail
 
 struct ClusterDrawShape {
-    std::uint32_t lanes = 1;     // Independent draw sequences per frame (for example one per depth-only target).
+    std::uint32_t lanes = 1;     // Independent draw sequences per frame: one per depth-only target, or one per occlusion phase.
     std::uint32_t partSlots = 1; // Distinct meshes drawn per lane.
 };
 
@@ -106,8 +107,18 @@ public:
     const char* StatsClearName(std::uint32_t lane, std::uint32_t slot) const noexcept;
     const char* StatsCopyName(std::uint32_t lane, std::uint32_t slot) const noexcept;
 
-    // A 1x1 texture of the lane for the pyramid binding while occlusion culling is off. Once per frame and lane.
+    // A 1x1 texture of the lane for the pyramid binding of a pass that does not test occlusion. Once per frame and lane.
     Texture HizDummy(Frame& frame, std::uint32_t lane);
+
+    // Per-slot history words of a two-phase chain (one word per work item), shared by the two lanes.
+    PersistentBuffer* History(std::uint32_t slot) noexcept;
+    // A small history stand-in of the lane for passes that never read or write history. Once per frame and lane.
+    GpuBufferRef HistoryDummy(Frame& frame, std::uint32_t lane);
+
+    // What the history buffer of a slot in the frame's view scope was last written for.
+    const ClusterHistoryRecord& HistoryRecord(const Frame& frame, std::uint32_t slot) const noexcept;
+    void NoteHistoryWritten(const Frame& frame, std::uint32_t slot, std::uint64_t key) noexcept;
+    void DropHistory(const Frame& frame, std::uint32_t slot) noexcept;
 
     // Survivor count of the frame's view, summed over part slots. Two frames old.
     ClusterVisibleCount VisibleClusters(const Frame& frame) const;
@@ -127,10 +138,10 @@ public:
     rg::ClusterDrawBindings* Bindings(detail::FrameContext& context);
     std::size_t BindingIndex(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) const noexcept;
 
-    // Checks the buffer budget of one chain (per-state and process-wide) and records its capacity.
-    // Nothing is recorded unless the result is Ok.
-    ClusterReserveResult TryReserveChainBytes(
-        rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot, std::uint64_t instanceCount, std::uint64_t workItems);
+    // Checks the buffer budget of one chain (per-state and process-wide) and records its capacity. A two-phase
+    // chain is recorded on its first lane and covers both lanes and the history. Nothing is recorded unless Ok.
+    ClusterReserveResult TryReserveChainBytes(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot,
+        std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase);
 
     // Capacity bytes recorded for one scope (all lanes and slots).
     std::uint64_t HeldBytes(rg::ViewScope scope) const noexcept;
@@ -179,6 +190,9 @@ private:
     std::vector<std::unique_ptr<PersistentBuffer>> m_visible;
     std::vector<std::unique_ptr<PersistentBuffer>> m_commands;
     std::vector<std::unique_ptr<PersistentBuffer>> m_count;
+    std::vector<std::unique_ptr<PersistentBuffer>> m_history;      // [slot]
+    std::vector<std::unique_ptr<PersistentBuffer>> m_historyDummy; // [lane]
+    std::vector<ClusterHistoryRecord> m_historyRecords;            // [scope][slot]
     std::vector<std::unique_ptr<GpuReadback<std::uint32_t>>> m_stats;
     std::vector<std::unique_ptr<GpuParams<ClusterCullParams>>> m_params;
     std::vector<std::unique_ptr<PersistentTarget>> m_hizDummy; // [lane]

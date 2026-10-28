@@ -3,6 +3,7 @@
 #include "Core/FeatureKit/ClusterDrawState.h"
 #include "Core/FeatureKit/ClusterNamePool.h"
 #include "Core/FeatureKit/HizPyramid.h"
+#include "Renderer/GpuStampPlan.h"
 
 #include <gtest/gtest.h>
 
@@ -173,7 +174,8 @@ TEST(ClusterDrawStateTests, BuffersAreDistinctPerLaneAndSlot)
     std::size_t count = 0;
     for (std::uint32_t slot = 0; slot < 3; ++slot) {
         buffers.insert(state.Instances(slot));
-        ++count;
+        buffers.insert(state.History(slot));
+        count += 2;
         for (std::uint32_t lane = 0; lane < 2; ++lane) {
             buffers.insert(state.Visible(lane, slot));
             buffers.insert(state.Commands(lane, slot));
@@ -185,6 +187,7 @@ TEST(ClusterDrawStateTests, BuffersAreDistinctPerLaneAndSlot)
     EXPECT_EQ(buffers.size(), count);
     EXPECT_EQ(state.Visible(2, 0), nullptr);
     EXPECT_EQ(state.Instances(3), nullptr);
+    EXPECT_EQ(state.History(3), nullptr);
 }
 
 TEST(ClusterDrawStateTests, BindingIndexCoversTwoScopesDensely)
@@ -207,17 +210,29 @@ TEST(ClusterDrawStateTests, BindingIndexCoversTwoScopesDensely)
 TEST(ClusterDrawStateTests, ReserveRejectsBadIndices)
 {
     ClusterDrawState state("TestReserveBad", { 1, 2 });
-    EXPECT_EQ(state.TryReserveChainBytes(rg::ViewScope::Shared, 0, 0, 1, 1), ClusterReserveResult::BadIndex);
-    EXPECT_EQ(state.TryReserveChainBytes(kGame, 1, 0, 1, 1), ClusterReserveResult::BadIndex);
-    EXPECT_EQ(state.TryReserveChainBytes(kGame, 0, 2, 1, 1), ClusterReserveResult::BadIndex);
+    EXPECT_EQ(state.TryReserveChainBytes(rg::ViewScope::Shared, 0, 0, 1, 1, false), ClusterReserveResult::BadIndex);
+    EXPECT_EQ(state.TryReserveChainBytes(kGame, 1, 0, 1, 1, false), ClusterReserveResult::BadIndex);
+    EXPECT_EQ(state.TryReserveChainBytes(kGame, 0, 2, 1, 1, false), ClusterReserveResult::BadIndex);
     EXPECT_EQ(state.HeldBytes(kGame), 0u);
+}
+
+TEST(ClusterDrawStateTests, ATwoPhaseChainNeedsASecondLaneAndIsRecordedOnTheFirst)
+{
+    ClusterDrawState oneLane("TestTwoPhaseOneLane", { 1, 2 });
+    EXPECT_EQ(oneLane.TryReserveChainBytes(kGame, 0, 0, 1, 1000, true), ClusterReserveResult::BadIndex);
+
+    ClusterDrawState twoLanes("TestTwoPhaseTwoLanes", { 2, 2 });
+    EXPECT_EQ(twoLanes.TryReserveChainBytes(kGame, 1, 0, 1, 1000, true), ClusterReserveResult::BadIndex);
+    ASSERT_EQ(twoLanes.TryReserveChainBytes(kGame, 0, 0, 1, 1000, true), ClusterReserveResult::Ok);
+    EXPECT_EQ(twoLanes.HeldBytes(kGame), ClusterChainBytes(1, 1000, true));
+    EXPECT_GT(twoLanes.HeldBytes(kGame), ClusterChainBytes(1, 1000, false));
 }
 
 TEST(ClusterDrawStateTests, StateBudgetThenProcessCeiling)
 {
     constexpr std::uint64_t kInstances = 1;
     constexpr std::uint64_t kWork = 1000000;
-    const std::uint64_t chain = ClusterChainBytes(kInstances, kWork);
+    const std::uint64_t chain = ClusterChainBytes(kInstances, kWork, false);
     ASSERT_GT(chain, 0u);
     const std::uint64_t perScope = kClusterDrawBudgetBytes / chain; // Chains that fit one scope.
     ASSERT_GE(perScope, 1u);
@@ -227,25 +242,25 @@ TEST(ClusterDrawStateTests, StateBudgetThenProcessCeiling)
         ClusterDrawState a("TestBudgetA", { 1, kMainViewPartSlots });
         ClusterDrawState b("TestBudgetB", { 1, kMainViewPartSlots });
         for (std::uint32_t slot = 0; slot < perScope; ++slot) {
-            ASSERT_EQ(a.TryReserveChainBytes(kGame, 0, slot, kInstances, kWork), ClusterReserveResult::Ok);
+            ASSERT_EQ(a.TryReserveChainBytes(kGame, 0, slot, kInstances, kWork, false), ClusterReserveResult::Ok);
         }
-        EXPECT_EQ(a.TryReserveChainBytes(kGame, 0, static_cast<std::uint32_t>(perScope), kInstances, kWork),
+        EXPECT_EQ(a.TryReserveChainBytes(kGame, 0, static_cast<std::uint32_t>(perScope), kInstances, kWork, false),
             ClusterReserveResult::OverStateBudget);
         EXPECT_EQ(a.HeldBytes(kGame), perScope * chain);
         EXPECT_LE(a.HeldBytes(kGame), kClusterDrawBudgetBytes);
 
         // Re-reserving a chain at the same size changes nothing.
-        EXPECT_EQ(a.TryReserveChainBytes(kGame, 0, 0, kInstances, kWork), ClusterReserveResult::Ok);
+        EXPECT_EQ(a.TryReserveChainBytes(kGame, 0, 0, kInstances, kWork, false), ClusterReserveResult::Ok);
         EXPECT_EQ(a.HeldBytes(kGame), perScope * chain);
 
         // Fill the process ceiling with both scopes of `a` and the game scope of `b`.
         std::uint32_t scene = 0;
-        while (a.TryReserveChainBytes(kScene, 0, scene, kInstances, kWork) == ClusterReserveResult::Ok) {
+        while (a.TryReserveChainBytes(kScene, 0, scene, kInstances, kWork, false) == ClusterReserveResult::Ok) {
             ++scene;
         }
         ClusterReserveResult last = ClusterReserveResult::Ok;
         for (std::uint32_t slot = 0; slot < kMainViewPartSlots && last == ClusterReserveResult::Ok; ++slot) {
-            last = b.TryReserveChainBytes(kGame, 0, slot, kInstances, kWork);
+            last = b.TryReserveChainBytes(kGame, 0, slot, kInstances, kWork, false);
         }
         EXPECT_NE(last, ClusterReserveResult::Ok);
         EXPECT_LE(ProcessClusterLedger().Total(), kClusterDrawProcessBudgetBytes);
@@ -253,7 +268,19 @@ TEST(ClusterDrawStateTests, StateBudgetThenProcessCeiling)
 
     // Destroying a state returns its bytes to the ledger.
     ClusterDrawState c("TestBudgetC", { 1, kMainViewPartSlots });
-    EXPECT_EQ(c.TryReserveChainBytes(kGame, 0, 0, kInstances, kWork), ClusterReserveResult::Ok);
+    EXPECT_EQ(c.TryReserveChainBytes(kGame, 0, 0, kInstances, kWork, false), ClusterReserveResult::Ok);
+}
+
+TEST(ClusterDrawStateTests, TheMainViewRunsOneLanePerPhaseAndStaysInsideTheGpuRecordBudget)
+{
+    EXPECT_EQ(kMainViewLanes, 2u);
+    EXPECT_EQ(kClusterPassNameCount, 2u * 8u * 6u + 4u * 4u * 3u);
+    EXPECT_LE(kGpuBaseRecordCount + 2 * kClusterPassNameCount + kHizPassCount, kGpuRecordBudgetSynchronous);
+
+    ClusterDrawState state("TestMainShape", { kMainViewLanes, kMainViewPartSlots });
+    ASSERT_TRUE(state.Valid());
+    EXPECT_EQ(state.AllPassNames().size(), static_cast<std::size_t>(kMainViewLanes) * kMainViewPartSlots * kClusterPassKindCount);
+    EXPECT_STREQ(state.PassName(1, 7, ClusterPassKind::Cull), "TestMainShape.L1.P7.Cull");
 }
 
 TEST(HizPyramidTests, BaseAndTopPassNamesAreUniqueAndStableAcrossRebuilds)

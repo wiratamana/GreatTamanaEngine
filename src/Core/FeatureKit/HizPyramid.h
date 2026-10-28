@@ -2,11 +2,8 @@
 
 #include "ComputeShader.h"
 #include "Frame.h"
-#include "PerView.h"
-#include "PersistentTarget.h"
 #include "Texture.h"
-#include "../../Math/Mat4.h"
-#include "../../Math/Vec3.h"
+#include "TransientTarget.h"
 #include "../../Renderer/Culling/ClusterCullMath.h"
 #include "../../Renderer/Culling/HizBuildPlan.h"
 
@@ -18,26 +15,17 @@
 
 namespace gte::fx {
 
-// Last frame's pyramid of one view, ready to bind to ClusterDrawChain::Occlusion().
-struct HizPrevious {
-    bool usable = false;                    // False on the first frame, after a resize or camera cut, or while the build is off.
-    HizReason reason = HizReason::Unavailable; // None when usable.
-    Texture atlas;
-    Mat4 viewProjection = Mat4::Identity(); // The view-projection the pyramid was built under.
-    HizLayout layout;                       // Layout of `atlas`.
-};
-
-// Per-view history of the pyramid: two atlases (this frame's and last frame's) and the camera of the last build.
-struct HizViewState {
-    PersistentTarget atlas[2]{ PersistentTarget{ "HizAtlas0" }, PersistentTarget{ "HizAtlas1" } };
-    HizValidity validity;
+// What a frame's pyramid of one view needs. Decided without declaring anything.
+struct HizPlan {
+    HizReason reason = HizReason::Unavailable; // None when Build() can run.
     HizLayout layout;
-    Mat4 viewProjection = Mat4::Identity();
-    Vec3 eye;
+    HizBuildPlan dispatches;
+
+    bool Usable() const noexcept { return reason == HizReason::None; }
 };
 
-// Farthest-depth pyramid of the scene depth, one R32_Float atlas per view, kept for the next frame.
-// Build() runs in a PostOpaque callback; Previous() in any callback of the next frame.
+// Farthest-depth pyramid of the view's scene depth, one R32_Float atlas per view and frame.
+// It is built and used in the same frame: nothing is kept.
 class HizPyramid {
 public:
     explicit HizPyramid(std::string_view baseName);
@@ -52,15 +40,13 @@ public:
     // "<base>.Base" and "<base>.Top" for a gate and for the stats registry.
     std::vector<std::string> AllPassNames() const;
 
-    // Declares the two build dispatches from the view's scene depth. False when nothing usable was built
-    // (a toggled-off pass, a missing shader, an invalid target); the history of that view restarts.
-    bool Build(PostOpaqueFrame& frame);
+    // Checks the view size, the depth, both pass toggles and both shaders. Declares nothing.
+    // `sceneDepth` must be this view's depth of this frame. TooLarge for a view the pyramid cannot cover.
+    HizPlan Plan(Frame& frame, Texture sceneDepth);
 
-    // The pyramid built last frame for this frame's view, with its guards applied.
-    HizPrevious Previous(Frame& frame);
-
-    // Forgets the history of the frame's view (for a feature that was switched off).
-    void Reset(Frame& frame);
+    // Declares the two build dispatches from `sceneDepth` and returns the atlas of this frame.
+    // Invalid (and nothing usable) when `plan` is not usable or a pass was refused.
+    Texture Build(Frame& frame, const HizPlan& plan, Texture sceneDepth);
 
 private:
     std::string m_base;
@@ -68,7 +54,7 @@ private:
     std::array<const char*, kHizPassCount> m_passNames{}; // Base, Top.
     ComputeShader m_baseShader{ "HizBuildBase" };
     ComputeShader m_topShader{ "HizBuildTop" };
-    PerView<HizViewState> m_views;
+    TransientTarget m_atlas;
 };
 
 } // namespace gte::fx

@@ -135,10 +135,12 @@ ClusterDrawState::ClusterDrawState(std::string_view baseName, ClusterDrawShape s
     constexpr BufferUse kVisibleUse = BufferUse::Storage;
     constexpr BufferUse kCommandUse = BufferUse::Storage | BufferUse::Indirect;
     constexpr BufferUse kCountUse = BufferUse::Storage | BufferUse::Indirect | BufferUse::TransferDst;
+    constexpr BufferUse kHistoryUse = BufferUse::Storage;
 
     for (std::uint32_t slot = 0; slot < m_shape.partSlots; ++slot) {
         const std::string suffix = ".P" + std::to_string(slot);
         m_instances.push_back(std::make_unique<PersistentBuffer>(m_base + ".Instances" + suffix, kInstanceUse));
+        m_history.push_back(std::make_unique<PersistentBuffer>(m_base + ".History" + suffix, kHistoryUse));
         m_stats.push_back(std::make_unique<GpuReadback<std::uint32_t>>(m_base + ".Stats" + suffix));
     }
     for (std::uint32_t lane = 0; lane < m_shape.lanes; ++lane) {
@@ -153,8 +155,11 @@ ClusterDrawState::ClusterDrawState(std::string_view baseName, ClusterDrawShape s
         m_params.push_back(std::make_unique<GpuParams<ClusterCullParams>>());
     }
     for (std::uint32_t lane = 0; lane < m_shape.lanes; ++lane) {
-        m_hizDummy.push_back(std::make_unique<PersistentTarget>(m_base + ".HizDummy.L" + std::to_string(lane)));
+        const std::string suffix = ".L" + std::to_string(lane);
+        m_hizDummy.push_back(std::make_unique<PersistentTarget>(m_base + ".HizDummy" + suffix));
+        m_historyDummy.push_back(std::make_unique<PersistentBuffer>(m_base + ".HistoryDummy" + suffix, kHistoryUse));
     }
+    m_historyRecords.assign(rg::kViewScopeCount * m_shape.partSlots, ClusterHistoryRecord{});
     m_chainBytes.assign(chains * rg::kViewScopeCount, 0);
 }
 
@@ -236,6 +241,43 @@ Texture ClusterDrawState::HizDummy(Frame& frame, std::uint32_t lane)
         return Texture{};
     }
     return m_hizDummy[lane]->Acquire(frame, Extent2D{ 1, 1 }, PixelFormat::R32_Float);
+}
+
+PersistentBuffer* ClusterDrawState::History(std::uint32_t slot) noexcept
+{
+    return InRange(0, slot) ? m_history[slot].get() : nullptr;
+}
+
+GpuBufferRef ClusterDrawState::HistoryDummy(Frame& frame, std::uint32_t lane)
+{
+    if (!InRange(lane, 0)) {
+        return GpuBufferRef{};
+    }
+    return m_historyDummy[lane]->Acquire(frame, kClusterHistoryBytes);
+}
+
+const ClusterHistoryRecord& ClusterDrawState::HistoryRecord(const Frame& frame, std::uint32_t slot) const noexcept
+{
+    static const ClusterHistoryRecord kNone;
+    if (!InRange(0, slot) || frame.Scope() == rg::ViewScope::Shared) {
+        return kNone;
+    }
+    return m_historyRecords[rg::ViewScopeIndex(frame.Scope()) * m_shape.partSlots + slot];
+}
+
+void ClusterDrawState::NoteHistoryWritten(const Frame& frame, std::uint32_t slot, std::uint64_t key) noexcept
+{
+    if (InRange(0, slot) && frame.Scope() != rg::ViewScope::Shared) {
+        m_historyRecords[rg::ViewScopeIndex(frame.Scope()) * m_shape.partSlots + slot] =
+            ClusterHistoryRecord{ key, frame.FrameIndex(), true };
+    }
+}
+
+void ClusterDrawState::DropHistory(const Frame& frame, std::uint32_t slot) noexcept
+{
+    if (InRange(0, slot) && frame.Scope() != rg::ViewScope::Shared) {
+        m_historyRecords[rg::ViewScopeIndex(frame.Scope()) * m_shape.partSlots + slot] = ClusterHistoryRecord{};
+    }
 }
 
 ClusterVisibleCount ClusterDrawState::VisibleClusters(const Frame& frame) const
@@ -354,15 +396,15 @@ std::uint64_t ClusterDrawState::HeldBytes(rg::ViewScope scope) const noexcept
     return total;
 }
 
-ClusterReserveResult ClusterDrawState::TryReserveChainBytes(
-    rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot, std::uint64_t instanceCount, std::uint64_t workItems)
+ClusterReserveResult ClusterDrawState::TryReserveChainBytes(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot,
+    std::uint64_t instanceCount, std::uint64_t workItems, bool twoPhase)
 {
-    if (!InRange(lane, slot) || scope == rg::ViewScope::Shared) {
+    if (!InRange(lane, slot) || scope == rg::ViewScope::Shared || (twoPhase && lane + 1 >= m_shape.lanes)) {
         return ClusterReserveResult::BadIndex;
     }
     const std::size_t scopeIndex = rg::ViewScopeIndex(scope);
     std::uint64_t& recorded = m_chainBytes[ChainIndex(scopeIndex, lane, slot)];
-    const std::uint64_t wanted = std::max(recorded, ClusterChainBytes(instanceCount, workItems));
+    const std::uint64_t wanted = std::max(recorded, ClusterChainBytes(instanceCount, workItems, twoPhase));
     const std::uint64_t others = HeldBytes(scope) - recorded;
     if (!FitsClusterBudget(others, wanted, kClusterDrawBudgetBytes)) {
         return ClusterReserveResult::OverStateBudget;
@@ -414,6 +456,14 @@ bool ClusterDrawState::ReleaseIdleScope(Frame& frame)
         const bool ok = buffer->Release(frame);
         all = all && ok;
     }
+    for (const auto& buffer : m_history) {
+        const bool ok = buffer->Release(frame);
+        all = all && ok;
+    }
+    for (const auto& buffer : m_historyDummy) {
+        const bool ok = buffer->Release(frame);
+        all = all && ok;
+    }
     for (std::size_t i = 0; i < m_visible.size(); ++i) {
         const bool visibleOk = m_visible[i]->Release(frame);
         const bool commandsOk = m_commands[i]->Release(frame);
@@ -426,6 +476,8 @@ bool ClusterDrawState::ReleaseIdleScope(Frame& frame)
 
     const std::size_t perScope = static_cast<std::size_t>(m_shape.lanes) * m_shape.partSlots;
     std::fill_n(m_chainBytes.begin() + static_cast<std::ptrdiff_t>(scopeIndex * perScope), perScope, std::uint64_t{ 0 });
+    std::fill_n(m_historyRecords.begin() + static_cast<std::ptrdiff_t>(scopeIndex * m_shape.partSlots),
+        m_shape.partSlots, ClusterHistoryRecord{});
     ProcessClusterLedger().Release(m_owner, static_cast<std::uint32_t>(scopeIndex));
     m_lastChainFrame[scopeIndex] = kNever;
     return true;

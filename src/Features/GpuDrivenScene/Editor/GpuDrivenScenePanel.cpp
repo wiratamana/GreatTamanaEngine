@@ -41,9 +41,9 @@ void DrawViewInfo(const char* label, const GpuDrivenSceneSettings& s, const GpuD
     if (!noGpu.empty()) {
         ImGui::TextColored(kWarnColor, "%.*s", static_cast<int>(noGpu.size()), noGpu.data());
     }
-    ImGui::Text("Buffer memory: %.1f MB", static_cast<double>(v.ledgerBytes) / (1024.0 * 1024.0));
-    if (!v.refusal.empty()) {
-        ImGui::TextColored(kWarnColor, "Not drawing on the GPU: %s", v.refusal.c_str());
+    ImGui::Text("Buffer memory: %.1f MB", static_cast<double>(v.gpu.ledgerBytes) / (1024.0 * 1024.0));
+    if (!v.gpu.refusal.empty()) {
+        ImGui::TextColored(kWarnColor, "Not drawing on the GPU: %s", v.gpu.refusal.c_str());
     }
     ImGui::PopID();
 }

@@ -3,6 +3,7 @@
 #include "ClusterDrawState.h"
 #include "ClusterDrawTypes.h"
 #include "Frame.h"
+#include "HizPyramid.h"
 #include "Texture.h"
 #include "../../Renderer/Culling/ClusterCullMath.h"
 
@@ -33,9 +34,12 @@ public:
     // Which tests run. The back-face cone test is ignored for a depth-only target.
     ClusterDrawChain& Culling(ClusterCullFlags flags);
 
-    // Last frame's farthest-depth pyramid (see HizPyramid) for the Occlusion test, with the view-projection it
-    // was built under and its layout. Occlusion is dropped for a depth-only target and for an invalid texture or layout.
-    ClusterDrawChain& Occlusion(Texture hizAtlas, const Mat4& prevViewProjection, const HizLayout& layout);
+    // Occlusion culling in two phases for a colour target: this frame's depth after the phase-1 draws builds the
+    // pyramid (see HizPyramid), then every item is tested against it. `sceneDepth` is the depth of the target
+    // (OpaqueFrame::SceneDepth()) and the cull camera must equal the draw camera. Needs a state with two lanes
+    // and this chain on lane 0. When it cannot run, the chain is the plain single-phase chain and
+    // ClusterStats::hizReason says why. Ignored for a depth-only target.
+    ClusterDrawChain& TwoPhase(HizPyramid& pyramid, Texture sceneDepth);
 
     // Color + depth target (load). Exactly one of Target() and DepthOnlyTarget().
     ClusterDrawChain& Target(Texture sceneTarget);
@@ -51,7 +55,8 @@ public:
     // Resolves and reserves everything and declares nothing. Idempotent.
     ClusterPlan Plan();
 
-    // Declares reset, cull and draw per part in that order, then takes the entities over.
+    // Declares reset, cull and draw per part (twice around one pyramid build for a two-phase chain), then takes
+    // the entities over.
     ClusterStats Record();
 
     // Kit-internal state; named here so the verb's helper functions can take it.

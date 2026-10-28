@@ -16,9 +16,6 @@ constexpr std::int32_t kDepthRangePriority = 100;
 constexpr std::int32_t kMaskPriority = 0;
 constexpr std::int32_t kCompositePriority = -500;
 
-// A snapshot older than this many frames (against the newest frame of any view) counts as not rendered.
-constexpr std::uint64_t kSnapshotStaleFrames = 2;
-
 constexpr std::uint64_t kDepthBytesPerTexel = 4; // 32-bit depth.
 
 constexpr std::array<rg::StaticName, kMaxShadowCascades> kCascadeDrawNames{
@@ -116,7 +113,7 @@ void ShadowFeature::ApplySettings(const ShadowSettings& candidate)
 ShadowViewSnapshot ShadowFeature::Snapshot(rg::ViewScope scope) const
 {
     ShadowViewSnapshot snapshot = m_views.For(scope).snapshot;
-    const bool stale = snapshot.frameIndex > m_newestFrame || m_newestFrame - snapshot.frameIndex > kSnapshotStaleFrames;
+    const bool stale = fx::SnapshotIsStale(snapshot.frameIndex, m_newestFrame);
     if (stale) {
         snapshot.status = ShadowFrameStatus::NotRendered;
         snapshot.maskStatus = ShadowFrameStatus::NotRendered;

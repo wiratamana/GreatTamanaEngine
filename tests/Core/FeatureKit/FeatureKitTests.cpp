@@ -543,5 +543,13 @@ TEST(FxVerbTest, AMovedFromChainIsSafe)
     EXPECT_FALSE(second.Dispatch(Extent2D{ 8, 8 }));
 }
 
+TEST(SnapshotAgeTest, AReportIsStaleAfterTwoFramesOrWhenItIsFromTheFuture)
+{
+    EXPECT_FALSE(SnapshotIsStale(10, 10));
+    EXPECT_FALSE(SnapshotIsStale(8, 10));
+    EXPECT_TRUE(SnapshotIsStale(7, 10));
+    EXPECT_TRUE(SnapshotIsStale(11, 10));
+}
+
 } // namespace
 } // namespace gte::fx

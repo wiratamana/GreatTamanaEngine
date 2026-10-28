@@ -11,19 +11,25 @@ layout(local_size_x = 64) in;
 // Bits of ClusterInstanceGpu.info.x.
 const uint kClusterFlagUniformScale = 1u;
 const uint kClusterFlagPositiveHand = 2u;
-const uint kClusterFlagMoved = 4u;
 
 // Bits of ClusterCullParams.counts.w.
 const uint kClusterCullFlagFrustum = 1u;
 const uint kClusterCullFlagBackfaceCone = 2u;
 const uint kClusterCullFlagOcclusion = 4u;
 const uint kClusterCullFlagOrthographic = 8u;
+const uint kClusterCullFlagPhaseFirst = 32u;
+const uint kClusterCullFlagPhaseSecond = 64u;
+const uint kClusterCullFlagHistoryValid = 128u;
 const uint kClusterCullFlagRawDepth = 256u;
+
+// Bits of one history word.
+const uint kClusterHistoryVisible = 1u;
+const uint kClusterHistoryDrawnFirst = 2u;
 
 struct ClusterCullParams {
     vec4 planes[6]; // xyz = normal, w = distance; inside when dot + w >= 0.
     vec4 eyeOrDirection; // xyz = eye point, or view direction when orthographic.
-    mat4 prevViewProjection;
+    mat4 viewProjection; // The cull camera.
     uvec4 counts; // x = instanceCount, y = clusterCount, z = workItems, w = cull flags.
     vec4 hiz; // xy = atlas size, zw = level 0 size.
     vec4 depthMap; // x = k, y = b of d = k + b / w, z = pyramid level count.
@@ -67,7 +73,12 @@ layout(std430, binding = 5) buffer CountBlock {
     uint value;
 } count;
 
-// Farthest-depth pyramid of last frame (one atlas); read only when the occlusion flag is set.
+// One 32-bit word per work item: bit 0 = visible last frame, bit 1 = drawn in the first phase of this frame.
+layout(std430, binding = 7) buffer HistoryBlock {
+    uint items[];
+} history;
+
+// Farthest-depth pyramid (one atlas); read only by the occlusion test.
 layout(binding = 6) uniform sampler2D hizAtlas;
 
 const float kHizRectMarginTexels = 1.0;
@@ -144,8 +155,8 @@ bool IsBehind(float nearestW, float nearestZ, float farthest)
     return nearestW > farthestW * (1.0 + kHizRelMargin) + kHizAbsMargin;
 }
 
-// Hi-Z test against last frame's depth. Kept when any corner is behind the eye or the box leaves the
-// screen. Mirrors ClusterOccluded.
+// Hi-Z test against the pyramid of this frame. The rect is clamped to the screen: pixels outside it are never
+// drawn. Kept when any corner is behind the eye. Mirrors ClusterOccluded.
 bool Occluded(Cluster cluster, mat4 world)
 {
     uvec2 base = uvec2(params.value.hiz.zw);
@@ -161,7 +172,7 @@ bool Occluded(Cluster cluster, mat4 world)
             (i & 1) != 0 ? cluster.aabbMax.x : cluster.aabbMin.x,
             (i & 2) != 0 ? cluster.aabbMax.y : cluster.aabbMin.y,
             (i & 4) != 0 ? cluster.aabbMax.z : cluster.aabbMin.z);
-        vec4 clip = params.value.prevViewProjection * (world * vec4(corner, 1.0));
+        vec4 clip = params.value.viewProjection * (world * vec4(corner, 1.0));
         if (!(clip.w > 1e-6)) {
             return false;
         }
@@ -174,7 +185,9 @@ bool Occluded(Cluster cluster, mat4 world)
         nearestZ = i == 0 ? ndc.z : min(nearestZ, ndc.z);
         nearestW = i == 0 ? clip.w : min(nearestW, clip.w);
     }
-    if (any(lessThan(ndcMin, vec2(-1.0))) || any(greaterThan(ndcMax, vec2(1.0)))) {
+    ndcMin = max(ndcMin, vec2(-1.0));
+    ndcMax = min(ndcMax, vec2(1.0));
+    if (any(greaterThan(ndcMin, ndcMax))) {
         return false;
     }
 
@@ -215,17 +228,32 @@ void main()
     Cluster cluster = clusters.items[clusterIndex];
     uint cullFlags = params.value.counts.w;
 
-    if ((cullFlags & kClusterCullFlagFrustum) != 0u && OutsideFrustum(cluster, instance.world)) {
-        return;
-    }
-    if ((cullFlags & kClusterCullFlagBackfaceCone) != 0u
-        && BackfaceConeCulled(cluster, instance.world, instance.info.x, uintBitsToFloat(instance.info.y))) {
-        return;
-    }
-    // A moved instance is never occlusion-culled: the pyramid holds last frame's depth.
-    if ((cullFlags & kClusterCullFlagOcclusion) != 0u && (instance.info.x & kClusterFlagMoved) == 0u
-        && Occluded(cluster, instance.world)) {
-        return;
+    // Evaluated once so both phases agree on the result.
+    bool inView = !((cullFlags & kClusterCullFlagFrustum) != 0u && OutsideFrustum(cluster, instance.world))
+        && !((cullFlags & kClusterCullFlagBackfaceCone) != 0u
+            && BackfaceConeCulled(cluster, instance.world, instance.info.x, uintBitsToFloat(instance.info.y)));
+
+    if ((cullFlags & kClusterCullFlagPhaseFirst) != 0u) {
+        uint word = (cullFlags & kClusterCullFlagHistoryValid) != 0u ? history.items[id] : 0u;
+        bool drawn = (word & kClusterHistoryVisible) != 0u && inView;
+        history.items[id] = (word & kClusterHistoryVisible) | (drawn ? kClusterHistoryDrawnFirst : 0u);
+        if (!drawn) {
+            return;
+        }
+    } else if ((cullFlags & kClusterCullFlagPhaseSecond) != 0u) {
+        bool isVisible = inView && !Occluded(cluster, instance.world);
+        uint word = history.items[id];
+        history.items[id] = isVisible ? kClusterHistoryVisible : 0u;
+        if (!isVisible || (word & kClusterHistoryDrawnFirst) != 0u) {
+            return;
+        }
+    } else {
+        if (!inView) {
+            return;
+        }
+        if ((cullFlags & kClusterCullFlagOcclusion) != 0u && Occluded(cluster, instance.world)) {
+            return;
+        }
     }
 
     uint slot = atomicAdd(count.value, 1u);

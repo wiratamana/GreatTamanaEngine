@@ -60,7 +60,7 @@ struct ClusterViewRender {
     UiTextureHandle texture = UiTextureHandle::Invalid;
     ClusterViewCounts counts;
     bool occlusionApplied = false; // false when the flag was set but no usable Hi-Z capture exists
-    bool hizCut = false;           // the capture was dropped because of a camera cut
+    bool hizCut = false;           // the capture was dropped because the cull pose differs from the capture pose
     double runMilliseconds = 0;    // wall time of the whole run, read-back included
     std::string note;              // why ok is false, empty when fine
 };

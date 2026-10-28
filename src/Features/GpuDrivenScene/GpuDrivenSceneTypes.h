@@ -3,7 +3,6 @@
 #include "../../Core/FeatureKit/ClusterDrawTypes.h"
 #include "../../Core/FeatureKit/EnumTable.h"
 #include "../../Core/FeatureKit/FeatureDebug.h"
-#include "../../Renderer/Culling/ClusterCullMath.h"
 
 #include <array>
 #include <cstddef>
@@ -44,11 +43,6 @@ inline constexpr std::array kOcclusionStateTable{
 
 inline constexpr std::array kHizReasonTable{
     fx::EnumEntry<HizReason>{ HizReason::None, "None" },
-    fx::EnumEntry<HizReason>{ HizReason::NoHistory, "NoHistory" },
-    fx::EnumEntry<HizReason>{ HizReason::Resized, "Resized" },
-    fx::EnumEntry<HizReason>{ HizReason::CameraCut, "CameraCut" },
-    fx::EnumEntry<HizReason>{ HizReason::WarmingUp, "WarmingUp" },
-    fx::EnumEntry<HizReason>{ HizReason::BuildOff, "BuildOff" },
     fx::EnumEntry<HizReason>{ HizReason::Unavailable, "Unavailable" },
     fx::EnumEntry<HizReason>{ HizReason::TooLarge, "TooLarge" },
 };
@@ -277,18 +271,13 @@ constexpr std::uint64_t ClusterCountAgeFrames(std::uint64_t frame, std::uint64_t
     return visibleFrame == 0 || visibleFrame > frame ? 0 : frame - visibleFrame;
 }
 
-// What a view reported at its last callback. Liveness, camera and CPU fields come from the always-on cull pass;
-// the GPU-path fields come from the cluster pass and read as zero in a frame where it did not run.
-struct GpuDrivenSceneViewSnapshot {
-    std::uint64_t frameIndex = 0;
-    bool rendered = false;
-    bool enabled = true;
-    bool hasPixels = true;
-    bool cameraValid = true;
+// What the cluster pass reported for a view. Reads as all zero in a frame where the pass did not run.
+struct GpuPathReport {
     std::uint32_t claimedEntities = 0;
     std::uint32_t parts = 0;
     OcclusionState occlusion = OcclusionState::NotRequested;
     HizReason hizReason = HizReason::None;
+    CullCameraSource hizSource = CullCameraSource::None;
     std::uint64_t testedClusters = 0;          // Current frame.
     std::uint64_t testedAtVisibleFrame = 0;    // Tested at the frame the visible count belongs to.
     std::uint32_t visibleClusters = 0;
@@ -297,14 +286,23 @@ struct GpuDrivenSceneViewSnapshot {
     bool visibleValid = false;
     std::uint64_t hidden = 0;
     bool hiddenValid = false; // visibleValid and visible <= testedAtVisibleFrame.
-    bool hizTrackingRequested = false; // This view asked for movement tracking in a recent frame.
     fx::ClusterInertReason inertReason = fx::ClusterInertReason::None;
     bool refused = false;
     std::string refusal;
     std::uint64_t ledgerBytes = 0;
+};
+
+// What a view reported at its last callback. Liveness, camera and CPU fields come from the always-on cull pass;
+// `gpu` comes from the cluster pass.
+struct GpuDrivenSceneViewSnapshot {
+    std::uint64_t frameIndex = 0;
+    bool rendered = false;
+    bool enabled = true;
+    bool hasPixels = true;
+    bool cameraValid = true;
+    GpuPathReport gpu;
 
     CullCameraSource cullCamera = CullCameraSource::None;
-    CullCameraSource hizSource = CullCameraSource::None;
 
     // CPU draw cull of this view, written by the always-on cull pass. Counts are one frame old.
     CpuCullState cpuCullState = CpuCullState::Off;

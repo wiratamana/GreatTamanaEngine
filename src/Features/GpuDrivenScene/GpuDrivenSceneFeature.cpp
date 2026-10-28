@@ -10,39 +10,13 @@ namespace {
 
 constexpr std::int32_t kOpaquePriority = 0;
 constexpr std::int32_t kCullPriority = -10; // Runs before the opaque pass and leaves its cull plan for it.
-constexpr std::int32_t kHizBuildPriority = -100; // Unique in PostOpaque; runs first, right after the opaque depth is final.
 
 // Fraction of a box's largest extent added before the CPU frustum test.
 constexpr float kCpuCullPadding = 0.05f;
 
-// A report older than this many frames (against the newest frame of any view) counts as not rendered.
-constexpr std::uint64_t kSnapshotStaleFrames = 2;
-
 bool HasNoPixels(const fx::View& view) noexcept
 {
     return view.extent.width == 0 || view.extent.height == 0;
-}
-
-// Copies the fields only the cluster pass writes; every other field of `to` is kept.
-void CopyGpuFields(GpuDrivenSceneViewSnapshot& to, const GpuDrivenSceneViewSnapshot& from)
-{
-    to.claimedEntities = from.claimedEntities;
-    to.parts = from.parts;
-    to.occlusion = from.occlusion;
-    to.hizReason = from.hizReason;
-    to.hizSource = from.hizSource;
-    to.testedClusters = from.testedClusters;
-    to.testedAtVisibleFrame = from.testedAtVisibleFrame;
-    to.visibleClusters = from.visibleClusters;
-    to.visibleFrame = from.visibleFrame;
-    to.statsCollected = from.statsCollected;
-    to.visibleValid = from.visibleValid;
-    to.hidden = from.hidden;
-    to.hiddenValid = from.hiddenValid;
-    to.inertReason = from.inertReason;
-    to.refused = from.refused;
-    to.refusal = from.refusal;
-    to.ledgerBytes = from.ledgerBytes;
 }
 
 CullPlan PlanCull(fx::OpaqueFrame& f, const GpuDrivenSceneSettings& cfg, bool secondary)
@@ -95,18 +69,17 @@ void GpuDrivenSceneFeature::Setup(fx::FeatureSetup& s)
         return;
     }
 
-    // Every pass name of the draw state is a toggle; the callback runs while any of them is enabled.
+    // Every pass name of the draw state and of the occlusion pyramid is a toggle; the callback runs while any
+    // of them is enabled.
     fx::Gate gate;
     gate.passNames = m_state.AllPassNames();
+    for (std::string& name : m_hiz.AllPassNames()) {
+        gate.passNames.push_back(std::move(name));
+    }
     s.Opaque("GpuDrivenScene.Opaque", kOpaquePriority, [this](fx::OpaqueFrame& f) { OpaquePass(f); }, gate);
 
     // The CPU draw cull is not a render pass: no pass toggle and no `enabled` flag may silence it.
     s.Opaque("GpuDrivenScene.SceneCull", kCullPriority, [this](fx::OpaqueFrame& f) { SceneCullPass(f); }, fx::Gate::Always());
-
-    // The pyramid is built from the depth the opaque stage left behind and read by the next frame's cull.
-    fx::Gate hizGate;
-    hizGate.passNames = m_hiz.AllPassNames();
-    s.PostOpaque("GpuDrivenScene.HizBuild", kHizBuildPriority, [this](fx::PostOpaqueFrame& f) { HizPass(f); }, hizGate);
 }
 
 void GpuDrivenSceneFeature::ApplySettings(const GpuDrivenSceneSettings& candidate)
@@ -118,17 +91,13 @@ GpuDrivenSceneViewSnapshot GpuDrivenSceneFeature::Snapshot(rg::ViewScope scope) 
 {
     const GpuDrivenSceneViewState& view = m_views.For(scope);
     GpuDrivenSceneViewSnapshot snapshot = view.snapshot;
-    const auto stale = [this](std::uint64_t frame) {
-        return frame > m_newestFrame || m_newestFrame - frame > kSnapshotStaleFrames;
-    };
-    if (stale(snapshot.frameIndex)) {
+    if (fx::SnapshotIsStale(snapshot.frameIndex, m_newestFrame)) {
         snapshot.rendered = false;
     }
     // GPU-path numbers show only when the cluster pass ran in the same frame as the liveness report.
     if (view.gpuFrame != snapshot.frameIndex) {
-        CopyGpuFields(snapshot, GpuDrivenSceneViewSnapshot{});
+        snapshot.gpu = GpuPathReport{};
     }
-    snapshot.hizTrackingRequested = view.hizBuildAsked && !stale(view.hizBuildFrame);
     return snapshot;
 }
 
@@ -159,13 +128,13 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     const bool hizRequested = cfg.mode == CullMode::HiZ;
     const bool wantStats = cfg.collectStats;
 
-    // Holds the GPU-path fields only; `finish` copies them into the view snapshot.
-    GpuDrivenSceneViewSnapshot snap;
+    // Written to the view snapshot by `finish`.
+    GpuPathReport snap;
 
     const auto finish = [&] {
         view.tested.Record(frameIndex, snap.testedClusters);
         snap.ledgerBytes = m_state.HeldBytes(scope);
-        CopyGpuFields(view.snapshot, snap);
+        view.snapshot.gpu = snap;
         view.gpuFrame = frameIndex;
     };
 
@@ -182,19 +151,13 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
 
     const std::span<const fx::ClusterInstance> candidates = f.ClusterCandidates();
     const bool culls = plan.source != CullCameraSource::None;
-    ClusterCullFlags flags = culls ? CullFlagsOf(tests) : ClusterCullFlags::None;
+    const ClusterCullFlags flags = culls ? CullFlagsOf(tests) : ClusterCullFlags::None;
+    // Only the primary view owns a pyramid, and only while it culls with its own camera.
+    const bool wantsHiz = ViewWantsHiz(cfg, secondary) && plan.source == CullCameraSource::Own;
     fx::ClusterDrawChain chain = f.ClusterDraw(m_state, 0);
-    bool pyramidBound = false;
-    if (!secondary && tests.occlusion && plan.source == CullCameraSource::Own) {
-        // Last frame's pyramid, only while its guards hold (first frame, resize, cut, missed build).
-        const fx::HizPrevious hiz = m_hiz.Previous(f);
-        snap.hizReason = hiz.reason;
+    if (wantsHiz) {
+        chain.TwoPhase(m_hiz, f.SceneDepth());
         snap.hizSource = CullCameraSource::Own;
-        if (hiz.usable) {
-            pyramidBound = true;
-            flags = flags | ClusterCullFlags::Occlusion;
-            chain.Occlusion(hiz.atlas, hiz.viewProjection, hiz.layout);
-        }
     }
     chain.Instances(candidates)
         .Camera(plan.live)
@@ -214,8 +177,8 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     snap.occlusion = OcclusionStateOf(hizRequested, culls, !secondary && stats.occlusionApplied);
     if (secondary && hizRequested && culls) {
         snap.hizReason = HizReason::Unavailable; // Only the primary view owns a pyramid.
-    } else if (pyramidBound && !stats.occlusionApplied) {
-        snap.hizReason = HizReason::Unavailable; // The pyramid was ready, the chain still dropped the test.
+    } else if (wantsHiz && !stats.occlusionApplied) {
+        snap.hizReason = stats.hizReason;
     }
     snap.statsCollected = wantStats;
 
@@ -273,20 +236,6 @@ void GpuDrivenSceneFeature::SceneCullPass(fx::OpaqueFrame& f)
         snap.cpuCullState = f.CullSceneDraw(plan.cull.viewProjection, kCpuCullPadding) ? CpuCullState::Active
                                                                                          : CpuCullState::NoCamera;
     }
-}
-
-void GpuDrivenSceneFeature::HizPass(fx::PostOpaqueFrame& f)
-{
-    GpuDrivenSceneViewState& view = m_views.For(f.Scope());
-    const bool wants = ViewWantsHiz(m_settings, f.Scope() == rg::ViewScope::Secondary);
-    // Build() asks for movement tracking before any guard, so "asked" equals "will build".
-    view.hizBuildAsked = wants;
-    view.hizBuildFrame = f.FrameIndex();
-    if (!wants) {
-        m_hiz.Reset(f);
-        return;
-    }
-    m_hiz.Build(f);
 }
 
 GTE_REGISTER_RENDER_FEATURE("GpuDrivenScene", GpuDrivenSceneFeature);

@@ -26,6 +26,7 @@ struct PersistentBuffer::Impl {
         std::string name; // Set on first use. The graph import and the buffer keep this pointer: it must not move.
         rg::GpuBuffer buffer;
         std::uint64_t capacity = 0;
+        std::uint64_t generation = 0; // Bumped by every create, grow and release.
         rg::BuildRetryGate gate;
         std::uint64_t importedSerial = 0; // 0 = not imported yet (a real serial is never 0).
         const rg::RenderGraphBuilder* importedBuilder = nullptr; // The builder that owns `imported`.
@@ -49,6 +50,7 @@ struct PersistentBuffer::Impl {
                 builder.OwningRenderer().Device(), static_cast<std::size_t>(capacity), slot.name.c_str(), use);
             slot.buffer = std::move(next);
             slot.capacity = capacity;
+            ++slot.generation;
         } catch (const std::exception& e) {
             if (slot.gate.OnFailure(frame.FrameIndex()) == rg::BuildRetryGate::FailureKind::First) {
                 frame.ReportOnce("PersistentBuffer '" + slot.name + "' could not allocate: " + e.what());
@@ -163,6 +165,7 @@ bool PersistentBuffer::Release(Frame& frame)
     }
     slot.buffer = rg::GpuBuffer{};
     slot.capacity = 0;
+    ++slot.generation;
     slot.importedSerial = 0;
     slot.importedBuilder = nullptr;
     slot.imported = rg::BufferHandle{};
@@ -176,6 +179,15 @@ std::uint64_t PersistentBuffer::Capacity(Frame& frame) const
         return 0;
     }
     return m_impl->slots[rg::ViewScopeIndex(context->scope)].capacity;
+}
+
+std::uint64_t PersistentBuffer::Generation(Frame& frame) const
+{
+    detail::FrameContext* context = frame.Context();
+    if (context == nullptr) {
+        return 0;
+    }
+    return m_impl->slots[rg::ViewScopeIndex(context->scope)].generation;
 }
 
 } // namespace gte::fx

@@ -12,6 +12,7 @@
 #include "../../Renderer/RenderGraph/PassKindDefaults.h"
 #include "../../Renderer/RenderGraph/RecordedPass.h"
 
+#include <array>
 #include <cassert>
 #include <exception>
 #include <optional>
@@ -39,6 +40,15 @@ std::string TokenText(MeshToken token)
     return "mesh " + std::to_string(token.index) + "/" + std::to_string(token.generation);
 }
 
+// Bits the chain sets itself; a caller never asks for them.
+constexpr std::uint32_t kChainOwnedFlags =
+    kClusterCullFlagOcclusion | kClusterCullFlagPhaseFirst | kClusterCullFlagPhaseSecond | kClusterCullFlagHistoryValid;
+
+// Push block of ClusterCullStats.comp.
+struct ClusterStatsPush {
+    std::uint32_t sumSecond;
+};
+
 } // namespace
 
 struct ClusterDrawChain::Impl {
@@ -64,15 +74,16 @@ struct ClusterDrawChain::Impl {
     bool idTint = false;
     bool stats = false;
 
-    // Hi-Z input of Occlusion().
-    Texture hiz;
-    Mat4 prevViewProjection = Mat4::Identity();
-    HizLayout hizLayout;
-    bool hasOcclusion = false;
+    // Input of TwoPhase().
+    HizPyramid* pyramid = nullptr;
+    Texture sceneDepth;
+    bool wantsTwoPhase = false;
 
-    // Hi-Z decisions made by Plan().
-    Texture hizBinding; // The pyramid, or a 1x1 stand-in while occlusion is off.
-    bool occlusionActive = false;
+    // Decisions made by Plan(): two-phase runs lane `lane` and `lane + 1`.
+    bool twoPhase = false;
+    HizReason hizReason = HizReason::None;
+    HizPlan hizPlan;
+    Texture atlas; // This frame's pyramid, set by the build between the rounds.
 
     // Filled by Plan().
     bool planned = false;
@@ -133,12 +144,11 @@ ClusterDrawChain& ClusterDrawChain::Culling(ClusterCullFlags flags)
     return *this;
 }
 
-ClusterDrawChain& ClusterDrawChain::Occlusion(Texture hizAtlas, const Mat4& prevViewProjection, const HizLayout& layout)
+ClusterDrawChain& ClusterDrawChain::TwoPhase(HizPyramid& pyramid, Texture sceneDepth)
 {
-    m_impl->hiz = hizAtlas;
-    m_impl->prevViewProjection = prevViewProjection;
-    m_impl->hizLayout = layout;
-    m_impl->hasOcclusion = true;
+    m_impl->pyramid = &pyramid;
+    m_impl->sceneDepth = sceneDepth;
+    m_impl->wantsTwoPhase = true;
     return *this;
 }
 
@@ -173,6 +183,29 @@ namespace {
 rg::StaticName PassNameOf(const ClusterDrawState& state, std::uint32_t lane, std::uint32_t slot, ClusterPassKind kind)
 {
     return rg::StaticName::Interned(state.PassName(lane, slot, kind));
+}
+
+// Decides whether the chain runs in two phases. Declares nothing; None means it does.
+HizReason PlanTwoPhase(ClusterDrawChain::Impl& s, rg::StaticName anchorName)
+{
+    Frame& frame = *s.frame;
+    detail::FrameContext& context = *frame.Context();
+    if (s.pyramid == nullptr || s.lane != 0 || s.state->Shape().lanes < 2) {
+        frame.ReportOnce(std::string("Pass '") + anchorName.value
+            + "': a two-phase chain needs lane 0 of a state with two lanes");
+        return HizReason::Unavailable;
+    }
+    const ClusterCamera& cullCamera = s.hasCullCamera ? s.cullCamera : s.camera;
+    if (!CameraPoseEqual(cullCamera.viewProjection, cullCamera.eyeOrDirection, s.camera.viewProjection,
+            s.camera.eyeOrDirection)) {
+        return HizReason::Unavailable; // The depth belongs to the draw camera only.
+    }
+    if (!s.sceneDepth.IsValid() || !detail::CheckOwned(frame, s.sceneDepth, anchorName, "the scene depth")
+        || !context.builder->HasSampleableDepth(s.sceneDepth.handle)) {
+        return HizReason::Unavailable;
+    }
+    s.hizPlan = s.pyramid->Plan(frame, s.sceneDepth);
+    return s.hizPlan.reason;
 }
 
 // Resolves everything the chain needs and fills `s.parts`. Declares nothing.
@@ -230,33 +263,20 @@ void PlanChain(ClusterDrawChain::Impl& s)
     }
 
     const ClusterCamera& cullCamera = s.hasCullCamera ? s.cullCamera : s.camera;
-    ClusterCullFlags flags = EffectiveClusterCullFlags(s.flags, s.depthOnly);
+    const ClusterCullFlags flags = static_cast<ClusterCullFlags>(
+        static_cast<std::uint32_t>(EffectiveClusterCullFlags(s.flags, s.depthOnly)) & ~kChainOwnedFlags);
     if (!ClusterCullParamsAreFinite(MakeClusterCullParams(
             cullCamera.viewProjection, cullCamera.eyeOrDirection, cullCamera.orthographic, 1, 1, flags))) {
         frame.ReportOnce(std::string("Pass '") + anchorName.value + "': the cull camera is not finite");
         return;
     }
 
-    // The Occlusion test needs a pyramid of this view; without a usable one only that test is dropped.
-    if (HasClusterCullFlag(flags, ClusterCullFlags::Occlusion)) {
-        const bool usable = !s.depthOnly && s.hasOcclusion && s.hizLayout.IsValid() && s.hiz.IsValid()
-            && CameraIsFinite(s.prevViewProjection, Vec3(0.0f, 0.0f, 0.0f));
-        if (!usable) {
-            flags = static_cast<ClusterCullFlags>(
-                static_cast<std::uint32_t>(flags) & ~static_cast<std::uint32_t>(ClusterCullFlags::Occlusion));
-        } else if (!detail::CheckOwned(frame, s.hiz, anchorName, "the occlusion pyramid")) {
-            return;
-        } else {
-            s.hizBinding = s.hiz;
-            s.occlusionActive = true;
-        }
+    // Without a usable pyramid the chain is the plain single-phase chain.
+    if (s.wantsTwoPhase && !s.depthOnly) {
+        s.hizReason = PlanTwoPhase(s, anchorName);
+        s.twoPhase = s.hizReason == HizReason::None;
     }
-    if (!s.hizBinding.IsValid()) {
-        s.hizBinding = state.HizDummy(frame, s.lane);
-        if (!s.hizBinding.IsValid()) {
-            return;
-        }
-    }
+    const std::uint32_t rounds = s.twoPhase ? 2 : 1;
 
     s.pipeline = state.ResolvePipeline(*context, ClusterPipelineKeyFor(flags, s.depthOnly, s.idTint));
     if (s.pipeline == nullptr || !frame.ShaderReady(state.CullShader())) {
@@ -313,13 +333,17 @@ void PlanChain(ClusterDrawChain::Impl& s)
         const std::uint64_t workItems = instanceCount * clusterCounts[index];
 
         // All-or-none: a toggled-off pass of the chain means nothing of this part is touched.
-        if (!frame.PassEnabled(PassNameOf(state, s.lane, thisSlot, ClusterPassKind::Reset))
-            || !frame.PassEnabled(PassNameOf(state, s.lane, thisSlot, ClusterPassKind::Cull))
-            || !frame.PassEnabled(PassNameOf(state, s.lane, thisSlot, ClusterPassKind::Draw))) {
+        bool toggledOff = false;
+        for (std::uint32_t round = 0; round < rounds; ++round) {
+            toggledOff = toggledOff || !frame.PassEnabled(PassNameOf(state, s.lane + round, thisSlot, ClusterPassKind::Reset))
+                || !frame.PassEnabled(PassNameOf(state, s.lane + round, thisSlot, ClusterPassKind::Cull))
+                || !frame.PassEnabled(PassNameOf(state, s.lane + round, thisSlot, ClusterPassKind::Draw));
+        }
+        if (toggledOff) {
             ++toggledOffParts;
             continue;
         }
-        if (state.TryReserveChainBytes(context->scope, s.lane, thisSlot, instanceCount, workItems)
+        if (state.TryReserveChainBytes(context->scope, s.lane, thisSlot, instanceCount, workItems, s.twoPhase)
             != ClusterReserveResult::Ok) {
             frame.ReportOnce(std::string("Pass '") + anchorName.value + "': " + TokenText(group.mesh)
                 + " is over the cluster draw memory budget; the CPU draw is used");
@@ -340,9 +364,6 @@ void PlanChain(ClusterDrawChain::Impl& s)
         }
         part.params = MakeClusterCullParams(cullCamera.viewProjection, cullCamera.eyeOrDirection,
             cullCamera.orthographic, static_cast<std::uint32_t>(instanceCount), part.clusterCount, flags);
-        if (s.occlusionActive) {
-            SetClusterCullHiz(part.params, s.prevViewProjection, s.hizLayout);
-        }
         s.parts.push_back(std::move(part));
     }
     if (s.parts.empty()) {
@@ -365,174 +386,274 @@ void PlanChain(ClusterDrawChain::Impl& s)
     s.plan.ready = true;
 }
 
-// Declares the passes of one part. Returns how far the chain got.
-ClusterChainProgress DeclarePart(ClusterDrawChain::Impl& s, const PlannedPart& part)
-{
-    Frame& frame = *s.frame;
-    ClusterDrawState& state = *s.state;
-    detail::FrameContext& context = *frame.Context();
-    Core& core = *context.core;
-    const std::uint32_t lane = s.lane;
-    const std::uint32_t slot = part.slot;
+// Buffers and bindings of one part, acquired once per frame.
+struct PartRuntime {
+    GpuBufferRef instances;
+    std::array<GpuBufferRef, 2> clusters, visible, commands, count; // [round]
+    std::array<Texture, 2> hizDummy;                                // [round]; round 1 of a two-phase chain binds the pyramid
+    GpuBufferRef history;                                           // The slot's history, or a stand-in.
+    bool historyValid = false;
+    std::uint64_t historyKey = 0;
+    GpuReadback<std::uint32_t>* readback = nullptr;
+};
 
-    const Mesh* mesh = core.ResolveClusterMesh(part.mesh);
-    if (mesh == nullptr || mesh->ClusterTable() == nullptr) {
-        assert(false && "a planned cluster mesh vanished within one frame");
-        frame.ReportOnce("ClusterDraw(): a planned mesh is no longer available; the CPU draw is used");
-        return ClusterChainProgress::None;
+// Declares the passes of a chain, one round of one part at a time. See RecordClusterRounds().
+class ChainDeclarer {
+public:
+    ChainDeclarer(ClusterDrawChain::Impl& chain)
+        : s(chain)
+        , runtime(chain.parts.size())
+    {
     }
 
-    // Buffers. Acquire imports each one once per frame; nothing is declared yet.
-    PersistentBuffer* instanceBuffer = state.Instances(slot);
-    const std::uint64_t instanceBytes = part.instances.size() * sizeof(ClusterInstanceGpu);
-    const GpuBufferRef instances = instanceBuffer->Acquire(frame, instanceBytes);
-    if (!instances.IsValid()) {
-        return ClusterChainProgress::None;
-    }
-    if (state.NeedsInstanceUpload(frame, slot)) {
-        if (!instanceBuffer->Upload(frame, part.instances.data(), instanceBytes)) {
-            return ClusterChainProgress::None;
-        }
-        state.NoteInstanceUploaded(frame, slot);
-    }
-    const GpuBufferRef visible = state.Visible(lane, slot)->Acquire(frame, part.workItems * kClusterVisibleBytes);
-    const GpuBufferRef commands = state.Commands(lane, slot)->Acquire(frame, part.workItems * kClusterCommandBytes);
-    const GpuBufferRef count = state.Count(lane, slot)->Acquire(frame, sizeof(std::uint32_t));
-    if (!visible.IsValid() || !commands.IsValid() || !count.IsValid()) {
-        return ClusterChainProgress::None;
-    }
-    const rg::BufferHandle tableHandle = context.builder->Import(*mesh->ClusterTable(), state.TableName(context.scope, lane, slot));
-    const GpuBufferRef clusters = frame.StampBuffer(
-        tableHandle, std::uint64_t{ part.clusterCount } * sizeof(MeshCluster), BufferUse::Storage);
+    ClusterDrawChain::Impl& s;
+    std::vector<PartRuntime> runtime;
+    std::size_t statsPart = 0;
 
-    struct Declarer {
-        ClusterDrawChain::Impl& s;
-        const PlannedPart& part;
-        detail::FrameContext& context;
-        GpuBufferRef instances, visible, commands, count, clusters;
-        rg::StaticName resetName, cullName, drawName;
-        GpuReadback<std::uint32_t>* readback = nullptr;
+    std::uint32_t LaneOf(std::uint32_t round) const noexcept { return s.lane + round; }
 
-        bool Reset() { return s.frame->FillBuffer(resetName, count, 0); }
+    // Acquires the buffers of a part. False leaves the part on the CPU draw.
+    bool Begin(std::size_t index)
+    {
+        Frame& frame = *s.frame;
+        ClusterDrawState& state = *s.state;
+        detail::FrameContext& context = *frame.Context();
+        const PlannedPart& part = s.parts[index];
+        PartRuntime& run = runtime[index];
 
-        bool Cull()
-        {
-            ClusterDrawState& state = *s.state;
-            return s.frame->Compute(state.CullShader(), cullName)
-                .Params(*state.Params(context.scope, s.lane, part.slot), part.params)
-                .BindBuffer("instances", instances)
-                .BindBuffer("clusters", clusters)
-                .BindBuffer("visible", visible)
-                .BindBuffer("commands", commands)
-                .BindBuffer("count", count)
-                .Bind("hizAtlas", s.hizBinding)
-                .Dispatch(Extent2D{ static_cast<std::uint32_t>(part.workItems), 1 });
+        const Mesh* mesh = context.core->ResolveClusterMesh(part.mesh);
+        if (mesh == nullptr || mesh->ClusterTable() == nullptr) {
+            assert(false && "a planned cluster mesh vanished within one frame");
+            frame.ReportOnce("ClusterDraw(): a planned mesh is no longer available; the CPU draw is used");
+            return false;
         }
 
-        bool Draw()
-        {
-            if (!detail::PassEnabled(context, drawName)) {
+        // Acquire imports each buffer once per frame; nothing is declared yet.
+        PersistentBuffer* instanceBuffer = state.Instances(part.slot);
+        const std::uint64_t instanceBytes = part.instances.size() * sizeof(ClusterInstanceGpu);
+        run.instances = instanceBuffer->Acquire(frame, instanceBytes);
+        if (!run.instances.IsValid()) {
+            return false;
+        }
+        if (state.NeedsInstanceUpload(frame, part.slot)) {
+            if (!instanceBuffer->Upload(frame, part.instances.data(), instanceBytes)) {
                 return false;
             }
-            rg::IndirectDrawRecord record;
-            record.target = s.target.handle;
-            record.indirect = commands.handle;
-            record.count = count.handle;
-            record.instances = instances.handle;
-            record.visible = visible.handle;
-            record.maxDrawCount = static_cast<std::uint32_t>(part.workItems);
-            record.depthOnly = s.depthOnly;
+            state.NoteInstanceUploaded(frame, part.slot);
+        }
 
-            Core* core = context.core;
-            const MeshToken token = part.mesh;
-            const Pipeline* pipeline = s.pipeline;
-            rg::ClusterDrawBindings* bindings = s.bindings;
-            const std::size_t bindingIndex = s.state->BindingIndex(context.scope, s.lane, part.slot);
-            const rg::RenderViewId view = context.view;
-            const bool depthOnly = s.depthOnly;
-            const Mat4 viewProjection = s.camera.viewProjection;
-            // The mesh is looked up again at execute time; a missing one draws nothing.
-            auto resolveInputs = [core, token, pipeline, bindings, bindingIndex, view, depthOnly, viewProjection]() {
-                rg::IndirectDrawInputs inputs;
-                inputs.mesh = core->ResolveClusterMesh(token);
-                inputs.pipeline = pipeline;
-                inputs.viewProjection = viewProjection;
-                inputs.clusterBindings = bindings;
-                inputs.clusterBindingIndex = bindingIndex;
-                if (!depthOnly) {
-                    inputs.sceneSet = core->GetSceneServicesDescriptorSet().DescriptorSetFor(view);
-                }
-                return inputs;
-            };
-
-            std::optional<rg::PassBody> body =
-                rg::MakeIndirectDrawBody(*context.builder, drawName.value, record, std::move(resolveInputs));
-            if (!body) {
+        const std::uint32_t rounds = s.twoPhase ? 2 : 1;
+        for (std::uint32_t round = 0; round < rounds; ++round) {
+            const std::uint32_t lane = LaneOf(round);
+            run.visible[round] = state.Visible(lane, part.slot)->Acquire(frame, part.workItems * kClusterVisibleBytes);
+            run.commands[round] = state.Commands(lane, part.slot)->Acquire(frame, part.workItems * kClusterCommandBytes);
+            run.count[round] = state.Count(lane, part.slot)->Acquire(frame, sizeof(std::uint32_t));
+            if (!run.visible[round].IsValid() || !run.commands[round].IsValid() || !run.count[round].IsValid()) {
                 return false;
             }
-            context.builder->AddRenderPass(drawName.value, rg::DefaultPassKind(rg::DeclarativePassType::IndirectDraw),
-                context.scope, rg::RenderPassCategory::General, std::move(body->setup), std::move(body->execute),
-                rg::DefaultDrawKind(rg::DeclarativePassType::IndirectDraw), context.event);
-            return true;
+            const rg::BufferHandle table =
+                context.builder->Import(*mesh->ClusterTable(), state.TableName(context.scope, lane, part.slot));
+            run.clusters[round] = frame.StampBuffer(
+                table, std::uint64_t{ part.clusterCount } * sizeof(MeshCluster), BufferUse::Storage);
+            run.hizDummy[round] = round == 0 ? state.HizDummy(frame, lane) : Texture{};
+        }
+        if (!run.hizDummy[0].IsValid()) {
+            return false;
         }
 
-        // Stats are optional and declared as one unit: clear, dispatch, host copy.
-        bool StatsClear()
-        {
-            ClusterDrawState& state = *s.state;
-            const std::uint32_t lane = s.lane;
-            readback = state.Stats(part.slot);
-            if (readback == nullptr || !s.frame->ShaderReady(state.StatsShader())
-                || !s.frame->PassEnabled(PassNameOf(state, lane, part.slot, ClusterPassKind::Stats))
-                || !s.frame->PassEnabled(rg::StaticName::Interned(state.StatsClearName(lane, part.slot)))
-                || !s.frame->PassEnabled(rg::StaticName::Interned(state.StatsCopyName(lane, part.slot)))) {
-                return false;
-            }
-            return s.frame->ClearReadback(rg::StaticName::Interned(state.StatsClearName(lane, part.slot)), *readback, 0u);
+        if (!s.twoPhase) {
+            run.history = state.HistoryDummy(frame, s.lane);
+            return run.history.IsValid();
         }
-
-        bool StatsCompute()
-        {
-            ClusterDrawState& state = *s.state;
-            const bool dispatched =
-                s.frame->Compute(state.StatsShader(), PassNameOf(state, s.lane, part.slot, ClusterPassKind::Stats))
-                    .BindBuffer("count", count)
-                    .BindOutput("outCount", *readback)
-                    .Dispatch(Extent2D{ 1, 1 });
-            if (!dispatched) {
-                s.frame->ReportOnce("ClusterDraw(): the stats dispatch was refused; the visible count is not updated");
-            }
-            return dispatched;
+        PersistentBuffer* historyBuffer = state.History(part.slot);
+        run.history = historyBuffer->Acquire(frame, part.workItems * kClusterHistoryBytes);
+        if (!run.history.IsValid()) {
+            return false;
         }
-
-        bool StatsCopy()
-        {
-            ClusterDrawState& state = *s.state;
-            return s.frame->CopyReadbackToHost(rg::StaticName::Interned(state.StatsCopyName(s.lane, part.slot)), *readback);
+        std::vector<std::uint32_t> entityWords;
+        entityWords.reserve(part.entities.size() * 2);
+        for (const Entity& entity : part.entities) {
+            entityWords.push_back(entity.index);
+            entityWords.push_back(entity.generation);
         }
-    };
-
-    Declarer declarer{ s, part, context, instances, visible, commands, count, clusters,
-        PassNameOf(state, lane, slot, ClusterPassKind::Reset), PassNameOf(state, lane, slot, ClusterPassKind::Cull),
-        PassNameOf(state, lane, slot, ClusterPassKind::Draw) };
-    const ClusterChainProgress progress = RecordClusterPart(declarer, ClusterStatsWanted(s.stats, s.depthOnly, lane));
-    if (progress != ClusterChainProgress::Draw) {
-        frame.ReportOnce(std::string("Pass '") + declarer.drawName.value
-            + "': the chain stopped before the draw; the CPU draw is used for this mesh");
+        const std::uint64_t meshToken = (std::uint64_t{ part.mesh.index } << 32) | part.mesh.generation;
+        run.historyKey = ClusterHistoryKey(meshToken, part.clusterCount, entityWords, historyBuffer->Generation(frame));
+        run.historyValid = ClusterHistoryUsable(state.HistoryRecord(frame, part.slot), run.historyKey, frame.FrameIndex());
+        // Valid again only once both rounds of this frame were declared.
+        state.DropHistory(frame, part.slot);
+        return true;
     }
-    return progress;
-}
+
+    bool Reset(std::size_t index, std::uint32_t round)
+    {
+        const PlannedPart& part = s.parts[index];
+        return s.frame->FillBuffer(PassNameOf(*s.state, LaneOf(round), part.slot, ClusterPassKind::Reset),
+            runtime[index].count[round], 0);
+    }
+
+    bool Cull(std::size_t index, std::uint32_t round)
+    {
+        ClusterDrawState& state = *s.state;
+        const PlannedPart& part = s.parts[index];
+        const PartRuntime& run = runtime[index];
+        const std::uint32_t lane = LaneOf(round);
+
+        ClusterCullParams params = part.params;
+        if (round == 1) {
+            SetClusterCullHiz(params, s.hizPlan.layout);
+            params.counts[3] |= kClusterCullFlagPhaseSecond;
+        } else if (s.twoPhase) {
+            params.counts[3] |= kClusterCullFlagPhaseFirst | (run.historyValid ? kClusterCullFlagHistoryValid : 0u);
+        }
+        const Texture pyramid = round == 1 ? s.atlas : run.hizDummy[0];
+        return s.frame->Compute(state.CullShader(), PassNameOf(state, lane, part.slot, ClusterPassKind::Cull))
+            .Params(*state.Params(s.frame->Context()->scope, lane, part.slot), params)
+            .BindBuffer("instances", run.instances)
+            .BindBuffer("clusters", run.clusters[round])
+            .BindBuffer("visible", run.visible[round])
+            .BindBuffer("commands", run.commands[round])
+            .BindBuffer("count", run.count[round])
+            .BindBuffer("history", run.history)
+            .Bind("hizAtlas", pyramid)
+            .Dispatch(Extent2D{ static_cast<std::uint32_t>(part.workItems), 1 });
+    }
+
+    bool Draw(std::size_t index, std::uint32_t round)
+    {
+        detail::FrameContext& context = *s.frame->Context();
+        const PlannedPart& part = s.parts[index];
+        const PartRuntime& run = runtime[index];
+        const std::uint32_t lane = LaneOf(round);
+        const rg::StaticName drawName = PassNameOf(*s.state, lane, part.slot, ClusterPassKind::Draw);
+        if (!detail::PassEnabled(context, drawName)) {
+            return false;
+        }
+        rg::IndirectDrawRecord record;
+        record.target = s.target.handle;
+        record.indirect = run.commands[round].handle;
+        record.count = run.count[round].handle;
+        record.instances = run.instances.handle;
+        record.visible = run.visible[round].handle;
+        record.maxDrawCount = static_cast<std::uint32_t>(part.workItems);
+        record.depthOnly = s.depthOnly;
+
+        Core* core = context.core;
+        const MeshToken token = part.mesh;
+        const Pipeline* pipeline = s.pipeline;
+        rg::ClusterDrawBindings* bindings = s.bindings;
+        const std::size_t bindingIndex = s.state->BindingIndex(context.scope, lane, part.slot);
+        const rg::RenderViewId view = context.view;
+        const bool depthOnly = s.depthOnly;
+        const Mat4 viewProjection = s.camera.viewProjection;
+        // The mesh is looked up again at execute time; a missing one draws nothing.
+        auto resolveInputs = [core, token, pipeline, bindings, bindingIndex, view, depthOnly, viewProjection]() {
+            rg::IndirectDrawInputs inputs;
+            inputs.mesh = core->ResolveClusterMesh(token);
+            inputs.pipeline = pipeline;
+            inputs.viewProjection = viewProjection;
+            inputs.clusterBindings = bindings;
+            inputs.clusterBindingIndex = bindingIndex;
+            if (!depthOnly) {
+                inputs.sceneSet = core->GetSceneServicesDescriptorSet().DescriptorSetFor(view);
+            }
+            return inputs;
+        };
+
+        std::optional<rg::PassBody> body =
+            rg::MakeIndirectDrawBody(*context.builder, drawName.value, record, std::move(resolveInputs));
+        if (!body) {
+            return false;
+        }
+        context.builder->AddRenderPass(drawName.value, rg::DefaultPassKind(rg::DeclarativePassType::IndirectDraw),
+            context.scope, rg::RenderPassCategory::General, std::move(body->setup), std::move(body->execute),
+            rg::DefaultDrawKind(rg::DeclarativePassType::IndirectDraw), context.event);
+        return true;
+    }
+
+    // Declares the pyramid from the depth the first round drew.
+    bool Build()
+    {
+        s.atlas = s.pyramid->Build(*s.frame, s.hizPlan, s.sceneDepth);
+        if (!s.atlas.IsValid()) {
+            s.frame->ReportOnce("ClusterDraw(): the occlusion pyramid was refused; the CPU draw is used");
+            return false;
+        }
+        return true;
+    }
+
+    // Stats are optional and declared as one unit: clear, dispatch, host copy. They run on the last lane of the chain.
+    std::uint32_t StatsLane() const noexcept { return LaneOf(s.twoPhase ? 1 : 0); }
+
+    bool StatsClear()
+    {
+        ClusterDrawState& state = *s.state;
+        const std::uint32_t slot = s.parts[statsPart].slot;
+        const std::uint32_t lane = StatsLane();
+        PartRuntime& run = runtime[statsPart];
+        run.readback = state.Stats(slot);
+        if (run.readback == nullptr || !s.frame->ShaderReady(state.StatsShader())
+            || !s.frame->PassEnabled(PassNameOf(state, lane, slot, ClusterPassKind::Stats))
+            || !s.frame->PassEnabled(rg::StaticName::Interned(state.StatsClearName(lane, slot)))
+            || !s.frame->PassEnabled(rg::StaticName::Interned(state.StatsCopyName(lane, slot)))) {
+            return false;
+        }
+        return s.frame->ClearReadback(rg::StaticName::Interned(state.StatsClearName(lane, slot)), *run.readback, 0u);
+    }
+
+    bool StatsCompute()
+    {
+        ClusterDrawState& state = *s.state;
+        const PartRuntime& run = runtime[statsPart];
+        const std::uint32_t round = s.twoPhase ? 1 : 0;
+        const bool dispatched =
+            s.frame->Compute(state.StatsShader(), PassNameOf(state, StatsLane(), s.parts[statsPart].slot, ClusterPassKind::Stats))
+                .BindBuffer("count", run.count[0])
+                .BindBuffer("secondCount", run.count[round])
+                .BindOutput("outCount", *run.readback)
+                .Push(ClusterStatsPush{ s.twoPhase ? 1u : 0u })
+                .Dispatch(Extent2D{ 1, 1 });
+        if (!dispatched) {
+            s.frame->ReportOnce("ClusterDraw(): the stats dispatch was refused; the visible count is not updated");
+        }
+        return dispatched;
+    }
+
+    bool StatsCopy()
+    {
+        ClusterDrawState& state = *s.state;
+        return s.frame->CopyReadbackToHost(
+            rg::StaticName::Interned(state.StatsCopyName(StatsLane(), s.parts[statsPart].slot)), *runtime[statsPart].readback);
+    }
+};
 
 void RecordChain(ClusterDrawChain::Impl& s)
 {
-    Core& core = *s.frame->Context()->core;
+    Frame& frame = *s.frame;
+    Core& core = *frame.Context()->core;
+    ChainDeclarer declarer(s);
+    const std::vector<ClusterStep> steps = RecordClusterRounds(declarer, s.parts.size(), s.twoPhase);
+
+    const bool statsWanted = ClusterStatsWanted(s.stats, s.depthOnly, s.lane);
     std::vector<std::span<const Entity>> partEntities;
     partEntities.reserve(s.parts.size());
-    for (const PlannedPart& part : s.parts) {
+    for (std::size_t i = 0; i < s.parts.size(); ++i) {
+        const PlannedPart& part = s.parts[i];
         partEntities.push_back(part.entities);
+        if (ClusterProgressOf(steps[i], s.twoPhase) != ClusterChainProgress::Draw) {
+            frame.ReportOnce(std::string("Pass '") + PassNameOf(*s.state, s.lane, part.slot, ClusterPassKind::Draw).value
+                + "': the chain stopped before the draw; the CPU draw is used for this mesh");
+            continue;
+        }
+        if (s.twoPhase) {
+            s.state->NoteHistoryWritten(frame, part.slot, declarer.runtime[i].historyKey);
+        }
+        // A refused stats pass never changes the progress, so it cannot revoke a claim.
+        if (statsWanted) {
+            declarer.statsPart = i;
+            RecordClusterStats(declarer);
+        }
     }
-    const ClusterRecordOutcome outcome = RecordClusterParts(
-        partEntities, s.claimContext, [&](std::size_t index) { return DeclarePart(s, s.parts[index]); });
+    const ClusterRecordOutcome outcome = ClusterOutcomeOf(partEntities, s.claimContext, steps, s.twoPhase);
 
     // The takeover is the last step, after every pass of a part was declared.
     if (!outcome.claimed.empty()) {
@@ -566,10 +687,12 @@ ClusterPlan ClusterDrawChain::Plan()
     } catch (const std::exception& e) {
         s.parts.clear();
         s.plan = ClusterPlan{};
+        s.twoPhase = false;
         s.frame->ReportOnce(std::string("ClusterDraw() could not plan: ") + e.what());
     } catch (...) {
         s.parts.clear();
         s.plan = ClusterPlan{};
+        s.twoPhase = false;
         s.frame->ReportOnce("ClusterDraw() could not plan: unknown error");
     }
     return s.plan;
@@ -596,7 +719,8 @@ ClusterStats ClusterDrawChain::Record()
         }
     }
     s.result.inertReason = s.plan.inertReason;
-    s.result.occlusionApplied = s.result.declared && s.occlusionActive;
+    s.result.hizReason = s.wantsTwoPhase && !s.depthOnly ? s.hizReason : HizReason::None;
+    s.result.occlusionApplied = s.result.declared && s.twoPhase;
 
     // Idle bookkeeping of the frame's scope; release only runs in the synchronous regime.
     s.state->TickIdle(*s.frame, s.result.declared);

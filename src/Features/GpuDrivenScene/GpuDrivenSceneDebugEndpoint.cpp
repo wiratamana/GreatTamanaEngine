@@ -38,32 +38,32 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDriv
 {
     const auto key = [&](std::string_view name) { return std::string(prefix).append(name); };
     const auto text = [](std::string_view s) { return std::string(s); };
+    const GpuPathReport& g = v.gpu;
     Add(out, key("rendered"), v.rendered);
     Add(out, key("frameIndex"), Count(v.frameIndex));
-    Add(out, key("occlusion"), text(fx::EnumName(kOcclusionStateTable, v.occlusion)));
-    Add(out, key("hizReason"), text(fx::EnumName(kHizReasonTable, v.hizReason)));
-    Add(out, key("inertReason"), text(fx::ClusterInertReasonName(v.inertReason)));
-    Add(out, key("lastRefusalReason"), v.refusal);
-    Add(out, key("claimedEntities"), Count(v.claimedEntities));
-    Add(out, key("parts"), Count(v.parts));
-    Add(out, key("testedClusters"), Count(v.testedClusters));
-    Add(out, key("testedAtVisibleFrame"), Count(v.testedAtVisibleFrame));
-    Add(out, key("visibleClusters"), Count(v.visibleClusters));
-    Add(out, key("visibleFrame"), Count(v.visibleFrame));
-    Add(out, key("visibleAge"), Count(ClusterCountAgeFrames(v.frameIndex, v.visibleFrame)));
-    Add(out, key("hidden"), Count(v.hidden));
-    Add(out, key("hiddenValid"), v.hiddenValid);
-    Add(out, key("statsCollected"), v.statsCollected);
-    Add(out, key("visibleValid"), v.visibleValid);
+    Add(out, key("occlusion"), text(fx::EnumName(kOcclusionStateTable, g.occlusion)));
+    Add(out, key("hizReason"), text(fx::EnumName(kHizReasonTable, g.hizReason)));
+    Add(out, key("inertReason"), text(fx::ClusterInertReasonName(g.inertReason)));
+    Add(out, key("lastRefusalReason"), g.refusal);
+    Add(out, key("claimedEntities"), Count(g.claimedEntities));
+    Add(out, key("parts"), Count(g.parts));
+    Add(out, key("testedClusters"), Count(g.testedClusters));
+    Add(out, key("testedAtVisibleFrame"), Count(g.testedAtVisibleFrame));
+    Add(out, key("visibleClusters"), Count(g.visibleClusters));
+    Add(out, key("visibleFrame"), Count(g.visibleFrame));
+    Add(out, key("visibleAge"), Count(ClusterCountAgeFrames(v.frameIndex, g.visibleFrame)));
+    Add(out, key("hidden"), Count(g.hidden));
+    Add(out, key("hiddenValid"), g.hiddenValid);
+    Add(out, key("statsCollected"), g.statsCollected);
+    Add(out, key("visibleValid"), g.visibleValid);
     Add(out, key("cameraValid"), v.cameraValid);
-    Add(out, key("hizTrackingRequested"), v.hizTrackingRequested);
-    Add(out, key("ledgerBytes"), Count(v.ledgerBytes));
+    Add(out, key("ledgerBytes"), Count(g.ledgerBytes));
     Add(out, key("cpuTested"), Count(v.cpuTested));
     Add(out, key("cpuCulled"), Count(v.cpuCulled));
     Add(out, key("cpuUnbounded"), Count(v.cpuUnbounded));
     Add(out, key("cpuCullState"), text(fx::EnumName(kCpuCullStateTable, v.cpuCullState)));
     Add(out, key("cullCamera"), text(fx::EnumName(kCullCameraSourceTable, v.cullCamera)));
-    Add(out, key("hizSource"), text(fx::EnumName(kCullCameraSourceTable, v.hizSource)));
+    Add(out, key("hizSource"), text(fx::EnumName(kCullCameraSourceTable, g.hizSource)));
 }
 
 fx::FeatureDebugResult Fail(std::string key, std::string message)

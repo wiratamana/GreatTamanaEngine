@@ -4,6 +4,7 @@
 #include "../../ECS/Entity.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
+#include "../../Renderer/Culling/ClusterCullMath.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -88,7 +89,8 @@ struct ClusterPlan {
 
 struct ClusterStats {
     bool declared = false;
-    bool occlusionApplied = false; // The Hi-Z test ran in this chain's cull.
+    bool occlusionApplied = false; // The two-phase occlusion cull ran in this chain.
+    HizReason hizReason = HizReason::None; // Why a requested two-phase chain ran single-phase; None otherwise.
     std::uint32_t instances = 0;
     std::uint32_t parts = 0;
     std::uint64_t workItems = 0; // Sum over declared parts of instances * clusters: what the cull tested.

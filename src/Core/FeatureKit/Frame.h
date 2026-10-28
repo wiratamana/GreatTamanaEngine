@@ -230,6 +230,10 @@ public:
     // The view's color + depth target.
     Texture SceneTarget() const noexcept { return Stamp(m_target); }
 
+    // The view's depth, sampleable by compute passes declared after the opaque draws. Check the view for
+    // sampleable depth before binding it.
+    Texture SceneDepth() const noexcept { return Stamp(m_target); }
+
 private:
     rg::TextureHandle m_target;
 };

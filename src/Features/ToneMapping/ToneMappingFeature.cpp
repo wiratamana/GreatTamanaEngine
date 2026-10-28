@@ -10,9 +10,6 @@ namespace {
 constexpr std::int32_t kFrameStampPriority = 40;
 constexpr std::int32_t kCompositePriority = 1000; // After every other PostComposite feature.
 
-// A snapshot older than this many frames (against the newest frame of any view) counts as not rendered.
-constexpr std::uint64_t kSnapshotStaleFrames = 2;
-
 } // namespace
 
 ToneMappingFeature::ToneMappingFeature(fx::FeatureHost&) { }
@@ -36,7 +33,7 @@ void ToneMappingFeature::ApplySettings(const ToneMappingSettings& candidate)
 ToneMappingViewSnapshot ToneMappingFeature::Snapshot(rg::ViewScope scope) const
 {
     ToneMappingViewSnapshot snapshot = m_views.For(scope).snapshot;
-    const bool stale = snapshot.frameIndex > m_newestFrame || m_newestFrame - snapshot.frameIndex > kSnapshotStaleFrames;
+    const bool stale = fx::SnapshotIsStale(snapshot.frameIndex, m_newestFrame);
     if (stale) {
         snapshot.status = ToneMappingFrameStatus::NotRendered;
     }

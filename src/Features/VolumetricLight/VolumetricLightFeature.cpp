@@ -15,9 +15,6 @@ constexpr std::int32_t kFrameStampPriority = 45;
 constexpr std::int32_t kVolumePriority = 60;
 constexpr std::int32_t kCompositePriority = -250; // After the shadow darkening, so the mask never dims the shafts.
 
-// A snapshot older than this many frames (against the newest frame of any view) counts as not rendered.
-constexpr std::uint64_t kSnapshotStaleFrames = 2;
-
 constexpr std::uint64_t kTexelBytes = 8; // RGBA16 float.
 constexpr std::uint64_t kVolumeBytes =
     std::uint64_t{ kVolumetricLightGridWidth } * kVolumetricLightGridHeight * kVolumetricLightGridDepth * kTexelBytes;
@@ -56,7 +53,7 @@ void VolumetricLightFeature::ApplySettings(const VolumetricLightSettings& candid
 VolumetricLightViewSnapshot VolumetricLightFeature::Snapshot(rg::ViewScope scope) const
 {
     VolumetricLightViewSnapshot snapshot = m_views.For(scope).snapshot;
-    const bool stale = snapshot.frameIndex > m_newestFrame || m_newestFrame - snapshot.frameIndex > kSnapshotStaleFrames;
+    const bool stale = fx::SnapshotIsStale(snapshot.frameIndex, m_newestFrame);
     if (stale) {
         snapshot.status = VolumetricLightFrameStatus::NotRendered;
     }

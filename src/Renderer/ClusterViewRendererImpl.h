@@ -159,13 +159,15 @@ struct ClusterViewRenderer::Impl {
     ClusterCullParams MakeParams(const ClusterViewCull& cull, ClusterCullFlags flags, bool useHiz) const;
     // Real atlas when `useHiz`, the 1x1 stand-in otherwise. Both are tracked owners of their layout.
     rg::TextureHandle ImportHizAtlas(rg::RenderGraphBuilder& builder, bool useHiz);
+    // The cull shader's history binding; the viewer never runs a two-phase chain, so it is never touched.
+    rg::BufferHandle ImportHistoryStandIn(rg::RenderGraphBuilder& builder);
 
     // ---- Pass declaration (graph build time) ----
     bool DeclareFill(rg::RenderGraphBuilder& builder, const char* passName, rg::BufferHandle buffer);
     bool DeclareReadback(rg::RenderGraphBuilder& builder, const char* passName, rg::BufferHandle device,
         rg::BufferHandle host, std::uint64_t bytes);
     bool DeclareCull(rg::RenderGraphBuilder& builder, const GraphSet& set, rg::BufferHandle instances,
-        rg::BufferHandle table, rg::TextureHandle hizAtlas, const ClusterCullParams& params);
+        rg::BufferHandle table, rg::BufferHandle history, rg::TextureHandle hizAtlas, const ClusterCullParams& params);
     // Counted indirect draw of `set`. `bindingIndex` picks the descriptor set (one per draw of a graph).
     bool DeclareDraw(rg::RenderGraphBuilder& builder, const char* passName, const GraphSet& set,
         rg::BufferHandle instances, rg::TextureHandle target, bool depthOnly, const Pipeline& pipeline,
@@ -218,6 +220,7 @@ struct ClusterViewRenderer::Impl {
     std::optional<RenderTexture> hizDepth;        // depth-only, sampled depth
     std::optional<RenderTexture> hizAtlas;        // R32_Float storage image
     std::optional<RenderTexture> hizStandIn;      // 1x1 R32_Float bound while no capture exists
+    rg::GpuBuffer historyStandIn;                 // Bound to the cull shader's history block; never accessed
     std::optional<ClusterViewHizInfo> hizInfo;    // pose of the capture held in `hizAtlas`
     std::uint64_t hizCaptureCounter = 0;
     int hizSceneWidth = 0; // size `hizDepth` and `hizAtlas` were made for

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <span>
@@ -97,7 +98,8 @@ TEST(ClusterCullMath, RecordSizesAndKitConstantsAgree)
     for (std::uint64_t bytes : { 0ull, 1ull, 256ull, 257ull, 5000ull, 1ull << 27, 1ull << 40 }) {
         EXPECT_EQ(ClusterBufferCapacity(bytes), fx::PersistentBufferCapacityFor(bytes)) << bytes;
     }
-    EXPECT_EQ(kClusterFlagUniformScale | kClusterFlagPositiveHand | kClusterFlagMoved, 7u);
+    EXPECT_EQ(kClusterFlagUniformScale | kClusterFlagPositiveHand, 3u);
+    EXPECT_EQ(sizeof(ClusterCullParams), 224u);
     EXPECT_EQ(kMaxMeshClusters, kClusterMaxBufferBytes / sizeof(MeshCluster));
 }
 
@@ -317,14 +319,30 @@ TEST(ClusterCullMath, SmallPartsAreNotWorthAChain)
 
 TEST(ClusterCullMath, ChainBytesRoundEachBufferToItsCapacity)
 {
-    EXPECT_EQ(ClusterChainBytes(1, 1), 4u * 256u);
+    EXPECT_EQ(ClusterChainBytes(1, 1, false), 4u * 256u);
     // 800 -> 1024, 8000 -> 8192, 20000 -> 32768, 4 -> 256.
-    EXPECT_EQ(ClusterChainBytes(10, 1000), 1024u + 8192u + 32768u + 256u);
+    EXPECT_EQ(ClusterChainBytes(10, 1000, false), 1024u + 8192u + 32768u + 256u);
     EXPECT_EQ(ClusterBufferCapacity(0), 256u);
     EXPECT_EQ(ClusterBufferCapacity(257), 512u);
     EXPECT_EQ(ClusterBufferCapacity(1ull << 40), kClusterMaxBufferBytes);
-    EXPECT_LE(ClusterChainBytes(std::numeric_limits<std::uint64_t>::max(), std::numeric_limits<std::uint64_t>::max()),
+    EXPECT_LE(ClusterChainBytes(std::numeric_limits<std::uint64_t>::max(), std::numeric_limits<std::uint64_t>::max(), false),
         4 * kClusterMaxBufferBytes);
+}
+
+TEST(ClusterCullMath, TwoPhaseChainDoublesLanesAndAddsTheHistory)
+{
+    EXPECT_EQ(ClusterHistoryCapacity(0), 256u);
+    EXPECT_EQ(ClusterHistoryCapacity(1000), 4096u);
+    EXPECT_EQ(ClusterChainBytes(1, 1, true), 256u + 2u * 3u * 256u + 256u);
+    // Lane: visible 8192 + commands 32768 + count 256. History: 4000 -> 4096.
+    EXPECT_EQ(ClusterChainBytes(10, 1000, true), 1024u + 2u * (8192u + 32768u + 256u) + 4096u);
+    EXPECT_GT(ClusterChainBytes(10, 1000, true), ClusterChainBytes(10, 1000, false));
+    // Saturating buffers: instances, two lanes of visible and commands, history.
+    EXPECT_LE(ClusterChainBytes(std::numeric_limits<std::uint64_t>::max(), std::numeric_limits<std::uint64_t>::max(), true),
+        6 * kClusterMaxBufferBytes + 4096u);
+    // One million items per chain fit the draw budget; the dispatch limit (4.2M items) does not.
+    EXPECT_LE(ClusterChainBytes(1, 1000000, true), kClusterDrawBudgetBytes);
+    EXPECT_GT(ClusterChainBytes(1, kMaxClusterDispatchGroups * kClusterCullGroupSize, true), kClusterDrawBudgetBytes);
 }
 
 TEST(ClusterCullMath, BudgetDecisionNeverOverflows)
@@ -764,7 +782,7 @@ TEST(ClusterCullMath, OcclusionKeepsWhatItCannotJudge)
     // Behind the eye.
     EXPECT_FALSE(ClusterOccluded(MakeCluster(Vec3(0.0f, 0.0f, -10.0f), 0.5f, Vec3(0.0f, 0.0f, 0.0f), 1.0f), world,
         viewProjection, layout, nearEverywhere));
-    // Off screen on the previous frame.
+    // Fully off screen: the clamped rect is empty.
     EXPECT_FALSE(ClusterOccluded(MakeCluster(Vec3(100.0f, 0.0f, 10.0f), 0.5f, Vec3(0.0f, 0.0f, 0.0f), 1.0f), world,
         viewProjection, layout, nearEverywhere));
     // A corner behind the eye (the box straddles the eye plane).
@@ -775,36 +793,55 @@ TEST(ClusterCullMath, OcclusionKeepsWhatItCannotJudge)
         viewProjection, HizLayout{}, nearEverywhere));
 }
 
-TEST(ClusterCullMath, CullParamsCarryThePyramidSizeAndDepthMap)
+TEST(ClusterCullMath, BoxPartlyOffScreenIsTestedOnItsVisiblePart)
 {
-    ClusterCullParams params = MakeClusterCullParams(
-        PerspectiveFrom(Vec3(0.0f, 0.0f, 0.0f)), Vec3(0.0f, 0.0f, 0.0f), false, 1, 1, ClusterCullFlags::Frustum);
+    const HizLayout layout = HizLayoutFor(256, 256);
+    const Mat4 viewProjection = PerspectiveFrom(Vec3(0.0f, 0.0f, 0.0f));
+    // Straddles the right screen edge at view distance 9.5 .. 10.5.
+    const MeshCluster edge = MakeCluster(Vec3(5.5f, 0.0f, 10.0f), 0.5f, Vec3(0.0f, 0.0f, 0.0f), 1.0f);
+    EXPECT_TRUE(ClusterOccluded(edge, Mat4::Identity(), viewProjection, layout, UniformAtlas(layout, 0.5f)));
+    // Where nothing is drawn (clear depth) the box stays.
+    EXPECT_FALSE(ClusterOccluded(edge, Mat4::Identity(), viewProjection, layout, UniformAtlas(layout, 1.0f)));
+}
+
+TEST(ClusterCullMath, CullParamsCarryTheCullCameraPyramidSizeAndDepthMap)
+{
+    const Mat4 vp = PerspectiveFrom(Vec3(1.0f, 2.0f, 3.0f));
+    ClusterCullParams params =
+        MakeClusterCullParams(vp, Vec3(1.0f, 2.0f, 3.0f), false, 1, 1, ClusterCullFlags::Frustum);
+    EXPECT_EQ(std::memcmp(params.viewProjection, vp.Data(), sizeof(params.viewProjection)), 0);
+
     const HizLayout layout = HizLayoutFor(256, 128);
-    const Mat4 prev = PerspectiveFrom(Vec3(1.0f, 2.0f, 3.0f));
-    SetClusterCullHiz(params, prev, layout);
+    SetClusterCullHiz(params, layout);
     EXPECT_FLOAT_EQ(params.hiz[0], static_cast<float>(layout.atlasWidth));
     EXPECT_FLOAT_EQ(params.hiz[1], static_cast<float>(layout.atlasHeight));
     EXPECT_FLOAT_EQ(params.hiz[2], 128.0f);
     EXPECT_FLOAT_EQ(params.hiz[3], 64.0f);
-    EXPECT_FLOAT_EQ(params.prevViewProjection[12], prev.Data()[12]);
 
-    const HizDepthMap map = HizDepthMapOf(prev);
+    const HizDepthMap map = HizDepthMapOf(vp);
     EXPECT_FLOAT_EQ(params.depthMap[0], map.k);
     EXPECT_FLOAT_EQ(params.depthMap[1], map.b);
     EXPECT_FLOAT_EQ(params.depthMap[2], static_cast<float>(layout.levelCount));
     EXPECT_EQ(params.counts[3] & kClusterCullFlagRawDepth, 0u);
 
-    SetClusterCullHiz(params, OrthographicLookingForward(), layout);
-    EXPECT_NE(params.counts[3] & kClusterCullFlagRawDepth, 0u);
-    EXPECT_EQ(params.counts[3] & kClusterCullFlagFrustum, kClusterCullFlagFrustum);
+    ClusterCullParams ortho = MakeClusterCullParams(
+        OrthographicLookingForward(), Vec3(0.0f, 0.0f, 1.0f), true, 1, 1, ClusterCullFlags::Frustum);
+    SetClusterCullHiz(ortho, layout);
+    EXPECT_NE(ortho.counts[3] & kClusterCullFlagRawDepth, 0u);
+    EXPECT_EQ(ortho.counts[3] & kClusterCullFlagFrustum, kClusterCullFlagFrustum);
 }
 
 TEST(ClusterCullMath, ParamBlockLayoutIsFixed)
 {
     EXPECT_EQ(sizeof(ClusterCullParams), 224u);
+    EXPECT_EQ(offsetof(ClusterCullParams, viewProjection), 112u);
     EXPECT_EQ(offsetof(ClusterCullParams, hiz), 192u);
     EXPECT_EQ(offsetof(ClusterCullParams, depthMap), 208u);
+    EXPECT_EQ(kClusterCullFlagPhaseFirst, 32u);
+    EXPECT_EQ(kClusterCullFlagPhaseSecond, 64u);
+    EXPECT_EQ(kClusterCullFlagHistoryValid, 128u);
     EXPECT_EQ(kClusterCullFlagRawDepth, 256u);
+    EXPECT_EQ(static_cast<std::uint32_t>(ClusterCullFlags::PhaseFirst), kClusterCullFlagPhaseFirst);
 }
 
 TEST(ClusterCullMath, HizBuildPlanRunsTheTopPassOnlyAboveLevelFour)
@@ -827,95 +864,110 @@ TEST(ClusterCullMath, HizBuildPlanRunsTheTopPassOnlyAboveLevelFour)
     EXPECT_EQ(kHizPassCount, 2u);
 }
 
-TEST(ClusterCullMath, OcclusionGuardsEveryResetEvent)
-{
-    EXPECT_TRUE(OcclusionAllowed(kHizValidFramesRequired, false, false, true, false));
-    EXPECT_FALSE(OcclusionAllowed(kHizValidFramesRequired - 1, false, false, true, false));
-    EXPECT_FALSE(OcclusionAllowed(kHizValidFramesRequired, true, false, true, false));
-    EXPECT_FALSE(OcclusionAllowed(kHizValidFramesRequired, false, true, true, false));
-    EXPECT_FALSE(OcclusionAllowed(kHizValidFramesRequired, false, false, false, false));
-    EXPECT_FALSE(OcclusionAllowed(kHizValidFramesRequired, false, false, true, true));
+// ---- two-phase history ----
 
-    EXPECT_EQ(NextFramesSinceValid(1, false, false, true, false), 2u);
-    EXPECT_EQ(NextFramesSinceValid(5, true, false, true, false), 0u);
-    EXPECT_EQ(NextFramesSinceValid(5, false, true, true, false), 0u);
-    EXPECT_EQ(NextFramesSinceValid(5, false, false, false, false), 0u);
-    EXPECT_EQ(NextFramesSinceValid(5, false, false, true, true), 0u);
-    EXPECT_EQ(NextFramesSinceValid(0xFFFFFFFFu, false, false, true, false), 0xFFFFFFFFu);
+TEST(ClusterCullMath, FirstPhaseDrawsLastFramesSurvivorsAndRewritesEveryWord)
+{
+    // Invalid history reads as zero: nothing is drawn and the word is cleared.
+    ClusterPhaseResult r = ClusterPhaseFirst(3, false, true);
+    EXPECT_FALSE(r.emit);
+    EXPECT_EQ(r.word, 0u);
+
+    r = ClusterPhaseFirst(kClusterHistoryVisible, true, true);
+    EXPECT_TRUE(r.emit);
+    EXPECT_EQ(r.word, kClusterHistoryVisible | kClusterHistoryDrawnFirst);
+
+    r = ClusterPhaseFirst(kClusterHistoryVisible, true, false); // Visible before, out of view now.
+    EXPECT_FALSE(r.emit);
+    EXPECT_EQ(r.word, kClusterHistoryVisible);
+
+    r = ClusterPhaseFirst(0, true, true); // Not visible before: left to the second phase.
+    EXPECT_FALSE(r.emit);
+    EXPECT_EQ(r.word, 0u);
+
+    r = ClusterPhaseFirst(kClusterHistoryDrawnFirst, true, true); // A stale phase bit never survives.
+    EXPECT_FALSE(r.emit);
+    EXPECT_EQ(r.word, 0u);
+
+    r = ClusterPhaseFirst(kClusterHistoryVisible | kClusterHistoryDrawnFirst, true, true);
+    EXPECT_TRUE(r.emit);
+    EXPECT_EQ(r.word, kClusterHistoryVisible | kClusterHistoryDrawnFirst);
 }
 
-static bool UsableAt(const HizValidity& s, std::uint64_t f, std::uint32_t w, std::uint32_t h)
+TEST(ClusterCullMath, SecondPhaseEmitsWhatTheFirstPhaseDidNotAndWritesEveryWord)
 {
-    return HizUnusableReason(s, f, w, h) == HizReason::None;
+    ClusterPhaseResult r = ClusterPhaseSecond(0, true, false);
+    EXPECT_TRUE(r.emit);
+    EXPECT_EQ(r.word, kClusterHistoryVisible);
+
+    r = ClusterPhaseSecond(kClusterHistoryDrawnFirst, true, false); // Drawn in the first phase: not again.
+    EXPECT_FALSE(r.emit);
+    EXPECT_EQ(r.word, kClusterHistoryVisible);
+
+    r = ClusterPhaseSecond(kClusterHistoryDrawnFirst, true, true); // Drawn early, occluded now: leaves the history.
+    EXPECT_FALSE(r.emit);
+    EXPECT_EQ(r.word, 0u);
+
+    r = ClusterPhaseSecond(0, false, false);
+    EXPECT_FALSE(r.emit);
+    EXPECT_EQ(r.word, 0u);
+
+    r = ClusterPhaseSecond(0, true, true);
+    EXPECT_FALSE(r.emit);
+    EXPECT_EQ(r.word, 0u);
 }
 
-TEST(ClusterCullMath, HizValidityCountsCleanBuildsAndRestartsOnEvents)
+TEST(ClusterCullMath, BothPhasesDrawAVisibleItemExactlyOnceForAnyHistory)
 {
-    HizValidity state;
-    EXPECT_FALSE(UsableAt(state, 1, 640, 360));
-
-    state = AdvanceHizValidity(state, 10, 640, 360, false); // First build.
-    EXPECT_EQ(state.framesSinceValid, 0u);
-    state = AdvanceHizValidity(state, 11, 640, 360, false);
-    EXPECT_EQ(state.framesSinceValid, 1u);
-    EXPECT_FALSE(UsableAt(state, 12, 640, 360));
-    state = AdvanceHizValidity(state, 12, 640, 360, false);
-    EXPECT_EQ(state.framesSinceValid, 2u);
-    EXPECT_TRUE(UsableAt(state, 13, 640, 360));
-    EXPECT_FALSE(UsableAt(state, 14, 640, 360)); // A frame without a build in between.
-    EXPECT_FALSE(UsableAt(state, 13, 800, 360)); // The view resized since.
-
-    HizValidity cut = AdvanceHizValidity(state, 13, 640, 360, true);
-    EXPECT_EQ(cut.framesSinceValid, 0u);
-
-    HizValidity missed = AdvanceHizValidity(state, 15, 640, 360, false);
-    EXPECT_EQ(missed.framesSinceValid, 0u);
-}
-
-TEST(ClusterCullMath, HizValidityHoldsTheBuildAfterAResize)
-{
-    HizValidity state;
-    for (std::uint64_t frame = 1; frame <= 3; ++frame) {
-        state = AdvanceHizValidity(state, frame, 640, 360, false);
+    for (const std::uint32_t word : { 0u, 1u, 2u, 3u }) {
+        for (const bool valid : { false, true }) {
+            for (const bool inView : { false, true }) {
+                for (const bool occluded : { false, true }) {
+                    const ClusterPhaseResult first = ClusterPhaseFirst(word, valid, inView);
+                    const ClusterPhaseResult second = ClusterPhaseSecond(first.word, inView, occluded);
+                    const int drawn = (first.emit ? 1 : 0) + (second.emit ? 1 : 0);
+                    const bool visible = inView && !occluded;
+                    EXPECT_LE(drawn, 1);
+                    if (visible) {
+                        EXPECT_EQ(drawn, 1) << word << valid << inView << occluded;
+                    }
+                    if (!inView) {
+                        EXPECT_EQ(drawn, 0);
+                    }
+                    EXPECT_EQ(second.word, visible ? kClusterHistoryVisible : 0u);
+                    if (!valid) {
+                        EXPECT_FALSE(first.emit);
+                    }
+                }
+            }
+        }
     }
-    ASSERT_EQ(state.framesSinceValid, 2u);
-
-    state = AdvanceHizValidity(state, 4, 800, 450, false); // Resize: the texture follows one frame late.
-    EXPECT_EQ(state.framesSinceValid, 0u);
-    state = AdvanceHizValidity(state, 5, 800, 450, false); // Held back.
-    EXPECT_EQ(state.framesSinceValid, 0u);
-    state = AdvanceHizValidity(state, 6, 800, 450, false);
-    EXPECT_EQ(state.framesSinceValid, 1u);
-    state = AdvanceHizValidity(state, 7, 800, 450, false);
-    EXPECT_TRUE(UsableAt(state, 8, 800, 450));
 }
 
-TEST(ClusterCullMath, CameraCutNeedsAJumpOrAHardTurn)
+TEST(ClusterCullMath, HistoryKeyIsOrderAndGenerationSensitive)
 {
-    const Vec3 origin(0.0f, 0.0f, 0.0f);
-    const Mat4 base = PerspectiveFrom(origin);
-    EXPECT_FALSE(HizCameraCut(base, origin, base, origin));
-    EXPECT_FALSE(HizCameraCut(base, origin, PerspectiveFrom(Vec3(1.0f, 0.0f, 0.0f)), Vec3(1.0f, 0.0f, 0.0f)));
-    EXPECT_TRUE(HizCameraCut(base, origin, PerspectiveFrom(Vec3(0.0f, 0.0f, 100.0f)), Vec3(0.0f, 0.0f, 100.0f)));
+    const std::array<std::uint32_t, 3> ids{ 7, 8, 9 };
+    const std::array<std::uint32_t, 3> swapped{ 8, 7, 9 };
+    const std::uint64_t key = ClusterHistoryKey(1, 64, ids, 1);
+    EXPECT_EQ(key, ClusterHistoryKey(1, 64, ids, 1));
+    EXPECT_NE(key, ClusterHistoryKey(1, 64, swapped, 1));
+    EXPECT_NE(key, ClusterHistoryKey(1, 64, ids, 2));
+    EXPECT_NE(key, ClusterHistoryKey(2, 64, ids, 1));
+    EXPECT_NE(key, ClusterHistoryKey(1, 65, ids, 1));
+    EXPECT_NE(key, ClusterHistoryKey(1, 64, std::span<const std::uint32_t>(ids).first(2), 1));
+    EXPECT_NE(ClusterHistoryKey(1, 64, {}, 1), ClusterHistoryKey(1, 64, ids, 1));
+}
 
-    const Mat4 turned = Mat4::PerspectiveFovLH_ZO(1.0f, 1.0f, 0.1f, 100.0f)
-        * Mat4::LookAtLH(origin, Vec3(1.0f, 0.0f, 0.0f), Vec3::Up());
-    EXPECT_TRUE(HizCameraCut(base, origin, turned, origin));
-
-    Mat4 broken = base;
+TEST(ClusterCullMath, PoseEqualityIsExact)
+{
+    const Vec3 eye(1.0f, 2.0f, 3.0f);
+    const Mat4 vp = PerspectiveFrom(eye);
+    EXPECT_TRUE(CameraPoseEqual(vp, eye, vp, eye));
+    EXPECT_FALSE(CameraPoseEqual(vp, eye, PerspectiveFrom(Vec3(1.0f, 2.0f, 3.001f)), Vec3(1.0f, 2.0f, 3.001f)));
+    EXPECT_FALSE(CameraPoseEqual(vp, eye, vp, Vec3(1.0f, 2.0f, 3.5f)));
+    Mat4 broken = vp;
     broken.columns[0].x = std::numeric_limits<float>::quiet_NaN();
-    EXPECT_TRUE(HizCameraCut(base, origin, broken, origin));
-}
-
-TEST(ClusterCullMath, InstanceMovedSeesAnyChangedEntry)
-{
-    const Mat4 a = Mat4::Translation(Vec3(1.0f, 2.0f, 3.0f));
-    EXPECT_FALSE(InstanceMoved(a, a));
-    EXPECT_TRUE(InstanceMoved(a, Mat4::Translation(Vec3(1.0f, 2.0f, 3.5f))));
-
-    Mat4 nan = a;
-    nan.columns[1].y = std::numeric_limits<float>::quiet_NaN();
-    EXPECT_TRUE(InstanceMoved(nan, nan)); // A NaN entry never counts as unchanged.
+    EXPECT_FALSE(CameraPoseEqual(broken, eye, broken, eye));
 }
 
 LocalBoundsView UnitBounds()

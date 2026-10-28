@@ -107,6 +107,8 @@ void ClusterViewRenderer::Impl::Build()
     }
     hizStandIn.emplace(renderer.CreateRenderTexture(1, 1, PixelFormat::R32_Float, "ClusterViewHizStandIn", nullptr,
         /*allowStorageImageAccess=*/false, /*allowDepthSampledAccess=*/false, /*createDepthCompanion=*/false));
+    historyStandIn = rg::GpuBuffer(renderer.Device(), kClusterMinBufferBytes, "ClusterViewHistoryStandIn",
+        rg::GpuBufferUse::Storage);
 }
 
 void ClusterViewRenderer::Impl::LogOnce(const std::string& message)
@@ -280,7 +282,7 @@ ClusterViewRenderer::Impl::GraphSet ClusterViewRenderer::Impl::ImportSet(rg::Ren
     return graphSet;
 }
 
-// The one place that decides whether the Hi-Z test runs: a capture must exist and must not be a camera cut.
+// The one place that decides whether the Hi-Z test runs: a capture must exist and be taken at exactly the cull pose.
 ClusterViewRenderer::Impl::AppliedCull ClusterViewRenderer::Impl::ResolveFlags(const ClusterViewCull& cull) const
 {
     AppliedCull applied;
@@ -290,10 +292,10 @@ ClusterViewRenderer::Impl::AppliedCull ClusterViewRenderer::Impl::ResolveFlags(c
     }
     const bool haveCapture = hizInfo.has_value() && hizAtlas.has_value()
         && HizLayoutFor(static_cast<std::uint32_t>(hizInfo->width), static_cast<std::uint32_t>(hizInfo->height)).IsValid();
-    const bool cut = haveCapture
-        && HizCameraCut(hizInfo->viewProjection, hizInfo->eye, cull.viewProjection, cull.eye);
-    applied.occlusionApplied = haveCapture && !cut;
-    applied.hizCut = cut;
+    const bool samePose = haveCapture
+        && CameraPoseEqual(hizInfo->viewProjection, hizInfo->eye, cull.viewProjection, cull.eye);
+    applied.occlusionApplied = samePose;
+    applied.hizCut = haveCapture && !samePose;
     if (!applied.occlusionApplied) {
         applied.flags = static_cast<ClusterCullFlags>(
             static_cast<std::uint32_t>(cull.flags) & ~static_cast<std::uint32_t>(ClusterCullFlags::Occlusion));
@@ -306,7 +308,7 @@ ClusterCullParams ClusterViewRenderer::Impl::MakeParams(
 {
     ClusterCullParams params = MakeClusterCullParams(cull.viewProjection, cull.eye, false, 1, tableClusters, flags);
     if (useHiz && hizInfo.has_value()) {
-        SetClusterCullHiz(params, hizInfo->viewProjection,
+        SetClusterCullHiz(params,
             HizLayoutFor(static_cast<std::uint32_t>(hizInfo->width), static_cast<std::uint32_t>(hizInfo->height)));
     }
     return params;
@@ -319,6 +321,11 @@ rg::TextureHandle ClusterViewRenderer::Impl::ImportHizAtlas(rg::RenderGraphBuild
     return builder.ImportTexture(real ? "ClusterViewHizAtlas" : "ClusterViewHizStandIn", texture.Target(),
         FromVkImageLayout(texture.CurrentState().layout), texture.SamplerObjectHandle(), SamplerHandle::Invalid,
         &texture);
+}
+
+rg::BufferHandle ClusterViewRenderer::Impl::ImportHistoryStandIn(rg::RenderGraphBuilder& builder)
+{
+    return builder.Import(historyStandIn);
 }
 
 bool ClusterViewRenderer::Impl::DeclareFill(rg::RenderGraphBuilder& builder, const char* passName, rg::BufferHandle buffer)
@@ -350,7 +357,7 @@ bool ClusterViewRenderer::Impl::DeclareReadback(rg::RenderGraphBuilder& builder,
 }
 
 bool ClusterViewRenderer::Impl::DeclareCull(rg::RenderGraphBuilder& builder, const GraphSet& set,
-    rg::BufferHandle instances, rg::BufferHandle clusters, rg::TextureHandle hizAtlasHandle,
+    rg::BufferHandle instances, rg::BufferHandle clusters, rg::BufferHandle history, rg::TextureHandle hizAtlasHandle,
     const ClusterCullParams& params)
 {
     const SetNames& names = kSetNames[static_cast<std::size_t>(set.id)];
@@ -362,6 +369,7 @@ bool ClusterViewRenderer::Impl::DeclareCull(rg::RenderGraphBuilder& builder, con
         .Bind("visible", set.visible)
         .Bind("commands", set.commands)
         .Bind("count", set.count)
+        .Bind("history", history)
         .Bind("hizAtlas", hizAtlasHandle)
         .Dispatch(Extent2D{ tableClusters, 1 });
 }
@@ -479,6 +487,7 @@ ClusterViewRenderer::Impl::RunResult ClusterViewRenderer::Impl::RunPlan(
         const rg::BufferHandle instanceHandle = builder.Import(*instance);
         const rg::BufferHandle tableHandle = builder.Import(*table);
         const rg::TextureHandle hizHandle = ImportHizAtlas(builder, applied.occlusionApplied);
+        const rg::BufferHandle historyHandle = ImportHistoryStandIn(builder);
 
         const GraphSet fin = ImportSet(builder, finalSet);
         std::array<GraphSet, 2> stages{};
@@ -504,14 +513,15 @@ ClusterViewRenderer::Impl::RunResult ClusterViewRenderer::Impl::RunPlan(
         ClusterCullFlags prefix = ClusterCullFlags::None;
         for (std::size_t k = 0; k < stageCount; ++k) {
             prefix = prefix | ordered[k];
-            ok = DeclareCull(builder, stages[k], instanceHandle, tableHandle, hizHandle, MakeParams(cull, prefix, false))
+            ok = DeclareCull(builder, stages[k], instanceHandle, tableHandle, historyHandle, hizHandle,
+                     MakeParams(cull, prefix, false))
                 && ok;
         }
-        ok = DeclareCull(builder, fin, instanceHandle, tableHandle, hizHandle,
+        ok = DeclareCull(builder, fin, instanceHandle, tableHandle, historyHandle, hizHandle,
                  MakeParams(cull, applied.flags, applied.occlusionApplied))
             && ok;
         if (ghost) {
-            ok = DeclareCull(builder, ghostSet, instanceHandle, tableHandle, hizHandle,
+            ok = DeclareCull(builder, ghostSet, instanceHandle, tableHandle, historyHandle, hizHandle,
                      MakeParams(cull, ClusterCullFlags::None, false))
                 && ok;
         }

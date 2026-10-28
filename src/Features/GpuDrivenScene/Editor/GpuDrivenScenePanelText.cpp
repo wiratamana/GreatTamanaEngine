@@ -8,11 +8,6 @@ std::string_view HizReasonText(HizReason reason) noexcept
 {
     switch (reason) {
     case HizReason::None: return "not ready";
-    case HizReason::NoHistory:
-    case HizReason::WarmingUp: return "warming up";
-    case HizReason::Resized: return "view resized";
-    case HizReason::CameraCut: return "camera cut";
-    case HizReason::BuildOff: return "pyramid build is off";
     case HizReason::Unavailable: return "not available";
     case HizReason::TooLarge: return "view is too large";
     }
@@ -33,12 +28,13 @@ std::string_view CullModeLine(CullMode mode) noexcept
 
 std::string GpuPathLine(const GpuDrivenSceneViewSnapshot& v)
 {
-    std::string line = "GPU path: " + std::to_string(v.claimedEntities) + " entities, " +
-        std::to_string(v.testedClusters) + " clusters tested, ";
-    if (v.visibleValid) {
-        line += std::to_string(v.visibleClusters) + " visible";
+    const GpuPathReport& g = v.gpu;
+    std::string line = "GPU path: " + std::to_string(g.claimedEntities) + " entities, " +
+        std::to_string(g.testedClusters) + " clusters tested, ";
+    if (g.visibleValid) {
+        line += std::to_string(g.visibleClusters) + " visible";
     } else {
-        line += v.statsCollected ? "visible count not ready" : "stats are off";
+        line += g.statsCollected ? "visible count not ready" : "stats are off";
     }
     return line;
 }
@@ -51,16 +47,16 @@ std::string CpuPathLine(const GpuDrivenSceneViewSnapshot& v)
 
 std::string HizLine(const GpuDrivenSceneViewSnapshot& v, bool secondary)
 {
-    switch (v.occlusion) {
+    switch (v.gpu.occlusion) {
     case OcclusionState::Applied: return "Hi-Z: active";
     case OcclusionState::NotRequested: return "Hi-Z: off";
     case OcclusionState::NoCullCamera: return "Hi-Z: no cull camera";
     case OcclusionState::Unusable: break;
     }
-    if (secondary && v.hizReason == HizReason::Unavailable) {
-        return "Hi-Z: shared pyramid not available (acts as Frustum)";
+    if (secondary && v.gpu.hizReason == HizReason::Unavailable) {
+        return "Hi-Z: primary view only (acts as Frustum)";
     }
-    return "Hi-Z: off (" + std::string(HizReasonText(v.hizReason)) + ")";
+    return "Hi-Z: off (" + std::string(HizReasonText(v.gpu.hizReason)) + ")";
 }
 
 std::string CullCameraLine(const GpuDrivenSceneSettings& s, const GpuDrivenSceneViewSnapshot& v)
@@ -86,7 +82,7 @@ std::string CpuCullStateLine(const GpuDrivenSceneViewSnapshot& v)
 
 std::string_view NoGpuPathLine(const GpuDrivenSceneSettings& s, const GpuDrivenSceneViewSnapshot& v) noexcept
 {
-    if (s.mode == CullMode::HiZ && v.claimedEntities == 0 && v.cpuTested > 0) {
+    if (s.mode == CullMode::HiZ && v.gpu.claimedEntities == 0 && v.cpuTested > 0) {
         return "No mesh is on the GPU path. Hi-Z cannot test CPU-drawn meshes.";
     }
     return {};

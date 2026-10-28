@@ -1,6 +1,6 @@
 #version 450
 
-// Copies the cluster cull survivor count into a readback buffer.
+// Copies the cluster cull survivor count into a readback buffer. With two lanes the result is the sum of both counts.
 layout(local_size_x = 1) in;
 
 layout(std430, binding = 0) readonly buffer CountBlock {
@@ -11,7 +11,15 @@ layout(std430, binding = 1) writeonly buffer OutCountBlock {
     uint value;
 } outCount;
 
+layout(std430, binding = 2) readonly buffer SecondCountBlock {
+    uint value;
+} secondCount;
+
+layout(push_constant) uniform Push {
+    uint sumSecond; // 1 = add the second count, 0 = first count only.
+} pc;
+
 void main()
 {
-    outCount.value = count.value;
+    outCount.value = count.value + (pc.sumSecond != 0u ? secondCount.value : 0u);
 }

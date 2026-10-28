@@ -25,16 +25,16 @@ TEST(GpuDrivenScenePanelTextTest, NoGpuPathLineOnlyForHizWithCpuMeshesAndNoClaim
 {
     GpuDrivenSceneViewSnapshot v;
     v.cpuTested = 5;
-    v.claimedEntities = 0;
+    v.gpu.claimedEntities = 0;
     EXPECT_FALSE(NoGpuPathLine(Hiz(), v).empty());
 
     GpuDrivenSceneSettings frustum;
     EXPECT_TRUE(NoGpuPathLine(frustum, v).empty());
 
-    v.claimedEntities = 1;
+    v.gpu.claimedEntities = 1;
     EXPECT_TRUE(NoGpuPathLine(Hiz(), v).empty());
 
-    v.claimedEntities = 0;
+    v.gpu.claimedEntities = 0;
     v.cpuTested = 0;
     EXPECT_TRUE(NoGpuPathLine(Hiz(), v).empty());
 }
@@ -52,19 +52,21 @@ TEST(GpuDrivenScenePanelTextTest, CpuCullStateLines)
     EXPECT_EQ(CpuCullStateLine(v), "CPU cull: off");
 }
 
-TEST(GpuDrivenScenePanelTextTest, HizLineSaysWhySecondaryHasNoPyramid)
+TEST(GpuDrivenScenePanelTextTest, HizLineSaysWhyHiZIsNotRunning)
 {
     GpuDrivenSceneViewSnapshot v;
-    v.occlusion = OcclusionState::Unusable;
-    v.hizReason = HizReason::Unavailable;
-    EXPECT_EQ(HizLine(v, true), "Hi-Z: shared pyramid not available (acts as Frustum)");
+    v.gpu.occlusion = OcclusionState::Unusable;
+    v.gpu.hizReason = HizReason::Unavailable;
+    EXPECT_EQ(HizLine(v, true), "Hi-Z: primary view only (acts as Frustum)");
     EXPECT_EQ(HizLine(v, false), "Hi-Z: off (not available)");
+    v.gpu.hizReason = HizReason::TooLarge;
+    EXPECT_EQ(HizLine(v, false), "Hi-Z: off (view is too large)");
 
-    v.occlusion = OcclusionState::Applied;
+    v.gpu.occlusion = OcclusionState::Applied;
     EXPECT_EQ(HizLine(v, false), "Hi-Z: active");
-    v.occlusion = OcclusionState::NoCullCamera;
+    v.gpu.occlusion = OcclusionState::NoCullCamera;
     EXPECT_EQ(HizLine(v, false), "Hi-Z: no cull camera");
-    v.occlusion = OcclusionState::NotRequested;
+    v.gpu.occlusion = OcclusionState::NotRequested;
     EXPECT_EQ(HizLine(v, false), "Hi-Z: off");
 }
 
@@ -85,13 +87,13 @@ TEST(GpuDrivenScenePanelTextTest, CullCameraLine)
 TEST(GpuDrivenScenePanelTextTest, CountLines)
 {
     GpuDrivenSceneViewSnapshot v;
-    v.claimedEntities = 3;
-    v.testedClusters = 40;
+    v.gpu.claimedEntities = 3;
+    v.gpu.testedClusters = 40;
     EXPECT_EQ(GpuPathLine(v), "GPU path: 3 entities, 40 clusters tested, stats are off");
-    v.statsCollected = true;
+    v.gpu.statsCollected = true;
     EXPECT_EQ(GpuPathLine(v), "GPU path: 3 entities, 40 clusters tested, visible count not ready");
-    v.visibleValid = true;
-    v.visibleClusters = 12;
+    v.gpu.visibleValid = true;
+    v.gpu.visibleClusters = 12;
     EXPECT_EQ(GpuPathLine(v), "GPU path: 3 entities, 40 clusters tested, 12 visible");
 
     v.cpuTested = 7;

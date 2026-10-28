@@ -13,16 +13,14 @@ struct CullPlan {
     CullCameraSource source = CullCameraSource::None;
 };
 
-// Per-view state: the tested history, the last report, this frame's cull plan and the last Hi-Z request.
+// Per-view state: the tested history, the last report and this frame's cull plan.
 struct GpuDrivenSceneViewState {
     TestedHistory tested;
     GpuDrivenSceneViewSnapshot snapshot;
-    std::uint64_t gpuFrame = 0; // Frame in which the GPU-path fields of `snapshot` were written.
+    std::uint64_t gpuFrame = 0; // Frame in which `snapshot.gpu` was written.
     CullPlan plan;
     std::uint64_t planFrame = 0;
     bool hasPlan = false;
-    std::uint64_t hizBuildFrame = 0;
-    bool hizBuildAsked = false;
 };
 
 // Culling of every view on both draw paths. Cluster-ready meshes are culled on the GPU and skipped by
@@ -50,7 +48,6 @@ public:
 private:
     void OpaquePass(fx::OpaqueFrame& f);
     void SceneCullPass(fx::OpaqueFrame& f);
-    void HizPass(fx::PostOpaqueFrame& f);
 
     // Once per frame, at the first view callback.
     void BeginFrame(std::uint64_t frameIndex);

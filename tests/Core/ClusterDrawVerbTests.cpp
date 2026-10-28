@@ -1,5 +1,6 @@
 // Tier-1 tests for the pure parts of the cluster draw verb: grouping, slot assignment, the cone/pipeline
-// pairing and the claim-after-proof flow with a refusing pass declarer. No device involved.
+// pairing, the round order of a two-phase chain and the claim-after-proof flow with a refusing declarer.
+// No device involved.
 
 #include "Core/FeatureKit/ClusterPartPlanning.h"
 #include "Renderer/Culling/ClusterCullMath.h"
@@ -7,6 +8,8 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <string>
+#include <vector>
 
 namespace gte::fx {
 namespace {
@@ -71,48 +74,134 @@ TEST(ClusterPartPlanningTest, ADepthOnlyLaneNeverGetsTheConeTestOrBackFaceCullin
     EXPECT_EQ(ClusterPipelineKeyFor(effective, true, true).variant, ClusterPipelineVariant::DepthOnly);
 }
 
-// A declarer that refuses one position of the chain.
+// A declarer that refuses one position of the chain and logs what was asked, in order.
 struct FakeDeclarer {
-    enum class Refuse { Nothing, Reset, Cull, Draw };
+    enum class Refuse { Nothing, Begin, Reset, Cull, Draw, Build };
     Refuse refuse = Refuse::Nothing;
-    int calls = 0;
+    std::size_t refusePart = 0;
+    std::uint32_t refuseRound = 0;
+    std::string log;
 
-    bool Reset()
+    bool Hit(Refuse at, std::size_t part, std::uint32_t round) const
     {
-        ++calls;
-        return refuse != Refuse::Reset;
+        return refuse == at && refusePart == part && refuseRound == round;
     }
-    bool Cull()
+    bool Begin(std::size_t part)
     {
-        ++calls;
-        return refuse != Refuse::Cull;
+        log += "B" + std::to_string(part) + " ";
+        return !Hit(Refuse::Begin, part, refuseRound);
     }
-    bool Draw()
+    bool Reset(std::size_t part, std::uint32_t round)
     {
-        ++calls;
-        return refuse != Refuse::Draw;
+        log += "R" + std::to_string(part) + "." + std::to_string(round) + " ";
+        return !Hit(Refuse::Reset, part, round);
+    }
+    bool Cull(std::size_t part, std::uint32_t round)
+    {
+        log += "C" + std::to_string(part) + "." + std::to_string(round) + " ";
+        return !Hit(Refuse::Cull, part, round);
+    }
+    bool Draw(std::size_t part, std::uint32_t round)
+    {
+        log += "D" + std::to_string(part) + "." + std::to_string(round) + " ";
+        return !Hit(Refuse::Draw, part, round);
+    }
+    bool Build()
+    {
+        log += "P ";
+        return refuse != Refuse::Build;
     }
 };
 
-TEST(ClusterPartPlanningTest, AChainStopsAtTheFirstRefusal)
+TEST(ClusterPartPlanningTest, AProgressStepMapsToTheClaimRule)
+{
+    EXPECT_EQ(ClusterProgressOf(ClusterStep::None, false), ClusterChainProgress::None);
+    EXPECT_EQ(ClusterProgressOf(ClusterStep::Reset1, false), ClusterChainProgress::Reset);
+    EXPECT_EQ(ClusterProgressOf(ClusterStep::Cull1, false), ClusterChainProgress::Cull);
+    EXPECT_EQ(ClusterProgressOf(ClusterStep::Draw1, false), ClusterChainProgress::Draw);
+    // A two-phase chain is claimable only after its last step.
+    for (const ClusterStep step : { ClusterStep::Draw1, ClusterStep::Reset2, ClusterStep::Cull2 }) {
+        EXPECT_NE(ClusterProgressOf(step, true), ClusterChainProgress::Draw);
+    }
+    EXPECT_EQ(ClusterProgressOf(ClusterStep::Draw2, true), ClusterChainProgress::Draw);
+}
+
+TEST(ClusterPartPlanningTest, ASinglePhaseChainStopsAtTheFirstRefusal)
 {
     struct Case {
         FakeDeclarer::Refuse refuse;
-        ClusterChainProgress progress;
-        int calls;
+        ClusterStep step;
+        const char* log;
     };
     const Case cases[] = {
-        { FakeDeclarer::Refuse::Reset, ClusterChainProgress::None, 1 },
-        { FakeDeclarer::Refuse::Cull, ClusterChainProgress::Reset, 2 },
-        { FakeDeclarer::Refuse::Draw, ClusterChainProgress::Cull, 3 },
-        { FakeDeclarer::Refuse::Nothing, ClusterChainProgress::Draw, 3 },
+        { FakeDeclarer::Refuse::Begin, ClusterStep::None, "B0 " },
+        { FakeDeclarer::Refuse::Reset, ClusterStep::None, "B0 R0.0 " },
+        { FakeDeclarer::Refuse::Cull, ClusterStep::Reset1, "B0 R0.0 C0.0 " },
+        { FakeDeclarer::Refuse::Draw, ClusterStep::Cull1, "B0 R0.0 C0.0 D0.0 " },
+        { FakeDeclarer::Refuse::Nothing, ClusterStep::Draw1, "B0 R0.0 C0.0 D0.0 " },
     };
     for (const Case& c : cases) {
         FakeDeclarer declarer;
         declarer.refuse = c.refuse;
-        EXPECT_EQ(RecordClusterChain(declarer), c.progress);
-        EXPECT_EQ(declarer.calls, c.calls);
+        const std::vector<ClusterStep> steps = RecordClusterRounds(declarer, 1, false);
+        ASSERT_EQ(steps.size(), 1u);
+        EXPECT_EQ(steps[0], c.step);
+        EXPECT_EQ(declarer.log, c.log);
     }
+}
+
+TEST(ClusterPartPlanningTest, ATwoPhaseChainRunsRoundOneOfAllPartsThenTheBuildThenRoundTwo)
+{
+    FakeDeclarer declarer;
+    const std::vector<ClusterStep> steps = RecordClusterRounds(declarer, 2, true);
+    EXPECT_EQ(declarer.log, "B0 R0.0 C0.0 D0.0 B1 R1.0 C1.0 D1.0 P R0.1 C0.1 D0.1 R1.1 C1.1 D1.1 ");
+    EXPECT_EQ(steps, (std::vector<ClusterStep>{ ClusterStep::Draw2, ClusterStep::Draw2 }));
+}
+
+TEST(ClusterPartPlanningTest, ARefusedBuildSkipsRoundTwoAndLeavesEveryPartUnclaimable)
+{
+    FakeDeclarer declarer;
+    declarer.refuse = FakeDeclarer::Refuse::Build;
+    const std::vector<ClusterStep> steps = RecordClusterRounds(declarer, 2, true);
+    EXPECT_EQ(declarer.log, "B0 R0.0 C0.0 D0.0 B1 R1.0 C1.0 D1.0 P ");
+    for (const ClusterStep step : steps) {
+        EXPECT_EQ(step, ClusterStep::Draw1);
+        EXPECT_NE(ClusterProgressOf(step, true), ClusterChainProgress::Draw);
+    }
+}
+
+TEST(ClusterPartPlanningTest, NoBuildRunsWhenNoPartFinishedRoundOneOrTheChainIsSinglePhase)
+{
+    FakeDeclarer refusedDraw;
+    refusedDraw.refuse = FakeDeclarer::Refuse::Draw;
+    RecordClusterRounds(refusedDraw, 1, true);
+    EXPECT_EQ(refusedDraw.log.find('P'), std::string::npos);
+
+    FakeDeclarer single;
+    RecordClusterRounds(single, 2, false);
+    EXPECT_EQ(single.log.find('P'), std::string::npos);
+    EXPECT_EQ(single.log.find(".1"), std::string::npos);
+}
+
+TEST(ClusterPartPlanningTest, ARefusalInOnePartNeverStopsTheOthers)
+{
+    FakeDeclarer roundOne;
+    roundOne.refuse = FakeDeclarer::Refuse::Cull;
+    roundOne.refusePart = 0;
+    roundOne.refuseRound = 0;
+    EXPECT_EQ(RecordClusterRounds(roundOne, 2, true), (std::vector<ClusterStep>{ ClusterStep::Reset1, ClusterStep::Draw2 }));
+    EXPECT_EQ(roundOne.log.find("R0.1"), std::string::npos);
+
+    FakeDeclarer roundTwo;
+    roundTwo.refuse = FakeDeclarer::Refuse::Draw;
+    roundTwo.refusePart = 0;
+    roundTwo.refuseRound = 1;
+    EXPECT_EQ(RecordClusterRounds(roundTwo, 2, true), (std::vector<ClusterStep>{ ClusterStep::Cull2, ClusterStep::Draw2 }));
+
+    FakeDeclarer beginRefused;
+    beginRefused.refuse = FakeDeclarer::Refuse::Begin;
+    beginRefused.refusePart = 1;
+    EXPECT_EQ(RecordClusterRounds(beginRefused, 2, true), (std::vector<ClusterStep>{ ClusterStep::Draw2, ClusterStep::None }));
 }
 
 const std::array<Entity, 2> kPartA = { MakeEntity(1), MakeEntity(2) };
@@ -125,16 +214,16 @@ ClusterClaimContext GameContext()
     return context;
 }
 
-TEST(ClusterPartPlanningTest, ARefusalAtAnyPositionLeavesThatPartUnclaimed)
+TEST(ClusterPartPlanningTest, OnlyPartsWithEveryStepDeclaredAreClaimed)
 {
-    for (const FakeDeclarer::Refuse refuse :
-        { FakeDeclarer::Refuse::Reset, FakeDeclarer::Refuse::Cull, FakeDeclarer::Refuse::Draw }) {
-        const std::array<std::span<const Entity>, 2> parts = { std::span<const Entity>(kPartA), std::span<const Entity>(kPartB) };
-        const ClusterRecordOutcome outcome = RecordClusterParts(parts, GameContext(), [&](std::size_t index) {
-            FakeDeclarer declarer;
-            declarer.refuse = index == 0 ? refuse : FakeDeclarer::Refuse::Nothing;
-            return RecordClusterChain(declarer);
-        });
+    const std::array<std::span<const Entity>, 2> parts = { std::span<const Entity>(kPartA), std::span<const Entity>(kPartB) };
+    for (const bool twoPhase : { false, true }) {
+        const ClusterStep last = twoPhase ? ClusterStep::Draw2 : ClusterStep::Draw1;
+        const std::array<ClusterStep, 2> done = { last, last };
+        EXPECT_EQ(ClusterOutcomeOf(parts, GameContext(), done, twoPhase).claimed.size(), 3u);
+
+        const std::array<ClusterStep, 2> partial = { ClusterStep::Cull1, last };
+        const ClusterRecordOutcome outcome = ClusterOutcomeOf(parts, GameContext(), partial, twoPhase);
         ASSERT_EQ(outcome.claimed.size(), 1u);
         EXPECT_EQ(outcome.claimed[0], MakeEntity(3));
         EXPECT_NE(outcome.progress[0], ClusterChainProgress::Draw);
@@ -142,14 +231,13 @@ TEST(ClusterPartPlanningTest, ARefusalAtAnyPositionLeavesThatPartUnclaimed)
     }
 }
 
-TEST(ClusterPartPlanningTest, AnAcceptingDeclarerClaimsEveryPart)
+TEST(ClusterPartPlanningTest, AHalfFinishedTwoPhaseChainClaimsNothing)
 {
-    const std::array<std::span<const Entity>, 2> parts = { std::span<const Entity>(kPartA), std::span<const Entity>(kPartB) };
-    const ClusterRecordOutcome outcome = RecordClusterParts(parts, GameContext(), [](std::size_t) {
-        FakeDeclarer declarer;
-        return RecordClusterChain(declarer);
-    });
-    EXPECT_EQ(outcome.claimed.size(), 3u);
+    const std::array<std::span<const Entity>, 1> parts = { std::span<const Entity>(kPartA) };
+    for (const ClusterStep step : { ClusterStep::Draw1, ClusterStep::Reset2, ClusterStep::Cull2 }) {
+        const std::array<ClusterStep, 1> steps = { step };
+        EXPECT_TRUE(ClusterOutcomeOf(parts, GameContext(), steps, true).claimed.empty());
+    }
 }
 
 TEST(ClusterPartPlanningTest, ASharedScopeFrameClaimsNothing)
@@ -157,11 +245,8 @@ TEST(ClusterPartPlanningTest, ASharedScopeFrameClaimsNothing)
     ClusterClaimContext context;
     context.scope = rg::ViewScope::Shared;
     const std::array<std::span<const Entity>, 1> parts = { std::span<const Entity>(kPartA) };
-    const ClusterRecordOutcome outcome = RecordClusterParts(parts, context, [](std::size_t) {
-        FakeDeclarer declarer;
-        return RecordClusterChain(declarer);
-    });
-    EXPECT_TRUE(outcome.claimed.empty());
+    const std::array<ClusterStep, 1> steps = { ClusterStep::Draw1 };
+    EXPECT_TRUE(ClusterOutcomeOf(parts, context, steps, false).claimed.empty());
 }
 
 TEST(ClusterPartPlanningTest, AFrameWithACaptureArmedClaimsNothing)
@@ -169,15 +254,12 @@ TEST(ClusterPartPlanningTest, AFrameWithACaptureArmedClaimsNothing)
     ClusterClaimContext context = GameContext();
     context.captureArmed = true;
     const std::array<std::span<const Entity>, 1> parts = { std::span<const Entity>(kPartA) };
-    const ClusterRecordOutcome outcome = RecordClusterParts(parts, context, [](std::size_t) {
-        FakeDeclarer declarer;
-        return RecordClusterChain(declarer);
-    });
-    EXPECT_TRUE(outcome.claimed.empty());
+    const std::array<ClusterStep, 1> steps = { ClusterStep::Draw1 };
+    EXPECT_TRUE(ClusterOutcomeOf(parts, context, steps, false).claimed.empty());
 }
 
-// A declarer that also has the stats steps; each step can be refused.
-struct StatsFakeDeclarer : FakeDeclarer {
+// A declarer that has the stats steps; each step can be refused.
+struct StatsFakeDeclarer {
     enum class RefuseStats { Nothing, Clear, Compute, Copy };
     RefuseStats refuseStats = RefuseStats::Nothing;
     int statsCalls = 0;
@@ -199,44 +281,16 @@ struct StatsFakeDeclarer : FakeDeclarer {
     }
 };
 
-TEST(ClusterPartPlanningTest, AStatsRefusalDoesNotRemoveTheClaim)
-{
-    for (const StatsFakeDeclarer::RefuseStats refuse :
-        { StatsFakeDeclarer::RefuseStats::Clear, StatsFakeDeclarer::RefuseStats::Compute,
-            StatsFakeDeclarer::RefuseStats::Copy }) {
-        const std::array<std::span<const Entity>, 2> parts = { std::span<const Entity>(kPartA), std::span<const Entity>(kPartB) };
-        const ClusterRecordOutcome outcome = RecordClusterParts(parts, GameContext(), [&](std::size_t) {
-            StatsFakeDeclarer declarer;
-            declarer.refuseStats = refuse;
-            return RecordClusterPart(declarer, true);
-        });
-        EXPECT_EQ(outcome.claimed.size(), 3u);
-        EXPECT_EQ(outcome.progress[0], ClusterChainProgress::Draw);
-    }
-}
-
-TEST(ClusterPartPlanningTest, StatsRunOnlyAfterADeclaredDrawAndOnlyWhenWanted)
-{
-    StatsFakeDeclarer wanted;
-    EXPECT_EQ(RecordClusterPart(wanted, true), ClusterChainProgress::Draw);
-    EXPECT_EQ(wanted.statsCalls, 3);
-
-    StatsFakeDeclarer notWanted;
-    EXPECT_EQ(RecordClusterPart(notWanted, false), ClusterChainProgress::Draw);
-    EXPECT_EQ(notWanted.statsCalls, 0);
-
-    StatsFakeDeclarer drawRefused;
-    drawRefused.refuse = FakeDeclarer::Refuse::Draw;
-    EXPECT_EQ(RecordClusterPart(drawRefused, true), ClusterChainProgress::Cull);
-    EXPECT_EQ(drawRefused.statsCalls, 0);
-}
-
 TEST(ClusterPartPlanningTest, StatsStopAtTheFirstRefusedStep)
 {
     StatsFakeDeclarer declarer;
     declarer.refuseStats = StatsFakeDeclarer::RefuseStats::Clear;
     EXPECT_FALSE(RecordClusterStats(declarer));
     EXPECT_EQ(declarer.statsCalls, 1);
+
+    StatsFakeDeclarer all;
+    EXPECT_TRUE(RecordClusterStats(all));
+    EXPECT_EQ(all.statsCalls, 3);
 }
 
 TEST(ClusterPartPlanningTest, StatsAreNeverWantedForADepthOnlyTargetOrALaterLane)
@@ -245,6 +299,16 @@ TEST(ClusterPartPlanningTest, StatsAreNeverWantedForADepthOnlyTargetOrALaterLane
     EXPECT_FALSE(ClusterStatsWanted(true, true, 0));
     EXPECT_FALSE(ClusterStatsWanted(true, false, 1));
     EXPECT_FALSE(ClusterStatsWanted(false, false, 0));
+}
+
+TEST(ClusterPartPlanningTest, HistoryIsTrustedOnlyWhenThePreviousFrameWroteItForTheSameContents)
+{
+    const ClusterHistoryRecord record{ 77, 10, true };
+    EXPECT_TRUE(ClusterHistoryUsable(record, 77, 11));
+    EXPECT_FALSE(ClusterHistoryUsable(record, 78, 11)); // Other mesh, instances or buffer.
+    EXPECT_FALSE(ClusterHistoryUsable(record, 77, 10)); // Written this frame already.
+    EXPECT_FALSE(ClusterHistoryUsable(record, 77, 12)); // A frame was skipped.
+    EXPECT_FALSE(ClusterHistoryUsable(ClusterHistoryRecord{}, 0, 1)); // Never written or dropped.
 }
 
 TEST(ClusterPartPlanningTest, VisibleCountsSumTheValidCellsAndKeepTheOldestFrame)
