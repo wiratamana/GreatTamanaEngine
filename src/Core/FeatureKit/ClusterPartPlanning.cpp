@@ -60,4 +60,22 @@ ClusterVisibleCount SumClusterCounts(std::span<const ClusterCountSample> samples
     return total;
 }
 
+ClusterReasonCounts SumClusterReasons(std::span<const ClusterReasonSample> samples) noexcept
+{
+    ClusterReasonCounts total;
+    for (const ClusterReasonSample& sample : samples) {
+        if (!sample.valid) {
+            continue;
+        }
+        total.frustum += sample.words.reasons[kClusterReasonFrustum];
+        total.cone += sample.words.reasons[kClusterReasonCone];
+        total.pyramid += sample.words.reasons[kClusterReasonPyramid];
+        total.history += sample.words.reasons[kClusterReasonHistory];
+        total.kept += sample.words.reasons[kClusterReasonKept];
+        total.frame = total.valid ? std::min(total.frame, sample.frame) : sample.frame;
+        total.valid = true;
+    }
+    return total;
+}
+
 } // namespace gte::fx

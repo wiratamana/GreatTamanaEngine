@@ -150,4 +150,22 @@ struct ClusterVisibleCount {
     bool valid = false;
 };
 
+// One readback cell of a part slot: the survivor count and the outcome counters (kClusterReason* slots).
+struct ClusterStatsWords {
+    std::uint32_t visible = 0;
+    std::uint32_t reasons[kClusterReasonWords] = {};
+};
+static_assert(sizeof(ClusterStatsWords) == kClusterCountBytes, "a readback cell mirrors the count buffer layout");
+
+// Items by outcome, summed over the parts of a chain. Zero unless the cull passes collected reasons.
+struct ClusterReasonCounts {
+    std::uint32_t frustum = 0; // Rejected by the frustum test.
+    std::uint32_t cone = 0;    // Rejected by the back-face cone test.
+    std::uint32_t pyramid = 0; // Rejected by the occlusion test.
+    std::uint32_t history = 0; // Drawn by the first phase from last frame's history.
+    std::uint32_t kept = 0;    // Passed every enabled test.
+    std::uint64_t frame = 0;   // Oldest frame among the cells that were summed.
+    bool valid = false;
+};
+
 } // namespace gte::fx

@@ -141,7 +141,7 @@ ClusterDrawState::ClusterDrawState(std::string_view baseName, ClusterDrawShape s
         const std::string suffix = ".P" + std::to_string(slot);
         m_instances.push_back(std::make_unique<PersistentBuffer>(m_base + ".Instances" + suffix, kInstanceUse));
         m_history.push_back(std::make_unique<PersistentBuffer>(m_base + ".History" + suffix, kHistoryUse));
-        m_stats.push_back(std::make_unique<GpuReadback<std::uint32_t>>(m_base + ".Stats" + suffix));
+        m_stats.push_back(std::make_unique<GpuReadback<ClusterStatsWords>>(m_base + ".Stats" + suffix));
     }
     for (std::uint32_t lane = 0; lane < m_shape.lanes; ++lane) {
         for (std::uint32_t slot = 0; slot < m_shape.partSlots; ++slot) {
@@ -210,7 +210,7 @@ PersistentBuffer* ClusterDrawState::Count(std::uint32_t lane, std::uint32_t slot
     return InRange(lane, slot) ? m_count[ChainIndex(0, lane, slot)].get() : nullptr;
 }
 
-GpuReadback<std::uint32_t>* ClusterDrawState::Stats(std::uint32_t slot) noexcept
+GpuReadback<ClusterStatsWords>* ClusterDrawState::Stats(std::uint32_t slot) noexcept
 {
     return InRange(0, slot) ? m_stats[slot].get() : nullptr;
 }
@@ -289,10 +289,25 @@ ClusterVisibleCount ClusterDrawState::VisibleClusters(const Frame& frame) const
     samples.reserve(m_stats.size());
     for (const auto& readback : m_stats) {
         if (const auto latest = readback->Latest(frame)) {
-            samples.push_back(ClusterCountSample{ true, latest->value, latest->frame });
+            samples.push_back(ClusterCountSample{ true, latest->value.visible, latest->frame });
         }
     }
     return SumClusterCounts(samples);
+}
+
+ClusterReasonCounts ClusterDrawState::ReasonCounts(const Frame& frame) const
+{
+    if (!Valid()) {
+        return ClusterReasonCounts{};
+    }
+    std::vector<ClusterReasonSample> samples;
+    samples.reserve(m_stats.size());
+    for (const auto& readback : m_stats) {
+        if (const auto latest = readback->Latest(frame)) {
+            samples.push_back(ClusterReasonSample{ true, latest->value, latest->frame });
+        }
+    }
+    return SumClusterReasons(samples);
 }
 
 bool ClusterDrawState::AcceptCandidateSpan(

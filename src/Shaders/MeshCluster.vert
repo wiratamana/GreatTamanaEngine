@@ -5,7 +5,7 @@
 
 #include "ClusterDrawBuffers.glsl"
 
-// Same 128-byte block as every pipeline; only viewProj is read here.
+// Same 128-byte block as every pipeline; viewProj is read here and the first word of `model` is the draw tag.
 layout(push_constant) uniform PushConstants {
     mat4 model;
     mat4 viewProj;
@@ -17,6 +17,7 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 0) out vec3 outWorldNormal;
 layout(location = 1) out vec3 outWorldPos;
 layout(location = 2) flat out uint outClusterId;
+layout(location = 3) flat out uint outDrawTag;
 
 invariant gl_Position;
 
@@ -30,4 +31,5 @@ void main()
     // mat3(model) is only exact for uniform scale (no inverse-transpose).
     outWorldNormal = mat3(model) * inNormal;
     outClusterId = entry.y;
+    outDrawTag = floatBitsToUint(pc.model[0][0]);
 }

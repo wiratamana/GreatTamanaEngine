@@ -54,8 +54,19 @@ constexpr UintRow kUintRows[] = {
     { "kClusterCullFlagPhaseSecond", kClusterCullFlagPhaseSecond },
     { "kClusterCullFlagHistoryValid", kClusterCullFlagHistoryValid },
     { "kClusterCullFlagRawDepth", kClusterCullFlagRawDepth },
+    { "kClusterCullFlagCollectReasons", kClusterCullFlagCollectReasons },
     { "kClusterHistoryVisible", kClusterHistoryVisible },
     { "kClusterHistoryDrawnFirst", kClusterHistoryDrawnFirst },
+    { "kClusterReasonFrustum", kClusterReasonFrustum },
+    { "kClusterReasonCone", kClusterReasonCone },
+    { "kClusterReasonPyramid", kClusterReasonPyramid },
+    { "kClusterReasonHistory", kClusterReasonHistory },
+    { "kClusterReasonKept", kClusterReasonKept },
+    { "kClusterReasonWords", kClusterReasonWords },
+    { "kClusterDrawTagFirst", kClusterDrawTagFirst },
+    { "kClusterDrawTagSecond", kClusterDrawTagSecond },
+    { "kClusterDrawTagPhaseMask", kClusterDrawTagPhaseMask },
+    { "kClusterDrawTagPhaseView", kClusterDrawTagPhaseView },
     { "kHizMaxLevels", kHizMaxLevels },
     { "kHizTopFirstLevel", kHizTopFirstLevel },
 };
@@ -221,11 +232,50 @@ TEST(ClusterShaderText, StatsShaderSumsTwoLanesBehindAPushFlag)
 {
     const std::string text = ReadTextFile((std::string(GTE_TEST_SHADERS_DIR) + "/ClusterCullStats.comp").c_str());
     ASSERT_FALSE(text.empty());
+    EXPECT_TRUE(Contains(text, "#include \"ClusterCullConstants.glsl\""));
     EXPECT_TRUE(Contains(text, "layout(std430, binding = 0) readonly buffer CountBlock {"));
     EXPECT_TRUE(Contains(text, "layout(std430, binding = 1) writeonly buffer OutCountBlock {"));
     EXPECT_TRUE(Contains(text, "layout(std430, binding = 2) readonly buffer SecondCountBlock {"));
     EXPECT_TRUE(Contains(text, "uint sumSecond;"));
-    EXPECT_TRUE(Contains(text, "count.value + (pc.sumSecond != 0u ? secondCount.value : 0u)"));
+    EXPECT_TRUE(Contains(text, "count.value + (both ? secondCount.value : 0u)"));
+    EXPECT_TRUE(Contains(text, "count.reasons[i] + (both ? secondCount.reasons[i] : 0u)"));
+}
+
+TEST(ClusterShaderText, CountBlockCarriesTheReasonCountersBehindTheSurvivorCount)
+{
+    const std::string text = ReadShader();
+    const std::size_t block = text.find("layout(std430, binding = 5) buffer CountBlock {");
+    ASSERT_NE(block, std::string::npos);
+    const std::size_t value = text.find("uint value;", block);
+    const std::size_t reasons = text.find("uint reasons[kClusterReasonWords];", block);
+    ASSERT_NE(value, std::string::npos);
+    ASSERT_NE(reasons, std::string::npos);
+    EXPECT_LT(value, reasons);
+    // The same layout as one readback cell: the survivor count, then the counters.
+    EXPECT_EQ(kClusterCountBytes, sizeof(std::uint32_t) * (1 + kClusterReasonWords));
+    EXPECT_LE(kClusterReasonKept, kClusterReasonWords - 1);
+    // Counters run only when asked for and only through atomics.
+    EXPECT_TRUE(Contains(text, "bool collect = (cullFlags & kClusterCullFlagCollectReasons) != 0u;"));
+    EXPECT_TRUE(Contains(text, "atomicAdd(count.reasons[kClusterReasonHistory], 1u);"));
+    EXPECT_TRUE(Contains(text, "atomicAdd(count.reasons[ReasonSlot(outside, coneCulled, occluded)], 1u);"));
+}
+
+TEST(ClusterShaderText, TintShadersReadTheDrawTagTheVertexShadersForward)
+{
+    const auto source = [](const char* name) {
+        return ReadTextFile((std::string(GTE_TEST_SHADERS_DIR) + "/" + name).c_str());
+    };
+    EXPECT_TRUE(Contains(source("MeshCluster.vert"), "layout(location = 3) flat out uint outDrawTag;"));
+    EXPECT_TRUE(Contains(source("MeshClusterTint.frag"), "layout(location = 3) flat in uint inDrawTag;"));
+    for (const char* name : { "MeshClusterUv.vert", "MeshClusterTangent.vert" }) {
+        const std::string vert = source(name);
+        EXPECT_TRUE(Contains(vert, "layout(location = 6) flat out uint outDrawTag;")) << name;
+        EXPECT_TRUE(Contains(vert, "outDrawTag = floatBitsToUint(pc.model[0][0]);")) << name;
+    }
+    EXPECT_TRUE(Contains(source("MeshClusterTintSurface.frag"), "layout(location = 6) flat in uint inDrawTag;"));
+    const std::string tint = source("ClusterTint.glsl");
+    EXPECT_TRUE(Contains(tint, "#include \"ClusterCullConstants.glsl\""));
+    EXPECT_TRUE(Contains(tint, "(drawTag & kClusterDrawTagPhaseView) == 0u"));
 }
 
 TEST(ClusterShaderText, HizBuildBaseShaderPushBlockAndBindings)

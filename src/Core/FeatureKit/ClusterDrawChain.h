@@ -50,11 +50,12 @@ public:
     ClusterDrawChain& Target(Texture sceneTarget);
     ClusterDrawChain& DepthOnlyTarget(Texture depth);
 
-    // Colors each cluster by its id (debug view).
-    ClusterDrawChain& IdTint(bool enabled);
+    // Colors each cluster by its id (debug view). With `byPhase` it colors by draw phase instead: red for the first
+    // phase, green for the second, gray for a single-phase chain.
+    ClusterDrawChain& IdTint(bool enabled, bool byPhase = false);
 
-    // Reads the survivor count back (colour target, first lane only). See ClusterDrawState::VisibleClusters().
-    // A refused stats pass never takes a claim away.
+    // Reads the survivor count and the outcome counters back (colour target, first lane only). See
+    // ClusterDrawState::VisibleClusters() and ReasonCounts(). A refused stats pass never takes a claim away.
     ClusterDrawChain& Stats(bool enabled);
 
     // Resolves and reserves everything and declares nothing. Idempotent.

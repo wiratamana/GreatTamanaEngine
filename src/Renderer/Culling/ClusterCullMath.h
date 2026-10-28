@@ -64,6 +64,9 @@ inline constexpr std::uint64_t kClusterCommandBytes = 20;
 inline constexpr std::uint64_t kClusterVisibleBytes = 8;
 inline constexpr std::uint64_t kClusterHistoryBytes = 4;
 
+// A lane's count buffer: the survivor count, then kClusterReasonWords outcome counters.
+inline constexpr std::uint64_t kClusterCountBytes = sizeof(std::uint32_t) * (1 + kClusterReasonWords);
+
 // Which clusters are tested, and in which phase of a two-phase chain the dispatch runs.
 enum class ClusterCullFlags : std::uint32_t {
     None = 0,
@@ -73,6 +76,7 @@ enum class ClusterCullFlags : std::uint32_t {
     PhaseFirst = kClusterCullFlagPhaseFirst,
     PhaseSecond = kClusterCullFlagPhaseSecond,
     HistoryValid = kClusterCullFlagHistoryValid,
+    CollectReasons = kClusterCullFlagCollectReasons,
 };
 
 constexpr ClusterCullFlags operator|(ClusterCullFlags a, ClusterCullFlags b) noexcept
@@ -257,6 +261,28 @@ constexpr ClusterPhaseResult ClusterPhaseSecond(std::uint32_t word, bool inView,
     return { visible && (word & kClusterHistoryDrawnFirst) == 0, visible ? kClusterHistoryVisible : 0u };
 }
 
+// Outcome counter an item adds to. Values equal the kClusterReason* slots.
+enum class ClusterReason : std::uint32_t {
+    Frustum = kClusterReasonFrustum,
+    Cone = kClusterReasonCone,
+    Pyramid = kClusterReasonPyramid,
+    History = kClusterReasonHistory,
+    Kept = kClusterReasonKept,
+};
+
+// Final outcome of an item: the first failing test (frustum, cone, occlusion), else Kept. The shader counts it in
+// the second phase and in a single-phase chain; the first phase counts only History (see ClusterPhaseFirst).
+constexpr ClusterReason ClusterReasonOf(bool outsideFrustum, bool coneCulled, bool occluded) noexcept
+{
+    if (outsideFrustum) {
+        return ClusterReason::Frustum;
+    }
+    if (coneCulled) {
+        return ClusterReason::Cone;
+    }
+    return occluded ? ClusterReason::Pyramid : ClusterReason::Kept;
+}
+
 // Identity of a history buffer's contents. Any change of mesh, cluster count, instance order or buffer
 // generation gives another key, so stale history is never trusted.
 std::uint64_t ClusterHistoryKey(std::uint64_t meshToken, std::uint32_t clusterCount,
@@ -374,6 +400,16 @@ constexpr std::size_t ClusterPipelineCacheIndex(const ClusterPipelineKey& key) n
     const std::size_t variantAndKind =
         static_cast<std::size_t>(key.variant) * kClusterMaterialKindCount + static_cast<std::size_t>(key.material);
     return variantAndKind * 2 + (key.cullBackFaces ? 1 : 0);
+}
+
+// Draw tag of one round: 0 for the id tint, else the phase tint view with the round's phase (none for a single round).
+constexpr std::uint32_t ClusterDrawTagFor(bool phaseTint, bool twoRounds, std::uint32_t round) noexcept
+{
+    if (!phaseTint) {
+        return 0;
+    }
+    const std::uint32_t phase = !twoRounds ? 0u : (round == 0 ? kClusterDrawTagFirst : kClusterDrawTagSecond);
+    return kClusterDrawTagPhaseView | phase;
 }
 
 // The cone test is dropped for a depth-only lane, which draws both sides.

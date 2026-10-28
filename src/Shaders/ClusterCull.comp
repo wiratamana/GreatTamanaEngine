@@ -51,9 +51,11 @@ layout(std430, binding = 4) writeonly buffer CommandsBlock {
     uint values[];
 } commands;
 
-// Atomic counter: the host zeroes it before the dispatch.
+// Atomic counters: the host zeroes them before the dispatch. `reasons` counts item outcomes (kClusterReason*) only
+// when kClusterCullFlagCollectReasons is set.
 layout(std430, binding = 5) buffer CountBlock {
     uint value;
+    uint reasons[kClusterReasonWords];
 } count;
 
 // One 32-bit word per work item: bit 0 = visible last frame, bit 1 = drawn in the first phase of this frame.
@@ -190,6 +192,18 @@ bool Occluded(Cluster cluster, mat4 world)
     return IsBehind(nearestW, nearestZ, farthest);
 }
 
+// Counter slot of an item's final outcome. Mirrors ClusterReasonOf.
+uint ReasonSlot(bool outside, bool coneCulled, bool occluded)
+{
+    if (outside) {
+        return kClusterReasonFrustum;
+    }
+    if (coneCulled) {
+        return kClusterReasonCone;
+    }
+    return occluded ? kClusterReasonPyramid : kClusterReasonKept;
+}
+
 void main()
 {
     uint id = gl_GlobalInvocationID.x;
@@ -206,9 +220,11 @@ void main()
     uint cullFlags = params.value.counts.w;
 
     // Evaluated once so both phases agree on the result.
-    bool inView = !((cullFlags & kClusterCullFlagFrustum) != 0u && OutsideFrustum(cluster, instance.world))
-        && !((cullFlags & kClusterCullFlagBackfaceCone) != 0u
-            && BackfaceConeCulled(cluster, instance.world, instance.info.x, uintBitsToFloat(instance.info.y)));
+    bool outside = (cullFlags & kClusterCullFlagFrustum) != 0u && OutsideFrustum(cluster, instance.world);
+    bool coneCulled = !outside && (cullFlags & kClusterCullFlagBackfaceCone) != 0u
+        && BackfaceConeCulled(cluster, instance.world, instance.info.x, uintBitsToFloat(instance.info.y));
+    bool inView = !outside && !coneCulled;
+    bool collect = (cullFlags & kClusterCullFlagCollectReasons) != 0u;
 
     if ((cullFlags & kClusterCullFlagPhaseFirst) != 0u) {
         uint word = (cullFlags & kClusterCullFlagHistoryValid) != 0u ? history.items[id] : 0u;
@@ -217,18 +233,26 @@ void main()
         if (!drawn) {
             return;
         }
+        if (collect) {
+            atomicAdd(count.reasons[kClusterReasonHistory], 1u);
+        }
     } else if ((cullFlags & kClusterCullFlagPhaseSecond) != 0u) {
-        bool isVisible = inView && !Occluded(cluster, instance.world);
+        bool occluded = inView && Occluded(cluster, instance.world);
+        bool isVisible = inView && !occluded;
         uint word = history.items[id];
         history.items[id] = isVisible ? kClusterHistoryVisible : 0u;
+        if (collect) {
+            atomicAdd(count.reasons[ReasonSlot(outside, coneCulled, occluded)], 1u);
+        }
         if (!isVisible || (word & kClusterHistoryDrawnFirst) != 0u) {
             return;
         }
     } else {
-        if (!inView) {
-            return;
+        bool occluded = inView && (cullFlags & kClusterCullFlagOcclusion) != 0u && Occluded(cluster, instance.world);
+        if (collect) {
+            atomicAdd(count.reasons[ReasonSlot(outside, coneCulled, occluded)], 1u);
         }
-        if ((cullFlags & kClusterCullFlagOcclusion) != 0u && Occluded(cluster, instance.world)) {
+        if (!inView || occluded) {
             return;
         }
     }

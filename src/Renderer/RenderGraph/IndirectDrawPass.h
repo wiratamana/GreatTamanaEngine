@@ -37,6 +37,7 @@ struct IndirectDrawRecord {
 // What the execute side needs besides the record; resolved by the caller each frame.
 // The set at `clusterBindingIndex` is rewritten from the record's `visible` and `instances` buffers right
 // before the draw. `materialSet` is bound at set 0 and required exactly when the pipeline has a material set.
+// `drawTag` is an opaque per-draw word the vertex shader can read (see ClusterTint.glsl).
 struct IndirectDrawInputs {
     const Pipeline* pipeline = nullptr;
     const Mesh* mesh = nullptr;
@@ -45,6 +46,7 @@ struct IndirectDrawInputs {
     Mat4 viewProjection = Mat4::Identity();
     ClusterDrawBindings* clusterBindings = nullptr;
     std::size_t clusterBindingIndex = 0;
+    std::uint32_t drawTag = 0;
 };
 
 // Why the record cannot be declared, or nullopt.

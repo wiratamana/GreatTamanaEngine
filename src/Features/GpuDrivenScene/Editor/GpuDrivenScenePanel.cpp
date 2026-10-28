@@ -21,7 +21,8 @@ void DrawLine(const std::string& line)
     }
 }
 
-void DrawViewInfo(const char* label, const GpuDrivenSceneSettings& s, const GpuDrivenSceneViewSnapshot& v, bool secondary)
+void DrawViewInfo(const char* label, const GpuDrivenSceneSettings& s, const GpuDrivenSceneViewSnapshot& v, bool secondary,
+    const CullTimeSplit& time)
 {
     ImGui::PushID(label);
     ImGui::SeparatorText(label);
@@ -30,13 +31,19 @@ void DrawViewInfo(const char* label, const GpuDrivenSceneSettings& s, const GpuD
         ImGui::PopID();
         return;
     }
+    DrawLine(CullTimeLine(time));
     DrawLine(CullCameraLine(s, v));
     DrawLine(CpuPathLine(v));
     DrawLine(CpuCullStateLine(v));
     DrawLine(GpuPathLine(v));
     DrawLine(CpuReasonsLine(v));
-    if (s.mode == CullMode::HiZ) {
+    if (s.mode == GpuCullMode::HiZ) {
         DrawLine(HizLine(v, secondary));
+    }
+    DrawLine(ReasonsLine(v));
+    const std::string inert = InertLine(s, v);
+    if (!inert.empty()) {
+        ImGui::TextColored(kWarnColor, "%s", inert.c_str());
     }
     const std::string_view noGpu = NoGpuPathLine(s, v);
     if (!noGpu.empty()) {
@@ -49,7 +56,7 @@ void DrawViewInfo(const char* label, const GpuDrivenSceneSettings& s, const GpuD
     ImGui::PopID();
 }
 
-bool DrawModeCombo(CullMode& current)
+bool DrawModeCombo(GpuCullMode& current)
 {
     bool changed = false;
     const std::string currentName(fx::EnumName(kCullModeTable, current));
@@ -86,8 +93,8 @@ bool DrawDebugViewCombo(GpuDrivenSceneDebugView& current)
 
 } // namespace
 
-bool BuildGpuDrivenScenePanel(GpuDrivenSceneSettings& edit, bool supported,
-    const GpuDrivenSceneViewSnapshot& game, const GpuDrivenSceneViewSnapshot& scene)
+bool BuildGpuDrivenScenePanel(GpuDrivenSceneSettings& edit, bool supported, const GpuDrivenSceneViewSnapshot& game,
+    const GpuDrivenSceneViewSnapshot& scene, const CullTimeSplits& times)
 {
     bool changed = false;
 
@@ -99,8 +106,8 @@ bool BuildGpuDrivenScenePanel(GpuDrivenSceneSettings& edit, bool supported,
     ImGui::TextWrapped("%.*s", static_cast<int>(help.size()), help.data());
     ImGui::PopStyleColor();
 
-    DrawViewInfo("Game view", edit, game, false);
-    DrawViewInfo("Scene view", edit, scene, true);
+    DrawViewInfo("Game view", edit, game, false, times.primary);
+    DrawViewInfo("Scene view", edit, scene, true, times.secondary);
 
     if (ImGui::CollapsingHeader("Advanced")) {
         if (supported) {
@@ -116,7 +123,7 @@ bool BuildGpuDrivenScenePanel(GpuDrivenSceneSettings& edit, bool supported,
             ImGui::TextWrapped("%.*s", static_cast<int>(warning.size()), warning.data());
             ImGui::PopStyleColor();
         }
-        changed |= ImGui::Checkbox("Count visible clusters (extra passes)", &edit.collectStats);
+        changed |= ImGui::Checkbox("Count visible clusters and reasons (extra passes)", &edit.collectStats);
         changed |= DrawDebugViewCombo(edit.debugView);
     }
 

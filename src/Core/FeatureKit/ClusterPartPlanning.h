@@ -154,6 +154,16 @@ struct ClusterCountSample {
 // Sums the valid cells. Invalid when none is valid; `frame` is the oldest frame used.
 ClusterVisibleCount SumClusterCounts(std::span<const ClusterCountSample> samples) noexcept;
 
+// One readback cell of a part slot with its outcome counters.
+struct ClusterReasonSample {
+    bool valid = false;
+    ClusterStatsWords words;
+    std::uint64_t frame = 0;
+};
+
+// Sums the valid cells. Invalid when none is valid; `frame` is the oldest frame used.
+ClusterReasonCounts SumClusterReasons(std::span<const ClusterReasonSample> samples) noexcept;
+
 // What a part slot's history buffer was last written for.
 struct ClusterHistoryRecord {
     std::uint64_t key = 0;

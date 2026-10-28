@@ -364,6 +364,33 @@ TEST(ClusterPartPlanningTest, VisibleCountsAreInvalidWithoutAValidCell)
     EXPECT_FALSE(SumClusterCounts({}).valid);
 }
 
+TEST(ClusterPartPlanningTest, ReasonCountsSumTheValidCellsPerSlotOfTheCountBuffer)
+{
+    ClusterReasonSample a;
+    a.valid = true;
+    a.frame = 9;
+    a.words.reasons[kClusterReasonFrustum] = 4;
+    a.words.reasons[kClusterReasonCone] = 1;
+    a.words.reasons[kClusterReasonPyramid] = 2;
+    a.words.reasons[kClusterReasonHistory] = 3;
+    a.words.reasons[kClusterReasonKept] = 10;
+    ClusterReasonSample b = a;
+    b.frame = 8;
+    ClusterReasonSample stale;
+    stale.words.reasons[kClusterReasonKept] = 999; // Not valid: ignored.
+
+    const std::array<ClusterReasonSample, 3> samples = { a, stale, b };
+    const ClusterReasonCounts total = SumClusterReasons(samples);
+    EXPECT_TRUE(total.valid);
+    EXPECT_EQ(total.frustum, 8u);
+    EXPECT_EQ(total.cone, 2u);
+    EXPECT_EQ(total.pyramid, 4u);
+    EXPECT_EQ(total.history, 6u);
+    EXPECT_EQ(total.kept, 20u);
+    EXPECT_EQ(total.frame, 8u);
+    EXPECT_FALSE(SumClusterReasons({}).valid);
+}
+
 TEST(ClusterSurvivorTableTest, AnEntryServesOnlyTheFrameAndGraphItWasPublishedFor)
 {
     int graph = 0;

@@ -1,18 +1,24 @@
 #version 450
 
-// Copies the cluster cull survivor count into a readback buffer. With two lanes the result is the sum of both counts.
+// Copies the cluster cull survivor count and the outcome counters into a readback buffer. With two lanes the
+// result is the sum of both lanes.
+#include "ClusterCullConstants.glsl"
+
 layout(local_size_x = 1) in;
 
 layout(std430, binding = 0) readonly buffer CountBlock {
     uint value;
+    uint reasons[kClusterReasonWords];
 } count;
 
 layout(std430, binding = 1) writeonly buffer OutCountBlock {
     uint value;
+    uint reasons[kClusterReasonWords];
 } outCount;
 
 layout(std430, binding = 2) readonly buffer SecondCountBlock {
     uint value;
+    uint reasons[kClusterReasonWords];
 } secondCount;
 
 layout(push_constant) uniform Push {
@@ -21,5 +27,9 @@ layout(push_constant) uniform Push {
 
 void main()
 {
-    outCount.value = count.value + (pc.sumSecond != 0u ? secondCount.value : 0u);
+    bool both = pc.sumSecond != 0u;
+    outCount.value = count.value + (both ? secondCount.value : 0u);
+    for (uint i = 0u; i < kClusterReasonWords; ++i) {
+        outCount.reasons[i] = count.reasons[i] + (both ? secondCount.reasons[i] : 0u);
+    }
 }

@@ -72,6 +72,12 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDriv
     Add(out, key("cpuPath.tooFewInstances"), Count(g.cpuPath.tooFewInstances));
     Add(out, key("cpuPath.nonFinite"), Count(g.cpuPath.nonFinite));
     Add(out, key("cpuPath.noSlot"), Count(g.cpuPath.noSlot));
+    Add(out, key("reasons.valid"), g.reasons.valid);
+    Add(out, key("reasons.frustum"), Count(g.reasons.frustum));
+    Add(out, key("reasons.cone"), Count(g.reasons.cone));
+    Add(out, key("reasons.pyramid"), Count(g.reasons.pyramid));
+    Add(out, key("reasons.history"), Count(g.reasons.history));
+    Add(out, key("reasons.kept"), Count(g.reasons.kept));
 }
 
 fx::FeatureDebugResult Fail(std::string key, std::string message)

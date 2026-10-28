@@ -205,13 +205,13 @@ public:
 
     // Issues a counted indexed indirect draw (count taken from `countBuffer`, capped at `maxDrawCount`). Needs the
     // indirect-draw device features. Set 0 = `materialDescriptorSet` when the pipeline has a material set,
-    // set 1 = scene services when the pipeline has it, set 2 = `bufferDescriptorSet`.
+    // set 1 = scene services when the pipeline has it, set 2 = `bufferDescriptorSet`. `drawTag` reaches the vertex shader.
     void SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
         uint64_t indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset,
         DescriptorSetHandle bufferDescriptorSet,
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
         const Mat4& viewProjMatrix = Mat4::Identity(),
-        DescriptorSetHandle materialDescriptorSet = DescriptorSetHandle::Invalid);
+        DescriptorSetHandle materialDescriptorSet = DescriptorSetHandle::Invalid, std::uint32_t drawTag = 0);
 
     // Scene geometry pipeline. Builds against ScenePixelFormat().
     Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,

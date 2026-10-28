@@ -72,7 +72,8 @@ void ExecuteIndirectDraw(PassContext& ctx, const IndirectDrawRecord& record, con
 
     const SceneRecording recording(ctx);
     ctx.renderer->SubmitIndirect(*inputs.pipeline, *inputs.mesh, indirect, /*indirectOffset=*/0, record.maxDrawCount,
-        count, /*countBufferOffset=*/0, bufferSet, inputs.sceneSet, inputs.viewProjection, inputs.materialSet);
+        count, /*countBufferOffset=*/0, bufferSet, inputs.sceneSet, inputs.viewProjection, inputs.materialSet,
+        inputs.drawTag);
     if (ctx.recordIndirectDraw) {
         ctx.recordIndirectDraw();
     }

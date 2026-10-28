@@ -33,9 +33,9 @@ TEST(GpuDrivenSceneTypesTest, EveryEnumTableRoundTrips)
 
 TEST(GpuDrivenSceneTypesTest, CullModeNamesAreExact)
 {
-    EXPECT_EQ(fx::EnumName(kCullModeTable, CullMode::NoCull), "NoCull");
-    EXPECT_EQ(fx::EnumName(kCullModeTable, CullMode::Frustum), "Frustum");
-    EXPECT_EQ(fx::EnumName(kCullModeTable, CullMode::HiZ), "HiZ");
+    EXPECT_EQ(fx::EnumName(kCullModeTable, GpuCullMode::NoCull), "NoCull");
+    EXPECT_EQ(fx::EnumName(kCullModeTable, GpuCullMode::Frustum), "Frustum");
+    EXPECT_EQ(fx::EnumName(kCullModeTable, GpuCullMode::HiZ), "HiZ");
     EXPECT_EQ(kCullModeTable.size(), 3u);
 }
 
@@ -43,7 +43,7 @@ TEST(GpuDrivenSceneTypesTest, DefaultsCullWithTheFrustum)
 {
     const GpuDrivenSceneSettings s;
     EXPECT_TRUE(s.enabled);
-    EXPECT_EQ(s.mode, CullMode::Frustum);
+    EXPECT_EQ(s.mode, GpuCullMode::Frustum);
     EXPECT_FALSE(s.cone);
     EXPECT_FALSE(s.collectStats);
     EXPECT_EQ(s.debugView, GpuDrivenSceneDebugView::Off);
@@ -53,16 +53,16 @@ TEST(GpuDrivenSceneTypesTest, SanitizeResetsOutOfRangeEnums)
 {
     GpuDrivenSceneSettings s;
     s.debugView = static_cast<GpuDrivenSceneDebugView>(200);
-    s.mode = static_cast<CullMode>(200);
+    s.mode = static_cast<GpuCullMode>(200);
     const GpuDrivenSceneSettings clean = SanitizeGpuDrivenSceneSettings(s);
     EXPECT_EQ(clean.debugView, GpuDrivenSceneDebugView::Off);
-    EXPECT_EQ(clean.mode, CullMode::Frustum);
+    EXPECT_EQ(clean.mode, GpuCullMode::Frustum);
 
     s = GpuDrivenSceneSettings{};
     s.debugView = GpuDrivenSceneDebugView::ClusterId;
-    s.mode = CullMode::HiZ;
+    s.mode = GpuCullMode::HiZ;
     EXPECT_EQ(SanitizeGpuDrivenSceneSettings(s).debugView, GpuDrivenSceneDebugView::ClusterId);
-    EXPECT_EQ(SanitizeGpuDrivenSceneSettings(s).mode, CullMode::HiZ);
+    EXPECT_EQ(SanitizeGpuDrivenSceneSettings(s).mode, GpuCullMode::HiZ);
 }
 
 TEST(GpuDrivenSceneTypesTest, ResolveCullTestsPerModeAndCone)
@@ -71,19 +71,19 @@ TEST(GpuDrivenSceneTypesTest, ResolveCullTestsPerModeAndCone)
         GpuDrivenSceneSettings s;
         s.cone = cone;
 
-        s.mode = CullMode::NoCull;
+        s.mode = GpuCullMode::NoCull;
         ViewCullTests t = ResolveCullTests(s);
         EXPECT_FALSE(t.frustum);
         EXPECT_FALSE(t.cone);
         EXPECT_FALSE(t.occlusion);
 
-        s.mode = CullMode::Frustum;
+        s.mode = GpuCullMode::Frustum;
         t = ResolveCullTests(s);
         EXPECT_TRUE(t.frustum);
         EXPECT_EQ(t.cone, cone);
         EXPECT_FALSE(t.occlusion);
 
-        s.mode = CullMode::HiZ;
+        s.mode = GpuCullMode::HiZ;
         t = ResolveCullTests(s);
         EXPECT_TRUE(t.frustum);
         EXPECT_EQ(t.cone, cone);
@@ -94,7 +94,7 @@ TEST(GpuDrivenSceneTypesTest, ResolveCullTestsPerModeAndCone)
 TEST(GpuDrivenSceneTypesTest, OnlyThePrimaryViewWantsHiz)
 {
     GpuDrivenSceneSettings s;
-    s.mode = CullMode::HiZ;
+    s.mode = GpuCullMode::HiZ;
     EXPECT_TRUE(ViewWantsHiz(s, false));
     EXPECT_FALSE(ViewWantsHiz(s, true));
 
@@ -102,20 +102,20 @@ TEST(GpuDrivenSceneTypesTest, OnlyThePrimaryViewWantsHiz)
     EXPECT_FALSE(ViewWantsHiz(s, false));
 
     s.enabled = true;
-    s.mode = CullMode::Frustum;
+    s.mode = GpuCullMode::Frustum;
     EXPECT_FALSE(ViewWantsHiz(s, false));
-    s.mode = CullMode::NoCull;
+    s.mode = GpuCullMode::NoCull;
     EXPECT_FALSE(ViewWantsHiz(s, false));
 }
 
 TEST(GpuDrivenSceneTypesTest, ChooseCullCameraTable)
 {
-    for (const CullMode mode : { CullMode::NoCull, CullMode::Frustum, CullMode::HiZ }) {
+    for (const GpuCullMode mode : { GpuCullMode::NoCull, GpuCullMode::Frustum, GpuCullMode::HiZ }) {
         for (const bool secondary : { false, true }) {
             for (const bool primaryValid : { false, true }) {
                 for (const bool liveValid : { false, true }) {
                     const CullCameraSource source = ChooseCullCamera(secondary, mode, primaryValid, liveValid);
-                    if (mode == CullMode::NoCull) {
+                    if (mode == GpuCullMode::NoCull) {
                         EXPECT_EQ(source, CullCameraSource::None);
                     } else if (secondary) {
                         EXPECT_EQ(source, primaryValid ? CullCameraSource::Primary : CullCameraSource::None);
@@ -153,9 +153,9 @@ TEST(GpuDrivenSceneTypesTest, SettingKeysApplyOrReject)
 {
     GpuDrivenSceneSettings s;
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "mode", "HiZ"), GpuDrivenSceneSetResult::Applied);
-    EXPECT_EQ(s.mode, CullMode::HiZ);
+    EXPECT_EQ(s.mode, GpuCullMode::HiZ);
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "mode", "NoCull"), GpuDrivenSceneSetResult::Applied);
-    EXPECT_EQ(s.mode, CullMode::NoCull);
+    EXPECT_EQ(s.mode, GpuCullMode::NoCull);
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "cone", "true"), GpuDrivenSceneSetResult::Applied);
     EXPECT_TRUE(s.cone);
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "collectStats", "1"), GpuDrivenSceneSetResult::Applied);
@@ -164,6 +164,8 @@ TEST(GpuDrivenSceneTypesTest, SettingKeysApplyOrReject)
     EXPECT_FALSE(s.enabled);
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "debugView", "ClusterId"), GpuDrivenSceneSetResult::Applied);
     EXPECT_EQ(s.debugView, GpuDrivenSceneDebugView::ClusterId);
+    EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "debugView", "ClusterPhase"), GpuDrivenSceneSetResult::Applied);
+    EXPECT_EQ(s.debugView, GpuDrivenSceneDebugView::ClusterPhase);
 
     const GpuDrivenSceneSettings before = s;
     EXPECT_EQ(ApplyGpuDrivenSceneSetting(s, "mode", "Bogus"), GpuDrivenSceneSetResult::BadValue);

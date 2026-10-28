@@ -425,7 +425,7 @@ public:
               GpuBufferUse::Storage | GpuBufferUse::HostWrite))
         , m_visible(MakeBuffer(fx, std::size_t{ m_items } * 8, "ParityVisible", GpuBufferUse::Storage | GpuBufferUse::TransferSrc))
         , m_commands(MakeBuffer(fx, std::size_t{ m_items } * 20, "ParityCommands", GpuBufferUse::Storage))
-        , m_count(MakeBuffer(fx, 4, "ParityCount",
+        , m_count(MakeBuffer(fx, static_cast<std::size_t>(kClusterCountBytes), "ParityCount",
               GpuBufferUse::Storage | GpuBufferUse::TransferSrc | GpuBufferUse::TransferDst))
         , m_history(MakeBuffer(fx, std::size_t{ m_items } * 4, "ParityHistory",
               GpuBufferUse::Storage | GpuBufferUse::HostWrite | GpuBufferUse::TransferSrc))

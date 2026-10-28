@@ -888,6 +888,40 @@ TEST(ClusterCullMath, HizBuildPlanRunsTheTopPassOnlyAboveLevelFour)
     EXPECT_EQ(kHizPassCount, 2u);
 }
 
+// ---- outcome reasons and draw tags ----
+
+TEST(ClusterCullMath, ReasonIsTheFirstFailingTestInFrustumConeOcclusionOrder)
+{
+    EXPECT_EQ(ClusterReasonOf(true, false, false), ClusterReason::Frustum);
+    EXPECT_EQ(ClusterReasonOf(true, true, true), ClusterReason::Frustum);
+    EXPECT_EQ(ClusterReasonOf(false, true, false), ClusterReason::Cone);
+    EXPECT_EQ(ClusterReasonOf(false, true, true), ClusterReason::Cone);
+    EXPECT_EQ(ClusterReasonOf(false, false, true), ClusterReason::Pyramid);
+    EXPECT_EQ(ClusterReasonOf(false, false, false), ClusterReason::Kept);
+}
+
+TEST(ClusterCullMath, ReasonValuesAreTheCounterSlotsOfTheCountBuffer)
+{
+    EXPECT_EQ(static_cast<std::uint32_t>(ClusterReason::Frustum), kClusterReasonFrustum);
+    EXPECT_EQ(static_cast<std::uint32_t>(ClusterReason::Cone), kClusterReasonCone);
+    EXPECT_EQ(static_cast<std::uint32_t>(ClusterReason::Pyramid), kClusterReasonPyramid);
+    EXPECT_EQ(static_cast<std::uint32_t>(ClusterReason::History), kClusterReasonHistory);
+    EXPECT_EQ(static_cast<std::uint32_t>(ClusterReason::Kept), kClusterReasonKept);
+    EXPECT_EQ(kClusterCountBytes, 4u * (1 + kClusterReasonWords));
+    EXPECT_EQ(kClusterCullFlagCollectReasons & (kClusterCullFlagRawDepth | kClusterCullFlagHistoryValid), 0u);
+    EXPECT_LE(ClusterBufferCapacity(kClusterCountBytes), kClusterMinBufferBytes);
+}
+
+TEST(ClusterCullMath, DrawTagIsZeroForTheIdTintAndCarriesThePhaseForThePhaseTint)
+{
+    EXPECT_EQ(ClusterDrawTagFor(false, true, 0), 0u);
+    EXPECT_EQ(ClusterDrawTagFor(false, true, 1), 0u);
+    EXPECT_EQ(ClusterDrawTagFor(true, true, 0), kClusterDrawTagPhaseView | kClusterDrawTagFirst);
+    EXPECT_EQ(ClusterDrawTagFor(true, true, 1), kClusterDrawTagPhaseView | kClusterDrawTagSecond);
+    EXPECT_EQ(ClusterDrawTagFor(true, false, 0), kClusterDrawTagPhaseView); // Single phase: gray.
+    EXPECT_EQ(ClusterDrawTagFor(true, true, 1) & kClusterDrawTagPhaseMask, kClusterDrawTagSecond);
+}
+
 // ---- two-phase history ----
 
 TEST(ClusterCullMath, FirstPhaseDrawsLastFramesSurvivorsAndRewritesEveryWord)

@@ -27,7 +27,7 @@ CullPlan PlanCull(fx::OpaqueFrame& f, const GpuDrivenSceneSettings& cfg, bool se
 
     // Without an active camera the view matrix is identity and must not cull.
     std::optional<fx::View> primaryView;
-    if (cfg.mode != CullMode::NoCull) {
+    if (cfg.mode != GpuCullMode::NoCull) {
         const float height = view.extent.height > 0 ? static_cast<float>(view.extent.height) : 1.0f;
         primaryView = f.PrimaryCamera(static_cast<float>(view.extent.width) / height);
     }
@@ -125,7 +125,7 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     // SceneCullPass normally planned this frame already; plan here if it has not run first.
     const CullPlan plan = view.hasPlan && view.planFrame == frameIndex ? view.plan : PlanCull(f, cfg, secondary);
     const bool hasPixels = !HasNoPixels(f.View());
-    const bool hizRequested = cfg.mode == CullMode::HiZ;
+    const bool hizRequested = cfg.mode == GpuCullMode::HiZ;
     const bool wantStats = cfg.collectStats;
 
     // Written to the view snapshot by `finish`.
@@ -168,7 +168,7 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
         .CullCamera(plan.cull)
         .Culling(flags)
         .Target(f.SceneTarget())
-        .IdTint(cfg.debugView == GpuDrivenSceneDebugView::ClusterId)
+        .IdTint(cfg.debugView != GpuDrivenSceneDebugView::Off, cfg.debugView == GpuDrivenSceneDebugView::ClusterPhase)
         .Stats(wantStats);
     const fx::ClusterStats stats = chain.Record();
 
@@ -191,6 +191,9 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
         snap.hizReason = stats.hizReason;
     }
     snap.statsCollected = wantStats;
+    if (wantStats) {
+        snap.reasons = m_state.ReasonCounts(f);
+    }
 
     // The count is two frames old: it is only shown next to the tested value of its own frame.
     const fx::ClusterVisibleCount visible = m_state.VisibleClusters(f);
@@ -236,7 +239,7 @@ void GpuDrivenSceneFeature::SceneCullPass(fx::OpaqueFrame& f)
     snap.cpuCulled = counts.culled;
     snap.cpuUnbounded = counts.unbounded;
 
-    if (cfg.mode == CullMode::NoCull) {
+    if (cfg.mode == GpuCullMode::NoCull) {
         snap.cpuCullState = CpuCullState::Off;
     } else if (f.ViewCaptureArmed()) {
         snap.cpuCullState = CpuCullState::SuppressedCapture;

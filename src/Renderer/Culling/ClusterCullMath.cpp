@@ -147,7 +147,7 @@ std::uint64_t ClusterChainBytes(std::uint64_t instanceCount, std::uint64_t workI
     const std::uint64_t lanes = twoPhase ? 2 : 1;
     std::uint64_t perLane = ClusterBufferCapacity(SaturatingMul(workItems, kClusterVisibleBytes));
     perLane = SaturatingAdd(perLane, ClusterBufferCapacity(SaturatingMul(workItems, kClusterCommandBytes)));
-    perLane = SaturatingAdd(perLane, ClusterBufferCapacity(sizeof(std::uint32_t)));
+    perLane = SaturatingAdd(perLane, ClusterBufferCapacity(kClusterCountBytes));
 
     std::uint64_t total = ClusterBufferCapacity(SaturatingMul(instanceCount, sizeof(ClusterInstanceGpu)));
     total = SaturatingAdd(total, SaturatingMul(perLane, lanes));

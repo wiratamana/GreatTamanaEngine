@@ -91,8 +91,8 @@ public:
     PersistentBuffer* Visible(std::uint32_t lane, std::uint32_t slot) noexcept;
     PersistentBuffer* Commands(std::uint32_t lane, std::uint32_t slot) noexcept;
     PersistentBuffer* Count(std::uint32_t lane, std::uint32_t slot) noexcept;
-    // Optional visible-count readback of a part slot.
-    GpuReadback<std::uint32_t>* Stats(std::uint32_t slot) noexcept;
+    // Optional readback of a part slot: survivor count and outcome counters.
+    GpuReadback<ClusterStatsWords>* Stats(std::uint32_t slot) noexcept;
 
     // One parameter block per (view scope, lane, slot): no two chains ever share one.
     GpuParams<ClusterCullParams>* Params(rg::ViewScope scope, std::uint32_t lane, std::uint32_t slot) noexcept;
@@ -126,6 +126,8 @@ public:
 
     // Survivor count of the frame's view, summed over part slots. Two frames old.
     ClusterVisibleCount VisibleClusters(const Frame& frame) const;
+    // Outcome counters of the frame's view, summed over part slots. Two frames old; zero unless reasons were collected.
+    ClusterReasonCounts ReasonCounts(const Frame& frame) const;
 
     // The first lane of a frame fixes the candidate span of its scope; a later lane with another span is refused.
     bool AcceptCandidateSpan(const Frame& frame, std::uint32_t lane, const void* data, std::size_t count) noexcept;
@@ -197,7 +199,7 @@ private:
     std::vector<std::unique_ptr<PersistentBuffer>> m_history;      // [slot]
     std::vector<std::unique_ptr<PersistentBuffer>> m_historyDummy; // [lane]
     std::vector<ClusterHistoryRecord> m_historyRecords;            // [scope][slot]
-    std::vector<std::unique_ptr<GpuReadback<std::uint32_t>>> m_stats;
+    std::vector<std::unique_ptr<GpuReadback<ClusterStatsWords>>> m_stats;
     std::vector<std::unique_ptr<GpuParams<ClusterCullParams>>> m_params;
     std::vector<std::unique_ptr<PersistentTarget>> m_hizDummy; // [lane]
 

@@ -502,7 +502,7 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
 void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
     uint64_t indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset,
     DescriptorSetHandle bufferDescriptorSet, DescriptorSetHandle sceneServicesSet, const Mat4& viewProjMatrix,
-    DescriptorSetHandle materialDescriptorSet)
+    DescriptorSetHandle materialDescriptorSet, std::uint32_t drawTag)
 {
     assert(m_currentGraphPassCmd != VK_NULL_HANDLE
         && "Renderer::SubmitIndirect() called outside of a render-graph pass recording.");
@@ -525,7 +525,7 @@ void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuff
     FrameRecorder::IssueIndirectDrawCommand(m_currentGraphPassCmd, pipeline.Native(), pipeline.Layout(),
         mesh.VertexBuffer(), mesh.IndexBuffer(), Native(bufferDescriptorSet), effectiveMaterialSet,
         effectiveSceneServicesSet, viewProjMatrix, indirectBuffer, indirectOffset, maxDrawCount, countBuffer,
-        countBufferOffset);
+        countBufferOffset, drawTag);
 }
 
 Pipeline Renderer::CreatePipeline(const std::string& vertexShaderSpirvPath,

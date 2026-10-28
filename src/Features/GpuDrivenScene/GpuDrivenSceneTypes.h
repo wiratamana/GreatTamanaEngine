@@ -15,20 +15,22 @@ namespace gte {
 
 inline constexpr const char* kGpuDrivenSceneFeatureName = "GpuDrivenScene";
 
-enum class GpuDrivenSceneDebugView : std::uint8_t { Off, ClusterId };
+// ClusterId colors each cluster by its id; ClusterPhase colors by draw phase (first red, second green).
+enum class GpuDrivenSceneDebugView : std::uint8_t { Off, ClusterId, ClusterPhase };
 
 inline constexpr std::array kGpuDrivenSceneDebugViewTable{
     fx::EnumEntry<GpuDrivenSceneDebugView>{ GpuDrivenSceneDebugView::Off, "Off" },
     fx::EnumEntry<GpuDrivenSceneDebugView>{ GpuDrivenSceneDebugView::ClusterId, "ClusterId" },
+    fx::EnumEntry<GpuDrivenSceneDebugView>{ GpuDrivenSceneDebugView::ClusterPhase, "ClusterPhase" },
 };
 
 // What is culled in every view, on both draw paths.
-enum class CullMode : std::uint8_t { NoCull, Frustum, HiZ };
+enum class GpuCullMode : std::uint8_t { NoCull, Frustum, HiZ };
 
 inline constexpr std::array kCullModeTable{
-    fx::EnumEntry<CullMode>{ CullMode::NoCull, "NoCull" },
-    fx::EnumEntry<CullMode>{ CullMode::Frustum, "Frustum" },
-    fx::EnumEntry<CullMode>{ CullMode::HiZ, "HiZ" },
+    fx::EnumEntry<GpuCullMode>{ GpuCullMode::NoCull, "NoCull" },
+    fx::EnumEntry<GpuCullMode>{ GpuCullMode::Frustum, "Frustum" },
+    fx::EnumEntry<GpuCullMode>{ GpuCullMode::HiZ, "HiZ" },
 };
 
 // Hi-Z state of a view.
@@ -69,10 +71,10 @@ inline constexpr std::array kCpuCullStateTable{
 struct GpuDrivenSceneSettings {
     // GPU (cluster) path on/off. Never changes the CPU draw cull.
     bool enabled = true;
-    CullMode mode = CullMode::Frustum;
+    GpuCullMode mode = GpuCullMode::Frustum;
     // Back-face cone test. Only correct for closed meshes; never applied to depth-only lanes.
     bool cone = false;
-    // Reads the visible-cluster count back. Costs three extra passes per part slot.
+    // Reads the visible-cluster count and the reason counters back. Costs three extra passes per part slot.
     bool collectStats = false;
     GpuDrivenSceneDebugView debugView = GpuDrivenSceneDebugView::Off;
 };
@@ -135,7 +137,7 @@ inline constexpr std::array kGpuDrivenSceneSettingKeys{
         &detail::SetEnum<&GpuDrivenSceneSettings::mode, kCullModeTable> },
     GpuDrivenSceneSettingKey{ "cone", "true or false", &detail::SetBool<&GpuDrivenSceneSettings::cone> },
     GpuDrivenSceneSettingKey{ "collectStats", "true or false", &detail::SetBool<&GpuDrivenSceneSettings::collectStats> },
-    GpuDrivenSceneSettingKey{ "debugView", "Off or ClusterId",
+    GpuDrivenSceneSettingKey{ "debugView", "Off, ClusterId or ClusterPhase",
         &detail::SetEnum<&GpuDrivenSceneSettings::debugView, kGpuDrivenSceneDebugViewTable> },
 };
 
@@ -174,9 +176,9 @@ struct ViewCullTests {
 constexpr ViewCullTests ResolveCullTests(const GpuDrivenSceneSettings& s) noexcept
 {
     switch (s.mode) {
-    case CullMode::NoCull: return { false, false, false };
-    case CullMode::Frustum: return { true, s.cone, false };
-    case CullMode::HiZ: return { true, s.cone, true };
+    case GpuCullMode::NoCull: return { false, false, false };
+    case GpuCullMode::Frustum: return { true, s.cone, false };
+    case GpuCullMode::HiZ: return { true, s.cone, true };
     }
     return {};
 }
@@ -184,13 +186,13 @@ constexpr ViewCullTests ResolveCullTests(const GpuDrivenSceneSettings& s) noexce
 // Only the primary view builds a pyramid.
 constexpr bool ViewWantsHiz(const GpuDrivenSceneSettings& s, bool secondary) noexcept
 {
-    return s.enabled && s.mode == CullMode::HiZ && !secondary;
+    return s.enabled && s.mode == GpuCullMode::HiZ && !secondary;
 }
 
 // The secondary view never culls with its own camera.
-constexpr CullCameraSource ChooseCullCamera(bool secondary, CullMode mode, bool primaryValid, bool liveValid) noexcept
+constexpr CullCameraSource ChooseCullCamera(bool secondary, GpuCullMode mode, bool primaryValid, bool liveValid) noexcept
 {
-    if (mode == CullMode::NoCull) {
+    if (mode == GpuCullMode::NoCull) {
         return CullCameraSource::None;
     }
     if (secondary) {
@@ -308,6 +310,7 @@ struct GpuPathReport {
     std::uint32_t visibleClusters = 0;
     std::uint64_t visibleFrame = 0;
     bool statsCollected = false; // The count readback was on this frame; visibleValid is false otherwise.
+    fx::ClusterReasonCounts reasons; // Items by outcome, two frames old; valid only when statsCollected.
     bool visibleValid = false;
     std::uint64_t hidden = 0;
     bool hiddenValid = false; // visibleValid and visible <= testedAtVisibleFrame.

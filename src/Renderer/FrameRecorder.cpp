@@ -51,16 +51,17 @@ void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pip
     VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet bufferDescriptorSet,
     VkDescriptorSet materialDescriptorSet, VkDescriptorSet sceneServicesSet, const Mat4& viewProj,
     VkBuffer indirectBuffer, uint64_t indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer,
-    uint64_t countBufferOffset)
+    uint64_t countBufferOffset, std::uint32_t drawTag)
 {
     assert(countBuffer != VK_NULL_HANDLE && "IssueIndirectDrawCommand: a count buffer is required.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
-    // Same push-constant shape as every pipeline; the `model` half stays zero (unused by the cluster shaders).
+    // Same push-constant shape as every pipeline. The cluster shaders ignore `model`, so its first word carries the tag.
     struct PushConstants {
         float model[16];
         float viewProj[16];
     } pushConstants{};
+    std::memcpy(&pushConstants.model[0], &drawTag, sizeof(drawTag));
     std::memcpy(pushConstants.viewProj, viewProj.Data(), sizeof(pushConstants.viewProj));
     vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
 

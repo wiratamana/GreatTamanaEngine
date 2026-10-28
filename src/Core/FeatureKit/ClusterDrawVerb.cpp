@@ -66,8 +66,8 @@ std::uint64_t ClusterPartSetKey(
 }
 
 // Bits the chain sets itself; a caller never asks for them.
-constexpr std::uint32_t kChainOwnedFlags =
-    kClusterCullFlagOcclusion | kClusterCullFlagPhaseFirst | kClusterCullFlagPhaseSecond | kClusterCullFlagHistoryValid;
+constexpr std::uint32_t kChainOwnedFlags = kClusterCullFlagOcclusion | kClusterCullFlagPhaseFirst
+    | kClusterCullFlagPhaseSecond | kClusterCullFlagHistoryValid | kClusterCullFlagCollectReasons;
 
 // Push block of ClusterCullStats.comp.
 struct ClusterStatsPush {
@@ -97,6 +97,7 @@ struct ClusterDrawChain::Impl {
     Texture target;
     bool depthOnly = false;
     bool idTint = false;
+    bool phaseTint = false; // With idTint: tint by draw phase instead of by cluster id.
     bool stats = false;
 
     // Input of TwoPhase() and ReuseSurvivors().
@@ -205,9 +206,10 @@ ClusterDrawChain& ClusterDrawChain::DepthOnlyTarget(Texture depth)
     return *this;
 }
 
-ClusterDrawChain& ClusterDrawChain::IdTint(bool enabled)
+ClusterDrawChain& ClusterDrawChain::IdTint(bool enabled, bool byPhase)
 {
     m_impl->idTint = enabled;
+    m_impl->phaseTint = enabled && byPhase;
     return *this;
 }
 
@@ -480,7 +482,7 @@ struct PartRuntime {
     GpuBufferRef history;                                           // The slot's history, or a stand-in.
     bool historyValid = false;
     std::uint64_t historyKey = 0;
-    GpuReadback<std::uint32_t>* readback = nullptr;
+    GpuReadback<ClusterStatsWords>* readback = nullptr;
 };
 
 // Declares the passes of a chain, one round of one part at a time. See RecordClusterRounds().
@@ -514,7 +516,7 @@ public:
             run.commands[round] = s.frame->StampBuffer(
                 lane.commands, published.workItems * kClusterCommandBytes, BufferUse::Storage | BufferUse::Indirect);
             run.count[round] = s.frame->StampBuffer(
-                lane.count, sizeof(std::uint32_t), BufferUse::Storage | BufferUse::Indirect | BufferUse::TransferDst);
+                lane.count, kClusterCountBytes, BufferUse::Storage | BufferUse::Indirect | BufferUse::TransferDst);
             ok = ok && run.visible[round].IsValid() && run.commands[round].IsValid() && run.count[round].IsValid();
         }
         return ok;
@@ -558,7 +560,7 @@ public:
             const std::uint32_t lane = LaneOf(round);
             run.visible[round] = state.Visible(lane, part.slot)->Acquire(frame, part.workItems * kClusterVisibleBytes);
             run.commands[round] = state.Commands(lane, part.slot)->Acquire(frame, part.workItems * kClusterCommandBytes);
-            run.count[round] = state.Count(lane, part.slot)->Acquire(frame, sizeof(std::uint32_t));
+            run.count[round] = state.Count(lane, part.slot)->Acquire(frame, kClusterCountBytes);
             if (!run.visible[round].IsValid() || !run.commands[round].IsValid() || !run.count[round].IsValid()) {
                 return false;
             }
@@ -616,6 +618,9 @@ public:
         } else if (s.twoPhase) {
             params.counts[3] |= kClusterCullFlagPhaseFirst | (run.historyValid ? kClusterCullFlagHistoryValid : 0u);
         }
+        if (ClusterStatsWanted(s.stats, s.depthOnly, s.lane)) {
+            params.counts[3] |= kClusterCullFlagCollectReasons;
+        }
         const Texture pyramid = round == 1 ? s.atlas : run.hizDummy[0];
         return s.frame->Compute(state.CullShader(), PassNameOf(state, lane, part.slot, ClusterPassKind::Cull))
             .Params(*state.Params(s.frame->Context()->scope, lane, part.slot), params)
@@ -657,14 +662,17 @@ public:
         const rg::RenderViewId view = context.view;
         const bool depthOnly = s.depthOnly;
         const Mat4 viewProjection = s.camera.viewProjection;
+        const std::uint32_t drawTag = ClusterDrawTagFor(s.phaseTint && !s.depthOnly, s.TwoRounds(), round);
         // The mesh and material are looked up again at execute time; a missing one draws nothing.
-        auto resolveInputs = [core, token, material, pipeline, bindings, bindingIndex, view, depthOnly, viewProjection]() {
+        auto resolveInputs = [core, token, material, pipeline, bindings, bindingIndex, view, depthOnly, viewProjection,
+                                 drawTag]() {
             rg::IndirectDrawInputs inputs;
             inputs.mesh = core->ResolveClusterMesh(token);
             inputs.pipeline = pipeline;
             inputs.viewProjection = viewProjection;
             inputs.clusterBindings = bindings;
             inputs.clusterBindingIndex = bindingIndex;
+            inputs.drawTag = drawTag;
             if (!depthOnly) {
                 inputs.sceneSet = core->GetSceneServicesDescriptorSet().DescriptorSetFor(view);
             }

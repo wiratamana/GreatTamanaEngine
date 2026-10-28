@@ -1860,7 +1860,8 @@ gte_generate_glsl_constants(
 gte_add_shader(GreatTamanaEditor src/Shaders/ClusterCull.comp
     EXTRA_DEPENDS src/Shaders/HizPyramidLayout.glsl
     GENERATED_DEPENDS "${GTE_CLUSTER_CULL_CONSTANTS_GLSL}")
-gte_add_shader(GreatTamanaEditor src/Shaders/ClusterCullStats.comp)
+gte_add_shader(GreatTamanaEditor src/Shaders/ClusterCullStats.comp
+    GENERATED_DEPENDS "${GTE_CLUSTER_CULL_CONSTANTS_GLSL}")
 gte_add_shader(GreatTamanaEditor src/Shaders/HizBuildBase.comp
     EXTRA_DEPENDS src/Shaders/HizPyramidLayout.glsl
     GENERATED_DEPENDS "${GTE_CLUSTER_CULL_CONSTANTS_GLSL}")
@@ -1873,7 +1874,8 @@ gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.vert
     EXTRA_DEPENDS src/Shaders/ClusterDrawBuffers.glsl)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.frag)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterTint.frag
-    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/ClusterTint.glsl)
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/ClusterTint.glsl
+    GENERATED_DEPENDS "${GTE_CLUSTER_CULL_CONSTANTS_GLSL}")
 # Cluster draw of textured (uv) and PBR (uv + tangent) meshes: their vertex shaders write the varyings of
 # TexturedMesh.vert / PbrMesh.vert, so the CPU draw's fragment shaders are reused.
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterUv.vert
@@ -1881,13 +1883,16 @@ gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterUv.vert
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterTangent.vert
     EXTRA_DEPENDS src/Shaders/ClusterDrawBuffers.glsl)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterTintSurface.frag
-    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/ClusterTint.glsl)
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/ClusterTint.glsl
+    GENERATED_DEPENDS "${GTE_CLUSTER_CULL_CONSTANTS_GLSL}")
 
 # Cluster viewer fragment shaders (render to explicit RGBA8 targets); staged in every build.
 gte_add_shader(GreatTamanaEditor src/Shaders/ClusterViewClay.frag
-    EXTRA_DEPENDS src/Shaders/ClusterViewShading.glsl src/Shaders/ClusterTint.glsl)
+    EXTRA_DEPENDS src/Shaders/ClusterViewShading.glsl src/Shaders/ClusterTint.glsl
+    GENERATED_DEPENDS "${GTE_CLUSTER_CULL_CONSTANTS_GLSL}")
 gte_add_shader(GreatTamanaEditor src/Shaders/ClusterViewTint.frag
-    EXTRA_DEPENDS src/Shaders/ClusterViewShading.glsl src/Shaders/ClusterTint.glsl)
+    EXTRA_DEPENDS src/Shaders/ClusterViewShading.glsl src/Shaders/ClusterTint.glsl
+    GENERATED_DEPENDS "${GTE_CLUSTER_CULL_CONSTANTS_GLSL}")
 gte_add_shader(GreatTamanaEditor src/Shaders/ClusterViewDim.frag)
 gte_add_shader(GreatTamanaEditor src/Shaders/ClusterViewId.frag)
 
