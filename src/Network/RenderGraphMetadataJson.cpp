@@ -56,6 +56,8 @@ nlohmann::json PassToJson(const rg::RenderGraphPassMetadata& pass)
         { "gpu_timing_status", rg::ToString(pass.gpuTimingState) },
         { "gpu_folded_passes", pass.gpuFoldedPasses },
         { "gpu_timing_milliseconds", OptionalToJson(pass.gpuTimingMilliseconds) },
+        { "gpu_barrier_milliseconds", OptionalToJson(pass.gpuBarrierMilliseconds) },
+        { "gpu_work_milliseconds", OptionalToJson(pass.gpuWorkMilliseconds) },
     };
 }
 
@@ -100,6 +102,8 @@ nlohmann::json FeatureToJson(const RenderFeatureDebugEntry& entry)
         { "priority", entry.priority },
         { "blend_mode", entry.blendMode },
         { "enabled", entry.enabled }, // Host-side enable/disable override.
+        { "enabled_primary", entry.enabledPrimary }, // Runs in the primary view when enabled and this are true.
+        { "enabled_secondary", entry.enabledSecondary }, // Same for the secondary view.
         { "is_project_feature", entry.isProjectFeature }, // Declared by a loaded project.
     };
 }

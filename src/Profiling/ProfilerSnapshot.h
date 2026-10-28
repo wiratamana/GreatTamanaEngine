@@ -102,6 +102,7 @@ struct SnapshotDrops {
 
 struct SnapshotDeviceState {
     bool deviceLost = false;
+    bool presentUncapped = false; // started without a vsync cap
     Metric consecutiveFrameTimeouts{};
     Metric abandonedObjects{};
 };

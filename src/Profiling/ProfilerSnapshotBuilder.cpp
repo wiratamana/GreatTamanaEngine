@@ -270,6 +270,7 @@ ProfilerSnapshot BuildProfilerSnapshot(const FrameProfiler& profiler, const Snap
         MissingMetric(Unit::Percent, SampleStatus::Absent, Reason::NotReady), false };
 
     snapshot.device.deviceLost = inputs.deviceLost;
+    snapshot.device.presentUncapped = inputs.presentUncapped;
     snapshot.device.consecutiveFrameTimeouts = Count(inputs.consecutiveFrameTimeouts);
     snapshot.device.abandonedObjects = Count(inputs.abandonedObjects);
     snapshot.timeline.aligned = inputs.gpuClockAligned;

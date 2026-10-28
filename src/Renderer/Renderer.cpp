@@ -121,15 +121,16 @@ std::unordered_set<VkDescriptorSet> g_liveUiTextures;
 
 } // namespace
 
-Renderer::Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation)
+Renderer::Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation, PresentPolicy presentPolicy)
     : m_instance("GreatTamanaEngine", surfaceProvider.VulkanInstanceExtensions(), kEnableValidation || forceValidation)
     , m_surface(m_instance.Native(), surfaceProvider)
     , m_device(m_instance.Native(), m_surface.Native())
     , m_depthFormat(m_device.PickDepthFormat())
+    , m_presentPolicy(presentPolicy)
     , m_allocator(m_instance.Native(), m_device.Physical(), m_device.Native(), VK_API_VERSION_1_3)
     , m_presenter(m_device.Physical(), m_device.Native(), m_surface.Native(), m_device.GraphicsQueueFamily(),
           m_device.PresentQueueFamily(), m_device.PresentQueue(), surfaceProvider.Width(), surfaceProvider.Height(),
-          m_allocator.Native(), m_depthFormat, m_memoryTracker, m_device)
+          m_allocator.Native(), m_depthFormat, m_memoryTracker, m_device, m_presentPolicy)
     , m_resources(m_device.Physical(), m_device.Native(), m_allocator.Native(), m_device.GraphicsQueueFamily(),
           m_depthFormat, m_memoryTracker, m_device, m_abandoned)
     , m_emptySetLayout(m_device.Native(), DescriptorSetLayoutBuilder(m_device.Native()).Build())

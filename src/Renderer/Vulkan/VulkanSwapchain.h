@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../PresentPolicy.h"
+
 #include <volk.h>
 
 #include <cstdint>
@@ -9,6 +11,7 @@ namespace gte {
 
 // RAII wrapper around a VkSwapchainKHR and its image views. Does not own the physical device, device or
 // surface; all three must outlive it. Recreate() rebuilds it in place (resize, or an out-of-date result).
+// The present mode follows `policy` and is chosen once, at construction.
 class VulkanSwapchain {
 public:
     VulkanSwapchain(VkPhysicalDevice physicalDevice,
@@ -17,7 +20,8 @@ public:
                     std::uint32_t graphicsFamily,
                     std::uint32_t presentFamily,
                     int width,
-                    int height);
+                    int height,
+                    PresentPolicy policy);
     ~VulkanSwapchain();
 
     VulkanSwapchain(const VulkanSwapchain&) = delete;
@@ -32,6 +36,7 @@ public:
 
     VkSwapchainKHR Native() const noexcept { return m_swapchain; }
     VkFormat ImageFormat() const noexcept { return m_imageFormat; }
+    PresentMode Mode() const noexcept { return m_presentMode; }
     VkExtent2D Extent() const noexcept { return m_extent; }
     std::uint32_t ImageCount() const noexcept { return static_cast<std::uint32_t>(m_images.size()); }
     VkImage Image(std::uint32_t index) const { return m_images[index]; }
@@ -46,6 +51,8 @@ private:
     VkSurfaceKHR m_surface = VK_NULL_HANDLE;
     std::uint32_t m_graphicsFamily = 0;
     std::uint32_t m_presentFamily = 0;
+    PresentPolicy m_policy = PresentPolicy::Capped;
+    PresentMode m_presentMode = PresentMode::Fifo;
 
     VkSwapchainKHR m_swapchain = VK_NULL_HANDLE;
     VkFormat m_imageFormat = VK_FORMAT_UNDEFINED;

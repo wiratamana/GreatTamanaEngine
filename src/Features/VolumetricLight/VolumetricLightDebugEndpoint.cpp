@@ -28,7 +28,6 @@ struct SettingKey {
 // Every settable key except debugView, which is an enum and has its own handling.
 constexpr std::array kSettingKeys{
     SettingKey{ "enabled", &VolumetricLightSettings::enabled },
-    SettingKey{ "applyInSceneView", &VolumetricLightSettings::applyInSceneView },
     SettingKey{ "density", &VolumetricLightSettings::density },
     SettingKey{ "albedo", &VolumetricLightSettings::albedo },
     SettingKey{ "anisotropyG", &VolumetricLightSettings::anisotropyG },

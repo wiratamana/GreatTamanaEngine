@@ -105,10 +105,13 @@ void AtmosphereFeature::Setup(fx::FeatureSetup& s)
     // Not a render pass: Always() keeps a toggle from silencing the sun light record.
     s.PreOpaque("Atmosphere.SunLight", kSunLightModulationPriority,
         [this](fx::PreOpaqueFrame& f) { PublishSunLight(f); }, fx::Gate::Always());
+    s.PostOpaque("DrawSkyBackground", kSkyBackgroundPriority, [this](fx::PostOpaqueFrame& f) { SkyBackground(f); });
+
+    // The secondary view skips aerial perspective by default; the sky background above stays on.
+    s.DefaultSecondaryViewEnabled(false);
     // After the sun cascades exist (PreOpaque), before the composite reads the volume.
     s.PostOpaque("AtmosphereAerialVolume", kAerialVolumePriority, [this](fx::PostOpaqueFrame& f) { AerialVolume(f); },
         fx::Gate{ "AtmosphereAerialPerspectiveVolumePass" });
-    s.PostOpaque("DrawSkyBackground", kSkyBackgroundPriority, [this](fx::PostOpaqueFrame& f) { SkyBackground(f); });
     s.PostComposite("AtmosphereComposite", kCompositePriority, fx::Blend::AlphaOver,
         [this](fx::CompositeFrame& f) { Composite(f); },
         fx::Gate{ "AtmosphereAerialPerspectiveCompositePass", "AtmosphereComposite.CopyToPrivateTarget" });

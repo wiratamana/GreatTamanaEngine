@@ -50,6 +50,7 @@ struct RenderFeatureCompositor::Impl {
     void ContributeRenderGraphPasses(const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>& out);
     std::vector<RenderFeatureDebugEntry> DebugSnapshot() const;
     bool SetFeatureEnabled(const std::string& name, bool enabled);
+    bool SetFeatureViewEnabled(const std::string& name, rg::ViewScope scope, bool enabled);
     bool SetFeaturePriority(const std::string& name, std::int32_t priority);
     bool RegisterFeature(
         const GtePluginRenderFeatureDescriptor& descriptor, ProjectRenderFeatureCallback callback, RenderFeatureOwner owner);

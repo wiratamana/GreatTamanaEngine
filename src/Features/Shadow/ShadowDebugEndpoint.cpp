@@ -25,7 +25,7 @@ struct SettingKey {
 // Every settable key except debugView, which is an enum and has its own handling.
 constexpr std::array kSettingKeys{
     SettingKey{ "cascadeCount", &ShadowSettings::cascadeCount },
-    SettingKey{ "mapResolution", &ShadowSettings::mapResolution },
+    SettingKey{ "maxMapResolution", &ShadowSettings::maxMapResolution },
     SettingKey{ "maxDistance", &ShadowSettings::maxDistance },
     SettingKey{ "splitLambda", &ShadowSettings::splitLambda },
     SettingKey{ "cascadeBlendFraction", &ShadowSettings::cascadeBlendFraction },

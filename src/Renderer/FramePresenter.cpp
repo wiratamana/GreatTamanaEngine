@@ -33,14 +33,14 @@ void ThrowIfNotCompleted(const char* what, BlockOutcome outcome)
 FramePresenter::FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
     std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue presentQueue, int width, int height,
     VmaAllocator allocator, VkFormat depthFormat, std::shared_ptr<GpuMemoryTracker> memoryTracker,
-    VulkanDevice& vulkanDevice)
+    VulkanDevice& vulkanDevice, PresentPolicy presentPolicy)
     : m_device(device)
     , m_presentQueue(presentQueue)
     , m_graphicsQueueFamily(graphicsQueueFamily)
     , m_vulkanDevice(&vulkanDevice)
     , m_depthFormat(depthFormat)
     , m_memoryTracker(std::move(memoryTracker))
-    , m_swapchain(physicalDevice, device, surface, graphicsQueueFamily, presentQueueFamily, width, height)
+    , m_swapchain(physicalDevice, device, surface, graphicsQueueFamily, presentQueueFamily, width, height, presentPolicy)
     , m_frameSync(device, kFramesInFlight, m_swapchain.ImageCount())
     , m_swapchainCapture(allocator, m_memoryTracker, kFramesInFlight)
 {

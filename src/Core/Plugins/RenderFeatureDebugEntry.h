@@ -18,6 +18,10 @@ struct RenderFeatureDebugEntry {
     // own flag, when the name is independently known there too.
     bool enabled = true;
 
+    // Per-view-scope flags. The feature runs in a scope when `enabled` and that scope's flag are both true.
+    bool enabledPrimary = true;
+    bool enabledSecondary = true;
+
     // True for a Project Assembly feature, false for an engine built-in one.
     // Set explicitly by the registering code (RenderFeatureOwner) - never
     // inferred from any other field.

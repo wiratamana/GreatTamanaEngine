@@ -28,6 +28,9 @@ void SsgiFeature::Setup(fx::FeatureSetup& s)
     s.PreOpaque("Ssgi.FrameStamp", kFrameStampPriority,
         [this](fx::PreOpaqueFrame& f) { m_newestFrame = f.FrameIndex(); }, fx::Gate::Always());
 
+    // The secondary view skips the trace and its composite by default.
+    s.DefaultSecondaryViewEnabled(false);
+
     s.PostOpaque("Ssgi.Trace", kTracePriority, [this](fx::PostOpaqueFrame& f) { TracePass(f); },
         fx::Gate{ "Ssgi.Prepare.Dispatch", "Ssgi.Trace.Dispatch", "Ssgi.Resolve.Dispatch" });
     s.PostComposite("Ssgi.Composite", kCompositePriority, fx::Blend::ScreenSpaceMask,
@@ -65,8 +68,7 @@ void SsgiFeature::TracePass(fx::PostOpaqueFrame& f)
         view.snapshot = snap;
     };
 
-    const bool sceneViewOff = f.Scope() == rg::ViewScope::Secondary && !cfg.applyInSceneView;
-    if (sceneViewOff || cfg.intensity <= 0.0f) {
+    if (cfg.intensity <= 0.0f) {
         bail(SsgiFrameStatus::PassDisabled);
         return;
     }

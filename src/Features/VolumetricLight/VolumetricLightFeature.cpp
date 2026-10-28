@@ -35,6 +35,9 @@ void VolumetricLightFeature::Setup(fx::FeatureSetup& s)
     s.PreOpaque("VolumetricLight.FrameStamp", kFrameStampPriority,
         [this](fx::PreOpaqueFrame& f) { m_newestFrame = f.FrameIndex(); }, fx::Gate::Always());
 
+    // The secondary view skips the volume and its composite by default.
+    s.DefaultSecondaryViewEnabled(false);
+
     s.PostOpaque("VolumetricLight.Volume", kVolumePriority, [this](fx::PostOpaqueFrame& f) { VolumePass(f); },
         fx::Gate{ "VolumetricLight.Inject.Dispatch", "VolumetricLight.Temporal.Dispatch",
             "VolumetricLight.Integrate.Dispatch" });
@@ -166,7 +169,7 @@ void VolumetricLightFeature::VolumePass(fx::PostOpaqueFrame& f)
         view.snapshot = snap;
     };
 
-    if (!cfg.enabled || (f.Scope() == rg::ViewScope::Secondary && !cfg.applyInSceneView)) {
+    if (!cfg.enabled) {
         bail(VolumetricLightFrameStatus::Disabled);
         return;
     }

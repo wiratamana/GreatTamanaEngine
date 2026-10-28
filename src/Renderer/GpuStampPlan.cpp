@@ -145,7 +145,7 @@ GpuFrameReport ResolveGpuStamps(const GpuStampPlan& plan, std::span<const GpuSta
     for (std::uint32_t r = 0; r < plan.recordCount; ++r) {
         records[r].barrierMs = 0.0f;
         records[r].workMs = 0.0f;
-        records[r].flags = 0;
+        records[r].flags = plan.mode == GpuStampMode::Fine ? std::uint8_t{ 0 } : kGpuRecordBarrierUnmeasured;
         records[r].foldedPasses = 0;
         records[r].state = GpuReadState::Present;
     }

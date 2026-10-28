@@ -46,6 +46,8 @@ struct RenderGraphPassMetadata {
     std::uint32_t indirectDrawCount = 0; // Indirect draws issued; their triangles are GPU-side and not counted above.
     GpuReadState gpuTimingState = GpuReadState::Absent; // State of this pass's GPU record.
     std::optional<double> gpuTimingMilliseconds; // Barrier + work as a number, nullopt unless the status is Present.
+    std::optional<double> gpuBarrierMilliseconds; // Barrier part; nullopt unless Present and the barrier was stamped.
+    std::optional<double> gpuWorkMilliseconds;    // Work part; nullopt unless the status is Present.
     double gpuRecordedMilliseconds = 0.0; // Barrier + work of the record whatever its status; meaningful for Present/Partial only.
     std::uint32_t gpuFoldedPasses = 0; // Passes this record stands for when it is the overflow bucket.
 };

@@ -39,7 +39,7 @@ public:
     FramePresenter(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
         std::uint32_t graphicsQueueFamily, std::uint32_t presentQueueFamily, VkQueue presentQueue, int width,
         int height, VmaAllocator allocator, VkFormat depthFormat, std::shared_ptr<GpuMemoryTracker> memoryTracker,
-        VulkanDevice& vulkanDevice);
+        VulkanDevice& vulkanDevice, PresentPolicy presentPolicy);
     ~FramePresenter();
 
     FramePresenter(const FramePresenter&) = delete;

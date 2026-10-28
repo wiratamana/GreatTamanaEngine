@@ -10,6 +10,7 @@
 #include "../Core.h"
 #include "../Logging.h"
 #include "../Plugins/RenderFeatureCameraData.h"
+#include "../Plugins/RenderFeatureCompositor.h"
 
 #include <cstdint>
 #include <deque>
@@ -146,6 +147,15 @@ private:
         if (!m_core.RegisterRenderPass(ToFrameEvent(registration.stage), registration.name.c_str(),
                 registration.priority, WhileAlive(std::weak_ptr<FeatureLife>(m_life), run), ToCoreBlend(registration.blend))) {
             throw std::runtime_error("Core refused the registration '" + registration.name + "'");
+        }
+        // Once-per-frame and always-on work has no per-view switch.
+        const bool gated = !registration.secondaryViewDefault && registration.stage != Stage::PreOpaqueShared
+            && !registration.gate.always;
+        if (gated) {
+            RenderFeatureCompositor* compositor = m_core.GetRenderFeatureCompositor();
+            if (compositor == nullptr || !compositor->SetFeatureViewEnabled(registration.name, rg::ViewScope::Secondary, false)) {
+                throw std::runtime_error("Core lost the registration '" + registration.name + "'");
+            }
         }
     }
 

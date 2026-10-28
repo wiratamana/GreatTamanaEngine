@@ -118,7 +118,7 @@ void DrawLiveInfo(const ShadowViewSnapshot& game, const ShadowViewSnapshot& scen
         }
         ImGui::EndTable();
     }
-    ImGui::Text("Resolution in use: %u", game.resolutionInUse);
+    ImGui::Text("Resolution in use: Game %u, Scene %u", game.resolutionInUse, scene.resolutionInUse);
     const double megabytes = static_cast<double>(game.cascadeBytes + scene.cascadeBytes) / (1024.0 * 1024.0);
     ImGui::Text("Cascade map memory (Game + Scene): %.1f MB", megabytes);
 }
@@ -150,7 +150,7 @@ bool BuildShadowPanel(EditorContext& /*ctx*/, ShadowSettings& edit, const Shadow
     DrawSdsmLine(game);
 
     ImGui::SeparatorText("Quality");
-    changed |= ComboValue("Map resolution", edit.mapResolution, kResolutions);
+    changed |= ComboValue("Max map resolution", edit.maxMapResolution, kResolutions);
     changed |= ComboValue("Filter samples", edit.filterSamples, kFilterSamples);
     changed |= ImGui::DragFloat("Filter radius (texels)", &edit.filterRadiusTexels, 0.05f, 0.0f, 8.0f);
     changed |= ImGui::SliderFloat("Strength", &edit.strength, 0.0f, 1.0f);

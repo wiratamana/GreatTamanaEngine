@@ -137,6 +137,17 @@ bool RenderFeatureCompositor::Impl::SetFeatureEnabled(const std::string& name, b
     return true;
 }
 
+bool RenderFeatureCompositor::Impl::SetFeatureViewEnabled(const std::string& name, rg::ViewScope scope, bool enabled)
+{
+    if (Entry* entry = FindEntryByName(name)) {
+        entry->scopes.Set(scope, enabled);
+        return true;
+    }
+    bool found = false;
+    ForEachStage([&](auto& list, const char*) { found = list.SetViewEnabled(name, scope, enabled) || found; });
+    return found;
+}
+
 bool RenderFeatureCompositor::Impl::SetFeaturePriority(const std::string& name, std::int32_t priority)
 {
     if (Entry* entry = FindEntryByName(name)) {
@@ -331,6 +342,8 @@ std::vector<RenderFeatureDebugEntry> RenderFeatureCompositor::Impl::DebugSnapsho
             debugEntry.priority = entry.descriptor.priority;
             debugEntry.blendMode = ToString(entry.descriptor.blendMode);
             debugEntry.enabled = IsEffectivelyEnabled(entry.descriptor.name, entry.enabledOverride);
+            debugEntry.enabledPrimary = entry.scopes.primary;
+            debugEntry.enabledSecondary = entry.scopes.secondary;
             debugEntry.isProjectFeature = (entry.owner == RenderFeatureOwner::Project);
             snapshot.push_back(std::move(debugEntry));
         }

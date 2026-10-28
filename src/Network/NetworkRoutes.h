@@ -1081,19 +1081,20 @@ struct ParsedRenderGraphSetPassEnabledQuery {
 ParsedRenderGraphSetPassEnabledQuery ParseRenderGraphSetPassEnabledQuery(
     const std::string& nameParam, const std::string& enabledParam);
 
-// An IDENTICAL shape to ParsedRenderGraphSetPassEnabledQuery above, for
-// GET /render_graph/set_feature_enabled - kept as its own, separate
-// struct/function rather than shared, mirroring this file's own existing
-// precedent of NOT sharing parse logic across genuinely different
-// endpoints even when the shape happens to match exactly.
+// Which view scopes GET /render_graph/set_feature_enabled changes.
+enum class FeatureViewFilter : std::uint8_t { Both, Primary, Secondary };
+
+// GET /render_graph/set_feature_enabled: "name" non-empty, "enabled" exactly "true"/"false", optional "view" =
+// "primary" | "secondary" (absent or empty means both scopes).
 struct ParsedRenderGraphSetFeatureEnabledQuery {
     bool valid = false;
     std::string errorMessage;
     std::string name;
     bool enabled = false;
+    FeatureViewFilter view = FeatureViewFilter::Both;
 };
 ParsedRenderGraphSetFeatureEnabledQuery ParseRenderGraphSetFeatureEnabledQuery(
-    const std::string& nameParam, const std::string& enabledParam);
+    const std::string& nameParam, const std::string& enabledParam, const std::string& viewParam);
 
 // Parsed, validated GET /render_graph/set_feature_priority query. "name"
 // must be non-empty; "priority" must parse as a valid base-10 integer

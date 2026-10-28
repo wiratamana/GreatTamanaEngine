@@ -127,7 +127,6 @@ ShadowViewSnapshot ShadowFeature::Snapshot(rg::ViewScope scope) const
 void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
 {
     const ShadowSettings& cfg = m_settings;
-    const std::uint32_t resolution = cfg.mapResolution;
     ShadowViewState& view = m_views.For(f.Scope());
 
     // A pass that records no cluster chain still advances the idle count so held buffers are released.
@@ -174,7 +173,13 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
         view.sdsm = ShadowSdsmState{};
     }
 
-    const ShadowCascadeSet set = BuildShadowCascades(frustum, sun.directionTowardSun, cfg, resolution, sdsmRange);
+    // The view size picks the map size; a change applies only after it held for a while (a resize idles the GPU).
+    const std::uint32_t previousResolution = view.resolution.current;
+    const std::uint32_t targetResolution =
+        EffectiveShadowResolution(cfg.maxMapResolution, f.View().extent.width, f.View().extent.height);
+    std::uint32_t resolution = StepShadowResolution(view.resolution, targetResolution);
+
+    ShadowCascadeSet set = BuildShadowCascades(frustum, sun.directionTowardSun, cfg, resolution, sdsmRange);
     snap.cascades = set;
     if (!set.valid) {
         finish(ShadowFrameStatus::NoValidCamera);
@@ -185,6 +190,26 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
     bool allEnabled = true;
     for (std::uint32_t c = 0; c < set.count; ++c) {
         allEnabled = allEnabled && f.PassEnabled(kCascadeDrawNames[c]);
+    }
+
+    // All maps share one size. A refused resize goes back to the previous size and retries later.
+    std::array<fx::Texture, kMaxShadowCascades> maps{};
+    const auto acquireMaps = [&](std::uint32_t size) {
+        bool ok = true;
+        for (std::uint32_t c = 0; c < set.count; ++c) {
+            maps[c] = view.maps[c].Acquire(f, fx::DepthOnly{ size });
+            ok = ok && maps[c].IsValid();
+        }
+        return ok;
+    };
+    if (allEnabled && !acquireMaps(resolution) && resolution != previousResolution) {
+        RefuseShadowResolution(view.resolution, previousResolution);
+        if (previousResolution != 0) {
+            resolution = previousResolution;
+            set = BuildShadowCascades(frustum, sun.directionTowardSun, cfg, resolution, sdsmRange);
+            snap.cascades = set;
+            acquireMaps(resolution);
+        }
     }
 
     // The Map channel is published only when every active cascade pass was recorded.
@@ -199,7 +224,7 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
     };
 
     for (std::uint32_t c = 0; allEnabled && c < set.count; ++c) {
-        const fx::Texture map = view.maps[c].Acquire(f, fx::DepthOnly{ resolution });
+        const fx::Texture map = maps[c];
         if (!map.IsValid()) {
             fail(ShadowFrameStatus::TargetFailed);
             continue;

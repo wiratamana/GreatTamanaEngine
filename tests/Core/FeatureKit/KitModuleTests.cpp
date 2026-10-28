@@ -275,5 +275,62 @@ TEST(KitModuleCoreTest, AFeatureRegistersItsPassesAndAnInertCallbackSurvivesTheM
     EXPECT_EQ(calls, 0);
 }
 
+struct SecondaryOffFeature final : Feature {
+    const char* Name() const override { return "KitScopeTest"; }
+
+    void Setup(FeatureSetup& setup) override
+    {
+        setup.PreOpaque("KitScopeTest.Stamp", 1, [](PreOpaqueFrame&) {}, Gate::Always());
+        setup.DefaultSecondaryViewEnabled(false);
+        setup.PreOpaqueShared("KitScopeTest.Shared", 2, [](SharedFrame&) {});
+        setup.PostOpaque("KitScopeTest.Post", 3, [](PostOpaqueFrame&) {});
+        setup.PostComposite("KitScopeTest.Composite", 4, Blend::AlphaOver, [](CompositeFrame&) {});
+    }
+};
+
+const RenderFeatureDebugEntry* FindEntry(const std::vector<RenderFeatureDebugEntry>& snapshot, const std::string& name)
+{
+    for (const RenderFeatureDebugEntry& entry : snapshot) {
+        if (entry.name == name) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+TEST(KitModuleCoreTest, ASecondaryViewDefaultOffGatesPerViewPassesButNeverSharedOrAlwaysOnes)
+{
+    HeadlessSurfaceProvider surface;
+    NoopHostServices services;
+    std::unique_ptr<Core> core = TryMakeCore(surface, services);
+    if (core == nullptr) {
+        GTEST_SKIP() << "Core construction needs headless Vulkan, which this machine lacks.";
+    }
+
+    std::unique_ptr<IEngineFeatureModule> module =
+        detail::MakeModule(*core, "KitScopeTest", [](FeatureHost&) { return std::make_unique<SecondaryOffFeature>(); });
+    ASSERT_NE(module, nullptr);
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+    const std::vector<RenderFeatureDebugEntry> snapshot = compositor->DebugSnapshot();
+
+    const RenderFeatureDebugEntry* stamp = FindEntry(snapshot, "KitScopeTest.Stamp");
+    const RenderFeatureDebugEntry* shared = FindEntry(snapshot, "KitScopeTest.Shared");
+    const RenderFeatureDebugEntry* post = FindEntry(snapshot, "KitScopeTest.Post");
+    const RenderFeatureDebugEntry* composite = FindEntry(snapshot, "KitScopeTest.Composite");
+    ASSERT_NE(stamp, nullptr);
+    ASSERT_NE(shared, nullptr);
+    ASSERT_NE(post, nullptr);
+    ASSERT_NE(composite, nullptr);
+
+    EXPECT_TRUE(stamp->enabledSecondary);
+    EXPECT_TRUE(shared->enabledSecondary);
+    EXPECT_TRUE(post->enabledPrimary);
+    EXPECT_FALSE(post->enabledSecondary);
+    EXPECT_TRUE(composite->enabledPrimary);
+    EXPECT_FALSE(composite->enabledSecondary);
+}
+
 } // namespace
 } // namespace gte::fx

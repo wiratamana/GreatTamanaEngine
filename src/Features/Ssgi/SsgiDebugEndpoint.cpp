@@ -44,7 +44,6 @@ constexpr std::array kSettingKeys{
     SettingKey{ "temporal", &SsgiSettings::temporal },
     SettingKey{ "historyWeight", &SsgiSettings::historyWeight },
     SettingKey{ "depthSigma", &SsgiSettings::depthSigma },
-    SettingKey{ "applyInSceneView", &SsgiSettings::applyInSceneView },
 };
 
 constexpr std::string_view kDebugViewKey = "debugView";

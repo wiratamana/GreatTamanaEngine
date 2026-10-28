@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -169,6 +170,37 @@ TEST(RenderFeatureCompositorPostOpaqueTest, SetFeatureEnabledAndSetFeaturePriori
         FindByName(compositor->DebugSnapshot(), "POp_Test_EnabledAndPriority");
     ASSERT_NE(foundAfterPriority, nullptr);
     EXPECT_EQ(foundAfterPriority->priority, 42);
+}
+
+TEST(RenderFeatureCompositorPostOpaqueTest, SetFeatureViewEnabledChangesOnlyThatScopeFlag)
+{
+    GTE_SKIP_IF_NO_HEADLESS_CORE(core);
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_ViewFlags", 5,
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
+    const RenderFeatureDebugEntry* fresh = FindByName(compositor->DebugSnapshot(), "POp_Test_ViewFlags");
+    ASSERT_NE(fresh, nullptr);
+    EXPECT_TRUE(fresh->enabledPrimary);
+    EXPECT_TRUE(fresh->enabledSecondary);
+
+    EXPECT_TRUE(compositor->SetFeatureViewEnabled("POp_Test_ViewFlags", rg::ViewScope::Secondary, false));
+    const RenderFeatureDebugEntry* after = FindByName(compositor->DebugSnapshot(), "POp_Test_ViewFlags");
+    ASSERT_NE(after, nullptr);
+    EXPECT_TRUE(after->enabled);
+    EXPECT_TRUE(after->enabledPrimary);
+    EXPECT_FALSE(after->enabledSecondary);
+
+    const std::vector<SceneStageEntry>& entries = compositor->StageFeaturesInPriorityOrder<CompositorStage::PostOpaque>();
+    const auto it = std::find_if(entries.begin(), entries.end(),
+        [](const SceneStageEntry& entry) { return entry.name == "POp_Test_ViewFlags"; });
+    ASSERT_NE(it, entries.end());
+    EXPECT_TRUE(RunsInScope(it->enabledOverride, it->scopes, rg::ViewScope::Primary));
+    EXPECT_FALSE(RunsInScope(it->enabledOverride, it->scopes, rg::ViewScope::Secondary));
+
+    EXPECT_FALSE(compositor->SetFeatureViewEnabled("POp_Test_NoSuchFeature", rg::ViewScope::Primary, false));
 }
 
 // A same-priority collision between two PostOpaque entries falls back to the

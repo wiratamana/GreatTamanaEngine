@@ -580,6 +580,8 @@ TEST(BuildRenderGraphMetadataResponseJsonTests, PopulatedMetadataRoundTripsEvery
     EXPECT_EQ(parsed["render_features"][0]["name"].get<std::string>(), "Vignette");
     EXPECT_EQ(parsed["render_features"][0]["stage"].get<std::string>(), "PreUI");
     EXPECT_EQ(parsed["render_features"][0]["priority"].get<std::int32_t>(), 1);
+    EXPECT_TRUE(parsed["render_features"][0]["enabled_primary"].get<bool>());
+    EXPECT_TRUE(parsed["render_features"][0]["enabled_secondary"].get<bool>());
 }
 
 TEST(BuildRenderGraphMetadataResponseJsonTests, ViewScopeLabelsAndTimingTextAreMappedForTheHttpContract)
@@ -613,6 +615,38 @@ TEST(BuildRenderGraphMetadataResponseJsonTests, ViewScopeLabelsAndTimingTextAreM
     EXPECT_TRUE(passes[1]["gpu_timing_milliseconds"].is_null());
     EXPECT_EQ(passes[2]["view_scope"].get<std::string>(), "Shared");
     EXPECT_EQ(passes[2]["gpu_timing_text"].get<std::string>(), "Absent");
+}
+
+TEST(BuildRenderGraphMetadataResponseJsonTests, PassGpuTimingKeysAreSplitAndNullWhenNotMeasured)
+{
+    gte::rg::RenderGraphMetadata metadata;
+    gte::rg::RenderGraphPassMetadata fine;
+    fine.gpuTimingState = gte::GpuReadState::Present;
+    fine.gpuTimingMilliseconds = 3.0;
+    fine.gpuBarrierMilliseconds = 1.0;
+    fine.gpuWorkMilliseconds = 2.0;
+    gte::rg::RenderGraphPassMetadata coarse; // Barrier not stamped.
+    coarse.gpuTimingState = gte::GpuReadState::Present;
+    coarse.gpuTimingMilliseconds = 2.0;
+    coarse.gpuWorkMilliseconds = 2.0;
+    gte::rg::RenderGraphPassMetadata absent;
+    metadata.offscreenRegime.passes = { fine, coarse, absent };
+
+    const nlohmann::json parsed = nlohmann::json::parse(BuildRenderGraphMetadataResponseJson(metadata));
+    const nlohmann::json& passes = parsed["offscreen_regime"]["passes"];
+    ASSERT_EQ(passes.size(), 3u);
+
+    for (const nlohmann::json& pass : passes) {
+        EXPECT_TRUE(pass.contains("gpu_timing_milliseconds"));
+        EXPECT_TRUE(pass.contains("gpu_barrier_milliseconds"));
+        EXPECT_TRUE(pass.contains("gpu_work_milliseconds"));
+    }
+    EXPECT_DOUBLE_EQ(passes[0]["gpu_barrier_milliseconds"].get<double>(), 1.0);
+    EXPECT_DOUBLE_EQ(passes[0]["gpu_work_milliseconds"].get<double>(), 2.0);
+    EXPECT_TRUE(passes[1]["gpu_barrier_milliseconds"].is_null());
+    EXPECT_DOUBLE_EQ(passes[1]["gpu_work_milliseconds"].get<double>(), 2.0);
+    EXPECT_TRUE(passes[2]["gpu_barrier_milliseconds"].is_null());
+    EXPECT_TRUE(passes[2]["gpu_work_milliseconds"].is_null());
 }
 
 TEST(BuildRenderGraphMetadataResponseJsonTests, CarriesGpuWaitAndGpuMemoryObjects)
@@ -1514,19 +1548,36 @@ TEST(ParseRenderGraphSetPassEnabledQueryTests, RejectsMissingOrInvalidEnabled)
 
 TEST(ParseRenderGraphSetFeatureEnabledQueryTests, AcceptsValidNameAndBool)
 {
-    const ParsedRenderGraphSetFeatureEnabledQuery result = ParseRenderGraphSetFeatureEnabledQuery("DemoRenderFeatureV2", "false");
+    const ParsedRenderGraphSetFeatureEnabledQuery result =
+        ParseRenderGraphSetFeatureEnabledQuery("DemoRenderFeatureV2", "false", "");
     ASSERT_TRUE(result.valid) << result.errorMessage;
     EXPECT_EQ(result.name, "DemoRenderFeatureV2");
     EXPECT_FALSE(result.enabled);
+    EXPECT_EQ(result.view, gte::Network::FeatureViewFilter::Both);
+}
+
+TEST(ParseRenderGraphSetFeatureEnabledQueryTests, ViewParamSelectsOneScopeOrIsRejected)
+{
+    const ParsedRenderGraphSetFeatureEnabledQuery primary = ParseRenderGraphSetFeatureEnabledQuery("Demo", "true", "primary");
+    ASSERT_TRUE(primary.valid) << primary.errorMessage;
+    EXPECT_EQ(primary.view, gte::Network::FeatureViewFilter::Primary);
+
+    const ParsedRenderGraphSetFeatureEnabledQuery secondary =
+        ParseRenderGraphSetFeatureEnabledQuery("Demo", "true", "secondary");
+    ASSERT_TRUE(secondary.valid) << secondary.errorMessage;
+    EXPECT_EQ(secondary.view, gte::Network::FeatureViewFilter::Secondary);
+
+    EXPECT_FALSE(ParseRenderGraphSetFeatureEnabledQuery("Demo", "true", "shared").valid);
+    EXPECT_FALSE(ParseRenderGraphSetFeatureEnabledQuery("Demo", "true", "Primary").valid);
 }
 
 TEST(ParseRenderGraphSetFeatureEnabledQueryTests, RejectsEmptyNameOrInvalidEnabled)
 {
-    const ParsedRenderGraphSetFeatureEnabledQuery emptyName = ParseRenderGraphSetFeatureEnabledQuery("", "true");
+    const ParsedRenderGraphSetFeatureEnabledQuery emptyName = ParseRenderGraphSetFeatureEnabledQuery("", "true", "");
     EXPECT_FALSE(emptyName.valid);
     EXPECT_EQ(emptyName.errorMessage, "missing or invalid required query parameter: name - must be non-empty");
 
-    const ParsedRenderGraphSetFeatureEnabledQuery badBool = ParseRenderGraphSetFeatureEnabledQuery("Demo", "nope");
+    const ParsedRenderGraphSetFeatureEnabledQuery badBool = ParseRenderGraphSetFeatureEnabledQuery("Demo", "nope", "");
     EXPECT_FALSE(badBool.valid);
     EXPECT_EQ(badBool.errorMessage, "missing or invalid required query parameter: enabled - must be \"true\" or \"false\"");
 }

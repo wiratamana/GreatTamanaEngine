@@ -57,7 +57,6 @@ enum class VolumetricLightReceiverState : std::uint8_t { NotChecked, Used, Missi
 // Tunables. Stored only through SanitizeVolumetricLightSettings().
 struct VolumetricLightSettings {
     bool enabled = true;
-    bool applyInSceneView = true;     // false skips the editor Scene view.
 
     // Medium.
     float density = 0.010f;           // Extinction per world unit, 0..1.

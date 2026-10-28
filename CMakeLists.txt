@@ -801,6 +801,7 @@ add_library(gte_core STATIC
     src/Renderer/OffscreenRecording.h
     src/Renderer/PresentRecoveryPlan.cpp
     src/Renderer/PresentRecoveryPlan.h
+    src/Renderer/PresentPolicy.h
     src/Renderer/GpuStampPlan.cpp
     src/Renderer/GpuStampPlan.h
     src/Renderer/GpuClockCalibration.cpp

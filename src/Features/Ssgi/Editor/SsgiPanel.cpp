@@ -85,7 +85,6 @@ bool BuildSsgiPanel(SsgiSettings& edit, const SsgiViewSnapshot& game, const Ssgi
     changed |= ImGui::Checkbox("Temporal", &edit.temporal);
     changed |= ImGui::SliderFloat("History weight", &edit.historyWeight, 0.0f, 0.98f);
     changed |= ImGui::SliderFloat("Depth sigma", &edit.depthSigma, 0.001f, 0.5f, "%.3f", ImGuiSliderFlags_Logarithmic);
-    changed |= ImGui::Checkbox("Apply in Scene view", &edit.applyInSceneView);
 
     ImGui::SeparatorText("Debug");
     int view = static_cast<int>(edit.debugView);

@@ -72,6 +72,10 @@ RenderGraphPassMetadata BuildPassMetadata(const RenderGraphPassSnapshot& pass)
         static_cast<double>(pass.stats.gpu.barrierMs) + static_cast<double>(pass.stats.gpu.workMs);
     if (pass.stats.gpu.state == GpuReadState::Present) {
         metadata.gpuTimingMilliseconds = metadata.gpuRecordedMilliseconds;
+        metadata.gpuWorkMilliseconds = static_cast<double>(pass.stats.gpu.workMs);
+        if ((pass.stats.gpu.flags & kGpuRecordBarrierUnmeasured) == 0) {
+            metadata.gpuBarrierMilliseconds = static_cast<double>(pass.stats.gpu.barrierMs);
+        }
     }
 
     return metadata;

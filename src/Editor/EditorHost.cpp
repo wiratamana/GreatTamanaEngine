@@ -394,12 +394,12 @@ EditorHost::SdlContext::~SdlContext()
     SDL_Quit();
 }
 
-EditorHost::EditorHost(const std::string& title, int width, int height, bool forceGpuValidation)
+EditorHost::EditorHost(const std::string& title, int width, int height, bool forceGpuValidation, PresentPolicy presentPolicy)
     : m_sdlContext()
     , m_window(title, width, height)
     // m_core is built from m_window (ISurfaceProvider) and m_hostServices (IHostServices); both exist by now.
     , m_hostServices()
-    , m_core(m_window, m_hostServices, forceGpuValidation)
+    , m_core(m_window, m_hostServices, forceGpuValidation, presentPolicy)
     // References bound to m_core's own instances.
     , m_renderer(m_core.GetRenderer())
     , m_renderGraph(m_core.GetRenderGraph())
@@ -780,8 +780,18 @@ int EditorHost::Run()
                     rgcResult.success = false;
                     rgcResult.errorMessage = "no render feature compositor available this session";
                 } else {
-                    rgcResult.success = compositor->SetFeatureEnabled(
-                        rgcRequest->setFeatureEnabled.name, rgcRequest->setFeatureEnabled.enabled);
+                    const RenderGraphControlSetFeatureEnabledCommand& toggle = rgcRequest->setFeatureEnabled;
+                    if (toggle.view == RenderGraphControlViewFilter::Both) {
+                        // Both scopes: the global override and both scope flags.
+                        rgcResult.success = compositor->SetFeatureEnabled(toggle.name, toggle.enabled)
+                            && compositor->SetFeatureViewEnabled(toggle.name, rg::ViewScope::Primary, toggle.enabled)
+                            && compositor->SetFeatureViewEnabled(toggle.name, rg::ViewScope::Secondary, toggle.enabled);
+                    } else {
+                        const rg::ViewScope scope = toggle.view == RenderGraphControlViewFilter::Primary
+                            ? rg::ViewScope::Primary
+                            : rg::ViewScope::Secondary;
+                        rgcResult.success = compositor->SetFeatureViewEnabled(toggle.name, scope, toggle.enabled);
+                    }
                     if (!rgcResult.success) {
                         rgcResult.errorMessage =
                             "\"" + rgcRequest->setFeatureEnabled.name + "\" matches no loaded plugin render feature.";
@@ -1191,6 +1201,7 @@ int EditorHost::Run()
             const ClockCalibration clock = m_renderer.GpuClockCalibration();
             Profiling::SnapshotInputs profilerInputs;
             profilerInputs.deviceLost = m_renderer.DeviceLost();
+            profilerInputs.presentUncapped = m_renderer.GetPresentPolicy() == PresentPolicy::Uncapped;
             profilerInputs.consecutiveFrameTimeouts = m_renderer.GpuWaitConsecutiveFrameTimeouts();
             profilerInputs.abandonedObjects = m_renderer.AbandonedObjectCount();
             profilerInputs.gpuClockAligned = clock.state == ClockCalibrationState::Present;

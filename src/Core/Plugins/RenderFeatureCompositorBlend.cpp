@@ -44,14 +44,18 @@ bool RenderFeatureCompositor::Impl::DispatchBlend(rg::RenderGraphBuilder& builde
 void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
     const rg::RenderPassFrameContext& frame, std::vector<rg::RenderPassDesc>&)
 {
+    // Views other than the primary view share the secondary view's identity.
+    const bool isPrimaryView = TranslateLegacyViewScope(frame.currentView) == rg::ViewScope::Primary;
+    const rg::ViewScope scope = isPrimaryView ? rg::ViewScope::Primary : rg::ViewScope::Secondary;
+
     std::vector<Entry> combinedList;
     combinedList.reserve(postComposite.size() + preUi.size());
     combinedList.insert(combinedList.end(), postComposite.begin(), postComposite.end());
     combinedList.insert(combinedList.end(), preUi.begin(), preUi.end());
 
     combinedList.erase(std::remove_if(combinedList.begin(), combinedList.end(),
-        [this](const Entry& entry) {
-            return !IsEffectivelyEnabled(entry.descriptor.name, entry.enabledOverride);
+        [this, scope](const Entry& entry) {
+            return !RunsInScope(IsEffectivelyEnabled(entry.descriptor.name, entry.enabledOverride), entry.scopes, scope);
         }), combinedList.end());
     if (combinedList.empty()) {
         return;
@@ -62,9 +66,6 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
         return;
     }
 
-    // Views other than the primary view share the secondary view's identity.
-    const bool isPrimaryView = TranslateLegacyViewScope(frame.currentView) == rg::ViewScope::Primary;
-    const rg::ViewScope scope = isPrimaryView ? rg::ViewScope::Primary : rg::ViewScope::Secondary;
     const std::string viewName = isPrimaryView ? kPrimaryViewName : kSecondaryViewName;
     const Extent2D extent{ resolved->extent.width, resolved->extent.height };
     frame.finalTextureOutputs.push_back(resolved->target);

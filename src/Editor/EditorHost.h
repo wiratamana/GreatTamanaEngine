@@ -35,7 +35,9 @@ namespace gte {
 class EditorHost {
 public:
     // `forceGpuValidation` turns the GPU API validation on in any build type.
-    EditorHost(const std::string& title, int width, int height, bool forceGpuValidation);
+    // `presentPolicy` Uncapped removes the vsync cap (benchmarks).
+    EditorHost(const std::string& title, int width, int height, bool forceGpuValidation,
+        PresentPolicy presentPolicy = PresentPolicy::Capped);
     ~EditorHost() = default;
 
     EditorHost(const EditorHost&) = delete;

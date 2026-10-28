@@ -14,8 +14,8 @@ namespace gte {
 
 namespace {
 
-// One row per registered render-feature entry: an "Enabled" checkbox and an editable priority field.
-// Both edit `renderFeatureCompositor` directly; with a null compositor the widgets render but edits are no-ops.
+// One row per registered render feature: enabled, primary and secondary view flags, and an editable priority.
+// Edits go to `renderFeatureCompositor`; with a null compositor they are no-ops.
 void BuildRenderFeaturesSection(
     const std::vector<RenderFeatureDebugEntry>& entries, RenderFeatureCompositor* renderFeatureCompositor)
 {
@@ -32,6 +32,18 @@ void BuildRenderFeaturesSection(
         bool enabled = entry.enabled;
         if (ImGui::Checkbox("##FeatureEnabled", &enabled) && renderFeatureCompositor != nullptr) {
             renderFeatureCompositor->SetFeatureEnabled(entry.name, enabled);
+        }
+        ImGui::SameLine();
+
+        // One flag per view scope; the feature runs in a scope when it is enabled and that flag is on.
+        bool primary = entry.enabledPrimary;
+        if (ImGui::Checkbox("P##FeaturePrimary", &primary) && renderFeatureCompositor != nullptr) {
+            renderFeatureCompositor->SetFeatureViewEnabled(entry.name, rg::ViewScope::Primary, primary);
+        }
+        ImGui::SameLine();
+        bool secondary = entry.enabledSecondary;
+        if (ImGui::Checkbox("S##FeatureSecondary", &secondary) && renderFeatureCompositor != nullptr) {
+            renderFeatureCompositor->SetFeatureViewEnabled(entry.name, rg::ViewScope::Secondary, secondary);
         }
         ImGui::SameLine();
 

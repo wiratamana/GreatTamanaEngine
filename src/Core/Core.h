@@ -61,7 +61,8 @@ struct FrameStats {
 class Core {
 public:
     // `forceGpuValidation` turns the GPU API validation on in any build type.
-    Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices, bool forceGpuValidation = false);
+    Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices, bool forceGpuValidation = false,
+        PresentPolicy presentPolicy = PresentPolicy::Capped);
 
     // Defined out-of-line in Core.cpp to support incomplete types in unique_ptr.
     ~Core();

@@ -1358,7 +1358,7 @@ ParsedRenderGraphSetPassEnabledQuery ParseRenderGraphSetPassEnabledQuery(
 }
 
 ParsedRenderGraphSetFeatureEnabledQuery ParseRenderGraphSetFeatureEnabledQuery(
-    const std::string& nameParam, const std::string& enabledParam)
+    const std::string& nameParam, const std::string& enabledParam, const std::string& viewParam)
 {
     ParsedRenderGraphSetFeatureEnabledQuery result;
     if (nameParam.empty()) {
@@ -1371,6 +1371,16 @@ ParsedRenderGraphSetFeatureEnabledQuery ParseRenderGraphSetFeatureEnabledQuery(
         result.enabled = false;
     } else {
         result.errorMessage = "missing or invalid required query parameter: enabled - must be \"true\" or \"false\"";
+        return result;
+    }
+    if (viewParam.empty()) {
+        result.view = FeatureViewFilter::Both;
+    } else if (viewParam == "primary") {
+        result.view = FeatureViewFilter::Primary;
+    } else if (viewParam == "secondary") {
+        result.view = FeatureViewFilter::Secondary;
+    } else {
+        result.errorMessage = "invalid query parameter: view - must be \"primary\" or \"secondary\"";
         return result;
     }
     result.name = nameParam;

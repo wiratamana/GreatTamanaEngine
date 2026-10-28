@@ -227,6 +227,18 @@ TEST(GpuStampPlanTest, BucketKeepsTheIdentityAndMakesTheFrameLookPartial)
     EXPECT_EQ(frame.records[0].foldedPasses, 0u);
 }
 
+TEST(GpuStampPlanTest, OnlyCoarseRecordsMarkTheBarrierAsUnmeasured)
+{
+    Frame coarse = BuildFrame({ { 0.0, 1.0, false }, { 0.0, 2.0, false } }, GpuStampMode::Coarse, 8, 0.5);
+    Resolve(coarse);
+    EXPECT_EQ(coarse.records[0].flags & kGpuRecordBarrierUnmeasured, kGpuRecordBarrierUnmeasured);
+    EXPECT_EQ(coarse.records[1].flags & kGpuRecordBarrierUnmeasured, kGpuRecordBarrierUnmeasured);
+
+    Frame fine = BuildFrame({ { 0.5, 1.0, false } }, GpuStampMode::Fine, 8, 0.5);
+    Resolve(fine);
+    EXPECT_EQ(fine.records[0].flags & kGpuRecordBarrierUnmeasured, 0);
+}
+
 TEST(GpuStampPlanTest, OutOfOrderStampsGiveErrorAndAreNotSummed)
 {
     Frame frame = BuildFrame({ { 0.5, 1.0, false }, { 0.5, 2.0, false }, { 0.5, 3.0, false } }, GpuStampMode::Fine,

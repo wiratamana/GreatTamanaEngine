@@ -7,6 +7,7 @@
 #include "../Application/ProfilerSnapshotBridge.h"
 #include "../Core/GpuViewMetrics.h"
 #include "../Profiling/ProfilerSnapshotBuilder.h"
+#include "../Renderer/PresentPolicy.h"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -220,6 +221,7 @@ nlohmann::json ProfilerSnapshotToJson(const ProfilerSnapshot& snapshot)
 
     nlohmann::json device = nlohmann::json::object();
     device["device_lost"] = snapshot.device.deviceLost;
+    device["present_policy"] = PresentPolicyName(snapshot.device.presentUncapped ? PresentPolicy::Uncapped : PresentPolicy::Capped);
     device["consecutive_frame_timeouts"] = MetricToJson(snapshot.device.consecutiveFrameTimeouts);
     device["abandoned_objects"] = MetricToJson(snapshot.device.abandonedObjects);
     out["device_state"] = std::move(device);

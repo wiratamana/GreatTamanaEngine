@@ -35,6 +35,7 @@ struct ShadowViewState {
     fx::GpuParams<ShadowMaskParamsGpu> params;
     fx::GpuReadback<ShadowDepthRangeGpu> depthRange{ "Shadow.DepthRange" };
     ShadowSdsmState sdsm;
+    ShadowResolutionState resolution; // Size of the cascade maps of this view.
     ShadowViewSnapshot snapshot;
 };
 

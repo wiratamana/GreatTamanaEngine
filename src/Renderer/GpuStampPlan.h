@@ -40,6 +40,7 @@ enum class GpuReadCall : std::uint8_t { Ok, NotReady, Failed };
 inline constexpr std::uint8_t kGpuRecordSkipped = 1;        // The pass was declared but did not execute.
 inline constexpr std::uint8_t kGpuRecordOverflowBucket = 2; // The record stands for several folded passes.
 inline constexpr std::uint8_t kGpuRecordStampOrder = 4;     // The stamps were out of order; times are not summed.
+inline constexpr std::uint8_t kGpuRecordBarrierUnmeasured = 8; // Coarse stamps: barrierMs is not a measurement.
 
 // One executed pass of one frame, in execution order.
 struct GpuPassRecord {

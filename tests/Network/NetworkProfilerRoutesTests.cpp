@@ -239,7 +239,8 @@ TEST(ProfilerRoutesJsonTest, TheOverviewKeysArePinned)
     EXPECT_EQ(KeysOf(document["drops"]),
         (std::set<std::string>{ "late_scopes", "foreign_scopes", "lost_worker_events", "dropped_scopes", "dropped_gpu_frames" }));
     EXPECT_EQ(KeysOf(document["device_state"]),
-        (std::set<std::string>{ "device_lost", "consecutive_frame_timeouts", "abandoned_objects" }));
+        (std::set<std::string>{ "device_lost", "present_policy", "consecutive_frame_timeouts", "abandoned_objects" }));
+    EXPECT_EQ(document["device_state"]["present_policy"], "capped");
     EXPECT_EQ(KeysOf(document["live_block"][0]), (std::set<std::string>{ "thread_slot", "site", "detail", "elapsed" }));
     EXPECT_EQ(KeysOf(document["scopes"][0]), (std::set<std::string>{ "name", "total", "self", "calls" }));
     EXPECT_EQ(KeysOf(document["checks"][0]), (std::set<std::string>{ "id", "status", "count", "text" }));

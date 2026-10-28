@@ -100,5 +100,12 @@ TEST(GpuDrivenScenePanelTextTest, CountLines)
     EXPECT_EQ(CpuPathLine(v), "CPU path: 7 tested, 2 culled, 1 kept without bounds (last frame)");
 }
 
+TEST(GpuDrivenScenePanelTextTest, HelpLineMentionsMillisecondsAndNoVsync)
+{
+    const std::string_view help = CullHelpLine();
+    EXPECT_NE(help.find("milliseconds"), std::string_view::npos);
+    EXPECT_NE(help.find("--no-vsync"), std::string_view::npos);
+}
+
 } // namespace
 } // namespace gte

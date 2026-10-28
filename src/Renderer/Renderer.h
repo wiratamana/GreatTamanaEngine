@@ -72,8 +72,12 @@ class VolumeTexturePreviewRenderer;
 class Renderer {
 public:
     // `forceValidation` turns API validation on in any build type (it is on by default in debug builds only).
-    explicit Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation);
+    // `presentPolicy` is fixed for the renderer's lifetime; Uncapped is for benchmarks.
+    explicit Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation,
+        PresentPolicy presentPolicy = PresentPolicy::Capped);
     ~Renderer();
+
+    PresentPolicy GetPresentPolicy() const noexcept { return m_presentPolicy; }
 
     // Logs once whether API validation is on, off, or was requested but is not installed.
     void LogValidationState() const;
@@ -389,6 +393,7 @@ private:
     VulkanDevice m_device;
 
     VkFormat m_depthFormat = VK_FORMAT_UNDEFINED;
+    PresentPolicy m_presentPolicy = PresentPolicy::Capped;
 
     std::shared_ptr<GpuMemoryTracker> m_memoryTracker = std::make_shared<GpuMemoryTracker>();
 

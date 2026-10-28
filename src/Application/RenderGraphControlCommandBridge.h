@@ -25,9 +25,13 @@ struct RenderGraphControlSetPassEnabledCommand {
     bool enabled = false;
 };
 
+// Which view scopes a feature toggle changes.
+enum class RenderGraphControlViewFilter { Both, Primary, Secondary };
+
 struct RenderGraphControlSetFeatureEnabledCommand {
     std::string name;
     bool enabled = false;
+    RenderGraphControlViewFilter view = RenderGraphControlViewFilter::Both;
 };
 
 struct RenderGraphControlSetFeaturePriorityCommand {

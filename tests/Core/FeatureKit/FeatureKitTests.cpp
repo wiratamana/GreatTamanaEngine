@@ -3,6 +3,7 @@
 
 #include "Core/FeatureKit/FeatureKit.h"
 #include "Core/FeatureKit/FrameContext.h"
+#include "Core/Plugins/ViewScopeEnable.h"
 #include "ECS/Registry.h"
 #include "Renderer/RenderGraph/RenderPassToggleRegistry.h"
 
@@ -211,6 +212,65 @@ TEST(FxFeatureSetupTest, EveryStageHasItsVerb)
     EXPECT_EQ(setup.Registrations()[0].stage, Stage::PostTransparent);
     EXPECT_EQ(setup.Registrations()[1].stage, Stage::PreUI);
     EXPECT_EQ(setup.Registrations()[2].stage, Stage::PreOpaqueShared);
+}
+
+TEST(FxFeatureSetupTest, RegistrationsStartEnabledInTheSecondaryViewUnlessTheDefaultIsChanged)
+{
+    FeatureSetup setup;
+    setup.PreOpaque("A", 0, [](PreOpaqueFrame&) {});
+    setup.DefaultSecondaryViewEnabled(false);
+    setup.PostOpaque("B", 0, [](PostOpaqueFrame&) {});
+    setup.PostComposite("C", 0, Blend::AlphaOver, [](CompositeFrame&) {});
+    setup.DefaultSecondaryViewEnabled(true);
+    setup.PostTransparent("D", 0, [](PostOpaqueFrame&) {});
+
+    ASSERT_TRUE(setup.Errors().empty());
+    ASSERT_EQ(setup.Registrations().size(), 4u);
+    EXPECT_TRUE(setup.Registrations()[0].secondaryViewDefault);
+    EXPECT_FALSE(setup.Registrations()[1].secondaryViewDefault);
+    EXPECT_FALSE(setup.Registrations()[2].secondaryViewDefault);
+    EXPECT_TRUE(setup.Registrations()[3].secondaryViewDefault);
+}
+
+// --- ViewScopeEnable -------------------------------------------------------------
+
+TEST(ViewScopeEnableTest, FlagsDefaultOnAndSetOnlyTouchesTheNamedScope)
+{
+    ViewScopeEnable flags;
+    EXPECT_TRUE(flags.Allows(rg::ViewScope::Primary));
+    EXPECT_TRUE(flags.Allows(rg::ViewScope::Secondary));
+
+    flags.Set(rg::ViewScope::Secondary, false);
+    EXPECT_TRUE(flags.Allows(rg::ViewScope::Primary));
+    EXPECT_FALSE(flags.Allows(rg::ViewScope::Secondary));
+
+    flags.Set(rg::ViewScope::Shared, false); // No flag for the shared scope: nothing changes.
+    EXPECT_TRUE(flags.primary);
+    EXPECT_FALSE(flags.secondary);
+}
+
+TEST(ViewScopeEnableTest, TheSharedScopeIsNeverGated)
+{
+    ViewScopeEnable off;
+    off.primary = false;
+    off.secondary = false;
+    EXPECT_TRUE(off.Allows(rg::ViewScope::Shared));
+}
+
+TEST(ViewScopeEnableTest, RunsInScopeIsGlobalAndScopeFlag)
+{
+    for (const bool global : { false, true }) {
+        for (const bool primary : { false, true }) {
+            for (const bool secondary : { false, true }) {
+                ViewScopeEnable flags;
+                flags.primary = primary;
+                flags.secondary = secondary;
+                EXPECT_EQ(RunsInScope(global, flags, rg::ViewScope::Primary), global && primary);
+                EXPECT_EQ(RunsInScope(global, flags, rg::ViewScope::Secondary), global && secondary);
+                EXPECT_EQ(RunsInScope(global, flags, rg::ViewScope::Shared), global);
+            }
+        }
+    }
 }
 
 TEST(FxFeatureSetupTest, EmptyLongDuplicateAndCallbacklessRegistrationsAreErrors)

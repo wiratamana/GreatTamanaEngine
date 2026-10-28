@@ -47,7 +47,6 @@ struct SsgiSettings {
     bool temporal = true;
     float historyWeight = 0.92f;         // 0..0.98
     float depthSigma = 0.03f;            // Relative depth tolerance of the bilateral filters, 0.001..0.5.
-    bool applyInSceneView = true;        // false skips the Editor Scene view.
     SsgiDebugView debugView = SsgiDebugView::Off;
 };
 

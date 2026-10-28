@@ -93,6 +93,10 @@ bool BuildGpuDrivenScenePanel(GpuDrivenSceneSettings& edit, bool supported,
     changed |= DrawModeCombo(edit.mode);
     const std::string_view modeLine = CullModeLine(edit.mode);
     ImGui::TextDisabled("%.*s", static_cast<int>(modeLine.size()), modeLine.data());
+    const std::string_view help = CullHelpLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextWrapped("%.*s", static_cast<int>(help.size()), help.data());
+    ImGui::PopStyleColor();
 
     DrawViewInfo("Game view", edit, game, false);
     DrawViewInfo("Scene view", edit, scene, true);

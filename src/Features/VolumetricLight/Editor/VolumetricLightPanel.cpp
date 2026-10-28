@@ -69,7 +69,6 @@ bool BuildVolumetricLightPanel(
 
     ImGui::SeparatorText("General");
     changed |= ImGui::Checkbox("Enabled", &edit.enabled);
-    changed |= ImGui::Checkbox("Apply in Scene view", &edit.applyInSceneView);
     changed |= ImGui::SliderFloat("Strength", &edit.strength, 0.0f, 1.0f);
 
     ImGui::SeparatorText("Medium");

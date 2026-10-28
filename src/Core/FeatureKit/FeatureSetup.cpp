@@ -47,6 +47,7 @@ void FeatureSetup::Add(Registration registration)
         m_errors.push_back("registration '" + registration.name + "' has no callback");
         return;
     }
+    registration.secondaryViewDefault = m_secondaryViewDefault;
     m_registrations.push_back(std::move(registration));
 }
 

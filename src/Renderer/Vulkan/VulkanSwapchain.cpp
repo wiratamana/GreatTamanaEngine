@@ -1,7 +1,10 @@
 #include "VulkanSwapchain.h"
 
+#include "../../Core/Logging.h"
+
 #include <algorithm>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace gte {
@@ -19,10 +22,23 @@ VkSurfaceFormatKHR ChooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& fo
     return formats.front();
 }
 
-VkPresentModeKHR ChoosePresentMode(const std::vector<VkPresentModeKHR>& modes)
+SupportedPresentModes SupportedModesOf(const std::vector<VkPresentModeKHR>& modes)
 {
-    // FIFO is always available and gives vsync; MAILBOX could be preferred later for lower latency.
-    (void)modes;
+    SupportedPresentModes supported;
+    for (const VkPresentModeKHR mode : modes) {
+        supported.mailbox = supported.mailbox || mode == VK_PRESENT_MODE_MAILBOX_KHR;
+        supported.immediate = supported.immediate || mode == VK_PRESENT_MODE_IMMEDIATE_KHR;
+    }
+    return supported;
+}
+
+VkPresentModeKHR ToVulkan(PresentMode mode) noexcept
+{
+    switch (mode) {
+    case PresentMode::Mailbox: return VK_PRESENT_MODE_MAILBOX_KHR;
+    case PresentMode::Immediate: return VK_PRESENT_MODE_IMMEDIATE_KHR;
+    case PresentMode::Fifo: break;
+    }
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
@@ -48,14 +64,18 @@ VulkanSwapchain::VulkanSwapchain(VkPhysicalDevice physicalDevice,
                                   std::uint32_t graphicsFamily,
                                   std::uint32_t presentFamily,
                                   int width,
-                                  int height)
+                                  int height,
+                                  PresentPolicy policy)
     : m_physicalDevice(physicalDevice)
     , m_device(device)
     , m_surface(surface)
     , m_graphicsFamily(graphicsFamily)
     , m_presentFamily(presentFamily)
+    , m_policy(policy)
 {
     Create(width, height);
+    GTE_LOG_INFO("Vulkan", std::string("present policy ") + PresentPolicyName(m_policy) + ", present mode "
+            + PresentModeName(m_presentMode));
 }
 
 VulkanSwapchain::~VulkanSwapchain()
@@ -69,6 +89,8 @@ VulkanSwapchain::VulkanSwapchain(VulkanSwapchain&& other) noexcept
     , m_surface(std::exchange(other.m_surface, VK_NULL_HANDLE))
     , m_graphicsFamily(other.m_graphicsFamily)
     , m_presentFamily(other.m_presentFamily)
+    , m_policy(other.m_policy)
+    , m_presentMode(other.m_presentMode)
     , m_swapchain(std::exchange(other.m_swapchain, VK_NULL_HANDLE))
     , m_imageFormat(other.m_imageFormat)
     , m_extent(other.m_extent)
@@ -86,6 +108,8 @@ VulkanSwapchain& VulkanSwapchain::operator=(VulkanSwapchain&& other) noexcept
         m_surface = std::exchange(other.m_surface, VK_NULL_HANDLE);
         m_graphicsFamily = other.m_graphicsFamily;
         m_presentFamily = other.m_presentFamily;
+        m_policy = other.m_policy;
+        m_presentMode = other.m_presentMode;
         m_swapchain = std::exchange(other.m_swapchain, VK_NULL_HANDLE);
         m_imageFormat = other.m_imageFormat;
         m_extent = other.m_extent;
@@ -118,7 +142,8 @@ void VulkanSwapchain::Create(int width, int height)
     vkGetPhysicalDeviceSurfacePresentModesKHR(m_physicalDevice, m_surface, &presentModeCount, presentModes.data());
 
     const VkSurfaceFormatKHR surfaceFormat = ChooseSurfaceFormat(formats);
-    const VkPresentModeKHR presentMode = ChoosePresentMode(presentModes);
+    m_presentMode = ChoosePresentMode(m_policy, SupportedModesOf(presentModes));
+    const VkPresentModeKHR presentMode = ToVulkan(m_presentMode);
     const VkExtent2D extent = ChooseExtent(capabilities, width, height);
 
     std::uint32_t imageCount = capabilities.minImageCount + 1;

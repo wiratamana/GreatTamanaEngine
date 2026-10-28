@@ -53,9 +53,12 @@ int main(int argc, char* argv[])
 
     // "--vulkan-validation" turns the GPU API validation on in any build type.
     const bool forceValidation = HasFlag(argc, argv, "--vulkan-validation");
+    // "--no-vsync" removes the present cap (benchmarks only).
+    const gte::PresentPolicy presentPolicy =
+        HasFlag(argc, argv, "--no-vsync") ? gte::PresentPolicy::Uncapped : gte::PresentPolicy::Capped;
 
     try {
-        gte::EditorHost host("Great Tamana Engine", 1280, 720, forceValidation);
+        gte::EditorHost host("Great Tamana Engine", 1280, 720, forceValidation, presentPolicy);
         return host.Run();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "Fatal error: %s\n", e.what());

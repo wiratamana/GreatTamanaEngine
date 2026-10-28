@@ -73,7 +73,7 @@ ShadowSettings SanitizeShadowSettings(const ShadowSettings& settings) noexcept
     ShadowSettings s = settings;
 
     s.cascadeCount = std::clamp<std::uint32_t>(settings.cascadeCount, 1u, kMaxShadowCascades);
-    s.mapResolution = NearestOf(kResolutions, settings.mapResolution);
+    s.maxMapResolution = NearestOf(kResolutions, settings.maxMapResolution);
     s.maxDistance = SanitizeFloat(settings.maxDistance, 1.0f, 100000.0f, d.maxDistance);
     s.splitLambda = SanitizeFloat(settings.splitLambda, 0.0f, 1.0f, d.splitLambda);
     s.cascadeBlendFraction = SanitizeFloat(settings.cascadeBlendFraction, 0.0f, 0.5f, d.cascadeBlendFraction);

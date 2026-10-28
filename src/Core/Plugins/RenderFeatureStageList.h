@@ -90,6 +90,16 @@ struct StageList {
         return true;
     }
 
+    bool SetViewEnabled(const std::string& name, rg::ViewScope scope, bool enabled)
+    {
+        EntryType* entry = Find(name);
+        if (entry == nullptr) {
+            return false;
+        }
+        entry->scopes.Set(scope, enabled);
+        return true;
+    }
+
     bool SetPriority(const std::string& name, std::int32_t priority, const char* stageName)
     {
         EntryType* entry = Find(name);
@@ -111,6 +121,8 @@ struct StageList {
             debugEntry.priority = entry.priority;
             debugEntry.blendMode = "None";
             debugEntry.enabled = isEnabled(entry.name, entry.enabledOverride);
+            debugEntry.enabledPrimary = entry.scopes.primary;
+            debugEntry.enabledSecondary = entry.scopes.secondary;
             debugEntry.isProjectFeature = (entry.owner == RenderFeatureOwner::Project);
             out.push_back(std::move(debugEntry));
         }

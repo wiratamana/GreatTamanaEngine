@@ -30,6 +30,9 @@ void GtaoFeature::Setup(fx::FeatureSetup& s)
     s.PreOpaque("Gtao.FrameStamp", kFrameStampPriority,
         [this](fx::PreOpaqueFrame& f) { m_newestFrame = f.FrameIndex(); }, fx::Gate::Always());
 
+    // The secondary view skips the occlusion pass and its composite by default.
+    s.DefaultSecondaryViewEnabled(false);
+
     s.PostOpaque("Gtao.Occlusion", kOcclusionPriority, [this](fx::PostOpaqueFrame& f) { OcclusionPass(f); },
         fx::Gate{ "Gtao.Main.Dispatch", "Gtao.Resolve.Dispatch" });
     s.PostComposite("Gtao.Composite", kCompositePriority, fx::Blend::ScreenSpaceMask,

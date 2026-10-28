@@ -34,6 +34,11 @@ bool RenderFeatureCompositor::SetFeatureEnabled(const std::string& name, bool en
     return m_impl->SetFeatureEnabled(name, enabled);
 }
 
+bool RenderFeatureCompositor::SetFeatureViewEnabled(const std::string& name, rg::ViewScope scope, bool enabled)
+{
+    return m_impl->SetFeatureViewEnabled(name, scope, enabled);
+}
+
 bool RenderFeatureCompositor::SetFeaturePriority(const std::string& name, std::int32_t priority)
 {
     return m_impl->SetFeaturePriority(name, priority);

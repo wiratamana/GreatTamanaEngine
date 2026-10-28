@@ -35,7 +35,7 @@ enum class ShadowFrameStatus : std::uint8_t {
 // Shadow tunables. Stored only through SanitizeShadowSettings().
 struct ShadowSettings {
     std::uint32_t cascadeCount = 4;     // 1..4
-    std::uint32_t mapResolution = 2048; // Per cascade: 512, 1024, 2048 or 4096.
+    std::uint32_t maxMapResolution = 2048; // Per cascade upper cap: 512, 1024, 2048 or 4096. The view size picks the real one.
     float maxDistance = 20000.0f;       // World units, clamped to the camera far plane.
     float splitLambda = 0.85f;          // 0 = uniform splits, 1 = logarithmic.
     float cascadeBlendFraction = 0.10f; // Of each cascade length, 0..0.5.

@@ -1299,8 +1299,8 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
 
     server.Get("/render_graph/set_feature_enabled",
         [renderGraphControlCommandBridge](const httplib::Request& req, httplib::Response& res) {
-        const ParsedRenderGraphSetFeatureEnabledQuery parsed =
-            ParseRenderGraphSetFeatureEnabledQuery(req.get_param_value("name"), req.get_param_value("enabled"));
+        const ParsedRenderGraphSetFeatureEnabledQuery parsed = ParseRenderGraphSetFeatureEnabledQuery(
+            req.get_param_value("name"), req.get_param_value("enabled"), req.get_param_value("view"));
         if (!parsed.valid) {
             res.status = 400;
             res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
@@ -1315,6 +1315,17 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         request.kind = RenderGraphControlCommandKind::SetFeatureEnabled;
         request.setFeatureEnabled.name = parsed.name;
         request.setFeatureEnabled.enabled = parsed.enabled;
+        switch (parsed.view) {
+        case FeatureViewFilter::Both:
+            request.setFeatureEnabled.view = RenderGraphControlViewFilter::Both;
+            break;
+        case FeatureViewFilter::Primary:
+            request.setFeatureEnabled.view = RenderGraphControlViewFilter::Primary;
+            break;
+        case FeatureViewFilter::Secondary:
+            request.setFeatureEnabled.view = RenderGraphControlViewFilter::Secondary;
+            break;
+        }
         const RenderGraphControlCommandBridge::SubmitResult submit = renderGraphControlCommandBridge->SubmitAndWait(request);
         RespondWithRenderGraphControlCommandResult(res, submit);
     });

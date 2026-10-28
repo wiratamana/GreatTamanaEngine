@@ -42,6 +42,7 @@ struct Registration {
     Blend blend = Blend::AlphaOver; // PostComposite and PreUI only.
     Gate gate;
     std::variant<PreOpaqueCallback, PostOpaqueCallback, CompositeCallback, SharedCallback, OpaqueCallback> callback;
+    bool secondaryViewDefault = true; // False: starts disabled in the secondary view.
 };
 
 // Registration verbs offered to Feature::Setup(). They only collect; mistakes are recorded and make the
@@ -61,6 +62,10 @@ public:
     void PreUI(std::string name, std::int32_t priority, Blend blend, CompositeCallback callback, Gate gate = {});
     void PreOpaqueShared(std::string name, std::int32_t priority, SharedCallback callback, Gate gate = {});
 
+    // Whether registrations added after this call start enabled in the secondary view (default true).
+    // Shared and Always() registrations are never gated.
+    void DefaultSecondaryViewEnabled(bool enabled) noexcept { m_secondaryViewDefault = enabled; }
+
     // Declares a scene-services slot at startup. Invalid (and one log) when it cannot be declared.
     SceneSlot DeclareSceneSlot(std::string_view name, SceneSlotKind kind, std::uint32_t preferredIndex);
 
@@ -75,6 +80,7 @@ private:
 
     ISceneSlotRegistrar* m_slots;
     bool m_missingRegistrarLogged = false;
+    bool m_secondaryViewDefault = true;
     std::vector<Registration> m_registrations;
     std::vector<std::string> m_errors;
 };

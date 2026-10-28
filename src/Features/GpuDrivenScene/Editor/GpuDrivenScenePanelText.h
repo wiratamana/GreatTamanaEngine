@@ -30,6 +30,9 @@ std::string CpuCullStateLine(const GpuDrivenSceneViewSnapshot& v);
 // Shown when Hi-Z is asked for but only CPU-drawn meshes exist; empty otherwise.
 std::string_view NoGpuPathLine(const GpuDrivenSceneSettings& s, const GpuDrivenSceneViewSnapshot& v) noexcept;
 
+// How to compare culling modes: timing and pacing hints.
+std::string_view CullHelpLine() noexcept;
+
 // Warning shown while back-face cone culling is on.
 std::string_view ConeWarningLine() noexcept;
 

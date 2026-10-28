@@ -15,6 +15,7 @@ namespace gte::Profiling {
 // State the profiler cannot see by itself.
 struct SnapshotInputs {
     bool deviceLost = false;
+    bool presentUncapped = false;
     std::uint32_t consecutiveFrameTimeouts = 0;
     std::uint32_t abandonedObjects = 0;
     bool gpuClockAligned = false; // GPU time can be placed on the CPU axis

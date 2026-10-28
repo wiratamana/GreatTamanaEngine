@@ -89,21 +89,71 @@ TEST(ShadowMathTest, SanitizeClampsCascadeCountIntoOneToMax)
     EXPECT_EQ(SanitizeShadowSettings(settings).cascadeCount, kMaxShadowCascades);
 }
 
-TEST(ShadowMathTest, SanitizeSnapsMapResolutionToTheNearestSupportedSize)
+TEST(ShadowMathTest, SanitizeSnapsMaxMapResolutionToTheNearestSupportedSize)
 {
     ShadowSettings settings;
 
-    settings.mapResolution = 0;
-    EXPECT_EQ(SanitizeShadowSettings(settings).mapResolution, 512u);
+    settings.maxMapResolution = 0;
+    EXPECT_EQ(SanitizeShadowSettings(settings).maxMapResolution, 512u);
 
-    settings.mapResolution = 777;
-    EXPECT_EQ(SanitizeShadowSettings(settings).mapResolution, 1024u);
+    settings.maxMapResolution = 777;
+    EXPECT_EQ(SanitizeShadowSettings(settings).maxMapResolution, 1024u);
 
-    settings.mapResolution = 2048;
-    EXPECT_EQ(SanitizeShadowSettings(settings).mapResolution, 2048u);
+    settings.maxMapResolution = 2048;
+    EXPECT_EQ(SanitizeShadowSettings(settings).maxMapResolution, 2048u);
 
-    settings.mapResolution = 100000;
-    EXPECT_EQ(SanitizeShadowSettings(settings).mapResolution, 4096u);
+    settings.maxMapResolution = 100000;
+    EXPECT_EQ(SanitizeShadowSettings(settings).maxMapResolution, 4096u);
+}
+
+TEST(ShadowMathTest, EffectiveResolutionFollowsTheViewSizeUpToTheCap)
+{
+    EXPECT_EQ(EffectiveShadowResolution(2048, 351, 447), 1024u);
+    EXPECT_EQ(EffectiveShadowResolution(2048, 1920, 1080), 2048u);
+    EXPECT_EQ(EffectiveShadowResolution(4096, 1920, 1080), 4096u);
+    EXPECT_EQ(EffectiveShadowResolution(2048, 64, 64), 512u);
+    EXPECT_EQ(EffectiveShadowResolution(2048, 0, 0), 512u);
+    EXPECT_EQ(EffectiveShadowResolution(512, 1920, 1080), 512u);
+}
+
+TEST(ShadowMathTest, ResolutionChangeAppliesOnlyAfterTheHoldPeriod)
+{
+    ShadowResolutionState state;
+    EXPECT_EQ(StepShadowResolution(state, 1024), 1024u); // The first size applies at once.
+
+    for (std::uint32_t i = 1; i < kShadowResolutionHoldFrames; ++i) {
+        EXPECT_EQ(StepShadowResolution(state, 2048), 1024u);
+    }
+    EXPECT_EQ(StepShadowResolution(state, 2048), 2048u); // Held for the full period.
+
+    // A target that flips back and forth never settles.
+    for (std::uint32_t i = 0; i < 4 * kShadowResolutionHoldFrames; ++i) {
+        EXPECT_EQ(StepShadowResolution(state, i % 2 == 0 ? 512 : 1024), 2048u);
+    }
+}
+
+TEST(ShadowMathTest, RefusedResizeKeepsTheOldSizeAndRetriesLater)
+{
+    ShadowResolutionState state;
+    StepShadowResolution(state, 1024);
+    std::uint32_t previous = 0;
+    for (std::uint32_t i = 0; i < kShadowResolutionHoldFrames; ++i) {
+        previous = state.current;
+        StepShadowResolution(state, 2048);
+    }
+    ASSERT_EQ(state.current, 2048u);
+
+    RefuseShadowResolution(state, previous);
+    EXPECT_EQ(state.current, 1024u);
+    for (std::uint32_t i = 1; i < kShadowResolutionHoldFrames; ++i) {
+        EXPECT_EQ(StepShadowResolution(state, 2048), 1024u);
+    }
+    EXPECT_EQ(StepShadowResolution(state, 2048), 2048u);
+
+    ShadowResolutionState fresh;
+    StepShadowResolution(fresh, 1024);
+    RefuseShadowResolution(fresh, 0);
+    EXPECT_EQ(fresh.current, 0u); // No maps exist, so the next frame picks a size again.
 }
 
 TEST(ShadowMathTest, SanitizeSnapsFilterSamplesToTheNearestSupportedCount)
@@ -196,7 +246,7 @@ TEST(ShadowMathTest, SanitizeIsIdempotentForAlreadyValidSettings)
 {
     ShadowSettings settings;
     settings.cascadeCount = 3;
-    settings.mapResolution = 1024;
+    settings.maxMapResolution = 1024;
     settings.maxDistance = 80.0f;
     settings.strength = 0.4f;
     settings.filterSamples = 16;
@@ -204,12 +254,12 @@ TEST(ShadowMathTest, SanitizeIsIdempotentForAlreadyValidSettings)
     const ShadowSettings once = SanitizeShadowSettings(settings);
     const ShadowSettings twice = SanitizeShadowSettings(once);
     EXPECT_EQ(once.cascadeCount, twice.cascadeCount);
-    EXPECT_EQ(once.mapResolution, twice.mapResolution);
+    EXPECT_EQ(once.maxMapResolution, twice.maxMapResolution);
     EXPECT_FLOAT_EQ(once.maxDistance, twice.maxDistance);
     EXPECT_FLOAT_EQ(once.strength, twice.strength);
     EXPECT_EQ(once.filterSamples, twice.filterSamples);
     EXPECT_EQ(once.cascadeCount, 3u);
-    EXPECT_EQ(once.mapResolution, 1024u);
+    EXPECT_EQ(once.maxMapResolution, 1024u);
 }
 
 TEST(ShadowMathTest, DefaultSettingsSurviveSanitizeUnchanged)
@@ -217,7 +267,7 @@ TEST(ShadowMathTest, DefaultSettingsSurviveSanitizeUnchanged)
     const ShadowSettings defaults;
     const ShadowSettings safe = SanitizeShadowSettings(defaults);
     EXPECT_EQ(safe.cascadeCount, defaults.cascadeCount);
-    EXPECT_EQ(safe.mapResolution, defaults.mapResolution);
+    EXPECT_EQ(safe.maxMapResolution, defaults.maxMapResolution);
     EXPECT_FLOAT_EQ(safe.maxDistance, defaults.maxDistance);
     EXPECT_FLOAT_EQ(safe.splitLambda, defaults.splitLambda);
     EXPECT_FLOAT_EQ(safe.casterRange, defaults.casterRange);

@@ -2285,6 +2285,7 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Renderer/AbandonedWorkTests.cpp
     Renderer/GpuWaitServiceTests.cpp
     Renderer/PresentRecoveryPlanTests.cpp
+    Renderer/PresentPolicyTests.cpp
     Renderer/GpuStampPlanTests.cpp
     Renderer/GpuClockCalibrationTests.cpp
     Renderer/GpuFrameRingTests.cpp

@@ -6,6 +6,7 @@
 #include "ProjectScenePassCallback.h"
 #include "RenderFeatureDebugEntry.h"
 #include "RenderFeatureDescriptor.h"
+#include "ViewScopeEnable.h"
 
 #include <cstdint>
 #include <memory>
@@ -36,6 +37,7 @@ struct StageEntry {
     std::string name;
     std::int32_t priority = 0;
     bool enabledOverride = true;
+    ViewScopeEnable scopes;
     Callback callback;
     RenderFeatureOwner owner = RenderFeatureOwner::Project;
 };
@@ -59,6 +61,10 @@ public:
 
     // Sets the enabled override of `name` in any list. False when no feature has that name.
     bool SetFeatureEnabled(const std::string& name, bool enabled);
+
+    // Sets the enabled flag of `name` for one view scope; it combines with the override. The shared scope has no
+    // flag. False when no feature has that name.
+    bool SetFeatureViewEnabled(const std::string& name, rg::ViewScope scope, bool enabled);
 
     // Changes the priority of `name` and re-sorts its stage. False when no feature has that name.
     bool SetFeaturePriority(const std::string& name, std::int32_t priority);
@@ -100,6 +106,7 @@ private:
     struct Entry {
         GtePluginRenderFeatureDescriptor descriptor{};
         bool enabledOverride = true;
+        ViewScopeEnable scopes;
         ProjectRenderFeatureCallback projectCallback;
         int projectFeatureSlot = -1;
         RenderFeatureOwner owner = RenderFeatureOwner::Project;

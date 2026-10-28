@@ -84,8 +84,9 @@ std::optional<ScenePassReadHandles> ResolveScenePassReadHandles(
 
 } // namespace
 
-Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices, bool forceGpuValidation)
-    : m_renderer(surfaceProvider, forceGpuValidation)
+Core::Core(ISurfaceProvider& surfaceProvider, IHostServices& hostServices, bool forceGpuValidation,
+    PresentPolicy presentPolicy)
+    : m_renderer(surfaceProvider, forceGpuValidation, presentPolicy)
     , m_sceneServicesDescriptorSet(m_renderer)
     , m_renderViewRegistry(m_renderer)
     , m_renderGraph(m_renderer)
@@ -694,9 +695,10 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 return;
             }
 
+            const rg::ViewScope viewScope = TranslateLegacyViewScope(frame.currentView);
             for (const PreOpaqueEntry& entry :
                 m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::PreOpaque>()) {
-                if (!entry.enabledOverride) {
+                if (!RunsInScope(entry.enabledOverride, entry.scopes, viewScope)) {
                     continue;
                 }
 
@@ -833,8 +835,10 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     [&](const SceneStageEntry& entry) { return entry.name == name; });
             });
 
+            const rg::ViewScope viewScope = TranslateLegacyViewScope(frame.currentView);
             for (const SceneStageEntry& entry : opaqueEntries) {
-                if (!entry.enabledOverride || m_faultedOpaqueFeatures.contains(entry.name)) {
+                if (!RunsInScope(entry.enabledOverride, entry.scopes, viewScope)
+                    || m_faultedOpaqueFeatures.contains(entry.name)) {
                     continue;
                 }
 
@@ -911,9 +915,10 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 return;
             }
 
+            const rg::ViewScope viewScope = TranslateLegacyViewScope(frame.currentView);
             for (const SceneStageEntry& entry :
                 m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::PostOpaque>()) {
-                if (!entry.enabledOverride) {
+                if (!RunsInScope(entry.enabledOverride, entry.scopes, viewScope)) {
                     continue;
                 }
 
@@ -957,9 +962,10 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 return;
             }
 
+            const rg::ViewScope viewScope = TranslateLegacyViewScope(frame.currentView);
             for (const SceneStageEntry& entry :
                 m_renderFeatureCompositorPtr->StageFeaturesInPriorityOrder<CompositorStage::PostTransparent>()) {
-                if (!entry.enabledOverride) {
+                if (!RunsInScope(entry.enabledOverride, entry.scopes, viewScope)) {
                     continue;
                 }
 
