@@ -104,9 +104,6 @@ struct ShadowDepthDecoded {
 // Decodes the reduction result: no visible pixel is NoSurface; non-finite or inverted bits are Invalid.
 ShadowDepthDecoded DecodeDepth(const ShadowDepthRangeGpu& gpu) noexcept;
 
-// The range of DecodeDepth(), or nothing unless it is a Range.
-std::optional<ShadowDepthRange> DecodeDepthRange(const ShadowDepthRangeGpu& gpu) noexcept;
-
 // Consecutive empty measurements, and the quiet time since the last Range, needed before a view skips its cascades.
 inline constexpr std::uint32_t kShadowSkipEmptySamples = 3;
 inline constexpr std::uint64_t kShadowSkipQuietFrames = 6;

@@ -79,3 +79,4 @@ CopyGpuFields
 pipelineUntextured
 GroupInstancesByMesh
 m_syntheticSetZeroLayout
+DecodeDepthRange

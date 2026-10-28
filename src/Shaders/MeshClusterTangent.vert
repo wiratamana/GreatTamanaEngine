@@ -5,9 +5,10 @@
 
 #include "ClusterDrawBuffers.glsl"
 
-// Same 128-byte block as every pipeline; viewProj is read here and the first word of `model` is the draw tag.
+// 128-byte push block shared with every pipeline: draw tag at offset 0, viewProj at offset 64.
 layout(push_constant) uniform PushConstants {
-    mat4 model;
+    uvec4 drawTag;
+    vec4 unused[3];
     mat4 viewProj;
 } pc;
 
@@ -43,5 +44,5 @@ void main()
     outWindingSign = windingSign;
     outUv = inUv;
     outClusterId = entry.y;
-    outDrawTag = floatBitsToUint(pc.model[0][0]);
+    outDrawTag = pc.drawTag.x;
 }

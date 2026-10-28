@@ -10,7 +10,8 @@ param(
     [int]$WarmupFrames = 120,
     [int]$RecordFrames = 300,
     [int]$TimeoutSeconds = 120,
-    [string]$OutFile = 'profiler_ab.md'
+    [string]$OutFile = 'profiler_ab.md',
+    [switch]$AllowCapped
 )
 
 Set-StrictMode -Version Latest
@@ -154,7 +155,13 @@ function Build-Table($Run) {
 
 # --- run ---------------------------------------------------------------------
 
-$null = Get-Json '/profiler'
+$first = Get-Json '/profiler'
+$presentPolicy = [string](Get-Field (Get-Field $first 'device_state') 'present_policy')
+if ([string]::IsNullOrEmpty($presentPolicy)) { $presentPolicy = 'unknown' }
+Write-Host "Present policy: $presentPolicy"
+if ($presentPolicy -eq 'capped' -and -not $AllowCapped) {
+    throw "Present policy is 'capped': frame times show the display rate, not the GPU cost. Start the editor with --no-vsync, or pass -AllowCapped to run anyway."
+}
 $timing = Measure-Run 'timing' $false
 $counts = Measure-Run 'counts' $true
 Set-CollectStats $false
@@ -163,6 +170,8 @@ $out = [System.Collections.Generic.List[string]]::new()
 $out.Add('# Profiler A/B run')
 $out.Add('')
 $out.Add("Date: $(Get-Date -Format s). Warm-up $WarmupFrames frames, record $RecordFrames frames. Rows without a source are profiler bugs.")
+$out.Add('')
+$out.Add("Present policy: **$presentPolicy** (/profiler device_state.present_policy)$(if ($presentPolicy -eq 'capped') { ' - capped run, frame times are not GPU cost' })")
 $out.Add('')
 foreach ($run in @($timing, $counts)) {
     $out.Add("## Run: $($run.Name) (cluster stats $(if ($run.CollectStats) { 'on' } else { 'off' }))")

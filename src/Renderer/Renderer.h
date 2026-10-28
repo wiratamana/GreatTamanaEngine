@@ -203,9 +203,8 @@ public:
         DescriptorSetHandle materialDescriptorSet = DescriptorSetHandle::Invalid,
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid);
 
-    // Issues a counted indexed indirect draw (count taken from `countBuffer`, capped at `maxDrawCount`). Needs the
-    // indirect-draw device features. Set 0 = `materialDescriptorSet` when the pipeline has a material set,
-    // set 1 = scene services when the pipeline has it, set 2 = `bufferDescriptorSet`. `drawTag` reaches the vertex shader.
+    // Counted indexed indirect draw (count from `countBuffer`, capped at `maxDrawCount`); needs the indirect features.
+    // Sets 0/1 bind when the pipeline has them, set 2 = `bufferDescriptorSet`; `drawTag` reaches the vertex shader.
     void SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
         uint64_t indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset,
         DescriptorSetHandle bufferDescriptorSet,
@@ -231,10 +230,8 @@ public:
     // Zero-binding layout; fills the unused sets below the buffer set (cluster buffers sit at set 2).
     DescriptorSetLayoutHandle EmptySetLayout() const noexcept;
 
-    // Cached cluster draw pipeline of `key` (vertex layout of `key.material`). Set 0 = material set (lit textured
-    // and PBR only), set 1 = scene services (lit and tint variants; `sceneServicesSetLayout`), set 2 = cluster
-    // buffer set. Null when the pipeline cannot be built (logged once per key). The pointer stays valid for the
-    // renderer's life. Main thread only.
+    // Cached cluster draw pipeline of `key`; sets 0 material, 1 scene services, 2 cluster buffers.
+    // Null when it cannot be built (logged once per key). Main thread only.
     const Pipeline* CreateClusterPipeline(const ClusterPipelineKey& key, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
     // Device indirect draw capabilities. maxDrawIndirectCount is 0 unless multi draw is enabled.

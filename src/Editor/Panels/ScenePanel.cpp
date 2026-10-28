@@ -14,6 +14,7 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -25,6 +26,13 @@ namespace gte {
 namespace {
 
 constexpr std::size_t kMaxSceneCameras = 256;
+
+// True when an enabled feature is switched off for the secondary (Scene) view.
+bool AnyFeatureOffInSceneView(const std::vector<RenderFeatureDebugEntry>& entries)
+{
+    return std::any_of(entries.begin(), entries.end(),
+        [](const RenderFeatureDebugEntry& e) { return e.enabled && !e.enabledSecondary; });
+}
 
 // Valid Camera entities as pick candidates, with the lens aspect of the Game view.
 void GatherCameraCandidates(Registry& registry, float aspect, std::vector<CameraPickCandidate>& out)
@@ -94,8 +102,8 @@ void BuildCameraOverlay(
 
 } // namespace
 
-void BuildScenePanel(
-    Game& game, Renderer& renderer, EditorContext& ctx, EditorCamera& camera, DescriptorSetLayoutHandle sceneServicesSetLayout)
+void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorCamera& camera,
+    DescriptorSetLayoutHandle sceneServicesSetLayout, const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries)
 {
     Registry& registry = game.GetRegistry();
     // Begin() is false when the panel is hidden (inactive tab or collapsed); the flag is read next frame
@@ -135,12 +143,14 @@ void BuildScenePanel(
             const ImVec2 imageMin = ImGui::GetItemRectMin();
             const ImVec2 imageSize = ImGui::GetItemRectSize();
 
-            // Some features start disabled in this view; say so in the top-right corner of the image.
-            constexpr const char* kPreviewLabel = "Scene view: fast preview";
-            const ImVec2 labelSize = ImGui::CalcTextSize(kPreviewLabel);
-            ImGui::GetWindowDrawList()->AddText(
-                ImVec2(imageMin.x + imageSize.x - labelSize.x - 8.0f, imageMin.y + 6.0f), IM_COL32(255, 255, 255, 170),
-                kPreviewLabel);
+            // The label shows only while a feature is really off in this view.
+            if (AnyFeatureOffInSceneView(renderFeatureEntries)) {
+                constexpr const char* kPreviewLabel = "Scene view: fast preview";
+                const ImVec2 labelSize = ImGui::CalcTextSize(kPreviewLabel);
+                ImGui::GetWindowDrawList()->AddText(
+                    ImVec2(imageMin.x + imageSize.x - labelSize.x - 8.0f, imageMin.y + 6.0f),
+                    IM_COL32(255, 255, 255, 170), kPreviewLabel);
+            }
 
             // Camera controls: a middle/right drag starts only while hovering the image, then keeps
             // responding until the button is released, even if the cursor leaves the image.

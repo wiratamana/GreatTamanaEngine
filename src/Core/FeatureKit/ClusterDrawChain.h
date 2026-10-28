@@ -14,8 +14,7 @@
 namespace gte::fx {
 
 // GPU-culled draw of cluster-ready meshes. Made by Frame::ClusterDraw(), ended by Record().
-// Declares nothing and claims nothing when a pass is toggled off, a device feature is missing,
-// a limit is exceeded or a pass refuses; those entities stay on the CPU draw.
+// On a toggle, missing feature, limit or refused pass it declares and claims nothing; entities stay on the CPU draw.
 class ClusterDrawChain {
 public:
     ~ClusterDrawChain();
@@ -34,36 +33,29 @@ public:
     // Which tests run. The back-face cone test is ignored for a depth-only target.
     ClusterDrawChain& Culling(ClusterCullFlags flags);
 
-    // Occlusion culling in two phases for a colour target: this frame's depth after the phase-1 draws builds the
-    // pyramid (see HizPyramid), then every item is tested against it. `sceneDepth` is the depth of the target
-    // (OpaqueFrame::SceneDepth()) and the cull camera must equal the draw camera. Needs a state with two lanes
-    // and this chain on lane 0. When it cannot run, the chain is the plain single-phase chain and
-    // ClusterStats::hizReason says why. Ignored for a depth-only target.
+    // Two-phase occlusion for a colour target: phase-1 depth builds the pyramid, then every item is tested.
+    // The cull camera must equal the draw camera; needs two lanes. If it cannot run, ClusterStats::hizReason says why.
     ClusterDrawChain& TwoPhase(HizPyramid& pyramid, Texture sceneDepth);
 
-    // Secondary-view chain only: when the primary view's chain of this frame published survivors for every part of
-    // this chain (same meshes, same instances, same cull camera and tests), draw them with this chain's camera and
-    // run no reset, cull or pyramid. Otherwise this chain culls on its own. ClusterStats::sharedSurvivors says which.
+    // Secondary-view chain only: draws the survivors the primary chain published for every part, else culls itself.
+    // ClusterStats::sharedSurvivors says which.
     ClusterDrawChain& ReuseSurvivors();
 
     // Color + depth target (load). Exactly one of Target() and DepthOnlyTarget().
     ClusterDrawChain& Target(Texture sceneTarget);
     ClusterDrawChain& DepthOnlyTarget(Texture depth);
 
-    // Colors each cluster by its id (debug view). With `byPhase` it colors by draw phase instead: red for the first
-    // phase, green for the second, gray for a single-phase chain.
+    // Colors each cluster by id (debug view); `byPhase` colors by draw phase instead (red, green, gray = single).
     ClusterDrawChain& IdTint(bool enabled, bool byPhase = false);
 
-    // Reads the survivor count and the outcome counters back (colour target, first lane only). See
-    // ClusterDrawState::VisibleClusters() and ReasonCounts(). A refused stats pass never takes a claim away.
+    // Reads the survivor count and outcome counters back (colour target, first lane only). A refused pass keeps the claim.
     ClusterDrawChain& Stats(bool enabled);
 
     // Resolves and reserves everything and declares nothing. Idempotent.
     ClusterPlan Plan();
 
-    // Declares reset, cull and draw per part (twice around one pyramid build for a two-phase chain), then takes
-    // the entities over. A primary-view colour chain also publishes its survivors for the secondary view of the
-    // frame; a chain that reuses them declares only the draws.
+    // Declares reset, cull and draw per part, then takes the entities over. A primary colour chain publishes
+    // its survivors for the secondary view; a chain that reuses them declares only the draws.
     ClusterStats Record();
 
     // Kit-internal state; named here so the verb's helper functions can take it.

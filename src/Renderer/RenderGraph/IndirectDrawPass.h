@@ -34,10 +34,8 @@ struct IndirectDrawRecord {
     std::optional<float> clearDepth;                // Clears the depth attachment when set (loads otherwise).
 };
 
-// What the execute side needs besides the record; resolved by the caller each frame.
-// The set at `clusterBindingIndex` is rewritten from the record's `visible` and `instances` buffers right
-// before the draw. `materialSet` is bound at set 0 and required exactly when the pipeline has a material set.
-// `drawTag` is an opaque per-draw word the vertex shader can read (see ClusterTint.glsl).
+// What the execute side needs besides the record, resolved each frame. `materialSet` (set 0) is required exactly
+// when the pipeline has a material set; `drawTag` is a per-draw word for the vertex shader.
 struct IndirectDrawInputs {
     const Pipeline* pipeline = nullptr;
     const Mesh* mesh = nullptr;

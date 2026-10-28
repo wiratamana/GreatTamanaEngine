@@ -12,4 +12,5 @@ powershell -File tools\profiler_ab\run_ab.ps1 -BaseUrl http://127.0.0.1:8080 -Re
 - Rows A1..A10 name their HTTP source. A row that no route can answer prints `NO HTTP SOURCE`. That is a profiler bug.
 - Frame time and GPU span are reported as median and p95 over the measured frames.
 - Fix the camera pose and window size before the run, and start the editor with `--no-vsync`.
+- The script reads `GET /profiler` `device_state.present_policy`, prints it in the summary, and stops when it is `capped`. Pass `-AllowCapped` to run anyway.
 - No route switches the GPU stamps on and off, so the stamps comparison is reported as not measured.

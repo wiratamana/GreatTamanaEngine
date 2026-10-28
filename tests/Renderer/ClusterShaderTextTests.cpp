@@ -267,12 +267,16 @@ TEST(ClusterShaderText, TintShadersReadTheDrawTagTheVertexShadersForward)
     };
     EXPECT_TRUE(Contains(source("MeshCluster.vert"), "layout(location = 3) flat out uint outDrawTag;"));
     EXPECT_TRUE(Contains(source("MeshClusterTint.frag"), "layout(location = 3) flat in uint inDrawTag;"));
-    for (const char* name : { "MeshClusterUv.vert", "MeshClusterTangent.vert" }) {
+    for (const char* name : { "MeshCluster.vert", "MeshClusterUv.vert", "MeshClusterTangent.vert" }) {
         const std::string vert = source(name);
-        EXPECT_TRUE(Contains(vert, "layout(location = 6) flat out uint outDrawTag;")) << name;
-        EXPECT_TRUE(Contains(vert, "outDrawTag = floatBitsToUint(pc.model[0][0]);")) << name;
+        EXPECT_TRUE(Contains(vert, "uvec4 drawTag;")) << name;
+        EXPECT_TRUE(Contains(vert, "vec4 unused[3];")) << name;
+        EXPECT_LT(vert.find("vec4 unused[3];"), vert.find("mat4 viewProj;")) << name;
+        EXPECT_TRUE(Contains(vert, "outDrawTag = pc.drawTag.x;")) << name;
+        EXPECT_FALSE(Contains(vert, "floatBitsToUint")) << name;
     }
-    EXPECT_TRUE(Contains(source("MeshClusterTintSurface.frag"), "layout(location = 6) flat in uint inDrawTag;"));
+    EXPECT_TRUE(Contains(source("MeshClusterUv.vert"), "layout(location = 6) flat out uint outDrawTag;"));
+    EXPECT_TRUE(Contains(source("MeshClusterTangent.vert"), "layout(location = 6) flat out uint outDrawTag;"));
     const std::string tint = source("ClusterTint.glsl");
     EXPECT_TRUE(Contains(tint, "#include \"ClusterCullConstants.glsl\""));
     EXPECT_TRUE(Contains(tint, "(drawTag & kClusterDrawTagPhaseView) == 0u"));

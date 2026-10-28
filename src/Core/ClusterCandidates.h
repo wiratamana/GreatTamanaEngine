@@ -38,10 +38,8 @@ constexpr std::optional<ClusterMaterialKind> ClusterMaterialKindOf(VertexLayout 
 // True when every entry of `m` is finite.
 bool IsFiniteMatrix(const Mat4& m) noexcept;
 
-// Eligible inputs as cluster instances, in input order. Needs a supported vertex layout (a textured one also needs a
-// material and its own cluster table; only an untextured mesh may get a synthesized table, and then only with enough
-// instances in the list), an index buffer, no GPU skinning, a finite world matrix and `capsPresent`.
-// Every rejected input is counted once in `rejected` when it is given.
+// Eligible inputs as cluster instances, in input order: supported layout, index buffer, no GPU skinning,
+// finite world matrix, `capsPresent`, and (textured) a material plus table. Rejects are counted in `rejected`.
 std::vector<fx::ClusterInstance> SelectClusterCandidates(
     std::span<const ClusterCandidateInput> inputs, bool capsPresent, fx::ClusterRejectCounts* rejected = nullptr);
 

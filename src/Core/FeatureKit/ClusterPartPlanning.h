@@ -80,10 +80,8 @@ ClusterStep RecordClusterRound(Declarer& declarer, std::size_t part, std::uint32
     return second ? ClusterStep::Draw2 : ClusterStep::Draw1;
 }
 
-// Round 1 of every part, then one pyramid build, then round 2 of every part that finished round 1.
-// A single-phase chain stops after round 1. `declarer` also provides bool Begin(part) (acquire the part's
-// buffers) and bool Build() (declare the pyramid). A refused Begin leaves the part at None; a refused Build
-// leaves every part at Draw1, which never counts as claimable in a two-phase chain.
+// Round 1 of every part, one pyramid build, then round 2 of parts that finished round 1 (two-phase only).
+// `declarer` provides Begin(part) and Build(); a refused Begin leaves the part at None, a refused Build at Draw1.
 template <typename Declarer>
 std::vector<ClusterStep> RecordClusterRounds(Declarer& declarer, std::size_t partCount, bool twoPhase)
 {
@@ -107,9 +105,8 @@ std::vector<ClusterStep> RecordClusterRounds(Declarer& declarer, std::size_t par
     return steps;
 }
 
-// Draws of published survivors: round 1 of every part, then round 2 of every part that finished round 1 (only when
-// the publisher ran two phases). There is no reset, cull or pyramid. `declarer` provides bool Begin(part) (resolve
-// the part's buffers) and bool Draw(part, round). A refused Begin leaves the part at None.
+// Draws published survivors: round 1 of every part, then round 2 (only if the publisher ran two phases); no cull.
+// `declarer` provides Begin(part) and Draw(part, round); a refused Begin leaves the part at None.
 template <typename Declarer>
 std::vector<ClusterStep> RecordSharedRounds(Declarer& declarer, std::size_t partCount, bool twoRounds)
 {

@@ -373,7 +373,7 @@ public:
             m_clusterViewer.RequestOpen(m_ctx.pendingClusterViewerPath);
             m_ctx.pendingClusterViewerPath.clear();
         }
-        BuildScenePanel(game, renderer, m_ctx, m_sceneCamera, sceneServicesSetLayout);
+        BuildScenePanel(game, renderer, m_ctx, m_sceneCamera, sceneServicesSetLayout, renderFeatureEntries);
         BuildGamePanel(m_ctx);
         BuildMemoryPanel(m_ctx, renderer);
         m_profilerPanel.Build(m_ctx);

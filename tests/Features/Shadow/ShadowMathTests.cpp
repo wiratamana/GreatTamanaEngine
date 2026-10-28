@@ -578,40 +578,15 @@ TEST(ShadowMathTest, SunElevationOfANonFiniteOrZeroDirectionCountsAsStraightUp)
 }
 
 // ---------------------------------------------------------------------------------------------
-// DecodeDepthRange
+// DecodeDepth
 // ---------------------------------------------------------------------------------------------
 
-TEST(ShadowMathTest, DecodeDepthRangeOfAnUntouchedResultIsNothing)
-{
-    EXPECT_FALSE(DecodeDepthRange(ShadowDepthRangeGpu{}).has_value());
-}
-
-TEST(ShadowMathTest, DecodeDepthRangeReadsMinAndInvertedMaxBits)
-{
-    ShadowDepthRangeGpu gpu;
-    gpu.minDepthBits = std::bit_cast<std::uint32_t>(2.0f);
-    gpu.invMaxDepthBits = ~std::bit_cast<std::uint32_t>(10.0f);
-
-    const std::optional<ShadowDepthRange> range = DecodeDepthRange(gpu);
-    ASSERT_TRUE(range.has_value());
-    EXPECT_FLOAT_EQ(range->nearDepth, 2.0f);
-    EXPECT_FLOAT_EQ(range->farDepth, 10.0f);
-}
-
-TEST(ShadowMathTest, DecodeDepthRangeRejectsFarSmallerThanNear)
-{
-    ShadowDepthRangeGpu gpu;
-    gpu.minDepthBits = std::bit_cast<std::uint32_t>(10.0f);
-    gpu.invMaxDepthBits = ~std::bit_cast<std::uint32_t>(2.0f);
-    EXPECT_FALSE(DecodeDepthRange(gpu).has_value());
-}
-
-TEST(ShadowMathTest, DecodeDepthRangeRejectsANonPositiveNear)
+TEST(ShadowMathTest, DecodeDepthRejectsANonPositiveNear)
 {
     ShadowDepthRangeGpu gpu;
     gpu.minDepthBits = std::bit_cast<std::uint32_t>(0.0f);
     gpu.invMaxDepthBits = ~std::bit_cast<std::uint32_t>(10.0f);
-    EXPECT_FALSE(DecodeDepthRange(gpu).has_value());
+    EXPECT_EQ(DecodeDepth(gpu).kind, ShadowDepthDecode::Invalid);
 }
 
 TEST(ShadowMathTest, DecodeDepthTellsRangeNoSurfaceAndInvalidApart)

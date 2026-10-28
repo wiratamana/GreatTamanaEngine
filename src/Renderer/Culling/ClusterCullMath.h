@@ -353,18 +353,16 @@ struct HizDepthMap {
 
 HizDepthMap HizDepthMapOf(const Mat4& viewProjection) noexcept;
 
-// True when a box (nearest view distance `nearestW`, nearest depth `nearestZ`) lies behind a pyramid texel of
-// farthest depth `farthest`. Never true for clear depth (1.0), depth beyond the far plane or non-finite input.
+// True when a box (nearest view distance `nearestW`, nearest depth `nearestZ`) lies behind a texel of farthest
+// depth `farthest`. Never true for clear depth (1.0), depth beyond far or non-finite input.
 bool HizBehind(const HizDepthMap& map, float nearestW, float nearestZ, float farthest) noexcept;
 
-// CPU oracle of the occlusion test in ClusterCull.comp. The box is projected with `viewProjection`, the camera
-// the pyramid was built for. The screen rect is clamped: pixels outside the screen are never drawn.
-// Kept (false) when any corner is behind the eye or the clamped rect is empty.
+// CPU oracle of the occlusion test in ClusterCull.comp, projected with the pyramid's camera.
+// The screen rect is clamped; kept (false) when a corner is behind the eye or the clamped rect is empty.
 bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& viewProjection,
     const HizLayout& layout, std::span<const float> atlas) noexcept;
 
-// Writes the pyramid size, the level count, the depth map of the block's own view-projection and the raw-depth
-// flag into the block. Call after MakeClusterCullParams.
+// Writes pyramid size, level count, depth map and raw-depth flag into the block. Call after MakeClusterCullParams.
 void SetClusterCullHiz(ClusterCullParams& params, const HizLayout& layout) noexcept;
 
 // Why a pyramid cannot cull. None means usable.

@@ -35,9 +35,8 @@ public:
         const Mat4& model, const Mat4& viewProj, VkDescriptorSet materialDescriptorSet,
         VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
 
-    // Indirect-draw sibling of IssueDrawCommand(): set 0 = `materialDescriptorSet`, set 1 = `sceneServicesSet`
-    // (each when non-null), set 2 = buffer set. Counted draw; needs drawIndirectCount, multiDrawIndirect and
-    // drawIndirectFirstInstance. `drawTag` is pushed as the first word of the unused model block. Never touches DrawStats.
+    // Counted indirect sibling of IssueDrawCommand(): sets 0/1 when non-null, set 2 = buffer set.
+    // `drawTag` goes to push-constant word 0. Needs drawIndirectCount. Never touches DrawStats.
     static void IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
         VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet bufferDescriptorSet,
         VkDescriptorSet materialDescriptorSet, VkDescriptorSet sceneServicesSet, const Mat4& viewProj,

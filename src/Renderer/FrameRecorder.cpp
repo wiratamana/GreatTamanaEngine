@@ -56,7 +56,7 @@ void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pip
     assert(countBuffer != VK_NULL_HANDLE && "IssueIndirectDrawCommand: a count buffer is required.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
-    // Same push-constant shape as every pipeline. The cluster shaders ignore `model`, so its first word carries the tag.
+    // Same 128-byte push block as every pipeline. The cluster shaders read the tag as a uvec4 at offset 0.
     struct PushConstants {
         float model[16];
         float viewProj[16];

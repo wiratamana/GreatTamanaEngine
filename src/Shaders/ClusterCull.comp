@@ -1,8 +1,7 @@
 #version 450
 
-// Cluster culling: one thread per (instance, cluster) pair of one mesh part.
-// Survivors append a visible record and an indirect draw command; the count buffer must be zero before dispatch.
-// Layouts must match ClusterCullMath.h (ClusterInstanceGpu, ClusterCullParams, MeshCluster) and the CPU oracle there.
+// Cluster culling: one thread per (instance, cluster) pair; survivors append a visible record and a draw command.
+// NOTE: layouts must match ClusterCullMath.h (ClusterInstanceGpu, ClusterCullParams, MeshCluster); zero the count first.
 
 #include "ClusterCullConstants.glsl"
 #include "HizPyramidLayout.glsl"

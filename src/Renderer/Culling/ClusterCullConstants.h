@@ -1,8 +1,7 @@
 #pragma once
 
-// Constants shared with the cull and pyramid shaders. The build turns every `inline constexpr` line
-// below into ClusterCullConstants.glsl, so keep each line in one of these forms:
-//   std::uint32_t NAME = <decimal> | 1u << <bit>;      float NAME = <digits>.<digits>[e<exp>]f;
+// Shared with the shaders: every `inline constexpr` line becomes ClusterCullConstants.glsl. Allowed forms:
+// `std::uint32_t NAME = <decimal> | 1u << <bit>;` and `float NAME = <digits>.<digits>[e<exp>]f;`.
 
 #include <cstdint>
 

@@ -478,7 +478,7 @@ void PlanChain(ClusterDrawChain::Impl& s)
 struct PartRuntime {
     GpuBufferRef instances;
     std::array<GpuBufferRef, 2> clusters, visible, commands, count; // [round]
-    std::array<Texture, 2> hizDummy;                                // [round]; round 1 of a two-phase chain binds the pyramid
+    Texture hizDummy;                                               // Bound to the pyramid slot of round 0.
     GpuBufferRef history;                                           // The slot's history, or a stand-in.
     bool historyValid = false;
     std::uint64_t historyKey = 0;
@@ -555,6 +555,10 @@ public:
             state.NoteInstanceUploaded(frame, part.slot);
         }
 
+        run.hizDummy = state.HizDummy(frame, s.lane);
+        if (!run.hizDummy.IsValid()) {
+            return false;
+        }
         const std::uint32_t rounds = s.twoPhase ? 2 : 1;
         for (std::uint32_t round = 0; round < rounds; ++round) {
             const std::uint32_t lane = LaneOf(round);
@@ -568,10 +572,6 @@ public:
                 context.builder->Import(*mesh->ClusterTable(), state.TableName(context.scope, lane, part.slot));
             run.clusters[round] = frame.StampBuffer(
                 table, std::uint64_t{ part.clusterCount } * sizeof(MeshCluster), BufferUse::Storage);
-            run.hizDummy[round] = round == 0 ? state.HizDummy(frame, lane) : Texture{};
-        }
-        if (!run.hizDummy[0].IsValid()) {
-            return false;
         }
 
         if (!s.twoPhase) {
@@ -621,7 +621,7 @@ public:
         if (ClusterStatsWanted(s.stats, s.depthOnly, s.lane)) {
             params.counts[3] |= kClusterCullFlagCollectReasons;
         }
-        const Texture pyramid = round == 1 ? s.atlas : run.hizDummy[0];
+        const Texture pyramid = round == 1 ? s.atlas : run.hizDummy;
         return s.frame->Compute(state.CullShader(), PassNameOf(state, lane, part.slot, ClusterPassKind::Cull))
             .Params(*state.Params(s.frame->Context()->scope, lane, part.slot), params)
             .BindBuffer("instances", run.instances)

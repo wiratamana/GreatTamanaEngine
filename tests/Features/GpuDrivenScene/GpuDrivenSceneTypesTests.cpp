@@ -75,19 +75,13 @@ TEST(GpuDrivenSceneTypesTest, ResolveCullTestsPerModeAndCone)
         ViewCullTests t = ResolveCullTests(s);
         EXPECT_FALSE(t.frustum);
         EXPECT_FALSE(t.cone);
-        EXPECT_FALSE(t.occlusion);
 
-        s.mode = GpuCullMode::Frustum;
-        t = ResolveCullTests(s);
-        EXPECT_TRUE(t.frustum);
-        EXPECT_EQ(t.cone, cone);
-        EXPECT_FALSE(t.occlusion);
-
-        s.mode = GpuCullMode::HiZ;
-        t = ResolveCullTests(s);
-        EXPECT_TRUE(t.frustum);
-        EXPECT_EQ(t.cone, cone);
-        EXPECT_TRUE(t.occlusion);
+        for (const GpuCullMode mode : { GpuCullMode::Frustum, GpuCullMode::HiZ }) {
+            s.mode = mode;
+            t = ResolveCullTests(s);
+            EXPECT_TRUE(t.frustum);
+            EXPECT_EQ(t.cone, cone);
+        }
     }
 }
 

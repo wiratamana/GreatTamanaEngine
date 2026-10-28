@@ -346,15 +346,6 @@ ShadowDepthDecoded DecodeDepth(const ShadowDepthRangeGpu& gpu) noexcept
     return { ShadowDepthDecode::Range, ShadowDepthRange{ nearDepth, farDepth } };
 }
 
-std::optional<ShadowDepthRange> DecodeDepthRange(const ShadowDepthRangeGpu& gpu) noexcept
-{
-    const ShadowDepthDecoded decoded = DecodeDepth(gpu);
-    if (decoded.kind != ShadowDepthDecode::Range) {
-        return std::nullopt;
-    }
-    return decoded.range;
-}
-
 float ExponentialBlendFactor(float deltaSeconds, float timeConstantSeconds) noexcept
 {
     if (timeConstantSeconds <= 0.0f) {

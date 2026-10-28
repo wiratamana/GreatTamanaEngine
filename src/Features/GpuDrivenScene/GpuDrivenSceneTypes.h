@@ -169,16 +169,15 @@ inline GpuDrivenSceneSetResult ApplyGpuDrivenSceneSetting(
 struct ViewCullTests {
     bool frustum = false;
     bool cone = false;
-    bool occlusion = false;
 };
 
 // Cluster tests of a view. Both views use the same table.
 constexpr ViewCullTests ResolveCullTests(const GpuDrivenSceneSettings& s) noexcept
 {
     switch (s.mode) {
-    case GpuCullMode::NoCull: return { false, false, false };
-    case GpuCullMode::Frustum: return { true, s.cone, false };
-    case GpuCullMode::HiZ: return { true, s.cone, true };
+    case GpuCullMode::NoCull: return { false, false };
+    case GpuCullMode::Frustum:
+    case GpuCullMode::HiZ: return { true, s.cone };
     }
     return {};
 }

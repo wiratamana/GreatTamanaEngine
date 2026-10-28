@@ -9,9 +9,8 @@
 
 namespace gte {
 
-// RAII wrapper around a VkSwapchainKHR and its image views. Does not own the physical device, device or
-// surface; all three must outlive it. Recreate() rebuilds it in place (resize, or an out-of-date result).
-// The present mode follows `policy` and is chosen once, at construction.
+// RAII wrapper around a VkSwapchainKHR and its image views; device and surface must outlive it.
+// Recreate() rebuilds in place. The present mode follows `policy`, chosen once at construction.
 class VulkanSwapchain {
 public:
     VulkanSwapchain(VkPhysicalDevice physicalDevice,
