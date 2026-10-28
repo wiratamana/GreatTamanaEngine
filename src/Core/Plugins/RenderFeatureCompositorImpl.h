@@ -42,6 +42,13 @@ struct RenderFeatureCompositor::Impl {
     StageList<ProjectScenePassCallback> postTransparent;
     RenderFeatureNamePool namePool;
 
+    // Features that read a channel even in views without surfaces.
+    struct ChannelConsumer {
+        std::string name;
+        std::string channelKey;
+    };
+    std::vector<ChannelConsumer> channelConsumers;
+
     static constexpr int kMaxConcurrentProjectRenderFeatures = 16;
     // Project features use a reusable slot index as their GPU-state key, so the key universe stays bounded.
     std::vector<int> freeProjectFeatureSlots;
@@ -51,6 +58,8 @@ struct RenderFeatureCompositor::Impl {
     std::vector<RenderFeatureDebugEntry> DebugSnapshot() const;
     bool SetFeatureEnabled(const std::string& name, bool enabled);
     bool SetFeatureViewEnabled(const std::string& name, rg::ViewScope scope, bool enabled);
+    bool AddChannelConsumer(const std::string& name, const std::string& channelKey);
+    bool HasChannelConsumer(const std::string& channelKey, rg::ViewScope scope) const;
     bool SetFeaturePriority(const std::string& name, std::int32_t priority);
     bool RegisterFeature(
         const GtePluginRenderFeatureDescriptor& descriptor, ProjectRenderFeatureCallback callback, RenderFeatureOwner owner);
@@ -106,6 +115,9 @@ struct RenderFeatureCompositor::Impl {
 
     // The override flag AND, when `name` is a toggle-registry entry, that entry's flag.
     bool IsEffectivelyEnabled(const std::string& name, bool enabledOverride) const;
+
+    // True when the feature called `name` exists and is enabled in `scope`.
+    bool RunsInScopeByName(const std::string& name, rg::ViewScope scope) const;
 
     // Debug-only guard: registration is main-thread-only.
     void AssertCalledFromMainThread() const;

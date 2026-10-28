@@ -52,15 +52,17 @@ TEST(ClusterViewShaderText, ClusterVertexShaderStaysInvariant)
 
 TEST(ClusterViewShaderText, HizBuildPushBlockIsTwoUvec4)
 {
-    // Matches the renderer's 32-byte push struct: levelInfo[4] and sizes[4] as uints.
-    const std::string text = ReadShaderFile("HizBuild.comp");
-    const std::size_t block = text.find("layout(push_constant)");
-    ASSERT_NE(block, std::string::npos);
-    const std::size_t end = text.find("} push;", block);
-    ASSERT_NE(end, std::string::npos);
-    const std::string body = text.substr(block, end - block);
-    EXPECT_TRUE(Contains(body, "uvec4 levelInfo;"));
-    EXPECT_TRUE(Contains(body, "uvec4 sizes;"));
+    // Matches the 32-byte HizBuildPush of both build shaders: sizes[4] and levels[4] as uints.
+    for (const char* name : { "HizBuildBase.comp", "HizBuildTop.comp" }) {
+        const std::string text = ReadShaderFile(name);
+        const std::size_t block = text.find("layout(push_constant)");
+        ASSERT_NE(block, std::string::npos) << name;
+        const std::size_t end = text.find("} push;", block);
+        ASSERT_NE(end, std::string::npos) << name;
+        const std::string body = text.substr(block, end - block);
+        EXPECT_TRUE(Contains(body, "uvec4 sizes;")) << name;
+        EXPECT_TRUE(Contains(body, "uvec4 levels;")) << name;
+    }
 }
 
 } // namespace

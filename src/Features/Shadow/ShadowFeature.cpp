@@ -157,12 +157,15 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
     }
 
     // Fit the splits to the measured depth range; without a usable range the cascades use fixed splits.
+    // The same measurements tell a view that shows no surface; without them the cascades never skip.
     std::optional<ShadowDepthRange> sdsmRange;
     if (cfg.useSdsm && SdsmGroupEnabled(f) && f.ShaderReady(m_depthReduceShader)) {
         std::optional<ShadowDepthSample> sample;
         if (const auto latest = view.depthRange.Latest(f)) {
-            if (const auto range = DecodeDepthRange(latest->value)) {
-                sample = ShadowDepthSample{ *range, latest->frame };
+            const ShadowDepthDecoded decoded = DecodeDepth(latest->value);
+            RecordShadowDepthSample(view.skip, decoded.kind, latest->frame);
+            if (decoded.kind == ShadowDepthDecode::Range) {
+                sample = ShadowDepthSample{ decoded.range, latest->frame };
             }
         }
         view.sdsm = UpdateSdsmState(view.sdsm, sample, frustum, cfg, f.FrameIndex(), f.DeltaSeconds());
@@ -171,6 +174,15 @@ void ShadowFeature::CascadesPass(fx::PreOpaqueFrame& f)
         }
     } else {
         view.sdsm = ShadowSdsmState{};
+        view.skip = ShadowSkipState{};
+    }
+
+    // No surface in view and no reader of the cascades: draw nothing. The maps stay allocated.
+    const bool anyReader = ShadowDebugViewNeeded(cfg) || f.ChannelHasEmptyViewReaders(kSunShadowReceiverChannel);
+    if (ShouldSkipShadowCascades(view.skip, f.FrameIndex(), anyReader)) {
+        snap.resolutionInUse = view.resolution.current;
+        finish(ShadowFrameStatus::Skipped);
+        return;
     }
 
     // The view size picks the map size; a change applies only after it held for a while (a resize idles the GPU).

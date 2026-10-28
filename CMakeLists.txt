@@ -1849,9 +1849,13 @@ gte_add_shader(GreatTamanaEditor src/Shaders/Mesh.frag
     EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl)
 
 # Cluster cull compute and the cluster draw vertex/fragment shaders (Mesh.frag is the lit fragment shader).
-gte_add_shader(GreatTamanaEditor src/Shaders/ClusterCull.comp)
+gte_add_shader(GreatTamanaEditor src/Shaders/ClusterCull.comp
+    EXTRA_DEPENDS src/Shaders/HizPyramidLayout.glsl)
 gte_add_shader(GreatTamanaEditor src/Shaders/ClusterCullStats.comp)
-gte_add_shader(GreatTamanaEditor src/Shaders/HizBuild.comp)
+gte_add_shader(GreatTamanaEditor src/Shaders/HizBuildBase.comp
+    EXTRA_DEPENDS src/Shaders/HizPyramidLayout.glsl)
+gte_add_shader(GreatTamanaEditor src/Shaders/HizBuildTop.comp
+    EXTRA_DEPENDS src/Shaders/HizPyramidLayout.glsl)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshCluster.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.frag)

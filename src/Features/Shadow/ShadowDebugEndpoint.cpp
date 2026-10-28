@@ -87,6 +87,7 @@ std::string_view StatusName(ShadowFrameStatus status) noexcept
     case ShadowFrameStatus::ShadersNotReady: return "ShadersNotReady";
     case ShadowFrameStatus::TargetFailed: return "TargetFailed";
     case ShadowFrameStatus::PassDisabled: return "PassDisabled";
+    case ShadowFrameStatus::Skipped: return "Skipped";
     }
     return "NotRendered";
 }

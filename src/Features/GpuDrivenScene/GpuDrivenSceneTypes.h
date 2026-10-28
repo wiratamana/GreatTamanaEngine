@@ -50,6 +50,7 @@ inline constexpr std::array kHizReasonTable{
     fx::EnumEntry<HizReason>{ HizReason::WarmingUp, "WarmingUp" },
     fx::EnumEntry<HizReason>{ HizReason::BuildOff, "BuildOff" },
     fx::EnumEntry<HizReason>{ HizReason::Unavailable, "Unavailable" },
+    fx::EnumEntry<HizReason>{ HizReason::TooLarge, "TooLarge" },
 };
 
 // Whose camera a view culls with: its own, the primary view's, or nobody's (no test runs).

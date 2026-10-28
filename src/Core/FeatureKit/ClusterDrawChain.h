@@ -34,9 +34,8 @@ public:
     ClusterDrawChain& Culling(ClusterCullFlags flags);
 
     // Last frame's farthest-depth pyramid (see HizPyramid) for the Occlusion test, with the view-projection it
-    // was built under and its level 0 size. Occlusion is dropped for a depth-only target and for an invalid texture.
-    ClusterDrawChain& Occlusion(Texture hizAtlas, const Mat4& prevViewProjection, std::uint32_t baseWidth,
-        std::uint32_t baseHeight);
+    // was built under and its layout. Occlusion is dropped for a depth-only target and for an invalid texture or layout.
+    ClusterDrawChain& Occlusion(Texture hizAtlas, const Mat4& prevViewProjection, const HizLayout& layout);
 
     // Color + depth target (load). Exactly one of Target() and DepthOnlyTarget().
     ClusterDrawChain& Target(Texture sceneTarget);

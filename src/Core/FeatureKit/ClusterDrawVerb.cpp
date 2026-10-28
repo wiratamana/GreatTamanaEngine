@@ -67,12 +67,10 @@ struct ClusterDrawChain::Impl {
     // Hi-Z input of Occlusion().
     Texture hiz;
     Mat4 prevViewProjection = Mat4::Identity();
-    std::uint32_t hizBaseWidth = 0;
-    std::uint32_t hizBaseHeight = 0;
+    HizLayout hizLayout;
     bool hasOcclusion = false;
 
     // Hi-Z decisions made by Plan().
-    HizLayout hizLayout;
     Texture hizBinding; // The pyramid, or a 1x1 stand-in while occlusion is off.
     bool occlusionActive = false;
 
@@ -135,13 +133,11 @@ ClusterDrawChain& ClusterDrawChain::Culling(ClusterCullFlags flags)
     return *this;
 }
 
-ClusterDrawChain& ClusterDrawChain::Occlusion(
-    Texture hizAtlas, const Mat4& prevViewProjection, std::uint32_t baseWidth, std::uint32_t baseHeight)
+ClusterDrawChain& ClusterDrawChain::Occlusion(Texture hizAtlas, const Mat4& prevViewProjection, const HizLayout& layout)
 {
     m_impl->hiz = hizAtlas;
     m_impl->prevViewProjection = prevViewProjection;
-    m_impl->hizBaseWidth = baseWidth;
-    m_impl->hizBaseHeight = baseHeight;
+    m_impl->hizLayout = layout;
     m_impl->hasOcclusion = true;
     return *this;
 }
@@ -243,7 +239,6 @@ void PlanChain(ClusterDrawChain::Impl& s)
 
     // The Occlusion test needs a pyramid of this view; without a usable one only that test is dropped.
     if (HasClusterCullFlag(flags, ClusterCullFlags::Occlusion)) {
-        s.hizLayout = HizLayoutFor(s.hizBaseWidth * 2u, s.hizBaseHeight * 2u);
         const bool usable = !s.depthOnly && s.hasOcclusion && s.hizLayout.IsValid() && s.hiz.IsValid()
             && CameraIsFinite(s.prevViewProjection, Vec3(0.0f, 0.0f, 0.0f));
         if (!usable) {

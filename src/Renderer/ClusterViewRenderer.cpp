@@ -98,7 +98,8 @@ void ClusterViewRenderer::Impl::Build()
     fragmentSpirv[static_cast<std::size_t>(ClusterViewFragment::Id)] = ReadShaderFileBytes("shaders/ClusterViewId.frag.spv");
     // The compute shaders are built by the graph on first use; a missing file is caught here.
     (void)ReadShaderFileBytes("shaders/ClusterCull.comp.spv");
-    (void)ReadShaderFileBytes("shaders/HizBuild.comp.spv");
+    (void)ReadShaderFileBytes("shaders/HizBuildBase.comp.spv");
+    (void)ReadShaderFileBytes("shaders/HizBuildTop.comp.spv");
 
     // Survivor draw and ghost draw of one run each own a set.
     if (!bindings.Prepare(2)) {

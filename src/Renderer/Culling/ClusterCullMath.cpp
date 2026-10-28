@@ -296,37 +296,57 @@ HizLayout HizLayoutFor(std::uint32_t sceneWidth, std::uint32_t sceneHeight) noex
     if (sceneWidth == 0 || sceneHeight == 0) {
         return layout;
     }
-    const auto halfUp = [](std::uint32_t v) { return std::max(1u, (v >> 1) + (v & 1u)); };
-    const auto shiftUp = [](std::uint32_t v, std::uint32_t k) {
-        return std::max(1u, (v >> k) + ((v & ((1u << k) - 1u)) != 0 ? 1u : 0u));
-    };
-    layout.baseWidth = halfUp(sceneWidth);
-    layout.baseHeight = halfUp(sceneHeight);
+    const auto halfUp = [](std::uint32_t v) { return (v >> 1) + (v & 1u); };
+    const std::uint32_t baseWidth = halfUp(sceneWidth);
+    const std::uint32_t baseHeight = halfUp(sceneHeight);
+    constexpr std::uint32_t kMaxBase = 1u << (kHizMaxLevels - 1);
+    if (baseWidth > kMaxBase || baseHeight > kMaxBase) {
+        return layout;
+    }
 
+    // Levels 0..L-1 where the top level is 1 x 1.
+    const std::uint32_t largest = std::max(baseWidth, baseHeight);
+    std::uint32_t levelCount = 1;
+    while ((1u << (levelCount - 1)) < largest) {
+        ++levelCount;
+    }
+
+    const auto ceilShift = [](std::uint32_t v, std::uint32_t k) { return std::max(1u, (v + ((1u << k) - 1u)) >> k); };
     std::uint32_t columnHeight = 0;
-    for (std::uint32_t k = 0; k < kHizLevelCount; ++k) {
+    for (std::uint32_t k = 0; k < levelCount; ++k) {
         HizLevel& level = layout.levels[k];
-        level.blockSize = 2u << k;
-        level.width = shiftUp(layout.baseWidth, k);
-        level.height = shiftUp(layout.baseHeight, k);
+        level.width = ceilShift(baseWidth, k);
+        level.height = ceilShift(baseHeight, k);
         if (k == 0) {
             continue;
         }
-        level.originX = layout.baseWidth;
+        level.originX = baseWidth;
         level.originY = columnHeight;
         columnHeight += level.height;
     }
-    layout.atlasWidth = layout.baseWidth + layout.levels[1].width;
-    layout.atlasHeight = std::max(layout.baseHeight, columnHeight);
+    layout.baseWidth = baseWidth;
+    layout.baseHeight = baseHeight;
+    layout.levelCount = levelCount;
+    layout.atlasWidth = baseWidth + (levelCount > 1 ? layout.levels[1].width : 0u);
+    layout.atlasHeight = std::max(baseHeight, columnHeight);
     return layout;
 }
 
-HizRect HizChooseRect(float minX, float minY, float maxX, float maxY, const HizLayout& layout) noexcept
+std::uint32_t HizLevelForExtent(float extent, std::uint32_t levelCount) noexcept
 {
-    HizRect rect;
+    std::uint32_t level = 0;
+    while (level + 1 < levelCount && static_cast<float>(1u << level) < extent) {
+        ++level;
+    }
+    return level;
+}
+
+std::optional<HizRect> HizChooseRect(
+    float minX, float minY, float maxX, float maxY, const HizLayout& layout) noexcept
+{
     if (!layout.IsValid() || !std::isfinite(minX) || !std::isfinite(minY) || !std::isfinite(maxX)
         || !std::isfinite(maxY)) {
-        return rect;
+        return std::nullopt;
     }
     const float width = static_cast<float>(layout.baseWidth);
     const float height = static_cast<float>(layout.baseHeight);
@@ -335,25 +355,16 @@ HizRect HizChooseRect(float minX, float minY, float maxX, float maxY, const HizL
     maxX = std::clamp(maxX + kHizRectMarginTexels, 0.0f, width);
     maxY = std::clamp(maxY + kHizRectMarginTexels, 0.0f, height);
     if (maxX < minX || maxY < minY) {
-        return rect;
+        return std::nullopt;
     }
 
-    const float extent = std::max(maxX - minX, maxY - minY);
-    std::uint32_t level = 0;
-    while (level <= kHizMaxLevel && static_cast<float>(1u << level) < extent) {
-        ++level;
-    }
-    if (level > kHizMaxLevel) {
-        return rect;
-    }
-
-    const HizLevel& info = layout.levels[level];
-    const float scale = 1.0f / static_cast<float>(1u << level);
+    HizRect rect;
+    rect.level = HizLevelForExtent(std::max(maxX - minX, maxY - minY), layout.levelCount);
+    const HizLevel& info = layout.levels[rect.level];
+    const float scale = 1.0f / static_cast<float>(1u << rect.level);
     const auto texel = [](float v, std::uint32_t size) {
         return std::min(static_cast<std::uint32_t>(std::max(v, 0.0f)), size - 1u);
     };
-    rect.usable = true;
-    rect.level = level;
     rect.x0 = texel(std::floor(minX * scale), info.width);
     rect.y0 = texel(std::floor(minY * scale), info.height);
     rect.x1 = texel(std::floor(maxX * scale), info.width);
@@ -363,7 +374,8 @@ HizRect HizChooseRect(float minX, float minY, float maxX, float maxY, const HizL
 
 float HizFarthestDepth(std::span<const float> atlas, const HizLayout& layout, const HizRect& rect) noexcept
 {
-    if (!rect.usable || atlas.size() < std::uint64_t{ layout.atlasWidth } * layout.atlasHeight) {
+    if (!layout.IsValid() || rect.level >= layout.levelCount
+        || atlas.size() < std::uint64_t{ layout.atlasWidth } * layout.atlasHeight) {
         return 1.0f;
     }
     const HizLevel& level = layout.levels[rect.level];
@@ -377,6 +389,97 @@ float HizFarthestDepth(std::span<const float> atlas, const HizLayout& layout, co
     return farthest;
 }
 
+std::vector<float> BuildHizPyramidReference(std::span<const float> sceneDepth, std::uint32_t sceneWidth,
+    std::uint32_t sceneHeight, const HizLayout& layout)
+{
+    if (!layout.IsValid() || sceneDepth.size() < std::uint64_t{ sceneWidth } * sceneHeight) {
+        return {};
+    }
+    std::vector<float> atlas(std::size_t{ layout.atlasWidth } * layout.atlasHeight, 0.0f);
+    const auto at = [&](std::uint32_t x, std::uint32_t y) -> float& {
+        return atlas[std::size_t{ y } * layout.atlasWidth + x];
+    };
+
+    for (std::uint32_t y = 0; y < layout.baseHeight; ++y) {
+        for (std::uint32_t x = 0; x < layout.baseWidth; ++x) {
+            float farthest = 0.0f;
+            for (std::uint32_t dy = 0; dy < 2; ++dy) {
+                for (std::uint32_t dx = 0; dx < 2; ++dx) {
+                    const std::uint32_t sx = x * 2 + dx;
+                    const std::uint32_t sy = y * 2 + dy;
+                    if (sx < sceneWidth && sy < sceneHeight) {
+                        farthest = std::max(farthest, sceneDepth[std::size_t{ sy } * sceneWidth + sx]);
+                    }
+                }
+            }
+            at(x, y) = farthest;
+        }
+    }
+    for (std::uint32_t k = 1; k < layout.levelCount; ++k) {
+        const HizLevel& below = layout.levels[k - 1];
+        const HizLevel& level = layout.levels[k];
+        for (std::uint32_t y = 0; y < level.height; ++y) {
+            for (std::uint32_t x = 0; x < level.width; ++x) {
+                float farthest = 0.0f;
+                for (std::uint32_t dy = 0; dy < 2; ++dy) {
+                    for (std::uint32_t dx = 0; dx < 2; ++dx) {
+                        const std::uint32_t qx = x * 2 + dx;
+                        const std::uint32_t qy = y * 2 + dy;
+                        if (qx < below.width && qy < below.height) {
+                            farthest = std::max(farthest, at(below.originX + qx, below.originY + qy));
+                        }
+                    }
+                }
+                at(level.originX + x, level.originY + y) = farthest;
+            }
+        }
+    }
+    return atlas;
+}
+
+HizDepthMap HizDepthMapOf(const Mat4& vp) noexcept
+{
+    if (!IsFiniteMat(vp) || IsOrthographicProjection(vp)) {
+        return {};
+    }
+    // For a perspective matrix row 2 is k times row 3 (xyz part): clip.z = k * clip.w + b.
+    const Vec3 r2(vp(2, 0), vp(2, 1), vp(2, 2));
+    const Vec3 r3(vp(3, 0), vp(3, 1), vp(3, 2));
+    const float rr = Dot(r3, r3);
+    if (!(rr > 0.0f)) {
+        return {};
+    }
+    const float k = Dot(r2, r3) / rr;
+    const Vec3 residual = r2 - r3 * k;
+    if (!std::isfinite(k) || !(Length(residual) <= 1e-4f * Length(r2))) {
+        return {};
+    }
+    const float b = vp(2, 3) - k * vp(3, 3);
+    if (!std::isfinite(b)) {
+        return {};
+    }
+    return HizDepthMap{ false, k, b };
+}
+
+bool HizBehind(const HizDepthMap& map, float nearestW, float nearestZ, float farthest) noexcept
+{
+    if (!std::isfinite(nearestW) || !std::isfinite(nearestZ) || !std::isfinite(farthest)) {
+        return false;
+    }
+    if (!(farthest < 1.0f)) {
+        return false; // Clear depth: a pixel of the block was never drawn.
+    }
+    if (map.raw) {
+        return nearestZ > farthest + kHizRawBias;
+    }
+    const float denominator = (farthest + kHizDepthGuard) - map.k;
+    if (!(denominator * map.b > 0.0f)) {
+        return false; // A depth at or beyond the far plane never occludes.
+    }
+    const float farthestW = map.b / denominator;
+    return nearestW > farthestW * (1.0f + kHizRelMargin) + kHizAbsMargin;
+}
+
 bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& prevViewProjection,
     const HizLayout& layout, std::span<const float> atlas) noexcept
 {
@@ -387,7 +490,8 @@ bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& 
     float minY = 0.0f;
     float maxX = 0.0f;
     float maxY = 0.0f;
-    float nearest = 0.0f;
+    float nearestZ = 0.0f;
+    float nearestW = 0.0f;
     for (int i = 0; i < 8; ++i) {
         const Vec3 local((i & 1) != 0 ? cluster.aabbMax[0] : cluster.aabbMin[0],
             (i & 2) != 0 ? cluster.aabbMax[1] : cluster.aabbMin[1],
@@ -411,7 +515,8 @@ bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& 
         maxX = i == 0 ? x : std::max(maxX, x);
         minY = i == 0 ? y : std::min(minY, y);
         maxY = i == 0 ? y : std::max(maxY, y);
-        nearest = i == 0 ? z : std::min(nearest, z);
+        nearestZ = i == 0 ? z : std::min(nearestZ, z);
+        nearestW = i == 0 ? clip[3] : std::min(nearestW, clip[3]);
     }
     // Depth outside the rect is unknown, so a box that leaves the screen is kept.
     if (minX < -1.0f || maxX > 1.0f || minY < -1.0f || maxY > 1.0f) {
@@ -419,12 +524,12 @@ bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& 
     }
     const float width = static_cast<float>(layout.baseWidth);
     const float height = static_cast<float>(layout.baseHeight);
-    const HizRect rect = HizChooseRect((minX * 0.5f + 0.5f) * width, (minY * 0.5f + 0.5f) * height,
+    const std::optional<HizRect> rect = HizChooseRect((minX * 0.5f + 0.5f) * width, (minY * 0.5f + 0.5f) * height,
         (maxX * 0.5f + 0.5f) * width, (maxY * 0.5f + 0.5f) * height, layout);
-    if (!rect.usable) {
+    if (!rect.has_value()) {
         return false;
     }
-    return nearest > HizFarthestDepth(atlas, layout, rect) + kHizDepthBias;
+    return HizBehind(HizDepthMapOf(prevViewProjection), nearestW, nearestZ, HizFarthestDepth(atlas, layout, *rect));
 }
 
 void SetClusterCullHiz(ClusterCullParams& params, const Mat4& prevViewProjection, const HizLayout& layout) noexcept
@@ -434,6 +539,13 @@ void SetClusterCullHiz(ClusterCullParams& params, const Mat4& prevViewProjection
     params.hiz[1] = static_cast<float>(layout.atlasHeight);
     params.hiz[2] = static_cast<float>(layout.baseWidth);
     params.hiz[3] = static_cast<float>(layout.baseHeight);
+
+    const HizDepthMap map = HizDepthMapOf(prevViewProjection);
+    params.depthMap[0] = map.k;
+    params.depthMap[1] = map.b;
+    params.depthMap[2] = static_cast<float>(layout.levelCount);
+    params.depthMap[3] = 0.0f;
+    params.counts[3] = map.raw ? (params.counts[3] | kClusterCullFlagRawDepth) : (params.counts[3] & ~kClusterCullFlagRawDepth);
 }
 
 bool HizCameraCut(const Mat4& prevViewProjection, const Vec3& prevEye, const Mat4& viewProjection,

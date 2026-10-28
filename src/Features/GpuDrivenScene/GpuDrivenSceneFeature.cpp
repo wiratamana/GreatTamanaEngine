@@ -193,7 +193,7 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
         if (hiz.usable) {
             pyramidBound = true;
             flags = flags | ClusterCullFlags::Occlusion;
-            chain.Occlusion(hiz.atlas, hiz.viewProjection, hiz.baseWidth, hiz.baseHeight);
+            chain.Occlusion(hiz.atlas, hiz.viewProjection, hiz.layout);
         }
     }
     chain.Instances(candidates)

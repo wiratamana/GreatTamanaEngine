@@ -66,6 +66,13 @@ public:
     // flag. False when no feature has that name.
     bool SetFeatureViewEnabled(const std::string& name, rg::ViewScope scope, bool enabled);
 
+    // Records that feature `name` reads channel `channelKey` ("<owner>.<channel>") even in views without surfaces.
+    // False when no feature has that name.
+    bool AddChannelConsumer(const std::string& name, const std::string& channelKey);
+
+    // True when a feature recorded by AddChannelConsumer() for `channelKey` is enabled in `scope`.
+    bool HasChannelConsumer(const std::string& channelKey, rg::ViewScope scope) const;
+
     // Changes the priority of `name` and re-sorts its stage. False when no feature has that name.
     bool SetFeaturePriority(const std::string& name, std::int32_t priority);
 

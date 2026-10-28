@@ -10,17 +10,6 @@
 
 namespace gte::fx {
 
-namespace {
-
-// Must match the push block of HizBuild.comp.
-struct HizBuildPush {
-    std::uint32_t levelInfo[4]; // level, scene depth texels per level texel, atlas origin x and y.
-    std::uint32_t sizes[4];     // level width and height, scene depth width and height.
-};
-static_assert(sizeof(HizBuildPush) == 32);
-
-} // namespace
-
 HizPyramid::HizPyramid(std::string_view baseName)
     : m_base(baseName)
 {
@@ -28,9 +17,10 @@ HizPyramid::HizPyramid(std::string_view baseName)
         m_error = "HizPyramid needs a base name";
         return;
     }
-    for (std::uint32_t level = 0; level < kHizLevelCount; ++level) {
-        m_levelNames[level] = InternClusterName(m_base + ".Level" + std::to_string(level));
-        if (m_levelNames[level] == nullptr) {
+    constexpr const char* kSuffixes[kHizPassCount] = { kHizBasePassSuffix, kHizTopPassSuffix };
+    for (std::uint32_t i = 0; i < kHizPassCount; ++i) {
+        m_passNames[i] = InternClusterName(m_base + kSuffixes[i]);
+        if (m_passNames[i] == nullptr) {
             m_error = "HizPyramid '" + m_base + "': the pass name table is full";
             return;
         }
@@ -43,8 +33,8 @@ std::vector<std::string> HizPyramid::AllPassNames() const
     if (!Valid()) {
         return names;
     }
-    names.reserve(m_levelNames.size());
-    for (const char* name : m_levelNames) {
+    names.reserve(m_passNames.size());
+    for (const char* name : m_passNames) {
         names.emplace_back(name);
     }
     return names;
@@ -76,14 +66,15 @@ bool HizPyramid::Build(PostOpaqueFrame& frame)
     if (!layout.IsValid() || !CameraIsFinite(v.viewProjection, v.eye)) {
         return restart();
     }
+    const HizBuildPlan plan = HizBuildPlanFor(layout);
 
     // Ask every toggle before the first side effect.
-    for (const char* name : m_levelNames) {
+    for (const char* name : m_passNames) {
         if (!frame.PassEnabled(rg::StaticName::Interned(name))) {
             return restart();
         }
     }
-    if (!frame.ShaderReady(m_shader)) {
+    if (!frame.ShaderReady(m_baseShader) || (plan.runTop && !frame.ShaderReady(m_topShader))) {
         return restart();
     }
 
@@ -93,18 +84,24 @@ bool HizPyramid::Build(PostOpaqueFrame& frame)
         return restart();
     }
 
-    // Every level reads the scene depth and writes only its own region of the atlas.
-    for (std::uint32_t level = 0; level < kHizLevelCount; ++level) {
-        const HizLevel& info = layout.levels[level];
-        const HizBuildPush push{ { level, info.blockSize, info.originX, info.originY },
-            { info.width, info.height, v.extent.width, v.extent.height } };
-        const bool declared = frame.Compute(m_shader, rg::StaticName::Interned(m_levelNames[level]))
+    // The base pass reduces the depth into levels 0..4, the top pass finishes the remaining levels.
+    const HizBuildPush push = MakeHizBuildPush(v.extent.width, v.extent.height, layout);
+    const bool baseDeclared = frame.Compute(m_baseShader, rg::StaticName::Interned(m_passNames[0]))
                                   .Push(push)
                                   .Bind("sceneDepth", Depth(frame.SceneDepth()))
-                                  .Bind("hizOutput", atlas)
-                                  .Dispatch(Extent2D{ info.width, info.height });
-        if (!declared) {
-            frame.ReportOnce(std::string("Pass '") + m_levelNames[level] + "' was refused; occlusion culling is off");
+                                  .Bind("pyramid", atlas)
+                                  .Dispatch(Extent2D{ plan.baseThreadsX, plan.baseThreadsY });
+    if (!baseDeclared) {
+        frame.ReportOnce(std::string("Pass '") + m_passNames[0] + "' was refused; occlusion culling is off");
+        return restart();
+    }
+    if (plan.runTop) {
+        const bool topDeclared = frame.Compute(m_topShader, rg::StaticName::Interned(m_passNames[1]))
+                                     .Push(push)
+                                     .Bind("pyramid", atlas)
+                                     .Dispatch(Extent2D{ plan.topThreadsX, 1 });
+        if (!topDeclared) {
+            frame.ReportOnce(std::string("Pass '") + m_passNames[1] + "' was refused; occlusion culling is off");
             return restart();
         }
     }
@@ -125,6 +122,10 @@ HizPrevious HizPyramid::Previous(Frame& frame)
     }
     HizViewState& view = m_views.For(frame.Scope());
     const fx::View& v = frame.View();
+    if (v.extent.width != 0 && v.extent.height != 0 && !HizLayoutFor(v.extent.width, v.extent.height).IsValid()) {
+        result.reason = HizReason::TooLarge;
+        return result;
+    }
     if (const HizReason reason = HizUnusableReason(view.validity, frame.FrameIndex(), v.extent.width, v.extent.height);
         reason != HizReason::None) {
         result.reason = reason;
@@ -145,8 +146,7 @@ HizPrevious HizPyramid::Previous(Frame& frame)
     result.reason = HizReason::None;
     result.atlas = atlas;
     result.viewProjection = view.viewProjection;
-    result.baseWidth = view.layout.baseWidth;
-    result.baseHeight = view.layout.baseHeight;
+    result.layout = view.layout;
     return result;
 }
 

@@ -157,6 +157,12 @@ private:
                 throw std::runtime_error("Core lost the registration '" + registration.name + "'");
             }
         }
+        if (!registration.consumedChannel.empty()) {
+            RenderFeatureCompositor* compositor = m_core.GetRenderFeatureCompositor();
+            if (compositor == nullptr || !compositor->AddChannelConsumer(registration.name, registration.consumedChannel)) {
+                throw std::runtime_error("Core lost the registration '" + registration.name + "'");
+            }
+        }
     }
 
     void Run(const Registration& registration, SharedOncePerFrame* sharedLatch, rg::RenderGraphBuilder& builder,

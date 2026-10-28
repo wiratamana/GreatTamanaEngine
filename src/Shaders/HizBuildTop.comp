@@ -1,0 +1,44 @@
+#version 450
+
+// Pyramid build, top pass: one workgroup builds level 5 up to the 1 x 1 top level, each from the level below.
+// Layout must match HizBuildPlan.h and ClusterCullMath.h.
+
+#include "HizPyramidLayout.glsl"
+
+layout(local_size_x = 256) in;
+
+layout(push_constant) uniform HizPush {
+    uvec4 sizes;  // xy = scene depth size, zw = level 0 size.
+    uvec4 levels; // x = level count.
+} push;
+
+layout(binding = 0, r32f) uniform coherent image2D pyramid;
+
+const uint kTopFirstLevel = 5u;
+
+void main()
+{
+    uvec2 base = push.sizes.zw;
+    for (uint level = kTopFirstLevel; level < push.levels.x; ++level) {
+        uvec2 size = HizLevelSize(base, level);
+        uvec2 below = HizLevelSize(base, level - 1u);
+        uvec2 originBelow = HizLevelOrigin(base, level - 1u);
+        uvec2 origin = HizLevelOrigin(base, level);
+        uint total = size.x * size.y;
+        for (uint i = gl_LocalInvocationIndex; i < total; i += 256u) {
+            uvec2 c = uvec2(i % size.x, i / size.x);
+            float farthest = 0.0;
+            for (uint dy = 0u; dy < 2u; ++dy) {
+                for (uint dx = 0u; dx < 2u; ++dx) {
+                    uvec2 q = c * 2u + uvec2(dx, dy);
+                    if (all(lessThan(q, below))) {
+                        farthest = max(farthest, imageLoad(pyramid, ivec2(originBelow + q)).r);
+                    }
+                }
+            }
+            imageStore(pyramid, ivec2(origin + c), vec4(farthest));
+        }
+        memoryBarrierImage();
+        barrier();
+    }
+}

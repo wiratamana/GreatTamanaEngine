@@ -1,6 +1,7 @@
-// Tier-1 text checks that ClusterCull.comp keeps the constants and layouts of ClusterCullMath.h.
+﻿// Tier-1 text checks that ClusterCull.comp keeps the constants and layouts of ClusterCullMath.h.
 
 #include "Renderer/Culling/ClusterCullMath.h"
+#include "Renderer/Culling/HizBuildPlan.h"
 
 #include <gtest/gtest.h>
 
@@ -47,6 +48,7 @@ TEST(ClusterShaderText, FlagBitsEqualTheCppConstants)
     EXPECT_TRUE(Contains(text, UintConstant("kClusterCullFlagBackfaceCone", kClusterCullFlagBackfaceCone)));
     EXPECT_TRUE(Contains(text, UintConstant("kClusterCullFlagOcclusion", kClusterCullFlagOcclusion)));
     EXPECT_TRUE(Contains(text, UintConstant("kClusterCullFlagOrthographic", kClusterCullFlagOrthographic)));
+    EXPECT_TRUE(Contains(text, UintConstant("kClusterCullFlagRawDepth", kClusterCullFlagRawDepth)));
 }
 
 TEST(ClusterShaderText, EveryBlockHasItsInstanceNameAndQualifier)
@@ -76,15 +78,18 @@ TEST(ClusterShaderText, StructFieldsFollowTheCppRecords)
     const std::size_t prev = text.find("mat4 prevViewProjection;");
     const std::size_t counts = text.find("uvec4 counts;");
     const std::size_t hiz = text.find("vec4 hiz;");
+    const std::size_t depthMap = text.find("vec4 depthMap;");
     ASSERT_NE(planes, std::string::npos);
     ASSERT_NE(eye, std::string::npos);
     ASSERT_NE(prev, std::string::npos);
     ASSERT_NE(counts, std::string::npos);
     ASSERT_NE(hiz, std::string::npos);
+    ASSERT_NE(depthMap, std::string::npos);
     EXPECT_LT(planes, eye);
     EXPECT_LT(eye, prev);
     EXPECT_LT(prev, counts);
     EXPECT_LT(counts, hiz);
+    EXPECT_LT(hiz, depthMap);
 
     // ClusterInstanceGpu: mat4 world + uvec4 info.
     EXPECT_TRUE(Contains(text, "mat4 world;"));
@@ -111,11 +116,19 @@ TEST(ClusterShaderText, HizConstantsAndBindingMatchTheCppOracle)
 {
     const std::string text = ReadShader();
     EXPECT_TRUE(Contains(text, "layout(binding = 6) uniform sampler2D hizAtlas;"));
-    EXPECT_TRUE(Contains(text, UintConstant("kHizMaxLevel", kHizMaxLevel)));
-    EXPECT_TRUE(Contains(text, "const float kHizDepthBias = 0.0001;"));
     EXPECT_TRUE(Contains(text, "const float kHizRectMarginTexels = 1.0;"));
-    EXPECT_FLOAT_EQ(kHizDepthBias, 0.0001f);
+    EXPECT_TRUE(Contains(text, "const float kHizRelMargin = 0.002;"));
+    EXPECT_TRUE(Contains(text, "const float kHizAbsMargin = 0.01;"));
+    EXPECT_TRUE(Contains(text, "const float kHizDepthGuard = 4.8e-7;"));
+    EXPECT_TRUE(Contains(text, "const float kHizRawBias = 0.001;"));
     EXPECT_FLOAT_EQ(kHizRectMarginTexels, 1.0f);
+    EXPECT_FLOAT_EQ(kHizRelMargin, 0.002f);
+    EXPECT_FLOAT_EQ(kHizAbsMargin, 0.01f);
+    EXPECT_FLOAT_EQ(kHizDepthGuard, 4.8e-7f);
+    EXPECT_FLOAT_EQ(kHizRawBias, 0.001f);
+    // The level count comes from the parameter block, not from a constant.
+    EXPECT_TRUE(Contains(text, "uint levelCount = uint(params.value.depthMap.z);"));
+    EXPECT_FALSE(Contains(text, "kHizMaxLevel"));
 }
 
 TEST(ClusterShaderText, OcclusionSkipsMovedInstances)
@@ -123,16 +136,33 @@ TEST(ClusterShaderText, OcclusionSkipsMovedInstances)
     EXPECT_TRUE(Contains(ReadShader(), "(instance.info.x & kClusterFlagMoved) == 0u"));
 }
 
-TEST(ClusterShaderText, HizBuildShaderPushBlockAndBindings)
+std::string ReadTextFile(const char* path)
 {
-    std::ifstream file(GTE_TEST_HIZ_BUILD_SHADER_PATH, std::ios::binary);
-    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    std::ifstream file(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+}
+
+TEST(ClusterShaderText, HizBuildBaseShaderPushBlockAndBindings)
+{
+    const std::string text = ReadTextFile(GTE_TEST_HIZ_BUILD_BASE_SHADER_PATH);
     ASSERT_FALSE(text.empty());
-    EXPECT_TRUE(Contains(text, "layout(local_size_x = 8, local_size_y = 8) in;"));
+    EXPECT_TRUE(Contains(text, "layout(local_size_x = 16, local_size_y = 16) in;"));
     EXPECT_TRUE(Contains(text, "layout(binding = 0) uniform sampler2D sceneDepth;"));
-    EXPECT_TRUE(Contains(text, "layout(binding = 1, r32f) uniform writeonly image2D hizOutput;"));
-    EXPECT_TRUE(Contains(text, "uvec4 levelInfo;"));
+    EXPECT_TRUE(Contains(text, "layout(binding = 1, r32f) uniform writeonly image2D pyramid;"));
     EXPECT_TRUE(Contains(text, "uvec4 sizes;"));
+    EXPECT_TRUE(Contains(text, "uvec4 levels;"));
+    EXPECT_TRUE(Contains(text, "#include \"HizPyramidLayout.glsl\""));
+}
+
+TEST(ClusterShaderText, HizBuildTopShaderPushBlockAndBindings)
+{
+    const std::string text = ReadTextFile(GTE_TEST_HIZ_BUILD_TOP_SHADER_PATH);
+    ASSERT_FALSE(text.empty());
+    EXPECT_TRUE(Contains(text, "layout(local_size_x = " + std::to_string(kHizTopThreads) + ") in;"));
+    EXPECT_TRUE(Contains(text, "layout(binding = 0, r32f) uniform coherent image2D pyramid;"));
+    EXPECT_TRUE(Contains(text, UintConstant("kTopFirstLevel", kHizTopFirstLevel)));
+    EXPECT_TRUE(Contains(text, "uvec4 sizes;"));
+    EXPECT_TRUE(Contains(text, "uvec4 levels;"));
 }
 
 } // namespace

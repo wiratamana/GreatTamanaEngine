@@ -17,8 +17,8 @@ inline constexpr std::uint32_t kGpuRecordBudgetPipelined = 64;
 
 // Passes outside the cluster path that one frame may record.
 inline constexpr std::uint32_t kGpuBaseRecordCount = 64;
-static_assert(kGpuBaseRecordCount + 2 * kClusterPassNameCount + kHizLevelCount <= kGpuRecordBudgetSynchronous,
-    "the synchronous record budget must cover both cluster views, the Hi-Z levels and the base passes");
+static_assert(kGpuBaseRecordCount + 2 * kClusterPassNameCount + kHizPassCount <= kGpuRecordBudgetSynchronous,
+    "the synchronous record budget must cover both cluster views, the pyramid passes and the base passes");
 
 // A delta above this (or one that wrapped backwards) marks a record as Error.
 inline constexpr double kMaxPlausibleGpuMs = 5000.0;

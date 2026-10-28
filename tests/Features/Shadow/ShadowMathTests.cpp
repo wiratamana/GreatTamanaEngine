@@ -614,6 +614,93 @@ TEST(ShadowMathTest, DecodeDepthRangeRejectsANonPositiveNear)
     EXPECT_FALSE(DecodeDepthRange(gpu).has_value());
 }
 
+TEST(ShadowMathTest, DecodeDepthTellsRangeNoSurfaceAndInvalidApart)
+{
+    EXPECT_EQ(DecodeDepth(ShadowDepthRangeGpu{}).kind, ShadowDepthDecode::NoSurface);
+
+    ShadowDepthRangeGpu range;
+    range.minDepthBits = std::bit_cast<std::uint32_t>(2.0f);
+    range.invMaxDepthBits = ~std::bit_cast<std::uint32_t>(10.0f);
+    const ShadowDepthDecoded decoded = DecodeDepth(range);
+    EXPECT_EQ(decoded.kind, ShadowDepthDecode::Range);
+    EXPECT_FLOAT_EQ(decoded.range.nearDepth, 2.0f);
+    EXPECT_FLOAT_EQ(decoded.range.farDepth, 10.0f);
+
+    ShadowDepthRangeGpu inverted;
+    inverted.minDepthBits = std::bit_cast<std::uint32_t>(10.0f);
+    inverted.invMaxDepthBits = ~std::bit_cast<std::uint32_t>(2.0f);
+    EXPECT_EQ(DecodeDepth(inverted).kind, ShadowDepthDecode::Invalid);
+
+    ShadowDepthRangeGpu notFinite;
+    notFinite.minDepthBits = std::bit_cast<std::uint32_t>(std::numeric_limits<float>::quiet_NaN());
+    notFinite.invMaxDepthBits = ~std::bit_cast<std::uint32_t>(10.0f);
+    EXPECT_EQ(DecodeDepth(notFinite).kind, ShadowDepthDecode::Invalid);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Skipping the cascades of a view without surfaces
+// ---------------------------------------------------------------------------------------------
+
+namespace {
+
+ShadowSkipState EmptySamples(std::uint32_t count, std::uint64_t firstFrame = 100)
+{
+    ShadowSkipState state;
+    for (std::uint32_t i = 0; i < count; ++i) {
+        RecordShadowDepthSample(state, ShadowDepthDecode::NoSurface, firstFrame + i);
+    }
+    return state;
+}
+
+} // namespace
+
+TEST(ShadowMathTest, SkipNeedsThreeEmptySamplesAndNoReader)
+{
+    EXPECT_FALSE(ShouldSkipShadowCascades(EmptySamples(2), 110, false));
+    EXPECT_TRUE(ShouldSkipShadowCascades(EmptySamples(3), 110, false));
+    EXPECT_FALSE(ShouldSkipShadowCascades(EmptySamples(3), 110, true));
+}
+
+TEST(ShadowMathTest, SkipIgnoresAFrameThatWasAlreadyRecorded)
+{
+    ShadowSkipState state;
+    for (int i = 0; i < 5; ++i) {
+        RecordShadowDepthSample(state, ShadowDepthDecode::NoSurface, 100);
+    }
+    EXPECT_EQ(state.emptyStreak, 1u);
+    EXPECT_FALSE(ShouldSkipShadowCascades(state, 110, false));
+}
+
+TEST(ShadowMathTest, SkipNeverHappensRightAfterAnInvalidSample)
+{
+    ShadowSkipState state = EmptySamples(2);
+    RecordShadowDepthSample(state, ShadowDepthDecode::Invalid, 102);
+    RecordShadowDepthSample(state, ShadowDepthDecode::NoSurface, 103);
+    EXPECT_FALSE(ShouldSkipShadowCascades(state, 110, false));
+}
+
+TEST(ShadowMathTest, SkipWaitsSixFramesAfterTheLastRangeSample)
+{
+    ShadowSkipState state;
+    RecordShadowDepthSample(state, ShadowDepthDecode::Range, 100);
+    for (std::uint64_t frame = 101; frame <= 103; ++frame) {
+        RecordShadowDepthSample(state, ShadowDepthDecode::NoSurface, frame);
+    }
+    EXPECT_FALSE(ShouldSkipShadowCascades(state, 106, false));
+    EXPECT_TRUE(ShouldSkipShadowCascades(state, 107, false));
+
+    RecordShadowDepthSample(state, ShadowDepthDecode::Range, 108);
+    EXPECT_FALSE(ShouldSkipShadowCascades(state, 109, false));
+}
+
+TEST(ShadowMathTest, SkipHistoryRestartsWhenTheFrameCounterGoesBackwards)
+{
+    ShadowSkipState state = EmptySamples(3, 500);
+    RecordShadowDepthSample(state, ShadowDepthDecode::NoSurface, 5);
+    EXPECT_EQ(state.emptyStreak, 1u);
+    EXPECT_FALSE(ShouldSkipShadowCascades(state, 6, false));
+}
+
 // ---------------------------------------------------------------------------------------------
 // ExponentialBlendFactor
 // ---------------------------------------------------------------------------------------------

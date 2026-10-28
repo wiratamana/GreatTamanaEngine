@@ -203,6 +203,29 @@ TEST(RenderFeatureCompositorPostOpaqueTest, SetFeatureViewEnabledChangesOnlyThat
     EXPECT_FALSE(compositor->SetFeatureViewEnabled("POp_Test_NoSuchFeature", rg::ViewScope::Primary, false));
 }
 
+TEST(RenderFeatureCompositorPostOpaqueTest, ChannelConsumerCountsOnlyWhileEnabledInTheScope)
+{
+    GTE_SKIP_IF_NO_HEADLESS_CORE(core);
+
+    RenderFeatureCompositor* compositor = core->GetRenderFeatureCompositor();
+    ASSERT_NE(compositor, nullptr);
+
+    ASSERT_TRUE(compositor->RegisterStageFeature(CompositorStage::PostOpaque, "POp_Test_Reader", 5,
+        [](rg::RenderGraphBuilder&, rg::RenderPassBlackboard&, rg::RenderViewId, const ScenePassReadHandles&) { }));
+    EXPECT_FALSE(compositor->AddChannelConsumer("POp_Test_NoSuchReader", "Owner.Data"));
+    EXPECT_TRUE(compositor->AddChannelConsumer("POp_Test_Reader", "Owner.Data"));
+
+    EXPECT_TRUE(compositor->HasChannelConsumer("Owner.Data", rg::ViewScope::Primary));
+    EXPECT_FALSE(compositor->HasChannelConsumer("Owner.Other", rg::ViewScope::Primary));
+
+    EXPECT_TRUE(compositor->SetFeatureViewEnabled("POp_Test_Reader", rg::ViewScope::Secondary, false));
+    EXPECT_TRUE(compositor->HasChannelConsumer("Owner.Data", rg::ViewScope::Primary));
+    EXPECT_FALSE(compositor->HasChannelConsumer("Owner.Data", rg::ViewScope::Secondary));
+
+    EXPECT_TRUE(compositor->SetFeatureEnabled("POp_Test_Reader", false));
+    EXPECT_FALSE(compositor->HasChannelConsumer("Owner.Data", rg::ViewScope::Primary));
+}
+
 // A same-priority collision between two PostOpaque entries falls back to the
 // documented, stable lexical tie-break (the stage list sort),
 // never crashing.

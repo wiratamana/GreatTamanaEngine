@@ -39,6 +39,16 @@ bool RenderFeatureCompositor::SetFeatureViewEnabled(const std::string& name, rg:
     return m_impl->SetFeatureViewEnabled(name, scope, enabled);
 }
 
+bool RenderFeatureCompositor::AddChannelConsumer(const std::string& name, const std::string& channelKey)
+{
+    return m_impl->AddChannelConsumer(name, channelKey);
+}
+
+bool RenderFeatureCompositor::HasChannelConsumer(const std::string& channelKey, rg::ViewScope scope) const
+{
+    return m_impl->HasChannelConsumer(channelKey, scope);
+}
+
 bool RenderFeatureCompositor::SetFeaturePriority(const std::string& name, std::int32_t priority)
 {
     return m_impl->SetFeaturePriority(name, priority);

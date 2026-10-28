@@ -3,15 +3,18 @@
 #include "Assets/MeshClusterValidation.h"
 #include "Core/FeatureKit/PersistentBufferPolicy.h"
 #include "Renderer/Culling/ClusterCullMath.h"
+#include "Renderer/Culling/HizBuildPlan.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace gte {
@@ -475,79 +478,257 @@ std::vector<float> UniformAtlas(const HizLayout& layout, float value)
     return std::vector<float>(static_cast<std::size_t>(layout.atlasWidth) * layout.atlasHeight, value);
 }
 
+// Perspective view-projection with the near plane at 0.1 and the given far plane, looking along +Z.
+Mat4 PerspectiveWithFar(float farZ)
+{
+    return Mat4::PerspectiveFovLH_ZO(1.0f, 1.0f, 0.1f, farZ) * Mat4::LookAtLH(Vec3(0.0f, 0.0f, 0.0f),
+               Vec3(0.0f, 0.0f, 1.0f), Vec3::Up());
+}
+
 TEST(ClusterCullMath, HizLayoutPacksLevelsRightOfLevelZero)
 {
     const HizLayout layout = HizLayoutFor(256, 256);
     ASSERT_TRUE(layout.IsValid());
     EXPECT_EQ(layout.baseWidth, 128u);
     EXPECT_EQ(layout.baseHeight, 128u);
+    EXPECT_EQ(layout.levelCount, 8u);
     EXPECT_EQ(layout.atlasWidth, 192u);
     EXPECT_EQ(layout.atlasHeight, 128u);
 
     EXPECT_EQ(layout.levels[0].originX, 0u);
-    EXPECT_EQ(layout.levels[0].blockSize, 2u);
-    const std::uint32_t expectedY[] = { 0, 0, 64, 96, 112, 120 };
-    const std::uint32_t expectedSize[] = { 128, 64, 32, 16, 8, 4 };
-    for (std::uint32_t k = 1; k < kHizLevelCount; ++k) {
+    EXPECT_EQ(layout.levels[0].originY, 0u);
+    const std::uint32_t expectedY[] = { 0, 0, 64, 96, 112, 120, 124, 126 };
+    const std::uint32_t expectedSize[] = { 128, 64, 32, 16, 8, 4, 2, 1 };
+    for (std::uint32_t k = 1; k < layout.levelCount; ++k) {
         EXPECT_EQ(layout.levels[k].originX, 128u) << k;
         EXPECT_EQ(layout.levels[k].originY, expectedY[k]) << k;
         EXPECT_EQ(layout.levels[k].width, expectedSize[k]) << k;
         EXPECT_EQ(layout.levels[k].height, expectedSize[k]) << k;
-        EXPECT_EQ(layout.levels[k].blockSize, 2u << k) << k;
     }
 }
 
-TEST(ClusterCullMath, HizLayoutRoundsOddSizesUpAndNeverOverlaps)
+TEST(ClusterCullMath, HizLayoutLevelCountReachesOneTexelForEverySize)
 {
-    const HizLayout odd = HizLayoutFor(5, 3);
-    ASSERT_TRUE(odd.IsValid());
-    EXPECT_EQ(odd.baseWidth, 3u);
-    EXPECT_EQ(odd.baseHeight, 2u);
-    for (const HizLevel& level : odd.levels) {
-        EXPECT_GE(level.width, 1u);
-        EXPECT_GE(level.height, 1u);
-        EXPECT_LE(level.originX + level.width, odd.atlasWidth);
-        EXPECT_LE(level.originY + level.height, odd.atlasHeight);
+    struct Case {
+        std::uint32_t scene;
+        std::uint32_t sceneHeight;
+        std::uint32_t base;
+        std::uint32_t baseHeight;
+        std::uint32_t levels;
+    };
+    const Case cases[] = {
+        { 1, 1, 1, 1, 1 },
+        { 2, 2, 1, 1, 1 },
+        { 350, 447, 175, 224, 9 },
+        { 1920, 1080, 960, 540, 11 },
+        { 3840, 2160, 1920, 1080, 12 },
+        { 8192, 4320, 4096, 2160, 13 },
+        { 16384, 16384, 8192, 8192, 14 },
+    };
+    for (const Case& c : cases) {
+        const HizLayout layout = HizLayoutFor(c.scene, c.sceneHeight);
+        ASSERT_TRUE(layout.IsValid()) << c.scene << "x" << c.sceneHeight;
+        EXPECT_EQ(layout.baseWidth, c.base);
+        EXPECT_EQ(layout.baseHeight, c.baseHeight);
+        EXPECT_EQ(layout.levelCount, c.levels) << c.scene << "x" << c.sceneHeight;
+        const HizLevel& top = layout.levels[layout.levelCount - 1];
+        EXPECT_EQ(top.width, 1u);
+        EXPECT_EQ(top.height, 1u);
+        for (std::uint32_t k = 0; k < layout.levelCount; ++k) {
+            EXPECT_EQ(layout.levels[k].width, std::max(1u, (c.base + (1u << k) - 1u) >> k)) << k;
+            EXPECT_EQ(layout.levels[k].height, std::max(1u, (c.baseHeight + (1u << k) - 1u) >> k)) << k;
+        }
     }
+}
 
+TEST(ClusterCullMath, HizLayoutRefusesZeroAndOversizedScenes)
+{
     EXPECT_FALSE(HizLayoutFor(0, 100).IsValid());
     EXPECT_FALSE(HizLayoutFor(100, 0).IsValid());
+    EXPECT_TRUE(HizLayoutFor(16384, 16384).IsValid());
+    EXPECT_FALSE(HizLayoutFor(16385, 100).IsValid());
+    EXPECT_FALSE(HizLayoutFor(100, 16385).IsValid());
+    EXPECT_FALSE(HizLayoutFor(0xFFFFFFFFu, 0xFFFFFFFFu).IsValid());
+}
 
-    // Levels 1.. are stacked without a gap or an overlap.
-    const HizLayout wide = HizLayoutFor(1921, 1081);
-    for (std::uint32_t k = 2; k < kHizLevelCount; ++k) {
-        EXPECT_EQ(wide.levels[k].originY, wide.levels[k - 1].originY + wide.levels[k - 1].height) << k;
+TEST(ClusterCullMath, HizLevelsNeverOverlapAndFitTheAtlas)
+{
+    for (const auto& [width, height] : { std::pair{ 5u, 3u }, std::pair{ 350u, 447u }, std::pair{ 1921u, 1081u } }) {
+        const HizLayout layout = HizLayoutFor(width, height);
+        ASSERT_TRUE(layout.IsValid());
+        std::vector<std::uint8_t> used(static_cast<std::size_t>(layout.atlasWidth) * layout.atlasHeight, 0);
+        for (std::uint32_t k = 0; k < layout.levelCount; ++k) {
+            const HizLevel& level = layout.levels[k];
+            ASSERT_LE(level.originX + level.width, layout.atlasWidth) << k;
+            ASSERT_LE(level.originY + level.height, layout.atlasHeight) << k;
+            for (std::uint32_t y = 0; y < level.height; ++y) {
+                for (std::uint32_t x = 0; x < level.width; ++x) {
+                    std::uint8_t& cell = used[static_cast<std::size_t>(level.originY + y) * layout.atlasWidth
+                        + level.originX + x];
+                    EXPECT_EQ(cell, 0u) << "level " << k;
+                    cell = 1;
+                }
+            }
+        }
     }
-    EXPECT_LE(wide.levels[kHizMaxLevel].originY + wide.levels[kHizMaxLevel].height, wide.atlasHeight);
+}
+
+TEST(ClusterCullMath, HizLevelForExtentIsTheSmallestCoveringLevel)
+{
+    const std::pair<float, std::uint32_t> cases[] = {
+        { 0.0f, 0 }, { 1.0f, 0 }, { 2.0f, 1 }, { 3.0f, 2 }, { 33.0f, 6 }, { 64.0f, 6 }, { 500.0f, 9 }, { 4000.0f, 12 },
+    };
+    for (const auto& [extent, level] : cases) {
+        EXPECT_EQ(HizLevelForExtent(extent, kHizMaxLevels), level) << extent;
+    }
+    EXPECT_EQ(HizLevelForExtent(4000.0f, 3), 2u); // Capped at the top level.
+    EXPECT_EQ(HizLevelForExtent(std::nanf(""), kHizMaxLevels), 0u);
+    EXPECT_EQ(HizLevelForExtent(100.0f, 0), 0u);
 }
 
 TEST(ClusterCullMath, HizChooseRectPicksTheSmallestLevelThatCoversTwoTexels)
 {
     const HizLayout layout = HizLayoutFor(256, 256);
-    const HizRect small = HizChooseRect(10.0f, 10.0f, 10.2f, 10.2f, layout);
-    ASSERT_TRUE(small.usable);
-    EXPECT_EQ(small.level, 2u); // 0.2 texels plus a margin of one on each side is 2.2 wide.
-    EXPECT_EQ(small.x0, 2u);
-    EXPECT_EQ(small.x1, 2u);
+    const std::optional<HizRect> small = HizChooseRect(10.0f, 10.0f, 10.2f, 10.2f, layout);
+    ASSERT_TRUE(small.has_value());
+    EXPECT_EQ(small->level, 2u); // 0.2 texels plus a margin of one on each side is 2.2 wide.
+    EXPECT_EQ(small->x0, 2u);
+    EXPECT_EQ(small->x1, 2u);
 
-    const HizRect atMax = HizChooseRect(10.0f, 10.0f, 40.0f, 40.0f, layout);
-    ASSERT_TRUE(atMax.usable);
-    EXPECT_EQ(atMax.level, kHizMaxLevel);
+    // A rect that covers the whole screen reads the 1 x 1 top level: no size rule keeps it.
+    const std::optional<HizRect> whole = HizChooseRect(0.0f, 0.0f, 128.0f, 128.0f, layout);
+    ASSERT_TRUE(whole.has_value());
+    EXPECT_EQ(whole->level, layout.levelCount - 1);
+    EXPECT_EQ(whole->x0, 0u);
+    EXPECT_EQ(whole->x1, 0u);
 
-    EXPECT_FALSE(HizChooseRect(10.0f, 10.0f, 41.0f, 41.0f, layout).usable); // Above the last level: kept.
-    EXPECT_FALSE(HizChooseRect(std::nanf(""), 0.0f, 1.0f, 1.0f, layout).usable);
+    EXPECT_FALSE(HizChooseRect(std::nanf(""), 0.0f, 1.0f, 1.0f, layout).has_value());
+    EXPECT_FALSE(HizChooseRect(0.0f, 0.0f, 1.0f, 1.0f, HizLayout{}).has_value());
+}
+
+TEST(ClusterCullMath, HizRectNeverSpansMoreThanTwoTexelsAtItsLevel)
+{
+    const HizLayout layout = HizLayoutFor(1024, 1024);
+    for (float width : { 0.3f, 1.0f, 2.5f, 7.7f, 33.0f, 100.0f, 255.5f, 400.0f }) {
+        for (float start = 0.0f; start < 100.0f; start += 6.37f) {
+            const std::optional<HizRect> rect = HizChooseRect(start, start * 0.5f, start + width, start * 0.5f + width, layout);
+            ASSERT_TRUE(rect.has_value());
+            EXPECT_LE(rect->x1 - rect->x0, 1u) << start << " " << width;
+            EXPECT_LE(rect->y1 - rect->y0, 1u) << start << " " << width;
+        }
+    }
 }
 
 TEST(ClusterCullMath, HizFarthestDepthTakesTheMaxOfFourTexels)
 {
     const HizLayout layout = HizLayoutFor(256, 256);
     std::vector<float> atlas = UniformAtlas(layout, 0.25f);
-    const HizRect rect{ true, 0, 4, 4, 5, 5 };
+    const HizRect rect{ 0, 4, 4, 5, 5 };
     atlas[static_cast<std::size_t>(5) * layout.atlasWidth + 4] = 0.75f;
     EXPECT_FLOAT_EQ(HizFarthestDepth(atlas, layout, rect), 0.75f);
 
     const std::vector<float> tooSmall(4, 0.0f);
     EXPECT_FLOAT_EQ(HizFarthestDepth(tooSmall, layout, rect), 1.0f); // No data: nothing is occluded.
+}
+
+TEST(ClusterCullMath, HizPyramidReferenceIsTheMaxOverEveryBlock)
+{
+    constexpr std::uint32_t kWidth = 33;
+    constexpr std::uint32_t kHeight = 17;
+    std::vector<float> depth(static_cast<std::size_t>(kWidth) * kHeight);
+    std::uint32_t state = 12345u;
+    for (float& d : depth) {
+        state = state * 1664525u + 1013904223u;
+        d = static_cast<float>(state >> 8) / static_cast<float>(1u << 24);
+    }
+    const HizLayout layout = HizLayoutFor(kWidth, kHeight);
+    const std::vector<float> atlas = BuildHizPyramidReference(depth, kWidth, kHeight, layout);
+    ASSERT_EQ(atlas.size(), static_cast<std::size_t>(layout.atlasWidth) * layout.atlasHeight);
+
+    for (std::uint32_t k = 0; k < layout.levelCount; ++k) {
+        const HizLevel& level = layout.levels[k];
+        const std::uint32_t block = 2u << k;
+        for (std::uint32_t y = 0; y < level.height; ++y) {
+            for (std::uint32_t x = 0; x < level.width; ++x) {
+                float expected = 0.0f;
+                for (std::uint32_t sy = y * block; sy < std::min((y + 1) * block, kHeight); ++sy) {
+                    for (std::uint32_t sx = x * block; sx < std::min((x + 1) * block, kWidth); ++sx) {
+                        expected = std::max(expected, depth[static_cast<std::size_t>(sy) * kWidth + sx]);
+                    }
+                }
+                const std::size_t index = static_cast<std::size_t>(level.originY + y) * layout.atlasWidth + level.originX + x;
+                EXPECT_EQ(atlas[index], expected) << "level " << k << " texel " << x << "," << y;
+            }
+        }
+    }
+    const HizLevel& top = layout.levels[layout.levelCount - 1];
+    EXPECT_EQ(atlas[static_cast<std::size_t>(top.originY) * layout.atlasWidth + top.originX],
+        *std::max_element(depth.begin(), depth.end()));
+
+    EXPECT_TRUE(BuildHizPyramidReference(depth, kWidth, kHeight, HizLayout{}).empty());
+    EXPECT_TRUE(BuildHizPyramidReference(std::span<const float>(depth.data(), 4), kWidth, kHeight, layout).empty());
+}
+
+TEST(ClusterCullMath, HizDepthMapMatchesThePerspectiveProjection)
+{
+    const HizDepthMap map = HizDepthMapOf(PerspectiveWithFar(1000.0f));
+    ASSERT_FALSE(map.raw);
+    EXPECT_NEAR(map.k, 1000.0f / 999.9f, 1e-5f);
+    EXPECT_NEAR(map.b, -0.1f * 1000.0f / 999.9f, 1e-5f);
+
+    // A moved camera keeps the same map: only the near and far planes matter.
+    const Mat4 moved = Mat4::PerspectiveFovLH_ZO(1.0f, 1.0f, 0.1f, 1000.0f)
+        * Mat4::LookAtLH(Vec3(3.0f, 4.0f, -5.0f), Vec3(1.0f, 0.0f, 2.0f), Vec3::Up());
+    const HizDepthMap movedMap = HizDepthMapOf(moved);
+    ASSERT_FALSE(movedMap.raw);
+    EXPECT_NEAR(movedMap.k, map.k, 1e-4f);
+    EXPECT_NEAR(movedMap.b, map.b, 1e-4f);
+}
+
+TEST(ClusterCullMath, HizDepthMapIsRawForOrthographicAndSkewedMatrices)
+{
+    EXPECT_TRUE(HizDepthMapOf(OrthographicLookingForward()).raw);
+    Mat4 skewed = PerspectiveWithFar(1000.0f);
+    skewed(2, 0) += 0.5f;
+    EXPECT_TRUE(HizDepthMapOf(skewed).raw);
+    Mat4 broken = PerspectiveWithFar(1000.0f);
+    broken(2, 2) = std::numeric_limits<float>::quiet_NaN();
+    EXPECT_TRUE(HizDepthMapOf(broken).raw);
+}
+
+TEST(ClusterCullMath, HizBehindUsesARelativeMarginInViewDepth)
+{
+    const HizDepthMap map = HizDepthMapOf(PerspectiveWithFar(1000.0f));
+    ASSERT_FALSE(map.raw);
+    for (const float occluderW : { 5.0f, 100.0f, 900.0f }) {
+        const float depth = map.k + map.b / occluderW;
+        EXPECT_FALSE(HizBehind(map, occluderW * 1.001f, 0.5f, depth)) << occluderW; // 0.1% behind: kept.
+        EXPECT_TRUE(HizBehind(map, occluderW * 1.01f, 0.5f, depth)) << occluderW;   // 1% behind: culled.
+        EXPECT_FALSE(HizBehind(map, occluderW * 0.9f, 0.5f, depth)) << occluderW;   // In front: kept.
+    }
+}
+
+TEST(ClusterCullMath, HizBehindNeverCullsForClearOrNonFiniteDepth)
+{
+    const HizDepthMap map = HizDepthMapOf(PerspectiveWithFar(1000.0f));
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    EXPECT_FALSE(HizBehind(map, 5000.0f, 1.0f, 1.0f)); // Clear depth: nothing was drawn there.
+    EXPECT_FALSE(HizBehind(map, 5000.0f, 1.0f, 1.5f));
+    EXPECT_FALSE(HizBehind(map, nan, 0.5f, 0.5f));
+    EXPECT_FALSE(HizBehind(map, 50.0f, nan, 0.5f));
+    EXPECT_FALSE(HizBehind(map, 50.0f, 0.5f, nan));
+    EXPECT_FALSE(HizBehind(map, inf, 0.5f, 0.5f));
+    EXPECT_FALSE(HizBehind(HizDepthMap{}, nan, 0.5f, 0.5f));
+}
+
+TEST(ClusterCullMath, HizBehindComparesRawDepthWithAnAbsoluteMargin)
+{
+    const HizDepthMap raw{};
+    ASSERT_TRUE(raw.raw);
+    EXPECT_TRUE(HizBehind(raw, 0.0f, 0.6f, 0.5f));
+    EXPECT_FALSE(HizBehind(raw, 0.0f, 0.5005f, 0.5f));
+    EXPECT_FALSE(HizBehind(raw, 0.0f, 0.4f, 0.5f));
 }
 
 TEST(ClusterCullMath, OccludedOnlyWhenBoxIsBehindThePyramidDepth)
@@ -557,11 +738,20 @@ TEST(ClusterCullMath, OccludedOnlyWhenBoxIsBehindThePyramidDepth)
     const MeshCluster cluster = MakeCluster(Vec3(0.0f, 0.0f, 10.0f), 0.5f, Vec3(0.0f, 0.0f, 0.0f), 1.0f);
     const Mat4 world = Mat4::Identity();
 
-    // The nearest face is at z = 9.5: ndc depth near 0.9904.
+    // The nearest face is at view distance 9.5.
     EXPECT_TRUE(ClusterOccluded(cluster, world, viewProjection, layout, UniformAtlas(layout, 0.5f)));
     EXPECT_TRUE(ClusterOccluded(cluster, world, viewProjection, layout, UniformAtlas(layout, 0.98f)));
     EXPECT_FALSE(ClusterOccluded(cluster, world, viewProjection, layout, UniformAtlas(layout, 0.9999f)));
     EXPECT_FALSE(ClusterOccluded(cluster, world, viewProjection, layout, UniformAtlas(layout, 1.0f)));
+}
+
+TEST(ClusterCullMath, OcclusionHasNoSizeRule)
+{
+    // A box that covers most of a large view is culled by a near pyramid.
+    const HizLayout big = HizLayoutFor(1024, 1024);
+    const Mat4 viewProjection = PerspectiveFrom(Vec3(0.0f, 0.0f, 0.0f));
+    const MeshCluster wide = MakeCluster(Vec3(0.0f, 0.0f, 10.0f), 3.0f, Vec3(0.0f, 0.0f, 0.0f), 1.0f);
+    EXPECT_TRUE(ClusterOccluded(wide, Mat4::Identity(), viewProjection, big, UniformAtlas(big, 0.0f)));
 }
 
 TEST(ClusterCullMath, OcclusionKeepsWhatItCannotJudge)
@@ -580,16 +770,12 @@ TEST(ClusterCullMath, OcclusionKeepsWhatItCannotJudge)
     // A corner behind the eye (the box straddles the eye plane).
     EXPECT_FALSE(ClusterOccluded(MakeCluster(Vec3(0.0f, 0.0f, 0.0f), 2.0f, Vec3(0.0f, 0.0f, 0.0f), 1.0f), world,
         viewProjection, layout, nearEverywhere));
-    // A rect larger than the biggest level.
-    const HizLayout big = HizLayoutFor(1024, 1024);
-    EXPECT_FALSE(ClusterOccluded(MakeCluster(Vec3(0.0f, 0.0f, 10.0f), 1.0f, Vec3(0.0f, 0.0f, 0.0f), 1.0f), world,
-        viewProjection, big, UniformAtlas(big, 0.0f)));
     // An invalid layout.
     EXPECT_FALSE(ClusterOccluded(MakeCluster(Vec3(0.0f, 0.0f, 10.0f), 0.5f, Vec3(0.0f, 0.0f, 0.0f), 1.0f), world,
         viewProjection, HizLayout{}, nearEverywhere));
 }
 
-TEST(ClusterCullMath, CullParamsCarryThePyramidSize)
+TEST(ClusterCullMath, CullParamsCarryThePyramidSizeAndDepthMap)
 {
     ClusterCullParams params = MakeClusterCullParams(
         PerspectiveFrom(Vec3(0.0f, 0.0f, 0.0f)), Vec3(0.0f, 0.0f, 0.0f), false, 1, 1, ClusterCullFlags::Frustum);
@@ -601,6 +787,44 @@ TEST(ClusterCullMath, CullParamsCarryThePyramidSize)
     EXPECT_FLOAT_EQ(params.hiz[2], 128.0f);
     EXPECT_FLOAT_EQ(params.hiz[3], 64.0f);
     EXPECT_FLOAT_EQ(params.prevViewProjection[12], prev.Data()[12]);
+
+    const HizDepthMap map = HizDepthMapOf(prev);
+    EXPECT_FLOAT_EQ(params.depthMap[0], map.k);
+    EXPECT_FLOAT_EQ(params.depthMap[1], map.b);
+    EXPECT_FLOAT_EQ(params.depthMap[2], static_cast<float>(layout.levelCount));
+    EXPECT_EQ(params.counts[3] & kClusterCullFlagRawDepth, 0u);
+
+    SetClusterCullHiz(params, OrthographicLookingForward(), layout);
+    EXPECT_NE(params.counts[3] & kClusterCullFlagRawDepth, 0u);
+    EXPECT_EQ(params.counts[3] & kClusterCullFlagFrustum, kClusterCullFlagFrustum);
+}
+
+TEST(ClusterCullMath, ParamBlockLayoutIsFixed)
+{
+    EXPECT_EQ(sizeof(ClusterCullParams), 224u);
+    EXPECT_EQ(offsetof(ClusterCullParams, hiz), 192u);
+    EXPECT_EQ(offsetof(ClusterCullParams, depthMap), 208u);
+    EXPECT_EQ(kClusterCullFlagRawDepth, 256u);
+}
+
+TEST(ClusterCullMath, HizBuildPlanRunsTheTopPassOnlyAboveLevelFour)
+{
+    const HizBuildPlan large = HizBuildPlanFor(HizLayoutFor(350, 447));
+    EXPECT_EQ(large.baseThreadsX, 175u);
+    EXPECT_EQ(large.baseThreadsY, 224u);
+    EXPECT_EQ(large.topThreadsX, kHizTopThreads);
+    EXPECT_TRUE(large.runTop);
+
+    EXPECT_FALSE(HizBuildPlanFor(HizLayoutFor(32, 32)).runTop); // Five levels: the base pass writes them all.
+    EXPECT_TRUE(HizBuildPlanFor(HizLayoutFor(64, 64)).runTop);
+
+    const HizBuildPush push = MakeHizBuildPush(350, 447, HizLayoutFor(350, 447));
+    EXPECT_EQ(push.sizes[0], 350u);
+    EXPECT_EQ(push.sizes[1], 447u);
+    EXPECT_EQ(push.sizes[2], 175u);
+    EXPECT_EQ(push.sizes[3], 224u);
+    EXPECT_EQ(push.levels[0], 9u);
+    EXPECT_EQ(kHizPassCount, 2u);
 }
 
 TEST(ClusterCullMath, OcclusionGuardsEveryResetEvent)

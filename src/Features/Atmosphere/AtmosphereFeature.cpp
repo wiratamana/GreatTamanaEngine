@@ -112,6 +112,8 @@ void AtmosphereFeature::Setup(fx::FeatureSetup& s)
     // After the sun cascades exist (PreOpaque), before the composite reads the volume.
     s.PostOpaque("AtmosphereAerialVolume", kAerialVolumePriority, [this](fx::PostOpaqueFrame& f) { AerialVolume(f); },
         fx::Gate{ "AtmosphereAerialPerspectiveVolumePass" });
+    // The volume shades air with the sun cascades, so the cascades must exist even when the view shows no surface.
+    s.ReadsChannelInEmptyViews("AtmosphereAerialVolume", kSunShadowReceiverOwner, kSunShadowReceiverChannel);
     s.PostComposite("AtmosphereComposite", kCompositePriority, fx::Blend::AlphaOver,
         [this](fx::CompositeFrame& f) { Composite(f); },
         fx::Gate{ "AtmosphereAerialPerspectiveCompositePass", "AtmosphereComposite.CopyToPrivateTarget" });

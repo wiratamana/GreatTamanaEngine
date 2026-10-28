@@ -43,6 +43,7 @@ struct Registration {
     Gate gate;
     std::variant<PreOpaqueCallback, PostOpaqueCallback, CompositeCallback, SharedCallback, OpaqueCallback> callback;
     bool secondaryViewDefault = true; // False: starts disabled in the secondary view.
+    std::string consumedChannel;      // "<owner>.<channel>" read even in views without surfaces; empty: none.
 };
 
 // Registration verbs offered to Feature::Setup(). They only collect; mistakes are recorded and make the
@@ -65,6 +66,10 @@ public:
     // Whether registrations added after this call start enabled in the secondary view (default true).
     // Shared and Always() registrations are never gated.
     void DefaultSecondaryViewEnabled(bool enabled) noexcept { m_secondaryViewDefault = enabled; }
+
+    // Marks the earlier registration `registrationName` as a reader of channel "<owner>.<channel>" that needs it even
+    // in views without surfaces (it shades empty space). Fails the setup for an unknown registration.
+    void ReadsChannelInEmptyViews(std::string_view registrationName, std::string_view ownerName, std::string_view channelName);
 
     // Declares a scene-services slot at startup. Invalid (and one log) when it cannot be declared.
     SceneSlot DeclareSceneSlot(std::string_view name, SceneSlotKind kind, std::uint32_t preferredIndex);

@@ -256,14 +256,15 @@ TEST(ClusterDrawStateTests, StateBudgetThenProcessCeiling)
     EXPECT_EQ(c.TryReserveChainBytes(kGame, 0, 0, kInstances, kWork), ClusterReserveResult::Ok);
 }
 
-TEST(HizPyramidTests, OneUniquePassNamePerLevelAndStableAcrossRebuilds)
+TEST(HizPyramidTests, BaseAndTopPassNamesAreUniqueAndStableAcrossRebuilds)
 {
     const HizPyramid pyramid("Test.Hiz");
     ASSERT_TRUE(pyramid.Valid());
     const std::vector<std::string> names = pyramid.AllPassNames();
-    ASSERT_EQ(names.size(), static_cast<std::size_t>(kHizLevelCount));
+    ASSERT_EQ(names.size(), static_cast<std::size_t>(kHizPassCount));
     EXPECT_EQ(std::set<std::string>(names.begin(), names.end()).size(), names.size());
-    EXPECT_EQ(names.front(), "Test.Hiz.Level0");
+    EXPECT_EQ(names.front(), "Test.Hiz.Base");
+    EXPECT_EQ(names.back(), "Test.Hiz.Top");
 
     const std::size_t poolSize = [] {
         const HizPyramid again("Test.Hiz");
@@ -271,7 +272,7 @@ TEST(HizPyramidTests, OneUniquePassNamePerLevelAndStableAcrossRebuilds)
     }();
     EXPECT_EQ(poolSize, names.size());
     // The same base interns to the same pointers: a rebuilt pyramid does not grow the table.
-    EXPECT_EQ(InternClusterName("Test.Hiz.Level0"), InternClusterName("Test.Hiz.Level0"));
+    EXPECT_EQ(InternClusterName("Test.Hiz.Base"), InternClusterName("Test.Hiz.Base"));
 
     const HizPyramid other("Test.HizOther");
     for (const std::string& name : other.AllPassNames()) {

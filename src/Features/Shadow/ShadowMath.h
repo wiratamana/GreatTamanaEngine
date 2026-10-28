@@ -95,8 +95,70 @@ SunShadowReceiver MakeSunShadowReceiver(const ShadowMapData& map, const ShadowSe
 // Sun elevation above the horizon in degrees; a non-finite direction counts as straight up.
 float SunElevationDegrees(const Vec3& directionTowardSun) noexcept;
 
-// Decodes the reduction result. Nothing when only sky was visible or the bits are not a valid range.
+// A decoded reduction result. `range` is meaningful only when `kind` is Range.
+struct ShadowDepthDecoded {
+    ShadowDepthDecode kind = ShadowDepthDecode::Invalid;
+    ShadowDepthRange range;
+};
+
+// Decodes the reduction result: no visible pixel is NoSurface; non-finite or inverted bits are Invalid.
+ShadowDepthDecoded DecodeDepth(const ShadowDepthRangeGpu& gpu) noexcept;
+
+// The range of DecodeDepth(), or nothing unless it is a Range.
 std::optional<ShadowDepthRange> DecodeDepthRange(const ShadowDepthRangeGpu& gpu) noexcept;
+
+// Consecutive empty measurements, and the quiet time since the last Range, needed before a view skips its cascades.
+inline constexpr std::uint32_t kShadowSkipEmptySamples = 3;
+inline constexpr std::uint64_t kShadowSkipQuietFrames = 6;
+
+// Per-view history of depth-range measurements. One entry per distinct frame.
+struct ShadowSkipState {
+    std::uint32_t emptyStreak = 0;    // Newest consecutive NoSurface samples.
+    std::uint64_t lastRangeFrame = 0; // Frame of the newest Range sample.
+    std::uint64_t lastSampleFrame = 0;
+    bool hasRange = false;
+    bool hasSample = false;
+};
+
+// Adds one measurement. A frame already seen is ignored; a frame that went backwards restarts the history.
+constexpr void RecordShadowDepthSample(ShadowSkipState& state, ShadowDepthDecode kind, std::uint64_t frame) noexcept
+{
+    if (state.hasSample && frame == state.lastSampleFrame) {
+        return;
+    }
+    if (state.hasSample && frame < state.lastSampleFrame) {
+        state = ShadowSkipState{};
+    }
+    state.hasSample = true;
+    state.lastSampleFrame = frame;
+    switch (kind) {
+    case ShadowDepthDecode::Range:
+        state.emptyStreak = 0;
+        state.hasRange = true;
+        state.lastRangeFrame = frame;
+        break;
+    case ShadowDepthDecode::NoSurface:
+        state.emptyStreak = state.emptyStreak < kShadowSkipEmptySamples ? state.emptyStreak + 1 : state.emptyStreak;
+        break;
+    case ShadowDepthDecode::Invalid:
+        state.emptyStreak = 0;
+        break;
+    }
+}
+
+// True when the cascades may be skipped this frame: nobody reads them, the last samples were all empty and no
+// surface was seen recently.
+constexpr bool ShouldSkipShadowCascades(
+    const ShadowSkipState& state, std::uint64_t frameIndex, bool anyReader) noexcept
+{
+    if (anyReader || state.emptyStreak < kShadowSkipEmptySamples) {
+        return false;
+    }
+    if (!state.hasRange) {
+        return true;
+    }
+    return frameIndex > state.lastRangeFrame && frameIndex - state.lastRangeFrame > kShadowSkipQuietFrames;
+}
 
 // 1 - exp(-dt / tau). tau <= 0 gives 1; otherwise a non-positive or non-finite input gives 0.
 float ExponentialBlendFactor(float deltaSeconds, float timeConstantSeconds) noexcept;

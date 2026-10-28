@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <initializer_list>
 #include <utility>
 
 namespace gte {
@@ -146,6 +147,42 @@ bool RenderFeatureCompositor::Impl::SetFeatureViewEnabled(const std::string& nam
     bool found = false;
     ForEachStage([&](auto& list, const char*) { found = list.SetViewEnabled(name, scope, enabled) || found; });
     return found;
+}
+
+bool RenderFeatureCompositor::Impl::AddChannelConsumer(const std::string& name, const std::string& channelKey)
+{
+    if (StageOfName(name) == nullptr) {
+        return false;
+    }
+    channelConsumers.push_back(ChannelConsumer{ name, channelKey });
+    return true;
+}
+
+bool RenderFeatureCompositor::Impl::RunsInScopeByName(const std::string& name, rg::ViewScope scope) const
+{
+    for (const std::vector<Entry>* list : std::initializer_list<const std::vector<Entry>*>{ &postComposite, &preUi }) {
+        for (const Entry& entry : *list) {
+            if (name == entry.descriptor.name) {
+                return RunsInScope(IsEffectivelyEnabled(name, entry.enabledOverride), entry.scopes, scope);
+            }
+        }
+    }
+    bool runs = false;
+    ForEachStage([&](const auto& list, const char*) {
+        for (const auto& entry : list.entries) {
+            if (entry.name == name) {
+                runs = RunsInScope(IsEffectivelyEnabled(name, entry.enabledOverride), entry.scopes, scope);
+            }
+        }
+    });
+    return runs;
+}
+
+bool RenderFeatureCompositor::Impl::HasChannelConsumer(const std::string& channelKey, rg::ViewScope scope) const
+{
+    return std::any_of(channelConsumers.begin(), channelConsumers.end(), [&](const ChannelConsumer& consumer) {
+        return consumer.channelKey == channelKey && RunsInScopeByName(consumer.name, scope);
+    });
 }
 
 bool RenderFeatureCompositor::Impl::SetFeaturePriority(const std::string& name, std::int32_t priority)

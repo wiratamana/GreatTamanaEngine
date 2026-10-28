@@ -17,8 +17,7 @@ inline constexpr std::uint32_t kDepthOnlyPassNamesPerPart = 3;
 inline constexpr std::uint32_t kClusterPassNameCount = kMainViewLanes * kMainViewPartSlots * kMainViewPassNamesPerPart
     + kDepthOnlyLanes * kDepthOnlyPartSlots * kDepthOnlyPassNamesPerPart;
 
-// Hi-Z pyramid: levels 0..kHizMaxLevel, one pass each.
-inline constexpr std::uint32_t kHizMaxLevel = 5;
-inline constexpr std::uint32_t kHizLevelCount = kHizMaxLevel + 1;
+// Pyramid build passes: base tile reduction and top levels.
+inline constexpr std::uint32_t kHizPassCount = 2;
 
 } // namespace gte

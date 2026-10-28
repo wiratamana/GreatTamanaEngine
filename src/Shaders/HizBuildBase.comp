@@ -1,0 +1,55 @@
+#version 450
+
+// Pyramid build, base pass: one 16 x 16 workgroup reduces a 32 x 32 depth tile into levels 0..4.
+// Texels outside the scene count as 0 (neutral for max). Layout must match HizBuildPlan.h and ClusterCullMath.h.
+
+#include "HizPyramidLayout.glsl"
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(push_constant) uniform HizPush {
+    uvec4 sizes;  // xy = scene depth size, zw = level 0 size.
+    uvec4 levels; // x = level count.
+} push;
+
+layout(binding = 0) uniform sampler2D sceneDepth;
+layout(binding = 1, r32f) uniform writeonly image2D pyramid;
+
+shared float tile[16][16];
+
+float Fetch(uvec2 p)
+{
+    return all(lessThan(p, push.sizes.xy)) ? texelFetch(sceneDepth, ivec2(p), 0).r : 0.0;
+}
+
+void main()
+{
+    uvec2 lid = gl_LocalInvocationID.xy;
+    uvec2 texel = gl_WorkGroupID.xy * 16u + lid;
+    uvec2 p = texel * 2u;
+    float v = max(max(Fetch(p), Fetch(p + uvec2(1u, 0u))), max(Fetch(p + uvec2(0u, 1u)), Fetch(p + uvec2(1u, 1u))));
+    if (all(lessThan(texel, push.sizes.zw))) {
+        imageStore(pyramid, ivec2(texel), vec4(v));
+    }
+    tile[lid.y][lid.x] = v;
+
+    for (uint level = 1u; level <= 4u; ++level) {
+        memoryBarrierShared();
+        barrier();
+        uint n = 16u >> level;
+        float r = 0.0;
+        if (lid.x < n && lid.y < n) {
+            uvec2 a = lid * 2u;
+            r = max(max(tile[a.y][a.x], tile[a.y][a.x + 1u]), max(tile[a.y + 1u][a.x], tile[a.y + 1u][a.x + 1u]));
+            uvec2 coord = ((gl_WorkGroupID.xy * 16u) >> level) + lid;
+            if (level < push.levels.x && all(lessThan(coord, HizLevelSize(push.sizes.zw, level)))) {
+                imageStore(pyramid, ivec2(HizLevelOrigin(push.sizes.zw, level) + coord), vec4(r));
+            }
+        }
+        memoryBarrierShared();
+        barrier();
+        if (lid.x < n && lid.y < n) {
+            tile[lid.y][lid.x] = r;
+        }
+    }
+}

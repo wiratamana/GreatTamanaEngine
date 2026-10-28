@@ -8,6 +8,7 @@
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
 #include "../../Renderer/Culling/ClusterCullMath.h"
+#include "../../Renderer/Culling/HizBuildPlan.h"
 
 #include <array>
 #include <cstdint>
@@ -23,8 +24,7 @@ struct HizPrevious {
     HizReason reason = HizReason::Unavailable; // None when usable.
     Texture atlas;
     Mat4 viewProjection = Mat4::Identity(); // The view-projection the pyramid was built under.
-    std::uint32_t baseWidth = 0;            // Level 0 size.
-    std::uint32_t baseHeight = 0;
+    HizLayout layout;                       // Layout of `atlas`.
 };
 
 // Per-view history of the pyramid: two atlases (this frame's and last frame's) and the camera of the last build.
@@ -49,11 +49,11 @@ public:
     bool Valid() const noexcept { return m_error.empty(); }
     const std::string& Error() const noexcept { return m_error; }
 
-    // "<base>.Level0" ... for a gate and for the stats registry.
+    // "<base>.Base" and "<base>.Top" for a gate and for the stats registry.
     std::vector<std::string> AllPassNames() const;
 
-    // Declares one dispatch per level from the view's scene depth. False when nothing usable was built
-    // (a toggled-off level, a missing shader, an invalid target); the history of that view restarts.
+    // Declares the two build dispatches from the view's scene depth. False when nothing usable was built
+    // (a toggled-off pass, a missing shader, an invalid target); the history of that view restarts.
     bool Build(PostOpaqueFrame& frame);
 
     // The pyramid built last frame for this frame's view, with its guards applied.
@@ -65,8 +65,9 @@ public:
 private:
     std::string m_base;
     std::string m_error;
-    std::array<const char*, kHizLevelCount> m_levelNames{};
-    ComputeShader m_shader{ "HizBuild" };
+    std::array<const char*, kHizPassCount> m_passNames{}; // Base, Top.
+    ComputeShader m_baseShader{ "HizBuildBase" };
+    ComputeShader m_topShader{ "HizBuildTop" };
     PerView<HizViewState> m_views;
 };
 

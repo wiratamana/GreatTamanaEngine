@@ -20,6 +20,18 @@ SceneSlot FeatureSetup::DeclareSceneSlot(std::string_view name, SceneSlotKind ki
     return m_slots->Declare(name, kind, preferredIndex);
 }
 
+void FeatureSetup::ReadsChannelInEmptyViews(
+    std::string_view registrationName, std::string_view ownerName, std::string_view channelName)
+{
+    const auto it = std::find_if(m_registrations.begin(), m_registrations.end(),
+        [&](const Registration& r) { return r.name == registrationName; });
+    if (it == m_registrations.end()) {
+        m_errors.push_back("ReadsChannelInEmptyViews: no registration named '" + std::string(registrationName) + "'");
+        return;
+    }
+    it->consumedChannel = std::string(ownerName) + "." + std::string(channelName);
+}
+
 void FeatureSetup::Fail(std::string message)
 {
     m_errors.push_back(std::move(message));

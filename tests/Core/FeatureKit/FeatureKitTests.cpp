@@ -308,6 +308,22 @@ TEST(FxFeatureSetupTest, OpaqueRegistrationIsAcceptedAndKeepsItsStage)
     EXPECT_TRUE(std::holds_alternative<OpaqueCallback>(setup.Registrations()[0].callback));
 }
 
+TEST(FxFeatureSetupTest, EmptyViewChannelReaderIsRecordedOnItsRegistration)
+{
+    FeatureSetup setup;
+    setup.PostOpaque("Effect.Reader", 0, [](PostOpaqueFrame&) {});
+    setup.PostOpaque("Effect.Other", 0, [](PostOpaqueFrame&) {});
+    setup.ReadsChannelInEmptyViews("Effect.Reader", "Owner", "Data");
+
+    EXPECT_TRUE(setup.Errors().empty());
+    ASSERT_EQ(setup.Registrations().size(), 2u);
+    EXPECT_EQ(setup.Registrations()[0].consumedChannel, "Owner.Data");
+    EXPECT_TRUE(setup.Registrations()[1].consumedChannel.empty());
+
+    setup.ReadsChannelInEmptyViews("Missing", "Owner", "Data");
+    EXPECT_EQ(setup.Errors().size(), 1u);
+}
+
 // --- SetupAndCommit ------------------------------------------------------------
 
 class RecordingSink final : public IRegistrationSink {

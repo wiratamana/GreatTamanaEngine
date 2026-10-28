@@ -1,32 +1,18 @@
-#include "ClusterViewRenderer.h"
+﻿#include "ClusterViewRenderer.h"
 #include "ClusterViewRendererImpl.h"
 
+#include "Culling/HizBuildPlan.h"
 #include "RenderGraph/ComputePass.h"
 #include "RenderGraph/RenderGraphBuilder.h"
 
-#include <iterator>
 #include <span>
 
 namespace gte {
 
 namespace {
 
-// Push block of HizBuild.comp.
-struct HizBuildPush {
-    std::uint32_t levelInfo[4]; // level, depth texels per level texel, atlas origin x and y
-    std::uint32_t sizes[4];     // level width and height, depth width and height
-};
-static_assert(sizeof(HizBuildPush) == 32);
-
-constexpr const char* kHizLevelNames[] = {
-    "ClusterView.Hiz.Level0",
-    "ClusterView.Hiz.Level1",
-    "ClusterView.Hiz.Level2",
-    "ClusterView.Hiz.Level3",
-    "ClusterView.Hiz.Level4",
-    "ClusterView.Hiz.Level5",
-};
-static_assert(std::size(kHizLevelNames) == kHizLevelCount, "one pass name per pyramid level");
+constexpr const char* kHizBasePassName = "ClusterView.Hiz.Base";
+constexpr const char* kHizTopPassName = "ClusterView.Hiz.Top";
 
 } // namespace
 
@@ -147,7 +133,7 @@ std::optional<ClusterViewHizInfo> ClusterViewRenderer::CaptureHiz(
         }
         const HizLayout layout = HizLayoutFor(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
         if (!layout.IsValid()) {
-            s.LogOnce("the Hi-Z capture size " + std::to_string(width) + "x" + std::to_string(height) + " is too small");
+            s.LogOnce("the Hi-Z capture size " + std::to_string(width) + "x" + std::to_string(height) + " is outside the pyramid range");
             return std::nullopt;
         }
         // Depth-only cluster pipeline of the engine: draws both sides, needs no scene set.
@@ -182,7 +168,8 @@ std::optional<ClusterViewHizInfo> ClusterViewRenderer::CaptureHiz(
         std::string buildError;
         const auto build = [&](rg::RenderGraphBuilder& builder) {
             std::vector<rg::TextureHandle> outputs;
-            if (!s.hizShader.IsReady(builder)) {
+            const HizBuildPlan plan = HizBuildPlanFor(layout);
+            if (!s.hizBaseShader.IsReady(builder) || (plan.runTop && !s.hizTopShader.IsReady(builder))) {
                 buildError = "the Hi-Z shader is not ready";
                 return outputs;
             }
@@ -201,17 +188,22 @@ std::optional<ClusterViewHizInfo> ClusterViewRenderer::CaptureHiz(
             const rg::TextureHandle atlasHandle = s.ImportHizAtlas(builder, true);
             builder.KeepTextureOutput(atlasHandle);
             outputs.push_back(atlasHandle);
-            for (std::uint32_t level = 0; level < kHizLevelCount; ++level) {
-                const HizLevel& info = layout.levels[level];
-                const HizBuildPush push{ { level, info.blockSize, info.originX, info.originY },
-                    { info.width, info.height, static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height) } };
-                const bool declared = rg::ComputePass(builder, s.hizShader, rg::StaticName::Interned(kHizLevelNames[level]),
-                    rg::ViewScope::Shared, rg::RenderPassEvent::Opaques)
-                                          .Push(push)
-                                          .Bind("sceneDepth", rg::Depth(depthHandle))
-                                          .Bind("hizOutput", atlasHandle)
-                                          .Dispatch(Extent2D{ info.width, info.height });
-                ok = declared && ok;
+            const HizBuildPush push =
+                MakeHizBuildPush(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), layout);
+            ok = rg::ComputePass(builder, s.hizBaseShader, rg::StaticName::Interned(kHizBasePassName),
+                     rg::ViewScope::Shared, rg::RenderPassEvent::Opaques)
+                     .Push(push)
+                     .Bind("sceneDepth", rg::Depth(depthHandle))
+                     .Bind("pyramid", atlasHandle)
+                     .Dispatch(Extent2D{ plan.baseThreadsX, plan.baseThreadsY })
+                && ok;
+            if (plan.runTop) {
+                ok = rg::ComputePass(builder, s.hizTopShader, rg::StaticName::Interned(kHizTopPassName),
+                         rg::ViewScope::Shared, rg::RenderPassEvent::Opaques)
+                         .Push(push)
+                         .Bind("pyramid", atlasHandle)
+                         .Dispatch(Extent2D{ plan.topThreadsX, 1 })
+                    && ok;
             }
             if (!ok) {
                 buildError = "a Hi-Z pass could not be declared";

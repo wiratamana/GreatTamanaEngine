@@ -41,6 +41,8 @@ void VolumetricLightFeature::Setup(fx::FeatureSetup& s)
     s.PostOpaque("VolumetricLight.Volume", kVolumePriority, [this](fx::PostOpaqueFrame& f) { VolumePass(f); },
         fx::Gate{ "VolumetricLight.Inject.Dispatch", "VolumetricLight.Temporal.Dispatch",
             "VolumetricLight.Integrate.Dispatch" });
+    // The volume shades air with the sun cascades, so the cascades must exist even when the view shows no surface.
+    s.ReadsChannelInEmptyViews("VolumetricLight.Volume", kSunShadowReceiverOwner, kSunShadowReceiverChannel);
     s.PostComposite("VolumetricLight.Composite", kCompositePriority, fx::Blend::AlphaOver,
         [this](fx::CompositeFrame& f) { CompositePass(f); },
         fx::Gate{ "VolumetricLight.Composite.Dispatch", "VolumetricLight.Composite.CopyToPrivateTarget" });

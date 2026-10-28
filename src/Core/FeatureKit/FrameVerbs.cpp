@@ -3,6 +3,7 @@
 #include "ComputeShader.h"
 #include "VerbSupport.h"
 #include "../Core.h"
+#include "../Plugins/RenderFeatureCompositor.h"
 #include "../../Renderer/RenderGraph/Shader.h"
 #include "../Logging.h"
 
@@ -111,6 +112,18 @@ bool Frame::PassEnabled(rg::StaticName passName) const
         return false;
     }
     return detail::PassEnabled(*m_context, passName);
+}
+
+bool Frame::ChannelHasEmptyViewReaders(std::string_view channelName) const
+{
+    if (m_context == nullptr || m_context->core == nullptr) {
+        return true;
+    }
+    const RenderFeatureCompositor* compositor = m_context->core->GetRenderFeatureCompositor();
+    if (compositor == nullptr) {
+        return true;
+    }
+    return compositor->HasChannelConsumer(std::string(m_context->featureName) + "." + std::string(channelName), m_view.scope);
 }
 
 void Frame::Keep(Texture texture)

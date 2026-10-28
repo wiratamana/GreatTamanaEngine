@@ -36,6 +36,7 @@ struct ShadowViewState {
     fx::GpuReadback<ShadowDepthRangeGpu> depthRange{ "Shadow.DepthRange" };
     ShadowSdsmState sdsm;
     ShadowResolutionState resolution; // Size of the cascade maps of this view.
+    ShadowSkipState skip;             // Depth-range history that decides when the cascades are skipped.
     ShadowViewSnapshot snapshot;
 };
 

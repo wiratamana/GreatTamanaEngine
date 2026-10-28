@@ -194,7 +194,8 @@ struct ClusterViewRenderer::Impl {
 
     // ---- Shaders ----
     rg::Shader cullShader{ "ClusterCull" };
-    rg::Shader hizShader{ "HizBuild" };
+    rg::Shader hizBaseShader{ "HizBuildBase" };
+    rg::Shader hizTopShader{ "HizBuildTop" };
     std::vector<std::byte> vertexSpirv;
     std::array<std::vector<std::byte>, 4> fragmentSpirv;
     std::array<std::optional<Pipeline>, 8> pipelines; // [fragment * 2 + cullBackFaces]

@@ -106,6 +106,10 @@ public:
     // Ask it before any side effect (Acquire, resize) that only an enabled pass needs.
     bool PassEnabled(rg::StaticName passName) const;
 
+    // True when a feature that reads this feature's channel `channelName` even in views without surfaces
+    // (see FeatureSetup::ReadsChannelInEmptyViews) is enabled for this view. True without an engine context.
+    bool ChannelHasEmptyViewReaders(std::string_view channelName) const;
+
     // One compute dispatch over `shader`. Declares nothing while its pass is toggled off.
     ComputeChain Compute(ComputeShader& shader, rg::StaticName passName);
 

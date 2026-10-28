@@ -333,17 +333,26 @@ float SunElevationDegrees(const Vec3& directionTowardSun) noexcept
     return std::asin(std::clamp(d.y, -1.0f, 1.0f)) * kRadToDeg;
 }
 
-std::optional<ShadowDepthRange> DecodeDepthRange(const ShadowDepthRangeGpu& gpu) noexcept
+ShadowDepthDecoded DecodeDepth(const ShadowDepthRangeGpu& gpu) noexcept
 {
     if (gpu.minDepthBits == 0xFFFFFFFFu) {
-        return std::nullopt; // No visible pixel.
+        return { ShadowDepthDecode::NoSurface, {} };
     }
     const float nearDepth = std::bit_cast<float>(gpu.minDepthBits);
     const float farDepth = std::bit_cast<float>(~gpu.invMaxDepthBits);
     if (!std::isfinite(nearDepth) || !std::isfinite(farDepth) || !(nearDepth > 0.0f) || farDepth < nearDepth) {
+        return { ShadowDepthDecode::Invalid, {} };
+    }
+    return { ShadowDepthDecode::Range, ShadowDepthRange{ nearDepth, farDepth } };
+}
+
+std::optional<ShadowDepthRange> DecodeDepthRange(const ShadowDepthRangeGpu& gpu) noexcept
+{
+    const ShadowDepthDecoded decoded = DecodeDepth(gpu);
+    if (decoded.kind != ShadowDepthDecode::Range) {
         return std::nullopt;
     }
-    return ShadowDepthRange{ nearDepth, farDepth };
+    return decoded.range;
 }
 
 float ExponentialBlendFactor(float deltaSeconds, float timeConstantSeconds) noexcept

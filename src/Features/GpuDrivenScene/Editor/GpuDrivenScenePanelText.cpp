@@ -14,6 +14,7 @@ std::string_view HizReasonText(HizReason reason) noexcept
     case HizReason::CameraCut: return "camera cut";
     case HizReason::BuildOff: return "pyramid build is off";
     case HizReason::Unavailable: return "not available";
+    case HizReason::TooLarge: return "view is too large";
     }
     return "not ready";
 }

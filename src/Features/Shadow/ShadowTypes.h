@@ -30,6 +30,7 @@ enum class ShadowFrameStatus : std::uint8_t {
     ShadersNotReady,
     TargetFailed,
     PassDisabled,
+    Skipped, // The view shows no surface and nothing reads the cascades.
 };
 
 // Shadow tunables. Stored only through SanitizeShadowSettings().
@@ -74,6 +75,13 @@ struct ShadowViewFrustum {
 struct ShadowDepthRange {
     float nearDepth = 0.0f;
     float farDepth = 0.0f;
+};
+
+// What one depth-range measurement says about the view.
+enum class ShadowDepthDecode : std::uint8_t {
+    Range,     // At least one surface; the range is valid.
+    NoSurface, // Nothing visible (only clear depth).
+    Invalid,   // Non-finite or inverted bits.
 };
 
 // A decoded depth-range measurement and the frame it was recorded in.

@@ -28,6 +28,7 @@ const char* StatusText(ShadowFrameStatus status) noexcept
     case ShadowFrameStatus::ShadersNotReady: return "Shaders not ready";
     case ShadowFrameStatus::TargetFailed: return "Target allocation failed";
     case ShadowFrameStatus::PassDisabled: return "A cascade pass is disabled";
+    case ShadowFrameStatus::Skipped: return "Skipped (no surface in view, nothing reads the cascades)";
     }
     return "Unknown";
 }
@@ -65,7 +66,8 @@ void DrawStatus(const ShadowViewSnapshot& game)
 {
     const ImVec4 green(0.4f, 0.9f, 0.4f, 1.0f);
     const ImVec4 orange(1.0f, 0.65f, 0.2f, 1.0f);
-    ImGui::TextColored(game.status == ShadowFrameStatus::Ok ? green : orange, "Game view: %s", StatusText(game.status));
+    const bool gameWorks = game.status == ShadowFrameStatus::Ok || game.status == ShadowFrameStatus::Skipped;
+    ImGui::TextColored(gameWorks ? green : orange, "Game view: %s", StatusText(game.status));
     ImGui::TextColored(
         game.maskStatus == ShadowFrameStatus::Ok ? green : orange, "Mask: %s", StatusText(game.maskStatus));
     if (game.status != ShadowFrameStatus::NotRendered) {
