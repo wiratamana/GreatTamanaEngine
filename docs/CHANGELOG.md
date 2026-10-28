@@ -4,6 +4,35 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## GPU culling: two-phase Hi-Z, textured clusters, cheaper fixed cost (branch `feature/gpu-cull-impl`, 2026-10-28)
+
+- **Real pyramid.** Two dispatches (`<base>.Base`, `<base>.Top`; `HizBuildBase.comp`, `HizBuildTop.comp`) build levels down to
+  1x1. The old per-level passes (`Hiz.Level0..5`), the level cap and the "too big" rule are gone. A scene side above 16384 gives
+  `hizReason=TooLarge`. The depth test uses linear view depth with a relative margin (`ClusterCullParams` is 224 bytes).
+- **Two-phase occlusion.** Phase 1 draws last frame's survivors from a per-slot history buffer, one pyramid is built from this
+  frame's depth, phase 2 tests everything and updates the history. The moved flag, `ClusterMovedTracker`,
+  `Core::RequestOcclusionTracking`, the camera-cut rule, the warm-up and the persistent atlases are deleted. `hizReason` is
+  `None`, `Unavailable` or `TooLarge`; `hizTrackingRequested` is removed. Colour views have 2 lanes.
+- **Shared survivors.** The secondary view draws the primary view's survivors with its own camera (`sharedSurvivors`,
+  `hizSource=primary`) and falls back to its own frustum chain.
+- **Textured and PBR clusters.** Descriptor sets are 0 material, 1 scene services, 2 cluster buffers. New shaders
+  `MeshClusterUv.vert`, `MeshClusterTangent.vert`, `MeshClusterTintSurface.frag`. The catalog gives each opaque static textured slice
+  a table, candidates are a capability filter with reasons (`cpuPath.*`), parts are (mesh, material), colour views have 12 slots,
+  and `Auto` import clusters textured meshes with the `Exact` weld. Alpha-tested, skinned and primitive meshes stay on the CPU path.
+- **Shadow.** `mapResolution` is renamed `maxMapResolution`; the real map size follows the view size (2 texels per view pixel, min
+  512, 30-frame hold). Cascades are skipped in a view with no surface when no air-shading reader needs them (status `Skipped`).
+- **Per-view-scope switch.** `FeatureSetup::DefaultSecondaryViewEnabled`, `render_features[].enabled_primary|enabled_secondary`,
+  `set_feature_enabled?view=primary|secondary`. VolumetricLight, Ssgi, Gtao and the Atmosphere aerial passes are off in the
+  secondary view by default. `applyInSceneView` is removed. The Scene view shows "Scene view: fast preview".
+- **Measurement.** `gpu_barrier_milliseconds` and `gpu_work_milliseconds` per pass, `device_state.present_policy`, the
+  `--no-vsync` flag, `reasons.*` cull counters (`collectStats`), `debugView=ClusterPhase`, panel lines for GPU time split, reasons,
+  inert cause and CPU-path reasons. Scripts in `tools/culling_bench/`.
+- **Shader constants** are generated from `ClusterCullConstants.h` into one GLSL include. GPU parity tests
+  (`ClusterGpuParityTests.cpp`) run the real shaders against the CPU oracle and report SKIPPED without a device.
+- **Not built.** The volumetric grid that follows the view size and the instance pre-test (both need measurements first), the
+  cluster builder merge of leftover clusters, the edge clamp with a still-pose gate (the two-phase clamp replaces it) and the
+  interim release of the old atlases and tracker limit (both objects are deleted).
+
 ## Culling mode and CPU path culling (branch `feature/gpu-cull-impl`, 2026-10-28)
 
 - **CPU path culling.** `RenderSystem::Draw` frustum-culls entities that are not on the cluster path, with padded world bounds

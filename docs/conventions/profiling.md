@@ -47,6 +47,9 @@ Every number the profiler shows is measured and carries a status. A value that w
 - Timestamp queries live in `src/Renderer` (`GpuStampPlan.h`, `RenderGraphTimestampPool`). One reset of the frame's query
   region, a stamp before and after each pass's barriers, and an end and final stamp. Passes past the record budget fold into
   one overflow record. A coarse mode uses fewer stamps.
+- A pass record splits into barrier time and work time. `GET /render_graph` exports `gpu_barrier_milliseconds` and
+  `gpu_work_milliseconds` next to `gpu_timing_milliseconds`; both are `null` when not measured. The barrier time exists only in the
+  fine stamp mode (the coarse mode never measures it, so it reads `null`, not `0`).
 - The region is read in one `vkGetQueryPoolResults` call with availability. A missing stamp reads `Absent` or `Partial`, a
   backwards or huge delta reads `Error`, a device without timestamps reads `Unsupported`.
 - The offscreen regime reads after its own wait. The present regime reads the slot the presenter just waited on. A frame that
@@ -82,6 +85,9 @@ Every number the profiler shows is measured and carries a status. A value that w
 - `GTE_ENABLE_PROFILER=OFF` removes the scope macros. `FrameProfiler` itself always compiles.
 - `ProfilerControl` holds the runtime switches: `capture` stops recording, `displayPaused` only freezes the panels.
 - `FrameProfiler::Instance()` is a process-wide singleton. A test that uses it calls `ResetForTesting()` first.
+- Present pacing is fixed at startup. The default is `Capped` (FIFO, vsync). Start the exe with `--no-vsync` for `Uncapped`
+  (`PresentPolicy`: MAILBOX, else IMMEDIATE, else FIFO). The chosen mode is logged once and `GET /profiler` reports
+  `device_state.present_policy` (`capped` or `uncapped`). With vsync on, FPS snaps to refresh steps: compare milliseconds.
 
 ## HTTP
 

@@ -42,7 +42,9 @@ Every compositor entry costs two full-size RGBA16F targets per view and one blen
 - `Ssgi.Prepare.Dispatch` or `Ssgi.Trace.Dispatch` off: status `PassDisabled`, nothing is declared, the picture has no GI.
 - `Ssgi.Resolve.Dispatch` off: the raw GI is shown (noisy) and the history is dropped.
 - `Ssgi.Composite.Draw` off: the GI is still computed but not applied. `/get_texture` still returns it.
-- `intensity` 0 or `applyInSceneView` false in the Scene view: status `PassDisabled`, no pass is declared.
+- `intensity` 0: status `PassDisabled`, no pass is declared.
+- Disabled for a view scope (`enabled_primary` / `enabled_secondary` false; the secondary view is off by default): no pass is
+  declared in that view and its status reads `NotRendered`.
 - A shader that is not built gives `ShadersNotReady` and the picture without GI.
 
 ## Settings
@@ -70,7 +72,6 @@ the scene file. A NaN or infinite float is replaced by the default.
 | `temporal` | true | history blend and per-frame noise rotation |
 | `historyWeight` | 0.92 | 0..0.98 |
 | `depthSigma` | 0.03 | 0.001..0.5 relative depth tolerance |
-| `applyInSceneView` | true | false skips the Editor Scene view |
 | `debugView` | Off | `Off`, `GiOnly`, `Normals` |
 
 ## HTTP recipe
@@ -106,6 +107,7 @@ arguments.
 - One bounce only. Transparent surfaces neither emit nor occlude.
 - View depth lives in a 16-bit float. Beyond a few hundred units the depth step passes `thickness`; `maxDistance` keeps GI in range.
 - Perspective cameras only. An orthographic or skewed camera gives status `NoValidCamera`.
-- The Game view and the Scene view both run Ssgi. Turn `applyInSceneView` off to halve the cost.
+- Ssgi runs in the Game view only by default (`DefaultSecondaryViewEnabled(false)`). Turn it on for the Scene view with
+  `GET /render_graph/set_feature_enabled?name=Ssgi&enabled=true&view=secondary`; that doubles the cost.
 - Memory per view: 5 textures x 8 bytes per GI texel (3 without the resolve pass), plus the two compositor targets.
 - Pass names are shared between views, so the GPU timing of a pass shows the view that ran last.

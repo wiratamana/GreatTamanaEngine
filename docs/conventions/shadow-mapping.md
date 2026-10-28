@@ -29,8 +29,11 @@ shadow maps. It fits the cascades to the camera every frame. No box has to be tu
 - **Sun uniforms.** The `SceneLighting` feature writes the sun, the ambient and the shadow data into scene uniform binding 8
   for every view. `DirectionalLighting.glsl` falls back to a default sun when the block was never written. Turning
   Shadow off never turns lit materials black.
-- **Resolution.** `mapResolution` (512, 1024, 2048, 4096) applies at once: `OffscreenTarget::Acquire` resizes each
-  cascade target (one GPU idle wait). A failed allocation backs off and is logged once. Cascades above `cascadeCount`
+- **Resolution.** `maxMapResolution` (512, 1024, 2048, 4096) is an upper cap. The real size per view is
+  `EffectiveShadowResolution(cap, viewWidth, viewHeight)`: 2 texels per view pixel of the longer side, at least 512, rounded up
+  to a power of two, clamped to the cap. A new size applies only after it was the target for 30 frames in a row
+  (`kShadowResolutionHoldFrames`): `OffscreenTarget::Acquire` resizes each cascade target (one GPU idle wait). A refused resize or a
+  failed allocation keeps the old size and is retried later. Cascades above `cascadeCount`
   are trimmed to 4x4.
 
 ## Passes and textures
@@ -55,7 +58,19 @@ Per cascade the order is: `Plan()`, the CPU depth draw with `Exclude(plan.exclus
 (it loads the map). When the plan is not ready or any pass of the chain is toggled off, the CPU draw stays complete.
 The lanes use the frustum test with the cascade matrix, never the back-face cone test, and no padding. With `cullCasters` off no
 cluster is culled. A frame with the Frame Debugger capture armed uses the CPU draw only. The CPU and cluster depth vertex
-shaders declare `invariant gl_Position` with the same expression order, so both paths write the same depth.
+shaders declare `invariant gl_Position` with the same expression order, so both paths write the same depth. Textured and PBR meshes
+that are claimed draw into the cascades through depth-only chains with no material (the pipeline kind only sets the vertex stride).
+Alpha-tested materials stay on the CPU depth draw.
+
+### Cascade skip
+
+A view skips its cascades when the last 3 depth-range samples (one per distinct frame) found no surface (`NoSurface`), no `Range`
+sample is newer than 6 frames, and no air-shading reader needs the map in that view. A feature registers as such a reader with
+`fx::FeatureSetup::ReadsChannelInEmptyViews()` (VolumetricLight and the Atmosphere aerial volume do); the Shadow feature asks with
+`Frame::ChannelHasEmptyViewReaders()`. A reader counts while it is enabled in that view scope, so with the default editor setup the
+primary view never skips and the secondary view can. A skipped view declares no cascade passes, publishes no `Map`, `Receiver` or
+slots and reports status `Skipped`. The maps stay allocated. An invalid depth-range sample never skips. Expect a missing shadow for
+2 to 3 frames when the camera turns from an empty view to a surface (the depth range is 2 frames old).
 
 ## Material slot contract
 
@@ -80,7 +95,7 @@ Edited in the dockable **Shadow** window or over HTTP. They are sanitized on wri
 | Key | Default | Range / note |
 |---|---|---|
 | `cascadeCount` | 4 | 1..4 |
-| `mapResolution` | 2048 | snaps to 512, 1024, 2048 or 4096 |
+| `maxMapResolution` | 2048 | upper cap per cascade; snaps to 512, 1024, 2048 or 4096. The view size picks the real size |
 | `maxDistance` | 20000 | 1..100000, clamped to the camera far plane |
 | `splitLambda` | 0.85 | 0..1 |
 | `cascadeBlendFraction` / `distanceFadeFraction` | 0.10 / 0.10 | 0..0.5 |
@@ -111,7 +126,8 @@ A NaN or infinite value is replaced by the default. The slope bias used by the s
 - `maxDistance` (default 20000) is clamped to the camera far plane. SDSM fits the cascades to the visible depth range, so small
   scenes keep small cascades once a depth sample exists (2 frames after start or after a sky-only view). Fixed splits (SDSM off,
   or no sample yet) are coarse at 20000: cascade 0 covers about 750 m.
-- Memory: 4 cascades x 2048^2 x 4 B = 64 MB per view, 2 views in the editor. 4096 is 4x that.
+- Memory: 4 cascades x 2048^2 x 4 B = 64 MB per view at the 2048 cap, 2 views in the editor. The real size follows the view size,
+  so a small view uses less.
 
 ## HTTP recipe
 
@@ -124,7 +140,7 @@ GET  /feature_debug/state?name=Shadow
 GET  /feature_debug/set?name=Shadow&debugView=CascadeColors      then GET /get_game_view
 GET  /feature_debug/set?name=Shadow&debugView=Mask               set first, the mask only exists with a debug view
 GET  /get_texture?texture_name=Shadow::Shadow.Mask.GameView
-GET  /feature_debug/set?name=Shadow&debugView=Off&mapResolution=1024
+GET  /feature_debug/set?name=Shadow&debugView=Off&maxMapResolution=1024
 GET  /list_textures                                               cascade maps now 1024
 GET  /get_texture?texture_name=Shadow.Cascade3.GameView&channel=depth
 GET  /render_graph                                                draw_call_count per cascade pass
@@ -139,7 +155,8 @@ stage), `mask.status` (mask stage), `frameIndex`, `sunElevationDegrees`, `effect
 `cascade<i>.sliceStart|sliceEnd|radius|texelWorldSize|depthRange|gridX|gridY` and `sdsm.active|rawNear|rawFar|nearDepth|
 farDepth|ageFrames`. `gridX` and `gridY` are the snapped cascade center in whole texels: shadow edges may move only when
 they change. A bad key or value is a 400 that names the key; nothing is applied. `reset_defaults` takes no arguments.
-A status reads `NotRendered` when its view has not rendered for a few frames, or when its pass is toggled off.
+A status reads `NotRendered` when its view has not rendered for a few frames, or when its pass is toggled off. It reads `Skipped`
+when the cascades were skipped (see "Cascade skip"). `resolutionInUse` is the real map size, never the cap.
 
 ## Limits
 
@@ -152,5 +169,6 @@ A status reads `NotRendered` when its view has not rendered for a few frames, or
 - A low sun gives very long shadows and needs a large slope bias on coarse cascades.
 - The depth range lags the camera by 2 frames. Padding and instant growth limit the effect.
 - A resolution change or an SDSM switch changes the texel size once; shadows re-sample at that moment.
-- A resolution change is refused while a view runs in the pipelined regime.
-- Memory: 4 x 2048^2 x 4 bytes = 64 MB per view. 4096 is four times that.
+- A resolution change is one GPU idle wait. A resize that the kit refuses (for example in the pipelined regime) keeps the old size
+  and is retried later.
+- Memory: 4 x `resolutionInUse`^2 x 4 bytes per view (64 MB at 2048). The cap 4096 is four times that.

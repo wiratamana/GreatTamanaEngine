@@ -9,13 +9,15 @@ the `GpuDrivenScene` feature and by depth-only lanes. Format, tools, claim rules
 in [gpu-driven-clusters.md](gpu-driven-clusters.md). Follow these rules when touching it:
 
 - **Eligibility is decided once per frame by Core.** `SelectClusterCandidates()` takes a draw command
-  when the mesh has a cluster table (or is synthesizable and has at least
-  `kMinInstancesForSynthesizedClusters` (4) instances), has an index buffer, uses the untextured
-  `VertexLayout::PositionNormal` pipeline, is not GPU-skinned and has a finite world matrix.
+  when the mesh has a cluster table (or is an untextured mesh that is synthesizable and has at least
+  `kMinInstancesForSynthesizedClusters` (4) instances), has an index buffer, uses a `PositionNormal`,
+  `PositionNormalUv` or `PositionNormalUvTangent` pipeline with a resolvable material for the textured kinds, is opaque,
+  is not GPU-skinned and has a finite world matrix.
   Everything else keeps drawing through the per-entity `Renderer::Submit()` path. Do not add a second,
   parallel batching mechanism.
-- **Per-view buffers.** Every buffer, parameter block, descriptor set and claimed-entity set is keyed by
-  view scope, lane and part slot. Two views never share one. Do not add a cache without a view dimension.
+- **Per-view buffers.** Every buffer, parameter block, descriptor set, history buffer and claimed-entity set is keyed by
+  view scope, lane and part slot. Two views never write the same one (the secondary view only reads the primary view's
+  published survivors). Do not add a cache without a view dimension.
 - **Capabilities.** The path needs `drawIndirectCount`, `multiDrawIndirect` and
   `drawIndirectFirstInstance` (`ClusterPathSupported()`). When one is missing the verb is inert and the
   CPU path draws. Commands write `firstInstance = slot`, which is invalid without the last two features.
@@ -37,5 +39,5 @@ in [gpu-driven-clusters.md](gpu-driven-clusters.md). Follow these rules when tou
   descriptor set in `Plan()`. The execute lambda re-resolves the mesh with a null check: assert in debug,
   draw nothing in release.
 
-Open items: two-phase occlusion culling (the cluster path has a one-frame-old Hi-Z), LOD selection,
-textured/bindless batching, primitive-shape batching, GPU-skinned-mesh batching and async compute.
+Open items: LOD selection, bindless batching, primitive-shape batching, GPU-skinned-mesh batching, alpha-tested
+meshes on the cluster path, a pre-test of whole instances for very large instance counts, and async compute.

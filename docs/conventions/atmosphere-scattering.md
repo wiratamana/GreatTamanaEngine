@@ -31,6 +31,10 @@ Toggle names (Render Graph panel and `/render_graph/set_pass_enabled`): `Atmosph
 `AtmosphereMultiScatteringLutPass`, `AtmosphereSkyViewLutPass`, `AtmosphereAerialPerspectiveVolumePass`,
 `DrawSkyBackground`, `AtmosphereAerialPerspectiveCompositePass`, `AtmosphereComposite.CopyToPrivateTarget`.
 With the volume pass off nothing is published, so the composite is not declared and the view holds the plain scene color.
+In the secondary view `AtmosphereAerialVolume` and `AtmosphereComposite` are off by default (`DefaultSecondaryViewEnabled(false)`,
+see [render-feature-authoring.md](render-feature-authoring.md)); the LUTs, the sun light and `DrawSkyBackground` still run there.
+Turn them on with `GET /render_graph/set_feature_enabled?name=AtmosphereAerialVolume&enabled=true&view=secondary` (and the same for
+`AtmosphereComposite`).
 
 Sky background replay: the Frame Debugger replays the Game view sky background through `rg::FullscreenReplay` (see
 [frame-debugger.md](frame-debugger.md)). Composite output: the Frame Debugger shows the exposed

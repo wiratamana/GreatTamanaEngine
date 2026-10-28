@@ -11,7 +11,7 @@ FeaturePurityCheck lists every file that shrinks and is empty. Shadow, SceneLigh
 | Piece | Purpose |
 |---|---|
 | `fx::Feature`, `fx::FeatureHost` | Base class and narrow engine facade (`Scene()`). |
-| `fx::FeatureSetup` | `PreOpaque`, `Opaque`, `PostOpaque`, `PostTransparent`, `PostComposite`, `PreUI`, `PreOpaqueShared`, `DeclareSceneSlot`. Registrations are only collected. |
+| `fx::FeatureSetup` | `PreOpaque`, `Opaque`, `PostOpaque`, `PostTransparent`, `PostComposite`, `PreUI`, `PreOpaqueShared`, `DeclareSceneSlot`, `DefaultSecondaryViewEnabled`, `ReadsChannelInEmptyViews`. Registrations are only collected. |
 | `fx::Gate` | Pass names a registration answers to in the toggle panel (default: the registered name). `Gate::Always()` is for work that is not a render pass (a uniform write) and must never be silenced by a toggle. |
 | `fx::View`, `fx::Frame` and typed frames | `PreOpaqueFrame`, `OpaqueFrame` (`SceneTarget()` writes color and depth), `PostOpaqueFrame` (scene color and depth), `CompositeFrame` (private target, extent), `SharedFrame`. |
 | `fx::Texture` | Graph handle stamped with `FrameSerial(frame, view)`. Valid in every callback of that view in that frame, never later. A frame also accepts textures made by the Shared callback of the same frame. |
@@ -27,10 +27,19 @@ The gate runs before the callback, so a disabled pass runs no side effect. Per-v
 the engine has no data for. `PreOpaqueShared` runs once per frame; a throwing callback is logged once and not retried
 in that frame. Every verb also checks its own pass name and declares nothing while it is toggled off.
 
-`Opaque` runs per view right after `RenderOpaque`, with an `OpaqueFrame`. `SceneTarget()` is the view's color and depth;
-passes declared there write both (load, never clear) and carry the `Opaques` tag. A pass that moves draw work off the CPU
+`Opaque` runs per view right after `RenderOpaque`, with an `OpaqueFrame`. `SceneTarget()` is the view's color and depth and
+`SceneDepth()` is the same depth as a sampleable texture (the depth that `RenderOpaque` wrote); passes declared there write both
+(load, never clear) and carry the `Opaques` tag. A pass that moves draw work off the CPU
 scene draw may take an entity from it only after every pass of its chain was declared (the claim is the last step, and a
 chain that stops part way claims nothing). A frame that records a capture, and the shared scope, never claim.
+
+A feature can default itself off in the secondary view with `FeatureSetup::DefaultSecondaryViewEnabled(false)`; it applies to
+the registrations added after the call (not to `PreOpaqueShared` or `Gate::Always()` ones). The compositor keeps an enabled flag per
+(registration, view scope) next to the global override: a registration runs in a scope when both are on, and declares nothing
+otherwise. `GET /render_graph/set_feature_enabled` takes `view=primary|secondary`. A feature that needs a channel even in a view with
+no surface (a reader that shades air) tags its registration with `FeatureSetup::ReadsChannelInEmptyViews(registration, owner,
+channel)`; the owner asks `Frame::ChannelHasEmptyViewReaders(channel)` before it skips its work. `fx::SnapshotIsStale(frame, newest)`
+is the shared rule for "this view did not render for a few frames" in a feature snapshot.
 
 ## Verbs (on `fx::Frame`)
 
@@ -46,7 +55,7 @@ chain that stops part way claims nothing). A frame that records a capture, and t
 | `Keep(texture)` | Keeps an output that nothing reads. |
 | `PublishToScene(slot, texture)`, `SetSceneUniforms(value)` | Feeds material shaders. The uniform block is at most 512 bytes (compile-time check). |
 | `FrameIndex()` | Frame counter, the same for both view scopes of one frame. Use it for "N frames ago", never time. |
-| `ClusterDraw(state, lane)` | `ClusterDrawChain`: `Instances`, `Camera`, `CullCamera`, `Culling`, `Occlusion`, `Target` or `DepthOnlyTarget`, `IdTint`, `Stats`, `Plan()`, `Record()`. Usage: `auto chain = f.ClusterDraw(state, 0).Instances(f.ClusterCandidates()).Camera(cam).Target(f.SceneTarget()); chain.Plan(); chain.Record();`. `Plan()` is optional and lets a CPU draw skip the entities the chain will take over. A chain that is toggled off, lacks device features, exceeds a limit or is refused declares nothing and claims nothing. `Record()` also does the idle bookkeeping that frees unused buffers: call it every frame, also when the plan is not ready. A callback that skips the chain calls `state.TickIdle(frame, false)` instead. |
+| `ClusterDraw(state, lane)` | `ClusterDrawChain`: `Instances`, `Camera`, `CullCamera`, `Culling`, `TwoPhase(pyramid, sceneDepth)` (occlusion, primary colour view, lane 0 of a 2-lane state), `ReuseSurvivors()` (secondary view draws the primary view's survivors), `Target` or `DepthOnlyTarget`, `IdTint(enabled, byPhase)`, `Stats`, `Plan()`, `Record()`. Usage: `auto chain = f.ClusterDraw(state, 0).Instances(f.ClusterCandidates()).Camera(cam).Target(f.SceneTarget()); chain.Plan(); chain.Record();`. `Plan()` is optional and lets a CPU draw skip the entities the chain will take over. A chain that is toggled off, lacks device features, exceeds a limit or is refused declares nothing and claims nothing. `Record()` also does the idle bookkeeping that frees unused buffers: call it every frame, also when the plan is not ready. A callback that skips the chain calls `state.TickIdle(frame, false)` instead. |
 | `DeltaSeconds()` | Real frame time in seconds (`Time::UnscaledDeltaTime()`), clamped to 0.25 s; 0 without an engine context. Independent of pause. Never divide by it. Turn a per-second rate into a per-frame step with `1 - exp(-dt / tau)`. |
 | `ShaderReady(computeShader)` | True when the shader is built (builds it now if needed). Check it before declaring passes that only make sense together with a dispatch. |
 

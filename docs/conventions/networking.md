@@ -390,9 +390,8 @@ module or adding a new endpoint:
   - `GET /scene_camera/set_pose?x=&y=&z=&yaw=&pitch=` moves the Scene fly camera and replies the new pose. All five keys
     are required. `x y z` are world units (not pixels), angles are degrees. Yaw 0 looks +Z. Pitch +89 looks straight
     down; pitch is clamped to +-89 and yaw wraps to [-180, 180). A missing key, a non-number, `nan`, `inf` or a value
-    above 1e6 (angles 1e5) is a `400` that names the key. The pose applies before the same frame renders. A move over
-    50 units or a big turn is a camera cut for Hi-Z: wait about 2 s before reading Hi-Z numbers (Frustum and Off
-    numbers need only the 2 frame readback lag). Wait 2 frames before `/scene_camera/image` after a move.
+    above 1e6 (angles 1e5) is a `400` that names the key. The pose applies before the same frame renders. Wait 2 frames
+    before reading cluster counts (the stats readback lag) and before `/scene_camera/image` after a move.
   - `GET /scene_camera/pick?x=<0..1>&y=<0..1>` does the same pick as a mouse click on the Scene image and selects
     the camera it hits. Replies `{"success":true,"hit":bool,"entity"}`.
   - `GET /scene_camera/select?name=<entity name>` selects a Camera entity by name. `404` for an unknown name.
@@ -431,7 +430,8 @@ module or adding a new endpoint:
     `gpu{views{shared,primary,secondary},span,indirect_draws{...},coverage{declared,executed,recorded,disabled_by_toggle}}`,
     `memory{total}`, `scopes[{name,total,self,calls}]` (top-level scopes, largest first), `scope_rows_dropped`,
     `checks[{id,status,count,text}]`, `drops{late_scopes,foreign_scopes,lost_worker_events,dropped_scopes,dropped_gpu_frames}`,
-    `device_state{device_lost,consecutive_frame_timeouts,abandoned_objects}`, `live_block[{thread_slot,site,detail,elapsed}]`
+    `device_state{device_lost,consecutive_frame_timeouts,abandoned_objects,present_policy}` (`present_policy` is `capped` or
+    `uncapped`; start the exe with `--no-vsync` for `uncapped`, see below), `live_block[{thread_slot,site,detail,elapsed}]`
     (waits in progress now), `spikes_available`, and:
     - `verdict{text,kind,frames,frame,cpu_work,gpu_wait,present_wait,other_wait,untracked,stall_share,stall_site}`. `kind` is
       `unknown`, `unreliable`, `stalled`, `present_limited`, `gpu_limited`, `cpu_limited` or `serial`. Every number is a median
@@ -765,7 +765,8 @@ registering a new named texture:
   `render_pass_event` - every GPU timing value already resolved to a status
   word (`gpu_timing_status`: `Present`, `Partial`, `Absent`, `Error`, `Unsupported` or `Inactive`), a
   display string (`gpu_timing_text`) AND a raw nullable number
-  (`gpu_timing_milliseconds`, set only when the status is `Present`; `gpu_folded_passes` counts the passes
+  (`gpu_timing_milliseconds`, set only when the status is `Present`; `gpu_barrier_milliseconds` and `gpu_work_milliseconds` split
+  it into barrier and work time, both `null` when not measured, and the barrier is also `null` in Coarse stamp mode; `gpu_folded_passes` counts the passes
   one overflow record stands for), every pass carrying a plain `owning_feature_name`
   string field - always populated, never a lookup/registry resolution, set
   automatically the moment that pass is declared under an open
@@ -774,7 +775,7 @@ registering a new named texture:
   `first_use_pass_name`/`last_use_pass_name`, `null` when never used),
   and `render_features` (the
   same loaded `_v2` plugin ordering/blend-mode readout the panel's own Plugin
-  Render Features section shows). Each pass also has `indirect_draw_count`. Three read-only
+  Render Features section shows; each entry also has `enabled_primary` and `enabled_secondary`: a feature runs in a view scope when `enabled` and that scope's key are both true). Each pass also has `indirect_draw_count`. Three read-only
   objects report device and memory state: `indirect_draw` (`draw_indirect_count`,
   `multi_draw_indirect`, `draw_indirect_first_instance`, `max_draw_indirect_count`),
   `gpu_memory` (`total_bytes`, `mesh_count`, and `by_name` bytes per GPU debug name; unnamed
@@ -819,14 +820,19 @@ registering a new named texture:
   state before you repeat a `set`. Limits: `name` is required, a duplicate key is a 400, at most 64 arguments, a key
   up to 64 bytes, a value up to 256 bytes. A non-finite number is written as `null`. The Shadow endpoint is
   described in `shadow-mapping.md`. The `GpuDrivenScene` endpoint settable keys are `enabled`, `mode` (`NoCull`,
-  `Frustum` or `HiZ`), `cone`, `collectStats` and `debugView` (`Off` or `ClusterId`). A bad value answers
+  `Frustum` or `HiZ`), `cone`, `collectStats` and `debugView` (`Off`, `ClusterId` or `ClusterPhase`). A bad value answers
   `<key> must be <allowed values>`; any other key answers `unknown key`. The only action is `reset_defaults`; any other
   action answers `unknown action; supported: reset_defaults`. Its state is prefixed `game.` and `scene.` per view
   (`testedClusters`, `visibleClusters` and `visibleValid` (needs `collectStats`), `testedAtVisibleFrame`, `hidden`,
-  `hiddenValid`, `cameraValid`, `claimedEntities`, `occlusion`, `hizReason`, `hizTrackingRequested` (this view asked for
-  movement tracking last frame), `inertReason`, `ledgerBytes`, ...) plus the CPU draw cull of the view: `cpuTested`,
+  `hiddenValid`, `cameraValid`, `claimedEntities`, `occlusion`, `hizReason` (`None`, `Unavailable` or `TooLarge`),
+  `sharedSurvivors` (the secondary view drew the primary view's survivors), `inertReason`, `ledgerBytes`, ...) plus the CPU draw cull
+  of the view: `cpuTested`,
   `cpuCulled`, `cpuUnbounded` (one frame old), `cpuCullState` (`active`, `off`, `suppressed: frame capture` or
-  `no camera`), `cullCamera` and `hizSource` (`own`, `primary` or `none`). `cameraValid` is the live camera of the
+  `no camera`), `cullCamera` and `hizSource` (`own`, `primary` or `none`). `cpuPath.skinned`, `cpuPath.noIndexBuffer`,
+  `cpuPath.unsupportedLayout`, `cpuPath.noClusterTable`, `cpuPath.tooFewInstances`, `cpuPath.nonFinite` and `cpuPath.noSlot` count
+  the renderables that stayed on the CPU path by reason. `reasons.valid`, `reasons.frustum`, `reasons.cone`, `reasons.pyramid`,
+  `reasons.history` and `reasons.kept` count the cull items of the view by outcome (only with `collectStats`; `reasons.valid` says
+  whether the counters were read). `cameraValid` is the live camera of the
   view. `hidden` is 0 while `hiddenValid` is false. `visibleAge` is `frameIndex - visibleFrame`, the frames since the
   visible count was read back; it is 0 when there is no count yet (`visibleFrame` 0).
 
@@ -884,7 +890,12 @@ registering a new named texture:
   A disabled plugin feature is never removed from `RenderFeatureCompositor`'s
   own tracked entries (only skipped during compositing), so
   `GET /render_graph`'s existing `render_features[]` array now also reports a
-  new `"enabled"` field automatically on every entry - no new discovery
+  new `"enabled"` field automatically on every entry, plus `"enabled_primary"` and `"enabled_secondary"` (the per-view-scope
+  switch; a feature runs in a scope when `enabled` and that scope's key are true). `GET /render_graph/set_feature_enabled?name=&enabled=`
+  takes an optional `view=primary|secondary`: without it the global override and both scope switches are set; with it only that
+  scope's switch changes. Any other `view` value is a `400`. A feature may default its secondary view to off
+  (`fx::FeatureSetup::DefaultSecondaryViewEnabled(false)`): VolumetricLight, Ssgi, Gtao and the Atmosphere aerial-perspective passes do.
+  No new discovery
   endpoint was needed for plugin features. A disabled BUILT-IN pass, by
   contrast, is never declared at all, so it leaves zero trace in
   `GET /render_graph`'s own pass tables - this is why built-in passes alone get

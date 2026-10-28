@@ -35,6 +35,8 @@ basis from the occlusion pass to the composite pass. The two history textures sw
 - `Gtao.Main.Dispatch` off: no AO is computed and none is drawn. Status `PassDisabled`.
 - `Gtao.Resolve.Dispatch` off: the raw AO is shown, with no denoise and no history. The history is dropped.
 - `Gtao.Composite.Draw` off: the AO is still computed but not applied to the image. `/get_texture` still returns it.
+- Disabled for a view scope (`enabled_primary` / `enabled_secondary` false): no pass is declared in that view and its status reads
+  `NotRendered`. Gtao is off in the secondary view by default (`DefaultSecondaryViewEnabled(false)`).
 
 ## Settings
 
