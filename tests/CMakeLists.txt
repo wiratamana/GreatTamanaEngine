@@ -2275,6 +2275,7 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Renderer/PipelineHandleTests.cpp
     Renderer/DrawStatsTests.cpp
     Renderer/Culling/ClusterCullMathTests.cpp
+    Renderer/Culling/CullingTypesTests.cpp
     Renderer/ClusterShaderTextTests.cpp
     Renderer/ClusterTintTests.cpp
     Renderer/ClusterViewShaderTextTests.cpp

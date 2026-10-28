@@ -25,6 +25,8 @@
 #include "../Renderer/GraphicsHandleRegistry.h"
 #include "../Renderer/VulkanFormatInfo.h"
 #include "ClusterCandidates.h"
+#include "ClusterClaim.h"
+#include "../Renderer/Culling/CullingTypes.h"
 #include "FaultInjection.h"
 #include "Logging.h"
 #include "ScreenPostProcessPassPriorityAssignment.h"
@@ -425,6 +427,26 @@ void Core::ClaimEntities(rg::ViewScope scope, std::span<const Entity> entities)
     m_claimedEntities[rg::ViewScopeIndex(scope)].insert(entities.begin(), entities.end());
 }
 
+bool Core::SetSceneDrawCull(rg::ViewScope scope, const Mat4& viewProjection, float paddingFraction)
+{
+    if (!SceneCullAllowed(ClusterClaimContext{ scope, m_captureArmedThisFrame })
+        || !TryExtractFrustumPlanes(viewProjection).has_value()) {
+        return false;
+    }
+    m_sceneCullThisFrame[rg::ViewScopeIndex(scope)] =
+        SceneCullRequest{ viewProjection, SanitizeCullPadding(paddingFraction), nullptr };
+    return true;
+}
+
+SceneCullCounts Core::LastSceneDrawCullCounts(rg::ViewScope scope, std::uint64_t currentFrameIndex) const noexcept
+{
+    if (scope == rg::ViewScope::Shared) {
+        return {};
+    }
+    const SceneCullResult& last = m_sceneCullCountsLast[rg::ViewScopeIndex(scope)];
+    return last.valid && SceneCullCountsFresh(last.frameIndex, currentFrameIndex) ? last.counts : SceneCullCounts{};
+}
+
 const Mesh* Core::ResolveClusterMesh(fx::MeshToken token)
 {
     return m_game.GetRenderSystem().TryGetMesh(MeshHandle{ token.index, token.generation });
@@ -708,8 +730,9 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 }
             };
             const std::size_t claimScope = rg::ViewScopeIndex(TranslateLegacyViewScope(frame.currentView));
+            const std::uint64_t frameIndex = frame.builder.FrameIndex();
             desc.execute = [this, aspectWidthOverHeight, isPrimaryView, viewProjectionOverride, frameDebuggerCapture,
-                                publishedServiceSlots, currentViewForServices, claimScope](rg::PassContext& ctx) {
+                                publishedServiceSlots, currentViewForServices, claimScope, frameIndex](rg::PassContext& ctx) {
                 std::array<SceneServicesDescriptorSet::ResolvedSlot, kSceneServiceSlotCount> resolvedServiceSlots{};
                 for (std::uint32_t slotIndex = 0; slotIndex < kSceneServiceSlotCount; ++slotIndex) {
                     if (publishedServiceSlots[slotIndex].has_value()) {
@@ -730,15 +753,21 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                     m_sceneServicesDescriptorSet.Rewrite(currentViewForServices, resolvedServiceSlots);
                 // Read at execute time: chains declared after this pass fill the set during declaration.
                 const std::unordered_set<Entity>& claimed = m_claimedEntities[claimScope];
+                SceneCullCounts cullCounts;
+                std::optional<SceneCullRequest> cull = m_sceneCullThisFrame[claimScope];
+                if (cull.has_value()) {
+                    cull->counts = &cullCounts;
+                }
                 if (isPrimaryView) {
                     rg::CommandBuffer cmd = ctx.Cmd();
                     m_game.Render(m_renderer, aspectWidthOverHeight, nullptr, frameDebuggerCapture, std::nullopt,
-                        claimed, sceneServicesSet, &cmd);
+                        claimed, sceneServicesSet, &cmd, cull);
                 } else {
                     const rg::SceneRecording recording(ctx);
                     m_game.Render(m_renderer, aspectWidthOverHeight, &viewProjectionOverride, nullptr, std::nullopt,
-                        claimed, sceneServicesSet);
+                        claimed, sceneServicesSet, nullptr, cull);
                 }
+                m_sceneCullCountsLast[claimScope] = SceneCullResult{ cullCounts, frameIndex, true };
             };
             out.push_back(std::move(desc));
         });
@@ -1007,6 +1036,9 @@ void Core::BuildFrame()
     // Per-frame claims, candidates and exclusions are cleared first so a frame that ends early leaves none behind.
     for (std::unordered_set<Entity>& claimed : m_claimedEntities) {
         claimed.clear();
+    }
+    for (std::optional<SceneCullRequest>& request : m_sceneCullThisFrame) {
+        request.reset();
     }
     m_clusterCandidates.clear();
     m_exclusionSets.clear();

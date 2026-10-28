@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <unordered_set>
 
@@ -31,10 +32,19 @@ inline std::optional<PipelineHandle> ResolveOverridePipeline(
     return overrides.byLayout[static_cast<std::size_t>(entityLayout)];
 }
 
+// Per-call cull tallies over entities the draw looked at (batched and past-maxDrawCount ones are not counted).
+struct SceneCullCounts {
+    std::uint32_t tested = 0;    // Had local bounds and were tested.
+    std::uint32_t culled = 0;    // Tested and outside.
+    std::uint32_t unbounded = 0; // No local bounds; always kept.
+};
+
 // Skip entities whose world bounds (padded by a fraction of their largest extent) lie outside this view-projection.
+// `counts` is non-owning, zeroed and written only during the draw call; nullptr skips tallying.
 struct SceneCullRequest {
     Mat4 viewProjection = Mat4::Identity();
     float paddingFraction = 0.0f;
+    SceneCullCounts* counts = nullptr;
 };
 
 // Plain data describing one DrawScene() call.

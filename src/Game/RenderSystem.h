@@ -75,10 +75,11 @@ public:
         IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
         const std::unordered_set<Entity>& batchedEntities = {},
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
-        rg::CommandBuffer* cmd = nullptr);
+        rg::CommandBuffer* cmd = nullptr, std::optional<SceneCullRequest> cull = std::nullopt);
 
     // Draw() with an explicit view-projection. Extras: frame-debugger `capture`, `maxDrawCount`, `batchedEntities`,
-    // per-layout `pipelineOverrideSet`, a draw `cmd`, and `cull` (skips entities whose padded bounds miss its frustum).
+    // per-layout `pipelineOverrideSet`, a draw `cmd`, and `cull` (skips entities whose padded bounds miss its frustum;
+    // an unusable matrix culls nothing).
     void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
         IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
         const std::unordered_set<Entity>& batchedEntities = {},

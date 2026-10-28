@@ -34,6 +34,13 @@ namespace detail {
 struct FrameContext;
 } // namespace detail
 
+// What a scene draw did with the entities it looked at: tested against bounds, rejected, kept for lack of bounds.
+struct SceneCullCounts {
+    std::uint32_t tested = 0;
+    std::uint32_t culled = 0;
+    std::uint32_t unbounded = 0;
+};
+
 // Longest frame time the kit reports; a stall counts as this much.
 inline constexpr float kMaxFrameDeltaSeconds = 0.25f;
 
@@ -141,6 +148,13 @@ public:
 
     // True when the device can run the cluster draw (indirect count, multi draw and first instance).
     bool ClusterPathSupported() const noexcept;
+
+    // Skips scene draws of this view whose padded bounds miss `viewProjection`. False when refused (shared frame,
+    // no engine context, unusable matrix, captured primary frame). The last call of a frame wins.
+    bool CullSceneDraw(const Mat4& viewProjection, float paddingFraction);
+
+    // Cull counts of this view's scene draw in the previous frame; zeros before the first frame or when it did not run.
+    SceneCullCounts LastSceneDrawCullCounts() const noexcept;
 
     // A GPU-culled draw of cluster-ready meshes on lane `lane` of `state`. Inert in a shared frame, while a
     // capture is armed for the primary view, and while the state is invalid.

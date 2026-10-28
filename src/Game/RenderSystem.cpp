@@ -9,6 +9,8 @@
 #include "Renderer/RenderGraph/BoundedOnceSet.h"
 #include "Renderer/RenderGraph/CommandBuffer.h"
 
+#include <array>
+#include <optional>
 #include <string>
 
 namespace gte {
@@ -80,10 +82,11 @@ Vec3 RenderSystem::ResolveActiveCameraWorldPosition(Registry& registry) noexcept
 
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
     IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
-    const std::unordered_set<Entity>& batchedEntities, DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd)
+    const std::unordered_set<Entity>& batchedEntities, DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd,
+    std::optional<SceneCullRequest> cull)
 {
     Draw(registry, renderer, ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight), capture, maxDrawCount,
-        batchedEntities, std::nullopt, sceneServicesSet, cmd);
+        batchedEntities, std::nullopt, sceneServicesSet, cmd, cull);
 }
 
 namespace {
@@ -109,8 +112,16 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
 
     const std::vector<DrawCommand> commands = CollectRenderables(registry);
     const bool hasOverrideSet = pipelineOverrideSet.has_value();
-    const std::array<Plane, 6> cullPlanes =
-        cull.has_value() ? ExtractFrustumPlanes(cull->viewProjection) : std::array<Plane, 6>{};
+
+    // An unusable matrix means no culling: a fallback plane would reject real geometry.
+    SceneCullCounts* const counts = cull.has_value() ? cull->counts : nullptr;
+    if (counts != nullptr) {
+        *counts = SceneCullCounts{};
+    }
+    std::optional<std::array<Plane, 6>> cullPlanes;
+    if (cull.has_value()) {
+        cullPlanes = TryExtractFrustumPlanes(cull->viewProjection);
+    }
 
     std::size_t consideredCount = 0;
 
@@ -126,10 +137,15 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
         }
 
         const Mesh* mesh = m_meshes.TryGet(command.mesh);
-        if (cull.has_value() && mesh != nullptr && mesh->LocalBounds().has_value()) {
-            const AABB worldBounds =
-                PadAABB(TransformAABB(*mesh->LocalBounds(), command.model), cull->paddingFraction);
-            if (IsAABBOutsideFrustum(cullPlanes, worldBounds)) {
+        if (cullPlanes.has_value() && mesh != nullptr) {
+            const bool bounded = mesh->LocalBounds().has_value();
+            const bool outside =
+                IsBoundsOutsideFrustum(*cullPlanes, mesh->LocalBounds(), command.model, cull->paddingFraction);
+            if (counts != nullptr) {
+                ++(bounded ? counts->tested : counts->unbounded);
+                counts->culled += outside ? 1u : 0u;
+            }
+            if (outside) {
                 continue;
             }
         }

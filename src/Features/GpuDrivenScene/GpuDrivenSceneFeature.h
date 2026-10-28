@@ -48,6 +48,7 @@ public:
 
 private:
     void OpaquePass(fx::OpaqueFrame& f);
+    void SceneCullPass(fx::OpaqueFrame& f);
     void HizPass(fx::PostOpaqueFrame& f);
 
     // Applies a pending panel request to the settings.

@@ -297,18 +297,19 @@ void Game::EnsureDefaultCameraExists()
 
 void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride,
     IFrameDebuggerCaptureRecorder* frameDebuggerCapture, std::optional<std::size_t> maxDrawCount,
-    const std::unordered_set<Entity>& batchedEntities, DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd)
+    const std::unordered_set<Entity>& batchedEntities, DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd,
+    std::optional<SceneCullRequest> cull)
 {
     EnsureDefaultCameraExists();
 
     if (viewProjectionOverride != nullptr) {
-        // Scene view: no capture, draw cap or command buffer; claimed entities are skipped like in the Game view.
+        // Secondary draw: no capture, draw cap or command buffer.
         m_renderSystem.Draw(m_registry, renderer, *viewProjectionOverride, nullptr, std::nullopt, batchedEntities,
-            std::nullopt, sceneServicesSet);
+            std::nullopt, sceneServicesSet, nullptr, cull);
     } else {
         // Capture pointer and `cmd` are only forwarded, never dereferenced here.
         m_renderSystem.Draw(m_registry, renderer, aspectWidthOverHeight, frameDebuggerCapture, maxDrawCount,
-            batchedEntities, sceneServicesSet, cmd);
+            batchedEntities, sceneServicesSet, cmd, cull);
     }
 }
 

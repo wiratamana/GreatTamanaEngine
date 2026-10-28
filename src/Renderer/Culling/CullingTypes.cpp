@@ -32,8 +32,8 @@ AABB ComputeLocalAABB(const std::vector<Vec3>& positions)
 
 namespace {
 
-// Normalizes a raw (a, b, c, d) plane row; a zero-length normal falls back to +Z instead of dividing by zero.
-Plane MakeNormalizedPlane(float a, float b, float c, float d) noexcept
+// Normalizes a raw (a, b, c, d) plane row. A degenerate normal falls back to +Z and clears `valid`.
+Plane MakeNormalizedPlane(float a, float b, float c, float d, bool& valid) noexcept
 {
     const float length = std::sqrt(a * a + b * b + c * c);
     Plane plane;
@@ -44,47 +44,84 @@ Plane MakeNormalizedPlane(float a, float b, float c, float d) noexcept
     } else {
         plane.normal = Vec3(0.0f, 0.0f, 1.0f);
         plane.distance = 0.0f;
+        valid = false;
     }
     return plane;
 }
 
-} // namespace
-
-std::array<Plane, 6> ExtractFrustumPlanes(const Mat4& viewProjection)
+// Gribb/Hartmann rows; m(row, col) is storage-order independent. `valid` is cleared by any degenerate plane.
+std::array<Plane, 6> ExtractPlanes(const Mat4& m, bool& valid) noexcept
 {
-    const Mat4& m = viewProjection;
-
     std::array<Plane, 6> planes;
-    // Gribb/Hartmann rows; m(row, col) is storage-order independent.
     // Left:   row3 + row0  (x >= -w)
     planes[0] = MakeNormalizedPlane(
-        m(3, 0) + m(0, 0), m(3, 1) + m(0, 1), m(3, 2) + m(0, 2), m(3, 3) + m(0, 3));
+        m(3, 0) + m(0, 0), m(3, 1) + m(0, 1), m(3, 2) + m(0, 2), m(3, 3) + m(0, 3), valid);
     // Right:  row3 - row0  (x <= w)
     planes[1] = MakeNormalizedPlane(
-        m(3, 0) - m(0, 0), m(3, 1) - m(0, 1), m(3, 2) - m(0, 2), m(3, 3) - m(0, 3));
+        m(3, 0) - m(0, 0), m(3, 1) - m(0, 1), m(3, 2) - m(0, 2), m(3, 3) - m(0, 3), valid);
     // Bottom: row3 + row1  (y >= -w)
     planes[2] = MakeNormalizedPlane(
-        m(3, 0) + m(1, 0), m(3, 1) + m(1, 1), m(3, 2) + m(1, 2), m(3, 3) + m(1, 3));
+        m(3, 0) + m(1, 0), m(3, 1) + m(1, 1), m(3, 2) + m(1, 2), m(3, 3) + m(1, 3), valid);
     // Top:    row3 - row1  (y <= w)
     planes[3] = MakeNormalizedPlane(
-        m(3, 0) - m(1, 0), m(3, 1) - m(1, 1), m(3, 2) - m(1, 2), m(3, 3) - m(1, 3));
-    // Near (VULKAN ZERO-TO-ONE depth range - z >= 0, NOT OpenGL's z >= -w): row2.
-    planes[4] = MakeNormalizedPlane(m(2, 0), m(2, 1), m(2, 2), m(2, 3));
+        m(3, 0) - m(1, 0), m(3, 1) - m(1, 1), m(3, 2) - m(1, 2), m(3, 3) - m(1, 3), valid);
+    // Near (zero-to-one depth, z >= 0): row2.
+    planes[4] = MakeNormalizedPlane(m(2, 0), m(2, 1), m(2, 2), m(2, 3), valid);
     // Far:    row3 - row2  (z <= w)
     planes[5] = MakeNormalizedPlane(
-        m(3, 0) - m(2, 0), m(3, 1) - m(2, 1), m(3, 2) - m(2, 2), m(3, 3) - m(2, 3));
-
+        m(3, 0) - m(2, 0), m(3, 1) - m(2, 1), m(3, 2) - m(2, 2), m(3, 3) - m(2, 3), valid);
     return planes;
 }
-
-namespace {
 
 bool IsFinite(const Vec3& v) noexcept
 {
     return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
 }
 
+bool IsFinite(const Mat4& m) noexcept
+{
+    for (int c = 0; c < 4; ++c) {
+        for (int r = 0; r < 4; ++r) {
+            if (!std::isfinite(m(r, c))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 } // namespace
+
+std::array<Plane, 6> ExtractFrustumPlanes(const Mat4& viewProjection)
+{
+    bool valid = true;
+    return ExtractPlanes(viewProjection, valid);
+}
+
+std::optional<std::array<Plane, 6>> TryExtractFrustumPlanes(const Mat4& viewProjection) noexcept
+{
+    if (!IsFinite(viewProjection)) {
+        return std::nullopt;
+    }
+    bool valid = true;
+    const std::array<Plane, 6> planes = ExtractPlanes(viewProjection, valid);
+    for (const Plane& plane : planes) {
+        valid = valid && IsFinite(plane.normal) && std::isfinite(plane.distance);
+    }
+    if (!valid) {
+        return std::nullopt;
+    }
+    return planes;
+}
+
+bool IsBoundsOutsideFrustum(const std::array<Plane, 6>& planes, const std::optional<AABB>& localBounds,
+    const Mat4& world, float paddingFraction) noexcept
+{
+    if (!localBounds.has_value() || !IsFinite(world)) {
+        return false;
+    }
+    return IsAABBOutsideFrustum(planes, PadAABB(TransformAABB(*localBounds, world), paddingFraction));
+}
 
 bool IsAABBOutsideFrustum(const std::array<Plane, 6>& planes, const AABB& worldBounds) noexcept
 {

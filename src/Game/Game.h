@@ -38,15 +38,15 @@ public:
     // Runs every frame, paused or not; the freeze decision is made inside using the shared EngineContext.
     void Update(const EngineContext& engineContext, const InputState& input);
 
-    // Queues this frame's draws for entities with a MeshRenderer. `viewProjectionOverride` null = active ECS
-    // Camera (Game view); else that matrix (Scene view). `frameDebuggerCapture`, `maxDrawCount` and `cmd` apply to
-    // the Game view only; `batchedEntities` (drawn elsewhere) and `sceneServicesSet` to both. Does not present.
+    // Queues this frame's draws for entities with a MeshRenderer. `viewProjectionOverride` null = active ECS Camera
+    // (primary); else that matrix (secondary). `frameDebuggerCapture`, `maxDrawCount` and `cmd` apply to the
+    // primary draw only; `batchedEntities` (drawn elsewhere), `sceneServicesSet` and `cull` to both. Does not present.
     void Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride = nullptr,
         IFrameDebuggerCaptureRecorder* frameDebuggerCapture = nullptr,
         std::optional<std::size_t> maxDrawCount = std::nullopt,
         const std::unordered_set<Entity>& batchedEntities = {},
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
-        rg::CommandBuffer* cmd = nullptr);
+        rg::CommandBuffer* cmd = nullptr, std::optional<SceneCullRequest> cull = std::nullopt);
 
 
     // ECS access for the Editor's Hierarchy/Inspector panels; non-const because the Inspector edits components in place.

@@ -1,13 +1,16 @@
-// Tier-1 tests for the Vulkan-free culling math in src/Renderer/Culling/CullingTypes.h:
-// ComputeLocalAABB(), TransformAABB(), ExtractFrustumPlanes(), plus
-// IndirectDrawCommand's byte size.
+// Tier-1 tests for the Vulkan-free culling math in src/Renderer/Culling/CullingTypes.h,
+// PartLocalBounds() and IndirectDrawCommand's byte size.
 
 #include "Renderer/Culling/CullingTypes.h"
 #include "Renderer/IndirectDrawTypes.h"
 
+#include "Game/Instantiation/MeshPartBounds.h"
 #include "Math/Quat.h"
 
 #include <gtest/gtest.h>
+
+#include <limits>
+#include <optional>
 
 namespace gte {
 namespace {
@@ -78,12 +81,7 @@ TEST(CullingTypes, TransformAABBByPureTranslationShiftsMinAndMaxByExactlyThatAmo
 
 TEST(CullingTypes, TransformAABBBy90DegreeYawProducesExpectedReorientedBox)
 {
-    // Rotating +90 degrees around Up() maps (x,y,z) -> (z,y,-x) - matches
-    // Quat.h's own documented "rotating Forward() by +90 degrees around
-    // Up() yields Right()" convention (hand-verified in
-    // tests/Math/QuatTests.cpp), confirmed here for a genuinely asymmetric
-    // box (extends further along Z than X before rotating - further along X
-    // than Z after) so the test can't pass by symmetry-coincidence.
+    // +90 degrees around Up() maps (x,y,z) -> (z,y,-x); the asymmetric box rules out a symmetry pass.
     const AABB localAABB{ Vec3(-0.5f, -1.0f, -2.0f), Vec3(0.5f, 1.0f, 2.0f) };
     const Mat4 worldMatrix = Mat4::FromQuat(Quat::FromAxisAngle(Vec3::Up(), kHalfPi));
 
@@ -94,14 +92,7 @@ TEST(CullingTypes, TransformAABBBy90DegreeYawProducesExpectedReorientedBox)
 }
 
 // --- ExtractFrustumPlanes() -------------------------------------------------
-//
-// A known, simple, hand-computed case: identity view (camera at the world
-// origin, looking down +Z - this engine's own Z-forward convention) composed
-// with a simple orthographic projection. See this campaign's
-// PHASE1_COMPLETION_REPORT.md for the full hand-derivation these exact
-// expected numbers come from (Gribb/Hartmann row extraction against Mat4's
-// own OrthographicLH_ZO output).
-
+// Identity view (camera at the origin looking down +Z) with a simple orthographic projection.
 TEST(CullingTypes, ExtractFrustumPlanesFromOrthographicProjectionMatchesHandComputedValues)
 {
     const Mat4 viewProjection = Mat4::OrthographicLH_ZO(-1.0f, 1.0f, -2.0f, 2.0f, 0.5f, 10.0f);
@@ -133,13 +124,90 @@ TEST(CullingTypes, ExtractFrustumPlanesFromOrthographicProjectionMatchesHandComp
     EXPECT_NEAR(planes[5].distance, 10.0f, 1e-4f);
 }
 
+// --- TryExtractFrustumPlanes() ----------------------------------------------
+
+TEST(CullingTypes, TryExtractFrustumPlanesMatchesExtractFrustumPlanesForAFiniteMatrix)
+{
+    const Mat4 viewProjection = Mat4::OrthographicLH_ZO(-1.0f, 1.0f, -2.0f, 2.0f, 0.5f, 10.0f);
+
+    const std::optional<std::array<Plane, 6>> planes = TryExtractFrustumPlanes(viewProjection);
+    ASSERT_TRUE(planes.has_value());
+
+    const std::array<Plane, 6> expected = ExtractFrustumPlanes(viewProjection);
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_TRUE(ApproximatelyEqual((*planes)[i].normal, expected[i].normal));
+        EXPECT_FLOAT_EQ((*planes)[i].distance, expected[i].distance);
+    }
+}
+
+TEST(CullingTypes, TryExtractFrustumPlanesRejectsNonFiniteAndZeroMatrices)
+{
+    Mat4 withNaN = Mat4::Identity();
+    withNaN(0, 0) = std::numeric_limits<float>::quiet_NaN();
+    EXPECT_FALSE(TryExtractFrustumPlanes(withNaN).has_value());
+
+    Mat4 withInf = Mat4::Identity();
+    withInf(1, 3) = std::numeric_limits<float>::infinity();
+    EXPECT_FALSE(TryExtractFrustumPlanes(withInf).has_value());
+
+    EXPECT_FALSE(TryExtractFrustumPlanes(Mat4::Zero()).has_value());
+}
+
+// --- IsBoundsOutsideFrustum() ------------------------------------------------
+
+TEST(CullingTypes, IsBoundsOutsideFrustumClassifiesInsideOutsideAndStraddlingBoxes)
+{
+    const std::array<Plane, 6> planes =
+        ExtractFrustumPlanes(Mat4::OrthographicLH_ZO(-1.0f, 1.0f, -2.0f, 2.0f, 0.5f, 10.0f));
+    const std::optional<AABB> box = AABB{ Vec3(-0.5f, -0.5f, -0.5f), Vec3(0.5f, 0.5f, 0.5f) };
+
+    EXPECT_FALSE(IsBoundsOutsideFrustum(planes, box, Mat4::Translation(Vec3(0.0f, 0.0f, 5.0f)), 0.0f));
+    EXPECT_TRUE(IsBoundsOutsideFrustum(planes, box, Mat4::Translation(Vec3(10.0f, 0.0f, 5.0f)), 0.0f));
+    EXPECT_FALSE(IsBoundsOutsideFrustum(planes, box, Mat4::Translation(Vec3(1.0f, 0.0f, 5.0f)), 0.0f));
+}
+
+TEST(CullingTypes, IsBoundsOutsideFrustumKeepsBoxesWithoutBoundsOrWithNonFiniteWorld)
+{
+    const std::array<Plane, 6> planes =
+        ExtractFrustumPlanes(Mat4::OrthographicLH_ZO(-1.0f, 1.0f, -2.0f, 2.0f, 0.5f, 10.0f));
+    const Mat4 distant = Mat4::Translation(Vec3(100.0f, 0.0f, 5.0f));
+
+    EXPECT_FALSE(IsBoundsOutsideFrustum(planes, std::nullopt, distant, 0.0f));
+
+    const std::optional<AABB> box = AABB{ Vec3(-0.5f, -0.5f, -0.5f), Vec3(0.5f, 0.5f, 0.5f) };
+    const Mat4 broken = Mat4::Translation(Vec3(std::numeric_limits<float>::quiet_NaN(), 0.0f, 5.0f));
+    EXPECT_FALSE(IsBoundsOutsideFrustum(planes, box, broken, 0.0f));
+}
+
+TEST(CullingTypes, IsBoundsOutsideFrustumPaddingKeepsANearMissingBox)
+{
+    const std::array<Plane, 6> planes =
+        ExtractFrustumPlanes(Mat4::OrthographicLH_ZO(-1.0f, 1.0f, -2.0f, 2.0f, 0.5f, 10.0f));
+    const std::optional<AABB> box = AABB{ Vec3(-0.5f, -0.5f, -0.5f), Vec3(0.5f, 0.5f, 0.5f) };
+    const Mat4 world = Mat4::Translation(Vec3(1.7f, 0.0f, 5.0f));
+
+    EXPECT_TRUE(IsBoundsOutsideFrustum(planes, box, world, 0.0f));
+    EXPECT_FALSE(IsBoundsOutsideFrustum(planes, box, world, 0.5f));
+}
+
+// --- PartLocalBounds() ---------------------------------------------------------
+
+TEST(CullingTypes, PartLocalBoundsIsEmptyForSkinnedPartsAndTightForStaticParts)
+{
+    const std::vector<Vec3> positions = { Vec3(0.0f, 0.0f, 0.0f), Vec3(1.0f, 2.0f, 3.0f), Vec3(5.0f, 5.0f, 5.0f) };
+    const std::vector<std::uint32_t> indices = { 0, 1 };
+
+    EXPECT_FALSE(PartLocalBounds(true, positions, indices).has_value());
+
+    const std::optional<AABB> bounds = PartLocalBounds(false, positions, indices);
+    ASSERT_TRUE(bounds.has_value());
+    EXPECT_TRUE(ApproximatelyEqual(bounds->min, Vec3(0.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(ApproximatelyEqual(bounds->max, Vec3(1.0f, 2.0f, 3.0f)));
+}
+
 // --- IndirectDrawCommand (src/Renderer/IndirectDrawTypes.h) -----------------
 //
-// Compile-time-only checks already exist directly in IndirectDrawTypes.h as
-// static_asserts (byte-for-byte match against VkDrawIndexedIndirectCommand) -
-// referencing sizeof() here is what actually forces this translation unit to
-// instantiate/see them, mirroring GpuSkinningTypesTests.cpp's own
-// "compiling at all is the test" precedent.
+// The static_asserts live in IndirectDrawTypes.h; sizeof() here forces this TU to see them.
 TEST(CullingTypes, IndirectDrawCommandMatchesDocumentedByteSize)
 {
     EXPECT_EQ(sizeof(IndirectDrawCommand), 20u);

@@ -10,8 +10,9 @@
 #include "../../Encoding/Utf8Path.h"
 #include "../../Profiling/ScopeTimer.h"
 #include "../../Renderer/MeshVertex.h"
-#include "../../Renderer/Culling/CullingTypes.h" // ComputeLocalAABB()
+#include "../../Renderer/Culling/CullingTypes.h"
 #include "../../Renderer/Renderer.h"
+#include "MeshPartBounds.h"
 #include "MaterialLifetimeRules.h"
 #include "../../Assets/MeshMaterialPartitioner.h"
 #include "MeshClusterTableSelection.h"
@@ -54,19 +55,6 @@ constexpr std::array<PipelineRow, 5> kPipelineRows{ {
     { "shaders/PbrMesh.vert.spv", "shaders/PbrMeshAlphaTest.frag.spv", VertexLayout::PositionNormalUvTangent, true,
         "PbrMesh.vert/PbrMeshAlphaTest.frag (PositionNormalUvTangent)" },
 } };
-
-// Tight local-space AABB of the vertices `indices` references (out-of-range indices are skipped).
-AABB ComputeSubsetLocalAABB(const std::vector<Vec3>& positions, const std::vector<std::uint32_t>& indices)
-{
-    std::vector<Vec3> referenced;
-    referenced.reserve(indices.size());
-    for (const std::uint32_t index : indices) {
-        if (index < positions.size()) {
-            referenced.push_back(positions[index]);
-        }
-    }
-    return ComputeLocalAABB(referenced);
-}
 
 bool IsValidMaterialIndex(std::int32_t index, std::size_t count) noexcept
 {
@@ -259,8 +247,10 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
                   static_cast<std::uint32_t>(vertices.size()), untexturedIndices.data(),
                   untexturedIndices.size() * sizeof(std::uint32_t),
                   static_cast<std::uint32_t>(untexturedIndices.size()), "ImportedMesh");
-        // Tight local-space bounds, computed once at load; used by GPU-driven culling.
-        gpuMesh.SetLocalBounds(ComputeSubsetLocalAABB(mesh->positions, untexturedIndices));
+        // Skinned meshes carry no bounds: their vertices change at runtime.
+        if (const std::optional<AABB> bounds = PartLocalBounds(skinned, mesh->positions, untexturedIndices)) {
+            gpuMesh.SetLocalBounds(*bounds);
+        }
         // Skinned vertices change every frame, so only static parts get a cluster table.
         if (!skinned && !mesh->clusters.empty()) {
             AttachClusterTable(gpuMesh, renderer, absoluteGtaPath, mesh->clusters, clusterSlices, untexturedIndices.size());
@@ -302,8 +292,10 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
             Mesh gpuMesh = renderer.CreateMeshFromSharedVertexBuffer(sharedTexturedVertexBuffer, texturedVertexCount,
                 sliceIndices.data(), sliceIndices.size() * sizeof(std::uint32_t),
                 static_cast<std::uint32_t>(sliceIndices.size()), "ImportedTexturedMesh");
-            // Tight local-space bounds for this submesh; textured batches are not GPU-driven yet.
-            gpuMesh.SetLocalBounds(ComputeSubsetLocalAABB(mesh->positions, sliceIndices));
+            // Skinned meshes carry no bounds: their vertices change at runtime.
+            if (const std::optional<AABB> bounds = PartLocalBounds(skinned, mesh->positions, sliceIndices)) {
+                gpuMesh.SetLocalBounds(*bounds);
+            }
             const MeshHandle handle = RegisterOwnedMesh(renderSystem, std::move(gpuMesh));
             MeshAssetPart part{ handle, slice.texture, slice.name };
             part.kind = ChooseMeshAssetPipelineKind(part.texture.IsValid(), tangentLayout, slice.alphaTested);

@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace gte {
@@ -41,5 +42,13 @@ AABB PadAABB(const AABB& box, float fractionOfLargestExtent) noexcept;
 
 // World-space AABB of a local AABB: transforms all 8 corners and takes the min/max.
 AABB TransformAABB(const AABB& localAABB, const Mat4& worldMatrix);
+
+// Same planes as ExtractFrustumPlanes, or nullopt when the matrix has a non-finite entry or a degenerate plane.
+std::optional<std::array<Plane, 6>> TryExtractFrustumPlanes(const Mat4& viewProjection) noexcept;
+
+// True when the padded world bounds of `localBounds` lie outside `planes`.
+// No bounds or a non-finite `world` matrix is never outside (kept).
+bool IsBoundsOutsideFrustum(const std::array<Plane, 6>& planes, const std::optional<AABB>& localBounds,
+    const Mat4& world, float paddingFraction) noexcept;
 
 } // namespace gte

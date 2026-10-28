@@ -1,10 +1,11 @@
-// Tier-1 tests for the pure claim rule in Core/ClusterClaim.h. No device involved.
+// Tier-1 tests for the pure claim and cull rules in Core/ClusterClaim.h. No device involved.
 
 #include "Core/ClusterClaim.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <limits>
 
 namespace gte {
 namespace {
@@ -103,6 +104,47 @@ TEST(ClusterClaimTest, AClaimIsAPureFunctionOfItsScope)
 TEST(ClusterClaimTest, NoPartsClaimNothing)
 {
     EXPECT_TRUE(ClaimedEntitiesOf({}, GameContext()).empty());
+}
+
+TEST(SceneCullAllowedTest, MatchesTheClaimRuleForEveryScopeAndCaptureState)
+{
+    for (const rg::ViewScope scope : { rg::ViewScope::Shared, rg::ViewScope::Primary, rg::ViewScope::Secondary }) {
+        for (const bool captureArmed : { false, true }) {
+            const ClusterClaimContext context{ scope, captureArmed };
+            EXPECT_EQ(SceneCullAllowed(context), ClusterClaimAllowed(context));
+        }
+    }
+}
+
+TEST(SceneCullAllowedTest, OnlyAPerViewScopeOutsideAPrimaryCaptureMayCull)
+{
+    EXPECT_FALSE(SceneCullAllowed({ rg::ViewScope::Shared, false }));
+    EXPECT_FALSE(SceneCullAllowed({ rg::ViewScope::Shared, true }));
+    EXPECT_TRUE(SceneCullAllowed({ rg::ViewScope::Primary, false }));
+    EXPECT_FALSE(SceneCullAllowed({ rg::ViewScope::Primary, true }));
+    EXPECT_TRUE(SceneCullAllowed({ rg::ViewScope::Secondary, false }));
+    EXPECT_TRUE(SceneCullAllowed({ rg::ViewScope::Secondary, true }));
+}
+
+TEST(SceneCullCountsFreshTest, OnlyThePreviousAndTheCurrentFrameCount)
+{
+    EXPECT_TRUE(SceneCullCountsFresh(9, 10));
+    EXPECT_TRUE(SceneCullCountsFresh(10, 10));
+    EXPECT_FALSE(SceneCullCountsFresh(8, 10));
+    EXPECT_FALSE(SceneCullCountsFresh(11, 10));
+    EXPECT_TRUE(SceneCullCountsFresh(0, 0));
+    EXPECT_FALSE(SceneCullCountsFresh(std::numeric_limits<std::uint64_t>::max(), 0));
+}
+
+TEST(SanitizeCullPaddingTest, ClampsToUnitRangeAndRejectsNonFinite)
+{
+    EXPECT_EQ(SanitizeCullPadding(0.05f), 0.05f);
+    EXPECT_EQ(SanitizeCullPadding(0.0f), 0.0f);
+    EXPECT_EQ(SanitizeCullPadding(1.0f), 1.0f);
+    EXPECT_EQ(SanitizeCullPadding(7.0f), 1.0f);
+    EXPECT_EQ(SanitizeCullPadding(-0.5f), 0.0f);
+    EXPECT_EQ(SanitizeCullPadding(std::numeric_limits<float>::quiet_NaN()), 0.0f);
+    EXPECT_EQ(SanitizeCullPadding(std::numeric_limits<float>::infinity()), 0.0f);
 }
 
 } // namespace

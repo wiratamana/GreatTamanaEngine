@@ -34,5 +34,17 @@ TEST(SceneDrawRequestTest, LeavesEveryOtherFieldAtItsDefault)
     EXPECT_EQ(request.sceneServicesSet, DescriptorSetHandle::Invalid);
 }
 
+TEST(SceneCullRequestTest, AggregateInitKeepsCountsOptionalAndZeroed)
+{
+    const SceneCullRequest request{ Mat4::Identity(), 0.05f };
+    EXPECT_EQ(request.counts, nullptr);
+    EXPECT_FLOAT_EQ(request.paddingFraction, 0.05f);
+
+    const SceneCullCounts counts;
+    EXPECT_EQ(counts.tested, 0u);
+    EXPECT_EQ(counts.culled, 0u);
+    EXPECT_EQ(counts.unbounded, 0u);
+}
+
 } // namespace
 } // namespace gte

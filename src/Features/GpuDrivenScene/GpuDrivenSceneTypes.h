@@ -379,6 +379,12 @@ struct GpuDrivenSceneViewSnapshot {
     bool refused = false;
     std::string refusal;
     std::uint64_t ledgerBytes = 0;
+
+    // CPU draw cull of this view, written by its own callback. Counts are one frame old.
+    std::uint32_t cpuTested = 0;
+    std::uint32_t cpuCulled = 0;
+    std::uint32_t cpuUnbounded = 0;
+    bool cpuCullRequested = false;
 };
 
 // The panel's view of the secondary view snapshot. A pure function of its inputs.

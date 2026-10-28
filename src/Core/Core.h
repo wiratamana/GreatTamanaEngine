@@ -7,6 +7,7 @@
 #include "../Application/RenderPassViewData.h"
 #include "../ECS/Entity.h"
 #include "../Game/Game.h"
+#include "../Game/SceneQuery.h"
 #include "../Renderer/Culling/ClusterCullMath.h"
 #include "../Renderer/MeshHandle.h"
 #include "../Renderer/PipelineHandle.h"
@@ -215,6 +216,13 @@ public:
     // For kit verbs only, and only after every pass of the chain was declared (see ClusterClaim.h).
     void ClaimEntities(rg::ViewScope scope, std::span<const Entity> entities);
 
+    // Asks the CPU scene draw of `scope` to skip entities whose padded bounds miss `viewProjection`. False when refused
+    // (shared scope, captured primary frame, unusable matrix). The last request of a frame wins. Kit verbs only.
+    bool SetSceneDrawCull(rg::ViewScope scope, const Mat4& viewProjection, float paddingFraction);
+
+    // Counts of the last CPU scene draw of `scope`; zeros unless it ran in the previous frame or in `currentFrameIndex`.
+    SceneCullCounts LastSceneDrawCullCounts(rg::ViewScope scope, std::uint64_t currentFrameIndex) const noexcept;
+
     // True while a frame capture records this frame's CPU draw list.
     bool CaptureArmedThisFrame() const noexcept { return m_captureArmedThisFrame; }
 
@@ -320,6 +328,15 @@ private:
 
     // Entities drawn by a pass chain instead of the CPU scene draw, per view scope. Cleared at the start of BuildFrame().
     std::array<std::unordered_set<Entity>, rg::kViewScopeCount> m_claimedEntities;
+
+    // Frustum cull request and the counts of its last draw, per view scope. The request is cleared at the start of BuildFrame().
+    struct SceneCullResult {
+        SceneCullCounts counts;
+        std::uint64_t frameIndex = 0;
+        bool valid = false; // False until a draw of this scope has stored its counts.
+    };
+    std::array<std::optional<SceneCullRequest>, rg::kViewScopeCount> m_sceneCullThisFrame;
+    std::array<SceneCullResult, rg::kViewScopeCount> m_sceneCullCountsLast;
 
     // Cluster-ready instances and entity exclusion sets of this frame. Both are cleared at the start of
     // BuildFrame(); a deque keeps every reserved set at a stable address. The epoch grows with each clear.

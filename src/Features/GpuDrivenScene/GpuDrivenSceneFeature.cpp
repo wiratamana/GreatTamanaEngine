@@ -9,7 +9,11 @@ namespace gte {
 namespace {
 
 constexpr std::int32_t kOpaquePriority = 0;
+constexpr std::int32_t kCullPriority = 10; // Distinct from kOpaquePriority; the request is read at execute time.
 constexpr std::int32_t kHizBuildPriority = -100; // Unique in PostOpaque; runs first, right after the opaque depth is final.
+
+// Fraction of a box's largest extent added before the CPU frustum test.
+constexpr float kCpuCullPadding = 0.05f;
 
 // A report older than this many frames (against the newest frame of any view) counts as not rendered.
 constexpr std::uint64_t kSnapshotStaleFrames = 2;
@@ -17,6 +21,14 @@ constexpr std::uint64_t kSnapshotStaleFrames = 2;
 bool HasNoPixels(const fx::View& view) noexcept
 {
     return view.extent.width == 0 || view.extent.height == 0;
+}
+
+// The camera both the cluster cull and the CPU cull test against. Safe to call twice per frame.
+const fx::ClusterCamera& CullCameraOf(GpuDrivenSceneViewState& view, const GpuDrivenSceneSettings& cfg, bool sceneView,
+    const fx::ClusterCamera& live, std::uint64_t frameIndex) noexcept
+{
+    return ResolveCullCamera(view.frozenCamera, cfg.enabled && ViewFreezeRequested(cfg, sceneView),
+        sceneView ? cfg.freezeSerial : 0u, live, frameIndex);
 }
 
 ClusterCullFlags CullFlagsOf(const ViewCullTests& tests) noexcept
@@ -50,6 +62,9 @@ void GpuDrivenSceneFeature::Setup(fx::FeatureSetup& s)
     fx::Gate gate;
     gate.passNames = m_state.AllPassNames();
     s.Opaque("GpuDrivenScene.Opaque", kOpaquePriority, [this](fx::OpaqueFrame& f) { OpaquePass(f); }, gate);
+
+    // The CPU draw cull is not a render pass: no pass toggle and no `enabled` flag may silence it.
+    s.Opaque("GpuDrivenScene.SceneCull", kCullPriority, [this](fx::OpaqueFrame& f) { SceneCullPass(f); }, fx::Gate::Always());
 
     // The pyramid is built from the depth the opaque stage left behind and read by the next frame's cull.
     fx::Gate hizGate;
@@ -128,8 +143,7 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     const ViewCullTests tests = ResolveViewCullTests(cfg, sceneView);
     const fx::View& viewData = f.View();
     const fx::ClusterCamera live = fx::ClusterCameraOf(viewData);
-    const fx::ClusterCamera& cullCamera = ResolveCullCamera(view.frozenCamera,
-        cfg.enabled && ViewFreezeRequested(cfg, sceneView), sceneView ? cfg.freezeSerial : 0u, live, frameIndex);
+    const fx::ClusterCamera& cullCamera = CullCameraOf(view, cfg, sceneView, live, frameIndex);
     const bool cullIsLive = !view.frozenCamera.frozen;
     const bool wantStats = cfg.collectStats || (sceneView && m_hudStatsActive);
 
@@ -147,6 +161,11 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     const auto finish = [&] {
         view.tested.Record(frameIndex, snap.testedClusters);
         snap.ledgerBytes = m_state.HeldBytes(scope);
+        // The CPU cull fields belong to the other callback.
+        snap.cpuTested = view.snapshot.cpuTested;
+        snap.cpuCulled = view.snapshot.cpuCulled;
+        snap.cpuUnbounded = view.snapshot.cpuUnbounded;
+        snap.cpuCullRequested = view.snapshot.cpuCullRequested;
         view.snapshot = std::move(snap);
         if (sceneView) {
             m_link->report = MakeViewCullReport(cfg, view.snapshot);
@@ -214,6 +233,27 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
         }
     }
     finish();
+}
+
+void GpuDrivenSceneFeature::SceneCullPass(fx::OpaqueFrame& f)
+{
+    const rg::ViewScope scope = f.Scope();
+    const bool sceneView = scope == rg::ViewScope::Secondary;
+    GpuDrivenSceneViewState& view = m_views.For(scope);
+    const std::uint64_t frameIndex = f.FrameIndex();
+    BeginFrame(frameIndex);
+
+    const GpuDrivenSceneSettings cfg = m_settings;
+    const fx::ClusterCamera live = fx::ClusterCameraOf(f.View());
+    const fx::ClusterCamera& cullCamera = CullCameraOf(view, cfg, sceneView, live, frameIndex);
+
+    GpuDrivenSceneViewSnapshot& snap = view.snapshot;
+    const auto counts = f.LastSceneDrawCullCounts();
+    snap.cpuTested = counts.tested;
+    snap.cpuCulled = counts.culled;
+    snap.cpuUnbounded = counts.unbounded;
+    snap.cpuCullRequested = ResolveViewCullTests(cfg, sceneView).frustum && cullCamera.valid
+        && f.CullSceneDraw(cullCamera.viewProjection, kCpuCullPadding);
 }
 
 void GpuDrivenSceneFeature::HizPass(fx::PostOpaqueFrame& f)

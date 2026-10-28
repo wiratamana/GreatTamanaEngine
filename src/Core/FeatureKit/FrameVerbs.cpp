@@ -64,6 +64,23 @@ std::span<const ClusterInstance> Frame::ClusterCandidates() const noexcept
     return m_context->core->ClusterCandidates();
 }
 
+bool Frame::CullSceneDraw(const Mat4& viewProjection, float paddingFraction)
+{
+    if (m_context == nullptr || m_context->core == nullptr) {
+        return false;
+    }
+    return m_context->core->SetSceneDrawCull(m_view.scope, viewProjection, paddingFraction);
+}
+
+SceneCullCounts Frame::LastSceneDrawCullCounts() const noexcept
+{
+    if (m_context == nullptr || m_context->core == nullptr) {
+        return {};
+    }
+    const gte::SceneCullCounts counts = m_context->core->LastSceneDrawCullCounts(m_view.scope, FrameIndex());
+    return SceneCullCounts{ counts.tested, counts.culled, counts.unbounded };
+}
+
 bool Frame::ShaderReady(ComputeShader& shader)
 {
     if (m_context == nullptr || m_context->builder == nullptr) {
