@@ -10,7 +10,6 @@
 #include "../Math/Mat4.h"
 #include "../Math/Vec2.h"
 #include "RenderGraphRegimeChoice.h"
-#include "ViewCullFreshness.h"
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -18,10 +17,6 @@
 #include <vector>
 
 namespace gte {
-
-namespace fx {
-struct ViewCullLink;
-}
 
 // Forward declaration only: the full definition lives in Core/EditorCapabilities.h and is heavy.
 enum class AssetScaffoldKind;
@@ -265,12 +260,6 @@ struct EditorContext {
 
     // Camera overlay state of the Scene panel's last frame.
     SceneCameraFrame sceneCamera;
-
-    // Link to the feature that culls the Scene view; empty until a feature attaches.
-    std::shared_ptr<fx::ViewCullLink> viewCull;
-
-    // UI-only state of the Scene panel cull box.
-    ScenePanelCullViewUi cullViewUi;
 };
 
 } // namespace gte

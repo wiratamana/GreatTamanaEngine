@@ -20,6 +20,7 @@
 #include "ClusterCandidates.h"
 #include "FrameDebuggerCaptureRecorder.h"
 #include "FeatureKit/ClusterDrawTypes.h"
+#include "FeatureKit/View.h"
 #include "RenderTimingAdapter.h"
 #include "Plugins/ProjectAssemblyHost.h"
 #include "../Assets/AssetDatabase.h"
@@ -223,6 +224,10 @@ public:
     // Counts of the last CPU scene draw of `scope`; zeros unless it ran in the previous frame or in `currentFrameIndex`.
     SceneCullCounts LastSceneDrawCullCounts(rg::ViewScope scope, std::uint64_t currentFrameIndex) const noexcept;
 
+    // Camera of the primary view; with no primary view data this frame it is built from the active camera at the last
+    // known primary aspect (else `fallbackAspect`). Empty without an active camera or with a non-finite matrix.
+    std::optional<fx::View> PrimaryCameraView(float fallbackAspect);
+
     // True while a frame capture records this frame's CPU draw list.
     bool CaptureArmedThisFrame() const noexcept { return m_captureArmedThisFrame; }
 
@@ -325,6 +330,9 @@ private:
 
     IFrameDebuggerCaptureRecorder* m_currentFrameDebuggerCaptureForOffscreenPipeline = nullptr;
     bool m_captureArmedThisFrame = false;
+
+    // Aspect of the primary view in the last frame it had data; 0 = unknown.
+    float m_lastPrimaryAspect = 0.0f;
 
     // Entities drawn by a pass chain instead of the CPU scene draw, per view scope. Cleared at the start of BuildFrame().
     std::array<std::unordered_set<Entity>, rg::kViewScopeCount> m_claimedEntities;

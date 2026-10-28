@@ -63,6 +63,9 @@ public:
     // One DrawCommand per entity with a MeshRenderer, with its world matrix. Touches only `registry`.
     static std::vector<DrawCommand> CollectRenderables(Registry& registry);
 
+    // True when some Camera component is active.
+    static bool HasActiveCamera(Registry& registry) noexcept;
+
     // View-projection of the first active Camera, or identity when there is none.
     static Mat4 ResolveActiveCameraViewProjection(Registry& registry, float aspectWidthOverHeight);
 

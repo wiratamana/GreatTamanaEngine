@@ -23,12 +23,32 @@ bool HasNoPixels(const fx::View& view) noexcept
     return view.extent.width == 0 || view.extent.height == 0;
 }
 
-// The camera both the cluster cull and the CPU cull test against. Safe to call twice per frame.
-const fx::ClusterCamera& CullCameraOf(GpuDrivenSceneViewState& view, const GpuDrivenSceneSettings& cfg, bool sceneView,
-    const fx::ClusterCamera& live, std::uint64_t frameIndex) noexcept
+// The camera a view culls with, shared by the cluster cull and the CPU cull.
+struct CullPlan {
+    fx::ClusterCamera live;
+    fx::ClusterCamera cull; // Meaningful only when `source` is not None.
+    CullCameraSource source = CullCameraSource::None;
+};
+
+CullPlan PlanCull(fx::OpaqueFrame& f, const GpuDrivenSceneSettings& cfg, bool secondary)
 {
-    return ResolveCullCamera(view.frozenCamera, cfg.enabled && ViewFreezeRequested(cfg, sceneView),
-        sceneView ? cfg.freezeSerial : 0u, live, frameIndex);
+    CullPlan plan;
+    const fx::View& view = f.View();
+    plan.live = fx::ClusterCameraOf(view);
+
+    fx::ClusterCamera primary;
+    primary.valid = false;
+    if (secondary && cfg.mode != CullMode::NoCull) {
+        const float height = view.extent.height > 0 ? static_cast<float>(view.extent.height) : 1.0f;
+        const float aspect = static_cast<float>(view.extent.width) / height;
+        if (const std::optional<fx::View> primaryView = f.PrimaryCamera(aspect)) {
+            primary = fx::ClusterCameraOf(*primaryView);
+        }
+    }
+
+    plan.source = ChooseCullCamera(secondary, cfg.mode, primary.valid, plan.live.valid);
+    plan.cull = plan.source == CullCameraSource::Primary ? primary : plan.live;
+    return plan;
 }
 
 ClusterCullFlags CullFlagsOf(const ViewCullTests& tests) noexcept
@@ -72,27 +92,9 @@ void GpuDrivenSceneFeature::Setup(fx::FeatureSetup& s)
     s.PostOpaque("GpuDrivenScene.HizBuild", kHizBuildPriority, [this](fx::PostOpaqueFrame& f) { HizPass(f); }, hizGate);
 }
 
-GpuDrivenSceneSettings GpuDrivenSceneFeature::EditableSettings()
-{
-    FlushRequest();
-    return m_settings;
-}
-
 void GpuDrivenSceneFeature::ApplySettings(const GpuDrivenSceneSettings& candidate)
 {
     m_settings = SanitizeGpuDrivenSceneSettings(candidate);
-}
-
-void GpuDrivenSceneFeature::FlushRequest()
-{
-    fx::ViewCullRequest& request = m_link->request;
-    if (!request.pending) {
-        return;
-    }
-    m_settings = ApplyViewCullRequest(m_settings, request);
-    request.pending = false;
-    request.freezeHere = false;
-    request.resetAll = false;
 }
 
 GpuDrivenSceneViewSnapshot GpuDrivenSceneFeature::Snapshot(rg::ViewScope scope) const
@@ -117,66 +119,45 @@ void GpuDrivenSceneFeature::BeginFrame(std::uint64_t frameIndex)
     m_frameBegun = true;
     m_beginFrame = frameIndex;
     m_newestFrame = std::max(m_newestFrame, frameIndex);
-
-    FlushRequest();
-    fx::ViewCullRequest& request = m_link->request;
-    m_hudStatsActive = m_hudStatsHold.Step(request.hudShown);
-    request.hudShown = false;
-
-    // A Scene view that stopped rendering never rewrites its report.
-    fx::ViewCullReport& report = m_link->report;
-    if (report.rendered && frameIndex > report.frame + kSnapshotStaleFrames) {
-        report.rendered = false;
-    }
 }
 
 void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
 {
     const rg::ViewScope scope = f.Scope();
-    const bool sceneView = scope == rg::ViewScope::Secondary;
+    const bool secondary = scope == rg::ViewScope::Secondary;
     GpuDrivenSceneViewState& view = m_views.For(scope);
     const std::uint64_t frameIndex = f.FrameIndex();
     BeginFrame(frameIndex);
     m_supported = f.ClusterPathSupported();
 
     const GpuDrivenSceneSettings cfg = m_settings;
-    const ViewCullTests tests = ResolveViewCullTests(cfg, sceneView);
+    const ViewCullTests tests = ResolveCullTests(cfg);
     const fx::View& viewData = f.View();
-    const fx::ClusterCamera live = fx::ClusterCameraOf(viewData);
-    const fx::ClusterCamera& cullCamera = CullCameraOf(view, cfg, sceneView, live, frameIndex);
-    const bool cullIsLive = !view.frozenCamera.frozen;
-    const bool wantStats = cfg.collectStats || (sceneView && m_hudStatsActive);
+    const CullPlan plan = PlanCull(f, cfg, secondary);
+    const bool hizRequested = cfg.mode == CullMode::HiZ;
+    const bool wantStats = cfg.collectStats;
 
     GpuDrivenSceneViewSnapshot snap;
     snap.frameIndex = frameIndex;
     snap.rendered = true;
     snap.enabled = cfg.enabled;
     snap.hasPixels = !HasNoPixels(viewData);
-    snap.cameraValid = live.valid;
-    snap.frozen = view.frozenCamera.frozen;
-    snap.frozenFrame = view.frozenCamera.frozen ? view.frozenCamera.frame : 0;
-    snap.cullCameraValid = cullCamera.valid;
-    snap.cullViewProjection = cullCamera.viewProjection;
+    snap.cameraValid = plan.live.valid;
+    snap.cullCamera = plan.source;
 
     const auto finish = [&] {
         view.tested.Record(frameIndex, snap.testedClusters);
         snap.ledgerBytes = m_state.HeldBytes(scope);
         // The CPU cull fields belong to the other callback.
+        snap.cpuCullState = view.snapshot.cpuCullState;
         snap.cpuTested = view.snapshot.cpuTested;
         snap.cpuCulled = view.snapshot.cpuCulled;
         snap.cpuUnbounded = view.snapshot.cpuUnbounded;
-        snap.cpuCullRequested = view.snapshot.cpuCullRequested;
         view.snapshot = std::move(snap);
-        if (sceneView) {
-            m_link->report = MakeViewCullReport(cfg, view.snapshot);
-        }
     };
 
-    if (!cfg.enabled || !snap.hasPixels || !live.valid) {
+    if (!cfg.enabled || !snap.hasPixels || !plan.live.valid) {
         snap.refusal = !cfg.enabled ? "disabled" : (!snap.hasPixels ? "view has no pixels" : "camera is not valid");
-        // Nothing was culled: never report a cull camera or a stale matrix.
-        snap.cullCameraValid = false;
-        snap.cullViewProjection = Mat4::Identity();
         // An idle scope still gives its buffers back.
         m_state.TickIdle(f, false);
         finish();
@@ -184,13 +165,15 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     }
 
     const std::span<const fx::ClusterInstance> candidates = f.ClusterCandidates();
-    ClusterCullFlags flags = CullFlagsOf(tests);
+    const bool culls = plan.source != CullCameraSource::None;
+    ClusterCullFlags flags = culls ? CullFlagsOf(tests) : ClusterCullFlags::None;
     fx::ClusterDrawChain chain = f.ClusterDraw(m_state, 0);
     bool pyramidBound = false;
-    if (HizMatchesCullCamera(tests.occlusion, cullIsLive)) {
+    if (!secondary && tests.occlusion && plan.source == CullCameraSource::Own) {
         // Last frame's pyramid, only while its guards hold (first frame, resize, cut, missed build).
         const fx::HizPrevious hiz = m_hiz.Previous(f);
         snap.hizReason = hiz.reason;
+        snap.hizSource = CullCameraSource::Own;
         if (hiz.usable) {
             pyramidBound = true;
             flags = flags | ClusterCullFlags::Occlusion;
@@ -198,8 +181,8 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
         }
     }
     chain.Instances(candidates)
-        .Camera(live)
-        .CullCamera(cullCamera)
+        .Camera(plan.live)
+        .CullCamera(plan.cull)
         .Culling(flags)
         .Target(f.SceneTarget())
         .IdTint(cfg.debugView == GpuDrivenSceneDebugView::ClusterId)
@@ -212,8 +195,10 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     snap.inertReason = stats.inertReason;
     snap.refused = ClusterOutcomeRefused(candidates.size(), stats);
     snap.refusal = DescribeClusterOutcome(candidates.size(), stats);
-    snap.occlusion = OcclusionStateOf(tests.occlusion, cullIsLive, stats.occlusionApplied);
-    if (pyramidBound && !stats.occlusionApplied) {
+    snap.occlusion = OcclusionStateOf(hizRequested, culls, !secondary && stats.occlusionApplied);
+    if (secondary && hizRequested && culls) {
+        snap.hizReason = HizReason::Unavailable; // Only the primary view owns a pyramid.
+    } else if (pyramidBound && !stats.occlusionApplied) {
         snap.hizReason = HizReason::Unavailable; // The pyramid was ready, the chain still dropped the test.
     }
     snap.statsCollected = wantStats;
@@ -226,7 +211,7 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
             snap.visibleClusters = visible.value;
             snap.visibleFrame = visible.frame;
             snap.testedAtVisibleFrame = *tested;
-            if (const std::optional<std::uint64_t> hidden = fx::HiddenClusterCount(*tested, visible.value)) {
+            if (const std::optional<std::uint64_t> hidden = HiddenClusterCount(*tested, visible.value)) {
                 snap.hidden = *hidden;
                 snap.hiddenValid = true;
             }
@@ -238,22 +223,30 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
 void GpuDrivenSceneFeature::SceneCullPass(fx::OpaqueFrame& f)
 {
     const rg::ViewScope scope = f.Scope();
-    const bool sceneView = scope == rg::ViewScope::Secondary;
+    const bool secondary = scope == rg::ViewScope::Secondary;
     GpuDrivenSceneViewState& view = m_views.For(scope);
-    const std::uint64_t frameIndex = f.FrameIndex();
-    BeginFrame(frameIndex);
+    BeginFrame(f.FrameIndex());
 
     const GpuDrivenSceneSettings cfg = m_settings;
-    const fx::ClusterCamera live = fx::ClusterCameraOf(f.View());
-    const fx::ClusterCamera& cullCamera = CullCameraOf(view, cfg, sceneView, live, frameIndex);
+    const CullPlan plan = PlanCull(f, cfg, secondary);
 
     GpuDrivenSceneViewSnapshot& snap = view.snapshot;
-    const auto counts = f.LastSceneDrawCullCounts();
+    const fx::SceneCullCounts counts = f.LastSceneDrawCullCounts();
     snap.cpuTested = counts.tested;
     snap.cpuCulled = counts.culled;
     snap.cpuUnbounded = counts.unbounded;
-    snap.cpuCullRequested = ResolveViewCullTests(cfg, sceneView).frustum && cullCamera.valid
-        && f.CullSceneDraw(cullCamera.viewProjection, kCpuCullPadding);
+    snap.cullCamera = plan.source;
+
+    if (cfg.mode == CullMode::NoCull) {
+        snap.cpuCullState = CpuCullState::Off;
+    } else if (f.ViewCaptureArmed()) {
+        snap.cpuCullState = CpuCullState::SuppressedCapture;
+    } else if (plan.source == CullCameraSource::None) {
+        snap.cpuCullState = CpuCullState::NoCamera;
+    } else {
+        snap.cpuCullState = f.CullSceneDraw(plan.cull.viewProjection, kCpuCullPadding) ? CpuCullState::Active
+                                                                                         : CpuCullState::NoCamera;
+    }
 }
 
 void GpuDrivenSceneFeature::HizPass(fx::PostOpaqueFrame& f)

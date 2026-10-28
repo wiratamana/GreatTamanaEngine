@@ -4,14 +4,12 @@
 #include "../EditorCamera.h"
 #include "../EditorContext.h"
 #include "../SceneCameraFrustum.h"
+#include "../SceneOverlay.h"
 #include "../TransformGizmo.h"
-#include "../ViewCullOverlay.h"
-#include "ScenePanelCullView.h"
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
 #include "../../ECS/TransformHierarchy.h"
-#include "../../Core/FeatureKit/ViewCullLink.h"
 #include "../../Game/Game.h"
 
 #include <imgui.h>
@@ -85,7 +83,6 @@ void BuildCameraOverlay(
         overlay.hoverId = hover->id;
     }
     overlay.viewProjection = frame.viewProjection;
-    overlay.cull = ctx.viewCull ? &ctx.viewCull->report : nullptr;
 
     std::vector<OverlaySegment2D> segments;
     std::vector<OverlayQuad2D> quads;
@@ -106,7 +103,6 @@ void BuildScenePanel(
     const bool isVisible =
         ImGui::Begin("Scene", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     ctx.sceneViewVisible = isVisible;
-    ctx.cullViewUi.stale = false;
     ctx.sceneCamera.rendered = false;
 
     if (isVisible) {
@@ -167,12 +163,7 @@ void BuildScenePanel(
             // Switcher is drawn after the hover check (IsItemHovered() still means the image), before the gizmo.
             ImGui::SetCursorScreenPos(ImVec2(imageMin.x + 8.0f, imageMin.y + 8.0f));
             DrawGizmoOperationSwitcher(ctx.gizmoOperation);
-            const float switcherBottom = ImGui::GetItemRectMax().y;
-
-            // The cull box sits below the switcher row, right aligned, so Move/Rotate/Scale stay clickable at any width.
-            // It is drawn first so it blocks camera picking under it.
-            const bool overCullView = BuildScenePanelCullView(ctx, imageMin, imageSize, switcherBottom);
-            BuildCameraOverlay(registry, ctx, camera, imageMin, imageSize, hovered && !overCullView);
+            BuildCameraOverlay(registry, ctx, camera, imageMin, imageSize, hovered);
 
             // Gizmo for the selected entity; needs a live entity with a Transform.
             // Uses this Scene camera's view/projection, not the gameplay camera's.

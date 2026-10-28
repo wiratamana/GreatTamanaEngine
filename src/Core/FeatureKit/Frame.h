@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -155,6 +156,13 @@ public:
 
     // Cull counts of this view's scene draw in the previous frame; zeros before the first frame or when it did not run.
     SceneCullCounts LastSceneDrawCullCounts() const noexcept;
+
+    // Camera of the primary view, even when the primary view is not rendered this frame (then built from the active
+    // camera with `fallbackAspect`). Empty without an active camera or with a non-finite matrix.
+    std::optional<fx::View> PrimaryCamera(float fallbackAspect) const;
+
+    // True when this view's frame is being captured; per-view draw takeovers (cull, claim) are refused then.
+    bool ViewCaptureArmed() const noexcept;
 
     // A GPU-culled draw of cluster-ready meshes on lane `lane` of `state`. Inert in a shared frame, while a
     // capture is armed for the primary view, and while the state is invalid.

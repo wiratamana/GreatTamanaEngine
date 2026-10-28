@@ -386,10 +386,6 @@ module or adding a new endpoint:
   - `GET /scene_camera/state` lists the cameras of the Scene (entity, name, pose, lens, selected, apex screen
     position as fractions of the Scene image) and the segments of the selected camera frustum in image pixels.
     `pose` is the pose of the Scene fly camera (same shape as `/scene_camera/pose`, without `success`).
-    `cull_view` holds the numbers of the Scene cull view (`valid`, `rendered`, `stale`, `camera_valid`, `mode`,
-    `source`, `tested`, `visible`, `hidden`, `tested_at_visible_frame`, `counts_valid`, `occlusion`, `hiz_reason`,
-    `frozen`, `frozen_frame`, ...); it is only `{"valid":false}` while no feature is linked. `stale` is true when the
-    report did not move for 4 UI frames; `rendered` is then false.
   - `GET /scene_camera/pose` replies `{"success":true,"position":{"x","y","z"},"yaw_degrees","pitch_degrees"}`.
   - `GET /scene_camera/set_pose?x=&y=&z=&yaw=&pitch=` moves the Scene fly camera and replies the new pose. All five keys
     are required. `x y z` are world units (not pixels), angles are degrees. Yaw 0 looks +Z. Pitch +89 looks straight
@@ -401,7 +397,7 @@ module or adding a new endpoint:
     the camera it hits. Replies `{"success":true,"hit":bool,"entity"}`.
   - `GET /scene_camera/select?name=<entity name>` selects a Camera entity by name. `404` for an unknown name.
   - `GET /scene_camera/image[?overlay=true][&format=json]` returns a PNG of the Scene view only, with the camera
-    overlay drawn in (default on), plus the cyan outline of a frozen cull camera. `409` when the Scene view was not rendered.
+    overlay drawn in (default on). `409` when the Scene view was not rendered.
   - `503` when there is no editor; `504` when the main thread did not answer in time.
 - **`POST /exit`** closes the editor through the normal shutdown path (the process ends with exit code 0, a few frames
   after the reply). Reply `{"success":true,"message":"exit requested"}`. It is POST so a link prefetch cannot close the
@@ -822,16 +818,15 @@ registering a new named texture:
   pending; 504 when the main thread did not answer in time. A 504 request may still be applied later, so read the
   state before you repeat a `set`. Limits: `name` is required, a duplicate key is a 400, at most 64 arguments, a key
   up to 64 bytes, a value up to 256 bytes. A non-finite number is written as `null`. The Shadow endpoint is
-  described in `shadow-mapping.md`. The `GpuDrivenScene` endpoint settable keys are `enabled`, `frustum`, `cone`,
-  `occlusion`, `freezeCulling`, `collectStats`, `debugView` (`Off` or `ClusterId`) and the Scene-only keys `sceneCull`
-  (`FollowSettings`, `Off`, `Frustum`, `FrustumHiz`), `sceneCone`, `sceneSource` (`Live` or `Frozen`; `SceneCamera` is
-  a bad value) and `ghost` (`NotDrawn`). A bad value answers `<key> must be <allowed values>`. Actions: `reset_defaults`
-  (every setting back to its default except `freezeSerial`, so a later `freeze_here` still captures) and `freeze_here`
-  (captures the Scene cull camera again). Its state is
-  prefixed `game.` and `scene.` per view (`testedClusters`, `visibleClusters` and `visibleValid` (needs `collectStats`),
-  `testedAtVisibleFrame`, `hidden`, `hiddenValid`, `cameraValid`, `claimedEntities`, `occlusion`, `hizReason`,
-  `hizTrackingRequested` (this view asked for movement tracking last frame), `cullFrozenFrame`, `inertReason`,
-  `ledgerBytes`, ...) plus `sceneCullMode` and the read-only `freezeSerial`. `cameraValid` is the live camera of the
+  described in `shadow-mapping.md`. The `GpuDrivenScene` endpoint settable keys are `enabled`, `mode` (`NoCull`,
+  `Frustum` or `HiZ`), `cone`, `collectStats` and `debugView` (`Off` or `ClusterId`). A bad value answers
+  `<key> must be <allowed values>`; any other key answers `unknown key`. The only action is `reset_defaults`; any other
+  action answers `unknown action; supported: reset_defaults`. Its state is prefixed `game.` and `scene.` per view
+  (`testedClusters`, `visibleClusters` and `visibleValid` (needs `collectStats`), `testedAtVisibleFrame`, `hidden`,
+  `hiddenValid`, `cameraValid`, `claimedEntities`, `occlusion`, `hizReason`, `hizTrackingRequested` (this view asked for
+  movement tracking last frame), `inertReason`, `ledgerBytes`, ...) plus the CPU draw cull of the view: `cpuTested`,
+  `cpuCulled`, `cpuUnbounded` (one frame old), `cpuCullState` (`active`, `off`, `suppressed: frame capture` or
+  `no camera`), `cullCamera` and `hizSource` (`own`, `primary` or `none`). `cameraValid` is the live camera of the
   view. `hidden` is 0 while `hiddenValid` is false. `visibleAge` is `frameIndex - visibleFrame`, the frames since the
   visible count was read back; it is 0 when there is no count yet (`visibleFrame` 0).
 

@@ -147,5 +147,18 @@ TEST(SanitizeCullPaddingTest, ClampsToUnitRangeAndRejectsNonFinite)
     EXPECT_EQ(SanitizeCullPadding(std::numeric_limits<float>::infinity()), 0.0f);
 }
 
+TEST(PrimaryAspectFallbackTest, PrefersLastPrimaryThenCallerThenOne)
+{
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    EXPECT_EQ(PrimaryAspectFallback(2.0f, 1.5f), 2.0f);
+    EXPECT_EQ(PrimaryAspectFallback(0.0f, 1.5f), 1.5f);
+    EXPECT_EQ(PrimaryAspectFallback(nan, 1.5f), 1.5f);
+    EXPECT_EQ(PrimaryAspectFallback(-1.0f, 1.5f), 1.5f);
+    EXPECT_EQ(PrimaryAspectFallback(inf, 1.5f), 1.5f);
+    EXPECT_EQ(PrimaryAspectFallback(0.0f, 0.0f), 1.0f);
+    EXPECT_EQ(PrimaryAspectFallback(nan, inf), 1.0f);
+}
+
 } // namespace
 } // namespace gte

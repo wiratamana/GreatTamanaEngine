@@ -64,6 +64,16 @@ constexpr float SanitizeCullPadding(float padding) noexcept
     return padding > 1.0f ? 1.0f : padding;
 }
 
+// Aspect for a primary camera built without primary view data: the last primary aspect, else `callerAspect`, else 1.
+constexpr float PrimaryAspectFallback(float lastPrimaryAspect, float callerAspect) noexcept
+{
+    const auto usable = [](float aspect) { return aspect > 0.0f && aspect <= std::numeric_limits<float>::max(); };
+    if (usable(lastPrimaryAspect)) {
+        return lastPrimaryAspect;
+    }
+    return usable(callerAspect) ? callerAspect : 1.0f;
+}
+
 // True when every pass of the part's chain was declared.
 constexpr bool ClusterPartClaimable(const ClusterPartClaim& part) noexcept
 {

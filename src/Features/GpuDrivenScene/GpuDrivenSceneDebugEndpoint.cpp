@@ -22,7 +22,7 @@ constexpr std::array kScopes{
 };
 
 // State keys that cannot be set.
-constexpr std::array<std::string_view, 3> kReadOnlyKeys{ "supported", "sceneCullMode", "freezeSerial" };
+constexpr std::string_view kReadOnlyKey = "supported";
 
 std::int64_t Count(std::uint64_t value) noexcept
 {
@@ -40,10 +40,8 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDriv
     const auto text = [](std::string_view s) { return std::string(s); };
     Add(out, key("rendered"), v.rendered);
     Add(out, key("frameIndex"), Count(v.frameIndex));
-    Add(out, key("frozen"), v.frozen);
-    Add(out, key("cullFrozenFrame"), Count(v.frozenFrame));
-    Add(out, key("occlusion"), text(fx::EnumName(fx::kOcclusionStateTable, v.occlusion)));
-    Add(out, key("hizReason"), text(fx::EnumName(fx::kHizReasonTable, v.hizReason)));
+    Add(out, key("occlusion"), text(fx::EnumName(kOcclusionStateTable, v.occlusion)));
+    Add(out, key("hizReason"), text(fx::EnumName(kHizReasonTable, v.hizReason)));
     Add(out, key("inertReason"), text(fx::ClusterInertReasonName(v.inertReason)));
     Add(out, key("lastRefusalReason"), v.refusal);
     Add(out, key("claimedEntities"), Count(v.claimedEntities));
@@ -60,6 +58,12 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDriv
     Add(out, key("cameraValid"), v.cameraValid);
     Add(out, key("hizTrackingRequested"), v.hizTrackingRequested);
     Add(out, key("ledgerBytes"), Count(v.ledgerBytes));
+    Add(out, key("cpuTested"), Count(v.cpuTested));
+    Add(out, key("cpuCulled"), Count(v.cpuCulled));
+    Add(out, key("cpuUnbounded"), Count(v.cpuUnbounded));
+    Add(out, key("cpuCullState"), text(fx::EnumName(kCpuCullStateTable, v.cpuCullState)));
+    Add(out, key("cullCamera"), text(fx::EnumName(kCullCameraSourceTable, v.cullCamera)));
+    Add(out, key("hizSource"), text(fx::EnumName(kCullCameraSourceTable, v.hizSource)));
 }
 
 fx::FeatureDebugResult Fail(std::string key, std::string message)
@@ -73,8 +77,7 @@ fx::FeatureDebugResult Fail(std::string key, std::string message)
 
 bool IsReadOnlyKey(std::string_view key) noexcept
 {
-    return key.starts_with("game.") || key.starts_with("scene.")
-        || std::find(kReadOnlyKeys.begin(), kReadOnlyKeys.end(), key) != kReadOnlyKeys.end();
+    return key.starts_with("game.") || key.starts_with("scene.") || key == kReadOnlyKey;
 }
 
 } // namespace
@@ -84,18 +87,10 @@ fx::FeatureDebugResult GpuDrivenSceneDebugEndpoint::GetState() const
     fx::FeatureDebugResult out;
     const GpuDrivenSceneSettings& s = m_feature.Settings();
     Add(out, "enabled", s.enabled);
-    Add(out, "frustum", s.frustum);
+    Add(out, "mode", std::string(fx::EnumName(kCullModeTable, s.mode)));
     Add(out, "cone", s.cone);
-    Add(out, "occlusion", s.occlusion);
-    Add(out, "freezeCulling", s.freezeCulling);
     Add(out, "collectStats", s.collectStats);
     Add(out, "debugView", std::string(fx::EnumName(kGpuDrivenSceneDebugViewTable, s.debugView)));
-    Add(out, "sceneCull", std::string(fx::EnumName(fx::kViewCullChoiceTable, s.sceneCull)));
-    Add(out, "sceneCullMode", std::string(fx::EnumName(fx::kViewCullModeTable, CullModeOf(ResolveViewCullTests(s, true)))));
-    Add(out, "sceneCone", s.sceneCone);
-    Add(out, "sceneSource", std::string(fx::EnumName(fx::kViewCullSourceTable, s.sceneSource)));
-    Add(out, "freezeSerial", Count(s.freezeSerial));
-    Add(out, "ghost", std::string(fx::EnumName(fx::kGhostStyleTable, s.ghost)));
     Add(out, "supported", m_feature.Supported());
     for (const ScopeName& scope : kScopes) {
         AddView(out, scope.prefix, m_feature.Snapshot(scope.scope));
@@ -105,7 +100,7 @@ fx::FeatureDebugResult GpuDrivenSceneDebugEndpoint::GetState() const
 
 fx::FeatureDebugResult GpuDrivenSceneDebugEndpoint::Set(std::span<const fx::FeatureDebugArg> args)
 {
-    GpuDrivenSceneSettings candidate = m_feature.EditableSettings();
+    GpuDrivenSceneSettings candidate = m_feature.Settings();
     for (const fx::FeatureDebugArg& arg : args) {
         switch (ApplyGpuDrivenSceneSetting(candidate, arg.key, arg.value)) {
         case GpuDrivenSceneSetResult::Applied: break;
@@ -123,23 +118,16 @@ fx::FeatureDebugResult GpuDrivenSceneDebugEndpoint::Set(std::span<const fx::Feat
 
 fx::FeatureDebugResult GpuDrivenSceneDebugEndpoint::Invoke(std::string_view action, std::span<const fx::FeatureDebugArg> args)
 {
-    const bool reset = action == "reset_defaults";
-    if (!reset && action != "freeze_here") {
+    if (action != "reset_defaults") {
         fx::FeatureDebugResult result;
         result.ok = false;
-        result.message = "unknown action; supported: reset_defaults, freeze_here";
+        result.message = "unknown action; supported: reset_defaults";
         return result;
     }
     if (!args.empty()) {
         return Fail(args.front().key, std::string(action) + " takes no arguments");
     }
-    GpuDrivenSceneSettings settings = m_feature.EditableSettings();
-    if (reset) {
-        settings = DefaultsKeepingSerial(settings);
-    } else {
-        FreezeSceneCullHere(settings);
-    }
-    m_feature.ApplySettings(settings);
+    m_feature.ApplySettings(GpuDrivenSceneSettings{});
     return GetState();
 }
 

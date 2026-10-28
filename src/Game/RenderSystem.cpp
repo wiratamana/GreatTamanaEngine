@@ -37,6 +37,17 @@ std::vector<DrawCommand> RenderSystem::CollectRenderables(Registry& registry)
     return commands;
 }
 
+bool RenderSystem::HasActiveCamera(Registry& registry) noexcept
+{
+    ComponentStorage<Camera>& cameras = registry.Storage<Camera>();
+    for (std::size_t i = 0; i < cameras.Size(); ++i) {
+        if (cameras.ComponentAt(i).active) {
+            return true;
+        }
+    }
+    return false;
+}
+
 Mat4 RenderSystem::ResolveActiveCameraViewProjection(Registry& registry, float aspectWidthOverHeight)
 {
     ComponentStorage<Camera>& cameras = registry.Storage<Camera>();

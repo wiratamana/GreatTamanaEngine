@@ -32,6 +32,7 @@
 #include "ScreenPostProcessPassPriorityAssignment.h"
 #include "Plugins/IPluginCapabilityOrchestrator.h"
 #include "Plugins/RenderFeatureCompositor.h"
+#include "Plugins/RenderFeatureCameraData.h"
 #include "Plugins/ProjectAssemblyRegistrationLedger.h"
 #include "ViewBackgroundReplayKey.h"
 
@@ -445,6 +446,37 @@ SceneCullCounts Core::LastSceneDrawCullCounts(rg::ViewScope scope, std::uint64_t
     }
     const SceneCullResult& last = m_sceneCullCountsLast[rg::ViewScopeIndex(scope)];
     return last.valid && SceneCullCountsFresh(last.frameIndex, currentFrameIndex) ? last.counts : SceneCullCounts{};
+}
+
+std::optional<fx::View> Core::PrimaryCameraView(float fallbackAspect)
+{
+    Registry& registry = m_game.GetRegistry();
+    // Without an active camera the matrix is identity, which must never pass as a camera.
+    if (!RenderSystem::HasActiveCamera(registry)) {
+        return std::nullopt;
+    }
+
+    fx::View view;
+    view.scope = rg::ViewScope::Primary;
+    const rg::RenderViewId primaryId = rg::RenderViewId::Named(kPrimaryViewName);
+    if (const RenderPassViewData* data = FindViewData(primaryId)) {
+        const RenderFeatureCameraData camera = ResolveRenderFeatureCameraData(primaryId, data);
+        if (data->renderTexture != nullptr) {
+            view.extent = data->renderTexture->Extent();
+        }
+        view.eye = camera.eyeWorldPosition;
+        view.viewProjection = data->viewProjection;
+        view.invViewProjection = camera.invViewProjection;
+        view.invViewProjectionValid = camera.invViewProjectionValid;
+    } else {
+        view.eye = RenderSystem::ResolveActiveCameraWorldPosition(registry);
+        view.viewProjection = RenderSystem::ResolveActiveCameraViewProjection(
+            registry, PrimaryAspectFallback(m_lastPrimaryAspect, fallbackAspect));
+    }
+    if (!IsFiniteMatrix(view.viewProjection)) {
+        return std::nullopt;
+    }
+    return view;
 }
 
 const Mesh* Core::ResolveClusterMesh(fx::MeshToken token)
@@ -1167,6 +1199,7 @@ void Core::BuildFrame()
                         frame.activeViews.push_back(rg::RenderViewId::Named(kPrimaryViewName));
                         m_currentFrameDebuggerCaptureForOffscreenPipeline = frameDebuggerCapture;
                         primaryAspectForReplay = aspect;
+                        m_lastPrimaryAspect = aspect;
                     }
 
                     // Set up the secondary view.

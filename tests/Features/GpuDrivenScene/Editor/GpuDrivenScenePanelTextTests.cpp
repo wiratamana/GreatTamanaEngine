@@ -1,0 +1,104 @@
+// Panel text of the culling feature.
+
+#include "Features/GpuDrivenScene/Editor/GpuDrivenScenePanelText.h"
+
+#include <gtest/gtest.h>
+
+namespace gte {
+namespace {
+
+GpuDrivenSceneSettings Hiz()
+{
+    GpuDrivenSceneSettings s;
+    s.mode = CullMode::HiZ;
+    return s;
+}
+
+TEST(GpuDrivenScenePanelTextTest, EveryModeHasALine)
+{
+    for (const auto& entry : kCullModeTable) {
+        EXPECT_FALSE(CullModeLine(entry.value).empty());
+    }
+}
+
+TEST(GpuDrivenScenePanelTextTest, NoGpuPathLineOnlyForHizWithCpuMeshesAndNoClaims)
+{
+    GpuDrivenSceneViewSnapshot v;
+    v.cpuTested = 5;
+    v.claimedEntities = 0;
+    EXPECT_FALSE(NoGpuPathLine(Hiz(), v).empty());
+
+    GpuDrivenSceneSettings frustum;
+    EXPECT_TRUE(NoGpuPathLine(frustum, v).empty());
+
+    v.claimedEntities = 1;
+    EXPECT_TRUE(NoGpuPathLine(Hiz(), v).empty());
+
+    v.claimedEntities = 0;
+    v.cpuTested = 0;
+    EXPECT_TRUE(NoGpuPathLine(Hiz(), v).empty());
+}
+
+TEST(GpuDrivenScenePanelTextTest, CpuCullStateLines)
+{
+    GpuDrivenSceneViewSnapshot v;
+    v.cpuCullState = CpuCullState::Active;
+    EXPECT_TRUE(CpuCullStateLine(v).empty());
+    v.cpuCullState = CpuCullState::SuppressedCapture;
+    EXPECT_EQ(CpuCullStateLine(v), "CPU cull suppressed: frame capture");
+    v.cpuCullState = CpuCullState::NoCamera;
+    EXPECT_EQ(CpuCullStateLine(v), "CPU cull: no camera");
+    v.cpuCullState = CpuCullState::Off;
+    EXPECT_EQ(CpuCullStateLine(v), "CPU cull: off");
+}
+
+TEST(GpuDrivenScenePanelTextTest, HizLineSaysWhySecondaryHasNoPyramid)
+{
+    GpuDrivenSceneViewSnapshot v;
+    v.occlusion = OcclusionState::Unusable;
+    v.hizReason = HizReason::Unavailable;
+    EXPECT_EQ(HizLine(v, true), "Hi-Z: shared pyramid not available (acts as Frustum)");
+    EXPECT_EQ(HizLine(v, false), "Hi-Z: off (not available)");
+
+    v.occlusion = OcclusionState::Applied;
+    EXPECT_EQ(HizLine(v, false), "Hi-Z: active");
+    v.occlusion = OcclusionState::NoCullCamera;
+    EXPECT_EQ(HizLine(v, false), "Hi-Z: no cull camera");
+    v.occlusion = OcclusionState::NotRequested;
+    EXPECT_EQ(HizLine(v, false), "Hi-Z: off");
+}
+
+TEST(GpuDrivenScenePanelTextTest, CullCameraLine)
+{
+    GpuDrivenSceneViewSnapshot v;
+    v.cullCamera = CullCameraSource::Own;
+    EXPECT_EQ(CullCameraLine({}, v), "Cull camera: own");
+    v.cullCamera = CullCameraSource::Primary;
+    EXPECT_EQ(CullCameraLine({}, v), "Cull camera: game camera");
+    v.cullCamera = CullCameraSource::None;
+    EXPECT_EQ(CullCameraLine({}, v), "Cull camera: none (no active camera)");
+    GpuDrivenSceneSettings off;
+    off.mode = CullMode::NoCull;
+    EXPECT_EQ(CullCameraLine(off, v), "Cull camera: none (culling is off)");
+}
+
+TEST(GpuDrivenScenePanelTextTest, CountLines)
+{
+    GpuDrivenSceneViewSnapshot v;
+    v.claimedEntities = 3;
+    v.testedClusters = 40;
+    EXPECT_EQ(GpuPathLine(v), "GPU path: 3 entities, 40 clusters tested, stats are off");
+    v.statsCollected = true;
+    EXPECT_EQ(GpuPathLine(v), "GPU path: 3 entities, 40 clusters tested, visible count not ready");
+    v.visibleValid = true;
+    v.visibleClusters = 12;
+    EXPECT_EQ(GpuPathLine(v), "GPU path: 3 entities, 40 clusters tested, 12 visible");
+
+    v.cpuTested = 7;
+    v.cpuCulled = 2;
+    v.cpuUnbounded = 1;
+    EXPECT_EQ(CpuPathLine(v), "CPU path: 7 tested, 2 culled, 1 kept without bounds (last frame)");
+}
+
+} // namespace
+} // namespace gte

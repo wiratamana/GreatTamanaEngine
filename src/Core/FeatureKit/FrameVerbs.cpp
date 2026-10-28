@@ -2,6 +2,7 @@
 
 #include "ComputeShader.h"
 #include "VerbSupport.h"
+#include "../ClusterClaim.h"
 #include "../Core.h"
 #include "../../Renderer/RenderGraph/Shader.h"
 #include "../Logging.h"
@@ -79,6 +80,22 @@ SceneCullCounts Frame::LastSceneDrawCullCounts() const noexcept
     }
     const gte::SceneCullCounts counts = m_context->core->LastSceneDrawCullCounts(m_view.scope, FrameIndex());
     return SceneCullCounts{ counts.tested, counts.culled, counts.unbounded };
+}
+
+std::optional<fx::View> Frame::PrimaryCamera(float fallbackAspect) const
+{
+    if (m_context == nullptr || m_context->core == nullptr) {
+        return std::nullopt;
+    }
+    return m_context->core->PrimaryCameraView(fallbackAspect);
+}
+
+bool Frame::ViewCaptureArmed() const noexcept
+{
+    if (m_context == nullptr || m_context->core == nullptr) {
+        return false;
+    }
+    return !SceneCullAllowed(ClusterClaimContext{ m_view.scope, m_context->core->CaptureArmedThisFrame() });
 }
 
 bool Frame::ShaderReady(ComputeShader& shader)

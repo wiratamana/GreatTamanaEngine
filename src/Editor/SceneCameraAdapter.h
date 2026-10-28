@@ -6,19 +6,11 @@
 
 namespace gte {
 
-namespace fx {
-struct ViewCullReport;
-}
-
 class Registry;
 class Renderer;
 class RenderTexture;
 class EditorCamera;
 struct EditorContext;
-
-// The HTTP view of a cull report. Counts that cannot be paired in time are reported invalid.
-// A stale report is never shown as rendered.
-SceneCameraCullView MakeSceneCameraCullView(const fx::ViewCullReport& report, bool stale);
 
 class SceneCameraAdapter final : public ISceneCameraControl {
 public:

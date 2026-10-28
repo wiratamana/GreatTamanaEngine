@@ -3,8 +3,7 @@
 #include "CameraFrustumOverlay.h"
 #include "EditorContext.h"
 #include "EditorCamera.h"
-#include "ViewCullOverlay.h"
-#include "../Core/FeatureKit/ViewCullLink.h"
+#include "SceneOverlay.h"
 #include "../ECS/Components/Camera.h"
 #include "../ECS/Components/Name.h"
 #include "../ECS/Registry.h"
@@ -46,40 +45,9 @@ void SceneCameraAdapter::BeginFrame(
     m_camera = &camera;
 }
 
-SceneCameraCullView MakeSceneCameraCullView(const fx::ViewCullReport& r, bool stale)
-{
-    SceneCameraCullView v;
-    v.valid = r.valid;
-    v.rendered = r.rendered && !stale;
-    v.stale = stale;
-    v.featureEnabled = r.featureEnabled;
-    v.cameraValid = r.cameraValid;
-    v.frame = r.frame;
-    v.choice = std::string(fx::EnumName(fx::kViewCullChoiceTable, r.choice));
-    v.mode = std::string(fx::EnumName(fx::kViewCullModeTable, r.mode));
-    v.source = std::string(fx::EnumName(fx::kViewCullSourceTable, r.source));
-    v.cone = r.cone;
-    v.tested = r.tested;
-    v.testedAtVisibleFrame = r.testedAtVisibleFrame;
-    v.visible = r.visible;
-    v.hidden = r.hidden;
-    v.visibleValid = r.visibleValid && r.hiddenValid;
-    v.claimedInstances = r.claimedInstances;
-    v.occlusion = std::string(fx::EnumName(fx::kOcclusionStateTable, r.occlusion));
-    v.hizReason = std::string(fx::EnumName(fx::kHizReasonTable, r.hizReason));
-    v.frozen = r.frozen;
-    v.frozenFrame = r.frozenFrame;
-    v.inertReason = std::string(fx::ClusterInertReasonName(r.inertReason));
-    v.refused = r.refused;
-    return v;
-}
-
 SceneCameraReport SceneCameraAdapter::Report() const
 {
     SceneCameraReport report;
-    if (m_ctx != nullptr && m_ctx->viewCull) {
-        report.cullView = MakeSceneCameraCullView(m_ctx->viewCull->report, m_ctx->cullViewUi.stale);
-    }
     if (m_camera != nullptr) {
         const Vec3& position = m_camera->GetTransform().position;
         report.pose.position[0] = position.x;
@@ -217,7 +185,6 @@ std::optional<ClusterViewerImage> SceneCameraAdapter::CaptureImage(bool overlay)
         input.candidates = frame.candidates;
         input.selectedId = frame.selectedId;
         input.viewProjection = frame.viewProjection;
-        input.cull = m_ctx->viewCull ? &m_ctx->viewCull->report : nullptr;
         const Vec2 imageMax(static_cast<float>(image.pixels.width), static_cast<float>(image.pixels.height));
         AppendSceneOverlay(input, Vec2::Zero(), imageMax, image.overlay, image.overlayQuads);
     }
