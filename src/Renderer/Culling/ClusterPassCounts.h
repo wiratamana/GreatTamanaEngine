@@ -8,7 +8,8 @@ namespace gte {
 
 // A colour view runs one lane per occlusion phase.
 inline constexpr std::uint32_t kMainViewLanes = 2;
-inline constexpr std::uint32_t kMainViewPartSlots = 8;
+// One slot per (mesh, material) part of a colour view.
+inline constexpr std::uint32_t kMainViewPartSlots = 12;
 inline constexpr std::uint32_t kDepthOnlyLanes = 4;
 inline constexpr std::uint32_t kDepthOnlyPartSlots = 4;
 

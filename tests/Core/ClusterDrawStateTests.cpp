@@ -274,7 +274,9 @@ TEST(ClusterDrawStateTests, StateBudgetThenProcessCeiling)
 TEST(ClusterDrawStateTests, TheMainViewRunsOneLanePerPhaseAndStaysInsideTheGpuRecordBudget)
 {
     EXPECT_EQ(kMainViewLanes, 2u);
-    EXPECT_EQ(kClusterPassNameCount, 2u * 8u * 6u + 4u * 4u * 3u);
+    EXPECT_EQ(kMainViewPartSlots, 12u);
+    EXPECT_EQ(kClusterPassNameCount, 2u * 12u * 6u + 4u * 4u * 3u);
+    EXPECT_EQ(kGpuBaseRecordCount + 2 * kClusterPassNameCount + kHizPassCount, 450u);
     EXPECT_LE(kGpuBaseRecordCount + 2 * kClusterPassNameCount + kHizPassCount, kGpuRecordBudgetSynchronous);
 
     ClusterDrawState state("TestMainShape", { kMainViewLanes, kMainViewPartSlots });

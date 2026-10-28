@@ -14,18 +14,22 @@
 
 namespace gte::fx {
 
-// All candidates of one mesh, as indices into the candidate span.
+// All candidates of one part (one mesh, and one material for a lit colour draw), as indices into the candidate span.
 struct ClusterMeshGroup {
     MeshToken mesh;
+    MaterialToken material; // Zero when the group is not split by material.
+    ClusterMaterialKind kind = ClusterMaterialKind::None;
     std::vector<std::uint32_t> instances;
 };
 
-// Groups candidates by mesh. Groups appear in order of first use; instances keep their order.
-std::vector<ClusterMeshGroup> GroupInstancesByMesh(std::span<const ClusterInstance> candidates);
+// Groups candidates by mesh, or by (mesh, material) when `splitByMaterial`. Groups appear in order of first use;
+// instances keep their order. A group takes the kind of its first instance.
+std::vector<ClusterMeshGroup> GroupInstances(std::span<const ClusterInstance> candidates, bool splitByMaterial);
 
 // Size of one part, for slot assignment.
 struct ClusterPartSize {
     MeshToken mesh;
+    MaterialToken material;
     std::uint64_t instanceCount = 0;
     std::uint64_t clusterCount = 0;
 };
@@ -36,7 +40,7 @@ struct ClusterSlotAssignment {
     std::vector<std::uint32_t> dropped;
 };
 
-// Slots go to the parts with the most work items first. Ties are broken by mesh token.
+// Slots go to the parts with the most work items first. Ties are broken by mesh token, then material token.
 ClusterSlotAssignment AssignClusterPartSlots(std::span<const ClusterPartSize> parts, std::uint32_t slotCount);
 
 // Last step of a part's chain that was declared. Round 1 is Reset1..Draw1, round 2 is Reset2..Draw2.

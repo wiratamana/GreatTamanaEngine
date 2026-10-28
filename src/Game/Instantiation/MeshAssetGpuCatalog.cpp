@@ -195,6 +195,7 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
         MaterialTextureHandle texture;
         std::string name;
         bool alphaTested = false;
+        std::size_t clusterSliceIndex = 0; // Position of this slice in `clusterSlices`.
     };
     std::vector<TexturedSlice> texturedSlices;
     std::vector<ClusterSliceRange> clusterSlices; // keep = the slice joins the untextured part.
@@ -224,7 +225,8 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
         clusterSlices.push_back(ClusterSliceRange{ static_cast<std::uint32_t>(slice.start),
             static_cast<std::uint32_t>(slice.count), !texture.IsValid() });
         if (texture.IsValid()) {
-            texturedSlices.push_back(TexturedSlice{ slice.start, slice.count, texture, slice.name, alphaTested });
+            texturedSlices.push_back(TexturedSlice{
+                slice.start, slice.count, texture, slice.name, alphaTested, clusterSlices.size() - 1 });
         } else {
             // No material, or a non-glTF material without a usable texture: flat neutral grey.
             untexturedIndices.insert(untexturedIndices.end(), mesh->indices.begin() + static_cast<std::ptrdiff_t>(slice.start),
@@ -295,6 +297,16 @@ const std::vector<MeshAssetPart>& MeshAssetGpuCatalog::EnsureMeshAsset(
             // Skinned meshes carry no bounds: their vertices change at runtime.
             if (const std::optional<AABB> bounds = PartLocalBounds(skinned, mesh->positions, sliceIndices)) {
                 gpuMesh.SetLocalBounds(*bounds);
+            }
+            // Only an opaque static slice joins the cluster path: a skinned one changes every frame and an
+            // alpha-tested one needs its texture in the depth pass.
+            if (!skinned && !slice.alphaTested && !mesh->clusters.empty()) {
+                std::vector<ClusterSliceRange> ownSlice = clusterSlices;
+                for (ClusterSliceRange& range : ownSlice) {
+                    range.keep = false;
+                }
+                ownSlice[slice.clusterSliceIndex].keep = true;
+                AttachClusterTable(gpuMesh, renderer, absoluteGtaPath, mesh->clusters, ownSlice, sliceIndices.size());
             }
             const MeshHandle handle = RegisterOwnedMesh(renderSystem, std::move(gpuMesh));
             MeshAssetPart part{ handle, slice.texture, slice.name };

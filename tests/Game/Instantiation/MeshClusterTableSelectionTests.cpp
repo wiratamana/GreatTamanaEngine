@@ -47,6 +47,31 @@ TEST(MeshClusterTableSelection, DroppedSliceRebasesFollowingOffsets)
     EXPECT_EQ((*table)[1].firstIndex, 3u);
 }
 
+// A textured slice keeps only its own clusters, rebased to the slice's own index buffer.
+TEST(MeshClusterTableSelection, EachSingleSliceOfTwoGetsItsOwnRebasedTable)
+{
+    const std::vector<MeshCluster> clusters = { MakeCluster(0, 6), MakeCluster(6, 3), MakeCluster(9, 6), MakeCluster(15, 3) };
+    std::vector<ClusterSliceRange> slices = { { 0, 9, false }, { 9, 9, false } };
+
+    std::string why;
+    slices[0].keep = true;
+    const auto first = SelectClusterTableForKeptSlices(clusters, slices, 9, kLimit, &why);
+    ASSERT_TRUE(first.has_value()) << why;
+    ASSERT_EQ(first->size(), 2u);
+    EXPECT_EQ((*first)[0].firstIndex, 0u);
+    EXPECT_EQ((*first)[1].firstIndex, 6u);
+
+    slices[0].keep = false;
+    slices[1].keep = true;
+    const auto second = SelectClusterTableForKeptSlices(clusters, slices, 9, kLimit, &why);
+    ASSERT_TRUE(second.has_value()) << why;
+    ASSERT_EQ(second->size(), 2u);
+    EXPECT_EQ((*second)[0].firstIndex, 0u);
+    EXPECT_EQ((*second)[0].indexCount, 6u);
+    EXPECT_EQ((*second)[1].firstIndex, 6u);
+    EXPECT_EQ((*second)[1].indexCount, 3u);
+}
+
 TEST(MeshClusterTableSelection, ClusterStraddlingSliceEdgeIsRefused)
 {
     const std::vector<MeshCluster> clusters = { MakeCluster(0, 12) };

@@ -105,6 +105,16 @@ TEST(GpuDrivenScenePanelTextTest, CountLines)
     EXPECT_EQ(CpuPathLine(v), "CPU path: 7 tested, 2 culled, 1 kept without bounds (last frame)");
 }
 
+TEST(GpuDrivenScenePanelTextTest, CpuReasonsLineNamesOnlyTheNonZeroReasons)
+{
+    GpuDrivenSceneViewSnapshot v;
+    EXPECT_TRUE(CpuReasonsLine(v).empty());
+    v.gpu.cpuPath.skinned = 2;
+    v.gpu.cpuPath.noSlot = 5;
+    const std::string line = CpuReasonsLine(v);
+    EXPECT_EQ(line, "On the CPU path (no Hi-Z): 5 without a free part slot, 2 skinned");
+}
+
 TEST(GpuDrivenScenePanelTextTest, HelpLineMentionsMillisecondsAndNoVsync)
 {
     const std::string_view help = CullHelpLine();

@@ -126,8 +126,9 @@ ClusterImportOutcome RunClusterStep(MeshData& mesh, const RigFileData& rig, cons
         if (mesh.indices.size() / 3 < options.autoTriangleThreshold) {
             return outcome;
         }
-        if (AnyMaterialDrawsTextured(rig.materials.materials)) {
-            outcome.message = "Clusters skipped: a material is textured or uses PBR shading (use mode Always).";
+        // Only the Exact weld keeps uvs and tangents intact; a textured mesh is never position-welded.
+        if (options.cluster.weld != ClusterWeldMode::Exact && AnyMaterialDrawsTextured(rig.materials.materials)) {
+            outcome.message = "Clusters skipped: a textured or PBR material needs the Exact weld.";
             return outcome;
         }
     }

@@ -23,11 +23,15 @@ Entity MakeEntity(std::uint32_t index)
     return e;
 }
 
-ClusterInstance MakeInstance(std::uint32_t entity, std::uint32_t meshIndex)
+ClusterInstance MakeInstance(std::uint32_t entity, std::uint32_t meshIndex, std::uint32_t materialIndex = 0)
 {
     ClusterInstance instance;
     instance.entity = MakeEntity(entity);
     instance.mesh = MeshToken{ meshIndex, 1 };
+    if (materialIndex != 0) {
+        instance.material = MaterialToken{ materialIndex, 1 };
+        instance.kind = ClusterMaterialKind::Textured;
+    }
     return instance;
 }
 
@@ -35,7 +39,7 @@ TEST(ClusterPartPlanningTest, GroupingKeepsFirstUseOrderAndInstanceOrder)
 {
     const std::array<ClusterInstance, 5> candidates = { MakeInstance(1, 7), MakeInstance(2, 3), MakeInstance(3, 7),
         MakeInstance(4, 3), MakeInstance(5, 9) };
-    const std::vector<ClusterMeshGroup> groups = GroupInstancesByMesh(candidates);
+    const std::vector<ClusterMeshGroup> groups = GroupInstances(candidates, false);
     ASSERT_EQ(groups.size(), 3u);
     EXPECT_EQ(groups[0].mesh.index, 7u);
     EXPECT_EQ(groups[1].mesh.index, 3u);
@@ -44,23 +48,54 @@ TEST(ClusterPartPlanningTest, GroupingKeepsFirstUseOrderAndInstanceOrder)
     EXPECT_EQ(groups[1].instances, (std::vector<std::uint32_t>{ 1, 3 }));
 }
 
+TEST(ClusterPartPlanningTest, GroupingSplitsByMaterialOnlyWhenAsked)
+{
+    const std::array<ClusterInstance, 4> candidates = { MakeInstance(1, 7, 2), MakeInstance(2, 7, 3),
+        MakeInstance(3, 7, 2), MakeInstance(4, 8, 2) };
+
+    const std::vector<ClusterMeshGroup> split = GroupInstances(candidates, true);
+    ASSERT_EQ(split.size(), 3u);
+    EXPECT_EQ(split[0].material.index, 2u);
+    EXPECT_EQ(split[0].kind, ClusterMaterialKind::Textured);
+    EXPECT_EQ(split[0].instances, (std::vector<std::uint32_t>{ 0, 2 }));
+    EXPECT_EQ(split[1].material.index, 3u);
+    EXPECT_EQ(split[2].mesh.index, 8u);
+
+    const std::vector<ClusterMeshGroup> merged = GroupInstances(candidates, false);
+    ASSERT_EQ(merged.size(), 2u);
+    EXPECT_FALSE(merged[0].material.IsValid());
+    EXPECT_EQ(merged[0].kind, ClusterMaterialKind::Textured);
+    EXPECT_EQ(merged[0].instances, (std::vector<std::uint32_t>{ 0, 1, 2 }));
+}
+
 TEST(ClusterPartPlanningTest, SlotsGoToTheMostWorkFirstAndTiesGoToTheLowerToken)
 {
+    const MaterialToken none;
     const std::array<ClusterPartSize, 4> parts = {
-        ClusterPartSize{ MeshToken{ 5, 1 }, 2, 10 }, // 20
-        ClusterPartSize{ MeshToken{ 4, 1 }, 1, 20 }, // 20, lower token than the first
-        ClusterPartSize{ MeshToken{ 6, 1 }, 100, 1 }, // 100
-        ClusterPartSize{ MeshToken{ 7, 1 }, 1, 1 }, // 1
+        ClusterPartSize{ MeshToken{ 5, 1 }, none, 2, 10 }, // 20
+        ClusterPartSize{ MeshToken{ 4, 1 }, none, 1, 20 }, // 20, lower token than the first
+        ClusterPartSize{ MeshToken{ 6, 1 }, none, 100, 1 }, // 100
+        ClusterPartSize{ MeshToken{ 7, 1 }, none, 1, 1 }, // 1
     };
     const ClusterSlotAssignment assignment = AssignClusterPartSlots(parts, 3);
     EXPECT_EQ(assignment.assigned, (std::vector<std::uint32_t>{ 2, 1, 0 }));
     EXPECT_EQ(assignment.dropped, (std::vector<std::uint32_t>{ 3 }));
 }
 
+TEST(ClusterPartPlanningTest, PartsOfOneMeshTieOnTheLowerMaterial)
+{
+    const std::array<ClusterPartSize, 2> parts = { ClusterPartSize{ MeshToken{ 5, 1 }, MaterialToken{ 9, 1 }, 1, 4 },
+        ClusterPartSize{ MeshToken{ 5, 1 }, MaterialToken{ 2, 1 }, 1, 4 } };
+    const ClusterSlotAssignment assignment = AssignClusterPartSlots(parts, 1);
+    EXPECT_EQ(assignment.assigned, (std::vector<std::uint32_t>{ 1 }));
+    EXPECT_EQ(assignment.dropped, (std::vector<std::uint32_t>{ 0 }));
+}
+
 TEST(ClusterPartPlanningTest, NoSlotsDropsEveryPart)
 {
-    const std::array<ClusterPartSize, 2> parts = { ClusterPartSize{ MeshToken{ 1, 1 }, 1, 1 },
-        ClusterPartSize{ MeshToken{ 2, 1 }, 1, 1 } };
+    const MaterialToken none;
+    const std::array<ClusterPartSize, 2> parts = { ClusterPartSize{ MeshToken{ 1, 1 }, none, 1, 1 },
+        ClusterPartSize{ MeshToken{ 2, 1 }, none, 1, 1 } };
     const ClusterSlotAssignment assignment = AssignClusterPartSlots(parts, 0);
     EXPECT_TRUE(assignment.assigned.empty());
     EXPECT_EQ(assignment.dropped.size(), 2u);

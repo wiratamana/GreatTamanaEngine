@@ -30,14 +30,23 @@ ClusterCandidateInput Eligible(std::uint32_t index)
     in.world = Mat4::Identity();
     in.meshHasClusters = true;
     in.meshHasIndexBuffer = true;
-    in.pipelineUntextured = true;
+    in.layout = VertexLayout::PositionNormal;
     in.gpuSkinned = false;
     return in;
 }
 
-std::vector<fx::ClusterInstance> Select(const std::vector<ClusterCandidateInput>& inputs, bool caps = true)
+ClusterCandidateInput EligibleTextured(std::uint32_t index, VertexLayout layout = VertexLayout::PositionNormalUv)
 {
-    return SelectClusterCandidates(inputs, caps);
+    ClusterCandidateInput in = Eligible(index);
+    in.layout = layout;
+    in.material = fx::MaterialToken{ index + 100, 1 };
+    return in;
+}
+
+std::vector<fx::ClusterInstance> Select(
+    const std::vector<ClusterCandidateInput>& inputs, bool caps = true, fx::ClusterRejectCounts* rejected = nullptr)
+{
+    return SelectClusterCandidates(inputs, caps, rejected);
 }
 
 TEST(ClusterCandidatesTests, AllClausesMetGivesOneInstance)
@@ -46,6 +55,8 @@ TEST(ClusterCandidatesTests, AllClausesMetGivesOneInstance)
     ASSERT_EQ(result.size(), 1u);
     EXPECT_EQ(result[0].entity, MakeEntity(1));
     EXPECT_EQ(result[0].mesh, (fx::MeshToken{ 1, 1 }));
+    EXPECT_EQ(result[0].kind, ClusterMaterialKind::None);
+    EXPECT_FALSE(result[0].material.IsValid());
     EXPECT_FLOAT_EQ(result[0].maxScale, 1.0f);
     EXPECT_EQ(result[0].flags, kClusterFlagUniformScale | kClusterFlagPositiveHand);
 }
@@ -56,15 +67,75 @@ TEST(ClusterCandidatesTests, EachClauseAloneExcludes)
     noClusters.meshHasClusters = false;
     ClusterCandidateInput noIndex = Eligible(2);
     noIndex.meshHasIndexBuffer = false;
-    ClusterCandidateInput textured = Eligible(3);
-    textured.pipelineUntextured = false;
+    ClusterCandidateInput colorLayout = Eligible(3);
+    colorLayout.layout = VertexLayout::PositionColor;
     ClusterCandidateInput skinned = Eligible(4);
     skinned.gpuSkinned = true;
 
     EXPECT_TRUE(Select({ noClusters }).empty());
     EXPECT_TRUE(Select({ noIndex }).empty());
-    EXPECT_TRUE(Select({ textured }).empty());
+    EXPECT_TRUE(Select({ colorLayout }).empty());
     EXPECT_TRUE(Select({ skinned }).empty());
+}
+
+TEST(ClusterCandidatesTests, TexturedLayoutsAreCandidatesWithTheirMaterialAndKind)
+{
+    const auto result = Select({ EligibleTextured(1), EligibleTextured(2, VertexLayout::PositionNormalUvTangent) });
+    ASSERT_EQ(result.size(), 2u);
+    EXPECT_EQ(result[0].kind, ClusterMaterialKind::Textured);
+    EXPECT_EQ(result[0].material, (fx::MaterialToken{ 101, 1 }));
+    EXPECT_EQ(result[1].kind, ClusterMaterialKind::Pbr);
+    EXPECT_EQ(result[1].material, (fx::MaterialToken{ 102, 1 }));
+}
+
+TEST(ClusterCandidatesTests, TexturedWithoutMaterialOrTableStaysOnTheCpuPath)
+{
+    ClusterCandidateInput noMaterial = EligibleTextured(1);
+    noMaterial.material = fx::MaterialToken{};
+    // A textured slice never gets a synthesized table, however many instances share it.
+    std::vector<ClusterCandidateInput> noTable;
+    for (std::uint32_t i = 0; i < kMinInstancesForSynthesizedClusters + 2; ++i) {
+        ClusterCandidateInput in = EligibleTextured(10 + i);
+        in.mesh = fx::MeshToken{ 50, 1 };
+        in.meshHasClusters = false;
+        in.meshSynthesizable = true;
+        noTable.push_back(in);
+    }
+
+    fx::ClusterRejectCounts counts;
+    std::vector<ClusterCandidateInput> inputs = noTable;
+    inputs.push_back(noMaterial);
+    EXPECT_TRUE(Select(inputs, true, &counts).empty());
+    EXPECT_EQ(counts.noClusterTable, noTable.size());
+    EXPECT_EQ(counts.unsupportedLayout, 1u);
+}
+
+TEST(ClusterCandidatesTests, RejectionsAreCountedByReason)
+{
+    ClusterCandidateInput skinned = Eligible(1);
+    skinned.gpuSkinned = true;
+    ClusterCandidateInput noIndex = Eligible(2);
+    noIndex.meshHasIndexBuffer = false;
+    ClusterCandidateInput colorLayout = Eligible(3);
+    colorLayout.layout = VertexLayout::PositionColor;
+    ClusterCandidateInput nan = Eligible(4);
+    nan.world(0, 3) = std::numeric_limits<float>::quiet_NaN();
+    ClusterCandidateInput noTable = Eligible(5);
+    noTable.meshHasClusters = false;
+    ClusterCandidateInput few = Eligible(6);
+    few.meshHasClusters = false;
+    few.meshSynthesizable = true;
+
+    fx::ClusterRejectCounts counts;
+    const auto result = Select({ Eligible(7), skinned, noIndex, colorLayout, nan, noTable, few }, true, &counts);
+    EXPECT_EQ(result.size(), 1u);
+    EXPECT_EQ(counts.skinned, 1u);
+    EXPECT_EQ(counts.noIndexBuffer, 1u);
+    EXPECT_EQ(counts.unsupportedLayout, 1u);
+    EXPECT_EQ(counts.nonFinite, 1u);
+    EXPECT_EQ(counts.noClusterTable, 1u);
+    EXPECT_EQ(counts.tooFewInstances, 1u);
+    EXPECT_EQ(counts.Total(), 6u);
 }
 
 TEST(ClusterCandidatesTests, MissingCapsGiveNothing)

@@ -65,6 +65,13 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDriv
     Add(out, key("cullCamera"), text(fx::EnumName(kCullCameraSourceTable, v.cullCamera)));
     Add(out, key("hizSource"), text(fx::EnumName(kCullCameraSourceTable, g.hizSource)));
     Add(out, key("sharedSurvivors"), g.sharedSurvivors);
+    Add(out, key("cpuPath.skinned"), Count(g.cpuPath.skinned));
+    Add(out, key("cpuPath.noIndexBuffer"), Count(g.cpuPath.noIndexBuffer));
+    Add(out, key("cpuPath.unsupportedLayout"), Count(g.cpuPath.unsupportedLayout));
+    Add(out, key("cpuPath.noClusterTable"), Count(g.cpuPath.noClusterTable));
+    Add(out, key("cpuPath.tooFewInstances"), Count(g.cpuPath.tooFewInstances));
+    Add(out, key("cpuPath.nonFinite"), Count(g.cpuPath.nonFinite));
+    Add(out, key("cpuPath.noSlot"), Count(g.cpuPath.noSlot));
 }
 
 fx::FeatureDebugResult Fail(std::string key, std::string message)

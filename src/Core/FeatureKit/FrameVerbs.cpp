@@ -65,6 +65,14 @@ std::span<const ClusterInstance> Frame::ClusterCandidates() const noexcept
     return m_context->core->ClusterCandidates();
 }
 
+ClusterRejectCounts Frame::ClusterRejections() const noexcept
+{
+    if (m_context == nullptr || m_context->core == nullptr || m_view.scope == rg::ViewScope::Shared) {
+        return {};
+    }
+    return m_context->core->ClusterRejections();
+}
+
 bool Frame::CullSceneDraw(const Mat4& viewProjection, float paddingFraction)
 {
     if (m_context == nullptr || m_context->core == nullptr) {

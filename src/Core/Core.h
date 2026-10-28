@@ -235,6 +235,12 @@ public:
     // Instances of cluster-ready meshes this frame, rebuilt by BuildFrame(). Valid until the next BuildFrame().
     std::span<const fx::ClusterInstance> ClusterCandidates() const noexcept { return m_clusterCandidates; }
 
+    // Renderables of this frame that stayed on the CPU draw, by reason. Rebuilt with the candidates.
+    const fx::ClusterRejectCounts& ClusterRejections() const noexcept { return m_clusterRejections; }
+
+    // The descriptor set of the material behind `token`; Invalid when it is stale or unknown.
+    DescriptorSetHandle ResolveClusterMaterialSet(fx::MaterialToken token);
+
     // The mesh behind `token`; null when it is stale or unknown.
     const Mesh* ResolveClusterMesh(fx::MeshToken token);
 
@@ -346,6 +352,7 @@ private:
     // Cluster-ready instances and entity exclusion sets of this frame. Both are cleared at the start of
     // BuildFrame(); a deque keeps every reserved set at a stable address. The epoch grows with each clear.
     std::vector<fx::ClusterInstance> m_clusterCandidates;
+    fx::ClusterRejectCounts m_clusterRejections;
     std::deque<std::unordered_set<Entity>> m_exclusionSets;
     std::uint64_t m_exclusionEpoch = 0;
 

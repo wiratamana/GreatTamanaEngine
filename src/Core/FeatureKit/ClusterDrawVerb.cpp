@@ -24,9 +24,18 @@ namespace gte::fx {
 
 namespace {
 
-// One mesh of the chain, resolved by Plan() and declared by Record().
+// Pipeline of one part and whether its draw binds a material set.
+struct PartPipeline {
+    const Pipeline* pipeline = nullptr;
+    bool usesMaterialSet = false;
+};
+
+// One part of the chain (a mesh, and a material for a lit colour draw), resolved by Plan() and declared by Record().
 struct PlannedPart {
     MeshToken mesh;
+    MaterialToken material;
+    const Pipeline* pipeline = nullptr;
+    bool usesMaterialSet = false;
     std::uint32_t slot = 0;
     std::uint32_t clusterCount = 0;
     std::uint64_t workItems = 0;
@@ -110,7 +119,7 @@ struct ClusterDrawChain::Impl {
     bool planned = false;
     ClusterPlan plan;
     std::vector<PlannedPart> parts;
-    const Pipeline* pipeline = nullptr;
+    std::uint32_t noSlotInstances = 0; // Instances of parts that found no slot.
     rg::ClusterDrawBindings* bindings = nullptr;
     ClusterClaimContext claimContext;
 
@@ -308,8 +317,7 @@ void PlanChain(ClusterDrawChain::Impl& s)
         s.twoPhase = s.hizReason == HizReason::None;
     }
 
-    s.pipeline = state.ResolvePipeline(*context, ClusterPipelineKeyFor(flags, s.depthOnly, s.idTint));
-    if (s.pipeline == nullptr || !frame.ShaderReady(state.CullShader())) {
+    if (!frame.ShaderReady(state.CullShader())) {
         return;
     }
     s.bindings = state.Bindings(*context);
@@ -318,10 +326,11 @@ void PlanChain(ClusterDrawChain::Impl& s)
         return;
     }
 
-    // Meshes that can run a chain, with their sizes.
+    // Parts that can run a chain, with their sizes. A colour draw splits a mesh by material; a depth-only draw does not.
     const ClusterLimits limits = ClusterLimitsFor(caps);
-    std::vector<ClusterMeshGroup> groups = GroupInstancesByMesh(s.instances);
+    std::vector<ClusterMeshGroup> groups = GroupInstances(s.instances, !s.depthOnly);
     std::vector<ClusterMeshGroup> eligible;
+    std::vector<PartPipeline> pipelines;
     std::vector<ClusterPartSize> sizes;
     std::vector<std::uint32_t> clusterCounts;
     for (ClusterMeshGroup& group : groups) {
@@ -343,15 +352,27 @@ void PlanChain(ClusterDrawChain::Impl& s)
                 + " is over a cluster draw limit; the CPU draw is used");
             continue;
         }
-        sizes.push_back(ClusterPartSize{ group.mesh, instanceCount, mesh->ClusterCount() });
+        // Textured parts need their material to resolve now; a lit draw without it would be skipped at execute time.
+        const ClusterPipelineKey key = ClusterPipelineKeyFor(flags, s.depthOnly, s.idTint, group.kind);
+        const Pipeline* pipeline = state.ResolvePipeline(*context, key);
+        const bool usesMaterialSet = !s.depthOnly && ClusterKeyUsesMaterialSet(key);
+        if (pipeline == nullptr
+            || (usesMaterialSet && core.ResolveClusterMaterialSet(group.material) == DescriptorSetHandle::Invalid)) {
+            continue;
+        }
+        pipelines.push_back(PartPipeline{ pipeline, usesMaterialSet });
+        sizes.push_back(ClusterPartSize{ group.mesh, group.material, instanceCount, mesh->ClusterCount() });
         clusterCounts.push_back(mesh->ClusterCount());
         eligible.push_back(std::move(group));
     }
 
     const ClusterSlotAssignment assignment = AssignClusterPartSlots(sizes, state.Shape().partSlots);
+    for (const std::uint32_t index : assignment.dropped) {
+        s.noSlotInstances += static_cast<std::uint32_t>(eligible[index].instances.size());
+    }
     if (!assignment.dropped.empty()) {
         frame.ReportWarningOnce(
-            std::string("Pass '") + anchorName.value + "': more meshes than part slots; the rest use the CPU draw");
+            std::string("Pass '") + anchorName.value + "': more parts than part slots; the rest use the CPU draw");
     }
 
     // The secondary view draws the primary view's survivors when every planned part was published for the same
@@ -410,6 +431,9 @@ void PlanChain(ClusterDrawChain::Impl& s)
 
         PlannedPart part;
         part.mesh = group.mesh;
+        part.material = group.material;
+        part.pipeline = pipelines[index].pipeline;
+        part.usesMaterialSet = pipelines[index].usesMaterialSet;
         part.slot = thisSlot;
         part.clusterCount = clusterCounts[index];
         part.workItems = workItems;
@@ -626,14 +650,15 @@ public:
 
         Core* core = context.core;
         const MeshToken token = part.mesh;
-        const Pipeline* pipeline = s.pipeline;
+        const MaterialToken material = part.usesMaterialSet ? part.material : MaterialToken{};
+        const Pipeline* pipeline = part.pipeline;
         rg::ClusterDrawBindings* bindings = s.bindings;
         const std::size_t bindingIndex = s.state->BindingIndex(context.scope, lane, part.slot);
         const rg::RenderViewId view = context.view;
         const bool depthOnly = s.depthOnly;
         const Mat4 viewProjection = s.camera.viewProjection;
-        // The mesh is looked up again at execute time; a missing one draws nothing.
-        auto resolveInputs = [core, token, pipeline, bindings, bindingIndex, view, depthOnly, viewProjection]() {
+        // The mesh and material are looked up again at execute time; a missing one draws nothing.
+        auto resolveInputs = [core, token, material, pipeline, bindings, bindingIndex, view, depthOnly, viewProjection]() {
             rg::IndirectDrawInputs inputs;
             inputs.mesh = core->ResolveClusterMesh(token);
             inputs.pipeline = pipeline;
@@ -642,6 +667,9 @@ public:
             inputs.clusterBindingIndex = bindingIndex;
             if (!depthOnly) {
                 inputs.sceneSet = core->GetSceneServicesDescriptorSet().DescriptorSetFor(view);
+            }
+            if (material.IsValid()) {
+                inputs.materialSet = core->ResolveClusterMaterialSet(material);
             }
             return inputs;
         };
@@ -847,6 +875,7 @@ ClusterStats ClusterDrawChain::Record()
     s.result.occlusionApplied = s.result.declared && s.twoPhase;
     s.result.sharedSurvivors = s.result.declared && s.shared;
     s.result.sharedOcclusion = s.result.sharedSurvivors && s.sharedLanes == 2;
+    s.result.noSlotInstances = s.noSlotInstances;
 
     // A shared chain holds no buffers of its own, so it lets its scope's old ones go idle.
     s.state->TickIdle(*s.frame, s.result.declared && !s.shared);

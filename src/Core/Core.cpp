@@ -551,6 +551,7 @@ void Core::FillExclusion(fx::EntityExclusion exclusion, std::span<const Entity> 
 void Core::BuildClusterCandidates()
 {
     m_clusterCandidates.clear();
+    m_clusterRejections = fx::ClusterRejectCounts{};
     if (!ClusterPathSupported(m_renderer.IndirectDrawCaps()) || m_renderFeatureCompositorPtr == nullptr) {
         return;
     }
@@ -587,16 +588,22 @@ void Core::BuildClusterCandidates()
         ClusterCandidateInput input;
         input.entity = command.entity;
         input.mesh = fx::MeshToken{ command.mesh.index, command.mesh.generation };
+        input.material = fx::MaterialToken{ command.texture.index, command.texture.generation };
         input.world = command.model;
         input.meshHasClusters = mesh->HasClusters();
         input.meshSynthesizable = mesh->HasIndexBuffer() && mesh->IndexCount() > 0 && mesh->IndexCount() % 3 == 0
             && mesh->LocalBounds().has_value();
         input.meshHasIndexBuffer = mesh->HasIndexBuffer();
-        input.pipelineUntextured = pipeline->VertexLayoutKind() == VertexLayout::PositionNormal;
+        input.layout = pipeline->VertexLayoutKind();
         input.gpuSkinned = gpuSkinnedOutputs.contains(mesh->VertexBufferHandle());
         inputs.push_back(input);
     }
-    m_clusterCandidates = SelectClusterCandidates(inputs, true);
+    m_clusterCandidates = SelectClusterCandidates(inputs, true, &m_clusterRejections);
+}
+
+DescriptorSetHandle Core::ResolveClusterMaterialSet(fx::MaterialToken token)
+{
+    return m_game.GetRenderSystem().MaterialSetOf(MaterialTextureHandle{ token.index, token.generation });
 }
 
 const Core::ExposedViewOutput* Core::FindExposedViewOutput(rg::ViewScope scope) const noexcept
@@ -1071,6 +1078,7 @@ void Core::BuildFrame()
         request.reset();
     }
     m_clusterCandidates.clear();
+    m_clusterRejections = fx::ClusterRejectCounts{};
     m_exclusionSets.clear();
     ++m_exclusionEpoch;
     m_captureArmedThisFrame = false;
@@ -1156,6 +1164,7 @@ void Core::BuildFrame()
                             BuildClusterCandidates();
                         } catch (const std::exception& e) {
                             m_clusterCandidates.clear();
+                            m_clusterRejections = fx::ClusterRejectCounts{};
                             const std::string failure = std::string("Core: cluster candidate list failed: ") + e.what();
                             if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
                                 GTE_LOG_ERROR("Core", failure);

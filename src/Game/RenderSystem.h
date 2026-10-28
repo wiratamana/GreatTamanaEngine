@@ -60,6 +60,13 @@ public:
     Mesh* TryGetMesh(MeshHandle handle) { return m_meshes.TryGet(handle); }
     const Pipeline* TryGetPipeline(PipelineHandle handle) const { return m_pipelines.TryGet(handle); }
 
+    // Descriptor set of a live material, or Invalid for an invalid or stale handle.
+    DescriptorSetHandle MaterialSetOf(MaterialTextureHandle handle) const
+    {
+        const MaterialTexture* material = m_textures.TryGet(handle);
+        return material != nullptr ? material->set.Handle() : DescriptorSetHandle::Invalid;
+    }
+
     // One DrawCommand per entity with a MeshRenderer, with its world matrix. Touches only `registry`.
     static std::vector<DrawCommand> CollectRenderables(Registry& registry);
 

@@ -34,6 +34,7 @@ void DrawViewInfo(const char* label, const GpuDrivenSceneSettings& s, const GpuD
     DrawLine(CpuPathLine(v));
     DrawLine(CpuCullStateLine(v));
     DrawLine(GpuPathLine(v));
+    DrawLine(CpuReasonsLine(v));
     if (s.mode == CullMode::HiZ) {
         DrawLine(HizLine(v, secondary));
     }

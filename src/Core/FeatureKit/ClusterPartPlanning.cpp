@@ -1,19 +1,20 @@
 #include "ClusterPartPlanning.h"
 
 #include <algorithm>
-#include <unordered_map>
+#include <map>
 
 namespace gte::fx {
 
-std::vector<ClusterMeshGroup> GroupInstancesByMesh(std::span<const ClusterInstance> candidates)
+std::vector<ClusterMeshGroup> GroupInstances(std::span<const ClusterInstance> candidates, bool splitByMaterial)
 {
     std::vector<ClusterMeshGroup> groups;
-    std::unordered_map<MeshToken, std::size_t, MeshTokenHash> groupOf;
+    std::map<std::pair<MeshToken, MaterialToken>, std::size_t> groupOf;
     for (std::size_t i = 0; i < candidates.size(); ++i) {
-        const MeshToken token = candidates[i].mesh;
-        auto [it, inserted] = groupOf.try_emplace(token, groups.size());
+        const ClusterInstance& candidate = candidates[i];
+        const MaterialToken material = splitByMaterial ? candidate.material : MaterialToken{};
+        auto [it, inserted] = groupOf.try_emplace(std::pair{ candidate.mesh, material }, groups.size());
         if (inserted) {
-            groups.push_back(ClusterMeshGroup{ token, {} });
+            groups.push_back(ClusterMeshGroup{ candidate.mesh, material, candidate.kind, {} });
         }
         groups[it->second].instances.push_back(static_cast<std::uint32_t>(i));
     }
@@ -32,7 +33,10 @@ ClusterSlotAssignment AssignClusterPartSlots(std::span<const ClusterPartSize> pa
         if (workA != workB) {
             return workA > workB;
         }
-        return parts[a].mesh < parts[b].mesh;
+        if (parts[a].mesh != parts[b].mesh) {
+            return parts[a].mesh < parts[b].mesh;
+        }
+        return parts[a].material < parts[b].material;
     });
 
     ClusterSlotAssignment result;

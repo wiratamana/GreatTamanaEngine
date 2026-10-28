@@ -182,8 +182,8 @@ TEST_F(MeshClusterImportTest, AutoSkipsASoupAfterTheCheapPreCheck)
     EXPECT_TRUE(mesh->clusters.empty());
 }
 
-// glTF materials are PBR: the runtime draws them on the textured path, so Auto must not write clusters.
-TEST_F(MeshClusterImportTest, AutoSkipsAPbrMaterialWithoutTexturesAndNamesTheReason)
+// glTF materials are PBR: Auto still runs the cluster step while the weld is Exact (the quad itself fills poorly).
+TEST_F(MeshClusterImportTest, AutoDoesNotRefuseAPbrMaterialWithTheExactWeld)
 {
     const std::filesystem::path sourceDir = m_root / "src";
     std::filesystem::create_directories(sourceDir);
@@ -192,8 +192,21 @@ TEST_F(MeshClusterImportTest, AutoSkipsAPbrMaterialWithoutTexturesAndNamesTheRea
     const AssetImportResult result
         = ImportAssetFile(m_db, source, m_root / "quad.gltf", Options(ClusterBuildMode::Auto, 1));
     ASSERT_TRUE(result.success) << result.message;
+    EXPECT_EQ(result.clusterMessage.find("Exact weld"), std::string::npos) << result.clusterMessage;
+}
+
+TEST_F(MeshClusterImportTest, AutoSkipsAPbrMaterialWithAnyOtherWeldAndNamesTheReason)
+{
+    const std::filesystem::path sourceDir = m_root / "src";
+    std::filesystem::create_directories(sourceDir);
+    const std::filesystem::path source = test::WriteGltfQuad(sourceDir);
+
+    MeshImportOptions options = Options(ClusterBuildMode::Auto, 1);
+    options.cluster.weld = ClusterWeldMode::PositionOnly;
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "quad.gltf", options);
+    ASSERT_TRUE(result.success) << result.message;
     EXPECT_EQ(result.clusterCount, 0u);
-    EXPECT_NE(result.clusterMessage.find("PBR"), std::string::npos) << result.clusterMessage;
+    EXPECT_NE(result.clusterMessage.find("Exact weld"), std::string::npos) << result.clusterMessage;
 
     const std::optional<MeshData> mesh = DecodeImported(result);
     ASSERT_TRUE(mesh.has_value());

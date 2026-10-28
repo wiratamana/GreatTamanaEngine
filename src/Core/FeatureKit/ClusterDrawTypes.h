@@ -36,13 +36,56 @@ struct MeshTokenHash {
     }
 };
 
+// Opaque id of a material. Core resolves it to the descriptor set that a draw binds; features never see that set.
+struct MaterialToken {
+    std::uint32_t index = 0;
+    std::uint32_t generation = 0; // 0 means no material.
+
+    constexpr bool IsValid() const noexcept { return generation != 0; }
+
+    friend bool operator==(const MaterialToken& a, const MaterialToken& b) noexcept
+    {
+        return a.index == b.index && a.generation == b.generation;
+    }
+    friend bool operator!=(const MaterialToken& a, const MaterialToken& b) noexcept { return !(a == b); }
+    friend bool operator<(const MaterialToken& a, const MaterialToken& b) noexcept
+    {
+        return a.index != b.index ? a.index < b.index : a.generation < b.generation;
+    }
+};
+
+struct MaterialTokenHash {
+    std::size_t operator()(const MaterialToken& token) const noexcept
+    {
+        return std::hash<std::uint64_t>{}((static_cast<std::uint64_t>(token.index) << 32) | token.generation);
+    }
+};
+
 // One drawable instance of a cluster-ready mesh. `flags` holds kClusterFlag* bits; `maxScale` is the largest axis scale.
+// `kind` selects the vertex layout and shaders; `material` is valid exactly when `kind` is not None.
 struct ClusterInstance {
     Entity entity;
     MeshToken mesh;
+    MaterialToken material;
+    ClusterMaterialKind kind = ClusterMaterialKind::None;
     Mat4 world = Mat4::Identity();
     std::uint32_t flags = 0;
     float maxScale = 0.0f;
+};
+
+// Renderables that candidate selection kept on the CPU draw, by reason. A renderable counts once.
+struct ClusterRejectCounts {
+    std::uint32_t skinned = 0;           // Skinned vertices change every frame.
+    std::uint32_t noIndexBuffer = 0;
+    std::uint32_t unsupportedLayout = 0; // Vertex layout outside the cluster set, or a textured mesh without a material.
+    std::uint32_t noClusterTable = 0;    // No table: alpha-tested or refused textured slice, or an untextured mesh that cannot get one.
+    std::uint32_t tooFewInstances = 0;   // A synthesized table is only worth a chain for several instances.
+    std::uint32_t nonFinite = 0;
+
+    constexpr std::uint32_t Total() const noexcept
+    {
+        return skinned + noIndexBuffer + unsupportedLayout + noClusterTable + tooFewInstances + nonFinite;
+    }
 };
 
 // Camera of one chain. `eyeOrDirection` is the eye point, or the view direction when `orthographic`.
@@ -96,6 +139,7 @@ struct ClusterStats {
     std::uint32_t instances = 0;
     std::uint32_t parts = 0;
     std::uint64_t workItems = 0; // Sum over declared parts of instances * clusters: what the cull tested.
+    std::uint32_t noSlotInstances = 0; // Instances of parts that found no part slot and stay on the CPU draw.
     ClusterInertReason inertReason = ClusterInertReason::None;
 };
 

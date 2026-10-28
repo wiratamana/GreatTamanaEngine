@@ -179,6 +179,7 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     snap.refused = ClusterOutcomeRefused(candidates.size(), stats);
     snap.refusal = DescribeClusterOutcome(candidates.size(), stats);
     snap.sharedSurvivors = stats.sharedSurvivors;
+    snap.cpuPath = CpuPathReasonsOf(f.ClusterRejections(), stats.noSlotInstances);
     // The secondary view inherits the primary view's occlusion result through the shared survivors.
     const bool occluded = secondary ? stats.sharedOcclusion : stats.occlusionApplied;
     snap.occlusion = OcclusionStateOf(hizRequested, culls, occluded);

@@ -271,10 +271,34 @@ constexpr std::uint64_t ClusterCountAgeFrames(std::uint64_t frame, std::uint64_t
     return visibleFrame == 0 || visibleFrame > frame ? 0 : frame - visibleFrame;
 }
 
+// Renderables that stayed on the CPU draw (no Hi-Z there), by reason. `noSlot` counts instances of parts that found no
+// part slot; the other fields come from candidate selection.
+struct CpuPathReasons {
+    std::uint32_t skinned = 0;
+    std::uint32_t noIndexBuffer = 0;
+    std::uint32_t unsupportedLayout = 0;
+    std::uint32_t noClusterTable = 0; // Alpha-tested or refused textured slices, and untextured meshes without a table.
+    std::uint32_t tooFewInstances = 0;
+    std::uint32_t nonFinite = 0;
+    std::uint32_t noSlot = 0;
+
+    constexpr std::uint32_t Total() const noexcept
+    {
+        return skinned + noIndexBuffer + unsupportedLayout + noClusterTable + tooFewInstances + nonFinite + noSlot;
+    }
+};
+
+constexpr CpuPathReasons CpuPathReasonsOf(const fx::ClusterRejectCounts& rejected, std::uint32_t noSlotInstances) noexcept
+{
+    return CpuPathReasons{ rejected.skinned, rejected.noIndexBuffer, rejected.unsupportedLayout, rejected.noClusterTable,
+        rejected.tooFewInstances, rejected.nonFinite, noSlotInstances };
+}
+
 // What the cluster pass reported for a view. Reads as all zero in a frame where the pass did not run.
 struct GpuPathReport {
     std::uint32_t claimedEntities = 0;
     std::uint32_t parts = 0;
+    CpuPathReasons cpuPath;
     OcclusionState occlusion = OcclusionState::NotRequested;
     HizReason hizReason = HizReason::None;
     CullCameraSource hizSource = CullCameraSource::None;

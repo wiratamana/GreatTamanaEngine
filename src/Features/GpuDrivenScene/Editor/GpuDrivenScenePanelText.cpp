@@ -45,6 +45,28 @@ std::string CpuPathLine(const GpuDrivenSceneViewSnapshot& v)
         std::to_string(v.cpuUnbounded) + " kept without bounds (last frame)";
 }
 
+std::string CpuReasonsLine(const GpuDrivenSceneViewSnapshot& v)
+{
+    const CpuPathReasons& r = v.gpu.cpuPath;
+    if (r.Total() == 0) {
+        return {};
+    }
+    std::string line = "On the CPU path (no Hi-Z):";
+    const auto add = [&line](std::uint32_t count, std::string_view reason) {
+        if (count > 0) {
+            line += (line.back() == ':' ? " " : ", ") + std::to_string(count) + " " + std::string(reason);
+        }
+    };
+    add(r.noClusterTable, "without a cluster table (alpha-tested, refused or primitive)");
+    add(r.noSlot, "without a free part slot");
+    add(r.skinned, "skinned");
+    add(r.tooFewInstances, "with too few instances");
+    add(r.unsupportedLayout, "with an unsupported layout or no material");
+    add(r.noIndexBuffer, "without an index buffer");
+    add(r.nonFinite, "with a non-finite matrix");
+    return line;
+}
+
 std::string HizLine(const GpuDrivenSceneViewSnapshot& v, bool secondary)
 {
     switch (v.gpu.occlusion) {

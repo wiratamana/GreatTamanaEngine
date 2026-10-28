@@ -18,6 +18,9 @@ std::string GpuPathLine(const GpuDrivenSceneViewSnapshot& v);
 // "CPU path: T tested, C culled, U kept without bounds (last frame)".
 std::string CpuPathLine(const GpuDrivenSceneViewSnapshot& v);
 
+// "On the CPU path (no Hi-Z): N <reason>, ..."; empty when every renderable is on the GPU path.
+std::string CpuReasonsLine(const GpuDrivenSceneViewSnapshot& v);
+
 // Hi-Z state in plain words. `secondary` selects the wording of a missing shared pyramid.
 std::string HizLine(const GpuDrivenSceneViewSnapshot& v, bool secondary);
 
