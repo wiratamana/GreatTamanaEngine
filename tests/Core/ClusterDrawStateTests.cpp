@@ -2,6 +2,7 @@
 
 #include "Core/FeatureKit/ClusterDrawState.h"
 #include "Core/FeatureKit/ClusterNamePool.h"
+#include "Core/FeatureKit/OncePerFrame.h"
 #include "Core/FeatureKit/HizPyramid.h"
 #include "Renderer/GpuStampPlan.h"
 
@@ -87,10 +88,56 @@ TEST(ClusterDrawLayoutTests, ShapeLimits)
 {
     EXPECT_TRUE(ClusterShapeIsValid({ kMainViewLanes, kMainViewPartSlots }));
     EXPECT_TRUE(ClusterShapeIsValid({ kDepthOnlyLanes, kDepthOnlyPartSlots }));
+    EXPECT_TRUE(ClusterShapeIsValid({ 1, 12 }));
     EXPECT_FALSE(ClusterShapeIsValid({ 0, 1 }));
     EXPECT_FALSE(ClusterShapeIsValid({ 1, 0 }));
     EXPECT_FALSE(ClusterShapeIsValid({ 5, 1 }));
-    EXPECT_FALSE(ClusterShapeIsValid({ 1, 9 }));
+    EXPECT_FALSE(ClusterShapeIsValid({ 1, 13 }));
+}
+
+// Stands in for a persistent resource that refuses a second request within one frame.
+struct OneRequestPerFrame {
+    std::uint64_t lastFrame = ~std::uint64_t{ 0 };
+    int Acquire(std::uint64_t frame)
+    {
+        if (frame == lastFrame) {
+            return 0;
+        }
+        lastFrame = frame;
+        return 7;
+    }
+};
+
+TEST(OncePerFrameTests, TwoPartsOfOneLaneInOneFrameBothGetTheResource)
+{
+    OneRequestPerFrame resource;
+    OncePerFrame<int> once;
+    for (int part = 0; part < 12; ++part) {
+        EXPECT_EQ(once.Get(5, nullptr, [&] { return resource.Acquire(5); }), 7) << "part " << part;
+    }
+}
+
+TEST(OncePerFrameTests, ANewFrameOrOwnerAcquiresAgain)
+{
+    OneRequestPerFrame resource;
+    OncePerFrame<int> once;
+    int builderA = 0;
+    int builderB = 0;
+    EXPECT_EQ(once.Get(1, &builderA, [&] { return resource.Acquire(1); }), 7);
+    EXPECT_EQ(once.Get(2, &builderA, [&] { return resource.Acquire(2); }), 7);
+    EXPECT_EQ(once.Get(2, &builderA, [&] { return resource.Acquire(2); }), 7);
+    int calls = 0;
+    once.Get(2, &builderB, [&] { return ++calls; });
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(OncePerFrameTests, AFailedAcquireIsNotRetriedInTheSameFrame)
+{
+    OncePerFrame<int> once;
+    int calls = 0;
+    EXPECT_EQ(once.Get(3, nullptr, [&] { ++calls; return 0; }), 0);
+    EXPECT_EQ(once.Get(3, nullptr, [&] { ++calls; return 9; }), 0);
+    EXPECT_EQ(calls, 1);
 }
 
 TEST(ClusterDrawStateTests, InvalidShapeIsRefusedWithMessage)

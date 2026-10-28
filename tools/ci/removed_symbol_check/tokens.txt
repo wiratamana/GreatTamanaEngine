@@ -80,3 +80,4 @@ pipelineUntextured
 GroupInstancesByMesh
 m_syntheticSetZeroLayout
 DecodeDepthRange
+kHizBaseTile

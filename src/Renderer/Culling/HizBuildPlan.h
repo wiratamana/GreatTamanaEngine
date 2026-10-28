@@ -9,8 +9,6 @@
 
 namespace gte {
 
-// Level-0 texels per workgroup side of the base pass (one workgroup reduces a 32 x 32 depth tile).
-inline constexpr std::uint32_t kHizBaseTile = 16;
 // Threads of the top pass, which is one workgroup. Levels from kHizTopFirstLevel up belong to it.
 inline constexpr std::uint32_t kHizTopThreads = 256;
 

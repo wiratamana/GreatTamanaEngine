@@ -48,7 +48,8 @@ function(gte_generate_glsl_constants HEADER OUTPUT)
 
     get_filename_component(OUTPUT_DIR "${OUTPUT}" DIRECTORY)
     file(MAKE_DIRECTORY "${OUTPUT_DIR}")
-    file(WRITE "${OUTPUT}.tmp" "${CONTENT}")
+    # file(WRITE) turns '\n' into '\r\n' on Windows; the tests and shaders expect LF.
+    file(CONFIGURE OUTPUT "${OUTPUT}.tmp" CONTENT "${CONTENT}" @ONLY NEWLINE_STYLE UNIX)
     execute_process(COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${OUTPUT}.tmp" "${OUTPUT}"
         RESULT_VARIABLE COPY_RESULT)
     file(REMOVE "${OUTPUT}.tmp")

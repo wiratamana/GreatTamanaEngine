@@ -222,10 +222,17 @@ function Show-SplitViews {
 # GpuDrivenScene settings and state
 # ---------------------------------------------------------------------------
 
+# Query text of a value. The route only accepts lowercase 'true'/'false' for booleans.
+function ConvertTo-QueryValue {
+    param($Value)
+    if ($Value -is [bool]) { return $Value.ToString().ToLowerInvariant() }
+    return [uri]::EscapeDataString([string]$Value)
+}
+
 # Writable keys: enabled, mode (NoCull|Frustum|HiZ), cone, collectStats, debugView (Off|ClusterId).
 function Set-GpuDrivenCfg {
     param([hashtable]$Pairs)
-    $q = (@($Pairs.GetEnumerator() | ForEach-Object { $_.Key + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&')
+    $q = (@($Pairs.GetEnumerator() | ForEach-Object { $_.Key + '=' + (ConvertTo-QueryValue $_.Value) }) -join '&')
     return (Invoke-CullGet ('/feature_debug/set?name=GpuDrivenScene&' + $q)).fields
 }
 
@@ -264,7 +271,7 @@ function Get-FeatureStates {
 
 function Send-FeatureEnabled {
     param([string]$Name, [bool]$Enabled, [string]$View = '')
-    $q = '/render_graph/set_feature_enabled?name=' + [uri]::EscapeDataString($Name) + '&enabled=' + $Enabled.ToString().ToLower()
+    $q = '/render_graph/set_feature_enabled?name=' + [uri]::EscapeDataString($Name) + '&enabled=' + (ConvertTo-QueryValue $Enabled)
     if ($View) { $q += '&view=' + $View }
     Invoke-CullGet $q | Out-Null
 }

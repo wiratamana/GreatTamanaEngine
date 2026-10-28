@@ -280,8 +280,10 @@ Occlusion is two-phase and exact for the current frame.
 - Depth-only lanes never use the pyramid.
 - Debug: `/feature_debug/set?name=GpuDrivenScene&mode=HiZ`; read `game.occlusion` (`Applied`, `Unusable`,
   `NoCullCamera`, `NotRequested`) and `game.hizReason` (`None`, `Unavailable`, `TooLarge`). With `collectStats=true` the `reasons.*`
-  keys count items by outcome: `frustum`, `cone`, `pyramid`, `history` (drawn in phase 1) and `kept`. A static scene draws nothing in phase 2
-  after the first frames. `debugView=ClusterPhase` tints phase 1 red, phase 2 green and a single-phase chain gray.
+  keys count items by outcome: `frustum`, `cone`, `pyramid`, `history` (drawn in phase 1) and `kept`. In two-phase mode they are not a
+  partition of the tested items: phase 1 counts only `history`, phase 2 counts the final outcome of every item, so a phase-1 item is
+  counted twice. A static scene draws nothing in phase 2 after the first frames. `debugView=ClusterPhase` tints phase 1 red, phase 2
+  green and a single-phase chain gray.
 
 ## Shared survivors
 

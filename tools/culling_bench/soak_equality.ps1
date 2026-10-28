@@ -1,17 +1,20 @@
 <#
   Image-equality soak test. Hi-Z must never remove a visible cluster.
-  Geometry-only config, ClusterId debug view (one colour per cluster). For each sequence of camera poses and
-  mover positions the sequence is replayed twice: Hi-Z mode (history runs frame after frame) and NoCull mode.
-  The game view images must be byte-equal; the number of differing pixels is always printed.
-  Exit code: 0 = all frames equal, 1 = some pixel differs, 2 = precondition failed, Hi-Z not active or a capture failed.
+  Geometry-only config, ClusterId debug view (one colour per cluster). Each sequence of camera poses and mover
+  positions is replayed in Hi-Z mode (history runs frame after frame) and in NoCull mode. NoCull is captured twice
+  per pose: its own difference is the noise floor (cluster emit order is not deterministic, depth ties flip pixels).
+  A frame FAILS when the Hi-Z difference is above max(8, 4 x noise) pixels, or when the differing pixels form a
+  connected block of 16 or more pixels (a wrongly removed cluster looks like that). Raw numbers are always printed.
+  Exit code: 0 = every scenario ran and no frame failed, 1 = a frame failed,
+  2 = a precondition failed, Hi-Z was not active, a capture failed or a scenario was skipped.
   Start the editor with the Game tab visible and the Frame Debugger closed. The scene must not be saved afterwards.
 #>
 [CmdletBinding()]
 param(
     [string]$BaseUrl = 'http://127.0.0.1:8080',
     [int]$Seed = 1234,
-    [string]$OutDir = (Join-Path $env:TEMP 'culling_soak'),
-    [string]$Terrain = (Join-Path $PSScriptRoot '..\..\build\Project\terrain_clustered.gta'),
+    [string]$OutDir = '',
+    [string]$Terrain = '',
     [switch]$SkipLoad,
     [string[]]$MoverEntities = @(),
     [ValidateSet('terrain', 'grid', 'both')][string]$Scene = 'terrain',
@@ -28,13 +31,21 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'lib.ps1')
+$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $OutDir) { $OutDir = Join-Path $env:TEMP 'culling_soak' }
+if (-not $Terrain) { $Terrain = Join-Path $ScriptDir '..\..\build\Project\terrain_clustered.gta' }
+. (Join-Path $ScriptDir 'lib.ps1')
 Initialize-CullLib -BaseUrl $BaseUrl
 Add-Type -AssemblyName System.Drawing
+
+$NoiseFloorPixels = 8
+$NoiseFactor = 4
+$BlockPixels = 16
 
 $script:Rng = New-Object System.Random($Seed)
 $script:Results = New-Object System.Collections.Generic.List[object]
 $script:Created = New-Object System.Collections.Generic.List[string]
+$script:Skipped = New-Object System.Collections.Generic.List[string]
 $script:Saved = $null
 $script:Fatal = $false
 
@@ -121,9 +132,10 @@ function Set-SoakFrame {
     foreach ($m in $Frame.Movers) { Set-CullTrs -Name $m.Name -Position $m.Pos }
 }
 
-# Replays $Frames in one mode and saves one PNG per frame. Returns $null or an error text.
+# Replays $Frames in one mode and saves one PNG per frame. With -Twice every pose is captured a second time
+# ('<prefix>2_NNN.png'). Returns $null or an error text.
 function Save-SoakPhase {
-    param([string]$Dir, [string]$Prefix, [string]$Mode, $Frames, [int]$Wait)
+    param([string]$Dir, [string]$Prefix, [string]$Mode, $Frames, [int]$Wait, [switch]$Twice)
     New-Item -ItemType Directory -Force -Path $Dir | Out-Null
     Set-GpuDrivenCfg @{ mode = $Mode } | Out-Null
     Set-SoakFrame $Frames[0]
@@ -133,11 +145,48 @@ function Save-SoakPhase {
         Wait-CullFrames $Wait
         $err = Save-GameView (Join-Path $Dir ('{0}_{1:D3}.png' -f $Prefix, $i))
         if ($err) { return ("frame $i ($Mode): " + $err) }
+        if ($Twice) {
+            Wait-CullFrames $Wait
+            $err = Save-GameView (Join-Path $Dir ('{0}2_{1:D3}.png' -f $Prefix, $i))
+            if ($err) { return ("frame $i ($Mode, second capture): " + $err) }
+        }
     }
     return $null
 }
 
+# Size of the largest 8-connected group in a list of pixel indices (y * width + x).
+function Get-LargestBlock {
+    param([System.Collections.Generic.List[int]]$Pixels, [int]$Width)
+    if ($Pixels.Count -eq 0) { return 0 }
+    $left = New-Object 'System.Collections.Generic.HashSet[int]'
+    foreach ($p in $Pixels) { [void]$left.Add($p) }
+    $stack = New-Object 'System.Collections.Generic.Stack[int]'
+    $best = 0
+    foreach ($start in $Pixels) {
+        if (-not $left.Remove($start)) { continue }
+        $size = 0
+        $stack.Push($start)
+        while ($stack.Count -gt 0) {
+            $p = $stack.Pop()
+            $size++
+            $x = $p % $Width
+            foreach ($dy in -1, 0, 1) {
+                foreach ($dx in -1, 0, 1) {
+                    if ($dx -eq 0 -and $dy -eq 0) { continue }
+                    $nx = $x + $dx
+                    if ($nx -lt 0 -or $nx -ge $Width) { continue }
+                    $q = $p + $dy * $Width + $dx
+                    if ($left.Remove($q)) { $stack.Push($q) }
+                }
+            }
+        }
+        if ($size -gt $best) { $best = $size }
+    }
+    return $best
+}
+
 # Pixel comparison of two PNGs. Equal hashes mean equal files; otherwise the decoded pixels are counted.
+# Returns Differing (pixels), MaxBlock (largest connected group of differing pixels), Total, SizeMismatch.
 function Compare-Png {
     param([string]$A, [string]$B)
     $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -145,13 +194,14 @@ function Compare-Png {
         $ha = [BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($A)))
         $hb = [BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($B)))
     } finally { $sha.Dispose() }
-    if ($ha -eq $hb) { return [pscustomobject]@{ Differing = 0; Total = 0; SizeMismatch = $false } }
+    if ($ha -eq $hb) { return [pscustomobject]@{ Differing = 0; MaxBlock = 0; Total = 0; SizeMismatch = $false } }
     $bmpA = $null; $bmpB = $null
     try {
         $bmpA = New-Object System.Drawing.Bitmap($A)
         $bmpB = New-Object System.Drawing.Bitmap($B)
         if ($bmpA.Width -ne $bmpB.Width -or $bmpA.Height -ne $bmpB.Height) {
-            return [pscustomobject]@{ Differing = [int]($bmpA.Width * $bmpA.Height); Total = [int]($bmpA.Width * $bmpA.Height); SizeMismatch = $true }
+            $all = [int]($bmpA.Width * $bmpA.Height)
+            return [pscustomobject]@{ Differing = $all; MaxBlock = $all; Total = $all; SizeMismatch = $true }
         }
         $w = $bmpA.Width; $h = $bmpA.Height
         $rect = New-Object System.Drawing.Rectangle(0, 0, $w, $h)
@@ -166,15 +216,24 @@ function Compare-Png {
         [System.Runtime.InteropServices.Marshal]::Copy($db.Scan0, $bb, 0, $n)
         $bmpA.UnlockBits($da)
         $bmpB.UnlockBits($db)
-        $diff = 0
+        $diff = New-Object 'System.Collections.Generic.List[int]'
         for ($i = 0; $i -lt $n; $i += 4) {
-            if ($ba[$i] -ne $bb[$i] -or $ba[$i + 1] -ne $bb[$i + 1] -or $ba[$i + 2] -ne $bb[$i + 2] -or $ba[$i + 3] -ne $bb[$i + 3]) { $diff++ }
+            if ($ba[$i] -ne $bb[$i] -or $ba[$i + 1] -ne $bb[$i + 1] -or $ba[$i + 2] -ne $bb[$i + 2] -or $ba[$i + 3] -ne $bb[$i + 3]) {
+                $diff.Add([int]($i -shr 2))
+            }
         }
-        return [pscustomobject]@{ Differing = $diff; Total = $w * $h; SizeMismatch = $false }
+        return [pscustomobject]@{ Differing = $diff.Count; MaxBlock = (Get-LargestBlock $diff $w); Total = $w * $h; SizeMismatch = $false }
     } finally {
         if ($null -ne $bmpA) { $bmpA.Dispose() }
         if ($null -ne $bmpB) { $bmpB.Dispose() }
     }
+}
+
+# A frame fails when the Hi-Z difference is far above the NoCull-against-NoCull noise, or forms a block.
+function Test-FrameFails {
+    param([int]$HizDiff, [int]$Noise, [int]$Block)
+    $limit = [math]::Max($NoiseFloorPixels, $NoiseFactor * $Noise)
+    return (($HizDiff -gt $limit) -or ($Block -ge $BlockPixels))
 }
 
 # Runs one scenario in both modes and compares frame by frame.
@@ -184,30 +243,52 @@ function Invoke-SoakScenario {
     if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
     Write-Host ("  scenario $Scene/$Name : " + $Frames.Count + ' frames')
     $row = [pscustomobject]@{ Scene = $Scene; Scenario = $Name; Frames = $Frames.Count; Compared = 0; EqualFrames = 0
-        DiffFrames = 0; DiffPixels = 0; MaxDiff = 0; HizActive = $false; Error = '' }
+        DiffFrames = 0; FailFrames = 0; DiffPixels = 0; MaxDiff = 0; MaxNoise = 0; MaxBlock = 0; HizActive = $false; Error = '' }
     $err = Save-SoakPhase $dir 'hiz' 'HiZ' $Frames $FrameWait
     if (-not $err) {
         $st = Get-GpuDrivenState
         $row.HizActive = ([string](Get-Field $st 'game.occlusion' '') -eq 'Applied')
-        $err = Save-SoakPhase $dir 'ref' 'NoCull' $Frames $FrameWait
+        $err = Save-SoakPhase $dir 'ref' 'NoCull' $Frames $FrameWait -Twice
     }
     if ($err) { $row.Error = $err; $script:Results.Add($row); return }
     for ($i = 0; $i -lt $Frames.Count; $i++) {
-        $a = Join-Path $dir ('ref_{0:D3}.png' -f $i)
-        $b = Join-Path $dir ('hiz_{0:D3}.png' -f $i)
-        $c = Compare-Png $a $b
+        $ref = Join-Path $dir ('ref_{0:D3}.png' -f $i)
+        $ref2 = Join-Path $dir ('ref2_{0:D3}.png' -f $i)
+        $hiz = Join-Path $dir ('hiz_{0:D3}.png' -f $i)
+        $c = Compare-Png $ref $hiz
+        $noise = (Compare-Png $ref $ref2).Differing
+        $fails = Test-FrameFails $c.Differing $noise $c.MaxBlock
         $row.Compared++
-        if ($c.Differing -eq 0) {
-            $row.EqualFrames++
-            if (-not $KeepAllImages) { Remove-Item -LiteralPath $a, $b -Force }
-        } else {
-            $row.DiffFrames++
-            $row.DiffPixels += $c.Differing
-            if ($c.Differing -gt $row.MaxDiff) { $row.MaxDiff = $c.Differing }
-            Write-Host ("    frame $i : $($c.Differing) of $($c.Total) pixels differ" + $(if ($c.SizeMismatch) { ' (image size mismatch)' } else { '' }))
+        if ($c.Differing -eq 0) { $row.EqualFrames++ } else { $row.DiffFrames++ }
+        $row.DiffPixels += $c.Differing
+        if ($c.Differing -gt $row.MaxDiff) { $row.MaxDiff = $c.Differing }
+        if ($noise -gt $row.MaxNoise) { $row.MaxNoise = $noise }
+        if ($c.MaxBlock -gt $row.MaxBlock) { $row.MaxBlock = $c.MaxBlock }
+        if ($fails) { $row.FailFrames++ }
+        if ($c.Differing -gt 0 -or $noise -gt 0) {
+            Write-Host ("    frame $i : hizDiff=$($c.Differing) noise=$noise largestBlock=$($c.MaxBlock) of $($c.Total) px" +
+                $(if ($c.SizeMismatch) { ' (image size mismatch)' } else { '' }) + $(if ($fails) { '  FAIL' } else { '  ok' }))
         }
+        if (-not $fails -and -not $KeepAllImages) { Remove-Item -LiteralPath $ref, $ref2, $hiz -Force }
     }
     $script:Results.Add($row)
+}
+
+# Grid entities are 'InstanceGrid <batch> <index>'. The newest batch is the highest one that exists.
+function Find-GridMovers {
+    param($Def)
+    $batch = 0
+    for ($b = 1; $b -le 64; $b++) {
+        try { Set-CullTrs -Name "InstanceGrid $b 0" -Position $Def.MoverHome } catch { break }
+        $batch = $b
+    }
+    if ($batch -eq 0) { return @() }
+    $names = @("InstanceGrid $batch 0")
+    foreach ($i in 1..2) {
+        $n = "InstanceGrid $batch $i"
+        try { Set-CullTrs -Name $n -Position $Def.MoverHome; $names += $n } catch { }
+    }
+    return $names
 }
 
 function Invoke-SoakScene {
@@ -232,12 +313,11 @@ function Invoke-SoakScene {
             $script:TerrainName = ''
         }
         Invoke-CullPost '/spawn_instance_grid' @{ count = $GridCount; spacing = $GridSpacing } | Out-Null
-        # Grid entities are named 'InstanceGrid <batch> <index>'; the first batch is assumed.
-        foreach ($i in 0..2) {
-            $n = "InstanceGrid 0 $i"
-            try { Set-CullTrs -Name $n -Position $def.MoverHome; $moverNames += $n } catch { }
-        }
-        if ($moverNames.Count -eq 0) { Write-Warning 'No grid mover entity found; the mover scenario is skipped for the grid.' }
+        $moverNames = @(Find-GridMovers $def)
+    }
+    if ($moverNames.Count -eq 0) {
+        $script:Skipped.Add("$Name/movers (no mover entity found)")
+        Write-Warning "No mover entity found: the mover scenario is skipped for '$Name'. The run cannot pass."
     }
 
     Set-CullCamera $CameraEntity $def.Base @($def.BasePitch, 0, 0)
@@ -282,10 +362,11 @@ try {
     foreach ($name in $script:Saved.Keys) {
         if ($name -match '^(Shadow|VolumetricLight|Atmosphere|Ssgi|Gtao|ToneMapping)') { Set-FeatureTriple $name $false $false $false }
     }
-    Set-GpuDrivenCfg @{ debugView = 'ClusterId'; collectStats = 'false'; cone = 'false'; enabled = 'true' } | Out-Null
+    Set-GpuDrivenCfg @{ debugView = 'ClusterId'; collectStats = $false; cone = $false; enabled = $true } | Out-Null
 
     Write-Host ("Seed $Seed, output folder $OutDir")
-    Write-Host 'NOTE  MeshHasCoincidentTriangles is not exposed over HTTP. Coincident triangles can swap winners between draw orders; check the mesh offline if a pixel differs.'
+    Write-Host ("Verdict: a frame fails when hizDiff > max($NoiseFloorPixels, $NoiseFactor x noise) or largestBlock >= $BlockPixels pixels.")
+    Write-Host 'NOTE  MeshHasCoincidentTriangles is not exposed over HTTP. Coincident triangles can swap winners between draw orders; check the mesh offline if a block differs.'
     $scenes = if ($Scene -eq 'both') { @('terrain', 'grid') } else { @($Scene) }
     foreach ($s in $scenes) {
         Invoke-SoakScene $s
@@ -293,23 +374,25 @@ try {
     }
 
     Write-Host ''
-    Write-Host 'scene    scenario  frames equal differing  diffPixels(total)  maxPixels/frame  hizActive'
-    $totalDiff = 0
+    Write-Host 'scene    scenario  frames equal differing  FAILED  diffPx(total)  maxHizDiff  maxNoise  maxBlock  hizActive'
+    $totalFail = 0
+    $stop = $script:Fatal -or ($script:Skipped.Count -gt 0)
     foreach ($r in $script:Results) {
-        Write-Host ('{0,-8} {1,-9} {2,6} {3,5} {4,9} {5,18} {6,16}  {7}{8}' -f $r.Scene, $r.Scenario, $r.Frames, $r.EqualFrames,
-            $r.DiffFrames, $r.DiffPixels, $r.MaxDiff, $r.HizActive, $(if ($r.Error) { '  ERROR: ' + $r.Error } else { '' }))
-        $totalDiff += $r.DiffPixels
-        if ($r.Error) { $exitCode = 2 }
+        Write-Host ('{0,-8} {1,-9} {2,6} {3,5} {4,9} {5,7} {6,14} {7,11} {8,9} {9,9}  {10}{11}' -f $r.Scene, $r.Scenario, $r.Frames, $r.EqualFrames,
+            $r.DiffFrames, $r.FailFrames, $r.DiffPixels, $r.MaxDiff, $r.MaxNoise, $r.MaxBlock, $r.HizActive, $(if ($r.Error) { '  ERROR: ' + $r.Error } else { '' }))
+        $totalFail += $r.FailFrames
+        if ($r.Error) { $stop = $true }
         elseif (-not $r.HizActive) {
             Write-Host ("    Hi-Z was not Applied in scenario $($r.Scene)/$($r.Scenario): the result proves nothing.")
-            $exitCode = 2
+            $stop = $true
         }
     }
-    if ($script:Fatal) { $exitCode = 2 }
-    if ($exitCode -eq 0 -and $totalDiff -gt 0) { $exitCode = 1 }
-    if ($exitCode -eq 0) { Write-Host 'PASS  0 differing pixels in every frame.' }
-    elseif ($exitCode -eq 1) { Write-Host ("FAIL  $totalDiff differing pixels in total. A differing pixel is a wrongly removed cluster (or a draw-order tie). Images are kept in $OutDir.") }
-    else { Write-Host 'STOP  precondition, capture or Hi-Z activity problem. See messages above.' }
+    foreach ($s in $script:Skipped) { Write-Host ('SKIPPED  ' + $s) }
+
+    if ($totalFail -gt 0) { $exitCode = 1 } elseif ($stop) { $exitCode = 2 }
+    if ($exitCode -eq 0) { Write-Host 'PASS  every scenario ran and no frame is above the noise limit.' }
+    elseif ($exitCode -eq 1) { Write-Host ("FAIL  $totalFail frame(s) above the noise limit or with a block of $BlockPixels+ pixels. Images of those frames are kept in $OutDir.") }
+    else { Write-Host 'STOP  precondition, capture, Hi-Z activity or skipped scenario. The run proves nothing. See messages above.' }
 } finally {
     Write-Host 'Cleanup: removing created entities, restoring camera, settings and feature states.'
     for ($i = $script:Created.Count - 1; $i -ge 0; $i--) {

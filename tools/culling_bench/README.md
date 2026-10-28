@@ -23,8 +23,9 @@ They only send requests. Nothing is saved by the editor. Close the editor withou
 - `bench_culling.ps1` exit codes: 0 all checks pass, 1 a check failed, 2 precondition failed, 3 a check could not be evaluated.
 - A row is valid when at least 80% of its samples have `Present` status for the span and the primary view and no folded GPU record (`-MinValidPercent`). A check on an invalid row is `INVALID`, never `PASS`.
 - Checks use same-run ratios. A check in ms (D1b, D3, D5) also fails when one round misses its limit by more than 2 ms. Absolute ms are orientation only.
-- D3 uses `-HizBudgetMs` (default 0.4). D7 compares against a run with every feature on in both views. That emulates the per-view switch only; pass `-BaselineSpanMs` from an old build for the full check.
-- `soak_equality.ps1` exit codes: 0 every frame equal (0 differing pixels), 1 some pixel differs, 2 precondition failed, Hi-Z was not `Applied`, or a capture failed. The number of differing pixels is always printed. Images are written under `-OutDir` (default `%TEMP%\culling_soak`); equal frames are deleted unless `-KeepAllImages`.
+- D3 uses `-HizBudgetMs` (default 0.4). D7 compares against a run with every feature on in both views. That emulates the per-view switch only, so without `-BaselineSpanMs` (from an old build) it prints `PARTIAL` and the run exits 3. It never prints FAIL.
+- `soak_equality.ps1` captures NoCull twice per pose; the difference of those two is the noise floor (cluster emit order is not deterministic). A frame FAILS when the Hi-Z difference is above `max(8, 4 x noise)` pixels, or when the differing pixels form a connected block of 16 or more pixels. Hi-Z diff, noise and largest block are always printed.
+- `soak_equality.ps1` exit codes: 0 every scenario ran and no frame failed, 1 a frame failed, 2 precondition failed, Hi-Z was not `Applied`, a capture failed or a scenario (for example the movers) was skipped. Images of failing frames are written under `-OutDir` (default `%TEMP%\culling_soak`); the others are deleted unless `-KeepAllImages`.
 - The mesh must have no coincident triangles for byte equality. That check is not exposed over HTTP; do it offline when a pixel differs.
 
 ## Notes

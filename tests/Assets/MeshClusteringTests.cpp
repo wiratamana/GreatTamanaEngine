@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -81,9 +82,19 @@ std::vector<TriangleKey> TriangleSet(const MeshData& mesh)
     return keys;
 }
 
+// Bitwise, so a NaN position still equals itself.
+bool SamePositions(const std::vector<Vec3>& a, const std::vector<Vec3>& b)
+{
+    const auto bits = [](float v) { return std::bit_cast<std::uint32_t>(v); };
+    return a.size() == b.size()
+        && std::equal(a.begin(), a.end(), b.begin(), [&](const Vec3& l, const Vec3& r) {
+               return bits(l.x) == bits(r.x) && bits(l.y) == bits(r.y) && bits(l.z) == bits(r.z);
+           });
+}
+
 void ExpectMeshUnchanged(const MeshData& a, const MeshData& b)
 {
-    EXPECT_EQ(a.positions, b.positions);
+    EXPECT_TRUE(SamePositions(a.positions, b.positions));
     EXPECT_EQ(a.normals, b.normals);
     EXPECT_EQ(a.uvs, b.uvs);
     EXPECT_EQ(a.indices, b.indices);
@@ -155,7 +166,7 @@ TEST(MeshClusteringTest, FlatClustersGetAConeThatContainsEveryTriangleNormal)
 
 TEST(MeshClusteringTest, MaterialSliceBoundariesAreClusterBoundaries)
 {
-    MeshData mesh = MakeGrid(12);
+    MeshData mesh = MakeGrid(20); // 2400 indices, so the split at 900 lies inside the mesh.
     const std::size_t total = mesh.indices.size();
     std::vector<Material> materials(2);
     materials[0].indexCount = 300 * 3;

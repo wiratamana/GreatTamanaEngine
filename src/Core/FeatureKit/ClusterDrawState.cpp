@@ -159,6 +159,8 @@ ClusterDrawState::ClusterDrawState(std::string_view baseName, ClusterDrawShape s
         m_hizDummy.push_back(std::make_unique<PersistentTarget>(m_base + ".HizDummy" + suffix));
         m_historyDummy.push_back(std::make_unique<PersistentBuffer>(m_base + ".HistoryDummy" + suffix, kHistoryUse));
     }
+    m_hizDummyOnce.resize(rg::kViewScopeCount * m_shape.lanes);
+    m_historyDummyOnce.resize(rg::kViewScopeCount * m_shape.lanes);
     m_historyRecords.assign(rg::kViewScopeCount * m_shape.partSlots, ClusterHistoryRecord{});
     m_chainBytes.assign(chains * rg::kViewScopeCount, 0);
 }
@@ -240,7 +242,10 @@ Texture ClusterDrawState::HizDummy(Frame& frame, std::uint32_t lane)
     if (!InRange(lane, 0)) {
         return Texture{};
     }
-    return m_hizDummy[lane]->Acquire(frame, Extent2D{ 1, 1 }, PixelFormat::R32_Float);
+    detail::FrameContext* context = frame.Context();
+    const std::size_t index = rg::ViewScopeIndex(frame.Scope()) * m_shape.lanes + lane;
+    return m_hizDummyOnce[index].Get(frame.Serial(), context != nullptr ? context->builder : nullptr,
+        [&] { return m_hizDummy[lane]->Acquire(frame, Extent2D{ 1, 1 }, PixelFormat::R32_Float); });
 }
 
 PersistentBuffer* ClusterDrawState::History(std::uint32_t slot) noexcept
@@ -253,7 +258,10 @@ GpuBufferRef ClusterDrawState::HistoryDummy(Frame& frame, std::uint32_t lane)
     if (!InRange(lane, 0)) {
         return GpuBufferRef{};
     }
-    return m_historyDummy[lane]->Acquire(frame, kClusterHistoryBytes);
+    detail::FrameContext* context = frame.Context();
+    const std::size_t index = rg::ViewScopeIndex(frame.Scope()) * m_shape.lanes + lane;
+    return m_historyDummyOnce[index].Get(frame.Serial(), context != nullptr ? context->builder : nullptr,
+        [&] { return m_historyDummy[lane]->Acquire(frame, kClusterHistoryBytes); });
 }
 
 const ClusterHistoryRecord& ClusterDrawState::HistoryRecord(const Frame& frame, std::uint32_t slot) const noexcept

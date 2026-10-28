@@ -6,6 +6,7 @@
 #include "ComputeShader.h"
 #include "GpuParams.h"
 #include "GpuReadback.h"
+#include "OncePerFrame.h"
 #include "PersistentBuffer.h"
 #include "PersistentTarget.h"
 #include "../../Renderer/Culling/ClusterCullMath.h"
@@ -108,12 +109,13 @@ public:
     const char* StatsClearName(std::uint32_t lane, std::uint32_t slot) const noexcept;
     const char* StatsCopyName(std::uint32_t lane, std::uint32_t slot) const noexcept;
 
-    // A 1x1 texture of the lane for the pyramid binding of a pass that does not test occlusion. Once per frame and lane.
+    // A 1x1 texture of the lane for the pyramid binding of a pass that does not test occlusion.
+    // Acquired on the first call of a frame; later calls of that frame return the same texture.
     Texture HizDummy(Frame& frame, std::uint32_t lane);
 
     // Per-slot history words of a two-phase chain (one word per work item), shared by the two lanes.
     PersistentBuffer* History(std::uint32_t slot) noexcept;
-    // A small history stand-in of the lane for passes that never read or write history. Once per frame and lane.
+    // A small history stand-in of the lane for passes that never read or write history. Same per-frame rule as HizDummy().
     GpuBufferRef HistoryDummy(Frame& frame, std::uint32_t lane);
 
     // What the history buffer of a slot in the frame's view scope was last written for.
@@ -198,10 +200,12 @@ private:
     std::vector<std::unique_ptr<PersistentBuffer>> m_count;
     std::vector<std::unique_ptr<PersistentBuffer>> m_history;      // [slot]
     std::vector<std::unique_ptr<PersistentBuffer>> m_historyDummy; // [lane]
+    std::vector<OncePerFrame<GpuBufferRef>> m_historyDummyOnce;    // [scope][lane]
     std::vector<ClusterHistoryRecord> m_historyRecords;            // [scope][slot]
     std::vector<std::unique_ptr<GpuReadback<ClusterStatsWords>>> m_stats;
     std::vector<std::unique_ptr<GpuParams<ClusterCullParams>>> m_params;
     std::vector<std::unique_ptr<PersistentTarget>> m_hizDummy; // [lane]
+    std::vector<OncePerFrame<Texture>> m_hizDummyOnce;         // [scope][lane]
 
     std::array<const Pipeline*, kClusterPipelineKeyCount> m_pipelines{};
     std::array<rg::BuildRetryGate, kClusterPipelineKeyCount> m_pipelineGates;

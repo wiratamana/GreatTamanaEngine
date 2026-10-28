@@ -9,7 +9,7 @@
 [CmdletBinding()]
 param(
     [string]$BaseUrl = 'http://127.0.0.1:8080',
-    [string]$Terrain = (Join-Path $PSScriptRoot '..\..\build\Project\terrain_clustered.gta'),
+    [string]$Terrain = '',
     [switch]$SkipLoad,
     [string]$CameraEntity = 'Camera',
     [double[]]$TerrainCamera = @(0, 900, 0),
@@ -27,7 +27,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'lib.ps1')
+$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $Terrain) { $Terrain = Join-Path $ScriptDir '..\..\build\Project\terrain_clustered.gta' }
+. (Join-Path $ScriptDir 'lib.ps1')
 Initialize-CullLib -BaseUrl $BaseUrl
 
 $script:Report = New-Object System.Collections.Generic.List[string]
@@ -142,8 +144,9 @@ function Get-Pairwise {
 }
 
 # Excess <= 0 passes (value minus its limit). MsRule: no single round may miss by more than 2 ms.
+# -Partial: the baseline is incomplete, so the numbers are printed but the status is PARTIAL, never PASS or FAIL.
 function Add-Check {
-    param([string]$Id, [string]$Text, [double[]]$Excess, [bool]$RowsOk, [bool]$MsRule, [string]$Note = '')
+    param([string]$Id, [string]$Text, [double[]]$Excess, [bool]$RowsOk, [bool]$MsRule, [string]$Note = '', [switch]$Partial)
     $status = 'INVALID'
     $detail = ''
     $vals = @($Excess | Where-Object { -not [double]::IsNaN($_) })
@@ -151,7 +154,7 @@ function Add-Check {
         $med = Get-Median $vals
         $worst = [double](($vals | Measure-Object -Maximum).Maximum)
         $pass = ($med -le 0.0) -and ((-not $MsRule) -or ($worst -le 2.0))
-        $status = if ($pass) { 'PASS' } else { 'FAIL' }
+        $status = if ($Partial) { 'PARTIAL' } elseif ($pass) { 'PASS' } else { 'FAIL' }
         $detail = ('median excess {0}, worst round {1}' -f (Format-Num $med 'N3'), (Format-Num $worst 'N3'))
     } else {
         $detail = if (-not $RowsOk) { 'a row has too few valid samples' } else { 'missing data' }
@@ -281,7 +284,7 @@ try {
         } else {
             $ok7 = Test-RowsOk @('T2 full-pipeline|Frustum', 'T2 full-pipeline|Frustum-allScopes')
             $ex = Get-Pairwise $t2['Frustum-allScopes'] $t2['Frustum'] { param($before, $after) if ($before.Span -le 0) { [double]::NaN } else { ($after.Span / $before.Span) - 0.65 } }
-            Add-Check 'D7' 'T2 Frustum: span <= 0.65 x span with every feature on in both views' $ex $ok7 $false 'PARTIAL: baseline emulates the per-view switch only, not the old fixed shadow size; pass -BaselineSpanMs from an old build for the full check'
+            Add-Check 'D7' 'T2 Frustum: span <= 0.65 x span with every feature on in both views' $ex $ok7 $false 'Not evaluable without -BaselineSpanMs: the baseline emulates the per-view switch only, not the old fixed shadow size.' -Partial
         }
 
         $ok3 = Test-RowsOk @('T3 hiz-wall|Frustum', 'T3 hiz-wall|HiZ')
@@ -307,9 +310,10 @@ try {
 
         $failed = @($script:Checks | Where-Object { $_.Status -eq 'FAIL' }).Count
         $invalid = @($script:Checks | Where-Object { $_.Status -eq 'INVALID' }).Count
+        $partial = @($script:Checks | Where-Object { $_.Status -eq 'PARTIAL' }).Count
         Out-Line ''
-        Out-Line ("Summary: {0} checks, {1} FAIL, {2} INVALID." -f $script:Checks.Count, $failed, $invalid)
-        if ($failed -gt 0) { $exitCode = 1 } elseif ($invalid -gt 0) { $exitCode = 3 }
+        Out-Line ("Summary: {0} checks, {1} FAIL, {2} INVALID, {3} PARTIAL." -f $script:Checks.Count, $failed, $invalid, $partial)
+        if ($failed -gt 0) { $exitCode = 1 } elseif (($invalid + $partial) -gt 0) { $exitCode = 3 }
 
         Out-Line ''
         Out-Line 'Result table (ms; medians over rounds; pass sums are basis A):'

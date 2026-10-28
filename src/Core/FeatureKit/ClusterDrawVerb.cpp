@@ -612,15 +612,17 @@ public:
         const std::uint32_t lane = LaneOf(round);
 
         ClusterCullParams params = part.params;
+        ClusterCullFlags chainBits = ClusterCullFlags::None;
         if (round == 1) {
             SetClusterCullHiz(params, s.hizPlan.layout);
-            params.counts[3] |= kClusterCullFlagPhaseSecond;
+            chainBits = ClusterCullFlags::PhaseSecond;
         } else if (s.twoPhase) {
-            params.counts[3] |= kClusterCullFlagPhaseFirst | (run.historyValid ? kClusterCullFlagHistoryValid : 0u);
+            chainBits = ClusterCullFlags::PhaseFirst | (run.historyValid ? ClusterCullFlags::HistoryValid : ClusterCullFlags::None);
         }
         if (ClusterStatsWanted(s.stats, s.depthOnly, s.lane)) {
-            params.counts[3] |= kClusterCullFlagCollectReasons;
+            chainBits = chainBits | ClusterCullFlags::CollectReasons;
         }
+        params.counts[3] |= static_cast<std::uint32_t>(chainBits);
         const Texture pyramid = round == 1 ? s.atlas : run.hizDummy;
         return s.frame->Compute(state.CullShader(), PassNameOf(state, lane, part.slot, ClusterPassKind::Cull))
             .Params(*state.Params(s.frame->Context()->scope, lane, part.slot), params)
