@@ -2274,7 +2274,8 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Renderer/ResourcePoolTests.cpp
     Renderer/PipelineHandleTests.cpp
     Renderer/DrawStatsTests.cpp
-    Renderer/Culling/ClusterCullMathTests.cpp
+Renderer/Culling/ClusterCullMathTests.cpp
+Renderer/Culling/ClusterGpuParityTests.cpp
     Renderer/Culling/CullingTypesTests.cpp
     Renderer/ClusterShaderTextTests.cpp
     Renderer/ClusterTintTests.cpp
@@ -2790,6 +2791,8 @@ gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.vert
 gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixture.frag)
 gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/ReflectFixtureUniform.comp)
 gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/BufferFixture.comp)
+gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/GpuParityFill.comp)
+gte_add_shader(GreatTamanaEngineTests tests/Renderer/Shaders/GpuParityDump.comp)
 target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_REFLECT_COMP_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixture.comp.spv"
     GTE_TEST_REFLECT_VERT_SPV_PATH="${CMAKE_BINARY_DIR}/shaders/ReflectFixture.vert.spv"

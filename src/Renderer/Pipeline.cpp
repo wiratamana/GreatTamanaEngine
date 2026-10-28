@@ -4,6 +4,7 @@
 #include "Vertex.h"
 #include "Vulkan/ShaderModule.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -164,8 +165,7 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         dynamicState.dynamicStateCount = static_cast<std::uint32_t>(std::size(dynamicStates));
         dynamicState.pDynamicStates = dynamicStates;
 
-        // One push constant range: "model" Mat4 then "viewProj" Mat4, vertex stage. A set-0 combined image
-        // sampler layout is added when `materialSetLayout` is set.
+        // One push constant range: "model" Mat4 then "viewProj" Mat4, vertex stage.
         VkPushConstantRange pushConstantRange{};
         pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         pushConstantRange.offset = 0;
@@ -176,35 +176,39 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
         layoutInfo.pushConstantRangeCount = 1;
         layoutInfo.pPushConstantRanges = &pushConstantRange;
 
-        // materialSetLayout and bufferSetLayout both occupy set 0 and are never used together.
         m_hasSceneServicesSet = (sceneServicesSetLayout != VK_NULL_HANDLE);
         m_hasMaterialSet = (materialSetLayout != VK_NULL_HANDLE);
 
-        assert(!(materialSetLayout != VK_NULL_HANDLE && bufferSetLayout != VK_NULL_HANDLE)
-            && "Pipeline: materialSetLayout and bufferSetLayout are mutually exclusive.");
-
-        const VkDescriptorSetLayout setZeroLayout =
-            materialSetLayout != VK_NULL_HANDLE ? materialSetLayout : bufferSetLayout;
-
-        // Set layouts must be contiguous: with a scene-services set 1 and nothing at set 0, a zero-binding
-        // filler layout owns set 0. `setLayouts` must outlive vkCreatePipelineLayout() below.
-        std::vector<VkDescriptorSetLayout> setLayouts;
-        if (sceneServicesSetLayout != VK_NULL_HANDLE) {
-            if (setZeroLayout != VK_NULL_HANDLE) {
-                setLayouts = { setZeroLayout, sceneServicesSetLayout };
-            } else {
-                VkDescriptorSetLayoutCreateInfo fillerInfo{};
-                fillerInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-                fillerInfo.bindingCount = 0;
-                if (vkCreateDescriptorSetLayout(device, &fillerInfo, nullptr, &m_syntheticSetZeroLayout) !=
-                    VK_SUCCESS) {
-                    throw std::runtime_error(
-                        "Pipeline: vkCreateDescriptorSetLayout (synthetic set-0 filler) failed.");
-                }
-                setLayouts = { m_syntheticSetZeroLayout, sceneServicesSetLayout };
+        // Set 0 = material, set 1 = scene services, set 2 = buffers. Set layouts must be contiguous, so a
+        // zero-binding filler owns every gap below the highest used set. `setLayouts` must outlive vkCreatePipelineLayout().
+        const bool hasBufferSet = (bufferSetLayout != VK_NULL_HANDLE);
+        std::size_t setCount = 0;
+        if (hasBufferSet) {
+            setCount = 3;
+        } else if (m_hasSceneServicesSet) {
+            setCount = 2;
+        } else if (m_hasMaterialSet) {
+            setCount = 1;
+        }
+        const VkDescriptorSetLayout noLayout = VK_NULL_HANDLE;
+        std::vector<VkDescriptorSetLayout> setLayouts(setCount, noLayout);
+        if (m_hasMaterialSet) {
+            setLayouts[0] = materialSetLayout;
+        }
+        if (m_hasSceneServicesSet) {
+            setLayouts[1] = sceneServicesSetLayout;
+        }
+        if (hasBufferSet) {
+            setLayouts[2] = bufferSetLayout;
+        }
+        if (std::find(setLayouts.begin(), setLayouts.end(), noLayout) != setLayouts.end()) {
+            VkDescriptorSetLayoutCreateInfo fillerInfo{};
+            fillerInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+            fillerInfo.bindingCount = 0;
+            if (vkCreateDescriptorSetLayout(device, &fillerInfo, nullptr, &m_fillerSetLayout) != VK_SUCCESS) {
+                throw std::runtime_error("Pipeline: vkCreateDescriptorSetLayout (set filler) failed.");
             }
-        } else if (setZeroLayout != VK_NULL_HANDLE) {
-            setLayouts = { setZeroLayout };
+            std::replace(setLayouts.begin(), setLayouts.end(), noLayout, m_fillerSetLayout);
         }
 
         if (!setLayouts.empty()) {
@@ -248,10 +252,10 @@ Pipeline::Pipeline(VkDevice device, std::span<const VkFormat> colorFormats, VkFo
             throw std::runtime_error("Pipeline: vkCreateGraphicsPipelines failed.");
         }
     } catch (...) {
-        // The synthetic set-0 filler layout may already exist; no member owns it yet, so destroy it here.
-        if (m_syntheticSetZeroLayout != VK_NULL_HANDLE) {
-            vkDestroyDescriptorSetLayout(device, m_syntheticSetZeroLayout, nullptr);
-            m_syntheticSetZeroLayout = VK_NULL_HANDLE;
+        // The filler layout may already exist; no member owns it yet, so destroy it here.
+        if (m_fillerSetLayout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(device, m_fillerSetLayout, nullptr);
+            m_fillerSetLayout = VK_NULL_HANDLE;
         }
         vkDestroyShaderModule(device, fragModule, nullptr);
         vkDestroyShaderModule(device, vertModule, nullptr);
@@ -421,7 +425,7 @@ Pipeline::Pipeline(Pipeline&& other) noexcept
     , m_vertexLayout(other.m_vertexLayout)
     , m_hasSceneServicesSet(other.m_hasSceneServicesSet)
     , m_hasMaterialSet(other.m_hasMaterialSet)
-    , m_syntheticSetZeroLayout(std::exchange(other.m_syntheticSetZeroLayout, VK_NULL_HANDLE))
+    , m_fillerSetLayout(std::exchange(other.m_fillerSetLayout, VK_NULL_HANDLE))
 {
 }
 
@@ -436,7 +440,7 @@ Pipeline& Pipeline::operator=(Pipeline&& other) noexcept
         m_vertexLayout = other.m_vertexLayout;
         m_hasSceneServicesSet = other.m_hasSceneServicesSet;
         m_hasMaterialSet = other.m_hasMaterialSet;
-        m_syntheticSetZeroLayout = std::exchange(other.m_syntheticSetZeroLayout, VK_NULL_HANDLE);
+        m_fillerSetLayout = std::exchange(other.m_fillerSetLayout, VK_NULL_HANDLE);
     }
     return *this;
 }
@@ -451,9 +455,9 @@ void Pipeline::Destroy() noexcept
         vkDestroyPipelineLayout(m_device, m_layout, nullptr);
         m_layout = VK_NULL_HANDLE;
     }
-    if (m_syntheticSetZeroLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_syntheticSetZeroLayout, nullptr);
-        m_syntheticSetZeroLayout = VK_NULL_HANDLE;
+    if (m_fillerSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_device, m_fillerSetLayout, nullptr);
+        m_fillerSetLayout = VK_NULL_HANDLE;
     }
 }
 

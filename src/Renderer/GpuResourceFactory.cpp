@@ -345,11 +345,12 @@ Pipeline GpuResourceFactory::CreatePipeline(std::span<const VkFormat> colorForma
 }
 
 Pipeline GpuResourceFactory::CreateClusterPipeline(std::span<const VkFormat> colorFormats,
-    const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, bool cullBackFaces,
-    const char* debugName, VkDescriptorSetLayout sceneServicesSetLayout) const
+    const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout,
+    bool useMaterialSet, bool cullBackFaces, const char* debugName, VkDescriptorSetLayout sceneServicesSetLayout) const
 {
+    const VkDescriptorSetLayout materialSetLayout = useMaterialSet ? m_materialSetLayout : VK_NULL_HANDLE;
     return Pipeline(m_device, colorFormats, m_depthFormat, vertexShaderSpirvPath, fragmentShaderSpirvPath,
-        VertexLayout::PositionNormal, VK_NULL_HANDLE, debugName, m_bufferSetLayout, sceneServicesSetLayout,
+        vertexLayout, materialSetLayout, debugName, m_bufferSetLayout, sceneServicesSetLayout,
         cullBackFaces ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE);
 }
 

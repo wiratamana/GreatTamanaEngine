@@ -59,6 +59,10 @@ void ExecuteIndirectDraw(PassContext& ctx, const IndirectDrawRecord& record, con
         ctx.ReportOnce(kCategory, "draw skipped: the indirect or count buffer did not resolve");
         return;
     }
+    if (inputs.pipeline->HasMaterialSet() && inputs.materialSet == DescriptorSetHandle::Invalid) {
+        ctx.ReportOnce(kCategory, "draw skipped: the pipeline needs a material set and none was resolved");
+        return;
+    }
     if (!inputs.clusterBindings->Rewrite(ctx, inputs.clusterBindingIndex, record.visible, record.instances)) {
         ctx.ReportOnce(kCategory, "draw skipped: the descriptor set could not be written");
         assert(false && "an indirect draw must have a prepared set and resolvable buffers");
@@ -68,7 +72,7 @@ void ExecuteIndirectDraw(PassContext& ctx, const IndirectDrawRecord& record, con
 
     const SceneRecording recording(ctx);
     ctx.renderer->SubmitIndirect(*inputs.pipeline, *inputs.mesh, indirect, /*indirectOffset=*/0, record.maxDrawCount,
-        count, /*countBufferOffset=*/0, bufferSet, inputs.sceneSet, inputs.viewProjection);
+        count, /*countBufferOffset=*/0, bufferSet, inputs.sceneSet, inputs.viewProjection, inputs.materialSet);
     if (ctx.recordIndirectDraw) {
         ctx.recordIndirectDraw();
     }

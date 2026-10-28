@@ -1867,10 +1867,20 @@ gte_add_shader(GreatTamanaEditor src/Shaders/HizBuildBase.comp
 gte_add_shader(GreatTamanaEditor src/Shaders/HizBuildTop.comp
     EXTRA_DEPENDS src/Shaders/HizPyramidLayout.glsl
     GENERATED_DEPENDS "${GTE_CLUSTER_CULL_CONSTANTS_GLSL}")
-gte_add_shader(GreatTamanaEditor src/Shaders/MeshCluster.vert)
-gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.vert)
+gte_add_shader(GreatTamanaEditor src/Shaders/MeshCluster.vert
+    EXTRA_DEPENDS src/Shaders/ClusterDrawBuffers.glsl)
+gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.vert
+    EXTRA_DEPENDS src/Shaders/ClusterDrawBuffers.glsl)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.frag)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterTint.frag
+    EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/ClusterTint.glsl)
+# Cluster draw of textured (uv) and PBR (uv + tangent) meshes: their vertex shaders write the varyings of
+# TexturedMesh.vert / PbrMesh.vert, so the CPU draw's fragment shaders are reused.
+gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterUv.vert
+    EXTRA_DEPENDS src/Shaders/ClusterDrawBuffers.glsl)
+gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterTangent.vert
+    EXTRA_DEPENDS src/Shaders/ClusterDrawBuffers.glsl)
+gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterTintSurface.frag
     EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl src/Shaders/ClusterTint.glsl)
 
 # Cluster viewer fragment shaders (render to explicit RGBA8 targets); staged in every build.

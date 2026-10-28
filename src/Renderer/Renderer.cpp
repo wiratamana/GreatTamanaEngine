@@ -137,6 +137,7 @@ Renderer::Renderer(ISurfaceProvider& surfaceProvider, bool forceValidation, Pres
 {
     m_emptySet = m_resources.AllocateDescriptorSet(m_emptySetLayout.Native()).Native();
     m_bufferSetLayoutHandle = RegisterDescriptorSetLayout(m_resources.BufferDescriptorSetLayout());
+    m_emptySetLayoutHandle = RegisterDescriptorSetLayout(m_emptySetLayout.Native());
 }
 
 Renderer::~Renderer()
@@ -154,6 +155,7 @@ Renderer::~Renderer()
         }
         m_abandoned.Release(idle);
     }
+    UnregisterDescriptorSetLayout(m_emptySetLayoutHandle);
     UnregisterDescriptorSetLayout(m_bufferSetLayoutHandle);
 }
 
@@ -499,7 +501,8 @@ void Renderer::Submit(const Pipeline& pipeline, const Mesh& mesh, const Mat4& mo
 
 void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
     uint64_t indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset,
-    DescriptorSetHandle bufferDescriptorSet, DescriptorSetHandle sceneServicesSet, const Mat4& viewProjMatrix)
+    DescriptorSetHandle bufferDescriptorSet, DescriptorSetHandle sceneServicesSet, const Mat4& viewProjMatrix,
+    DescriptorSetHandle materialDescriptorSet)
 {
     assert(m_currentGraphPassCmd != VK_NULL_HANDLE
         && "Renderer::SubmitIndirect() called outside of a render-graph pass recording.");
@@ -514,10 +517,15 @@ void Renderer::SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuff
 
     const VkDescriptorSet effectiveSceneServicesSet =
         pipeline.HasSceneServicesSet() ? Native(sceneServicesSet) : VK_NULL_HANDLE;
+    const VkDescriptorSet effectiveMaterialSet =
+        pipeline.HasMaterialSet() ? Native(materialDescriptorSet) : VK_NULL_HANDLE;
+    assert((!pipeline.HasMaterialSet() || effectiveMaterialSet != VK_NULL_HANDLE)
+        && "Renderer::SubmitIndirect(): the pipeline needs a material set.");
 
     FrameRecorder::IssueIndirectDrawCommand(m_currentGraphPassCmd, pipeline.Native(), pipeline.Layout(),
-        mesh.VertexBuffer(), mesh.IndexBuffer(), Native(bufferDescriptorSet), effectiveSceneServicesSet,
-        viewProjMatrix, indirectBuffer, indirectOffset, maxDrawCount, countBuffer, countBufferOffset);
+        mesh.VertexBuffer(), mesh.IndexBuffer(), Native(bufferDescriptorSet), effectiveMaterialSet,
+        effectiveSceneServicesSet, viewProjMatrix, indirectBuffer, indirectOffset, maxDrawCount, countBuffer,
+        countBufferOffset);
 }
 
 Pipeline Renderer::CreatePipeline(const std::string& vertexShaderSpirvPath,
@@ -589,49 +597,40 @@ DescriptorSetLayoutHandle Renderer::BufferSetLayout() const noexcept
     return m_bufferSetLayoutHandle;
 }
 
+DescriptorSetLayoutHandle Renderer::EmptySetLayout() const noexcept
+{
+    return m_emptySetLayoutHandle;
+}
+
 const Pipeline* Renderer::CreateClusterPipeline(
     const ClusterPipelineKey& key, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
+    const bool depthOnly = key.variant == ClusterPipelineVariant::DepthOnly;
     ClusterPipelineSlot& slot = m_clusterPipelines[ClusterPipelineCacheIndex(key)];
     if (slot.pipeline != nullptr) {
-        assert(slot.sceneServicesSetLayout == sceneServicesSetLayout
-            && "Renderer::CreateClusterPipeline: one scene services layout per renderer");
-        return slot.sceneServicesSetLayout == sceneServicesSetLayout ? slot.pipeline.get() : nullptr;
+        // A depth-only pipeline has no scene set, so its caller's layout never matters.
+        const bool sameLayout = depthOnly || slot.sceneServicesSetLayout == sceneServicesSetLayout;
+        assert(sameLayout && "Renderer::CreateClusterPipeline: one scene services layout per renderer");
+        return sameLayout ? slot.pipeline.get() : nullptr;
     }
 
-    const bool depthOnly = key.variant == ClusterPipelineVariant::DepthOnly;
     if (!depthOnly && sceneServicesSetLayout == DescriptorSetLayoutHandle::Invalid) {
         return nullptr;
     }
 
-    const char* vertexPath = "shaders/MeshCluster.vert.spv";
-    const char* fragmentPath = "shaders/Mesh.frag.spv";
-    const char* debugName = "MeshCluster.vert/Mesh.frag";
-    switch (key.variant) {
-    case ClusterPipelineVariant::Lit:
-        break;
-    case ClusterPipelineVariant::IdTint:
-        fragmentPath = "shaders/MeshClusterTint.frag.spv";
-        debugName = "MeshCluster.vert/MeshClusterTint.frag";
-        break;
-    case ClusterPipelineVariant::DepthOnly:
-        vertexPath = "shaders/MeshClusterDepth.vert.spv";
-        fragmentPath = "shaders/MeshClusterDepth.frag.spv";
-        debugName = "MeshClusterDepth.vert/MeshClusterDepth.frag";
-        break;
-    }
-
+    const ClusterShaderSet shaders = ClusterShadersFor(key);
     try {
         const VkFormat colorFormat = ToVkFormat(ScenePixelFormat());
         const std::span<const VkFormat> colorFormats =
             depthOnly ? std::span<const VkFormat>() : std::span<const VkFormat>(&colorFormat, 1);
-        slot.pipeline = std::make_unique<Pipeline>(m_resources.CreateClusterPipeline(colorFormats, vertexPath,
-            fragmentPath, key.cullBackFaces, debugName, depthOnly ? VK_NULL_HANDLE : Native(sceneServicesSetLayout)));
+        slot.pipeline = std::make_unique<Pipeline>(m_resources.CreateClusterPipeline(colorFormats, shaders.vertex,
+            shaders.fragment, shaders.vertexLayout, ClusterKeyUsesMaterialSet(key), key.cullBackFaces,
+            shaders.debugName, depthOnly ? VK_NULL_HANDLE : Native(sceneServicesSetLayout)));
         slot.sceneServicesSetLayout = sceneServicesSetLayout;
     } catch (const std::exception& e) {
         if (!slot.failureLogged) {
             slot.failureLogged = true;
-            GTE_LOG_ERROR("Renderer", std::string("cluster pipeline '") + debugName + "' failed: " + e.what());
+            GTE_LOG_ERROR("Renderer", std::string("cluster pipeline '") + shaders.debugName + "' failed: " + e.what());
         }
         return nullptr;
     }

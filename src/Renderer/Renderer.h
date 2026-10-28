@@ -204,12 +204,14 @@ public:
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid);
 
     // Issues a counted indexed indirect draw (count taken from `countBuffer`, capped at `maxDrawCount`). Needs the
-    // indirect-draw device features. Set 0 = `bufferDescriptorSet`, set 1 = scene services when the pipeline has it.
+    // indirect-draw device features. Set 0 = `materialDescriptorSet` when the pipeline has a material set,
+    // set 1 = scene services when the pipeline has it, set 2 = `bufferDescriptorSet`.
     void SubmitIndirect(const Pipeline& pipeline, const Mesh& mesh, VkBuffer indirectBuffer,
         uint64_t indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset,
         DescriptorSetHandle bufferDescriptorSet,
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
-        const Mat4& viewProjMatrix = Mat4::Identity());
+        const Mat4& viewProjMatrix = Mat4::Identity(),
+        DescriptorSetHandle materialDescriptorSet = DescriptorSetHandle::Invalid);
 
     // Scene geometry pipeline. Builds against ScenePixelFormat().
     Pipeline CreatePipeline(const std::string& vertexShaderSpirvPath, const std::string& fragmentShaderSpirvPath,
@@ -226,9 +228,13 @@ public:
     // Layout of the buffer set: binding 0 = visible list, binding 1 = instances.
     DescriptorSetLayoutHandle BufferSetLayout() const noexcept;
 
-    // Cached cluster draw pipeline of `key` (PositionNormal vertices, set 0 = cluster buffer set). The lit and
-    // tint variants need `sceneServicesSetLayout` as set 1; depth-only ignores it. Null when the pipeline cannot
-    // be built (logged once per key). The pointer stays valid for the renderer's life. Main thread only.
+    // Zero-binding layout; fills the unused sets below the buffer set (cluster buffers sit at set 2).
+    DescriptorSetLayoutHandle EmptySetLayout() const noexcept;
+
+    // Cached cluster draw pipeline of `key` (vertex layout of `key.material`). Set 0 = material set (lit textured
+    // and PBR only), set 1 = scene services (lit and tint variants; `sceneServicesSetLayout`), set 2 = cluster
+    // buffer set. Null when the pipeline cannot be built (logged once per key). The pointer stays valid for the
+    // renderer's life. Main thread only.
     const Pipeline* CreateClusterPipeline(const ClusterPipelineKey& key, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
     // Device indirect draw capabilities. maxDrawIndirectCount is 0 unless multi draw is enabled.
@@ -423,6 +429,7 @@ private:
     };
     std::array<ClusterPipelineSlot, kClusterPipelineKeyCount> m_clusterPipelines;
     DescriptorSetLayoutHandle m_bufferSetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
+    DescriptorSetLayoutHandle m_emptySetLayoutHandle = DescriptorSetLayoutHandle::Invalid;
 
     // Runs one-shot graphs; created on first use. Declared last so it is destroyed first.
     rg::RenderGraph& OneShotGraph();

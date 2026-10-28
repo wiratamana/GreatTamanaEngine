@@ -1,0 +1,24 @@
+#version 450
+
+// Parity fixture: copies a sampled single-channel float image into a row-major float buffer.
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D source;
+
+layout(std430, binding = 1) writeonly buffer DumpBlock {
+    float values[];
+} dump;
+
+layout(push_constant) uniform PushBlock {
+    uint width;
+    uint height;
+} pc;
+
+void main()
+{
+    uvec2 p = gl_GlobalInvocationID.xy;
+    if (p.x >= pc.width || p.y >= pc.height) {
+        return;
+    }
+    dump.values[p.y * pc.width + p.x] = texelFetch(source, ivec2(p), 0).r;
+}

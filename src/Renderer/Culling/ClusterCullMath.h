@@ -6,6 +6,7 @@
 #include "../../Assets/MeshCluster.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
+#include "../VertexLayout.h"
 #include "ClusterCullConstants.h"
 #include "ClusterPassCounts.h"
 #include "CullingTypes.h"
@@ -349,20 +350,30 @@ enum class HizReason : std::uint8_t { None, Unavailable, TooLarge };
 
 enum class ClusterPipelineVariant : std::uint8_t { Lit, IdTint, DepthOnly };
 
+// Vertex layout and material of the drawn mesh: None = position + normal, Textured = position + normal + uv,
+// Pbr = position + normal + uv + tangent.
+enum class ClusterMaterialKind : std::uint8_t { None, Textured, Pbr };
+
 struct ClusterPipelineKey {
     ClusterPipelineVariant variant = ClusterPipelineVariant::Lit;
     bool cullBackFaces = false;
+    ClusterMaterialKind material = ClusterMaterialKind::None;
 
     friend constexpr bool operator==(const ClusterPipelineKey&, const ClusterPipelineKey&) noexcept = default;
 };
 
-// Number of distinct pipeline keys (3 variants x 2 cull modes).
-inline constexpr std::size_t kClusterPipelineKeyCount = 6;
+inline constexpr std::size_t kClusterPipelineVariantCount = 3;
+inline constexpr std::size_t kClusterMaterialKindCount = 3;
+
+// Number of distinct pipeline keys (variants x material kinds x 2 cull modes).
+inline constexpr std::size_t kClusterPipelineKeyCount = kClusterPipelineVariantCount * kClusterMaterialKindCount * 2;
 
 // Dense index of a key in [0, kClusterPipelineKeyCount), for a fixed-size pipeline cache.
 constexpr std::size_t ClusterPipelineCacheIndex(const ClusterPipelineKey& key) noexcept
 {
-    return static_cast<std::size_t>(key.variant) * 2 + (key.cullBackFaces ? 1 : 0);
+    const std::size_t variantAndKind =
+        static_cast<std::size_t>(key.variant) * kClusterMaterialKindCount + static_cast<std::size_t>(key.material);
+    return variantAndKind * 2 + (key.cullBackFaces ? 1 : 0);
 }
 
 // The cone test is dropped for a depth-only lane, which draws both sides.
@@ -372,14 +383,79 @@ constexpr ClusterCullFlags EffectiveClusterCullFlags(ClusterCullFlags flags, boo
     return static_cast<ClusterCullFlags>(depthOnly ? (bits & ~kClusterCullFlagBackfaceCone) : bits);
 }
 
-// The cone test and the back-face-culling pipeline are one decision.
-constexpr ClusterPipelineKey ClusterPipelineKeyFor(ClusterCullFlags flags, bool depthOnly, bool idTint) noexcept
+// The cone test and the back-face-culling pipeline are one decision. `material` picks the vertex layout and,
+// for the lit variant, the fragment shader and the material set.
+constexpr ClusterPipelineKey ClusterPipelineKeyFor(ClusterCullFlags flags, bool depthOnly, bool idTint,
+    ClusterMaterialKind material = ClusterMaterialKind::None) noexcept
 {
     ClusterPipelineKey key;
     key.variant = depthOnly ? ClusterPipelineVariant::DepthOnly
                             : (idTint ? ClusterPipelineVariant::IdTint : ClusterPipelineVariant::Lit);
     key.cullBackFaces = HasClusterCullFlag(EffectiveClusterCullFlags(flags, depthOnly), ClusterCullFlags::BackfaceCone);
+    key.material = material;
     return key;
+}
+
+// True when the pipeline of `key` binds a material set at set 0 (only the lit textured and PBR variants).
+constexpr bool ClusterKeyUsesMaterialSet(const ClusterPipelineKey& key) noexcept
+{
+    return key.variant == ClusterPipelineVariant::Lit && key.material != ClusterMaterialKind::None;
+}
+
+// Vertex layout the mesh buffer of a material kind must have.
+constexpr VertexLayout ClusterVertexLayoutFor(ClusterMaterialKind material) noexcept
+{
+    switch (material) {
+    case ClusterMaterialKind::Textured:
+        return VertexLayout::PositionNormalUv;
+    case ClusterMaterialKind::Pbr:
+        return VertexLayout::PositionNormalUvTangent;
+    case ClusterMaterialKind::None:
+        break;
+    }
+    return VertexLayout::PositionNormal;
+}
+
+// SPIR-V names (relative to the executable folder) and vertex layout of a cluster pipeline.
+struct ClusterShaderSet {
+    const char* vertex = "";
+    const char* fragment = "";
+    const char* debugName = "";
+    VertexLayout vertexLayout = VertexLayout::PositionNormal;
+};
+
+// The lit textured and PBR variants reuse the fragment shaders of the CPU mesh draw; every cluster vertex shader
+// writes the varyings that fragment shader reads. Depth-only draws read the position only.
+constexpr ClusterShaderSet ClusterShadersFor(const ClusterPipelineKey& key) noexcept
+{
+    ClusterShaderSet set;
+    set.vertexLayout = ClusterVertexLayoutFor(key.material);
+    const bool plain = key.material == ClusterMaterialKind::None;
+    const bool pbr = key.material == ClusterMaterialKind::Pbr;
+    switch (key.variant) {
+    case ClusterPipelineVariant::Lit:
+        set.vertex = plain ? "shaders/MeshCluster.vert.spv"
+                           : (pbr ? "shaders/MeshClusterTangent.vert.spv" : "shaders/MeshClusterUv.vert.spv");
+        set.fragment = plain ? "shaders/Mesh.frag.spv"
+                             : (pbr ? "shaders/PbrMesh.frag.spv" : "shaders/TexturedMesh.frag.spv");
+        set.debugName = plain ? "MeshCluster.vert/Mesh.frag"
+                              : (pbr ? "MeshClusterTangent.vert/PbrMesh.frag" : "MeshClusterUv.vert/TexturedMesh.frag");
+        break;
+    case ClusterPipelineVariant::IdTint:
+        set.vertex = plain ? "shaders/MeshCluster.vert.spv"
+                           : (pbr ? "shaders/MeshClusterTangent.vert.spv" : "shaders/MeshClusterUv.vert.spv");
+        set.fragment = plain ? "shaders/MeshClusterTint.frag.spv" : "shaders/MeshClusterTintSurface.frag.spv";
+        set.debugName = plain ? "MeshCluster.vert/MeshClusterTint.frag"
+                              : (pbr ? "MeshClusterTangent.vert/MeshClusterTintSurface.frag"
+                                     : "MeshClusterUv.vert/MeshClusterTintSurface.frag");
+        break;
+    case ClusterPipelineVariant::DepthOnly:
+        set.vertex = "shaders/MeshClusterDepth.vert.spv";
+        set.fragment = "shaders/MeshClusterDepth.frag.spv";
+        set.debugName = "MeshClusterDepth.vert/MeshClusterDepth.frag";
+        break;
+    }
+    return set;
 }
 
 // ---------------------------------------------------------------------------------------------

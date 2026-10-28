@@ -20,8 +20,8 @@ inline constexpr std::size_t kPipelineMaxColorAttachments = 8;
 class Pipeline {
 public:
     // Single-format form; forwards to the span constructor. SPIR-V paths are compiled "<exe dir>/shaders/*.spv".
-    // Set 0: `materialSetLayout` (PositionNormalUv, PositionNormalUvTangent) or `bufferSetLayout` (storage buffers).
-    // Set 1: `sceneServicesSetLayout`. An empty set 0 with a set 1 gets a zero-binding filler (no gaps allowed).
+    // Set 0: `materialSetLayout`. Set 1: `sceneServicesSetLayout`. Set 2: `bufferSetLayout` (storage buffers).
+    // Sets that are unused below the highest used one get a zero-binding filler (no gaps allowed).
     Pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat, const std::string& vertexShaderSpirvPath,
         const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout = VertexLayout::PositionColor,
         VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE, const char* debugName = nullptr,
@@ -73,7 +73,7 @@ public:
     bool HasMaterialSet() const noexcept { return m_hasMaterialSet; }
 
     // True when set 0 is a zero-binding filler; draws must bind the renderer's empty set there.
-    bool HasSyntheticSetZero() const noexcept { return m_syntheticSetZeroLayout != VK_NULL_HANDLE; }
+    bool HasSyntheticSetZero() const noexcept { return m_fillerSetLayout != VK_NULL_HANDLE && !m_hasMaterialSet; }
 
 private:
     void Destroy() noexcept;
@@ -86,8 +86,8 @@ private:
 
     bool m_hasSceneServicesSet = false;
     bool m_hasMaterialSet = false;
-    // Owned only when a zero-binding filler was needed at set 0; VK_NULL_HANDLE otherwise.
-    VkDescriptorSetLayout m_syntheticSetZeroLayout = VK_NULL_HANDLE;
+    // Zero-binding layout filling the unused sets below the highest used one; VK_NULL_HANDLE when no gap exists.
+    VkDescriptorSetLayout m_fillerSetLayout = VK_NULL_HANDLE;
 };
 
 } // namespace gte

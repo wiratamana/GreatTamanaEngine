@@ -479,14 +479,38 @@ TEST(ClusterCullMath, PipelineCacheIndexIsDenseAndUnique)
     std::array<bool, kClusterPipelineKeyCount> seen{};
     for (const ClusterPipelineVariant variant :
         { ClusterPipelineVariant::Lit, ClusterPipelineVariant::IdTint, ClusterPipelineVariant::DepthOnly }) {
-        for (const bool cullBackFaces : { false, true }) {
-            const std::size_t index = ClusterPipelineCacheIndex(ClusterPipelineKey{ variant, cullBackFaces });
-            ASSERT_LT(index, kClusterPipelineKeyCount);
-            EXPECT_FALSE(seen[index]);
-            seen[index] = true;
+        for (const ClusterMaterialKind material :
+            { ClusterMaterialKind::None, ClusterMaterialKind::Textured, ClusterMaterialKind::Pbr }) {
+            for (const bool cullBackFaces : { false, true }) {
+                const std::size_t index =
+                    ClusterPipelineCacheIndex(ClusterPipelineKey{ variant, cullBackFaces, material });
+                ASSERT_LT(index, kClusterPipelineKeyCount);
+                EXPECT_FALSE(seen[index]);
+                seen[index] = true;
+            }
         }
     }
     EXPECT_TRUE(std::all_of(seen.begin(), seen.end(), [](bool b) { return b; }));
+    EXPECT_EQ(kClusterPipelineKeyCount, kClusterPipelineVariantCount * kClusterMaterialKindCount * 2);
+}
+
+TEST(ClusterCullMath, PipelineKeyCarriesTheMaterialKindAndOnlyLitBindsAMaterialSet)
+{
+    const ClusterPipelineKey plain = ClusterPipelineKeyFor(ClusterCullFlags::Frustum, false, false);
+    EXPECT_EQ(plain.material, ClusterMaterialKind::None);
+    EXPECT_FALSE(ClusterKeyUsesMaterialSet(plain));
+
+    for (const ClusterMaterialKind material : { ClusterMaterialKind::Textured, ClusterMaterialKind::Pbr }) {
+        const ClusterPipelineKey lit = ClusterPipelineKeyFor(ClusterCullFlags::Frustum, false, false, material);
+        const ClusterPipelineKey tint = ClusterPipelineKeyFor(ClusterCullFlags::Frustum, false, true, material);
+        const ClusterPipelineKey depth = ClusterPipelineKeyFor(ClusterCullFlags::Frustum, true, false, material);
+        EXPECT_EQ(lit.material, material);
+        EXPECT_EQ(depth.material, material);
+        EXPECT_TRUE(ClusterKeyUsesMaterialSet(lit));
+        EXPECT_FALSE(ClusterKeyUsesMaterialSet(tint));
+        EXPECT_FALSE(ClusterKeyUsesMaterialSet(depth));
+        EXPECT_NE(ClusterPipelineCacheIndex(lit), ClusterPipelineCacheIndex(plain));
+    }
 }
 
 // ---- Hi-Z occlusion ----

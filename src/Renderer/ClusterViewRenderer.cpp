@@ -423,7 +423,9 @@ const Pipeline* ClusterViewRenderer::Impl::ViewPipeline(ClusterViewFragment frag
         return nullptr;
     }
     try {
-        const DescriptorSetLayoutHandle extraSets[] = { renderer.BufferSetLayout() };
+        // Cluster buffers sit at set 2; sets 0 and 1 are zero-binding fillers.
+        const DescriptorSetLayoutHandle extraSets[] = { renderer.EmptySetLayout(), renderer.EmptySetLayout(),
+            renderer.BufferSetLayout() };
         PipelineDesc desc = PipelinePreset::Opaque(PixelFormat::RGBA8_UNorm, renderer.DepthPixelFormat());
         desc.vertexLayout = VertexLayout::PositionNormal;
         desc.cullMode = cullBackFaces ? CullMode::Back : CullMode::None;

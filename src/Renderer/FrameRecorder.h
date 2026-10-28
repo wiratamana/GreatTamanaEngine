@@ -35,12 +35,14 @@ public:
         const Mat4& model, const Mat4& viewProj, VkDescriptorSet materialDescriptorSet,
         VkDescriptorSet sceneServicesSet = VK_NULL_HANDLE);
 
-    // Indirect-draw sibling of IssueDrawCommand(): set 0 = buffer set, set 1 = `sceneServicesSet` (when non-null).
-    // Counted draw; needs drawIndirectCount, multiDrawIndirect and drawIndirectFirstInstance. Never touches DrawStats.
+    // Indirect-draw sibling of IssueDrawCommand(): set 0 = `materialDescriptorSet`, set 1 = `sceneServicesSet`
+    // (each when non-null), set 2 = buffer set. Counted draw; needs drawIndirectCount, multiDrawIndirect and
+    // drawIndirectFirstInstance. Never touches DrawStats.
     static void IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
         VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet bufferDescriptorSet,
-        VkDescriptorSet sceneServicesSet, const Mat4& viewProj, VkBuffer indirectBuffer, uint64_t indirectOffset,
-        std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset);
+        VkDescriptorSet materialDescriptorSet, VkDescriptorSet sceneServicesSet, const Mat4& viewProj,
+        VkBuffer indirectBuffer, uint64_t indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer,
+        uint64_t countBufferOffset);
 
     // Records attachment barriers, the dynamic-rendering clear to `clearColor`, the queued draws, `recordExtra` and the
     // transition to `finalLayout`. A null target.depthImage skips depth; a real one is cleared to 1.0 and discarded.

@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 namespace gte {
 namespace {
@@ -249,6 +250,163 @@ TEST(ClusterShaderText, HizBuildTopShaderPushBlockAndBindings)
     EXPECT_TRUE(Contains(text, "level = kHizTopFirstLevel;"));
     EXPECT_TRUE(Contains(text, "uvec4 sizes;"));
     EXPECT_TRUE(Contains(text, "uvec4 levels;"));
+}
+
+// ---- cluster draw shaders ----
+
+std::string ReadShaderSource(const std::string& name)
+{
+    return ReadTextFile((std::string(GTE_TEST_SHADERS_DIR) + "/" + name).c_str());
+}
+
+// Trimmed lines of `text` that start with "layout(location" and contain `marker`.
+std::vector<std::string> LocationLines(const std::string& text, const std::string& marker)
+{
+    std::vector<std::string> lines;
+    std::size_t begin = 0;
+    while (begin < text.size()) {
+        std::size_t end = text.find('\n', begin);
+        if (end == std::string::npos) {
+            end = text.size();
+        }
+        std::string line = text.substr(begin, end - begin);
+        const std::size_t first = line.find_first_not_of(" \t\r");
+        if (first != std::string::npos) {
+            line = line.substr(first, line.find_last_not_of(" \t\r") - first + 1);
+            if (line.rfind("layout(location", 0) == 0 && line.find(marker) != std::string::npos) {
+                lines.push_back(line);
+            }
+        }
+        begin = end + 1;
+    }
+    return lines;
+}
+
+TEST(ClusterDrawShaderText, BuffersLiveAtSetTwoInOneSharedInclude)
+{
+    const std::string buffers = ReadShaderSource("ClusterDrawBuffers.glsl");
+    ASSERT_FALSE(buffers.empty());
+    EXPECT_TRUE(Contains(buffers, "layout(std430, set = 2, binding = 0) readonly buffer VisibleBlock {"));
+    EXPECT_TRUE(Contains(buffers, "layout(std430, set = 2, binding = 1) readonly buffer InstancesBlock {"));
+    EXPECT_FALSE(Contains(buffers, "set = 0"));
+    EXPECT_FALSE(Contains(buffers, "set = 1"));
+
+    for (const char* name :
+        { "MeshCluster.vert", "MeshClusterDepth.vert", "MeshClusterUv.vert", "MeshClusterTangent.vert" }) {
+        const std::string text = ReadShaderSource(name);
+        ASSERT_FALSE(text.empty()) << name;
+        EXPECT_TRUE(Contains(text, "#include \"ClusterDrawBuffers.glsl\"")) << name;
+        EXPECT_FALSE(Contains(text, "buffer VisibleBlock")) << name;
+        EXPECT_FALSE(Contains(text, "set = ")) << name;
+        EXPECT_TRUE(Contains(text, "invariant gl_Position;")) << name;
+        EXPECT_TRUE(Contains(text, "instances.items[entry.x].world")) << name;
+    }
+}
+
+TEST(ClusterDrawShaderText, TexturedVertexShaderWritesTheCpuDrawVaryings)
+{
+    const std::string cpu = ReadShaderSource("TexturedMesh.vert");
+    const std::string cluster = ReadShaderSource("MeshClusterUv.vert");
+    ASSERT_FALSE(cpu.empty());
+    ASSERT_FALSE(cluster.empty());
+    const std::vector<std::string> outs = LocationLines(cpu, " out ");
+    ASSERT_EQ(outs.size(), 3u);
+    for (const std::string& line : outs) {
+        EXPECT_TRUE(Contains(cluster, line)) << line;
+    }
+    const std::vector<std::string> ins = LocationLines(cpu, " in ");
+    ASSERT_EQ(ins.size(), 3u);
+    for (const std::string& line : ins) {
+        EXPECT_TRUE(Contains(cluster, line)) << line;
+    }
+    EXPECT_TRUE(Contains(cluster, "gl_Position = pc.viewProj * world;"));
+    EXPECT_TRUE(Contains(cluster, "outWorldNormal = mat3(model) * inNormal;"));
+}
+
+TEST(ClusterDrawShaderText, PbrVertexShaderKeepsTheCofactorNormalAndWindingSign)
+{
+    const std::string cpu = ReadShaderSource("PbrMesh.vert");
+    const std::string cluster = ReadShaderSource("MeshClusterTangent.vert");
+    ASSERT_FALSE(cpu.empty());
+    ASSERT_FALSE(cluster.empty());
+    const std::vector<std::string> outs = LocationLines(cpu, " out ");
+    ASSERT_EQ(outs.size(), 5u);
+    for (const std::string& line : outs) {
+        EXPECT_TRUE(Contains(cluster, line)) << line;
+    }
+    const std::vector<std::string> ins = LocationLines(cpu, " in ");
+    ASSERT_EQ(ins.size(), 4u);
+    for (const std::string& line : ins) {
+        EXPECT_TRUE(Contains(cluster, line)) << line;
+    }
+    // Mirrored instances need the same math as the CPU draw.
+    for (const char* expression : { "mat3 cofactor = mat3(cross(m[1], m[2]), cross(m[2], m[0]), cross(m[0], m[1]));",
+             "float windingSign = determinant(m) < 0.0 ? -1.0 : 1.0;",
+             "outWorldNormal = cofactor * inNormal * windingSign;",
+             "outWorldTangent = vec4(m * inTangent.xyz, inTangent.w * windingSign);", "outWindingSign = windingSign;" }) {
+        EXPECT_TRUE(Contains(cpu, expression)) << expression;
+        EXPECT_TRUE(Contains(cluster, expression)) << expression;
+    }
+}
+
+TEST(ClusterDrawShaderText, TintSurfaceShaderReadsTheClusterIdBothLayoutsWrite)
+{
+    const std::string frag = ReadShaderSource("MeshClusterTintSurface.frag");
+    ASSERT_FALSE(frag.empty());
+    EXPECT_TRUE(Contains(frag, "#include \"ClusterTint.glsl\""));
+    EXPECT_TRUE(Contains(frag, "layout(location = 0) in vec3 inWorldNormal;"));
+    EXPECT_TRUE(Contains(frag, "layout(location = 2) in vec3 inWorldPos;"));
+    EXPECT_TRUE(Contains(frag, "layout(location = 5) flat in uint inClusterId;"));
+    for (const char* name : { "MeshClusterUv.vert", "MeshClusterTangent.vert" }) {
+        const std::string vert = ReadShaderSource(name);
+        EXPECT_TRUE(Contains(vert, "layout(location = 0) out vec3 outWorldNormal;")) << name;
+        EXPECT_TRUE(Contains(vert, "layout(location = 2) out vec3 outWorldPos;")) << name;
+        EXPECT_TRUE(Contains(vert, "layout(location = 5) flat out uint outClusterId;")) << name;
+    }
+}
+
+TEST(ClusterDrawShaderText, EveryPipelineKeyNamesExistingShadersAndItsVertexLayout)
+{
+    for (const ClusterPipelineVariant variant :
+        { ClusterPipelineVariant::Lit, ClusterPipelineVariant::IdTint, ClusterPipelineVariant::DepthOnly }) {
+        for (const ClusterMaterialKind material :
+            { ClusterMaterialKind::None, ClusterMaterialKind::Textured, ClusterMaterialKind::Pbr }) {
+            ClusterPipelineKey key;
+            key.variant = variant;
+            key.material = material;
+            const ClusterShaderSet set = ClusterShadersFor(key);
+            EXPECT_EQ(set.vertexLayout, ClusterVertexLayoutFor(material));
+            for (const std::string path : { std::string(set.vertex), std::string(set.fragment) }) {
+                const std::string prefix = "shaders/";
+                const std::string suffix = ".spv";
+                ASSERT_TRUE(path.rfind(prefix, 0) == 0 && path.size() > prefix.size() + suffix.size()) << path;
+                const std::string source = path.substr(prefix.size(), path.size() - prefix.size() - suffix.size());
+                EXPECT_FALSE(ReadShaderSource(source).empty()) << source;
+            }
+            EXPECT_NE(std::string(set.debugName), "");
+        }
+    }
+}
+
+TEST(ClusterDrawShaderText, LitTexturedAndPbrReuseTheCpuDrawFragmentShaders)
+{
+    ClusterPipelineKey key;
+    key.material = ClusterMaterialKind::Textured;
+    EXPECT_STREQ(ClusterShadersFor(key).fragment, "shaders/TexturedMesh.frag.spv");
+    EXPECT_STREQ(ClusterShadersFor(key).vertex, "shaders/MeshClusterUv.vert.spv");
+    key.material = ClusterMaterialKind::Pbr;
+    EXPECT_STREQ(ClusterShadersFor(key).fragment, "shaders/PbrMesh.frag.spv");
+    EXPECT_STREQ(ClusterShadersFor(key).vertex, "shaders/MeshClusterTangent.vert.spv");
+    key.material = ClusterMaterialKind::None;
+    EXPECT_STREQ(ClusterShadersFor(key).fragment, "shaders/Mesh.frag.spv");
+    EXPECT_STREQ(ClusterShadersFor(key).vertex, "shaders/MeshCluster.vert.spv");
+    // Depth-only draws use one vertex shader for every layout.
+    key.variant = ClusterPipelineVariant::DepthOnly;
+    for (const ClusterMaterialKind material :
+        { ClusterMaterialKind::None, ClusterMaterialKind::Textured, ClusterMaterialKind::Pbr }) {
+        key.material = material;
+        EXPECT_STREQ(ClusterShadersFor(key).vertex, "shaders/MeshClusterDepth.vert.spv");
+    }
 }
 
 } // namespace

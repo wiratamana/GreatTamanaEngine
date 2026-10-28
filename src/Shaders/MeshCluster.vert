@@ -3,24 +3,13 @@
 // Cluster mesh vertex shader: gl_InstanceIndex is the firstInstance of the draw command, a slot in `visible`.
 // Same outputs as Mesh.vert, so Mesh.frag is reused.
 
+#include "ClusterDrawBuffers.glsl"
+
 // Same 128-byte block as every pipeline; only viewProj is read here.
 layout(push_constant) uniform PushConstants {
     mat4 model;
     mat4 viewProj;
 } pc;
-
-struct ClusterInstance {
-    mat4 world;
-    uvec4 info;
-};
-
-layout(std430, set = 0, binding = 0) readonly buffer VisibleBlock {
-    uvec2 items[]; // x = instance index, y = cluster index.
-} visible;
-
-layout(std430, set = 0, binding = 1) readonly buffer InstancesBlock {
-    ClusterInstance items[];
-} instances;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;

@@ -79,11 +79,11 @@ public:
         bool useMaterialTexture = false, const char* debugName = nullptr,
         VkDescriptorSetLayout sceneServicesSetLayout = VK_NULL_HANDLE) const;
 
-    // Cluster draw pipeline: PositionNormal vertices, set 0 = buffer set, set 1 = `sceneServicesSetLayout`
-    // when non-null. Empty `colorFormats` builds a depth-only pipeline.
+    // Cluster draw pipeline: set 0 = material set when `useMaterialSet`, set 1 = `sceneServicesSetLayout` when
+    // non-null, set 2 = buffer set. Empty `colorFormats` builds a depth-only pipeline.
     Pipeline CreateClusterPipeline(std::span<const VkFormat> colorFormats, const std::string& vertexShaderSpirvPath,
-        const std::string& fragmentShaderSpirvPath, bool cullBackFaces, const char* debugName,
-        VkDescriptorSetLayout sceneServicesSetLayout) const;
+        const std::string& fragmentShaderSpirvPath, VertexLayout vertexLayout, bool useMaterialSet, bool cullBackFaces,
+        const char* debugName, VkDescriptorSetLayout sceneServicesSetLayout) const;
 
     ComputePipeline CreateComputePipeline(const std::string& shaderSpirvPath,
         const std::vector<VkDescriptorSetLayout>& descriptorSetLayouts = {},

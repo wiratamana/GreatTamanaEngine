@@ -49,8 +49,9 @@ void FrameRecorder::IssueDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, V
 
 void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout,
     VkBuffer vertexBuffer, VkBuffer indexBuffer, VkDescriptorSet bufferDescriptorSet,
-    VkDescriptorSet sceneServicesSet, const Mat4& viewProj, VkBuffer indirectBuffer, uint64_t indirectOffset,
-    std::uint32_t maxDrawCount, VkBuffer countBuffer, uint64_t countBufferOffset)
+    VkDescriptorSet materialDescriptorSet, VkDescriptorSet sceneServicesSet, const Mat4& viewProj,
+    VkBuffer indirectBuffer, uint64_t indirectOffset, std::uint32_t maxDrawCount, VkBuffer countBuffer,
+    uint64_t countBufferOffset)
 {
     assert(countBuffer != VK_NULL_HANDLE && "IssueIndirectDrawCommand: a count buffer is required.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
@@ -63,16 +64,17 @@ void FrameRecorder::IssueIndirectDrawCommand(VkCommandBuffer cmd, VkPipeline pip
     std::memcpy(pushConstants.viewProj, viewProj.Data(), sizeof(pushConstants.viewProj));
     vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), &pushConstants);
 
-    // Set 0 is always the buffer set of the cluster pipelines.
-    vkCmdBindDescriptorSets(
-        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &bufferDescriptorSet, 0, nullptr);
-
-    // Set 1, bound only when a scene-services set was resolved (SubmitIndirect() gates it).
+    // Set 0 (material) and set 1 (scene services) only when the pipeline resolved them; set 2 is always the buffers.
+    if (materialDescriptorSet != VK_NULL_HANDLE) {
+        vkCmdBindDescriptorSets(
+            cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, /*firstSet=*/0, 1, &materialDescriptorSet, 0, nullptr);
+    }
     if (sceneServicesSet != VK_NULL_HANDLE) {
         vkCmdBindDescriptorSets(
             cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, /*firstSet=*/1, 1, &sceneServicesSet, 0, nullptr);
     }
-
+    vkCmdBindDescriptorSets(
+        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, /*firstSet=*/2, 1, &bufferDescriptorSet, 0, nullptr);
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
     vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT32);

@@ -36,11 +36,12 @@ struct IndirectDrawRecord {
 
 // What the execute side needs besides the record; resolved by the caller each frame.
 // The set at `clusterBindingIndex` is rewritten from the record's `visible` and `instances` buffers right
-// before the draw.
+// before the draw. `materialSet` is bound at set 0 and required exactly when the pipeline has a material set.
 struct IndirectDrawInputs {
     const Pipeline* pipeline = nullptr;
     const Mesh* mesh = nullptr;
     DescriptorSetHandle sceneSet = DescriptorSetHandle::Invalid;
+    DescriptorSetHandle materialSet = DescriptorSetHandle::Invalid;
     Mat4 viewProjection = Mat4::Identity();
     ClusterDrawBindings* clusterBindings = nullptr;
     std::size_t clusterBindingIndex = 0;
