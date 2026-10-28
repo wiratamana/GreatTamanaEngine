@@ -135,8 +135,8 @@ Rules:
 
 - **Claim after proof.** An entity is claimed only when its whole chain was declared. A chain
   that stops part way claims nothing, so the CPU path draws the entity.
-- **Capture frames never claim** for the Game view. While the Frame Debugger window is open
-  and enabled, the Game view draws every entity on the CPU path, so replay steps stay exact.
+- **Capture frames never claim or cull** for the primary view. While the Frame Debugger window is open
+  and enabled, the primary view draws every entity on the CPU path with no cull, so replay steps stay exact.
 - **Per view scope.** Every instance, visible, command and count buffer, parameter block and
   claimed set belongs to one (view scope, lane, part slot). Game and Scene views never share
   one. A shared-scope frame has no camera, so the verb is inert there.
@@ -196,12 +196,15 @@ Both vertex shaders declare `invariant gl_Position` with the same expression ord
   count's frame is gone, `visibleValid` is false and `statsCollected` says why. Stats are off by default.
   The age of a visible count is exactly `frame - visibleFrame`. The profiler does not carry cluster counts: read them from
   here, never as triangles, and take timing from a run with stats off (see [Profiling](profiling.md)).
-- `GET /feature_debug/set?name=GpuDrivenScene&frustum=...&cone=...&freezeCulling=true&collectStats=true&debugView=ClusterId`.
-- **Freeze culling** keeps the cull camera of the last live frame while the view camera moves (both views).
-  Move the camera, then fetch `GET /get_game_view` to see what was culled. A disabled feature clears it;
-  a resize keeps it. For the Scene view alone use `sceneSource=Frozen` (see "Scene cull view").
+- `GET /feature_debug/set?name=GpuDrivenScene&mode=Frustum&cone=false&collectStats=true&debugView=ClusterId`.
+  `mode` is `NoCull`, `Frustum` or `HiZ`. `GET /feature_debug/invoke?name=GpuDrivenScene&action=reset_defaults` resets all.
+- **CPU path numbers.** `cpuTested`, `cpuCulled`, `cpuUnbounded` and `cpuCullState` per view (see "CPU path culling"). Compare
+  `draw_call_count` of `RenderOpaque` in `GET /render_graph` between `NoCull` and `Frustum`. Compare milliseconds, not FPS: the
+  swapchain presents with VSync.
+- **See the cull.** In `Frustum` or `HiZ` mode the secondary view shows exactly what the game camera keeps. Move the secondary
+  camera with `GET /scene_camera/set_pose` and fetch `GET /scene_camera/image`.
 - **`debugView=ClusterId`** colours each cluster by a hash of its id (`MeshClusterTint.frag`).
-  Culled clusters are not visible by design: look at the Scene view with a frozen cull camera.
+  Culled clusters are not visible by design: look at the secondary view from outside the game frustum.
 - `GET /render_graph`: per-pass `gpu_timing_milliseconds`, `draw_call_count`,
   `indirect_draw_count`, plus `indirect_draw` (device caps) and `gpu_memory`
   (`total_bytes`, `mesh_count`, `by_name`). Indirect draws never add to `triangle_count`.
@@ -230,8 +233,12 @@ Both vertex shaders declare `invariant gl_Position` with the same expression ord
 - With one job worker or no job system, a build runs inline and stalls the editor.
 - The rename of the atomic write fails when another handle holds the target open. It is atomic
   against a crash, not durable against a power cut.
-- Hi-Z occlusion uses last frame's depth. It tests only boxes that were fully on screen last frame.
-  Boxes with a corner behind the eye, or a rect above level 5 (64 depth texels), are kept.
+- Hi-Z occlusion exists only on the cluster path. Cubes and other primitives, textured and PBR meshes and skinned models are
+  CPU-drawn and get frustum culling only.
+- Hi-Z occlusion uses last frame's depth. It tests only boxes that were fully on screen last frame. Boxes with a corner
+  behind the eye are kept. A box whose rect is wider than 32 level-0 texels (about 64 scene pixels) is kept, so only small
+  occludees are removed. A large occluder works fine.
+- A moved instance is never occlusion-culled, and the pyramid needs two clean builds after a start, resize or camera cut.
 - Two-phase occlusion (draw last frame's survivors, rebuild the pyramid, test the rest) is not implemented.
   Fast camera motion can pop a cluster in for one frame.
 
@@ -250,56 +257,70 @@ Both vertex shaders declare `invariant gl_Position` with the same expression ord
 - A moved instance is never occlusion-culled. Core tracks last frame's world matrices only while a pyramid
   is being built (`Core::RequestOcclusionTracking`); a new entity counts as moved.
 - Depth-only lanes never use the pyramid.
-- Debug: `/feature_debug/set?name=GpuDrivenScene&occlusion=true`; read `game.occlusion` (`Applied`, `Unusable`,
-  `CameraNotLive`, `NotRequested`) and `game.hizReason`. A frozen cull camera never uses the pyramid
-  (see "Scene cull view"). To look at the Hi-Z result use `sceneCull=FrustumHiz` and the Scene view.
+- Debug: `/feature_debug/set?name=GpuDrivenScene&mode=HiZ`; read `game.occlusion` (`Applied`, `Unusable`,
+  `NoCullCamera`, `NotRequested`) and `game.hizReason`. The secondary view never uses a pyramid (see "Culling mode").
+  To see what the game camera keeps, look at the secondary view with `mode=Frustum` or `mode=HiZ`.
 
-## Scene cull view
+## Culling mode
 
-The Scene panel has a "Cull view" box. It picks the cull tests of the **Scene view only** and shows how many
-clusters are visible and hidden. The Game view never reads these fields.
+One setting, `mode`, decides what is culled in both views and on both draw paths. The "Culling" panel (feature
+`GpuDrivenScene`) has the combo. The default is `Frustum`.
 
-- **Settings.** The first group (`frustum`, `cone`, `occlusion`, `freezeCulling`) drives the Game view, and the Scene view
-  while `sceneCull=FollowSettings`. Scene-only fields: `sceneCull` (`FollowSettings`, `Off`, `Frustum`, `FrustumHiz`),
-  `sceneCone`, `sceneSource` (`Live`, `Frozen`), `freezeSerial` (read-only) and `ghost` (`NotDrawn`). `Off` keeps
-  the cluster draw path with no culling flags, so it is the baseline. `freezeCulling` freezes both views.
-  `reset_defaults` and the panel button reset everything except `freezeSerial`. Unchecking "Cull view" resets only the
-  Scene-only fields.
-- **Link.** `fx::ViewCullLink` (`Core/FeatureKit/ViewCullLink.h`) is plain data: the Scene panel writes `request`, the
-  feature writes `report`. The feature owns it as `std::shared_ptr`; the editor keeps a copy in `EditorContext::viewCull`
-  (empty without the feature). The feature flushes a pending request at the first view callback of a frame. Every other
-  writer (debug endpoint, feature panel) goes through `EditableSettings()`, which flushes first, so the last writer wins
-  in event order. Main thread only.
-- **The box.** The box is open while the user ticked "Cull view" (one UI-only flag) or while the report differs from the
-  all-default state. An HTTP change therefore opens the box with no click. Unticking sends a reset and the box stays
-  closed until the feature flushes it. The box draws nothing while the report is stale.
-- **Stale rule.** The panel counts UI frames while `report.frame` stands still. After 4 UI frames the report is stale: no
-  HUD, and `cull_view.stale=true`, `rendered=false` in HTTP. A gap in UI frames (panel hidden) starts the count fresh.
-- **Layout.** The box sits below the Move/Rotate/Scale switcher row, right aligned, so the switcher stays clickable at any
-  panel width. It is skipped when the free space is too small, and it scrolls when the HUD is taller than the free height.
-- **Frozen camera.** `sceneSource=Frozen` captures the Scene camera once. A new `freezeSerial` (the "Freeze here" button
-  or `invoke action=freeze_here`) captures again. A resize keeps the frozen camera: the frustum is world geometry.
-  The outline of the frozen cull frustum is drawn in the Scene panel and in `GET /scene_camera/image`. While the source
-  is `Frozen` and no valid camera exists yet, the HUD says it waits for a valid camera.
-- **Hi-Z honesty.** The pyramid is built from the live camera depth of the view. One rule, `HizMatchesCullCamera`
-  (`GpuDrivenSceneTypes.h`), says a view uses Hi-Z only when it asked for it and its cull camera is live. The feature
-  drops the Hi-Z test otherwise (`occlusion=CameraNotLive`), also when `occlusion=true` and `freezeCulling=true` are set
-  through HTTP. A view that does not need the pyramid does not build it. A Scene-only `Frustum` choice requests no
-  movement tracking (`hizTrackingRequested=false`).
+| Mode | Cluster path (GPU) | CPU path |
+|---|---|---|
+| `NoCull` | No culling flags. Baseline. | No cull request. |
+| `Frustum` | Frustum test (and the cone test when `cone` is on). | Frustum test on padded world bounds. |
+| `HiZ` | Frustum plus Hi-Z occlusion. | Same as `Frustum`. Hi-Z cannot test CPU-drawn meshes. |
+
+- **Cull camera.** The cull camera is the active game camera (the first active `Camera`). The primary view culls with its own
+  camera (`cullCamera=own`). The secondary view culls with the primary camera (`cullCamera=primary`), never with its own. So
+  the secondary view shows exactly what the game camera keeps: fly the secondary camera away and the world is cut at the game
+  frustum. The game frustum uses the primary aspect. If the primary view is not rendered, the last known primary aspect is used.
+- **No camera.** With no active camera, or a camera whose matrix is not finite, the view uses `cullCamera=none`. Nothing is
+  culled and the panel says why.
+- **Settings.** `enabled` (GPU cluster path on or off, never changes the CPU cull), `mode`, `cone`, `collectStats`, `debugView`.
+  `cone` is only correct for closed meshes. When the cull camera is not the view camera, the cone test uses the cull camera eye,
+  so back faces seen from the secondary camera can vanish. `reset_defaults` and the panel button reset everything.
+- **Hi-Z owner.** Only the primary view builds a pyramid. In `HiZ` mode the secondary view reports `occlusion=Unusable`,
+  `hizReason=Unavailable` ("shared pyramid not available") and acts as `Frustum`. `hizSource` is `own` for the primary view
+  and `none` for the secondary view. `occlusion=NoCullCamera` means no cull camera was available.
 - **Counts.** `tested` is from the current frame, `visible` is two frames old. The feature keeps the tested value of the
   last 4 frames and pairs each visible count with the tested value of its own frame (`testedAtVisibleFrame`).
   `hidden = testedAtVisibleFrame - visible` is computed once, in the feature, and it is empty (`hiddenValid=false`) when
-  visible is larger. The HUD says "no data yet" without a visible count and "Counts are settling" while `hiddenValid` is
-  false.
-- **Stats gate.** The Scene view reads the count while `collectStats` is on or the HUD was drawn in the last 3 frames.
-  The user setting `collectStats` is never changed. With the tool off, no stats pass of the Scene view runs.
-- **State.** `/feature_debug/state?name=GpuDrivenScene` adds `sceneCull`, `sceneCullMode` (`Off`, `Frustum`,
-  `FrustumHiz`, `Custom`), `sceneCone`, `sceneSource`, `freezeSerial`, `ghost` and per view `occlusion`, `hizReason`,
-  `cameraValid`, `hizTrackingRequested`, `cullFrozenFrame`, `testedAtVisibleFrame`, `hidden`, `hiddenValid`.
-  `GET /scene_camera/state` has the same HUD numbers in `cull_view` (`camera_valid`, `tested`, `stale`, ...). The HUD is
-  ImGui and is not in the PNG: every HUD number is in JSON. `GET /scene_camera/set_pose` moves the Scene camera by HTTP.
-- **Limits.** Only cluster-path meshes are counted. CPU-drawn meshes are never culled by this system and are not shown.
-  Hidden clusters are not drawn. Hi-Z of a frozen cull camera is not available.
+  visible is larger.
+- **State.** `/feature_debug/state?name=GpuDrivenScene` gives `enabled`, `mode`, `cone`, `collectStats`, `debugView`, `supported`
+  and per view (`game.` primary, `scene.` secondary) the cluster numbers, `occlusion`, `hizReason`, `cameraValid`,
+  `hizTrackingRequested`, `cullCamera`, `hizSource`, `cpuTested`, `cpuCulled`, `cpuUnbounded` and `cpuCullState`
+  (`active`, `off`, `suppressed: frame capture`, `no camera`). The panel prints the same numbers.
+  `GET /scene_camera/image` returns the secondary view image without a screenshot.
+
+## CPU path culling
+
+Entities that are not on the cluster path are drawn by `RenderSystem::Draw`. It frustum-culls them when it gets a
+`SceneCullRequest`.
+
+- **Request flow.** A feature calls `Frame::CullSceneDraw(viewProjection, padding)` in its own always-on Opaque callback
+  (`GpuDrivenScene.SceneCull`). `Core::SetSceneDrawCull` stores one request per view scope (the last write of the frame wins).
+  The `RenderOpaque` pass reads it at execute time and passes it to `Game::Render`. The callback is not a render pass: it ignores
+  `enabled` and the cluster pass toggles. The CPU cull follows `mode` alone.
+- **Refused.** `CullSceneDraw` returns false for the shared scope, with no engine context, for an unusable matrix
+  (`TryExtractFrustumPlanes` is empty: non-finite entry or degenerate plane) and while the Frame Debugger records the primary view.
+  An unusable matrix never culls. It is not a fallback plane.
+- **Capture rule.** While the Frame Debugger records the primary view, the primary view does no CPU cull and no cluster claim
+  (`SceneCullAllowed` and `ClusterClaimAllowed` share one rule), so replay steps stay exact. The secondary view is not affected.
+  The state says `suppressed: frame capture`.
+- **Test.** The world box is the local bounds transformed by the world matrix, padded by 5% of its largest extent
+  (`IsBoundsOutsideFrustum`). A non-finite world matrix keeps the entity.
+- **Counts.** `Draw` fills `SceneCullCounts` over entities that are not claimed by the cluster path and not past `maxDrawCount`:
+  `tested` (has bounds, was tested), `culled` (tested and outside), `unbounded` (no local bounds, kept). The counts are one frame
+  old (`Frame::LastSceneDrawCullCounts`) and read zero when the view did not run in the last frame.
+- **No bounds.** A mesh without local bounds is always kept and is not cluster-synthesizable.
+- **Skinned meshes.** A skinned model's parts carry no local bounds (`PartLocalBounds`), because their vertices change at runtime.
+  The CPU cull, the shadow caster cull and the cluster synthesis therefore keep them.
+- **Convention.** A mesh whose vertices change after upload, or whose vertex shader displaces vertices, must not set local bounds.
+- **Scope.** Only the main scene draw gets the request. Project and feature scene draws draw without a cull unless they ask for one.
+- **Hi-Z.** CPU-drawn meshes (primitives such as cubes, textured and PBR meshes) get frustum culling only. If no mesh is on the
+  cluster path, the panel says so.
 
 ## Cluster Viewer
 

@@ -4,6 +4,23 @@ Reverse-chronological history of every feature campaign landed in this
 engine. For the short, current-state summary, see the main
 [README.md](../README.md)'s own "Status" section.
 
+## Culling mode and CPU path culling (branch `feature/gpu-cull-impl`, 2026-10-28)
+
+- **CPU path culling.** `RenderSystem::Draw` frustum-culls entities that are not on the cluster path, with padded world bounds
+  (padding 0.05). Entities without local bounds are kept and counted. An unusable matrix or no active camera never culls. The
+  primary view does no CPU cull and no cluster claim while the Frame Debugger records it.
+- **Skinned meshes carry no local bounds** (`PartLocalBounds`), so no cull uses stale bind-pose boxes.
+- **One setting.** `mode` (`NoCull`, `Frustum`, `HiZ`; default `Frustum`) replaces `frustum`, `occlusion` and `freezeCulling`.
+  `enabled` switches the cluster path only.
+- **Game-camera cull.** The secondary view culls with the primary (active game) camera. The primary view builds the only Hi-Z
+  pyramid; the secondary view reports `Unavailable` and acts as `Frustum`.
+- **New panel.** "Culling" shows mode, GPU and CPU path numbers, Hi-Z state and cull camera.
+- **Kit.** `Frame::CullSceneDraw`, `LastSceneDrawCullCounts`, `PrimaryCamera`, `ViewCaptureArmed`. The CPU cull runs in its own
+  always-on callback, so pass toggles and `enabled` do not silence it.
+- **HTTP.** New state keys `cpuTested`, `cpuCulled`, `cpuUnbounded`, `cpuCullState`, `cullCamera`, `hizSource`. Removed: the
+  freeze world, the Cull view box and HUD, ghost, scene-only settings, `freeze_here`, `cull_view` in `/scene_camera/state`.
+  `OcclusionState::CameraNotLive` is now `NoCullCamera`.
+
 ## Timeline image, export and GPU clock calibration (branch `feature/gpu-cull-impl`, 2026-10-26)
 
 - **Timeline image.** `GET /profiler/timeline_image[?frame=F][&width=W]` returns a PNG of one frame drawn on the CPU from frame
