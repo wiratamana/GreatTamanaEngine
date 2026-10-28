@@ -6,6 +6,7 @@
 #include "../../Assets/MeshCluster.h"
 #include "../../Math/Mat4.h"
 #include "../../Math/Vec3.h"
+#include "ClusterCullConstants.h"
 #include "ClusterPassCounts.h"
 #include "CullingTypes.h"
 
@@ -43,23 +44,7 @@ constexpr bool ClusterPathSupported(const IndirectDrawCapsView& caps) noexcept
 // Constants
 // ---------------------------------------------------------------------------------------------
 
-// Bits of ClusterInstanceGpu::info[0]. Mirrored by name in ClusterCull.comp.
-inline constexpr std::uint32_t kClusterFlagUniformScale = 1u << 0;
-inline constexpr std::uint32_t kClusterFlagPositiveHand = 1u << 1;
-
-// Bits of ClusterCullParams::counts[3]. Mirrored by name in ClusterCull.comp.
-inline constexpr std::uint32_t kClusterCullFlagFrustum = 1u << 0;
-inline constexpr std::uint32_t kClusterCullFlagBackfaceCone = 1u << 1;
-inline constexpr std::uint32_t kClusterCullFlagOcclusion = 1u << 2; // Single-phase test against a same-pose pyramid.
-inline constexpr std::uint32_t kClusterCullFlagOrthographic = 1u << 3; // Set from the camera, never by a caller.
-inline constexpr std::uint32_t kClusterCullFlagPhaseFirst = 1u << 5; // Draws last frame's survivors.
-inline constexpr std::uint32_t kClusterCullFlagPhaseSecond = 1u << 6; // Tests every item against this frame's pyramid.
-inline constexpr std::uint32_t kClusterCullFlagHistoryValid = 1u << 7; // The history words are trustworthy.
-inline constexpr std::uint32_t kClusterCullFlagRawDepth = 1u << 8; // Set by SetClusterCullHiz when no depth map exists.
-
-// Bits of one history word. Mirrored in ClusterCull.comp.
-inline constexpr std::uint32_t kClusterHistoryVisible = 1u << 0; // Visible after the last second phase.
-inline constexpr std::uint32_t kClusterHistoryDrawnFirst = 1u << 1; // Drawn by the first phase of this frame.
+// Flag and history bits, margins and level limits shared with the shaders live in ClusterCullConstants.h.
 
 inline constexpr std::uint32_t kClusterCullGroupSize = 64;
 inline constexpr std::uint64_t kMaxClusterDispatchGroups = 65535;
@@ -282,18 +267,6 @@ std::uint64_t ClusterHistoryKey(std::uint64_t meshToken, std::uint32_t clusterCo
 
 // The pyramid is one R32_Float atlas of farthest-depth levels. Level 0 is half the scene depth size and every
 // level halves the one below, down to a 1 x 1 top level. Texels outside the scene hold 0 (neutral for max).
-
-// The projected rect grows by this many level-0 texels on every side.
-inline constexpr float kHizRectMarginTexels = 1.0f;
-
-// Occlusion margins on view depth (perspective) and on raw depth (no depth map). Mirrored in ClusterCull.comp.
-inline constexpr float kHizRelMargin = 0.002f;
-inline constexpr float kHizAbsMargin = 0.01f;
-inline constexpr float kHizDepthGuard = 4.8e-7f; // About eight depth steps near 1.0.
-inline constexpr float kHizRawBias = 0.001f;
-
-// Largest pyramid: level 0 up to 8192 texels per side (scene depth up to 16384), levels 0..13.
-inline constexpr std::uint32_t kHizMaxLevels = 14;
 
 struct HizLevel {
     std::uint32_t originX = 0;

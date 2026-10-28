@@ -278,6 +278,7 @@ struct GpuPathReport {
     OcclusionState occlusion = OcclusionState::NotRequested;
     HizReason hizReason = HizReason::None;
     CullCameraSource hizSource = CullCameraSource::None;
+    bool sharedSurvivors = false; // The view drew the primary view's survivors instead of culling.
     std::uint64_t testedClusters = 0;          // Current frame.
     std::uint64_t testedAtVisibleFrame = 0;    // Tested at the frame the visible count belongs to.
     std::uint32_t visibleClusters = 0;

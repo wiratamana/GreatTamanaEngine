@@ -8,11 +8,14 @@ if(NOT GLSLC_EXECUTABLE)
         "Install it (Vulkan SDK or 'scoop install shaderc') and reconfigure.")
 endif()
 
-# gte_add_shader(<target> <source relative to CMAKE_SOURCE_DIR> [EXTRA_DEPENDS <file>...])
+# gte_add_shader(<target> <source relative to CMAKE_SOURCE_DIR> [EXTRA_DEPENDS <file>...] [GENERATED_DEPENDS <abs file>...])
 # Compiles to ${CMAKE_BINARY_DIR}/shaders/<name>.spv and stages a copy in <exe dir>/shaders/.
-# EXTRA_DEPENDS lists every #include'd file so glslc re-runs when one changes.
+# EXTRA_DEPENDS lists every #include'd source file (relative paths); GENERATED_DEPENDS lists #include'd files
+# generated into GTE_SHADER_GENERATED_DIR (absolute paths). glslc re-runs when one changes.
+set(GTE_SHADER_GENERATED_DIR "${CMAKE_BINARY_DIR}/shaders/gen")
+
 function(gte_add_shader TARGET SOURCE)
-    cmake_parse_arguments(GTE_ADD_SHADER "" "" "EXTRA_DEPENDS" ${ARGN})
+    cmake_parse_arguments(GTE_ADD_SHADER "" "" "EXTRA_DEPENDS;GENERATED_DEPENDS" ${ARGN})
 
     set(SOURCE_ABSOLUTE "${CMAKE_SOURCE_DIR}/${SOURCE}")
     get_filename_component(SHADER_NAME "${SOURCE}" NAME)
@@ -22,12 +25,14 @@ function(gte_add_shader TARGET SOURCE)
     foreach(EXTRA_DEP ${GTE_ADD_SHADER_EXTRA_DEPENDS})
         list(APPEND EXTRA_DEPENDS_ABSOLUTE "${CMAKE_SOURCE_DIR}/${EXTRA_DEP}")
     endforeach()
+    list(APPEND EXTRA_DEPENDS_ABSOLUTE ${GTE_ADD_SHADER_GENERATED_DEPENDS})
     # Reflection reads binding names from OpName: never add -O or -g0 (they strip names).
     # A test pins this: reflected names of the fixtures must not be empty.
     add_custom_command(
         OUTPUT "${COMPILED}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/shaders"
-        COMMAND "${GLSLC_EXECUTABLE}" "${SOURCE_ABSOLUTE}" -I "${CMAKE_SOURCE_DIR}/src/Shaders" -o "${COMPILED}"
+        COMMAND "${GLSLC_EXECUTABLE}" "${SOURCE_ABSOLUTE}" -I "${CMAKE_SOURCE_DIR}/src/Shaders"
+                -I "${GTE_SHADER_GENERATED_DIR}" -o "${COMPILED}"
         DEPENDS "${SOURCE_ABSOLUTE}" ${EXTRA_DEPENDS_ABSOLUTE}
         COMMENT "Compiling shader ${SOURCE} -> ${COMPILED}"
         VERBATIM

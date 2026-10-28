@@ -2781,6 +2781,7 @@ target_compile_definitions(GreatTamanaEngineTests PRIVATE
     GTE_TEST_CLUSTER_CULL_SHADER_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/ClusterCull.comp"
     GTE_TEST_HIZ_BUILD_BASE_SHADER_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/HizBuildBase.comp"
     GTE_TEST_HIZ_BUILD_TOP_SHADER_PATH="${CMAKE_SOURCE_DIR}/src/Shaders/HizBuildTop.comp"
+    GTE_TEST_CLUSTER_CULL_CONSTANTS_GLSL_PATH="${CMAKE_BINARY_DIR}/shaders/gen/ClusterCullConstants.glsl"
 )
 
 # Engine-owned reflection fixtures with abstract names (not shipped).

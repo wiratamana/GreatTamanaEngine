@@ -159,6 +159,10 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
         chain.TwoPhase(m_hiz, f.SceneDepth());
         snap.hizSource = CullCameraSource::Own;
     }
+    // A secondary view that culls with the primary camera draws the primary view's survivors when they exist.
+    if (secondary && plan.source == CullCameraSource::Primary) {
+        chain.ReuseSurvivors();
+    }
     chain.Instances(candidates)
         .Camera(plan.live)
         .CullCamera(plan.cull)
@@ -174,9 +178,14 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     snap.inertReason = stats.inertReason;
     snap.refused = ClusterOutcomeRefused(candidates.size(), stats);
     snap.refusal = DescribeClusterOutcome(candidates.size(), stats);
-    snap.occlusion = OcclusionStateOf(hizRequested, culls, !secondary && stats.occlusionApplied);
-    if (secondary && hizRequested && culls) {
-        snap.hizReason = HizReason::Unavailable; // Only the primary view owns a pyramid.
+    snap.sharedSurvivors = stats.sharedSurvivors;
+    // The secondary view inherits the primary view's occlusion result through the shared survivors.
+    const bool occluded = secondary ? stats.sharedOcclusion : stats.occlusionApplied;
+    snap.occlusion = OcclusionStateOf(hizRequested, culls, occluded);
+    if (secondary && occluded) {
+        snap.hizSource = CullCameraSource::Primary;
+    } else if (secondary && hizRequested && culls) {
+        snap.hizReason = HizReason::Unavailable; // The primary view's chain ran no pyramid this frame.
     } else if (wantsHiz && !stats.occlusionApplied) {
         snap.hizReason = stats.hizReason;
     }

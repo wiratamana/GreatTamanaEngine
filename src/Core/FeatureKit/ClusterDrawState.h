@@ -2,6 +2,7 @@
 
 #include "ClusterDrawTypes.h"
 #include "ClusterPartPlanning.h"
+#include "ClusterSurvivorTable.h"
 #include "ComputeShader.h"
 #include "GpuParams.h"
 #include "GpuReadback.h"
@@ -120,6 +121,9 @@ public:
     void NoteHistoryWritten(const Frame& frame, std::uint32_t slot, std::uint64_t key) noexcept;
     void DropHistory(const Frame& frame, std::uint32_t slot) noexcept;
 
+    // Survivors the primary view's chain published this frame; the secondary view's chain reads them.
+    ClusterSurvivorTable& Survivors() noexcept { return m_survivors; }
+
     // Survivor count of the frame's view, summed over part slots. Two frames old.
     ClusterVisibleCount VisibleClusters(const Frame& frame) const;
 
@@ -203,6 +207,7 @@ private:
 
     std::vector<std::uint64_t> m_chainBytes; // [scope][lane][slot] recorded capacity
     std::array<std::uint64_t, rg::kViewScopeCount> m_lastChainFrame;
+    ClusterSurvivorTable m_survivors;
 };
 
 } // namespace gte::fx

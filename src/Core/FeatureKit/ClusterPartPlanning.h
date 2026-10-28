@@ -103,6 +103,29 @@ std::vector<ClusterStep> RecordClusterRounds(Declarer& declarer, std::size_t par
     return steps;
 }
 
+// Draws of published survivors: round 1 of every part, then round 2 of every part that finished round 1 (only when
+// the publisher ran two phases). There is no reset, cull or pyramid. `declarer` provides bool Begin(part) (resolve
+// the part's buffers) and bool Draw(part, round). A refused Begin leaves the part at None.
+template <typename Declarer>
+std::vector<ClusterStep> RecordSharedRounds(Declarer& declarer, std::size_t partCount, bool twoRounds)
+{
+    std::vector<ClusterStep> steps(partCount, ClusterStep::None);
+    for (std::size_t part = 0; part < partCount; ++part) {
+        if (declarer.Begin(part) && declarer.Draw(part, 0)) {
+            steps[part] = ClusterStep::Draw1;
+        }
+    }
+    if (!twoRounds) {
+        return steps;
+    }
+    for (std::size_t part = 0; part < partCount; ++part) {
+        if (steps[part] == ClusterStep::Draw1 && declarer.Draw(part, 1)) {
+            steps[part] = ClusterStep::Draw2;
+        }
+    }
+    return steps;
+}
+
 // Stats run only for a colour target on the first lane, when the caller asked for them.
 constexpr bool ClusterStatsWanted(bool requested, bool depthOnly, std::uint32_t lane) noexcept
 {

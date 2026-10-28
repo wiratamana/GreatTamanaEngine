@@ -4,27 +4,10 @@
 // Survivors append a visible record and an indirect draw command; the count buffer must be zero before dispatch.
 // Layouts must match ClusterCullMath.h (ClusterInstanceGpu, ClusterCullParams, MeshCluster) and the CPU oracle there.
 
+#include "ClusterCullConstants.glsl"
 #include "HizPyramidLayout.glsl"
 
 layout(local_size_x = 64) in;
-
-// Bits of ClusterInstanceGpu.info.x.
-const uint kClusterFlagUniformScale = 1u;
-const uint kClusterFlagPositiveHand = 2u;
-
-// Bits of ClusterCullParams.counts.w.
-const uint kClusterCullFlagFrustum = 1u;
-const uint kClusterCullFlagBackfaceCone = 2u;
-const uint kClusterCullFlagOcclusion = 4u;
-const uint kClusterCullFlagOrthographic = 8u;
-const uint kClusterCullFlagPhaseFirst = 32u;
-const uint kClusterCullFlagPhaseSecond = 64u;
-const uint kClusterCullFlagHistoryValid = 128u;
-const uint kClusterCullFlagRawDepth = 256u;
-
-// Bits of one history word.
-const uint kClusterHistoryVisible = 1u;
-const uint kClusterHistoryDrawnFirst = 2u;
 
 struct ClusterCullParams {
     vec4 planes[6]; // xyz = normal, w = distance; inside when dot + w >= 0.
@@ -80,12 +63,6 @@ layout(std430, binding = 7) buffer HistoryBlock {
 
 // Farthest-depth pyramid (one atlas); read only by the occlusion test.
 layout(binding = 6) uniform sampler2D hizAtlas;
-
-const float kHizRectMarginTexels = 1.0;
-const float kHizRelMargin = 0.002;
-const float kHizAbsMargin = 0.01;
-const float kHizDepthGuard = 4.8e-7;
-const float kHizRawBias = 0.001;
 
 // Conservative: only a box fully behind one plane is rejected; a non-finite box is kept.
 bool OutsideFrustum(Cluster cluster, mat4 world)

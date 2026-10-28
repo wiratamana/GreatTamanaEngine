@@ -3,6 +3,7 @@
 // Pyramid build, base pass: one 16 x 16 workgroup reduces a 32 x 32 depth tile into levels 0..4.
 // Texels outside the scene count as 0 (neutral for max). Layout must match HizBuildPlan.h and ClusterCullMath.h.
 
+#include "ClusterCullConstants.glsl"
 #include "HizPyramidLayout.glsl"
 
 layout(local_size_x = 16, local_size_y = 16) in;
@@ -33,7 +34,7 @@ void main()
     }
     tile[lid.y][lid.x] = v;
 
-    for (uint level = 1u; level <= 4u; ++level) {
+    for (uint level = 1u; level < kHizTopFirstLevel; ++level) {
         memoryBarrierShared();
         barrier();
         uint n = 16u >> level;

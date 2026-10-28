@@ -139,6 +139,7 @@ include(FetchJson)
 include(FetchSpirvReflect)
 include(FetchKTX)
 include(CompileShaders)
+include(GenerateGlslConstants)
 # PHASE1_GTE_PLUGIN_ABI_FOUNDATION.md, Step 3.4 (PHASE0_MASTER_STRATEGY.md's
 # Locked Design Decision #4) - defines mingw_copy_runtime_dll()/
 # gte_apply_plugin_shared_crt_linkage(), the reusable CRT-linkage-flip +
@@ -489,6 +490,7 @@ add_library(gte_core STATIC
     src/Core/FeatureKit/ClusterDrawChain.h
     src/Core/FeatureKit/ClusterDrawVerb.cpp
     src/Core/FeatureKit/ClusterPartPlanning.h
+    src/Core/FeatureKit/ClusterSurvivorTable.h
     src/Core/FeatureKit/ClusterPartPlanning.cpp
     src/Core/FeatureKit/HizPyramid.h
     src/Core/FeatureKit/HizPyramid.cpp
@@ -1848,14 +1850,23 @@ gte_add_shader(GreatTamanaEditor src/Shaders/Mesh.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/Mesh.frag
     EXTRA_DEPENDS src/Shaders/DirectionalLighting.glsl)
 
+# Cull and pyramid constants come from one C++ header (see cmake/GenerateGlslConstants.cmake).
+set(GTE_CLUSTER_CULL_CONSTANTS_GLSL "${GTE_SHADER_GENERATED_DIR}/ClusterCullConstants.glsl")
+gte_generate_glsl_constants(
+    "${CMAKE_SOURCE_DIR}/src/Renderer/Culling/ClusterCullConstants.h"
+    "${GTE_CLUSTER_CULL_CONSTANTS_GLSL}")
+
 # Cluster cull compute and the cluster draw vertex/fragment shaders (Mesh.frag is the lit fragment shader).
 gte_add_shader(GreatTamanaEditor src/Shaders/ClusterCull.comp
-    EXTRA_DEPENDS src/Shaders/HizPyramidLayout.glsl)
+    EXTRA_DEPENDS src/Shaders/HizPyramidLayout.glsl
+    GENERATED_DEPENDS "${GTE_CLUSTER_CULL_CONSTANTS_GLSL}")
 gte_add_shader(GreatTamanaEditor src/Shaders/ClusterCullStats.comp)
 gte_add_shader(GreatTamanaEditor src/Shaders/HizBuildBase.comp
-    EXTRA_DEPENDS src/Shaders/HizPyramidLayout.glsl)
+    EXTRA_DEPENDS src/Shaders/HizPyramidLayout.glsl
+    GENERATED_DEPENDS "${GTE_CLUSTER_CULL_CONSTANTS_GLSL}")
 gte_add_shader(GreatTamanaEditor src/Shaders/HizBuildTop.comp
-    EXTRA_DEPENDS src/Shaders/HizPyramidLayout.glsl)
+    EXTRA_DEPENDS src/Shaders/HizPyramidLayout.glsl
+    GENERATED_DEPENDS "${GTE_CLUSTER_CULL_CONSTANTS_GLSL}")
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshCluster.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.vert)
 gte_add_shader(GreatTamanaEditor src/Shaders/MeshClusterDepth.frag)

@@ -64,6 +64,7 @@ TEST(GpuDrivenScenePanelTextTest, HizLineSaysWhyHiZIsNotRunning)
 
     v.gpu.occlusion = OcclusionState::Applied;
     EXPECT_EQ(HizLine(v, false), "Hi-Z: active");
+    EXPECT_EQ(HizLine(v, true), "Hi-Z: primary view's survivors");
     v.gpu.occlusion = OcclusionState::NoCullCamera;
     EXPECT_EQ(HizLine(v, false), "Hi-Z: no cull camera");
     v.gpu.occlusion = OcclusionState::NotRequested;
@@ -95,6 +96,8 @@ TEST(GpuDrivenScenePanelTextTest, CountLines)
     v.gpu.visibleValid = true;
     v.gpu.visibleClusters = 12;
     EXPECT_EQ(GpuPathLine(v), "GPU path: 3 entities, 40 clusters tested, 12 visible");
+    v.gpu.sharedSurvivors = true;
+    EXPECT_EQ(GpuPathLine(v), "GPU path: 3 entities, 40 clusters (primary view's survivors), 12 visible");
 
     v.cpuTested = 7;
     v.cpuCulled = 2;

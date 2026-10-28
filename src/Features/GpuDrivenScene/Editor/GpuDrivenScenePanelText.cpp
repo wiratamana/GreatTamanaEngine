@@ -30,7 +30,7 @@ std::string GpuPathLine(const GpuDrivenSceneViewSnapshot& v)
 {
     const GpuPathReport& g = v.gpu;
     std::string line = "GPU path: " + std::to_string(g.claimedEntities) + " entities, " +
-        std::to_string(g.testedClusters) + " clusters tested, ";
+        std::to_string(g.testedClusters) + (g.sharedSurvivors ? " clusters (primary view's survivors), " : " clusters tested, ");
     if (g.visibleValid) {
         line += std::to_string(g.visibleClusters) + " visible";
     } else {
@@ -48,7 +48,7 @@ std::string CpuPathLine(const GpuDrivenSceneViewSnapshot& v)
 std::string HizLine(const GpuDrivenSceneViewSnapshot& v, bool secondary)
 {
     switch (v.gpu.occlusion) {
-    case OcclusionState::Applied: return "Hi-Z: active";
+    case OcclusionState::Applied: return secondary ? "Hi-Z: primary view's survivors" : "Hi-Z: active";
     case OcclusionState::NotRequested: return "Hi-Z: off";
     case OcclusionState::NoCullCamera: return "Hi-Z: no cull camera";
     case OcclusionState::Unusable: break;

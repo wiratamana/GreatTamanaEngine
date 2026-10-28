@@ -30,6 +30,8 @@ struct PlannedPart {
     std::uint32_t slot = 0;
     std::uint32_t clusterCount = 0;
     std::uint64_t workItems = 0;
+    std::uint64_t setKey = 0;     // Instance set and order; see ClusterPartSetKey().
+    ClusterSurvivorPart published; // The primary view's survivors of this part; set only for a shared chain.
     std::vector<ClusterInstanceGpu> instances;
     std::vector<Entity> entities;
     ClusterCullParams params{};
@@ -38,6 +40,20 @@ struct PlannedPart {
 std::string TokenText(MeshToken token)
 {
     return "mesh " + std::to_string(token.index) + "/" + std::to_string(token.generation);
+}
+
+// Identifies the instance set and order of a part; equal in every view that draws the same candidates.
+std::uint64_t ClusterPartSetKey(
+    const ClusterMeshGroup& group, std::uint32_t clusterCount, std::span<const ClusterInstance> instances)
+{
+    std::vector<std::uint32_t> words;
+    words.reserve(group.instances.size() * 2);
+    for (const std::uint32_t candidate : group.instances) {
+        words.push_back(instances[candidate].entity.index);
+        words.push_back(instances[candidate].entity.generation);
+    }
+    const std::uint64_t meshToken = (std::uint64_t{ group.mesh.index } << 32) | group.mesh.generation;
+    return ClusterHistoryKey(meshToken, clusterCount, words, 0);
 }
 
 // Bits the chain sets itself; a caller never asks for them.
@@ -74,13 +90,18 @@ struct ClusterDrawChain::Impl {
     bool idTint = false;
     bool stats = false;
 
-    // Input of TwoPhase().
+    // Input of TwoPhase() and ReuseSurvivors().
     HizPyramid* pyramid = nullptr;
     Texture sceneDepth;
     bool wantsTwoPhase = false;
+    bool reuseSurvivors = false;
 
-    // Decisions made by Plan(): two-phase runs lane `lane` and `lane + 1`.
+    // Decisions made by Plan(): two-phase runs lane `lane` and `lane + 1`; a shared chain draws the published
+    // survivors of `sharedLanes` lanes starting at `lane` and culls nothing.
     bool twoPhase = false;
+    bool shared = false;
+    std::uint32_t sharedLanes = 1;
+    std::uint32_t cullFlagBits = 0; // Cull flags without the bits the chain owns.
     HizReason hizReason = HizReason::None;
     HizPlan hizPlan;
     Texture atlas; // This frame's pyramid, set by the build between the rounds.
@@ -95,6 +116,9 @@ struct ClusterDrawChain::Impl {
 
     bool recorded = false;
     ClusterStats result;
+
+    // True when the chain draws in two rounds: two-phase occlusion, or the survivors of a two-phase publisher.
+    bool TwoRounds() const noexcept { return twoPhase || (shared && sharedLanes == 2); }
 };
 
 ClusterDrawChain Frame::ClusterDraw(ClusterDrawState& state, std::uint32_t lane)
@@ -149,6 +173,12 @@ ClusterDrawChain& ClusterDrawChain::TwoPhase(HizPyramid& pyramid, Texture sceneD
     m_impl->pyramid = &pyramid;
     m_impl->sceneDepth = sceneDepth;
     m_impl->wantsTwoPhase = true;
+    return *this;
+}
+
+ClusterDrawChain& ClusterDrawChain::ReuseSurvivors()
+{
+    m_impl->reuseSurvivors = true;
     return *this;
 }
 
@@ -265,6 +295,7 @@ void PlanChain(ClusterDrawChain::Impl& s)
     const ClusterCamera& cullCamera = s.hasCullCamera ? s.cullCamera : s.camera;
     const ClusterCullFlags flags = static_cast<ClusterCullFlags>(
         static_cast<std::uint32_t>(EffectiveClusterCullFlags(s.flags, s.depthOnly)) & ~kChainOwnedFlags);
+    s.cullFlagBits = static_cast<std::uint32_t>(flags);
     if (!ClusterCullParamsAreFinite(MakeClusterCullParams(
             cullCamera.viewProjection, cullCamera.eyeOrDirection, cullCamera.orthographic, 1, 1, flags))) {
         frame.ReportOnce(std::string("Pass '") + anchorName.value + "': the cull camera is not finite");
@@ -276,7 +307,6 @@ void PlanChain(ClusterDrawChain::Impl& s)
         s.hizReason = PlanTwoPhase(s, anchorName);
         s.twoPhase = s.hizReason == HizReason::None;
     }
-    const std::uint32_t rounds = s.twoPhase ? 2 : 1;
 
     s.pipeline = state.ResolvePipeline(*context, ClusterPipelineKeyFor(flags, s.depthOnly, s.idTint));
     if (s.pipeline == nullptr || !frame.ShaderReady(state.CullShader())) {
@@ -324,6 +354,31 @@ void PlanChain(ClusterDrawChain::Impl& s)
             std::string("Pass '") + anchorName.value + "': more meshes than part slots; the rest use the CPU draw");
     }
 
+    // The secondary view draws the primary view's survivors when every planned part was published for the same
+    // instances, cull camera and tests. Otherwise it culls on its own.
+    std::vector<std::uint64_t> setKeys(eligible.size(), 0);
+    if (!s.depthOnly) {
+        for (const std::uint32_t index : assignment.assigned) {
+            setKeys[index] = ClusterPartSetKey(eligible[index], clusterCounts[index], s.instances);
+        }
+    }
+    if (s.reuseSurvivors && context->scope == rg::ViewScope::Secondary && !s.depthOnly) {
+        const ClusterSurvivorTable& table = state.Survivors();
+        std::size_t covered = 0;
+        for (const std::uint32_t index : assignment.assigned) {
+            covered += table.Find(eligible[index].mesh, setKeys[index]) != nullptr ? 1 : 0;
+        }
+        const bool sameSetup = table.cullFlags == s.cullFlagBits
+            && CameraPoseEqual(
+                table.cullViewProjection, table.cullEye, cullCamera.viewProjection, cullCamera.eyeOrDirection);
+        s.shared = ChooseSurvivorSource(true, table.IsFor(frame.FrameIndex(), context->builder), sameSetup,
+                       assignment.assigned.size(), covered)
+            == ClusterSurvivorSource::Shared;
+        s.sharedLanes = table.laneCount;
+        s.twoPhase = s.twoPhase && !s.shared;
+    }
+    const std::uint32_t rounds = s.shared ? s.sharedLanes : (s.twoPhase ? 2u : 1u);
+
     std::uint32_t slot = 0;
     std::uint32_t toggledOffParts = 0;
     for (const std::uint32_t index : assignment.assigned) {
@@ -335,16 +390,19 @@ void PlanChain(ClusterDrawChain::Impl& s)
         // All-or-none: a toggled-off pass of the chain means nothing of this part is touched.
         bool toggledOff = false;
         for (std::uint32_t round = 0; round < rounds; ++round) {
-            toggledOff = toggledOff || !frame.PassEnabled(PassNameOf(state, s.lane + round, thisSlot, ClusterPassKind::Reset))
-                || !frame.PassEnabled(PassNameOf(state, s.lane + round, thisSlot, ClusterPassKind::Cull))
-                || !frame.PassEnabled(PassNameOf(state, s.lane + round, thisSlot, ClusterPassKind::Draw));
+            const std::uint32_t lane = s.lane + round;
+            toggledOff = toggledOff || !frame.PassEnabled(PassNameOf(state, lane, thisSlot, ClusterPassKind::Draw))
+                || (!s.shared
+                    && (!frame.PassEnabled(PassNameOf(state, lane, thisSlot, ClusterPassKind::Reset))
+                        || !frame.PassEnabled(PassNameOf(state, lane, thisSlot, ClusterPassKind::Cull))));
         }
         if (toggledOff) {
             ++toggledOffParts;
             continue;
         }
-        if (state.TryReserveChainBytes(context->scope, s.lane, thisSlot, instanceCount, workItems, s.twoPhase)
-            != ClusterReserveResult::Ok) {
+        if (!s.shared
+            && state.TryReserveChainBytes(context->scope, s.lane, thisSlot, instanceCount, workItems, s.twoPhase)
+                != ClusterReserveResult::Ok) {
             frame.ReportOnce(std::string("Pass '") + anchorName.value + "': " + TokenText(group.mesh)
                 + " is over the cluster draw memory budget; the CPU draw is used");
             continue;
@@ -355,6 +413,10 @@ void PlanChain(ClusterDrawChain::Impl& s)
         part.slot = thisSlot;
         part.clusterCount = clusterCounts[index];
         part.workItems = workItems;
+        part.setKey = setKeys[index];
+        if (s.shared) {
+            part.published = *state.Survivors().Find(group.mesh, part.setKey);
+        }
         part.instances.reserve(group.instances.size());
         part.entities.reserve(group.instances.size());
         for (const std::uint32_t candidate : group.instances) {
@@ -412,9 +474,34 @@ public:
 
     std::uint32_t LaneOf(std::uint32_t round) const noexcept { return s.lane + round; }
 
+    // Stamps the buffers another view published for this part. They stay owned by that view.
+    bool BeginShared(std::size_t index)
+    {
+        const PlannedPart& part = s.parts[index];
+        const ClusterSurvivorPart& published = part.published;
+        PartRuntime& run = runtime[index];
+        run.instances = s.frame->StampBuffer(
+            published.instances, part.instances.size() * sizeof(ClusterInstanceGpu), BufferUse::Storage);
+        bool ok = run.instances.IsValid();
+        for (std::uint32_t round = 0; round < s.sharedLanes; ++round) {
+            const ClusterSurvivorLane& lane = published.lanes[round];
+            run.visible[round] =
+                s.frame->StampBuffer(lane.visible, published.workItems * kClusterVisibleBytes, BufferUse::Storage);
+            run.commands[round] = s.frame->StampBuffer(
+                lane.commands, published.workItems * kClusterCommandBytes, BufferUse::Storage | BufferUse::Indirect);
+            run.count[round] = s.frame->StampBuffer(
+                lane.count, sizeof(std::uint32_t), BufferUse::Storage | BufferUse::Indirect | BufferUse::TransferDst);
+            ok = ok && run.visible[round].IsValid() && run.commands[round].IsValid() && run.count[round].IsValid();
+        }
+        return ok;
+    }
+
     // Acquires the buffers of a part. False leaves the part on the CPU draw.
     bool Begin(std::size_t index)
     {
+        if (s.shared) {
+            return BeginShared(index);
+        }
         Frame& frame = *s.frame;
         ClusterDrawState& state = *s.state;
         detail::FrameContext& context = *frame.Context();
@@ -582,7 +669,7 @@ public:
     }
 
     // Stats are optional and declared as one unit: clear, dispatch, host copy. They run on the last lane of the chain.
-    std::uint32_t StatsLane() const noexcept { return LaneOf(s.twoPhase ? 1 : 0); }
+    std::uint32_t StatsLane() const noexcept { return LaneOf(s.TwoRounds() ? 1 : 0); }
 
     bool StatsClear()
     {
@@ -604,13 +691,14 @@ public:
     {
         ClusterDrawState& state = *s.state;
         const PartRuntime& run = runtime[statsPart];
-        const std::uint32_t round = s.twoPhase ? 1 : 0;
+        const bool twoRounds = s.TwoRounds();
+        const std::uint32_t round = twoRounds ? 1 : 0;
         const bool dispatched =
             s.frame->Compute(state.StatsShader(), PassNameOf(state, StatsLane(), s.parts[statsPart].slot, ClusterPassKind::Stats))
                 .BindBuffer("count", run.count[0])
                 .BindBuffer("secondCount", run.count[round])
                 .BindOutput("outCount", *run.readback)
-                .Push(ClusterStatsPush{ s.twoPhase ? 1u : 0u })
+                .Push(ClusterStatsPush{ twoRounds ? 1u : 0u })
                 .Dispatch(Extent2D{ 1, 1 });
         if (!dispatched) {
             s.frame->ReportOnce("ClusterDraw(): the stats dispatch was refused; the visible count is not updated");
@@ -626,12 +714,45 @@ public:
     }
 };
 
+// Hands the primary view's finished parts to the secondary view of this frame.
+void PublishSurvivors(
+    const ClusterDrawChain::Impl& s, const ChainDeclarer& declarer, std::span<const ClusterChainProgress> progress)
+{
+    detail::FrameContext& context = *s.frame->Context();
+    if (context.scope != rg::ViewScope::Primary || s.depthOnly || s.lane != 0 || s.shared) {
+        return;
+    }
+    const ClusterCamera& cullCamera = s.hasCullCamera ? s.cullCamera : s.camera;
+    ClusterSurvivorTable& table = s.state->Survivors();
+    table.Begin(s.frame->FrameIndex(), context.builder, s.twoPhase ? 2u : 1u, s.cullFlagBits, cullCamera.viewProjection,
+        cullCamera.eyeOrDirection);
+    for (std::size_t i = 0; i < s.parts.size(); ++i) {
+        if (progress[i] != ClusterChainProgress::Draw) {
+            continue;
+        }
+        const PlannedPart& part = s.parts[i];
+        const PartRuntime& run = declarer.runtime[i];
+        ClusterSurvivorPart published;
+        published.mesh = part.mesh;
+        published.setKey = part.setKey;
+        published.workItems = part.workItems;
+        published.instances = run.instances.handle;
+        for (std::size_t round = 0; round < (s.twoPhase ? 2u : 1u); ++round) {
+            published.lanes[round] = ClusterSurvivorLane{ run.visible[round].handle, run.commands[round].handle,
+                run.count[round].handle };
+        }
+        table.parts.push_back(published);
+    }
+}
+
 void RecordChain(ClusterDrawChain::Impl& s)
 {
     Frame& frame = *s.frame;
     Core& core = *frame.Context()->core;
     ChainDeclarer declarer(s);
-    const std::vector<ClusterStep> steps = RecordClusterRounds(declarer, s.parts.size(), s.twoPhase);
+    const bool twoRounds = s.TwoRounds();
+    const std::vector<ClusterStep> steps = s.shared ? RecordSharedRounds(declarer, s.parts.size(), twoRounds)
+                                                    : RecordClusterRounds(declarer, s.parts.size(), s.twoPhase);
 
     const bool statsWanted = ClusterStatsWanted(s.stats, s.depthOnly, s.lane);
     std::vector<std::span<const Entity>> partEntities;
@@ -639,7 +760,7 @@ void RecordChain(ClusterDrawChain::Impl& s)
     for (std::size_t i = 0; i < s.parts.size(); ++i) {
         const PlannedPart& part = s.parts[i];
         partEntities.push_back(part.entities);
-        if (ClusterProgressOf(steps[i], s.twoPhase) != ClusterChainProgress::Draw) {
+        if (ClusterProgressOf(steps[i], twoRounds) != ClusterChainProgress::Draw) {
             frame.ReportOnce(std::string("Pass '") + PassNameOf(*s.state, s.lane, part.slot, ClusterPassKind::Draw).value
                 + "': the chain stopped before the draw; the CPU draw is used for this mesh");
             continue;
@@ -653,7 +774,7 @@ void RecordChain(ClusterDrawChain::Impl& s)
             RecordClusterStats(declarer);
         }
     }
-    const ClusterRecordOutcome outcome = ClusterOutcomeOf(partEntities, s.claimContext, steps, s.twoPhase);
+    const ClusterRecordOutcome outcome = ClusterOutcomeOf(partEntities, s.claimContext, steps, twoRounds);
 
     // The takeover is the last step, after every pass of a part was declared.
     if (!outcome.claimed.empty()) {
@@ -671,6 +792,7 @@ void RecordChain(ClusterDrawChain::Impl& s)
             s.result.workItems += s.parts[i].workItems;
         }
     }
+    PublishSurvivors(s, declarer, outcome.progress);
 }
 
 } // namespace
@@ -688,11 +810,13 @@ ClusterPlan ClusterDrawChain::Plan()
         s.parts.clear();
         s.plan = ClusterPlan{};
         s.twoPhase = false;
+        s.shared = false;
         s.frame->ReportOnce(std::string("ClusterDraw() could not plan: ") + e.what());
     } catch (...) {
         s.parts.clear();
         s.plan = ClusterPlan{};
         s.twoPhase = false;
+        s.shared = false;
         s.frame->ReportOnce("ClusterDraw() could not plan: unknown error");
     }
     return s.plan;
@@ -721,9 +845,11 @@ ClusterStats ClusterDrawChain::Record()
     s.result.inertReason = s.plan.inertReason;
     s.result.hizReason = s.wantsTwoPhase && !s.depthOnly ? s.hizReason : HizReason::None;
     s.result.occlusionApplied = s.result.declared && s.twoPhase;
+    s.result.sharedSurvivors = s.result.declared && s.shared;
+    s.result.sharedOcclusion = s.result.sharedSurvivors && s.sharedLanes == 2;
 
-    // Idle bookkeeping of the frame's scope; release only runs in the synchronous regime.
-    s.state->TickIdle(*s.frame, s.result.declared);
+    // A shared chain holds no buffers of its own, so it lets its scope's old ones go idle.
+    s.state->TickIdle(*s.frame, s.result.declared && !s.shared);
     return s.result;
 }
 

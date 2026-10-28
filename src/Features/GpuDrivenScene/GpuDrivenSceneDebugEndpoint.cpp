@@ -64,6 +64,7 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDriv
     Add(out, key("cpuCullState"), text(fx::EnumName(kCpuCullStateTable, v.cpuCullState)));
     Add(out, key("cullCamera"), text(fx::EnumName(kCullCameraSourceTable, v.cullCamera)));
     Add(out, key("hizSource"), text(fx::EnumName(kCullCameraSourceTable, g.hizSource)));
+    Add(out, key("sharedSurvivors"), g.sharedSurvivors);
 }
 
 fx::FeatureDebugResult Fail(std::string key, std::string message)

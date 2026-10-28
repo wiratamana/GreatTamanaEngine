@@ -3,6 +3,7 @@
 // Pyramid build, top pass: one workgroup builds level 5 up to the 1 x 1 top level, each from the level below.
 // Layout must match HizBuildPlan.h and ClusterCullMath.h.
 
+#include "ClusterCullConstants.glsl"
 #include "HizPyramidLayout.glsl"
 
 layout(local_size_x = 256) in;
@@ -14,12 +15,10 @@ layout(push_constant) uniform HizPush {
 
 layout(binding = 0, r32f) uniform coherent image2D pyramid;
 
-const uint kTopFirstLevel = 5u;
-
 void main()
 {
     uvec2 base = push.sizes.zw;
-    for (uint level = kTopFirstLevel; level < push.levels.x; ++level) {
+    for (uint level = kHizTopFirstLevel; level < push.levels.x; ++level) {
         uvec2 size = HizLevelSize(base, level);
         uvec2 below = HizLevelSize(base, level - 1u);
         uvec2 originBelow = HizLevelOrigin(base, level - 1u);

@@ -41,6 +41,11 @@ public:
     // ClusterStats::hizReason says why. Ignored for a depth-only target.
     ClusterDrawChain& TwoPhase(HizPyramid& pyramid, Texture sceneDepth);
 
+    // Secondary-view chain only: when the primary view's chain of this frame published survivors for every part of
+    // this chain (same meshes, same instances, same cull camera and tests), draw them with this chain's camera and
+    // run no reset, cull or pyramid. Otherwise this chain culls on its own. ClusterStats::sharedSurvivors says which.
+    ClusterDrawChain& ReuseSurvivors();
+
     // Color + depth target (load). Exactly one of Target() and DepthOnlyTarget().
     ClusterDrawChain& Target(Texture sceneTarget);
     ClusterDrawChain& DepthOnlyTarget(Texture depth);
@@ -56,7 +61,8 @@ public:
     ClusterPlan Plan();
 
     // Declares reset, cull and draw per part (twice around one pyramid build for a two-phase chain), then takes
-    // the entities over.
+    // the entities over. A primary-view colour chain also publishes its survivors for the secondary view of the
+    // frame; a chain that reuses them declares only the draws.
     ClusterStats Record();
 
     // Kit-internal state; named here so the verb's helper functions can take it.

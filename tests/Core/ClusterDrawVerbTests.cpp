@@ -3,6 +3,7 @@
 // No device involved.
 
 #include "Core/FeatureKit/ClusterPartPlanning.h"
+#include "Core/FeatureKit/ClusterSurvivorTable.h"
 #include "Renderer/Culling/ClusterCullMath.h"
 
 #include <gtest/gtest.h>
@@ -326,6 +327,77 @@ TEST(ClusterPartPlanningTest, VisibleCountsAreInvalidWithoutAValidCell)
     const std::array<ClusterCountSample, 2> none = { ClusterCountSample{}, ClusterCountSample{} };
     EXPECT_FALSE(SumClusterCounts(none).valid);
     EXPECT_FALSE(SumClusterCounts({}).valid);
+}
+
+TEST(ClusterSurvivorTableTest, AnEntryServesOnlyTheFrameAndGraphItWasPublishedFor)
+{
+    int graph = 0;
+    int otherGraph = 0;
+    ClusterSurvivorTable table;
+    EXPECT_FALSE(table.IsFor(0, &graph)); // Empty.
+
+    table.Begin(5, &graph, 2, 3u, Mat4::Identity(), Vec3());
+    ClusterSurvivorPart part;
+    part.mesh = MeshToken{ 1, 1 };
+    part.setKey = 9;
+    table.parts.push_back(part);
+
+    EXPECT_TRUE(table.IsFor(5, &graph));
+    EXPECT_FALSE(table.IsFor(6, &graph));
+    EXPECT_FALSE(table.IsFor(5, &otherGraph));
+    EXPECT_NE(table.Find(MeshToken{ 1, 1 }, 9), nullptr);
+    EXPECT_EQ(table.Find(MeshToken{ 1, 1 }, 10), nullptr);
+    EXPECT_EQ(table.Find(MeshToken{ 2, 1 }, 9), nullptr);
+
+    table.Begin(6, &graph, 1, 3u, Mat4::Identity(), Vec3());
+    EXPECT_EQ(table.Find(MeshToken{ 1, 1 }, 9), nullptr); // A new frame starts empty.
+    table.Clear();
+    EXPECT_FALSE(table.IsFor(6, &graph));
+}
+
+TEST(ClusterSurvivorTableTest, ASecondaryChainSharesOnlyWhenEverythingMatchesAndEveryPartIsCovered)
+{
+    EXPECT_EQ(ChooseSurvivorSource(true, true, true, 2, 2), ClusterSurvivorSource::Shared);
+    EXPECT_EQ(ChooseSurvivorSource(false, true, true, 2, 2), ClusterSurvivorSource::Own);  // Not asked for.
+    EXPECT_EQ(ChooseSurvivorSource(true, false, true, 2, 2), ClusterSurvivorSource::Own);  // Stale table.
+    EXPECT_EQ(ChooseSurvivorSource(true, true, false, 2, 2), ClusterSurvivorSource::Own);  // Other camera or tests.
+    EXPECT_EQ(ChooseSurvivorSource(true, true, true, 2, 1), ClusterSurvivorSource::Own);   // A part is missing.
+    EXPECT_EQ(ChooseSurvivorSource(true, true, true, 0, 0), ClusterSurvivorSource::Own);   // Nothing to draw.
+}
+
+TEST(ClusterPartPlanningTest, SharedRoundsDrawRoundOneOfAllPartsThenRoundTwoWithoutCullOrBuild)
+{
+    FakeDeclarer two;
+    const std::vector<ClusterStep> steps = RecordSharedRounds(two, 2, true);
+    EXPECT_EQ(two.log, "B0 D0.0 B1 D1.0 D0.1 D1.1 ");
+    EXPECT_EQ(steps, (std::vector<ClusterStep>{ ClusterStep::Draw2, ClusterStep::Draw2 }));
+
+    FakeDeclarer one;
+    EXPECT_EQ(RecordSharedRounds(one, 1, false), (std::vector<ClusterStep>{ ClusterStep::Draw1 }));
+    EXPECT_EQ(one.log, "B0 D0.0 ");
+}
+
+TEST(ClusterPartPlanningTest, ARefusedSharedDrawLeavesThatPartUnclaimable)
+{
+    FakeDeclarer roundOne;
+    roundOne.refuse = FakeDeclarer::Refuse::Draw;
+    roundOne.refusePart = 0;
+    roundOne.refuseRound = 0;
+    EXPECT_EQ(RecordSharedRounds(roundOne, 2, true), (std::vector<ClusterStep>{ ClusterStep::None, ClusterStep::Draw2 }));
+
+    FakeDeclarer roundTwo;
+    roundTwo.refuse = FakeDeclarer::Refuse::Draw;
+    roundTwo.refusePart = 1;
+    roundTwo.refuseRound = 1;
+    const std::vector<ClusterStep> steps = RecordSharedRounds(roundTwo, 2, true);
+    EXPECT_EQ(steps, (std::vector<ClusterStep>{ ClusterStep::Draw2, ClusterStep::Draw1 }));
+    EXPECT_NE(ClusterProgressOf(steps[1], true), ClusterChainProgress::Draw);
+
+    FakeDeclarer begin;
+    begin.refuse = FakeDeclarer::Refuse::Begin;
+    begin.refusePart = 0;
+    EXPECT_EQ(RecordSharedRounds(begin, 1, true), (std::vector<ClusterStep>{ ClusterStep::None }));
+    EXPECT_EQ(begin.log, "B0 ");
 }
 
 } // namespace
