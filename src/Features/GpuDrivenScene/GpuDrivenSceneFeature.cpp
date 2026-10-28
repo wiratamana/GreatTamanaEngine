@@ -9,7 +9,7 @@ namespace gte {
 namespace {
 
 constexpr std::int32_t kOpaquePriority = 0;
-constexpr std::int32_t kCullPriority = 10; // Distinct from kOpaquePriority; the request is read at execute time.
+constexpr std::int32_t kCullPriority = -10; // Runs before the opaque pass and leaves its cull plan for it.
 constexpr std::int32_t kHizBuildPriority = -100; // Unique in PostOpaque; runs first, right after the opaque depth is final.
 
 // Fraction of a box's largest extent added before the CPU frustum test.
@@ -23,12 +23,27 @@ bool HasNoPixels(const fx::View& view) noexcept
     return view.extent.width == 0 || view.extent.height == 0;
 }
 
-// The camera a view culls with, shared by the cluster cull and the CPU cull.
-struct CullPlan {
-    fx::ClusterCamera live;
-    fx::ClusterCamera cull; // Meaningful only when `source` is not None.
-    CullCameraSource source = CullCameraSource::None;
-};
+// Copies the fields only the cluster pass writes; every other field of `to` is kept.
+void CopyGpuFields(GpuDrivenSceneViewSnapshot& to, const GpuDrivenSceneViewSnapshot& from)
+{
+    to.claimedEntities = from.claimedEntities;
+    to.parts = from.parts;
+    to.occlusion = from.occlusion;
+    to.hizReason = from.hizReason;
+    to.hizSource = from.hizSource;
+    to.testedClusters = from.testedClusters;
+    to.testedAtVisibleFrame = from.testedAtVisibleFrame;
+    to.visibleClusters = from.visibleClusters;
+    to.visibleFrame = from.visibleFrame;
+    to.statsCollected = from.statsCollected;
+    to.visibleValid = from.visibleValid;
+    to.hidden = from.hidden;
+    to.hiddenValid = from.hiddenValid;
+    to.inertReason = from.inertReason;
+    to.refused = from.refused;
+    to.refusal = from.refusal;
+    to.ledgerBytes = from.ledgerBytes;
+}
 
 CullPlan PlanCull(fx::OpaqueFrame& f, const GpuDrivenSceneSettings& cfg, bool secondary)
 {
@@ -36,17 +51,19 @@ CullPlan PlanCull(fx::OpaqueFrame& f, const GpuDrivenSceneSettings& cfg, bool se
     const fx::View& view = f.View();
     plan.live = fx::ClusterCameraOf(view);
 
+    // Without an active camera the view matrix is identity and must not cull.
+    std::optional<fx::View> primaryView;
+    if (cfg.mode != CullMode::NoCull) {
+        const float height = view.extent.height > 0 ? static_cast<float>(view.extent.height) : 1.0f;
+        primaryView = f.PrimaryCamera(static_cast<float>(view.extent.width) / height);
+    }
     fx::ClusterCamera primary;
     primary.valid = false;
-    if (secondary && cfg.mode != CullMode::NoCull) {
-        const float height = view.extent.height > 0 ? static_cast<float>(view.extent.height) : 1.0f;
-        const float aspect = static_cast<float>(view.extent.width) / height;
-        if (const std::optional<fx::View> primaryView = f.PrimaryCamera(aspect)) {
-            primary = fx::ClusterCameraOf(*primaryView);
-        }
+    if (secondary && primaryView) {
+        primary = fx::ClusterCameraOf(*primaryView);
     }
 
-    plan.source = ChooseCullCamera(secondary, cfg.mode, primary.valid, plan.live.valid);
+    plan.source = ChooseCullCamera(secondary, cfg.mode, primary.valid, plan.live.valid && primaryView.has_value());
     plan.cull = plan.source == CullCameraSource::Primary ? primary : plan.live;
     return plan;
 }
@@ -107,6 +124,10 @@ GpuDrivenSceneViewSnapshot GpuDrivenSceneFeature::Snapshot(rg::ViewScope scope) 
     if (stale(snapshot.frameIndex)) {
         snapshot.rendered = false;
     }
+    // GPU-path numbers show only when the cluster pass ran in the same frame as the liveness report.
+    if (view.gpuFrame != snapshot.frameIndex) {
+        CopyGpuFields(snapshot, GpuDrivenSceneViewSnapshot{});
+    }
     snapshot.hizTrackingRequested = view.hizBuildAsked && !stale(view.hizBuildFrame);
     return snapshot;
 }
@@ -132,32 +153,27 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
 
     const GpuDrivenSceneSettings cfg = m_settings;
     const ViewCullTests tests = ResolveCullTests(cfg);
-    const fx::View& viewData = f.View();
-    const CullPlan plan = PlanCull(f, cfg, secondary);
+    // SceneCullPass normally planned this frame already; plan here if it has not run first.
+    const CullPlan plan = view.hasPlan && view.planFrame == frameIndex ? view.plan : PlanCull(f, cfg, secondary);
+    const bool hasPixels = !HasNoPixels(f.View());
     const bool hizRequested = cfg.mode == CullMode::HiZ;
     const bool wantStats = cfg.collectStats;
 
+    // Holds the GPU-path fields only; `finish` copies them into the view snapshot.
     GpuDrivenSceneViewSnapshot snap;
-    snap.frameIndex = frameIndex;
-    snap.rendered = true;
-    snap.enabled = cfg.enabled;
-    snap.hasPixels = !HasNoPixels(viewData);
-    snap.cameraValid = plan.live.valid;
-    snap.cullCamera = plan.source;
 
     const auto finish = [&] {
         view.tested.Record(frameIndex, snap.testedClusters);
         snap.ledgerBytes = m_state.HeldBytes(scope);
-        // The CPU cull fields belong to the other callback.
-        snap.cpuCullState = view.snapshot.cpuCullState;
-        snap.cpuTested = view.snapshot.cpuTested;
-        snap.cpuCulled = view.snapshot.cpuCulled;
-        snap.cpuUnbounded = view.snapshot.cpuUnbounded;
-        view.snapshot = std::move(snap);
+        CopyGpuFields(view.snapshot, snap);
+        view.gpuFrame = frameIndex;
     };
 
-    if (!cfg.enabled || !snap.hasPixels || !plan.live.valid) {
-        snap.refusal = !cfg.enabled ? "disabled" : (!snap.hasPixels ? "view has no pixels" : "camera is not valid");
+    if (!cfg.enabled || !hasPixels || !plan.live.valid) {
+        snap.refusal = !cfg.enabled ? "disabled" : (!hasPixels ? "view has no pixels" : "camera is not valid");
+        if (cfg.enabled && hasPixels && hizRequested) {
+            snap.occlusion = OcclusionState::NoCullCamera;
+        }
         // An idle scope still gives its buffers back.
         m_state.TickIdle(f, false);
         finish();
@@ -225,17 +241,27 @@ void GpuDrivenSceneFeature::SceneCullPass(fx::OpaqueFrame& f)
     const rg::ViewScope scope = f.Scope();
     const bool secondary = scope == rg::ViewScope::Secondary;
     GpuDrivenSceneViewState& view = m_views.For(scope);
-    BeginFrame(f.FrameIndex());
+    const std::uint64_t frameIndex = f.FrameIndex();
+    BeginFrame(frameIndex);
 
     const GpuDrivenSceneSettings cfg = m_settings;
     const CullPlan plan = PlanCull(f, cfg, secondary);
+    view.plan = plan;
+    view.planFrame = frameIndex;
+    view.hasPlan = true;
 
+    // This pass is always on, so it owns the liveness and CPU fields of the snapshot.
     GpuDrivenSceneViewSnapshot& snap = view.snapshot;
+    snap.frameIndex = frameIndex;
+    snap.rendered = true;
+    snap.enabled = cfg.enabled;
+    snap.hasPixels = !HasNoPixels(f.View());
+    snap.cameraValid = plan.live.valid;
+    snap.cullCamera = plan.source;
     const fx::SceneCullCounts counts = f.LastSceneDrawCullCounts();
     snap.cpuTested = counts.tested;
     snap.cpuCulled = counts.culled;
     snap.cpuUnbounded = counts.unbounded;
-    snap.cullCamera = plan.source;
 
     if (cfg.mode == CullMode::NoCull) {
         snap.cpuCullState = CpuCullState::Off;

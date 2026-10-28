@@ -161,7 +161,7 @@ public:
     // camera with `fallbackAspect`). Empty without an active camera or with a non-finite matrix.
     std::optional<fx::View> PrimaryCamera(float fallbackAspect) const;
 
-    // True when this view's frame is being captured; per-view draw takeovers (cull, claim) are refused then.
+    // True in the primary view while its frame is being captured; per-view draw takeovers (cull, claim) are refused then.
     bool ViewCaptureArmed() const noexcept;
 
     // A GPU-culled draw of cluster-ready meshes on lane `lane` of `state`. Inert in a shared frame, while a

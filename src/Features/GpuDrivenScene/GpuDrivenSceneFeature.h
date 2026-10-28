@@ -6,10 +6,21 @@
 
 namespace gte {
 
-// Per-view state: the tested history, the last report and the last Hi-Z request.
+// The camera a view culls with, shared by the cluster cull and the CPU cull.
+struct CullPlan {
+    fx::ClusterCamera live;
+    fx::ClusterCamera cull; // Meaningful only when `source` is not None.
+    CullCameraSource source = CullCameraSource::None;
+};
+
+// Per-view state: the tested history, the last report, this frame's cull plan and the last Hi-Z request.
 struct GpuDrivenSceneViewState {
     TestedHistory tested;
     GpuDrivenSceneViewSnapshot snapshot;
+    std::uint64_t gpuFrame = 0; // Frame in which the GPU-path fields of `snapshot` were written.
+    CullPlan plan;
+    std::uint64_t planFrame = 0;
+    bool hasPlan = false;
     std::uint64_t hizBuildFrame = 0;
     bool hizBuildAsked = false;
 };

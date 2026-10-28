@@ -91,4 +91,10 @@ std::string_view NoGpuPathLine(const GpuDrivenSceneSettings& s, const GpuDrivenS
     return {};
 }
 
+std::string_view ConeWarningLine() noexcept
+{
+    return "Only correct for closed meshes. The Scene view tests the cone from the game camera eye, "
+           "so back faces can vanish there.";
+}
+
 } // namespace gte

@@ -7,7 +7,6 @@
 #include "../Renderer/RenderGraph/RenderGraphHandles.h"
 
 #include <cstdint>
-#include <limits>
 #include <span>
 #include <vector>
 
@@ -29,8 +28,7 @@ struct ClusterClaimContext {
 };
 
 // False in the shared scope (no camera, no target) and in a primary view frame that is being captured.
-// One rule for every per-view takeover of the CPU scene draw (claims and cull requests).
-constexpr bool PerViewDrawTakeoverAllowed(const ClusterClaimContext& context) noexcept
+constexpr bool ClusterClaimAllowed(const ClusterClaimContext& context) noexcept
 {
     if (context.scope == rg::ViewScope::Shared) {
         return false;
@@ -38,40 +36,10 @@ constexpr bool PerViewDrawTakeoverAllowed(const ClusterClaimContext& context) no
     return !(context.captureArmed && context.scope == rg::ViewScope::Primary);
 }
 
-constexpr bool ClusterClaimAllowed(const ClusterClaimContext& context) noexcept
-{
-    return PerViewDrawTakeoverAllowed(context);
-}
-
-// Same rule as ClusterClaimAllowed: a captured primary frame keeps its full draw list.
+// The CPU draw cull follows the claim rule: a captured primary frame keeps its full draw list.
 constexpr bool SceneCullAllowed(const ClusterClaimContext& context) noexcept
 {
-    return PerViewDrawTakeoverAllowed(context);
-}
-
-// Cull counts are live only when they come from the previous frame or the current one.
-constexpr bool SceneCullCountsFresh(std::uint64_t storedFrame, std::uint64_t currentFrame) noexcept
-{
-    return storedFrame == currentFrame || (currentFrame > 0 && storedFrame == currentFrame - 1);
-}
-
-// Cull padding as a fraction of the largest box extent: clamped to [0, 1]; NaN, negative or infinite gives 0.
-constexpr float SanitizeCullPadding(float padding) noexcept
-{
-    if (!(padding >= 0.0f) || padding > std::numeric_limits<float>::max()) {
-        return 0.0f;
-    }
-    return padding > 1.0f ? 1.0f : padding;
-}
-
-// Aspect for a primary camera built without primary view data: the last primary aspect, else `callerAspect`, else 1.
-constexpr float PrimaryAspectFallback(float lastPrimaryAspect, float callerAspect) noexcept
-{
-    const auto usable = [](float aspect) { return aspect > 0.0f && aspect <= std::numeric_limits<float>::max(); };
-    if (usable(lastPrimaryAspect)) {
-        return lastPrimaryAspect;
-    }
-    return usable(callerAspect) ? callerAspect : 1.0f;
+    return ClusterClaimAllowed(context);
 }
 
 // True when every pass of the part's chain was declared.

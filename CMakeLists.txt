@@ -576,6 +576,7 @@ add_library(gte_core STATIC
     src/Core/ClusterCandidates.cpp
     src/Core/ClusterClaim.h
     src/Core/ClusterClaim.cpp
+    src/Core/CullRequestRules.h
     src/Math/MathTypes.h
     src/Math/Vec2.h
     src/Math/Vec3.h

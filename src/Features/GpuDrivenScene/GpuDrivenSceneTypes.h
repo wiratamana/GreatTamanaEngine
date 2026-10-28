@@ -276,7 +276,8 @@ constexpr std::uint64_t ClusterCountAgeFrames(std::uint64_t frame, std::uint64_t
     return visibleFrame == 0 || visibleFrame > frame ? 0 : frame - visibleFrame;
 }
 
-// What a view reported at its last callback.
+// What a view reported at its last callback. Liveness, camera and CPU fields come from the always-on cull pass;
+// the GPU-path fields come from the cluster pass and read as zero in a frame where it did not run.
 struct GpuDrivenSceneViewSnapshot {
     std::uint64_t frameIndex = 0;
     bool rendered = false;
@@ -304,7 +305,7 @@ struct GpuDrivenSceneViewSnapshot {
     CullCameraSource cullCamera = CullCameraSource::None;
     CullCameraSource hizSource = CullCameraSource::None;
 
-    // CPU draw cull of this view, written by its own callback. Counts are one frame old.
+    // CPU draw cull of this view, written by the always-on cull pass. Counts are one frame old.
     CpuCullState cpuCullState = CpuCullState::Off;
     std::uint32_t cpuTested = 0;
     std::uint32_t cpuCulled = 0;

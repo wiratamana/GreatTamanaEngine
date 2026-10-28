@@ -26,6 +26,7 @@
 #include "../Renderer/VulkanFormatInfo.h"
 #include "ClusterCandidates.h"
 #include "ClusterClaim.h"
+#include "CullRequestRules.h"
 #include "../Renderer/Culling/CullingTypes.h"
 #include "FaultInjection.h"
 #include "Logging.h"

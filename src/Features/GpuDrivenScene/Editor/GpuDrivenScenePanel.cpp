@@ -106,7 +106,10 @@ bool BuildGpuDrivenScenePanel(GpuDrivenSceneSettings& edit, bool supported,
         changed |= ImGui::Checkbox("GPU path enabled", &edit.enabled);
         changed |= ImGui::Checkbox("Back-face cone culling", &edit.cone);
         if (edit.cone) {
-            ImGui::TextColored(kWarnColor, "Only correct for closed meshes.");
+            const std::string_view warning = ConeWarningLine();
+            ImGui::PushStyleColor(ImGuiCol_Text, kWarnColor);
+            ImGui::TextWrapped("%.*s", static_cast<int>(warning.size()), warning.data());
+            ImGui::PopStyleColor();
         }
         changed |= ImGui::Checkbox("Count visible clusters (extra passes)", &edit.collectStats);
         changed |= DrawDebugViewCombo(edit.debugView);

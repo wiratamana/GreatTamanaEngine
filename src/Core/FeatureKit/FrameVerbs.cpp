@@ -2,7 +2,6 @@
 
 #include "ComputeShader.h"
 #include "VerbSupport.h"
-#include "../ClusterClaim.h"
 #include "../Core.h"
 #include "../../Renderer/RenderGraph/Shader.h"
 #include "../Logging.h"
@@ -95,7 +94,7 @@ bool Frame::ViewCaptureArmed() const noexcept
     if (m_context == nullptr || m_context->core == nullptr) {
         return false;
     }
-    return !SceneCullAllowed(ClusterClaimContext{ m_view.scope, m_context->core->CaptureArmedThisFrame() });
+    return m_view.scope == rg::ViewScope::Primary && m_context->core->CaptureArmedThisFrame();
 }
 
 bool Frame::ShaderReady(ComputeShader& shader)

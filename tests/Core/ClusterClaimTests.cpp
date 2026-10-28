@@ -1,6 +1,7 @@
-// Tier-1 tests for the pure claim and cull rules in Core/ClusterClaim.h. No device involved.
+// Tier-1 tests for the pure claim and cull rules in Core/ClusterClaim.h and Core/CullRequestRules.h. No device involved.
 
 #include "Core/ClusterClaim.h"
+#include "Core/CullRequestRules.h"
 
 #include <gtest/gtest.h>
 
