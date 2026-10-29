@@ -1704,23 +1704,65 @@ TEST(BuildRenderGraphControlCommandResponseJsonTests, IncludesWindowOpenWhenSupp
 
 namespace {
 
-using gte::Network::BuildOpenSponzaSceneResponseJson;
+using gte::PresetProfile;
+using gte::PresetScene;
+using gte::Network::BuildOpenPresetSceneResponseJson;
+using gte::Network::ParseOpenPresetSceneRequest;
 
-TEST(BuildOpenSponzaSceneResponseJsonTests, ReportsAllFields)
+TEST(BuildOpenPresetSceneResponseJsonTests, ReportsAllFields)
 {
-    const nlohmann::json parsed = nlohmann::json::parse(BuildOpenSponzaSceneResponseJson(true, "C:/x/Sponza.gta", "ok"));
+    const nlohmann::json parsed =
+        nlohmann::json::parse(BuildOpenPresetSceneResponseJson("sponza", true, "C:/x/Sponza.gta", "ok"));
+    EXPECT_EQ(parsed.size(), 5u);
     EXPECT_EQ(parsed["success"], true);
+    EXPECT_EQ(parsed["preset"], "sponza");
     EXPECT_EQ(parsed["imported_this_call"], true);
     EXPECT_EQ(parsed["gta_path"], "C:/x/Sponza.gta");
     EXPECT_EQ(parsed["message"], "ok");
 }
 
-TEST(BuildOpenSponzaSceneResponseJsonTests, EscapesBackslashAndQuote)
+TEST(BuildOpenPresetSceneResponseJsonTests, EscapesBackslashAndQuote)
 {
     const std::string message = "path \"C:\\x\" failed";
-    const nlohmann::json parsed = nlohmann::json::parse(BuildOpenSponzaSceneResponseJson(false, "C:\\x\\Sponza.gta", message));
+    const nlohmann::json parsed =
+        nlohmann::json::parse(BuildOpenPresetSceneResponseJson("sponza", false, "C:\\x\\Sponza.gta", message));
     EXPECT_EQ(parsed["gta_path"], "C:\\x\\Sponza.gta");
     EXPECT_EQ(parsed["message"], message);
+}
+
+TEST(ParseOpenPresetSceneRequestTests, AcceptsBothPresetsWithDefaults)
+{
+    const auto sponza = ParseOpenPresetSceneRequest(R"({"preset":"sponza"})");
+    ASSERT_TRUE(sponza.valid);
+    EXPECT_EQ(sponza.preset, PresetScene::Sponza);
+    EXPECT_FALSE(sponza.parameters.count.has_value());
+    EXPECT_FALSE(sponza.parameters.spacing.has_value());
+    EXPECT_EQ(sponza.parameters.profile, PresetProfile::GeometryOnly);
+
+    const auto demo = ParseOpenPresetSceneRequest(R"({"preset":"hiz_demo","count":50000,"spacing":2.5,"profile":"full"})");
+    ASSERT_TRUE(demo.valid);
+    EXPECT_EQ(demo.preset, PresetScene::HizDemo);
+    ASSERT_TRUE(demo.parameters.count.has_value());
+    EXPECT_EQ(*demo.parameters.count, 50000u);
+    EXPECT_FLOAT_EQ(*demo.parameters.spacing, 2.5f);
+    EXPECT_EQ(demo.parameters.profile, PresetProfile::Full);
+}
+
+TEST(ParseOpenPresetSceneRequestTests, RejectsBadBodies)
+{
+    EXPECT_FALSE(ParseOpenPresetSceneRequest("").valid);
+    EXPECT_FALSE(ParseOpenPresetSceneRequest("[]").valid);
+    EXPECT_FALSE(ParseOpenPresetSceneRequest("{}").valid);
+    EXPECT_FALSE(ParseOpenPresetSceneRequest(R"({"preset":"nope"})").valid);
+    EXPECT_FALSE(ParseOpenPresetSceneRequest(R"({"preset":7})").valid);
+    EXPECT_FALSE(ParseOpenPresetSceneRequest(R"({"preset":"hiz_demo","spacing":0.05})").valid);
+    EXPECT_FALSE(ParseOpenPresetSceneRequest(R"({"preset":"hiz_demo","spacing":1001})").valid);
+    EXPECT_FALSE(ParseOpenPresetSceneRequest(R"({"preset":"hiz_demo","spacing":"2"})").valid);
+    EXPECT_FALSE(ParseOpenPresetSceneRequest(R"({"preset":"hiz_demo","profile":"other"})").valid);
+    EXPECT_FALSE(ParseOpenPresetSceneRequest(R"({"preset":"hiz_demo","count":-1})").valid);
+    EXPECT_FALSE(ParseOpenPresetSceneRequest(R"({"preset":"hiz_demo","count":1.5})").valid);
+    EXPECT_FALSE(ParseOpenPresetSceneRequest(R"({"preset":"hiz_demo","count":"5"})").valid);
+    EXPECT_FALSE(ParseOpenPresetSceneRequest(R"({"preset":"hiz_demo","count":4294967296})").valid);
 }
 
 } // namespace

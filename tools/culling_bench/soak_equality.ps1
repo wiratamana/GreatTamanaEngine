@@ -1,5 +1,6 @@
 <#
-  Image-equality soak test. Hi-Z must never remove a visible cluster.
+  Image-equality soak test. Hi-Z never removes a visible cluster, and a camera turning back from nothing in view
+  draws the same image as NoCull (scenario away-and-back: -AwayFrames away, one frame back). Needs GET /hiz_demo/geometry_only_features.
   Geometry-only config, ClusterId debug view (one colour per cluster). Each sequence of camera poses and mover
   positions is replayed in Hi-Z mode (history runs frame after frame) and in NoCull mode. NoCull is captured twice
   per pose: its own difference is the noise floor (cluster emit order is not deterministic, depth ties flip pixels).
@@ -23,6 +24,7 @@ param(
     [int]$PanFrames = 60,
     [int]$TurnPairs = 6,
     [int]$MoverFrames = 60,
+    [int]$AwayFrames = 30,
     [int]$FrameWait = 2,
     [int]$GridCount = 2000,
     [double]$GridSpacing = 2.0,
@@ -55,17 +57,18 @@ function Get-Rnd {
 }
 
 # Scene definitions. Rest ranges are camera position (X/Y/Z), pitch and yaw in degrees.
+# AwayRot is a camera rotation with nothing of the scene in view.
 function Get-SceneDef {
     param([string]$Name)
     if ($Name -eq 'terrain') {
         return [pscustomobject]@{
-            Name = 'terrain'; Base = @(0, 900, 0); BasePitch = -10.0
+            Name = 'terrain'; Base = @(0, 900, 0); BasePitch = -10.0; AwayRot = @(80.0, 0.0, 0.0)
             X = @(-600, 600); Y = @(820, 1300); Z = @(-600, 600); Pitch = @(-50, 10); Yaw = @(0, 360)
             WallPos = @(0, 900, 40); WallScale = @(30, 30, 0.2); MoverAmp = 40.0; MoverHome = @(0, 0, 0)
         }
     }
     return [pscustomobject]@{
-        Name = 'grid'; Base = @(0, 0, -60); BasePitch = 0.0
+        Name = 'grid'; Base = @(0, 0, -60); BasePitch = 0.0; AwayRot = @(0.0, 180.0, 0.0)
         X = @(-40, 40); Y = @(-40, 40); Z = @(-120, -40); Pitch = @(-15, 15); Yaw = @(-30, 30)
         WallPos = @(0, 0, -30); WallScale = @(20, 20, 0.2); MoverAmp = 8.0; MoverHome = @(0, 0, 8)
     }
@@ -102,6 +105,17 @@ function New-TurnFrames {
         $y0 = Get-Rnd @(-90, 90)
         $frames.Add((New-Frame $Def.Base @($Def.BasePitch, $y0, 0.0)))
         $frames.Add((New-Frame $Def.Base @($Def.BasePitch, ($y0 + 40.0), 0.0)))
+    }
+    return $frames.ToArray()
+}
+
+# Camera looks away for $AwayFrames frames (nothing in view), then one frame back at the base pose, twice.
+function New-AwayAndBackFrames {
+    param($Def, [int]$AwayFrames)
+    $frames = New-Object System.Collections.Generic.List[object]
+    foreach ($backYaw in @(0.0, 20.0)) {
+        for ($i = 0; $i -lt $AwayFrames; $i++) { $frames.Add((New-Frame $Def.Base $Def.AwayRot)) }
+        $frames.Add((New-Frame $Def.Base @($Def.BasePitch, $backYaw, 0.0)))
     }
     return $frames.ToArray()
 }
@@ -337,6 +351,7 @@ function Invoke-SoakScene {
     $script:Created.Add($wall)
     Invoke-SoakScenario $Name 'pan' (New-PanFrames $def $PanFrames)
     Invoke-SoakScenario $Name 'turn40' (New-TurnFrames $def $TurnPairs)
+    Invoke-SoakScenario $Name 'away-and-back' (New-AwayAndBackFrames $def $AwayFrames)
     if ($moverNames.Count -gt 0) {
         Invoke-SoakScenario $Name 'movers' (New-MoverFrames $def $moverNames $MoverFrames)
         foreach ($n in $moverNames) { try { Set-CullTrs -Name $n -Position $def.MoverHome } catch { } }
@@ -351,6 +366,7 @@ $savedCam = $null
 $script:TerrainName = ''
 try {
     try { $null = Invoke-CullGet '/profiler' } catch { Write-Host ('Editor not reachable at ' + $BaseUrl + ': ' + $_); exit 2 }
+    try { $prefixes = @(Get-GeometryOnlyPrefixes) } catch { Write-Host ('Fixed-cost feature list unavailable: ' + $_); exit 2 }
     New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
     Show-SplitViews
     Start-Sleep -Seconds 2
@@ -360,7 +376,7 @@ try {
 
     # Deterministic config: geometry only, no temporal features, one colour per cluster.
     foreach ($name in $script:Saved.Keys) {
-        if ($name -match '^(Shadow|VolumetricLight|Atmosphere|Ssgi|Gtao|ToneMapping)') { Set-FeatureTriple $name $false $false $false }
+        if (Test-GeometryOnlyFeature $name $prefixes) { Set-FeatureTriple $name $false $false $false }
     }
     Set-GpuDrivenCfg @{ debugView = 'ClusterId'; collectStats = $false; cone = $false; enabled = $true } | Out-Null
 
@@ -374,11 +390,11 @@ try {
     }
 
     Write-Host ''
-    Write-Host 'scene    scenario  frames equal differing  FAILED  diffPx(total)  maxHizDiff  maxNoise  maxBlock  hizActive'
+    Write-Host 'scene    scenario      frames equal differing  FAILED  diffPx(total)  maxHizDiff  maxNoise  maxBlock  hizActive'
     $totalFail = 0
     $stop = $script:Fatal -or ($script:Skipped.Count -gt 0)
     foreach ($r in $script:Results) {
-        Write-Host ('{0,-8} {1,-9} {2,6} {3,5} {4,9} {5,7} {6,14} {7,11} {8,9} {9,9}  {10}{11}' -f $r.Scene, $r.Scenario, $r.Frames, $r.EqualFrames,
+        Write-Host ('{0,-8} {1,-13} {2,6} {3,5} {4,9} {5,7} {6,14} {7,11} {8,9} {9,9}  {10}{11}' -f $r.Scene, $r.Scenario, $r.Frames, $r.EqualFrames,
             $r.DiffFrames, $r.FailFrames, $r.DiffPixels, $r.MaxDiff, $r.MaxNoise, $r.MaxBlock, $r.HizActive, $(if ($r.Error) { '  ERROR: ' + $r.Error } else { '' }))
         $totalFail += $r.FailFrames
         if ($r.Error) { $stop = $true }

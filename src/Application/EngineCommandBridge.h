@@ -7,6 +7,7 @@
 // may be in flight at a time. See SyncCommandBridge.h for the handoff
 // mechanism.
 
+#include "../Core/EditorCapabilities.h"
 #include "../ECS/Entity.h"
 #include "../Game/EngineCommandResults.h"
 #include "../Math/Vec3.h"
@@ -27,7 +28,7 @@ enum class EngineCommandKind {
     LoadScene,
     GetSceneSnapshot,
     SetProbeHotReloadMarkerValueForTesting,
-    OpenSponzaScene,
+    OpenPresetScene,
 };
 
 // Plain request payload for one InstantiatePrimitive command.
@@ -66,6 +67,12 @@ struct SetProbeHotReloadMarkerValueForTestingCommand {
     int value = 0;
 };
 
+// Preset to open and its optional parameters.
+struct OpenPresetSceneCommand {
+    PresetScene preset = PresetScene::Sponza;
+    PresetParameters parameters;
+};
+
 // One pending engine command, tagged by `kind` - only the field matching
 // `kind` is meaningful.
 struct EngineCommandRequest {
@@ -79,6 +86,7 @@ struct EngineCommandRequest {
     LoadSceneCommand loadScene;
     GetSceneSnapshotCommand getSceneSnapshot;
     SetProbeHotReloadMarkerValueForTestingCommand setProbeHotReloadMarkerValueForTesting;
+    OpenPresetSceneCommand openPresetScene;
 };
 
 // The completed result of one EngineCommandRequest - `kind` mirrors the
@@ -94,7 +102,7 @@ struct EngineCommandResult {
     LoadSceneOutcome loadScene;
     GetSceneSnapshotOutcome getSceneSnapshot;
     SetProbeHotReloadMarkerValueForTestingOutcome setProbeHotReloadMarkerValueForTesting;
-    OpenSponzaSceneOutcome openSponzaScene;
+    OpenPresetSceneOutcome openPresetScene;
 };
 
 class EngineCommandBridge : public SyncCommandBridge<EngineCommandRequest, EngineCommandResult> {

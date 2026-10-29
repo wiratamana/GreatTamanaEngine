@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <mutex>
 #include <type_traits>
 #include <unordered_set>
@@ -889,11 +891,78 @@ std::string BuildScenePathResponseJson(bool success, const std::string& errorMes
     return body.dump();
 }
 
-std::string BuildOpenSponzaSceneResponseJson(
-    bool importedThisCall, const std::string& gtaPath, const std::string& message)
+ParsedOpenPresetSceneRequest ParseOpenPresetSceneRequest(const std::string& jsonBody)
+{
+    constexpr double kMinSpacing = 0.1;
+    constexpr double kMaxSpacing = 1000.0;
+
+    ParsedOpenPresetSceneRequest result;
+    const nlohmann::json parsed = ParseJsonNoThrow(jsonBody);
+    if (parsed.is_discarded()) {
+        result.errorMessage = "malformed JSON body";
+        return result;
+    }
+    if (!parsed.is_object()) {
+        result.errorMessage = "request body must be a JSON object";
+        return result;
+    }
+
+    if (!parsed.contains("preset") || !parsed["preset"].is_string()) {
+        result.errorMessage = "missing or invalid required field: preset";
+        return result;
+    }
+    const std::string preset = parsed["preset"].get<std::string>();
+    if (preset == PresetSceneName(PresetScene::Sponza)) {
+        result.preset = PresetScene::Sponza;
+    } else if (preset == PresetSceneName(PresetScene::HizDemo)) {
+        result.preset = PresetScene::HizDemo;
+    } else {
+        result.errorMessage = "unknown preset (expected \"sponza\" or \"hiz_demo\")";
+        return result;
+    }
+
+    if (parsed.contains("count") && !parsed["count"].is_null()) {
+        const nlohmann::json& count = parsed["count"];
+        if (!count.is_number_integer() || count.get<std::int64_t>() < 0
+            || count.get<std::int64_t>() > static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max())) {
+            result.errorMessage = "count must be a non-negative integer";
+            return result;
+        }
+        result.parameters.count = static_cast<std::uint32_t>(count.get<std::int64_t>());
+    }
+
+    if (parsed.contains("spacing") && !parsed["spacing"].is_null()) {
+        const nlohmann::json& spacing = parsed["spacing"];
+        const double value = spacing.is_number() ? spacing.get<double>() : 0.0;
+        if (!spacing.is_number() || !std::isfinite(value) || value < kMinSpacing || value > kMaxSpacing) {
+            result.errorMessage = "spacing must be a number from 0.1 to 1000";
+            return result;
+        }
+        result.parameters.spacing = static_cast<float>(value);
+    }
+
+    if (parsed.contains("profile") && !parsed["profile"].is_null()) {
+        const nlohmann::json& profile = parsed["profile"];
+        if (profile.is_string() && profile.get<std::string>() == PresetProfileName(PresetProfile::GeometryOnly)) {
+            result.parameters.profile = PresetProfile::GeometryOnly;
+        } else if (profile.is_string() && profile.get<std::string>() == PresetProfileName(PresetProfile::Full)) {
+            result.parameters.profile = PresetProfile::Full;
+        } else {
+            result.errorMessage = "profile must be \"geometry_only\" or \"full\"";
+            return result;
+        }
+    }
+
+    result.valid = true;
+    return result;
+}
+
+std::string BuildOpenPresetSceneResponseJson(
+    std::string_view preset, bool importedThisCall, const std::string& gtaPath, const std::string& message)
 {
     nlohmann::json body;
     body["success"] = true;
+    body["preset"] = std::string(preset);
     body["imported_this_call"] = importedThisCall;
     body["gta_path"] = gtaPath;
     body["message"] = message;

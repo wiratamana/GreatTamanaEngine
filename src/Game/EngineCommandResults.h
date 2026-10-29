@@ -255,12 +255,13 @@ struct LoadSceneOutcome {
     std::string resolvedPath; // the ABSOLUTE path actually read from, meaningful only when success == true.
 };
 
-// Outcome of one ISceneIOCapability::OpenSponzaScene() call.
+// Outcome of one ISceneIOCapability::OpenPresetScene() call.
 // editorAvailable == false means this build has no scene IO capability.
-struct OpenSponzaSceneOutcome {
+struct OpenPresetSceneOutcome {
     bool success = false;
     bool editorAvailable = true;
     bool importedThisCall = false;
+    std::string preset; // Wire name of the preset that was requested.
     std::string message;
     std::string gtaPath;
 };

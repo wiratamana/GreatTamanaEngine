@@ -46,17 +46,17 @@ constexpr Vec3 kLightRotationEulerDegrees{ 50.0f, 0.0f, 0.0f };
 // Warm white sun, linear.
 constexpr Vec3 kSunColor{ 1.0f, 0.92f, 0.78f };
 
-OpenSponzaSceneResult Fail(std::string message)
+OpenSponzaResult Fail(std::string message)
 {
     GTE_LOG_ERROR(kLogCategory, message);
-    OpenSponzaSceneResult result;
+    OpenSponzaResult result;
     result.message = std::move(message);
     return result;
 }
 
 } // namespace
 
-OpenSponzaSceneResult OpenSponzaScene(
+OpenSponzaResult OpenSponza(
     Game& game, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout)
 try
 {
@@ -72,7 +72,7 @@ try
     const std::filesystem::path texturesDirectory = sponzaDirectory / "Sponza_Textures";
     const std::filesystem::path stampPath = sponzaDirectory / "Sponza.import.stamp";
 
-    OpenSponzaSceneResult result;
+    OpenSponzaResult result;
     result.gtaPath = PathToUtf8(gtaPath);
 
     // The import is reused only when the mesh exists and its stamp (written last) matches this importer and source.
@@ -161,7 +161,7 @@ try
 
     result.success = true;
     result.message = result.importedThisCall ? "Imported and opened the Sponza scene." : "Opened the Sponza scene.";
-    GTE_LOG_INFO(kLogCategory, "OpenSponzaScene: done");
+    GTE_LOG_INFO(kLogCategory, "OpenSponza: done");
     return result;
 }
 catch (const std::exception& e)

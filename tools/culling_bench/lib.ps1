@@ -452,3 +452,216 @@ function Test-CullPreconditions {
     } catch { $warn.Add('profiler unreadable: ' + $_) }
     return [pscustomobject]@{ Ok = ($fail.Count -eq 0); Failures = $fail.ToArray(); Warnings = $warn.ToArray() }
 }
+
+# ---------------------------------------------------------------------------
+# Fixed-cost feature set (the engine owns the list)
+# ---------------------------------------------------------------------------
+
+# Name prefixes of the fixed-cost features, from GET /hiz_demo/geometry_only_features. Throws when empty.
+function Get-GeometryOnlyPrefixes {
+    $r = Invoke-CullGet '/hiz_demo/geometry_only_features'
+    $p = @(@(Get-Field $r 'prefixes' @()) | ForEach-Object { [string]$_ })
+    if ($p.Count -eq 0) { throw 'GET /hiz_demo/geometry_only_features returned no prefixes.' }
+    return $p
+}
+
+function Test-GeometryOnlyFeature {
+    param([string]$Name, [string[]]$Prefixes)
+    foreach ($p in $Prefixes) {
+        if ($Name.StartsWith($p, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
+# ---------------------------------------------------------------------------
+# Entity transform read, feature pass time
+# ---------------------------------------------------------------------------
+
+# Current transform of an entity. A name-only POST /set_entity_trs changes nothing. Returns $null on failure.
+function Get-CullTrs {
+    param([string]$Name)
+    try { $r = Invoke-CullPost '/set_entity_trs' @{ name = $Name } } catch { return $null }
+    $t = Get-Field $r 'transform'
+    if ($null -eq $t) { return $null }
+    $p = $t.position
+    $e = $t.rotation_euler_degrees
+    $s = $t.scale
+    return [pscustomobject]@{
+        Position = @([double]$p.x, [double]$p.y, [double]$p.z)
+        Rotation = @([double]$e.x, [double]$e.y, [double]$e.z)
+        Scale = @([double]$s.x, [double]$s.y, [double]$s.z)
+    }
+}
+
+# Median pass ms of one feature in one view ('primary' | 'secondary') of a Measure-CullConfig result.
+# NaN when the feature had no timed pass in that view.
+function Get-FeatureMs {
+    param($Measurement, [string]$View, [string]$Feature)
+    $key = $View + '|' + $Feature
+    $fm = $Measurement.FeatureMs
+    if ($fm.ContainsKey($key)) { return [double]$fm[$key] }
+    return [double]::NaN
+}
+
+# ---------------------------------------------------------------------------
+# Hi-Z demo table and verdicts (pure functions of measured rows)
+# ---------------------------------------------------------------------------
+
+# Number as text; a value that was not measured prints '-', never 0.
+function Format-Cell {
+    param([double]$Value, [string]$Format = 'N2')
+    if ([double]::IsNaN($Value)) { return '-' }
+    return $Value.ToString($Format, [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+# Signed change of $Value against $Base as '+1.23 ms (+4.5 %)'. '-' when either is unknown.
+function Format-HizDelta {
+    param([double]$Value, [double]$Base)
+    if ([double]::IsNaN($Value) -or [double]::IsNaN($Base)) { return '-' }
+    $d = $Value - $Base
+    $sign = if ($d -lt 0) { '-' } else { '+' }
+    $text = ('{0}{1} ms' -f $sign, (Format-Cell ([math]::Abs($d))))
+    if ($Base -gt 0) { $text += (' ({0}{1} %)' -f $sign, (Format-Cell ([math]::Abs(100.0 * $d / $Base)) 'N1')) }
+    return $text
+}
+
+# One table row from the repeated measurements ($Reps) of one profile, wall state and mode.
+# Each measurement is a Measure-CullConfig result, optionally with a VerdictKind note property.
+function New-HizDemoRow {
+    param([string]$Profile, [string]$Wall, [string]$Mode, $Reps, [string]$PresentPolicy)
+    $arr = @($Reps)
+    $validSum = 0
+    $sampleSum = 0
+    foreach ($m in $arr) { $validSum += $m.Valid; $sampleSum += $m.Samples }
+    $validPct = if ($sampleSum -gt 0) { 100.0 * $validSum / $sampleSum } else { 0.0 }
+    $cpu = Get-Median @($arr | ForEach-Object { $_.Cpu })
+    $limited = (@($arr | Where-Object { (Get-Field $_ 'VerdictKind' '') -eq 'present_limited' }).Count -gt 0)
+    $fps = [double]::NaN
+    $fpsNote = ''
+    if ($PresentPolicy -ne 'uncapped') { $fpsNote = 'n/a: capped' }
+    elseif ($limited) { $fpsNote = 'n/a: present limited' }
+    elseif ([double]::IsNaN($cpu) -or $cpu -le 0) { $fpsNote = 'n/a: not measured' }
+    else { $fps = 1000.0 / $cpu }
+    $applied = ($Mode -ne 'HiZ') -or (@($arr | Where-Object { $_.Occlusion -ne 'Applied' }).Count -eq 0)
+    return [pscustomobject]@{
+        Profile = $Profile
+        Wall = $Wall
+        Mode = $Mode
+        Span = Get-Median @($arr | ForEach-Object { $_.Span })
+        Primary = Get-Median @($arr | ForEach-Object { $_.Primary })
+        Secondary = Get-Median @($arr | ForEach-Object { $_.Secondary })
+        GdsPrimary = Get-Median @($arr | ForEach-Object { Get-FeatureMs $_ 'primary' 'GpuDrivenScene' })
+        GdsSecondary = Get-Median @($arr | ForEach-Object { Get-FeatureMs $_ 'secondary' 'GpuDrivenScene' })
+        Tested = Get-Median @($arr | ForEach-Object { $_.Tested })
+        Drawn = Get-Median @($arr | ForEach-Object { $_.Visible })
+        Cpu = $cpu
+        Fps = $fps
+        FpsNote = $fpsNote
+        Applied = $applied
+        ValidPct = $validPct
+    }
+}
+
+function Find-HizDemoRow {
+    param($Rows, [string]$Profile, [string]$Wall, [string]$Mode)
+    foreach ($r in $Rows) {
+        if ($r.Profile -eq $Profile -and $r.Wall -eq $Wall -and $r.Mode -eq $Mode) { return $r }
+    }
+    return $null
+}
+
+# Markdown table lines, one row per measured configuration.
+function Format-HizDemoTable {
+    param($Rows)
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('| profile | wall | mode | span ms | primary ms | secondary ms | GpuDrivenScene primary ms | GpuDrivenScene secondary ms | clusters tested | clusters drawn | FPS | samples valid % |')
+    $lines.Add('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
+    foreach ($r in $Rows) {
+        $fps = if (-not [double]::IsNaN($r.Fps)) { Format-Cell $r.Fps 'N0' } elseif ($r.FpsNote) { $r.FpsNote } else { '-' }
+        $lines.Add(('| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7} | {8} | {9} | {10} | {11} |' -f `
+            $r.Profile, $r.Wall, $r.Mode, (Format-Cell $r.Span), (Format-Cell $r.Primary), (Format-Cell $r.Secondary),
+            (Format-Cell $r.GdsPrimary), (Format-Cell $r.GdsSecondary), (Format-Cell $r.Tested 'N0'), (Format-Cell $r.Drawn 'N0'),
+            $fps, (Format-Cell $r.ValidPct 'N0')))
+    }
+    return $lines.ToArray()
+}
+
+function New-HizDemoCheck {
+    param([string]$Id, [string]$Text, [string]$Status, [string]$Detail)
+    return [pscustomobject]@{ Id = $Id; Text = $Text; Status = $Status; Detail = $Detail }
+}
+
+# Computed verdict lines and PASS / FAIL / INVALID checks per profile.
+#   wall on : Hi-Z GpuDrivenScene primary ms <= $WallRatio x Frustum.
+#   wall off: Hi-Z GpuDrivenScene primary ms <= Frustum + $HizBudgetMs.
+# INVALID = a row has too few valid samples, Hi-Z was not Applied, or a value was not measured.
+function Get-HizDemoVerdicts {
+    param($Rows, [double]$HizBudgetMs = 0.4, [double]$WallRatio = 0.10, [double]$MinValidPercent = 80.0)
+    $lines = New-Object System.Collections.Generic.List[string]
+    $checks = New-Object System.Collections.Generic.List[object]
+    $profiles = @($Rows | ForEach-Object { $_.Profile } | Select-Object -Unique)
+    foreach ($p in $profiles) {
+        $nOff = Find-HizDemoRow $Rows $p 'off' 'NoCull'
+        $fOff = Find-HizDemoRow $Rows $p 'off' 'Frustum'
+        $hOff = Find-HizDemoRow $Rows $p 'off' 'HiZ'
+        $fOn = Find-HizDemoRow $Rows $p 'on' 'Frustum'
+        $hOn = Find-HizDemoRow $Rows $p 'on' 'HiZ'
+
+        if (($null -ne $nOff) -and ($null -ne $fOff)) {
+            $lines.Add(('[{0}] Frustum vs NoCull, wall off: {1}' -f $p, (Format-HizDelta $fOff.Span $nOff.Span)))
+        }
+        if (($null -ne $fOn) -and ($null -ne $hOn)) {
+            $lines.Add(('[{0}] Hi-Z vs Frustum, wall on: {1}, clusters drawn {2} -> {3}' -f $p,
+                (Format-HizDelta $hOn.Span $fOn.Span), (Format-Cell $fOn.Drawn 'N0'), (Format-Cell $hOn.Drawn 'N0')))
+            $status = 'INVALID'
+            $detail = 'a row has too few valid samples, Hi-Z was not Applied, or a value was not measured'
+            $ok = ($fOn.ValidPct -ge $MinValidPercent) -and ($hOn.ValidPct -ge $MinValidPercent) -and $hOn.Applied
+            $ok = $ok -and (-not [double]::IsNaN($fOn.GdsPrimary)) -and (-not [double]::IsNaN($hOn.GdsPrimary)) -and ($fOn.GdsPrimary -gt 0)
+            if ($ok) {
+                $status = if ($hOn.GdsPrimary -le ($WallRatio * $fOn.GdsPrimary)) { 'PASS' } else { 'FAIL' }
+                $detail = ('Hi-Z {0} ms, Frustum {1} ms' -f (Format-Cell $hOn.GdsPrimary 'N3'), (Format-Cell $fOn.GdsPrimary 'N3'))
+            }
+            $checks.Add((New-HizDemoCheck ('H1 ' + $p) ('wall on: Hi-Z GpuDrivenScene primary <= ' + (Format-Cell (100.0 * $WallRatio) 'N0') + '% of Frustum') $status $detail))
+        }
+        if (($null -ne $fOff) -and ($null -ne $hOff)) {
+            $lines.Add(('[{0}] Hi-Z vs Frustum, wall off: {1} (GpuDrivenScene primary {2})' -f $p,
+                (Format-HizDelta $hOff.Span $fOff.Span), (Format-HizDelta $hOff.GdsPrimary $fOff.GdsPrimary)))
+            $status = 'INVALID'
+            $detail = 'a row has too few valid samples, Hi-Z was not Applied, or a value was not measured'
+            $ok = ($fOff.ValidPct -ge $MinValidPercent) -and ($hOff.ValidPct -ge $MinValidPercent) -and $hOff.Applied
+            $ok = $ok -and (-not [double]::IsNaN($fOff.GdsPrimary)) -and (-not [double]::IsNaN($hOff.GdsPrimary))
+            if ($ok) {
+                $status = if ($hOff.GdsPrimary -le ($fOff.GdsPrimary + $HizBudgetMs)) { 'PASS' } else { 'FAIL' }
+                $detail = ('Hi-Z {0} ms, Frustum {1} ms' -f (Format-Cell $hOff.GdsPrimary 'N3'), (Format-Cell $fOff.GdsPrimary 'N3'))
+            }
+            $checks.Add((New-HizDemoCheck ('H2 ' + $p) ('wall off: Hi-Z GpuDrivenScene primary <= Frustum + ' + (Format-Cell $HizBudgetMs) + ' ms') $status $detail))
+        }
+    }
+    return [pscustomobject]@{ Lines = $lines.ToArray(); Checks = $checks.ToArray() }
+}
+
+# 0 all pass, 1 a check failed, 3 a check could not be evaluated (or there is no check).
+function Get-HizDemoExitCode {
+    param($Checks)
+    $c = @($Checks)
+    if ($c.Count -eq 0) { return 3 }
+    if (@($c | Where-Object { $_.Status -eq 'FAIL' }).Count -gt 0) { return 1 }
+    if (@($c | Where-Object { $_.Status -ne 'PASS' }).Count -gt 0) { return 3 }
+    return 0
+}
+
+# Rows as ordered maps with NaN turned into null (ConvertTo-Json would write an invalid NaN token).
+function ConvertTo-HizDemoJsonRows {
+    param($Rows)
+    $out = New-Object System.Collections.Generic.List[object]
+    foreach ($r in $Rows) {
+        $o = [ordered]@{}
+        foreach ($prop in $r.PSObject.Properties) {
+            $v = $prop.Value
+            if (($v -is [double]) -and [double]::IsNaN($v)) { $v = $null }
+            $o[$prop.Name] = $v
+        }
+        $out.Add($o)
+    }
+    return $out.ToArray()
+}

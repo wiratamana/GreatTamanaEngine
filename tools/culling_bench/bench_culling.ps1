@@ -1,6 +1,6 @@
 <#
   Culling benchmark. Drives a running editor over HTTP; nothing is saved to disk by the editor.
-  Tables: T1 geometry only | T2 full pipeline | T3 Hi-Z wall | T4 empty floor | T5 heavy scene (-IncludeHeavy).
+  Tables: T1 geometry only | T2 full pipeline | T3 Hi-Z wall | T7 camera looks away | T4 empty floor | T5 heavy scene (-IncludeHeavy, also T7h).
   Each table runs its configs in -Repeats alternating A/B rounds with -Samples samples per run.
   Exit code: 0 = all checks pass, 1 = a check failed, 2 = precondition failed or editor unreachable,
   3 = a check could not be evaluated (invalid rows or missing data).
@@ -38,7 +38,7 @@ $script:Created = New-Object System.Collections.Generic.List[string]
 $script:RowOk = @{}
 $script:Saved = $null
 $script:ShadowPattern = '^Shadow'
-$script:PostPattern = '^(VolumetricLight|Atmosphere|Ssgi|Gtao|ToneMapping)'
+$script:Prefixes = @()
 $script:MdRows = New-Object System.Collections.Generic.List[string]
 
 function Out-Line {
@@ -63,7 +63,7 @@ function Set-BenchConfig {
         $t = $script:Saved[$name]
         $g = $t.G
         if ($name -match $script:ShadowPattern -and $Cfg.Shadow -eq 'off') { $g = $false }
-        if ($name -match $script:PostPattern -and $Cfg.Post -eq 'off') { $g = $false }
+        if ((Test-GeometryOnlyFeature $name $script:Prefixes) -and ($name -notmatch $script:ShadowPattern) -and $Cfg.Post -eq 'off') { $g = $false }
         $s = if ($Cfg.Secondary -eq 'all') { $true } else { $t.S }
         Set-FeatureTriple $name $g $t.P $s
     }
@@ -171,6 +171,97 @@ function Remove-Created {
     $script:Created.Clear()
 }
 
+# Camera rotations tried for 'nothing in view' (pitch, yaw, roll in degrees).
+$script:AwayRotations = @(@(80.0, 0.0, 0.0), @(-80.0, 0.0, 0.0), @(0.0, 180.0, 0.0))
+
+# True when the game view holds a valid, non-zero count of visible clusters (Frustum mode, stats on).
+function Test-SceneInView {
+    $st = Get-GpuDrivenState
+    return ([bool](Get-Field $st 'game.visibleValid' $false) -and ([double](Get-Field $st 'game.visibleClusters' 0) -gt 0))
+}
+
+# First rotation at $Position that leaves no visible cluster, or $null.
+function Find-AwayRotation {
+    param([double[]]$Position)
+    foreach ($rot in $script:AwayRotations) {
+        Set-CullCamera $CameraEntity $Position $rot
+        Wait-CullFrames 12
+        $st = Get-GpuDrivenState
+        if ([bool](Get-Field $st 'game.visibleValid' $false) -and ([double](Get-Field $st 'game.visibleClusters' -1) -eq 0)) { return $rot }
+    }
+    return $null
+}
+
+# Frustum runs with the camera facing the scene and looking away, in alternating rounds (stats on).
+# Returns Facing and Away measurement lists, or $null when the poses cannot be established.
+function Invoke-AwayTable {
+    param([string]$Table, $Facing)
+    Out-Line ''
+    Out-Line ('=== ' + $Table + ' ===')
+    Set-GpuDrivenCfg @{ mode = 'Frustum'; collectStats = 'true'; debugView = 'Off'; cone = 'false' } | Out-Null
+    Set-CullCamera $CameraEntity $Facing.Position $Facing.Rotation
+    Wait-CullFrames 12
+    if (-not (Test-SceneInView)) {
+        Out-Line 'INVALID  the facing pose shows no visible cluster; the away table is skipped.'
+        return $null
+    }
+    $away = Find-AwayRotation $Facing.Position
+    if ($null -eq $away) {
+        Set-CullCamera $CameraEntity $Facing.Position $Facing.Rotation
+        Out-Line 'INVALID  no camera rotation was found that shows nothing; the away table is skipped.'
+        return $null
+    }
+    Out-Line ('Away rotation (pitch, yaw, roll): ' + ($away -join ', '))
+    $rotations = @{ facing = $Facing.Rotation; away = $away }
+    $res = @{ facing = New-Object System.Collections.Generic.List[object]; away = New-Object System.Collections.Generic.List[object] }
+    for ($rep = 1; $rep -le $Repeats; $rep++) {
+        $order = if ($rep % 2 -eq 0) { @('away', 'facing') } else { @('facing', 'away') }
+        foreach ($n in $order) {
+            Set-CullCamera $CameraEntity $Facing.Position $rotations[$n]
+            Write-Host ('  ' + $Table + ' round ' + $rep + '/' + $Repeats + ' ' + $n)
+            $m = Measure-CullConfig -Label ($Table + ' ' + $n) -Samples $Samples
+            $st = Get-GpuDrivenState
+            $skipped = [double](Get-Field $st 'game.skippedParts' ([double]::NaN))
+            $res[$n].Add(($m | Add-Member -NotePropertyName Skipped -NotePropertyValue $skipped -PassThru))
+        }
+    }
+    Set-CullCamera $CameraEntity $Facing.Position $Facing.Rotation
+    foreach ($n in @('facing', 'away')) {
+        $arr = $res[$n].ToArray()
+        $validSum = 0; $sampleSum = 0
+        foreach ($m in $arr) { $validSum += $m.Valid; $sampleSum += $m.Samples }
+        $validPct = if ($sampleSum -gt 0) { 100.0 * $validSum / $sampleSum } else { 0.0 }
+        $script:RowOk[$Table + '|' + $n] = ($validPct -ge $MinValidPercent)
+        # A part with no pass has no row in the graph: its GpuDrivenScene time is exactly 0 while the view is valid.
+        $gds = Get-Median @($arr | ForEach-Object { $g = Get-FeatureMs $_ 'primary' 'GpuDrivenScene'; if ([double]::IsNaN($g)) { 0.0 } else { $g } })
+        $tested = Get-Median @($arr | ForEach-Object { $_.Tested })
+        $skip = Get-Median @($arr | ForEach-Object { $_.Skipped })
+        Out-Line ('{0,-8} GpuDrivenScene primary={1,7} ms  clusters tested={2,9}  skippedParts={3,4}  valid {4}/{5} ({6}%)' -f $n,
+            (Format-Num $gds 'N3'), (Format-Num $tested 'N0'), (Format-Num $skip 'N0'), $validSum, $sampleSum, (Format-Num $validPct 'N0'))
+    }
+    return [pscustomobject]@{ Facing = $res['facing']; Away = $res['away'] }
+}
+
+# Checks of an away table: the part is skipped, nothing is tested, no GpuDrivenScene pass runs; facing is not skipped.
+function Add-AwayChecks {
+    param($Res, [string]$Table, [string]$Id)
+    if ($null -eq $Res) {
+        Add-Check ($Id + '1') ($Table + ': away view skips the part') @([double]::NaN) $false $false 'no away pose'
+        return
+    }
+    $rowsOk = Test-RowsOk @(($Table + '|facing'), ($Table + '|away'))
+    $away = $Res.Away.ToArray()
+    $facing = $Res.Facing.ToArray()
+    $ex = @($away | ForEach-Object { 1.0 - $_.Skipped })
+    Add-Check ($Id + '1') ($Table + ': away view skips >= 1 part (game.skippedParts)') $ex $rowsOk $false
+    $ex = @($away | ForEach-Object { [double]$_.Tested })
+    Add-Check ($Id + '2') ($Table + ': away view tests 0 clusters') $ex $rowsOk $false
+    $ex = @($away | ForEach-Object { $g = Get-FeatureMs $_ 'primary' 'GpuDrivenScene'; if ([double]::IsNaN($g)) { 0.0 } else { $g } })
+    Add-Check ($Id + '3') ($Table + ': away view has no GpuDrivenScene pass in the primary view (sum = 0 ms)') $ex $rowsOk $false
+    $ex = @($facing | ForEach-Object { $_.Skipped })
+    Add-Check ($Id + '4') ($Table + ': facing view skips no part') $ex $rowsOk $false
+}
+
 $exitCode = 0
 $savedCfg = $null
 $savedCam = $null
@@ -178,6 +269,7 @@ $viewSizeStart = 'unknown'
 $terrainName = ''
 try {
     try { $null = Invoke-CullGet '/profiler' } catch { Write-Host ('Editor not reachable at ' + $BaseUrl + ': ' + $_); exit 2 }
+    try { $script:Prefixes = @(Get-GeometryOnlyPrefixes) } catch { Write-Host ('Fixed-cost feature list unavailable: ' + $_); exit 2 }
 
     Show-SplitViews
     Start-Sleep -Seconds 2
@@ -226,6 +318,9 @@ try {
         [void]$script:Created.Remove($wall)
         [void](Remove-CullEntity $wall)
 
+        # T7: camera looks away, nothing in view.
+        $away = Invoke-AwayTable 'T7 away' ([pscustomobject]@{ Position = [double[]]$TerrainCamera; Rotation = @(0.0, 0.0, 0.0) })
+
         # T4: empty scene, the fixed floor.
         $t4 = $null
         if (-not $SkipLoad) {
@@ -239,7 +334,7 @@ try {
         }
 
         # T5: heavy scene (needs -IncludeHeavy).
-        $t5 = $null; $t5w = $null
+        $t5 = $null; $t5w = $null; $away5 = $null
         if ($IncludeHeavy) {
             Out-Line ''
             Out-Line ("Spawning instance grid: count=$GridCount spacing=$GridSpacing (camera far plane cannot be set over HTTP; the default 1000 is assumed)")
@@ -248,6 +343,7 @@ try {
             Start-Sleep -Seconds 2
             $t5 = Invoke-BenchTable 'T5 heavy-grid' @(
                 (New-Cfg 'NoCull' 'NoCull' 'off' 'off'), (New-Cfg 'Frustum' 'Frustum' 'off' 'off'), (New-Cfg 'HiZ' 'HiZ' 'off' 'off'))
+            $away5 = Invoke-AwayTable 'T7h away-grid' ([pscustomobject]@{ Position = @(0.0, 0.0, $GridCameraZ); Rotation = @(0.0, 0.0, 0.0) })
             $wall5 = Add-CullPrimitive 'cube' 'BenchWall5' @(0, 0, $GridCameraZ + 50) @(4000, 4000, 0.2)
             $script:Created.Add($wall5)
             $t5w = Invoke-BenchTable 'T5w heavy-grid-wall' @(
@@ -298,6 +394,9 @@ try {
             $ex = Get-Pairwise $t5w['Frustum'] $t5w['HiZ'] { param($f, $h) if (-not ($f.Visible -gt 0)) { [double]::NaN } else { ($h.Visible / $f.Visible) - 0.05 } }
             Add-Check 'D2b' 'T5w grid behind wall: clusters drawn in HiZ <= 5% of Frustum' $ex ($ok5w -and $applied5) $false $(if ($applied5) { '' } else { '(game.occlusion was not Applied in HiZ)' })
         }
+
+        Add-AwayChecks $away 'T7 away' 'A'
+        if ($IncludeHeavy) { Add-AwayChecks $away5 'T7h away-grid' 'Ah' }
 
         if ($null -ne $t4) {
             $floor = Get-Median @($t4['Frustum-postOff'].ToArray() | ForEach-Object { $_.Span })

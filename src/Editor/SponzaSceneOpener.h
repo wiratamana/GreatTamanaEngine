@@ -9,7 +9,7 @@ namespace gte {
 class Game;
 class Renderer;
 
-struct OpenSponzaSceneResult {
+struct OpenSponzaResult {
     bool success = false;
     bool importedThisCall = false;
     std::string message; // Status line on success, error text on failure.
@@ -18,7 +18,7 @@ struct OpenSponzaSceneResult {
 
 // Replaces the scene with the Sponza glTF sample, importing it to Project/Sponza on first use.
 // The old scene is kept if the import or spawn fails. Main thread only. Never throws.
-OpenSponzaSceneResult OpenSponzaScene(
+OpenSponzaResult OpenSponza(
     Game& game, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
 } // namespace gte

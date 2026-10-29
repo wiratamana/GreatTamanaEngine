@@ -557,6 +557,15 @@ module or adding a new endpoint:
   `task_manager/scene-serialization-2/PHASE0_MASTER_STRATEGY.md` for the
   full six-phase campaign writeup.
 
+- **`POST /open_preset_scene`** is File > Open Sponza Scene / Open Hi-Z Demo Scene for AI callers.
+  Body: `{"preset":"sponza"|"hiz_demo", "count"?, "spacing"?, "profile"?}`. `preset` is required.
+  `count` is a non-negative integer, `spacing` a number from 0.1 to 1000, `profile` is
+  `"geometry_only"` (default) or `"full"`. Any other value is `400`. `ParseOpenPresetSceneRequest()` in
+  `NetworkRoutes.h` checks the body. The route waits up to 300 s (an import can be slow). Reply `200`:
+  `{"success":true,"preset","imported_this_call","gta_path","message"}`. `500` when the open failed
+  (the old scene is kept), `503` without the Editor module or while another engine command runs,
+  `504` on timeout. The old `POST /open_sponza_scene` route is gone (404).
+
 - **`GET /get_logs`/`POST /clear_logs`** (`task_manager/logger-1` campaign,
   `task_manager/logger-1/PHASE0_MASTER_STRATEGY.md`, Phase 3) expose the
   engine's new `gte::Logger` (see [Logging](logging.md)) over HTTP - a

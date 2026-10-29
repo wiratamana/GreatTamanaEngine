@@ -31,10 +31,13 @@ std::filesystem::path EditorSceneIOCapability::DefaultScenePath() const
     return gte::DefaultScenePath();
 }
 
-ISceneIOCapability::OpenSceneOutcome EditorSceneIOCapability::OpenSponzaScene(
-    Game& game, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout)
+ISceneIOCapability::OpenSceneOutcome EditorSceneIOCapability::OpenPresetScene(Game& game, Renderer& renderer,
+    DescriptorSetLayoutHandle sceneServicesSetLayout, PresetScene kind, const PresetParameters&)
 {
-    OpenSponzaSceneResult result = gte::OpenSponzaScene(game, renderer, sceneServicesSetLayout);
+    if (kind != PresetScene::Sponza) {
+        return { false, false, "this preset scene is not available yet", {} };
+    }
+    OpenSponzaResult result = OpenSponza(game, renderer, sceneServicesSetLayout);
     return { result.success, result.importedThisCall, std::move(result.message), std::move(result.gtaPath) };
 }
 

@@ -10,13 +10,40 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace gte {
 
 class Game;
 class Renderer;
+
+// Pre-built scenes the editor can open in one step.
+enum class PresetScene { Sponza, HizDemo };
+
+// Which fixed-cost features a preset leaves on.
+enum class PresetProfile { GeometryOnly, Full };
+
+// Optional preset inputs; an unset value means "use the preset default".
+struct PresetParameters {
+    std::optional<std::uint32_t> count;
+    std::optional<float> spacing;
+    PresetProfile profile = PresetProfile::GeometryOnly;
+};
+
+// Wire name of a preset ("sponza", "hiz_demo").
+constexpr std::string_view PresetSceneName(PresetScene kind) noexcept
+{
+    return kind == PresetScene::Sponza ? "sponza" : "hiz_demo";
+}
+
+// Wire name of a profile ("geometry_only", "full").
+constexpr std::string_view PresetProfileName(PresetProfile profile) noexcept
+{
+    return profile == PresetProfile::GeometryOnly ? "geometry_only" : "full";
+}
 
 // Saves and loads scenes through the editor. `outErrorMessage` is set only when a call returns false.
 class ISceneIOCapability {
@@ -34,7 +61,7 @@ public:
     // The default scene path used when a caller supplies an empty one.
     virtual std::filesystem::path DefaultScenePath() const = 0;
 
-    // Result of OpenSponzaScene(); `message` is a status line on success, the error text on failure.
+    // Result of OpenPresetScene(); `message` is a status line on success, the error text on failure.
     struct OpenSceneOutcome {
         bool success = false;
         bool importedThisCall = false;
@@ -42,9 +69,9 @@ public:
         std::string gtaPath;
     };
 
-    // Replaces the scene with the Sponza glTF sample, importing it first if needed. Main thread only.
-    virtual OpenSceneOutcome OpenSponzaScene(
-        Game& game, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout) = 0;
+    // Replaces the scene with the chosen preset. The old scene is kept on failure. Main thread only.
+    virtual OpenSceneOutcome OpenPresetScene(Game& game, Renderer& renderer,
+        DescriptorSetLayoutHandle sceneServicesSetLayout, PresetScene kind, const PresetParameters& parameters) = 0;
 };
 
 // Log query capability. Core code holds a nullable pointer: nullptr means the build has no logger,

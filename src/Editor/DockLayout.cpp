@@ -108,7 +108,7 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
                     "Failed to load scene (missing or malformed file).");
             }
             if (ImGui::MenuItem("Open Sponza Scene")) {
-                const OpenSponzaSceneResult opened = OpenSponzaScene(game, renderer, sceneServicesSetLayout);
+                const OpenSponzaResult opened = OpenSponza(game, renderer, sceneServicesSetLayout);
                 reportStatus(opened.success, opened.message, opened.message);
             }
             ImGui::Separator();

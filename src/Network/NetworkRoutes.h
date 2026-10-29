@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -877,10 +878,20 @@ ParsedScenePathRequest ParseScenePathRequest(const std::string& jsonBody);
 // Failure shape: identical to BuildGenericErrorResponseJson() below.
 std::string BuildScenePathResponseJson(bool success, const std::string& errorMessage, const std::string& resolvedPath);
 
-// Success: {"success":true,"imported_this_call":bool,"gta_path":"...","message":"..."}
+// Parsed, validated body of POST /open_preset_scene: {"preset", "count"?, "spacing"?, "profile"?}.
+// `valid == false` means `errorMessage` explains why (the route answers 400).
+struct ParsedOpenPresetSceneRequest {
+    bool valid = false;
+    std::string errorMessage;
+    PresetScene preset = PresetScene::Sponza;
+    PresetParameters parameters;
+};
+ParsedOpenPresetSceneRequest ParseOpenPresetSceneRequest(const std::string& jsonBody);
+
+// Success: {"success":true,"preset":"...","imported_this_call":bool,"gta_path":"...","message":"..."}
 // Failures use BuildGenericErrorResponseJson().
-std::string BuildOpenSponzaSceneResponseJson(
-    bool importedThisCall, const std::string& gtaPath, const std::string& message);
+std::string BuildOpenPresetSceneResponseJson(
+    std::string_view preset, bool importedThisCall, const std::string& gtaPath, const std::string& message);
 
 // --- task_manager/logger-1 campaign, PHASE3
 // (PHASE3_NETWORK_ENDPOINTS_GET_LOGS_AND_CLEAR_LOGS.md) - GET /get_logs and

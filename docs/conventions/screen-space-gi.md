@@ -79,7 +79,7 @@ the scene file. A NaN or infinite float is replaced by the default.
 All routes are plain `GET` (see `networking.md`). The Game tab must be visible for `/get_game_view`.
 
 ```
-POST /open_sponza_scene {}
+POST /open_preset_scene {"preset":"sponza"}
 GET  /activate_tab?name=Game
 GET  /feature_debug/list
 GET  /feature_debug/state?name=Ssgi

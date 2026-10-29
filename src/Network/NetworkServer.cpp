@@ -1884,9 +1884,15 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(BuildScenePathResponseJson(outcome.success, outcome.errorMessage, outcome.resolvedPath), "application/json");
     });
 
-    // POST /open_sponza_scene: File > Open Sponza Scene for AI callers. No body.
-    // The first call imports Sponza, so it gets a much longer timeout than the 3 s default.
-    server.Post("/open_sponza_scene", [commandBridge](const httplib::Request&, httplib::Response& res) {
+    // POST /open_preset_scene: File > Open <preset> for AI callers.
+    // An import or a large spawn can be slow, so it gets a much longer timeout than the 3 s default.
+    server.Post("/open_preset_scene", [commandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedOpenPresetSceneRequest parsed = ParseOpenPresetSceneRequest(req.body);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
         if (commandBridge == nullptr) {
             res.status = 503;
             res.set_content(BuildGenericErrorResponseJson("engine command bridge not available"), "application/json");
@@ -1894,11 +1900,13 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         }
 
         EngineCommandRequest request;
-        request.kind = EngineCommandKind::OpenSponzaScene;
+        request.kind = EngineCommandKind::OpenPresetScene;
+        request.openPresetScene.preset = parsed.preset;
+        request.openPresetScene.parameters = parsed.parameters;
 
-        constexpr int kOpenSponzaTimeoutMilliseconds = 300000;
+        constexpr int kOpenPresetTimeoutMilliseconds = 300000;
         const EngineCommandBridge::SubmitResult submit =
-            commandBridge->SubmitAndWait(request, kOpenSponzaTimeoutMilliseconds);
+            commandBridge->SubmitAndWait(request, kOpenPresetTimeoutMilliseconds);
         if (submit.alreadyPending) {
             res.status = 503;
             res.set_content(BuildGenericErrorResponseJson("another engine command is already in progress"), "application/json");
@@ -1907,21 +1915,21 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         if (submit.timedOut) {
             res.status = 504;
             res.set_content(BuildGenericErrorResponseJson(
-                                "engine command timed out - the import may still be running, check GET /get_logs"),
+                                "engine command timed out - the open may still be running, check GET /get_logs"),
                 "application/json");
             return;
         }
 
-        const OpenSponzaSceneOutcome& outcome = submit.result->openSponzaScene;
+        const OpenPresetSceneOutcome& outcome = submit.result->openPresetScene;
         if (!outcome.editorAvailable) {
             res.status = 503;
             res.set_content(BuildGenericErrorResponseJson(outcome.message), "application/json");
             return;
         }
-        // No caller input is involved, so a failure is an environment problem: 500.
+        // Inputs are validated above, so a failure here is an environment problem: 500.
         res.status = outcome.success ? 200 : 500;
         res.set_content(outcome.success
-                ? BuildOpenSponzaSceneResponseJson(outcome.importedThisCall, outcome.gtaPath, outcome.message)
+                ? BuildOpenPresetSceneResponseJson(outcome.preset, outcome.importedThisCall, outcome.gtaPath, outcome.message)
                 : BuildGenericErrorResponseJson(outcome.message),
             "application/json");
     });

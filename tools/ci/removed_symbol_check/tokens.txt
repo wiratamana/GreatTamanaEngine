@@ -82,3 +82,7 @@ m_syntheticSetZeroLayout
 DecodeDepthRange
 kHizBaseTile
 RenderEntityNode
+OpenSponzaScene
+OpenSponzaSceneOutcome
+openSponzaScene
+BuildOpenSponzaSceneResponseJson

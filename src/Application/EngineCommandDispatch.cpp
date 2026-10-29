@@ -106,18 +106,21 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneI
         result.setProbeHotReloadMarkerValueForTesting.success = success;
         break;
     }
-    // Opens the Sponza sample; imports it on first use, so it can take a long time.
-    case EngineCommandKind::OpenSponzaScene: {
+    // Opens a preset scene; a first-time import can take a long time.
+    case EngineCommandKind::OpenPresetScene: {
+        const OpenPresetSceneCommand& cmd = request.openPresetScene;
+        OpenPresetSceneOutcome& out = result.openPresetScene;
+        out.preset = std::string(PresetSceneName(cmd.preset));
         if (sceneIOCapability != nullptr) {
-            ISceneIOCapability::OpenSceneOutcome outcome =
-                sceneIOCapability->OpenSponzaScene(game, renderer, sceneServicesSetLayout);
-            result.openSponzaScene.success = outcome.success;
-            result.openSponzaScene.importedThisCall = outcome.importedThisCall;
-            result.openSponzaScene.message = std::move(outcome.message);
-            result.openSponzaScene.gtaPath = std::move(outcome.gtaPath);
+            ISceneIOCapability::OpenSceneOutcome outcome = sceneIOCapability->OpenPresetScene(
+                game, renderer, sceneServicesSetLayout, cmd.preset, cmd.parameters);
+            out.success = outcome.success;
+            out.importedThisCall = outcome.importedThisCall;
+            out.message = std::move(outcome.message);
+            out.gtaPath = std::move(outcome.gtaPath);
         } else {
-            result.openSponzaScene.editorAvailable = false;
-            result.openSponzaScene.message = "opening the Sponza scene requires the Editor module";
+            out.editorAvailable = false;
+            out.message = "opening a preset scene requires the Editor module";
         }
         break;
     }
