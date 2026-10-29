@@ -64,9 +64,8 @@ private:
 
 class InstanceGridTestSpawner {
 public:
-    // Spawns `instanceCount` named entities on a square grid with `spacing` between centres, centred on `center`.
-    // Refuses (no entities) a count of 0, a count or spacing out of range, and a grid that
-    // exceeds the cluster path limits. A failure while spawning removes the entities it made.
+    // Spawns `instanceCount` named entities on a square grid, `spacing` apart, centred on `center`.
+    // Refuses bad or oversized input; a failure removes the entities it made.
     static InstanceGridSpawnResult Spawn(Game& game, Renderer& renderer, InstanceGridResources& resources,
         std::uint32_t instanceCount, float spacing, DescriptorSetLayoutHandle sceneServicesSetLayout,
         const Vec3& center = Vec3{ 0.0f, 0.0f, kInstanceGridDefaultDepth });

@@ -889,9 +889,8 @@ struct ParsedOpenPresetSceneRequest {
 };
 ParsedOpenPresetSceneRequest ParseOpenPresetSceneRequest(const std::string& jsonBody);
 
-// Success: {"success":true,"preset":"...","imported_this_call":bool,"gta_path":"...","message":"..."}
-// plus the members of `detailsJson` (a JSON object text of preset-specific keys; ignored when empty or malformed).
-// Failures use BuildGenericErrorResponseJson().
+// Success JSON of POST /open_preset_scene: fixed keys plus the members of `detailsJson` (key list: the networking convention doc).
+// `imported_this_call` and `gta_path` are emitted for the sponza preset only. Failures use BuildGenericErrorResponseJson().
 std::string BuildOpenPresetSceneResponseJson(std::string_view preset, bool importedThisCall, const std::string& gtaPath,
     const std::string& message, const std::string& detailsJson = {});
 
@@ -1091,10 +1090,7 @@ struct ParsedHierarchyStateQuery {
 };
 ParsedHierarchyStateQuery ParseHierarchyStateQuery(const std::string& firstParam, const std::string& countParam);
 
-// {"visible","entityCount","rowCount","collapsedCount","first","rows":[{"entity":"<index>/<generation>",
-//  "parent":"<index>/<generation>"|null,"depth","siblingPosition","label","hasChildren","expanded","selected"}],
-//  "buildMs","flattenMs","drawnRows"}
-// The three timings are null while the panel is hidden (not measured).
+// Response JSON for GET /hierarchy_state (key list: the networking convention doc).
 std::string BuildHierarchyStateResponseJson(const HierarchyStateReport& report);
 
 // GET /render_graph/set_pass_enabled, /passes, /set_feature_enabled,

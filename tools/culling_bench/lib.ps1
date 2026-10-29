@@ -591,10 +591,8 @@ function New-HizDemoCheck {
     return [pscustomobject]@{ Id = $Id; Text = $Text; Status = $Status; Detail = $Detail }
 }
 
-# Computed verdict lines and PASS / FAIL / INVALID checks per profile.
-#   wall on : Hi-Z GpuDrivenScene primary ms <= $WallRatio x Frustum.
-#   wall off: Hi-Z GpuDrivenScene primary ms <= Frustum + $HizBudgetMs.
-# INVALID = a row has too few valid samples, Hi-Z was not Applied, or a value was not measured.
+# Verdict lines and PASS / FAIL / INVALID checks per profile (wall on: Hi-Z <= $WallRatio x Frustum;
+# wall off: Hi-Z <= Frustum + $HizBudgetMs). INVALID = too few valid samples, Hi-Z not Applied, or unmeasured.
 function Get-HizDemoVerdicts {
     param($Rows, [double]$HizBudgetMs = 0.4, [double]$WallRatio = 0.10, [double]$MinValidPercent = 80.0)
     $lines = New-Object System.Collections.Generic.List[string]

@@ -86,3 +86,4 @@ OpenSponzaScene
 OpenSponzaSceneOutcome
 openSponzaScene
 BuildOpenSponzaSceneResponseJson
+SettingsGuard

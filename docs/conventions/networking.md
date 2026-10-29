@@ -562,7 +562,8 @@ module or adding a new endpoint:
   `count` is a non-negative integer, `spacing` a number from 0.1 to 1000, `profile` is
   `"geometry_only"` (default) or `"full"`. Any other value is `400`. `ParseOpenPresetSceneRequest()` in
   `NetworkRoutes.h` checks the body. The route waits up to 300 s (an import can be slow). Reply `200`:
-  `{"success":true,"preset","imported_this_call","gta_path","message"}`. `500` when the open failed
+  `{"success":true,"preset","message"}`; for `"sponza"` it also has `"imported_this_call"` and `"gta_path"`.
+  `500` when the open failed
   (the old scene is kept), `503` without the Editor module or while another engine command runs,
   `504` on timeout. The old `POST /open_sponza_scene` route is gone (404).
   For `"hiz_demo"` the reply also carries `"profile"`, `"instanceCount"`, `"countClamped"` (the count is

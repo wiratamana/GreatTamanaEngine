@@ -37,9 +37,8 @@ bool SiblingLess(std::uint32_t siblingA, Entity a, std::uint32_t siblingB, Entit
 // O(N) per call: never call it in a loop over many entities (use HierarchySnapshot).
 std::vector<Entity> GetChildren(Registry& registry, Entity parent);
 
-// Appends `child` as the last child of `newParent` (kInvalidEntity = root).
-// Fails (false, child untouched) when child has no Transform, newParent has none, or the move makes a cycle.
-// worldPositionStays recomputes the local transform so the world transform is unchanged.
+// Appends `child` as the last child of `newParent` (kInvalidEntity = root). Fails (false, child untouched) when
+// either has no Transform or the move makes a cycle. worldPositionStays keeps the world transform.
 bool SetParent(Registry& registry, Entity child, Entity newParent, bool worldPositionStays = true);
 
 // Moves `entity` to position `desiredIndex` among its other siblings (clamped) and renumbers the group 0..N-1.
@@ -61,10 +60,8 @@ struct HierarchyAssignment {
     std::uint32_t siblingIndex = 0; // saved order key inside the new parent
 };
 
-// Applies many parent links at once without keeping world positions.
-// A child without a Transform is skipped; a parent that is dead, has no Transform or would close a cycle
-// leaves the child a root. The assigned children of each parent are renumbered 0..k-1 by
-// (siblingIndex, input order); a repeated child keeps its last assignment. O(N log N), no recursion.
+// Applies many parent links at once, keeping local transforms. Invalid links (no Transform, dead parent, cycle)
+// make the child a root. Each parent's assigned children are renumbered 0..k-1 by (siblingIndex, input order).
 void AssignHierarchy(Registry& registry, std::span<const HierarchyAssignment> assignments);
 
 } // namespace gte

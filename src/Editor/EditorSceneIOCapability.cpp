@@ -47,8 +47,8 @@ ISceneIOCapability::OpenSceneOutcome EditorSceneIOCapability::OpenPresetScene(Ga
     }
 
     OpenSponzaResult result = OpenSponza(game, renderer, sceneServicesSetLayout);
-    if (result.success) {
-        ReleaseHizDemoSettings(services);
+    if (result.success && !ReleaseHizDemoSettings(services)) {
+        result.message += " The Hi-Z demo settings were not fully restored (see the log).";
     }
     return { result.success, result.importedThisCall, std::move(result.message), std::move(result.gtaPath), {} };
 }

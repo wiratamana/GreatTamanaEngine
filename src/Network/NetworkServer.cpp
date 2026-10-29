@@ -16,7 +16,7 @@
 #include "../Application/RenderGraphControlCommandBridge.h"
 #include "../Core/EditorCapabilities.h" // ILogQueryCapability.
 #include "../Core/Logging.h"
-#include "../Editor/HizDemoSceneOpener.h" // kGeometryOnlyFeaturePrefixes.
+#include "../Editor/HizDemoProfile.h"
 #include "../Editor/OverlayRaster.h"
 #include "../Encoding/Base64.h"
 #include "../Encoding/CapturedPixelConversion.h"

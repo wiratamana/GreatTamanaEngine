@@ -1,6 +1,7 @@
 // Tests for the Hi-Z demo scene's pure layout, parameter clamps and reply keys. No device, no registry.
 
 #include "Editor/HizDemoLayout.h"
+#include "Editor/HizDemoProfile.h"
 #include "Editor/HizDemoSceneOpener.h"
 #include "Editor/InstanceGridTestSpawner.h"
 #include "Core/InstanceGridLimits.h"
@@ -188,6 +189,45 @@ TEST(HizDemoFeatureListTest, MatchesByPrefix)
     EXPECT_FALSE(IsGeometryOnlyFeature("GpuDrivenScene"));
     EXPECT_FALSE(IsGeometryOnlyFeature("Gt"));
     EXPECT_FALSE(IsGeometryOnlyFeature(""));
+}
+
+RenderFeatureDebugEntry Feature(const char* name, bool enabled)
+{
+    RenderFeatureDebugEntry entry;
+    entry.name = name;
+    entry.enabled = enabled;
+    return entry;
+}
+
+TEST(HizDemoFeatureSwitchTest, GeometryOnlyTurnsOffOnlyEnabledFixedCostFeatures)
+{
+    const std::vector<RenderFeatureDebugEntry> features{
+        Feature("Shadow", true), Feature("Ssgi", false), Feature("GpuDrivenScene", true), Feature("Gtao", true) };
+    const HizFeatureSwitch plan = PlanHizFeatureSwitch(PresetProfile::GeometryOnly, {}, features);
+    EXPECT_TRUE(plan.turnOn.empty());
+    ASSERT_EQ(plan.turnOff.size(), 2u);
+    EXPECT_EQ(plan.turnOff[0], "Shadow");
+    EXPECT_EQ(plan.turnOff[1], "Gtao");
+}
+
+TEST(HizDemoFeatureSwitchTest, ReopenKeepsCarriedFeaturesOffAndTouchesNothingTwice)
+{
+    // An active demo already turned Shadow off: a second geometry_only open must not list it again.
+    const std::vector<std::string> carried{ "Shadow" };
+    const std::vector<RenderFeatureDebugEntry> features{ Feature("Shadow", false), Feature("Gtao", true) };
+    const HizFeatureSwitch plan = PlanHizFeatureSwitch(PresetProfile::GeometryOnly, carried, features);
+    EXPECT_TRUE(plan.turnOn.empty());
+    ASSERT_EQ(plan.turnOff.size(), 1u);
+    EXPECT_EQ(plan.turnOff[0], "Gtao");
+}
+
+TEST(HizDemoFeatureSwitchTest, FullProfileGivesCarriedFeaturesBack)
+{
+    const std::vector<std::string> carried{ "Shadow", "Ssgi" };
+    const std::vector<RenderFeatureDebugEntry> features{ Feature("Shadow", false), Feature("Ssgi", false) };
+    const HizFeatureSwitch plan = PlanHizFeatureSwitch(PresetProfile::Full, carried, features);
+    EXPECT_EQ(plan.turnOn, carried);
+    EXPECT_TRUE(plan.turnOff.empty());
 }
 
 TEST(HizDemoReplyTest, DetailsCarryEveryDocumentedKey)

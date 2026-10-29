@@ -1322,6 +1322,7 @@ add_library(gte_editor STATIC
     src/Editor/HizDemoSceneOpener.h
     src/Editor/HizDemoSceneOpener.cpp
     src/Editor/HizDemoState.h
+    src/Editor/HizDemoProfile.h
     src/Editor/Panels/OverlayLabel.h
     # editor-core-separation-1 campaign, PHASE6
     # (PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md) - the real

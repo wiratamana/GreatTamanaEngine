@@ -964,8 +964,10 @@ std::string BuildOpenPresetSceneResponseJson(std::string_view preset, bool impor
     nlohmann::json body;
     body["success"] = true;
     body["preset"] = std::string(preset);
-    body["imported_this_call"] = importedThisCall;
-    body["gta_path"] = gtaPath;
+    if (preset == PresetSceneName(PresetScene::Sponza)) {
+        body["imported_this_call"] = importedThisCall;
+        body["gta_path"] = gtaPath;
+    }
     body["message"] = message;
     if (!detailsJson.empty()) {
         // A malformed details text is dropped: the fixed keys above stay valid.

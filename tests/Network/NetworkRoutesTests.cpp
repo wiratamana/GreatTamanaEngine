@@ -7,7 +7,7 @@
 // ParseGetLogsQueryTests) still need the real Editor::Logger class
 // directly. Matches Network/NetworkRoutes.cpp's own identical fix.
 #include "Editor/Logger.h"
-#include "Editor/HizDemoSceneOpener.h" // kGeometryOnlyFeaturePrefixes.
+#include "Editor/HizDemoProfile.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -1736,19 +1736,21 @@ TEST(BuildOpenPresetSceneResponseJsonTests, MergesDetailsKeysNextToTheFixedOnes)
     const std::string details = R"({"profile":"full","instanceCount":7,"entities":{"camera":"1/0"},"restoresOnClose":true})";
     const nlohmann::json parsed =
         nlohmann::json::parse(BuildOpenPresetSceneResponseJson("hiz_demo", false, "", "ok", details));
-    EXPECT_EQ(parsed.size(), 9u);
+    EXPECT_EQ(parsed.size(), 7u);
     EXPECT_EQ(parsed["preset"], "hiz_demo");
     EXPECT_EQ(parsed["profile"], "full");
     EXPECT_EQ(parsed["instanceCount"], 7);
     EXPECT_EQ(parsed["entities"]["camera"], "1/0");
     EXPECT_EQ(parsed["restoresOnClose"], true);
+    EXPECT_FALSE(parsed.contains("imported_this_call"));
+    EXPECT_FALSE(parsed.contains("gta_path"));
 }
 
 TEST(BuildOpenPresetSceneResponseJsonTests, MalformedDetailsAreDropped)
 {
     const nlohmann::json parsed =
         nlohmann::json::parse(BuildOpenPresetSceneResponseJson("hiz_demo", false, "", "ok", "{not json"));
-    EXPECT_EQ(parsed.size(), 5u);
+    EXPECT_EQ(parsed.size(), 3u);
 }
 
 TEST(BuildGeometryOnlyFeaturesResponseJsonTests, ListsEverySharedPrefix)

@@ -2998,7 +2998,7 @@ set(GTE_COMMENT_RULE_SRC
     Editor/Panels/HierarchyRows.h Editor/Panels/HierarchyRows.cpp Editor/HierarchyStateReport.h
     ECS/HierarchySnapshot.h ECS/HierarchySnapshot.cpp
     Editor/HizDemoLayout.h Editor/HizDemoLayout.cpp Editor/HizDemoSceneOpener.h Editor/HizDemoSceneOpener.cpp
-    Editor/HizDemoState.h Editor/Panels/OverlayLabel.h
+    Editor/HizDemoState.h Editor/HizDemoProfile.h Editor/Panels/OverlayLabel.h
     Editor/SceneIO.cpp Editor/SceneIO.h
     Game/Game.cpp Game/Game.h Game/Instantiation/MeshAssetGpuCatalog.cpp Game/Instantiation/MeshAssetGpuCatalog.h
     Game/Instantiation/MeshInstantiationSystem.cpp Game/Instantiation/MeshInstantiationSystem.h

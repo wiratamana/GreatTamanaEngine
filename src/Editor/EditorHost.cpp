@@ -603,8 +603,12 @@ void EditorHost::ServiceHizDemoMenuAction()
         ok = CloseHizDemo(m_game, services, message);
         break;
     case HizDemoMenuAction::SceneReplaced:
-        ReleaseHizDemoSettings(services);
-        return;
+        if (ReleaseHizDemoSettings(services)) {
+            return;
+        }
+        ok = false;
+        message = "The Hi-Z demo settings were not fully restored (see the log).";
+        break;
     case HizDemoMenuAction::None:
         return;
     }

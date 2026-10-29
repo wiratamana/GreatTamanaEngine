@@ -7,7 +7,8 @@
   A frame FAILS when the Hi-Z difference is above max(8, 4 x noise) pixels, or when the differing pixels form a
   connected block of 16 or more pixels (a wrongly removed cluster looks like that). Raw numbers are always printed.
   Exit code: 0 = every scenario ran and no frame failed, 1 = a frame failed,
-  2 = a precondition failed, Hi-Z was not active, a capture failed or a scenario was skipped.
+  2 = a precondition failed, Hi-Z was not active, a capture failed or a scenario was skipped. The away-and-back
+  scenario also stops with 2 when game.skippedParts stays 0 after every away block (the camera never looked away).
   Start the editor with the Game tab visible and the Frame Debugger closed. The scene must not be saved afterwards.
 #>
 [CmdletBinding()]
@@ -49,6 +50,7 @@ $script:Results = New-Object System.Collections.Generic.List[object]
 $script:Created = New-Object System.Collections.Generic.List[string]
 $script:Skipped = New-Object System.Collections.Generic.List[string]
 $script:Saved = $null
+$script:Probe = $null
 $script:Fatal = $false
 
 function Get-Rnd {
@@ -109,6 +111,13 @@ function New-TurnFrames {
     return $frames.ToArray()
 }
 
+# Index of the last away frame of each block built by New-AwayAndBackFrames.
+function Get-AwayProbeFrames {
+    param([int]$AwayFrames)
+    $last = foreach ($block in 0..1) { $block * ($AwayFrames + 1) + $AwayFrames - 1 }
+    return @($last)
+}
+
 # Camera looks away for $AwayFrames frames (nothing in view), then one frame back at the base pose, twice.
 function New-AwayAndBackFrames {
     param($Def, [int]$AwayFrames)
@@ -147,9 +156,10 @@ function Set-SoakFrame {
 }
 
 # Replays $Frames in one mode and saves one PNG per frame. With -Twice every pose is captured a second time
-# ('<prefix>2_NNN.png'). Returns $null or an error text.
+# ('<prefix>2_NNN.png'). After each frame listed in -ProbeFrames, game.skippedParts is appended to $script:Probe.
+# Returns $null or an error text.
 function Save-SoakPhase {
-    param([string]$Dir, [string]$Prefix, [string]$Mode, $Frames, [int]$Wait, [switch]$Twice)
+    param([string]$Dir, [string]$Prefix, [string]$Mode, $Frames, [int]$Wait, [switch]$Twice, [int[]]$ProbeFrames = @())
     New-Item -ItemType Directory -Force -Path $Dir | Out-Null
     Set-GpuDrivenCfg @{ mode = $Mode } | Out-Null
     Set-SoakFrame $Frames[0]
@@ -159,6 +169,9 @@ function Save-SoakPhase {
         Wait-CullFrames $Wait
         $err = Save-GameView (Join-Path $Dir ('{0}_{1:D3}.png' -f $Prefix, $i))
         if ($err) { return ("frame $i ($Mode): " + $err) }
+        if ($ProbeFrames -contains $i) {
+            $script:Probe.Add([double](Get-Field (Get-GpuDrivenState) 'game.skippedParts' 0))
+        }
         if ($Twice) {
             Wait-CullFrames $Wait
             $err = Save-GameView (Join-Path $Dir ('{0}2_{1:D3}.png' -f $Prefix, $i))
@@ -252,13 +265,17 @@ function Test-FrameFails {
 
 # Runs one scenario in both modes and compares frame by frame.
 function Invoke-SoakScenario {
-    param([string]$Scene, [string]$Name, $Frames)
+    param([string]$Scene, [string]$Name, $Frames, [int[]]$ProbeFrames = @())
     $dir = Join-Path (Join-Path $OutDir $Scene) $Name
     if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
     Write-Host ("  scenario $Scene/$Name : " + $Frames.Count + ' frames')
     $row = [pscustomobject]@{ Scene = $Scene; Scenario = $Name; Frames = $Frames.Count; Compared = 0; EqualFrames = 0
         DiffFrames = 0; FailFrames = 0; DiffPixels = 0; MaxDiff = 0; MaxNoise = 0; MaxBlock = 0; HizActive = $false; Error = '' }
-    $err = Save-SoakPhase $dir 'hiz' 'HiZ' $Frames $FrameWait
+    $script:Probe = New-Object System.Collections.Generic.List[double]
+    $err = Save-SoakPhase $dir 'hiz' 'HiZ' $Frames $FrameWait -ProbeFrames $ProbeFrames
+    if (-not $err -and $ProbeFrames.Count -gt 0 -and (($script:Probe | Measure-Object -Maximum).Maximum -lt 1)) {
+        $err = 'camera never looked away: skippedParts = 0'
+    }
     if (-not $err) {
         $st = Get-GpuDrivenState
         $row.HizActive = ([string](Get-Field $st 'game.occlusion' '') -eq 'Applied')
@@ -351,7 +368,7 @@ function Invoke-SoakScene {
     $script:Created.Add($wall)
     Invoke-SoakScenario $Name 'pan' (New-PanFrames $def $PanFrames)
     Invoke-SoakScenario $Name 'turn40' (New-TurnFrames $def $TurnPairs)
-    Invoke-SoakScenario $Name 'away-and-back' (New-AwayAndBackFrames $def $AwayFrames)
+    Invoke-SoakScenario $Name 'away-and-back' (New-AwayAndBackFrames $def $AwayFrames) -ProbeFrames (Get-AwayProbeFrames $AwayFrames)
     if ($moverNames.Count -gt 0) {
         Invoke-SoakScenario $Name 'movers' (New-MoverFrames $def $moverNames $MoverFrames)
         foreach ($n in $moverNames) { try { Set-CullTrs -Name $n -Position $def.MoverHome } catch { } }

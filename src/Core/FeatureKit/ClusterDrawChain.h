@@ -54,9 +54,8 @@ public:
     // Resolves and reserves everything and declares nothing. Idempotent.
     ClusterPlan Plan();
 
-    // Declares reset, cull and draw per part, then takes the entities over. A primary colour chain publishes
-    // its survivors for the secondary view; a chain that reuses them declares only the draws.
-    // A part wholly outside the cull frustum gets no pass but its entities are taken over.
+    // Declares reset, cull and draw per part and takes the entities over. A part wholly outside the
+    // cull frustum gets no pass but its entities are still taken over.
     ClusterStats Record();
 
     // Kit-internal state; named here so the verb's helper functions can take it.
