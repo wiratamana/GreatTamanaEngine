@@ -3,6 +3,7 @@
 #include "CameraPick.h"
 #include "ClusterToolUiState.h"
 #include "InstanceGridTestSpawner.h"
+#include "Panels/HierarchyRows.h"
 #include "Selection.h"
 #include "../Core/Extent.h"
 #include "../Core/UiTextureHandle.h"
@@ -260,6 +261,9 @@ struct EditorContext {
 
     // Camera overlay state of the Scene panel's last frame.
     SceneCameraFrame sceneCamera;
+
+    // Hierarchy panel state that outlives one frame.
+    HierarchyViewState hierarchy;
 };
 
 } // namespace gte

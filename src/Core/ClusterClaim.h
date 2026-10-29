@@ -12,8 +12,9 @@
 
 namespace gte {
 
-// Last pass of the (reset, cull, draw) chain that was declared, in that order.
-enum class ClusterChainProgress : std::uint8_t { None, Reset, Cull, Draw };
+// Last pass of the (reset, cull, draw) chain that was declared, in that order. Culled: the whole part lies outside
+// the cull frustum, so no pass exists and none is needed.
+enum class ClusterChainProgress : std::uint8_t { None, Reset, Cull, Draw, Culled };
 
 // Outcome of one part's chain.
 struct ClusterPartClaim {
@@ -42,10 +43,10 @@ constexpr bool SceneCullAllowed(const ClusterClaimContext& context) noexcept
     return ClusterClaimAllowed(context);
 }
 
-// True when every pass of the part's chain was declared.
+// True when every pass of the part's chain was declared, or the part needs none because it is outside the view.
 constexpr bool ClusterPartClaimable(const ClusterPartClaim& part) noexcept
 {
-    return part.progress == ClusterChainProgress::Draw;
+    return part.progress == ClusterChainProgress::Draw || part.progress == ClusterChainProgress::Culled;
 }
 
 // Entities of every claimable part, in part order. Empty when the context disallows claims.

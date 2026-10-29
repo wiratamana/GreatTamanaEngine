@@ -38,6 +38,8 @@
 #include "ViewBackgroundReplayKey.h"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -514,7 +516,7 @@ bool Core::EnsureClusterTable(fx::MeshToken token, std::uint64_t frameIndex)
             GTE_PROFILE_MARKER("Periodic.ClusterTableSynthesis");
             mesh->SetClusterTable(rg::GpuBuffer::CreateWithData(m_renderer.Device(), &*cluster, sizeof(MeshCluster),
                                       "MeshClusterTable", rg::GpuBufferUse::Storage),
-                1);
+                1, ClusterTableBounds(std::span<const MeshCluster>(&*cluster, 1)));
             m_synthesisBackoff.erase(token);
             return true;
         }
@@ -548,9 +550,44 @@ void Core::FillExclusion(fx::EntityExclusion exclusion, std::span<const Entity> 
     }
 }
 
+std::span<const AABB> Core::ClusterCandidateBounds()
+{
+    if (m_clusterBoundsBuilt) {
+        return m_clusterCandidateBounds;
+    }
+    GTE_PROFILE_SCOPE("ClusterPart.Bounds");
+    constexpr float kHuge = std::numeric_limits<float>::max();
+    const AABB kNeverRejected{ Vec3(kHuge, kHuge, kHuge), Vec3(-kHuge, -kHuge, -kHuge) };
+    m_clusterCandidateBounds.assign(m_clusterCandidates.size(), kNeverRejected);
+    fx::MeshToken lastToken;
+    const Mesh* lastMesh = nullptr;
+    bool haveLast = false;
+    for (std::size_t i = 0; i < m_clusterCandidates.size(); ++i) {
+        const fx::ClusterInstance& instance = m_clusterCandidates[i];
+        if (!haveLast || instance.mesh != lastToken) {
+            lastToken = instance.mesh;
+            lastMesh = ResolveClusterMesh(instance.mesh);
+            haveLast = true;
+        }
+        if (lastMesh == nullptr || !lastMesh->ClusterBounds().has_value() || !IsFiniteMatrix(instance.world)) {
+            continue;
+        }
+        const AABB world = TransformAABB(*lastMesh->ClusterBounds(), instance.world);
+        const bool finite = std::isfinite(world.min.x) && std::isfinite(world.min.y) && std::isfinite(world.min.z)
+            && std::isfinite(world.max.x) && std::isfinite(world.max.y) && std::isfinite(world.max.z);
+        if (finite) {
+            m_clusterCandidateBounds[i] = world;
+        }
+    }
+    m_clusterBoundsBuilt = true;
+    return m_clusterCandidateBounds;
+}
+
 void Core::BuildClusterCandidates()
 {
     m_clusterCandidates.clear();
+    m_clusterCandidateBounds.clear();
+    m_clusterBoundsBuilt = false;
     m_clusterRejections = fx::ClusterRejectCounts{};
     if (!ClusterPathSupported(m_renderer.IndirectDrawCaps()) || m_renderFeatureCompositorPtr == nullptr) {
         return;

@@ -122,6 +122,13 @@ public:
         return view;
     }
 
+    HierarchyStateReport HierarchyState(Game& /*game*/, std::uint64_t /*first*/, std::uint64_t /*count*/) const override
+    {
+        HierarchyStateReport report;
+        report.editorAvailable = false;
+        return report;
+    }
+
     ClusterBuildStartResult InspectorBuildClusters(const InspectorClusterOptions& /*options*/) override
     {
         ClusterBuildStartResult result;

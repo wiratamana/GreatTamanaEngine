@@ -59,6 +59,22 @@ TEST(ClusterClaimTest, AChainThatStoppedBeforeTheDrawClaimsNothing)
     }
 }
 
+TEST(ClusterClaimTest, APartOutsideTheViewIsClaimedWithoutAnyPass)
+{
+    ClusterPartClaim culled = CompletePart(kPartA);
+    culled.progress = ClusterChainProgress::Culled;
+    const std::array<ClusterPartClaim, 2> parts = { culled, CompletePart(kPartB) };
+    EXPECT_TRUE(ClusterPartClaimable(culled));
+    EXPECT_EQ(ClaimedEntitiesOf(parts, GameContext()).size(), 3u);
+
+    ClusterClaimContext shared;
+    shared.scope = rg::ViewScope::Shared;
+    EXPECT_TRUE(ClaimedEntitiesOf(parts, shared).empty());
+    ClusterClaimContext captured = GameContext();
+    captured.captureArmed = true;
+    EXPECT_TRUE(ClaimedEntitiesOf(parts, captured).empty());
+}
+
 TEST(ClusterClaimTest, ACapturedGameViewFrameClaimsNothing)
 {
     ClusterClaimContext context = GameContext();

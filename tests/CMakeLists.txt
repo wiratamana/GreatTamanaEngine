@@ -2006,7 +2006,8 @@ set(GTE_TEST_SOURCES
     # null surface is NOT safe here, and why VK_EXT_headless_surface is used
     # instead.
     Core/CoreHeadlessConstructionTests.cpp
-Core/ClusterClaimTests.cpp
+    Core/ClusterClaimTests.cpp
+    Core/ClusterPartSkipTests.cpp
 Core/ClusterCandidatesTests.cpp
 Core/ClusterDrawStateTests.cpp
 Core/ClusterDrawVerbTests.cpp
@@ -2208,6 +2209,7 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Assets/MeshTangentsTests.cpp
     Scene/SceneJsonFormatTests.cpp
     Scene/SceneBuilderTests.cpp
+    Scene/SceneHierarchyBulkTests.cpp
     Scene/SceneRoundTripIntegrationTests.cpp
     Memory/GpuMemoryTrackerTests.cpp
     Memory/SdlMemoryTrackerTests.cpp
@@ -2437,6 +2439,7 @@ Renderer/Culling/ClusterGpuParityTests.cpp
     ECS/RegistryTests.cpp
     ECS/CameraTests.cpp
     ECS/TransformHierarchyTests.cpp
+    ECS/HierarchySnapshotTests.cpp
     ECS/EntityQueryTests.cpp
     ECS/Reflection/ComponentTypeRegistryTests.cpp
     ECS/Reflection/BuiltinComponentReflectionTests.cpp
@@ -2630,6 +2633,7 @@ Editor/RenderGraphDisplayTextTests.cpp
         Editor/ClusterStatusTextTests.cpp
         Editor/SceneOverlayTests.cpp
         Editor/FrustumFromViewProjectionTests.cpp
+        Editor/HierarchyRowsTests.cpp
     )
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only
@@ -2990,6 +2994,8 @@ set(GTE_COMMENT_RULE_SRC
     Editor/EditorSceneIOCapability.h Editor/InstanceGridTestSpawner.cpp Editor/InstanceGridTestSpawner.h
     Editor/ImGuiEditorLayer.cpp Editor/NullEditorLayer.cpp Editor/Panels/HierarchyPanel.cpp
     Editor/Panels/HierarchyPanel.h Editor/Panels/ScenePanel.cpp Editor/Panels/ScenePanel.h
+    Editor/Panels/HierarchyRows.h Editor/Panels/HierarchyRows.cpp Editor/HierarchyStateReport.h
+    ECS/HierarchySnapshot.h ECS/HierarchySnapshot.cpp
     Editor/SceneIO.cpp Editor/SceneIO.h
     Game/Game.cpp Game/Game.h Game/Instantiation/MeshAssetGpuCatalog.cpp Game/Instantiation/MeshAssetGpuCatalog.h
     Game/Instantiation/MeshInstantiationSystem.cpp Game/Instantiation/MeshInstantiationSystem.h
@@ -3070,8 +3076,9 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Assets/MeshClusterTests.cpp Assets/MeshClusteringTests.cpp Assets/MeshMaterialPartitionerTests.cpp
     Assets/MeshClusterImportTests.cpp Editor/MeshClusterBuildRunnerTests.cpp Editor/ClusterToolUiStateTests.cpp
     Network/NetworkRoutesInspectorTests.cpp Network/NetworkRoutesClusterViewerTests.cpp
+    Editor/HierarchyRowsTests.cpp ECS/HierarchySnapshotTests.cpp Scene/SceneHierarchyBulkTests.cpp
     Network/NetworkRoutesSceneCameraTests.cpp
-    Core/ClusterClaimTests.cpp Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp Core/ClusterCandidatesTests.cpp
+    Core/ClusterClaimTests.cpp Core/ClusterPartSkipTests.cpp Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp Core/ClusterCandidatesTests.cpp
     Core/ClusterDrawStateTests.cpp Core/ClusterDrawVerbTests.cpp
     Renderer/ClusterShaderTextTests.cpp Renderer/RenderGraph/IndirectDrawRecordTests.cpp
     Assets/MeshClusterCloneTests.cpp Renderer/ClusterTintTests.cpp Renderer/ClusterViewShaderTextTests.cpp

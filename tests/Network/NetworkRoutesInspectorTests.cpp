@@ -118,4 +118,79 @@ TEST(InspectorResponseTests, SmallAnswersAreValidJson)
     EXPECT_EQ(selected["selected_path"], "C:\\P\\a.gta");
 }
 
+TEST(ParseHierarchyStateQueryTests, DefaultsAndCap)
+{
+    const ParsedHierarchyStateQuery blank = ParseHierarchyStateQuery("", "");
+    ASSERT_TRUE(blank.valid) << blank.errorMessage;
+    EXPECT_EQ(blank.first, 0u);
+    EXPECT_EQ(blank.count, 200u);
+
+    const ParsedHierarchyStateQuery capped = ParseHierarchyStateQuery("5", "999999");
+    ASSERT_TRUE(capped.valid) << capped.errorMessage;
+    EXPECT_EQ(capped.first, 5u);
+    EXPECT_EQ(capped.count, 2000u);
+
+    EXPECT_FALSE(ParseHierarchyStateQuery("-1", "").valid);
+    EXPECT_FALSE(ParseHierarchyStateQuery("", "abc").valid);
+}
+
+TEST(HierarchyStateResponseTests, JsonCarriesEveryKey)
+{
+    gte::HierarchyStateReport report;
+    report.visible = true;
+    report.entityCount = 3;
+    report.rowCount = 2;
+    report.collapsedCount = 1;
+    report.first = 4;
+    report.buildMs = 0.5;
+    report.flattenMs = 0.25;
+    report.drawnRows = 2;
+
+    gte::HierarchyStateRow root;
+    root.entity = gte::Entity{ 7, 2 };
+    root.label = "Root";
+    root.hasChildren = true;
+    root.expanded = false;
+    root.selected = true;
+    gte::HierarchyStateRow child;
+    child.entity = gte::Entity{ 9, 1 };
+    child.parent = root.entity;
+    child.depth = 1;
+    child.siblingPosition = 3;
+    child.label = "Child";
+    report.rows = { root, child };
+
+    const nlohmann::json body = nlohmann::json::parse(BuildHierarchyStateResponseJson(report));
+    for (const char* key : { "visible", "entityCount", "rowCount", "collapsedCount", "first", "rows", "buildMs", "flattenMs",
+             "drawnRows" }) {
+        EXPECT_TRUE(body.contains(key)) << key;
+    }
+    ASSERT_EQ(body["rows"].size(), 2u);
+    for (const char* key : { "entity", "parent", "depth", "siblingPosition", "label", "hasChildren", "expanded", "selected" }) {
+        EXPECT_TRUE(body["rows"][0].contains(key)) << key;
+    }
+    EXPECT_EQ(body["rows"][0]["entity"], "7/2");
+    EXPECT_TRUE(body["rows"][0]["parent"].is_null());
+    EXPECT_EQ(body["rows"][1]["parent"], "7/2");
+    EXPECT_EQ(body["rows"][1]["depth"], 1);
+    EXPECT_EQ(body["rows"][1]["siblingPosition"], 3);
+    EXPECT_FALSE(body["rows"][0]["expanded"].get<bool>());
+    EXPECT_TRUE(body["rows"][0]["selected"].get<bool>());
+    EXPECT_EQ(body["first"], 4);
+}
+
+TEST(HierarchyStateResponseTests, HiddenPanelHasNoRowsAndNullTimings)
+{
+    gte::HierarchyStateReport report;
+    report.entityCount = 10;
+
+    const nlohmann::json body = nlohmann::json::parse(BuildHierarchyStateResponseJson(report));
+    EXPECT_FALSE(body["visible"].get<bool>());
+    EXPECT_EQ(body["entityCount"], 10);
+    EXPECT_TRUE(body["rows"].empty());
+    EXPECT_TRUE(body["buildMs"].is_null());
+    EXPECT_TRUE(body["flattenMs"].is_null());
+    EXPECT_TRUE(body["drawnRows"].is_null());
+}
+
 } // namespace

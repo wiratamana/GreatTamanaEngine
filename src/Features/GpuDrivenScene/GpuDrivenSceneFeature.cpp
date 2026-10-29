@@ -172,8 +172,10 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
         .Stats(wantStats);
     const fx::ClusterStats stats = chain.Record();
 
-    snap.claimedEntities = stats.instances;
+    snap.claimedEntities = ClaimedInstancesOf(stats);
     snap.parts = stats.parts;
+    snap.skippedParts = stats.skippedParts;
+    snap.skippedInstances = stats.skippedInstances;
     snap.testedClusters = stats.workItems;
     snap.inertReason = stats.inertReason;
     snap.refused = ClusterOutcomeRefused(candidates.size(), stats);
@@ -197,7 +199,15 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
 
     // The count is two frames old: it is only shown next to the tested value of its own frame.
     const fx::ClusterVisibleCount visible = m_state.VisibleClusters(f);
-    if (wantStats && visible.valid) {
+    if (ChainSkippedEverything(stats)) {
+        // Every part was outside the view: the chain knows the exact count this frame.
+        snap.visibleValid = true;
+        snap.visibleClusters = 0;
+        snap.visibleFrame = frameIndex;
+        snap.testedAtVisibleFrame = 0;
+        snap.hidden = 0;
+        snap.hiddenValid = true;
+    } else if (wantStats && visible.valid) {
         if (const std::optional<std::uint64_t> tested = view.tested.At(visible.frame)) {
             snap.visibleValid = true;
             snap.visibleClusters = visible.value;

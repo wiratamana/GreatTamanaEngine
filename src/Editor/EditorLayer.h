@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ClusterToolUiState.h"
+#include "HierarchyStateReport.h"
 
 #include "../Assets/MeshClusterOptions.h"
 #include "../Core/CapturedPixels.h"
@@ -318,6 +319,10 @@ public:
 
     // What the Inspector showed on its last draw. Default-valued for NullEditorLayer.
     virtual InspectorStateView InspectorState() const = 0;
+
+    // The Hierarchy panel's rows from the last drawn frame: `count` rows from row `first`.
+    // `editorAvailable` is false for NullEditorLayer.
+    virtual HierarchyStateReport HierarchyState(Game& game, std::uint64_t first, std::uint64_t count) const = 0;
 
     // Starts a cluster build for the selected asset through the same function as the "Build Clusters" button.
     virtual ClusterBuildStartResult InspectorBuildClusters(const InspectorClusterOptions& options) = 0;

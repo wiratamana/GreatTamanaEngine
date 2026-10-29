@@ -1,15 +1,14 @@
 #include "HierarchyPanel.h"
 
+#include "HierarchyRows.h"
 #include "../EditorContext.h"
 #include "../InstanceGridTestSpawner.h"
 #include "../ImGuiUniqueId.h"
 #include "../../Core/InstanceGridLimits.h"
-#include "../../ECS/Components/Camera.h"
-#include "../../ECS/Components/Name.h"
-#include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
 #include "../../ECS/TransformHierarchy.h"
 #include "../../Game/Game.h"
+#include "../../Profiling/ScopeTimer.h"
 #include "../../Renderer/Primitives/PrimitiveMeshGenerator.h"
 
 #include <imgui.h>
@@ -17,16 +16,18 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <cstdio>
+#include <cstdint>
+#include <cstring>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace gte {
 
 namespace {
 
-// Every PrimitiveType offered by "Create 3D Object" below, in menu order -
-// see PrimitiveMeshGenerator.h for the shapes themselves.
+// Shapes offered by "Create 3D Object", in menu order.
 constexpr std::array<PrimitiveType, 5> kCreatableShapes = {
     PrimitiveType::Cube,
     PrimitiveType::Sphere,
@@ -35,51 +36,77 @@ constexpr std::array<PrimitiveType, 5> kCreatableShapes = {
     PrimitiveType::Plane,
 };
 
-// Row drop bands: the top and bottom fraction insert as a sibling before/after the row; the middle reparents as a child.
+// Row drop bands: the top and bottom fraction insert a sibling before/after the row; the middle reparents.
 constexpr float kReorderBandFraction = 0.25f;
 
-// Display label: the Name component value when set, else "Entity %u" (with " (Camera)" for cameras).
-std::string BuildEntityLabel(Registry& registry, Entity entity)
-{
-    if (const Name* name = registry.TryGetComponent<Name>(entity); name != nullptr && !name->value.empty()) {
-        return registry.HasComponent<Camera>(entity) ? (name->value + " (Camera)") : name->value;
-    }
+// Deeper rows are drawn at this indent level so a very deep chain keeps the window narrow.
+constexpr std::uint32_t kMaxDrawnDepth = 64;
 
-    char label[32];
-    if (registry.HasComponent<Camera>(entity)) {
-        std::snprintf(label, sizeof(label), "Entity %u (Camera)", entity.index);
-    } else {
-        std::snprintf(label, sizeof(label), "Entity %u", entity.index);
+// Everything a row needs; the registry is only read while rows are drawn.
+struct RowContext {
+    EditorContext& ctx;
+    Registry& registry;
+    PendingHierarchyAction& pending;
+};
+
+// Row index of the entity being dragged out of this panel, if any.
+std::optional<int> DraggedRowIndex(const std::vector<HierarchyRow>& rows)
+{
+    const ImGuiPayload* payload = ImGui::GetDragDropPayload();
+    if (payload == nullptr || !payload->IsDataType(kHierarchyEntityDragDropPayloadType)
+        || payload->DataSize != static_cast<int>(sizeof(Entity))) {
+        return std::nullopt;
     }
-    return std::string(label);
+    Entity dragged;
+    std::memcpy(&dragged, payload->Data, sizeof(Entity));
+    const auto found = std::find_if(rows.begin(), rows.end(), [dragged](const HierarchyRow& row) {
+        return row.entity == dragged;
+    });
+    if (found == rows.end()) {
+        return std::nullopt;
+    }
+    return static_cast<int>(found - rows.begin());
 }
 
-// Renders `entity` and its descendants as an ImGui tree with selection and drag-and-drop reparenting.
-void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Registry& registry, Entity entity,
-    DescriptorSetLayoutHandle sceneServicesSetLayout)
+// Draws one flat row: selection, drag source and drop target. Drops only fill `pending`.
+void DrawRow(RowContext& rc, const HierarchyRow& row)
 {
-    ScopedUniqueId idScope(static_cast<int>(entity.index), "HierarchyPanel::RenderEntityNode");
+    const Entity entity = row.entity;
+    ScopedUniqueId idScope(static_cast<int>(entity.index), "HierarchyPanel::DrawRow");
 
-    const std::string label = BuildEntityLabel(registry, entity);
-    const std::vector<Entity> children = GetChildren(registry, entity);
+    const std::string label = BuildEntityLabel(rc.registry, entity);
+    const float indent = static_cast<float>(std::min(row.depth, kMaxDrawnDepth)) * ImGui::GetStyle().IndentSpacing;
+    if (indent > 0.0f) {
+        ImGui::Indent(indent);
+    }
 
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick
-        | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen;
-    if (children.empty()) {
-        flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+        | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+    if (!row.hasChildren) {
+        flags |= ImGuiTreeNodeFlags_Leaf;
     }
-    if (ctx.selection.IsEntitySelected(entity)) {
+    if (rc.ctx.selection.IsEntitySelected(entity)) {
         flags |= ImGuiTreeNodeFlags_Selected;
     }
+    if (row.hasChildren) {
+        ImGui::SetNextItemOpen(row.expanded, ImGuiCond_Always);
+    }
 
-    const bool opened = ImGui::TreeNodeEx(label.c_str(), flags);
+    ImGui::TreeNodeEx(label.c_str(), flags);
 
-    // Row rect, captured before children draw; picks the drop band, and the drag source attaches to this item.
     const ImVec2 itemMin = ImGui::GetItemRectMin();
     const ImVec2 itemMax = ImGui::GetItemRectMax();
 
+    if (row.hasChildren && ImGui::IsItemToggledOpen()) {
+        if (row.expanded) {
+            rc.ctx.hierarchy.collapsed.insert(entity);
+        } else {
+            rc.ctx.hierarchy.collapsed.erase(entity);
+        }
+    }
+
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
-        ctx.selection.SelectEntity(entity);
+        rc.ctx.selection.SelectEntity(entity);
     }
 
     if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
@@ -89,77 +116,115 @@ void RenderEntityNode(Game& game, Renderer& renderer, EditorContext& ctx, Regist
     }
 
     if (ImGui::BeginDragDropTarget()) {
-        const float rowHeight = std::max(1.0f, itemMax.y - itemMin.y);
-        const float relativeY = (ImGui::GetMousePos().y - itemMin.y) / rowHeight;
-
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kHierarchyEntityDragDropPayloadType)) {
-            const Entity dragged = *static_cast<const Entity*>(payload->Data);
-            // Dropping onto itself is a no-op; SetParent() also rejects cycles and dead handles.
-            if (dragged != entity && registry.IsAlive(dragged)) {
-                if (relativeY < kReorderBandFraction || relativeY > (1.0f - kReorderBandFraction)) {
-                    // Top/bottom band: insert as a sibling before/after `entity` under its parent
-                    // (a pure reorder when `dragged` already shares that parent).
-                    const Transform* targetTransform = registry.TryGetComponent<Transform>(entity);
-                    const Entity newParent = targetTransform != nullptr ? targetTransform->parent : kInvalidEntity;
-                    const std::uint32_t targetIndex = targetTransform != nullptr ? targetTransform->siblingIndex : 0;
-                    const std::uint32_t desiredIndex = (relativeY < kReorderBandFraction) ? targetIndex : targetIndex + 1;
+            Entity dragged;
+            std::memcpy(&dragged, payload->Data, sizeof(Entity));
+            if (dragged != entity && rc.registry.IsAlive(dragged)) {
+                const float rowHeight = std::max(1.0f, itemMax.y - itemMin.y);
+                const float relativeY = (ImGui::GetMousePos().y - itemMin.y) / rowHeight;
 
-                    if (SetParent(registry, dragged, newParent, /*worldPositionStays=*/true)) {
-                        SetSiblingIndex(registry, dragged, desiredIndex);
-                    }
+                PendingHierarchyAction action;
+                action.dragged = dragged;
+                action.target = entity;
+                if (relativeY < kReorderBandFraction || relativeY > (1.0f - kReorderBandFraction)) {
+                    action.kind = PendingHierarchyAction::Kind::Reorder;
+                    action.targetParent = row.parent;
+                    action.targetPosition = row.siblingPosition;
+                    action.insertAfter = relativeY > 0.5f;
                 } else {
-                    // Middle band: attach `dragged` as `entity`'s newest
-                    // (last) child.
-                    SetParent(registry, dragged, entity, /*worldPositionStays=*/true);
+                    action.kind = PendingHierarchyAction::Kind::Reparent;
                 }
+                rc.pending = std::move(action);
             }
         }
 
 #if GTE_ENABLE_PROJECT_PANEL
-        // Project-panel asset dropped on a row: an animation plays on a rigged model; otherwise a mesh
-        // spawns as a child of `entity`. PlayAnimationOnEntity() is tried first and fails for non-animations.
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kProjectAssetDragDropPayloadType)) {
-            const std::string absolutePath(static_cast<const char*>(payload->Data));
-            if (!game.PlayAnimationOnEntity(entity, absolutePath)) {
-                const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath, sceneServicesSetLayout);
-                if (spawned.IsValid()) {
-                    SetParent(registry, spawned, entity, /*worldPositionStays=*/true);
-                    ctx.selection.SelectEntity(spawned);
-                }
-            }
+            PendingHierarchyAction action;
+            action.kind = PendingHierarchyAction::Kind::SpawnAsset;
+            action.target = entity;
+            action.assetPath = static_cast<const char*>(payload->Data);
+            rc.pending = std::move(action);
         }
 #endif
 
         ImGui::EndDragDropTarget();
     }
 
-    if (opened && !children.empty()) {
-        for (const Entity child : children) {
-            RenderEntityNode(game, renderer, ctx, registry, child, sceneServicesSetLayout);
-        }
-        ImGui::TreePop();
+    if (indent > 0.0f) {
+        ImGui::Unindent(indent);
     }
+}
 
-    // No manual ImGui::PopID(); anymore - ScopedUniqueId's destructor handles it.
+// Applies the drop recorded this frame. Runs after the row loop, so no row sees a half-changed tree.
+void ApplyPendingAction(Game& game, Renderer& renderer, EditorContext& ctx, Registry& registry,
+    DescriptorSetLayoutHandle sceneServicesSetLayout, const PendingHierarchyAction& action)
+{
+    switch (action.kind) {
+    case PendingHierarchyAction::Kind::None:
+        return;
+    case PendingHierarchyAction::Kind::Reparent:
+    case PendingHierarchyAction::Kind::Reorder:
+        ExecuteHierarchyAction(registry, ctx.hierarchy.snapshot, action);
+        return;
+    case PendingHierarchyAction::Kind::SpawnAsset:
+#if GTE_ENABLE_PROJECT_PANEL
+        // An animation plays on a rigged model; any other asset spawns as a child of the target.
+        if (registry.IsAlive(action.target) && !game.PlayAnimationOnEntity(action.target, action.assetPath)) {
+            const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, action.assetPath, sceneServicesSetLayout);
+            if (spawned.IsValid()) {
+                SetParent(registry, spawned, action.target, /*worldPositionStays=*/true);
+                ctx.selection.SelectEntity(spawned);
+            }
+        }
+#else
+        (void)game;
+        (void)renderer;
+        (void)sceneServicesSetLayout;
+#endif
+        return;
+    }
 }
 
 } // namespace
 
 void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
+    GTE_PROFILE_SCOPE("HierarchyPanel");
+
+    HierarchyViewState& view = ctx.hierarchy;
+    if (!ImGui::Begin("Hierarchy")) {
+        ImGui::End();
+        NoteHierarchyHidden(view);
+        return;
+    }
+    NoteHierarchyVisible(view);
+
     Registry& registry = game.GetRegistry();
+    UpdateHierarchyRows(registry, view);
 
-    ImGui::Begin("Hierarchy");
-
-    // Top-level entities: those whose parent is kInvalidEntity (or dangling).
-    const std::vector<Entity> roots = GetChildren(registry, kInvalidEntity);
-    for (const Entity root : roots) {
-        RenderEntityNode(game, renderer, ctx, registry, root, sceneServicesSetLayout);
-    }
-
-    if (roots.empty()) {
+    PendingHierarchyAction pending;
+    if (view.rows.empty()) {
+        view.lastDrawnRows = 0;
         ImGui::TextDisabled("(no entities)");
+    } else {
+        RowContext rowContext{ ctx, registry, pending };
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(view.rows.size()));
+        if (const std::optional<int> draggedRow = DraggedRowIndex(view.rows)) {
+            clipper.IncludeItemByIndex(*draggedRow); // keeps the drag source submitted while scrolled away
+        }
+        std::uint32_t drawnRows = 0;
+        while (clipper.Step()) {
+            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+                DrawRow(rowContext, view.rows[static_cast<std::size_t>(i)]);
+                ++drawnRows;
+            }
+        }
+        view.lastDrawnRows = drawnRows;
     }
+
+    ApplyPendingAction(game, renderer, ctx, registry, sceneServicesSetLayout, pending);
 
     // Drop target for the empty area below the tree: an entity drop unparents it, an asset drop spawns at the root.
     // The invisible button gives the target a rect even when the tree is empty or short.
@@ -170,7 +235,8 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, Des
         ImGui::InvisibleButton("HierarchyRootDropTarget", dropTargetSize);
         if (ImGui::BeginDragDropTarget()) {
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kHierarchyEntityDragDropPayloadType)) {
-                const Entity dragged = *static_cast<const Entity*>(payload->Data);
+                Entity dragged;
+                std::memcpy(&dragged, payload->Data, sizeof(Entity));
                 if (registry.IsAlive(dragged)) {
                     SetParent(registry, dragged, kInvalidEntity, /*worldPositionStays=*/true);
                 }
@@ -180,8 +246,6 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, Des
                 const std::string absolutePath(static_cast<const char*>(payload->Data));
                 const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath, sceneServicesSetLayout);
                 if (spawned.IsValid()) {
-                    // Same "select what you just created" convention as
-                    // "Create 3D Object" below.
                     ctx.selection.SelectEntity(spawned);
                 }
             }
@@ -195,9 +259,6 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, Des
         if (ImGui::BeginMenu("Create 3D Object")) {
             for (const PrimitiveType type : kCreatableShapes) {
                 if (ImGui::MenuItem(ToString(type))) {
-                    // Select the freshly spawned entity immediately - same
-                    // as Unity, so Inspector shows it without an extra
-                    // click in Hierarchy.
                     ctx.selection.SelectEntity(game.CreatePrimitiveEntity(renderer, type, sceneServicesSetLayout));
                 }
             }

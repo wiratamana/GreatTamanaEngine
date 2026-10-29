@@ -81,7 +81,7 @@ widget ID from a name, label or path alone.
 | File | Function(s) |
 |---|---|
 | `Panels/ProjectPanel.cpp` | `RenderLeftPaneFolder()`, `RenderBreadcrumb()`, `RenderRightPaneEntry()` |
-| `Panels/HierarchyPanel.cpp` | `RenderEntityNode()` |
+| `Panels/HierarchyPanel.cpp` | `DrawRow()` |
 | `Panels/InspectorPanel.cpp` | Verlet chain and joint loops |
 | `Panels/RenderFeaturesPanel.cpp` | `BuildRenderFeaturesSection()` |
 | `BoneViewerWindow.cpp` | `RenderBoneTreeNode()`, `RenderFlatPartRow()`, `RenderVerletChainNode()` |

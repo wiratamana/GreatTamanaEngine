@@ -43,6 +43,7 @@
 #include "SceneCameraAdapter.h"
 #include "TransformGizmo.h"
 #include "../Game/Game.h"
+#include "Panels/HierarchyRows.h"
 #include "../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/UiTextureBackend.h"
@@ -616,6 +617,11 @@ public:
         view.cloneWeld = shown.cloneWeld;
         view.openViewerAfterClone = shown.openViewerAfterClone;
         return view;
+    }
+
+    HierarchyStateReport HierarchyState(Game& game, std::uint64_t first, std::uint64_t count) const override
+    {
+        return BuildHierarchyStateReport(game.GetRegistry(), m_ctx.hierarchy, m_ctx.selection, first, count);
     }
 
     ClusterBuildStartResult InspectorBuildClusters(const InspectorClusterOptions& options) override

@@ -47,6 +47,7 @@ inline constexpr std::array kHizReasonTable{
     fx::EnumEntry<HizReason>{ HizReason::None, "None" },
     fx::EnumEntry<HizReason>{ HizReason::Unavailable, "Unavailable" },
     fx::EnumEntry<HizReason>{ HizReason::TooLarge, "TooLarge" },
+    fx::EnumEntry<HizReason>{ HizReason::NothingInView, "NothingInView" },
 };
 
 // Whose camera a view culls with: its own, the primary view's, or nobody's (no test runs).
@@ -248,13 +249,26 @@ private:
     std::array<Entry, 4> m_ring{};
 };
 
-// A chain with instances that declared nothing and had no deliberate reason.
+// A chain with instances that declared nothing, skipped nothing and had no deliberate reason.
 constexpr bool ClusterOutcomeRefused(std::size_t candidateCount, const fx::ClusterStats& stats) noexcept
 {
-    return stats.inertReason == fx::ClusterInertReason::None && candidateCount > 0 && !stats.declared;
+    return stats.inertReason == fx::ClusterInertReason::None && candidateCount > 0 && !stats.declared && stats.skippedParts == 0;
 }
 
-// Why a view drew nothing through the cluster path; empty when it did or when there was nothing to draw.
+// Every part of the chain was outside the cull frustum: nothing is drawn and the visible count is exactly 0.
+constexpr bool ChainSkippedEverything(const fx::ClusterStats& stats) noexcept
+{
+    return stats.parts == 0 && stats.skippedParts > 0;
+}
+
+// Instances the cluster path owns this frame: drawn parts plus skipped parts.
+constexpr std::uint32_t ClaimedInstancesOf(const fx::ClusterStats& stats) noexcept
+{
+    return stats.instances + stats.skippedInstances;
+}
+
+// Why a view drew nothing through the cluster path; empty when it did, when every part was outside the view,
+// or when there was nothing to draw.
 inline std::string DescribeClusterOutcome(std::size_t candidateCount, const fx::ClusterStats& stats)
 {
     if (stats.inertReason != fx::ClusterInertReason::None) {
@@ -297,8 +311,10 @@ constexpr CpuPathReasons CpuPathReasonsOf(const fx::ClusterRejectCounts& rejecte
 
 // What the cluster pass reported for a view. Reads as all zero in a frame where the pass did not run.
 struct GpuPathReport {
-    std::uint32_t claimedEntities = 0;
+    std::uint32_t claimedEntities = 0; // Instances of drawn parts plus instances of skipped parts.
     std::uint32_t parts = 0;
+    std::uint32_t skippedParts = 0;     // Parts outside the cull frustum: no pass, entities still claimed.
+    std::uint32_t skippedInstances = 0; // Instances of those parts.
     CpuPathReasons cpuPath;
     OcclusionState occlusion = OcclusionState::NotRequested;
     HizReason hizReason = HizReason::None;

@@ -65,6 +65,14 @@ std::span<const ClusterInstance> Frame::ClusterCandidates() const noexcept
     return m_context->core->ClusterCandidates();
 }
 
+std::span<const AABB> Frame::ClusterCandidateBounds() const
+{
+    if (m_context == nullptr || m_context->core == nullptr || m_view.scope == rg::ViewScope::Shared) {
+        return {};
+    }
+    return m_context->core->ClusterCandidateBounds();
+}
+
 ClusterRejectCounts Frame::ClusterRejections() const noexcept
 {
     if (m_context == nullptr || m_context->core == nullptr || m_view.scope == rg::ViewScope::Shared) {

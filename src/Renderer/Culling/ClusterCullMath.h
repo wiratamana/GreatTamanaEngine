@@ -209,6 +209,9 @@ std::optional<ClusterRef> ClusterIdToInstanceCluster(
 // Per-instance flags and largest axis scale of a world matrix. A non-finite matrix gives flags 0.
 std::uint32_t ClusterInstanceFlagsFor(const Mat4& world, float* maxScaleOut) noexcept;
 
+// Union of every cluster box of a table. Empty for an empty table or a non-finite or inverted box.
+std::optional<AABB> ClusterTableBounds(std::span<const MeshCluster> clusters) noexcept;
+
 // Frustum test of the cluster box moved to world space. A non-finite box is kept.
 bool ClusterFrustumCulled(const MeshCluster& cluster, const Mat4& world, const std::array<Plane, 6>& planes) noexcept;
 
@@ -365,8 +368,8 @@ bool ClusterOccluded(const MeshCluster& cluster, const Mat4& world, const Mat4& 
 // Writes pyramid size, level count, depth map and raw-depth flag into the block. Call after MakeClusterCullParams.
 void SetClusterCullHiz(ClusterCullParams& params, const HizLayout& layout) noexcept;
 
-// Why a pyramid cannot cull. None means usable.
-enum class HizReason : std::uint8_t { None, Unavailable, TooLarge };
+// Why a pyramid cannot cull. None means usable. NothingInView: every part was outside the cull frustum, no pyramid ran.
+enum class HizReason : std::uint8_t { None, Unavailable, TooLarge, NothingInView };
 
 // ---------------------------------------------------------------------------------------------
 // Pipeline key

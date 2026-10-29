@@ -6,6 +6,7 @@
 #include "SyncCommandBridge.h"
 #include "../Assets/MeshClusterOptions.h"
 #include "../Core/InstanceGridLimits.h"
+#include "../Editor/HierarchyStateReport.h"
 #include "../Editor/SceneCameraControl.h"
 
 #include <cstdint>
@@ -24,7 +25,14 @@ enum class EditorUiCommandKind {
     SplitViews,
     ClusterViewer,
     SceneCamera,
+    HierarchyState,
     Exit, // No payload; the editor loop ends after the reply is sent.
+};
+
+// Plain request payload for one HierarchyState command: `count` rows starting at row `first`.
+struct HierarchyStateCommand {
+    std::uint64_t first = 0;
+    std::uint32_t count = 200;
 };
 
 // Plain request payload for one ActivateTab command.
@@ -96,6 +104,7 @@ struct EditorUiCommandRequest {
     SplitViewsCommand splitViews;
     ClusterViewerCommand clusterViewer;
     SceneCameraCommand sceneCamera;
+    HierarchyStateCommand hierarchyState;
 };
 
 // Outcome of one ActivateTab command.
@@ -196,6 +205,7 @@ struct EditorUiCommandResult {
     SplitViewsOutcome splitViews;
     ClusterViewerOutcome clusterViewer;
     SceneCameraOutcome sceneCamera;
+    HierarchyStateReport hierarchyState;
 };
 
 class EditorUiCommandBridge : public SyncCommandBridge<EditorUiCommandRequest, EditorUiCommandResult> {

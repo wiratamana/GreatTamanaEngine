@@ -130,9 +130,7 @@ try
     if (root == kInvalidEntity) {
         return Fail("Sponza spawn failed: could not load \"" + result.gtaPath + "\".");
     }
-    for (const Entity oldRoot : oldRoots) {
-        DestroyEntityAndDescendants(registry, oldRoot);
-    }
+    DestroyEntitiesAndDescendants(registry, oldRoots);
     // The spawn may have de-duplicated the name against the old scene; restore it.
     if (Name* name = registry.TryGetComponent<Name>(root)) {
         name->value = kRootName;

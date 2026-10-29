@@ -1289,6 +1289,59 @@ std::string BuildSplitViewsResponseJson(bool split)
     return body.dump();
 }
 
+ParsedHierarchyStateQuery ParseHierarchyStateQuery(const std::string& firstParam, const std::string& countParam)
+{
+    ParsedHierarchyStateQuery result;
+    if (!firstParam.empty() && !TryParseNonNegativeUInt64(firstParam, result.first)) {
+        result.errorMessage = "invalid query parameter: first - must be a non-negative integer";
+        return result;
+    }
+    if (!countParam.empty()) {
+        std::uint64_t count = 0;
+        if (!TryParseNonNegativeUInt64(countParam, count)) {
+            result.errorMessage = "invalid query parameter: count - must be a non-negative integer";
+            return result;
+        }
+        result.count = static_cast<std::uint32_t>(std::min<std::uint64_t>(count, kMaxHierarchyStateRows));
+    }
+    result.valid = true;
+    return result;
+}
+
+std::string BuildHierarchyStateResponseJson(const HierarchyStateReport& report)
+{
+    const auto entityText = [](Entity entity) {
+        return std::to_string(entity.index) + "/" + std::to_string(entity.generation);
+    };
+
+    nlohmann::json rows = nlohmann::json::array();
+    for (const HierarchyStateRow& row : report.rows) {
+        nlohmann::json item;
+        item["entity"] = entityText(row.entity);
+        item["parent"] = row.parent.IsValid() ? nlohmann::json(entityText(row.parent)) : nlohmann::json(nullptr);
+        item["depth"] = row.depth;
+        item["siblingPosition"] = row.siblingPosition;
+        item["label"] = row.label;
+        item["hasChildren"] = row.hasChildren;
+        item["expanded"] = row.expanded;
+        item["selected"] = row.selected;
+        rows.push_back(std::move(item));
+    }
+
+    nlohmann::json body;
+    body["visible"] = report.visible;
+    body["entityCount"] = report.entityCount;
+    body["rowCount"] = report.rowCount;
+    body["collapsedCount"] = report.collapsedCount;
+    body["first"] = report.first;
+    body["rows"] = std::move(rows);
+    // A hidden panel measured nothing: null, never 0.
+    body["buildMs"] = report.visible ? nlohmann::json(report.buildMs) : nlohmann::json(nullptr);
+    body["flattenMs"] = report.visible ? nlohmann::json(report.flattenMs) : nlohmann::json(nullptr);
+    body["drawnRows"] = report.visible ? nlohmann::json(report.drawnRows) : nlohmann::json(nullptr);
+    return body.dump();
+}
+
 std::string BuildInspectorStateResponseJson(const InspectorStateResponseView& view)
 {
     nlohmann::json body;

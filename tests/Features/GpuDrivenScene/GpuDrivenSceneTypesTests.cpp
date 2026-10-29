@@ -243,5 +243,32 @@ TEST(GpuDrivenSceneTypesTest, OutcomeTextNamesInertReasonAndRefusal)
     EXPECT_EQ(DescribeClusterOutcome(3, stats), "capture armed");
 }
 
+TEST(GpuDrivenSceneTypesTest, AFullySkippedChainIsNotRefused)
+{
+    fx::ClusterStats stats;
+    stats.skippedParts = 2;
+    stats.skippedInstances = 500;
+    EXPECT_FALSE(ClusterOutcomeRefused(500, stats));
+    EXPECT_TRUE(DescribeClusterOutcome(500, stats).empty());
+    EXPECT_TRUE(ChainSkippedEverything(stats));
+
+    stats.parts = 1;
+    EXPECT_FALSE(ChainSkippedEverything(stats));
+}
+
+TEST(GpuDrivenSceneTypesTest, ClaimedInstancesIncludeSkippedInstances)
+{
+    fx::ClusterStats stats;
+    stats.instances = 30;
+    stats.skippedInstances = 12;
+    EXPECT_EQ(ClaimedInstancesOf(stats), 42u);
+    EXPECT_EQ(ClaimedInstancesOf(fx::ClusterStats{}), 0u);
+}
+
+TEST(GpuDrivenSceneTypesTest, NothingInViewHasAnExactName)
+{
+    EXPECT_EQ(fx::EnumName(kHizReasonTable, HizReason::NothingInView), "NothingInView");
+}
+
 } // namespace
 } // namespace gte

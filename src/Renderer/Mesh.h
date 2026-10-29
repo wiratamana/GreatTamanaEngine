@@ -70,13 +70,16 @@ public:
     const std::optional<AABB>& LocalBounds() const noexcept { return m_localBounds; }
 
     // Cluster table over this mesh's index buffer (read-only storage buffer). Owned by the mesh.
+    // `clusterBounds` is the union of every cluster box; empty when unknown.
     bool HasClusters() const noexcept { return m_clusterTable.has_value() && m_clusterCount > 0; }
     std::uint32_t ClusterCount() const noexcept { return m_clusterCount; }
     const rg::GpuBuffer* ClusterTable() const noexcept { return m_clusterTable ? &*m_clusterTable : nullptr; }
-    void SetClusterTable(rg::GpuBuffer table, std::uint32_t count) noexcept
+    const std::optional<AABB>& ClusterBounds() const noexcept { return m_clusterBounds; }
+    void SetClusterTable(rg::GpuBuffer table, std::uint32_t count, const std::optional<AABB>& clusterBounds) noexcept
     {
         m_clusterTable.emplace(std::move(table));
         m_clusterCount = count;
+        m_clusterBounds = clusterBounds;
     }
 
 private:
@@ -91,6 +94,7 @@ private:
 
     std::optional<rg::GpuBuffer> m_clusterTable;
     std::uint32_t m_clusterCount = 0;
+    std::optional<AABB> m_clusterBounds;
 };
 
 } // namespace gte

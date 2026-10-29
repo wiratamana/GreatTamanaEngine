@@ -167,6 +167,33 @@ TEST(GpuDrivenScenePanelTextTest, InertLineNamesTheReasonOrStaysEmpty)
     EXPECT_TRUE(InertLine(s, v).empty());
 }
 
+TEST(GpuDrivenScenePanelTextTest, SkippedPartsLineShowsOnlyWhenPartsWereSkipped)
+{
+    GpuDrivenSceneViewSnapshot v;
+    EXPECT_TRUE(SkippedPartsLine(v).empty());
+    v.gpu.skippedParts = 2;
+    EXPECT_EQ(SkippedPartsLine(v), "Parts skipped (outside view): 2");
+}
+
+TEST(GpuDrivenScenePanelTextTest, SkippedInstancesCountAsOnTheGpuPath)
+{
+    GpuDrivenSceneViewSnapshot v;
+    v.cpuTested = 5;
+    v.gpu.claimedEntities = 100; // All of them belong to skipped parts.
+    v.gpu.skippedParts = 1;
+    v.gpu.skippedInstances = 100;
+    EXPECT_TRUE(NoGpuPathLine(Hiz(), v).empty());
+    EXPECT_TRUE(InertLine(GpuDrivenSceneSettings{}, v).empty());
+}
+
+TEST(GpuDrivenScenePanelTextTest, HizLineSaysNothingInView)
+{
+    GpuDrivenSceneViewSnapshot v;
+    v.gpu.occlusion = OcclusionState::Unusable;
+    v.gpu.hizReason = HizReason::NothingInView;
+    EXPECT_EQ(HizLine(v, false), "Hi-Z: nothing in view");
+}
+
 TEST(GpuDrivenScenePanelTextTest, CullTimeSplitGroupsByViewAndOwnerAndNeverInventsZero)
 {
     const std::string_view cull = "GpuDrivenScene";

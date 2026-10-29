@@ -1,6 +1,7 @@
 #include "ClusterPartPlanning.h"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 
 namespace gte::fx {
@@ -44,6 +45,57 @@ ClusterSlotAssignment AssignClusterPartSlots(std::span<const ClusterPartSize> pa
         (result.assigned.size() < slotCount ? result.assigned : result.dropped).push_back(index);
     }
     return result;
+}
+
+ClusterPartBox UnionInstanceBoxes(std::span<const AABB> instanceBoxes, std::span<const std::uint32_t> indices) noexcept
+{
+    ClusterPartBox part;
+    bool first = true;
+    for (const std::uint32_t index : indices) {
+        if (index >= instanceBoxes.size()) {
+            return ClusterPartBox{};
+        }
+        const AABB& box = instanceBoxes[index];
+        const bool usable = std::isfinite(box.min.x) && std::isfinite(box.min.y) && std::isfinite(box.min.z)
+            && std::isfinite(box.max.x) && std::isfinite(box.max.y) && std::isfinite(box.max.z)
+            && box.min.x <= box.max.x && box.min.y <= box.max.y && box.min.z <= box.max.z;
+        if (!usable) {
+            return ClusterPartBox{};
+        }
+        if (first) {
+            part.box = box;
+            first = false;
+            continue;
+        }
+        part.box.min = Vec3(std::min(part.box.min.x, box.min.x), std::min(part.box.min.y, box.min.y),
+            std::min(part.box.min.z, box.min.z));
+        part.box.max = Vec3(std::max(part.box.max.x, box.max.x), std::max(part.box.max.y, box.max.y),
+            std::max(part.box.max.z, box.max.z));
+    }
+    part.bounded = !first;
+    return part;
+}
+
+bool ShouldSkipClusterPart(const std::optional<std::array<Plane, 6>>& planes, ClusterCullFlags flags,
+    const ClusterPartBox& part) noexcept
+{
+    if (!planes.has_value() || !part.bounded || !HasClusterCullFlag(flags, ClusterCullFlags::Frustum)) {
+        return false;
+    }
+    return IsAABBOutsideFrustum(*planes, PadAABB(part.box, kClusterPartSkipPadding));
+}
+
+std::vector<std::uint8_t> PlanClusterPartSkips(const std::optional<std::array<Plane, 6>>& planes,
+    ClusterCullFlags flags, std::span<const AABB> instanceBoxes, std::span<const ClusterMeshGroup> groups)
+{
+    std::vector<std::uint8_t> skips(groups.size(), 0);
+    if (!planes.has_value() || !HasClusterCullFlag(flags, ClusterCullFlags::Frustum)) {
+        return skips;
+    }
+    for (std::size_t i = 0; i < groups.size(); ++i) {
+        skips[i] = ShouldSkipClusterPart(planes, flags, UnionInstanceBoxes(instanceBoxes, groups[i].instances)) ? 1 : 0;
+    }
+    return skips;
 }
 
 ClusterVisibleCount SumClusterCounts(std::span<const ClusterCountSample> samples) noexcept

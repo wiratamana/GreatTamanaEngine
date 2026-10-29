@@ -3,35 +3,35 @@
 #include "../ECS/Components/MeshAssetSource.h"
 #include "../ECS/Components/Name.h"
 #include "../ECS/Components/Transform.h"
+#include "../ECS/HierarchySnapshot.h"
 #include "../ECS/Reflection/ComponentTypeRegistry.h"
 #include "../ECS/TransformHierarchy.h"
 #include "../Game/Game.h"
+#include "../Profiling/ScopeTimer.h"
 #include "../Renderer/Primitives/PrimitiveMeshGenerator.h"
 #include "../Renderer/Renderer.h"
 
-#include <functional>
+#include <optional>
+#include <span>
 #include <utility>
+#include <vector>
 
 namespace gte {
 
 namespace {
 
-// Pre-order walk: appends `entity`'s record, then recurses into its children, so a parent's index is
-// known when each child captures it. `outEntityOrder` is index-aligned with `outDocument.entities`.
-void WalkEntityRecursive(Registry& registry, Entity entity, std::optional<std::size_t> parentIndex,
-    std::vector<Entity>& outEntityOrder, SceneDocument& outDocument)
+// One record for `entity`: sibling order plus every registered component the entity has, so new
+// components become part of a saved scene by registering themselves.
+SceneEntityRecord CaptureRecord(Registry& registry, Entity entity, std::optional<std::size_t> parentIndex,
+    const std::vector<ComponentTypeDescriptor>& descriptors)
 {
-    const std::size_t myIndex = outDocument.entities.size();
-
     SceneEntityRecord record;
     record.parentIndex = parentIndex;
     if (const Transform* transform = registry.TryGetComponent<Transform>(entity); transform != nullptr) {
         record.siblingIndex = transform->siblingIndex;
     }
 
-    // Generic capture: serialize every registered component type the entity has, so new components
-    // become part of a saved scene by registering themselves.
-    for (const ComponentTypeDescriptor& descriptor : ComponentTypeRegistry::Instance().AllSortedByTypeName()) {
+    for (const ComponentTypeDescriptor& descriptor : descriptors) {
         const void* component = descriptor.tryGetConstComponent(registry, entity);
         if (component == nullptr) {
             continue;
@@ -42,26 +42,47 @@ void WalkEntityRecursive(Registry& registry, Entity entity, std::optional<std::s
         }
         record.components[descriptor.typeName] = std::move(fields);
     }
-
-    outEntityOrder.push_back(entity);
-    outDocument.entities.push_back(std::move(record));
-
-    for (const Entity child : GetChildren(registry, entity)) {
-        WalkEntityRecursive(registry, child, myIndex, outEntityOrder, outDocument);
-    }
+    return record;
 }
 
 } // namespace
 
 SceneDocument BuildSceneDocumentFromRegistry(Registry& registry, const AssetDatabase& assetDatabase)
 {
+    GTE_PROFILE_SCOPE("Scene.Save");
+
+    HierarchySnapshot snapshot;
+    snapshot.Rebuild(registry);
+    const std::vector<ComponentTypeDescriptor>& descriptors = ComponentTypeRegistry::Instance().AllSortedByTypeName();
+
     SceneDocument document;
     std::vector<Entity> entityOrder; // index-aligned with document.entities.
-    for (const Entity root : GetChildren(registry, kInvalidEntity)) {
-        WalkEntityRecursive(registry, root, std::nullopt, entityOrder, document);
+
+    // Iterative pre-order: a parent's record comes first, then its children in sibling order.
+    struct Pending {
+        Entity entity;
+        std::optional<std::size_t> parentIndex;
+    };
+    std::vector<Pending> stack;
+    const auto pushChildren = [&](Entity parent, std::optional<std::size_t> parentIndex) {
+        const std::span<const Entity> children = snapshot.Children(parent);
+        for (auto it = children.rbegin(); it != children.rend(); ++it) {
+            stack.push_back(Pending{ *it, parentIndex });
+        }
+    };
+
+    pushChildren(kInvalidEntity, std::nullopt);
+    while (!stack.empty()) {
+        const Pending pending = stack.back();
+        stack.pop_back();
+
+        const std::size_t index = document.entities.size();
+        entityOrder.push_back(pending.entity);
+        document.entities.push_back(CaptureRecord(registry, pending.entity, pending.parentIndex, descriptors));
+        pushChildren(pending.entity, index);
     }
 
-    // Resolve asset guids after the walk, when entityOrder and document are fully built and index-aligned.
+    // Resolve asset guids once entityOrder and document are fully built and index-aligned.
     for (std::size_t i = 0; i < entityOrder.size(); ++i) {
         if (const MeshAssetSource* meshAssetSource = registry.TryGetComponent<MeshAssetSource>(entityOrder[i]);
             meshAssetSource != nullptr) {
@@ -78,20 +99,19 @@ SceneDocument BuildSceneDocumentFromRegistry(Registry& registry, const AssetData
 
 void ClearEntireScene(Registry& registry)
 {
-    // Snapshot roots BEFORE destroying anything - GetChildren(kInvalidEntity)
-    // reads live Transform data that DestroyEntityAndDescendants() below
-    // mutates as it goes.
-    const std::vector<Entity> roots = GetChildren(registry, kInvalidEntity);
-    for (const Entity root : roots) {
-        DestroyEntityAndDescendants(registry, root);
-    }
+    GTE_PROFILE_SCOPE("Scene.Destroy");
+    HierarchySnapshot snapshot;
+    snapshot.Rebuild(registry);
+    const std::span<const Entity> roots = snapshot.Children(kInvalidEntity);
+    DestroyEntitiesAndDescendants(registry, roots);
 }
 
-// Spawns the document's entities in recipe-aware passes (A: create, B1: parent, B2: fields, B3: sibling order).
+// Spawns the document's entities in passes: A creates, B1 wires parents and sibling order, B2 applies fields.
 // File I/O, asset scanning and ClearEntireScene() stay with the caller.
 void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDocument& document,
     const AssetDatabase& assetDatabase, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
+    GTE_PROFILE_SCOPE("Scene.Load");
     Registry& registry = game.GetRegistry();
 
     const std::size_t entityCount = document.entities.size();
@@ -108,17 +128,33 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
     // childrenOf[i] = indices j with parentIndex == i, in ascending (saved-sibling) order.
     std::vector<std::vector<std::size_t>> childrenOf(entityCount);
     for (std::size_t i = 0; i < entityCount; ++i) {
-        if (document.entities[i].parentIndex.has_value()) {
-            childrenOf[*document.entities[i].parentIndex].push_back(i);
+        const std::optional<std::size_t>& parentIndex = document.entities[i].parentIndex;
+        if (parentIndex.has_value() && *parentIndex < entityCount) {
+            childrenOf[*parentIndex].push_back(i);
         }
     }
 
-    // Marks i and every saved descendant as decided, so Pass A never spawns stray unparented bare
-    // entities for the children of an unresolvable asset root.
-    std::function<void(std::size_t)> markSubtreeUnresolved = [&](std::size_t i) {
-        consumedByRecipe[i] = true;
-        for (const std::size_t childIndex : childrenOf[i]) {
-            markSubtreeUnresolved(childIndex);
+    // Marks i and every saved descendant as decided, so Pass A never spawns stray bare entities
+    // under an unresolvable asset root. Iterative; each record is walked at most once.
+    std::vector<bool> subtreeMarked(entityCount, false);
+    std::vector<std::size_t> markStack;
+    const auto markSubtreeUnresolved = [&](std::size_t root) {
+        if (subtreeMarked[root]) {
+            consumedByRecipe[root] = true;
+            return;
+        }
+        subtreeMarked[root] = true;
+        markStack.push_back(root);
+        while (!markStack.empty()) {
+            const std::size_t i = markStack.back();
+            markStack.pop_back();
+            consumedByRecipe[i] = true;
+            for (const std::size_t childIndex : childrenOf[i]) {
+                if (!subtreeMarked[childIndex]) {
+                    subtreeMarked[childIndex] = true;
+                    markStack.push_back(childIndex);
+                }
+            }
         }
     };
 
@@ -157,9 +193,7 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
             const Entity rootEntity = game.CreateMeshEntityFromGtaFile(renderer, asset->gtaPath, sceneServicesSetLayout);
             resultEntities[i] = rootEntity;
             consumedByRecipe[i] = true;
-            // alreadyParentedByRecipe[i] is DELIBERATELY NOT set here - see
-            // Pass B1 below for why the root record itself must still be
-            // free to run through the normal SetParent() step.
+            // The root record itself is not marked as parented: it still gets its saved parent in Pass B1.
 
             // Reconciliation: match this record's saved children to the live children just created,
             // by Name, first-unused-match, in ascending sibling order (deterministic pairing).
@@ -197,39 +231,39 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
                 resultEntities[j] = match; // kInvalidEntity if no unused live child of that exact name (possibly "") is left.
                 consumedByRecipe[j] = true; // Either way - a saved child of an asset root is NEVER independently re-created as a bare entity.
                 if (match != kInvalidEntity) {
-                    alreadyParentedByRecipe[j] = true; // ONLY on an actual match - see Pass B1.
+                    alreadyParentedByRecipe[j] = true; // Only on an actual match.
                 }
             }
             continue;
         }
 
         // Plain entity (Camera, Light, empty node, orphaned child). Gets a default Transform up front
-        // so SetParent() in Pass B1 can succeed.
+        // so it can take part in the hierarchy.
         resultEntities[i] = registry.CreateEntity();
         registry.AddComponent<Transform>(resultEntities[i]);
     }
 
-    // PASS B1 (hierarchy wiring) runs before Transform values are applied: SetParent() with
-    // worldPositionStays=true would recompute and clobber the local values Pass B2 writes.
+    // PASS B1 (hierarchy): parents and sibling order in one bulk call, before Pass B2 writes field values.
+    // Matched asset-root children keep the parent the recipe gave them.
+    std::vector<HierarchyAssignment> assignments;
+    assignments.reserve(entityCount);
     for (std::size_t i = 0; i < entityCount; ++i) {
-        if (resultEntities[i] == kInvalidEntity) {
-            continue; // Skip anything left unresolved (an unmatched reconciled child, or anything markSubtreeUnresolved() touched).
-        }
-        if (alreadyParentedByRecipe[i]) {
-            // A matched asset-root child is already attached by CreateMeshEntityFromGtaFile().
-            // Not gated on consumedByRecipe: recipe roots always spawn top-level, so a saved parentIndex
-            // must still go through SetParent() below.
+        const Entity entity = resultEntities[i];
+        if (entity == kInvalidEntity) {
             continue;
         }
         const SceneEntityRecord& record = document.entities[i];
-        if (record.parentIndex.has_value()) {
-            const Entity parentEntity = resultEntities[*record.parentIndex];
-            if (parentEntity != kInvalidEntity) {
-                SetParent(registry, resultEntities[i], parentEntity, /*worldPositionStays=*/false);
+        Entity parent = kInvalidEntity;
+        if (alreadyParentedByRecipe[i]) {
+            if (const Transform* transform = registry.TryGetComponent<Transform>(entity)) {
+                parent = EffectiveParent(registry, *transform);
             }
-            // Defensive: the saved parent never resolved (already skipped by the guard above for unresolved subtrees).
+        } else if (record.parentIndex.has_value() && *record.parentIndex < entityCount) {
+            parent = resultEntities[*record.parentIndex];
         }
+        assignments.push_back(HierarchyAssignment{ entity, parent, record.siblingIndex });
     }
+    AssignHierarchy(registry, assignments);
 
     // PASS B2 (generic field application): restores exact saved values (Transform, Name, Camera, ...),
     // including on recipe-spawned entities and asset roots.
@@ -260,15 +294,6 @@ void ReconstructSceneFromDocument(Game& game, Renderer& renderer, const SceneDoc
                 }
             }
         }
-    }
-
-    // PASS B3 (sibling ordering). Re-applying a matched child's saved index is idempotent; a reparented
-    // recipe root needs its saved index like any other record.
-    for (std::size_t i = 0; i < entityCount; ++i) {
-        if (resultEntities[i] == kInvalidEntity) {
-            continue;
-        }
-        SetSiblingIndex(registry, resultEntities[i], document.entities[i].siblingIndex);
     }
 
     // Guarantee a Camera exists right after load, not only on the next Game::Render().

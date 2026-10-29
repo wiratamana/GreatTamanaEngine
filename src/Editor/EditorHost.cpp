@@ -336,6 +336,9 @@ EditorUiCommandResult RunEditorUiCommand(const EditorUiCommandRequest& request, 
     case EditorUiCommandKind::SceneCamera:
         result.sceneCamera = RunSceneCameraCommand(request.sceneCamera, layer.SceneCameraControl());
         break;
+    case EditorUiCommandKind::HierarchyState:
+        result.hierarchyState = layer.HierarchyState(game, request.hierarchyState.first, request.hierarchyState.count);
+        break;
     case EditorUiCommandKind::Exit:
         break; // The result kind is the answer; Run() ends the loop.
     }

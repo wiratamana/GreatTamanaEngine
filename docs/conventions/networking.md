@@ -350,6 +350,15 @@ module or adding a new endpoint:
     `Scene` (`false`) with ImGui DockBuilder (`SetSceneGameSplit()` in `DockLayout.cpp`). Both windows
     then have a real dock id, so the default-layout rebuild (`DefaultDockLayoutIsNeeded()`) never
     fires. Replies `409` until the dock layout is built. Both views render from the next frame on.
+  - `GET /hierarchy_state?first=<row>&count=<n>` (defaults `0` and `200`, `count` capped at `2000`) returns
+    the Hierarchy rows of the last drawn frame, answered on the main thread through the new
+    `EditorUiCommandKind::HierarchyState`:
+    `{"visible","entityCount","rowCount","collapsedCount","first","rows":[{"entity":"<index>/<generation>",
+    "parent":"<index>/<generation>"|null,"depth","siblingPosition","label","hasChildren","expanded","selected"}],
+    "buildMs","flattenMs","drawnRows"}`. `visible` is `false` while the panel is hidden; `rows` is then empty
+    and the three timings are `null` (not measured, never `0`). `buildMs` is the snapshot rebuild,
+    `flattenMs` the row flatten, `drawnRows` the rows ImGui drew. `400` for a non-numeric `first`/`count`,
+    `503` without an editor. Pinned by `NetworkRoutesInspectorTests.cpp`.
 
 - **Cluster viewer routes** (`/cluster_viewer/*`, `POST /clone_clusters`) use two more
   `EditorUiCommandKind` values, `ClusterViewer` and `SceneCamera`, and the `CloneMeshClusters` kind of
@@ -824,7 +833,9 @@ registering a new named texture:
   `<key> must be <allowed values>`; any other key answers `unknown key`. The only action is `reset_defaults`; any other
   action answers `unknown action; supported: reset_defaults`. Its state is prefixed `game.` and `scene.` per view
   (`testedClusters`, `visibleClusters` and `visibleValid` (needs `collectStats`), `testedAtVisibleFrame`, `hidden`,
-  `hiddenValid`, `cameraValid`, `claimedEntities`, `occlusion`, `hizReason` (`None`, `Unavailable` or `TooLarge`),
+  `hiddenValid`, `cameraValid`, `claimedEntities` (drawn plus skipped instances), `occlusion`, `hizReason` (`None`,
+  `Unavailable`, `TooLarge` or `NothingInView`), `skippedParts` and `skippedInstances` (parts outside the cull frustum:
+  no pass, entities still claimed; a view whose parts are all skipped reports `visibleClusters` 0 with `visibleValid` true),
   `sharedSurvivors` (the secondary view drew the primary view's survivors), `inertReason`, `ledgerBytes`, ...) plus the CPU draw cull
   of the view: `cpuTested`,
   `cpuCulled`, `cpuUnbounded` (one frame old), `cpuCullState` (`active`, `off`, `suppressed: frame capture` or

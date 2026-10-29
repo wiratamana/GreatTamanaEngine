@@ -10,6 +10,7 @@
 #include "../../Encoding/Utf8Path.h"
 #include "../../Profiling/ScopeTimer.h"
 #include "../../Renderer/MeshVertex.h"
+#include "../../Renderer/Culling/ClusterCullMath.h"
 #include "../../Renderer/Culling/CullingTypes.h"
 #include "../../Renderer/Renderer.h"
 #include "MeshPartBounds.h"
@@ -92,7 +93,7 @@ void AttachClusterTable(Mesh& gpuMesh, Renderer& renderer, const std::string& pa
     try {
         gpuMesh.SetClusterTable(rg::GpuBuffer::CreateWithData(renderer.Device(), table->data(),
                                     table->size() * sizeof(MeshCluster), "MeshClusterTable", rg::GpuBufferUse::Storage),
-            static_cast<std::uint32_t>(table->size()));
+            static_cast<std::uint32_t>(table->size()), ClusterTableBounds(*table));
     } catch (const std::exception& error) {
         GTE_LOG_WARNING(kLogCategory,
             path + ": cluster table upload failed (" + error.what() + "); the mesh draws on the CPU path.");

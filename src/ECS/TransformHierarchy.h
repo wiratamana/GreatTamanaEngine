@@ -3,7 +3,9 @@
 #include "Entity.h"
 #include "Math/Mat4.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace gte {
@@ -11,127 +13,58 @@ namespace gte {
 class Registry;
 struct Transform;
 
-// Free functions implementing Transform (Components/Transform.h)'s
-// parent/child hierarchy - deliberately NOT methods on Transform itself
-// (a component must stay plain data with no Registry dependency of its own -
-// see AGENTS.md, "Entity-Component-System"), the same "only code that
-// already depends on both the ECS world and something else may bridge them"
-// boundary RenderSystem already follows for Renderer. Every function here
-// only ever needs a Registry - no Renderer, no live GPU device - so this
-// whole module is genuinely Tier-1-testable (see
-// tests/ECS/TransformHierarchyTests.cpp).
-//
-// Unity-equivalent surface: Transform.parent (get/set via SetParent()),
-// Transform.GetWorldToLocalMatrix()-adjacent LocalToWorldMatrix()
-// (ComputeWorldMatrix() here), and Transform.GetSiblingIndex()/
-// SetSiblingIndex()/GetChild()/childCount (GetChildren()/SetSiblingIndex()
-// here).
+// Hierarchy operations on Transform::parent / Transform::siblingIndex. Registry-only, no GPU.
 
-// Recursively composes parentWorld * localTransform all the way up to a
-// root (an entity with Transform::parent == kInvalidEntity, or whose parent
-// entity is no longer alive/has no Transform of its own) - the actual
-// Unity-"Transform.localToWorldMatrix" equivalent now that parenting
-// exists (Transform::LocalToWorldMatrix() itself only ever composes ONE
-// entity's own local T/R/S - see that method's own doc comment). An entity
-// with no Transform at all resolves to Mat4::Identity(), matching
-// RenderSystem::CollectRenderables()'s pre-existing "no Transform ->
-// Identity" fallback. Depth-capped defensively against a malformed parent
-// chain that somehow loops back on itself (should never happen if every
-// reparent goes through SetParent() below, which itself rejects cycles) -
-// falls back to treating the offending entity as a root rather than hanging
-// forever.
+// World matrix: local matrices composed up the parent chain. Identity without a Transform.
+// Depth-capped so a malformed (cyclic) chain cannot hang.
 Mat4 ComputeWorldMatrix(Registry& registry, Entity entity);
 
-// The world-space equivalent of `entity`'s Transform - same
-// position/rotation/scale fields, but fully resolved through its whole
-// parent chain via ComputeWorldMatrix() above (decomposed back into
-// position/rotation/scale as ComputeWorldMatrix()'s own inverse operation -
-// same column-based decomposition TransformGizmo.cpp already uses). Returns
-// a default (identity) Transform for an entity with no Transform component
-// at all - matching Camera::ViewMatrix()'s pre-existing "no Transform ->
-// identity" fallback (see RenderSystem::ResolveActiveCameraViewProjection()).
-// The returned Transform's own `parent`/`siblingIndex` fields are always
-// left at their defaults (kInvalidEntity/0) - this is a plain
-// position/rotation/scale snapshot, not a real hierarchy node.
+// World-space position/rotation/scale of `entity`. Identity Transform without a Transform component.
+// The returned parent/siblingIndex are left at their defaults.
 Transform ComputeWorldTransform(Registry& registry, Entity entity);
 
-// True if walking UP `entity`'s own parent chain (Transform::parent, then
-// ITS parent, ...) ever reaches `potentialAncestor` - i.e. `entity` is a
-// (possibly indirect) child of `potentialAncestor`. Used by SetParent()
-// below to reject a reparent that would create a cycle (attaching an entity
-// as a child of one of its own descendants) before it happens. Depth-capped
-// the same way ComputeWorldMatrix() is, for the same defensive reason.
+// True if `potentialAncestor` lies on the parent chain above `entity`. Depth-capped.
 bool IsDescendantOf(Registry& registry, Entity entity, Entity potentialAncestor);
 
-// Every entity whose Transform::parent == `parent` (pass kInvalidEntity for
-// the top-level/root entity list - see Panels/HierarchyPanel.cpp), sorted by
-// Transform::siblingIndex (ties broken by ComponentStorage<Transform>'s own
-// dense-iteration order, i.e. creation order until a Remove() reshuffles it -
-// see ComponentStorage.h). An entity whose OWN parent field points at an
-// entity that is no longer alive (e.g. that parent was destroyed without
-// ever explicitly detaching its children first) is treated as if
-// parent == kInvalidEntity instead - i.e. it "falls back to the root list" -
-// exactly the same defensive fallback ComputeWorldMatrix() already applies,
-// so a dangling parent reference never makes an entity silently vanish from
-// "Hierarchy" entirely.
+// The parent that counts: `transform.parent` when that entity is alive and has a Transform,
+// otherwise kInvalidEntity (the entity is a root).
+Entity EffectiveParent(const Registry& registry, const Transform& transform) noexcept;
+
+// Total order of siblings: siblingIndex, then entity index, then entity generation.
+bool SiblingLess(std::uint32_t siblingA, Entity a, std::uint32_t siblingB, Entity b) noexcept;
+
+// Children of `parent` in SiblingLess order. kInvalidEntity lists the roots.
+// O(N) per call: never call it in a loop over many entities (use HierarchySnapshot).
 std::vector<Entity> GetChildren(Registry& registry, Entity parent);
 
-// Reparents `child` under `newParent` (kInvalidEntity to detach it to the
-// scene root), appending it as the new LAST sibling under that parent (see
-// MoveToLastSibling() below) - the attach/detach half of "Hierarchy" drag-
-// and-drop (see Panels/HierarchyPanel.cpp). Fails outright (returns false,
-// leaving `child` completely untouched) when: child == newParent, `child`
-// has no Transform component, `newParent` is non-invalid but has no
-// Transform component, or `newParent` is `child` itself or one of `child`'s
-// own descendants (IsDescendantOf() above) - reparenting onto your own
-// descendant would create a cycle ComputeWorldMatrix() could never
-// terminate correctly otherwise.
-//
-// When `worldPositionStays` is true (the default - matches Unity's own
-// Transform.SetParent(Transform, bool) default), `child`'s local
-// position/rotation/scale are recomputed so its WORLD transform is
-// unchanged by the reparent - i.e. dragging an entity under a new parent in
-// "Hierarchy" doesn't visually move it in "Scene"/"Game". Pass false to
-// keep the local transform fields exactly as authored instead - the entity
-// then jumps to wherever that local transform happens to resolve to under
-// its new parent (Unity's Transform.SetParent(Transform) one-argument
-// overload's behavior, minus the world-position-preserving step).
+// Appends `child` as the last child of `newParent` (kInvalidEntity = root).
+// Fails (false, child untouched) when child has no Transform, newParent has none, or the move makes a cycle.
+// worldPositionStays recomputes the local transform so the world transform is unchanged.
 bool SetParent(Registry& registry, Entity child, Entity newParent, bool worldPositionStays = true);
 
-// Moves `entity` to sibling index `desiredIndex` (0 = first) among the
-// OTHER entities that currently share its own Transform::parent - the
-// reorder half of "Hierarchy" drag-and-drop. Every entity in that sibling
-// group (including `entity` itself) has its own siblingIndex renumbered
-// densely (0..N-1) in the process - `desiredIndex` is clamped to
-// [0, siblingCount] first, so passing an out-of-range value is equivalent
-// to moving `entity` to the end. `entity`'s own Transform::parent is never
-// touched by this function - see SetParent() above to also change parent.
-// No-op (returns false) if `entity` has no Transform component.
+// Moves `entity` to position `desiredIndex` among its other siblings (clamped) and renumbers the group 0..N-1.
+// The parent is not changed. False if `entity` has no Transform.
 bool SetSiblingIndex(Registry& registry, Entity entity, std::uint32_t desiredIndex);
 
-// Appends `entity` as the last sibling under its CURRENT Transform::parent -
-// convenience used internally by SetParent() (a freshly-reparented entity
-// always lands at the end of its new parent's child list, exactly like a
-// freshly-instantiated Unity GameObject does), and equally useful standalone
-// (e.g. "move to bottom" without changing parent). No-op if `entity` has no
-// Transform component.
+// Makes `entity` the last sibling under its effective parent. No-op without a Transform.
 void MoveToLastSibling(Registry& registry, Entity entity);
 
-// Destroys `entity` AND every descendant of it (recursively, via
-// GetChildren() above), post-order (children destroyed before their own
-// parent) so a destroyed entity's own children are never left querying a
-// GetChildren() call against an already-dead parent mid-walk. Safe to call
-// on an already-dead/invalid entity (a no-op, matching
-// Registry::DestroyEntity()'s own safety guarantee). Each individual
-// destroy goes through Registry::DestroyEntity() (removing the entity from
-// every component pool it ever touched - see Registry.h), so no component
-// type this entity or its descendants carry needs to be known here.
-//
-// Needed by task_manager/scene-serialization-1's
-// Scene/SceneBuilder.h::ClearSerializableSceneObjects() (replacing a scene's
-// content before a Load) - also independently useful for a future
-// per-entity Hierarchy "Delete" command (see TODO.md, "Per-entity Hierarchy
-// context menu").
+// Destroys `entity` and all its descendants, children before parents. No-op on a dead entity.
 void DestroyEntityAndDescendants(Registry& registry, Entity entity);
+
+// Destroys every root and all descendants in one O(N) pass. Dead roots and overlapping roots are fine.
+void DestroyEntitiesAndDescendants(Registry& registry, std::span<const Entity> roots);
+
+struct HierarchyAssignment {
+    Entity child;
+    Entity parent;                  // kInvalidEntity = root
+    std::uint32_t siblingIndex = 0; // saved order key inside the new parent
+};
+
+// Applies many parent links at once without keeping world positions.
+// A child without a Transform is skipped; a parent that is dead, has no Transform or would close a cycle
+// leaves the child a root. The assigned children of each parent are renumbered 0..k-1 by
+// (siblingIndex, input order); a repeated child keeps its last assignment. O(N log N), no recursion.
+void AssignHierarchy(Registry& registry, std::span<const HierarchyAssignment> assignments);
 
 } // namespace gte

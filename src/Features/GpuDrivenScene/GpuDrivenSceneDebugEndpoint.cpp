@@ -47,6 +47,8 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDriv
     Add(out, key("lastRefusalReason"), g.refusal);
     Add(out, key("claimedEntities"), Count(g.claimedEntities));
     Add(out, key("parts"), Count(g.parts));
+    Add(out, key("skippedParts"), Count(g.skippedParts));
+    Add(out, key("skippedInstances"), Count(g.skippedInstances));
     Add(out, key("testedClusters"), Count(g.testedClusters));
     Add(out, key("testedAtVisibleFrame"), Count(g.testedAtVisibleFrame));
     Add(out, key("visibleClusters"), Count(g.visibleClusters));

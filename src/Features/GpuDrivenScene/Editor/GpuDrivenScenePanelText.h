@@ -18,6 +18,9 @@ std::string_view CullModeLine(GpuCullMode mode) noexcept;
 // "GPU path: N entities, M clusters tested, V visible", or why V is missing.
 std::string GpuPathLine(const GpuDrivenSceneViewSnapshot& v);
 
+// "Parts skipped (outside view): N"; empty when no part was skipped.
+std::string SkippedPartsLine(const GpuDrivenSceneViewSnapshot& v);
+
 // "CPU path: T tested, C culled, U kept without bounds (last frame)".
 std::string CpuPathLine(const GpuDrivenSceneViewSnapshot& v);
 

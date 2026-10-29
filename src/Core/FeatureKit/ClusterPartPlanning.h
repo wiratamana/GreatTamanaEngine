@@ -6,8 +6,10 @@
 #include "ClusterDrawTypes.h"
 #include "../ClusterClaim.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -42,6 +44,25 @@ struct ClusterSlotAssignment {
 
 // Slots go to the parts with the most work items first. Ties are broken by mesh token, then material token.
 ClusterSlotAssignment AssignClusterPartSlots(std::span<const ClusterPartSize> parts, std::uint32_t slotCount);
+
+// World box that holds every instance of one part. `bounded` is false for no instances, an index out of range, or
+// a non-finite or inverted instance box (an instance without mesh bounds).
+struct ClusterPartBox {
+    AABB box;
+    bool bounded = false;
+};
+ClusterPartBox UnionInstanceBoxes(std::span<const AABB> instanceBoxes, std::span<const std::uint32_t> indices) noexcept;
+
+// Share of the largest extent added to a part box before the frustum test, so rounding never drops a visible part.
+inline constexpr float kClusterPartSkipPadding = 0.01f;
+
+// True when the cull uses the frustum, planes exist, the part is bounded and its padded box lies outside the frustum.
+bool ShouldSkipClusterPart(const std::optional<std::array<Plane, 6>>& planes, ClusterCullFlags flags,
+    const ClusterPartBox& part) noexcept;
+
+// One entry per group: 1 when ShouldSkipClusterPart holds for the union of that group's instance boxes.
+std::vector<std::uint8_t> PlanClusterPartSkips(const std::optional<std::array<Plane, 6>>& planes,
+    ClusterCullFlags flags, std::span<const AABB> instanceBoxes, std::span<const ClusterMeshGroup> groups);
 
 // Last step of a part's chain that was declared. Round 1 is Reset1..Draw1, round 2 is Reset2..Draw2.
 // A single-phase chain only has round 1.
@@ -179,18 +200,21 @@ struct ClusterRecordOutcome {
     std::vector<Entity> claimed;                // Entities of the parts whose chain was fully declared.
 };
 
-// Builds the claim from what was really declared. `parts` holds the entities of each part.
+// Builds the claim from what was really declared. `parts` holds the entities of each part; `skippedEntities` are the
+// entities of parts outside the view, claimed under the same context rules.
 inline ClusterRecordOutcome ClusterOutcomeOf(std::span<const std::span<const Entity>> parts,
-    const ClusterClaimContext& context, std::span<const ClusterStep> steps, bool twoPhase)
+    const ClusterClaimContext& context, std::span<const ClusterStep> steps, bool twoPhase,
+    std::span<const Entity> skippedEntities = {})
 {
     ClusterRecordOutcome outcome;
     outcome.progress.assign(parts.size(), ClusterChainProgress::None);
     std::vector<ClusterPartClaim> claims;
-    claims.reserve(parts.size());
+    claims.reserve(parts.size() + 1);
     for (std::size_t i = 0; i < parts.size(); ++i) {
         outcome.progress[i] = i < steps.size() ? ClusterProgressOf(steps[i], twoPhase) : ClusterChainProgress::None;
         claims.push_back(ClusterPartClaim{ parts[i], outcome.progress[i] });
     }
+    claims.push_back(ClusterPartClaim{ skippedEntities, ClusterChainProgress::Culled });
     outcome.claimed = ClaimedEntitiesOf(claims, context);
     return outcome;
 }

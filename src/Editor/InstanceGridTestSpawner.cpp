@@ -134,7 +134,7 @@ bool InstanceGridResources::Build(
         mesh.SetLocalBounds(ComputeLocalAABB(data.positions));
         mesh.SetClusterTable(rg::GpuBuffer::CreateWithData(renderer.Device(), table->data(),
                                  table->size() * sizeof(MeshCluster), "MeshClusterTable", rg::GpuBufferUse::Storage),
-            static_cast<std::uint32_t>(table->size()));
+            static_cast<std::uint32_t>(table->size()), ClusterTableBounds(*table));
 
         Pipeline pipeline = renderer.CreatePipeline("shaders/Mesh.vert.spv", "shaders/Mesh.frag.spv",
             VertexLayout::PositionNormal, /*useMaterialTexture=*/false,

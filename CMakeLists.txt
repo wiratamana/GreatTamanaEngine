@@ -596,6 +596,8 @@ add_library(gte_core STATIC
     src/ECS/Registry.cpp
     src/ECS/TransformHierarchy.h
     src/ECS/TransformHierarchy.cpp
+    src/ECS/HierarchySnapshot.h
+    src/ECS/HierarchySnapshot.cpp
     src/ECS/EntityQuery.h
     src/ECS/EntityQuery.cpp
     src/ECS/Components/Transform.h
@@ -1473,6 +1475,8 @@ add_library(gte_editor STATIC
     src/Editor/RenderGraphTexturePreview.cpp
     src/Editor/Panels/HierarchyPanel.h
     src/Editor/Panels/HierarchyPanel.cpp
+    src/Editor/Panels/HierarchyRows.h
+    src/Editor/Panels/HierarchyRows.cpp
     src/Editor/Panels/InspectorPanel.h
     src/Editor/Panels/InspectorPanel.cpp
     src/Editor/Panels/ScenePanel.h

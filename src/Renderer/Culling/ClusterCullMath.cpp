@@ -246,6 +246,29 @@ std::uint32_t ClusterInstanceFlagsFor(const Mat4& world, float* maxScaleOut) noe
     return flags;
 }
 
+std::optional<AABB> ClusterTableBounds(std::span<const MeshCluster> clusters) noexcept
+{
+    if (clusters.empty()) {
+        return std::nullopt;
+    }
+    AABB box{ Vec3(clusters[0].aabbMin[0], clusters[0].aabbMin[1], clusters[0].aabbMin[2]),
+        Vec3(clusters[0].aabbMax[0], clusters[0].aabbMax[1], clusters[0].aabbMax[2]) };
+    for (const MeshCluster& cluster : clusters) {
+        for (int axis = 0; axis < 3; ++axis) {
+            const float lo = cluster.aabbMin[axis];
+            const float hi = cluster.aabbMax[axis];
+            if (!std::isfinite(lo) || !std::isfinite(hi) || lo > hi) {
+                return std::nullopt;
+            }
+            float& boxMin = axis == 0 ? box.min.x : (axis == 1 ? box.min.y : box.min.z);
+            float& boxMax = axis == 0 ? box.max.x : (axis == 1 ? box.max.y : box.max.z);
+            boxMin = std::min(boxMin, lo);
+            boxMax = std::max(boxMax, hi);
+        }
+    }
+    return box;
+}
+
 bool ClusterFrustumCulled(const MeshCluster& cluster, const Mat4& world, const std::array<Plane, 6>& planes) noexcept
 {
     AABB local;

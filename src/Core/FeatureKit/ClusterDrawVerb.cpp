@@ -4,6 +4,7 @@
 #include "ComputeChain.h"
 #include "VerbSupport.h"
 #include "../Core.h"
+#include "../../Profiling/ScopeTimer.h"
 #include "../ClusterClaim.h"
 #include "../../Renderer/Mesh.h"
 #include "../../Renderer/Renderer.h"
@@ -121,6 +122,9 @@ struct ClusterDrawChain::Impl {
     ClusterPlan plan;
     std::vector<PlannedPart> parts;
     std::uint32_t noSlotInstances = 0; // Instances of parts that found no slot.
+    std::uint32_t skippedParts = 0;    // Parts outside the cull frustum: no pass, no slot.
+    std::uint32_t skippedInstances = 0;
+    std::vector<Entity> skippedEntities; // Entities of the skipped parts, claimed without a pass.
     rg::ClusterDrawBindings* bindings = nullptr;
     ClusterClaimContext claimContext;
 
@@ -368,6 +372,38 @@ void PlanChain(ClusterDrawChain::Impl& s)
         eligible.push_back(std::move(group));
     }
 
+    // Parts wholly outside the cull frustum get no pass and no slot; their entities are still claimed. The decision
+    // uses only the cull camera and the shared candidates, so every view reaches the same one.
+    {
+        GTE_PROFILE_SCOPE("ClusterPart.Skip");
+        const bool sharedCandidates = s.instances.data() == frame.ClusterCandidates().data();
+        const std::vector<std::uint8_t> skips = PlanClusterPartSkips(
+            TryExtractFrustumPlanes(cullCamera.viewProjection), flags,
+            sharedCandidates ? frame.ClusterCandidateBounds() : std::span<const AABB>{}, eligible);
+        std::size_t kept = 0;
+        for (std::size_t i = 0; i < eligible.size(); ++i) {
+            if (skips[i] != 0) {
+                ++s.skippedParts;
+                s.skippedInstances += static_cast<std::uint32_t>(eligible[i].instances.size());
+                for (const std::uint32_t candidate : eligible[i].instances) {
+                    s.skippedEntities.push_back(s.instances[candidate].entity);
+                }
+                continue;
+            }
+            if (kept != i) {
+                eligible[kept] = std::move(eligible[i]);
+                pipelines[kept] = pipelines[i];
+                sizes[kept] = sizes[i];
+                clusterCounts[kept] = clusterCounts[i];
+            }
+            ++kept;
+        }
+        eligible.resize(kept);
+        pipelines.resize(kept);
+        sizes.resize(kept);
+        clusterCounts.resize(kept);
+    }
+
     const ClusterSlotAssignment assignment = AssignClusterPartSlots(sizes, state.Shape().partSlots);
     for (const std::uint32_t index : assignment.dropped) {
         s.noSlotInstances += static_cast<std::uint32_t>(eligible[index].instances.size());
@@ -454,7 +490,7 @@ void PlanChain(ClusterDrawChain::Impl& s)
             cullCamera.orthographic, static_cast<std::uint32_t>(instanceCount), part.clusterCount, flags);
         s.parts.push_back(std::move(part));
     }
-    if (s.parts.empty()) {
+    if (s.parts.empty() && s.skippedParts == 0) {
         if (toggledOffParts > 0) {
             s.plan.inertReason = ClusterInertReason::ToggledOff;
         }
@@ -467,6 +503,9 @@ void PlanChain(ClusterDrawChain::Impl& s)
         if (s.plan.exclusion.handle == nullptr) {
             frame.ReportOnce(std::string("Pass '") + anchorName.value + "': no exclusion set is left this frame");
             s.parts.clear();
+            s.skippedEntities.clear();
+            s.skippedParts = 0;
+            s.skippedInstances = 0;
             return;
         }
     }
@@ -783,10 +822,24 @@ void PublishSurvivors(
     }
 }
 
+// Hands the claimed entities to the CPU scene draw (or to the depth-only exclusion set).
+void ApplyClaim(const ClusterDrawChain::Impl& s, std::span<const Entity> claimed)
+{
+    if (claimed.empty()) {
+        return;
+    }
+    GTE_PROFILE_SCOPE("ClusterPart.Claim");
+    Core& core = *s.frame->Context()->core;
+    if (s.depthOnly) {
+        core.FillExclusion(s.plan.exclusion, claimed);
+    } else {
+        core.ClaimEntities(s.claimContext.scope, claimed);
+    }
+}
+
 void RecordChain(ClusterDrawChain::Impl& s)
 {
     Frame& frame = *s.frame;
-    Core& core = *frame.Context()->core;
     ChainDeclarer declarer(s);
     const bool twoRounds = s.TwoRounds();
     const std::vector<ClusterStep> steps = s.shared ? RecordSharedRounds(declarer, s.parts.size(), twoRounds)
@@ -812,16 +865,11 @@ void RecordChain(ClusterDrawChain::Impl& s)
             RecordClusterStats(declarer);
         }
     }
-    const ClusterRecordOutcome outcome = ClusterOutcomeOf(partEntities, s.claimContext, steps, twoRounds);
+    const ClusterRecordOutcome outcome =
+        ClusterOutcomeOf(partEntities, s.claimContext, steps, twoRounds, s.skippedEntities);
 
     // The takeover is the last step, after every pass of a part was declared.
-    if (!outcome.claimed.empty()) {
-        if (s.depthOnly) {
-            core.FillExclusion(s.plan.exclusion, outcome.claimed);
-        } else {
-            core.ClaimEntities(s.claimContext.scope, outcome.claimed);
-        }
-    }
+    ApplyClaim(s, outcome.claimed);
     for (std::size_t i = 0; i < s.parts.size(); ++i) {
         if (outcome.progress[i] == ClusterChainProgress::Draw) {
             s.result.declared = true;
@@ -833,6 +881,13 @@ void RecordChain(ClusterDrawChain::Impl& s)
     PublishSurvivors(s, declarer, outcome.progress);
 }
 
+// A chain whose parts are all outside the view declares nothing; their entities are still taken over.
+void ClaimSkippedOnly(ClusterDrawChain::Impl& s)
+{
+    const ClusterRecordOutcome outcome = ClusterOutcomeOf({}, s.claimContext, {}, false, s.skippedEntities);
+    ApplyClaim(s, outcome.claimed);
+}
+
 } // namespace
 
 ClusterPlan ClusterDrawChain::Plan()
@@ -842,19 +897,22 @@ ClusterPlan ClusterDrawChain::Plan()
         return s.plan;
     }
     s.planned = true;
+    const auto reset = [&s] {
+        s.parts.clear();
+        s.skippedEntities.clear();
+        s.skippedParts = 0;
+        s.skippedInstances = 0;
+        s.plan = ClusterPlan{};
+        s.twoPhase = false;
+        s.shared = false;
+    };
     try {
         PlanChain(s);
     } catch (const std::exception& e) {
-        s.parts.clear();
-        s.plan = ClusterPlan{};
-        s.twoPhase = false;
-        s.shared = false;
+        reset();
         s.frame->ReportOnce(std::string("ClusterDraw() could not plan: ") + e.what());
     } catch (...) {
-        s.parts.clear();
-        s.plan = ClusterPlan{};
-        s.twoPhase = false;
-        s.shared = false;
+        reset();
         s.frame->ReportOnce("ClusterDraw() could not plan: unknown error");
     }
     return s.plan;
@@ -869,9 +927,13 @@ ClusterStats ClusterDrawChain::Record()
     s.recorded = true;
     Plan();
 
-    if (s.plan.ready && !s.parts.empty()) {
+    if (s.plan.ready) {
         try {
-            RecordChain(s);
+            if (!s.parts.empty()) {
+                RecordChain(s);
+            } else {
+                ClaimSkippedOnly(s);
+            }
         } catch (const std::exception& e) {
             s.result = ClusterStats{};
             s.frame->ReportOnce(std::string("ClusterDraw() could not record: ") + e.what());
@@ -880,15 +942,22 @@ ClusterStats ClusterDrawChain::Record()
             s.frame->ReportOnce("ClusterDraw() could not record: unknown error");
         }
     }
+    const bool nothingInView = s.plan.ready && s.parts.empty() && s.skippedParts > 0;
     s.result.inertReason = s.plan.inertReason;
     s.result.hizReason = s.wantsTwoPhase && !s.depthOnly ? s.hizReason : HizReason::None;
+    if (nothingInView && s.twoPhase) {
+        s.result.hizReason = HizReason::NothingInView;
+    }
     s.result.occlusionApplied = s.result.declared && s.twoPhase;
     s.result.sharedSurvivors = s.result.declared && s.shared;
     s.result.sharedOcclusion = s.result.sharedSurvivors && s.sharedLanes == 2;
     s.result.noSlotInstances = s.noSlotInstances;
+    s.result.skippedParts = s.skippedParts;
+    s.result.skippedInstances = s.skippedInstances;
 
     // A shared chain holds no buffers of its own, so it lets its scope's old ones go idle.
-    s.state->TickIdle(*s.frame, s.result.declared && !s.shared);
+    // A chain that skipped parts is still in use: its buffers stay for when the parts come back into view.
+    s.state->TickIdle(*s.frame, (s.result.declared && !s.shared) || s.skippedParts > 0);
     return s.result;
 }
 

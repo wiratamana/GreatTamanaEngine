@@ -124,7 +124,7 @@ constexpr std::string_view ClusterInertReasonName(ClusterInertReason reason) noe
 }
 
 struct ClusterPlan {
-    bool ready = false; // Record() is expected to declare the whole chain.
+    bool ready = false; // Record() declares the chain and claims its entities; no pass when every part is outside the view.
     EntityExclusion exclusion;
     std::uint32_t parts = 0;
     ClusterInertReason inertReason = ClusterInertReason::None;
@@ -140,6 +140,8 @@ struct ClusterStats {
     std::uint32_t parts = 0;
     std::uint64_t workItems = 0; // Sum over declared parts of instances * clusters: what the cull tested.
     std::uint32_t noSlotInstances = 0; // Instances of parts that found no part slot and stay on the CPU draw.
+    std::uint32_t skippedParts = 0;     // Parts outside the cull frustum: no pass, entities still claimed.
+    std::uint32_t skippedInstances = 0; // Instances of those parts.
     ClusterInertReason inertReason = ClusterInertReason::None;
 };
 

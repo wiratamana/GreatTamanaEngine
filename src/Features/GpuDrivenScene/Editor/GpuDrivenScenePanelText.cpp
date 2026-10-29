@@ -12,6 +12,7 @@ std::string_view HizReasonText(HizReason reason) noexcept
     case HizReason::None: return "not ready";
     case HizReason::Unavailable: return "not available";
     case HizReason::TooLarge: return "view is too large";
+    case HizReason::NothingInView: return "nothing in view";
     }
     return "not ready";
 }
@@ -39,6 +40,14 @@ std::string GpuPathLine(const GpuDrivenSceneViewSnapshot& v)
         line += g.statsCollected ? "visible count not ready" : "stats are off";
     }
     return line;
+}
+
+std::string SkippedPartsLine(const GpuDrivenSceneViewSnapshot& v)
+{
+    if (v.gpu.skippedParts == 0) {
+        return {};
+    }
+    return "Parts skipped (outside view): " + std::to_string(v.gpu.skippedParts);
 }
 
 std::string CpuPathLine(const GpuDrivenSceneViewSnapshot& v)
@@ -76,6 +85,9 @@ std::string HizLine(const GpuDrivenSceneViewSnapshot& v, bool secondary)
     case OcclusionState::NotRequested: return "Hi-Z: off";
     case OcclusionState::NoCullCamera: return "Hi-Z: no cull camera";
     case OcclusionState::Unusable: break;
+    }
+    if (v.gpu.hizReason == HizReason::NothingInView) {
+        return "Hi-Z: nothing in view";
     }
     if (secondary && v.gpu.hizReason == HizReason::Unavailable) {
         return "Hi-Z: primary view only (acts as Frustum)";

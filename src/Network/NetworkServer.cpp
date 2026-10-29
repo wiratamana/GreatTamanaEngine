@@ -1021,6 +1021,32 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(BuildInspectorStateResponseJson(view), "application/json");
     });
 
+    // GET /hierarchy_state?first=&count=: the Hierarchy rows of the last drawn frame.
+    server.Get("/hierarchy_state", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedHierarchyStateQuery parsed =
+            ParseHierarchyStateQuery(req.get_param_value("first"), req.get_param_value("count"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        EditorUiCommandRequest request;
+        request.kind = EditorUiCommandKind::HierarchyState;
+        request.hierarchyState.first = parsed.first;
+        request.hierarchyState.count = parsed.count;
+        const std::optional<EditorUiCommandResult> result = SubmitEditorUiCommand(uiCommandBridge, request, res);
+        if (!result.has_value()) {
+            return;
+        }
+        if (!result->hierarchyState.editorAvailable) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("the Editor module is not compiled in"), "application/json");
+            return;
+        }
+        res.status = 200;
+        res.set_content(BuildHierarchyStateResponseJson(result->hierarchyState), "application/json");
+    });
+
     // POST /inspector/build_clusters: presses "Build Clusters" for the Inspector's selected asset.
     // The report shows up in /inspector_state once EditorHost has polled the finished build.
     server.Post("/inspector/build_clusters", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {

@@ -13,6 +13,7 @@
 #include "../Core/FeatureKit/FeatureDebug.h"
 #include "../Core/Logging.h"
 #include "../Core/InstanceGridLimits.h"
+#include "../Editor/HierarchyStateReport.h" // Report struct of the GET /hierarchy_state route.
 #include "../Editor/SceneCameraControl.h" // Report structs of the viewer and Scene camera routes.
 #include "../Renderer/RenderGraph/RenderGraphMetadata.h" // Type of the GET /render_graph body.
 
@@ -1059,6 +1060,26 @@ ParsedSplitViewsQuery ParseSplitViewsQuery(const std::string& enabledParam);
 
 // Success shape: {"success":true,"split":<bool>}
 std::string BuildSplitViewsResponseJson(bool split);
+
+// Rows a single GET /hierarchy_state answer may carry.
+inline constexpr std::uint32_t kMaxHierarchyStateRows = 2000;
+inline constexpr std::uint32_t kDefaultHierarchyStateRows = 200;
+
+// Parsed GET /hierarchy_state query: optional "first" (default 0) and "count" (default 200, capped at 2000).
+// Both must be non-negative integers when present.
+struct ParsedHierarchyStateQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::uint64_t first = 0;
+    std::uint32_t count = kDefaultHierarchyStateRows;
+};
+ParsedHierarchyStateQuery ParseHierarchyStateQuery(const std::string& firstParam, const std::string& countParam);
+
+// {"visible","entityCount","rowCount","collapsedCount","first","rows":[{"entity":"<index>/<generation>",
+//  "parent":"<index>/<generation>"|null,"depth","siblingPosition","label","hasChildren","expanded","selected"}],
+//  "buildMs","flattenMs","drawnRows"}
+// The three timings are null while the panel is hidden (not measured).
+std::string BuildHierarchyStateResponseJson(const HierarchyStateReport& report);
 
 // GET /render_graph/set_pass_enabled, /passes, /set_feature_enabled,
 // /set_feature_priority query parsing and response building.

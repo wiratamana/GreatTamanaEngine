@@ -151,6 +151,10 @@ public:
     // shared frame, or when the device cannot run the cluster path. Valid for this frame only.
     std::span<const ClusterInstance> ClusterCandidates() const noexcept;
 
+    // World box of each candidate, aligned with ClusterCandidates(). Built once per frame on the first call. A candidate
+    // without mesh cluster bounds or with a non-finite matrix gets an inverted box that no frustum test rejects.
+    std::span<const AABB> ClusterCandidateBounds() const;
+
     // Renderables of this frame that stayed on the CPU draw, by reason. Zeros when ClusterCandidates() is empty
     // for lack of an engine context, a shared frame or device support.
     ClusterRejectCounts ClusterRejections() const noexcept;

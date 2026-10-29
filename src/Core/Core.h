@@ -235,6 +235,10 @@ public:
     // Instances of cluster-ready meshes this frame, rebuilt by BuildFrame(). Valid until the next BuildFrame().
     std::span<const fx::ClusterInstance> ClusterCandidates() const noexcept { return m_clusterCandidates; }
 
+    // World box of each candidate, built once per frame on the first call. Inverted (never rejected) when the mesh has
+    // no cluster bounds or the matrix is non-finite. Kit verbs only.
+    std::span<const AABB> ClusterCandidateBounds();
+
     // Renderables of this frame that stayed on the CPU draw, by reason. Rebuilt with the candidates.
     const fx::ClusterRejectCounts& ClusterRejections() const noexcept { return m_clusterRejections; }
 
@@ -352,6 +356,8 @@ private:
     // Cluster-ready instances and entity exclusion sets of this frame. Both are cleared at the start of
     // BuildFrame(); a deque keeps every reserved set at a stable address. The epoch grows with each clear.
     std::vector<fx::ClusterInstance> m_clusterCandidates;
+    std::vector<AABB> m_clusterCandidateBounds; // Built lazily, aligned with m_clusterCandidates.
+    bool m_clusterBoundsBuilt = false;
     fx::ClusterRejectCounts m_clusterRejections;
     std::deque<std::unordered_set<Entity>> m_exclusionSets;
     std::uint64_t m_exclusionEpoch = 0;

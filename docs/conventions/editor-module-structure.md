@@ -74,6 +74,11 @@ directly as `ImGuiEditorLayer.cpp` itself:
   one explicitly, by name, in a fixed order. Don't introduce an
   `IEditorPanel` abstraction preemptively; only reach for one if a genuine,
   stated requirement for runtime-registered/plugin panels shows up later.
+- **Hierarchy panel**: each frame it rebuilds one `HierarchySnapshot` (parent -> ordered
+  children), flattens it into rows (`Panels/HierarchyRows.*`, no ImGui) with its own
+  collapsed-set open state, and draws only the visible rows with `ImGuiListClipper`.
+  Drops fill one `PendingHierarchyAction` that runs after the row loop. A hidden panel
+  does no work. State lives in `EditorContext::hierarchy`; `GET /hierarchy_state` reads it.
 - A **future panel that genuinely needs its own persistent state across
   frames** (e.g. a Console's scrollback buffer) may become a small class
   instead of a free function - it still gets called explicitly by name from

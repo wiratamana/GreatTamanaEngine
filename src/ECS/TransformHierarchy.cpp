@@ -1,36 +1,25 @@
 #include "TransformHierarchy.h"
 
 #include "Components/Transform.h"
+#include "HierarchySnapshot.h"
 #include "Registry.h"
 #include "Math/Quat.h"
 #include "Math/Vec3.h"
 #include "Math/Vec4.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace gte {
 
 namespace {
 
-// Defensive cap on how many parent-chain hops any of the walks below will
-// ever follow - every entity is created fresh via Registry::CreateEntity()
-// and this engine has nowhere near a million live entities today, so
-// hitting this in practice would only ever mean a malformed parent chain
-// (which SetParent()'s own cycle rejection should already prevent) rather
-// than a legitimately deep scene graph.
+// Cap on parent-chain hops, so a malformed chain cannot loop forever.
 constexpr int kMaxHierarchyDepth = 1'000'000;
 
-// Same column-based decomposition TransformGizmo.cpp's ManipulateTransformGizmo()
-// already uses to turn a manipulated 4x4 matrix back into position/rotation/
-// scale (see that file's own comment for the full "why not
-// ImGuizmo::DecomposeMatrixToComponents()" reasoning) - duplicated here
-// rather than shared, since TransformGizmo.cpp deliberately has no
-// Registry/ECS dependency at all and this module deliberately has no ImGui/
-// ImGuizmo dependency; both independently need "Mat4 -> position/rotation/
-// scale" and arrive at it the exact same handedness-agnostic way (translation
-// is column 3 verbatim; columns 0/1/2 are the rotation's right/up/forward
-// basis scaled by scale.x/y/z respectively, so dividing each column by its
-// own length recovers the pure rotation basis for Quat::FromMat4()).
+constexpr std::uint32_t kRootGroup = std::numeric_limits<std::uint32_t>::max();
+
+// Column-based decomposition: translation is column 3, columns 0..2 are the rotation basis scaled per axis.
 void DecomposeMatrix(const Mat4& m, Vec3& outPosition, Quat& outRotation, Vec3& outScale)
 {
     const Vec3 col0{ m(0, 0), m(1, 0), m(2, 0) };
@@ -64,17 +53,10 @@ Mat4 ComputeWorldMatrix(Registry& registry, Entity entity)
         return local;
     }
 
+    // Walk up, left-multiplying each ancestor's local matrix.
     Mat4 world = local;
     Entity current = parent;
     int depth = 0;
-    // Iteratively walk UP the chain, accumulating parent * ... * local from
-    // the innermost (immediate parent) outward - equivalent to (and cheaper
-    // than) naive recursion computing the full ancestor chain per call.
-    // Built by repeatedly left-multiplying by each ancestor's own LOCAL
-    // matrix, which is exactly parentWorld * childWorld composed
-    // incrementally: after this loop, `world` == root.local * ... *
-    // grandparent.local * parent.local * entity.local, matching
-    // ComputeWorldMatrix()'s own recursive definition.
     while (current.IsValid() && depth < kMaxHierarchyDepth) {
         const Transform* currentTransform = registry.TryGetComponent<Transform>(current);
         if (currentTransform == nullptr) {
@@ -95,7 +77,7 @@ Mat4 ComputeWorldMatrix(Registry& registry, Entity entity)
 
 Transform ComputeWorldTransform(Registry& registry, Entity entity)
 {
-    Transform result; // Identity default - matches "no Transform" fallback.
+    Transform result;
     if (registry.TryGetComponent<Transform>(entity) == nullptr) {
         return result;
     }
@@ -127,37 +109,57 @@ bool IsDescendantOf(Registry& registry, Entity entity, Entity potentialAncestor)
     return false;
 }
 
+Entity EffectiveParent(const Registry& registry, const Transform& transform) noexcept
+{
+    const Entity parent = transform.parent;
+    if (parent.IsValid() && registry.HasComponent<Transform>(parent)) {
+        return parent;
+    }
+    return kInvalidEntity;
+}
+
+bool SiblingLess(std::uint32_t siblingA, Entity a, std::uint32_t siblingB, Entity b) noexcept
+{
+    if (siblingA != siblingB) {
+        return siblingA < siblingB;
+    }
+    if (a.index != b.index) {
+        return a.index < b.index;
+    }
+    return a.generation < b.generation;
+}
+
 std::vector<Entity> GetChildren(Registry& registry, Entity parent)
 {
-    std::vector<Entity> result;
+    struct Row {
+        std::uint32_t sibling;
+        Entity entity;
+    };
 
+    if (!parent.IsValid()) {
+        parent = kInvalidEntity;
+    }
+
+    const Registry& constRegistry = registry;
     ComponentStorage<Transform>& storage = registry.Storage<Transform>();
+
+    std::vector<Row> rows;
     for (std::size_t i = 0; i < storage.Size(); ++i) {
-        const Entity candidate = storage.EntityAt(i);
         const Transform& transform = storage.ComponentAt(i);
-
-        Entity effectiveParent = transform.parent;
-        if (effectiveParent.IsValid() && !registry.IsAlive(effectiveParent)) {
-            // A dangling reference to a since-destroyed parent - treat as a
-            // root rather than letting this entity silently vanish from
-            // every GetChildren() call (see this function's own doc
-            // comment).
-            effectiveParent = kInvalidEntity;
-        }
-
-        if (effectiveParent == parent) {
-            result.push_back(candidate);
+        if (EffectiveParent(constRegistry, transform) == parent) {
+            rows.push_back(Row{ transform.siblingIndex, storage.EntityAt(i) });
         }
     }
 
-    std::stable_sort(result.begin(), result.end(), [&registry](Entity a, Entity b) {
-        const Transform* ta = registry.TryGetComponent<Transform>(a);
-        const Transform* tb = registry.TryGetComponent<Transform>(b);
-        const std::uint32_t sa = ta != nullptr ? ta->siblingIndex : 0;
-        const std::uint32_t sb = tb != nullptr ? tb->siblingIndex : 0;
-        return sa < sb;
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) noexcept {
+        return SiblingLess(a.sibling, a.entity, b.sibling, b.entity);
     });
 
+    std::vector<Entity> result;
+    result.reserve(rows.size());
+    for (const Row& row : rows) {
+        result.push_back(row.entity);
+    }
     return result;
 }
 
@@ -168,32 +170,25 @@ void MoveToLastSibling(Registry& registry, Entity entity)
         return;
     }
 
-    const Entity parent = transform->parent;
+    const Registry& constRegistry = registry;
+    const Entity parent = EffectiveParent(constRegistry, *transform);
 
     bool any = false;
     std::uint32_t maxIndex = 0;
 
     ComponentStorage<Transform>& storage = registry.Storage<Transform>();
     for (std::size_t i = 0; i < storage.Size(); ++i) {
-        const Entity candidate = storage.EntityAt(i);
-        if (candidate == entity) {
+        if (storage.EntityAt(i) == entity) {
             continue;
         }
-        const Transform& candidateTransform = storage.ComponentAt(i);
-        if (candidateTransform.parent == parent) {
-            maxIndex = any ? std::max(maxIndex, candidateTransform.siblingIndex) : candidateTransform.siblingIndex;
+        const Transform& candidate = storage.ComponentAt(i);
+        if (EffectiveParent(constRegistry, candidate) == parent) {
+            maxIndex = any ? std::max(maxIndex, candidate.siblingIndex) : candidate.siblingIndex;
             any = true;
         }
     }
 
-    // Re-fetch: the loop above only ever READS other entities' components
-    // (ComponentStorage<Transform> is never resized by this function), so
-    // `transform` is still the exact same valid pointer - re-fetched anyway
-    // for clarity/defensiveness rather than relying on that invariant.
-    Transform* target = registry.TryGetComponent<Transform>(entity);
-    if (target != nullptr) {
-        target->siblingIndex = any ? maxIndex + 1 : 0;
-    }
+    transform->siblingIndex = any ? maxIndex + 1 : 0;
 }
 
 bool SetSiblingIndex(Registry& registry, Entity entity, std::uint32_t desiredIndex)
@@ -202,7 +197,8 @@ bool SetSiblingIndex(Registry& registry, Entity entity, std::uint32_t desiredInd
     if (transform == nullptr) {
         return false;
     }
-    const Entity parent = transform->parent;
+    const Registry& constRegistry = registry;
+    const Entity parent = EffectiveParent(constRegistry, *transform);
 
     std::vector<Entity> siblings = GetChildren(registry, parent);
     siblings.erase(std::remove(siblings.begin(), siblings.end(), entity), siblings.end());
@@ -230,9 +226,6 @@ bool SetParent(Registry& registry, Entity child, Entity newParent, bool worldPos
         if (registry.TryGetComponent<Transform>(newParent) == nullptr) {
             return false;
         }
-        // Reparenting `child` under one of its OWN descendants (or under
-        // itself, already rejected above) would create a cycle
-        // ComputeWorldMatrix() could never resolve correctly.
         if (IsDescendantOf(registry, newParent, child)) {
             return false;
         }
@@ -243,10 +236,7 @@ bool SetParent(Registry& registry, Entity child, Entity newParent, bool worldPos
         worldBefore = ComputeWorldMatrix(registry, child);
     }
 
-    {
-        Transform* childTransform = registry.TryGetComponent<Transform>(child);
-        childTransform->parent = newParent;
-    }
+    registry.TryGetComponent<Transform>(child)->parent = newParent;
 
     if (worldPositionStays) {
         const Mat4 parentWorld = newParent.IsValid() ? ComputeWorldMatrix(registry, newParent) : Mat4::Identity();
@@ -266,20 +256,177 @@ bool SetParent(Registry& registry, Entity child, Entity newParent, bool worldPos
 
 void DestroyEntityAndDescendants(Registry& registry, Entity entity)
 {
-    if (!registry.IsAlive(entity)) {
+    DestroyEntitiesAndDescendants(registry, std::span<const Entity>(&entity, 1));
+}
+
+void DestroyEntitiesAndDescendants(Registry& registry, std::span<const Entity> roots)
+{
+    bool anyAlive = false;
+    for (const Entity root : roots) {
+        if (registry.IsAlive(root)) {
+            anyAlive = true;
+            break;
+        }
+    }
+    if (!anyAlive) {
         return;
     }
 
-    // Snapshot BEFORE recursing/destroying - GetChildren() reads live
-    // Transform::parent data that Registry::DestroyEntity() below is about
-    // to invalidate, so every child must be captured into this local
-    // vector up front, not re-queried mid-loop.
-    const std::vector<Entity> children = GetChildren(registry, entity);
-    for (const Entity child : children) {
-        DestroyEntityAndDescendants(registry, child);
+    HierarchySnapshot snapshot;
+    snapshot.Rebuild(registry);
+
+    std::vector<std::uint8_t> collected; // indexed by entity index; live entities never share an index
+    const auto collect = [&collected](Entity entity) {
+        if (entity.index >= collected.size()) {
+            collected.resize(std::max<std::size_t>(static_cast<std::size_t>(entity.index) + 1, collected.size() * 2), 0);
+        }
+        if (collected[entity.index] != 0) {
+            return false;
+        }
+        collected[entity.index] = 1;
+        return true;
+    };
+
+    // Iterative pre-order over every root subtree.
+    std::vector<Entity> order;
+    std::vector<Entity> stack;
+    for (const Entity root : roots) {
+        if (!registry.IsAlive(root) || !collect(root)) {
+            continue;
+        }
+        stack.push_back(root);
+        while (!stack.empty()) {
+            const Entity entity = stack.back();
+            stack.pop_back();
+            order.push_back(entity);
+
+            const std::span<const Entity> children = snapshot.Children(entity);
+            for (auto it = children.rbegin(); it != children.rend(); ++it) {
+                if (collect(*it)) {
+                    stack.push_back(*it);
+                }
+            }
+        }
     }
 
-    registry.DestroyEntity(entity);
+    for (auto it = order.rbegin(); it != order.rend(); ++it) {
+        registry.DestroyEntity(*it);
+    }
+}
+
+void AssignHierarchy(Registry& registry, std::span<const HierarchyAssignment> assignments)
+{
+    ComponentStorage<Transform>& storage = registry.Storage<Transform>();
+    const std::size_t transformCount = storage.Size();
+    if (assignments.empty() || transformCount == 0) {
+        return;
+    }
+
+    std::uint32_t maxIndex = 0;
+    for (std::size_t i = 0; i < transformCount; ++i) {
+        maxIndex = std::max(maxIndex, storage.EntityAt(i).index);
+    }
+    const std::size_t slotCount = static_cast<std::size_t>(maxIndex) + 1;
+
+    // parentOf: the parent each slot will have; assignedAt: 1-based input position of its winning assignment.
+    std::vector<Entity> parentOf(slotCount, kInvalidEntity);
+    std::vector<std::uint32_t> assignedAt(slotCount, 0);
+
+    const Registry& constRegistry = registry;
+    for (std::size_t i = 0; i < transformCount; ++i) {
+        parentOf[storage.EntityAt(i).index] = EffectiveParent(constRegistry, storage.ComponentAt(i));
+    }
+    for (std::size_t i = 0; i < assignments.size(); ++i) {
+        const HierarchyAssignment& assignment = assignments[i];
+        if (!constRegistry.HasComponent<Transform>(assignment.child)) {
+            continue;
+        }
+        Entity parent = assignment.parent;
+        if (parent == assignment.child || !constRegistry.HasComponent<Transform>(parent)) {
+            parent = kInvalidEntity;
+        }
+        parentOf[assignment.child.index] = parent;
+        assignedAt[assignment.child.index] = static_cast<std::uint32_t>(i + 1);
+    }
+
+    // Cycle detection: one walk up from each assigned child with node states (1 = on the current
+    // path, 2 = done). A cycle is cut at its latest assigned link.
+    std::vector<std::uint8_t> state(slotCount, 0);
+    std::vector<std::uint32_t> path;
+    for (std::size_t i = 0; i < assignments.size(); ++i) {
+        const std::uint32_t start = assignments[i].child.index;
+        if (start >= slotCount || assignedAt[start] != i + 1 || state[start] != 0) {
+            continue;
+        }
+
+        path.clear();
+        std::uint32_t current = start;
+        for (;;) {
+            state[current] = 1;
+            path.push_back(current);
+
+            const Entity next = parentOf[current];
+            if (!next.IsValid() || state[next.index] == 2) {
+                break;
+            }
+            if (state[next.index] == 1) {
+                std::size_t cycleBegin = path.size();
+                while (path[cycleBegin - 1] != next.index) {
+                    --cycleBegin;
+                }
+                --cycleBegin;
+                std::uint32_t victim = path.back();
+                for (std::size_t k = cycleBegin; k < path.size(); ++k) {
+                    if (assignedAt[path[k]] > assignedAt[victim]) {
+                        victim = path[k];
+                    }
+                }
+                parentOf[victim] = kInvalidEntity;
+                break;
+            }
+            current = next.index;
+        }
+        for (const std::uint32_t slot : path) {
+            state[slot] = 2;
+        }
+    }
+
+    // Renumber each parent's assigned children densely by (savedIndex, input order).
+    struct Row {
+        std::uint32_t group;
+        std::uint32_t saved;
+        std::uint32_t order;
+        Entity child;
+    };
+    std::vector<Row> rows;
+    rows.reserve(assignments.size());
+    for (std::size_t i = 0; i < assignments.size(); ++i) {
+        const HierarchyAssignment& assignment = assignments[i];
+        if (assignment.child.index >= slotCount || assignedAt[assignment.child.index] != i + 1) {
+            continue;
+        }
+        const Entity parent = parentOf[assignment.child.index];
+        rows.push_back(Row{ parent.IsValid() ? parent.index : kRootGroup, assignment.siblingIndex,
+            static_cast<std::uint32_t>(i), assignment.child });
+    }
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) noexcept {
+        if (a.group != b.group) {
+            return a.group < b.group;
+        }
+        if (a.saved != b.saved) {
+            return a.saved < b.saved;
+        }
+        return a.order < b.order;
+    });
+
+    std::uint32_t rank = 0;
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        rank = (i > 0 && rows[i].group == rows[i - 1].group) ? rank + 1 : 0;
+        if (Transform* transform = storage.TryGet(rows[i].child)) {
+            transform->parent = parentOf[rows[i].child.index];
+            transform->siblingIndex = rank;
+        }
+    }
 }
 
 } // namespace gte
