@@ -20,7 +20,6 @@ Entity MakeEntity(std::uint32_t index, std::uint32_t generation = 1)
 TEST(EntityMarkSetTest, AnEmptySetContainsNothing)
 {
     const EntityMarkSet set;
-    EXPECT_TRUE(set.Empty());
     EXPECT_FALSE(set.Contains(MakeEntity(0)));
     EXPECT_FALSE(set.Contains(MakeEntity(1000)));
     EXPECT_FALSE(set.Contains(kInvalidEntity));
@@ -31,7 +30,6 @@ TEST(EntityMarkSetTest, InsertedEntitiesAreContained)
     EntityMarkSet set;
     const std::array<Entity, 3> entities = { MakeEntity(2), MakeEntity(50), MakeEntity(7) };
     set.Insert(entities);
-    EXPECT_EQ(set.Size(), 3u);
     for (const Entity entity : entities) {
         EXPECT_TRUE(set.Contains(entity));
     }
@@ -51,7 +49,6 @@ TEST(EntityMarkSetTest, AnInvalidEntityIsIgnored)
 {
     EntityMarkSet set;
     set.Insert(kInvalidEntity);
-    EXPECT_TRUE(set.Empty());
     EXPECT_FALSE(set.Contains(kInvalidEntity));
 }
 
@@ -61,22 +58,22 @@ TEST(EntityMarkSetTest, ClearForgetsEverythingAndTheSetKeepsWorking)
     set.Insert(MakeEntity(1));
     set.Insert(MakeEntity(9));
     set.Clear();
-    EXPECT_TRUE(set.Empty());
     EXPECT_FALSE(set.Contains(MakeEntity(1)));
     EXPECT_FALSE(set.Contains(MakeEntity(9)));
 
     set.Insert(MakeEntity(9));
     EXPECT_TRUE(set.Contains(MakeEntity(9)));
     EXPECT_FALSE(set.Contains(MakeEntity(1)));
-    EXPECT_EQ(set.Size(), 1u);
 }
 
-TEST(EntityMarkSetTest, ADuplicateInsertCountsOnce)
+TEST(EntityMarkSetTest, ADuplicateInsertStaysContained)
 {
     EntityMarkSet set;
     set.Insert(MakeEntity(4));
     set.Insert(MakeEntity(4));
-    EXPECT_EQ(set.Size(), 1u);
+    EXPECT_TRUE(set.Contains(MakeEntity(4)));
+    set.Clear();
+    EXPECT_FALSE(set.Contains(MakeEntity(4)));
 }
 
 } // namespace

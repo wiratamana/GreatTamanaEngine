@@ -30,6 +30,7 @@ struct HierarchyStateReport {
     std::uint64_t first = 0;
     std::vector<HierarchyStateRow> rows;
     double buildMs = 0.0;
+    bool rowsReused = false; // the last update kept the rows, so no flatten was measured
     double flattenMs = 0.0;
     std::uint32_t drawnRows = 0;
 };

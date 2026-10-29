@@ -57,7 +57,10 @@ TEST(ExcludedEntitiesOfTest, ReturnsOneSharedEmptySetWhenThereIsNone)
     const SceneDrawRequest first;
     const SceneDrawRequest second;
 
-    EXPECT_TRUE(ExcludedEntitiesOf(first).Empty());
+    Entity entity;
+    entity.index = 5;
+    entity.generation = 1;
+    EXPECT_FALSE(ExcludedEntitiesOf(first).Contains(entity));
     EXPECT_EQ(&ExcludedEntitiesOf(first), &ExcludedEntitiesOf(second));
 }
 

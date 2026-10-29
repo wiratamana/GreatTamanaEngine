@@ -1435,9 +1435,10 @@ std::string BuildHierarchyStateResponseJson(const HierarchyStateReport& report)
     body["collapsedCount"] = report.collapsedCount;
     body["first"] = report.first;
     body["rows"] = HierarchyRowsToJson(report.rows);
-    // A hidden panel measured nothing: null, never 0.
+    // A hidden panel measured nothing: null, never 0. Reused rows measured no flatten: null too.
     body["buildMs"] = report.visible ? nlohmann::json(report.buildMs) : nlohmann::json(nullptr);
-    body["flattenMs"] = report.visible ? nlohmann::json(report.flattenMs) : nlohmann::json(nullptr);
+    body["rowsReused"] = report.visible && report.rowsReused;
+    body["flattenMs"] = report.visible && !report.rowsReused ? nlohmann::json(report.flattenMs) : nlohmann::json(nullptr);
     body["drawnRows"] = report.visible ? nlohmann::json(report.drawnRows) : nlohmann::json(nullptr);
     return body.dump();
 }

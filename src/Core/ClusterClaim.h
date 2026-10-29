@@ -50,7 +50,7 @@ constexpr bool ClusterPartClaimable(const ClusterPartClaim& part) noexcept
 }
 
 // Entities of every claimable part as one span per part, in part order, empty spans dropped. Nothing when the
-// context disallows claims. The spans point into `parts`' own storage.
+// context disallows claims. The spans point to the storage behind `parts[i].entities`, not into `parts`.
 std::vector<std::span<const Entity>> ClaimedSpansOf(
     std::span<const ClusterPartClaim> parts, const ClusterClaimContext& context);
 

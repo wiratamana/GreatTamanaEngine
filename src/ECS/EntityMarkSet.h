@@ -23,11 +23,7 @@ public:
         if (entity.index >= m_slots.size()) {
             Grow(entity.index);
         }
-        Slot& slot = m_slots[entity.index];
-        if (slot.epoch != m_epoch) {
-            ++m_count;
-        }
-        slot = Slot{ m_epoch, entity.generation };
+        m_slots[entity.index] = Slot{ m_epoch, entity.generation };
     }
 
     void Insert(std::span<const Entity> entities)
@@ -46,7 +42,6 @@ public:
     // Forgets every entity. Keeps the slot memory.
     void Clear() noexcept
     {
-        m_count = 0;
         if (m_epoch == std::numeric_limits<std::uint32_t>::max()) {
             m_slots.assign(m_slots.size(), Slot{});
             m_epoch = 1;
@@ -54,9 +49,6 @@ public:
         }
         ++m_epoch;
     }
-
-    bool Empty() const noexcept { return m_count == 0; }
-    std::size_t Size() const noexcept { return m_count; }
 
 private:
     struct Slot {
@@ -73,7 +65,6 @@ private:
 
     std::vector<Slot> m_slots;
     std::uint32_t m_epoch = 1;
-    std::size_t m_count = 0;
 };
 
 } // namespace gte

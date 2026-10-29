@@ -102,6 +102,7 @@ void UpdateHierarchyRows(Registry& registry, HierarchyViewState& state)
         && state.flattenedCollapsedRevision == state.collapsedRevision
         && state.flattenedCollapsedSize == state.collapsed.size()
         && (!state.rows.empty() || state.snapshot.Size() == 0);
+    state.lastRowsReused = current;
     if (current) {
         state.lastFlattenMs = 0.0;
         return;
@@ -145,7 +146,7 @@ std::uint32_t ComputeSiblingInsertIndex(
     return base + (insertAfter ? 1u : 0u);
 }
 
-bool ExecuteHierarchyAction(Registry& registry, const HierarchySnapshot& snapshot, const PendingHierarchyAction& action)
+bool ApplyHierarchyAction(Registry& registry, HierarchyViewState& state, const PendingHierarchyAction& action)
 {
     if (action.kind != PendingHierarchyAction::Kind::Reparent && action.kind != PendingHierarchyAction::Kind::Reorder) {
         return false;
@@ -165,7 +166,7 @@ bool ExecuteHierarchyAction(Registry& registry, const HierarchySnapshot& snapsho
 
     std::optional<std::uint32_t> draggedPosition;
     if (EffectiveParent(registry, *draggedTransform) == action.targetParent) {
-        const std::span<const Entity> siblings = snapshot.Children(action.targetParent);
+        const std::span<const Entity> siblings = state.snapshot.Children(action.targetParent);
         const auto found = std::find(siblings.begin(), siblings.end(), action.dragged);
         if (found != siblings.end()) {
             draggedPosition = static_cast<std::uint32_t>(found - siblings.begin());
@@ -176,11 +177,6 @@ bool ExecuteHierarchyAction(Registry& registry, const HierarchySnapshot& snapsho
 
     return SetSiblingIndex(registry, action.dragged,
         ComputeSiblingInsertIndex(action.targetPosition, draggedPosition, action.insertAfter));
-}
-
-bool ApplyHierarchyAction(Registry& registry, HierarchyViewState& state, const PendingHierarchyAction& action)
-{
-    return ExecuteHierarchyAction(registry, state.snapshot, action);
 }
 
 void ToggleHierarchyCollapsed(HierarchyViewState& state, const HierarchyRow& row)
@@ -354,6 +350,7 @@ HierarchyStateReport BuildHierarchyStateReport(const Registry& registry, const H
     report.rowCount = state.rows.size();
     report.collapsedCount = state.collapsed.size();
     report.buildMs = state.lastBuildMs;
+    report.rowsReused = state.lastRowsReused;
     report.flattenMs = state.lastFlattenMs;
     report.drawnRows = state.lastDrawnRows;
 

@@ -88,3 +88,4 @@ openSponzaScene
 BuildOpenSponzaSceneResponseJson
 SettingsGuard
 ClaimedEntitiesOf
+ExecuteHierarchyAction

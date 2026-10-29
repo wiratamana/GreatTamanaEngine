@@ -244,7 +244,7 @@ TEST(HierarchyRowsTest, ReorderInTheSameParentLeavesTheTransformBitIdentical)
     action.targetParent = targetRow->parent;
     action.targetPosition = targetRow->siblingPosition;
     action.insertAfter = false;
-    ASSERT_TRUE(ExecuteHierarchyAction(registry, state.snapshot, action));
+    ASSERT_TRUE(ApplyHierarchyAction(registry, state, action));
 
     EXPECT_EQ(GetChildren(registry, parent), (std::vector<Entity>{ children[1], children[2], children[0], children[3] }));
 
@@ -273,7 +273,7 @@ TEST(HierarchyRowsTest, ReorderUnderAnotherParentMovesTheEntity)
     action.targetParent = p2;
     action.targetPosition = 1;
     action.insertAfter = false;
-    ASSERT_TRUE(ExecuteHierarchyAction(registry, state.snapshot, action));
+    ASSERT_TRUE(ApplyHierarchyAction(registry, state, action));
 
     EXPECT_EQ(GetChildren(registry, p2), (std::vector<Entity>{ t0, moved, t1 }));
     EXPECT_TRUE(GetChildren(registry, p1).empty());
@@ -434,7 +434,9 @@ TEST(HierarchyRowsTest, RowsAreReusedUntilTheHierarchyOrTheCollapsedSetChanges)
     const std::vector<Entity> before = EntitiesOf(state.rows);
     const std::uint64_t revision = state.snapshot.Revision();
 
+    EXPECT_FALSE(state.lastRowsReused);
     UpdateHierarchyRows(registry, state);
+    EXPECT_TRUE(state.lastRowsReused);
     EXPECT_EQ(state.lastFlattenMs, 0.0);
     EXPECT_EQ(state.snapshot.Revision(), revision);
     EXPECT_EQ(EntitiesOf(state.rows), before);

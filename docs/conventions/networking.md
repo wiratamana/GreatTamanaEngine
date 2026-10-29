@@ -355,9 +355,12 @@ module or adding a new endpoint:
     `EditorUiCommandKind::HierarchyState`:
     `{"visible","entityCount","rowCount","collapsedCount","first","rows":[{"entity":"<index>/<generation>",
     "parent":"<index>/<generation>"|null,"depth","siblingPosition","label","hasChildren","expanded","selected"}],
-    "buildMs","flattenMs","drawnRows"}`. `visible` is `false` while the panel is hidden; `rows` is then empty
-    and the three timings are `null` (not measured, never `0`). `buildMs` is the snapshot rebuild,
-    `flattenMs` the row flatten, `drawnRows` the rows ImGui drew. `400` for a non-numeric `first`/`count`,
+    "buildMs","rowsReused","flattenMs","drawnRows"}`. `visible` is `false` while the panel is hidden; `rows` is then empty
+    and `buildMs`, `flattenMs` and `drawnRows` are `null` (not measured, never `0`). `buildMs` is the snapshot rebuild,
+    `rowsReused` (bool, `false` while hidden) is `true` when the last update kept the rows, and then `flattenMs` is `null`
+    too (no flatten ran); otherwise `flattenMs` is the row flatten. `drawnRows` is the rows ImGui drew. When the hierarchy
+    changes every frame, the per-frame snapshot rebuild at 100000 entities costs about 12 ms; an unchanged scene costs
+    about 0.6 ms (fingerprint check). `400` for a non-numeric `first`/`count`,
     `503` without an editor. Pinned by `NetworkRoutesInspectorTests.cpp`.
   - `GET /panel_visible?name=Hierarchy&visible=true|false` hides or shows an editor panel for this session only
     (`PanelHiddenFlags` in `EditorContext`; never saved, a restart shows the panel again). It runs on the main

@@ -41,7 +41,8 @@ struct HierarchyViewState {
     std::uint32_t hiddenFrames = 0;
     bool visible = false;                 // the panel was drawn on the last frame
     double lastBuildMs = 0.0;
-    double lastFlattenMs = 0.0;           // 0 when the rows were reused
+    double lastFlattenMs = 0.0;           // meaningful only when !lastRowsReused
+    bool lastRowsReused = false;          // the last update kept the rows
     std::uint32_t lastDrawnRows = 0;
 };
 
@@ -84,11 +85,8 @@ struct PendingHierarchyAction {
     std::string assetPath;              // SpawnAsset
 };
 
-// Applies a Reparent or Reorder action. `snapshot` must still match the registry.
+// Applies a recorded Reparent or Reorder drop against the current snapshot; used by the panel and POST /hierarchy_action.
 // A reorder inside one parent leaves the transform untouched. Returns false when nothing changed.
-bool ExecuteHierarchyAction(Registry& registry, const HierarchySnapshot& snapshot, const PendingHierarchyAction& action);
-
-// Applies a recorded drop against the current snapshot; the one entry point of the panel and POST /hierarchy_action.
 bool ApplyHierarchyAction(Registry& registry, HierarchyViewState& state, const PendingHierarchyAction& action);
 
 // Flips the open state of a row that has children; the one writer of `collapsed` for arrow clicks.

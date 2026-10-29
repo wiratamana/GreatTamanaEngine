@@ -161,8 +161,8 @@ TEST(HierarchyStateResponseTests, JsonCarriesEveryKey)
     report.rows = { root, child };
 
     const nlohmann::json body = nlohmann::json::parse(BuildHierarchyStateResponseJson(report));
-    for (const char* key : { "visible", "entityCount", "rowCount", "collapsedCount", "first", "rows", "buildMs", "flattenMs",
-             "drawnRows" }) {
+    for (const char* key : { "visible", "entityCount", "rowCount", "collapsedCount", "first", "rows", "buildMs", "rowsReused",
+             "flattenMs", "drawnRows" }) {
         EXPECT_TRUE(body.contains(key)) << key;
     }
     ASSERT_EQ(body["rows"].size(), 2u);
@@ -177,6 +177,14 @@ TEST(HierarchyStateResponseTests, JsonCarriesEveryKey)
     EXPECT_FALSE(body["rows"][0]["expanded"].get<bool>());
     EXPECT_TRUE(body["rows"][0]["selected"].get<bool>());
     EXPECT_EQ(body["first"], 4);
+    EXPECT_FALSE(body["rowsReused"].get<bool>());
+    EXPECT_EQ(body["flattenMs"], 0.25);
+
+    report.rowsReused = true;
+    const nlohmann::json reused = nlohmann::json::parse(BuildHierarchyStateResponseJson(report));
+    EXPECT_TRUE(reused["rowsReused"].get<bool>());
+    EXPECT_TRUE(reused["flattenMs"].is_null());
+    EXPECT_EQ(reused["buildMs"], 0.5);
 }
 
 TEST(HierarchyStateResponseTests, HiddenPanelHasNoRowsAndNullTimings)
@@ -190,6 +198,7 @@ TEST(HierarchyStateResponseTests, HiddenPanelHasNoRowsAndNullTimings)
     EXPECT_TRUE(body["rows"].empty());
     EXPECT_TRUE(body["buildMs"].is_null());
     EXPECT_TRUE(body["flattenMs"].is_null());
+    EXPECT_FALSE(body["rowsReused"].get<bool>());
     EXPECT_TRUE(body["drawnRows"].is_null());
 }
 

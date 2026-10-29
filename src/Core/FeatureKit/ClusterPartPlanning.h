@@ -70,6 +70,18 @@ std::vector<std::uint8_t> PlanClusterPartSkips(const std::optional<std::array<Pl
     ClusterCullFlags flags, std::span<const AABB> instanceBoxes, const ClusterPartBox& allBoxes,
     std::span<const ClusterMeshGroup> groups);
 
+// Hi-Z reason a chain reports. A chain that wanted occlusion and had every part skipped reads NothingInView,
+// also a shared chain that never ran two phases itself. Other chains keep their planned reason, or None.
+constexpr HizReason ClusterHizReasonOf(HizReason planned, bool wantsTwoPhase, bool depthOnly, bool twoPhase,
+    bool nothingInView) noexcept
+{
+    const bool wantedOcclusion = wantsTwoPhase && !depthOnly;
+    if (nothingInView && (twoPhase || wantedOcclusion)) {
+        return HizReason::NothingInView;
+    }
+    return wantedOcclusion ? planned : HizReason::None;
+}
+
 // Last step of a part's chain that was declared. Round 1 is Reset1..Draw1, round 2 is Reset2..Draw2.
 // A single-phase chain only has round 1.
 enum class ClusterStep : std::uint8_t { None, Reset1, Cull1, Draw1, Reset2, Cull2, Draw2 };
