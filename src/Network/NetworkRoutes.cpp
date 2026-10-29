@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <span>
 #include <mutex>
 #include <type_traits>
 #include <unordered_set>
@@ -957,8 +958,8 @@ ParsedOpenPresetSceneRequest ParseOpenPresetSceneRequest(const std::string& json
     return result;
 }
 
-std::string BuildOpenPresetSceneResponseJson(
-    std::string_view preset, bool importedThisCall, const std::string& gtaPath, const std::string& message)
+std::string BuildOpenPresetSceneResponseJson(std::string_view preset, bool importedThisCall, const std::string& gtaPath,
+    const std::string& message, const std::string& detailsJson)
 {
     nlohmann::json body;
     body["success"] = true;
@@ -966,6 +967,26 @@ std::string BuildOpenPresetSceneResponseJson(
     body["imported_this_call"] = importedThisCall;
     body["gta_path"] = gtaPath;
     body["message"] = message;
+    if (!detailsJson.empty()) {
+        // A malformed details text is dropped: the fixed keys above stay valid.
+        const nlohmann::json details = ParseJsonNoThrow(detailsJson);
+        if (details.is_object()) {
+            for (const auto& [key, value] : details.items()) {
+                body[key] = value;
+            }
+        }
+    }
+    return body.dump();
+}
+
+std::string BuildGeometryOnlyFeaturesResponseJson(std::span<const std::string_view> prefixes)
+{
+    nlohmann::json list = nlohmann::json::array();
+    for (const std::string_view prefix : prefixes) {
+        list.push_back(std::string(prefix));
+    }
+    nlohmann::json body;
+    body["prefixes"] = std::move(list);
     return body.dump();
 }
 

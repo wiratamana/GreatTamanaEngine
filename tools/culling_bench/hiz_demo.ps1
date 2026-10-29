@@ -68,7 +68,7 @@ function Open-DemoScene {
     $body = [ordered]@{ preset = 'hiz_demo'; count = $Count; spacing = $Spacing; profile = $ProfileName }
     $reply = Invoke-CullPost '/open_preset_scene' $body 300
     if (-not [bool](Get-Field $reply 'success' $false)) {
-        Out-Line ('FAIL  open_preset_scene: ' + [string](Get-Field $reply 'message' 'no message'))
+        Out-Line ('FAIL  open_preset_scene: ' + [string](Get-Field $reply 'error' (Get-Field $reply 'message' 'no message')))
         return $false
     }
     Out-Line ('Opened: ' + [string](Get-Field $reply 'message' ''))

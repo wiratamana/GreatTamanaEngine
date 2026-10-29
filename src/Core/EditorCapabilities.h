@@ -62,11 +62,13 @@ public:
     virtual std::filesystem::path DefaultScenePath() const = 0;
 
     // Result of OpenPresetScene(); `message` is a status line on success, the error text on failure.
+    // `detailsJson` is an optional JSON object text of preset-specific reply keys (empty when there are none).
     struct OpenSceneOutcome {
         bool success = false;
         bool importedThisCall = false;
         std::string message;
         std::string gtaPath;
+        std::string detailsJson;
     };
 
     // Replaces the scene with the chosen preset. The old scene is kept on failure. Main thread only.

@@ -1,5 +1,6 @@
 #include "ScenePanel.h"
 
+#include "OverlayLabel.h"
 #include "../CameraFrustumOverlay.h"
 #include "../EditorCamera.h"
 #include "../EditorContext.h"
@@ -143,13 +144,13 @@ void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorC
             const ImVec2 imageMin = ImGui::GetItemRectMin();
             const ImVec2 imageSize = ImGui::GetItemRectSize();
 
-            // The label shows only while a feature is really off in this view.
-            if (AnyFeatureOffInSceneView(renderFeatureEntries)) {
-                constexpr const char* kPreviewLabel = "Scene view: fast preview";
-                const ImVec2 labelSize = ImGui::CalcTextSize(kPreviewLabel);
-                ImGui::GetWindowDrawList()->AddText(
-                    ImVec2(imageMin.x + imageSize.x - labelSize.x - 8.0f, imageMin.y + 6.0f),
-                    IM_COL32(255, 255, 255, 170), kPreviewLabel);
+            // The labels show only while a feature is really off in this view.
+            const bool previewOff = AnyFeatureOffInSceneView(renderFeatureEntries);
+            if (previewOff) {
+                DrawViewOverlayLabel(imageMin, imageSize, "Scene view: fast preview", 0);
+            }
+            if (ctx.hizDemo.active && ctx.hizDemo.geometryOnly) {
+                DrawViewOverlayLabel(imageMin, imageSize, kHizDemoOverlayLabel, previewOff ? 1 : 0);
             }
 
             // Camera controls: a middle/right drag starts only while hovering the image, then keeps

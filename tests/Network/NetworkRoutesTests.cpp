@@ -7,6 +7,7 @@
 // ParseGetLogsQueryTests) still need the real Editor::Logger class
 // directly. Matches Network/NetworkRoutes.cpp's own identical fix.
 #include "Editor/Logger.h"
+#include "Editor/HizDemoSceneOpener.h" // kGeometryOnlyFeaturePrefixes.
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -1728,6 +1729,38 @@ TEST(BuildOpenPresetSceneResponseJsonTests, EscapesBackslashAndQuote)
         nlohmann::json::parse(BuildOpenPresetSceneResponseJson("sponza", false, "C:\\x\\Sponza.gta", message));
     EXPECT_EQ(parsed["gta_path"], "C:\\x\\Sponza.gta");
     EXPECT_EQ(parsed["message"], message);
+}
+
+TEST(BuildOpenPresetSceneResponseJsonTests, MergesDetailsKeysNextToTheFixedOnes)
+{
+    const std::string details = R"({"profile":"full","instanceCount":7,"entities":{"camera":"1/0"},"restoresOnClose":true})";
+    const nlohmann::json parsed =
+        nlohmann::json::parse(BuildOpenPresetSceneResponseJson("hiz_demo", false, "", "ok", details));
+    EXPECT_EQ(parsed.size(), 9u);
+    EXPECT_EQ(parsed["preset"], "hiz_demo");
+    EXPECT_EQ(parsed["profile"], "full");
+    EXPECT_EQ(parsed["instanceCount"], 7);
+    EXPECT_EQ(parsed["entities"]["camera"], "1/0");
+    EXPECT_EQ(parsed["restoresOnClose"], true);
+}
+
+TEST(BuildOpenPresetSceneResponseJsonTests, MalformedDetailsAreDropped)
+{
+    const nlohmann::json parsed =
+        nlohmann::json::parse(BuildOpenPresetSceneResponseJson("hiz_demo", false, "", "ok", "{not json"));
+    EXPECT_EQ(parsed.size(), 5u);
+}
+
+TEST(BuildGeometryOnlyFeaturesResponseJsonTests, ListsEverySharedPrefix)
+{
+    const nlohmann::json parsed =
+        nlohmann::json::parse(gte::Network::BuildGeometryOnlyFeaturesResponseJson(gte::kGeometryOnlyFeaturePrefixes));
+    ASSERT_EQ(parsed.size(), 1u);
+    ASSERT_TRUE(parsed["prefixes"].is_array());
+    ASSERT_EQ(parsed["prefixes"].size(), gte::kGeometryOnlyFeaturePrefixes.size());
+    for (std::size_t i = 0; i < gte::kGeometryOnlyFeaturePrefixes.size(); ++i) {
+        EXPECT_EQ(parsed["prefixes"][i], std::string(gte::kGeometryOnlyFeaturePrefixes[i]));
+    }
 }
 
 TEST(ParseOpenPresetSceneRequestTests, AcceptsBothPresetsWithDefaults)

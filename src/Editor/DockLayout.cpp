@@ -96,6 +96,12 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
         ctx.sceneIoStatusSetTime = std::chrono::steady_clock::now();
     };
 
+    // Outcome of a Hi-Z demo menu action the host ran last frame.
+    if (ctx.hizDemoMenuResult.fresh) {
+        reportStatus(!ctx.hizDemoMenuResult.isError, ctx.hizDemoMenuResult.message, ctx.hizDemoMenuResult.message);
+        ctx.hizDemoMenuResult.fresh = false;
+    }
+
     if (ImGui::BeginMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Save Scene", "Ctrl+S")) {
@@ -110,6 +116,16 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
             if (ImGui::MenuItem("Open Sponza Scene")) {
                 const OpenSponzaResult opened = OpenSponza(game, renderer, sceneServicesSetLayout);
                 reportStatus(opened.success, opened.message, opened.message);
+                if (opened.success) {
+                    ctx.hizDemoMenuAction = HizDemoMenuAction::SceneReplaced;
+                }
+            }
+            // The host runs these on the main thread next frame and reports the outcome back.
+            if (ImGui::MenuItem("Open Hi-Z Demo Scene")) {
+                ctx.hizDemoMenuAction = HizDemoMenuAction::Open;
+            }
+            if (ImGui::MenuItem("Close Hi-Z Demo", nullptr, false, ctx.hizDemo.active)) {
+                ctx.hizDemoMenuAction = HizDemoMenuAction::Close;
             }
             ImGui::Separator();
             // Sets a flag instead of calling exit() so shutdown goes through the normal RAII teardown.

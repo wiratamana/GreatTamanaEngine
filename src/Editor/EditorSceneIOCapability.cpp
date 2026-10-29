@@ -32,13 +32,25 @@ std::filesystem::path EditorSceneIOCapability::DefaultScenePath() const
 }
 
 ISceneIOCapability::OpenSceneOutcome EditorSceneIOCapability::OpenPresetScene(Game& game, Renderer& renderer,
-    DescriptorSetLayoutHandle sceneServicesSetLayout, PresetScene kind, const PresetParameters&)
+    DescriptorSetLayoutHandle sceneServicesSetLayout, PresetScene kind, const PresetParameters& parameters)
 {
-    if (kind != PresetScene::Sponza) {
-        return { false, false, "this preset scene is not available yet", {} };
+    const HizDemoServices services = m_hizDemoServices ? m_hizDemoServices() : HizDemoServices{};
+    if (kind == PresetScene::HizDemo) {
+        const HizDemoReport report = OpenHizDemo(game, renderer, sceneServicesSetLayout, parameters, services);
+        OpenSceneOutcome outcome;
+        outcome.success = report.success;
+        outcome.message = report.message;
+        if (report.success) {
+            outcome.detailsJson = BuildHizDemoDetailsJson(report);
+        }
+        return outcome;
     }
+
     OpenSponzaResult result = OpenSponza(game, renderer, sceneServicesSetLayout);
-    return { result.success, result.importedThisCall, std::move(result.message), std::move(result.gtaPath) };
+    if (result.success) {
+        ReleaseHizDemoSettings(services);
+    }
+    return { result.success, result.importedThisCall, std::move(result.message), std::move(result.gtaPath), {} };
 }
 
 } // namespace gte

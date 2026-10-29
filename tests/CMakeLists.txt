@@ -2634,6 +2634,7 @@ Editor/RenderGraphDisplayTextTests.cpp
         Editor/SceneOverlayTests.cpp
         Editor/FrustumFromViewProjectionTests.cpp
         Editor/HierarchyRowsTests.cpp
+        Editor/HizDemoLayoutTests.cpp
     )
 
     # ProjectPanelData.h/.cpp (see src/Editor/ProjectPanelData.h) is only
@@ -2996,6 +2997,8 @@ set(GTE_COMMENT_RULE_SRC
     Editor/Panels/HierarchyPanel.h Editor/Panels/ScenePanel.cpp Editor/Panels/ScenePanel.h
     Editor/Panels/HierarchyRows.h Editor/Panels/HierarchyRows.cpp Editor/HierarchyStateReport.h
     ECS/HierarchySnapshot.h ECS/HierarchySnapshot.cpp
+    Editor/HizDemoLayout.h Editor/HizDemoLayout.cpp Editor/HizDemoSceneOpener.h Editor/HizDemoSceneOpener.cpp
+    Editor/HizDemoState.h Editor/Panels/OverlayLabel.h
     Editor/SceneIO.cpp Editor/SceneIO.h
     Game/Game.cpp Game/Game.h Game/Instantiation/MeshAssetGpuCatalog.cpp Game/Instantiation/MeshAssetGpuCatalog.h
     Game/Instantiation/MeshInstantiationSystem.cpp Game/Instantiation/MeshInstantiationSystem.h
@@ -3077,6 +3080,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Assets/MeshClusterImportTests.cpp Editor/MeshClusterBuildRunnerTests.cpp Editor/ClusterToolUiStateTests.cpp
     Network/NetworkRoutesInspectorTests.cpp Network/NetworkRoutesClusterViewerTests.cpp
     Editor/HierarchyRowsTests.cpp ECS/HierarchySnapshotTests.cpp Scene/SceneHierarchyBulkTests.cpp
+    Editor/HizDemoLayoutTests.cpp
     Network/NetworkRoutesSceneCameraTests.cpp
     Core/ClusterClaimTests.cpp Core/ClusterPartSkipTests.cpp Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp Core/ClusterCandidatesTests.cpp
     Core/ClusterDrawStateTests.cpp Core/ClusterDrawVerbTests.cpp

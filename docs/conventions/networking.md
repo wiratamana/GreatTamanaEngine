@@ -565,6 +565,18 @@ module or adding a new endpoint:
   `{"success":true,"preset","imported_this_call","gta_path","message"}`. `500` when the open failed
   (the old scene is kept), `503` without the Editor module or while another engine command runs,
   `504` on timeout. The old `POST /open_sponza_scene` route is gone (404).
+  For `"hiz_demo"` the reply also carries `"profile"`, `"instanceCount"`, `"countClamped"` (the count is
+  clamped to 1..100000 and `message` says "count clamped to N"), `"clustersPerInstance"`, `"workItems"`,
+  `"entities":{"camera","sun","wall"}` (`"index/generation"`), `"gpuDrivenScene":{"mode","collectStats"}`
+  and `"restoresOnClose":true`. The demo scene has a camera ("Main Camera"), a sun ("HizDemo Sun"), a wall
+  ("HizDemo Wall") and the instance grid. It sets GpuDrivenScene to Frustum with stats on. With
+  `"geometry_only"` it also turns off the fixed-cost features listed by `GET /hiz_demo/geometry_only_features`.
+  The new scene is built first; the old one is replaced only when everything worked. File > Close Hi-Z Demo, the
+  next preset open and File > Open Sponza Scene put the features and settings back.
+
+- **`GET /hiz_demo/geometry_only_features`** returns `{"prefixes":["Shadow","VolumetricLight",...]}`: the one
+  list of fixed-cost feature name prefixes the Hi-Z demo's `geometry_only` profile turns off. Scripts read
+  it from here. It needs no engine command and always answers `200`.
 
 - **`GET /get_logs`/`POST /clear_logs`** (`task_manager/logger-1` campaign,
   `task_manager/logger-1/PHASE0_MASTER_STRATEGY.md`, Phase 3) expose the

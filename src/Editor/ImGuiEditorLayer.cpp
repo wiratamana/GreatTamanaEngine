@@ -548,6 +548,11 @@ public:
 
     MeshClusterBuildRunner* ClusterBuildRunner() override { return &m_clusterBuildRunner; }
 
+    HizDemoEditorHandles HizDemoHandles() noexcept override
+    {
+        return { &m_ctx.instanceGrid, &m_ctx.hizDemo, &m_ctx.hizDemoMenuAction, &m_ctx.hizDemoMenuResult };
+    }
+
     void OnMeshCloneFinished(const std::string& createdPathUtf8, bool openViewer) override
     {
         if (openViewer) {

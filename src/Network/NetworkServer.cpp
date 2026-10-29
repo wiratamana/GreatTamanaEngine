@@ -16,6 +16,7 @@
 #include "../Application/RenderGraphControlCommandBridge.h"
 #include "../Core/EditorCapabilities.h" // ILogQueryCapability.
 #include "../Core/Logging.h"
+#include "../Editor/HizDemoSceneOpener.h" // kGeometryOnlyFeaturePrefixes.
 #include "../Editor/OverlayRaster.h"
 #include "../Encoding/Base64.h"
 #include "../Encoding/CapturedPixelConversion.h"
@@ -1929,9 +1930,16 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         // Inputs are validated above, so a failure here is an environment problem: 500.
         res.status = outcome.success ? 200 : 500;
         res.set_content(outcome.success
-                ? BuildOpenPresetSceneResponseJson(outcome.preset, outcome.importedThisCall, outcome.gtaPath, outcome.message)
+                ? BuildOpenPresetSceneResponseJson(
+                      outcome.preset, outcome.importedThisCall, outcome.gtaPath, outcome.message, outcome.detailsJson)
                 : BuildGenericErrorResponseJson(outcome.message),
             "application/json");
+    });
+
+    // GET /hiz_demo/geometry_only_features: the one list of fixed-cost feature prefixes the demo profile turns off.
+    // Constant data, so no engine bridge is needed.
+    server.Get("/hiz_demo/geometry_only_features", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content(BuildGeometryOnlyFeaturesResponseJson(kGeometryOnlyFeaturePrefixes), "application/json");
     });
 
     // task_manager/logger-1 campaign, PHASE3

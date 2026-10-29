@@ -57,6 +57,8 @@
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
+#include <utility>
 
 namespace gte {
 
@@ -493,8 +495,9 @@ EditorHost::EditorHost(const std::string& title, int width, int height, bool for
     m_builtinFeatureModules = BuiltinFeatureModuleRegistry::Instance().CreateAll(m_core);
     m_editorLayer->AttachBuiltinFeatureModules(m_builtinFeatureModules, m_renderer, m_renderGraph);
 
-    // Scene IO for the engine command dispatch. Stateless delegation, so one process-lifetime instance is enough.
+    // Scene IO for the engine command dispatch. One process-lifetime instance; the demo handles are resolved per call.
     static EditorSceneIOCapability s_editorSceneIOCapability;
+    s_editorSceneIOCapability.SetHizDemoServicesProvider([this]() { return MakeHizDemoServices(); });
     m_sceneIOCapability = &s_editorSceneIOCapability;
 
 #if GTE_ENABLE_NETWORK
@@ -557,6 +560,57 @@ void EditorHost::ServiceFeatureDebugCommand()
     }
     result.found = result.found || request->kind == FeatureDebugCommandKind::List;
     FulfillOrLogDrop(m_featureDebugCommandBridge, pending->id, std::move(result), "FeatureDebug");
+}
+
+HizDemoServices EditorHost::MakeHizDemoServices()
+{
+    HizDemoServices services;
+    const HizDemoEditorHandles handles = m_editorLayer->HizDemoHandles();
+    services.grid = handles.grid;
+    services.state = handles.state;
+    services.compositor = m_core.GetRenderFeatureCompositor();
+    for (const std::unique_ptr<IEngineFeatureModule>& module : m_builtinFeatureModules) {
+        fx::Feature* feature = module ? fx::FindFeature(*module) : nullptr;
+        if (feature != nullptr && std::string_view(feature->Name()) == "GpuDrivenScene") {
+            services.gpuDrivenScene = feature->DebugEndpoint();
+            break;
+        }
+    }
+    return services;
+}
+
+void EditorHost::ServiceHizDemoMenuAction()
+{
+    const HizDemoEditorHandles handles = m_editorLayer->HizDemoHandles();
+    if (handles.pendingMenuAction == nullptr || *handles.pendingMenuAction == HizDemoMenuAction::None) {
+        return;
+    }
+    const HizDemoMenuAction action = std::exchange(*handles.pendingMenuAction, HizDemoMenuAction::None);
+    GTE_PROFILE_SCOPE("EditorHost::ExecuteHizDemoMenuAction");
+
+    const HizDemoServices services = MakeHizDemoServices();
+    std::string message;
+    bool ok = true;
+    switch (action) {
+    case HizDemoMenuAction::Open: {
+        const HizDemoReport report = OpenHizDemo(m_game, m_renderer,
+            m_core.GetSceneServicesDescriptorSet().LayoutHandle(), PresetParameters{}, services);
+        ok = report.success;
+        message = report.message;
+        break;
+    }
+    case HizDemoMenuAction::Close:
+        ok = CloseHizDemo(m_game, services, message);
+        break;
+    case HizDemoMenuAction::SceneReplaced:
+        ReleaseHizDemoSettings(services);
+        return;
+    case HizDemoMenuAction::None:
+        return;
+    }
+    if (handles.menuResult != nullptr) {
+        *handles.menuResult = HizDemoMenuResult{ true, !ok, std::move(message) };
+    }
 }
 
 int EditorHost::Run()
@@ -635,6 +689,8 @@ int EditorHost::Run()
                 &s_editorHotReloadDebugCapability, m_core.GetSceneServicesDescriptorSet().LayoutHandle(), enginePending->request);
             FulfillOrLogDrop(m_commandBridge, enginePending->id, result, "Engine");
         }
+
+        ServiceHizDemoMenuAction();
 
         // Hot reload: at most once per frame, and it blocks this thread until done (a deliberate hard freeze).
         if (const std::optional<std::string> requestedProject = m_hotReloadCommandBridge.TryPeekPendingProjectName()) {

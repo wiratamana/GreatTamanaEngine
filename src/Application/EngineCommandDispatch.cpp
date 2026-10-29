@@ -118,6 +118,7 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneI
             out.importedThisCall = outcome.importedThisCall;
             out.message = std::move(outcome.message);
             out.gtaPath = std::move(outcome.gtaPath);
+            out.detailsJson = std::move(outcome.detailsJson);
         } else {
             out.editorAvailable = false;
             out.message = "opening a preset scene requires the Editor module";

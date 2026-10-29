@@ -1317,6 +1317,12 @@ add_library(gte_editor STATIC
     src/Editor/SceneIO.cpp
     src/Editor/SponzaSceneOpener.h
     src/Editor/SponzaSceneOpener.cpp
+    src/Editor/HizDemoLayout.h
+    src/Editor/HizDemoLayout.cpp
+    src/Editor/HizDemoSceneOpener.h
+    src/Editor/HizDemoSceneOpener.cpp
+    src/Editor/HizDemoState.h
+    src/Editor/Panels/OverlayLabel.h
     # editor-core-separation-1 campaign, PHASE6
     # (PHASE6_EDITOR_CAPABILITY_CALL_SITE_CONVERSION_SCENE_IO.md) - the real
     # ISceneIOCapability implementation wrapping SceneIO.h above.

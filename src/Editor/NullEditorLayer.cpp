@@ -105,6 +105,7 @@ public:
     void OnMeshCloneFinished(const std::string& /*createdPathUtf8*/, bool /*openViewer*/) override { }
     IClusterViewerControl* ClusterViewerControl() override { return nullptr; }
     ISceneCameraControl* SceneCameraControl() override { return nullptr; }
+    HizDemoEditorHandles HizDemoHandles() noexcept override { return {}; }
 
     // No Inspector or dock layout in a release build.
     AssetSelectionResult SelectProjectAsset(const std::string& /*absolutePath*/) override

@@ -2,6 +2,7 @@
 
 #include "ClusterToolUiState.h"
 #include "HierarchyStateReport.h"
+#include "HizDemoState.h"
 
 #include "../Assets/MeshClusterOptions.h"
 #include "../Core/CapturedPixels.h"
@@ -49,6 +50,7 @@ class IHotReloadDebugCapability;
 class MeshClusterBuildRunner;
 class IClusterViewerControl;
 class ISceneCameraControl;
+class InstanceGridResources;
 
 // Result of ActivateTab(). Kept separate from Application's own outcome type so this header
 // never depends on src/Application/; Application::Run() converts between them.
@@ -143,6 +145,14 @@ struct SplitViewsLayerResult {
     bool success = false;
     bool split = false;
     std::string message;
+};
+
+// Non-owning pointers into the editor's own state, for the Hi-Z demo scene opener and the menu request.
+struct HizDemoEditorHandles {
+    InstanceGridResources* grid = nullptr;
+    HizDemoState* state = nullptr;
+    HizDemoMenuAction* pendingMenuAction = nullptr;
+    HizDemoMenuResult* menuResult = nullptr;
 };
 
 // Boundary between engine core and the optional Editor UI; only src/Editor/ ever includes ImGui.
@@ -342,6 +352,9 @@ public:
 
     // The Scene cameras' HTTP surface. nullptr for NullEditorLayer.
     virtual ISceneCameraControl* SceneCameraControl() = 0;
+
+    // Editor state the Hi-Z demo works on. All null for NullEditorLayer.
+    virtual HizDemoEditorHandles HizDemoHandles() noexcept = 0;
 };
 
 // Creates the real ImGui-backed editor layer (defined in src/Editor/ImGuiEditorLayer.cpp).

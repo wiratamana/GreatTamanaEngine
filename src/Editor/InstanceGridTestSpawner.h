@@ -1,14 +1,17 @@
 #pragma once
 
 #include "../Core/GraphicsHandles.h"
+#include "../ECS/Entity.h"
+#include "../Math/Vec3.h"
 #include "../Renderer/MeshHandle.h"
 #include "../Renderer/PipelineHandle.h"
 
 // Editor validation helper: spawns a square grid of instances that share one clustered indexed mesh.
-// Used by the Hierarchy menu and POST /spawn_instance_grid.
+// Used by the Hierarchy menu, POST /spawn_instance_grid and the Hi-Z demo scene.
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace gte {
 
@@ -19,10 +22,14 @@ class RenderSystem;
 // Quads per side of the shared grid mesh.
 inline constexpr std::uint32_t kInstanceGridQuadsPerSide = 32;
 
+// Default grid centre depth: in front of the default camera.
+inline constexpr float kInstanceGridDefaultDepth = 8.0f;
+
 struct InstanceGridSpawnResult {
     bool success = false;
     std::string errorMessage;
     std::uint32_t instanceCount = 0; // New entities created; only meaningful on success.
+    std::vector<Entity> entities;    // The new entities in creation order; only meaningful on success.
 };
 
 // Mesh and pipeline shared by every spawned grid. Owned by the editor layer; releases both on destruction.
@@ -57,11 +64,12 @@ private:
 
 class InstanceGridTestSpawner {
 public:
-    // Spawns `instanceCount` named entities on a square grid with `spacing` between centres.
+    // Spawns `instanceCount` named entities on a square grid with `spacing` between centres, centred on `center`.
     // Refuses (no entities) a count of 0, a count or spacing out of range, and a grid that
-    // exceeds the cluster path limits.
+    // exceeds the cluster path limits. A failure while spawning removes the entities it made.
     static InstanceGridSpawnResult Spawn(Game& game, Renderer& renderer, InstanceGridResources& resources,
-        std::uint32_t instanceCount, float spacing, DescriptorSetLayoutHandle sceneServicesSetLayout);
+        std::uint32_t instanceCount, float spacing, DescriptorSetLayoutHandle sceneServicesSetLayout,
+        const Vec3& center = Vec3{ 0.0f, 0.0f, kInstanceGridDefaultDepth });
 };
 
 } // namespace gte

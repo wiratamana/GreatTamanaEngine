@@ -2,6 +2,7 @@
 
 #include "CameraPick.h"
 #include "ClusterToolUiState.h"
+#include "HizDemoState.h"
 #include "InstanceGridTestSpawner.h"
 #include "Panels/HierarchyRows.h"
 #include "Selection.h"
@@ -264,6 +265,11 @@ struct EditorContext {
 
     // Hierarchy panel state that outlives one frame.
     HierarchyViewState hierarchy;
+
+    // What the Hi-Z demo scene changed, and the menu action waiting for the host (run on the main thread).
+    HizDemoState hizDemo;
+    HizDemoMenuAction hizDemoMenuAction = HizDemoMenuAction::None;
+    HizDemoMenuResult hizDemoMenuResult;
 };
 
 } // namespace gte

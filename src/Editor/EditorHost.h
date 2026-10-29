@@ -9,6 +9,7 @@
 #include "../Core/Plugins/IEngineFeatureModule.h"
 #include "EditorHostServices.h"
 #include "EditorLayer.h"
+#include "HizDemoSceneOpener.h"
 #include "../Game/Game.h"
 #include "../Network/NetworkServer.h"
 #include "../Renderer/DeviceIdleGuard.h"
@@ -51,6 +52,12 @@ public:
 private:
     // Answers at most one pending feature debug request on the main thread.
     void ServiceFeatureDebugCommand();
+
+    // Handles to what the Hi-Z demo scene works through, resolved fresh on every call.
+    HizDemoServices MakeHizDemoServices();
+
+    // Runs the Hi-Z demo action a menu click left in the editor state, on the main thread.
+    void ServiceHizDemoMenuAction();
 
     // RAII guard for SDL_Init()/SDL_Quit(). Declared first so SDL outlives every SDL-owning member.
     struct SdlContext {

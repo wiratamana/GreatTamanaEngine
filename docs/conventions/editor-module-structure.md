@@ -79,6 +79,11 @@ directly as `ImGuiEditorLayer.cpp` itself:
   collapsed-set open state, and draws only the visible rows with `ImGuiListClipper`.
   Drops fill one `PendingHierarchyAction` that runs after the row loop. A hidden panel
   does no work. State lives in `EditorContext::hierarchy`; `GET /hierarchy_state` reads it.
+- **Scene openers** (`SponzaSceneOpener.*`, `HizDemoSceneOpener.*`) build the new scene first and delete
+  the old roots in one `DestroyEntitiesAndDescendants()` call only on success. The Hi-Z demo keeps what it
+  changed in `EditorContext::hizDemo` (`HizDemoState`); `File > Close Hi-Z Demo` restores it. Menu clicks
+  set `EditorContext::hizDemoMenuAction`; `EditorHost` runs it on the main thread next frame. The pure
+  layout is `HizDemoLayout.*`.
 - A **future panel that genuinely needs its own persistent state across
   frames** (e.g. a Console's scrollback buffer) may become a small class
   instead of a free function - it still gets called explicitly by name from

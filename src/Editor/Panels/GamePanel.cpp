@@ -1,6 +1,7 @@
 #include "GamePanel.h"
 
 #include "../EditorContext.h"
+#include "OverlayLabel.h"
 
 #include <imgui.h>
 
@@ -27,6 +28,9 @@ void BuildGamePanel(EditorContext& ctx)
             ImGui::Image(
                 static_cast<ImTextureID>(static_cast<std::uint64_t>(ctx.gameViewDescriptor)),
                 avail);
+            if (ctx.hizDemo.active && ctx.hizDemo.geometryOnly) {
+                DrawViewOverlayLabel(ImGui::GetItemRectMin(), ImGui::GetItemRectSize(), kHizDemoOverlayLabel, 0);
+            }
         }
     }
     ImGui::End();

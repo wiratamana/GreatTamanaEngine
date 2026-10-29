@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -889,9 +890,13 @@ struct ParsedOpenPresetSceneRequest {
 ParsedOpenPresetSceneRequest ParseOpenPresetSceneRequest(const std::string& jsonBody);
 
 // Success: {"success":true,"preset":"...","imported_this_call":bool,"gta_path":"...","message":"..."}
+// plus the members of `detailsJson` (a JSON object text of preset-specific keys; ignored when empty or malformed).
 // Failures use BuildGenericErrorResponseJson().
-std::string BuildOpenPresetSceneResponseJson(
-    std::string_view preset, bool importedThisCall, const std::string& gtaPath, const std::string& message);
+std::string BuildOpenPresetSceneResponseJson(std::string_view preset, bool importedThisCall, const std::string& gtaPath,
+    const std::string& message, const std::string& detailsJson = {});
+
+// GET /hiz_demo/geometry_only_features: {"prefixes":["Shadow",...]}.
+std::string BuildGeometryOnlyFeaturesResponseJson(std::span<const std::string_view> prefixes);
 
 // --- task_manager/logger-1 campaign, PHASE3
 // (PHASE3_NETWORK_ENDPOINTS_GET_LOGS_AND_CLEAR_LOGS.md) - GET /get_logs and

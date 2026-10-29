@@ -264,6 +264,7 @@ struct OpenPresetSceneOutcome {
     std::string preset; // Wire name of the preset that was requested.
     std::string message;
     std::string gtaPath;
+    std::string detailsJson; // Preset-specific reply keys as a JSON object text; empty when none.
 };
 
 // editor-core-separation-12 campaign, PHASE1 (Project Assembly Hot Reload

@@ -7,6 +7,7 @@
 #include "../ECS/Components/Transform.h"
 #include "../ECS/EntityQuery.h"
 #include "../ECS/Registry.h"
+#include "../ECS/TransformHierarchy.h"
 #include "../Game/Game.h"
 #include "../Game/Instantiation/MeshClusterTableSelection.h"
 #include "../Game/Instantiation/MeshVertexPacking.h"
@@ -27,8 +28,6 @@
 namespace gte {
 
 namespace {
-
-constexpr float kGridDepth = 8.0f; // In front of the default camera.
 
 // Regular grid of kInstanceGridQuadsPerSide^2 quads in [-0.5, 0.5]^2, facing -Z, shared vertices.
 MeshData MakeGridMeshData()
@@ -155,12 +154,13 @@ bool InstanceGridResources::Build(
 
 InstanceGridSpawnResult InstanceGridTestSpawner::Spawn(Game& game, Renderer& renderer,
     InstanceGridResources& resources, std::uint32_t instanceCount, float spacing,
-    DescriptorSetLayoutHandle sceneServicesSetLayout)
+    DescriptorSetLayoutHandle sceneServicesSetLayout, const Vec3& center)
 {
     InstanceGridSpawnResult result;
     const auto refuse = [&result](std::string message) {
         result.success = false;
         result.errorMessage = std::move(message);
+        result.entities.clear();
         return result;
     };
 
@@ -193,8 +193,8 @@ InstanceGridSpawnResult InstanceGridTestSpawner::Spawn(Game& game, Renderer& ren
     Registry& registry = game.GetRegistry();
     const std::uint32_t columns = static_cast<std::uint32_t>(std::ceil(std::sqrt(static_cast<double>(instanceCount))));
     const std::uint32_t rows = (instanceCount + columns - 1) / columns;
-    const float originX = -spacing * static_cast<float>(columns - 1) * 0.5f;
-    const float originY = -spacing * static_cast<float>(rows - 1) * 0.5f;
+    const float originX = center.x - spacing * static_cast<float>(columns - 1) * 0.5f;
+    const float originY = center.y - spacing * static_cast<float>(rows - 1) * 0.5f;
 
     // One name scan per batch, not per entity: a batch is "InstanceGrid <batch> <index>".
     std::uint32_t batch = 1;
@@ -203,18 +203,25 @@ InstanceGridSpawnResult InstanceGridTestSpawner::Spawn(Game& game, Renderer& ren
     }
     const std::string namePrefix = "InstanceGrid " + std::to_string(batch) + " ";
 
-    for (std::uint32_t i = 0; i < instanceCount; ++i) {
-        const Entity entity = registry.CreateEntity();
+    try {
+        result.entities.reserve(instanceCount);
+        for (std::uint32_t i = 0; i < instanceCount; ++i) {
+            const Entity entity = registry.CreateEntity();
+            result.entities.push_back(entity);
 
-        Transform& transform = registry.AddComponent<Transform>(entity);
-        transform.position = Vec3{ originX + spacing * static_cast<float>(i % columns),
-            originY + spacing * static_cast<float>(i / columns), kGridDepth };
+            Transform& transform = registry.AddComponent<Transform>(entity);
+            transform.position = Vec3{ originX + spacing * static_cast<float>(i % columns),
+                originY + spacing * static_cast<float>(i / columns), center.z };
 
-        MeshRenderer& meshRenderer = registry.AddComponent<MeshRenderer>(entity);
-        meshRenderer.mesh = resources.MeshRef();
-        meshRenderer.pipeline = resources.PipelineRef();
+            MeshRenderer& meshRenderer = registry.AddComponent<MeshRenderer>(entity);
+            meshRenderer.mesh = resources.MeshRef();
+            meshRenderer.pipeline = resources.PipelineRef();
 
-        registry.AddComponent<Name>(entity, Name{ namePrefix + std::to_string(i) });
+            registry.AddComponent<Name>(entity, Name{ namePrefix + std::to_string(i) });
+        }
+    } catch (const std::exception& e) {
+        DestroyEntitiesAndDescendants(registry, result.entities);
+        return refuse(std::string("grid spawn failed: ") + e.what());
     }
 
     result.success = true;
