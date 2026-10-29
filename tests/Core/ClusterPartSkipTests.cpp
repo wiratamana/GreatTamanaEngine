@@ -286,15 +286,15 @@ TEST(ClusterPartSkipTest, ASkippedPartHasEveryClusterCulledByTheOracle)
     EXPECT_GT(keptParts, 20u);
 }
 
-TEST(ClusterPartSkipTest, FullySkippedChainReadsNothingInViewAlsoWhenShared)
+TEST(ClusterPartSkipTest, FullySkippedChainReadsNothingInViewOnlyWhenItWantedOcclusion)
 {
-    // Owner ran two phases, shared chain did not, depth-only chain never wanted occlusion.
-    EXPECT_EQ(ClusterHizReasonOf(HizReason::None, true, false, true, true), HizReason::NothingInView);
-    EXPECT_EQ(ClusterHizReasonOf(HizReason::Unavailable, true, false, false, true), HizReason::NothingInView);
-    EXPECT_EQ(ClusterHizReasonOf(HizReason::Unavailable, true, true, false, true), HizReason::None);
-    EXPECT_EQ(ClusterHizReasonOf(HizReason::Unavailable, false, false, false, true), HizReason::None);
-    EXPECT_EQ(ClusterHizReasonOf(HizReason::Unavailable, true, false, false, false), HizReason::Unavailable);
-    EXPECT_EQ(ClusterHizReasonOf(HizReason::TooLarge, true, true, false, false), HizReason::None);
+    // A depth-only chain or one without two phases never wanted occlusion.
+    EXPECT_EQ(ClusterHizReasonOf(HizReason::None, true, false, true), HizReason::NothingInView);
+    EXPECT_EQ(ClusterHizReasonOf(HizReason::Unavailable, true, false, true), HizReason::NothingInView);
+    EXPECT_EQ(ClusterHizReasonOf(HizReason::Unavailable, true, true, true), HizReason::None);
+    EXPECT_EQ(ClusterHizReasonOf(HizReason::Unavailable, false, false, true), HizReason::None);
+    EXPECT_EQ(ClusterHizReasonOf(HizReason::Unavailable, true, false, false), HizReason::Unavailable);
+    EXPECT_EQ(ClusterHizReasonOf(HizReason::TooLarge, true, true, false), HizReason::None);
 }
 
 } // namespace

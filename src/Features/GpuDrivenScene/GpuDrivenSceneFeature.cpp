@@ -187,10 +187,10 @@ void GpuDrivenSceneFeature::OpaquePass(fx::OpaqueFrame& f)
     snap.occlusion = OcclusionStateOf(hizRequested, culls, occluded);
     if (secondary && occluded) {
         snap.hizSource = CullCameraSource::Primary;
-    } else if (secondary && hizRequested && culls) {
-        snap.hizReason = HizReason::Unavailable; // The primary view's chain ran no pyramid this frame.
-    } else if (wantsHiz && !stats.occlusionApplied) {
-        snap.hizReason = stats.hizReason;
+    }
+    if (const std::optional<HizReason> reason =
+            HizReasonOfView(secondary, hizRequested, culls, occluded, wantsHiz, ChainSkippedEverything(stats), stats.hizReason)) {
+        snap.hizReason = *reason;
     }
     snap.statsCollected = wantStats;
     if (wantStats) {

@@ -261,6 +261,23 @@ constexpr bool ChainSkippedEverything(const fx::ClusterStats& stats) noexcept
     return stats.parts == 0 && stats.skippedParts > 0;
 }
 
+// Hi-Z reason a view reports; empty keeps the default. A requested Hi-Z that culls reads NothingInView when the chain
+// skipped everything, Unavailable for a secondary view that got no occlusion from the primary, else the chain's reason.
+constexpr std::optional<HizReason> HizReasonOfView(bool secondary, bool hizRequested, bool culls, bool occluded, bool wantsHiz,
+    bool chainSkippedEverything, HizReason chainReason) noexcept
+{
+    if (hizRequested && culls && chainSkippedEverything) {
+        return HizReason::NothingInView;
+    }
+    if (secondary && hizRequested && culls && !occluded) {
+        return HizReason::Unavailable;
+    }
+    if (wantsHiz && !occluded) {
+        return chainReason;
+    }
+    return std::nullopt;
+}
+
 // Instances the cluster path owns this frame: drawn parts plus skipped parts.
 constexpr std::uint32_t ClaimedInstancesOf(const fx::ClusterStats& stats) noexcept
 {

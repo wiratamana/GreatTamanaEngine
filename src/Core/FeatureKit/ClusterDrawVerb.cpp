@@ -968,7 +968,7 @@ ClusterStats ClusterDrawChain::Record()
     }
     const bool nothingInView = s.plan.ready && s.parts.empty() && s.skippedParts > 0;
     s.result.inertReason = s.plan.inertReason;
-    s.result.hizReason = ClusterHizReasonOf(s.hizReason, s.wantsTwoPhase, s.depthOnly, s.twoPhase, nothingInView);
+    s.result.hizReason = ClusterHizReasonOf(s.hizReason, s.wantsTwoPhase, s.depthOnly, nothingInView);
     s.result.occlusionApplied = s.result.declared && s.twoPhase;
     s.result.sharedSurvivors = s.result.declared && s.shared;
     s.result.sharedOcclusion = s.result.sharedSurvivors && s.sharedLanes == 2;

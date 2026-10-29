@@ -260,6 +260,23 @@ TEST(GpuDrivenSceneTypesTest, AFullySkippedChainIsNotRefused)
     EXPECT_FALSE(ChainSkippedEverything(stats));
 }
 
+TEST(GpuDrivenSceneTypesTest, HizReasonOfViewDecidesPerView)
+{
+    constexpr HizReason kNone = HizReason::None;
+    //                          secondary hiz   culls  occluded wants skipped chainReason
+    EXPECT_EQ(HizReasonOfView(true, true, true, false, false, true, kNone), HizReason::NothingInView);
+    EXPECT_EQ(HizReasonOfView(false, true, true, false, true, true, kNone), HizReason::NothingInView);
+    EXPECT_EQ(HizReasonOfView(true, true, true, false, false, false, kNone), HizReason::Unavailable);
+    EXPECT_FALSE(HizReasonOfView(true, true, true, true, false, false, kNone).has_value());
+    EXPECT_FALSE(HizReasonOfView(false, true, true, true, true, false, kNone).has_value());
+    EXPECT_EQ(HizReasonOfView(false, true, true, false, true, false, HizReason::TooLarge), HizReason::TooLarge);
+    // Hi-Z not requested: never NothingInView.
+    EXPECT_FALSE(HizReasonOfView(false, false, true, false, false, true, kNone).has_value());
+    EXPECT_FALSE(HizReasonOfView(true, false, true, false, false, true, kNone).has_value());
+    // No cull camera: nothing to report either.
+    EXPECT_FALSE(HizReasonOfView(true, true, false, false, false, true, kNone).has_value());
+}
+
 TEST(GpuDrivenSceneTypesTest, ClaimedInstancesIncludeSkippedInstances)
 {
     fx::ClusterStats stats;
