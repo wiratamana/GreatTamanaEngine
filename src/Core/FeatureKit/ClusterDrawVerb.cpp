@@ -373,35 +373,39 @@ void PlanChain(ClusterDrawChain::Impl& s)
     }
 
     // Parts wholly outside the cull frustum get no pass and no slot; their entities are still claimed. The decision
-    // uses only the cull camera and the shared candidates, so every view reaches the same one.
+    // uses only the cull camera and the shared candidates, so every view reaches the same one. Bounds are built
+    // only when a skip is possible.
     {
         GTE_PROFILE_SCOPE("ClusterPart.Skip");
-        const bool sharedCandidates = s.instances.data() == frame.ClusterCandidates().data();
-        const std::vector<std::uint8_t> skips = PlanClusterPartSkips(
-            TryExtractFrustumPlanes(cullCamera.viewProjection), flags,
-            sharedCandidates ? frame.ClusterCandidateBounds() : std::span<const AABB>{}, eligible);
-        std::size_t kept = 0;
-        for (std::size_t i = 0; i < eligible.size(); ++i) {
-            if (skips[i] != 0) {
-                ++s.skippedParts;
-                s.skippedInstances += static_cast<std::uint32_t>(eligible[i].instances.size());
-                for (const std::uint32_t candidate : eligible[i].instances) {
-                    s.skippedEntities.push_back(s.instances[candidate].entity);
+        const auto planes = TryExtractFrustumPlanes(cullCamera.viewProjection);
+        const bool canSkip = planes.has_value() && HasClusterCullFlag(flags, ClusterCullFlags::Frustum)
+            && !eligible.empty() && s.instances.data() == frame.ClusterCandidates().data();
+        if (canSkip) {
+            const std::vector<std::uint8_t> skips =
+                PlanClusterPartSkips(planes, flags, frame.ClusterCandidateBounds(), eligible);
+            std::size_t kept = 0;
+            for (std::size_t i = 0; i < eligible.size(); ++i) {
+                if (skips[i] != 0) {
+                    ++s.skippedParts;
+                    s.skippedInstances += static_cast<std::uint32_t>(eligible[i].instances.size());
+                    for (const std::uint32_t candidate : eligible[i].instances) {
+                        s.skippedEntities.push_back(s.instances[candidate].entity);
+                    }
+                    continue;
                 }
-                continue;
+                if (kept != i) {
+                    eligible[kept] = std::move(eligible[i]);
+                    pipelines[kept] = pipelines[i];
+                    sizes[kept] = sizes[i];
+                    clusterCounts[kept] = clusterCounts[i];
+                }
+                ++kept;
             }
-            if (kept != i) {
-                eligible[kept] = std::move(eligible[i]);
-                pipelines[kept] = pipelines[i];
-                sizes[kept] = sizes[i];
-                clusterCounts[kept] = clusterCounts[i];
-            }
-            ++kept;
+            eligible.resize(kept);
+            pipelines.resize(kept);
+            sizes.resize(kept);
+            clusterCounts.resize(kept);
         }
-        eligible.resize(kept);
-        pipelines.resize(kept);
-        sizes.resize(kept);
-        clusterCounts.resize(kept);
     }
 
     const ClusterSlotAssignment assignment = AssignClusterPartSlots(sizes, state.Shape().partSlots);

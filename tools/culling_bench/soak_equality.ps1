@@ -155,9 +155,8 @@ function Set-SoakFrame {
     foreach ($m in $Frame.Movers) { Set-CullTrs -Name $m.Name -Position $m.Pos }
 }
 
-# Replays $Frames in one mode and saves one PNG per frame. With -Twice every pose is captured a second time
-# ('<prefix>2_NNN.png'). After each frame listed in -ProbeFrames, game.skippedParts is appended to $script:Probe.
-# Returns $null or an error text.
+# Replays $Frames in one mode, one PNG per frame ('<prefix>2_NNN.png' for the -Twice repeat). Appends
+# game.skippedParts to $script:Probe after each -ProbeFrames frame. Returns $null or an error text.
 function Save-SoakPhase {
     param([string]$Dir, [string]$Prefix, [string]$Mode, $Frames, [int]$Wait, [switch]$Twice, [int[]]$ProbeFrames = @())
     New-Item -ItemType Directory -Force -Path $Dir | Out-Null

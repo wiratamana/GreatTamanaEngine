@@ -182,9 +182,8 @@ private:
     bool m_armed = true;
 };
 
-// Sets the GpuDrivenScene settings and switches features for `profile`. `next` already holds the baseline of an
-// active demo (`haveBaseline`); otherwise the settings seen here become the baseline. Every change is recorded
-// in `change`. False with `error` on failure.
+// Sets the GpuDrivenScene settings and switches features for `profile`; `next` holds the baseline of an active
+// demo, else the current settings become it. All changes go to `change`. False with `error` on failure.
 bool ApplySettings(const HizDemoServices& services, PresetProfile profile, bool haveBaseline, HizDemoState& next,
     SettingsChange& change, std::string& error)
 {
@@ -238,7 +237,9 @@ bool ApplySettings(const HizDemoServices& services, PresetProfile profile, bool 
             return false;
         }
         change.turnedOff.push_back(name);
-        next.disabledFeatures.push_back(name);
+        if (std::find(next.disabledFeatures.begin(), next.disabledFeatures.end(), name) == next.disabledFeatures.end()) {
+            next.disabledFeatures.push_back(name);
+        }
     }
     return true;
 }
