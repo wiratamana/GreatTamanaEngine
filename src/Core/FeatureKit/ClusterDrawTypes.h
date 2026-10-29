@@ -141,7 +141,7 @@ struct ClusterStats {
     bool occlusionApplied = false; // The two-phase occlusion cull ran in this chain.
     bool sharedSurvivors = false;  // The chain drew another view's published survivors; nothing was culled here.
     bool sharedOcclusion = false;  // Those survivors came from a two-phase occlusion chain.
-    HizReason hizReason = HizReason::None; // Why a requested two-phase chain ran single-phase; None otherwise.
+    HizReason hizReason = HizReason::None; // Why the view's HiZ phase was skipped (incl. nothing in view); None otherwise.
     std::uint32_t instances = 0;
     std::uint32_t parts = 0;
     std::uint64_t workItems = 0; // Sum over declared parts of instances * clusters: what the cull tested.
