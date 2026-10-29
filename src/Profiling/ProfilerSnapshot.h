@@ -18,6 +18,7 @@ inline constexpr std::uint32_t kProfilerSchemaVersion = 1;
 
 inline constexpr std::size_t kSnapshotNameBytes = 64;
 inline constexpr std::size_t kSnapshotScopeRows = 32;
+inline constexpr std::size_t kSnapshotNestedRows = 64;
 inline constexpr std::size_t kSnapshotFrameRows = 120;
 inline constexpr std::size_t kSnapshotSpikeRows = 16;
 inline constexpr std::size_t kSnapshotSiteBytes = 24;
@@ -27,6 +28,15 @@ inline constexpr std::size_t kSnapshotVerdictBytes = 192;
 // One top-level CPU scope, summed over its calls in the frame.
 struct SnapshotScopeRow {
     std::array<char, kSnapshotNameBytes> name{};
+    Metric total{};
+    Metric self{};
+    Metric calls{};
+};
+
+// One name at one nested depth (1 or deeper), summed over its calls in the frame.
+struct SnapshotNestedRow {
+    std::array<char, kSnapshotNameBytes> name{};
+    std::uint32_t depth = 0;
     Metric total{};
     Metric self{};
     Metric calls{};
@@ -156,6 +166,10 @@ struct ProfilerSnapshot {
     std::array<SnapshotScopeRow, kSnapshotScopeRows> scopes{};
     std::uint32_t scopeCount = 0;
     std::uint32_t scopeRowsDropped = 0; // distinct top-level scopes that did not fit
+
+    std::array<SnapshotNestedRow, kSnapshotNestedRows> nested{}; // largest total first
+    std::uint32_t nestedCount = 0;
+    std::uint32_t nestedRowsDropped = 0; // distinct (name, depth) pairs that did not fit
 
     std::array<SnapshotFrameRow, kSnapshotFrameRows> frames{}; // oldest first
     std::uint32_t frameCount = 0;

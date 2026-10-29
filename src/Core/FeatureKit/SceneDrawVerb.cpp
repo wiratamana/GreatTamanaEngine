@@ -32,7 +32,7 @@ struct SceneDrawChain::Impl {
     std::optional<float> depthClear;
     Texture color;
     std::optional<float> cullPadding;
-    const std::unordered_set<Entity>* excluded = nullptr;
+    const EntityMarkSet* excluded = nullptr;
 };
 
 SceneDrawChain Frame::SceneDraw(rg::StaticName passName)
@@ -111,7 +111,7 @@ SceneDrawChain& SceneDrawChain::CullToFrustum(float paddingFraction)
 SceneDrawChain& SceneDrawChain::Exclude(const EntityExclusion& exclusion)
 {
     if (m_impl && exclusion.handle != nullptr) {
-        m_impl->excluded = static_cast<const std::unordered_set<Entity>*>(exclusion.handle);
+        m_impl->excluded = static_cast<const EntityMarkSet*>(exclusion.handle);
     }
     return *this;
 }

@@ -130,6 +130,15 @@ public:
         return report;
     }
 
+    bool SetPanelHidden(TogglePanel /*panel*/, bool /*hidden*/) override { return false; }
+
+    HierarchyActionReport HierarchyAction(Game& /*game*/, const HierarchyActionCommand& /*request*/) override
+    {
+        HierarchyActionReport report;
+        report.editorAvailable = false;
+        return report;
+    }
+
     ClusterBuildStartResult InspectorBuildClusters(const InspectorClusterOptions& /*options*/) override
     {
         ClusterBuildStartResult result;

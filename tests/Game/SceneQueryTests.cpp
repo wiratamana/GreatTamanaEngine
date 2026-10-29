@@ -41,11 +41,11 @@ TEST(ResolveOverridePipelineTest, DifferentLayoutsResolveIndependently)
 
 TEST(ExcludedEntitiesOfTest, ReturnsTheCallersOwnSetByAddress)
 {
-    std::unordered_set<Entity> own;
+    EntityMarkSet own;
     Entity entity;
     entity.index = 5;
     entity.generation = 1;
-    own.insert(entity);
+    own.Insert(entity);
     SceneDrawRequest request;
     request.batchedEntities = &own;
 
@@ -57,7 +57,7 @@ TEST(ExcludedEntitiesOfTest, ReturnsOneSharedEmptySetWhenThereIsNone)
     const SceneDrawRequest first;
     const SceneDrawRequest second;
 
-    EXPECT_TRUE(ExcludedEntitiesOf(first).empty());
+    EXPECT_TRUE(ExcludedEntitiesOf(first).Empty());
     EXPECT_EQ(&ExcludedEntitiesOf(first), &ExcludedEntitiesOf(second));
 }
 

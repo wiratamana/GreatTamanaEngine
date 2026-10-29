@@ -87,3 +87,4 @@ OpenSponzaSceneOutcome
 openSponzaScene
 BuildOpenSponzaSceneResponseJson
 SettingsGuard
+ClaimedEntitiesOf

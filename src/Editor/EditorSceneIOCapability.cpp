@@ -53,4 +53,12 @@ ISceneIOCapability::OpenSceneOutcome EditorSceneIOCapability::OpenPresetScene(Ga
     return { result.success, result.importedThisCall, std::move(result.message), std::move(result.gtaPath), {} };
 }
 
+ISceneIOCapability::CloseSceneOutcome EditorSceneIOCapability::ClosePresetScene(Game& game)
+{
+    const HizDemoServices services = m_hizDemoServices ? m_hizDemoServices() : HizDemoServices{};
+    CloseSceneOutcome outcome;
+    outcome.success = CloseHizDemo(game, services, outcome.message);
+    return outcome;
+}
+
 } // namespace gte

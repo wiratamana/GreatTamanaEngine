@@ -37,13 +37,32 @@ ClusterClaimContext GameContext()
     return context;
 }
 
+// Spans of the claim flattened, so tests compare entities in part order.
+std::vector<Entity> Claimed(std::span<const ClusterPartClaim> parts, const ClusterClaimContext& context)
+{
+    std::vector<Entity> flat;
+    for (const std::span<const Entity> span : ClaimedSpansOf(parts, context)) {
+        flat.insert(flat.end(), span.begin(), span.end());
+    }
+    return flat;
+}
+
 TEST(ClusterClaimTest, ACompleteChainClaimsEveryEntityOfEveryPart)
 {
     const std::array<ClusterPartClaim, 2> parts = { CompletePart(kPartA), CompletePart(kPartB) };
-    const std::vector<Entity> claimed = ClaimedEntitiesOf(parts, GameContext());
+    const std::vector<Entity> claimed = Claimed(parts, GameContext());
     ASSERT_EQ(claimed.size(), 3u);
     EXPECT_EQ(claimed[0], MakeEntity(1));
     EXPECT_EQ(claimed[2], MakeEntity(3));
+}
+
+TEST(ClusterClaimTest, TheClaimPointsIntoThePartStorageWithoutCopying)
+{
+    const std::array<ClusterPartClaim, 2> parts = { CompletePart(kPartA), CompletePart(kPartB) };
+    const std::vector<std::span<const Entity>> spans = ClaimedSpansOf(parts, GameContext());
+    ASSERT_EQ(spans.size(), 2u);
+    EXPECT_EQ(spans[0].data(), kPartA.data());
+    EXPECT_EQ(spans[1].data(), kPartB.data());
 }
 
 TEST(ClusterClaimTest, AChainThatStoppedBeforeTheDrawClaimsNothing)
@@ -53,7 +72,7 @@ TEST(ClusterClaimTest, AChainThatStoppedBeforeTheDrawClaimsNothing)
         ClusterPartClaim part = CompletePart(kPartA);
         part.progress = progress;
         const std::array<ClusterPartClaim, 2> parts = { part, CompletePart(kPartB) };
-        const std::vector<Entity> claimed = ClaimedEntitiesOf(parts, GameContext());
+        const std::vector<Entity> claimed = Claimed(parts, GameContext());
         ASSERT_EQ(claimed.size(), 1u);
         EXPECT_EQ(claimed[0], MakeEntity(3));
     }
@@ -65,14 +84,14 @@ TEST(ClusterClaimTest, APartOutsideTheViewIsClaimedWithoutAnyPass)
     culled.progress = ClusterChainProgress::Culled;
     const std::array<ClusterPartClaim, 2> parts = { culled, CompletePart(kPartB) };
     EXPECT_TRUE(ClusterPartClaimable(culled));
-    EXPECT_EQ(ClaimedEntitiesOf(parts, GameContext()).size(), 3u);
+    EXPECT_EQ(Claimed(parts, GameContext()).size(), 3u);
 
     ClusterClaimContext shared;
     shared.scope = rg::ViewScope::Shared;
-    EXPECT_TRUE(ClaimedEntitiesOf(parts, shared).empty());
+    EXPECT_TRUE(Claimed(parts, shared).empty());
     ClusterClaimContext captured = GameContext();
     captured.captureArmed = true;
-    EXPECT_TRUE(ClaimedEntitiesOf(parts, captured).empty());
+    EXPECT_TRUE(Claimed(parts, captured).empty());
 }
 
 TEST(ClusterClaimTest, ACapturedGameViewFrameClaimsNothing)
@@ -80,7 +99,7 @@ TEST(ClusterClaimTest, ACapturedGameViewFrameClaimsNothing)
     ClusterClaimContext context = GameContext();
     context.captureArmed = true;
     const std::array<ClusterPartClaim, 1> parts = { CompletePart(kPartA) };
-    EXPECT_TRUE(ClaimedEntitiesOf(parts, context).empty());
+    EXPECT_TRUE(Claimed(parts, context).empty());
 }
 
 TEST(ClusterClaimTest, ACaptureOfTheGameViewDoesNotBlockTheSceneView)
@@ -89,7 +108,7 @@ TEST(ClusterClaimTest, ACaptureOfTheGameViewDoesNotBlockTheSceneView)
     context.scope = rg::ViewScope::Secondary;
     context.captureArmed = true;
     const std::array<ClusterPartClaim, 1> parts = { CompletePart(kPartA) };
-    EXPECT_EQ(ClaimedEntitiesOf(parts, context).size(), 2u);
+    EXPECT_EQ(Claimed(parts, context).size(), 2u);
 }
 
 TEST(ClusterClaimTest, TheSharedScopeNeverClaims)
@@ -97,7 +116,7 @@ TEST(ClusterClaimTest, TheSharedScopeNeverClaims)
     ClusterClaimContext context;
     context.scope = rg::ViewScope::Shared;
     const std::array<ClusterPartClaim, 1> parts = { CompletePart(kPartA) };
-    EXPECT_TRUE(ClaimedEntitiesOf(parts, context).empty());
+    EXPECT_TRUE(Claimed(parts, context).empty());
 }
 
 TEST(ClusterClaimTest, AClaimIsAPureFunctionOfItsScope)
@@ -107,8 +126,8 @@ TEST(ClusterClaimTest, AClaimIsAPureFunctionOfItsScope)
     ClusterClaimContext sceneContext;
     sceneContext.scope = rg::ViewScope::Secondary;
 
-    const std::vector<Entity> game = ClaimedEntitiesOf(gameParts, GameContext());
-    const std::vector<Entity> scene = ClaimedEntitiesOf(sceneParts, sceneContext);
+    const std::vector<Entity> game = Claimed(gameParts, GameContext());
+    const std::vector<Entity> scene = Claimed(sceneParts, sceneContext);
     ASSERT_EQ(game.size(), 2u);
     ASSERT_EQ(scene.size(), 1u);
     for (const Entity& sceneEntity : scene) {
@@ -120,7 +139,7 @@ TEST(ClusterClaimTest, AClaimIsAPureFunctionOfItsScope)
 
 TEST(ClusterClaimTest, NoPartsClaimNothing)
 {
-    EXPECT_TRUE(ClaimedEntitiesOf({}, GameContext()).empty());
+    EXPECT_TRUE(Claimed({}, GameContext()).empty());
 }
 
 TEST(SceneCullAllowedTest, MatchesTheClaimRuleForEveryScopeAndCaptureState)

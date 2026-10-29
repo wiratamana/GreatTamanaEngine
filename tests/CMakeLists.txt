@@ -2440,6 +2440,7 @@ Renderer/Culling/ClusterGpuParityTests.cpp
     ECS/CameraTests.cpp
     ECS/TransformHierarchyTests.cpp
     ECS/HierarchySnapshotTests.cpp
+    ECS/EntityMarkSetTests.cpp
     ECS/EntityQueryTests.cpp
     ECS/Reflection/ComponentTypeRegistryTests.cpp
     ECS/Reflection/BuiltinComponentReflectionTests.cpp
@@ -2995,10 +2996,10 @@ set(GTE_COMMENT_RULE_SRC
     Editor/EditorSceneIOCapability.h Editor/InstanceGridTestSpawner.cpp Editor/InstanceGridTestSpawner.h
     Editor/ImGuiEditorLayer.cpp Editor/NullEditorLayer.cpp Editor/Panels/HierarchyPanel.cpp
     Editor/Panels/HierarchyPanel.h Editor/Panels/ScenePanel.cpp Editor/Panels/ScenePanel.h
-    Editor/Panels/HierarchyRows.h Editor/Panels/HierarchyRows.cpp Editor/HierarchyStateReport.h
-    ECS/HierarchySnapshot.h ECS/HierarchySnapshot.cpp
+    Editor/Panels/HierarchyRows.h Editor/Panels/HierarchyRows.cpp Editor/HierarchyStateReport.h Editor/HierarchyActionRequest.h
+    ECS/HierarchySnapshot.h ECS/HierarchySnapshot.cpp ECS/EntityMarkSet.h
     Editor/HizDemoLayout.h Editor/HizDemoLayout.cpp Editor/HizDemoSceneOpener.h Editor/HizDemoSceneOpener.cpp
-    Editor/HizDemoState.h Editor/HizDemoProfile.h Editor/Panels/OverlayLabel.h
+    Editor/HizDemoState.h Editor/HizDemoProfile.h Editor/Panels/OverlayLabel.h Editor/PanelVisibility.h
     Editor/SceneIO.cpp Editor/SceneIO.h
     Game/Game.cpp Game/Game.h Game/Instantiation/MeshAssetGpuCatalog.cpp Game/Instantiation/MeshAssetGpuCatalog.h
     Game/Instantiation/MeshInstantiationSystem.cpp Game/Instantiation/MeshInstantiationSystem.h
@@ -3079,7 +3080,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Assets/MeshClusterTests.cpp Assets/MeshClusteringTests.cpp Assets/MeshMaterialPartitionerTests.cpp
     Assets/MeshClusterImportTests.cpp Editor/MeshClusterBuildRunnerTests.cpp Editor/ClusterToolUiStateTests.cpp
     Network/NetworkRoutesInspectorTests.cpp Network/NetworkRoutesClusterViewerTests.cpp
-    Editor/HierarchyRowsTests.cpp ECS/HierarchySnapshotTests.cpp Scene/SceneHierarchyBulkTests.cpp
+    Editor/HierarchyRowsTests.cpp ECS/HierarchySnapshotTests.cpp ECS/EntityMarkSetTests.cpp Scene/SceneHierarchyBulkTests.cpp
     Editor/HizDemoLayoutTests.cpp
     Network/NetworkRoutesSceneCameraTests.cpp
     Core/ClusterClaimTests.cpp Core/ClusterPartSkipTests.cpp Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp Core/ClusterCandidatesTests.cpp

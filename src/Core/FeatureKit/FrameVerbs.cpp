@@ -73,6 +73,22 @@ std::span<const AABB> Frame::ClusterCandidateBounds() const
     return m_context->core->ClusterCandidateBounds();
 }
 
+std::span<const Entity> Frame::ClusterCandidateEntities() const
+{
+    if (m_context == nullptr || m_context->core == nullptr || m_view.scope == rg::ViewScope::Shared) {
+        return {};
+    }
+    return m_context->core->ClusterCandidateEntities();
+}
+
+ClusterPartBox Frame::ClusterCandidateUnion() const
+{
+    if (m_context == nullptr || m_context->core == nullptr || m_view.scope == rg::ViewScope::Shared) {
+        return {};
+    }
+    return m_context->core->ClusterCandidateUnion();
+}
+
 ClusterRejectCounts Frame::ClusterRejections() const noexcept
 {
     if (m_context == nullptr || m_context->core == nullptr || m_view.scope == rg::ViewScope::Shared) {

@@ -112,6 +112,15 @@ nlohmann::json ProfilerSpikeDetailToJson(const Profiling::SpikeDetail& detail);
 // 200 with the frame, 404 when it is not frozen (never was, or evicted).
 ProfilerReply BuildProfilerSpikeReply(const std::optional<Profiling::SpikeDetail>& detail, std::uint64_t frameIndex);
 
+// Query `name` of GET /profiler/scope: any non-empty text up to 256 bytes.
+std::optional<std::string> ParseProfilerScopeName(const std::string& text);
+
+// Body of GET /profiler/scope: every call of the scope `name` in one frame, summed per depth.
+nlohmann::json ProfilerScopeToJson(const Profiling::SpikeDetail& frame, const std::string& name);
+
+// 200 with the rows, 404 when the scope did not run in the frame, 503 when no frame was published yet.
+ProfilerReply BuildProfilerScopeReply(const std::optional<Profiling::SpikeDetail>& frame, const std::string& name);
+
 // Outcome text of a failed pin or unpin: status 404 for an unknown frame, 409 for the pin limit.
 ProfilerReply BuildProfilerPinErrorReply(bool limitReached, std::uint64_t frameIndex, std::size_t pinned);
 

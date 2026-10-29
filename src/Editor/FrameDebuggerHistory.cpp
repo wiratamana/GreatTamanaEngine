@@ -1,5 +1,6 @@
 #include "FrameDebuggerHistory.h"
 
+#include "../Profiling/ScopeTimer.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/OneShot.h"
 
@@ -40,7 +41,10 @@ void FrameDebuggerCurrentCapture::CaptureFrame(Renderer& renderer, const rg::Ren
     if (compositedGameViewSource != nullptr) {
         copy(*compositedGameViewSource, *entry.compositedPreview);
     }
-    oneShot.Run();
+    {
+        GTE_PROFILE_BLOCKED("Wait.OneShotSubmit");
+        oneShot.Run();
+    }
 }
 
 } // namespace gte

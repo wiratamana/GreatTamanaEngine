@@ -1048,6 +1048,62 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(BuildHierarchyStateResponseJson(result->hierarchyState), "application/json");
     });
 
+    // GET /panel_visible?name=<panel>&visible=true|false: hides or shows a panel for this session only.
+    server.Get("/panel_visible", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedPanelVisibleQuery parsed =
+            ParsePanelVisibleQuery(req.get_param_value("name"), req.get_param_value("visible"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        EditorUiCommandRequest request;
+        request.kind = EditorUiCommandKind::PanelVisible;
+        request.panelVisible.panel = parsed.panel;
+        request.panelVisible.visible = parsed.visible;
+        const std::optional<EditorUiCommandResult> result = SubmitEditorUiCommand(uiCommandBridge, request, res);
+        if (!result.has_value()) {
+            return;
+        }
+        if (!result->panelVisible.editorAvailable) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("the Editor module is not compiled in"), "application/json");
+            return;
+        }
+        res.status = 200;
+        res.set_content(BuildPanelVisibleResponseJson(parsed.panel, parsed.visible), "application/json");
+    });
+
+    // POST /hierarchy_action: a Hierarchy drop or arrow click through the panel's own code, for tests and AI debugging.
+    server.Post("/hierarchy_action", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedHierarchyActionRequest parsed = ParseHierarchyActionRequest(req.body);
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        EditorUiCommandRequest request;
+        request.kind = EditorUiCommandKind::HierarchyAction;
+        request.hierarchyAction = parsed.command;
+        const std::optional<EditorUiCommandResult> result = SubmitEditorUiCommand(uiCommandBridge, request, res);
+        if (!result.has_value()) {
+            return;
+        }
+        const HierarchyActionReport& report = result->hierarchyAction;
+        if (!report.editorAvailable) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("the Editor module is not compiled in"), "application/json");
+            return;
+        }
+        if (!report.success) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(report.errorMessage), "application/json");
+            return;
+        }
+        res.status = 200;
+        res.set_content(BuildHierarchyActionResponseJson(report), "application/json");
+    });
+
     // POST /inspector/build_clusters: presses "Build Clusters" for the Inspector's selected asset.
     // The report shows up in /inspector_state once EditorHost has polled the finished build.
     server.Post("/inspector/build_clusters", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
@@ -1933,6 +1989,40 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
                 ? BuildOpenPresetSceneResponseJson(
                       outcome.preset, outcome.importedThisCall, outcome.gtaPath, outcome.message, outcome.detailsJson)
                 : BuildGenericErrorResponseJson(outcome.message),
+            "application/json");
+    });
+
+    // POST /close_preset_scene: Close Hi-Z Demo for AI callers. The body is ignored.
+    server.Post("/close_preset_scene", [commandBridge](const httplib::Request&, httplib::Response& res) {
+        if (commandBridge == nullptr) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("engine command bridge not available"), "application/json");
+            return;
+        }
+        EngineCommandRequest request;
+        request.kind = EngineCommandKind::ClosePresetScene;
+        constexpr int kClosePresetTimeoutMilliseconds = 30000; // Destroying a large demo scene can pass the 3 s default.
+        const EngineCommandBridge::SubmitResult submit =
+            commandBridge->SubmitAndWait(request, kClosePresetTimeoutMilliseconds);
+        if (submit.alreadyPending) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("another engine command is already in progress"), "application/json");
+            return;
+        }
+        if (submit.timedOut) {
+            res.status = 504;
+            res.set_content(BuildGenericErrorResponseJson("engine command timed out"), "application/json");
+            return;
+        }
+        const ClosePresetSceneOutcome& outcome = submit.result->closePresetScene;
+        if (!outcome.editorAvailable) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson(outcome.message), "application/json");
+            return;
+        }
+        res.status = outcome.success ? 200 : 500;
+        res.set_content(outcome.success ? BuildClosePresetSceneResponseJson(outcome.message)
+                                        : BuildGenericErrorResponseJson(outcome.message),
             "application/json");
     });
 

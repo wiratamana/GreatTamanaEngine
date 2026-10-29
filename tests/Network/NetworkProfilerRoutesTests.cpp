@@ -79,6 +79,15 @@ ProfilerSnapshot FullSnapshot()
     }
     s.scopeRowsDropped = 0;
 
+    s.nestedCount = 2;
+    for (std::uint32_t i = 0; i < s.nestedCount; ++i) {
+        Profiling::CopySnapshotText(s.nested[i].name, i == 0 ? "HierarchyPanel" : "ClusterPart.Skip");
+        s.nested[i].depth = i + 1;
+        s.nested[i].total = Ms(2.0);
+        s.nested[i].self = Ms(1.0);
+        s.nested[i].calls = Cnt(1);
+    }
+
     s.frameCount = 3;
     for (std::uint32_t i = 0; i < s.frameCount; ++i) {
         s.frames[i].frameIndex = 40 + i;
@@ -226,7 +235,8 @@ TEST(ProfilerRoutesJsonTest, TheOverviewKeysArePinned)
     const json document = ProfilerSnapshotToJson(FullSnapshot());
     const std::set<std::string> expected{
         "success", "schema_version", "frame_index", "state", "has_frame", "snapshot_age", "capture", "display_paused",
-        "cpu_frame", "untracked", "blocked", "gpu", "memory", "scopes", "scope_rows_dropped", "checks", "drops",
+        "cpu_frame", "untracked", "blocked", "gpu", "memory", "scopes", "scope_rows_dropped", "nested", "nested_rows_dropped",
+        "checks", "drops",
         "device_state", "live_block", "verdict", "overhead", "timeline", "spikes_available",
     };
     EXPECT_EQ(KeysOf(document["timeline"]), (std::set<std::string>{ "aligned", "reason" }));
@@ -243,6 +253,11 @@ TEST(ProfilerRoutesJsonTest, TheOverviewKeysArePinned)
     EXPECT_EQ(document["device_state"]["present_policy"], "capped");
     EXPECT_EQ(KeysOf(document["live_block"][0]), (std::set<std::string>{ "thread_slot", "site", "detail", "elapsed" }));
     EXPECT_EQ(KeysOf(document["scopes"][0]), (std::set<std::string>{ "name", "total", "self", "calls" }));
+    ASSERT_EQ(document["nested"].size(), 2u);
+    EXPECT_EQ(KeysOf(document["nested"][0]), (std::set<std::string>{ "name", "depth", "total", "self", "calls" }));
+    EXPECT_EQ(document["nested"][0]["name"], "HierarchyPanel");
+    EXPECT_EQ(document["nested"][0]["depth"], 1);
+    EXPECT_TRUE(IsMetricObject(document["nested_rows_dropped"]));
     EXPECT_EQ(KeysOf(document["checks"][0]), (std::set<std::string>{ "id", "status", "count", "text" }));
 }
 
@@ -443,6 +458,47 @@ TEST(ProfilerRoutesReplyTest, ASpikeThatIsGoneAnswers404AndAFrozenOneAnswers200)
     const ProfilerReply found = BuildProfilerSpikeReply(FullSpikeDetail(), 41);
     EXPECT_EQ(found.status, 200);
     EXPECT_EQ(json::parse(found.body)["frame_index"], 41);
+}
+
+TEST(ProfilerRoutesParseTest, AScopeNameIsRequiredAndBounded)
+{
+    EXPECT_EQ(ParseProfilerScopeName("ClusterPart.Bounds"), std::optional<std::string>("ClusterPart.Bounds"));
+    EXPECT_FALSE(ParseProfilerScopeName(""));
+    EXPECT_FALSE(ParseProfilerScopeName(std::string(257, 'a')));
+}
+
+TEST(ProfilerRoutesReplyTest, AScopeIsSummedPerDepthAndKeepsItsKeysPinned)
+{
+    Profiling::SpikeDetail frame = FullSpikeDetail();
+    frame.scopes.push_back({ "HierarchyPanel", 2.0, 4.0, 3.0, 1, Profiling::ScopeKind::Work });
+    frame.scopes.push_back({ "HierarchyPanel", 7.0, 2.0, 1.5, 1, Profiling::ScopeKind::Work });
+    frame.scopes.push_back({ "HierarchyPanel", 9.0, 0.5, 0.5, 2, Profiling::ScopeKind::Work });
+    frame.scopes.push_back({ "HierarchyPanel", 9.0, 0.0, 0.0, 2, Profiling::ScopeKind::Marker });
+
+    const ProfilerReply reply = BuildProfilerScopeReply(frame, "HierarchyPanel");
+    ASSERT_EQ(reply.status, 200);
+    const json document = json::parse(reply.body);
+    EXPECT_EQ(KeysOf(document),
+        (std::set<std::string>{ "success", "schema_version", "frame_index", "state", "name", "rows", "dropped_scopes" }));
+    ASSERT_EQ(document["rows"].size(), 2u);
+    EXPECT_EQ(KeysOf(document["rows"][0]), (std::set<std::string>{ "depth", "calls", "total", "self" }));
+    EXPECT_EQ(document["rows"][0]["depth"], 1);
+    EXPECT_DOUBLE_EQ(document["rows"][0]["calls"]["value"].get<double>(), 2.0);
+    EXPECT_DOUBLE_EQ(document["rows"][0]["total"]["value"].get<double>(), 6.0);
+    EXPECT_DOUBLE_EQ(document["rows"][0]["self"]["value"].get<double>(), 4.5);
+    EXPECT_EQ(document["rows"][1]["depth"], 2);
+    EXPECT_DOUBLE_EQ(document["rows"][1]["calls"]["value"].get<double>(), 1.0);
+
+    std::vector<std::string> stray;
+    FindStrayNumbers(document, "", stray);
+    EXPECT_TRUE(stray.empty()) << (stray.empty() ? "" : stray.front());
+}
+
+TEST(ProfilerRoutesReplyTest, AScopeThatDidNotRunAnswers404AndNoFrameAnswers503)
+{
+    EXPECT_EQ(BuildProfilerScopeReply(FullSpikeDetail(), "NoSuchScope").status, 404);
+    EXPECT_EQ(BuildProfilerScopeReply(std::nullopt, "Present").status, 503);
+    EXPECT_EQ(BuildProfilerScopeReply(FullSpikeDetail(), "Present").status, 200);
 }
 
 TEST(ProfilerRoutesReplyTest, ARefusedPinNamesTheLimitOrTheMissingFrame)

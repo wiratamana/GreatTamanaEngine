@@ -106,8 +106,10 @@ TEST(ClusterPartSkipTest, NothingIsSkippedWithoutTheFrustumTestPlanesOrBounds)
 
     const std::vector<ClusterMeshGroup> groups{ { MeshToken{ 1, 1 }, {}, ClusterMaterialKind::None, { 0 } } };
     const std::vector<AABB> boxes{ Box(5, 0, 1, 6, 1, 2) };
-    EXPECT_EQ(PlanClusterPartSkips(planes, ClusterCullFlags::None, boxes, groups), (std::vector<std::uint8_t>{ 0 }));
-    EXPECT_EQ(PlanClusterPartSkips(std::nullopt, kFrustumOnly, boxes, groups), (std::vector<std::uint8_t>{ 0 }));
+    EXPECT_EQ(PlanClusterPartSkips(planes, ClusterCullFlags::None, boxes, Union(boxes), groups),
+        (std::vector<std::uint8_t>{ 0 }));
+    EXPECT_EQ(PlanClusterPartSkips(std::nullopt, kFrustumOnly, boxes, Union(boxes), groups),
+        (std::vector<std::uint8_t>{ 0 }));
 }
 
 TEST(ClusterPartSkipTest, PerspectiveAndOrthographicPlanesAgreeOnObviousCases)
@@ -127,7 +129,44 @@ TEST(ClusterPartSkipTest, GroupsAreDecidedIndependently)
         { MeshToken{ 1, 1 }, {}, ClusterMaterialKind::None, { 0, 2 } },
         { MeshToken{ 2, 1 }, {}, ClusterMaterialKind::None, { 1 } },
     };
-    EXPECT_EQ(PlanClusterPartSkips(planes, kFrustumOnly, boxes, groups), (std::vector<std::uint8_t>{ 1, 0 }));
+    EXPECT_EQ(PlanClusterPartSkips(planes, kFrustumOnly, boxes, Union(boxes), groups), (std::vector<std::uint8_t>{ 1, 0 }));
+}
+
+TEST(ClusterPartSkipTest, AGroupCoveringEveryCandidateUsesTheWholeUnion)
+{
+    const Planes planes = OrthoPlanes();
+    const std::vector<AABB> outsideBoxes{ Box(5, 0, 1, 6, 1, 2), Box(7, 0, 1, 8, 1, 2) };
+    const std::vector<ClusterMeshGroup> all{ { MeshToken{ 1, 1 }, {}, ClusterMaterialKind::None, { 0, 1 } } };
+    const std::vector<std::uint8_t> viaUnion =
+        PlanClusterPartSkips(planes, kFrustumOnly, outsideBoxes, Union(outsideBoxes), all);
+    EXPECT_EQ(viaUnion, (std::vector<std::uint8_t>{ 1 }));
+
+    // The index path of the same instances must decide the same.
+    const std::vector<ClusterMeshGroup> shuffled{ { MeshToken{ 1, 1 }, {}, ClusterMaterialKind::None, { 1, 0 } } };
+    EXPECT_EQ(PlanClusterPartSkips(planes, kFrustumOnly, outsideBoxes, Union(outsideBoxes), shuffled), viaUnion);
+
+    // The whole union is what counts for a covering group: an unbounded union never skips.
+    EXPECT_EQ(PlanClusterPartSkips(planes, kFrustumOnly, outsideBoxes, ClusterPartBox{}, all),
+        (std::vector<std::uint8_t>{ 0 }));
+}
+
+TEST(ClusterPartSkipTest, APartialGroupUsesItsOwnIndices)
+{
+    const Planes planes = OrthoPlanes();
+    const std::vector<AABB> boxes{ Box(5, 0, 1, 6, 1, 2), Box(-0.5f, -0.5f, 1, 0.5f, 0.5f, 2) };
+    const std::vector<ClusterMeshGroup> groups{ { MeshToken{ 1, 1 }, {}, ClusterMaterialKind::None, { 0 } } };
+    // The whole union holds the visible box, but the group only holds the outside one.
+    EXPECT_EQ(PlanClusterPartSkips(planes, kFrustumOnly, boxes, Union(boxes), groups), (std::vector<std::uint8_t>{ 1 }));
+}
+
+TEST(ClusterPartSkipTest, AnUnusableCandidateMakesTheWholeUnionUnbounded)
+{
+    constexpr float kHuge = std::numeric_limits<float>::max();
+    const std::vector<AABB> boxes{ Box(5, 0, 1, 6, 1, 2), Box(kHuge, kHuge, kHuge, -kHuge, -kHuge, -kHuge) };
+    const ClusterPartBox all = Union(boxes);
+    EXPECT_FALSE(all.bounded);
+    const std::vector<ClusterMeshGroup> groups{ { MeshToken{ 1, 1 }, {}, ClusterMaterialKind::None, { 0, 1 } } };
+    EXPECT_EQ(PlanClusterPartSkips(OrthoPlanes(), kFrustumOnly, boxes, all, groups), (std::vector<std::uint8_t>{ 0 }));
 }
 
 TEST(ClusterPartSkipTest, ASkippedPartDoesNotTakeASlotFromAVisiblePart)
@@ -138,7 +177,7 @@ TEST(ClusterPartSkipTest, ASkippedPartDoesNotTakeASlotFromAVisiblePart)
         { MeshToken{ 1, 1 }, {}, ClusterMaterialKind::None, { 0 } },
         { MeshToken{ 2, 1 }, {}, ClusterMaterialKind::None, { 1 } },
     };
-    const std::vector<std::uint8_t> skips = PlanClusterPartSkips(planes, kFrustumOnly, boxes, groups);
+    const std::vector<std::uint8_t> skips = PlanClusterPartSkips(planes, kFrustumOnly, boxes, Union(boxes), groups);
     std::vector<ClusterPartSize> sizes;
     for (std::size_t i = 0; i < groups.size(); ++i) {
         if (skips[i] == 0) {
@@ -153,17 +192,22 @@ TEST(ClusterPartSkipTest, ASkippedPartDoesNotTakeASlotFromAVisiblePart)
 TEST(ClusterPartSkipTest, SkippedEntitiesAreClaimedUnderTheContextRules)
 {
     const std::array<Entity, 2> skipped{ Entity{ 7, 1 }, Entity{ 8, 1 } };
+    const std::array<Entity, 1> more{ Entity{ 9, 1 } };
+    const std::array<std::span<const Entity>, 2> skippedSpans{ std::span<const Entity>(skipped), std::span<const Entity>(more) };
     const std::array<std::span<const Entity>, 0> noParts{};
     const std::array<ClusterStep, 0> noSteps{};
 
     ClusterClaimContext view{ rg::ViewScope::Primary, false };
-    const ClusterRecordOutcome outcome = ClusterOutcomeOf(noParts, view, noSteps, false, skipped);
-    EXPECT_EQ(outcome.claimed.size(), 2u);
+    const ClusterRecordOutcome outcome = ClusterOutcomeOf(noParts, view, noSteps, false, skippedSpans);
+    ASSERT_EQ(outcome.claimed.size(), 2u);
+    EXPECT_EQ(outcome.claimed[0].data(), skipped.data());
+    EXPECT_EQ(outcome.claimed[0].size(), 2u);
+    EXPECT_EQ(outcome.claimed[1].data(), more.data());
 
     ClusterClaimContext shared{ rg::ViewScope::Shared, false };
-    EXPECT_TRUE(ClusterOutcomeOf(noParts, shared, noSteps, false, skipped).claimed.empty());
+    EXPECT_TRUE(ClusterOutcomeOf(noParts, shared, noSteps, false, skippedSpans).claimed.empty());
     ClusterClaimContext captured{ rg::ViewScope::Primary, true };
-    EXPECT_TRUE(ClusterOutcomeOf(noParts, captured, noSteps, false, skipped).claimed.empty());
+    EXPECT_TRUE(ClusterOutcomeOf(noParts, captured, noSteps, false, skippedSpans).claimed.empty());
 }
 
 TEST(ClusterPartSkipTest, TableBoundsCoverEveryClusterAndRejectBadBoxes)

@@ -15,43 +15,61 @@ constexpr std::uint32_t kRootGroup = std::numeric_limits<std::uint32_t>::max();
 
 } // namespace
 
-void HierarchySnapshot::Rebuild(Registry& registry)
+bool HierarchySnapshot::Rebuild(Registry& registry)
 {
     ComponentStorage<Transform>& storage = registry.Storage<Transform>();
     const std::size_t count = storage.Size();
 
+    // The effective parent depends only on these fields and on which entities own a Transform.
+    if (count == m_keys.size()) {
+        std::uint32_t difference = 0;
+        for (std::size_t i = 0; i < count; ++i) {
+            const Entity entity = storage.EntityAt(i);
+            const Transform& transform = storage.ComponentAt(i);
+            const Key& key = m_keys[i];
+            difference |= (key.entity.index ^ entity.index) | (key.entity.generation ^ entity.generation)
+                | (key.parent.index ^ transform.parent.index) | (key.parent.generation ^ transform.parent.generation)
+                | (key.sibling ^ transform.siblingIndex);
+        }
+        if (difference == 0) {
+            return false;
+        }
+    }
+
+    ++m_revision;
     m_entities.clear();
     m_roots = Range{};
+    m_keys.clear();
     if (count == 0) {
         m_rangeByParentIndex.clear();
-        return;
+        return true;
     }
 
-    std::uint32_t maxIndex = 0;
-    for (std::size_t i = 0; i < count; ++i) {
-        maxIndex = std::max(maxIndex, storage.EntityAt(i).index);
-    }
-    const std::size_t slotCount = static_cast<std::size_t>(maxIndex) + 1;
-    m_rangeByParentIndex.assign(slotCount, Range{});
-
-    // Pass 1: effective parent per Transform, group sizes, owner generation per slot.
+    // Pass 1: one read of the Transform storage. Writes the fingerprint and the effective parent group.
     const Registry& constRegistry = registry;
-    m_rows.resize(count);
+    m_keys.resize(count);
+    std::uint32_t maxIndex = 0;
     for (std::size_t i = 0; i < count; ++i) {
         const Entity entity = storage.EntityAt(i);
         const Transform& transform = storage.ComponentAt(i);
         const Entity parent = EffectiveParent(constRegistry, transform);
-        const std::uint32_t group = parent.IsValid() ? parent.index : kRootGroup;
-        m_rows[i] = Row{ group, transform.siblingIndex, entity };
-        if (group == kRootGroup) {
-            ++m_roots.count;
-        } else {
-            ++m_rangeByParentIndex[group].count;
-        }
-        m_rangeByParentIndex[entity.index].generation = entity.generation;
+        m_keys[i] = Key{ entity, transform.parent, transform.siblingIndex, parent.IsValid() ? parent.index : kRootGroup };
+        maxIndex = std::max(maxIndex, entity.index);
     }
 
-    // Pass 2: prefix sums. Roots first, then one range per parent slot.
+    // Pass 2: group sizes and the owner generation of every slot.
+    const std::size_t slotCount = static_cast<std::size_t>(maxIndex) + 1;
+    m_rangeByParentIndex.assign(slotCount, Range{});
+    for (const Key& key : m_keys) {
+        if (key.group == kRootGroup) {
+            ++m_roots.count;
+        } else {
+            ++m_rangeByParentIndex[key.group].count;
+        }
+        m_rangeByParentIndex[key.entity.index].generation = key.entity.generation;
+    }
+
+    // Pass 3: prefix sums. Roots first, then one range per parent slot.
     m_cursor.resize(slotCount + 1);
     m_roots.first = 0;
     m_cursor[slotCount] = 0;
@@ -63,14 +81,14 @@ void HierarchySnapshot::Rebuild(Registry& registry)
         running += range.count;
     }
 
-    // Pass 3: counting-sort scatter.
+    // Pass 4: counting-sort scatter.
     m_grouped.resize(count);
-    for (const Row& row : m_rows) {
-        const std::size_t group = row.group == kRootGroup ? slotCount : row.group;
-        m_grouped[m_cursor[group]++] = row;
+    for (const Key& key : m_keys) {
+        const std::size_t group = key.group == kRootGroup ? slotCount : key.group;
+        m_grouped[m_cursor[group]++] = Row{ key.entity, key.sibling };
     }
 
-    // Pass 4: order each group; the rows carry their own key.
+    // Pass 5: order each group; the rows carry their own key.
     const auto less = [](const Row& a, const Row& b) noexcept {
         return SiblingLess(a.sibling, a.entity, b.sibling, b.entity);
     };
@@ -93,6 +111,7 @@ void HierarchySnapshot::Rebuild(Registry& registry)
     for (std::size_t i = 0; i < count; ++i) {
         m_entities[i] = m_grouped[i].entity;
     }
+    return true;
 }
 
 std::span<const Entity> HierarchySnapshot::Children(Entity parent) const noexcept

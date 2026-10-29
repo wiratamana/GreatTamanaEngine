@@ -22,6 +22,7 @@ public:
     std::filesystem::path DefaultScenePath() const override;
     OpenSceneOutcome OpenPresetScene(Game& game, Renderer& renderer, DescriptorSetLayoutHandle sceneServicesSetLayout,
         PresetScene kind, const PresetParameters& parameters) override;
+    CloseSceneOutcome ClosePresetScene(Game& game) override;
 
 private:
     std::function<HizDemoServices()> m_hizDemoServices;

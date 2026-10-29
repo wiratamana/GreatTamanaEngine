@@ -74,6 +74,15 @@ public:
     // Replaces the scene with the chosen preset. The old scene is kept on failure. Main thread only.
     virtual OpenSceneOutcome OpenPresetScene(Game& game, Renderer& renderer,
         DescriptorSetLayoutHandle sceneServicesSetLayout, PresetScene kind, const PresetParameters& parameters) = 0;
+
+    // Result of ClosePresetScene(); `message` says what happened on success and failure alike.
+    struct CloseSceneOutcome {
+        bool success = false;
+        std::string message;
+    };
+
+    // Closes the open preset scene (the Hi-Z demo) and restores the settings it changed. Main thread only.
+    virtual CloseSceneOutcome ClosePresetScene(Game& game) = 0;
 };
 
 // Log query capability. Core code holds a nullable pointer: nullptr means the build has no logger,

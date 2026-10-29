@@ -29,6 +29,9 @@
 #include "CullRequestRules.h"
 #include "../Renderer/Culling/CullingTypes.h"
 #include "FaultInjection.h"
+#include "FeatureKit/ClusterPartPlanning.h"
+#include "../Jobs/JobDispatch.h"
+#include "../Jobs/JobSystem.h"
 #include "Logging.h"
 #include "ScreenPostProcessPassPriorityAssignment.h"
 #include "Plugins/IPluginCapabilityOrchestrator.h"
@@ -44,7 +47,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <deque>
 #include <optional>
 #include <stdexcept>
 #include <thread>
@@ -429,7 +431,7 @@ void Core::ClaimEntities(rg::ViewScope scope, std::span<const Entity> entities)
     if (scope == rg::ViewScope::Shared) {
         return;
     }
-    m_claimedEntities[rg::ViewScopeIndex(scope)].insert(entities.begin(), entities.end());
+    m_claimedEntities[rg::ViewScopeIndex(scope)].Insert(entities);
 }
 
 bool Core::SetSceneDrawCull(rg::ViewScope scope, const Mat4& viewProjection, float paddingFraction)
@@ -533,60 +535,170 @@ bool Core::EnsureClusterTable(fx::MeshToken token, std::uint64_t frameIndex)
 
 fx::EntityExclusion Core::ReserveExclusion()
 {
-    if (m_exclusionSets.size() >= kMaxExclusionSetsPerFrame) {
+    if (m_exclusionSetsUsed >= m_exclusionSets.size()) {
         return {};
     }
-    m_exclusionSets.emplace_back();
-    return fx::EntityExclusion{ &m_exclusionSets.back() };
+    return fx::EntityExclusion{ &m_exclusionSets[m_exclusionSetsUsed++] };
 }
 
 void Core::FillExclusion(fx::EntityExclusion exclusion, std::span<const Entity> entities)
 {
-    for (std::unordered_set<Entity>& set : m_exclusionSets) {
-        if (exclusion.handle == &set) {
-            set.insert(entities.begin(), entities.end());
+    for (std::size_t i = 0; i < m_exclusionSetsUsed; ++i) {
+        if (exclusion.handle == &m_exclusionSets[i]) {
+            m_exclusionSets[i].Insert(entities);
             return;
         }
     }
 }
 
-std::span<const AABB> Core::ClusterCandidateBounds()
+namespace {
+
+// Candidates handled by one bounds job.
+constexpr std::size_t kBoundsChunkSize = 4096;
+
+AABB NeverRejectedBox() noexcept
 {
-    if (m_clusterBoundsBuilt) {
-        return m_clusterCandidateBounds;
-    }
-    GTE_PROFILE_SCOPE("ClusterPart.Bounds");
     constexpr float kHuge = std::numeric_limits<float>::max();
-    const AABB kNeverRejected{ Vec3(kHuge, kHuge, kHuge), Vec3(-kHuge, -kHuge, -kHuge) };
-    m_clusterCandidateBounds.assign(m_clusterCandidates.size(), kNeverRejected);
+    return AABB{ Vec3(kHuge, kHuge, kHuge), Vec3(-kHuge, -kHuge, -kHuge) };
+}
+
+// Union of the usable boxes of one chunk; `usable` is false when any box of the chunk is not.
+struct BoundsChunkResult {
+    AABB box = NeverRejectedBox();
+    bool usable = true;
+};
+
+// Input and output of the bounds jobs. Each job writes only its own chunk's slice, so nothing is shared for writing.
+struct BoundsBuild {
+    std::span<const fx::ClusterInstance> candidates;
+    RenderSystem* renderSystem = nullptr;
+    AABB* bounds = nullptr;
+    Entity* entities = nullptr;
+    BoundsChunkResult* chunks = nullptr;
+};
+
+void BuildBoundsChunk(const BoundsBuild& build, std::size_t chunk) noexcept
+{
+    const AABB neverRejected = NeverRejectedBox();
+    const std::size_t first = chunk * kBoundsChunkSize;
+    const std::size_t last = std::min(build.candidates.size(), first + kBoundsChunkSize);
+    BoundsChunkResult result;
     fx::MeshToken lastToken;
-    const Mesh* lastMesh = nullptr;
     bool haveLast = false;
-    for (std::size_t i = 0; i < m_clusterCandidates.size(); ++i) {
-        const fx::ClusterInstance& instance = m_clusterCandidates[i];
+    const AABB* local = nullptr;
+    for (std::size_t i = first; i < last; ++i) {
+        const fx::ClusterInstance& instance = build.candidates[i];
+        build.entities[i] = instance.entity;
         if (!haveLast || instance.mesh != lastToken) {
             lastToken = instance.mesh;
-            lastMesh = ResolveClusterMesh(instance.mesh);
             haveLast = true;
+            const Mesh* mesh =
+                build.renderSystem->TryGetMesh(MeshHandle{ instance.mesh.index, instance.mesh.generation });
+            local = (mesh != nullptr && mesh->ClusterBounds().has_value()) ? &*mesh->ClusterBounds() : nullptr;
         }
-        if (lastMesh == nullptr || !lastMesh->ClusterBounds().has_value() || !IsFiniteMatrix(instance.world)) {
+        AABB box = neverRejected;
+        bool usable = false;
+        if (local != nullptr) {
+            const AABB world = TransformAABB(*local, instance.world);
+            usable = fx::IsUsableInstanceBox(world);
+            if (usable) {
+                box = world;
+            }
+        }
+        build.bounds[i] = box;
+        if (!usable) {
+            result.usable = false;
             continue;
         }
-        const AABB world = TransformAABB(*lastMesh->ClusterBounds(), instance.world);
-        const bool finite = std::isfinite(world.min.x) && std::isfinite(world.min.y) && std::isfinite(world.min.z)
-            && std::isfinite(world.max.x) && std::isfinite(world.max.y) && std::isfinite(world.max.z);
-        if (finite) {
-            m_clusterCandidateBounds[i] = world;
-        }
+        result.box.min = Vec3(std::min(result.box.min.x, box.min.x), std::min(result.box.min.y, box.min.y),
+            std::min(result.box.min.z, box.min.z));
+        result.box.max = Vec3(std::max(result.box.max.x, box.max.x), std::max(result.box.max.y, box.max.y),
+            std::max(result.box.max.z, box.max.z));
     }
+    build.chunks[chunk] = result;
+}
+
+void RunBoundsBatch(std::uint32_t beginChunk, std::uint32_t endChunk, void* payload)
+{
+    const BoundsBuild& build = *static_cast<const BoundsBuild*>(payload);
+    for (std::uint32_t chunk = beginChunk; chunk < endChunk; ++chunk) {
+        BuildBoundsChunk(build, chunk);
+    }
+}
+
+} // namespace
+
+void Core::BuildClusterBounds()
+{
+    if (m_clusterBoundsBuilt) {
+        return;
+    }
+    GTE_PROFILE_SCOPE("ClusterPart.Bounds");
+    const std::size_t count = m_clusterCandidates.size();
+    const std::size_t chunkCount = (count + kBoundsChunkSize - 1) / kBoundsChunkSize;
+    // Every slot is rewritten below, so the arrays are only resized, never cleared.
+    m_clusterCandidateBounds.resize(count);
+    m_clusterCandidateEntities.resize(count);
+    std::vector<BoundsChunkResult> chunks(chunkCount);
+
+    BoundsBuild build;
+    build.candidates = m_clusterCandidates;
+    build.renderSystem = &m_game.GetRenderSystem();
+    build.bounds = m_clusterCandidateBounds.data();
+    build.entities = m_clusterCandidateEntities.data();
+    build.chunks = chunks.data();
+    if (chunkCount == 1) {
+        BuildBoundsChunk(build, 0);
+    } else if (chunkCount > 1) {
+        Jobs::JobHandle handle;
+        try {
+            Jobs::Dispatch(&RunBoundsBatch, static_cast<std::uint32_t>(chunkCount), &build, handle, 1);
+        } catch (...) {
+            Jobs::JobSystem::Instance().WaitForJobs(handle); // Scheduled jobs still read `build`.
+            throw;
+        }
+        GTE_PROFILE_BLOCKED("Wait.Workers");
+        Jobs::JobSystem::Instance().WaitForJobs(handle);
+    }
+
+    AABB all = NeverRejectedBox();
+    bool bounded = count > 0;
+    for (const BoundsChunkResult& chunk : chunks) {
+        if (!chunk.usable) {
+            bounded = false;
+            break;
+        }
+        all.min = Vec3(std::min(all.min.x, chunk.box.min.x), std::min(all.min.y, chunk.box.min.y),
+            std::min(all.min.z, chunk.box.min.z));
+        all.max = Vec3(std::max(all.max.x, chunk.box.max.x), std::max(all.max.y, chunk.box.max.y),
+            std::max(all.max.z, chunk.box.max.z));
+    }
+    m_clusterCandidateUnion = bounded ? fx::ClusterPartBox{ all, true } : fx::ClusterPartBox{};
     m_clusterBoundsBuilt = true;
+}
+
+std::span<const AABB> Core::ClusterCandidateBounds()
+{
+    BuildClusterBounds();
     return m_clusterCandidateBounds;
+}
+
+std::span<const Entity> Core::ClusterCandidateEntities()
+{
+    BuildClusterBounds();
+    return m_clusterCandidateEntities;
+}
+
+const fx::ClusterPartBox& Core::ClusterCandidateUnion()
+{
+    BuildClusterBounds();
+    return m_clusterCandidateUnion;
 }
 
 void Core::BuildClusterCandidates()
 {
     m_clusterCandidates.clear();
-    m_clusterCandidateBounds.clear();
+    m_clusterCandidateUnion = fx::ClusterPartBox{};
     m_clusterBoundsBuilt = false;
     m_clusterRejections = fx::ClusterRejectCounts{};
     if (!ClusterPathSupported(m_renderer.IndirectDrawCaps()) || m_renderFeatureCompositorPtr == nullptr) {
@@ -822,7 +934,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 const DescriptorSetHandle sceneServicesSet =
                     m_sceneServicesDescriptorSet.Rewrite(currentViewForServices, resolvedServiceSlots);
                 // Read at execute time: chains declared after this pass fill the set during declaration.
-                const std::unordered_set<Entity>& claimed = m_claimedEntities[claimScope];
+                const EntityMarkSet& claimed = m_claimedEntities[claimScope];
                 SceneCullCounts cullCounts;
                 std::optional<SceneCullRequest> cull = m_sceneCullThisFrame[claimScope];
                 if (cull.has_value()) {
@@ -1108,15 +1220,18 @@ const char* Core::ViewResourceName(rg::ViewScope scope) const noexcept
 void Core::BuildFrame()
 {
     // Per-frame claims, candidates and exclusions are cleared first so a frame that ends early leaves none behind.
-    for (std::unordered_set<Entity>& claimed : m_claimedEntities) {
-        claimed.clear();
+    for (EntityMarkSet& claimed : m_claimedEntities) {
+        claimed.Clear();
     }
     for (std::optional<SceneCullRequest>& request : m_sceneCullThisFrame) {
         request.reset();
     }
     m_clusterCandidates.clear();
     m_clusterRejections = fx::ClusterRejectCounts{};
-    m_exclusionSets.clear();
+    for (std::size_t i = 0; i < m_exclusionSetsUsed; ++i) {
+        m_exclusionSets[i].Clear();
+    }
+    m_exclusionSetsUsed = 0;
     ++m_exclusionEpoch;
     m_captureArmedThisFrame = false;
 

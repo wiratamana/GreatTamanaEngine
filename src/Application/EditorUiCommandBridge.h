@@ -6,7 +6,9 @@
 #include "SyncCommandBridge.h"
 #include "../Assets/MeshClusterOptions.h"
 #include "../Core/InstanceGridLimits.h"
+#include "../Editor/HierarchyActionRequest.h"
 #include "../Editor/HierarchyStateReport.h"
+#include "../Editor/PanelVisibility.h"
 #include "../Editor/SceneCameraControl.h"
 
 #include <cstdint>
@@ -26,6 +28,8 @@ enum class EditorUiCommandKind {
     ClusterViewer,
     SceneCamera,
     HierarchyState,
+    PanelVisible,
+    HierarchyAction,
     Exit, // No payload; the editor loop ends after the reply is sent.
 };
 
@@ -33,6 +37,12 @@ enum class EditorUiCommandKind {
 struct HierarchyStateCommand {
     std::uint64_t first = 0;
     std::uint32_t count = 200;
+};
+
+// Plain request payload for one PanelVisible command.
+struct PanelVisibleCommand {
+    TogglePanel panel = TogglePanel::Hierarchy;
+    bool visible = true;
 };
 
 // Plain request payload for one ActivateTab command.
@@ -105,6 +115,8 @@ struct EditorUiCommandRequest {
     ClusterViewerCommand clusterViewer;
     SceneCameraCommand sceneCamera;
     HierarchyStateCommand hierarchyState;
+    PanelVisibleCommand panelVisible;
+    HierarchyActionCommand hierarchyAction;
 };
 
 // Outcome of one ActivateTab command.
@@ -183,6 +195,11 @@ struct ClusterViewerOutcome {
     std::optional<ClusterViewerImage> image; // Image
 };
 
+// Outcome of one PanelVisible command. `editorAvailable` is false when the build has no editor panels.
+struct PanelVisibleOutcome {
+    bool editorAvailable = true;
+};
+
 // Outcome of one SceneCamera command. `available` is false when the editor has no Scene view.
 struct SceneCameraOutcome {
     bool available = true;
@@ -206,6 +223,8 @@ struct EditorUiCommandResult {
     ClusterViewerOutcome clusterViewer;
     SceneCameraOutcome sceneCamera;
     HierarchyStateReport hierarchyState;
+    PanelVisibleOutcome panelVisible;
+    HierarchyActionReport hierarchyAction;
 };
 
 class EditorUiCommandBridge : public SyncCommandBridge<EditorUiCommandRequest, EditorUiCommandResult> {

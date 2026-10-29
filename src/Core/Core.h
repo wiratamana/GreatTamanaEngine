@@ -6,6 +6,7 @@
 #include "ISurfaceProvider.h"
 #include "../Application/RenderPassViewData.h"
 #include "../ECS/Entity.h"
+#include "../ECS/EntityMarkSet.h"
 #include "../Game/Game.h"
 #include "../Game/SceneQuery.h"
 #include "../Renderer/Culling/ClusterCullMath.h"
@@ -33,7 +34,6 @@
 
 #include <array>
 #include <cstddef>
-#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -235,9 +235,15 @@ public:
     // Instances of cluster-ready meshes this frame, rebuilt by BuildFrame(). Valid until the next BuildFrame().
     std::span<const fx::ClusterInstance> ClusterCandidates() const noexcept { return m_clusterCandidates; }
 
-    // World box of each candidate, built once per frame on the first call. Inverted (never rejected) when the mesh has
-    // no cluster bounds or the matrix is non-finite. Kit verbs only.
+    // World box of each candidate, built once per frame on the first call of any of the three accessors below.
+    // Inverted (never rejected) when the mesh has no cluster bounds or the matrix is non-finite. Kit verbs only.
     std::span<const AABB> ClusterCandidateBounds();
+
+    // Entity of each candidate, aligned with ClusterCandidates(). Built with the bounds.
+    std::span<const Entity> ClusterCandidateEntities();
+
+    // Union of every candidate box; unbounded when any candidate box is unusable. Built with the bounds.
+    const fx::ClusterPartBox& ClusterCandidateUnion();
 
     // Renderables of this frame that stayed on the CPU draw, by reason. Rebuilt with the candidates.
     const fx::ClusterRejectCounts& ClusterRejections() const noexcept { return m_clusterRejections; }
@@ -285,6 +291,7 @@ private:
     const RenderPassViewData* FindViewData(rg::RenderViewId view) const noexcept;
     const ExposedViewOutput* FindExposedViewOutput(rg::ViewScope scope) const noexcept;
     void BuildClusterCandidates();
+    void BuildClusterBounds();
 
     IEditorLayer* m_editorLayer = nullptr; // Optional editor hook.
 
@@ -342,7 +349,7 @@ private:
     float m_lastPrimaryAspect = 0.0f;
 
     // Entities drawn by a pass chain instead of the CPU scene draw, per view scope. Cleared at the start of BuildFrame().
-    std::array<std::unordered_set<Entity>, rg::kViewScopeCount> m_claimedEntities;
+    std::array<EntityMarkSet, rg::kViewScopeCount> m_claimedEntities;
 
     // Frustum cull request and the counts of its last draw, per view scope. The request is cleared at the start of BuildFrame().
     struct SceneCullResult {
@@ -353,13 +360,17 @@ private:
     std::array<std::optional<SceneCullRequest>, rg::kViewScopeCount> m_sceneCullThisFrame;
     std::array<SceneCullResult, rg::kViewScopeCount> m_sceneCullCountsLast;
 
-    // Cluster-ready instances and entity exclusion sets of this frame. Both are cleared at the start of
-    // BuildFrame(); a deque keeps every reserved set at a stable address. The epoch grows with each clear.
+    // Cluster-ready instances and entity exclusion sets of this frame, cleared at the start of BuildFrame().
+    // The pool is a fixed array, so a reserved set keeps its address; the epoch grows with each clear.
     std::vector<fx::ClusterInstance> m_clusterCandidates;
-    std::vector<AABB> m_clusterCandidateBounds; // Built lazily, aligned with m_clusterCandidates.
+    // Per-candidate arrays below are rebuilt together on first use; `m_clusterBoundsBuilt` guards stale contents.
+    std::vector<AABB> m_clusterCandidateBounds;
+    std::vector<Entity> m_clusterCandidateEntities;
+    fx::ClusterPartBox m_clusterCandidateUnion;
     bool m_clusterBoundsBuilt = false;
     fx::ClusterRejectCounts m_clusterRejections;
-    std::deque<std::unordered_set<Entity>> m_exclusionSets;
+    std::array<EntityMarkSet, kMaxExclusionSetsPerFrame> m_exclusionSets;
+    std::size_t m_exclusionSetsUsed = 0;
     std::uint64_t m_exclusionEpoch = 0;
 
     // Failed one-cluster syntheses per mesh; entries die with their mesh.

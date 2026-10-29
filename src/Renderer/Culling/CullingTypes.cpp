@@ -159,32 +159,29 @@ AABB PadAABB(const AABB& box, float fractionOfLargestExtent) noexcept
 
 AABB TransformAABB(const AABB& localAABB, const Mat4& worldMatrix)
 {
-    const Vec3 corners[8] = {
-        Vec3(localAABB.min.x, localAABB.min.y, localAABB.min.z),
-        Vec3(localAABB.max.x, localAABB.min.y, localAABB.min.z),
-        Vec3(localAABB.min.x, localAABB.max.y, localAABB.min.z),
-        Vec3(localAABB.max.x, localAABB.max.y, localAABB.min.z),
-        Vec3(localAABB.min.x, localAABB.min.y, localAABB.max.z),
-        Vec3(localAABB.max.x, localAABB.min.y, localAABB.max.z),
-        Vec3(localAABB.min.x, localAABB.max.y, localAABB.max.z),
-        Vec3(localAABB.max.x, localAABB.max.y, localAABB.max.z),
-    };
+    // Centre/extent form: exact for an affine matrix, 8 corners not needed.
+    const Vec4& c0 = worldMatrix.columns[0];
+    const Vec4& c1 = worldMatrix.columns[1];
+    const Vec4& c2 = worldMatrix.columns[2];
+    const Vec4& c3 = worldMatrix.columns[3];
 
-    Vec3 worldMin = worldMatrix.TransformPoint(corners[0]);
-    Vec3 worldMax = worldMin;
-    for (int i = 1; i < 8; ++i) {
-        const Vec3 worldCorner = worldMatrix.TransformPoint(corners[i]);
-        worldMin.x = std::min(worldMin.x, worldCorner.x);
-        worldMin.y = std::min(worldMin.y, worldCorner.y);
-        worldMin.z = std::min(worldMin.z, worldCorner.z);
-        worldMax.x = std::max(worldMax.x, worldCorner.x);
-        worldMax.y = std::max(worldMax.y, worldCorner.y);
-        worldMax.z = std::max(worldMax.z, worldCorner.z);
-    }
+    const float cx = 0.5f * (localAABB.min.x + localAABB.max.x);
+    const float cy = 0.5f * (localAABB.min.y + localAABB.max.y);
+    const float cz = 0.5f * (localAABB.min.z + localAABB.max.z);
+    const float ex = 0.5f * (localAABB.max.x - localAABB.min.x);
+    const float ey = 0.5f * (localAABB.max.y - localAABB.min.y);
+    const float ez = 0.5f * (localAABB.max.z - localAABB.min.z);
+
+    const float wx = c0.x * cx + c1.x * cy + c2.x * cz + c3.x;
+    const float wy = c0.y * cx + c1.y * cy + c2.y * cz + c3.y;
+    const float wz = c0.z * cx + c1.z * cy + c2.z * cz + c3.z;
+    const float hx = std::fabs(c0.x) * ex + std::fabs(c1.x) * ey + std::fabs(c2.x) * ez;
+    const float hy = std::fabs(c0.y) * ex + std::fabs(c1.y) * ey + std::fabs(c2.y) * ez;
+    const float hz = std::fabs(c0.z) * ex + std::fabs(c1.z) * ey + std::fabs(c2.z) * ez;
 
     AABB result;
-    result.min = worldMin;
-    result.max = worldMax;
+    result.min = Vec3(wx - hx, wy - hy, wz - hz);
+    result.max = Vec3(wx + hx, wy + hy, wz + hz);
     return result;
 }
 

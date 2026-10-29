@@ -193,4 +193,102 @@ TEST(HierarchyStateResponseTests, HiddenPanelHasNoRowsAndNullTimings)
     EXPECT_TRUE(body["drawnRows"].is_null());
 }
 
+TEST(ParsePanelVisibleQueryTests, NameAndVisibleAreValidated)
+{
+    const ParsedPanelVisibleQuery hide = ParsePanelVisibleQuery("Hierarchy", "false");
+    ASSERT_TRUE(hide.valid) << hide.errorMessage;
+    EXPECT_EQ(hide.panel, gte::TogglePanel::Hierarchy);
+    EXPECT_FALSE(hide.visible);
+
+    const ParsedPanelVisibleQuery show = ParsePanelVisibleQuery("Hierarchy", "true");
+    ASSERT_TRUE(show.valid) << show.errorMessage;
+    EXPECT_TRUE(show.visible);
+
+    const ParsedPanelVisibleQuery unknown = ParsePanelVisibleQuery("Nope", "true");
+    EXPECT_FALSE(unknown.valid);
+    EXPECT_NE(unknown.errorMessage.find("Hierarchy"), std::string::npos); // lists the supported names
+
+    EXPECT_FALSE(ParsePanelVisibleQuery("", "true").valid);
+    EXPECT_FALSE(ParsePanelVisibleQuery("Hierarchy", "").valid);
+    EXPECT_FALSE(ParsePanelVisibleQuery("Hierarchy", "TRUE").valid);
+    EXPECT_FALSE(ParsePanelVisibleQuery("hierarchy", "true").valid);
+}
+
+TEST(PanelVisibleResponseTests, JsonKeysArePinned)
+{
+    const nlohmann::json body =
+        nlohmann::json::parse(BuildPanelVisibleResponseJson(gte::TogglePanel::Hierarchy, false));
+    EXPECT_EQ(body.size(), 3u);
+    EXPECT_TRUE(body["success"].get<bool>());
+    EXPECT_EQ(body["name"], "Hierarchy");
+    EXPECT_FALSE(body["visible"].get<bool>());
+}
+
+TEST(ClosePresetSceneResponseTests, JsonKeysArePinned)
+{
+    const nlohmann::json body = nlohmann::json::parse(BuildClosePresetSceneResponseJson("Closed the Hi-Z demo."));
+    EXPECT_EQ(body.size(), 2u);
+    EXPECT_TRUE(body["success"].get<bool>());
+    EXPECT_EQ(body["message"], "Closed the Hi-Z demo.");
+}
+
+TEST(ParseHierarchyActionRequestTests, KindAndEntitiesAreValidated)
+{
+    const ParsedHierarchyActionRequest reorder = ParseHierarchyActionRequest(
+        R"({"kind":"reorder","dragged":{"index":4,"generation":2},"target":"9/1","insertAfter":true})");
+    ASSERT_TRUE(reorder.valid) << reorder.errorMessage;
+    EXPECT_EQ(reorder.command.kind, gte::HierarchyActionKind::Reorder);
+    EXPECT_EQ(reorder.command.dragged, (gte::Entity{ 4, 2 }));
+    EXPECT_EQ(reorder.command.target, (gte::Entity{ 9, 1 }));
+    EXPECT_TRUE(reorder.command.insertAfter);
+
+    const ParsedHierarchyActionRequest reparent =
+        ParseHierarchyActionRequest(R"({"kind":"reparent","dragged":"4/2","target":{"index":9,"generation":1}})");
+    ASSERT_TRUE(reparent.valid) << reparent.errorMessage;
+    EXPECT_EQ(reparent.command.kind, gte::HierarchyActionKind::Reparent);
+    EXPECT_FALSE(reparent.command.insertAfter);
+
+    const ParsedHierarchyActionRequest toggle = ParseHierarchyActionRequest(R"({"kind":"toggle","target":"9/1"})");
+    ASSERT_TRUE(toggle.valid) << toggle.errorMessage;
+    EXPECT_EQ(toggle.command.kind, gte::HierarchyActionKind::Toggle);
+}
+
+TEST(ParseHierarchyActionRequestTests, BadBodiesAreRefused)
+{
+    EXPECT_FALSE(ParseHierarchyActionRequest("").valid);
+    EXPECT_FALSE(ParseHierarchyActionRequest("[]").valid);
+    EXPECT_FALSE(ParseHierarchyActionRequest(R"({"target":"9/1"})").valid);                                // no kind
+    EXPECT_FALSE(ParseHierarchyActionRequest(R"({"kind":"move","dragged":"4/2","target":"9/1"})").valid);   // bad kind
+    EXPECT_FALSE(ParseHierarchyActionRequest(R"({"kind":"reorder","target":"9/1"})").valid);                // no dragged
+    EXPECT_FALSE(ParseHierarchyActionRequest(R"({"kind":"reparent","dragged":"4/2"})").valid);              // no target
+    EXPECT_FALSE(ParseHierarchyActionRequest(R"({"kind":"toggle","target":"9/0"})").valid);                 // generation 0
+    EXPECT_FALSE(ParseHierarchyActionRequest(R"({"kind":"toggle","target":"nine"})").valid);
+    EXPECT_FALSE(ParseHierarchyActionRequest(R"({"kind":"toggle","target":{"index":1}})").valid);
+    EXPECT_FALSE(ParseHierarchyActionRequest(R"({"kind":"toggle","target":"9/1","insertAfter":"yes"})").valid);
+}
+
+TEST(HierarchyActionResponseTests, JsonKeysArePinned)
+{
+    gte::HierarchyActionReport report;
+    report.success = true;
+    report.kind = "reorder";
+    report.changed = true;
+    report.firstRow = 3;
+    gte::HierarchyStateRow row;
+    row.entity = gte::Entity{ 7, 2 };
+    row.label = "Root";
+    report.rows = { row };
+
+    const nlohmann::json body = nlohmann::json::parse(BuildHierarchyActionResponseJson(report));
+    EXPECT_EQ(body.size(), 5u);
+    for (const char* key : { "success", "kind", "changed", "firstRow", "rows" }) {
+        EXPECT_TRUE(body.contains(key)) << key;
+    }
+    EXPECT_EQ(body["kind"], "reorder");
+    EXPECT_EQ(body["firstRow"], 3);
+    ASSERT_EQ(body["rows"].size(), 1u);
+    EXPECT_EQ(body["rows"][0].size(), 8u);
+    EXPECT_EQ(body["rows"][0]["entity"], "7/2");
+}
+
 } // namespace

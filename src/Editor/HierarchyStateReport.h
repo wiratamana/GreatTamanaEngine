@@ -34,4 +34,15 @@ struct HierarchyStateReport {
     std::uint32_t drawnRows = 0;
 };
 
+// Outcome of POST /hierarchy_action. `rows` are the rows around the target after the action, starting at row `firstRow`.
+struct HierarchyActionReport {
+    bool editorAvailable = true;
+    bool success = false;
+    std::string errorMessage; // set when !success
+    std::string kind;         // "reparent" | "reorder" | "toggle"
+    bool changed = false;
+    std::uint64_t firstRow = 0;
+    std::vector<HierarchyStateRow> rows;
+};
+
 } // namespace gte

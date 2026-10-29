@@ -155,6 +155,12 @@ public:
     // without mesh cluster bounds or with a non-finite matrix gets an inverted box that no frustum test rejects.
     std::span<const AABB> ClusterCandidateBounds() const;
 
+    // Entity of each candidate, aligned with ClusterCandidates(). Valid for this frame only.
+    std::span<const Entity> ClusterCandidateEntities() const;
+
+    // Union of every candidate box; unbounded when any candidate box is unusable. Valid for this frame only.
+    ClusterPartBox ClusterCandidateUnion() const;
+
     // Renderables of this frame that stayed on the CPU draw, by reason. Zeros when ClusterCandidates() is empty
     // for lack of an engine context, a shared frame or device support.
     ClusterRejectCounts ClusterRejections() const noexcept;

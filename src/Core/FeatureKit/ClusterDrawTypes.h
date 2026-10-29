@@ -88,6 +88,12 @@ struct ClusterRejectCounts {
     }
 };
 
+// World box that holds a set of instances. `bounded` is false for an empty set or when any instance box is unusable.
+struct ClusterPartBox {
+    AABB box;
+    bool bounded = false;
+};
+
 // Camera of one chain. `eyeOrDirection` is the eye point, or the view direction when `orthographic`.
 struct ClusterCamera {
     Mat4 viewProjection = Mat4::Identity();

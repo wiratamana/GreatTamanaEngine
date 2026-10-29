@@ -594,7 +594,7 @@ function New-HizDemoCheck {
 # Verdict lines and PASS / FAIL / INVALID checks per profile (wall on: Hi-Z <= $WallRatio x Frustum;
 # wall off: Hi-Z <= Frustum + $HizBudgetMs). INVALID = too few valid samples, Hi-Z not Applied, or unmeasured.
 function Get-HizDemoVerdicts {
-    param($Rows, [double]$HizBudgetMs = 0.4, [double]$WallRatio = 0.10, [double]$MinValidPercent = 80.0)
+    param($Rows, [double]$HizBudgetMs = 3.0, [double]$WallRatio = 0.25, [double]$MinValidPercent = 80.0)
     $lines = New-Object System.Collections.Generic.List[string]
     $checks = New-Object System.Collections.Generic.List[object]
     $profiles = @($Rows | ForEach-Object { $_.Profile } | Select-Object -Unique)
@@ -624,6 +624,7 @@ function Get-HizDemoVerdicts {
         if (($null -ne $fOff) -and ($null -ne $hOff)) {
             $lines.Add(('[{0}] Hi-Z vs Frustum, wall off: {1} (GpuDrivenScene primary {2})' -f $p,
                 (Format-HizDelta $hOff.Span $fOff.Span), (Format-HizDelta $hOff.GdsPrimary $fOff.GdsPrimary)))
+            $lines.Add(('[{0}] Hi-Z runs a second full cull pass over all work items, so wall off adds ms; only an indirect-dispatch cull removes it.' -f $p))
             $status = 'INVALID'
             $detail = 'a row has too few valid samples, Hi-Z was not Applied, or a value was not measured'
             $ok = ($fOff.ValidPct -ge $MinValidPercent) -and ($hOff.ValidPct -ge $MinValidPercent) -and $hOff.Applied

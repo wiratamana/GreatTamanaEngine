@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <exception>
+#include <map>
 #include <system_error>
 #include <vector>
 
@@ -199,6 +200,20 @@ nlohmann::json ProfilerSnapshotToJson(const ProfilerSnapshot& snapshot)
     }
     out["scopes"] = std::move(scopes);
     out["scope_rows_dropped"] = MetricToJson(Profiling::PresentMetric(snapshot.scopeRowsDropped, Profiling::Unit::Count));
+
+    nlohmann::json nested = nlohmann::json::array();
+    for (std::uint32_t i = 0; i < snapshot.nestedCount && i < snapshot.nested.size(); ++i) {
+        const Profiling::SnapshotNestedRow& row = snapshot.nested[i];
+        nlohmann::json item = nlohmann::json::object();
+        item["name"] = Text(row.name);
+        item["depth"] = row.depth;
+        item["total"] = MetricToJson(row.total);
+        item["self"] = MetricToJson(row.self);
+        item["calls"] = MetricToJson(row.calls);
+        nested.push_back(std::move(item));
+    }
+    out["nested"] = std::move(nested);
+    out["nested_rows_dropped"] = MetricToJson(Profiling::PresentMetric(snapshot.nestedRowsDropped, Profiling::Unit::Count));
 
     nlohmann::json checks = nlohmann::json::array();
     for (const Profiling::SnapshotCheck& check : snapshot.checks) {
@@ -535,6 +550,65 @@ ProfilerReply BuildProfilerSpikeReply(const std::optional<Profiling::SpikeDetail
     return { 200, ProfilerSpikeDetailToJson(*detail).dump() };
 }
 
+std::optional<std::string> ParseProfilerScopeName(const std::string& text)
+{
+    constexpr std::size_t kMaxScopeNameBytes = 256;
+    if (text.empty() || text.size() > kMaxScopeNameBytes) {
+        return std::nullopt;
+    }
+    return text;
+}
+
+nlohmann::json ProfilerScopeToJson(const Profiling::SpikeDetail& frame, const std::string& name)
+{
+    struct DepthSum {
+        double totalMs = 0.0;
+        double selfMs = 0.0;
+        std::uint32_t calls = 0;
+    };
+    std::map<std::uint16_t, DepthSum> byDepth;
+    for (const Profiling::SpikeScopeRow& row : frame.scopes) {
+        if (row.kind == Profiling::ScopeKind::Marker || row.name != name) {
+            continue;
+        }
+        DepthSum& sum = byDepth[row.depth];
+        sum.totalMs += row.durationMs;
+        sum.selfMs += row.selfMs;
+        ++sum.calls;
+    }
+
+    nlohmann::json out = nlohmann::json::object();
+    out["success"] = true;
+    out["schema_version"] = Profiling::kProfilerSchemaVersion;
+    out["frame_index"] = frame.frameIndex;
+    out["state"] = "ok";
+    out["name"] = name;
+    nlohmann::json rows = nlohmann::json::array();
+    for (const auto& [depth, sum] : byDepth) {
+        nlohmann::json item = nlohmann::json::object();
+        item["depth"] = depth;
+        item["calls"] = MetricToJson(Profiling::PresentMetric(static_cast<double>(sum.calls), Profiling::Unit::Count));
+        item["total"] = MetricToJson(Profiling::PresentMetric(sum.totalMs, Profiling::Unit::Milliseconds));
+        item["self"] = MetricToJson(Profiling::PresentMetric(sum.selfMs, Profiling::Unit::Milliseconds, Profiling::MetricKind::Derived));
+        rows.push_back(std::move(item));
+    }
+    out["rows"] = std::move(rows);
+    out["dropped_scopes"] = MetricToJson(Profiling::PresentMetric(static_cast<double>(frame.droppedScopes), Profiling::Unit::Count));
+    return out;
+}
+
+ProfilerReply BuildProfilerScopeReply(const std::optional<Profiling::SpikeDetail>& frame, const std::string& name)
+{
+    if (!frame) {
+        return { 503, BuildGenericErrorResponseJson("no profiler frame published yet - the main thread has not published one, try again") };
+    }
+    const nlohmann::json document = ProfilerScopeToJson(*frame, name);
+    if (document["rows"].empty()) {
+        return { 404, BuildGenericErrorResponseJson("no scope named '" + name + "' ran in frame " + std::to_string(frame->frameIndex)) };
+    }
+    return { 200, document.dump() };
+}
+
 ProfilerReply BuildProfilerPinErrorReply(bool limitReached, std::uint64_t frameIndex, std::size_t pinned)
 {
     if (limitReached) {
@@ -627,6 +701,30 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
                 reply = { 400, BuildGenericErrorResponseJson("invalid query parameter: index - the frame_index of a frozen spike") };
             } else {
                 reply = BuildProfilerSpikeReply(bridge->SpikeFrame(*index), *index);
+            }
+        }
+#else
+        static_cast<void>(req);
+        static_cast<void>(bridge);
+        reply = BuildProfilerUnavailableReply();
+#endif
+        res.status = reply.status;
+        res.set_content(reply.body, "application/json");
+    });
+
+    server.Get("/profiler/scope", [bridge](const httplib::Request& req, httplib::Response& res) {
+        ProfilerReply reply;
+#if GTE_ENABLE_PROFILER
+        if (bridge == nullptr) {
+            reply = BuildProfilerUnavailableReply();
+        } else {
+            const std::optional<std::string> name = ParseProfilerScopeName(req.get_param_value("name"));
+            if (!name) {
+                reply = { 400, BuildGenericErrorResponseJson("invalid query parameter: name - the exact name of a scope") };
+            } else {
+                // Asking also tells the main thread to keep publishing frames.
+                static_cast<void>(bridge->Latest(kSnapshotWait));
+                reply = BuildProfilerScopeReply(bridge->LatestFrameDetail(), *name);
             }
         }
 #else

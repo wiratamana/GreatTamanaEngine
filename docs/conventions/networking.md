@@ -359,6 +359,26 @@ module or adding a new endpoint:
     and the three timings are `null` (not measured, never `0`). `buildMs` is the snapshot rebuild,
     `flattenMs` the row flatten, `drawnRows` the rows ImGui drew. `400` for a non-numeric `first`/`count`,
     `503` without an editor. Pinned by `NetworkRoutesInspectorTests.cpp`.
+  - `GET /panel_visible?name=Hierarchy&visible=true|false` hides or shows an editor panel for this session only
+    (`PanelHiddenFlags` in `EditorContext`; never saved, a restart shows the panel again). It runs on the main
+    thread through `EditorUiCommandKind::PanelVisible`. `/activate_tab` cannot hide a panel that sits alone in
+    its dock. A hidden panel is skipped before it does any work: the `HierarchyPanel` scope is absent and
+    `/hierarchy_state` reports `visible` `false` (timings `null`). Supported `name`: `Hierarchy` only (`kTogglePanelNames`
+    in `PanelVisibility.h`). Reply `200`: `{"success":true,"name","visible"}`. `400` for an unknown `name` (the
+    error lists the supported names) or a `visible` that is not exactly `true` or `false`, `503` without an editor.
+    Pinned by `NetworkRoutesInspectorTests.cpp` and `HierarchyRowsTests.cpp`.
+  - `POST /hierarchy_action` is a debug route for tests and AI debugging: it does what a mouse drop or an arrow
+    click does, on the main thread through `EditorUiCommandKind::HierarchyAction`. Body:
+    `{"kind":"reparent"|"reorder"|"toggle","dragged","target","insertAfter"?}`. An entity is
+    `{"index","generation"}` or the `"<index>/<generation>"` text of `/hierarchy_state`; `toggle` needs only `target`.
+    The route refreshes the rows itself (it works while the panel is hidden), builds the action with
+    `PlanHierarchyAction()` from the target row's `parent` and `siblingPosition` (what a real drop records) and applies
+    it with `ApplyHierarchyAction()` / `ToggleHierarchyCollapsed()`, the same functions `HierarchyPanel.cpp` calls.
+    Reply `200`: `{"success":true,"kind","changed","firstRow","rows":[...]}` with the rows of `/hierarchy_state`
+    for the target row +-5 after the action (`firstRow` = index of the first one). `changed` is `false` when the
+    action was legal but moved nothing. `400` for a bad body, a dead entity, a target that is not a visible row
+    (hidden under a collapsed row), `dragged == target`, a new parent inside the dragged subtree, or a `toggle` on a
+    row without children. `503` without an editor. Pinned by `HierarchyRowsTests.cpp` and `NetworkRoutesInspectorTests.cpp`.
 
 - **Cluster viewer routes** (`/cluster_viewer/*`, `POST /clone_clusters`) use two more
   `EditorUiCommandKind` values, `ClusterViewer` and `SceneCamera`, and the `CloneMeshClusters` kind of
@@ -437,7 +457,9 @@ module or adding a new endpoint:
   - **`GET /profiler`**: `success`, `schema_version`, `frame_index`, `state`, `has_frame`, `snapshot_age`, `capture`,
     `display_paused`, `cpu_frame`, `untracked`, `blocked{gpu,workers,other}`,
     `gpu{views{shared,primary,secondary},span,indirect_draws{...},coverage{declared,executed,recorded,disabled_by_toggle}}`,
-    `memory{total}`, `scopes[{name,total,self,calls}]` (top-level scopes, largest first), `scope_rows_dropped`,
+    `memory{total}`, `scopes[{name,total,self,calls}]` (top-level scopes, largest first, at most 32), `scope_rows_dropped`,
+    `nested[{name,depth,total,self,calls}]` (scopes at depth 1 or deeper of the newest frame, one row per name and depth,
+    largest total first, capped at 64), `nested_rows_dropped` (distinct name and depth pairs that did not fit),
     `checks[{id,status,count,text}]`, `drops{late_scopes,foreign_scopes,lost_worker_events,dropped_scopes,dropped_gpu_frames}`,
     `device_state{device_lost,consecutive_frame_timeouts,abandoned_objects,present_policy}` (`present_policy` is `capped` or
     `uncapped`; start the exe with `--no-vsync` for `uncapped`, see below), `live_block[{thread_slot,site,detail,elapsed}]`
@@ -465,6 +487,11 @@ module or adding a new endpoint:
   - **`GET /profiler/spike?index=F`**: one frozen frame by its `frame_index` `F` with `scopes[{name,kind,depth,start,duration,self}]`
     in time order (`start` counts from the frame start), `gpu_views`, `dropped_scopes`. A bad index is a `400`, a frame that was
     never frozen or was evicted is a `404`.
+  - **`GET /profiler/scope?name=<exact scope name>`**: every call of one scope in the newest published frame, at any depth,
+    summed per depth: `success`, `schema_version`, `frame_index`, `state`, `name`, `rows[{depth,calls,total,self}]` (one row
+    per depth, shallow first), `dropped_scopes`. The profiler keeps the scope tree of the newest frame and of frozen spikes
+    only, so there is no per-frame history of one scope: poll the route and take the median of the samples. Missing or
+    over-long `name` is a `400`, a scope that did not run in that frame is a `404`, no published frame yet is a `503`.
   - **`POST /profiler/set`** with `capture`, `display_pause`, `pin`, `unpin` (a spike `frame_index`) and/or `spike_threshold_ms`
     (0 to 10000, 0 selects the median rule) as query values or a JSON body
     `{"capture":bool,"display_pause":bool,"pin":N,"unpin":N,"spike_threshold_ms":x}`. Reply
@@ -574,6 +601,13 @@ module or adding a new endpoint:
   `"geometry_only"` it also turns off the fixed-cost features listed by `GET /hiz_demo/geometry_only_features`.
   The new scene is built first; the old one is replaced only when everything worked. File > Close Hi-Z Demo, the
   next preset open and File > Open Sponza Scene put the features and settings back.
+
+- **`POST /close_preset_scene`** is File > Close Hi-Z Demo for AI callers (`EngineCommandKind::ClosePresetScene`
+  -> `ISceneIOCapability::ClosePresetScene()` -> `CloseHizDemo()`). The body is ignored. It removes the entities the
+  demo created and restores the features and settings it changed. Reply `200`: `{"success":true,"message"}`.
+  `500` `{"error"}` when no demo is open or the restore was incomplete (`message` says which; see `/get_logs`),
+  `503` without the Editor module or while another engine command runs, `504` after 30 s.
+  Pinned by `NetworkRoutesInspectorTests.cpp` (`BuildClosePresetSceneResponseJson()`).
 
 - **`GET /hiz_demo/geometry_only_features`** returns `{"prefixes":["Shadow","VolumetricLight",...]}`: the one
   list of fixed-cost feature name prefixes the Hi-Z demo's `geometry_only` profile turns off. Scripts read
@@ -857,7 +891,9 @@ registering a new named texture:
   (`testedClusters`, `visibleClusters` and `visibleValid` (needs `collectStats`), `testedAtVisibleFrame`, `hidden`,
   `hiddenValid`, `cameraValid`, `claimedEntities` (drawn plus skipped instances), `occlusion`, `hizReason` (`None`,
   `Unavailable`, `TooLarge` or `NothingInView`), `skippedParts` and `skippedInstances` (parts outside the cull frustum:
-  no pass, entities still claimed; a view whose parts are all skipped reports `visibleClusters` 0 with `visibleValid` true),
+  no pass, entities still claimed; a view whose parts are all skipped reports `visibleClusters` 0 with `visibleValid` true;
+  the four keys `game|scene.skippedParts|skippedInstances` are numbers, pinned by `GpuDrivenSceneTypesTests.cpp` through
+  `AppendGpuDrivenSceneViewFields()`),
   `sharedSurvivors` (the secondary view drew the primary view's survivors), `inertReason`, `ledgerBytes`, ...) plus the CPU draw cull
   of the view: `cpuTested`,
   `cpuCulled`, `cpuUnbounded` (one frame old), `cpuCullState` (`active`, `off`, `suppressed: frame capture` or

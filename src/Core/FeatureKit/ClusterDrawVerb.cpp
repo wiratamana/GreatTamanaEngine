@@ -124,7 +124,9 @@ struct ClusterDrawChain::Impl {
     std::uint32_t noSlotInstances = 0; // Instances of parts that found no slot.
     std::uint32_t skippedParts = 0;    // Parts outside the cull frustum: no pass, no slot.
     std::uint32_t skippedInstances = 0;
-    std::vector<Entity> skippedEntities; // Entities of the skipped parts, claimed without a pass.
+    // Claim input of the skipped parts: spans into Core's candidate entities or into `skippedStorage`, both frame-lived.
+    std::vector<Entity> skippedStorage;
+    std::vector<std::span<const Entity>> skippedEntities;
     rg::ClusterDrawBindings* bindings = nullptr;
     ClusterClaimContext claimContext;
 
@@ -354,7 +356,7 @@ void PlanChain(ClusterDrawChain::Impl& s)
             continue;
         }
         if (verdict != ClusterPartVerdict::Ok) {
-            frame.ReportOnce(std::string("Pass '") + anchorName.value + "': " + TokenText(group.mesh)
+            frame.ReportWarningOnce(std::string("Pass '") + anchorName.value + "': " + TokenText(group.mesh)
                 + " is over a cluster draw limit; the CPU draw is used");
             continue;
         }
@@ -372,25 +374,39 @@ void PlanChain(ClusterDrawChain::Impl& s)
         eligible.push_back(std::move(group));
     }
 
-    // Parts wholly outside the cull frustum get no pass and no slot; their entities are still claimed. The decision
-    // uses only the cull camera and the shared candidates, so every view reaches the same one. Bounds are built
-    // only when a skip is possible.
+    // Parts wholly outside the cull frustum get no pass and no slot; their entities are still claimed.
+    // Every view decides from the cull camera and the shared candidates alone, so all views agree.
     {
         GTE_PROFILE_SCOPE("ClusterPart.Skip");
         const auto planes = TryExtractFrustumPlanes(cullCamera.viewProjection);
         const bool canSkip = planes.has_value() && HasClusterCullFlag(flags, ClusterCullFlags::Frustum)
             && !eligible.empty() && s.instances.data() == frame.ClusterCandidates().data();
         if (canSkip) {
-            const std::vector<std::uint8_t> skips =
-                PlanClusterPartSkips(planes, flags, frame.ClusterCandidateBounds(), eligible);
+            const std::vector<std::uint8_t> skips = PlanClusterPartSkips(
+                planes, flags, frame.ClusterCandidateBounds(), frame.ClusterCandidateUnion(), eligible);
+            const std::span<const Entity> candidateEntities = frame.ClusterCandidateEntities();
+            std::size_t partialEntities = 0;
+            for (std::size_t i = 0; i < eligible.size(); ++i) {
+                if (skips[i] != 0 && eligible[i].instances.size() != candidateEntities.size()) {
+                    partialEntities += eligible[i].instances.size();
+                }
+            }
+            s.skippedStorage.reserve(partialEntities); // Exact, so spans into it never dangle.
             std::size_t kept = 0;
             for (std::size_t i = 0; i < eligible.size(); ++i) {
                 if (skips[i] != 0) {
                     ++s.skippedParts;
                     s.skippedInstances += static_cast<std::uint32_t>(eligible[i].instances.size());
-                    for (const std::uint32_t candidate : eligible[i].instances) {
-                        s.skippedEntities.push_back(s.instances[candidate].entity);
+                    if (eligible[i].instances.size() == candidateEntities.size()) {
+                        s.skippedEntities.push_back(candidateEntities);
+                        continue;
                     }
+                    const std::size_t begin = s.skippedStorage.size();
+                    for (const std::uint32_t candidate : eligible[i].instances) {
+                        s.skippedStorage.push_back(candidateEntities[candidate]);
+                    }
+                    s.skippedEntities.push_back(
+                        std::span<const Entity>(s.skippedStorage.data() + begin, eligible[i].instances.size()));
                     continue;
                 }
                 if (kept != i) {
@@ -466,7 +482,7 @@ void PlanChain(ClusterDrawChain::Impl& s)
         if (!s.shared
             && state.TryReserveChainBytes(context->scope, s.lane, thisSlot, instanceCount, workItems, s.twoPhase)
                 != ClusterReserveResult::Ok) {
-            frame.ReportOnce(std::string("Pass '") + anchorName.value + "': " + TokenText(group.mesh)
+            frame.ReportWarningOnce(std::string("Pass '") + anchorName.value + "': " + TokenText(group.mesh)
                 + " is over the cluster draw memory budget; the CPU draw is used");
             continue;
         }
@@ -508,6 +524,7 @@ void PlanChain(ClusterDrawChain::Impl& s)
             frame.ReportOnce(std::string("Pass '") + anchorName.value + "': no exclusion set is left this frame");
             s.parts.clear();
             s.skippedEntities.clear();
+            s.skippedStorage.clear();
             s.skippedParts = 0;
             s.skippedInstances = 0;
             return;
@@ -827,17 +844,19 @@ void PublishSurvivors(
 }
 
 // Hands the claimed entities to the CPU scene draw (or to the depth-only exclusion set).
-void ApplyClaim(const ClusterDrawChain::Impl& s, std::span<const Entity> claimed)
+void ApplyClaim(const ClusterDrawChain::Impl& s, std::span<const std::span<const Entity>> claimed)
 {
     if (claimed.empty()) {
         return;
     }
     GTE_PROFILE_SCOPE("ClusterPart.Claim");
     Core& core = *s.frame->Context()->core;
-    if (s.depthOnly) {
-        core.FillExclusion(s.plan.exclusion, claimed);
-    } else {
-        core.ClaimEntities(s.claimContext.scope, claimed);
+    for (const std::span<const Entity> entities : claimed) {
+        if (s.depthOnly) {
+            core.FillExclusion(s.plan.exclusion, entities);
+        } else {
+            core.ClaimEntities(s.claimContext.scope, entities);
+        }
     }
 }
 
@@ -904,6 +923,7 @@ ClusterPlan ClusterDrawChain::Plan()
     const auto reset = [&s] {
         s.parts.clear();
         s.skippedEntities.clear();
+        s.skippedStorage.clear();
         s.skippedParts = 0;
         s.skippedInstances = 0;
         s.plan = ClusterPlan{};

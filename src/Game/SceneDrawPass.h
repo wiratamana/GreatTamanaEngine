@@ -36,7 +36,7 @@ public:
 
     // Entities the draw skips. Read when the pass executes, so the set must outlive the frame's graph. Null skips none.
     // With `liveEpoch`, a changed epoch at execute time means the set is gone: debug asserts, release skips nothing.
-    SceneDrawPass& ExcludeEntities(const std::unordered_set<Entity>* entities, const std::uint64_t* liveEpoch = nullptr);
+    SceneDrawPass& ExcludeEntities(const EntityMarkSet* entities, const std::uint64_t* liveEpoch = nullptr);
 
     // Declares the pass. False (and one error in the log) when it has no attachment.
     bool Draw();
@@ -49,7 +49,7 @@ private:
     PipelineOverrideSet m_overrides;
     Mat4 m_viewProjection = Mat4::Identity();
     std::optional<float> m_cullPadding;
-    const std::unordered_set<Entity>* m_excluded = nullptr;
+    const EntityMarkSet* m_excluded = nullptr;
     const std::uint64_t* m_liveEpoch = nullptr;
     std::uint64_t m_epochAtDeclare = 0;
 };

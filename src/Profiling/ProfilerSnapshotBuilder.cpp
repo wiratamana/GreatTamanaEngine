@@ -42,68 +42,86 @@ bool IsAbsentGpu(const GpuViewMetric& metric) noexcept
     return metric.status == SampleStatus::Absent;
 }
 
-// Accumulates one name's top-level scopes.
+// One name at one depth, summed over its calls in the frame.
 struct ScopeAccumulator {
     NameId name = kInvalidNameId;
+    std::uint16_t depth = 0;
     std::uint64_t totalTicks = 0;
     std::uint64_t selfTicks = 0;
     std::uint32_t calls = 0;
 };
+
+// Sums the non-marker scopes at depth 0 (`topLevel`) or deeper. Same name and depth merge; largest total first.
+std::vector<ScopeAccumulator> SumScopes(
+    std::span<const ScopeEvent> events, std::span<const ScopeTimes> times, bool topLevel)
+{
+    std::vector<std::uint32_t> picked;
+    for (std::size_t i = 0; i < events.size(); ++i) {
+        if (events[i].kind != ScopeKind::Marker && (events[i].depth == 0) == topLevel) {
+            picked.push_back(static_cast<std::uint32_t>(i));
+        }
+    }
+    std::sort(picked.begin(), picked.end(), [&](std::uint32_t a, std::uint32_t b) {
+        return events[a].name != events[b].name ? events[a].name < events[b].name : events[a].depth < events[b].depth;
+    });
+
+    std::vector<ScopeAccumulator> sums;
+    for (const std::uint32_t index : picked) {
+        const ScopeEvent& event = events[index];
+        if (sums.empty() || sums.back().name != event.name || sums.back().depth != event.depth) {
+            sums.push_back(ScopeAccumulator{ event.name, event.depth, 0, 0, 0 });
+        }
+        sums.back().totalTicks += times[index].totalTicks;
+        sums.back().selfTicks += times[index].selfTicks;
+        ++sums.back().calls;
+    }
+    std::sort(sums.begin(), sums.end(), [](const ScopeAccumulator& a, const ScopeAccumulator& b) {
+        if (a.totalTicks != b.totalTicks) {
+            return a.totalTicks > b.totalTicks;
+        }
+        return a.name != b.name ? a.name < b.name : a.depth < b.depth;
+    });
+    return sums;
+}
+
+template <typename Row>
+void FillScopeRow(Row& row, const ScopeAccumulator& sum, bool partial)
+{
+    CopySnapshotText(row.name, ResolveName(sum.name));
+    row.total = TicksAsMilliseconds(sum.totalTicks);
+    row.self = TicksAsMilliseconds(sum.selfTicks, MetricKind::Derived);
+    row.calls = Count(sum.calls);
+    if (partial) {
+        row.total.status = SampleStatus::Partial;
+        row.total.reason = Reason::Dropped;
+        row.self.status = SampleStatus::Partial;
+        row.self.reason = Reason::Dropped;
+    }
+}
 
 void FillScopeRows(ProfilerSnapshot& snapshot, const FrameRecord& record)
 {
     const std::span<const ScopeEvent> events = record.scopes.Events();
     std::vector<ScopeTimes> times(events.size());
     ComputeScopeTimes(events, times);
-
-    std::array<ScopeAccumulator, kSnapshotScopeRows> accumulators{};
-    std::size_t used = 0;
-    std::uint32_t dropped = 0;
-
-    for (std::size_t i = 0; i < events.size(); ++i) {
-        const ScopeEvent& event = events[i];
-        if (event.depth != 0 || event.kind == ScopeKind::Marker) {
-            continue;
-        }
-        ScopeAccumulator* row = nullptr;
-        for (std::size_t r = 0; r < used; ++r) {
-            if (accumulators[r].name == event.name) {
-                row = &accumulators[r];
-                break;
-            }
-        }
-        if (row == nullptr) {
-            if (used == accumulators.size()) {
-                ++dropped;
-                continue;
-            }
-            row = &accumulators[used++];
-            row->name = event.name;
-        }
-        row->totalTicks += times[i].totalTicks;
-        row->selfTicks += times[i].selfTicks;
-        ++row->calls;
-    }
-
-    std::sort(accumulators.begin(), accumulators.begin() + static_cast<std::ptrdiff_t>(used),
-        [](const ScopeAccumulator& a, const ScopeAccumulator& b) { return a.totalTicks > b.totalTicks; });
-
     const bool partial = record.scopes.Partial();
-    for (std::size_t r = 0; r < used; ++r) {
-        SnapshotScopeRow& row = snapshot.scopes[r];
-        CopySnapshotText(row.name, ResolveName(accumulators[r].name));
-        row.total = TicksAsMilliseconds(accumulators[r].totalTicks);
-        row.self = TicksAsMilliseconds(accumulators[r].selfTicks, MetricKind::Derived);
-        row.calls = Count(accumulators[r].calls);
-        if (partial) {
-            row.total.status = SampleStatus::Partial;
-            row.total.reason = Reason::Dropped;
-            row.self.status = SampleStatus::Partial;
-            row.self.reason = Reason::Dropped;
-        }
+
+    const std::vector<ScopeAccumulator> top = SumScopes(events, times, true);
+    const std::size_t topUsed = std::min(top.size(), snapshot.scopes.size());
+    for (std::size_t r = 0; r < topUsed; ++r) {
+        FillScopeRow(snapshot.scopes[r], top[r], partial);
     }
-    snapshot.scopeCount = static_cast<std::uint32_t>(used);
-    snapshot.scopeRowsDropped = dropped;
+    snapshot.scopeCount = static_cast<std::uint32_t>(topUsed);
+    snapshot.scopeRowsDropped = static_cast<std::uint32_t>(top.size() - topUsed);
+
+    const std::vector<ScopeAccumulator> nested = SumScopes(events, times, false);
+    const std::size_t nestedUsed = std::min(nested.size(), snapshot.nested.size());
+    for (std::size_t r = 0; r < nestedUsed; ++r) {
+        FillScopeRow(snapshot.nested[r], nested[r], partial);
+        snapshot.nested[r].depth = nested[r].depth;
+    }
+    snapshot.nestedCount = static_cast<std::uint32_t>(nestedUsed);
+    snapshot.nestedRowsDropped = static_cast<std::uint32_t>(nested.size() - nestedUsed);
 }
 
 void FillFrameRows(ProfilerSnapshot& snapshot, const FrameProfiler& profiler)

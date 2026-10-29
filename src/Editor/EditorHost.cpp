@@ -341,6 +341,13 @@ EditorUiCommandResult RunEditorUiCommand(const EditorUiCommandRequest& request, 
     case EditorUiCommandKind::HierarchyState:
         result.hierarchyState = layer.HierarchyState(game, request.hierarchyState.first, request.hierarchyState.count);
         break;
+    case EditorUiCommandKind::PanelVisible:
+        result.panelVisible.editorAvailable =
+            layer.SetPanelHidden(request.panelVisible.panel, !request.panelVisible.visible);
+        break;
+    case EditorUiCommandKind::HierarchyAction:
+        result.hierarchyAction = layer.HierarchyAction(game, request.hierarchyAction);
+        break;
     case EditorUiCommandKind::Exit:
         break; // The result kind is the answer; Run() ends the loop.
     }

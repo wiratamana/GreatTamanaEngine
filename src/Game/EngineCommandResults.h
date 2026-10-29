@@ -267,6 +267,14 @@ struct OpenPresetSceneOutcome {
     std::string detailsJson; // Preset-specific reply keys as a JSON object text; empty when none.
 };
 
+// Outcome of one ISceneIOCapability::ClosePresetScene() call.
+// editorAvailable == false means this build has no scene IO capability.
+struct ClosePresetSceneOutcome {
+    bool success = false;
+    bool editorAvailable = true;
+    std::string message;
+};
+
 // editor-core-separation-12 campaign, PHASE1 (Project Assembly Hot Reload
 // plan, BIG-STEP 1) - outcome of one
 // IHotReloadDebugCapability::BuildSceneSnapshotJson(Game&) call, wrapped for

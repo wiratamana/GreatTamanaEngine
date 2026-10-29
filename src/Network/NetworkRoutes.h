@@ -15,7 +15,9 @@
 #include "../Core/FeatureKit/FeatureDebug.h"
 #include "../Core/Logging.h"
 #include "../Core/InstanceGridLimits.h"
-#include "../Editor/HierarchyStateReport.h" // Report struct of the GET /hierarchy_state route.
+#include "../Editor/HierarchyActionRequest.h" // Request of the POST /hierarchy_action route.
+#include "../Editor/HierarchyStateReport.h" // Report structs of the GET /hierarchy_state and POST /hierarchy_action routes.
+#include "../Editor/PanelVisibility.h" // Panel ids of the GET /panel_visible route.
 #include "../Editor/SceneCameraControl.h" // Report structs of the viewer and Scene camera routes.
 #include "../Renderer/RenderGraph/RenderGraphMetadata.h" // Type of the GET /render_graph body.
 
@@ -1092,6 +1094,33 @@ ParsedHierarchyStateQuery ParseHierarchyStateQuery(const std::string& firstParam
 
 // Response JSON for GET /hierarchy_state (key list: the networking convention doc).
 std::string BuildHierarchyStateResponseJson(const HierarchyStateReport& report);
+
+// Parsed GET /panel_visible query: "name" must be one of kTogglePanelNames, "visible" exactly "true" or "false".
+struct ParsedPanelVisibleQuery {
+    bool valid = false;
+    std::string errorMessage; // Lists the supported names when `name` is unknown.
+    TogglePanel panel = TogglePanel::Hierarchy;
+    bool visible = true;
+};
+ParsedPanelVisibleQuery ParsePanelVisibleQuery(const std::string& nameParam, const std::string& visibleParam);
+
+// Success shape: {"success":true,"name":"<panel>","visible":<bool>}
+std::string BuildPanelVisibleResponseJson(TogglePanel panel, bool visible);
+
+// Success shape of POST /close_preset_scene: {"success":true,"message":"<text>"}. Failures use BuildGenericErrorResponseJson().
+std::string BuildClosePresetSceneResponseJson(const std::string& message);
+
+// Parsed POST /hierarchy_action body: {"kind":"reparent"|"reorder"|"toggle","dragged","target","insertAfter"?}.
+// An entity is {"index","generation"} or "<index>/<generation>". Toggle needs only "target".
+struct ParsedHierarchyActionRequest {
+    bool valid = false;
+    std::string errorMessage;
+    HierarchyActionCommand command;
+};
+ParsedHierarchyActionRequest ParseHierarchyActionRequest(const std::string& jsonBody);
+
+// Success shape: {"success":true,"kind","changed","firstRow","rows":[<GET /hierarchy_state row>]}
+std::string BuildHierarchyActionResponseJson(const HierarchyActionReport& report);
 
 // GET /render_graph/set_pass_enabled, /passes, /set_feature_enabled,
 // /set_feature_priority query parsing and response building.

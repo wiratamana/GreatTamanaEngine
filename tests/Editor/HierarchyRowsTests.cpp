@@ -6,6 +6,7 @@
 #include "ECS/HierarchySnapshot.h"
 #include "ECS/Registry.h"
 #include "ECS/TransformHierarchy.h"
+#include "Editor/PanelVisibility.h"
 #include "Editor/Selection.h"
 
 #include <gtest/gtest.h>
@@ -301,6 +302,195 @@ TEST(HierarchyRowsTest, HiddenPanelReportsNoRowsAndReleasesBuffersAfterALongRun)
     EXPECT_TRUE(state.rows.empty());
     EXPECT_EQ(state.rows.capacity(), 0u);
     EXPECT_EQ(state.snapshot.Size(), 0u);
+}
+
+TEST(HierarchyActionPlanTest, RefusesEveryBadRequestAndKeepsTheRowData)
+{
+    Registry registry;
+    const Entity root = AddNode(registry, kInvalidEntity, 0);
+    const Entity a = AddNode(registry, root, 0);
+    const Entity b = AddNode(registry, a, 0);
+    const Entity other = AddNode(registry, kInvalidEntity, 1);
+    const std::vector<HierarchyRow> rows = Flatten(registry, { a }); // rows: root, a, other; b is hidden
+
+    const auto plan = [&](HierarchyActionKind kind, Entity dragged, Entity target, bool after = false) {
+        return PlanHierarchyAction(registry, rows, HierarchyActionCommand{ kind, dragged, target, after });
+    };
+
+    const Entity dead = AddNode(registry);
+    registry.DestroyEntity(dead);
+    EXPECT_FALSE(plan(HierarchyActionKind::Reorder, dead, other).ok);
+    EXPECT_FALSE(plan(HierarchyActionKind::Reorder, other, dead).ok);
+    EXPECT_FALSE(plan(HierarchyActionKind::Reparent, other, b).ok);   // target hidden under a collapsed row
+    EXPECT_FALSE(plan(HierarchyActionKind::Reparent, other, other).ok);
+    EXPECT_FALSE(plan(HierarchyActionKind::Reparent, root, a).ok);    // onto its own descendant
+    EXPECT_FALSE(plan(HierarchyActionKind::Reorder, root, a).ok);     // new parent would be root itself
+    EXPECT_FALSE(plan(HierarchyActionKind::Toggle, kInvalidEntity, other).ok); // no children
+
+    const HierarchyActionPlan toggle = plan(HierarchyActionKind::Toggle, kInvalidEntity, a);
+    ASSERT_TRUE(toggle.ok) << toggle.error;
+    EXPECT_EQ(toggle.row.entity, a);
+    EXPECT_FALSE(toggle.row.expanded);
+
+    const HierarchyActionPlan reparent = plan(HierarchyActionKind::Reparent, other, root);
+    ASSERT_TRUE(reparent.ok) << reparent.error;
+    EXPECT_EQ(reparent.action.kind, PendingHierarchyAction::Kind::Reparent);
+    EXPECT_EQ(reparent.action.target, root);
+
+    const HierarchyActionPlan reorder = plan(HierarchyActionKind::Reorder, other, a, true);
+    ASSERT_TRUE(reorder.ok) << reorder.error;
+    EXPECT_EQ(reorder.action.kind, PendingHierarchyAction::Kind::Reorder);
+    EXPECT_EQ(reorder.action.targetParent, root);
+    EXPECT_EQ(reorder.action.targetPosition, 0u);
+    EXPECT_TRUE(reorder.action.insertAfter);
+}
+
+TEST(HierarchyActionRunTest, ReorderInOneParentKeepsTheTransformAndTheCollapsedSet)
+{
+    Registry registry;
+    const Entity parent = AddNode(registry);
+    std::vector<Entity> children;
+    for (int i = 0; i < 4; ++i) {
+        const Entity child = AddNode(registry, parent, 0); // equal sibling indexes: every child ties
+        Transform& transform = registry.GetComponent<Transform>(child);
+        transform.position = Vec3(1.0f + static_cast<float>(i), 0.37f, -2.0f);
+        transform.rotation = Quat::FromEulerDegrees(10.0f * static_cast<float>(i), 33.0f, 7.0f);
+        children.push_back(child);
+    }
+    const Entity foldedRoot = AddNode(registry, kInvalidEntity, 1);
+    AddNode(registry, foldedRoot);
+    const Transform before = registry.GetComponent<Transform>(children[0]);
+
+    HierarchyViewState state;
+    state.collapsed.insert(foldedRoot);
+    const Selection selection{};
+
+    const HierarchyActionReport report = RunHierarchyAction(registry, state, selection,
+        HierarchyActionCommand{ HierarchyActionKind::Reorder, children[0], children[3], false });
+    ASSERT_TRUE(report.success) << report.errorMessage;
+    EXPECT_TRUE(report.changed);
+    EXPECT_EQ(GetChildren(registry, parent), (std::vector<Entity>{ children[1], children[2], children[0], children[3] }));
+
+    const Transform& after = registry.GetComponent<Transform>(children[0]);
+    EXPECT_EQ(std::memcmp(&before.position, &after.position, sizeof(Vec3)), 0);
+    EXPECT_EQ(std::memcmp(&before.rotation, &after.rotation, sizeof(Quat)), 0);
+    EXPECT_EQ(std::memcmp(&before.scale, &after.scale, sizeof(Vec3)), 0);
+    EXPECT_TRUE(state.collapsed.contains(foldedRoot));
+
+    ASSERT_FALSE(report.rows.empty());
+    EXPECT_EQ(report.rows[0].entity, state.rows[static_cast<std::size_t>(report.firstRow)].entity);
+    const auto moved = std::find_if(report.rows.begin(), report.rows.end(),
+        [&](const HierarchyStateRow& row) { return row.entity == children[0]; });
+    ASSERT_NE(moved, report.rows.end());
+    EXPECT_EQ(moved->parent, parent);
+    EXPECT_EQ(moved->siblingPosition, 2u);
+}
+
+TEST(HierarchyActionRunTest, ReparentMovesTheEntityAndToggleFlipsTheRow)
+{
+    Registry registry;
+    const Entity first = AddNode(registry, kInvalidEntity, 0);
+    const Entity second = AddNode(registry, kInvalidEntity, 1);
+    const Entity moved = AddNode(registry, first);
+    HierarchyViewState state;
+    const Selection selection{};
+
+    const HierarchyActionReport reparent = RunHierarchyAction(registry, state, selection,
+        HierarchyActionCommand{ HierarchyActionKind::Reparent, moved, second, false });
+    ASSERT_TRUE(reparent.success) << reparent.errorMessage;
+    EXPECT_TRUE(reparent.changed);
+    EXPECT_EQ(GetChildren(registry, second), (std::vector<Entity>{ moved }));
+    EXPECT_TRUE(GetChildren(registry, first).empty());
+
+    const HierarchyActionCommand toggleRequest{ HierarchyActionKind::Toggle, kInvalidEntity, second, false };
+    const HierarchyActionReport closed = RunHierarchyAction(registry, state, selection, toggleRequest);
+    ASSERT_TRUE(closed.success) << closed.errorMessage;
+    EXPECT_TRUE(state.collapsed.contains(second));
+    ASSERT_EQ(state.rows.size(), 2u); // first, second; the child row is hidden
+    const auto row = std::find_if(closed.rows.begin(), closed.rows.end(),
+        [second](const HierarchyStateRow& r) { return r.entity == second; });
+    ASSERT_NE(row, closed.rows.end());
+    EXPECT_FALSE(row->expanded);
+
+    EXPECT_TRUE(RunHierarchyAction(registry, state, selection, toggleRequest).success);
+    EXPECT_FALSE(state.collapsed.contains(second));
+
+    const HierarchyActionReport bad = RunHierarchyAction(registry, state, selection,
+        HierarchyActionCommand{ HierarchyActionKind::Reparent, second, second, false });
+    EXPECT_FALSE(bad.success);
+    EXPECT_FALSE(bad.errorMessage.empty());
+}
+
+TEST(HierarchyRowsTest, RowsAreReusedUntilTheHierarchyOrTheCollapsedSetChanges)
+{
+    Registry registry;
+    const Entity root = AddNode(registry);
+    const Entity child = AddNode(registry, root);
+    AddNode(registry, child);
+    HierarchyViewState state;
+
+    UpdateHierarchyRows(registry, state);
+    ASSERT_EQ(state.rows.size(), 3u);
+    const std::vector<Entity> before = EntitiesOf(state.rows);
+    const std::uint64_t revision = state.snapshot.Revision();
+
+    UpdateHierarchyRows(registry, state);
+    EXPECT_EQ(state.lastFlattenMs, 0.0);
+    EXPECT_EQ(state.snapshot.Revision(), revision);
+    EXPECT_EQ(EntitiesOf(state.rows), before);
+
+    ToggleHierarchyCollapsed(state, state.rows[0]);
+    UpdateHierarchyRows(registry, state);
+    EXPECT_EQ(state.rows.size(), 1u);
+    EXPECT_EQ(state.snapshot.Revision(), revision);
+
+    ToggleHierarchyCollapsed(state, state.rows[0]);
+    UpdateHierarchyRows(registry, state);
+    EXPECT_EQ(EntitiesOf(state.rows), before);
+
+    ASSERT_TRUE(SetParent(registry, child, kInvalidEntity));
+    UpdateHierarchyRows(registry, state);
+    EXPECT_GT(state.snapshot.Revision(), revision);
+    EXPECT_EQ(state.rows.size(), 3u);
+    EXPECT_EQ(state.rows[1].depth, 0u);
+}
+
+TEST(HierarchyRowsTest, HidingThePanelForLongForcesAFreshFlatten)
+{
+    Registry registry;
+    AddNode(registry);
+    HierarchyViewState state;
+    UpdateHierarchyRows(registry, state);
+    ASSERT_EQ(state.rows.size(), 1u);
+
+    for (std::uint32_t i = 0; i < kHierarchyHiddenFramesBeforeRelease; ++i) {
+        NoteHierarchyHidden(state);
+    }
+    EXPECT_TRUE(state.rows.empty());
+
+    UpdateHierarchyRows(registry, state);
+    EXPECT_EQ(state.rows.size(), 1u);
+}
+
+TEST(PanelVisibilityTest, HiddenFlagDecidesWhetherThePanelIsBuilt)
+{
+    PanelHiddenFlags flags;
+    EXPECT_TRUE(ShouldBuildPanel(flags, TogglePanel::Hierarchy));
+    flags.Set(TogglePanel::Hierarchy, true);
+    EXPECT_FALSE(ShouldBuildPanel(flags, TogglePanel::Hierarchy));
+    flags.Set(TogglePanel::Hierarchy, false);
+    EXPECT_TRUE(ShouldBuildPanel(flags, TogglePanel::Hierarchy));
+}
+
+TEST(PanelVisibilityTest, NamesRoundTrip)
+{
+    for (const std::string_view name : kTogglePanelNames) {
+        const std::optional<TogglePanel> panel = TogglePanelFromName(name);
+        ASSERT_TRUE(panel.has_value()) << name;
+        EXPECT_EQ(TogglePanelName(*panel), name);
+    }
+    EXPECT_FALSE(TogglePanelFromName("").has_value());
+    EXPECT_FALSE(TogglePanelFromName("hierarchy").has_value());
 }
 
 } // namespace

@@ -43,6 +43,7 @@
 #include "SceneCameraAdapter.h"
 #include "TransformGizmo.h"
 #include "../Game/Game.h"
+#include "../Profiling/ScopeTimer.h"
 #include "Panels/HierarchyRows.h"
 #include "../Renderer/RenderGraph/RenderPassToggleRegistry.h"
 #include "../Renderer/Renderer.h"
@@ -252,9 +253,7 @@ public:
 
     RenderTexture* PrimaryViewTarget() override
     {
-        // Not visible last frame (inactive tab behind "Scene", or
-        // collapsed) - see EditorContext::gameViewVisible - skip rendering
-        // into it entirely this frame; nobody would see it anyway.
+        // Skip rendering while the panel is not visible (inactive tab or collapsed); nobody would see it.
         if (!m_ctx.gameViewVisible) {
             return nullptr;
         }
@@ -265,14 +264,18 @@ public:
             const Extent2D current = m_gameView.Extent();
             if (current.width != m_ctx.desiredExtent.width || current.height != m_ctx.desiredExtent.height) {
                 // Resizes are rare and user-driven, so a full GPU stall is acceptable.
-                if (m_renderer->WaitForGpuIdle(BlockSite::TargetResize, "game view resize") != BlockOutcome::Completed) {
+                BlockOutcome idle;
+                {
+                    GTE_PROFILE_BLOCKED("Wait.TargetResize");
+                    idle = m_renderer->WaitForGpuIdle(BlockSite::TargetResize, "game view resize");
+                }
+                if (idle != BlockOutcome::Completed) {
                     return nullptr; // Cannot resize safely; skip rendering this view.
                 }
                 ReleaseGameViewDescriptor();
                 m_gameView.Resize(
                     static_cast<int>(m_ctx.desiredExtent.width), static_cast<int>(m_ctx.desiredExtent.height));
-                // A new ImGui descriptor for the resized texture is
-                // (re)created lazily in BuildUI() the next time it's needed.
+                // BuildUI() recreates the ImGui descriptor of the resized texture lazily.
             }
         }
         return &m_gameView;
@@ -288,7 +291,12 @@ public:
         if (m_ctx.desiredSceneExtent.width > 0 && m_ctx.desiredSceneExtent.height > 0) {
             const Extent2D current = m_sceneView.Extent();
             if (current.width != m_ctx.desiredSceneExtent.width || current.height != m_ctx.desiredSceneExtent.height) {
-                if (m_renderer->WaitForGpuIdle(BlockSite::TargetResize, "scene view resize") != BlockOutcome::Completed) {
+                BlockOutcome idle;
+                {
+                    GTE_PROFILE_BLOCKED("Wait.TargetResize");
+                    idle = m_renderer->WaitForGpuIdle(BlockSite::TargetResize, "scene view resize");
+                }
+                if (idle != BlockOutcome::Completed) {
                     return nullptr; // Cannot resize safely; skip rendering this view.
                 }
                 ReleaseSceneViewDescriptor();
@@ -332,26 +340,30 @@ public:
 
         Registry& registry = game.GetRegistry();
 
-        BuildDockspaceAndMenuBar(m_ctx, game, renderer, m_hotReloadDebugCapability, sceneServicesSetLayout);
+        {
+            GTE_PROFILE_SCOPE("Panel.DockspaceAndMenuBar");
+            BuildDockspaceAndMenuBar(m_ctx, game, renderer, m_hotReloadDebugCapability, sceneServicesSetLayout);
+        }
 
         // New/Open Project and Create Asset windows are available in every build, regardless of
         // GTE_ENABLE_PROJECT_PANEL.
-        m_newProjectWindow.Build(m_ctx, m_projectLifecycleCapability);
-        m_openProjectWindow.Build(m_ctx, m_projectLifecycleCapability);
-        m_createAssetWindow.Build(m_ctx, m_assetScaffoldingCapability);
-
-        // Lazily (re)create the ImGui descriptors for the Game/Scene view textures (first use, or after a resize).
-        // The panels show m_gameView/m_sceneView directly: the compositor blends every feature into them,
-        // while a per-feature *Composited texture only reflects that feature's position in the chain.
         {
+            GTE_PROFILE_SCOPE("Panel.ProjectWindows");
+            m_newProjectWindow.Build(m_ctx, m_projectLifecycleCapability);
+            m_openProjectWindow.Build(m_ctx, m_projectLifecycleCapability);
+            m_createAssetWindow.Build(m_ctx, m_assetScaffoldingCapability);
+        }
+
+        // (Re)creates the ImGui descriptors of the Game and Scene view textures on first use or after a resize.
+        // The panels show the view textures directly; the compositor already blends every feature into them.
+        {
+            GTE_PROFILE_SCOPE("Panel.ViewDescriptors");
             RenderTexture* gameSource = &m_gameView;
             if (m_ctx.gameViewDescriptor == UiTextureHandle::Invalid || gameSource->View() != m_lastKnownGameView) {
                 ReleaseGameViewDescriptor();
                 m_ctx.gameViewDescriptor = renderer.GetUiTextureHandle(*gameSource);
                 m_lastKnownGameView = gameSource->View();
             }
-        }
-        {
             RenderTexture* sceneSource = &m_sceneView;
             if (m_ctx.sceneViewDescriptor == UiTextureHandle::Invalid || sceneSource->View() != m_lastKnownSceneView) {
                 ReleaseSceneViewDescriptor();
@@ -360,13 +372,17 @@ public:
             }
         }
         BuildHierarchyPanel(game, renderer, m_ctx, sceneServicesSetLayout);
+        {
+            GTE_PROFILE_SCOPE("Panel.Inspector");
 #if GTE_ENABLE_PROJECT_PANEL
-        BuildInspectorPanel(registry, m_ctx, renderer, m_assetPreview, m_assetPreviewMesh, m_boneViewer,
-            game.GetPhysicsSystem(), game.GetMeshInstantiationSystem(), m_modelRigCache);
+            BuildInspectorPanel(registry, m_ctx, renderer, m_assetPreview, m_assetPreviewMesh, m_boneViewer,
+                game.GetPhysicsSystem(), game.GetMeshInstantiationSystem(), m_modelRigCache);
 #else
-        BuildInspectorPanel(registry, m_ctx, game.GetPhysicsSystem(), game.GetMeshInstantiationSystem());
+            BuildInspectorPanel(registry, m_ctx, game.GetPhysicsSystem(), game.GetMeshInstantiationSystem());
 #endif
+        }
         if (!m_ctx.pendingAssetRecordRefresh.empty()) {
+            GTE_PROFILE_SCOPE("Panel.AssetRecordRefresh");
             RefreshProjectAssetRecord(m_ctx.pendingAssetRecordRefresh);
             m_ctx.pendingAssetRecordRefresh.clear();
         }
@@ -374,36 +390,78 @@ public:
             m_clusterViewer.RequestOpen(m_ctx.pendingClusterViewerPath);
             m_ctx.pendingClusterViewerPath.clear();
         }
-        BuildScenePanel(game, renderer, m_ctx, m_sceneCamera, sceneServicesSetLayout, renderFeatureEntries);
-        BuildGamePanel(m_ctx);
-        BuildMemoryPanel(m_ctx, renderer);
-        m_profilerPanel.Build(m_ctx);
-        m_renderGraphPanel.Build(m_ctx, renderer, renderGraph, renderPassToggleRegistry);
-        m_renderFeaturesPanel.Build(m_ctx, renderFeatureEntries, renderFeatureCompositor);
+        {
+            GTE_PROFILE_SCOPE("Panel.SceneView");
+            BuildScenePanel(game, renderer, m_ctx, m_sceneCamera, sceneServicesSetLayout, renderFeatureEntries);
+        }
+        {
+            GTE_PROFILE_SCOPE("Panel.GameView");
+            BuildGamePanel(m_ctx);
+        }
+        {
+            GTE_PROFILE_SCOPE("Panel.Memory");
+            BuildMemoryPanel(m_ctx, renderer);
+        }
+        {
+            GTE_PROFILE_SCOPE("Panel.Profiler");
+            m_profilerPanel.Build(m_ctx);
+        }
+        {
+            GTE_PROFILE_SCOPE("Panel.RenderGraph");
+            m_renderGraphPanel.Build(m_ctx, renderer, renderGraph, renderPassToggleRegistry);
+        }
+        {
+            GTE_PROFILE_SCOPE("Panel.RenderFeatures");
+            m_renderFeaturesPanel.Build(m_ctx, renderFeatureEntries, renderFeatureCompositor);
+        }
         // Jobs panel; also hosts the CPU/GPU skinning toggle, hence `game`.
-        m_jobsPanel.Build(m_ctx, game);
+        {
+            GTE_PROFILE_SCOPE("Panel.Jobs");
+            m_jobsPanel.Build(m_ctx, game);
+        }
         // Log panel; depends only on EditorContext and the thread-safe logger.
-        m_logPanel.Build(m_ctx);
+        {
+            GTE_PROFILE_SCOPE("Panel.Log");
+            m_logPanel.Build(m_ctx);
+        }
         // Frame Debugger window (Build() is a no-op unless open). It gets the raw and composited Game views for
         // before/after comparison, plus the toggle registry and offscreen blackboard for its honesty checks.
-        m_frameDebuggerPanel.Build(m_ctx, renderer, renderGraph, m_gameView, m_gameViewComposited,
-            &renderPassToggleRegistry, &offscreenBlackboard);
+        {
+            GTE_PROFILE_SCOPE("Panel.FrameDebugger");
+            m_frameDebuggerPanel.Build(m_ctx, renderer, renderGraph, m_gameView, m_gameViewComposited,
+                &renderPassToggleRegistry, &offscreenBlackboard);
+        }
 #if GTE_ENABLE_PROJECT_PANEL
-        m_projectPanel.Build(m_ctx);
-        // Bone Viewer floating window; Build() is a no-op while it is closed.
-        m_boneViewer.Build(registry, renderer, m_ctx, m_modelRigCache, game.GetPhysicsSystem());
+        {
+            GTE_PROFILE_SCOPE("Panel.Project");
+            m_projectPanel.Build(m_ctx);
+        }
+        {
+            // Bone Viewer floating window; Build() is a no-op while it is closed.
+            GTE_PROFILE_SCOPE("Panel.BoneViewer");
+            m_boneViewer.Build(registry, renderer, m_ctx, m_modelRigCache, game.GetPhysicsSystem());
+        }
 #endif
-        // Cluster Viewer floating window; Build() is a no-op while it is closed.
-        m_clusterViewer.Build(renderer, m_ctx, registry);
-        m_sceneCameraAdapter.BeginFrame(renderer, m_ctx, registry, m_sceneView, m_sceneCamera);
+        {
+            // Cluster Viewer floating window; Build() is a no-op while it is closed.
+            GTE_PROFILE_SCOPE("Panel.ClusterViewer");
+            m_clusterViewer.Build(renderer, m_ctx, registry);
+        }
+        {
+            GTE_PROFILE_SCOPE("Panel.SceneCameraAdapter");
+            m_sceneCameraAdapter.BeginFrame(renderer, m_ctx, registry, m_sceneView, m_sceneCamera);
+        }
 
         // Draw every registered plugin panel; the content goes through PluginPanelDrawContextAdapter.
-        for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
-            if (ImGui::Begin(entry.name.c_str())) {
-                PluginPanelDrawContextAdapter drawContext;
-                entry.module->BuildPanel(drawContext);
+        {
+            GTE_PROFILE_SCOPE("Panel.Plugins");
+            for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
+                if (ImGui::Begin(entry.name.c_str())) {
+                    PluginPanelDrawContextAdapter drawContext;
+                    entry.module->BuildPanel(drawContext);
+                }
+                ImGui::End(); // Always called, matching ImGui::Begin()'s own documented contract, even when Begin() returned false.
             }
-            ImGui::End(); // Always called, matching ImGui::Begin()'s own documented contract, even when Begin() returned false.
         }
     }
 
@@ -627,6 +685,20 @@ public:
     HierarchyStateReport HierarchyState(Game& game, std::uint64_t first, std::uint64_t count) const override
     {
         return BuildHierarchyStateReport(game.GetRegistry(), m_ctx.hierarchy, m_ctx.selection, first, count);
+    }
+
+    bool SetPanelHidden(TogglePanel panel, bool hidden) override
+    {
+        m_ctx.hiddenPanels.Set(panel, hidden);
+        if (panel == TogglePanel::Hierarchy && hidden) {
+            NoteHierarchyHidden(m_ctx.hierarchy);
+        }
+        return true;
+    }
+
+    HierarchyActionReport HierarchyAction(Game& game, const HierarchyActionCommand& request) override
+    {
+        return RunHierarchyAction(game.GetRegistry(), m_ctx.hierarchy, m_ctx.selection, request);
     }
 
     ClusterBuildStartResult InspectorBuildClusters(const InspectorClusterOptions& options) override

@@ -83,7 +83,7 @@ public:
     // Handles that no longer resolve are skipped. Parameters are documented on the view-projection overload.
     void Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
         IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
-        const std::unordered_set<Entity>& batchedEntities = {},
+        const EntityMarkSet& batchedEntities = {},
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
         rg::CommandBuffer* cmd = nullptr, std::optional<SceneCullRequest> cull = std::nullopt);
 
@@ -92,7 +92,7 @@ public:
     // an unusable matrix culls nothing).
     void Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
         IFrameDebuggerCaptureRecorder* capture = nullptr, std::optional<std::size_t> maxDrawCount = std::nullopt,
-        const std::unordered_set<Entity>& batchedEntities = {},
+        const EntityMarkSet& batchedEntities = {},
         std::optional<PipelineOverrideSet> pipelineOverrideSet = std::nullopt,
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid, rg::CommandBuffer* cmd = nullptr,
         std::optional<SceneCullRequest> cull = std::nullopt);

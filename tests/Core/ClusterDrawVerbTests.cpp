@@ -250,18 +250,29 @@ ClusterClaimContext GameContext()
     return context;
 }
 
+// The claimed entities of an outcome in part order.
+std::vector<Entity> FlatClaim(const ClusterRecordOutcome& outcome)
+{
+    std::vector<Entity> flat;
+    for (const std::span<const Entity> span : outcome.claimed) {
+        flat.insert(flat.end(), span.begin(), span.end());
+    }
+    return flat;
+}
+
 TEST(ClusterPartPlanningTest, OnlyPartsWithEveryStepDeclaredAreClaimed)
 {
     const std::array<std::span<const Entity>, 2> parts = { std::span<const Entity>(kPartA), std::span<const Entity>(kPartB) };
     for (const bool twoPhase : { false, true }) {
         const ClusterStep last = twoPhase ? ClusterStep::Draw2 : ClusterStep::Draw1;
         const std::array<ClusterStep, 2> done = { last, last };
-        EXPECT_EQ(ClusterOutcomeOf(parts, GameContext(), done, twoPhase).claimed.size(), 3u);
+        EXPECT_EQ(FlatClaim(ClusterOutcomeOf(parts, GameContext(), done, twoPhase)).size(), 3u);
 
         const std::array<ClusterStep, 2> partial = { ClusterStep::Cull1, last };
         const ClusterRecordOutcome outcome = ClusterOutcomeOf(parts, GameContext(), partial, twoPhase);
-        ASSERT_EQ(outcome.claimed.size(), 1u);
-        EXPECT_EQ(outcome.claimed[0], MakeEntity(3));
+        const std::vector<Entity> claimed = FlatClaim(outcome);
+        ASSERT_EQ(claimed.size(), 1u);
+        EXPECT_EQ(claimed[0], MakeEntity(3));
         EXPECT_NE(outcome.progress[0], ClusterChainProgress::Draw);
         EXPECT_EQ(outcome.progress[1], ClusterChainProgress::Draw);
     }

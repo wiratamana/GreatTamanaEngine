@@ -9,6 +9,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <limits>
 #include <optional>
 
@@ -89,6 +92,45 @@ TEST(CullingTypes, TransformAABBBy90DegreeYawProducesExpectedReorientedBox)
 
     EXPECT_TRUE(ApproximatelyEqual(worldAABB.min, Vec3(-2.0f, -1.0f, -0.5f), 1e-4f));
     EXPECT_TRUE(ApproximatelyEqual(worldAABB.max, Vec3(2.0f, 1.0f, 0.5f), 1e-4f));
+}
+
+TEST(CullingTypes, TransformAABBMatchesEightCornerReferenceForAffineMatrices)
+{
+    std::uint32_t seed = 12345u;
+    const auto next = [&seed]() {
+        seed = seed * 1664525u + 1013904223u;
+        return static_cast<float>(seed >> 8) / static_cast<float>(1u << 24); // [0, 1)
+    };
+    for (int i = 0; i < 64; ++i) {
+        const Vec3 axis(next() - 0.5f, next() - 0.5f + 0.1f, next() - 0.5f);
+        const Mat4 world = Mat4::TRS(Vec3(next() * 200.0f - 100.0f, next() * 200.0f - 100.0f, next() * 200.0f - 100.0f),
+            Quat::FromAxisAngle(Normalize(axis), next() * kTwoPi),
+            Vec3(0.2f + next() * 4.0f, 0.2f + next() * 4.0f, 0.2f + next() * 4.0f));
+        const AABB local{ Vec3(-next() * 3.0f, -next() * 3.0f, -next() * 3.0f),
+            Vec3(next() * 3.0f, next() * 3.0f, next() * 3.0f) };
+
+        Vec3 refMin = world.TransformPoint(local.min);
+        Vec3 refMax = refMin;
+        for (int corner = 1; corner < 8; ++corner) {
+            const Vec3 p = world.TransformPoint(Vec3((corner & 1) ? local.max.x : local.min.x,
+                (corner & 2) ? local.max.y : local.min.y, (corner & 4) ? local.max.z : local.min.z));
+            refMin = Vec3(std::min(refMin.x, p.x), std::min(refMin.y, p.y), std::min(refMin.z, p.z));
+            refMax = Vec3(std::max(refMax.x, p.x), std::max(refMax.y, p.y), std::max(refMax.z, p.z));
+        }
+
+        const AABB box = TransformAABB(local, world);
+        EXPECT_TRUE(ApproximatelyEqual(box.min, refMin, 1e-3f));
+        EXPECT_TRUE(ApproximatelyEqual(box.max, refMax, 1e-3f));
+    }
+}
+
+TEST(CullingTypes, TransformAABBWithNonFiniteMatrixGivesNonFiniteBox)
+{
+    Mat4 broken = Mat4::Identity();
+    broken(0, 3) = std::numeric_limits<float>::quiet_NaN();
+    const AABB box = TransformAABB(AABB{ Vec3(-1.0f, -1.0f, -1.0f), Vec3(1.0f, 1.0f, 1.0f) }, broken);
+    EXPECT_FALSE(std::isfinite(box.min.x));
+    EXPECT_FALSE(std::isfinite(box.max.x));
 }
 
 // --- ExtractFrustumPlanes() -------------------------------------------------

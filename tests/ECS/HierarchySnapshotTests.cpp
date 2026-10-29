@@ -163,5 +163,86 @@ TEST(HierarchySnapshotTest, RebuildAfterAChangeSeesTheChange)
     EXPECT_EQ(snapshot.Size(), 1u);
 }
 
+// Every entity's child list must equal that of a snapshot built from scratch.
+void ExpectSameAsFresh(Registry& registry, const HierarchySnapshot& snapshot, const std::vector<Entity>& entities)
+{
+    HierarchySnapshot fresh;
+    fresh.Rebuild(registry);
+    EXPECT_EQ(snapshot.Size(), fresh.Size());
+    EXPECT_EQ(ToVector(snapshot.Children(kInvalidEntity)), ToVector(fresh.Children(kInvalidEntity)));
+    for (const Entity entity : entities) {
+        EXPECT_EQ(ToVector(snapshot.Children(entity)), ToVector(fresh.Children(entity))) << "entity " << entity.index;
+    }
+}
+
+TEST(HierarchySnapshotTest, UnchangedHierarchySkipsTheRebuild)
+{
+    Registry registry;
+    const Entity parent = AddTransformEntity(registry);
+    AddTransformEntity(registry, parent);
+
+    HierarchySnapshot snapshot;
+    EXPECT_TRUE(snapshot.Rebuild(registry));
+    const std::uint64_t revision = snapshot.Revision();
+    EXPECT_FALSE(snapshot.Rebuild(registry));
+    EXPECT_FALSE(snapshot.Rebuild(registry));
+    EXPECT_EQ(snapshot.Revision(), revision);
+}
+
+TEST(HierarchySnapshotTest, EveryKindOfChangeIsSeenByTheNextRebuild)
+{
+    Registry registry;
+    std::vector<Entity> entities;
+    for (int i = 0; i < 6; ++i) {
+        entities.push_back(AddTransformEntity(registry));
+    }
+    HierarchySnapshot snapshot;
+    snapshot.Rebuild(registry);
+
+    const auto expectRebuilt = [&](const char* what) {
+        const std::uint64_t before = snapshot.Revision();
+        EXPECT_TRUE(snapshot.Rebuild(registry)) << what;
+        EXPECT_GT(snapshot.Revision(), before) << what;
+        ExpectSameAsFresh(registry, snapshot, entities);
+        EXPECT_FALSE(snapshot.Rebuild(registry)) << what;
+    };
+
+    ASSERT_TRUE(SetParent(registry, entities[1], entities[0]));
+    expectRebuilt("SetParent");
+
+    ASSERT_TRUE(SetSiblingIndex(registry, entities[3], 0));
+    expectRebuilt("SetSiblingIndex");
+
+    registry.GetComponent<Transform>(entities[2]).parent = entities[4]; // direct field write
+    expectRebuilt("direct parent write");
+
+    registry.GetComponent<Transform>(entities[5]).siblingIndex = 7; // direct field write
+    expectRebuilt("direct siblingIndex write");
+
+    registry.RemoveComponent<Transform>(entities[0]); // swap-remove moves another entry
+    expectRebuilt("Transform removed");
+
+    registry.DestroyEntity(entities[4]);
+    expectRebuilt("destroy");
+
+    // The freed slot is reused with a newer generation.
+    entities.push_back(AddTransformEntity(registry));
+    expectRebuilt("slot reuse");
+}
+
+TEST(HierarchySnapshotTest, RebuildingAgainstAnotherRegistryComparesContentOnly)
+{
+    Registry first;
+    AddTransformEntity(first);
+    Registry second;
+    const Entity entity = AddTransformEntity(second);
+    second.RemoveComponent<Transform>(entity);
+
+    HierarchySnapshot snapshot;
+    snapshot.Rebuild(first);
+    EXPECT_TRUE(snapshot.Rebuild(second));
+    EXPECT_EQ(snapshot.Size(), 0u);
+}
+
 } // namespace
 } // namespace gte

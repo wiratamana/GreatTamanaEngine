@@ -92,6 +92,56 @@ TEST_F(ProfilerSnapshotBuilderTest, SameNameTopLevelScopesAreSummedAndCounted)
     }
 }
 
+TEST_F(ProfilerSnapshotBuilderTest, NestedScopesAreListedByDepthAndTopLevelOnesAreNot)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.BeginFrame();
+    const ScopeStart outer = profiler.BeginScope();
+    const ScopeStart middle = profiler.BeginScope();
+    const ScopeStart inner = profiler.BeginScope();
+    profiler.EndScope(inner, InternName("NestedTestInner"), ScopeKind::Work, ViewSlot::Shared);
+    profiler.EndScope(middle, InternName("NestedTestMiddle"), ScopeKind::Work, ViewSlot::Shared);
+    RunScope("NestedTestMiddle"); // same name at depth 1 again: one row, two calls
+    profiler.EndScope(outer, InternName("NestedTestOuter"), ScopeKind::Work, ViewSlot::Shared);
+    profiler.EndFrame();
+
+    const ProfilerSnapshot snapshot = BuildProfilerSnapshot(profiler, SnapshotInputs{});
+    ASSERT_EQ(snapshot.scopeCount, 1u);
+    EXPECT_EQ(SnapshotText(snapshot.scopes[0].name), "NestedTestOuter");
+
+    ASSERT_EQ(snapshot.nestedCount, 2u);
+    EXPECT_EQ(snapshot.nestedRowsDropped, 0u);
+    for (std::uint32_t i = 0; i < snapshot.nestedCount; ++i) {
+        const SnapshotNestedRow& row = snapshot.nested[i];
+        const std::string name(SnapshotText(row.name));
+        EXPECT_NE(name, "NestedTestOuter");
+        EXPECT_EQ(row.depth, name == "NestedTestMiddle" ? 1u : 2u) << name;
+        EXPECT_DOUBLE_EQ(row.calls.value, name == "NestedTestMiddle" ? 2.0 : 1.0) << name;
+        EXPECT_EQ(row.self.kind, MetricKind::Derived);
+    }
+    EXPECT_GE(snapshot.nested[0].total.value, snapshot.nested[1].total.value);
+}
+
+TEST_F(ProfilerSnapshotBuilderTest, NestedRowsAreCappedAndTheRestIsCounted)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.BeginFrame();
+    const ScopeStart outer = profiler.BeginScope();
+    const std::size_t distinct = kSnapshotNestedRows + 5;
+    for (std::size_t i = 0; i < distinct; ++i) {
+        RunScope(("NestedCapTest" + std::to_string(i)).c_str());
+    }
+    profiler.EndScope(outer, InternName("NestedCapOuter"), ScopeKind::Work, ViewSlot::Shared);
+    profiler.EndFrame();
+
+    const ProfilerSnapshot snapshot = BuildProfilerSnapshot(profiler, SnapshotInputs{});
+    EXPECT_EQ(snapshot.nestedCount, kSnapshotNestedRows);
+    EXPECT_EQ(snapshot.nestedRowsDropped, 5u);
+    for (std::uint32_t i = 1; i < snapshot.nestedCount; ++i) {
+        EXPECT_GE(snapshot.nested[i - 1].total.value, snapshot.nested[i].total.value);
+    }
+}
+
 TEST_F(ProfilerSnapshotBuilderTest, BlockedTimeIsSplitIntoGpuWorkersAndOther)
 {
     FrameProfiler& profiler = FrameProfiler::Instance();

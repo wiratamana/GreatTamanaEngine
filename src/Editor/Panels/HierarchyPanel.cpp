@@ -98,11 +98,7 @@ void DrawRow(RowContext& rc, const HierarchyRow& row)
     const ImVec2 itemMax = ImGui::GetItemRectMax();
 
     if (row.hasChildren && ImGui::IsItemToggledOpen()) {
-        if (row.expanded) {
-            rc.ctx.hierarchy.collapsed.insert(entity);
-        } else {
-            rc.ctx.hierarchy.collapsed.erase(entity);
-        }
+        ToggleHierarchyCollapsed(rc.ctx.hierarchy, row);
     }
 
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
@@ -165,7 +161,7 @@ void ApplyPendingAction(Game& game, Renderer& renderer, EditorContext& ctx, Regi
         return;
     case PendingHierarchyAction::Kind::Reparent:
     case PendingHierarchyAction::Kind::Reorder:
-        ExecuteHierarchyAction(registry, ctx.hierarchy.snapshot, action);
+        ApplyHierarchyAction(registry, ctx.hierarchy, action);
         return;
     case PendingHierarchyAction::Kind::SpawnAsset:
 #if GTE_ENABLE_PROJECT_PANEL
@@ -190,6 +186,10 @@ void ApplyPendingAction(Game& game, Renderer& renderer, EditorContext& ctx, Regi
 
 void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
+    if (!ShouldBuildPanel(ctx.hiddenPanels, TogglePanel::Hierarchy)) {
+        NoteHierarchyHidden(ctx.hierarchy);
+        return;
+    }
     GTE_PROFILE_SCOPE("HierarchyPanel");
 
     HierarchyViewState& view = ctx.hierarchy;

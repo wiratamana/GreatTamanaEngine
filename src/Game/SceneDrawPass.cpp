@@ -52,7 +52,7 @@ SceneDrawPass& SceneDrawPass::CullToFrustum(float paddingFraction)
     return *this;
 }
 
-SceneDrawPass& SceneDrawPass::ExcludeEntities(const std::unordered_set<Entity>* entities, const std::uint64_t* liveEpoch)
+SceneDrawPass& SceneDrawPass::ExcludeEntities(const EntityMarkSet* entities, const std::uint64_t* liveEpoch)
 {
     m_excluded = entities;
     m_liveEpoch = liveEpoch;

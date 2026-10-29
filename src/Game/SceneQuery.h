@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ECS/Entity.h"
+#include "ECS/EntityMarkSet.h"
 #include "Math/Mat4.h"
 #include "../Core/GraphicsHandles.h" // DescriptorSetHandle
 #include "Renderer/Pipeline.h"
@@ -59,7 +60,7 @@ struct SceneDrawRequest {
     std::optional<std::size_t> maxDrawCount = std::nullopt;
 
     // Entities drawn by GPU-driven batches instead; nullptr is an empty set.
-    const std::unordered_set<Entity>* batchedEntities = nullptr;
+    const EntityMarkSet* batchedEntities = nullptr;
 
     // Scene-services descriptor set (set = 1) bound for every draw of this call; Invalid binds none.
     DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid;
@@ -69,7 +70,7 @@ struct SceneDrawRequest {
 };
 
 // The request's excluded set by reference (the caller's own set, or one shared empty set). Never a copy.
-const std::unordered_set<Entity>& ExcludedEntitiesOf(const SceneDrawRequest& request) noexcept;
+const EntityMarkSet& ExcludedEntitiesOf(const SceneDrawRequest& request) noexcept;
 
 // The single scene-drawing entry point for built-in and project passes; forwards to RenderSystem::Draw().
 void DrawScene(RenderSystem& renderSystem, Registry& registry, Renderer& renderer,

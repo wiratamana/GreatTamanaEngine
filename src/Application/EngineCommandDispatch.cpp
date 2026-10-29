@@ -125,6 +125,19 @@ EngineCommandResult ExecuteEngineCommand(Game& game, Renderer& renderer, ISceneI
         }
         break;
     }
+    // Closes the open preset scene and restores what it changed.
+    case EngineCommandKind::ClosePresetScene: {
+        ClosePresetSceneOutcome& out = result.closePresetScene;
+        if (sceneIOCapability != nullptr) {
+            ISceneIOCapability::CloseSceneOutcome outcome = sceneIOCapability->ClosePresetScene(game);
+            out.success = outcome.success;
+            out.message = std::move(outcome.message);
+        } else {
+            out.editorAvailable = false;
+            out.message = "closing a preset scene requires the Editor module";
+        }
+        break;
+    }
     }
     return result;
 }

@@ -285,6 +285,17 @@ Occlusion is two-phase and exact for the current frame.
   counted twice. A static scene draws nothing in phase 2 after the first frames. `debugView=ClusterPhase` tints phase 1 red, phase 2
   green and a single-phase chain gray.
 
+## Buffer memory
+
+- Each feature owns one `ClusterDrawState`. Its buffers are counted per (state, view scope) in a process-wide ledger. Limits: 256 MB per
+  state, 512 MB for the process (`ClusterCullMath.h`). A chain over a limit is refused and its part uses the CPU draw (one warning per pass).
+- A scope gives its buffers back after 600 frames without a chain (`TickIdle`). `TickIdle` runs inside the feature's own callback.
+- A feature turned off with `set_feature_enabled` gets no callback, so it never ticks. Its buffers stay held until the feature is
+  enabled again, goes idle while enabled, or is destroyed. This is by design of the callback model.
+- Consequence: after a run with many cluster lanes on (for example the Shadow cascades at 100000 instances), turning them off keeps their
+  bytes in the ledger and can refuse a later large `GpuDrivenScene` chain. Re-enable the feature for 600 frames, or restart the editor,
+  before a 100000-instance Hi-Z measurement.
+
 ## Shared survivors
 
 The secondary view culls with the primary camera, so the primary view's result is its answer too.

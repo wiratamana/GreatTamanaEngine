@@ -1400,14 +1400,16 @@ ParsedHierarchyStateQuery ParseHierarchyStateQuery(const std::string& firstParam
     return result;
 }
 
-std::string BuildHierarchyStateResponseJson(const HierarchyStateReport& report)
+namespace {
+
+nlohmann::json HierarchyRowsToJson(const std::vector<HierarchyStateRow>& source)
 {
     const auto entityText = [](Entity entity) {
         return std::to_string(entity.index) + "/" + std::to_string(entity.generation);
     };
 
     nlohmann::json rows = nlohmann::json::array();
-    for (const HierarchyStateRow& row : report.rows) {
+    for (const HierarchyStateRow& row : source) {
         nlohmann::json item;
         item["entity"] = entityText(row.entity);
         item["parent"] = row.parent.IsValid() ? nlohmann::json(entityText(row.parent)) : nlohmann::json(nullptr);
@@ -1419,18 +1421,156 @@ std::string BuildHierarchyStateResponseJson(const HierarchyStateReport& report)
         item["selected"] = row.selected;
         rows.push_back(std::move(item));
     }
+    return rows;
+}
 
+} // namespace
+
+std::string BuildHierarchyStateResponseJson(const HierarchyStateReport& report)
+{
     nlohmann::json body;
     body["visible"] = report.visible;
     body["entityCount"] = report.entityCount;
     body["rowCount"] = report.rowCount;
     body["collapsedCount"] = report.collapsedCount;
     body["first"] = report.first;
-    body["rows"] = std::move(rows);
+    body["rows"] = HierarchyRowsToJson(report.rows);
     // A hidden panel measured nothing: null, never 0.
     body["buildMs"] = report.visible ? nlohmann::json(report.buildMs) : nlohmann::json(nullptr);
     body["flattenMs"] = report.visible ? nlohmann::json(report.flattenMs) : nlohmann::json(nullptr);
     body["drawnRows"] = report.visible ? nlohmann::json(report.drawnRows) : nlohmann::json(nullptr);
+    return body.dump();
+}
+
+ParsedPanelVisibleQuery ParsePanelVisibleQuery(const std::string& nameParam, const std::string& visibleParam)
+{
+    ParsedPanelVisibleQuery result;
+    const std::optional<TogglePanel> panel = TogglePanelFromName(nameParam);
+    if (!panel.has_value()) {
+        std::string names;
+        for (const std::string_view name : kTogglePanelNames) {
+            names += names.empty() ? "" : ", ";
+            names += name;
+        }
+        result.errorMessage = "missing or unknown query parameter: name - supported panels: " + names;
+        return result;
+    }
+    if (visibleParam != "true" && visibleParam != "false") {
+        result.errorMessage = "missing or invalid required query parameter: visible - must be \"true\" or \"false\"";
+        return result;
+    }
+    result.panel = *panel;
+    result.visible = visibleParam == "true";
+    result.valid = true;
+    return result;
+}
+
+std::string BuildPanelVisibleResponseJson(TogglePanel panel, bool visible)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["name"] = std::string(TogglePanelName(panel));
+    body["visible"] = visible;
+    return body.dump();
+}
+
+std::string BuildClosePresetSceneResponseJson(const std::string& message)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["message"] = message;
+    return body.dump();
+}
+
+namespace {
+
+// An entity is {"index","generation"} or the "<index>/<generation>" text of GET /hierarchy_state; generation is non-zero.
+bool TryParseHierarchyEntity(const nlohmann::json& value, Entity& out)
+{
+    std::uint64_t index = 0;
+    std::uint64_t generation = 0;
+    if (value.is_object()) {
+        if (!value.contains("index") || !value.contains("generation") || !value["index"].is_number_unsigned()
+            || !value["generation"].is_number_unsigned()) {
+            return false;
+        }
+        index = value["index"].get<std::uint64_t>();
+        generation = value["generation"].get<std::uint64_t>();
+    } else if (value.is_string()) {
+        const std::string text = value.get<std::string>();
+        const std::size_t slash = text.find('/');
+        if (slash == std::string::npos || !TryParseNonNegativeUInt64(text.substr(0, slash), index)
+            || !TryParseNonNegativeUInt64(text.substr(slash + 1), generation)) {
+            return false;
+        }
+    } else {
+        return false;
+    }
+    constexpr std::uint64_t kMax32 = std::numeric_limits<std::uint32_t>::max();
+    if (index > kMax32 || generation == 0 || generation > kMax32) {
+        return false;
+    }
+    out = Entity{ static_cast<std::uint32_t>(index), static_cast<std::uint32_t>(generation) };
+    return true;
+}
+
+} // namespace
+
+ParsedHierarchyActionRequest ParseHierarchyActionRequest(const std::string& jsonBody)
+{
+    ParsedHierarchyActionRequest result;
+
+    const nlohmann::json parsed = ParseJsonNoThrow(jsonBody);
+    if (parsed.is_discarded()) {
+        result.errorMessage = "malformed JSON body";
+        return result;
+    }
+    if (!parsed.is_object()) {
+        result.errorMessage = "request body must be a JSON object";
+        return result;
+    }
+
+    const std::string kind = parsed.contains("kind") && parsed["kind"].is_string() ? parsed["kind"].get<std::string>() : "";
+    if (kind == HierarchyActionKindName(HierarchyActionKind::Reparent)) {
+        result.command.kind = HierarchyActionKind::Reparent;
+    } else if (kind == HierarchyActionKindName(HierarchyActionKind::Reorder)) {
+        result.command.kind = HierarchyActionKind::Reorder;
+    } else if (kind == HierarchyActionKindName(HierarchyActionKind::Toggle)) {
+        result.command.kind = HierarchyActionKind::Toggle;
+    } else {
+        result.errorMessage = "missing or invalid required field: kind - must be \"reparent\", \"reorder\" or \"toggle\"";
+        return result;
+    }
+
+    if (!parsed.contains("target") || !TryParseHierarchyEntity(parsed["target"], result.command.target)) {
+        result.errorMessage = "missing or invalid required field: target - use {\"index\",\"generation\"} or \"<index>/<generation>\"";
+        return result;
+    }
+    if (result.command.kind != HierarchyActionKind::Toggle
+        && (!parsed.contains("dragged") || !TryParseHierarchyEntity(parsed["dragged"], result.command.dragged))) {
+        result.errorMessage = "missing or invalid required field: dragged - use {\"index\",\"generation\"} or \"<index>/<generation>\"";
+        return result;
+    }
+    if (parsed.contains("insertAfter")) {
+        if (!parsed["insertAfter"].is_boolean()) {
+            result.errorMessage = "invalid field: insertAfter - must be a boolean";
+            return result;
+        }
+        result.command.insertAfter = parsed["insertAfter"].get<bool>();
+    }
+
+    result.valid = true;
+    return result;
+}
+
+std::string BuildHierarchyActionResponseJson(const HierarchyActionReport& report)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["kind"] = report.kind;
+    body["changed"] = report.changed;
+    body["firstRow"] = report.firstRow;
+    body["rows"] = HierarchyRowsToJson(report.rows);
     return body.dump();
 }
 

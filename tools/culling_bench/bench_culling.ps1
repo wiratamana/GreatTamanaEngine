@@ -180,14 +180,23 @@ function Test-SceneInView {
     return ([bool](Get-Field $st 'game.visibleValid' $false) -and ([double](Get-Field $st 'game.visibleClusters' 0) -gt 0))
 }
 
-# First rotation at $Position that leaves no visible cluster, or $null.
-function Find-AwayRotation {
+# First pose that skips a part and shows nothing, or $null. Tries the given position first, then raised
+# positions (a camera inside the part box cannot skip it). Returns Position and Rotation.
+function Find-AwayPose {
     param([double[]]$Position)
-    foreach ($rot in $script:AwayRotations) {
-        Set-CullCamera $CameraEntity $Position $rot
-        Wait-CullFrames 12
-        $st = Get-GpuDrivenState
-        if ([bool](Get-Field $st 'game.visibleValid' $false) -and ([double](Get-Field $st 'game.visibleClusters' -1) -eq 0)) { return $rot }
+    $positions = @($Position,
+        [double[]]@($Position[0], [math]::Max(4000.0, $Position[1] + 3000.0), $Position[2]),
+        [double[]]@($Position[0], 20000.0, $Position[2]))
+    foreach ($pos in $positions) {
+        foreach ($rot in $script:AwayRotations) {
+            Set-CullCamera $CameraEntity $pos $rot
+            Wait-CullFrames 12
+            $st = Get-GpuDrivenState
+            $nothing = [bool](Get-Field $st 'game.visibleValid' $false) -and ([double](Get-Field $st 'game.visibleClusters' -1) -eq 0)
+            if ($nothing -and ([double](Get-Field $st 'game.skippedParts' 0) -ge 1)) {
+                return [pscustomobject]@{ Position = [double[]]$pos; Rotation = [double[]]$rot }
+            }
+        }
     }
     return $null
 }
@@ -205,19 +214,19 @@ function Invoke-AwayTable {
         Out-Line 'INVALID  the facing pose shows no visible cluster; the away table is skipped.'
         return $null
     }
-    $away = Find-AwayRotation $Facing.Position
+    $away = Find-AwayPose $Facing.Position
     if ($null -eq $away) {
         Set-CullCamera $CameraEntity $Facing.Position $Facing.Rotation
-        Out-Line 'INVALID  no camera rotation was found that shows nothing; the away table is skipped.'
+        Out-Line 'INVALID  no camera pose was found that skips the part; the away table is skipped.'
         return $null
     }
-    Out-Line ('Away rotation (pitch, yaw, roll): ' + ($away -join ', '))
-    $rotations = @{ facing = $Facing.Rotation; away = $away }
+    Out-Line ('Away position: ' + ($away.Position -join ', ') + '  rotation (pitch, yaw, roll): ' + ($away.Rotation -join ', '))
+    $poses = @{ facing = $Facing; away = $away }
     $res = @{ facing = New-Object System.Collections.Generic.List[object]; away = New-Object System.Collections.Generic.List[object] }
     for ($rep = 1; $rep -le $Repeats; $rep++) {
         $order = if ($rep % 2 -eq 0) { @('away', 'facing') } else { @('facing', 'away') }
         foreach ($n in $order) {
-            Set-CullCamera $CameraEntity $Facing.Position $rotations[$n]
+            Set-CullCamera $CameraEntity $poses[$n].Position $poses[$n].Rotation
             Write-Host ('  ' + $Table + ' round ' + $rep + '/' + $Repeats + ' ' + $n)
             $m = Measure-CullConfig -Label ($Table + ' ' + $n) -Samples $Samples
             $st = Get-GpuDrivenState

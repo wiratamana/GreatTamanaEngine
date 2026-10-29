@@ -93,7 +93,7 @@ Vec3 RenderSystem::ResolveActiveCameraWorldPosition(Registry& registry) noexcept
 
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, float aspectWidthOverHeight,
     IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
-    const std::unordered_set<Entity>& batchedEntities, DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd,
+    const EntityMarkSet& batchedEntities, DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd,
     std::optional<SceneCullRequest> cull)
 {
     Draw(registry, renderer, ResolveActiveCameraViewProjection(registry, aspectWidthOverHeight), capture, maxDrawCount,
@@ -116,7 +116,7 @@ const char* VertexLayoutDebugName(VertexLayout layout)
 
 void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& viewProjection,
     IFrameDebuggerCaptureRecorder* capture, std::optional<std::size_t> maxDrawCount,
-    const std::unordered_set<Entity>& batchedEntities, std::optional<PipelineOverrideSet> pipelineOverrideSet,
+    const EntityMarkSet& batchedEntities, std::optional<PipelineOverrideSet> pipelineOverrideSet,
     DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd, std::optional<SceneCullRequest> cull)
 {
     GTE_PROFILE_SCOPE("RenderSystem::Draw");
@@ -143,7 +143,7 @@ void RenderSystem::Draw(Registry& registry, Renderer& renderer, const Mat4& view
         ++consideredCount;
 
         // A batched entity is drawn by its indirect pass, but still counts toward maxDrawCount.
-        if (batchedEntities.contains(command.entity)) {
+        if (batchedEntities.Contains(command.entity)) {
             continue;
         }
 

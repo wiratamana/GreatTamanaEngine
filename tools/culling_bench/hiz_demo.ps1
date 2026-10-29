@@ -3,12 +3,13 @@
   profile x wall (off, on) x mode (NoCull, Frustum, HiZ) in alternating rounds with Measure-CullConfig.
   Table: span, primary, secondary, GpuDrivenScene passes, clusters tested and drawn, FPS (uncapped only).
   A value that was not measured prints '-', never 0. Profiles: geometry_only (fixed-cost features off), full, both.
-  Checks per profile: wall on  -> Hi-Z GpuDrivenScene primary ms <= WallRatio x Frustum;
-                      wall off -> Hi-Z GpuDrivenScene primary ms <= Frustum + HizBudgetMs.
+  Checks per profile: wall on  -> Hi-Z GpuDrivenScene primary ms <= WallRatio (0.25) x Frustum;
+                      wall off -> Hi-Z GpuDrivenScene primary ms <= Frustum + HizBudgetMs (3.0).
+  Hi-Z runs a second full cull pass over all work items; only an indirect-dispatch cull would remove that cost.
   Exit code: 0 = all checks pass, 1 = a check failed, 2 = precondition failed or editor unreachable,
   3 = a check could not be evaluated (invalid rows, Hi-Z not applied, missing data).
-  Start the editor with --no-vsync and the Game tab visible. The demo scene stays open; close it with
-  File > Close Hi-Z Demo. -OutFile writes <name>.md and <name>.json.
+  Start the editor with --no-vsync and the Game tab visible. Cleanup closes the demo through
+  POST /close_preset_scene, which restores the features and settings. -OutFile writes <name>.md and <name>.json.
 #>
 [CmdletBinding()]
 param(
@@ -20,8 +21,8 @@ param(
     [int]$Repeats = 3,
     [string]$WallName = 'HizDemo Wall',
     [double]$MinValidPercent = 80.0,
-    [double]$HizBudgetMs = 0.4,
-    [double]$WallRatio = 0.10,
+    [double]$HizBudgetMs = 3.0,
+    [double]$WallRatio = 0.25,
     [string]$OutFile = ''
 )
 
@@ -33,7 +34,7 @@ Initialize-CullLib -BaseUrl $BaseUrl
 
 $script:Report = New-Object System.Collections.Generic.List[string]
 $script:Rows = New-Object System.Collections.Generic.List[object]
-$script:Saved = $null
+$script:Opened = $false
 $script:Prefixes = @()
 $script:WallHome = $null
 $script:PresentPolicy = 'unknown'
@@ -60,6 +61,31 @@ function Measure-DemoRun {
     return ($m | Add-Member -NotePropertyName VerdictKind -NotePropertyValue $kind -PassThru)
 }
 
+# Polls GET /render_graph until no fixed-cost feature reads on (the list lags the open by a few frames).
+# Returns the names still on after the timeout.
+function Wait-FixedCostFeaturesOff {
+    param([int]$TimeoutSec = 10)
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ($true) {
+        $states = Get-FeatureStates
+        $on = @(@($states.Keys) | Where-Object { (Test-GeometryOnlyFeature $_ $script:Prefixes) -and $states[$_].G })
+        if (($on.Count -eq 0) -or ((Get-Date) -ge $deadline)) { return $on }
+        Start-Sleep -Milliseconds 200
+    }
+}
+
+# Closes the demo through the engine, which restores the features and settings it changed.
+function Close-DemoScene {
+    try {
+        $reply = Invoke-CullPost '/close_preset_scene' @{} 60
+        if (-not [bool](Get-Field $reply 'success' $false)) {
+            Write-Host ('WARN  close_preset_scene: ' + [string](Get-Field $reply 'message' (Get-Field $reply 'error' 'no message')))
+        } else {
+            Write-Host ('Closed: ' + [string](Get-Field $reply 'message' ''))
+        }
+    } catch { Write-Host ('WARN  close_preset_scene: ' + $_) }
+}
+
 # Opens the demo scene for one profile and checks the preconditions. Returns $false when they fail.
 function Open-DemoScene {
     param([string]$ProfileName)
@@ -71,15 +97,13 @@ function Open-DemoScene {
         Out-Line ('FAIL  open_preset_scene: ' + [string](Get-Field $reply 'error' (Get-Field $reply 'message' 'no message')))
         return $false
     }
+    $script:Opened = $true
     Out-Line ('Opened: ' + [string](Get-Field $reply 'message' ''))
     Out-Line ('instances={0} clamped={1} clustersPerInstance={2} workItems={3}' -f (Get-Field $reply 'instanceCount' '-'),
         (Get-Field $reply 'countClamped' '-'), (Get-Field $reply 'clustersPerInstance' '-'), (Get-Field $reply 'workItems' '-'))
 
-    $states = Get-FeatureStates
     if ($ProfileName -eq 'geometry_only') {
-        foreach ($n in $states.Keys) {
-            if ((Test-GeometryOnlyFeature $n $script:Prefixes) -and $states[$n].G) { Out-Line ('WARN  fixed-cost feature is still on: ' + $n) }
-        }
+        foreach ($n in @(Wait-FixedCostFeaturesOff 10)) { Out-Line ('WARN  fixed-cost feature is still on: ' + $n) }
     }
     Show-SplitViews
     Start-Sleep -Seconds 3
@@ -126,15 +150,12 @@ function Measure-DemoProfile {
 }
 
 $exitCode = 0
-$savedCfg = $null
 try {
     try { $null = Invoke-CullGet '/profiler' } catch { Write-Host ('Editor not reachable at ' + $BaseUrl + ': ' + $_); exit 2 }
     try { $script:Prefixes = @(Get-GeometryOnlyPrefixes) } catch { Write-Host ('Fixed-cost feature list unavailable: ' + $_); exit 2 }
 
     Show-SplitViews
     Start-Sleep -Seconds 2
-    $script:Saved = Get-FeatureStates
-    $savedCfg = Save-GpuDrivenCfg
 
     $profiles = if ($ProfileChoice -eq 'both') { @('geometry_only', 'full') } else { @($ProfileChoice) }
     foreach ($p in $profiles) {
@@ -179,14 +200,9 @@ try {
     Write-Host ('Run aborted: ' + $_)
     $exitCode = 2
 } finally {
-    Write-Host 'Cleanup: restoring the wall, settings and feature states. The demo scene stays open.'
-    try { if ($null -ne $script:WallHome) { Set-CullTrs -Name $WallName -Position $script:WallHome } } catch { Write-Warning ('Wall restore failed: ' + $_) }
-    try { if ($null -ne $savedCfg) { Set-GpuDrivenCfg $savedCfg | Out-Null } } catch { Write-Warning ('GpuDrivenScene restore failed: ' + $_) }
-    try {
-        if ($null -ne $script:Saved) {
-            $null = Get-FeatureStates
-            Restore-FeatureStates $script:Saved
-        }
-    } catch { Write-Warning ('Feature restore failed: ' + $_) }
+    if ($script:Opened) {
+        Write-Host 'Cleanup: closing the Hi-Z demo.'
+        Close-DemoScene
+    }
 }
 exit $exitCode

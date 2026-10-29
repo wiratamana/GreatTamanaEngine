@@ -5,10 +5,10 @@
 namespace gte {
 
 namespace {
-const std::unordered_set<Entity> kNoExcludedEntities;
+const EntityMarkSet kNoExcludedEntities;
 } // namespace
 
-const std::unordered_set<Entity>& ExcludedEntitiesOf(const SceneDrawRequest& request) noexcept
+const EntityMarkSet& ExcludedEntitiesOf(const SceneDrawRequest& request) noexcept
 {
     return request.batchedEntities != nullptr ? *request.batchedEntities : kNoExcludedEntities;
 }

@@ -34,7 +34,9 @@ void Add(fx::FeatureDebugResult& out, std::string key, fx::FeatureDebugValue val
     out.fields.push_back({ std::move(key), std::move(value) });
 }
 
-void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDrivenSceneViewSnapshot& v)
+} // namespace
+
+void AppendGpuDrivenSceneViewFields(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDrivenSceneViewSnapshot& v)
 {
     const auto key = [&](std::string_view name) { return std::string(prefix).append(name); };
     const auto text = [](std::string_view s) { return std::string(s); };
@@ -82,6 +84,8 @@ void AddView(fx::FeatureDebugResult& out, std::string_view prefix, const GpuDriv
     Add(out, key("reasons.kept"), Count(g.reasons.kept));
 }
 
+namespace {
+
 fx::FeatureDebugResult Fail(std::string key, std::string message)
 {
     fx::FeatureDebugResult result;
@@ -109,7 +113,7 @@ fx::FeatureDebugResult GpuDrivenSceneDebugEndpoint::GetState() const
     Add(out, "debugView", std::string(fx::EnumName(kGpuDrivenSceneDebugViewTable, s.debugView)));
     Add(out, "supported", m_feature.Supported());
     for (const ScopeName& scope : kScopes) {
-        AddView(out, scope.prefix, m_feature.Snapshot(scope.scope));
+        AppendGpuDrivenSceneViewFields(out, scope.prefix, m_feature.Snapshot(scope.scope));
     }
     return out;
 }

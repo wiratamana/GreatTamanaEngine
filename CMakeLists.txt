@@ -589,6 +589,7 @@ add_library(gte_core STATIC
     src/Math/Quat.h
     src/Math/PbrBrdf.h
     src/ECS/Entity.h
+    src/ECS/EntityMarkSet.h
     src/ECS/EntityManager.cpp
     src/ECS/EntityManager.h
     src/ECS/ComponentStorage.h

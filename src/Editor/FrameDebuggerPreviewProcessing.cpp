@@ -1,6 +1,7 @@
 #include "FrameDebuggerPreviewProcessing.h"
 
 #include "../Math/ToneMapCurves.h"
+#include "../Profiling/ScopeTimer.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/ComputePass.h"
 #include "../Renderer/RenderGraph/OneShot.h"
@@ -89,7 +90,10 @@ const Texture2D& FrameDebuggerPreviewRenderer::RenderPreview(Renderer& renderer,
         .Bind("outputImage", dst)
         .Push(PushConstants{ static_cast<std::int32_t>(channel), levelsBlack, levelsWhite, sceneReferred ? 1 : 0 })
         .Dispatch(extent);
-    oneShot.Run();
+    {
+        GTE_PROFILE_BLOCKED("Wait.OneShotSubmit");
+        oneShot.Run();
+    }
     return *m_outputTexture;
 }
 

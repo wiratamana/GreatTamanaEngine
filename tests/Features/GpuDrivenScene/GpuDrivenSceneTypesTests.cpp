@@ -1,11 +1,15 @@
 // Settings, cull plan, camera choice, count history and debug keys of the GpuDrivenScene feature.
 
+#include "Features/GpuDrivenScene/GpuDrivenSceneDebugEndpoint.h"
 #include "Features/GpuDrivenScene/GpuDrivenSceneTypes.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstdint>
+#include <string>
 #include <string_view>
+#include <variant>
 
 namespace gte {
 namespace {
@@ -268,6 +272,40 @@ TEST(GpuDrivenSceneTypesTest, ClaimedInstancesIncludeSkippedInstances)
 TEST(GpuDrivenSceneTypesTest, NothingInViewHasAnExactName)
 {
     EXPECT_EQ(fx::EnumName(kHizReasonTable, HizReason::NothingInView), "NothingInView");
+}
+
+const fx::FeatureDebugField* FindField(const fx::FeatureDebugResult& result, std::string_view key)
+{
+    for (const fx::FeatureDebugField& field : result.fields) {
+        if (field.key == key) {
+            return &field;
+        }
+    }
+    return nullptr;
+}
+
+TEST(GpuDrivenSceneTypesTest, StateJsonCarriesTheSkipKeysOfBothViews)
+{
+    GpuDrivenSceneViewSnapshot view;
+    view.gpu.skippedParts = 3;
+    view.gpu.skippedInstances = 1234;
+
+    for (const std::string_view prefix : { std::string_view("game."), std::string_view("scene.") }) {
+        fx::FeatureDebugResult out;
+        AppendGpuDrivenSceneViewFields(out, prefix, view);
+
+        const fx::FeatureDebugField* parts = FindField(out, std::string(prefix) + "skippedParts");
+        const fx::FeatureDebugField* instances = FindField(out, std::string(prefix) + "skippedInstances");
+        ASSERT_NE(parts, nullptr) << prefix;
+        ASSERT_NE(instances, nullptr) << prefix;
+        ASSERT_TRUE(std::holds_alternative<std::int64_t>(parts->value));
+        ASSERT_TRUE(std::holds_alternative<std::int64_t>(instances->value));
+        EXPECT_EQ(std::get<std::int64_t>(parts->value), 3);
+        EXPECT_EQ(std::get<std::int64_t>(instances->value), 1234);
+        for (const fx::FeatureDebugField& field : out.fields) {
+            EXPECT_TRUE(field.key.starts_with(prefix)) << field.key;
+        }
+    }
 }
 
 } // namespace

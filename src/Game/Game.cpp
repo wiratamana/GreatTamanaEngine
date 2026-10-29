@@ -297,7 +297,7 @@ void Game::EnsureDefaultCameraExists()
 
 void Game::Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride,
     IFrameDebuggerCaptureRecorder* frameDebuggerCapture, std::optional<std::size_t> maxDrawCount,
-    const std::unordered_set<Entity>& batchedEntities, DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd,
+    const EntityMarkSet& batchedEntities, DescriptorSetHandle sceneServicesSet, rg::CommandBuffer* cmd,
     std::optional<SceneCullRequest> cull)
 {
     EnsureDefaultCameraExists();

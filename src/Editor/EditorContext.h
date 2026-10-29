@@ -4,6 +4,7 @@
 #include "ClusterToolUiState.h"
 #include "HizDemoState.h"
 #include "InstanceGridTestSpawner.h"
+#include "PanelVisibility.h"
 #include "Panels/HierarchyRows.h"
 #include "Selection.h"
 #include "../Core/Extent.h"
@@ -265,6 +266,9 @@ struct EditorContext {
 
     // Hierarchy panel state that outlives one frame.
     HierarchyViewState hierarchy;
+
+    // Panels an HTTP caller hid for this session.
+    PanelHiddenFlags hiddenPanels;
 
     // What the Hi-Z demo scene changed, and the menu action waiting for the host (run on the main thread).
     HizDemoState hizDemo;

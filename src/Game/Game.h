@@ -7,6 +7,7 @@
 #include "../Core/EngineContext.h"
 #include "Animation/AnimationSystem.h"
 #include "ECS/Components/DirectionalLight.h"
+#include "ECS/EntityMarkSet.h"
 #include "ECS/Registry.h"
 #include "EngineCommandResults.h"
 #include "Instantiation/MeshInstantiationSystem.h"
@@ -19,7 +20,6 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 namespace gte {
@@ -44,7 +44,7 @@ public:
     void Render(Renderer& renderer, float aspectWidthOverHeight, const Mat4* viewProjectionOverride = nullptr,
         IFrameDebuggerCaptureRecorder* frameDebuggerCapture = nullptr,
         std::optional<std::size_t> maxDrawCount = std::nullopt,
-        const std::unordered_set<Entity>& batchedEntities = {},
+        const EntityMarkSet& batchedEntities = {},
         DescriptorSetHandle sceneServicesSet = DescriptorSetHandle::Invalid,
         rg::CommandBuffer* cmd = nullptr, std::optional<SceneCullRequest> cull = std::nullopt);
 

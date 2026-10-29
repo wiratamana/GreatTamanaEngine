@@ -49,7 +49,9 @@ constexpr bool ClusterPartClaimable(const ClusterPartClaim& part) noexcept
     return part.progress == ClusterChainProgress::Draw || part.progress == ClusterChainProgress::Culled;
 }
 
-// Entities of every claimable part, in part order. Empty when the context disallows claims.
-std::vector<Entity> ClaimedEntitiesOf(std::span<const ClusterPartClaim> parts, const ClusterClaimContext& context);
+// Entities of every claimable part as one span per part, in part order, empty spans dropped. Nothing when the
+// context disallows claims. The spans point into `parts`' own storage.
+std::vector<std::span<const Entity>> ClaimedSpansOf(
+    std::span<const ClusterPartClaim> parts, const ClusterClaimContext& context);
 
 } // namespace gte

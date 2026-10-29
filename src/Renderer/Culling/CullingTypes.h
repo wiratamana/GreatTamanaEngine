@@ -40,7 +40,7 @@ bool IsAABBOutsideFrustum(const std::array<Plane, 6>& planes, const AABB& worldB
 // A negative or non-finite fraction counts as 0.
 AABB PadAABB(const AABB& box, float fractionOfLargestExtent) noexcept;
 
-// World-space AABB of a local AABB: transforms all 8 corners and takes the min/max.
+// World-space AABB of a local AABB (centre/extent form; exact for an affine matrix).
 AABB TransformAABB(const AABB& localAABB, const Mat4& worldMatrix);
 
 // Same planes as ExtractFrustumPlanes, or nullopt when the matrix has a non-finite entry or a degenerate plane.

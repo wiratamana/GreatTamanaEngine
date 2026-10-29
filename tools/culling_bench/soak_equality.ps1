@@ -51,6 +51,7 @@ $script:Created = New-Object System.Collections.Generic.List[string]
 $script:Skipped = New-Object System.Collections.Generic.List[string]
 $script:Saved = $null
 $script:Probe = $null
+$script:HizApplied = $false
 $script:Fatal = $false
 
 function Get-Rnd {
@@ -59,18 +60,18 @@ function Get-Rnd {
 }
 
 # Scene definitions. Rest ranges are camera position (X/Y/Z), pitch and yaw in degrees.
-# AwayRot is a camera rotation with nothing of the scene in view.
+# AwayPos / AwayRot is a camera pose with nothing of the scene in view (outside the mesh box for the terrain).
 function Get-SceneDef {
     param([string]$Name)
     if ($Name -eq 'terrain') {
         return [pscustomobject]@{
-            Name = 'terrain'; Base = @(0, 900, 0); BasePitch = -10.0; AwayRot = @(80.0, 0.0, 0.0)
+            Name = 'terrain'; Base = @(0, 900, 0); BasePitch = -10.0; AwayPos = @(0, 4000, 0); AwayRot = @(-80.0, 0.0, 0.0)
             X = @(-600, 600); Y = @(820, 1300); Z = @(-600, 600); Pitch = @(-50, 10); Yaw = @(0, 360)
             WallPos = @(0, 900, 40); WallScale = @(30, 30, 0.2); MoverAmp = 40.0; MoverHome = @(0, 0, 0)
         }
     }
     return [pscustomobject]@{
-        Name = 'grid'; Base = @(0, 0, -60); BasePitch = 0.0; AwayRot = @(0.0, 180.0, 0.0)
+        Name = 'grid'; Base = @(0, 0, -60); BasePitch = 0.0; AwayPos = @(0, 0, -60); AwayRot = @(0.0, 180.0, 0.0)
         X = @(-40, 40); Y = @(-40, 40); Z = @(-120, -40); Pitch = @(-15, 15); Yaw = @(-30, 30)
         WallPos = @(0, 0, -30); WallScale = @(20, 20, 0.2); MoverAmp = 8.0; MoverHome = @(0, 0, 8)
     }
@@ -118,12 +119,12 @@ function Get-AwayProbeFrames {
     return @($last)
 }
 
-# Camera looks away for $AwayFrames frames (nothing in view), then one frame back at the base pose, twice.
+# Camera looks away (AwayPos / AwayRot, nothing in view) for $AwayFrames frames, then one frame back at the base pose, twice.
 function New-AwayAndBackFrames {
     param($Def, [int]$AwayFrames)
     $frames = New-Object System.Collections.Generic.List[object]
     foreach ($backYaw in @(0.0, 20.0)) {
-        for ($i = 0; $i -lt $AwayFrames; $i++) { $frames.Add((New-Frame $Def.Base $Def.AwayRot)) }
+        for ($i = 0; $i -lt $AwayFrames; $i++) { $frames.Add((New-Frame $Def.AwayPos $Def.AwayRot)) }
         $frames.Add((New-Frame $Def.Base @($Def.BasePitch, $backYaw, 0.0)))
     }
     return $frames.ToArray()
@@ -155,8 +156,8 @@ function Set-SoakFrame {
     foreach ($m in $Frame.Movers) { Set-CullTrs -Name $m.Name -Position $m.Pos }
 }
 
-# Replays $Frames in one mode, one PNG per frame ('<prefix>2_NNN.png' for the -Twice repeat). Appends
-# game.skippedParts to $script:Probe after each -ProbeFrames frame. Returns $null or an error text.
+# Replays $Frames in one mode, one PNG per frame ('<prefix>2_NNN.png' for -Twice). HiZ mode sets $script:HizApplied
+# when any frame reads occlusion Applied; -ProbeFrames add game.skippedParts to $script:Probe. Returns $null or an error.
 function Save-SoakPhase {
     param([string]$Dir, [string]$Prefix, [string]$Mode, $Frames, [int]$Wait, [switch]$Twice, [int[]]$ProbeFrames = @())
     New-Item -ItemType Directory -Force -Path $Dir | Out-Null
@@ -168,6 +169,9 @@ function Save-SoakPhase {
         Wait-CullFrames $Wait
         $err = Save-GameView (Join-Path $Dir ('{0}_{1:D3}.png' -f $Prefix, $i))
         if ($err) { return ("frame $i ($Mode): " + $err) }
+        if (($Mode -eq 'HiZ') -and (-not $script:HizApplied)) {
+            $script:HizApplied = ([string](Get-Field (Get-GpuDrivenState) 'game.occlusion' '') -eq 'Applied')
+        }
         if ($ProbeFrames -contains $i) {
             $script:Probe.Add([double](Get-Field (Get-GpuDrivenState) 'game.skippedParts' 0))
         }
@@ -271,13 +275,13 @@ function Invoke-SoakScenario {
     $row = [pscustomobject]@{ Scene = $Scene; Scenario = $Name; Frames = $Frames.Count; Compared = 0; EqualFrames = 0
         DiffFrames = 0; FailFrames = 0; DiffPixels = 0; MaxDiff = 0; MaxNoise = 0; MaxBlock = 0; HizActive = $false; Error = '' }
     $script:Probe = New-Object System.Collections.Generic.List[double]
+    $script:HizApplied = $false
     $err = Save-SoakPhase $dir 'hiz' 'HiZ' $Frames $FrameWait -ProbeFrames $ProbeFrames
     if (-not $err -and $ProbeFrames.Count -gt 0 -and (($script:Probe | Measure-Object -Maximum).Maximum -lt 1)) {
         $err = 'camera never looked away: skippedParts = 0'
     }
     if (-not $err) {
-        $st = Get-GpuDrivenState
-        $row.HizActive = ([string](Get-Field $st 'game.occlusion' '') -eq 'Applied')
+        $row.HizActive = $script:HizApplied
         $err = Save-SoakPhase $dir 'ref' 'NoCull' $Frames $FrameWait -Twice
     }
     if ($err) { $row.Error = $err; $script:Results.Add($row); return }

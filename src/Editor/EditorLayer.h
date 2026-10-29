@@ -1,8 +1,10 @@
 #pragma once
 
 #include "ClusterToolUiState.h"
+#include "HierarchyActionRequest.h"
 #include "HierarchyStateReport.h"
 #include "HizDemoState.h"
+#include "PanelVisibility.h"
 
 #include "../Assets/MeshClusterOptions.h"
 #include "../Core/CapturedPixels.h"
@@ -333,6 +335,13 @@ public:
     // The Hierarchy panel's rows from the last drawn frame: `count` rows from row `first`.
     // `editorAvailable` is false for NullEditorLayer.
     virtual HierarchyStateReport HierarchyState(Game& game, std::uint64_t first, std::uint64_t count) const = 0;
+
+    // Hides or shows a panel for this session. Returns false for NullEditorLayer (no panels).
+    virtual bool SetPanelHidden(TogglePanel panel, bool hidden) = 0;
+
+    // Runs one Hierarchy edit through the same code as a mouse drop or arrow click and reports the rows around the target.
+    // `editorAvailable` is false for NullEditorLayer.
+    virtual HierarchyActionReport HierarchyAction(Game& game, const HierarchyActionCommand& request) = 0;
 
     // Starts a cluster build for the selected asset through the same function as the "Build Clusters" button.
     virtual ClusterBuildStartResult InspectorBuildClusters(const InspectorClusterOptions& options) = 0;

@@ -1,7 +1,7 @@
 #include "ClusterPartPlanning.h"
 
 #include <algorithm>
-#include <cmath>
+#include <limits>
 #include <map>
 
 namespace gte::fx {
@@ -10,14 +10,19 @@ std::vector<ClusterMeshGroup> GroupInstances(std::span<const ClusterInstance> ca
 {
     std::vector<ClusterMeshGroup> groups;
     std::map<std::pair<MeshToken, MaterialToken>, std::size_t> groupOf;
+    // Runs of one mesh and material are common; the last group skips the map lookup.
+    std::size_t lastGroup = 0;
     for (std::size_t i = 0; i < candidates.size(); ++i) {
         const ClusterInstance& candidate = candidates[i];
         const MaterialToken material = splitByMaterial ? candidate.material : MaterialToken{};
-        auto [it, inserted] = groupOf.try_emplace(std::pair{ candidate.mesh, material }, groups.size());
-        if (inserted) {
-            groups.push_back(ClusterMeshGroup{ candidate.mesh, material, candidate.kind, {} });
+        if (i == 0 || candidate.mesh != groups[lastGroup].mesh || material != groups[lastGroup].material) {
+            auto [it, inserted] = groupOf.try_emplace(std::pair{ candidate.mesh, material }, groups.size());
+            if (inserted) {
+                groups.push_back(ClusterMeshGroup{ candidate.mesh, material, candidate.kind, {} });
+            }
+            lastGroup = it->second;
         }
-        groups[it->second].instances.push_back(static_cast<std::uint32_t>(i));
+        groups[lastGroup].instances.push_back(static_cast<std::uint32_t>(i));
     }
     return groups;
 }
@@ -49,31 +54,24 @@ ClusterSlotAssignment AssignClusterPartSlots(std::span<const ClusterPartSize> pa
 
 ClusterPartBox UnionInstanceBoxes(std::span<const AABB> instanceBoxes, std::span<const std::uint32_t> indices) noexcept
 {
-    ClusterPartBox part;
-    bool first = true;
+    if (indices.empty()) {
+        return ClusterPartBox{};
+    }
+    constexpr float kHuge = std::numeric_limits<float>::max();
+    Vec3 lo(kHuge, kHuge, kHuge);
+    Vec3 hi(-kHuge, -kHuge, -kHuge);
     for (const std::uint32_t index : indices) {
         if (index >= instanceBoxes.size()) {
             return ClusterPartBox{};
         }
         const AABB& box = instanceBoxes[index];
-        const bool usable = std::isfinite(box.min.x) && std::isfinite(box.min.y) && std::isfinite(box.min.z)
-            && std::isfinite(box.max.x) && std::isfinite(box.max.y) && std::isfinite(box.max.z)
-            && box.min.x <= box.max.x && box.min.y <= box.max.y && box.min.z <= box.max.z;
-        if (!usable) {
+        if (!IsUsableInstanceBox(box)) {
             return ClusterPartBox{};
         }
-        if (first) {
-            part.box = box;
-            first = false;
-            continue;
-        }
-        part.box.min = Vec3(std::min(part.box.min.x, box.min.x), std::min(part.box.min.y, box.min.y),
-            std::min(part.box.min.z, box.min.z));
-        part.box.max = Vec3(std::max(part.box.max.x, box.max.x), std::max(part.box.max.y, box.max.y),
-            std::max(part.box.max.z, box.max.z));
+        lo = Vec3(std::min(lo.x, box.min.x), std::min(lo.y, box.min.y), std::min(lo.z, box.min.z));
+        hi = Vec3(std::max(hi.x, box.max.x), std::max(hi.y, box.max.y), std::max(hi.z, box.max.z));
     }
-    part.bounded = !first;
-    return part;
+    return ClusterPartBox{ AABB{ lo, hi }, true };
 }
 
 bool ShouldSkipClusterPart(const std::optional<std::array<Plane, 6>>& planes, ClusterCullFlags flags,
@@ -86,14 +84,17 @@ bool ShouldSkipClusterPart(const std::optional<std::array<Plane, 6>>& planes, Cl
 }
 
 std::vector<std::uint8_t> PlanClusterPartSkips(const std::optional<std::array<Plane, 6>>& planes,
-    ClusterCullFlags flags, std::span<const AABB> instanceBoxes, std::span<const ClusterMeshGroup> groups)
+    ClusterCullFlags flags, std::span<const AABB> instanceBoxes, const ClusterPartBox& allBoxes,
+    std::span<const ClusterMeshGroup> groups)
 {
     std::vector<std::uint8_t> skips(groups.size(), 0);
     if (!planes.has_value() || !HasClusterCullFlag(flags, ClusterCullFlags::Frustum)) {
         return skips;
     }
     for (std::size_t i = 0; i < groups.size(); ++i) {
-        skips[i] = ShouldSkipClusterPart(planes, flags, UnionInstanceBoxes(instanceBoxes, groups[i].instances)) ? 1 : 0;
+        const bool coversAll = !instanceBoxes.empty() && groups[i].instances.size() == instanceBoxes.size();
+        const ClusterPartBox part = coversAll ? allBoxes : UnionInstanceBoxes(instanceBoxes, groups[i].instances);
+        skips[i] = ShouldSkipClusterPart(planes, flags, part) ? 1 : 0;
     }
     return skips;
 }
