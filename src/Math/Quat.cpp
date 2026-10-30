@@ -1,4 +1,4 @@
-﻿#include "Quat.h"
+#include "Quat.h"
 
 #include "Mat4.h"
 
@@ -24,25 +24,22 @@ Quat Quat::FromEulerDegrees(float pitchX, float yawY, float rollZ) noexcept
 
 Vec3 Quat::ToEulerDegrees() const noexcept
 {
-    Mat4 m = ToMat4();
+    const Mat4 m = ToMat4();
 
-    // Decomposing R = Ry(yaw) * Rx(pitch) * Rz(roll) (see FromEulerDegrees
-    // above) gives, among others:
-    //   R(1,2) = -sin(pitch)
+    // R = Ry(yaw) * Rx(pitch) * Rz(roll):
+    //   R(1,2) = -sin(pitch), hypot(R(1,0), R(1,1)) = |cos(pitch)|
     //   R(1,0) = cos(pitch)*sin(roll), R(1,1) = cos(pitch)*cos(roll)
     //   R(0,2) = cos(pitch)*sin(yaw),  R(2,2) = cos(pitch)*cos(yaw)
-    float sx = Clamp(-m(1, 2), -1.0f, 1.0f);
-    float pitch = std::asin(sx);
-    float cx = std::cos(pitch);
+    // atan2 keeps pitch accurate near +/-90 where asin is ill-conditioned.
+    const float cosPitch = std::hypot(m(1, 0), m(1, 1));
+    const float pitch = std::atan2(-m(1, 2), cosPitch);
 
     float yaw, roll;
-    if (cx > 1e-4f) {
+    if (cosPitch > 1e-3f) {
         roll = std::atan2(m(1, 0), m(1, 1));
         yaw = std::atan2(m(0, 2), m(2, 2));
     } else {
-        // Gimbal lock (pitch ~ +/-90 degrees): yaw and roll become the same
-        // degree of freedom - conventionally dump all of it into yaw and
-        // zero out roll, same fallback most engines use here.
+        // Gimbal lock: yaw and roll share one axis. Put it all in yaw.
         roll = 0.0f;
         yaw = std::atan2(-m(2, 0), m(0, 0));
     }

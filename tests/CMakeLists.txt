@@ -2525,6 +2525,7 @@ if(TRUE)
         Editor/ExitGateTests.cpp
         Editor/SceneGridMathTests.cpp
         Editor/SelectionTests.cpp
+        Editor/RotationEulerEditCacheTests.cpp
         Editor/ImGuiMemoryTrackerTests.cpp
         Editor/MemoryPanelDataTests.cpp
         Editor/VolumeTexturePreviewSelectionTests.cpp

@@ -6,6 +6,7 @@
 #include "InstanceGridTestSpawner.h"
 #include "PanelVisibility.h"
 #include "Panels/HierarchyRows.h"
+#include "RotationEulerEditCache.h"
 #include "Selection.h"
 #include "../Core/Extent.h"
 #include "../Core/UiTextureHandle.h"
@@ -271,6 +272,9 @@ struct EditorContext {
     HizDemoState hizDemo;
     HizDemoMenuAction hizDemoMenuAction = HizDemoMenuAction::None;
     HizDemoMenuResult hizDemoMenuResult;
+
+    // Euler angles being edited in the Inspector's Rotation field.
+    RotationEulerEditCache rotationEdit;
 };
 
 } // namespace gte

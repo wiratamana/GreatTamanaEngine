@@ -1,4 +1,4 @@
-﻿// Unit tests for Quat (src/Math/Quat.h). RotatingForward*/RotatingRight*
+// Unit tests for Quat (src/Math/Quat.h). RotatingForward*/RotatingRight*
 // below double as the defining sanity check that this engine's rotation
 // convention behaves like Unity's Quaternion.AngleAxis (see Quat.h).
 
@@ -6,6 +6,8 @@
 #include "Math/Mat4.h"
 
 #include <gtest/gtest.h>
+
+#include <cmath>
 
 namespace gte {
 namespace {
@@ -69,6 +71,41 @@ TEST(QuatTests, FromEulerAndToEulerRoundTripForNonDegenerateAngles)
     Quat reconstructed = Quat::FromEulerDegrees(euler.x, euler.y, euler.z);
 
     EXPECT_TRUE(RepresentSameRotation(original, reconstructed, 1e-3f));
+}
+
+// Rotation angle between two quaternions in degrees (stable near identity, unlike acos(dot)).
+static float AngleBetweenDegrees(const Quat& a, const Quat& b)
+{
+    const Quat d = a.Inverse() * b;
+    const float v = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+    return RadToDeg(2.0f * std::atan2(v, std::fabs(d.w)));
+}
+
+TEST(QuatTests, ToEulerRoundTripSweepIncludingPitchPoles)
+{
+    int bad = 0;
+    for (float x = -180.0f; x <= 180.0f; x += 15.0f) {
+        for (float y = -180.0f; y <= 180.0f; y += 15.0f) {
+            for (float z = -180.0f; z <= 180.0f; z += 15.0f) {
+                const Quat q = Quat::FromEulerDegrees(x, y, z);
+                const Vec3 e = q.ToEulerDegrees();
+                if (AngleBetweenDegrees(q, Quat::FromEulerDegrees(e.x, e.y, e.z)) > 0.05f) {
+                    ++bad;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(bad, 0);
+}
+
+TEST(QuatTests, ToEulerAtMinusNinetyPitchKeepsRotation)
+{
+    const Quat q = Quat::FromEulerDegrees(-90.0f, 30.0f, 40.0f);
+    const Vec3 e = q.ToEulerDegrees();
+
+    EXPECT_NEAR(e.x, -90.0f, 0.01f);
+    EXPECT_NEAR(e.y, 70.0f, 0.05f);
+    EXPECT_NEAR(e.z, 0.0f, 0.01f);
 }
 
 TEST(QuatTests, SlerpAtEndpointsReturnsInputs)

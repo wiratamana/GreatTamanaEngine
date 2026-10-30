@@ -597,9 +597,9 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
         if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::DragFloat3("Position", &transform->position.x, 0.01f);
 
-            Vec3 eulerDegrees = transform->rotation.ToEulerDegrees();
+            Vec3 eulerDegrees = ctx.rotationEdit.Resolve(entity, transform->rotation);
             if (ImGui::DragFloat3("Rotation", &eulerDegrees.x, 0.1f)) {
-                transform->rotation = Quat::FromEulerDegrees(eulerDegrees.x, eulerDegrees.y, eulerDegrees.z);
+                transform->rotation = ctx.rotationEdit.Commit(eulerDegrees);
             }
 
             ImGui::DragFloat3("Scale", &transform->scale.x, 0.01f);
