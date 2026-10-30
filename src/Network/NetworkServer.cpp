@@ -991,6 +991,31 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(BuildSelectAssetResponseJson(parsed.path), "application/json");
     });
 
+    // GET /select_entity?name=<Name>: selects the entity with that exact Name as the Inspector target.
+    server.Get("/select_entity", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        const ParsedSelectEntityQuery parsed = ParseSelectEntityQuery(req.get_param_value("name"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        EditorUiCommandRequest request;
+        request.kind = EditorUiCommandKind::SelectEntity;
+        request.selectEntity.name = parsed.name;
+        const std::optional<EditorUiCommandResult> result = SubmitEditorUiCommand(uiCommandBridge, request, res);
+        if (!result.has_value()) {
+            return;
+        }
+        const SelectEntityOutcome& outcome = result->selectEntity;
+        if (!outcome.success) {
+            res.status = !outcome.editorAvailable ? 503 : (outcome.notFound ? 404 : 400);
+            res.set_content(BuildGenericErrorResponseJson(outcome.message), "application/json");
+            return;
+        }
+        res.status = 200;
+        res.set_content(BuildSelectEntityResponseJson(parsed.name), "application/json");
+    });
+
     // GET /inspector_state: what the Inspector showed on its last draw.
     server.Get("/inspector_state", [uiCommandBridge](const httplib::Request&, httplib::Response& res) {
         EditorUiCommandRequest request;

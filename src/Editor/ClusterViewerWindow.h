@@ -10,6 +10,7 @@
 #include "ClusterViewerStats.h"
 #include "ClusterViewerTruth.h"
 #include "OrbitCamera.h"
+#include "RotationEulerEditCache.h"
 #include "../Renderer/ClusterViewRenderer.h"
 
 #include <array>
@@ -168,6 +169,7 @@ private:
     OrbitCamera m_orbit;
     ClusterViewerSettings m_settings;
     DebugCameraState m_debug;
+    RotationEulerEditCache m_debugRotationEdit; // Euler shown in the debug camera fields.
 
     // Main slot.
     FrameKey m_mainKey;

@@ -47,7 +47,8 @@ struct RotationEulerEditCache {
         return written;
     }
 
-    void Invalidate() noexcept { valid = false; }
+    // Follows a stored quaternion that was adjusted after Commit() (e.g. normalized), keeping the shown Euler.
+    void Rebind(const Quat& stored) noexcept { written = stored; }
 
 private:
     static float Sanitize(float v) noexcept

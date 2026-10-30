@@ -247,10 +247,10 @@ void ClusterViewerWindow::DrawDebugCameraControls()
         m_debug.transform.position = Vec3(position[0], position[1], position[2]);
         changed = true;
     }
-    const Vec3 euler = m_debug.transform.rotation.ToEulerDegrees();
+    const Vec3 euler = m_debugRotationEdit.Resolve(kInvalidEntity, m_debug.transform.rotation);
     float rotation[3] = { euler.x, euler.y, euler.z };
     if (ImGui::DragFloat3("Pitch/Yaw/Roll", rotation, 0.5f)) {
-        m_debug.transform.rotation = Quat::FromEulerDegrees(rotation[0], rotation[1], rotation[2]);
+        m_debug.transform.rotation = m_debugRotationEdit.Commit(Vec3(rotation[0], rotation[1], rotation[2]));
         changed = true;
     }
     changed |= ImGui::DragFloat("FOV", &m_debug.fovYDegrees, 0.1f, kDebugCameraMinFov, kDebugCameraMaxFov, "%.1f");
@@ -261,6 +261,8 @@ void ClusterViewerWindow::DrawDebugCameraControls()
     changed |= ImGui::DragFloat("Aspect", &m_debug.aspect, 0.01f, kDebugCameraMinAspect, kDebugCameraMaxAspect, "%.3f");
     if (changed) {
         m_debug = ClampDebugCamera(m_debug);
+        // The clamp normalizes the quaternion; keep the shown Euler (the cache holds the pre-clamp quaternion).
+        m_debugRotationEdit.Rebind(m_debug.transform.rotation);
     }
 
     if (ImGui::Button("Snap to view")) {

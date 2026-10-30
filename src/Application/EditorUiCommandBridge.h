@@ -22,6 +22,7 @@ enum class EditorUiCommandKind {
     ActivateTab,
     SpawnInstanceGrid,
     SelectAsset,
+    SelectEntity,
     InspectorState,
     InspectorBuildClusters,
     SplitViews,
@@ -59,6 +60,11 @@ struct SpawnInstanceGridCommand {
 // Plain request payload for one SelectAsset command.
 struct SelectAssetCommand {
     std::string absolutePath;
+};
+
+// Plain request payload for one SelectEntity command.
+struct SelectEntityCommand {
+    std::string name;
 };
 
 // Cluster options of one InspectorBuildClusters command; same fields as the Inspector's own controls.
@@ -110,6 +116,7 @@ struct EditorUiCommandRequest {
     ActivateTabCommand activateTab;
     SpawnInstanceGridCommand spawnInstanceGrid;
     SelectAssetCommand selectAsset;
+    SelectEntityCommand selectEntity;
     InspectorBuildClustersCommand inspectorBuildClusters;
     SplitViewsCommand splitViews;
     ClusterViewerCommand clusterViewer;
@@ -145,6 +152,14 @@ struct SpawnInstanceGridOutcome {
 struct SelectAssetOutcome {
     bool success = false;
     bool editorAvailable = true;
+    std::string message;
+};
+
+// Outcome of one SelectEntity command. `editorAvailable` is false when the build has no Editor.
+struct SelectEntityOutcome {
+    bool success = false;
+    bool editorAvailable = true;
+    bool notFound = false; // No entity has that name.
     std::string message;
 };
 
@@ -217,6 +232,7 @@ struct EditorUiCommandResult {
     ActivateTabOutcome activateTab;
     SpawnInstanceGridOutcome spawnInstanceGrid;
     SelectAssetOutcome selectAsset;
+    SelectEntityOutcome selectEntity;
     InspectorStateOutcome inspectorState;
     InspectorBuildClustersOutcome inspectorBuildClusters;
     SplitViewsOutcome splitViews;

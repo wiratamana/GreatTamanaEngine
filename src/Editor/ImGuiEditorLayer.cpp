@@ -4,6 +4,7 @@
 
 #include "../Core/Logging.h"
 #include "ClusterViewerWindow.h"
+#include "../ECS/EntityQuery.h"
 #include "../Encoding/Utf8Path.h"
 #include "BuiltinFeatureEditorPanelRegistry.h"
 #include "DockLayout.h"
@@ -638,6 +639,20 @@ public:
         result.editorAvailable = false;
         result.message = "the Project panel is not compiled in";
 #endif
+        return result;
+    }
+
+    EntitySelectionResult SelectEntityByName(Game& game, const std::string& name) override
+    {
+        EntitySelectionResult result;
+        const Entity entity = FindEntityByName(game.GetRegistry(), name);
+        if (entity == kInvalidEntity) {
+            result.notFound = true;
+            result.message = "no entity is named \"" + name + "\"";
+            return result;
+        }
+        m_ctx.selection.SelectEntity(entity);
+        result.success = true;
         return result;
     }
 

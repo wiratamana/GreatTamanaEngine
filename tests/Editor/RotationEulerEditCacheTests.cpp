@@ -80,6 +80,19 @@ TEST(RotationEulerEditCacheTests, EditingYKeepsLargeX)
     EXPECT_FLOAT_EQ(shown.y, 15.0f);
 }
 
+TEST(RotationEulerEditCacheTests, RebindKeepsEulerWhenStoredQuaternionIsNormalized)
+{
+    RotationEulerEditCache cache;
+    Quat q = cache.Commit(Vec3(9999.0f, 10.0f, 0.0f));
+    q = Quat(q.x * 1.5f, q.y * 1.5f, q.z * 1.5f, q.w * 1.5f); // A writer scaled it; same rotation.
+    cache.Rebind(q);
+
+    const Vec3 shown = cache.Resolve(kInvalidEntity, q);
+
+    EXPECT_FLOAT_EQ(shown.x, 9999.0f);
+    EXPECT_FLOAT_EQ(shown.y, 10.0f);
+}
+
 TEST(RotationEulerEditCacheTests, NonFiniteAndHugeInputsAreSanitized)
 {
     RotationEulerEditCache cache;

@@ -155,6 +155,8 @@ Details:
 - A missing `parent` still spawns the entity. The reply sets `parent_requested_but_not_found`.
 - In `set_entity_trs`, each of `translation`, `rotation_euler_degrees`, `scale` is all-or-nothing: x, y and z are all required. `null` means "leave it".
 - Rotation is Euler degrees: x = pitch, y = yaw, z = roll. The reply has both Euler and `rotation_quaternion`.
+- The reply's `rotation_euler_degrees` is the canonical Euler (pitch folded into [-90, 90]). Sending x = 9999 returns x = -81. It is the same rotation.
+- Cluster viewer `camPitch`, `camYaw`, `camRoll`: a partial update (e.g. only `camPitch`) re-derives the other angles from the stored quaternion.
 - `instantiate_primitive` `world_position` can miss axes. Missing axes are 0.
 - `instantiate_light`: `rotation_euler_degrees` is all-or-nothing. `illuminance_lux` must be 0 or more (default 100000). `color` default is 1,1,1.
 - `set_entity_trs` with no field is a safe no-op. It returns the current transform.
@@ -196,6 +198,7 @@ These use `EditorUiCommandBridge`: one request at a time, 3 s timeout.
 | `GET /split_views` **MUT** | Q `enabled`* | `{success, split}` | `409` |
 | `POST /spawn_instance_grid` **MUT** | B `count` (1 to 100000, default 6), `spacing` (0.1 to 1000, default 1.5) | `{success, instance_count}` | `400` range, `503` no Editor |
 | `GET /select_asset` **MUT** | Q `path`* (absolute `.gta`) | `{success, selected_path}` | `400`, `503` |
+| `GET /select_entity` **MUT** | Q `name`* (exact entity Name) | `{success, selected_entity}` | `400`, `404` unknown name, `503` no Editor |
 | `GET /inspector_state` | none | See below | `503` |
 | `POST /inspector/build_clusters` **MUT** | B optional `weld`, `max_vertices`, `max_triangles`, `cone_weight` | `{success, started}` | `400` refused, `503` busy |
 | `GET /hierarchy_state` | Q `first` (default 0), `count` (default 200, max 2000) | See below | `400`, `503` |

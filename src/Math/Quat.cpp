@@ -6,6 +6,11 @@
 
 namespace gte {
 
+namespace {
+// Below this |cos(pitch)| roll is dropped. Float noise in yaw/roll grows as ~1e-7/cos, the dropped roll as cos.
+constexpr float kGimbalCosPitch = 3.0e-4f;
+} // namespace
+
 Quat Quat::FromAxisAngle(const Vec3& axis, float angleRadians) noexcept
 {
     Vec3 n = Normalize(axis);
@@ -26,16 +31,12 @@ Vec3 Quat::ToEulerDegrees() const noexcept
 {
     const Mat4 m = ToMat4();
 
-    // R = Ry(yaw) * Rx(pitch) * Rz(roll):
-    //   R(1,2) = -sin(pitch), hypot(R(1,0), R(1,1)) = |cos(pitch)|
-    //   R(1,0) = cos(pitch)*sin(roll), R(1,1) = cos(pitch)*cos(roll)
-    //   R(0,2) = cos(pitch)*sin(yaw),  R(2,2) = cos(pitch)*cos(yaw)
-    // atan2 keeps pitch accurate near +/-90 where asin is ill-conditioned.
+    // R = Ry*Rx*Rz; atan2 keeps pitch accurate near +/-90 where asin is ill-conditioned.
     const float cosPitch = std::hypot(m(1, 0), m(1, 1));
     const float pitch = std::atan2(-m(1, 2), cosPitch);
 
     float yaw, roll;
-    if (cosPitch > 1e-3f) {
+    if (cosPitch > kGimbalCosPitch) {
         roll = std::atan2(m(1, 0), m(1, 1));
         yaw = std::atan2(m(0, 2), m(2, 2));
     } else {

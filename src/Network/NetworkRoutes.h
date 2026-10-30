@@ -1046,6 +1046,17 @@ ParsedSelectAssetQuery ParseSelectAssetQuery(const std::string& pathParam);
 // Success shape: {"success":true,"selected_path":"..."}
 std::string BuildSelectAssetResponseJson(const std::string& selectedPath);
 
+// Parsed GET /select_entity query: "name" is required and non-empty.
+struct ParsedSelectEntityQuery {
+    bool valid = false;
+    std::string errorMessage;
+    std::string name;
+};
+ParsedSelectEntityQuery ParseSelectEntityQuery(const std::string& nameParam);
+
+// Success shape: {"success":true,"selected_entity":"..."}
+std::string BuildSelectEntityResponseJson(const std::string& entityName);
+
 // Network-side copy of what the Inspector showed on its last draw.
 struct InspectorStateResponseView {
     std::string selectionKind;

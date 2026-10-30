@@ -89,7 +89,7 @@ TEST(QuatTests, ToEulerRoundTripSweepIncludingPitchPoles)
             for (float z = -180.0f; z <= 180.0f; z += 15.0f) {
                 const Quat q = Quat::FromEulerDegrees(x, y, z);
                 const Vec3 e = q.ToEulerDegrees();
-                if (AngleBetweenDegrees(q, Quat::FromEulerDegrees(e.x, e.y, e.z)) > 0.05f) {
+                if (AngleBetweenDegrees(q, Quat::FromEulerDegrees(e.x, e.y, e.z)) > 0.01f) {
                     ++bad;
                 }
             }

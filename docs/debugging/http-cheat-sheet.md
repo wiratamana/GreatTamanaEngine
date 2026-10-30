@@ -128,7 +128,7 @@ Full params and responses: [HTTP routes](http-routes.md) and [HTTP routes (debug
 | Camera | `/scene_camera/image` | `overlay=true\|false` | **IMG** |
 | Editor | `/list_tabs`, `/activate_tab`, `/split_views`, `/panel_visible` | `name` / `enabled` / `visible` | **W** |
 | Editor | `/hierarchy_state`, `POST /hierarchy_action` | `first`,`count` / `kind`,`target`,`dragged` | **W** (action) |
-| Editor | `/inspector_state`, `/select_asset` | `path` (abs `.gta`) | **W** (select) |
+| Editor | `/inspector_state`, `/select_asset`, `/select_entity` | `path` (abs `.gta`) / `name` | **W** (select) |
 | Editor | `POST /exit` | none (closes the editor) | **W** |
 | Cluster | `/cluster_viewer/open`, `/state`, `/set`, `/pick` | `path` / `key=value` / `x`,`y` | **W** (open, set) |
 | Cluster | `POST /cluster_viewer/verify`, `/capture_hiz` | none | **W** |

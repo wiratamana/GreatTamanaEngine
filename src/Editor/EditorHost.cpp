@@ -288,6 +288,14 @@ EditorUiCommandResult RunEditorUiCommand(const EditorUiCommandRequest& request, 
         result.selectAsset.message = selected.message;
         break;
     }
+    case EditorUiCommandKind::SelectEntity: {
+        const EntitySelectionResult selected = layer.SelectEntityByName(game, request.selectEntity.name);
+        result.selectEntity.success = selected.success;
+        result.selectEntity.editorAvailable = selected.editorAvailable;
+        result.selectEntity.notFound = selected.notFound;
+        result.selectEntity.message = selected.message;
+        break;
+    }
     case EditorUiCommandKind::InspectorState: {
         InspectorStateView view = layer.InspectorState();
         InspectorStateOutcome& out = result.inspectorState;

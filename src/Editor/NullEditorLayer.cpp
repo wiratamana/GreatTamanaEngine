@@ -115,6 +115,14 @@ public:
         return result;
     }
 
+    EntitySelectionResult SelectEntityByName(Game& /*game*/, const std::string& /*name*/) override
+    {
+        EntitySelectionResult result;
+        result.editorAvailable = false;
+        result.message = "the Editor module is not compiled in";
+        return result;
+    }
+
     InspectorStateView InspectorState() const override
     {
         InspectorStateView view;

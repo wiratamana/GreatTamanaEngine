@@ -1358,6 +1358,26 @@ std::string BuildSelectAssetResponseJson(const std::string& selectedPath)
     return body.dump();
 }
 
+ParsedSelectEntityQuery ParseSelectEntityQuery(const std::string& nameParam)
+{
+    ParsedSelectEntityQuery result;
+    if (nameParam.empty()) {
+        result.errorMessage = "missing required query parameter: name";
+        return result;
+    }
+    result.name = nameParam;
+    result.valid = true;
+    return result;
+}
+
+std::string BuildSelectEntityResponseJson(const std::string& entityName)
+{
+    nlohmann::json body;
+    body["success"] = true;
+    body["selected_entity"] = entityName;
+    return body.dump();
+}
+
 ParsedSplitViewsQuery ParseSplitViewsQuery(const std::string& enabledParam)
 {
     ParsedSplitViewsQuery result;

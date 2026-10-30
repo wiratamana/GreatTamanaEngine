@@ -117,6 +117,14 @@ struct AssetSelectionResult {
     std::string message;
 };
 
+// Result of SelectEntityByName(). `editorAvailable` is false for NullEditorLayer.
+struct EntitySelectionResult {
+    bool success = false;
+    bool editorAvailable = true;
+    bool notFound = false; // No entity has that name.
+    std::string message;
+};
+
 // Snapshot of the Inspector for GET /inspector_state. Strings are empty when nothing of that kind was shown.
 struct InspectorStateView {
     bool editorAvailable = true;
@@ -328,6 +336,9 @@ public:
 
     // Selects a mesh asset as the Inspector target, like a click in the Project panel.
     virtual AssetSelectionResult SelectProjectAsset(const std::string& absolutePath) = 0;
+
+    // Selects the entity whose Name is exactly `name`, like a click in the Hierarchy.
+    virtual EntitySelectionResult SelectEntityByName(Game& game, const std::string& name) = 0;
 
     // What the Inspector showed on its last draw. Default-valued for NullEditorLayer.
     virtual InspectorStateView InspectorState() const = 0;
