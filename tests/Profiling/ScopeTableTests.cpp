@@ -195,7 +195,8 @@ TEST(ScopeTableTest, CapsRowsAndCountsTheRest)
     const ScopeTable table = BuildScopeTree(*frame, ScopeSort::CallOrder, LaneRowCaps{ 4, 100, 100 });
 
     EXPECT_EQ(table.rows.size(), 4u);
-    EXPECT_EQ(table.rowsDropped, 7u);
+    EXPECT_EQ(table.TotalDropped(), 7u);
+    EXPECT_EQ(table.rowsDroppedByLane[static_cast<std::size_t>(ScopeLane::Main)], 7u);
 }
 
 TEST(ScopeTableTest, ALongMainLaneNeverHidesTheGpuLane)
@@ -221,12 +222,15 @@ TEST(ScopeTableTest, ALongMainLaneNeverHidesTheGpuLane)
     const ScopeTable tree = BuildScopeTree(*frame, ScopeSort::CallOrder, LaneRowCaps{ 4, 100, 100 });
     EXPECT_EQ(tree.rows.size(), 4u + 3u); // 4 Main rows, then the feature row and its 2 passes
     EXPECT_EQ(gpuRows(tree), 3);
-    EXPECT_EQ(tree.rowsDropped, 7u);
+    EXPECT_EQ(tree.TotalDropped(), 7u);
+    EXPECT_EQ(tree.rowsDroppedByLane[static_cast<std::size_t>(ScopeLane::Gpu)], 0u);
 
     const ScopeTable flat = BuildScopeFlat(*frame, ScopeSort::CallOrder, LaneRowCaps{ 4, 100, 1 });
     EXPECT_EQ(gpuRows(flat), 1);
     EXPECT_EQ(flat.rows.size(), 4u + 1u);
-    EXPECT_EQ(flat.rowsDropped, 7u + 1u);
+    EXPECT_EQ(flat.TotalDropped(), 7u + 1u);
+    EXPECT_EQ(flat.rowsDroppedByLane[static_cast<std::size_t>(ScopeLane::Main)], 7u);
+    EXPECT_EQ(flat.rowsDroppedByLane[static_cast<std::size_t>(ScopeLane::Gpu)], 1u);
 }
 
 TEST(ScopeTableTest, OrphanAttachesToNearestOpenRowAndDroppedEventsMarkTruncation)

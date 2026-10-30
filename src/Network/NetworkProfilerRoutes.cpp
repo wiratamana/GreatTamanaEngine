@@ -497,7 +497,12 @@ nlohmann::json ProfilerTableToJson(const ProfilerSnapshot& snapshot, const Profi
         const Profiling::SnapshotTables& tables = *snapshot.tables;
         const auto& source = tree ? tables.tree : tables.flat;
         const std::uint32_t count = std::min<std::uint32_t>(tree ? tables.treeCount : tables.flatCount, static_cast<std::uint32_t>(source.size()));
-        dropped = tree ? tables.treeDropped : tables.flatDropped;
+        const auto& droppedByLane = tree ? tables.treeDropped : tables.flatDropped;
+        for (std::size_t lane = 0; lane < droppedByLane.size(); ++lane) {
+            if (LaneSelected(query.lane, static_cast<Profiling::ScopeLane>(lane))) {
+                dropped += droppedByLane[lane];
+            }
+        }
         truncated = tree && tables.treeTruncated;
         for (std::uint32_t i = 0; i < count; ++i) {
             if (!LaneSelected(query.lane, static_cast<Profiling::ScopeLane>(source[i].lane))) {

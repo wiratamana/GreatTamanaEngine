@@ -200,7 +200,8 @@ Body:
 - `calls`, `total`, `self`, `max`, `percent_of_frame` and `rows_dropped` are metric objects. `depth` is a plain number.
 - A GPU row that was not measured has `total`, `self` and `max` with `value:null` and the real `status`. `percent_of_frame` is `null` when its base is unknown.
 - `tree_truncated:true` means the event buffer was full. The tree is incomplete. The `flat` view is still exact.
-- `rows_dropped` counts rows beyond the 256 row limit of the snapshot plus rows cut by `limit`.
+- `rows_dropped` counts rows cut by the lane caps of the snapshot (160 Main, 32 Workers, 64 GPU rows) in the lanes the query selects, plus rows cut by `limit`. `lane=gpu` never counts Main rows.
+- The panel has its own caps (384 Main, 64 Workers, 128 GPU) and shows `N rows hidden` when it cuts rows.
 
 ```text
 curl.exe "http://127.0.0.1:8080/profiler/table?view=flat&lane=main&limit=40"

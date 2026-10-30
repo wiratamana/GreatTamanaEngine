@@ -3,6 +3,7 @@
 #include "ScopeEvent.h"
 
 #include <cstdint>
+#include <string_view>
 
 namespace gte::Profiling {
 
@@ -18,6 +19,14 @@ struct ScopeSource {
     std::uint32_t line = 0;
     ScopeOrigin origin = ScopeOrigin::Unknown;
 };
+
+// Checkout directory of the engine with a trailing separator, derived from this library's own source path.
+// Empty when that path has an unexpected shape.
+std::string_view EngineRoot() noexcept;
+
+// Under `engineRoot`: src/ is Engine, Projects/ is Project, anything else is Unknown.
+// Outside it (or with an empty root): a "/Projects/" folder is Project, else a "/src/" folder is Engine.
+ScopeOrigin OriginOfPath(std::string_view path, std::string_view engineRoot) noexcept;
 
 // Same as InternName, and remembers the call site. The first site wins. Copies the text, never keeps `file`.
 NameId InternNameAt(const char* text, const char* file, std::uint32_t line) noexcept;

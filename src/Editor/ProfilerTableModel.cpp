@@ -159,7 +159,7 @@ void BuildTableModel(const Profiling::FrameRecord& frame, const TableOptions& op
     const Profiling::ScopeTable table = options.tree ? Profiling::BuildScopeTree(frame, options.sort, kUncapped)
                                                      : Profiling::BuildScopeFlat(frame, options.sort, kUncapped);
     model.treeTruncated = table.treeTruncated;
-    model.rowsDropped = table.rowsDropped;
+    model.rowsDropped = table.TotalDropped();
 
     // Every row gets a view first; filtering then compacts the same vector.
     std::vector<TableRowView>& views = model.rows;

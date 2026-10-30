@@ -172,15 +172,15 @@ void FillTableRow(SnapshotTableRow& out, const ScopeTableRow& in, double frameMs
 }
 
 // The lane caps keep the table within the array.
-void CopyTable(std::array<SnapshotTableRow, kSnapshotTableRows>& rows, std::uint32_t& count, std::uint32_t& dropped,
-    const ScopeTable& table, double frameMs, double gpuMs)
+void CopyTable(std::array<SnapshotTableRow, kSnapshotTableRows>& rows, std::uint32_t& count,
+    std::array<std::uint32_t, kScopeLaneCount>& dropped, const ScopeTable& table, double frameMs, double gpuMs)
 {
     const std::size_t used = std::min(table.rows.size(), rows.size());
     for (std::size_t i = 0; i < used; ++i) {
         FillTableRow(rows[i], table.rows[i], frameMs, gpuMs);
     }
     count = static_cast<std::uint32_t>(used);
-    dropped = table.rowsDropped;
+    dropped = table.rowsDroppedByLane;
 }
 
 void FillTables(ProfilerSnapshot& snapshot, const FrameRecord& record)

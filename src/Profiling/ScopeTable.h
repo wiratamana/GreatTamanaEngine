@@ -29,8 +29,17 @@ struct ScopeTableRow {
 
 struct ScopeTable {
     std::vector<ScopeTableRow> rows; // lanes in order Main, Workers, Gpu; pre-order
-    std::uint32_t rowsDropped = 0;   // rows beyond the cap of their lane, all lanes together
+    std::array<std::uint32_t, kScopeLaneCount> rowsDroppedByLane{}; // rows beyond the lane cap
     bool treeTruncated = false;      // tree mode only: events were dropped, so the tree is partial
+
+    std::uint32_t TotalDropped() const noexcept
+    {
+        std::uint32_t total = 0;
+        for (const std::uint32_t dropped : rowsDroppedByLane) {
+            total += dropped;
+        }
+        return total;
+    }
 };
 
 enum class ScopeSort : std::uint8_t { CallOrder, TotalDesc, SelfDesc };

@@ -597,7 +597,7 @@ Profiling::SnapshotTableRow MakeTableRow(const char* name, Profiling::ScopeLane 
     return row;
 }
 
-ProfilerSnapshot TableSnapshot()
+ProfilerSnapshot TableSnapshot(std::array<std::uint32_t, Profiling::kScopeLaneCount> treeDropped = { 1, 0, 0 })
 {
     using Profiling::ScopeLane;
     using Profiling::SampleStatus;
@@ -614,7 +614,7 @@ ProfilerSnapshot TableSnapshot()
     tables->tree[5] = MakeTableRow("PassB", ScopeLane::Gpu, 1, false, 1, 0.0, SampleStatus::Absent);
     Profiling::CopySnapshotText(tables->tree[5].feature, "FeatureA");
     tables->treeCount = 6;
-    tables->treeDropped = 1;
+    tables->treeDropped = treeDropped;
     tables->treeTruncated = true;
 
     tables->flat[0] = tables->tree[0];
@@ -681,6 +681,24 @@ TEST(ProfilerRoutesTableTest, TheLaneAndViewFiltersSelectRows)
     EXPECT_EQ(flat["view"], "flat");
     EXPECT_EQ(flat["rows"].size(), 3u);
     EXPECT_EQ(flat["tree_truncated"], false);
+}
+
+TEST(ProfilerRoutesTableTest, RowsDroppedCountsOnlyTheSelectedLanes)
+{
+    // Main cut 1 row, Workers 2, Gpu 4.
+    const ProfilerSnapshot snapshot = TableSnapshot({ 1, 2, 4 });
+    const auto dropped = [&](ProfilerTableLane lane, std::size_t limit) {
+        ProfilerTableQuery query;
+        query.lane = lane;
+        query.limit = limit;
+        return ProfilerTableToJson(snapshot, query)["rows_dropped"]["value"].get<double>();
+    };
+
+    EXPECT_DOUBLE_EQ(dropped(ProfilerTableLane::All, 100), 7.0);
+    EXPECT_DOUBLE_EQ(dropped(ProfilerTableLane::Main, 100), 1.0);
+    EXPECT_DOUBLE_EQ(dropped(ProfilerTableLane::Workers, 100), 2.0);
+    EXPECT_DOUBLE_EQ(dropped(ProfilerTableLane::Gpu, 100), 4.0);
+    EXPECT_DOUBLE_EQ(dropped(ProfilerTableLane::Gpu, 1), 4.0 + 2.0); // 3 GPU rows, 1 shown
 }
 
 TEST(ProfilerRoutesTableTest, TheLimitCutsRowsAndCountsThemAsDropped)

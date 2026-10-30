@@ -354,11 +354,11 @@ TEST_F(ProfilerSnapshotBuilderTest, TablesHoldTreeAndFlatRowsOfTheNewestFrame)
     EXPECT_EQ(SnapshotText(tables.tree[1].name), "TableChild");
     EXPECT_EQ(tables.tree[1].depth, 1u);
     EXPECT_EQ(tables.tree[1].calls, 2u);
-    EXPECT_EQ(tables.treeDropped, 0u);
+    EXPECT_EQ(tables.treeDropped, (std::array<std::uint32_t, kScopeLaneCount>{}));
     EXPECT_FALSE(tables.treeTruncated);
 
     ASSERT_EQ(tables.flatCount, 2u);
-    EXPECT_EQ(tables.flatDropped, 0u);
+    EXPECT_EQ(tables.flatDropped, (std::array<std::uint32_t, kScopeLaneCount>{}));
     const SnapshotTableRow* child = FindRow(std::span<const SnapshotTableRow>(tables.flat.data(), tables.flatCount), "TableChild");
     ASSERT_NE(child, nullptr);
     EXPECT_EQ(child->calls, 2u);
@@ -410,9 +410,15 @@ TEST_F(ProfilerSnapshotBuilderTest, ALongMainLaneStillLeavesRoomForTheGpuRows)
             [](const SnapshotTableRow& row) { return row.lane == static_cast<std::uint8_t>(ScopeLane::Gpu); });
     };
 
-    EXPECT_EQ(tables.treeDropped, extra);
+    const std::size_t main = static_cast<std::size_t>(ScopeLane::Main);
+    const std::size_t workers = static_cast<std::size_t>(ScopeLane::Workers);
+    const std::size_t gpuLane = static_cast<std::size_t>(ScopeLane::Gpu);
+    EXPECT_EQ(tables.treeDropped[main], extra);
+    EXPECT_EQ(tables.treeDropped[workers], 0u);
+    EXPECT_EQ(tables.treeDropped[gpuLane], 0u);
     EXPECT_EQ(gpuRows(tables.tree, tables.treeCount), 2); // feature row and its pass
-    EXPECT_EQ(tables.flatDropped, extra);
+    EXPECT_EQ(tables.flatDropped[main], extra);
+    EXPECT_EQ(tables.flatDropped[gpuLane], 0u);
     EXPECT_EQ(gpuRows(tables.flat, tables.flatCount), 1);
 }
 

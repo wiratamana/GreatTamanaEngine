@@ -7,7 +7,6 @@
 #include "../Profiling/ProfilingClock.h"
 #include "../Profiling/ScopeTree.h"
 
-#include <algorithm>
 #include <array>
 #include <cstdio>
 

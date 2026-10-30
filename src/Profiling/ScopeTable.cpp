@@ -73,7 +73,7 @@ public:
             ++m_used[lane];
             m_table.rows.push_back(row);
         } else {
-            ++m_table.rowsDropped;
+            ++m_table.rowsDroppedByLane[lane];
         }
     }
 

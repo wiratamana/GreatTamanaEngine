@@ -4,6 +4,9 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
+#include <string_view>
+
 namespace gte::Profiling {
 namespace {
 
@@ -28,6 +31,34 @@ TEST(ScopeSourceTest, ProjectPathBeatsEnginePath)
 {
     const NameId id = InternNameAt("ScopeSourceTest.Both", "C:/x/src/Projects/Foo/a.cpp", 1);
     EXPECT_EQ(SourceOf(id).origin, ScopeOrigin::Project);
+}
+
+TEST(ScopeSourceTest, EngineRootDecidesInsideTheCheckout)
+{
+    // A checkout that itself sits in a "Projects" folder must not turn engine code into project code.
+    constexpr std::string_view root = "C:/Users/x/Projects/GreatTamanaEngine/";
+    EXPECT_EQ(OriginOfPath("C:/Users/x/Projects/GreatTamanaEngine/src/Core/Core.cpp", root), ScopeOrigin::Engine);
+    EXPECT_EQ(OriginOfPath("C:\\Users\\x\\Projects\\GreatTamanaEngine\\src\\Core\\Core.cpp", root), ScopeOrigin::Engine);
+    EXPECT_EQ(OriginOfPath("C:/Users/x/Projects/GreatTamanaEngine/Projects/Foo/a.cpp", root), ScopeOrigin::Project);
+    EXPECT_EQ(OriginOfPath("C:/Users/x/Projects/GreatTamanaEngine/third_party/b.cpp", root), ScopeOrigin::Unknown);
+    EXPECT_EQ(OriginOfPath("D:/other/Projects/Foo/a.cpp", root), ScopeOrigin::Project);
+    EXPECT_EQ(OriginOfPath("D:/other/src/a.cpp", root), ScopeOrigin::Engine);
+    EXPECT_EQ(OriginOfPath("C:/Users/x/Projects/Foo/src/a.cpp", {}), ScopeOrigin::Project);
+}
+
+TEST(ScopeSourceTest, RealEngineRootTagsEngineSources)
+{
+    const std::string_view root = EngineRoot();
+    if (root.empty()) {
+        GTEST_SKIP() << "engine root is not derivable from this build's source paths";
+    }
+    const std::string engine = std::string(root) + "src/Core/Core.cpp";
+    const std::string project = std::string(root) + "Projects/Foo/a.cpp";
+    EXPECT_EQ(OriginOfPath(engine, root), ScopeOrigin::Engine);
+    EXPECT_EQ(OriginOfPath(project, root), ScopeOrigin::Project);
+
+    const NameId id = InternNameAt("ScopeSourceTest.RealRoot", engine.c_str(), 3);
+    EXPECT_EQ(SourceOf(id).origin, ScopeOrigin::Engine);
 }
 
 TEST(ScopeSourceTest, FirstSiteWins)

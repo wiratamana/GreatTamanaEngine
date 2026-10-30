@@ -85,8 +85,8 @@ struct SnapshotTables {
     std::array<SnapshotTableRow, kSnapshotTableRows> flat{};
     std::uint32_t treeCount = 0;
     std::uint32_t flatCount = 0;
-    std::uint32_t treeDropped = 0;
-    std::uint32_t flatDropped = 0;
+    std::array<std::uint32_t, kScopeLaneCount> treeDropped{}; // rows cut by the lane caps, per lane
+    std::array<std::uint32_t, kScopeLaneCount> flatDropped{};
     bool treeTruncated = false; // events were dropped: the tree is partial, the flat table is exact
 };
 

@@ -144,10 +144,13 @@ Panel layout, top to bottom. The first screen is the summary and the graph.
 
 ## Origin tag
 - Every scope name remembers the file and line where it was first written (`InternNameAt`, `InternFunctionName`). Only the file base name is stored.
-- A path with `/Projects/` is "Your project". A path with `/src/` is "Engine". Anything else is unknown. The first site that wrote a name wins.
+- The engine root is the folder of this checkout. It is read from the path of `ScopeSource.cpp` at build time (`EngineRoot()`).
+- A path under `<root>src/` is "Engine". A path under `<root>Projects/` is "Your project". Another path under the root is unknown.
+- A path outside the root (or no root): `/Projects/` in the path is "Your project", else `/src/` is "Engine", else unknown. `\` and `/` are the same.
+- The first site that wrote a name wins.
 
 ## GPU rows
-- `Core::PublishGpuMetrics` sends one row per executed offscreen pass: pass name, owning feature, barrier ms, work ms, draw calls and status.
+- `Core::PublishGpuMetrics` sends one row per executed offscreen pass: pass name, owning feature, barrier ms, work ms and status.
 - In the table they sit in the GPU lane: feature row, with its passes below. A pass that was not measured shows its status word (absent, unsupported, inactive, error), never `0.00`. A partial row has a `~` prefix.
 - Present graph passes have no rows.
 
@@ -166,9 +169,10 @@ Panel layout, top to bottom. The first screen is the summary and the graph.
 | Worker ring | 1024 slots | Counted in `lost_worker_events` |
 | Name table | 64 KB, 3072 names | The name shows as `<overflow>` |
 | Frame history | 300 frames | Oldest is dropped |
-| Aggregate rows per frame (one per name and lane) | 768 | Counted. Existing rows stay exact |
-| GPU pass rows per frame | 256 | Counted. The renderer folds passes past its own stamp budget into one `(folded passes)` row |
-| Per-name history | 256 tracks x 300 frames | A track is recycled after 300 unused frames. Else `History tracks dropped` |
+| Aggregate rows per frame (one per name and lane) | 768 | Rows past the limit are not recorded. Rows already in stay exact |
+| GPU pass rows per frame | 256 | Rows past the limit are not recorded. The renderer folds passes past its own stamp budget into one `(folded passes)` row |
+| Per-name history | 256 tracks x 300 frames | A track is recycled after 300 unused frames. A name with no free track has no history line. The footer shows `rows without history this frame` |
+| Table rows | Panel: 384 Main, 64 Workers, 128 GPU. Snapshot: 160 Main, 32 Workers, 64 GPU | A busy lane never hides another lane. The panel shows `N rows hidden`. `rows_dropped` counts them |
 | `GET /profiler/frames` | 1 to 120 rows | `count` is clamped |
 
 ## Frame stages
