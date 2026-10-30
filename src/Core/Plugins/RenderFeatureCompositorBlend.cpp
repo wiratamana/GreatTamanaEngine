@@ -4,6 +4,8 @@
 #include "RenderFeatureCameraData.h"
 #include "../Core.h"
 #include "../Logging.h"
+#include "../RenderTimingAdapter.h"
+#include "../../Profiling/ScopeTimer.h"
 #include "../../Application/RenderPassViewData.h"
 #include "../../Renderer/RenderGraph/ComputePass.h"
 #include "../../Renderer/RenderGraph/RenderFeatureScope.h"
@@ -98,6 +100,7 @@ void RenderFeatureCompositor::Impl::ContributeRenderGraphPasses(
         bool declaredPasses = true;
         if (entry.projectCallback) {
             const rg::RenderFeatureScope featureScope(frame.builder, featureName);
+            GTE_PROFILE_SCOPE_ID(FeatureScopeName(featureName));
             const RenderPassViewData* viewData = core.FindRenderPassViewDataNoCopy(frame.currentView);
             ScenePassReadHandles handles;
             handles.colorHandle = currentInput;

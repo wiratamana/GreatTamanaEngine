@@ -13,102 +13,12 @@
 
 namespace gte {
 
-std::vector<CpuScopeRow> BuildSortedCpuScopeRows(const Profiling::FrameRecord& frame)
-{
-    const auto events = frame.scopes.Events();
-
-    std::vector<Profiling::ScopeTimes> times(events.size());
-    Profiling::ComputeScopeTimes(events, times);
-
-    std::vector<CpuScopeRow> rows;
-    std::vector<Profiling::NameId> ids;
-    for (std::size_t i = 0; i < events.size(); ++i) {
-        const Profiling::ScopeEvent& event = events[i];
-        if (event.kind == Profiling::ScopeKind::Marker) {
-            continue;
-        }
-
-        const auto found = std::find(ids.begin(), ids.end(), event.name);
-        const std::size_t row = static_cast<std::size_t>(found - ids.begin());
-        if (found == ids.end()) {
-            ids.push_back(event.name);
-            CpuScopeRow fresh;
-            fresh.name = Profiling::ResolveName(event.name);
-            fresh.kind = event.kind;
-            rows.push_back(fresh);
-        }
-
-        rows[row].totalMilliseconds += Profiling::TicksToMilliseconds(times[i].totalTicks);
-        rows[row].selfMilliseconds += Profiling::TicksToMilliseconds(times[i].selfTicks);
-        ++rows[row].callCount;
-    }
-
-    std::stable_sort(rows.begin(), rows.end(),
-        [](const CpuScopeRow& a, const CpuScopeRow& b) { return a.totalMilliseconds > b.totalMilliseconds; });
-    return rows;
-}
-
-std::vector<CpuTreeRow> BuildCpuTreeRows(const Profiling::FrameRecord& frame, const Profiling::FrameTotals& totals)
-{
-    const auto events = frame.scopes.Events();
-
-    std::vector<Profiling::ScopeTimes> times(events.size());
-    Profiling::ComputeScopeTimes(events, times);
-
-    // Events arrive children first. A parent starts no later than its children, so sorting by start time and then
-    // by depth restores tree order.
-    std::vector<std::size_t> order;
-    order.reserve(events.size());
-    for (std::size_t i = 0; i < events.size(); ++i) {
-        if (events[i].kind != Profiling::ScopeKind::Marker) {
-            order.push_back(i);
-        }
-    }
-    std::stable_sort(order.begin(), order.end(), [&events](std::size_t a, std::size_t b) {
-        if (events[a].startTicks != events[b].startTicks) {
-            return events[a].startTicks < events[b].startTicks;
-        }
-        return events[a].depth < events[b].depth;
-    });
-
-    const double frameMilliseconds = Profiling::TicksToMilliseconds(totals.frameTicks);
-    const auto percentOf = [frameMilliseconds](double milliseconds) {
-        return frameMilliseconds > 0.0 ? milliseconds / frameMilliseconds * 100.0 : 0.0;
-    };
-
-    std::vector<CpuTreeRow> rows;
-    rows.reserve(order.size() + 1);
-    for (const std::size_t i : order) {
-        CpuTreeRow row;
-        row.name = Profiling::ResolveName(events[i].name);
-        row.kind = events[i].kind;
-        row.depth = events[i].depth;
-        row.totalMilliseconds = Profiling::TicksToMilliseconds(times[i].totalTicks);
-        row.selfMilliseconds = Profiling::TicksToMilliseconds(times[i].selfTicks);
-        row.percentOfFrame = percentOf(row.totalMilliseconds);
-        rows.push_back(row);
-    }
-
-    if (totals.frameTicks > 0) {
-        CpuTreeRow untracked;
-        untracked.name = "(untracked)";
-        untracked.untracked = true;
-        untracked.totalMilliseconds = Profiling::TicksToMilliseconds(totals.untrackedTicks);
-        untracked.selfMilliseconds = untracked.totalMilliseconds;
-        untracked.percentOfFrame = percentOf(untracked.totalMilliseconds);
-        rows.push_back(untracked);
-    }
-    return rows;
-}
-
 ProfilerFrameView BuildProfilerFrameView(const Profiling::FrameRecord& frame, bool captureEnabled)
 {
     ProfilerFrameView view;
     view.summary = frame.summary;
     view.totals = Profiling::ComputeFrameTotals(frame);
     view.checks = Profiling::EvaluateChecks(frame, view.totals, captureEnabled);
-    view.rows = BuildSortedCpuScopeRows(frame);
-    view.tree = BuildCpuTreeRows(frame, view.totals);
     return view;
 }
 

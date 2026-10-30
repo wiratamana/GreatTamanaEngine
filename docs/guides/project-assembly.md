@@ -1,6 +1,6 @@
 # Project assembly
 > How to make a game project that loads into the editor as DLLs, and how that system works inside. For game developers and engine developers.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-10-31
 
 ## TL;DR
 - A project is C++ and GLSL in `Projects/<Name>/`. CMake builds it into `<Name>_Game.dll` and, if needed, `<Name>_Editor.dll`.
@@ -194,6 +194,24 @@ curl.exe "http://127.0.0.1:8080/render_graph"
 - `dll_file_names` lists `MyGame_Game.dll`.
 - The ledger lists your passes, features, panels and component types. It does not list pre-opaque and post-opaque names.
 - `/render_graph` shows your features in `render_features[]` with `is_project_feature`.
+
+## Time your code
+Project DLLs get the engine's `GTE_ENABLE_*` switches (profiler, job system, network, panels) from `cmake/GteProject.cmake`. The profiler macros really record in your DLL.
+
+```cpp
+#include "../../../src/Profiling/ScopeTimer.h"
+
+namespace my_game {
+void BuildTintPass()
+{
+    GTE_PROFILE_FUNCTION();
+    // ... work ...
+}
+} // namespace my_game
+```
+
+- The row is named `my_game::BuildTintPass`. Check it with `curl.exe "http://127.0.0.1:8080/profiler/scope?name=my_game::BuildTintPass"` or in the Profiler panel ("Your project code").
+- One macro per line. Not for `constexpr` functions. Use `GTE_PROFILE_JOB_SCOPE("Name")` inside job bodies. Details: [Profiling](../debugging/profiling.md).
 
 ## Limits
 - Single developer, same machine and toolchain. No script API, no code editor in the engine, no rename or delete of a project.

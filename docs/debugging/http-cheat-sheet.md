@@ -1,6 +1,6 @@
 # HTTP debugging cheat sheet
 > One-page guide to the editor's HTTP debug server. For humans and AI agents who need to see, measure or poke a running editor.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-10-31
 
 ## TL;DR
 - The editor runs a server on `http://127.0.0.1:8080`. Loopback only. The port is fixed.
@@ -59,6 +59,9 @@ More about threads and bridges: [HTTP server](../architecture/http-server.md).
 | Turn a feature off | `GET /render_graph/set_feature_enabled?name=<feature>&enabled=false` **W** |
 | Why is the frame slow? | `GET /profiler` (`verdict.kind`) |
 | Where is the spike? | `GET /profiler/spikes`, then `/profiler/spike?index=<frame_index>` |
+| Which code is slow, with calls and ms? | `GET /profiler/table?view=flat` (plain title, explanation, calls, total, self, `origin`) |
+| See the CPU and GPU frame graph | `GET /profiler/graph_image` **IMG** (grey frame, blue CPU busy, orange GPU) |
+| Is my project code timed? | `GET /profiler/scope?name=<Namespace::Function>` or `/profiler/table?view=flat` (`origin:"project"`) |
 | Is the editor frozen? | `GET /profiler` (`live_block[].site`) |
 | Is Hi-Z culling working? | `GET /feature_debug/state?name=GpuDrivenScene` |
 | Change a feature setting | `GET /feature_debug/set?name=<feature>&<key>=<value>` **W** |
@@ -108,6 +111,8 @@ Full params and responses: [HTTP routes](http-routes.md) and [HTTP routes (debug
 | Profiler | `/profiler/spike` | `index` (spike `frame_index`) | |
 | Profiler | `/profiler/scope` | `name` (exact scope name) | |
 | Profiler | `/profiler/timeline_image` | `frame`, `width` 200..2400 | **IMG** |
+| Profiler | `/profiler/graph_image` | `width` 200..2400, `height` 100..800, `frames` 30..120 | **IMG** |
+| Profiler | `/profiler/table` | `view=tree\|flat`, `lane=all\|main\|workers\|gpu`, `limit` 1..256 | |
 | Profiler | `POST /profiler/set` | `capture`, `display_pause`, `pin`, `unpin`, `spike_threshold_ms` | **W** |
 | Profiler | `POST /profiler/export` | `frames` 1..120 | |
 | Fault | `/debug/fault` | none = list. `kind`, `count` 1..1000 = arm | **W** |

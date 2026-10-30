@@ -1,13 +1,20 @@
 #include "ProfilerSnapshotBuilder.h"
 
 #include "FrameChecks.h"
+#include "FrameGraphData.h"
 #include "NameTable.h"
 #include "Overhead.h"
 #include "ProfilingClock.h"
+#include "ScopeSource.h"
+#include "ScopeTable.h"
 #include "ScopeTree.h"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cstring>
+#include <memory>
+#include <string_view>
 #include <vector>
 
 namespace gte::Profiling {
@@ -124,6 +131,74 @@ void FillScopeRows(ProfilerSnapshot& snapshot, const FrameRecord& record)
     snapshot.nestedRowsDropped = static_cast<std::uint32_t>(nested.size() - nestedUsed);
 }
 
+// "File.cpp:123" of the site that first wrote `name`; empty when unknown.
+void FormatSourceText(std::span<char> out, NameId name) noexcept
+{
+    out[0] = '\0';
+    const ScopeSource source = SourceOf(name);
+    if (source.fileName == kInvalidNameId) {
+        return;
+    }
+    std::array<char, 16> digits{};
+    const auto converted = std::to_chars(digits.data(), digits.data() + digits.size(), source.line);
+    const std::size_t used = CopySnapshotText(out, ResolveName(source.fileName));
+    if (used + 1 < out.size()) {
+        out[used] = ':';
+        CopySnapshotText(out.subspan(used + 1), std::string_view(digits.data(), static_cast<std::size_t>(converted.ptr - digits.data())));
+    }
+}
+
+void FillTableRow(SnapshotTableRow& out, const ScopeTableRow& in, double frameMs, double gpuMs)
+{
+    CopySnapshotText(out.name, ResolveName(in.name));
+    CopySnapshotText(out.feature, in.feature == kInvalidNameId ? std::string_view() : std::string_view(ResolveName(in.feature)));
+    FormatSourceText(out.source, in.name);
+    out.lane = static_cast<std::uint8_t>(in.lane);
+    out.origin = static_cast<std::uint8_t>(SourceOf(in.name).origin);
+    out.kind = in.kind;
+    out.status = in.status;
+    out.hasChildren = in.hasChildren;
+    out.depth = in.depth;
+    out.calls = in.calls;
+    out.totalMs = TicksToMilliseconds(in.totalTicks);
+    out.selfMs = TicksToMilliseconds(in.selfTicks);
+    out.maxMs = TicksToMilliseconds(in.maxTicks);
+
+    const bool gpu = in.lane == ScopeLane::Gpu;
+    const double base = gpu ? gpuMs : frameMs;
+    const bool measured = !gpu || in.status == SampleStatus::Present || in.status == SampleStatus::Partial;
+    out.percentKnown = measured && base > 0.0;
+    out.percent = out.percentKnown ? out.totalMs / base * 100.0 : 0.0;
+}
+
+void CopyTable(std::array<SnapshotTableRow, kSnapshotTableRows>& rows, std::uint32_t& count, std::uint32_t& dropped,
+    const ScopeTable& table, double frameMs, double gpuMs)
+{
+    const std::size_t used = std::min(table.rows.size(), rows.size());
+    for (std::size_t i = 0; i < used; ++i) {
+        FillTableRow(rows[i], table.rows[i], frameMs, gpuMs);
+    }
+    count = static_cast<std::uint32_t>(used);
+    dropped = table.rowsDropped + static_cast<std::uint32_t>(table.rows.size() - used);
+}
+
+void FillTables(ProfilerSnapshot& snapshot, const FrameRecord& record)
+{
+    auto tables = std::make_shared<SnapshotTables>();
+    const double frameMs = record.summary.cpuMilliseconds;
+    const double gpuMs = record.summary.gpu.span.status == SampleStatus::Present
+        ? static_cast<double>(record.summary.gpu.span.milliseconds)
+        : 0.0;
+
+    const ScopeTable tree = BuildScopeTree(record, ScopeSort::CallOrder, kSnapshotTableRows);
+    CopyTable(tables->tree, tables->treeCount, tables->treeDropped, tree, frameMs, gpuMs);
+    tables->treeTruncated = tree.treeTruncated;
+
+    const ScopeTable flat = BuildScopeFlat(record, ScopeSort::TotalDesc, kSnapshotTableRows);
+    CopyTable(tables->flat, tables->flatCount, tables->flatDropped, flat, frameMs, gpuMs);
+    snapshot.tables = std::move(tables);
+}
+
 void FillFrameRows(ProfilerSnapshot& snapshot, const FrameProfiler& profiler)
 {
     const std::size_t total = profiler.HistoryCount();
@@ -140,6 +215,8 @@ void FillFrameRows(ProfilerSnapshot& snapshot, const FrameProfiler& profiler)
         row.frameIndex = summary.frameIndex;
         row.cpu = Milliseconds(summary.cpuMilliseconds);
         row.cpu.ageFrames = age;
+        row.cpuBusy = Milliseconds(CpuBusyMilliseconds(summary), MetricKind::Derived);
+        row.cpuBusy.ageFrames = age;
         row.gpuSpan = MetricFromGpuView(summary.gpu.span);
         row.gpuPrimary = MetricFromGpuView(summary.gpu.views[static_cast<std::size_t>(ViewSlot::Primary)]);
         row.gpuSecondary = MetricFromGpuView(summary.gpu.views[static_cast<std::size_t>(ViewSlot::Secondary)]);
@@ -363,6 +440,7 @@ ProfilerSnapshot BuildProfilerSnapshot(const FrameProfiler& profiler, const Snap
     snapshot.drops.droppedGpuFrames = CountOf(gpu.droppedFrames, coverageStatus);
 
     FillScopeRows(snapshot, record);
+    FillTables(snapshot, record);
 
     // An estimate, not a reading: events recorded times the cost of one event measured at startup.
     const OverheadEstimate overhead = EstimateOverhead(profiler.EventCostNs(), record.scopes.Size(), summary.cpuMilliseconds);

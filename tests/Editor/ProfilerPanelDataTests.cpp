@@ -6,6 +6,7 @@
 #include "Renderer/RenderGraph/RenderGraphSnapshotFormatting.h"
 
 #include <algorithm>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -21,63 +22,6 @@ void AddScope(Profiling::FrameRecord& frame, const char* name, std::uint64_t sta
 {
     frame.scopes.Append(Profiling::ScopeEvent{
         start, end, Profiling::InternName(name), depth, kind, Profiling::ViewSlot::Shared });
-}
-
-TEST(ProfilerPanelDataTest, RowsAreSortedBiggestFirst)
-{
-    Profiling::FrameRecord frame;
-    AddScope(frame, "PanelTestSmall", 0, 1'000'000, 0);
-    AddScope(frame, "PanelTestBig", 0, 10'000'000, 0);
-    AddScope(frame, "PanelTestMedium", 0, 5'000'000, 0);
-
-    const std::vector<CpuScopeRow> rows = BuildSortedCpuScopeRows(frame);
-
-    ASSERT_EQ(rows.size(), 3u);
-    EXPECT_STREQ(rows[0].name, "PanelTestBig");
-    EXPECT_STREQ(rows[1].name, "PanelTestMedium");
-    EXPECT_STREQ(rows[2].name, "PanelTestSmall");
-}
-
-TEST(ProfilerPanelDataTest, SelfTimeExcludesDirectChildren)
-{
-    // Post-order: the child ends before its parent.
-    Profiling::FrameRecord frame;
-    AddScope(frame, "PanelTestChild", 1'000'000, 4'000'000, 1);
-    AddScope(frame, "PanelTestParent", 0, 10'000'000, 0);
-
-    const std::vector<CpuScopeRow> rows = BuildSortedCpuScopeRows(frame);
-
-    ASSERT_EQ(rows.size(), 2u);
-    EXPECT_STREQ(rows[0].name, "PanelTestParent");
-    EXPECT_DOUBLE_EQ(rows[0].totalMilliseconds, 10.0);
-    EXPECT_DOUBLE_EQ(rows[0].selfMilliseconds, 7.0);
-    EXPECT_DOUBLE_EQ(rows[1].selfMilliseconds, 3.0);
-}
-
-TEST(ProfilerPanelDataTest, SameNameIsSummedAndCounted)
-{
-    Profiling::FrameRecord frame;
-    AddScope(frame, "PanelTestRepeat", 0, 2'000'000, 0);
-    AddScope(frame, "PanelTestRepeat", 3'000'000, 4'000'000, 0);
-
-    const std::vector<CpuScopeRow> rows = BuildSortedCpuScopeRows(frame);
-
-    ASSERT_EQ(rows.size(), 1u);
-    EXPECT_EQ(rows[0].callCount, 2u);
-    EXPECT_DOUBLE_EQ(rows[0].totalMilliseconds, 3.0);
-}
-
-TEST(ProfilerPanelDataTest, MarkersAreNotRows)
-{
-    Profiling::FrameRecord frame;
-    AddScope(frame, "PanelTestMarker", 5, 5, 0, Profiling::ScopeKind::Marker);
-    EXPECT_TRUE(BuildSortedCpuScopeRows(frame).empty());
-}
-
-TEST(ProfilerPanelDataTest, EmptyFrameHasNoRows)
-{
-    const Profiling::FrameRecord frame{};
-    EXPECT_TRUE(BuildSortedCpuScopeRows(frame).empty());
 }
 
 TEST(ProfilerPanelDataTest, FormatDurationProducesExpectedText)
@@ -227,47 +171,14 @@ TEST(ProfilerPanelDataTest, CpuScopeTableEmptyMessageMatchesCompileTimeFlag)
     }
 }
 
-TEST(ProfilerPanelDataTest, TreeRowsListParentsBeforeChildrenAndEndWithUntracked)
+TEST(ProfilerPanelDataTest, FrameViewCarriesChecks)
 {
-    // Post-order input: children first. The frame is 20 ms; top-level scopes cover 10 ms.
-    Profiling::FrameRecord frame;
-    frame.summary.startTicks = 0;
-    frame.summary.endTicks = 20'000'000;
-    AddScope(frame, "PanelTreeChildA", 1'000'000, 4'000'000, 1);
-    AddScope(frame, "PanelTreeChildB", 5'000'000, 7'000'000, 1);
-    AddScope(frame, "PanelTreeParent", 0, 10'000'000, 0);
+    auto frame = std::make_unique<Profiling::FrameRecord>();
+    frame->summary.endTicks = 10'000'000;
+    AddScope(*frame, "PanelViewBody", 0, 10'000'000, 0);
 
-    const Profiling::FrameTotals totals = Profiling::ComputeFrameTotals(frame);
-    const std::vector<CpuTreeRow> rows = BuildCpuTreeRows(frame, totals);
-
-    ASSERT_EQ(rows.size(), 4u);
-    EXPECT_STREQ(rows[0].name, "PanelTreeParent");
-    EXPECT_EQ(rows[0].depth, 0u);
-    EXPECT_DOUBLE_EQ(rows[0].selfMilliseconds, 5.0);
-    EXPECT_DOUBLE_EQ(rows[0].percentOfFrame, 50.0);
-    EXPECT_STREQ(rows[1].name, "PanelTreeChildA");
-    EXPECT_EQ(rows[1].depth, 1u);
-    EXPECT_STREQ(rows[2].name, "PanelTreeChildB");
-    EXPECT_TRUE(rows[3].untracked);
-    EXPECT_DOUBLE_EQ(rows[3].totalMilliseconds, 10.0);
-}
-
-TEST(ProfilerPanelDataTest, TreeRowsOfAnEmptyFrameHaveNoUntrackedRow)
-{
-    const Profiling::FrameRecord frame{};
-    const std::vector<CpuTreeRow> rows = BuildCpuTreeRows(frame, Profiling::ComputeFrameTotals(frame));
-    EXPECT_TRUE(rows.empty());
-}
-
-TEST(ProfilerPanelDataTest, FrameViewCarriesChecksAndRows)
-{
-    Profiling::FrameRecord frame;
-    frame.summary.endTicks = 10'000'000;
-    AddScope(frame, "PanelViewBody", 0, 10'000'000, 0);
-
-    const ProfilerFrameView view = BuildProfilerFrameView(frame, false);
-    EXPECT_EQ(view.rows.size(), 1u);
-    EXPECT_EQ(view.tree.size(), 2u); // the body and the untracked row
+    const ProfilerFrameView view = BuildProfilerFrameView(*frame, false);
+    EXPECT_EQ(view.totals.frameTicks, 10'000'000u);
     EXPECT_EQ(view.checks.items[static_cast<std::size_t>(Profiling::CheckId::CaptureOn)].status,
         Profiling::CheckStatus::Warn);
 }

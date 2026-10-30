@@ -2,6 +2,7 @@
 
 #include "LiveBlockTable.h"
 #include "ProfilingTypes.h"
+#include "ScopeHistory.h"
 #include "ScopeLog.h"
 #include "SpikeStore.h"
 #include "WorkerRing.h"
@@ -11,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 
 namespace gte::Profiling {
 
@@ -67,6 +69,9 @@ public:
     // GPU numbers of the open frame. A frame that never sets them keeps every GPU number Absent.
     void SetGpuMetrics(const GpuFrameMetrics& metrics) noexcept;
 
+    // Main thread. Replaces the open frame's GPU pass rows. Ignored while no frame is open.
+    void SetGpuPassRows(std::span<const GpuPassRow> rows) noexcept;
+
     // Frames closed so far.
     std::uint64_t CompletedFrameCount() const noexcept { return m_frameIndex; }
 
@@ -82,6 +87,9 @@ public:
 
     // Event detail of the newest finished frame. An empty record before the first frame.
     const FrameRecord& LastCompletedFrame() const noexcept;
+
+    // Per-name history of the newest frames. Main thread only.
+    const ScopeHistory& Scopes() const noexcept { return m_scopeHistory; }
 
     // Frames frozen because they were much slower than the recent median. Any thread may read and pin.
     SpikeStore& Spikes() noexcept { return m_spikes; }
@@ -115,6 +123,8 @@ private:
     std::uint64_t m_frameStartTicks = 0;
     MemorySnapshot m_openMemory{};
     GpuFrameMetrics m_openGpu{};
+    GpuPassRowBuffer m_openGpuPasses;
+    ScopeHistory m_scopeHistory;
 
     ScopeLog m_log;
     WorkerRing m_ring;

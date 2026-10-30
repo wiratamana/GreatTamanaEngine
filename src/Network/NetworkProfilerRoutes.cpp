@@ -1,12 +1,15 @@
 #include "NetworkProfilerRoutes.h"
 
+#include "NetworkProfilerGraph.h"
 #include "NetworkProfilerTimeline.h"
 #include "NetworkRoutes.h"
 #include "ViewWireName.h"
 
+#include "../Application/ProfilerScopeCatalog.h"
 #include "../Application/ProfilerSnapshotBridge.h"
 #include "../Core/GpuViewMetrics.h"
 #include "../Profiling/ProfilerSnapshotBuilder.h"
+#include "../Profiling/ScopeSource.h"
 #include "../Renderer/PresentPolicy.h"
 
 #include <httplib.h>
@@ -286,6 +289,7 @@ nlohmann::json ProfilerFramesToJson(const ProfilerSnapshot& snapshot, std::size_
         nlohmann::json item = nlohmann::json::object();
         item["frame_index"] = row.frameIndex;
         item["cpu"] = MetricToJson(row.cpu);
+        item["cpu_busy"] = MetricToJson(row.cpuBusy);
         item["gpu_span"] = MetricToJson(row.gpuSpan);
         item["gpu_primary"] = MetricToJson(row.gpuPrimary);
         item["gpu_secondary"] = MetricToJson(row.gpuSecondary);
@@ -354,6 +358,162 @@ ProfilerReply BuildProfilerNoSnapshotReply(const ProfilerSnapshot& liveOnly)
     nlohmann::json out = Envelope(liveOnly, "no_snapshot");
     out["live_block"] = LiveBlocksToJson(liveOnly);
     return { 200, out.dump() };
+}
+
+ParsedProfilerTableQuery ParseProfilerTableQuery(const std::string& view, const std::string& lane, const std::string& limit)
+{
+    ParsedProfilerTableQuery result;
+    if (view.empty() || view == "tree") {
+        result.query.view = ProfilerTableView::Tree;
+    } else if (view == "flat") {
+        result.query.view = ProfilerTableView::Flat;
+    } else {
+        result.errorMessage = "invalid query parameter: view - must be tree or flat";
+        return result;
+    }
+
+    if (lane.empty() || lane == "all") {
+        result.query.lane = ProfilerTableLane::All;
+    } else if (lane == "main") {
+        result.query.lane = ProfilerTableLane::Main;
+    } else if (lane == "workers") {
+        result.query.lane = ProfilerTableLane::Workers;
+    } else if (lane == "gpu") {
+        result.query.lane = ProfilerTableLane::Gpu;
+    } else {
+        result.errorMessage = "invalid query parameter: lane - must be all, main, workers or gpu";
+        return result;
+    }
+
+    if (!limit.empty()) {
+        std::uint64_t value = 0;
+        const char* const begin = limit.data();
+        const char* const end = begin + limit.size();
+        const std::from_chars_result parsed = std::from_chars(begin, end, value);
+        if (parsed.ec != std::errc{} || parsed.ptr != end) {
+            result.errorMessage = "invalid query parameter: limit - must be a whole number from 1 to 256";
+            return result;
+        }
+        result.query.limit = static_cast<std::size_t>(std::clamp<std::uint64_t>(value, 1, kProfilerTableLimitMax));
+    }
+    result.valid = true;
+    return result;
+}
+
+namespace {
+
+const char* LaneWireName(Profiling::ScopeLane lane) noexcept
+{
+    switch (lane) {
+    case Profiling::ScopeLane::Main: return "main";
+    case Profiling::ScopeLane::Workers: return "workers";
+    case Profiling::ScopeLane::Gpu: return "gpu";
+    }
+    return "main";
+}
+
+const char* OriginWireName(Profiling::ScopeOrigin origin) noexcept
+{
+    switch (origin) {
+    case Profiling::ScopeOrigin::Engine: return "engine";
+    case Profiling::ScopeOrigin::Project: return "project";
+    case Profiling::ScopeOrigin::Unknown: break;
+    }
+    return "unknown";
+}
+
+bool LaneSelected(ProfilerTableLane filter, Profiling::ScopeLane lane) noexcept
+{
+    switch (filter) {
+    case ProfilerTableLane::All: return true;
+    case ProfilerTableLane::Main: return lane == Profiling::ScopeLane::Main;
+    case ProfilerTableLane::Workers: return lane == Profiling::ScopeLane::Workers;
+    case ProfilerTableLane::Gpu: return lane == Profiling::ScopeLane::Gpu;
+    }
+    return true;
+}
+
+// A time that was not measured is null with its real status, never 0.
+Metric TimeMetric(double milliseconds, SampleStatus status, Profiling::MetricKind kind) noexcept
+{
+    if (status == SampleStatus::Present) {
+        return Profiling::PresentMetric(milliseconds, Profiling::Unit::Milliseconds, kind);
+    }
+    if (status == SampleStatus::Partial) {
+        Metric metric = Profiling::PresentMetric(milliseconds, Profiling::Unit::Milliseconds, kind);
+        metric.status = SampleStatus::Partial;
+        metric.reason = Profiling::Reason::Folded;
+        return metric;
+    }
+    const Profiling::Reason why = status == SampleStatus::Unsupported ? Profiling::Reason::DeviceUnsupported : Profiling::Reason::NotReady;
+    return Profiling::MissingMetric(Profiling::Unit::Milliseconds, status, why);
+}
+
+nlohmann::json TableRowToJson(const Profiling::SnapshotTableRow& row)
+{
+    const auto lane = static_cast<Profiling::ScopeLane>(row.lane);
+    const auto origin = static_cast<Profiling::ScopeOrigin>(row.origin);
+    const std::string name = Text(row.name);
+    const std::string feature = Text(row.feature);
+    const bool featureRow = lane == Profiling::ScopeLane::Gpu && row.depth == 0 && !feature.empty() && name == feature;
+    const ScopeInfo info = featureRow ? DescribeGpuFeature(name) : DescribeScope(name, lane, origin);
+
+    nlohmann::json item = nlohmann::json::object();
+    item["lane"] = LaneWireName(lane);
+    item["name"] = name;
+    item["title"] = info.title;
+    item["explanation"] = info.explanation;
+    item["hint"] = info.hint;
+    item["category"] = CategoryLabel(info.category);
+    item["origin"] = OriginWireName(origin);
+    item["source"] = Text(row.source);
+    item["feature"] = feature;
+    item["kind"] = row.kind == Profiling::ScopeKind::Blocked ? "blocked" : "work";
+    item["waiting"] = info.waiting || row.kind == Profiling::ScopeKind::Blocked;
+    item["has_children"] = row.hasChildren;
+    item["depth"] = row.depth;
+    item["calls"] = MetricToJson(Profiling::PresentMetric(static_cast<double>(row.calls), Profiling::Unit::Count));
+    item["total"] = MetricToJson(TimeMetric(row.totalMs, row.status, Profiling::MetricKind::Measured));
+    item["self"] = MetricToJson(TimeMetric(row.selfMs, row.status, Profiling::MetricKind::Derived));
+    item["max"] = MetricToJson(TimeMetric(row.maxMs, row.status, Profiling::MetricKind::Measured));
+    item["percent_of_frame"] = MetricToJson(row.percentKnown
+            ? Profiling::PresentMetric(row.percent, Profiling::Unit::Percent, Profiling::MetricKind::Derived)
+            : Profiling::MissingMetric(Profiling::Unit::Percent, SampleStatus::Absent, Profiling::Reason::NotReady));
+    return item;
+}
+
+} // namespace
+
+nlohmann::json ProfilerTableToJson(const ProfilerSnapshot& snapshot, const ProfilerTableQuery& query)
+{
+    nlohmann::json out = Envelope(snapshot);
+    const bool tree = query.view == ProfilerTableView::Tree;
+    out["view"] = tree ? "tree" : "flat";
+
+    nlohmann::json rows = nlohmann::json::array();
+    std::uint32_t dropped = 0;
+    bool truncated = false;
+    if (snapshot.tables) {
+        const Profiling::SnapshotTables& tables = *snapshot.tables;
+        const auto& source = tree ? tables.tree : tables.flat;
+        const std::uint32_t count = std::min<std::uint32_t>(tree ? tables.treeCount : tables.flatCount, static_cast<std::uint32_t>(source.size()));
+        dropped = tree ? tables.treeDropped : tables.flatDropped;
+        truncated = tree && tables.treeTruncated;
+        for (std::uint32_t i = 0; i < count; ++i) {
+            if (!LaneSelected(query.lane, static_cast<Profiling::ScopeLane>(source[i].lane))) {
+                continue;
+            }
+            if (rows.size() >= query.limit) {
+                ++dropped;
+                continue;
+            }
+            rows.push_back(TableRowToJson(source[i]));
+        }
+    }
+    out["rows"] = std::move(rows);
+    out["rows_dropped"] = MetricToJson(Profiling::PresentMetric(static_cast<double>(dropped), Profiling::Unit::Count));
+    out["tree_truncated"] = truncated;
+    return out;
 }
 
 ProfilerReply BuildProfilerUnavailableReply()
@@ -651,6 +811,23 @@ ProfilerImageReply BuildProfilerTimelineReply(
     }
 }
 
+ProfilerImageReply BuildProfilerGraphReply(
+    const std::optional<ProfilerSnapshot>& snapshot, int width, int height, std::size_t frames)
+{
+    if (!snapshot || snapshot->frameCount == 0) {
+        return { 503, {}, BuildGenericErrorResponseJson("no profiler frame published yet - the main thread has not published one, try again") };
+    }
+    const std::size_t available = std::min<std::size_t>(snapshot->frameCount, snapshot->frames.size());
+    const std::size_t shown = std::min(frames, available);
+    try {
+        const std::span<const Profiling::SnapshotFrameRow> rows(snapshot->frames.data() + (available - shown), shown);
+        const std::vector<std::uint8_t> png = RenderGraphPng(PlanGraphPixels(rows, width, height));
+        return { 200, "image/png", std::string(reinterpret_cast<const char*>(png.data()), png.size()) };
+    } catch (const std::exception& error) {
+        return { 500, {}, BuildGenericErrorResponseJson(std::string("graph image failed: ") + error.what()) };
+    }
+}
+
 void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bridge, BrowserRefusal refuseBrowser)
 {
     const auto serve = [bridge](ProfilerRoute route) {
@@ -829,6 +1006,66 @@ void RegisterProfilerRoutes(httplib::Server& server, ProfilerSnapshotBridge* bri
             }
             reply = BuildProfilerTimelineReply(bridge->SpikeFrame(*index), true, *index, *width);
         }
+        res.status = reply.status;
+        if (reply.contentType.empty()) {
+            res.set_content(reply.body, "application/json");
+        } else {
+            res.set_content(reply.body.data(), reply.body.size(), reply.contentType);
+        }
+#else
+        static_cast<void>(req);
+        static_cast<void>(bridge);
+        const ProfilerReply reply = BuildProfilerUnavailableReply();
+        res.status = reply.status;
+        res.set_content(reply.body, "application/json");
+#endif
+    });
+
+    server.Get("/profiler/table", [bridge](const httplib::Request& req, httplib::Response& res) {
+        ProfilerReply reply;
+#if GTE_ENABLE_PROFILER
+        const ParsedProfilerTableQuery parsed = ParseProfilerTableQuery(
+            req.get_param_value("view"), req.get_param_value("lane"), req.get_param_value("limit"));
+        if (!parsed.valid) {
+            reply = { 400, BuildGenericErrorResponseJson(parsed.errorMessage) };
+        } else if (bridge == nullptr) {
+            reply = BuildProfilerUnavailableReply();
+        } else {
+            const std::optional<ProfilerSnapshot> latest = bridge->Latest(kSnapshotWait);
+            reply = latest ? ProfilerReply{ 200, ProfilerTableToJson(*latest, parsed.query).dump() }
+                           : BuildProfilerNoSnapshotReply(bridge->LiveOnlySnapshot());
+        }
+#else
+        static_cast<void>(req);
+        static_cast<void>(bridge);
+        reply = BuildProfilerUnavailableReply();
+#endif
+        res.status = reply.status;
+        res.set_content(reply.body, "application/json");
+    });
+
+    server.Get("/profiler/graph_image", [bridge](const httplib::Request& req, httplib::Response& res) {
+#if GTE_ENABLE_PROFILER
+        const std::optional<int> width = ParseGraphParam(req.get_param_value("width"), kGraphWidthDefault, kGraphWidthMin, kGraphWidthMax);
+        const std::optional<int> height = ParseGraphParam(req.get_param_value("height"), kGraphHeightDefault, kGraphHeightMin, kGraphHeightMax);
+        const std::optional<int> frames = ParseGraphParam(req.get_param_value("frames"), kGraphFramesDefault, kGraphFramesMin, kGraphFramesMax);
+        const char* badParam = !width ? "width" : !height ? "height" : !frames ? "frames" : nullptr;
+        if (badParam != nullptr) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(std::string("invalid query parameter: ") + badParam
+                                + " - a whole number within its limits (width 200-2400, height 100-800, frames 30-120)"),
+                "application/json");
+            return;
+        }
+        if (bridge == nullptr) {
+            const ProfilerReply reply = BuildProfilerUnavailableReply();
+            res.status = reply.status;
+            res.set_content(reply.body, "application/json");
+            return;
+        }
+
+        const ProfilerImageReply reply = BuildProfilerGraphReply(
+            bridge->Latest(kSnapshotWait), *width, *height, static_cast<std::size_t>(*frames));
         res.status = reply.status;
         if (reply.contentType.empty()) {
             res.set_content(reply.body, "application/json");

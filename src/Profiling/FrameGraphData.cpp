@@ -1,8 +1,30 @@
 #include "FrameGraphData.h"
 
+#include "ProfilingClock.h"
+
 #include <algorithm>
+#include <limits>
 
 namespace gte::Profiling {
+
+double CpuBusyMilliseconds(const FrameSummary& frame) noexcept
+{
+    return std::max(0.0, frame.cpuMilliseconds - TicksToMilliseconds(frame.blockedTicks));
+}
+
+double GpuSpanMilliseconds(const GpuViewMetric& span) noexcept
+{
+    return span.status == SampleStatus::Present ? static_cast<double>(span.milliseconds)
+                                                : std::numeric_limits<double>::quiet_NaN();
+}
+
+double GraphAxisMaxMilliseconds(double largestVisibleMs) noexcept
+{
+    if (!(largestVisibleMs > 0.0)) {
+        return kGraphGuideLowMs;
+    }
+    return std::max(kGraphGuideLowMs, largestVisibleMs * 1.1);
+}
 
 std::vector<FrameGraphPoint> BuildFrameGraphPoints(const FrameProfiler& profiler)
 {
@@ -11,7 +33,7 @@ std::vector<FrameGraphPoint> BuildFrameGraphPoints(const FrameProfiler& profiler
 
     for (std::size_t i = 0; i < profiler.HistoryCount(); ++i) {
         const FrameSummary& frame = profiler.HistoryAt(i);
-        points.push_back({ frame.frameIndex, frame.cpuMilliseconds, frame.memory });
+        points.push_back({ frame.frameIndex, frame.cpuMilliseconds, frame.memory, CpuBusyMilliseconds(frame), frame.gpu.span });
     }
     return points;
 }

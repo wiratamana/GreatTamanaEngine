@@ -37,6 +37,7 @@ void FrameProfiler::BeginFrame() noexcept
     m_frameStartTicks = GetProfilingPerformanceCounter();
     m_openMemory = MemorySnapshot{};
     m_openGpu = GpuFrameMetrics{};
+    m_openGpuPasses.Clear();
 }
 
 void FrameProfiler::EndFrame() noexcept
@@ -51,8 +52,12 @@ void FrameProfiler::EndFrame() noexcept
 
     FrameRecord& record = m_last;
     record.scopes = m_log.Buffer();
+    record.aggregates = m_log.Aggregates();
+    record.gpuPasses = m_openGpuPasses;
     record.workers.Clear();
     const WorkerDrainStats drain = m_ring.Drain(m_frameStartTicks, endTicks, record.workers);
+    AppendWorkerAggregates(record.workers.Events(), record.aggregates);
+    AppendGpuAggregates(record.gpuPasses.Events(), record.aggregates);
     const GateCounters gate = m_log.Gate().TakeCounters();
 
     FrameSummary& summary = record.summary;
@@ -78,6 +83,7 @@ void FrameProfiler::EndFrame() noexcept
     summary.largestBlockedName = totals.largestBlockedName;
     summary.largestBlockedTicks = totals.largestBlockedTicks;
 
+    m_scopeHistory.Record(summary.frameIndex, record.aggregates.Rows());
     FreezeIfSpike(record);
 
     m_history[m_historyHead] = summary;
@@ -158,6 +164,17 @@ void FrameProfiler::SetGpuMetrics(const GpuFrameMetrics& metrics) noexcept
     }
 }
 
+void FrameProfiler::SetGpuPassRows(std::span<const GpuPassRow> rows) noexcept
+{
+    if (!m_frameInProgress) {
+        return;
+    }
+    m_openGpuPasses.Clear();
+    for (const GpuPassRow& row : rows) {
+        m_openGpuPasses.Append(row);
+    }
+}
+
 const FrameSummary& FrameProfiler::HistoryAt(std::size_t indexFromOldest) const noexcept
 {
     const std::size_t oldest = (m_historyHead + kMaxFrameHistory - m_historyCount) % kMaxFrameHistory;
@@ -177,7 +194,13 @@ void FrameProfiler::ResetForTesting() noexcept
     m_frameStartTicks = 0;
     m_openMemory = MemorySnapshot{};
     m_openGpu = GpuFrameMetrics{};
-    m_last = FrameRecord{};
+    m_openGpuPasses.Clear();
+    m_last.summary = FrameSummary{};
+    m_last.scopes.Clear();
+    m_last.workers.Clear();
+    m_last.aggregates.Clear();
+    m_last.gpuPasses.Clear();
+    m_scopeHistory.Clear();
     m_history = {};
     m_spikes.Clear();
     m_historyHead = 0;

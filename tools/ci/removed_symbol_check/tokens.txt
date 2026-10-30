@@ -93,3 +93,10 @@ RefreshProjectAssetRecord
 RefreshAssetRecord
 pendingAssetRecordRefresh
 RefreshRecordFromFile
+CpuScopeRow
+CpuTreeRow
+BuildSortedCpuScopeRows
+BuildCpuTreeRows
+BuildCpuTreeTable
+BuildCpuScopeTable
+m_groupByName

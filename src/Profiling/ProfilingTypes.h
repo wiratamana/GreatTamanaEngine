@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EventBuffer.h"
+#include "ScopeAggregate.h"
 #include "ScopeEvent.h"
 #include "WorkerRing.h"
 
@@ -69,15 +70,18 @@ struct FrameSummary {
     std::uint64_t largestBlockedTicks = 0;
 };
 
-// The full event detail of one finished frame.
+// The full detail of one finished frame. Large: keep it off the stack.
 struct FrameRecord {
     FrameSummary summary{};
     ScopeEventBuffer scopes;
     WorkerEventBuffer workers;
+    ScopeAggregateBuffer aggregates; // all lanes
+    GpuPassRowBuffer gpuPasses;
 };
 
 // A frozen spike holds a whole frame record, so its size decides the memory of the spike store.
-static_assert(sizeof(FrameRecord) <= sizeof(FrameSummary) + sizeof(ScopeEventBuffer) + sizeof(WorkerEventBuffer) + 64,
+static_assert(sizeof(FrameRecord) <= sizeof(FrameSummary) + sizeof(ScopeEventBuffer) + sizeof(WorkerEventBuffer)
+        + sizeof(ScopeAggregateBuffer) + sizeof(GpuPassRowBuffer) + 64,
     "FrameRecord grew past the sum of its parts");
 
 } // namespace gte::Profiling

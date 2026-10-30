@@ -20,39 +20,11 @@ namespace gte {
 
 // Pure data shaping and text formatting for the Profiler panel. No ImGui.
 
-// One CPU scope name summed over the frame.
-struct CpuScopeRow {
-    const char* name = "";
-    Profiling::ScopeKind kind = Profiling::ScopeKind::Work;
-    double totalMilliseconds = 0.0; // a scope nested in a scope of the same name is counted twice
-    double selfMilliseconds = 0.0;  // total minus direct children
-    std::uint32_t callCount = 0;
-};
-
-// Rows of the frame's scope events, biggest total first. Instant markers are not rows.
-std::vector<CpuScopeRow> BuildSortedCpuScopeRows(const Profiling::FrameRecord& frame);
-
-// One scope event in tree order (parents before children).
-struct CpuTreeRow {
-    const char* name = "";
-    Profiling::ScopeKind kind = Profiling::ScopeKind::Work;
-    std::uint16_t depth = 0;
-    bool untracked = false;          // the frame time outside every top-level scope
-    double totalMilliseconds = 0.0;
-    double selfMilliseconds = 0.0;   // total minus direct children
-    double percentOfFrame = 0.0;
-};
-
-// Scope events in tree order, then one untracked row for the frame time no top-level scope covers.
-std::vector<CpuTreeRow> BuildCpuTreeRows(const Profiling::FrameRecord& frame, const Profiling::FrameTotals& totals);
-
-// Everything the panel shows for one finished frame.
+// Totals and checks of one finished frame.
 struct ProfilerFrameView {
     Profiling::FrameSummary summary{};
     Profiling::FrameTotals totals{};
     Profiling::ProfilerChecks checks{};
-    std::vector<CpuScopeRow> rows;
-    std::vector<CpuTreeRow> tree;
 };
 
 ProfilerFrameView BuildProfilerFrameView(const Profiling::FrameRecord& frame, bool captureEnabled);

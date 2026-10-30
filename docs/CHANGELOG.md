@@ -14,6 +14,7 @@
 
 | Entry | Branch | Date |
 |---|---|---|
+| [Readable profiler](#readable-profiler-branch-fixsmall-fixes-2026-10-31) | `fix/small-fixes` | 2026-10-31 |
 | [GPU culling: two-phase Hi-Z, textured clusters, cheaper fixed cost](#gpu-culling-two-phase-hi-z-textured-clusters-cheaper-fixed-cost-branch-featuregpu-cull-impl-2026-10-28) | `feature/gpu-cull-impl` | 2026-10-28 |
 | [Culling mode and CPU path culling](#culling-mode-and-cpu-path-culling-branch-featuregpu-cull-impl-2026-10-28) | `feature/gpu-cull-impl` | 2026-10-28 |
 | [Timeline image, export and GPU clock calibration](#timeline-image-export-and-gpu-clock-calibration-branch-featuregpu-cull-impl-2026-10-26) | `feature/gpu-cull-impl` | 2026-10-26 |
@@ -34,6 +35,30 @@
 | [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
 | [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 | [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+
+## Readable profiler (branch `fix/small-fixes`, 2026-10-31)
+
+- **New panel.** The Profiler panel is rewritten: a plain summary sentence, a graph with Frame (grey), CPU busy (blue) and GPU (orange)
+  lines and tick boxes (up to 8 lines for ticked rows), and a table with Calls, Total, Self, % and a bar. Rows have plain titles and
+  tooltips, a filter, categories, Tree or Flat, Inclusive or Self, and Pause. The tree indent bug (top-level rows drawn as deep as
+  depth 2, because `ImGui::Indent(0)` means the default indent) is gone with the old panel code. Rows are placed with `SetCursorPosX`.
+- **Project code is timed.** Project DLLs now get the engine's `GTE_ENABLE_*` switches (`cmake/GteProject.cmake`), so profiler macros
+  record there. `ScopeTimer.h` stops the build with `#error` when `GTE_ENABLE_PROFILER` is undefined. The ctest `ProjectDefineProbe`
+  builds a probe the way a project is built.
+- **`GTE_PROFILE_FUNCTION()`.** Names a scope from the compiler (`Namespace::Class::Method`, `TrimFunctionName`). Every scope name now
+  remembers its file and line, and whether it is engine or project code (`InternNameAt`, `SourceOf`).
+- **Exact totals.** Per-name aggregates (calls, total, self, max) are summed online in `ScopeLog`, so a hot scope called thousands of
+  times keeps exact numbers when the 2048 event buffer is full. Worker and GPU rows are aggregated the same way.
+- **GPU rows per pass and per-feature scopes.** `Core::PublishGpuMetrics` reports one row per executed offscreen pass with its feature.
+  Render feature callbacks run inside `Feature.<name>` scopes. Present graph passes have no per-pass rows.
+- **History and tables.** `ScopeHistory` keeps 256 tracks x 300 frames per name for the graph lines. `ScopeTable` builds the merged call
+  tree and the flat list.
+- **Plain-English catalog.** `src/Application/ProfilerScopeCatalog` gives every scope a title, explanation, hint and category. A coverage
+  test fails for a hand-written scope name with no entry.
+- **HTTP.** New `GET /profiler/table` (tree or flat, lane filter, limit) and `GET /profiler/graph_image` (PNG, no screenshot needed).
+  `GET /profiler/frames` rows have `cpu_busy`.
+- **Not run in this change.** The editor run checks were not done: the project DLL end-to-end check, the visual check of the panel and
+  the `EventCostNs` measurement. Only the build, the guard checks and a filtered set of unit tests were run.
 
 ## GPU culling: two-phase Hi-Z, textured clusters, cheaper fixed cost (branch `feature/gpu-cull-impl`, 2026-10-28)
 

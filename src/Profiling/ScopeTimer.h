@@ -1,19 +1,31 @@
 #pragma once
 
+#ifndef GTE_ENABLE_PROFILER
+#error "GTE_ENABLE_PROFILER must be defined to 0 or 1 by the build system."
+#endif
+
 #include "FrameProfiler.h"
 #include "NameTable.h"
 #include "ScopeEvent.h"
+#include "ScopeSource.h"
 
 #include <cstdint>
 
 #define GTE_PROFILE_CONCAT_INNER(a, b) a##b
 #define GTE_PROFILE_CONCAT(a, b) GTE_PROFILE_CONCAT_INNER(a, b)
 
-// Interns a literal once per call site and returns its id.
+// Interns a literal once per call site, remembers the site, and returns the id.
 #define GTE_PROFILE_NAME_ID(name) ([]() noexcept { \
-    static const ::gte::Profiling::NameId id = ::gte::Profiling::InternName(name); \
+    static const ::gte::Profiling::NameId id = ::gte::Profiling::InternNameAt(name, __FILE__, __LINE__); \
     return id; \
 }())
+
+// The signature must be taken outside any lambda, so this stays a plain macro.
+#if defined(_MSC_VER)
+#define GTE_PROFILE_PRETTY_FUNCTION __FUNCSIG__
+#else
+#define GTE_PROFILE_PRETTY_FUNCTION __PRETTY_FUNCTION__
+#endif
 
 #if GTE_ENABLE_PROFILER
 
@@ -24,6 +36,13 @@
 // Same, for a name interned earlier with InternName().
 #define GTE_PROFILE_SCOPE_ID(nameId) \
     ::gte::Profiling::ScopeTimer GTE_PROFILE_CONCAT(gteProfileScope_, __LINE__)(nameId)
+
+// Times the rest of the enclosing function, named "Namespace::Class::Method". Not for constexpr functions.
+#define GTE_PROFILE_FUNCTION() \
+    static const ::gte::Profiling::NameId GTE_PROFILE_CONCAT(gteProfileFunctionId_, __LINE__) = \
+        ::gte::Profiling::InternFunctionName(GTE_PROFILE_PRETTY_FUNCTION, __FILE__, __LINE__); \
+    ::gte::Profiling::ScopeTimer GTE_PROFILE_CONCAT(gteProfileScope_, __LINE__)( \
+        GTE_PROFILE_CONCAT(gteProfileFunctionId_, __LINE__))
 
 // Times the rest of the block as time spent waiting, not working.
 #define GTE_PROFILE_BLOCKED(name) \
@@ -38,6 +57,7 @@
 
 #define GTE_PROFILE_SCOPE(name) static_assert(true)
 #define GTE_PROFILE_SCOPE_ID(nameId) static_assert(true)
+#define GTE_PROFILE_FUNCTION() static_assert(true)
 #define GTE_PROFILE_BLOCKED(name) static_assert(true)
 #define GTE_PROFILE_MARKER(name) static_cast<void>(0)
 

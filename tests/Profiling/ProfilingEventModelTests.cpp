@@ -152,7 +152,7 @@ TEST(NameTableTest, GlobalTableInternsAndResolves)
 TEST(ProfilingBudgetTest, EventSizesAndFrameRecordStayInBudget)
 {
     EXPECT_EQ(sizeof(ScopeEvent), 24u);
-    EXPECT_LE(sizeof(FrameRecord), 72u * 1024u);
+    EXPECT_LE(sizeof(FrameRecord), 120u * 1024u);
     EXPECT_EQ(ScopeEventBuffer::kCapacity, kMaxScopeEventsPerFrame);
 }
 

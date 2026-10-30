@@ -19,6 +19,10 @@ std::string_view FormatWaitName(std::span<char> buffer, BlockSite site, const ch
 // Writes "<prefix>.<suffix>" into `buffer` (truncated to fit) and returns the text.
 std::string_view FormatScopeName(std::span<char> buffer, const char* prefix, const char* suffix) noexcept;
 
+// Interns "Feature.<feature>" or "Feature.<feature>.<callback>" (cut at 127 bytes).
+// Returns kInvalidNameId while capture is off.
+Profiling::NameId FeatureScopeName(std::string_view feature, std::string_view callback = {}) noexcept;
+
 class RenderTimingAdapter final : public IRenderTimingObserver {
 public:
     // Names the graph being executed ("Offscreen", "Present"). A string literal. Main thread only.

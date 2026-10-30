@@ -751,6 +751,8 @@ add_library(gte_core STATIC
     src/Application/FrameCaptureBridge.cpp
     src/Application/ProfilerSnapshotBridge.h
     src/Application/ProfilerSnapshotBridge.cpp
+    src/Application/ProfilerScopeCatalog.h
+    src/Application/ProfilerScopeCatalog.cpp
     src/Application/GpuTimingText.h
     src/Application/EngineCommandBridge.h
     src/Application/EditorUiCommandBridge.h
@@ -1099,6 +1101,16 @@ add_library(gte_core STATIC
     src/Profiling/TimelineLayout.cpp
     src/Profiling/Overhead.h
     src/Profiling/Overhead.cpp
+    src/Profiling/FunctionName.h
+    src/Profiling/FunctionName.cpp
+    src/Profiling/ScopeSource.h
+    src/Profiling/ScopeSource.cpp
+    src/Profiling/ScopeAggregate.h
+    src/Profiling/ScopeAggregate.cpp
+    src/Profiling/ScopeHistory.h
+    src/Profiling/ScopeHistory.cpp
+    src/Profiling/ScopeTable.h
+    src/Profiling/ScopeTable.cpp
     src/Jobs/JobTypes.h
     src/Jobs/JobQueue.h
     src/Jobs/JobQueue.cpp
@@ -1120,6 +1132,8 @@ add_library(gte_core STATIC
     src/Network/NetworkProfilerRoutes.cpp
     src/Network/NetworkProfilerTimeline.h
     src/Network/NetworkProfilerTimeline.cpp
+    src/Network/NetworkProfilerGraph.h
+    src/Network/NetworkProfilerGraph.cpp
     src/Network/RenderGraphMetadataJson.h
     src/Network/RenderGraphMetadataJson.cpp
     src/Network/NetworkServer.h
@@ -1437,6 +1451,10 @@ add_library(gte_editor STATIC
     src/Editor/MemoryPanelData.cpp
     src/Editor/ProfilerPanelData.h
     src/Editor/ProfilerPanelData.cpp
+    src/Editor/ProfilerTableModel.h
+    src/Editor/ProfilerTableModel.cpp
+    src/Editor/ProfilerGraphModel.h
+    src/Editor/ProfilerGraphModel.cpp
     src/Editor/JobsPanelData.h
     src/Editor/JobsPanelData.cpp
     src/Editor/LogPanelData.h
@@ -1495,6 +1513,10 @@ add_library(gte_editor STATIC
     src/Editor/Panels/MemoryPanel.cpp
     src/Editor/Panels/ProfilerPanel.h
     src/Editor/Panels/ProfilerPanel.cpp
+    src/Editor/Panels/ProfilerGraphWidget.h
+    src/Editor/Panels/ProfilerGraphWidget.cpp
+    src/Editor/Panels/ProfilerTableWidget.h
+    src/Editor/Panels/ProfilerTableWidget.cpp
     src/Editor/Panels/RenderGraphPanel.h
     src/Editor/Panels/RenderGraphPanel.cpp
     src/Editor/Panels/RenderFeaturesPanel.h

@@ -1,6 +1,6 @@
 # HTTP routes: debug tools
 > Route reference for profiler, fault injection, feature debug, frame debugger, render graph control and project assembly. For anyone who calls the editor's HTTP server.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-10-31
 
 ## TL;DR
 - Server: `127.0.0.1:8080`, editor only. All JSON examples below are built from code, not from a live run.
@@ -69,12 +69,14 @@ Plain numbers (not metrics): `schema_version`, `frame_index`, `thread_slot`, `de
 | Route | Params | Reply and use |
 |---|---|---|
 | `GET /profiler` | none | Overview. Start here for "why is the frame slow". |
-| `GET /profiler/frames` | `count` whole number, default 30, clamped to 1..120 | Newest frames, oldest first. Each row: `frame_index`, `cpu`, `gpu_span`, `gpu_primary`, `gpu_secondary`. Use for A/B stats. |
+| `GET /profiler/frames` | `count` whole number, default 30, clamped to 1..120 | Newest frames, oldest first. Each row: `frame_index`, `cpu`, `cpu_busy` (CPU frame ms minus Blocked ms), `gpu_span`, `gpu_primary`, `gpu_secondary`. Use for A/B stats. |
 | `GET /profiler/spikes` | none | Frozen slow frames, newest first. |
 | `GET /profiler/spike` | `index` = `frame_index` of a frozen spike (required) | One frozen frame with its scope tree. `400` bad index. `404` never frozen or evicted. |
 | `GET /profiler/scope` | `name` = exact scope name, 1..256 bytes (required) | Newest frame only. Rows per depth: `{depth,calls,total,self}`. `404` scope did not run. No history: poll and take the median. |
 | `POST /profiler/set` | see below | Change capture, pause, pins, spike threshold. Browser guarded. |
 | `GET /profiler/timeline_image` | `frame` (spike index, default newest), `width` 200..2400 (default 1200) | PNG. See [Images](#timeline-image). |
+| `GET /profiler/graph_image` | `width` 200..2400, `height` 100..800, `frames` 30..120 | PNG of the Frame, CPU busy and GPU lines. See [Graph image](#graph-image). |
+| `GET /profiler/table` | `view` tree or flat, `lane` all, main, workers or gpu, `limit` 1..256 | Calls and ms per name with plain-English text. See [Table](#table). |
 | `POST /profiler/export` | `frames` 1..120, default 30 | One JSON: `frames`, `overview`, `pinned_spikes[]`. Writes no file. `503` before the first snapshot. Browser guarded. |
 
 `/profiler/scope` and `/profiler/timeline_image` without `frame` also make the main thread keep publishing.
@@ -159,6 +161,50 @@ Rules run in this order. The first match wins.
 
 ```text
 curl.exe -o timeline.png "http://127.0.0.1:8080/profiler/timeline_image?frame=1234&width=1600"
+```
+
+### Graph image
+- Drawn on the CPU. No text. Three lines: Frame time (grey), CPU busy (blue), GPU span (orange). Guide lines at 16.7 ms and 33.3 ms when they are below the top of the axis.
+- A frame without a `Present` value is a gap. Nothing is drawn for it. Rows ticked in the panel are not drawn here.
+- Params: `width` 200..2400 (default 1200), `height` 100..800 (default 300), `frames` 30..120 (default 120, newest frames).
+- `400` for a bad value (not a whole number, or outside its limits). `503` when there is no snapshot or no frame yet.
+- View it with `gte_send_request`, not `http_request`.
+
+```text
+curl.exe -o graph.png "http://127.0.0.1:8080/profiler/graph_image?width=1200&height=300&frames=120"
+```
+
+### Table
+Source of the data: the same totals the Profiler panel shows. Calls and times come from per-frame totals, so a hot scope called thousands of times still has the right `calls`.
+
+| Param | Values | Default |
+|---|---|---|
+| `view` | `tree` (merged call tree) or `flat` (one row per name) | `tree` |
+| `lane` | `all`, `main`, `workers`, `gpu` | `all` |
+| `limit` | 1..256 (a number above 256 is clamped to 256) | 128 |
+
+`400` for a bad `view`, `lane` or a `limit` that is not a number. No snapshot: `200` with `"state":"no_snapshot"`.
+
+Body:
+```text
+{ "schema_version":1, "frame_index":N, "state":"ok", "view":"tree",
+  "rows":[ { "lane":"main", "name":"...", "title":"...", "explanation":"...", "hint":"...",
+             "category":"Waiting", "origin":"engine", "source":"File.cpp:123", "feature":"",
+             "kind":"work", "waiting":false, "has_children":true, "depth":2,
+             "calls":{...}, "total":{...}, "self":{...}, "max":{...}, "percent_of_frame":{...} } ],
+  "rows_dropped":{...}, "tree_truncated":false }
+```
+- Rows are in pre-order. The parent of a row is the nearest earlier row of the same lane with `depth - 1`.
+- `lane` is `main`, `workers` or `gpu`. `origin` is `engine`, `project` or `unknown`. `feature` is set for GPU rows.
+- `title`, `explanation`, `hint` and `category` are plain English from the catalog. `waiting` is true for pure waits.
+- `calls`, `total`, `self`, `max`, `percent_of_frame` and `rows_dropped` are metric objects. `depth` is a plain number.
+- A GPU row that was not measured has `total`, `self` and `max` with `value:null` and the real `status`. `percent_of_frame` is `null` when its base is unknown.
+- `tree_truncated:true` means the event buffer was full. The tree is incomplete. The `flat` view is still exact.
+- `rows_dropped` counts rows beyond the 256 row limit of the snapshot plus rows cut by `limit`.
+
+```text
+curl.exe "http://127.0.0.1:8080/profiler/table?view=flat&lane=main&limit=40"
+curl.exe "http://127.0.0.1:8080/profiler/scope?name=profile_probe::BuildTintPass"
 ```
 
 ### Profiler recipes

@@ -1,15 +1,20 @@
 #include "ProfilerPanel.h"
 
+#include "ProfilerGraphWidget.h"
+#include "ProfilerTableWidget.h"
 #include "../EditorContext.h"
 #include "../MemoryPanelData.h"
 #include "../ProfilerPanelData.h"
+#include "../../Application/ProfilerScopeCatalog.h"
 #include "../../Profiling/FrameProfiler.h"
+#include "../../Profiling/NameTable.h"
 
 #include <imgui.h>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <span>
 #include <string>
 
@@ -17,13 +22,34 @@ namespace gte {
 
 namespace {
 
-// Newest frames shown in the graphs. The graph is a few hundred pixels wide.
-constexpr std::size_t kGraphWindowFrames = 240;
+constexpr ImVec4 kColorBad(1.0f, 0.35f, 0.3f, 1.0f);
+constexpr ImVec4 kColorWarn(1.0f, 0.75f, 0.2f, 1.0f);
+constexpr ImVec4 kColorGood(0.45f, 0.85f, 0.45f, 1.0f);
+constexpr ImVec4 kColorQuiet(0.6f, 0.6f, 0.6f, 1.0f);
 
-std::span<const Profiling::FrameGraphPoint> WindowedTail(const std::vector<Profiling::FrameGraphPoint>& points)
+constexpr float kGraphHeight = 110.0f;
+constexpr float kMinTableHeight = 120.0f;
+constexpr std::size_t kMaxTableRows = 512;
+constexpr double kLimitMessageSeconds = 3.0;
+constexpr float kNamesWarnShare = 0.9f;
+
+bool Radio(const char* label, bool active)
 {
-    const std::span<const Profiling::FrameGraphPoint> all(points);
-    return points.size() <= kGraphWindowFrames ? all : all.subspan(points.size() - kGraphWindowFrames);
+    return ImGui::RadioButton(label, active);
+}
+
+ImVec4 VerdictColor(Profiling::VerdictKind kind)
+{
+    switch (kind) {
+    case Profiling::VerdictKind::Unreliable:
+    case Profiling::VerdictKind::Stalled: return kColorBad;
+    case Profiling::VerdictKind::PresentLimited: return kColorWarn;
+    case Profiling::VerdictKind::Unknown: return kColorQuiet;
+    case Profiling::VerdictKind::GpuLimited:
+    case Profiling::VerdictKind::CpuLimited:
+    case Profiling::VerdictKind::Serial: return kColorGood;
+    }
+    return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
 void BuildCaptureAndPauseControls(Profiling::FrameProfiler& profiler)
@@ -32,100 +58,136 @@ void BuildCaptureAndPauseControls(Profiling::FrameProfiler& profiler)
     if (ImGui::Checkbox("Capture", &captureEnabled)) {
         profiler.SetCaptureEnabled(captureEnabled);
     }
-    if (!captureEnabled) {
-        ImGui::TextDisabled("Capture disabled - no new frames are being recorded.");
-    }
-
     ImGui::SameLine();
-
     bool paused = profiler.IsDisplayPaused();
     if (ImGui::Checkbox("Pause", &paused)) {
         profiler.SetDisplayPaused(paused);
     }
 }
 
-void BuildCpuFrameTimeGraph(
-    std::span<const Profiling::FrameGraphPoint> windowed, const Profiling::FrameSummary& latest, std::vector<float>& scratch)
+void BuildViewControls(TableOptions& options, bool& showSelf)
 {
-    ImGui::SeparatorText("CPU Frame Time");
-
-    if (windowed.empty()) {
-        ImGui::TextDisabled("Waiting for profiler data...");
-        return;
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    ImGui::TextUnformatted("View:");
+    ImGui::SameLine();
+    if (Radio("Tree", options.tree)) {
+        options.tree = true;
     }
-
-    scratch.clear();
-    scratch.reserve(windowed.size());
-    for (const Profiling::FrameGraphPoint& point : windowed) {
-        scratch.push_back(static_cast<float>(point.cpuMilliseconds));
+    ImGui::SameLine();
+    if (Radio("Flat", !options.tree)) {
+        options.tree = false;
     }
-
-    const Profiling::FrameGraphRange range = Profiling::ComputeCpuMillisecondsRange(windowed);
-    const float scaleMin = range.hasData ? std::min(0.0f, static_cast<float>(range.minMilliseconds)) : 0.0f;
-    const float scaleMax = range.hasData ? static_cast<float>(range.maxMilliseconds) : 1.0f;
-
-    ImGui::PlotLines("##CpuFrameTimeGraph", scratch.data(), static_cast<int>(scratch.size()), 0, nullptr, scaleMin,
-        scaleMax, ImVec2(0.0f, 80.0f));
-
-    ImGui::Text("%s", FormatFrameTimeSummary(latest.cpuMilliseconds).c_str());
-    if (range.hasData) {
-        ImGui::Text("Range: %s - %s", FormatDuration(range.minMilliseconds).c_str(),
-            FormatDuration(range.maxMilliseconds).c_str());
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    ImGui::TextUnformatted("Show:");
+    ImGui::SameLine();
+    if (Radio("Inclusive", !showSelf)) {
+        showSelf = false;
     }
+    ImGui::SameLine();
+    if (Radio("Self time", showSelf)) {
+        showSelf = true;
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("Technical names", &options.showTechnicalNames);
+}
 
-    // Anything dropped makes the numbers below lower bounds.
-    if (latest.lateScopes != 0 || latest.foreignScopes != 0 || latest.lostWorkerEvents != 0) {
-        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "Dropped: %u late scopes, %u off-thread scopes, %u worker events",
-            latest.lateScopes, latest.foreignScopes, latest.lostWorkerEvents);
+void BuildSummary(const std::string& summary, const ProfilerVerdictLine& verdict, const ProfilerFrameView& view,
+    Profiling::FrameProfiler& profiler)
+{
+    ImGui::PushStyleColor(ImGuiCol_Text, VerdictColor(verdict.kind));
+    ImGui::TextWrapped("%s", summary.c_str());
+    ImGui::PopStyleColor();
+    ImGui::TextWrapped("%s", DescribeVerdict(verdict.kind));
+
+    const Profiling::OverheadEstimate overhead =
+        Profiling::EstimateOverhead(profiler.EventCostNs(), view.totals.scopeCount, view.summary.cpuMilliseconds);
+    const std::string overheadLine = FormatOverheadLine(overhead);
+    if (overhead.warn) {
+        ImGui::TextColored(kColorWarn, "%s", overheadLine.c_str());
+    } else {
+        ImGui::TextDisabled("%s", overheadLine.c_str());
     }
 }
 
-void BuildCpuScopeTable(const std::vector<CpuScopeRow>& rows)
+void DrawTopThings(const std::vector<TopThing>& things)
 {
-    ImGui::SeparatorText("CPU Scopes");
-
-    if (rows.empty()) {
-        ImGui::TextDisabled("%s", CpuScopeTableEmptyMessage());
+    ImGui::SeparatorText("What to look at");
+    if (things.empty()) {
+        ImGui::TextDisabled("Nothing stands out in this frame.");
         return;
     }
+    for (const TopThing& thing : things) {
+        ImGui::TextWrapped("%s%s: %s (%.1f%%)  %s", thing.gpu ? "[GPU] " : "", thing.title.c_str(),
+            FormatDuration(thing.ms).c_str(), thing.percent, thing.hint.c_str());
+    }
+}
 
-    constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable;
-    if (ImGui::BeginTable("CpuScopesTable", 4, tableFlags, ImVec2(0.0f, 150.0f))) {
-        ImGui::TableSetupColumn("Scope");
-        ImGui::TableSetupColumn("Total", ImGuiTableColumnFlags_WidthFixed, 90.0f);
-        ImGui::TableSetupColumn("Self", ImGuiTableColumnFlags_WidthFixed, 90.0f);
-        ImGui::TableSetupColumn("Calls", ImGuiTableColumnFlags_WidthFixed, 60.0f);
-        ImGui::TableHeadersRow();
+void BuildFilterRow(std::array<char, 64>& filter, TableOptions& options, const TableModel& table, std::size_t trackedCount)
+{
+    ImGui::SetNextItemWidth(160.0f);
+    ImGui::InputTextWithHint("##filter", "Filter", filter.data(), filter.size());
 
-        for (const CpuScopeRow& row : rows) {
-            ImGui::TableNextRow();
-
-            ImGui::TableSetColumnIndex(0);
-            if (row.kind == Profiling::ScopeKind::Blocked) {
-                ImGui::TextDisabled("%s (blocked)", row.name);
-            } else {
-                ImGui::TextUnformatted(row.name);
+    ImGui::SameLine();
+    if (ImGui::Button("Categories")) {
+        ImGui::OpenPopup("##categories");
+    }
+    if (ImGui::BeginPopup("##categories")) {
+        for (std::size_t i = 0; i < kScopeCategoryCount; ++i) {
+            const ScopeCategory category = static_cast<ScopeCategory>(i);
+            bool on = (options.categoryMask & CategoryBit(category)) != 0;
+            if (ImGui::Checkbox(CategoryLabel(category), &on)) {
+                options.categoryMask = on ? options.categoryMask | CategoryBit(category)
+                                          : options.categoryMask & ~CategoryBit(category);
             }
-
-            ImGui::TableSetColumnIndex(1);
-            ImGui::TextUnformatted(FormatDuration(row.totalMilliseconds).c_str());
-
-            ImGui::TableSetColumnIndex(2);
-            ImGui::TextUnformatted(FormatDuration(row.selfMilliseconds).c_str());
-
-            ImGui::TableSetColumnIndex(3);
-            ImGui::Text("%u", row.callCount);
         }
+        ImGui::EndPopup();
+    }
 
-        ImGui::EndTable();
+    ImGui::SameLine();
+    if (ImGui::Button("Expand all")) {
+        options.collapsed.clear();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Collapse all")) {
+        for (const TableRowView& row : table.rows) {
+            if (row.row.hasChildren) {
+                options.collapsed.push_back(row.row.pathKey);
+            }
+        }
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("Graph lines: %zu / %zu", trackedCount, kMaxTrackedRows);
+}
+
+void BuildFooter(const Profiling::ScopeHistory& history)
+{
+    const std::uint32_t used = Profiling::GlobalNameTable().Count();
+    const bool nearFull = static_cast<float>(used) >= static_cast<float>(Profiling::kMaxNames) * kNamesWarnShare;
+    ImGui::TextColored(nearFull ? kColorWarn : kColorQuiet, "Names used: %u / %zu", used, Profiling::kMaxNames);
+    ImGui::SameLine();
+    ImGui::TextDisabled("  History tracks: %zu / %zu", history.TrackCount(), Profiling::kHistoryTracks);
+    if (history.DroppedTracks() != 0) {
+        ImGui::SameLine();
+        ImGui::TextColored(kColorWarn, "  History tracks dropped: %u", history.DroppedTracks());
     }
 }
 
-void BuildChecksSection(const ProfilerFrameView& view)
+void BuildChecksSection(const ProfilerFrameView& view, const ProfilerVerdictLine& verdict, bool& hadIssues)
 {
-    ImGui::SeparatorText("Checks");
-
     const std::size_t issues = view.checks.IssueCount();
+    if (issues != 0 && !hadIssues) {
+        ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+    }
+    hadIssues = issues != 0;
+    if (!ImGui::CollapsingHeader("Checks")) {
+        return;
+    }
+
+    ImGui::TextDisabled("%s", verdict.text.c_str());
     if (issues == 0) {
         ImGui::TextDisabled("All %zu checks pass.", view.checks.items.size());
     }
@@ -133,63 +195,18 @@ void BuildChecksSection(const ProfilerFrameView& view)
         if (check.status == Profiling::CheckStatus::Ok) {
             continue;
         }
-        const ImVec4 color = check.status == Profiling::CheckStatus::Fail ? ImVec4(1.0f, 0.35f, 0.3f, 1.0f)
-                                                                           : ImVec4(1.0f, 0.75f, 0.2f, 1.0f);
-        ImGui::TextColored(color, "%s", FormatCheckLine(check).c_str());
+        ImGui::TextColored(check.status == Profiling::CheckStatus::Fail ? kColorBad : kColorWarn, "%s",
+            FormatCheckLine(check).c_str());
     }
     ImGui::TextDisabled("%s", FormatBlockedLine(view.totals).c_str());
-}
-
-void BuildCpuTreeTable(const ProfilerFrameView& view)
-{
-    ImGui::SeparatorText("CPU Scopes");
-
-    if (view.tree.empty()) {
-        ImGui::TextDisabled("%s", CpuScopeTableEmptyMessage());
-        return;
-    }
-
-    constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable
-        | ImGuiTableFlags_ScrollY;
-    if (ImGui::BeginTable("CpuTreeTable", 4, tableFlags, ImVec2(0.0f, 220.0f))) {
-        ImGui::TableSetupColumn("Scope");
-        ImGui::TableSetupColumn("Total", ImGuiTableColumnFlags_WidthFixed, 90.0f);
-        ImGui::TableSetupColumn("Self", ImGuiTableColumnFlags_WidthFixed, 90.0f);
-        ImGui::TableSetupColumn("% frame", ImGuiTableColumnFlags_WidthFixed, 70.0f);
-        ImGui::TableHeadersRow();
-
-        for (const CpuTreeRow& row : view.tree) {
-            ImGui::TableNextRow();
-
-            ImGui::TableSetColumnIndex(0);
-            ImGui::Indent(static_cast<float>(row.depth) * 12.0f);
-            if (row.untracked) {
-                ImGui::TextDisabled("%s", row.name);
-            } else if (row.kind == Profiling::ScopeKind::Blocked) {
-                ImGui::TextDisabled("%s (blocked)", row.name);
-            } else {
-                ImGui::TextUnformatted(row.name);
-            }
-            ImGui::Unindent(static_cast<float>(row.depth) * 12.0f);
-
-            ImGui::TableSetColumnIndex(1);
-            ImGui::TextUnformatted(FormatDuration(row.totalMilliseconds).c_str());
-
-            ImGui::TableSetColumnIndex(2);
-            ImGui::TextUnformatted(FormatDuration(row.selfMilliseconds).c_str());
-
-            ImGui::TableSetColumnIndex(3);
-            ImGui::Text("%.1f%%", row.percentOfFrame);
-        }
-
-        ImGui::EndTable();
-    }
 }
 
 void BuildGpuMemorySection(std::span<const Profiling::FrameGraphPoint> windowed, const Profiling::FrameSummary& latest,
     std::vector<float>& scratch)
 {
-    ImGui::SeparatorText("GPU Memory");
+    if (!ImGui::CollapsingHeader("GPU Memory")) {
+        return;
+    }
 
     const Profiling::MemorySnapshot& memory = latest.memory;
     if (memory.status == Profiling::SampleStatus::Present) {
@@ -204,7 +221,7 @@ void BuildGpuMemorySection(std::span<const Profiling::FrameGraphPoint> windowed,
         return;
     }
 
-    // A frame without a snapshot repeats the last value; the range below skips those frames.
+    // A frame without a snapshot repeats the last value; the range skips those frames.
     scratch.clear();
     scratch.reserve(windowed.size());
     float lastKnown = 0.0f;
@@ -220,14 +237,15 @@ void BuildGpuMemorySection(std::span<const Profiling::FrameGraphPoint> windowed,
         ImGui::TextDisabled("Waiting for memory history...");
         return;
     }
-
     ImGui::PlotLines("##GpuMemoryGraph", scratch.data(), static_cast<int>(scratch.size()), 0, nullptr,
         static_cast<float>(range.minBytes), static_cast<float>(range.maxBytes), ImVec2(0.0f, 60.0f));
 }
 
 void BuildGpuTimingSection(const Profiling::GpuFrameMetrics& gpu)
 {
-    ImGui::SeparatorText("GPU Timing");
+    if (!ImGui::CollapsingHeader("GPU Timing")) {
+        return;
+    }
 
     // Labels live here; the profiler module only knows primary and secondary.
     struct Row {
@@ -253,45 +271,18 @@ void BuildGpuTimingSection(const Profiling::GpuFrameMetrics& gpu)
     }
 }
 
-ImVec4 VerdictColor(Profiling::VerdictKind kind)
-{
-    switch (kind) {
-    case Profiling::VerdictKind::Unreliable:
-    case Profiling::VerdictKind::Stalled: return ImVec4(1.0f, 0.35f, 0.3f, 1.0f);
-    case Profiling::VerdictKind::PresentLimited: return ImVec4(1.0f, 0.75f, 0.2f, 1.0f);
-    case Profiling::VerdictKind::Unknown: return ImVec4(0.6f, 0.6f, 0.6f, 1.0f);
-    case Profiling::VerdictKind::GpuLimited:
-    case Profiling::VerdictKind::CpuLimited:
-    case Profiling::VerdictKind::Serial: return ImVec4(0.45f, 0.85f, 0.45f, 1.0f);
-    }
-    return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-}
-
-void BuildVerdictBar(const ProfilerFrameView& view, Profiling::FrameProfiler& profiler)
-{
-    const ProfilerVerdictLine verdict = BuildVerdictLine(profiler, view.checks);
-    ImGui::TextColored(VerdictColor(verdict.kind), "%s", verdict.text.c_str());
-
-    const Profiling::OverheadEstimate overhead =
-        Profiling::EstimateOverhead(profiler.EventCostNs(), view.totals.scopeCount, view.summary.cpuMilliseconds);
-    const std::string overheadLine = FormatOverheadLine(overhead);
-    if (overhead.warn) {
-        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "%s", overheadLine.c_str());
-    } else {
-        ImGui::TextDisabled("%s", overheadLine.c_str());
-    }
-}
-
 void BuildSpikeSection(Profiling::FrameProfiler& profiler, std::string& pinMessage)
 {
-    ImGui::SeparatorText("Spikes");
+    if (!ImGui::CollapsingHeader("Spikes")) {
+        return;
+    }
 
     Profiling::SpikeStore& store = profiler.Spikes();
     std::array<Profiling::SpikeStore::Row, Profiling::SpikeStore::kSlots> spikes{};
     const std::size_t count = store.Rows(spikes);
     ImGui::TextDisabled("%s", FormatSpikeSummary(count, store.PinnedCount()).c_str());
     if (!pinMessage.empty()) {
-        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "%s", pinMessage.c_str());
+        ImGui::TextColored(kColorBad, "%s", pinMessage.c_str());
     }
     if (count == 0) {
         ImGui::TextDisabled("No frame was slower than twice the recent median.");
@@ -325,7 +316,7 @@ void BuildSpikeSection(Profiling::FrameProfiler& profiler, std::string& pinMessa
         if (row.explained) {
             ImGui::TextUnformatted(row.classification.c_str());
         } else {
-            ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "%s", row.classification.c_str());
+            ImGui::TextColored(kColorWarn, "%s", row.classification.c_str());
         }
         ImGui::TableSetColumnIndex(4);
         ImGui::TextUnformatted(row.cause.c_str());
@@ -354,39 +345,84 @@ void ProfilerPanel::Build(EditorContext& /*ctx*/)
 
     Profiling::FrameProfiler& profiler = Profiling::FrameProfiler::Instance();
     BuildCaptureAndPauseControls(profiler);
+    BuildViewControls(m_options, m_showSelf);
+    if (!profiler.IsCaptureEnabled()) {
+        ImGui::TextDisabled("Capture disabled - no new frames are being recorded.");
+    }
 
+    if constexpr (!kCpuScopeInstrumentationCompiledIn) {
+        ImGui::TextDisabled("%s", CpuScopeTableEmptyMessage());
+        ImGui::End();
+        return;
+    }
+
+    // Paused: keep showing one copy of the newest frame. Recording continues underneath.
     const bool paused = profiler.IsDisplayPaused();
     if (paused && !m_wasPaused) {
-        m_frozenPoints = Profiling::BuildFrameGraphPoints(profiler);
-        m_frozenView = BuildProfilerFrameView(profiler.LastCompletedFrame(), profiler.IsCaptureEnabled());
+        m_frozenRecord = std::make_unique<Profiling::FrameRecord>(profiler.LastCompletedFrame());
+    } else if (!paused) {
+        m_frozenRecord.reset();
     }
     m_wasPaused = paused;
+    const Profiling::FrameRecord& record = m_frozenRecord ? *m_frozenRecord : profiler.LastCompletedFrame();
 
-    std::vector<Profiling::FrameGraphPoint> livePoints;
-    ProfilerFrameView liveView;
-    const std::vector<Profiling::FrameGraphPoint>* points = &m_frozenPoints;
-    const ProfilerFrameView* view = &m_frozenView;
+    if (std::strcmp(m_filterBuffer.data(), m_options.filter.c_str()) != 0) {
+        m_options.filter = m_filterBuffer.data();
+    }
+    m_options.sort = m_showSelf ? Profiling::ScopeSort::SelfDesc : Profiling::ScopeSort::TotalDesc;
+
     if (!paused) {
-        livePoints = Profiling::BuildFrameGraphPoints(profiler);
-        liveView = BuildProfilerFrameView(profiler.LastCompletedFrame(), profiler.IsCaptureEnabled());
-        points = &livePoints;
-        view = &liveView;
+        m_points = Profiling::BuildFrameGraphPoints(profiler);
+        m_graph = BuildGraphModel(m_points, profiler.Scopes(), m_tracked,
+            m_showSelf ? Profiling::ScopeSeries::SelfMs : Profiling::ScopeSeries::TotalMs, m_visibility);
+    }
+    // Legend toggles and unticked rows apply at once, also on a frozen graph.
+    for (std::size_t i = 0; i < 3 && i < m_graph.series.size(); ++i) {
+        m_graph.series[i].visible = i == 0 ? m_visibility.frame : i == 1 ? m_visibility.cpuBusy : m_visibility.gpu;
+    }
+    std::erase_if(m_graph.series, [this](const GraphSeries& s) { return !s.isBase && !IsTracked(m_tracked, s.key); });
+
+    m_table = BuildTableModel(record, m_options, kMaxTableRows);
+    const std::vector<TopThing> topThings = gte::BuildTopThings(record);
+    const ProfilerFrameView view = BuildProfilerFrameView(record, profiler.IsCaptureEnabled());
+    const ProfilerVerdictLine verdict = BuildVerdictLine(profiler, view.checks);
+
+    BuildSummary(BuildPlainSummary(MakePlainSummaryInput(record.summary)), verdict, view, profiler);
+    DrawTopThings(topThings);
+
+    ImGui::SeparatorText("Frame time");
+    DrawProfilerGraph(m_graph, m_visibility, m_tracked, kGraphHeight);
+
+    BuildFilterRow(m_filterBuffer, m_options, m_table, m_tracked.size());
+    if (ImGui::GetTime() < m_limitMessageUntil) {
+        ImGui::TextColored(kColorBad, "Graph limit reached, untick one");
+    }
+    if (m_options.tree && m_table.treeTruncated) {
+        ImGui::TextColored(kColorWarn, "Tree detail is incomplete (%u scopes dropped). The Flat view is still exact.",
+            record.scopes.Dropped());
     }
 
-    const std::span<const Profiling::FrameGraphPoint> windowed = WindowedTail(*points);
-
-    BuildVerdictBar(*view, profiler);
-    BuildCpuFrameTimeGraph(windowed, view->summary, m_cpuGraphScratch);
-    BuildChecksSection(*view);
-    ImGui::Checkbox("Group by name", &m_groupByName);
-    if (m_groupByName) {
-        BuildCpuScopeTable(view->rows);
+    if (m_table.rows.empty()) {
+        ImGui::TextDisabled("%s", m_options.filter.empty() && m_options.categoryMask == kAllCategoriesMask
+                ? CpuScopeTableEmptyMessage()
+                : "No rows match the filter.");
     } else {
-        BuildCpuTreeTable(*view);
+        const float height = std::max(kMinTableHeight, ImGui::GetContentRegionAvail().y - ImGui::GetTextLineHeightWithSpacing() * 2.5f);
+        TableDrawState state{ m_tracked, m_options.collapsed, m_options.tree, m_options.showTechnicalNames };
+        DrawProfilerTable(m_table, state, height);
+        if (state.limitRefused) {
+            m_limitMessageUntil = ImGui::GetTime() + kLimitMessageSeconds;
+        }
     }
+
+    BuildFooter(profiler.Scopes());
+
+    BuildChecksSection(view, verdict, m_hadIssues);
     BuildSpikeSection(profiler, m_pinMessage);
-    BuildGpuMemorySection(windowed, view->summary, m_memoryGraphScratch);
-    BuildGpuTimingSection(view->summary.gpu);
+    const std::span<const Profiling::FrameGraphPoint> all(m_points);
+    BuildGpuMemorySection(all.size() <= kGraphWindowFrames ? all : all.subspan(all.size() - kGraphWindowFrames),
+        view.summary, m_memoryScratch);
+    BuildGpuTimingSection(view.summary.gpu);
 
     ImGui::End();
 }

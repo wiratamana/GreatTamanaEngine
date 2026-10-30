@@ -11,6 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
 namespace gte::Profiling {
 
@@ -46,9 +47,42 @@ struct SnapshotNestedRow {
 struct SnapshotFrameRow {
     std::uint64_t frameIndex = 0;
     Metric cpu{};
+    Metric cpuBusy{}; // cpu minus Blocked time
     Metric gpuSpan{};
     Metric gpuPrimary{};
     Metric gpuSecondary{};
+};
+
+inline constexpr std::size_t kSnapshotTableRows = 256;
+
+// One row of the call table, in plain units (not Metric) to keep rows small.
+struct SnapshotTableRow {
+    std::array<char, 96> name{};
+    std::array<char, 64> feature{}; // GPU rows: owning feature
+    std::array<char, 40> source{};  // "File.cpp:123"
+    std::uint8_t lane = 0;          // ScopeLane
+    std::uint8_t origin = 0;        // ScopeOrigin
+    ScopeKind kind = ScopeKind::Work;
+    SampleStatus status = SampleStatus::Present;
+    bool hasChildren = false;
+    bool percentKnown = false;
+    std::uint16_t depth = 0;
+    std::uint32_t calls = 0;
+    double totalMs = 0.0;
+    double selfMs = 0.0;
+    double maxMs = 0.0;
+    double percent = 0.0;
+};
+
+// Call tables of the newest frame. Shared and immutable, so copies of a snapshot stay small.
+struct SnapshotTables {
+    std::array<SnapshotTableRow, kSnapshotTableRows> tree{};
+    std::array<SnapshotTableRow, kSnapshotTableRows> flat{};
+    std::uint32_t treeCount = 0;
+    std::uint32_t flatCount = 0;
+    std::uint32_t treeDropped = 0;
+    std::uint32_t flatDropped = 0;
+    bool treeTruncated = false; // events were dropped: the tree is partial, the flat table is exact
 };
 
 struct SnapshotLiveBlock {
@@ -173,6 +207,8 @@ struct ProfilerSnapshot {
 
     std::array<SnapshotFrameRow, kSnapshotFrameRows> frames{}; // oldest first
     std::uint32_t frameCount = 0;
+
+    std::shared_ptr<const SnapshotTables> tables; // null until a frame was recorded
 
     bool spikesAvailable = false;
     std::array<SnapshotSpikeRow, kSnapshotSpikeRows> spikes{}; // newest first

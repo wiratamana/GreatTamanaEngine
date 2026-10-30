@@ -7,6 +7,11 @@ namespace gte::Profiling {
 // Per-frame caps. Overflow is counted, never silent.
 inline constexpr std::size_t kMaxScopeEventsPerFrame = 2048;
 inline constexpr std::size_t kMaxWorkerEventsPerFrame = 512;
+inline constexpr std::size_t kMaxScopeAggregatesPerFrame = 768;
+inline constexpr std::size_t kMaxGpuPassRowsPerFrame = 256;
+
+// Per-name history: one track per lane and name.
+inline constexpr std::size_t kHistoryTracks = 256;
 
 // Lock-free worker ring.
 inline constexpr std::size_t kWorkerRingSlots = 1024;

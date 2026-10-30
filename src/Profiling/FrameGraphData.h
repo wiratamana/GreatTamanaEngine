@@ -14,6 +14,8 @@ struct FrameGraphPoint {
     std::uint64_t frameIndex = 0;
     double cpuMilliseconds = 0.0;
     MemorySnapshot memory{};
+    double cpuBusyMilliseconds = 0.0; // frame time minus Blocked time
+    GpuViewMetric gpuSpan{};
 };
 
 // Min and max of one series. Check hasData before plotting.
@@ -22,6 +24,19 @@ struct FrameGraphRange {
     double minMilliseconds = 0.0;
     double maxMilliseconds = 0.0;
 };
+
+// Guide lines (60 and 30 FPS) drawn on the frame time graph.
+inline constexpr double kGraphGuideLowMs = 16.7;
+inline constexpr double kGraphGuideHighMs = 33.3;
+
+// Main thread time not spent waiting. Never negative.
+double CpuBusyMilliseconds(const FrameSummary& frame) noexcept;
+
+// GPU span in ms when its status is Present, otherwise NaN (a gap, never 0).
+double GpuSpanMilliseconds(const GpuViewMetric& span) noexcept;
+
+// Top of the Y axis: 10% above the largest visible value, at least kGraphGuideLowMs.
+double GraphAxisMaxMilliseconds(double largestVisibleMs) noexcept;
 
 // Retained history as points, oldest first. Reads finished frames only.
 std::vector<FrameGraphPoint> BuildFrameGraphPoints(const FrameProfiler& profiler);

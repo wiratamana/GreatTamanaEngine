@@ -48,6 +48,21 @@ std::string_view FormatScopeName(std::span<char> buffer, const char* prefix, con
     return std::string_view(buffer.data(), used);
 }
 
+Profiling::NameId FeatureScopeName(std::string_view feature, std::string_view callback) noexcept
+{
+    if (!Profiling::FrameProfiler::Instance().IsCaptureEnabled()) {
+        return Profiling::kInvalidNameId;
+    }
+    std::array<char, 128> text{};
+    const std::span<char> room(text.data(), text.size() - 1);
+    std::size_t used = Append(room, 0, "Feature.");
+    used = Append(room, used, feature);
+    if (!callback.empty()) {
+        used = Append(room, used, ".");
+        used = Append(room, used, callback);
+    }
+    return Profiling::GlobalNameTable().Intern(std::string_view(text.data(), used));
+}
 void RenderTimingAdapter::OpenScope(std::string_view name, Profiling::ScopeKind kind) noexcept
 {
     if (!Profiling::FrameGate::IsMainThread()) {

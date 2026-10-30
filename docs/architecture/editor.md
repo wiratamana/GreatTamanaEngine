@@ -1,6 +1,6 @@
 # Editor
 > How the editor is built: host, panels, bridges and the rules for adding UI. For anyone who changes `src/Editor/`.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-10-31
 
 ## TL;DR
 - There is one executable: `GreatTamanaEditor.exe`. `EditorHost` owns the main loop.
@@ -56,7 +56,7 @@ Frame order in `EditorHost::Run()`:
 | Scene | Center tab | Own render target, orbit camera, transform gizmo, camera frustum overlay |
 | Game | Center tab | Shows the Game view. A hidden tab is not rendered |
 | Memory | Bottom | SDL and ImGui CPU bytes, tracked GPU resources, VMA heap budgets |
-| Profiler | Bottom | CPU frame graph, scope table, GPU timing, Capture and Pause |
+| Profiler | Bottom | Plain summary, CPU/GPU frame graph (tick a row to plot it), table with calls, total, self and % per name, Capture and Pause |
 | Jobs | Bottom | Worker timeline. CPU/GPU skinning toggle |
 | Log | Bottom | Filterable, colored log |
 | Project | Bottom | File browser for `<exe dir>/Project/`. Drag-in import. Right-click Create |
@@ -70,6 +70,7 @@ Frame order in `EditorHost::Run()`:
 - The Project panel and Bone Viewer exist only when CMake option `GTE_ENABLE_PROJECT_PANEL` is `ON` (default).
 - The Project panel scans its folder only while visible, on a job-system worker (`ProjectScanRunner`), and keeps no `AssetDatabase`.
 - The Memory panel reads data that `MemoryPanelData` shapes. The Profiler panel reads [Profiling](../debugging/profiling.md) data.
+- The Profiler panel is split in three layers. Plain text and descriptions: `src/Application/ProfilerScopeCatalog`. Pure view models without ImGui: `ProfilerTableModel` and `ProfilerGraphModel` in `src/Editor`. Drawing: `ProfilerPanel`, `ProfilerGraphWidget` and `ProfilerTableWidget` in `src/Editor/Panels`. Tree rows are placed with `SetCursorPosX`, never `ImGui::Indent(0)` (zero means the default indent).
 - A toolbar under the menu has Pause, Resume and Step.
 
 ### Menus

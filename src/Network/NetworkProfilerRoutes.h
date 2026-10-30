@@ -72,6 +72,30 @@ ProfilerReply BuildProfilerReply(ProfilerRoute route, const Profiling::ProfilerS
 // 200 with state "no_snapshot" and the waits in progress, for a main thread that never published (e.g. it is stalled).
 ProfilerReply BuildProfilerNoSnapshotReply(const Profiling::ProfilerSnapshot& liveOnly);
 
+inline constexpr std::size_t kProfilerTableLimitDefault = 128;
+inline constexpr std::size_t kProfilerTableLimitMax = Profiling::kSnapshotTableRows;
+
+enum class ProfilerTableView : std::uint8_t { Tree, Flat };
+enum class ProfilerTableLane : std::uint8_t { All, Main, Workers, Gpu };
+
+struct ProfilerTableQuery {
+    ProfilerTableView view = ProfilerTableView::Tree;
+    ProfilerTableLane lane = ProfilerTableLane::All;
+    std::size_t limit = kProfilerTableLimitDefault;
+};
+
+struct ParsedProfilerTableQuery {
+    bool valid = false;
+    std::string errorMessage;
+    ProfilerTableQuery query;
+};
+
+// Empty texts mean the defaults. view: tree|flat. lane: all|main|workers|gpu. limit: a whole number, clamped to 1..256.
+ParsedProfilerTableQuery ParseProfilerTableQuery(const std::string& view, const std::string& lane, const std::string& limit);
+
+// Body of GET /profiler/table: the call table of the newest frame with plain-English text per row.
+nlohmann::json ProfilerTableToJson(const Profiling::ProfilerSnapshot& snapshot, const ProfilerTableQuery& query);
+
 // Reply when the bridge is missing (503), or a status object (200) when the profiler is compiled out.
 ProfilerReply BuildProfilerUnavailableReply();
 
@@ -138,6 +162,10 @@ struct ProfilerImageReply {
 // PNG of one frame's timeline. A frame that does not exist answers 503 (newest) or 404 (a named frame).
 ProfilerImageReply BuildProfilerTimelineReply(
     const std::optional<Profiling::SpikeDetail>& frame, bool namedFrame, std::uint64_t frameIndex, int width);
+
+// PNG of the CPU busy, GPU and frame time lines over the newest `frames` frames. 503 until a frame was published.
+ProfilerImageReply BuildProfilerGraphReply(
+    const std::optional<Profiling::ProfilerSnapshot>& snapshot, int width, int height, std::size_t frames);
 
 // Refuses a browser request with 403 and returns true.
 using BrowserRefusal = bool (*)(const httplib::Request&, httplib::Response&);

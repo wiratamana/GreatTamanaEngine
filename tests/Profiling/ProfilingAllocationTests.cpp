@@ -1,7 +1,10 @@
 #include "Profiling/FrameGate.h"
 #include "Profiling/ManualClock.h"
 #include "Profiling/NameTable.h"
+#include "Profiling/ScopeAggregate.h"
+#include "Profiling/ScopeHistory.h"
 #include "Profiling/ScopeLog.h"
+#include "Profiling/ScopeSource.h"
 #include "Profiling/ScopeTree.h"
 #include "Profiling/WorkerRing.h"
 
@@ -85,6 +88,23 @@ TEST(ProfilingAllocationTest, InterningAKnownNameAndResolvingNeverAllocates)
     EXPECT_STREQ(resolved, "ProfilingAllocationTest.Name");
 }
 
+TEST(ProfilingAllocationTest, InterningAKnownNameAtASiteNeverAllocates)
+{
+    const NameId named = InternNameAt("ProfilingAllocationTest.Site", "C:/x/src/A.cpp", 1);
+    const NameId function = InternFunctionName("void sample::Widget::Update()", "C:/x/src/A.cpp", 2);
+
+    const std::uint64_t before = t_allocations;
+    bool stable = true;
+    for (int i = 0; i < 1000; ++i) {
+        stable = stable && InternNameAt("ProfilingAllocationTest.Site", "C:/x/src/B.cpp", 3) == named;
+        stable = stable && InternFunctionName("void sample::Widget::Update()", "C:/x/src/B.cpp", 4) == function;
+    }
+    const std::uint64_t after = t_allocations;
+
+    EXPECT_EQ(after, before);
+    EXPECT_TRUE(stable);
+}
+
 TEST(ProfilingAllocationTest, WorkerRingPushAndDrainNeverAllocate)
 {
     auto ring = std::make_unique<WorkerRing>();
@@ -99,6 +119,46 @@ TEST(ProfilingAllocationTest, WorkerRingPushAndDrainNeverAllocate)
 
     EXPECT_EQ(after, before);
     EXPECT_GT(stats.drained, 0u);
+}
+
+TEST(ProfilingAllocationTest, AggregationAndHistoryNeverAllocate)
+{
+    FrameGate::MarkMainThread();
+    auto log = std::make_unique<ScopeLog>();
+    auto history = std::make_unique<ScopeHistory>();
+    auto out = std::make_unique<ScopeAggregateBuffer>();
+    ManualClock clock;
+    const std::array<WorkerEvent, 2> workers{ { { 0, 5, 2, 0, 0, 0 }, { 1, 9, 3, 1, 0, 0 } } };
+    std::array<GpuPassRow, 2> gpu{};
+    gpu[0].pass = 2;
+    gpu[0].status = SampleStatus::Present;
+    gpu[1].pass = 3;
+    gpu[1].foldedPasses = 4;
+    gpu[1].status = SampleStatus::Present;
+    AppendGpuAggregates(gpu, *out); // first call interns the folded-pass name
+    out->Clear();
+
+    const std::uint64_t before = t_allocations;
+    for (std::uint64_t frame = 0; frame < 5; ++frame) {
+        log->BeginFrame(true);
+        for (int i = 0; i < 2500; ++i) { // more events than the event buffer holds
+            const ScopeStart start = log->Begin(clock.NowTicks());
+            clock.AdvanceTicks(3);
+            log->End(start, 2 + static_cast<NameId>(i % 5), ScopeKind::Work, ViewSlot::Shared, clock.NowTicks());
+        }
+        log->EndFrame();
+        out->Clear();
+        AppendWorkerAggregates(workers, *out);
+        AppendGpuAggregates(gpu, *out);
+        history->Record(frame, log->Aggregates().Rows());
+        history->Record(frame, out->Rows());
+    }
+    const std::uint64_t after = t_allocations;
+
+    EXPECT_EQ(after, before);
+    EXPECT_EQ(log->Aggregates().Rows().size(), 5u);
+    EXPECT_EQ(log->Aggregates().Rows()[0].calls, 500u);
+    EXPECT_GT(log->Buffer().Dropped(), 0u);
 }
 
 TEST(ProfilingAllocationTest, ComputingScopeTimesNeverAllocates)

@@ -5,6 +5,8 @@
 
 #include "../Application/RenderPasses.h"
 #include "../Profiling/FrameProfiler.h"
+#include "../Profiling/NameTable.h"
+#include "RenderTimingAdapter.h"
 #include "GpuViewMetrics.h"
 #include "../Profiling/ScopeTimer.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
@@ -851,6 +853,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
 
                 const std::size_t before = frame.builder.DeclaredPassCount();
                 const rg::RenderFeatureScope scope(frame.builder, entry.name);
+                GTE_PROFILE_SCOPE_ID(FeatureScopeName(entry.name));
                 entry.callback(frame.builder, frame.blackboard, frame.currentView);
                 const std::size_t after = frame.builder.DeclaredPassCount();
 
@@ -992,6 +995,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
                 const std::size_t before = frame.builder.DeclaredPassCount();
                 try {
                     const rg::RenderFeatureScope scope(frame.builder, entry.name);
+                    GTE_PROFILE_SCOPE_ID(FeatureScopeName(entry.name));
                     entry.callback(frame.builder, frame.blackboard, frame.currentView, handles);
                 } catch (const std::exception& e) {
                     logOnce("Opaque feature '" + entry.name + "' threw: " + e.what());
@@ -1071,6 +1075,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
 
                 const std::size_t before = frame.builder.DeclaredPassCount();
                 const rg::RenderFeatureScope scope(frame.builder, entry.name);
+                GTE_PROFILE_SCOPE_ID(FeatureScopeName(entry.name));
                 entry.callback(frame.builder, frame.blackboard, frame.currentView, *handles);
                 const std::size_t after = frame.builder.DeclaredPassCount();
 
@@ -1118,6 +1123,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
 
                 const std::size_t before = frame.builder.DeclaredPassCount();
                 const rg::RenderFeatureScope scope(frame.builder, entry.name);
+                GTE_PROFILE_SCOPE_ID(FeatureScopeName(entry.name));
                 entry.callback(frame.builder, frame.blackboard, frame.currentView, *handles);
                 const std::size_t after = frame.builder.DeclaredPassCount();
 
@@ -1486,18 +1492,52 @@ void Core::BuildFrame()
 void Core::PublishGpuMetrics(bool primaryActive, bool secondaryActive)
 {
     const rg::RenderGraphSnapshot& snapshot = m_renderGraph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback);
+    Profiling::FrameProfiler& profiler = Profiling::FrameProfiler::Instance();
+    const bool captureEnabled = profiler.IsCaptureEnabled();
+    const bool wantRows = captureEnabled && (primaryActive || secondaryActive);
 
+    if (m_gpuPassRowScratch.capacity() < Profiling::kMaxGpuPassRowsPerFrame) {
+        m_gpuPassRowScratch.reserve(Profiling::kMaxGpuPassRowsPerFrame);
+    }
     m_gpuRecordScratch.clear();
+    m_gpuPassRowScratch.clear();
+    bool bucketAdded = false;
     std::uint32_t executed = 0;
     for (const rg::RenderGraphPassSnapshot& pass : snapshot.passesInExecutionOrder) {
-        if (!pass.isCulled) {
-            ++executed;
-            m_gpuRecordScratch.push_back(pass.stats.gpu);
+        if (pass.isCulled) {
+            continue;
         }
+        ++executed;
+        const GpuPassRecord& record = pass.stats.gpu;
+        m_gpuRecordScratch.push_back(record);
+
+        if (!wantRows || (record.flags & kGpuRecordSkipped) != 0
+            || m_gpuPassRowScratch.size() >= Profiling::kMaxGpuPassRowsPerFrame) {
+            continue;
+        }
+        // Folded passes share one bucket record; emit it once.
+        const bool bucket = (record.flags & kGpuRecordOverflowBucket) != 0;
+        if (bucket) {
+            if (bucketAdded) {
+                continue;
+            }
+            bucketAdded = true;
+        }
+        Profiling::GpuPassRow row;
+        row.pass = bucket ? Profiling::kInvalidNameId : Profiling::InternName(pass.name.c_str());
+        row.feature = pass.owningFeatureName.empty() ? Profiling::kInvalidNameId
+                                                     : Profiling::InternName(pass.owningFeatureName.c_str());
+        row.barrierMs = record.barrierMs;
+        row.workMs = record.workMs;
+        row.drawCalls = record.drawCalls;
+        row.foldedPasses = bucket ? record.foldedPasses : 0u;
+        row.view = ToViewSlot(pass.viewScope);
+        row.status = ToSampleStatus(record.state);
+        m_gpuPassRowScratch.push_back(row);
     }
 
     GpuMetricsInput input;
-    input.captureEnabled = Profiling::FrameProfiler::Instance().IsCaptureEnabled();
+    input.captureEnabled = captureEnabled;
     input.viewActive[static_cast<std::size_t>(Profiling::ViewSlot::Primary)] = primaryActive;
     input.viewActive[static_cast<std::size_t>(Profiling::ViewSlot::Secondary)] = secondaryActive;
     input.declaredPasses = static_cast<std::uint32_t>(snapshot.passesInExecutionOrder.size());
@@ -1505,7 +1545,8 @@ void Core::PublishGpuMetrics(bool primaryActive, bool secondaryActive)
     input.disabledByToggle = m_offscreenRenderPipeline.DisabledByToggleLastFrame();
     input.droppedFrames = snapshot.droppedGpuFrames;
 
-    Profiling::FrameProfiler::Instance().SetGpuMetrics(BuildGpuFrameMetrics(m_gpuRecordScratch, snapshot.gpuReport, input));
+    profiler.SetGpuMetrics(BuildGpuFrameMetrics(m_gpuRecordScratch, snapshot.gpuReport, input));
+    profiler.SetGpuPassRows(m_gpuPassRowScratch);
 }
 
 bool Core::StopIfDeviceLost()

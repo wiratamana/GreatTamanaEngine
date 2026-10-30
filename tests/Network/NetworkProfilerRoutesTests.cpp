@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <set>
 #include <string>
 #include <thread>
@@ -576,6 +577,170 @@ TEST(ProfilerRoutesReplyTest, SetReplyShowsTheStateAfterTheChange)
     EXPECT_EQ(reply["success"], true);
     EXPECT_EQ(reply["capture"], false);
     EXPECT_EQ(reply["display_paused"], true);
+}
+
+Profiling::SnapshotTableRow MakeTableRow(const char* name, Profiling::ScopeLane lane, std::uint16_t depth, bool hasChildren,
+    std::uint32_t calls, double totalMs, Profiling::SampleStatus status = Profiling::SampleStatus::Present)
+{
+    Profiling::SnapshotTableRow row;
+    Profiling::CopySnapshotText(row.name, name);
+    row.lane = static_cast<std::uint8_t>(lane);
+    row.depth = depth;
+    row.hasChildren = hasChildren;
+    row.calls = calls;
+    row.totalMs = totalMs;
+    row.selfMs = totalMs / 2.0;
+    row.maxMs = totalMs;
+    row.status = status;
+    row.percentKnown = status == Profiling::SampleStatus::Present;
+    row.percent = row.percentKnown ? 12.5 : 0.0;
+    return row;
+}
+
+ProfilerSnapshot TableSnapshot()
+{
+    using Profiling::ScopeLane;
+    using Profiling::SampleStatus;
+    ProfilerSnapshot s = FullSnapshot();
+    auto tables = std::make_shared<Profiling::SnapshotTables>();
+
+    tables->tree[0] = MakeTableRow("Render.Prepare", ScopeLane::Main, 0, true, 1, 3.0);
+    tables->tree[1] = MakeTableRow("ClusterPart.Skip", ScopeLane::Main, 1, false, 400, 1.0);
+    tables->tree[2] = MakeTableRow("SkinVertices", ScopeLane::Workers, 0, false, 4, 0.5);
+    tables->tree[3] = MakeTableRow("FeatureA", ScopeLane::Gpu, 0, true, 2, 2.0);
+    Profiling::CopySnapshotText(tables->tree[3].feature, "FeatureA");
+    tables->tree[4] = MakeTableRow("PassA", ScopeLane::Gpu, 1, false, 1, 2.0);
+    Profiling::CopySnapshotText(tables->tree[4].feature, "FeatureA");
+    tables->tree[5] = MakeTableRow("PassB", ScopeLane::Gpu, 1, false, 1, 0.0, SampleStatus::Absent);
+    Profiling::CopySnapshotText(tables->tree[5].feature, "FeatureA");
+    tables->treeCount = 6;
+    tables->treeDropped = 1;
+    tables->treeTruncated = true;
+
+    tables->flat[0] = tables->tree[0];
+    tables->flat[0].depth = 0;
+    tables->flat[1] = tables->tree[2];
+    tables->flat[2] = tables->tree[4];
+    tables->flat[2].depth = 0;
+    tables->flatCount = 3;
+
+    s.tables = std::move(tables);
+    return s;
+}
+
+TEST(ProfilerRoutesTableTest, EveryNumberSitsInsideAMetricAndTheKeysArePinned)
+{
+    const json document = ProfilerTableToJson(TableSnapshot(), ProfilerTableQuery{});
+    std::vector<std::string> stray;
+    FindStrayNumbers(document, "", stray);
+    EXPECT_TRUE(stray.empty()) << (stray.empty() ? "" : stray.front());
+
+    EXPECT_EQ(document["view"], "tree");
+    EXPECT_EQ(document["tree_truncated"], true);
+    EXPECT_TRUE(IsMetricObject(document["rows_dropped"]));
+    EXPECT_DOUBLE_EQ(document["rows_dropped"]["value"].get<double>(), 1.0);
+    ASSERT_EQ(document["rows"].size(), 6u);
+    EXPECT_EQ(KeysOf(document["rows"][0]),
+        (std::set<std::string>{ "lane", "name", "title", "explanation", "hint", "category", "origin", "source", "feature", "kind",
+            "waiting", "has_children", "depth", "calls", "total", "self", "max", "percent_of_frame" }));
+    EXPECT_EQ(document["rows"][0]["lane"], "main");
+    EXPECT_EQ(document["rows"][0]["name"], "Render.Prepare");
+    EXPECT_FALSE(document["rows"][0]["title"].get<std::string>().empty());
+    EXPECT_EQ(document["rows"][1]["depth"], 1);
+    EXPECT_DOUBLE_EQ(document["rows"][1]["calls"]["value"].get<double>(), 400.0);
+}
+
+TEST(ProfilerRoutesTableTest, AnUnmeasuredGpuRowIsNullWithItsRealStatus)
+{
+    const json document = ProfilerTableToJson(TableSnapshot(), ProfilerTableQuery{});
+    const json& pass = document["rows"][5];
+    EXPECT_EQ(pass["lane"], "gpu");
+    EXPECT_EQ(pass["feature"], "FeatureA");
+    EXPECT_TRUE(pass["total"]["value"].is_null());
+    EXPECT_EQ(pass["total"]["status"], "Absent");
+    EXPECT_TRUE(pass["percent_of_frame"]["value"].is_null());
+    EXPECT_FALSE(document["rows"][4]["total"]["value"].is_null());
+}
+
+TEST(ProfilerRoutesTableTest, TheLaneAndViewFiltersSelectRows)
+{
+    ProfilerTableQuery query;
+    query.lane = ProfilerTableLane::Gpu;
+    const json gpu = ProfilerTableToJson(TableSnapshot(), query);
+    ASSERT_EQ(gpu["rows"].size(), 3u);
+    for (const json& row : gpu["rows"]) {
+        EXPECT_EQ(row["lane"], "gpu");
+    }
+
+    query.lane = ProfilerTableLane::Workers;
+    EXPECT_EQ(ProfilerTableToJson(TableSnapshot(), query)["rows"].size(), 1u);
+
+    query = ProfilerTableQuery{};
+    query.view = ProfilerTableView::Flat;
+    const json flat = ProfilerTableToJson(TableSnapshot(), query);
+    EXPECT_EQ(flat["view"], "flat");
+    EXPECT_EQ(flat["rows"].size(), 3u);
+    EXPECT_EQ(flat["tree_truncated"], false);
+}
+
+TEST(ProfilerRoutesTableTest, TheLimitCutsRowsAndCountsThemAsDropped)
+{
+    ProfilerTableQuery query;
+    query.limit = 2;
+    const json document = ProfilerTableToJson(TableSnapshot(), query);
+    EXPECT_EQ(document["rows"].size(), 2u);
+    EXPECT_DOUBLE_EQ(document["rows_dropped"]["value"].get<double>(), 5.0);
+}
+
+TEST(ProfilerRoutesTableTest, NoTablesMeansNoRows)
+{
+    const json document = ProfilerTableToJson(FullSnapshot(), ProfilerTableQuery{});
+    EXPECT_TRUE(document["rows"].empty());
+    EXPECT_EQ(document["state"], "ok");
+}
+
+TEST(ProfilerRoutesTableTest, TheQueryDefaultsClampsAndRejectsBadValues)
+{
+    const ParsedProfilerTableQuery defaults = ParseProfilerTableQuery("", "", "");
+    ASSERT_TRUE(defaults.valid);
+    EXPECT_EQ(defaults.query.view, ProfilerTableView::Tree);
+    EXPECT_EQ(defaults.query.lane, ProfilerTableLane::All);
+    EXPECT_EQ(defaults.query.limit, kProfilerTableLimitDefault);
+
+    const ParsedProfilerTableQuery set = ParseProfilerTableQuery("flat", "workers", "10");
+    ASSERT_TRUE(set.valid);
+    EXPECT_EQ(set.query.view, ProfilerTableView::Flat);
+    EXPECT_EQ(set.query.lane, ProfilerTableLane::Workers);
+    EXPECT_EQ(set.query.limit, 10u);
+
+    EXPECT_EQ(ParseProfilerTableQuery("", "", "0").query.limit, 1u);
+    EXPECT_EQ(ParseProfilerTableQuery("", "", "99999").query.limit, kProfilerTableLimitMax);
+    EXPECT_FALSE(ParseProfilerTableQuery("deep", "", "").valid);
+    EXPECT_FALSE(ParseProfilerTableQuery("", "cpu", "").valid);
+    EXPECT_FALSE(ParseProfilerTableQuery("", "", "abc").valid);
+    EXPECT_FALSE(ParseProfilerTableQuery("", "", "-1").valid);
+    EXPECT_FALSE(ParseProfilerTableQuery("", "", "5x").valid);
+}
+
+TEST(ProfilerRoutesTableTest, FrameRowsCarryCpuBusy)
+{
+    ProfilerSnapshot snapshot = FullSnapshot();
+    snapshot.frames[2].cpuBusy = Ms(7.0);
+    const json frame = ProfilerFramesToJson(snapshot, 1)["frames"][0];
+    EXPECT_TRUE(IsMetricObject(frame["cpu_busy"]));
+    EXPECT_DOUBLE_EQ(frame["cpu_busy"]["value"].get<double>(), 7.0);
+}
+
+TEST(ProfilerRoutesTableTest, TheGraphImageNeedsAFrameAndAnswersAPng)
+{
+    EXPECT_EQ(BuildProfilerGraphReply(std::nullopt, 400, 200, 60).status, 503);
+    EXPECT_EQ(BuildProfilerGraphReply(ProfilerSnapshot{}, 400, 200, 60).status, 503);
+
+    const ProfilerImageReply reply = BuildProfilerGraphReply(FullSnapshot(), 400, 200, 60);
+    ASSERT_EQ(reply.status, 200);
+    EXPECT_EQ(reply.contentType, "image/png");
+    ASSERT_GE(reply.body.size(), 8u);
+    EXPECT_EQ(reply.body.substr(1, 3), "PNG");
 }
 
 TEST(ProfilerBridgeTest, ASnapshotIsBuiltOnlyAfterSomeoneAsked)

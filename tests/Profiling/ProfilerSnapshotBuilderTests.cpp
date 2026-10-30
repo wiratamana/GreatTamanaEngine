@@ -5,7 +5,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -313,6 +316,103 @@ TEST_F(ProfilerSnapshotBuilderTest, OverheadIsAnEstimateOnlyAfterTheCostWasMeasu
     EXPECT_EQ(measured.overhead.estimated.status, SampleStatus::Present);
     EXPECT_EQ(measured.overhead.estimated.kind, MetricKind::Estimated);
     EXPECT_EQ(measured.overhead.costPerEvent.kind, MetricKind::Estimated);
+}
+
+const SnapshotTableRow* FindRow(std::span<const SnapshotTableRow> rows, std::string_view name)
+{
+    for (const SnapshotTableRow& row : rows) {
+        if (SnapshotText(row.name) == name) {
+            return &row;
+        }
+    }
+    return nullptr;
+}
+
+TEST_F(ProfilerSnapshotBuilderTest, NoFrameMeansNoTables)
+{
+    const ProfilerSnapshot snapshot = BuildProfilerSnapshot(FrameProfiler::Instance(), SnapshotInputs{});
+    EXPECT_EQ(snapshot.tables, nullptr);
+}
+
+TEST_F(ProfilerSnapshotBuilderTest, TablesHoldTreeAndFlatRowsOfTheNewestFrame)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.BeginFrame();
+    const ScopeStart outer = profiler.BeginScope();
+    RunScope("TableChild");
+    RunScope("TableChild");
+    profiler.EndScope(outer, InternName("TableOuter"), ScopeKind::Work, ViewSlot::Shared);
+    profiler.EndFrame();
+
+    const ProfilerSnapshot snapshot = BuildProfilerSnapshot(profiler, SnapshotInputs{});
+    ASSERT_NE(snapshot.tables, nullptr);
+    const SnapshotTables& tables = *snapshot.tables;
+    ASSERT_EQ(tables.treeCount, 2u);
+    EXPECT_EQ(SnapshotText(tables.tree[0].name), "TableOuter");
+    EXPECT_EQ(tables.tree[0].depth, 0u);
+    EXPECT_TRUE(tables.tree[0].hasChildren);
+    EXPECT_EQ(SnapshotText(tables.tree[1].name), "TableChild");
+    EXPECT_EQ(tables.tree[1].depth, 1u);
+    EXPECT_EQ(tables.tree[1].calls, 2u);
+    EXPECT_EQ(tables.treeDropped, 0u);
+    EXPECT_FALSE(tables.treeTruncated);
+
+    ASSERT_EQ(tables.flatCount, 2u);
+    EXPECT_EQ(tables.flatDropped, 0u);
+    const SnapshotTableRow* child = FindRow(std::span<const SnapshotTableRow>(tables.flat.data(), tables.flatCount), "TableChild");
+    ASSERT_NE(child, nullptr);
+    EXPECT_EQ(child->calls, 2u);
+    EXPECT_EQ(child->depth, 0u);
+    EXPECT_TRUE(child->percentKnown);
+}
+
+TEST_F(ProfilerSnapshotBuilderTest, AHotScopeKeepsExactCallsInTheFlatTableWhenTheEventBufferOverflows)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.BeginFrame();
+    for (int i = 0; i < 3000; ++i) {
+        RunScope("HotTableScope");
+    }
+    profiler.EndFrame();
+
+    const ProfilerSnapshot snapshot = BuildProfilerSnapshot(profiler, SnapshotInputs{});
+    ASSERT_NE(snapshot.tables, nullptr);
+    EXPECT_TRUE(snapshot.tables->treeTruncated);
+    const SnapshotTableRow* hot = FindRow(
+        std::span<const SnapshotTableRow>(snapshot.tables->flat.data(), snapshot.tables->flatCount), "HotTableScope");
+    ASSERT_NE(hot, nullptr);
+    EXPECT_EQ(hot->calls, 3000u);
+}
+
+TEST_F(ProfilerSnapshotBuilderTest, LongTableNamesAreCutAt95Bytes)
+{
+    const std::string longName(150, 'x');
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.BeginFrame();
+    RunScope(longName.c_str());
+    profiler.EndFrame();
+
+    const ProfilerSnapshot snapshot = BuildProfilerSnapshot(profiler, SnapshotInputs{});
+    ASSERT_NE(snapshot.tables, nullptr);
+    ASSERT_GE(snapshot.tables->flatCount, 1u);
+    EXPECT_EQ(SnapshotText(snapshot.tables->flat[0].name).size(), 95u);
+}
+
+TEST_F(ProfilerSnapshotBuilderTest, CpuBusyIsFrameMinusBlockedTime)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    profiler.BeginFrame();
+    const ScopeStart start = profiler.BeginScope();
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    profiler.EndScope(start, InternName("BusyTestWait"), ScopeKind::Blocked, ViewSlot::Shared);
+    profiler.EndFrame();
+
+    const FrameSummary& summary = profiler.HistoryAt(profiler.HistoryCount() - 1);
+    const ProfilerSnapshot snapshot = BuildProfilerSnapshot(profiler, SnapshotInputs{});
+    ASSERT_EQ(snapshot.frameCount, 1u);
+    const double expected = std::max(0.0, summary.cpuMilliseconds - static_cast<double>(summary.blockedTicks) / 1.0e6);
+    EXPECT_NEAR(snapshot.frames[0].cpuBusy.value, expected, 1e-6);
+    EXPECT_LT(snapshot.frames[0].cpuBusy.value, snapshot.frames[0].cpu.value);
 }
 
 TEST(SnapshotTextTest, CopyIsCutToFitAndTerminated)

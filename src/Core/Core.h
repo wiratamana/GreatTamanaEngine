@@ -6,6 +6,7 @@
 #include "ISurfaceProvider.h"
 #include "../Application/RenderPassViewData.h"
 #include "../ECS/Entity.h"
+#include "../Profiling/ScopeAggregate.h"
 #include "../ECS/EntityMarkSet.h"
 #include "../Game/Game.h"
 #include "../Game/SceneQuery.h"
@@ -316,6 +317,9 @@ private:
 
     // Reused every frame to gather the executed passes' GPU records.
     std::vector<GpuPassRecord> m_gpuRecordScratch;
+
+    // Per-pass rows of the same frame for the profiler. Reserved once.
+    std::vector<Profiling::GpuPassRow> m_gpuPassRowScratch;
 
     // Publishes the per-view GPU numbers of the newest synchronous snapshot to the profiler.
     void PublishGpuMetrics(bool primaryActive, bool secondaryActive);

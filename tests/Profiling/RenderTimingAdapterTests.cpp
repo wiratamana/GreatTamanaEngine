@@ -8,6 +8,7 @@
 
 #include <array>
 #include <chrono>
+#include <string>
 #include <string_view>
 #include <thread>
 
@@ -54,6 +55,26 @@ TEST(FormatNamesTest, ScopeNamesJoinPrefixAndSuffix)
     std::array<char, 64> text{};
     EXPECT_EQ(FormatScopeName(text, "Offscreen", "Compile"), "Offscreen.Compile");
     EXPECT_EQ(FormatScopeName(text, "Declare", nullptr), "Declare.");
+}
+
+TEST_F(RenderTimingAdapterTest, FeatureScopeNamesCarryTheFeatureAndCallback)
+{
+    EXPECT_EQ(Profiling::ResolveName(FeatureScopeName("A")), std::string_view("Feature.A"));
+    EXPECT_EQ(Profiling::ResolveName(FeatureScopeName("A", "cb")), std::string_view("Feature.A.cb"));
+}
+
+TEST_F(RenderTimingAdapterTest, FeatureScopeNamesAreCutAt127Bytes)
+{
+    const std::string longName(300, 'x');
+    const std::string_view text = Profiling::ResolveName(FeatureScopeName(longName));
+    EXPECT_EQ(text.size(), 127u);
+    EXPECT_EQ(text.substr(0, 8), "Feature.");
+}
+
+TEST_F(RenderTimingAdapterTest, FeatureScopeNameIsInvalidWhileCaptureIsOff)
+{
+    FrameProfiler::Instance().SetCaptureEnabled(false);
+    EXPECT_EQ(FeatureScopeName("A"), Profiling::kInvalidNameId);
 }
 
 TEST_F(RenderTimingAdapterTest, ABlockBecomesABlockedScopeWithItsSiteName)

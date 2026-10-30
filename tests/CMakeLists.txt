@@ -486,8 +486,7 @@
 #                                            above.
 #   - Editor/ProfilerPanelDataTests.cpp     - the Editor "Profiler" panel's
 #                                            pure data-shaping/formatting
-#                                            logic (BuildSortedCpuScopeRows()/
-#                                            FormatDuration()/
+#                                            logic (FormatDuration()/
 #                                            FormatFrameTimeSummary()/
 #                                            FormatCount()/
 #                                            ResolveGpuPassCounts()/
@@ -2236,6 +2235,14 @@ Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp
     Network/NetworkProfilerRoutesTests.cpp
     Network/NetworkProfilerTimelineTests.cpp
     Profiling/TimelineLayoutTests.cpp
+    Profiling/FunctionNameTests.cpp
+    Profiling/ScopeSourceTests.cpp
+    Profiling/ScopeFunctionMacroTests.cpp
+    Profiling/ScopeAggregateTests.cpp
+    Profiling/ScopeHistoryTests.cpp
+    Profiling/ScopeTableTests.cpp
+    Application/ProfilerScopeCatalogTests.cpp
+    Application/ProfilerScopeCatalogCoverageTests.cpp
     Core/GpuViewMetricsTests.cpp
     Jobs/JobQueueTests.cpp
     Jobs/JobSystemTests.cpp
@@ -2555,6 +2562,9 @@ if(TRUE)
         Editor/FrameDebuggerCoverageCheckerTests.cpp
         Editor/FrameDebuggerSideChannelCheckerTests.cpp
 Editor/ProfilerPanelDataTests.cpp
+        Editor/ProfilerTableModelTests.cpp
+        Editor/ProfilerGraphModelTests.cpp
+        Network/NetworkProfilerGraphTests.cpp
 Editor/RenderGraphDisplayTextTests.cpp
         Editor/JobsPanelDataTests.cpp
         Editor/LogPanelDataTests.cpp
@@ -2682,6 +2692,9 @@ foreach(GTE_FEATURE_TEST_DIR ${GTE_FEATURE_TEST_DIRS})
         endif()
     endif()
 endforeach()
+
+# Source root scanned by the scope-catalog coverage test.
+target_compile_definitions(GreatTamanaEngineTests PRIVATE GTE_REPO_SRC_DIR="${CMAKE_SOURCE_DIR}/src")
 
 # Sponza sample folder for the optional real-model glTF test (empty when not fetched).
 target_compile_definitions(GreatTamanaEngineTests PRIVATE GTE_TEST_SPONZA_DIR="${GTE_SPONZA_DIR}")
@@ -3054,6 +3067,12 @@ set(GTE_COMMENT_RULE_SRC
     Network/NetworkProfilerTimeline.h Network/NetworkProfilerTimeline.cpp
     Application/ProfilerSnapshotBridge.h Application/ProfilerSnapshotBridge.cpp Application/GpuTimingText.h
     Editor/EditorViewNames.h Editor/RenderGraphDisplayText.h Editor/RenderGraphDisplayText.cpp
+    Application/ProfilerScopeCatalog.h Application/ProfilerScopeCatalog.cpp
+    Network/NetworkProfilerGraph.h Network/NetworkProfilerGraph.cpp
+    Editor/ProfilerTableModel.h Editor/ProfilerTableModel.cpp Editor/ProfilerGraphModel.h Editor/ProfilerGraphModel.cpp
+    Editor/ProfilerPanelData.h Editor/ProfilerPanelData.cpp Editor/Panels/ProfilerPanel.h Editor/Panels/ProfilerPanel.cpp
+    Editor/Panels/ProfilerGraphWidget.h Editor/Panels/ProfilerGraphWidget.cpp
+    Editor/Panels/ProfilerTableWidget.h Editor/Panels/ProfilerTableWidget.cpp
     Network/RenderGraphMetadataJson.h Network/RenderGraphMetadataJson.cpp Network/ViewWireName.h
     Profiling/
     Features/SceneLighting/ Features/GpuDrivenScene/)
@@ -3103,7 +3122,10 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Renderer/PresentRecoveryPlanTests.cpp Renderer/RenderGraph/OffscreenRecordingFaultTests.cpp Renderer/GpuStampPlanTests.cpp
     Renderer/GpuWaitServiceTests.cpp Network/NetworkFaultRoutesTests.cpp Renderer/GpuFrameRingTests.cpp Profiling/
     Editor/RenderGraphDisplayTextTests.cpp
-    Network/NetworkProfilerRoutesTests.cpp Renderer/GpuClockCalibrationTests.cpp Network/NetworkProfilerTimelineTests.cpp)
+    Network/NetworkProfilerRoutesTests.cpp Renderer/GpuClockCalibrationTests.cpp Network/NetworkProfilerTimelineTests.cpp
+    Application/ProfilerScopeCatalogTests.cpp Application/ProfilerScopeCatalogCoverageTests.cpp
+    Network/NetworkProfilerGraphTests.cpp Editor/ProfilerTableModelTests.cpp Editor/ProfilerGraphModelTests.cpp
+    Editor/ProfilerPanelDataTests.cpp)
 set(GTE_COMMENT_RULE_SRC_ARGS "")
 foreach(path IN LISTS GTE_COMMENT_RULE_SRC)
     list(APPEND GTE_COMMENT_RULE_SRC_ARGS --only "${path}")
@@ -3125,4 +3147,13 @@ target_include_directories(gte_header_purity_probe PRIVATE "${CMAKE_SOURCE_DIR}/
 target_compile_features(gte_header_purity_probe PRIVATE cxx_std_20)
 add_test(NAME HeaderPurity
     COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target gte_header_purity_probe
+)
+target_compile_definitions(gte_header_purity_probe PRIVATE GTE_ENABLE_PROFILER=1)
+
+# Compiles a probe with the exact include/define setup a project assembly gets; fails if engine switches are not forwarded.
+add_library(gte_project_define_probe OBJECT EXCLUDE_FROM_ALL "${CMAKE_SOURCE_DIR}/tests/Tools/ProjectDefineProbe.cpp")
+gte_project_assembly_apply_header_paths(gte_project_define_probe)
+target_compile_features(gte_project_define_probe PRIVATE cxx_std_20)
+add_test(NAME ProjectDefineProbe
+    COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target gte_project_define_probe
 )
