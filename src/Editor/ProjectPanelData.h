@@ -21,16 +21,15 @@ struct ProjectEntry {
 // Deepest folder level a scan descends into; deeper folders are listed empty.
 inline constexpr int kMaxProjectScanDepth = 32;
 
-// Scans `rootPath` into a tree: directories first, then files, case-insensitive by name.
-// Links are listed as plain entries and never followed. `cancel` is checked once per
-// directory (nullptr = never). Never throws. Safe to call from a job.
+// Scans `rootPath` into a tree: directories first, then case-insensitive by name. Links are never followed.
+// `cancel` is checked per directory (nullptr = never). Safe to call from a job.
 std::vector<ProjectEntry> ScanProjectDirectory(
     const std::filesystem::path& rootPath, const std::atomic<bool>* cancel = nullptr);
 
-// Sorted names of the regular files directly inside `directory`. Never throws. Safe to call from a job.
+// Sorted names of the regular files directly inside `directory`. Safe to call from a job.
 std::vector<std::string> ListFileNames(const std::filesystem::path& directory);
 
-// Makes sure `rootPath` is a directory, creating it if needed. Returns false if it still is not. Never throws.
+// Makes sure `rootPath` is a directory, creating it if needed. Returns false if it still is not.
 bool EnsureProjectRootExists(const std::filesystem::path& rootPath);
 
 // Directory a new item lands in for `targetRelativePath`: the folder itself, else its parent,

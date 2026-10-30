@@ -77,11 +77,11 @@ void ProjectPanel::PumpScan()
 
 void ProjectPanel::ApplyScanResult(ProjectScanResult&& result)
 {
-    m_hasScanResult = true;
     if (result.failed) {
         SetStatus("Project scan failed: " + result.errorMessage, true); // Keep the last good tree.
         return;
     }
+    m_hasScanResult = true;
     m_rootExists = result.rootExists;
     m_tree = std::move(result.tree);
     m_linkedFolderName = std::move(result.linkedFolderName);

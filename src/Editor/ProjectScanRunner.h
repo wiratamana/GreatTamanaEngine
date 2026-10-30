@@ -57,8 +57,6 @@ public:
     // Returns the finished result exactly once.
     std::optional<ProjectScanResult> Poll(Clock::time_point now);
 
-    bool Busy() const noexcept { return m_payload != nullptr; }
-
 private:
     std::unique_ptr<Payload> m_payload;
     Jobs::JobHandle m_handle; // Reused for every scan.

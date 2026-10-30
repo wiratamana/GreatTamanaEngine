@@ -13,11 +13,8 @@ namespace gte {
 
 struct EditorContext;
 
-// Two-pane "Project" panel: a folder tree on the left, the open folder's contents on the right.
-// Shows the "Project" folder next to the executable and imports files dropped from the OS.
-// The folder is scanned on a job-system worker, only while the panel is visible.
-// Entries are plain snapshots (never handles into the tree); selection lives in ctx.selection.
-// Compiled only when GTE_ENABLE_PROJECT_PANEL is ON.
+// Two-pane "Project" panel: folder tree left, open folder right; imports files dropped from the OS.
+// Scans on a job worker, only while visible. Compiled only when GTE_ENABLE_PROJECT_PANEL is ON.
 class ProjectPanel {
 public:
     ProjectPanel();
@@ -25,10 +22,8 @@ public:
     // Builds the ImGui window. Call once per frame; selecting an entry writes ctx.selection.
     void Build(EditorContext& ctx);
 
-    // Imports a file or folder dropped on any window. `screenX`/`screenY` are absolute desktop
-    // coordinates. The target folder comes from the drop zones of the last visible frame; drops
-    // outside both panes are ignored. Files go through ImportAssetFile, folders are copied.
-    // Names never overwrite an existing item. Never throws; failures show as a status line.
+    // Imports a file or folder dropped from the OS at absolute desktop (screenX, screenY).
+    // Drops outside both panes are ignored; names never overwrite; failures show as a status line.
     void HandleExternalFileDrop(float screenX, float screenY, const std::string& sourcePathUtf8);
 
     // Imports one file into `destinationRelativeFolder` of the Project root. Rejects absolute,

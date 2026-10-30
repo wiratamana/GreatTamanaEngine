@@ -70,15 +70,17 @@ TEST_F(ProjectScanRunnerTest, IsDueAtConstruction)
     EXPECT_TRUE(runner.IsDue(Clock::now()));
 }
 
-TEST_F(ProjectScanRunnerTest, BusyAfterStartUntilPolled)
+TEST_F(ProjectScanRunnerTest, NotDueWhileScanInFlightAndStartableAfterPoll)
 {
     ProjectScanRunner runner;
     ASSERT_TRUE(runner.Start(RequestFor(m_root)));
-    EXPECT_TRUE(runner.Busy());
-    EXPECT_FALSE(runner.IsDue(Clock::now()));
+    runner.MarkDirty();
+    EXPECT_FALSE(runner.IsDue(Clock::now() + std::chrono::hours(1)));
 
     ASSERT_TRUE(WaitForResult(runner).has_value());
-    EXPECT_FALSE(runner.Busy());
+    EXPECT_TRUE(runner.IsDue(Clock::now() + std::chrono::hours(1)));
+    EXPECT_TRUE(runner.Start(RequestFor(m_root)));
+    ASSERT_TRUE(WaitForResult(runner).has_value());
 }
 
 TEST_F(ProjectScanRunnerTest, ResultHasTreeAndRootExists)

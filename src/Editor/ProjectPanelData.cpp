@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <exception>
 #include <system_error>
 
 namespace gte {
@@ -88,34 +87,25 @@ std::vector<ProjectEntry> ScanChildren(const std::filesystem::path& dirAbsPath, 
 
 std::vector<ProjectEntry> ScanProjectDirectory(const std::filesystem::path& rootPath, const std::atomic<bool>* cancel)
 {
-    try {
-        std::error_code ec;
-        if (!std::filesystem::is_directory(rootPath, ec) || ec) {
-            return {};
-        }
-        return ScanChildren(rootPath, std::string(), 0, cancel);
-    } catch (const std::exception&) {
-        return {}; // Last resort (e.g. bad_alloc): never escape into a job or the UI.
+    std::error_code ec;
+    if (!std::filesystem::is_directory(rootPath, ec) || ec) {
+        return {};
     }
+    return ScanChildren(rootPath, std::string(), 0, cancel);
 }
 
 std::vector<std::string> ListFileNames(const std::filesystem::path& directory)
 {
     std::vector<std::string> names;
-    try {
-        std::error_code ec;
-        std::filesystem::directory_iterator it(
-            directory, std::filesystem::directory_options::skip_permission_denied, ec);
-        for (const std::filesystem::directory_iterator end; !ec && it != end; it.increment(ec)) {
-            std::error_code entryEc;
-            if (it->is_regular_file(entryEc) && !entryEc) {
-                names.push_back(PathToUtf8(it->path().filename()));
-            }
+    std::error_code ec;
+    std::filesystem::directory_iterator it(directory, std::filesystem::directory_options::skip_permission_denied, ec);
+    for (const std::filesystem::directory_iterator end; !ec && it != end; it.increment(ec)) {
+        std::error_code entryEc;
+        if (it->is_regular_file(entryEc) && !entryEc) {
+            names.push_back(PathToUtf8(it->path().filename()));
         }
-        std::sort(names.begin(), names.end());
-    } catch (const std::exception&) {
-        names.clear();
     }
+    std::sort(names.begin(), names.end());
     return names;
 }
 
