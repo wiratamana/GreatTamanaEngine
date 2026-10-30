@@ -683,6 +683,32 @@ TEST(ProfilerRoutesTableTest, TheLaneAndViewFiltersSelectRows)
     EXPECT_EQ(flat["tree_truncated"], false);
 }
 
+TEST(ProfilerRoutesTableTest, OnlyAFeatureGroupRowGetsTheFeatureWording)
+{
+    using Profiling::ScopeLane;
+    auto tables = std::make_shared<Profiling::SnapshotTables>();
+    tables->tree[0] = MakeTableRow("Hiz", ScopeLane::Gpu, 0, true, 1, 2.0);
+    Profiling::CopySnapshotText(tables->tree[0].feature, "Hiz");
+    tables->treeCount = 1;
+    // Flat view: a pass that is named like its feature has no children.
+    tables->flat[0] = MakeTableRow("Hiz", ScopeLane::Gpu, 0, false, 1, 2.0);
+    Profiling::CopySnapshotText(tables->flat[0].feature, "Hiz");
+    tables->flatCount = 1;
+
+    ProfilerSnapshot snapshot = FullSnapshot();
+    snapshot.tables = std::move(tables);
+
+    ProfilerTableQuery query;
+    const json tree = ProfilerTableToJson(snapshot, query);
+    ASSERT_EQ(tree["rows"].size(), 1u);
+    EXPECT_NE(tree["rows"][0]["title"].get<std::string>().find("Render feature"), std::string::npos);
+
+    query.view = ProfilerTableView::Flat;
+    const json flat = ProfilerTableToJson(snapshot, query);
+    ASSERT_EQ(flat["rows"].size(), 1u);
+    EXPECT_EQ(flat["rows"][0]["title"].get<std::string>().find("Render feature"), std::string::npos);
+}
+
 TEST(ProfilerRoutesTableTest, RowsDroppedCountsOnlyTheSelectedLanes)
 {
     // Main cut 1 row, Workers 2, Gpu 4.

@@ -455,7 +455,7 @@ nlohmann::json TableRowToJson(const Profiling::SnapshotTableRow& row)
     const auto origin = static_cast<Profiling::ScopeOrigin>(row.origin);
     const std::string name = Text(row.name);
     const std::string feature = Text(row.feature);
-    const bool featureRow = lane == Profiling::ScopeLane::Gpu && row.depth == 0 && !feature.empty() && name == feature;
+    const bool featureRow = lane == Profiling::ScopeLane::Gpu && row.depth == 0 && row.hasChildren && !feature.empty() && name == feature;
     const ScopeInfo info = featureRow ? DescribeGpuFeature(name) : DescribeScope(name, lane, origin);
 
     nlohmann::json item = nlohmann::json::object();

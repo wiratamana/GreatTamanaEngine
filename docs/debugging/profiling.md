@@ -169,7 +169,7 @@ Panel layout, top to bottom. The first screen is the summary and the graph.
 | Worker ring | 1024 slots | Counted in `lost_worker_events` |
 | Name table | 64 KB, 3072 names | The name shows as `<overflow>` |
 | Frame history | 300 frames | Oldest is dropped |
-| Aggregate rows per frame (one per name and lane) | 768 | Rows past the limit are not recorded. Rows already in stay exact |
+| Aggregate rows per frame (one per name and lane) | 768 | Rows past the limit are not recorded. Rows already in stay exact. The panel footer shows "Aggregate rows dropped: N" |
 | GPU pass rows per frame | 256 | Rows past the limit are not recorded. The renderer folds passes past its own stamp budget into one `(folded passes)` row |
 | Per-name history | 256 tracks x 300 frames | A track is recycled after 300 unused frames. A name with no free track has no history line. The footer shows `rows without history this frame` |
 | Table rows | Panel: 384 Main, 64 Workers, 128 GPU. Snapshot: 160 Main, 32 Workers, 64 GPU | A busy lane never hides another lane. The panel shows `N rows hidden`. `rows_dropped` counts them |

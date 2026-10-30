@@ -160,7 +160,7 @@ void BuildFilterRow(std::array<char, 64>& filter, TableOptions& options, const T
     ImGui::TextDisabled("Graph lines: %zu / %zu", trackedCount, kMaxTrackedRows);
 }
 
-void BuildFooter(const Profiling::ScopeHistory& history)
+void BuildFooter(const Profiling::ScopeHistory& history, std::uint32_t aggregatesDropped)
 {
     const std::uint32_t used = Profiling::GlobalNameTable().Count();
     const bool nearFull = static_cast<float>(used) >= static_cast<float>(Profiling::kMaxNames) * kNamesWarnShare;
@@ -170,6 +170,10 @@ void BuildFooter(const Profiling::ScopeHistory& history)
     if (history.DroppedTracks() != 0) {
         ImGui::SameLine();
         ImGui::TextColored(kColorWarn, "  rows without history this frame: %u", history.DroppedTracks());
+    }
+    if (aggregatesDropped != 0) {
+        ImGui::SameLine();
+        ImGui::TextColored(kColorWarn, "  Aggregate rows dropped: %u", aggregatesDropped);
     }
 }
 
@@ -424,7 +428,7 @@ void ProfilerPanel::Build(EditorContext& /*ctx*/)
             m_table.rowsDropped);
     }
 
-    BuildFooter(profiler.Scopes());
+    BuildFooter(profiler.Scopes(), record.aggregates.Dropped());
 
     BuildChecksSection(view, verdict, m_hadIssues);
     BuildSpikeSection(profiler, m_pinMessage);
