@@ -7,6 +7,16 @@
 #include <cctype>
 #include <system_error>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace gte {
 
 namespace {
@@ -26,8 +36,18 @@ bool CompareEntries(const ProjectEntry& a, const ProjectEntry& b)
     return LessNoCase(a.name, b.name);
 }
 
-bool IsLink(std::filesystem::file_type type)
+// True for symlinks, junctions and any other reparse point. Never followed by the scan.
+bool IsLink(const std::filesystem::path& path, std::filesystem::file_type type)
 {
+#ifdef _WIN32
+    // libstdc++ reports junctions as plain directories, so ask the OS directly.
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        return true;
+    }
+#else
+    static_cast<void>(path);
+#endif
 #ifdef _MSC_VER
     if (type == std::filesystem::file_type::junction) {
         return true;
@@ -66,11 +86,13 @@ std::vector<ProjectEntry> ScanChildren(const std::filesystem::path& dirAbsPath, 
         projectEntry.name = PathToUtf8(entry.path().filename());
         projectEntry.relativePath
             = dirRelativePath.empty() ? projectEntry.name : dirRelativePath + "/" + projectEntry.name;
-        projectEntry.isDirectory = type == std::filesystem::file_type::directory;
-
-        if (projectEntry.isDirectory) {
+        // A link is a plain leaf: not a directory, no size, no children.
+        if (IsLink(entry.path(), type)) {
+            projectEntry.isDirectory = false;
+        } else if (type == std::filesystem::file_type::directory) {
+            projectEntry.isDirectory = true;
             projectEntry.children = ScanChildren(entry.path(), projectEntry.relativePath, depth + 1, cancel);
-        } else if (!IsLink(type)) {
+        } else {
             std::error_code sizeEc;
             const std::uintmax_t size = entry.file_size(sizeEc);
             projectEntry.sizeBytes = sizeEc ? 0 : size;

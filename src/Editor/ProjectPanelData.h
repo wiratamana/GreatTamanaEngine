@@ -21,7 +21,8 @@ struct ProjectEntry {
 // Deepest folder level a scan descends into; deeper folders are listed empty.
 inline constexpr int kMaxProjectScanDepth = 32;
 
-// Scans `rootPath` into a tree: directories first, then case-insensitive by name. Links are never followed.
+// Scans `rootPath` into a tree: directories first, then case-insensitive by name.
+// Links (symlinks, junctions) are listed as plain entries and never followed.
 // `cancel` is checked per directory (nullptr = never). Safe to call from a job.
 std::vector<ProjectEntry> ScanProjectDirectory(
     const std::filesystem::path& rootPath, const std::atomic<bool>* cancel = nullptr);
