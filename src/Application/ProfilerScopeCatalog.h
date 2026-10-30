@@ -37,6 +37,7 @@ struct ScopeInfo {
     std::string hint;        // advice when the row is big; may be empty
     ScopeCategory category = ScopeCategory::Other;
     bool waiting = false;    // pure wait: the CPU is idle
+    bool generic = false;    // no real description was found: this is the origin fallback text
 };
 
 // Describes a raw scope name. Exact name first, then prefix rule, then origin fallback. Never throws.
@@ -44,9 +45,6 @@ ScopeInfo DescribeScope(std::string_view name, Profiling::ScopeLane lane, Profil
 
 // Describes a GPU feature row (the sum of its passes).
 ScopeInfo DescribeGpuFeature(std::string_view feature);
-
-// True when DescribeScope found no real description and returned the generic origin text.
-bool IsFallbackInfo(const ScopeInfo& info);
 
 // Plain advice for a verdict kind. Never empty.
 const char* DescribeVerdict(Profiling::VerdictKind kind);

@@ -53,11 +53,10 @@ void FrameProfiler::EndFrame() noexcept
     FrameRecord& record = m_last;
     record.scopes = m_log.Buffer();
     record.aggregates = m_log.Aggregates();
-    record.gpuPasses = m_openGpuPasses;
     record.workers.Clear();
     const WorkerDrainStats drain = m_ring.Drain(m_frameStartTicks, endTicks, record.workers);
     AppendWorkerAggregates(record.workers.Events(), record.aggregates);
-    AppendGpuAggregates(record.gpuPasses.Events(), record.aggregates);
+    AppendGpuAggregates(m_openGpuPasses.Events(), record.aggregates);
     const GateCounters gate = m_log.Gate().TakeCounters();
 
     FrameSummary& summary = record.summary;
@@ -199,7 +198,6 @@ void FrameProfiler::ResetForTesting() noexcept
     m_last.scopes.Clear();
     m_last.workers.Clear();
     m_last.aggregates.Clear();
-    m_last.gpuPasses.Clear();
     m_scopeHistory.Clear();
     m_history = {};
     m_spikes.Clear();

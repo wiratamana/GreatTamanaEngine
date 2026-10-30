@@ -71,8 +71,9 @@ struct GraphModel {
     bool historyOutOfSync = false; // tracked rows exist but their history ends on another frame
 };
 
-// Tracked rows without a history track are left out of the model.
-GraphModel BuildGraphModel(std::span<const Profiling::FrameGraphPoint> points, const Profiling::ScopeHistory& history,
-    std::span<const TrackedKey> tracked, Profiling::ScopeSeries series, const GraphVisibility& visibility);
+// Refills `model` in place (buffers keep their capacity). Tracked rows without a history track are left out.
+void BuildGraphModel(std::span<const Profiling::FrameGraphPoint> points, const Profiling::ScopeHistory& history,
+    std::span<const TrackedKey> tracked, Profiling::ScopeSeries series, const GraphVisibility& visibility,
+    GraphModel& model);
 
 } // namespace gte

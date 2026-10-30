@@ -30,7 +30,9 @@ public:
 
     std::size_t FrameCount() const noexcept;      // <= kMaxFrameHistory
     std::size_t TrackCount() const noexcept;      // tracks in use
-    std::uint32_t DroppedTracks() const noexcept { return m_droppedTracks; } // keys that found no track
+
+    // Rows of the newest Record() call that found no free track.
+    std::uint32_t DroppedTracks() const noexcept { return m_droppedTracks; }
 
     void Clear() noexcept;
 
@@ -45,9 +47,10 @@ private:
         std::array<std::uint16_t, kMaxFrameHistory> calls{}; // clamped at 65535
     };
 
-    // Index of the track for the key, creating or recycling one. kNoTrack when none is free.
+    // Index of the track for the key, creating or recycling one. kNoTrack when none is free;
+    // `exhausted` then stays true so the caller stops scanning for the rest of the frame.
     static constexpr std::size_t kNoTrack = static_cast<std::size_t>(-1);
-    std::size_t FindOrCreateTrack(ScopeLane lane, NameId name) noexcept;
+    std::size_t FindOrCreateTrack(ScopeLane lane, NameId name, bool& exhausted) noexcept;
 
     std::array<Track, kHistoryTracks> m_tracks{};
     std::array<std::array<std::uint16_t, kMaxNames + 1>, kScopeLaneCount> m_trackOfName{}; // 0 = none, else index + 1

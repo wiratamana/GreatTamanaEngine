@@ -43,7 +43,6 @@ void ExpectMatchesEvents(const ScopeLog& log)
         std::uint64_t total = 0;
         std::uint64_t self = 0;
         std::uint32_t calls = 0;
-        std::uint16_t minDepth = 0xFFFF;
     };
     std::map<NameId, Sum> expected;
     for (std::size_t i = 0; i < events.size(); ++i) {
@@ -54,7 +53,6 @@ void ExpectMatchesEvents(const ScopeLog& log)
         sum.total += times[i].totalTicks;
         sum.self += times[i].selfTicks;
         ++sum.calls;
-        sum.minDepth = std::min(sum.minDepth, events[i].depth);
     }
 
     const std::span<const ScopeAggregate> rows = log.Aggregates().Rows();
@@ -65,7 +63,6 @@ void ExpectMatchesEvents(const ScopeLog& log)
         EXPECT_EQ(row->totalTicks, sum.total) << "name " << name;
         EXPECT_EQ(row->selfTicks, sum.self) << "name " << name;
         EXPECT_EQ(row->calls, sum.calls) << "name " << name;
-        EXPECT_EQ(row->minDepth, sum.minDepth) << "name " << name;
     }
 }
 
@@ -153,11 +150,9 @@ TEST(ScopeAggregateTest, StaysExactWhenTheEventBufferOverflows)
     EXPECT_EQ(child->calls, 2500u);
     EXPECT_EQ(child->totalTicks, 10000u);
     EXPECT_EQ(child->maxTicks, 4u);
-    EXPECT_EQ(child->minDepth, 1u);
     EXPECT_EQ(top->calls, 1u);
     EXPECT_EQ(top->totalTicks, 10005u);
     EXPECT_EQ(top->selfTicks, 5u);
-    EXPECT_EQ(top->minDepth, 0u);
 }
 
 TEST(ScopeAggregateTest, CountsRowsThatDoNotFitAndKeepsExistingRowsExact)
@@ -286,8 +281,7 @@ GpuPassRow MakePass(NameId pass, float barrierMs, float workMs, SampleStatus sta
 
 TEST(ScopeAggregateTest, GpuRowsMergeAndKeepTheirFeature)
 {
-    std::array<GpuPassRow, 2> rows{ MakePass(80, 1.0f, 2.0f, SampleStatus::Present), MakePass(80, 0.5f, 0.5f, SampleStatus::Present) };
-    rows[1].view = ViewSlot::Secondary;
+    const std::array<GpuPassRow, 2> rows{ MakePass(80, 1.0f, 2.0f, SampleStatus::Present), MakePass(80, 0.5f, 0.5f, SampleStatus::Present) };
     auto out = std::make_unique<ScopeAggregateBuffer>();
 
     AppendGpuAggregates(rows, *out);
@@ -381,7 +375,6 @@ TEST_F(FrameProfilerAggregateTest, EndFrameCarriesMainWorkerAndGpuRows)
     const ScopeAggregate* gpuRow = FindRow(rows, ScopeLane::Gpu, passName);
     ASSERT_NE(gpuRow, nullptr);
     EXPECT_EQ(gpuRow->totalTicks, 2'000'000u);
-    EXPECT_EQ(frame.gpuPasses.Size(), 1u);
 
     std::array<float, 4> series{};
     EXPECT_TRUE(profiler.Scopes().CopySeries(ScopeLane::Gpu, passName, ScopeSeries::TotalMs, series));
@@ -399,7 +392,6 @@ TEST_F(FrameProfilerAggregateTest, GpuRowsOutsideAFrameAreIgnored)
     profiler.EndFrame();
     profiler.SetGpuPassRows(gpu); // after the frame
 
-    EXPECT_EQ(profiler.LastCompletedFrame().gpuPasses.Size(), 0u);
     EXPECT_EQ(profiler.LastCompletedFrame().aggregates.Size(), 0u);
 }
 

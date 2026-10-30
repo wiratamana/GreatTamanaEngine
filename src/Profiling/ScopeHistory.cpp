@@ -7,11 +7,14 @@
 
 namespace gte::Profiling {
 
-std::size_t ScopeHistory::FindOrCreateTrack(ScopeLane lane, NameId name) noexcept
+std::size_t ScopeHistory::FindOrCreateTrack(ScopeLane lane, NameId name, bool& exhausted) noexcept
 {
     std::uint16_t& mapped = m_trackOfName[static_cast<std::size_t>(lane)][name];
     if (mapped != 0) {
         return static_cast<std::size_t>(mapped) - 1;
+    }
+    if (exhausted) {
+        return kNoTrack;
     }
 
     // A free track, or one unseen for a whole ring (all its values are already zero).
@@ -27,7 +30,7 @@ std::size_t ScopeHistory::FindOrCreateTrack(ScopeLane lane, NameId name) noexcep
         }
     }
     if (target == kNoTrack) {
-        ++m_droppedTracks;
+        exhausted = true;
         return kNoTrack;
     }
 
@@ -46,6 +49,7 @@ std::size_t ScopeHistory::FindOrCreateTrack(ScopeLane lane, NameId name) noexcep
 void ScopeHistory::Record(std::uint64_t frameIndex, std::span<const ScopeAggregate> rows) noexcept
 {
     const std::size_t slot = static_cast<std::size_t>(m_cursor % kMaxFrameHistory);
+    m_droppedTracks = 0;
 
     for (Track& track : m_tracks) {
         if (track.used) {
@@ -55,12 +59,14 @@ void ScopeHistory::Record(std::uint64_t frameIndex, std::span<const ScopeAggrega
         }
     }
 
+    bool exhausted = false;
     for (const ScopeAggregate& row : rows) {
         if (row.kind == ScopeKind::Marker || row.name > kMaxNames || static_cast<std::size_t>(row.lane) >= kScopeLaneCount) {
             continue;
         }
-        const std::size_t index = FindOrCreateTrack(row.lane, row.name);
+        const std::size_t index = FindOrCreateTrack(row.lane, row.name, exhausted);
         if (index == kNoTrack) {
+            ++m_droppedTracks;
             continue;
         }
         Track& track = m_tracks[index];

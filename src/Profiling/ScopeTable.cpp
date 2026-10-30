@@ -3,6 +3,7 @@
 #include "ScopeTree.h"
 
 #include <algorithm>
+#include <array>
 #include <unordered_map>
 #include <utility>
 
@@ -51,19 +52,25 @@ void SortRows(std::vector<ScopeTableRow>& rows, ScopeSort sort)
         [sort](const ScopeTableRow& a, const ScopeTableRow& b) { return Precedes(sort, a, b); });
 }
 
-// Collects rows up to the cap and counts the rest.
+// Collects rows up to the cap of each lane and counts the rest.
 class RowSink {
 public:
-    RowSink(ScopeTable& table, std::size_t maxRows) noexcept
+    RowSink(ScopeTable& table, const LaneRowCaps& caps)
         : m_table(table)
-        , m_maxRows(maxRows)
+        , m_caps(caps)
     {
-        table.rows.reserve(std::min<std::size_t>(maxRows, 1024));
+        std::size_t total = 0;
+        for (const std::size_t cap : caps) {
+            total += cap;
+        }
+        table.rows.reserve(std::min<std::size_t>(total, 1024));
     }
 
     void Push(const ScopeTableRow& row)
     {
-        if (m_table.rows.size() < m_maxRows) {
+        const std::size_t lane = static_cast<std::size_t>(row.lane);
+        if (m_used[lane] < m_caps[lane]) {
+            ++m_used[lane];
             m_table.rows.push_back(row);
         } else {
             ++m_table.rowsDropped;
@@ -72,7 +79,8 @@ public:
 
 private:
     ScopeTable& m_table;
-    std::size_t m_maxRows;
+    LaneRowCaps m_caps;
+    std::array<std::size_t, kScopeLaneCount> m_used{};
 };
 
 ScopeTableRow RowFromAggregate(const ScopeAggregate& agg)
@@ -270,10 +278,10 @@ void AppendGpuTree(const FrameRecord& frame, ScopeSort sort, RowSink& sink)
 
 } // namespace
 
-ScopeTable BuildScopeTree(const FrameRecord& frame, ScopeSort sort, std::size_t maxRows)
+ScopeTable BuildScopeTree(const FrameRecord& frame, ScopeSort sort, const LaneRowCaps& caps)
 {
     ScopeTable table;
-    RowSink sink(table, maxRows);
+    RowSink sink(table, caps);
     AppendMainTree(frame, sort, sink);
     AppendFlatLane(frame, ScopeLane::Workers, sort, sink);
     AppendGpuTree(frame, sort, sink);
@@ -281,10 +289,10 @@ ScopeTable BuildScopeTree(const FrameRecord& frame, ScopeSort sort, std::size_t 
     return table;
 }
 
-ScopeTable BuildScopeFlat(const FrameRecord& frame, ScopeSort sort, std::size_t maxRows)
+ScopeTable BuildScopeFlat(const FrameRecord& frame, ScopeSort sort, const LaneRowCaps& caps)
 {
     ScopeTable table;
-    RowSink sink(table, maxRows);
+    RowSink sink(table, caps);
     AppendFlatLane(frame, ScopeLane::Main, sort, sink);
     AppendFlatLane(frame, ScopeLane::Workers, sort, sink);
     AppendFlatLane(frame, ScopeLane::Gpu, sort, sink);

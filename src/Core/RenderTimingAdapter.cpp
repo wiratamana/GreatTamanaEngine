@@ -63,6 +63,7 @@ Profiling::NameId FeatureScopeName(std::string_view feature, std::string_view ca
     }
     return Profiling::GlobalNameTable().Intern(std::string_view(text.data(), used));
 }
+
 void RenderTimingAdapter::OpenScope(std::string_view name, Profiling::ScopeKind kind) noexcept
 {
     if (!Profiling::FrameGate::IsMainThread()) {

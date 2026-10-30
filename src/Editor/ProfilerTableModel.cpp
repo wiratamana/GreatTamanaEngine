@@ -2,6 +2,7 @@
 
 #include "../Profiling/FrameGraphData.h"
 #include "../Profiling/NameTable.h"
+#include "../Profiling/ProfilingBudget.h"
 #include "../Profiling/ProfilingClock.h"
 
 #include <algorithm>
@@ -19,6 +20,7 @@ using Profiling::ScopeTableRow;
 constexpr std::uint32_t kNoParent = 0xFFFFFFFFu;
 constexpr double kTopThingMinPercent = 5.0;
 constexpr std::size_t kTopThingsPerLane = 3;
+constexpr std::size_t kNameSlots = Profiling::kMaxNames + 1;
 
 std::string Lower(std::string_view text)
 {
@@ -58,26 +60,28 @@ std::string SourceText(Profiling::NameId name)
     return std::string(Profiling::ResolveName(source.fileName)) + ":" + std::to_string(source.line);
 }
 
-TableRowView MakeView(const ScopeTableRow& row, bool tree, const Bases& bases)
+std::unique_ptr<ScopeText> MakeText(ScopeLane lane, Profiling::NameId name, bool gpuFeature)
+{
+    auto text = std::make_unique<ScopeText>();
+    text->rawName = Profiling::ResolveName(name);
+    text->origin = Profiling::SourceOf(name).origin;
+    text->sourceText = SourceText(name);
+    text->info = gpuFeature ? DescribeGpuFeature(text->rawName) : DescribeScope(text->rawName, lane, text->origin);
+    text->lowerTitle = Lower(text->info.title);
+    text->lowerRaw = Lower(text->rawName);
+    return text;
+}
+
+TableRowView MakeView(const ScopeTableRow& row, bool tree, const Bases& bases, ScopeTextCache& cache)
 {
     TableRowView view;
     view.row = row;
-    view.rawName = Profiling::ResolveName(row.name);
-    view.origin = Profiling::SourceOf(row.name).origin;
-    view.sourceText = SourceText(row.name);
     view.isGpuFeature = tree && row.lane == ScopeLane::Gpu && row.depth == 0 && row.hasChildren
         && row.feature != Profiling::kInvalidNameId && row.name == row.feature;
-
-    const ScopeInfo info = view.isGpuFeature ? DescribeGpuFeature(view.rawName)
-                                             : DescribeScope(view.rawName, row.lane, view.origin);
-    view.title = info.title;
-    view.explanation = info.explanation;
-    view.hint = info.hint;
-    view.category = info.category;
-    view.waiting = info.waiting || row.kind == Profiling::ScopeKind::Blocked;
-
+    view.text = &cache.Get(row.lane, row.name, view.isGpuFeature);
+    view.waiting = view.text->info.waiting || row.kind == Profiling::ScopeKind::Blocked;
     if (row.lane == ScopeLane::Gpu && row.feature != Profiling::kInvalidNameId && !view.isGpuFeature) {
-        view.featureTitle = DescribeGpuFeature(Profiling::ResolveName(row.feature)).title;
+        view.feature = &cache.Get(ScopeLane::Gpu, row.feature, true);
     }
 
     view.totalMs = Profiling::TicksToMilliseconds(row.totalTicks);
@@ -96,14 +100,14 @@ TableRowView MakeView(const ScopeTableRow& row, bool tree, const Bases& bases)
 
 bool Matches(const TableRowView& view, const TableOptions& options, const std::string& lowerFilter)
 {
-    if ((options.categoryMask & CategoryBit(view.category)) == 0) {
+    if ((options.categoryMask & CategoryBit(view.text->info.category)) == 0) {
         return false;
     }
     if (lowerFilter.empty()) {
         return true;
     }
-    return Lower(view.title).find(lowerFilter) != std::string::npos
-        || Lower(view.rawName).find(lowerFilter) != std::string::npos;
+    return view.text->lowerTitle.find(lowerFilter) != std::string::npos
+        || view.text->lowerRaw.find(lowerFilter) != std::string::npos;
 }
 
 bool IsCollapsed(const std::vector<std::uint64_t>& collapsed, std::uint64_t pathKey) noexcept
@@ -113,9 +117,28 @@ bool IsCollapsed(const std::vector<std::uint64_t>& collapsed, std::uint64_t path
 
 } // namespace
 
-TableModel BuildTableModel(const Profiling::FrameRecord& frame, const TableOptions& options, std::size_t maxRows)
+const ScopeText& ScopeTextCache::Get(ScopeLane lane, Profiling::NameId name, bool gpuFeature)
 {
-    TableModel model;
+    if (m_slots.empty()) {
+        m_slots.resize(Profiling::kScopeLaneCount * 2 * kNameSlots);
+    }
+    // A name past the table size can only be the shared overflow name.
+    const std::size_t id = name < kNameSlots ? name : Profiling::kOverflowNameId;
+    const std::size_t laneIndex = std::min(static_cast<std::size_t>(lane), Profiling::kScopeLaneCount - 1);
+    std::unique_ptr<ScopeText>& slot = m_slots[(laneIndex * 2 + (gpuFeature ? 1 : 0)) * kNameSlots + id];
+    if (!slot) {
+        slot = MakeText(lane, static_cast<Profiling::NameId>(id), gpuFeature);
+    }
+    return *slot;
+}
+
+void BuildTableModel(const Profiling::FrameRecord& frame, const TableOptions& options, const Profiling::LaneRowCaps& caps,
+    ScopeTextCache& cache, TableModel& model)
+{
+    model.rows.clear();
+    model.laneTotalMs = {};
+    model.rowsDropped = 0;
+
     const Bases bases = BasesOf(frame.summary);
     model.cpuBaseMs = bases.cpuMs;
     model.gpuBaseMs = bases.gpuMs;
@@ -132,15 +155,18 @@ TableModel BuildTableModel(const Profiling::FrameRecord& frame, const TableOptio
     }
 
     constexpr std::size_t kNoCap = std::numeric_limits<std::size_t>::max();
-    const Profiling::ScopeTable table = options.tree ? Profiling::BuildScopeTree(frame, options.sort, kNoCap)
-                                                     : Profiling::BuildScopeFlat(frame, options.sort, kNoCap);
+    constexpr Profiling::LaneRowCaps kUncapped{ kNoCap, kNoCap, kNoCap };
+    const Profiling::ScopeTable table = options.tree ? Profiling::BuildScopeTree(frame, options.sort, kUncapped)
+                                                     : Profiling::BuildScopeFlat(frame, options.sort, kUncapped);
     model.treeTruncated = table.treeTruncated;
+    model.rowsDropped = table.rowsDropped;
 
+    // Every row gets a view first; filtering then compacts the same vector.
+    std::vector<TableRowView>& views = model.rows;
     const std::size_t count = table.rows.size();
-    std::vector<TableRowView> views;
     views.reserve(count);
     for (const ScopeTableRow& row : table.rows) {
-        views.push_back(MakeView(row, options.tree, bases));
+        views.push_back(MakeView(row, options.tree, bases, cache));
     }
 
     // Parent of each row: the nearest earlier row of the same lane with a smaller depth.
@@ -166,29 +192,39 @@ TableModel BuildTableModel(const Profiling::FrameRecord& frame, const TableOptio
         }
     }
 
+    // Visible rows are decided on the intact vector; the compaction below overwrites parents.
     std::vector<char> hidden(count, 0);
-    model.rows.reserve(std::min(count, maxRows));
     for (std::size_t i = 0; i < count; ++i) {
         const std::uint32_t p = parent[i];
         if (p != kNoParent && (hidden[p] != 0 || IsCollapsed(options.collapsed, views[p].row.pathKey))) {
             hidden[i] = 1;
         }
+    }
+
+    std::array<std::size_t, Profiling::kScopeLaneCount> laneRows{};
+    std::size_t written = 0;
+    for (std::size_t i = 0; i < count; ++i) {
         if (keep[i] == 0 || hidden[i] != 0) {
             continue;
         }
-        if (model.rows.size() < maxRows) {
-            model.rows.push_back(std::move(views[i]));
-        } else {
+        const std::size_t lane = std::min(static_cast<std::size_t>(views[i].row.lane), Profiling::kScopeLaneCount - 1);
+        if (laneRows[lane] >= caps[lane]) {
             ++model.rowsDropped;
+            continue;
         }
+        ++laneRows[lane];
+        if (written != i) {
+            views[written] = std::move(views[i]);
+        }
+        ++written;
     }
-    return model;
+    views.resize(written);
 }
 
 namespace {
 
 struct Candidate {
-    ScopeInfo info;
+    const ScopeText* text = nullptr;
     double ms = 0.0;
 };
 
@@ -196,15 +232,15 @@ void AppendTop(std::vector<Candidate>& list, double base, bool gpu, std::vector<
 {
     std::stable_sort(list.begin(), list.end(), [](const Candidate& a, const Candidate& b) { return a.ms > b.ms; });
     for (std::size_t i = 0; i < list.size() && i < kTopThingsPerLane; ++i) {
-        out.push_back({ list[i].info.title, list[i].info.hint, list[i].ms, list[i].ms / base * 100.0, gpu });
+        out.push_back({ list[i].text, list[i].ms, list[i].ms / base * 100.0, gpu });
     }
 }
 
 } // namespace
 
-std::vector<TopThing> BuildTopThings(const Profiling::FrameRecord& frame)
+void BuildTopThings(const Profiling::FrameRecord& frame, ScopeTextCache& cache, std::vector<TopThing>& out)
 {
-    std::vector<TopThing> out;
+    out.clear();
     const Bases bases = BasesOf(frame.summary);
 
     std::vector<Candidate> cpu;
@@ -218,16 +254,16 @@ std::vector<TopThing> BuildTopThings(const Profiling::FrameRecord& frame)
             if (ms / bases.cpuMs * 100.0 < kTopThingMinPercent) {
                 continue;
             }
-            ScopeInfo info = DescribeScope(Profiling::ResolveName(agg.name), agg.lane, Profiling::SourceOf(agg.name).origin);
-            if (!info.waiting) {
-                cpu.push_back({ std::move(info), ms });
+            const ScopeText& text = cache.Get(agg.lane, agg.name);
+            if (!text.info.waiting) {
+                cpu.push_back({ &text, ms });
             }
         } else if (agg.lane == ScopeLane::Gpu && bases.gpuKnown && Timed(agg.status)) {
             const double ms = Profiling::TicksToMilliseconds(agg.totalTicks);
             if (ms / bases.gpuMs * 100.0 < kTopThingMinPercent) {
                 continue;
             }
-            gpu.push_back({ DescribeScope(Profiling::ResolveName(agg.name), agg.lane, Profiling::ScopeOrigin::Unknown), ms });
+            gpu.push_back({ &cache.Get(agg.lane, agg.name), ms });
         }
     }
 
@@ -237,7 +273,6 @@ std::vector<TopThing> BuildTopThings(const Profiling::FrameRecord& frame)
     if (bases.gpuKnown) {
         AppendTop(gpu, bases.gpuMs, true, out);
     }
-    return out;
 }
 
 PlainSummaryInput MakePlainSummaryInput(const Profiling::FrameSummary& summary)

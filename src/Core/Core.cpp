@@ -6,9 +6,8 @@
 #include "../Application/RenderPasses.h"
 #include "../Profiling/FrameProfiler.h"
 #include "../Profiling/NameTable.h"
-#include "RenderTimingAdapter.h"
-#include "GpuViewMetrics.h"
 #include "../Profiling/ScopeTimer.h"
+#include "GpuViewMetrics.h"
 #include "../Renderer/GpuSkinning/GpuSkinningPipelines.h"
 #include "../Renderer/Culling/ClusterCullMath.h"
 #include "../Renderer/RenderGraph/FullscreenPass.h"
@@ -35,6 +34,7 @@
 #include "../Jobs/JobDispatch.h"
 #include "../Jobs/JobSystem.h"
 #include "Logging.h"
+#include "RenderTimingAdapter.h"
 #include "ScreenPostProcessPassPriorityAssignment.h"
 #include "Plugins/IPluginCapabilityOrchestrator.h"
 #include "Plugins/RenderFeatureCompositor.h"
@@ -799,6 +799,7 @@ void Core::RegisterOffscreenRenderPipelineProviders()
             }
 
             const rg::RenderFeatureScope scope(frame.builder, "GPU Skinning");
+            GTE_PROFILE_SCOPE_ID(FeatureScopeName("GPU Skinning"));
             for (std::size_t i = 0; i < m_gpuSkinningRequestsThisFrame.size(); ++i) {
                 GpuSkinningDispatch dispatch = m_gpuSkinningRequestsThisFrame[i].dispatch;
                 dispatch.outputHandle = m_gpuSkinningHandlesThisFrame[i];
@@ -1529,9 +1530,7 @@ void Core::PublishGpuMetrics(bool primaryActive, bool secondaryActive)
                                                      : Profiling::InternName(pass.owningFeatureName.c_str());
         row.barrierMs = record.barrierMs;
         row.workMs = record.workMs;
-        row.drawCalls = record.drawCalls;
         row.foldedPasses = bucket ? record.foldedPasses : 0u;
-        row.view = ToViewSlot(pass.viewScope);
         row.status = ToSampleStatus(record.state);
         m_gpuPassRowScratch.push_back(row);
     }

@@ -29,14 +29,10 @@ constexpr ImVec4 kColorQuiet(0.6f, 0.6f, 0.6f, 1.0f);
 
 constexpr float kGraphHeight = 110.0f;
 constexpr float kMinTableHeight = 120.0f;
-constexpr std::size_t kMaxTableRows = 512;
+// Row caps per lane (Main, Workers, Gpu); a busy lane never hides another.
+constexpr Profiling::LaneRowCaps kTableLaneCaps{ 384, 64, 128 };
 constexpr double kLimitMessageSeconds = 3.0;
 constexpr float kNamesWarnShare = 0.9f;
-
-bool Radio(const char* label, bool active)
-{
-    return ImGui::RadioButton(label, active);
-}
 
 ImVec4 VerdictColor(Profiling::VerdictKind kind)
 {
@@ -72,11 +68,11 @@ void BuildViewControls(TableOptions& options, bool& showSelf)
     ImGui::SameLine();
     ImGui::TextUnformatted("View:");
     ImGui::SameLine();
-    if (Radio("Tree", options.tree)) {
+    if (ImGui::RadioButton("Tree", options.tree)) {
         options.tree = true;
     }
     ImGui::SameLine();
-    if (Radio("Flat", !options.tree)) {
+    if (ImGui::RadioButton("Flat", !options.tree)) {
         options.tree = false;
     }
     ImGui::SameLine();
@@ -84,11 +80,11 @@ void BuildViewControls(TableOptions& options, bool& showSelf)
     ImGui::SameLine();
     ImGui::TextUnformatted("Show:");
     ImGui::SameLine();
-    if (Radio("Inclusive", !showSelf)) {
+    if (ImGui::RadioButton("Inclusive", !showSelf)) {
         showSelf = false;
     }
     ImGui::SameLine();
-    if (Radio("Self time", showSelf)) {
+    if (ImGui::RadioButton("Self time", showSelf)) {
         showSelf = true;
     }
     ImGui::SameLine();
@@ -121,8 +117,8 @@ void DrawTopThings(const std::vector<TopThing>& things)
         return;
     }
     for (const TopThing& thing : things) {
-        ImGui::TextWrapped("%s%s: %s (%.1f%%)  %s", thing.gpu ? "[GPU] " : "", thing.title.c_str(),
-            FormatDuration(thing.ms).c_str(), thing.percent, thing.hint.c_str());
+        ImGui::TextWrapped("%s%s: %s (%.1f%%)  %s", thing.gpu ? "[GPU] " : "", thing.text->info.title.c_str(),
+            FormatDuration(thing.ms).c_str(), thing.percent, thing.text->info.hint.c_str());
     }
 }
 
@@ -153,6 +149,7 @@ void BuildFilterRow(std::array<char, 64>& filter, TableOptions& options, const T
     }
     ImGui::SameLine();
     if (ImGui::Button("Collapse all")) {
+        options.collapsed.clear();
         for (const TableRowView& row : table.rows) {
             if (row.row.hasChildren) {
                 options.collapsed.push_back(row.row.pathKey);
@@ -172,7 +169,7 @@ void BuildFooter(const Profiling::ScopeHistory& history)
     ImGui::TextDisabled("  History tracks: %zu / %zu", history.TrackCount(), Profiling::kHistoryTracks);
     if (history.DroppedTracks() != 0) {
         ImGui::SameLine();
-        ImGui::TextColored(kColorWarn, "  History tracks dropped: %u", history.DroppedTracks());
+        ImGui::TextColored(kColorWarn, "  rows without history this frame: %u", history.DroppedTracks());
     }
 }
 
@@ -341,9 +338,17 @@ void BuildSpikeSection(Profiling::FrameProfiler& profiler, std::string& pinMessa
 
 void ProfilerPanel::Build(EditorContext& /*ctx*/)
 {
-    ImGui::Begin("Profiler");
-
     Profiling::FrameProfiler& profiler = Profiling::FrameProfiler::Instance();
+    if (!ImGui::Begin("Profiler")) {
+        // Hidden or collapsed: no model work. A frozen copy is dropped once the pause ends.
+        if (!profiler.IsDisplayPaused()) {
+            m_frozenRecord.reset();
+            m_wasPaused = false;
+        }
+        ImGui::End();
+        return;
+    }
+
     BuildCaptureAndPauseControls(profiler);
     BuildViewControls(m_options, m_showSelf);
     if (!profiler.IsCaptureEnabled()) {
@@ -372,9 +377,9 @@ void ProfilerPanel::Build(EditorContext& /*ctx*/)
     m_options.sort = m_showSelf ? Profiling::ScopeSort::SelfDesc : Profiling::ScopeSort::TotalDesc;
 
     if (!paused) {
-        m_points = Profiling::BuildFrameGraphPoints(profiler);
-        m_graph = BuildGraphModel(m_points, profiler.Scopes(), m_tracked,
-            m_showSelf ? Profiling::ScopeSeries::SelfMs : Profiling::ScopeSeries::TotalMs, m_visibility);
+        Profiling::BuildFrameGraphPoints(profiler, m_points);
+        BuildGraphModel(m_points, profiler.Scopes(), m_tracked,
+            m_showSelf ? Profiling::ScopeSeries::SelfMs : Profiling::ScopeSeries::TotalMs, m_visibility, m_graph);
     }
     // Legend toggles and unticked rows apply at once, also on a frozen graph.
     for (std::size_t i = 0; i < 3 && i < m_graph.series.size(); ++i) {
@@ -382,13 +387,13 @@ void ProfilerPanel::Build(EditorContext& /*ctx*/)
     }
     std::erase_if(m_graph.series, [this](const GraphSeries& s) { return !s.isBase && !IsTracked(m_tracked, s.key); });
 
-    m_table = BuildTableModel(record, m_options, kMaxTableRows);
-    const std::vector<TopThing> topThings = gte::BuildTopThings(record);
+    BuildTableModel(record, m_options, kTableLaneCaps, m_textCache, m_table);
+    BuildTopThings(record, m_textCache, m_topThings);
     const ProfilerFrameView view = BuildProfilerFrameView(record, profiler.IsCaptureEnabled());
     const ProfilerVerdictLine verdict = BuildVerdictLine(profiler, view.checks);
 
     BuildSummary(BuildPlainSummary(MakePlainSummaryInput(record.summary)), verdict, view, profiler);
-    DrawTopThings(topThings);
+    DrawTopThings(m_topThings);
 
     ImGui::SeparatorText("Frame time");
     DrawProfilerGraph(m_graph, m_visibility, m_tracked, kGraphHeight);
@@ -413,6 +418,10 @@ void ProfilerPanel::Build(EditorContext& /*ctx*/)
         if (state.limitRefused) {
             m_limitMessageUntil = ImGui::GetTime() + kLimitMessageSeconds;
         }
+    }
+    if (m_table.rowsDropped != 0) {
+        ImGui::TextColored(kColorWarn, "%u rows hidden (too many to list). Use the filter to narrow the table.",
+            m_table.rowsDropped);
     }
 
     BuildFooter(profiler.Scopes());

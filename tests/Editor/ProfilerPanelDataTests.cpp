@@ -31,28 +31,6 @@ TEST(ProfilerPanelDataTest, FormatDurationProducesExpectedText)
     EXPECT_EQ(FormatDuration(2.4), "2.40 ms");
 }
 
-TEST(ProfilerPanelDataTest, FormatFrameTimeSummaryComputesFpsCorrectly)
-{
-    EXPECT_EQ(FormatFrameTimeSummary(1000.0 / 60.0), "16.67 ms / 60 FPS");
-    EXPECT_EQ(FormatFrameTimeSummary(1000.0 / 30.0), "33.33 ms / 30 FPS");
-}
-
-TEST(ProfilerPanelDataTest, FormatFrameTimeSummaryGuardsAgainstNonPositiveInput)
-{
-    EXPECT_EQ(FormatFrameTimeSummary(0.0), "N/A");
-    EXPECT_EQ(FormatFrameTimeSummary(-5.0), "N/A");
-}
-
-TEST(ProfilerPanelDataTest, FormatCountGroupsThousandsCorrectly)
-{
-    EXPECT_EQ(FormatCount(0), "0");
-    EXPECT_EQ(FormatCount(42), "42");
-    EXPECT_EQ(FormatCount(999), "999");
-    EXPECT_EQ(FormatCount(1000), "1,000");
-    EXPECT_EQ(FormatCount(128400), "128,400");
-    EXPECT_EQ(FormatCount(1234567), "1,234,567");
-}
-
 TEST(ProfilerPanelDataTest, GpuTimingLineShowsANumberOnlyForPresent)
 {
     using Profiling::SampleStatus;

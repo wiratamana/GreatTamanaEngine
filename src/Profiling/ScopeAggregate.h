@@ -23,9 +23,7 @@ struct GpuPassRow {
     NameId feature = kInvalidNameId;
     float barrierMs = 0.0f;
     float workMs = 0.0f;
-    std::uint32_t drawCalls = 0;
     std::uint32_t foldedPasses = 0; // > 0: the row stands for several folded passes
-    ViewSlot view = ViewSlot::Shared;
     SampleStatus status = SampleStatus::Absent;
 };
 
@@ -37,7 +35,6 @@ struct ScopeAggregate {
     NameId name = kInvalidNameId;
     NameId feature = kInvalidNameId; // GPU rows: owning feature
     std::uint32_t calls = 0;
-    std::uint16_t minDepth = 0; // Main lane: shallowest depth seen
     ScopeLane lane = ScopeLane::Main;
     ScopeKind kind = ScopeKind::Work;
     SampleStatus status = SampleStatus::Present;

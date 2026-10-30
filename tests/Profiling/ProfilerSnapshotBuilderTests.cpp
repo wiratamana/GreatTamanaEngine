@@ -384,6 +384,38 @@ TEST_F(ProfilerSnapshotBuilderTest, AHotScopeKeepsExactCallsInTheFlatTableWhenTh
     EXPECT_EQ(hot->calls, 3000u);
 }
 
+TEST_F(ProfilerSnapshotBuilderTest, ALongMainLaneStillLeavesRoomForTheGpuRows)
+{
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    const std::size_t extra = 10;
+    const std::size_t distinct = kSnapshotLaneRowCaps[static_cast<std::size_t>(ScopeLane::Main)] + extra;
+    profiler.BeginFrame();
+    for (std::size_t i = 0; i < distinct; ++i) {
+        RunScope(("LaneCapMain" + std::to_string(i)).c_str());
+    }
+    GpuPassRow pass;
+    pass.pass = InternName("LaneCapPass");
+    pass.feature = InternName("LaneCapFeature");
+    pass.workMs = 1.0f;
+    pass.status = SampleStatus::Present;
+    const std::array<GpuPassRow, 1> gpu{ pass };
+    profiler.SetGpuPassRows(gpu);
+    profiler.EndFrame();
+
+    const ProfilerSnapshot snapshot = BuildProfilerSnapshot(profiler, SnapshotInputs{});
+    ASSERT_NE(snapshot.tables, nullptr);
+    const SnapshotTables& tables = *snapshot.tables;
+    const auto gpuRows = [](const auto& rows, std::uint32_t count) {
+        return std::count_if(rows.begin(), rows.begin() + count,
+            [](const SnapshotTableRow& row) { return row.lane == static_cast<std::uint8_t>(ScopeLane::Gpu); });
+    };
+
+    EXPECT_EQ(tables.treeDropped, extra);
+    EXPECT_EQ(gpuRows(tables.tree, tables.treeCount), 2); // feature row and its pass
+    EXPECT_EQ(tables.flatDropped, extra);
+    EXPECT_EQ(gpuRows(tables.flat, tables.flatCount), 1);
+}
+
 TEST_F(ProfilerSnapshotBuilderTest, LongTableNamesAreCutAt95Bytes)
 {
     const std::string longName(150, 'x');

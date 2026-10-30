@@ -54,40 +54,6 @@ std::string FormatDuration(double milliseconds)
     return std::string(buffer);
 }
 
-std::string FormatFrameTimeSummary(double cpuMilliseconds)
-{
-    if (cpuMilliseconds <= 0.0) {
-        return "N/A";
-    }
-
-    const double fps = 1000.0 / cpuMilliseconds;
-    const std::string duration = FormatDuration(cpuMilliseconds);
-
-    char buffer[96];
-    std::snprintf(buffer, sizeof(buffer), "%s / %.0f FPS", duration.c_str(), fps);
-    return std::string(buffer);
-}
-
-std::string FormatCount(std::uint64_t value)
-{
-    const std::string digits = std::to_string(value);
-
-    std::string result;
-    result.reserve(digits.size() + digits.size() / 3);
-
-    int sinceLastSeparator = 0;
-    for (auto it = digits.rbegin(); it != digits.rend(); ++it) {
-        if (sinceLastSeparator != 0 && sinceLastSeparator % 3 == 0) {
-            result.push_back(',');
-        }
-        result.push_back(*it);
-        ++sinceLastSeparator;
-    }
-
-    std::reverse(result.begin(), result.end());
-    return result;
-}
-
 std::string FormatGpuTimingLine(Profiling::SampleStatus status, double milliseconds)
 {
     switch (status) {

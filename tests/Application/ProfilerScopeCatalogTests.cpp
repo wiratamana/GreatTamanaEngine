@@ -107,7 +107,7 @@ TEST(ProfilerScopeCatalogTest, EveryExactNameHasItsListedText)
         const ScopeInfo info = DescribeScope(c.name, ScopeLane::Main, ScopeOrigin::Engine);
         EXPECT_FALSE(info.title.empty()) << c.name;
         EXPECT_FALSE(info.explanation.empty()) << c.name;
-        EXPECT_FALSE(IsFallbackInfo(info)) << c.name;
+        EXPECT_FALSE(info.generic) << c.name;
         EXPECT_EQ(info.category, c.category) << c.name;
         EXPECT_EQ(info.waiting, c.waiting) << c.name;
     }
@@ -137,7 +137,7 @@ TEST(ProfilerScopeCatalogTest, PrefixRulesCarryTheNamePart)
         const std::string_view part = c.name.substr(c.name.find('.') + 1);
         EXPECT_NE(info.title.find(part), std::string::npos) << c.name;
         EXPECT_EQ(info.category, c.category) << c.name;
-        EXPECT_FALSE(IsFallbackInfo(info)) << c.name;
+        EXPECT_FALSE(info.generic) << c.name;
     }
 
     const ScopeInfo callback = DescribeScope("Feature.A.cb", ScopeLane::Main, ScopeOrigin::Engine);
@@ -154,7 +154,7 @@ TEST(ProfilerScopeCatalogTest, EveryGpuWaitSiteHasItsOwnExplanation)
         const ScopeInfo info = DescribeScope(name, ScopeLane::Main, ScopeOrigin::Engine);
         EXPECT_TRUE(info.waiting) << name;
         EXPECT_EQ(info.category, ScopeCategory::Waiting) << name;
-        EXPECT_FALSE(IsFallbackInfo(info)) << name;
+        EXPECT_FALSE(info.generic) << name;
         EXPECT_TRUE(explanations.insert(info.explanation).second) << name;
     }
 
@@ -176,7 +176,7 @@ TEST(ProfilerScopeCatalogTest, UnknownNamesFallBackByOrigin)
         const ScopeInfo info = DescribeScope("sample::Other", ScopeLane::Main, origin);
         EXPECT_EQ(info.category, ScopeCategory::Other);
         EXPECT_EQ(info.title, "sample::Other");
-        EXPECT_TRUE(IsFallbackInfo(info));
+        EXPECT_TRUE(info.generic);
     }
 }
 

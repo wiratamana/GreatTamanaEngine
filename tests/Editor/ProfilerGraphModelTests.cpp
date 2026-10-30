@@ -57,11 +57,19 @@ std::unique_ptr<Profiling::ScopeHistory> MakeHistory(const char* name, std::size
     return history;
 }
 
+GraphModel Build(std::span<const FrameGraphPoint> points, const Profiling::ScopeHistory& history,
+    std::span<const TrackedKey> tracked, Profiling::ScopeSeries series, const GraphVisibility& visibility)
+{
+    GraphModel model;
+    BuildGraphModel(points, history, tracked, series, visibility, model);
+    return model;
+}
+
 TEST(ProfilerGraphModelTest, BaseSeriesHaveFixedOrderColorsAndValues)
 {
     const auto history = std::make_unique<Profiling::ScopeHistory>();
     const std::vector<FrameGraphPoint> points = MakePoints(5);
-    const GraphModel model = BuildGraphModel(points, *history, {}, Profiling::ScopeSeries::TotalMs, GraphVisibility{});
+    const GraphModel model = Build(points, *history, {}, Profiling::ScopeSeries::TotalMs, GraphVisibility{});
 
     ASSERT_EQ(model.series.size(), 3u);
     EXPECT_EQ(model.series[0].color.r, kGraphFrameColor.r);
@@ -79,7 +87,7 @@ TEST(ProfilerGraphModelTest, GpuIsAGapWhenNotPresentAndBusyNeverNegative)
     const auto history = std::make_unique<Profiling::ScopeHistory>();
     std::vector<FrameGraphPoint> points;
     points.push_back(MakePoint(0, 10.0, 50.0, 3.0f, SampleStatus::Absent));
-    const GraphModel model = BuildGraphModel(points, *history, {}, Profiling::ScopeSeries::TotalMs, GraphVisibility{});
+    const GraphModel model = Build(points, *history, {}, Profiling::ScopeSeries::TotalMs, GraphVisibility{});
 
     EXPECT_TRUE(std::isnan(model.series[2].values[0]));
     EXPECT_FLOAT_EQ(model.series[1].values[0], 0.0f);
@@ -93,14 +101,14 @@ TEST(ProfilerGraphModelTest, AxisIsAtLeastOneFrameAtSixtyFpsAndIgnoresHiddenLine
 
     GraphVisibility visibility;
     visibility.gpu = false;
-    GraphModel model = BuildGraphModel(points, *history, {}, Profiling::ScopeSeries::TotalMs, visibility);
+    GraphModel model = Build(points, *history, {}, Profiling::ScopeSeries::TotalMs, visibility);
     EXPECT_GE(model.axisMaxMs, 16.7f);
     EXPECT_FALSE(model.guideLow);
     EXPECT_FALSE(model.guideHigh);
     EXPECT_FALSE(model.series[2].visible);
     EXPECT_FLOAT_EQ(model.series[2].values[0], 500.0f);
 
-    model = BuildGraphModel(points, *history, {}, Profiling::ScopeSeries::TotalMs, GraphVisibility{});
+    model = Build(points, *history, {}, Profiling::ScopeSeries::TotalMs, GraphVisibility{});
     EXPECT_FLOAT_EQ(model.axisMaxMs, 550.0f);
     EXPECT_TRUE(model.guideLow);
     EXPECT_TRUE(model.guideHigh);
@@ -110,7 +118,7 @@ TEST(ProfilerGraphModelTest, WindowKeepsTheNewestFrames)
 {
     const auto history = std::make_unique<Profiling::ScopeHistory>();
     const std::vector<FrameGraphPoint> points = MakePoints(kGraphWindowFrames + 10);
-    const GraphModel model = BuildGraphModel(points, *history, {}, Profiling::ScopeSeries::TotalMs, GraphVisibility{});
+    const GraphModel model = Build(points, *history, {}, Profiling::ScopeSeries::TotalMs, GraphVisibility{});
 
     ASSERT_EQ(model.frameIndices.size(), kGraphWindowFrames);
     EXPECT_EQ(model.frameIndices.front(), 10u);
@@ -123,7 +131,7 @@ TEST(ProfilerGraphModelTest, TrackedRowComesFromHistoryWithItsPaletteColor)
     const std::vector<FrameGraphPoint> points = MakePoints(5);
     const TrackedKey key{ ScopeLane::Main, Profiling::InternName("TrackedSample") };
     const std::vector<TrackedKey> tracked{ key };
-    const GraphModel model = BuildGraphModel(points, *history, tracked, Profiling::ScopeSeries::TotalMs, GraphVisibility{});
+    const GraphModel model = Build(points, *history, tracked, Profiling::ScopeSeries::TotalMs, GraphVisibility{});
 
     ASSERT_EQ(model.series.size(), 4u);
     const GraphSeries& s = model.series[3];
@@ -144,9 +152,34 @@ TEST(ProfilerGraphModelTest, UntrackedNameIsOmittedAndMisalignedHistoryIsFlagged
     const std::vector<TrackedKey> tracked{ known, unknown };
 
     const std::vector<FrameGraphPoint> shifted = MakePoints(8);
-    const GraphModel model = BuildGraphModel(shifted, *history, tracked, Profiling::ScopeSeries::TotalMs, GraphVisibility{});
+    const GraphModel model = Build(shifted, *history, tracked, Profiling::ScopeSeries::TotalMs, GraphVisibility{});
     EXPECT_EQ(model.series.size(), 4u);
     EXPECT_TRUE(model.historyOutOfSync);
+}
+
+TEST(ProfilerGraphModelTest, RefillingTheSameModelGivesTheSameAsAFreshOne)
+{
+    const auto history = MakeHistory("TrackedSample", 5);
+    const TrackedKey key{ ScopeLane::Main, Profiling::InternName("TrackedSample") };
+    const std::vector<TrackedKey> tracked{ key };
+    const std::vector<FrameGraphPoint> points = MakePoints(5);
+
+    GraphModel reused;
+    BuildGraphModel(MakePoints(9), *history, {}, Profiling::ScopeSeries::TotalMs, GraphVisibility{}, reused);
+    BuildGraphModel(points, *history, tracked, Profiling::ScopeSeries::TotalMs, GraphVisibility{}, reused);
+    const GraphModel fresh = Build(points, *history, tracked, Profiling::ScopeSeries::TotalMs, GraphVisibility{});
+
+    ASSERT_EQ(reused.series.size(), fresh.series.size());
+    EXPECT_EQ(reused.frameIndices, fresh.frameIndices);
+    for (std::size_t i = 0; i < fresh.series.size(); ++i) {
+        EXPECT_EQ(reused.series[i].label, fresh.series[i].label);
+        EXPECT_EQ(reused.series[i].isBase, fresh.series[i].isBase);
+        ASSERT_EQ(reused.series[i].values.size(), fresh.series[i].values.size());
+    }
+
+    // Dropping the tracked row shrinks the model back to the base lines.
+    BuildGraphModel(points, *history, {}, Profiling::ScopeSeries::TotalMs, GraphVisibility{}, reused);
+    EXPECT_EQ(reused.series.size(), 3u);
 }
 
 TEST(ProfilerGraphModelTest, NinthTrackedRowIsRefused)

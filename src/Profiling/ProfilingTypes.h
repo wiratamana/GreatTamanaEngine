@@ -76,12 +76,11 @@ struct FrameRecord {
     ScopeEventBuffer scopes;
     WorkerEventBuffer workers;
     ScopeAggregateBuffer aggregates; // all lanes
-    GpuPassRowBuffer gpuPasses;
 };
 
 // A frozen spike holds a whole frame record, so its size decides the memory of the spike store.
 static_assert(sizeof(FrameRecord) <= sizeof(FrameSummary) + sizeof(ScopeEventBuffer) + sizeof(WorkerEventBuffer)
-        + sizeof(ScopeAggregateBuffer) + sizeof(GpuPassRowBuffer) + 64,
+        + sizeof(ScopeAggregateBuffer) + 64,
     "FrameRecord grew past the sum of its parts");
 
 } // namespace gte::Profiling

@@ -55,6 +55,11 @@ struct SnapshotFrameRow {
 
 inline constexpr std::size_t kSnapshotTableRows = 256;
 
+// Rows kept per lane (Main, Workers, Gpu), so a long Main tree never hides the other lanes.
+inline constexpr std::array<std::size_t, kScopeLaneCount> kSnapshotLaneRowCaps{ 160, 32, 64 };
+static_assert(kSnapshotLaneRowCaps[0] + kSnapshotLaneRowCaps[1] + kSnapshotLaneRowCaps[2] <= kSnapshotTableRows,
+    "lane caps must fit the table arrays");
+
 // One row of the call table, in plain units (not Metric) to keep rows small.
 struct SnapshotTableRow {
     std::array<char, 96> name{};

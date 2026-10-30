@@ -38,6 +38,8 @@ private:
     std::vector<Profiling::FrameGraphPoint> m_points;
     GraphModel m_graph;
     TableModel m_table;
+    ScopeTextCache m_textCache; // row text, built once per name; the table and top list point into it
+    std::vector<TopThing> m_topThings;
     std::vector<float> m_memoryScratch;
 
     // Why the last pin request was refused; empty when it was not.

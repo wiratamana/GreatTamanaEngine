@@ -4,6 +4,7 @@
 #include "ScopeAggregate.h"
 #include "ScopeEvent.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -28,16 +29,19 @@ struct ScopeTableRow {
 
 struct ScopeTable {
     std::vector<ScopeTableRow> rows; // lanes in order Main, Workers, Gpu; pre-order
-    std::uint32_t rowsDropped = 0;   // rows beyond maxRows
+    std::uint32_t rowsDropped = 0;   // rows beyond the cap of their lane, all lanes together
     bool treeTruncated = false;      // tree mode only: events were dropped, so the tree is partial
 };
 
 enum class ScopeSort : std::uint8_t { CallOrder, TotalDesc, SelfDesc };
 
+// Row cap per lane, indexed by ScopeLane (Main, Workers, Gpu). A busy lane never pushes out another.
+using LaneRowCaps = std::array<std::size_t, kScopeLaneCount>;
+
 // Merged call tree. Main lane comes from events, Workers lane is flat, Gpu lane is feature -> pass.
-ScopeTable BuildScopeTree(const FrameRecord& frame, ScopeSort sort, std::size_t maxRows);
+ScopeTable BuildScopeTree(const FrameRecord& frame, ScopeSort sort, const LaneRowCaps& caps);
 
 // Flat rows from the aggregates. Complete even when events were dropped.
-ScopeTable BuildScopeFlat(const FrameRecord& frame, ScopeSort sort, std::size_t maxRows);
+ScopeTable BuildScopeFlat(const FrameRecord& frame, ScopeSort sort, const LaneRowCaps& caps);
 
 } // namespace gte::Profiling

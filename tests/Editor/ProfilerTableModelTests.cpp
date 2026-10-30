@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace gte {
 namespace {
@@ -70,10 +72,26 @@ std::unique_ptr<FrameRecord> MakeTreeFrame()
     return frame;
 }
 
+constexpr Profiling::LaneRowCaps kAmple{ 100, 100, 100 };
+
+// Models point into the cache, so one cache outlives every test.
+ScopeTextCache& SharedCache()
+{
+    static ScopeTextCache cache;
+    return cache;
+}
+
+TableModel Build(const FrameRecord& frame, const TableOptions& options, const Profiling::LaneRowCaps& caps = kAmple)
+{
+    TableModel model;
+    BuildTableModel(frame, options, caps, SharedCache(), model);
+    return model;
+}
+
 const TableRowView* Find(const TableModel& model, const char* rawName)
 {
     for (const TableRowView& row : model.rows) {
-        if (row.rawName == rawName) {
+        if (row.text->rawName == rawName) {
             return &row;
         }
     }
@@ -89,7 +107,7 @@ TEST(ProfilerTableModelTest, PercentUsesFrameForCpuAndSpanForGpu)
 
     TableOptions options;
     options.tree = false;
-    const TableModel model = BuildTableModel(*frame, options, 100);
+    const TableModel model = Build(*frame, options);
 
     const TableRowView* cpu = Find(model, "Offscreen");
     const TableRowView* gpu = Find(model, "PassA");
@@ -99,7 +117,7 @@ TEST(ProfilerTableModelTest, PercentUsesFrameForCpuAndSpanForGpu)
     EXPECT_DOUBLE_EQ(cpu->percentOfBase, 50.0);
     EXPECT_TRUE(gpu->percentKnown);
     EXPECT_DOUBLE_EQ(gpu->percentOfBase, 50.0);
-    EXPECT_FALSE(gpu->featureTitle.empty());
+    EXPECT_NE(gpu->feature, nullptr);
     EXPECT_TRUE(model.gpuBaseKnown);
 }
 
@@ -112,7 +130,7 @@ TEST(ProfilerTableModelTest, UnknownGpuBaseClearsGpuPercentOnly)
 
     TableOptions options;
     options.tree = false;
-    const TableModel model = BuildTableModel(*frame, options, 100);
+    const TableModel model = Build(*frame, options);
 
     EXPECT_FALSE(model.gpuBaseKnown);
     ASSERT_NE(Find(model, "PassA"), nullptr);
@@ -125,15 +143,15 @@ TEST(ProfilerTableModelTest, TreeKeepsAncestorsOfFilterHitsCaseInsensitive)
     auto frame = MakeTreeFrame();
     TableOptions options;
     options.filter = "OFFSCREEN.BEGIN";
-    TableModel model = BuildTableModel(*frame, options, 100);
+    TableModel model = Build(*frame, options);
 
     ASSERT_EQ(model.rows.size(), 2u);
-    EXPECT_EQ(model.rows[0].rawName, "Offscreen");
-    EXPECT_EQ(model.rows[1].rawName, "Offscreen.Begin");
+    EXPECT_EQ(model.rows[0].text->rawName, "Offscreen");
+    EXPECT_EQ(model.rows[1].text->rawName, "Offscreen.Begin");
     EXPECT_EQ(model.rows[1].row.depth, 1u);
 
     options.filter = "START OF";
-    model = BuildTableModel(*frame, options, 100);
+    model = Build(*frame, options);
     EXPECT_NE(Find(model, "Offscreen.Begin"), nullptr);
     EXPECT_EQ(Find(model, "PhysicsSystem::Update"), nullptr);
 }
@@ -141,12 +159,12 @@ TEST(ProfilerTableModelTest, TreeKeepsAncestorsOfFilterHitsCaseInsensitive)
 TEST(ProfilerTableModelTest, CategoryMaskHidesACategory)
 {
     auto frame = MakeTreeFrame();
-    const TableRowView physics = BuildTableModel(*frame, TableOptions{}, 100).rows.back();
-    ASSERT_EQ(physics.rawName, "PhysicsSystem::Update");
+    const TableRowView physics = Build(*frame, TableOptions{}).rows.back();
+    ASSERT_EQ(physics.text->rawName, "PhysicsSystem::Update");
 
     TableOptions options;
-    options.categoryMask = kAllCategoriesMask & ~CategoryBit(physics.category);
-    const TableModel model = BuildTableModel(*frame, options, 100);
+    options.categoryMask = kAllCategoriesMask & ~CategoryBit(physics.text->info.category);
+    const TableModel model = Build(*frame, options);
     EXPECT_EQ(Find(model, "PhysicsSystem::Update"), nullptr);
     EXPECT_NE(Find(model, "Offscreen"), nullptr);
 }
@@ -154,14 +172,14 @@ TEST(ProfilerTableModelTest, CategoryMaskHidesACategory)
 TEST(ProfilerTableModelTest, CollapsedRowHidesDescendantsButKeepsItsTotals)
 {
     auto frame = MakeTreeFrame();
-    const TableModel full = BuildTableModel(*frame, TableOptions{}, 100);
+    const TableModel full = Build(*frame, TableOptions{});
     ASSERT_EQ(full.rows.size(), 3u);
     const TableRowView* parent = Find(full, "Offscreen");
     ASSERT_NE(parent, nullptr);
 
     TableOptions options;
     options.collapsed.push_back(parent->row.pathKey);
-    const TableModel model = BuildTableModel(*frame, options, 100);
+    const TableModel model = Build(*frame, options);
     ASSERT_EQ(model.rows.size(), 2u);
     EXPECT_EQ(Find(model, "Offscreen.Begin"), nullptr);
     EXPECT_DOUBLE_EQ(Find(model, "Offscreen")->totalMs, 100.0);
@@ -174,19 +192,76 @@ TEST(ProfilerTableModelTest, BlockedRowsAndCatalogWaitsAreWaiting)
     AddEvent(*frame, "Wait.Workers", 10, 20, 0);
     AddEvent(*frame, "PhysicsSystem::Update", 20, 30, 0);
 
-    const TableModel model = BuildTableModel(*frame, TableOptions{}, 100);
+    const TableModel model = Build(*frame, TableOptions{});
     ASSERT_NE(Find(model, "SampleBlockedName"), nullptr);
     EXPECT_TRUE(Find(model, "SampleBlockedName")->waiting);
     EXPECT_TRUE(Find(model, "Wait.Workers")->waiting);
     EXPECT_FALSE(Find(model, "PhysicsSystem::Update")->waiting);
 }
 
-TEST(ProfilerTableModelTest, MaxRowsCapsAfterFilteringAndCountsTheRest)
+TEST(ProfilerTableModelTest, CapsApplyAfterFilteringAndCountTheRest)
 {
     auto frame = MakeTreeFrame();
-    const TableModel model = BuildTableModel(*frame, TableOptions{}, 2);
+    const TableModel model = Build(*frame, TableOptions{}, { 2, 2, 2 });
     EXPECT_EQ(model.rows.size(), 2u);
     EXPECT_EQ(model.rowsDropped, 1u);
+}
+
+TEST(ProfilerTableModelTest, ABusyLaneNeverPushesOutAnotherLane)
+{
+    auto frame = MakeFrame(100.0);
+    for (int i = 0; i < 6; ++i) {
+        const std::string name = "BusyMainScope" + std::to_string(i);
+        AddAggregate(*frame, ScopeLane::Main, name.c_str(), 10, 10);
+    }
+    AddAggregate(*frame, ScopeLane::Gpu, "PassA", 5, 5, SampleStatus::Present, "FeatA");
+    AddAggregate(*frame, ScopeLane::Gpu, "PassB", 4, 4, SampleStatus::Present, "FeatA");
+    SetGpuSpan(*frame, 20.0f, SampleStatus::Present);
+
+    TableOptions options;
+    options.tree = false;
+    const TableModel model = Build(*frame, options, { 3, 3, 3 });
+
+    std::size_t main = 0;
+    std::size_t gpu = 0;
+    for (const TableRowView& row : model.rows) {
+        main += row.row.lane == ScopeLane::Main ? 1 : 0;
+        gpu += row.row.lane == ScopeLane::Gpu ? 1 : 0;
+    }
+    EXPECT_EQ(main, 3u);
+    EXPECT_EQ(gpu, 2u);
+    EXPECT_EQ(model.rowsDropped, 3u);
+}
+
+TEST(ProfilerTableModelTest, RefillingTheSameModelDropsOldRows)
+{
+    auto frame = MakeTreeFrame();
+    TableModel model;
+    ScopeTextCache cache;
+    BuildTableModel(*frame, TableOptions{}, kAmple, cache, model);
+    ASSERT_EQ(model.rows.size(), 3u);
+
+    TableOptions options;
+    options.filter = "physics";
+    BuildTableModel(*frame, options, kAmple, cache, model);
+    ASSERT_EQ(model.rows.size(), 1u);
+    EXPECT_EQ(model.rows[0].text->rawName, "PhysicsSystem::Update");
+    EXPECT_EQ(model.rowsDropped, 0u);
+}
+
+TEST(ProfilerTableModelTest, TextCacheGivesTheSameEntryAndTheCatalogText)
+{
+    ScopeTextCache cache;
+    const Profiling::NameId name = Id("Offscreen");
+    const ScopeText& first = cache.Get(ScopeLane::Main, name);
+    const ScopeText& second = cache.Get(ScopeLane::Main, name);
+    EXPECT_EQ(&first, &second);
+    EXPECT_EQ(first.rawName, "Offscreen");
+    EXPECT_EQ(first.info.title, DescribeScope("Offscreen", ScopeLane::Main, first.origin).title);
+
+    const ScopeText& feature = cache.Get(ScopeLane::Gpu, name, true);
+    EXPECT_NE(&feature, &cache.Get(ScopeLane::Gpu, name, false));
+    EXPECT_EQ(feature.info.title, DescribeGpuFeature("Offscreen").title);
 }
 
 TEST(ProfilerTableModelTest, TopThingsTakeBigNonWaitingCpuRowsAndBigGpuRows)
@@ -199,11 +274,14 @@ TEST(ProfilerTableModelTest, TopThingsTakeBigNonWaitingCpuRowsAndBigGpuRows)
     AddAggregate(*frame, ScopeLane::Gpu, "PassB", 1, 1, SampleStatus::Present, "FeatA");
     SetGpuSpan(*frame, 40.0f, SampleStatus::Present);
 
-    const std::vector<TopThing> things = BuildTopThings(*frame);
+    std::vector<TopThing> things;
+    BuildTopThings(*frame, SharedCache(), things);
     ASSERT_EQ(things.size(), 2u);
     EXPECT_FALSE(things[0].gpu);
     EXPECT_DOUBLE_EQ(things[0].ms, 60.0);
     EXPECT_DOUBLE_EQ(things[0].percent, 60.0);
+    ASSERT_NE(things[0].text, nullptr);
+    EXPECT_EQ(things[0].text->rawName, "PhysicsSystem::Update");
     EXPECT_TRUE(things[1].gpu);
     EXPECT_DOUBLE_EQ(things[1].percent, 25.0);
 }

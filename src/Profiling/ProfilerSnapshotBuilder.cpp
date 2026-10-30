@@ -171,6 +171,7 @@ void FillTableRow(SnapshotTableRow& out, const ScopeTableRow& in, double frameMs
     out.percent = out.percentKnown ? out.totalMs / base * 100.0 : 0.0;
 }
 
+// The lane caps keep the table within the array.
 void CopyTable(std::array<SnapshotTableRow, kSnapshotTableRows>& rows, std::uint32_t& count, std::uint32_t& dropped,
     const ScopeTable& table, double frameMs, double gpuMs)
 {
@@ -179,7 +180,7 @@ void CopyTable(std::array<SnapshotTableRow, kSnapshotTableRows>& rows, std::uint
         FillTableRow(rows[i], table.rows[i], frameMs, gpuMs);
     }
     count = static_cast<std::uint32_t>(used);
-    dropped = table.rowsDropped + static_cast<std::uint32_t>(table.rows.size() - used);
+    dropped = table.rowsDropped;
 }
 
 void FillTables(ProfilerSnapshot& snapshot, const FrameRecord& record)
@@ -190,11 +191,11 @@ void FillTables(ProfilerSnapshot& snapshot, const FrameRecord& record)
         ? static_cast<double>(record.summary.gpu.span.milliseconds)
         : 0.0;
 
-    const ScopeTable tree = BuildScopeTree(record, ScopeSort::CallOrder, kSnapshotTableRows);
+    const ScopeTable tree = BuildScopeTree(record, ScopeSort::CallOrder, kSnapshotLaneRowCaps);
     CopyTable(tables->tree, tables->treeCount, tables->treeDropped, tree, frameMs, gpuMs);
     tables->treeTruncated = tree.treeTruncated;
 
-    const ScopeTable flat = BuildScopeFlat(record, ScopeSort::TotalDesc, kSnapshotTableRows);
+    const ScopeTable flat = BuildScopeFlat(record, ScopeSort::TotalDesc, kSnapshotLaneRowCaps);
     CopyTable(tables->flat, tables->flatCount, tables->flatDropped, flat, frameMs, gpuMs);
     snapshot.tables = std::move(tables);
 }

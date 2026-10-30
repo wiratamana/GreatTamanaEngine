@@ -7,6 +7,7 @@
 
 #include <array>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace gte::Profiling {
@@ -151,6 +152,13 @@ TEST(ScopeHistoryTest, ExhaustedTracksAreCountedAndExistingOnesStayExact)
     history->Record(0, rows);
 
     EXPECT_EQ(history->DroppedTracks(), 1u);
+    history->Record(1, rows); // a gauge of the newest Record, not a running total
+    EXPECT_EQ(history->DroppedTracks(), 1u);
+    rows.push_back(MakeRow(ScopeLane::Main, static_cast<NameId>(kHistoryTracks + 2), 2));
+    history->Record(2, rows); // every unmapped row counts, however many
+    EXPECT_EQ(history->DroppedTracks(), 2u);
+    history->Record(3, std::span<const ScopeAggregate>(rows.data(), 4));
+    EXPECT_EQ(history->DroppedTracks(), 0u);
     EXPECT_EQ(history->TrackCount(), kHistoryTracks);
     std::array<float, 1> out{};
     ASSERT_TRUE(history->CopySeries(ScopeLane::Main, 1, ScopeSeries::TotalMs, out));

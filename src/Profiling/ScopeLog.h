@@ -75,7 +75,6 @@ public:
 
     const ScopeEventBuffer& Buffer() const noexcept { return m_buffer; }
     const ScopeAggregateBuffer& Aggregates() const noexcept { return m_aggregates; }
-    std::uint32_t AggregateNameOutOfRange() const noexcept { return m_aggregateNameOutOfRange; }
     FrameGate& Gate() noexcept { return m_gate; }
 
 private:
@@ -92,14 +91,12 @@ private:
             return;
         }
         if (e.name >= m_aggregateSlot.size()) {
-            ++m_aggregateNameOutOfRange;
             return;
         }
         std::uint16_t& slot = m_aggregateSlot[e.name];
         if (slot == 0) {
             ScopeAggregate row;
             row.name = e.name;
-            row.minDepth = e.depth;
             row.kind = e.kind;
             const std::size_t index = m_aggregates.Add(row);
             if (index == ScopeAggregateBuffer::kNone) {
@@ -112,7 +109,6 @@ private:
         row.selfTicks += self;
         row.maxTicks = std::max(row.maxTicks, total);
         ++row.calls;
-        row.minDepth = std::min(row.minDepth, e.depth);
     }
 
     FrameGate m_gate;
@@ -120,7 +116,6 @@ private:
     std::array<std::uint64_t, kMaxScopeDepth + 1> m_childTicks{};
     std::array<std::uint16_t, kMaxNames + 1> m_aggregateSlot{}; // 0 = none, else row index + 1
     ScopeAggregateBuffer m_aggregates;
-    std::uint32_t m_aggregateNameOutOfRange = 0;
     std::uint16_t m_depth = 0;
 };
 

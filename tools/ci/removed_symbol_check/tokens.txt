@@ -100,3 +100,10 @@ BuildCpuTreeRows
 BuildCpuTreeTable
 BuildCpuScopeTable
 m_groupByName
+FormatFrameTimeSummary
+FormatCount
+FrameGraphRange
+ComputeCpuMillisecondsRange
+AggregateNameOutOfRange
+m_aggregateNameOutOfRange
+IsFallbackInfo

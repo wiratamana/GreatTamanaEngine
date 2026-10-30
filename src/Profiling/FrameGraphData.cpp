@@ -26,33 +26,14 @@ double GraphAxisMaxMilliseconds(double largestVisibleMs) noexcept
     return std::max(kGraphGuideLowMs, largestVisibleMs * 1.1);
 }
 
-std::vector<FrameGraphPoint> BuildFrameGraphPoints(const FrameProfiler& profiler)
+void BuildFrameGraphPoints(const FrameProfiler& profiler, std::vector<FrameGraphPoint>& out)
 {
-    std::vector<FrameGraphPoint> points;
-    points.reserve(profiler.HistoryCount());
-
+    out.clear();
+    out.reserve(profiler.HistoryCount());
     for (std::size_t i = 0; i < profiler.HistoryCount(); ++i) {
         const FrameSummary& frame = profiler.HistoryAt(i);
-        points.push_back({ frame.frameIndex, frame.cpuMilliseconds, frame.memory, CpuBusyMilliseconds(frame), frame.gpu.span });
+        out.push_back({ frame.frameIndex, frame.cpuMilliseconds, frame.memory, CpuBusyMilliseconds(frame), frame.gpu.span });
     }
-    return points;
-}
-
-FrameGraphRange ComputeCpuMillisecondsRange(std::span<const FrameGraphPoint> points)
-{
-    FrameGraphRange range;
-    if (points.empty()) {
-        return range;
-    }
-
-    range.hasData = true;
-    range.minMilliseconds = points[0].cpuMilliseconds;
-    range.maxMilliseconds = points[0].cpuMilliseconds;
-    for (const FrameGraphPoint& point : points.subspan(1)) {
-        range.minMilliseconds = std::min(range.minMilliseconds, point.cpuMilliseconds);
-        range.maxMilliseconds = std::max(range.maxMilliseconds, point.cpuMilliseconds);
-    }
-    return range;
 }
 
 MemoryBytesRange ComputeMemoryBytesRange(std::span<const FrameGraphPoint> points)

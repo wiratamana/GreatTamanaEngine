@@ -13,15 +13,18 @@ namespace gte {
 namespace {
 
 constexpr float kGap = std::numeric_limits<float>::quiet_NaN();
+constexpr std::size_t kBaseSeriesCount = 3; // Frame, CPU busy, GPU
 
-GraphSeries MakeBase(const char* label, GraphColor color, bool visible, std::size_t count)
+// Rewrites a base line in place and keeps the capacity of its value buffer.
+void ResetBase(GraphSeries& s, const char* label, GraphColor color, bool visible, std::size_t count)
 {
-    GraphSeries s;
     s.label = label;
     s.color = color;
     s.visible = visible;
+    s.isBase = true;
+    s.key = TrackedKey{};
+    s.values.clear();
     s.values.reserve(count);
-    return s;
 }
 
 void TrackLargest(const GraphSeries& s, float& largest) noexcept
@@ -62,17 +65,25 @@ bool IsTracked(std::span<const TrackedKey> list, TrackedKey key) noexcept
     return std::find(list.begin(), list.end(), key) != list.end();
 }
 
-GraphModel BuildGraphModel(std::span<const Profiling::FrameGraphPoint> points, const Profiling::ScopeHistory& history,
-    std::span<const TrackedKey> tracked, Profiling::ScopeSeries series, const GraphVisibility& visibility)
+void BuildGraphModel(std::span<const Profiling::FrameGraphPoint> points, const Profiling::ScopeHistory& history,
+    std::span<const TrackedKey> tracked, Profiling::ScopeSeries series, const GraphVisibility& visibility,
+    GraphModel& model)
 {
-    GraphModel model;
     const std::span<const Profiling::FrameGraphPoint> window =
         points.size() > kGraphWindowFrames ? points.last(kGraphWindowFrames) : points;
     const std::size_t count = window.size();
 
-    GraphSeries frame = MakeBase("Frame time", kGraphFrameColor, visibility.frame, count);
-    GraphSeries busy = MakeBase("CPU busy", kGraphCpuBusyColor, visibility.cpuBusy, count);
-    GraphSeries gpu = MakeBase("GPU", kGraphGpuColor, visibility.gpu, count);
+    if (model.series.size() < kBaseSeriesCount) {
+        model.series.resize(kBaseSeriesCount);
+    }
+    GraphSeries& frame = model.series[0];
+    GraphSeries& busy = model.series[1];
+    GraphSeries& gpu = model.series[2];
+    ResetBase(frame, "Frame time", kGraphFrameColor, visibility.frame, count);
+    ResetBase(busy, "CPU busy", kGraphCpuBusyColor, visibility.cpuBusy, count);
+    ResetBase(gpu, "GPU", kGraphGpuColor, visibility.gpu, count);
+
+    model.frameIndices.clear();
     model.frameIndices.reserve(count);
     for (const Profiling::FrameGraphPoint& p : window) {
         model.frameIndices.push_back(p.frameIndex);
@@ -80,24 +91,30 @@ GraphModel BuildGraphModel(std::span<const Profiling::FrameGraphPoint> points, c
         busy.values.push_back(static_cast<float>(p.cpuBusyMilliseconds));
         gpu.values.push_back(static_cast<float>(Profiling::GpuSpanMilliseconds(p.gpuSpan)));
     }
-    model.series.push_back(std::move(frame));
-    model.series.push_back(std::move(busy));
-    model.series.push_back(std::move(gpu));
 
+    // Tracked rows reuse the slots after the base lines; a row without history leaves no slot.
+    std::size_t used = kBaseSeriesCount;
     const std::size_t trackedCount = std::min(tracked.size(), kMaxTrackedRows);
     for (std::size_t i = 0; i < trackedCount && count > 0; ++i) {
-        GraphSeries s;
-        s.isBase = false;
-        s.color = kGraphTrackedColors[i];
-        s.key = tracked[i];
+        if (model.series.size() <= used) {
+            model.series.emplace_back();
+        }
+        GraphSeries& s = model.series[used];
         s.values.assign(count, kGap);
         if (!history.CopySeries(tracked[i].lane, tracked[i].name, series, s.values)) {
             continue;
         }
-        const char* raw = Profiling::ResolveName(tracked[i].name);
-        s.label = DescribeScope(raw, tracked[i].lane, Profiling::SourceOf(tracked[i].name).origin).title;
-        model.series.push_back(std::move(s));
+        if (s.isBase || s.label.empty() || !(s.key == tracked[i])) {
+            const char* raw = Profiling::ResolveName(tracked[i].name);
+            s.label = DescribeScope(raw, tracked[i].lane, Profiling::SourceOf(tracked[i].name).origin).title;
+        }
+        s.isBase = false;
+        s.visible = true;
+        s.color = kGraphTrackedColors[i];
+        s.key = tracked[i];
+        ++used;
     }
+    model.series.resize(used);
 
     model.historyOutOfSync = trackedCount > 0 && count > 0 && history.NewestFrameIndex() != window.back().frameIndex;
 
@@ -109,7 +126,6 @@ GraphModel BuildGraphModel(std::span<const Profiling::FrameGraphPoint> points, c
     model.axisMaxMs = static_cast<float>(axisMax);
     model.guideLow = Profiling::kGraphGuideLowMs < axisMax;
     model.guideHigh = Profiling::kGraphGuideHighMs < axisMax;
-    return model;
 }
 
 } // namespace gte

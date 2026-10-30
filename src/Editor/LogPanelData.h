@@ -57,11 +57,8 @@ struct LevelColor {
 };
 LevelColor ColorForLevel(LogLevel level) noexcept;
 
-// "[12.345s][Frame 42][Warning][Renderer] message text" - the exact,
-// single, shared line format both LogPanel.cpp's rendering AND this
-// file's own test use, so they can never silently drift apart (mirrors
-// ProfilerPanelData.h's FormatDuration()/FormatFrameTimeSummary()
-// precedent).
+// "[12.345s][Frame 42][Warning][Renderer] message text".
+// Shared by the panel and its test so the two cannot drift apart.
 std::string FormatLogEntryLine(const LogEntry& entry);
 
 } // namespace gte

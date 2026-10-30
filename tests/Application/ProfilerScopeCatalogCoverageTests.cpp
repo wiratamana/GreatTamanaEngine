@@ -87,7 +87,7 @@ TEST(ProfilerScopeCatalogCoverageTest, EveryHandWrittenScopeNameIsDescribed)
             CollectNames(text, macro, names);
             for (const std::string& name : names) {
                 ++checked;
-                if (IsFallbackInfo(DescribeScope(name, macro.lane, ScopeOrigin::Engine))) {
+                if (DescribeScope(name, macro.lane, ScopeOrigin::Engine).generic) {
                     missing.insert(name);
                 }
             }

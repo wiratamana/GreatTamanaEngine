@@ -160,14 +160,10 @@ constexpr auto kWaitSites = std::to_array<WaitSite>({
     { "ImGuiBackend", "the user interface renderer is waiting", "" },
 });
 
-std::string Str(std::string_view text)
-{
-    return std::string(text);
-}
-
 ScopeInfo FromEntry(const Entry& entry)
 {
-    return { Str(entry.title), Str(entry.explanation), Str(entry.hint), entry.category, entry.waiting };
+    return { std::string(entry.title), std::string(entry.explanation), std::string(entry.hint), entry.category,
+        entry.waiting };
 }
 
 const Entry* FindExact(std::string_view name)
@@ -204,12 +200,12 @@ ScopeInfo DescribeGpuWait(std::string_view inner)
     }
 
     ScopeInfo info;
-    info.title = "Waiting for the graphics card: " + Str(plain);
+    info.title = "Waiting for the graphics card: " + std::string(plain);
     if (!detail.empty()) {
-        info.title += " (" + Str(detail) + ")";
+        info.title += " (" + std::string(detail) + ")";
     }
-    info.explanation = "The CPU is idle and waits until " + Str(plain) + ". This is not CPU work.";
-    info.hint = Str(hint);
+    info.explanation = "The CPU is idle and waits until " + std::string(plain) + ". This is not CPU work.";
+    info.hint = std::string(hint);
     info.category = Waiting;
     info.waiting = true;
     return info;
@@ -225,8 +221,8 @@ ScopeInfo DescribeGpuPass(std::string_view name)
             "Many small passes were measured together because the measuring budget ran out.";
         return info;
     }
-    info.title = "\"" + Str(name) + "\" on the GPU";
-    info.explanation = "How long the graphics card spent on the render pass \"" + Str(name)
+    info.title = "\"" + std::string(name) + "\" on the GPU";
+    info.explanation = "How long the graphics card spent on the render pass \"" + std::string(name)
         + "\". Waits for earlier passes are included.";
     info.hint = "If this pass is the biggest, make it draw less or run at a lower quality.";
     return info;
@@ -242,15 +238,15 @@ ScopeInfo DescribeByPrefix(std::string_view name, bool& found)
         return DescribeGpuWait(rest.substr(0, rest.size() - 1));
     }
     if (AfterPrefix(name, "Pass.", rest)) {
-        info.title = "Draw step \"" + Str(rest) + "\" (CPU)";
-        info.explanation = "The CPU writes the graphics commands of the render pass \"" + Str(rest)
+        info.title = "Draw step \"" + std::string(rest) + "\" (CPU)";
+        info.explanation = "The CPU writes the graphics commands of the render pass \"" + std::string(rest)
             + "\". Slow means the pass has many draws or heavy setup.";
         info.category = RenderRecord;
         return info;
     }
     if (AfterPrefix(name, "Declare.", rest)) {
-        info.title = "Plan step \"" + Str(rest) + "\"";
-        info.explanation = "The CPU decides which render passes \"" + Str(rest)
+        info.title = "Plan step \"" + std::string(rest) + "\"";
+        info.explanation = "The CPU decides which render passes \"" + std::string(rest)
             + "\" adds for this frame. Slow means too many features or objects to plan.";
         info.category = RenderPrepare;
         return info;
@@ -259,20 +255,20 @@ ScopeInfo DescribeByPrefix(std::string_view name, bool& found)
         const std::size_t dot = rest.find('.');
         const std::string_view feature = rest.substr(0, dot);
         if (dot == std::string_view::npos || dot + 1 >= rest.size()) {
-            info.title = "Render feature \"" + Str(feature) + "\"";
+            info.title = "Render feature \"" + std::string(feature) + "\"";
             info.explanation = "CPU time this render feature needed to add its passes this frame.";
         } else {
             const std::string_view callback = rest.substr(dot + 1);
-            info.title = "Render feature \"" + Str(feature) + "\" (" + Str(callback) + ")";
-            info.explanation = "CPU time of the callback " + Str(callback) + " of the render feature \""
-                + Str(feature) + "\".";
+            info.title = "Render feature \"" + std::string(feature) + "\" (" + std::string(callback) + ")";
+            info.explanation = "CPU time of the callback " + std::string(callback) + " of the render feature \""
+                + std::string(feature) + "\".";
         }
         info.category = RenderFeature;
         return info;
     }
     if (AfterPrefix(name, "Panel.", rest)) {
-        info.title = "Editor panel \"" + Str(rest) + "\"";
-        info.explanation = "Time to draw the editor panel \"" + Str(rest) + "\". It is not part of the game.";
+        info.title = "Editor panel \"" + std::string(rest) + "\"";
+        info.explanation = "Time to draw the editor panel \"" + std::string(rest) + "\". It is not part of the game.";
         info.category = EditorUi;
         return info;
     }
@@ -283,12 +279,13 @@ ScopeInfo DescribeByPrefix(std::string_view name, bool& found)
 ScopeInfo DescribeByOrigin(std::string_view name, ScopeOrigin origin)
 {
     ScopeInfo info;
-    info.title = name.empty() ? "(unnamed)" : Str(name);
+    info.title = name.empty() ? "(unnamed)" : std::string(name);
+    info.generic = true;
     if (origin == ScopeOrigin::Project) {
-        info.explanation = Str(kProjectFallback);
+        info.explanation = std::string(kProjectFallback);
         info.category = ProjectCode;
     } else {
-        info.explanation = Str(kEngineFallback);
+        info.explanation = std::string(kEngineFallback);
         info.category = Other;
     }
     return info;
@@ -356,15 +353,10 @@ ScopeInfo DescribeScope(std::string_view name, ScopeLane lane, ScopeOrigin origi
 ScopeInfo DescribeGpuFeature(std::string_view feature)
 {
     ScopeInfo info;
-    info.title = "Render feature \"" + Str(feature) + "\" (GPU)";
-    info.explanation = "How long the graphics card spent on all passes of the render feature \"" + Str(feature) + "\".";
+    info.title = "Render feature \"" + std::string(feature) + "\" (GPU)";
+    info.explanation = "How long the graphics card spent on all passes of the render feature \"" + std::string(feature) + "\".";
     info.category = GpuWork;
     return info;
-}
-
-bool IsFallbackInfo(const ScopeInfo& info)
-{
-    return info.explanation == kEngineFallback || info.explanation == kProjectFallback;
 }
 
 const char* DescribeVerdict(Profiling::VerdictKind kind)

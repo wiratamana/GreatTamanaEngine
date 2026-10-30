@@ -8,11 +8,15 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <memory>
+#include <vector>
 
 namespace gte::Profiling {
 namespace {
+
+constexpr LaneRowCaps kCap100{ 100, 100, 100 };
 
 // Records scopes through a real log, then copies the result into a heap frame record.
 class Recorder {
@@ -74,6 +78,16 @@ std::vector<NameId> Names(const ScopeTable& table)
     return names;
 }
 
+GpuPassRow MakePass(NameId pass, NameId feature, float workMs, SampleStatus status)
+{
+    GpuPassRow row;
+    row.pass = pass;
+    row.feature = feature;
+    row.workMs = workMs;
+    row.status = status;
+    return row;
+}
+
 TEST(ScopeTableTest, MergesRepeatedChildrenIntoOneRow)
 {
     Recorder rec;
@@ -84,7 +98,7 @@ TEST(ScopeTableTest, MergesRepeatedChildrenIntoOneRow)
     });
     const auto frame = rec.Finish();
 
-    const ScopeTable table = BuildScopeTree(*frame, ScopeSort::CallOrder, 100);
+    const ScopeTable table = BuildScopeTree(*frame, ScopeSort::CallOrder, kCap100);
 
     ASSERT_EQ(table.rows.size(), 2u);
     EXPECT_EQ(table.rows[0].name, 200u);
@@ -109,8 +123,8 @@ TEST(ScopeTableTest, SameNameUnderTwoParentsStaysSeparateWithStableKeys)
     rec.Scope(211, 1, [&] { rec.Leaf(212, 2); });
     const auto frame = rec.Finish();
 
-    const ScopeTable first = BuildScopeTree(*frame, ScopeSort::CallOrder, 100);
-    const ScopeTable second = BuildScopeTree(*frame, ScopeSort::CallOrder, 100);
+    const ScopeTable first = BuildScopeTree(*frame, ScopeSort::CallOrder, kCap100);
+    const ScopeTable second = BuildScopeTree(*frame, ScopeSort::CallOrder, kCap100);
 
     ASSERT_EQ(first.rows.size(), 4u);
     EXPECT_EQ(Names(first), (std::vector<NameId>{ 210, 212, 211, 212 }));
@@ -130,7 +144,7 @@ TEST(ScopeTableTest, PreOrderDepthAndHasChildren)
     });
     const auto frame = rec.Finish();
 
-    const ScopeTable table = BuildScopeTree(*frame, ScopeSort::CallOrder, 100);
+    const ScopeTable table = BuildScopeTree(*frame, ScopeSort::CallOrder, kCap100);
 
     ASSERT_EQ(table.rows.size(), 4u);
     EXPECT_EQ(Names(table), (std::vector<NameId>{ 220, 221, 222, 223 }));
@@ -155,7 +169,7 @@ TEST(ScopeTableTest, SortsSiblingsByTotalSelfAndCallOrder)
 
     const auto children = [&](ScopeSort sort) {
         std::vector<NameId> names;
-        for (const ScopeTableRow& row : BuildScopeTree(*frame, sort, 100).rows) {
+        for (const ScopeTableRow& row : BuildScopeTree(*frame, sort, kCap100).rows) {
             if (row.depth == 1) {
                 names.push_back(row.name);
             }
@@ -178,10 +192,41 @@ TEST(ScopeTableTest, CapsRowsAndCountsTheRest)
     });
     const auto frame = rec.Finish();
 
-    const ScopeTable table = BuildScopeTree(*frame, ScopeSort::CallOrder, 4);
+    const ScopeTable table = BuildScopeTree(*frame, ScopeSort::CallOrder, LaneRowCaps{ 4, 100, 100 });
 
     EXPECT_EQ(table.rows.size(), 4u);
     EXPECT_EQ(table.rowsDropped, 7u);
+}
+
+TEST(ScopeTableTest, ALongMainLaneNeverHidesTheGpuLane)
+{
+    Recorder rec;
+    rec.Scope(410, 1, [&] {
+        for (NameId id = 411; id < 421; ++id) {
+            rec.Leaf(id, 1);
+        }
+    });
+    auto frame = rec.Finish();
+    const std::array<GpuPassRow, 2> passes{
+        MakePass(500, 600, 2.0f, SampleStatus::Present),
+        MakePass(501, 600, 1.0f, SampleStatus::Present),
+    };
+    AppendGpuAggregates(passes, frame->aggregates);
+
+    const auto gpuRows = [](const ScopeTable& table) {
+        return std::count_if(table.rows.begin(), table.rows.end(),
+            [](const ScopeTableRow& row) { return row.lane == ScopeLane::Gpu; });
+    };
+
+    const ScopeTable tree = BuildScopeTree(*frame, ScopeSort::CallOrder, LaneRowCaps{ 4, 100, 100 });
+    EXPECT_EQ(tree.rows.size(), 4u + 3u); // 4 Main rows, then the feature row and its 2 passes
+    EXPECT_EQ(gpuRows(tree), 3);
+    EXPECT_EQ(tree.rowsDropped, 7u);
+
+    const ScopeTable flat = BuildScopeFlat(*frame, ScopeSort::CallOrder, LaneRowCaps{ 4, 100, 1 });
+    EXPECT_EQ(gpuRows(flat), 1);
+    EXPECT_EQ(flat.rows.size(), 4u + 1u);
+    EXPECT_EQ(flat.rowsDropped, 7u + 1u);
 }
 
 TEST(ScopeTableTest, OrphanAttachesToNearestOpenRowAndDroppedEventsMarkTruncation)
@@ -194,7 +239,7 @@ TEST(ScopeTableTest, OrphanAttachesToNearestOpenRowAndDroppedEventsMarkTruncatio
     }
     ASSERT_GT(frame->scopes.Dropped(), 0u);
 
-    const ScopeTable table = BuildScopeTree(*frame, ScopeSort::CallOrder, 100);
+    const ScopeTable table = BuildScopeTree(*frame, ScopeSort::CallOrder, kCap100);
 
     const ScopeTableRow* orphan = FindRow(table, 301);
     ASSERT_NE(orphan, nullptr);
@@ -213,8 +258,8 @@ TEST(ScopeTableTest, FlatRowsStayCompleteWhenEventsAreDropped)
     const auto frame = rec.Finish();
     ASSERT_GT(frame->scopes.Dropped(), 0u);
 
-    const ScopeTable tree = BuildScopeTree(*frame, ScopeSort::CallOrder, 100);
-    const ScopeTable flat = BuildScopeFlat(*frame, ScopeSort::CallOrder, 100);
+    const ScopeTable tree = BuildScopeTree(*frame, ScopeSort::CallOrder, kCap100);
+    const ScopeTable flat = BuildScopeFlat(*frame, ScopeSort::CallOrder, kCap100);
 
     EXPECT_TRUE(tree.treeTruncated);
     EXPECT_FALSE(flat.treeTruncated);
@@ -238,18 +283,8 @@ TEST(ScopeTableTest, MarkersNeverAppear)
     });
     const auto frame = rec.Finish();
 
-    EXPECT_EQ(FindRow(BuildScopeTree(*frame, ScopeSort::CallOrder, 100), 441), nullptr);
-    EXPECT_EQ(FindRow(BuildScopeFlat(*frame, ScopeSort::CallOrder, 100), 441), nullptr);
-}
-
-GpuPassRow MakePass(NameId pass, NameId feature, float workMs, SampleStatus status)
-{
-    GpuPassRow row;
-    row.pass = pass;
-    row.feature = feature;
-    row.workMs = workMs;
-    row.status = status;
-    return row;
+    EXPECT_EQ(FindRow(BuildScopeTree(*frame, ScopeSort::CallOrder, kCap100), 441), nullptr);
+    EXPECT_EQ(FindRow(BuildScopeFlat(*frame, ScopeSort::CallOrder, kCap100), 441), nullptr);
 }
 
 TEST(ScopeTableTest, GpuTreeSumsPassesUnderTheirFeature)
@@ -262,7 +297,7 @@ TEST(ScopeTableTest, GpuTreeSumsPassesUnderTheirFeature)
     auto frame = std::make_unique<FrameRecord>();
     AppendGpuAggregates(passes, frame->aggregates);
 
-    const ScopeTable tree = BuildScopeTree(*frame, ScopeSort::CallOrder, 100);
+    const ScopeTable tree = BuildScopeTree(*frame, ScopeSort::CallOrder, kCap100);
 
     ASSERT_EQ(tree.rows.size(), 4u);
     EXPECT_EQ(Names(tree), (std::vector<NameId>{ 600, 500, 501, 502 }));
@@ -277,7 +312,7 @@ TEST(ScopeTableTest, GpuTreeSumsPassesUnderTheirFeature)
     EXPECT_EQ(tree.rows[3].depth, 0u);
     EXPECT_FALSE(tree.rows[3].hasChildren);
 
-    const ScopeTable flat = BuildScopeFlat(*frame, ScopeSort::CallOrder, 100);
+    const ScopeTable flat = BuildScopeFlat(*frame, ScopeSort::CallOrder, kCap100);
 
     ASSERT_EQ(flat.rows.size(), 3u);
     EXPECT_EQ(Names(flat), (std::vector<NameId>{ 500, 501, 502 }));
@@ -295,8 +330,8 @@ TEST(ScopeTableTest, WorkerRowsFollowTheMainLaneAtDepthZero)
     const std::array<WorkerEvent, 2> events{ { { 0, 10, 451, 0, 0, 0 }, { 20, 50, 451, 1, 0, 0 } } };
     AppendWorkerAggregates(events, frame->aggregates);
 
-    for (const ScopeTable& table : { BuildScopeTree(*frame, ScopeSort::CallOrder, 100),
-             BuildScopeFlat(*frame, ScopeSort::CallOrder, 100) }) {
+    for (const ScopeTable& table : { BuildScopeTree(*frame, ScopeSort::CallOrder, kCap100),
+             BuildScopeFlat(*frame, ScopeSort::CallOrder, kCap100) }) {
         ASSERT_EQ(table.rows.size(), 2u);
         EXPECT_EQ(table.rows[0].lane, ScopeLane::Main);
         EXPECT_EQ(table.rows[1].lane, ScopeLane::Workers);

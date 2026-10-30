@@ -38,12 +38,6 @@ std::string FormatBlockedLine(const Profiling::FrameTotals& totals);
 // "12.34 ms"
 std::string FormatDuration(double milliseconds);
 
-// "16.67 ms / 60 FPS", or "N/A" for a non-positive time.
-std::string FormatFrameTimeSummary(double cpuMilliseconds);
-
-// 128400 -> "128,400"
-std::string FormatCount(std::uint64_t value);
-
 // GPU timing text. Only a Present status shows a number; every other status shows its own word.
 std::string FormatGpuTimingLine(Profiling::SampleStatus status, double milliseconds);
 

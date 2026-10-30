@@ -487,9 +487,6 @@
 #   - Editor/ProfilerPanelDataTests.cpp     - the Editor "Profiler" panel's
 #                                            pure data-shaping/formatting
 #                                            logic (FormatDuration()/
-#                                            FormatFrameTimeSummary()/
-#                                            FormatCount()/
-#                                            ResolveGpuPassCounts()/
 #                                            FormatGpuTimingLine()/
 #                                            CpuScopeTableEmptyMessage() - see
 #                                            src/Editor/ProfilerPanelData.h) -
@@ -835,8 +832,7 @@
 #   Profiling/FrameGraphDataTests.cpp       - Phase 2's pure "FrameProfiler
 #                                            history -> plottable points"
 #                                            reshape (BuildFrameGraphPoints()/
-#                                            ComputeCpuMillisecondsRange()/
-#                                            ComputeGpuMillisecondsRange() -
+#                                            ComputeMemoryBytesRange() -
 #                                            src/Profiling/FrameGraphData.h) -
 #                                            exact frame-index ordering
 #                                            (including ring-buffer

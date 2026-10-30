@@ -1,4 +1,4 @@
-// Tier 1: history to plottable points, and the range helpers.
+// Tier 1: history to plottable points, and the memory range helper.
 #include "Profiling/FrameGraphData.h"
 #include "Profiling/FrameProfiler.h"
 
@@ -25,12 +25,11 @@ protected:
     }
 };
 
-FrameGraphPoint MakeCpuPoint(std::uint64_t frameIndex, double cpuMilliseconds)
+std::vector<FrameGraphPoint> PointsOf(const FrameProfiler& profiler)
 {
-    FrameGraphPoint point;
-    point.frameIndex = frameIndex;
-    point.cpuMilliseconds = cpuMilliseconds;
-    return point;
+    std::vector<FrameGraphPoint> points;
+    BuildFrameGraphPoints(profiler, points);
+    return points;
 }
 
 FrameGraphPoint MakeMemoryPoint(SampleStatus status, std::uint64_t totalBytes)
@@ -43,9 +42,8 @@ FrameGraphPoint MakeMemoryPoint(SampleStatus status, std::uint64_t totalBytes)
 
 TEST_F(FrameGraphDataTest, EmptyHistoryProducesNoPointsAndNoRange)
 {
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(FrameProfiler::Instance());
+    const std::vector<FrameGraphPoint> points = PointsOf(FrameProfiler::Instance());
     EXPECT_TRUE(points.empty());
-    EXPECT_FALSE(ComputeCpuMillisecondsRange(points).hasData);
     EXPECT_FALSE(ComputeMemoryBytesRange(points).hasData);
 }
 
@@ -62,7 +60,7 @@ TEST_F(FrameGraphDataTest, PointsFollowTheHistoryOldestFirst)
         profiler.EndFrame();
     }
 
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
+    const std::vector<FrameGraphPoint> points = PointsOf(profiler);
     ASSERT_EQ(points.size(), 3u);
     for (std::size_t i = 0; i < points.size(); ++i) {
         EXPECT_EQ(points[i].frameIndex, i);
@@ -86,7 +84,7 @@ TEST_F(FrameGraphDataTest, CaptureOffLeavesNoGapInFrameIndices)
     profiler.BeginFrame();
     profiler.EndFrame();
 
-    const std::vector<FrameGraphPoint> points = BuildFrameGraphPoints(profiler);
+    const std::vector<FrameGraphPoint> points = PointsOf(profiler);
     ASSERT_EQ(points.size(), 2u);
     EXPECT_EQ(points[0].frameIndex, 0u);
     EXPECT_EQ(points[1].frameIndex, 1u);
@@ -99,38 +97,31 @@ TEST_F(FrameGraphDataTest, OpenFrameIsNeverInThePoints)
     profiler.EndFrame();
     profiler.BeginFrame(); // still open
 
-    EXPECT_EQ(BuildFrameGraphPoints(profiler).size(), 1u);
+    EXPECT_EQ(PointsOf(profiler).size(), 1u);
     profiler.EndFrame();
 }
 
-TEST(FrameGraphRangeTest, CpuRangeFindsMinAndMax)
+TEST_F(FrameGraphDataTest, RefillingAReusedVectorGivesTheSameAsAFreshOne)
 {
-    const std::vector<FrameGraphPoint> points = { MakeCpuPoint(0, 8.0), MakeCpuPoint(1, 2.5), MakeCpuPoint(2, 30.0),
-        MakeCpuPoint(3, 11.0) };
+    FrameProfiler& profiler = FrameProfiler::Instance();
+    for (int i = 0; i < 3; ++i) {
+        profiler.BeginFrame();
+        profiler.EndFrame();
+    }
 
-    const FrameGraphRange range = ComputeCpuMillisecondsRange(points);
-    ASSERT_TRUE(range.hasData);
-    EXPECT_DOUBLE_EQ(range.minMilliseconds, 2.5);
-    EXPECT_DOUBLE_EQ(range.maxMilliseconds, 30.0);
-}
+    std::vector<FrameGraphPoint> reused;
+    BuildFrameGraphPoints(profiler, reused);
+    profiler.BeginFrame();
+    profiler.EndFrame();
+    BuildFrameGraphPoints(profiler, reused);
 
-TEST(FrameGraphRangeTest, CpuRangeOfOnePointIsThatPoint)
-{
-    const std::vector<FrameGraphPoint> points = { MakeCpuPoint(0, 4.0) };
-
-    const FrameGraphRange range = ComputeCpuMillisecondsRange(points);
-    ASSERT_TRUE(range.hasData);
-    EXPECT_DOUBLE_EQ(range.minMilliseconds, 4.0);
-    EXPECT_DOUBLE_EQ(range.maxMilliseconds, 4.0);
-}
-
-TEST(FrameGraphRangeTest, CpuRangeAcceptsASubSpan)
-{
-    const std::vector<FrameGraphPoint> points = { MakeCpuPoint(0, 100.0), MakeCpuPoint(1, 3.0), MakeCpuPoint(2, 5.0) };
-
-    const FrameGraphRange range = ComputeCpuMillisecondsRange(std::span<const FrameGraphPoint>(points).subspan(1));
-    ASSERT_TRUE(range.hasData);
-    EXPECT_DOUBLE_EQ(range.maxMilliseconds, 5.0);
+    std::vector<FrameGraphPoint> fresh;
+    BuildFrameGraphPoints(profiler, fresh);
+    ASSERT_EQ(reused.size(), fresh.size());
+    ASSERT_EQ(fresh.size(), 4u);
+    for (std::size_t i = 0; i < fresh.size(); ++i) {
+        EXPECT_EQ(reused[i].frameIndex, fresh[i].frameIndex);
+    }
 }
 
 TEST(FrameGraphRangeTest, MemoryRangeSkipsPointsThatAreNotPresent)

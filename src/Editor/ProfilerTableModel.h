@@ -10,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -22,18 +23,32 @@ constexpr std::uint32_t CategoryBit(ScopeCategory category) noexcept
     return 1u << static_cast<unsigned>(category);
 }
 
+// All text of one scope name. Never changes after it is built.
+struct ScopeText {
+    ScopeInfo info;
+    std::string rawName;
+    std::string sourceText;  // "File.cpp:123"; empty when the site is unknown
+    std::string lowerTitle;  // for the case-insensitive filter
+    std::string lowerRaw;
+    Profiling::ScopeOrigin origin = Profiling::ScopeOrigin::Unknown;
+};
+
+// Builds the text of each (lane, name) once. Entries keep their address for the life of the cache.
+class ScopeTextCache {
+public:
+    // `gpuFeature` selects the text of a render feature sum row instead of a pass row.
+    const ScopeText& Get(Profiling::ScopeLane lane, Profiling::NameId name, bool gpuFeature = false);
+
+private:
+    std::vector<std::unique_ptr<ScopeText>> m_slots; // sized on first use
+};
+
 struct TableRowView {
     Profiling::ScopeTableRow row;
-    std::string title;
-    std::string explanation;
-    std::string hint;
-    std::string rawName;
-    std::string sourceText;   // "File.cpp:123"; empty when the site is unknown
-    std::string featureTitle; // GPU rows: title of the owning feature; empty otherwise
-    ScopeCategory category = ScopeCategory::Other;
-    Profiling::ScopeOrigin origin = Profiling::ScopeOrigin::Unknown;
-    bool waiting = false;     // pure wait: the CPU is idle
-    bool isGpuFeature = false; // tree mode: sum row of one render feature
+    const ScopeText* text = nullptr;    // owned by the cache; never null in a built model
+    const ScopeText* feature = nullptr; // GPU pass rows: text of the owning feature
+    bool waiting = false;               // pure wait: the CPU is idle
+    bool isGpuFeature = false;          // tree mode: sum row of one render feature
     double totalMs = 0.0;
     double selfMs = 0.0;
     double maxMs = 0.0;
@@ -56,24 +71,24 @@ struct TableModel {
     double cpuBaseMs = 0.0;  // frame time: base of Main and Workers percent
     double gpuBaseMs = 0.0;  // GPU span: base of Gpu percent
     bool gpuBaseKnown = false;
-    std::uint32_t rowsDropped = 0;
+    std::uint32_t rowsDropped = 0; // rows cut by the lane caps, after filtering
     bool treeTruncated = false;
 };
 
-// Builds the visible rows of the newest frame. maxRows caps the rows after filtering.
-TableModel BuildTableModel(const Profiling::FrameRecord& frame, const TableOptions& options, std::size_t maxRows);
+// Refills `out` with the visible rows of `frame` (capacity is reused). `caps` limits the rows of each lane after filtering.
+void BuildTableModel(const Profiling::FrameRecord& frame, const TableOptions& options, const Profiling::LaneRowCaps& caps,
+    ScopeTextCache& cache, TableModel& out);
 
 // One "what to look at" line.
 struct TopThing {
-    std::string title;
-    std::string hint;
+    const ScopeText* text = nullptr; // owned by the cache
     double ms = 0.0;
     double percent = 0.0;
     bool gpu = false;
 };
 
-// Up to 3 CPU rows by self time and 3 GPU rows by time, each at least 5% of its base.
-std::vector<TopThing> BuildTopThings(const Profiling::FrameRecord& frame);
+// Refills `out` with up to 3 CPU rows by self time and 3 GPU rows by time, each at least 5% of its base.
+void BuildTopThings(const Profiling::FrameRecord& frame, ScopeTextCache& cache, std::vector<TopThing>& out);
 
 // Numbers for BuildPlainSummary taken from one frame summary.
 PlainSummaryInput MakePlainSummaryInput(const Profiling::FrameSummary& summary);

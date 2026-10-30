@@ -5,6 +5,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <string>
 
@@ -77,9 +78,53 @@ std::string TimeText(const TableRowView& view, double milliseconds)
     return view.row.lane == ScopeLane::Gpu && view.row.status == Profiling::SampleStatus::Partial ? "~" + text : text;
 }
 
-void DrawLaneHeader(ScopeLane lane, double totalMs)
+// Table items in draw order: a header before the first row of each lane, then the rows.
+struct DisplayLayout {
+    std::array<ScopeLane, Profiling::kScopeLaneCount> lanes{};
+    std::array<std::size_t, Profiling::kScopeLaneCount> firstRow{}; // row index each header precedes
+    std::size_t headerCount = 0;
+    std::size_t itemCount = 0;
+
+    // Header number of an item, or -1 when the item is a row.
+    int HeaderAt(std::size_t item) const noexcept
+    {
+        for (std::size_t h = 0; h < headerCount; ++h) {
+            if (item == firstRow[h] + h) {
+                return static_cast<int>(h);
+            }
+        }
+        return -1;
+    }
+
+    // Row index of a non-header item.
+    std::size_t RowOf(std::size_t item) const noexcept
+    {
+        std::size_t headersBefore = 0;
+        while (headersBefore < headerCount && firstRow[headersBefore] + headersBefore < item) {
+            ++headersBefore;
+        }
+        return item - headersBefore;
+    }
+};
+
+DisplayLayout MakeLayout(const TableModel& model) noexcept
 {
-    ImGui::TableNextRow();
+    DisplayLayout layout;
+    for (std::size_t i = 0; i < model.rows.size() && layout.headerCount < layout.lanes.size(); ++i) {
+        const ScopeLane lane = model.rows[i].row.lane;
+        if (layout.headerCount == 0 || layout.lanes[layout.headerCount - 1] != lane) {
+            layout.lanes[layout.headerCount] = lane;
+            layout.firstRow[layout.headerCount] = i;
+            ++layout.headerCount;
+        }
+    }
+    layout.itemCount = model.rows.size() + layout.headerCount;
+    return layout;
+}
+
+void DrawLaneHeader(ScopeLane lane, double totalMs, float rowHeight)
+{
+    ImGui::TableNextRow(ImGuiTableRowFlags_None, rowHeight);
     ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, kLaneHeaderBg);
     ImGui::PushID(-1 - static_cast<int>(lane));
     ImGui::TableSetColumnIndex(1);
@@ -99,21 +144,22 @@ void DrawLaneHeader(ScopeLane lane, double totalMs)
 
 void DrawTooltip(const TableRowView& view)
 {
+    const ScopeText& text = *view.text;
     ImGui::BeginTooltip();
     ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
-    ImGui::TextColored(kTitleText, "%s", view.title.c_str());
-    ImGui::TextWrapped("%s", view.explanation.c_str());
-    if (!view.hint.empty()) {
-        ImGui::TextWrapped("%s", view.hint.c_str());
+    ImGui::TextColored(kTitleText, "%s", text.info.title.c_str());
+    ImGui::TextWrapped("%s", text.info.explanation.c_str());
+    if (!text.info.hint.empty()) {
+        ImGui::TextWrapped("%s", text.info.hint.c_str());
     }
     ImGui::PushStyleColor(ImGuiCol_Text, kGreyText);
-    ImGui::Text("Code name: %s", view.rawName.c_str());
-    ImGui::Text("Origin: %s", OriginLabel(view.origin));
-    if (!view.sourceText.empty()) {
-        ImGui::Text("Source: %s", view.sourceText.c_str());
+    ImGui::Text("Code name: %s", text.rawName.c_str());
+    ImGui::Text("Origin: %s", OriginLabel(text.origin));
+    if (!text.sourceText.empty()) {
+        ImGui::Text("Source: %s", text.sourceText.c_str());
     }
-    if (!view.featureTitle.empty()) {
-        ImGui::Text("Render feature: %s", view.featureTitle.c_str());
+    if (view.feature != nullptr) {
+        ImGui::Text("Render feature: %s", view.feature->info.title.c_str());
     }
     if (HasTime(view)) {
         ImGui::Text("Longest call: %s", FormatDuration(view.maxMs).c_str());
@@ -148,8 +194,9 @@ void DrawNameCell(const TableRowView& v, TableDrawState& state)
     }
     ImGui::SameLine(0.0f, 0.0f);
 
-    const std::string& primary = state.technicalNames ? v.rawName : v.title;
-    const std::string& secondary = state.technicalNames ? v.title : v.rawName;
+    const ScopeText& text = *v.text;
+    const std::string& primary = state.technicalNames ? text.rawName : text.info.title;
+    const std::string& secondary = state.technicalNames ? text.info.title : text.rawName;
     if (v.waiting) {
         ImGui::PushStyleColor(ImGuiCol_Text, kGreyText);
     }
@@ -203,9 +250,9 @@ void DrawBar(const TableRowView& view)
     ImGui::Dummy(ImVec2(width, height));
 }
 
-void DrawRow(const TableRowView& view, TableDrawState& state)
+void DrawRow(const TableRowView& view, TableDrawState& state, float rowHeight)
 {
-    ImGui::TableNextRow();
+    ImGui::TableNextRow(ImGuiTableRowFlags_None, rowHeight);
     ImGui::PushID(IdOf(view.row.pathKey));
 
     ImGui::TableSetColumnIndex(0);
@@ -255,15 +302,22 @@ void DrawProfilerTable(const TableModel& model, TableDrawState& state, float hei
     ImGui::TableSetupColumn("Bar", ImGuiTableColumnFlags_WidthFixed, 100.0f);
     ImGui::TableHeadersRow();
 
-    bool haveLane = false;
-    ScopeLane lane = ScopeLane::Main;
-    for (const TableRowView& view : model.rows) {
-        if (!haveLane || view.row.lane != lane) {
-            haveLane = true;
-            lane = view.row.lane;
-            DrawLaneHeader(lane, model.laneTotalMs[static_cast<std::size_t>(lane)]);
+    // Every row has the same height, so the clipper can skip the rows outside the scroll area.
+    const float rowHeight = ImGui::GetFrameHeight() + ImGui::GetStyle().CellPadding.y * 2.0f;
+    const DisplayLayout layout = MakeLayout(model);
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(layout.itemCount), rowHeight);
+    while (clipper.Step()) {
+        for (int item = clipper.DisplayStart; item < clipper.DisplayEnd; ++item) {
+            const std::size_t index = static_cast<std::size_t>(item);
+            const int header = layout.HeaderAt(index);
+            if (header >= 0) {
+                const ScopeLane lane = layout.lanes[static_cast<std::size_t>(header)];
+                DrawLaneHeader(lane, model.laneTotalMs[static_cast<std::size_t>(lane)], rowHeight);
+            } else {
+                DrawRow(model.rows[layout.RowOf(index)], state, rowHeight);
+            }
         }
-        DrawRow(view, state);
     }
     ImGui::EndTable();
 }
