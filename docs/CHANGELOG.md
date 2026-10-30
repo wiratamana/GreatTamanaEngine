@@ -1,8 +1,39 @@
 # Changelog
+> Feature history of GTE, newest first. Read it to learn when and why something changed.
 
-Reverse-chronological history of every feature campaign landed in this
-engine. For the short, current-state summary, see the main
-[README.md](../README.md)'s own "Status" section.
+## How to read this file
+
+- Entries are grouped by topic under `##` headings. The newest is at the top.
+- Each heading names the branch. Newer entries also have a date.
+- The last entry is very long. Its later bullets are older work with no heading of their own.
+- Old entries can name classes, routes, flags and files that no longer exist. The code and the docs win.
+- This file is history, not a guide. For how things work today, start at the [docs index](README.md).
+- For commit-level detail use `git log --oneline`.
+
+## Contents
+
+| Entry | Branch | Date |
+|---|---|---|
+| [GPU culling: two-phase Hi-Z, textured clusters, cheaper fixed cost](#gpu-culling-two-phase-hi-z-textured-clusters-cheaper-fixed-cost-branch-featuregpu-cull-impl-2026-10-28) | `feature/gpu-cull-impl` | 2026-10-28 |
+| [Culling mode and CPU path culling](#culling-mode-and-cpu-path-culling-branch-featuregpu-cull-impl-2026-10-28) | `feature/gpu-cull-impl` | 2026-10-28 |
+| [Timeline image, export and GPU clock calibration](#timeline-image-export-and-gpu-clock-calibration-branch-featuregpu-cull-impl-2026-10-26) | `feature/gpu-cull-impl` | 2026-10-26 |
+| [Frame verdict, spikes, markers and overhead](#frame-verdict-spikes-markers-and-overhead-branch-featuregpu-cull-impl-2026-10-26) | `feature/gpu-cull-impl` | 2026-10-26 |
+| [GPU records with honest statuses](#gpu-records-with-honest-statuses-branch-featuregpu-cull-impl-2026-10-26) | `feature/gpu-cull-impl` | 2026-10-26 |
+| [Profiler event log](#profiler-event-log-branch-featuregpu-cull-impl-2026-10-26) | `feature/gpu-cull-impl` | 2026-10-26 |
+| [GPU wait safety](#gpu-wait-safety-branch-featuregpu-cull-impl-2026-10-26) | `feature/gpu-cull-impl` | 2026-10-26 |
+| [Scene cull view fixes, pose and exit routes](#scene-cull-view-fixes-pose-and-exit-routes-branch-featuregpu-cull-impl-2026-10-26) | `feature/gpu-cull-impl` | 2026-10-26 |
+| [Scene cull view](#scene-cull-view-branch-featuregpu-cull-impl-2026-10-24) | `feature/gpu-cull-impl` | 2026-10-24 |
+| [Cluster Viewer and Create Clustered Copy](#cluster-viewer-and-create-clustered-copy-branch-featuregpu-cull-impl-2026-10-23) | `feature/gpu-cull-impl` | 2026-10-23 |
+| [Sun occlusion, aerial perspective and light shafts for large and small scenes](#sun-occlusion-aerial-perspective-and-light-shafts-for-large-and-small-scenes-branch-featurehdr-tonemap-impl) | `feature/hdr-tonemap-impl` | - |
+| [Atmosphere sun and sky light](#atmosphere-sun-and-sky-light-branch-featurehdr-tonemap-impl) | `feature/hdr-tonemap-impl` | - |
+| [PBR material textures and GGX specular](#pbr-material-textures-and-ggx-specular-branch-featurehdr-tonemap-impl) | `feature/hdr-tonemap-impl` | - |
+| [Lighting retune](#lighting-retune-branch-featurehdr-tonemap-impl) | `feature/hdr-tonemap-impl` | - |
+| [Material shadows](#material-shadows-branch-featurehdr-tonemap-impl) | `feature/hdr-tonemap-impl` | - |
+| [HDR scene pipeline and ToneMapping](#hdr-scene-pipeline-and-tonemapping-branch-featurehdr-tonemap-impl) | `feature/hdr-tonemap-impl` | - |
+| [Fog fix](#fog-fix-branch-featurehdr-tonemap-impl) | `feature/hdr-tonemap-impl` | - |
+| [Ambient occlusion](#ambient-occlusion-branch-featurevolumetric-light-impl) | `feature/volumetric-light-impl` | - |
+| [Cascaded shadow maps](#cascaded-shadow-maps-branch-fixgreat-refactor) | `fix/great-refactor` | - |
+| [Render pass API and feature kit](#render-pass-api-and-feature-kit-branch-fixgreat-refactor) | `fix/great-refactor` | - |
 
 ## GPU culling: two-phase Hi-Z, textured clusters, cheaper fixed cost (branch `feature/gpu-cull-impl`, 2026-10-28)
 
@@ -136,7 +167,7 @@ engine. For the short, current-state summary, see the main
   (was `SceneCamera`). `FlushRequest` is private; callers use `EditableSettings()`.
 - **HTTP.** `GET /scene_camera/pose`, `GET /scene_camera/set_pose?x&y&z&yaw&pitch`, `POST /exit` (normal shutdown, exit code 0,
   `403` for browser cross-site requests). New keys: `cull_view.camera_valid|tested|stale`, `pose` in `/scene_camera/state`,
-  `game.|scene.cameraValid|hizTrackingRequested` (see [networking.md](conventions/networking.md)).
+  `game.|scene.cameraValid|hizTrackingRequested` (see [networking.md](debugging/http-routes.md)).
 
 ## Scene cull view (branch `feature/gpu-cull-impl`, 2026-10-24)
 
@@ -153,7 +184,7 @@ engine. For the short, current-state summary, see the main
   panel is gone. Debug keys come from one table with the allowed values; enum names come from one template. The camera
   overlay lines of the Scene panel and the HTTP image come from one builder.
 - **HTTP.** `sceneCull`, `sceneCone`, `sceneSource`, `ghost`, `freeze_here`, per-view `occlusion`, `hizReason`, `hidden`,
-  `testedAtVisibleFrame`; `cull_view` in `/scene_camera/state` (see [networking.md](conventions/networking.md)).
+  `testedAtVisibleFrame`; `cull_view` in `/scene_camera/state` (see [networking.md](debugging/http-routes.md)).
 - **Cost record.** Stats hold: while the HUD is drawn the Scene view runs three stats passes per part slot, for 3 frames
   after the HUD stops. GPU ms with the HUD on and off: to be measured on the reference machine.
 - **Not done.** Hidden-cluster ghost draw, the Active camera as cull source, Hi-Z for another camera and the Scene camera
@@ -174,7 +205,7 @@ engine. For the short, current-state summary, see the main
 - **Debug camera and Scene cameras.** The debug camera has a frustum gizmo that is picked and moved with the mouse
   (`GizmoIdScope`, `IsGizmoOver`, `IsGizmoUsing`, `CancelGizmoInteraction` in `TransformGizmo.h`). The Scene panel shows camera
   bodies, draws the frustum of the selected camera and selects a camera with a left click (`PickCamera`).
-- **HTTP.** `/cluster_viewer/*`, `/scene_camera/*` and `/clone_clusters` (see [networking.md](conventions/networking.md)).
+- **HTTP.** `/cluster_viewer/*`, `/scene_camera/*` and `/clone_clusters` (see [networking.md](debugging/http-routes.md)).
   Image routes return the viewer or Scene image only, with an optional camera overlay.
 - **Cost record.** Wall time of one viewer run and one Verify on the reference clone at 1280x720: to be measured on the
   reference machine.
@@ -187,7 +218,7 @@ engine. For the short, current-state summary, see the main
 - Aerial Perspective Strength has no practical upper limit (ceiling 1e30). The composite clamps transmittance to 0..1 and the output to 0..65504.
 - Shadow `casterRange` is the extra distance toward the sun beyond a cascade's bounding sphere (cascade depth range =
   `2 * radius + casterRange`). Range 1..100000, default 200. `maxDistance` default is 20000. See
-  [shadow-mapping.md](conventions/shadow-mapping.md).
+  [shadow-mapping.md](reference/render-features/shadow.md).
 - `SunShadowReceiver` has `depthFitted` (splits fitted to a measured range) and one shared `SunShadowReceiverUsable()` check used
   by VolumetricLight and Atmosphere.
 - The aerial perspective volume runs in PostOpaque (priority 20) and reads the sun cascades, so mountains shadow the air. Air
@@ -241,7 +272,7 @@ engine. For the short, current-state summary, see the main
 ## Material shadows (branch `feature/hdr-tonemap-impl`)
 
 - Material shaders sample the four cascade depth maps (scene slots 0..3, set 1 bindings 0..3) and remove only the sun term in
-  shadow; ambient stays. First production user of `DeclareSceneSlot`. See [shadow-mapping.md](conventions/shadow-mapping.md).
+  shadow; ambient stays. First production user of `DeclareSceneSlot`. See [shadow-mapping.md](reference/render-features/shadow.md).
 - `ShadowSettings::applyInMaterials` (default true); `Shadow.Composite` then draws debug views only. `strength` default 1.0.
 - The mask and composite passes run only for debug views or when `applyInMaterials` is off.
 - Scene uniform block limit 128 -> 512 bytes; `SceneLightingUniformData` is 448 bytes and carries the cascade data from the
@@ -272,14 +303,14 @@ engine. For the short, current-state summary, see the main
 
 - Gtao: screen-space ground-truth AO from the scene depth only, in a PostOpaque compute pair (sample, denoise with temporal
   history) and a PostComposite linear-space multiply. Works in Game and Scene views. See
-  [ambient-occlusion.md](conventions/ambient-occlusion.md).
+  [ambient-occlusion.md](reference/render-features/gtao.md).
 - `GtaoMath` CPU oracle, `/feature_debug/*` endpoint (`debugView=AoOnly`, `reset_defaults`) and a dockable "Gtao" editor window.
 
 ## Cascaded shadow maps (branch `fix/great-refactor`)
 
 - Shadow: up to four auto-fitted cascades with stable texel snapping, depth-range fitting from a GPU readback (two frames
   late), per-cascade caster culling, live shadow-map resolution, one receive path in the mask compute shader and debug
-  views. See [shadow-mapping.md](conventions/shadow-mapping.md).
+  views. See [shadow-mapping.md](reference/render-features/shadow.md).
 - `SceneLighting` feature writes the sun uniforms (32 bytes, valid flag) every frame; material shaders keep only Lambert
   (`DirectionalLighting.glsl`) and never turn black when Shadow is off.
 - Feature kit: `Frame::FrameIndex`, `Frame::DeltaSeconds` (real time, clamped to 0.25 s), `Frame::ShaderReady`,
@@ -313,7 +344,7 @@ engine. For the short, current-state summary, see the main
 - Recording context: code outside `src/Renderer` carries the Vulkan-free `rg::RecordingContext`.
   `CommandBuffer::AdoptRaw`, `CommandBuffer::RawCommandBuffer` and `PassContext::RawCommandBuffer` are gone; only
   `rg::RecordingAccess` inside `src/Renderer` opens the raw handle. See
-  [recording-context.md](architecture/recording-context.md).
+  [recording-context.md](architecture/render-graph.md).
 - Frame Debugger: `FrameDebuggerEventSink` takes an `AttachmentWrite` (opaque image token, extent, `PixelFormat`); the
   snapshot copy is `rg::CaptureAttachmentIntoSnapshot` in `src/Renderer`. Editor previews use `UiTextureHandle`; readbacks
   use `Renderer::CaptureDebugTexturePixels` / `CaptureEventSnapshotPixels`. The metadata sink gets barrier labels as strings.
@@ -324,11 +355,11 @@ engine. For the short, current-state summary, see the main
   `fx::ViewOutput` with `Frame::ExposeAsViewOutput` and `Core::ExposeViewOutput` (replaces
   `RegisterFinalizeForSamplingHook`), `Renderer::ResizeRenderTexture`, `CountInViewStats`. A value published by a
   `PreOpaqueShared` callback is visible to every view, and textures of the Shared callback pass `Frame::Owns`. See
-  [kit-view-background.md](architecture/kit-view-background.md) and [kit-view-output.md](architecture/kit-view-output.md).
+  [kit-view-background.md](reference/feature-kit.md) and [kit-view-output.md](reference/feature-kit.md).
 - A render-graph pass that skips a binding asserts in debug builds (it still logs once in release).
 - CI allowlists: FeaturePurity 0 lines, VolkLeak 9 lines, NativeLeak 10 lines.
-- See [render-pass-api.md](conventions/render-pass-api.md) and
-  [render-feature-authoring.md](conventions/render-feature-authoring.md).
+- See [render-pass-api.md](architecture/render-graph.md) and
+  [render-feature-authoring.md](guides/writing-a-render-feature.md).
 
 Early foundation stage, but past the basic-scaffolding phase for several
 pieces:
@@ -389,7 +420,7 @@ pieces:
   drag-and-drop: drop onto another row's middle band to attach as its child
   (world position preserved), onto its top/bottom band to reorder as a
   sibling, or onto empty panel space to detach back to the scene root - see
-  [Editor / Debug UI](architecture/editor-debug-ui.md). The Scene-view transform gizmo (below) and
+  [Editor / Debug UI](architecture/editor.md). The Scene-view transform gizmo (below) and
   Inspector's "Parent"/"Unparent" control were both updated to match.
 - The Scene-view transform gizmo now manipulates in WORLD space and converts
   back to the selected entity's own LOCAL `Transform` fields via its
@@ -495,7 +526,7 @@ pieces:
   `ECS/TransformHierarchy.h/.cpp`'s `ComputeWorldMatrix()`/`SetParent()`/
   `GetChildren()`/`SetSiblingIndex()`) - a parented entity's world transform
   is composed all the way up its parent chain, cycle-safely, and "Hierarchy"
-  exposes it as a real drag-and-drop tree (see [Editor / Debug UI](architecture/editor-debug-ui.md)).
+  exposes it as a real drag-and-drop tree (see [Editor / Debug UI](architecture/editor.md)).
   Fully unit-tested, including
   generation-guarded stale-handle safety.
 - The ECS is wired all the way into actual rendering, not just present as
@@ -727,7 +758,7 @@ pieces:
   whenever one is present, falling back to that same synthesized label
   otherwise. `CreateMeshEntityFromGtaFile()` now returns the ROOT entity
   (previously the first part) — the Hierarchy/Scene drag-and-drop targets
-  (see [Editor / Debug UI](architecture/editor-debug-ui.md)) select exactly the one entity that
+  (see [Editor / Debug UI](architecture/editor.md)) select exactly the one entity that
   represents the whole freshly instantiated model. Verified against the
   same real Furina model (32 materials) already used elsewhere in this
   README, and the full test suite (363 tests) still passes.
@@ -876,7 +907,7 @@ pieces:
   the tree and the viewport (click either one; double-click a tree row to
   re-center the camera on it). Reads straight from the source `*.gta` file
   (the same path `AssetPreviewMesh` already uses), independent of `Game`'s
-  own animation-runtime caches. See [Editor / Debug UI](architecture/editor-debug-ui.md) for the full rundown.
+  own animation-runtime caches. See [Editor / Debug UI](architecture/editor.md) for the full rundown.
 - **`Game.cpp` cleaned back up into a thin composition root - the "god
   object" (ten distinct responsibilities: pipeline/mesh caches, `.gta`
   decode, material-texture resolution, entity spawning, animation clip
@@ -930,7 +961,7 @@ pieces:
   (Phases 0-3/5) finally visible, closing out `PROFILER_STRATEGY_v2.md`'s
   original 8-phase plan except for Phase 4 (Vulkan GPU timestamp queries -
   since implemented, see the entry below) and Phase 6 (benchmark mode),
-  both deliberately deferred at the time.** See [Editor / Debug UI](architecture/editor-debug-ui.md) for the full "Profiler panel:" rundown - live CPU
+  both deliberately deferred at the time.** See [Editor / Debug UI](architecture/editor.md) for the full "Profiler panel:" rundown - live CPU
   frame-time graph, sorted CPU-scope table, per-pass draw-call/triangle
   counts, GPU memory totals + sparkline, an honest GPU-timing "N/A"
   placeholder (a permanent condition until Phase 4 landed - see below), and
@@ -1012,7 +1043,7 @@ pieces:
   synchronous offscreen Game+Scene regime, once for the pipelined swapchain
   Present regime); Phase 7 is the actual production cut-over -
   `Application::Run()` now drives every real frame through it, with zero
-  observable behavior change by design; and Phase 8 (see [Editor / Debug UI](architecture/editor-debug-ui.md), "Render Graph panel") makes the whole thing observable via a
+  observable behavior change by design; and Phase 8 (see [Editor / Debug UI](architecture/editor.md), "Render Graph panel") makes the whole thing observable via a
   new Editor panel. `Game::Render()`/`RenderSystem::Draw()`/
   `Renderer::Submit()` all kept their exact pre-campaign public signatures
   throughout - this was, and remains, a purely internal `Renderer`-layer

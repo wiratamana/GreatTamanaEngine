@@ -1,151 +1,146 @@
 # Rendering
+> One-page overview of how a frame is drawn: layers, frame flow, formats and materials. Read this first, then the deep docs.
+> Verified against code: 2026-10-30
 
-_Part of [GreatTamanaEngine](../../README.md)'s architecture docs. See
-[docs/README.md](../README.md) for the full documentation index._
+## TL;DR
+- Only `src/Renderer/` touches Vulkan. Everything else uses `gte::rg` (render graph) and `gte::fx` (feature kit).
+- Each frame is two render graphs. The offscreen graph draws the views. The present graph blits and draws the UI.
+- Scene color is linear HDR `RGBA16_Float`. The `ToneMapping` feature makes display colors at the end.
+- Rendering uses Vulkan 1.3 dynamic rendering. There is no `VkRenderPass` and no `VkFramebuffer`.
+- Two views exist: Primary (Game) and Secondary (Scene). Renderer code says `Primary` / `Secondary`. The editor says Game / Scene.
 
-`Renderer` (`src/Renderer/Renderer.h/.cpp`) owns a real Vulkan pipeline built
-on top of a set of small RAII wrappers under `src/Renderer/Vulkan/`
-(`VulkanInstance` -> `VulkanSurface` -> `VulkanDevice` -> `VulkanSwapchain`),
-using **dynamic rendering** (no `VkRenderPass`/`VkFramebuffer`) instead of
-SDL's `SDL_Renderer`. Its public surface is still just `Clear()`/`Present()`,
-plus `RenderOffscreen()`/`CreateRenderTexture()` for drawing into an
-off-screen `RenderTexture` instead of the swapchain — the primitive behind
-the Editor's Unity-style "Game"/"Scene" panels, each with its OWN
-`RenderTexture` now (see [Editor / Debug UI](editor-debug-ui.md)) that the entity holding
-the active `Camera` component renders into, which the Editor then displays
-inside its own `ImGui::Image()` panel.
-Vulkan itself is accessed exclusively through **volk** (a dynamic meta-loader,
-see `BUILDING.md`) — nothing in the engine links a classic Vulkan loader
-import lib or calls `vulkan.h` functions directly without going through it.
-GPU memory is allocated exclusively through **VMA** (Vulkan Memory
-Allocator, see `BUILDING.md`) via `VulkanAllocator`
-(`src/Renderer/Vulkan/VulkanAllocator.h/.cpp`) — an RAII wrapper owning a
-single `VmaAllocator` that `Renderer` creates once alongside its
-instance/device and hands to every GPU resource type
-(`RenderTexture`/`Buffer` today) to create its images/buffers through
-(`vmaCreateImage`/`vmaCreateBuffer`) instead of each one hand-rolling its own
-memory-type lookup and alloc/bind/free calls. `Buffer`
-(`src/Renderer/Buffer.h/.cpp`) is the general-purpose GPU buffer primitive
-for vertex/index/uniform/staging data, created via
-`Renderer::CreateBuffer()`/`CreateDeviceLocalBuffer()` — see
-`BufferMemoryUsage` (`Buffer.h`) for the `GpuOnly` (device-local,
-not CPU-mappable) vs. `CpuToGpu`/`GpuToCpu` (persistently host-mapped)
-distinction. `Renderer::CreateDeviceLocalBuffer()` covers the common
-"static GPU-only buffer initialized once" case (vertex/index buffers) by
-uploading through a temporary staging `Buffer` and copying it in via
-`Renderer::ImmediateSubmit()` — a general one-time-submit-and-wait command
-buffer helper, also reusable for future one-off GPU work (e.g. image layout
-transitions, mipmap generation) outside the per-frame `Present()`/
-`RenderOffscreen()` recording. `Mesh`/`Pipeline` themselves are still
-returned by value from `Renderer::CreateMesh()`/`CreatePipeline()`
-unchanged — `Renderer` has zero knowledge that an ECS exists; see
-[Entity-Component-System](ecs.md) for how something else (`RenderSystem`)
-owns/addresses them by handle. `Pipeline` carries one push constant range: a
-`mat4 model` immediately followed by a `mat4 viewProj` (vertex stage, 128
-bytes total — the guaranteed minimum `maxPushConstantsSize` on every
-conformant Vulkan implementation), and `Renderer::Submit()`/
-`FrameRecorder::Submit()` take an optional model matrix AND an optional
-view-projection matrix (both `Mat4::Identity()` by default) recorded via
-`vkCmdPushConstants` right before each draw as
-`pc.viewProj * pc.model * vec4(position, 1.0)` — see
-`Shaders/Triangle.vert`'s matching `layout(push_constant)` block. A scene
-with no active `Camera` pushes an identity `viewProj`, preserving this
-engine's original "vertices already authored directly in clip space"
-triangle-demo behavior.
-`Mesh` (`src/Renderer/Mesh.h`) now optionally carries a real INDEX buffer
-alongside its vertex buffer (a second, indexed constructor — the original
-non-indexed one is unchanged and still what every built-in primitive shape
-uses), and `Pipeline` (`src/Renderer/Pipeline.h/.cpp`) picks its vertex
-binding/attribute description via a `VertexLayout` enum —
-`PositionColor` (the original `Vertex.h`, the default, used everywhere
-today except below) or `PositionNormal` (a new `MeshVertex.h`: position +
-a real per-vertex normal, no color). `FrameRecorder` issues
-`vkCmdDrawIndexed` instead of `vkCmdDraw` whenever the submitted `Mesh` has
-an index buffer. This is what lets a real imported mesh (see
-[Asset Pipeline](asset-pipeline.md)) be drawn through the SAME shared `Renderer`/`RenderSystem`
-path as everything else — a `*.gta` `AssetType::Mesh` payload's
-positions/normals/triangle indices are uploaded as-is (no per-triangle
-vertex duplication) and rendered via a small, always-compiled "grey clay"
-shader pair (`Shaders/Mesh.vert/.frag` — sun light + hemisphere ambient + cascade shadows from `DirectionalLighting.glsl`,
-no textures yet, since a Mesh asset carries no material data — see
-[Asset Pipeline](asset-pipeline.md)), through `Game::CreateMeshEntityFromGtaFile()`
-(`src/Game/Game.h/.cpp` — mirrors `CreatePrimitiveEntity()` below).
-Every render target (the swapchain, or a `RenderTexture`) is paired with a
-real **`DepthBuffer`** (`src/Renderer/DepthBuffer.h/.cpp`) at a format
-queried once from the physical device (`VulkanDevice::PickDepthFormat()`,
-surfaced as `Renderer::DepthFormat()` — the exact depth counterpart to
-`ColorFormat()`, same "Render Target Format Matching" discipline), and
-`Pipeline` always depth-tests/writes (`VK_COMPARE_OP_LESS`). The swapchain
-gets one `DepthBuffer` per swapchain image (`FramePresenter`, indexed by
-swapchain image index rather than frame-in-flight slot — the same "a
-just-acquired image is guaranteed free to reuse" guarantee
-`VulkanFrameSync`'s render-finished semaphores already rely on); each
-`RenderTexture` (Editor "Game"/"Scene" views) owns one companion
-`DepthBuffer` of its own, resized alongside its color image. This is what
-actually makes real (non-coplanar) 3D geometry — the built-in primitive
-shapes below — render correctly occluded instead of drawing in whatever
-order it happened to be submitted in; the engine's original hardcoded
-triangle demo never exposed this gap since its geometry was always flat and
-non-overlapping in screen space.
+## Diagram
+```text
+ Editor / Game / Features(Editor/)     no Vulkan names, no Native()
+        |
+ src/Features/<Name>/                  only fx::, Math, ECS, Core basics
+        |
+ src/Core/FeatureKit  (gte::fx)        Vulkan-free verbs and handles
+        |
+ src/Renderer/RenderGraph (gte::rg)    Vulkan-free headers, Vulkan in .cpp
+        |
+ src/Renderer/*, src/Renderer/Vulkan/  the only place for Vk*, vk*, VK_*
+```
+The rule and its CI checks are in [AGENTS.md](../../AGENTS.md#vulkan-boundary-strict).
+
+## How it works
+Frame flow, as run by `EditorHost` and `Core`:
+
+1. `Core::Update()` advances time and runs game logic. Before it, `EditorHost` drains HTTP command bridges.
+2. `Renderer::BeginFrame()` clears the queued CPU `Submit()` draws.
+3. `Core::BuildFrame()` runs the offscreen graph. It waits for the GPU, so the Game view is safe to read after it.
+4. `IEditorLayer::BuildUI()` builds ImGui. The Render Graph panel and `/render_graph` get their data.
+5. `Core::Present()` runs the present graph. Its GPU timing is read back later (pipelined).
+
+Inside `BuildFrame()`:
+
+1. Clear the per-frame claim sets, cull requests and cluster candidate list.
+2. `Render.Prepare`: free unused GPU meshes and materials, pick the view targets.
+3. Declare the offscreen graph: GPU skinning, cluster candidates, then all providers.
+4. If a Frame Debugger capture is pending, add the replay passes.
+5. Compile, record, submit, wait. Then finalize the view textures for sampling.
+
+Providers are declared in two phases: `Before` and `After` the deferred passes. In each phase, `Once` providers go first.
+Deferred descriptions are sorted by `RenderPassEvent`. Feature providers draw straight into the builder.
+
+| Provider | Scope | Phase | Event tag |
+|---|---|---|---|
+| `GpuSkinning` | once | Before | `PreOpaques` |
+| `ClearViewTarget` | per view | Before | `BeforeEverything` |
+| `PreOpaqueFeatures` | per view | Before | `PreOpaques` |
+| `RenderOpaque` | per view | Before | `Opaques` |
+| `RenderTransparent` | per view (only with a scene overlay) | Before | `Transparents` |
+| `OpaqueFeatures` | per view | After | `Opaques` |
+| `PostOpaqueFeatures` | per view | After | `AfterOpaques` |
+| `PostTransparentFeatures` | per view | After | `AfterTransparents` |
+| `PluginRenderFeatures` | per view | After | `AfterEverything` |
+
+The present graph has two providers: `PresentPrimaryView` and `Present`. See [Render graph](render-graph.md).
 
 ## Scene color and the display image
+Per view, the shipped features run like this:
 
-Scene color is linear HDR in one engine-wide format, `Renderer::ScenePixelFormat()` (RGBA16_Float). Material shaders
-(`DirectionalLighting.glsl`) and the sky background write linear radiance; they know nothing about exposure, curves or sRGB.
-The swapchain format (`Renderer::ColorFormat()`) is used only by what draws into the swapchain (ImGui, the final blit) and
-by the mesh preview.
+| Stage | What runs |
+|---|---|
+| PreOpaque | Frame stamps, Atmosphere LUTs, sun light, shadow cascades, scene lighting uniforms |
+| Opaque | `RenderOpaque` (scene draw), `GpuDrivenScene` passes |
+| PostOpaque | Sky background, aerial volume, shadow mask, GTAO, SSGI trace, volumetric volume |
+| PostComposite | Blend chain by priority. See below. |
 
-Per view (Game and Scene), the frame is:
+PostComposite chain, in linear HDR, lowest priority first:
 
-1. Scene draw into the view target (RGBA16F), cleared with the linear `kSceneClearColor`.
-2. PostOpaque features (shadow mask, GTAO occlusion, SSGI trace, volumetric volume, atmosphere LUTs).
-3. PostComposite chain in priority order, all in linear HDR: `Ssgi.Composite` (-1600), `Gtao.Composite` (-1500),
-   `AtmosphereComposite` (-1000), `Shadow.Composite` (-500, debug views only while shadows are applied in materials),
-   `VolumetricLight.Composite` (-250), `ToneMapping` (+1000, last).
-4. `ToneMapping` is the display transform: exposure, saturation, curve (Clamp, ACES, PBR Neutral), sRGB encode and dither.
-   After the chain the view target holds display values in 0..1. The Editor panel, `/get_game_view` and the swapchain blit
-   copy it unchanged. With ToneMapping off, the view shows raw linear color.
+| Priority | Feature pass |
+|---|---|
+| -1600 | `Ssgi.Composite` |
+| -1500 | `Gtao.Composite` |
+| -1000 | `AtmosphereComposite` |
+| -500 | `Shadow.Composite` |
+| -250 | `VolumetricLight.Composite` |
+| +1000 | `ToneMapping` (last) |
 
-The compositor's seed, accumulators and private targets are RGBA16F too, so no feature clamps or quantizes the scene before
-tone mapping.
+- `ToneMapping` is the display transform. It does exposure, saturation, curve, sRGB encode and dither.
+- After the chain, the view target holds display values in 0..1. The editor panel, `/get_game_view` and the swapchain blit copy it as is.
+- With `ToneMapping` off, the view shows raw linear color.
+- The chain uses `RGBA16_Float` for every private target, so nothing is clamped before tone mapping.
 
-### Rendering without view panels
+## Rendering without view panels
+- With no Game or Scene target (no editor panel visible), `Core` renders the Game view into `DirectPrimaryView`.
+- The target uses the scene format and follows the window size.
+- It uses the same offscreen graph, so post features and `/get_game_view` still work.
+- `PresentPrimaryView` copies it to the swapchain. `Present` then clears (if needed) and draws ImGui.
 
-When the Editor gives no Game or Scene target (no Editor, or both panels hidden), `Core` renders the Game view into its own
-`DirectPrimaryView` target (scene format, resized with the window) through the same offscreen graph, so post features run and
-`/get_game_view` works. The `PresentPrimaryView` pass (`PresentBlit.vert/.frag`) then copies it to the swapchain before the
-Present pass records ImGui. `AddPresentPass()` only clears the swapchain (when no direct target was blitted) and records the UI.
-GPU skinning runs once, in the offscreen graph.
+## Captures
+`Encoding::HdrVisualization` turns `RGBA16_Float` into 8 bit:
 
-### Captures
+| Mode | Used for |
+|---|---|
+| `DisplayReferred` | `GameView`, `SceneView`. Clamp to 0..1, no curve. `/get_game_view` always uses it. |
+| `SceneReferred` | `GameViewComposited`, `SceneViewComposited`, `*VolumetricLight`, `FrameDebuggerReplayStep*`. Default tone map. |
+| `DebugScaled` | Everything else, such as tiny LUTs. Fixed x400 exposure. |
 
-`Encoding::HdrVisualization` picks how an RGBA16F image becomes 8 bit: `DisplayReferred` (clamp, no curve) for `GameView` and
-`SceneView`, `SceneReferred` (the default tone map) for scene-referred previews such as `GameViewComposited` and Frame Debugger
-steps, and `DebugScaled` (fixed exposure, for tiny-valued LUTs) for everything else. `/get_game_view` always uses
-`DisplayReferred`; `/get_texture` classifies by texture name.
+`/get_texture` picks the mode from the texture name. See [HTTP cheat sheet](../debugging/http-cheat-sheet.md).
 
 ## Materials
+Details: [PBR materials](../conventions/pbr-materials.md).
 
-Details and conventions: [PBR Materials](../conventions/pbr-materials.md).
+| Topic | Fact |
+|---|---|
+| Material set (set 0) | 5 bindings: base color, `MaterialParams` (48 bytes), normal, metallic-roughness, occlusion |
+| Missing image | Replaced by a 1x1 default image, so every set is complete |
+| Set pool | `MaterialSetPool`, 4096 sets. Warning above 75%. A lease frees the set with the material. |
+| Vertex layouts | `PositionColor`, `PositionNormal`, `PositionNormalUv`, `PositionNormalUvTangent` and a no-input fullscreen layout. Depth-only pipelines exist per layout. |
+| Pipeline kinds | `Untextured`, `Textured`, `TexturedAlphaTest`, `Pbr`, `PbrAlphaTest`. Chosen once per mesh part. |
+| Texture upload | Batched: 64 MiB staging budget, max 256 images per chunk, one submit and one fence wait per chunk |
+| Draw guard | `RenderSystem::Draw` skips a draw whose material set does not resolve. One warning per handle. |
+| Release sweep | `Render.Prepare` frees unused meshes and materials after one bounded GPU drain |
 
-- **Material set (set 0, 5 bindings).** 0 base color, 1 `MaterialParams` (48 bytes), 2 normal, 3 metallic-roughness,
-  4 occlusion. A missing image is replaced by a 1x1 default image, so every set is complete and the old shaders that read
-  only bindings 0 and 1 stay valid. `MaterialTexture` holds the four images (`MaterialImages`, indexed by
-  `MaterialImageRole`), the params buffer and a `MaterialSetLease`.
-- **Set lease.** `MaterialSetPool` (`FREE_DESCRIPTOR_SET`, 4096 sets, 75% warning) allocates under a mutex. The lease frees
-  the set and unregisters the handle when the material is destroyed.
-- **Vertex layouts.** `PositionNormalUvTangent` (`MeshVertexTangent`, 48 bytes) joins the old layouts. `BuildVertexInputState`
-  has no `default:` label, so a new layout cannot silently get the wrong vertex input. Depth-only pipelines exist for every
-  layout in `fx::SceneShaderSet` (`DepthOnlyLayouts()`).
-- **Pipeline kinds.** `MeshAssetPipelineKind` (`Untextured`, `Textured`, `TexturedAlphaTest`, `Pbr`, `PbrAlphaTest`) is
-  chosen once per mesh part; `MeshAssetGpuCatalog::EnsurePipeline` builds the pipeline from one table.
-- **Scene block.** `SceneLightingUniformData` carries the eye position for every view (shadow data or not) and the material
-  debug view in `groundAmbientAndMaterialDebugView.w`.
-- **Batched texture upload.** `GpuResourceFactory::CreateMaterialImages` uploads images in chunks (64 MiB staging budget, at
-  most 256 images): one staging buffer, one command buffer, one submit and one fence wait per chunk. `CreateTexture2D` is the
-  one-image case of the same path. A failed fence wait is logged, the device is drained once and the call throws.
-  `Renderer::GetUploadStats()` returns the submit, image and staging byte counters.
-- **Draw guard.** `RenderSystem::Draw` skips a draw whose pipeline needs a material set that does not resolve (one warning per
-  handle), so a stale handle never binds an empty set 0.
-- **Release sweep.** `Core::BuildFrame()` calls `Game::ReleaseUnusedGpuMaterials()` before any pass is recorded. Unused
-  materials are destroyed through `RenderSystem::UnregisterTexture` after one `Renderer::DrainGpuForResourceRelease()`.
+## Key files
+| File | Role |
+|---|---|
+| `src/Renderer/Renderer.h` | Facade. Device, swapchain, resource factories, captures, GPU waits. |
+| `src/Core/Core.cpp` | `BuildFrame()`, `Present()`, provider registration |
+| `src/Renderer/RenderGraph/` | The render graph. See [Render graph](render-graph.md). |
+| `src/Core/FeatureKit/` | `gte::fx`, what render features use |
+| `src/Renderer/FramePresenter.*`, `FrameRecorder.*` | Swapchain present and offscreen record |
+| `src/Features/<Name>/` | One folder per render feature |
+| `src/Shaders/` | Shared GLSL. Feature shaders sit in `src/Features/<Name>/Shaders/`. |
+
+## Rules
+1. Never name Vulkan outside `src/Renderer/`.
+2. Never hardcode a format. Use `ScenePixelFormat()` for scene color and `ColorFormat()` only for the swapchain.
+3. Every render target has a depth buffer. Do not add a target or pipeline without depth by habit.
+4. Scene geometry pipelines use `ScenePixelFormat()`. Never record them into a swapchain-format target.
+5. Disabled passes must not run or leave side effects. See [Render honesty](../conventions/render-honesty.md).
+
+## Gotchas
+- A pass whose output nobody reads is culled with no error.
+- A provider that reads a deferred pass's texture must run in the `After` phase. Otherwise the writer is culled.
+- If the offscreen graph throws, the direct primary target is not blitted. Present clears the swapchain instead. The error is logged once.
+- `PostTransparent` and `PreUI` stages exist, but no shipped feature uses them.
+- `Renderer` lists `RenderFeatureCompositor` as a friend. This is known debt. Do not copy it.
+
+## Related
+- [Render graph](render-graph.md) · [Render honesty](../conventions/render-honesty.md)
+- [Frame Debugger](../debugging/frame-debugger.md) · [HTTP cheat sheet](../debugging/http-cheat-sheet.md)
+- [Writing a render feature](../guides/writing-a-render-feature.md) · [Feature kit](../reference/feature-kit.md)
+- [PBR materials](../conventions/pbr-materials.md) · [Render features](../reference/render-features/README.md)

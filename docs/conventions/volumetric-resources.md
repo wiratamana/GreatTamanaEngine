@@ -1,142 +1,85 @@
-# Volumetric Resources (`VolumeTexture` Recipe)
+# Volumetric resources
+> How a render feature uses a real 3D GPU texture (a volume): fill it with compute, read it later. For feature authors.
+> Verified against code: 2026-10-30
 
-_Part of [GreatTamanaEngine](../../AGENTS.md)'s contributor conventions. See
-[docs/README.md](../README.md) for the full documentation index._
+## TL;DR
+- A volume is an `fx::PersistentVolume` member of the feature. One 3D texture per view scope.
+- Its size and format are fixed at construction. A zero axis is refused.
+- It is imported with an undefined layout every frame. Its contents do not carry over. A pass must rewrite all of it.
+- The kit has no transient volume and no volume pool. Do not add one without a real need.
+- Two features use volumes today: Atmosphere (aerial volume) and VolumetricLight (three froxel volumes).
 
-How to build a feature on a real 3D (`VK_IMAGE_TYPE_3D`) GPU grid: a compute pass
-fills it, a later pass samples it. The examples use a fictional `ExampleVolumeFeature`
-written with the feature kit ([`render-feature-authoring.md`](render-feature-authoring.md)).
-[`atmosphere-scattering.md`](atmosphere-scattering.md) describes the one shipped
-feature that uses a volume (the aerial perspective volume). A change to how a
-volume is created, imported or written must update both pages.
-
-## 1. Ownership and lifetime
-
-A volume is owned by `fx::PersistentVolume` (`src/Core/FeatureKit/PersistentVolume.h/.cpp`),
-a member of the feature (usually inside a `fx::PerView<State>` struct):
+## Rules
+1. Declare the volume as a feature member, usually inside a `fx::PerView<State>` struct.
+2. Call `f.PassEnabled("Pass")` first. A disabled pass must not create, import or keep anything.
+3. Call `Acquire(f)` once per callback. It returns an invalid texture on refusal. Then return.
+4. Bind the volume by shader variable name. The shader declares `writeonly image3D`.
+5. Rewrite the whole volume every frame. For history, use a 2D ping-pong `PersistentTarget` (see below).
+6. Pick the dispatch shape by data dependency, not by habit.
+7. Include `VolumetricFroxelMath.glsl` for slice-to-depth math. Never keep a private copy.
 
 ```cpp
 fx::PersistentVolume m_volume{ "ExampleVolume", fx::VolumeSize{ 64, 64, 32 }, PixelFormat::RGBA16_Float };
-```
 
-- The size and format are fixed at construction. A zero axis is refused (logged once).
-- It keeps one `VolumeTexture` per view scope, created lazily on the first `Acquire()`.
-  A failed creation is logged once and retried on a cooldown.
-- It is persistent and owned by the feature. The render graph never pools or
-  allocates a volume. There is no transient volume. Do not build one without a
-  real need.
-
-## 2. Acquire every frame
-
-Call `Acquire(f)` from the callback that declares the pass. It imports the volume
-into this frame's graph with an undefined layout and keeps the handle alive:
-
-```cpp
-if (!f.PassEnabled("ExampleVolume.Fill")) {
-    return; // a disabled pass must not create or import anything
-}
+if (!f.PassEnabled("ExampleVolume.Fill")) { return; }
 const fx::Texture volume = m_volume.Acquire(f);
-if (!volume.IsValid()) {
-    return;
-}
+if (!volume.IsValid()) { return; }
 ```
 
-Because the layout is undefined, the contents do not carry over between frames.
-A pass must rewrite the whole volume every frame. Carrying content from the
-previous frame is not supported by `PersistentVolume`.
+## Dispatch shape
 
-## 3. The compute pass: two dispatch shapes
+| Shape | Use when | Dispatch | Example |
+|---|---|---|---|
+| Per cell `(x, y, z)` | Every cell is independent | `.Dispatch(Extent2D{w, h}, depth)` | `src/Shaders/VolumetricFroxelExamplePerCellFill.comp` (local size 4x4x4). VolumetricLight Inject and Temporal |
+| Per column `(x, y)`, loop over Z | A slice depends on earlier slices of the same column | `.Dispatch(Extent2D{w, h})` | `src/Shaders/VolumetricFroxelExamplePerColumnFill.comp` (4x4x1). Atmosphere aerial volume, VolumetricLight Integrate |
 
-Bind the volume by shader variable name. `Dispatch(Extent2D size, depth)` takes
-the number of elements per axis. The engine rounds up to whole groups. The shader
-must bounds-check against `imageSize()`.
-
-### (a) One invocation per cell `(x, y, z)`
-
-Use it when every cell is computed independently. Example shader:
-`src/Shaders/VolumetricFroxelExamplePerCellFill.comp`
-(`local_size 4x4x4`, binding `outputImage`).
+- Rule of thumb: if a slice depends on any other slice, use per column.
+- The wrong shape gives no error and no validation warning. You only get wrong values.
+- `Dispatch` takes the element count per axis and rounds up to whole groups. The shader must still bounds-check against `imageSize()`.
 
 ```cpp
-const fx::VolumeSize n = kVolumeSize;
 f.Compute(m_fillShader, "ExampleVolume.Fill")
     .Bind("outputImage", volume)
     .Dispatch(Extent2D{ n.width, n.height }, n.depth);
 ```
 
-### (b) One invocation per `(x, y)` column, looping over Z in the shader
+## Do and Don't
 
-Use it when a slice depends on the previous slice of the same column. This is
-the Atmosphere aerial perspective volume
-(`src/Features/Atmosphere/Shaders/AtmosphereAerialPerspectiveVolume.comp`,
-`local_size 8x8x1`). The feature dispatches X and Y only:
+| Do | Don't |
+|---|---|
+| Acquire after `PassEnabled` | Acquire first and check the toggle later |
+| Rewrite every texel each frame | Expect last frame's content in the volume |
+| Keep history in a 2D atlas `PersistentTarget`, two of them, alternated by `FrameIndex() & 1` | Try to carry content in a `PersistentVolume` |
+| Use one `Image3D` scene slot at most | Treat `Image3D` slots like `Image2D` slots |
+| Share slice math from `src/Shaders/VolumetricFroxelMath.glsl` | Copy the formula into a feature shader |
 
-```cpp
-f.Compute(m_aerialVolumeShader, "AtmosphereAerialPerspectiveVolumePass")
-    .Params(view.aerialAtmosphereParams, shared->parameters)
-    .Bind("destinationVolume", volume)
-    .Dispatch(kAerialDispatchSize);
-```
+## How to make the result readable
 
-Feature-free example: `src/Shaders/VolumetricFroxelExamplePerColumnFill.comp`
-(`local_size 4x4x1`, binding `outputImage`, push constants `maxDistanceKm` and
-`depthExponent`).
+| Way | Use when | How |
+|---|---|---|
+| Channel plus a later pass | Your own pass samples or composites the volume | `Channel<T>.Publish(f, value, {volume})` after the dispatch was declared. A later callback calls `Fetch(f)` and uses `Bind(...)` |
+| `Image3D` scene slot | Every material shader must sample it | `DeclareSceneSlot(name, SceneSlotKind::Image3D, index)` in `Setup()`, then `f.PublishToScene(slot, volume)` |
 
-**Selection rule**: if a slice's value depends on any other slice, use (b). If all
-cells are independent, use (a). Picking the wrong one gives no error and no
-validation warning, only wrong values.
+- Atmosphere publishes the volume on its `AerialVolume` channel. The composite pass binds it.
+- VolumetricLight publishes `Result` (the integrated volume, max distance, depth exponent) for its composite pass.
+- Publish only after the dispatch was declared. Put the volume in the keep list.
+- A published channel that another toggleable pass reads needs a risk rule. See [Render honesty](render-honesty.md).
 
-## 4. Culling: keep the written volume
+## Checks
+- `ctest --test-dir build -R "FeaturePurityCheck|HeaderPurity"` for kit-only code.
+- The volume test pins the example shaders and the slice formula: `tests/Renderer/RenderGraph/VolumeTextureExampleFeatureTests.cpp`.
+- `/list_textures` lists a volume with `kind` `texture3d`. `/get_texture` renders a preview of it. See [HTTP cheat sheet](../debugging/http-cheat-sheet.md).
 
-A pass whose only output is a volume is culled by the graph unless its volume
-handle is kept. `PersistentVolume::Acquire()` already calls `KeepTextureOutput()`
-on the handle, so kit features need nothing more. Code that imports a volume with
-`RenderGraphBuilder::ImportVolumeTexture()` directly must call
-`KeepTextureOutput(handle)` itself, or the pass is dropped silently every frame.
+## Gotchas
+- A pass whose only output is a volume is culled unless its handle is kept. `PersistentVolume::Acquire()` keeps it for you.
+- A volume imported directly with `ImportVolumeTexture()` needs `KeepTextureOutput(handle)`. Without it the pass is dropped silently every frame.
+- `Image3D` has one shared dummy for every `Image3D` slot. A second slot shares it with no error. No shipped feature registers an `Image3D` slot.
+- A failed creation is logged once under `FeatureKit` and retried on a cooldown. Check the log if a volume stays invalid.
+- The volume's graph name is `<base>.GameView` or `<base>.SceneView` in the editor.
 
-## 5. Making the result consumable
-
-### (a) A `SceneSlotKind::Image3D` scene slot
-
-Use it when every opaque-shaded material should sample the volume from a fixed
-slot. Declare the slot in `Setup()` with `FeatureSetup::DeclareSceneSlot(name, SceneSlotKind::Image3D, preferredIndex)`
-and publish with `f.PublishToScene(slot, volume)`
-(`src/Core/FeatureKit/SceneSlot.h`, `src/Renderer/SceneServicesDescriptorSet.h`).
-
-Caveat: `Image2D` has one dummy texture per slot index. `Image3D` has ONE shared
-dummy (`m_dummyImage3DTexture` in `SceneServicesDescriptorSet`) for every
-`Image3D` slot. It is sound only while at most one `Image3D` slot exists. A second
-`Image3D` slot silently shares the same dummy and no error is logged. No shipped
-feature registers an `Image3D` slot today.
-
-### (b) A channel plus a later pass
-
-Publish the volume with a `fx::Channel<T>` (for example the `AerialVolume` channel, whose
-`AtmosphereAerialResult` in `AtmosphereFeature.h` carries the volume) and read it in a later callback
-(`PostOpaque` or `PostComposite`) as a normal `Bind(...)` of a fullscreen or
-compute pass. Publish only after the dispatch was declared, with the volume in the keep list. Use it when the feature
-needs its own sampling or compositing step against scene depth. Atmosphere does this: the `PostOpaque` callback
-`AerialVolume()` publishes the volume and `Composite()` binds `aerialPerspectiveVolume` in
-`AtmosphereAerialPerspectiveCompositePass`.
-For engine-level publishing without the kit, see
-[`scene-resource-publishing.md`](scene-resource-publishing.md).
-
-## 6. The slice-depth mapping utility
-
-The slice index to view depth mapping used by dispatch shape (b) is a feature-free GLSL
-utility: `src/Shaders/VolumetricFroxelMath.glsl` (`FroxelSliceToViewDepth()`,
-`ViewDepthToFroxelSlice()`). It is `#include`d by `AtmosphereCommon.glsl` and by
-`VolumetricFroxelExamplePerColumnFill.comp`. A shader that needs the formula must
-`#include` the shared file, never keep its own copy.
-
-## 7. What NOT to do
-
-- Do not build a `VolumeTexture` pool. Volumes are import-only.
-- Do not move feature-specific physics into a shared utility if it is not
-  resource-shape-agnostic.
-- Do not present either dispatch shape as the only recipe. Pick the one the data
-  dependency requires.
-- Do not treat `Image3D` scene slots as symmetric to `Image2D` (single shared
-  dummy, section 5a).
-- Do not call `Acquire()` before checking `f.PassEnabled(...)`. A disabled pass must
-  not create, import or keep anything.
+## Related
+- [Feature kit reference](../reference/feature-kit.md) — `PersistentVolume`, channels, scene slots
+- [Writing a render feature](../guides/writing-a-render-feature.md) — feature steps
+- [Atmosphere](../reference/render-features/atmosphere.md) — aerial perspective volume
+- [Volumetric light](../reference/render-features/volumetric-light.md) — froxel volumes with temporal history
+- [Render honesty](render-honesty.md) — rules for published channels

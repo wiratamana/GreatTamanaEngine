@@ -1,8 +1,24 @@
 # RemovedSymbolCheck
+> Deleted symbols must stay deleted. This check fails when one comes back.
 
-Fails when `src` or `tests` name a symbol listed in `tokens.txt`. Those symbols were deleted on purpose.
-A hit means dead code came back, or a comment still talks about code that no longer exists.
+## What it enforces
 
-- Scanner: `gte_ci_scan` (`tools/ci/common`), run once for `src` and once for `tests`. Comments and string literals are scanned.
-- The allowlist is empty and stays empty.
-- When a symbol is deleted, add its name to `tokens.txt` in the same change.
+| Item | Value |
+|---|---|
+| ctest names | `RemovedSymbolCheckSrc`, `RemovedSymbolCheckTests` |
+| Scanned | `src`, then `tests` |
+| Forbidden | every name in `tokens.txt` |
+| Comments and strings | both scanned |
+| Allowlist | empty. It stays empty. |
+
+A hit means dead code came back, or a comment still talks about code that is gone.
+
+## Rule
+
+When you delete a symbol, add its name to `tokens.txt` in the same change.
+
+## Run
+
+```cmd
+ctest --test-dir build -R RemovedSymbolCheck --output-on-failure
+```

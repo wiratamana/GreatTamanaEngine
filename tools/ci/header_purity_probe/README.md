@@ -1,15 +1,35 @@
 # HeaderPurity
+> A compile test. Headers meant to be Vulkan-free must build without any Vulkan header.
 
-Text checks cannot see a header that reaches Vulkan through another include. This probe compiles
-`tests/Tools/HeaderPurityProbe.cpp` as an OBJECT target (`gte_header_purity_probe`) whose only include
-directory is `src`: no volk, no Vulkan SDK, no PCH, no forced include. A header on the list that pulls in
-`volk.h` fails with "file not found", so the check cannot fail open. A `#error` on `VOLK_HEADER_VERSION` /
-`VK_HEADER_VERSION` is the second line of defence.
+Text scans cannot see a header that reaches Vulkan through another include. This probe can.
 
-- Covered today: `Core/{Extent,GraphicsHandles,PixelFormat}.h`, the feature kit umbrella header
-  `Core/FeatureKit/FeatureKit.h` (the real one, so every kit header it pulls in is checked),
-  `Features/Shadow/ShadowTypes.h` and
-  `Renderer/RenderGraph/{ComputePass,FullscreenPass,GpuParams,PassChain,PerView,RenderGraphHandles,Shader,StaticName,ViewScopeUtil}.h`.
-- To cover another header, add its `#include` to the probe. `RenderGraphBuilder.h`, `Renderer.h`, `Core.h`
-  and `CommandBuffer.h` include volk and cannot be added.
-- Run: `ctest -R HeaderPurity`.
+## How it works
+
+| Item | Value |
+|---|---|
+| ctest name | `HeaderPurity` |
+| Target | `gte_header_purity_probe` (OBJECT, `EXCLUDE_FROM_ALL`) |
+| Source | `tests/Tools/HeaderPurityProbe.cpp` |
+| Include path | `src` only. No volk, no Vulkan SDK. |
+| Failure | "file not found" when a listed header reaches `volk.h` |
+| Backup | `#error` if `VOLK_HEADER_VERSION` or `VK_HEADER_VERSION` is defined |
+
+## What is covered
+
+The headers listed in `HeaderPurityProbe.cpp`:
+
+- core value types (`Extent`, `PixelFormat`, `GraphicsHandles`)
+- the feature kit umbrella header `Core/FeatureKit/FeatureKit.h`
+- feature type headers (Gtao, Ssgi, Shadow, VolumetricLight)
+- the `Profiling/` headers
+- a set of `Renderer/` and `Renderer/RenderGraph/` headers that are Vulkan-free
+
+## Run
+
+```cmd
+ctest --test-dir build -R HeaderPurity --output-on-failure
+```
+
+## Add a header
+
+Add its `#include` to `HeaderPurityProbe.cpp`. Headers that include volk cannot be added. Examples: `Renderer.h`, `Core.h`, `CommandBuffer.h`.

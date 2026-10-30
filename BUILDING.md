@@ -1,77 +1,89 @@
 # Building
+> How to build and run the engine on Windows. For anyone who just cloned the repo.
+> Verified against code: 2026-10-30
 
-Windows only, for now.
+## TL;DR
+- Windows only. Toolchain is **MinGW-w64 (g++) + Ninja**. Nothing else is supported.
+- Four commands: configure, build, run, test.
+- First configure downloads all dependencies. You need internet and `git`.
+- `glslc` is the one tool you must install yourself.
 
-Prerequisites:
+## Requirements
+| Tool | Version | Note |
+|---|---|---|
+| CMake | 3.19 or newer | |
+| MinGW-w64 `g++` | with C++20 | On `PATH`. The link step uses GNU `ld` flags, so MSVC does not work |
+| Ninja | any recent | On `PATH`. It is a single-config generator |
+| `glslc` | any recent | On `PATH`. Not downloaded. Install the Vulkan SDK or run `scoop install shaderc` |
+| `git` | any recent | Fetches the Sponza test model. Nothing else needs it |
+| Vulkan GPU driver | 1.3 | Needed to run. No Vulkan SDK is needed to build |
 
-- **CMake 3.19+**
-- **A C++20 toolchain CMake can generate for**, e.g. one of:
-  - Visual Studio 2017+ (with the "Desktop development with C++" workload)
-  - Ninja + MSVC/clang
-  - MinGW-w64 (g++) + mingw32-make or Ninja
-- `SDL3` is not vendored in this repo — CMake downloads the official prebuilt
-  SDL3 headers/DLL/import lib straight from the SDL GitHub releases
-  (https://github.com/libsdl-org/SDL) into `include/`, `SDL3.dll`, and
-  `lib/SDL3.lib` on first configure (see `cmake/FetchSDL3.cmake`). These are
-  gitignored — every clone fetches its own copy, so nothing SDL-related is
-  committed to the repo. Subsequent configures reuse what was already
-  downloaded and don't need the network again.
-- Vulkan is likewise not vendored, and **no Vulkan SDK installation is
-  required**. CMake fetches the official `Vulkan-Headers`
-  (https://github.com/KhronosGroup/Vulkan-Headers) into `include/vulkan` and
-  `include/vk_video`, plus `volk` (https://github.com/zeux/volk) — a tiny
-  meta-loader — into `third_party/volk` (see `cmake/FetchVulkan.cmake`).
-  volk resolves all Vulkan function pointers by dynamically loading
-  `vulkan-1.dll` at runtime, so there's nothing to link against or copy next
-  to the .exe: any machine with a Vulkan-capable GPU driver installed already
-  has `vulkan-1.dll` on its normal DLL search path. These are gitignored too,
-  same as SDL3.
-- The **Vulkan Memory Allocator (VMA)** header
-  (https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) is
-  fetched the same way, into `third_party/vma/vk_mem_alloc.h` (see
-  `cmake/FetchVMA.cmake`), and gitignored like everything else above. Every
-  GPU allocation in the engine (`RenderTexture`/`Buffer`) goes through the
-  `vma` target via `VulkanAllocator` (`src/Renderer/Vulkan/VulkanAllocator.h/.cpp`)
-  — see Rendering (in `README.md`) and Status (in `README.md`) for details.
-- A curated subset of [benikabocha/saba](https://github.com/benikabocha/saba)
-  (MikuMikuDance `.pmx` model file reading only — see `README.md`, "Asset
-  Pipeline") plus its one real dependency, **glm** (header-only), are
-  likewise fetched automatically on first configure — no submodule, no
-  network access needed on later configures — into `third_party/saba/` and
-  `third_party/glm/` (see `cmake/FetchSaba.cmake`), and gitignored like
-  everything else above. `SABA_RELEASE_TAG`/`GLM_RELEASE_TAG` (both pinned
-  to a specific commit/tag by default, not a moving branch) and
-  `SABA_FORCE_REDOWNLOAD`/`GLM_FORCE_REDOWNLOAD` are tunable via `-D...` the
-  same way every other `Fetch*.cmake` module's cache variables are.
-- **`glslc`** must already be installed and on `PATH` (it is NOT fetched
-  automatically, unlike everything else above — see `cmake/CompileShaders.cmake`'s
-  own header comment for why: it's a build-time-only developer tool, never
-  shipped/needed at runtime). Get it from either the
-  [Vulkan SDK](https://vulkan.lunarg.com/) or a standalone Shaderc install
-  (e.g. `scoop install shaderc` on Windows) — needed to compile every
-  `src/Shaders/*.vert`/`*.frag` (including the Editor's Mesh Asset preview
-  shaders, `Shaders/MeshPreview.vert/.frag`) to SPIR-V at build time.
-- Dear ImGui (core + its SDL3/Vulkan backends) is fetched the same way, into
-  `third_party/imgui/` (see `cmake/FetchImGui.cmake`), but **only** when
-  `GTE_ENABLE_EDITOR` is `ON` (the default) — a build configured with
-  `-DGTE_ENABLE_EDITOR=OFF` never touches the network for this and never
-  compiles a single ImGui source file.
-- The Editor's Unity-style "Project" panel (a live file browser rooted at a
-  "Project" folder created next to the built `.exe`, plus drag-and-drop
-  import from Windows Explorer — see `README.md`, "Editor / Debug UI") is
-  gated by its OWN switch, `GTE_ENABLE_PROJECT_PANEL` (`ON` by default),
-  separate from `GTE_ENABLE_EDITOR` — pass `-DGTE_ENABLE_PROJECT_PANEL=OFF`
-  to build the rest of the Editor without it. Only meaningful when
-  `GTE_ENABLE_EDITOR` is also `ON`.
-
-```
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Debug
-build\Debug\GreatTamanaEditor.exe
+## Build
+```cmd
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+build\GreatTamanaEditor.exe
+ctest --test-dir build --output-on-failure
 ```
 
-(swap the `-G` generator for whatever matches your installed toolchain, e.g.
-`-G Ninja` or `-G "MinGW Makefiles"`)
+- Build only the editor: `cmake --build build --target GreatTamanaEditor`.
+- For a Debug build, set `-DCMAKE_BUILD_TYPE=Debug` at configure time. `--config Debug` does nothing with Ninja.
+- A new folder under `Projects/` is picked up on the next build. See [Project assembly](docs/guides/project-assembly.md).
 
-See `README.md` for the overall architecture and `TESTING.md` for how to
-build and run the test suite.
+## Run flags
+| Flag | Effect |
+|---|---|
+| `--no-vsync` | Uncapped present. Use it for benchmarks only |
+| `--vulkan-validation` | Turns on Vulkan validation in any build type |
+| `--reimport <source> <dest.gta>` | Headless re-import of one asset. Prints a message, then exits |
+
+The editor starts an HTTP debug server on `127.0.0.1:8080`. See the [HTTP cheat sheet](docs/debugging/http-cheat-sheet.md).
+
+## CMake options
+Pass them as `-D<NAME>=ON|OFF` at configure time.
+
+| Option | Default | Effect when OFF |
+|---|---|---|
+| `GTE_BUILD_TESTS` | ON | No GoogleTest fetch, no test exe, no ctest |
+| `GTE_ENABLE_PROFILER` | ON | `GTE_PROFILE_SCOPE` compiles to nothing |
+| `GTE_ENABLE_JOB_SYSTEM` | ON | `Schedule()` runs inline. No worker threads |
+| `GTE_ENABLE_NETWORK` | ON | The HTTP server never starts |
+| `GTE_ENABLE_PROJECT_PANEL` | ON | No Project panel, asset inspector, asset preview or Bone Viewer |
+| `GTE_ENABLE_PROJECT_ASSEMBLIES` | ON | No `Projects/*/Libraries` discovery, no DLL loading. New Project refuses |
+| `GTE_FETCH_SPONZA` | ON | No Sponza clone into `_reference/` |
+| `GTE_CORE_STANDALONE_PROBE_ONLY` | OFF | **CI only.** Configures `gte_core` alone. Never set it by hand |
+
+## What gets downloaded
+CMake fetches everything at configure time. Later configures reuse the files. These folders are gitignored: `include/`, `lib/`, `third_party/`, `_reference/`, `build/`.
+
+| Dependency | Source | Pin |
+|---|---|---|
+| SDL3 | GitHub release (prebuilt) | `latest` |
+| Vulkan-Headers, volk | GitHub zip | `latest` |
+| VMA, cpp-httplib, nlohmann/json, GoogleTest | GitHub | `latest` |
+| Dear ImGui | GitHub zip | branch `docking` (moves) |
+| ImGuizmo, stb, MikkTSpace, meshoptimizer | GitHub | fixed commit |
+| KTX-Software | built from source | `v4.4.2` |
+| cgltf | GitHub | `v1.15` |
+| saba (PMX/VMD) and glm | GitHub zip subset | fixed commit and `1.0.1` |
+| SPIRV-Reflect | vendored zip name in CMake | fixed |
+| Sponza model | sparse `git` clone of `glTF-Sample-Assets` | `main` |
+
+- Override a pin: `-D<NAME>_RELEASE_TAG=<tag>`, for example `-DKTX_RELEASE_TAG=v4.4.2`.
+- Force a fresh download: `-D<NAME>_FORCE_REDOWNLOAD=ON`.
+- Many pins are `latest`. Two clones on different days can build different code.
+
+## Troubleshooting
+| Symptom | Cause | Fix |
+|---|---|---|
+| Configure stops, `glslc` not found | `glslc` not on `PATH` | Install it, open a new shell |
+| Linker rejects `-Wl,--whole-archive` | Not using MinGW-w64 | Use MinGW-w64 and Ninja |
+| Sponza missing, only a warning | No `git` or no network | Ignore it, or set `-DGTE_FETCH_SPONZA=OFF` |
+| Fetch fails | No internet or a proxy | Fix the network, configure again |
+| Editor starts, no HTTP | Port 8080 is taken | Close the other editor instance |
+
+## Related
+- [Getting started](docs/getting-started.md)
+- [Testing](TESTING.md)
+- [Project assembly](docs/guides/project-assembly.md)
+- [Documentation index](docs/README.md)

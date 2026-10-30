@@ -1,147 +1,126 @@
-# PBR materials (glTF import, GGX shading, material lifetime)
+# PBR materials
+> Rules for glTF materials: image roles, tangent convention, GGX shading, and material GPU lifetime. For anyone touching material shaders, import or the material cache.
+> Verified against code: 2026-10-30
 
-Imported glTF meshes draw with a tangent-space normal map, a metallic-roughness map, an occlusion map and a GGX sun
-specular. PMX models and primitive shapes keep the old base-color shaders. Scene color stays linear HDR; ToneMapping does
-the display transform (see `architecture/rendering.md`).
+## TL;DR
+- Imported glTF meshes use a normal map, a metallic-roughness map, an occlusion map and a GGX sun specular.
+- PMX models and primitives keep the older base-color shaders.
+- Scene color stays linear HDR. Tone mapping does the display transform (see [Tone mapping](../reference/render-features/tone-mapping.md)).
+- Only base color is sRGB. Every other image is linear.
+- Nothing here throws. A bad image or material falls back to a default and logs once.
 
-## Image roles and color spaces
+## Rules
+1. Never flip the green channel of the normal map. Green is +B (OpenGL convention).
+2. A vertex tangent is a `Vec4`: xyz is the unit tangent T, w is +1 or -1. The bitangent is `cross(N, T) * w`.
+3. The shadow lookup uses the geometric normal, never the bump normal.
+4. The `MaterialParams` C++ struct and `MaterialParams.glsl` must match. Both are 48 bytes.
+5. Every material set is complete: all five bindings are written, also for PMX materials.
+6. Keep radiance clamped to `kMaxSceneRadiance` (8192). Scene color is `RGBA16F`. Above 65504 it becomes `+inf`, then a black pixel.
+7. Release materials only through the sweep on the main thread. Never free a GPU material by hand.
 
-`MaterialImageRole` (`src/Renderer/MaterialImageRole.h`) names the four material slots. Only base color is sRGB.
+## Image roles
+`MaterialImageRole` (`src/Renderer/MaterialImageRole.h`) names the four slots.
 
 | Role | Set 0 binding | GPU format | Channels |
 |---|---|---|---|
-| `BaseColor` | 0 | RGBA8_SRGB | rgb color, a alpha |
-| `Normal` | 2 | RGBA8_UNorm | rgb = tangent-space normal * 0.5 + 0.5 |
-| `MetallicRoughness` | 3 | RGBA8_UNorm | G roughness, B metallic |
-| `Occlusion` | 4 | RGBA8_UNorm | R occlusion (1 = unoccluded) |
+| `BaseColor` | 0 | `RGBA8_SRGB` | rgb color, a alpha |
+| `Normal` | 2 | `RGBA8_UNorm` | rgb = tangent-space normal * 0.5 + 0.5 |
+| `MetallicRoughness` | 3 | `RGBA8_UNorm` | G roughness, B metallic |
+| `Occlusion` | 4 | `RGBA8_UNorm` | R occlusion (1 = unoccluded) |
 
-Binding 1 is the 48-byte `MaterialParams` block (`src/Renderer/MaterialParams.h`, `src/Shaders/MaterialParams.glsl`):
-`baseColorFactor`, then `params` (alpha cutoff, metallic, roughness, normal scale) and `pbr` (occlusion strength). A test
-parses the GLSL block and compares it with the C++ struct. `MakeMaterialParams` clamps every value and maps NaN to the default.
-
-A missing image is replaced by a 1x1 default image: white sRGB, flat normal (128,128,255), white metallic-roughness, white
-occlusion. Every set is complete: all five bindings are written, also for PMX materials. Mip chains of data images are plain
-linear averages. The shader normalizes the sampled normal.
+- Binding 1 is the `MaterialParams` block: `baseColorFactor`, then alpha cutoff, metallic, roughness, normal scale, occlusion strength.
+- `MakeMaterialParams` clamps colors, cutoff, metallic, roughness and occlusion to 0..1, and normal scale to 0..8. A non-finite value becomes its default.
+- A missing image becomes a 1x1 default: white sRGB, flat normal (128,128,255), white metallic-roughness, white occlusion.
+- Mip chains of data images are plain linear averages. The shader normalizes the sampled normal.
 
 ## Tangent convention
+The normal map is decoded as `n = rgb * 2 - 1`, then `n.xy *= normalScale`, then `N' = normalize(T * n.x + B * n.y + N * n.z)`.
 
-A vertex tangent is a `Vec4`: xyz = unit tangent T, w = +1 or -1. The bitangent is `B = cross(N, T) * w`. The normal map
-is decoded as `n = rgb * 2 - 1`, `n.xy *= normalScale`, `N' = normalize(T * n.x + B * n.y + N * n.z)`. Green is +B (OpenGL
-convention). Never flip green.
-
-- **Import.** The loader converts an authored `TANGENT` to engine space (Z is mirrored): `T = ToEngineSpace(A * T_gltf)`,
-  `w = w_gltf * (node mirrored ? -1 : 1) * -1`, then orthogonalizes T against N.
-- **Generation.** A primitive without `TANGENT` gets MikkTSpace tangents (`GenerateMeshTangents`, `src/Assets/MeshTangents.cpp`).
-  The uv is passed as `(u, 1 - v)`. The sign w is computed from the triangle's own uv gradient, not taken from MikkTSpace,
-  so authored and generated tangents mean the same thing. A vertex whose corners need different frames is split.
-  `FallbackTangent` is used when no tangent can be derived.
-- **Storage.** The mesh `*.gta` payload has an optional trailing tangent section (count + 16 bytes per vertex). The decoder
-  rejects a wrong count, a truncated block and any trailing bytes.
-- **Vertex shader.** World T = `mat3(model) * T`; `w` is multiplied by the sign of `determinant(mat3(model))`. The world
-  normal uses the cofactor matrix times that sign, which is exact for any scale and for mirroring matrices.
-- **Back faces.** `side = (gl_FrontFacing ? 1 : -1) * windingSign`. When `side < 0` the whole frame (T, B, N) is negated.
+| Stage | What happens |
+|---|---|
+| Import | An authored `TANGENT` is moved to engine space (Z is mirrored). The sign w flips for the mirror and for a mirrored node. T is made orthogonal to N. |
+| Generation | A primitive without `TANGENT` gets MikkTSpace tangents (`GenerateMeshTangents`). The sign comes from the triangle's own uv gradient. A vertex whose corners need two frames is split. |
+| Fallback | `FallbackTangent` when no tangent can be derived. The import message counts them. |
+| Storage | Optional tangent tail in the mesh payload: count, then 16 bytes per vertex. The decoder rejects a wrong count, a short block or trailing bytes. |
+| Vertex shader | World T is `mat3(model) * T`. The normal uses the cofactor matrix. Both use the sign of `determinant`, so they are exact for any scale and for mirror matrices. |
+| Back faces | `side = (gl_FrontFacing ? 1 : -1) * windingSign`. When `side < 0` the whole frame (T, B, N) is negated. |
 
 ## Vertex layout and pipelines
+`VertexLayout::PositionNormalUvTangent` uses `MeshVertexTangent` (48 bytes). `MeshAssetPipelineKind` picks one pipeline per part.
 
-`VertexLayout::PositionNormalUvTangent` uses `MeshVertexTangent` (48 bytes: position 0, normal 12, uv 24, tangent 32).
-`MeshAssetPipelineKind` (`src/Game/Instantiation/MeshAssetPipelineKind.h`) picks one pipeline per part:
-`Untextured`, `Textured`, `TexturedAlphaTest` (old layout) or `Pbr`, `PbrAlphaTest` (`PbrMesh.vert` + `PbrMesh.frag` /
-`PbrMeshAlphaTest.frag`). A mesh uses the tangent layout for all textured parts when it is not skinned, carries one tangent
-per vertex and every textured slice is a glTF material (`CanUseTangentLayout`). Otherwise the old layout is used for all of
-them. A mesh `*.gta` without tangents still renders through the old path. Sun shadows need a depth-only pipeline per layout
-(see `shadow-mapping.md`).
+| Kind | Layout | Shaders |
+|---|---|---|
+| `Untextured`, `Textured`, `TexturedAlphaTest` | Older layouts | `Mesh`, `TexturedMesh` |
+| `Pbr`, `PbrAlphaTest` | With tangent | `PbrMesh.vert` with `PbrMesh.frag` or `PbrMeshAlphaTest.frag` |
 
-Set 0 is the material set; set 1 is the scene-services set. A pipeline without a material set but with a scene-services set
-gets an empty set-0 layout, and the draw binds the renderer's empty set at set 0 (`Renderer::Submit`).
+- A mesh uses the tangent layout when it is not skinned, has one tangent per vertex, and every textured slice is a glTF material (`CanUseTangentLayout`). Otherwise all its parts use the older layout.
+- A mesh without tangents still renders through the older path.
+- Sun shadows need a depth-only pipeline per layout. See [Shadow](../reference/render-features/shadow.md).
+- Set 0 is the material set. Set 1 is scene services. A pipeline with no material set gets an empty set 0.
 
 ## Shading model
+Sun plus hemisphere ambient. There is no environment map. Code: `src/Shaders/PbrBrdf.glsl`, `PbrMaterial.glsl`. CPU reference: `src/Math/PbrBrdf.h`.
 
-Sun plus hemisphere ambient; there is no environment map. Code: `src/Shaders/PbrBrdf.glsl`, `PbrMaterial.glsl`; CPU
-reference and tests: `src/Math/PbrBrdf.h`.
-
-- `roughness = clamp(perceptualRoughness, 0.045, 1)`, `alpha = roughness^2`, `F0 = mix(0.04, baseColor, metallic)`,
-  `diffuseColor = baseColor * (1 - metallic)`.
-- Sun term = `sunIlluminance * NdotL * (1 - strength * shadow) * horizon`, where `horizon = saturate(dot(Ng, L) * 8)`. The
-  shadow lookup uses the geometric normal Ng, never the bump normal.
-- Diffuse is scaled by `kDirectScale` (0.65). Specular is `D_GGX * V_SmithGGXCorrelated * F_Schlick` times
-  `kDirectScale * pi` (the Lambert term has no 1/pi).
+- `roughness = clamp(perceptualRoughness, 0.045, 1)`, `alpha = roughness^2`, `F0 = mix(0.04, baseColor, metallic)`, `diffuseColor = baseColor * (1 - metallic)`.
+- Sun term = `sunIlluminance * NdotL * sunVisibility * horizon`. `horizon` is `saturate(dot(Ng, L) * 8)`.
+- Diffuse is scaled by `kDirectScale` (0.65). Specular is `D_GGX * V_SmithGGXCorrelated * F_Schlick`, scaled by `kDirectScale * pi`.
 - Ambient = `diffuseColor * HemisphereAmbient(N) * occlusion + HemisphereAmbient(reflect(-V, N)) * EnvBrdfApprox * SpecularOcclusion`.
-  Shadows remove only the sun term. Occlusion multiplies ambient only.
-- V comes from the eye position in the scene uniform block. `SceneLighting` writes it for every view, with or without shadow data.
-- The scene block holds the sun and ambient intensity already multiplied by the atmosphere record when
-  `AtmosphereSettings::sceneLightFollowsAtmosphere` is on. The shader does not know about the atmosphere.
-- The radiance is clamped to `kMaxSceneRadiance` = 8192, because scene color is RGBA16F and a smooth highlight would
-  otherwise become +inf and then a black pixel.
+- Shadows remove only the sun term. Occlusion multiplies ambient only.
+- `SceneLighting` writes the eye position for every view. With `sceneLightFollowsAtmosphere` on, sun and ambient are already multiplied by the atmosphere record. The shader does not know the atmosphere.
 
 ## Material debug views
-
-`SceneLighting` has `materialDebugView` (0..8), packed in `groundAmbientAndMaterialDebugView.w` of the scene block. The
-shader writes the value as `SrgbToLinear(value)`, so with ToneMapping `Clamp`, exposure 1, saturation 1, dither 0 the
-captured image shows the value exactly. Switch off features that change scene color after the mesh pass (Atmosphere, Gtao,
-VolumetricLight) before comparing colors.
+`SceneLighting` has `materialDebugView` (0 to 8). The shader writes `SrgbToLinear(value)`. With tone mapping `Clamp`, exposure 1, saturation 1 and dither 0, a capture shows the value exactly. Turn off Atmosphere, Gtao and VolumetricLight first. They change scene color after the mesh pass.
 
 | Value | View | Value | View |
 |---|---|---|---|
 | 0 | off | 5 | tangent T (xyz * 0.5 + 0.5) |
 | 1 | shading normal | 6 | handedness w (green +1, red -1) |
-| 2 | roughness (grey) | 7 | facing (green front, red back) |
-| 3 | metallic (grey) | 8 | base color (unlit) |
-| 4 | occlusion (grey) | | |
+| 2 | roughness | 7 | facing (green front, red back) |
+| 3 | metallic | 8 | base color (unlit) |
+| 4 | occlusion | | |
 
-Live check over HTTP (plain `GET`; the Game tab must be visible for `/get_game_view`). The capture is the game view image
-only, no screen grab:
+A value of 9 or more, a negative value or a non-integer gives `400`. Quick check (details in the [HTTP cheat sheet](../debugging/http-cheat-sheet.md)):
 
+```cmd
+curl.exe "http://127.0.0.1:8080/feature_debug/set?name=SceneLighting&materialDebugView=2"
+curl.exe -o view.png "http://127.0.0.1:8080/get_game_view"
+curl.exe "http://127.0.0.1:8080/feature_debug/set?name=SceneLighting&materialDebugView=0"
 ```
-GET /activate_tab?name=Game
-GET /feature_debug/state?name=SceneLighting
-GET /feature_debug/set?name=ToneMapping&mode=Clamp&exposure=1&saturation=1&dither=0
-GET /feature_debug/set?name=SceneLighting&materialDebugView=2      then GET /get_game_view
-GET /feature_debug/set?name=SceneLighting&materialDebugView=0
-GET /feature_debug/invoke?name=ToneMapping&action=reset_defaults
-GET /get_logs?min_level=warning
-```
-
-`materialDebugView` is an integer key. A value of 9 or more, a negative value or a non-integer is rejected with a 400 that
-names the key. The same setting is the "Material debug view" combo of the **SceneLighting** editor window. For one draw's
-bound images use `/frame_debugger/open`, `/enable?value=true`, `/capture`, `/select_event?index=<n>` (see `frame-debugger.md`).
-
-## Failure policy
-
-Nothing here throws out of a render or load call.
-
-| Failure | Result |
-|---|---|
-| Base color image missing or undecodable | the part uses the default white image (flat color); one warning per Guid |
-| Normal, metallic-roughness or occlusion image missing | that slot uses its default image; one warning per Guid |
-| GPU creation of a material fails | `Resolve()` logs one warning and returns an invalid handle; the part draws untextured |
-| One upload chunk fails | every image of that chunk is marked failed (one warning per Guid) |
-| Upload fence wait fails | the factory logs, waits for the device once and throws; the chunk is treated as failed |
-| Bad tangent section in a mesh payload | `DecodeMeshDataFromBytes` returns `nullopt`; the spawn fails with the existing error |
-| Bad count or section in the rig blob | `DecodeRigDataFromBytes` returns `nullopt`; the catalog logs one warning |
-| `TANGENT` accessor missing or wrong type | tangents are generated for that primitive |
-| MikkTSpace fails or no uv | every tangent of the primitive is `FallbackTangent`; the import message counts it |
-| Draw whose pipeline needs a material set but the handle does not resolve | the draw is skipped, one warning per handle |
-| Material still used by an entity or cached asset | the release sweep keeps it |
 
 ## Material lifetime
+- **Upload.** Many images go up in few submits: one staging buffer and one command buffer per chunk (64 MiB or 256 images). Images are decoded in groups of 48 MiB. One summary line is logged.
+- **Sets.** `MaterialSetPool` holds up to 4096 material sets. A `MaterialSetLease` frees its set when the material dies.
+- **Cache.** One image per `(Guid, srgb)`. One material per `(four Guids, MaterialParams bytes)`.
+- **Sweep.** `Core::BuildFrame` calls `Game::ReleaseUnusedGpuResources` first, on the main thread. When a sweep is pending it runs every 30 frames. Materials no entity and no cached part uses go first, then images only the cache holds, then unused meshes.
+- The GPU is drained once, and only if something was freed. The log line is "Released N materials and M images".
 
-- **Upload.** `CreateMaterialImages` uploads many images with a few submits: one staging buffer, one command buffer, two
-  `vkCmdPipelineBarrier2` calls and one fence wait per chunk (64 MiB or 256 images). `MaterialTextureGpuCache::PrepareImages`
-  decodes in groups of 48 MiB and logs one summary line ("n images uploaded in m submits"). `Renderer::GetUploadStats()` holds
-  the counters.
-- **Sets.** A set belongs to one material and is owned by `MaterialSetLease` (`src/Renderer/MaterialSetPool.h`), which
-  frees it into the pool (capacity 4096, 75% warning) when the `MaterialTexture` is destroyed. The images live as long as the
-  material or the cache that loaded them.
-- **Cache.** One image per `(Guid, srgb)`; one material per `(four Guids, MaterialParams bytes)`.
-- **Release sweep.** `Core::BuildFrame()` calls `Game::ReleaseUnusedGpuMaterials()` first, on the main thread, before any pass
-  records. When a sweep is pending it runs every 30 frames (`ShouldRunMaterialSweep`): materials that no `MeshRenderer` and no
-  cached asset part uses are unregistered (`RenderSystem::UnregisterTexture`), then images only the cache still holds are freed.
-  The GPU is drained once (`Renderer::DrainGpuForResourceRelease()`) and only when something is freed. Log line:
-  "Released N materials and M images (K images, L materials stay)".
-- Vertex and index buffers of a replaced mesh asset are released by the mesh sweep once no entity or cached part uses them.
+## Failure policy
+| Failure | Result |
+|---|---|
+| Base color image missing or undecodable | Default white image. One warning per Guid. |
+| Normal, metallic-roughness or occlusion image missing | That slot uses its default image. |
+| GPU creation of a material fails | `Resolve()` logs once and returns an invalid handle. The part draws untextured. |
+| One upload chunk fails | Every image of that chunk is marked failed. |
+| Bad tangent section in a mesh payload | Decode returns `nullopt`. The spawn fails with the existing error. |
+| Bad section in the rig blob | Decode returns `nullopt`. The catalog logs once. |
+| `TANGENT` accessor missing or wrong type | Tangents are generated for that primitive. |
+| MikkTSpace fails or no uv | Every tangent of the primitive is `FallbackTangent`. |
+| Draw needs a material set that does not resolve | The draw is skipped. One warning per handle. |
+| Material still used | The sweep keeps it. |
+
+## Checks
+- `tests/Renderer/MaterialParamsTests.cpp` parses the GLSL block and compares it with the C++ struct.
+- `tests/Features/SceneLighting/` covers the debug view range.
+- Shader math has a CPU reference in `src/Math/PbrBrdf.h` with tests.
 
 ## Not supported
+- Emissive. The slot is imported, never sampled.
+- `KHR_materials_*` and `KHR_texture_transform`.
+- Texture coordinate sets other than `TEXCOORD_0`. The importer reports them in its message.
+- glTF sampler modes. All images use Repeat and linear filtering.
+- Image-based lighting and alpha blending.
+- GPU skinning of tangent meshes.
 
-Emissive, `KHR_materials_*`, texture coordinate sets other than `TEXCOORD_0`, `KHR_texture_transform`, glTF sampler modes (all
-images use Repeat and linear filtering), image-based lighting, alpha blending, GPU skinning of tangent meshes. The importer
-reports unsupported texcoord sets and shading models in its success message.
+## Related
+- [Asset pipeline](../architecture/asset-pipeline.md) · [Rendering](../architecture/rendering.md) · [Scene lighting](../reference/render-features/scene-lighting.md)
+- [Frame debugger](../debugging/frame-debugger.md) (bound images of one draw) · [Animation and physics](../architecture/animation-physics.md)

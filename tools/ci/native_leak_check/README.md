@@ -1,16 +1,36 @@
 # NativeLeakCheck
+> Code outside `src/Renderer` must not touch raw engine wrappers or record GPU work by hand.
 
-Code outside `src/Renderer` must not touch raw engine wrappers or record GPU work by hand. The check
-fails on `Native(` (member, arrow and free-function form), `DescriptorSet`, `DescriptorWrite`,
-`AllocateDescriptorSet`, `FreeDescriptorSet`, `ComputePipeline`, `CreateComputePipeline`, `EmitImageBarrier`,
-`ImmediateSubmit`, `BeginGraphPassRecording`, `RecordingAccess`, `PlatformHandle(`, `ColorPixelFormat(`,
-`DepthPixelFormat(`, `WaitForGpuIdle` and `vkDeviceWaitIdle`. It also fails on an `#include` of a
-Renderer-internal header (`includes.txt`: `Compute/ComputePipeline.h`, `Compute/ComputeDispatch.h`, `DescriptorSet.h`).
+## What it enforces
 
-- Scanner: `gte_ci_scan`. Comments are skipped, string literals are scanned on purpose (editor code
-  templates carry `#include` lines inside strings).
-- `tokens.txt`: the forbidden names. `includes.txt`: the forbidden include paths (substring match).
-  `allowlist.txt`: platform files that may use them, one reason per line.
-- Ratchet: a line whose file is gone or clean fails ("stale line: remove it"). Lines are only removed.
-- A reason starting with `permanent:` is a real platform boundary; `debt:` lines are work to do.
-- Starting debt: `gte_ci_scan --root src --skip Renderer/ --tokens tokens.txt --comments skip --strings scan --report`.
+| Item | Value |
+|---|---|
+| ctest name | `NativeLeakCheck` |
+| Scanned | `src`, except `Renderer/` |
+| Forbidden names | `tokens.txt`: `Native(`, `DescriptorSet`, `ComputePipeline`, `EmitImageBarrier`, `ImmediateSubmit`, `BeginGraphPassRecording`, `RecordingAccess`, `PlatformHandle(`, `WaitForGpuIdle`, `vkDeviceWaitIdle` and more |
+| Forbidden includes | `includes.txt`: `Compute/ComputePipeline.h`, `Compute/ComputeDispatch.h`, `/DescriptorSet.h` |
+| Comments | skipped |
+| String literals | scanned. Editor code templates carry `#include` lines in strings. |
+
+`Native(` covers `.Native()`, `->Native()` and the free function `Native(handle)`.
+
+## Allowlist
+
+`allowlist.txt` has one reason per line.
+
+| Prefix | Meaning | Today |
+|---|---|---|
+| `permanent:` | a real platform boundary | `Editor/ImGuiEditorLayer.cpp`, `Window/Window.h` |
+| `debt:` | work to do | none |
+
+A line whose file is gone or clean fails the check ("stale line: remove it"). Lines are only removed.
+
+## Run
+
+```cmd
+ctest --test-dir build -R NativeLeakCheck --output-on-failure
+```
+
+## If it fails
+
+Use `rg::OneShot`, `rg::Shader`, `rg::GpuBuffer` and the pass kinds. See [Render graph](../../../docs/architecture/render-graph.md).

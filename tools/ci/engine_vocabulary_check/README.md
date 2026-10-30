@@ -1,16 +1,33 @@
 # EngineVocabularyCheck
+> The engine layer uses abstract names only. Feature and gameplay words belong in `src/Features` and game code.
 
-The engine layer (`src/Renderer`, `src/Core`) uses abstract names only (texture, buffer, pass, descriptor).
-Feature and gameplay words belong in `src/Features` and in game code. The check fails when a file in the
-engine layer contains one of the tokens in `tokens.txt`.
+## What it enforces
 
-- Scanner: `gte_ci_scan`, case-insensitive. Comments and string literals ARE scanned: that is where feature names leak.
-- Token forms in `tokens.txt`:
-  - `*Atmosphere*` (leading and trailing `*`): matches inside any identifier, comment or string, so
-    `AtmosphereLutRenderer` and `ATMOSPHERE_PHASE2_X` both hit. Used for Atmosphere, Shadow, Cloud, Weather,
-    Terrain, Player, Enemy, Gameplay.
-  - `Sky` (bare word): whole identifier only. Used for Sky, Fog, Water, Volumetric, which are parts of unrelated
-    names (`SkyBox`, `VolumetricFroxelMath`).
-- `allowlist.txt` is empty. Fix a hit by naming the thing abstractly; do not add a line.
-- Exit code 2 means the scan itself is broken (0 files scanned, unreadable file). It never counts as a pass.
-- List hits: `gte_ci_scan --root src --only Renderer/ --only Core/ --tokens tokens.txt --comments scan --strings scan --ignore-case --report`.
+| Item | Value |
+|---|---|
+| ctest name | `EngineVocabularyCheck` |
+| Scanned | `src/Renderer`, `src/Core`, `src/Profiling`, and the asset files listed in `tests/CMakeLists.txt` (mesh, cluster, `.gta`, import) |
+| Case | ignored |
+| Comments and strings | both scanned. Feature names leak there. |
+| Allowlist | empty. It stays empty. |
+
+## Token forms (`tokens.txt`)
+
+| Form | Meaning | Words |
+|---|---|---|
+| `*Word*` | hits inside any identifier, comment or string | Atmosphere, Shadow, Cloud, Weather, Terrain, Player, Enemy, Gameplay |
+| `Word` | hits a whole identifier only | Sky, Fog, Water, Volumetric |
+
+Bare words are used where the word is part of unrelated names (`SkyBox`, `VolumetricFroxelMath`).
+
+## Run
+
+```cmd
+ctest --test-dir build -R EngineVocabularyCheck --output-on-failure
+```
+
+## If it fails
+
+- Name the thing abstractly: texture, buffer, pass, view.
+- Do not add an allowlist line.
+- Exit code 2 means the scan itself broke (0 files scanned, unreadable file). It is never a pass.

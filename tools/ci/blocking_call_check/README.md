@@ -1,14 +1,29 @@
 # BlockingCallCheck
+> Every CPU wait on the GPU goes through one file. This check fails when any other file waits.
 
-Every CPU wait on the GPU goes through `GpuWaitService` (`src/Renderer/Vulkan/GpuWaitService.cpp`).
-It is named by a `BlockSite`, result-checked and reported to the observer. Fence waits and the queue drain are
-bounded; the final device idle and the present call have no Vulkan timeout.
+## What it enforces
 
-The check fails when any other file under `src` names `vkWaitForFences`, `vkDeviceWaitIdle`,
-`vkQueueWaitIdle`, `vkWaitSemaphores`, `vkAcquireNextImageKHR` or `vkQueuePresentKHR` (acquire and present
-have their own wrappers).
+| Item | Value |
+|---|---|
+| ctest name | `BlockingCallCheck` |
+| Scanned | `src`, except `Renderer/Vulkan/GpuWaitService.cpp` |
+| Forbidden | `vkWaitForFences`, `vkDeviceWaitIdle`, `vkQueueWaitIdle`, `vkWaitSemaphores`, `vkAcquireNextImageKHR`, `vkQueuePresentKHR` |
+| Comments | skipped |
+| String literals | scanned |
+| Allowlist | empty. It stays empty. |
 
-- Scanner: `gte_ci_scan` (`tools/ci/common`). Comments are skipped, string literals are scanned.
-- The wait service source file is excluded with `--skip`. The allowlist is empty and stays empty.
-- Idle waits outside `src/Renderer` go through `Renderer::WaitForGpuIdle(site, detail)` and its two named
-  wrappers. They take a mandatory site and return a `[[nodiscard]]` `BlockOutcome`.
+## Rules
+
+- `GpuWaitService` names each wait with a `BlockSite`.
+- Code outside `src/Renderer` drains the GPU with `Renderer::DrainGpuForCodeUnload()` or `Renderer::DrainGpuForResourceRelease(detail)`.
+- Both return a `[[nodiscard]]` `BlockOutcome`. Check it.
+
+## Run
+
+```cmd
+ctest --test-dir build -R BlockingCallCheck --output-on-failure
+```
+
+## If it fails
+
+Move the wait into `GpuWaitService`. Do not add an allowlist line. See also [NativeLeakCheck](../native_leak_check/README.md).

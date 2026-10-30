@@ -1,46 +1,38 @@
-﻿# Atmosphere/Core Decoupling Check
+# AtmosphereCoreDecouplingCheck
+> A small CMake script. The feature-agnostic core files must never contain the word `Atmosphere`.
 
-## What this is
+## What it enforces
 
-A tiny, standalone CMake script (`CheckAtmosphereCoreDecoupling.cmake`, run via
-`cmake -P`, never configured as its own project) that enforces one permanent
-rule: `src/Core/Core.h`, `src/Core/Core.cpp`, `src/Editor/EditorLayer.h`, and
-`src/Editor/EditorHost.cpp` must never contain the literal, case-sensitive
-substring `Atmosphere`. These files are the engine's feature-agnostic
-rendering core, its one Editor abstraction boundary, and the composition root
-that constructs built-in feature modules generically - none of them should
-ever name a concrete built-in render feature directly.
+| Item | Value |
+|---|---|
+| ctest name | `AtmosphereCoreDecouplingCheck` |
+| Script | `CheckAtmosphereCoreDecoupling.cmake`, run with `cmake -P` |
+| Files checked | `src/Core/Core.h`, `src/Core/Core.cpp`, `src/Editor/EditorLayer.h`, `src/Editor/EditorHost.cpp` |
+| Rule | the case-sensitive text `Atmosphere` must not appear |
+| Method | plain line search. A comment hit counts like a code hit. |
 
-Unlike the other folders under `tools/ci/` (manually-invocable local CMake
-probes), this one IS wired into the real, automated test run: it is
-registered as a `ctest` test named `AtmosphereCoreDecouplingCheck` (see
-`tests/CMakeLists.txt`), so a plain `ctest` run from the build directory
-exercises it automatically, every time, alongside the GoogleTest suite.
+These files are the rendering core, the editor boundary, and the composition root. None may name a built-in feature.
 
-## Running it directly
+## Run
 
-```
-cmake -D GTE_REPO_ROOT=<repo root> -P tools/ci/atmosphere_core_decoupling_check/CheckAtmosphereCoreDecoupling.cmake
+```cmd
+ctest --test-dir build -R AtmosphereCoreDecouplingCheck --output-on-failure
 ```
 
-Or, once registered as a test:
+Or directly:
 
+```cmd
+cmake -D GTE_REPO_ROOT=. -P tools/ci/atmosphere_core_decoupling_check/CheckAtmosphereCoreDecoupling.cmake
 ```
-ctest -R AtmosphereCoreDecouplingCheck --output-on-failure
-```
 
-## What a pass/fail result means
+## Result
 
-- **PASS**: none of the files mention the substring. This proves textual
-  decoupling only - it is NOT proof the feature still renders correctly
-  after being moved out of Core (that needs a live, manual smoke test).
-- **FAIL**: the script prints every offending line and exits non-zero. A
-  wrapping `ctest` run reports this the same way it reports any other failed
-  test.
+| Result | Meaning |
+|---|---|
+| PASS | no file has the word. This proves text decoupling only. It does not prove the feature still renders. |
+| FAIL | the script prints every hit and exits non-zero |
 
-## What this deliberately does NOT do
+## Limits
 
-- It does not check any file other than the ones listed above.
-- It does not understand C++ at all - it is a plain, line-based textual
-  substring search (`file(STRINGS ... REGEX "Atmosphere")`), so a match
-  inside a comment counts exactly the same as a match inside real code.
+- It checks only the four files above.
+- It does not parse C++.

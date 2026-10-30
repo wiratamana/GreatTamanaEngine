@@ -1,13 +1,26 @@
 # FeaturePurityCheck
+> Render feature code stays free of Vulkan and of raw engine wrappers. Features use `gte::fx` only.
 
-Render feature code (`src/Features/<Name>/`, except `Editor/`) must stay free of Vulkan and of the
-engine's raw wrappers. The check fails on any name in `tokens.txt` and on any `#include` whose path
-contains an entry of `includes.txt` (`Renderer/`, `Core/Core.h`, `Game/Game.h`, `Game/SceneQuery.h`,
-`Game/RenderSystem.h`, `Application/`). `Core/FeatureKit/` is allowed.
+## What it enforces
 
-- Scanner: `gte_ci_scan`. Comments and string literals are skipped; matching is whole identifier and
-  case-sensitive, so `Renderer` does not match `MaskRenderer`. Do not weaken the token list: rename
-  the feature symbol instead.
-- `allowlist.txt`: starting debt, one reason per line, relative to `src/Features`.
-- Ratchet: a line whose file is gone or clean fails ("stale line: remove it"). Lines are only removed.
-- Starting debt: `gte_ci_scan --root src/Features --skip-dir Editor --tokens tokens.txt --includes includes.txt --comments skip --strings skip --report`.
+| Item | Value |
+|---|---|
+| ctest name | `FeaturePurityCheck` |
+| Scanned | `src/Features/<Name>/`, except `Editor/` |
+| Forbidden names | `tokens.txt`: Vulkan names, `Renderer`, `Core`, `Game`, `Buffer`, `Pipeline`, `RenderGraph`, `Native(` and more |
+| Forbidden includes | `includes.txt`: `Renderer/`, `Core/Core.h`, `Game/Game.h`, `Game/SceneQuery.h`, `Game/RenderSystem.h`, `Application/` |
+| Allowed | `Core/FeatureKit/` |
+| Matching | whole identifier, case sensitive. `Renderer` does not hit `MaskRenderer`. |
+| Comments and strings | skipped |
+
+## Run
+
+```cmd
+ctest --test-dir build -R FeaturePurityCheck --output-on-failure
+```
+
+## If it fails
+
+- Use the kit instead. See [Writing a render feature](../../../docs/guides/writing-a-render-feature.md).
+- Do not weaken `tokens.txt`. Rename the feature symbol.
+- `allowlist.txt` is empty today. A stale line (file gone or clean) fails the check. Lines are only removed.

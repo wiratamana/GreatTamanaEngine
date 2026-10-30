@@ -1,191 +1,90 @@
-# GreatTamanaEngine Documentation Index
+# Documentation index
+> Every doc of GreatTamanaEngine in one place. Pick by folder, or use the reading paths below.
+> Verified against code: 2026-10-30
 
-This folder holds the full-detail documentation that the root
-[`README.md`](../README.md) and [`AGENTS.md`](../AGENTS.md) were split apart
-from, so both root files could stay short, GitHub-style entry points. The
-split is two-way: **[`architecture/`](architecture/)** mirrors the root
-`README.md`'s old "Architecture" section (what the engine's subsystems *are*
-and how they layer together), and **[`conventions/`](conventions/)** mirrors
-the root `AGENTS.md`'s old subsystem sections (the coding rules to follow
-when touching each subsystem). Each root file today keeps every original
-`##`/`###` heading, shrunk to a short summary ending in a link into one of
-these two folders.
+## Reading paths
+| You are... | Read in this order |
+|---|---|
+| New to the repo | [README](../README.md), [Building](../BUILDING.md), [Getting started](getting-started.md), [Overview](architecture/overview.md) |
+| Debugging a running editor | [HTTP cheat sheet](debugging/http-cheat-sheet.md), [Troubleshooting](troubleshooting.md), [Glossary](glossary.md) |
+| Writing engine code | [Contributing](conventions/contributing.md), [Overview](architecture/overview.md), [Rendering](architecture/rendering.md) |
+| Making a game project | [Project assembly](guides/project-assembly.md), [Getting started](getting-started.md) |
 
-## Architecture
+## Start here
+| Doc | What it gives you | Who |
+|---|---|---|
+| [README](../README.md) | What the engine is, repo map | Everyone |
+| [Building](../BUILDING.md) | Toolchain, build commands, CMake options | Everyone |
+| [Testing](../TESTING.md) | Run and add tests, guard checks | Developers |
+| [Getting started](getting-started.md) | 30-minute path from clone to first HTTP call | New users |
+| [Glossary](glossary.md) | One line per term | Everyone |
+| [Troubleshooting](troubleshooting.md) | Symptom, cause, fix | Everyone |
+| [TODO](../TODO.md) | Open work, by area | Maintainers |
+| [Changelog](CHANGELOG.md) | Long history, newest first | Maintainers |
+| [AGENTS.md](../AGENTS.md) | Code rules. Owned by a human, never edited by tools | Humans and AI agents |
 
-One file per subsystem, each expanding on the matching `### ` subsection
-still summarized in the root [`README.md`](../README.md)'s "Architecture"
-section:
+## Debugging (tools to find bugs)
+| Doc | What it gives you | Who |
+|---|---|---|
+| [HTTP cheat sheet](debugging/http-cheat-sheet.md) | One-page guide and recipes for the HTTP debug server | Everyone |
+| [HTTP routes](debugging/http-routes.md) | Capture, logs, scene, camera, editor, asset routes | Tool and script authors |
+| [HTTP routes (debug)](debugging/http-routes-debug.md) | Profiler, faults, feature debug, frame debugger, render graph, project | Tool and script authors |
+| [Profiling](debugging/profiling.md) | CPU and GPU profiler, how to read it | Performance work |
+| [Frame debugger](debugging/frame-debugger.md) | Freeze one frame, inspect draw events | Render debugging |
+| [Logging](debugging/logging.md) | Write and read log lines | Developers |
 
-- **[Event handling](architecture/event-handling.md)** — how SDL's raw event
-  stream is translated into the engine's own `gte::Event` vocabulary before
-  reaching `InputState`/`Game::OnEvent()`.
-- **[Math](architecture/math.md)** — the from-scratch `Vec2`/`Vec3`/`Vec4`/
-  `Mat4`/`Quat` library (no GLM dependency) and its coordinate-system
-  conventions.
-- **[Rendering](architecture/rendering.md)** — the real Vulkan pipeline
-  behind the `Renderer` abstraction: dynamic rendering, RAII wrappers,
-  buffers, meshes, depth testing, and offscreen render targets.
-- **[Entity-Component-System (ECS)](architecture/ecs.md)** — the engine's
-  Scene/World data model (`Entity`/`EntityManager`/`ComponentStorage<T>`/
-  `Registry`), `Transform`'s parent/child hierarchy, and the
-  `RenderSystem`/`MeshInstantiationSystem`/`AnimationSystem` boundary rule.
-- **[Asset Pipeline](architecture/asset-pipeline.md)** — the `*.gta` binary
-  asset container format, `AssetDatabase`, and the PNG/JPG, MikuMikuDance
-  `.pmx`, and `.vmd` import pipelines.
-- **[Editor / Debug UI](architecture/editor-debug-ui.md)** — the optional
-  `src/Editor/` module: Hierarchy/Inspector/Scene/Game panels, the transform
-  gizmo, Memory/Profiler/Render Graph/Project panels, and asset preview/Bone
-  Viewer tooling.
+## Architecture (how it works)
+| Doc | What it gives you | Who |
+|---|---|---|
+| [Overview](architecture/overview.md) | Layers, startup, frame loop, threads | Read first |
+| [ECS](architecture/ecs.md) | Entities, components, hierarchy, reflection | Gameplay and tools code |
+| [Math](architecture/math.md) | Axes, matrix layout, angles, depth range | Transform and camera code |
+| [HTTP server](architecture/http-server.md) | Threads, bridges, timeouts, add a route | Engine developers |
+| [Editor](architecture/editor.md) | Host, panels, bridges, UI rules | Editor developers |
+| [Rendering](architecture/rendering.md) | Layers, frame flow, formats, materials | Render developers |
+| [Render graph](architecture/render-graph.md) | The `rg` API for passes and recording | Render developers |
+| [GPU-driven rendering](architecture/gpu-driven-rendering.md) | Cluster culling, Hi-Z, indirect draw | Render developers |
+| [Mesh clusters](architecture/mesh-clusters.md) | Cluster table format and build | Asset and render developers |
+| [Asset pipeline](architecture/asset-pipeline.md) | Source file to `.gta` to runtime object | Asset developers |
+| [Animation and physics](architecture/animation-physics.md) | Pose, IK, Verlet chains, skinning | Animation developers |
+| [Scene serialization](architecture/scene-serialization.md) | `.gtscene` save and load | Component authors |
 
-## Conventions
+## Conventions (rules to follow)
+| Doc | What it gives you | Who |
+|---|---|---|
+| [Contributing](conventions/contributing.md) | Code rules in short form, CI guards | Everyone who codes |
+| [Job system](conventions/job-system.md) | Worker pool rules, thread-safety table | Developers |
+| [Time and playback pause](conventions/time-and-playback-pause.md) | Frame clock, pause, step | Gameplay code |
+| [Memory tracking](conventions/memory-tracking.md) | GPU, SDL, ImGui memory trackers | Resource authors |
+| [ImGui ID uniqueness](conventions/imgui-id-uniqueness.md) | Unique widget IDs in loops | Editor developers |
+| [Render honesty](conventions/render-honesty.md) | Pass toggles and the Frame Debugger tree must agree | Pass authors |
+| [PBR materials](conventions/pbr-materials.md) | glTF image roles, tangents, GGX | Material and import code |
+| [Volumetric resources](conventions/volumetric-resources.md) | 3D textures in features | Feature authors |
 
-One file per subsystem-specific coding convention, each expanding on the
-matching `## ` section still summarized in the root [`AGENTS.md`](../AGENTS.md)
-(which keeps `## Coding Guidelines` and `## Testability & Regression Safety`
-inline in full, since both are short and universally cross-cutting rather
-than subsystem-specific):
+## Guides (do one task)
+| Doc | What it gives you | Who |
+|---|---|---|
+| [Project assembly](guides/project-assembly.md) | Make a game project, load and hot reload it | Game developers |
+| [Writing a render feature](guides/writing-a-render-feature.md) | Add a built-in feature step by step | Engine developers |
 
-- **[GPU Resource Memory Tracking](conventions/gpu-resource-memory-tracking.md)**
-  — every GPU resource type must register with `GpuMemoryTracker`, identified
-  by a cheap, generational `GpuResourceHandle`.
-- **[CPU Dependency Memory Tracking](conventions/cpu-dependency-memory-tracking.md)**
-  — `SdlMemoryTracker`/`ImGuiMemoryTracker` track third-party CPU memory
-  usage, surfaced by the Editor's "Memory" panel.
-- **[Profiling](conventions/profiling.md)** — `src/Profiling/`'s CPU event log
-  (`GTE_PROFILE_SCOPE`), per-view GPU timestamp records with statuses, verdict,
-  spikes, `/profiler` HTTP routes and the timeline image.
-- **[Time and Playback Pause](conventions/time-and-playback-pause.md)** —
-  the dedicated, explicit `gte::Time`/`gte::EngineContext` per-frame
-  time-keeping objects, and the Unity-style Pause/Resume/Step toolbar built
-  on top of them.
-- **[Frame Debugger](conventions/frame-debugger.md)** — the real,
-  Unity-Frame-Debugger-style Game View capture tool (`FrameDebuggerData.h/.cpp`
-  /`FrameDebuggerCapture.h/.cpp`/`FrameDebuggerHistory.h/.cpp`/
-  `FrameDebuggerPreviewProcessing.h/.cpp`, `Panels/FrameDebuggerPanel.h/.cpp`),
-  its 8-slot frame-history ring buffer, real Channels/Levels preview
-  compositing, and its full `/frame_debugger/*` HTTP automation surface.
-- **[Job System](conventions/job-system.md)** — `src/Jobs/`'s general-purpose
-  worker-thread pool, `Schedule()`/`Dispatch()`/dependencies/continuations,
-  and the thread-safety classification of every shared subsystem.
-- **[Networking](conventions/networking.md)** — the embedded, loopback-only
-  HTTP server (`gte::Network::NetworkServer`), its cross-thread bridges, and
-  every route family (frame/texture capture, ECS-mutating commands, Editor UI
-  control) — includes the nested "Named Texture Capture" subsection.
-- **[Logging](conventions/logging.md)** — the Editor-only, thread-safe,
-  in-memory `gte::Logger` log store (`GTE_LOG_DEBUG/INFO/WARNING/ERROR`),
-  its bounded ring buffer, and the `GET /get_logs`/`POST /clear_logs` HTTP
-  endpoints.
-- **[ImGui Widget ID Uniqueness](conventions/imgui-id-uniqueness.md)** —
-  `gte::ScopedUniqueId`, the mandated way to enter a per-iteration Dear ImGui
-  ID scope for any widget built inside a loop over runtime data, plus the
-  proactive `ImGuiIdConflictTracker`/`ImGuiIdConflictGuard` detection layer.
-- **[Render Target Format Matching](conventions/render-target-format-matching.md)**
-  — read `Renderer::ScenePixelFormat()` for scene color and
-  `Renderer::ColorFormat()`/`DepthFormat()` for the swapchain and depth rather than
-  hardcoding a `VkFormat` literal.
-- **[Skeletal Animation Pose Resolution](conventions/skeletal-animation-pose-resolution.md)**
-  — the per-frame MMD pose evaluation pipeline under `src/Animation/`
-  (`BoneChainResolver.h`, `BonePoseMath.h`, `AnimationPoseEvaluator.h`).
-- **[GPU Vertex Skinning](conventions/gpu-vertex-skinning.md)** — the
-  compute-shader mirror of the CPU vertex-skinning path, switchable via
-  `AnimationSystem::SkinningMode`.
-- **[GPU-Driven Rendering](conventions/gpu-driven-rendering.md)** — the
-  compute-shader frustum-culling + indirect-draw path for batches of entities
-  sharing one `(MeshHandle, PipelineHandle)` pair, Game View only.
-- **[GPU-Driven Clusters](conventions/gpu-driven-clusters.md)** — mesh clustering
-  (import hook, Inspector button, `POST /build_clusters`), the `GCL1` file tail, the
-  per-view cluster cull + indirect draw verb, claim rules, capability matrix, limits
-  and the `/feature_debug` + `/render_graph` debug workflow.
-- **[Atmosphere Scattering](conventions/atmosphere-scattering.md)** — the
-  physically-based real-time atmosphere-scattering + aerial-perspective
-  system and its permanent CPU oracle, `AtmosphereMath.h/.cpp`.
-- **[Shadow Mapping](conventions/shadow-mapping.md)** — cascaded shadow maps fitted
-  to the camera and the visible depth range, the single mask receive path, and the
-  `/feature_debug/*` HTTP recipe.
-- **[Ambient Occlusion](conventions/ambient-occlusion.md)** — screen-space GTAO from the
-  scene depth only, the denoise and history passes, the linear-space composite, and the
-  `/feature_debug/*` HTTP recipe.
-- **[Screen-Space GI](conventions/screen-space-gi.md)** — one-bounce screen-space diffuse
-  light (Ssgi): pass layout, settings, `/feature_debug/*` HTTP recipe and limits.
-- **[PBR Materials](conventions/pbr-materials.md)** — material image roles and color spaces, the
-  tangent convention, the GGX shading model, the material debug views, failure policy and the
-  lifetime of material sets and images.
-- **[Entity-Component-System (ECS)](conventions/ecs.md)** — the `AGENTS.md`-
-  side coding conventions for entities/components (distinct from, and
-  cross-linked with, [`architecture/ecs.md`](architecture/ecs.md)'s engine
-  architecture overview).
-- **[Scene Serialization](conventions/scene-serialization.md)** — the
-  `src/Scene/` Save/Load module (`SceneDocument.h`/`SceneTextFormat.h/.cpp`/
-  `SceneBuilder.h/.cpp`) wired into `File > Save Scene`/`File > Open Scene`.
-- **[Editor Module Structure](conventions/editor-module-structure.md)** —
-  the `src/Editor/` folder boundary, `ImGuiEditorLayer`'s composition root,
-  `EditorContext`, `Selection`, `DockLayout`, and the fixed `Panels/*.cpp`
-  builder-function convention.
-- **[Plugin Architecture](conventions/plugin-architecture.md)** — **REMOVED**
-  by the `better-render-pass-2` campaign; the file is kept as a short pointer
-  notice plus the original, now-historical ABI-versioned `.dll` plugin system
-  design, verbatim, for the record.
-- **[Engine Feature Modules](conventions/engine-feature-module.md)** — the
-  successor to the above: how to write a first-party, built-into-the-engine
-  render feature (`IEngineFeatureModule`/`BuiltinFeatureModuleRegistry`/
-  `GTE_REGISTER_BUILTIN_FEATURE_MODULE`, plus the optional Editor-panel half),
-  the `src/Features/<Name>/` folder convention, and the generic, zero-CMake-
-  touch build auto-discovery every feature folder gets for free. Atmosphere
-  Scattering (below) is the one real, shipped feature built this way.
-- **[Render Pass API](conventions/render-pass-api.md)** — `gte::rg`: one reflected
-  `rg::Shader`, binding by name, the declarative pass kinds (compute, fullscreen,
-  mesh, indirect draw, transfer, blit), the hidden raw command buffer and the
-  ratchet checks that guard it.
-- **[Render Feature Authoring](conventions/render-feature-authoring.md)** — `gte::fx`,
-  the Vulkan-free feature kit: `fx::Feature`, atomic setup, gates, typed frames,
-  `GTE_REGISTER_RENDER_FEATURE`, and what is still missing.
-- **[Project Assembly System](conventions/project-assembly-system.md)** — the
-  per-developer `Projects/<Name>/` source tree that compiles into two `.dll`s
-  (`<Name>_Game.dll`/`<Name>_Editor.dll`) linked directly against
-  `GreatTamanaEditor.exe`, calling real, non-ABI-wrapped engine types
-  (`gte::Core&`, real ImGui, real `rg::RenderGraphBuilder`) with zero engine
-  recompilation.
-- **[Render Pass Toggle Honesty](conventions/render-pass-toggle-honesty.md)** —
-  the iron rule that a render pass's declared/enabled state and the Frame
-  Debugger's own displayed event tree must never disagree, how a pass
-  bypassing the generic `RenderPipeline::DeclareOnePhase()` flush loop must
-  consult `RenderPassToggleRegistry` itself, and the permanent, automatic
-  `RenderPassHonestyChecker`/`RenderPassHonestyGuard` mismatch detector.
-- **[Render Pass Side-Channel Honesty](conventions/render-pass-side-channel-honesty.md)** —
-  a narrower layer on top of the above: gating every side effect a
-  `RenderPipeline` provider produces (not just its own `RenderPassDesc`), the
-  `RenderPassCategory::Debug` vs `FrameDebuggerInternal` distinction, the
-  "Other Render Passes" structural fallback bucket, and the two additional
-  permanent, automatic `FrameDebuggerCoverageChecker`/`FrameDebuggerSideChannelChecker`
-  detectors (Clause B/Clause C).
-- **[Volumetric Resources](conventions/volumetric-resources.md)** — the generic
-  `VolumeTexture` recipe for any future 3D-grid-driven GPU feature: ownership/
-  import, both valid compute-dispatch shapes, the mandatory
-  `KeepTextureOutput()` call, and both ways to make the result
-  consumable — distinct from [Atmosphere Scattering](conventions/atmosphere-scattering.md)
-  above, which documents the one real shipped feature's own specific behavior.
+## Reference (look-up tables)
+| Doc | What it gives you | Who |
+|---|---|---|
+| [Feature kit](reference/feature-kit.md) | `gte::fx` verbs, resources, channels | Feature authors |
+| [Render features](reference/render-features/README.md) | Master table of the 8 features | Everyone |
+| [Atmosphere](reference/render-features/atmosphere.md) | Sky, aerial perspective, sun tint | Tuning, debugging |
+| [Shadow](reference/render-features/shadow.md) | Sun cascade shadows | Tuning, debugging |
+| [Scene lighting](reference/render-features/scene-lighting.md) | Sun and ambient data for materials | Tuning, debugging |
+| [Tone mapping](reference/render-features/tone-mapping.md) | Exposure, curve, display encode | Tuning, debugging |
+| [GTAO](reference/render-features/gtao.md) | Ambient occlusion | Tuning, debugging |
+| [SSGI](reference/render-features/ssgi.md) | One-bounce screen-space GI | Tuning, debugging |
+| [Volumetric light](reference/render-features/volumetric-light.md) | Light shafts and fog | Tuning, debugging |
+| [GPU-driven scene](reference/render-features/gpu-driven-scene.md) | Culling feature, "Culling" panel | Tuning, debugging |
 
-## Changelog
-
-See **[CHANGELOG.md](CHANGELOG.md)** for the complete, reverse-chronological
-project history from the very first triangle demo onward — the root
-`README.md`'s "Status" section keeps only the last few entries inline and
-links here for everything older.
-
-## Other Project Documentation
-
-These three top-level files are just as much a part of the project's
-documentation as anything under `docs/`, but are already properly separated,
-focused files and were left untouched by the `doc-refactor-1` campaign that
-created this folder:
-
-- **[BUILDING.md](../BUILDING.md)** — prerequisites and build instructions.
-- **[TESTING.md](../TESTING.md)** — how to build and run the test suite.
-- **[TODO.md](../TODO.md)** — known limitations, deliberately deferred
-  follow-ups, and longer-term engine roadmap ideas.
-
----
-
-See the root [README.md](../README.md) and [AGENTS.md](../AGENTS.md) for the
-short overview each of these was extracted from.
+## Tools
+| Tool | What it does |
+|---|---|
+| [culling_bench](../tools/culling_bench/README.md), [profiler_ab](../tools/profiler_ab/README.md) | Benchmark scripts that call the HTTP server |
+| [volk_leak_check](../tools/ci/volk_leak_check/README.md), [native_leak_check](../tools/ci/native_leak_check/README.md), [feature_purity_check](../tools/ci/feature_purity_check/README.md), [header_purity_probe](../tools/ci/header_purity_probe/README.md) | Vulkan boundary guards |
+| [blocking_call_check](../tools/ci/blocking_call_check/README.md), [engine_vocabulary_check](../tools/ci/engine_vocabulary_check/README.md), [profiler_vocabulary_check](../tools/ci/profiler_vocabulary_check/README.md), [removed_symbol_check](../tools/ci/removed_symbol_check/README.md), [atmosphere_core_decoupling_check](../tools/ci/atmosphere_core_decoupling_check/README.md) | Source scan guards |
+| [gte_core_standalone_probe](../tools/ci/gte_core_standalone_probe/README.md), [gte_core_player_link_probe](../tools/ci/gte_core_player_link_probe/README.md), [gte_project_assembly_link_probe](../tools/ci/gte_project_assembly_link_probe/README.md) | Link probes for the library split |
