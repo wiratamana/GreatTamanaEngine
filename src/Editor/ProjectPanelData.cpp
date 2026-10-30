@@ -36,14 +36,19 @@ bool CompareEntries(const ProjectEntry& a, const ProjectEntry& b)
     return LessNoCase(a.name, b.name);
 }
 
-// True for symlinks, junctions and any other reparse point. Never followed by the scan.
+// True for symlinks and mount points (junctions, volumes). Cloud placeholders are normal entries.
 bool IsLink(const std::filesystem::path& path, std::filesystem::file_type type)
 {
 #ifdef _WIN32
     // libstdc++ reports junctions as plain directories, so ask the OS directly.
-    const DWORD attributes = GetFileAttributesW(path.c_str());
-    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-        return true;
+    WIN32_FIND_DATAW data{};
+    const HANDLE find = FindFirstFileW(path.c_str(), &data);
+    if (find != INVALID_HANDLE_VALUE) {
+        FindClose(find);
+        if ((data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0
+            && (data.dwReserved0 == IO_REPARSE_TAG_SYMLINK || data.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT)) {
+            return true;
+        }
     }
 #else
     static_cast<void>(path);
