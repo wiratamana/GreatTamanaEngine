@@ -68,6 +68,7 @@ Frame order in `EditorHost::Run()`:
 | Atmosphere, Culling, Gtao, SceneLighting, Shadow, Ssgi, ToneMapping, VolumetricLight | Bottom tabs | One settings panel per built-in render feature. `Culling` is `GpuDrivenScene` |
 
 - The Project panel and Bone Viewer exist only when CMake option `GTE_ENABLE_PROJECT_PANEL` is `ON` (default).
+- The Project panel scans its folder only while visible, on a job-system worker (`ProjectScanRunner`), and keeps no `AssetDatabase`.
 - The Memory panel reads data that `MemoryPanelData` shapes. The Profiler panel reads [Profiling](../debugging/profiling.md) data.
 - A toolbar under the menu has Pause, Resume and Step.
 

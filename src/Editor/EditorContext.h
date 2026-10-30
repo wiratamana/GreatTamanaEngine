@@ -255,9 +255,6 @@ struct EditorContext {
     // Mesh and pipeline shared by spawned instance grids; releases them with the editor layer.
     InstanceGridResources instanceGrid;
 
-    // Asset path (UTF-8) whose project record must be refreshed; set by a panel, consumed by the editor layer.
-    std::string pendingAssetRecordRefresh;
-
     // Mesh asset path (UTF-8) the cluster viewer should open; set by a panel, consumed by the editor layer.
     std::string pendingClusterViewerPath;
 

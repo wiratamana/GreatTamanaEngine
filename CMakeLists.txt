@@ -1555,6 +1555,8 @@ if(GTE_ENABLE_PROJECT_PANEL)
     target_sources(gte_editor PRIVATE
         src/Editor/ProjectPanelData.h
         src/Editor/ProjectPanelData.cpp
+        src/Editor/ProjectScanRunner.h
+        src/Editor/ProjectScanRunner.cpp
         src/Editor/Panels/ProjectPanel.h
         src/Editor/Panels/ProjectPanel.cpp
         src/Editor/AssetInspectorData.h

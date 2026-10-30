@@ -3,6 +3,7 @@
 
 #include "Editor/ProjectPanelData.h"
 
+#include <atomic>
 #include <cstddef>
 #include <fstream>
 
@@ -320,6 +321,98 @@ TEST(ProjectPanelDataResolveDropTargetTest, RectBoundaryIsInclusive)
     const std::optional<std::string> target = ResolveDropTarget(zones, 110.0f, 60.0f, leftPane, rightPane, "");
     ASSERT_TRUE(target.has_value());
     EXPECT_EQ(*target, "Sub");
+}
+
+// --- ScanProjectDirectory() limits -------------------------------------------
+
+TEST_F(ProjectPanelDataTest, ScanProjectDirectory_PreSetCancelFlagReturnsEmpty)
+{
+    WriteFile(m_root / "a.txt", "a");
+    std::filesystem::create_directories(m_root / "Sub");
+    WriteFile(m_root / "Sub" / "b.txt", "b");
+
+    const std::atomic<bool> cancel{ true };
+    EXPECT_TRUE(ScanProjectDirectory(m_root, &cancel).empty());
+}
+
+TEST_F(ProjectPanelDataTest, ScanProjectDirectory_StopsAtDepthCap)
+{
+    std::filesystem::path deep = m_root;
+    for (int i = 0; i < kMaxProjectScanDepth + 5; ++i) {
+        deep /= "d";
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(deep, ec);
+    if (ec) {
+        GTEST_SKIP() << "path too long for this filesystem";
+    }
+
+    const std::vector<ProjectEntry> tree = ScanProjectDirectory(m_root);
+
+    int levels = 0;
+    const std::vector<ProjectEntry>* level = &tree;
+    const ProjectEntry* deepest = nullptr;
+    while (!level->empty()) {
+        deepest = &level->front();
+        ++levels;
+        level = &deepest->children;
+    }
+    EXPECT_EQ(levels, kMaxProjectScanDepth);
+    ASSERT_NE(deepest, nullptr);
+    EXPECT_TRUE(deepest->children.empty());
+}
+
+TEST_F(ProjectPanelDataTest, ScanProjectDirectory_ListsDirectoryLinkAsPlainEntryAndDoesNotFollowIt)
+{
+    std::filesystem::create_directories(m_root / "Sub");
+    std::error_code ec;
+    std::filesystem::create_directory_symlink(m_root, m_root / "Sub" / "loop", ec);
+    if (ec) {
+        GTEST_SKIP() << "symlink not permitted";
+    }
+
+    const std::vector<ProjectEntry> tree = ScanProjectDirectory(m_root);
+
+    ASSERT_EQ(tree.size(), 1u);
+    EXPECT_EQ(tree[0].name, "Sub");
+    ASSERT_TRUE(tree[0].isDirectory);
+    ASSERT_EQ(tree[0].children.size(), 1u);
+    EXPECT_EQ(tree[0].children[0].name, "loop");
+    EXPECT_FALSE(tree[0].children[0].isDirectory);
+    EXPECT_TRUE(tree[0].children[0].children.empty());
+}
+
+// --- ListFileNames() ---------------------------------------------------------
+
+TEST_F(ProjectPanelDataTest, ListFileNames_ReturnsOnlySortedFileNames)
+{
+    WriteFile(m_root / "c.txt", "c");
+    WriteFile(m_root / "a.txt", "a");
+    WriteFile(m_root / "b.txt", "b");
+    std::filesystem::create_directories(m_root / "Folder");
+
+    const std::vector<std::string> expected = { "a.txt", "b.txt", "c.txt" };
+    EXPECT_EQ(ListFileNames(m_root), expected);
+}
+
+TEST_F(ProjectPanelDataTest, ListFileNames_MissingFolderReturnsEmpty)
+{
+    EXPECT_TRUE(ListFileNames(m_root / "Nope").empty());
+}
+
+// --- ImportedFileName() ------------------------------------------------------
+
+TEST(ProjectPanelDataImportedFileNameTest, ConvertedFormatsBecomeGta)
+{
+    EXPECT_EQ(ImportedFileName("a.PNG"), std::filesystem::path("a.gta"));
+    EXPECT_EQ(ImportedFileName("a.pmx"), std::filesystem::path("a.gta"));
+    EXPECT_EQ(ImportedFileName("a.vmd"), std::filesystem::path("a.gta"));
+}
+
+TEST(ProjectPanelDataImportedFileNameTest, OtherNamesStayUnchanged)
+{
+    EXPECT_EQ(ImportedFileName("a.txt"), std::filesystem::path("a.txt"));
+    EXPECT_EQ(ImportedFileName("a"), std::filesystem::path("a"));
 }
 
 } // namespace

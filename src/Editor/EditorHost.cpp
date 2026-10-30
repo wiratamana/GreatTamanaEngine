@@ -354,8 +354,7 @@ EditorUiCommandResult RunEditorUiCommand(const EditorUiCommandRequest& request, 
     return result;
 }
 
-// Runs once per finished job, whichever door started it. A build drops the cached GPU mesh and refreshes the
-// asset record; a clone leaves the source alone and hands the new file to the editor layer.
+// Runs once per finished job. A build drops the cached GPU mesh; a clone hands the new file to the editor layer.
 void RunClusterBuildFollowUp(const MeshClusterFinishedBuild& finished, Game& game, IEditorLayer& editorLayer)
 {
     const std::string pathUtf8 = PathToUtf8(finished.path);
@@ -381,7 +380,6 @@ void RunClusterBuildFollowUp(const MeshClusterFinishedBuild& finished, Game& gam
     if (normalized != pathUtf8) {
         meshes.InvalidateCachedMeshAsset(normalized);
     }
-    editorLayer.RefreshProjectAssetRecord(pathUtf8);
     GTE_LOG_INFO("MeshClustering",
         "Cluster build finished for " + pathUtf8 + ": " + std::to_string(report.clusterCount) + " clusters, vertices "
             + std::to_string(report.vertexCountBefore) + " -> " + std::to_string(report.vertexCountAfter) + ", "

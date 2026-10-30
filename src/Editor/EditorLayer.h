@@ -349,10 +349,6 @@ public:
     // Docks "Game" beside "Scene" (true) or back as a tab of "Scene" (false). Call between NewFrame() and BuildUI().
     virtual SplitViewsLayerResult SetSceneGameSplit(bool enabled) = 0;
 
-    // Re-reads the tracked record (file size, header) of one *.gta asset in the Project database.
-    // A no-op when the path is not tracked or the build has no Project panel.
-    virtual void RefreshProjectAssetRecord(const std::string& absoluteGtaPath) = 0;
-
     // Called once when a clustered copy was written to `createdPathUtf8`. Opens the viewer on it when `openViewer`.
     virtual void OnMeshCloneFinished(const std::string& createdPathUtf8, bool openViewer) = 0;
 

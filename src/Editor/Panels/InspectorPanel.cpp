@@ -1157,7 +1157,6 @@ void BuildRecomputeNormalsFromGeometryButton(
         ui.lastNormalsError = errorMessage;
         if (ui.lastNormalsSucceeded) {
             meshInstantiationSystem.InvalidateCachedMeshAsset(absolutePath);
-            ctx.pendingAssetRecordRefresh = absolutePath;
         }
     }
     ImGui::EndDisabled();

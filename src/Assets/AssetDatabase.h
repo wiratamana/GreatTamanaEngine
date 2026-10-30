@@ -100,10 +100,6 @@ public:
     // FindByGuid() above.
     const AssetRecord* FindByPath(const std::filesystem::path& gtaPath) const;
 
-    // Re-reads the header and file size of one tracked asset. False when the path is not tracked
-    // or the header cannot be read. Never walks the directory.
-    bool RefreshRecordFromFile(const std::filesystem::path& gtaPath);
-
     // Every currently-tracked asset whose type is exactly `type`.
     std::vector<AssetRecord> GetAssetsOfType(AssetType type) const;
 

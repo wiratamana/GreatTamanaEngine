@@ -89,3 +89,7 @@ BuildOpenSponzaSceneResponseJson
 SettingsGuard
 ClaimedEntitiesOf
 ExecuteHierarchyAction
+RefreshProjectAssetRecord
+RefreshAssetRecord
+pendingAssetRecordRefresh
+RefreshRecordFromFile

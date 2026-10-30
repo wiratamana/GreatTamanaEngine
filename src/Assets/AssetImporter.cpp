@@ -250,14 +250,19 @@ AssetImportResult ImportAsPlainCopy(const std::filesystem::path& sourcePath,
 {
     AssetImportResult result;
 
+    std::filesystem::path destination = preferredDestinationPath;
+    if (destination.extension() == ".gta" && sourcePath.extension() != ".gta") {
+        destination.replace_extension(sourcePath.extension()); // Raw bytes must not wear the *.gta name.
+    }
+
     std::error_code dirEc;
-    const std::filesystem::path parent = preferredDestinationPath.parent_path();
+    const std::filesystem::path parent = destination.parent_path();
     if (!parent.empty()) {
         std::filesystem::create_directories(parent, dirEc); // Best-effort; copy_file() below is the real check.
     }
 
     std::error_code copyEc;
-    std::filesystem::copy_file(sourcePath, preferredDestinationPath, std::filesystem::copy_options::none, copyEc);
+    std::filesystem::copy_file(sourcePath, destination, std::filesystem::copy_options::none, copyEc); // Never overwrites.
     if (copyEc) {
         result.success = false;
         result.message = fallbackPrefix + "Failed to import \"" + PathToUtf8(sourcePath.filename())
@@ -267,8 +272,8 @@ AssetImportResult ImportAsPlainCopy(const std::filesystem::path& sourcePath,
 
     result.success = true;
     result.convertedToKtx2 = false;
-    result.finalPath = preferredDestinationPath;
-    result.message = fallbackPrefix + "Imported \"" + PathToUtf8(preferredDestinationPath.filename()) + "\".";
+    result.finalPath = destination;
+    result.message = fallbackPrefix + "Imported \"" + PathToUtf8(destination.filename()) + "\".";
     return result;
 }
 

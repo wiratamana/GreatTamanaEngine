@@ -98,7 +98,7 @@ Keep the `_Textures` folder next to the mesh `.gta`. If you move one, move both.
 - It is an in-memory index of Guid and path. `RefreshFromDirectory` scans recursively and reads headers only.
 - A corrupt file is skipped. If two files share a Guid, the first one wins.
 - `FindByGuid` and `FindByPath` return pointers. They die on the next `Clear`, `Refresh` or `ImportAsset`. Copy the `AssetRecord`.
-- Several callers build their own database: Project panel, scene IO, hot reload, and `MeshAssetGpuCatalog` (per mesh folder).
+- Several callers build their own database: scene IO, hot reload, and `MeshAssetGpuCatalog` (per mesh folder). The Project panel keeps none; an import registers into a call-local database.
 
 ## Atomic writes
 `src/Assets/AtomicFile.h` is the only way a `.gta` is written.

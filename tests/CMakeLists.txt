@@ -529,6 +529,10 @@
 #                                            AND GTE_ENABLE_PROJECT_PANEL are
 #                                            both ON, same reason as
 #                                            EditorCameraTests.cpp above.
+#   - Editor/ProjectScanRunnerTests.cpp       - ProjectScanRunner's job, throttle
+#                                            and dirty-mark logic (see
+#                                            src/Editor/ProjectScanRunner.h);
+#                                            no ImGui or window involved.
 #   - Editor/ModelRigCacheTests.cpp           - ModelRigCache::GetOrLoad()'s
 #                                            mtime-gated load/reload/cache
 #                                            behavior for a model's whole
@@ -2649,6 +2653,7 @@ Editor/RenderGraphDisplayTextTests.cpp
     if(GTE_ENABLE_PROJECT_PANEL)
         list(APPEND GTE_TEST_SOURCES
             Editor/ProjectPanelDataTests.cpp
+            Editor/ProjectScanRunnerTests.cpp
             Editor/AssetInspectorDataTests.cpp
             Editor/ModelRigCacheTests.cpp
             Editor/RigidBodyWireframeTests.cpp

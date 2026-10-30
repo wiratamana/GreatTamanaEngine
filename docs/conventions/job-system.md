@@ -54,6 +54,7 @@
 | `Renderer`, `Vulkan/*`, `GpuMemoryTracker` | NEVER | Main thread only. No locks inside. |
 | `RenderGraph/*` | NEVER | Issues GPU calls. Mutates unsynchronized state. |
 | ImGui, `src/Editor/*` | NEVER | ImGui is single threaded. |
+| `ProjectPanelData` free functions (`src/Editor/ProjectPanelData.*`) | JOB-SAFE | Pure filesystem and string work. No ImGui, no shared state. |
 | `Registry`, `EntityManager`, `ComponentStorage<T>` | Write: NEVER. Read: READ-SAFE | Read only while the main thread does not write. Best: copy plain values first. |
 | `AssetDatabase` | NEVER | No locks. Not proven safe for reads. |
 | `ResourcePool<T, Handle>`, GPU catalogs in `Game/Instantiation` | NEVER | They hand out live GPU pointers. Resolve on the main thread. |
@@ -77,6 +78,7 @@ Meaning of the words:
 | `PhysicsSystem` | One item per Verlet chain | 24 joints or more per entity |
 | `Core::BuildClusterBounds` | Cluster bounds chunks | 2 chunks or more |
 | `MeshClusterBuildRunner` | One `Schedule` job for a cluster build | Runs inline if `WorkerCount()` is below 2 |
+| `ProjectScanRunner` | One `Schedule` job per Project folder scan | Never inline by choice; inline only when the job system is OFF |
 
 - `ScheduleAfter` and `DispatchAfter` have no production caller. Only tests use them.
 - GPU skinning mode does not use the pool. It uploads bone matrices only.

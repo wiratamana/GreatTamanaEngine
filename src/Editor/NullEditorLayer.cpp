@@ -97,9 +97,8 @@ public:
 
     bool SetRenderGraphDisplayedRegime(bool /*present*/) override { return false; }
 
-    // No editor build runner or Project database in a release build.
+    // No editor build runner in a release build.
     MeshClusterBuildRunner* ClusterBuildRunner() override { return nullptr; }
-    void RefreshProjectAssetRecord(const std::string& /*absoluteGtaPath*/) override { }
 
     // No cluster viewer or Scene camera tools in a release build.
     void OnMeshCloneFinished(const std::string& /*createdPathUtf8*/, bool /*openViewer*/) override { }

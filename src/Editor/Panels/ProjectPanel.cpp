@@ -1,25 +1,20 @@
 #include "ProjectPanel.h"
 
+#include "../ActiveProjectAssemblyState.h"
 #include "../EditorContext.h"
+#include "../ImGuiUniqueId.h"
+#include "../MemoryPanelData.h" // FormatBytes()
 #include "../ProjectRootPath.h"
+#include "../../Assets/AssetDatabase.h"
 #include "../../Assets/AssetImporter.h"
+#include "../../Core/EditorCapabilities.h" // AssetScaffoldKind
 #include "../../Core/Logging.h"
 #include "../../Encoding/Utf8Path.h"
-#include "../ImGuiUniqueId.h"
-#include "../MemoryPanelData.h" // FormatBytes() - reused for the file-size tooltip below.
-
-// editor-core-separation-18 campaign (On-Engine Project Workflow plan,
-// BIG-STEP 4), PHASE2 - the synthetic "[Active Project] <Name>" row's own
-// data source + the AssetScaffoldKind enum's REAL definition (only this
-// .cpp needs the full Core/EditorCapabilities.h - see EditorContext.h's own
-// forward-declare comment for why the header only forward-declares it).
-#include "../ActiveProjectAssemblyState.h"
-#include "../../Core/EditorCapabilities.h"
+#include "../../Profiling/ScopeTimer.h"
 
 #include <imgui.h>
 
 #include <algorithm>
-#include <cctype>
 #include <exception>
 #include <system_error>
 
@@ -27,7 +22,6 @@ namespace gte {
 
 namespace {
 
-constexpr std::chrono::milliseconds kRescanInterval{ 500 };
 constexpr std::chrono::milliseconds kStatusMessageLifetime{ 4000 };
 
 constexpr float kSplitterWidth = 6.0f;
@@ -57,76 +51,42 @@ bool HasSubfolders(const ProjectEntry& entry)
 
 ProjectPanel::ProjectPanel()
 {
-    // See ProjectRootPath.h for why this now resolves through a shared
-    // helper (also used by Editor/SceneIO.h's Save/Load, which must work
-    // even when GTE_ENABLE_PROJECT_PANEL is OFF) rather than its own
-    // private computation - this keeps exactly ONE place in the codebase
-    // that decides where "Project" lives, instead of two independent
-    // copies that could silently drift apart.
     m_rootPath = ResolveProjectRootDirectory();
 }
 
-void ProjectPanel::EnsureRootAndMaybeRescan()
+void ProjectPanel::PumpScan()
 {
-    const auto now = std::chrono::steady_clock::now();
-    if (!m_needsRescan && (now - m_lastScanTime) < kRescanInterval) {
+    const auto now = ProjectScanRunner::Clock::now();
+    if (std::optional<ProjectScanResult> done = m_scan.Poll(now)) {
+        GTE_PROFILE_SCOPE("Project.ApplyScan");
+        ApplyScanResult(std::move(*done));
+    }
+    if (!m_scan.IsDue(now)) {
         return;
     }
-
-    // Re-checked (and, if missing, recreated) on every throttled rescan -
-    // not just once at startup - so a "Project" folder deleted externally
-    // while the Editor is running gets quietly recreated (or at least
-    // re-detected as missing) within one rescan interval, rather than
-    // requiring an engine restart.
-    m_rootExists = EnsureProjectRootExists(m_rootPath);
-    m_tree = m_rootExists ? ScanProjectDirectory(m_rootPath) : std::vector<ProjectEntry>{};
-
-    // Rebuilds the *.gta guid<->path index from whatever's actually on
-    // disk right now, on the exact same throttle as m_tree above - see
-    // GetAssetDatabase()'s own doc comment (ProjectPanel.h).
-    if (m_rootExists) {
-        m_assetDatabase.RefreshFromDirectory(m_rootPath);
-    } else {
-        m_assetDatabase.Clear();
+    GTE_PROFILE_SCOPE("Project.StartScan");
+    ProjectScanRequest request;
+    request.rootPath = m_rootPath;
+    ActiveProjectSource active = ActiveProjectAssemblyState::Instance().GetActiveSource();
+    if (active.hasActiveProject) {
+        request.linkedFolderName = std::move(active.name);
+        request.linkedFolderPath = std::move(active.assetsDirectory);
     }
-
-    ReconcileCurrentFolderAfterRescan();
-
-    // editor-core-separation-18 campaign, PHASE2 - added to the SAME
-    // throttled rescan; completely independent filesystem root from
-    // m_rootPath above (LDD-PW3, PROJECTWORKFLOW_BIGSTEP_01...txt), never
-    // touches m_tree/m_rootExists/m_assetDatabase.
-    RescanActiveProjectAssetsIfNeeded();
-
-    m_lastScanTime = now;
-    m_needsRescan = false;
+    m_scan.Start(std::move(request));
 }
 
-// editor-core-separation-18 campaign (On-Engine Project Workflow plan,
-// BIG-STEP 4), PHASE2 - refreshes m_activeProjectAssetFileNames/
-// m_activeProjectNameLastScanned from the CURRENTLY active Project
-// Assembly's own Assets/ folder (ActiveProjectAssemblyState::GetActive()) -
-// a completely independent filesystem root from m_rootPath (LDD-PW3), never
-// touches m_tree/m_rootExists/m_assetDatabase. Called from
-// EnsureRootAndMaybeRescan() on the SAME 500ms throttle as the rest of this
-// panel's own state (see that method's own call site above).
-void ProjectPanel::RescanActiveProjectAssetsIfNeeded()
+void ProjectPanel::ApplyScanResult(ProjectScanResult&& result)
 {
-    const ActiveProjectAssemblyInfo active = ActiveProjectAssemblyState::Instance().GetActive();
-    if (!active.hasActiveProject) {
-        m_activeProjectAssetFileNames.clear();
-        m_activeProjectNameLastScanned.clear();
+    m_hasScanResult = true;
+    if (result.failed) {
+        SetStatus("Project scan failed: " + result.errorMessage, true); // Keep the last good tree.
         return;
     }
-    m_activeProjectAssetFileNames.clear();
-    std::error_code iterationError;
-    for (const auto& entry : std::filesystem::directory_iterator(active.assetsDirectory, iterationError)) {
-        if (entry.is_regular_file()) {
-            m_activeProjectAssetFileNames.push_back(PathToUtf8(entry.path().filename()));
-        }
-    }
-    std::sort(m_activeProjectAssetFileNames.begin(), m_activeProjectAssetFileNames.end());
-    m_activeProjectNameLastScanned = active.name;
+    m_rootExists = result.rootExists;
+    m_tree = std::move(result.tree);
+    m_linkedFolderName = std::move(result.linkedFolderName);
+    m_linkedFileNames = std::move(result.linkedFileNames);
+    ReconcileCurrentFolderAfterRescan();
 }
 
 void ProjectPanel::ReconcileCurrentFolderAfterRescan()
@@ -136,12 +96,7 @@ void ProjectPanel::ReconcileCurrentFolderAfterRescan()
         return;
     }
 
-    // Walk up to the nearest ancestor that still exists as a directory in
-    // the freshly-scanned tree - covers both "the open folder itself was
-    // deleted" and "it was replaced by a same-named file" without ever
-    // leaving the right pane stuck showing a folder that no longer exists.
-    // Terminates: the Project root itself (empty relativePath) is always
-    // considered valid, so this can never loop forever.
+    // Walk up to the nearest ancestor that still exists as a folder. The root (empty path) always ends the loop.
     while (!m_currentFolderRelativePath.empty()) {
         const ProjectEntry* found = FindEntryByRelativePath(m_tree, m_currentFolderRelativePath);
         if (found != nullptr && found->isDirectory) {
@@ -186,16 +141,9 @@ void ProjectPanel::RecordFolderDropZone(const std::string& relativePath)
 void ProjectPanel::RenderLeftPaneFolder(EditorContext& ctx, int siblingIndex, const ProjectEntry& entry)
 {
     if (!entry.isDirectory) {
-        return; // Left pane is folders-only, like Unity/Explorer's own tree.
+        return; // The left pane lists folders only.
     }
 
-    // task_manager/editor-core-separation-10 campaign, PHASE3 - was
-    // ImGui::PushID(entry.relativePath.c_str()) alone. A relative
-    // filesystem path is very likely unique in practice, but "very likely"
-    // is exactly the assumption this whole campaign exists to stop relying
-    // on - siblingIndex (this call's own position among its immediate
-    // siblings) is what actually guarantees uniqueness now; relativePath is
-    // kept only as the debug key.
     ScopedUniqueId idScope(siblingIndex, "ProjectPanel::RenderLeftPaneFolder", entry.relativePath.c_str());
 
     const bool hasSubfolders = HasSubfolders(entry);
@@ -221,49 +169,22 @@ void ProjectPanel::RenderLeftPaneFolder(EditorContext& ctx, int siblingIndex, co
         }
         ImGui::TreePop();
     }
-    // No manual ImGui::PopID() anymore - ScopedUniqueId's destructor
-    // handles it.
 }
 
-// editor-core-separation-18 campaign (On-Engine Project Workflow plan,
-// BIG-STEP 4), PHASE2 - the synthetic "[Active Project] <Name>" row,
-// rendered as a SIBLING to the existing "Project" root node (see
-// RenderLeftPane() below) - a no-op (returns immediately) whenever no
-// Project Assembly is currently active (Definition of Done item 1,
-// PHASE0_MASTER_STRATEGY.md).
+// Sibling of the "Project" root node; draws nothing when no project is active.
 void ProjectPanel::RenderActiveProjectAssetsRow(EditorContext& ctx)
 {
-    if (m_activeProjectNameLastScanned.empty()) {
-        return; // No active project right now - the whole row is absent.
+    if (m_linkedFolderName.empty()) {
+        return;
     }
 
-    const std::string label = "[Active Project] " + m_activeProjectNameLastScanned;
+    const std::string label = "[Active Project] " + m_linkedFolderName;
     ImGui::TreeNodeEx(label.c_str(),
         ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow);
 
-    // Item-scoped popup, tied to the tree node widget rendered IMMEDIATELY
-    // above - fires ONLY when THIS SPECIFIC row was right-clicked, never
-    // from elsewhere in the pane.
-    //
-    // Mechanically re-verified against this repo's own vendored ImGui
-    // source (third_party/imgui/imgui.cpp) rather than assumed:
-    // BeginPopupContextItem()'s trailing `return BeginPopupEx(id, ...)` call
-    // is UNCONDITIONAL - it does not merely fire on the frame the popup
-    // first opens. BeginPopupEx() renders the popup on EVERY frame this
-    // exact call site executes while `id` is still on ImGui's own internal
-    // open-popup stack, regardless of whether THIS frame's own
-    // IsItemHovered()/IsMouseReleased() trigger condition (which only gates
-    // the earlier OpenPopupEx() call) is true. Since
-    // RenderActiveProjectAssetsRow() itself runs unconditionally every frame
-    // the row exists, the `if` branch below is therefore already entered on
-    // EVERY frame this popup is open - including while a nested "Create"
-    // submenu is open on top of it - not just the single frame it was first
-    // triggered. A separate `else if (ImGui::IsPopupOpen(...))` fallback is
-    // therefore unreachable dead code and is deliberately NOT used here.
+    // BeginPopupContextItem renders on every frame the popup is open, so the flag below
+    // is set for the popup's whole lifetime, not just the frame it opened.
     if (ImGui::BeginPopupContextItem("ProjectAssemblySourceContextMenu")) {
-        // Set on every frame this popup renders (see above) - closes the
-        // double-popup hazard deterministically for the FULL lifetime of
-        // this popup, not just its opening frame.
         m_suppressPaneContextMenuThisFrame = true;
         if (ImGui::BeginMenu("Create")) {
             if (ImGui::MenuItem("Render Pass...")) {
@@ -288,19 +209,16 @@ void ProjectPanel::RenderActiveProjectAssetsRow(EditorContext& ctx)
     }
 
     ImGui::TreePush("ProjectAssemblySourceChildren");
-    for (const std::string& fileName : m_activeProjectAssetFileNames) {
-        ImGui::BulletText("%s", fileName.c_str()); // display-only (LDD-CA3) - no Selectable/click/drag handling at all.
+    for (const std::string& fileName : m_linkedFileNames) {
+        ImGui::BulletText("%s", fileName.c_str()); // Display only: no select, click or drag.
     }
     ImGui::TreePop();
 
-    ImGui::TreePop(); // matches the outer TreeNodeEx() above (ImGuiTreeNodeFlags_DefaultOpen means this is always "open" and always needs its matching TreePop()).
+    ImGui::TreePop(); // Matches the outer TreeNodeEx (DefaultOpen: always open).
 }
 
 void ProjectPanel::RenderLeftPane(EditorContext& ctx)
 {
-    // editor-core-separation-18 campaign, PHASE2 - rendered BEFORE the
-    // existing "Project" root node below; a no-op row (returns immediately)
-    // when no project is active.
     RenderActiveProjectAssetsRow(ctx);
     ImGuiTreeNodeFlags rootFlags
         = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen;
@@ -338,14 +256,13 @@ void ProjectPanel::RenderBreadcrumb()
         const std::string segment
             = m_currentFolderRelativePath.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
         if (segment.empty()) {
-            break; // Nothing left to walk (m_currentFolderRelativePath was empty - already just "Project" above).
+            break; // Empty path: only the "Project" root button is shown.
         }
         accumulated = accumulated.empty() ? segment : accumulated + "/" + segment;
 
         ImGui::SameLine();
         ImGui::TextUnformatted("/");
         ImGui::SameLine();
-        // task_manager/editor-core-separation-10 campaign, PHASE3.
         {
             ScopedUniqueId idScope(segmentIndex++, "ProjectPanel::RenderBreadcrumb", segment.c_str());
             if (ImGui::SmallButton(segment.c_str())) {
@@ -362,26 +279,13 @@ void ProjectPanel::RenderBreadcrumb()
 
 void ProjectPanel::RenderRightPaneEntry(EditorContext& ctx, int entryIndex, const ProjectEntry& entry)
 {
-    // task_manager/editor-core-separation-10 campaign, PHASE3 - was
-    // ImGui::PushID(entry.relativePath.c_str()) alone.
     ScopedUniqueId idScope(entryIndex, "ProjectPanel::RenderRightPaneEntry", entry.relativePath.c_str());
 
     const bool isSelected = ctx.selection.IsAssetSelected(entry.relativePath);
     const std::string label = entry.isDirectory ? ("[Folder] " + entry.name) : entry.name;
     ImGui::Selectable(label.c_str(), isSelected);
 
-    // Lets a file be dragged straight out of "Project" onto "Hierarchy"/
-    // "Scene" to instantiate it (see EditorContext.h's
-    // kProjectAssetDragDropPayloadType and Game::CreateMeshEntityFromGtaFile())
-    // - Unity's own "drag a model asset into the scene" convention. The
-    // payload is the file's absolute filesystem path, UTF-8 encoded - the
-    // same representation ReadGtaFile()/AssetPreviewMesh::Render() already
-    // expect - so the receiving panel never needs to know this panel's own
-    // m_rootPath to resolve it. Only non-directory entries are draggable;
-    // only a *.gta AssetType::Mesh file is currently understood on the
-    // receiving end, but any OTHER file is simply ignored there (see
-    // Game::CreateMeshEntityFromGtaFile()'s own "degrade gracefully"
-    // contract), so this doesn't need its own extension check here.
+    // Files drag out as their absolute UTF-8 path, so a receiving panel needs no knowledge of the Project root.
     if (!entry.isDirectory && ImGui::BeginDragDropSource()) {
         const std::string absolutePathUtf8 = PathToUtf8(m_rootPath / PathFromUtf8(entry.relativePath));
         ImGui::SetDragDropPayload(
@@ -394,9 +298,7 @@ void ProjectPanel::RenderRightPaneEntry(EditorContext& ctx, int entryIndex, cons
     }
 
     if (entry.isDirectory && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        // Double-click a subfolder here to navigate INTO it - the same
-        // "open" action as clicking it in the left pane, so both panes
-        // always agree on what's open.
+        // Double-click opens the folder, same as clicking it in the left pane.
         m_currentFolderRelativePath = entry.relativePath;
         SetAssetSelection(ctx, entry.relativePath, true);
     } else if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
@@ -406,8 +308,6 @@ void ProjectPanel::RenderRightPaneEntry(EditorContext& ctx, int entryIndex, cons
     if (!entry.isDirectory && ImGui::IsItemHovered()) {
         ImGui::SetTooltip("%s", FormatBytes(entry.sizeBytes).c_str());
     }
-
-    // No manual ImGui::PopID() anymore - ScopedUniqueId's destructor handles it.
 }
 
 void ProjectPanel::RenderRightPane(EditorContext& ctx)
@@ -437,16 +337,12 @@ void ProjectPanel::CreateNewFolder()
         SetStatus("Failed to create folder: " + ec.message(), true);
     } else {
         SetStatus("Created \"" + PathToUtf8(destination.filename()) + "\".", false);
-        m_needsRescan = true;
+        m_scan.MarkDirty();
     }
 }
 
 void ProjectPanel::DeleteSelected(EditorContext& ctx)
 {
-    // Guarded by Selection::HasAssetSelection() itself (not just the
-    // disabled menu item in RenderContextMenu()) - a genuine no-op rather
-    // than acting on a stale/no-longer-highlighted path if this were ever
-    // reached in a state where Kind() isn't Asset.
     if (!ctx.selection.HasAssetSelection()) {
         return;
     }
@@ -466,29 +362,21 @@ void ProjectPanel::DeleteSelected(EditorContext& ctx)
         SetStatus("Deleted \"" + selectedDisplay + "\".", false);
     }
 
-    // If the deleted item was also whatever Project (or Inspector) currently
-    // has selected, clear that too via Selection's own gate-keeper method -
-    // otherwise Inspector would keep showing metadata for something that
-    // just stopped existing until the user picks something else, and
-    // Project's own row highlight/hasSelection would keep pointing at a
-    // relativePath that no longer resolves to anything.
+    // Drop the selection if it pointed at the deleted item.
     ctx.selection.ClearAssetIfPath(selectedDisplay);
 
-    // The deleted item might have been the currently open folder itself
-    // (or an ancestor of it) - ReconcileCurrentFolderAfterRescan() (run as
-    // part of the rescan below) walks m_currentFolderRelativePath back up
-    // to whatever still exists, so it's left alone here.
-    m_needsRescan = true;
+    // An open folder that was deleted is walked up to an existing ancestor after the next scan.
+    m_scan.MarkDirty();
 }
 
 void ProjectPanel::RenderContextMenu(EditorContext& ctx, const char* popupId)
 {
     if (m_suppressPaneContextMenuThisFrame) {
-        return; // editor-core-separation-18 campaign, PHASE2 - see RenderActiveProjectAssetsRow()'s own comment for why.
+        return; // The active-project row's popup owns the right click this frame.
     }
     if (ImGui::BeginPopupContextWindow(popupId)) {
         if (ImGui::MenuItem("Refresh")) {
-            m_needsRescan = true;
+            m_scan.MarkDirty();
         }
         if (ImGui::MenuItem("New Folder", nullptr, false, m_rootExists)) {
             CreateNewFolder();
@@ -504,30 +392,36 @@ void ProjectPanel::RenderContextMenu(EditorContext& ctx, const char* popupId)
 
 void ProjectPanel::Build(EditorContext& ctx)
 {
-    EnsureRootAndMaybeRescan();
-    m_suppressPaneContextMenuThisFrame = false; // editor-core-separation-18 campaign, PHASE2 - reset once, at the very top, before either pane renders this frame.
+    m_suppressPaneContextMenuThisFrame = false;
 
+    const bool wasVisible = m_panelVisible;
     m_panelVisible = ImGui::Begin("Project");
     if (m_panelVisible) {
+        if (!wasVisible) {
+            m_scan.MarkDirty(); // Data may be old after a hidden period.
+        }
+        PumpScan(); // Before any pane is drawn: it may replace m_tree.
+        m_folderDropZones.clear();
+        m_leftPaneRect = Rect{};
+        m_rightPaneRect = Rect{};
+
         if (ImGui::Button("Refresh")) {
-            m_needsRescan = true;
+            m_scan.MarkDirty();
         }
         ImGui::SameLine();
         ImGui::TextDisabled("%s", PathToUtf8(m_rootPath).c_str());
 
         ImGui::Separator();
 
-        if (!m_rootExists) {
+        if (!m_hasScanResult) {
+            ImGui::TextDisabled("Scanning...");
+        } else if (!m_rootExists) {
             ImGui::TextColored(
                 ImVec4(1.0f, 0.55f, 0.2f, 1.0f), "The \"Project\" folder is missing and could not be (re)created:");
             ImGui::TextWrapped("%s", PathToUtf8(m_rootPath).c_str());
             ImGui::TextDisabled("(check that this location is writable, then click Refresh)");
         } else {
-            m_folderDropZones.clear();
-
-            // Clamp the splitter to stay sane as the window itself is
-            // resized (e.g. never wider than the window, never so narrow
-            // either pane becomes unusable).
+            // Keep the splitter inside the window as it is resized.
             const float totalAvailWidth = ImGui::GetContentRegionAvail().x;
             const float maxLeftWidth = std::max(kMinPaneWidth, totalAvailWidth - kMinPaneWidth - kSplitterWidth);
             m_leftPaneWidth = std::clamp(m_leftPaneWidth, kMinPaneWidth, maxLeftWidth);
@@ -580,15 +474,11 @@ void ProjectPanel::Build(EditorContext& ctx)
 
 void ProjectPanel::HandleExternalFileDrop(float screenX, float screenY, const std::string& sourcePathUtf8)
 {
-    if (!m_panelVisible || sourcePathUtf8.empty()) {
-        return; // "Project" isn't even on screen this frame - not this panel's business.
+    if (!m_panelVisible || !m_hasScanResult || sourcePathUtf8.empty()) {
+        return; // Panel not on screen, or no drop zones recorded yet.
     }
 
     if (!m_rootExists) {
-        // The two panes/drop zones below aren't meaningfully rendered at
-        // all this frame (see Build()) when the root is missing - nothing
-        // sensible to hit-test against, so this is the one case handled
-        // before even trying.
         SetStatus("Cannot import - the \"Project\" folder is missing.", true);
         return;
     }
@@ -596,7 +486,7 @@ void ProjectPanel::HandleExternalFileDrop(float screenX, float screenY, const st
     const std::optional<std::string> target = ResolveDropTarget(
         m_folderDropZones, screenX, screenY, m_leftPaneRect, m_rightPaneRect, m_currentFolderRelativePath);
     if (!target.has_value()) {
-        return; // Landed outside both panes entirely - not this panel's business.
+        return; // Landed outside both panes.
     }
 
     try {
@@ -613,23 +503,8 @@ void ProjectPanel::HandleExternalFileDrop(float screenX, float screenY, const st
         std::error_code isDirEc;
         const bool sourceIsDirectory = std::filesystem::is_directory(source, isDirEc) && !isDirEc;
 
-        // For a file that's about to be gated into a *.gta wrapper (see
-        // AssetImporter::ImportAssetFile() below), the uniqueness check
-        // must collide against an EXISTING "name.gta" (e.g. a previously-
-        // imported texture/mesh), not the source's own "name.png"/"name.pmx"
-        // - otherwise re-dropping "rock.png" (or "model.pmx") after
-        // "rock.gta" ("model.gta") already exists would resolve to
-        // "rock.gta" directly (a silent overwrite) instead of
-        // "rock (1).gta".
-        std::filesystem::path desiredName = source.filename();
-        if (!sourceIsDirectory) {
-            std::string extension = PathToUtf8(source.extension());
-            std::transform(extension.begin(), extension.end(), extension.begin(),
-                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (IsImportableAsKtx2Texture(extension) || IsImportableAsMeshAsset(extension)) {
-                desiredName.replace_extension(".gta");
-            }
-        }
+        // Name collisions are checked against the name the import will actually write.
+        const std::filesystem::path desiredName = sourceIsDirectory ? source.filename() : ImportedFileName(source);
         const std::filesystem::path destination = MakeUniqueDestinationPath(targetDir, desiredName);
 
         if (sourceIsDirectory) {
@@ -639,25 +514,19 @@ void ProjectPanel::HandleExternalFileDrop(float screenX, float screenY, const st
                 SetStatus("Failed to import \"" + PathToUtf8(source.filename()) + "\": " + copyEc.message(), true);
             } else {
                 SetStatus("Imported \"" + PathToUtf8(destination.filename()) + "\" into Project.", false);
-                m_needsRescan = true;
+                m_scan.MarkDirty();
             }
         } else {
-            // Files are gated through AssetImporter - see
-            // HandleExternalFileDrop()'s own doc comment (ProjectPanel.h).
-            const AssetImportResult result = ImportAssetFile(m_assetDatabase, source, destination, MeshImportOptions{});
+            AssetDatabase database; // Scratch: ImportAssetFile() needs somewhere to register.
+            const AssetImportResult result = ImportAssetFile(database, source, destination, MeshImportOptions{});
             LogClusterMessage(result);
             SetStatus(result.message, !result.success);
             if (result.success) {
-                m_needsRescan = true;
+                m_scan.MarkDirty();
             }
         }
     } catch (const std::exception& e) {
-        // Same belt-and-braces reasoning as ScanProjectDirectory() - every
-        // call above already uses the std::error_code overload, but a
-        // drag-and-drop import touching a source this engine doesn't
-        // control (an arbitrary OS file/folder, possibly on a removable/
-        // network drive that could disappear mid-copy) must never be able
-        // to crash the Editor.
+        // The source is outside engine control (removable or network drive); never crash the editor.
         SetStatus(std::string("Failed to import dropped item: ") + e.what(), true);
     }
 }
@@ -667,13 +536,7 @@ AssetImportResult ProjectPanel::ImportExternalFile(
 {
     AssetImportResult result;
 
-    // Confirmed (read in full): EnsureRootAndMaybeRescan() is already
-    // idempotent and throttled (500ms, via m_lastScanTime/m_needsRescan) -
-    // calling it again here, on top of Build()'s own once-per-frame call,
-    // is always safe and never double-scans within the same throttle
-    // window.
-    EnsureRootAndMaybeRescan();
-    if (!m_rootExists) {
+    if (!EnsureProjectRootExists(m_rootPath)) {
         result.success = false;
         result.message = "Cannot import - the \"Project\" folder is missing.";
         return result;
@@ -692,17 +555,9 @@ AssetImportResult ProjectPanel::ImportExternalFile(
         return result;
     }
 
-    // Empty destinationRelativeFolder means the Project root; anything escaping the root is rejected below.
+    // Empty destinationRelativeFolder means the Project root.
     std::filesystem::path relFolder = PathFromUtf8(destinationRelativeFolder);
-    // Rejects BOTH a fully-qualified absolute path (e.g. "C:\Windows") AND a
-    // Windows DRIVE-RELATIVE or ROOT-RELATIVE path (e.g. "C:Temp" -
-    // relative to whatever the current directory on the C: drive happens
-    // to be, or "\Escape" - relative to the current drive's own root).
-    // is_absolute() alone returns FALSE for both of those on Windows (it
-    // requires BOTH a root name AND a root directory together) -
-    // has_root_path() is true if EITHER one is present on its own, which is
-    // what actually matters here: "does this path carry any notion of a
-    // drive/root at all that could resolve outside the Project folder".
+    // has_root_path() also catches drive-relative ("C:Temp") and root-relative ("\x") paths that is_absolute() misses.
     if (relFolder.is_absolute() || relFolder.has_root_path()) {
         result.success = false;
         result.message = "destination_folder must be a plain path relative to the Project root, not absolute "
@@ -719,31 +574,16 @@ AssetImportResult ProjectPanel::ImportExternalFile(
     const std::filesystem::path targetDir = (m_rootPath / normalizedRelFolder).lexically_normal();
 
     std::error_code dirEc;
-    std::filesystem::create_directories(targetDir, dirEc); // best-effort; MakeUniqueDestinationPath()/ImportAssetFile() below are the real check.
+    std::filesystem::create_directories(targetDir, dirEc); // Best effort; ImportAssetFile() below is the real check.
 
-    // Same "*.gta"-collision-aware destination naming HandleExternalFileDrop()
-    // already uses (see that method's own comment on why this matters for
-    // an already-imported "name.gta" existing before "name.png"/"name.pmx"
-    // is re-dropped) - EXTENDED here to also cover IsImportableAsMotionAsset()
-    // (".vmd"), which HandleExternalFileDrop() itself does not currently
-    // check (a narrow, pre-existing, out-of-scope inconsistency in that
-    // already-merged stl-parser-1-era method - NOT something this phase
-    // fixes there - but there is no reason to knowingly copy it into this
-    // brand-new method too).
-    std::filesystem::path desiredName = sourceAbsolutePath.filename();
-    std::string extension = PathToUtf8(sourceAbsolutePath.extension());
-    std::transform(extension.begin(), extension.end(), extension.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (IsImportableAsKtx2Texture(extension) || IsImportableAsMeshAsset(extension)
-        || IsImportableAsMotionAsset(extension)) {
-        desiredName.replace_extension(".gta");
-    }
-    const std::filesystem::path destination = MakeUniqueDestinationPath(targetDir, desiredName);
+    const std::filesystem::path destination
+        = MakeUniqueDestinationPath(targetDir, ImportedFileName(sourceAbsolutePath));
 
-    result = ImportAssetFile(m_assetDatabase, sourceAbsolutePath, destination, MeshImportOptions{});
+    AssetDatabase database; // Scratch: ImportAssetFile() needs somewhere to register.
+    result = ImportAssetFile(database, sourceAbsolutePath, destination, MeshImportOptions{});
     LogClusterMessage(result);
     if (result.success) {
-        m_needsRescan = true;
+        m_scan.MarkDirty();
     }
     return result;
 }

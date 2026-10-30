@@ -339,6 +339,21 @@ TEST_F(AssetImporterTest, CorruptImageExtensionFallsBackToPlainCopy)
     EXPECT_TRUE(std::filesystem::exists(result.finalPath, ec));
 }
 
+TEST_F(AssetImporterTest, CorruptImageDestinedForGtaIsCopiedWithItsSourceExtension)
+{
+    const std::filesystem::path source = m_root / "bad.png";
+    WriteFile(source, "not a png");
+
+    const AssetImportResult result = ImportAssetFile(m_db, source, m_root / "out" / "bad.gta", kNoClusters);
+
+    ASSERT_TRUE(result.success) << result.message;
+    EXPECT_EQ(result.finalPath, m_root / "out" / "bad.png");
+
+    std::error_code ec;
+    EXPECT_TRUE(std::filesystem::exists(m_root / "out" / "bad.png", ec));
+    EXPECT_FALSE(std::filesystem::exists(m_root / "out" / "bad.gta", ec));
+}
+
 TEST_F(AssetImporterTest, GltfWithAMissingImageStillImportsAndCountsTheMissingTexture)
 {
     const std::filesystem::path source = test::WriteGltfTriangle(m_root, test::kMaskedTexturedMaterialJson, true);

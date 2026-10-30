@@ -3,10 +3,6 @@
 #include "ProjectRootPath.h" // gte::ExecutableDirectory()
 #include "../Core/Plugins/ProjectAssemblyBuildRunner.h" // ResolveProjectAssemblyOutputDirectory()
 #include "../Core/Plugins/ProjectAssemblyHost.h" // GetLoadedAssemblyFileNames()
-// GetHotReloadEngineStateMutex() - REQUIRED around the GetLoadedAssemblyFileNames()
-// call inside GetActive() below (see that method's own doc comment in the
-// header for the full "why" - ProjectAssemblyHost::GetLoadedAssemblyFileNames()
-// itself takes no internal lock).
 #include "../Core/Plugins/HotReloadEngineStateMutex.h"
 
 #include <algorithm>
@@ -40,13 +36,25 @@ void ActiveProjectAssemblyState::SetProjectAssemblyHost(ProjectAssemblyHost& pro
     m_projectAssemblyHost = &projectAssemblyHost;
 }
 
+ActiveProjectSource ActiveProjectAssemblyState::GetActiveSource() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    ActiveProjectSource source;
+    if (m_hasActiveProject) {
+        source.hasActiveProject = true;
+        source.name = m_name;
+        source.assetsDirectory = m_sourceDirectory / "Assets";
+    }
+    return source;
+}
+
 ActiveProjectAssemblyInfo ActiveProjectAssemblyState::GetActive() const
 {
     ActiveProjectAssemblyInfo info;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (!m_hasActiveProject) {
-            return info; // hasActiveProject stays false; everything else default.
+            return info;
         }
         info.hasActiveProject = true;
         info.name = m_name;
@@ -58,14 +66,7 @@ ActiveProjectAssemblyInfo ActiveProjectAssemblyState::GetActive() const
     info.isCompiled = std::filesystem::exists(outputDirectory / (info.name + "_Game.dll"));
 
     if (m_projectAssemblyHost != nullptr) {
-        // Mirrors EditorHotReloadDebugCapability::GetLoadedAssemblyFileNames()'s
-        // own real, current precedent EXACTLY - ProjectAssemblyHost::
-        // GetLoadedAssemblyFileNames() itself takes no internal lock, so this
-        // read must be guarded by the SAME shared mutex a future hot-reload
-        // cycle's own mutation of m_loadedAssemblies is required to hold too
-        // (HotReloadEngineStateMutex.h's own header comment) - without this,
-        // a future "Open Project"/HTTP-exposed caller of GetActive() from a
-        // network thread would race a main-thread hot-reload cycle.
+        // The host's loaded list has no lock of its own; hot reload mutates it under this mutex.
         std::lock_guard<std::mutex> loadedAssembliesLock(GetHotReloadEngineStateMutex());
         const std::vector<std::string> loaded = m_projectAssemblyHost->GetLoadedAssemblyFileNames();
         info.isLoaded = std::find(loaded.begin(), loaded.end(), info.name + "_Game.dll") != loaded.end();

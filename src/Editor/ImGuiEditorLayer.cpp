@@ -381,11 +381,6 @@ public:
             BuildInspectorPanel(registry, m_ctx, game.GetPhysicsSystem(), game.GetMeshInstantiationSystem());
 #endif
         }
-        if (!m_ctx.pendingAssetRecordRefresh.empty()) {
-            GTE_PROFILE_SCOPE("Panel.AssetRecordRefresh");
-            RefreshProjectAssetRecord(m_ctx.pendingAssetRecordRefresh);
-            m_ctx.pendingAssetRecordRefresh.clear();
-        }
         if (!m_ctx.pendingClusterViewerPath.empty()) {
             m_clusterViewer.RequestOpen(m_ctx.pendingClusterViewerPath);
             m_ctx.pendingClusterViewerPath.clear();
@@ -619,15 +614,6 @@ public:
     }
     IClusterViewerControl* ClusterViewerControl() override { return &m_clusterViewer; }
     ISceneCameraControl* SceneCameraControl() override { return &m_sceneCameraAdapter; }
-
-    void RefreshProjectAssetRecord(const std::string& absoluteGtaPath) override
-    {
-#if GTE_ENABLE_PROJECT_PANEL
-        m_projectPanel.RefreshAssetRecord(PathFromUtf8(absoluteGtaPath));
-#else
-        (void)absoluteGtaPath;
-#endif
-    }
 
     AssetSelectionResult SelectProjectAsset(const std::string& absolutePath) override
     {
