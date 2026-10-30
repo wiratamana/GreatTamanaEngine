@@ -7,6 +7,7 @@
 #include "PanelVisibility.h"
 #include "Panels/HierarchyRows.h"
 #include "RotationEulerEditCache.h"
+#include "RotationFieldProbe.h"
 #include "Selection.h"
 #include "../Core/Extent.h"
 #include "../Core/UiTextureHandle.h"
@@ -275,6 +276,9 @@ struct EditorContext {
 
     // Euler angles being edited in the Inspector's Rotation field.
     RotationEulerEditCache rotationEdit;
+
+    // What that field drew last frame, for GET /inspector_state.
+    RotationFieldProbe rotationProbe;
 };
 
 } // namespace gte

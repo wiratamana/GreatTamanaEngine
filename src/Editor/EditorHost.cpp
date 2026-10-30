@@ -312,8 +312,12 @@ EditorUiCommandResult RunEditorUiCommand(const EditorUiCommandRequest& request, 
         out.cloneDestination = std::move(view.cloneDestination);
         out.cloneWeld = std::move(view.cloneWeld);
         out.openViewerAfterClone = view.openViewerAfterClone;
+        out.rotation = view.rotation;
         break;
     }
+    case EditorUiCommandKind::InjectMouse:
+        result.injectMouse.editorAvailable = layer.InjectMouse(request.injectMouse);
+        break;
     case EditorUiCommandKind::InspectorBuildClusters: {
         const InspectorBuildClustersCommand& command = request.inspectorBuildClusters;
         InspectorClusterOptions options;

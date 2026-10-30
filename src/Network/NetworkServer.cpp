@@ -1043,8 +1043,37 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         view.cloneDestination = outcome.cloneDestination;
         view.cloneWeld = outcome.cloneWeld;
         view.openViewerAfterClone = outcome.openViewerAfterClone;
+        view.rotation = outcome.rotation;
         res.status = 200;
         res.set_content(BuildInspectorStateResponseJson(view), "application/json");
+    });
+
+    // GET /ui_mouse?action=move|down|up|release&x=&y=&button=: queues a mouse event for the editor's ImGui input.
+    server.Get("/ui_mouse", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
+        if (RefuseBrowserRequest(req, res)) {
+            return;
+        }
+        const ParsedUiMouseQuery parsed = ParseUiMouseQuery(req.get_param_value("action"), req.get_param_value("x"),
+            req.get_param_value("y"), req.get_param_value("button"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        EditorUiCommandRequest request;
+        request.kind = EditorUiCommandKind::InjectMouse;
+        request.injectMouse = parsed.injection;
+        const std::optional<EditorUiCommandResult> result = SubmitEditorUiCommand(uiCommandBridge, request, res);
+        if (!result.has_value()) {
+            return;
+        }
+        if (!result->injectMouse.editorAvailable) {
+            res.status = 503;
+            res.set_content(BuildGenericErrorResponseJson("the Editor module is not compiled in"), "application/json");
+            return;
+        }
+        res.status = 200;
+        res.set_content(BuildUiMouseResponseJson(parsed.injection), "application/json");
     });
 
     // GET /hierarchy_state?first=&count=: the Hierarchy rows of the last drawn frame.

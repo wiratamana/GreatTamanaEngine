@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace gte {
 
@@ -19,6 +20,7 @@ struct RotationEulerEditCache {
     Vec3 euler{};
     Quat written{};
     bool valid = false;
+    std::uint32_t rederiveCount = 0; // Times Resolve() rebuilt `euler` from the quaternion.
 
     // Euler to display. Re-derived when the entity changed or the quaternion was
     // modified by anything other than Commit() (bit-exact compare on purpose).
@@ -31,6 +33,7 @@ struct RotationEulerEditCache {
             entity = e;
             valid = true;
             written = current;
+            ++rederiveCount;
         }
         return euler;
     }

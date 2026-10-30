@@ -199,6 +199,7 @@ These use `EditorUiCommandBridge`: one request at a time, 3 s timeout.
 | `POST /spawn_instance_grid` **MUT** | B `count` (1 to 100000, default 6), `spacing` (0.1 to 1000, default 1.5) | `{success, instance_count}` | `400` range, `503` no Editor |
 | `GET /select_asset` **MUT** | Q `path`* (absolute `.gta`) | `{success, selected_path}` | `400`, `503` |
 | `GET /select_entity` **MUT** | Q `name`* (exact entity Name) | `{success, selected_entity}` | `400`, `404` unknown name, `503` no Editor |
+| `GET /ui_mouse` **MUT** | Q `action`* (`move`, `down`, `up`, `release`), `x`, `y` (needed for `move`), `button` | `{success, action, button, x, y}` | `400`, `403` browser, `503` no Editor |
 | `GET /inspector_state` | none | See below | `503` |
 | `POST /inspector/build_clusters` **MUT** | B optional `weld`, `max_vertices`, `max_triangles`, `cone_weight` | `{success, started}` | `400` refused, `503` busy |
 | `GET /hierarchy_state` | Q `first` (default 0), `count` (default 200, max 2000) | See below | `400`, `503` |
@@ -209,7 +210,10 @@ Notes:
 - `activate_tab` and `panel_visible` change the session only. Nothing is saved.
 - `split_views`: `true` puts Game beside Scene. `false` makes Game a tab of Scene.
 - `spawn_instance_grid` is a load-test spawner. It answers `503` if the editor layer is the null one.
-- `inspector_state` shows what the Inspector drew last frame: `selection_kind`, `selected_path`, `shown_path`, `clusters_text`, `cluster_status`, `build_button_enabled`, `build_button_disabled_reason`, `build_running`, `clone_button_disabled_reason`, `clone_destination`, `clone_weld`, `open_viewer_after_clone`.
+- `inspector_state` shows what the Inspector drew last frame: `selection_kind`, `selected_path`, `shown_path`, `clusters_text`, `cluster_status`, `build_button_enabled`, `build_button_disabled_reason`, `build_running`, `clone_button_disabled_reason`, `clone_destination`, `clone_weld`, `open_viewer_after_clone`, and `rotation`.
+- `inspector_state.rotation` is the Transform "Rotation" field: `drawn` (false if it was not drawn last frame), `entity` (`{index, generation}`), `euler_degrees` (`[x,y,z]` as shown), `axis_center` (three `[x,y]` pairs, screen pixels of the X, Y, Z drag fields, same space as `/ui_mouse`), `rederive_count`. `rederive_count` counts how often the shown Euler was rebuilt from the quaternion. It must stay constant while a value like 9999 is shown and nothing else edits the rotation.
+- `ui_mouse` queues one synthetic mouse event into the editor's ImGui input. It is applied on the next UI frame, so the real widgets react. `action=move` needs `x` and `y` (screen pixels, within +/-10000000). `down` and `up` take an optional `button` (`left` default, `right`, `middle`). `release` lets go of all buttons and gives the pointer back to the real mouse. While a `move` is active the injected position is re-applied every frame. Always finish with `release`.
+- Drag a Rotation axis: `select_entity`, read `axis_center` from `inspector_state`, then `ui_mouse` `move` to that center, `down`, `move` to center.x + N pixels (1 pixel = 0.1 degree), `up`, `release`. Wait one frame between calls and read `inspector_state` again.
 - `inspector/build_clusters` is async. Read the result from `/inspector_state`. Limits are the same as `/build_clusters`.
 
 `hierarchy_state` reply:

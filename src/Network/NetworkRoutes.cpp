@@ -1610,6 +1610,72 @@ std::string BuildInspectorStateResponseJson(const InspectorStateResponseView& vi
     body["clone_destination"] = view.cloneDestination;
     body["clone_weld"] = view.cloneWeld;
     body["open_viewer_after_clone"] = view.openViewerAfterClone;
+    const RotationFieldReport& rotation = view.rotation;
+    nlohmann::json centers = nlohmann::json::array();
+    for (const Vec2& center : rotation.axisCenter) {
+        centers.push_back(nlohmann::json::array({ center.x, center.y }));
+    }
+    body["rotation"] = {
+        { "drawn", rotation.drawn },
+        { "entity", { { "index", rotation.entity.index }, { "generation", rotation.entity.generation } } },
+        { "euler_degrees", nlohmann::json::array({ rotation.shown.x, rotation.shown.y, rotation.shown.z }) },
+        { "axis_center", std::move(centers) },
+        { "rederive_count", rotation.rederiveCount },
+    };
+    return body.dump();
+}
+
+ParsedUiMouseQuery ParseUiMouseQuery(const std::string& actionParam, const std::string& xParam,
+    const std::string& yParam, const std::string& buttonParam)
+{
+    constexpr float kMaxCoordinate = 1.0e7f;
+    ParsedUiMouseQuery result;
+    MouseInjection& out = result.injection;
+    if (actionParam == "move") {
+        out.action = MouseInjectAction::Move;
+    } else if (actionParam == "down") {
+        out.action = MouseInjectAction::Down;
+    } else if (actionParam == "up") {
+        out.action = MouseInjectAction::Up;
+    } else if (actionParam == "release") {
+        out.action = MouseInjectAction::Release;
+    } else {
+        result.errorMessage = "missing or invalid required query parameter: action - must be \"move\", \"down\", \"up\" or \"release\"";
+        return result;
+    }
+    if (buttonParam.empty() || buttonParam == "left") {
+        out.button = MouseInjectButton::Left;
+    } else if (buttonParam == "right") {
+        out.button = MouseInjectButton::Right;
+    } else if (buttonParam == "middle") {
+        out.button = MouseInjectButton::Middle;
+    } else {
+        result.errorMessage = "invalid query parameter: button - must be \"left\", \"right\" or \"middle\"";
+        return result;
+    }
+    if (out.action == MouseInjectAction::Move) {
+        const auto inRange = [](const std::string& text, float& value) {
+            return TryParseWholeFloat(text, value) && std::isfinite(value) && std::fabs(value) <= kMaxCoordinate;
+        };
+        if (!inRange(xParam, out.x) || !inRange(yParam, out.y)) {
+            result.errorMessage = "missing or invalid query parameters: x and y - must be screen pixels within +/-10000000";
+            return result;
+        }
+    }
+    result.valid = true;
+    return result;
+}
+
+std::string BuildUiMouseResponseJson(const MouseInjection& injection)
+{
+    static constexpr const char* kActions[] = { "move", "down", "up", "release" };
+    static constexpr const char* kButtons[] = { "left", "right", "middle" };
+    nlohmann::json body;
+    body["success"] = true;
+    body["action"] = kActions[static_cast<int>(injection.action)];
+    body["button"] = kButtons[static_cast<int>(injection.button)];
+    body["x"] = injection.x;
+    body["y"] = injection.y;
     return body.dump();
 }
 

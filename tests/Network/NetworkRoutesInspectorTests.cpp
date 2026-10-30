@@ -106,6 +106,45 @@ TEST(InspectorResponseTests, StateJsonCarriesEveryField)
     EXPECT_TRUE(body["build_running"].get<bool>());
 }
 
+TEST(InspectorResponseTests, StateJsonCarriesRotationField)
+{
+    InspectorStateResponseView view;
+    view.rotation.drawn = true;
+    view.rotation.entity = gte::Entity{ 3, 2 };
+    view.rotation.shown = gte::Vec3(9999.0f, 0.0f, 0.0f);
+    view.rotation.axisCenter[1] = gte::Vec2(120.0f, 40.0f);
+    view.rotation.rederiveCount = 7;
+
+    const nlohmann::json rotation = nlohmann::json::parse(BuildInspectorStateResponseJson(view))["rotation"];
+    EXPECT_TRUE(rotation["drawn"].get<bool>());
+    EXPECT_EQ(rotation["entity"]["index"], 3u);
+    EXPECT_EQ(rotation["entity"]["generation"], 2u);
+    EXPECT_FLOAT_EQ(rotation["euler_degrees"][0].get<float>(), 9999.0f);
+    EXPECT_FLOAT_EQ(rotation["axis_center"][1][0].get<float>(), 120.0f);
+    EXPECT_EQ(rotation["rederive_count"], 7u);
+}
+
+TEST(ParseUiMouseQueryTests, MoveNeedsFiniteCoordinatesOtherActionsDoNot)
+{
+    const ParsedUiMouseQuery move = ParseUiMouseQuery("move", "12.5", "-3", "");
+    ASSERT_TRUE(move.valid) << move.errorMessage;
+    EXPECT_EQ(move.injection.action, gte::MouseInjectAction::Move);
+    EXPECT_FLOAT_EQ(move.injection.x, 12.5f);
+    EXPECT_FLOAT_EQ(move.injection.y, -3.0f);
+    EXPECT_EQ(move.injection.button, gte::MouseInjectButton::Left);
+
+    EXPECT_FALSE(ParseUiMouseQuery("move", "", "1", "").valid);
+    EXPECT_FALSE(ParseUiMouseQuery("move", "nan", "1", "").valid);
+    EXPECT_FALSE(ParseUiMouseQuery("move", "1e30", "1", "").valid);
+
+    const ParsedUiMouseQuery down = ParseUiMouseQuery("down", "", "", "right");
+    ASSERT_TRUE(down.valid) << down.errorMessage;
+    EXPECT_EQ(down.injection.button, gte::MouseInjectButton::Right);
+    EXPECT_TRUE(ParseUiMouseQuery("release", "", "", "").valid);
+    EXPECT_FALSE(ParseUiMouseQuery("click", "", "", "").valid);
+    EXPECT_FALSE(ParseUiMouseQuery("up", "", "", "side").valid);
+}
+
 TEST(InspectorResponseTests, SmallAnswersAreValidJson)
 {
     const nlohmann::json started = nlohmann::json::parse(BuildInspectorBuildStartedResponseJson());

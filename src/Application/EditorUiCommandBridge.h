@@ -8,7 +8,9 @@
 #include "../Core/InstanceGridLimits.h"
 #include "../Editor/HierarchyActionRequest.h"
 #include "../Editor/HierarchyStateReport.h"
+#include "../Editor/MouseInjection.h"
 #include "../Editor/PanelVisibility.h"
+#include "../Editor/RotationFieldProbe.h"
 #include "../Editor/SceneCameraControl.h"
 
 #include <cstdint>
@@ -23,6 +25,7 @@ enum class EditorUiCommandKind {
     SpawnInstanceGrid,
     SelectAsset,
     SelectEntity,
+    InjectMouse,
     InspectorState,
     InspectorBuildClusters,
     SplitViews,
@@ -117,6 +120,7 @@ struct EditorUiCommandRequest {
     SpawnInstanceGridCommand spawnInstanceGrid;
     SelectAssetCommand selectAsset;
     SelectEntityCommand selectEntity;
+    MouseInjection injectMouse;
     InspectorBuildClustersCommand inspectorBuildClusters;
     SplitViewsCommand splitViews;
     ClusterViewerCommand clusterViewer;
@@ -178,6 +182,12 @@ struct InspectorStateOutcome {
     std::string cloneDestination;          // File name only.
     std::string cloneWeld;                 // "auto" | "exact" | "position_only"
     bool openViewerAfterClone = false;
+    RotationFieldReport rotation;
+};
+
+// Outcome of one InjectMouse command. `editorAvailable` is false when the build has no Editor.
+struct InjectMouseOutcome {
+    bool editorAvailable = true;
 };
 
 enum class InspectorBuildClustersStatus {
@@ -234,6 +244,7 @@ struct EditorUiCommandResult {
     SelectAssetOutcome selectAsset;
     SelectEntityOutcome selectEntity;
     InspectorStateOutcome inspectorState;
+    InjectMouseOutcome injectMouse;
     InspectorBuildClustersOutcome inspectorBuildClusters;
     SplitViewsOutcome splitViews;
     ClusterViewerOutcome clusterViewer;

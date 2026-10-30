@@ -130,6 +130,8 @@ public:
         return view;
     }
 
+    bool InjectMouse(const MouseInjection& /*injection*/) override { return false; }
+
     HierarchyStateReport HierarchyState(Game& /*game*/, std::uint64_t /*first*/, std::uint64_t /*count*/) const override
     {
         HierarchyStateReport report;

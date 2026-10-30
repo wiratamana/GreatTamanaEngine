@@ -16,6 +16,8 @@
 #include "../Core/Logging.h"
 #include "../Core/InstanceGridLimits.h"
 #include "../Editor/HierarchyActionRequest.h" // Request of the POST /hierarchy_action route.
+#include "../Editor/MouseInjection.h" // Request of the GET /ui_mouse route.
+#include "../Editor/RotationFieldProbe.h" // Rotation field report of the GET /inspector_state route.
 #include "../Editor/HierarchyStateReport.h" // Report structs of the GET /hierarchy_state and POST /hierarchy_action routes.
 #include "../Editor/PanelVisibility.h" // Panel ids of the GET /panel_visible route.
 #include "../Editor/SceneCameraControl.h" // Report structs of the viewer and Scene camera routes.
@@ -1071,12 +1073,27 @@ struct InspectorStateResponseView {
     std::string cloneDestination; // File name only.
     std::string cloneWeld;        // "auto" | "exact" | "position_only"
     bool openViewerAfterClone = false;
+    RotationFieldReport rotation;
 };
 
 // {"selection_kind","selected_path","shown_path","clusters_text","cluster_status",
 //  "build_button_enabled","build_button_disabled_reason","build_running",
-//  "clone_button_disabled_reason","clone_destination","clone_weld","open_viewer_after_clone"}
+//  "clone_button_disabled_reason","clone_destination","clone_weld","open_viewer_after_clone",
+//  "rotation":{"drawn","entity":{"index","generation"},"euler_degrees":[x,y,z],"axis_center":[[x,y]x3],"rederive_count"}}
 std::string BuildInspectorStateResponseJson(const InspectorStateResponseView& view);
+
+// Parsed GET /ui_mouse query: "action" is move, down, up or release; "x" and "y" (screen pixels) are
+// required for move; "button" (left, right, middle) is optional and defaults to left.
+struct ParsedUiMouseQuery {
+    bool valid = false;
+    std::string errorMessage;
+    MouseInjection injection;
+};
+ParsedUiMouseQuery ParseUiMouseQuery(const std::string& actionParam, const std::string& xParam,
+    const std::string& yParam, const std::string& buttonParam);
+
+// Success shape: {"success":true,"action":"...","button":"...","x":<n>,"y":<n>}
+std::string BuildUiMouseResponseJson(const MouseInjection& injection);
 
 // Parsed GET /split_views query: "enabled" must be exactly "true" or "false".
 struct ParsedSplitViewsQuery {

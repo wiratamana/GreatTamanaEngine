@@ -243,6 +243,7 @@ public:
         ImGui::SetCurrentContext(m_context);
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
+        QueueInjectedPointer(); // After the backend, so its OS mouse position does not win.
         ImGui::NewFrame();
 
         // Reset ID-conflict tracking; must run after ImGui::NewFrame() and before any widget is built.
@@ -658,6 +659,7 @@ public:
 
     InspectorStateView InspectorState() const override
     {
+        ImGui::SetCurrentContext(m_context);
         InspectorStateView view;
         const Selection& selection = m_ctx.selection;
         switch (selection.Kind()) {
@@ -680,7 +682,45 @@ public:
         view.cloneDestination = shown.cloneDestination;
         view.cloneWeld = shown.cloneWeld;
         view.openViewerAfterClone = shown.openViewerAfterClone;
+        view.rotation = m_ctx.rotationProbe.Report(ImGui::GetFrameCount(), m_ctx.rotationEdit.rederiveCount);
         return view;
+    }
+
+    bool InjectMouse(const MouseInjection& injection) override
+    {
+        ImGui::SetCurrentContext(m_context);
+        ImGuiIO& io = ImGui::GetIO();
+        InjectedPointer& pointer = m_injectedPointer;
+        const int button = static_cast<int>(injection.button); // Left, Right, Middle match ImGuiMouseButton_*.
+        switch (injection.action) {
+        case MouseInjectAction::Move:
+            pointer.active = true;
+            pointer.x = injection.x;
+            pointer.y = injection.y;
+            if (const ImGuiID id = ViewportIdAt(pointer.x, pointer.y)) {
+                pointer.viewportId = id;
+            }
+            break;
+        case MouseInjectAction::Down:
+        case MouseInjectAction::Up:
+            if (!pointer.active) { // Take over at the current pointer position.
+                pointer.active = true;
+                pointer.x = io.MousePos.x;
+                pointer.y = io.MousePos.y;
+                pointer.viewportId = ViewportIdAt(pointer.x, pointer.y);
+            }
+            QueueInjectedPointer();
+            io.AddMouseButtonEvent(button, injection.action == MouseInjectAction::Down);
+            return true;
+        case MouseInjectAction::Release:
+            for (int b = 0; b < ImGuiMouseButton_COUNT; ++b) {
+                io.AddMouseButtonEvent(b, false);
+            }
+            pointer = InjectedPointer{};
+            return true;
+        }
+        QueueInjectedPointer();
+        return true;
     }
 
     HierarchyStateReport HierarchyState(Game& game, std::uint64_t first, std::uint64_t count) const override
@@ -832,8 +872,42 @@ private:
         }
     }
 
+    // Pointer placed by InjectMouse(); re-queued every frame so the real mouse cannot move it.
+    struct InjectedPointer {
+        bool active = false;
+        float x = 0.0f;
+        float y = 0.0f;
+        ImGuiID viewportId = 0; // Viewport last seen under the pointer.
+    };
+
+    static ImGuiID ViewportIdAt(float x, float y)
+    {
+        const ImVector<ImGuiViewport*>& viewports = ImGui::GetPlatformIO().Viewports;
+        for (int i = viewports.Size - 1; i >= 0; --i) {
+            const ImGuiViewport* vp = viewports[i];
+            if (x >= vp->Pos.x && y >= vp->Pos.y && x < vp->Pos.x + vp->Size.x && y < vp->Pos.y + vp->Size.y) {
+                return vp->ID;
+            }
+        }
+        return 0;
+    }
+
+    // Queues the injected pointer position (and hovered viewport) for the next ImGui::NewFrame().
+    void QueueInjectedPointer()
+    {
+        if (!m_injectedPointer.active) {
+            return;
+        }
+        ImGuiIO& io = ImGui::GetIO();
+        io.AddMousePosEvent(m_injectedPointer.x, m_injectedPointer.y);
+        if ((io.BackendFlags & ImGuiBackendFlags_HasMouseHoveredViewport) && m_injectedPointer.viewportId != 0) {
+            io.AddMouseViewportEvent(m_injectedPointer.viewportId);
+        }
+    }
+
     Renderer* m_renderer = nullptr; // Non-owning - see constructor comment.
     ImGuiContext* m_context = nullptr;
+    InjectedPointer m_injectedPointer;
     RenderTexture m_gameView;
     RenderTexture m_sceneView;
 

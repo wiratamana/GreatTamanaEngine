@@ -4,7 +4,9 @@
 #include "HierarchyActionRequest.h"
 #include "HierarchyStateReport.h"
 #include "HizDemoState.h"
+#include "MouseInjection.h"
 #include "PanelVisibility.h"
+#include "RotationFieldProbe.h"
 
 #include "../Assets/MeshClusterOptions.h"
 #include "../Core/CapturedPixels.h"
@@ -140,6 +142,7 @@ struct InspectorStateView {
     std::string cloneDestination; // File name only.
     std::string cloneWeld;        // "auto" | "exact" | "position_only"
     bool openViewerAfterClone = false;
+    RotationFieldReport rotation;
 };
 
 // Cluster options handed to InspectorBuildClusters(); the Inspector's own controls take these values.
@@ -342,6 +345,9 @@ public:
 
     // What the Inspector showed on its last draw. Default-valued for NullEditorLayer.
     virtual InspectorStateView InspectorState() const = 0;
+
+    // Queues one synthetic mouse event for the next UI frame. Returns false for NullEditorLayer.
+    virtual bool InjectMouse(const MouseInjection& injection) = 0;
 
     // The Hierarchy panel's rows from the last drawn frame: `count` rows from row `first`.
     // `editorAvailable` is false for NullEditorLayer.

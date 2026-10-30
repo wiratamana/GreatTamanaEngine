@@ -1,6 +1,7 @@
-// Unit tests for RotationEulerEditCache (src/Editor/RotationEulerEditCache.h).
+// Unit tests for RotationEulerEditCache and RotationFieldProbe (src/Editor/).
 
 #include "Editor/RotationEulerEditCache.h"
+#include "Editor/RotationFieldProbe.h"
 
 #include <gtest/gtest.h>
 
@@ -16,7 +17,9 @@ constexpr Entity kEntityB{ 2, 1 };
 TEST(RotationEulerEditCacheTests, CommittedLargeAngleSurvivesResolve)
 {
     RotationEulerEditCache cache;
-    const Quat q = cache.Commit(Vec3(9999.0f, 0.0f, 0.0f));
+    Vec3 edited = cache.Resolve(kEntityA, Quat::Identity());
+    edited.x = 9999.0f;
+    const Quat q = cache.Commit(edited);
 
     const Vec3 shown = cache.Resolve(kEntityA, q);
 
@@ -28,8 +31,9 @@ TEST(RotationEulerEditCacheTests, CommittedLargeAngleSurvivesResolve)
 TEST(RotationEulerEditCacheTests, ExternalQuaternionChangeRederivesCanonicalEuler)
 {
     RotationEulerEditCache cache;
-    Quat q = cache.Commit(Vec3(120.0f, 0.0f, 0.0f));
-    cache.Resolve(kEntityA, q);
+    Vec3 edited = cache.Resolve(kEntityA, Quat::Identity());
+    edited.x = 120.0f;
+    cache.Commit(edited);
 
     const Quat external = Quat::FromEulerDegrees(10.0f, 20.0f, 30.0f);
     const Vec3 shown = cache.Resolve(kEntityA, external);
@@ -42,8 +46,10 @@ TEST(RotationEulerEditCacheTests, ExternalQuaternionChangeRederivesCanonicalEule
 TEST(RotationEulerEditCacheTests, DifferentEntityRederivesCanonicalEuler)
 {
     RotationEulerEditCache cache;
-    const Quat q = cache.Commit(Vec3(9999.0f, 0.0f, 0.0f));
-    cache.Resolve(kEntityA, q);
+    Vec3 edited = cache.Resolve(kEntityA, Quat::Identity());
+    edited.x = 9999.0f;
+    const Quat q = cache.Commit(edited);
+    ASSERT_FLOAT_EQ(cache.Resolve(kEntityA, q).x, 9999.0f);
 
     const Vec3 shown = cache.Resolve(kEntityB, q);
 
@@ -69,8 +75,10 @@ TEST(RotationEulerEditCacheTests, JitterAroundNinetyKeepsYawAndRollZero)
 TEST(RotationEulerEditCacheTests, EditingYKeepsLargeX)
 {
     RotationEulerEditCache cache;
-    Quat q = cache.Commit(Vec3(9999.0f, 0.0f, 0.0f));
-    Vec3 shown = cache.Resolve(kEntityA, q);
+    Vec3 shown = cache.Resolve(kEntityA, Quat::Identity());
+    shown.x = 9999.0f;
+    Quat q = cache.Commit(shown);
+    shown = cache.Resolve(kEntityA, q);
     shown.y = 15.0f;
     q = cache.Commit(shown);
 
@@ -78,6 +86,21 @@ TEST(RotationEulerEditCacheTests, EditingYKeepsLargeX)
 
     EXPECT_FLOAT_EQ(shown.x, 9999.0f);
     EXPECT_FLOAT_EQ(shown.y, 15.0f);
+}
+
+TEST(RotationEulerEditCacheTests, IdleLargeAngleDoesNotRederive)
+{
+    RotationEulerEditCache cache;
+    Vec3 shown = cache.Resolve(kEntityA, Quat::Identity());
+    shown.x = 9999.0f;
+    const Quat q = cache.Commit(shown);
+    const std::uint32_t before = cache.rederiveCount;
+
+    for (int i = 0; i < 100; ++i) {
+        EXPECT_FLOAT_EQ(cache.Resolve(kEntityA, q).x, 9999.0f);
+    }
+
+    EXPECT_EQ(cache.rederiveCount, before);
 }
 
 TEST(RotationEulerEditCacheTests, RebindKeepsEulerWhenStoredQuaternionIsNormalized)
@@ -102,6 +125,24 @@ TEST(RotationEulerEditCacheTests, NonFiniteAndHugeInputsAreSanitized)
     EXPECT_FLOAT_EQ(cache.euler.y, 0.0f);
     EXPECT_FLOAT_EQ(cache.euler.z, -RotationEulerEditCache::kMaxDegrees);
     EXPECT_TRUE(std::isfinite(q.x) && std::isfinite(q.y) && std::isfinite(q.z) && std::isfinite(q.w));
+}
+
+TEST(RotationFieldProbeTests, RecordsFieldCentersAndExpiresAfterOneFrame)
+{
+    RotationFieldProbe probe;
+    EXPECT_FALSE(probe.Report(10, 0).drawn);
+
+    probe.Record(10, kEntityA, Vec3(9999.0f, 0.0f, 0.0f), 100.0f, 50.0f, 306.0f, 4.0f);
+
+    const RotationFieldReport report = probe.Report(11, 5);
+    EXPECT_TRUE(report.drawn);
+    EXPECT_EQ(report.rederiveCount, 5u);
+    EXPECT_FLOAT_EQ(report.shown.x, 9999.0f);
+    EXPECT_FLOAT_EQ(report.axisCenter[0].x, 149.5f); // Field width floor((306 - 8) / 3) = 99.
+    EXPECT_FLOAT_EQ(report.axisCenter[1].x, 252.5f); // 100 + (99 + 4) + 99 / 2
+    EXPECT_FLOAT_EQ(report.axisCenter[1].y, 50.0f);
+    EXPECT_LT(report.axisCenter[1].x, report.axisCenter[2].x);
+    EXPECT_FALSE(probe.Report(12, 5).drawn);
 }
 
 } // namespace

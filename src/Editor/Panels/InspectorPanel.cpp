@@ -598,9 +598,14 @@ void BuildEntityInspector(Registry& registry, EditorContext& ctx, PhysicsSystem&
             ImGui::DragFloat3("Position", &transform->position.x, 0.01f);
 
             Vec3 eulerDegrees = ctx.rotationEdit.Resolve(entity, transform->rotation);
+            const float rotationFieldsWidth = ImGui::CalcItemWidth();
             if (ImGui::DragFloat3("Rotation", &eulerDegrees.x, 0.1f)) {
                 transform->rotation = ctx.rotationEdit.Commit(eulerDegrees);
             }
+            const ImVec2 rotationMin = ImGui::GetItemRectMin();
+            ctx.rotationProbe.Record(ImGui::GetFrameCount(), entity, eulerDegrees, rotationMin.x,
+                rotationMin.y + ImGui::GetItemRectSize().y * 0.5f, rotationFieldsWidth,
+                ImGui::GetStyle().ItemInnerSpacing.x);
 
             ImGui::DragFloat3("Scale", &transform->scale.x, 0.01f);
 
