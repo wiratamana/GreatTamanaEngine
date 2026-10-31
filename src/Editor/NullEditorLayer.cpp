@@ -54,6 +54,7 @@ public:
     IFrameDebuggerCaptureRecorder* PrepareFrameDebuggerCaptureContext() override { return nullptr; }
     void NotifyFrameDebuggerStepConsumed() override { }
     bool ConsumePendingFrameDebuggerReplayRequest() override { return false; }
+    void FrameDebuggerNotifyOffscreenFailed() override { }
 
     // No Frame Debugger UI or state exists in a release build, so these are inert no-ops.
     void FrameDebuggerOpenWindow() override { }

@@ -13,18 +13,8 @@
 
 namespace gte {
 
-// Real implementation of rg::IPassDebugMetadataSink (write) and
-// rg::IPassDebugMetadataProvider (read). Compiled only into gte_editor -
-// never gte_core. A Player-style build links gte_core alone, so this class
-// is never constructed there and every installed sink pointer stays null.
-//
-// A PassRecord has no stable identity across frames, so this table is
-// cleared (but keeps capacity) once per fresh graph declaration via
-// BeginFrame() - never a permanent, ever-growing map.
-//
-// declarationIndexThisFrame is always exactly == m_table.size() when
-// OnPassDeclared() fires - a dense 0, 1, 2, ... sequence with no gaps,
-// matching RenderGraphBuilder's own pass declaration order.
+// Implements rg::IPassDebugMetadataSink (write) and rg::IPassDebugMetadataProvider (read). Editor-only.
+// The table is cleared (capacity kept) by BeginFrame(); OnPassDeclared() sees an index equal to m_table.size().
 class FrameDebuggerPassMetadataRecorder final : public rg::IPassDebugMetadataSink,
                                                  public rg::IPassDebugMetadataProvider {
 public:
@@ -44,12 +34,8 @@ public:
         m_barrierLabelsByIndex.clear();
     }
 
-    // Fires once per WRITE usage that actually required a barrier, at execute
-    // time, in the exact order RenderGraph::Execute()'s writes-loop applies them.
-    // A single pass can legally write the same resource name more than once
-    // (e.g. color + depth-stencil attachment of one combined render target) -
-    // each occurrence is queued per-name, FIFO, so a later query consumes
-    // labels in the same order they were produced instead of collapsing them.
+    // Fires once per write that needed a barrier, in write order. One pass can write the same resource
+    // twice, so labels are queued per name and consumed in order.
     void OnResourceBarrierApplied(
         std::size_t declarationIndex, const std::string& resourceName, std::string transitionLabel) override
     {
@@ -68,10 +54,8 @@ public:
         return true;
     }
 
-    // Consumes one label from this (declarationIndex, resourceName) pair's FIFO
-    // queue, in the same write order RenderGraphSnapshot.cpp's own write loop
-    // queries it. Returns false (never throws) once the queue runs dry - e.g.
-    // a read-only usage, or more queries than barriers actually applied.
+    // Pops one label from the (declarationIndex, resourceName) queue.
+    // Returns false once the queue is empty.
     bool QueryBarrierTransitionLabel(
         std::size_t declarationIndex, const std::string& resourceName, std::string& outLabel) const override
     {
@@ -94,13 +78,8 @@ public:
 private:
     std::vector<rg::PassDebugMetadata> m_table;
 
-    // Parallel to m_table. Per declared pass, one FIFO queue of barrier
-    // labels per resource name - NOT a single label per name, so repeated
-    // writes to the same resource (color attachment + depth-stencil
-    // attachment of one combined target) each get their own, correctly
-    // ordered label instead of the last write silently overwriting the first.
-    // mutable: QueryBarrierTransitionLabel() consumes (pops) as it reads,
-    // which is an internal read-cursor detail, not observable sink state.
+    // Parallel to m_table. One FIFO queue of barrier labels per resource name, so repeated writes to one
+    // resource each keep their own label. mutable: queries pop labels as a read cursor.
     mutable std::vector<std::unordered_map<std::string, std::deque<std::string>>> m_barrierLabelsByIndex;
 };
 

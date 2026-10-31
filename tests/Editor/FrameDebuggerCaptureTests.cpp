@@ -1,5 +1,4 @@
-// Tier-1 tests of FrameDebuggerCaptureContext's recording and the standard pipeline state descriptions.
-// Built only when GTE_ENABLE_EDITOR is ON.
+// Tier-1 tests of FrameDebuggerCaptureContext recording, arming and the standard pipeline state descriptions.
 
 #include "Editor/FrameDebuggerCapture.h"
 
@@ -25,7 +24,6 @@ TEST(FrameDebuggerCaptureContextTest, StartsEmpty)
     FrameDebuggerCaptureContext capture;
     EXPECT_TRUE(capture.PipelineDebugNames().empty());
     EXPECT_TRUE(capture.MaterialSlotRows().empty());
-    EXPECT_EQ(capture.DrawCallCount(), 0);
     EXPECT_TRUE(ApproximatelyEqual(capture.LastViewProjection(), Mat4::Identity()));
     EXPECT_TRUE(capture.DrawRecords().empty());
 }
@@ -43,7 +41,6 @@ TEST(FrameDebuggerCaptureContextTest, RecordDrawDeduplicatesRepeatedNames)
     EXPECT_EQ(capture.PipelineDebugNames()[0], "Mesh.vert/Mesh.frag (PositionNormal)");
     ASSERT_EQ(capture.MaterialSlotRows().size(), 1u);
     EXPECT_EQ(capture.MaterialSlotRows()[0], (FrameDebuggerMaterialSlot { "Base Color", "MaterialTexture abc123" }));
-    EXPECT_EQ(capture.DrawCallCount(), 2);
 }
 
 TEST(FrameDebuggerCaptureContextTest, RecordDrawKeepsDistinctNamesSeparate)
@@ -58,7 +55,6 @@ TEST(FrameDebuggerCaptureContextTest, RecordDrawKeepsDistinctNamesSeparate)
     ASSERT_EQ(capture.MaterialSlotRows().size(), 2u);
     EXPECT_EQ(capture.MaterialSlotRows()[0].imageName, "MaterialTexture abc123");
     EXPECT_EQ(capture.MaterialSlotRows()[1].imageName, "MaterialTexture def456");
-    EXPECT_EQ(capture.DrawCallCount(), 2);
 }
 
 TEST(FrameDebuggerCaptureContextTest, RecordDrawSkipsEmptyImageNames)
@@ -69,7 +65,6 @@ TEST(FrameDebuggerCaptureContextTest, RecordDrawSkipsEmptyImageNames)
 
     EXPECT_EQ(capture.PipelineDebugNames().size(), 2u);
     EXPECT_TRUE(capture.MaterialSlotRows().empty());
-    EXPECT_EQ(capture.DrawCallCount(), 2);
 }
 
 TEST(FrameDebuggerCaptureContextTest, MaterialSlotRowsDedupeBySlotAndImageInFirstSeenOrder)
@@ -108,7 +103,6 @@ TEST(FrameDebuggerCaptureContextTest, ResetClearsEverythingBackToEmpty)
 
     EXPECT_TRUE(capture.PipelineDebugNames().empty());
     EXPECT_TRUE(capture.MaterialSlotRows().empty());
-    EXPECT_EQ(capture.DrawCallCount(), 0);
     EXPECT_TRUE(ApproximatelyEqual(capture.LastViewProjection(), Mat4::Identity()));
     EXPECT_TRUE(capture.DrawRecords().empty());
 }
@@ -157,8 +151,39 @@ TEST(FrameDebuggerCaptureContextTest, RecordEntityDrawDoesNotAffectRecordDrawBoo
 
     EXPECT_TRUE(capture.PipelineDebugNames().empty());
     EXPECT_TRUE(capture.MaterialSlotRows().empty());
-    EXPECT_EQ(capture.DrawCallCount(), 0);
     ASSERT_EQ(capture.DrawRecords().size(), 1u);
+}
+
+TEST(FrameDebuggerCaptureContextTest, NoteCommandResultIsIgnoredWhileInactive)
+{
+    FrameDebuggerCaptureContext capture;
+    capture.NoteCommandResult(AttachmentWrite {});
+    capture.Reset();
+
+    EXPECT_EQ(capture.LastFrameEventCount(), 0);
+}
+
+TEST(FrameDebuggerCaptureContextTest, NoteCommandResultCountsAfterReset)
+{
+    FrameDebuggerCaptureContext capture;
+    capture.Reset();
+    capture.NoteCommandResult(AttachmentWrite {});
+    capture.NoteCommandResult(AttachmentWrite {});
+    capture.Reset();
+
+    EXPECT_EQ(capture.LastFrameEventCount(), 2);
+}
+
+TEST(FrameDebuggerCaptureContextTest, DeactivateStopsCountingAndZeroesCounters)
+{
+    FrameDebuggerCaptureContext capture;
+    capture.Reset();
+    capture.NoteCommandResult(AttachmentWrite {});
+    capture.Deactivate();
+    capture.NoteCommandResult(AttachmentWrite {});
+    capture.Reset();
+
+    EXPECT_EQ(capture.LastFrameEventCount(), 0);
 }
 
 TEST(DescribeStandardPipelineStateTest, ReportsRealHardcodedPipelineCppValues)

@@ -107,3 +107,12 @@ ComputeCpuMillisecondsRange
 AggregateNameOutOfRange
 m_aggregateNameOutOfRange
 IsFallbackInfo
+m_drawCallCount
+FrameDebuggerHistoryEntry
+BuildPlaceholderFrameDebuggerSnapshot
+FormatFrameHistoryLabel
+m_shaderPropertyPreviewKind
+m_stepCaptureRequested
+m_pendingCaptureTrigger
+m_replayServicedThisFrame
+m_wasPlaybackPaused

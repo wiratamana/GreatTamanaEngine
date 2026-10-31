@@ -1148,6 +1148,7 @@ TEST(BuildFrameDebuggerStateResponseJsonTests, ProducesExactExpectedShape)
     state.channel = "r";
     state.levelsBlack = 0.1f;
     state.levelsWhite = 0.9f;
+    state.captureStatus = "captured";
 
     const std::string body = BuildFrameDebuggerStateResponseJson(state);
     const nlohmann::json parsed = nlohmann::json::parse(body);
@@ -1159,6 +1160,8 @@ TEST(BuildFrameDebuggerStateResponseJsonTests, ProducesExactExpectedShape)
     EXPECT_EQ(parsed["channel"], "r");
     EXPECT_FLOAT_EQ(parsed["levelsBlack"].get<float>(), 0.1f);
     EXPECT_FLOAT_EQ(parsed["levelsWhite"].get<float>(), 0.9f);
+    EXPECT_EQ(parsed["captureStatus"], "captured");
+    EXPECT_EQ(parsed["captureError"], "");
     // Never wrapped in a "success" envelope - this is a pure status read.
     EXPECT_FALSE(parsed.contains("success"));
 }
@@ -1172,6 +1175,8 @@ TEST(BuildFrameDebuggerCommandResponseJsonTests, SuccessShapeHasNoErrorField)
     EXPECT_FALSE(parsed.contains("error"));
     ASSERT_TRUE(parsed.contains("state"));
     EXPECT_EQ(parsed["state"]["channel"], "all");
+    EXPECT_EQ(parsed["state"]["captureStatus"], "disabled");
+    EXPECT_EQ(parsed["state"]["captureError"], "");
 }
 
 TEST(BuildFrameDebuggerCommandResponseJsonTests, FailureShapeIncludesErrorAndState)
@@ -1185,6 +1190,18 @@ TEST(BuildFrameDebuggerCommandResponseJsonTests, FailureShapeIncludesErrorAndSta
     EXPECT_EQ(parsed["error"], "frame debugger command could not be applied");
     ASSERT_TRUE(parsed.contains("state"));
     EXPECT_EQ(parsed["state"]["enabled"], false);
+}
+
+TEST(BuildFrameDebuggerStateResponseJsonTests, FailedCaptureReportsStatusAndReason)
+{
+    FrameDebuggerStateResponseView state;
+    state.enabled = true;
+    state.captureStatus = "failed";
+    state.captureError = "Capture failed: out of memory";
+
+    const nlohmann::json parsed = nlohmann::json::parse(BuildFrameDebuggerStateResponseJson(state));
+    EXPECT_EQ(parsed["captureStatus"], "failed");
+    EXPECT_EQ(parsed["captureError"], "Capture failed: out of memory");
 }
 
 // --- task_manager/scene-serialization-2 campaign, PHASE5

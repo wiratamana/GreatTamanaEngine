@@ -1478,12 +1478,18 @@ void Core::BuildFrame()
             }
             // The target's contents are undefined; present clears the swapchain instead of copying it.
             m_directPrimaryTargetUsedThisFrame = false;
+            if (m_editorLayer != nullptr) {
+                m_editorLayer->FrameDebuggerNotifyOffscreenFailed();
+            }
         } catch (...) {
             const std::string failure = "RenderGraph offscreen Execute() failed: unknown exception";
             if (rg::BoundedOnceSet<64>::ShouldLog(m_frameFailureOnce.Note(failure))) {
                 GTE_LOG_ERROR("Core", failure);
             }
             m_directPrimaryTargetUsedThisFrame = false;
+            if (m_editorLayer != nullptr) {
+                m_editorLayer->FrameDebuggerNotifyOffscreenFailed();
+            }
         }
     } else {
         PublishGpuMetrics(false, false);

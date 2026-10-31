@@ -1481,8 +1481,9 @@ add_library(gte_editor STATIC
     # rg::IPassDebugMetadataSink and rg::IPassDebugMetadataProvider (see
     # src/Renderer/RenderGraph/RenderGraphDebugMetadataSink.h).
     src/Editor/FrameDebuggerPassMetadataRecorder.h
-    src/Editor/FrameDebuggerHistory.h
-    src/Editor/FrameDebuggerHistory.cpp
+    src/Editor/FrameDebuggerCaptureHandshake.h
+    src/Editor/FrameDebuggerCapturedFrame.h
+    src/Editor/FrameDebuggerCapturedFrame.cpp
     src/Editor/FrameDebuggerPreviewProcessing.h
     src/Editor/FrameDebuggerPreviewProcessing.cpp
     # editor-core-separation-7 campaign, PHASE3

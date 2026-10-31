@@ -599,18 +599,11 @@ std::string BuildListTabsResponseJson()
     return body.dump();
 }
 
-// --- task_manager/frame-debugger-3 campaign, PHASE7
-// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - see
-// NetworkRoutes.h's own doc comments above each declaration for the exact,
-// locked validation/response rules implemented below.
+// --- /frame_debugger/* query parsing and JSON (rules are documented in NetworkRoutes.h).
 
 namespace {
 
-// Strict whole-integer parse: the ENTIRE string must be consumed (no
-// trailing garbage, e.g. "12abc" is rejected, not silently truncated to
-// 12) and must not be empty - mirrors this file's own existing
-// "caller mistake -> loud validation failure, never a silent best guess"
-// philosophy (see this file's header comment).
+// Strict whole-string integer parse: rejects empty text and trailing garbage like "12abc".
 bool TryParseWholeInt(const std::string& text, int& outValue)
 {
     if (text.empty()) {
@@ -629,8 +622,7 @@ bool TryParseWholeInt(const std::string& text, int& outValue)
     }
 }
 
-// Same strict, whole-string-consumed parse as TryParseWholeInt() above, for
-// a decimal float.
+// Strict whole-string float parse, like TryParseWholeInt().
 bool TryParseWholeFloat(const std::string& text, float& outValue)
 {
     if (text.empty()) {
@@ -725,6 +717,8 @@ nlohmann::json FrameDebuggerStateToJson(const FrameDebuggerStateResponseView& st
     body["levelsBlack"] = state.levelsBlack;
     body["levelsWhite"] = state.levelsWhite;
     body["perDrawEventCount"] = state.perDrawEventCount;
+    body["captureStatus"] = state.captureStatus;
+    body["captureError"] = state.captureError;
     return body;
 }
 

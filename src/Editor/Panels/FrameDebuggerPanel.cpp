@@ -79,18 +79,15 @@ void FrameDebuggerPanel::ReleaseShaderPropertyTexturePreview()
     m_shaderPropertyPreviewExtent = Extent2D{};
 }
 
-// Click handler of the "View" button: releases the shown preview, then does one fresh capture and upload.
 void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& textureName, rg::ResourceKind kind)
 {
     ReleaseShaderPropertyTexturePreview(); // Always start fresh.
 
     if (m_frameRenderer == nullptr || m_frameRenderGraph == nullptr) {
-        return; // Defensive only: Build() sets both before any button can be clicked.
+        return;
     }
 
-    m_shaderPropertyPreviewKind = kind;
-
-    // The texture upload can throw on GPU resource exhaustion; an exception must not escape an ImGui click handler.
+    // Texture upload can throw on GPU exhaustion; the exception must not escape an ImGui click handler.
     auto uploadOrFail = [this, &textureName](const void* pixelsRgba8, int width, int height, const char* debugName) -> bool {
         try {
             m_shaderPropertyPreviewTexture = std::make_unique<Texture2D>(m_frameRenderer->CreateTexture2D(
@@ -138,7 +135,7 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
         } else if (Encoding::IsBgraFormat(raw.format)) {
             Encoding::ConvertBgraToRgbaInPlace(raw.pixels.data(), raw.width, raw.height);
         }
-        // else: already tightly packed RGBA8.
+        // Raw RGBA8 needs no conversion.
 
         if (!ok) {
             m_shaderPropertyPreviewName = textureName;
@@ -188,13 +185,12 @@ void FrameDebuggerPanel::RequestShaderPropertyTexturePreview(const std::string& 
 
 void FrameDebuggerPanel::EnsurePreviewDescriptor()
 {
-    const FrameDebuggerHistoryEntry* entry = m_currentCapture.CurrentEntry();
+    const FrameDebuggerCapturedFrame* frame = m_currentCapture.CurrentFrame();
 
     const std::optional<FrameDebuggerEventDetails> selectedDetails =
-        (entry != nullptr) ? FindEventDetailsByIndex(entry->snapshot, m_selectedEventIndex) : std::nullopt;
+        (frame != nullptr) ? FindEventDetailsByIndex(frame->snapshot, m_selectedEventIndex) : std::nullopt;
 
-    // A leaf that touches a private render-graph resource is previewed straight from that texture: no stall, no
-    // CPU readback. On a miss, fall through to the retained-capture path below.
+    // A leaf that writes a private render-graph resource is previewed straight from that texture (no readback).
     std::optional<rg::DebugTextureSnapshot> privatePreview;
     if (selectedDetails.has_value() && selectedDetails->privateWriteTextureName.has_value()
         && m_frameRenderGraph != nullptr) {
@@ -203,7 +199,7 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     if (privatePreview.has_value() && privatePreview->ColorViewId() != 0 && m_frameRenderer != nullptr) {
         const std::uint64_t desiredView = privatePreview->ColorViewId();
         if (m_previewDescriptor != UiTextureHandle::Invalid && desiredView == m_lastKnownPreviewView) {
-            return; // Already wrapping the right view.
+            return;
         }
         ReleasePreviewDescriptor();
         m_previewDescriptor = m_frameRenderer->GetUiTextureHandle(*privatePreview);
@@ -211,8 +207,7 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
         return;
     }
 
-    // The selected event's stepPreviewKind/stepPreviewIndex drive the choice. With nothing selected the final
-    // composited image (PostComposite) is shown.
+    // With nothing selected the final composited image is shown.
     FrameDebuggerStepPreviewKind stepPreviewKind = FrameDebuggerStepPreviewKind::PostComposite;
     int stepPreviewIndex = -1;
     if (selectedDetails.has_value()) {
@@ -220,27 +215,26 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
         stepPreviewIndex = selectedDetails->stepPreviewIndex;
     }
 
-    // Resolved here (not in ChooseFrameDebuggerPreviewSource): does the step's preview index name a retained texture?
-    const bool hasPerObjectStepPreviewAtIndex = entry != nullptr
+    const bool hasPerObjectStepPreviewAtIndex = frame != nullptr
         && stepPreviewKind == FrameDebuggerStepPreviewKind::PerObjectStep && stepPreviewIndex >= 0
-        && static_cast<std::size_t>(stepPreviewIndex) < entry->perObjectStepPreviews.size();
+        && static_cast<std::size_t>(stepPreviewIndex) < frame->perObjectStepPreviews.size();
 
-    const FrameDebuggerPreviewSourceChoice choice = ChooseFrameDebuggerPreviewSource(entry != nullptr, stepPreviewKind,
-        entry != nullptr && entry->preview.has_value(), entry != nullptr && entry->compositedPreview.has_value(),
+    const FrameDebuggerPreviewSourceChoice choice = ChooseFrameDebuggerPreviewSource(frame != nullptr, stepPreviewKind,
+        frame != nullptr && frame->preview.has_value(), frame != nullptr && frame->compositedPreview.has_value(),
         hasPerObjectStepPreviewAtIndex);
-    m_lastPreviewChoice = choice; // Cached for BuildInspectorPane()'s own placeholder-text decision.
+    m_lastPreviewChoice = choice;
 
     const RenderTexture* selectedSource = nullptr;
     switch (choice) {
     case FrameDebuggerPreviewSourceChoice::Preview:
-        selectedSource = (entry != nullptr && entry->preview.has_value()) ? &(*entry->preview) : nullptr;
+        selectedSource = (frame != nullptr && frame->preview.has_value()) ? &(*frame->preview) : nullptr;
         break;
     case FrameDebuggerPreviewSourceChoice::CompositedPreview:
-        selectedSource = (entry != nullptr && entry->compositedPreview.has_value()) ? &(*entry->compositedPreview) : nullptr;
+        selectedSource = (frame != nullptr && frame->compositedPreview.has_value()) ? &(*frame->compositedPreview) : nullptr;
         break;
     case FrameDebuggerPreviewSourceChoice::PerObjectStepPreview:
         selectedSource = hasPerObjectStepPreviewAtIndex
-            ? &entry->perObjectStepPreviews[static_cast<std::size_t>(stepPreviewIndex)]
+            ? &frame->perObjectStepPreviews[static_cast<std::size_t>(stepPreviewIndex)]
             : nullptr;
         break;
     case FrameDebuggerPreviewSourceChoice::NotYetDrawn:
@@ -249,14 +243,12 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     }
 
     if (selectedSource == nullptr || m_frameRenderer == nullptr) {
-        // Nothing to preview: no capture yet, nothing drawn yet, or the retained texture is missing.
         ReleasePreviewDescriptor();
         return;
     }
 
     // Per-object step previews hold linear scene color and always go through the preview shader.
-    // Neutral channel/levels on any other source: show the retained texture directly and skip the dispatch.
-    // The retained copy is never mutated.
+    // Neutral channel/levels on any other source show the retained texture directly.
     const bool sceneReferred = (choice == FrameDebuggerPreviewSourceChoice::PerObjectStepPreview);
     const bool isNeutral = (m_channel == FrameDebuggerPreviewChannel::All) && (m_levelsBlack <= 0.0f)
         && (m_levelsWhite >= 1.0f) && !sceneReferred;
@@ -285,7 +277,7 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     }
 
     if (m_previewDescriptor != UiTextureHandle::Invalid && desiredView == m_lastKnownPreviewView) {
-        return; // Already wrapping the right view.
+        return;
     }
 
     ReleasePreviewDescriptor();
@@ -294,9 +286,15 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     m_lastKnownPreviewView = desiredView;
 }
 
+bool FrameDebuggerPanel::IsCaptureArmed(const EditorContext& ctx) const noexcept
+{
+    return m_enabled && ctx.frameDebuggerWindowOpen;
+}
+
 FrameDebuggerCaptureContext* FrameDebuggerPanel::PrepareCaptureContextForThisFrame(EditorContext& ctx)
 {
-    if (!ctx.frameDebuggerWindowOpen || !m_enabled) {
+    if (!IsCaptureArmed(ctx)) {
+        m_captureContext.Deactivate();
         return nullptr;
     }
     m_captureContext.Reset();
@@ -305,32 +303,29 @@ FrameDebuggerCaptureContext* FrameDebuggerPanel::PrepareCaptureContextForThisFra
 
 void FrameDebuggerPanel::NotifyStepConsumed() noexcept
 {
-    m_stepCaptureRequested = true;
+    if (m_enabled) {
+        m_handshake.Request();
+    }
 }
 
-// Early half of the pending/serviced replay handshake (see FrameDebuggerPanel.h).
 bool FrameDebuggerPanel::ConsumePendingReplayRequest()
 {
-    if (!m_pendingCaptureTrigger) {
-        return false;
+    return m_handshake.ConsumeForReplay();
+}
+
+void FrameDebuggerPanel::NotifyOffscreenFailed()
+{
+    if (m_handshake.NotifyFrameFailed()) {
+        m_captureError = "The Game view failed to render. See the Core log, then click Capture to retry.";
     }
-    m_pendingCaptureTrigger = false; // cleared HERE, exactly once - never cleared anywhere else.
-    m_replayServicedThisFrame = true; // leaves a same-frame "receipt" for Build()'s own later check.
-    return true;
 }
 
 void FrameDebuggerPanel::TriggerCapture()
 {
-    if (m_frameRenderer == nullptr || m_frameRenderGraph == nullptr || m_frameGameView == nullptr) {
-        // Unreachable in practice: Build() sets these before the toolbar row runs.
-        return;
-    }
-
     const rg::RenderGraphSnapshot graphSnapshot =
         m_frameRenderGraph->LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback);
 
-    // Render pass honesty detector, once per capture: a pass that is non-culled yet reported disabled is a
-    // contradiction between the graph and the toggle registry. A no-op without a registry.
+    // Honesty detector: a non-culled pass reported disabled by the toggle registry.
     if (m_frameToggleRegistry != nullptr) {
         const std::vector<std::string> mismatches = DetectRenderPassHonestyMismatches(
             graphSnapshot.passesInExecutionOrder,
@@ -338,8 +333,7 @@ void FrameDebuggerPanel::TriggerCapture()
         RenderPassHonestyGuard::Instance().ReportCaptureMismatches(mismatches);
     }
 
-    // "Disabled side effect still visible" detector over a curated list of known-risk blackboard keys.
-    // A no-op without a toggle registry or blackboard.
+    // Side-channel detector: a disabled pass whose known-risk blackboard key was still published.
     if (m_frameToggleRegistry != nullptr && m_frameBlackboard != nullptr) {
         const std::vector<std::string> leaks = DetectDisabledPassBlackboardKeyLeaks(
             KnownRiskBlackboardKeyRules(),
@@ -356,46 +350,57 @@ void FrameDebuggerPanel::TriggerCapture()
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, m_captureContext, renderTargetInfo);
 
-    // "Ran but not shown" detector, once per capture: a non-culled pass that executed but has no leaf in the
-    // snapshot tree.
+    // Coverage detector: a non-culled pass that executed but has no leaf in the tree.
     const std::vector<std::string> missingFromTree =
         DetectPassesMissingFromFrameDebuggerTree(graphSnapshot.passesInExecutionOrder, snapshot);
     FrameDebuggerCoverageGuard::Instance().ReportCaptureMismatches(missingFromTree);
 
-    // Pass m_captureContext so the per-object step previews move into the history entry before Reset() wipes them.
-    m_currentCapture.CaptureFrame(
-        *m_frameRenderer, *m_frameRenderGraph, snapshot, *m_frameGameView, m_frameGameViewComposited, m_captureContext);
+    try {
+        m_currentCapture.CaptureFrame(
+            *m_frameRenderer, snapshot, *m_frameGameView, m_frameGameViewComposited, m_captureContext);
+    } catch (const std::exception& e) {
+        m_currentCapture.Clear();
+        m_handshake.Fail();
+        m_captureError = std::string("Capture failed: ") + e.what();
+        GTE_LOG_ERROR("FrameDebugger", m_captureError);
+        return;
+    }
+    m_captureError.clear();
     SetSelectedEventIndex(-1);
 }
 
-// The single place that changes m_selectedEventIndex. `newIndex` is already clamped by the caller.
 void FrameDebuggerPanel::SetSelectedEventIndex(int newIndex)
 {
     if (newIndex == m_selectedEventIndex) {
-        return; // No real change - nothing to release/refresh.
+        return;
     }
     m_selectedEventIndex = newIndex;
-    // The user went elsewhere: drop any shader-property preview and fall back to the event's step preview.
+    // A shader-property preview belongs to the old selection.
     ReleaseShaderPropertyTexturePreview();
 }
 
-// Shared by the "Enable" checkbox and SetEnabledFromCommand(). Enabling pauses playback and requests a deferred
-// capture (armed next frame, so that frame's draw records are recorded); disabling clears the capture but does
-// not resume playback. The capture runs two steps later: ConsumePendingReplayRequest(), then Build().
+// Enable pauses a running game. Disable resumes it only if Enable was what paused it.
 void FrameDebuggerPanel::ApplyEnabledEdge(EditorContext& ctx, bool newEnabled)
 {
-    const bool wasEnabled = m_enabled;
-    m_enabled = newEnabled;
-    if (m_enabled && !wasEnabled) {
-        ctx.playbackPaused = true;
-
-        // Capture is deferred to the next Build() so this frame's draw records are armed first.
-        m_pendingCaptureTrigger = true;
-    } else if (!m_enabled && wasEnabled) {
-        // Disabling clears the capture; a shader-property preview of it must not linger.
-        m_currentCapture.Clear();
-        ReleaseShaderPropertyTexturePreview();
+    if (newEnabled == m_enabled) {
+        return;
     }
+    m_enabled = newEnabled;
+    if (m_enabled) {
+        m_pausedByFrameDebugger = !ctx.playbackPaused;
+        ctx.playbackPaused = true;
+        m_handshake.Request();
+        return;
+    }
+    if (m_pausedByFrameDebugger) {
+        ctx.playbackPaused = false;
+    }
+    m_pausedByFrameDebugger = false;
+    m_handshake.Cancel();
+    m_captureError.clear();
+    m_currentCapture.Clear();
+    ReleaseShaderPropertyTexturePreview();
+    SetSelectedEventIndex(-1);
 }
 
 void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
@@ -408,31 +413,11 @@ void FrameDebuggerPanel::BuildToolbarRow(EditorContext& ctx)
 
     ImGui::SameLine();
 
-    // "Capture" re-captures on demand while paused; it only sets the pending flag (the capture is deferred).
     ImGui::BeginDisabled(!m_enabled);
     if (ImGui::Button("Capture")) {
-        m_pendingCaptureTrigger = true;
+        m_handshake.Request();
     }
     ImGui::EndDisabled();
-
-    ImGui::SameLine();
-
-    // Cosmetic stub: there is no Play/Edit split, so this combo is permanently disabled.
-    static constexpr const char* kModeItems[] = { "Editor" };
-    int modeIndex = 0;
-    ImGui::SetNextItemWidth(120.0f);
-    ImGui::BeginDisabled();
-    ImGui::Combo("##FrameDebuggerMode", &modeIndex, kModeItems, 1);
-    ImGui::EndDisabled();
-
-    // A requested step capture is serviced here, after Game::Render(), using the freshest m_enabled. It only sets
-    // the pending flag; the capture itself is deferred like the other two trigger sites.
-    if (m_stepCaptureRequested) {
-        m_stepCaptureRequested = false;
-        if (m_enabled) {
-            m_pendingCaptureTrigger = true;
-        }
-    }
 }
 
 void FrameDebuggerPanel::BuildFrameStepperRow(const FrameDebuggerSnapshot& snapshot)
@@ -465,10 +450,8 @@ void FrameDebuggerPanel::BuildFrameStepperRow(const FrameDebuggerSnapshot& snaps
 
 void FrameDebuggerPanel::RenderEventNode(const FrameDebuggerEventNode& node)
 {
-    // A node with children renders as an expandable row (and selectable when it is a draw call), whatever isDrawCall says.
+    // A node with children is an expandable row. IsItemClicked() makes a click anywhere on the row select it.
     if (!node.children.empty()) {
-        // A pure group or a selectable leaf with children. IsItemClicked() makes a click on the row (not just
-        // its arrow) select it.
         ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen;
         if (node.isDrawCall && node.eventIndex == m_selectedEventIndex) {
             flags |= ImGuiTreeNodeFlags_Selected;
@@ -487,11 +470,10 @@ void FrameDebuggerPanel::RenderEventNode(const FrameDebuggerEventNode& node)
     }
 
     if (!node.isDrawCall) {
-        // Unreachable in practice: groups are only added when they have a child.
-        return;
+        return; // Groups are only added when they have a child.
     }
 
-    // A leaf draw-call row without children: highlighted when selected, click selects it.
+    // Leaf draw call: highlighted when selected, a click selects it.
     const bool isSelected = (node.eventIndex == m_selectedEventIndex);
     if (ImGui::Selectable(node.name.c_str(), isSelected)) {
         SetSelectedEventIndex(node.eventIndex);
@@ -500,36 +482,20 @@ void FrameDebuggerPanel::RenderEventNode(const FrameDebuggerEventNode& node)
 
 void FrameDebuggerPanel::BuildEventTreePane(const FrameDebuggerSnapshot& snapshot)
 {
-    if (snapshot.rootNodes.empty()) {
-        // Nothing captured yet, or the deferred capture has not landed: show an honest empty state, never a fake tree.
-        ImGui::TextDisabled("No frame captured yet.");
-        return;
-    }
-
     for (const FrameDebuggerEventNode& root : snapshot.rootNodes) {
         RenderEventNode(root);
     }
 }
 
 void FrameDebuggerPanel::BuildInspectorPane(
-    const FrameDebuggerSnapshot& snapshot, const FrameDebuggerHistoryEntry* currentEntry)
+    const FrameDebuggerSnapshot& snapshot, const FrameDebuggerCapturedFrame* currentFrame)
 {
-    // --- RenderTarget selector row (frame-level, not event-level) ---
     ImGui::TextUnformatted("RenderTarget");
     ImGui::SameLine(150.0f);
     ImGui::TextUnformatted(snapshot.renderTarget.name.c_str());
 
-    static constexpr const char* kRenderTargetItems[] = { "RT 0" };
-    int rtIndex = 0;
-    ImGui::SetNextItemWidth(80.0f);
-    ImGui::BeginDisabled();
-    ImGui::Combo("##FrameDebuggerRenderTarget", &rtIndex, kRenderTargetItems, 1);
-    ImGui::EndDisabled();
-
-    ImGui::SameLine();
     ImGui::TextUnformatted("Channels");
-    ImGui::SameLine();
-    // Each button sets m_channel; the active one uses the theme's ButtonActive color.
+    // The active channel button uses the theme's ButtonActive color.
     static constexpr std::pair<const char*, FrameDebuggerPreviewChannel> kChannelButtons[] = {
         { "All", FrameDebuggerPreviewChannel::All },
         { "R", FrameDebuggerPreviewChannel::R },
@@ -551,17 +517,15 @@ void FrameDebuggerPanel::BuildInspectorPane(
         }
     }
 
-    // --- Levels slider (frame-level) ---
     ImGui::TextUnformatted("Levels");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1.0f);
-    // Two-handle range writing m_levelsBlack/m_levelsWhite. AlwaysClamp keeps both in [0, 1]; the clamp below
-    // keeps white above black.
+    // AlwaysClamp keeps both handles in [0, 1]; the line below keeps white above black.
     ImGui::DragFloatRange2("##FrameDebuggerLevels", &m_levelsBlack, &m_levelsWhite, 0.005f, 0.0f, 1.0f, "Black %.2f",
         "White %.2f", ImGuiSliderFlags_AlwaysClamp);
     m_levelsWhite = std::max(m_levelsWhite, m_levelsBlack + 0.001f);
 
-    // --- Texture preview box ---
+    // Preview box.
     const std::string resolutionCaption = std::to_string(snapshot.renderTarget.width) + "x"
         + std::to_string(snapshot.renderTarget.height) + "  " + snapshot.renderTarget.format;
     ImGui::TextDisabled("%s", resolutionCaption.c_str());
@@ -569,12 +533,11 @@ void FrameDebuggerPanel::BuildInspectorPane(
     const std::optional<FrameDebuggerEventDetails> details
         = FindEventDetailsByIndex(snapshot, m_selectedEventIndex);
 
-    // The retained preview belongs to the captured frame, not to one event, so it shows whenever the capture has
-    // one. m_previewDescriptor is already null for every step without an image (set by EnsurePreviewDescriptor()).
-    const bool showPreviewTexture = (m_previewDescriptor != UiTextureHandle::Invalid) && (currentEntry != nullptr);
+    // The retained preview belongs to the capture, not to one event.
+    const bool showPreviewTexture = (m_previewDescriptor != UiTextureHandle::Invalid) && (currentFrame != nullptr);
 
     const float previewHeight = std::max(120.0f, ImGui::GetContentRegionAvail().y * 0.5f);
-    // Opaque black behind the whole preview box (letterbox look), whether it shows an image or placeholder text.
+    // Opaque black letterbox behind the image or the placeholder text.
     ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(0, 0, 0, 255));
     ImGui::BeginChild("FrameDebuggerTexturePreview", ImVec2(0.0f, previewHeight), true);
     {
@@ -598,7 +561,7 @@ void FrameDebuggerPanel::BuildInspectorPane(
                 }
             } else {
                 const ImVec2 avail = ImGui::GetContentRegionAvail();
-                // Distinct placeholder for a failed lookup or upload, separate from the plain "No Texture" case.
+                // A failed lookup or upload gets its own text, apart from the plain "No Texture".
                 const char* placeholderText = m_shaderPropertyPreviewLookupFailed
                     ? "Texture not currently available for preview."
                     : "No Texture";
@@ -621,7 +584,7 @@ void FrameDebuggerPanel::BuildInspectorPane(
             }
         } else {
             const ImVec2 avail = ImGui::GetContentRegionAvail();
-            // Distinct placeholder for the NotYetDrawn state (a pre-view compute leaf); no image is fabricated.
+            // Pre-view leaf: nothing drawn yet, so no image is fabricated.
             const char* placeholderText = (m_lastPreviewChoice == FrameDebuggerPreviewSourceChoice::NotYetDrawn)
                 ? "Nothing drawn yet at this point in the frame."
                 : "No Texture";
@@ -666,75 +629,61 @@ void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebug
     BuildPropertyRow("Stencil ZFail", d.stencilZFail);
 
     ImGui::Spacing();
-
-    if (ImGui::BeginTabBar("FrameDebuggerEventTabs")) {
-        if (ImGui::BeginTabItem("Preview")) {
-            // A per-draw-call preview render does not exist yet.
-            ImGui::TextDisabled("Not available yet.");
-            ImGui::EndTabItem();
+    if (!d.textures.empty()) {
+        ImGui::SeparatorText("Textures");
+        // Button IDs use the row index: two rows can share a valueLabel and ImGui IDs must be unique.
+        for (std::size_t i = 0; i < d.textures.size(); ++i) {
+            const FrameDebuggerTextureProperty& texture = d.textures[i];
+            BuildPropertyRow(texture.name.c_str(), texture.valueLabel);
+            // Only render-graph 2D and volume textures can be previewed.
+            if (texture.isRenderGraphResource && texture.kind != rg::ResourceKind::Buffer
+                && texture.kind != rg::ResourceKind::TextureArray) {
+                ImGui::SameLine();
+                const bool isCurrentlyViewing = (m_shaderPropertyPreviewName == texture.valueLabel);
+                if (isCurrentlyViewing) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+                }
+                const std::string buttonId = "View##Texture" + std::to_string(i);
+                if (ImGui::SmallButton(buttonId.c_str())) {
+                    RequestShaderPropertyTexturePreview(texture.valueLabel, texture.kind);
+                }
+                if (isCurrentlyViewing) {
+                    ImGui::PopStyleColor();
+                }
+            }
         }
-        if (ImGui::BeginTabItem("ShaderProperties")) {
-            if (!d.textures.empty()) {
-                ImGui::SeparatorText("Textures");
-                // Button IDs use the row index: two rows can share a valueLabel (a pass reading and writing one
-                // name) and ImGui IDs must be unique.
-                for (std::size_t i = 0; i < d.textures.size(); ++i) {
-                    const FrameDebuggerTextureProperty& texture = d.textures[i];
-                    BuildPropertyRow(texture.name.c_str(), texture.valueLabel);
-                    // Only a render-graph 2D or volume texture gets a "View" button: a buffer, material
-                    // texture or texture array has no preview, and a button that does nothing would be dishonest.
-                    if (texture.isRenderGraphResource && texture.kind != rg::ResourceKind::Buffer
-                        && texture.kind != rg::ResourceKind::TextureArray) {
-                        ImGui::SameLine();
-                        const bool isCurrentlyViewing = (m_shaderPropertyPreviewName == texture.valueLabel);
-                        if (isCurrentlyViewing) {
-                            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-                        }
-                        const std::string buttonId = "View##Texture" + std::to_string(i);
-                        if (ImGui::SmallButton(buttonId.c_str())) {
-                            RequestShaderPropertyTexturePreview(texture.valueLabel, texture.kind);
-                        }
-                        if (isCurrentlyViewing) {
-                            ImGui::PopStyleColor();
-                        }
-                    }
-                }
-            }
-            if (!d.gpuTimingText.empty()) {
-                ImGui::SeparatorText("GPU");
-                BuildPropertyRow("GPU Time", d.gpuTimingText);
-                if (d.indirectDraws != 0) {
-                    BuildPropertyRow("Indirect Draws", std::to_string(d.indirectDraws));
-                }
-            }
-            if (!d.vectors.empty()) {
-                ImGui::SeparatorText("Vectors");
-                for (const FrameDebuggerVectorProperty& vector : d.vectors) {
-                    BuildPropertyRow(vector.name.c_str(), FormatVectorProperty(vector));
-                }
-            }
-            if (!d.matrices.empty()) {
-                ImGui::SeparatorText("Matrices");
-                for (const FrameDebuggerMatrixProperty& matrix : d.matrices) {
-                    ImGui::TextUnformatted(matrix.name.c_str());
-                    const std::string formatted = FormatMatrixProperty(matrix);
-                    // One ImGui::Text() per row (see FormatMatrixProperty()).
-                    std::size_t start = 0;
-                    while (start <= formatted.size()) {
-                        const std::size_t newlinePos = formatted.find('\n', start);
-                        const std::string rowText = formatted.substr(
-                            start, newlinePos == std::string::npos ? std::string::npos : newlinePos - start);
-                        ImGui::Text("    %s", rowText.c_str());
-                        if (newlinePos == std::string::npos) {
-                            break;
-                        }
-                        start = newlinePos + 1;
-                    }
-                }
-            }
-            ImGui::EndTabItem();
+    }
+    if (!d.gpuTimingText.empty()) {
+        ImGui::SeparatorText("GPU");
+        BuildPropertyRow("GPU Time", d.gpuTimingText);
+        if (d.indirectDraws != 0) {
+            BuildPropertyRow("Indirect Draws", std::to_string(d.indirectDraws));
         }
-        ImGui::EndTabBar();
+    }
+    if (!d.vectors.empty()) {
+        ImGui::SeparatorText("Vectors");
+        for (const FrameDebuggerVectorProperty& vector : d.vectors) {
+            BuildPropertyRow(vector.name.c_str(), FormatVectorProperty(vector));
+        }
+    }
+    if (!d.matrices.empty()) {
+        ImGui::SeparatorText("Matrices");
+        for (const FrameDebuggerMatrixProperty& matrix : d.matrices) {
+            ImGui::TextUnformatted(matrix.name.c_str());
+            const std::string formatted = FormatMatrixProperty(matrix);
+            // One ImGui::Text() per matrix row.
+            std::size_t start = 0;
+            while (start <= formatted.size()) {
+                const std::size_t newlinePos = formatted.find('\n', start);
+                const std::string rowText = formatted.substr(
+                    start, newlinePos == std::string::npos ? std::string::npos : newlinePos - start);
+                ImGui::Text("    %s", rowText.c_str());
+                if (newlinePos == std::string::npos) {
+                    break;
+                }
+                start = newlinePos + 1;
+            }
+        }
     }
 }
 
@@ -742,52 +691,42 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     RenderTexture& gameView, RenderTexture* compositedGameView, rg::RenderPassToggleRegistry* toggleRegistry,
     const rg::RenderPassBlackboard* offscreenBlackboard)
 {
-    // Late half of the replay handshake: Build() runs after the offscreen graph has executed, so this frame's
-    // draw records and replay passes exist and the capture can run now.
-    if (m_replayServicedThisFrame) {
-        m_replayServicedThisFrame = false;
-        TriggerCapture();
-    }
-
-    // Resuming playback while enabled clears the capture (m_enabled stays set). The Resume button lives elsewhere,
-    // so detect the paused->running edge here and refresh m_wasPlaybackPaused on every call.
-    if (m_enabled && m_wasPlaybackPaused && !ctx.playbackPaused) {
-        m_currentCapture.Clear();
-        // A displayed shader-property preview is cleared with the capture.
-        ReleaseShaderPropertyTexturePreview();
-    }
-    m_wasPlaybackPaused = ctx.playbackPaused;
-
-    // A toggle change in the Render Graph panel (earlier this frame) arms a re-capture while enabled, so a disabled
-    // pass does not stay visible. Only arms the deferred trigger; the set_pass_enabled HTTP route captures directly.
-    if (ctx.renderPassToggleRegistryChangedThisFrame) {
-        ctx.renderPassToggleRegistryChangedThisFrame = false;
-        if (m_enabled) {
-            m_pendingCaptureTrigger = true;
-            GTE_LOG_DEBUG("FrameDebugger",
-                "Build() - RenderPassToggleRegistry changed this frame while Enabled - arming an automatic "
-                "re-capture for the next frame.");
-        }
-    }
-
-    // Cached for TriggerCapture() and the toolbar row; set even when the window is closed, in this one place.
+    // The collaborators are cached first: TriggerCapture() below reads them.
     m_frameRenderer = &renderer;
     m_frameRenderGraph = &renderGraph;
     m_frameGameView = &gameView;
-    m_frameGameViewComposited = compositedGameView; // Nullable.
-    m_frameToggleRegistry = toggleRegistry; // Nullable.
-    m_frameBlackboard = offscreenBlackboard; // Nullable.
-
-    // Cheap and idempotent: must run every call, before the early return below.
+    m_frameGameViewComposited = compositedGameView;
+    m_frameToggleRegistry = toggleRegistry;
+    m_frameBlackboard = offscreenBlackboard;
     m_captureContext.InitializeEventCapture(renderer);
+
+    // Two things end an enabled session: the window was closed, or the user resumed the game.
+    if (m_enabled && !ctx.frameDebuggerWindowOpen) {
+        ApplyEnabledEdge(ctx, false);
+    }
+    if (m_enabled && !ctx.playbackPaused) {
+        m_pausedByFrameDebugger = false;
+        ApplyEnabledEdge(ctx, false);
+    }
+
+    // Second half of the handshake: this frame's replay passes and draw records exist now.
+    if (m_handshake.ConsumeForCapture()) {
+        TriggerCapture();
+    }
+
+    // A pass toggle changed earlier this frame: capture again so a disabled pass does not linger.
+    if (ctx.renderPassToggleRegistryChangedThisFrame) {
+        ctx.renderPassToggleRegistryChangedThisFrame = false;
+        if (m_enabled) {
+            m_handshake.Request();
+        }
+    }
 
     if (!ctx.frameDebuggerWindowOpen) {
         return;
     }
 
-    // p_open keeps the title-bar close button in sync with the "Window > Frame Debugger" menu bool.
-    // A programmatic open pins the window once onto the main ImGui viewport, so swapchain captures can see it;
-    // later it can be dragged away freely.
+    // A programmatic open pins the window once onto the main viewport so swapchain captures can see it.
     if (m_pinToMainViewportNextOpen) {
         const ImGuiViewport* mainViewport = ImGui::GetMainViewport();
         const ImVec2 pinnedSize(
@@ -808,59 +747,71 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     BuildToolbarRow(ctx);
     ImGui::Separator();
 
-    // Show the current capture, or an empty tree when nothing has been captured yet.
-    const FrameDebuggerHistoryEntry* currentEntry = m_currentCapture.CurrentEntry();
-    const FrameDebuggerSnapshot snapshot =
-        (currentEntry != nullptr) ? currentEntry->snapshot : BuildPlaceholderFrameDebuggerSnapshot();
+    const FrameDebuggerCapturedFrame* currentFrame = m_currentCapture.CurrentFrame();
 
-    // A changed capture invalidates event indices, so the selection is cleared. Detected through the raw retained
-    // preview view (new on every capture); the processed scratch view would reset the selection every frame.
+    // A new capture invalidates event indices, so the selection is cleared. The raw retained preview view
+    // is new on every capture; the processed scratch view would reset the selection every frame.
     {
         const std::uint64_t newRawPreviewView =
-            (currentEntry != nullptr && currentEntry->preview.has_value()) ? currentEntry->preview->ViewId() : 0;
+            (currentFrame != nullptr && currentFrame->preview.has_value()) ? currentFrame->preview->ViewId() : 0;
         if (newRawPreviewView != m_lastKnownRawPreviewView) {
             m_selectedEventIndex = -1;
         }
         m_lastKnownRawPreviewView = newRawPreviewView;
     }
 
-    // Keeps m_previewDescriptor in sync with the current capture (a no-op unless the image view changed).
+    // Keeps m_previewDescriptor in sync with the current capture (also releases it when there is no capture).
     EnsurePreviewDescriptor();
+
+    if (currentFrame == nullptr) {
+        BuildEmptyState();
+        ImGui::End();
+        return;
+    }
+    const FrameDebuggerSnapshot& snapshot = currentFrame->snapshot;
 
     BuildFrameStepperRow(snapshot);
     ImGui::Separator();
 
-    if (!m_enabled) {
-        ImGui::TextDisabled("Enable Frame Debugger above to inspect the current frame's render events.");
-    } else {
-        const float totalAvailWidth = ImGui::GetContentRegionAvail().x;
-        const float paneAreaHeight = ImGui::GetContentRegionAvail().y;
-        const float maxLeftWidth = std::max(120.0f, totalAvailWidth - 200.0f - kSplitterWidth);
-        m_leftPaneWidth = std::clamp(m_leftPaneWidth, 120.0f, maxLeftWidth);
+    const float totalAvailWidth = ImGui::GetContentRegionAvail().x;
+    const float paneAreaHeight = ImGui::GetContentRegionAvail().y;
+    const float maxLeftWidth = std::max(120.0f, totalAvailWidth - 200.0f - kSplitterWidth);
+    m_leftPaneWidth = std::clamp(m_leftPaneWidth, 120.0f, maxLeftWidth);
 
-        ImGui::BeginChild("FrameDebuggerEventTree", ImVec2(m_leftPaneWidth, paneAreaHeight), true);
-        BuildEventTreePane(snapshot);
-        ImGui::EndChild();
+    ImGui::BeginChild("FrameDebuggerEventTree", ImVec2(m_leftPaneWidth, paneAreaHeight), true);
+    BuildEventTreePane(snapshot);
+    ImGui::EndChild();
 
-        ImGui::SameLine();
-        ImGui::Button("##FrameDebuggerSplitter", ImVec2(kSplitterWidth, paneAreaHeight));
-        if (ImGui::IsItemActive()) {
-            m_leftPaneWidth += ImGui::GetIO().MouseDelta.x;
-        }
-        if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
-            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-        }
-        ImGui::SameLine();
-
-        ImGui::BeginChild("FrameDebuggerInspector", ImVec2(0.0f, paneAreaHeight), true);
-        BuildInspectorPane(snapshot, currentEntry);
-        ImGui::EndChild();
+    ImGui::SameLine();
+    ImGui::Button("##FrameDebuggerSplitter", ImVec2(kSplitterWidth, paneAreaHeight));
+    if (ImGui::IsItemActive()) {
+        m_leftPaneWidth += ImGui::GetIO().MouseDelta.x;
     }
+    if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+    }
+    ImGui::SameLine();
+
+    ImGui::BeginChild("FrameDebuggerInspector", ImVec2(0.0f, paneAreaHeight), true);
+    BuildInspectorPane(snapshot, currentFrame);
+    ImGui::EndChild();
 
     ImGui::End();
 }
 
-// HTTP automation entry points (contracts in FrameDebuggerPanel.h).
+void FrameDebuggerPanel::BuildEmptyState()
+{
+    if (!m_enabled) {
+        ImGui::TextDisabled("Frame Debugger is off. Tick Enable to freeze and inspect the current Game view frame.");
+        return;
+    }
+    if (m_handshake.Phase() == FrameDebuggerCapturePhase::Failed) {
+        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", m_captureError.c_str());
+        ImGui::TextDisabled("Click Capture to retry.");
+        return;
+    }
+    ImGui::TextDisabled("Capturing the Game view frame...");
+}
 
 void FrameDebuggerPanel::RequestOpenWindow(EditorContext& ctx)
 {
@@ -872,24 +823,25 @@ void FrameDebuggerPanel::RequestOpenWindow(EditorContext& ctx)
 
 void FrameDebuggerPanel::SetEnabledFromCommand(EditorContext& ctx, bool enabled)
 {
+    if (enabled) {
+        RequestOpenWindow(ctx);
+    }
     ApplyEnabledEdge(ctx, enabled);
 }
 
 bool FrameDebuggerPanel::CaptureNowFromCommand()
 {
     if (!m_enabled) {
-        // Same guard as the "Capture" button: without Enable the capture context holds no armed data.
         return false;
     }
-    // Like the "Capture" button: only arms the deferred trigger, because this frame's graph has already executed.
-    m_pendingCaptureTrigger = true;
+    m_handshake.Request();
     return true;
 }
 
 void FrameDebuggerPanel::SelectEventFromCommand(int index)
 {
-    const FrameDebuggerHistoryEntry* currentEntry = m_currentCapture.CurrentEntry();
-    const int totalEventCount = (currentEntry != nullptr) ? currentEntry->snapshot.totalEventCount : 0;
+    const FrameDebuggerCapturedFrame* currentFrame = m_currentCapture.CurrentFrame();
+    const int totalEventCount = (currentFrame != nullptr) ? currentFrame->snapshot.totalEventCount : 0;
     SetSelectedEventIndex(ClampSelectedEventIndex(index, totalEventCount));
 }
 
@@ -920,9 +872,7 @@ bool FrameDebuggerPanel::SetChannelFromCommand(const std::string& channel)
 
 void FrameDebuggerPanel::SetLevelsFromCommand(float black, float white)
 {
-    // Same clamp discipline as the Levels DragFloatRange2 UI control
-    // itself (ImGuiSliderFlags_AlwaysClamp keeps both handles inside
-    // [0, 1] and never lets them cross) - see BuildInspectorPane().
+    // Same clamp as the Levels control: both handles stay in [0, 1] and white stays above black.
     m_levelsBlack = std::clamp(black, 0.0f, 1.0f);
     m_levelsWhite = std::clamp(white, 0.0f, 1.0f);
     m_levelsWhite = std::max(m_levelsWhite, m_levelsBlack + 0.001f);
@@ -935,8 +885,8 @@ FrameDebuggerStateSnapshotView FrameDebuggerPanel::BuildStateSnapshotView(const 
     view.windowOpen = ctx.frameDebuggerWindowOpen;
     view.hasCapturedFrame = m_currentCapture.HasCapture();
 
-    const FrameDebuggerHistoryEntry* currentEntry = m_currentCapture.CurrentEntry();
-    view.totalEventCount = (currentEntry != nullptr) ? currentEntry->snapshot.totalEventCount : 0;
+    const FrameDebuggerCapturedFrame* currentFrame = m_currentCapture.CurrentFrame();
+    view.totalEventCount = (currentFrame != nullptr) ? currentFrame->snapshot.totalEventCount : 0;
     view.selectedEventIndex = m_selectedEventIndex;
 
     // No `default:` so a new channel enumerator fails to compile here.
@@ -960,7 +910,9 @@ FrameDebuggerStateSnapshotView FrameDebuggerPanel::BuildStateSnapshotView(const 
 
     view.levelsBlack = m_levelsBlack;
     view.levelsWhite = m_levelsWhite;
-    view.perDrawEventCount = m_captureContext.LastFrameEventCount();
+    view.captureStatus = FrameDebuggerCaptureStatusName(m_enabled, m_handshake.Phase(), view.hasCapturedFrame);
+    view.captureError = (m_handshake.Phase() == FrameDebuggerCapturePhase::Failed) ? m_captureError : std::string();
+    view.perDrawEventCount = view.hasCapturedFrame ? m_captureContext.LastFrameEventCount() : 0;
     return view;
 }
 

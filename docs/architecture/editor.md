@@ -135,7 +135,7 @@ Frame order in `EditorHost::Run()`:
 ## Gotchas
 - `WantsCaptureMouse` and `WantsCaptureKeyboard` stop clicks in ImGui from reaching gameplay. They come from `ImGuiIO`.
 - `/get_window?title=...` captures floating (undocked) windows only. For docked panels use `/get_swapchain`.
-- The Frame Debugger pauses playback when you enable it. Disabling it does not resume.
+- The Frame Debugger pauses the game when you enable it. Disabling it resumes, unless you had paused first.
 - The Game view is `Primary` and the Scene view is `Secondary` in renderer code. The Render Graph window is open on start.
 - The extra-panel interface says a panel draws only through `ctx`. Project panels call real `ImGui::*` and ignore `ctx`, because they share the exe's ImGui.
 - Hot reload has no menu item. It is HTTP only.

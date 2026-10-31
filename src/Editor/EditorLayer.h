@@ -82,7 +82,7 @@ struct ProjectAssetImportResult {
 struct FrameDebuggerStateSnapshotView {
     bool enabled = false;
     bool windowOpen = false;
-    // True when a captured frame exists (only one is ever kept).
+    // True when a captured frame exists (only one is kept).
     bool hasCapturedFrame = false;
     int totalEventCount = 0;
     int selectedEventIndex = -1;
@@ -90,8 +90,14 @@ struct FrameDebuggerStateSnapshotView {
     float levelsBlack = 0.0f;
     float levelsWhite = 1.0f;
 
-    // High-water mark of per-draw event indices for the captured frame (0 before any capture).
+    // High-water mark of per-draw event indices for the captured frame (0 without a capture).
     int perDrawEventCount = 0;
+
+    // "disabled", "pending", "captured" or "failed".
+    std::string captureStatus = "disabled";
+
+    // Reason text. Empty unless captureStatus is "failed".
+    std::string captureError;
 };
 
 // One per-draw event's captured image. `pixels` is PNG-encoded, like GET /get_texture.
@@ -184,8 +190,8 @@ public:
     // Starts a new UI frame. Call once per frame, before Game's Update()/Render().
     virtual void NewFrame() = 0;
 
-    // Render target of the primary view this frame, or nullptr to render straight to the swapchain
-    // (no Editor) or skip the view (panel not visible). Resizes the texture to the panel size first.
+    // Render target of the primary view this frame, or nullptr to render straight to the swapchain (no Editor)
+    // or to skip the view (panel not visible and the Frame Debugger is not capturing). Resizes the texture first.
     virtual RenderTexture* PrimaryViewTarget() = 0;
 
     // Same for the secondary view, with its own RenderTexture.
@@ -264,23 +270,25 @@ public:
     virtual ProjectAssetImportResult ImportExternalAssetIntoProject(
         const std::string& sourceAbsolutePath, const std::string& destinationRelativeFolder) = 0;
 
-    // Returns a freshly reset capture recorder if the Frame Debugger window is open and enabled, else nullptr.
-    // Call once per frame before the primary view renders. Reflects the previous frame's UI state.
+    // Returns a freshly reset capture recorder while a capture can be served (Enable on, window open), else nullptr.
+    // Call once per frame before the primary view renders.
     virtual IFrameDebuggerCaptureRecorder* PrepareFrameDebuggerCaptureContext() = 0;
 
     // Records that a Step happened this frame; the capture itself runs later this frame inside BuildUI().
     virtual void NotifyFrameDebuggerStepConsumed() = 0;
 
-    // Read-and-clear: true for the one frame after a capture trigger, so that frame can declare replay passes.
-    // Call once per frame before the primary view's passes are declared.
+    // Read-and-clear: true when this frame must declare replay passes. Call once per frame
+    // before the primary view's passes are declared.
     virtual bool ConsumePendingFrameDebuggerReplayRequest() = 0;
+
+    // Core calls this when the offscreen build threw. Fails a capture request that is in flight.
+    virtual void FrameDebuggerNotifyOffscreenFailed() = 0;
 
     // Opens the Frame Debugger window (idempotent) and pins it to the main viewport for that opening,
     // so GET /get_swapchain can see it immediately.
     virtual void FrameDebuggerOpenWindow() = 0;
 
-    // Mirrors the "Enable" checkbox edges, including auto-pause on enable.
-    // The capture itself is deferred to the next Build().
+    // Mirrors the Enable checkbox, and opens the window when enabling.
     virtual void FrameDebuggerSetEnabled(bool enabled) = 0;
 
     // Hands the ImGui implementation the capability behind the "New Project..." window.
@@ -296,7 +304,7 @@ public:
     virtual void SetHotReloadDebugCapability(IHotReloadDebugCapability* capability) = 0;
 
     // Requests a capture. Returns false if the Frame Debugger is not enabled.
-    // Arms a deferred trigger; the capture happens on the next frame.
+    // Served on the next offscreen build, within one or two frames.
     virtual bool FrameDebuggerCaptureNow() = 0;
 
     // Selects the leaf event with this global index (clamped to the captured frame's event count).

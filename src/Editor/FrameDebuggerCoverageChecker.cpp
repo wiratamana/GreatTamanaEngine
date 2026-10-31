@@ -31,22 +31,13 @@ std::vector<std::string> DetectPassesMissingFromFrameDebuggerTree(
     std::vector<std::string> missing;
     for (const rg::RenderGraphPassSnapshot& pass : passes) {
         if (pass.isCulled) {
-            // A real, legitimate, unrelated reason a pass did not run this
-            // frame - never a "the tree hid a real survivor" contradiction.
-            continue;
+            continue; // Did not run this frame.
         }
         if (pass.category == rg::RenderPassCategory::FrameDebuggerInternal) {
-            // Genuinely, permanently Frame-Debugger-OWNED ephemeral
-            // scaffolding (e.g. FrameDebuggerReplayStepN) - never a real
-            // tree citizen, by design (RenderGraphTypes.h's own doc
-            // comment) - not a contradiction.
-            continue;
+            continue; // Debugger-owned scaffolding is never shown.
         }
         if (pass.viewScope == rg::ViewScope::Secondary) {
-            // The Frame Debugger tree is Game-View-only, by design
-            // (BuildRealFrameDebuggerSnapshot()'s own documented exclusion
-            // throughout) - not a contradiction.
-            continue;
+            continue; // The tree covers the primary view only.
         }
         if (presentNames.find(pass.name) == presentNames.end()) {
             missing.push_back(pass.name);

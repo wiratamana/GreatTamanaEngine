@@ -818,6 +818,8 @@ int EditorHost::Run()
             fdResult.state.levelsBlack = stateView.levelsBlack;
             fdResult.state.levelsWhite = stateView.levelsWhite;
             fdResult.state.perDrawEventCount = stateView.perDrawEventCount;
+            fdResult.state.captureStatus = stateView.captureStatus;
+            fdResult.state.captureError = stateView.captureError;
 
             FulfillOrLogDrop(m_frameDebuggerCommandBridge, fdPending->id, fdResult, "FrameDebugger");
         }

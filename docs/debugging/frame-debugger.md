@@ -1,17 +1,18 @@
 # Frame Debugger
 > An editor window and HTTP routes that freeze one Game view frame and show its render events. For anyone who debugs what a frame draws.
-> Verified against code: 2026-10-30. HTTP examples are read from code, not run live.
+> Verified against code: 2026-10-31. HTTP examples are read from code, not run live.
 
 ## TL;DR
-- Open it with `Window > Frame Debugger`. Turn on `Enable`. It pauses playback and captures one frame.
+- Open it with `Window > Frame Debugger`. Turn on `Enable`. It pauses the game and captures one frame. Turn `Enable` off and the game runs again.
+- It works with any tab layout. While `Enable` is on, the Game view renders every frame even if the Game tab is hidden.
 - It shows the Game view only. Scene view passes never appear.
 - It keeps one capture. A new capture replaces the old one. There is no history.
-- Capture is on demand. The tree and images stay frozen until you capture again, disable it, or resume playback.
+- Capture is on demand. The tree and images stay frozen until you capture again or disable it.
 - Every capture also runs three [honesty detectors](../conventions/render-honesty.md).
 
 ## Quick start
 In the editor:
-1. `Window > Frame Debugger`, then tick `Enable`. A capture starts and playback pauses.
+1. `Window > Frame Debugger`, then tick `Enable`. A capture starts, the game pauses, the window fills in one or two frames.
 2. Click an event in the left tree, or drag the frame-step slider. Left and Right keys also work.
 3. Use the channel buttons (All, R, G, B, A) and the levels sliders to look at the preview.
 4. Click `Capture` to capture again after you change something.
@@ -25,16 +26,16 @@ curl.exe "http://127.0.0.1:8080/frame_debugger/state"
 curl.exe "http://127.0.0.1:8080/frame_debugger/select_event?index=3"
 curl.exe "http://127.0.0.1:8080/get_swapchain" -o fd.png
 ```
-- Poll `state` until `hasCapturedFrame` is `true` and `totalEventCount` is above 0.
+- Poll `state` until `captureStatus` is `captured`. `failed` gives a reason in `captureError`.
 - `get_swapchain` shows the window with the selected preview. The `open` route pins the window onto the main ImGui viewport so it is visible.
-- When done, call `enable?value=false`. Playback stays paused. Resume it in the UI.
+- When done, call `enable?value=false`. The game runs again if the debugger paused it.
 
 ## Reading the data
 ### Routes
 | Route | Effect |
 |---|---|
 | `GET /frame_debugger/open` | Opens the window |
-| `GET /frame_debugger/enable?value=true\|false` | Same as the checkbox |
+| `GET /frame_debugger/enable?value=true\|false` | Same as the checkbox. `value=true` also opens the window. |
 | `GET /frame_debugger/capture` | Arms a capture. Refused while not enabled. |
 | `GET /frame_debugger/select_event?index=<n>` | Selects a tree event. `-1` deselects. |
 | `GET /frame_debugger/set_channel?value=all\|r\|g\|b\|a` | Channel isolation |
@@ -43,7 +44,8 @@ curl.exe "http://127.0.0.1:8080/get_swapchain" -o fd.png
 | `GET /frame_debugger/get_event_texture?index=<n>` | PNG of one per-draw event. `format=json` gives base64 JSON. |
 
 - All routes except `state` and `get_event_texture` answer `{"success": ..., "state": {...}}`.
-- `state` fields: `enabled`, `windowOpen`, `hasCapturedFrame`, `totalEventCount`, `selectedEventIndex`, `channel`, `levelsBlack`, `levelsWhite`, `perDrawEventCount`.
+- `state` fields: `enabled`, `windowOpen`, `hasCapturedFrame`, `totalEventCount`, `selectedEventIndex`, `channel`, `levelsBlack`, `levelsWhite`, `perDrawEventCount`, `captureStatus` (`disabled`, `pending`, `captured`, `failed`), `captureError` (text, only when `failed`).
+- Poll `state` until `captureStatus` is `captured`. Stop and read `captureError` if it is `failed`.
 - `get_event_texture` returns 404 until that index was armed and a later frame was captured. Poll it.
 - The `index` of `get_event_texture` is a per-draw index. It is not the tree `eventIndex`.
 - Details and error codes: [HTTP routes (debug)](http-routes-debug.md).
@@ -87,7 +89,7 @@ Each leaf has a preview kind. The snapshot builder sets it once.
 - A feature makes the composited image with `Frame::ExposeAsViewOutput()`. `Core` passes it to the editor layer through `SetPrimaryViewCompositedTexture()`.
 - Channel and Levels are applied by `FrameDebuggerPreviewProcessing`. Levels go first, then channel. `Shaders/FrameDebuggerPreview.comp` does it on the GPU.
 - The retained copy is never changed. These controls are separate from `channel=color|depth` of `GET /get_texture`.
-- In the `ShaderProperties` tab, a row that names a 2D or volume texture has a `View` button. Buffers, material textures and texture arrays have none.
+- In the `ShaderProperties` sections of the event details, a row that names a 2D or volume texture has a `View` button. Buffers, material textures and texture arrays have none.
 
 ## Recipes
 ### Why is this object not drawn or drawn wrong?
@@ -110,12 +112,15 @@ Each leaf has a preview kind. The snapshot builder sets it once.
 6. Toggle the pass off and on. Check the three honesty log categories stay empty.
 
 ## How a capture works
-A capture needs a frame rendered with the capture context armed from its first draw. One request spans two frames:
+A capture needs a frame rendered with the capture context armed from its first draw. `FrameDebuggerCaptureHandshake` tracks one request:
 
-1. A trigger sets `m_pendingCaptureTrigger`. Triggers are: the Enable edge, a Step, the `Capture` button, `/frame_debugger/capture`, and a toggle change.
-2. Next frame, `Core` calls `IEditorLayer::PrepareFrameDebuggerCaptureContext()`. The panel returns its context only while open and enabled. `RenderSystem::Draw()` records into it.
-3. While the offscreen graph is declared, `ConsumePendingFrameDebuggerReplayRequest()` returns true. `AddReplayPasses()` declares the replay passes.
-4. After execution, `FrameDebuggerPanel::Build()` runs `TriggerCapture()`: the detectors, `BuildRealFrameDebuggerSnapshot()`, then `CaptureFrame()`.
+1. `Request()`: a trigger fires. Triggers are: the Enable edge, a Step, the `Capture` button, `/frame_debugger/capture`, and a pass toggle.
+2. The next offscreen build calls `IEditorLayer::PrepareFrameDebuggerCaptureContext()`. The panel returns its context while enabled and open. `RenderSystem::Draw()` records into it. The Game view renders for this even when its tab is hidden.
+3. `ConsumeForReplay()`: while the offscreen graph is declared, `ConsumePendingFrameDebuggerReplayRequest()` returns true and `AddReplayPasses()` declares the replay passes.
+4. `ConsumeForCapture()`: in the same frame, after execution, `FrameDebuggerPanel::Build()` runs `TriggerCapture()`: the detectors, `BuildRealFrameDebuggerSnapshot()`, then `CaptureFrame()`.
+
+- HTTP and Step requests are served in the same frame. The `Capture` button and the pass toggle are served one frame later.
+- A request ends as `captured` or `failed`. If the offscreen build throws, or `CaptureFrame()` throws, the phase is `Failed` and `captureError` has the reason.
 
 ### Replay passes
 - One graphics pass per drawn object. Pass `i` redraws objects `[0..i]` into its own texture.
@@ -131,10 +136,13 @@ A capture needs a frame rendered with the capture context armed from its first d
 - `perDrawEventCount` in `state` is the high-water mark of these per-draw indices.
 
 ## Gotchas
-- `Enable` pauses playback. `Disable` clears the capture but does not resume. Resuming while enabled clears the capture and keeps `Enable` on.
-- Capture takes two frames. Do not read the tree right after `capture`. Poll `state`.
+- `Enable` pauses the game. `Disable` resumes it, unless you had paused it yourself first.
+- Clicking `Resume` while `Enable` is on turns `Enable` off.
+- Closing the window turns `Enable` off.
+- The Game view renders at the size the Game panel last had. If the Game tab was never shown, that is the window size at startup.
+- If the Game view fails to render while a capture is pending, `captureStatus` is `failed`. Click `Capture` to retry.
+- A capture takes one or two frames. Do not read the tree right after `capture`. Poll `state`.
 - On a capture frame, the Game view keeps its full CPU draw list. GPU-driven cluster claims and scene culling are off for that view.
-- The `Editor` mode combo is a disabled stub. The `Preview` tab is a placeholder.
 - `/get_swapchain` captures the whole window. Call `open` first so the window sits on the main viewport.
 - Panel descriptors are released before the UI backend shuts down (`ReleasePreviewDescriptor()`).
 
@@ -146,7 +154,8 @@ A capture needs a frame rendered with the capture context armed from its first d
 | `src/Editor/FrameDebuggerCapture.*` | Capture context, per-draw capture, pipeline state text |
 | `src/Editor/FrameDebuggerDrawRecording.cpp` | Records one scene draw |
 | `src/Editor/FrameDebuggerReplayPasses.cpp` | Replay passes |
-| `src/Editor/FrameDebuggerHistory.*` | The one retained capture |
+| `src/Editor/FrameDebuggerCapturedFrame.*` | The one retained capture |
+| `src/Editor/FrameDebuggerCaptureHandshake.h` | The capture life cycle and the status word |
 | `src/Editor/FrameDebuggerPreviewProcessing.*` | Channel and levels |
 | `src/Editor/FrameDebuggerPassMetadataRecorder.h` | Records pass category, draw kind, owner, barrier labels |
 | `src/Editor/*Checker.*`, `*Guard.*` | The three honesty detectors |

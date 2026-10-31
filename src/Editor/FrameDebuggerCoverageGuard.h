@@ -5,10 +5,8 @@
 
 #include <string>
 
-// Logger-aware singleton wrapper around the pure
-// DetectPassesMissingFromFrameDebuggerTree() (FrameDebuggerCoverageChecker.h).
-// Logs "FrameDebuggerCoverage" exactly once per pass name newly found
-// executed but missing from the Frame Debugger's own event tree.
+// Logs "FrameDebuggerCoverage" once per pass that ran but is missing from the Frame Debugger event tree.
+// Wraps DetectPassesMissingFromFrameDebuggerTree() (FrameDebuggerCoverageChecker.h).
 namespace gte {
 
 struct FrameDebuggerCoverageGuardTag {

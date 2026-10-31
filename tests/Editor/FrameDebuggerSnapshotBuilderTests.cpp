@@ -1,19 +1,5 @@
-// Unit tests for the Frame Debugger's real snapshot builder
-// (src/Editor/FrameDebuggerData.h's BuildRealFrameDebuggerSnapshot()) - pure,
-// ImGui-free, no-live-VkDevice-needed reshape of a hand-fabricated
-// gte::rg::RenderGraphSnapshot + FrameDebuggerCaptureContext, mirroring
-// tests/Renderer/RenderGraph/RenderGraphSnapshotTests.cpp's own "hand-built
-// snapshot in, real result out" precedent. Only built when GTE_ENABLE_EDITOR
-// is ON, since FrameDebuggerData.h/.cpp are only compiled into gte_core then.
-//
-// Compute-dispatch discovery is purely generic, driven by each
-// RenderGraphPassSnapshot's own `kind` flag, and grouped into "Compute
-// Dispatches (Pre-GameView)"/"Compute Dispatches (Post-GameView)". Every
-// real pass leaf below (except "RenderOpaque" itself, which keeps its own
-// per-entity mechanism) is wrapped as a "v PassName" parent owning exactly
-// one real, independently-selectable child event row
-// (WrapPassWithOwnedChildEvent()) - each wrapped pass consumes TWO
-// consecutive `nextEventIndex` values instead of one.
+// Tier-1 tests for BuildRealFrameDebuggerSnapshot(): hand-built render-graph snapshots in, event tree out.
+// Every wrapped pass owns one child row and consumes two consecutive event indices.
 
 #include "Editor/FrameDebuggerData.h"
 
@@ -37,17 +23,7 @@ rg::RenderGraphPassSnapshot MakePass(const std::string& name)
     return pass;
 }
 
-// A plain graphics pass with kind == rg::PassKind::Compute and
-// renderPassEvent defaulted to PreOpaques, mirroring how every real pre-view
-// compute pass in this engine is actually tagged in production. Required so
-// BuildRealFrameDebuggerSnapshot()'s FindViewRegionPivot() lookup (which
-// finds the first pass whose renderPassEvent >= Opaques) keeps treating
-// every fixture's "RenderOpaque" pass (built via the plain, unmodified
-// MakePass() - default renderPassEvent is Opaques) as the pivot - without
-// this, a synthetic pre-view compute pass built via this helper would share
-// "RenderOpaque"'s own default Opaques value and incorrectly become the
-// pivot itself purely by sitting earlier in the fixture's own
-// passesInExecutionOrder vector.
+// Compute pass tagged PreOpaques, so a fixture's default-tagged "RenderOpaque" stays the view-region pivot.
 rg::RenderGraphPassSnapshot MakeComputePass(const std::string& name)
 {
     rg::RenderGraphPassSnapshot pass = MakePass(name);
@@ -56,15 +32,7 @@ rg::RenderGraphPassSnapshot MakeComputePass(const std::string& name)
     return pass;
 }
 
-// Render Pass campaign (task_manager/render-pass-1), PHASE4 - a graphics
-// pass with a given RenderPassCategory, mirroring how
-// AddFrameDebuggerReplayPasses() (FrameDebuggerReplayPasses.cpp) now tags
-// its own N replay passes. editor-core-separation-22 campaign, PHASE4 -
-// that real production code now tags rg::RenderPassCategory::FrameDebuggerInternal
-// (RENAMED from the old, misused rg::RenderPassCategory::Debug value - see
-// RenderGraphTypes.h's own updated doc comments); this helper itself is
-// unchanged - callers now pass whichever category they actually mean to
-// test.
+// Graphics pass with the given category (the replay passes use FrameDebuggerInternal).
 rg::RenderGraphPassSnapshot MakeGraphicsPassWithCategory(const std::string& name, rg::RenderPassCategory category)
 {
     rg::RenderGraphPassSnapshot pass = MakePass(name);
@@ -72,13 +40,7 @@ rg::RenderGraphPassSnapshot MakeGraphicsPassWithCategory(const std::string& name
     return pass;
 }
 
-// editor-core-separation-26 campaign, PHASE4 - a plain graphics-tier pass
-// with kind == rg::PassKind::Blit/drawKind == rg::RenderPassDrawKind::Blit,
-// exactly as a real RenderGraphBuilder::AddBlitPass() call (PHASE5, not yet
-// producible anywhere in the engine as of this phase) will stamp. Uses
-// MakePass()'s own default renderPassEvent (Opaques) - a real blit pass
-// declared with no explicit RenderPassEvent tag defaults the same way every
-// other builder-declared pass does.
+// Blit pass. It keeps the default Opaques event, like any pass declared without a tag.
 rg::RenderGraphPassSnapshot MakeBlitPass(const std::string& name)
 {
     rg::RenderGraphPassSnapshot pass = MakePass(name);
@@ -90,16 +52,7 @@ rg::RenderGraphPassSnapshot MakeBlitPass(const std::string& name)
 TEST(FrameDebuggerSnapshotBuilderTest, NoRenderOpaquePassProducesEmptyResult)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    // render-pass-3 campaign, PHASE4 - both passes here must be explicitly
-    // tagged BELOW RenderPassEvent::Opaques (MakePass()'s own default IS
-    // Opaques - see MakePass() above), or the new FindViewRegionPivot()
-    // lookup would incorrectly treat one of them as a genuine pivot, since
-    // it never checks a pass's NAME at all. Neither of these two names
-    // corresponds to any REAL pass in production anymore (the old
-    // monolithic "SceneView"/"GameView" passes were split apart back in the
-    // render-pass-1 campaign) - this fixture only needs "some pass, some
-    // other pass, definitely no Opaques-or-later pass" to prove the "empty
-    // result" contract.
+    // Both passes are tagged below Opaques: the pivot lookup ignores names and would otherwise pick one.
     rg::RenderGraphPassSnapshot sceneView = MakePass("SceneView");
     sceneView.renderPassEvent = rg::RenderPassEvent::BeforeEverything;
     graphSnapshot.passesInExecutionOrder.push_back(sceneView);
@@ -114,44 +67,11 @@ TEST(FrameDebuggerSnapshotBuilderTest, NoRenderOpaquePassProducesEmptyResult)
     EXPECT_EQ(snapshot.totalEventCount, 0);
 }
 
-// REWRITTEN (was GameViewWithNoComputePassesProducesExactlyOneLeaf) - the
-// pivot pass literal ("GameView" -> "RenderOpaque") and the passName
-// assertion changed. Render Pass campaign (task_manager/render-pass-1),
-// PHASE4 - the original fixture also included a trailing "Present" pass
-// AFTER the pivot to prove Game-View-only scope excludes it - this is no
-// longer a safe inclusion under the NEW "view region" walk (Step 3.3), which
-// (correctly, per its own spec) treats ANY surviving, non-SceneView-scoped,
-// non-Debug-category Graphics pass positioned after the pivot as a real view-
-// region leaf - in the REAL engine this scenario never actually arises
-// ("Present" is declared in a completely SEPARATE RenderGraph::Execute() call
-// from "RenderOpaque" - see Application.cpp - so the two are never part of
-// the same RenderGraphSnapshot at all), so artificially combining them in one
-// fixture no longer reflects reality. Dropped from this fixture; "SceneView"
-// stays (BEFORE the pivot, still exercising exclusion the same way it always
-// has - the pre-view loop only ever inspects Compute-kind passes).
-//
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: only "SceneView" +
-// "RenderOpaque", zero compute passes, no "DrawSkyBackground" - nothing here
-// is ever wrapped by PHASE2's WrapPassWithOwnedChildEvent().
+// Only the pivot pass produces a leaf; a secondary-view pass before it is excluded.
 TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueWithNoComputePassesProducesExactlyOneLeaf)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    // SceneView is a real pass in the SAME underlying snapshot - Locked
-    // Design Decision #7 (Game-View-only scope) must exclude it even though
-    // it's right here alongside "RenderOpaque".
-    // render-pass-3 campaign, PHASE4 - explicitly tagged BELOW
-    // RenderPassEvent::Opaques (see MakeComputePass()'s own updated doc
-    // comment above for why this is now required - MakePass()'s own default
-    // renderPassEvent IS Opaques, same as "RenderOpaque" itself).
-    // editor-core-separation-22 campaign, PHASE4 - ALSO now explicitly
-    // tagged `viewScope = ViewScope::Secondary` (MakePass()'s own default is
-    // Shared, not SceneView) - this pass's own exclusion must be an HONEST,
-    // already-documented reason (ViewScope::Secondary, matching this pass's
-    // own name/intent) rather than an accidental artifact of the pre-view
-    // loop only ever inspecting Compute-kind passes; without this, the new
-    // "Other Render Passes" sweep would (correctly, per Clause B) surface it
-    // as a real leaf, since it would otherwise be a genuine, unclaimed
-    // Graphics-kind survivor.
+    // Tagged below Opaques and secondary scope, so its exclusion is deliberate and it is not swept up.
     rg::RenderGraphPassSnapshot sceneView = MakePass("SceneView");
     sceneView.renderPassEvent = rg::RenderPassEvent::BeforeEverything;
     sceneView.viewScope = rg::ViewScope::Secondary;
@@ -182,8 +102,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueWithNoComputePassesProducesEx
     ASSERT_EQ(leaf.details->textures.size(), 1u);
     EXPECT_EQ(leaf.details->textures[0].valueLabel, "MaterialTexture abc123");
 
-    // vectors: clear color + real aggregate DrawStats from the graph
-    // snapshot's own "RenderOpaque" entry (NOT from capture.DrawCallCount()).
+    // vectors: clear color + the real aggregate DrawStats of the graph's "RenderOpaque" entry.
     ASSERT_EQ(leaf.details->vectors.size(), 2u);
     bool foundDrawStats = false;
     for (const FrameDebuggerVectorProperty& vec : leaf.details->vectors) {
@@ -200,14 +119,8 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueWithNoComputePassesProducesEx
     EXPECT_EQ(leaf.details->zTest, "Less");
 }
 
-// "Compute LUT" vs. "Compute Dispatches (Pre-GameView)" category-split
-// regression test: one LUT-category pass ("SkyLutPass") and one
-// GpuSkinning-category pass ("SkinPass_A") in the SAME fixture, declared in
-// an order that DELIBERATELY puts the non-LUT pass BEFORE the LUT pass in
-// real execution order - proving the tree's PRESENTATION order ("Compute
-// LUT" always first) is a fixed rule, never tied to real interleaved
-// execution order. Each wrapped compute pass also owns a real
-// "Compute Dispatch" child event, consuming one extra nextEventIndex value.
+// Owner groups come first, then the generic group, whatever the execution order.
+// Each compute pass owns a "Compute Dispatch" child that consumes one extra event index.
 TEST(FrameDebuggerSnapshotBuilderTest, MixedComputeLutAndPreGameViewCategoriesProduceBothGroupsInFixedOrder)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -241,10 +154,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, MixedComputeLutAndPreGameViewCategoriesPr
     EXPECT_EQ(lutGroup.name, "Compute LUT");
     ASSERT_EQ(lutGroup.children.size(), 1u);
     EXPECT_EQ(lutGroup.children[0].name, "SkyLutPass");
-    // Real execution order was index 1 (after SkinPass_A's own parent+child
-    // pair) - eventIndex reflects that TRUE execution order even though the
-    // tree lists this group first. SkyLutPass now also owns one real child
-    // event ("Compute Dispatch"), consuming indices 2 (parent) and 3 (child).
+    // SkyLutPass runs after SkinPass_A's parent and child, so it takes indices 2 and 3.
     EXPECT_EQ(lutGroup.children[0].eventIndex, 2);
     ASSERT_EQ(lutGroup.children[0].children.size(), 1u);
     EXPECT_EQ(lutGroup.children[0].children[0].name, "Compute Dispatch");
@@ -266,11 +176,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, MixedComputeLutAndPreGameViewCategoriesPr
     EXPECT_EQ(renderOpaqueLeaf.eventIndex, 4); // Sequential across the WHOLE tree.
 }
 
-// Proves a pre-view compute pass tagged ONLY with the LUT category produces
-// ONLY the "Compute LUT" group, never an empty "Compute Dispatches
-// (Pre-GameView)" sibling. Only checks root.children.size()/names - see
-// ComputeLutSubPassAlsoOwnsAComputeDispatchChild (below) for the dedicated
-// test proving the wrapped-child fact for this exact fixture shape.
+// A pass owned by one feature produces only that feature's group, never an empty generic group.
 TEST(FrameDebuggerSnapshotBuilderTest, OnlyAtmosphereLutCategoryPreGameViewPassProducesOnlyComputeLutGroup)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -289,31 +195,11 @@ TEST(FrameDebuggerSnapshotBuilderTest, OnlyAtmosphereLutCategoryPreGameViewPassP
     EXPECT_EQ(root.children[1].name, "RenderOpaque");
 }
 
-// REWRITTEN (was GpuSkinningNameWithNoMatchingRealPassAddsNoGroup) - the OLD
-// scenario ("a caller-supplied name that matches no real pass") can no
-// longer occur at all now that the name-list parameter is gone entirely;
-// this replaces it with the analogous NEW regression: an ordinary pass
-// declared via plain AddPass() (kind defaults to PassKind::Graphics) must never
-// be mistaken for a compute dispatch, no matter what it's named.
-//
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: the extra pass is
-// Graphics-kind and sits BEFORE the pivot, so it is never visited by either
-// loop at all - never wrapped, zero index consumption.
-//
-// UPDATED (editor-core-separation-22 campaign, PHASE4) - a Graphics-kind
-// pass sitting before the pivot is no longer silently dropped (Clause B): it
-// now surfaces under the new "Other Render Passes" sweep group. This test's
-// own actual point still holds and is now proven more directly: even once
-// visible, it is built via the GRAPHICS leaf path, never mistaken for a
-// compute dispatch.
+// A graphics pass before the pivot is never taken for a compute dispatch; it lands in "Other Render Passes".
 TEST(FrameDebuggerSnapshotBuilderTest, NonComputePassIsNeverTreatedAsComputeDispatch)
 {
     rg::RenderGraphSnapshot graphSnapshot;
-    // render-pass-3 campaign, PHASE4 - explicitly tagged BELOW
-    // RenderPassEvent::Opaques (see MakeComputePass()'s own updated doc
-    // comment above) so it stays correctly invisible to the new
-    // FindViewRegionPivot() lookup too, matching its pre-existing
-    // invisibility to the OLD name-based pivot search exactly.
+    // Tagged below Opaques so the pivot lookup ignores it.
     rg::RenderGraphPassSnapshot ordinaryGraphicsPass = MakePass("SomeOrdinaryGraphicsPass");
     ordinaryGraphicsPass.renderPassEvent = rg::RenderPassEvent::BeforeEverything;
     graphSnapshot.passesInExecutionOrder.push_back(ordinaryGraphicsPass);
@@ -324,12 +210,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, NonComputePassIsNeverTreatedAsComputeDisp
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
     const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
-    // "RenderOpaque" leaf + the new "Other Render Passes" sweep group - this
-    // pass used to be silently dropped (Graphics-kind, before the pivot -
-    // neither loop ever inspected it); it is now a real, structural survivor
-    // and MUST appear somewhere (Clause B), but built via the GRAPHICS leaf
-    // path, never mistaken for a compute dispatch - that is what this test
-    // actually proves now.
+    // "RenderOpaque" leaf plus the "Other Render Passes" group, built through the graphics path.
     ASSERT_EQ(root.children.size(), 2u);
     EXPECT_EQ(root.children[0].name, "RenderOpaque");
     const FrameDebuggerEventNode& otherGroup = root.children[1];
@@ -343,8 +224,6 @@ TEST(FrameDebuggerSnapshotBuilderTest, NonComputePassIsNeverTreatedAsComputeDisp
     EXPECT_EQ(snapshot.totalEventCount, 3); // RenderOpaque(0) + swept leaf parent(1) + child(2).
 }
 
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: "RenderOpaque"-only
-// fixture, no compute pass, no other Graphics-kind pass.
 TEST(FrameDebuggerSnapshotBuilderTest, DistinctPipelineAndTextureNamesProduceDistinctEntriesNotDuplicates)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -366,18 +245,12 @@ TEST(FrameDebuggerSnapshotBuilderTest, DistinctPipelineAndTextureNamesProduceDis
     EXPECT_EQ(details.textures[1].valueLabel, "TextureB");
 }
 
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: "RenderOpaque"-only
-// fixture.
 TEST(FrameDebuggerSnapshotBuilderTest, ViewProjectionMatrixRoundTripsWithoutTransposing)
 {
     rg::RenderGraphSnapshot graphSnapshot;
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
 
-    // A hand-picked, deliberately NON-symmetric matrix: column c holds
-    // values {4c+1, 4c+2, 4c+3, 4c+4} - so matrix(row, col) is always
-    // DISTINCT from matrix(col, row) whenever row != col, guaranteeing a
-    // row/column-major mixup produces visibly wrong values, not a
-    // by-coincidence-correct symmetric result.
+    // Non-symmetric matrix (column c holds 4c+1..4c+4), so a row/column mixup gives visibly wrong values.
     const Mat4 matrix(Vec4(1.0f, 2.0f, 3.0f, 4.0f), Vec4(5.0f, 6.0f, 7.0f, 8.0f), Vec4(9.0f, 10.0f, 11.0f, 12.0f),
         Vec4(13.0f, 14.0f, 15.0f, 16.0f));
 
@@ -392,10 +265,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, ViewProjectionMatrixRoundTripsWithoutTran
     EXPECT_EQ(details.matrices[0].name, "ViewProjection");
     const std::array<float, 16>& values = details.matrices[0].values;
 
-    // Row-major expectation: values[row*4 + col] == matrix(row, col).
-    // matrix(row, col) == columns[col][row], so row 0 reads {1, 5, 9, 13}
-    // (the FIRST element of every column), not {1, 2, 3, 4} (column 0's own
-    // elements - what a mistaken raw Data() memcpy would produce instead).
+    // Row-major: values[row*4 + col] == matrix(row, col), so row 0 reads {1, 5, 9, 13}, not column 0.
     EXPECT_FLOAT_EQ(values[0], 1.0f);
     EXPECT_FLOAT_EQ(values[1], 5.0f);
     EXPECT_FLOAT_EQ(values[2], 9.0f);
@@ -405,8 +275,6 @@ TEST(FrameDebuggerSnapshotBuilderTest, ViewProjectionMatrixRoundTripsWithoutTran
     EXPECT_FLOAT_EQ(values[15], 16.0f);
 }
 
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: "RenderOpaque"-only
-// fixture.
 TEST(FrameDebuggerSnapshotBuilderTest, RenderTargetInfoIsRealAndNamedGameView)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -421,29 +289,14 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderTargetInfoIsRealAndNamedGameView)
 
     const FrameDebuggerSnapshot snapshot = BuildRealFrameDebuggerSnapshot(graphSnapshot, capture, info);
 
-    // "GameView" here is the RenderTexture/resource name, completely
-    // unrelated to (and unaffected by) the "RenderOpaque" PASS-name pivot
-    // above - see PHASE0_MASTER_STRATEGY.md's own Step 2 point 4.
+    // "GameView" is the render texture name, not the pass name.
     EXPECT_EQ(snapshot.renderTarget.name, "GameView");
     EXPECT_EQ(snapshot.renderTarget.width, 1920);
     EXPECT_EQ(snapshot.renderTarget.height, 1080);
     EXPECT_EQ(snapshot.renderTarget.format, "Texture (RGBA8 UNORM)");
 }
 
-// REWRITTEN (was AerialPerspectiveCompositePassProducesThirdLeafAfterGameView,
-// frame-debugger-4 campaign PHASE2) - the OLD version asserted the hardcoded
-// "Aerial Perspective Composite" friendly passName/"Compute Composite"
-// eventLabel/".comp" shaderName special case (BuildAerialPerspectiveCompositeLeaf(),
-// now DELETED). The pass is now discovered purely via `kind`, and its
-// leaf carries only real, generic, never-fabricated facts - the raw pass
-// name for passName/shaderName, and the generic "Compute Dispatch"
-// eventLabel every compute leaf now shares. It also now lands under the NEW
-// "Compute Dispatches (Post-GameView)" group (since it runs strictly AFTER
-// "RenderOpaque") rather than being appended directly as a third top-level leaf.
-//
-// REWRITTEN AGAIN (Frame Debugger Pass-Ownership campaign,
-// task_manager/render-pass-2, PHASE3) - the composite pass now also owns a
-// real "Compute Dispatch" child event; totalEventCount grows from 2 to 3.
+// A post-pivot compute pass lands in the post group and owns a "Compute Dispatch" child.
 TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewComputePassProducesLeafUnderPostGameViewGroup)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -496,8 +349,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewComputePassProducesLeafUnderP
     EXPECT_EQ(leaf.details->vectors[0].name, "GPU Time (ms)");
     EXPECT_FLOAT_EQ(leaf.details->vectors[0].x, 0.25f);
 
-    // Frame Debugger Pass-Ownership campaign (render-pass-2), PHASE2/PHASE3 -
-    // the pass now also owns one real child event, "Compute Dispatch".
+    // The pass owns one child event, "Compute Dispatch".
     ASSERT_EQ(leaf.children.size(), 1u);
     const FrameDebuggerEventNode& child = leaf.children[0];
     EXPECT_EQ(child.name, "Compute Dispatch");
@@ -507,12 +359,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewComputePassProducesLeafUnderP
     EXPECT_EQ(child.details->passName, "AtmosphereAerialPerspectiveCompositePass");
 }
 
-// REWRITTEN (was NoAerialPerspectiveCompositePassAddsNoThirdLeaf) - covers
-// PHASE2's own Step 3.6 item (b): zero real compute passes at all produces
-// NEITHER "Compute Dispatches (...)" group, not an empty one on either side.
-//
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: "RenderOpaque"-only
-// fixture, nothing ever wrapped.
+// No compute passes produce neither group.
 TEST(FrameDebuggerSnapshotBuilderTest, NoComputePassesProduceNeitherGroup)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -526,18 +373,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, NoComputePassesProduceNeitherGroup)
     EXPECT_EQ(snapshot.totalEventCount, 1);
 }
 
-// REWRITTEN (was AllThreeGroupsAppearTogetherInRealExecutionOrder) - the OLD
-// version fed a gpuSkinningPassNamesThisFrame name list and asserted the
-// single, always-after-"GameView" "GPU Skinning"/"AtmosphereAerial..." shape.
-// NEW version marks both passes kind == rg::PassKind::Compute directly and asserts the SPLIT
-// "Compute Dispatches (Pre-GameView)" -> "RenderOpaque" -> "Compute Dispatches
-// (Post-GameView)" three-top-level-sibling shape (Locked Design Decision #8
-// - PHASE2's own Step 3.6 item (a3)).
-//
-// REWRITTEN AGAIN (Frame Debugger Pass-Ownership campaign,
-// task_manager/render-pass-2, PHASE3) - both wrapped compute passes now also
-// own a real "Compute Dispatch" child event; eventIndex/totalEventCount
-// updated accordingly.
+// Pre and post groups appear as siblings of the "RenderOpaque" leaf, in execution order.
 TEST(FrameDebuggerSnapshotBuilderTest, PreAndPostGameViewGroupsAppearTogetherAsSiblingsInRealExecutionOrder)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -581,17 +417,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, PreAndPostGameViewGroupsAppearTogetherAsS
     EXPECT_EQ(snapshot.totalEventCount, 5);
 }
 
-// frame-debugger-6 campaign, PHASE2
-// (PHASE2_FRAME_DEBUGGER_VIEWSCOPE_FILTERED_DISCOVERY.md, Step 4) - the
-// actual regression proof for the real-world bug this whole campaign started
-// from (PHASE0_MASTER_STRATEGY.md Section 0): TWO real compute passes, ONE
-// literal shared name ("AtmosphereSkyViewLutPass"), one genuinely GameView-
-// scoped and one genuinely SceneView-scoped - only the GameView one may ever
-// appear in this Game-View-scoped tree.
-//
-// REWRITTEN (Frame Debugger Pass-Ownership campaign, task_manager/render-pass-2,
-// PHASE3) - the surviving GameView-scoped pass now also owns a real
-// "Compute Dispatch" child event; totalEventCount grows from 2 to 3.
+// A secondary-view pass sharing a name with a primary-view pass is excluded.
 TEST(FrameDebuggerSnapshotBuilderTest, SceneViewScopedPreGameViewPassIsExcludedEvenWhenNameCollidesWithGameViewOne)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -622,13 +448,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, SceneViewScopedPreGameViewPassIsExcludedE
     EXPECT_EQ(snapshot.totalEventCount, 3); // Wrapped pass (parent+child) + RenderOpaque.
 }
 
-// Symmetric coverage for the POST-GameView group - models the real
-// "AtmosphereAerialPerspectiveCompositePass" duplicate scenario from
-// PHASE0_MASTER_STRATEGY.md Section 0.
-//
-// REWRITTEN (Frame Debugger Pass-Ownership campaign, task_manager/render-pass-2,
-// PHASE3) - the surviving GameView-scoped pass now also owns a real
-// "Compute Dispatch" child event; totalEventCount grows from 2 to 3.
+// Same exclusion for the post group.
 TEST(FrameDebuggerSnapshotBuilderTest, SceneViewScopedPostGameViewPassIsExcludedEvenWhenNameCollidesWithGameViewOne)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -658,14 +478,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, SceneViewScopedPostGameViewPassIsExcluded
     EXPECT_EQ(snapshot.totalEventCount, 3); // RenderOpaque + wrapped pass (parent+child).
 }
 
-// Guards against an over-eager fix that accidentally also excludes
-// ViewScope::Shared passes (e.g. the real Transmittance/Multi-Scattering LUT
-// passes, genuinely computed once per frame, not once per view) - these must
-// still appear exactly as before this campaign.
-//
-// REWRITTEN (Frame Debugger Pass-Ownership campaign, task_manager/render-pass-2,
-// PHASE3) - the surviving Shared-scoped pass now also owns a real "Compute
-// Dispatch" child event; totalEventCount grows from 2 to 3.
+// Shared-scope passes still appear.
 TEST(FrameDebuggerSnapshotBuilderTest, SharedViewScopedPassStillAppearsNormally)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -691,14 +504,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, SharedViewScopedPassStillAppearsNormally)
     EXPECT_EQ(snapshot.totalEventCount, 3);
 }
 
-// frame-debugger-6 campaign, PHASE4
-// (PHASE4_GAMEVIEW_PER_ENTITY_DRAW_TREE_LEAVES.md, Step 4) - the actual
-// user-facing feature: the "RenderOpaque" node now gets one real child leaf
-// per real FrameDebuggerDrawRecord captured this frame.
-//
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: this is
-// "RenderOpaque"'s own untouched per-entity-children mechanism, explicitly
-// out of scope for PHASE2's rework (Locked Design Decision #1).
+// "RenderOpaque" gets one child leaf per draw record.
 TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueNodeGetsOneChildLeafPerDrawRecord)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -753,14 +559,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueNodeGetsOneChildLeafPerDrawRe
     EXPECT_EQ(snapshot.totalEventCount, 3);
 }
 
-// eventIndex stays strictly monotonic across pre-group -> RenderOpaque ->
-// RenderOpaque's children -> post-group, extending
-// EventIndexIsMonotonicAcrossPreGameViewGameViewAndPostGameView one level
-// deeper.
-//
-// REWRITTEN (Frame Debugger Pass-Ownership campaign, task_manager/render-pass-2,
-// PHASE3) - PreA/PostA now each also own a real "Compute Dispatch" child
-// event; every eventIndex from "RenderOpaque" onward shifts accordingly.
+// Event indices increase across the pre group, the pivot, its children and the post group.
 TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewRenderOpaqueChildrenAndPostGameView)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -800,15 +599,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewRen
     EXPECT_EQ(snapshot.totalEventCount, 7);
 }
 
-// No draw records captured this frame -> "RenderOpaque" keeps zero children,
-// exactly like every earlier campaign's behavior (an honestly empty Game
-// View, e.g. before the very first mesh entity is spawned).
-//
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED, and explicitly
-// re-checked: this is the ONE remaining real-world case where a node can
-// still have zero children after this whole campaign ("RenderOpaque" itself
-// with no draw records) - every OTHER pass leaf now always gets exactly one
-// child, by design (Step 3.5's own "gap already covered" note).
+// Without draw records "RenderOpaque" has no children.
 TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueNodeHasNoChildrenWhenNoDrawRecordsCaptured)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -823,14 +614,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueNodeHasNoChildrenWhenNoDrawRe
     EXPECT_EQ(snapshot.totalEventCount, 1);
 }
 
-// REQUIRED regression test (found by this campaign's own double-check pass,
-// not a shipped bug, PHASE4's own Step 4) - a per-entity draw-record child
-// leaf's own `details->passName` must NEVER be the literal string
-// "RenderOpaque" - only the real "RenderOpaque" pass leaf itself may ever
-// carry that exact value.
-//
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: "RenderOpaque"-only
-// fixture.
+// A per-entity child's passName is never the literal "RenderOpaque"; only the pass leaf carries it.
 TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueDrawRecordLeafPassNameIsNeverLiterallyRenderOpaque)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -852,14 +636,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueDrawRecordLeafPassNameIsNever
     EXPECT_EQ(renderOpaqueLeaf.details->passName, "RenderOpaque");
 }
 
-// NEW - PHASE2's own Step 3.6 item (c): a culled compute pass must never
-// appear in either group, on EITHER side of "RenderOpaque" - a culled pass
-// did not really run this frame, so showing it as if it did would be dishonest.
-//
-// REWRITTEN (Frame Debugger Pass-Ownership campaign, task_manager/render-pass-2,
-// PHASE3) - both surviving compute passes now also own a real "Compute
-// Dispatch" child event; totalEventCount grows from 3 to 5. A culled pass
-// still never consumes an index at all, unaffected.
+// Culled compute passes appear in neither group and consume no event index.
 TEST(FrameDebuggerSnapshotBuilderTest, CulledComputePassIsExcludedFromEitherComputeDispatchGroup)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -906,14 +683,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, CulledComputePassIsExcludedFromEitherComp
     EXPECT_EQ(snapshot.totalEventCount, 5); // Only 5 real events (2 wrapped passes + RenderOpaque).
 }
 
-// NEW - PHASE2's own Step 3.6 item (d): every read/write row is labeled by
-// its own real ResourceKind (PHASE1's readKinds/writeKinds), covering all
-// three kinds for BOTH reads and writes on one pass.
-//
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: only reads
-// `.details->textures` on the PASS-LEVEL (parent) node - no
-// children.empty()/index/totalEventCount assertion exists anywhere in this
-// test.
+// Read and write rows are labeled by their resource kind.
 TEST(FrameDebuggerSnapshotBuilderTest, ComputeDispatchLeafLabelsReadWriteRowsByRealResourceKind)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -941,11 +711,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, ComputeDispatchLeafLabelsReadWriteRowsByR
     ASSERT_EQ(details.textures.size(), 6u);
     EXPECT_EQ(details.textures[0].name, "Read Texture");
     EXPECT_EQ(details.textures[0].valueLabel, "SomeTexture");
-    // task_manager/frame-debugger-9 campaign, PHASE3 - each render-graph row
-    // now also carries its own real `kind` PLUS `isRenderGraphResource ==
-    // true` (Step 3.8's own required coverage: a Buffer row IS a real
-    // render-graph resource too, just never image-previewable - `kind` is
-    // what actually gates the "View" button, not this flag alone).
+    // Each row also carries its kind and the render-graph flag.
     EXPECT_EQ(details.textures[0].kind, rg::ResourceKind::Texture);
     EXPECT_TRUE(details.textures[0].isRenderGraphResource);
     EXPECT_EQ(details.textures[1].name, "Read Buffer");
@@ -970,15 +736,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, ComputeDispatchLeafLabelsReadWriteRowsByR
     EXPECT_TRUE(details.textures[5].isRenderGraphResource);
 }
 
-// NEW - PHASE2's own Step 3.6 item (e): eventIndex values across the WHOLE
-// tree are monotonically increasing in true chronological order - every
-// pre-GameView leaf's index < "RenderOpaque"'s own index < every post-GameView
-// leaf's index. Regression coverage for BuildRealFrameDebuggerSnapshot()'s
-// own documented "do not reorder these blocks" ordering caveat.
-//
-// REWRITTEN (Frame Debugger Pass-Ownership campaign, task_manager/render-pass-2,
-// PHASE3) - every compute pass now also owns a real "Compute Dispatch" child
-// event; every eventIndex after the first pre-view pass shifts accordingly.
+// Event indices increase in execution order: pre group, then the pivot, then the post group.
 TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewGameViewAndPostGameView)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1020,19 +778,8 @@ TEST(FrameDebuggerSnapshotBuilderTest, EventIndexIsMonotonicAcrossPreGameViewGam
     EXPECT_EQ(snapshot.totalEventCount, 9);
 }
 
-// task_manager/frame-debugger-7 campaign, PHASE4
-// (PHASE4_PREVIEW_WIRING_AND_DATA_MODEL.md, Step 3.5) - the old
-// `CollectComputePassTextureWrites()`/`CollectComputePassVolumeTextureWrites()`
-// tests (frame-debugger-5 campaign) were DELETED along with the functions
-// they covered (PHASE0's Locked Design Decision #3). Replaced below with
-// coverage proving `BuildRealFrameDebuggerSnapshot()` assigns the right
-// `stepPreviewKind`/`stepPreviewIndex` to a Pre-GameView leaf, the
-// "RenderOpaque" leaf, each per-object child (in order), a Post-GameView-
-// before-composite leaf, and a Post-GameView-at/after-composite leaf.
-//
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: only reads
-// `.details->stepPreviewKind` on the pass-level node - no index/child-count/
-// totalEventCount assertion exists.
+// Step preview kinds: a pre-pivot leaf, the pivot leaf, per-object children, and post leaves
+// before and after the composite pass.
 
 TEST(FrameDebuggerSnapshotBuilderTest, PreGameViewLeafGetsNotYetDrawnStepPreviewKind)
 {
@@ -1050,8 +797,6 @@ TEST(FrameDebuggerSnapshotBuilderTest, PreGameViewLeafGetsNotYetDrawnStepPreview
     EXPECT_EQ(preGroup.children[0].details->stepPreviewKind, FrameDebuggerStepPreviewKind::NotYetDrawn);
 }
 
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: "RenderOpaque"-only
-// fixture.
 TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueLeafGetsPreCompositeStepPreviewKind)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1066,8 +811,6 @@ TEST(FrameDebuggerSnapshotBuilderTest, RenderOpaqueLeafGetsPreCompositeStepPrevi
     EXPECT_EQ(renderOpaqueLeaf.details->stepPreviewKind, FrameDebuggerStepPreviewKind::PreComposite);
 }
 
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: "RenderOpaque"'s own
-// per-entity children only.
 TEST(FrameDebuggerSnapshotBuilderTest, PerObjectDrawRecordChildrenGetPerObjectStepKindAndIncreasingIndex)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1092,9 +835,6 @@ TEST(FrameDebuggerSnapshotBuilderTest, PerObjectDrawRecordChildrenGetPerObjectSt
     EXPECT_EQ(renderOpaqueLeaf.children[1].details->stepPreviewIndex, 1);
 }
 
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: only
-// postGroup.children.size() (a GROUP sibling count, unaffected) and
-// `.details->stepPreviewKind` on the pass-level node.
 TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewLeafBeforeCompositePassGetsPreCompositeStepPreviewKind)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1117,9 +857,6 @@ TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewLeafBeforeCompositePassGetsPr
     EXPECT_EQ(postGroup.children[0].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PreComposite);
 }
 
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: only
-// postGroup.children.size() (sibling count, unaffected) and
-// `.details->stepPreviewKind` on each pass-level node.
 TEST(FrameDebuggerSnapshotBuilderTest, CompositePassLeafItselfGetsPostCompositeStepPreviewKind)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1149,16 +886,9 @@ TEST(FrameDebuggerSnapshotBuilderTest, CompositePassLeafItselfGetsPostCompositeS
     EXPECT_EQ(postGroup.children[1].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PostComposite);
 }
 
-// render-pass-2 campaign, PHASE3 - CONFIRMED UNCHANGED: only
-// postGroup.children.size() (sibling count, unaffected) and
-// `.details->stepPreviewKind` on the pass-level node.
 TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewLeavesDefaultToPostCompositeWhenNoCompositePassSurvives)
 {
-    // No pass anywhere writes "GameViewComposited" this frame (e.g. a
-    // capture taken before the atmosphere composite pass has ever run this
-    // session) - FindPostGameViewCompositePassExecutionIndex() returns -1,
-    // and every Post-GameView leaf falls into the PostComposite default
-    // catch-all bucket (Step 2's own "or nothing selected" wording).
+    // No pass writes "GameViewComposited": every post leaf defaults to PostComposite.
     rg::RenderGraphSnapshot graphSnapshot;
     graphSnapshot.passesInExecutionOrder.push_back(MakePass("RenderOpaque"));
     graphSnapshot.passesInExecutionOrder.push_back(MakeComputePass("SomePostGameViewPassWithNoCompositeWrite"));
@@ -1173,26 +903,8 @@ TEST(FrameDebuggerSnapshotBuilderTest, PostGameViewLeavesDefaultToPostCompositeW
     EXPECT_EQ(postGroup.children[0].details->stepPreviewKind, FrameDebuggerStepPreviewKind::PostComposite);
 }
 
-// Render Pass campaign (task_manager/render-pass-1), PHASE4
-// (PHASE4_FRAME_DEBUGGER_GENERIC_TREE_REWORK.md, Step 3.3) - REPLACES the old
-// frame-debugger-8 campaign's "SkyBackgroundLeafSurvivesAlongsideComputeDispatchSplit"
-// test (which fed a `RecordSkyBackgroundDraw()` DrawRecord, now REMOVED - see
-// FrameDebuggerCaptureTests.cpp). "DrawSkyBackground" is now a real, separate
-// pass in the fixture itself, discovered by the "view region" walk - proves
-// PHASE1-PHASE4 all compose correctly with the PRE-EXISTING pre/post-GameView
-// compute-dispatch split (frame-debugger-5/frame-debugger-6 campaigns) with
-// zero regressions.
-//
-// REWRITTEN AGAIN (Frame Debugger Pass-Ownership campaign,
-// task_manager/render-pass-2, PHASE3) - every one of these five pass-level
-// leaves now also owns a real child event of its own ("Compute Dispatch" for
-// PreA/PostA, "Draw Quad" for DrawSkyBackground - PHASE1/PHASE2), doubling
-// every one of their own index consumption; "RenderOpaque" itself and its
-// own per-entity child are UNTOUCHED, per Locked Design Decision #1. The
-// fixture also now explicitly tags "DrawSkyBackground" with
-// RenderPassDrawKind::DrawQuad (GraphicsChildEventLabelFor() reads this
-// field purely structurally, never the pass's own name - MakePass() never
-// infers it).
+// "DrawSkyBackground" is a separate view-region pass and composes with the pre/post compute split.
+// Each wrapped pass owns a child row; "RenderOpaque" keeps its per-entity children.
 TEST(FrameDebuggerSnapshotBuilderTest, DrawSkyBackgroundLeafSurvivesAlongsideComputeDispatchSplit)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1236,7 +948,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, DrawSkyBackgroundLeafSurvivesAlongsideCom
     EXPECT_EQ(skyLeaf.details->stepPreviewKind, FrameDebuggerStepPreviewKind::PreComposite);
 
     const FrameDebuggerEventNode& skyChild = skyLeaf.children[0];
-    EXPECT_EQ(skyChild.name, "Draw Quad"); // DrawSkyBackground is tagged RenderPassDrawKind::DrawQuad (PHASE1).
+    EXPECT_EQ(skyChild.name, "Draw Quad"); // The sky pass is tagged RenderPassDrawKind::DrawQuad.
     ASSERT_TRUE(skyChild.details.has_value());
     EXPECT_EQ(skyChild.details->eventLabel, "Draw Quad");
     EXPECT_EQ(skyChild.details->passName, "DrawSkyBackground"); // Same owning pass.
@@ -1262,11 +974,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, DrawSkyBackgroundLeafSurvivesAlongsideCom
     EXPECT_EQ(snapshot.totalEventCount, 8);
 }
 
-// Phase A (frame-debugger rehaul) - privateWriteTextureName exclusion rule.
-// A leaf that writes the shared "GameView" buffer (RenderOpaque,
-// DrawSkyBackground) must get privateWriteTextureName == std::nullopt, while
-// a genuine private-resource leaf (a Compute LUT pass writing its own
-// texture) must get it populated with that resource's own name.
+// The shared "GameView" buffer gives no private write texture; a private resource does.
 TEST(FrameDebuggerSnapshotBuilderTest, PrivateWriteTextureNameExcludesGameViewButPopulatesForPrivateResource)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1310,18 +1018,8 @@ TEST(FrameDebuggerSnapshotBuilderTest, PrivateWriteTextureNameExcludesGameViewBu
     EXPECT_FALSE(skyLeaf.details->privateWriteTextureName.has_value());
 }
 
-// NEW - Render Pass campaign, PHASE4, Step 3.5 - the concrete proof the
-// "RenderTransparent" mechanism is genuinely generic, not just "generic in
-// theory": since that pass never actually declares itself in the graph
-// today, a fixture with only "RenderOpaque" + "DrawSkyBackground" (and no
-// "RenderTransparent" anywhere) produces EXACTLY those two leaves in the
-// view region - no third, empty/fake leaf ever appears.
-//
-// EXTENDED (Frame Debugger Pass-Ownership campaign, task_manager/render-pass-2,
-// PHASE3) - proves the actual fix itself: "DrawSkyBackground" now owns
-// exactly one real child event, "Draw Quad" (PHASE1/PHASE2). The fixture
-// explicitly tags it RenderPassDrawKind::DrawQuad - MakePass() never infers
-// drawKind from a pass's own name.
+// Without a "RenderTransparent" pass the view region is exactly "RenderOpaque" and "DrawSkyBackground".
+// "DrawSkyBackground" owns a "Draw Quad" child.
 TEST(FrameDebuggerSnapshotBuilderTest, ViewRegionHasExactlyRenderOpaqueAndDrawSkyBackgroundWhenRenderTransparentAbsent)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1343,34 +1041,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, ViewRegionHasExactlyRenderOpaqueAndDrawSk
     EXPECT_EQ(root.children[1].children[0].name, "Draw Quad");
 }
 
-// NEW, REQUIRED by this phase's own 3.3/3.3b fix - Render Pass campaign,
-// PHASE4 - a Graphics-kind, ViewScope::Primary,
-// RenderPassCategory::FrameDebuggerInternal pass positioned in
-// passesInExecutionOrder BETWEEN "DrawSkyBackground" and the eventual
-// Post-GameView compute pass (mirroring AddFrameDebuggerReplayPasses()'s own
-// real, confirmed position) must produce ZERO extra leaves in the view
-// region (still exactly "RenderOpaque"/"DrawSkyBackground", nothing else) -
-// this is the concrete regression test proving the Frame Debugger's own
-// internal replay passes can never leak into the tree.
-//
-// REWRITTEN (Frame Debugger Pass-Ownership campaign,
-// task_manager/render-pass-2, PHASE3) - "DrawSkyBackground" and the composite
-// pass now each also own a real child event of their own; eventIndex/
-// totalEventCount updated accordingly. The fixture also now explicitly tags
-// "DrawSkyBackground" RenderPassDrawKind::DrawQuad.
-//
-// RETAGGED (editor-core-separation-22 campaign, PHASE4) - the two synthetic
-// replay passes are now tagged `RenderPassCategory::FrameDebuggerInternal`
-// instead of `RenderPassCategory::Debug`, matching what
-// FrameDebuggerReplayPasses.cpp's own real production code now does (Debug
-// no longer means "invisible" - only FrameDebuggerInternal does; see
-// RenderGraphTypes.h's own updated doc comments). Renamed to match: this
-// test now asserts the thing it actually means to assert ("the Frame
-// Debugger's own internal replay scaffolding never leaks into the tree"),
-// not the now-incorrect claim that Debug-category passes are invisible -
-// see DebugCategoryGraphicsPassInsideViewRegionIsNowVisibleAsANormalLeaf
-// (below) for the new, dedicated coverage proving the opposite for a REAL
-// Debug-category pass.
+// FrameDebuggerInternal replay passes inside the view region never produce a leaf.
 TEST(FrameDebuggerSnapshotBuilderTest, FrameDebuggerInternalCategoryGraphicsPassInsideViewRegionProducesNoExtraLeaf)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1393,11 +1064,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, FrameDebuggerInternalCategoryGraphicsPass
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
     const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
-    // "RenderOpaque" + "DrawSkyBackground" + "Compute Dispatches
-    // (Post-GameView)" - the two FrameDebuggerInternal-category replay
-    // passes produce NO leaves of their own anywhere (not even under the new
-    // "Other Render Passes" sweep - they are an honestly-documented
-    // exclusion, not a coverage gap).
+    // The replay passes produce no leaves, not even in "Other Render Passes".
     ASSERT_EQ(root.children.size(), 3u);
     EXPECT_EQ(root.children[0].name, "RenderOpaque");
     EXPECT_EQ(root.children[1].name, "DrawSkyBackground");
@@ -1406,10 +1073,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, FrameDebuggerInternalCategoryGraphicsPass
     ASSERT_EQ(postGroup.children.size(), 1u);
     EXPECT_EQ(postGroup.children[0].name, "AtmosphereAerialPerspectiveCompositePass");
 
-    // eventIndex is monotonic and SKIPS the two FrameDebuggerInternal-category
-    // passes entirely (they never get an eventIndex at all): RenderOpaque(0),
-    // DrawSkyBackground(1) + its own child "Draw Quad"(2), composite(3) +
-    // its own child "Compute Dispatch"(4).
+    // Event indices skip the internal passes: RenderOpaque(0), sky(1) + child(2), composite(3) + child(4).
     EXPECT_EQ(root.children[0].eventIndex, 0);
     EXPECT_EQ(root.children[1].eventIndex, 1);
     ASSERT_EQ(root.children[1].children.size(), 1u);
@@ -1498,19 +1162,8 @@ TEST(FrameDebuggerSnapshotBuilderTest, SharedSlotImageIsListedOnceInTheRenderOpa
     }
 }
 
-// ---------------------------------------------------------------------------
-// NEW TESTS - Frame Debugger Pass-Ownership campaign (task_manager/render-pass-2),
-// PHASE3, Step 3.5 - cover the fix itself (WrapPassWithOwnedChildEvent()/
-// GraphicsChildEventLabelFor()), not just non-regression of the 31
-// pre-existing tests above.
-// ---------------------------------------------------------------------------
-
-// Step 3.5 test 1, EXTENDED per this phase's own "gap found during review"
-// note - proves dual-selectability (Locked Design Decision #2) end-to-end
-// through the real FindEventDetailsByIndex() lookup function, for BOTH a
-// wrapped GRAPHICS-kind pass ("DrawSkyBackground") AND a wrapped
-// COMPUTE-kind pass ("SomeComputePass") in the SAME fixture - the one
-// remaining un-exercised combination this campaign's own fix touches.
+// Parent and child rows of a wrapped graphics pass and a wrapped compute pass both resolve
+// through FindEventDetailsByIndex().
 TEST(FrameDebuggerSnapshotBuilderTest, WrappedPassLevelNodeAndItsChildAreBothIndependentlySelectable)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1539,10 +1192,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, WrappedPassLevelNodeAndItsChildAreBothInd
     EXPECT_EQ(skyChildDetails->passName, "DrawSkyBackground");
     EXPECT_EQ(skyChildDetails->eventLabel, "Draw Quad");
 
-    // Found during this phase's own review (PHASE3 Step 3.5's gap) -
-    // WrapPassWithOwnedChildEvent() is the exact same generic mechanism for a
-    // wrapped COMPUTE-kind pass too - both its parent row and its owned
-    // "Compute Dispatch" child row must also be independently resolvable.
+    // The same holds for a wrapped compute pass.
     const std::optional<FrameDebuggerEventDetails> computeParentDetails = FindEventDetailsByIndex(snapshot, 0);
     ASSERT_TRUE(computeParentDetails.has_value());
     EXPECT_EQ(computeParentDetails->passName, "SomeComputePass");
@@ -1553,13 +1203,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, WrappedPassLevelNodeAndItsChildAreBothInd
     EXPECT_EQ(computeChildDetails->eventLabel, "Compute Dispatch");
 }
 
-// Step 3.5 test 2 - three synthetic fixtures, each with "RenderOpaque" + one
-// other Graphics-kind pass in the view region, each tagged a DIFFERENT
-// rg::RenderPassDrawKind directly on the RenderGraphPassSnapshot fixture -
-// the owned child's own label must match exactly, derived PURELY from that
-// structural tag, never from the pass's own name. This is the ONE test in
-// this whole campaign that actually exercises the `Blit` scaffold value
-// end-to-end, even though no real pass uses it yet.
+// The owned child's label follows the structural draw kind, never the pass name.
 TEST(FrameDebuggerSnapshotBuilderTest, GraphicsChildEventLabelMatchesRenderPassDrawKind)
 {
     // DrawQuad.
@@ -1668,18 +1312,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, ASyntheticThirdPartyTagAndHeadingGetsGrou
     EXPECT_EQ(root.children[1].name, "RenderOpaque");
 }
 
-// ---------------------------------------------------------------------------
-// NEW TEST - render-pass-3 campaign, PHASE4
-// (PHASE4_FRAME_DEBUGGER_EVENT_PIVOT_FIX.md, Step 3.3) - the actual
-// regression proof for the fix itself: a pass named something OTHER than
-// "RenderOpaque" (proving the lookup is genuinely name-free), tagged
-// RenderPassEvent::Opaques, is correctly found as the view-region pivot -
-// its own real stats/per-entity draw records flow into the resulting leaf
-// exactly the same way "RenderOpaque" itself always has, and a real pass
-// LITERALLY named "RenderOpaque" sitting BEFORE it in execution order (but
-// tagged BELOW Opaques, i.e. NOT itself eligible to be the pivot) is
-// correctly skipped/ignored - proving this is genuinely a structural,
-// order+tag-driven lookup, never a name comparison in either direction.
+// The pivot is found by event tag, not by name: a pass named "RenderOpaque" tagged below Opaques is not the pivot.
 TEST(FrameDebuggerSnapshotBuilderTest, ViewRegionPivotIsFoundStructurallyEvenWhenNotNamedRenderOpaque)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1706,28 +1339,13 @@ TEST(FrameDebuggerSnapshotBuilderTest, ViewRegionPivotIsFoundStructurallyEvenWhe
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
     const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
-    // editor-core-separation-22 campaign, PHASE4 - the red herring is
-    // Graphics-kind, non-culled, viewScope::Shared (not SceneView), category
-    // General (not FrameDebuggerInternal) - a genuine structural survivor
-    // sitting BEFORE the real pivot. Neither the pre-view compute loop (it
-    // only ever inspects Compute-kind passes) nor the view-region walk (it
-    // only starts AT the pivot) ever touches it, so it now correctly
-    // surfaces under the new "Other Render Passes" sweep group instead of
-    // being silently dropped (Clause B) - this does NOT weaken this test's
-    // own actual point: the red herring is never mistaken FOR the pivot
-    // itself, and its own real data never reaches the real "RenderOpaque"
-    // pivot leaf below.
+    // The red herring is a surviving pass before the pivot, so it lands in "Other Render Passes".
     ASSERT_EQ(root.children.size(), 2u);
 
     const FrameDebuggerEventNode& leaf = root.children[0];
     EXPECT_TRUE(leaf.isDrawCall);
     ASSERT_TRUE(leaf.details.has_value());
-    // BuildRenderOpaqueLeaf() always stamps the literal "RenderOpaque"
-    // display label/passName regardless of the underlying pass's own real
-    // name - this is pre-existing, unchanged behavior (see that function's
-    // own doc comment) - what this test actually proves is that the REAL,
-    // differently-named pass's own DATA (draw stats, per-entity children)
-    // is what got used, not the red herring's.
+    // BuildRenderOpaqueLeaf() always uses the literal "RenderOpaque" label; the data must be the real pivot's.
     bool foundDrawStats = false;
     for (const FrameDebuggerVectorProperty& vec : leaf.details->vectors) {
         if (vec.name == "Draw Stats (Calls, Tris)") {
@@ -1763,16 +1381,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, ViewRegionPivotIsFoundStructurallyEvenWhe
     EXPECT_EQ(snapshot.totalEventCount, 4);
 }
 
-// editor-core-separation-22 campaign, PHASE4 - the actual regression proof
-// for the fix itself (PHASE0_MASTER_STRATEGY.md's Step 2.2): a real,
-// General-category Graphics-kind pass tagged RenderPassEvent::AfterEverything,
-// positioned STRUCTURALLY AFTER a surviving Post-GameView compute pass -
-// mirroring the real "DemoRenderFeaturePlugin_Clear" shape exactly. The OLD
-// two-loop-plus-walk shape silently dropped this pass entirely (the
-// view-region walk breaks the instant it meets the surviving compute pass,
-// and the post-GameView compute loop only ever inspects Compute-kind passes)
-// - it must now surface as a real leaf under the new "Other Render Passes"
-// sweep group instead.
+// A graphics pass after a surviving compute pass is swept into "Other Render Passes".
 TEST(FrameDebuggerSnapshotBuilderTest, GraphicsPassAfterSurvivingComputePassIsSweptIntoOtherRenderPassesGroup)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1816,18 +1425,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, GraphicsPassAfterSurvivingComputePassIsSw
     EXPECT_EQ(snapshot.totalEventCount, 5);
 }
 
-// editor-core-separation-26 campaign, PHASE4 - the required companion audit's
-// own literal Part B.3 "Frame Debugger correctness" acceptance proof: a real
-// PassKind::Blit pass sitting immediately after the "RenderOpaque" pivot
-// inside the view-region walk must NEVER be mistaken for "RenderOpaque"
-// itself, and must NEVER consume/displace the real "RenderOpaque" leaf.
-// FindViewRegionPivot() (re-confirmed by direct code reading before writing
-// this fixture) returns the FIRST pass, in true execution order, whose
-// renderPassEvent >= Opaques - "RenderOpaque" here (built via the plain,
-// unmodified MakePass(), whose default renderPassEvent IS Opaques) is
-// therefore genuinely THE pivot (pivotIndex == 0), and the view-region walk
-// itself starts AT pivotIndex (i.e. it re-visits and consumes the pivot pass
-// as its own very first iteration) - confirmed structurally, not guessed.
+// A blit pass after the pivot is never taken for "RenderOpaque" and does not displace it.
 TEST(FrameDebuggerSnapshotBuilderTest, BlitPassImmediatelyAfterPivotIsNeverTreatedAsRenderOpaqueAndDoesNotDisplaceRealRenderOpaque)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1856,24 +1454,14 @@ TEST(FrameDebuggerSnapshotBuilderTest, BlitPassImmediatelyAfterPivotIsNeverTreat
     ASSERT_EQ(blitLeaf.children.size(), 1u); // Owns exactly one real child event, like every Graphics-family leaf.
     EXPECT_EQ(blitLeaf.children[0].name, "Blit"); // GraphicsChildEventLabelFor(RenderPassDrawKind::Blit).
 
-    // THE actual displacement-proof assertion: the real "DrawSkyBackground"
-    // pass, arriving strictly AFTER the Blit pass, is still built as a normal
-    // Graphics leaf - it was never silently consumed/mislabeled by the Blit
-    // pass sitting in front of it, and "RenderOpaque" above was never
-    // re-triggered a second time either.
+    // A later "DrawSkyBackground" pass is still built as a normal graphics leaf.
     const FrameDebuggerEventNode& skyLeaf = root.children[2];
     EXPECT_EQ(skyLeaf.name, "DrawSkyBackground");
     ASSERT_EQ(skyLeaf.children.size(), 1u);
     EXPECT_EQ(skyLeaf.children[0].name, "Draw Mesh"); // Default RenderPassDrawKind::DrawMesh (fixture never set it).
 }
 
-// editor-core-separation-26 campaign, PHASE4 - the second literal Part B.3
-// proof: a real PassKind::Blit pass swept up by the final "Other Render
-// Passes" catch-all (e.g. positioned structurally AFTER a surviving
-// Post-GameView compute pass, mirroring the pre-existing
-// "DemoRenderFeaturePlugin_Clear"-shaped fixture immediately above this one)
-// gets a correctly labeled "Blit" child event, not a "Draw Mesh"/"Compute
-// Dispatch" mislabel.
+// A blit pass swept into "Other Render Passes" gets a "Blit" child label.
 TEST(FrameDebuggerSnapshotBuilderTest, BlitPassInOtherRenderPassesSweepGetsCorrectBlitLabel)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1909,15 +1497,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, BlitPassInOtherRenderPassesSweepGetsCorre
     EXPECT_EQ(leaf.children[0].name, "Blit"); // GraphicsChildEventLabelFor(RenderPassDrawKind::Blit) - never a mislabel.
 }
 
-// editor-core-separation-22 campaign, PHASE4 - a real Debug-category FEATURE
-// pass (e.g. PluginRenderPassBuilderAdapter's own fullscreen clear pass,
-// GBufferValidation, ComputeBlurValidation) sitting INSIDE the view region
-// (i.e. still discovered by the normal view-region walk, not the sweep) used
-// to be silently dropped by the OLD (incorrect) `category == Debug`
-// exclusion; `RenderPassCategory::Debug` no longer means "invisible" as of
-// this phase - only `RenderPassCategory::FrameDebuggerInternal` does. This
-// is the concrete proof a real Debug-category pass is now a normal, visible
-// tree citizen.
+// A Debug-category feature pass inside the view region is a normal visible leaf.
 TEST(FrameDebuggerSnapshotBuilderTest, DebugCategoryGraphicsPassInsideViewRegionIsNowVisibleAsANormalLeaf)
 {
     rg::RenderGraphSnapshot graphSnapshot;
@@ -1933,10 +1513,7 @@ TEST(FrameDebuggerSnapshotBuilderTest, DebugCategoryGraphicsPassInsideViewRegion
 
     ASSERT_EQ(snapshot.rootNodes.size(), 1u);
     const FrameDebuggerEventNode& root = snapshot.rootNodes[0];
-    // RenderOpaque + DrawSkyBackground + the Debug-category pass itself, all
-    // as direct siblings under root - discovered by the ordinary view-region
-    // walk, never swept into "Other Render Passes" at all (it sits inside
-    // that walk's own index range, before any surviving compute pass).
+    // Direct siblings under root: the ordinary view-region walk finds the Debug-category pass.
     ASSERT_EQ(root.children.size(), 3u);
     EXPECT_EQ(root.children[0].name, "RenderOpaque");
     EXPECT_EQ(root.children[1].name, "DrawSkyBackground");

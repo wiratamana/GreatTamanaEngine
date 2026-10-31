@@ -12,9 +12,6 @@
 #include <string>
 #include <vector>
 
-// Editor-only recorder of what the Game View drew this frame, fed from RenderSystem::Draw() through the
-// IFrameDebuggerCaptureRecorder interface and the per-draw FrameDebuggerEventSink hook.
-// Core files must hold only a forward-declared pointer and guard dereferences with GTE_ENABLE_EDITOR.
 namespace gte {
 
 // Forward declarations for the interface overrides below.
@@ -22,14 +19,13 @@ class Registry;
 class Renderer;
 class Mesh;
 class Pipeline;
-struct MaterialTexture; // Defined as a struct, not a class.
+struct MaterialTexture;
 class Game;
 namespace rg {
 class RenderGraphBuilder;
 } // namespace rg
 
-// Display-ready blend/Z/stencil facts of one pipeline configuration, matching FrameDebuggerEventDetails
-// (src/Editor/FrameDebuggerData.h) field for field.
+// Display-ready blend/Z/stencil facts of one pipeline configuration. Mirrors FrameDebuggerEventDetails.
 struct FrameDebuggerStandardPipelineState {
     std::string blendMode;
     std::string zClip;
@@ -50,7 +46,7 @@ struct FrameDebuggerMaterialSlot {
     friend bool operator==(const FrameDebuggerMaterialSlot&, const FrameDebuggerMaterialSlot&) = default;
 };
 
-// One real draw call's attribution facts, in draw order. Never deduplicated: one entry per draw.
+// One real draw call's attribution facts, in draw order. Never deduplicated.
 struct FrameDebuggerDrawRecord {
     std::uint32_t entityIndex = 0;
     std::uint32_t entityGeneration = 0;
@@ -60,23 +56,21 @@ struct FrameDebuggerDrawRecord {
     std::uint32_t triangleCount = 0;
 };
 
-// Blend/Z/stencil facts of the standard mesh pipeline (see Pipeline.cpp). Pure and free.
+// Blend/Z/stencil facts of the standard mesh pipeline.
 FrameDebuggerStandardPipelineState DescribeStandardPipelineState();
 
-// Same for the sky background pipeline (depth test EQUAL, depth write off). Pure and free.
+// Same for the sky background pipeline (depth test EQUAL, depth write off).
 FrameDebuggerStandardPipelineState DescribeSkyBackgroundPipelineState();
 
-// Passive per-frame recorder of what RenderSystem::Draw() resolved for the Game View. It only accumulates what it
-// is told; the caller decides when it is armed. A caller that passes nullptr pays only one null check per draw.
+// Per-frame recorder of what the primary view drew. Passive: it accumulates what it is told while active.
 class FrameDebuggerCaptureContext : public IFrameDebuggerCaptureRecorder, public FrameDebuggerEventSink {
 public:
-    // Records one resolved draw. Pipeline names and (slot, image) pairs are deduplicated in first-seen order;
-    // empty names are never added. `viewProjection` is the column-major matrix the whole Game-View pass used.
+    // Records one resolved draw. Pipeline names and (slot, image) pairs are deduplicated in first-seen order.
+    // `viewProjection` is the column-major matrix the whole pass used.
     void RecordDraw(const std::string& pipelineDebugName, const std::vector<FrameDebuggerMaterialSlot>& slots,
         const Mat4& viewProjection);
 
-    // Records one draw's attribution facts in addition to RecordDraw(). `triangleCount` follows
-    // DrawStats.h::AccumulateDrawStats().
+    // Records one draw's attribution facts in addition to RecordDraw().
     void RecordEntityDraw(std::uint32_t entityIndex, std::uint32_t entityGeneration, const std::string& displayName,
         const std::string& pipelineDebugName, const std::vector<FrameDebuggerMaterialSlot>& slots,
         std::uint32_t triangleCount);
@@ -91,22 +85,22 @@ public:
         const std::vector<rg::BufferHandle>& gpuSkinningOutputBuffers, const rg::FullscreenReplay& backgroundReplay,
         RenderTexture& gameTarget, rg::RenderPassToggleRegistry* toggleRegistry = nullptr) override;
 
-    // Clears every recorded fact. Call once at the top of every armed frame.
+    // Arms this context for the frame and clears every recorded fact. Call once at the top of every armed frame.
     void Reset();
 
-    // Live per-frame event counter: one fresh index per call, numbering every draw or dispatch recorded this
-    // armed frame across all passes. Separate index space from the event tree's own eventIndex.
+    // Stops counting and forgets per-draw capture state. Call on every frame that is not armed.
+    void Deactivate() noexcept;
+
+    // Live per-frame event counter: one fresh index per call. Separate index space from the event tree's eventIndex.
     int NextEventIndex() noexcept { return m_nextEventIndex++; }
 
-    // NextEventIndex() high-water mark of the last armed frame; Reset() snapshots it before zeroing the counter.
+    // Event count of the last armed frame; Reset() snapshots it before zeroing the counter.
     int LastFrameEventCount() const noexcept { return m_lastFrameEventCount; }
 
-    // Binds the renderer the retained snapshot is built through. Call before installing this as the event
-    // sink; cheap and idempotent.
+    // Binds the renderer the retained snapshot is built through. Cheap and idempotent.
     void InitializeEventCapture(Renderer& renderer) noexcept;
 
-    // Re-arms per-draw capture for an event index; takes effect from the next captured frame.
-    // Only the armed index's image is kept, in one resized-in-place scratch slot, to bound VRAM.
+    // Arms per-draw capture for an event index from the next captured frame. Only that image is kept.
     void ArmEventIndex(int index) noexcept { m_armedEventIndex = index; }
 
     // FrameDebuggerEventSink overrides.
@@ -122,55 +116,47 @@ public:
     // Meaningful only when HasRetainedEventImage() is true.
     const rg::RetainedEventSnapshot& RetainedEventImage() const noexcept { return m_retainedEventImage; }
 
-    // True if the retained image is a depth-only capture (color is preferred when a draw wrote both).
-    // Meaningful only when HasRetainedEventImage() is true.
+    // True if the retained image is depth-only (color is preferred when a draw wrote both).
     bool RetainedEventIsDepth() const noexcept { return m_retainedEventIsDepth; }
 
-    // Distinct, non-empty pipeline debug names recorded via RecordDraw() since the last Reset(), first-seen order.
+    // Distinct, non-empty pipeline debug names recorded since the last Reset(), first-seen order.
     const std::vector<std::string>& PipelineDebugNames() const noexcept { return m_pipelineDebugNames; }
 
-    // Distinct material slots recorded since the last Reset(), first-seen order; a slot with no image name is skipped.
+    // Distinct material slots recorded since the last Reset(), first-seen order; slots without an image name are skipped.
     const std::vector<FrameDebuggerMaterialSlot>& MaterialSlotRows() const noexcept { return m_materialSlotRows; }
-
-    // RecordDraw() calls since the last Reset(): this frame's Game-View draw-call count.
-    int DrawCallCount() const noexcept { return m_drawCallCount; }
 
     // The last view-projection passed to RecordDraw(); Mat4::Identity() if none since the last Reset().
     const Mat4& LastViewProjection() const noexcept { return m_lastViewProjection; }
 
-    // Per-draw attribution records since the last Reset(), in draw order. Never deduplicated.
+    // Per-draw attribution records since the last Reset(), in draw order.
     const std::vector<FrameDebuggerDrawRecord>& DrawRecords() const noexcept { return m_drawRecords; }
 
-    // Called by AddReplayPasses() on a capture-trigger frame: one retained RenderTexture per drawn object in
-    // DrawRecords() order (after objects [0..i]), plus a trailing background step when a background callback
-    // exists. The textures hold garbage until Execute() returns; move them out before the next Reset().
+    // Set by AddReplayPasses(): one retained texture per drawn object, plus a trailing background step if any.
+    // Contents are valid only after the graph executed; move them out before the next Reset().
     void SetReplayStepPreviews(std::vector<RenderTexture>&& previews) noexcept
     {
         m_replayStepPreviews = std::move(previews);
     }
 
-    // Empty on every frame that is not a capture-trigger frame. Mutable so capture can move the textures out.
+    // Empty on every frame that is not a capture frame. Mutable so capture can move the textures out.
     std::vector<RenderTexture>& ReplayStepPreviews() noexcept { return m_replayStepPreviews; }
 
 private:
     std::vector<std::string> m_pipelineDebugNames;
     std::vector<FrameDebuggerMaterialSlot> m_materialSlotRows;
-    int m_drawCallCount = 0;
     Mat4 m_lastViewProjection = Mat4::Identity();
     std::vector<FrameDebuggerDrawRecord> m_drawRecords;
-
-    // See SetReplayStepPreviews().
     std::vector<RenderTexture> m_replayStepPreviews;
 
-    // See NextEventIndex()/LastFrameEventCount() above.
+    bool m_active = false;
     int m_nextEventIndex = 0;
     int m_lastFrameEventCount = 0;
 
-    // Per-draw event capture state (see ArmEventIndex(), NoteCommandResult(), FlushPendingCapture()).
+    // Per-draw event capture state.
     Renderer* m_eventCaptureRenderer = nullptr;
     int m_armedEventIndex = -1;
     int m_retainedEventIndex = -1;
-    bool m_retainedEventIsDepth = false; // See RetainedEventIsDepth().
+    bool m_retainedEventIsDepth = false;
     std::optional<AttachmentWrite> m_pendingEventCapture;
     rg::RetainedEventSnapshot m_retainedEventImage;
 };

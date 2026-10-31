@@ -1,13 +1,13 @@
 # Time and playback pause
 > Rules for the frame clock (`gte::Time`) and the Pause / Resume / Step toolbar. For anyone reading time or touching `Game::Update`.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-10-31
 
 ## TL;DR
 - One `Time` object lives in `EngineContext`, owned by `Core`. It is not a singleton.
 - `Core::Update` calls `Time::Advance` once per frame, paused or not.
 - Pause freezes the simulation, not the frame. Rendering and the editor keep running.
 - Step is a fixed 1/60 s tick. Resume after a long pause is also one 1/60 s step.
-- The toggles live in the editor. No HTTP route pauses or steps directly. `/frame_debugger/enable` pauses as a side effect.
+- The toggles live in the editor. No HTTP route pauses or steps directly. `/frame_debugger/enable` pauses as a side effect and `value=false` resumes.
 
 ## Time API
 | Call | Value |
@@ -58,7 +58,7 @@ m_game.Update(m_engineContext, *input.inputState);
 ## Toolbar
 - `BuildPlaybackToolbar` (`src/Editor/PlaybackControls.cpp`) draws a strip under the menu bar.
 - One button toggles `Pause` and `Resume`. The `Step` button is disabled unless paused.
-- Enabling the Frame Debugger also sets `playbackPaused`. Disabling it does not resume. See [Frame debugger](../debugging/frame-debugger.md).
+- Enabling the Frame Debugger also sets `playbackPaused`. Disabling it resumes, unless the user had paused first. Clicking Resume turns the Frame Debugger off. See [Frame debugger](../debugging/frame-debugger.md).
 
 ## Checks
 | Test | Proves |

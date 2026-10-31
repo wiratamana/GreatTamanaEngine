@@ -348,7 +348,7 @@ Captures one frame of the Game view and lets you inspect each draw. All routes a
 | Route | Params | Effect |
 |---|---|---|
 | `/frame_debugger/open` | none | Opens the window. It is pinned once to the main ImGui viewport so `/get_swapchain` can see it. |
-| `/frame_debugger/enable` | `value=true` or `false` | Same as the checkbox. Enable pauses playback and arms a capture. Disable clears the capture. It does not resume playback. |
+| `/frame_debugger/enable` | `value=true` or `false` | Same as the checkbox. `true` opens the window, pauses the game and arms a capture. `false` clears the capture and resumes the game if the debugger paused it. |
 | `/frame_debugger/capture` | none | Arms a capture for the next frame. `409` while not enabled. |
 | `/frame_debugger/select_event` | `index` integer. `-1` deselects. Clamped to the count. | Selects a tree event. |
 | `/frame_debugger/set_channel` | `value=all`, `r`, `g`, `b` or `a` | Channel isolation. Other value = `400`. |
@@ -356,7 +356,8 @@ Captures one frame of the Game view and lets you inspect each draw. All routes a
 | `/frame_debugger/state` | none | Flat JSON, no `success` field. |
 | `/frame_debugger/get_event_texture` | `index` (per-draw index), `format=json` for base64 JSON | PNG of one draw's attachment. |
 
-- `state` returns: `enabled`, `windowOpen`, `hasCapturedFrame`, `totalEventCount`, `selectedEventIndex`, `channel`, `levelsBlack`, `levelsWhite`, `perDrawEventCount`.
+- `state` returns: `enabled`, `windowOpen`, `hasCapturedFrame`, `totalEventCount`, `selectedEventIndex`, `channel`, `levelsBlack`, `levelsWhite`, `perDrawEventCount`, `captureStatus` (`disabled`, `pending`, `captured`, `failed`), `captureError` (text, only when `failed`).
+- While enabled, the Game view renders every frame even if the Game tab is hidden, so `/get_game_view` works.
 - Other routes reply `{"success":b,"state":{...}}`. A failure is `409` with `"state"` inside, so you can see why.
 - `perDrawEventCount` has its own index space. It is not the tree `eventIndex`.
 - Only the armed per-draw index is kept (VRAM bound). A new index re-arms and returns `404` first. Poll until `200`.
@@ -367,10 +368,10 @@ Captures one frame of the Game view and lets you inspect each draw. All routes a
 Capture flow:
 1. `GET /frame_debugger/open`, then `GET /frame_debugger/enable?value=true`.
 2. `GET /frame_debugger/capture`. `success` must be `true`.
-3. Poll `GET /frame_debugger/state` until `hasCapturedFrame` is `true` and `totalEventCount > 0`.
+3. Poll `GET /frame_debugger/state` until `captureStatus` is `captured` (or stop on `failed`).
 4. `GET /frame_debugger/select_event?index=N`, then `GET /get_swapchain` to see the window. Or `GET /frame_debugger/get_event_texture?index=K` for one draw.
 5. Optional: `set_channel`, `set_levels`.
-6. `GET /frame_debugger/enable?value=false`. Playback stays paused. Resume it in the UI.
+6. `GET /frame_debugger/enable?value=false`. The game runs again if the debugger paused it.
 
 Gotcha: while the debugger is enabled, GpuDrivenScene reports `inertReason:"capture armed"` and `cpuCullState:"suppressed: frame capture"`. Close it before you benchmark.
 

@@ -612,23 +612,9 @@ std::string BuildUnknownTabNameResponseJson(const std::string& tabName);
 // drift out of sync with what GET /activate_tab itself accepts).
 std::string BuildListTabsResponseJson();
 
-// --- task_manager/frame-debugger-3 campaign, PHASE7
-// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) -
-// GET /frame_debugger/open, /enable, /capture, /select_event,
-// /set_channel, /set_levels, /state. Every function below stays PURE - no
-// httplib/socket/thread/Editor/ImGui/FrameDebuggerCommandBridge dependency
-// of any kind, exactly like every other function in this file (see this
-// file's own header comment) - NetworkServer.cpp is the one place that
-// converts a parsed query into a real FrameDebuggerCommandRequest and calls
-// FrameDebuggerCommandBridge::SubmitAndWait().
+// --- /frame_debugger/* routes. Pure parsing and JSON building; NetworkServer.cpp talks to the bridge.
 
-// Parsed, validated GET /frame_debugger/enable query. `valid == false`
-// means `errorMessage` explains exactly why (a 400 response). Validation:
-// "value" must be present and EXACTLY "true" or "false" (case-sensitive,
-// matching this file's existing exact-lowercase-matching convention -
-// e.g. ParseGetTextureQuery()'s own "color"/"depth") - otherwise "missing
-// or invalid required query parameter: value - must be \"true\" or
-// \"false\"".
+// Parsed GET /frame_debugger/enable query. `value` must be exactly "true" or "false".
 struct ParsedFrameDebuggerEnableQuery {
     bool valid = false;
     std::string errorMessage;
@@ -636,14 +622,8 @@ struct ParsedFrameDebuggerEnableQuery {
 };
 ParsedFrameDebuggerEnableQuery ParseFrameDebuggerEnableQuery(const std::string& valueParam);
 
-// Parsed, validated GET /frame_debugger/select_event query. "index" must be
-// present and parse as a whole decimal integer (optionally negative, e.g.
-// "-1" to deselect) - otherwise "missing or invalid required query
-// parameter: index - must be an integer". No range validation happens here
-// - FrameDebuggerPanel::SelectEventFromCommand() clamps it against the
-// currently-viewed captured frame's own totalEventCount via
-// ClampSelectedEventIndex(), the same as a real tree-row click already
-// does.
+// Parsed GET /frame_debugger/select_event query. `index` is a whole integer, negative deselects.
+// Range clamping happens later, against the captured frame.
 struct ParsedFrameDebuggerSelectEventQuery {
     bool valid = false;
     std::string errorMessage;
@@ -651,13 +631,8 @@ struct ParsedFrameDebuggerSelectEventQuery {
 };
 ParsedFrameDebuggerSelectEventQuery ParseFrameDebuggerSelectEventQuery(const std::string& indexParam);
 
-// Parsed, validated GET /frame_debugger/set_channel query. "value" must be
-// present and EXACTLY one of "all"/"r"/"g"/"b"/"a" (case-sensitive) -
-// otherwise "invalid channel - must be \"all\", \"r\", \"g\", \"b\", or
-// \"a\"". NOTE: this is a DELIBERATELY DIFFERENT parameter name/value set
-// from /get_texture's own "channel=color|depth" query parameter - see
-// PHASE0_MASTER_STRATEGY.md's Step 2 and PHASE6_CHANNELS_AND_LEVELS_REAL_PREVIEW.md's
-// own Step 2 for exactly why these must never collide.
+// Parsed GET /frame_debugger/set_channel query. `value` is exactly "all", "r", "g", "b" or "a".
+// Not the same as /get_texture's "channel=color|depth".
 struct ParsedFrameDebuggerSetChannelQuery {
     bool valid = false;
     std::string errorMessage;
@@ -665,16 +640,7 @@ struct ParsedFrameDebuggerSetChannelQuery {
 };
 ParsedFrameDebuggerSetChannelQuery ParseFrameDebuggerSetChannelQuery(const std::string& valueParam);
 
-// Parsed, validated GET /frame_debugger/set_levels query. Both "black" and
-// "white" must be present and parse as valid decimal numbers - otherwise
-// "missing or invalid required query parameter: black/white - must be a
-// number" (one distinct message per which parameter actually failed). No
-// black < white ordering is enforced here - FrameDebuggerPanel::
-// SetLevelsFromCommand() applies the same defensive
-// "white > black + 0.001f" clamp the Levels UI control itself already
-// does, so a caller-supplied inverted/degenerate pair is silently
-// corrected rather than rejected (matching that control's own existing,
-// documented tolerance).
+// Parsed GET /frame_debugger/set_levels query. Both numbers are required; ordering is fixed up later.
 struct ParsedFrameDebuggerSetLevelsQuery {
     bool valid = false;
     std::string errorMessage;
@@ -684,18 +650,10 @@ struct ParsedFrameDebuggerSetLevelsQuery {
 ParsedFrameDebuggerSetLevelsQuery ParseFrameDebuggerSetLevelsQuery(
     const std::string& blackParam, const std::string& whiteParam);
 
-// A plain, Application/FrameDebuggerCommandBridge-independent view of the
-// Frame Debugger's read-only state - NetworkServer.cpp is the one place
-// that copies a real FrameDebuggerStateOutcome
-// (src/Application/FrameDebuggerCommandBridge.h) into this struct, one
-// field at a time, mirroring TextureListEntryView's own doc comment
-// ("a struct crossing a layer boundary is never accepted directly here").
+// Frame Debugger state as the routes see it. NetworkServer.cpp copies the bridge outcome into it field by field.
 struct FrameDebuggerStateResponseView {
     bool enabled = false;
     bool windowOpen = false;
-    // task_manager/frame-debugger-7 campaign, PHASE1 - REPLACES
-    // `historyCount`/`historyCursor` - there is only ever ONE captured
-    // frame now.
     bool hasCapturedFrame = false;
     int totalEventCount = 0;
     int selectedEventIndex = -1;
@@ -703,29 +661,21 @@ struct FrameDebuggerStateResponseView {
     float levelsBlack = 0.0f;
     float levelsWhite = 1.0f;
 
-    // Per-draw event capture - a NEW, additive field; every existing field's
-    // own name/type/meaning is unchanged. See
-    // FrameDebuggerStateOutcome::perDrawEventCount's own doc comment
-    // (src/Application/FrameDebuggerCommandBridge.h).
+    // Draw events recorded in the captured frame. 0 until a capture exists.
     int perDrawEventCount = 0;
+
+    // "disabled", "pending", "captured" or "failed".
+    std::string captureStatus = "disabled";
+
+    // Reason text. Empty unless captureStatus is "failed".
+    std::string captureError;
 };
 
-// Builds GET /frame_debugger/state's entire response body (a flat object,
-// no "success" wrapper - this is a pure status read, never an action):
-// {"enabled":bool,"windowOpen":bool,"hasCapturedFrame":bool,
-//  "totalEventCount":int,"selectedEventIndex":int,"channel":"all",
-//  "levelsBlack":0.0,"levelsWhite":1.0}
+// Builds the GET /frame_debugger/state body: a flat object with every field of the view, no "success" wrapper.
 std::string BuildFrameDebuggerStateResponseJson(const FrameDebuggerStateResponseView& state);
 
-// Builds the response body for every OTHER /frame_debugger/* route
-// (open/enable/capture/select_event/set_channel/set_levels):
-//   - success == true  -> {"success":true,"state":{...same shape as
-//     BuildFrameDebuggerStateResponseJson() above...}}
-//   - success == false -> {"success":false,"error":"<errorMessage>",
-//     "state":{...}} (the resulting state is still reported even on a
-//     logical failure, e.g. "capture requested while not enabled" - an AI
-//     verifier can see exactly why nothing changed without a SEPARATE
-//     GET /frame_debugger/state round-trip)
+// Builds the body of every other /frame_debugger/* route:
+// {"success":true,"state":{...}} or {"success":false,"error":"...","state":{...}}.
 std::string BuildFrameDebuggerCommandResponseJson(
     bool success, const std::string& errorMessage, const FrameDebuggerStateResponseView& state);
 

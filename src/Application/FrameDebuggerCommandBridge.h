@@ -1,13 +1,7 @@
 #pragma once
 
-// Cross-thread bridge for network-driven Frame Debugger commands: open the
-// window, enable/disable capture, select an event, adjust channel/levels,
-// read current state, or fetch one real per-draw event's own captured
-// image. See SyncCommandBridge.h for the handoff mechanism.
-//
-// GET /frame_debugger/state also goes through this bridge (a GetState
-// command) rather than a direct read - the Frame Debugger's state is
-// mutable, main-thread-owned data with no atomics of its own.
+// Cross-thread bridge for network-driven Frame Debugger commands.
+// GET /frame_debugger/state goes through it too: the state is main-thread data.
 
 #include "SyncCommandBridge.h"
 
@@ -25,7 +19,7 @@ enum class FrameDebuggerCommandKind {
     SetChannel,
     SetLevels,
     GetState,
-    GetEventTexture, // Per-draw event capture - GET /frame_debugger/get_event_texture.
+    GetEventTexture,
 };
 
 struct FrameDebuggerSetEnabledCommand {
@@ -37,7 +31,7 @@ struct FrameDebuggerSelectEventCommand {
 };
 
 struct FrameDebuggerSetChannelCommand {
-    // "all"|"r"|"g"|"b"|"a" - already validated before submission.
+    // "all", "r", "g", "b" or "a". Validated before submission.
     std::string channel;
 };
 
@@ -50,8 +44,7 @@ struct FrameDebuggerGetEventTextureCommand {
     int index = -1;
 };
 
-// One pending Frame Debugger command, tagged by `kind` - only the field
-// matching `kind` is meaningful.
+// One pending command. Only the field matching `kind` is meaningful.
 struct FrameDebuggerCommandRequest {
     FrameDebuggerCommandKind kind = FrameDebuggerCommandKind::GetState;
     FrameDebuggerSetEnabledCommand setEnabled;
@@ -61,9 +54,7 @@ struct FrameDebuggerCommandRequest {
     FrameDebuggerGetEventTextureCommand getEventTexture;
 };
 
-// The Frame Debugger's read-only state snapshot. A completely independent,
-// Application-owned type - this header never depends on anything under
-// src/Editor/.
+// Read-only Frame Debugger state. Independent of anything under src/Editor/.
 struct FrameDebuggerStateOutcome {
     bool enabled = false;
     bool windowOpen = false;
@@ -74,18 +65,17 @@ struct FrameDebuggerStateOutcome {
     float levelsBlack = 0.0f;
     float levelsWhite = 1.0f;
 
-    // Per-draw event capture - the live NextEventIndex() high-water mark for
-    // whichever frame is currently captured. A NEW, additive field,
-    // defaulting to 0 until a real capture has happened at least once -
-    // every existing field's own name/type/meaning is unchanged.
+    // Draw events recorded in the captured frame. 0 until a capture exists.
     int perDrawEventCount = 0;
+
+    // "disabled", "pending", "captured" or "failed".
+    std::string captureStatus = "disabled";
+
+    // Reason text. Empty unless captureStatus is "failed".
+    std::string captureError;
 };
 
-// Per-draw event capture outcome - meaningful only for
-// FrameDebuggerCommandKind::GetEventTexture. `pixels` is already-PNG-encoded
-// bytes, the same encoding GET /get_texture already returns. `found` is
-// false whenever that exact index has never been captured yet (including
-// the normal "just armed, wait for the next captured frame" case).
+// Result of GetEventTexture. `pixels` is PNG-encoded; `found` is false until that event index is captured.
 struct FrameDebuggerEventTextureOutcome {
     bool found = false;
     std::vector<std::uint8_t> pixels;
@@ -93,15 +83,13 @@ struct FrameDebuggerEventTextureOutcome {
     std::uint32_t height = 0;
 };
 
-// Outcome of one FrameDebuggerCommandRequest. `success` is false for
-// CaptureNow when capture isn't enabled, or SetChannel given an
-// unrecognized string. `state` is always populated with the resulting
-// state after the command ran.
+// Outcome of one command. `success` is false for CaptureNow while disabled or SetChannel with a bad string.
+// `state` is always the state after the command ran.
 struct FrameDebuggerCommandResult {
     FrameDebuggerCommandKind kind = FrameDebuggerCommandKind::GetState;
     bool success = true;
     FrameDebuggerStateOutcome state;
-    // Meaningful only when kind == FrameDebuggerCommandKind::GetEventTexture.
+    // Only meaningful when kind == GetEventTexture.
     FrameDebuggerEventTextureOutcome eventTexture;
 };
 

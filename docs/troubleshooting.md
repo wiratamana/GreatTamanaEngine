@@ -1,6 +1,6 @@
 # Troubleshooting
 > Symptom, cause and fix for the most common problems: build, start, HTTP, rendering, projects and tests.
-> Verified against code: 2026-10-30. HTTP behaviour is read from code, not from a live run.
+> Verified against code: 2026-10-31. HTTP behaviour is read from code, not from a live run.
 
 ## TL;DR
 - Build problems: almost always the toolchain. Only MinGW-w64 and Ninja work.
@@ -60,12 +60,12 @@ More on codes: [HTTP cheat sheet](debugging/http-cheat-sheet.md#4-status-codes).
 | Feature status `NotRendered` | The view did not render for a few frames, or the feature or pass is off in that view | Scene view defaults: see [Render features](reference/render-features/README.md#scene-view-defaults). |
 | Feature setting rejected | `set` is all or none. One bad key gives `400`. | Fix the key. Read the `error` text. |
 | Settings gone after a scene load | Settings live in memory. Scenes do not save them. | Set them again. |
-| `inertReason` is `capture armed` | The Frame Debugger is on | `GET /frame_debugger/enable?value=false`. Playback stays paused. |
+| `inertReason` is `capture armed` | The Frame Debugger is on | `GET /frame_debugger/enable?value=false`. Playback resumes. |
 | Culling seems off | `mode` is `NoCull`, or `inertReason` is not `none` | `GET /feature_debug/state?name=GpuDrivenScene`. See [GPU-driven scene](reference/render-features/gpu-driven-scene.md). |
 | Hi-Z not used | `hizReason` is `Unavailable`, `TooLarge` or `NothingInView` | Read the reason. It says why the view skipped Hi-Z. |
 | Log shows `RenderPassHonesty` | A pass runs although its toggle says off | Fix the pass name at the declaration. See [Render honesty](conventions/render-honesty.md). |
 | Log shows `FrameDebuggerCoverage` or `FrameDebuggerSideChannel` | A pass is not a leaf, or hidden data leaks while off | Same doc. Follow the clause in the message. |
-| Frame Debugger tree is empty | Capture takes two frames | Poll `/frame_debugger/state` for `hasCapturedFrame:true`. |
+| Frame Debugger tree is empty | Capture takes one or two frames, or it failed | Poll `/frame_debugger/state`: `captureStatus:captured`. If `failed`, read `captureError`. |
 | One bad frame, then fine | The offscreen graph threw. Logged once per message. | `GET /get_logs?min_level=error`. |
 
 ## Projects and hot reload

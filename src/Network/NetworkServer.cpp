@@ -256,13 +256,7 @@ void RegisterRenderGraphRoute(httplib::Server& server, FrameCaptureBridge* captu
     });
 }
 
-// task_manager/frame-debugger-3 campaign, PHASE7
-// (PHASE7_NETWORK_HTTP_AUTOMATION_AND_MAIN_VIEWPORT_PINNING.md) - copies a
-// real FrameDebuggerStateOutcome (src/Application/FrameDebuggerCommandBridge.h)
-// into NetworkRoutes.h's own, completely independent
-// FrameDebuggerStateResponseView, one field at a time - the same "a struct
-// crossing a layer boundary is never accepted directly by NetworkRoutes.h"
-// convention TextureListEntryView's own doc comment already establishes.
+// Copies the bridge outcome into the route's own view, field by field.
 FrameDebuggerStateResponseView ToFrameDebuggerStateResponseView(const FrameDebuggerStateOutcome& outcome)
 {
     FrameDebuggerStateResponseView view;
@@ -275,6 +269,8 @@ FrameDebuggerStateResponseView ToFrameDebuggerStateResponseView(const FrameDebug
     view.levelsBlack = outcome.levelsBlack;
     view.levelsWhite = outcome.levelsWhite;
     view.perDrawEventCount = outcome.perDrawEventCount;
+    view.captureStatus = outcome.captureStatus;
+    view.captureError = outcome.captureError;
     return view;
 }
 
@@ -341,12 +337,7 @@ void RegisterFaultRoutes([[maybe_unused]] httplib::Server& server)
 #endif
 }
 
-// Shared tail for every /frame_debugger/* route EXCEPT /state (which needs
-// its own, slightly different 200-only-on-success-read shape - see that
-// route's own lambda below): maps alreadyPending/timedOut/outcome.success
-// to a status code + BuildFrameDebuggerCommandResponseJson(), exactly
-// mirroring /activate_tab's own alreadyPending/timedOut -> 503/504 mapping
-// immediately above.
+// Shared tail of every /frame_debugger/* route except /state: maps pending/timeout/result to 503/504/200/409.
 void RespondWithFrameDebuggerCommandResult(
     httplib::Response& res, const FrameDebuggerCommandBridge::SubmitResult& submit)
 {
@@ -369,11 +360,8 @@ void RespondWithFrameDebuggerCommandResult(
         "application/json");
 }
 
-// GET /frame_debugger/get_event_texture's own response shape - an IMAGE
-// (same raw-PNG/base64-JSON negotiation GET /get_texture already uses via
-// ResolveCaptureResponseFormat()/BuildCaptureJsonBody()), never the generic
-// {"success":...,"state":{...}} shape every other /frame_debugger/* route
-// uses - this route's whole point is handing back a real picture.
+// Response of GET /frame_debugger/get_event_texture: a PNG or base64 JSON (same negotiation as /get_texture),
+// not the {"success","state"} shape of the other routes.
 void WriteFrameDebuggerEventTextureResponse(
     const FrameDebuggerCommandBridge::SubmitResult& submit, const httplib::Request& req, httplib::Response& res)
 {
@@ -1315,11 +1303,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         RespondWithFrameDebuggerCommandResult(res, submit);
     });
 
-    // GET /frame_debugger/state - a READ-ONLY status endpoint. Goes through
-    // the SAME bridge (a GetState command kind) rather than a lighter-weight
-    // direct read - see FrameDebuggerCommandBridge.h's own header comment
-    // for exactly why (the Frame Debugger's state is genuinely mutable,
-    // main-thread-owned data with no atomics of its own).
+    // GET /frame_debugger/state: read-only, but still goes through the bridge (the state is main-thread data).
     server.Get("/frame_debugger/state", [frameDebuggerCommandBridge](const httplib::Request&, httplib::Response& res) {
         if (frameDebuggerCommandBridge == nullptr) {
             res.status = 503;
@@ -1343,16 +1327,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(BuildFrameDebuggerStateResponseJson(ToFrameDebuggerStateResponseView(submit.result->state)), "application/json");
     });
 
-    // Per-draw event capture - GET /frame_debugger/get_event_texture?index=N.
-    // Reuses ParseFrameDebuggerSelectEventQuery()'s own required-integer
-    // "index" parsing (identical shape - a plain, required event index) -
-    // never a second, near-duplicate parser.
-    // Reachable end-to-end: RenderSystem::Draw()'s own `cmd` parameter feeds
-    // gte::rg::CommandBuffer::Draw(), which calls
-    // FrameDebuggerEventSink::NoteCommandResult()/FlushPendingCapture() per
-    // draw - see Core/FrameDebuggerEventSink.h. Still returns 404/found==false
-    // until the requested event index has actually been (re)armed and a
-    // matching frame has been captured.
+    // GET /frame_debugger/get_event_texture?index=N. 404 until that event index has been captured.
     server.Get("/frame_debugger/get_event_texture",
         [frameDebuggerCommandBridge](const httplib::Request& req, httplib::Response& res) {
             const ParsedFrameDebuggerSelectEventQuery parsed =

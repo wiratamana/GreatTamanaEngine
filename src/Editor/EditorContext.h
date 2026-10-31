@@ -144,37 +144,13 @@ struct EditorContext {
     // height, which only BuildAssetInspector() (mid-ImGui-layout) knows.
     float inspectorPreviewHeight = 260.0f;
 
-    // frame-debugger-1 campaign (task_manager/frame-debugger-1/
-    // PHASE3_EDITOR_PAUSE_STEP_STATE_AND_TOOLBAR_UI.md) - true whenever the
-    // user has toggled gameplay simulation paused via the toolbar's
-    // Pause/Resume button (see PlaybackControls.h). False by default - a
-    // brand-new session behaves EXACTLY like before this campaign (nothing
-    // paused, Game::Update() simulates normally every frame) until the user
-    // explicitly pauses. Read once per frame by
-    // Application::Run()/IEditorLayer::IsPlaybackPaused() - see PHASE4.
+    // True while gameplay simulation is paused: the Pause/Resume button, or the Frame Debugger.
     bool playbackPaused = false;
 
-    // True for exactly the one frame after the user clicks "Step" while
-    // playbackPaused is already true - set by PlaybackControls.cpp's own
-    // button handler, consumed (read-and-cleared) by
-    // IEditorLayer::TryConsumeStepRequest() - see PHASE4. Clicking "Step"
-    // while NOT already paused is a no-op (the button is rendered disabled
-    // while playbackPaused is false - see PlaybackControls.cpp).
+    // True for one frame after "Step" is clicked while paused.
     bool stepOneFrameRequested = false;
 
-    // task_manager/frame-debugger-2 campaign (PHASE2) - true whenever
-    // the Editor's on-demand "Frame Debugger" floating window
-    // (Panels/FrameDebuggerPanel.h) is currently open. Flipped directly
-    // by DockLayout.cpp's checkable "Window > Frame Debugger" menu item
-    // (ImGui::MenuItem's own 3-argument overload writes straight through
-    // a bool*), and passed as ImGui::Begin()'s own p_open parameter by
-    // FrameDebuggerPanel::Build() - so the window's titlebar [x] close
-    // button keeps this exact same bool in sync automatically, in both
-    // directions. False by default (closed on a fresh session) -
-    // mirrors BoneViewerWindow's own default-closed-until-opened
-    // behavior, just via a shared EditorContext bool instead of a
-    // private member (see FrameDebuggerPanel.h's own class comment for
-    // why).
+    // True while the Frame Debugger window is open. The menu item and the title-bar close button write it.
     bool frameDebuggerWindowOpen = false;
 
     // True when the floating "Render Graph" window (Panels/RenderGraphPanel.h)
@@ -193,11 +169,7 @@ struct EditorContext {
     // and the window's own titlebar close button. Defaults to false.
     bool renderFeaturesWindowOpen = false;
 
-    // Set true in RenderGraphPanel::Build() when a before/after snapshot
-    // diff (DidRenderPassToggleEnabledStatesChange) detects any pass toggle
-    // checkbox flip this frame (Pass Tree, or Isolate Pass). Read-and-cleared
-    // by FrameDebuggerPanel::Build() to trigger a fresh capture so a toggled
-    // pass doesn't linger with stale debugger data.
+    // Set by the Render Graph panel when a pass toggle flips. The Frame Debugger reads and clears it to capture again.
     bool renderPassToggleRegistryChangedThisFrame = false;
 
 

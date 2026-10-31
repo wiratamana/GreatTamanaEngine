@@ -255,8 +255,8 @@ public:
 
     RenderTexture* PrimaryViewTarget() override
     {
-        // Skip rendering while the panel is not visible (inactive tab or collapsed); nobody would see it.
-        if (!m_ctx.gameViewVisible) {
+        // The Frame Debugger needs the Game view rendered even when its tab is hidden.
+        if (!m_ctx.gameViewVisible && !m_frameDebuggerPanel.IsCaptureArmed(m_ctx)) {
             return nullptr;
         }
 
@@ -770,8 +770,7 @@ public:
         return result;
     }
 
-
-    // Frame Debugger capture hooks; both forward into m_frameDebuggerPanel, which owns the capture state.
+    // Frame Debugger hooks: all state lives in m_frameDebuggerPanel.
     IFrameDebuggerCaptureRecorder* PrepareFrameDebuggerCaptureContext() override
     {
         return m_frameDebuggerPanel.PrepareCaptureContextForThisFrame(m_ctx);
@@ -779,13 +778,13 @@ public:
 
     void NotifyFrameDebuggerStepConsumed() override { m_frameDebuggerPanel.NotifyStepConsumed(); }
 
-    // Forwards to m_frameDebuggerPanel.
     bool ConsumePendingFrameDebuggerReplayRequest() override
     {
         return m_frameDebuggerPanel.ConsumePendingReplayRequest();
     }
 
-    // Frame Debugger HTTP commands; each forwards to the matching m_frameDebuggerPanel method.
+    void FrameDebuggerNotifyOffscreenFailed() override { m_frameDebuggerPanel.NotifyOffscreenFailed(); }
+
     void FrameDebuggerOpenWindow() override { m_frameDebuggerPanel.RequestOpenWindow(m_ctx); }
     void FrameDebuggerSetEnabled(bool enabled) override { m_frameDebuggerPanel.SetEnabledFromCommand(m_ctx, enabled); }
 

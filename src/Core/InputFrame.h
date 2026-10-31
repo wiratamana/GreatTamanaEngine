@@ -27,16 +27,7 @@ struct InputFrame {
     // other nullable-hook conventions (e.g. IEditorLayer* itself).
     const InputState* inputState = nullptr;
 
-    // frame-debugger-1 campaign's own Pause/Step semantics (AGENTS.md, "Time
-    // and Playback Pause"). PHASE0_MASTER_STRATEGY.md's Locked Design
-    // Decision #8 puts IEditorLayer::IsPlaybackPaused()/
-    // TryConsumeStepRequest()/NotifyFrameDebuggerStepConsumed() in the
-    // HOST-LEVEL bucket (never called through Core's own m_editorLayer
-    // hook) - Application/EditorHost resolves these directly against its
-    // own m_editorLayer BEFORE calling Core::Update(), and threads the
-    // already-resolved booleans in here as plain data. Core::Update() never
-    // reaches through its own m_editorLayer hook for playback-pause
-    // concerns at all.
+    // Pause and step state, resolved by the host before Core::Update(). Core never queries the editor layer for them.
     bool playbackPaused = false;
     bool stepRequested = false;
 };

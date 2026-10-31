@@ -2566,7 +2566,8 @@ Editor/RenderGraphDisplayTextTests.cpp
         Editor/LogPanelDataTests.cpp
         Editor/FrameDebuggerDataTests.cpp
         Editor/FrameDebuggerCaptureTests.cpp
-        Editor/FrameDebuggerHistoryTests.cpp
+        Editor/FrameDebuggerCapturedFrameTests.cpp
+        Editor/FrameDebuggerCaptureHandshakeTests.cpp
         Editor/FrameDebuggerSnapshotBuilderTests.cpp
         Editor/FrameDebuggerPreviewProcessingTests.cpp
         # editor-core-separation-7 campaign, PHASE3 - gte_editor-tier "Export
@@ -2998,10 +2999,14 @@ set(GTE_COMMENT_RULE_SRC
     Core/Plugins/RenderFeatureCompositor.h Core/Plugins/RenderFeatureCompositorBlend.cpp
     Core/Plugins/RenderFeatureCompositorImpl.cpp Core/Plugins/RenderFeatureCompositorImpl.h
     Core/Plugins/RenderFeatureNamePool.h
-    Editor/FrameDebuggerHistory.cpp Editor/FrameDebuggerHistory.h
+    Editor/FrameDebuggerCapturedFrame.cpp Editor/FrameDebuggerCapturedFrame.h
     Editor/FrameDebuggerPreviewProcessing.cpp Editor/FrameDebuggerPreviewProcessing.h
     Editor/FrameDebuggerSideChannelChecker.cpp Editor/FrameDebuggerSideChannelChecker.h
-    Editor/Panels/FrameDebuggerPanel.cpp
+    Editor/Panels/FrameDebuggerPanel.cpp Editor/Panels/FrameDebuggerPanel.h
+    Editor/FrameDebuggerData.h Editor/FrameDebuggerData.cpp Editor/FrameDebuggerCoverageChecker.h
+    Editor/FrameDebuggerCoverageChecker.cpp Editor/FrameDebuggerCoverageGuard.h Editor/FrameDebuggerCoverageGuard.cpp
+    Editor/FrameDebuggerDrawRecording.cpp Editor/FrameDebuggerPassMetadataRecorder.h
+    Editor/FrameDebuggerCaptureHandshake.h Application/FrameDebuggerCommandBridge.h
     Game/Animation/AnimationSystem.cpp Game/Animation/AnimationSystem.h
     Game/Animation/GpuSkinningRigCache.cpp Game/Animation/GpuSkinningRigCache.h
     Game/RenderSystem.cpp Game/RenderSystem.h Game/SceneDrawPass.cpp Game/SceneDrawPass.h
@@ -3074,6 +3079,8 @@ set(GTE_COMMENT_RULE_SRC
     Features/SceneLighting/ Features/GpuDrivenScene/)
 set(GTE_COMMENT_RULE_TESTS
     Core/FeatureKit/ Core/GpuViewMetricsTests.cpp Editor/FrameDebuggerSideChannelCheckerTests.cpp
+    Editor/FrameDebuggerCaptureHandshakeTests.cpp Editor/FrameDebuggerCapturedFrameTests.cpp
+    Editor/FrameDebuggerCaptureTests.cpp
     Features/Shadow/SceneLightingUniformLayoutTests.cpp Features/Shadow/ShadowMaskParamsTests.cpp
     Features/Shadow/ShadowMathTests.cpp Features/Shadow/ShadowClusterLaneTests.cpp Game/SceneDrawPassTests.cpp
     Features/Gtao/GtaoMathTests.cpp Features/Gtao/GtaoParamsTests.cpp Features/Gtao/GtaoShaderNamesTests.cpp

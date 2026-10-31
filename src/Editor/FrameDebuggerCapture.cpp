@@ -46,8 +46,6 @@ FrameDebuggerStandardPipelineState DescribeSkyBackgroundPipelineState()
 void FrameDebuggerCaptureContext::RecordDraw(
     const std::string& pipelineDebugName, const std::vector<FrameDebuggerMaterialSlot>& slots, const Mat4& viewProjection)
 {
-    ++m_drawCallCount;
-
     if (!pipelineDebugName.empty()
         && std::find(m_pipelineDebugNames.begin(), m_pipelineDebugNames.end(), pipelineDebugName)
             == m_pipelineDebugNames.end()) {
@@ -80,16 +78,25 @@ void FrameDebuggerCaptureContext::RecordEntityDraw(std::uint32_t entityIndex, st
 
 void FrameDebuggerCaptureContext::Reset()
 {
+    m_active = true;
     m_pipelineDebugNames.clear();
     m_materialSlotRows.clear();
-    m_drawCallCount = 0;
     m_lastViewProjection = Mat4::Identity();
     m_drawRecords.clear();
     // Leftover replay-step targets must not outlive the capture frame.
     m_replayStepPreviews.clear();
-    // Remember the previous frame's event total before zeroing the counter.
     m_lastFrameEventCount = m_nextEventIndex;
     m_nextEventIndex = 0;
+}
+
+void FrameDebuggerCaptureContext::Deactivate() noexcept
+{
+    m_active = false;
+    m_nextEventIndex = 0;
+    m_lastFrameEventCount = 0;
+    m_armedEventIndex = -1;
+    m_retainedEventIndex = -1;
+    m_pendingEventCapture.reset();
 }
 
 void FrameDebuggerCaptureContext::InitializeEventCapture(Renderer& renderer) noexcept
@@ -99,8 +106,11 @@ void FrameDebuggerCaptureContext::InitializeEventCapture(Renderer& renderer) noe
 
 void FrameDebuggerCaptureContext::NoteCommandResult(const AttachmentWrite& write)
 {
+    if (!m_active) {
+        return;
+    }
     if (m_armedEventIndex < 0) {
-        NextEventIndex(); // Keep this frame's counter advancing even while disarmed.
+        NextEventIndex(); // Keeps the counter advancing while no event is armed.
         return;
     }
     const int index = NextEventIndex();

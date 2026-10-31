@@ -232,9 +232,10 @@ curl.exe http://127.0.0.1:8080/frame_debugger/state
 curl.exe "http://127.0.0.1:8080/frame_debugger/select_event?index=5"
 curl.exe "http://127.0.0.1:8080/frame_debugger/get_event_texture?index=5" -o draw5.png
 ```
-- Poll `state` until `hasCapturedFrame:true` and `totalEventCount` above 0.
+- Poll `state` until `captureStatus` is `captured`. `failed` gives a reason in `captureError`.
 - `get_event_texture` gives `404` until that index is armed and a later frame is captured. Poll it.
-- `enable?value=true` pauses playback. `enable?value=false` does not resume it. Resume in the editor.
+- `enable?value=true` pauses the game. `enable?value=false` resumes it (unless you had paused it first).
+- The Game view renders while it is on, even if the Game tab is hidden. `/get_game_view` works too.
 - While it is on, GpuDrivenScene is inert (`capture armed`). Close it before a benchmark.
 - Details: [Frame debugger](frame-debugger.md).
 
