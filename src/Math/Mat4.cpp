@@ -1,4 +1,4 @@
-﻿#include "Mat4.h"
+#include "Mat4.h"
 
 #include "Quat.h"
 
@@ -9,13 +9,8 @@ namespace gte {
 
 namespace {
 
-// Classic column-major 4x4 adjugate + determinant, based on the widely-
-// published "MESA glu invert matrix" cofactor-expansion algorithm (twelve
-// shared 2x2 sub-determinants reused across the sixteen adjugate entries).
-// Kept as one shared routine so Mat4::Determinant() and
-// Mat4::Inverse()/TryInverse() can never disagree with each other.
-// `m`/`adj` are column-major float[16] (index = col*4 + row), matching
-// Mat4::Data().
+// Column-major 4x4 cofactor expansion (index = col*4 + row, as Mat4::Data()).
+// One shared routine so Determinant() and TryInverse() always agree.
 void ComputeAdjugateAndDeterminant(const float m[16], float adj[16], float& det) noexcept
 {
     adj[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
@@ -39,6 +34,28 @@ void ComputeAdjugateAndDeterminant(const float m[16], float adj[16], float& det)
     adj[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] + m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
 
     det = m[0] * adj[0] + m[1] * adj[4] + m[2] * adj[8] + m[3] * adj[12];
+}
+
+// Relative determinant tolerance below which a matrix counts as singular (float epsilon is ~1.2e-7).
+constexpr float kSingularRelativeTolerance = 1.0e-6f;
+
+// Sum of |term| over the 24 products of the determinant expansion: the size the determinant can have without cancellation.
+float AbsDeterminantTermSum(const float m[16]) noexcept
+{
+    float sum = 0.0f;
+    for (int c0 = 0; c0 < 4; ++c0) {
+        for (int c1 = 0; c1 < 4; ++c1) {
+            if (c1 == c0)
+                continue;
+            for (int c2 = 0; c2 < 4; ++c2) {
+                if (c2 == c0 || c2 == c1)
+                    continue;
+                const int c3 = 6 - c0 - c1 - c2;
+                sum += std::fabs(m[c0 * 4 + 0] * m[c1 * 4 + 1] * m[c2 * 4 + 2] * m[c3 * 4 + 3]);
+            }
+        }
+    }
+    return sum;
 }
 
 } // namespace
@@ -147,10 +164,15 @@ bool Mat4::TryInverse(Mat4& outInverse) const noexcept
     float det;
     ComputeAdjugateAndDeterminant(Data(), adj, det);
 
-    if (std::fabs(det) <= kEpsilon)
+    // Singular when the determinant is lost in rounding noise of its own terms. Scale independent.
+    const float scale = AbsDeterminantTermSum(Data());
+    if (!(std::fabs(det) > kSingularRelativeTolerance * scale))
         return false;
 
-    float invDet = 1.0f / det;
+    const float invDet = 1.0f / det;
+    if (!std::isfinite(invDet))
+        return false;
+
     for (float& v : adj)
         v *= invDet;
 

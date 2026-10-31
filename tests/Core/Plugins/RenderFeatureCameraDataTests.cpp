@@ -37,6 +37,20 @@ TEST(RenderFeatureCameraDataTest, WellConditionedViewProjectionProducesValidChec
     EXPECT_TRUE(ApproximatelyEqual(result.invViewProjection, expectedInverse));
 }
 
+TEST(RenderFeatureCameraDataTest, LargeOrthographicViewProjectionProducesValidInverse)
+{
+    // Small determinant (~1e-12), but a regular matrix.
+    const float halfHeight = 1155.0f;
+    const float farZ = 200000.0f;
+    const Mat4 viewProjection = Mat4::OrthographicLH_ZO(-halfHeight * 1.6f, halfHeight * 1.6f, -halfHeight, halfHeight, -farZ, farZ, true)
+        * Mat4::LookAtLH(Vec3(0.0f, 2000.0f, 0.0f), Vec3(0.0f, 0.0f, 0.0f), Vec3(0.0f, 0.0f, 1.0f));
+    RenderPassViewData viewData = MakeViewData(viewProjection, Vec3(0.0f, 2000.0f, 0.0f));
+
+    const RenderFeatureCameraData result = ResolveRenderFeatureCameraData(rg::RenderViewId::Named("Primary"), &viewData);
+
+    EXPECT_TRUE(result.invViewProjectionValid);
+}
+
 TEST(RenderFeatureCameraDataTest, SingularViewProjectionProducesInvalidIdentityFallback)
 {
     // A default-constructed Mat4 is all-zero (see Mat4.h's own constructor

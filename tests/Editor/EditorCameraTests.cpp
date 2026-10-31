@@ -405,6 +405,41 @@ TEST(EditorCameraTest, NonFiniteInputIsIgnored)
 
     camera.Update(Frame(0.0f, 0.0f, 1.0f, false, false, nan));
     ExpectSamePose(camera, before);
+
+    EditorCameraInput badHeight = Frame(10.0f, 10.0f, 0.0f, true);
+    badHeight.viewportHeightPixels = nan;
+    camera.Update(badHeight);
+    ExpectSamePose(camera, before);
+}
+
+TEST(EditorCameraTest, OrthographicViewProjectionInvertsAtEveryDistanceAndAspect)
+{
+    constexpr float kAspects[] = { 1.0f, 16.0f / 9.0f, 719.0f / 447.0f, 3.0f };
+    constexpr float kDistances[] = { EditorCamera::kMinDistance, 1.0f, 21.0f, 22.0f, 100.0f, 2000.0f, 100000.0f };
+
+    for (const SceneViewAxis axis : { SceneViewAxis::PositiveY, SceneViewAxis::PositiveZ, SceneViewAxis::NegativeX }) {
+        for (const float distance : kDistances) {
+            EditorCamera camera;
+            camera.SetProjectionMode(CameraProjectionMode::Orthographic);
+            camera.AlignTo(axis);
+            ASSERT_TRUE(camera.SetDistance(distance));
+
+            for (const float aspect : kAspects) {
+                const Mat4 viewProjection = camera.ViewProjection(aspect);
+                Mat4 inverse;
+                ASSERT_TRUE(viewProjection.TryInverse(inverse)) << "distance=" << distance << " aspect=" << aspect;
+                // The depth range is -far..+far (far up to 1e7), so float rounding in the depth row is a few 1e-2.
+                const Mat4 product = inverse * viewProjection;
+                float maxError = 0.0f;
+                for (int r = 0; r < 4; ++r) {
+                    for (int c = 0; c < 4; ++c) {
+                        maxError = std::max(maxError, std::fabs(product(r, c) - (r == c ? 1.0f : 0.0f)));
+                    }
+                }
+                EXPECT_LT(maxError, 0.05f) << "distance=" << distance << " aspect=" << aspect;
+            }
+        }
+    }
 }
 
 TEST(EditorCameraSetPoseTest, RoundTripsPositionYawAndPitch)

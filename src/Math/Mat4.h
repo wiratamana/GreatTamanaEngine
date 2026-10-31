@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "MathTypes.h"
 #include "Vec3.h"
@@ -78,18 +78,13 @@ struct alignas(16) Mat4 {
 
     Mat4 Transposed() const noexcept;
 
-    // Cofactor-expansion determinant, computed from the same adjugate
-    // matrix Inverse()/TryInverse() below use internally - kept as one
-    // shared routine (see Mat4.cpp) so Determinant() and the inverse can
-    // never silently disagree with each other.
+    // Cofactor-expansion determinant (the same routine TryInverse() uses).
     float Determinant() const noexcept;
 
-    // Returns Identity() and (debug builds only) asserts if this matrix is
-    // singular (Determinant() ~ 0) - a singular matrix reaching Inverse()
-    // almost always means a programming error upstream (e.g. a zero
-    // scale). Callers that need to handle a singular matrix as a normal,
-    // expected outcome should use TryInverse() instead.
+    // Returns Identity() and asserts (debug builds) when singular. Use TryInverse() if that can happen legitimately.
     Mat4 Inverse() const noexcept;
+
+    // False when the determinant is rounding noise relative to its own terms (scale independent), or not finite.
     bool TryInverse(Mat4& outInverse) const noexcept;
 
     // w=1: applies translation - use for positions/points. Does NOT

@@ -1,4 +1,4 @@
-﻿// Unit tests for Mat4 (src/Math/Mat4.h). Where possible these use exact,
+// Unit tests for Mat4 (src/Math/Mat4.h). Where possible these use exact,
 // hand-verified expected values (see comments per test) rather than
 // comparing against a second math library - see src/Math/MathTypes.h for
 // why that was judged an acceptable risk tradeoff for this from-scratch
@@ -95,6 +95,31 @@ TEST(Mat4Tests, SingularMatrixHasNoInverse)
     Mat4 singular = Mat4::Scaling(Vec3(1.0f, 0.0f, 1.0f)); // collapses Y to zero
     Mat4 inv;
     EXPECT_FALSE(singular.TryInverse(inv));
+}
+
+TEST(Mat4Tests, ZeroAndRankDeficientMatricesHaveNoInverse)
+{
+    Mat4 inv;
+    EXPECT_FALSE(Mat4{}.TryInverse(inv));
+
+    // Two equal columns: rank 3, large entries, determinant is pure rounding noise.
+    Mat4 equalColumns = Mat4::TRS(Vec3(1000.0f, -2.0f, 3.0f), Quat::FromAxisAngle(Normalize(Vec3(1.0f, 2.0f, 3.0f)), 0.7f), Vec3(5.0f, 5.0f, 5.0f));
+    equalColumns.columns[2] = equalColumns.columns[0];
+    EXPECT_FALSE(equalColumns.TryInverse(inv));
+
+    // A zero row.
+    Mat4 zeroRow = Mat4::Identity();
+    zeroRow.columns[0].y = zeroRow.columns[1].y = zeroRow.columns[2].y = zeroRow.columns[3].y = 0.0f;
+    EXPECT_FALSE(zeroRow.TryInverse(inv));
+}
+
+TEST(Mat4Tests, TinyButRegularMatrixStillInverts)
+{
+    // Determinant is far below 1e-6 but the matrix is well conditioned.
+    const Mat4 m = Mat4::Scaling(Vec3(1.0e-3f, 2.0e-3f, 5.0e-8f));
+    Mat4 inv;
+    ASSERT_TRUE(m.TryInverse(inv));
+    EXPECT_TRUE(ApproximatelyEqual(inv * m, Mat4::Identity(), 1.0e-4f));
 }
 
 // Eye at the origin, looking straight down +Z (this engine's forward) with

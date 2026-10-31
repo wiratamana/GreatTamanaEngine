@@ -27,7 +27,7 @@ bool IsWithin(float value, float limit) noexcept
 void EditorCamera::Update(const EditorCameraInput& input) noexcept
 {
     if (!std::isfinite(input.mouseDelta.x) || !std::isfinite(input.mouseDelta.y) || !std::isfinite(input.scrollNotches)
-        || !std::isfinite(input.deltaSeconds)) {
+        || !std::isfinite(input.deltaSeconds) || !std::isfinite(input.viewportHeightPixels)) {
         return;
     }
 
