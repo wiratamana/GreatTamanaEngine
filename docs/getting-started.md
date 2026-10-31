@@ -1,6 +1,6 @@
 # Getting started
 > A 30-minute path from a fresh clone to a running editor, a loaded scene, a game project and a first HTTP call.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-10-31
 
 ## TL;DR
 - Build with MinGW-w64 and Ninja. Run `build\GreatTamanaEditor.exe`.
@@ -58,7 +58,7 @@ curl.exe http://127.0.0.1:8080/profiler
 | `/http_hello_world` | Plain text. Proves the server is alive |
 | `/get_logs` | Log entries as JSON. Filter with `min_level`, `category`, `keyword`, `limit` |
 | `/get_blocking_errors` | Only the entries that block. Empty means all is fine |
-| `/get_game_view` | A PNG of the Game view. The Game tab must be visible |
+| `/get_game_view` | A PNG of the Game view. The Game tab must be visible, unless the Frame Debugger is enabled |
 | `/profiler` | Frame time, verdict and checks as JSON |
 
 More routes and recipes: [HTTP cheat sheet](debugging/http-cheat-sheet.md).
@@ -72,7 +72,7 @@ More routes and recipes: [HTTP cheat sheet](debugging/http-cheat-sheet.md).
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Connection refused` on 8080 | Editor not running, or port taken | Start one editor only |
-| `/get_game_view` returns 409 | Game tab is hidden | Click the Game tab |
+| `/get_game_view` returns 409 | Game tab is hidden and the Frame Debugger is off | Click the Game tab |
 | Open Sponza fails | Model not fetched | Re-configure with network and `git`. See [Building](../BUILDING.md) |
 | Project stays "not compiled" | Compile not run or failed | Run Compile, read the Log panel |
 | Status 503 or 504 | Main thread busy or stalled | Wait, retry once. See [HTTP cheat sheet](debugging/http-cheat-sheet.md) |

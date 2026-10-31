@@ -39,6 +39,7 @@ RenderGraph::RenderGraph(Renderer& renderer, TimingMode timingMode)
 // kDefaultStaleFrames of disuse, so no in-flight command buffer can still reference one.
 void RenderGraph::BeginPersistentResourceFrame() noexcept
 {
+    m_persistentTexturesResizedThisFrame = false;
     ++m_persistentResourceFrameCounter;
     m_persistentResourceCache.BeginFrame(
         m_persistentResourceFrameCounter, kPersistentResourceStaleThresholdFrames);
@@ -1024,6 +1025,7 @@ void RenderGraph::ExecuteCompiledGraph(VkCommandBuffer cmd, ExecuteTimingMode ti
     }
     if (!isPipelined) {
         const std::vector<PersistentSlotRef> resized = m_persistentResourceCache.FlushPendingResizes();
+        m_persistentTexturesResizedThisFrame = m_persistentTexturesResizedThisFrame || !resized.empty();
         // The resize replaced the image behind the snapshot registered above: re-register it.
         for (const PersistentSlotRef& slot : resized) {
             for (const PersistentTextureUse& use : input.persistentCacheTextures) {

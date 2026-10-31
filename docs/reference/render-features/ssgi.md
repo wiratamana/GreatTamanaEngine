@@ -1,6 +1,6 @@
 # Ssgi (screen-space GI)
 > One bounce of diffuse light, traced in screen space. For anyone tuning or debugging indirect light.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-10-31
 
 ## TL;DR
 - Adds one diffuse bounce from visible geometry to the linear HDR scene color.
@@ -84,7 +84,7 @@ curl.exe "http://127.0.0.1:8080/feature_debug/set?name=Ssgi&debugView=GiOnly"
 curl.exe -o game.png "http://127.0.0.1:8080/get_game_view"
 curl.exe "http://127.0.0.1:8080/render_graph/set_feature_enabled?name=Ssgi&enabled=true&view=secondary"
 ```
-The Game tab must be visible for `/get_game_view`. Set `debugView=Off` after the test. More recipes: [HTTP cheat sheet](../../debugging/http-cheat-sheet.md).
+The Game tab must be visible for `/get_game_view`, unless the Frame Debugger is enabled. Set `debugView=Off` after the test. More recipes: [HTTP cheat sheet](../../debugging/http-cheat-sheet.md).
 
 ## Limits
 - Screen space only. Off-screen or hidden light does not bounce. GI changes as lights enter and leave the view.

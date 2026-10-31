@@ -54,7 +54,7 @@ Frame order in `EditorHost::Run()`:
 | Hierarchy | Left | Entity tree. Drag to reparent or reorder. Right-click to create objects |
 | Inspector | Right | Edit components. Asset metadata, previews, cluster tools, "Open Bone Viewer" |
 | Scene | Center tab | Own render target, orbit camera, transform gizmo, camera frustum overlay |
-| Game | Center tab | Shows the Game view. A hidden tab is not rendered |
+| Game | Center tab | Shows the Game view. A hidden tab is not rendered, unless the Frame Debugger is enabled |
 | Memory | Bottom | SDL and ImGui CPU bytes, tracked GPU resources, VMA heap budgets |
 | Profiler | Bottom | Plain summary, CPU/GPU frame graph (tick a row to plot it), table with calls, total, self and % per name, Capture and Pause |
 | Jobs | Bottom | Worker timeline. CPU/GPU skinning toggle |
@@ -117,7 +117,7 @@ Frame order in `EditorHost::Run()`:
 2. Panels are `BuildXPanel(ctx, ...)` functions, or small classes when they keep state (`ProfilerPanel`, `RenderGraphPanel`, `FrameDebuggerPanel`). There is no `IEditorPanel` base class.
 3. `EditorContext` is plain data. Add a field only when two places need it.
 4. Change selection only through `Selection`. A panel never writes the selection fields.
-5. A panel with its own render target writes `ImGui::Begin()`'s return value to a visibility flag. `ImGuiEditorLayer` returns `nullptr` from `PrimaryViewTarget()` or `SecondaryViewTarget()` for a hidden view, so that view is not rendered.
+5. A panel with its own render target writes `ImGui::Begin()`'s return value to a visibility flag. `ImGuiEditorLayer` returns `nullptr` from `PrimaryViewTarget()` or `SecondaryViewTarget()` for a hidden view, so that view is not rendered. The exception is the Game view while the Frame Debugger is enabled and open.
 6. Keep logic that needs no ImGui in a separate file. Then it can be unit tested.
 7. Never write editor or ECS state from the network thread. Use a bridge.
 8. Use `ScopedUniqueId` for ImGui IDs in loops. See [ImGui ID uniqueness](../conventions/imgui-id-uniqueness.md).

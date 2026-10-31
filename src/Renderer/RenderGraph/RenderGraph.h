@@ -93,8 +93,12 @@ public:
     // Current frame counter used for debug texture freshness.
     std::uint64_t CurrentDebugTextureFrameCounter() const noexcept;
 
-    // Advances the persistent resource cache frame counter.
+    // Advances the persistent resource cache frame counter and clears PersistentTexturesResizedThisFrame().
     void BeginPersistentResourceFrame() noexcept;
+
+    // True when an Execute() since the last BeginPersistentResourceFrame() ran with persistent textures that had a
+    // stale size: they are recreated at the right size only after that Execute(), so its output is incomplete.
+    bool PersistentTexturesResizedThisFrame() const noexcept { return m_persistentTexturesResizedThisFrame; }
 
     // Synchronous regime: reads the stamps of the last Execute() once its submission completed, resolves them and
     // fills the synchronous snapshot's GPU fields.
@@ -297,6 +301,7 @@ private:
 
     std::uint64_t m_debugTextureFrameCounter = 0;
     std::uint64_t m_persistentResourceFrameCounter = 0;
+    bool m_persistentTexturesResizedThisFrame = false;
     std::uint64_t m_oneShotFrame = 0;
 };
 

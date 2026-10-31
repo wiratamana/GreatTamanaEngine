@@ -421,8 +421,7 @@ public:
             GTE_PROFILE_SCOPE("Panel.Log");
             m_logPanel.Build(m_ctx);
         }
-        // Frame Debugger window (Build() is a no-op unless open). It gets the raw and composited Game views for
-        // before/after comparison, plus the toggle registry and offscreen blackboard for its honesty checks.
+        // Frame Debugger: also serves the capture handshake and ends the session when the window closes.
         {
             GTE_PROFILE_SCOPE("Panel.FrameDebugger");
             m_frameDebuggerPanel.Build(m_ctx, renderer, renderGraph, m_gameView, m_gameViewComposited,

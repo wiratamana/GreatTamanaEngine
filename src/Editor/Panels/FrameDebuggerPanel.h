@@ -38,7 +38,7 @@ public:
     FrameDebuggerPanel(const FrameDebuggerPanel&) = delete;
     FrameDebuggerPanel& operator=(const FrameDebuggerPanel&) = delete;
 
-    // Builds the window and serves a replayed capture. Collaborators are only used during this call.
+    // Caches the collaborators for later calls and serves the capture half of the handshake.
     // `compositedGameView` and the last two pointers may be null; the matching detectors are then skipped.
     void Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph, RenderTexture& gameView,
         RenderTexture* compositedGameView, rg::RenderPassToggleRegistry* toggleRegistry = nullptr,
@@ -134,6 +134,9 @@ private:
     FrameDebuggerCaptureHandshake m_handshake;
 
     std::string m_captureError; // Reason text while the phase is Failed, else empty.
+
+    // Captures pushed back in a row because the frame ran with stale-size persistent targets.
+    int m_resizeDeferrals = 0;
 
     bool m_pausedByFrameDebugger = false; // True when Enable paused a running game (so Disable resumes it).
 

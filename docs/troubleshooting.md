@@ -37,7 +37,7 @@
 | `503` on `/get_texture` or `/get_game_view` | GPU busy, device lost, or no bridge | Retry once. If it stays, restart the editor. |
 | `504` | Main thread did not answer in time. The work may still run. | Read state before you retry a write. Check `/profiler` (`live_block`). |
 | `403` | The browser guard refused the request | Use `curl.exe` or a script. Send no `Origin` or `Host` header. |
-| `409` on `/get_game_view` | The Game view has no target (tab hidden) | Click the Game tab. |
+| `409` on `/get_game_view` | The Game view has no target (tab hidden and the Frame Debugger is off) | Click the Game tab, or enable the Frame Debugger. |
 | `409` on `set_pass_enabled` | The pass is deny-listed (`Present`, `ClearViewTarget`) | Pick another pass. |
 | `404` on `get_event_texture` | That draw index is not captured yet | Poll until a later frame is captured. |
 | `400` | Bad param, bad JSON or unknown key | Read `error`. It names the key and range. |

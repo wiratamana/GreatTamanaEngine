@@ -120,6 +120,7 @@ A capture needs a frame rendered with the capture context armed from its first d
 4. `ConsumeForCapture()`: in the same frame, after execution, `FrameDebuggerPanel::Build()` runs `TriggerCapture()`: the detectors, `BuildRealFrameDebuggerSnapshot()`, then `CaptureFrame()`.
 
 - HTTP and Step requests are served in the same frame. The `Capture` button and the pass toggle are served one frame later.
+- Persistent render-graph textures change size only after the graph ran (`RenderGraph::PersistentTexturesResizedThisFrame()`). A frame that resized any of them is incomplete, so `Build()` requests the capture again for the next frame. This repeats at most 3 times in a row, so the status stays `pending` for a frame or two after a view resize or a first render.
 - A request ends as `captured` or `failed`. If the offscreen build throws, or `CaptureFrame()` throws, the phase is `Failed` and `captureError` has the reason.
 
 ### Replay passes

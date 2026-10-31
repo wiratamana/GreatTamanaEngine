@@ -34,6 +34,7 @@ namespace gte {
 
 namespace {
 constexpr float kSplitterWidth = 6.0f;
+constexpr int kMaxResizeDeferrals = 3;
 
 void BuildPropertyRow(const char* label, const std::string& value)
 {
@@ -397,6 +398,7 @@ void FrameDebuggerPanel::ApplyEnabledEdge(EditorContext& ctx, bool newEnabled)
     }
     m_pausedByFrameDebugger = false;
     m_handshake.Cancel();
+    m_resizeDeferrals = 0;
     m_captureError.clear();
     m_currentCapture.Clear();
     ReleaseShaderPropertyTexturePreview();
@@ -711,7 +713,17 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
 
     // Second half of the handshake: this frame's replay passes and draw records exist now.
     if (m_handshake.ConsumeForCapture()) {
-        TriggerCapture();
+        // Persistent targets are recreated at a new size only after the graph ran, so a frame that resized
+        // some drew into stale-size targets. It is skipped; the bound keeps a target that resizes every frame from
+        // starving the capture.
+        if (renderGraph.PersistentTexturesResizedThisFrame() && m_resizeDeferrals < kMaxResizeDeferrals) {
+            ++m_resizeDeferrals;
+            m_handshake.Request();
+            GTE_LOG_DEBUG("FrameDebugger", "Capture moved to the next frame: persistent targets were resized.");
+        } else {
+            m_resizeDeferrals = 0;
+            TriggerCapture();
+        }
     }
 
     // A pass toggle changed earlier this frame: capture again so a disabled pass does not linger.

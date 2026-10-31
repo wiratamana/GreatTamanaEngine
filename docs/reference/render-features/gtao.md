@@ -1,6 +1,6 @@
 # Gtao (ambient occlusion)
 > Screen-space ambient occlusion (GTAO) from scene depth. For anyone tuning or debugging contact shadows.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-10-31
 
 ## TL;DR
 - Reads only the scene depth. No normal or albedo buffer.
@@ -77,7 +77,7 @@ curl.exe "http://127.0.0.1:8080/feature_debug/state?name=Gtao"
 curl.exe "http://127.0.0.1:8080/feature_debug/set?name=Gtao&debugView=AoOnly"
 curl.exe -o game.png "http://127.0.0.1:8080/get_game_view"
 ```
-The Game tab must be visible for `/get_game_view`. Set `debugView=Off` after the test. More recipes: [HTTP cheat sheet](../../debugging/http-cheat-sheet.md).
+The Game tab must be visible for `/get_game_view`, unless the Frame Debugger is enabled. Set `debugView=Off` after the test. More recipes: [HTTP cheat sheet](../../debugging/http-cheat-sheet.md).
 
 ## Limits
 - The multiply also darkens direct light. No albedo, no multi-bounce. Bright surfaces look too dark.

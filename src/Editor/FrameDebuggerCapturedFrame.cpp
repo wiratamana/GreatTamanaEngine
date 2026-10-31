@@ -4,6 +4,7 @@
 #include "../Renderer/Renderer.h"
 #include "../Renderer/RenderGraph/OneShot.h"
 
+#include <stdexcept>
 #include <utility>
 
 namespace gte {
@@ -40,9 +41,13 @@ void FrameDebuggerCurrentCapture::CaptureFrame(Renderer& renderer, const FrameDe
     if (compositedGameViewSource != nullptr) {
         copy(*compositedGameViewSource, *frame.compositedPreview);
     }
+    bool copied = false;
     {
         GTE_PROFILE_BLOCKED("Wait.OneShotSubmit");
-        oneShot.Run();
+        copied = oneShot.Run();
+    }
+    if (!copied) {
+        throw std::runtime_error("the GPU copy of the Game view failed");
     }
 
     m_current.emplace(std::move(frame));
