@@ -72,9 +72,54 @@ nlohmann::json ScenePoseToJson(const SceneCameraPose& pose)
     });
 }
 
+nlohmann::json SceneViewToJson(const SceneCameraView& view)
+{
+    return nlohmann::json::object({
+        { "projection", view.orthographic ? "orthographic" : "perspective" },
+        { "distance", view.distance },
+        { "axis", view.axisName },
+    });
+}
+
+ParsedSetViewQuery ParseSetViewQuery(
+    const std::string& direction, const std::string& projection, const std::string& distance)
+{
+    ParsedSetViewQuery result;
+    if (direction.empty() && projection.empty() && distance.empty()) {
+        result.errorMessage = "give at least one of the query parameters: direction, projection, distance";
+        return result;
+    }
+    if (!direction.empty()) {
+        SceneViewAxis axis;
+        if (!TryParseSceneViewAxis(direction, axis)) {
+            result.errorMessage = "invalid query parameter: direction - must be right, left, top, bottom, front or back";
+            return result;
+        }
+        result.request.axis = axis;
+    }
+    if (!projection.empty()) {
+        if (projection != "perspective" && projection != "orthographic") {
+            result.errorMessage = "invalid query parameter: projection - must be perspective or orthographic";
+            return result;
+        }
+        result.request.orthographic = (projection == "orthographic");
+    }
+    if (!distance.empty()) {
+        float value = 0.0f;
+        if (!TryParseFiniteFloat(distance, EditorCamera::kMaxDistance, value) || value < EditorCamera::kMinDistance) {
+            result.errorMessage = "invalid query parameter: distance - must be a finite number from 0.05 to 100000";
+            return result;
+        }
+        result.request.distance = value;
+    }
+    result.valid = true;
+    return result;
+}
+
 std::string BuildSceneCameraPoseJson(const SceneCameraReport& report)
 {
     nlohmann::json body = ScenePoseToJson(report.pose);
+    body["view"] = SceneViewToJson(report.view);
     body["success"] = true;
     return body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }

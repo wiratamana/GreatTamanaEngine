@@ -200,11 +200,10 @@ public:
     // Resource name of the view's texture as shown to tools. The view output names derive from it.
     virtual const char* ViewResourceName(rg::ViewScope scope) const noexcept = 0;
 
-    // Projection * view the secondary view renders with, for a target of the given aspect ratio.
-    // Backed by the orbitable EditorCamera; Identity for NullEditorLayer.
+    // Projection * view the secondary view renders with. Perspective or orthographic; Identity for NullEditorLayer.
     virtual Mat4 SecondaryViewProjection(float aspectWidthOverHeight) const = 0;
 
-    // World-space eye position of the secondary view's EditorCamera. Zero for NullEditorLayer.
+    // World position of the secondary view's camera. Only a position: it is not a true eye in orthographic mode.
     virtual Vec3 SecondaryViewCameraWorldPosition() const = 0;
 
     // Texture the primary view's panel shows instead of its raw view once a feature publishes a composited output.

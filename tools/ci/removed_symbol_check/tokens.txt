@@ -116,3 +116,10 @@ m_stepCaptureRequested
 m_pendingCaptureTrigger
 m_replayServicedThisFrame
 m_wasPlaybackPaused
+SceneGridMath
+ComputeGridPlaneHit
+GridPlaneHit
+ComputeGridLineCoverage
+ComputeAxisLineCoverage
+kPanUnitsPerPixel
+kZoomUnitsPerWheelNotch

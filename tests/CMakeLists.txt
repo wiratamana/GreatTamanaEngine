@@ -2526,7 +2526,7 @@ if(TRUE)
     list(APPEND GTE_TEST_SOURCES
         Editor/EditorCameraTests.cpp
         Editor/ExitGateTests.cpp
-        Editor/SceneGridMathTests.cpp
+        Editor/SceneViewAxesTests.cpp
         Editor/SelectionTests.cpp
         Editor/RotationEulerEditCacheTests.cpp
         Editor/ImGuiMemoryTrackerTests.cpp
@@ -3075,9 +3075,12 @@ set(GTE_COMMENT_RULE_SRC
     Editor/Panels/ProfilerGraphWidget.h Editor/Panels/ProfilerGraphWidget.cpp
     Editor/Panels/ProfilerTableWidget.h Editor/Panels/ProfilerTableWidget.cpp
     Network/RenderGraphMetadataJson.h Network/RenderGraphMetadataJson.cpp Network/ViewWireName.h
+    Editor/SceneViewAxes.h Editor/SceneViewAxes.cpp Editor/Panels/SceneViewGizmo.h Editor/Panels/SceneViewGizmo.cpp
+    Editor/TransformGizmo.h Editor/TransformGizmo.cpp
     Profiling/
     Features/SceneLighting/ Features/GpuDrivenScene/)
 set(GTE_COMMENT_RULE_TESTS
+    Editor/SceneViewAxesTests.cpp
     Core/FeatureKit/ Core/GpuViewMetricsTests.cpp Editor/FrameDebuggerSideChannelCheckerTests.cpp
     Editor/FrameDebuggerCaptureHandshakeTests.cpp Editor/FrameDebuggerCapturedFrameTests.cpp
     Editor/FrameDebuggerCaptureTests.cpp

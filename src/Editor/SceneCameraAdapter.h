@@ -22,6 +22,7 @@ public:
     SceneCameraResult Select(const std::string& entityName) override;
     SceneCameraPickResult Pick(float x, float y) override;
     SceneCameraResult SetPose(const SceneCameraPose& pose) override;
+    SceneCameraResult SetView(const SceneCameraViewRequest& request) override;
     std::optional<ClusterViewerImage> CaptureImage(bool overlay) override;
 
 private:

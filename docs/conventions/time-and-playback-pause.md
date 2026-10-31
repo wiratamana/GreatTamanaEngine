@@ -1,6 +1,6 @@
 # Time and playback pause
 > Rules for the frame clock (`gte::Time`) and the Pause / Resume / Step toolbar. For anyone reading time or touching `Game::Update`.
-> Verified against code: 2026-10-31
+> Verified against code: 2026-11-01
 
 ## TL;DR
 - One `Time` object lives in `EngineContext`, owned by `Core`. It is not a singleton.
@@ -32,7 +32,7 @@
 8. `EngineContext` has one field today: `Time time`. Add a field only for a real need.
 9. Pause intent (`playbackPaused`, step request) lives in `EditorContext`. Only `EditorHost` reads it and passes plain booleans in `InputFrame`.
 10. Read the step request every frame (`TryConsumeStepRequest`). A stale step must never linger.
-11. The Scene camera uses raw mouse deltas, not `Time`. Do not add a `Time` dependency to `EditorCamera`.
+11. The Scene camera takes raw mouse deltas and real frame seconds as plain floats. It never reads `gte::Time`. Do not add a `Time` dependency to `EditorCamera`.
 
 ## Flow
 ```cpp

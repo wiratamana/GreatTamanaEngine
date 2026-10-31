@@ -1,6 +1,6 @@
 # Editor
 > How the editor is built: host, panels, bridges and the rules for adding UI. For anyone who changes `src/Editor/`.
-> Verified against code: 2026-10-31
+> Verified against code: 2026-11-01
 
 ## TL;DR
 - There is one executable: `GreatTamanaEditor.exe`. `EditorHost` owns the main loop.
@@ -53,7 +53,7 @@ Frame order in `EditorHost::Run()`:
 |---|---|---|
 | Hierarchy | Left | Entity tree. Drag to reparent or reorder. Right-click to create objects |
 | Inspector | Right | Edit components. Asset metadata, previews, cluster tools, "Open Bone Viewer" |
-| Scene | Center tab | Own render target, orbit camera, transform gizmo, camera frustum overlay |
+| Scene | Center tab | Own render target, fly camera with Persp / Iso, view gizmo, transform gizmo, camera frustum overlay |
 | Game | Center tab | Shows the Game view. A hidden tab is not rendered, unless the Frame Debugger is enabled |
 | Memory | Bottom | SDL and ImGui CPU bytes, tracked GPU resources, VMA heap budgets |
 | Profiler | Bottom | Plain summary, CPU/GPU frame graph (tick a row to plot it), table with calls, total, self and % per name, Capture and Pause |
@@ -89,14 +89,20 @@ Frame order in `EditorHost::Run()`:
 ### Controls and drag-drop
 | Where | Input | Action |
 |---|---|---|
-| Scene | Middle mouse drag | Pan |
-| Scene | Mouse wheel | Dolly |
-| Scene | Right mouse drag | Look |
+| Scene | Middle mouse drag | Pan. The scene follows the cursor at any zoom |
+| Scene | Mouse wheel | Zoom to the pivot. Fast scrolling accelerates |
+| Scene | Right mouse drag | Look around (Perspective) or orbit the pivot (Isometric) |
+| Scene | Click a gizmo head (top-right) | Look along that axis: Right, Left, Top, Bottom, Back, Front |
+| Scene | Click `Persp` / `Iso` under the gizmo | Switch Perspective and Isometric |
 | Scene | Left click on a camera frustum | Select that camera entity. Meshes cannot be picked by click |
 | Project panel | Drag a file out | Payload `GTE_PROJECT_ASSET_PATH` (absolute path) |
 | Hierarchy, Scene | Drop a `*.gta` mesh | Spawn it. On an entity row it becomes a child |
 | Hierarchy | Drag a row | Payload `GTE_HIERARCHY_ENTITY`. Middle of a row = reparent, top or bottom edge = reorder |
 | Project panel | Drop a file from Explorer | Import it into the folder. Textures and meshes become `.gta`. Name clashes get `name (1)` |
+
+- The pivot is the point `distance` in front of the camera. Head clicks and Isometric orbit turn around it.
+- Isometric is a plain orthographic projection. Features that need a point eye (Atmosphere, Gtao, Ssgi, VolumetricLight) are not valid there.
+- The grid has no fixed fade distance. Each line level fades by its spacing in pixels.
 
 ## Key files
 | File (`src/Editor/...`) | Role |

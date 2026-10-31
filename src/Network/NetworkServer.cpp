@@ -749,6 +749,23 @@ void RegisterClusterViewerRoutes(
         }
     });
 
+    server.Get("/scene_camera/view", [runSceneCamera](const httplib::Request& req, httplib::Response& res) {
+        const ParsedSetViewQuery parsed = ParseSetViewQuery(
+            req.get_param_value("direction"), req.get_param_value("projection"), req.get_param_value("distance"));
+        if (!parsed.valid) {
+            res.status = 400;
+            res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
+            return;
+        }
+        SceneCameraCommand command;
+        command.operation = SceneCameraOperation::SetView;
+        command.view = parsed.request;
+        if (const std::optional<SceneCameraOutcome> out = runSceneCamera(res, std::move(command))) {
+            res.status = 200;
+            res.set_content(BuildSceneCameraPoseJson(out->report), "application/json");
+        }
+    });
+
     server.Post("/exit", [uiBridge](const httplib::Request& req, httplib::Response& res) {
         if (RefuseBrowserRequest(req, res)) {
             return;

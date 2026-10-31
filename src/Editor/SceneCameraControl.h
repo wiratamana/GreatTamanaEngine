@@ -3,6 +3,7 @@
 // The one surface the Scene cameras expose to the HTTP bridge. No ImGui, no Vulkan.
 
 #include "ClusterViewerControl.h"
+#include "SceneViewAxes.h"
 
 #include <cstdint>
 #include <optional>
@@ -48,6 +49,20 @@ struct SceneCameraPose {
     float pitchDegrees = 0.0f;
 };
 
+// What the Scene camera looks at: pivot distance, projection and the axis view.
+struct SceneCameraView {
+    float distance = 5.0f;
+    bool orthographic = false;
+    std::string axisName; // "Top", "Front", ... when looking straight along an axis, else empty
+};
+
+// Parts of the view to change. A part that is not set stays as it is.
+struct SceneCameraViewRequest {
+    std::optional<SceneViewAxis> axis;
+    std::optional<bool> orthographic;
+    std::optional<float> distance;
+};
+
 // Everything GET /scene_camera/state shows.
 struct SceneCameraReport {
     bool rendered = false; // the Scene view was drawn last frame
@@ -57,6 +72,7 @@ struct SceneCameraReport {
     std::uint64_t selectedEntity = 0; // 0 when no camera is selected
     std::vector<OverlaySegment2D> selectedFrustum; // image pixels
     SceneCameraPose pose; // the Scene camera; valid without a rendered Scene image
+    SceneCameraView view; // valid without a rendered Scene image
 };
 
 class ISceneCameraControl {
@@ -71,6 +87,9 @@ public:
 
     // Moves the Scene camera. Position in world units, angles in degrees.
     virtual SceneCameraResult SetPose(const SceneCameraPose& pose) = 0;
+
+    // Changes the Scene view. Distance is applied first (keeps the pivot), then the axis, then the projection.
+    virtual SceneCameraResult SetView(const SceneCameraViewRequest& request) = 0;
     virtual std::optional<ClusterViewerImage> CaptureImage(bool overlay) = 0;
 };
 

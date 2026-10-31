@@ -246,6 +246,9 @@ SceneCameraOutcome RunSceneCameraCommand(const SceneCameraCommand& command, ISce
         out.result = control->SetPose(pose);
         break;
     }
+    case SceneCameraOperation::SetView:
+        out.result = control->SetView(command.view);
+        break;
     case SceneCameraOperation::Image:
         out.image = control->CaptureImage(command.overlay);
         if (out.image.has_value()) {

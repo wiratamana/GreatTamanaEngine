@@ -67,27 +67,14 @@ void DrawGizmoOperationSwitcher(GizmoOperation& operation)
 }
 
 bool ManipulateTransformGizmo(GizmoOperation operation, const Mat4& view, const Mat4& projection, float rectX,
-    float rectY, float rectWidth, float rectHeight, Transform& transform, const Mat4& parentWorld)
+    float rectY, float rectWidth, float rectHeight, Transform& transform, const Mat4& parentWorld, bool orthographic)
 {
-    // Appends to the CURRENT window's ImDrawList (see this function's own
-    // header comment) - ScenePanel.cpp calls this while "Scene" is still
-    // the current ImGui window, right after its ImGui::Image() call.
+    // Draws into the current window's draw list: call it while the Scene window is current.
     ImGuizmo::SetDrawlist();
-    ImGuizmo::SetOrthographic(false);
+    ImGuizmo::SetOrthographic(orthographic);
     ImGuizmo::SetRect(rectX, rectY, rectWidth, rectHeight);
 
-    // ImGuizmo's `matrix` parameter is both input (where to draw/manipulate
-    // the gizmo from) and output (the manipulated result) - it needs a
-    // plain, mutable float[16], never Mat4::Data() directly (that's
-    // `const float*`). Column-major layout is bit-identical to gte::Mat4's
-    // own (see Mat4.h), so a straight memcpy is all that's needed - no
-    // transpose, no repacking. Manipulated in WORLD space (parentWorld *
-    // transform's own local matrix - see this function's own header
-    // comment) rather than `transform`'s local matrix directly, so a
-    // parented entity's gizmo actually lines up with where it's really
-    // drawn in "Scene" (RenderSystem draws it via
-    // ECS/TransformHierarchy.h's ComputeWorldMatrix(), the exact same
-    // parentWorld * local composition).
+    // Manipulate in world space (parent world * local). ImGuizmo edits the float[16] in place.
     const Mat4 worldMatrix = parentWorld * transform.LocalToWorldMatrix();
     float matrix[16];
     std::memcpy(matrix, worldMatrix.Data(), sizeof(matrix));
@@ -95,35 +82,10 @@ bool ManipulateTransformGizmo(GizmoOperation operation, const Mat4& view, const 
     const bool manipulated = ImGuizmo::Manipulate(
         view.Data(), projection.Data(), ToImGuizmoOperation(operation), ImGuizmo::LOCAL, matrix);
 
+    // Rebuild position, rotation and scale from the matrix columns.
+    // Not ImGuizmo's Euler helper: its Euler order differs from Quat::FromEulerDegrees.
     if (manipulated) {
-        // Deliberately NOT ImGuizmo::DecomposeMatrixToComponents() here -
-        // its own header comment flags "numerical stability issues", and
-        // more importantly its rotation output is Euler degrees in
-        // ImGuizmo's OWN composition order, which is not guaranteed to
-        // match gte::Quat::FromEulerDegrees()'s Yaw*Pitch*Roll convention
-        // (see Quat.h). InspectorPanel.cpp gets away with that round trip
-        // (ToEulerDegrees() -> DragFloat3 -> FromEulerDegrees()) because
-        // it's this engine's OWN convention on both ends; mixing in a
-        // second library's Euler convention here would silently fight the
-        // mouse every frame of a rotate drag instead. Reading the
-        // manipulated matrix's raw columns and going through
-        // Quat::FromMat4() instead sidesteps Euler order entirely - plain
-        // linear algebra, exact (up to float error) regardless of either
-        // library's Euler convention.
-        //
-        // `matrix` is the manipulated WORLD matrix - convert back to
-        // `transform`'s own LOCAL space first (parentWorld's inverse *
-        // world), THEN decompose that into position/rotation/scale, so a
-        // parented entity's Transform fields stay correctly relative to
-        // its parent (for a root entity, parentWorld == Identity() and
-        // this is a no-op, exactly the previous behavior):
-        //   - translation is column 3, verbatim.
-        //   - Transform::LocalToWorldMatrix() builds T * R * S (see
-        //     Mat4::TRS()), so columns 0/1/2 are the rotation's own
-        //     right/up/forward basis vectors, each additionally scaled by
-        //     scale.x/y/z respectively - each column's own length IS that
-        //     axis's scale, and dividing it back out recovers the pure
-        //     rotation basis.
+        // Back to the entity's local space.
         Mat4 manipulatedWorld;
         std::memcpy(manipulatedWorld.columns, matrix, sizeof(matrix));
 
@@ -133,6 +95,7 @@ bool ManipulateTransformGizmo(GizmoOperation operation, const Mat4& view, const 
         }
         const Mat4 local = parentInverse * manipulatedWorld;
 
+        // Column lengths are the scales. Dividing them out leaves the rotation.
         const Vec3 col0{ local(0, 0), local(1, 0), local(2, 0) };
         const Vec3 col1{ local(0, 1), local(1, 1), local(2, 1) };
         const Vec3 col2{ local(0, 2), local(1, 2), local(2, 2) };

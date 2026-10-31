@@ -96,7 +96,7 @@ struct ClusterViewerCommand {
     bool overlay = false;                                             // Image
 };
 
-enum class SceneCameraOperation : std::uint8_t { State, Select, Pick, Image, SetPose };
+enum class SceneCameraOperation : std::uint8_t { State, Select, Pick, Image, SetPose, SetView };
 
 // Request payload for one SceneCamera command; only the fields of `operation` are read.
 struct SceneCameraCommand {
@@ -110,6 +110,7 @@ struct SceneCameraCommand {
     float poseZ = 0.0f;
     float yawDegrees = 0.0f;   // SetPose
     float pitchDegrees = 0.0f;
+    SceneCameraViewRequest view; // SetView
 };
 
 // One pending Editor UI command, tagged by `kind` - only the field matching

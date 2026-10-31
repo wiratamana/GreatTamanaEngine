@@ -1,7 +1,7 @@
 # HTTP routes
 
 > Reference for the general debug routes: capture, logs, scene, editor UI, scene camera, assets and clusters. For people and AI agents who need exact parameters.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-11-01
 
 ## TL;DR
 - Server: `127.0.0.1:8080`, editor only. See [HTTP server](../architecture/http-server.md).
@@ -232,19 +232,24 @@ This moves the **editor** Scene camera. Then `/scene_camera/image` or `/get_swap
 
 | Route | Params | Response | Errors |
 |---|---|---|---|
-| `GET /scene_camera/state` | none | `{rendered, image:{width,height}, selected_entity, cameras[], selected_frustum[], pose}` | `503` |
-| `GET /scene_camera/pose` | none | `{success, position:{x,y,z}, yaw_degrees, pitch_degrees}` | `503` |
+| `GET /scene_camera/state` | none | `{rendered, image:{width,height}, selected_entity, cameras[], selected_frustum[], pose, view}` | `503` |
+| `GET /scene_camera/pose` | none | `{success, position:{x,y,z}, yaw_degrees, pitch_degrees, view:{projection,distance,axis}}` | `503` |
 | `GET /scene_camera/set_pose` **MUT** | Q `x`* `y`* `z`* (max 1e6), `yaw`* `pitch`* (max 1e5) | Same as `/pose` | `400` names the bad key |
+| `GET /scene_camera/view` **MUT** | Q `direction` (`right`,`left`,`top`,`bottom`,`front`,`back`), `projection` (`perspective`,`orthographic`), `distance` (0.05 to 100000). At least one. | Same as `/pose` | `400` names the bad key |
 | `GET /scene_camera/pick` | Q `x`* `y`* (0 to 1, fraction of the image) | `{success, hit, entity?}` | `409` not rendered |
 | `GET /scene_camera/select` **MUT** | Q `name`* | `{success, selected}` | `404` unknown entity |
 | `GET /scene_camera/image` **IMG** | Q `overlay` (`true` default, or `false`) | PNG | `409` |
 
-- `set_pose` needs all five parameters. Each must be a finite number.
+- `set_pose` needs all five parameters. Each must be a finite number. It keeps the pivot distance. Pitch is clamped to +-90.
+- `direction` looks along the axis around the pivot. `top` looks down (pitch 90). `front` looks along +Z (yaw 0).
+- `distance` is applied first, then `direction`, then `projection`. `set_pose` keeps the distance.
+- The gizmo is ImGui. `/scene_camera/image` does not contain it. Use `/get_swapchain`.
 - Each `cameras[]` item: `entity`, `name`, `position`, `rotation_euler_degrees`, `fov_y_degrees`, `near`, `far`, `selected`, `screen` (`apex_x`, `apex_y`, `visible`).
 - `overlay=true` draws the camera frustums on the image.
 
 ```text
 curl.exe "http://127.0.0.1:8080/scene_camera/set_pose?x=0&y=5&z=-10&yaw=0&pitch=-15"
+curl.exe "http://127.0.0.1:8080/scene_camera/view?direction=top&projection=orthographic"
 curl.exe "http://127.0.0.1:8080/scene_camera/image?overlay=true" -o scene.png
 ```
 

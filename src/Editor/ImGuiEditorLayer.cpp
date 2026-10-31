@@ -311,21 +311,19 @@ public:
 
     const char* ViewResourceName(rg::ViewScope scope) const noexcept override { return EditorViewResourceName(scope); }
 
-    // Reflects the Scene camera as of the last BuildUI() (up to one frame of lag).
+    // Scene camera as of the last BuildUI() (one frame of lag).
     Mat4 SecondaryViewProjection(float aspectWidthOverHeight) const override
     {
         return m_sceneCamera.ViewProjection(aspectWidthOverHeight);
     }
 
-    // See IEditorLayer::SecondaryViewCameraWorldPosition()'s own doc comment.
     Vec3 SecondaryViewCameraWorldPosition() const override { return m_sceneCamera.GetTransform().position; }
-
 
     // Remembers the pointer; BuildUI() creates the ImGui descriptor from it lazily.
     void SetPrimaryViewCompositedTexture(RenderTexture* texture) override { m_gameViewComposited = texture; }
     void SetSecondaryViewCompositedTexture(RenderTexture* texture) override { m_sceneViewComposited = texture; }
 
-    // See IEditorLayer::RenderSceneGrid(). Called only when the Scene view rendered, so no visibility check is needed.
+    // Called only when the Scene view rendered.
     void RenderSceneGrid(const rg::RecordingContext& cmd, const Mat4& sceneViewProjection) override
     {
         m_sceneGrid.Draw(cmd, sceneViewProjection);
@@ -916,10 +914,10 @@ private:
     VkImageView m_lastKnownGameView = VK_NULL_HANDLE;
     VkImageView m_lastKnownSceneView = VK_NULL_HANDLE;
 
-    // Scene view's own orbit camera; ScenePanel updates it from mouse input each frame.
+    // Fly camera of the Scene view. ScenePanel updates it every frame.
     EditorCamera m_sceneCamera;
 
-    // Infinite ground grid for the Scene view; drawn whenever the Scene view renders, with no toggle.
+    // Infinite ground grid of the Scene view. Always drawn, no toggle.
     SceneGridRenderer m_sceneGrid;
 
     // True once Render(cmd) has actually run THIS frame (reset to false at

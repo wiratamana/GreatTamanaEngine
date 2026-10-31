@@ -74,15 +74,7 @@ struct EditorContext {
     bool gameViewVisible = true;
     bool sceneViewVisible = true;
 
-    // Whether a Scene-view camera drag (pan/rotate - see EditorCamera.h) is
-    // currently "captured": it started with the mouse actually pressed down
-    // while hovering the Scene panel's image (ScenePanel.cpp), so it keeps
-    // responding to mouse movement even if the cursor later drifts outside
-    // the image mid-drag, ending only once the corresponding button is
-    // released - exactly like Unity's own Scene view camera controls (and
-    // like a normal OS drag/resize gesture in general). Written/read
-    // entirely by ScenePanel.cpp; EditorCamera itself never touches ImGui
-    // and has no idea this exists.
+    // True while a middle (pan) or right (look) drag that started on the Scene image is held.
     bool sceneCameraPanning = false;
     bool sceneCameraRotating = false;
 
@@ -98,12 +90,7 @@ struct EditorContext {
     // reinventing its own.
     Selection selection;
 
-    // Which gizmo manipulation ScenePanel's top-left Move/Rotate/Scale
-    // switcher (TransformGizmo.h's DrawGizmoOperationSwitcher()) is
-    // currently set to, and therefore what ManipulateTransformGizmo() does
-    // with the current Hierarchy selection's Transform this frame (see
-    // Panels/ScenePanel.cpp). Translate is Unity's own default for a
-    // freshly-opened scene.
+    // Move / Rotate / Scale choice of the Scene toolbar.
     GizmoOperation gizmoOperation = GizmoOperation::Translate;
 
     // Set by File > Exit (see DockLayout.cpp's BuildDockspaceAndMenuBar());

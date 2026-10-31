@@ -12,7 +12,7 @@ class EditorCamera;
 class Game;
 class Renderer;
 
-// Scene view: own render target, orbit camera, gizmo and asset drop spawning. Once per frame.
+// Scene view: own render target, fly camera, view gizmo, transform gizmo and asset drop spawning. Once per frame.
 // `sceneServicesSetLayout` serves the spawn path; `renderFeatureEntries` tells whether a feature is off here.
 void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorCamera& camera,
     DescriptorSetLayoutHandle sceneServicesSetLayout, const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries);

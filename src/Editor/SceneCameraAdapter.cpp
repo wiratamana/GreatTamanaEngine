@@ -55,6 +55,11 @@ SceneCameraReport SceneCameraAdapter::Report() const
         report.pose.position[2] = position.z;
         report.pose.yawDegrees = m_camera->YawDegrees();
         report.pose.pitchDegrees = m_camera->PitchDegrees();
+        report.view.distance = m_camera->Distance();
+        report.view.orthographic = m_camera->IsOrthographic();
+        if (const std::optional<SceneViewAxis> aligned = AlignedSceneViewAxis(m_camera->Forward())) {
+            report.view.axisName = SceneViewAxisName(*aligned);
+        }
     }
     if (m_ctx == nullptr || m_registry == nullptr || !m_ctx->sceneCamera.rendered) {
         return report;
@@ -162,6 +167,24 @@ SceneCameraResult SceneCameraAdapter::SetPose(const SceneCameraPose& pose)
         return { false, SceneCameraError::BadInput, "pose values must be finite and within the accepted range" };
     }
     return { true, SceneCameraError::None, "pose set" };
+}
+
+SceneCameraResult SceneCameraAdapter::SetView(const SceneCameraViewRequest& request)
+{
+    if (m_camera == nullptr) {
+        return { false, SceneCameraError::Unavailable, "the Scene camera is not linked yet" };
+    }
+    if (request.distance.has_value() && !m_camera->SetDistance(*request.distance)) {
+        return { false, SceneCameraError::BadInput, "distance must be a finite number from 0.05 to 100000" };
+    }
+    if (request.axis.has_value()) {
+        m_camera->AlignTo(*request.axis);
+    }
+    if (request.orthographic.has_value()) {
+        m_camera->SetProjectionMode(
+            *request.orthographic ? CameraProjectionMode::Orthographic : CameraProjectionMode::Perspective);
+    }
+    return { true, SceneCameraError::None, "view set" };
 }
 
 std::optional<ClusterViewerImage> SceneCameraAdapter::CaptureImage(bool overlay)

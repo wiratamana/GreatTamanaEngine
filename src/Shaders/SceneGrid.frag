@@ -1,6 +1,7 @@
 #version 450
 
-// Infinite ground grid: ray-plane hit at Y == 0 per pixel, anti-aliased lines, colored X/Z axes, distance fade.
+// Infinite ground grid: a ray-plane hit at Y == 0 per pixel. Lines are about one pixel wide and fade as their spacing
+// on screen shrinks, so the grid thins out toward the horizon instead of being cut at a distance.
 // No Y flip here: invViewProj already maps this pixel's NDC xy to the ray the scene geometry used.
 
 layout(push_constant) uniform PushConstants {
@@ -12,10 +13,15 @@ layout(location = 0) in vec2 inNdcXY;
 
 layout(location = 0) out vec4 outColor;
 
-const float kMinorCellSize = 1.0;   // World units between minor lines.
-const float kMajorCellSize = 10.0;  // World units between major lines.
-const float kFadeDistance = 100.0;  // World units at which the grid reaches zero alpha.
-const float kAxisLineHalfWidthWorld = 0.03; // World-unit half-width of the X/Z axis lines.
+const int kLevelCount = 5;               // Cell sizes 1, 10, 100, 1000, 10000 world units.
+const float kBaseCellSize = 1.0;
+const float kCellSizeStep = 10.0;
+const float kLineHalfWidthPx = 0.35;     // Half width of a grid line on screen.
+const float kLineFadeStartPx = 3.0;      // Lines closer than this on screen are invisible.
+const float kLineFadeFullPx = 12.0;      // Lines farther apart than this on screen are fully visible.
+const float kAxisHalfWidthPx = 0.9;      // Half width of the X and Z axis lines on screen.
+const float kAxisHorizonFadeSin = 0.03;  // Axis lines fade out below this sine of the view angle to the ground.
+const float kMaxGridDepth = 0.99999;     // Keeps ground beyond the far plane inside the depth range.
 const vec3 kMinorLineColor = vec3(0.5, 0.5, 0.5);
 const vec3 kMajorLineColor = vec3(0.8, 0.8, 0.8);
 const vec3 kXAxisColor = vec3(0.85, 0.16, 0.16); // Red: world X axis (Z == 0 line).
@@ -30,100 +36,71 @@ vec3 SrgbToLinear(vec3 c)
     return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
 }
 
-// Grid-line coverage, 0 = no line, 1 = on a line; the line width follows the screen-space derivative.
-float GridLineCoverage(vec2 worldXZ, float cellSize)
+// Draws `color` with alpha `a` over the accumulated premultiplied color.
+void Accumulate(inout vec3 premul, inout float alpha, vec3 color, float a)
 {
-    vec2 coord = worldXZ / cellSize;
-    vec2 deriv = max(abs(fwidth(coord)), 1e-6);
-    vec2 g = abs(fract(coord - 0.5) - 0.5) / deriv;
-    float lineFactor = min(g.x, g.y);
-    return 1.0 - clamp(lineFactor, 0.0, 1.0);
+    premul = color * a + premul * (1.0 - a);
+    alpha = a + alpha * (1.0 - a);
 }
 
-// Coverage of an axis line with a fixed world-space half-width.
-float AxisLineCoverage(float distanceFromAxis, float derivative)
+// Coverage of the lines of one cell size. `footprint` is world units per pixel along x and z.
+// Lines are one family per axis, so each family fades by its own spacing in pixels.
+float GridLineCoverage(vec2 worldXZ, float cellSize, vec2 footprint)
 {
-    float d = max(abs(derivative), 1e-6);
-    return 1.0 - clamp((distanceFromAxis - kAxisLineHalfWidthWorld) / d, 0.0, 1.0);
+    vec2 cellPx = cellSize / footprint;
+    vec2 distPx = abs(fract(worldXZ / cellSize - 0.5) - 0.5) * cellPx;
+    vec2 coverage = clamp(kLineHalfWidthPx + 0.5 - distPx, 0.0, 1.0)
+        * smoothstep(kLineFadeStartPx, kLineFadeFullPx, cellPx);
+    return max(coverage.x, coverage.y);
+}
+
+// Coverage of an axis line, a fixed number of pixels wide.
+float AxisLineCoverage(float distanceFromAxis, float footprint)
+{
+    return clamp(kAxisHalfWidthPx + 0.5 - distanceFromAxis / footprint, 0.0, 1.0);
 }
 
 void main()
 {
-    // Ray through this pixel, from the near plane to the far plane.
+    // Ray through this pixel, from the near plane (t = 0) to the far plane (t = 1). Ground beyond t = 1 is still drawn.
+    // Every derivative is taken before any discard, so all invocations of a quad run them.
     vec4 nearH = pc.invViewProj * vec4(inNdcXY, 0.0, 1.0);
     vec4 farH = pc.invViewProj * vec4(inNdcXY, 1.0, 1.0);
-    if (abs(nearH.w) < 1e-6 || abs(farH.w) < 1e-6) {
-        discard;
-    }
-    vec3 nearPoint = nearH.xyz / nearH.w;
-    vec3 farPoint = farH.xyz / farH.w;
+    bool valid = abs(nearH.w) >= 1e-6 && abs(farH.w) >= 1e-6;
+    vec3 nearPoint = nearH.xyz / (valid ? nearH.w : 1.0);
+    vec3 farPoint = farH.xyz / (valid ? farH.w : 1.0);
     vec3 rayDir = farPoint - nearPoint;
 
-    if (abs(rayDir.y) < 1e-6) {
-        discard; // Ray parallel to the ground plane.
-    }
-
-    float t = -nearPoint.y / rayDir.y;
-    if (t <= 0.0 || t > 1.0) {
-        discard; // Behind the camera, or beyond the far clip plane.
-    }
+    bool hasHit = abs(rayDir.y) >= 1e-6;
+    float t = -nearPoint.y / (hasHit ? rayDir.y : 1.0);
+    valid = valid && hasHit && t > 0.0;
 
     vec3 worldPos = nearPoint + rayDir * t;
-
     vec4 clipHit = pc.viewProj * vec4(worldPos, 1.0);
-    if (clipHit.w <= 1e-6) {
-        discard;
-    }
-    float ndcDepth = clipHit.z / clipHit.w;
-    if (ndcDepth < 0.0 || ndcDepth > 1.0) {
-        discard;
-    }
+    float ndcDepth = clipHit.z / max(clipHit.w, 1e-6);
+    vec2 footprint = max(fwidth(worldPos.xz), vec2(1e-6));
 
-    // The near-plane point stands in for the eye position, so no camera push constant is needed.
-    float distanceFromCamera = length(worldPos - nearPoint);
-    float distanceFade = 1.0 - smoothstep(kFadeDistance * 0.5, kFadeDistance, distanceFromCamera);
-    if (distanceFade <= 0.001) {
-        discard;
-    }
-
-    float minorCoverage = GridLineCoverage(worldPos.xz, kMinorCellSize);
-    float majorCoverage = GridLineCoverage(worldPos.xz, kMajorCellSize);
-
-    // Hide minor lines as their cells shrink below about half a pixel (avoids moire).
-    vec2 minorDeriv = fwidth(worldPos.xz / kMinorCellSize);
-    float minorLod = max(minorDeriv.x, minorDeriv.y);
-    float minorFade = clamp(2.0 - minorLod, 0.0, 1.0);
-    minorCoverage *= minorFade;
-
-    // Every major line is also a minor line; draw it once.
-    minorCoverage *= (1.0 - majorCoverage);
-
-    vec3 gridColor = kMinorLineColor * minorCoverage + kMajorLineColor * majorCoverage;
-    float gridAlpha = max(minorCoverage * kMinorLineMaxAlpha, majorCoverage * kMajorLineMaxAlpha);
-
-    vec2 worldDeriv = max(abs(fwidth(worldPos.xz)), 1e-6);
-    // The X axis is the line Z == 0, the Z axis is the line X == 0.
-    float xAxisCoverage = AxisLineCoverage(abs(worldPos.z), worldDeriv.y);
-    float zAxisCoverage = AxisLineCoverage(abs(worldPos.x), worldDeriv.x);
-
-    vec3 finalColor = gridColor;
-    float finalAlpha = gridAlpha;
-
-    // Axis lines win over the plain grid where they overlap.
-    if (zAxisCoverage > 0.0) {
-        finalColor = mix(finalColor, kZAxisColor, zAxisCoverage);
-        finalAlpha = max(finalAlpha, zAxisCoverage * kAxisLineMaxAlpha);
-    }
-    if (xAxisCoverage > 0.0) {
-        finalColor = mix(finalColor, kXAxisColor, xAxisCoverage);
-        finalAlpha = max(finalAlpha, xAxisCoverage * kAxisLineMaxAlpha);
+    vec3 premul = vec3(0.0);
+    float alpha = 0.0;
+    float cellSize = kBaseCellSize;
+    for (int level = 0; level < kLevelCount; ++level) {
+        bool finest = (level == 0);
+        float a = GridLineCoverage(worldPos.xz, cellSize, footprint)
+            * (finest ? kMinorLineMaxAlpha : kMajorLineMaxAlpha);
+        Accumulate(premul, alpha, finest ? kMinorLineColor : kMajorLineColor, a);
+        cellSize *= kCellSizeStep;
     }
 
-    finalAlpha *= distanceFade;
-    if (finalAlpha <= 0.003) {
+    // The X axis is the line Z == 0, the Z axis is the line X == 0. The X axis is drawn last, so it wins at the origin.
+    float horizonFade = smoothstep(0.0, kAxisHorizonFadeSin, abs(rayDir.y) / max(length(rayDir), 1e-6));
+    float axisAlpha = kAxisLineMaxAlpha * horizonFade;
+    Accumulate(premul, alpha, kZAxisColor, AxisLineCoverage(abs(worldPos.x), footprint.x) * axisAlpha);
+    Accumulate(premul, alpha, kXAxisColor, AxisLineCoverage(abs(worldPos.z), footprint.y) * axisAlpha);
+
+    if (!valid || alpha <= 0.003) {
         discard;
     }
 
-    gl_FragDepth = ndcDepth;
-    outColor = vec4(SrgbToLinear(finalColor), finalAlpha);
+    gl_FragDepth = min(ndcDepth, kMaxGridDepth);
+    outColor = vec4(SrgbToLinear(premul / alpha), alpha);
 }

@@ -2382,6 +2382,7 @@ std::string BuildSceneCameraStateJson(const SceneCameraReport& report)
     body["cameras"] = std::move(cameras);
     body["selected_frustum"] = SegmentsToJson(report.selectedFrustum);
     body["pose"] = ScenePoseToJson(report.pose);
+    body["view"] = SceneViewToJson(report.view);
     return body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 

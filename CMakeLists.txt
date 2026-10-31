@@ -1148,6 +1148,8 @@ add_library(gte_core STATIC
     src/Encoding/PngEncoder.cpp
     src/Editor/OverlayRaster.h
     src/Editor/OverlayRaster.cpp
+    src/Editor/SceneViewAxes.h
+    src/Editor/SceneViewAxes.cpp
     src/Encoding/DepthVisualization.h
     src/Encoding/DepthVisualization.cpp
     src/Encoding/HdrColorVisualization.h
@@ -1403,8 +1405,6 @@ add_library(gte_editor STATIC
     src/Editor/EditorCamera.h
     src/Editor/EditorCamera.cpp
     src/Editor/ExitGate.h
-    src/Editor/SceneGridMath.h
-    src/Editor/SceneGridMath.cpp
     src/Editor/InstanceGridTestSpawner.h
     src/Editor/InstanceGridTestSpawner.cpp
     src/Editor/TransformGizmo.h
@@ -1508,6 +1508,8 @@ add_library(gte_editor STATIC
     src/Editor/Panels/InspectorPanel.cpp
     src/Editor/Panels/ScenePanel.h
     src/Editor/Panels/ScenePanel.cpp
+    src/Editor/Panels/SceneViewGizmo.h
+    src/Editor/Panels/SceneViewGizmo.cpp
     src/Editor/Panels/GamePanel.h
     src/Editor/Panels/GamePanel.cpp
     src/Editor/Panels/MemoryPanel.h

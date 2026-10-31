@@ -181,4 +181,91 @@ TEST(SceneCameraStateJsonTests, CarriesThePose)
     EXPECT_FALSE(body.at("pose").contains("success"));
 }
 
+TEST(SceneCameraSetViewQueryTests, ParsesEveryPart)
+{
+    const ParsedSetViewQuery parsed = ParseSetViewQuery("top", "orthographic", "12.5");
+    ASSERT_TRUE(parsed.valid);
+    ASSERT_TRUE(parsed.request.axis.has_value());
+    EXPECT_EQ(*parsed.request.axis, SceneViewAxis::PositiveY);
+    ASSERT_TRUE(parsed.request.orthographic.has_value());
+    EXPECT_TRUE(*parsed.request.orthographic);
+    ASSERT_TRUE(parsed.request.distance.has_value());
+    EXPECT_FLOAT_EQ(*parsed.request.distance, 12.5f);
+}
+
+TEST(SceneCameraSetViewQueryTests, ParsesOnePartAlone)
+{
+    const ParsedSetViewQuery axisOnly = ParseSetViewQuery("front", "", "");
+    ASSERT_TRUE(axisOnly.valid);
+    EXPECT_TRUE(axisOnly.request.axis.has_value());
+    EXPECT_FALSE(axisOnly.request.orthographic.has_value());
+    EXPECT_FALSE(axisOnly.request.distance.has_value());
+
+    const ParsedSetViewQuery projectionOnly = ParseSetViewQuery("", "perspective", "");
+    ASSERT_TRUE(projectionOnly.valid);
+    EXPECT_FALSE(projectionOnly.request.axis.has_value());
+    ASSERT_TRUE(projectionOnly.request.orthographic.has_value());
+    EXPECT_FALSE(*projectionOnly.request.orthographic);
+    EXPECT_FALSE(projectionOnly.request.distance.has_value());
+
+    const ParsedSetViewQuery distanceOnly = ParseSetViewQuery("", "", "3");
+    ASSERT_TRUE(distanceOnly.valid);
+    EXPECT_FALSE(distanceOnly.request.axis.has_value());
+    EXPECT_FALSE(distanceOnly.request.orthographic.has_value());
+    ASSERT_TRUE(distanceOnly.request.distance.has_value());
+    EXPECT_FLOAT_EQ(*distanceOnly.request.distance, 3.0f);
+}
+
+TEST(SceneCameraSetViewQueryTests, RejectsEmpty)
+{
+    const ParsedSetViewQuery parsed = ParseSetViewQuery("", "", "");
+    EXPECT_FALSE(parsed.valid);
+    EXPECT_NE(parsed.errorMessage.find("at least one"), std::string::npos);
+}
+
+TEST(SceneCameraSetViewQueryTests, NamesTheBadKey)
+{
+    EXPECT_NE(ParseSetViewQuery("up", "", "").errorMessage.find("direction"), std::string::npos);
+    EXPECT_NE(ParseSetViewQuery("", "round", "").errorMessage.find("projection"), std::string::npos);
+    EXPECT_NE(ParseSetViewQuery("", "", "abc").errorMessage.find("distance"), std::string::npos);
+
+    EXPECT_FALSE(ParseSetViewQuery("top", "", "0.01").valid);
+    EXPECT_FALSE(ParseSetViewQuery("top", "", "1e9").valid);
+    EXPECT_FALSE(ParseSetViewQuery("top", "", "nan").valid);
+    EXPECT_TRUE(ParseSetViewQuery("top", "", "").valid);
+}
+
+TEST(SceneCameraSetViewQueryTests, RejectsUppercaseDirection)
+{
+    EXPECT_FALSE(ParseSetViewQuery("Top", "", "").valid);
+}
+
+TEST(SceneCameraViewJsonTests, PoseJsonCarriesTheView)
+{
+    SceneCameraReport report;
+    report.view.distance = 7.5f;
+    report.view.orthographic = true;
+    report.view.axisName = "Top";
+
+    const nlohmann::json json = nlohmann::json::parse(BuildSceneCameraPoseJson(report));
+    EXPECT_TRUE(json["success"].get<bool>());
+    EXPECT_EQ(json["view"]["projection"].get<std::string>(), "orthographic");
+    EXPECT_FLOAT_EQ(json["view"]["distance"].get<float>(), 7.5f);
+    EXPECT_EQ(json["view"]["axis"].get<std::string>(), "Top");
+}
+
+TEST(SceneCameraViewJsonTests, StateJsonCarriesTheViewAndTheDefaultIsPerspective)
+{
+    const nlohmann::json json = nlohmann::json::parse(BuildSceneCameraStateJson({}));
+    EXPECT_EQ(json["view"]["projection"].get<std::string>(), "perspective");
+    EXPECT_EQ(json["view"]["axis"].get<std::string>(), "");
+}
+
+TEST(SceneCameraViewJsonTests, EmbeddedViewHasNoSuccessKey)
+{
+    const nlohmann::json json = SceneViewToJson(SceneCameraView{});
+    EXPECT_FALSE(json.contains("success"));
+    EXPECT_TRUE(json.contains("distance"));
+}
+
 } // namespace

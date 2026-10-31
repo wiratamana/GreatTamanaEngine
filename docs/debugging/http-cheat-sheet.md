@@ -1,6 +1,6 @@
 # HTTP debugging cheat sheet
 > One-page guide to the editor's HTTP debug server. For humans and AI agents who need to see, measure or poke a running editor.
-> Verified against code: 2026-10-31
+> Verified against code: 2026-11-01
 
 ## TL;DR
 - The editor runs a server on `http://127.0.0.1:8080`. Loopback only. The port is fixed.
@@ -68,6 +68,7 @@ More about threads and bridges: [HTTP server](../architecture/http-server.md).
 | Reset a feature | `GET /feature_debug/invoke?name=<feature>&action=reset_defaults` **W** |
 | Inspect one draw call | `/frame_debugger/*` (see R6) |
 | Move the scene camera | `GET /scene_camera/set_pose?x=0&y=2&z=5&yaw=0&pitch=0` **W** |
+| Look along an axis, switch Persp / Iso | `GET /scene_camera/view?direction=top&projection=orthographic` **W** |
 | Build a repro scene | `POST /instantiate_primitive` **W** |
 | Load the Hi-Z demo scene | `POST /open_preset_scene` **W** |
 | Hot reload a game project | `POST /project_assembly/hot_reload?name=<project>` **W** |
@@ -129,6 +130,7 @@ Full params and responses: [HTTP routes](http-routes.md) and [HTTP routes (debug
 | Scene | `POST /spawn_instance_grid` | `count`, `spacing` | **W** |
 | Camera | `/scene_camera/state`, `/scene_camera/pose` | none | |
 | Camera | `/scene_camera/set_pose` | `x`, `y`, `z`, `yaw`, `pitch` (all 5) | **W** |
+| Camera | `/scene_camera/view` | `direction`, `projection`, `distance` (any, at least one) | **W** |
 | Camera | `/scene_camera/pick`, `/scene_camera/select` | `x`,`y` (0..1) / `name` | **W** (select) |
 | Camera | `/scene_camera/image` | `overlay=true\|false` | **IMG** |
 | Editor | `/list_tabs`, `/activate_tab`, `/split_views`, `/panel_visible` | `name` / `enabled` / `visible` | **W** |
