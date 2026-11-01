@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../EditorWindow.h"
 #include "../FrameDebuggerData.h"
 #include "../FrameDebuggerCaptureHandshake.h"
 #include "../FrameDebuggerCapturedFrame.h"
@@ -28,27 +29,21 @@ class RenderPassToggleRegistry;
 class RenderPassBlackboard;
 } // namespace rg
 
-// Floating window that freezes one frame and shows its event tree, render target and per-event state.
+// The Frame Debugger window: inspects one captured frame's draw calls and render passes. Closed by default.
 // Owns the capture context, the retained capture and the preview descriptors.
-class FrameDebuggerPanel {
+class FrameDebuggerPanel final : public EditorWindow {
 public:
-    FrameDebuggerPanel() = default;
+    FrameDebuggerPanel() : EditorWindow("Frame Debugger", WindowDock::Floating, false, 900.0f, 600.0f) {}
     ~FrameDebuggerPanel();
 
     FrameDebuggerPanel(const FrameDebuggerPanel&) = delete;
     FrameDebuggerPanel& operator=(const FrameDebuggerPanel&) = delete;
 
-    // Caches the collaborators for later calls and serves the capture half of the handshake.
-    // `compositedGameView` and the last two pointers may be null; the matching detectors are then skipped.
-    void Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph, RenderTexture& gameView,
-        RenderTexture* compositedGameView, rg::RenderPassToggleRegistry* toggleRegistry = nullptr,
-        const rg::RenderPassBlackboard* offscreenBlackboard = nullptr);
-
     // True while a capture can be served: Enable on and the window open. The Game view must render in that case.
-    bool IsCaptureArmed(const EditorContext& ctx) const noexcept;
+    bool IsCaptureArmed() const noexcept;
 
     // Resets and returns the per-draw capture context while armed; deactivates it and returns nullptr otherwise.
-    FrameDebuggerCaptureContext* PrepareCaptureContextForThisFrame(EditorContext& ctx);
+    FrameDebuggerCaptureContext* PrepareCaptureContextForThisFrame();
 
     // A single-step happened this frame: requests a new capture while enabled.
     void NotifyStepConsumed() noexcept;
@@ -66,10 +61,6 @@ public:
     void ReleaseShaderPropertyTexturePreview();
 
     // HTTP entry points; each mirrors the matching piece of hand-driven UI.
-
-    // Opens the window and pins it once onto the main viewport so swapchain captures can see it.
-    void RequestOpenWindow(EditorContext& ctx);
-
     // Same as the "Enable" checkbox; enabling also opens the window.
     void SetEnabledFromCommand(EditorContext& ctx, bool enabled);
 
@@ -86,13 +77,17 @@ public:
     void SetLevelsFromCommand(float black, float white);
 
     // Read-only state for GET /frame_debugger/state.
-    FrameDebuggerStateSnapshotView BuildStateSnapshotView(const EditorContext& ctx) const;
+    FrameDebuggerStateSnapshotView BuildStateSnapshotView() const;
 
     // The session's one per-draw event sink; valid for this object's lifetime.
     FrameDebuggerEventSink* EventSinkForInstall() noexcept { return &m_captureContext; }
 
     // Backs GET /frame_debugger/get_event_texture.
     FrameDebuggerEventTextureResult GetEventTextureFromCommand(int eventIndex);
+
+protected:
+    void OnFrame(EditorFrame& frame) override;
+    void OnGui(EditorFrame& frame) override;
 
 private:
     void BuildToolbarRow(EditorContext& ctx);
@@ -117,7 +112,7 @@ private:
     // shader-property preview.
     void SetSelectedEventIndex(int newIndex);
 
-    // Runs one capture from the collaborators cached by this frame's Build().
+    // Runs one capture from the collaborators cached by this frame's OnFrame().
     void TriggerCapture();
 
     bool m_enabled = false;
@@ -130,7 +125,7 @@ private:
 
     FrameDebuggerCurrentCapture m_currentCapture; // Exactly one captured frame at a time.
 
-    // Capture life cycle: Core serves the replay half, Build() the capture half.
+    // Capture life cycle: Core serves the replay half, OnFrame() the capture half.
     FrameDebuggerCaptureHandshake m_handshake;
 
     std::string m_captureError; // Reason text while the phase is Failed, else empty.
@@ -181,16 +176,13 @@ private:
     // Volume raymarch renderer, shared with GET /get_texture.
     VolumeTexturePreviewRenderer m_shaderPropertyVolumeRenderer;
 
-    // Collaborators of the current Build(). Non-owning; overwritten first thing in every Build().
+    // Collaborators of the current frame. Non-owning; overwritten first thing in every OnFrame().
     Renderer* m_frameRenderer = nullptr;
     const rg::RenderGraph* m_frameRenderGraph = nullptr;
     RenderTexture* m_frameGameView = nullptr;
     RenderTexture* m_frameGameViewComposited = nullptr; // Nullable.
-    rg::RenderPassToggleRegistry* m_frameToggleRegistry = nullptr; // Nullable; gates the honesty detector.
-    const rg::RenderPassBlackboard* m_frameBlackboard = nullptr; // Nullable; gates the side-channel detector.
-
-    // True for the one Build() after RequestOpenWindow(): pins the window onto the main viewport.
-    bool m_pinToMainViewportNextOpen = false;
+    rg::RenderPassToggleRegistry* m_frameToggleRegistry = nullptr; // Gates the honesty detector.
+    const rg::RenderPassBlackboard* m_frameBlackboard = nullptr; // Gates the side-channel detector.
 };
 
 } // namespace gte

@@ -9,6 +9,7 @@
 #include "ClusterViewerSettings.h"
 #include "ClusterViewerStats.h"
 #include "ClusterViewerTruth.h"
+#include "EditorWindow.h"
 #include "OrbitCamera.h"
 #include "RotationEulerEditCache.h"
 #include "../Renderer/ClusterViewRenderer.h"
@@ -30,7 +31,7 @@ class Registry;
 class Renderer;
 struct EditorContext;
 
-class ClusterViewerWindow final : public IClusterViewerControl {
+class ClusterViewerWindow final : public EditorWindow, public IClusterViewerControl {
 public:
     ClusterViewerWindow();
     ~ClusterViewerWindow() override;
@@ -38,11 +39,8 @@ public:
     ClusterViewerWindow(const ClusterViewerWindow&) = delete;
     ClusterViewerWindow& operator=(const ClusterViewerWindow&) = delete;
 
-    // Opens or re-targets the window; the mesh loads in the next Build().
+    // Opens or re-targets the window; the mesh loads on the next frame.
     void RequestOpen(const std::string& absoluteGtaPath);
-
-    // Per frame; a no-op while closed.
-    void Build(Renderer& renderer, EditorContext& ctx, Registry& registry);
 
     // Closes the window and frees the renderer and every derived result (GPU idle first). Safe to repeat.
     void Reset();
@@ -54,6 +52,11 @@ public:
     ClusterViewerResult CaptureHiz() override;
     ClusterViewerPickResult Pick(float x, float y) override;
     std::optional<ClusterViewerImage> CaptureImage(ClusterViewerImageTarget target, bool overlay) override;
+
+protected:
+    void OnFrame(EditorFrame& frame) override;
+    void OnGui(EditorFrame& frame) override;
+    void OnHidden(EditorFrame& frame) override;
 
 private:
     // Everything one slot render depends on; the slot re-renders only when it changes.
@@ -86,7 +89,7 @@ private:
     void LoadMesh(Renderer& renderer, const std::string& path);
     void PollFile(Renderer& renderer);
     void ClearDerived();
-    void Close();
+    void ReleaseGpu();
     static FileIdentity StatFile(const std::filesystem::path& path);
 
     // Camera and flags.
@@ -138,8 +141,6 @@ private:
     void HandleViewportInput(const Mat4& viewProjection, Vec2 imageMin, Vec2 imageMax, bool hovered);
 
     // State.
-    bool m_open = false;
-    bool m_closeRequested = false; // the window was closed this frame; GPU objects are freed at the next Build()
     std::string m_pendingPath;
     EditorContext* m_ctx = nullptr;
     Registry* m_registry = nullptr;

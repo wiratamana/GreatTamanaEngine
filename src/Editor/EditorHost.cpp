@@ -17,7 +17,6 @@
 #include "CaptureFailureReason.h"
 #include "ExitGate.h"
 #include "VolumeTexturePreviewSelection.h"
-#include "../Core/EditorPanelRegistry.h"
 // RenderFeatureCompositor::DebugSnapshot() needs the full type (Core.h only forward-declares it).
 #include "../Core/Plugins/RenderFeatureCompositor.h"
 #include "../Application/EventTranslator.h"
@@ -358,7 +357,7 @@ EditorUiCommandResult RunEditorUiCommand(const EditorUiCommandRequest& request, 
         break;
     case EditorUiCommandKind::PanelVisible:
         result.panelVisible.editorAvailable =
-            layer.SetPanelHidden(request.panelVisible.panel, !request.panelVisible.visible);
+            layer.SetWindowOpen(request.panelVisible.name, request.panelVisible.visible);
         break;
     case EditorUiCommandKind::HierarchyAction:
         result.hierarchyAction = layer.HierarchyAction(game, request.hierarchyAction);
@@ -489,29 +488,13 @@ EditorHost::EditorHost(const std::string& title, int width, int height, bool for
     // Core only stores this callback; the editor's own Render(cmd) is still called from here, on EditorHost.
     m_core.SetPresentImGuiRecorder([this](const rg::RecordingContext& cmd) { m_editorLayer->Render(cmd); });
 
-    // Seeds the panel registry with every built-in panel name before any plugin panel registers,
-    // so built-ins always list first. The list must match the panel catalog.
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Hierarchy");
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Inspector");
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Scene");
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Game");
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Memory");
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Profiler");
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Render Graph");
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Jobs");
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Log");
-#if GTE_ENABLE_PROJECT_PANEL
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Project");
-#endif
-
     // Project assemblies load once, from their own output folder (never "plugins/"); `this` is the EditorHost
     // every "*_Editor.dll" receives. Gated by GTE_ENABLE_PROJECT_ASSEMBLIES.
 #if GTE_ENABLE_PROJECT_ASSEMBLIES
     m_core.LoadProjectAssemblies(ResolveProjectAssemblyOutputDirectory(gte::ExecutableDirectory()), this);
 #endif
 
-    // Created after every built-in panel name is registered, so plugin panels come after built-ins.
-    // EditorHost never names a concrete feature module.
+    // Feature windows register after the built-in and project windows, so they come last.
     m_builtinFeatureModules = BuiltinFeatureModuleRegistry::Instance().CreateAll(m_core);
     m_editorLayer->AttachBuiltinFeatureModules(m_builtinFeatureModules, m_renderer, m_renderGraph);
 

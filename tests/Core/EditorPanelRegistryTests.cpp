@@ -1,49 +1,24 @@
-// Tier-1 tests for src/Core/EditorPanelRegistry.h/.cpp (editor-core-
-// separation-3 campaign, PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) -
-// replaces the old tests/Editor/EditorPanelCatalogTests.cpp (deleted this
-// same phase, since Core/EditorPanelCatalog.h itself was deleted, mirroring
-// the "delete the old mechanism, don't leave a parallel one" precedent
-// PHASE3.4 of this same phase file cites).
-//
-// EditorPanelRegistry::Instance() is process-wide, mutable state that
-// persists for the lifetime of this whole test binary (a Meyers singleton,
-// mirroring LoggerLogSink::Instance()'s own precedent - see
-// tests/Core/LogSinkTests.cpp's own header comment) - unlike Logger, it has
-// no Clear()/reset method (by design: production code registers every
-// built-in panel name, then every plugin panel, exactly ONCE per process,
-// at EditorHost construction time - see PHASE0_MASTER_STRATEGY.md's Locked
-// Design Decision #9 - there is no real call site that ever needs to reset
-// it). Every test below therefore registers its own uniquely-named,
-// test-only panel name(s) (never a real built-in name like "Hierarchy") so
-// tests never interfere with each other regardless of run order, and never
-// asserts an absolute AllNames()/PluginPanels() size - only that ITS OWN
-// registered name(s) round-trip correctly.
+// Tests for the process-wide editor window registry. It has no reset, so every test uses its own unique window names.
 
 #include "Core/EditorPanelRegistry.h"
-#include "Core/EditorPanelModule.h" // relocated here, better-render-pass-2 PHASE1.
+#include "Editor/EditorWindow.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace gte {
 namespace {
 
-class FakeEditorPanelModule final : public IEditorPanelModule_v1 {
+class FakeWindow final : public EditorWindow {
 public:
-    explicit FakeEditorPanelModule(const char* name)
-        : m_name(name)
-    {
-    }
+    explicit FakeWindow(const char* name) : EditorWindow(name, WindowDock::Bottom) {}
 
-    const char* GetPanelName() const override { return m_name; }
-    void BuildPanel(IPluginPanelDrawContext& /*ctx*/) override { m_buildPanelCallCount++; }
-
-    int BuildPanelCallCount() const noexcept { return m_buildPanelCallCount; }
-
-private:
-    const char* m_name;
-    int m_buildPanelCallCount = 0;
+protected:
+    void OnGui(EditorFrame& /*frame*/) override {}
 };
 
 bool Contains(const std::vector<std::string>& names, const std::string& name)
@@ -51,239 +26,136 @@ bool Contains(const std::vector<std::string>& names, const std::string& name)
     return std::find(names.begin(), names.end(), name) != names.end();
 }
 
-TEST(EditorPanelRegistryTest, RegisterBuiltinPanelName_MakesIsKnownNameTrueAndAppearsInAllNames)
+TEST(EditorPanelRegistryTest, RegisteredWindowIsKnownListedAndFindable)
 {
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Test_Builtin_Panel_Alpha");
+    FakeWindow window("Test_Window_Alpha");
+    EditorPanelRegistry& registry = EditorPanelRegistry::Instance();
+    registry.RegisterWindow(window.Name(), &window);
 
-    EXPECT_TRUE(EditorPanelRegistry::Instance().IsKnownName("Test_Builtin_Panel_Alpha"));
-    EXPECT_TRUE(Contains(EditorPanelRegistry::Instance().AllNames(), "Test_Builtin_Panel_Alpha"));
+    EXPECT_TRUE(registry.IsKnownName("Test_Window_Alpha"));
+    EXPECT_TRUE(Contains(registry.AllNames(), "Test_Window_Alpha"));
+    EXPECT_EQ(registry.FindWindow("Test_Window_Alpha"), &window);
+
+    registry.UnregisterWindow("Test_Window_Alpha");
 }
 
-TEST(EditorPanelRegistryTest, RegisterBuiltinPanelName_DoesNotAppearInPluginPanels)
+TEST(EditorPanelRegistryTest, WindowsKeepRegistrationOrder)
 {
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Test_Builtin_Panel_Beta");
+    FakeWindow first("Test_Window_Order_First");
+    FakeWindow second("Test_Window_Order_Second");
+    EditorPanelRegistry& registry = EditorPanelRegistry::Instance();
+    registry.RegisterWindow(first.Name(), &first);
+    registry.RegisterWindow(second.Name(), &second);
 
-    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
-        EXPECT_NE(entry.name, "Test_Builtin_Panel_Beta");
-    }
+    const std::vector<std::string> names = registry.AllNames();
+    const auto firstAt = std::find(names.begin(), names.end(), "Test_Window_Order_First");
+    const auto secondAt = std::find(names.begin(), names.end(), "Test_Window_Order_Second");
+    ASSERT_NE(firstAt, names.end());
+    ASSERT_NE(secondAt, names.end());
+    EXPECT_LT(firstAt, secondAt);
+
+    registry.UnregisterWindow("Test_Window_Order_First");
+    registry.UnregisterWindow("Test_Window_Order_Second");
 }
 
-TEST(EditorPanelRegistryTest, RegisterPluginPanel_MakesIsKnownNameTrueAndAppearsInAllNamesAndPluginPanels)
+TEST(EditorPanelRegistryTest, DuplicateNameIsRefusedAndTheFirstWindowWins)
 {
-    FakeEditorPanelModule fakeModule("Test_Plugin_Panel_Gamma");
-    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Plugin_Panel_Gamma", &fakeModule);
+    FakeWindow first("Test_Window_Duplicate");
+    FakeWindow second("Test_Window_Duplicate");
+    EditorPanelRegistry& registry = EditorPanelRegistry::Instance();
+    registry.RegisterWindow(first.Name(), &first);
+    registry.RegisterWindow(second.Name(), &second);
 
-    EXPECT_TRUE(EditorPanelRegistry::Instance().IsKnownName("Test_Plugin_Panel_Gamma"));
-    EXPECT_TRUE(Contains(EditorPanelRegistry::Instance().AllNames(), "Test_Plugin_Panel_Gamma"));
+    EXPECT_EQ(registry.FindWindow("Test_Window_Duplicate"), &first);
+    const std::vector<std::string> names = registry.AllNames();
+    EXPECT_EQ(std::count(names.begin(), names.end(), "Test_Window_Duplicate"), 1);
 
-    bool foundInPluginPanels = false;
-    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
-        if (entry.name == "Test_Plugin_Panel_Gamma") {
-            foundInPluginPanels = true;
-            EXPECT_EQ(entry.module, &fakeModule);
-        }
-    }
-    EXPECT_TRUE(foundInPluginPanels);
+    registry.UnregisterWindow("Test_Window_Duplicate");
 }
 
-TEST(EditorPanelRegistryTest, RegisterPluginPanel_ModulePointerIsUsableAndDrawsThroughTheCuratedContext)
+TEST(EditorPanelRegistryTest, NullWindowAndEmptyNameAreRefused)
 {
-    FakeEditorPanelModule fakeModule("Test_Plugin_Panel_Delta");
-    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Plugin_Panel_Delta", &fakeModule);
+    EditorPanelRegistry& registry = EditorPanelRegistry::Instance();
+    FakeWindow window("Test_Window_Unnamed");
+    registry.RegisterWindow("Test_Window_Null", nullptr);
+    registry.RegisterWindow("", &window);
 
-    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
-        if (entry.name == "Test_Plugin_Panel_Delta") {
-            class NoOpDrawContext final : public IPluginPanelDrawContext {
-            public:
-                void Text(const char* /*text*/) override { }
-                bool Button(const char* /*label*/) override { return false; }
-                void Separator() override { }
-            };
-            NoOpDrawContext drawContext;
-            entry.module->BuildPanel(drawContext);
-        }
-    }
-
-    EXPECT_EQ(fakeModule.BuildPanelCallCount(), 1);
+    EXPECT_FALSE(registry.IsKnownName("Test_Window_Null"));
+    EXPECT_FALSE(registry.IsKnownName(""));
 }
 
-TEST(EditorPanelRegistryTest, RegisterPluginPanel_RefusesACollisionWithAnAlreadyRegisteredBuiltinName)
+TEST(EditorPanelRegistryTest, UnregisterRemovesTheNameAndAllowsRegisteringItAgain)
 {
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Test_Builtin_For_Collision_Eta");
+    FakeWindow first("Test_Window_Reload");
+    EditorPanelRegistry& registry = EditorPanelRegistry::Instance();
+    registry.RegisterWindow(first.Name(), &first);
+    registry.UnregisterWindow("Test_Window_Reload");
+    EXPECT_FALSE(registry.IsKnownName("Test_Window_Reload"));
 
-    FakeEditorPanelModule collidingModule("Test_Builtin_For_Collision_Eta");
-    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Builtin_For_Collision_Eta", &collidingModule);
+    FakeWindow second("Test_Window_Reload");
+    registry.RegisterWindow(second.Name(), &second);
+    EXPECT_EQ(registry.FindWindow("Test_Window_Reload"), &second);
 
-    // The name must still resolve to the ORIGINAL (built-in) registration,
-    // never the plugin's - i.e. it must NOT appear a second time in
-    // PluginPanels(), proving the plugin's own registration was refused.
-    int occurrencesInPluginPanels = 0;
-    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
-        if (entry.name == "Test_Builtin_For_Collision_Eta") {
-            ++occurrencesInPluginPanels;
-        }
-    }
-    EXPECT_EQ(occurrencesInPluginPanels, 0);
+    registry.UnregisterWindow("Test_Window_Reload");
 }
 
-TEST(EditorPanelRegistryTest, RegisterPluginPanel_RefusesACollisionWithAnAlreadyRegisteredPluginName)
+TEST(EditorPanelRegistryTest, UnregisterOfAnUnknownNameIsSafe)
 {
-    FakeEditorPanelModule firstModule("Test_Plugin_For_Collision_Theta");
-    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Plugin_For_Collision_Theta", &firstModule);
-
-    FakeEditorPanelModule secondModule("Test_Plugin_For_Collision_Theta");
-    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Plugin_For_Collision_Theta", &secondModule);
-
-    // Exactly ONE entry must exist for this name, and it must still point at
-    // the FIRST module (first-registered wins, second is refused) - never
-    // two entries for the same name.
-    int occurrences = 0;
-    const IEditorPanelModule_v1* resolvedModule = nullptr;
-    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
-        if (entry.name == "Test_Plugin_For_Collision_Theta") {
-            ++occurrences;
-            resolvedModule = entry.module;
-        }
-    }
-    EXPECT_EQ(occurrences, 1);
-    EXPECT_EQ(resolvedModule, &firstModule);
+    EXPECT_NO_FATAL_FAILURE(EditorPanelRegistry::Instance().UnregisterWindow("Test_Window_Never_Registered"));
+    EXPECT_FALSE(EditorPanelRegistry::Instance().IsKnownName("Test_Window_Never_Registered"));
 }
 
-TEST(EditorPanelRegistryTest, IsKnownName_UnregisteredNameReturnsFalse)
+TEST(EditorPanelRegistryTest, NamesAreCaseSensitive)
 {
-    EXPECT_FALSE(EditorPanelRegistry::Instance().IsKnownName("Test_This_Name_Was_Never_Registered_Epsilon"));
+    FakeWindow window("Test_Window_Case");
+    EditorPanelRegistry& registry = EditorPanelRegistry::Instance();
+    registry.RegisterWindow(window.Name(), &window);
+
+    EXPECT_TRUE(registry.IsKnownName("Test_Window_Case"));
+    EXPECT_FALSE(registry.IsKnownName("test_window_case"));
+
+    registry.UnregisterWindow("Test_Window_Case");
 }
 
-TEST(EditorPanelRegistryTest, IsKnownName_IsCaseSensitive)
+TEST(EditorPanelRegistryTest, UnregisterEditorWindowOnlyRemovesTheRegisteredObject)
 {
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Test_Case_Sensitive_Zeta");
+    FakeWindow owner("Test_Window_Owner");
+    FakeWindow impostor("Test_Window_Owner");
+    RegisterEditorWindow(owner);
+    RegisterEditorWindow(impostor);
 
-    EXPECT_TRUE(EditorPanelRegistry::Instance().IsKnownName("Test_Case_Sensitive_Zeta"));
-    EXPECT_FALSE(EditorPanelRegistry::Instance().IsKnownName("test_case_sensitive_zeta"));
+    UnregisterEditorWindow(impostor);
+    EXPECT_EQ(EditorPanelRegistry::Instance().FindWindow("Test_Window_Owner"), &owner);
+
+    UnregisterEditorWindow(owner);
+    EXPECT_FALSE(EditorPanelRegistry::Instance().IsKnownName("Test_Window_Owner"));
 }
 
-// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
-// BIG-STEP 2, PHASE2 - Hazard 2 fix) - Tier-1 coverage for
-// EditorPanelRegistry::UnregisterPluginPanel(), including the
-// m_allNames-collision-guard regression this phase exists to prevent (see
-// PHASE2_EDITOR_PANEL_REGISTRY_UNREGISTER_HAZARD2.md, Step 3.4, items 1-4).
-// Each test uses its own unique, nowhere-else-used name(s) and tears down
-// (via UnregisterPluginPanel()) whatever it registers, mirroring this file's
-// own pre-existing convention exactly.
-
-TEST(EditorPanelRegistryTest, UnregisterPluginPanel_RemovesFromBothAllNamesAndPluginPanels)
-{
-    FakeEditorPanelModule fakeModule("Test_Plugin_Panel_Iota");
-    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Plugin_Panel_Iota", &fakeModule);
-
-    ASSERT_TRUE(EditorPanelRegistry::Instance().IsKnownName("Test_Plugin_Panel_Iota"));
-    ASSERT_TRUE(Contains(EditorPanelRegistry::Instance().AllNames(), "Test_Plugin_Panel_Iota"));
-
-    EditorPanelRegistry::Instance().UnregisterPluginPanel("Test_Plugin_Panel_Iota");
-
-    EXPECT_FALSE(EditorPanelRegistry::Instance().IsKnownName("Test_Plugin_Panel_Iota"));
-    EXPECT_FALSE(Contains(EditorPanelRegistry::Instance().AllNames(), "Test_Plugin_Panel_Iota"));
-    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
-        EXPECT_NE(entry.name, "Test_Plugin_Panel_Iota");
-    }
-}
-
-TEST(EditorPanelRegistryTest, UnregisterPluginPanel_ThenReRegisteringSameNameSucceedsWithoutCollisionRefusal)
-{
-    // Regression guard: re-registering the same name after an unregister
-    // must not be refused by IsKnownName()'s own collision guard - this is
-    // exactly what a Project Assembly panel reload does every time.
-    FakeEditorPanelModule firstModule("Test_Plugin_Panel_Kappa");
-    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Plugin_Panel_Kappa", &firstModule);
-    EditorPanelRegistry::Instance().UnregisterPluginPanel("Test_Plugin_Panel_Kappa");
-
-    FakeEditorPanelModule secondModule("Test_Plugin_Panel_Kappa");
-    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Plugin_Panel_Kappa", &secondModule);
-
-    EXPECT_TRUE(EditorPanelRegistry::Instance().IsKnownName("Test_Plugin_Panel_Kappa"));
-    int occurrences = 0;
-    const IEditorPanelModule_v1* resolvedModule = nullptr;
-    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
-        if (entry.name == "Test_Plugin_Panel_Kappa") {
-            ++occurrences;
-            resolvedModule = entry.module;
-        }
-    }
-    EXPECT_EQ(occurrences, 1);
-    EXPECT_EQ(resolvedModule, &secondModule);
-
-    EditorPanelRegistry::Instance().UnregisterPluginPanel("Test_Plugin_Panel_Kappa");
-}
-
-TEST(EditorPanelRegistryTest, UnregisterPluginPanel_NeverRegisteredNameIsASafeNoOp)
-{
-    EXPECT_NO_FATAL_FAILURE(
-        EditorPanelRegistry::Instance().UnregisterPluginPanel("Test_Plugin_Panel_Never_Registered_Lambda"));
-    EXPECT_FALSE(EditorPanelRegistry::Instance().IsKnownName("Test_Plugin_Panel_Never_Registered_Lambda"));
-}
-
-TEST(EditorPanelRegistryTest, UnregisterPluginPanel_DoesNotWeakenBuiltinNameCollisionProtection)
-{
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Test_Builtin_For_Collision_Mu");
-
-    FakeEditorPanelModule collidingModule("Test_Builtin_For_Collision_Mu");
-    EditorPanelRegistry::Instance().RegisterPluginPanel("Test_Builtin_For_Collision_Mu", &collidingModule);
-
-    // The plugin registration must still be refused - only plugin-registered
-    // names become unregisterable, built-in names are untouched by this
-    // phase's own change. NOTE: deliberately NOT calling
-    // UnregisterPluginPanel("Test_Builtin_For_Collision_Mu") here to "clean
-    // up" - per this method's own documented, spec-exact behavior it removes
-    // ANY matching name from m_allNames regardless of how it got there, so
-    // doing that here would actually remove this built-in name too, which is
-    // not what this test is checking and would be a self-inflicted false
-    // assumption, not a real bug (EditorPanelRegistry has no reset method by
-    // design - see this file's own header comment - so built-in names
-    // registered by tests are expected to persist for the rest of this test
-    // binary's lifetime, exactly like every other RegisterBuiltinPanelName
-    // test above).
-    int occurrencesInPluginPanels = 0;
-    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
-        if (entry.name == "Test_Builtin_For_Collision_Mu") {
-            ++occurrencesInPluginPanels;
-        }
-    }
-    EXPECT_EQ(occurrencesInPluginPanels, 0);
-    EXPECT_TRUE(EditorPanelRegistry::Instance().IsKnownName("Test_Builtin_For_Collision_Mu"));
-}
-
-} // namespace
-} // namespace gte
-
-// This file ALSO registers the ONE global gtest Environment that seeds
-// EditorPanelRegistry with the same real built-in panel names
-// EditorHost.cpp's own constructor registers in production (see that file's
-// own registration call, PHASE4) - for THIS WHOLE TEST BINARY, since no test
-// here constructs a real EditorHost. Other test files elsewhere in this same
-// binary (tests/Network/NetworkRoutesTests.cpp's ParseActivateTabQueryTests/
-// BuildListTabsResponseJsonTests, tests/Network/
-// ActivateTabEndpointEndToEndTests.cpp) depend on real names like "Profiler"
-// already being known - mirrors tests/Core/LogSinkTests.cpp's own identical
-// "one global Environment every other test file quietly depends on" shape.
-namespace {
-
-class SeedBuiltinEditorPanelNamesEnvironment : public ::testing::Environment {
+// Other test files in this binary need the built-in window names to be known, as they are in the editor.
+class SeedWindowNamesEnvironment : public ::testing::Environment {
 public:
     void SetUp() override
     {
-        ::gte::EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Hierarchy");
-        ::gte::EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Inspector");
-        ::gte::EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Scene");
-        ::gte::EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Game");
-        ::gte::EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Memory");
-        ::gte::EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Profiler");
-        ::gte::EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Render Graph");
-        ::gte::EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Jobs");
-        ::gte::EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Log");
+        for (const char* name :
+            { "Hierarchy", "Inspector", "Scene", "Game", "Memory", "Profiler", "Render Graph", "Jobs", "Log" }) {
+            m_windows.push_back(std::make_unique<FakeWindow>(name));
+            RegisterEditorWindow(*m_windows.back());
+        }
     }
+
+    void TearDown() override
+    {
+        for (const std::unique_ptr<FakeWindow>& window : m_windows) {
+            UnregisterEditorWindow(*window);
+        }
+    }
+
+private:
+    std::vector<std::unique_ptr<FakeWindow>> m_windows;
 };
 
-::testing::Environment* const g_seedBuiltinEditorPanelNamesEnvironment =
-    ::testing::AddGlobalTestEnvironment(new SeedBuiltinEditorPanelNamesEnvironment());
+::testing::Environment* const g_seedWindowNamesEnvironment =
+    ::testing::AddGlobalTestEnvironment(new SeedWindowNamesEnvironment());
 
 } // namespace
+} // namespace gte

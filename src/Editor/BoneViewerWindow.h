@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EditorWindow.h"
 #include "Selection.h" // ModelPartKind
 #include "RigidBodyGroupSelection.h" // RigidBodyJointEdge, BuildRigidBodyAdjacency()
 #include "FlatListRangeSelection.h" // BuildInclusiveIndexRange()
@@ -18,16 +19,14 @@ namespace gte {
 
 class MeshPreviewRenderer;
 class ModelRigCache;
-class PhysicsSystem;
-class Registry;
 class Renderer;
 struct EditorContext;
 
 // Floating Inspector window: orbitable bind-pose mesh with bone gizmos, rigid bodies, joints and dynamic chains.
 // Reads the source *.gta from disk. Call Reset() before the UI backend shuts down (the destructor also does).
-class BoneViewerWindow {
+class BoneViewerWindow final : public EditorWindow {
 public:
-    BoneViewerWindow();
+    explicit BoneViewerWindow(ModelRigCache& rigCache);
     ~BoneViewerWindow();
 
     BoneViewerWindow(const BoneViewerWindow&) = delete;
@@ -36,12 +35,11 @@ public:
     // Opens (or re-targets) the window onto `rootEntity`. An invalid entity shows a "no mesh asset" message.
     void Open(Entity rootEntity) noexcept;
 
-    // Builds the floating window; a no-op while closed. Called once per frame from ImGuiEditorLayer::BuildUI().
-    // `rigCache` is the shared rig cache; `physicsSystem` is looked up fresh every call for the dynamic-chain view.
-    void Build(Registry& registry, Renderer& renderer, EditorContext& ctx, ModelRigCache& rigCache, PhysicsSystem& physicsSystem);
-
     // Releases every held GPU resource after the GPU is idle. Also called by the destructor; safe to call repeatedly.
     void Reset();
+
+protected:
+    void OnGui(EditorFrame& frame) override;
 
 private:
     // One skeleton bone, reduced to what the overlay draws.
@@ -80,7 +78,7 @@ private:
     // The orbit camera's eye position, derived from target, yaw, pitch and distance.
     Vec3 ComputeEyePosition() const noexcept;
 
-    bool m_open = false;
+    ModelRigCache& m_rigCache;
     Entity m_targetEntity = kInvalidEntity;
 
     std::unique_ptr<MeshPreviewRenderer> m_preview; // Built on first use.
@@ -118,12 +116,12 @@ private:
     Vec3 m_boundsCenter = Vec3::Zero();
     float m_boundsRadius = 1.0f;
 
-    // Orbit camera local to this window. Left drag rotates, wheel dollies, middle drag pans (see Build()).
+    // Orbit camera local to this window. Left drag rotates, wheel dollies, middle drag pans.
     float m_camYawDeg = 0.0f;
     float m_camPitchDeg = 12.0f;
     float m_camDistance = 5.0f;
     Vec3 m_camTarget = Vec3::Zero();
-    bool m_needsFraming = true; // Set on (re)load; the next Build() frames the camera once.
+    bool m_needsFraming = true; // Set on (re)load; the next draw frames the camera once.
 
     // A drag keeps responding when the cursor leaves the image, until the button is released.
     bool m_rotating = false;

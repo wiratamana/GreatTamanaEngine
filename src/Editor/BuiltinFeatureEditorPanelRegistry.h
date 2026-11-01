@@ -7,38 +7,26 @@
 namespace gte {
 
 class IEngineFeatureModule;
-class IEditorPanelModule_v1;
+class EditorWindow;
 class Renderer;
 struct EditorContext;
 
 namespace rg { class RenderGraph; } // namespace rg
 
-// Given a live IEngineFeatureModule& (already constructed by
-// BuiltinFeatureModuleRegistry) plus this session's real EditorContext&/
-// Renderer&/RenderGraph&, builds that module's own Editor panel. Only ever
-// implemented inside a feature's own Editor/ subfolder .cpp. Expected to be
-// a simple, non-throwing constructor call - unlike
-// BuiltinFeatureModuleRegistry::CreateAll(), this is NOT wrapped in
-// try/catch: a panel failing to construct is a bug in the panel's own
-// constructor to fix directly.
-using EditorPanelFactoryForModule = std::unique_ptr<IEditorPanelModule_v1> (*)(
+// Builds the editor window of one feature module. Implemented in the feature's own Editor/ folder; must not throw.
+using EditorPanelFactoryForModule = std::unique_ptr<EditorWindow> (*)(
     IEngineFeatureModule& module, EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph);
 
-// Meyers-singleton, mirrors BuiltinFeatureModuleRegistry's shape, keyed by
-// the SAME ModuleName() string rather than a compile-time type.
+// Factories keyed by IEngineFeatureModule::ModuleName().
 class BuiltinFeatureEditorPanelRegistry {
 public:
     static BuiltinFeatureEditorPanelRegistry& Instance();
 
-    // Called by a feature's own Editor-tier self-registration macro, at
-    // static-init time. A duplicate moduleName is refused exactly like
-    // BuiltinFeatureModuleRegistry::RegisterFactory() refuses one.
+    // Called at static-init time. A duplicate moduleName is refused.
     void RegisterFactory(const char* moduleName, EditorPanelFactoryForModule factory);
 
-    // Looks up module.ModuleName(); returns nullptr (expected - most
-    // modules have no panel) if nothing was registered under that exact
-    // name, otherwise invokes the matching factory.
-    std::unique_ptr<IEditorPanelModule_v1> TryCreatePanel(
+    // Returns nullptr when the module has no editor window.
+    std::unique_ptr<EditorWindow> TryCreatePanel(
         IEngineFeatureModule& module, EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph) const;
 
 private:

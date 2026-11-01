@@ -2,12 +2,11 @@
 
 namespace gte {
 
-struct EditorContext;
 struct AtmosphereSettings;
 struct AtmosphereAerialSnapshot;
 
-// Stateless panel that edits `edit` once per frame from the editor layer. True when a value changed.
-// `effective` is what the Game view's aerial perspective really used last frame.
-bool BuildAtmospherePanel(EditorContext& ctx, AtmosphereSettings& edit, const AtmosphereAerialSnapshot& effective);
+// Draws the Atmosphere settings into the current window. True when a value changed.
+// `effective` is what the aerial perspective used last frame.
+bool BuildAtmospherePanel(AtmosphereSettings& edit, const AtmosphereAerialSnapshot& effective);
 
 } // namespace gte

@@ -2,7 +2,7 @@
 
 #include "ProfilerGraphWidget.h"
 #include "ProfilerTableWidget.h"
-#include "../EditorContext.h"
+#include "../EditorFrame.h"
 #include "../MemoryPanelData.h"
 #include "../ProfilerPanelData.h"
 #include "../../Application/ProfilerScopeCatalog.h"
@@ -340,32 +340,9 @@ void BuildSpikeSection(Profiling::FrameProfiler& profiler, std::string& pinMessa
 
 } // namespace
 
-void ProfilerPanel::Build(EditorContext& /*ctx*/)
+void ProfilerPanel::SyncPauseEdge()
 {
     Profiling::FrameProfiler& profiler = Profiling::FrameProfiler::Instance();
-    if (!ImGui::Begin("Profiler")) {
-        // Hidden or collapsed: no model work. A frozen copy is dropped once the pause ends.
-        if (!profiler.IsDisplayPaused()) {
-            m_frozenRecord.reset();
-            m_wasPaused = false;
-        }
-        ImGui::End();
-        return;
-    }
-
-    BuildCaptureAndPauseControls(profiler);
-    BuildViewControls(m_options, m_showSelf);
-    if (!profiler.IsCaptureEnabled()) {
-        ImGui::TextDisabled("Capture disabled - no new frames are being recorded.");
-    }
-
-    if constexpr (!kCpuScopeInstrumentationCompiledIn) {
-        ImGui::TextDisabled("%s", CpuScopeTableEmptyMessage());
-        ImGui::End();
-        return;
-    }
-
-    // Paused: keep showing one copy of the newest frame. Recording continues underneath.
     const bool paused = profiler.IsDisplayPaused();
     if (paused && !m_wasPaused) {
         m_frozenRecord = std::make_unique<Profiling::FrameRecord>(profiler.LastCompletedFrame());
@@ -373,6 +350,30 @@ void ProfilerPanel::Build(EditorContext& /*ctx*/)
         m_frozenRecord.reset();
     }
     m_wasPaused = paused;
+}
+
+void ProfilerPanel::OnFrame(EditorFrame& /*frame*/)
+{
+    SyncPauseEdge();
+}
+
+void ProfilerPanel::OnGui(EditorFrame& /*frame*/)
+{
+    Profiling::FrameProfiler& profiler = Profiling::FrameProfiler::Instance();
+    BuildCaptureAndPauseControls(profiler);
+    SyncPauseEdge();
+    BuildViewControls(m_options, m_showSelf);
+    if (!profiler.IsCaptureEnabled()) {
+        ImGui::TextDisabled("Capture disabled - no new frames are being recorded.");
+    }
+
+    if constexpr (!kCpuScopeInstrumentationCompiledIn) {
+        ImGui::TextDisabled("%s", CpuScopeTableEmptyMessage());
+        return;
+    }
+
+    // Paused: keep showing one copy of the newest frame. Recording continues underneath.
+    const bool paused = profiler.IsDisplayPaused();
     const Profiling::FrameRecord& record = m_frozenRecord ? *m_frozenRecord : profiler.LastCompletedFrame();
 
     if (std::strcmp(m_filterBuffer.data(), m_options.filter.c_str()) != 0) {
@@ -436,8 +437,6 @@ void ProfilerPanel::Build(EditorContext& /*ctx*/)
     BuildGpuMemorySection(all.size() <= kGraphWindowFrames ? all : all.subspan(all.size() - kGraphWindowFrames),
         view.summary, m_memoryScratch);
     BuildGpuTimingSection(view.summary.gpu);
-
-    ImGui::End();
 }
 
 } // namespace gte

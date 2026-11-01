@@ -2,13 +2,13 @@
 
 #include "HierarchyRows.h"
 #include "../EditorContext.h"
+#include "../EditorFrame.h"
 #include "../InstanceGridTestSpawner.h"
 #include "../ImGuiUniqueId.h"
 #include "../../Core/InstanceGridLimits.h"
 #include "../../ECS/Registry.h"
 #include "../../ECS/TransformHierarchy.h"
 #include "../../Game/Game.h"
-#include "../../Profiling/ScopeTimer.h"
 #include "../../Renderer/Primitives/PrimitiveMeshGenerator.h"
 
 #include <imgui.h>
@@ -184,20 +184,18 @@ void ApplyPendingAction(Game& game, Renderer& renderer, EditorContext& ctx, Regi
 
 } // namespace
 
-void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, DescriptorSetLayoutHandle sceneServicesSetLayout)
+void HierarchyPanel::OnHidden(EditorFrame& frame)
 {
-    if (!ShouldBuildPanel(ctx.hiddenPanels, TogglePanel::Hierarchy)) {
-        NoteHierarchyHidden(ctx.hierarchy);
-        return;
-    }
-    GTE_PROFILE_SCOPE("HierarchyPanel");
+    NoteHierarchyHidden(frame.ctx.hierarchy);
+}
 
+void HierarchyPanel::OnGui(EditorFrame& frame)
+{
+    EditorContext& ctx = frame.ctx;
+    Game& game = frame.game;
+    Renderer& renderer = frame.renderer;
+    const DescriptorSetLayoutHandle sceneServicesSetLayout = frame.sceneServicesSetLayout;
     HierarchyViewState& view = ctx.hierarchy;
-    if (!ImGui::Begin("Hierarchy")) {
-        ImGui::End();
-        NoteHierarchyHidden(view);
-        return;
-    }
     NoteHierarchyVisible(view);
 
     Registry& registry = game.GetRegistry();
@@ -274,8 +272,6 @@ void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, Des
         }
         ImGui::EndPopup();
     }
-
-    ImGui::End();
 }
 
 } // namespace gte

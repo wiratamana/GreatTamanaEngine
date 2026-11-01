@@ -1,7 +1,6 @@
 #include "BuiltinFeatureEditorPanelRegistry.h"
-
+#include "EditorWindow.h"
 #include "../Core/Logging.h"
-#include "../Core/EditorPanelModule.h"
 #include "../Core/Plugins/IEngineFeatureModule.h"
 
 #include <cassert>
@@ -27,7 +26,7 @@ void BuiltinFeatureEditorPanelRegistry::RegisterFactory(const char* moduleName, 
     m_factories.push_back({ moduleName, factory });
 }
 
-std::unique_ptr<IEditorPanelModule_v1> BuiltinFeatureEditorPanelRegistry::TryCreatePanel(
+std::unique_ptr<EditorWindow> BuiltinFeatureEditorPanelRegistry::TryCreatePanel(
     IEngineFeatureModule& module, EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph) const
 {
     for (const FactoryEntry& entry : m_factories) {

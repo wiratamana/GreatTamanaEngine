@@ -5,7 +5,7 @@
 ## TL;DR
 - There is one executable: `GreatTamanaEditor.exe`. `EditorHost` owns the main loop.
 - `gte_core` has no ImGui and no SDL. Only `src/Editor/` includes ImGui. `Core` sees the editor through `IEditorLayer`.
-- Panels are free functions or small classes. They share one plain struct, `EditorContext`.
+- Every window is an `EditorWindow`. Windows share one plain struct, `EditorContext`, through `EditorFrame`.
 - The HTTP server never touches editor state. It hands work to the main thread through a bridge.
 - Pure logic lives in `*Data.cpp` files without ImGui. Those files have unit tests in `tests/Editor/`.
 
@@ -42,13 +42,14 @@ Frame order in `EditorHost::Run()`:
 `Quit` and `WindowResized` are not mouse or keyboard events. The capture check never blocks them.
 
 ### `BuildUI()` order
-1. Dockspace and menu bar, then the New/Open Project and Create Asset windows.
-2. View descriptors, then Hierarchy, Inspector, Scene, Game.
-3. Memory, Profiler, Render Graph, Render Features, Jobs, Log, Frame Debugger.
-4. Project, Bone Viewer, Cluster Viewer.
-5. Every registered extra panel.
+1. Dockspace and menu bar, then the New/Open Project and Create Asset dialogs.
+2. View descriptors.
+3. Every registered window, in registration order: Hierarchy, Inspector, Scene, Game, Memory, Profiler, Render Graph, Render Features, Jobs, Log, Frame Debugger, Project, Bone Viewer, Cluster Viewer, then project windows, then the 8 render feature windows.
+4. Scene camera adapter.
 
 ## Panels
+Every window below derives from `EditorWindow`. Open any of them from the Window menu. Closing a window keeps its place in `imgui.ini`.
+
 | Window | Default place | Purpose |
 |---|---|---|
 | Hierarchy | Left | Entity tree. Drag to reparent or reorder. Right-click to create objects |
@@ -77,14 +78,13 @@ Frame order in `EditorHost::Run()`:
 | Menu | Items |
 |---|---|
 | File | Save Scene (Ctrl+S), Open Scene (Ctrl+O), Open Sponza Scene, Open Hi-Z Demo Scene, Close Hi-Z Demo, Exit |
-| Window | Frame Debugger, Render Graph, Render Features |
+| Window | Every registered window, one flat list sorted by name. A click opens it, raises it and centers it if it floats |
 | Project | New Project..., Open Project..., Compile `<Name>` |
 | Hierarchy right-click | Create 3D Object, Create Directional Light, Create Instance Grid |
 
 ### Default layout
 - Hierarchy 20% left, Inspector 28% right, Scene and Game tabs in the center, a bottom strip of 25%.
-- The layout is built once. It is built again only when the dockspace is missing or a registered panel was never docked.
-- After that, `imgui.ini` and the user decide.
+- The layout is built only on a first run (no dock space in `imgui.ini`). After that `imgui.ini` and the user decide.
 
 ### Controls and drag-drop
 | Where | Input | Action |
@@ -104,11 +104,20 @@ Frame order in `EditorHost::Run()`:
 - Isometric is a plain orthographic projection. Features that need a point eye (Atmosphere, Gtao, Ssgi, VolumetricLight) are not valid there.
 - The grid has no fixed fade distance. Each line level fades by its spacing in pixels.
 
+## Windows
+- Derive from `EditorWindow`, give a name, a default dock place and a default open state, write `OnGui()`. The base class draws the title bar and the close button.
+- Hooks: `OnFrame()` every frame (even closed), `OnGui()` when the content is visible, `OnHidden()` when closed or the tab is not selected.
+- Floating window: X in the title bar. Docked window: no X; right-click the tab, then "Close Tab". No window can collapse. Every window can dock.
+- `Show()` opens, raises and (floating) centers. The Window menu, `GET /activate_tab` and `GET /panel_visible` use it.
+- Known limits: right-click on a background tab only selects it. A window registered later by hot reload floats until you dock it.
+
 ## Key files
 | File (`src/Editor/...`) | Role |
 |---|---|
 | `EditorHost.cpp` | Main loop, bridge draining, captures, startup |
 | `ImGuiEditorLayer.cpp` | ImGui context, two view textures, `BuildUI()` |
+| `EditorWindow.h/.cpp` | Base class of every window: open state, title bar, close, Window menu hooks |
+| `EditorFrame.h` | Per-frame input handed to every window |
 | `EditorContext.h` | Shared plain state for all panels |
 | `Selection.h` | The only gate for selection changes |
 | `DockLayout.cpp` | Menu bar, dockspace, default layout |
@@ -116,34 +125,30 @@ Frame order in `EditorHost::Run()`:
 | `*Data.cpp`, `Panels/HierarchyRows.*`, `EditorCamera.*` | Pure logic, no ImGui |
 | `src/Features/<Name>/Editor/` | Settings panel of one render feature (not in `src/Editor/`) |
 | `src/Core/EditorCapabilities.h` | Interfaces that `Core` and HTTP use to reach editor features |
-| `src/Core/EditorPanelRegistry.h` | Names of all panels, built-in and extra |
+| `src/Core/EditorPanelRegistry.h` | Name -> window pointer of every window |
 
 ## Rules
 1. Only `src/Editor/` includes ImGui. `Core` talks to the editor through `IEditorLayer` only.
-2. Panels are `BuildXPanel(ctx, ...)` functions, or small classes when they keep state (`ProfilerPanel`, `RenderGraphPanel`, `FrameDebuggerPanel`). There is no `IEditorPanel` base class.
+2. Every window derives from `EditorWindow` and draws in `OnGui()`. It never calls `ImGui::Begin` or `End` itself.
 3. `EditorContext` is plain data. Add a field only when two places need it.
 4. Change selection only through `Selection`. A panel never writes the selection fields.
-5. A panel with its own render target writes `ImGui::Begin()`'s return value to a visibility flag. `ImGuiEditorLayer` returns `nullptr` from `PrimaryViewTarget()` or `SecondaryViewTarget()` for a hidden view, so that view is not rendered. The exception is the Game view while the Frame Debugger is enabled and open.
+5. A window with its own render target uses `IsVisible()` as its visibility flag. `ImGuiEditorLayer` returns `nullptr` from `PrimaryViewTarget()` or `SecondaryViewTarget()` for a hidden or closed view, so that view is not rendered. The exception is the Game view while the Frame Debugger is enabled and open.
 6. Keep logic that needs no ImGui in a separate file. Then it can be unit tested.
 7. Never write editor or ECS state from the network thread. Use a bridge.
 8. Use `ScopedUniqueId` for ImGui IDs in loops. See [ImGui ID uniqueness](../conventions/imgui-id-uniqueness.md).
 9. Use the engine's handles for GPU objects. Only the ImGui backend setup in `ImGuiEditorLayer.cpp` may touch Vulkan.
 10. A scene opener builds the new scene first. It deletes the old roots only on success.
 
-## Extra panels
-- A panel is an `IEditorPanelModule_v1`: `GetPanelName()` and `BuildPanel(ctx)`.
-- Register it with `EditorPanelRegistry::Instance().RegisterPluginPanel(name, module)`.
-- Built-in features do it with `GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("Name", &Factory)` in `Features/<Name>/Editor/`.
-- Project assemblies do it from their `_Editor` DLL. See [Project assembly](../guides/project-assembly.md).
-- `ImGuiEditorLayer` calls `ImGui::Begin(name)` for each one. The panel then draws its content.
-- All extra panels are docked into the bottom strip.
+## Project and feature windows
+- A project assembly derives from `EditorWindow` and calls `gte::RegisterEditorWindow(window)` in its entry point. See [Project assembly](../guides/project-assembly.md).
+- A render feature derives from `EditorWindow` in `Features/<Name>/Editor/` and registers a factory with `GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("Name", &Factory)`.
+- Registration order is draw order and default tab order. All windows with `DefaultDock` Bottom tab into the bottom strip.
 
 ## Gotchas
 - `WantsCaptureMouse` and `WantsCaptureKeyboard` stop clicks in ImGui from reaching gameplay. They come from `ImGuiIO`.
 - `/get_window?title=...` captures floating (undocked) windows only. For docked panels use `/get_swapchain`.
 - The Frame Debugger pauses the game when you enable it. Disabling it resumes, unless you had paused first.
 - The Game view is `Primary` and the Scene view is `Secondary` in renderer code. The Render Graph window is open on start.
-- The extra-panel interface says a panel draws only through `ctx`. Project panels call real `ImGui::*` and ignore `ctx`, because they share the exe's ImGui.
 - Hot reload has no menu item. It is HTTP only.
 - `Projects/GteE2E*` folders are test leftovers. They are ignored by git.
 

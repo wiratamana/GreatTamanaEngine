@@ -5,6 +5,7 @@
 #include "../CameraFrustumOverlay.h"
 #include "../EditorCamera.h"
 #include "../EditorContext.h"
+#include "../EditorFrame.h"
 #include "../SceneCameraFrustum.h"
 #include "../SceneOverlay.h"
 #include "../TransformGizmo.h"
@@ -104,110 +105,119 @@ void BuildCameraOverlay(
 
 } // namespace
 
-void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorCamera& camera,
-    DescriptorSetLayoutHandle sceneServicesSetLayout, const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries)
+int ScenePanel::ExtraFlags() const
 {
+    return ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+}
+
+void ScenePanel::OnFrame(EditorFrame& frame)
+{
+    frame.ctx.sceneCamera.rendered = false;
+}
+
+void ScenePanel::OnGui(EditorFrame& frame)
+{
+    EditorContext& ctx = frame.ctx;
+    Game& game = frame.game;
+    EditorCamera& camera = m_camera;
     Registry& registry = game.GetRegistry();
-    // Begin() is false for a hidden tab. The flag stops the Scene view from rendering next frame.
-    const bool isVisible =
-        ImGui::Begin("Scene", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-    ctx.sceneViewVisible = isVisible;
-    ctx.sceneCamera.rendered = false;
-
-    if (isVisible) {
-        const ImVec2 avail = ImGui::GetContentRegionAvail();
-        if (avail.x >= 1.0f && avail.y >= 1.0f) {
-            // Scene view's own extent, applied next frame; independent of the Game view's ctx.desiredExtent.
-            ctx.desiredSceneExtent.width = static_cast<std::uint32_t>(avail.x);
-            ctx.desiredSceneExtent.height = static_cast<std::uint32_t>(avail.y);
-
-            // Scene view has its own RenderTexture (ctx.sceneViewDescriptor).
-            ImGui::Image(
-                static_cast<ImTextureID>(static_cast<std::uint64_t>(ctx.sceneViewDescriptor)),
-                avail);
-
+    const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries = frame.renderFeatureEntries;
 #if GTE_ENABLE_PROJECT_PANEL
-            // Drop target for Project-panel *.gta Mesh assets: instantiates the dropped asset.
-            if (ImGui::BeginDragDropTarget()) {
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kProjectAssetDragDropPayloadType)) {
-                    const std::string absolutePath(static_cast<const char*>(payload->Data));
-                    const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath, sceneServicesSetLayout);
-                    if (spawned.IsValid()) {
-                        ctx.selection.SelectEntity(spawned);
-                    }
-                }
-                ImGui::EndDragDropTarget();
-            }
+    Renderer& renderer = frame.renderer;
+    const DescriptorSetLayoutHandle sceneServicesSetLayout = frame.sceneServicesSetLayout;
 #endif
 
-            // On-screen rect of the Scene image; the gizmos and switcher are placed against it, not the window.
-            const ImVec2 imageMin = ImGui::GetItemRectMin();
-            const ImVec2 imageSize = ImGui::GetItemRectSize();
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    if (avail.x < 1.0f || avail.y < 1.0f) {
+        return;
+    }
 
-            // The labels show only while a feature is really off in this view.
-            const bool previewOff = AnyFeatureOffInSceneView(renderFeatureEntries);
-            if (previewOff) {
-                DrawViewOverlayLabel(imageMin, imageSize, "Scene view: fast preview", 0, kSceneViewGizmoReservedWidth);
-            }
-            if (ctx.hizDemo.active && ctx.hizDemo.geometryOnly) {
-                DrawViewOverlayLabel(imageMin, imageSize, kHizDemoOverlayLabel, previewOff ? 1 : 0, kSceneViewGizmoReservedWidth);
-            }
+    // Scene view's own extent, applied next frame; independent of the Game view's ctx.desiredExtent.
+    ctx.desiredSceneExtent.width = static_cast<std::uint32_t>(avail.x);
+    ctx.desiredSceneExtent.height = static_cast<std::uint32_t>(avail.y);
 
-            // A middle or right drag starts only over the image, then follows the cursor until the button is released.
-            const bool hovered = ImGui::IsItemHovered();
+    // Scene view has its own RenderTexture (ctx.sceneViewDescriptor).
+    ImGui::Image(static_cast<ImTextureID>(static_cast<std::uint64_t>(ctx.sceneViewDescriptor)), avail);
 
-            if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
-                ctx.sceneCameraPanning = true;
-            }
-            if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle)) {
-                ctx.sceneCameraPanning = false;
-            }
-
-            if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-                ctx.sceneCameraRotating = true;
-            }
-            if (ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
-                ctx.sceneCameraRotating = false;
-            }
-
-            const ImGuiIO& io = ImGui::GetIO();
-            EditorCameraInput cameraInput;
-            cameraInput.mouseDelta = Vec2{ io.MouseDelta.x, io.MouseDelta.y };
-            cameraInput.scrollNotches = hovered ? io.MouseWheel : 0.0f; // The wheel only zooms while the cursor is on the image.
-            cameraInput.deltaSeconds = io.DeltaTime;
-            cameraInput.viewportHeightPixels = imageSize.y;
-            cameraInput.panning = ctx.sceneCameraPanning;
-            cameraInput.looking = ctx.sceneCameraRotating;
-            camera.Update(cameraInput);
-
-            ImGui::SetCursorScreenPos(ImVec2(imageMin.x + 8.0f, imageMin.y + 8.0f));
-            DrawGizmoOperationSwitcher(ctx.gizmoOperation);
-
-            // The view gizmo comes before the camera pick: its item blocks picking under it.
-            const SceneViewGizmoResult viewGizmo = DrawSceneViewGizmo(imageMin, imageSize, camera);
-            if (viewGizmo.alignTo.has_value()) {
-                camera.AlignTo(*viewGizmo.alignTo);
-            }
-            if (viewGizmo.toggleProjection) {
-                camera.ToggleProjectionMode();
-            }
-            BuildCameraOverlay(registry, ctx, camera, imageMin, imageSize, hovered);
-
-            // Transform gizmo of the selected entity, drawn with the Scene camera.
-            const Entity selectedEntity = ctx.selection.SelectedEntity();
-            if (registry.IsAlive(selectedEntity)) {
-                if (Transform* transform = registry.TryGetComponent<Transform>(selectedEntity)) {
-                    const float aspect = imageSize.y > 0.0f ? (imageSize.x / imageSize.y) : 1.0f;
-                    const Mat4 parentWorld = (transform->parent.IsValid() && registry.IsAlive(transform->parent))
-                        ? ComputeWorldMatrix(registry, transform->parent)
-                        : Mat4::Identity();
-                    ManipulateTransformGizmo(ctx.gizmoOperation, camera.View(), camera.GizmoProjection(aspect), imageMin.x,
-                        imageMin.y, imageSize.x, imageSize.y, *transform, parentWorld, camera.IsOrthographic());
-                }
+#if GTE_ENABLE_PROJECT_PANEL
+    // Drop target for Project-panel *.gta Mesh assets: instantiates the dropped asset.
+    if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kProjectAssetDragDropPayloadType)) {
+            const std::string absolutePath(static_cast<const char*>(payload->Data));
+            const Entity spawned = game.CreateMeshEntityFromGtaFile(renderer, absolutePath, sceneServicesSetLayout);
+            if (spawned.IsValid()) {
+                ctx.selection.SelectEntity(spawned);
             }
         }
+        ImGui::EndDragDropTarget();
     }
-    ImGui::End();
+#endif
+
+    // On-screen rect of the Scene image; the gizmos and switcher are placed against it, not the window.
+    const ImVec2 imageMin = ImGui::GetItemRectMin();
+    const ImVec2 imageSize = ImGui::GetItemRectSize();
+
+    // The labels show only while a feature is really off in this view.
+    const bool previewOff = AnyFeatureOffInSceneView(renderFeatureEntries);
+    if (previewOff) {
+        DrawViewOverlayLabel(imageMin, imageSize, "Scene view: fast preview", 0, kSceneViewGizmoReservedWidth);
+    }
+    if (ctx.hizDemo.active && ctx.hizDemo.geometryOnly) {
+        DrawViewOverlayLabel(imageMin, imageSize, kHizDemoOverlayLabel, previewOff ? 1 : 0, kSceneViewGizmoReservedWidth);
+    }
+
+    // A middle or right drag starts only over the image, then follows the cursor until the button is released.
+    const bool hovered = ImGui::IsItemHovered();
+
+    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
+        ctx.sceneCameraPanning = true;
+    }
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle)) {
+        ctx.sceneCameraPanning = false;
+    }
+
+    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+        ctx.sceneCameraRotating = true;
+    }
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
+        ctx.sceneCameraRotating = false;
+    }
+
+    const ImGuiIO& io = ImGui::GetIO();
+    EditorCameraInput cameraInput;
+    cameraInput.mouseDelta = Vec2{ io.MouseDelta.x, io.MouseDelta.y };
+    cameraInput.scrollNotches = hovered ? io.MouseWheel : 0.0f; // The wheel only zooms while the cursor is on the image.
+    cameraInput.deltaSeconds = io.DeltaTime;
+    cameraInput.viewportHeightPixels = imageSize.y;
+    cameraInput.panning = ctx.sceneCameraPanning;
+    cameraInput.looking = ctx.sceneCameraRotating;
+    camera.Update(cameraInput);
+
+    ImGui::SetCursorScreenPos(ImVec2(imageMin.x + 8.0f, imageMin.y + 8.0f));
+    DrawGizmoOperationSwitcher(ctx.gizmoOperation);
+
+    // The view gizmo comes before the camera pick: its item blocks picking under it.
+    const SceneViewGizmoResult viewGizmo = DrawSceneViewGizmo(imageMin, imageSize, camera);
+    if (viewGizmo.alignTo.has_value()) {
+        camera.AlignTo(*viewGizmo.alignTo);
+    }
+    if (viewGizmo.toggleProjection) {
+        camera.ToggleProjectionMode();
+    }
+    BuildCameraOverlay(registry, ctx, camera, imageMin, imageSize, hovered);
+
+    // Transform gizmo of the selected entity, drawn with the Scene camera.
+    const Entity selectedEntity = ctx.selection.SelectedEntity();
+    if (registry.IsAlive(selectedEntity)) {
+        if (Transform* transform = registry.TryGetComponent<Transform>(selectedEntity)) {
+            const float aspect = imageSize.y > 0.0f ? (imageSize.x / imageSize.y) : 1.0f;
+            const Mat4 parentWorld = (transform->parent.IsValid() && registry.IsAlive(transform->parent))
+                ? ComputeWorldMatrix(registry, transform->parent)
+                : Mat4::Identity();
+            ManipulateTransformGizmo(ctx.gizmoOperation, camera.View(), camera.GizmoProjection(aspect), imageMin.x,
+                imageMin.y, imageSize.x, imageSize.y, *transform, parentWorld, camera.IsOrthographic());
+        }
+    }
 }
 
 } // namespace gte

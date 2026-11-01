@@ -19,7 +19,6 @@
 #include "../Editor/MouseInjection.h" // Request of the GET /ui_mouse route.
 #include "../Editor/RotationFieldProbe.h" // Rotation field report of the GET /inspector_state route.
 #include "../Editor/HierarchyStateReport.h" // Report structs of the GET /hierarchy_state and POST /hierarchy_action routes.
-#include "../Editor/PanelVisibility.h" // Panel ids of the GET /panel_visible route.
 #include "../Editor/SceneCameraControl.h" // Report structs of the viewer and Scene camera routes.
 #include "../Renderer/RenderGraph/RenderGraphMetadata.h" // Type of the GET /render_graph body.
 
@@ -548,22 +547,10 @@ std::string BuildListTexturesResponseJson(const std::vector<TextureListEntryView
 // GET /render_graph body from the metadata the capture bridge published (labels are mapped by the JSON builder).
 std::string BuildRenderGraphMetadataResponseJson(const gte::rg::RenderGraphMetadata& metadata);
 
-// --- network-impl-7 campaign - GET /activate_tab and GET /list_tabs.
-// Every function below stays PURE - no httplib/socket/thread/Registry/Game/
-// Renderer/ImGui dependency of any kind, exactly like everything above -
-// Core/EditorPanelRegistry.h (included above) is a plain, gte_core-owned data
-// header with the same "safe to depend on from anywhere" property as
-// <cstdint>/<string>, not an Editor/ImGui dependency in the sense this
-// file's own header comment warns against.
+// --- GET /activate_tab and GET /list_tabs. Pure: they read only the window name registry (Core/EditorPanelRegistry.h).
 
-// Parsed, validated GET /activate_tab query parameters. `valid == false`
-// means `errorMessage` explains exactly why (a 400 response); `notFound ==
-// true` (only meaningful when `valid == true`) means the name did not
-// match anything in EditorPanelRegistry::Instance()'s known panel list (a 404
-// response, NOT a 400 - the request itself was well-formed, the NAME it
-// asked about just isn't one this engine knows about - see
-// PHASE0_MASTER_STRATEGY.md's own locked endpoint contract for the exact
-// status-code mapping this distinction feeds into).
+// Parsed GET /activate_tab query. `valid == false`: `errorMessage` says why (400).
+// `notFound` (only when valid): the name is not a registered window (404).
 struct ParsedActivateTabQuery {
     bool valid = false;
     std::string errorMessage;
@@ -571,45 +558,20 @@ struct ParsedActivateTabQuery {
     std::string tabName;
 };
 
-// Validation rules (checked in this order):
-//   1. `nameParam` must be non-empty - otherwise "missing or empty required
-//      query parameter: name" (valid = false).
-//   2. `nameParam` must exactly (case-sensitive) match one entry of
-//      gte::EditorPanelRegistry::Instance() (Core/EditorPanelRegistry.h's
-//      IsKnownName()) - otherwise valid = true, notFound = true,
-//      tabName = nameParam (the caller/route handler is expected to build a
-//      404 response quoting this name - see BuildActivateTabResponseJson()
-//      below).
-//   3. Otherwise valid = true, notFound = false, tabName = nameParam.
+// `nameParam` must be non-empty (else valid = false), and an exact, case-sensitive registered window name
+// (else valid = true, notFound = true).
 ParsedActivateTabQuery ParseActivateTabQuery(const std::string& nameParam);
 
-// Builds GET /activate_tab's response body for every outcome EXCEPT the
-// 400 (malformed request) and 503 (bridge unavailable) cases, which reuse
-// BuildGenericErrorResponseJson() directly at the route-handler call site,
-// same split convention BuildSetEntityTrsResponseJson()'s own doc comment
-// already documents for its own endpoint.
-//   - success == true  -> {"success":true,"activated_tab":"<tabName>"}
-//   - success == false && tabExists == false (a KNOWN panel name, but no
-//     live window with that name existed this session yet) ->
-//     {"success":false,"error":"panel '<tabName>' has no live window yet
-//     this session - try again after the Editor has rendered at least one
-//     frame"} (409 - see the route handler, NetworkServer.cpp)
+// GET /activate_tab body for every outcome except 400 and 503 (those use BuildGenericErrorResponseJson()).
+//   - success: {"success":true,"activated_tab":"<tabName>"}
+//   - failure (the registry knows the name, the editor layer does not): {"success":false,"error":"window '<tabName>' could not be opened"}
 std::string BuildActivateTabResponseJson(bool success, bool tabExists, const std::string& tabName);
 
-// Builds the 404 response body for a `name` that is well-formed but not a
-// known panel (ParsedActivateTabQuery::notFound == true):
-// {"success":false,"error":"unknown tab name '<tabName>' - see GET
-// /list_tabs for the currently known names"}
+// 404 body for a well-formed but unknown name: {"success":false,"error":"unknown tab name '<tabName>' - see GET /list_tabs ..."}
 std::string BuildUnknownTabNameResponseJson(const std::string& tabName);
 
-// Builds GET /list_tabs's entire response body - needs no request/query
-// input at all beyond the current, runtime-populated registry state (see
-// Core/EditorPanelRegistry.h): {"tabs":["Hierarchy","Inspector","Scene","Game",
-// "Memory","Profiler","Render Graph","Jobs","Atmosphere"]} (plus "Project"
-// appended when GTE_ENABLE_PROJECT_PANEL is ON, and any loaded plugin's own
-// panel name(s) appended after every built-in name - reads directly from
-// gte::EditorPanelRegistry::Instance().AllNames(), so this list can never
-// drift out of sync with what GET /activate_tab itself accepts).
+// GET /list_tabs body: {"tabs":[...]} with every registered window in registration order.
+// It reads the registry directly, so it cannot drift from what GET /activate_tab accepts.
 std::string BuildListTabsResponseJson();
 
 // --- /frame_debugger/* routes. Pure parsing and JSON building; NetworkServer.cpp talks to the bridge.
@@ -1073,17 +1035,17 @@ ParsedHierarchyStateQuery ParseHierarchyStateQuery(const std::string& firstParam
 // Response JSON for GET /hierarchy_state (key list: the networking convention doc).
 std::string BuildHierarchyStateResponseJson(const HierarchyStateReport& report);
 
-// Parsed GET /panel_visible query: "name" must be one of kTogglePanelNames, "visible" exactly "true" or "false".
+// Parsed GET /panel_visible query: "name" must be a registered window (see GET /list_tabs), "visible" exactly "true" or "false".
 struct ParsedPanelVisibleQuery {
     bool valid = false;
-    std::string errorMessage; // Lists the supported names when `name` is unknown.
-    TogglePanel panel = TogglePanel::Hierarchy;
+    std::string errorMessage;
+    std::string name;
     bool visible = true;
 };
 ParsedPanelVisibleQuery ParsePanelVisibleQuery(const std::string& nameParam, const std::string& visibleParam);
 
-// Success shape: {"success":true,"name":"<panel>","visible":<bool>}
-std::string BuildPanelVisibleResponseJson(TogglePanel panel, bool visible);
+// Success shape: {"success":true,"name":"<window>","visible":<bool>}
+std::string BuildPanelVisibleResponseJson(const std::string& name, bool visible);
 
 // Success shape of POST /close_preset_scene: {"success":true,"message":"<text>"}. Failures use BuildGenericErrorResponseJson().
 std::string BuildClosePresetSceneResponseJson(const std::string& message);

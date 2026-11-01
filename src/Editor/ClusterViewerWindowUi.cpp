@@ -5,10 +5,12 @@
 #include "ClusterStatusText.h"
 #include "ClusterToolUiState.h"
 #include "EditorContext.h"
+#include "EditorFrame.h"
 #include "ImGuiUniqueId.h"
 #include "MeshClusterBuildRunner.h"
 #include "TransformGizmo.h"
 #include "../Assets/MeshClusterClone.h"
+#include "../Game/Game.h"
 #include "../Math/MathTypes.h"
 
 #include <imgui.h>
@@ -83,79 +85,84 @@ void ClusterViewerWindow::DrawCloneStatus()
     }
 }
 
-void ClusterViewerWindow::Build(Renderer& renderer, EditorContext& ctx, Registry& registry)
+void ClusterViewerWindow::OnFrame(EditorFrame& frame)
 {
-    m_ctx = &ctx;
-    m_registry = &registry;
-
-    if (m_closeRequested) {
-        m_closeRequested = false;
-        Close();
+    m_ctx = &frame.ctx;
+    m_registry = &frame.game.GetRegistry();
+    if (!frame.ctx.pendingClusterViewerPath.empty()) {
+        RequestOpen(frame.ctx.pendingClusterViewerPath);
+        frame.ctx.pendingClusterViewerPath.clear();
+    }
+    if (!IsOpen()) {
+        // The last frame's draw data may still use the view textures; this runs one frame after the close.
+        if (m_renderer != nullptr || m_valid || m_hasRun) {
+            ReleaseGpu();
+        }
+        return;
     }
     if (!m_pendingPath.empty()) {
         const std::string path = std::move(m_pendingPath);
         m_pendingPath.clear();
-        m_open = true;
-        LoadMesh(renderer, path);
+        LoadMesh(frame.renderer, path);
     }
-    if (!m_open) {
-        return;
+    PollFile(frame.renderer);
+}
+
+void ClusterViewerWindow::OnGui(EditorFrame& /*frame*/)
+{
+    ScopedUniqueId idScope(0, "ClusterViewerWindow::Build");
+    if (!m_valid && m_load.banner == ClusterViewerBanner::None) {
+        ImGui::TextDisabled("No mesh is loaded. Use \"Open Cluster Viewer\" in the Inspector on a .gta mesh.");
     }
-    PollFile(renderer);
-
-    ImGui::SetNextWindowSize(ImVec2(1100.0f, 720.0f), ImGuiCond_FirstUseEver);
-    const bool visible = ImGui::Begin("Cluster Viewer", &m_open);
-    if (visible) {
-        ScopedUniqueId idScope(0, "ClusterViewerWindow::Build");
-        if (m_load.banner != ClusterViewerBanner::None) {
-            ImGui::TextColored(IsHardFailure(m_load.banner) ? kRed : kOrange, "%s", m_load.text.c_str());
-            if (m_load.offerCreateCopy) {
-                ImGui::SameLine();
-                if (ImGui::Button("Create Clustered Copy")) {
-                    StartCloneFromViewer();
-                }
-            }
-            DrawCloneStatus();
-        }
-        if (m_valid) {
-            DrawToolbar();
-            ImGui::Separator();
-
-            const float fullWidth = ImGui::GetContentRegionAvail().x;
-            const float maxControls = std::max(kMinPaneWidth, fullWidth - kSplitterThickness - kMinPaneWidth);
-            m_controlsWidth = std::clamp(m_controlsWidth, kMinPaneWidth, maxControls);
-
-            ImGui::BeginChild("ClusterViewerControls", ImVec2(m_controlsWidth, 0.0f), true);
-            DrawControls();
-            ImGui::EndChild();
-
+    if (m_load.banner != ClusterViewerBanner::None) {
+        ImGui::TextColored(IsHardFailure(m_load.banner) ? kRed : kOrange, "%s", m_load.text.c_str());
+        if (m_load.offerCreateCopy) {
             ImGui::SameLine();
-            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ScrollbarGrab));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::GetStyleColorVec4(ImGuiCol_ScrollbarGrabHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::GetStyleColorVec4(ImGuiCol_ScrollbarGrabActive));
-            ImGui::Button("##ClusterViewerSplitter", ImVec2(kSplitterThickness, -1.0f));
-            ImGui::PopStyleColor(3);
-            if (ImGui::IsItemActive()) {
-                m_controlsWidth += ImGui::GetIO().MouseDelta.x;
+            if (ImGui::Button("Create Clustered Copy")) {
+                StartCloneFromViewer();
             }
-            if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
-                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-            }
-
-            ImGui::SameLine();
-            ImGui::BeginChild("ClusterViewerViewport", ImVec2(0.0f, 0.0f), false,
-                ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-            DrawViewport();
-            ImGui::EndChild();
         }
+        DrawCloneStatus();
     }
-    if (!visible || !m_valid) {
+    if (m_valid) {
+        DrawToolbar();
+        ImGui::Separator();
+
+        const float fullWidth = ImGui::GetContentRegionAvail().x;
+        const float maxControls = std::max(kMinPaneWidth, fullWidth - kSplitterThickness - kMinPaneWidth);
+        m_controlsWidth = std::clamp(m_controlsWidth, kMinPaneWidth, maxControls);
+
+        ImGui::BeginChild("ClusterViewerControls", ImVec2(m_controlsWidth, 0.0f), true);
+        DrawControls();
+        ImGui::EndChild();
+
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ScrollbarGrab));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::GetStyleColorVec4(ImGuiCol_ScrollbarGrabHovered));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::GetStyleColorVec4(ImGuiCol_ScrollbarGrabActive));
+        ImGui::Button("##ClusterViewerSplitter", ImVec2(kSplitterThickness, -1.0f));
+        ImGui::PopStyleColor(3);
+        if (ImGui::IsItemActive()) {
+            m_controlsWidth += ImGui::GetIO().MouseDelta.x;
+        }
+        if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        }
+
+        ImGui::SameLine();
+        ImGui::BeginChild("ClusterViewerViewport", ImVec2(0.0f, 0.0f), false,
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        DrawViewport();
+        ImGui::EndChild();
+    }
+    if (!m_valid) {
         CancelGizmo();
     }
-    ImGui::End();
-    if (!m_open) {
-        m_closeRequested = true; // this frame's draw data still references the view textures
-    }
+}
+
+void ClusterViewerWindow::OnHidden(EditorFrame& /*frame*/)
+{
+    CancelGizmo();
 }
 
 void ClusterViewerWindow::DrawToolbar()

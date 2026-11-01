@@ -1,4 +1,4 @@
-#include "ToneMappingPluginPanelModule.h"
+#include "ToneMappingWindow.h"
 
 #include "ToneMappingPanel.h"
 #include "../ToneMappingFeature.h"
@@ -9,7 +9,7 @@
 
 namespace gte {
 
-void ToneMappingPluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/)
+void ToneMappingWindow::OnGui(EditorFrame& /*frame*/)
 {
     ToneMappingSettings edit = m_feature.Settings();
     if (BuildToneMappingPanel(
@@ -19,13 +19,13 @@ void ToneMappingPluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/)
 }
 
 namespace {
-std::unique_ptr<IEditorPanelModule_v1> CreateToneMappingPanelModule(
+std::unique_ptr<EditorWindow> CreateToneMappingWindow(
     IEngineFeatureModule& module, EditorContext&, Renderer&, const rg::RenderGraph&)
 {
-    return std::make_unique<ToneMappingPluginPanelModule>(fx::FeatureOf<ToneMappingFeature>(module));
+    return std::make_unique<ToneMappingWindow>(fx::FeatureOf<ToneMappingFeature>(module));
 }
 } // namespace
 
-GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("ToneMapping", &CreateToneMappingPanelModule);
+GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("ToneMapping", &CreateToneMappingWindow);
 
 } // namespace gte

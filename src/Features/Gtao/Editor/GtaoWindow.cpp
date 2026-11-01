@@ -1,4 +1,4 @@
-#include "GtaoPluginPanelModule.h"
+#include "GtaoWindow.h"
 
 #include "GtaoPanel.h"
 #include "../GtaoFeature.h"
@@ -9,7 +9,7 @@
 
 namespace gte {
 
-void GtaoPluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/)
+void GtaoWindow::OnGui(EditorFrame& /*frame*/)
 {
     GtaoSettings edit = m_feature.Settings();
     if (BuildGtaoPanel(edit, m_feature.Snapshot(rg::ViewScope::Primary), m_feature.Snapshot(rg::ViewScope::Secondary))) {
@@ -18,13 +18,13 @@ void GtaoPluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/)
 }
 
 namespace {
-std::unique_ptr<IEditorPanelModule_v1> CreateGtaoPanelModule(
+std::unique_ptr<EditorWindow> CreateGtaoWindow(
     IEngineFeatureModule& module, EditorContext&, Renderer&, const rg::RenderGraph&)
 {
-    return std::make_unique<GtaoPluginPanelModule>(fx::FeatureOf<GtaoFeature>(module));
+    return std::make_unique<GtaoWindow>(fx::FeatureOf<GtaoFeature>(module));
 }
 } // namespace
 
-GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("Gtao", &CreateGtaoPanelModule);
+GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("Gtao", &CreateGtaoWindow);
 
 } // namespace gte

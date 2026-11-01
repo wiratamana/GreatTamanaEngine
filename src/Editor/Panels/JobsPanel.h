@@ -1,25 +1,27 @@
 #pragma once
 
+#include "../EditorWindow.h"
 #include "../../Profiling/WorkerTimelineData.h"
 
 #include <vector>
 
 namespace gte {
 
-struct EditorContext;
-class Game;
-
-// Jobs panel: one timeline row per job worker for the last finished frame, plus the skinning mode toggle.
-// Stateful because Pause keeps a frozen copy of the timeline. Capture and Pause are shared with the Profiler panel.
-class JobsPanel {
+// One timeline row per job worker for the last finished frame, plus the skinning mode toggle.
+// Pause keeps a frozen copy of the timeline; Capture and Pause are shared with the Profiler window.
+class JobsPanel final : public EditorWindow {
 public:
-    void Build(EditorContext& ctx, Game& game);
+    JobsPanel() : EditorWindow("Jobs", WindowDock::Bottom) {}
+
+protected:
+    void OnFrame(EditorFrame& frame) override;
+    void OnGui(EditorFrame& frame) override;
 
 private:
-    // Display pause state as of the last Build() call.
-    bool m_wasPaused = false;
+    // Copies the timeline on the frame Pause turns on.
+    void SyncPauseEdge();
 
-    // Copy taken when Pause turned on.
+    bool m_wasPaused = false;
     std::vector<Profiling::WorkerTimelinePoint> m_frozenPoints;
     double m_frozenFrameMilliseconds = 0.0;
 };

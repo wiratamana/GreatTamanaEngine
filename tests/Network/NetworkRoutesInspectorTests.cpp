@@ -245,7 +245,7 @@ TEST(ParsePanelVisibleQueryTests, NameAndVisibleAreValidated)
 {
     const ParsedPanelVisibleQuery hide = ParsePanelVisibleQuery("Hierarchy", "false");
     ASSERT_TRUE(hide.valid) << hide.errorMessage;
-    EXPECT_EQ(hide.panel, gte::TogglePanel::Hierarchy);
+    EXPECT_EQ(hide.name, "Hierarchy");
     EXPECT_FALSE(hide.visible);
 
     const ParsedPanelVisibleQuery show = ParsePanelVisibleQuery("Hierarchy", "true");
@@ -254,7 +254,7 @@ TEST(ParsePanelVisibleQueryTests, NameAndVisibleAreValidated)
 
     const ParsedPanelVisibleQuery unknown = ParsePanelVisibleQuery("Nope", "true");
     EXPECT_FALSE(unknown.valid);
-    EXPECT_NE(unknown.errorMessage.find("Hierarchy"), std::string::npos); // lists the supported names
+    EXPECT_NE(unknown.errorMessage.find("GET /list_tabs"), std::string::npos);
 
     EXPECT_FALSE(ParsePanelVisibleQuery("", "true").valid);
     EXPECT_FALSE(ParsePanelVisibleQuery("Hierarchy", "").valid);
@@ -264,8 +264,7 @@ TEST(ParsePanelVisibleQueryTests, NameAndVisibleAreValidated)
 
 TEST(PanelVisibleResponseTests, JsonKeysArePinned)
 {
-    const nlohmann::json body =
-        nlohmann::json::parse(BuildPanelVisibleResponseJson(gte::TogglePanel::Hierarchy, false));
+    const nlohmann::json body = nlohmann::json::parse(BuildPanelVisibleResponseJson("Hierarchy", false));
     EXPECT_EQ(body.size(), 3u);
     EXPECT_TRUE(body["success"].get<bool>());
     EXPECT_EQ(body["name"], "Hierarchy");

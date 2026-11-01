@@ -541,9 +541,7 @@ std::string BuildRenderGraphMetadataResponseJson(const gte::rg::RenderGraphMetad
     return RenderGraphMetadataToJson(metadata).dump();
 }
 
-// --- network-impl-7 campaign - GET /activate_tab and GET /list_tabs. See
-// NetworkRoutes.h's own doc comments above each declaration for the exact,
-// locked validation/response rules implemented below.
+// --- GET /activate_tab and GET /list_tabs; the rules are documented in NetworkRoutes.h.
 
 ParsedActivateTabQuery ParseActivateTabQuery(const std::string& nameParam)
 {
@@ -562,16 +560,14 @@ ParsedActivateTabQuery ParseActivateTabQuery(const std::string& nameParam)
     return result;
 }
 
-std::string BuildActivateTabResponseJson(bool success, bool tabExists, const std::string& tabName)
+std::string BuildActivateTabResponseJson(bool success, bool /*tabExists*/, const std::string& tabName)
 {
-    (void)tabExists; // See NetworkRoutes.h's own doc comment - `success` alone already selects the right branch below.
     nlohmann::json body;
     body["success"] = success;
     if (success) {
         body["activated_tab"] = tabName;
     } else {
-        body["error"] = "panel '" + tabName +
-            "' has no live window yet this session - try again after the Editor has rendered at least one frame";
+        body["error"] = "window '" + tabName + "' could not be opened";
     }
     return body.dump();
 }
@@ -1460,31 +1456,30 @@ std::string BuildHierarchyStateResponseJson(const HierarchyStateReport& report)
 ParsedPanelVisibleQuery ParsePanelVisibleQuery(const std::string& nameParam, const std::string& visibleParam)
 {
     ParsedPanelVisibleQuery result;
-    const std::optional<TogglePanel> panel = TogglePanelFromName(nameParam);
-    if (!panel.has_value()) {
-        std::string names;
-        for (const std::string_view name : kTogglePanelNames) {
-            names += names.empty() ? "" : ", ";
-            names += name;
-        }
-        result.errorMessage = "missing or unknown query parameter: name - supported panels: " + names;
+    bool known = false;
+    {
+        std::lock_guard<std::mutex> lock(GetHotReloadEngineStateMutex());
+        known = EditorPanelRegistry::Instance().IsKnownName(nameParam);
+    }
+    if (!known) {
+        result.errorMessage = "missing or unknown query parameter: name - see GET /list_tabs for the window names";
         return result;
     }
     if (visibleParam != "true" && visibleParam != "false") {
         result.errorMessage = "missing or invalid required query parameter: visible - must be \"true\" or \"false\"";
         return result;
     }
-    result.panel = *panel;
+    result.name = nameParam;
     result.visible = visibleParam == "true";
     result.valid = true;
     return result;
 }
 
-std::string BuildPanelVisibleResponseJson(TogglePanel panel, bool visible)
+std::string BuildPanelVisibleResponseJson(const std::string& name, bool visible)
 {
     nlohmann::json body;
     body["success"] = true;
-    body["name"] = std::string(TogglePanelName(panel));
+    body["name"] = name;
     body["visible"] = visible;
     return body.dump();
 }

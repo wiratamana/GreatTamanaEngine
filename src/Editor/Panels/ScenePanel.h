@@ -1,20 +1,23 @@
 #pragma once
 
-#include "../../Core/GraphicsHandles.h"
-#include "../../Core/Plugins/RenderFeatureDebugEntry.h"
-
-#include <vector>
+#include "../EditorWindow.h"
 
 namespace gte {
 
-struct EditorContext;
 class EditorCamera;
-class Game;
-class Renderer;
 
-// Scene view: own render target, fly camera, view gizmo, transform gizmo and asset drop spawning. Once per frame.
-// `sceneServicesSetLayout` serves the spawn path; `renderFeatureEntries` tells whether a feature is off here.
-void BuildScenePanel(Game& game, Renderer& renderer, EditorContext& ctx, EditorCamera& camera,
-    DescriptorSetLayoutHandle sceneServicesSetLayout, const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries);
+// Scene view: own render target, camera, gizmo and asset drop spawning.
+class ScenePanel final : public EditorWindow {
+public:
+    explicit ScenePanel(EditorCamera& camera) : EditorWindow("Scene", WindowDock::Center), m_camera(camera) {}
+
+protected:
+    int ExtraFlags() const override;
+    void OnFrame(EditorFrame& frame) override;
+    void OnGui(EditorFrame& frame) override;
+
+private:
+    EditorCamera& m_camera;
+};
 
 } // namespace gte

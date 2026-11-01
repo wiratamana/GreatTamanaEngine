@@ -41,7 +41,7 @@ Legend: `*` = required. **Q** = query parameter. **B** = JSON body key. **IMG** 
 | Route | Params | Response | Notes |
 |---|---|---|---|
 | `GET /http_hello_world` | none | text `hello world` | Is the server alive? |
-| `GET /list_tabs` | none | `{"tabs":["Hierarchy","Inspector",...]}` | Built-in panels first, then project panels. No bridge. |
+| `GET /list_tabs` | none | `{"tabs":["Hierarchy","Inspector",...]}` | Every registered window: built-in windows first, then project windows, then render feature windows. No bridge. |
 | `GET /list_textures` | none | `{"textures":[{name, regime, format, width, height, has_depth, frames_since_update, kind, depth}]}` | Names for `/get_texture`. |
 | `GET /render_graph` | none | Full graph of the current frame. See below. | No bridge. |
 
@@ -193,8 +193,8 @@ These use `EditorUiCommandBridge`: one request at a time, 3 s timeout.
 
 | Route | Params | Response | Errors |
 |---|---|---|---|
-| `GET /activate_tab` **MUT** | Q `name`* (exact panel name) | `{success, activated_tab}` | `404` unknown name, `409` panel has no live window yet |
-| `GET /panel_visible` **MUT** | Q `name`* (only `Hierarchy`), `visible`* | `{success, name, visible}` | `400` lists the supported names |
+| `GET /activate_tab` **MUT** | Q `name`* (exact window name) | `{success, activated_tab}` | `404` unknown name, `409` the editor layer does not know a name the registry knows |
+| `GET /panel_visible` **MUT** | Q `name`* (any window name from `/list_tabs`), `visible`* | `{success, name, visible}` | `400` unknown name or bad `visible` |
 | `GET /split_views` **MUT** | Q `enabled`* | `{success, split}` | `409` |
 | `POST /spawn_instance_grid` **MUT** | B `count` (1 to 100000, default 6), `spacing` (0.1 to 1000, default 1.5) | `{success, instance_count}` | `400` range, `503` no Editor |
 | `GET /select_asset` **MUT** | Q `path`* (absolute `.gta`) | `{success, selected_path}` | `400`, `503` |
@@ -207,7 +207,7 @@ These use `EditorUiCommandBridge`: one request at a time, 3 s timeout.
 | `POST /exit` **MUT** | none | `{"success":true,"message":"exit requested"}` | `403` browser |
 
 Notes:
-- `activate_tab` and `panel_visible` change the session only. Nothing is saved.
+- `activate_tab` and `panel_visible=true` open the window (Show): it is raised and, if it floats, centered. `panel_visible=false` closes it. Nothing is saved.
 - `split_views`: `true` puts Game beside Scene. `false` makes Game a tab of Scene.
 - `spawn_instance_grid` is a load-test spawner. It answers `503` if the editor layer is the null one.
 - `inspector_state` shows what the Inspector drew last frame: `selection_kind`, `selected_path`, `shown_path`, `clusters_text`, `cluster_status`, `build_button_enabled`, `build_button_disabled_reason`, `build_running`, `clone_button_disabled_reason`, `clone_destination`, `clone_weld`, `open_viewer_after_clone`, and `rotation`.
@@ -357,7 +357,6 @@ curl.exe http://127.0.0.1:8080/project_assembly/hot_reload/status
 - `/get_game_view` and `/get_swapchain` return text errors. Do not parse them as JSON.
 - `?format=garbage` returns a PNG. It does not fail.
 - Log `level` in JSON is `Warning`. The query `min_level=warning` takes any case.
-- `panel_visible` supports only `Hierarchy`.
 - The editor must run one instance. A second one has no HTTP.
 
 ## Related

@@ -1,6 +1,6 @@
 #include "JobsPanel.h"
 
-#include "../EditorContext.h"
+#include "../EditorFrame.h"
 #include "../JobsPanelData.h"
 #include "../../Game/Animation/AnimationSystem.h"
 #include "../../Game/Game.h"
@@ -126,24 +126,33 @@ void BuildTimeline(
 
 } // namespace
 
-void JobsPanel::Build(EditorContext& /*ctx*/, Game& game)
+void JobsPanel::SyncPauseEdge()
 {
-    ImGui::Begin("Jobs");
-
     Profiling::FrameProfiler& profiler = Profiling::FrameProfiler::Instance();
-    const std::size_t workerCount = Jobs::JobSystem::Instance().WorkerCount();
-
-    BuildSkinningModeControl(game);
-    ImGui::Separator();
-
-    BuildPauseControl(profiler);
-
     const bool paused = profiler.IsDisplayPaused();
     if (paused && !m_wasPaused) {
         m_frozenPoints = Profiling::BuildWorkerTimelinePoints(profiler.LastCompletedFrame());
         m_frozenFrameMilliseconds = profiler.LastCompletedFrame().summary.cpuMilliseconds;
     }
     m_wasPaused = paused;
+}
+
+void JobsPanel::OnFrame(EditorFrame& /*frame*/)
+{
+    SyncPauseEdge();
+}
+
+void JobsPanel::OnGui(EditorFrame& frame)
+{
+    Profiling::FrameProfiler& profiler = Profiling::FrameProfiler::Instance();
+    const std::size_t workerCount = Jobs::JobSystem::Instance().WorkerCount();
+
+    BuildSkinningModeControl(frame.game);
+    ImGui::Separator();
+
+    BuildPauseControl(profiler);
+    SyncPauseEdge();
+    const bool paused = profiler.IsDisplayPaused();
 
     std::vector<Profiling::WorkerTimelinePoint> livePoints;
     const std::vector<Profiling::WorkerTimelinePoint>* points = &m_frozenPoints;
@@ -156,8 +165,6 @@ void JobsPanel::Build(EditorContext& /*ctx*/, Game& game)
 
     BuildUtilizationSummary(*points, workerCount);
     BuildTimeline(*points, frameMilliseconds, workerCount);
-
-    ImGui::End();
 }
 
 } // namespace gte

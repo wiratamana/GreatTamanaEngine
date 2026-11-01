@@ -1,6 +1,6 @@
 #include "MemoryPanel.h"
 
-#include "../EditorContext.h"
+#include "../EditorFrame.h"
 #include "../EditorGpuMemoryNameOverlay.h"
 #include "../ImGuiMemoryTracker.h"
 #include "../MemoryPanelData.h"
@@ -191,19 +191,15 @@ void BuildDescriptorPoolSection(Renderer& renderer)
 
 } // namespace
 
-void BuildMemoryPanel(EditorContext& /*ctx*/, Renderer& renderer)
+void MemoryPanel::OnGui(EditorFrame& frame)
 {
-    ImGui::Begin("Memory");
-
     BuildCpuDependenciesSection();
     ImGui::Separator();
-    BuildGpuTrackedSection(renderer);
+    BuildGpuTrackedSection(frame.renderer);
     ImGui::Separator();
-    BuildGpuHeapBudgetSection(renderer);
+    BuildGpuHeapBudgetSection(frame.renderer);
     ImGui::Separator();
-    BuildDescriptorPoolSection(renderer);
-
-    ImGui::End();
+    BuildDescriptorPoolSection(frame.renderer);
 }
 
 } // namespace gte

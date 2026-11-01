@@ -1,13 +1,13 @@
 # Project assembly
 > How to make a game project that loads into the editor as DLLs, and how that system works inside. For game developers and engine developers.
-> Verified against code: 2026-10-31
+> Verified against code: 2026-11-01
 
 ## TL;DR
 - A project is C++ and GLSL in `Projects/<Name>/`. CMake builds it into `<Name>_Game.dll` and, if needed, `<Name>_Editor.dll`.
 - The editor loads the DLLs and calls one export: `GTE_RegisterProject`. Your code uses the real engine types. No wrapper, no engine rebuild.
 - It works only on the same machine and toolchain as the engine. There is no portability.
 - Hot reload exists and is HTTP only. There is no menu item for it.
-- There is no gameplay script API. A project adds render passes, render features, editor panels and ECS components.
+- There is no gameplay script API. A project adds render passes, render features, editor windows and ECS components.
 
 ## Before you start
 - Build the engine with MinGW and Ninja. See [Building](../../BUILDING.md).
@@ -31,7 +31,7 @@ Three folders look alike. Do not mix them up.
 4. Load. Menu `Project > Open Project...`, pick `<Name>`. The tier must be `Compiled`.
 5. Change code. Reload it with HTTP hot reload. Do not use Compile on a loaded project.
 6. Optional: scaffold code from the Project panel: right-click the `[Active Project]` row, then `Create`.
-7. Optional: add an editor panel. Put the `.cpp` under `Assets/.../Editor/`.
+7. Optional: add an editor window. Put the `.cpp` under `Assets/.../Editor/`.
 
 ```cmd
 curl.exe -X POST "http://127.0.0.1:8080/project_assembly/create_project?name=MyGame"
@@ -124,37 +124,36 @@ Project panel, right-click `[Active Project]`, `Create`. Or `POST /project_assem
 | `screen_post_process_pass` | `<Name>ScreenPass.cpp` | Automatic. Needs the two anchor comments in `<Name>Game.cpp`. Priority is highest existing + 1 |
 
 ## Write an editor panel
-An `_Editor.dll` registers a panel from its own entry point. It gets the host as a second argument.
+An `_Editor.dll` registers a window from its own entry point. It gets the host as a second argument.
 
 ```cpp
 #include "../../Libraries/ProjectAssemblyExports.h"
-#include "../../../../src/Core/EditorPanelModule.h"
-#include "../../../../src/Core/EditorPanelRegistry.h"
+#include "../../../../src/Editor/EditorWindow.h"
 #include <imgui.h>
 
 namespace {
-class HelloPanel final : public gte::IEditorPanelModule_v1 {
+class HelloWindow final : public gte::EditorWindow {
 public:
-    const char* GetPanelName() const override { return "Hello"; }
-    void BuildPanel(gte::IPluginPanelDrawContext&) override { ImGui::TextUnformatted("Hello"); }
+    HelloWindow() : EditorWindow("Hello", gte::WindowDock::Bottom) {}
+
+protected:
+    void OnGui(gte::EditorFrame&) override { ImGui::TextUnformatted("Hello"); }
 };
-HelloPanel g_panel;
-void RegisterProject(gte::Core&, gte::EditorHost&)
-{
-    gte::EditorPanelRegistry::Instance().RegisterPluginPanel("Hello", &g_panel);
-}
+HelloWindow g_window;
+void RegisterProject(gte::Core&, gte::EditorHost&) { gte::RegisterEditorWindow(g_window); }
 } // namespace
 GTE_DEFINE_PROJECT_EXPORTS_EDITOR(RegisterProject)
 ```
 
 - Use `GTE_DEFINE_PROJECT_EXPORTS_GAME(fn)` for `_Game` (`void(gte::Core&)`) and `..._EDITOR(fn)` for `_Editor`. Once per DLL.
-- Call real `ImGui::*`. Ignore the `ctx` argument. Your DLL shares the exe's ImGui.
+- The window gets a title bar, a close button, a tab menu and an entry in the Window menu. Call real `ImGui::*` in `OnGui()`. Your DLL shares the exe's ImGui.
+- Hot reload unregisters the window by name before the DLL is unloaded. A window added by a reload floats until you dock it.
 
 ## How it works
 Load and unload steps, in order:
 1. At startup `EditorHost` calls `Core::LoadProjectAssemblies(<exe dir>/project_assemblies)`. It scans files that end with `_Game.dll` or `_Editor.dll`.
 2. For each DLL the host resolves `GTE_RegisterProject`. A DLL without it is skipped with a warning.
-3. Before the call, `ProjectAssemblyRegistrationLedger` starts recording. Every pass, feature, panel and ECS component type that the DLL registers is attributed to the project.
+3. Before the call, `ProjectAssemblyRegistrationLedger` starts recording. Every pass, feature, window and ECS component type that the DLL registers is attributed to the project.
 4. On unload the ledger removes all of that, then `FreeLibrary` runs. The `_Editor` DLL goes first.
 
 - Create (`New Project` or `create_project`) checks the name, writes the three scaffold files and runs `cmake` once, synchronously. Then it marks the project active. It does not compile.

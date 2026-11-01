@@ -1,5 +1,6 @@
 #include "DockLayout.h"
 #include "EditorContext.h"
+#include "EditorWindow.h"
 #include "../Core/EditorPanelRegistry.h"
 #include "PlaybackControls.h"
 #include "SceneIO.h"
@@ -13,30 +14,29 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <algorithm>
 #include <chrono>
 #include <string>
+#include <vector>
 
 namespace gte {
 
 namespace {
 
-// True if the dockspace node is missing, or any panel window exists but was never docked (DockId == 0).
-bool DefaultDockLayoutIsNeeded(ImGuiID dockspaceId)
+ImGuiID DockNodeFor(WindowDock dock, ImGuiID left, ImGuiID center, ImGuiID right, ImGuiID bottom)
 {
-    if (ImGui::DockBuilderGetNode(dockspaceId) == nullptr) {
-        return true;
+    switch (dock) {
+    case WindowDock::Left: return left;
+    case WindowDock::Center: return center;
+    case WindowDock::Right: return right;
+    case WindowDock::Bottom: return bottom;
+    case WindowDock::Floating: break;
     }
-    for (const std::string& panelName : EditorPanelRegistry::Instance().AllNames()) {
-        const ImGuiWindow* window = ImGui::FindWindowByName(panelName.c_str());
-        if (window != nullptr && window->DockId == 0) {
-            return true;
-        }
-    }
-    return false;
+    return 0;
 }
 
-// Default layout, built once: Hierarchy left, Inspector right, Scene/Game tabs center, wide bottom strip.
-// The bottom strip is split first so it spans the full width.
+// Default layout, built only on a first run: Hierarchy left, Inspector right, Scene/Game center tabs, wide bottom strip.
+// The bottom strip is split first so it spans the full width. Each window docks where its DefaultDock() says.
 void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
 {
     ImGui::DockBuilderRemoveNode(dockspaceId);
@@ -48,26 +48,15 @@ void BuildDefaultDockLayout(ImGuiID dockspaceId, ImVec2 size)
     const ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.20f, nullptr, &center);
     const ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.28f, nullptr, &center);
 
-    ImGui::DockBuilderDockWindow("Hierarchy", left);
-    ImGui::DockBuilderDockWindow("Inspector", right);
-    ImGui::DockBuilderDockWindow("Scene", center);
-    ImGui::DockBuilderDockWindow("Game", center);
-    ImGui::DockBuilderDockWindow("Memory", bottom);
-    ImGui::DockBuilderDockWindow("Profiler", bottom);
-    // "Render Graph" is a floating window and is not docked here.
-    ImGui::DockBuilderDockWindow("Jobs", bottom);
-    ImGui::DockBuilderDockWindow("Log", bottom);
-#if GTE_ENABLE_PROJECT_PANEL
-    // Tabbed alongside "Memory", like Unity's bottom "Project" tab.
-    ImGui::DockBuilderDockWindow("Project", bottom);
-#endif
-
-    // Every plugin panel (built-in or Project Assembly) is tabbed into the bottom node.
-    for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
-        ImGui::DockBuilderDockWindow(entry.name.c_str(), bottom);
+    for (const EditorPanelRegistry::WindowEntry& entry : EditorPanelRegistry::Instance().Windows()) {
+        const ImGuiID node = DockNodeFor(entry.window->DefaultDock(), left, center, right, bottom);
+        if (node != 0) {
+            ImGui::DockBuilderDockWindow(entry.name.c_str(), node);
+        }
     }
     ImGui::DockBuilderFinish(dockspaceId);
 }
+
 } // namespace
 
 void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer,
@@ -135,15 +124,18 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Window")) {
-            // Floating (not docked) window; the checkmark follows ctx.frameDebuggerWindowOpen,
-            // including a close via the titlebar [x].
-            ImGui::MenuItem("Frame Debugger", nullptr, &ctx.frameDebuggerWindowOpen);
-            // Render Graph is a floating window too (not docked), same
-            // open/close convention as Frame Debugger above.
-            ImGui::MenuItem("Render Graph", nullptr, &ctx.renderGraphWindowOpen);
-            // Render Features is a floating window too (not docked), same
-            // open/close convention as Frame Debugger/Render Graph above.
-            ImGui::MenuItem("Render Features", nullptr, &ctx.renderFeaturesWindowOpen);
+            // One flat list of every registered window, sorted by name. A click opens it, raises it and centers it when it floats.
+            std::vector<EditorWindow*> windows;
+            for (const EditorPanelRegistry::WindowEntry& entry : EditorPanelRegistry::Instance().Windows()) {
+                windows.push_back(entry.window);
+            }
+            std::sort(windows.begin(), windows.end(),
+                [](const EditorWindow* a, const EditorWindow* b) { return WindowNameLess(a->Name(), b->Name()); });
+            for (EditorWindow* window : windows) {
+                if (ImGui::MenuItem(window->Name(), nullptr, window->IsOpen())) {
+                    window->Show();
+                }
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Project")) {
@@ -200,29 +192,16 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
     }
 
     const ImGuiID dockspaceId = ImGui::GetID("EditorDockSpace");
+    // Asked before DockSpace(): DockSpace() creates the node itself, so afterwards it always exists.
+    const bool hadSavedLayout = ImGui::DockBuilderGetNode(dockspaceId) != nullptr;
     ImGui::DockSpace(dockspaceId, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
 
-    // Runs only until ctx.dockLayoutEnsured latches. ImGui reports DockId == 0 mid-drag, so checking
-    // every frame would rebuild the default layout and cancel the user's split/undock drag.
-    // Also repairs a stale imgui.ini that predates some panels.
+    // A saved layout is never rebuilt. Only a first run (no dock space in imgui.ini) gets the default layout.
     if (!ctx.dockLayoutEnsured) {
-        bool allPanelsAccountedFor = true;
-        for (const std::string& panelName : EditorPanelRegistry::Instance().AllNames()) {
-            // A panel that never called Begin() yet has no window; wait and re-check next frame.
-            if (ImGui::FindWindowByName(panelName.c_str()) == nullptr) {
-                allPanelsAccountedFor = false;
-                break;
-            }
-        }
-
-        if (DefaultDockLayoutIsNeeded(dockspaceId)) {
+        ctx.dockLayoutEnsured = true;
+        if (!hadSavedLayout) {
             BuildDefaultDockLayout(dockspaceId, viewport->WorkSize);
-            ctx.dockLayoutEnsured = true; // We just fixed it ourselves - trust it, never recheck.
-        } else if (allPanelsAccountedFor) {
-            // Every panel has a live window with a real dock (e.g. a valid saved imgui.ini): stop checking.
-            ctx.dockLayoutEnsured = true;
         }
-        // else: some panel has not had its first Begin() yet; re-check next frame.
     }
 
     // Short-lived colored status line for the last Save/Open Scene action.
@@ -252,17 +231,6 @@ void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer
     ImGui::End();
 }
 
-// SetWindowFocus() only takes a name, so the window is looked up a second time by name here.
-bool FindAndFocusEditorWindow(const char* panelName)
-{
-    const ImGuiWindow* window = ImGui::FindWindowByName(panelName);
-    if (window == nullptr) {
-        return false;
-    }
-    ImGui::SetWindowFocus(panelName);
-    return true;
-}
-
 SceneGameSplitResult SetSceneGameSplit(const EditorContext& ctx, bool enabled)
 {
     SceneGameSplitResult result;
@@ -281,7 +249,7 @@ SceneGameSplitResult SetSceneGameSplit(const EditorContext& ctx, bool enabled)
         return result;
     }
 
-    // Game always gets a real dock node, so the default-layout rebuild never sees it as undocked.
+    // Game always keeps a dock node of its own.
     const ImGuiID sceneNode = scene->DockId;
     if (enabled && game->DockId == sceneNode) {
         ImGuiID gameNode = 0;

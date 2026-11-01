@@ -38,7 +38,6 @@ bool BuildToneMappingPanel(
     ToneMappingSettings& edit, const ToneMappingViewSnapshot& game, const ToneMappingViewSnapshot& scene)
 {
     bool changed = false;
-    ImGui::Begin("ToneMapping");
 
     DrawStatus("Game view", game);
     DrawStatus("Scene view", scene);
@@ -58,7 +57,6 @@ bool BuildToneMappingPanel(
         changed = true;
     }
 
-    ImGui::End();
     return changed;
 }
 

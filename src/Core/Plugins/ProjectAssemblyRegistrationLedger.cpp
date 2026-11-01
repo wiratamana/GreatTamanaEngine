@@ -157,7 +157,7 @@ void ProjectAssemblyRegistrationLedger::UnregisterEverythingFor(const std::strin
         ComponentTypeRegistry::Instance().UnregisterDescriptor(*nameIt);
     }
     for (auto nameIt = entry.panelNames.rbegin(); nameIt != entry.panelNames.rend(); ++nameIt) {
-        EditorPanelRegistry::Instance().UnregisterPluginPanel(*nameIt);
+        EditorPanelRegistry::Instance().UnregisterWindow(*nameIt);
     }
     // better-render-pass-5 effort, BLOCK 3, PHASE4 - PreOpaque features
     // are torn down in the SAME teardown pass as renderFeatureNames,

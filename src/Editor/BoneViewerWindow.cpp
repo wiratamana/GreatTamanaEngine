@@ -1,6 +1,7 @@
 #include "BoneViewerWindow.h"
 
 #include "EditorContext.h"
+#include "EditorFrame.h"
 #include "ModelRigCache.h"
 #include "ImGuiUniqueId.h"
 #include "../Encoding/Utf8Path.h"
@@ -12,6 +13,7 @@
 #include "../Assets/RigFile.h" // RigFileData
 #include "../ECS/Components/MeshAssetSource.h"
 #include "../ECS/Registry.h"
+#include "../Game/Game.h"
 #include "../Game/Physics/PhysicsSystem.h" // PhysicsSystem::GetDynamicChainRigCache()
 #include "../Math/Mat4.h"
 #include "../Math/Vec4.h"
@@ -59,7 +61,11 @@ struct OverlayPart {
 
 } // namespace
 
-BoneViewerWindow::BoneViewerWindow() = default;
+BoneViewerWindow::BoneViewerWindow(ModelRigCache& rigCache)
+    : EditorWindow("Bone Viewer", WindowDock::Floating, false, 900.0f, 650.0f)
+    , m_rigCache(rigCache)
+{
+}
 
 BoneViewerWindow::~BoneViewerWindow()
 {
@@ -68,8 +74,10 @@ BoneViewerWindow::~BoneViewerWindow()
 
 void BoneViewerWindow::Open(Entity rootEntity) noexcept
 {
-    m_open = true;
     m_targetEntity = rootEntity;
+    if (!IsOpen()) {
+        Show();
+    }
 }
 
 void BoneViewerWindow::Reset()
@@ -162,7 +170,7 @@ bool BoneViewerWindow::EnsureDataLoaded(
     m_vertexCount = static_cast<std::uint32_t>(previewData.vertices.size());
     m_indexCount = static_cast<std::uint32_t>(mesh->indices.size());
     m_cachedIsValid = true;
-    m_needsFraming = true; // A newly (re)loaded model - reframe the camera next Build() call.
+    m_needsFraming = true; // A newly (re)loaded model: reframe the camera on the next draw.
     return true;
 }
 
@@ -462,40 +470,32 @@ void BoneViewerWindow::BuildPartListPane(
     }
 }
 
-void BoneViewerWindow::Build(
-    Registry& registry, Renderer& renderer, EditorContext& ctx, ModelRigCache& rigCache, PhysicsSystem& physicsSystem)
+void BoneViewerWindow::OnGui(EditorFrame& frame)
 {
-    if (!m_open) {
-        return;
-    }
-
-    ImGui::SetNextWindowSize(ImVec2(900.0f, 650.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Bone Viewer", &m_open)) {
-        ImGui::End();
-        return;
-    }
+    Registry& registry = frame.game.GetRegistry();
+    Renderer& renderer = frame.renderer;
+    EditorContext& ctx = frame.ctx;
+    ModelRigCache& rigCache = m_rigCache;
+    PhysicsSystem& physicsSystem = frame.game.GetPhysicsSystem();
 
     if (!registry.IsAlive(m_targetEntity)) {
         ImGui::TextDisabled("The selected entity no longer exists.");
-        ImGui::End();
         return;
     }
 
     const MeshAssetSource* source = registry.TryGetComponent<MeshAssetSource>(m_targetEntity);
     if (source == nullptr || source->gtaPath.empty()) {
         ImGui::TextDisabled("This entity has no associated mesh asset (MeshAssetSource) to inspect.");
-        ImGui::End();
         return;
     }
 
     if (!EnsureDataLoaded(renderer, source->gtaPath, ctx, rigCache) || !m_cachedIsValid) {
         ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.2f, 1.0f), "Failed to load mesh/skeleton data for:");
         ImGui::TextWrapped("%s", source->gtaPath.c_str());
-        ImGui::End();
         return;
     }
 
-    // Fetched once per Build() and passed down. May be nullptr (no entry registered for this path yet).
+    // Fetched once per frame and passed down. May be nullptr (no entry registered for this path yet).
     const DynamicChainRigCache::ModelEntry* verletModel = physicsSystem.GetDynamicChainRigCache().TryGet(source->gtaPath);
 
     if (m_needsFraming) {
@@ -716,7 +716,6 @@ void BoneViewerWindow::Build(
         if (previewTexture == UiTextureHandle::Invalid) {
             ImGui::TextDisabled("The 3D preview is not available.");
             ImGui::EndChild();
-            ImGui::End();
             return;
         }
 
@@ -1086,8 +1085,6 @@ void BoneViewerWindow::Build(
     }
 
     ImGui::EndChild();
-
-    ImGui::End();
 }
 
 } // namespace gte

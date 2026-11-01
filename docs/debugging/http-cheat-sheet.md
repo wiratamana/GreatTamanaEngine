@@ -296,7 +296,6 @@ curl.exe http://127.0.0.1:8080/debug/fault
 - Log `level` in the reply is `Warning`. In the query use `min_level=warning` (any case).
 - `?format=garbage` gives PNG, not an error.
 - `/scene_camera/set_pose` needs all 5 params: `x`, `y`, `z`, `yaw`, `pitch`.
-- `/panel_visible` supports only `Hierarchy`.
 - `feature_debug/set` is all-or-nothing, and values are clamped. Read the reply.
 - The profiler GPU lane is not time-aligned to the CPU lanes.
 - Cluster counts are clusters, not triangles.

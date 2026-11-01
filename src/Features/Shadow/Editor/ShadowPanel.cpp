@@ -1,6 +1,5 @@
 #include "ShadowPanel.h"
 
-#include "../../../Editor/EditorContext.h"
 #include "../ShadowTypes.h"
 
 #include <imgui.h>
@@ -127,11 +126,9 @@ void DrawLiveInfo(const ShadowViewSnapshot& game, const ShadowViewSnapshot& scen
 
 } // namespace
 
-bool BuildShadowPanel(EditorContext& /*ctx*/, ShadowSettings& edit, const ShadowViewSnapshot& game,
-    const ShadowViewSnapshot& scene)
+bool BuildShadowPanel(ShadowSettings& edit, const ShadowViewSnapshot& game, const ShadowViewSnapshot& scene)
 {
     bool changed = false;
-    ImGui::Begin("Shadow");
 
     DrawStatus(game);
 
@@ -182,7 +179,6 @@ bool BuildShadowPanel(EditorContext& /*ctx*/, ShadowSettings& edit, const Shadow
         changed = true;
     }
 
-    ImGui::End();
     return changed;
 }
 

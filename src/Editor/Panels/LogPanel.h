@@ -1,22 +1,17 @@
 #pragma once
 
+#include "../EditorWindow.h"
 #include "../LogPanelData.h"
-
-#include <cstdint>
 
 namespace gte {
 
-struct EditorContext;
-
-// The "Log" panel (task_manager/logger-1 campaign, PHASE4) - a Unity
-// Console-style scrolling, filterable, colored list of every entry
-// Editor/Logger.h currently retains. A small, stateful, non-polymorphic
-// class (mirrors JobsPanel.h exactly), called by name from
-// ImGuiEditorLayer::BuildUI() - no IEditorPanel interface introduced (see
-// AGENTS.md, "Editor Module Structure").
-class LogPanel {
+// Scrolling, filterable, colored list of every entry the Logger retains.
+class LogPanel final : public EditorWindow {
 public:
-    void Build(EditorContext& ctx);
+    LogPanel() : EditorWindow("Log", WindowDock::Bottom) {}
+
+protected:
+    void OnGui(EditorFrame& frame) override;
 
 private:
     LogPanelFilterState m_filterState;

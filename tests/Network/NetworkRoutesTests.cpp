@@ -983,8 +983,7 @@ TEST(BuildActivateTabResponseJsonTests, FailureShape)
     const std::string body = BuildActivateTabResponseJson(false, false, "Profiler");
     const nlohmann::json parsed = nlohmann::json::parse(body);
     EXPECT_EQ(parsed["success"], false);
-    EXPECT_EQ(parsed["error"],
-        "panel 'Profiler' has no live window yet this session - try again after the Editor has rendered at least one frame");
+    EXPECT_EQ(parsed["error"], "window 'Profiler' could not be opened");
     EXPECT_FALSE(parsed.contains("activated_tab"));
 }
 
@@ -996,12 +995,7 @@ TEST(BuildUnknownTabNameResponseJsonTests, Shape)
     EXPECT_EQ(parsed["error"], "unknown tab name 'NotARealTab' - see GET /list_tabs for the currently known names");
 }
 
-// editor-core-separation-3 campaign, PHASE4 - Core/EditorPanelCatalog.h's
-// former compile-time-fixed kKnownEditorPanelNames[]/kKnownEditorPanelNameCount
-// are gone, replaced by EditorPanelRegistry (a runtime-populated registry,
-// seeded for this whole test binary by tests/Core/EditorPanelRegistryTests.cpp's
-// own global gtest Environment) - compares against the registry's own live
-// state directly instead of a compile-time constant that no longer exists.
+// The list comes straight from the registry, so it can never drift from what GET /activate_tab accepts.
 TEST(BuildListTabsResponseJsonTests, ContainsEveryRegisteredPanelName)
 {
     const std::string body = BuildListTabsResponseJson();

@@ -1,6 +1,7 @@
 #include "FrameDebuggerPanel.h"
 
 #include "../EditorContext.h"
+#include "../EditorFrame.h"
 #include "../../Encoding/HdrColorVisualization.h"
 #include "../../Encoding/CapturedPixelConversion.h"
 #include "../../Encoding/DepthVisualization.h"
@@ -287,14 +288,14 @@ void FrameDebuggerPanel::EnsurePreviewDescriptor()
     m_lastKnownPreviewView = desiredView;
 }
 
-bool FrameDebuggerPanel::IsCaptureArmed(const EditorContext& ctx) const noexcept
+bool FrameDebuggerPanel::IsCaptureArmed() const noexcept
 {
-    return m_enabled && ctx.frameDebuggerWindowOpen;
+    return m_enabled && IsOpen();
 }
 
-FrameDebuggerCaptureContext* FrameDebuggerPanel::PrepareCaptureContextForThisFrame(EditorContext& ctx)
+FrameDebuggerCaptureContext* FrameDebuggerPanel::PrepareCaptureContextForThisFrame()
 {
-    if (!IsCaptureArmed(ctx)) {
+    if (!IsCaptureArmed()) {
         m_captureContext.Deactivate();
         return nullptr;
     }
@@ -689,21 +690,23 @@ void FrameDebuggerPanel::BuildEventDetailsSection(const std::optional<FrameDebug
     }
 }
 
-void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph,
-    RenderTexture& gameView, RenderTexture* compositedGameView, rg::RenderPassToggleRegistry* toggleRegistry,
-    const rg::RenderPassBlackboard* offscreenBlackboard)
+void FrameDebuggerPanel::OnFrame(EditorFrame& frame)
 {
+    EditorContext& ctx = frame.ctx;
+    Renderer& renderer = frame.renderer;
+    const rg::RenderGraph& renderGraph = frame.renderGraph;
+
     // The collaborators are cached first: TriggerCapture() below reads them.
     m_frameRenderer = &renderer;
     m_frameRenderGraph = &renderGraph;
-    m_frameGameView = &gameView;
-    m_frameGameViewComposited = compositedGameView;
-    m_frameToggleRegistry = toggleRegistry;
-    m_frameBlackboard = offscreenBlackboard;
+    m_frameGameView = &frame.gameView;
+    m_frameGameViewComposited = frame.gameViewComposited;
+    m_frameToggleRegistry = &frame.renderPassToggleRegistry;
+    m_frameBlackboard = &frame.offscreenBlackboard;
     m_captureContext.InitializeEventCapture(renderer);
 
     // Two things end an enabled session: the window was closed, or the user resumed the game.
-    if (m_enabled && !ctx.frameDebuggerWindowOpen) {
+    if (m_enabled && !IsOpen()) {
         ApplyEnabledEdge(ctx, false);
     }
     if (m_enabled && !ctx.playbackPaused) {
@@ -713,9 +716,8 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
 
     // Second half of the handshake: this frame's replay passes and draw records exist now.
     if (m_handshake.ConsumeForCapture()) {
-        // Persistent targets are recreated at a new size only after the graph ran, so a frame that resized
-        // some drew into stale-size targets. It is skipped; the bound keeps a target that resizes every frame from
-        // starving the capture.
+        // A frame that resized persistent targets drew into stale-size targets, so it is skipped.
+        // The bound keeps a target that resizes every frame from starving the capture.
         if (renderGraph.PersistentTexturesResizedThisFrame() && m_resizeDeferrals < kMaxResizeDeferrals) {
             ++m_resizeDeferrals;
             m_handshake.Request();
@@ -733,28 +735,11 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
             m_handshake.Request();
         }
     }
+}
 
-    if (!ctx.frameDebuggerWindowOpen) {
-        return;
-    }
-
-    // A programmatic open pins the window once onto the main viewport so swapchain captures can see it.
-    if (m_pinToMainViewportNextOpen) {
-        const ImGuiViewport* mainViewport = ImGui::GetMainViewport();
-        const ImVec2 pinnedSize(
-            std::min(900.0f, mainViewport->WorkSize.x), std::min(600.0f, mainViewport->WorkSize.y));
-        ImGui::SetNextWindowViewport(mainViewport->ID);
-        ImGui::SetNextWindowPos(mainViewport->WorkPos, ImGuiCond_Always);
-        ImGui::SetNextWindowSize(pinnedSize, ImGuiCond_Always);
-        m_pinToMainViewportNextOpen = false;
-    } else {
-        ImGui::SetNextWindowSize(ImVec2(900.0f, 600.0f), ImGuiCond_FirstUseEver);
-    }
-    if (!ImGui::Begin("Frame Debugger", &ctx.frameDebuggerWindowOpen)) {
-        // Collapsed: End() is still required after Begin() returns false.
-        ImGui::End();
-        return;
-    }
+void FrameDebuggerPanel::OnGui(EditorFrame& frame)
+{
+    EditorContext& ctx = frame.ctx;
 
     BuildToolbarRow(ctx);
     ImGui::Separator();
@@ -777,7 +762,6 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
 
     if (currentFrame == nullptr) {
         BuildEmptyState();
-        ImGui::End();
         return;
     }
     const FrameDebuggerSnapshot& snapshot = currentFrame->snapshot;
@@ -807,8 +791,6 @@ void FrameDebuggerPanel::Build(EditorContext& ctx, Renderer& renderer, const rg:
     ImGui::BeginChild("FrameDebuggerInspector", ImVec2(0.0f, paneAreaHeight), true);
     BuildInspectorPane(snapshot, currentFrame);
     ImGui::EndChild();
-
-    ImGui::End();
 }
 
 void FrameDebuggerPanel::BuildEmptyState()
@@ -825,18 +807,10 @@ void FrameDebuggerPanel::BuildEmptyState()
     ImGui::TextDisabled("Capturing the Game view frame...");
 }
 
-void FrameDebuggerPanel::RequestOpenWindow(EditorContext& ctx)
-{
-    if (!ctx.frameDebuggerWindowOpen) {
-        ctx.frameDebuggerWindowOpen = true;
-        m_pinToMainViewportNextOpen = true;
-    }
-}
-
 void FrameDebuggerPanel::SetEnabledFromCommand(EditorContext& ctx, bool enabled)
 {
     if (enabled) {
-        RequestOpenWindow(ctx);
+        Show();
     }
     ApplyEnabledEdge(ctx, enabled);
 }
@@ -890,11 +864,11 @@ void FrameDebuggerPanel::SetLevelsFromCommand(float black, float white)
     m_levelsWhite = std::max(m_levelsWhite, m_levelsBlack + 0.001f);
 }
 
-FrameDebuggerStateSnapshotView FrameDebuggerPanel::BuildStateSnapshotView(const EditorContext& ctx) const
+FrameDebuggerStateSnapshotView FrameDebuggerPanel::BuildStateSnapshotView() const
 {
     FrameDebuggerStateSnapshotView view;
     view.enabled = m_enabled;
-    view.windowOpen = ctx.frameDebuggerWindowOpen;
+    view.windowOpen = IsOpen();
     view.hasCapturedFrame = m_currentCapture.HasCapture();
 
     const FrameDebuggerCapturedFrame* currentFrame = m_currentCapture.CurrentFrame();

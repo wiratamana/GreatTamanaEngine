@@ -1,4 +1,4 @@
-#include "GpuDrivenScenePluginPanelModule.h"
+#include "GpuDrivenSceneWindow.h"
 
 #include "GpuDrivenScenePanel.h"
 #include "../GpuDrivenSceneFeature.h"
@@ -14,7 +14,7 @@ namespace gte {
 
 namespace {
 
-// The grouping reads a snapshot's strings; once per this many panel draws is plenty.
+// The grouping reads a snapshot's strings; once per this many draws is plenty.
 constexpr std::uint32_t kRefreshEveryDraws = 15;
 
 CullTimeView ViewOf(rg::ViewScope scope) noexcept
@@ -29,7 +29,7 @@ CullTimeView ViewOf(rg::ViewScope scope) noexcept
 
 } // namespace
 
-void GpuDrivenScenePluginPanelModule::RefreshTimes()
+void GpuDrivenSceneWindow::RefreshTimes()
 {
     const rg::RenderGraphMetadata metadata = rg::BuildRenderGraphMetadata(
         m_graph.LastSnapshot(rg::ExecuteTimingMode::SynchronousImmediateReadback),
@@ -51,7 +51,7 @@ void GpuDrivenScenePluginPanelModule::RefreshTimes()
     m_hasTimes = true;
 }
 
-void GpuDrivenScenePluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/)
+void GpuDrivenSceneWindow::OnGui(EditorFrame& /*frame*/)
 {
     if (!m_hasTimes || ++m_drawsSinceRefresh >= kRefreshEveryDraws) {
         RefreshTimes();
@@ -65,13 +65,13 @@ void GpuDrivenScenePluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*
 }
 
 namespace {
-std::unique_ptr<IEditorPanelModule_v1> CreateGpuDrivenScenePanelModule(
+std::unique_ptr<EditorWindow> CreateGpuDrivenSceneWindow(
     IEngineFeatureModule& module, EditorContext&, Renderer&, const rg::RenderGraph& graph)
 {
-    return std::make_unique<GpuDrivenScenePluginPanelModule>(fx::FeatureOf<GpuDrivenSceneFeature>(module), graph);
+    return std::make_unique<GpuDrivenSceneWindow>(fx::FeatureOf<GpuDrivenSceneFeature>(module), graph);
 }
 } // namespace
 
-GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("GpuDrivenScene", &CreateGpuDrivenScenePanelModule);
+GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("GpuDrivenScene", &CreateGpuDrivenSceneWindow);
 
 } // namespace gte

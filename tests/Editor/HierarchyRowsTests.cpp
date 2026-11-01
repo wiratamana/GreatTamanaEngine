@@ -6,7 +6,6 @@
 #include "ECS/HierarchySnapshot.h"
 #include "ECS/Registry.h"
 #include "ECS/TransformHierarchy.h"
-#include "Editor/PanelVisibility.h"
 #include "Editor/Selection.h"
 
 #include <gtest/gtest.h>
@@ -472,27 +471,6 @@ TEST(HierarchyRowsTest, HidingThePanelForLongForcesAFreshFlatten)
 
     UpdateHierarchyRows(registry, state);
     EXPECT_EQ(state.rows.size(), 1u);
-}
-
-TEST(PanelVisibilityTest, HiddenFlagDecidesWhetherThePanelIsBuilt)
-{
-    PanelHiddenFlags flags;
-    EXPECT_TRUE(ShouldBuildPanel(flags, TogglePanel::Hierarchy));
-    flags.Set(TogglePanel::Hierarchy, true);
-    EXPECT_FALSE(ShouldBuildPanel(flags, TogglePanel::Hierarchy));
-    flags.Set(TogglePanel::Hierarchy, false);
-    EXPECT_TRUE(ShouldBuildPanel(flags, TogglePanel::Hierarchy));
-}
-
-TEST(PanelVisibilityTest, NamesRoundTrip)
-{
-    for (const std::string_view name : kTogglePanelNames) {
-        const std::optional<TogglePanel> panel = TogglePanelFromName(name);
-        ASSERT_TRUE(panel.has_value()) << name;
-        EXPECT_EQ(TogglePanelName(*panel), name);
-    }
-    EXPECT_FALSE(TogglePanelFromName("").has_value());
-    EXPECT_FALSE(TogglePanelFromName("hierarchy").has_value());
 }
 
 } // namespace

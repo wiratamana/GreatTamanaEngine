@@ -55,7 +55,6 @@ void DrawStatus(const GtaoViewSnapshot& game)
 bool BuildGtaoPanel(GtaoSettings& edit, const GtaoViewSnapshot& game, const GtaoViewSnapshot& scene)
 {
     bool changed = false;
-    ImGui::Begin("Gtao");
 
     DrawStatus(game);
 
@@ -99,7 +98,6 @@ bool BuildGtaoPanel(GtaoSettings& edit, const GtaoViewSnapshot& game, const Gtao
         changed = true;
     }
 
-    ImGui::End();
     return changed;
 }
 

@@ -1,4 +1,4 @@
-#include "VolumetricLightPluginPanelModule.h"
+#include "VolumetricLightWindow.h"
 
 #include "VolumetricLightPanel.h"
 #include "../VolumetricLightFeature.h"
@@ -9,7 +9,7 @@
 
 namespace gte {
 
-void VolumetricLightPluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/)
+void VolumetricLightWindow::OnGui(EditorFrame& /*frame*/)
 {
     VolumetricLightSettings edit = m_feature.Settings();
     if (BuildVolumetricLightPanel(
@@ -19,13 +19,13 @@ void VolumetricLightPluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx
 }
 
 namespace {
-std::unique_ptr<IEditorPanelModule_v1> CreateVolumetricLightPanelModule(
+std::unique_ptr<EditorWindow> CreateVolumetricLightWindow(
     IEngineFeatureModule& module, EditorContext&, Renderer&, const rg::RenderGraph&)
 {
-    return std::make_unique<VolumetricLightPluginPanelModule>(fx::FeatureOf<VolumetricLightFeature>(module));
+    return std::make_unique<VolumetricLightWindow>(fx::FeatureOf<VolumetricLightFeature>(module));
 }
 } // namespace
 
-GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("VolumetricLight", &CreateVolumetricLightPanelModule);
+GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("VolumetricLight", &CreateVolumetricLightWindow);
 
 } // namespace gte

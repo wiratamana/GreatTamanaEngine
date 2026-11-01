@@ -5,7 +5,7 @@
 // name / ECS component typeName a SPECIFIC Project Assembly's own
 // GTE_RegisterProject call registered, with ZERO change required to that
 // Project Assembly's own authored code - Core::RegisterProjectRenderPassProvider()/
-// EditorPanelRegistry::RegisterPluginPanel()/ComponentTypeRegistry::
+// EditorPanelRegistry::RegisterWindow()/ComponentTypeRegistry::
 // RegisterDescriptor() each call this class's own RecordX() immediately
 // after doing their own real work, unconditionally, every time they are
 // called by ANYTHING (including the engine's own built-in startup
@@ -56,7 +56,7 @@ public:
     void EndRecording();
 
     // Called by Core::RegisterProjectRenderPassProvider()/
-    // EditorPanelRegistry::RegisterPluginPanel()/ComponentTypeRegistry::
+    // EditorPanelRegistry::RegisterWindow()/ComponentTypeRegistry::
     // RegisterDescriptor() themselves, immediately after each does its own
     // real work - ALWAYS, unconditionally, from every call site, including
     // the engine's own built-in startup registrations. A safe, silent no-op
@@ -113,7 +113,7 @@ public:
     // `projectName`'s own recorded names, in REVERSE registration order,
     // calling core.GetRenderPipelineForProjectAssemblies().Unregister() (see
     // 3.3 below for the exact accessor this needs from Core),
-    // EditorPanelRegistry::Instance().UnregisterPluginPanel(), and
+    // EditorPanelRegistry::Instance().UnregisterWindow(), and
     // ComponentTypeRegistry::Instance().UnregisterDescriptor() for each, then
     // erases `projectName`'s own ledger entry entirely (a fresh
     // BeginRecordingFor(projectName) on the next load/reload starts from a

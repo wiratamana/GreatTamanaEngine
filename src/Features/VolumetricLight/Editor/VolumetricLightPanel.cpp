@@ -63,7 +63,6 @@ bool BuildVolumetricLightPanel(
     VolumetricLightSettings& edit, const VolumetricLightViewSnapshot& game, const VolumetricLightViewSnapshot& scene)
 {
     bool changed = false;
-    ImGui::Begin("VolumetricLight");
 
     DrawStatus(game);
 
@@ -140,7 +139,6 @@ bool BuildVolumetricLightPanel(
         changed = true;
     }
 
-    ImGui::End();
     return changed;
 }
 

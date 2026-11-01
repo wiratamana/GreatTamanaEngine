@@ -1,11 +1,17 @@
 #pragma once
 
+#include "../EditorWindow.h"
+
 namespace gte {
 
-struct EditorContext;
+// The Game view. Writes its content size to ctx.desiredExtent; the editor layer sizes the view texture to it next frame.
+class GamePanel final : public EditorWindow {
+public:
+    GamePanel() : EditorWindow("Game", WindowDock::Center) {}
 
-// The Game panel. Writes its content size to ctx.desiredExtent and its visibility to ctx.gameViewVisible each frame;
-// ImGuiEditorLayer applies both to the primary view's texture next frame.
-void BuildGamePanel(EditorContext& ctx);
+protected:
+    int ExtraFlags() const override;
+    void OnGui(EditorFrame& frame) override;
+};
 
 } // namespace gte

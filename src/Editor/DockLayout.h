@@ -14,9 +14,6 @@ class IHotReloadDebugCapability;
 void BuildDockspaceAndMenuBar(EditorContext& ctx, Game& game, Renderer& renderer,
     IHotReloadDebugCapability* hotReloadDebugCapability, DescriptorSetLayoutHandle sceneServicesSetLayout);
 
-// Focuses the ImGui window with this exact name. False when no such window exists yet.
-bool FindAndFocusEditorWindow(const char* panelName);
-
 // Result of SetSceneGameSplit(). `error` is empty when `applied` is true.
 struct SceneGameSplitResult {
     bool applied = false;

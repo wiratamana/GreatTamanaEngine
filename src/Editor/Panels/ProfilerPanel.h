@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../EditorWindow.h"
 #include "../ProfilerGraphModel.h"
 #include "../ProfilerPanelData.h"
 #include "../ProfilerTableModel.h"
@@ -13,15 +14,20 @@
 
 namespace gte {
 
-struct EditorContext;
-
-// Profiler panel: plain summary, CPU/GPU graph, scope table, checks, spikes and GPU status.
+// Profiler window: plain summary, CPU/GPU graph, scope table, checks, spikes and GPU status.
 // Pause keeps a frozen copy of the newest frame; Capture is a separate switch.
-class ProfilerPanel {
+class ProfilerPanel final : public EditorWindow {
 public:
-    void Build(EditorContext& ctx);
+    ProfilerPanel() : EditorWindow("Profiler", WindowDock::Bottom) {}
+
+protected:
+    void OnFrame(EditorFrame& frame) override;
+    void OnGui(EditorFrame& frame) override;
 
 private:
+    // Copies the newest frame on the frame Pause turns on; drops the copy when Pause turns off.
+    void SyncPauseEdge();
+
     bool m_wasPaused = false;
     bool m_showSelf = false; // graph and sort use self time instead of inclusive time
     bool m_hadIssues = false;

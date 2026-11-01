@@ -140,7 +140,7 @@ public:
         return report;
     }
 
-    bool SetPanelHidden(TogglePanel /*panel*/, bool /*hidden*/) override { return false; }
+    bool SetWindowOpen(const std::string& /*name*/, bool /*open*/) override { return false; }
 
     HierarchyActionReport HierarchyAction(Game& /*game*/, const HierarchyActionCommand& /*request*/) override
     {

@@ -1,6 +1,6 @@
 #include "RenderFeaturesPanel.h"
 
-#include "../EditorContext.h"
+#include "../EditorFrame.h"
 #include "../../Core/Plugins/RenderFeatureCompositor.h"
 #include "../ImGuiUniqueId.h"
 
@@ -66,22 +66,9 @@ void BuildRenderFeaturesSection(
 
 } // namespace
 
-void RenderFeaturesPanel::Build(EditorContext& ctx, const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
-    RenderFeatureCompositor* renderFeatureCompositor)
+void RenderFeaturesPanel::OnGui(EditorFrame& frame)
 {
-    if (!ctx.renderFeaturesWindowOpen) {
-        return;
-    }
-
-    ImGui::SetNextWindowSize(ImVec2(520.0f, 420.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Render Features", &ctx.renderFeaturesWindowOpen)) {
-        ImGui::End();
-        return;
-    }
-
-    BuildRenderFeaturesSection(renderFeatureEntries, renderFeatureCompositor);
-
-    ImGui::End();
+    BuildRenderFeaturesSection(frame.renderFeatureEntries, frame.renderFeatureCompositor);
 }
 
 } // namespace gte

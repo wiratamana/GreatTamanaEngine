@@ -1,6 +1,7 @@
 #include "InspectorPanel.h"
 
 #include "../EditorContext.h"
+#include "../EditorFrame.h"
 #include "../ImGuiUniqueId.h"
 #include "../../ECS/Components/Camera.h"
 #include "../../ECS/Components/DirectionalLight.h"
@@ -11,6 +12,7 @@
 #include "../../ECS/Components/Transform.h"
 #include "../../ECS/Registry.h"
 #include "../../ECS/TransformHierarchy.h"
+#include "../../Game/Game.h"
 #include "../../Game/Physics/PhysicsSystem.h"
 #include "../../Game/Instantiation/MeshInstantiationSystem.h"
 #include "../../Game/Physics/DynamicChainPhysicsPersistence.h"
@@ -135,20 +137,7 @@ const char* JointTypeLabel(JointType type)
     }
 }
 
-// Shown whenever ctx.selection.Kind() == ModelPart (see
-// task_manager/verlet-integration-2/PHASE1_SELECTION_MODEL_PART_FOUNDATION.md)
-// - the sub-part-of-a-model equivalent of BuildEntityInspector()/
-// BuildAssetInspector() below. Every field is read-only (plain ImGui::Text()
-// or ImGui::BeginDisabled()) for the Bone/RigidBody/Joint cases - there is no
-// physics simulation anywhere in the engine that consumes RigidBody/Joint
-// data yet (see Assets/PhysicsData.h's own file comment), so there is
-// nothing for an edit here to actually drive - same scope limit as this
-// file's existing "Mesh Renderer"/"Global Physics Settings" read-only
-// sections. The Verlet case (task_manager/verlet-integration-5,
-// PHASE3_INSPECTOR_VERLET_JOINT_SECTION.md) is the one exception - a real,
-// already-running simulation (PhysicsSystem::Update()) DOES consume
-// DynamicJointSettings, so that branch genuinely live-edits
-// PhysicsSystem's own DynamicChainRigCache.
+// Details of the selected Bone, Rigid Body or Joint. Read-only, except Verlet joints, which edit the live simulation.
 void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCache& rigCache, PhysicsSystem& physicsSystem)
 {
     const Entity owner = ctx.selection.SelectedModelPartEntity();
@@ -157,16 +146,7 @@ void BuildModelPartInspector(Registry& registry, EditorContext& ctx, ModelRigCac
         return;
     }
 
-    // Lets the user get back to the Entity Inspector view (and its "Open
-    // Bone Viewer" button, only reachable from that view - see
-    // InspectorPanel.h's own class comment) without leaving the Bone Viewer
-    // and re-picking the same entity in Hierarchy - see
-    // PHASE0_MASTER_STRATEGY.md's "Revision Notes (v2)", finding #4. Calling
-    // SelectEntity() flips ctx.selection.Kind() to Entity immediately, so
-    // NEXT frame's BuildInspectorPanel() call takes the BuildEntityInspector()
-    // branch instead of this one - this frame still finishes rendering the
-    // Model Part section below unchanged (harmless - Kind() only matters at
-    // the top of BuildInspectorPanel(), already past by the time this runs).
+    // Back to the Entity view without leaving the Bone Viewer; takes effect next frame.
     if (ImGui::Button("Select Owning Entity")) {
         ctx.selection.SelectEntity(owner);
     }
@@ -1597,38 +1577,30 @@ void BuildAssetInspector(EditorContext& ctx, Renderer& renderer, AssetPreviewTex
 
 } // namespace
 
-#if GTE_ENABLE_PROJECT_PANEL
-void BuildInspectorPanel(Registry& registry, EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview,
-    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem,
-    MeshInstantiationSystem& meshInstantiationSystem, ModelRigCache& rigCache)
-#else
-void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& physicsSystem,
-    MeshInstantiationSystem& meshInstantiationSystem)
-#endif
+void InspectorPanel::OnFrame(EditorFrame& frame)
 {
-    ctx.clusterTool.shown = InspectorShownState{};
-    ImGui::Begin("Inspector");
+    frame.ctx.clusterTool.shown = InspectorShownState{};
+}
 
+void InspectorPanel::OnGui(EditorFrame& frame)
+{
+    EditorContext& ctx = frame.ctx;
+    Registry& registry = frame.game.GetRegistry();
+    PhysicsSystem& physicsSystem = frame.game.GetPhysicsSystem();
+    MeshInstantiationSystem& meshInstantiationSystem = frame.game.GetMeshInstantiationSystem();
 #if GTE_ENABLE_PROJECT_PANEL
     if (ctx.selection.Kind() == InspectorSelectionKind::Asset && !ctx.selection.SelectedAssetAbsolutePath().empty()) {
-        BuildAssetInspector(ctx, renderer, assetPreview, assetPreviewMesh, meshInstantiationSystem);
-        ImGui::End();
+        BuildAssetInspector(ctx, frame.renderer, m_assetPreview, m_assetPreviewMesh, meshInstantiationSystem);
         return;
     }
     if (ctx.selection.Kind() == InspectorSelectionKind::ModelPart) {
-        BuildModelPartInspector(registry, ctx, rigCache, physicsSystem);
-        ImGui::End();
+        BuildModelPartInspector(registry, ctx, m_rigCache, physicsSystem);
         return;
     }
-#endif
-
-#if GTE_ENABLE_PROJECT_PANEL
-    BuildEntityInspector(registry, ctx, boneViewer, physicsSystem, meshInstantiationSystem);
+    BuildEntityInspector(registry, ctx, m_boneViewer, physicsSystem, meshInstantiationSystem);
 #else
     BuildEntityInspector(registry, ctx, physicsSystem, meshInstantiationSystem);
 #endif
-
-    ImGui::End();
 }
 
 ClusterBuildStartResult StartInspectorClusterBuild(EditorContext& ctx, const std::string& absolutePath)

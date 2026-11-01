@@ -1,4 +1,4 @@
-#include "SceneLightingPluginPanelModule.h"
+#include "SceneLightingWindow.h"
 
 #include "SceneLightingPanel.h"
 #include "../SceneLightingFeature.h"
@@ -9,7 +9,7 @@
 
 namespace gte {
 
-void SceneLightingPluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/)
+void SceneLightingWindow::OnGui(EditorFrame& /*frame*/)
 {
     SceneLightingSettings edit = m_feature.Settings();
     if (BuildSceneLightingPanel(edit)) {
@@ -18,13 +18,13 @@ void SceneLightingPluginPanelModule::BuildPanel(IPluginPanelDrawContext& /*ctx*/
 }
 
 namespace {
-std::unique_ptr<IEditorPanelModule_v1> CreateSceneLightingPanelModule(
+std::unique_ptr<EditorWindow> CreateSceneLightingWindow(
     IEngineFeatureModule& module, EditorContext&, Renderer&, const rg::RenderGraph&)
 {
-    return std::make_unique<SceneLightingPluginPanelModule>(fx::FeatureOf<SceneLightingFeature>(module));
+    return std::make_unique<SceneLightingWindow>(fx::FeatureOf<SceneLightingFeature>(module));
 }
 } // namespace
 
-GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("SceneLighting", &CreateSceneLightingPanelModule);
+GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("SceneLighting", &CreateSceneLightingWindow);
 
 } // namespace gte

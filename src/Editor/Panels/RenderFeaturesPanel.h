@@ -1,20 +1,16 @@
 #pragma once
 
-#include "../../Core/Plugins/RenderFeatureDebugEntry.h"
-
-#include <vector>
+#include "../EditorWindow.h"
 
 namespace gte {
 
-struct EditorContext;
-class RenderFeatureCompositor;
-
-// Live render-feature authoring window (priority and enabled state).
-// Toggled via EditorContext::renderFeaturesWindowOpen.
-class RenderFeaturesPanel {
+// Render feature priority and enable authoring.
+class RenderFeaturesPanel final : public EditorWindow {
 public:
-    void Build(EditorContext& ctx, const std::vector<RenderFeatureDebugEntry>& renderFeatureEntries,
-        RenderFeatureCompositor* renderFeatureCompositor);
+    RenderFeaturesPanel() : EditorWindow("Render Features", WindowDock::Floating, false, 520.0f, 420.0f) {}
+
+protected:
+    void OnGui(EditorFrame& frame) override;
 };
 
 } // namespace gte

@@ -54,7 +54,6 @@ void DrawStatus(const SsgiViewSnapshot& game)
 bool BuildSsgiPanel(SsgiSettings& edit, const SsgiViewSnapshot& game, const SsgiViewSnapshot& scene)
 {
     bool changed = false;
-    ImGui::Begin("Ssgi");
 
     DrawStatus(game);
 
@@ -100,7 +99,6 @@ bool BuildSsgiPanel(SsgiSettings& edit, const SsgiViewSnapshot& game, const Ssgi
         changed = true;
     }
 
-    ImGui::End();
     return changed;
 }
 

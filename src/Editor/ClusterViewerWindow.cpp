@@ -46,7 +46,10 @@ std::array<float, 16> ToArray(const Mat4& m) noexcept
 
 } // namespace
 
-ClusterViewerWindow::ClusterViewerWindow() = default;
+ClusterViewerWindow::ClusterViewerWindow()
+    : EditorWindow("Cluster Viewer", WindowDock::Floating, false, 1100.0f, 720.0f)
+{
+}
 
 ClusterViewerWindow::~ClusterViewerWindow()
 {
@@ -55,13 +58,16 @@ ClusterViewerWindow::~ClusterViewerWindow()
 
 void ClusterViewerWindow::RequestOpen(const std::string& absoluteGtaPath)
 {
-    m_open = true;
+    if (!IsOpen()) {
+        Show();
+    }
     m_pendingPath = absoluteGtaPath;
 }
 
 void ClusterViewerWindow::Reset()
 {
-    Close();
+    ReleaseGpu();
+    EditorWindow::Close();
     m_pendingPath.clear();
     m_hasLoaded = false;
     m_assetPath.clear();
@@ -80,10 +86,9 @@ void ClusterViewerWindow::CancelGizmo()
     m_gizmoDrawn = false;
 }
 
-void ClusterViewerWindow::Close()
+void ClusterViewerWindow::ReleaseGpu()
 {
     CancelGizmo();
-    m_open = false;
     m_orbiting = false;
     m_panning = false;
     m_valid = false;
@@ -553,7 +558,7 @@ void ClusterViewerWindow::RenderPreview()
 
 std::optional<ClusterViewerResult> ClusterViewerWindow::NotReady(bool needClusterModes) const
 {
-    if (!m_open) {
+    if (!IsOpen()) {
         return MakeError(ClusterViewerError::NotOpen, "the viewer is not open");
     }
     if (m_load.banner == ClusterViewerBanner::NoDeviceSupport) {

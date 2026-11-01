@@ -2,18 +2,8 @@
 
 #include <vector>
 
-// editor-core-separation-6 campaign, PHASE2
-// (PHASE2_PLUGIN_CAPABILITY_ORCHESTRATOR_REGISTRY_AND_RENDER_FEATURE_MIGRATION.md)
-// - RENDER_FEATURE_COMPOSITING_FINDINGS_AND_PROPOSAL_2026-09-25.md Section
-// 3.5: the ONE generic, reusable interface for "when plugins finish
-// loading, let every interested HOST subsystem discover and react to them" -
-// replacing a bespoke, hand-written for-loop per capability kind
-// (IRenderFeatureModule_v1's loop lived inline in Core::LoadPlugins()/
-// Core::RegisterOffscreenRenderPipelineProviders(); IEditorPanelModule_v1's
-// loop lived inline in EditorHost.cpp - see PHASE3 for that migration).
-// This header lives in gte_core (never gte_plugin_abi - it is HOST-internal
-// wiring, never crosses the plugin ABI boundary, so it is free to use
-// std::vector/real gte_core types like rg::RenderPassFrameContext).
+// Generic hook: once plugins finish loading, each registered orchestrator finds and wires up the capability it cares about.
+// Host-internal; it never crosses the plugin ABI boundary.
 
 namespace gte {
 

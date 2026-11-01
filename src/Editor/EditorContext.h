@@ -4,7 +4,6 @@
 #include "ClusterToolUiState.h"
 #include "HizDemoState.h"
 #include "InstanceGridTestSpawner.h"
-#include "PanelVisibility.h"
 #include "Panels/HierarchyRows.h"
 #include "RotationEulerEditCache.h"
 #include "RotationFieldProbe.h"
@@ -54,155 +53,65 @@ struct SceneCameraFrame {
     std::uint64_t selectedId = 0; // selected Camera entity, 0 when none
 };
 
-// Plain shared state passed by reference into every Editor panel and dock-layout function.
-// Only ImGuiEditorLayer and the panel functions it calls touch it, in a fixed order every frame.
+// Plain shared state every editor window and the dock layout can reach through EditorFrame::ctx.
 struct EditorContext {
-    // ImGui-side texture handle of the Game-view texture; created lazily by BuildUI(), read by GamePanel.
+    // ImGui handle of the Game view texture; created lazily by BuildUI(), read by GamePanel.
     UiTextureHandle gameViewDescriptor = UiTextureHandle::Invalid;
 
     // Same for the Scene view, read by ScenePanel.
     UiTextureHandle sceneViewDescriptor = UiTextureHandle::Invalid;
 
-    // Size in pixels of the "Game" panel content last frame; the Game-view texture is resized to it next frame.
+    // Content size in pixels of the Game panel last frame; the Game view texture is resized to it next frame.
     Extent2D desiredExtent{};
 
-    // Same for the "Scene" panel, independent of the Game view.
+    // Same for the Scene panel.
     Extent2D desiredSceneExtent{};
 
-    // True when the panel's ImGui::Begin() returned true last frame (the panel is visible).
-    // A hidden view is not rendered. Starts true so the first frame renders both.
-    bool gameViewVisible = true;
-    bool sceneViewVisible = true;
-
-    // True while a middle (pan) or right (look) drag that started on the Scene image is held.
+    // A Scene camera drag that started over the image keeps going until the button is released.
     bool sceneCameraPanning = false;
     bool sceneCameraRotating = false;
 
-    // The single gate-keeper for every Hierarchy-entity / Project-asset
-    // selection in the Editor (see Selection.h) - HierarchyPanel/
-    // ProjectPanel only ever change what's selected through this object's
-    // own methods (SelectEntity()/SelectAsset()/ClearAssetIfPath()), never
-    // by assigning fields directly, so there is exactly one place in the
-    // codebase that ever writes "the selection changed" - useful right now
-    // for InspectorPanel/ScenePanel to read back, and set up specifically
-    // so a future Command-pattern implementation (undo-able selection
-    // changes) has one obvious choke point to route through instead of
-    // reinventing its own.
+    // The only gate for Hierarchy and Project selection changes (see Selection.h).
     Selection selection;
 
-    // Move / Rotate / Scale choice of the Scene toolbar.
+    // Transform gizmo mode chosen in the Scene panel switcher.
     GizmoOperation gizmoOperation = GizmoOperation::Translate;
 
-    // Set by File > Exit (see DockLayout.cpp's BuildDockspaceAndMenuBar());
-    // read once per frame by ImGuiEditorLayer::WantsExit().
+    // Set by File > Exit; read once per frame by IEditorLayer::WantsExit().
     bool exitRequested = false;
 
-    // Short-lived, colored status feedback for File > Save Scene/Open Scene
-    // (DockLayout.cpp's BuildDockspaceAndMenuBar(), Ctrl+S/Ctrl+O too) -
-    // mirrors ProjectPanel's own private SetStatus()/m_statusMessage
-    // pattern (Panels/ProjectPanel.cpp), just surfaced through EditorContext
-    // instead, since DockLayout.cpp's BuildDockspaceAndMenuBar() is a free
-    // function with no persistent members of its own to keep this in.
-    // Empty means "nothing to show right now".
+    // Colored status line for File > Save/Open Scene. Empty means nothing to show.
     std::string sceneIoStatusMessage;
     bool sceneIoStatusIsError = false;
     std::chrono::steady_clock::time_point sceneIoStatusSetTime;
 
-    // Latches true the first time every one of Hierarchy/Inspector/Scene/
-    // Game is confirmed to have a real dock (see DockLayout.cpp's
-    // BuildDockspaceAndMenuBar() comment for the full one-shot rationale) -
-    // once true, it never touches the docking system again for the rest of
-    // the process, which is what lets the user freely drag/split/undock any
-    // panel afterwards.
+    // True once the first frame decided whether the default dock layout is needed.
     bool dockLayoutEnsured = false;
 
-    // Persisted (across frames AND across selection changes) pixel height
-    // of the Inspector's Unity-style bottom "texture viewer" strip, when the
-    // current Inspector selection is a previewable image/texture asset (see
-    // Panels/InspectorPanel.cpp's BuildAssetInspector()). Deliberately lives
-    // here rather than as InspectorPanel-local state, since InspectorPanel
-    // is a stateless free function (see AGENTS.md, "Editor Module
-    // Structure") - this is its one piece of genuinely cross-frame state,
-    // the same role EditorContext already plays for every other
-    // panel-persisted value above. Adjusted live by dragging the splitter
-    // between the metadata list and the viewer; clamped to sane bounds
-    // every frame in BuildAssetInspector() itself rather than here, since
-    // the valid range depends on the Inspector panel's current on-screen
-    // height, which only BuildAssetInspector() (mid-ImGui-layout) knows.
+    // Height in pixels of the Inspector's bottom texture viewer; kept across selections.
     float inspectorPreviewHeight = 260.0f;
 
-    // True while gameplay simulation is paused: the Pause/Resume button, or the Frame Debugger.
+    // True while gameplay is paused from the toolbar.
     bool playbackPaused = false;
 
-    // True for one frame after "Step" is clicked while paused.
+    // True for the one frame after "Step" is clicked while paused.
     bool stepOneFrameRequested = false;
 
-    // True while the Frame Debugger window is open. The menu item and the title-bar close button write it.
-    bool frameDebuggerWindowOpen = false;
-
-    // True when the floating "Render Graph" window (Panels/RenderGraphPanel.h)
-    // is open. Toggled by "Window > Render Graph" menu item and the window's
-    // own titlebar close button. Defaults to true (always visible on launch).
-    bool renderGraphWindowOpen = true;
-
-    // Which regime the "Render Graph" panel shows. One shared field so a
-    // human's toolbar click and an HTTP command always agree.
+    // Regime the Render Graph window shows; shared by its toolbar and HTTP.
     RenderGraphRegimeChoice renderGraphDisplayedRegime = RenderGraphRegimeChoice::Present;
 
-    // True when the floating "Render Features" window
-    // (Panels/RenderFeaturesPanel.h) is open - GPU-driven-batch culling
-    // readout + render-feature priority/enable authoring, split out of the
-    // Render Graph panel. Toggled by "Window > Render Features" menu item
-    // and the window's own titlebar close button. Defaults to false.
-    bool renderFeaturesWindowOpen = false;
-
-    // Set by the Render Graph panel when a pass toggle flips. The Frame Debugger reads and clears it to capture again.
+    // Set when a pass toggle changed this frame; read and cleared by the Frame Debugger.
     bool renderPassToggleRegistryChangedThisFrame = false;
 
-
-    // editor-core-separation-16 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 2), PHASE4 - true whenever NewProjectWindow.h's floating
-    // window is currently open. Flipped by the new "Project > New
-    // Project..." menu item (DockLayout.cpp) and by the window's own
-    // titlebar [x] close button (ImGui::Begin()'s p_open parameter keeps
-    // both in sync automatically) - mirrors frameDebuggerWindowOpen's own
-    // exact convention immediately above.
+    // True while that dialog is open. Set by the menu or a button, cleared by the dialog.
     bool newProjectWindowOpen = false;
-
-    // editor-core-separation-17 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 3), PHASE4 - true whenever OpenProjectWindow.h's floating
-    // window is currently open. Same open/close convention as
-    // newProjectWindowOpen immediately above.
     bool openProjectWindowOpen = false;
-
-    // editor-core-separation-18 campaign (On-Engine Project Workflow plan,
-    // BIG-STEP 4), PHASE2 - true whenever CreateAssetWindow.h's floating
-    // window (PHASE3) is currently open. Set by ProjectPanel's own new
-    // "[Active Project] <Name>" row's Create submenu (Panels/ProjectPanel.cpp);
-    // read/cleared the same open/close way as newProjectWindowOpen/
-    // openProjectWindowOpen above.
     bool createAssetWindowOpen = false;
 
-    // Which AssetScaffoldKind CreateAssetWindow should scaffold - only
-    // meaningful while createAssetWindowOpen is true; written at the same time
-    // as createAssetWindowOpen, immediately before it's set true, never read
-    // beforehand. Defaulted via static_cast<AssetScaffoldKind>(0) rather than
-    // the enumerator name RenderPass itself, because EditorContext.h only
-    // FORWARD-declares AssetScaffoldKind above (an incomplete type has no
-    // visible enumerators yet) - 0 is correct PROVIDED RenderPass really is
-    // declared first in Core/EditorCapabilities.h's own
-    // `enum class AssetScaffoldKind { RenderPass, ComputeShader, ShaderPair };`
-    // (confirmed - RenderPass is listed first, so its implicit value is 0). If
-    // that enum's ordering is ever changed, this literal must be updated too.
-    AssetScaffoldKind createAssetWindowPendingKind = static_cast<AssetScaffoldKind>(0); // RenderPass
+    // Kind the Create Asset dialog scaffolds. 0 is RenderPass, the first enumerator of AssetScaffoldKind.
+    AssetScaffoldKind createAssetWindowPendingKind = static_cast<AssetScaffoldKind>(0);
 
-    // Short-lived, colored status feedback shared by every "Project"-menu
-    // action this whole 5-file plan adds (New Project this campaign; Open
-    // Project/Compile in later campaigns) - mirrors sceneIoStatusMessage/
-    // sceneIoStatusIsError/sceneIoStatusSetTime's own exact convention
-    // above, just for a different family of actions, so a later campaign's
-    // "Open Project" success/failure toast reuses this SAME field rather
-    // than inventing a third status-toast mechanism.
+    // Colored status line for Project menu actions. Empty means nothing to show.
     std::string projectWorkflowStatusMessage;
     bool projectWorkflowStatusIsError = false;
     std::chrono::steady_clock::time_point projectWorkflowStatusSetTime;
@@ -213,10 +122,10 @@ struct EditorContext {
     // Persistent Inspector state of the cluster and normals tools.
     ClusterToolUiState clusterTool;
 
-    // Mesh and pipeline shared by spawned instance grids; releases them with the editor layer.
+    // Mesh and pipeline shared by spawned instance grids.
     InstanceGridResources instanceGrid;
 
-    // Mesh asset path (UTF-8) the cluster viewer should open; set by a panel, consumed by the editor layer.
+    // Mesh asset path (UTF-8) the Cluster Viewer should open; consumed by ClusterViewerWindow::OnFrame().
     std::string pendingClusterViewerPath;
 
     // Camera overlay state of the Scene panel's last frame.
@@ -224,9 +133,6 @@ struct EditorContext {
 
     // Hierarchy panel state that outlives one frame.
     HierarchyViewState hierarchy;
-
-    // Panels an HTTP caller hid for this session.
-    PanelHiddenFlags hiddenPanels;
 
     // What the Hi-Z demo scene changed, and the menu action waiting for the host (run on the main thread).
     HizDemoState hizDemo;

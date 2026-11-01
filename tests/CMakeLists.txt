@@ -2019,12 +2019,7 @@ Core/ClusterDrawVerbTests.cpp
     # directly and expects it to reach the real Logger ring buffer depends
     # on this file being compiled in.
     Core/LogSinkTests.cpp
-    # editor-core-separation-3 campaign, PHASE4
-    # (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) - replaces the deleted
-    # Editor/EditorPanelCatalogTests.cpp (Core/EditorPanelCatalog.h itself was
-    # deleted this same phase, replaced by this real, runtime-populated
-    # registry). Unconditional, since src/Core/EditorPanelRegistry.h/.cpp is
-    # unconditionally in gte_core's own source list.
+    # The registry is in gte_core; the tests also use the header-only EditorWindow.
     Core/EditorPanelRegistryTests.cpp
     # better-render-pass-2 campaign, PHASE3 (PHASE3_DELETE_ABI_HOST_CODE.md) -
     # Core/PluginRenderFeatureDiagnosticsTests.cpp, Core/FixedBufferReaderTests.cpp,
@@ -2647,6 +2642,7 @@ Editor/RenderGraphDisplayTextTests.cpp
         Editor/SceneOverlayTests.cpp
         Editor/FrustumFromViewProjectionTests.cpp
         Editor/HierarchyRowsTests.cpp
+        Editor/EditorWindowTests.cpp
         Editor/HizDemoLayoutTests.cpp
     )
 
@@ -3019,7 +3015,11 @@ set(GTE_COMMENT_RULE_SRC
     Editor/Panels/HierarchyRows.h Editor/Panels/HierarchyRows.cpp Editor/HierarchyStateReport.h Editor/HierarchyActionRequest.h
     ECS/HierarchySnapshot.h ECS/HierarchySnapshot.cpp ECS/EntityMarkSet.h
     Editor/HizDemoLayout.h Editor/HizDemoLayout.cpp Editor/HizDemoSceneOpener.h Editor/HizDemoSceneOpener.cpp
-    Editor/HizDemoState.h Editor/HizDemoProfile.h Editor/Panels/OverlayLabel.h Editor/PanelVisibility.h
+    Editor/HizDemoState.h Editor/HizDemoProfile.h Editor/Panels/OverlayLabel.h
+    Core/EditorPanelRegistry.h Core/EditorPanelRegistry.cpp Editor/EditorWindow.h Editor/EditorWindow.cpp
+    Editor/EditorFrame.h Editor/EditorContext.h Editor/Panels/GamePanel.h Editor/Panels/GamePanel.cpp
+    Editor/Panels/MemoryPanel.h Editor/Panels/ProfilerPanel.h Editor/Panels/JobsPanel.h Editor/Panels/LogPanel.h
+    Editor/Panels/InspectorPanel.h Editor/Panels/RenderFeaturesPanel.h Editor/Panels/RenderGraphPanel.h
     Editor/SceneIO.cpp Editor/SceneIO.h
     Game/Game.cpp Game/Game.h Game/Instantiation/MeshAssetGpuCatalog.cpp Game/Instantiation/MeshAssetGpuCatalog.h
     Game/Instantiation/MeshInstantiationSystem.cpp Game/Instantiation/MeshInstantiationSystem.h
@@ -3113,6 +3113,7 @@ Core/Plugins/RenderFeatureBlendTests.cpp Tools/CppScannerTests.cpp Tools/HeaderP
     Network/NetworkRoutesInspectorTests.cpp Network/NetworkRoutesClusterViewerTests.cpp
     Editor/HierarchyRowsTests.cpp ECS/HierarchySnapshotTests.cpp ECS/EntityMarkSetTests.cpp Scene/SceneHierarchyBulkTests.cpp
     Editor/HizDemoLayoutTests.cpp
+    Core/EditorPanelRegistryTests.cpp Editor/EditorWindowTests.cpp
     Network/NetworkRoutesSceneCameraTests.cpp
     Core/ClusterClaimTests.cpp Core/ClusterPartSkipTests.cpp Core/Plugins/RenderFeatureCompositorOpaqueTests.cpp Core/ClusterCandidatesTests.cpp
     Core/ClusterDrawStateTests.cpp Core/ClusterDrawVerbTests.cpp

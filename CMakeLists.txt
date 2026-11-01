@@ -768,11 +768,7 @@ add_library(gte_core STATIC
     # src/Application/*.cpp bridge above.
     src/Application/ProjectAssemblyHotReloadCommandBridge.h
     src/Application/ProjectAssemblyHotReloadCommandBridge.cpp
-    # editor-core-separation-3 campaign, PHASE4
-    # (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) - EditorPanelRegistry,
-    # replacing EditorPanelCatalog.h's former fixed kKnownEditorPanelNames[]
-    # array with a real, runtime-populated registry (built-in panels PLUS
-    # every loaded plugin's own IEditorPanelModule_v1::GetPanelName()).
+    # Registry of every editor window (name -> pointer). Core never calls into a window.
     src/Core/EditorPanelRegistry.h
     src/Core/EditorPanelRegistry.cpp
     # editor-core-separation-1 campaign, PHASE9 (PHASE9_CMAKE_TARGET_SPLIT.md,
@@ -1326,6 +1322,9 @@ add_library(gte_editor STATIC
     src/Editor/SceneCameraFrustum.cpp
     src/Editor/BuiltinFeatureEditorPanelRegistry.h
     src/Editor/BuiltinFeatureEditorPanelRegistry.cpp
+    src/Editor/EditorFrame.h
+    src/Editor/EditorWindow.h
+    src/Editor/EditorWindow.cpp
     src/Editor/EditorContext.h
     src/Editor/RenderGraphRegimeChoice.h
     src/Editor/ProjectRootPath.h
@@ -1530,13 +1529,6 @@ add_library(gte_editor STATIC
     src/Editor/Panels/LogPanel.cpp
     src/Editor/Panels/FrameDebuggerPanel.h
     src/Editor/Panels/FrameDebuggerPanel.cpp
-    # editor-core-separation-3 campaign, PHASE4
-    # (PHASE4_EDITOR_PANEL_CAPABILITY_AND_REGISTRY.md) -
-    # PluginPanelDrawContextAdapter, gte_editor's own implementation of
-    # IPluginPanelDrawContext, closing the ImGui-shared-global-context hazard
-    # (PHASE0_MASTER_STRATEGY.md, Step 2.4).
-    src/Editor/Plugins/PluginPanelDrawContextAdapter.h
-    src/Editor/Plugins/PluginPanelDrawContextAdapter.cpp
     src/Editor/ImGuiEditorLayer.cpp
 )
 

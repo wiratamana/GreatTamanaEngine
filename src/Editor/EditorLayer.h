@@ -5,7 +5,6 @@
 #include "HierarchyStateReport.h"
 #include "HizDemoState.h"
 #include "MouseInjection.h"
-#include "PanelVisibility.h"
 #include "RotationFieldProbe.h"
 
 #include "../Assets/MeshClusterOptions.h"
@@ -258,9 +257,8 @@ public:
     // Read-and-clear: true once per "Step" click. Called every frame so a stale request is drained.
     virtual bool TryConsumeStepRequest() = 0;
 
-    // Brings the named panel's tab to the front. The caller validates `panelName`.
-    // Returns tabExists == false if no live window has that name this frame.
-    // Call between NewFrame() and BuildUI() of the same frame.
+    // Opens the named window, raises it and centers it when it floats. The caller validates `panelName`.
+    // Returns tabExists == false when no window has that name. Call between NewFrame() and BuildUI() of the same frame.
     virtual TabActivationResult ActivateTab(const std::string& panelName) = 0;
 
     // Imports one external file into the Project folder at `destinationRelativeFolder` ("" = root).
@@ -283,8 +281,7 @@ public:
     // Core calls this when the offscreen build threw. Fails a capture request that is in flight.
     virtual void FrameDebuggerNotifyOffscreenFailed() = 0;
 
-    // Opens the Frame Debugger window (idempotent) and pins it to the main viewport for that opening,
-    // so GET /get_swapchain can see it immediately.
+    // Opens the Frame Debugger window (idempotent).
     virtual void FrameDebuggerOpenWindow() = 0;
 
     // Mirrors the Enable checkbox, and opens the window when enabling.
@@ -360,8 +357,8 @@ public:
     // `editorAvailable` is false for NullEditorLayer.
     virtual HierarchyStateReport HierarchyState(Game& game, std::uint64_t first, std::uint64_t count) const = 0;
 
-    // Hides or shows a panel for this session. Returns false for NullEditorLayer (no panels).
-    virtual bool SetPanelHidden(TogglePanel panel, bool hidden) = 0;
+    // Opens (Show) or closes the registered editor window with this exact name. Returns false for NullEditorLayer.
+    virtual bool SetWindowOpen(const std::string& name, bool open) = 0;
 
     // Runs one Hierarchy edit through the same code as a mouse drop or arrow click and reports the rows around the target.
     // `editorAvailable` is false for NullEditorLayer.

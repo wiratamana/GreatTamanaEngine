@@ -23,8 +23,9 @@ ClusterViewSlot ToSlot(ClusterViewerImageTarget target) noexcept
 
 ClusterViewerResult ClusterViewerWindow::Open(Renderer& renderer, const std::string& absolutePath)
 {
-    m_open = true;
-    m_closeRequested = false;
+    if (!IsOpen()) {
+        Show();
+    }
     m_pendingPath.clear();
     LoadMesh(renderer, absolutePath);
     if (!m_valid) {
@@ -39,7 +40,7 @@ ClusterViewerResult ClusterViewerWindow::Open(Renderer& renderer, const std::str
 ClusterViewerReport ClusterViewerWindow::Report() const
 {
     ClusterViewerReport report;
-    report.open = m_open;
+    report.open = IsOpen();
     report.path = m_assetPath;
     report.valid = m_valid;
     report.clusterPathSupported = !m_rendererFailed && m_load.banner != ClusterViewerBanner::NoDeviceSupport;
@@ -126,7 +127,7 @@ ClusterViewerReport ClusterViewerWindow::Report() const
 
 ClusterViewerResult ClusterViewerWindow::Set(std::span<const KeyValue> pairs)
 {
-    if (!m_open) {
+    if (!IsOpen()) {
         return MakeError(ClusterViewerError::NotOpen, "the viewer is not open");
     }
     std::vector<ClusterViewerKeyValue> parsed;

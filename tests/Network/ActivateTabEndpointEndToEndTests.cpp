@@ -1,29 +1,9 @@
-// End-to-end tests for GET /activate_tab and GET /list_tabs - network-impl-7
-// campaign, Phase 5 (PHASE5_TESTING_DOCS_AND_REGRESSION_SAFETY.md, Step 3.1).
-// Mirrors tests/Network/EngineCommandEndpointsEndToEndTests.cpp's own proven
-// shape exactly: a real gte::EditorUiCommandBridge + a real
-// gte::Network::NetworkServer, wired together exactly like gte::Application
-// does in production, hit over a REAL loopback socket via httplib::Client -
-// with a FAKE, ImGui-free stand-in (FakeEditorUiStandIn, below) standing in
-// for Application::Run()'s real per-frame TryPeekPendingCommand()/
-// FulfillCommand(id, result) calls (and, transitively, for IEditorLayer::ActivateTab()
-// itself).
-//
-// There is no live Application/ImGui context/window anywhere in this file -
-// per this codebase's established "Tier 2, no automated coverage yet"
-// acceptance for anything genuinely ImGui/GPU-window-dependent (AGENTS.md,
-// "Testability & Regression Safety"), the real ImGui docking mechanism
-// (IEditorLayer::ActivateTab()'s ImGuiEditorLayer implementation) stays
-// covered by Phase 2's own manual smoke test plus this phase's own Section
-// 3.6 live runtime smoke test (see PHASE5_COMPLETION_REPORT.md). What IS
-// tested here, for real, is everything this campaign actually invented that
-// ISN'T ImGui/window plumbing: the EditorUiCommandBridge <-> NetworkServer
-// cross-thread handshake, the HTTP status-code mapping (200/400/404/503/504),
-// the 404-short-circuits-before-touching-the-bridge ordering rule, and the
-// real JSON request/response bodies round-tripping over a real socket.
+// End-to-end tests for GET /activate_tab and GET /list_tabs over a real loopback socket.
+// A fake stand-in drains the EditorUiCommandBridge in place of the editor layer, so no ImGui is involved.
 
 #include "Application/EditorUiCommandBridge.h"
 #include "Core/EditorPanelRegistry.h"
+#include "Editor/EditorWindow.h"
 #include "Network/NetworkServer.h"
 
 #include "NetworkTestHelpers.h"
@@ -40,20 +20,12 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace gte {
 namespace {
 
-// The ImGui-free stand-in for Application::Run()'s real per-frame Editor UI
-// command drain (see this phase document's own Step 3.1). A tight polling
-// loop on its own dedicated thread that fulfills any pending request with a
-// configurable, pre-set ActivateTabOutcome - deliberately NOT trying to
-// replicate IEditorLayer::ActivateTab()'s real ImGui-docking behavior (that
-// stays Phase 2's own manual-only verification) - this stand-in only needs
-// to prove the HTTP <-> bridge <-> "main thread" wiring itself works, the
-// same "deliberately NOT trying to replicate the real logic" philosophy
-// EngineCommandEndpointsEndToEndTests.cpp's own FakeEngineCommandStandIn
-// already establishes.
+// Fulfills every pending bridge request with a preset outcome on its own thread.
 class FakeEditorUiStandIn {
 public:
     explicit FakeEditorUiStandIn(EditorUiCommandBridge& bridge)
@@ -73,15 +45,10 @@ public:
     FakeEditorUiStandIn(const FakeEditorUiStandIn&) = delete;
     FakeEditorUiStandIn& operator=(const FakeEditorUiStandIn&) = delete;
 
-    // Gating (mirrors FakeMainThreadStandIn::SetGated in
-    // CaptureEndpointsEndToEndTests.cpp / FakeEngineCommandStandIn::SetGated
-    // in EngineCommandEndpointsEndToEndTests.cpp) is what lets a request stay
-    // genuinely pending on purpose - used by the timeout test below.
+    // While gated, requests stay pending (used by the timeout test).
     void SetGated(bool gated) { m_gated.store(gated); }
 
-    // Configures what the NEXT fulfilled request will report - defaults to
-    // { success: true, tabExists: true } (the common "tab found and
-    // focused" happy path), overridden per-test as needed.
+    // Outcome reported for the next fulfilled request. Defaults to success with an existing tab.
     void SetNextOutcome(bool success, bool tabExists)
     {
         std::lock_guard<std::mutex> lock(m_outcomeMutex);
@@ -119,22 +86,25 @@ private:
     std::thread m_thread;
 };
 
-// A real gte::EditorUiCommandBridge + a real gte::Network::NetworkServer
-// (captureBridge/commandBridge deliberately left nullptr - these two routes
-// never touch either), started on an ephemeral port, wired together exactly
-// like gte::Application does in production.
+class ListTabsProbeWindow final : public EditorWindow {
+public:
+    ListTabsProbeWindow() : EditorWindow("Test_ListTabs_Panel_Omega", WindowDock::Bottom) {}
+
+protected:
+    void OnGui(EditorFrame& /*frame*/) override {}
+};
+
+struct ListTabsProbeRegistration {
+    ListTabsProbeWindow window;
+    ListTabsProbeRegistration() { RegisterEditorWindow(window); }
+    ~ListTabsProbeRegistration() { UnregisterEditorWindow(window); }
+};
+
+// A real bridge and a real NetworkServer on an ephemeral port, wired like the application does.
 class ActivateTabEndpointEndToEndTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        // editor-core-separation-3 campaign, PHASE4 - this test binary never
-        // constructs a real EditorHost, so EditorPanelRegistry is never
-        // seeded with the real built-in panel names the way production does
-        // (EditorHost.cpp's own registration call) - registering "Profiler"
-        // here (idempotent to re-register across multiple SetUp() calls -
-        // IsKnownName()/GET /list_tabs both tolerate a duplicate entry fine)
-        // is what every test below that activates "Profiler" now needs.
-        EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Profiler");
         m_standIn = std::make_unique<FakeEditorUiStandIn>(m_bridge);
         m_server = std::make_unique<Network::NetworkServer>(nullptr, nullptr, &m_bridge);
         m_server->Start(0);
@@ -194,16 +164,7 @@ TEST_F(ActivateTabEndpointEndToEndTest, ActivateTabReturns400ForMissingName)
 
 TEST_F(ActivateTabEndpointEndToEndTest, ActivateTabReturns504WhenNeverFulfilled)
 {
-    // Per this phase document's own precedent
-    // (EngineCommandEndpointsEndToEndTests.cpp's own
-    // TimedOutSubmissionIsWhatTheHttpRouteMapsToA504): never wait out
-    // EditorUiCommandBridge's real 3-second default production timeout over
-    // a real HTTP round trip - call SubmitAndWait() directly with a per-call
-    // SHORT override instead, bypassing HTTP entirely. This is still a full,
-    // honest regression proof of the exact behavior the HTTP route forwards
-    // verbatim (see NetworkServer.cpp's "/activate_tab" handler) - timedOut
-    // -> HTTP 504 - without needing a slow, real ~3-second round trip in the
-    // test suite.
+    // Calls SubmitAndWait() with a short timeout directly, so the test does not wait out the 3 s production timeout.
     m_standIn->SetGated(true);
 
     EditorUiCommandRequest request;
@@ -218,16 +179,10 @@ TEST_F(ActivateTabEndpointEndToEndTest, ActivateTabReturns504WhenNeverFulfilled)
     m_standIn->SetGated(false);
 }
 
-// editor-core-separation-3 campaign, PHASE4 - Core/EditorPanelCatalog.h's
-// former compile-time-fixed kKnownEditorPanelNames[]/kKnownEditorPanelNameCount
-// are gone, replaced by EditorPanelRegistry (a runtime-populated registry) -
-// this test now proves GET /list_tabs genuinely reflects the registry's own
-// LIVE state (registering one uniquely-named test-only panel first, so this
-// proves real, generic behavior rather than a fixed expected list) instead of
-// asserting against a compile-time constant that no longer exists.
+// GET /list_tabs reflects the live registry.
 TEST_F(ActivateTabEndpointEndToEndTest, ListTabsReturnsEveryRegisteredPanelName)
 {
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Test_ListTabs_Panel_Omega");
+    ListTabsProbeRegistration probe;
 
     const httplib::Result res = m_client->Get("/list_tabs");
 
@@ -250,14 +205,10 @@ TEST_F(ActivateTabEndpointEndToEndTest, ListTabsReturnsEveryRegisteredPanelName)
     EXPECT_TRUE(foundTestPanel);
 }
 
-// A real (non-nullptr) EditorUiCommandBridge with NO FakeEditorUiStandIn
-// servicing it at all - proving ParseActivateTabQuery()'s own pre-validation
-// really does short-circuit an unknown tab name BEFORE ever touching the
-// bridge (a 404 that returns instantly, never waiting on a bridge that will
-// never be fulfilled).
+// An unknown name must answer 404 at once, without touching a bridge that nothing services.
 TEST(ActivateTabEndpointNoStandInTests, ActivateTabReturns404ForAnUnknownNameWithoutTouchingTheBridge)
 {
-    EditorUiCommandBridge bridge; // Real, non-null - but nothing ever services it.
+    EditorUiCommandBridge bridge;
     Network::NetworkServer server(nullptr, nullptr, &bridge);
     server.Start(0);
     ASSERT_TRUE(server.IsRunning());
@@ -272,26 +223,15 @@ TEST(ActivateTabEndpointNoStandInTests, ActivateTabReturns404ForAnUnknownNameWit
     EXPECT_EQ(res->status, 404);
     const nlohmann::json parsed = nlohmann::json::parse(res->body);
     EXPECT_EQ(parsed["success"], false);
-    // Must have returned promptly - well before the bridge's own default
-    // production timeout - proving this never actually waited on the bridge
-    // at all.
     EXPECT_LT(elapsed, std::chrono::milliseconds(1000));
 
     server.Stop();
 }
 
-// A NetworkServer constructed with uiCommandBridge == nullptr (mirrors
-// production's own "no editor-UI-touching routes wired up" contract, see
-// NetworkServer.h's own constructor doc comment) must respond 503 for
-// GET /activate_tab with a KNOWN name, rather than crashing.
+// A server without an editor UI bridge answers 503 for a known name instead of crashing.
 TEST(ActivateTabEndpointNullBridgeTests, ActivateTabReturns503WhenBridgeIsNull)
 {
-    // editor-core-separation-3 campaign, PHASE4 - "Profiler" must be a known
-    // name for this test to correctly exercise the null-bridge 503 path
-    // (rather than a 404 short-circuit) - see this file's own fixture SetUp()
-    // comment above for why this registration is needed at all now.
-    EditorPanelRegistry::Instance().RegisterBuiltinPanelName("Profiler");
-    Network::NetworkServer server; // captureBridge/commandBridge/uiCommandBridge all default to nullptr.
+    Network::NetworkServer server;
     server.Start(0);
     ASSERT_TRUE(server.IsRunning());
     httplib::Client client("127.0.0.1", server.BoundPort());
@@ -307,11 +247,7 @@ TEST(ActivateTabEndpointNullBridgeTests, ActivateTabReturns503WhenBridgeIsNull)
     server.Stop();
 }
 
-// The ordering-regression case Phase 4's own tests/Network/NetworkServerTests.cpp
-// already covers directly against RegisterRoutes() - re-proven here as a full
-// HTTP round trip too: an UNKNOWN name must still be 404, never 503, even
-// with a nullptr bridge - proving the "notFound checked before the
-// nullptr-bridge check" ordering rule holds through the real route handler.
+// An unknown name is a 404, never a 503, even with a null bridge.
 TEST(ActivateTabEndpointNullBridgeTests, ActivateTabReturns404NotServiceUnavailableForUnknownNameEvenWithNullBridge)
 {
     Network::NetworkServer server;

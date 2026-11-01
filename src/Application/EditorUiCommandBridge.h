@@ -9,7 +9,6 @@
 #include "../Editor/HierarchyActionRequest.h"
 #include "../Editor/HierarchyStateReport.h"
 #include "../Editor/MouseInjection.h"
-#include "../Editor/PanelVisibility.h"
 #include "../Editor/RotationFieldProbe.h"
 #include "../Editor/SceneCameraControl.h"
 
@@ -43,9 +42,9 @@ struct HierarchyStateCommand {
     std::uint32_t count = 200;
 };
 
-// Plain request payload for one PanelVisible command.
+// Plain request payload for one PanelVisible command: `name` is a registered window name.
 struct PanelVisibleCommand {
-    TogglePanel panel = TogglePanel::Hierarchy;
+    std::string name;
     bool visible = true;
 };
 
@@ -131,13 +130,8 @@ struct EditorUiCommandRequest {
     HierarchyActionCommand hierarchyAction;
 };
 
-// Outcome of one ActivateTab command.
-// - success == true                        -> tab found and focused
-// - success == false && tabExists == false  -> no live ImGui window with
-//                                              that exact name existed this
-//                                              frame
-// A name not in the known tab list is rejected before ever reaching this
-// bridge - this outcome type has no field for that case.
+// Outcome of one ActivateTab command. `tabExists` is false when the editor has no window with that name.
+// A name unknown to the registry is rejected before it reaches this bridge.
 struct ActivateTabOutcome {
     bool success = false;
     bool tabExists = false;

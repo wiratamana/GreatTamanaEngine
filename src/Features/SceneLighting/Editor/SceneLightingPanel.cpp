@@ -31,7 +31,6 @@ bool EditColor(const char* label, float& r, float& g, float& b)
 bool BuildSceneLightingPanel(SceneLightingSettings& edit)
 {
     bool changed = false;
-    ImGui::Begin("SceneLighting");
 
     ImGui::SeparatorText("Debug");
     int view = static_cast<int>(edit.materialDebugView);
@@ -50,7 +49,6 @@ bool BuildSceneLightingPanel(SceneLightingSettings& edit)
         changed = true;
     }
 
-    ImGui::End();
     return changed;
 }
 

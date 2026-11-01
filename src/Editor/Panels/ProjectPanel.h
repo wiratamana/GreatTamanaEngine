@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../EditorWindow.h"
 #include "../ProjectPanelData.h"
 #include "../ProjectScanRunner.h"
 #include "../../Assets/AssetImporter.h"
@@ -13,14 +14,11 @@ namespace gte {
 
 struct EditorContext;
 
-// Two-pane "Project" panel: folder tree left, open folder right; imports files dropped from the OS.
+// Two-pane Project window: folder tree left, open folder right; imports files dropped from the OS.
 // Scans on a job worker, only while visible. Compiled only when GTE_ENABLE_PROJECT_PANEL is ON.
-class ProjectPanel {
+class ProjectPanel final : public EditorWindow {
 public:
     ProjectPanel();
-
-    // Builds the ImGui window. Call once per frame; selecting an entry writes ctx.selection.
-    void Build(EditorContext& ctx);
 
     // Imports a file or folder dropped from the OS at absolute desktop (screenX, screenY).
     // Drops outside both panes are ignored; names never overwrite; failures show as a status line.
@@ -32,6 +30,11 @@ public:
         const std::filesystem::path& sourceAbsolutePath, const std::string& destinationRelativeFolder);
 
     const std::filesystem::path& GetRootPath() const noexcept { return m_rootPath; }
+
+protected:
+    void OnFrame(EditorFrame& frame) override;
+    void OnGui(EditorFrame& frame) override;
+    void OnHidden(EditorFrame& frame) override;
 
 private:
     // Applies a finished scan, then starts the next one when due. Main thread, visible panel only.
@@ -78,7 +81,7 @@ private:
     Rect m_leftPaneRect;
     Rect m_rightPaneRect;
 
-    bool m_panelVisible = false;
+    bool m_shownLastFrame = false; // Rescan when the window is shown again after a hidden period.
 
     // Short-lived status line; clears itself after a few seconds.
     std::string m_statusMessage;

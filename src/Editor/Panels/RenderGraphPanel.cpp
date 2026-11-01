@@ -1,6 +1,7 @@
 #include "RenderGraphPanel.h"
 
 #include "../EditorContext.h"
+#include "../EditorFrame.h"
 #include "../EditorGpuMemoryNameOverlay.h"
 #include "../MemoryPanelData.h"
 #include "../ProfilerPanelData.h"
@@ -94,26 +95,20 @@ void CollectResourceResolutionText(const rg::RenderGraphRegimeMetadata& regime, 
 
 } // namespace
 
-void RenderGraphPanel::Build(
-    EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph, rg::RenderPassToggleRegistry& renderPassToggleRegistry)
+void RenderGraphPanel::OnFrame(EditorFrame& frame)
 {
-    if (!ctx.renderGraphWindowOpen) {
-        // Part 4.6 edge case - the window closed (titlebar [x], or the
-        // "Window > Render Graph" menu item) while isolating a pass: restore
-        // every saved toggle state before returning, exactly like the
-        // "Exit Isolation" button press does. Isolation must never silently
-        // leak into a closed window's state.
-        if (m_isolatedPass.has_value()) {
-            ToggleIsolatePass(*m_isolatedPass, renderPassToggleRegistry);
-        }
-        return;
+    // A window closed while a pass is isolated gives every saved toggle state back.
+    if (!IsOpen() && m_isolatedPass.has_value()) {
+        ToggleIsolatePass(*m_isolatedPass, frame.renderPassToggleRegistry);
     }
+}
 
-    ImGui::SetNextWindowSize(ImVec2(1100.0f, 700.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Render Graph", &ctx.renderGraphWindowOpen)) {
-        ImGui::End();
-        return;
-    }
+void RenderGraphPanel::OnGui(EditorFrame& frame)
+{
+    EditorContext& ctx = frame.ctx;
+    Renderer& renderer = frame.renderer;
+    const rg::RenderGraph& renderGraph = frame.renderGraph;
+    rg::RenderPassToggleRegistry& renderPassToggleRegistry = frame.renderPassToggleRegistry;
 
     if (!m_paused || m_forceSingleCapture) {
         m_frozenMetadata = rg::BuildRenderGraphMetadata(
@@ -134,9 +129,7 @@ void RenderGraphPanel::Build(
     const std::vector<RenderGraphGroupedPass> grouped = GroupPassMetadataByName(regime.passes);
     const GraphLayout layout = ComputeGraphLayout(regime);
 
-    // Snapshotted BEFORE any checkbox-drawing section below runs this frame,
-    // compared again AFTER the whole body - so a toggle flip anywhere (Pass
-    // Tree or Isolate Pass) is never missed.
+    // Compared again after the body, so a toggle flip anywhere in it is caught.
     const std::vector<rg::RenderPassToggleState> toggleStatesBefore = renderPassToggleRegistry.ListAll();
 
     BuildToolbar(ctx, regime);
@@ -144,9 +137,7 @@ void RenderGraphPanel::Build(
 
     const float bodyHeight = ImGui::GetContentRegionAvail().y - m_timelineHeight;
     ImGui::BeginChild("RenderGraphBody", ImVec2(0.0f, bodyHeight), false);
-    // Clamp both splitters so neither pane can be dragged to zero/negative
-    // width, and the center canvas always keeps a minimum width too - each
-    // pane's own bound accounts for the OTHER pane's current width.
+    // Each splitter is clamped so no pane collapses and the canvas keeps a minimum width.
     const float totalAvailWidth = ImGui::GetContentRegionAvail().x;
     const float maxLeftPaneWidth =
         std::max(kMinPaneWidth, totalAvailWidth - m_rightPaneWidth - kMinCanvasWidth - 2.0f * kSplitterWidth);
@@ -196,15 +187,13 @@ void RenderGraphPanel::Build(
     ImGui::BeginChild("Timeline", ImVec2(0.0f, m_timelineHeight), true);
     BuildTimeline(regime);
     ImGui::EndChild();
-
-    ImGui::End();
 }
 
 void RenderGraphPanel::BuildToolbar(EditorContext& ctx, const rg::RenderGraphRegimeMetadata& regime)
 {
     if (ImGui::Button("Capture Frame")) {
         m_forceSingleCapture = true;
-        m_paused = false; // Let Build() take one fresh snapshot this frame, then re-freeze.
+        m_paused = false; // OnGui() takes one fresh snapshot this frame, then re-freezes.
     }
     ImGui::SameLine();
     ImGui::Checkbox("Pause", &m_paused);
@@ -288,11 +277,7 @@ void RenderGraphPanel::BuildPassTree(
         liveByName[row.name] = &row;
     }
 
-    // Every known pass, always visible - grouped directly off the toggle
-    // registry's own sticky owningFeatureName field (set once, the instant
-    // a pass is first declared, for the rest of the process's life) -
-    // never by snapshot presence. `toggles.ListAll()` already includes
-    // every pass ever declared or ever mutated this session.
+    // Every known pass, grouped by its owning feature; never filtered by snapshot presence.
     std::unordered_map<std::string, std::vector<rg::RenderPassToggleState>> byGroup;
     for (const rg::RenderPassToggleState& state : toggles.ListAll()) {
         const auto liveIt = liveByName.find(state.name);
@@ -314,9 +299,7 @@ void RenderGraphPanel::BuildPassTree(
         byGroup[state.owningFeatureName].push_back(state);
     }
 
-    // Sorted heading order - deterministic, independent of unordered_map's
-    // own bucket layout (which otherwise could visibly jitter row order
-    // between sessions for no reason).
+    // Sorted so the heading order is stable.
     std::vector<std::string> headings;
     headings.reserve(byGroup.size());
     for (const auto& entry : byGroup) {
@@ -335,8 +318,7 @@ void RenderGraphPanel::BuildPassTree(
     }
 }
 
-// One row for one pass, in every case - no parallel "disabled row"
-// function. Checkbox always reflects the registry's own real flag.
+// One row per pass; the checkbox always shows the registry's own flag.
 void RenderGraphPanel::DrawPassTreeRow(const rg::RenderPassToggleState& state,
     const RenderGraphGroupedPass* liveRow, rg::RenderPassToggleRegistry& toggles)
 {
@@ -631,8 +613,7 @@ void RenderGraphPanel::BuildInspector(const rg::RenderGraphRegimeMetadata& regim
     }
 }
 
-// Reversible mass-disable: reuses the existing, already-correct toggle
-// registry. No new mechanism, no new HTTP route, no new engine state.
+// Disables every pass but one; a second call on the same pass restores the saved toggle states.
 void RenderGraphPanel::ToggleIsolatePass(const std::string& passName, rg::RenderPassToggleRegistry& toggles)
 {
     if (m_isolatedPass.has_value() && *m_isolatedPass == passName) {
@@ -653,10 +634,7 @@ void RenderGraphPanel::ToggleIsolatePass(const std::string& passName, rg::Render
     m_isolatedPass = passName;
 }
 
-// This engine's RenderGraphResourcePool only reuses a pool entry across
-// FRAMES when a new request matches an identical TextureDesc/BufferDesc -
-// it does NOT alias two differently-shaped resources within one frame.
-// Label it honestly; never draw this as cross-pass aliasing.
+// The resource pool only reuses entries across frames; it never aliases resources within one frame.
 void RenderGraphPanel::BuildTimeline(const rg::RenderGraphRegimeMetadata& regime)
 {
     DrawTimelineTrack("Graphics Track", regime, "Graphics");
@@ -746,11 +724,7 @@ void RenderGraphPanel::RequestTexturePreview(
     }
 }
 
-// Reuses the existing central GpuMemoryTracker (via Renderer::GetMemoryResources())
-// - the same data the "Memory" panel already reads. No parallel tracker, no
-// new bookkeeping. Linear scan over a tracker that holds, at most, a few
-// hundred live GPU resources, called once per selected-pass-inspector-frame
-// (not per resource per node per frame) - cache-irrelevant, not a hot path.
+// Linear scan of the renderer's GPU memory tracker; only runs for the selected pass.
 std::optional<uint64_t> RenderGraphPanel::LookupTrackedResourceSizeByName(
     const std::string& resourceName, Renderer& renderer) const
 {

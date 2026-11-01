@@ -1,6 +1,5 @@
 #include "AtmospherePanel.h"
 
-#include "../../../Editor/EditorContext.h"
 #include "../AtmosphereParameters.h"
 #include "../AtmosphereTypes.h"
 
@@ -8,10 +7,9 @@
 
 namespace gte {
 
-bool BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& edit, const AtmosphereAerialSnapshot& effective)
+bool BuildAtmospherePanel(AtmosphereSettings& edit, const AtmosphereAerialSnapshot& effective)
 {
     bool changed = false;
-    ImGui::Begin("Atmosphere");
 
     ImGui::TextDisabled("Physical sky atmosphere controls.");
 
@@ -68,7 +66,6 @@ bool BuildAtmospherePanel(EditorContext& /*ctx*/, AtmosphereSettings& edit, cons
         "right-click > \"Create Directional Light\", then edit its Transform/DirectionalLight in \"Inspector\". "
         "Color and illuminance describe the sun straight overhead.");
 
-    ImGui::End();
     return changed;
 }
 

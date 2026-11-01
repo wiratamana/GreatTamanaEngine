@@ -19,9 +19,9 @@
 #include "NewProjectWindow.h"
 #include "OpenProjectWindow.h"
 #include "CreateAssetWindow.h"
-#include "Plugins/PluginPanelDrawContextAdapter.h"
+#include "EditorFrame.h"
+#include "EditorWindow.h"
 #include "../Core/EditorPanelRegistry.h"
-#include "../Core/EditorPanelModule.h"
 #include "Panels/FrameDebuggerPanel.h"
 #include "Panels/GamePanel.h"
 #include "Panels/HierarchyPanel.h"
@@ -109,6 +109,9 @@ public:
             ImGuiStyle& style = ImGui::GetStyle();
             style.WindowRounding = 0.0f;
             style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+            // No tab-list/collapse triangle and no "close all tabs" X on a dock node. Windows close from their own tab menu or title bar.
+            style.WindowMenuButtonPosition = ImGuiDir_None;
+            style.DockingNodeHasCloseButton = false;
         }
 
         // The default ImGui font has no CJK glyphs. Try the CJK fonts Windows ships (none is bundled), else keep
@@ -173,10 +176,16 @@ public:
                 return ImGui_ImplVulkan_AddTexture(sampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             },
             [](VkDescriptorSet set) { ImGui_ImplVulkan_RemoveTexture(set); });
+
+        ForEachBuiltinWindow([](EditorWindow& window) { RegisterEditorWindow(window); });
     }
 
     ~ImGuiEditorLayer() override
     {
+        ForEachBuiltinWindow([](EditorWindow& window) { UnregisterEditorWindow(window); });
+        for (const std::unique_ptr<EditorWindow>& window : m_featureWindows) {
+            UnregisterEditorWindow(*window);
+        }
         ImGui::SetCurrentContext(m_context);
 
         // The GPU must be done with anything ImGui's Vulkan backend (or our own AddTexture() descriptors)
@@ -256,7 +265,7 @@ public:
     RenderTexture* PrimaryViewTarget() override
     {
         // The Frame Debugger needs the Game view rendered even when its tab is hidden.
-        if (!m_ctx.gameViewVisible && !m_frameDebuggerPanel.IsCaptureArmed(m_ctx)) {
+        if (!m_gamePanel.IsVisible() && !m_frameDebuggerPanel.IsCaptureArmed()) {
             return nullptr;
         }
 
@@ -286,7 +295,7 @@ public:
     RenderTexture* SecondaryViewTarget() override
     {
         // Same visibility gating and resize-on-demand as PrimaryViewTarget().
-        if (!m_ctx.sceneViewVisible) {
+        if (!m_scenePanel.IsVisible()) {
             return nullptr;
         }
 
@@ -338,15 +347,12 @@ public:
     {
         ImGui::SetCurrentContext(m_context);
 
-        Registry& registry = game.GetRegistry();
-
         {
             GTE_PROFILE_SCOPE("Panel.DockspaceAndMenuBar");
             BuildDockspaceAndMenuBar(m_ctx, game, renderer, m_hotReloadDebugCapability, sceneServicesSetLayout);
         }
 
-        // New/Open Project and Create Asset windows are available in every build, regardless of
-        // GTE_ENABLE_PROJECT_PANEL.
+        // New/Open Project and Create Asset are dialogs, not windows: they are not in the registry or the Window menu.
         {
             GTE_PROFILE_SCOPE("Panel.ProjectWindows");
             m_newProjectWindow.Build(m_ctx, m_projectLifecycleCapability);
@@ -371,91 +377,17 @@ public:
                 m_lastKnownSceneView = sceneSource->View();
             }
         }
-        BuildHierarchyPanel(game, renderer, m_ctx, sceneServicesSetLayout);
-        {
-            GTE_PROFILE_SCOPE("Panel.Inspector");
-#if GTE_ENABLE_PROJECT_PANEL
-            BuildInspectorPanel(registry, m_ctx, renderer, m_assetPreview, m_assetPreviewMesh, m_boneViewer,
-                game.GetPhysicsSystem(), game.GetMeshInstantiationSystem(), m_modelRigCache);
-#else
-            BuildInspectorPanel(registry, m_ctx, game.GetPhysicsSystem(), game.GetMeshInstantiationSystem());
-#endif
-        }
-        if (!m_ctx.pendingClusterViewerPath.empty()) {
-            m_clusterViewer.RequestOpen(m_ctx.pendingClusterViewerPath);
-            m_ctx.pendingClusterViewerPath.clear();
-        }
-        {
-            GTE_PROFILE_SCOPE("Panel.SceneView");
-            BuildScenePanel(game, renderer, m_ctx, m_sceneCamera, sceneServicesSetLayout, renderFeatureEntries);
-        }
-        {
-            GTE_PROFILE_SCOPE("Panel.GameView");
-            BuildGamePanel(m_ctx);
-        }
-        {
-            GTE_PROFILE_SCOPE("Panel.Memory");
-            BuildMemoryPanel(m_ctx, renderer);
-        }
-        {
-            GTE_PROFILE_SCOPE("Panel.Profiler");
-            m_profilerPanel.Build(m_ctx);
-        }
-        {
-            GTE_PROFILE_SCOPE("Panel.RenderGraph");
-            m_renderGraphPanel.Build(m_ctx, renderer, renderGraph, renderPassToggleRegistry);
-        }
-        {
-            GTE_PROFILE_SCOPE("Panel.RenderFeatures");
-            m_renderFeaturesPanel.Build(m_ctx, renderFeatureEntries, renderFeatureCompositor);
-        }
-        // Jobs panel; also hosts the CPU/GPU skinning toggle, hence `game`.
-        {
-            GTE_PROFILE_SCOPE("Panel.Jobs");
-            m_jobsPanel.Build(m_ctx, game);
-        }
-        // Log panel; depends only on EditorContext and the thread-safe logger.
-        {
-            GTE_PROFILE_SCOPE("Panel.Log");
-            m_logPanel.Build(m_ctx);
-        }
-        // Frame Debugger: also serves the capture handshake and ends the session when the window closes.
-        {
-            GTE_PROFILE_SCOPE("Panel.FrameDebugger");
-            m_frameDebuggerPanel.Build(m_ctx, renderer, renderGraph, m_gameView, m_gameViewComposited,
-                &renderPassToggleRegistry, &offscreenBlackboard);
-        }
-#if GTE_ENABLE_PROJECT_PANEL
-        {
-            GTE_PROFILE_SCOPE("Panel.Project");
-            m_projectPanel.Build(m_ctx);
-        }
-        {
-            // Bone Viewer floating window; Build() is a no-op while it is closed.
-            GTE_PROFILE_SCOPE("Panel.BoneViewer");
-            m_boneViewer.Build(registry, renderer, m_ctx, m_modelRigCache, game.GetPhysicsSystem());
-        }
-#endif
-        {
-            // Cluster Viewer floating window; Build() is a no-op while it is closed.
-            GTE_PROFILE_SCOPE("Panel.ClusterViewer");
-            m_clusterViewer.Build(renderer, m_ctx, registry);
-        }
-        {
-            GTE_PROFILE_SCOPE("Panel.SceneCameraAdapter");
-            m_sceneCameraAdapter.BeginFrame(renderer, m_ctx, registry, m_sceneView, m_sceneCamera);
+
+        // Every window draws itself in registration order: built-in windows, project windows, then render feature windows.
+        EditorFrame frame{ m_ctx, game, renderer, renderGraph, renderFeatureEntries, renderPassToggleRegistry,
+            renderFeatureCompositor, offscreenBlackboard, sceneServicesSetLayout, m_gameView, m_gameViewComposited };
+        for (const EditorPanelRegistry::WindowEntry& entry : EditorPanelRegistry::Instance().Windows()) {
+            entry.window->Draw(frame);
         }
 
-        // Draw every registered plugin panel; the content goes through PluginPanelDrawContextAdapter.
         {
-            GTE_PROFILE_SCOPE("Panel.Plugins");
-            for (const auto& entry : EditorPanelRegistry::Instance().PluginPanels()) {
-                if (ImGui::Begin(entry.name.c_str())) {
-                    PluginPanelDrawContextAdapter drawContext;
-                    entry.module->BuildPanel(drawContext);
-                }
-                ImGui::End(); // Always called, matching ImGui::Begin()'s own documented contract, even when Begin() returned false.
-            }
+            GTE_PROFILE_SCOPE("Panel.SceneCameraAdapter");
+            m_sceneCameraAdapter.BeginFrame(renderer, m_ctx, game.GetRegistry(), m_sceneView, m_sceneCamera);
         }
     }
 
@@ -542,12 +474,14 @@ public:
         return true;
     }
 
-    // See IEditorLayer::ActivateTab(). Sets the ImGui context explicitly because it may not be current here.
+    // See IEditorLayer::ActivateTab().
     TabActivationResult ActivateTab(const std::string& panelName) override
     {
-        ImGui::SetCurrentContext(m_context);
         TabActivationResult result;
-        result.tabExists = FindAndFocusEditorWindow(panelName.c_str());
+        if (EditorWindow* window = EditorPanelRegistry::Instance().FindWindow(panelName)) {
+            window->Show();
+            result.tabExists = true;
+        }
         return result;
     }
 
@@ -725,11 +659,16 @@ public:
         return BuildHierarchyStateReport(game.GetRegistry(), m_ctx.hierarchy, m_ctx.selection, first, count);
     }
 
-    bool SetPanelHidden(TogglePanel panel, bool hidden) override
+    bool SetWindowOpen(const std::string& name, bool open) override
     {
-        m_ctx.hiddenPanels.Set(panel, hidden);
-        if (panel == TogglePanel::Hierarchy && hidden) {
-            NoteHierarchyHidden(m_ctx.hierarchy);
+        EditorWindow* window = EditorPanelRegistry::Instance().FindWindow(name);
+        if (window == nullptr) {
+            return false;
+        }
+        if (open) {
+            window->Show();
+        } else {
+            window->Close();
         }
         return true;
     }
@@ -770,7 +709,7 @@ public:
     // Frame Debugger hooks: all state lives in m_frameDebuggerPanel.
     IFrameDebuggerCaptureRecorder* PrepareFrameDebuggerCaptureContext() override
     {
-        return m_frameDebuggerPanel.PrepareCaptureContextForThisFrame(m_ctx);
+        return m_frameDebuggerPanel.PrepareCaptureContextForThisFrame();
     }
 
     void NotifyFrameDebuggerStepConsumed() override { m_frameDebuggerPanel.NotifyStepConsumed(); }
@@ -782,16 +721,14 @@ public:
 
     void FrameDebuggerNotifyOffscreenFailed() override { m_frameDebuggerPanel.NotifyOffscreenFailed(); }
 
-    void FrameDebuggerOpenWindow() override { m_frameDebuggerPanel.RequestOpenWindow(m_ctx); }
+    void FrameDebuggerOpenWindow() override { m_frameDebuggerPanel.Show(); }
     void FrameDebuggerSetEnabled(bool enabled) override { m_frameDebuggerPanel.SetEnabledFromCommand(m_ctx, enabled); }
 
-    // Mirrors the Render Graph panel's own toolbar Regime combo - an HTTP
-    // command flips the same EditorContext field a human click would.
-    // Returns whether the "Render Graph" window was actually open to see it.
+    // Sets the same field the Render Graph toolbar combo sets. Returns whether the window is open to show it.
     bool SetRenderGraphDisplayedRegime(bool present) override
     {
         m_ctx.renderGraphDisplayedRegime = present ? RenderGraphRegimeChoice::Present : RenderGraphRegimeChoice::Offscreen;
-        return m_ctx.renderGraphWindowOpen;
+        return m_renderGraphPanel.IsOpen();
     }
 
     // Stored only; m_newProjectWindow's Build() invokes it.
@@ -812,17 +749,16 @@ public:
         m_hotReloadDebugCapability = capability;
     }
 
-    // Registers each module's Editor panel (if any) from BuiltinFeatureEditorPanelRegistry, once.
-    // Called by EditorHost after BuiltinFeatureModuleRegistry::CreateAll().
+    // Creates and registers the window of every feature module that has one.
     void AttachBuiltinFeatureModules(const std::vector<std::unique_ptr<IEngineFeatureModule>>& modules,
         Renderer& renderer, const rg::RenderGraph& renderGraph) override
     {
         for (const auto& module : modules) {
-            std::unique_ptr<IEditorPanelModule_v1> panel =
+            std::unique_ptr<EditorWindow> window =
                 BuiltinFeatureEditorPanelRegistry::Instance().TryCreatePanel(*module, m_ctx, renderer, renderGraph);
-            if (panel != nullptr) {
-                EditorPanelRegistry::Instance().RegisterPluginPanel(panel->GetPanelName(), panel.get());
-                m_builtinFeaturePanelModules.push_back(std::move(panel));
+            if (window != nullptr) {
+                RegisterEditorWindow(*window);
+                m_featureWindows.push_back(std::move(window));
             }
         }
     }
@@ -838,7 +774,7 @@ public:
     }
     FrameDebuggerStateSnapshotView FrameDebuggerGetState() const override
     {
-        return m_frameDebuggerPanel.BuildStateSnapshotView(m_ctx);
+        return m_frameDebuggerPanel.BuildStateSnapshotView();
     }
     FrameDebuggerEventSink* FrameDebuggerGetEventSinkForInstall() override
     {
@@ -850,6 +786,28 @@ public:
     }
 
 private:
+    // The built-in windows in draw order. Registered in the constructor, unregistered in the destructor.
+    template <typename Visit>
+    void ForEachBuiltinWindow(Visit&& visit)
+    {
+        visit(m_hierarchyPanel);
+        visit(m_inspectorPanel);
+        visit(m_scenePanel);
+        visit(m_gamePanel);
+        visit(m_memoryPanel);
+        visit(m_profilerPanel);
+        visit(m_renderGraphPanel);
+        visit(m_renderFeaturesPanel);
+        visit(m_jobsPanel);
+        visit(m_logPanel);
+        visit(m_frameDebuggerPanel);
+#if GTE_ENABLE_PROJECT_PANEL
+        visit(m_projectPanel);
+        visit(m_boneViewer);
+#endif
+        visit(m_clusterViewer);
+    }
+
     void ReleaseGameViewDescriptor()
     {
         if (m_ctx.gameViewDescriptor != UiTextureHandle::Invalid) {
@@ -920,81 +878,54 @@ private:
     // Infinite ground grid of the Scene view. Always drawn, no toggle.
     SceneGridRenderer m_sceneGrid;
 
-    // True once Render(cmd) has actually run THIS frame (reset to false at
-    // the top of every NewFrame()) - see RenderPlatformWindows() for why
-    // this guard exists.
+    // True once Render(cmd) has run this frame; RenderPlatformWindows() skips the frame otherwise.
     bool m_frameRendered = false;
 
-    // "Profiler" panel, docked with Memory. Not gated by GTE_ENABLE_PROJECT_PANEL.
+    // Built-in windows. Those that own GPU descriptors release them in the destructor.
+    HierarchyPanel m_hierarchyPanel;
+    ScenePanel m_scenePanel{ m_sceneCamera };
+    GamePanel m_gamePanel;
+    MemoryPanel m_memoryPanel;
     ProfilerPanel m_profilerPanel;
-
-    // "Render Graph" floating window, toggled by ctx.renderGraphWindowOpen and the Window menu.
     RenderGraphPanel m_renderGraphPanel;
-
-    // "Render Features" panel: GPU-driven batch culling readout and feature priority/enable authoring.
-    // Opened and closed via ctx.renderFeaturesWindowOpen.
     RenderFeaturesPanel m_renderFeaturesPanel;
-
-    // "Jobs" panel, docked with Memory/Profiler. Depends only on the profiler and job system.
     JobsPanel m_jobsPanel;
-
-    // "Log" panel, docked with Memory/Profiler/Jobs/Atmosphere. Depends only on the thread-safe logger state.
     LogPanel m_logPanel;
-
-    // Floating "Frame Debugger" window, opened from the Window menu. It owns an ImGui preview descriptor,
-    // so the destructor must release it before ImGui_ImplVulkan_Shutdown().
     FrameDebuggerPanel m_frameDebuggerPanel;
 
 #if GTE_ENABLE_PROJECT_PANEL
-    // "Project" panel: live folder view plus external drag-and-drop import.
-    // ProcessEvent() feeds it SDL_EVENT_DROP_FILE.
     ProjectPanel m_projectPanel;
-
-    // Inspector's image preview for decodable image files.
-    // Reset() in the destructor before ImGui_ImplVulkan_Shutdown().
     AssetPreviewTexture m_assetPreview;
-
-    // Inspector's 3D mesh preview for *.gta Mesh assets. Reset() in the destructor, like m_assetPreview.
     AssetPreviewMesh m_assetPreviewMesh;
-
-    // Bone Viewer floating window, opened from the Inspector; keeps its entity when the selection changes.
-    // Reset() in the destructor, like m_assetPreview.
-    BoneViewerWindow m_boneViewer;
-
-    // Mtime-cached rig data shared by BoneViewerWindow and InspectorPanel, so both read one copy.
     ModelRigCache m_modelRigCache;
+    BoneViewerWindow m_boneViewer{ m_modelRigCache };
+    InspectorPanel m_inspectorPanel{ m_assetPreview, m_assetPreviewMesh, m_boneViewer, m_modelRigCache };
+#else
+    InspectorPanel m_inspectorPanel;
 #endif
 
-    // Cluster Viewer floating window, opened from the Inspector. Reset() in the destructor, like m_assetPreview.
     ClusterViewerWindow m_clusterViewer;
 
     // HTTP access to the Scene panel's cameras; refreshed every BuildUI().
     SceneCameraAdapter m_sceneCameraAdapter;
 
-    // "Create New Project" floating window (Project > New Project...). No GPU resources, so no Reset() needed.
-    // Outside GTE_ENABLE_PROJECT_PANEL: it must exist in every build.
+    // Dialogs, not windows: no registry entry, no Window menu item. Present in every build.
     NewProjectWindow m_newProjectWindow;
-    // "Open Project" floating window (Project > Open Project...). No GPU resources; always present.
     OpenProjectWindow m_openProjectWindow;
-    // Non-owning; EditorHost's static capability outlives this object.
-    IProjectLifecycleCapability* m_projectLifecycleCapability = nullptr;
-    // "Create New Asset" floating window, opened from the Project panel's Create submenu.
-    // No GPU resources; exists regardless of GTE_ENABLE_PROJECT_PANEL.
     CreateAssetWindow m_createAssetWindow;
-    // Non-owning; EditorHost's static capability outlives this object.
+
+    // Non-owning; EditorHost's static capabilities outlive this object.
+    IProjectLifecycleCapability* m_projectLifecycleCapability = nullptr;
     IAssetScaffoldingCapability* m_assetScaffoldingCapability = nullptr;
-    // Non-owning; EditorHost's static capability outlives this object. Read by BuildDockspaceAndMenuBar()
-    // because the "Compile" menu item lives in the menu bar.
     IHotReloadDebugCapability* m_hotReloadDebugCapability = nullptr;
 
-    // Shared state read and written by the dock layout and every panel builder; see EditorContext.h.
+    // Shared state read and written by the dock layout and every window; see EditorContext.h.
     EditorContext m_ctx;
 
     // The one cluster build runner of this editor. EditorHost polls it; the Inspector starts builds on it.
     MeshClusterBuildRunner m_clusterBuildRunner;
 
-    // Owns every built-in feature's Editor panel module; lives for the rest of the process.
-    std::vector<std::unique_ptr<IEditorPanelModule_v1>> m_builtinFeaturePanelModules;
+    std::vector<std::unique_ptr<EditorWindow>> m_featureWindows; // Render feature windows; registered by AttachBuiltinFeatureModules().
 };
 
 } // namespace

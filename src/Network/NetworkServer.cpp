@@ -867,22 +867,12 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     // exists to ship.
     RegisterRenderGraphRoute(server, captureBridge);
 
-    // network-impl-7 campaign
-    // (PHASE4_HTTP_ENDPOINTS_ACTIVATE_TAB_AND_LIST_TABS.md) - GET /list_tabs.
-    // Needs NO bridge at all - the panel list comes straight from
-    // EditorPanelRegistry::Instance() (editor-core-separation-3 campaign,
-    // PHASE4 - see Core/EditorPanelRegistry.h) - this is the SIMPLEST route in
-    // this whole file: zero runtime/thread/bridge dependency beyond that
-    // process-wide registry.
+    // GET /list_tabs: needs no bridge; the list comes straight from EditorPanelRegistry.
     server.Get("/list_tabs", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(BuildListTabsResponseJson(), "application/json");
     });
 
-    // network-impl-7 campaign
-    // (PHASE4_HTTP_ENDPOINTS_ACTIVATE_TAB_AND_LIST_TABS.md) -
-    // GET /activate_tab?name=<PanelName>. See PHASE0_MASTER_STRATEGY.md's
-    // own locked endpoint contract for the exact status-code mapping
-    // implemented below.
+    // GET /activate_tab?name=<WindowName>: opens the window, raises it and centers it when it floats.
     server.Get("/activate_tab", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
         const ParsedActivateTabQuery parsed = ParseActivateTabQuery(req.get_param_value("name"));
         if (!parsed.valid) {
@@ -890,12 +880,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             res.set_content(BuildGenericErrorResponseJson(parsed.errorMessage), "application/json");
             return;
         }
-        // IMPORTANT ordering detail: an unknown tab NAME (404) is checked
-        // BEFORE the uiCommandBridge == nullptr (503) check - see this
-        // phase document's own Section 3.3 "IMPORTANT ordering detail" note
-        // - a request for an unrecognized name fails for the same reason
-        // regardless of whether the bridge exists at all, so it must always
-        // be a 404, never a 503.
+        // An unknown name is a 404 even when the bridge is missing, so it is checked before the 503.
         if (parsed.notFound) {
             res.status = 404;
             res.set_content(BuildUnknownTabNameResponseJson(parsed.tabName), "application/json");
@@ -1107,7 +1092,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         res.set_content(BuildHierarchyStateResponseJson(result->hierarchyState), "application/json");
     });
 
-    // GET /panel_visible?name=<panel>&visible=true|false: hides or shows a panel for this session only.
+    // GET /panel_visible?name=<window>&visible=true|false: opens (Show) or closes any registered window for this session only.
     server.Get("/panel_visible", [uiCommandBridge](const httplib::Request& req, httplib::Response& res) {
         const ParsedPanelVisibleQuery parsed =
             ParsePanelVisibleQuery(req.get_param_value("name"), req.get_param_value("visible"));
@@ -1118,7 +1103,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
         }
         EditorUiCommandRequest request;
         request.kind = EditorUiCommandKind::PanelVisible;
-        request.panelVisible.panel = parsed.panel;
+        request.panelVisible.name = parsed.name;
         request.panelVisible.visible = parsed.visible;
         const std::optional<EditorUiCommandResult> result = SubmitEditorUiCommand(uiCommandBridge, request, res);
         if (!result.has_value()) {
@@ -1130,7 +1115,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
             return;
         }
         res.status = 200;
-        res.set_content(BuildPanelVisibleResponseJson(parsed.panel, parsed.visible), "application/json");
+        res.set_content(BuildPanelVisibleResponseJson(parsed.name, parsed.visible), "application/json");
     });
 
     // POST /hierarchy_action: a Hierarchy drop or arrow click through the panel's own code, for tests and AI debugging.

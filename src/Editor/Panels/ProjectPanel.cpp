@@ -2,6 +2,7 @@
 
 #include "../ActiveProjectAssemblyState.h"
 #include "../EditorContext.h"
+#include "../EditorFrame.h"
 #include "../ImGuiUniqueId.h"
 #include "../MemoryPanelData.h" // FormatBytes()
 #include "../ProjectRootPath.h"
@@ -49,7 +50,7 @@ bool HasSubfolders(const ProjectEntry& entry)
 
 } // namespace
 
-ProjectPanel::ProjectPanel()
+ProjectPanel::ProjectPanel() : EditorWindow("Project", WindowDock::Bottom)
 {
     m_rootPath = ResolveProjectRootDirectory();
 }
@@ -390,91 +391,97 @@ void ProjectPanel::RenderContextMenu(EditorContext& ctx, const char* popupId)
     }
 }
 
-void ProjectPanel::Build(EditorContext& ctx)
+void ProjectPanel::OnFrame(EditorFrame& /*frame*/)
 {
     m_suppressPaneContextMenuThisFrame = false;
+}
 
-    const bool wasVisible = m_panelVisible;
-    m_panelVisible = ImGui::Begin("Project");
-    if (m_panelVisible) {
-        if (!wasVisible) {
-            m_scan.MarkDirty(); // Data may be old after a hidden period.
+void ProjectPanel::OnHidden(EditorFrame& /*frame*/)
+{
+    m_shownLastFrame = false;
+}
+
+void ProjectPanel::OnGui(EditorFrame& frame)
+{
+    EditorContext& ctx = frame.ctx;
+    if (!m_shownLastFrame) {
+        m_scan.MarkDirty(); // Data may be old after a hidden period.
+    }
+    m_shownLastFrame = true;
+
+    PumpScan(); // Before any pane is drawn: it may replace m_tree.
+    m_folderDropZones.clear();
+    m_leftPaneRect = Rect{};
+    m_rightPaneRect = Rect{};
+
+    if (ImGui::Button("Refresh")) {
+        m_scan.MarkDirty();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", PathToUtf8(m_rootPath).c_str());
+
+    ImGui::Separator();
+
+    if (!m_hasScanResult) {
+        ImGui::TextDisabled("Scanning...");
+    } else if (!m_rootExists) {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.55f, 0.2f, 1.0f), "The \"Project\" folder is missing and could not be (re)created:");
+        ImGui::TextWrapped("%s", PathToUtf8(m_rootPath).c_str());
+        ImGui::TextDisabled("(check that this location is writable, then click Refresh)");
+    } else {
+        // Keep the splitter inside the window as it is resized.
+        const float totalAvailWidth = ImGui::GetContentRegionAvail().x;
+        const float maxLeftWidth = std::max(kMinPaneWidth, totalAvailWidth - kMinPaneWidth - kSplitterWidth);
+        m_leftPaneWidth = std::clamp(m_leftPaneWidth, kMinPaneWidth, maxLeftWidth);
+
+        const float paneAreaHeight = std::max(ImGui::GetContentRegionAvail().y - kFooterReserve, 40.0f);
+
+        ImGui::BeginChild("ProjectLeftPane", ImVec2(m_leftPaneWidth, paneAreaHeight), true);
+        RenderLeftPane(ctx);
+        RenderContextMenu(ctx, "ProjectLeftPaneContextMenu");
+        {
+            const ImVec2 childPos = ImGui::GetWindowPos();
+            const ImVec2 childSize = ImGui::GetWindowSize();
+            m_leftPaneRect = Rect{ childPos.x, childPos.y, childSize.x, childSize.y };
         }
-        PumpScan(); // Before any pane is drawn: it may replace m_tree.
-        m_folderDropZones.clear();
-        m_leftPaneRect = Rect{};
-        m_rightPaneRect = Rect{};
+        ImGui::EndChild();
 
-        if (ImGui::Button("Refresh")) {
-            m_scan.MarkDirty();
+        ImGui::SameLine();
+        ImGui::Button("##ProjectPaneSplitter", ImVec2(kSplitterWidth, paneAreaHeight));
+        if (ImGui::IsItemActive()) {
+            m_leftPaneWidth += ImGui::GetIO().MouseDelta.x;
+        }
+        if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
         }
         ImGui::SameLine();
-        ImGui::TextDisabled("%s", PathToUtf8(m_rootPath).c_str());
 
-        ImGui::Separator();
-
-        if (!m_hasScanResult) {
-            ImGui::TextDisabled("Scanning...");
-        } else if (!m_rootExists) {
-            ImGui::TextColored(
-                ImVec4(1.0f, 0.55f, 0.2f, 1.0f), "The \"Project\" folder is missing and could not be (re)created:");
-            ImGui::TextWrapped("%s", PathToUtf8(m_rootPath).c_str());
-            ImGui::TextDisabled("(check that this location is writable, then click Refresh)");
-        } else {
-            // Keep the splitter inside the window as it is resized.
-            const float totalAvailWidth = ImGui::GetContentRegionAvail().x;
-            const float maxLeftWidth = std::max(kMinPaneWidth, totalAvailWidth - kMinPaneWidth - kSplitterWidth);
-            m_leftPaneWidth = std::clamp(m_leftPaneWidth, kMinPaneWidth, maxLeftWidth);
-
-            const float paneAreaHeight = std::max(ImGui::GetContentRegionAvail().y - kFooterReserve, 40.0f);
-
-            ImGui::BeginChild("ProjectLeftPane", ImVec2(m_leftPaneWidth, paneAreaHeight), true);
-            RenderLeftPane(ctx);
-            RenderContextMenu(ctx, "ProjectLeftPaneContextMenu");
-            {
-                const ImVec2 childPos = ImGui::GetWindowPos();
-                const ImVec2 childSize = ImGui::GetWindowSize();
-                m_leftPaneRect = Rect{ childPos.x, childPos.y, childSize.x, childSize.y };
-            }
-            ImGui::EndChild();
-
-            ImGui::SameLine();
-            ImGui::Button("##ProjectPaneSplitter", ImVec2(kSplitterWidth, paneAreaHeight));
-            if (ImGui::IsItemActive()) {
-                m_leftPaneWidth += ImGui::GetIO().MouseDelta.x;
-            }
-            if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
-                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-            }
-            ImGui::SameLine();
-
-            ImGui::BeginChild("ProjectRightPane", ImVec2(0.0f, paneAreaHeight), true);
-            RenderRightPane(ctx);
-            RenderContextMenu(ctx, "ProjectRightPaneContextMenu");
-            {
-                const ImVec2 childPos = ImGui::GetWindowPos();
-                const ImVec2 childSize = ImGui::GetWindowSize();
-                m_rightPaneRect = Rect{ childPos.x, childPos.y, childSize.x, childSize.y };
-            }
-            ImGui::EndChild();
+        ImGui::BeginChild("ProjectRightPane", ImVec2(0.0f, paneAreaHeight), true);
+        RenderRightPane(ctx);
+        RenderContextMenu(ctx, "ProjectRightPaneContextMenu");
+        {
+            const ImVec2 childPos = ImGui::GetWindowPos();
+            const ImVec2 childSize = ImGui::GetWindowSize();
+            m_rightPaneRect = Rect{ childPos.x, childPos.y, childSize.x, childSize.y };
         }
+        ImGui::EndChild();
+    }
 
-        if (!m_statusMessage.empty()) {
-            if (std::chrono::steady_clock::now() - m_statusSetTime < kStatusMessageLifetime) {
-                const ImVec4 color
-                    = m_statusIsError ? ImVec4(1.0f, 0.4f, 0.4f, 1.0f) : ImVec4(0.6f, 0.85f, 0.6f, 1.0f);
-                ImGui::TextColored(color, "%s", m_statusMessage.c_str());
-            } else {
-                m_statusMessage.clear();
-            }
+    if (!m_statusMessage.empty()) {
+        if (std::chrono::steady_clock::now() - m_statusSetTime < kStatusMessageLifetime) {
+            const ImVec4 color
+                = m_statusIsError ? ImVec4(1.0f, 0.4f, 0.4f, 1.0f) : ImVec4(0.6f, 0.85f, 0.6f, 1.0f);
+            ImGui::TextColored(color, "%s", m_statusMessage.c_str());
+        } else {
+            m_statusMessage.clear();
         }
     }
-    ImGui::End();
 }
 
 void ProjectPanel::HandleExternalFileDrop(float screenX, float screenY, const std::string& sourcePathUtf8)
 {
-    if (!m_panelVisible || !m_hasScanResult || sourcePathUtf8.empty()) {
+    if (!IsVisible() || !m_hasScanResult || sourcePathUtf8.empty()) {
         return; // Panel not on screen, or no drop zones recorded yet.
     }
 

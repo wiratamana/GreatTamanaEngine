@@ -2,6 +2,7 @@
 
 #include "../../Renderer/RenderGraph/RenderGraphMetadata.h"
 #include "../../Renderer/RenderGraph/RenderPassToggleRegistry.h"
+#include "../EditorWindow.h"
 #include "../RenderGraphDisplayText.h"
 #include "../RenderGraphLayout.h"
 #include "../RenderGraphTexturePreview.h"
@@ -21,30 +22,17 @@ namespace rg {
 class RenderGraph;
 } // namespace rg
 
-// Node-canvas view of one RenderGraph::Execute() call: pass tree (left),
-// graph canvas or sortable table (center), inspector (right), GPU timeline
-// (bottom). Both the Offscreen (Game/Scene View) and Present regimes stay
-// reachable via the toolbar's own Regime combo (EditorContext::
-// renderGraphDisplayedRegime, also settable over HTTP) - this panel never
-// hides either one.
-//
-// A floating window, not docked into the bottom strip with Memory/Profiler/
-// Jobs/Log - a node canvas needs real screen space (see DockLayout.cpp).
-//
-// Single responsibility: inspecting ONE selected pass's real render-graph
-// data. GPU-driven-batch culling stats and render-feature priority editing
-// live in their own panel (Panels/RenderFeaturesPanel.h) - this panel never
-// mixes "inspect a pass" with "author a render feature" again.
-class RenderGraphPanel {
+// Pass tree, graph canvas or table, inspector and GPU timeline of one render graph execution.
+class RenderGraphPanel final : public EditorWindow {
 public:
-    void Build(EditorContext& ctx, Renderer& renderer, const rg::RenderGraph& renderGraph,
-        rg::RenderPassToggleRegistry& renderPassToggleRegistry);
+    RenderGraphPanel() : EditorWindow("Render Graph", WindowDock::Floating, true, 1100.0f, 700.0f) {}
 
-    // Releases m_texturePreview's live ImGui/Vulkan descriptor, if any.
-    // Call explicitly BEFORE ImGui_ImplVulkan_Shutdown() - this class is
-    // declared after the ImGui context, so its own destructor alone runs
-    // too late.
+    // Releases the texture preview descriptor. Call before ImGui_ImplVulkan_Shutdown().
     void ReleaseTexturePreview() { m_texturePreview.Release(); }
+
+protected:
+    void OnFrame(EditorFrame& frame) override;
+    void OnGui(EditorFrame& frame) override;
 
 private:
     enum class ViewMode : std::uint8_t { Graph, Table };
@@ -53,9 +41,7 @@ private:
     void BuildToolbar(EditorContext& ctx, const rg::RenderGraphRegimeMetadata& regime);
     void BuildPassTree(const std::vector<RenderGraphGroupedPass>& grouped,
         rg::RenderPassToggleRegistry& toggles);
-    // One row for every known pass - no separate "disabled row" function.
-    // `liveRow` is nullptr when this pass produced no snapshot row this
-    // frame (still drawn, honestly labeled, never silently hidden).
+    // `liveRow` is null when the pass produced no snapshot row this frame; it is still drawn.
     void DrawPassTreeRow(const rg::RenderPassToggleState& state,
         const RenderGraphGroupedPass* liveRow, rg::RenderPassToggleRegistry& toggles);
     void BuildGraphCanvas(const GraphLayout& layout, const rg::RenderGraphRegimeMetadata& regime);
@@ -68,16 +54,14 @@ private:
     void ToggleIsolatePass(const std::string& passName, rg::RenderPassToggleRegistry& toggles);
     std::optional<uint64_t> LookupTrackedResourceSizeByName(const std::string& resourceName, Renderer& renderer) const;
 
-    // Shared search-text + queue-kind predicate for both the pass tree and
-    // the pass table - one filter, never two independently-maintained ones.
+    // Search-text and queue-kind filter shared by the pass tree and the pass table.
     bool PassMatchesFilters(const RenderGraphGroupedPass& row) const;
 
     bool m_paused = false;
     bool m_forceSingleCapture = false; // "Capture Frame" one-shot refresh-then-freeze.
     rg::RenderGraphMetadata m_frozenMetadata;
 
-    // Resource name -> "<W>x<H>, <FORMAT>" text, rebuilt only while unpaused.
-    // Kept in lockstep with m_frozenMetadata so pausing freezes both alike.
+    // Resource name -> "<W>x<H>, <FORMAT>"; frozen together with m_frozenMetadata.
     std::unordered_map<std::string, std::string> m_frozenResourceResolutionText;
 
     QueueKindFilter m_kindFilter = QueueKindFilter::All;
@@ -89,8 +73,7 @@ private:
     float m_timelineHeight = 120.0f;
     std::optional<std::string> m_selectedPassName;
 
-    // Reversible mass-disable state for "Isolate Pass" - see
-    // ToggleIsolatePass()'s own doc comment.
+    // Saved toggle states restored when "Isolate Pass" ends.
     std::optional<std::string> m_isolatedPass;
     std::vector<rg::RenderPassToggleState> m_preIsolationToggleStates;
 

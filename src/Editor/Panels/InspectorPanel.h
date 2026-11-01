@@ -1,15 +1,12 @@
 #pragma once
 
 #include "../ClusterToolUiState.h"
+#include "../EditorWindow.h"
 
 #include <string>
 
 namespace gte {
 
-class Registry;
-class Renderer;
-class PhysicsSystem;
-class MeshInstantiationSystem;
 struct EditorContext;
 #if GTE_ENABLE_PROJECT_PANEL
 class AssetPreviewTexture;
@@ -18,74 +15,35 @@ class BoneViewerWindow;
 class ModelRigCache;
 #endif
 
-// Shows/edits whichever selection is currently "on top" - see
-// ctx.selection.Kind() (Selection.h):
-//   - Entity (ctx.selection.SelectedEntity(), from Hierarchy) - Transform
-//     fields directly editable (position/scale as-is, rotation shown/edited
-//     as Euler degrees and converted back to the stored Quat - see
-//     Math/Quat.h's FromEulerDegrees()/ToEulerDegrees()); MeshRenderer's
-//     handles are shown read-only (no asset-picker UI exists yet to let a
-//     user reassign them). An entity that carries a MeshAssetSource
-//     component (i.e. the root of a model spawned via
-//     Game::CreateMeshEntityFromGtaFile() - see ECS/Components/
-//     MeshAssetSource.h) additionally gets an "Open Bone Viewer" button
-//     (only when GTE_ENABLE_PROJECT_PANEL is ON - see `boneViewer` below)
-//     that opens `boneViewer` onto it - a Unity-"Avatar configuration"-style
-//     floating debug window showing the model's bind-pose mesh with every
-//     skeleton bone drawn as a gizmo dot + name, for debugging an imported
-//     model/animation bone mismatch (see BoneViewerWindow.h).
-//   - Asset (ctx.selection.SelectedAssetAbsolutePath(), from Project - only
-//     reachable when GTE_ENABLE_PROJECT_PANEL is ON) - plain file/folder metadata
-//     (name/extension/size/last-modified, via AssetInspectorData.h), PLUS
-//     a live texture preview (via AssetPreviewTexture + `renderer`) if the
-//     selected file decodes as a supported image, OR a live, auto-rotating
-//     3D mesh preview (via AssetPreviewMesh + `renderer`) if it's a *.gta
-//     AssetType::Mesh file (the result of importing a .pmx - see
-//     src/Assets/AssetImporter.h), OR a decoded metadata-only summary
-//     (model name, frame range, and bone/morph/camera/light/shadow/IK
-//     keyframe counts + the actual bone name list - no GPU/live preview,
-//     just MotionFile.h's DecodeMotionDataFromBytes()) if it's a *.gta
-//     AssetType::Animation file (the result of importing a .vmd - see
-//     src/Assets/VmdLoader.h); falls back to metadata-only for anything
-//     else (a folder, a non-image/non-mesh/non-animation file, or a file
-//     that fails to decode/parse).
-//   - ModelPart (ctx.selection.SelectedModelPartEntity()/Kind()/Index(),
-//     from BoneViewerWindow's own Bones/Rigid Bodies/Joints selection -
-//     only reachable when GTE_ENABLE_PROJECT_PANEL is ON) - full, read-only
-//     details for whichever bone/rigid body/joint is currently selected
-//     inside the Bone Viewer (name/index/parent/position/flags/IK chain for
-//     a Bone; shape/size/transform/mass/damping/collision filter for a
-//     RigidBody; connected bodies/transform/limits/spring factors for a
-//     Joint), read via the shared `rigCache` (ModelRigCache.h) - see
-//     task_manager/verlet-integration-2/PHASE4_INSPECTOR_MODEL_PART_SECTION.md.
-// Called once per frame by ImGuiEditorLayer::BuildUI(), after
-// BuildHierarchyPanel(). `renderer`/`assetPreview`/`assetPreviewMesh`/
-// `boneViewer`/`rigCache` only exist in this signature when
-// GTE_ENABLE_PROJECT_PANEL is
-// ON - see AGENTS.md, "Editor Module Structure", for why this `#if` guard is
-// one of the few GTE_ENABLE_PROJECT_PANEL touch points allowed outside
-// ImGuiEditorLayer.cpp/DockLayout.cpp. (BoneViewerWindow itself has nothing
-// to do with the Project panel feature-wise - it's only gated the same way
-// because it reuses AssetPreviewMesh's own MeshPreview.vert/.frag shader
-// pair, which is only ever compiled/staged under this same switch - see
-// CMakeLists.txt.) `physicsSystem` (PHASE4,
-// task_manager/verlet-integration-1/PHASE4_PARAMETER_AUTHORING_AND_DATA_DRIVEN_CONFIG.md,
-// 3.5) exists in EVERY signature (not gated behind GTE_ENABLE_PROJECT_PANEL)
-// - it backs the "Dynamic Chain Physics" section shown for any entity
-// carrying a DynamicChainRig component. `meshInstantiationSystem`
-// (task_manager/verlet-integration-11, PHASE3) also exists in EVERY
-// signature for the same reason - it lets the "Save Joint Physics to Asset"
-// button (PHASE4) refresh this session's already-cached SkinnedMeshData via
-// MeshInstantiationSystem::RefreshCachedJointPhysicsOverridesFromDisk() right
-// after a successful save.
+// Shows what is selected: an entity, a Project asset or a Bone Viewer part.
+class InspectorPanel final : public EditorWindow {
+public:
 #if GTE_ENABLE_PROJECT_PANEL
-void BuildInspectorPanel(Registry& registry, EditorContext& ctx, Renderer& renderer, AssetPreviewTexture& assetPreview,
-    AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer, PhysicsSystem& physicsSystem,
-    MeshInstantiationSystem& meshInstantiationSystem, ModelRigCache& rigCache);
+    InspectorPanel(AssetPreviewTexture& assetPreview, AssetPreviewMesh& assetPreviewMesh, BoneViewerWindow& boneViewer,
+        ModelRigCache& rigCache)
+        : EditorWindow("Inspector", WindowDock::Right)
+        , m_assetPreview(assetPreview)
+        , m_assetPreviewMesh(assetPreviewMesh)
+        , m_boneViewer(boneViewer)
+        , m_rigCache(rigCache)
+    {
+    }
 #else
-void BuildInspectorPanel(Registry& registry, EditorContext& ctx, PhysicsSystem& physicsSystem,
-    MeshInstantiationSystem& meshInstantiationSystem);
+    InspectorPanel() : EditorWindow("Inspector", WindowDock::Right) {}
 #endif
+
+protected:
+    void OnFrame(EditorFrame& frame) override;
+    void OnGui(EditorFrame& frame) override;
+
+private:
+#if GTE_ENABLE_PROJECT_PANEL
+    AssetPreviewTexture& m_assetPreview;
+    AssetPreviewMesh& m_assetPreviewMesh;
+    BoneViewerWindow& m_boneViewer;
+    ModelRigCache& m_rigCache;
+#endif
+};
 
 // Starts a cluster build of the mesh asset at `absolutePath` with the options in ctx.clusterTool.
 // Used by the "Build Clusters" button and by the HTTP route, so both take the same path.

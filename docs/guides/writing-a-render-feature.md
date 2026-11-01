@@ -1,6 +1,6 @@
 # Writing a render feature
 > Step-by-step guide to add a built-in render feature to the engine. For engine developers.
-> Verified against code: 2026-10-30
+> Verified against code: 2026-11-01
 
 ## TL;DR
 - A feature is a folder `src/Features/<Name>/`, a class derived from `fx::Feature`, and one macro line.
@@ -143,7 +143,7 @@ At the bottom of `FooFeature.cpp`, inside `namespace gte`:
 GTE_REGISTER_RENDER_FEATURE("Foo", FooFeature);
 ```
 - The name must be unique. A duplicate is refused at start-up: an error log, and `assert` in debug.
-- Use the same string in the macro and in `Name()`. The macro name finds the editor panel. `Name()` is the owner of passes, channels and debug keys.
+- Use the same string in the macro and in `Name()`. The macro name finds the editor window. `Name()` is the owner of passes, channels and debug keys.
 
 ### 7. Write the shaders
 - Binding names in GLSL are the contract with C++. `Bind("sourceColor", ...)` needs a variable `sourceColor`.
@@ -159,15 +159,16 @@ Implement `fx::IFeatureDebugEndpoint`: `GetState()`, `Set()` and `Invoke()`. All
 - Use `ParseDebugBool`, `ParseDebugUnsigned`, `ParseDebugFloat` from `FeatureDebug.h` to parse values.
 - Routes: `/feature_debug/{list,state,set,invoke}?name=Foo`. See [HTTP cheat sheet](../debugging/http-cheat-sheet.md).
 
-### 9. Add an editor panel (optional)
-In `Editor/`, write a class derived from `IEditorPanelModule_v1` (`GetPanelName`, `BuildPanel`). Register it with the same name as the feature:
+### 9. Add an editor window (optional)
+In `Editor/`, write a class derived from `EditorWindow` (name, `WindowDock::Bottom`, `OnGui`). Register a factory with the same name as the feature:
 ```cpp
-GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("Foo", &CreateFooPanelModule);
+GTE_REGISTER_BUILTIN_FEATURE_EDITOR_PANEL("Foo", &CreateFooWindow);
 ```
 - The factory gets `(IEngineFeatureModule&, EditorContext&, Renderer&, const rg::RenderGraph&)`.
 - Reach your feature with `fx::FeatureOf<FooFeature>(module)`. It throws `std::logic_error` for a wrong type.
-- Built-in panels ignore `ctx` and call their own ImGui code. The editor docks every registered panel.
-- A panel that throws in its constructor is not caught. Fix the panel.
+- `OnGui()` draws the content only. Never call `ImGui::Begin` or `End`: the base class does it and adds the close button.
+- The window appears in the Window menu and docks into the bottom strip by default.
+- A window that throws in its constructor is not caught. Fix the window.
 
 ### 10. Guard the side channels
 If a channel or scene slot of yours is read by another pass that can be toggled alone, add a rule in `KnownRiskBlackboardKeyRules()` (`src/Editor/FrameDebuggerSideChannelChecker.cpp`). Use `AddChannelRules()` per view, or `AddSharedChannelRule()` for a Shared publish. See [Render honesty](../conventions/render-honesty.md).

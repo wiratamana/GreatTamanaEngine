@@ -1,15 +1,17 @@
 #pragma once
 
-#include "../../Core/GraphicsHandles.h"
+#include "../EditorWindow.h"
 
 namespace gte {
 
-class Game;
-class Renderer;
-struct EditorContext;
+// Entity tree of every Transform with drag-and-drop reparenting and a create menu.
+class HierarchyPanel final : public EditorWindow {
+public:
+    HierarchyPanel() : EditorWindow("Hierarchy", WindowDock::Left) {}
 
-// Entity tree of every Transform, with drag-and-drop reparenting and a "Create 3D Object" menu. Once per frame.
-// `sceneServicesSetLayout` is the layout of Core's scene-services descriptor set, used by spawn paths.
-void BuildHierarchyPanel(Game& game, Renderer& renderer, EditorContext& ctx, DescriptorSetLayoutHandle sceneServicesSetLayout);
+protected:
+    void OnGui(EditorFrame& frame) override;
+    void OnHidden(EditorFrame& frame) override;
+};
 
 } // namespace gte
