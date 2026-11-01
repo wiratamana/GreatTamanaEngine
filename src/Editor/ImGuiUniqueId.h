@@ -1,6 +1,17 @@
 #pragma once
 
+#include <imgui_internal.h> // ImGuiWindow::TitleBarHeight
+
 namespace gte {
+
+// Window-wide right-click popup that can only be opened below the title bar.
+// Keeps an already open popup alive when the mouse is elsewhere.
+inline bool BeginContentContextPopup(const char* popupId)
+{
+    const ImGuiWindow* window = ImGui::GetCurrentWindow();
+    const bool belowTitleBar = ImGui::GetMousePos().y >= window->Pos.y + window->TitleBarHeight;
+    return belowTitleBar ? ImGui::BeginPopupContextWindow(popupId) : ImGui::BeginPopup(popupId);
+}
 
 // THE mandated way to enter a per-iteration ImGui ID scope for any widget
 // built inside a loop over a list/table of runtime data - see AGENTS.md's

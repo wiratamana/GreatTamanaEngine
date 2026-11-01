@@ -375,7 +375,7 @@ void ProjectPanel::RenderContextMenu(EditorContext& ctx, const char* popupId)
     if (m_suppressPaneContextMenuThisFrame) {
         return; // The active-project row's popup owns the right click this frame.
     }
-    if (ImGui::BeginPopupContextWindow(popupId)) {
+    if (BeginContentContextPopup(popupId)) {
         if (ImGui::MenuItem("Refresh")) {
             m_scan.MarkDirty();
         }

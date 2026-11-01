@@ -252,8 +252,8 @@ void HierarchyPanel::OnGui(EditorFrame& frame)
         }
     }
 
-    // Right-click anywhere in the window opens the create menu.
-    if (ImGui::BeginPopupContextWindow("HierarchyContextMenu")) {
+    // Right-click in the window content opens the create menu.
+    if (BeginContentContextPopup("HierarchyContextMenu")) {
         if (ImGui::BeginMenu("Create 3D Object")) {
             for (const PrimitiveType type : kCreatableShapes) {
                 if (ImGui::MenuItem(ToString(type))) {
