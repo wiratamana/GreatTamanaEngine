@@ -971,7 +971,7 @@ TEST(ParseActivateTabQueryTests, IsCaseSensitive)
 
 TEST(BuildActivateTabResponseJsonTests, SuccessShape)
 {
-    const std::string body = BuildActivateTabResponseJson(true, true, "Profiler");
+    const std::string body = BuildActivateTabResponseJson(true, "Profiler");
     const nlohmann::json parsed = nlohmann::json::parse(body);
     EXPECT_EQ(parsed["success"], true);
     EXPECT_EQ(parsed["activated_tab"], "Profiler");
@@ -980,7 +980,7 @@ TEST(BuildActivateTabResponseJsonTests, SuccessShape)
 
 TEST(BuildActivateTabResponseJsonTests, FailureShape)
 {
-    const std::string body = BuildActivateTabResponseJson(false, false, "Profiler");
+    const std::string body = BuildActivateTabResponseJson(false, "Profiler");
     const nlohmann::json parsed = nlohmann::json::parse(body);
     EXPECT_EQ(parsed["success"], false);
     EXPECT_EQ(parsed["error"], "window 'Profiler' could not be opened");

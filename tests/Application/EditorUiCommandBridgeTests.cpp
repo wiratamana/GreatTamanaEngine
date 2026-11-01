@@ -17,12 +17,11 @@ EditorUiCommandRequest MakeActivateTabRequest(const std::string& tabName)
     return request;
 }
 
-EditorUiCommandResult MakeActivateTabResult(bool success, bool tabExists)
+EditorUiCommandResult MakeActivateTabResult(bool success)
 {
     EditorUiCommandResult result;
     result.kind = EditorUiCommandKind::ActivateTab;
     result.activateTab.success = success;
-    result.activateTab.tabExists = tabExists;
     return result;
 }
 
@@ -57,7 +56,7 @@ TEST(EditorUiCommandBridgeTest, SubmitAndWaitReturnsFulfilledResult)
         const auto peeked = bridge.TryPeekPendingCommand();
         ASSERT_TRUE(peeked.has_value());
         EXPECT_EQ(peeked->request.activateTab.tabName, "Profiler");
-        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeActivateTabResult(true, true)));
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeActivateTabResult(true)));
     });
 
     const auto start = std::chrono::steady_clock::now();
@@ -71,7 +70,6 @@ TEST(EditorUiCommandBridgeTest, SubmitAndWaitReturnsFulfilledResult)
     ASSERT_TRUE(result.result.has_value());
     EXPECT_EQ(result.result->kind, EditorUiCommandKind::ActivateTab);
     EXPECT_TRUE(result.result->activateTab.success);
-    EXPECT_TRUE(result.result->activateTab.tabExists);
     EXPECT_LT(elapsed, std::chrono::milliseconds(4000));
 }
 
@@ -111,7 +109,7 @@ TEST(EditorUiCommandBridgeTest, SubmitAndWaitReturnsAlreadyPendingWhenAnotherReq
 TEST(EditorUiCommandBridgeTest, FulfillCommandIsDroppedWhenNothingIsPending)
 {
     EditorUiCommandBridge bridge;
-    EXPECT_FALSE(bridge.FulfillCommand(1, MakeActivateTabResult(true, true)));
+    EXPECT_FALSE(bridge.FulfillCommand(1, MakeActivateTabResult(true)));
     EXPECT_FALSE(bridge.IsCommandPending());
 }
 
@@ -143,7 +141,7 @@ TEST(EditorUiCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAndDoesNotCorr
     EXPECT_TRUE(timedOut.timedOut);
     ASSERT_NE(idA, 0u);
 
-    EXPECT_FALSE(bridge.FulfillCommand(idA, MakeActivateTabResult(true, true)));
+    EXPECT_FALSE(bridge.FulfillCommand(idA, MakeActivateTabResult(true)));
 
     std::thread fulfiller([&bridge] {
         while (!bridge.IsCommandPending()) {
@@ -151,7 +149,7 @@ TEST(EditorUiCommandBridgeTest, LateFulfillmentAfterTimeoutIsInertAndDoesNotCorr
         }
         const auto peeked = bridge.TryPeekPendingCommand();
         ASSERT_TRUE(peeked.has_value());
-        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeActivateTabResult(true, true)));
+        EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeActivateTabResult(true)));
     });
 
     const EditorUiCommandBridge::SubmitResult fresh = bridge.SubmitAndWait(MakeActivateTabRequest("Jobs"), 5000);
@@ -183,7 +181,7 @@ TEST(EditorUiCommandBridgeTest, PendingStateIsObservableAndClearsAfterFulfillmen
     EXPECT_EQ(peeked->request.kind, EditorUiCommandKind::ActivateTab);
     EXPECT_EQ(peeked->request.activateTab.tabName, "Atmosphere");
 
-    EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeActivateTabResult(false, false)));
+    EXPECT_TRUE(bridge.FulfillCommand(peeked->id, MakeActivateTabResult(false)));
     requester.join();
 
     EXPECT_FALSE(bridge.IsCommandPending());

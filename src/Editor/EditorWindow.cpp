@@ -12,7 +12,7 @@ namespace {
 constexpr const char* kTabMenuId = "##EditorWindowMenu";
 } // namespace
 
-// True when ImGui will place the window inside a dock node (now, or from the saved layout, or by its default place).
+// True when ImGui has the window in a dock node (live, or from saved settings). Unknown windows float.
 bool EditorWindow::IsDockedNow() const
 {
     if (const ImGuiWindow* window = ImGui::FindWindowByName(m_name.c_str())) {
@@ -21,7 +21,7 @@ bool EditorWindow::IsDockedNow() const
     if (const ImGuiWindowSettings* saved = ImGui::FindWindowSettingsByID(ImHashStr(m_name.c_str()))) {
         return saved->DockId != 0;
     }
-    return m_dock != WindowDock::Floating;
+    return false;
 }
 
 // Right after Begin() the last item is this window's tab (docked) or title bar (floating).
@@ -54,7 +54,7 @@ void EditorWindow::Draw(EditorFrame& frame)
     }
 
     const ImGuiViewport* mainViewport = ImGui::GetMainViewport();
-    if (m_dock == WindowDock::Floating) {
+    if (!IsDockedNow()) {
         ImGui::SetNextWindowPos(mainViewport->GetCenter(), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     }
     if (m_defaultWidth > 0.0f && m_defaultHeight > 0.0f) {
@@ -74,7 +74,8 @@ void EditorWindow::Draw(EditorFrame& frame)
     windowClass.TabItemFlagsOverrideSet = ImGuiTabItemFlags_NoCloseButton;
     ImGui::SetNextWindowClass(&windowClass);
 
-    m_visible = ImGui::Begin(m_name.c_str(), &m_open, ExtraFlags() | ImGuiWindowFlags_NoCollapse);
+    const ImGuiWindowFlags flags = (ExtraFlags() | ImGuiWindowFlags_NoCollapse) & ~ImGuiWindowFlags_NoDocking;
+    m_visible = ImGui::Begin(m_name.c_str(), &m_open, flags);
     DrawTabMenu();
     if (m_visible) {
         OnGui(frame);

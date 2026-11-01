@@ -65,7 +65,7 @@ protected:
     // Runs instead of OnGui() when the window is closed or its tab is not selected.
     virtual void OnHidden(EditorFrame& /*frame*/) {}
 
-    // Extra ImGuiWindowFlags_* values. NoCollapse is always added and cannot be removed.
+    // Extra ImGuiWindowFlags_* values. NoCollapse is always added and NoDocking is always removed.
     virtual int ExtraFlags() const { return 0; }
 
 private:

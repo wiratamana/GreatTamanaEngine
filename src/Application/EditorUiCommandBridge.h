@@ -130,11 +130,9 @@ struct EditorUiCommandRequest {
     HierarchyActionCommand hierarchyAction;
 };
 
-// Outcome of one ActivateTab command. `tabExists` is false when the editor has no window with that name.
-// A name unknown to the registry is rejected before it reaches this bridge.
+// Outcome of one ActivateTab command. `success` is false when the editor has no window with that name.
 struct ActivateTabOutcome {
     bool success = false;
-    bool tabExists = false;
 };
 
 // Outcome of one SpawnInstanceGrid command. `success == false` covers a refused grid

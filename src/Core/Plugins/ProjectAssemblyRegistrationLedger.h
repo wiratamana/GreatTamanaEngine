@@ -1,31 +1,8 @@
 // src/Core/Plugins/ProjectAssemblyRegistrationLedger.h
-//
-// editor-core-separation-13 campaign (Project Assembly Hot Reload plan,
-// BIG-STEP 2), PHASE3. Records every render-pass debugName / editor-panel
-// name / ECS component typeName a SPECIFIC Project Assembly's own
-// GTE_RegisterProject call registered, with ZERO change required to that
-// Project Assembly's own authored code - Core::RegisterProjectRenderPassProvider()/
-// EditorPanelRegistry::RegisterWindow()/ComponentTypeRegistry::
-// RegisterDescriptor() each call this class's own RecordX() immediately
-// after doing their own real work, unconditionally, every time they are
-// called by ANYTHING (including the engine's own built-in startup
-// registrations) - RecordX() itself is a safe, silent no-op whenever no
-// BeginRecordingFor() bracket is currently active, which is true for every
-// one of the engine's own built-in registrations (they never run inside
-// such a bracket).
-//
-// Locking: every public method takes THIS CLASS'S OWN internal m_mutex -
-// deliberately NOT gte::GetHotReloadEngineStateMutex() (src/Core/Plugins/
-// HotReloadEngineStateMutex.h) - m_mutex only protects this class's own
-// m_activeProjectStack/m_entries data. A caller that also needs to guard
-// the WIDER engine state (ComponentTypeRegistry/EditorPanelRegistry/Core's
-// own render pipeline) around a RecordX()/UnregisterEverythingFor()/
-// PeekEntry() call is responsible for taking GetHotReloadEngineStateMutex()
-// itself, exactly like EditorHotReloadDebugCapability::GetLedgerEntry()
-// already does around its own PeekEntry() call - this class itself must
-// NEVER also lock GetHotReloadEngineStateMutex() internally, since that
-// non-recursive mutex is already held by that exact caller at the point it
-// calls in, which would deadlock immediately.
+// Records the render passes, windows and component types that each project assembly registers, so they can be
+// unregistered on unload. Recording is a no-op outside a BeginRecordingFor() bracket.
+// Locking: uses its own m_mutex only. Callers that also need GetHotReloadEngineStateMutex() must take it themselves;
+// this class must never lock it (the caller already holds it, so it would deadlock).
 #pragma once
 
 #include <mutex>
@@ -55,13 +32,7 @@ public:
     void BeginRecordingFor(const std::string& projectName);
     void EndRecording();
 
-    // Called by Core::RegisterProjectRenderPassProvider()/
-    // EditorPanelRegistry::RegisterWindow()/ComponentTypeRegistry::
-    // RegisterDescriptor() themselves, immediately after each does its own
-    // real work - ALWAYS, unconditionally, from every call site, including
-    // the engine's own built-in startup registrations. A safe, silent no-op
-    // whenever no BeginRecordingFor() bracket is currently active (the
-    // engine's own built-in registrations never run inside one).
+    // Called by each registry after it registers something. No-op when no BeginRecordingFor() bracket is active.
     void RecordRenderPass(const std::string& debugName);
     // editor-core-separation-23 campaign, PHASE4
     // (PHASE4_HOT_RELOAD_LEDGER_TEARDOWN_WIRING.md) - called by
@@ -109,19 +80,8 @@ public:
         std::vector<std::string> componentTypeNames;
     };
 
-    // The teardown step (Hazards 1/2 fix, BIG-STEP 0 Section 2) - walks
-    // `projectName`'s own recorded names, in REVERSE registration order,
-    // calling core.GetRenderPipelineForProjectAssemblies().Unregister() (see
-    // 3.3 below for the exact accessor this needs from Core),
-    // EditorPanelRegistry::Instance().UnregisterWindow(), and
-    // ComponentTypeRegistry::Instance().UnregisterDescriptor() for each, then
-    // erases `projectName`'s own ledger entry entirely (a fresh
-    // BeginRecordingFor(projectName) on the next load/reload starts from a
-    // genuinely empty slate). Idempotent - calling this for a projectName
-    // with no ledger entry (never loaded, or already torn down) is a safe,
-    // GTE_LOG_INFO-logged no-op, never a warning or crash - this is an
-    // expected, normal path a future BIG-STEP 3 campaign's own retry/failure
-    // handling relies on.
+    // Unregisters everything `projectName` recorded, in reverse order, then erases its entry.
+    // Safe no-op (logged) when there is no entry.
     void UnregisterEverythingFor(const std::string& projectName, Core& core);
 
     // Read-only peek at projectName's current ledger entry, for

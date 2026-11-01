@@ -1,6 +1,6 @@
 # Editor
 > How the editor is built: host, panels, bridges and the rules for adding UI. For anyone who changes `src/Editor/`.
-> Verified against code: 2026-11-01
+> Verified against code: 2026-11-01 (after REVIEW 1 fixes)
 
 ## TL;DR
 - There is one executable: `GreatTamanaEditor.exe`. `EditorHost` owns the main loop.
@@ -110,6 +110,7 @@ Every window below derives from `EditorWindow`. Open any of them from the Window
 - Floating window: X in the title bar. Docked window: no X; right-click the tab, then "Close Tab". No window can collapse. Every window can dock.
 - `Show()` opens, raises and (floating) centers. The Window menu, `GET /activate_tab` and `GET /panel_visible` use it.
 - Known limits: right-click on a background tab only selects it. A window registered later by hot reload floats until you dock it.
+- `TabItemFlagsOverrideSet` is an experimental ImGui field, so a new window can show an X on its tab for one frame.
 
 ## Key files
 | File (`src/Editor/...`) | Role |

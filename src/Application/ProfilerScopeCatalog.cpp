@@ -68,27 +68,12 @@ constexpr auto kRaw = std::to_array<Entry>({
     { "ClusterPart.Skip", "Skipping hidden clusters", "Finds mesh groups that are completely outside the camera view and skips them.", "", RenderPrepare, false },
     { "ClusterPart.Claim", "Handing objects to GPU drawing", "Tells the normal CPU draw which objects the GPU cluster path already draws.", "", RenderPrepare, false },
 
-    // Editor panels.
-    { "IEditorLayer::BuildUI", "Editor user interface", "Builds all editor panels for this frame. It is not part of the game.", "", EditorUi, false },
-    { "HierarchyPanel", "Hierarchy panel", "Draws the list of objects in the scene.", "", EditorUi, false },
-    { "Panel.DockspaceAndMenuBar", "Menu bar and layout", "Draws the menu bar and the panel layout.", "", EditorUi, false },
+    // Editor UI. Per-window "Panel.<window name>" rows are described by prefix.
+    { "IEditorLayer::BuildUI", "Editor user interface", "Builds all editor windows for this frame. It is not part of the game.", "", EditorUi, false },
+    { "Panel.DockspaceAndMenuBar", "Menu bar and layout", "Draws the menu bar and the window layout.", "", EditorUi, false },
     { "Panel.ProjectWindows", "Project windows", "Draws windows that belong to project code.", "", EditorUi, false },
     { "Panel.ViewDescriptors", "View pictures", "Prepares the pictures shown in the editor views.", "", EditorUi, false },
-    { "Panel.Inspector", "Inspector panel", "Draws the properties of the selected object.", "", EditorUi, false },
-    { "Panel.SceneView", "Scene view panel", "Shows the scene view picture and its tools.", "", EditorUi, false },
-    { "Panel.GameView", "Game view panel", "Shows the game view picture.", "", EditorUi, false },
-    { "Panel.Memory", "Memory panel", "Shows how much graphics memory is used.", "", EditorUi, false },
-    { "Panel.Profiler", "Profiler panel", "Draws this profiler.", "", EditorUi, false },
-    { "Panel.RenderGraph", "Render graph panel", "Shows the render passes and how they connect.", "", EditorUi, false },
-    { "Panel.RenderFeatures", "Render features panel", "Lists the render features and their settings.", "", EditorUi, false },
-    { "Panel.Jobs", "Jobs panel", "Shows work on the helper threads.", "", EditorUi, false },
-    { "Panel.Log", "Log panel", "Shows log messages.", "", EditorUi, false },
-    { "Panel.FrameDebugger", "Frame debugger panel", "Lets you look at one frame draw call by draw call.", "", EditorUi, false },
-    { "Panel.Project", "Project panel", "Shows the files of the project.", "", EditorUi, false },
-    { "Panel.BoneViewer", "Bone viewer", "Shows the bones of a model.", "", EditorUi, false },
-    { "Panel.ClusterViewer", "Cluster viewer", "Shows the clusters of a mesh.", "", EditorUi, false },
     { "Panel.SceneCameraAdapter", "Scene camera control", "Handles the camera of the scene view.", "", EditorUi, false },
-    { "Panel.Plugins", "Project panels", "Draws editor panels added by project code.", "", EditorUi, false },
 
     // Loading and tools.
     { "Project.StartScan", "Starting a project folder scan", "Asks a helper thread to look at the project files.", "", LoadingAndTools, false },

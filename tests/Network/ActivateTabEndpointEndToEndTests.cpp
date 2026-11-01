@@ -48,12 +48,11 @@ public:
     // While gated, requests stay pending (used by the timeout test).
     void SetGated(bool gated) { m_gated.store(gated); }
 
-    // Outcome reported for the next fulfilled request. Defaults to success with an existing tab.
-    void SetNextOutcome(bool success, bool tabExists)
+    // Outcome reported for the next fulfilled request. Defaults to success.
+    void SetNextOutcome(bool success)
     {
         std::lock_guard<std::mutex> lock(m_outcomeMutex);
         m_nextSuccess = success;
-        m_nextTabExists = tabExists;
     }
 
 private:
@@ -68,7 +67,6 @@ private:
                     {
                         std::lock_guard<std::mutex> lock(m_outcomeMutex);
                         result.activateTab.success = m_nextSuccess;
-                        result.activateTab.tabExists = m_nextTabExists;
                     }
                     m_bridge.FulfillCommand(pending->id, result);
                 }
@@ -82,7 +80,6 @@ private:
     std::atomic<bool> m_stop{ false };
     std::mutex m_outcomeMutex;
     bool m_nextSuccess = true;
-    bool m_nextTabExists = true;
     std::thread m_thread;
 };
 
@@ -128,7 +125,7 @@ protected:
 
 TEST_F(ActivateTabEndpointEndToEndTest, ActivateTabSucceedsWhenMainThreadReportsTabExists)
 {
-    m_standIn->SetNextOutcome(true, true);
+    m_standIn->SetNextOutcome(true);
 
     const httplib::Result res = m_client->Get("/activate_tab?name=Profiler");
 
@@ -142,7 +139,7 @@ TEST_F(ActivateTabEndpointEndToEndTest, ActivateTabSucceedsWhenMainThreadReports
 
 TEST_F(ActivateTabEndpointEndToEndTest, ActivateTabReturns409WhenMainThreadReportsTabDoesNotExistYet)
 {
-    m_standIn->SetNextOutcome(false, false);
+    m_standIn->SetNextOutcome(false);
 
     const httplib::Result res = m_client->Get("/activate_tab?name=Profiler");
 

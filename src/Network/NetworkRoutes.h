@@ -565,7 +565,7 @@ ParsedActivateTabQuery ParseActivateTabQuery(const std::string& nameParam);
 // GET /activate_tab body for every outcome except 400 and 503 (those use BuildGenericErrorResponseJson()).
 //   - success: {"success":true,"activated_tab":"<tabName>"}
 //   - failure (the registry knows the name, the editor layer does not): {"success":false,"error":"window '<tabName>' could not be opened"}
-std::string BuildActivateTabResponseJson(bool success, bool tabExists, const std::string& tabName);
+std::string BuildActivateTabResponseJson(bool success, const std::string& tabName);
 
 // 404 body for a well-formed but unknown name: {"success":false,"error":"unknown tab name '<tabName>' - see GET /list_tabs ..."}
 std::string BuildUnknownTabNameResponseJson(const std::string& tabName);

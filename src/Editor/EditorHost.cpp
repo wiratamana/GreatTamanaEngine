@@ -270,7 +270,6 @@ EditorUiCommandResult RunEditorUiCommand(const EditorUiCommandRequest& request, 
     switch (request.kind) {
     case EditorUiCommandKind::ActivateTab: {
         const TabActivationResult activation = layer.ActivateTab(request.activateTab.tabName);
-        result.activateTab.tabExists = activation.tabExists;
         result.activateTab.success = activation.tabExists;
         break;
     }

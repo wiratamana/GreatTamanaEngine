@@ -910,7 +910,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
 
         const ActivateTabOutcome& outcome = submit.result->activateTab;
         res.status = outcome.success ? 200 : 409;
-        res.set_content(BuildActivateTabResponseJson(outcome.success, outcome.tabExists, parsed.tabName), "application/json");
+        res.set_content(BuildActivateTabResponseJson(outcome.success, parsed.tabName), "application/json");
     });
 
     // POST /spawn_instance_grid: parse, check the UI command bridge, submit, map the outcome.

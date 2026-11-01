@@ -58,25 +58,10 @@ constexpr ExactCase kExactCases[] = {
     { "ClusterPart.Skip", ScopeCategory::RenderPrepare, false },
     { "ClusterPart.Claim", ScopeCategory::RenderPrepare, false },
     { "IEditorLayer::BuildUI", ScopeCategory::EditorUi, false },
-    { "HierarchyPanel", ScopeCategory::EditorUi, false },
     { "Panel.DockspaceAndMenuBar", ScopeCategory::EditorUi, false },
     { "Panel.ProjectWindows", ScopeCategory::EditorUi, false },
     { "Panel.ViewDescriptors", ScopeCategory::EditorUi, false },
-    { "Panel.Inspector", ScopeCategory::EditorUi, false },
-    { "Panel.SceneView", ScopeCategory::EditorUi, false },
-    { "Panel.GameView", ScopeCategory::EditorUi, false },
-    { "Panel.Memory", ScopeCategory::EditorUi, false },
-    { "Panel.Profiler", ScopeCategory::EditorUi, false },
-    { "Panel.RenderGraph", ScopeCategory::EditorUi, false },
-    { "Panel.RenderFeatures", ScopeCategory::EditorUi, false },
-    { "Panel.Jobs", ScopeCategory::EditorUi, false },
-    { "Panel.Log", ScopeCategory::EditorUi, false },
-    { "Panel.FrameDebugger", ScopeCategory::EditorUi, false },
-    { "Panel.Project", ScopeCategory::EditorUi, false },
-    { "Panel.BoneViewer", ScopeCategory::EditorUi, false },
-    { "Panel.ClusterViewer", ScopeCategory::EditorUi, false },
     { "Panel.SceneCameraAdapter", ScopeCategory::EditorUi, false },
-    { "Panel.Plugins", ScopeCategory::EditorUi, false },
     { "Project.StartScan", ScopeCategory::LoadingAndTools, false },
     { "Project.ApplyScan", ScopeCategory::LoadingAndTools, false },
     { "Scene.Load", ScopeCategory::LoadingAndTools, false },
@@ -115,8 +100,8 @@ TEST(ProfilerScopeCatalogTest, EveryExactNameHasItsListedText)
 
 TEST(ProfilerScopeCatalogTest, ExactNameBeatsPrefixRule)
 {
-    const ScopeInfo exact = DescribeScope("Panel.Profiler", ScopeLane::Main, ScopeOrigin::Engine);
-    EXPECT_EQ(exact.title, "Profiler panel");
+    const ScopeInfo exact = DescribeScope("Panel.ViewDescriptors", ScopeLane::Main, ScopeOrigin::Engine);
+    EXPECT_EQ(exact.title, "View pictures");
     const ScopeInfo prefix = DescribeScope("Panel.Sample", ScopeLane::Main, ScopeOrigin::Engine);
     EXPECT_NE(prefix.title.find("Sample"), std::string::npos);
 }

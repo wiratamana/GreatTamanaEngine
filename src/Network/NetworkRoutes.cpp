@@ -560,7 +560,7 @@ ParsedActivateTabQuery ParseActivateTabQuery(const std::string& nameParam)
     return result;
 }
 
-std::string BuildActivateTabResponseJson(bool success, bool /*tabExists*/, const std::string& tabName)
+std::string BuildActivateTabResponseJson(bool success, const std::string& tabName)
 {
     nlohmann::json body;
     body["success"] = success;
