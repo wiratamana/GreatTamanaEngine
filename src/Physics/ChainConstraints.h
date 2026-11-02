@@ -3,9 +3,8 @@
 
 namespace gte {
 
-// Keeps two particles `restLength` apart (mass-weighted position-based projection).
-// `correctionStrength` in 0..1 is the per-iteration relaxation factor.
-// No-op when both are pinned, their inverse masses sum to ~0, or they coincide.
+// Keeps two particles `restLength` apart (mass-weighted); `correctionStrength` 0..1 per iteration.
+// No-op when both are pinned, inverse masses sum to ~0, or they coincide.
 void SolveDistanceConstraint(VerletParticle& a, VerletParticle& b, float restLength, float correctionStrength = 1.0f) noexcept;
 
 // Blends the particle toward `animatedTargetPosition` by `stiffness01` (0 = free, 1 = snap). No-op when pinned.

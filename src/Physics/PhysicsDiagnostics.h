@@ -62,10 +62,8 @@ struct GroupSamples {
 // Mean and nearest-rank percentiles (index = ceil(p * n) - 1). Empty input gives zeros.
 MetricStats Summarize(const std::vector<float>& values);
 
-// Adds one frame of one chain to `groups` (key = JointGroupKey of the bone name) and to the "ALL" entry.
-// Root children with an effective limit <= 1 degree also go to "WELDED_ROOT_CHILDREN" (dist and seg_dir_err only).
-// effectiveLimitRadians and boneNames are index-aligned with joints (pi = free).
-// prev1/prev2 are the two frames before `cur` (null = accel_local is skipped).
+// Adds one chain frame to `groups` (key = JointGroupKey) and "ALL"; welded root children also to "WELDED_ROOT_CHILDREN".
+// Spans are index-aligned with joints; prev1/prev2 are earlier frames (null skips accel_local).
 void AccumulateChainFrame(const DynamicChainDefinition& chain, std::span<const std::string> boneNames,
     std::span<const float> effectiveLimitRadians, const ChainFrameSample& cur, const ChainFrameSample* prev1,
     const ChainFrameSample* prev2, float renderHz, std::map<std::string, GroupSamples>& groups);

@@ -675,7 +675,6 @@ PhysicsDebugCommandResult DoRun(Game& game, const PhysicsDebugCommandRequest& re
         const SkeletalAnimator* before = registry.TryGetComponent<SkeletalAnimator>(target.entity);
         const float frameBefore = before != nullptr ? before->frame : 0.0f;
 
-        recorder.Forget(target.entity);
         game.StepSimulationHeadless(deltaSeconds);
 
         const SkeletalAnimator* after = registry.TryGetComponent<SkeletalAnimator>(target.entity);

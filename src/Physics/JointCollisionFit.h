@@ -10,9 +10,8 @@ namespace gte {
 // Distance a fresh particle at `position` with `radius` is moved by `collider` (0 when below 1e-5).
 float ProbeCollisionPush(const Vec3& position, float radius, const Collider& collider) noexcept;
 
-// Fits the collision of every joint of `chain` to the bind pose (bindJointPositions is index-aligned with joints).
-// Per collider: no push keeps the radius, a push at radius 0 ignores the collider, else the radius shrinks to fit.
-// collisionFitRadius stays -1 when no collider touches the joint. No-op when the span size does not match.
+// Fits each joint's collision radius to the bind pose (shrinks it until no collider pushes; -1 = untouched).
+// No-op when the span size does not match the joints.
 void FitJointCollisionToBindPose(
     DynamicChainDefinition& chain, std::span<const Vec3> bindJointPositions, std::span<const Collider> bindColliders);
 

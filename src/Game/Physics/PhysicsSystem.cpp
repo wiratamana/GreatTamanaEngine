@@ -23,7 +23,6 @@
 #include <cassert>
 #include <chrono>
 #include <cstdint>
-#include <unordered_map>
 #include <unordered_set>
 
 namespace gte {
