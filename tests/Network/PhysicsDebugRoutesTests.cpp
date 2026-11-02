@@ -165,7 +165,6 @@ TEST(PhysicsDebugImageQueryTests, DefaultsAndLimits)
     EXPECT_FALSE(full.request.showJoints);
     EXPECT_TRUE(full.request.showLimits);
     EXPECT_EQ(full.request.highlight, "Q");
-    EXPECT_EQ(full.format, "json");
 
     EXPECT_FALSE(ParsePhysicsDebugImageQuery({}).valid);
     EXPECT_FALSE(ParsePhysicsDebugImageQuery({ { "entity", "A" }, { "view", "left" } }).valid);

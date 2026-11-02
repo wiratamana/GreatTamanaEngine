@@ -68,6 +68,10 @@ struct DynamicChainBatchContext {
     bool interpolate;
     float alpha;
 
+    // Frame length and the accumulator before this frame's steps; place each step inside the frame.
+    float frameDeltaSeconds;
+    float accumulatedBeforeSeconds;
+
     // One recorder slot per chain (entries may be null); null when the recorder is off.
     const std::vector<ChainFrameSample*>* recorderSlots;
 };
@@ -122,25 +126,54 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
 
         Mat4 anchorInverse;
         const bool interpolate = context.interpolate && rootWorld.TryInverse(anchorInverse);
-        if (!context.interpolate) {
+        if (!interpolate) {
             state.prevStepLocal.clear();
             state.currStepLocal.clear();
+            state.prevAnimatedWorld.clear();
         }
+
+        // Each step sees the animated pose of its own time inside the frame, not the frame-end pose.
+        const std::size_t jointCount = chain.jointBoneIndices.size();
+        const bool blendTargets = interpolate && !context.frozen && context.stepCount > 0 && context.frameDeltaSeconds > 0.0f
+            && state.prevAnimatedWorld.size() == jointCount
+            && Length(rootWorldPos - state.prevAnchorWorld.TransformPoint(Vec3::Zero())) <= chain.maxPlausibleRootDelta;
 
         StepDiagnostics frameDiag;
         if (!context.frozen) {
             for (int step = 0; step < context.stepCount; ++step) {
+                Vec3 stepRootPos = rootWorldPos;
+                Mat4 stepAnchorInverse = anchorInverse;
+                const std::vector<Vec3>* stepTargets = &animatedJointWorldPositions;
+                if (blendTargets) {
+                    const float stepTime = static_cast<float>(step + 1) * context.fixedTimestepSeconds - context.accumulatedBeforeSeconds;
+                    const float fraction = std::clamp(stepTime / context.frameDeltaSeconds, 0.0f, 1.0f);
+                    state.scratchTargets.resize(jointCount);
+                    for (std::size_t i = 0; i < jointCount; ++i) {
+                        state.scratchTargets[i] = Lerp(state.prevAnimatedWorld[i], animatedJointWorldPositions[i], fraction);
+                    }
+                    const Mat4 stepAnchor = BlendAnchorFrames(state.prevAnchorWorld, rootWorld, fraction);
+                    stepRootPos = stepAnchor.TransformPoint(Vec3::Zero());
+                    stepTargets = &state.scratchTargets;
+                    if (!stepAnchor.TryInverse(stepAnchorInverse)) {
+                        stepAnchorInverse = anchorInverse;
+                    }
+                }
+
                 StepDiagnostics stepDiag;
                 StepOptions options = context.options;
                 options.diagnostics = &stepDiag;
                 const bool wasInitialized = state.initialized;
-                StepDynamicChain(chain, rootWorldPos, animatedJointWorldPositions, state, context.fixedTimestepSeconds,
+                StepDynamicChain(chain, stepRootPos, *stepTargets, state, context.fixedTimestepSeconds,
                     context.gravity, context.wind, *context.resolvedColliders, options);
                 AddDiagnostics(frameDiag, stepDiag);
                 if (interpolate) {
-                    StoreStepLocal(state, anchorInverse, !wasInitialized || stepDiag.reseeds > 0);
+                    StoreStepLocal(state, stepAnchorInverse, !wasInitialized || stepDiag.reseeds > 0);
                 }
             }
+        }
+        if (interpolate) {
+            state.prevAnimatedWorld = animatedJointWorldPositions;
+            state.prevAnchorWorld = rootWorld;
         }
 
         // Always re-apply the last particles, so a frame without a step never shows the raw animated pose.
@@ -365,6 +398,7 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
         }
 
         // A rig with no new step this frame must still re-apply its last particles (no pop to the animated pose).
+        const float accumulatedBefore = rig.frozen ? 0.0f : rig.accumulatedSeconds;
         int stepCount = 0;
         if (rig.frozen) {
             rig.accumulatedSeconds = 0.0f; // Never bank time while frozen.
@@ -416,7 +450,7 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
         DynamicChainBatchContext context{ &model->skeleton, &model->chains, &rig.chainStates, &resolvedPose->pose, stepCount,
             m_globalSettings.fixedTimestepSeconds, m_globalSettings.gravity, m_globalSettings.wind, entityWorldMatrix,
             entityWorldMatrixInverse, rig.frozen, &resolvedColliders, stepOptions, m_globalSettings.interpolateOutput, alpha,
-            recordThis ? &recorderSlots : nullptr };
+            static_cast<float>(deltaSeconds), accumulatedBefore, recordThis ? &recorderSlots : nullptr };
 
         if (totalJoints >= kMinDynamicJointsToParallelize && model->chains.size() > 1) {
             Jobs::JobHandle chainHandle;

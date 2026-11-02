@@ -2,6 +2,7 @@
 
 #include "ChainConstraints.h"
 #include "CollisionFilter.h"
+#include "DynamicChainDefinition.h"
 #include "TimeScaling.h"
 #include "VerletIntegration.h"
 #include "../Math/MathTypes.h"
@@ -19,6 +20,9 @@ namespace {
 constexpr float kMinMass = 1e-4f;
 // A collision move longer than this counts as a push.
 constexpr float kPushEpsilon = 1e-6f;
+// Runaway bound from the animated pose: factor * longest root path, never below the minimum (model units).
+constexpr float kDivergenceFactor = 10.0f;
+constexpr float kMinDivergenceBound = 100.0f;
 
 void SeedParticlesFromAnimatedPose(const DynamicChainDefinition& definition,
     const std::vector<Vec3>& animatedJointWorldPositions, DynamicChainRuntimeState& state, std::size_t jointCount)
@@ -43,6 +47,61 @@ bool IsIgnoredCollider(const std::vector<std::uint16_t>& sortedIgnored, std::siz
 {
     return !sortedIgnored.empty() && colliderIndex <= 0xFFFFu
         && std::binary_search(sortedIgnored.begin(), sortedIgnored.end(), static_cast<std::uint16_t>(colliderIndex));
+}
+
+// Longest rest-length path from the anchor to any joint.
+float MaxRootPathLength(const DynamicChainDefinition& definition, std::vector<float>& scratch)
+{
+    const std::size_t jointCount = definition.restLengths.size();
+    scratch.resize(jointCount);
+    float longest = 0.0f;
+    for (std::size_t i = 0; i < jointCount; ++i) {
+        const std::int32_t parent = definition.parentJointIndex[i];
+        const float base = (parent >= 0 && static_cast<std::size_t>(parent) < i) ? scratch[static_cast<std::size_t>(parent)] : 0.0f;
+        scratch[i] = base + definition.restLengths[i];
+        longest = std::max(longest, scratch[i]);
+    }
+    return longest;
+}
+
+// Rebuilds the chain parent-first: each joint keeps its direction, clamped into its cone, at exactly its rest length.
+// Lengths stay exact and no joint is pulled back by its child, so the pass adds no energy.
+void ApplyBendCone(const DynamicChainDefinition& definition, const Vec3& rootWorldPosition,
+    const std::vector<Vec3>& animated, DynamicChainRuntimeState& state, std::uint32_t* clampedJoints)
+{
+    const std::size_t jointCount = state.particles.size();
+    state.scratchPositions.resize(jointCount);
+    for (std::size_t i = 0; i < jointCount; ++i) {
+        state.scratchPositions[i] = state.particles[i].position;
+    }
+
+    for (std::size_t i = 0; i < jointCount; ++i) {
+        const std::int32_t parent = definition.parentJointIndex[i];
+        const bool isRootChild = parent < 0;
+        const std::size_t parentIndex = isRootChild ? 0 : static_cast<std::size_t>(parent);
+        const Vec3 parentBefore = isRootChild ? rootWorldPosition : state.scratchPositions[parentIndex];
+        const Vec3 parentNow = isRootChild ? rootWorldPosition : state.particles[parentIndex].position;
+        const Vec3 parentAnim = isRootChild ? rootWorldPosition : animated[parentIndex];
+
+        const Vec3 offset = state.scratchPositions[i] - parentBefore;
+        const float length = Length(offset);
+        Vec3 direction = Vec3::Down();
+        if (std::isfinite(length) && length > kEpsilon) {
+            direction = offset / length;
+        } else {
+            const Vec3 animatedSegment = animated[i] - parentAnim;
+            const float animatedLength = Length(animatedSegment);
+            if (animatedLength > kEpsilon) {
+                direction = animatedSegment / animatedLength;
+            }
+        }
+
+        VerletParticle& particle = state.particles[i];
+        particle.position = parentNow + direction * definition.restLengths[i];
+        if (SolveBendLimit(particle, parentNow, parentAnim, animated[i], state.scratchLimits[i]) && clampedJoints != nullptr) {
+            ++*clampedJoints;
+        }
+    }
 }
 
 } // namespace
@@ -122,12 +181,14 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
             particle, fixedDeltaTime, acceleration, ScaleStepFraction(baseDamping, fixedDeltaTime, options.dampingMultiplier));
     }
 
-    const bool bendLimitsActive = options.bendLimitsEnabled;
-    if (bendLimitsActive) {
+    // The cone pass only runs when at least one joint has a finite limit.
+    bool coneActive = false;
+    if (options.bendLimitsEnabled) {
         ComputeEffectiveBendLimits(definition, options, state.scratchLimits);
+        coneActive = std::any_of(state.scratchLimits.begin(), state.scratchLimits.end(), [](float limit) { return limit < kPi; });
     }
 
-    // Rods, braces, then the bend cone, repeated.
+    // Rods and braces, repeated.
     const int iterations = static_cast<int>(definition.constraintIterations);
     for (int iter = 0; iter < iterations; ++iter) {
         VerletParticle anchor;
@@ -154,21 +215,6 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
             SolveDistanceConstraint(state.particles[static_cast<std::size_t>(extra.jointIndexA)],
                 state.particles[static_cast<std::size_t>(extra.jointIndexB)], extra.restLength);
         }
-
-        if (bendLimitsActive) {
-            const bool countClamps = (iter == 0); // each joint counts at most once per call.
-            for (std::size_t i = 0; i < jointCount; ++i) {
-                const std::int32_t parentJoint = definition.parentJointIndex[i];
-                const bool isRootChild = parentJoint < 0;
-                const Vec3& parentSim = isRootChild ? rootWorldPosition : state.particles[static_cast<std::size_t>(parentJoint)].position;
-                const Vec3& parentAnim = isRootChild ? rootWorldPosition : animatedJointWorldPositions[static_cast<std::size_t>(parentJoint)];
-                const bool moved = SolveBendLimit(state.particles[i], parentSim, parentAnim, animatedJointWorldPositions[i],
-                    state.scratchLimits[i]);
-                if (moved && countClamps && diagnostics != nullptr) {
-                    ++diagnostics->bendClampedJoints;
-                }
-            }
-        }
     }
 
     // Soft pull toward the animated pose, once per step.
@@ -177,9 +223,19 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
             ScaleStepFraction(definition.jointSettings[i].stiffness, fixedDeltaTime, options.stiffnessMultiplier));
     }
 
-    // Collision has the final say.
+    // Cone first, so collision sees a legal pose.
+    if (coneActive) {
+        ApplyBendCone(definition, rootWorldPosition, animatedJointWorldPositions, state,
+            diagnostics != nullptr ? &diagnostics->bendClampedJoints : nullptr);
+    }
+
+    // Collision; welded joints cannot move, so they skip it.
+    bool anyPushed = false;
     if (definition.collisionEnabled && !colliders.empty()) {
         for (std::size_t i = 0; i < jointCount; ++i) {
+            if (coneActive && IsWeldedLimit(state.scratchLimits[i])) {
+                continue;
+            }
             const DynamicJointSettings& js = definition.jointSettings[i];
             VerletParticle& particle = state.particles[i];
             particle.collisionRadius
@@ -195,9 +251,10 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
                 }
                 SolveCollision(particle, collider);
             }
-            if (diagnostics != nullptr) {
-                const float pushed = Length(particle.position - before);
-                if (pushed > kPushEpsilon) {
+            const float pushed = Length(particle.position - before);
+            if (pushed > kPushEpsilon) {
+                anyPushed = true;
+                if (diagnostics != nullptr) {
                     ++diagnostics->collisionPushedParticles;
                     diagnostics->collisionPushDistanceSum += pushed;
                 }
@@ -205,15 +262,27 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
         }
     }
 
-    // Reset only the broken particle to its animated target.
+    // The cone has the final say.
+    if (coneActive && anyPushed) {
+        ApplyBendCone(definition, rootWorldPosition, animatedJointWorldPositions, state, nullptr);
+    }
+
+    // A non-finite or runaway particle reseeds the whole chain.
+    const float maxPath = MaxRootPathLength(definition, state.scratchPathLength);
+    const float divergenceBound = std::max(maxPath * kDivergenceFactor, kMinDivergenceBound);
+    std::uint32_t diverged = 0;
     for (std::size_t i = 0; i < jointCount; ++i) {
-        VerletParticle& particle = state.particles[i];
-        if (!IsFinite(particle.position)) {
-            particle.position = animatedJointWorldPositions[i];
-            particle.previousPosition = animatedJointWorldPositions[i];
-            if (diagnostics != nullptr) {
-                ++diagnostics->nanGuardHits;
-            }
+        const Vec3& position = state.particles[i].position;
+        if (!IsFinite(position) || !(Length(position - animatedJointWorldPositions[i]) <= divergenceBound)) {
+            ++diverged;
+        }
+    }
+    if (diverged > 0) {
+        SeedParticlesFromAnimatedPose(definition, animatedJointWorldPositions, state, jointCount);
+        ++state.reseedCount;
+        if (diagnostics != nullptr) {
+            ++diagnostics->reseeds;
+            diagnostics->nanGuardHits += diverged;
         }
     }
 

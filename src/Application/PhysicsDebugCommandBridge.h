@@ -58,7 +58,6 @@ struct PhysicsDebugCommandResult {
     PhysicsDebugSnapshot snapshot;
     PhysicsAnimatorReport animator; // Play and Seek.
     PhysicsCaptureStatus capture;   // Capture.
-    std::string entityName;         // resolved entity name echoed back.
     std::vector<std::pair<std::string, std::string>> settings; // Set and Preset.
 };
 

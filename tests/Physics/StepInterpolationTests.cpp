@@ -43,4 +43,28 @@ TEST(StepInterpolationTests, RotatedAndTranslatedAnchorTransformsTheResult)
     EXPECT_FALSE(ApproximatelyEqual(expected, Vec3(2.0f, 2.0f, 3.0f), 1e-3f));
 }
 
+TEST(StepInterpolationTests, BlendAnchorFramesIsExactForTranslationsAndClamped)
+{
+    const Mat4 from = Mat4::Translation(Vec3(0.0f, 0.0f, 0.0f));
+    const Mat4 to = Mat4::Translation(Vec3(4.0f, 2.0f, 0.0f));
+
+    EXPECT_TRUE(ApproximatelyEqual(BlendAnchorFrames(from, to, 0.25f).TransformPoint(Vec3::Zero()), Vec3(1.0f, 0.5f, 0.0f)));
+    EXPECT_TRUE(ApproximatelyEqual(BlendAnchorFrames(from, to, -1.0f), from));
+    EXPECT_TRUE(ApproximatelyEqual(BlendAnchorFrames(from, to, 2.0f), to));
+    EXPECT_TRUE(ApproximatelyEqual(BlendAnchorFrames(from, to, std::numeric_limits<float>::quiet_NaN()), from));
+}
+
+TEST(StepInterpolationTests, BlendAnchorFramesOfASmallRotationStaysRigid)
+{
+    const Mat4 from = Mat4::TRS(Vec3::Zero(), Quat::FromEulerDegrees(0.0f, 0.0f, 0.0f), Vec3::One());
+    const Mat4 to = Mat4::TRS(Vec3(1.0f, 0.0f, 0.0f), Quat::FromEulerDegrees(0.0f, 4.0f, 0.0f), Vec3::One());
+    const Mat4 half = BlendAnchorFrames(from, to, 0.5f);
+
+    // A unit vector keeps its length to better than 0.1 percent.
+    EXPECT_NEAR(Length(half.TransformVector(Vec3(0.0f, 0.0f, 1.0f))), 1.0f, 1e-3f);
+    Mat4 inverse;
+    ASSERT_TRUE(half.TryInverse(inverse));
+    EXPECT_TRUE(ApproximatelyEqual(inverse.TransformPoint(half.TransformPoint(Vec3(3.0f, 2.0f, 1.0f))), Vec3(3.0f, 2.0f, 1.0f), 1e-4f));
+}
+
 } // namespace gte

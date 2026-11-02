@@ -81,7 +81,6 @@ bool ResolveTarget(Game& game, const std::string& name, Target& target, PhysicsD
         return false;
     }
     target = { entity, rig, model };
-    result.entityName = name;
     return true;
 }
 
@@ -544,6 +543,14 @@ PhysicsDebugCommandResult DoMetrics(Game& game, const PhysicsDebugCommandRequest
     }
 
     result.run.metrics = accumulator.Finish(renderHz);
+    if (!request.groupFilter.empty()) {
+        std::erase_if(result.run.metrics.groups,
+            [&request](const GroupMetricsReport& group) { return group.key != request.groupFilter; });
+        if (result.run.metrics.groups.empty()) {
+            Fail(result, 400, "unknown group '" + request.groupFilter + "'", "group");
+            return result;
+        }
+    }
     FillBindPoseMetrics(result.run.metrics, *target.model, settings);
     result.run.settingsUsed = DescribeSettings(settings);
     Succeed(result);

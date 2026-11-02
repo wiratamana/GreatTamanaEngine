@@ -3005,9 +3005,6 @@ ParsedPhysicsDebugImageQuery ParsePhysicsDebugImageQuery(const PhysicsDebugQuery
     if (const auto found = values.find("highlight"); found != values.end()) {
         request.highlight = found->second;
     }
-    if (const auto found = values.find("format"); found != values.end()) {
-        result.format = found->second;
-    }
     result.valid = true;
     return result;
 }

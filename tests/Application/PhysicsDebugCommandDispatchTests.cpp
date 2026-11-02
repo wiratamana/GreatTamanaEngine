@@ -259,6 +259,33 @@ TEST(PhysicsDebugCommandDispatchTests, LiveCaptureFeedsMetrics)
     EXPECT_NEAR(metrics.run.metrics.renderHz, 60.0f, 0.5f);
 }
 
+TEST(PhysicsDebugCommandDispatchTests, MetricsGroupFilterKeepsOnlyTheNamedGroup)
+{
+    Scene scene;
+    PhysicsDebugCommandRequest capture;
+    capture.captureEnabled = true;
+    capture.windowFrames = 20;
+    ASSERT_TRUE(scene.Run(PhysicsDebugCommandKind::Capture, capture).success);
+    for (int i = 0; i < 8; ++i) {
+        scene.game.StepSimulationHeadless(1.0 / 60.0);
+    }
+    const PhysicsDebugCommandResult all = scene.Run(PhysicsDebugCommandKind::Metrics, scene.ForEntity());
+    ASSERT_TRUE(all.success) << all.errorMessage;
+    ASSERT_FALSE(all.run.metrics.groups.empty());
+
+    PhysicsDebugCommandRequest filtered = scene.ForEntity();
+    filtered.groupFilter = all.run.metrics.groups[0].key;
+    const PhysicsDebugCommandResult one = scene.Run(PhysicsDebugCommandKind::Metrics, filtered);
+    ASSERT_TRUE(one.success) << one.errorMessage;
+    ASSERT_EQ(one.run.metrics.groups.size(), 1u);
+    EXPECT_EQ(one.run.metrics.groups[0].key, filtered.groupFilter);
+
+    filtered.groupFilter = "NoSuchGroup";
+    const PhysicsDebugCommandResult unknown = scene.Run(PhysicsDebugCommandKind::Metrics, filtered);
+    EXPECT_EQ(unknown.httpStatus, 400);
+    EXPECT_EQ(unknown.errorKey, "group");
+}
+
 TEST(PhysicsDebugCommandDispatchTests, RunValidatesItsInput)
 {
     Scene scene;

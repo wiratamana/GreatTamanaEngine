@@ -7,6 +7,10 @@
 
 namespace gte {
 
+// An effective bend limit at or below this means the joint is welded to the animated pose.
+inline constexpr float kWeldLimitRadians = DegToRad(1.0f);
+constexpr bool IsWeldedLimit(float limitRadians) noexcept { return limitRadians <= kWeldLimitRadians; }
+
 // Per-joint tuning of one simulated bone.
 struct DynamicJointSettings {
     // Fraction of velocity removed per 1/60 s step (0..1).

@@ -1443,12 +1443,11 @@ struct ParsedPhysicsDebugJointsQuery {
 ParsedPhysicsDebugJointsQuery ParsePhysicsDebugJointsQuery(const PhysicsDebugQueryParams& params);
 
 // GET /physics_debug/image?entity=N[&view][&mode][&width][&height][&colliders][&joints][&limits][&highlight][&format].
-// `format` is only passed through; ResolveCaptureResponseFormat() decides the reply shape.
+// `format` is validated as a known key only; the route picks the reply shape itself.
 struct ParsedPhysicsDebugImageQuery {
     bool valid = false;
     std::string errorMessage;
     PhysicsDebugImageRequest request;
-    std::string format;
 };
 ParsedPhysicsDebugImageQuery ParsePhysicsDebugImageQuery(const PhysicsDebugQueryParams& params);
 

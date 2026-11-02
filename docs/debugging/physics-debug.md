@@ -212,13 +212,13 @@ Samples are taken after the physics update wrote the pose. Units are model units
 | `abs_stretch` | `abs(segment length / rest length - 1)`. How much a rod is stretched or squashed. |
 | `writeback_err` | Distance between the final bone position (forward kinematics) and the display position. Loss of the position-to-rotation step. |
 | `accel_local` | Second difference of the joint position in anchor space, times `render_hz` squared. Body motion removed, so it shows cloth jitter only. |
-| `collision.pushed_particles_per_frame` | Joints moved by collision, per render frame. |
+| `collision.pushed_particles_per_frame` | Joints moved by collision, summed over all fixed steps of one render frame (2 steps at 120 Hz and 60 fps), then averaged per frame. Not per step. Welded joints skip collision. |
 | `collision.bind_pose_penetrating_joints` | Joints that sit inside a collider in the bind pose (raw radius). |
 | `collision.bind_pose_pushed_joints` | Same, with the radius fit and ignore list that are active now. |
 | `bend.clamped_joints_per_frame` | Joints the bend cone had to move. |
 | `steps_histogram` | Render frames with 0, 1, 2 and 3 or more fixed steps. |
-| `reseed_count` | Re-seeds after the first seed (teleport guard). Should be 0. |
-| `nan_count` | NaN guard hits. Must be 0. |
+| `reseed_count` | Re-seeds after the first seed: teleport guard or divergence guard. Should be 0. |
+| `nan_count` | Particles the divergence guard caught (not finite, or farther than 10 times the longest root path, at least 100 units, from the animated pose). Must be 0. |
 | `welded_root_children` | Root children with an effective limit of 1 degree or less. |
 
 Statistics: `p50`, `p95`, `p99` are nearest rank (`index = ceil(p * n) - 1` in the sorted list). `max` is the largest sample.

@@ -1,5 +1,6 @@
 #pragma once
 #include "VerletParticle.h"
+#include "../Math/Mat4.h"
 #include "../Math/Vec3.h"
 
 #include <cstdint>
@@ -22,12 +23,19 @@ struct DynamicChainRuntimeState {
     // Re-seeds after the first seed since the last reset.
     std::uint32_t reseedCount = 0;
 
-    // Scratch for the effective bend limits (reused every step).
-    std::vector<float> scratchLimits;
-
     // Particle positions in the anchor frame after the previous and the last fixed step.
     std::vector<Vec3> prevStepLocal;
     std::vector<Vec3> currStepLocal;
+
+    // Animated joint positions and anchor matrix of the previous render frame (empty = none yet).
+    std::vector<Vec3> prevAnimatedWorld;
+    Mat4 prevAnchorWorld = Mat4::Identity();
+
+    // Scratch reused every step so the solver never allocates after the first call.
+    std::vector<float> scratchLimits;
+    std::vector<float> scratchPathLength;
+    std::vector<Vec3> scratchPositions;
+    std::vector<Vec3> scratchTargets;
 };
 
 } // namespace gte
