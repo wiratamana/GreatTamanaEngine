@@ -76,7 +76,7 @@ void FitJointCollisionToBindPose(
         }
 
         if (anyFit) {
-            joint.collisionFitRadius = fitted;
+            joint.collisionFitRadius = fitted * kCollisionFitSafety;
         }
     }
 }

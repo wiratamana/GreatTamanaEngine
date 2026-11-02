@@ -277,9 +277,10 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
         // Alternate collision and cone until the pose is outside the colliders and inside the cones.
         // The cone always runs last, so it keeps the final say when no pose satisfies both.
         bool moved = collideAll(true);
-        for (int round = 0; coneActive && moved;) {
+        int rounds = 0;
+        while (coneActive && moved) {
             ApplyBendCone(definition, rootWorldPosition, animatedJointWorldPositions, state, nullptr);
-            if (++round >= kMaxCollisionConeRounds) {
+            if (++rounds >= kMaxCollisionConeRounds) {
                 break;
             }
             moved = collideAll(false);

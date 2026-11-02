@@ -86,17 +86,22 @@ void AddDiagnostics(StepDiagnostics& sum, const StepDiagnostics& add) noexcept
     sum.nanGuardHits += add.nanGuardHits;
 }
 
-// Stores the particle positions in the anchor frame; keeps the two latest steps.
+// Stores this step's particles in the anchor frame as a display knot: the mean of the last two raw steps.
+// A welded joint has the same anchor-local position every step, so the mean is exact for it.
 void StoreStepLocal(DynamicChainRuntimeState& state, const Mat4& anchorInverse, bool resetHistory)
 {
     const std::size_t count = state.particles.size();
-    const bool restart = resetHistory || state.currStepLocal.size() != count || state.prevStepLocal.size() != count;
+    const bool restart = resetHistory || state.currStepLocal.size() != count || state.prevStepLocal.size() != count
+        || state.lastStepLocal.size() != count;
     if (!restart) {
         state.prevStepLocal.swap(state.currStepLocal);
     }
     state.currStepLocal.resize(count);
+    state.lastStepLocal.resize(count);
     for (std::size_t i = 0; i < count; ++i) {
-        state.currStepLocal[i] = anchorInverse.TransformPoint(state.particles[i].position);
+        const Vec3 local = anchorInverse.TransformPoint(state.particles[i].position);
+        state.currStepLocal[i] = restart ? local : (state.lastStepLocal[i] + local) * 0.5f;
+        state.lastStepLocal[i] = local;
     }
     if (restart) {
         state.prevStepLocal = state.currStepLocal;
@@ -130,6 +135,7 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
         if (!interpolate) {
             state.prevStepLocal.clear();
             state.currStepLocal.clear();
+            state.lastStepLocal.clear();
             state.prevAnimatedLocal.clear();
         }
 

@@ -96,7 +96,7 @@ Reply:
  "limit_violation_deg":STATS,"abs_stretch":STATS,"writeback_err":STATS,"accel_local":STATS}],
  "all":{"...same fields..."},
  "welded_root_children":{"joints":15,"dist_from_animated":STATS,"seg_dir_err_deg":STATS},
-"collision":{"pushed_particles_per_frame":0,"raw_pushed_particles_per_frame":0,"mean_push_distance":0,"bind_pose_penetrating_joints":23,"bind_pose_pushed_joints":0},
+ "collision":{"pushed_particles_per_frame":0,"raw_pushed_particles_per_frame":0,"mean_push_distance":0,"bind_pose_penetrating_joints":23,"bind_pose_pushed_joints":0},
  "bend":{"clamped_joints_per_frame":0},"reseed_count":0,"nan_count":0,"physics_ms":{"median":0.4,"p95":0.6},
  "trace":[],"snapshots":[]}
 ```
@@ -211,11 +211,12 @@ Samples are taken after the physics update wrote the pose. Units are model units
 | `limit_violation_deg` | `max(0, seg_dir_err_deg - effective limit)`. How far the segment leaves its cone. |
 | `abs_stretch` | `abs(segment length / rest length - 1)`. How much a rod is stretched or squashed. |
 | `writeback_err` | Distance between the final bone position (forward kinematics) and the display position. Loss of the position-to-rotation step. |
-| `accel_local` | Second difference of the joint position in anchor space, times `render_hz` squared. Body motion removed, so it shows cloth jitter only. |
+| `accel_local` | Second difference of the joint position in anchor space, times `render_hz` squared. Body motion removed, so it shows cloth jitter only. Welded groups show the float noise of the position-to-rotation step (`acos` near 0 in `ApplyDynamicChainPhysicsToPose`) times `render_hz` squared, so their ratio between render rates is not a solver quality number. |
 | `collision.pushed_particles_per_frame` | Joints moved by collision that are still outside every collider after the final bend cone, summed over all fixed steps of one render frame, then averaged per frame. Not per step. Welded joints skip collision. A push the cone undoes (no place outside the collider inside the cone) is not counted. |
 | `collision.raw_pushed_particles_per_frame` | Same sum, but every joint collision moved, whether or not the cone undid it. Equal to the counted value when bend limits are off. |
 | `collision.bind_pose_penetrating_joints` | Joints that sit inside a collider in the bind pose (raw radius). |
 | `collision.bind_pose_pushed_joints` | Same, with the radius fit and ignore list that are active now. |
+| `collision_fit_radius` (per joint) | Half of the largest radius that no collider pushes at the bind pose. The slack keeps a joint that rests on a collider face from being pushed every step. |
 | `bend.clamped_joints_per_frame` | Joints the bend cone had to move. |
 | `steps_histogram` | Render frames with 0, 1, 2 and 3 or more fixed steps. |
 | `reseed_count` | Re-seeds after the first seed: teleport guard or divergence guard. Should be 0. |

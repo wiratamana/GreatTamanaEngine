@@ -23,9 +23,11 @@ struct DynamicChainRuntimeState {
     // Re-seeds after the first seed since the last reset.
     std::uint32_t reseedCount = 0;
 
-    // Particle positions in the anchor frame after the previous and the last fixed step.
+    // Display knots in the anchor frame: each is the mean of two consecutive fixed steps, which removes step-rate jitter.
+    // The two latest knots are kept; lastStepLocal is the latest raw step.
     std::vector<Vec3> prevStepLocal;
     std::vector<Vec3> currStepLocal;
+    std::vector<Vec3> lastStepLocal;
 
     // Animated joint positions in the anchor frame, and the anchor matrix, of the previous render frame (empty = none yet).
     std::vector<Vec3> prevAnimatedLocal;

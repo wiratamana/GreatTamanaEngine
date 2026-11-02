@@ -43,8 +43,8 @@
   around the animated direction. The half angle adds up from the anchor. A limit of 0 on a root child is an exact weld.
 - **Time units.** Damping and stiffness are fractions per 1/60 s and are rescaled to the real step (`ScaleStepFraction`). PMX damping maps
   once with `1 - exp(-d * rate / 60)`. Defaults are now gravity 98, fixed step 1/120 s, 10 steps per frame.
-- **Collision fit.** A joint that starts inside a collider in the bind pose gets a smaller radius or ignores that collider.
-- **Interpolated output.** The written pose is interpolated between the last two fixed steps in anchor-local space. Render rate no longer
+- **Collision fit.** A joint that starts inside a collider in the bind pose ignores that collider. A joint near one keeps half of its largest free radius.
+- **Interpolated output.** The written pose is interpolated in anchor-local space between display knots (the mean of two fixed steps). Render rate no longer
   changes the cloth jitter.
 - **Physics debug toolbox.** `/physics_debug/*` lists, plays, seeks, resets, runs a headless scenario with statistics per joint group,
   records the live frames, lists joints and colliders, and draws the chains as a PNG (`/physics_debug/image`). Every new behavior has a

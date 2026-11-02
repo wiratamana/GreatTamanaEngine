@@ -31,7 +31,7 @@ DynamicChainDefinition MakeChain(std::size_t jointCount, float collisionRadius)
 
 } // namespace
 
-TEST(JointCollisionFitTests, SphereShrinksRadiusToTheLargestFreeValue)
+TEST(JointCollisionFitTests, SphereShrinksRadiusToTheSafetyFractionOfTheLargestFreeValue)
 {
     DynamicChainDefinition chain = MakeChain(1, 0.2f);
     const std::vector<Vec3> bind = { Vec3(1.05f, 0.0f, 0.0f) };
@@ -39,7 +39,7 @@ TEST(JointCollisionFitTests, SphereShrinksRadiusToTheLargestFreeValue)
 
     FitJointCollisionToBindPose(chain, bind, colliders);
 
-    EXPECT_NEAR(chain.jointSettings[0].collisionFitRadius, 0.05f, 0.002f);
+    EXPECT_NEAR(chain.jointSettings[0].collisionFitRadius, 0.05f * kCollisionFitSafety, 0.001f);
     EXPECT_GE(chain.jointSettings[0].collisionFitRadius, 0.0f);
     EXPECT_TRUE(chain.jointSettings[0].ignoredColliderIndices.empty());
 }
@@ -97,7 +97,7 @@ TEST(JointCollisionFitTests, BoxFitsRadiusToFaceDistance)
 
     FitJointCollisionToBindPose(chain, bind, colliders);
 
-    EXPECT_NEAR(chain.jointSettings[0].collisionFitRadius, 0.05f, 0.002f);
+    EXPECT_NEAR(chain.jointSettings[0].collisionFitRadius, 0.05f * kCollisionFitSafety, 0.001f);
 }
 
 TEST(JointCollisionFitTests, CapsuleFitsRadiusToSurfaceDistance)
@@ -111,7 +111,7 @@ TEST(JointCollisionFitTests, CapsuleFitsRadiusToSurfaceDistance)
 
     FitJointCollisionToBindPose(chain, bind, colliders);
 
-    EXPECT_NEAR(chain.jointSettings[0].collisionFitRadius, 0.05f, 0.002f);
+    EXPECT_NEAR(chain.jointSettings[0].collisionFitRadius, 0.05f * kCollisionFitSafety, 0.001f);
 }
 
 TEST(JointCollisionFitTests, TwoCollidersTakeTheSmallerRadiusAndOnlyListFailedOrigins)
@@ -127,7 +127,7 @@ TEST(JointCollisionFitTests, TwoCollidersTakeTheSmallerRadiusAndOnlyListFailedOr
 
     FitJointCollisionToBindPose(chain, bind, colliders);
 
-    EXPECT_NEAR(chain.jointSettings[0].collisionFitRadius, 0.05f, 0.002f);
+    EXPECT_NEAR(chain.jointSettings[0].collisionFitRadius, 0.05f * kCollisionFitSafety, 0.001f);
     ASSERT_EQ(chain.jointSettings[0].ignoredColliderIndices.size(), 1u);
     EXPECT_EQ(chain.jointSettings[0].ignoredColliderIndices[0], 2);
 }
