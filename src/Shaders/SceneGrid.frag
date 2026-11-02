@@ -2,11 +2,19 @@
 
 // Infinite ground grid: a ray-plane hit at Y == 0 per pixel. Lines are about one pixel wide and fade as their spacing
 // on screen shrinks, so the grid thins out toward the horizon instead of being cut at a distance.
-// No Y flip here: invViewProj already maps this pixel's NDC xy to the ray the scene geometry used.
+// No Y flip here: the CPU built the rays from the same matrix the scene geometry used.
 
+// The ray of a pixel at NDC (x, y) is affine in x and y. The CPU computes the terms in double precision, so the hit
+// stays exact when the ground is thousands of units beyond the far plane.
 layout(push_constant) uniform PushConstants {
-    mat4 invViewProj; // Inverse of the scene camera's view * projection.
-    mat4 viewProj;    // The same matrix, used to re-derive gl_FragDepth.
+    vec4 originBase; // Ray origin (a point on the near plane) at NDC (0, 0).
+    vec4 originDx;   // Change of the origin per unit of NDC x.
+    vec4 originDy;   // Change of the origin per unit of NDC y.
+    vec4 dirBase;    // Ray direction (near point to far point) at NDC (0, 0).
+    vec4 dirDx;      // Change of the direction per unit of NDC x.
+    vec4 dirDy;      // Change of the direction per unit of NDC y.
+    vec4 depthRowZ;  // Row 2 of view * projection, to re-derive gl_FragDepth.
+    vec4 depthRowW;  // Row 3 of view * projection.
 } pc;
 
 layout(location = 0) in vec2 inNdcXY;
@@ -64,20 +72,16 @@ void main()
 {
     // Ray through this pixel, from the near plane (t = 0) to the far plane (t = 1). Ground beyond t = 1 is still drawn.
     // Every derivative is taken before any discard, so all invocations of a quad run them.
-    vec4 nearH = pc.invViewProj * vec4(inNdcXY, 0.0, 1.0);
-    vec4 farH = pc.invViewProj * vec4(inNdcXY, 1.0, 1.0);
-    bool valid = abs(nearH.w) >= 1e-6 && abs(farH.w) >= 1e-6;
-    vec3 nearPoint = nearH.xyz / (valid ? nearH.w : 1.0);
-    vec3 farPoint = farH.xyz / (valid ? farH.w : 1.0);
-    vec3 rayDir = farPoint - nearPoint;
+    vec3 origin = pc.originBase.xyz + pc.originDx.xyz * inNdcXY.x + pc.originDy.xyz * inNdcXY.y;
+    vec3 rayDir = pc.dirBase.xyz + pc.dirDx.xyz * inNdcXY.x + pc.dirDy.xyz * inNdcXY.y;
 
-    bool hasHit = abs(rayDir.y) >= 1e-6;
-    float t = -nearPoint.y / (hasHit ? rayDir.y : 1.0);
-    valid = valid && hasHit && t > 0.0;
+    bool valid = abs(rayDir.y) >= 1e-6;
+    float t = -origin.y / (valid ? rayDir.y : 1.0);
+    valid = valid && t > 0.0;
 
-    vec3 worldPos = nearPoint + rayDir * t;
-    vec4 clipHit = pc.viewProj * vec4(worldPos, 1.0);
-    float ndcDepth = clipHit.z / max(clipHit.w, 1e-6);
+    vec3 worldPos = origin + rayDir * t;
+    vec4 hit = vec4(worldPos, 1.0);
+    float ndcDepth = dot(pc.depthRowZ, hit) / max(dot(pc.depthRowW, hit), 1e-6);
     vec2 footprint = max(fwidth(worldPos.xz), vec2(1e-6));
 
     vec3 premul = vec3(0.0);

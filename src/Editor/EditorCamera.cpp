@@ -83,9 +83,11 @@ void EditorCamera::ApplyZoom(float notches, float deltaSeconds) noexcept
     }
 
     // The eye moves along forward by a share of the distance, so the pivot stays put while the distance is 1 unit or more.
-    // Closer than that the eye flies on and drags the pivot with it.
+    // Closer than that the eye flies on and drags the pivot with it. A flying eye steps by a share of its height above
+    // the ground (at least 1 unit), so a high eye with no pivot nearby is not stuck at tiny steps.
     const float factor = std::pow(1.0f - kZoomStep, applied);
-    const float step = std::max(m_distance, kMinFlyStep) * (1.0f - factor);
+    const float base = m_distance >= kMinFlyStep ? m_distance : std::max(kMinFlyStep, std::fabs(m_transform.position.y));
+    const float step = base * (1.0f - factor);
     m_transform.position += Forward() * step;
     m_distance = std::clamp(m_distance - step, kMinDistance, kMaxDistance);
 }

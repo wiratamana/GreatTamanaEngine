@@ -248,6 +248,43 @@ TEST(EditorCameraTest, TheEyeStillFliesForwardAtTheMinimumDistance)
     EXPECT_NEAR(camera.Distance(), EditorCamera::kMinDistance, 1.0e-6f);
 }
 
+TEST(EditorCameraTest, AHighFlyingEyeStepsByAShareOfItsHeight)
+{
+    EditorCamera camera;
+    ASSERT_TRUE(camera.SetPose(Vec3{ 0.0f, 1000.0f, 0.0f }, 0.0f, 0.0f));
+    ASSERT_TRUE(camera.SetDistance(EditorCamera::kMinDistance));
+    const Vec3 start = camera.GetTransform().position;
+
+    ZoomNow(camera, 1.0f);
+
+    EXPECT_TRUE(ApproximatelyEqual(camera.GetTransform().position, start + camera.Forward() * 100.0f, 1.0e-2f));
+    EXPECT_NEAR(camera.Distance(), EditorCamera::kMinDistance, 1.0e-6f);
+}
+
+TEST(EditorCameraTest, ZoomingOutFromTheMinimumDistanceHighUpGrowsTheDistanceFast)
+{
+    EditorCamera camera;
+    ASSERT_TRUE(camera.SetPose(Vec3{ 0.0f, 1000.0f, 0.0f }, 0.0f, 0.0f));
+    ASSERT_TRUE(camera.SetDistance(EditorCamera::kMinDistance));
+
+    ZoomNow(camera, -1.0f);
+
+    EXPECT_NEAR(camera.Distance(), EditorCamera::kMinDistance + 1000.0f * (1.0f / 0.9f - 1.0f), 1.0e-1f);
+}
+
+TEST(EditorCameraTest, TheHeightRuleDoesNotApplyWhileThePivotIsFarAway)
+{
+    EditorCamera camera;
+    ASSERT_TRUE(camera.SetPose(Vec3{ 0.0f, 1000.0f, 0.0f }, 0.0f, 0.0f));
+    ASSERT_TRUE(camera.SetDistance(10.0f));
+    const Vec3 pivot = camera.Pivot();
+
+    ZoomNow(camera, 1.0f);
+
+    EXPECT_NEAR(camera.Distance(), 9.0f, 1.0e-3f);
+    EXPECT_TRUE(ApproximatelyEqual(camera.Pivot(), pivot, 1.0e-2f));
+}
+
 TEST(EditorCameraTest, DistanceAndPositionAreClamped)
 {
     EditorCamera camera;

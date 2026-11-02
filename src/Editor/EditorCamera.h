@@ -94,7 +94,8 @@ private:
     static constexpr float kDegreesPerPixel = 0.2f;
     static constexpr float kMaxPitchDegrees = 90.0f;
 
-    // Each notch closes 10% of the distance. The base step never drops below 1 unit, so the eye can fly through geometry.
+    // Each notch closes 10% of the distance. Under 1 unit the eye flies instead: 10% of its height above the ground,
+    // and never less than 1 unit.
     static constexpr float kZoomStep = 0.10f;
     static constexpr float kMinFlyStep = 1.0f;
 
