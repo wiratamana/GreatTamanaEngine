@@ -27,15 +27,17 @@ struct DynamicChainRuntimeState {
     std::vector<Vec3> prevStepLocal;
     std::vector<Vec3> currStepLocal;
 
-    // Animated joint positions and anchor matrix of the previous render frame (empty = none yet).
-    std::vector<Vec3> prevAnimatedWorld;
+    // Animated joint positions in the anchor frame, and the anchor matrix, of the previous render frame (empty = none yet).
+    std::vector<Vec3> prevAnimatedLocal;
     Mat4 prevAnchorWorld = Mat4::Identity();
 
     // Scratch reused every step so the solver never allocates after the first call.
     std::vector<float> scratchLimits;
     std::vector<float> scratchPathLength;
+    std::vector<float> scratchPushDistance;
     std::vector<Vec3> scratchPositions;
     std::vector<Vec3> scratchTargets;
+    std::vector<Vec3> scratchAnimatedLocal;
 };
 
 } // namespace gte

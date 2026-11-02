@@ -64,6 +64,7 @@ private:
 
     std::uint32_t m_frames = 0;
     std::uint64_t m_pushedParticles = 0;
+    std::uint64_t m_rawPushedParticles = 0;
     double m_pushDistanceSum = 0.0;
     std::uint64_t m_bendClamped = 0;
     std::uint32_t m_reseeds = 0;

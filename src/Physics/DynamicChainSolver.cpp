@@ -20,6 +20,10 @@ namespace {
 constexpr float kMinMass = 1e-4f;
 // A collision move longer than this counts as a push.
 constexpr float kPushEpsilon = 1e-6f;
+// A joint left penetrating by less than this still counts as outside after the cone (model units).
+constexpr float kRetainTolerance = 1e-4f;
+// Collision/cone alternations per step.
+constexpr int kMaxCollisionConeRounds = 4;
 // Runaway bound from the animated pose: factor * longest root path, never below the minimum (model units).
 constexpr float kDivergenceFactor = 10.0f;
 constexpr float kMinDivergenceBound = 100.0f;
@@ -47,6 +51,27 @@ bool IsIgnoredCollider(const std::vector<std::uint16_t>& sortedIgnored, std::siz
 {
     return !sortedIgnored.empty() && colliderIndex <= 0xFFFFu
         && std::binary_search(sortedIgnored.begin(), sortedIgnored.end(), static_cast<std::uint16_t>(colliderIndex));
+}
+
+// Pushes one joint out of every collider that applies to it; returns how far it moved.
+float CollideJoint(const DynamicChainDefinition& definition, std::size_t jointIndex, const StepOptions& options,
+    const std::vector<Collider>& colliders, VerletParticle& particle)
+{
+    const DynamicJointSettings& js = definition.jointSettings[jointIndex];
+    particle.collisionRadius
+        = (options.useCollisionFit && js.collisionFitRadius >= 0.0f) ? js.collisionFitRadius : js.collisionRadius;
+    const Vec3 before = particle.position;
+    for (std::size_t k = 0; k < colliders.size(); ++k) {
+        const Collider& collider = colliders[k];
+        if (options.useCollisionFit && IsIgnoredCollider(js.ignoredColliderIndices, k)) {
+            continue;
+        }
+        if (!GroupsMayCollide(js.group, js.collisionMask, collider.group, collider.collisionMask)) {
+            continue;
+        }
+        SolveCollision(particle, collider);
+    }
+    return Length(particle.position - before);
 }
 
 // Longest rest-length path from the anchor to any joint.
@@ -230,41 +255,49 @@ void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& root
     }
 
     // Collision; welded joints cannot move, so they skip it.
-    bool anyPushed = false;
     if (definition.collisionEnabled && !colliders.empty()) {
+        state.scratchPushDistance.assign(jointCount, 0.0f);
+        const auto collideAll = [&](bool record) {
+            bool moved = false;
+            for (std::size_t i = 0; i < jointCount; ++i) {
+                if (coneActive && IsWeldedLimit(state.scratchLimits[i])) {
+                    continue;
+                }
+                const float pushed = CollideJoint(definition, i, options, colliders, state.particles[i]);
+                if (pushed > kPushEpsilon) {
+                    moved = true;
+                    if (record) {
+                        state.scratchPushDistance[i] = pushed;
+                    }
+                }
+            }
+            return moved;
+        };
+
+        // Alternate collision and cone until the pose is outside the colliders and inside the cones.
+        // The cone always runs last, so it keeps the final say when no pose satisfies both.
+        bool moved = collideAll(true);
+        for (int round = 0; coneActive && moved;) {
+            ApplyBendCone(definition, rootWorldPosition, animatedJointWorldPositions, state, nullptr);
+            if (++round >= kMaxCollisionConeRounds) {
+                break;
+            }
+            moved = collideAll(false);
+        }
+
+        // A push counts only if the joint is still outside after the cone; the raw count has every push.
         for (std::size_t i = 0; i < jointCount; ++i) {
-            if (coneActive && IsWeldedLimit(state.scratchLimits[i])) {
+            const float pushed = state.scratchPushDistance[i];
+            if (!(pushed > kPushEpsilon) || diagnostics == nullptr) {
                 continue;
             }
-            const DynamicJointSettings& js = definition.jointSettings[i];
-            VerletParticle& particle = state.particles[i];
-            particle.collisionRadius
-                = (options.useCollisionFit && js.collisionFitRadius >= 0.0f) ? js.collisionFitRadius : js.collisionRadius;
-            const Vec3 before = particle.position;
-            for (std::size_t k = 0; k < colliders.size(); ++k) {
-                const Collider& collider = colliders[k];
-                if (options.useCollisionFit && IsIgnoredCollider(js.ignoredColliderIndices, k)) {
-                    continue;
-                }
-                if (!GroupsMayCollide(js.group, js.collisionMask, collider.group, collider.collisionMask)) {
-                    continue;
-                }
-                SolveCollision(particle, collider);
-            }
-            const float pushed = Length(particle.position - before);
-            if (pushed > kPushEpsilon) {
-                anyPushed = true;
-                if (diagnostics != nullptr) {
-                    ++diagnostics->collisionPushedParticles;
-                    diagnostics->collisionPushDistanceSum += pushed;
-                }
+            ++diagnostics->collisionRawPushedParticles;
+            VerletParticle probe = state.particles[i];
+            if (!coneActive || CollideJoint(definition, i, options, colliders, probe) <= kRetainTolerance) {
+                ++diagnostics->collisionPushedParticles;
+                diagnostics->collisionPushDistanceSum += pushed;
             }
         }
-    }
-
-    // The cone has the final say.
-    if (coneActive && anyPushed) {
-        ApplyBendCone(definition, rootWorldPosition, animatedJointWorldPositions, state, nullptr);
     }
 
     // A non-finite or runaway particle reseeds the whole chain.

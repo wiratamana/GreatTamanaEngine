@@ -1,6 +1,8 @@
 // Collision fit radius, ignored colliders and step diagnostics of StepDynamicChain().
 
+#include "Math/MathTypes.h"
 #include "Physics/DynamicChainSolver.h"
+#include "Physics/PhysicsDiagnostics.h"
 
 #include <gtest/gtest.h>
 
@@ -136,6 +138,54 @@ TEST(DynamicChainSolverCollisionFitTests, DiagnosticsCountReseedsAfterTheFirstSe
     // A normal step afterwards does not.
     StepDynamicChain(definition, teleported, targets, state, kDt, Vec3::Zero(), WindSettings{}, {}, options);
     EXPECT_EQ(diagnostics.reseeds, 1u);
+}
+
+namespace {
+
+// One joint in a 10 degree cone around straight down from the anchor, steps once on its animated pose.
+struct ConeStepResult {
+    Vec3 position;
+    StepDiagnostics diagnostics;
+};
+
+ConeStepResult StepConedJointOnce(const Collider& collider)
+{
+    DynamicChainDefinition definition = BuildCollidingJoint(0.0f, -1.0f, {});
+    definition.jointSettings[0].bendLimitRadians = DegToRad(10.0f);
+
+    ConeStepResult result;
+    StepOptions options;
+    options.bendLimitsEnabled = true;
+    options.diagnostics = &result.diagnostics;
+    DynamicChainRuntimeState state;
+    StepDynamicChain(definition, Vec3::Zero(), { Vec3(0.0f, -1.0f, 0.0f) }, state, kDt, Vec3::Zero(), WindSettings{},
+        { collider }, options);
+    result.position = state.particles[0].position;
+    return result;
+}
+
+} // namespace
+
+TEST(DynamicChainSolverCollisionFitTests, PushIsKeptLegalWhenAPlaceOutsideTheColliderInsideTheConeExists)
+{
+    const Collider sphere = MakeSphere(Vec3(0.2f, -1.0f, 0.0f), 0.3f);
+    const ConeStepResult result = StepConedJointOnce(sphere);
+
+    EXPECT_GE(Length(result.position - sphere.center), 0.3f - 1e-3f);
+    EXPECT_LE(VectorAngleDegrees(result.position, Vec3::Down()), 10.01f);
+    EXPECT_EQ(result.diagnostics.collisionRawPushedParticles, 1u);
+    EXPECT_EQ(result.diagnostics.collisionPushedParticles, 1u);
+}
+
+TEST(DynamicChainSolverCollisionFitTests, PushUndoneByTheConeIsRawButNotCounted)
+{
+    // The whole cone lies inside the sphere, so the cone keeps the final say.
+    const Collider sphere = MakeSphere(Vec3(0.05f, -1.0f, 0.0f), 0.5f);
+    const ConeStepResult result = StepConedJointOnce(sphere);
+
+    EXPECT_LE(VectorAngleDegrees(result.position, Vec3::Down()), 10.01f);
+    EXPECT_EQ(result.diagnostics.collisionRawPushedParticles, 1u);
+    EXPECT_EQ(result.diagnostics.collisionPushedParticles, 0u);
 }
 
 } // namespace gte

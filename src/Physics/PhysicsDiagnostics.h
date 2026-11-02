@@ -28,6 +28,7 @@ struct ChainFrameSample {
     std::vector<Vec3> display;           // per joint, handed to ApplyDynamicChainPhysicsToPose (world space).
     std::vector<Vec3> fk;                // per joint, bone origin after ApplyDynamicChainPhysicsToPose.
     std::uint16_t stepsThisFrame = 0;
+    std::uint32_t collisionRawPushedParticles = 0;
     std::uint32_t collisionPushedParticles = 0;
     float collisionPushDistanceSum = 0.0f;
     std::uint32_t bendClampedJoints = 0;

@@ -1,6 +1,7 @@
 #include "StepInterpolation.h"
 
 #include "../Math/MathTypes.h"
+#include "../Math/Quat.h"
 
 namespace gte {
 
@@ -13,13 +14,9 @@ Vec3 InterpolateToAnchor(const Mat4& anchorNow, const Vec3& prevLocal, const Vec
 Mat4 BlendAnchorFrames(const Mat4& from, const Mat4& to, float t) noexcept
 {
     const float k = t > 0.0f ? Clamp(t, 0.0f, 1.0f) : 0.0f; // also maps NaN to 0.
-    Mat4 result;
-    for (int column = 0; column < 4; ++column) {
-        for (int row = 0; row < 4; ++row) {
-            result(row, column) = from(row, column) + (to(row, column) - from(row, column)) * k;
-        }
-    }
-    return result;
+    const Quat rotation = Slerp(Normalize(Quat::FromMat4(from)), Normalize(Quat::FromMat4(to)), k);
+    const Vec3 position = Lerp(from.TransformPoint(Vec3::Zero()), to.TransformPoint(Vec3::Zero()), k);
+    return Mat4::TRS(position, rotation, Vec3::One());
 }
 
 } // namespace gte

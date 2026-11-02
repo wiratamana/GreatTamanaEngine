@@ -68,12 +68,12 @@ A chain is a tree of simulated bones hanging from a pinned anchor bone.
 | Detection | `DetectDynamicChains` walks the PMX rigid body and joint graph from Static anchors. A chain needs at least 2 joints. |
 | Diagnostics | Orphan bodies, cross-chain joints, duplicate bone assignments and joints without a PMX bend limit are reported, not silently lost. |
 | Anchor | The root bone is never written by physics. It always comes from the animated pose. |
-| Solver | `StepDynamicChain`: seed, Verlet integration with step-length damping, rods and extra constraints, goal pull, bend cone, collision with the bind-pose fit, bend cone again, divergence guard. |
+| Solver | `StepDynamicChain`: seed, Verlet integration with step-length damping, rods and extra constraints, goal pull, bend cone, then collision and bend cone alternating (at most 4 rounds, cone last) with the bind-pose fit, divergence guard. |
 | Bend limit | Each joint keeps its segment inside a cone around the animated direction. The half angle is the sum of the PMX joint limits from the anchor down. A limit of 0 on a root child is an exact weld. The cone pass rebuilds the chain parent first: each joint keeps its direction (clamped into the cone) at exactly its rest length. A welded joint skips collision. |
 | Divergence guard | A particle that is not finite, or farther from its animated spot than 10 times the longest root path (at least 100 units), reseeds the chain. It counts in `nan_count` and `reseed_count`. |
 | Colliders | Static PMX bodies become sphere, box or capsule colliders (`ModelColliderDetection`). All chains of a model share them. A joint inside a collider in the bind pose gets a smaller radius or ignores that collider (`FitJointCollisionToBindPose`). |
 | Wind | One world wind (`WindSettings`): direction, base strength, gust strength and frequency. Default is zero. |
-| Time | Fixed step with an accumulator. Simulation runs in true world space. With interpolation on, each step blends the animated pose (and anchor) of the last two render frames to its own time, and the written pose is interpolated between the last two steps in anchor-local space. |
+| Time | Fixed step with an accumulator. Simulation runs in true world space. With interpolation on, each step blends the anchor frame of the last two render frames (quaternion slerp plus lerp of the translation, always rigid) and lerps the animated joints in the anchor frame, so a welded joint keeps one anchor-local position at every render rate. The written pose is interpolated between the last two steps in anchor-local space. |
 | Parallel | Chains run in parallel when a model has more than one chain and at least 24 joints. The outer entity loop stays sequential. |
 
 Defaults:

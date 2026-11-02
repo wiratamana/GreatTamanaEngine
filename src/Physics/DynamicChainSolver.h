@@ -12,8 +12,9 @@ namespace gte {
 
 // Per-call counters read by the physics debug toolbox. All zero when nothing happened.
 struct StepDiagnostics {
-    std::uint32_t collisionPushedParticles = 0;
-    float collisionPushDistanceSum = 0.0f;
+    std::uint32_t collisionRawPushedParticles = 0; // every joint collision moved.
+    std::uint32_t collisionPushedParticles = 0;    // pushed joints that are still outside after the cone.
+    float collisionPushDistanceSum = 0.0f;         // sum over the counted pushes.
     std::uint32_t bendClampedJoints = 0;
     std::uint32_t reseeds = 0; // re-seeds after the first seed.
     std::uint32_t nanGuardHits = 0;

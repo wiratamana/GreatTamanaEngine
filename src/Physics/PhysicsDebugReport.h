@@ -113,7 +113,8 @@ struct GroupMetricsReport {
 };
 
 struct PhysicsCollisionMetrics {
-    double pushedParticlesPerFrame = 0.0;
+    double pushedParticlesPerFrame = 0.0;    // pushes that survive the cone.
+    double rawPushedParticlesPerFrame = 0.0; // every push.
     double meanPushDistance = 0.0;
     std::uint32_t bindPosePenetratingJoints = 0; // raw radius, no ignore list.
     std::uint32_t bindPosePushedJoints = 0;      // active radius and ignore rules.

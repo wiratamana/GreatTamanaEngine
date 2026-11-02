@@ -67,4 +67,18 @@ TEST(StepInterpolationTests, BlendAnchorFramesOfASmallRotationStaysRigid)
     EXPECT_TRUE(ApproximatelyEqual(inverse.TransformPoint(half.TransformPoint(Vec3(3.0f, 2.0f, 1.0f))), Vec3(3.0f, 2.0f, 1.0f), 1e-4f));
 }
 
+TEST(StepInterpolationTests, BlendAnchorFramesOfALargeRotationIsARigidSlerp)
+{
+    const Mat4 from = Mat4::Identity();
+    const Mat4 to = Mat4::TRS(Vec3(2.0f, 0.0f, 0.0f), Quat::FromEulerDegrees(0.0f, 90.0f, 0.0f), Vec3::One());
+    const Mat4 half = BlendAnchorFrames(from, to, 0.5f);
+
+    // Half of 90 degrees about Y, exactly orthonormal; an element-wise blend would shrink this vector by 29 percent.
+    const Vec3 forward(0.0f, 0.0f, 1.0f);
+    EXPECT_NEAR(Length(half.TransformVector(forward)), 1.0f, 1e-5f);
+    EXPECT_TRUE(ApproximatelyEqual(
+        half.TransformVector(forward), Quat::FromEulerDegrees(0.0f, 45.0f, 0.0f).RotateVector(forward), 1e-4f));
+    EXPECT_TRUE(ApproximatelyEqual(half.TransformPoint(Vec3::Zero()), Vec3(1.0f, 0.0f, 0.0f), 1e-5f));
+}
+
 } // namespace gte

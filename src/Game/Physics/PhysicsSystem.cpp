@@ -78,6 +78,7 @@ struct DynamicChainBatchContext {
 
 void AddDiagnostics(StepDiagnostics& sum, const StepDiagnostics& add) noexcept
 {
+    sum.collisionRawPushedParticles += add.collisionRawPushedParticles;
     sum.collisionPushedParticles += add.collisionPushedParticles;
     sum.collisionPushDistanceSum += add.collisionPushDistanceSum;
     sum.bendClampedJoints += add.bendClampedJoints;
@@ -129,13 +130,21 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
         if (!interpolate) {
             state.prevStepLocal.clear();
             state.currStepLocal.clear();
-            state.prevAnimatedWorld.clear();
+            state.prevAnimatedLocal.clear();
+        }
+
+        // Animated joints in the anchor frame; blended per step so a rigid anchor motion never distorts the targets.
+        const std::size_t jointCount = chain.jointBoneIndices.size();
+        if (interpolate) {
+            state.scratchAnimatedLocal.resize(jointCount);
+            for (std::size_t i = 0; i < jointCount; ++i) {
+                state.scratchAnimatedLocal[i] = anchorInverse.TransformPoint(animatedJointWorldPositions[i]);
+            }
         }
 
         // Each step sees the animated pose of its own time inside the frame, not the frame-end pose.
-        const std::size_t jointCount = chain.jointBoneIndices.size();
         const bool blendTargets = interpolate && !context.frozen && context.stepCount > 0 && context.frameDeltaSeconds > 0.0f
-            && state.prevAnimatedWorld.size() == jointCount
+            && state.prevAnimatedLocal.size() == jointCount
             && Length(rootWorldPos - state.prevAnchorWorld.TransformPoint(Vec3::Zero())) <= chain.maxPlausibleRootDelta;
 
         StepDiagnostics frameDiag;
@@ -147,14 +156,16 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
                 if (blendTargets) {
                     const float stepTime = static_cast<float>(step + 1) * context.fixedTimestepSeconds - context.accumulatedBeforeSeconds;
                     const float fraction = std::clamp(stepTime / context.frameDeltaSeconds, 0.0f, 1.0f);
-                    state.scratchTargets.resize(jointCount);
-                    for (std::size_t i = 0; i < jointCount; ++i) {
-                        state.scratchTargets[i] = Lerp(state.prevAnimatedWorld[i], animatedJointWorldPositions[i], fraction);
-                    }
                     const Mat4 stepAnchor = BlendAnchorFrames(state.prevAnchorWorld, rootWorld, fraction);
-                    stepRootPos = stepAnchor.TransformPoint(Vec3::Zero());
-                    stepTargets = &state.scratchTargets;
-                    if (!stepAnchor.TryInverse(stepAnchorInverse)) {
+                    if (stepAnchor.TryInverse(stepAnchorInverse)) {
+                        state.scratchTargets.resize(jointCount);
+                        for (std::size_t i = 0; i < jointCount; ++i) {
+                            state.scratchTargets[i] = stepAnchor.TransformPoint(
+                                Lerp(state.prevAnimatedLocal[i], state.scratchAnimatedLocal[i], fraction));
+                        }
+                        stepRootPos = stepAnchor.TransformPoint(Vec3::Zero());
+                        stepTargets = &state.scratchTargets;
+                    } else {
                         stepAnchorInverse = anchorInverse;
                     }
                 }
@@ -172,7 +183,7 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
             }
         }
         if (interpolate) {
-            state.prevAnimatedWorld = animatedJointWorldPositions;
+            state.prevAnimatedLocal.swap(state.scratchAnimatedLocal);
             state.prevAnchorWorld = rootWorld;
         }
 
@@ -211,6 +222,7 @@ void StepDynamicChainRange(std::uint32_t beginIndex, std::uint32_t endIndex, Dyn
                     * ComputeBoneWorldMatrix(*context.skeleton, *context.pose, chain.jointBoneIndices[i]);
                 slot->fk[i] = jointWorld.TransformPoint(Vec3::Zero());
             }
+            slot->collisionRawPushedParticles = frameDiag.collisionRawPushedParticles;
             slot->collisionPushedParticles = frameDiag.collisionPushedParticles;
             slot->collisionPushDistanceSum = frameDiag.collisionPushDistanceSum;
             slot->bendClampedJoints = frameDiag.bendClampedJoints;

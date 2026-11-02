@@ -60,8 +60,9 @@ std::vector<float> RunSwayingAnchor(const DynamicChainDefinition& definition, co
     const Vec3 gravity(0.0f, -98.0f, 0.0f);
     constexpr int kSteps = 240;
     constexpr int kFirstCheckedStep = 10;
-    constexpr float kAmplitude = 0.64f;
-    constexpr float kOmega = kPi; // peak speed = amplitude * omega = 2 units/s.
+    // Anchor acceleration (amplitude * omega^2 = 59 units/s^2) is large against gravity, so an unlimited chain bends far.
+    constexpr float kAmplitude = 1.5f;
+    constexpr float kOmega = 2.0f * kPi;
 
     for (int step = 0; step < kSteps; ++step) {
         const Vec3 root(kAmplitude * std::sin(kOmega * static_cast<float>(step) * kDt), 0.0f, 0.0f);

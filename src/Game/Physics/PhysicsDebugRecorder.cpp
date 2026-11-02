@@ -81,6 +81,7 @@ void PhysicsDebugRecorder::BeginFrame(Entity entity, std::size_t chainCount, con
         slot.display.resize(joints);
         slot.fk.resize(joints);
         slot.stepsThisFrame = steps;
+        slot.collisionRawPushedParticles = 0;
         slot.collisionPushedParticles = 0;
         slot.collisionPushDistanceSum = 0.0f;
         slot.bendClampedJoints = 0;

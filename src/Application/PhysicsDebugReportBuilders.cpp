@@ -171,6 +171,7 @@ void PhysicsMetricsAccumulator::AddFrame(std::span<const ChainFrameSample* const
         AccumulateChainFrame(m_model->chains[c], m_names[c], m_limits[c], *sample, At(prev1, c), At(prev2, c), renderHz, m_groups);
 
         m_pushedParticles += sample->collisionPushedParticles;
+        m_rawPushedParticles += sample->collisionRawPushedParticles;
         m_pushDistanceSum += sample->collisionPushDistanceSum;
         m_bendClamped += sample->bendClampedJoints;
         m_reseeds += sample->reseedCount;
@@ -200,6 +201,7 @@ PhysicsMetricsReport PhysicsMetricsAccumulator::Finish(float renderHz) const
 
     const double frames = static_cast<double>(std::max<std::uint32_t>(m_frames, 1));
     report.collision.pushedParticlesPerFrame = static_cast<double>(m_pushedParticles) / frames;
+    report.collision.rawPushedParticlesPerFrame = static_cast<double>(m_rawPushedParticles) / frames;
     report.collision.meanPushDistance = m_pushedParticles > 0 ? m_pushDistanceSum / static_cast<double>(m_pushedParticles) : 0.0;
     report.bendClampedJointsPerFrame = static_cast<double>(m_bendClamped) / frames;
     report.stepsHistogram = m_stepsHistogram;

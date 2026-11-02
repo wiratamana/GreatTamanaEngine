@@ -2667,6 +2667,7 @@ void PdAddMetrics(PdJson& body, const PhysicsMetricsReport& m)
             { "seg_dir_err_deg", PdStatsJson(m.weldedRootChildren.segDirErrDeg) } });
     }
     body["collision"] = PdJson::object({ { "pushed_particles_per_frame", m.collision.pushedParticlesPerFrame },
+        { "raw_pushed_particles_per_frame", m.collision.rawPushedParticlesPerFrame },
         { "mean_push_distance", m.collision.meanPushDistance },
         { "bind_pose_penetrating_joints", m.collision.bindPosePenetratingJoints },
         { "bind_pose_pushed_joints", m.collision.bindPosePushedJoints } });

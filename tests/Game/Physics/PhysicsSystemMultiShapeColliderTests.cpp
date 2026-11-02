@@ -325,6 +325,8 @@ TEST(PhysicsSystemMultiShapeColliderTests, ChainCollidesCorrectlyAgainstAllThree
     // Free joints and raw particle output: default PMX limits would weld the chain.
     physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
     physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
+    // Joints start inside the colliders; the bind-pose fit would ignore those colliders.
+    physicsSystem.GetGlobalPhysicsSettings().useCollisionFit = false;
 
     Registry registry;
     const std::string path = "MultiShapeColliderModel.gta";
