@@ -1,136 +1,207 @@
-# Compiles GLSL (src/Shaders, ...) to SPIR-V with glslc at build time. Only GLSL is committed.
-# glslc is a build-time tool: it must be on PATH (Vulkan SDK or `scoop install shaderc`).
+# Compiles GLSL to SPIR-V at build time. Only GLSL is committed.
+#
+# The compiler is looked up on the first gte_add_shader(), never at include time:
+#   1. glslc: GLSLC_EXECUTABLE, PATH, %VULKAN_SDK%/Bin, C:/VulkanSDK/*/Bin
+#   2. glslang: PATH, the same SDK folders, build/_tools/glslang
+#   3. download of GTE_GLSLANG_URL into build/_tools/glslang (GTE_FETCH_GLSLANG=ON)
+#
+#   gte_find_shader_compiler()
+#   gte_add_shader(<target> <source rel. to CMAKE_SOURCE_DIR> [EXTRA_DEPENDS <rel file>...] [GENERATED_DEPENDS <abs file>...])
+#   gte_add_shaders_in_dir(<target> <dir rel. to CMAKE_SOURCE_DIR>)
+#   gte_stage_shader(<target> <shader file name without .spv>)
+#
+# Output: ${CMAKE_BINARY_DIR}/shaders/<name>.spv, copied to <exe dir>/shaders/ after each build.
 
-find_program(GLSLC_EXECUTABLE glslc)
-if(NOT GLSLC_EXECUTABLE)
-    message(FATAL_ERROR
-        "glslc not found on PATH - required to compile GLSL shaders to SPIR-V. "
-        "Install it (Vulkan SDK or 'scoop install shaderc') and reconfigure.")
-endif()
+include(GteFetch)
 
-# gte_add_shader(<target> <source relative to CMAKE_SOURCE_DIR> [EXTRA_DEPENDS <file>...] [GENERATED_DEPENDS <abs file>...])
-# Compiles to ${CMAKE_BINARY_DIR}/shaders/<name>.spv and stages a copy in <exe dir>/shaders/.
-# EXTRA_DEPENDS lists every #include'd source file (relative paths); GENERATED_DEPENDS lists #include'd files
-# generated into GTE_SHADER_GENERATED_DIR (absolute paths). glslc re-runs when one changes.
+option(GTE_FETCH_GLSLANG "Download glslang when no shader compiler is found" ON)
+set(GTE_GLSLANG_URL
+    "https://github.com/KhronosGroup/glslang/releases/download/16.6.0/glslang-16.6.0-windows-x86_64-release.zip"
+    CACHE STRING "glslang Windows release zip, used when no glslc is installed")
+set(GTE_GLSLANG_SHA256 "82bf434e69b9bb4829de7e2b4bc2c5e7a7861e53d66cf75e5cc70f5f694a8d9b"
+    CACHE STRING "SHA-256 of GTE_GLSLANG_URL (empty to skip the check)")
+mark_as_advanced(GTE_GLSLANG_URL GTE_GLSLANG_SHA256)
+
 set(GTE_SHADER_GENERATED_DIR "${CMAKE_BINARY_DIR}/shaders/gen")
 
+function(_gte_fetch_glslang)
+    set(_tools "${CMAKE_BINARY_DIR}/_tools")
+    set(_hash "")
+    if(GTE_GLSLANG_SHA256)
+        string(TOLOWER "${GTE_GLSLANG_SHA256}" _lower)
+        set(_hash SHA256 "${_lower}")
+    endif()
+
+    message(STATUS "No glslc found. Downloading glslang (or pass -DGLSLC_EXECUTABLE=<glslc.exe>).")
+    gte_download("${GTE_GLSLANG_URL}" "${_tools}/glslang-download/glslang.zip" ${_hash})
+    gte_extract_zip("${_tools}/glslang-download/glslang.zip" "${_tools}/glslang" _root)
+    file(REMOVE_RECURSE "${_tools}/glslang-download")
+
+    file(GLOB _exe "${_root}/bin/glslang*.exe")
+    if(NOT _exe)
+        message(FATAL_ERROR "No glslang*.exe in ${_root}/bin. Check GTE_GLSLANG_URL.")
+    endif()
+    list(GET _exe 0 _exe)
+    set(GTE_GLSLANG_EXECUTABLE "${_exe}" CACHE FILEPATH "glslang compiler" FORCE)
+endfunction()
+
+# Finds (or downloads) a shader compiler. Sets cache GTE_SHADER_COMPILER and GTE_SHADER_COMPILER_KIND.
+function(gte_find_shader_compiler)
+    if(GTE_SHADER_COMPILER AND EXISTS "${GTE_SHADER_COMPILER}")
+        return()
+    endif()
+
+    set(_sdk_dirs "")
+    if(DEFINED ENV{VULKAN_SDK})
+        file(TO_CMAKE_PATH "$ENV{VULKAN_SDK}" _sdk)
+        list(APPEND _sdk_dirs "${_sdk}/Bin")
+    endif()
+    file(GLOB _installs "C:/VulkanSDK/*/Bin")
+    list(SORT _installs ORDER DESCENDING)
+    list(APPEND _sdk_dirs ${_installs})
+
+    set(_compiler "")
+    set(_kind "")
+    find_program(GLSLC_EXECUTABLE NAMES glslc PATHS ${_sdk_dirs} DOC "glslc shader compiler")
+    if(GLSLC_EXECUTABLE)
+        set(_compiler "${GLSLC_EXECUTABLE}")
+        set(_kind glslc)
+    else()
+        find_program(GTE_GLSLANG_EXECUTABLE NAMES glslang glslangValidator
+            PATHS ${_sdk_dirs} "${CMAKE_BINARY_DIR}/_tools/glslang/bin" DOC "glslang compiler")
+        if(NOT GTE_GLSLANG_EXECUTABLE AND GTE_FETCH_GLSLANG)
+            _gte_fetch_glslang()
+        endif()
+        if(GTE_GLSLANG_EXECUTABLE)
+            set(_compiler "${GTE_GLSLANG_EXECUTABLE}")
+            set(_kind glslang)
+        endif()
+    endif()
+
+    if(NOT _compiler)
+        message(FATAL_ERROR
+            "No GLSL compiler found. Do one of these, then reconfigure:\n"
+            "  - install the Vulkan SDK (https://vulkan.lunarg.com)\n"
+            "  - run: scoop install shaderc\n"
+            "  - pass -DGLSLC_EXECUTABLE=<path to glslc.exe>\n"
+            "  - pass -DGTE_FETCH_GLSLANG=ON to download glslang (needs internet)")
+    endif()
+
+    set(GTE_SHADER_COMPILER "${_compiler}" CACHE INTERNAL "Shader compiler executable")
+    set(GTE_SHADER_COMPILER_KIND "${_kind}" CACHE INTERNAL "glslc or glslang")
+    message(STATUS "Shader compiler (${_kind}): ${_compiler}")
+endfunction()
+
+# Never add -O or -g0: reflection reads binding names from OpName, and a test pins that.
+function(_gte_shader_command OUT_VAR SOURCE OUTPUT)
+    set(_engine_inc "${CMAKE_SOURCE_DIR}/src/Shaders")
+    if(GTE_SHADER_COMPILER_KIND STREQUAL "glslc")
+        set(_cmd "${GTE_SHADER_COMPILER}" "${SOURCE}" -I "${_engine_inc}" -I "${GTE_SHADER_GENERATED_DIR}"
+            -o "${OUTPUT}")
+    else()
+        # glslang needs #include enabled explicitly; glslc turns it on by itself.
+        set(_cmd "${GTE_SHADER_COMPILER}" -V --target-env vulkan1.0
+            "-I${_engine_inc}" "-I${GTE_SHADER_GENERATED_DIR}"
+            "-P#extension GL_GOOGLE_include_directive : enable" -o "${OUTPUT}" "${SOURCE}")
+    endif()
+    set(${OUT_VAR} "${_cmd}" PARENT_SCOPE)
+endfunction()
+
+function(_gte_stage_spv TARGET SHADER_NAME)
+    add_custom_command(TARGET ${TARGET} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:${TARGET}>/shaders"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${CMAKE_BINARY_DIR}/shaders/${SHADER_NAME}.spv"
+                "$<TARGET_FILE_DIR:${TARGET}>/shaders/${SHADER_NAME}.spv"
+        COMMENT "Staging ${SHADER_NAME}.spv next to ${TARGET}")
+endfunction()
+
+# EXTRA_DEPENDS: #include'd files, relative to CMAKE_SOURCE_DIR. GENERATED_DEPENDS: absolute paths.
 function(gte_add_shader TARGET SOURCE)
-    cmake_parse_arguments(GTE_ADD_SHADER "" "" "EXTRA_DEPENDS;GENERATED_DEPENDS" ${ARGN})
+    cmake_parse_arguments(A "" "" "EXTRA_DEPENDS;GENERATED_DEPENDS" ${ARGN})
+    gte_find_shader_compiler()
 
-    set(SOURCE_ABSOLUTE "${CMAKE_SOURCE_DIR}/${SOURCE}")
-    get_filename_component(SHADER_NAME "${SOURCE}" NAME)
-    set(COMPILED "${CMAKE_BINARY_DIR}/shaders/${SHADER_NAME}.spv")
+    set(_source "${CMAKE_SOURCE_DIR}/${SOURCE}")
+    get_filename_component(_name "${SOURCE}" NAME)
+    set(_compiled "${CMAKE_BINARY_DIR}/shaders/${_name}.spv")
 
-    set(EXTRA_DEPENDS_ABSOLUTE "")
-    foreach(EXTRA_DEP ${GTE_ADD_SHADER_EXTRA_DEPENDS})
-        list(APPEND EXTRA_DEPENDS_ABSOLUTE "${CMAKE_SOURCE_DIR}/${EXTRA_DEP}")
+    set(_deps "")
+    foreach(_dep ${A_EXTRA_DEPENDS})
+        list(APPEND _deps "${CMAKE_SOURCE_DIR}/${_dep}")
     endforeach()
-    list(APPEND EXTRA_DEPENDS_ABSOLUTE ${GTE_ADD_SHADER_GENERATED_DEPENDS})
-    # Reflection reads binding names from OpName: never add -O or -g0 (they strip names).
-    # A test pins this: reflected names of the fixtures must not be empty.
+    list(APPEND _deps ${A_GENERATED_DEPENDS})
+
+    _gte_shader_command(_compile "${_source}" "${_compiled}")
     add_custom_command(
-        OUTPUT "${COMPILED}"
+        OUTPUT "${_compiled}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/shaders"
-        COMMAND "${GLSLC_EXECUTABLE}" "${SOURCE_ABSOLUTE}" -I "${CMAKE_SOURCE_DIR}/src/Shaders"
-                -I "${GTE_SHADER_GENERATED_DIR}" -o "${COMPILED}"
-        DEPENDS "${SOURCE_ABSOLUTE}" ${EXTRA_DEPENDS_ABSOLUTE}
-        COMMENT "Compiling shader ${SOURCE} -> ${COMPILED}"
-        VERBATIM
-    )
+        COMMAND ${_compile}
+        DEPENDS "${_source}" ${_deps}
+        COMMENT "Compiling shader ${SOURCE}"
+        VERBATIM)
 
-    set_source_files_properties("${SOURCE_ABSOLUTE}" PROPERTIES HEADER_FILE_ONLY TRUE)
-    target_sources(${TARGET} PRIVATE "${SOURCE_ABSOLUTE}" "${COMPILED}")
-    set_property(GLOBAL APPEND PROPERTY GTE_COMPILED_SHADERS "${SHADER_NAME}")
-
-    add_custom_command(TARGET ${TARGET} POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:${TARGET}>/shaders"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${COMPILED}"
-                "$<TARGET_FILE_DIR:${TARGET}>/shaders/${SHADER_NAME}.spv"
-        COMMENT "Staging ${SHADER_NAME}.spv next to ${TARGET}"
-    )
+    set_source_files_properties("${_source}" PROPERTIES HEADER_FILE_ONLY TRUE)
+    target_sources(${TARGET} PRIVATE "${_source}" "${_compiled}")
+    set_property(GLOBAL APPEND PROPERTY GTE_COMPILED_SHADERS "${_name}")
+    _gte_stage_spv(${TARGET} "${_name}")
 endfunction()
 
-# gte_stage_shader(<target> <file name without .spv>)
-# Stages a shader that another target already compiles (gte_add_shader) next to <target>'s exe.
+# Stages a shader that another target already compiles with gte_add_shader().
 function(gte_stage_shader TARGET SHADER_NAME)
-    set(COMPILED "${CMAKE_BINARY_DIR}/shaders/${SHADER_NAME}.spv")
-    # The output is produced by another directory's custom command; mark it generated here so
-    # configure works before it has been built.
-    set_source_files_properties("${COMPILED}" PROPERTIES GENERATED TRUE)
-    target_sources(${TARGET} PRIVATE "${COMPILED}")
-    add_custom_command(TARGET ${TARGET} POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:${TARGET}>/shaders"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${COMPILED}"
-                "$<TARGET_FILE_DIR:${TARGET}>/shaders/${SHADER_NAME}.spv"
-        COMMENT "Staging ${SHADER_NAME}.spv next to ${TARGET}"
-    )
+    set(_compiled "${CMAKE_BINARY_DIR}/shaders/${SHADER_NAME}.spv")
+    # Produced by another directory's command, so mark it generated here.
+    set_source_files_properties("${_compiled}" PROPERTIES GENERATED TRUE)
+    target_sources(${TARGET} PRIVATE "${_compiled}")
+    _gte_stage_spv(${TARGET} "${SHADER_NAME}")
 endfunction()
 
-# gte_add_shaders_in_dir(<target> <dir relative to CMAKE_SOURCE_DIR>)
-# Registers every *.vert/*.frag/*.comp directly inside <dir> via gte_add_shader().
-# #include dependencies are found by scanning (current dir first, then src/Shaders), transitively.
+# Registers every *.vert/*.frag/*.comp directly in <dir>. #include files are found transitively in
+# the including file's folder, src/Shaders and GTE_SHADER_GENERATED_DIR (generate those first).
 function(gte_add_shaders_in_dir TARGET DIR)
-    set(GTE_SHADERS_DIR_ABSOLUTE "${CMAKE_SOURCE_DIR}/${DIR}")
+    file(GLOB _sources CONFIGURE_DEPENDS
+        "${CMAKE_SOURCE_DIR}/${DIR}/*.vert"
+        "${CMAKE_SOURCE_DIR}/${DIR}/*.frag"
+        "${CMAKE_SOURCE_DIR}/${DIR}/*.comp")
 
-    file(GLOB GTE_SHADER_SOURCES_ABSOLUTE
-         CONFIGURE_DEPENDS
-         "${GTE_SHADERS_DIR_ABSOLUTE}/*.vert"
-         "${GTE_SHADERS_DIR_ABSOLUTE}/*.frag"
-         "${GTE_SHADERS_DIR_ABSOLUTE}/*.comp")
-
-    foreach(GTE_SHADER_ABSOLUTE ${GTE_SHADER_SOURCES_ABSOLUTE})
-        file(RELATIVE_PATH GTE_SHADER_RELATIVE "${CMAKE_SOURCE_DIR}" "${GTE_SHADER_ABSOLUTE}")
-
-        set(GTE_INCLUDE_WORKLIST "${GTE_SHADER_ABSOLUTE}")
-        set(GTE_INCLUDE_VISITED "")
-        set(GTE_EXTRA_DEPENDS_ABSOLUTE "")
-
-        while(GTE_INCLUDE_WORKLIST)
-            list(GET GTE_INCLUDE_WORKLIST 0 GTE_INCLUDE_CURRENT)
-            list(REMOVE_AT GTE_INCLUDE_WORKLIST 0)
-
-            if(NOT GTE_INCLUDE_CURRENT IN_LIST GTE_INCLUDE_VISITED)
-                list(APPEND GTE_INCLUDE_VISITED "${GTE_INCLUDE_CURRENT}")
-
-                if(EXISTS "${GTE_INCLUDE_CURRENT}")
-                    file(STRINGS "${GTE_INCLUDE_CURRENT}" GTE_INCLUDE_LINES
-                         REGEX "^[ \t]*#include[ \t]+\"[^\"]+\"")
-                    get_filename_component(GTE_INCLUDE_CURRENT_DIR "${GTE_INCLUDE_CURRENT}" DIRECTORY)
-
-                    foreach(GTE_INCLUDE_LINE ${GTE_INCLUDE_LINES})
-                        string(REGEX REPLACE "^[ \t]*#include[ \t]+\"([^\"]+)\".*" "\\1"
-                               GTE_INCLUDE_NAME "${GTE_INCLUDE_LINE}")
-
-                        set(GTE_INCLUDE_RESOLVED "")
-                        if(EXISTS "${GTE_INCLUDE_CURRENT_DIR}/${GTE_INCLUDE_NAME}")
-                            set(GTE_INCLUDE_RESOLVED "${GTE_INCLUDE_CURRENT_DIR}/${GTE_INCLUDE_NAME}")
-                        elseif(EXISTS "${CMAKE_SOURCE_DIR}/src/Shaders/${GTE_INCLUDE_NAME}")
-                            set(GTE_INCLUDE_RESOLVED "${CMAKE_SOURCE_DIR}/src/Shaders/${GTE_INCLUDE_NAME}")
-                        endif()
-
-                        if(GTE_INCLUDE_RESOLVED)
-                            if(NOT GTE_INCLUDE_RESOLVED IN_LIST GTE_EXTRA_DEPENDS_ABSOLUTE)
-                                list(APPEND GTE_EXTRA_DEPENDS_ABSOLUTE "${GTE_INCLUDE_RESOLVED}")
-                            endif()
-                            list(APPEND GTE_INCLUDE_WORKLIST "${GTE_INCLUDE_RESOLVED}")
-                        endif()
-                    endforeach()
-                endif()
+    foreach(_shader ${_sources})
+        set(_todo "${_shader}")
+        set(_seen "")
+        set(_deps "")
+        while(_todo)
+            list(POP_FRONT _todo _current)
+            if(_current IN_LIST _seen OR NOT EXISTS "${_current}")
+                continue()
             endif()
+            list(APPEND _seen "${_current}")
+            get_filename_component(_current_dir "${_current}" DIRECTORY)
+            file(STRINGS "${_current}" _lines REGEX "^[ \t]*#include[ \t]+\"[^\"]+\"")
+            foreach(_line ${_lines})
+                string(REGEX REPLACE "^[ \t]*#include[ \t]+\"([^\"]+)\".*" "\\1" _name "${_line}")
+                foreach(_search "${_current_dir}" "${CMAKE_SOURCE_DIR}/src/Shaders" "${GTE_SHADER_GENERATED_DIR}")
+                    if(EXISTS "${_search}/${_name}")
+                        list(APPEND _deps "${_search}/${_name}")
+                        list(APPEND _todo "${_search}/${_name}")
+                        break()
+                    endif()
+                endforeach()
+            endforeach()
         endwhile()
+        list(REMOVE_DUPLICATES _deps)
 
-        set(GTE_EXTRA_DEPENDS_RELATIVE "")
-        foreach(GTE_DEP_ABSOLUTE ${GTE_EXTRA_DEPENDS_ABSOLUTE})
-            file(RELATIVE_PATH GTE_DEP_RELATIVE "${CMAKE_SOURCE_DIR}" "${GTE_DEP_ABSOLUTE}")
-            list(APPEND GTE_EXTRA_DEPENDS_RELATIVE "${GTE_DEP_RELATIVE}")
+        # Includes under the generated dir are outside the source tree: pass them as absolute.
+        set(_relative "")
+        set(_generated "")
+        foreach(_dep ${_deps})
+            string(FIND "${_dep}" "${GTE_SHADER_GENERATED_DIR}/" _pos)
+            if(_pos EQUAL 0)
+                list(APPEND _generated "${_dep}")
+            else()
+                file(RELATIVE_PATH _rel "${CMAKE_SOURCE_DIR}" "${_dep}")
+                list(APPEND _relative "${_rel}")
+            endif()
         endforeach()
 
-        if(GTE_EXTRA_DEPENDS_RELATIVE)
-            gte_add_shader(${TARGET} "${GTE_SHADER_RELATIVE}" EXTRA_DEPENDS ${GTE_EXTRA_DEPENDS_RELATIVE})
-        else()
-            gte_add_shader(${TARGET} "${GTE_SHADER_RELATIVE}")
-        endif()
+        file(RELATIVE_PATH _shader_rel "${CMAKE_SOURCE_DIR}" "${_shader}")
+        gte_add_shader(${TARGET} "${_shader_rel}" EXTRA_DEPENDS ${_relative} GENERATED_DEPENDS ${_generated})
     endforeach()
 endfunction()

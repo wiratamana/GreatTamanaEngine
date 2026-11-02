@@ -1,4 +1,4 @@
-# Getting started
+﻿# Getting started
 > A 30-minute path from a fresh clone to a running editor, a loaded scene, a game project and a first HTTP call.
 > Verified against code: 2026-11-01
 
@@ -10,7 +10,7 @@
 
 ## Before you start
 - A Windows PC with a Vulkan 1.3 GPU driver.
-- CMake, MinGW-w64, Ninja, `glslc` and `git` on `PATH`. See [Building](../BUILDING.md).
+- CMake, MinGW-w64, Ninja and `git` on `PATH`. No Vulkan SDK or `glslc` needed. See [Building](../BUILDING.md).
 - Internet for the first configure. It downloads all dependencies.
 
 ## Steps

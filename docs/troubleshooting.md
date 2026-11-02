@@ -11,12 +11,12 @@
 ## Build and configure
 | Symptom | Cause | Fix |
 |---|---|---|
-| Configure stops: `glslc` not found | `glslc` is not on `PATH` | Install the Vulkan SDK or `scoop install shaderc`. Open a new shell. |
+| Configure stops: no shader compiler | No `glslc`, and the glslang download is off or failed | Allow the download (`GTE_FETCH_GLSLANG=ON`), or pass `-DGLSLC_EXECUTABLE=...`. See [Building](../BUILDING.md). |
 | Linker rejects `-Wl,--whole-archive` | Compiler is not MinGW-w64 | Use MinGW-w64 `g++` and Ninja. MSVC does not work. |
 | `--config Debug` changes nothing | Ninja is single-config | Configure again with `-DCMAKE_BUILD_TYPE=Debug`. |
-| Dependency fetch fails | No internet or a proxy | Fix the network. Run configure again. |
+| Dependency fetch fails | No internet or a proxy | Fix the network. Run configure again. Use `-DGTE_FETCH_RETRIES=<n>` or `-DGTE_FORCE_REDOWNLOAD=ON` if needed. |
 | Sponza missing, only a warning | No `git` or no network | Ignore it, or set `-DGTE_FETCH_SPONZA=OFF`. |
-| Two clones build different code | Many pins are `latest` | Pin with `-D<NAME>_RELEASE_TAG=<tag>`. See [Building](../BUILDING.md). |
+| Two clones build different code | Different `GTE_<NAME>_REF` pins, or Dear ImGui `docking` moved | Pin with `-DGTE_<NAME>_REF=<tag>`. Pin `GTE_IMGUI_REF` to a commit. See [Building](../BUILDING.md). |
 | `ctest` lists no tests | `GTE_BUILD_TESTS=OFF` | Configure with `-DGTE_BUILD_TESTS=ON`. |
 | CMake warns about `libstdc++-6.dll` | Project DLLs need the shared C++ runtime | Put the shared runtime next to the compiler. See [Project assembly](guides/project-assembly.md#before-you-start). |
 
