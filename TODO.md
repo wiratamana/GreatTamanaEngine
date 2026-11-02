@@ -1,4 +1,4 @@
-# TODO and roadmap
+﻿# TODO and roadmap
 > Open work and known gaps in GTE. For contributors who want to pick a task.
 > Verified against code: 2026-10-30
 
@@ -14,7 +14,7 @@ Status: `open` = nothing in code yet. `verify` = could not be proven from code a
 | Pick meshes in the Scene view | A click picks only a camera, by its apex or frustum edge. A mesh cannot be picked, so no outline either. | open | `src/Editor/CameraPick.cpp`, `src/Editor/Panels/ScenePanel.cpp` |
 | Save As and more than one scene | `File > Save Scene` always writes `<project root>/TestScene.gtscene`. The HTTP routes accept a `path`. | open | `src/Editor/SceneIO.cpp` |
 | Bone Viewer shows the live pose | The window shows the bind pose only. It cannot compare a playing clip with the real bone position. | open | `src/Editor/BoneViewerWindow.h` |
-| Own transform gizmo instead of ImGuizmo | ImGuizmo needs a source patch (`cmake/FetchImGuizmo.cmake`) and has its own conventions. Long-term, multi-day work. | open | `src/Editor/TransformGizmo.cpp` |
+| Own transform gizmo instead of ImGuizmo | ImGuizmo needs a source patch (`cmake/FetchImGui.cmake`) and has its own conventions. Long-term, multi-day work. | open | `src/Editor/TransformGizmo.cpp` |
 
 ## Time and playback
 

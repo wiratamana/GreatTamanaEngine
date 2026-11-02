@@ -1,4 +1,4 @@
-# Writing a render feature
+﻿# Writing a render feature
 > Step-by-step guide to add a built-in render feature to the engine. For engine developers.
 > Verified against code: 2026-11-01
 
@@ -67,7 +67,7 @@ src/Features/Foo/
   Editor/                   optional panel
 ```
 - `*.h` and `*.cpp` directly in the folder go to `gte_core`. `Editor/*` goes to `gte_editor`.
-- `Shaders/*.vert|frag|comp` are compiled by `glslc`. Other subfolders are not picked up.
+- `Shaders/*.vert|frag|comp` are compiled to SPIR-V by CMake (`glslc` or glslang). Other subfolders are not picked up.
 - Only `FooFeature.h/.cpp` is required.
 
 ### 2. Write the types and the CPU math first
@@ -206,7 +206,7 @@ curl.exe "http://127.0.0.1:8080/get_logs?category=FeatureKit"
 | Feature registered but no passes | `Setup()` recorded an error | Check name length, duplicates, empty callback |
 | Pass never runs | Name not in the `Gate`, or the pass is toggled off | Fix the `Gate`. Check `/render_graph` |
 | Pass silently disappears | Its output is read by nobody, so the graph culled it | Acquire through the kit (it keeps the handle) or call `f.Keep(tex)` |
-| Shader not found | File not in `Shaders/`, or wrong name | Folder must be `Shaders`. Rebuild. `glslc` must be on PATH |
+| Shader not found | File not in `Shaders/`, or wrong name | Folder must be `Shaders`. Rebuild. Configure again if the shader is new |
 | Second `Compute` with same name is dropped | Same literal pass name twice in one view and frame | Give each call its own name |
 | `FeaturePurityCheck` fails | Banned include or name | Use the kit. Do not edit `tokens.txt` or the allowlist |
 

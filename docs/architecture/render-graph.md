@@ -1,4 +1,4 @@
-# Render graph
+﻿# Render graph
 > The `gte::rg` API: how passes, shaders, buffers and recording work. For anyone who writes or changes render code.
 > Verified against code: 2026-10-30
 
@@ -62,7 +62,7 @@ Attachment formats come from the declared textures (`DescOf`). Never use `ColorP
 ## Shaders and binding
 - `rg::Shader` loads `shaders/<base>.comp.spv`, or `<base>.vert.spv` and `.frag.spv`. Paths resolve against the exe directory only.
 - It reflects names, types, access, stages and the push block once. It owns layouts and pipelines (RAII).
-- Build: `glslc` must be on `PATH`. Output goes to `build/shaders/` next to the exe.
+- Build: CMake finds `glslc`, or downloads glslang if there is none. Output goes to `build/shaders/` next to the exe.
 - A failed shader build never throws into the frame. It logs one warning, retries on a growing cooldown, and logs once on recovery.
 
 Bind by name: `.Bind("sourceColor", tex)`. Access comes from the GLSL qualifiers. `readonly` and `writeonly` are respected. No qualifier means read-write, which costs an extra barrier.

@@ -1,4 +1,4 @@
-# Project assembly
+﻿# Project assembly
 > How to make a game project that loads into the editor as DLLs, and how that system works inside. For game developers and engine developers.
 > Verified against code: 2026-11-01
 
@@ -13,7 +13,7 @@
 - Build the engine with MinGW and Ninja. See [Building](../../BUILDING.md).
 - The compiler needs a shared `libstdc++-6.dll` next to it. Without it, CMake warns and project DLLs cannot share the C++ runtime with the exe.
 - CMake option `GTE_ENABLE_PROJECT_ASSEMBLIES` must be `ON` (default). `OFF` means no discovery, no load, and "New Project" refuses.
-- `glslc` must be on `PATH`. It compiles your shaders.
+- A shader compiler compiles your shaders. CMake finds `glslc` or downloads glslang. See [Building](../../BUILDING.md).
 - Start the editor from the `build` folder.
 
 Three folders look alike. Do not mix them up.

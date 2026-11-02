@@ -1,132 +1,47 @@
-# CMake build trees
+# Build trees
 /build/
 /build_test/
 /build_network_off/
 /build-editor-off/
 /build-project-panel-off/
-# editor-core-separation-1 campaign, PHASE18 - the standalone-core probe's
-# own build tree (tools/ci/gte_core_standalone_probe/), never committed,
-# same as every other build tree above.
 /build-core-probe/
-# editor-core-separation-2 campaign, PHASE4 - the new player-link probe's
-# own build tree (tools/ci/gte_core_player_link_probe/), never committed,
-# same as /build-core-probe/ above.
 /build-player-link-probe/
-# editor-core-separation-3 campaign, PHASE2/PHASE5 originally added two more
-# ignore rules here for tools/ci/gte_plugin_abi_handshake_probe/'s and
-# tools/ci/gte_plugin_isolation_probe/'s own build trees
-# (/build-plugin-abi-handshake-probe/, /build-plugin-isolation-probe/) - both
-# probes, and both ignore rules, are REMOVED (better-render-pass-2 campaign,
-# PHASE4) now that plugins/gte_plugin_abi/ itself is fully deleted - nothing
-# to ignore here anymore.
-# editor-core-separation-11 campaign, PHASE2 - the new Project Assembly link
-# probe's own build tree (tools/ci/gte_project_assembly_link_probe/), never
-# committed, same as /build-player-link-probe/ above. This probe is a
-# genuinely standalone CMake project (not a nested-invocation wrapper around
-# the real root CMakeLists.txt like the 2 probes above it), so it also
-# fetches its OWN, independent copies of SDL3/Vulkan-Headers+volk/ImGui
-# straight into its own source directory (see that probe's own CMakeLists.txt
-# for why) - those fetched artifacts must never be committed either.
 /build-project-assembly-link-probe/
+/build-project-assembly-link-probe-scratch-off/
+/out/
+
+# Fetched by tools/ci/gte_project_assembly_link_probe (it is a standalone CMake project)
 /tools/ci/gte_project_assembly_link_probe/include/
 /tools/ci/gte_project_assembly_link_probe/lib/
 /tools/ci/gte_project_assembly_link_probe/SDL3.dll
 /tools/ci/gte_project_assembly_link_probe/third_party/
-# Optional scratch binary dir used to reproduce PHASE2's own Step 4(b)
-# ("WINDOWS_EXPORT_ALL_SYMBOLS OFF should fail to link") experiment by hand -
-# never a permanent fixture, but ignored defensively in case someone forgets
-# to delete it after running the experiment.
-/build-project-assembly-link-probe-scratch-off/
-/out/
 
-# Local reference-only clones for research (see task_manager/atmosphere-scattering-1/
-# ATMOSPHERE_PHASE0_MASTER_STRATEGY_v1.md, Locked Design Decision 3) - a study
-# aid only, never added to CMake/compiled/linked, never committed.
+# Local only: research clones, build tool shims, user projects
 /_reference/
-
-# Local-machine-only build tool shim (e.g. a fetched ninja.exe for dev boxes
-# missing a build tool) - not part of the project, never committed.
 /build_tools/
+/Projects/
 
-# SDL3 artifacts fetched by cmake/FetchSDL3.cmake (regenerated automatically
-# on configure — see CMakeLists.txt / cmake/FetchSDL3.cmake)
+# Dependencies staged by cmake/Fetch*.cmake (refetched on configure)
 /include/SDL3/
 /lib/SDL3.lib
 /SDL3.dll
-
-# Vulkan artifacts fetched by cmake/FetchVulkan.cmake (regenerated
-# automatically on configure — see CMakeLists.txt / cmake/FetchVulkan.cmake)
 /include/vulkan/
 /include/vk_video/
 /third_party/volk/
-
-# Dear ImGui artifacts fetched by cmake/FetchImGui.cmake (regenerated
-# automatically on configure — see CMakeLists.txt / cmake/FetchImGui.cmake)
-/third_party/imgui/
-
-# ImGuizmo artifacts fetched by cmake/FetchImGuizmo.cmake (regenerated
-# automatically on configure — see CMakeLists.txt / cmake/FetchImGuizmo.cmake)
-/third_party/imguizmo/
-
-# Vulkan Memory Allocator artifacts fetched by cmake/FetchVMA.cmake
-# (regenerated automatically on configure — see CMakeLists.txt /
-# cmake/FetchVMA.cmake)
 /third_party/vma/
-
-# stb_image.h fetched by cmake/FetchSTB.cmake (regenerated automatically on
-# configure — see CMakeLists.txt / cmake/FetchSTB.cmake)
+/third_party/imgui/
+/third_party/imguizmo/
 /third_party/stb/
-
-# KTX-Software prebuilt SDK (headers + ktx.lib + ktx.dll) fetched by
-# cmake/FetchKTX.cmake (regenerated automatically on configure — see
-# CMakeLists.txt / cmake/FetchKTX.cmake)
 /third_party/ktx/
-
-# saba (curated PMX-file-reading subset) and its glm header-only dependency,
-# fetched by cmake/FetchSaba.cmake (regenerated automatically on configure —
-# see CMakeLists.txt / cmake/FetchSaba.cmake)
 /third_party/saba/
 /third_party/glm/
-
-# cgltf.h (single-header glTF 2.0 loader) fetched by cmake/FetchCgltf.cmake
-# (regenerated automatically on configure — see CMakeLists.txt /
-# cmake/FetchCgltf.cmake)
 /third_party/cgltf/
-
-# MikkTSpace sources fetched by cmake/FetchMikkTSpace.cmake
 /third_party/mikktspace/
-
-# meshoptimizer sources fetched by cmake/FetchMeshOptimizer.cmake
 /third_party/meshoptimizer/
-
-# GoogleTest artifacts fetched by cmake/FetchGTest.cmake (regenerated
-# automatically on configure when GTE_BUILD_TESTS is ON — see
-# CMakeLists.txt / cmake/FetchGTest.cmake / tests/CMakeLists.txt)
 /third_party/googletest/
-
-# cpp-httplib artifacts fetched by cmake/FetchHttplib.cmake (regenerated
-# automatically on configure — see CMakeLists.txt / cmake/FetchHttplib.cmake)
 /third_party/httplib/
-
-# nlohmann/json artifacts fetched by cmake/FetchJson.cmake (regenerated
-# automatically on configure — see CMakeLists.txt / cmake/FetchJson.cmake)
 /third_party/json/
-
-# SPIRV-Reflect artifacts fetched/vendored by cmake/FetchSpirvReflect.cmake
-# (regenerated automatically on configure — see CMakeLists.txt /
-# cmake/FetchSpirvReflect.cmake. task_manager/better-render-pass-1 campaign,
-# PHASE1)
 /third_party/spirv_reflect/
 
-# Compiled shader binaries (SPIR-V) built from src/Shaders/*.vert/*.frag by
-# cmake/CompileShaders.cmake (glslc) - regenerated automatically on every
-# build into "<exe dir>/shaders/", never committed. Only the GLSL source is
-# version-controlled.
+# Compiled shaders (SPIR-V). Only the GLSL source is committed.
 *.spv
-
-# Project Assembly system (editor-core-separation-11 campaign) - per-
-# developer, in-progress user C++/shader source living OUTSIDE the engine's
-# own committed src/ tree. Never committed - same-toolchain, same-build-run
-# scoped by design (see task_manager/editor-core-separation-11/PHASE0_MASTER_STRATEGY.md,
-# LDD3).
-/Projects/

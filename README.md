@@ -1,4 +1,4 @@
-# GreatTamanaEngine
+﻿# GreatTamanaEngine
 > A game engine and editor written from scratch in C++20 on Vulkan 1.3. For developers who build, extend or debug it.
 > Verified against code: 2026-10-30
 
@@ -18,7 +18,7 @@ cmake --build build
 build\GreatTamanaEditor.exe
 ```
 
-You need MinGW-w64, Ninja, CMake and `glslc`. See [Building](BUILDING.md). Then follow [Getting started](docs/getting-started.md).
+You need MinGW-w64, Ninja, CMake and `git`. No Vulkan SDK is needed. See [Building](BUILDING.md). Then follow [Getting started](docs/getting-started.md).
 
 ## Layers
 ```text
