@@ -1,6 +1,7 @@
 // Unit tests for SolveBendLimit (src/Physics/ChainConstraints.h).
 
 #include "Physics/ChainConstraints.h"
+#include "Physics/PhysicsDiagnostics.h"
 
 #include <gtest/gtest.h>
 
@@ -9,11 +10,6 @@
 
 namespace gte {
 namespace {
-
-float AngleDegrees(const Vec3& a, const Vec3& b)
-{
-    return RadToDeg(std::acos(Clamp(Dot(Normalize(a), Normalize(b)), -1.0f, 1.0f)));
-}
 
 VerletParticle MakeChild(const Vec3& position)
 {
@@ -45,7 +41,7 @@ TEST(BendLimitSolveTests, ChildIsClampedToTheConeBoundaryInThePlane)
 
     EXPECT_TRUE(SolveBendLimit(child, kParent, kParent, kChildAnim, DegToRad(30.0f)));
 
-    EXPECT_NEAR(AngleDegrees(child.position, Vec3(1.0f, 0.0f, 0.0f)), 30.0f, 0.01f);
+    EXPECT_NEAR(VectorAngleDegrees(child.position, Vec3(1.0f, 0.0f, 0.0f)), 30.0f, 0.01f);
     EXPECT_NEAR(Length(child.position), 1.5f, 1e-5f);
     EXPECT_NEAR(child.position.z, 0.0f, 1e-5f); // stays in the plane of both directions.
     EXPECT_GT(child.position.y, 0.0f);
@@ -86,7 +82,7 @@ TEST(BendLimitSolveTests, OppositeDirectionGivesFiniteResultAtTheLimit)
     EXPECT_TRUE(SolveBendLimit(child, kParent, kParent, kChildAnim, DegToRad(45.0f)));
 
     EXPECT_TRUE(std::isfinite(child.position.x) && std::isfinite(child.position.y) && std::isfinite(child.position.z));
-    EXPECT_NEAR(AngleDegrees(child.position, Vec3(1.0f, 0.0f, 0.0f)), 45.0f, 0.01f);
+    EXPECT_NEAR(VectorAngleDegrees(child.position, Vec3(1.0f, 0.0f, 0.0f)), 45.0f, 0.01f);
     EXPECT_NEAR(Length(child.position), 2.0f, 1e-5f);
 }
 

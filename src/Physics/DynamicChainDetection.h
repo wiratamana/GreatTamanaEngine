@@ -37,13 +37,12 @@ struct DynamicChainDetectionResult {
     DynamicChainDetectionDiagnostics diagnostics;
     // Per chain, per joint: index of the PMX joint to the tree parent used for the bend limit (-1 = none).
     std::vector<std::vector<std::int32_t>> pmxJointIndexPerJoint;
+    // Per chain, per joint: index of the rigid body that supplied mass, damping and radius (-1 = none).
+    std::vector<std::vector<std::int32_t>> rigidBodyIndexPerJoint;
 };
 
-// Detects dynamic bone chains from the PMX rigid body and joint graph.
-// Static bodies anchor a chain; Dynamic and DynamicAndBoneMerge bodies reachable from one become its joints.
-// Tree edges follow the real skeleton parents. PMX joints between two joints of a chain that are not tree edges
-// become extra constraints. A model without physics data gives an empty result.
-// Hub limit: several children of one non-anchor joint share one bone rotation, the last child wins in the resolver.
+// Detects dynamic bone chains from the PMX rigid body and joint graph. No physics data gives an empty result.
+// Static bodies anchor a chain; reachable Dynamic bodies become joints; extra PMX joints become brace constraints.
 DynamicChainDetectionResult DetectDynamicChains(
     const SkeletonData& skeleton, const PhysicsData* physics, const DynamicChainDetectionDefaults& defaults);
 

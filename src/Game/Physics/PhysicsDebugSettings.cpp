@@ -133,17 +133,15 @@ bool ParseNumber(std::string_view text, bool wholeOnly, double& out)
 bool ParseValue(const Row& row, std::string_view text, double& out, std::string& error)
 {
     switch (row.kind) {
-    case Kind::Bool:
-        if (text == "true" || text == "1") {
-            out = 1.0;
-            return true;
+    case Kind::Bool: {
+        bool flag = false;
+        if (!ParsePhysicsBool(text, flag)) {
+            error = std::string(row.key) + " must be true or false";
+            return false;
         }
-        if (text == "false" || text == "0") {
-            out = 0.0;
-            return true;
-        }
-        error = std::string(row.key) + " must be true or false";
-        return false;
+        out = flag ? 1.0 : 0.0;
+        return true;
+    }
     case Kind::Enum:
         for (std::size_t i = 0; i < row.names.size(); ++i) {
             if (text == row.names[i]) {
@@ -171,6 +169,19 @@ bool ParseValue(const Row& row, std::string_view text, double& out, std::string&
 }
 
 } // namespace
+
+bool ParsePhysicsBool(std::string_view text, bool& out) noexcept
+{
+    if (text == "true" || text == "1") {
+        out = true;
+        return true;
+    }
+    if (text == "false" || text == "0") {
+        out = false;
+        return true;
+    }
+    return false;
+}
 
 bool ApplyPhysicsSettingPairs(GlobalPhysicsSettings& settings, const PhysicsSettingPairs& pairs,
     std::string& errorMessage, std::string& errorKey)
@@ -215,10 +226,9 @@ bool ApplyPhysicsSettingPairs(GlobalPhysicsSettings& settings, const PhysicsSett
 bool ApplyPhysicsPreset(GlobalPhysicsSettings& settings, std::string_view presetName)
 {
     if (presetName == "default") {
-        const GlobalPhysicsSettings defaults;
-        for (const Row& row : Table()) {
-            row.set(settings, row.get(defaults));
-        }
+        const WindSettings wind = settings.wind; // not part of any preset.
+        settings = GlobalPhysicsSettings{};
+        settings.wind = wind;
         return true;
     }
     if (presetName == "legacy") {

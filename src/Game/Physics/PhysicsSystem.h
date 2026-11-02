@@ -48,8 +48,13 @@ public:
     PhysicsDebugRecorder& GetDebugRecorder() noexcept { return m_ownRecorder; }
     const PhysicsDebugRecorder& GetDebugRecorder() const noexcept { return m_ownRecorder; }
 
-    // Records into `recorder` instead of the own one for as long as it is set. Null restores the own recorder.
-    void SetDebugRecorderOverride(PhysicsDebugRecorder* recorder) noexcept { m_recorderOverride = recorder; }
+    // Records `onlyEntity` into `recorder` instead of the own one (other entities are skipped) while set.
+    // Null restores the own recorder, which records every entity.
+    void SetDebugRecorderOverride(PhysicsDebugRecorder* recorder, Entity onlyEntity = kInvalidEntity) noexcept
+    {
+        m_recorderOverride = recorder;
+        m_recorderOverrideEntity = onlyEntity;
+    }
 
     // Wall time of the last Update() call, in milliseconds.
     double LastUpdateMilliseconds() const noexcept { return m_lastUpdateMilliseconds; }
@@ -62,6 +67,7 @@ private:
     GlobalPhysicsSettings m_globalSettings;
     PhysicsDebugRecorder m_ownRecorder;
     PhysicsDebugRecorder* m_recorderOverride = nullptr;
+    Entity m_recorderOverrideEntity = kInvalidEntity;
     double m_lastUpdateMilliseconds = 0.0;
 };
 

@@ -16,8 +16,9 @@ namespace {
 constexpr float kPushEpsilon = 1e-5f;
 constexpr int kSearchIterations = 12;
 
-// True when a particle at `position` with `radius` is moved by the collider.
-bool IsPushed(const Vec3& position, float radius, const Collider& collider) noexcept
+} // namespace
+
+float ProbeCollisionPush(const Vec3& position, float radius, const Collider& collider) noexcept
 {
     VerletParticle probe;
     probe.position = position;
@@ -25,10 +26,9 @@ bool IsPushed(const Vec3& position, float radius, const Collider& collider) noex
     probe.inverseMass = 1.0f;
     probe.collisionRadius = radius;
     SolveCollision(probe, collider);
-    return Length(probe.position - position) > kPushEpsilon;
+    const float moved = Length(probe.position - position);
+    return moved > kPushEpsilon ? moved : 0.0f;
 }
-
-} // namespace
 
 void FitJointCollisionToBindPose(
     DynamicChainDefinition& chain, std::span<const Vec3> bindJointPositions, std::span<const Collider> bindColliders)
@@ -54,10 +54,10 @@ void FitJointCollisionToBindPose(
             if (!GroupsMayCollide(joint.group, joint.collisionMask, collider.group, collider.collisionMask)) {
                 continue;
             }
-            if (!IsPushed(position, fullRadius, collider)) {
+            if (ProbeCollisionPush(position, fullRadius, collider) == 0.0f) {
                 continue;
             }
-            if (IsPushed(position, 0.0f, collider)) {
+            if (ProbeCollisionPush(position, 0.0f, collider) > 0.0f) {
                 joint.ignoredColliderIndices.push_back(static_cast<std::uint16_t>(k));
                 continue;
             }
@@ -65,7 +65,7 @@ void FitJointCollisionToBindPose(
             float high = fullRadius; // pushed.
             for (int iteration = 0; iteration < kSearchIterations; ++iteration) {
                 const float mid = 0.5f * (low + high);
-                if (IsPushed(position, mid, collider)) {
+                if (ProbeCollisionPush(position, mid, collider) > 0.0f) {
                     high = mid;
                 } else {
                     low = mid;

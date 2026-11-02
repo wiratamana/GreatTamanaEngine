@@ -2765,7 +2765,7 @@ ParsedPhysicsDebugPlayRequest ParsePhysicsDebugPlayRequest(const std::string& js
         result.frame = static_cast<float>(number);
     }
     if (const auto found = body.find("speed"); found != body.end()) {
-        if (!PdJsonNumber(*found, 0.0, 100.0, number)) {
+        if (!PdJsonNumber(*found, 0.0, static_cast<double>(kPhysicsDebugMaxPlaySpeed), number)) {
             result.errorMessage = "speed must be a number between 0 and 100";
             return result;
         }

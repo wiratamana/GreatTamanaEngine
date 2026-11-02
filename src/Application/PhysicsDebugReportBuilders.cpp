@@ -5,6 +5,7 @@
 #include "../Game/Physics/PhysicsSystem.h"
 #include "../Math/MathTypes.h"
 #include "../Physics/CollisionFilter.h"
+#include "../Physics/JointCollisionFit.h"
 
 #include <algorithm>
 #include <cmath>
@@ -12,22 +13,6 @@
 namespace gte {
 
 namespace {
-
-constexpr float kPushEpsilon = 1e-5f;
-constexpr float kWeldLimitRadians = kPi / 180.0f;
-
-// Distance a fresh particle at `position` is moved by one collider (0 = no push).
-float ProbePush(const Vec3& position, float radius, const Collider& collider) noexcept
-{
-    VerletParticle particle;
-    particle.position = position;
-    particle.previousPosition = position;
-    particle.inverseMass = 1.0f;
-    particle.collisionRadius = radius;
-    SolveCollision(particle, collider);
-    const float moved = Length(particle.position - position);
-    return moved > kPushEpsilon ? moved : 0.0f;
-}
 
 const ChainFrameSample* At(std::span<const ChainFrameSample* const> samples, std::size_t index) noexcept
 {
@@ -74,17 +59,6 @@ Vec3 ToVec3(const Float3& v) noexcept
     return Vec3(v[0], v[1], v[2]);
 }
 
-float AngleBetweenDeg(const Vec3& a, const Vec3& b) noexcept
-{
-    const float la = Length(a);
-    const float lb = Length(b);
-    if (la < 1e-6f || lb < 1e-6f) {
-        return 0.0f;
-    }
-    const float c = std::clamp(Dot(a, b) / (la * lb), -1.0f, 1.0f);
-    return RadToDeg(std::acos(c));
-}
-
 std::string BoneNameOrEmpty(const SkeletonData& skeleton, std::int32_t boneIndex)
 {
     if (boneIndex < 0 || static_cast<std::size_t>(boneIndex) >= skeleton.bones.size()) {
@@ -109,18 +83,6 @@ std::string ColliderLabel(const DynamicChainRigCache::ModelEntry& model, std::si
         return model.colliderRigidBodyNames[colliderIndex];
     }
     return "collider#" + std::to_string(colliderIndex);
-}
-
-std::vector<float> CumulativeBendLimits(const DynamicChainDefinition& chain)
-{
-    const std::size_t count = chain.jointSettings.size();
-    std::vector<float> cumulative(count, kPi);
-    for (std::size_t i = 0; i < count; ++i) {
-        const std::int32_t parent = i < chain.parentJointIndex.size() ? chain.parentJointIndex[i] : -1;
-        const float parentValue = (parent >= 0 && static_cast<std::size_t>(parent) < i) ? cumulative[static_cast<std::size_t>(parent)] : 0.0f;
-        cumulative[i] = std::min(kPi, chain.jointSettings[i].bendLimitRadians + parentValue);
-    }
-    return cumulative;
 }
 
 BindPoseCollisionReport ComputeBindPoseCollision(const DynamicChainRigCache::ModelEntry& model, const GlobalPhysicsSettings& settings)
@@ -153,7 +115,7 @@ BindPoseCollisionReport ComputeBindPoseCollision(const DynamicChainRigCache::Mod
                 if (!GroupsMayCollide(js.group, js.collisionMask, collider.group, collider.collisionMask)) {
                     continue;
                 }
-                const float rawPush = ProbePush(bindPosition, js.collisionRadius, collider);
+                const float rawPush = ProbeCollisionPush(bindPosition, js.collisionRadius, collider);
                 if (rawPush > 0.0f) {
                     rawHit = true;
                     report.penetrations.push_back({ static_cast<std::uint32_t>(c), static_cast<std::uint32_t>(i), names[i],
@@ -163,7 +125,7 @@ BindPoseCollisionReport ComputeBindPoseCollision(const DynamicChainRigCache::Mod
                     const bool ignored = settings.useCollisionFit
                         && std::binary_search(js.ignoredColliderIndices.begin(), js.ignoredColliderIndices.end(),
                             static_cast<std::uint16_t>(k));
-                    if (!ignored && ProbePush(bindPosition, activeRadius, collider) > 0.0f) {
+                    if (!ignored && ProbeCollisionPush(bindPosition, activeRadius, collider) > 0.0f) {
                         activeHit = true;
                     }
                 }
@@ -191,7 +153,7 @@ PhysicsMetricsAccumulator::PhysicsMetricsAccumulator(const DynamicChainRigCache:
             ++info.joints;
             ++m_totalJoints;
             const bool rootChild = i < chain.parentJointIndex.size() && chain.parentJointIndex[i] < 0;
-            if (rootChild && i < m_limits[c].size() && m_limits[c][i] <= kWeldLimitRadians) {
+            if (rootChild && i < m_limits[c].size() && IsWeldedLimit(m_limits[c][i])) {
                 ++m_weldedJoints;
             }
         }

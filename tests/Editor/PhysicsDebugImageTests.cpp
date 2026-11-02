@@ -105,6 +105,18 @@ TEST(PhysicsDebugImageTest, ThreePointsLandOnKnownPixelsInNegZView)
     EXPECT_FLOAT_EQ(image.boundsMax[1], 5.0f);
 }
 
+TEST(PhysicsDebugImageTest, ColliderAndLimitLinesDoNotChangeTheBounds)
+{
+    PhysicsDebugSnapshot snapshot = MakeSnapshot("negz");
+    snapshot.points = { Point(0, 0, 0), Point(10, 5, 0) };
+    snapshot.segments = { Segment({ -500, -500, 0 }, { 500, 500, 0 }, PhysicsDebugColorClass::Collider),
+        Segment({ -900, 0, 0 }, { 900, 0, 0 }, PhysicsDebugColorClass::Limit) };
+    const PhysicsDebugImage image = RenderPhysicsDebugSnapshot(snapshot);
+    EXPECT_FLOAT_EQ(image.boundsMin[0], 0.0f);
+    EXPECT_FLOAT_EQ(image.boundsMax[0], 10.0f);
+    EXPECT_FLOAT_EQ(image.boundsMax[1], 5.0f);
+}
+
 TEST(PhysicsDebugImageTest, ThreePointsLandOnKnownPixelsInTopView)
 {
     PhysicsDebugSnapshot snapshot = MakeSnapshot("top");

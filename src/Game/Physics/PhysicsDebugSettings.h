@@ -10,9 +10,11 @@ namespace gte {
 
 using PhysicsSettingPairs = std::vector<std::pair<std::string, std::string>>;
 
-// Applies "key=value" pairs to `settings`. ALL OR NOTHING: on any error nothing changes and false is returned
-// with `errorMessage` set and `errorKey` naming the offending key. Strict parsing: no "12abc", no leading '+',
-// finite numbers only, bool = "true"|"false"|"1"|"0", enum text is case-exact, unknown or duplicate key = error.
+// Strict bool text: "true"|"1" or "false"|"0". Anything else returns false and leaves `out` alone.
+bool ParsePhysicsBool(std::string_view text, bool& out) noexcept;
+
+// Applies "key=value" pairs. ALL OR NOTHING: on any error nothing changes, false is returned and
+// `errorKey` names the offending key. Strict parsing; unknown or duplicate keys are errors.
 bool ApplyPhysicsSettingPairs(GlobalPhysicsSettings& settings, const PhysicsSettingPairs& pairs,
     std::string& errorMessage, std::string& errorKey);
 

@@ -64,8 +64,8 @@ Reply as `set`. Any other name: `400`.
 
 ### `POST /physics_debug/play`
 Body `{"entity":"N","animation_gta_path":"<absolute path>","frame":0,"speed":1,"loop":true}`. `frame`, `speed`, `loop` are optional.
+`frame` 0..100000. `speed` 0..100 (`0` holds a frame); a value outside the range gives `400`.
 Reply `{"success":true,"entity":"N","animator":{...}}`. Refused with `400` for a dead entity, a model without skin data or a bad clip.
-`speed: 0` holds a frame.
 
 ### `GET /physics_debug/seek?entity=N&frame=F[&reset_physics=true|false]`
 `frame` 0..100000. Needs an animator (`409` otherwise). `reset_physics` default `true`. Reply `{"success":true,"animator":{...}}`.
@@ -275,7 +275,7 @@ A run advances the VMD frame by `30 / render_hz` per render frame. One pass is `
 Each run starts from a fresh physics state and restores everything it touched. Use `tools/physics_debug/run_scenario.ps1` to run them and check the gates ([README](../../tools/physics_debug/README.md)).
 
 ## Gotchas
-- A headless `run` steps ALL entities, not only the target. It freezes the editor for its duration (about 0.2 to 2 s). Time and pause state are ignored.
+- A headless `run` steps ALL entities, but records only the target. It freezes the editor for its duration (about 0.2 to 2 s). Time and pause state are ignored.
 - With `restore` (default `true`) the run restores the settings and, for every entity, the animator (frame, speed, playing, loop) and the rig (enabled, frozen, chain states, accumulated time). It does this even when a step fails. The live recorder is off during a run.
 - The run forces `loop` on for the target animator. A clip that ends without loop would fall back to the bind pose.
 - `wrapped: true` means the clip looped during the run. Use fewer frames or a lower `start_frame` for a clean pass.

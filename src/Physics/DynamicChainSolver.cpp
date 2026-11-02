@@ -47,21 +47,26 @@ bool IsIgnoredCollider(const std::vector<std::uint16_t>& sortedIgnored, std::siz
 
 } // namespace
 
-void ComputeEffectiveBendLimits(const DynamicChainDefinition& definition, const StepOptions& options, std::vector<float>& out)
+void ComputeCumulativeBendLimits(const DynamicChainDefinition& definition, std::vector<float>& out)
 {
+    // Parents always come first.
     const std::size_t jointCount = definition.jointSettings.size();
     out.assign(jointCount, kPi);
-    if (!options.bendLimitsEnabled) {
-        return;
-    }
-
-    // Cumulative own limits from the anchor down; parents always come first.
     for (std::size_t i = 0; i < jointCount; ++i) {
         const std::int32_t parent = i < definition.parentJointIndex.size() ? definition.parentJointIndex[i] : -1;
         const float parentCumulative
             = (parent >= 0 && static_cast<std::size_t>(parent) < i) ? out[static_cast<std::size_t>(parent)] : 0.0f;
         out[i] = std::min(kPi, definition.jointSettings[i].bendLimitRadians + parentCumulative);
     }
+}
+
+void ComputeEffectiveBendLimits(const DynamicChainDefinition& definition, const StepOptions& options, std::vector<float>& out)
+{
+    if (!options.bendLimitsEnabled) {
+        out.assign(definition.jointSettings.size(), kPi);
+        return;
+    }
+    ComputeCumulativeBendLimits(definition, out);
     for (float& limit : out) {
         limit = std::clamp(limit * options.bendLimitScale + options.bendLimitMinRadians, 0.0f, kPi);
     }

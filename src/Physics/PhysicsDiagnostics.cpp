@@ -1,5 +1,7 @@
 #include "PhysicsDiagnostics.h"
 
+#include "../Math/MathTypes.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -8,14 +10,14 @@ namespace gte {
 
 namespace {
 
-constexpr float kPi = 3.14159265358979f;
-constexpr float kRadToDeg = 180.0f / kPi;
 constexpr float kMinRestLength = 1e-4f;
 constexpr float kMinVectorLength = 1e-6f;
-constexpr float kWeldLimitDegrees = 1.0f;
 
-// Angle in degrees between two vectors; 0 when either is shorter than kMinVectorLength.
-float AngleDegrees(const Vec3& a, const Vec3& b) noexcept
+bool IsDigit(char c) noexcept { return c >= '0' && c <= '9'; }
+
+} // namespace
+
+float VectorAngleDegrees(const Vec3& a, const Vec3& b) noexcept
 {
     const float la = Length(a);
     const float lb = Length(b);
@@ -23,12 +25,8 @@ float AngleDegrees(const Vec3& a, const Vec3& b) noexcept
         return 0.0f;
     }
     const float c = std::clamp(Dot(a, b) / (la * lb), -1.0f, 1.0f);
-    return std::acos(c) * kRadToDeg;
+    return RadToDeg(std::acos(c));
 }
-
-bool IsDigit(char c) noexcept { return c >= '0' && c <= '9'; }
-
-} // namespace
 
 std::string JointGroupKey(std::string_view boneName)
 {
@@ -107,8 +105,8 @@ void AccumulateChainFrame(const DynamicChainDefinition& chain, std::span<const s
         const Vec3 dispSegment = cur.display[i] - parentDisp;
 
         const float distFromAnimated = Length(cur.display[i] - cur.animated[i]);
-        const float segDirErr = AngleDegrees(dispSegment, animSegment);
-        const float limitDeg = effectiveLimitRadians[i] * kRadToDeg;
+        const float segDirErr = VectorAngleDegrees(dispSegment, animSegment);
+        const float limitDeg = RadToDeg(effectiveLimitRadians[i]);
         const float limitViolation = std::max(0.0f, segDirErr - limitDeg);
 
         GroupSamples& group = groups[JointGroupKey(boneNames[i])];
@@ -122,7 +120,7 @@ void AccumulateChainFrame(const DynamicChainDefinition& chain, std::span<const s
         push(&GroupSamples::segDirErrDeg, segDirErr);
         push(&GroupSamples::limitViolationDeg, limitViolation);
 
-        if (isRootChild && limitDeg <= kWeldLimitDegrees) {
+        if (isRootChild && IsWeldedLimit(effectiveLimitRadians[i])) {
             GroupSamples& welded = groups["WELDED_ROOT_CHILDREN"];
             welded.distFromAnimated.push_back(distFromAnimated);
             welded.segDirErrDeg.push_back(segDirErr);
@@ -132,8 +130,8 @@ void AccumulateChainFrame(const DynamicChainDefinition& chain, std::span<const s
             const std::int32_t grandParent = chain.parentJointIndex[p];
             const Vec3 gpAnim = grandParent < 0 ? cur.rootAnimWorld : cur.animated[static_cast<std::size_t>(grandParent)];
             const Vec3 gpDisp = grandParent < 0 ? cur.rootAnimWorld : cur.display[static_cast<std::size_t>(grandParent)];
-            const float animBend = AngleDegrees(parentAnim - gpAnim, animSegment);
-            const float dispBend = AngleDegrees(parentDisp - gpDisp, dispSegment);
+            const float animBend = VectorAngleDegrees(parentAnim - gpAnim, animSegment);
+            const float dispBend = VectorAngleDegrees(parentDisp - gpDisp, dispSegment);
             push(&GroupSamples::bendDeltaDeg, std::abs(dispBend - animBend));
         }
 

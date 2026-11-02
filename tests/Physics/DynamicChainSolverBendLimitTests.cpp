@@ -2,6 +2,7 @@
 
 #include "Physics/DynamicChainDetection.h"
 #include "Physics/DynamicChainSolver.h"
+#include "Physics/PhysicsDiagnostics.h"
 #include "Math/MathTypes.h"
 
 #include <gtest/gtest.h>
@@ -40,16 +41,6 @@ StepOptions EnabledOptions()
     return options;
 }
 
-float AngleDegrees(const Vec3& a, const Vec3& b)
-{
-    const float la = Length(a);
-    const float lb = Length(b);
-    if (la < 1e-6f || lb < 1e-6f) {
-        return 0.0f;
-    }
-    return RadToDeg(std::acos(std::clamp(Dot(a, b) / (la * lb), -1.0f, 1.0f)));
-}
-
 // Animated pose: the chain hangs straight down from the anchor.
 std::vector<Vec3> HangingTargets(const Vec3& root, std::size_t jointCount, float restLength)
 {
@@ -81,7 +72,7 @@ std::vector<float> RunSwayingAnchor(const DynamicChainDefinition& definition, co
         }
         for (std::size_t i = 0; i < jointCount; ++i) {
             const Vec3 parent = i == 0 ? root : state.particles[i - 1].position;
-            const float error = AngleDegrees(state.particles[i].position - parent, Vec3(0.0f, -restLength, 0.0f));
+            const float error = VectorAngleDegrees(state.particles[i].position - parent, Vec3(0.0f, -restLength, 0.0f));
             maxErrorPerJoint[i] = std::max(maxErrorPerJoint[i], error);
         }
     }

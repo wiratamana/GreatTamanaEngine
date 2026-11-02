@@ -263,23 +263,20 @@ void PhysicsSystem::RegisterDynamicChains(const std::string& absoluteGtaPath, co
     }
     entry.skeleton = data.skeleton;
 
-    // Debug names and PMX limits per joint (lowest rigid body index wins per bone).
+    // Debug names and PMX limits per joint.
     entry.jointDebugInfo.resize(detection.chains.size());
-    std::unordered_map<std::int32_t, std::int32_t> boneToBody;
-    if (physics != nullptr) {
-        for (std::size_t b = 0; b < physics->rigidBodies.size(); ++b) {
-            boneToBody.emplace(physics->rigidBodies[b].boneIndex, static_cast<std::int32_t>(b));
-        }
-    }
     for (std::size_t c = 0; c < detection.chains.size(); ++c) {
         const DynamicChainDefinition& chain = detection.chains[c];
         std::vector<JointDebugInfo>& infos = entry.jointDebugInfo[c];
         infos.resize(chain.jointBoneIndices.size());
         for (std::size_t j = 0; j < infos.size(); ++j) {
             JointDebugInfo& info = infos[j];
-            const auto body = boneToBody.find(chain.jointBoneIndices[j]);
-            if (physics != nullptr && body != boneToBody.end()) {
-                info.rigidBodyName = physics->rigidBodies[static_cast<std::size_t>(body->second)].name;
+            const std::int32_t bodyIndex = (c < detection.rigidBodyIndexPerJoint.size()
+                                               && j < detection.rigidBodyIndexPerJoint[c].size())
+                ? detection.rigidBodyIndexPerJoint[c][j]
+                : -1;
+            if (physics != nullptr && bodyIndex >= 0 && static_cast<std::size_t>(bodyIndex) < physics->rigidBodies.size()) {
+                info.rigidBodyName = physics->rigidBodies[static_cast<std::size_t>(bodyIndex)].name;
             }
             const std::int32_t jointIndex = (c < detection.pmxJointIndexPerJoint.size()
                                                 && j < detection.pmxJointIndexPerJoint[c].size())
@@ -402,8 +399,9 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
         }
 
         // Recorder slots are looked up here on the main thread, so jobs never touch the recorder map.
+        const bool recordThis = recording && (m_recorderOverride == nullptr || entity == m_recorderOverrideEntity);
         std::vector<ChainFrameSample*> recorderSlots;
-        if (recording) {
+        if (recordThis) {
             std::vector<std::size_t> jointCounts;
             jointCounts.reserve(model->chains.size());
             for (const DynamicChainDefinition& chain : model->chains) {
@@ -419,7 +417,7 @@ void PhysicsSystem::Update(Registry& registry, double deltaSeconds)
         DynamicChainBatchContext context{ &model->skeleton, &model->chains, &rig.chainStates, &resolvedPose->pose, stepCount,
             m_globalSettings.fixedTimestepSeconds, m_globalSettings.gravity, m_globalSettings.wind, entityWorldMatrix,
             entityWorldMatrixInverse, rig.frozen, &resolvedColliders, stepOptions, m_globalSettings.interpolateOutput, alpha,
-            recording ? &recorderSlots : nullptr };
+            recordThis ? &recorderSlots : nullptr };
 
         if (totalJoints >= kMinDynamicJointsToParallelize && model->chains.size() > 1) {
             Jobs::JobHandle chainHandle;

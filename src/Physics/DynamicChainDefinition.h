@@ -1,4 +1,6 @@
 #pragma once
+#include "../Math/MathTypes.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -30,7 +32,7 @@ struct DynamicJointSettings {
     std::vector<std::uint16_t> ignoredColliderIndices;
 
     // Own bend limit in radians, from the PMX joint to the tree parent (pi = free).
-    float bendLimitRadians = 3.14159265f;
+    float bendLimitRadians = kPi;
 };
 
 // Distance constraint between two joints of one chain that is not a tree edge. Indices are positions in jointBoneIndices.

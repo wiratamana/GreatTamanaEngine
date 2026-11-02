@@ -71,6 +71,11 @@ int DrawRank(PhysicsDebugColorClass colorClass) noexcept
     return 3;
 }
 
+bool AffectsBounds(PhysicsDebugColorClass colorClass) noexcept
+{
+    return colorClass != PhysicsDebugColorClass::Collider && colorClass != PhysicsDebugColorClass::Limit;
+}
+
 struct Projection {
     PhysicsDebugViewBasis basis;
     double centerU = 0.0;
@@ -144,7 +149,7 @@ PhysicsDebugImage RenderPhysicsDebugSnapshot(const PhysicsDebugSnapshot& snapsho
         std::copy(kBackground.begin(), kBackground.end(), image.rgba.begin() + static_cast<std::ptrdiff_t>(i));
     }
 
-    // Bounds of every finite point, in 3D and projected on the view axes.
+    // Bounds of the figure: sim, anim, highlight and anchor points. Collider and limit lines never resize it.
     bool any = false;
     Float3 boundsMin{};
     Float3 boundsMax{};
@@ -176,11 +181,15 @@ PhysicsDebugImage RenderPhysicsDebugSnapshot(const PhysicsDebugSnapshot& snapsho
         maxV = std::max(maxV, v);
     };
     for (const PhysicsDebugSegment& segment : snapshot.segments) {
-        include(segment.a);
-        include(segment.b);
+        if (AffectsBounds(segment.colorClass)) {
+            include(segment.a);
+            include(segment.b);
+        }
     }
     for (const PhysicsDebugPoint& point : snapshot.points) {
-        include(point.p);
+        if (AffectsBounds(point.colorClass)) {
+            include(point.p);
+        }
     }
     image.boundsMin = boundsMin;
     image.boundsMax = boundsMax;

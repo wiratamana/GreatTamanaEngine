@@ -19,9 +19,6 @@ namespace gte {
 Float3 ToFloat3(const Vec3& v) noexcept;
 Vec3 ToVec3(const Float3& v) noexcept;
 
-// Angle between two vectors in degrees; 0 when either is shorter than 1e-6.
-float AngleBetweenDeg(const Vec3& a, const Vec3& b) noexcept;
-
 // Bone name per joint of the chain ("" for an out of range bone index).
 std::vector<std::string> ChainBoneNames(const SkeletonData& skeleton, const DynamicChainDefinition& chain);
 
@@ -30,9 +27,6 @@ std::string BoneNameOrEmpty(const SkeletonData& skeleton, std::int32_t boneIndex
 
 // Rigid body name of the k-th model collider, or "collider#<k>" when it has none.
 std::string ColliderLabel(const DynamicChainRigCache::ModelEntry& model, std::size_t colliderIndex);
-
-// Own bend limits summed from the anchor down to each joint, capped at pi (radians).
-std::vector<float> CumulativeBendLimits(const DynamicChainDefinition& chain);
 
 // Bind-pose collision probe of every chain joint against every model collider.
 struct BindPoseCollisionReport {

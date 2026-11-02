@@ -95,5 +95,21 @@ TEST(PhysicsDebugRecorderSystemTests, WindowOfFiveKeepsTheNewestFiveUpdatesOldes
     EXPECT_NEAR(newest.rootAnimWorld.x, anchor.x, 1e-5f);
 }
 
+TEST(PhysicsDebugRecorderSystemTests, OverrideRecordsOnlyTheNamedEntity)
+{
+    ChainScene scene(BuildChainModel(kJointCount, 1.0f));
+    PhysicsDebugRecorder privateRecorder;
+    privateRecorder.Configure(true, 5);
+
+    scene.physics.SetDebugRecorderOverride(&privateRecorder, kInvalidEntity);
+    RunScene(scene, 3);
+    EXPECT_EQ(privateRecorder.FramesRecorded(scene.entity), 0u);
+
+    scene.physics.SetDebugRecorderOverride(&privateRecorder, scene.entity);
+    RunScene(scene, 3);
+    EXPECT_EQ(privateRecorder.FramesRecorded(scene.entity), 3u);
+    scene.physics.SetDebugRecorderOverride(nullptr);
+}
+
 } // namespace
 } // namespace gte

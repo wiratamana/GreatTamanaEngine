@@ -1,6 +1,7 @@
 #pragma once
 #include "DynamicChainDefinition.h"
 #include "../Math/Mat4.h"
+#include "../Math/MathTypes.h"
 #include "../Math/Vec3.h"
 
 #include <cstdint>
@@ -11,6 +12,13 @@
 #include <vector>
 
 namespace gte {
+
+// A root child with an effective bend limit at or below this counts as welded to the animation.
+inline constexpr float kWeldLimitRadians = DegToRad(1.0f);
+constexpr bool IsWeldedLimit(float limitRadians) noexcept { return limitRadians <= kWeldLimitRadians; }
+
+// Angle between two vectors in degrees; 0 when either is shorter than 1e-6.
+float VectorAngleDegrees(const Vec3& a, const Vec3& b) noexcept;
 
 // "HB1_3_5" -> "HB1". Removes every trailing "_<digits>" run; the full name when nothing is left.
 std::string JointGroupKey(std::string_view boneName);

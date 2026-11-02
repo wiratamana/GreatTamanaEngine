@@ -164,7 +164,7 @@ TEST(PhysicsDebugSettingsTest, DefaultPresetMatchesTheStructDefaults)
     ASSERT_TRUE(ApplyPhysicsPreset(legacy, "default"));
     EXPECT_EQ(DescribeSettings(legacy), DescribeSettings(defaults));
     EXPECT_FLOAT_EQ(legacy.gravity.y, defaults.gravity.y);
-    EXPECT_FLOAT_EQ(legacy.fixedTimestepSeconds, defaults.fixedTimestepSeconds);
+    EXPECT_EQ(legacy.fixedTimestepSeconds, defaults.fixedTimestepSeconds); // bit exact, no 1/hz round trip.
     EXPECT_EQ(legacy.maxStepsPerFrame, defaults.maxStepsPerFrame);
 }
 

@@ -11,6 +11,9 @@ namespace gte {
 
 using Float3 = std::array<float, 3>;
 
+// Largest animator speed the play command accepts (0 holds the frame).
+inline constexpr float kPhysicsDebugMaxPlaySpeed = 100.0f;
+
 // ---- List / State -------------------------------------------------------
 
 struct PhysicsAnimatorReport {

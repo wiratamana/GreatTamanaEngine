@@ -31,7 +31,6 @@ namespace gte {
 namespace {
 
 constexpr float kMaxFrameValue = 100000.0f;
-constexpr float kMaxAbsSpeed = 1000.0f;
 constexpr std::uint32_t kMaxRunFrames = 3600;
 constexpr std::uint64_t kMaxRunJointFrames = 2000000;
 constexpr std::uint32_t kMaxJointRows = 2000;
@@ -57,19 +56,6 @@ void Succeed(PhysicsDebugCommandResult& result) noexcept
 {
     result.success = true;
     result.httpStatus = 200;
-}
-
-bool ParseBoolText(const std::string& text, bool& out) noexcept
-{
-    if (text == "true" || text == "1") {
-        out = true;
-        return true;
-    }
-    if (text == "false" || text == "0") {
-        out = false;
-        return true;
-    }
-    return false;
 }
 
 // The entity a command works on, with its rig and cached model.
@@ -137,12 +123,12 @@ PhysicsCaptureStatus MakeCaptureStatus(Game& game, const Entity* entity)
     return status;
 }
 
-// Routes the physics system into a private recorder for the scope; the own recorder is restored on exit.
+// Routes the physics system into a private recorder (target entity only) for the scope; the own recorder is restored on exit.
 class RecorderOverrideScope {
 public:
-    RecorderOverrideScope(PhysicsSystem& physics, PhysicsDebugRecorder& recorder) : m_physics(physics)
+    RecorderOverrideScope(PhysicsSystem& physics, PhysicsDebugRecorder& recorder, Entity onlyEntity) : m_physics(physics)
     {
-        m_physics.SetDebugRecorderOverride(&recorder);
+        m_physics.SetDebugRecorderOverride(&recorder, onlyEntity);
     }
     ~RecorderOverrideScope() { m_physics.SetDebugRecorderOverride(nullptr); }
     RecorderOverrideScope(const RecorderOverrideScope&) = delete;
@@ -227,7 +213,7 @@ bool ProbeEntityFrame(Game& game, const Target& target, std::vector<ChainFrameSa
     PhysicsDebugRecorder recorder;
     recorder.Configure(true, kProbeWindow);
     {
-        RecorderOverrideScope scope(game.GetPhysicsSystem(), recorder);
+        RecorderOverrideScope scope(game.GetPhysicsSystem(), recorder, target.entity);
         game.StepSimulationHeadless(0.0);
     }
     out.clear();
@@ -358,7 +344,7 @@ PhysicsDebugCommandResult DoSet(Game& game, const PhysicsDebugCommandRequest& re
             Fail(result, 400, "duplicate key " + key, key);
             return result;
         }
-        if (!ParseBoolText(value, parsed)) {
+        if (!ParsePhysicsBool(value, parsed)) {
             Fail(result, 400, key + " must be true or false", key);
             return result;
         }
@@ -424,8 +410,8 @@ PhysicsDebugCommandResult DoPlay(Game& game, const PhysicsDebugCommandRequest& r
         Fail(result, 400, "frame must be between 0 and 100000", "frame");
         return result;
     }
-    if (request.hasSpeed && !(std::fabs(request.speed) <= kMaxAbsSpeed)) {
-        Fail(result, 400, "speed must be between -1000 and 1000", "speed");
+    if (request.hasSpeed && !(request.speed >= 0.0f && request.speed <= kPhysicsDebugMaxPlaySpeed)) {
+        Fail(result, 400, "speed must be between 0 and 100", "speed");
         return result;
     }
     if (!game.PlayAnimationOnEntity(target.entity, request.animationGtaPath)) {
@@ -557,9 +543,8 @@ PhysicsDebugCommandResult DoMetrics(Game& game, const PhysicsDebugCommandRequest
         accumulator.AddFrame(cur, prev1, prev2, renderHz);
     }
 
-    result.metrics = accumulator.Finish(renderHz);
-    FillBindPoseMetrics(result.metrics, *target.model, settings);
-    result.run.metrics = result.metrics;
+    result.run.metrics = accumulator.Finish(renderHz);
+    FillBindPoseMetrics(result.run.metrics, *target.model, settings);
     result.run.settingsUsed = DescribeSettings(settings);
     Succeed(result);
     return result;
@@ -673,7 +658,7 @@ PhysicsDebugCommandResult DoRun(Game& game, const PhysicsDebugCommandRequest& re
     const std::size_t chainCount = model.chains.size();
     PhysicsDebugRecorder recorder;
     recorder.Configure(true, kProbeWindow);
-    RecorderOverrideScope recorderScope(physics, recorder);
+    RecorderOverrideScope recorderScope(physics, recorder, target.entity);
 
     PhysicsMetricsAccumulator accumulator(model, BuildStepOptions(runSettings));
     std::vector<std::array<ChainFrameSample, 3>> history(chainCount);
@@ -753,7 +738,6 @@ PhysicsDebugCommandResult DoRun(Game& game, const PhysicsDebugCommandRequest& re
     result.run.physicsMsMedian = timing.p50;
     result.run.physicsMsP95 = timing.p95;
     result.run.trace = std::move(traceSeries);
-    result.metrics = result.run.metrics;
     Succeed(result);
     return result;
 }
@@ -788,7 +772,8 @@ PhysicsDebugCommandResult DoJoints(Game& game, const PhysicsDebugCommandRequest&
         const DynamicChainDefinition& chain = model.chains[c];
         const std::vector<std::string> names = ChainBoneNames(model.skeleton, chain);
         const std::vector<float> effective = ComputeEffectiveBendLimits(chain, options);
-        const std::vector<float> cumulative = CumulativeBendLimits(chain);
+        std::vector<float> cumulative;
+        ComputeCumulativeBendLimits(chain, cumulative);
         const std::vector<JointDebugInfo>* debugInfo = c < model.jointDebugInfo.size() ? &model.jointDebugInfo[c] : nullptr;
         const ChainFrameSample* sample = (liveValid && c < live.size()) ? &live[c] : nullptr;
 
@@ -850,7 +835,7 @@ PhysicsDebugCommandResult DoJoints(Game& game, const PhysicsDebugCommandRequest&
                 row.live.particle = i < particles.size() ? ToFloat3(particles[i].position) : row.live.display;
                 row.live.distFromAnimated = Length(sample->display[i] - sample->animated[i]);
                 row.live.segDirErrDeg
-                    = AngleBetweenDeg(sample->display[i] - parentDisplay, sample->animated[i] - parentAnimated);
+                    = VectorAngleDegrees(sample->display[i] - parentDisplay, sample->animated[i] - parentAnimated);
             }
             report.rows.push_back(std::move(row));
         }

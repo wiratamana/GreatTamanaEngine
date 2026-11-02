@@ -255,8 +255,8 @@ TEST(PhysicsDebugCommandDispatchTests, LiveCaptureFeedsMetrics)
     }
     const PhysicsDebugCommandResult metrics = scene.Run(PhysicsDebugCommandKind::Metrics, scene.ForEntity());
     ASSERT_TRUE(metrics.success) << metrics.errorMessage;
-    EXPECT_EQ(metrics.metrics.frames, 8u);
-    EXPECT_NEAR(metrics.metrics.renderHz, 60.0f, 0.5f);
+    EXPECT_EQ(metrics.run.metrics.frames, 8u);
+    EXPECT_NEAR(metrics.run.metrics.renderHz, 60.0f, 0.5f);
 }
 
 TEST(PhysicsDebugCommandDispatchTests, RunValidatesItsInput)

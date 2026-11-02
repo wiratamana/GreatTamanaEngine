@@ -31,15 +31,15 @@ struct StepOptions {
     float bendLimitMinRadians = 0.0f;
 };
 
+// Own bend limits summed from the anchor down to each joint, capped at pi (radians).
+void ComputeCumulativeBendLimits(const DynamicChainDefinition& definition, std::vector<float>& out);
+
 // Effective bend limit per joint in radians (pi = free):
 // clamp(cumulativeOwnLimits * scale + minRadians, 0, pi). All pi when limits are disabled.
 void ComputeEffectiveBendLimits(const DynamicChainDefinition& definition, const StepOptions& options, std::vector<float>& out);
 std::vector<float> ComputeEffectiveBendLimits(const DynamicChainDefinition& definition, const StepOptions& options);
 
-// Advances one chain by one fixed step.
-// Root and animated positions are world space (animated pose, no physics). `colliders` are world space.
-// Order: seed, integrate (step-length damping), rods + extra constraints + bend cone,
-// goal pull, collision, NaN guard. Does nothing when the definition arrays disagree in size.
+// Advances one chain by one fixed step. Root, animated and collider positions are world space.
 void StepDynamicChain(const DynamicChainDefinition& definition, const Vec3& rootWorldPosition,
     const std::vector<Vec3>& animatedJointWorldPositions, DynamicChainRuntimeState& state, float fixedDeltaTime,
     const Vec3& gravity, const WindSettings& wind, const std::vector<Collider>& colliders = {},

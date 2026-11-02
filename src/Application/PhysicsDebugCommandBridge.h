@@ -52,8 +52,7 @@ struct PhysicsDebugCommandResult {
 
     PhysicsDebugListReport list;
     PhysicsDebugStateReport state;
-    PhysicsRunReport run;
-    PhysicsMetricsReport metrics;
+    PhysicsRunReport run;           // Run and Metrics (run.metrics).
     PhysicsJointsReport joints;
     PhysicsCollidersReport colliders;
     PhysicsDebugSnapshot snapshot;

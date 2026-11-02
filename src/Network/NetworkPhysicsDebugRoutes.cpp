@@ -261,7 +261,7 @@ void RegisterPhysicsDebugRoutes(httplib::Server& server, PhysicsDebugCommandBrid
         request.windowFrames = parsed.windowFrames;
         request.groupFilter = parsed.group;
         if (const auto result = Submit(bridge, std::move(request), kQuickTimeoutMilliseconds, res)) {
-            Respond(res, 200, BuildPhysicsDebugMetricsResponseJson(parsed.entity, result->metrics));
+            Respond(res, 200, BuildPhysicsDebugMetricsResponseJson(parsed.entity, result->run.metrics));
         }
     });
 

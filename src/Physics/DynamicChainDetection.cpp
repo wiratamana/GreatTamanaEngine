@@ -15,11 +15,8 @@
 #include <unordered_set>
 #include <utility>
 
-// Chain detection walks the rigid body and joint graph and the real skeleton ancestry:
-// A no physics -> empty. B graph reachability from Static bodies. C bone -> rigid body map (lowest index wins).
-// D resolve each Dynamic bone to its anchor through real bone ancestors. E assemble one tree per anchor.
-// F fold the remaining PMX joints into extra constraints. G short chains dropped, settings and bend limits seeded.
-// H everything sorted for determinism.
+// Chain detection: joint graph reachability from Static anchors, then trees along the real skeleton ancestry.
+// Steps A..H below. Output is sorted for determinism.
 
 namespace gte {
 
@@ -377,6 +374,7 @@ DynamicChainDetectionResult DetectDynamicChains(
     // Step G: drop short chains, seed per-joint settings from the matched rigid bodies, assign bend limits.
     std::vector<DynamicChainDefinition> finalChains;
     std::vector<std::vector<std::int32_t>> finalPmxJointIndices;
+    std::vector<std::vector<std::int32_t>> finalRigidBodyIndices;
     std::vector<std::vector<std::int32_t>> finalMissingBones;
     for (DynamicChainDefinition& chain : preliminaryChains) {
         if (chain.jointBoneIndices.size() < defaults.minimumChainLength) {
@@ -396,9 +394,11 @@ DynamicChainDetectionResult DetectDynamicChains(
             chain.maxPlausibleRootDelta = sumRestLengths * 5.0f;
         }
 
+        std::vector<std::int32_t> rigidBodyIndices(chain.jointBoneIndices.size(), -1);
         for (std::size_t j = 0; j < chain.jointBoneIndices.size(); ++j) {
             const auto rbIt = boneIndexToRigidBodyIndex.find(chain.jointBoneIndices[j]);
             if (rbIt != boneIndexToRigidBodyIndex.end()) {
+                rigidBodyIndices[j] = rbIt->second;
                 const RigidBody& body = physics->rigidBodies[static_cast<std::size_t>(rbIt->second)];
                 chain.jointSettings[j].mass = body.mass;
                 chain.jointSettings[j].pmxLinearDamping = body.linearDamping;
@@ -420,6 +420,7 @@ DynamicChainDetectionResult DetectDynamicChains(
 
         finalChains.push_back(std::move(chain));
         finalPmxJointIndices.push_back(std::move(pmxJointIndices));
+        finalRigidBodyIndices.push_back(std::move(rigidBodyIndices));
         finalMissingBones.push_back(std::move(missingBones));
     }
 
@@ -442,9 +443,11 @@ DynamicChainDetectionResult DetectDynamicChains(
     std::vector<std::int32_t> bendLimitMissingBoneIndices;
     result.chains.reserve(order.size());
     result.pmxJointIndexPerJoint.reserve(order.size());
+    result.rigidBodyIndexPerJoint.reserve(order.size());
     for (const std::size_t i : order) {
         result.chains.push_back(std::move(finalChains[i]));
         result.pmxJointIndexPerJoint.push_back(std::move(finalPmxJointIndices[i]));
+        result.rigidBodyIndexPerJoint.push_back(std::move(finalRigidBodyIndices[i]));
         bendLimitMissingBoneIndices.insert(bendLimitMissingBoneIndices.end(), finalMissingBones[i].begin(), finalMissingBones[i].end());
     }
 
