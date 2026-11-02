@@ -50,6 +50,17 @@ void Game::Update(const EngineContext& engineContext, const InputState& /*input*
     }
 }
 
+void Game::StepSimulationHeadless(double deltaSeconds)
+{
+    m_animationSystem.EvaluatePoses(m_registry, deltaSeconds);
+    m_physicsSystem.Update(m_registry, deltaSeconds);
+}
+
+std::optional<std::uint32_t> Game::TryGetClipLastFrame(const std::string& absoluteAnimationGtaPath) const
+{
+    return m_animationSystem.TryGetClipLastFrame(absoluteAnimationGtaPath);
+}
+
 Entity Game::CreatePrimitiveEntity(Renderer& renderer, PrimitiveType type, DescriptorSetLayoutHandle sceneServicesSetLayout)
 {
     return m_meshInstantiationSystem.SpawnPrimitive(m_registry, renderer, type, sceneServicesSetLayout);

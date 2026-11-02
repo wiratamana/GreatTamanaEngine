@@ -322,6 +322,9 @@ TEST(PhysicsSystemMultiShapeColliderTests, ChainCollidesCorrectlyAgainstAllThree
 {
     PhysicsSystem physicsSystem;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3::Zero(); // see this file's own determinism argument above.
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     Registry registry;
     const std::string path = "MultiShapeColliderModel.gta";
@@ -366,6 +369,9 @@ TEST(PhysicsSystemMultiShapeColliderTests, SameFixtureWithCollisionDisabledDoesP
 {
     PhysicsSystem physicsSystem;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3::Zero(); // see this file's own determinism argument above.
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     Registry registry;
     const std::string path = "MultiShapeColliderModelNoCollision.gta";

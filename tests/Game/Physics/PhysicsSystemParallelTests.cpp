@@ -111,6 +111,9 @@ TEST(PhysicsSystemParallelTests, SerialAndParallelPathsProduceByteIdenticalResul
     PhysicsSystem physicsSystem;
     Registry registry;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
     // Wind's default (zero strength) is deliberately left as-is - this test
     // cares only about proving the serial/parallel SPLIT doesn't change the
     // result, not about spatially-varying wind (which would legitimately
@@ -171,6 +174,9 @@ TEST(PhysicsSystemParallelTests, ParallelPathAloneProducesConsistentResultsAcros
     PhysicsSystem physicsSystem;
     Registry registry;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.3f, -5.0f, 0.2f); // an arbitrary, non-axis-aligned pull.
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     const SymmetricModel model = BuildSymmetricModel(40);
     const Entity entity = RegisterAndAttachModel(physicsSystem, registry, "ManyChainsModelB.gta", model);

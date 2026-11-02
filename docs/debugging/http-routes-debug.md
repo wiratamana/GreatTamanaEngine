@@ -1,6 +1,6 @@
 # HTTP routes: debug tools
-> Route reference for profiler, fault injection, feature debug, frame debugger, render graph control and project assembly. For anyone who calls the editor's HTTP server.
-> Verified against code: 2026-10-31
+> Route reference for profiler, fault injection, feature debug, frame debugger, render graph control, project assembly and physics debug. For anyone who calls the editor's HTTP server.
+> Verified against code: 2026-11-02
 
 ## TL;DR
 - Server: `127.0.0.1:8080`, editor only. All JSON examples below are built from code, not from a live run.
@@ -453,6 +453,28 @@ Hot reload debug flow:
 6. Prove the scene survived: `debug/scene_snapshot`.
 
 More: [Project assembly guide](../guides/project-assembly.md).
+
+## Physics debug
+Measure, change and look at the dynamic bone chains (skirt, hair) of a model. Full guide, metrics and playbook: [Physics debug](physics-debug.md).
+
+| Route | Params | Reply |
+|---|---|---|
+| `GET /physics_debug/list` | none | Entities with chains and their animator |
+| `GET /physics_debug/state` | `entity` | Settings, time, chains, groups, detection counts, capture status |
+| `GET /physics_debug/set` | `<key>=<value>` (at least one), `entity` for `rig_enabled` and `rig_frozen` | All settings after the change. All or nothing. |
+| `GET /physics_debug/preset` | `name=default\|legacy` | All settings after the change |
+| `POST /physics_debug/play` | body `entity`, `animation_gta_path`, optional `frame`, `speed`, `loop` | Animator state |
+| `GET /physics_debug/seek` | `entity`, `frame` 0..100000, `reset_physics=true\|false` | Animator state |
+| `GET /physics_debug/reset` | `entity` | `{"success":true}` |
+| `POST /physics_debug/run` | body `entity`, `frames` 1..3600, `render_hz` 10..480, optional `start_frame`, `warmup_frames`, `restore`, `settings`, `trace`, `snapshot_frames` | Statistics per joint group. Waits up to 60 s. |
+| `GET /physics_debug/capture` | `enabled=true\|false`, `window` 1..600 | Recorder status |
+| `GET /physics_debug/metrics` | `entity`, `window`, `group` | Same shape as `run`, from the live recorder |
+| `GET /physics_debug/joints` | `entity`, `chain`, `group`, `first`, `count` 1..2000 | One row per joint |
+| `GET /physics_debug/colliders` | `entity` | Colliders and bind-pose penetrations |
+| `GET /physics_debug/image` | `entity`, `view`, `mode`, `width`, `height`, `colliders`, `joints`, `limits`, `highlight`, `format` | PNG, or JSON with `data_base64` |
+
+- Errors: `400` bad input (the body names the key), `404` unknown entity, `409` state conflict, `503` bridge busy, `504` main thread too slow. Read the state before you repeat a write after `504`.
+- All settings are in memory. A restart resets them. `GET /physics_debug/preset?name=default` restores them.
 
 ## Related
 - [HTTP cheat sheet](http-cheat-sheet.md) · [HTTP routes](http-routes.md) · [HTTP server](../architecture/http-server.md)

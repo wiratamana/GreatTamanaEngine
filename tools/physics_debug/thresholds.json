@@ -1,0 +1,36 @@
+{
+  "gates": [
+    { "id": "E1", "scenario": "S1", "groups": ["Q","HB1","HB2","HB3","HB4","左F","右F"], "metric": "limit_violation_deg", "stat": "p95", "op": "<=", "value": 3.0 },
+    { "id": "E1", "scenario": "S1", "groups": ["Q","HB1","HB2","HB3","HB4","左F","右F"], "metric": "limit_violation_deg", "stat": "p99", "op": "<=", "value": 6.0 },
+    { "id": "E1", "scenario": "S1", "groups": ["Q","HB1","HB2","HB3","HB4","左F","右F"], "metric": "limit_violation_deg", "stat": "max", "op": "<=", "value": 12.0 },
+
+    { "id": "E2", "scenario": "S1", "field": "welded_root_children.joints", "op": ">=", "value": 10 },
+    { "id": "E2", "scenario": "S1", "aggregate": "welded_root_children", "metric": "dist_from_animated", "stat": "mean", "op": "<=", "value": 0.05 },
+    { "id": "E2", "scenario": "S1", "aggregate": "welded_root_children", "metric": "dist_from_animated", "stat": "p95", "op": "<=", "value": 0.12 },
+
+    { "id": "E3", "scenario": "S5", "groups": ["*"], "metric": "seg_dir_err_deg", "stat": "p50", "op": "within_rel", "value": 0.02, "baseline": "S5_legacy" },
+    { "id": "E3", "scenario": "S5", "groups": ["*"], "metric": "seg_dir_err_deg", "stat": "p95", "op": "within_rel", "value": 0.02, "baseline": "S5_legacy" },
+    { "id": "E3", "scenario": "S5", "groups": ["*"], "metric": "dist_from_animated", "stat": "mean", "op": "within_rel", "value": 0.02, "baseline": "S5_legacy" },
+
+    { "id": "E4", "scenarios": ["S2","S1"], "groups": ["HB1","Q","HB2"], "metric": "accel_local", "stat": "mean", "op": "ratio<=", "value": 1.30 },
+    { "id": "E4", "scenarios": ["S3","S1"], "groups": ["HB1","Q","HB2"], "metric": "accel_local", "stat": "mean", "op": "ratio<=", "value": 1.50 },
+
+    { "id": "E5", "scenario": "S1", "field": "collision.bind_pose_pushed_joints", "op": "==", "value": 0 },
+    { "id": "E5", "scenario": "S1", "field": "collision.bind_pose_penetrating_joints", "op": "==", "value": 23, "note": "Furina specific raw count" },
+    { "id": "E5", "scenario": "S7", "field": "collision.bind_pose_pushed_joints", "op": "==", "value": 23, "note": "fit off pushes the same joints as the raw count" },
+    { "id": "E5", "scenario": "S1", "field": "collision.pushed_particles_per_frame", "op": "<=", "value": 0.5, "baseline": "S1_legacy" },
+    { "id": "E5", "scenarios": ["S6","S1"], "groups": ["Q"], "metric": "seg_dir_err_deg", "stat": "p50", "op": "absdiff<=", "value": 3.0 },
+    { "id": "E5", "scenarios": ["S6","S1"], "groups": ["HB1"], "metric": "seg_dir_err_deg", "stat": "p50", "op": "absdiff<=", "value": 1.5 },
+
+    { "id": "E6", "scenario": "S1", "field": "nan_count", "op": "==", "value": 0 },
+    { "id": "E6", "scenario": "S1", "field": "reseed_count", "op": "==", "value": 0 },
+    { "id": "E6", "scenario": "S4", "field": "nan_count", "op": "==", "value": 0 },
+    { "id": "E6", "scenario": "S4", "field": "reseed_count", "op": "==", "value": 0 },
+    { "id": "E6", "scenario": "S1", "groups": ["*"], "metric": "abs_stretch", "stat": "p99", "op": "<=", "value": 1.1, "floor": 0.10, "baseline": "S1_legacy", "note": "limit = max(1.1 * baseline p99, 0.10)" },
+    { "id": "E6", "scenario": "S4", "aggregate": "all", "metric": "dist_from_animated", "stat": "max", "op": "<=", "value": 6.0 },
+
+    { "id": "E7", "scenario": "S1", "field": "physics_ms.median", "op": "<=", "value": 2.5, "baseline": "S1_legacy", "repeat": 3, "note": "median of the medians of 3 runs" },
+
+    { "id": "E9", "scenario": "S1", "check": "determinism", "note": "two identical runs equal except physics_ms" }
+  ]
+}

@@ -1,0 +1,65 @@
+#pragma once
+#include "DynamicChainDefinition.h"
+#include "../Math/Mat4.h"
+#include "../Math/Vec3.h"
+
+#include <cstdint>
+#include <map>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace gte {
+
+// "HB1_3_5" -> "HB1". Removes every trailing "_<digits>" run; the full name when nothing is left.
+std::string JointGroupKey(std::string_view boneName);
+
+// One render frame of one chain. Raw positions only; all math happens later.
+struct ChainFrameSample {
+    float renderDeltaSeconds = 0.0f;
+    Vec3 rootAnimWorld = Vec3::Zero();
+    Mat4 anchorWorld = Mat4::Identity(); // anchor bone world matrix (entity applied).
+    std::vector<Vec3> animated;          // per joint, before physics.
+    std::vector<Vec3> display;           // per joint, handed to ApplyDynamicChainPhysicsToPose (world space).
+    std::vector<Vec3> fk;                // per joint, bone origin after ApplyDynamicChainPhysicsToPose.
+    std::uint16_t stepsThisFrame = 0;
+    std::uint32_t collisionPushedParticles = 0;
+    float collisionPushDistanceSum = 0.0f;
+    std::uint32_t bendClampedJoints = 0;
+    std::uint32_t reseedCount = 0;
+    std::uint32_t nanGuardHits = 0;
+};
+
+struct MetricStats {
+    std::uint64_t count = 0;
+    double mean = 0.0;
+    double p50 = 0.0;
+    double p95 = 0.0;
+    double p99 = 0.0;
+    double max = 0.0;
+};
+
+// Raw values of one group, collected over many frames.
+struct GroupSamples {
+    std::vector<float> distFromAnimated;
+    std::vector<float> segDirErrDeg;
+    std::vector<float> bendDeltaDeg;
+    std::vector<float> limitViolationDeg;
+    std::vector<float> absStretch;
+    std::vector<float> writebackErr;
+    std::vector<float> accelLocal;
+};
+
+// Mean and nearest-rank percentiles (index = ceil(p * n) - 1). Empty input gives zeros.
+MetricStats Summarize(const std::vector<float>& values);
+
+// Adds one frame of one chain to `groups` (key = JointGroupKey of the bone name) and to the "ALL" entry.
+// Root children with an effective limit <= 1 degree also go to "WELDED_ROOT_CHILDREN" (dist and seg_dir_err only).
+// effectiveLimitRadians and boneNames are index-aligned with joints (pi = free).
+// prev1/prev2 are the two frames before `cur` (null = accel_local is skipped).
+void AccumulateChainFrame(const DynamicChainDefinition& chain, std::span<const std::string> boneNames,
+    std::span<const float> effectiveLimitRadians, const ChainFrameSample& cur, const ChainFrameSample* prev1,
+    const ChainFrameSample* prev2, float renderHz, std::map<std::string, GroupSamples>& groups);
+
+} // namespace gte

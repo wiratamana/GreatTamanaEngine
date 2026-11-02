@@ -72,6 +72,11 @@ More about threads and bridges: [HTTP server](../architecture/http-server.md).
 | Build a repro scene | `POST /instantiate_primitive` **W** |
 | Load the Hi-Z demo scene | `POST /open_preset_scene` **W** |
 | Hot reload a game project | `POST /project_assembly/hot_reload?name=<project>` **W** |
+| Play a clip on a model | `POST /physics_debug/play` **W** (see [physics debug](physics-debug.md)) |
+| Measure skirt or hair motion | `POST /physics_debug/run {"entity":"<n>","frames":204,"render_hz":60}` |
+| Change a physics setting, then measure | `GET /physics_debug/set?bend_limits_enabled=false` **W**, then `/physics_debug/run` |
+| See the cloth and hair as lines | `GET /physics_debug/image?entity=<n>&view=negz` **IMG** |
+| Read one row per physics joint | `GET /physics_debug/joints?entity=<n>&group=Q` |
 | Test a recovery path | `GET /debug/fault?kind=<kind>` **W** |
 
 ## 4. Status codes
@@ -148,6 +153,14 @@ Full params and responses: [HTTP routes](http-routes.md) and [HTTP routes (debug
 | Project | `POST /project_assembly/debug/compile_only`, `/hot_reload` | `name` (query). Hot reload blocks up to 600 s | **W** |
 | Project | `/project_assembly/debug/ledger` | `name` | |
 | Project | `/project_assembly/debug/loaded_assemblies`, `/component_types`, `/scene_snapshot` | none | |
+| Physics | `/physics_debug/list` | none | |
+| Physics | `/physics_debug/state`, `/reset`, `/colliders` | `entity` | **W** (reset) |
+| Physics | `/physics_debug/set`, `/preset` | `<key>=<value>` (+ `entity` for `rig_*`) / `name=default\|legacy` | **W** |
+| Physics | `POST /physics_debug/play`, `/seek` | body `entity`, `animation_gta_path`, `frame`, `speed`, `loop` / query `entity`, `frame`, `reset_physics` | **W** |
+| Physics | `POST /physics_debug/run` | body `entity`, `frames`, `render_hz`, `settings`, `trace`, `snapshot_frames` | |
+| Physics | `/physics_debug/capture`, `/metrics` | `enabled`, `window` / `entity`, `window`, `group` | **W** (capture) |
+| Physics | `/physics_debug/joints` | `entity`, `chain`, `group`, `first`, `count` 1..2000 | |
+| Physics | `/physics_debug/image` | `entity`, `view`, `mode`, `width`, `height`, `colliders`, `joints`, `limits`, `highlight`, `format` | **IMG** |
 | Demo | `/hiz_demo/geometry_only_features` | none | |
 
 ## 6. Images

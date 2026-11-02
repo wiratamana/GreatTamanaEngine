@@ -95,6 +95,9 @@ TEST(PhysicsSystemAnchorRigidityRegressionTests, LegBoneNeverMovesWhileHubAccess
     PhysicsSystem physicsSystem;
     Registry registry;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     const SkinnedMeshData data = BuildHubAnchorWithLegFixture();
     physicsSystem.RegisterDynamicChains("HubAnchorLegModel.gta", data);
@@ -127,6 +130,9 @@ TEST(PhysicsSystemAnchorRigidityRegressionTests, LegBoneNeverMovesAcrossATransfo
     PhysicsSystem physicsSystem;
     Registry registry;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     const SkinnedMeshData data = BuildHubAnchorWithLegFixture();
     physicsSystem.RegisterDynamicChains("HubAnchorLegDragModel.gta", data);

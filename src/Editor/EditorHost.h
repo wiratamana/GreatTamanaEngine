@@ -23,6 +23,7 @@
 #include "../Application/FeatureDebugCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
 #include "../Application/FrameDebuggerCommandBridge.h"
+#include "../Application/PhysicsDebugCommandBridge.h"
 #include "../Application/RenderGraphControlCommandBridge.h"
 #include "../Application/ProjectAssemblyHotReloadCommandBridge.h"
 #include "../Application/ProjectLifecycleLoadCommandBridge.h"
@@ -104,6 +105,8 @@ private:
     FeatureDebugCommandBridge m_featureDebugCommandBridge;
     // Backs the GET /profiler routes.
     ProfilerSnapshotBridge m_profilerBridge;
+    // Backs the /physics_debug/* routes.
+    PhysicsDebugCommandBridge m_physicsDebugCommandBridge;
     // Cross-thread hand-off for project assembly hot reload; not passed to NetworkServer's constructor.
     ProjectAssemblyHotReloadCommandBridge m_hotReloadCommandBridge;
 

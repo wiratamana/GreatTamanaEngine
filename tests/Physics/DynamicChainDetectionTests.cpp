@@ -1,17 +1,11 @@
-// Unit tests for DetectDynamicChains() (src/Physics/DynamicChainDetection.h) -
-// task_manager/verlet-integration-6, Phase 3: a full rewrite of the previous
-// Bone::deformAfterPhysics-driven algorithm, now walking the real RigidBody/
-// Joint graph (RigidBodyJointGraph.h) plus the skeleton's own real bone
-// ancestry. Every test in this file replaces the old (deleted) suite, which
-// asserted the deformAfterPhysics-driven behavior that no longer exists.
-// Pure function - hand-built SkeletonData/PhysicsData fixtures, no ECS/GPU/
-// file I/O involved.
+// Unit tests for DetectDynamicChains(): hand-built skeleton and PhysicsData fixtures, no ECS or GPU.
 
 #include "Physics/DynamicChainDetection.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <iterator>
 #include <set>
@@ -381,11 +375,11 @@ TEST(DynamicChainDetectionTests, DuplicateBoneRigidBodyAssignmentPicksLowestInde
     EXPECT_EQ(chain.jointBoneIndices[1], 2);
     EXPECT_EQ(chain.parentJointIndex, (std::vector<std::int32_t>{ -1, 0 }));
 
-    // The LOWER rigid-body index (mass 2.5/damping 0.1) must be the one used
-    // to seed this joint's settings - never the dropped duplicate (99/99).
+    // The lower rigid body index (mass 2.5, damping 0.1) seeds the joint, never the dropped duplicate.
     ASSERT_EQ(chain.jointSettings.size(), 2u);
     EXPECT_NEAR(chain.jointSettings[0].mass, 2.5f, 1e-4f);
-    EXPECT_NEAR(chain.jointSettings[0].damping, 0.1f, 1e-4f);
+    EXPECT_NEAR(chain.jointSettings[0].pmxLinearDamping, 0.1f, 1e-6f);
+    EXPECT_NEAR(chain.jointSettings[0].damping, 1.0f - std::exp(-0.1f / 60.0f), 1e-6f);
 }
 
 TEST(DynamicChainDetectionTests, DuplicateBoneRigidBodyAssignmentDropRecordedInDiagnostics)

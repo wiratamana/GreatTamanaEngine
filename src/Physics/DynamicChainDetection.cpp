@@ -1,6 +1,8 @@
 #include "DynamicChainDetection.h"
 
+#include "JointBendLimit.h"
 #include "RigidBodyJointGraph.h"
+#include "TimeScaling.h"
 #include "../Math/MathTypes.h" // kEpsilon
 #include "../Math/Vec3.h"
 
@@ -13,67 +15,24 @@
 #include <unordered_set>
 #include <utility>
 
-// task_manager/verlet-integration-6 - full rewrite. See DynamicChainDetection.h's
-// own doc comment for the algorithm summary (Steps A-H); this comment gives
-// the fully detailed write-up the header only summarizes.
-//
-// Step A: physics == nullptr -> empty result immediately.
-// Step B: build the RigidBody/Joint graph (RigidBodyJointGraph.h) and compute
-//   which Dynamic/DynamicAndBoneMerge bodies are graph-reachable from >=1
-//   Static body.
-// Step C: map bones to their own eligible RigidBody in three passes: (1) seed
-//   the orphan diagnostic straight from every graph-orphaned Dynamic body
-//   (before anything else is built - this is the ONLY place a TRUE
-//   graph-orphan is ever recorded, fixing what would otherwise be a silent
-//   "vanishes from the result entirely" bug), (2) build the eligibility map
-//   (Static bodies, or reachable Dynamic bodies, each with a valid boneIndex
-//   - an unattached body is never inserted), (3) apply the "keep the lowest
-//   rigid-body index" tie-break for two bodies sharing one boneIndex, and
-//   diagnose every dropped duplicate.
-// Step D: for every reachable Dynamic bone (ascending bone index, for
-//   determinism), walk its REAL skeleton ancestor chain - never the raw
-//   joint graph - skipping over any non-participating "pass-through" bone,
-//   until it reaches a Static anchor, an already-resolved (memoized) Dynamic
-//   member (join that SAME chain), a dead end (no further ancestor, or an
-//   out-of-range parent index - both terminal identically), or a
-//   revisited bone (an ancestry cycle - orphan, plus a debug-only assert).
-//   Every bone actually visited during a walk that ultimately fails to reach
-//   an anchor is unioned into the same orphan list Step C already seeded.
-// Step E: group every resolved (non-orphaned) bone by its own anchor and
-//   assemble each anchor's own tree (parent-before-child, breadth-first,
-//   children visited in ascending bone-index order at every level) into a
-//   single DynamicChainDefinition - a spider-web skirt's several branches
-//   and cross-braces all land in ONE chain, never one per branch.
-// Step F: fold every remaining original PMX Joint into an
-//   ExtraStructuralConstraint when both endpoints land in the SAME chain but
-//   aren't already a tree edge (de-duplicating two Joints connecting the
-//   exact same pair), or drop-and-diagnose it when its two endpoints land in
-//   two DIFFERENT chains.
-// Step G: discard any chain shorter than defaults.minimumChainLength (never
-//   retroactively orphans its own bones - "too short" and "unreachable" stay
-//   two distinct concepts), then seed jointSettings/maxPlausibleRootDelta/
-//   head-collider defaults exactly like the old algorithm did.
-// Step H: sort the final chain list (ascending rootBoneIndex, tie-broken by
-//   jointBoneIndices[0]) and every diagnostic list, so two calls against
-//   logically-identical-but-differently-ordered PhysicsData always return
-//   the same result, not just the same content.
+// Chain detection walks the rigid body and joint graph and the real skeleton ancestry:
+// A no physics -> empty. B graph reachability from Static bodies. C bone -> rigid body map (lowest index wins).
+// D resolve each Dynamic bone to its anchor through real bone ancestors. E assemble one tree per anchor.
+// F fold the remaining PMX joints into extra constraints. G short chains dropped, settings and bend limits seeded.
+// H everything sorted for determinism.
 
 namespace gte {
 
 namespace {
 
-// One real-ancestry resolution result for a single participating (Dynamic/
-// DynamicAndBoneMerge) bone (Step D).
+// Real-ancestry resolution of one Dynamic or DynamicAndBoneMerge bone.
 struct MemberResolution {
     bool orphaned = false;
-    // Real bone index of the Static anchor this member ultimately belongs
-    // to - only meaningful when !orphaned.
+    // Static anchor bone this member belongs to (valid when !orphaned).
     std::int32_t anchorBoneIndex = -1;
-    // true => this member's tree-parent IS the anchor directly
-    // (parentJointIndex == -1 once assembled in Step E).
+    // True when the tree parent is the anchor itself.
     bool parentIsRoot = false;
-    // Valid only when !parentIsRoot && !orphaned - another member's own real
-    // bone index (this member's tree-parent).
+    // Tree parent bone (valid when !parentIsRoot && !orphaned).
     std::int32_t parentMemberBoneIndex = -1;
 };
 
@@ -91,30 +50,8 @@ BoneRole RoleOf(const std::unordered_map<std::int32_t, std::int32_t>& boneIndexT
     return motionType == RigidBodyMotionType::Static ? BoneRole::Anchor : BoneRole::Member;
 }
 
-// task_manager/verlet-integration-10, PHASE2 - approximates a PMX rigid
-// body's own shape as a single effective collision radius, for use as a
-// simulated joint particle's own physical "thickness" (VerletParticle::
-// collisionRadius, via DynamicJointSettings::collisionRadius). This is
-// DELIBERATELY an approximation (a Box or an off-axis Capsule cannot be
-// exactly reduced to one scalar radius) chosen to be SAFE (never larger
-// than the body's own true minimum half-thickness, so this can never push a
-// joint further away from a collider than its real PMX geometry would
-// justify):
-//   Sphere  -> shapeSize.x directly (already an exact radius).
-//   Capsule -> shapeSize.x directly (the capsule's own radius - its height
-//              is a SEGMENT length along the bone chain's own direction,
-//              already fully accounted for by the chain's own restLengths;
-//              re-using it here as an additional radius would double-count
-//              the joint's own reach along its own chain axis).
-//   Box     -> the SMALLEST of the three half-extents (shapeSize.x/y/z) -
-//              the inscribed-sphere radius, i.e. the largest sphere that
-//              still fits entirely inside the box on its own thinnest axis -
-//              conservative/safe by construction (never larger than the
-//              box's own true minimum half-thickness on any axis).
-// A non-positive result (a degenerate/zero-sized authored shape) is clamped
-// to exactly 0.0f - "no meaningful physical extent," matching
-// IsDegenerateColliderShape()'s own sibling convention in
-// Physics/ModelColliderDetection.cpp.
+// Collision radius of a joint from its rigid body shape: sphere and capsule radius, or the smallest box half-extent.
+// Never larger than the body's thinnest half-thickness; a degenerate shape gives 0.
 float DeriveJointCollisionRadius(RigidBodyShape shape, const Vec3& shapeSize) noexcept
 {
     float radius = 0.0f;
@@ -132,9 +69,7 @@ float DeriveJointCollisionRadius(RigidBodyShape shape, const Vec3& shapeSize) no
     return std::max(0.0f, radius);
 }
 
-// One anchor-rooted group of resolved members, still using REAL bone indices
-// (converted into jointBoneIndices positions only once the final traversal
-// order is known - Step E).
+// Resolved members of one anchor, still as real bone indices.
 struct ChainGroup {
     std::vector<std::int32_t> rootChildren; // Real bone indices, direct (parentIsRoot) children of the anchor.
     std::unordered_map<std::int32_t, std::vector<std::int32_t>> childrenByMemberBone; // Real bone -> real bone children.
@@ -160,9 +95,7 @@ DynamicChainDetectionResult DetectDynamicChains(
 
     std::vector<std::int32_t> orphanedBoneIndices;
 
-    // Step C, pass 1 (fixes the "true graph-orphan silently vanishes"
-    // bug) - seed the orphan list directly from Phase 2's own output BEFORE
-    // the eligibility map is even built.
+    // Step C, pass 1: graph-orphaned bodies go straight into the orphan list.
     for (std::int32_t rigidBodyIndex : reach.orphanedDynamicRigidBodyIndices) {
         const RigidBody& body = physics->rigidBodies[static_cast<std::size_t>(rigidBodyIndex)];
         if (body.boneIndex >= 0 && static_cast<std::size_t>(body.boneIndex) < boneCount) {
@@ -175,10 +108,8 @@ DynamicChainDetectionResult DetectDynamicChains(
         isReachableDynamic[static_cast<std::size_t>(idx)] = true;
     }
 
-    // Step C, pass 2 (eligibility map) + pass 3 (duplicate tie-break,
-    // diagnosed). Unattached (boneIndex < 0, or out of range) bodies are
-    // excluded BEFORE the tie-break runs, so two entirely unrelated
-    // unattached bodies can never spuriously "collide."
+    // Step C, passes 2 and 3: eligibility map, then keep the lowest rigid body index per bone (drops are diagnosed).
+    // Unattached bodies are excluded first so they never collide with each other.
     std::unordered_map<std::int32_t, std::int32_t> boneIndexToRigidBodyIndex;
     std::vector<std::int32_t> duplicateAssignmentsDropped;
     for (std::size_t i = 0; i < physics->rigidBodies.size(); ++i) {
@@ -192,14 +123,12 @@ DynamicChainDetectionResult DetectDynamicChains(
         }
         const auto insertion = boneIndexToRigidBodyIndex.emplace(body.boneIndex, static_cast<std::int32_t>(i));
         if (!insertion.second) {
-            // Ascending iteration order guarantees the map already holds the
-            // LOWEST rigid-body index for this boneIndex - `i` is the
-            // (higher-index) one being dropped.
+            // Ascending order: the map already holds the lowest index, `i` is the one dropped.
             duplicateAssignmentsDropped.push_back(static_cast<std::int32_t>(i));
         }
     }
 
-    // Step D - ascending bone index at the top level, for determinism.
+    // Step D: ascending bone index at the top level, for determinism.
     std::vector<std::int32_t> participatingBones;
     for (const auto& entry : boneIndexToRigidBodyIndex) {
         const RigidBody& body = physics->rigidBodies[static_cast<std::size_t>(entry.second)];
@@ -259,11 +188,7 @@ DynamicChainDetectionResult DetectDynamicChains(
                     }
                     break;
                 }
-                // Not yet resolved by an earlier top-level iteration - keep
-                // climbing; this bone joins the SAME walked sequence (its
-                // own resolution is a pure function of the ancestor chain
-                // beyond it, identical whether resolved from here or from
-                // its own would-be top-level iteration later).
+                // Not resolved yet: keep climbing, this bone joins the same walked sequence.
                 walkedMembers.push_back(parent);
                 current = parent;
                 continue;
@@ -273,13 +198,7 @@ DynamicChainDetectionResult DetectDynamicChains(
         }
 
         if (cycleDetected) {
-            // task_manager/verlet-integration-6, Phase 3 - a malformed/
-            // corrupted skeleton (a parentBoneIndex cycle) should never
-            // happen in practice; fail loudly in a debug build rather than
-            // merely degrading to an orphan silently (see
-            // DynamicChainSolver.cpp's own NaN-guard assert for the
-            // established precedent of pairing an unconditional graceful
-            // degrade with a debug-only diagnostic assert).
+            // A parentBoneIndex cycle is a corrupt skeleton: degrade to an orphan, assert in debug.
             assert(false && "DetectDynamicChains(): cyclic skeleton ancestry detected (parentBoneIndex cycle)");
         }
 
@@ -396,8 +315,7 @@ DynamicChainDetectionResult DetectDynamicChains(
         preliminaryChains.push_back(std::move(chain));
     }
 
-    // Step F - fold every remaining original PMX Joint into extraConstraints
-    // (or drop it as cross-chain, diagnosed), ascending joint index.
+    // Step F: fold PMX joints between two joints of one chain into extra constraints; drop cross-chain ones.
     std::vector<std::int32_t> crossChainJointsDropped;
     std::vector<std::unordered_set<std::uint64_t>> addedExtraPairsPerChain(preliminaryChains.size());
 
@@ -440,9 +358,7 @@ DynamicChainDetectionResult DetectDynamicChains(
             continue; // Case 2 - already represented as the implicit tree edge.
         }
 
-        // Case 3 - a genuine "ring brace"/cross joint. De-duplicate two
-        // different PMX Joints connecting the exact same pair of joints,
-        // keeping only the first encountered (ascending jointIndex order).
+        // A ring brace. Keep only the first PMX joint of each joint pair.
         const std::int32_t lo = jointIndexA < jointIndexB ? jointIndexA : jointIndexB;
         const std::int32_t hi = jointIndexA < jointIndexB ? jointIndexB : jointIndexA;
         const std::uint64_t pairKey = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(lo)) << 32) | static_cast<std::uint32_t>(hi);
@@ -458,13 +374,10 @@ DynamicChainDetectionResult DetectDynamicChains(
         chain.extraConstraints.push_back(extra);
     }
 
-    // Step G - discard chains shorter than defaults.minimumChainLength, then
-    // seed jointSettings/maxPlausibleRootDelta defaults - collision detection
-    // is now handled entirely separately by DetectModelColliders()
-    // (task_manager/verlet-integration-9, PHASE3), not by this function at
-    // all. A discarded chain's own bones are NOT retroactively moved into
-    // orphanedBoneIndices ("too short" and "unreachable" remain distinct).
+    // Step G: drop short chains, seed per-joint settings from the matched rigid bodies, assign bend limits.
     std::vector<DynamicChainDefinition> finalChains;
+    std::vector<std::vector<std::int32_t>> finalPmxJointIndices;
+    std::vector<std::vector<std::int32_t>> finalMissingBones;
     for (DynamicChainDefinition& chain : preliminaryChains) {
         if (chain.jointBoneIndices.size() < defaults.minimumChainLength) {
             continue;
@@ -488,18 +401,36 @@ DynamicChainDetectionResult DetectDynamicChains(
             if (rbIt != boneIndexToRigidBodyIndex.end()) {
                 const RigidBody& body = physics->rigidBodies[static_cast<std::size_t>(rbIt->second)];
                 chain.jointSettings[j].mass = body.mass;
-                chain.jointSettings[j].damping = body.linearDamping;
+                chain.jointSettings[j].pmxLinearDamping = body.linearDamping;
+                chain.jointSettings[j].damping = PmxDampingToStepFraction(body.linearDamping, defaults.pmxDampingRatePerSecond);
                 chain.jointSettings[j].group = body.group;
                 chain.jointSettings[j].collisionMask = body.collisionGroupMask;
                 chain.jointSettings[j].collisionRadius = DeriveJointCollisionRadius(body.shape, body.shapeSize);
             }
         }
 
+        std::vector<std::int32_t> pmxJointIndices = AssignBendLimits(chain, skeleton, *physics, boneIndexToRigidBodyIndex);
+        pmxJointIndices.resize(chain.jointBoneIndices.size(), -1);
+        std::vector<std::int32_t> missingBones;
+        for (std::size_t j = 0; j < pmxJointIndices.size(); ++j) {
+            if (pmxJointIndices[j] < 0) {
+                missingBones.push_back(chain.jointBoneIndices[j]);
+            }
+        }
+
         finalChains.push_back(std::move(chain));
+        finalPmxJointIndices.push_back(std::move(pmxJointIndices));
+        finalMissingBones.push_back(std::move(missingBones));
     }
 
-    // Step H - full determinism: sort the chain list and every diagnostic list.
-    std::sort(finalChains.begin(), finalChains.end(), [](const DynamicChainDefinition& a, const DynamicChainDefinition& b) {
+    // Step H: sort chains by anchor bone, then first joint. Sort every diagnostic list.
+    std::vector<std::size_t> order(finalChains.size());
+    for (std::size_t i = 0; i < order.size(); ++i) {
+        order[i] = i;
+    }
+    std::stable_sort(order.begin(), order.end(), [&finalChains](std::size_t ia, std::size_t ib) {
+        const DynamicChainDefinition& a = finalChains[ia];
+        const DynamicChainDefinition& b = finalChains[ib];
         if (a.rootBoneIndex != b.rootBoneIndex) {
             return a.rootBoneIndex < b.rootBoneIndex;
         }
@@ -508,18 +439,28 @@ DynamicChainDetectionResult DetectDynamicChains(
         return aFirst < bFirst;
     });
 
-    std::sort(orphanedBoneIndices.begin(), orphanedBoneIndices.end());
-    orphanedBoneIndices.erase(std::unique(orphanedBoneIndices.begin(), orphanedBoneIndices.end()), orphanedBoneIndices.end());
-    std::sort(crossChainJointsDropped.begin(), crossChainJointsDropped.end());
-    crossChainJointsDropped.erase(std::unique(crossChainJointsDropped.begin(), crossChainJointsDropped.end()), crossChainJointsDropped.end());
-    std::sort(duplicateAssignmentsDropped.begin(), duplicateAssignmentsDropped.end());
-    duplicateAssignmentsDropped.erase(
-        std::unique(duplicateAssignmentsDropped.begin(), duplicateAssignmentsDropped.end()), duplicateAssignmentsDropped.end());
+    std::vector<std::int32_t> bendLimitMissingBoneIndices;
+    result.chains.reserve(order.size());
+    result.pmxJointIndexPerJoint.reserve(order.size());
+    for (const std::size_t i : order) {
+        result.chains.push_back(std::move(finalChains[i]));
+        result.pmxJointIndexPerJoint.push_back(std::move(finalPmxJointIndices[i]));
+        bendLimitMissingBoneIndices.insert(bendLimitMissingBoneIndices.end(), finalMissingBones[i].begin(), finalMissingBones[i].end());
+    }
 
-    result.chains = std::move(finalChains);
+    const auto sortUnique = [](std::vector<std::int32_t>& values) {
+        std::sort(values.begin(), values.end());
+        values.erase(std::unique(values.begin(), values.end()), values.end());
+    };
+    sortUnique(orphanedBoneIndices);
+    sortUnique(crossChainJointsDropped);
+    sortUnique(duplicateAssignmentsDropped);
+    sortUnique(bendLimitMissingBoneIndices);
+
     result.diagnostics.orphanedDynamicBoneIndices = std::move(orphanedBoneIndices);
     result.diagnostics.crossChainJointsDropped = std::move(crossChainJointsDropped);
     result.diagnostics.duplicateBoneRigidBodyAssignmentsDropped = std::move(duplicateAssignmentsDropped);
+    result.diagnostics.bendLimitMissingBoneIndices = std::move(bendLimitMissingBoneIndices);
     return result;
 }
 

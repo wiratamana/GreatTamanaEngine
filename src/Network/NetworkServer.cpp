@@ -2,6 +2,7 @@
 
 #include "NetworkCaptureFailure.h"
 #include "NetworkFaultRoutes.h"
+#include "NetworkPhysicsDebugRoutes.h"
 #include "NetworkProfilerRoutes.h"
 #include "NetworkRoutes.h"
 #include "NetworkRequestGuard.h"
@@ -13,6 +14,7 @@
 #include "../Application/FeatureDebugCommandBridge.h"
 #include "../Application/FrameCaptureBridge.h"
 #include "../Application/FrameDebuggerCommandBridge.h"
+#include "../Application/PhysicsDebugCommandBridge.h"
 #include "../Application/RenderGraphControlCommandBridge.h"
 #include "../Core/EditorCapabilities.h" // ILogQueryCapability.
 #include "../Core/Logging.h"
@@ -834,7 +836,8 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability,
     RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability,
     IProjectLifecycleCapability* projectLifecycleCapability, IAssetScaffoldingCapability* assetScaffoldingCapability,
-    FeatureDebugCommandBridge* featureDebugCommandBridge, ProfilerSnapshotBridge* profilerSnapshotBridge)
+    FeatureDebugCommandBridge* featureDebugCommandBridge, ProfilerSnapshotBridge* profilerSnapshotBridge,
+    PhysicsDebugCommandBridge* physicsDebugCommandBridge)
 {
     server.Get("/http_hello_world", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(HandleHelloWorld(), "text/plain; charset=utf-8");
@@ -2449,6 +2452,7 @@ void RegisterRoutes(httplib::Server& server, FrameCaptureBridge* captureBridge, 
     RegisterFaultRoutes(server);
     RegisterProfilerRoutes(server, profilerSnapshotBridge, &RefuseBrowserRequest);
     RegisterFeatureDebugRoutes(server, featureDebugCommandBridge);
+    RegisterPhysicsDebugRoutes(server, physicsDebugCommandBridge, &RefuseBrowserRequest);
     RegisterClusterViewerRoutes(server, uiCommandBridge, assetImportCommandBridge);
 }
 
@@ -2463,7 +2467,8 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     AssetImportCommandBridge* assetImportCommandBridge, ILogQueryCapability* logQueryCapability,
     RenderGraphControlCommandBridge* renderGraphControlCommandBridge, IHotReloadDebugCapability* hotReloadDebugCapability,
     IProjectLifecycleCapability* projectLifecycleCapability, IAssetScaffoldingCapability* assetScaffoldingCapability,
-    FeatureDebugCommandBridge* featureDebugCommandBridge, ProfilerSnapshotBridge* profilerSnapshotBridge)
+    FeatureDebugCommandBridge* featureDebugCommandBridge, ProfilerSnapshotBridge* profilerSnapshotBridge,
+    PhysicsDebugCommandBridge* physicsDebugCommandBridge)
     : m_impl(std::make_unique<Impl>())
     , m_captureBridge(captureBridge)
     , m_commandBridge(commandBridge)
@@ -2477,11 +2482,13 @@ NetworkServer::NetworkServer(FrameCaptureBridge* captureBridge, EngineCommandBri
     , m_assetScaffoldingCapability(assetScaffoldingCapability)
     , m_featureDebugCommandBridge(featureDebugCommandBridge)
     , m_profilerSnapshotBridge(profilerSnapshotBridge)
+    , m_physicsDebugCommandBridge(physicsDebugCommandBridge)
 {
     // Routes are registered once here, never in Start(), so a restart cannot register them twice.
     RegisterRoutes(m_impl->server, m_captureBridge, m_commandBridge, m_uiCommandBridge, m_frameDebuggerCommandBridge,
         m_assetImportCommandBridge, m_logQueryCapability, m_renderGraphControlCommandBridge, m_hotReloadDebugCapability,
-        m_projectLifecycleCapability, m_assetScaffoldingCapability, m_featureDebugCommandBridge, m_profilerSnapshotBridge);
+        m_projectLifecycleCapability, m_assetScaffoldingCapability, m_featureDebugCommandBridge, m_profilerSnapshotBridge,
+        m_physicsDebugCommandBridge);
 }
 
 NetworkServer::~NetworkServer()

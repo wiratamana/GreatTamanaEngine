@@ -293,6 +293,9 @@ TEST(PhysicsSystemCollisionGroupAndRadiusEndToEndTests, GroupMaskFilteringAndJoi
 {
     PhysicsSystem physicsSystem;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3::Zero(); // see BuildFixture()'s own determinism argument.
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     Registry registry;
     const std::string path = "CollisionGroupAndRadiusModel.gta";
@@ -383,6 +386,9 @@ TEST(PhysicsSystemCollisionGroupAndRadiusEndToEndTests, OutOfRangeGroupValueProd
     const auto runFixtureAndReturnJoint2FinalPosition = [](std::uint8_t joint2Group, const char* path) -> Vec3 {
         PhysicsSystem physicsSystem;
         physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3::Zero();
+        // Free joints and raw particle output: default PMX limits would weld the chain.
+        physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+        physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
         Registry registry;
         const SkinnedMeshData data = BuildFixture(joint2Group);

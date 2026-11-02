@@ -11,28 +11,13 @@ namespace gte {
 
 namespace {
 
-// Same PMX Euler-rotation convention as src/Editor/RigidBodyWireframe.cpp's
-// own (private, Editor-only) RotationFromPmxEuler() - redeclared locally
-// rather than shared/exported, matching this campaign's own
-// PHASE0_MASTER_STRATEGY.md convention (mirrors the established precedent
-// in Physics/BoneChainPhysicsResolver.cpp, which redeclares Animation/
-// IkSolver.cpp's own tolerance constants for the identical reason: the
-// original file is not always compiled/linked, e.g. RigidBodyWireframe.cpp
-// only exists under GTE_ENABLE_PROJECT_PANEL). Verified against
-// saba::MMDPhysics.cpp's own `rotMat = ry * rx * rz` - do not change this
-// to a different Euler order.
+// PMX rigid body Euler order (Ry * Rx * Rz).
 Quat RotationFromPmxEuler(const Vec3& rotateRadians) noexcept
 {
     return Quat::FromEulerDegrees(RadToDeg(rotateRadians.x), RadToDeg(rotateRadians.y), RadToDeg(rotateRadians.z));
 }
 
-// Mirrors src/Editor/RigidBodyWireframe.h's own documented per-shape
-// "nothing meaningful to draw/collide against" degenerate thresholds
-// EXACTLY (that file's own doc comment: Sphere - radius <= 0; Box - ALL of
-// x/y/z <= 0; Capsule - radius <= 0, non-positive height is still valid -
-// a "pure sphere" capsule). Redeclared here (rather than shared) for the
-// same reason as RotationFromPmxEuler() above - RigidBodyWireframe.cpp is
-// an Editor-only file, not always compiled/linked.
+// A shape with nothing to collide against: sphere/capsule radius <= 0, or a box with every extent <= 0.
 bool IsDegenerateColliderShape(RigidBodyShape shape, const Vec3& shapeSize) noexcept
 {
     switch (shape) {
@@ -56,12 +41,12 @@ std::vector<ModelColliderDefinition> DetectModelColliders(const SkeletonData& sk
     }
 
     const std::size_t boneCount = skeleton.bones.size();
-    const std::vector<BoneLocalOffset> bindPose; // empty - ComputeBoneWorldMatrix() defaults every entry to identity.
+    const std::vector<BoneLocalOffset> bindPose; // empty = identity for every bone.
 
     for (std::size_t rigidBodyIndex = 0; rigidBodyIndex < physics->rigidBodies.size(); ++rigidBodyIndex) {
         const RigidBody& body = physics->rigidBodies[rigidBodyIndex];
         if (body.motionType != RigidBodyMotionType::Static) {
-            continue; // Only a kinematic, bone-following body is a valid collision obstacle - see this file's own header comment.
+            continue; // Only kinematic, bone-following bodies are obstacles.
         }
         if (body.boneIndex < 0 || static_cast<std::size_t>(body.boneIndex) >= boneCount) {
             continue; // Unattached - nothing to track every frame.
@@ -73,8 +58,7 @@ std::vector<ModelColliderDefinition> DetectModelColliders(const SkeletonData& sk
         const Mat4 bindBoneWorld = ComputeBoneWorldMatrix(skeleton, bindPose, body.boneIndex);
         Mat4 bindBoneWorldInverse;
         if (!bindBoneWorld.TryInverse(bindBoneWorldInverse)) {
-            continue; // Algebraically should never happen (pure bind-pose TRS) - defensive only, matches
-                      // BoneChainPhysicsResolver.cpp's own identical precedent.
+            continue; // Singular bind transform: cannot happen for a pure TRS, skip defensively.
         }
 
         const Mat4 rigidBodyBindWorld = Mat4::TRS(body.translate, RotationFromPmxEuler(body.rotateRadians), Vec3::One());
@@ -82,6 +66,7 @@ std::vector<ModelColliderDefinition> DetectModelColliders(const SkeletonData& sk
 
         ModelColliderDefinition def;
         def.boneIndex = body.boneIndex;
+        def.rigidBodyIndex = static_cast<std::int32_t>(rigidBodyIndex);
         def.shape = body.shape;
         def.shapeSize = body.shapeSize;
         def.group = body.group;
@@ -91,11 +76,7 @@ std::vector<ModelColliderDefinition> DetectModelColliders(const SkeletonData& sk
         result.push_back(def);
     }
 
-    // Full determinism - ascending boneIndex, ties broken by original
-    // rigid-body index (stable_sort preserves the ascending-rigidBodyIndex
-    // insertion order for equal boneIndex keys, matching this codebase's
-    // own established "ascending index" tie-break convention elsewhere -
-    // see e.g. DynamicChainDetection.cpp's Step C, pass 3).
+    // Ascending bone index; a stable sort keeps rigid body order for equal keys.
     std::stable_sort(result.begin(), result.end(),
         [](const ModelColliderDefinition& a, const ModelColliderDefinition& b) { return a.boneIndex < b.boneIndex; });
 

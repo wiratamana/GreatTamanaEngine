@@ -115,6 +115,19 @@ void ApplyMeshHandleForSkinningMode(Registry& registry, Entity animatorEntity,
 
 } // namespace
 
+std::optional<std::uint32_t> AnimationSystem::TryGetClipLastFrame(const std::string& absoluteAnimationGtaPath) const
+{
+    const MotionData* motion = m_clipCache.TryGet(absoluteAnimationGtaPath);
+    if (motion == nullptr) {
+        return std::nullopt;
+    }
+    std::uint32_t lastFrame = 0;
+    for (const BoneKeyframe& keyframe : motion->boneKeyframes) {
+        lastFrame = std::max(lastFrame, keyframe.frame);
+    }
+    return lastFrame;
+}
+
 bool AnimationSystem::Play(Registry& registry, Entity targetEntity, const std::string& absoluteAnimationGtaPath)
 {
     if (!registry.IsAlive(targetEntity)) {

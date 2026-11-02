@@ -5,213 +5,73 @@
 
 namespace gte {
 
-// LOCAL (per-joint) tuning - see PHASE4's "global vs. local" split.
-//
-// task_manager/verlet-integration-7, Phase 5 (PHASE5_IDLE_PHYSICS_TUNING_AND_SETTLING_REGRESSION.md,
-// Culprit E) - `damping`/`stiffness` defaults below were RE-TUNED this phase.
-// Every prior value (damping = 0.08f, stiffness = 0.35f) was only ever
-// validated/judged with physics riding on TOP of an actively-playing MMD
-// dance animation - large, constantly-changing bone motion that visually
-// masked how mediocre these defaults actually were in true isolation. Once
-// verlet-integration-7's Phases 1-4 made a perfectly still, NEVER-animated
-// T-pose model simulate continuously for the first time, the old defaults
-// were measured (via a throwaway tuning harness driving the real
-// StepDynamicChain() directly) to sag less than 0.15% of the chain's own
-// total rest length under default gravity - i.e. visually indistinguishable
-// from "dead"/rigid, exactly the complaint this campaign exists to fix. The
-// new defaults were chosen so a perfectly still T-pose chain (see
-// tests/Physics/DynamicChainSolverIdleSettlingTests.cpp) visibly sags
-// (comfortably above 1% of its own total rest length), settles into a
-// stable shape within a small fraction of the test's own 10-second budget,
-// and never diverges/explodes/NaNs - `stiffness` in particular had to drop
-// far more than `damping` rose, since SolveGoalConstraint() is applied as a
-// fixed-fraction-per-frame Lerp back toward the animated target EVERY single
-// step (see ChainConstraints.h), which otherwise suppresses almost all
-// gravity-driven motion even at a seemingly "low" value like 0.35.
+// Per-joint tuning of one simulated bone.
 struct DynamicJointSettings {
-    float damping = 0.4f;    // "Damping" - see VerletIntegration.h.
-    float stiffness = 0.02f; // "Stiffness" (goal constraint) - see ChainConstraints.h's SolveGoalConstraint().
-    float mass = 1.0f;       // "Weight" - inverse-mass fed to VerletParticle::inverseMass (must be > 0).
+    // Fraction of velocity removed per 1/60 s step (0..1).
+    float damping = 0.4f;
+    // Fraction of the pull toward the animated pose per 1/60 s step (0..1).
+    float stiffness = 0.02f;
+    // Fed to VerletParticle::inverseMass (must be > 0).
+    float mass = 1.0f;
 
-    // task_manager/verlet-integration-10, PHASE1 - this JOINT's own PMX
-    // collision-group membership/mask, copied from whichever Dynamic/
-    // DynamicAndBoneMerge RigidBody this joint's own bone matched during
-    // detection (DynamicChainDetection.cpp, Step G) - the joint-side half of
-    // the same Bullet-style group/mask filter Physics/Collider.h's own
-    // `group`/`collisionMask` fields implement for the STATIC collider side.
-    // Same "collides with everything by default" rationale as Collider's own
-    // fields - every hand-built DynamicJointSettings{...} in the existing
-    // test suite (e.g. DynamicChainSolverTests.cpp's
-    // `DynamicJointSettings{ damping, stiffness, 1.0f }`) leaves these two
-    // trailing fields at these exact defaults, reproducing pre-PHASE1
-    // behavior byte-for-byte. `group` is NEVER range-validated anywhere in
-    // this engine (a raw, unchecked byte from the source .pmx file - see
-    // PHASE0_MASTER_STRATEGY.md's Step 2 point 13) - always mask it
-    // (`group & 0x0Fu`) before using it as a shift amount.
+    // PMX collision group and mask of the matched rigid body. Always mask `group` with 0x0F before shifting.
     std::uint8_t group = 0;
     std::uint16_t collisionMask = 0xFFFF;
 
-    // task_manager/verlet-integration-10, PHASE2 - this joint's own
-    // effective collision radius, derived once by
-    // DynamicChainDetection.cpp (Step G) from whichever Dynamic/
-    // DynamicAndBoneMerge RigidBody this joint's own bone matched during
-    // detection - see that file's own DeriveJointCollisionRadius() doc
-    // comment for the exact per-shape derivation rule. Copied into
-    // VerletParticle::collisionRadius once per (re)seed by
-    // DynamicChainSolver.cpp's SeedParticlesFromAnimatedPose(), mirroring
-    // exactly how `mass` is already copied into VerletParticle::inverseMass
-    // at that same point. DEFAULT 0.0f - a hand-built chain (every existing
-    // test fixture) that never sets this reproduces the exact pre-PHASE2
-    // zero-radius-point behavior.
+    // Collision radius derived from the matched rigid body shape (0 = point).
     float collisionRadius = 0.0f;
+
+    // Raw PMX linear damping of the matched rigid body (-1 = not from PMX).
+    float pmxLinearDamping = -1.0f;
+
+    // Largest collision radius with no push in the bind pose (-1 = not fitted, use collisionRadius).
+    float collisionFitRadius = -1.0f;
+    // Sorted indices into the model collider list that this joint never collides with.
+    std::vector<std::uint16_t> ignoredColliderIndices;
+
+    // Own bend limit in radians, from the PMX joint to the tree parent (pi = free).
+    float bendLimitRadians = 3.14159265f;
 };
 
-// task_manager/verlet-integration-6, Phase 1/3 - a single non-hierarchy
-// stabilizing constraint between two joints that are BOTH already members
-// of this same chain's jointBoneIndices, but are NOT a parentJointIndex
-// tree edge (see DynamicChainDefinition::parentJointIndex's own doc comment
-// below). Indices are POSITIONS within jointBoneIndices
-// (0..jointBoneIndices.size()-1), never raw skeleton bone indices - mirrors
-// jointBoneIndices' own "index into itself" convention used by
-// parentJointIndex. Purely a Verlet SolveDistanceConstraint() pair
-// (ChainConstraints.h) - never drives bone rotation (see
-// BoneChainPhysicsResolver.h's own "IMPORTANT DESIGN NOTE" for exactly why
-// only a REAL skeleton parent/child pair can ever do that). This is how an
-// MMD skirt's authored horizontal "ring brace" Joints (connecting two
-// SIBLING bones, or two bones unrelated in the skeleton) still meaningfully
-// stabilize the simulation even though they can never move a bone by
-// themselves.
+// Distance constraint between two joints of one chain that is not a tree edge. Indices are positions in jointBoneIndices.
 struct ExtraStructuralConstraint {
-    std::int32_t jointIndexA = -1; // position within jointBoneIndices.
-    std::int32_t jointIndexB = -1; // position within jointBoneIndices.
-    float restLength = 0.0f;       // bind-pose distance between the two bones.
+    std::int32_t jointIndexA = -1;
+    std::int32_t jointIndexB = -1;
+    float restLength = 0.0f; // bind-pose distance.
 };
 
-// One dynamic bone chain (a TREE of physics-simulated bones on one model -
-// any number of independent chains may coexist on the same skeleton,
-// sharing no state with each other) - `rootBoneIndex` is NEVER written by
-// physics - not its rotation, not its translation, for any joint, ever (see
-// Physics/BoneChainPhysicsResolver.cpp's ApplyDynamicChainPhysicsToPose(),
-// task_manager/verlet-integration-8, Phase 1). It is the pinned anchor,
-// always taken directly from the animated FK pose every step. This matters
-// because `rootBoneIndex` is frequently a REAL, SHARED, load-bearing
-// skeleton bone (e.g. an MMD model's own 下半身/"lower body," which is also
-// the ordinary FK ancestor of the character's legs) - NOT a dedicated,
-// physics-only "hair root" bone. Before verlet-integration-8, this
-// guarantee was violated for any joint whose tree-parent was the anchor
-// directly (see that campaign's own investigation,
-// task_manager/verlet-integration-7/INVESTIGATION_FULL_BODY_DISTORTION_ON_TRANSFORM_DRAG.md,
-// for the full reported symptom and root cause) - this comment now
-// describes the CORRECTED, enforced behavior. `jointBoneIndices` is the
-// ordered list of bones that ARE simulated. task_manager/verlet-integration-6,
-// Phase 1 - a chain used to be an implicit flat linked list
-// (jointBoneIndices[i]'s parent was ALWAYS jointBoneIndices[i-1]); it is now
-// an EXPLICIT tree via parentJointIndex below, so a single chain can
-// represent genuine branching (an MMD skirt's spider-web hub with 4+
-// children) instead of being forced into one object per branch - see
-// PHASE0_MASTER_STRATEGY.md (verlet-integration-6) for the full rationale.
+// One tree of simulated bones hanging from a pinned anchor bone.
+// The anchor (rootBoneIndex) is never written by physics.
 struct DynamicChainDefinition {
     std::int32_t rootBoneIndex = -1;
     std::vector<std::int32_t> jointBoneIndices;
-    std::vector<DynamicJointSettings> jointSettings; // index-aligned 1:1 with jointBoneIndices.
+    std::vector<DynamicJointSettings> jointSettings; // index-aligned with jointBoneIndices.
 
-    // task_manager/verlet-integration-6, Phase 1 - EXPLICIT tree-parent per
-    // joint, index-aligned 1:1 with jointBoneIndices. parentJointIndex[i] is
-    // a POSITION within jointBoneIndices (never a raw bone index) of joint
-    // i's own parent joint; -1 means "my parent is rootBoneIndex directly."
-    // INVARIANT (relied on by BoneChainPhysicsResolver.cpp/DynamicChainSolver.cpp,
-    // and re-verified by both files' own tests): parentJointIndex[i], if not
-    // -1, MUST be < i (every joint's parent already has an earlier position
-    // in this same array) - this guarantees a single top-to-bottom pass over
-    // jointBoneIndices always processes a parent strictly before any of its
-    // children, exactly like the OLD implicit "i-1" order already guaranteed
-    // by construction. A chain builder (Phase 3) that violates this ordering
-    // produces a definition that will silently fail to pose/simulate
-    // correctly for the affected joint and every one of its descendants -
-    // this is the single most important invariant in this whole campaign.
-    // ALSO INVARIANT: skeleton.bones[jointBoneIndices[i]].parentBoneIndex
-    // must equal (parentJointIndex[i] < 0 ? rootBoneIndex :
-    // jointBoneIndices[parentJointIndex[i]]) - i.e. parentJointIndex must
-    // always describe a REAL skeleton parent/child pair, never an arbitrary
-    // graph edge (see this file's own header comment above
-    // ExtraStructuralConstraint, and PHASE0's Culprit A). Chain builders
-    // (Phase 3) are the ONLY code that may construct this array; hand-built
-    // test fixtures must respect it too.
-    //
-    // A pre-Phase1 "flat list" chain is just the special case
-    // parentJointIndex[i] == static_cast<std::int32_t>(i) - 1 for every i -
-    // use DynamicChainDefinition::MakeLinearParentIndices() below to build
-    // exactly that shape without repeating this logic at every call site.
+    // Tree parent per joint as a position in jointBoneIndices, -1 = the anchor.
+    // INVARIANT: parentJointIndex[i] < i, and it is a real skeleton parent/child pair.
     std::vector<std::int32_t> parentJointIndex;
 
-    // task_manager/verlet-integration-6, Phase 1/3 - see
-    // ExtraStructuralConstraint's own doc comment above. May be empty (the
-    // overwhelmingly common case for a plain single-strand hair/tail chain
-    // with no cross-bracing Joints at all).
+    // Brace constraints that are not tree edges (may be empty).
     std::vector<ExtraStructuralConstraint> extraConstraints;
 
-    // Bind-pose segment lengths, index-aligned with jointBoneIndices:
-    // restLengths[i] is the bind-pose distance between jointBoneIndices[i]
-    // and ITS OWN parentJointIndex-resolved parent (rootBoneIndex if -1) -
-    // see parentJointIndex's own doc comment above for exactly which bone
-    // that is. Precomputed once, never recomputed per frame.
+    // Bind-pose distance to the tree parent (the anchor for root children), index-aligned.
     std::vector<float> restLengths;
 
-    float gravityScale = 1.0f;             // LOCAL multiplier applied to the GLOBAL gravity vector (see PHASE4).
-    float windScale = 1.0f;                // LOCAL multiplier applied to the GLOBAL WindSettings (see PHASE4).
-    std::uint8_t constraintIterations = 4; // structural relaxation passes per fixed step - see ChainConstraints.h.
+    float gravityScale = 1.0f;
+    float windScale = 1.0f;
+    std::uint8_t constraintIterations = 4; // rod relaxation passes per fixed step.
 
-    // task_manager/verlet-integration-9 (PHASE2_DATA_MODEL_GENERALIZED_COLLIDER_LIST.md)
-    // - REPLACES the old single-sphere `hasHeadCollider`/
-    // `headColliderBoneIndex`/`headColliderRadius` trio entirely. Collision
-    // is no longer authored per-chain at all: the actual collider SHAPES
-    // (mixed Sphere/Box/Capsule) are auto-detected once per MODEL from every
-    // RigidBodyMotionType::Static PMX rigid body (see Physics/
-    // ModelColliderDetection.h, PHASE3) and shared by every chain belonging
-    // to that model. `collisionEnabled` is the one remaining per-chain
-    // knob: when true, EVERY joint particle of THIS chain is tested against
-    // EVERY collider in that shared model-wide list (see
-    // DynamicChainSolver.h's own StepDynamicChain() step 5) - when false,
-    // collision is a complete no-op for this chain regardless of how many
-    // colliders the model has. task_manager/verlet-integration-10, PHASE3 -
-    // defaults to true as of this phase (was false from this field's
-    // introduction in verlet-integration-9 through the rest of that
-    // campaign) - a freshly-detected chain now collides against its model's
-    // own auto-detected PMX colliders immediately, with no manual Editor
-    // opt-in required, per that campaign's own explicit user request ("by
-    // default, turn collision to ON"). A human may still explicitly disable
-    // collision per chain via the Editor Inspector's existing "Enable
-    // Collision" checkbox (Editor/Panels/InspectorPanel.cpp) - this default
-    // only changes what a BRAND NEW, never-before-tuned chain starts at. See
-    // Game/Physics/PhysicsSystem.cpp's own `anyChainWantsCollision` guard
-    // doc comment for the accepted per-frame performance consequence of this
-    // default flip (task_manager/verlet-integration-10, PHASE3, Step 4.1).
+    // Collide every joint against the model collider list.
     bool collisionEnabled = true;
 
-    // PHASE5, 3.3 - numerical safety: if the chain's own root bone moves
-    // farther than this in a single StepDynamicChain() call (a teleporting
-    // character, an Editor gizmo drag, ...), every particle is re-seeded
-    // onto the animated pose instead of being integrated across a spurious,
-    // implausibly large displacement. A generous default sufficient for
-    // hand-built definitions/tests; DynamicChainDetection.h overrides this
-    // per-chain based on the chain's own actual combined rest length.
+    // A root move larger than this in one call re-seeds the chain (teleport guard).
     float maxPlausibleRootDelta = 10.0f;
 
-    // task_manager/verlet-integration-6, Phase 1 - convenience helper for
-    // both hand-built test fixtures AND any future single-strand-only
-    // caller: returns { -1, 0, 1, ..., jointCount - 2 }, the exact "flat
-    // list" shape every chain implicitly had before this phase. Pass the
-    // RESULT to a freshly-built DynamicChainDefinition's own
-    // parentJointIndex field directly.
+    // Returns { -1, 0, 1, ..., jointCount - 2 }: a single strand.
     static std::vector<std::int32_t> MakeLinearParentIndices(std::size_t jointCount);
 };
 
-// task_manager/verlet-integration-5, Phase 1 - the result of
-// FindDynamicChainJointByBoneIndex() below - "no match" is represented as
-// { -1, -1 }, never a thrown exception/assert (a bone that is not a
-// physics-driven joint at all - the overwhelmingly common case for most
-// bones in most models - is an entirely normal, expected input, not an
-// error).
+// Result of FindDynamicChainJointByBoneIndex(); { -1, -1 } means no match.
 struct DynamicChainJointLocation {
     std::int32_t chainIndex = -1;
     std::int32_t jointIndexInChain = -1;
@@ -219,30 +79,7 @@ struct DynamicChainJointLocation {
     bool IsValid() const noexcept { return chainIndex >= 0 && jointIndexInChain >= 0; }
 };
 
-// Finds which chain (if any) has `boneIndex` as one of its OWN
-// jointBoneIndices entries, and at what position within that chain's own
-// ordered list. Returns a default-constructed (invalid, both fields -1)
-// DynamicChainJointLocation if `boneIndex` is not a joint of ANY chain in
-// `chains` - e.g. it is an ordinary (non-physics-driven) bone, or it is
-// some chain's OWN rootBoneIndex (the anchor - see
-// DynamicChainDefinition::rootBoneIndex's own doc comment: the root is
-// never itself a member of jointBoneIndices, by construction, so it never
-// matches here either).
-//
-// A bone index can appear in jointBoneIndices of AT MOST ONE chain, ever -
-// see DynamicChainDetection.h's own DetectDynamicChains() contract (a
-// branch point starts one NEW chain per child rather than folding into a
-// shared definition, and a bone has exactly one parent) - so this always
-// returns at most one match; the moment one is found, this returns
-// immediately without scanning the remaining chains.
-//
-// Deliberately pure/free (no ECS, no Editor, no GPU) so both
-// src/Editor/BoneViewerWindow.cpp (task_manager/verlet-integration-5,
-// Phase 2 - resolving a clicked gizmo dot/tree row back to its chain) and
-// src/Editor/Panels/InspectorPanel.cpp (Phase 3 - resolving the current
-// Model-Part selection back to the exact DynamicJointSettings to show/
-// edit) can share ONE tested implementation, rather than each hand-rolling
-// their own subtly-different linear scan.
+// Finds the chain and position whose jointBoneIndices contain `boneIndex`. Anchors never match.
 DynamicChainJointLocation FindDynamicChainJointByBoneIndex(
     const std::vector<DynamicChainDefinition>& chains, std::int32_t boneIndex);
 

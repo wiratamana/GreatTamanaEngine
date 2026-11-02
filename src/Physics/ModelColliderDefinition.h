@@ -7,59 +7,24 @@
 
 namespace gte {
 
-// One collider volume tracked from the model's own PMX Static rigid-body
-// data (Assets/PhysicsData.h) - LOCAL, bind-pose-relative data, precomputed
-// ONCE per model by Physics/ModelColliderDetection.h's DetectModelColliders()
-// (task_manager/verlet-integration-9, PHASE3) and re-resolved to WORLD space
-// EVERY FRAME by the caller (Game/Physics/PhysicsSystem.cpp, PHASE4) from
-// `boneIndex`'s own current animated world transform - this exactly mirrors
-// how the now-removed single SphereCollider used to be re-derived every
-// step (see DynamicChainSolver.h's own now-superseded doc comment history),
-// generalized here to the full Sphere/Box/Capsule shape set
-// Assets::RigidBodyShape actually supports, and to a real per-shape
-// ORIENTATION (meaningless for a Sphere, but required for a Box/Capsule to
-// be positioned/aimed correctly).
-//
-// This struct deliberately lives in Physics/'s "data-driven" tier (like
-// DynamicChainDefinition.h), not its "pure primitive" tier (like
-// Physics/Collider.h) - see task_manager/verlet-integration-9,
-// PHASE0_MASTER_STRATEGY.md's "Architectural tiering" note for why this
-// split is intentional and must be preserved.
+// One collider volume from a Static PMX rigid body, in bind-pose-relative form.
+// Resolved to world space every frame from the animated pose of `boneIndex`.
 struct ModelColliderDefinition {
-    // Bone this collider tracks every frame (RigidBody::boneIndex).
+    // Bone this collider follows.
     std::int32_t boneIndex = -1;
 
+    // Index into PhysicsData::rigidBodies (-1 = unknown).
+    std::int32_t rigidBodyIndex = -1;
+
     RigidBodyShape shape = RigidBodyShape::Sphere;
-    // Same per-shape convention as RigidBody::shapeSize (Assets/PhysicsData.h)
-    // and Physics/Collider.h's own `size` field - unaffected by any
-    // transform.
+    // Same per-shape convention as RigidBody::shapeSize and Collider::size.
     Vec3 shapeSize = Vec3::Zero();
 
-    // The FIXED, bind-pose-relative offset of this collider from
-    // `boneIndex`'s own bind-pose world transform - i.e. the unique
-    // rotation+translation that, composed on top of `boneIndex`'s CURRENT
-    // (animated) world matrix, reproduces exactly where this rigid body's
-    // own authored (Assets::RigidBody::translate/rotateRadians, an absolute
-    // MODEL-SPACE bind-pose transform - see PhysicsData.h's own doc
-    // comment) shape sits at bind pose, and then correctly "rides along"
-    // as the bone animates - the same "bind pose offset" principle vertex
-    // skinning itself relies on. Precomputed exactly once by
-    // DetectModelColliders() (PHASE3) using only bind-pose data (an EMPTY
-    // pose vector - see Animation/BoneWorldMatrixQuery.h) - NEVER
-    // recomputed per frame.
+    // Fixed offset from the bind-pose bone transform to the shape.
     Vec3 localOffsetPosition = Vec3::Zero();
     Quat localOffsetRotation = Quat::Identity();
 
-    // task_manager/verlet-integration-10, PHASE1 - copied verbatim from the
-    // Static RigidBody this collider was detected from
-    // (Assets/PhysicsData.h::RigidBody::group/collisionGroupMask) - see
-    // Physics/Collider.h's own `group`/`collisionMask` doc comment for the
-    // full filtering contract these are resolved into every frame, and its
-    // own note on why `group` must always be masked (`& 0x0Fu`) before use
-    // as a shift amount. Unlike Collider's own trailing fields, these are a
-    // VERBATIM copy of whatever the source PMX RigidBody actually declared,
-    // never defaulted to "collides with everything" here - see
-    // Physics/ModelColliderDetection.cpp's own DetectModelColliders().
+    // Verbatim PMX collision group and mask. Always mask `group` with 0x0F before shifting.
     std::uint8_t group = 0;
     std::uint16_t collisionMask = 0xFFFF;
 };

@@ -8,6 +8,11 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <initializer_list>
+#include <map>
+#include <set>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -2379,6 +2384,830 @@ std::string BuildSceneCameraStateJson(const SceneCameraReport& report)
     body["pose"] = ScenePoseToJson(report.pose);
     body["view"] = SceneViewToJson(report.view);
     return body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+// --- /physics_debug/* routes.
+
+namespace {
+
+using PdJson = nlohmann::json;
+
+std::string PdDump(const PdJson& body)
+{
+    return body.dump(-1, ' ', false, PdJson::error_handler_t::replace);
+}
+
+PdJson PdFloat3(const Float3& v)
+{
+    return PdJson::array({ v[0], v[1], v[2] });
+}
+
+// Query parameters of one request, strict: only `allowed` keys, each at most once.
+bool PdCollectQuery(const PhysicsDebugQueryParams& params, std::initializer_list<std::string_view> allowed,
+    std::map<std::string, std::string>& out, std::string& error)
+{
+    for (const auto& [key, value] : params) {
+        if (std::find(allowed.begin(), allowed.end(), std::string_view(key)) == allowed.end()) {
+            error = "unknown query parameter: " + key;
+            return false;
+        }
+        if (!out.emplace(key, value).second) {
+            error = "duplicate query parameter: " + key;
+            return false;
+        }
+    }
+    return true;
+}
+
+bool PdParseDouble(const std::string& text, double& out)
+{
+    if (text.empty()) {
+        return false;
+    }
+    for (const char c : text) {
+        if (!(std::isdigit(static_cast<unsigned char>(c)) || c == '-' || c == '.' || c == 'e' || c == 'E')) {
+            return false;
+        }
+    }
+    char* end = nullptr;
+    const double value = std::strtod(text.c_str(), &end);
+    if (end != text.c_str() + text.size() || !std::isfinite(value)) {
+        return false;
+    }
+    out = value;
+    return true;
+}
+
+bool PdParseWhole(const std::string& text, std::uint64_t& out)
+{
+    if (text.empty() || text.size() > 12) {
+        return false;
+    }
+    std::uint64_t value = 0;
+    for (const char c : text) {
+        if (c < '0' || c > '9') {
+            return false;
+        }
+        value = value * 10 + static_cast<std::uint64_t>(c - '0');
+    }
+    out = value;
+    return true;
+}
+
+std::string PdNumberText(double value)
+{
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "%.9g", value);
+    return buffer;
+}
+
+// Optional whole number in [minValue, maxValue]. Absent keeps `out`.
+bool PdGetWhole(const std::map<std::string, std::string>& values, const char* key, std::uint32_t minValue,
+    std::uint32_t maxValue, std::uint32_t& out, std::string& error)
+{
+    const auto found = values.find(key);
+    if (found == values.end()) {
+        return true;
+    }
+    std::uint64_t parsed = 0;
+    if (!PdParseWhole(found->second, parsed) || parsed < minValue || parsed > maxValue) {
+        error = std::string("invalid query parameter: ") + key + " - must be a whole number between "
+            + std::to_string(minValue) + " and " + std::to_string(maxValue);
+        return false;
+    }
+    out = static_cast<std::uint32_t>(parsed);
+    return true;
+}
+
+// Optional number in [minValue, maxValue]. Absent keeps `out`.
+bool PdGetNumber(const std::map<std::string, std::string>& values, const char* key, double minValue, double maxValue,
+    double& out, std::string& error)
+{
+    const auto found = values.find(key);
+    if (found == values.end()) {
+        return true;
+    }
+    double parsed = 0.0;
+    if (!PdParseDouble(found->second, parsed) || parsed < minValue || parsed > maxValue) {
+        error = std::string("invalid query parameter: ") + key + " - must be a number between "
+            + PdNumberText(minValue) + " and " + PdNumberText(maxValue);
+        return false;
+    }
+    out = parsed;
+    return true;
+}
+
+// Optional "true" or "false". Absent keeps `out`.
+bool PdGetBool(const std::map<std::string, std::string>& values, const char* key, bool& out, std::string& error)
+{
+    const auto found = values.find(key);
+    if (found == values.end()) {
+        return true;
+    }
+    if (found->second == "true") {
+        out = true;
+    } else if (found->second == "false") {
+        out = false;
+    } else {
+        error = std::string("invalid query parameter: ") + key + " - must be \"true\" or \"false\"";
+        return false;
+    }
+    return true;
+}
+
+// Optional text that must be one of `choices`. Absent keeps `out`.
+bool PdGetChoice(const std::map<std::string, std::string>& values, const char* key,
+    std::initializer_list<std::string_view> choices, std::string& out, std::string& error)
+{
+    const auto found = values.find(key);
+    if (found == values.end()) {
+        return true;
+    }
+    if (std::find(choices.begin(), choices.end(), std::string_view(found->second)) == choices.end()) {
+        error = std::string("invalid query parameter: ") + key + " - unsupported value";
+        return false;
+    }
+    out = found->second;
+    return true;
+}
+
+// Required non-empty text.
+bool PdRequireText(const std::map<std::string, std::string>& values, const char* key, std::string& out, std::string& error)
+{
+    const auto found = values.find(key);
+    if (found == values.end() || found->second.empty()) {
+        error = std::string("missing or empty required query parameter: ") + key;
+        return false;
+    }
+    out = found->second;
+    return true;
+}
+
+// JSON number (not a bool) inside [minValue, maxValue].
+bool PdJsonNumber(const PdJson& value, double minValue, double maxValue, double& out)
+{
+    if (!value.is_number()) {
+        return false;
+    }
+    const double number = value.get<double>();
+    if (!std::isfinite(number) || number < minValue || number > maxValue) {
+        return false;
+    }
+    out = number;
+    return true;
+}
+
+bool PdJsonWhole(const PdJson& value, std::uint32_t minValue, std::uint32_t maxValue, std::uint32_t& out)
+{
+    if (!value.is_number()) {
+        return false;
+    }
+    const std::optional<std::uint32_t> exact = ExactUint32InRange(value.get<double>(), minValue, maxValue);
+    if (!exact) {
+        return false;
+    }
+    out = *exact;
+    return true;
+}
+
+// Parses a body that must be a JSON object. Returns false with `error` set.
+bool PdParseObjectBody(const std::string& jsonBody, PdJson& out, std::string& error)
+{
+    out = PdJson::parse(jsonBody, nullptr, false);
+    if (out.is_discarded()) {
+        error = "malformed JSON body";
+        return false;
+    }
+    if (!out.is_object()) {
+        error = "request body must be a JSON object";
+        return false;
+    }
+    return true;
+}
+
+bool PdHasOnlyKeys(const PdJson& object, std::initializer_list<std::string_view> allowed, std::string& error)
+{
+    for (const auto& item : object.items()) {
+        if (std::find(allowed.begin(), allowed.end(), std::string_view(item.key())) == allowed.end()) {
+            error = "unknown field: " + item.key();
+            return false;
+        }
+    }
+    return true;
+}
+
+bool PdJsonNonEmptyString(const PdJson& object, const char* key, std::string& out, std::string& error)
+{
+    const auto found = object.find(key);
+    if (found == object.end() || !found->is_string() || found->get<std::string>().empty()) {
+        error = std::string("missing or invalid required field: ") + key;
+        return false;
+    }
+    out = found->get<std::string>();
+    return true;
+}
+
+PdJson PdAnimatorJson(const PhysicsAnimatorReport& a)
+{
+    return PdJson::object({ { "present", a.present }, { "playing", a.playing }, { "loop", a.loop }, { "speed", a.speed },
+        { "frame", a.frame }, { "last_frame", a.lastFrame }, { "animation_gta_path", a.animationGtaPath } });
+}
+
+PdJson PdStatsJson(const MetricStats& s)
+{
+    return PdJson::object({ { "n", s.count }, { "mean", s.mean }, { "p50", s.p50 }, { "p95", s.p95 }, { "p99", s.p99 },
+        { "max", s.max } });
+}
+
+PdJson PdGroupJson(const GroupMetricsReport& g)
+{
+    return PdJson::object({ { "key", g.key }, { "chain", g.chainIndex }, { "joints", g.jointCount },
+        { "dist_from_animated", PdStatsJson(g.distFromAnimated) }, { "seg_dir_err_deg", PdStatsJson(g.segDirErrDeg) },
+        { "bend_delta_deg", PdStatsJson(g.bendDeltaDeg) }, { "limit_violation_deg", PdStatsJson(g.limitViolationDeg) },
+        { "abs_stretch", PdStatsJson(g.absStretch) }, { "writeback_err", PdStatsJson(g.writebackErr) },
+        { "accel_local", PdStatsJson(g.accelLocal) } });
+}
+
+PdJson PdSettingsJson(const std::vector<std::pair<std::string, std::string>>& settings)
+{
+    PdJson object = PdJson::object();
+    for (const auto& [key, text] : settings) {
+        double number = 0.0;
+        std::uint64_t whole = 0;
+        if (text == "true" || text == "false") {
+            object[key] = (text == "true");
+        } else if (PdParseWhole(text, whole)) {
+            object[key] = whole;
+        } else if (PdParseDouble(text, number)) {
+            object[key] = number;
+        } else {
+            object[key] = text;
+        }
+    }
+    return object;
+}
+
+// Writes the metric part shared by the run and metrics bodies.
+void PdAddMetrics(PdJson& body, const PhysicsMetricsReport& m)
+{
+    body["frames"] = m.frames;
+    body["render_hz"] = m.renderHz;
+    body["steps_histogram"] = PdJson::array({ m.stepsHistogram[0], m.stepsHistogram[1], m.stepsHistogram[2], m.stepsHistogram[3] });
+    PdJson groups = PdJson::array();
+    for (const GroupMetricsReport& g : m.groups) {
+        groups.push_back(PdGroupJson(g));
+    }
+    body["groups"] = std::move(groups);
+    body["all"] = PdGroupJson(m.all);
+    if (m.weldedRootChildren.jointCount == 0) {
+        body["welded_root_children"] = nullptr;
+    } else {
+        body["welded_root_children"] = PdJson::object({ { "joints", m.weldedRootChildren.jointCount },
+            { "dist_from_animated", PdStatsJson(m.weldedRootChildren.distFromAnimated) },
+            { "seg_dir_err_deg", PdStatsJson(m.weldedRootChildren.segDirErrDeg) } });
+    }
+    body["collision"] = PdJson::object({ { "pushed_particles_per_frame", m.collision.pushedParticlesPerFrame },
+        { "mean_push_distance", m.collision.meanPushDistance },
+        { "bind_pose_penetrating_joints", m.collision.bindPosePenetratingJoints },
+        { "bind_pose_pushed_joints", m.collision.bindPosePushedJoints } });
+    body["bend"] = PdJson::object({ { "clamped_joints_per_frame", m.bendClampedJointsPerFrame } });
+    body["reseed_count"] = m.reseedCount;
+    body["nan_count"] = m.nanCount;
+}
+
+std::string PdMaskHex(std::uint32_t mask)
+{
+    char buffer[16];
+    std::snprintf(buffer, sizeof(buffer), "0x%04x", static_cast<unsigned>(mask));
+    return buffer;
+}
+
+} // namespace
+
+ParsedPhysicsDebugEntityQuery ParsePhysicsDebugEntityQuery(const PhysicsDebugQueryParams& params)
+{
+    ParsedPhysicsDebugEntityQuery result;
+    std::map<std::string, std::string> values;
+    if (PdCollectQuery(params, { "entity" }, values, result.errorMessage)
+        && PdRequireText(values, "entity", result.entity, result.errorMessage)) {
+        result.valid = true;
+    }
+    return result;
+}
+
+ParsedPhysicsDebugSetQuery ParsePhysicsDebugSetQuery(const PhysicsDebugQueryParams& params)
+{
+    ParsedPhysicsDebugSetQuery result;
+    std::set<std::string> seen;
+    for (const auto& [key, value] : params) {
+        if (key.empty()) {
+            result.errorMessage = "empty query parameter name";
+            return result;
+        }
+        if (!seen.insert(key).second) {
+            result.errorMessage = "duplicate query parameter: " + key;
+            result.errorKey = key;
+            return result;
+        }
+        if (key == "entity") {
+            if (value.empty()) {
+                result.errorMessage = "empty query parameter: entity";
+                result.errorKey = key;
+                return result;
+            }
+            result.entity = value;
+        } else {
+            result.pairs.emplace_back(key, value);
+        }
+    }
+    if (result.pairs.empty()) {
+        result.errorMessage = "at least one setting key is required";
+        return result;
+    }
+    result.valid = true;
+    return result;
+}
+
+ParsedPhysicsDebugPresetQuery ParsePhysicsDebugPresetQuery(const PhysicsDebugQueryParams& params)
+{
+    ParsedPhysicsDebugPresetQuery result;
+    std::map<std::string, std::string> values;
+    if (!PdCollectQuery(params, { "name" }, values, result.errorMessage)) {
+        return result;
+    }
+    const auto found = values.find("name");
+    if (found == values.end() || (found->second != "default" && found->second != "legacy")) {
+        result.errorMessage = "missing or invalid required query parameter: name - must be \"default\" or \"legacy\"";
+        return result;
+    }
+    result.name = found->second;
+    result.valid = true;
+    return result;
+}
+
+ParsedPhysicsDebugPlayRequest ParsePhysicsDebugPlayRequest(const std::string& jsonBody)
+{
+    ParsedPhysicsDebugPlayRequest result;
+    PdJson body;
+    if (!PdParseObjectBody(jsonBody, body, result.errorMessage)
+        || !PdHasOnlyKeys(body, { "entity", "animation_gta_path", "frame", "speed", "loop" }, result.errorMessage)
+        || !PdJsonNonEmptyString(body, "entity", result.entity, result.errorMessage)
+        || !PdJsonNonEmptyString(body, "animation_gta_path", result.animationGtaPath, result.errorMessage)) {
+        return result;
+    }
+    double number = 0.0;
+    if (const auto found = body.find("frame"); found != body.end()) {
+        if (!PdJsonNumber(*found, 0.0, 100000.0, number)) {
+            result.errorMessage = "frame must be a number between 0 and 100000";
+            return result;
+        }
+        result.hasFrame = true;
+        result.frame = static_cast<float>(number);
+    }
+    if (const auto found = body.find("speed"); found != body.end()) {
+        if (!PdJsonNumber(*found, 0.0, 100.0, number)) {
+            result.errorMessage = "speed must be a number between 0 and 100";
+            return result;
+        }
+        result.hasSpeed = true;
+        result.speed = static_cast<float>(number);
+    }
+    if (const auto found = body.find("loop"); found != body.end()) {
+        if (!found->is_boolean()) {
+            result.errorMessage = "loop must be a boolean";
+            return result;
+        }
+        result.hasLoop = true;
+        result.loop = found->get<bool>();
+    }
+    result.valid = true;
+    return result;
+}
+
+ParsedPhysicsDebugSeekQuery ParsePhysicsDebugSeekQuery(const PhysicsDebugQueryParams& params)
+{
+    ParsedPhysicsDebugSeekQuery result;
+    std::map<std::string, std::string> values;
+    if (!PdCollectQuery(params, { "entity", "frame", "reset_physics" }, values, result.errorMessage)
+        || !PdRequireText(values, "entity", result.entity, result.errorMessage)) {
+        return result;
+    }
+    if (values.find("frame") == values.end()) {
+        result.errorMessage = "missing or empty required query parameter: frame";
+        return result;
+    }
+    double frame = 0.0;
+    if (!PdGetNumber(values, "frame", 0.0, 100000.0, frame, result.errorMessage)
+        || !PdGetBool(values, "reset_physics", result.resetPhysics, result.errorMessage)) {
+        return result;
+    }
+    result.frame = static_cast<float>(frame);
+    result.valid = true;
+    return result;
+}
+
+ParsedPhysicsDebugRunRequest ParsePhysicsDebugRunRequest(const std::string& jsonBody)
+{
+    ParsedPhysicsDebugRunRequest result;
+    std::string& error = result.errorMessage;
+    PdJson body;
+    if (!PdParseObjectBody(jsonBody, body, error)
+        || !PdHasOnlyKeys(body, { "entity", "frames", "render_hz", "start_frame", "warmup_frames", "restore", "settings",
+                                    "trace", "snapshot_frames" }, error)
+        || !PdJsonNonEmptyString(body, "entity", result.run.entityName, error)) {
+        return result;
+    }
+    const auto frames = body.find("frames");
+    if (frames == body.end() || !PdJsonWhole(*frames, 1, kPhysicsDebugMaxRunFrames, result.run.frames)) {
+        error = "frames must be a whole number between 1 and 3600";
+        return result;
+    }
+    double number = 0.0;
+    const auto hz = body.find("render_hz");
+    if (hz == body.end() || !PdJsonNumber(*hz, 10.0, 480.0, number)) {
+        error = "render_hz must be a number between 10 and 480";
+        return result;
+    }
+    result.run.renderHz = static_cast<float>(number);
+    if (const auto found = body.find("start_frame"); found != body.end()) {
+        if (!PdJsonNumber(*found, 0.0, 100000.0, number)) {
+            error = "start_frame must be a number between 0 and 100000";
+            return result;
+        }
+        result.run.startFrame = static_cast<float>(number);
+    }
+    if (const auto found = body.find("warmup_frames"); found != body.end()) {
+        if (!PdJsonWhole(*found, 0, kPhysicsDebugMaxRunFrames, result.run.warmupFrames)
+            || result.run.warmupFrames >= result.run.frames) {
+            error = "warmup_frames must be a whole number below frames";
+            return result;
+        }
+    }
+    if (const auto found = body.find("restore"); found != body.end()) {
+        if (!found->is_boolean()) {
+            error = "restore must be a boolean";
+            return result;
+        }
+        result.run.restore = found->get<bool>();
+    }
+    if (const auto found = body.find("settings"); found != body.end()) {
+        if (!found->is_object()) {
+            error = "settings must be an object";
+            return result;
+        }
+        for (const auto& item : found->items()) {
+            const PdJson& value = item.value();
+            if (item.key().empty()) {
+                error = "settings keys must not be empty";
+                return result;
+            }
+            if (value.is_boolean()) {
+                result.run.settingsPairs.emplace_back(item.key(), value.get<bool>() ? "true" : "false");
+            } else if (value.is_number() && std::isfinite(value.get<double>())) {
+                result.run.settingsPairs.emplace_back(item.key(), PdNumberText(value.get<double>()));
+            } else if (value.is_string()) {
+                result.run.settingsPairs.emplace_back(item.key(), value.get<std::string>());
+            } else {
+                error = "settings." + item.key() + " must be a number, a boolean or a string";
+                return result;
+            }
+        }
+    }
+    if (const auto found = body.find("trace"); found != body.end()) {
+        if (!found->is_object() || !PdHasOnlyKeys(*found, { "bones", "every" }, error)) {
+            if (error.empty()) {
+                error = "trace must be an object";
+            }
+            return result;
+        }
+        if (const auto bones = found->find("bones"); bones != found->end()) {
+            if (!bones->is_array() || bones->size() > 64) {
+                error = "trace.bones must be an array of at most 64 names";
+                return result;
+            }
+            for (const PdJson& name : *bones) {
+                if (!name.is_string() || name.get<std::string>().empty()) {
+                    error = "trace.bones must hold non-empty strings";
+                    return result;
+                }
+                result.run.traceBones.push_back(name.get<std::string>());
+            }
+        }
+        if (const auto every = found->find("every"); every != found->end()) {
+            if (!PdJsonWhole(*every, 1, kPhysicsDebugMaxRunFrames, result.run.traceEvery)) {
+                error = "trace.every must be a whole number between 1 and 3600";
+                return result;
+            }
+        }
+    }
+    if (const auto found = body.find("snapshot_frames"); found != body.end()) {
+        if (!found->is_array() || found->size() > 32) {
+            error = "snapshot_frames must be an array of at most 32 frame numbers";
+            return result;
+        }
+        for (const PdJson& item : *found) {
+            std::uint32_t frame = 0;
+            if (!PdJsonWhole(item, 0, kPhysicsDebugMaxRunFrames, frame) || frame >= result.run.frames) {
+                error = "snapshot_frames entries must be whole numbers below frames";
+                return result;
+            }
+            result.run.snapshotFrames.push_back(frame);
+        }
+    }
+    result.valid = true;
+    return result;
+}
+
+ParsedPhysicsDebugCaptureQuery ParsePhysicsDebugCaptureQuery(const PhysicsDebugQueryParams& params)
+{
+    ParsedPhysicsDebugCaptureQuery result;
+    std::map<std::string, std::string> values;
+    if (!PdCollectQuery(params, { "enabled", "window", "entity" }, values, result.errorMessage)) {
+        return result;
+    }
+    if (values.find("enabled") == values.end()) {
+        result.errorMessage = "missing required query parameter: enabled - must be \"true\" or \"false\"";
+        return result;
+    }
+    if (!PdGetBool(values, "enabled", result.enabled, result.errorMessage)
+        || !PdGetWhole(values, "window", 1, kPhysicsDebugMaxWindowFrames, result.windowFrames, result.errorMessage)) {
+        return result;
+    }
+    if (const auto found = values.find("entity"); found != values.end()) {
+        if (found->second.empty()) {
+            result.errorMessage = "empty query parameter: entity";
+            return result;
+        }
+        result.entity = found->second;
+    }
+    result.valid = true;
+    return result;
+}
+
+ParsedPhysicsDebugMetricsQuery ParsePhysicsDebugMetricsQuery(const PhysicsDebugQueryParams& params)
+{
+    ParsedPhysicsDebugMetricsQuery result;
+    std::map<std::string, std::string> values;
+    if (PdCollectQuery(params, { "entity", "window", "group" }, values, result.errorMessage)
+        && PdRequireText(values, "entity", result.entity, result.errorMessage)
+        && PdGetWhole(values, "window", 1, kPhysicsDebugMaxWindowFrames, result.windowFrames, result.errorMessage)) {
+        if (const auto found = values.find("group"); found != values.end()) {
+            result.group = found->second;
+        }
+        result.valid = true;
+    }
+    return result;
+}
+
+ParsedPhysicsDebugJointsQuery ParsePhysicsDebugJointsQuery(const PhysicsDebugQueryParams& params)
+{
+    ParsedPhysicsDebugJointsQuery result;
+    std::map<std::string, std::string> values;
+    std::string& error = result.errorMessage;
+    if (!PdCollectQuery(params, { "entity", "chain", "group", "first", "count" }, values, error)
+        || !PdRequireText(values, "entity", result.entity, error)
+        || !PdGetWhole(values, "first", 0, 100000000, result.first, error)
+        || !PdGetWhole(values, "count", 1, kPhysicsDebugMaxJointRows, result.count, error)) {
+        return result;
+    }
+    std::uint32_t chain = 0;
+    if (values.find("chain") != values.end()) {
+        if (!PdGetWhole(values, "chain", 0, 65535, chain, error)) {
+            return result;
+        }
+        result.chain = static_cast<std::int32_t>(chain);
+    }
+    if (const auto found = values.find("group"); found != values.end()) {
+        result.group = found->second;
+    }
+    result.valid = true;
+    return result;
+}
+
+ParsedPhysicsDebugImageQuery ParsePhysicsDebugImageQuery(const PhysicsDebugQueryParams& params)
+{
+    ParsedPhysicsDebugImageQuery result;
+    std::map<std::string, std::string> values;
+    std::string& error = result.errorMessage;
+    PhysicsDebugImageRequest& request = result.request;
+    if (!PdCollectQuery(params, { "entity", "view", "mode", "width", "height", "colliders", "joints", "limits", "highlight",
+                                    "format" }, values, error)
+        || !PdRequireText(values, "entity", request.entityName, error)
+        || !PdGetChoice(values, "view", { "negz", "posz", "posx", "negx", "top" }, request.view, error)
+        || !PdGetChoice(values, "mode", { "both", "sim", "anim" }, request.mode, error)
+        || !PdGetWhole(values, "width", 200, 2000, request.width, error)
+        || !PdGetWhole(values, "height", 200, 2000, request.height, error)
+        || !PdGetBool(values, "colliders", request.showColliders, error)
+        || !PdGetBool(values, "joints", request.showJoints, error)
+        || !PdGetBool(values, "limits", request.showLimits, error)) {
+        return result;
+    }
+    if (const auto found = values.find("highlight"); found != values.end()) {
+        request.highlight = found->second;
+    }
+    if (const auto found = values.find("format"); found != values.end()) {
+        result.format = found->second;
+    }
+    result.valid = true;
+    return result;
+}
+
+std::string BuildPhysicsDebugListResponseJson(const PhysicsDebugListReport& report)
+{
+    PdJson entities = PdJson::array();
+    for (const PhysicsDebugListEntry& e : report.entries) {
+        entities.push_back(PdJson::object({ { "name", e.name },
+            { "entity", PdJson::object({ { "index", e.entityIndex }, { "generation", e.entityGeneration } }) },
+            { "mesh_gta_path", e.meshGtaPath }, { "chains", e.chainCount }, { "joints", e.jointCount },
+            { "rig_enabled", e.rigEnabled }, { "rig_frozen", e.rigFrozen }, { "animator", PdAnimatorJson(e.animator) } }));
+    }
+    return PdDump(PdJson::object({ { "entities", std::move(entities) } }));
+}
+
+std::string BuildPhysicsDebugStateResponseJson(const PhysicsDebugStateReport& report)
+{
+    PdJson chains = PdJson::array();
+    for (const PhysicsChainStateReport& c : report.chains) {
+        chains.push_back(PdJson::object({ { "index", c.index }, { "anchor_bone", c.anchorBoneName },
+            { "anchor_bone_index", c.anchorBoneIndex }, { "joints", c.joints }, { "root_children", c.rootChildren },
+            { "extra_constraints", c.extraConstraints }, { "constraint_iterations", c.constraintIterations },
+            { "collision_enabled", c.collisionEnabled }, { "max_plausible_root_delta", c.maxPlausibleRootDelta },
+            { "initialized", c.initialized }, { "reseed_count", c.reseedCount } }));
+    }
+    PdJson groups = PdJson::array();
+    for (const PhysicsGroupInfo& g : report.groups) {
+        groups.push_back(PdJson::object({ { "key", g.key }, { "chain", g.chainIndex }, { "joints", g.joints } }));
+    }
+    PdJson body;
+    body["success"] = true;
+    body["entity"] = report.entityName;
+    body["settings"] = PdSettingsJson(report.settings);
+    body["time"] = PdJson::object({ { "paused", report.timePaused }, { "frozen_this_frame", report.timeFrozenThisFrame },
+        { "frame_count", report.timeFrameCount } });
+    body["chains"] = std::move(chains);
+    body["groups"] = std::move(groups);
+    body["colliders"] = report.colliderCount;
+    body["detection"] = PdJson::object({ { "orphans", report.orphanCount },
+        { "cross_chain_joints_dropped", report.crossChainJointsDropped },
+        { "duplicate_bodies_dropped", report.duplicateBodiesDropped }, { "bend_limit_missing", report.bendLimitMissing } });
+    body["capture"] = PdJson::object({ { "enabled", report.capture.enabled },
+        { "window_frames", report.capture.windowFrames }, { "frames_recorded", report.capture.framesRecorded } });
+    return PdDump(body);
+}
+
+std::string BuildPhysicsDebugSettingsResponseJson(const std::vector<std::pair<std::string, std::string>>& settings)
+{
+    return PdDump(PdJson::object({ { "success", true }, { "settings", PdSettingsJson(settings) } }));
+}
+
+std::string BuildPhysicsDebugPlayResponseJson(const std::string& entity, const PhysicsAnimatorReport& animator)
+{
+    return PdDump(PdJson::object({ { "success", true }, { "entity", entity }, { "animator", PdAnimatorJson(animator) } }));
+}
+
+std::string BuildPhysicsDebugSuccessResponseJson()
+{
+    return PdDump(PdJson::object({ { "success", true } }));
+}
+
+std::string BuildPhysicsDebugRunResponseJson(const std::string& entity, const PhysicsRunReport& report)
+{
+    PdJson body;
+    body["success"] = true;
+    body["entity"] = entity;
+    PdAddMetrics(body, report.metrics);
+    body["settings_used"] = PdSettingsJson(report.settingsUsed);
+    body["wrapped"] = report.wrapped;
+    body["physics_ms"] = PdJson::object({ { "median", report.physicsMsMedian }, { "p95", report.physicsMsP95 } });
+    PdJson trace = PdJson::array();
+    for (const PhysicsTraceSeries& series : report.trace) {
+        PdJson display = PdJson::array();
+        PdJson animated = PdJson::array();
+        PdJson fk = PdJson::array();
+        for (const Float3& v : series.display) {
+            display.push_back(PdFloat3(v));
+        }
+        for (const Float3& v : series.animated) {
+            animated.push_back(PdFloat3(v));
+        }
+        for (const Float3& v : series.fk) {
+            fk.push_back(PdFloat3(v));
+        }
+        trace.push_back(PdJson::object({ { "bone", series.bone }, { "display", std::move(display) },
+            { "animated", std::move(animated) }, { "fk", std::move(fk) } }));
+    }
+    body["trace"] = std::move(trace);
+    PdJson snapshots = PdJson::array();
+    for (const PhysicsRunSnapshot& snapshot : report.snapshots) {
+        PdJson joints = PdJson::array();
+        for (const PhysicsTraceJoint& j : snapshot.joints) {
+            joints.push_back(PdJson::object({ { "bone", j.bone }, { "animated", PdFloat3(j.animated) },
+                { "display", PdFloat3(j.display) }, { "fk", PdFloat3(j.fk) } }));
+        }
+        snapshots.push_back(PdJson::object({ { "frame", snapshot.frame }, { "joints", std::move(joints) } }));
+    }
+    body["snapshots"] = std::move(snapshots);
+    return PdDump(body);
+}
+
+std::string BuildPhysicsDebugMetricsResponseJson(const std::string& entity, const PhysicsMetricsReport& metrics)
+{
+    PdJson body;
+    body["success"] = true;
+    body["entity"] = entity;
+    PdAddMetrics(body, metrics);
+    return PdDump(body);
+}
+
+std::string BuildPhysicsDebugJointsResponseJson(const PhysicsJointsReport& report)
+{
+    PdJson rows = PdJson::array();
+    for (const PhysicsJointRow& r : report.rows) {
+        PdJson ignored = PdJson::array();
+        for (const std::string& name : r.ignoredColliders) {
+            ignored.push_back(name);
+        }
+        const PdJson live = PdJson::object({ { "valid", r.live.valid }, { "animated", PdFloat3(r.live.animated) },
+            { "display", PdFloat3(r.live.display) }, { "particle", PdFloat3(r.live.particle) },
+            { "fk", PdFloat3(r.live.fk) }, { "dist_from_animated", r.live.distFromAnimated },
+            { "seg_dir_err_deg", r.live.segDirErrDeg } });
+        PdJson row;
+        row["i"] = r.index;
+        row["chain"] = r.chain;
+        row["bone"] = r.bone;
+        row["bone_index"] = r.boneIndex;
+        row["group"] = r.group;
+        row["parent_joint"] = r.parentJoint;
+        row["parent_bone"] = r.parentBone;
+        row["rest_length"] = r.restLength;
+        row["rigid_body"] = r.rigidBodyName;
+        row["mass"] = r.mass;
+        row["damping"] = r.damping;
+        row["pmx_linear_damping"] = r.pmxLinearDamping;
+        row["stiffness"] = r.stiffness;
+        row["collision_radius"] = r.collisionRadius;
+        row["collision_fit_radius"] = r.collisionFitRadius;
+        row["ignored_colliders"] = std::move(ignored);
+        row["group_bit"] = r.groupBit;
+        row["collision_mask"] = PdMaskHex(r.collisionMask);
+        row["bend_limit_deg"] = r.bendLimitDeg;
+        row["cumulative_bend_limit_deg"] = r.cumulativeBendLimitDeg;
+        row["effective_bend_limit_deg"] = r.effectiveBendLimitDeg;
+        row["pmx_joint"] = r.pmxJointName;
+        row["pmx_rot_lower_deg"] = PdFloat3(r.pmxRotLowerDeg);
+        row["pmx_rot_upper_deg"] = PdFloat3(r.pmxRotUpperDeg);
+        row["pmx_joint_found"] = r.pmxJointFound;
+        row["live"] = live;
+        rows.push_back(std::move(row));
+    }
+    return PdDump(PdJson::object({ { "success", true }, { "total", report.total }, { "first", report.first },
+        { "rows", std::move(rows) } }));
+}
+
+std::string BuildPhysicsDebugCollidersResponseJson(const PhysicsCollidersReport& report)
+{
+    PdJson colliders = PdJson::array();
+    for (const PhysicsColliderRow& c : report.rows) {
+        colliders.push_back(PdJson::object({ { "i", c.index }, { "rigid_body", c.rigidBodyName }, { "bone", c.boneName },
+            { "shape", c.shape }, { "size", PdFloat3(c.size) }, { "world_center", PdFloat3(c.worldCenter) },
+            { "world_rotation", PdJson::array({ c.worldRotationQuat[0], c.worldRotationQuat[1], c.worldRotationQuat[2],
+                                                  c.worldRotationQuat[3] }) },
+            { "group", c.group }, { "mask", PdMaskHex(c.mask) } }));
+    }
+    PdJson penetrations = PdJson::array();
+    for (const PhysicsBindPosePenetration& p : report.bindPosePenetrations) {
+        penetrations.push_back(PdJson::object({ { "chain", p.chain }, { "joint", p.joint }, { "bone", p.bone },
+            { "collider", p.collider }, { "push", p.push } }));
+    }
+    return PdDump(PdJson::object({ { "success", true }, { "colliders", std::move(colliders) },
+        { "bind_pose_penetrations", std::move(penetrations) } }));
+}
+
+std::string BuildPhysicsDebugCaptureResponseJson(const PhysicsCaptureStatus& status)
+{
+    return PdDump(PdJson::object({ { "success", true }, { "enabled", status.enabled },
+        { "window_frames", status.windowFrames }, { "frames_recorded", status.framesRecorded } }));
+}
+
+std::string BuildPhysicsDebugImageJsonBody(int width, int height, const std::string& base64Png,
+    const PhysicsDebugImageViewInfo& view, const std::vector<std::string>& highlightedBones)
+{
+    PdJson bones = PdJson::array();
+    for (const std::string& name : highlightedBones) {
+        bones.push_back(name);
+    }
+    PdJson body;
+    body["width"] = width;
+    body["height"] = height;
+    body["format"] = "png";
+    body["data_base64"] = base64Png;
+    body["view"] = PdJson::object({ { "name", view.name }, { "right", PdFloat3(view.right) }, { "up", PdFloat3(view.up) },
+        { "forward", PdFloat3(view.forward) }, { "bounds_min", PdFloat3(view.boundsMin) },
+        { "bounds_max", PdFloat3(view.boundsMax) }, { "pixels_per_unit", view.pixelsPerUnit } });
+    body["legend"] = PdJson::object({ { "anim", "green" }, { "sim", "red" }, { "collider", "blue" }, { "limit", "yellow" },
+        { "highlight", "magenta" }, { "axes", "x red, y green, z blue" } });
+    body["highlighted_bones"] = std::move(bones);
+    return PdDump(body);
 }
 
 } // namespace gte::Network

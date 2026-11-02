@@ -111,6 +111,9 @@ TEST(GameLoopPhysicsWithoutAnimationTests,
     ASSERT_FALSE(registry.HasComponent<SkeletalAnimator>(entity));
 
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     // Exactly Game::Update()'s own two-call sequence (its third call,
     // SkinAndUpload(), is Phase 2's concern and irrelevant to this

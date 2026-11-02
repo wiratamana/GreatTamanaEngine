@@ -137,6 +137,9 @@ TEST(PhysicsSystemWorldSpaceRootMotionTests, EntityTransformTranslationProducesI
     PhysicsSystem physicsSystem;
     Registry registry;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     const SkinnedMeshData data = BuildSyntheticChainFixture();
     const std::string path = "WorldSpaceDragModel.gta";
@@ -180,6 +183,9 @@ TEST(PhysicsSystemWorldSpaceRootMotionTests,
 {
     PhysicsSystem physicsSystem;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     // (a) A sequence of small, continuous per-frame deltas (a plausible
     // 60fps mouse-drag) must never trip the re-seed guard - i.e. the tip
@@ -282,6 +288,9 @@ TEST(PhysicsSystemWorldSpaceRootMotionTests, IdentityOrMissingTransformProducesB
     PhysicsSystem physicsSystemNoTransform;
     Registry registryNoTransform;
     physicsSystemNoTransform.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystemNoTransform.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystemNoTransform.GetGlobalPhysicsSettings().interpolateOutput = false;
     const SkinnedMeshData dataNoTransform = BuildSyntheticChainFixture();
     const Entity entityNoTransform
         = RegisterAttachAndSeedPose(physicsSystemNoTransform, registryNoTransform, "NoTransformModel.gta", dataNoTransform);
@@ -290,6 +299,9 @@ TEST(PhysicsSystemWorldSpaceRootMotionTests, IdentityOrMissingTransformProducesB
     PhysicsSystem physicsSystemIdentityTransform;
     Registry registryIdentityTransform;
     physicsSystemIdentityTransform.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystemIdentityTransform.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystemIdentityTransform.GetGlobalPhysicsSettings().interpolateOutput = false;
     const SkinnedMeshData dataIdentityTransform = BuildSyntheticChainFixture();
     const Entity entityIdentityTransform = RegisterAttachAndSeedPose(
         physicsSystemIdentityTransform, registryIdentityTransform, "IdentityTransformModel.gta", dataIdentityTransform);
@@ -318,6 +330,9 @@ TEST(PhysicsSystemWorldSpaceRootMotionTests, ATransformParentedUnderAMovingAnces
     PhysicsSystem physicsSystem;
     Registry registry;
     physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+    // Free joints and raw particle output: default PMX limits would weld the chain.
+    physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+    physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
     const SkinnedMeshData data = BuildSyntheticChainFixture();
     const std::string path = "ParentedDragModel.gta";
@@ -374,6 +389,9 @@ TEST(PhysicsSystemWorldSpaceRootMotionTests, EntityTransformScaleNeverAffectsThe
         PhysicsSystem physicsSystem;
         Registry registry;
         physicsSystem.GetGlobalPhysicsSettings().gravity = Vec3(0.0f, -9.8f, 0.0f);
+        // Free joints and raw particle output: default PMX limits would weld the chain.
+        physicsSystem.GetGlobalPhysicsSettings().bendLimitsEnabled = false;
+        physicsSystem.GetGlobalPhysicsSettings().interpolateOutput = false;
 
         const SkinnedMeshData data = BuildSyntheticChainFixture();
         const Entity entity = RegisterAttachAndSeedPose(physicsSystem, registry, "ScaleInvarianceModel.gta", data);

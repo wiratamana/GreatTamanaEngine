@@ -68,6 +68,7 @@
 | `FrameDebuggerCommandBridge` | `/frame_debugger/*` | 3 s | 1 |
 | `RenderGraphControlCommandBridge` | `/render_graph/passes`, `/render_graph/set_*` | 3 s | 1 |
 | `FeatureDebugCommandBridge` | `/feature_debug/*` | 3 s | 1 |
+| `PhysicsDebugCommandBridge` | `/physics_debug/*` | 3 s, `POST /physics_debug/run` 60 s | 1 |
 | `ProjectLifecycleLoadCommandBridge` | `/project_assembly/open_project` (load step) | 5 s | 1 |
 | `ProjectAssemblyHotReloadCommandBridge` | `/project_assembly/hot_reload` | 600 s | 1 |
 | Profiler bridge | `/profiler*` | see [debug routes](../debugging/http-routes-debug.md) | 1 |

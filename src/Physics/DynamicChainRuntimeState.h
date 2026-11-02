@@ -1,48 +1,33 @@
 #pragma once
 #include "VerletParticle.h"
+#include "../Math/Vec3.h"
 
+#include <cstdint>
 #include <vector>
 
 namespace gte {
 
-// Persistent, per-INSTANCE simulation memory for one DynamicChainDefinition -
-// owned by whichever entity/component is simulating it (see PHASE3's new
-// DynamicChainRig component), one DynamicChainRuntimeState per
-// DynamicChainDefinition, never shared across two different entities animating
-// the same underlying model (this mirrors AnimationSystem's own existing,
-// documented "two entities sharing one *.gta currently fight over shared
-// state" limitation - see AGENTS.md's Job System table - a per-entity
-// runtime state is exactly what avoids that same trap here).
+// Per-instance simulation memory of one DynamicChainDefinition (never shared between entities).
 struct DynamicChainRuntimeState {
-    // Index-aligned with DynamicChainDefinition::jointBoneIndices - resized
-    // and (re-)seeded to the animated bind pose the first time
-    // StepDynamicChain() is ever called for this instance (see its own
-    // "lazy init" step) so the chain doesn't visibly "fall" from the origin
-    // on its very first frame.
+    // Index-aligned with DynamicChainDefinition::jointBoneIndices; seeded on the first step.
     std::vector<VerletParticle> particles;
     bool initialized = false;
 
-    // Running simulation clock, in seconds, advanced by exactly
-    // fixedDeltaTime every StepDynamicChain() call - fed to
-    // ComputeWindAcceleration() (Phase 1) so wind phase is continuous
-    // across frames rather than resetting.
+    // Simulation clock in seconds; drives the wind phase.
     float simulationTimeSeconds = 0.0f;
 
-    // PHASE5 (task_manager/verlet-integration-1/
-    // PHASE5_COLLISION_STABILITY_AND_PERFORMANCE_HARDENING.md, 3.3) - the
-    // root world position StepDynamicChain() was last called with, used to
-    // detect an implausible root teleport between two consecutive calls.
-    // Set to this call's OWN rootWorldPosition before every
-    // StepDynamicChain() call returns, unconditionally - whether this call
-    // re-seeded because of a teleport, a genuine lazy-init, or ran the
-    // ordinary integrate+constrain path - so the guard never permanently
-    // trips after firing once. task_manager/verlet-integration-7, Phase 3 -
-    // as of this phase, this is a genuine WORLD-space (rotation +
-    // translation only, scale excluded) position, composed by
-    // PhysicsSystem::Update() from the owning ECS entity's own resolved
-    // Transform - before this phase it was only ever bone-local
-    // "model space".
+    // Root position of the last call, for the teleport guard.
     Vec3 lastRootWorldPosition = Vec3::Zero();
+
+    // Re-seeds after the first seed since the last reset.
+    std::uint32_t reseedCount = 0;
+
+    // Scratch for the effective bend limits (reused every step).
+    std::vector<float> scratchLimits;
+
+    // Particle positions in the anchor frame after the previous and the last fixed step.
+    std::vector<Vec3> prevStepLocal;
+    std::vector<Vec3> currStepLocal;
 };
 
 } // namespace gte
